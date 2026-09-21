@@ -1,0 +1,18 @@
+# Thresholds for template analysis (deterministic part).
+colors:
+  delta_e_tolerance: 1.8      # ΔE (CIE76) under which two colours are one token (visually identical)
+chrome:
+  min_share: 0.4              # a shape repeating at the same bbox on ≥40% of slides is chrome
+  min_slides: 3
+groups:
+  size_tolerance: 0.06        # relative size difference for cells to be "equal"
+spacing:
+  min_column_share: 0.25
+render:
+  dpi: 110
+  thumb_width: 480
+classification:
+  llm_weight: 1.5
+  vlm_weight: 1.0
+  heuristic_weight: 1.0
+  llm_role_override_confidence: 0.7
