@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "verstka"
+version = "0.1.0"
+description = "Verstka — reads any PPTX template as a set of rules and generates new decks in its style"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "python-pptx>=1.0.2",
+    "lxml>=5.0",
+    "Pillow>=10.0",
+    "pydantic>=2.7",
+    "openai>=1.40",
+    "httpx>=0.27",
+    "typer>=0.12",
+    "rich>=13.0",
+    "PyYAML>=6.0",
+    "Jinja2>=3.1",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+api = ["fastapi>=0.115", "uvicorn[standard]>=0.30", "sse-starlette>=2.1", "python-multipart>=0.0.9"]
+
+[project.scripts]
+verstka = "verstka.cli.main:app"
+
+[tool.setuptools.packages.find]
+include = ["verstka*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
