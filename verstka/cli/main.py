@@ -260,3 +260,26 @@ def list_checks() -> None:
     for spec in (SLIDE_CONTENT, DECK_COHERENCE):
         tbl.add_row(spec.id, spec.kind, spec.severity, spec.category, spec.title)
     console.print(tbl)
+
+
+@app.command()
+def serve(
+    host: str = typer.Option("127.0.0.1", "--host", help="Bind address"),
+    port: int = typer.Option(8000, "--port", "-p"),
+    workspace: Optional[Path] = typer.Option(None, "--workspace", "-w", help="Workspace root (default ./workspace or $VERSTKA_WORKSPACE)"),
+    models: Optional[Path] = typer.Option(None, "--models", help="models.yaml with provider roles"),
+    reload: bool = typer.Option(False, "--reload", help="Auto-reload on code changes (development)"),
+) -> None:
+    """Run the web service: API on /api and the React UI on / (after `npm run build` in web/)."""
+    import os
+
+    import uvicorn
+
+    if workspace:
+        os.environ["VERSTKA_WORKSPACE"] = str(workspace.resolve())
+    if models:
+        os.environ["VERSTKA_MODELS"] = str(models.resolve())
+    if not (_REPO_ROOT / "web" / "dist" / "index.html").exists():
+        console.print("[yellow]web/dist not found: only the API is served. Build the UI: cd web && npm install && npm run build[/yellow]")
+    console.print(f"Verstka → http://{host}:{port}")
+    uvicorn.run("verstka.api.app:app", host=host, port=port, reload=reload, log_level="info")
