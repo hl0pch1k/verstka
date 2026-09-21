@@ -1,0 +1,134 @@
+"""Assemble slide patterns (slots with capacity, repeat groups, decor) and dedupe them."""
+
+from __future__ import annotations
+
+from collections import Counter
+from typing import Optional
+
+from verstka.analysis.groups import group_membership
+from verstka.analysis.shapes import ShapeInfo, looks_like_placeholder
+from verstka.schemas.common import Bbox, EMU_PER_PT, Family, PatternKind, ShapeKind, SlotRole
+from verstka.schemas.template import Capacity, ClassificationTrace, Pattern, RepeatGroup, Slot, SlotStyle
+
+AVG_CHAR_EM = 0.52  # average glyph advance relative to font size for Latin/Cyrillic sans
+AVG_CHAR_EM_BOLD = 0.56
+
+
+def estimate_capacity(bbox: Bbox, size_pt: float, bold: bool = False, insets_emu: tuple[int, int, int, int] = (91440, 45720, 91440, 45720), line_spacing: float = 1.2) -> Capacity:
+    if size_pt <= 0 or bbox.w <= 0 or bbox.h <= 0:
+        return Capacity(max_chars=0, max_lines=0)
+    usable_w_pt = max((bbox.w - insets_emu[0] - insets_emu[2]) / EMU_PER_PT, 0.0)
+    usable_h_pt = max((bbox.h - insets_emu[1] - insets_emu[3]) / EMU_PER_PT, 0.0)
+    char_w = size_pt * (AVG_CHAR_EM_BOLD if bold else AVG_CHAR_EM)
+    chars_per_line = int(usable_w_pt / char_w) if char_w else 0
+    lines = int(usable_h_pt / (size_pt * line_spacing)) if size_pt else 0
+    lines = max(lines, 1)
+    return Capacity(max_chars=max(chars_per_line, 1) * lines, max_lines=lines)
+
+
+def slot_style(s: ShapeInfo) -> SlotStyle:
+    if not s.text:
+        return SlotStyle()
+    return SlotStyle(
+        font_family=s.text.dominant_font,
+        size_pt=s.text.dominant_size_pt,
+        bold=s.text.bold_share > 0.5,
+        color_hex=s.text.dominant_color,
+        align=s.text.dominant_align,
+    )
+
+
+_TEXT_ROLES = {SlotRole.title, SlotRole.subtitle, SlotRole.body, SlotRole.bullet_list, SlotRole.card_title, SlotRole.card_body, SlotRole.number, SlotRole.number_label, SlotRole.caption}
+
+
+def build_pattern(
+    pattern_id: str,
+    slide_index: int,
+    shapes: list[ShapeInfo],
+    roles: dict[str, SlotRole],
+    groups: list[RepeatGroup],
+    trace: ClassificationTrace,
+    family: Family,
+    slide_w: int,
+    slide_h: int,
+    *,
+    thumbnail: Optional[str] = None,
+    layout_part: Optional[str] = None,
+    asset_ids: Optional[dict[str, str]] = None,
+    line_spacing: float = 1.2,
+) -> Pattern:
+    asset_ids = asset_ids or {}
+    membership = group_membership(groups)
+    slots: list[Slot] = []
+    decor: list[str] = []
+    counters: Counter = Counter()
+    has_placeholder_text = False
+    for s in sorted(shapes, key=lambda s: (s.bbox.y, s.bbox.x)):
+        role = roles.get(s.id)
+        if role is None or role == SlotRole.chrome:
+            continue
+        if role == SlotRole.decoration:
+            if s.image_part and s.image_part in asset_ids:
+                decor.append(asset_ids[s.image_part])
+            continue
+        if role in _TEXT_ROLES and not s.text:
+            continue
+        counters[role.value] += 1
+        slot_id = f"{role.value}_{counters[role.value]}"
+        style = slot_style(s)
+        if role in _TEXT_ROLES and s.text:
+            size = style.size_pt or 18.0
+            cap = estimate_capacity(s.bbox, size, style.bold, s.text.insets_emu, line_spacing)
+            sample = s.plain_text.strip()[:120] or None
+            if sample and looks_like_placeholder(sample):
+                has_placeholder_text = True
+        else:
+            cap = Capacity(max_chars=0, max_lines=0)
+            sample = None
+        gid = membership[s.id][0] if s.id in membership else None
+        slots.append(Slot(id=slot_id, role=role, shape_id=s.id, bbox=s.bbox.to_frac(slide_w, slide_h), style=style, capacity=cap, group_id=gid, sample_text=sample))
+    quality = 1.0
+    if has_placeholder_text:
+        quality -= 0.15  # placeholder text means a designer-made sample: mildly penalised only for dedupe ordering
+    if trace.agreement < 0.5:
+        quality -= 0.3
+    if trace.kind == PatternKind.freeform:
+        quality -= 0.2
+    if not slots:
+        quality -= 0.3
+    return Pattern(
+        id=pattern_id,
+        source_slide=slide_index,
+        kind=trace.kind,
+        family=family,
+        slots=slots,
+        repeat_groups=groups,
+        decor_assets=decor,
+        quality=round(max(quality, 0.0), 3),
+        thumbnail=thumbnail,
+        classification=trace,
+        layout_part=layout_part,
+    )
+
+
+def _slot_signature(p: Pattern) -> tuple:
+    return tuple(sorted(s.role.value for s in p.slots))
+
+
+def dedupe_patterns(patterns: list[Pattern], bbox_tol: float = 0.02) -> list[Pattern]:
+    """Drop near-identical patterns (same kind, family, role multiset, same slot geometry); keep the best quality."""
+    kept: list[Pattern] = []
+    for p in sorted(patterns, key=lambda p: (-p.quality, p.source_slide)):
+        dup = False
+        for k in kept:
+            if k.kind != p.kind or k.family != p.family or _slot_signature(k) != _slot_signature(p) or len(k.slots) != len(p.slots):
+                continue
+            ks = sorted(k.slots, key=lambda s: (s.role.value, s.bbox.y, s.bbox.x))
+            ps = sorted(p.slots, key=lambda s: (s.role.value, s.bbox.y, s.bbox.x))
+            if all(a.bbox.close_to(b.bbox, bbox_tol) for a, b in zip(ks, ps)):
+                dup = True
+                break
+        if not dup:
+            kept.append(p)
+    kept.sort(key=lambda p: p.source_slide)
+    return kept

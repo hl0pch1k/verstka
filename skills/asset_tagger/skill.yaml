@@ -1,0 +1,13 @@
+name: asset_tagger
+version: 0.1.0
+role: vlm
+description: Tags a template image asset (kind, topics, short description) so the renderer can pick fitting illustrations and icons.
+prompt_files:
+  system: prompts/system.md
+  user: prompts/user.md
+output_schema: verstka.analysis.assets.AssetTag
+params:
+  temperature: 0.1
+  max_tokens: 300
+changelog:
+  - "0.1.0: initial version"

@@ -11,7 +11,8 @@ from verstka.schemas.common import BboxFrac, Family, PatternKind, SlotRole
 
 class ColorToken(BaseModel):
     hex: str
-    role: Optional[str] = None  # background.light, background.dark, surface, text.primary, text.secondary, accent.1.., semantic.positive, semantic.negative
+    role: Optional[str] = None  # background.light, background.dark, surface, text.primary, text.secondary, accent.N, neutral.N
+    semantic: Optional[str] = None  # positive | negative (hint for charts and status colours)
     weight: float = 0.0
     contexts: dict[str, int] = Field(default_factory=dict)  # fill/text/line/background → count
 
@@ -97,6 +98,12 @@ class Tokens(BaseModel):
         acc = [(c.role, c.hex) for c in self.colors if c.role and c.role.startswith("accent.")]
         acc.sort(key=lambda t: int(t[0].split(".")[1]))
         return [h for _, h in acc]
+
+    def semantic_color(self, kind: str) -> Optional[str]:
+        for c in self.colors:
+            if c.semantic == kind:
+                return c.hex
+        return None
 
     def palette(self) -> list[str]:
         return [c.hex for c in self.colors]

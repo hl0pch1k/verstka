@@ -1,0 +1,15 @@
+name: slide_vision_check
+version: 0.1.0
+role: vlm
+description: >
+  Looks at the rendered image of one template slide and decides the pattern kind and the slide's purpose.
+  Used as the third vote of the classification ensemble.
+prompt_files:
+  system: prompts/system.md
+  user: prompts/user.md
+output_schema: verstka.analysis.classify.SlideVisionCheck
+params:
+  temperature: 0.1
+  max_tokens: 400
+changelog:
+  - "0.1.0: initial version"

@@ -138,12 +138,13 @@ def assign_color_roles(tokens: list[ColorToken], primary_family: Family = Family
             t.role = f"accent.{n}"
     # semantic hints: a red-ish and a green-ish accent that are not the primary accent
     for t in tokens:
+        t.semantic = None
         if t.role and t.role.startswith("accent.") and t.role != "accent.1":
             hue = _hue_deg(t.hex)
             if hue >= 340 or hue <= 15:
-                t.role = t.role + "|semantic.negative"
+                t.semantic = "negative"
             elif 95 <= hue <= 160:
-                t.role = t.role + "|semantic.positive"
+                t.semantic = "positive"
     # neutrals
     k = 0
     for t in tokens:
