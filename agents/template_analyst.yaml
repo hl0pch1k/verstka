@@ -1,0 +1,15 @@
+name: template_analyst
+version: 0.1.0
+description: Разбирает шаблон в дизайн-систему и библиотеку паттернов (verstka.analysis.manifest.analyze_template).
+steps:
+  - skill: slide_classifier
+    description: тип слайда и роли фигур по JSON геометрии
+  - skill: slide_vision_check
+    description: подтверждение типа по картинке слайда
+    optional: true
+  - skill: rule_harvester
+    description: правила дизайнера из текста на слайдах
+    optional: true
+  - skill: asset_tagger
+    description: типы и теги картинок-ассетов
+    optional: true

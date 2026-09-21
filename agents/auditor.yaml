@@ -1,0 +1,13 @@
+name: auditor
+version: 0.1.0
+description: Аудит сгенерированной колоды и автофикс (verstka.audit.runner.run_audit, verstka.audit.autofix.autofix_loop).
+steps:
+  - skill: slide_content_audit
+    description: 11 вопросов валидации контента по картинке слайда
+    optional: true
+  - skill: deck_coherence_audit
+    description: связность соседних слайдов и единый язык
+    optional: true
+  - skill: text_condenser
+    description: сокращение текста при автофиксе плотности
+    optional: true

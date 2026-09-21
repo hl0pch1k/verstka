@@ -1,0 +1,14 @@
+# Reproducible run: `verstka generate --config configs/run.example.yaml`
+template: ../Датасет/VK_WorkSpace_Клиентская_конференция_Шаблон_03.pptx
+brief: examples/briefs/vk_workspace_feature.md
+# outline: path/to/outline.json   # alternative to brief: skip planning
+strategy: all            # structured | visual | compact | all
+slides: 12
+audience: продуктовый комитет
+out: examples/outputs/workspace
+export: all              # pptx | pdf | html | all
+no_llm: false            # true = fully deterministic run (no model calls)
+no_vlm: false
+no_audit: false
+no_autofix: false
+audit_models: false      # VLM/LLM content checks in the audit

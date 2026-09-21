@@ -1,0 +1,14 @@
+name: content_planner
+version: 0.1.0
+description: Превращает бриф в план колоды с реестром фактов (verstka.planning.outline.plan_outline).
+steps:
+  - skill: data_extractor
+    description: реестр фактов, ряды и таблицы из брифа
+  - skill: outline_planner
+    description: состав, порядок и содержание слайдов по стратегии
+  - skill: text_condenser
+    description: сокращение текста до лимитов плотности
+    optional: true
+  - skill: fact_checker
+    description: сверка плана с брифом, один повторный проход планировщика
+    optional: true

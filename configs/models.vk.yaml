@@ -1,0 +1,18 @@
+# Final stage: the same Qwen3.8-27B served by VK inference. Only the endpoint and key change.
+roles:
+  llm:
+    backend: openai_compat
+    model: qwen3.8-27b
+    base_url: ${VK_INFERENCE_BASE_URL}
+    api_key: ${VK_INFERENCE_API_KEY}
+    temperature: 0.2
+  vlm:
+    backend: openai_compat
+    model: qwen3.8-27b
+    base_url: ${VK_INFERENCE_BASE_URL}
+    api_key: ${VK_INFERENCE_API_KEY}
+    temperature: 0.1
+limits:
+  max_concurrency: 4
+  timeout_s: 180
+  max_attempts: 3
