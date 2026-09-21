@@ -1,4 +1,8 @@
-"""Colour tokens: collect, cluster and assign roles."""
+"""Colour tokens: collect, cluster and assign roles.
+
+Roles are NOT exclusive: black can be both the dark background of title slides and the primary text colour
+of content slides; the brand blue can be both a divider background and the first accent.
+"""
 
 from __future__ import annotations
 
@@ -48,32 +52,37 @@ def cluster_colors(samples: list[ColorSample], delta_e_tol: float = 1.8) -> list
     """Greedy clustering by ΔE (tight: visually identical only, so white cards on an off-white background stay distinct);
     the heaviest observed hex represents each cluster (keeps exact brand colours)."""
     by_hex: dict[str, float] = defaultdict(float)
-    ctx_by_hex: dict[str, Counter] = defaultdict(Counter)
+    ctx_count: dict[str, Counter] = defaultdict(Counter)
+    ctx_weight: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
     for s in samples:
         by_hex[s.hex] += s.weight
-        ctx_by_hex[s.hex][s.context] += 1
+        ctx_count[s.hex][s.context] += 1
+        ctx_weight[s.hex][s.context] += s.weight
     ordered = sorted(by_hex.items(), key=lambda kv: -kv[1])
     clusters: list[dict] = []
     for hex_, w in ordered:
         c = Color(hex=hex_)
-        placed = False
         for cl in clusters:
             if Color.delta_e(c, cl["color"]) <= delta_e_tol:
                 cl["weight"] += w
-                cl["contexts"].update(ctx_by_hex[hex_])
-                cl["members"].append(hex_)
-                placed = True
+                cl["contexts"].update(ctx_count[hex_])
+                for k, v in ctx_weight[hex_].items():
+                    cl["cw"][k] += v
                 break
-        if not placed:
-            clusters.append({"color": c, "hex": hex_, "weight": w, "contexts": Counter(ctx_by_hex[hex_]), "members": [hex_]})
-    tokens = [ColorToken(hex=cl["hex"], weight=round(cl["weight"], 3), contexts=dict(cl["contexts"])) for cl in clusters]
+        else:
+            clusters.append({"color": c, "hex": hex_, "weight": w, "contexts": Counter(ctx_count[hex_]), "cw": defaultdict(float, ctx_weight[hex_])})
+    tokens = [
+        ColorToken(hex=cl["hex"], weight=round(cl["weight"], 3), contexts=dict(cl["contexts"]), context_weight={k: round(v, 3) for k, v in cl["cw"].items()})
+        for cl in clusters
+    ]
     tokens.sort(key=lambda t: -t.weight)
     return tokens
 
 
 def _saturation(hex_: str) -> float:
+    """HSV saturation (HLS saturation explodes near white/black)."""
     r, g, b = hex_to_rgb(hex_)
-    _, _, s = colorsys.rgb_to_hls(r / 255, g / 255, b / 255)
+    _, s, _ = colorsys.rgb_to_hsv(r / 255, g / 255, b / 255)
     return s
 
 
@@ -84,63 +93,71 @@ def _hue_deg(hex_: str) -> float:
 
 
 def assign_color_roles(tokens: list[ColorToken], primary_family: Family = Family.light) -> list[ColorToken]:
-    """Assign background/text/surface/accent roles in place and return the list."""
+    """Assign roles in place (a token may carry several) and return the list."""
     for t in tokens:
+        t.roles = []
         t.role = None
+        t.semantic = None
+        t.is_brand = False
     if not tokens:
         return tokens
 
-    def ctx_weight(t: ColorToken, ctx: str) -> float:
-        return t.weight * (t.contexts.get(ctx, 0) / max(sum(t.contexts.values()), 1))
+    def cw(t: ColorToken, ctx: str) -> float:
+        return t.context_weight.get(ctx, 0.0)
 
     # backgrounds
-    light_bgs = [t for t in tokens if t.contexts.get("background") and relative_luminance(t.hex) >= 0.3]
-    dark_bgs = [t for t in tokens if t.contexts.get("background") and relative_luminance(t.hex) < 0.3]
-    bg_light = max(light_bgs, key=lambda t: t.contexts["background"], default=None)
-    bg_dark = max(dark_bgs, key=lambda t: t.contexts["background"], default=None)
+    light_bgs = [t for t in tokens if cw(t, "background") > 0 and relative_luminance(t.hex) >= 0.3]
+    dark_bgs = [t for t in tokens if cw(t, "background") > 0 and relative_luminance(t.hex) < 0.3]
+    bg_light = max(light_bgs, key=lambda t: cw(t, "background"), default=None)
+    bg_dark = max(dark_bgs, key=lambda t: cw(t, "background"), default=None)
     if bg_light is None and primary_family == Family.light:
-        bg_light = ColorToken(hex="FFFFFF", weight=0.0, contexts={"background": 0})
+        bg_light = ColorToken(hex="FFFFFF", weight=0.0)
         tokens.append(bg_light)
     if bg_dark is None and primary_family == Family.dark:
-        bg_dark = ColorToken(hex="000000", weight=0.0, contexts={"background": 0})
+        bg_dark = ColorToken(hex="000000", weight=0.0)
         tokens.append(bg_dark)
     if bg_light is not None:
-        bg_light.role = "background.light"
+        bg_light.roles.append("background.light")
     if bg_dark is not None:
-        bg_dark.role = "background.dark"
+        bg_dark.roles.append("background.dark")
     primary_bg = (bg_dark if primary_family == Family.dark else bg_light) or bg_light or bg_dark
     bg_hex = primary_bg.hex if primary_bg else "FFFFFF"
 
-    # text colours
-    text_tokens = sorted([t for t in tokens if t.role is None and t.contexts.get("text")], key=lambda t: -ctx_weight(t, "text"))
+    # text colours (may overlap with backgrounds)
+    text_tokens = sorted([t for t in tokens if cw(t, "text") > 0], key=lambda t: -cw(t, "text"))
     primary_text = next((t for t in text_tokens if contrast_ratio(t.hex, bg_hex) >= 4.5), None)
     if primary_text is not None:
-        primary_text.role = "text.primary"
+        primary_text.roles.append("text.primary")
         secondary = next(
-            (t for t in text_tokens if t is not primary_text and contrast_ratio(t.hex, bg_hex) >= 3.0 and Color.delta_e(Color(hex=t.hex), Color(hex=primary_text.hex)) > 10 and _saturation(t.hex) < 0.35),
+            (
+                t
+                for t in text_tokens
+                if t is not primary_text and contrast_ratio(t.hex, bg_hex) >= 3.0 and Color.delta_e(Color(hex=t.hex), Color(hex=primary_text.hex)) > 10 and _saturation(t.hex) < 0.35
+            ),
             None,
         )
         if secondary is not None:
-            secondary.role = "text.secondary"
+            secondary.roles.append("text.secondary")
 
     # surface: a fill close to the background but distinct
-    surfaces = [t for t in tokens if t.role is None and t.contexts.get("fill") and 1.0 < contrast_ratio(t.hex, bg_hex) < 1.6]
+    surfaces = [t for t in tokens if not t.roles and cw(t, "fill") > 0 and 1.0 < contrast_ratio(t.hex, bg_hex) < 1.6]
     if surfaces:
-        max(surfaces, key=lambda t: ctx_weight(t, "fill")).role = "surface"
+        max(surfaces, key=lambda t: cw(t, "fill")).roles.append("surface")
 
-    # accents: saturated colours by weight
-    accents = [t for t in tokens if t.role is None and _saturation(t.hex) >= 0.25 and 0.05 < relative_luminance(t.hex) < 0.95]
-    accents.sort(key=lambda t: -(t.weight * (0.5 + _saturation(t.hex))))
-    n = 0
-    for t in accents:
-        n += 1
-        if n <= 6:
-            t.role = f"accent.{n}"
-    # semantic hints: a red-ish and a green-ish accent that are not the primary accent
-    for t in tokens:
-        t.semantic = None
-        if t.role and t.role.startswith("accent.") and t.role != "accent.1":
-            hue = _hue_deg(t.hex)
+    # accents: saturated colours by weight; saturated backgrounds (brand dividers) count too
+    def is_accent_candidate(t: ColorToken) -> bool:
+        if _saturation(t.hex) < 0.25 or not (0.05 < relative_luminance(t.hex) < 0.95):
+            return False
+        return not any(r.startswith("text.") for r in t.roles) or cw(t, "fill") > 0
+
+    accents = [t for t in tokens if is_accent_candidate(t)]
+    accents.sort(key=lambda t: -((cw(t, "fill") + cw(t, "text") + cw(t, "line") + 0.05 * cw(t, "background")) * (0.5 + _saturation(t.hex))))
+    for n, t in enumerate(accents[:6], 1):
+        t.roles.append(f"accent.{n}")
+        if n == 1:
+            t.is_brand = True
+        hue = _hue_deg(t.hex)
+        if n > 1:
             if hue >= 340 or hue <= 15:
                 t.semantic = "negative"
             elif 95 <= hue <= 160:
@@ -148,9 +165,11 @@ def assign_color_roles(tokens: list[ColorToken], primary_family: Family = Family
     # neutrals
     k = 0
     for t in tokens:
-        if t.role is None:
+        if not t.roles:
             k += 1
-            t.role = f"neutral.{k}"
+            t.roles.append(f"neutral.{k}")
+    for t in tokens:
+        t.role = t.roles[0] if t.roles else None
     return tokens
 
 

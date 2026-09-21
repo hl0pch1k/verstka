@@ -73,5 +73,57 @@ def detect_chrome(shapes_per_slide: dict[int, list[ShapeInfo]], slide_w: int, sl
 
 
 def chrome_ids(shapes: list[ShapeInfo], chrome: list[ChromeElement], slide_w: int, slide_h: int) -> set[str]:
-    sigs = {c.signature for c in chrome}
+    sigs = {c.signature for c in chrome if c.source == "slide"}
     return {s.id for s in shapes if shape_signature(s, slide_w, slide_h) in sigs}
+
+
+def inherited_chrome(part_shapes: dict[str, list[ShapeInfo]], slides_using: dict[str, list[int]], n_slides: int, slide_w: int, slide_h: int, source_kind: str) -> list[ChromeElement]:
+    """Chrome that lives on layouts/masters: every non-placeholder shape with content (logo, footer, decoration)."""
+    out: list[ChromeElement] = []
+    slide_area = float(slide_w * slide_h)
+    for part, shapes in part_shapes.items():
+        users = slides_using.get(part, [])
+        if not users:
+            continue
+        share = round(len(users) / max(n_slides, 1), 3)
+        tiny: dict[tuple[int, int], list[ShapeInfo]] = {}
+        for s in shapes:
+            if s.is_placeholder or s.bbox.area <= 0:
+                continue
+            if not (s.kind == ShapeKind.pic or s.has_text or s.fill_hex or s.line_hex):
+                continue
+            if s.has_text and len(s.plain_text.strip()) > 60:
+                continue
+            if s.bbox.area / slide_area < 0.002 and not s.has_text and s.kind != ShapeKind.pic:
+                f = s.bbox.to_frac(slide_w, slide_h)
+                tiny.setdefault((int(f.x * 5), int(f.y * 5)), []).append(s)  # decorative dots/lines: merge per 5x5 cell
+                continue
+            kind = "pic" if s.kind == ShapeKind.pic else ("text" if s.has_text else "sp")
+            out.append(
+                ChromeElement(
+                    signature=f"{source_kind}:{part}:{shape_signature(s, slide_w, slide_h)}",
+                    bbox=s.bbox.to_frac(slide_w, slide_h),
+                    share=share,
+                    kind=kind,
+                    sample_slide=users[0],
+                    text=s.plain_text[:40] if s.has_text else None,
+                    image_part=s.image_part,
+                    source=f"{source_kind}:{part}",
+                )
+            )
+        for cell, members in tiny.items():
+            u = members[0].bbox
+            for m in members[1:]:
+                u = u.union(m.bbox)
+            out.append(
+                ChromeElement(
+                    signature=f"{source_kind}:{part}:pattern:{cell[0]},{cell[1]}",
+                    bbox=u.to_frac(slide_w, slide_h),
+                    share=share,
+                    kind="pattern",
+                    sample_slide=users[0],
+                    text=f"{len(members)} decorative shapes",
+                    source=f"{source_kind}:{part}",
+                )
+            )
+    return out

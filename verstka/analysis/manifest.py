@@ -13,7 +13,7 @@ import yaml
 
 from verstka.analysis.assets import extract_assets, tag_assets_with_vlm
 from verstka.analysis.chrome import chrome_ids as _chrome_ids
-from verstka.analysis.chrome import detect_chrome
+from verstka.analysis.chrome import detect_chrome, inherited_chrome
 from verstka.analysis.classify import classify_slide
 from verstka.analysis.colors import assign_color_roles, cluster_colors, collect_color_samples
 from verstka.analysis.components import derive_components
@@ -167,6 +167,26 @@ def analyze_template(
     chrome_cfg = cfg.get("chrome", {})
     chrome = detect_chrome(shapes_by_slide, slide_w, slide_h, min_share=float(chrome_cfg.get("min_share", 0.4)), min_slides=int(chrome_cfg.get("min_slides", 3)))
     chrome_by_slide = {i: _chrome_ids(shapes, chrome, slide_w, slide_h) for i, shapes in shapes_by_slide.items()}
+    # chrome inherited from layouts and masters (logos, footers) — recorded for audits and the synth renderer
+    layout_users: dict[str, list[int]] = {}
+    for i, lp in layout_by_slide.items():
+        if lp:
+            layout_users.setdefault(lp, []).append(i)
+    layout_shapes: dict[str, list[ShapeInfo]] = {}
+    master_users: dict[str, list[int]] = {}
+    master_shapes: dict[str, list[ShapeInfo]] = {}
+    for lp, users in layout_users.items():
+        try:
+            layout_shapes[lp] = extract_shapes(pkg, lp, SlideContext(pkg, lp))
+            mp = pkg.master_of(lp)
+            if mp:
+                master_users.setdefault(mp, []).extend(users)
+                if mp not in master_shapes:
+                    master_shapes[mp] = extract_shapes(pkg, mp, SlideContext(pkg, mp))
+        except Exception as e:  # noqa: BLE001
+            warnings.append(f"layout {lp}: chrome extraction failed: {str(e)[:120]}")
+    chrome.extend(inherited_chrome(layout_shapes, layout_users, n_slides, slide_w, slide_h, "layout"))
+    chrome.extend(inherited_chrome(master_shapes, master_users, n_slides, slide_w, slide_h, "master"))
     chrome_image_parts = {c.image_part for c in chrome if c.image_part}
 
     # 4. assets

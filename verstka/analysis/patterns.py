@@ -94,8 +94,8 @@ def build_pattern(
         quality -= 0.3
     if trace.kind == PatternKind.freeform:
         quality -= 0.2
-    if not slots:
-        quality -= 0.3
+    if not any(s.role in _TEXT_ROLES for s in slots):
+        quality -= 0.5  # nothing to write into: decorative/blank sample
     return Pattern(
         id=pattern_id,
         source_slide=slide_index,

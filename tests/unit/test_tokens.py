@@ -33,13 +33,26 @@ def test_role_assignment_light_template():
         ColorSample("FF3885", "fill", 2),
     ]
     tokens = assign_color_roles(cluster_colors(samples), Family.light)
-    roles = {t.role.split("|")[0]: t.hex for t in tokens if t.role}
+    roles = {r: t.hex for t in tokens for r in t.roles}
     assert roles["background.light"] == "FFFFFF"
     assert roles["text.primary"] == "000000"
     assert roles["text.secondary"] == "8F8F8F"
     assert roles["accent.1"] == "0077FF"
     assert roles["surface"] == "F5F8FC"
     assert roles["accent.2"] == "FF3885"
+    assert next(t for t in tokens if t.hex == "FF3885").semantic is None  # pink is a brand accent, not "negative"
+    tokens2 = assign_color_roles(cluster_colors(samples + [ColorSample("EE5959", "fill", 1)]), Family.light)
+    assert next(t for t in tokens2 if t.hex == "EE5959").semantic == "negative"
+
+
+def test_roles_are_not_exclusive_dark_titles_light_body():
+    # black is the background of title slides AND the text colour of content slides
+    samples = [ColorSample("FFFFFF", "background", 300), ColorSample("000000", "background", 100), ColorSample("000000", "text", 60), ColorSample("0077FF", "fill", 10), ColorSample("0077FF", "background", 50)]
+    tokens = assign_color_roles(cluster_colors(samples), Family.light)
+    black = next(t for t in tokens if t.hex == "000000")
+    assert "background.dark" in black.roles and "text.primary" in black.roles
+    blue = next(t for t in tokens if t.hex == "0077FF")
+    assert "accent.1" in blue.roles
 
 
 def test_type_scale_roles():

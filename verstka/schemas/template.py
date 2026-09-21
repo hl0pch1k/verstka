@@ -11,10 +11,16 @@ from verstka.schemas.common import BboxFrac, Family, PatternKind, SlotRole
 
 class ColorToken(BaseModel):
     hex: str
-    role: Optional[str] = None  # background.light, background.dark, surface, text.primary, text.secondary, accent.N, neutral.N
+    role: Optional[str] = None  # primary role for display: background.light, background.dark, surface, text.primary, text.secondary, accent.N, neutral.N
+    roles: list[str] = Field(default_factory=list)  # all roles (black may be background.dark AND text.primary)
     semantic: Optional[str] = None  # positive | negative (hint for charts and status colours)
+    is_brand: bool = False
     weight: float = 0.0
     contexts: dict[str, int] = Field(default_factory=dict)  # fill/text/line/background → count
+    context_weight: dict[str, float] = Field(default_factory=dict)  # fill/text/line/background → summed weight
+
+    def has_role(self, role: str) -> bool:
+        return role in self.roles or self.role == role
 
 
 class FontUsage(BaseModel):
@@ -70,6 +76,7 @@ class ChromeElement(BaseModel):
     sample_slide: int
     text: Optional[str] = None
     image_part: Optional[str] = None
+    source: str = "slide"  # slide | layout:<part> | master:<part> (layout/master chrome is inherited automatically)
 
 
 class BackgroundFamily(BaseModel):
@@ -90,13 +97,17 @@ class Tokens(BaseModel):
 
     def color_for(self, role: str) -> Optional[str]:
         for c in self.colors:
-            if c.role == role:
+            if c.has_role(role):
                 return c.hex
         return None
 
     def accents(self) -> list[str]:
-        acc = [(c.role, c.hex) for c in self.colors if c.role and c.role.startswith("accent.")]
-        acc.sort(key=lambda t: int(t[0].split(".")[1]))
+        acc = []
+        for c in self.colors:
+            for r in c.roles or ([c.role] if c.role else []):
+                if r and r.startswith("accent."):
+                    acc.append((int(r.split(".")[1]), c.hex))
+        acc.sort()
         return [h for _, h in acc]
 
     def semantic_color(self, kind: str) -> Optional[str]:

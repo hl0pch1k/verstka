@@ -83,10 +83,10 @@ def build_type_scale(shapes_per_slide: dict[int, list[ShapeInfo]], chrome_ids_pe
         display = max(display_cands, key=lambda t: t[1])[0] if display_cands else None
         h2_cands = [(s, w) for s, w in clusters if body < s < h1]
         h2 = max(h2_cands, key=lambda t: t[1])[0] if h2_cands else None
-        small_cands = [(s, w) for s, w in clusters if s < body and w / total >= 0.005]
+        small_cands = [(s, w) for s, w in clusters if body * 0.6 <= s < body and w / total >= 0.005 and s >= 6]
         small = max(small_cands, key=lambda t: t[1])[0] if small_cands else None
-        caption_cands = [(s, w) for s, w in clusters if small is not None and s < small and w / total >= 0.003]
-        caption = min(caption_cands, key=lambda t: t[0])[0] if caption_cands else None
+        caption_cands = [(s, w) for s, w in clusters if small is not None and body * 0.5 <= s < small and w / total >= 0.003 and s >= 6]
+        caption = max(caption_cands, key=lambda t: t[1])[0] if caption_cands else None
 
         def step(role: str, size: Optional[float]) -> None:
             if size is None:

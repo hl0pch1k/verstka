@@ -55,6 +55,18 @@ def heuristic_kind(
 
     if _THANKS_RE.search(title_text) and n_content <= 8:
         return PatternKind.thanks, 0.9
+    # ordinal markers 01, 02, 03… are sequence numbers, not KPIs → agenda / process / timeline
+    ordinals = [s for s in texts if _NUM_SEQ_RE.match(s.plain_text.strip())]
+    if len(ordinals) >= 3:
+        values = sorted(int(s.plain_text.strip()) for s in ordinals)
+        if values[0] <= 2 and values[-1] - values[0] <= len(values) + 1:
+            if _AGENDA_RE.search(title_text) or _AGENDA_RE.search(all_text) or slide_index <= 3:
+                return PatternKind.agenda, 0.8
+            if _TIMELINE_RE.search(all_text):
+                return PatternKind.timeline, 0.75
+            return PatternKind.process, 0.75
+    if slide_index <= 2 and title is not None and role_counts.get(SlotRole.subtitle, 0) >= 1 and n_cards == 0 and n_content <= 7 and n_numbers == 0:
+        return PatternKind.title, 0.85
     if any(_MONO_RE.search(s.text.dominant_font or "") for s in texts if s.text) and any(len(s.plain_text) > 40 for s in texts):
         return PatternKind.code, 0.85
     if n_numbers >= 3:
