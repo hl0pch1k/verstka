@@ -39,6 +39,7 @@ class TypeStep(BaseModel):
 class Typography(BaseModel):
     families: list[FontUsage] = Field(default_factory=list)
     scale: list[TypeStep] = Field(default_factory=list)
+    sizes_used: list[float] = Field(default_factory=list)  # every size the template uses (audit tolerance ±0.75 pt)
     left_align_share: float = 1.0
     line_spacing: float = 1.2
 
@@ -281,7 +282,7 @@ class TemplateManifest(BaseModel):
     style_rules: list[StyleRule] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     n_slides: int = 0
-    analysis_version: str = "6"
+    analysis_version: str = "7"
     embedded_fonts: list[str] = Field(default_factory=list)
 
     def patterns_of_kind(self, kind: PatternKind) -> list[Pattern]:

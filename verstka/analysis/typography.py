@@ -103,7 +103,8 @@ def build_type_scale(shapes_per_slide: dict[int, list[ShapeInfo]], chrome_ids_pe
     total_align = sum(align_chars.values()) or 1
     left_share = (align_chars.get("l", 0) + align_chars.get("just", 0)) / total_align
     line_spacing = round(median(spacings), 2) if spacings else 1.2
-    return Typography(families=families, scale=scale, left_align_share=round(left_share, 3), line_spacing=line_spacing)
+    sizes_used = sorted({round(s, 2) for s, w in clusters if w >= 3})
+    return Typography(families=families, scale=scale, sizes_used=sizes_used, left_align_share=round(left_share, 3), line_spacing=line_spacing)
 
 
 def all_sizes(shapes_per_slide: dict[int, list[ShapeInfo]]) -> list[float]:

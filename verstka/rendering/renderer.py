@@ -30,6 +30,17 @@ class RenderResult:
         return [f"slide {s.index} ({s.outline_id}): {w}" for s in self.slides for w in s.warnings]
 
 
+def _mark_notes(builder: DeckBuilder, oslide) -> None:
+    """Write speaker notes plus a machine marker so the audit can map slides back to the outline."""
+    try:
+        slide = builder.created[-1]
+        tf = slide.notes_slide.notes_text_frame
+        base = (oslide.notes or "").strip()
+        tf.text = (base + "\n" if base else "") + f"[verstka:{oslide.id}]"
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def render_deck(
     outline: DeckOutline,
     plan: LayoutPlan,
@@ -63,6 +74,7 @@ def render_deck(
             except Exception as e2:  # noqa: BLE001
                 log.exception("synth fallback failed for slide %d", i)
                 rendered.warnings.append(f"synth fallback failed: {str(e2)[:160]}")
+        _mark_notes(builder, oslide)
         result.slides.append(rendered)
         if progress:
             progress(f"rendered slide {i}/{n}", i / max(n, 1))
