@@ -56,7 +56,9 @@ def test_matcher_on_simple_deck(simple_deck, tmp_path):
     # three KPI numbers fit the three-card pattern (cards is a fallback for stat_row) → clone with reasons; table has no fallback → synth
     assert by_id["sl4"].mode == "clone" and by_id["sl4"].pattern_id == cards_plan.pattern_id
     assert by_id["sl7"].mode == "synth" and by_id["sl7"].composition == "table"
-    assert by_id["sl6"].mode == "synth" and by_id["sl6"].composition == "chart_text"
+    # chart → the image_text pattern (chart goes into the image slot)
+    image_pattern = next(p for p in manifest.patterns if p.kind == PatternKind.image_text)
+    assert by_id["sl6"].mode == "clone" and by_id["sl6"].pattern_id == image_pattern.id
     # score result is explainable
     cards_pattern = next(p for p in manifest.patterns if p.kind == PatternKind.cards)
     res = score_pattern(outline.slides[4], cards_pattern, manifest, strategy)

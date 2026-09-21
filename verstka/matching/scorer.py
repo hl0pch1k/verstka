@@ -49,19 +49,44 @@ def score_pattern(
         return ScoreResult(0.0, [f"тип {pattern.kind.value} несовместим с {slide.kind.value}"], fit)
     reasons.append(f"тип {pattern.kind.value} для {slide.kind.value}: {kind:.1f}")
 
+    # chart / table / quote need room
+    slide_kind = slide.kind
+    if slide_kind in (PatternKind.chart, PatternKind.table):
+        big = [s for s in pattern.slots if s.role in (SlotRole.image, SlotRole.body, SlotRole.bullet_list) and s.bbox.area >= 0.12]
+        if pattern.kind not in (PatternKind.chart, PatternKind.table) and not big:
+            kind *= 0.3
+            reasons.append("нет крупной области под диаграмму или таблицу")
+    if slide_kind == PatternKind.quote and slide.content.quote:
+        cap_q = max((s.capacity.max_chars for s in pattern.slots if s.role in (SlotRole.body, SlotRole.bullet_list, SlotRole.card_body, SlotRole.subtitle)), default=0)
+        if cap_q < len(slide.content.quote) * 0.8:
+            kind *= 0.5
+            reasons.append("слоты слишком малы для цитаты")
+        if any(len(g.member_shape_ids) >= 3 for g in pattern.repeat_groups):
+            kind *= 0.4
+            reasons.append("список ячеек не подходит для цитаты")
+
     # capacity in items
     n = needed_items(slide)
     cap = 1.0
-    group = max(pattern.repeat_groups, key=lambda g: len(g.member_shape_ids), default=None)
+    text_group_roles = (SlotRole.card_title, SlotRole.card_body, SlotRole.number, SlotRole.number_label, SlotRole.bullet_list, SlotRole.body)
+    groups = [g for g in pattern.repeat_groups if any(s.group_id == g.id and s.role in text_group_roles for s in pattern.slots)]
+    group = max(groups, key=lambda g: len(g.member_shape_ids), default=None)
     if n >= 2:
         if group is not None:
+            n_cells = len(group.member_shape_ids)
             fit["items"] = f"{n}/{group.max_n}"
             if group.min_n <= n <= group.max_n:
                 cap = 1.0
                 reasons.append(f"ёмкость группы {n} из {group.max_n} ячеек")
+                if n_cells > 2 * n + 2:
+                    cap = 0.75
+                    reasons.append(f"группа из {n_cells} ячеек заметно больше нужных {n}")
             elif n > group.max_n:
-                cap = max(0.2, 1.0 - 0.25 * (n - group.max_n))
+                cap = 0.15 if n > group.max_n + 1 else 0.4
                 reasons.append(f"не хватает ячеек: нужно {n}, максимум {group.max_n}")
+            if group.cell_bbox.area < 0.02 and slide_kind in (PatternKind.cards, PatternKind.process, PatternKind.comparison, PatternKind.team, PatternKind.two_column):
+                cap = min(cap, 0.2)
+                reasons.append("ячейки слишком малы для карточек")
         else:
             role_slots = sum(1 for s in pattern.slots if s.role in (SlotRole.card_title, SlotRole.number, SlotRole.bullet_list, SlotRole.body))
             if slide.kind in (PatternKind.bullets, PatternKind.agenda) and any(s.role == SlotRole.bullet_list for s in pattern.slots):
@@ -92,6 +117,15 @@ def score_pattern(
         if ratio > 1.0:
             fit[f"overflow_{role_name}"] = round(ratio, 2)
     fit["text_ratio"] = round(worst, 2)
+    # clutter: text slots the content cannot fill will be emptied — prefer patterns whose slot count matches
+    needed_roles = needed_chars(slide)
+    n_items = needed_items(slide)
+    text_slots = [s for s in pattern.slots if s.role in (SlotRole.body, SlotRole.bullet_list, SlotRole.card_title, SlotRole.card_body, SlotRole.number, SlotRole.number_label, SlotRole.caption)]
+    needed_slots = sum(1 for r in needed_roles if r not in ("title", "subtitle")) + max(n_items - 1, 0) * sum(1 for r in ("card_title", "card_body", "number", "number_label") if r in needed_roles)
+    extra = max(len(text_slots) - max(needed_slots, 1), 0)
+    clutter = min(0.3, 0.03 * extra)
+    if clutter:
+        reasons.append(f"{extra} лишних текстовых слотов останутся пустыми")
     if worst <= 1.0:
         text = 1.0
         reasons.append("текст помещается")
@@ -114,9 +148,26 @@ def score_pattern(
     diversity = -0.15 if pattern.id in recent_ids else 0.0
     if diversity:
         reasons.append("паттерн уже использован недавно")
-    weight = strategy.weight(pattern.kind.value)
+    weight = strategy.weight(pattern.kind.value) if pattern.kind == slide.kind else 1.0
     if weight != 1.0:
         reasons.append(f"вес стратегии {strategy.name}: ×{weight:.2f}")
-    base = 0.4 * kind + 0.25 * cap + 0.15 * text + 0.05 * fam + 0.1 * pattern.quality + diversity
+    # a large sample image (photo, screenshot, chart picture) that the content cannot replace would stay as stale sample content
+    content = slide.content
+    has_visual = bool(content.image_hint or content.chart is not None or content.table is not None)
+    stale_images = [s for s in pattern.slots if s.role == SlotRole.image and s.bbox.area >= 0.12]
+    if stale_images and not has_visual:
+        kind *= 0.6
+        reasons.append("крупная картинка-образец останется без замены")
+    # strategy flavour: visual favours decorated/illustrated samples, compact favours denser samples, structured plain ones
+    n_decor = len(pattern.decor_assets) + sum(1 for s in pattern.slots if s.role in (SlotRole.icon, SlotRole.image))
+    if strategy.name == "visual":
+        style = 0.08 if n_decor >= 1 else 0.0
+    elif strategy.name == "compact":
+        style = 0.08 * min(len(text_slots) / 8.0, 1.0)
+    else:
+        style = 0.04 if n_decor == 0 else 0.0
+    if style:
+        reasons.append(f"стиль стратегии {strategy.name}: +{style:.2f}")
+    base = 0.45 * kind + 0.25 * cap + 0.1 * text + 0.05 * fam + 0.1 * pattern.quality + diversity - clutter + style
     score = max(0.0, min(1.2, base * weight))
     return ScoreResult(round(score, 3), reasons, fit)

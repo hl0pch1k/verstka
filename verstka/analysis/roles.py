@@ -13,9 +13,16 @@ from verstka.schemas.template import RepeatGroup, Typography
 NUMERIC_RE = re.compile(r"^[\s\d.,%+×x><≈~$€₽£\-–—/]{1,10}(\s?(млн|млрд|тыс|k|m|b|%|x|×|ч|дн|раз|шт|₽|\$))?\s*$", re.I)
 
 
+_KPI_PLACEHOLDER_RE = re.compile(r"^[xхX]{1,4}\s?%?$|^[xхX]{1,3}\s?(млн|млрд|тыс|k|m)$", re.I)
+
+
 def is_numeric_text(text: str) -> bool:
     t = text.strip()
-    return bool(t) and bool(NUMERIC_RE.match(t)) and any(ch.isdigit() for ch in t)
+    if not t:
+        return False
+    if _KPI_PLACEHOLDER_RE.match(t):
+        return True
+    return bool(NUMERIC_RE.match(t)) and any(ch.isdigit() for ch in t)
 
 
 def _size(s: ShapeInfo) -> float:
@@ -100,7 +107,7 @@ def heuristic_roles(
     for g in groups:
         for cell in g.member_shape_ids:
             members = [by_id[i] for i in cell if i in by_id and by_id[i].id not in roles]
-            cell_texts = sorted([m for m in members if m.has_text], key=lambda m: (-(_size(m)), m.bbox.y))
+            cell_texts = sorted([m for m in members if m.text is not None and (m.has_text or not m.is_visual_shape)], key=lambda m: (-(_size(m)), m.bbox.y))
             if cell_texts:
                 head = cell_texts[0]
                 bold_first = next((m for m in sorted(cell_texts, key=lambda m: m.bbox.y) if m.text.bold_share > 0.5), None)

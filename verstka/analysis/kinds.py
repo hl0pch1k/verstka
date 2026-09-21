@@ -67,8 +67,13 @@ def heuristic_kind(
             return PatternKind.process, 0.75
     if slide_index <= 2 and title is not None and role_counts.get(SlotRole.subtitle, 0) >= 1 and n_cards == 0 and n_content <= 7 and n_numbers == 0:
         return PatternKind.title, 0.85
+    small_pics = [s for s in shapes if roles.get(s.id) in (SlotRole.image, SlotRole.icon) and s.bbox.area / slide_area < 0.06]
+    if slide_index <= 3 and title is not None and n_cards == 0 and n_numbers == 0 and n_content <= 4 and len(small_pics) == 1 and role_counts.get(SlotRole.image, 0) + role_counts.get(SlotRole.icon, 0) == 1 and role_counts.get(SlotRole.bullet_list, 0) == 0:
+        return PatternKind.title, 0.7  # speaker variant of the title slide (avatar + name)
     if any(_MONO_RE.search(s.text.dominant_font or "") for s in texts if s.text) and any(len(s.plain_text) > 40 for s in texts):
         return PatternKind.code, 0.85
+    if n_numbers >= 8:
+        return PatternKind.chart, 0.6  # a chart or table drawn with shapes
     if n_numbers >= 3:
         return PatternKind.stat_row, 0.8
     if n_numbers in (1, 2):

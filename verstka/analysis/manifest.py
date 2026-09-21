@@ -117,8 +117,11 @@ def analyze_template(
 
     ws = TemplateWorkspace.create(pptx, workspace_root)
     if ws.is_analyzed and not force:
-        report("loaded cached manifest", 1.0)
-        return TemplateManifest.model_validate_json(ws.manifest_path.read_text(encoding="utf-8"))
+        cached = TemplateManifest.model_validate_json(ws.manifest_path.read_text(encoding="utf-8"))
+        if cached.analysis_version == TemplateManifest.model_fields["analysis_version"].default:
+            report("loaded cached manifest", 1.0)
+            return cached
+        log.info("cached manifest has analysis_version %s, re-analyzing", cached.analysis_version)
 
     warnings: list[str] = []
     pkg = PptxPackage.open(ws.source)

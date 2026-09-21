@@ -68,7 +68,7 @@ def needed_chars(slide: OutlineSlide) -> dict[str, int]:
         out["card_body"] = max(len(i.text) + sum(len(b) + 2 for b in i.bullets) for i in items)
     if c.numbers:
         out["number"] = max(len(n.value) for n in c.numbers)
-        out["number_label"] = max(len(n.label) for n in c.numbers)
+        out["number_label"] = min(max(len(n.label) for n in c.numbers), 40)  # labels wrap and shrink easily
     return out
 
 

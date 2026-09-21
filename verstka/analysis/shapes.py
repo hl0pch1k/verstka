@@ -415,6 +415,8 @@ class SlideContext:
 
 
 def _bbox_from_sp(sp: etree._Element, spPr_path: str) -> Optional[tuple[int, int, int, int, float]]:
+    if spPr_path == "p:xfrm":  # graphicFrame: <p:xfrm><a:off/><a:ext/></p:xfrm>
+        return _read_xfrm(find(sp, "p:xfrm"))
     return _read_xfrm(find(sp, f"{spPr_path}/a:xfrm"))
 
 

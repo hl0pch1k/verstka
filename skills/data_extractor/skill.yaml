@@ -1,0 +1,13 @@
+name: data_extractor
+version: 0.1.0
+role: llm
+description: Extracts a facts registry (numbers with units and labels), numeric series for charts and tables from the brief.
+prompt_files:
+  system: prompts/system.md
+  user: prompts/user.md
+output_schema: verstka.schemas.outline.FactsExtraction
+params:
+  temperature: 0.0
+  max_tokens: 3000
+changelog:
+  - "0.1.0: initial version"

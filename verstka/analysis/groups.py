@@ -87,9 +87,8 @@ def _build_group(gid: str, cells: list[Cell], slide_w: int, slide_h: int, safe: 
         avail = safe.y2 * slide_h - ys[0]
         max_n = int((avail + gap_emu) // (cell_h + gap_emu)) if cell_h + gap_emu > 0 else len(cells)
     else:
-        xs = sorted({round(c.bbox.x / (0.04 * slide_w)) * (0.04 * slide_w) for c in cells})
         gap = 0.0
-        max_n = rows * cols
+        max_n = len(cells)  # a grid is not extended: the sample defines its capacity
     max_n = max(min(max_n, 8 if axis != "grid" else 12), len(cells))
     first = cells[0].bbox
     return RepeatGroup(
@@ -131,21 +130,57 @@ def detect_repeat_groups(
                 break
         else:
             clusters.append([a])
+    def _satellites(a: ShapeInfo, others: list[ShapeInfo]) -> list[ShapeInfo]:
+        """Text boxes right of / below the anchor that visually belong to it (icon + label rows, icon-above-text cards)."""
+        out = []
+        for m in others:
+            if m is a or m.kind != ShapeKind.sp or m.text is None or m.is_visual_shape:
+                continue
+            vert_overlap = m.bbox.y < a.bbox.y2 and m.bbox.y2 > a.bbox.y
+            gap_x = m.bbox.x - a.bbox.x2
+            if vert_overlap and -0.01 * slide_w <= gap_x <= 0.06 * slide_w and m.bbox.w <= 0.6 * slide_w:
+                out.append(m)
+                continue
+            horiz_overlap = m.bbox.x < a.bbox.x2 and m.bbox.x2 > a.bbox.x
+            gap_y = m.bbox.y - a.bbox.y2
+            if horiz_overlap and -0.01 * slide_h <= gap_y <= 0.05 * slide_h and m.bbox.h <= 0.35 * slide_h and m.bbox.w <= max(a.bbox.w * 2.5, 0.3 * slide_w):
+                out.append(m)
+        return out
+
+    def _union(shapes_: list[ShapeInfo]) -> Bbox:
+        b = shapes_[0].bbox
+        for m in shapes_[1:]:
+            b = b.union(m.bbox)
+        return b
+
     for cl in clusters:
         if len(cl) < 2:
             continue
         cells: list[Cell] = []
+        anchor_ids = {a.id for a in cl}
+        # satellites: each text box goes to its nearest adjacent anchor
+        sat_owner: dict[str, ShapeInfo] = {}
+        for a in cl:
+            for m in _satellites(a, cand):
+                if m.id in anchor_ids:
+                    continue
+                prev = sat_owner.get(m.id)
+                if prev is None or abs(m.bbox.center[1] - a.bbox.center[1]) + abs(m.bbox.center[0] - a.bbox.center[0]) < abs(m.bbox.center[1] - prev.bbox.center[1]) + abs(m.bbox.center[0] - prev.bbox.center[0]):
+                    sat_owner[m.id] = a
         for a in cl:
             members = [m for m in cand if m is not a and m.bbox.area <= a.bbox.area and a.bbox.contains_point(*m.bbox.center)]
-            cells.append(Cell(a.id, [a.id] + [m.id for m in members], a.bbox, _composition([a] + members)))
+            sats = [m for m in cand if sat_owner.get(m.id) is a and m not in members]
+            all_members = [a] + members + sats
+            cells.append(Cell(a.id, [m.id for m in all_members], _union(all_members), _composition(all_members)))
         # keep the modal composition
         modal = Counter(c.composition for c in cells).most_common(1)[0][0]
         cells = [c for c in cells if c.composition == modal]
         if len(cells) >= 2:
             proposals.append(cells)
 
-    # Stage B: text-only rows/columns (equal style, aligned)
-    texts = [s for s in cand if s.has_text and not s.is_visual_shape and s.kind == ShapeKind.sp]
+    # Stage B: text-only rows/columns (equal style, aligned); empty text boxes count too
+    in_stage_a = {i for cells in proposals for c in cells for i in c.member_ids}
+    texts = [s for s in cand if s.text is not None and not s.is_visual_shape and s.kind == ShapeKind.sp and s.id not in in_stage_a]
     tclusters: list[list[ShapeInfo]] = []
     for t in texts:
         key = (round((t.text.dominant_size_pt or 0) * 2) / 2, t.text.bold_share > 0.5)
