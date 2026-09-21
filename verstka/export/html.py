@@ -18,19 +18,22 @@ from verstka.schemas.template import TemplateManifest
 _MIME = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "gif": "image/gif", "svg": "image/svg+xml", "webp": "image/webp", "bmp": "image/bmp", "emf": "image/emf", "wmf": "image/wmf"}
 
 
-def _data_uri(pkg: PptxPackage, part: Optional[str], cache: dict[str, str]) -> Optional[str]:
+def _image_class(pkg: PptxPackage, part: Optional[str], cache: dict[str, str]) -> Optional[str]:
+    """Register an image once and return its CSS class name (the data URI lives in a single <style> rule)."""
     if not part or not pkg.exists(part):
         return None
     if part in cache:
-        return cache[part]
+        return cache[part] or None
     ext = part.rsplit(".", 1)[-1].lower()
     mime = _MIME.get(ext)
     if mime is None or ext in ("emf", "wmf"):
         cache[part] = ""
         return None
-    uri = f"data:{mime};base64," + base64.b64encode(pkg.read(part)).decode("ascii")
-    cache[part] = uri
-    return uri
+    cls = f"im{len([v for v in cache.values() if v]) + 1}"
+    cache[part] = cls
+    cache.setdefault("__uris__", {})  # type: ignore[arg-type]
+    cache["__uris__"][cls] = f"data:{mime};base64," + base64.b64encode(pkg.read(part)).decode("ascii")  # type: ignore[index]
+    return cls
 
 
 def _font_face() -> str:
@@ -103,10 +106,10 @@ def _element_html(e: IRElement, slide: IRSlide, ir: DeckIR, pkg: PptxPackage, ca
     if contrast_ratio(text_default, bg) < 2.5:
         text_default = "FFFFFF" if slide.family.value == "dark" else "000000"
     if e.type == "picture":
-        uri = _data_uri(pkg, e.image_part, cache)
-        if not uri:
+        cls = _image_class(pkg, e.image_part, cache)
+        if not cls:
             return ""
-        return f'<div class="el" style="{style}"><img src="{uri}" alt="" style="width:100%;height:100%;object-fit:cover"></div>'
+        return f'<div class="el pic {cls}" style="{style}"></div>'
     if e.type == "chart" and e.chart:
         colors = manifest.components.chart_style.series_colors or manifest.tokens.accents()
         svg = chart_svg(e.chart, e.bbox.w / EMU_PER_PT, e.bbox.h / EMU_PER_PT, colors, text_hex=text_default, font=f"'{default_font}', Play, Arial, sans-serif", font_px=max(manifest.components.chart_style.font_size_pt, 9))
@@ -152,9 +155,9 @@ def export_html(pptx: Path | str, manifest: TemplateManifest, out: Path | str | 
             layout_chrome = layout_chrome + chrome_by_layout.get(master_part, [])
         for c in layout_chrome:
             if c.kind == "pic" and c.image_part:
-                uri = _data_uri(pkg, c.image_part, cache)
-                if uri:
-                    parts.append(f'<div class="el chrome" style="left:{_pct(c.bbox.x)};top:{_pct(c.bbox.y)};width:{_pct(c.bbox.w)};height:{_pct(c.bbox.h)}"><img src="{uri}" alt="" style="width:100%;height:100%;object-fit:contain"></div>')
+                cls = _image_class(pkg, c.image_part, cache)
+                if cls:
+                    parts.append(f'<div class="el chrome pic contain {cls}" style="left:{_pct(c.bbox.x)};top:{_pct(c.bbox.y)};width:{_pct(c.bbox.w)};height:{_pct(c.bbox.h)}"></div>')
         for e in sorted(s.elements, key=lambda e: e.z):
             parts.append(_element_html(e, s, ir, pkg, cache, manifest, default_font))
         if s.notes:
@@ -162,6 +165,7 @@ def export_html(pptx: Path | str, manifest: TemplateManifest, out: Path | str | 
         parts.append(f'<div class="num">{s.index} / {ir.n_slides}</div></section>')
         slides_html.append("".join(parts))
     pkg.close()
+    image_css = "\n".join(f".{cls}{{background-image:url({uri})}}" for cls, uri in (cache.get("__uris__") or {}).items())  # type: ignore[union-attr]
     ratio = ir.slide_w / ir.slide_h
     page = f"""<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{html.escape(title or pptx.stem)}</title>
@@ -173,6 +177,8 @@ body{{margin:0;background:#1e1e22;font-family:'{html.escape(default_font)}',Play
 .slide{{position:relative;width:100%;aspect-ratio:{ratio:.5f};overflow:hidden;margin:0 auto 28px;box-shadow:0 10px 30px rgba(0,0,0,.35);border-radius:6px;container-type:inline-size}}
 .el{{position:absolute;box-sizing:border-box;overflow:hidden}}
 .el.chrome{{pointer-events:none}}
+.pic{{background-size:cover;background-position:center;background-repeat:no-repeat}} .pic.contain{{background-size:contain}}
+{image_css}
 .tx{{display:flex;flex-direction:column;height:100%;padding:0.35cqw 0.6cqw;box-sizing:border-box;line-height:1.2;word-wrap:break-word}}
 .tx p{{margin:0 0 0.25em 0}} .tx ul{{margin:0;padding-left:1.2em}} .tx li{{margin:0 0 0.25em 0}}
 table{{border-collapse:collapse;width:100%;height:100%}} th,td{{padding:0.3em 0.6em;text-align:left;border-bottom:1px solid rgba(128,128,128,.35)}} td:not(:first-child){{text-align:right}}
