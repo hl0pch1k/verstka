@@ -6,10 +6,33 @@ from typing import Optional
 
 from verstka.rendering.fonts import wrap_lines
 from verstka.schemas.audit import FixAction
-from verstka.schemas.common import EMU_PER_PT, Bbox
+from verstka.schemas.common import EMU_PER_PT, Bbox, hex_to_rgb, rgb_to_hex
 from verstka.schemas.deck_ir import DeckIR, IRElement, IRSlide
 
 CONTENT_TYPES = ("text", "picture", "chart", "table")
+
+
+def text_elements(slide: IRSlide) -> list[IRElement]:
+    """Real text boxes only: tables and charts carry text too but are audited by their own checks."""
+    return [e for e in slide.elements if e.type == "text" and e.has_text]
+
+
+def fill_alpha(e: IRElement) -> float:
+    """Opacity of the element fill (0..1); `fill_alpha` is optional on the IR, missing means opaque."""
+    a = getattr(e, "fill_alpha", None)
+    try:
+        return max(0.0, min(1.0, float(a))) if a is not None else 1.0
+    except (TypeError, ValueError):
+        return 1.0
+
+
+def composite_hex(fg_hex: str, alpha: float, under_hex: str) -> str:
+    """Colour of a translucent fill seen over an opaque colour: alpha·fg + (1−alpha)·under."""
+    if alpha >= 1.0:
+        return fg_hex.upper()
+    r1, g1, b1 = hex_to_rgb(fg_hex)
+    r2, g2, b2 = hex_to_rgb(under_hex)
+    return rgb_to_hex(alpha * r1 + (1 - alpha) * r2, alpha * g1 + (1 - alpha) * g2, alpha * b1 + (1 - alpha) * b2)
 
 
 def is_chrome_like(e: IRElement, ir: DeckIR) -> bool:
@@ -54,16 +77,27 @@ def contains(outer: Bbox, inner: Bbox, tol: float = 0.02) -> bool:
     return outer.x - tx <= inner.x and outer.y - ty <= inner.y and outer.x2 + tx >= inner.x2 and outer.y2 + ty >= inner.y2
 
 
-def enclosing_fill(slide: IRSlide, e: IRElement) -> Optional[str]:
-    """Fill colour of the smallest filled element that contains e (a card), else None."""
+def enclosing_fill(slide: IRSlide, e: IRElement, bg_slide: Optional[str] = None) -> Optional[str]:
+    """Effective colour behind e: the fill of the smallest filled element containing e (a card), translucent cards
+    composited over what lies under them (outer card or the slide background). None when nothing encloses e."""
     cands = [o for o in slide.elements if o is not e and o.fill_hex and o.type in ("shape", "text") and contains(o.bbox, e.bbox, 0.01) and o.bbox.area > e.bbox.area]
     if not cands:
         return None
-    return min(cands, key=lambda o: o.bbox.area).fill_hex
+    color = bg_slide or slide.background_hex
+    for o in sorted(cands, key=lambda o: o.bbox.area, reverse=True):  # outermost → innermost
+        a = fill_alpha(o)
+        if a >= 1.0 or not color:
+            color = o.fill_hex.upper()
+            continue
+        try:
+            color = composite_hex(o.fill_hex, a, color)
+        except ValueError:
+            color = o.fill_hex.upper()
+    return color
 
 
 def title_element(slide: IRSlide) -> Optional[IRElement]:
-    texts = slide.texts
+    texts = text_elements(slide)
     if not texts:
         return None
     ph = next((t for t in texts if t.ph_type in ("title", "ctrTitle")), None)

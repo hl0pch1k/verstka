@@ -18,11 +18,13 @@ AUTOFIX = {
     "margin_violation": "сдвиг в безопасную область",
     "font_not_in_template": "замена на шрифт шаблона",
     "color_not_in_palette": "ближайший цвет палитры",
-    "contrast_low": "основной цвет текста шаблона",
+    "contrast_low": "цвет текста шаблона, достигающий нужного контраста",
     "too_many_bullets": "сокращение списка",
     "bullet_too_long": "сокращение текста",
     "placeholder_text": "удаление заглушки",
     "empty_slide": "перевыбор макета",
+    "content_missing": "перевыбор макета",
+    "table_cell_wrap": "перевыбор макета",
 }
 
 

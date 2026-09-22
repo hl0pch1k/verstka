@@ -45,14 +45,21 @@ def check(spec: CheckSpec):
     return deco
 
 
+_BUILTIN_LOADED = False
+
+
 def load_builtin_checks() -> None:
+    """Import every built-in check module once (idempotent; importing a subset elsewhere must not hide the rest)."""
+    global _BUILTIN_LOADED
+    if _BUILTIN_LOADED:
+        return
+    _BUILTIN_LOADED = True
     for mod in ("layout", "template", "density", "integrity"):
         importlib.import_module(f"verstka.audit.checks.{mod}")
 
 
 def all_checks() -> list[tuple[CheckSpec, CheckFn]]:
-    if not _CHECKS:
-        load_builtin_checks()
+    load_builtin_checks()
     return list(_CHECKS)
 
 

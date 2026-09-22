@@ -1,20 +1,29 @@
-"""Integrity checks: file opens, placeholders, empty/picture slides, chart labels, duplicates."""
+"""Integrity checks: file opens, empty deck, placeholders, empty/picture slides, lost content, chart labels, duplicates."""
 
 from __future__ import annotations
 
+import re
 from difflib import SequenceMatcher
+from typing import Optional
 
 from verstka.analysis.shapes import looks_like_placeholder
-from verstka.audit.checks.common import content_elements, fix, title_element
+from verstka.audit.checks.common import content_elements, fix, text_elements, title_element
 from verstka.audit.registry import AuditContext, check
 from verstka.schemas.audit import CheckSpec, Issue
+from verstka.schemas.deck_ir import IRSlide
+from verstka.schemas.outline import OutlineSlide
 
 FILE_OPENS = CheckSpec(id="file_opens", title="Файл не открывается", severity="error", category="integrity", description="PPTX не открывается python-pptx или не рендерится LibreOffice.")
+EMPTY_DECK = CheckSpec(id="empty_deck", title="В колоде нет ни одного слайда", severity="error", category="integrity", description="Файл открывается, но не содержит слайдов.")
 PLACEHOLDER_TEXT = CheckSpec(id="placeholder_text", title="Остался текст-заглушка", severity="error", category="integrity", description="На слайде остался lorem ipsum, XXX, TODO, «вставьте текст», «Заголовок», «Имя Фамилия» и подобные заглушки шаблона.")
 EMPTY_SLIDE = CheckSpec(id="empty_slide", title="Пустой слайд или слайд с одним заголовком", severity="error", category="integrity", description="На слайде нет контента кроме заголовка (кроме титульного, разделителей и финального).")
 SLIDE_IS_PICTURE = CheckSpec(id="slide_is_picture", title="Слайд оказался картинкой, а не редактируемыми объектами", severity="error", category="integrity", description="Одна картинка занимает ≥ 90% слайда и на слайде нет текста.")
 CHART_MISSING_LABELS = CheckSpec(id="chart_missing_labels", title="У диаграммы нет подписей осей, единиц или легенды", severity="warn", category="integrity", description="Нативная диаграмма без подписей данных и без оси значений, либо многосерийная без легенды, либо без единиц измерения.")
 DUPLICATE_SLIDES = CheckSpec(id="duplicate_slides", title="Два слайда дублируют друг друга", severity="warn", category="integrity", description="Текст двух слайдов совпадает более чем на 90%.")
+CONTENT_MISSING = CheckSpec(id="content_missing", title="Часть запланированного контента пропала со слайда", severity="error", category="integrity", description="Заголовок, буллеты, названия карточек, числа с подписями и заголовки колонок из плана ищутся в тексте слайда (включая ячейки таблиц) без учёта пробелов и регистра по первым 18 символам; ошибка, если нет трети и более строк, иначе предупреждение.")
+
+CONTENT_KEY_CHARS = 18
+_WS_RE = re.compile(r"[\s\u00a0\u202f\u2009\u2007]+")
 
 
 @check(FILE_OPENS)
@@ -27,15 +36,30 @@ def file_opens(ctx: AuditContext) -> list[Issue]:
     return out
 
 
+@check(EMPTY_DECK)
+def empty_deck(ctx: AuditContext) -> list[Issue]:
+    if ctx.opens_ok and not ctx.ir.slides:
+        return [ctx.new_issue(EMPTY_DECK, 0, "в колоде нет ни одного слайда")]
+    return []
+
+
 @check(PLACEHOLDER_TEXT)
 def placeholder_text(ctx: AuditContext) -> list[Issue]:
     out: list[Issue] = []
     for s in ctx.ir.slides:
-        for e in s.texts:
+        for e in s.elements:  # table cells included: sample tables keep their placeholder text too
+            if not e.has_text:
+                continue
             t = e.text.strip()
             if looks_like_placeholder(t):
                 out.append(ctx.new_issue(PLACEHOLDER_TEXT, s.index, f"заглушка «{t[:40]}»", bboxes=[e.bbox_frac], element_ids=[e.id], autofix=fix("drop_element", "удалить заглушку", element_id=e.id)))
     return out
+
+
+def _outline_slide(ctx: AuditContext, s: IRSlide) -> Optional[OutlineSlide]:
+    if ctx.outline is None or not s.outline_id:
+        return None
+    return next((o for o in ctx.outline.slides if o.id == s.outline_id), None)
 
 
 @check(EMPTY_SLIDE)
@@ -49,15 +73,66 @@ def empty_slide(ctx: AuditContext) -> list[Issue]:
         title = title_element(s)
         others = [e for e in els if e is not title]
         text_others = [e for e in others if e.has_text or e.type in ("chart", "table")]
-        if not els or (title is not None and not text_others and not any(e.type == "picture" and e.bbox_frac.area > 0.1 for e in others)):
-            kind = "unknown"
-            if ctx.outline and s.outline_id:
-                osl = next((o for o in ctx.outline.slides if o.id == s.outline_id), None)
-                if osl is not None:
-                    kind = osl.kind.value
+        osl = _outline_slide(ctx, s)
+        # a picture is content only when the plan asked for one; otherwise it is template decoration next to a lone title
+        picture_planned = osl is None or bool(osl.content.image_hint) or osl.kind.value == "image_text"
+        has_picture = picture_planned and any(e.type == "picture" and e.bbox_frac.area > 0.1 for e in others)
+        if not els or (title is not None and not text_others and not has_picture):
+            kind = osl.kind.value if osl is not None else "unknown"
             if kind in ("section", "thanks", "title", "quote"):
                 continue
             out.append(ctx.new_issue(EMPTY_SLIDE, s.index, "на слайде только заголовок", autofix=fix("rematch", "перевыбрать макет", outline_id=s.outline_id)))
+    return out
+
+
+def _norm_text(t: str) -> str:
+    return _WS_RE.sub("", t).lower().replace("ё", "е")
+
+
+def wanted_strings(osl: OutlineSlide) -> list[str]:
+    """Texts the plan puts on the slide that must survive rendering (order preserved, duplicates dropped)."""
+    c = osl.content
+    raw: list[str] = [osl.headline]
+    raw.extend(c.bullets)
+    raw.extend(it.title for it in c.items)
+    for n in c.numbers:
+        raw.extend((n.value, n.label))
+    raw.extend(col.title for col in c.columns)
+    if c.table:
+        raw.extend(c.table.columns)
+    out: list[str] = []
+    for t in raw:
+        t = (t or "").strip()
+        if t and _norm_text(t) and t not in out:
+            out.append(t)
+    return out
+
+
+def slide_text_norm(s: IRSlide) -> str:
+    parts = [e.text for e in s.elements if e.type == "text" and e.has_text]
+    for e in s.elements:
+        if e.type == "table" and e.table:
+            parts.extend(cell for row in e.table.rows for cell in row)
+    return "|".join(_norm_text(p) for p in parts)
+
+
+@check(CONTENT_MISSING)
+def content_missing(ctx: AuditContext) -> list[Issue]:
+    out: list[Issue] = []
+    for s in ctx.ir.slides:
+        osl = _outline_slide(ctx, s)
+        if osl is None:
+            continue
+        wanted = wanted_strings(osl)
+        if not wanted:
+            continue
+        have = slide_text_norm(s)
+        missing = [w for w in wanted if _norm_text(w)[:CONTENT_KEY_CHARS] not in have]
+        if not missing:
+            continue
+        severity = "error" if len(missing) * 3 >= len(wanted) else "warn"
+        shown = ", ".join(f"«{m[:40]}»" for m in missing[:3]) + ("…" if len(missing) > 3 else "")
+        out.append(ctx.new_issue(CONTENT_MISSING, s.index, f"{len(missing)} из {len(wanted)} текстов плана нет на слайде: {shown}", severity=severity, details={"missing": missing, "wanted": len(wanted)}, autofix=fix("rematch", "перевыбрать макет, чтобы весь контент поместился", outline_id=s.outline_id)))
     return out
 
 
@@ -66,7 +141,7 @@ def slide_is_picture(ctx: AuditContext) -> list[Issue]:
     out: list[Issue] = []
     for s in ctx.ir.slides:
         pics = [e for e in s.elements if e.type == "picture" and e.bbox_frac.area >= 0.9]
-        if pics and not s.texts:
+        if pics and not text_elements(s):
             out.append(ctx.new_issue(SLIDE_IS_PICTURE, s.index, "слайд состоит из одной картинки", bboxes=[pics[0].bbox_frac], element_ids=[pics[0].id]))
     return out
 
@@ -96,7 +171,7 @@ def chart_missing_labels(ctx: AuditContext) -> list[Issue]:
 @check(DUPLICATE_SLIDES)
 def duplicate_slides(ctx: AuditContext) -> list[Issue]:
     out: list[Issue] = []
-    texts = [(s.index, " ".join(e.text for e in s.texts).strip().lower()) for s in ctx.ir.slides]
+    texts = [(s.index, " ".join(e.text for e in s.elements if e.has_text).strip().lower()) for s in ctx.ir.slides]
     for i, (ia, ta) in enumerate(texts):
         if len(ta) < 40:
             continue

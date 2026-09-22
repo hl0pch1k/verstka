@@ -146,6 +146,7 @@ def build_deck_ir(pptx: Path | str, with_images: bool = True) -> DeckIR:
                 bbox_frac=s.bbox.to_frac(W, H),
                 paragraphs=paragraphs,
                 fill_hex=s.fill_hex,
+                fill_alpha=s.fill_alpha,
                 line_hex=s.line_hex,
                 image_part=s.image_part,
                 crop=s.crop,

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from verstka.audit.checks.common import content_elements, fix
+from verstka.audit.checks.common import content_elements, fix, text_elements
 from verstka.audit.registry import AuditContext, check
 from verstka.schemas.audit import CheckSpec, Issue
 from verstka.schemas.common import Bbox
@@ -11,14 +11,14 @@ TOO_MANY_BULLETS = CheckSpec(id="too_many_bullets", title="Больше 6 бул
 BULLET_TOO_LONG = CheckSpec(id="bullet_too_long", title="Буллет длиннее 15 слов", severity="warn", category="density", description="Абзац с маркером содержит больше 15 слов.")
 TABLE_TOO_BIG = CheckSpec(id="table_too_big", title="Таблица больше 7 строк или 5 колонок", severity="warn", category="density", description="Нативная таблица превышает 7 строк (с шапкой) или 5 колонок.")
 TOO_MANY_SERIES = CheckSpec(id="too_many_series", title="Больше 5 серий на диаграмме", severity="warn", category="density", description="Нативная диаграмма содержит больше пяти рядов данных.")
-FILL_RATIO = CheckSpec(id="fill_ratio", title="Слайд заполнен меньше чем на четверть или больше чем на три четверти", severity="warn", category="density", description="Площадь объединения контентных блоков относительно безопасной области шаблона вне диапазона 25–75%.")
+FILL_RATIO = CheckSpec(id="fill_ratio", title="Слайд заполнен меньше чем на четверть или больше чем на 80%", severity="warn", category="density", description="Площадь объединения контентных блоков относительно безопасной области шаблона меньше 25% (меньше 20% при одном-двух блоках — сведение) или больше 80%.")
 
 
 @check(TOO_MANY_BULLETS)
 def too_many_bullets(ctx: AuditContext) -> list[Issue]:
     out: list[Issue] = []
     for s in ctx.ir.slides:
-        for e in s.texts:
+        for e in text_elements(s):
             n = sum(1 for p in e.paragraphs if (p.bullet or p.level > 0) and p.text.strip())
             if n > 6:
                 out.append(ctx.new_issue(TOO_MANY_BULLETS, s.index, f"{n} буллетов в одном блоке", bboxes=[e.bbox_frac], element_ids=[e.id], autofix=fix("condense_text", "сократить список до 6 пунктов", outline_id=s.outline_id, element_id=e.id)))
@@ -29,7 +29,7 @@ def too_many_bullets(ctx: AuditContext) -> list[Issue]:
 def bullet_too_long(ctx: AuditContext) -> list[Issue]:
     out: list[Issue] = []
     for s in ctx.ir.slides:
-        for e in s.texts:
+        for e in text_elements(s):
             long = [p.text for p in e.paragraphs if (p.bullet or p.level > 0) and len(p.text.split()) > 15]
             if long:
                 out.append(ctx.new_issue(BULLET_TOO_LONG, s.index, f"{len(long)} буллетов длиннее 15 слов: «{long[0][:50]}…»", bboxes=[e.bbox_frac], element_ids=[e.id], autofix=fix("condense_text", "сократить буллеты до 15 слов", outline_id=s.outline_id, element_id=e.id)))

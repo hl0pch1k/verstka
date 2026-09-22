@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from typing import Optional
+
 from verstka.analysis.chrome import shape_signature
-from verstka.audit.checks.common import enclosing_fill, fix, is_chrome_like
+from verstka.audit.checks.common import composite_hex, enclosing_fill, fill_alpha, fix, is_chrome_like, text_elements
 from verstka.audit.registry import AuditContext, check
 from verstka.schemas.audit import CheckSpec, Issue
 from verstka.schemas.common import Color, contrast_ratio
@@ -13,7 +15,9 @@ SIZE_NOT_IN_SCALE = CheckSpec(id="size_not_in_scale", title="Кегль не и�
 COLOR_NOT_IN_PALETTE = CheckSpec(id="color_not_in_palette", title="Цвет не из палитры шаблона", severity="warn", category="template", description="Цвет текста или заливки отстоит от ближайшего цвета палитры шаблона больше чем на ΔE 6.")
 LAYOUT_NOT_FROM_TEMPLATE = CheckSpec(id="layout_not_from_template", title="Слайд собран не на макете из шаблона", severity="error", category="template", description="Слайд ссылается на макет, которого нет в пакете шаблона.")
 CHROME_MOVED = CheckSpec(id="chrome_moved", title="Логотип или колонтитул сдвинуты с положенного места", severity="warn", category="template", description="Элемент хрома шаблона (логотип, колонтитул на слайдах) отсутствует или стоит в другом месте.")
-CONTRAST_LOW = CheckSpec(id="contrast_low", title="Контраст текста к фону ниже 4.5:1", severity="warn", category="template", description="Контраст по WCAG между цветом текста и фоном (карточка или фон слайда) ниже 4.5:1 для обычного текста и 3:1 для крупного (≥24 пт).")
+CONTRAST_LOW = CheckSpec(id="contrast_low", title="Контраст текста к фону ниже 4.5:1", severity="warn", category="template", description="Контраст по WCAG между цветом текста и фоном (карточка с учётом прозрачности заливки или фон слайда) ниже 4.5:1 для обычного текста и 3:1 для крупного (≥24 пт).")
+
+CONTRAST_CANDIDATE_ROLES = ("text.primary", "text.secondary")
 
 
 def _allowed_fonts(ctx: AuditContext) -> set[str]:
@@ -31,7 +35,7 @@ def font_not_in_template(ctx: AuditContext) -> list[Issue]:
         return out
     for s in ctx.ir.slides:
         used: dict[str, list[str]] = {}
-        for e in s.texts:
+        for e in text_elements(s):
             for p in e.paragraphs:
                 for r in p.runs:
                     if r.font and r.text.strip():
@@ -52,7 +56,7 @@ def size_not_in_scale(ctx: AuditContext) -> list[Issue]:
         return out
     for s in ctx.ir.slides:
         bad: dict[float, list[str]] = {}
-        for e in s.texts:
+        for e in text_elements(s):
             for p in e.paragraphs:
                 for r in p.runs:
                     if r.size_pt and r.text.strip() and all(abs(r.size_pt - t) > 0.75 for t in sizes):
@@ -93,7 +97,7 @@ def color_not_in_palette(ctx: AuditContext) -> list[Issue]:
                 if d > 6.0:
                     seen.setdefault(h, []).append(e.id)
         for h, ids in seen.items():
-            out.append(ctx.new_issue(COLOR_NOT_IN_PALETTE, s.index, f"цвет #{h} не из палитры шаблона", element_ids=sorted(set(ids)), autofix=fix("recolor", "заменить ближайшим цветом палитры", hex=h, element_ids=sorted(set(ids)))))
+            out.append(ctx.new_issue(COLOR_NOT_IN_PALETTE, s.index, f"цвет #{h} не из палитры шаблона", element_ids=sorted(set(ids)), autofix=fix("recolor", "заменить ближайшим цветом палитры", hex=h, element_ids=sorted(set(ids)), scope="all")))
     return out
 
 
@@ -127,20 +131,38 @@ def chrome_moved(ctx: AuditContext) -> list[Issue]:
     return out
 
 
+def _contrast_replacement(tokens, bg: str, need: float) -> Optional[str]:
+    """First template text colour (then white, black) that reaches the required ratio against bg; None if nothing does."""
+    cands: list[str] = []
+    for role in CONTRAST_CANDIDATE_ROLES:
+        hx = tokens.color_for(role)
+        if hx:
+            cands.append(hx.upper())
+    cands.extend(("FFFFFF", "000000"))
+    for c in dict.fromkeys(cands):
+        try:
+            if contrast_ratio(c, bg) >= need:
+                return c
+        except ValueError:
+            continue
+    return None
+
+
 @check(CONTRAST_LOW)
 def contrast_low(ctx: AuditContext) -> list[Issue]:
     out: list[Issue] = []
     tokens = ctx.manifest.tokens
     for s in ctx.ir.slides:
         bg_slide = s.background_hex or tokens.color_for("background.dark" if s.family.value == "dark" else "background.light") or ("000000" if s.family.value == "dark" else "FFFFFF")
-        for e in s.texts:
+        for e in text_elements(s):
             if is_chrome_like(e, ctx.ir):
                 continue
             color = e.dominant_color
             if not color:
                 continue
-            bg = e.fill_hex or enclosing_fill(s, e) or bg_slide
+            under = enclosing_fill(s, e, bg_slide) or bg_slide
             try:
+                bg = composite_hex(e.fill_hex, fill_alpha(e), under) if e.fill_hex else under
                 cr = contrast_ratio(color, bg)
             except ValueError:
                 continue
@@ -149,5 +171,7 @@ def contrast_low(ctx: AuditContext) -> list[Issue]:
             if cr < need:
                 accent_text = any(t.hex == color and any(r.startswith("accent.") for r in t.roles) for t in tokens.colors)
                 severity = "error" if cr < 2.5 else ("info" if (accent_text and cr >= 3.0) else "warn")  # brand accent on dark is the template's own choice
-                out.append(ctx.new_issue(CONTRAST_LOW, s.index, f"контраст {cr:.1f}:1 у «{e.text[:30]}» (#{color} на #{bg})", bboxes=[e.bbox_frac], element_ids=[e.id], severity=severity, details={"contrast": round(cr, 2)}, autofix=fix("recolor", "заменить цвет текста на основной цвет текста шаблона", element_ids=[e.id], target="text.primary")))
+                to = _contrast_replacement(tokens, bg, need)
+                autofix = fix("recolor", f"заменить цвет текста на #{to}", element_ids=[e.id], to=to, scope="text") if to else None
+                out.append(ctx.new_issue(CONTRAST_LOW, s.index, f"контраст {cr:.1f}:1 у «{e.text[:30]}» (#{color} на #{bg})", bboxes=[e.bbox_frac], element_ids=[e.id], severity=severity, details={"contrast": round(cr, 2), "background": bg}, autofix=autofix))
     return out
