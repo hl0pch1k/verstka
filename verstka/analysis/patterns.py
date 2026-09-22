@@ -91,6 +91,7 @@ def build_pattern(
     counters: Counter = Counter()
     has_placeholder_text = False
     chrome: list[str] = []
+    decor_boxes: list = []
     for s in sorted(shapes, key=lambda s: (s.bbox.y, s.bbox.x)):
         role = roles.get(s.id)
         if role == SlotRole.chrome:
@@ -101,6 +102,8 @@ def build_pattern(
         if role == SlotRole.decoration:
             if s.image_part and s.image_part in asset_ids:
                 decor.append(asset_ids[s.image_part])
+            if s.kind == ShapeKind.pic and 0.04 <= s.bbox.area / float(slide_w * slide_h) < 0.6:
+                decor_boxes.append(s.bbox.to_frac(slide_w, slide_h))
             continue
         container = role in (SlotRole.body, SlotRole.card_body) and not s.has_text and s.is_visual_shape
         if role in _TEXT_ROLES and not s.text and not container:
@@ -150,6 +153,7 @@ def build_pattern(
         layout_part=layout_part,
         chrome_shape_ids=chrome,
         reference=reference,
+        decor_boxes=decor_boxes,
     )
 
 

@@ -665,7 +665,7 @@ def slide_family(package: PptxPackage, slide_part: str, ctx: SlideContext, shape
 
             with Image.open(image_path) as im:
                 small = im.convert("L").resize((32, 18))
-                mean = sum(small.getdata()) / (32 * 18)
+                mean = sum(small.tobytes()) / (32 * 18)
             return (Family.dark if mean < 90 else Family.light), None
         except Exception:  # noqa: BLE001
             pass

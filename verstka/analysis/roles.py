@@ -51,22 +51,23 @@ def is_empty_frame(s: ShapeInfo, shapes: list[ShapeInfo], slide_w: int, slide_h:
     if s.is_placeholder and s.ph_type not in (None, "body", "obj"):
         return False
     fw, fh = s.bbox.w / slide_w, s.bbox.h / slide_h
-    if fw < 0.08 or fh < 0.06 or not (0.015 <= fw * fh <= 0.55):
-        return False
+    if fw < 0.08 or fh < 0.06 or not (0.015 <= fw * fh <= 0.55) or fw > 0.9 or fh > 0.9:
+        return False  # a slide-high or slide-wide block is a panel of the layout, not a card
     if s.bbox.x < 0 or s.bbox.y < 0 or s.bbox.x2 > slide_w * 1.001 or s.bbox.y2 > slide_h * 1.001:
         return False  # a frame running off the slide is an ornament
     if s.fill_hex is not None and s.fill_alpha >= 0.5 and _saturation(s.fill_hex) > 0.35:
         return False  # a coloured block is decoration (or a label behind a heading)
     for o in shapes:
-        if o.id == s.id:
+        if o.id == s.id or o.bbox.area <= 0:
             continue
+        overlap = s.bbox.intersection(o.bbox)
+        if overlap <= 0.05 * o.bbox.area:
+            continue
+        if o.has_text or o.kind in (ShapeKind.pic, ShapeKind.graphic_frame) or o.is_placeholder or (o.text is not None and not o.is_visual_shape):
+            return False  # it already hosts (or sits under) slots, pictures, text boxes — even empty ones
         cx, cy = o.bbox.x + o.bbox.w / 2, o.bbox.y + o.bbox.h / 2
         inside = s.bbox.x <= cx <= s.bbox.x2 and s.bbox.y <= cy <= s.bbox.y2
-        if not inside:
-            continue
-        if o.has_text or o.kind in (ShapeKind.pic, ShapeKind.graphic_frame):
-            return False
-        if o.is_visual_shape and o.bbox.area >= 0.05 * s.bbox.area and o.z > s.z:
+        if inside and o.is_visual_shape and o.bbox.area >= 0.05 * s.bbox.area and o.z > s.z:
             return False  # a panel holding other cards is a background, not a slot
     return True
 

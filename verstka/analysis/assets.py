@@ -53,6 +53,34 @@ def _image_meta(data: bytes, ext: str) -> tuple[int, int, bool]:
         return 0, 0, False
 
 
+def _looks_like_qr(data: bytes, ext: str) -> bool:
+    """A square, almost two-tone picture with dense black/white transitions (a QR or data-matrix code)."""
+    if ext not in ("png", "jpg", "gif", "bmp", "webp"):
+        return False
+    try:
+        from io import BytesIO
+
+        from PIL import Image
+
+        im = Image.open(BytesIO(data))
+        if not (0.85 <= im.width / max(im.height, 1) <= 1.18) or min(im.size) < 40:
+            return False
+        if im.mode in ("RGBA", "LA", "P"):
+            rgba = im.convert("RGBA")
+            flat = Image.new("RGB", rgba.size, (255, 255, 255))
+            flat.paste(rgba, mask=rgba.split()[-1])
+            im = flat
+        px = list(im.convert("L").resize((64, 64)).tobytes())
+    except Exception:  # noqa: BLE001
+        return False
+    dark = sum(1 for v in px if v < 80) / len(px)
+    light = sum(1 for v in px if v > 180) / len(px)
+    if dark < 0.15 or light < 0.2 or dark + light < 0.8:
+        return False
+    flips = sum(1 for r in range(64) for c in range(63) if (px[r * 64 + c] < 128) != (px[r * 64 + c + 1] < 128))
+    return flips / 64 >= 8
+
+
 def extract_assets(
     package: PptxPackage,
     shapes_by_slide: dict[int, list[ShapeInfo]],
@@ -90,7 +118,9 @@ def extract_assets(
         max_used_w = max((s.bbox.w / slide_w for _, s in uses), default=0.0)
         max_used_area = max((s.bbox.area / float(slide_w * slide_h) for _, s in uses), default=0.0)
         kind = "other"
-        if part in chrome_image_parts:
+        if _looks_like_qr(data, ext):
+            kind = "qr"  # the template owner's QR code never belongs to a new deck
+        elif part in chrome_image_parts:
             kind = "logo"
         elif max_used_area >= 0.8:
             kind = "pattern"
