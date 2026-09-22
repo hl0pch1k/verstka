@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Union
+from typing import Optional, Union
 
 import yaml
 
@@ -31,6 +31,13 @@ _KEY_ALIASES = {
 _PURPOSE_ALIASES = {"фича": "feature", "feature": "feature", "продукт": "product", "product": "product", "проект": "project", "project": "project", "инициатива": "initiative", "initiative": "initiative", "отчёт": "report", "отчет": "report", "report": "report"}
 
 
+def normalize_purpose(value: Optional[str]) -> Optional[str]:
+    """Map a free-form purpose («фича», "feature", ...) onto the Brief.purpose literal; unknown values become "other"."""
+    if value is None:
+        return None
+    return _PURPOSE_ALIASES.get(str(value).strip().lower(), "other")
+
+
 def parse_brief_text(text: str) -> Brief:
     meta: dict = {}
     body = text
@@ -47,7 +54,7 @@ def parse_brief_text(text: str) -> Brief:
         if key:
             fields[key] = v
     if "purpose" in fields and fields["purpose"] is not None:
-        fields["purpose"] = _PURPOSE_ALIASES.get(str(fields["purpose"]).strip().lower(), "other")
+        fields["purpose"] = normalize_purpose(fields["purpose"])
     if "slide_count" in fields and fields["slide_count"] is not None:
         try:
             fields["slide_count"] = int(fields["slide_count"])

@@ -24,40 +24,57 @@ class Job:
     finished_at: Optional[float] = None
     events: list[dict] = field(default_factory=list)
     _subscribers: list[queue.Queue] = field(default_factory=list, repr=False)
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
     def emit(self, message: str, progress: Optional[float] = None, **extra) -> None:
         if progress is not None:
             self.progress = max(0.0, min(1.0, progress))
         self.message = message
         ev = {"job_id": self.id, "status": self.status, "progress": round(self.progress, 3), "message": message, "t": round(time.time() - self.created_at, 2), **extra}
-        self.events.append(ev)
-        for q in list(self._subscribers):
-            q.put(ev)
+        # append + fan-out under the lock so a subscriber that is replaying history never misses an event
+        with self._lock:
+            self.events.append(ev)
+            for q in list(self._subscribers):
+                q.put(ev)
 
     def subscribe(self) -> queue.Queue:
         q: queue.Queue = queue.Queue()
-        for ev in self.events[-50:]:
-            q.put(ev)
-        self._subscribers.append(q)
+        with self._lock:
+            for ev in self.events[-50:]:
+                q.put(ev)
+            self._subscribers.append(q)
         return q
 
     def unsubscribe(self, q: queue.Queue) -> None:
-        if q in self._subscribers:
-            self._subscribers.remove(q)
+        with self._lock:
+            if q in self._subscribers:
+                self._subscribers.remove(q)
 
     def to_dict(self) -> dict:
         return {"id": self.id, "kind": self.kind, "status": self.status, "progress": round(self.progress, 3), "message": self.message, "error": self.error, "created_at": self.created_at, "finished_at": self.finished_at, "result": self.result if isinstance(self.result, (dict, list, str, int, float)) or self.result is None else str(self.result)}
 
 
 class JobRunner:
-    def __init__(self) -> None:
+    def __init__(self, max_jobs: int = 200) -> None:
         self.jobs: dict[str, Job] = {}
+        self.max_jobs = max_jobs
         self._lock = threading.Lock()
+
+    def _evict_locked(self) -> None:
+        """Drop the oldest finished jobs once the registry exceeds max_jobs (running jobs are never evicted)."""
+        if len(self.jobs) <= self.max_jobs:
+            return
+        finished = sorted((j for j in self.jobs.values() if j.status in ("done", "failed")), key=lambda j: j.finished_at or j.created_at)
+        for old in finished:
+            if len(self.jobs) <= self.max_jobs:
+                break
+            self.jobs.pop(old.id, None)
 
     def submit(self, kind: str, fn: Callable[[Job], Any]) -> Job:
         job = Job(id=uuid.uuid4().hex[:12], kind=kind)
         with self._lock:
             self.jobs[job.id] = job
+            self._evict_locked()
 
         def run() -> None:
             job.status = "running"

@@ -7,19 +7,25 @@ import logging
 import os
 import queue
 import re
+import shutil
+import threading
+import time
+import zipfile
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from verstka import __version__
 from verstka.api.jobs import Job, JobRunner
 from verstka.api.narrator import describe_audit, describe_plan, describe_slide_choice, describe_template
-from verstka.api.store import Store
+from verstka.api.store import SAFE_ID_RE, Store
+from verstka.ingest.workspace import file_sha256
+from verstka.planning.brief import normalize_purpose, parse_brief_text
 from verstka.planning.strategies import STRATEGY_NAMES, load_strategies
 from verstka.providers.registry import ProviderRegistry
 from verstka.schemas.audit import AuditReport
@@ -29,14 +35,34 @@ from verstka.skills_registry.registry import SkillsRegistry
 
 log = logging.getLogger(__name__)
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+_DEFAULT_CORS_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173"  # Vite dev server; the built UI is same-origin
+_UPLOAD_CHUNK = 1 << 20
+_MAX_CHAT_SESSIONS = 500
+
+
+def cors_origins() -> list[str]:
+    raw = os.environ.get("VERSTKA_CORS_ORIGINS", _DEFAULT_CORS_ORIGINS)
+    return [o.strip() for o in raw.split(",") if o.strip()]
+
+
+def max_upload_bytes() -> int:
+    try:
+        mb = float(os.environ.get("VERSTKA_MAX_UPLOAD_MB", "200"))
+    except ValueError:
+        mb = 200.0
+    return int(mb * 1024 * 1024)
+
 
 app = FastAPI(title="Verstka API", version=__version__)
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(CORSMiddleware, allow_origins=cors_origins(), allow_methods=["*"], allow_headers=["*"])
 store = Store()
 runner = JobRunner()
 _providers: Optional[ProviderRegistry] = None
 _skills: Optional[SkillsRegistry] = None
 _chat_sessions: dict[str, dict] = {}
+_chat_lock = threading.Lock()
+_fix_active: set[tuple[str, str]] = set()  # (generation id, strategy) with an autofix job in flight
+_fix_lock = threading.Lock()
 
 
 def providers() -> Optional[ProviderRegistry]:
@@ -103,6 +129,70 @@ class ChatRequest(BaseModel):
 # ---------------------------------------------------------------------------- helpers
 
 
+def _validation_message(e: ValidationError, limit: int = 5) -> str:
+    errors = e.errors()
+    parts = []
+    for err in errors[:limit]:
+        loc = ".".join(str(x) for x in err.get("loc", ()))
+        parts.append(f"{loc}: {err.get('msg')}" if loc else str(err.get("msg")))
+    more = len(errors) - limit
+    return "; ".join(parts) + (f" (+{more} more)" if more > 0 else "")
+
+
+def _serve_file(base: Path, rel: str, **kwargs) -> FileResponse:
+    """Serve `base/rel` only if it resolves to a regular file inside `base`."""
+    base = base.resolve()
+    target = (base / rel).resolve()
+    if not target.is_relative_to(base) or not target.is_file():
+        raise HTTPException(404, "file not found")
+    return FileResponse(target, **kwargs)
+
+
+def _variant_dir(gid: str, strategy: str) -> Path:
+    gdir = store.generation_dir(gid)
+    if gdir is None or strategy not in STRATEGY_NAMES:
+        raise HTTPException(404, "not found")
+    return gdir / strategy
+
+
+def _brief_from_request(req: GenerateRequest) -> Brief:
+    """Parse the brief text (YAML front matter, «не более N слайдов», title) and let explicit request fields override it."""
+    brief = parse_brief_text(req.brief or "")
+    if req.audience is not None:
+        brief.audience = req.audience
+    if req.purpose is not None:
+        brief.purpose = normalize_purpose(req.purpose)
+    if req.slides is not None:
+        brief.slide_count = req.slides
+    if req.extra_instructions is not None:
+        brief.extra_instructions = req.extra_instructions
+    if "language" not in brief.model_fields_set and req.language:
+        brief.language = req.language
+    return brief
+
+
+def _looks_like_pptx(path: Path) -> bool:
+    if not zipfile.is_zipfile(path):
+        return False
+    try:
+        with zipfile.ZipFile(path) as z:
+            return "ppt/presentation.xml" in z.namelist()
+    except zipfile.BadZipFile:
+        return False
+
+
+def _discard_failed_upload(path: Path) -> None:
+    """After a failed analysis: drop the upload and the template directory it created (unless an older analysis lives there)."""
+    try:
+        if path.exists():
+            tdir = store.root / "templates" / file_sha256(path)[:16]
+            if tdir.is_dir() and not (tdir / "manifest.json").exists():
+                shutil.rmtree(tdir, ignore_errors=True)
+    except OSError as e:
+        log.warning("cleanup after failed analysis: %s", e)
+    path.unlink(missing_ok=True)
+
+
 def _variant_payload(gdir: Path, strategy: str) -> Optional[dict]:
     vdir = gdir / strategy
     if not (vdir / "deck.pptx").exists():
@@ -142,10 +232,10 @@ def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job) -> dic
         raise ValueError("template is not analyzed")
     brief = None
     outline = None
-    if req.outline:
+    if req.outline is not None:
         outline = DeckOutline.model_validate(req.outline)
     else:
-        brief = Brief(text=req.brief or "", audience=req.audience, purpose=req.purpose, slide_count=req.slides, language=req.language, extra_instructions=req.extra_instructions)
+        brief = _brief_from_request(req)
     use_models = req.use_models and models_configured()
     res = generate_variants(
         store.workspace(req.template_id).source,
@@ -176,10 +266,28 @@ def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job) -> dic
         "use_models": use_models,
         "seconds": res.seconds,
         "created_at": gdir.stat().st_mtime,
+        "status": "done",
+        "job_id": job.id,
         "summary": {v.strategy: {"n_slides": len(v.outline.slides), "score": v.audit.summary.score if v.audit else None, "errors": v.audit.summary.errors if v.audit else None, "warnings": v.audit.summary.warnings if v.audit else None, "seconds": v.seconds} for v in res.variants},
     }
     store.write_generation_meta(gid, meta)
     return meta
+
+
+def _generation_job(gid: str, gdir: Path, req: GenerateRequest) -> Callable[[Job], dict]:
+    """Wrap the pipeline so generation.json always ends in status done or failed (the UI lists both)."""
+
+    def run(job: Job) -> dict:
+        meta = store.read_generation_meta(gid) or {"id": gid}
+        store.write_generation_meta(gid, {**meta, "status": "running", "job_id": job.id})
+        try:
+            return _run_generation(gid, gdir, req, job)
+        except BaseException as e:
+            meta = store.read_generation_meta(gid) or {"id": gid}
+            store.write_generation_meta(gid, {**meta, "status": "failed", "job_id": job.id, "error": str(e)[:300]})
+            raise
+
+    return run
 
 
 # ---------------------------------------------------------------------------- routes: meta
@@ -222,14 +330,31 @@ def list_templates() -> list[dict]:
 async def upload_template(file: UploadFile = File(...), use_models: bool = Form(True)) -> dict:
     if not file.filename or not file.filename.lower().endswith(".pptx"):
         raise HTTPException(400, "only .pptx files are accepted")
-    data = await file.read()
-    path = store.save_upload(file.filename, data)
+    limit = max_upload_bytes()
+    path = store.upload_path(file.filename)
+    size = 0
+    try:
+        with open(path, "wb") as out:
+            while chunk := await file.read(_UPLOAD_CHUNK):
+                size += len(chunk)
+                if size > limit:
+                    raise HTTPException(413, f"file is larger than {limit // (1024 * 1024)} MB")
+                out.write(chunk)
+        if not _looks_like_pptx(path):
+            raise HTTPException(400, "not a PowerPoint file: expected a zip package with ppt/presentation.xml")
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise
     use = use_models and models_configured()
 
     def run(job: Job) -> dict:
         from verstka.analysis.manifest import analyze_template
 
-        m = analyze_template(path, workspace_root=store.root, providers=providers() if use else None, skills=skills() if use else None, use_llm=use, use_vlm=use, progress=lambda msg, frac: job.emit(msg, frac))
+        try:
+            m = analyze_template(path, workspace_root=store.root, providers=providers() if use else None, skills=skills() if use else None, use_llm=use, use_vlm=use, progress=lambda msg, frac: job.emit(msg, frac))
+        except BaseException:
+            _discard_failed_upload(path)
+            raise
         return {"template_id": m.template_id, "n_slides": m.n_slides, "n_patterns": len(m.patterns)}
 
     job = runner.submit("analyze", run)
@@ -252,11 +377,11 @@ def get_template(template_id: str) -> dict:
 
 @app.get("/api/templates/{template_id}/files/{path:path}")
 def template_file(template_id: str, path: str):
-    ws = store.workspace(template_id)
-    target = (ws.dir / path).resolve()
-    if not str(target).startswith(str(ws.dir.resolve())) or not target.is_file():
-        raise HTTPException(404, "file not found")
-    return FileResponse(target)
+    try:
+        ws = store.workspace(template_id)
+    except FileNotFoundError:
+        raise HTTPException(404, "template not found")
+    return _serve_file(ws.dir, path)
 
 
 # ---------------------------------------------------------------------------- routes: jobs
@@ -283,7 +408,8 @@ def job_events(job_id: str):
                 try:
                     ev = q.get(timeout=15)
                     yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
-                    if ev.get("status") in ("done", "failed") and ev.get("message") in ("done",) or ev.get("message", "").startswith("failed"):
+                    # JobRunner sets job.status before the terminal emit, so only the last event carries done/failed
+                    if ev.get("status") in ("done", "failed"):
                         break
                 except queue.Empty:
                     yield ": keep-alive\n\n"
@@ -307,14 +433,21 @@ def list_generations() -> list[dict]:
 def create_generation(req: GenerateRequest) -> dict:
     if store.manifest(req.template_id) is None:
         raise HTTPException(404, "template not found or not analyzed")
-    if not req.brief and not req.outline:
+    if req.brief is None and req.outline is None:
         raise HTTPException(400, "brief or outline is required")
     bad = [s for s in req.strategies if s not in STRATEGY_NAMES]
     if bad:
         raise HTTPException(400, f"unknown strategies: {bad}")
+    if req.outline is not None:
+        try:
+            DeckOutline.model_validate(req.outline)
+        except ValidationError as e:
+            raise HTTPException(422, "invalid outline: " + _validation_message(e))
+    elif not _brief_from_request(req).text.strip():
+        raise HTTPException(422, "brief is empty")
     gid, gdir = store.new_generation_dir()
-    store.write_generation_meta(gid, {"id": gid, "template_id": req.template_id, "strategies": req.strategies, "status": "running"})
-    job = runner.submit("generate", lambda job: _run_generation(gid, gdir, req, job))
+    store.write_generation_meta(gid, {"id": gid, "template_id": req.template_id, "strategies": req.strategies, "brief": req.brief, "audience": req.audience, "purpose": req.purpose, "slides": req.slides, "status": "running", "created_at": time.time()})
+    job = runner.submit("generate", _generation_job(gid, gdir, req))
     return {"job_id": job.id, "generation_id": gid}
 
 
@@ -325,38 +458,31 @@ def get_generation(gid: str) -> dict:
 
 @app.delete("/api/generations/{gid}")
 def delete_generation(gid: str) -> dict:
+    if not SAFE_ID_RE.fullmatch(gid):
+        raise HTTPException(404, "not found")
     return {"deleted": store.delete_generation(gid)}
 
 
 @app.get("/api/generations/{gid}/{strategy}/slides/{name}")
 def slide_image(gid: str, strategy: str, name: str):
-    gdir = store.generation_dir(gid)
-    if gdir is None or not re.fullmatch(r"slide-\d{3}\.jpg", name):
+    vdir = _variant_dir(gid, strategy)
+    if not re.fullmatch(r"slide-\d{3}\.jpg", name):
         raise HTTPException(404, "not found")
-    p = gdir / strategy / "slides" / name
-    if not p.is_file():
-        raise HTTPException(404, "not found")
-    return FileResponse(p, media_type="image/jpeg")
+    return _serve_file(vdir / "slides", name, media_type="image/jpeg")
 
 
 @app.get("/api/generations/{gid}/{strategy}/files/{name}")
 def generation_file(gid: str, strategy: str, name: str):
-    gdir = store.generation_dir(gid)
-    if gdir is None or name not in ("deck.pptx", "deck.pdf", "deck.html", "outline.json", "layout_plan.json", "audit_report.json", "run_manifest.json"):
-        raise HTTPException(404, "not found")
-    p = gdir / strategy / name
-    if not p.is_file():
+    vdir = _variant_dir(gid, strategy)
+    if name not in ("deck.pptx", "deck.pdf", "deck.html", "outline.json", "layout_plan.json", "audit_report.json", "run_manifest.json"):
         raise HTTPException(404, "not found")
     media = {"pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation", "pdf": "application/pdf", "html": "text/html", "json": "application/json"}[name.rsplit(".", 1)[-1]]
-    return FileResponse(p, media_type=media, filename=name)
+    return _serve_file(vdir, name, media_type=media, filename=name)
 
 
 @app.get("/api/generations/{gid}/{strategy}/explain/{index}")
 def explain_slide(gid: str, strategy: str, index: int) -> dict:
-    gdir = store.generation_dir(gid)
-    if gdir is None:
-        raise HTTPException(404, "not found")
-    vdir = gdir / strategy
+    vdir = _variant_dir(gid, strategy)
     meta = store.read_generation_meta(gid) or {}
     manifest = store.manifest(meta.get("template_id", ""))
     if manifest is None or not (vdir / "outline.json").exists():
@@ -368,45 +494,56 @@ def explain_slide(gid: str, strategy: str, index: int) -> dict:
 
 @app.post("/api/generations/{gid}/{strategy}/fixes")
 def apply_fixes(gid: str, strategy: str, req: FixRequest) -> dict:
-    gdir = store.generation_dir(gid)
-    if gdir is None:
-        raise HTTPException(404, "not found")
-    vdir = gdir / strategy
+    vdir = _variant_dir(gid, strategy)
     meta = store.read_generation_meta(gid) or {}
     manifest = store.manifest(meta.get("template_id", ""))
     if manifest is None or not (vdir / "audit_report.json").exists():
         raise HTTPException(404, "variant or audit not found")
+    key = (gid, strategy)
+    with _fix_lock:
+        if key in _fix_active:
+            raise HTTPException(409, "autofix is already running for this variant")
+        _fix_active.add(key)
 
     def run(job: Job) -> dict:
         from verstka.audit.autofix import autofix_loop
         from verstka.export.html import export_html
         from verstka.export.pdf import export_pdf
 
-        ws = store.workspace(meta["template_id"])
-        outline = DeckOutline.model_validate_json((vdir / "outline.json").read_text(encoding="utf-8"))
-        plan = LayoutPlan.model_validate_json((vdir / "layout_plan.json").read_text(encoding="utf-8"))
-        report = AuditReport.model_validate_json((vdir / "audit_report.json").read_text(encoding="utf-8"))
-        only = None if req.all_deterministic else set(req.issue_ids)
-        job.emit("применяю исправления", 0.2)
-        final, plan2, outline2, _ = autofix_loop(vdir / "deck.pptx", report, outline, plan, manifest, ws, max_iterations=2, only_ids=only, images_dir=vdir / "slides")
-        (vdir / "audit_report.json").write_text(final.model_dump_json(indent=2), encoding="utf-8")
-        (vdir / "outline.json").write_text(outline2.model_dump_json(indent=2), encoding="utf-8")
-        (vdir / "layout_plan.json").write_text(plan2.model_dump_json(indent=2), encoding="utf-8")
-        job.emit("экспортирую", 0.8)
         try:
-            if (vdir / "deck.pdf").exists():
-                export_pdf(vdir / "deck.pptx", vdir / "deck.pdf")
-            if (vdir / "deck.html").exists():
-                export_html(vdir / "deck.pptx", manifest, vdir / "deck.html", title=outline2.title)
-        except Exception as e:  # noqa: BLE001
-            log.warning("re-export failed: %s", e)
-        summary = meta.get("summary", {})
-        summary[strategy] = {**summary.get(strategy, {}), "score": final.summary.score, "errors": final.summary.errors, "warnings": final.summary.warnings}
-        meta["summary"] = summary
-        store.write_generation_meta(gid, meta)
-        return {"score": final.summary.score, "errors": final.summary.errors, "warnings": final.summary.warnings, "applied": final.applied_fixes}
+            ws = store.workspace(meta["template_id"])
+            outline = DeckOutline.model_validate_json((vdir / "outline.json").read_text(encoding="utf-8"))
+            plan = LayoutPlan.model_validate_json((vdir / "layout_plan.json").read_text(encoding="utf-8"))
+            report = AuditReport.model_validate_json((vdir / "audit_report.json").read_text(encoding="utf-8"))
+            only = None if req.all_deterministic else set(req.issue_ids)
+            job.emit("применяю исправления", 0.2)
+            final, plan2, outline2, _ = autofix_loop(vdir / "deck.pptx", report, outline, plan, manifest, ws, max_iterations=2, only_ids=only, images_dir=vdir / "slides")
+            (vdir / "audit_report.json").write_text(final.model_dump_json(indent=2), encoding="utf-8")
+            (vdir / "outline.json").write_text(outline2.model_dump_json(indent=2), encoding="utf-8")
+            (vdir / "layout_plan.json").write_text(plan2.model_dump_json(indent=2), encoding="utf-8")
+            job.emit("экспортирую", 0.8)
+            try:
+                if (vdir / "deck.pdf").exists():
+                    export_pdf(vdir / "deck.pptx", vdir / "deck.pdf")
+                if (vdir / "deck.html").exists():
+                    export_html(vdir / "deck.pptx", manifest, vdir / "deck.html", title=outline2.title)
+            except Exception as e:  # noqa: BLE001
+                log.warning("re-export failed: %s", e)
+            summary = meta.get("summary", {})
+            summary[strategy] = {**summary.get(strategy, {}), "score": final.summary.score, "errors": final.summary.errors, "warnings": final.summary.warnings}
+            meta["summary"] = summary
+            store.write_generation_meta(gid, meta)
+            return {"score": final.summary.score, "errors": final.summary.errors, "warnings": final.summary.warnings, "applied": final.applied_fixes}
+        finally:
+            with _fix_lock:
+                _fix_active.discard(key)
 
-    job = runner.submit("fix", run)
+    try:
+        job = runner.submit("fix", run)
+    except BaseException:
+        with _fix_lock:
+            _fix_active.discard(key)
+        raise
     return {"job_id": job.id}
 
 
@@ -414,12 +551,8 @@ def apply_fixes(gid: str, strategy: str, req: FixRequest) -> dict:
 def diff_runs(gid: str, strategy: str, other_gid: str, other_strategy: str) -> dict:
     from verstka.pipeline.run_manifest import diff_manifests
 
-    a = store.generation_dir(gid)
-    b = store.generation_dir(other_gid)
-    if a is None or b is None:
-        raise HTTPException(404, "not found")
-    pa = a / strategy / "run_manifest.json"
-    pb = b / other_strategy / "run_manifest.json"
+    pa = _variant_dir(gid, strategy) / "run_manifest.json"
+    pb = _variant_dir(other_gid, other_strategy) / "run_manifest.json"
     if not pa.exists() or not pb.exists():
         raise HTTPException(404, "run manifest not found")
     ma = json.loads(pa.read_text(encoding="utf-8"))
@@ -429,19 +562,25 @@ def diff_runs(gid: str, strategy: str, other_gid: str, other_strategy: str) -> d
 
 # ---------------------------------------------------------------------------- routes: chat agent
 
-
+# "generate" is decided first: a brief pasted into the chat mentions audiences, plans, templates and audits all at once.
+_GEN_RX = re.compile(r"сгенерируй|(сделай|собери|создай|подготовь)\s+(презентац|слайд|дек|колод)|\bgenerate\b", re.I)
 _INTENT_RULES = [
     ("explain_slide", re.compile(r"(почему|объясни|как выбран|why).*слайд\w*\s*(\d+)|слайд\w*\s*(\d+).*(почему|объясни|why)", re.I)),
-    ("audit", re.compile(r"аудит|проверь|ошибк|замечан|audit|issues", re.I)),
-    ("fix_all", re.compile(r"исправь вс|почини вс|fix all|автофикс", re.I)),
-    ("export", re.compile(r"экспорт|скачать|pdf|html|download", re.I)),
-    ("template", re.compile(r"шаблон|template|дизайн-систем|палитр|шрифт", re.I)),
-    ("plan", re.compile(r"план|структур|какие слайды|outline|макет", re.I)),
-    ("generate", re.compile(r"сгенерируй|сделай презентац|собери презентац|создай презентац|generate|сделай слайды", re.I)),
+    ("fix_all", re.compile(r"(исправь|почини|поправь)\s+(вс|ошибк|замечан)|fix all|автофикс", re.I)),
+    ("audit", re.compile(r"\bаудит(?!ор)\w*|\bпроверь|\bошибк|замечани|\baudit\b|\bissues\b", re.I)),
+    ("export", re.compile(r"экспорт|скачать|\bpdf\b|\bhtml\b|download", re.I)),
+    ("template", re.compile(r"\bшаблон|template|дизайн-систем|палитр|шрифт", re.I)),
+    ("plan", re.compile(r"\bплан\w*|структур|какие слайды|outline|макет", re.I)),
 ]
 
 
+def _looks_like_brief(text: str) -> bool:
+    return len(text) > 200 or text.count("\n") >= 3
+
+
 def _intent(message: str) -> tuple[str, dict]:
+    if _GEN_RX.search(message) or _looks_like_brief(message):
+        return "generate", {}
     for name, rx in _INTENT_RULES:
         m = rx.search(message)
         if m:
@@ -451,12 +590,22 @@ def _intent(message: str) -> tuple[str, dict]:
                 if num:
                     params["index"] = int(num)
             return name, params
-    return "generate" if len(message) > 200 else "help", {}
+    return "help", {}
+
+
+def _session(session_id: str) -> dict:
+    """Fetch (or create) a chat session; the most recently used one moves to the end and the oldest are evicted beyond the cap."""
+    with _chat_lock:
+        session = _chat_sessions.pop(session_id, None) or {"history": []}
+        _chat_sessions[session_id] = session
+        while len(_chat_sessions) > _MAX_CHAT_SESSIONS:
+            _chat_sessions.pop(next(iter(_chat_sessions)))
+    return session
 
 
 @app.post("/api/chat")
 def chat(req: ChatRequest) -> dict:
-    session = _chat_sessions.setdefault(req.session_id, {"history": []})
+    session = _session(req.session_id)
     if req.template_id:
         session["template_id"] = req.template_id
     if req.generation_id:
@@ -493,9 +642,14 @@ def chat(req: ChatRequest) -> dict:
         payload = _generation_payload(gen_id)
         jobs = []
         for vv in payload.get("variants", []):
-            r = apply_fixes(gen_id, vv["strategy"], FixRequest(all_deterministic=True))
+            try:
+                r = apply_fixes(gen_id, vv["strategy"], FixRequest(all_deterministic=True))
+            except HTTPException as e:
+                if e.status_code != 409:
+                    raise
+                continue  # already running for this variant
             jobs.append({"strategy": vv["strategy"], "job_id": r["job_id"]})
-        reply = "Запустил автофикс для всех вариантов. Результаты появятся в панели аудита."
+        reply = "Запустил автофикс для всех вариантов. Результаты появятся в панели аудита." if jobs else "Автофикс уже выполняется — дождитесь результатов в панели аудита."
         actions.append({"type": "jobs", "jobs": jobs})
     elif intent == "generate":
         if not template_id:

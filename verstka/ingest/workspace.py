@@ -4,10 +4,15 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+
+
+# Ids that may be joined to a workspace directory: one path segment, no dots, no separators, no control chars.
+SAFE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 
 
 def file_sha256(path: Path | str) -> str:
@@ -44,6 +49,8 @@ class TemplateWorkspace:
     @classmethod
     def open(cls, template_id: str, root: Optional[Path | str] = None) -> "TemplateWorkspace":
         root = Path(root) if root else default_workspace_root()
+        if not SAFE_ID_RE.fullmatch(template_id or ""):
+            raise FileNotFoundError(f"invalid template id {template_id!r}")
         d = root / "templates" / template_id
         if not d.is_dir():
             raise FileNotFoundError(f"template workspace {template_id} not found under {root}")

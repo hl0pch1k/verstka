@@ -110,13 +110,48 @@ def basic_outline(brief: Brief, facts: FactsExtraction, strategy: Strategy, targ
         k += 1
     slides.append(OutlineSlide(id=f"sl{k}", kind=PatternKind.thanks, headline="Спасибо за внимание", subtitle=None))
     outline = DeckOutline(title=title, subtitle=brief.audience, audience=brief.audience, purpose=brief.purpose, strategy=strategy.name, language=brief.language, slides=slides, facts=facts.facts, series=facts.series, tables=facts.tables)
-    return validate_outline(outline, None, target)
+    return validate_outline(outline, None, target, hard_limit=bool(brief.slide_count))
 
 
 # ------------------------------------------------------------------ validation
 
+# Which slides go first when the deck is longer than the target: structure first, text next, data (charts, tables, KPI rows) last.
+_DROP_PRIORITY = {PatternKind.section: 0, PatternKind.quote: 1, PatternKind.agenda: 2, PatternKind.bullets: 3}
+_DATA_KINDS = {PatternKind.chart, PatternKind.table, PatternKind.stat_row}
 
-def validate_outline(outline: DeckOutline, manifest: Optional[TemplateManifest], target: int, skills: Optional[SkillsRegistry] = None, providers: Optional[ProviderRegistry] = None) -> DeckOutline:
+
+def _drop_priority(s: OutlineSlide) -> int:
+    return 6 if s.kind in _DATA_KINDS else _DROP_PRIORITY.get(s.kind, 5)
+
+
+def _drop_key(slides: list[OutlineSlide], s: OutlineSlide) -> tuple[int, int, int]:
+    """Lower sorts first: priority, then (bullets slides only) the fewest bullets, then the later slide."""
+    n_bullets = len(s.content.bullets) if s.kind == PatternKind.bullets else 0
+    return (_drop_priority(s), n_bullets, -slides.index(s))
+
+
+def _merge_into_previous(slides: list[OutlineSlide], victim: OutlineSlide) -> bool:
+    """Move a bullets slide's bullets into the nearest earlier bullets slide that has room (keeps the content, loses the slide)."""
+    if victim.kind != PatternKind.bullets or not victim.content.bullets:
+        return False
+    idx = slides.index(victim)
+    for prev in reversed(slides[1:idx]):
+        if prev.kind == PatternKind.bullets and len(prev.content.bullets) + len(victim.content.bullets) <= MAX_BULLETS:
+            prev.content.bullets.extend(victim.content.bullets)
+            prev.notes = (prev.notes + "\n" if prev.notes else "") + f"Объединено со слайдом «{victim.headline}»"
+            return True
+    return False
+
+
+def validate_outline(
+    outline: DeckOutline,
+    manifest: Optional[TemplateManifest],
+    target: int,
+    skills: Optional[SkillsRegistry] = None,
+    providers: Optional[ProviderRegistry] = None,
+    hard_limit: bool = False,
+) -> DeckOutline:
+    """Normalise density and structure; trim to `target` (+1 tolerance) or, when the brief fixed the count (`hard_limit`), to exactly `target`."""
     slides = list(outline.slides)
     # density limits
     for s in slides:
@@ -151,15 +186,18 @@ def validate_outline(outline: DeckOutline, manifest: Optional[TemplateManifest],
         slides.insert(0, OutlineSlide(id="sl_title", kind=PatternKind.title, headline=outline.title, subtitle=outline.subtitle))
     if slides and slides[-1].kind != PatternKind.thanks:
         slides.append(OutlineSlide(id="sl_thanks", kind=PatternKind.thanks, headline="Спасибо за внимание"))
-    # count: drop low-priority slides beyond target (+1 tolerance)
-    def priority(s: OutlineSlide) -> int:
-        return {PatternKind.section: 0, PatternKind.quote: 1, PatternKind.agenda: 2}.get(s.kind, 5)
-
-    while len(slides) > target + 1:
-        candidates = [s for s in slides[1:-1]]
-        victim = min(candidates, key=lambda s: (priority(s), -slides.index(s)))
-        if priority(victim) >= 5 and len(slides) <= target + 2:
+    # count: drop low-priority slides beyond the limit; small bullets slides are merged into a neighbour before anything is lost
+    limit = target if hard_limit else target + 1
+    while len(slides) > limit:
+        candidates = slides[1:-1]
+        if not candidates:
             break
+        victim = min(candidates, key=lambda s: _drop_key(slides, s))
+        if _merge_into_previous(slides, victim):
+            slides.remove(victim)
+            continue
+        if not hard_limit and _drop_priority(victim) >= 3 and len(slides) <= target + 2:
+            break  # soft target: keep real content rather than lose it for one slide
         slides.remove(victim)
     # unique headlines
     seen: Counter = Counter()
@@ -214,8 +252,9 @@ def plan_outline(
     except (ProviderError, ValueError, KeyError) as e:
         warnings.append(f"outline_planner failed, deterministic outline used: {str(e)[:160]}")
         return basic_outline(brief, facts, strategy, target), warnings
+    hard_limit = bool(brief.slide_count)  # «не более N слайдов» / slides: N in the brief is binding
     outline = DeckOutline(title=planned.title or brief.title_hint or "Презентация", subtitle=planned.subtitle, audience=brief.audience, purpose=brief.purpose, strategy=strategy.name, language=brief.language, slides=planned.slides, facts=facts.facts, series=facts.series, tables=facts.tables)
-    outline = validate_outline(outline, manifest, target, skills, providers)
+    outline = validate_outline(outline, manifest, target, skills, providers, hard_limit=hard_limit)
     # fact check + one repair pass
     try:
         chk = skills.run("fact_checker", providers, {"outline_json": outline.model_dump_json(), "brief": brief.text, "facts_json": variables["facts_json"]})
@@ -227,7 +266,7 @@ def plan_outline(
                 res2 = skills.run("outline_planner", providers, variables)
                 planned2: PlannedDeck = res2.parsed
                 outline.slides = planned2.slides
-                outline = validate_outline(outline, manifest, target, skills, providers)
+                outline = validate_outline(outline, manifest, target, skills, providers, hard_limit=hard_limit)
                 warnings.append(f"fact_checker found {len(errors)} issues; outline regenerated once")
             except (ProviderError, ValueError, KeyError) as e:
                 warnings.append(f"repair pass failed: {str(e)[:120]}")

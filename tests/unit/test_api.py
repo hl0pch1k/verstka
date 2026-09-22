@@ -52,6 +52,8 @@ def test_api_flow(client, simple_deck):
     job = _wait(c, r.json()["job_id"], timeout=300)
     assert job["status"] == "done", job["error"]
     g = c.get(f"/api/generations/{gid}").json()
+    assert g["status"] == "done" and g["job_id"] == job["id"]
+    assert c.get("/api/generations").json()[0]["status"] == "done"
     v = g["variants"][0]
     assert v["strategy"] == "structured" and len(v["outline"]["slides"]) == 12 and v["audit"] is not None and v["run_manifest"]["strategy"] == "structured"
     assert "deck.pptx" in v["files"]
@@ -70,3 +72,13 @@ def test_api_flow(client, simple_deck):
     assert r.status_code == 200
     job = _wait(c, r.json()["job_id"], timeout=300)
     assert job["status"] == "done", job["error"]
+    # the per-variant fix lock is released once the job is over
+    r = c.post(f"/api/generations/{gid}/structured/fixes", json={"all_deterministic": True})
+    assert r.status_code == 200
+    job = _wait(c, r.json()["job_id"], timeout=300)
+    assert job["status"] == "done", job["error"]
+    # the chat agent can start autofix for every variant
+    r = c.post("/api/chat", json={"session_id": "s1", "message": "исправь все ошибки"}).json()
+    assert r["intent"] == "fix_all" and r["actions"] and r["actions"][0]["type"] == "jobs"
+    for j in r["actions"][0]["jobs"]:
+        assert _wait(c, j["job_id"], timeout=300)["status"] == "done"
