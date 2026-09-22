@@ -140,6 +140,12 @@ def fill_text(sp_el: etree._Element, paragraphs: list[ParagraphSpec], size_pt: O
                 _set_bullet(pPr, False)
                 for attr in ("marL", "indent"):  # a plain line under a bulleted list starts at the markers' edge
                     pPr.attrib.pop(attr, None)
+            elif not spec.bullet and pPr.find(q("a:buNone")) is None:
+                # the marker may come from the layout/master list style (a body placeholder): switch it off explicitly
+                _set_bullet(pPr, False)
+                if pPr.get("marL") is None and pPr.get("indent") is None:
+                    pPr.set("marL", "0")  # the inherited hanging indent belonged to the marker
+                    pPr.set("indent", "0")
         if spec.level:
             if pPr is None:
                 pPr = etree.Element(q("a:pPr"))

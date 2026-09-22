@@ -46,10 +46,19 @@ NS_P = "http://schemas.openxmlformats.org/presentationml/2006/main"
 NS_R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 
 TIME_BUDGET_S = 120.0
-TEMPLATES = ["handdrawn", "lct"]
+TEMPLATES = ["handdrawn", "lct", "classic43"]
+CLASSIC_BUILDER = TESTS_DIR / "fixtures" / "classic43.py"
 
 
 # ---------------------------------------------------------------------------- inputs
+
+
+def _load_module(name: str, path: Path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def _load_handdrawn_module():
@@ -90,7 +99,8 @@ def handdrawn_module():
 @pytest.fixture(scope="module")
 def template_paths(tmp_path_factory, handdrawn_module) -> dict[str, Path | None]:
     hd = handdrawn_module.build_handdrawn_deck(tmp_path_factory.mktemp("handdrawn") / "handdrawn.pptx")
-    return {"handdrawn": hd, "lct": _lct_path()}
+    classic = _load_module("verstka_tests_classic43", CLASSIC_BUILDER).build_classic_deck(tmp_path_factory.mktemp("classic43") / "classic43.pptx")
+    return {"handdrawn": hd, "lct": _lct_path(), "classic43": classic}
 
 
 @pytest.fixture(scope="module")
@@ -209,7 +219,7 @@ def test_analysis_alone_is_fast(template_paths, tmp_path):
         t0 = time.time()
         m = analyze_template(path, workspace_root=tmp_path / f"ws_{name}", use_llm=False, use_vlm=False, render=False)
         assert time.time() - t0 < 30, name
-        assert m.n_slides >= 10
+        assert m.n_slides >= 9
 
 
 # ---------------------------------------------------------------------------- contract: generation
@@ -369,3 +379,20 @@ def test_lct_icon_sheets_are_not_used_as_content_layouts(runs):
     for v in run.result.variants:
         used = [(s.index, s.pattern_id, icons.get(s.pattern_id, 0)) for s in v.render.slides if s.pattern_id and icons.get(s.pattern_id, 0) > 30]
         assert not used, (v.strategy, used)
+
+
+def test_classic43_keeps_its_own_accent_and_geometry(runs):
+    """A 4:3 placeholder template: its teal accent (drawn on the master) leads tables and charts — never a VK blue
+    default — and nothing is placed outside the 4:3 slide."""
+    run = _run(runs, "classic43")
+    m = run.manifest
+    assert m.tokens.accents()[0] == "008C8C", m.tokens.accents()
+    assert m.components.table_style.header_fill_hex == "008C8C"
+    for v in run.result.variants:
+        prs = Presentation(str(v.out_dir / "deck.pptx"))
+        W, H = int(prs.slide_width), int(prs.slide_height)
+        assert (W, H) == (9144000, 6858000)
+        out = [(i, sh.name) for i, s in enumerate(prs.slides, 1) for sh in s.shapes if sh.left is not None and (sh.left < -W * 0.01 or sh.left + sh.width > W * 1.01 or sh.top + sh.height > H * 1.01)]
+        assert not out, (v.strategy, out)
+        faces = set().union(*_deck_typefaces(prs).values())
+        assert "0077FF" not in {c.upper() for c in re.findall(r'srgbClr val="([0-9A-Fa-f]{6})"', "".join(etree.tostring(s._element).decode() for s in prs.slides))}, v.strategy

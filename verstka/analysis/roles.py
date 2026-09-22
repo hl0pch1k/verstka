@@ -120,7 +120,8 @@ def heuristic_roles(
         elif title is not None and s.id not in membership:
             gap = s.bbox.y - title.bbox.y2
             overlaps_x = s.bbox.x < title.bbox.x2 and s.bbox.x2 > title.bbox.x
-            if -0.02 * slide_h <= gap <= 0.08 * slide_h and overlaps_x and _size(s) < _size(title) and len(s.plain_text) <= 160:
+            one_line = len([p for p in s.text.paragraphs if p.text.strip()]) <= 1 and not s.text.has_bullets  # a list is not a subtitle
+            if -0.02 * slide_h <= gap <= 0.08 * slide_h and overlaps_x and _size(s) < _size(title) and len(s.plain_text) <= 160 and one_line:
                 roles[s.id] = SlotRole.subtitle
                 break
     # an empty subtitle placeholder is still the subtitle slot; an empty, low body placeholder directly under the

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -11,6 +12,8 @@ from typing import Optional
 
 from verstka.ingest.workspace import SAFE_ID_RE, TemplateWorkspace, default_workspace_root
 from verstka.schemas.template import TemplateManifest
+
+_META_LOCK = threading.RLock()
 
 _ID_RE = SAFE_ID_RE
 
@@ -96,8 +99,23 @@ class Store:
         d = self.generation_dir(gid)
         if d is None:
             return False
-        (d / "generation.json").write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        with _META_LOCK:
+            (d / "generation.json").write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
         return True
+
+    def merge_generation_meta(self, gid: str, data: dict, only_missing: bool = False) -> Optional[dict]:
+        """Read-modify-write under one lock: the job thread and the request thread may both touch generation.json."""
+        d = self.generation_dir(gid)
+        if d is None:
+            return None
+        p = d / "generation.json"
+        with _META_LOCK:
+            meta = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {"id": gid}
+            for k, v in data.items():
+                if not only_missing or k not in meta:
+                    meta[k] = v
+            p.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+        return meta
 
     def read_generation_meta(self, gid: str) -> Optional[dict]:
         d = self.generation_dir(gid)

@@ -147,6 +147,24 @@ def build_pattern(
     if not any(s.role in _TEXT_ROLES for s in slots):
         quality -= 0.5  # nothing to write into: decorative/blank sample
     reference = reference_reason(shapes, roles)
+    # drawn mock-ups (a phone made of a group of shapes) and empty picture placeholders are sample content too
+    slide_area = float(slide_w * slide_h)
+    text_ids = {x.shape_id for x in slots if x.role in _TEXT_ROLES}
+    groups_of: dict[str, list[ShapeInfo]] = {}
+    for s in shapes:
+        if s.group_path:
+            groups_of.setdefault(s.group_path[0], []).append(s)
+    for members in groups_of.values():
+        if any(m.id in text_ids or m.has_text for m in members) or any(roles.get(m.id) == SlotRole.chrome for m in members):
+            continue
+        box = members[0].bbox
+        for m in members[1:]:
+            box = box.union(m.bbox)
+        if 0.04 <= box.area / slide_area < 0.6:
+            decor_boxes.append(box.to_frac(slide_w, slide_h))
+    for s in shapes:
+        if s.is_placeholder and s.ph_type == "pic" and not s.image_part and 0.04 <= s.bbox.area / slide_area < 0.6:
+            decor_boxes.append(s.bbox.to_frac(slide_w, slide_h))
     return Pattern(
         id=pattern_id,
         source_slide=slide_index,

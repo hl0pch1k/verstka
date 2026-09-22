@@ -233,8 +233,10 @@ class _SlideCtx:
         height_grow = 0
         res = fit_size(texts, Bbox(x=bx.x, y=bx.y, w=width, h=bx.h), family, size, bold, self.scale, insets_emu=insets, line_spacing=self.typo.line_spacing, min_ratio=0.8)
         if not res.fits:
-            two = fit_size(texts, Bbox(x=bx.x, y=bx.y, w=width, h=10 ** 9), family, size, bold, self.scale, insets_emu=insets, line_spacing=self.typo.line_spacing, min_ratio=0.8)
-            if two.lines == 2:
+            # two lines at a size down to 0.7 of the heading's: the label grows by one line, the heading stays legible
+            h2 = int(2 * size * self.typo.line_spacing * EMU_PER_PT) + insets[1] + insets[3]
+            two = fit_size(texts, Bbox(x=bx.x, y=bx.y, w=width, h=h2), family, size, bold, self.scale, insets_emu=insets, line_spacing=self.typo.line_spacing, min_ratio=0.7)
+            if two.fits and two.lines <= 2:
                 height_grow = max(0, int(two.height_pt * EMU_PER_PT) + insets[1] + insets[3] - bx.h)
         set_element_pos(el, w=width, h=bx.h + height_grow)
         if grow or height_grow:
@@ -908,10 +910,25 @@ def _clamp_to_safe(box: Bbox, ctx: _SlideCtx) -> Bbox:
     return box
 
 
+_SCHEME_BASE = {"bg1": "FFFFFF", "lt1": "FFFFFF", "bg2": "EEEEEE", "lt2": "EEEEEE", "tx1": "000000", "dk1": "000000", "tx2": "333333", "dk2": "333333"}
+
+
 def _fill_hex(el: etree._Element) -> Optional[str]:
+    """The solid fill of a shape: an sRGB value, or the light/dark base colours of the theme scheme (bg1, tx1…)."""
     spPr = el.find(q("p:spPr"))
-    clr = spPr.find(q("a:solidFill") + "/" + q("a:srgbClr")) if spPr is not None else None
-    return clr.get("val").upper() if clr is not None and clr.get("val") else None
+    sf = spPr.find(q("a:solidFill")) if spPr is not None else None
+    if sf is None:
+        if spPr is not None and spPr.find(q("a:noFill")) is not None:
+            return None
+        ref = el.find(q("p:style") + "/" + q("a:fillRef"))  # the fill of the shape style («Прямоугольник» by default)
+        if ref is None or (ref.get("idx") or "0") == "0":
+            return None
+        sf = ref
+    rgb = sf.find(q("a:srgbClr"))
+    if rgb is not None and rgb.get("val"):
+        return rgb.get("val").upper()
+    sch = sf.find(q("a:schemeClr"))
+    return _SCHEME_BASE.get(sch.get("val")) if sch is not None else None
 
 
 def _ground_hex(ctx: _SlideCtx, box: Bbox) -> Optional[str]:

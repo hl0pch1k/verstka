@@ -61,3 +61,8 @@ def test_tables_become_series_only_when_they_are_charts():
     assert table_series(matrix) == ([], None)
     mixed = TableData(columns=["Показатель", "2024", "2025"], rows=[["Студентов", "640", "1 100"], ["Дошли", "71%", "76%"], ["Работают", "58%", "63%"]])
     assert table_series(mixed) == ([], None)  # different units in one column: a table, not a chart
+
+
+def test_ranges_are_one_figure():
+    got = {k.value: k.label for s in ["Три варианта собираются за 8–25 секунд на шаблон.", "Оценка аудита 88–100 из 100."] for k in kpis_of(s)}
+    assert "8–25 с" in got and got["88–100"] == "оценка аудита"

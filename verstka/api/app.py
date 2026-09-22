@@ -278,13 +278,11 @@ def _generation_job(gid: str, gdir: Path, req: GenerateRequest) -> Callable[[Job
     """Wrap the pipeline so generation.json always ends in status done or failed (the UI lists both)."""
 
     def run(job: Job) -> dict:
-        meta = store.read_generation_meta(gid) or {"id": gid}
-        store.write_generation_meta(gid, {**meta, "status": "running", "job_id": job.id})
+        store.merge_generation_meta(gid, {"status": "running", "job_id": job.id})
         try:
             return _run_generation(gid, gdir, req, job)
         except BaseException as e:
-            meta = store.read_generation_meta(gid) or {"id": gid}
-            store.write_generation_meta(gid, {**meta, "status": "failed", "job_id": job.id, "error": str(e)[:300]})
+            store.merge_generation_meta(gid, {"status": "failed", "job_id": job.id, "error": str(e)[:300]})
             raise
 
     return run
@@ -448,6 +446,7 @@ def create_generation(req: GenerateRequest) -> dict:
     gid, gdir = store.new_generation_dir()
     store.write_generation_meta(gid, {"id": gid, "template_id": req.template_id, "strategies": req.strategies, "brief": req.brief, "audience": req.audience, "purpose": req.purpose, "slides": req.slides, "status": "running", "created_at": time.time()})
     job = runner.submit("generate", _generation_job(gid, gdir, req))
+    store.merge_generation_meta(gid, {"job_id": job.id}, only_missing=True)  # visible at once, whatever the thread did
     return {"job_id": job.id, "generation_id": gid}
 
 

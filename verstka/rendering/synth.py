@@ -17,7 +17,7 @@ from verstka.analysis.xmlns import q
 from verstka.ingest.workspace import TemplateWorkspace
 from verstka.rendering.assets_pick import pick_asset
 from verstka.rendering.charts import add_chart
-from verstka.rendering.clone import _SlideCtx, clear_width, renumber_page_chrome
+from verstka.rendering.clone import _fill_hex, _SlideCtx, clear_width, renumber_page_chrome
 from verstka.rendering.deck import DeckBuilder, element_bbox, is_nested, remove_element, slide_shape_elements
 from verstka.rendering.fit import fit_size
 from verstka.rendering.images import insert_picture
@@ -148,12 +148,28 @@ def _canvas_for(manifest: TemplateManifest, family: Family, comp: str) -> Option
             if p.kind in _NOT_CONTENT_CANVAS or title.bbox.y > 0.3 or title.bbox.w < 0.2:
                 continue
             rank = 0
-        big_pictures = sum(1 for s in p.slots if s.role == SlotRole.image and s.bbox.area >= 0.05)
+        big_pictures = sum(1 for s in p.slots if s.role == SlotRole.image and s.bbox.area >= 0.05) + sum(1 for b in p.decor_boxes if b.area >= 0.05)
         clutter = len(p.slots) + sum(len(g.member_shape_ids) for g in p.repeat_groups) + len(p.decor_assets) + 5 * big_pictures
         key = (rank, clutter, -p.quality, p.source_slide)
         if best is None or key < best[0]:
             best = (key, p)
     return best[1] if best else None
+
+
+def _readable(ground: str, preferred: list) -> str:
+    cands = [c for c in preferred if c] + ["000000", "FFFFFF"]
+    return next((c for c in cands if contrast_ratio(c, ground) >= 4.5), max(cands, key=lambda c: contrast_ratio(c, ground)))
+
+
+def _paints(el) -> bool:
+    spPr = el.find(q("p:spPr"))
+    if spPr is not None:
+        if spPr.find(q("a:noFill")) is not None:
+            return False
+        if any(spPr.find(q(t)) is not None for t in ("a:solidFill", "a:gradFill", "a:blipFill", "a:pattFill")):
+            return True
+    ref = el.find(q("p:style") + "/" + q("a:fillRef"))
+    return ref is not None and (ref.get("idx") or "0") != "0"
 
 
 def _slide_on_canvas(builder: DeckBuilder, canvas: Pattern, W: int, H: int):
@@ -162,6 +178,21 @@ def _slide_on_canvas(builder: DeckBuilder, canvas: Pattern, W: int, H: int):
     els = slide_shape_elements(slide)
     title = _top_title(canvas)
     keep = set(canvas.chrome_shape_ids) | ({title.shape_id} if title else set())
+    # the label the heading is printed on (a pill) is part of the heading's style: its colour was chosen for it
+    tb = element_bbox(els[title.shape_id]) if title and title.shape_id in els else None
+    ground: Optional[tuple[Bbox, Optional[str]]] = None  # a half-slide panel the heading stands on
+    if tb:
+        tol = int(0.01 * W)
+        for sid, el in els.items():
+            b = element_bbox(el)
+            if sid in keep or not b or is_nested(el) or etree.QName(el).localname != "sp":
+                continue  # the heading's ground may be a small pill or a half-slide panel — it stays either way
+            if "".join(t.text or "" for t in el.iter(q("a:t"))).strip() or not _paints(el):
+                continue
+            if b[0] - tol <= tb[0] <= b[0] + b[2] - int(0.04 * W) and b[1] - tol <= tb[1] and b[1] + b[3] + tol >= tb[1] + tb[3]:
+                keep.add(sid)
+                if b[2] * b[3] > 0.25 * W * H and (ground is None or b[2] * b[3] > ground[0].area):
+                    ground = (Bbox(x=b[0], y=b[1], w=b[2], h=b[3]), _fill_hex(el))
     for sid, el in els.items():
         if sid in keep or is_nested(el) or el.getparent() is None:
             continue
@@ -174,7 +205,7 @@ def _slide_on_canvas(builder: DeckBuilder, canvas: Pattern, W: int, H: int):
     title_shape = next((sh for sh in slide.shapes if title is not None and str(sh.shape_id) == title.shape_id), None)
     if title_shape is not None and is_nested(title_shape._element):
         title_shape = None
-    return slide, title_shape
+    return slide, title_shape, ground
 
 
 def _adopt_canvas_colors(pal: "_Palette", canvas: Pattern, manifest: TemplateManifest) -> None:
@@ -300,8 +331,9 @@ def render_synth(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
     comp = plan_slide.composition or "bullets"
     family = _family_for(oslide, manifest)
     canvas = _canvas_for(manifest, family, comp)
+    ground = None
     if canvas is not None:
-        slide, title_ph = _slide_on_canvas(builder, canvas, builder.slide_w, builder.slide_h)
+        slide, title_ph, ground = _slide_on_canvas(builder, canvas, builder.slide_w, builder.slide_h)
     else:
         layout, family = _layout_for(builder, manifest, family, oslide.kind)
         slide = builder.prs.slides.add_slide(layout)
@@ -315,6 +347,17 @@ def render_synth(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
     W, H = builder.slide_w, builder.slide_h
     safe = t.spacing.safe_area
     sx, sy, sw, sh = int(safe.x * W), int(safe.y * H), int(safe.w * W), int(safe.h * H)
+    if ground is not None:
+        # the heading stands on a panel (LCT: white half, photo half): the composition lives inside the panel
+        gb, ghex = ground
+        pad = int(0.03 * W)
+        x1, x2 = max(sx, gb.x + pad), min(sx + sw, gb.x2 - pad)
+        y2 = min(sy + sh, gb.y2 - pad)
+        if x2 - x1 > 0.25 * W:
+            sx, sw, sh = x1, x2 - x1, y2 - sy
+        if ghex:
+            pal.bg = ghex
+            pal.text = pal.text2 = _readable(ghex, [pal.text, t.color_for("text.primary")])
     scale = [s.size_pt for s in typo.scale]
     font = typo.primary_family
     h1, title_color, title_bold, title_font = _title_style(manifest, family, pal)

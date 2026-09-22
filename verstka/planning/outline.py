@@ -83,14 +83,24 @@ def _fact_id(facts: FactsExtraction, value: str) -> Optional[str]:
     return None
 
 
-def _headline(sentences: list[str], fallback: str, max_words: int = 11) -> str:
+def _headline(sentences: list[str], fallback: str, max_words: int = 12) -> str:
     """A slide heading is a conclusion: the first statement of the section, not its topic word; a statement with a
-    colon is headed by what precedes the colon («Рынку не хватает инженеров данных: …»)."""
+    colon is headed by what precedes the colon («Рынку не хватает инженеров данных: …»). A long statement is cut at a
+    clause boundary, never in the middle of a phrase («… в фирменный»)."""
     for s in sentences:
         if len(s.split()) < 3:
             continue
         head = s.split(":", 1)[0] if ":" in s and len(s.split(":", 1)[0].split()) >= 3 else s
-        return H.short(head, max_words)
+        words = head.split()
+        if len(words) <= max_words:
+            return H.strip_end(head)
+        cut = " ".join(words[:max_words])
+        bounds = [m.start() for m in re.finditer(r"[,;—–]\s", cut)]
+        # a clause that ends on a pointer («на то, чтобы …», «так, что …») is not a statement on its own
+        bounds = [b for b in bounds if len(cut[:b].split()) >= 5 and cut[:b].split()[-1].lower() not in {"то", "так", "том", "тем", "это", "там", "тогда"}]
+        if bounds:
+            return H.strip_end(cut[: bounds[-1]])
+        return H.strip_end(head) if len(words) <= max_words + 4 else H.short(head, max_words)
     return fallback
 
 
@@ -149,7 +159,8 @@ def _blocks_of(sec: H.Section, facts: FactsExtraction, series_by_span: dict, clo
             rest = others
     # figures: three or more in a section make a KPI row; fewer stay in the text
     if len(kpis) >= 2 and len(kpi_sentences) >= 2 or len(kpis) >= 3:
-        head_sentence = kpis[0].sentence
+        # the section's first statement heads the slide (with or without a figure of its own)
+        head_sentence = next((x for x in sentences if len(x.split()) >= 3 and not H.steps_of([x, x, x])[0]), kpis[0].sentence)
         tiles = [k for k in kpis if k.sentence != head_sentence]
         if len(tiles) < 3:
             tiles = kpis
@@ -170,7 +181,7 @@ def _blocks_of(sec: H.Section, facts: FactsExtraction, series_by_span: dict, clo
                 unit = tbl.columns[0].split(",", 1)[1].strip() if "," in tbl.columns[0] else ""
                 head = f"{title or tot[0]}: {tot[1][0]} → {tot[1][1]} {unit}".strip()
             spec = ChartSpec(type=chart_type or "column", series_ids=[x.id for x in series], unit=series[0].unit, highlight_index=len(series[0].values) - 1 if chart_type == "column" else None)
-            out.append(_Block(PatternKind.chart, head or lead or title, title, SlideContent(chart=spec), "chart"))
+            out.append(_Block(PatternKind.chart, head or lead or (f"{title}: сравнение" if title else "Сравнение"), title, SlideContent(chart=spec), "chart"))
             out[-1].content.table = tbl  # kept for strategies that prefer the table
         else:
             out.append(_Block(PatternKind.table, lead or (f"{title}: сравнение" if title else "Сравнение"), title, SlideContent(table=tbl), "table"))
@@ -207,7 +218,7 @@ def _to_cards(b: _Block) -> _Block:
     lines = b.content.bullets or b.content.paragraphs
     if b.kind != PatternKind.bullets or not (2 <= len(lines) <= 4):
         return b
-    items = [SlideItem(title=H.short(l, 9), icon_hint=H.short(l, 2)) for l in lines]
+    items = [SlideItem(title=_headline([l], H.strip_end(l), max_words=10), icon_hint=H.short(l, 2)) for l in lines]
     return _Block(PatternKind.cards, b.headline, b.section, SlideContent(items=items), "items", b.fact_refs)
 
 

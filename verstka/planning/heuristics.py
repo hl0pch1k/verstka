@@ -22,6 +22,7 @@ _NUMBER_RE = re.compile(
     r"(?<![\w.,])(?P<num>[+\-−]?\d{1,3}(?:[   ]\d{3})+(?:[.,]\d+)?|[+\-−]?\d+(?:[.,]\d+)?)"
     r"(?:\s?(?P<unit>%|млн|млрд|тыс\.?|ч(?:ас(?:ов|а)?)?\b|мин(?:ут)?\b|дн(?:ей|я)?\b|недел[ьяи]\b|мес(?:яц(?:а|ев)?)?\b|лет\b|год(?:а)?\b|раз(?:а)?\b|шт\.?|₽|руб(?:\.|лей|ля)?|\$|x|×))?"
 )
+_RANGE_RE = re.compile(r"(?<![\w.,])(?P<a>\d+(?:[.,]\d+)?)\s?[–—-]\s?(?P<b>\d+(?:[.,]\d+)?)(?:\s?(?P<unit>%|секунд[аы]?|сек|с\b|мин(?:ут[аы]?)?|ч(?:ас(?:ов|а)?)?\b|дн(?:ей|я)?\b|мес(?:яц(?:а|ев)?)?\b|млн|млрд|тыс\.?))?")
 _OF_RE = re.compile(r"(?P<a>\d+(?:[.,]\d+)?)\s+(?:[а-яё]+\s+)?из\s+(?P<b>\d+(?:[.,]\d+)?)", re.I)
 _FROM_TO_RE = re.compile(r"\bс\s+(?P<a>\d[\d\s]*(?:[.,]\d+)?\s?%?)\s+до\s+(?P<b>\d[\d\s]*(?:[.,]\d+)?\s?%?)", re.I)
 _UP_RE = re.compile(r"\b(вырос\w*|увеличил\w*|рост\w*|прибав\w*|повысил\w*)\b", re.I)
@@ -294,6 +295,20 @@ def kpi_of(sentence: str) -> Optional[Kpi]:
         before = s[: m_ft.start()]
         label = " ".join(_after_last_verb(before)) or " ".join(_clean_before(before)) or s
         return Kpi(value=f"{a} → {b}", label=short(label, 7), sentence=sentence, number=parse_number(b) or 0.0)
+    m_rg = _RANGE_RE.search(s)
+    if m_rg and (parse_number(m_rg.group("a")) or 0) < (parse_number(m_rg.group("b")) or 0):
+        # «8–25 секунд», «88–100 из 100»: a range is one figure
+        unit = {"секунд": "с", "секунды": "с", "секунда": "с", "сек": "с", "минут": "мин", "минуты": "мин", "часов": "ч", "часа": "ч", "дней": "дн", "дня": "дн", "месяцев": "мес", "месяца": "мес"}.get(m_rg.group("unit") or "", m_rg.group("unit") or "")
+        value = f"{m_rg.group('a')}–{m_rg.group('b')}{('' if unit == '%' else ' ') + unit if unit else ''}"
+        before = s[: m_rg.start()]
+        after = re.split(r"[,;:]\s", s[m_rg.end():].strip())[0].strip()
+        after = re.sub(r"^из\s+\d+\s*", "", after)
+        words_b = [w for w in before.split() if w.lower() not in _FILLERS]
+        while words_b and words_b[-1].lower() in _PREPS:
+            words_b.pop()
+        label = " ".join(words_b + after.split()[:4]) or s
+        label = short(label, 8)
+        return Kpi(value=value, label=label[:1].lower() + label[1:] if label[:1].isupper() and not label[:2].isupper() else label, sentence=sentence, number=parse_number(m_rg.group("b")) or 0.0)
     m_of = _OF_RE.search(s)
     if m_of and (parse_number(m_of.group("a")) or 0) > (parse_number(m_of.group("b")) or 0):
         m_of = None  # «640 студентов из 12 университетов» is not «640 of 12»

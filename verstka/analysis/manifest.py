@@ -15,7 +15,7 @@ from verstka.analysis.assets import extract_assets, tag_assets_with_vlm
 from verstka.analysis.chrome import chrome_ids as _chrome_ids
 from verstka.analysis.chrome import detect_chrome, inherited_chrome, visual_chrome
 from verstka.analysis.classify import classify_slide
-from verstka.analysis.colors import assign_color_roles, cluster_colors, collect_color_samples
+from verstka.analysis.colors import ColorSample, assign_color_roles, cluster_colors, collect_color_samples
 from verstka.analysis.components import derive_components
 from verstka.analysis.gallery import write_gallery, write_thumbnails
 from verstka.analysis.groups import detect_repeat_groups
@@ -247,7 +247,25 @@ def analyze_template(
     primary_family = Family.dark if families.get("dark", 0) > families.get("light", 0) else Family.light
     samples = []
     for i, shapes in shapes_by_slide.items():
-        samples.extend(collect_color_samples(shapes, slide_w, slide_h, bg_hex=bg_by_slide.get(i), chrome_ids=chrome_by_slide[i]))
+        # a picture ground is represented by its median colour: an approximation, so it only whispers in the palette
+        solid_bg = bg_by_slide.get(i) if i not in image_bg else None
+        samples.extend(collect_color_samples(shapes, slide_w, slide_h, bg_hex=solid_bg, chrome_ids=chrome_by_slide[i]))
+        if i in image_bg and bg_by_slide.get(i):
+            samples.append(ColorSample(bg_by_slide[i].upper(), "background", 0.5))
+    # the brand also lives on masters and layouts (rules, bars, logos) and in the theme: light votes, so that a
+    # template whose slides are all black-on-white still has its accent (instead of a VK blue default)
+    art = [s for shapes in list(layout_shapes.values()) + list(master_shapes.values()) for s in shapes if not s.is_placeholder]
+    for smp in collect_color_samples(art, slide_w, slide_h):
+        if smp.context != "background":
+            samples.append(ColorSample(smp.hex, smp.context, smp.weight * 0.5))
+    try:
+        theme = SlideContext(pkg, slide_parts[0]).resolver if slide_parts else None
+        for k, name in enumerate(("accent1", "accent2")):
+            hx = theme.scheme_hex(name) if theme is not None else None
+            if hx:
+                samples.append(ColorSample(hx.upper(), "fill", 0.2 - 0.05 * k))
+    except Exception:  # noqa: BLE001
+        pass
     colors = assign_color_roles(cluster_colors(samples, float(cfg.get("colors", {}).get("delta_e_tolerance", 1.8))), primary_family)
 
     # 6. spacing (preliminary) and groups

@@ -103,7 +103,9 @@ def contains(outer: Bbox, inner: Bbox, tol: float = 0.02) -> bool:
 def enclosing_fill(slide: IRSlide, e: IRElement, bg_slide: Optional[str] = None) -> Optional[str]:
     """Effective colour behind e: the fill of the smallest filled element containing e (a card), translucent cards
     composited over what lies under them (outer card or the slide background). None when nothing encloses e."""
-    cands = [o for o in slide.elements if o is not e and o.fill_hex and o.type in ("shape", "text") and contains(o.bbox, e.bbox, 0.01) and o.bbox.area > e.bbox.area]
+    # a card holds the text when it covers most of it — a text box a hair wider than its card is still on the card
+    cands = [o for o in slide.elements if o is not e and o.fill_hex and o.type in ("shape", "text") and o.bbox.area > e.bbox.area
+             and (contains(o.bbox, e.bbox, 0.01) or o.bbox.intersection(e.bbox) >= 0.8 * max(e.bbox.area, 1))]
     if not cands:
         return None
     color = bg_slide or slide.background_hex

@@ -648,6 +648,42 @@ def slide_background(package: PptxPackage, slide_part: str, ctx: SlideContext) -
     return "FFFFFF", "solid"
 
 
+_BG_COLOR_CACHE: dict[tuple[int, str], Optional[str]] = {}
+
+
+def background_picture_color(package: PptxPackage, slide_part: str, ctx: SlideContext) -> Optional[str]:
+    """Median colour of the picture a slide's background is filled with (slide → layout → master), or None.
+
+    The rendered slide mixes the ground with its cards; the picture itself is what text and tables stand on."""
+    for part in (slide_part, ctx.layout_part, ctx.master_part):
+        if not part:
+            continue
+        root = package.xml(part)
+        blip = find(root, "p:cSld/p:bg/p:bgPr/a:blipFill/a:blip")
+        if blip is None:
+            if find(root, "p:cSld/p:bg") is not None:
+                return None  # a solid or gradient ground wins over the parts below
+            continue
+        target = package.target_of(part, blip.get(q("r:embed")) or "")
+        if not target or not package.exists(target):
+            return None
+        key = (id(package), target)
+        if key not in _BG_COLOR_CACHE:
+            try:
+                from io import BytesIO
+
+                from PIL import Image
+
+                with Image.open(BytesIO(package.read(target))) as im:
+                    rgb = im.convert("RGB").resize((48, 27))
+                    chans = [sorted(rgb.getchannel(c).tobytes()) for c in range(3)]
+                _BG_COLOR_CACHE[key] = "".join(f"{ch[len(ch) // 2]:02X}" for ch in chans)
+            except Exception:  # noqa: BLE001
+                _BG_COLOR_CACHE[key] = None
+        return _BG_COLOR_CACHE[key]
+    return None
+
+
 def slide_family(package: PptxPackage, slide_part: str, ctx: SlideContext, shapes: list[ShapeInfo], image_path: Optional[str] = None) -> tuple[Family, Optional[str]]:
     """Light/dark family and the effective background hex (None when unknown)."""
     slide_w, slide_h = package.slide_size
@@ -659,6 +695,10 @@ def slide_family(package: PptxPackage, slide_part: str, ctx: SlideContext, shape
     hex_, kind = slide_background(package, slide_part, ctx)
     if hex_ and kind != "image":
         return (Family.dark if relative_luminance(hex_) < 0.3 else Family.light), hex_
+    if kind == "image":
+        pic = background_picture_color(package, slide_part, ctx)
+        if pic:
+            return (Family.dark if relative_luminance(pic) < 0.3 else Family.light), pic
     if image_path:
         try:
             from PIL import Image

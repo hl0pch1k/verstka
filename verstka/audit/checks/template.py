@@ -175,7 +175,11 @@ def contrast_low(ctx: AuditContext) -> list[Issue]:
             if cr < need:
                 accent_text = any(t.hex == color and any(r.startswith("accent.") for r in t.roles) for t in tokens.colors)
                 severity = "error" if cr < 2.5 else ("info" if (accent_text and cr >= 3.0) else "warn")  # brand accent on dark is the template's own choice
-                to = None if uncertain else _contrast_replacement(tokens, bg, need)
+                # the heading keeps the template's own colour (white on a pink pill is the design, not a slip)
+                is_heading = e.ph_type in ("title", "ctrTitle")
+                if is_heading and severity != "error":
+                    severity = "info"
+                to = None if uncertain or is_heading else _contrast_replacement(tokens, bg, need)
                 autofix = fix("recolor", f"заменить цвет текста на #{to}", element_ids=[e.id], to=to, scope="text") if to else None
                 if uncertain:
                     severity = "info"

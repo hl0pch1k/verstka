@@ -95,8 +95,9 @@ def heuristic_kind(
         return PatternKind.title, 0.9
     if title is not None and role_counts.get(SlotRole.subtitle, 0) >= 1 and n_content <= 4 and n_cards == 0:
         return PatternKind.title if slide_index <= 2 else PatternKind.section, 0.7
-    if title is not None and n_content <= 2 and n_cards == 0:
-        return PatternKind.section, 0.7
+    body_chars = sum(len(t.plain_text) for t in texts if title is None or t.id != title.id)
+    if title is not None and n_content <= 2 and n_cards == 0 and role_counts.get(SlotRole.bullet_list, 0) == 0 and body_chars <= 120:
+        return PatternKind.section, 0.7  # a divider: a heading and a line at most, never a list
     # team: group cells with picture + name-like text
     if biggest_group is not None and n_cards >= 3:
         cells = biggest_group.member_shape_ids
