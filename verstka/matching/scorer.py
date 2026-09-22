@@ -211,6 +211,11 @@ def score_pattern(
     if stale_images and not has_visual:
         kind *= 0.6
         reasons.append("крупная картинка-образец останется без замены")
+    # a decorative picture in the middle of the content area (a chart snapshot, a KPI ring) says the sample's own story
+    stale_decor = [b for b in pattern.decor_boxes if b.area >= 0.08 and 0.15 < b.y + b.h / 2 < 0.85 and 0.15 < b.x + b.w / 2 < 0.85]
+    if stale_decor and not has_visual:
+        kind *= 0.6
+        reasons.append("крупная иллюстрация образца посреди слайда не относится к содержанию")
     # strategy flavour: visual favours decorated/illustrated samples, compact favours denser samples, structured plain ones
     n_decor = len(pattern.decor_assets) + sum(1 for s in pattern.slots if s.role in (SlotRole.icon, SlotRole.image))
     if strategy.name == "visual":

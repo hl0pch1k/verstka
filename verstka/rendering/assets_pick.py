@@ -26,8 +26,10 @@ _HINT_SYNONYMS = {
 
 
 def _score(asset: Asset, words: set[str]) -> int:
-    hay = " ".join(asset.tags + [Path(asset.path).stem]).lower()
-    return sum(1 for w in words if w and w in hay)
+    """Hint words found in the asset's tags (file names are ids, not descriptions); short words never match —
+    «и» is a substring of every «image12»."""
+    hay = " ".join(asset.tags).lower()
+    return sum(1 for w in words if len(w) >= 4 and w in hay)
 
 
 def _expand(hint: Optional[str]) -> set[str]:

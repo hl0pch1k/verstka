@@ -195,6 +195,21 @@ def adjust_group(slide: Slide, group: RepeatGroup, n_needed: int, slide_w: int, 
         span_end0 = starts[-1] + size0
         edge = int((slide_w if row else slide_h) * 0.97)
         room_end = min(max(span_end0, starts[0] + max(group.max_n, n_orig) * pitch0 - gap), edge)
+        # never reflow over something else standing in the group's band after its last cell (a highlighted card,
+        # a picture): the free room ends a gap before it
+        cross0 = min((b.y if row else b.x) for b in boxes0)
+        cross1 = max((b.y2 if row else b.x2) for b in boxes0)
+        own = {id(e) for c in cells for e in c} | {id(e) for r in riders for e in r}
+        tree0 = cells[0][0].getparent()
+        for other in (tree0 if tree0 is not None else []):
+            if id(other) in own or etree.QName(other).localname not in _DRAWABLE:
+                continue
+            ob = element_bbox(other)
+            if not ob or ob[2] * ob[3] >= 0.6 * slide_w * slide_h:
+                continue
+            o_start, o_c0, o_c1 = (ob[0], ob[1], ob[1] + ob[3]) if row else (ob[1], ob[0], ob[0] + ob[2])
+            if o_start >= span_end0 - int(0.005 * (slide_w if row else slide_h)) and o_c0 < cross1 and o_c1 > cross0:
+                room_end = min(room_end, max(span_end0, o_start - gap))
         cards = any(_is_card_cell(c, b) for c, b in zip(cells, boxes0))
         n_fit = max(1, int((room_end - starts[0] + gap) // max(0.6 * size0 + gap, 1)))
         n = max(1, min(n_needed, max(n_fit, n_orig)))

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from verstka.rendering.fonts import wrap_lines
+from verstka.rendering.fonts import text_width_pt, wrap_lines
 from verstka.schemas.common import EMU_PER_PT, Bbox
 
 
@@ -17,9 +17,15 @@ class FitResult:
     height_pt: float
 
 
+_NEVER = 10 ** 6
+
+
 def _lines_for(paragraphs: list[str], family: Optional[str], size_pt: float, bold: bool, width_pt: float) -> int:
+    """Lines the paragraphs take; a word wider than the box never fits (it would be broken by letters: «64/0»)."""
     total = 0
     for p in paragraphs:
+        if any(text_width_pt(w, family, size_pt, bold) > width_pt for w in p.split()):
+            return _NEVER
         total += max(len(wrap_lines(p, family, size_pt, bold, width_pt)), 1)
     return total
 

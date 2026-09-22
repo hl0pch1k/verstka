@@ -62,14 +62,29 @@ def add_table(slide: Slide, bbox: Bbox, table: TableData, style: TableStyleSpec,
     style_id = tblPr.find(q("a:tableStyleId"))
     if style_id is not None:
         tblPr.remove(style_id)  # plain table: our own fills and borders only
-    row_h = int(bbox.h / n_rows)
-    for r in tbl.rows:
-        r.height = Emu(row_h)
-    col_w = int(bbox.w / n_cols)
-    for c in tbl.columns:
-        c.width = Emu(col_w)
     family = font_family or typography.primary_family
     size = style.font_size_pt or typography.size_for("small", 12.0)
+    body = typography.size_for("body", size)
+    if body > size and bbox.h / n_rows >= 2.8 * body * 12700:
+        size = body  # a short table in a big area reads at body size, not at footnote size
+    # rows as tall as their text needs (with air), never stretched over the whole area: a 2-row table is not a banner
+    row_h = int(min(bbox.h / n_rows, size * 2.6 * 12700))
+    for r in tbl.rows:
+        r.height = Emu(row_h)
+    gf.height = Emu(row_h * n_rows)
+    # columns share the width by the length of their longest entry (labels get room, numbers stay compact)
+    lengths = []
+    for j in range(n_cols):
+        texts = [table.columns[j]] + [row[j] for row in table.rows if j < len(row)]
+        lengths.append(max((len(t) for t in texts), default=1))
+    med = sorted(lengths)[len(lengths) // 2] or 1
+    # a column is never narrower than its header word set in bold (+2 chars of padding)
+    weights = [max(min(max(n, 0.6 * med), 3 * med), max((len(w) for w in table.columns[j].split()), default=1) * 1.1 + 2) for j, n in enumerate(lengths)]
+    total = sum(weights) or 1
+    widths = [int(bbox.w * w / total) for w in weights]
+    widths[-1] += bbox.w - sum(widths)
+    for c, w in zip(tbl.columns, widths):
+        c.width = Emu(w)
     body_hex = style.body_text_hex or "000000"
 
     def write(cell, text: str, *, bold: bool, color_hex: str, align: PP_ALIGN, fill_hex: Optional[str]) -> None:

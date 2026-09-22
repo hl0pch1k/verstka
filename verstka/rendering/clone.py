@@ -18,9 +18,9 @@ from verstka.ingest.workspace import TemplateWorkspace
 from verstka.rendering.assets_pick import pick_asset, pick_icon
 from verstka.rendering.charts import add_chart
 from verstka.rendering.deck import DeckBuilder, element_bbox, is_nested, remove_element, renumber_ids, set_element_pos, shift_element, slide_shape_elements
-from verstka.rendering.fonts import text_width_pt
+from verstka.rendering.fonts import text_width_pt, wrap_lines
 from verstka.rendering.fit import fit_size, grow_size
-from verstka.rendering.groups import adjust_group, cell_bbox, cells_elements, reading_order_key, transform_element
+from verstka.rendering.groups import adjust_group, cell_bbox, cell_riders, cells_elements, reading_order_key, transform_element
 from verstka.rendering.images import replace_picture
 from verstka.rendering.tables import add_table
 from verstka.rendering.textfill import ParagraphSpec, clear_text, ensure_txbody, fill_text, has_visible_style, set_text_size, shape_text, style_runs
@@ -81,7 +81,7 @@ class _SlideCtx:
         nv = el.find(".//" + q("p:cNvPr"))
         return nv.get("id") if nv is not None else None
 
-    def fill_el(self, el: etree._Element, slot: Optional[Slot], paragraphs: list[ParagraphSpec], *, size_hint: Optional[float] = None, min_ratio: float = 0.6, grow_to: Optional[float] = None) -> None:
+    def fill_el(self, el: etree._Element, slot: Optional[Slot], paragraphs: list[ParagraphSpec], *, size_hint: Optional[float] = None, min_ratio: float = 0.6, grow_to: Optional[float] = None, widen: bool = False) -> None:
         if not paragraphs:
             return
         box = element_bbox(el)
@@ -96,7 +96,11 @@ class _SlideCtx:
             pad = container_inset(box[2], box[3])
             ensure_txbody(el, (pad, pad, pad, pad))
         insets = _body_insets(el)
-        if box and box[2] > 0 and box[3] > 0 and slot is not None and slot.role in (SlotRole.title, SlotRole.subtitle):
+        if box and box[2] > 0 and box[3] > 0:
+            _wrap_inside(el, [p.text for p in paragraphs], family, size, bold, box, insets)
+        if box and box[2] > 0 and box[3] > 0 and slot is not None and slot.role in _GROWABLE and not container:
+            box = self._room_in_holder(el, box)
+        if box and box[2] > 0 and box[3] > 0 and slot is not None and (widen or slot.role in (SlotRole.title, SlotRole.subtitle)):
             box = self._widen_on_backing(el, box, [p.text for p in paragraphs], family, size, bold, insets)
         if box and box[2] > 0 and box[3] > 0:
             res = fit_size([p.text for p in paragraphs], Bbox(x=box[0], y=box[1], w=box[2], h=box[3]), family, size, bold, self.scale, insets_emu=insets, line_spacing=self.typo.line_spacing, min_ratio=min_ratio)
@@ -115,6 +119,18 @@ class _SlideCtx:
                         target_size = shrink.size_pt
                 else:
                     self.warnings.append(f"text may overflow in {slot.id if slot else 'shape'} ({res.lines} lines)")
+        if box and box[2] > 0 and box[3] > 0 and any(p.size_pt for p in paragraphs):
+            # an emphasised line (a figure) may be larger than the rest only as far as the box height allows
+            ls = self.typo.line_spacing
+            usable_w = max((box[2] - insets[0] - insets[2]) / EMU_PER_PT, 1.0)
+            usable_h = max((box[3] - insets[1] - insets[3]) / EMU_PER_PT, 1.0)
+            rest = sum(max(len(wrap_lines(p.text, family, target_size, bold, usable_w)), 1) for p in paragraphs if not p.size_pt) * target_size * ls
+            paragraphs = [ParagraphSpec(p.text, bullet=p.bullet, level=p.level, bold=p.bold, size_pt=p.size_pt, color_hex=p.color_hex) for p in paragraphs]
+            for p in paragraphs:
+                if p.size_pt and p.size_pt > target_size:
+                    lines = max(len(wrap_lines(p.text, family, p.size_pt, True, usable_w)), 1)
+                    room = (usable_h - rest) / (ls * lines)
+                    p.size_pt = round(max(target_size, min(p.size_pt, room)), 1)
         explicit = size_hint is not None or target_size != slot_size or container
         fill_text(el, paragraphs, size_pt=target_size if explicit else None)
         if container:
@@ -122,6 +138,47 @@ class _SlideCtx:
         sid = self.id_of(el)
         if sid:
             self.filled.add(sid)
+
+    def _room_in_holder(self, el: etree._Element, box: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+        """A text box drawn on a card may take the card's empty height below it — down to the next text or picture
+        in the card, or to the card's inner edge (the sample's one-line box would otherwise force tiny type)."""
+        if is_nested(el):
+            return box
+        bodyPr = el.find(q("p:txBody") + "/" + q("a:bodyPr"))
+        if bodyPr is not None and bodyPr.get("anchor") == "b":
+            return box
+        bx = Bbox(x=box[0], y=box[1], w=box[2], h=box[3])
+        tol = int(0.01 * self.W)
+        tree = el.getparent()
+        holder = None
+        for other in tree:
+            if other is el or etree.QName(other).localname != "sp" or shape_text(other).strip() or not _has_fill(other):
+                continue
+            b = element_bbox(other)
+            if not b or b[2] * b[3] > 0.5 * self.W * self.H or b[2] * b[3] < 1.5 * bx.area:
+                continue
+            ob = Bbox(x=b[0], y=b[1], w=b[2], h=b[3])
+            if ob.x - tol <= bx.x and ob.y - tol <= bx.y and ob.x2 + tol >= bx.x2 and ob.y2 + tol >= bx.y2 and (holder is None or ob.area < holder.area):
+                holder = ob
+        if holder is None:
+            return box
+        pad = max(min(bx.x - holder.x, int(0.04 * self.H)), int(0.012 * self.H))
+        limit = holder.y2 - pad
+        for other in tree:
+            if other is el or etree.QName(other).localname not in ("sp", "pic", "graphicFrame", "grpSp"):
+                continue
+            b = element_bbox(other)
+            if not b or (b[0], b[1], b[2], b[3]) == (holder.x, holder.y, holder.w, holder.h):
+                continue
+            inside = holder.x <= b[0] + b[2] / 2 <= holder.x2 and holder.y <= b[1] + b[3] / 2 <= holder.y2
+            overlaps_x = b[0] < bx.x2 and b[0] + b[2] > bx.x
+            is_content = etree.QName(other).localname != "sp" or shape_text(other).strip() or (self.id_of(other) or "") in self.slot_of
+            if inside and overlaps_x and b[1] >= bx.y2 - tol and is_content:
+                limit = min(limit, b[1] - int(0.012 * self.H))
+        if limit <= bx.y2 + int(0.02 * self.H):
+            return box
+        set_element_pos(el, h=limit - bx.y)
+        return (bx.x, bx.y, bx.w, limit - bx.y)
 
     def _widen_on_backing(self, el: etree._Element, box: tuple[int, int, int, int], texts: list[str], family: Optional[str], size: float, bold: bool, insets: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
         """A heading printed on a label (pill, plate) that is too short for the new text: the label and the text box
@@ -196,6 +253,20 @@ class _SlideCtx:
 
     def smallest_font(self, slots: list[Slot]) -> Optional[Slot]:
         return min(slots, key=lambda s: (s.style.size_pt or 99.0)) if slots else None
+
+
+_GROWABLE = {SlotRole.body, SlotRole.bullet_list, SlotRole.card_body, SlotRole.card_title, SlotRole.number_label, SlotRole.caption}
+
+
+def _wrap_inside(el: etree._Element, texts: list[str], family: Optional[str], size: float, bold: bool, box: tuple[int, int, int, int], insets: tuple[int, int, int, int]) -> None:
+    """A box set to «no wrap» for a one-word sample must wrap a longer text inside its own width, not run across
+    the neighbouring column."""
+    bodyPr = el.find(q("p:txBody") + "/" + q("a:bodyPr"))
+    if bodyPr is None or bodyPr.get("wrap") != "none":
+        return
+    widest = max((text_width_pt(t, family, size, bold) for t in texts), default=0.0) * EMU_PER_PT
+    if widest > box[2] - insets[0] - insets[2]:
+        bodyPr.set("wrap", "square")
 
 
 def _has_fill(el: etree._Element) -> bool:
@@ -489,7 +560,11 @@ def _fill_one_cell(ctx: _SlideCtx, entries, chunk: list[SlideItem], cell_idx: in
         if nums:
             write(nums, [ParagraphSpec(item.number)], min_ratio=0.35)
         else:
-            head = ParagraphSpec(item.number, bullet=False, bold=True)
+            # no figure slot in the card: the figure leads it, set a few steps above the card's text
+            host = titles[0][1] if titles else (bodies[0][1] if bodies else None)
+            base = (host.style.size_pt if host is not None and host.style.size_pt else ctx.typo.size_for("body", 14.0))
+            big = min(max(base * 1.7, base + 8), ctx.typo.size_for("h1", base * 2.4))
+            head = ParagraphSpec(item.number, bullet=False, bold=True, size_pt=big)
         title = item.title if item.title and item.title != item.number else ""
     else:
         if nums:
@@ -504,6 +579,13 @@ def _fill_one_cell(ctx: _SlideCtx, entries, chunk: list[SlideItem], cell_idx: in
         else:
             body = [head] + ([ParagraphSpec(title, bullet=False, bold=True)] if title else []) + body_paras
     elif titles and title:
+        if not body_paras:
+            # a thesis card: the empty description slot leaves, the heading takes the card's height instead of
+            # shrinking into its one-line box
+            for e, _, _ in body_slots:
+                if not is_nested(e) and e.getparent() is not None:
+                    ctx.remove_el(e)
+            body_slots = []
         write(titles, [ParagraphSpec(title)])
         body = body_paras
     elif title and body_paras:
@@ -601,6 +683,8 @@ def _fill_cells(ctx: _SlideCtx, items: list[SlideItem], use_ordinals: bool = Tru
     seen: set[str] = set()
     cell_bodies: list[tuple[etree._Element, Optional[Slot]]] = []
     cell_numbers: list[tuple[etree._Element, Optional[Slot]]] = []
+    cell_titles: list[tuple[etree._Element, Optional[Slot]]] = []
+    cell_heads: list[etree._Element] = []
     for cell_idx, cell in enumerate(cells):
         chunk = items[cell_idx * per_cell : (cell_idx + 1) * per_cell]
         entries = _cell_entries(ctx, group, cell, extra[cell_idx])
@@ -623,14 +707,21 @@ def _fill_cells(ctx: _SlideCtx, items: list[SlideItem], use_ordinals: bool = Tru
             for nv in e.iter(q("p:cNvPr")):
                 ctx.cell_member_ids.add(nv.get("id"))
         for e, slot, role in entries:
-            if (ctx.id_of(e) or "") in ctx.filled and etree.QName(e).localname == "sp":
+            if (ctx.id_of(e) or "") in ctx.filled and etree.QName(e).localname == "sp" and e.getparent() is not None:
                 if role == SlotRole.number:
                     cell_numbers.append((e, slot))
+                elif role == SlotRole.card_title:
+                    if item is not None and item.number and shape_text(e).strip() == item.number:
+                        cell_heads.append(e)  # an emphasised figure: sized with the other figures, not with titles
+                    else:
+                        cell_titles.append((e, slot))
                 elif role in _BODY_ROLES or role == SlotRole.number_label:
                     cell_bodies.append((e, slot))
     # one size for the same role in every card: the smallest that fits all of them, grown along the scale when all have room
     _harmonize(ctx, cell_bodies, cap=_text_cap(ctx))
+    _harmonize(ctx, cell_titles, cap=None)
     _harmonize(ctx, cell_numbers, cap=None, min_ratio=0.35)
+    _harmonize_first_lines(cell_heads)
     if numeric_items and not include_number:
         # figures live outside the group (big_number patterns): the largest standalone slot takes the first one
         for slot, item in zip(standalone_numbers, [i for i in items if i.number]):
@@ -670,6 +761,22 @@ def _harmonize(ctx: _SlideCtx, pairs: list[tuple[etree._Element, Optional[Slot]]
         common = min(sizes)
         for e, _ in pairs:
             set_text_size(e, common)
+
+
+def _harmonize_first_lines(els: list[etree._Element]) -> None:
+    """Figures leading their cards share one size: the smallest one that fitted."""
+    firsts = []
+    for e in els:
+        p0 = e.find(q("p:txBody") + "/" + q("a:p"))
+        sizes = [int(r.get("sz")) for r in p0.iter(q("a:rPr")) if r.get("sz")] if p0 is not None else []
+        if sizes:
+            firsts.append((p0, min(sizes)))
+    if len(firsts) < 2:
+        return
+    common = min(sz for _, sz in firsts)
+    for p0, _ in firsts:
+        for r in list(p0.iter(q("a:rPr"))) + list(p0.iter(q("a:endParaRPr"))):
+            r.set("sz", str(common))
 
 
 def _nearest_label(slot: Slot, labels: list[Slot]) -> Optional[Slot]:
@@ -758,6 +865,46 @@ def _clamp_to_safe(box: Bbox, ctx: _SlideCtx) -> Bbox:
     return box
 
 
+def _grow_into_free_area(box: Bbox, ctx: _SlideCtx, oslide: Optional[OutlineSlide] = None) -> Bbox:
+    """A sample table/chart area far smaller than the free content area (Education keeps a 25%-wide sample table)
+    grows inside the safe area below its top edge — over text slots that will stay empty, never over anything else."""
+    safe = ctx.manifest.tokens.spacing.safe_area
+    if box.area >= 0.3 * ctx.W * ctx.H:
+        return box
+    keeps_text = bool(oslide and (oslide.content.paragraphs or oslide.content.bullets))
+    tree = ctx.slide._element.cSld.find(q("p:spTree"))
+    blockers = []
+    for el in tree:
+        if etree.QName(el).localname not in ("sp", "pic", "graphicFrame", "grpSp", "cxnSp"):
+            continue
+        b = element_bbox(el)
+        sid = ctx.id_of(el) or ""
+        if not b or b[2] * b[3] >= 0.6 * ctx.W * ctx.H or sid in ctx.pattern.chrome_shape_ids:
+            continue
+        slot = ctx.slot_of.get(sid)
+        if slot is not None and slot.role in (SlotRole.title, SlotRole.subtitle):
+            if b[1] + b[3] <= box.y + int(0.01 * ctx.H):
+                continue  # the heading above
+        elif slot is not None and slot.role in TEXT_ROLES and sid not in ctx.filled and not has_visible_style(el) and not keeps_text:
+            continue  # an empty text slot: the cleanup removes it
+        blockers.append(Bbox(x=b[0], y=b[1], w=b[2], h=b[3]))
+    x1, x2 = int(safe.x * ctx.W), int(safe.x2 * ctx.W)
+    y2 = int(safe.y2 * ctx.H)
+    gap_x, gap_y = int(0.02 * ctx.W), int(0.02 * ctx.H)
+    for o in blockers:
+        if o.y2 <= box.y or o.y >= y2:
+            continue
+        if o.x2 <= box.x + 1:
+            x1 = max(x1, o.x2 + gap_x)
+        elif o.x >= box.x2 - 1:
+            x2 = min(x2, o.x - gap_x)
+    for o in blockers:
+        if o.x < x2 and o.x2 > x1 and o.y >= box.y2 - 1:
+            y2 = min(y2, o.y - gap_y)
+    grown = Bbox(x=min(box.x, x1), y=box.y, w=max(box.x2, x2) - min(box.x, x1), h=max(box.h, y2 - box.y))
+    return grown if grown.area > box.area else box
+
+
 def _place_native_object(ctx: _SlideCtx, oslide: OutlineSlide) -> None:
     c = oslide.content
     manifest = ctx.manifest
@@ -824,6 +971,8 @@ def _place_native_object(ctx: _SlideCtx, oslide: OutlineSlide) -> None:
         title_bottom = max((s.bbox.y2 for s in ctx.pattern.slots if s.role == SlotRole.title), default=safe.y)
         box = Bbox(x=int(safe.x * ctx.W), y=int((title_bottom + 0.03) * ctx.H), w=int(safe.w * ctx.W), h=int((safe.y2 - title_bottom - 0.05) * ctx.H))
     box = _clamp_to_safe(box, ctx) if not ctx.filled & {s.shape_id for s in holders} else box
+    if not ctx.filled & {s.shape_id for s in holders}:
+        box = _grow_into_free_area(box, ctx, oslide)
     # pictures the object would cover (sample screenshots, chart images marked as decoration) are removed
     for sid, el in list(ctx.els.items()):
         if sid in ctx.removed or etree.QName(el).localname != "pic" or is_nested(el):
@@ -848,13 +997,26 @@ def _place_native_object(ctx: _SlideCtx, oslide: OutlineSlide) -> None:
 
 
 def _remove_empty_cells(ctx: _SlideCtx) -> None:
-    """A repeat-group cell with a text slot that received nothing loses all its shapes: no orphan avatars, chips or card backgrounds."""
+    """A repeat-group cell with a text slot that received nothing loses all its shapes — and its riders (the icon
+    chip next to a list line): no orphan avatars, chips or card backgrounds."""
+    protected = {sl.shape_id for sl in ctx.pattern.slots if sl.role in (SlotRole.title, SlotRole.subtitle)} | set(ctx.pattern.chrome_shape_ids)
     for g in ctx.pattern.repeat_groups:
+        live = [c for c in cells_elements(ctx.slide, g) if c]
+        riders_of: dict[int, list[etree._Element]] = {}
+        if live and not any(is_nested(e) for c in live for e in c):
+            for c, r in zip(live, cell_riders(ctx.slide, g, live, protected)):
+                for e in c:
+                    riders_of[id(e)] = r
         for cell in g.member_shape_ids:
             if not any(ctx.role_of.get(sid) in CELL_TEXT_ROLES for sid in cell):
                 continue
             if any(sid in ctx.filled for sid in cell):
                 continue
+            for sid in cell:
+                el = ctx.els.get(sid)
+                for rider in riders_of.get(id(el), []) if el is not None else []:
+                    if rider.getparent() is not None and (ctx.id_of(rider) or "") not in ctx.filled:
+                        ctx.remove_el(rider)
             for sid in cell:
                 el = ctx.els.get(sid)
                 if el is None or sid in ctx.removed or el.getparent() is None:
@@ -865,6 +1027,88 @@ def _remove_empty_cells(ctx: _SlideCtx) -> None:
                     continue
                 remove_element(el)
                 ctx.removed.add(sid)
+
+
+def _fill_label(ctx: _SlideCtx, title: Slot, oslide: OutlineSlide) -> None:
+    """A short tag printed above the heading («Кейс», «Проблема» in a pill) carries the section name; without a
+    section it is emptied (its pill then goes as an orphan) so running text never lands in a 1-line tag."""
+    labels = [
+        s for s in ctx.slots(SlotRole.body, SlotRole.caption, SlotRole.subtitle)
+        if s.bbox.y2 <= title.bbox.y + 0.02 and s.bbox.h <= 0.1 and len(s.sample_text or "") <= 25 and s.shape_id != title.shape_id
+    ]
+    if not labels:
+        return
+    label = min(labels, key=lambda s: abs(s.bbox.y2 - title.bbox.y))
+    tag = (oslide.section or "").strip()
+    if tag and tag.lower() != oslide.headline.strip().lower() and len(tag) <= 40:
+        ctx.fill_slot(label, [ParagraphSpec(tag)], min_ratio=0.8, widen=True)
+    else:
+        el = ctx.els.get(label.shape_id)
+        if el is not None and has_visible_style(el) and not is_nested(el):
+            ctx.remove_el(el)  # the tag is its own pill: an empty pill must not stay
+        elif el is not None:
+            clear_text(el)
+        ctx.removed.add(label.shape_id)
+
+
+def _remove_qr_codes(ctx: _SlideCtx) -> None:
+    """QR codes of the template (a contact card on the closing slide) point to someone else's page."""
+    qr_parts = {a.media_part for a in ctx.manifest.assets if a.kind == "qr" and a.media_part}
+    if not qr_parts:
+        return
+    for pic in list(ctx.slide._element.cSld.iter(q("p:pic"))):
+        blip = pic.find(".//" + q("a:blip"))
+        rid = blip.get(q("r:embed")) if blip is not None else None
+        try:
+            part = ctx.slide.part.related_part(rid) if rid else None
+        except KeyError:
+            part = None
+        if part is not None and str(part.partname).lstrip("/") in qr_parts:
+            ctx.remove_el(pic)
+
+
+def _remove_orphan_holders(ctx: _SlideCtx) -> None:
+    """A plate whose text slots all stayed empty (a label pill without its tag, a note box without its note) goes,
+    together with the small icons drawn on it. Plates that hold anything written, a picture or a chart stay."""
+    W, H = ctx.W, ctx.H
+    chrome = set(ctx.pattern.chrome_shape_ids)
+    text_slots = [s for s in ctx.pattern.slots if s.role in TEXT_ROLES]
+    tree = ctx.slide._element.cSld.find(q("p:spTree"))
+    for sid, el in list(ctx.els.items()):
+        if sid in ctx.removed or sid in ctx.filled or sid in chrome or el.getparent() is not tree or etree.QName(el).localname not in ("sp", "pic"):
+            continue
+        if etree.QName(el).localname == "sp" and (shape_text(el).strip() or not (_has_fill(el) or el.find(q("p:spPr") + "/" + q("a:ln")) is not None)):
+            continue
+        b = element_bbox(el)
+        if not b or b[2] <= 0 or b[3] <= 0 or b[2] * b[3] >= 0.5 * W * H:
+            continue
+        box = Bbox(x=b[0], y=b[1], w=b[2], h=b[3])
+
+        def inside(bx: Bbox) -> bool:
+            cx, cy = bx.x + bx.w / 2, bx.y + bx.h / 2
+            return box.x <= cx <= box.x2 and box.y <= cy <= box.y2
+
+        hosted = [t for t in text_slots if t.shape_id != sid and inside(t.bbox.to_emu(W, H))]
+        if not hosted or any(t.shape_id in ctx.filled for t in hosted):
+            continue
+        occupants = []
+        busy = False
+        for other in list(tree):
+            if other is el or etree.QName(other).localname not in ("sp", "pic", "graphicFrame", "grpSp", "cxnSp"):
+                continue
+            ob = element_bbox(other)
+            if not ob or not inside(Bbox(x=ob[0], y=ob[1], w=ob[2], h=ob[3])):
+                continue
+            osid = ctx.id_of(other) or ""
+            if etree.QName(other).localname == "graphicFrame" or osid in ctx.filled or shape_text(other).strip():
+                busy = True
+                break
+            if ob[2] * ob[3] <= 0.2 * box.area:
+                occupants.append(other)
+        if busy:
+            continue
+        for o in [el] + occupants:
+            ctx.remove_el(o)
 
 
 def _remove_placeholder_boxes(ctx: _SlideCtx) -> None:
@@ -951,6 +1195,7 @@ def render_clone(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
     titles = ctx.slots(SlotRole.title)
     if titles:
         ctx.fill_slot(titles[0], [ParagraphSpec(oslide.headline)], min_ratio=0.7)
+        _fill_label(ctx, titles[0], oslide)
     elif oslide.headline and oslide.kind not in (PatternKind.thanks,):
         ctx.warnings.append("pattern has no title slot")
     subtitle_text = oslide.subtitle or (oslide.section if oslide.kind not in (PatternKind.title, PatternKind.thanks, PatternKind.section) else None)
@@ -1001,7 +1246,9 @@ def render_clone(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
         target = ctx.slots(SlotRole.body) or ctx.slots(SlotRole.bullet_list) or ctx.slots(SlotRole.card_body) or ctx.slots(SlotRole.caption)
         if target:
             big = ctx.largest(target)
-            ctx.fill_slot(big, [ParagraphSpec(p, bullet=False) for p in c.paragraphs], size_hint=_running_size(big), grow_to=text_cap)
+            lone = len(c.paragraphs) == 1 and len(c.paragraphs[0].split()) <= 25 and not c.bullets and not items
+            cap = max(body_cap, ctx.typo.size_for("h1", body_cap) * 0.75) if lone else text_cap
+            ctx.fill_slot(big, [ParagraphSpec(p, bullet=False) for p in c.paragraphs], size_hint=_running_size(big), grow_to=cap)
         elif oslide.kind not in (PatternKind.chart, PatternKind.table):
             ctx.warnings.append("no slot for paragraphs")
     if c.quote:
@@ -1046,6 +1293,9 @@ def render_clone(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
         if slot.container and not is_nested(el):
             remove_element(el)
             ctx.removed.add(slot.shape_id)
+        elif has_visible_style(el) and not is_nested(el) and slot.bbox.area <= 0.08 and len(slot.sample_text or "") <= 40:
+            remove_element(el)  # a painted label («Примечание» in a pill) without its text is an empty lozenge
+            ctx.removed.add(slot.shape_id)
         elif has_visible_style(el) or is_nested(el):
             clear_text(el)
         else:
@@ -1057,6 +1307,7 @@ def render_clone(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
         txt = shape_text(el)
         if txt.strip() and looks_like_placeholder(txt):
             clear_text(el)
+    _remove_orphan_holders(ctx)
     # sample content pictures (photos, screenshots, chart images) that nothing replaced are stale: drop them
     has_visual = bool(c.image_hint or c.chart is not None or c.table is not None)
     drop_icons = oslide.kind in (PatternKind.thanks, PatternKind.title, PatternKind.section, PatternKind.quote)
@@ -1075,6 +1326,7 @@ def render_clone(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
         if not has_visual or slot.bbox.area >= 0.05:
             remove_element(el)
             ctx.removed.add(slot.shape_id)
+    _remove_qr_codes(ctx)
     if oslide.notes:
         try:
             slide.notes_slide.notes_text_frame.text = oslide.notes

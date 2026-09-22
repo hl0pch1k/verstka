@@ -276,3 +276,55 @@ def test_merge_items_fills_every_cell():
     assert len(merged) == 4
     flat = [b for m in merged for b in (m.bullets or [m.title])]
     assert flat == [f"Пункт {i}" for i in range(5)]
+
+
+def test_a_panel_hosting_empty_placeholders_is_not_an_empty_card():
+    """roles.is_empty_frame: the white half-slide panel of LCT slide 12 holds empty title/object placeholders — it is
+    the ground of those slots and must survive rendering."""
+    from verstka.analysis.roles import is_empty_frame
+    from verstka.analysis.shapes import ShapeInfo, TextInfo
+    from verstka.schemas.common import Bbox, ShapeKind
+
+    W, H = 12192000, 6858000
+    panel = ShapeInfo(id="30", name="Прямоугольник 29", kind=ShapeKind.sp, bbox=Bbox(x=0, y=int(H * 0.1), w=int(W * 0.5), h=int(H * 0.8)), z=1, fill_hex="FFFFFF", geometry="rect")
+    body = ShapeInfo(id="29", name="Объект 28", kind=ShapeKind.sp, bbox=Bbox(x=int(W * 0.04), y=int(H * 0.2), w=int(W * 0.4), h=int(H * 0.6)), z=2, is_placeholder=True, ph_type="obj", text=TextInfo())
+    assert not is_empty_frame(panel, [panel, body], W, H)
+    lone = ShapeInfo(id="31", name="card", kind=ShapeKind.sp, bbox=Bbox(x=int(W * 0.55), y=int(H * 0.2), w=int(W * 0.3), h=int(H * 0.5)), z=3, fill_hex="FFFFFF", geometry="roundRect")
+    assert is_empty_frame(lone, [panel, body, lone], W, H)
+
+
+def test_a_label_pill_without_its_text_is_removed(tmp_path):
+    """clone._remove_orphan_holders: a coloured pill whose tag slot stays empty must not remain as a blank lozenge."""
+    from pptx.dml.color import RGBColor
+    from pptx.enum.shapes import MSO_SHAPE
+
+    from verstka.analysis.manifest import analyze_template
+    from verstka.ingest.workspace import TemplateWorkspace
+    from verstka.rendering.clone import render_clone
+    from verstka.schemas.common import PatternKind
+    from verstka.schemas.layout import LayoutSlide
+    from verstka.schemas.outline import DeckOutline, OutlineSlide, SlideContent
+
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Emu(12192000), Emu(6858000)
+    s = prs.slides.add_slide(prs.slide_layouts[6])
+    pill = s.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Emu(600000), Emu(300000), Emu(1800000), Emu(400000))
+    pill.fill.solid()
+    pill.fill.fore_color.rgb = RGBColor(0x00, 0x77, 0xFF)
+    tag = s.shapes.add_textbox(Emu(650000), Emu(330000), Emu(1700000), Emu(340000))
+    tag.text_frame.text = "Проблема"
+    tag.text_frame.paragraphs[0].runs[0].font.size = Emu(12 * 12700)
+    head = s.shapes.add_textbox(Emu(600000), Emu(900000), Emu(9000000), Emu(900000))
+    head.text_frame.text = "Большой заголовок слайда"
+    head.text_frame.paragraphs[0].runs[0].font.size = Emu(36 * 12700)
+    body = s.shapes.add_textbox(Emu(600000), Emu(2200000), Emu(9000000), Emu(3000000))
+    body.text_frame.text = "Первый тезис\\nВторой тезис\\nТретий тезис"
+    path = tmp_path / "pill.pptx"
+    prs.save(str(path))
+    m = analyze_template(path, workspace_root=tmp_path / "ws", use_llm=False, use_vlm=False, render=False)
+    p = m.patterns[0]
+    oslide = OutlineSlide(id="s1", kind=PatternKind.bullets, headline="Новый заголовок", content=SlideContent(bullets=["Один", "Два"]))
+    ws = TemplateWorkspace.open(m.template_id, tmp_path / "ws")
+    slide, _ = render_clone(DeckBuilder(ws.source), LayoutSlide(outline_id="s1", mode="clone", pattern_id=p.id), oslide, p, m, ws, DeckOutline(title="t", slides=[oslide]))
+    names = [sh.shape_id for sh in slide.shapes]
+    assert pill.shape_id not in names, "the empty pill stayed"
