@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from verstka.audit.checks.common import CONTENT_TYPES, contains, fix, is_chrome_like, text_elements, text_height_needed_pt, title_element, usable_height_pt
+from verstka.audit.checks.common import CONTENT_TYPES, at_template_position, contains, fix, is_chrome_like, text_elements, text_height_needed_pt, title_element, usable_height_pt
 from verstka.audit.registry import AuditContext, check
 from verstka.rendering.fonts import text_width_pt
 from verstka.schemas.audit import CheckSpec, Issue
@@ -58,7 +58,7 @@ def text_clipped(ctx: AuditContext) -> list[Issue]:
 def overlap(ctx: AuditContext) -> list[Issue]:
     out: list[Issue] = []
     for s in ctx.ir.slides:
-        texts = [e for e in text_elements(s) if not is_chrome_like(e, ctx.ir)]
+        texts = [e for e in text_elements(s) if not is_chrome_like(e, ctx.ir, ctx.manifest)]
         seen: set[tuple[str, str]] = set()
         for i, a in enumerate(texts):
             for b in texts[i + 1 :]:
@@ -142,7 +142,7 @@ def margin_violation(ctx: AuditContext) -> list[Issue]:
     safe = ctx.manifest.tokens.spacing.safe_area
     for s in ctx.ir.slides:
         for e in text_elements(s):
-            if is_chrome_like(e, ctx.ir) or e.nested:
+            if is_chrome_like(e, ctx.ir, ctx.manifest) or e.nested or at_template_position(e, ctx.manifest):
                 continue
             f = e.bbox_frac
             if f.x < safe.x - 0.03 or f.x2 > safe.x2 + 0.03 or f.y2 > safe.y2 + 0.05:
@@ -159,7 +159,7 @@ def grid_alignment(ctx: AuditContext) -> list[Issue]:
     for s in ctx.ir.slides:
         misaligned = []
         for e in text_elements(s):
-            if is_chrome_like(e, ctx.ir) or e.nested or e.bbox_frac.w < 0.2:
+            if is_chrome_like(e, ctx.ir, ctx.manifest) or e.nested or e.bbox_frac.w < 0.2:
                 continue
             if all(abs(e.bbox_frac.x - c) > 0.015 for c in cols):
                 misaligned.append(e)

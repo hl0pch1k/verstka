@@ -65,7 +65,7 @@ def fill_ratio(ctx: AuditContext) -> list[Issue]:
     W, H = ctx.ir.slide_w, ctx.ir.slide_h
     safe = ctx.manifest.tokens.spacing.safe_area.to_emu(W, H)
     for s in ctx.ir.slides:
-        els = content_elements(s, ctx.ir)
+        els = content_elements(s, ctx.ir, ctx.manifest)
         if not els:
             continue
         # union area via coarse raster (fast, robust to overlaps)

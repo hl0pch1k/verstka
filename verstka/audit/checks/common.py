@@ -8,6 +8,7 @@ from verstka.rendering.fonts import wrap_lines
 from verstka.schemas.audit import FixAction
 from verstka.schemas.common import EMU_PER_PT, Bbox, hex_to_rgb, rgb_to_hex
 from verstka.schemas.deck_ir import DeckIR, IRElement, IRSlide
+from verstka.schemas.template import TemplateManifest
 
 CONTENT_TYPES = ("text", "picture", "chart", "table")
 
@@ -35,16 +36,38 @@ def composite_hex(fg_hex: str, alpha: float, under_hex: str) -> str:
     return rgb_to_hex(alpha * r1 + (1 - alpha) * r2, alpha * g1 + (1 - alpha) * g2, alpha * b1 + (1 - alpha) * b2)
 
 
-def is_chrome_like(e: IRElement, ir: DeckIR) -> bool:
-    """Small elements near the edges (logos, footers, page numbers) are not content."""
+def is_chrome_like(e: IRElement, ir: DeckIR, manifest: Optional["TemplateManifest"] = None) -> bool:
+    """Logos, footers, page numbers are not content: small elements near the edges, and anything standing where the
+    template analysis found slide chrome (a footer may be a third of the slide wide and still belong to the template)."""
     f = e.bbox_frac
     tiny = f.area < 0.01
     near_edge = f.y > 0.88 or f.y2 < 0.08 or f.x2 < 0.06 or f.x > 0.94
-    return tiny and near_edge
+    if tiny and near_edge:
+        return True
+    if manifest is not None:
+        for c in manifest.tokens.chrome:
+            if c.source != "slide" or (c.kind == "pic") != (e.type == "picture"):
+                continue
+            if f.close_to(c.bbox, 0.015):
+                return True
+    return False
 
 
-def content_elements(slide: IRSlide, ir: DeckIR) -> list[IRElement]:
-    return [e for e in slide.elements if e.type in CONTENT_TYPES and e.bbox.area > 0 and not is_chrome_like(e, ir)]
+def at_template_position(e: IRElement, manifest: Optional["TemplateManifest"]) -> bool:
+    """The element starts exactly where the template itself places a slot (any sample): the template's geometry,
+    not a layout mistake — margin estimates never override it."""
+    if manifest is None:
+        return False
+    f = e.bbox_frac
+    for p in manifest.patterns:
+        for s in p.slots:
+            if abs(s.bbox.x - f.x) <= 0.006 and abs(s.bbox.y - f.y) <= 0.006:
+                return True
+    return False
+
+
+def content_elements(slide: IRSlide, ir: DeckIR, manifest: Optional["TemplateManifest"] = None) -> list[IRElement]:
+    return [e for e in slide.elements if e.type in CONTENT_TYPES and e.bbox.area > 0 and not is_chrome_like(e, ir, manifest)]
 
 
 def text_height_needed_pt(e: IRElement, line_spacing: float = 1.2) -> tuple[float, int]:

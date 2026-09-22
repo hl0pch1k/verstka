@@ -69,7 +69,7 @@ def empty_slide(ctx: AuditContext) -> list[Issue]:
     for s in ctx.ir.slides:
         if s.index in (1, n):
             continue
-        els = content_elements(s, ctx.ir)
+        els = content_elements(s, ctx.ir, ctx.manifest)
         title = title_element(s)
         others = [e for e in els if e is not title]
         text_others = [e for e in others if e.has_text or e.type in ("chart", "table")]

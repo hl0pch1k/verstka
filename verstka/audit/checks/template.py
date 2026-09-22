@@ -155,12 +155,15 @@ def contrast_low(ctx: AuditContext) -> list[Issue]:
     for s in ctx.ir.slides:
         bg_slide = s.background_hex or tokens.color_for("background.dark" if s.family.value == "dark" else "background.light") or ("000000" if s.family.value == "dark" else "FFFFFF")
         for e in text_elements(s):
-            if is_chrome_like(e, ctx.ir):
+            if is_chrome_like(e, ctx.ir, ctx.manifest):
                 continue
             color = e.dominant_color
             if not color:
                 continue
-            under = enclosing_fill(s, e, bg_slide) or bg_slide
+            enclosing = enclosing_fill(s, e, bg_slide)
+            under = enclosing or bg_slide
+            # a picture or gradient ground: its colour under the text is unknown here — report, never recolour
+            uncertain = enclosing is None and not s.background_hex
             try:
                 bg = composite_hex(e.fill_hex, fill_alpha(e), under) if e.fill_hex else under
                 cr = contrast_ratio(color, bg)
@@ -171,7 +174,9 @@ def contrast_low(ctx: AuditContext) -> list[Issue]:
             if cr < need:
                 accent_text = any(t.hex == color and any(r.startswith("accent.") for r in t.roles) for t in tokens.colors)
                 severity = "error" if cr < 2.5 else ("info" if (accent_text and cr >= 3.0) else "warn")  # brand accent on dark is the template's own choice
-                to = _contrast_replacement(tokens, bg, need)
+                to = None if uncertain else _contrast_replacement(tokens, bg, need)
                 autofix = fix("recolor", f"заменить цвет текста на #{to}", element_ids=[e.id], to=to, scope="text") if to else None
+                if uncertain:
+                    severity = "info"
                 out.append(ctx.new_issue(CONTRAST_LOW, s.index, f"контраст {cr:.1f}:1 у «{e.text[:30]}» (#{color} на #{bg})", bboxes=[e.bbox_frac], element_ids=[e.id], severity=severity, details={"contrast": round(cr, 2), "background": bg}, autofix=autofix))
     return out

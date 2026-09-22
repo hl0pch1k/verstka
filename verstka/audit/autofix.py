@@ -329,15 +329,19 @@ def autofix_loop(
     use_models: bool = False,
     only_ids: Optional[set[str]] = None,
     images_dir: Optional[Path] = None,
+    render: Optional[bool] = None,
 ) -> tuple[AuditReport, LayoutPlan, DeckOutline, RenderResult | None]:
     """Apply fixes while the audit improves; an iteration that makes it worse is rolled back (deck, plan, outline).
 
+    Slide images are rendered for every re-audit only when the model checks need them (`render`, default: with
+    models) — LibreOffice is the slowest step of the loop and the deterministic checks work on the XML.
     Returns the final report/plan/outline (and last render)."""
     pptx = Path(pptx)
     current = report
     render_result: RenderResult | None = None
     slide_w, slide_h = manifest.slide_size.w, manifest.slide_size.h
-    audit_kw = dict(providers=providers if use_models else None, skills=skills if use_models else None, use_vlm=use_models, use_llm=use_models, images_dir=images_dir, strategy=report.strategy)
+    render = use_models if render is None else render
+    audit_kw = dict(providers=providers if use_models else None, skills=skills if use_models else None, use_vlm=use_models, use_llm=use_models, images_dir=images_dir, strategy=report.strategy, render=render)
     selected_keys = {_issue_key(i) for i in current.issues if i.id in only_ids} if only_ids is not None else None
     for it in range(1, max_iterations + 1):
         fixes = plan_fixes(current, plan, only_ids)
