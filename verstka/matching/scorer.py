@@ -56,18 +56,36 @@ def score_pattern(
     recent_ids = recent_ids or []
     reasons: list[str] = []
     fit: dict = {}
+    if pattern.reference:
+        return ScoreResult(0.0, [f"служебный слайд шаблона: {pattern.reference}"], fit)
     kind = kind_compat(slide.kind, pattern.kind)
     if kind <= 0:
         return ScoreResult(0.0, [f"тип {pattern.kind.value} несовместим с {slide.kind.value}"], fit)
     reasons.append(f"тип {pattern.kind.value} для {slide.kind.value}: {kind:.1f}")
+    has_title_slot = any(s.role == SlotRole.title for s in pattern.slots)
+    if slide.headline and not has_title_slot:
+        if slide.kind in (PatternKind.title, PatternKind.section, PatternKind.thanks):
+            # the heading of such a slide is its whole content: a sample whose title is baked into the picture is unusable
+            return ScoreResult(0.0, reasons + ["в образце нет слота под заголовок (текст зашит в картинку или отсутствует)"], fit)
+        if slide.kind != PatternKind.quote:
+            kind *= 0.3
+            reasons.append("в образце нет слота под заголовок: заголовок слайда потеряется")
 
     # chart / table / quote need room
     slide_kind = slide.kind
-    if slide_kind in (PatternKind.chart, PatternKind.table):
-        big = [s for s in pattern.slots if s.role in (SlotRole.image, SlotRole.body, SlotRole.bullet_list) and s.bbox.area >= 0.12]
-        if pattern.kind not in (PatternKind.chart, PatternKind.table) and not big:
+    data_room: Optional[float] = None
+    if slide_kind in (PatternKind.chart, PatternKind.table) or slide.content.chart is not None or slide.content.table is not None:
+        # the data object needs a free area: a sample chart/table (cleared by the renderer), a picture or a big text box
+        room = max((s.bbox.area for s in pattern.slots if s.role in (SlotRole.image, SlotRole.body, SlotRole.bullet_list)), default=0.0)
+        if pattern.kind in (PatternKind.chart, PatternKind.table):
+            room = max(room, 0.35)
+        data_room = min(1.0, room / 0.3)
+        if room < 0.12:
             kind *= 0.3
+            data_room = 0.2
             reasons.append("нет крупной области под диаграмму или таблицу")
+        else:
+            reasons.append(f"область под данные: {room:.0%} слайда")
     if slide_kind == PatternKind.quote and slide.content.quote:
         cap_q = max((s.capacity.max_chars for s in pattern.slots if s.role in (SlotRole.body, SlotRole.bullet_list, SlotRole.card_body, SlotRole.subtitle)), default=0)
         if cap_q < len(slide.content.quote) * 0.8:
@@ -112,6 +130,8 @@ def score_pattern(
                 reasons.append(f"нет повторяющейся группы под {n} элементов")
             fit["items"] = f"{n}/{role_slots}"
 
+    if data_room is not None and n < 2:
+        cap = data_room  # no items to count: the capacity of such a slide is the room for its chart or table
     # text fit
     worst = 0.0
     for role_name, need in needed_chars(slide).items():

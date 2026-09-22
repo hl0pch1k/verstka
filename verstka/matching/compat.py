@@ -7,7 +7,7 @@ from verstka.schemas.outline import OutlineSlide
 
 # outline kind → acceptable pattern kinds with a compatibility factor
 KIND_FALLBACKS: dict[K, list[tuple[K, float]]] = {
-    K.title: [(K.title, 1.0)],
+    K.title: [(K.title, 1.0), (K.section, 0.6), (K.thanks, 0.4)],  # a divider sample makes a fine cover when the title sample is unusable
     K.section: [(K.section, 1.0), (K.title, 0.5)],
     K.agenda: [(K.agenda, 1.0), (K.bullets, 0.6), (K.process, 0.5), (K.cards, 0.4)],
     K.bullets: [(K.bullets, 1.0), (K.two_column, 0.5), (K.cards, 0.5), (K.image_text, 0.4), (K.freeform, 0.3)],
