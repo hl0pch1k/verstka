@@ -482,9 +482,11 @@ def test_extra3_bullets_into_two_cells_are_lists_not_title_plus_text(tmp_path):
     oslide = OutlineSlide(id="s3", kind=PatternKind.bullets, headline="Проблема", content=SlideContent(bullets=bullets))
     slide, warnings, _ = _clone(pptx, _manifest([pat]), pat, oslide, tmp_path)
     els = slide_shape_elements(slide)
+    # the row reflows to three narrower cells (one thesis each) instead of merging theses into lists
+    row = sorted((e for e in els.values() if element_bbox(e) and abs(element_bbox(e)[1] - int(0.38 * 6858000)) < 20000), key=lambda e: element_bbox(e)[0])
     seen = []
-    for c in cards:
-        for p in _paras(els[_sid(c)]):
+    for e in row:
+        for p in _paras(e):
             t = "".join(x.text or "" for x in p.iter(q("a:t")))
             if t:
                 seen.append(t)

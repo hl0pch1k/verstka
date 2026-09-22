@@ -277,8 +277,11 @@ def test_xml_fixes_are_rederived_after_a_rerender(tmp_path, monkeypatch):
     fresh_refont = FixAction(action="refont", params={"element_ids": ["77"]})
     calls: list[list[tuple[int, FixAction]]] = []
 
+    audits: list[bool] = []
+
     def fake_audit(path, manifest, outline=None, ws=None, render=True, **kw):
-        if not render:  # render-free audit of the re-rendered deck: element ids changed
+        audits.append(render)
+        if len(audits) == 1:  # the audit right after the re-render: element ids changed
             return _report(path, [_issue("font_not_in_template-2-9", 2, "font_not_in_template", "error", "s2", fresh_refont)])
         return _report(path, [])
 
@@ -288,6 +291,7 @@ def test_xml_fixes_are_rederived_after_a_rerender(tmp_path, monkeypatch):
     monkeypatch.setattr(af, "_xml_fixes", lambda p, actions, manifest, w, h: calls.append(list(actions)) or [f"slide {i}: font in {a.params['element_ids'][0]}" for i, a in actions])
     final, *_ = af.autofix_loop(pptx, report0, outline, plan, _manifest(), None, max_iterations=2)
     assert calls == [[(2, fresh_refont)]], calls
+    assert audits == [False, False]  # without models no audit of the loop starts LibreOffice
     xml = [f for f in final.applied_fixes if f.get("action") == "xml"]
     assert xml and xml[0]["iteration"] == 1 and "77" in xml[0]["result"]
     assert final.summary.errors == 0

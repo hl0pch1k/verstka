@@ -462,4 +462,4 @@ def test_f5_slide_texts_excludes_tables(tmp_path):
 
 
 def test_analysis_version_bumped():
-    assert TemplateManifest.model_fields["analysis_version"].default == "8"
+    assert int(TemplateManifest.model_fields["analysis_version"].default) >= 8

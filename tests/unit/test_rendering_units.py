@@ -10,7 +10,7 @@ from verstka.rendering.charts import add_chart, number_format
 from verstka.rendering.deck import DeckBuilder, element_bbox, slide_shape_elements
 from verstka.rendering.fit import fit_size
 from verstka.rendering.fonts import measure_text_lines, text_width_pt, wrap_lines
-from verstka.rendering.groups import adjust_group, cell_bbox
+from verstka.rendering.groups import adjust_group, cell_bbox, cells_elements
 from verstka.rendering.tables import add_table
 from verstka.rendering.textfill import ParagraphSpec, fill_text, shape_text
 from verstka.schemas.common import Bbox, PatternKind
@@ -96,8 +96,13 @@ def test_adjust_group_shrink_and_grow(simple_deck, tmp_path):
     b2 = DeckBuilder(simple_deck)
     slide2 = b2.clone_slide(cards.source_slide)
     cells2, nid2 = adjust_group(slide2, group_big, 5, W, H, b2.next_shape_id(slide2))
-    # three 26%-wide cards already span the slide: no duplicate fits, growth is capped by the slide bounds
-    assert len(cells2) == 3
+    # three 26%-wide cards already span the slide: more cards reflow narrower over the same span (≥ 60% width)
+    assert len(cells2) >= 4
+    boxes2 = [cell_bbox(c) for c in cells2]
+    orig_w = cell_bbox(cells_elements(DeckBuilder(simple_deck).source_slide(cards.source_slide), group)[0]).w
+    assert all(b.x >= 0 and b.x2 <= W for b in boxes2)
+    assert all(b2.x > b1.x2 for b1, b2 in zip(boxes2, boxes2[1:])), "cells must not overlap"
+    assert min(b.w for b in boxes2) >= 0.55 * orig_w
     # shrink the cards first so that duplicates fit, then grow
     b4 = DeckBuilder(simple_deck)
     slide4 = b4.clone_slide(cards.source_slide)
@@ -118,7 +123,9 @@ def test_adjust_group_shrink_and_grow(simple_deck, tmp_path):
     b3 = DeckBuilder(simple_deck)
     slide3 = b3.clone_slide(cards.source_slide)
     cells3, _ = adjust_group(slide3, group, 7, W, H, b3.next_shape_id(slide3))
-    assert len(cells3) == max(group.max_n, 3)
+    boxes3 = [cell_bbox(c) for c in cells3]
+    assert 3 <= len(cells3) < 7  # bounded by the 60%-width floor, not by the request
+    assert all(b.x2 <= W for b in boxes3) and all(b2.x > b1.x2 for b1, b2 in zip(boxes3, boxes3[1:]))
 
 
 def test_chart_and_table_native(simple_deck, tmp_path):

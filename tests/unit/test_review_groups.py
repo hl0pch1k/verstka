@@ -169,12 +169,32 @@ def test_adjust_group_column_axis_redistributes_with_riders(tmp_path):
     assert len(cells) == 2
     after = _by_name(slide)
     assert "Cell 3" not in after and "Mark 3" not in after
-    # second cell spread down towards the end of the original span, x untouched, marker follows
-    c2_before, c2_after = before["Cell 2"], element_bbox(after["Cell 2"])
-    assert c2_after[1] > c2_before[1] and c2_after[0] == c2_before[0]
-    span_end = int(0.2 * H) + 2 * (int(0.18 * H) + int(0.07 * H)) + int(0.18 * H)
-    assert abs(c2_after[1] + c2_after[3] - span_end) <= 2
-    assert element_bbox(after["Mark 2"])[1] - before["Mark 2"][1] == c2_after[1] - c2_before[1]
+    # plain text rows (an agenda) keep the designed rhythm: nothing moves, the removed row's marker left with it
+    for name in ("Cell 1", "Cell 2", "Mark 1", "Mark 2"):
+        assert element_bbox(after[name]) == before[name], name
+
+
+def test_adjust_group_column_of_cards_stretches_over_the_span(tmp_path):
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Emu(W), Emu(H)
+    s = prs.slides.add_slide(prs.slide_layouts[6])
+    cells = []
+    for i in range(3):
+        y = 0.2 + i * 0.25
+        bg = _shape(s, 0.1, y, 0.6, 0.18, kind=MSO_SHAPE.ROUNDED_RECTANGLE, name=f"Card {i + 1}")
+        tx = _text(s, 0.12, y + 0.02, 0.56, 0.14, f"Пункт {i + 1}", name=f"Text {i + 1}")
+        cells.append([_sid(bg), _sid(tx)])
+    prs.save(tmp_path / "cards.pptx")
+    group = RepeatGroup(id="g1", member_shape_ids=cells, max_n=3, axis="column", gap=0.07, cell_bbox=BboxFrac(x=0.1, y=0.2, w=0.6, h=0.18))
+    b = DeckBuilder(tmp_path / "cards.pptx")
+    slide = b.clone_slide(1)
+    got, _ = adjust_group(slide, group, 2, W, H, b.next_shape_id(slide))
+    boxes = [cell_bbox(c) for c in got]
+    span_end = int(0.2 * H) + 2 * int(0.25 * H) + int(0.18 * H)
+    assert len(got) == 2 and boxes[0].h > int(0.18 * H) * 1.2
+    assert abs(boxes[1].y2 - span_end) <= int(0.01 * H)
+    text2 = element_bbox(_by_name(slide)["Text 2"])
+    assert boxes[1].y < text2[1] and text2[1] + text2[3] < boxes[1].y2  # the text stretched inside its card
 
 
 # ---- R2: synth layout choice and title height ---------------------------------------------------------
