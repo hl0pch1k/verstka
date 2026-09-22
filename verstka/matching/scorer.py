@@ -13,6 +13,8 @@ from verstka.schemas.template import Pattern, TemplateManifest
 
 _GROUP_ROLES = {SlotRole.card_title, SlotRole.card_body, SlotRole.number, SlotRole.number_label, SlotRole.icon}
 _STANDALONE_KINDS = {PatternKind.title, PatternKind.section, PatternKind.thanks, PatternKind.quote}
+_CONTENT_ROLES = (SlotRole.body, SlotRole.bullet_list, SlotRole.card_title, SlotRole.card_body, SlotRole.number, SlotRole.number_label, SlotRole.caption)
+_NUMBER_KINDS = {PatternKind.stat_row, PatternKind.big_number}
 
 
 @dataclass
@@ -31,6 +33,16 @@ def _slot_capacity(pattern: Pattern, role: SlotRole) -> int:
         grouped = [s for s in slots if s.group_id]
         return max((s.capacity.max_chars for s in (grouped or slots)), default=0)
     return sum(s.capacity.max_chars for s in slots)
+
+
+def _number_holders(pattern: Pattern, group) -> int:
+    """How many figures the clone renderer can place: the cells of the text group (grown up to max_n), otherwise the standalone number slots.
+
+    Numbers are never merged, so every figure beyond this count is lost.
+    """
+    if group is not None:
+        return max(len(group.member_shape_ids), group.max_n)
+    return sum(1 for s in pattern.slots if s.role == SlotRole.number and not s.group_id)
 
 
 def score_pattern(
@@ -117,8 +129,25 @@ def score_pattern(
         if ratio > 1.0:
             fit[f"overflow_{role_name}"] = round(ratio, 2)
     fit["text_ratio"] = round(worst, 2)
-    # clutter: text slots the content cannot fill will be emptied — prefer patterns whose slot count matches
+    # hard gates: a pattern without room for the slide's content would render a headline over stale sample shapes
+    content = slide.content
     needed_roles = needed_chars(slide)
+    content_need = sum(v for k, v in needed_roles.items() if k not in ("title", "subtitle"))
+    content_cap = sum(s.capacity.max_chars for s in pattern.slots if s.role in _CONTENT_ROLES)
+    has_data_object = content.chart is not None or content.table is not None
+    if content_need > 0 and content_cap == 0 and not has_data_object:
+        return ScoreResult(0.0, reasons + ["в паттерне нет ни одного слота под содержимое"], fit)
+    if content_need > 0 and content_cap < 0.35 * content_need and not has_data_object:
+        kind *= 0.3
+        reasons.append(f"ёмкость слотов ({content_cap} симв.) намного меньше объёма содержимого ({content_need} симв.)")
+    numbers_lost = False
+    if slide_kind in _NUMBER_KINDS and n >= 1:
+        holders = _number_holders(pattern, group)
+        if n > holders:
+            cap = 0.0
+            kind *= 0.5
+            numbers_lost = True
+            reasons.append(f"числа не поместятся и будут потеряны: {n} чисел, мест {holders}")
     n_items = needed_items(slide)
     text_slots = [s for s in pattern.slots if s.role in (SlotRole.body, SlotRole.bullet_list, SlotRole.card_title, SlotRole.card_body, SlotRole.number, SlotRole.number_label, SlotRole.caption)]
     needed_slots = sum(1 for r in needed_roles if r not in ("title", "subtitle")) + max(n_items - 1, 0) * sum(1 for r in ("card_title", "card_body", "number", "number_label") if r in needed_roles)
@@ -138,6 +167,11 @@ def score_pattern(
     else:
         text = 0.15
         reasons.append(f"текст не помещается (×{worst:.2f})")
+    # a pattern that needs the text shrunk ×1.8 renders tiny type: that outweighs an exact kind match
+    if worst > 1.8:
+        kind *= 0.6
+    elif worst > 1.3:
+        kind *= 0.85
 
     # family continuity
     fam = 1.0
@@ -150,9 +184,8 @@ def score_pattern(
         reasons.append("паттерн уже использован недавно")
     weight = strategy.weight(pattern.kind.value) if pattern.kind == slide.kind else 1.0
     if weight != 1.0:
-        reasons.append(f"вес стратегии {strategy.name}: ×{weight:.2f}")
+        reasons.append(f"вес стратегии {strategy.name} для типа: ×{weight:.2f}")
     # a large sample image (photo, screenshot, chart picture) that the content cannot replace would stay as stale sample content
-    content = slide.content
     has_visual = bool(content.image_hint or content.chart is not None or content.table is not None)
     stale_images = [s for s in pattern.slots if s.role == SlotRole.image and s.bbox.area >= 0.12]
     if stale_images and not has_visual:
@@ -168,6 +201,11 @@ def score_pattern(
         style = 0.04 if n_decor == 0 else 0.0
     if style:
         reasons.append(f"стиль стратегии {strategy.name}: +{style:.2f}")
-    base = 0.45 * kind + 0.25 * cap + 0.1 * text + 0.05 * fam + 0.1 * pattern.quality + diversity - clutter + style
-    score = max(0.0, min(1.2, base * weight))
+    # the strategy weight scales only the kind term, so it cannot lift a pattern with failed capacity above 1.0
+    base = 0.45 * kind * weight + 0.25 * cap + 0.1 * text + 0.05 * fam + 0.1 * pattern.quality + diversity - clutter + style
+    score = max(0.0, min(1.2, base))
+    if numbers_lost and score >= strategy.synth_threshold:
+        # losing a fact is worse than any synthesized stat row: such a pattern may stay an alternative but never wins over synth
+        score = max(0.0, strategy.synth_threshold - 0.05)
+        reasons.append(f"балл опущен ниже порога синтеза {strategy.synth_threshold:.2f}, чтобы не терять числа")
     return ScoreResult(round(score, 3), reasons, fit)

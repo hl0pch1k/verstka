@@ -51,7 +51,9 @@ def fit_size(
     for s in candidates:
         lines = _lines_for(paragraphs, family, s, bold, usable_w)
         height = lines * s * line_spacing + max(len(paragraphs) - 1, 0) * para_spacing_pt
-        last = FitResult(s, height <= usable_h, lines, height)
+        # a single line that fits the width needs the glyph height only: line spacing adds nothing below it
+        fits = height <= usable_h or (lines == 1 and len(paragraphs) == 1 and usable_h >= s)
+        last = FitResult(s, fits, lines, height)
         if last.fits:
             return last
     return last

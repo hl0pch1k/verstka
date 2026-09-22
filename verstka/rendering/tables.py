@@ -24,6 +24,11 @@ def _is_numeric(text: str) -> bool:
     return bool(t) and bool(_NUM_RE.match(t)) and any(ch.isdigit() for ch in t)
 
 
+def _column_is_numeric(rows: list[list[str]], j: int) -> bool:
+    cells = [row[j] for row in rows if j < len(row) and row[j].strip()]
+    return bool(cells) and all(_is_numeric(c) for c in cells)
+
+
 def _set_borders(cell, color_hex: Optional[str], width_emu: int = 6350, bottom_only: bool = True) -> None:
     tcPr = cell._tc.get_or_add_tcPr()
     for tag in ("a:lnL", "a:lnR", "a:lnT", "a:lnB"):
@@ -90,14 +95,15 @@ def add_table(slide: Slide, bbox: Bbox, table: TableData, style: TableStyleSpec,
 
     header_fill = style.header_fill_hex
     header_text = style.header_text_hex or "FFFFFF"
+    # one alignment per column, shared by the header and the body: numeric columns (every non-empty cell is a number) go right
+    aligns = [PP_ALIGN.RIGHT if j > 0 and _column_is_numeric(table.rows, j) else PP_ALIGN.LEFT for j in range(n_cols)]
     for j, col in enumerate(table.columns):
-        write(tbl.cell(0, j), col, bold=True, color_hex=header_text, align=PP_ALIGN.LEFT if j == 0 else PP_ALIGN.RIGHT, fill_hex=header_fill)
+        write(tbl.cell(0, j), col, bold=True, color_hex=header_text, align=aligns[j], fill_hex=header_fill)
         _set_borders(tbl.cell(0, j), None)
     for i, row in enumerate(table.rows, start=1):
         band = style.band_fill_hex if (n_rows > 5 and i % 2 == 0) else None
         for j in range(n_cols):
             text = row[j] if j < len(row) else ""
-            numeric = _is_numeric(text) and j > 0
-            write(tbl.cell(i, j), text, bold=False, color_hex=body_hex, align=PP_ALIGN.RIGHT if numeric else PP_ALIGN.LEFT, fill_hex=band)
+            write(tbl.cell(i, j), text, bold=False, color_hex=body_hex, align=aligns[j], fill_hex=band)
             _set_borders(tbl.cell(i, j), style.border_hex or "D9D9D9")
     return gf

@@ -37,7 +37,8 @@ class DeckBuilder:
         return self.prs.slides[index_1based - 1]
 
     def layouts(self):
-        return list(self.prs.slide_layouts)
+        """Every layout of every master (python-pptx's `slide_layouts` covers the first master only)."""
+        return [layout for master in self.prs.slide_masters for layout in master.slide_layouts]
 
     # ---- cloning ----------------------------------------------------------------
     def clone_slide(self, index_1based: int) -> Slide:

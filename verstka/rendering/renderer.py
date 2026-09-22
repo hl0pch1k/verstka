@@ -41,6 +41,28 @@ def _mark_notes(builder: DeckBuilder, oslide) -> None:
         pass
 
 
+def _snapshot(builder: DeckBuilder) -> tuple[int, set[str]]:
+    return len(builder.created), {sld.get("id") for sld in builder.prs.slides._sldIdLst}
+
+
+def _rollback(builder: DeckBuilder, snapshot: tuple[int, set[str]]) -> int:
+    """Drop every slide a failed renderer added after the snapshot; returns how many were removed."""
+    n_created, ids = snapshot
+    sld_lst = builder.prs.slides._sldIdLst
+    removed = 0
+    for sld in list(sld_lst):
+        if sld.get("id") not in ids:
+            rid = sld.rId
+            sld_lst.remove(sld)
+            try:
+                builder.prs.part.drop_rel(rid)
+            except KeyError:
+                pass
+            removed += 1
+    del builder.created[n_created:]
+    return removed
+
+
 def render_deck(
     outline: DeckOutline,
     plan: LayoutPlan,
@@ -57,6 +79,7 @@ def render_deck(
     for i, oslide in enumerate(outline.slides, 1):
         ps = plan.for_outline(oslide.id) or LayoutSlide(outline_id=oslide.id, mode="synth", composition="bullets", reasons=["no plan entry"])
         rendered = RenderedSlide(outline_id=oslide.id, index=i, mode=ps.mode, pattern_id=ps.pattern_id, composition=ps.composition)
+        before = _snapshot(builder)
         try:
             if ps.mode == "clone" and ps.pattern_id in patterns:
                 _, warns = render_clone(builder, ps, oslide, patterns[ps.pattern_id], manifest, ws, outline)
@@ -66,6 +89,8 @@ def render_deck(
         except Exception as e:  # noqa: BLE001
             log.exception("slide %d (%s) failed in mode %s", i, oslide.id, ps.mode)
             rendered.warnings.append(f"{ps.mode} failed: {str(e)[:160]}; fell back to synth")
+            # a half-filled clone must not stay in the deck next to its synth replacement
+            _rollback(builder, before)
             try:
                 fallback = LayoutSlide(outline_id=oslide.id, mode="synth", composition=ps.composition or "bullets")
                 _, warns = render_synth(builder, fallback, oslide, manifest, ws, outline)
@@ -74,7 +99,9 @@ def render_deck(
             except Exception as e2:  # noqa: BLE001
                 log.exception("synth fallback failed for slide %d", i)
                 rendered.warnings.append(f"synth fallback failed: {str(e2)[:160]}")
-        _mark_notes(builder, oslide)
+                _rollback(builder, before)
+        if len(builder.created) > before[0]:
+            _mark_notes(builder, oslide)  # only a slide made for this outline entry carries its marker
         result.slides.append(rendered)
         if progress:
             progress(f"rendered slide {i}/{n}", i / max(n, 1))

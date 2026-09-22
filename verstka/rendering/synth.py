@@ -22,10 +22,34 @@ from verstka.rendering.fit import fit_size
 from verstka.rendering.images import insert_picture
 from verstka.rendering.tables import add_table
 from verstka.rendering.textfill import ParagraphSpec, fill_text
-from verstka.schemas.common import Bbox, Family, PatternKind, SlotRole, contrast_ratio
+from verstka.schemas.common import EMU_PER_INCH, EMU_PER_PT, Bbox, Family, PatternKind, SlotRole, contrast_ratio
 from verstka.schemas.layout import LayoutSlide
 from verstka.schemas.outline import DeckOutline, OutlineSlide, SlideItem
 from verstka.schemas.template import Pattern, TemplateManifest
+
+_DEFAULT_RADIUS_EMU = int(0.12 * EMU_PER_INCH)
+_CONTENT_KINDS = (PatternKind.bullets, PatternKind.cards, PatternKind.freeform, PatternKind.two_column, PatternKind.stat_row)
+
+
+def card_adj(radius_emu: int, w: int, h: int) -> float:
+    """roundRect adjustment for an absolute corner radius: relative to the shorter side, capped so cards never turn into capsules."""
+    side = min(w, h)
+    if radius_emu <= 0 or side <= 0:
+        return 0.0
+    return min(radius_emu / side, 0.25)
+
+
+def _card_radius_emu(manifest: TemplateManifest) -> int:
+    """Corner radius of the template's cards as an absolute size.
+
+    A sample's `adj` is relative to the sample's shorter side, so it is converted with the sample card size;
+    when only a ratio is known (e.g. from pill-shaped chips) a conventional 0.12 inch is used instead.
+    """
+    card = manifest.components.card
+    if card and card.radius is not None and card.width_frac and card.height_frac:
+        side = min(card.width_frac * manifest.slide_size.w, card.height_frac * manifest.slide_size.h)
+        return int(max(0.0, min(card.radius, 0.5)) * side)
+    return _DEFAULT_RADIUS_EMU
 
 
 class _Palette:
@@ -45,7 +69,7 @@ class _Palette:
         card = manifest.components.card
         self.card_fill = (card.fill_hex if card and card.fill_hex and 1.0 < contrast_ratio(card.fill_hex, self.bg) < 3.0 else self.surface)
         self.card_line = card.line_hex if card else None
-        self.radius = (card.radius if card and card.radius is not None else (t.shapes.typical_radius or 0.08))
+        self.radius_emu = _card_radius_emu(manifest)
 
 
 def _family_for(oslide: OutlineSlide, manifest: TemplateManifest) -> Family:
@@ -56,19 +80,38 @@ def _family_for(oslide: OutlineSlide, manifest: TemplateManifest) -> Family:
     return fams.most_common(1)[0][0] if fams else Family.light
 
 
+def _layout_family(manifest: TemplateManifest, part: str, default: Family) -> Family:
+    fams = Counter(p.family for p in manifest.patterns if p.layout_part == part)
+    return fams.most_common(1)[0][0] if fams else default
+
+
 def _layout_for(builder: DeckBuilder, manifest: TemplateManifest, family: Family, kind: PatternKind):
-    """Layout used by the most sample slides of this family (prefer same kind, then content kinds)."""
-    prefs = [p for p in manifest.patterns if p.family == family and p.kind == kind and p.layout_part]
-    if not prefs:
-        prefs = [p for p in manifest.patterns if p.family == family and p.layout_part and p.kind in (PatternKind.bullets, PatternKind.cards, PatternKind.freeform, PatternKind.two_column, PatternKind.stat_row)]
-    if not prefs:
-        prefs = [p for p in manifest.patterns if p.family == family and p.layout_part]
-    counts = Counter(p.layout_part for p in prefs)
-    by_partname = {str(l.part.partname).lstrip("/"): l for l in builder.prs.slide_layouts}
-    for part, _ in counts.most_common():
-        if part in by_partname:
-            return by_partname[part]
-    return builder.prs.slide_layouts[-1]
+    """(layout, family): the layout used by the most sample slides of this family, searched over every master.
+
+    Preference: same kind → content kinds → any kind of the family → any family (then the returned family is the
+    one of the samples on that layout, so the palette matches its background). When no sample resolves to a
+    layout of the package, a title-only-like layout is chosen — never blindly the last one.
+    """
+    by_partname = {str(l.part.partname).lstrip("/"): l for l in builder.layouts()}
+    known = [p for p in manifest.patterns if p.layout_part and p.layout_part in by_partname]
+    tiers = [
+        [p for p in known if p.family == family and p.kind == kind],
+        [p for p in known if p.family == family and p.kind in _CONTENT_KINDS],
+        [p for p in known if p.family == family],
+        known,
+    ]
+    for prefs in tiers:
+        if prefs:
+            part = Counter(p.layout_part for p in prefs).most_common(1)[0][0]
+            return by_partname[part], _layout_family(manifest, part, family)
+
+    def rank(layout):
+        phs = list(layout.placeholders)
+        titled = any(str(ph.placeholder_format.type).split(".")[-1].split(" ")[0] in ("TITLE", "CENTER_TITLE") for ph in phs)
+        return (0 if titled else 1, len(phs))
+
+    layouts = builder.layouts()
+    return (min(layouts, key=rank) if layouts else builder.prs.slide_layouts[0]), family
 
 
 def _title_style(manifest: TemplateManifest, family: Family, pal: _Palette) -> tuple[float, str, bool, Optional[str]]:
@@ -125,10 +168,11 @@ def _textbox(slide: Slide, box: Bbox, paragraphs: list[ParagraphSpec], *, size: 
     return tb
 
 
-def _rect(slide: Slide, box: Bbox, fill: Optional[str], line: Optional[str], radius: float):
-    shape = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE if radius > 0 else MSO_SHAPE.RECTANGLE, Emu(box.x), Emu(box.y), Emu(box.w), Emu(box.h))
-    if radius > 0:
-        shape.adjustments[0] = min(max(radius, 0.0), 0.5)
+def _rect(slide: Slide, box: Bbox, fill: Optional[str], line: Optional[str], radius_emu: int):
+    adj = card_adj(radius_emu, box.w, box.h)
+    shape = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE if adj > 0 else MSO_SHAPE.RECTANGLE, Emu(box.x), Emu(box.y), Emu(box.w), Emu(box.h))
+    if adj > 0:
+        shape.adjustments[0] = adj
     if fill:
         shape.fill.solid()
         shape.fill.fore_color.rgb = RGBColor.from_string(fill)
@@ -178,9 +222,8 @@ def _items(oslide: OutlineSlide) -> list[SlideItem]:
 
 def render_synth(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineSlide, manifest: TemplateManifest, ws: TemplateWorkspace, outline: DeckOutline) -> tuple[Slide, list[str]]:
     warnings: list[str] = []
-    family = _family_for(oslide, manifest)
-    pal = _Palette(manifest, family)
-    layout = _layout_for(builder, manifest, family, oslide.kind)
+    layout, family = _layout_for(builder, manifest, _family_for(oslide, manifest), oslide.kind)
+    pal = _Palette(manifest, family)  # palette of the layout's real family: text must contrast with its background
     slide = builder.prs.slides.add_slide(layout)
     builder.created.append(slide)
     t = manifest.tokens
@@ -207,9 +250,20 @@ def render_synth(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
     c = oslide.content
     title_h = int(H * (0.16 if comp not in ("title", "section", "thanks") else 0.3))
     if title_ph is not None and comp not in ("title", "section", "thanks"):
-        fill_text(title_ph._element, [ParagraphSpec(oslide.headline)])
-        tb = title_ph
-        y_after = int(title_ph.top + title_ph.height) if title_ph.top is not None else sy + title_h
+        # measure the headline against the placeholder box: the content starts below the fitted text, not below
+        # the placeholder's nominal height (which is one line tall on most layouts)
+        if title_ph.top is not None:
+            box = Bbox(x=int(title_ph.left), y=int(title_ph.top), w=int(title_ph.width), h=int(title_ph.height))
+        else:
+            box = Bbox(x=sx, y=sy, w=sw, h=title_h)
+        insets = (91440, 45720, 91440, 45720)
+        res = fit_size([oslide.headline], box, title_font, h1, title_bold, scale, insets_emu=insets, line_spacing=typo.line_spacing)
+        fill_text(title_ph._element, [ParagraphSpec(oslide.headline)], size_pt=res.size_pt)
+        text_h = int(res.height_pt * EMU_PER_PT) + insets[1] + insets[3]
+        if text_h > box.h or title_ph.top is None:
+            # keep the headline inside its own box
+            title_ph.left, title_ph.top, title_ph.width, title_ph.height = Emu(box.x), Emu(box.y), Emu(box.w), Emu(max(box.h, text_h))
+        y_after = box.y + max(box.h, text_h)
     elif comp not in ("title", "section", "thanks"):
         if title_ph is not None:
             title_ph._element.getparent().remove(title_ph._element)
@@ -222,6 +276,7 @@ def render_synth(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
     top = y_after + int(H * 0.02)
     avail_h = sy + sh - top
     gap = int((t.spacing.gutter or 0.03) * W)
+    card_gap = min(gap, int(0.03 * W))  # the template gutter is a column gutter; card grids need a narrower one
 
     if comp in ("title", "section", "thanks"):
         box = Bbox(x=sx, y=int(H * 0.30), w=int(sw * 0.8), h=int(H * 0.3))
@@ -257,13 +312,13 @@ def render_synth(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
         rows = math.ceil(n / cols)
         if comp in ("two_column", "comparison"):
             cols, rows = min(n, 3), 1
-        cw = int((sw - gap * (cols - 1)) / cols)
-        ch = int((avail_h - gap * (rows - 1)) / rows)
+        cw = int((sw - card_gap * (cols - 1)) / cols)
+        ch = int((avail_h - card_gap * (rows - 1)) / rows)
         for i, item in enumerate(items):
             r_, c_ = divmod(i, cols)
-            box = Bbox(x=sx + c_ * (cw + gap), y=top + r_ * (ch + gap), w=cw, h=ch)
+            box = Bbox(x=sx + c_ * (cw + card_gap), y=top + r_ * (ch + card_gap), w=cw, h=ch)
             if comp in ("cards", "comparison") and (pal.card_fill or pal.card_line):
-                _rect(slide, box, pal.card_fill, pal.card_line if not pal.card_fill else None, pal.radius)
+                _rect(slide, box, pal.card_fill, pal.card_line if not pal.card_fill else None, pal.radius_emu)
             inset = int(cw * 0.07)
             head_h = int(ch * 0.3)
             y_head = box.y + inset
@@ -291,9 +346,9 @@ def render_synth(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
                 paras = [ParagraphSpec(b, bullet=True) for b in c.bullets] or [ParagraphSpec(p) for p in c.paragraphs]
                 _textbox(slide, Bbox(x=sx + int(sw * 0.55), y=top, w=int(sw * 0.45), h=avail_h), paras, size=body, color=pal.text, font=font, scale=scale)
             return slide, warnings
-        cw = int((sw - gap * (n - 1)) / n)
+        cw = int((sw - card_gap * (n - 1)) / n)
         for i, num in enumerate(nums):
-            x = sx + i * (cw + gap)
+            x = sx + i * (cw + card_gap)
             _textbox(slide, Bbox(x=x, y=top, w=cw, h=int(avail_h * 0.45)), [ParagraphSpec(num.value)], size=display * 0.8, color=pal.accent, font=font, bold=True, anchor="b", scale=scale)
             _textbox(slide, Bbox(x=x, y=top + int(avail_h * 0.47), w=cw, h=int(avail_h * 0.35)), [ParagraphSpec(num.label)], size=body, color=pal.text2, font=font, scale=scale)
         return slide, warnings
