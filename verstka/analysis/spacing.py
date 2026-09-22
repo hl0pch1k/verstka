@@ -36,6 +36,7 @@ def compute_spacing(
     for idx, shapes in shapes_per_slide.items():
         chrome = chrome_ids_per_slide.get(idx, set())
         edges: set[float] = set()
+        s_left, s_right, s_top, s_bottom = [], [], [], []
         for s in shapes:
             if s.id in chrome or s.bbox.area <= 0 or s.bbox.area / area >= 0.8:
                 continue
@@ -46,17 +47,24 @@ def compute_spacing(
             f = s.bbox.to_frac(slide_w, slide_h)
             if f.x < -0.01 or f.y < -0.01 or f.x2 > 1.01 or f.y2 > 1.01:
                 continue  # bleeding decor
-            lefts.append(f.x)
-            rights.append(f.x2)
-            tops.append(f.y)
-            bottoms.append(f.y2)
+            s_left.append(f.x)
+            s_right.append(f.x2)
+            s_top.append(f.y)
+            s_bottom.append(f.y2)
             edges.add(round(f.x, 2))
         left_edges_by_slide[idx] = edges
+        if s_left:
+            # one vote per slide: where this slide's content starts and ends (an icon sheet with 200 icons in the
+            # middle must not pull the margins inwards)
+            lefts.append(min(s_left))
+            rights.append(max(s_right))
+            tops.append(min(s_top))
+            bottoms.append(max(s_bottom))
     if lefts:
-        x1 = max(0.02, min(0.2, _percentile(lefts, 0.05)))
-        x2 = min(0.98, max(0.8, _percentile(rights, 0.95)))
-        y1 = max(0.02, min(0.3, _percentile(tops, 0.05)))
-        y2 = min(0.98, max(0.7, _percentile(bottoms, 0.95)))
+        x1 = max(0.02, min(0.2, _percentile(lefts, 0.25)))
+        x2 = min(0.98, max(0.8, _percentile(rights, 0.75)))
+        y1 = max(0.02, min(0.3, _percentile(tops, 0.25)))
+        y2 = min(0.98, max(0.7, _percentile(bottoms, 0.75)))
         safe = BboxFrac(x=round(x1, 3), y=round(y1, 3), w=round(x2 - x1, 3), h=round(y2 - y1, 3))
     else:
         safe = BboxFrac(x=0.05, y=0.08, w=0.9, h=0.84)

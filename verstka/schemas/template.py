@@ -143,6 +143,7 @@ class Slot(BaseModel):
     capacity: Capacity = Field(default_factory=lambda: Capacity(max_chars=0, max_lines=0))
     group_id: Optional[str] = None
     sample_text: Optional[str] = None
+    container: bool = False  # an empty frame of the sample: the text is written into the shape itself
 
 
 class RepeatGroup(BaseModel):
@@ -184,6 +185,8 @@ class Pattern(BaseModel):
     thumbnail: Optional[str] = None
     classification: Optional[ClassificationTrace] = None
     layout_part: Optional[str] = None
+    chrome_shape_ids: list[str] = Field(default_factory=list)  # logos, footers, page numbers drawn on this sample
+    reference: Optional[str] = None  # why the sample is template documentation, not a layout (icon sheet, palette)
 
     def slots_by_role(self, role: SlotRole) -> list[Slot]:
         return [s for s in self.slots if s.role == role]
@@ -282,7 +285,7 @@ class TemplateManifest(BaseModel):
     style_rules: list[StyleRule] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     n_slides: int = 0
-    analysis_version: str = "8"
+    analysis_version: str = "9"
     embedded_fonts: list[str] = Field(default_factory=list)
 
     def patterns_of_kind(self, kind: PatternKind) -> list[Pattern]:

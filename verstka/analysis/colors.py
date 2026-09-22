@@ -151,7 +151,14 @@ def assign_color_roles(tokens: list[ColorToken], primary_family: Family = Family
         return not any(r.startswith("text.") for r in t.roles) or cw(t, "fill") > 0
 
     accents = [t for t in tokens if is_accent_candidate(t)]
-    accents.sort(key=lambda t: -((cw(t, "fill") + cw(t, "text") + cw(t, "line") + 0.05 * cw(t, "background")) * (0.5 + _saturation(t.hex))))
+
+    def accent_rank(t: ColorToken) -> tuple[bool, float]:
+        # a colour that barely stands out from the ground (a card surface, 1.3:1) never leads the accents,
+        # however much area it covers: charts, KPI figures and ticks take accent.1 and must be visible
+        blends_in = "surface" in t.roles or contrast_ratio(t.hex, bg_hex) < 1.6
+        return blends_in, -((cw(t, "fill") + cw(t, "text") + cw(t, "line") + 0.05 * cw(t, "background")) * (0.5 + _saturation(t.hex)))
+
+    accents.sort(key=accent_rank)
     for n, t in enumerate(accents[:6], 1):
         t.roles.append(f"accent.{n}")
         if n == 1:

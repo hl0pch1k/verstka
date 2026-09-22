@@ -28,7 +28,7 @@ from verstka.ingest.package import PptxPackage
 from verstka.ingest.render import RenderError, find_pdftoppm, find_soffice, render_slides
 from verstka.ingest.workspace import TemplateWorkspace
 from verstka.providers.registry import ProviderRegistry
-from verstka.schemas.common import Family, ShapeKind
+from verstka.schemas.common import Family, ShapeKind, contrast_ratio
 from verstka.schemas.template import BackgroundFamily, ShapeStyleStats, SlideSize, TemplateManifest, Tokens
 from verstka.skills_registry.registry import SkillsRegistry
 
@@ -90,6 +90,18 @@ def template_summary_text(n_slides: int, slide_w: int, slide_h: int, tokens: Tok
     accents = ", ".join("#" + a for a in tokens.accents()[:3]) or "none"
     fam = ", ".join(f"{k}: {v}" for k, v in families.items())
     return f"{n_slides} slides, {slide_w / 914400:.2f}x{slide_h / 914400:.2f} in; fonts {fonts}; accents {accents}; slide families {fam}"
+
+
+def text_color_on(under_hex: Optional[str], tokens: Tokens) -> Optional[str]:
+    """The template's own text colour that reads best on `under_hex` (primary text first, then the backgrounds)."""
+    if not under_hex:
+        return tokens.color_for("text.primary")
+    candidates = [tokens.color_for(r) for r in ("text.primary", "text.secondary", "background.dark", "background.light")]
+    candidates = [c for c in candidates if c] + ["000000", "FFFFFF"]
+    for c in candidates:
+        if contrast_ratio(c, under_hex) >= 4.5:
+            return c
+    return max(candidates, key=lambda c: contrast_ratio(c, under_hex))
 
 
 def analyze_template(
@@ -289,6 +301,8 @@ def analyze_template(
                 layout_part=layout_by_slide.get(i),
                 asset_ids=asset_id_by_part,
                 line_spacing=typography.line_spacing,
+                body_size=typography.size_for("body", 14.0),
+                text_on=lambda fill, i=i: text_color_on(fill or bg_by_slide.get(i) or tokens.color_for("background.dark" if family_by_slide[i] == Family.dark else "background.light"), tokens),
             )
         )
     patterns = dedupe_patterns(patterns)

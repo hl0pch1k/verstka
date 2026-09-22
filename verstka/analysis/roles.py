@@ -7,7 +7,7 @@ from typing import Optional
 
 from verstka.analysis.groups import group_membership
 from verstka.analysis.shapes import ShapeInfo
-from verstka.schemas.common import ShapeKind, SlotRole
+from verstka.schemas.common import ShapeKind, SlotRole, contrast_ratio, hex_to_rgb
 from verstka.schemas.template import RepeatGroup, Typography
 
 NUMERIC_RE = re.compile(r"^[\s\d.,%+×x><≈~$€₽£\-–—/]{1,10}(\s?(млн|млрд|тыс|k|m|b|%|x|×|ч|дн|раз|шт|₽|\$))?\s*$", re.I)
@@ -29,6 +29,48 @@ def _size(s: ShapeInfo) -> float:
     return (s.text.dominant_size_pt or s.text.max_size_pt or 0.0) if s.text else 0.0
 
 
+_SERVICE_PH = {"sldNum", "dt", "ftr", "hdr"}
+_FRAME_GEOMETRIES = {None, "rect", "roundRect", "round1Rect", "round2SameRect", "round2DiagRect", "snip1Rect", "snip2SameRect", "snipRoundRect", "flowChartAlternateProcess", "flowChartProcess", "plaque"}
+
+
+def _saturation(hex_: str) -> float:
+    r, g, b = hex_to_rgb(hex_)
+    mx, mn = max(r, g, b), min(r, g, b)
+    return 0.0 if mx == 0 else (mx - mn) / mx
+
+
+def is_empty_frame(s: ShapeInfo, shapes: list[ShapeInfo], slide_w: int, slide_h: int) -> bool:
+    """An empty card/panel the designer left for content (the LCT template is made of them).
+
+    A rectangular shape with a light/neutral fill or just an outline, big enough for a few lines, with no text of
+    its own and nothing with text or a picture inside. Saturated accent blocks, slide-sized backgrounds, lines and
+    circles stay decoration.
+    """
+    if s.kind != ShapeKind.sp or s.has_text or not s.is_visual_shape or s.geometry not in _FRAME_GEOMETRIES:
+        return False
+    if s.is_placeholder and s.ph_type not in (None, "body", "obj"):
+        return False
+    fw, fh = s.bbox.w / slide_w, s.bbox.h / slide_h
+    if fw < 0.08 or fh < 0.06 or not (0.015 <= fw * fh <= 0.55):
+        return False
+    if s.bbox.x < 0 or s.bbox.y < 0 or s.bbox.x2 > slide_w * 1.001 or s.bbox.y2 > slide_h * 1.001:
+        return False  # a frame running off the slide is an ornament
+    if s.fill_hex is not None and s.fill_alpha >= 0.5 and _saturation(s.fill_hex) > 0.35:
+        return False  # a coloured block is decoration (or a label behind a heading)
+    for o in shapes:
+        if o.id == s.id:
+            continue
+        cx, cy = o.bbox.x + o.bbox.w / 2, o.bbox.y + o.bbox.h / 2
+        inside = s.bbox.x <= cx <= s.bbox.x2 and s.bbox.y <= cy <= s.bbox.y2
+        if not inside:
+            continue
+        if o.has_text or o.kind in (ShapeKind.pic, ShapeKind.graphic_frame):
+            return False
+        if o.is_visual_shape and o.bbox.area >= 0.05 * s.bbox.area and o.z > s.z:
+            return False  # a panel holding other cards is a background, not a slot
+    return True
+
+
 def heuristic_roles(
     shapes: list[ShapeInfo],
     groups: list[RepeatGroup],
@@ -47,7 +89,8 @@ def heuristic_roles(
     by_id = {s.id: s for s in shapes}
 
     for s in shapes:
-        if s.id in chrome_ids:
+        # slide number, date and footer placeholders are chrome by definition, even on a single sample
+        if s.id in chrome_ids or s.ph_type in _SERVICE_PH:
             roles[s.id] = SlotRole.chrome
 
     texts = [s for s in shapes if s.has_text and s.id not in roles and s.kind != ShapeKind.graphic_frame]
@@ -119,6 +162,11 @@ def heuristic_roles(
                     best, best_d = s, d
         if best is not None:
             roles[best.id] = SlotRole.number_label
+
+    # empty frames are containers: the text (or the chart/table) goes inside them
+    for s in shapes:
+        if s.id not in roles and is_empty_frame(s, shapes, slide_w, slide_h):
+            roles[s.id] = SlotRole.card_body if s.id in membership else SlotRole.body
 
     # cells: card title/body/icon
     for g in groups:

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from collections import Counter
-from typing import Optional
+from typing import Callable, Optional
 
 from verstka.analysis.groups import group_membership
 from verstka.analysis.shapes import ShapeInfo, looks_like_placeholder
@@ -12,6 +13,11 @@ from verstka.schemas.template import Capacity, ClassificationTrace, Pattern, Rep
 
 AVG_CHAR_EM = 0.52  # average glyph advance relative to font size for Latin/Cyrillic sans
 AVG_CHAR_EM_BOLD = 0.56
+
+
+def container_inset(w_emu: int, h_emu: int) -> int:
+    """Padding inside an empty frame that receives text: 7% of its shorter side, 0.1–0.25 inch."""
+    return int(min(max(0.07 * min(w_emu, h_emu), 91440), 228600))
 
 
 def estimate_capacity(bbox: Bbox, size_pt: float, bold: bool = False, insets_emu: tuple[int, int, int, int] = (91440, 45720, 91440, 45720), line_spacing: float = 1.2) -> Capacity:
@@ -24,6 +30,25 @@ def estimate_capacity(bbox: Bbox, size_pt: float, bold: bool = False, insets_emu
     lines = int(usable_h_pt / (size_pt * line_spacing)) if size_pt else 0
     lines = max(lines, 1)
     return Capacity(max_chars=max(chars_per_line, 1) * lines, max_lines=lines)
+
+
+_HEX_RE = re.compile(r"(?:#|hex\s*#?)\s*[0-9a-f]{6}\b", re.I)
+
+
+def reference_reason(shapes: list[ShapeInfo], roles: dict[str, SlotRole]) -> Optional[str]:
+    """Samples that document the template instead of showing a layout: icon/logo sheets and palette swatches.
+
+    They feed the asset library and the tokens, but cloning one as a content slide leaves dozens of stale icons.
+    """
+    small_pics = sum(1 for s in shapes if roles.get(s.id) in (SlotRole.icon, SlotRole.image, SlotRole.decoration) and s.kind == ShapeKind.pic)
+    icons = sum(1 for s in shapes if roles.get(s.id) == SlotRole.icon)
+    texts = sum(1 for s in shapes if s.has_text and roles.get(s.id) not in (None, SlotRole.chrome))
+    if max(icons, small_pics) >= 12 and max(icons, small_pics) >= 2 * max(texts, 1):
+        return f"лист иконок или логотипов ({max(icons, small_pics)} шт.)"
+    swatches = sum(1 for s in shapes if s.has_text and _HEX_RE.search(s.plain_text))
+    if swatches >= 3:
+        return f"палитра шаблона ({swatches} образцов цвета)"
+    return None
 
 
 def slot_style(s: ShapeInfo) -> SlotStyle:
@@ -56,6 +81,8 @@ def build_pattern(
     layout_part: Optional[str] = None,
     asset_ids: Optional[dict[str, str]] = None,
     line_spacing: float = 1.2,
+    body_size: float = 14.0,
+    text_on: Optional[Callable[[Optional[str]], Optional[str]]] = None,
 ) -> Pattern:
     asset_ids = asset_ids or {}
     membership = group_membership(groups)
@@ -63,20 +90,32 @@ def build_pattern(
     decor: list[str] = []
     counters: Counter = Counter()
     has_placeholder_text = False
+    chrome: list[str] = []
     for s in sorted(shapes, key=lambda s: (s.bbox.y, s.bbox.x)):
         role = roles.get(s.id)
-        if role is None or role == SlotRole.chrome:
+        if role == SlotRole.chrome:
+            chrome.append(s.id)
+            continue
+        if role is None:
             continue
         if role == SlotRole.decoration:
             if s.image_part and s.image_part in asset_ids:
                 decor.append(asset_ids[s.image_part])
             continue
-        if role in _TEXT_ROLES and not s.text:
+        container = role in (SlotRole.body, SlotRole.card_body) and not s.has_text and s.is_visual_shape
+        if role in _TEXT_ROLES and not s.text and not container:
             continue
         counters[role.value] += 1
         slot_id = f"{role.value}_{counters[role.value]}"
         style = slot_style(s)
-        if role in _TEXT_ROLES and s.text:
+        if container:
+            # an empty frame: body text of the template, coloured for the frame's own fill (or the slide under an outline)
+            pad = container_inset(s.bbox.w, s.bbox.h)
+            fill = s.fill_hex if s.fill_hex and s.fill_alpha >= 0.5 else None
+            style = SlotStyle(size_pt=body_size, color_hex=text_on(fill) if text_on else None)
+            cap = estimate_capacity(s.bbox, body_size, False, (pad, pad, pad, pad), line_spacing)
+            sample = None
+        elif role in _TEXT_ROLES and s.text:
             size = style.size_pt or 18.0
             cap = estimate_capacity(s.bbox, size, style.bold, s.text.insets_emu, line_spacing)
             sample = s.plain_text.strip()[:120] or None
@@ -86,7 +125,7 @@ def build_pattern(
             cap = Capacity(max_chars=0, max_lines=0)
             sample = None
         gid = membership[s.id][0] if s.id in membership else None
-        slots.append(Slot(id=slot_id, role=role, shape_id=s.id, bbox=s.bbox.to_frac(slide_w, slide_h), style=style, capacity=cap, group_id=gid, sample_text=sample))
+        slots.append(Slot(id=slot_id, role=role, shape_id=s.id, bbox=s.bbox.to_frac(slide_w, slide_h), style=style, capacity=cap, group_id=gid, sample_text=sample, container=container))
     quality = 1.0
     if has_placeholder_text:
         quality -= 0.15  # placeholder text means a designer-made sample: mildly penalised only for dedupe ordering
@@ -96,6 +135,7 @@ def build_pattern(
         quality -= 0.2
     if not any(s.role in _TEXT_ROLES for s in slots):
         quality -= 0.5  # nothing to write into: decorative/blank sample
+    reference = reference_reason(shapes, roles)
     return Pattern(
         id=pattern_id,
         source_slide=slide_index,
@@ -108,6 +148,8 @@ def build_pattern(
         thumbnail=thumbnail,
         classification=trace,
         layout_part=layout_part,
+        chrome_shape_ids=chrome,
+        reference=reference,
     )
 
 
