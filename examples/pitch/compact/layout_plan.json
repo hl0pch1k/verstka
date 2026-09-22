@@ -1,0 +1,333 @@
+{
+  "strategy": "compact",
+  "template_id": "1604aa9146b82cac",
+  "slides": [
+    {
+      "outline_id": "sl1",
+      "mode": "clone",
+      "pattern_id": "p7",
+      "composition": null,
+      "fit": {
+        "overflow_title": 1.03,
+        "text_ratio": 1.03
+      },
+      "score": 0.86,
+      "reasons": [
+        "слайд 7 шаблона",
+        "тип section для title: 0.6",
+        "текст чуть длиннее ёмкости (×1.03), нужен меньший кегль",
+        "обложка: заголовок 48 пт, других текстов 0: +0.12"
+      ],
+      "alternatives": [
+        [
+          "p19",
+          0.559
+        ],
+        [
+          "p1",
+          0.0
+        ],
+        [
+          "p37",
+          0.0
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl2",
+      "mode": "clone",
+      "pattern_id": "p11",
+      "composition": null,
+      "fit": {
+        "items": "2/2",
+        "overflow_card_title": 1.2,
+        "text_ratio": 1.2
+      },
+      "score": 1.095,
+      "reasons": [
+        "слайд 11 шаблона",
+        "тип two_column для two_column: 1.0",
+        "ёмкость группы 2 из 2 ячеек",
+        "текст чуть длиннее ёмкости (×1.20), нужен меньший кегль",
+        "вес стратегии compact для типа: ×1.30",
+        "стиль стратегии compact: +0.04"
+      ],
+      "alternatives": [
+        [
+          "p27",
+          0.666
+        ],
+        [
+          "p9",
+          0.555
+        ],
+        [
+          "p20",
+          0.523
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl3",
+      "mode": "clone",
+      "pattern_id": "p9",
+      "composition": null,
+      "fit": {
+        "items": "5/5",
+        "text_ratio": 0.36
+      },
+      "score": 1.083,
+      "reasons": [
+        "слайд 9 шаблона",
+        "тип cards для cards: 1.0",
+        "ёмкость группы 5 из 5 ячеек",
+        "текст помещается",
+        "вес стратегии compact для типа: ×1.15",
+        "стиль стратегии compact: +0.08"
+      ],
+      "alternatives": [
+        [
+          "p25",
+          0.675
+        ],
+        [
+          "p4",
+          0.572
+        ],
+        [
+          "p20",
+          0.558
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl4",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "stat_row",
+      "fit": {
+        "items": "3/5",
+        "overflow_body": 2.0,
+        "overflow_number": 2.0,
+        "text_ratio": 2.0
+      },
+      "score": 0.402,
+      "reasons": [
+        "лучший паттерн p9 набрал 0.40 < порога 0.45",
+        "композиция stat_row из компонентов шаблона"
+      ],
+      "alternatives": [
+        [
+          "p9",
+          0.402
+        ],
+        [
+          "p8",
+          0.249
+        ],
+        [
+          "p5",
+          0.0
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl5",
+      "mode": "clone",
+      "pattern_id": "p12",
+      "composition": null,
+      "fit": {
+        "text_ratio": 0.82
+      },
+      "score": 0.645,
+      "reasons": [
+        "слайд 12 шаблона",
+        "тип bullets для table: 0.3",
+        "область под данные: 33% слайда",
+        "текст помещается",
+        "стиль стратегии compact: +0.01"
+      ],
+      "alternatives": [
+        [
+          "p14",
+          0.621
+        ],
+        [
+          "p13",
+          0.565
+        ],
+        [
+          "p2",
+          0.506
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl6",
+      "mode": "clone",
+      "pattern_id": "p11",
+      "composition": null,
+      "fit": {
+        "items": "2/2",
+        "text_ratio": 0.59
+      },
+      "score": 0.975,
+      "reasons": [
+        "слайд 11 шаблона",
+        "тип two_column для two_column: 1.0",
+        "ёмкость группы 2 из 2 ячеек",
+        "текст помещается",
+        "паттерн уже использован недавно",
+        "вес стратегии compact для типа: ×1.30",
+        "стиль стратегии compact: +0.04"
+      ],
+      "alternatives": [
+        [
+          "p27",
+          0.641
+        ],
+        [
+          "p9",
+          0.505
+        ],
+        [
+          "p20",
+          0.498
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl7",
+      "mode": "clone",
+      "pattern_id": "p20",
+      "composition": null,
+      "fit": {
+        "text_ratio": 0.79
+      },
+      "score": 0.79,
+      "reasons": [
+        "слайд 20 шаблона",
+        "тип bullets для bullets: 1.0",
+        "5 лишних текстовых слотов останутся пустыми",
+        "текст помещается",
+        "семья light отличается от предыдущего слайда",
+        "вес стратегии compact для типа: ×0.90",
+        "стиль стратегии compact: +0.06"
+      ],
+      "alternatives": [
+        [
+          "p2",
+          0.668
+        ],
+        [
+          "p13",
+          0.668
+        ],
+        [
+          "p18",
+          0.66
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl8",
+      "mode": "clone",
+      "pattern_id": "p9",
+      "composition": null,
+      "fit": {
+        "items": "3/5",
+        "text_ratio": 0.46,
+        "tried": [
+          "p25"
+        ]
+      },
+      "score": 0.76,
+      "reasons": [
+        "слайд 25 шаблона",
+        "тип process для process: 1.0",
+        "ёмкость группы 3 из 5 ячеек",
+        "9 лишних текстовых слотов останутся пустыми",
+        "текст помещается",
+        "стиль стратегии compact: +0.08",
+        "автофикс: перевыбран паттерн p9 (0.69)"
+      ],
+      "alternatives": [
+        [
+          "p9",
+          0.69
+        ],
+        [
+          "p3",
+          0.61
+        ],
+        [
+          "p4",
+          0.585
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl9",
+      "mode": "clone",
+      "pattern_id": "p12",
+      "composition": null,
+      "fit": {
+        "overflow_title": 1.3,
+        "text_ratio": 1.3
+      },
+      "score": 0.86,
+      "reasons": [
+        "слайд 12 шаблона",
+        "тип bullets для bullets: 1.0",
+        "текст чуть длиннее ёмкости (×1.30), нужен меньший кегль",
+        "семья dark отличается от предыдущего слайда",
+        "вес стратегии compact для типа: ×0.90",
+        "стиль стратегии compact: +0.01"
+      ],
+      "alternatives": [
+        [
+          "p18",
+          0.685
+        ],
+        [
+          "p20",
+          0.665
+        ],
+        [
+          "p2",
+          0.643
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl10",
+      "mode": "clone",
+      "pattern_id": "p7",
+      "composition": null,
+      "fit": {
+        "text_ratio": 0.5
+      },
+      "score": 0.8,
+      "reasons": [
+        "слайд 7 шаблона",
+        "тип section для thanks: 0.4",
+        "текст помещается",
+        "обложка: заголовок 48 пт, других текстов 0: +0.12"
+      ],
+      "alternatives": [
+        [
+          "p19",
+          0.655
+        ],
+        [
+          "p1",
+          0.0
+        ],
+        [
+          "p37",
+          0.0
+        ]
+      ]
+    }
+  ]
+}

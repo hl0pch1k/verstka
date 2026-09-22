@@ -1,0 +1,347 @@
+{
+  "strategy": "structured",
+  "template_id": "cbbe3aa6a21d23ce",
+  "slides": [
+    {
+      "outline_id": "sl1",
+      "mode": "clone",
+      "pattern_id": "p3",
+      "composition": null,
+      "fit": {
+        "overflow_title": 4.42,
+        "overflow_subtitle": 1.18,
+        "text_ratio": 4.42,
+        "tried": [
+          "p1"
+        ]
+      },
+      "score": 0.845,
+      "reasons": [
+        "слайд 1 шаблона",
+        "тип title для title: 1.0",
+        "текст не помещается (×4.42)",
+        "стиль стратегии structured: +0.04",
+        "обложка: заголовок 48 пт, других текстов 0: +0.12",
+        "автофикс: перевыбран паттерн p3 (0.82)"
+      ],
+      "alternatives": [
+        [
+          "p3",
+          0.824
+        ],
+        [
+          "p2",
+          0.68
+        ],
+        [
+          "p43",
+          0.678
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl2",
+      "mode": "clone",
+      "pattern_id": "p17",
+      "composition": null,
+      "fit": {
+        "items": "6/6",
+        "text_ratio": 0.72
+      },
+      "score": 0.615,
+      "reasons": [
+        "слайд 17 шаблона",
+        "тип cards для agenda: 0.4",
+        "ёмкость группы 6 из 6 ячеек",
+        "3 лишних текстовых слотов останутся пустыми",
+        "текст помещается",
+        "стиль стратегии structured: +0.04"
+      ],
+      "alternatives": [
+        [
+          "p9",
+          0.602
+        ],
+        [
+          "p25",
+          0.508
+        ],
+        [
+          "p16",
+          0.465
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl3",
+      "mode": "clone",
+      "pattern_id": "p25",
+      "composition": null,
+      "fit": {
+        "items": "4/4",
+        "overflow_title": 4.1,
+        "overflow_number": 2.0,
+        "text_ratio": 4.1
+      },
+      "score": 0.617,
+      "reasons": [
+        "слайд 25 шаблона",
+        "тип cards для stat_row: 0.6",
+        "ёмкость группы 4 из 4 ячеек",
+        "текст не помещается (×4.10)",
+        "стиль стратегии structured: +0.04"
+      ],
+      "alternatives": [
+        [
+          "p14",
+          0.602
+        ],
+        [
+          "p15",
+          0.562
+        ],
+        [
+          "p20",
+          0.562
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl4",
+      "mode": "clone",
+      "pattern_id": "p24",
+      "composition": null,
+      "fit": {
+        "items": "3/3",
+        "overflow_card_title": 2.0,
+        "text_ratio": 2.0
+      },
+      "score": 0.724,
+      "reasons": [
+        "слайд 24 шаблона",
+        "тип cards для cards: 1.0",
+        "ёмкость группы 3 из 3 ячеек",
+        "текст не помещается (×2.00)",
+        "вес стратегии structured для типа: ×1.20"
+      ],
+      "alternatives": [
+        [
+          "p14",
+          0.704
+        ],
+        [
+          "p15",
+          0.664
+        ],
+        [
+          "p20",
+          0.664
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl5",
+      "mode": "clone",
+      "pattern_id": "p14",
+      "composition": null,
+      "fit": {
+        "items": "3/3",
+        "overflow_title": 1.54,
+        "overflow_number": 2.67,
+        "text_ratio": 2.67,
+        "tried": [
+          "p42"
+        ]
+      },
+      "score": 0.562,
+      "reasons": [
+        "слайд 42 шаблона",
+        "тип big_number для stat_row: 0.6",
+        "ёмкость группы 3 из 3 ячеек",
+        "текст не помещается (×2.67)",
+        "автофикс: перевыбран паттерн p14 (0.54)"
+      ],
+      "alternatives": [
+        [
+          "p14",
+          0.542
+        ],
+        [
+          "p45",
+          0.542
+        ],
+        [
+          "p46",
+          0.533
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl6",
+      "mode": "clone",
+      "pattern_id": "p9",
+      "composition": null,
+      "fit": {
+        "overflow_title": 1.3,
+        "text_ratio": 1.3
+      },
+      "score": 0.52,
+      "reasons": [
+        "слайд 9 шаблона",
+        "тип bullets для table: 0.3",
+        "область под данные: 31% слайда",
+        "2 лишних текстовых слотов останутся пустыми",
+        "текст заметно длиннее ёмкости (×1.30), потребуется сокращение",
+        "стиль стратегии structured: +0.04"
+      ],
+      "alternatives": [
+        [
+          "p38",
+          0.333
+        ],
+        [
+          "p27",
+          0.283
+        ],
+        [
+          "p8",
+          0.182
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl7",
+      "mode": "clone",
+      "pattern_id": "p25",
+      "composition": null,
+      "fit": {
+        "items": "3/4",
+        "overflow_title": 1.1,
+        "text_ratio": 1.1
+      },
+      "score": 0.99,
+      "reasons": [
+        "слайд 25 шаблона",
+        "тип cards для cards: 1.0",
+        "ёмкость группы 3 из 4 ячеек",
+        "2 лишних текстовых слотов останутся пустыми",
+        "текст чуть длиннее ёмкости (×1.10), нужен меньший кегль",
+        "вес стратегии structured для типа: ×1.20",
+        "стиль стратегии structured: +0.04"
+      ],
+      "alternatives": [
+        [
+          "p14",
+          0.975
+        ],
+        [
+          "p15",
+          0.935
+        ],
+        [
+          "p17",
+          0.795
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl8",
+      "mode": "clone",
+      "pattern_id": "p14",
+      "composition": null,
+      "fit": {
+        "items": "3/4",
+        "text_ratio": 0.77
+      },
+      "score": 0.735,
+      "reasons": [
+        "слайд 14 шаблона",
+        "тип cards для process: 0.6",
+        "ёмкость группы 3 из 4 ячеек",
+        "2 лишних текстовых слотов останутся пустыми",
+        "текст помещается",
+        "стиль стратегии structured: +0.04"
+      ],
+      "alternatives": [
+        [
+          "p15",
+          0.695
+        ],
+        [
+          "p25",
+          0.6
+        ],
+        [
+          "p26",
+          0.565
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl9",
+      "mode": "clone",
+      "pattern_id": "p9",
+      "composition": null,
+      "fit": {
+        "overflow_body": 1.18,
+        "text_ratio": 1.18
+      },
+      "score": 0.825,
+      "reasons": [
+        "слайд 9 шаблона",
+        "тип bullets для bullets: 1.0",
+        "2 лишних текстовых слотов останутся пустыми",
+        "текст чуть длиннее ёмкости (×1.18), нужен меньший кегль",
+        "паттерн уже использован недавно",
+        "вес стратегии structured для типа: ×1.20",
+        "стиль стратегии structured: +0.04"
+      ],
+      "alternatives": [
+        [
+          "p10",
+          0.66
+        ],
+        [
+          "p27",
+          0.52
+        ],
+        [
+          "p24",
+          0.475
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl10",
+      "mode": "clone",
+      "pattern_id": "p6",
+      "composition": null,
+      "fit": {
+        "overflow_title": 1.12,
+        "text_ratio": 1.12
+      },
+      "score": 1.022,
+      "reasons": [
+        "слайд 6 шаблона",
+        "тип thanks для thanks: 1.0",
+        "текст чуть длиннее ёмкости (×1.12), нужен меньший кегль",
+        "стиль стратегии structured: +0.04",
+        "обложка: заголовок 36 пт, других текстов 1: +0.06"
+      ],
+      "alternatives": [
+        [
+          "p4",
+          0.915
+        ],
+        [
+          "p3",
+          0.764
+        ],
+        [
+          "p1",
+          0.715
+        ]
+      ]
+    }
+  ]
+}

@@ -1,0 +1,203 @@
+{
+  "verstka_version": "0.1.0",
+  "git_commit": null,
+  "created_at": "2026-09-23T02:44:41+0300",
+  "platform": "macOS-27.0-arm64-arm-64bit",
+  "template": {
+    "id": "1604aa9146b82cac",
+    "file": "ЛЦТ2026 Шаблон презентации.pptx"
+  },
+  "strategy": "structured",
+  "inputs": {
+    "brief_sha256": "ba09028be0fda8ab",
+    "outline_sha256": "ca146dc1ed3c63d0"
+  },
+  "skills": {},
+  "providers": {
+    "llm": {
+      "backend": "none"
+    },
+    "vlm": {
+      "backend": "none"
+    }
+  },
+  "timings_s": {
+    "analyze": 0.03,
+    "plan": 0.0,
+    "render": 0.98,
+    "audit": 2.58,
+    "export": 21.61,
+    "total": 32.72
+  },
+  "usage": {},
+  "applied_fixes": [
+    {
+      "iteration": 1,
+      "outline_id": "sl11",
+      "action": "rematch",
+      "result": "rematch → p3"
+    }
+  ],
+  "audit": {
+    "errors": 0,
+    "warnings": 3,
+    "infos": 5,
+    "model_flags": 0,
+    "score": 91,
+    "checks_run": [
+      "out_of_bounds",
+      "text_clipped",
+      "overlap",
+      "text_overflow",
+      "margin_violation",
+      "grid_alignment",
+      "image_stretched",
+      "table_cell_wrap",
+      "font_not_in_template",
+      "size_not_in_scale",
+      "color_not_in_palette",
+      "layout_not_from_template",
+      "chrome_moved",
+      "contrast_low",
+      "too_many_bullets",
+      "bullet_too_long",
+      "table_too_big",
+      "too_many_series",
+      "fill_ratio",
+      "file_opens",
+      "empty_deck",
+      "placeholder_text",
+      "empty_slide",
+      "content_missing",
+      "slide_is_picture",
+      "chart_missing_labels",
+      "duplicate_slides"
+    ]
+  },
+  "slides": [
+    {
+      "index": 1,
+      "outline_id": "sl1",
+      "mode": "clone",
+      "pattern_id": "p7",
+      "composition": null,
+      "warnings": []
+    },
+    {
+      "index": 2,
+      "outline_id": "sl2",
+      "mode": "clone",
+      "pattern_id": "p3",
+      "composition": null,
+      "warnings": []
+    },
+    {
+      "index": 3,
+      "outline_id": "sl3",
+      "mode": "clone",
+      "pattern_id": "p20",
+      "composition": null,
+      "warnings": [
+        "label widened by 26% of the slide for the heading"
+      ]
+    },
+    {
+      "index": 4,
+      "outline_id": "sl4",
+      "mode": "clone",
+      "pattern_id": "p9",
+      "composition": null,
+      "warnings": [
+        "label widened by 19% of the slide for the heading"
+      ]
+    },
+    {
+      "index": 5,
+      "outline_id": "sl5",
+      "mode": "clone",
+      "pattern_id": "p9",
+      "composition": null,
+      "warnings": []
+    },
+    {
+      "index": 6,
+      "outline_id": "sl6",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "stat_row",
+      "warnings": []
+    },
+    {
+      "index": 7,
+      "outline_id": "sl7",
+      "mode": "clone",
+      "pattern_id": "p12",
+      "composition": null,
+      "warnings": []
+    },
+    {
+      "index": 8,
+      "outline_id": "sl8",
+      "mode": "clone",
+      "pattern_id": "p9",
+      "composition": null,
+      "warnings": []
+    },
+    {
+      "index": 9,
+      "outline_id": "sl9",
+      "mode": "clone",
+      "pattern_id": "p9",
+      "composition": null,
+      "warnings": []
+    },
+    {
+      "index": 10,
+      "outline_id": "sl10",
+      "mode": "clone",
+      "pattern_id": "p20",
+      "composition": null,
+      "warnings": [
+        "label widened by 26% of the slide for the heading"
+      ]
+    },
+    {
+      "index": 11,
+      "outline_id": "sl11",
+      "mode": "clone",
+      "pattern_id": "p3",
+      "composition": null,
+      "warnings": []
+    },
+    {
+      "index": 12,
+      "outline_id": "sl12",
+      "mode": "clone",
+      "pattern_id": "p12",
+      "composition": null,
+      "warnings": [
+        "text may overflow in title_1 (2 lines)"
+      ]
+    },
+    {
+      "index": 13,
+      "outline_id": "sl13",
+      "mode": "clone",
+      "pattern_id": "p7",
+      "composition": null,
+      "warnings": []
+    }
+  ],
+  "warnings": [
+    "no LLM provider: deterministic outline",
+    "slide 3 (sl3): label widened by 26% of the slide for the heading",
+    "slide 4 (sl4): label widened by 19% of the slide for the heading",
+    "slide 10 (sl10): label widened by 26% of the slide for the heading",
+    "slide 12 (sl12): text may overflow in title_1 (2 lines)"
+  ],
+  "exports": {
+    "pptx": "examples/pitch/structured/deck.pptx",
+    "pdf": "examples/pitch/structured/deck.pdf",
+    "html": "examples/pitch/structured/deck.html"
+  }
+}

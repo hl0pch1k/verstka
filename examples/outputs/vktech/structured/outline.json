@@ -1,0 +1,561 @@
+{
+  "title": "Инициатива: перенос аналитического контура в VK Cloud",
+  "subtitle": "техническое руководство и финансовый директор",
+  "audience": "техническое руководство и финансовый директор",
+  "purpose": "initiative",
+  "strategy": "structured",
+  "language": "ru",
+  "slides": [
+    {
+      "id": "sl1",
+      "kind": "title",
+      "section": null,
+      "headline": "Инициатива: перенос аналитического контура в VK Cloud",
+      "subtitle": "техническое руководство и финансовый директор",
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "",
+      "fact_refs": []
+    },
+    {
+      "id": "sl2",
+      "kind": "agenda",
+      "section": null,
+      "headline": "О чём поговорим",
+      "subtitle": null,
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [
+          {
+            "title": "Проблема",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Предложение",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Экономика",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Риски и как их снимаем",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "План",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Решение, которое просим",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          }
+        ],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "",
+      "fact_refs": []
+    },
+    {
+      "id": "sl3",
+      "kind": "stat_row",
+      "section": "Проблема",
+      "headline": "Аналитический кластер работает на 48 собственных серверах возрастом от четырёх лет",
+      "subtitle": null,
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [],
+        "numbers": [
+          {
+            "value": "23%",
+            "label": "загрузка в среднем",
+            "fact_id": "f2"
+          },
+          {
+            "value": "97%",
+            "label": "в пиковые дни отчётности",
+            "fact_id": "f3"
+          },
+          {
+            "value": "6 из 30",
+            "label": "ночные расчёты не успевают к утру",
+            "fact_id": "f4"
+          },
+          {
+            "value": "38 млн ₽",
+            "label": "продление поддержки железа на следующий год",
+            "fact_id": "f5"
+          }
+        ],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "",
+      "fact_refs": [
+        "f2",
+        "f3",
+        "f4",
+        "f5"
+      ]
+    },
+    {
+      "id": "sl4",
+      "kind": "cards",
+      "section": "Предложение",
+      "headline": "Перенести хранилище и расчёты в VK Cloud",
+      "subtitle": "Своё железо вывести из эксплуатации за два квартала",
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [
+          {
+            "title": "Управляемые Kubernetes и ClickHouse",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Автоматическое масштабирование под пиковую нагрузку",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Оплата по потреблению",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          }
+        ],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "",
+      "fact_refs": []
+    },
+    {
+      "id": "sl5",
+      "kind": "stat_row",
+      "section": "Экономика",
+      "headline": "Экономия 26 млн рублей в год, окупаемость миграции за 7 месяцев",
+      "subtitle": null,
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [],
+        "numbers": [
+          {
+            "value": "26 млн ₽",
+            "label": "экономия в год",
+            "fact_id": "f6"
+          },
+          {
+            "value": "7 мес",
+            "label": "окупаемость миграции",
+            "fact_id": null
+          },
+          {
+            "value": "×3,4",
+            "label": "расчёты в пик за счёт масштабирования",
+            "fact_id": "f7"
+          }
+        ],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "",
+      "fact_refs": [
+        "f6",
+        "f7"
+      ]
+    },
+    {
+      "id": "sl6",
+      "kind": "table",
+      "section": "Экономика",
+      "headline": "Экономика: 61 → 35 млн ₽ в год",
+      "subtitle": null,
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [],
+        "numbers": [],
+        "table": {
+          "columns": [
+            "Статья, млн ₽ в год",
+            "Сейчас",
+            "В VK Cloud"
+          ],
+          "rows": [
+            [
+              "Поддержка и амортизация",
+              "38",
+              "0"
+            ],
+            [
+              "Электричество и площадка",
+              "9",
+              "0"
+            ],
+            [
+              "Облачные ресурсы",
+              "0",
+              "27"
+            ],
+            [
+              "Команда эксплуатации",
+              "14",
+              "8"
+            ],
+            [
+              "Итого",
+              "61",
+              "35"
+            ]
+          ],
+          "unit": null,
+          "caption": null,
+          "source_span": "| Статья, млн ₽ в год | Сейчас | В VK Cloud |"
+        },
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "",
+      "fact_refs": []
+    },
+    {
+      "id": "sl7",
+      "kind": "cards",
+      "section": "Риски и как их снимаем",
+      "headline": "Риски и как их снимаем",
+      "subtitle": null,
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [
+          {
+            "title": "Совместимость",
+            "text": "2 из 140 отчётов используют нестандартные расширения — переписываем",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Безопасность",
+            "text": "Данные остаются в контуре РФ, шифрование на диске и в канале, доступ по ролям",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Зависимость от провайдера",
+            "text": "Экспорт данных в открытых форматах закреплён в договоре",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          }
+        ],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "",
+      "fact_refs": []
+    },
+    {
+      "id": "sl8",
+      "kind": "process",
+      "section": "План",
+      "headline": "План",
+      "subtitle": "Команда: 4 инженера и архитектор",
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [
+          {
+            "title": "Этап 1, месяц 1–2",
+            "text": "Пилот на копии хранилища и 20 отчётах",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Этап 2, месяц 3–4",
+            "text": "Перенос расчётов, параллельная работа",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Этап 3, месяц 5–6",
+            "text": "Отключение старого кластера",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          }
+        ],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "",
+      "fact_refs": []
+    },
+    {
+      "id": "sl9",
+      "kind": "bullets",
+      "section": "Решение, которое просим",
+      "headline": "Решение, которое просим",
+      "subtitle": null,
+      "content": {
+        "bullets": [],
+        "paragraphs": [
+          "Утвердить бюджет миграции 12 млн рублей и старт пилота с 1 ноября"
+        ],
+        "items": [],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "",
+      "fact_refs": []
+    },
+    {
+      "id": "sl10",
+      "kind": "thanks",
+      "section": null,
+      "headline": "Спасибо за внимание",
+      "subtitle": null,
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "",
+      "fact_refs": []
+    }
+  ],
+  "facts": [
+    {
+      "id": "f1",
+      "value": "48",
+      "unit": null,
+      "label": "аналитический кластер работает на 48 собственных серверах возрастом",
+      "source_span": "Аналитический кластер работает на 48 собственных серверах возрастом от четырёх лет."
+    },
+    {
+      "id": "f2",
+      "value": "23",
+      "unit": "%",
+      "label": "загрузка в среднем",
+      "source_span": "Загрузка в среднем 23%, но в пиковые дни отчётности 97%, из-за чего ночные расчёты не успевают к утру в 6 случаях из 30."
+    },
+    {
+      "id": "f3",
+      "value": "97",
+      "unit": "%",
+      "label": "в пиковые дни отчётности",
+      "source_span": "Загрузка в среднем 23%, но в пиковые дни отчётности 97%, из-за чего ночные расчёты не успевают к утру в 6 случаях из 30."
+    },
+    {
+      "id": "f4",
+      "value": "30",
+      "unit": null,
+      "label": "ночные расчёты не успевают к утру",
+      "source_span": "Загрузка в среднем 23%, но в пиковые дни отчётности 97%, из-за чего ночные расчёты не успевают к утру в 6 случаях из 30."
+    },
+    {
+      "id": "f5",
+      "value": "38",
+      "unit": "млн",
+      "label": "продление поддержки железа на следующий год",
+      "source_span": "Продление поддержки железа на следующий год стоит 38 млн рублей."
+    },
+    {
+      "id": "f6",
+      "value": "26",
+      "unit": "млн",
+      "label": "экономия в год",
+      "source_span": "Экономия 26 млн рублей в год, окупаемость миграции за 7 месяцев."
+    },
+    {
+      "id": "f7",
+      "value": "3,4",
+      "unit": null,
+      "label": "расчёты в пик за счёт масштабирования",
+      "source_span": "Расчёты в пик ускоряются в 3,4 раза за счёт масштабирования."
+    },
+    {
+      "id": "f8",
+      "value": "140",
+      "unit": null,
+      "label": "совместимость: 2 из 140 отчётов используют нестандартные расширения",
+      "source_span": "Совместимость: 2 из 140 отчётов используют нестандартные расширения — переписываем."
+    },
+    {
+      "id": "f9",
+      "value": "20",
+      "unit": null,
+      "label": "пилот на копии хранилища и 20 отчётах",
+      "source_span": "Этап 1, месяц 1–2: пилот на копии хранилища и 20 отчётах."
+    },
+    {
+      "id": "f10",
+      "value": "12",
+      "unit": "млн",
+      "label": "утвердить бюджет миграции 12 млн рублей и старт",
+      "source_span": "Утвердить бюджет миграции 12 млн рублей и старт пилота с 1 ноября."
+    }
+  ],
+  "series": [
+    {
+      "id": "s1",
+      "name": "Сейчас",
+      "categories": [
+        "Поддержка и амортизация",
+        "Электричество и площадка",
+        "Облачные ресурсы",
+        "Команда эксплуатации"
+      ],
+      "values": [
+        38.0,
+        9.0,
+        0.0,
+        14.0
+      ],
+      "unit": "млн ₽ в год",
+      "source_span": "| Статья, млн ₽ в год | Сейчас | В VK Cloud |"
+    },
+    {
+      "id": "s2",
+      "name": "В VK Cloud",
+      "categories": [
+        "Поддержка и амортизация",
+        "Электричество и площадка",
+        "Облачные ресурсы",
+        "Команда эксплуатации"
+      ],
+      "values": [
+        0.0,
+        0.0,
+        27.0,
+        8.0
+      ],
+      "unit": "млн ₽ в год",
+      "source_span": "| Статья, млн ₽ в год | Сейчас | В VK Cloud |"
+    }
+  ],
+  "tables": [
+    {
+      "columns": [
+        "Статья, млн ₽ в год",
+        "Сейчас",
+        "В VK Cloud"
+      ],
+      "rows": [
+        [
+          "Поддержка и амортизация",
+          "38",
+          "0"
+        ],
+        [
+          "Электричество и площадка",
+          "9",
+          "0"
+        ],
+        [
+          "Облачные ресурсы",
+          "0",
+          "27"
+        ],
+        [
+          "Команда эксплуатации",
+          "14",
+          "8"
+        ],
+        [
+          "Итого",
+          "61",
+          "35"
+        ]
+      ],
+      "unit": null,
+      "caption": null,
+      "source_span": "| Статья, млн ₽ в год | Сейчас | В VK Cloud |"
+    }
+  ]
+}

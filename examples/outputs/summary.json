@@ -1,0 +1,89 @@
+{
+  "workspace": {
+    "template": "VK_WorkSpace_Клиентская_конференция_Шаблон_03.pptx",
+    "brief": "examples/briefs/vk_workspace_feature.md",
+    "mode": "offline",
+    "seconds": 9.8,
+    "variants": {
+      "structured": {
+        "slides": 10,
+        "seconds": 9.6,
+        "score": 100,
+        "errors": 0,
+        "warnings": 0
+      },
+      "visual": {
+        "slides": 11,
+        "seconds": 8.9,
+        "score": 94,
+        "errors": 0,
+        "warnings": 2
+      },
+      "compact": {
+        "slides": 8,
+        "seconds": 7.0,
+        "score": 100,
+        "errors": 0,
+        "warnings": 0
+      }
+    }
+  },
+  "education": {
+    "template": "Шаблон презентации VK Education.pptx",
+    "brief": "examples/briefs/edu_program.md",
+    "mode": "offline",
+    "seconds": 9.3,
+    "variants": {
+      "structured": {
+        "slides": 10,
+        "seconds": 9.1,
+        "score": 91,
+        "errors": 0,
+        "warnings": 3
+      },
+      "visual": {
+        "slides": 10,
+        "seconds": 7.8,
+        "score": 88,
+        "errors": 0,
+        "warnings": 4
+      },
+      "compact": {
+        "slides": 8,
+        "seconds": 6.4,
+        "score": 94,
+        "errors": 0,
+        "warnings": 2
+      }
+    }
+  },
+  "vktech": {
+    "template": "VK Tech шаблон.pptx",
+    "brief": "examples/briefs/cloud_initiative.md",
+    "mode": "offline",
+    "seconds": 11.9,
+    "variants": {
+      "structured": {
+        "slides": 10,
+        "seconds": 11.7,
+        "score": 100,
+        "errors": 0,
+        "warnings": 0
+      },
+      "visual": {
+        "slides": 10,
+        "seconds": 9.0,
+        "score": 91,
+        "errors": 0,
+        "warnings": 3
+      },
+      "compact": {
+        "slides": 9,
+        "seconds": 6.5,
+        "score": 100,
+        "errors": 0,
+        "warnings": 0
+      }
+    }
+  }
+}

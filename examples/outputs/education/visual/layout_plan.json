@@ -1,0 +1,336 @@
+{
+  "strategy": "visual",
+  "template_id": "9ef2323ed5f49f46",
+  "slides": [
+    {
+      "outline_id": "sl1",
+      "mode": "clone",
+      "pattern_id": "p3",
+      "composition": null,
+      "fit": {
+        "overflow_title": 1.45,
+        "text_ratio": 1.45
+      },
+      "score": 0.954,
+      "reasons": [
+        "слайд 3 шаблона",
+        "тип title для title: 1.0",
+        "текст заметно длиннее ёмкости (×1.45), потребуется сокращение",
+        "стиль стратегии visual: +0.08",
+        "обложка: заголовок 48 пт, других текстов 1: +0.07"
+      ],
+      "alternatives": [
+        [
+          "p1",
+          0.805
+        ],
+        [
+          "p2",
+          0.805
+        ],
+        [
+          "p49",
+          0.784
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl2",
+      "mode": "clone",
+      "pattern_id": "p13",
+      "composition": null,
+      "fit": {
+        "overflow_title": 1.27,
+        "text_ratio": 1.27
+      },
+      "score": 0.955,
+      "reasons": [
+        "слайд 13 шаблона",
+        "тип big_number для big_number: 1.0",
+        "6 лишних текстовых слотов останутся пустыми",
+        "текст чуть длиннее ёмкости (×1.27), нужен меньший кегль",
+        "вес стратегии visual для типа: ×1.30",
+        "стиль стратегии visual: +0.08"
+      ],
+      "alternatives": [
+        [
+          "p18",
+          0.665
+        ],
+        [
+          "p26",
+          0.543
+        ],
+        [
+          "p27",
+          0.543
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl3",
+      "mode": "clone",
+      "pattern_id": "p26",
+      "composition": null,
+      "fit": {
+        "items": "2/3",
+        "overflow_card_title": 2.0,
+        "text_ratio": 2.0
+      },
+      "score": 0.779,
+      "reasons": [
+        "слайд 26 шаблона",
+        "тип cards для cards: 1.0",
+        "ёмкость группы 2 из 3 ячеек",
+        "текст не помещается (×2.00)",
+        "вес стратегии visual для типа: ×1.05",
+        "стиль стратегии visual: +0.08"
+      ],
+      "alternatives": [
+        [
+          "p27",
+          0.779
+        ],
+        [
+          "p28",
+          0.779
+        ],
+        [
+          "p7",
+          0.699
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl4",
+      "mode": "clone",
+      "pattern_id": "p7",
+      "composition": null,
+      "fit": {
+        "items": "4/4",
+        "overflow_card_title": 2.0,
+        "text_ratio": 2.0
+      },
+      "score": 0.699,
+      "reasons": [
+        "слайд 7 шаблона",
+        "тип cards для cards: 1.0",
+        "ёмкость группы 4 из 4 ячеек",
+        "текст не помещается (×2.00)",
+        "вес стратегии visual для типа: ×1.05"
+      ],
+      "alternatives": [
+        [
+          "p8",
+          0.699
+        ],
+        [
+          "p27",
+          0.629
+        ],
+        [
+          "p28",
+          0.629
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl5",
+      "mode": "clone",
+      "pattern_id": "p42",
+      "composition": null,
+      "fit": {
+        "items": "4/7",
+        "overflow_number": 1.8,
+        "text_ratio": 1.8
+      },
+      "score": 0.707,
+      "reasons": [
+        "слайд 42 шаблона",
+        "тип stat_row для stat_row: 1.0",
+        "7 отдельных слотов под 4 элементов",
+        "6 лишних текстовых слотов останутся пустыми",
+        "текст заметно длиннее ёмкости (×1.80), потребуется сокращение",
+        "вес стратегии visual для типа: ×1.30"
+      ],
+      "alternatives": [
+        [
+          "p46",
+          0.676
+        ],
+        [
+          "p8",
+          0.577
+        ],
+        [
+          "p48",
+          0.524
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl6",
+      "mode": "clone",
+      "pattern_id": "p38",
+      "composition": null,
+      "fit": {
+        "text_ratio": 0.8
+      },
+      "score": 0.963,
+      "reasons": [
+        "слайд 38 шаблона",
+        "тип table для table: 1.0",
+        "область под данные: 35% слайда",
+        "текст помещается",
+        "вес стратегии visual для типа: ×0.85",
+        "стиль стратегии visual: +0.08"
+      ],
+      "alternatives": [
+        [
+          "p39",
+          0.963
+        ],
+        [
+          "p40",
+          0.963
+        ],
+        [
+          "p33",
+          0.666
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl7",
+      "mode": "clone",
+      "pattern_id": "p8",
+      "composition": null,
+      "fit": {
+        "items": "4/6",
+        "overflow_card_title": 2.0,
+        "text_ratio": 2.0
+      },
+      "score": 0.699,
+      "reasons": [
+        "слайд 8 шаблона",
+        "тип cards для cards: 1.0",
+        "ёмкость группы 4 из 6 ячеек",
+        "текст не помещается (×2.00)",
+        "вес стратегии visual для типа: ×1.05"
+      ],
+      "alternatives": [
+        [
+          "p26",
+          0.629
+        ],
+        [
+          "p27",
+          0.629
+        ],
+        [
+          "p28",
+          0.629
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl8",
+      "mode": "clone",
+      "pattern_id": "p26",
+      "composition": null,
+      "fit": {
+        "items": "3/3",
+        "overflow_card_title": 2.0,
+        "text_ratio": 2.0
+      },
+      "score": 0.779,
+      "reasons": [
+        "слайд 26 шаблона",
+        "тип cards для cards: 1.0",
+        "ёмкость группы 3 из 3 ячеек",
+        "текст не помещается (×2.00)",
+        "вес стратегии visual для типа: ×1.05",
+        "стиль стратегии visual: +0.08"
+      ],
+      "alternatives": [
+        [
+          "p27",
+          0.779
+        ],
+        [
+          "p28",
+          0.779
+        ],
+        [
+          "p7",
+          0.699
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl9",
+      "mode": "clone",
+      "pattern_id": "p27",
+      "composition": null,
+      "fit": {
+        "items": "3/3",
+        "overflow_card_title": 2.0,
+        "text_ratio": 2.0
+      },
+      "score": 0.657,
+      "reasons": [
+        "слайд 27 шаблона",
+        "тип cards для process: 0.6",
+        "ёмкость группы 3 из 3 ячеек",
+        "текст не помещается (×2.00)",
+        "стиль стратегии visual: +0.08"
+      ],
+      "alternatives": [
+        [
+          "p28",
+          0.657
+        ],
+        [
+          "p21",
+          0.625
+        ],
+        [
+          "p7",
+          0.577
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl10",
+      "mode": "clone",
+      "pattern_id": "p52",
+      "composition": null,
+      "fit": {
+        "overflow_title": 1.46,
+        "text_ratio": 1.46
+      },
+      "score": 1.008,
+      "reasons": [
+        "слайд 52 шаблона",
+        "тип thanks для thanks: 1.0",
+        "текст заметно длиннее ёмкости (×1.46), потребуется сокращение",
+        "стиль стратегии visual: +0.08",
+        "обложка: заголовок 60 пт, других текстов 0: +0.12"
+      ],
+      "alternatives": [
+        [
+          "p4",
+          0.8
+        ],
+        [
+          "p5",
+          0.8
+        ],
+        [
+          "p16",
+          0.776
+        ]
+      ]
+    }
+  ]
+}

@@ -1,0 +1,347 @@
+{
+  "verstka_version": "0.1.0",
+  "git_commit": null,
+  "created_at": "2026-09-23T02:50:28+0300",
+  "platform": "macOS-27.0-arm64-arm-64bit",
+  "template": {
+    "id": "cbbe3aa6a21d23ce",
+    "file": "VK Tech шаблон.pptx"
+  },
+  "strategy": "visual",
+  "inputs": {
+    "brief_sha256": "c232da9c9c4f7617",
+    "outline_sha256": "e65049d48abaab1a"
+  },
+  "skills": {},
+  "providers": {
+    "llm": {
+      "backend": "none"
+    },
+    "vlm": {
+      "backend": "none"
+    }
+  },
+  "timings_s": {
+    "analyze": 0.02,
+    "plan": 0.0,
+    "render": 0.86,
+    "audit": 1.71,
+    "export": 3.73,
+    "total": 9.03
+  },
+  "usage": {},
+  "applied_fixes": [
+    {
+      "iteration": 1,
+      "outline_id": "sl6",
+      "action": "rematch",
+      "result": "rematch → p49"
+    },
+    {
+      "iteration": 1,
+      "outline_id": "sl2",
+      "action": "rematch",
+      "result": "rematch → p46"
+    },
+    {
+      "iteration": 1,
+      "outline_id": "sl1",
+      "action": "rematch",
+      "result": "rematch → p3"
+    },
+    {
+      "iteration": 1,
+      "outline_id": "sl5",
+      "action": "rematch",
+      "result": "rematch → p45"
+    },
+    {
+      "iteration": 1,
+      "action": "xml",
+      "result": "slide 2: shrunk text in 2372 to 14 pt"
+    },
+    {
+      "iteration": 1,
+      "action": "xml",
+      "result": "slide 3: shrunk text in 696 to 11 pt"
+    },
+    {
+      "iteration": 1,
+      "action": "xml",
+      "result": "slide 3: shrunk text in 702 to 11 pt"
+    },
+    {
+      "iteration": 1,
+      "action": "xml",
+      "result": "slide 3: shrunk text in 708 to 11 pt"
+    },
+    {
+      "iteration": 1,
+      "action": "xml",
+      "result": "slide 3: shrunk text in 714 to 11 pt"
+    },
+    {
+      "iteration": 1,
+      "action": "xml",
+      "result": "slide 3: shrunk text in 717 to 14 pt"
+    },
+    {
+      "iteration": 1,
+      "action": "xml",
+      "result": "slide 3: recolored 2 colour(s) in 697 → 000000 (text)"
+    },
+    {
+      "iteration": 1,
+      "action": "xml",
+      "result": "slide 3: recolored 2 colour(s) in 703 → 000000 (text)"
+    },
+    {
+      "iteration": 1,
+      "action": "xml",
+      "result": "slide 3: recolored 2 colour(s) in 709 → 000000 (text)"
+    },
+    {
+      "iteration": 1,
+      "action": "xml",
+      "result": "slide 3: recolored 2 colour(s) in 715 → 000000 (text)"
+    },
+    {
+      "iteration": 1,
+      "action": "xml",
+      "result": "slide 5: shrunk text in 2348 to 20 pt"
+    },
+    {
+      "iteration": 1,
+      "action": "xml",
+      "result": "slide 5: shrunk text in 2349 to 20 pt"
+    },
+    {
+      "iteration": 1,
+      "action": "xml",
+      "result": "slide 5: shrunk text in 2350 to 20 pt"
+    },
+    {
+      "iteration": 1,
+      "action": "xml",
+      "result": "slide 5: recolored 2 colour(s) in 2343 → 000000 (text)"
+    },
+    {
+      "iteration": 1,
+      "action": "xml",
+      "result": "slide 5: recolored 2 colour(s) in 2345 → 000000 (text)"
+    },
+    {
+      "iteration": 1,
+      "action": "xml",
+      "result": "slide 5: recolored 2 colour(s) in 2347 → 000000 (text)"
+    },
+    {
+      "iteration": 1,
+      "action": "xml",
+      "result": "slide 7: shrunk text in 696 to 11 pt"
+    },
+    {
+      "iteration": 1,
+      "action": "xml",
+      "result": "slide 7: shrunk text in 702 to 11 pt"
+    },
+    {
+      "iteration": 1,
+      "action": "xml",
+      "result": "slide 7: shrunk text in 708 to 11 pt"
+    },
+    {
+      "iteration": 1,
+      "action": "xml",
+      "result": "slide 7: recolored 2 colour(s) in 697 → 000000 (text)"
+    },
+    {
+      "iteration": 1,
+      "action": "xml",
+      "result": "slide 7: recolored 2 colour(s) in 703 → 000000 (text)"
+    },
+    {
+      "iteration": 1,
+      "action": "xml",
+      "result": "slide 7: recolored 2 colour(s) in 709 → 000000 (text)"
+    },
+    {
+      "iteration": 1,
+      "action": "xml",
+      "result": "slide 8: recolored 2 colour(s) in 1060 → 000000 (text)"
+    },
+    {
+      "iteration": 1,
+      "action": "xml",
+      "result": "slide 8: recolored 2 colour(s) in 1064 → 000000 (text)"
+    },
+    {
+      "iteration": 1,
+      "action": "xml",
+      "result": "slide 8: recolored 2 colour(s) in 1068 → 000000 (text)"
+    }
+  ],
+  "audit": {
+    "errors": 0,
+    "warnings": 3,
+    "infos": 7,
+    "model_flags": 0,
+    "score": 91,
+    "checks_run": [
+      "out_of_bounds",
+      "text_clipped",
+      "overlap",
+      "text_overflow",
+      "margin_violation",
+      "grid_alignment",
+      "image_stretched",
+      "table_cell_wrap",
+      "font_not_in_template",
+      "size_not_in_scale",
+      "color_not_in_palette",
+      "layout_not_from_template",
+      "chrome_moved",
+      "contrast_low",
+      "too_many_bullets",
+      "bullet_too_long",
+      "table_too_big",
+      "too_many_series",
+      "fill_ratio",
+      "file_opens",
+      "empty_deck",
+      "placeholder_text",
+      "empty_slide",
+      "content_missing",
+      "slide_is_picture",
+      "chart_missing_labels",
+      "duplicate_slides"
+    ]
+  },
+  "slides": [
+    {
+      "index": 1,
+      "outline_id": "sl1",
+      "mode": "clone",
+      "pattern_id": "p3",
+      "composition": null,
+      "warnings": [
+        "heading kept clear of the logos"
+      ]
+    },
+    {
+      "index": 2,
+      "outline_id": "sl2",
+      "mode": "clone",
+      "pattern_id": "p46",
+      "composition": null,
+      "warnings": [
+        "heading kept clear of the logos",
+        "text may overflow in title_1 (3 lines)"
+      ]
+    },
+    {
+      "index": 3,
+      "outline_id": "sl3",
+      "mode": "clone",
+      "pattern_id": "p15",
+      "composition": null,
+      "warnings": [
+        "heading kept clear of the logos",
+        "text may overflow in title_1 (3 lines)"
+      ]
+    },
+    {
+      "index": 4,
+      "outline_id": "sl4",
+      "mode": "clone",
+      "pattern_id": "p24",
+      "composition": null,
+      "warnings": [
+        "heading kept clear of the logos",
+        "subtitle had no slot"
+      ]
+    },
+    {
+      "index": 5,
+      "outline_id": "sl5",
+      "mode": "clone",
+      "pattern_id": "p45",
+      "composition": null,
+      "warnings": []
+    },
+    {
+      "index": 6,
+      "outline_id": "sl6",
+      "mode": "clone",
+      "pattern_id": "p49",
+      "composition": null,
+      "warnings": [
+        "heading kept clear of the logos"
+      ]
+    },
+    {
+      "index": 7,
+      "outline_id": "sl7",
+      "mode": "clone",
+      "pattern_id": "p15",
+      "composition": null,
+      "warnings": [
+        "heading kept clear of the logos"
+      ]
+    },
+    {
+      "index": 8,
+      "outline_id": "sl8",
+      "mode": "clone",
+      "pattern_id": "p25",
+      "composition": null,
+      "warnings": [
+        "subtitle had no slot"
+      ]
+    },
+    {
+      "index": 9,
+      "outline_id": "sl9",
+      "mode": "clone",
+      "pattern_id": "p9",
+      "composition": null,
+      "warnings": [
+        "heading kept clear of the logos"
+      ]
+    },
+    {
+      "index": 10,
+      "outline_id": "sl10",
+      "mode": "clone",
+      "pattern_id": "p6",
+      "composition": null,
+      "warnings": [
+        "heading kept clear of the logos"
+      ]
+    }
+  ],
+  "warnings": [
+    "no LLM provider: deterministic outline",
+    "slide 1 (sl1): text may overflow in title_1 (4 lines)",
+    "slide 2 (sl2): heading kept clear of the logos",
+    "slide 2 (sl2): text may overflow in title_1 (3 lines)",
+    "slide 2 (sl2): widened number slot number_1",
+    "slide 3 (sl3): heading kept clear of the logos",
+    "slide 3 (sl3): text may overflow in title_1 (3 lines)",
+    "slide 4 (sl4): heading kept clear of the logos",
+    "slide 4 (sl4): subtitle had no slot",
+    "slide 5 (sl5): text may overflow in number_1 (2 lines)",
+    "slide 5 (sl5): text of «7 мес» had no slot in cell 2",
+    "slide 5 (sl5): text of «×3,4» had no slot in cell 3",
+    "slide 6 (sl6): heading kept clear of the logos",
+    "slide 7 (sl7): heading kept clear of the logos",
+    "slide 8 (sl8): subtitle had no slot",
+    "slide 9 (sl9): heading kept clear of the logos",
+    "slide 10 (sl10): heading kept clear of the logos"
+  ],
+  "exports": {
+    "pptx": "/Users/h.u.1.l.a/Downloads/Конкурсы/VK tech/verstka/examples/outputs/vktech/visual/deck.pptx",
+    "pdf": "/Users/h.u.1.l.a/Downloads/Конкурсы/VK tech/verstka/examples/outputs/vktech/visual/deck.pdf",
+    "html": "/Users/h.u.1.l.a/Downloads/Конкурсы/VK tech/verstka/examples/outputs/vktech/visual/deck.html"
+  }
+}

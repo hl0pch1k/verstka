@@ -1,0 +1,687 @@
+{
+  "title": "Verstka — цифровой дизайнер презентаций",
+  "subtitle": "жюри хакатона «Лидеры цифровой трансформации 2026»",
+  "audience": "жюри хакатона «Лидеры цифровой трансформации 2026»",
+  "purpose": "product",
+  "strategy": "structured",
+  "language": "ru",
+  "slides": [
+    {
+      "id": "sl1",
+      "kind": "title",
+      "section": null,
+      "headline": "Verstka — цифровой дизайнер презентаций",
+      "subtitle": "жюри хакатона «Лидеры цифровой трансформации 2026»",
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "",
+      "fact_refs": []
+    },
+    {
+      "id": "sl2",
+      "kind": "agenda",
+      "section": null,
+      "headline": "О чём поговорим",
+      "subtitle": null,
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [
+          {
+            "title": "Проблема",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Решение",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Как это работает",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Результаты на датасете",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Невиданный шаблон",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Три варианта вёрстки",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          }
+        ],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "",
+      "fact_refs": []
+    },
+    {
+      "id": "sl3",
+      "kind": "bullets",
+      "section": "Проблема",
+      "headline": "Команды тратят часы на то, чтобы уложить готовый текст в фирменный шаблон",
+      "subtitle": null,
+      "content": {
+        "bullets": [
+          "Команды тратят часы на то, чтобы уложить готовый текст в фирменный шаблон",
+          "Шаблоны живут как набор примеров, а не как правила",
+          "Генераторы презентаций рисуют «похоже», но не в стиле компании и без редактируемых объектов"
+        ],
+        "paragraphs": [],
+        "items": [],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "",
+      "fact_refs": []
+    },
+    {
+      "id": "sl4",
+      "kind": "cards",
+      "section": "Решение",
+      "headline": "Verstka читает любой PPTX как набор правил",
+      "subtitle": null,
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [
+          {
+            "title": "Палитру с ролями",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Шкалу кеглей",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Сетку",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Хром",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Паттерны слайдов",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Компоненты и ассеты",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          }
+        ],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "По брифу сервис собирает три визуально разных варианта в стиле шаблона, проверяет их аудитом и отдаёт PPTX из нативных объектов, PDF и HTML.",
+      "fact_refs": []
+    },
+    {
+      "id": "sl5",
+      "kind": "cards",
+      "section": "Как это работает",
+      "headline": "Как это работает",
+      "subtitle": null,
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [
+          {
+            "title": "Разбор",
+            "text": "Сервис находит паттерны на слайдах-образцах, группы карточек и роли слотов",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "План",
+            "text": "Бриф превращается в реестр фактов и план колоды с заголовками-выводами",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Вёрстка",
+            "text": "Образец клонируется внутри пакета шаблона или слайд синтезируется из токенов",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Аудит",
+            "text": "27 детерминированных проверок и 11 вопросов модели по картинке слайда",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Экспорт",
+            "text": "PPTX, PDF и HTML",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          }
+        ],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "",
+      "fact_refs": []
+    },
+    {
+      "id": "sl6",
+      "kind": "stat_row",
+      "section": "Результаты на датасете",
+      "headline": "Девять демо-колод собраны без единой ошибки аудита",
+      "subtitle": null,
+      "content": {
+        "bullets": [],
+        "paragraphs": [
+          "Девять демо-колод собраны без единой ошибки аудита"
+        ],
+        "items": [],
+        "numbers": [
+          {
+            "value": "8–25 с",
+            "label": "три варианта с аудитом, автофиксом и экспортом собираются",
+            "fact_id": "f5"
+          },
+          {
+            "value": "88–100",
+            "label": "оценка аудита",
+            "fact_id": "f2"
+          },
+          {
+            "value": "15",
+            "label": "все 15 контрольных колод проходят проверку схемы OOXML",
+            "fact_id": "f8"
+          }
+        ],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "",
+      "fact_refs": [
+        "f5",
+        "f2",
+        "f8"
+      ]
+    },
+    {
+      "id": "sl7",
+      "kind": "table",
+      "section": "Результаты на датасете",
+      "headline": "Результаты на датасете: сравнение",
+      "subtitle": null,
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [],
+        "numbers": [],
+        "table": {
+          "columns": [
+            "Шаблон",
+            "Структурный",
+            "Визуальный",
+            "Компактный"
+          ],
+          "rows": [
+            [
+              "VK WorkSpace",
+              "100",
+              "91",
+              "100"
+            ],
+            [
+              "VK Education",
+              "88",
+              "88",
+              "94"
+            ],
+            [
+              "VK Tech",
+              "100",
+              "91",
+              "100"
+            ]
+          ],
+          "unit": null,
+          "caption": null,
+          "source_span": "| Шаблон | Структурный | Визуальный | Компактный |"
+        },
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "",
+      "fact_refs": []
+    },
+    {
+      "id": "sl8",
+      "kind": "cards",
+      "section": "Невиданный шаблон",
+      "headline": "Невиданный шаблон",
+      "subtitle": null,
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [
+          {
+            "title": "Логотипы",
+            "text": "Находим даже зашитые в фоновую картинку и не ставим на них текст",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Пустые рамки",
+            "text": "Превращаем в места для текста, таблиц и диаграмм",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Справочные слайды",
+            "text": "Листы иконок, палитры и ссылок не используем как макеты",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Синтез",
+            "text": "Рисуем на чистом слайде-образце, сохраняя фон и хром",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          }
+        ],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "",
+      "fact_refs": []
+    },
+    {
+      "id": "sl9",
+      "kind": "cards",
+      "section": "Три варианта вёрстки",
+      "headline": "Три варианта вёрстки",
+      "subtitle": null,
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [
+          {
+            "title": "Структурный",
+            "text": "Повестка, одна мысль на слайд, точные таблицы",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Визуальный",
+            "text": "Ключевая цифра первым слайдом, карточки и диаграммы",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Компактный",
+            "text": "Соседние разделы в две колонки, сравнения таблицами",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          }
+        ],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "",
+      "fact_refs": []
+    },
+    {
+      "id": "sl10",
+      "kind": "bullets",
+      "section": "Открытые модели",
+      "headline": "Qwen3.8-27B под лицензией Apache 2.0 для текста и картинок",
+      "subtitle": null,
+      "content": {
+        "bullets": [
+          "Смена на инференс VK — одна строка в конфиге",
+          "Без модели сервис работает полностью: детерминированный разбор, планировщик и аудит"
+        ],
+        "paragraphs": [],
+        "items": [],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "",
+      "fact_refs": []
+    },
+    {
+      "id": "sl11",
+      "kind": "process",
+      "section": "Дорожная карта",
+      "headline": "Дорожная карта",
+      "subtitle": null,
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [
+          {
+            "title": "Этап 1",
+            "text": "Подключение к инференсу VK и прогон на невиданных шаблонах",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Этап 2",
+            "text": "Генерация иллюстраций открытой моделью в стиле шаблона",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Этап 3",
+            "text": "Плагин для PowerPoint и командный режим с общими шаблонами",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          }
+        ],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "",
+      "fact_refs": []
+    },
+    {
+      "id": "sl12",
+      "kind": "bullets",
+      "section": "Выводы",
+      "headline": "Verstka превращает шаблон компании в правила, а бриф",
+      "subtitle": null,
+      "content": {
+        "bullets": [],
+        "paragraphs": [
+          "Просим пропустить проект в финал и дать доступ к инференсу VK"
+        ],
+        "items": [],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "",
+      "fact_refs": []
+    },
+    {
+      "id": "sl13",
+      "kind": "thanks",
+      "section": null,
+      "headline": "Спасибо за внимание",
+      "subtitle": null,
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "",
+      "fact_refs": []
+    }
+  ],
+  "facts": [
+    {
+      "id": "f1",
+      "value": "1621",
+      "unit": null,
+      "label": "шаблоны живут как набор примеров",
+      "source_span": "Шаблоны живут как набор примеров, а не как правила: в шаблоне VK Tech 1621 свободная фигура и только 81 плейсхолдер."
+    },
+    {
+      "id": "f2",
+      "value": "81",
+      "unit": null,
+      "label": "Шаблоны живут как набор примеров, а не как правила: в шаблоне VK Tech 1621 свободная фигура и только 81 плейсхолдер.",
+      "source_span": "Шаблоны живут как набор примеров, а не как правила: в шаблоне VK Tech 1621 свободная фигура и только 81 плейсхолдер."
+    },
+    {
+      "id": "f3",
+      "value": "27",
+      "unit": null,
+      "label": "аудит: 27 детерминированных проверок и 11 вопросов модели",
+      "source_span": "Аудит: 27 детерминированных проверок и 11 вопросов модели по картинке слайда."
+    },
+    {
+      "id": "f4",
+      "value": "11",
+      "unit": null,
+      "label": "Аудит: 27 детерминированных проверок и 11 вопросов модели по картинке слайда.",
+      "source_span": "Аудит: 27 детерминированных проверок и 11 вопросов модели по картинке слайда."
+    },
+    {
+      "id": "f5",
+      "value": "25",
+      "unit": null,
+      "label": "три варианта с аудитом, автофиксом и экспортом собираются",
+      "source_span": "Три варианта с аудитом, автофиксом и экспортом собираются за 8–25 секунд на шаблон."
+    },
+    {
+      "id": "f6",
+      "value": "88",
+      "unit": null,
+      "label": "оценка аудита",
+      "source_span": "Оценка аудита 88–100 из 100."
+    },
+    {
+      "id": "f7",
+      "value": "100",
+      "unit": null,
+      "label": "оценка аудита",
+      "source_span": "Оценка аудита 88–100 из 100."
+    },
+    {
+      "id": "f8",
+      "value": "15",
+      "unit": null,
+      "label": "все 15 контрольных колод проходят проверку схемы OOXML",
+      "source_span": "Все 15 контрольных колод проходят проверку схемы OOXML."
+    },
+    {
+      "id": "f9",
+      "value": "2.0",
+      "unit": null,
+      "label": "Qwen3.8-27B под лицензией Apache 2.0 для текста и картинок.",
+      "source_span": "Qwen3.8-27B под лицензией Apache 2.0 для текста и картинок."
+    }
+  ],
+  "series": [
+    {
+      "id": "s1",
+      "name": "Структурный",
+      "categories": [
+        "VK WorkSpace",
+        "VK Education",
+        "VK Tech"
+      ],
+      "values": [
+        100.0,
+        88.0,
+        100.0
+      ],
+      "unit": null,
+      "source_span": "| Шаблон | Структурный | Визуальный | Компактный |"
+    },
+    {
+      "id": "s2",
+      "name": "Визуальный",
+      "categories": [
+        "VK WorkSpace",
+        "VK Education",
+        "VK Tech"
+      ],
+      "values": [
+        91.0,
+        88.0,
+        91.0
+      ],
+      "unit": null,
+      "source_span": "| Шаблон | Структурный | Визуальный | Компактный |"
+    },
+    {
+      "id": "s3",
+      "name": "Компактный",
+      "categories": [
+        "VK WorkSpace",
+        "VK Education",
+        "VK Tech"
+      ],
+      "values": [
+        100.0,
+        94.0,
+        100.0
+      ],
+      "unit": null,
+      "source_span": "| Шаблон | Структурный | Визуальный | Компактный |"
+    }
+  ],
+  "tables": [
+    {
+      "columns": [
+        "Шаблон",
+        "Структурный",
+        "Визуальный",
+        "Компактный"
+      ],
+      "rows": [
+        [
+          "VK WorkSpace",
+          "100",
+          "91",
+          "100"
+        ],
+        [
+          "VK Education",
+          "88",
+          "88",
+          "94"
+        ],
+        [
+          "VK Tech",
+          "100",
+          "91",
+          "100"
+        ]
+      ],
+      "unit": null,
+      "caption": null,
+      "source_span": "| Шаблон | Структурный | Визуальный | Компактный |"
+    }
+  ]
+}

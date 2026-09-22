@@ -1,0 +1,399 @@
+{
+  "deck": "/Users/h.u.1.l.a/Downloads/Конкурсы/VK tech/verstka/examples/outputs/education/visual/deck.pptx",
+  "template_id": "9ef2323ed5f49f46",
+  "strategy": "visual",
+  "issues": [
+    {
+      "id": "grid_alignment-4-1",
+      "slide": 4,
+      "check_id": "grid_alignment",
+      "severity": "info",
+      "kind": "deterministic",
+      "message": "2 блоков не выровнены по колонкам шаблона",
+      "bboxes": [
+        {
+          "x": 0.5048176673228346,
+          "y": 0.2589024496937883,
+          "w": 0.4421875,
+          "h": 0.3144475065616798
+        },
+        {
+          "x": 0.5048176673228346,
+          "y": 0.5897191601049869,
+          "w": 0.4421875,
+          "h": 0.3144475065616798
+        }
+      ],
+      "element_ids": [
+        "275",
+        "278"
+      ],
+      "suggestion": null,
+      "autofix": null,
+      "details": {},
+      "outline_id": "sl4"
+    },
+    {
+      "id": "grid_alignment-7-2",
+      "slide": 7,
+      "check_id": "grid_alignment",
+      "severity": "info",
+      "kind": "deterministic",
+      "message": "2 блоков не выровнены по колонкам шаблона",
+      "bboxes": [
+        {
+          "x": 0.35548392388451444,
+          "y": 0.258564887722368,
+          "w": 0.2905511811023622,
+          "h": 0.3144475065616798
+        },
+        {
+          "x": 0.6554124015748032,
+          "y": 0.258564887722368,
+          "w": 0.2905511811023622,
+          "h": 0.3144475065616798
+        }
+      ],
+      "element_ids": [
+        "285",
+        "286"
+      ],
+      "suggestion": null,
+      "autofix": null,
+      "details": {},
+      "outline_id": "sl7"
+    },
+    {
+      "id": "grid_alignment-8-3",
+      "slide": 8,
+      "check_id": "grid_alignment",
+      "severity": "info",
+      "kind": "deterministic",
+      "message": "2 блоков не выровнены по колонкам шаблона",
+      "bboxes": [
+        {
+          "x": 0.3597005413385827,
+          "y": 0.5503493729950423,
+          "w": 0.23622047244094488,
+          "h": 0.17988291046952465
+        },
+        {
+          "x": 0.6653646653543307,
+          "y": 0.5503493729950423,
+          "w": 0.23622047244094488,
+          "h": 0.2136146106736658
+        }
+      ],
+      "element_ids": [
+        "766",
+        "767"
+      ],
+      "suggestion": null,
+      "autofix": null,
+      "details": {},
+      "outline_id": "sl8"
+    },
+    {
+      "id": "grid_alignment-9-4",
+      "slide": 9,
+      "check_id": "grid_alignment",
+      "severity": "info",
+      "kind": "deterministic",
+      "message": "2 блоков не выровнены по колонкам шаблона",
+      "bboxes": [
+        {
+          "x": 0.3597005413385827,
+          "y": 0.5503493729950423,
+          "w": 0.23622047244094488,
+          "h": 0.17988291046952465
+        },
+        {
+          "x": 0.6653646653543307,
+          "y": 0.5503493729950423,
+          "w": 0.23622047244094488,
+          "h": 0.2136146106736658
+        }
+      ],
+      "element_ids": [
+        "787",
+        "788"
+      ],
+      "suggestion": null,
+      "autofix": null,
+      "details": {},
+      "outline_id": "sl9"
+    },
+    {
+      "id": "size_not_in_scale-1-5",
+      "slide": 1,
+      "check_id": "size_not_in_scale",
+      "severity": "info",
+      "kind": "deterministic",
+      "message": "кегль 33.6 пт не из шкалы шаблона",
+      "bboxes": [],
+      "element_ids": [
+        "249"
+      ],
+      "suggestion": null,
+      "autofix": null,
+      "details": {
+        "size": 33.6
+      },
+      "outline_id": "sl1"
+    },
+    {
+      "id": "size_not_in_scale-5-6",
+      "slide": 5,
+      "check_id": "size_not_in_scale",
+      "severity": "info",
+      "kind": "deterministic",
+      "message": "кегль 25.2 пт не из шкалы шаблона",
+      "bboxes": [],
+      "element_ids": [
+        "920"
+      ],
+      "suggestion": null,
+      "autofix": null,
+      "details": {
+        "size": 25.2
+      },
+      "outline_id": "sl5"
+    },
+    {
+      "id": "size_not_in_scale-7-7",
+      "slide": 7,
+      "check_id": "size_not_in_scale",
+      "severity": "info",
+      "kind": "deterministic",
+      "message": "кегль 30.6 пт не из шкалы шаблона",
+      "bboxes": [],
+      "element_ids": [
+        "283"
+      ],
+      "suggestion": null,
+      "autofix": null,
+      "details": {
+        "size": 30.6
+      },
+      "outline_id": "sl7"
+    },
+    {
+      "id": "size_not_in_scale-8-8",
+      "slide": 8,
+      "check_id": "size_not_in_scale",
+      "severity": "info",
+      "kind": "deterministic",
+      "message": "кегль 30.6 пт не из шкалы шаблона",
+      "bboxes": [],
+      "element_ids": [
+        "763"
+      ],
+      "suggestion": null,
+      "autofix": null,
+      "details": {
+        "size": 30.6
+      },
+      "outline_id": "sl8"
+    },
+    {
+      "id": "size_not_in_scale-10-9",
+      "slide": 10,
+      "check_id": "size_not_in_scale",
+      "severity": "warn",
+      "kind": "deterministic",
+      "message": "кегль 51 пт не из шкалы шаблона",
+      "bboxes": [],
+      "element_ids": [
+        "1075"
+      ],
+      "suggestion": null,
+      "autofix": null,
+      "details": {
+        "size": 51.0
+      },
+      "outline_id": "sl10"
+    },
+    {
+      "id": "contrast_low-2-10",
+      "slide": 2,
+      "check_id": "contrast_low",
+      "severity": "info",
+      "kind": "deterministic",
+      "message": "контраст 4.1:1 у «В первом наборе учились 640 ст» (#0077FF на #FFFFFF)",
+      "bboxes": [
+        {
+          "x": 0.05555561023622047,
+          "y": 0.10092592592592593,
+          "w": 0.3668737696850394,
+          "h": 0.0939400699912511
+        }
+      ],
+      "element_ids": [
+        "342"
+      ],
+      "suggestion": null,
+      "autofix": null,
+      "details": {
+        "contrast": 4.13,
+        "background": "FFFFFF"
+      },
+      "outline_id": "sl2"
+    },
+    {
+      "id": "fill_ratio-2-11",
+      "slide": 2,
+      "check_id": "fill_ratio",
+      "severity": "warn",
+      "kind": "deterministic",
+      "message": "слайд заполнен только на 14%",
+      "bboxes": [],
+      "element_ids": [],
+      "suggestion": null,
+      "autofix": null,
+      "details": {
+        "ratio": 0.15
+      },
+      "outline_id": "sl2"
+    },
+    {
+      "id": "fill_ratio-4-12",
+      "slide": 4,
+      "check_id": "fill_ratio",
+      "severity": "warn",
+      "kind": "deterministic",
+      "message": "слайд заполнен на 86%",
+      "bboxes": [],
+      "element_ids": [],
+      "suggestion": null,
+      "autofix": null,
+      "details": {
+        "ratio": 0.87
+      },
+      "outline_id": "sl4"
+    },
+    {
+      "id": "fill_ratio-5-13",
+      "slide": 5,
+      "check_id": "fill_ratio",
+      "severity": "warn",
+      "kind": "deterministic",
+      "message": "слайд заполнен только на 19%",
+      "bboxes": [],
+      "element_ids": [],
+      "suggestion": null,
+      "autofix": null,
+      "details": {
+        "ratio": 0.19
+      },
+      "outline_id": "sl5"
+    }
+  ],
+  "summary": {
+    "errors": 0,
+    "warnings": 4,
+    "infos": 9,
+    "model_flags": 0,
+    "score": 88,
+    "checks_run": [
+      "out_of_bounds",
+      "text_clipped",
+      "overlap",
+      "text_overflow",
+      "margin_violation",
+      "grid_alignment",
+      "image_stretched",
+      "table_cell_wrap",
+      "font_not_in_template",
+      "size_not_in_scale",
+      "color_not_in_palette",
+      "layout_not_from_template",
+      "chrome_moved",
+      "contrast_low",
+      "too_many_bullets",
+      "bullet_too_long",
+      "table_too_big",
+      "too_many_series",
+      "fill_ratio",
+      "file_opens",
+      "empty_deck",
+      "placeholder_text",
+      "empty_slide",
+      "content_missing",
+      "slide_is_picture",
+      "chart_missing_labels",
+      "duplicate_slides"
+    ]
+  },
+  "per_slide": {
+    "4": [
+      "grid_alignment-4-1",
+      "fill_ratio-4-12"
+    ],
+    "7": [
+      "grid_alignment-7-2",
+      "size_not_in_scale-7-7"
+    ],
+    "8": [
+      "grid_alignment-8-3",
+      "size_not_in_scale-8-8"
+    ],
+    "9": [
+      "grid_alignment-9-4"
+    ],
+    "1": [
+      "size_not_in_scale-1-5"
+    ],
+    "5": [
+      "size_not_in_scale-5-6",
+      "fill_ratio-5-13"
+    ],
+    "10": [
+      "size_not_in_scale-10-9"
+    ],
+    "2": [
+      "contrast_low-2-10",
+      "fill_ratio-2-11"
+    ]
+  },
+  "iterations": 1,
+  "applied_fixes": [
+    {
+      "iteration": 1,
+      "action": "xml",
+      "result": "slide 2: shrunk text in 342 to 14 pt"
+    },
+    {
+      "iteration": 1,
+      "action": "xml",
+      "result": "slide 2: shrunk text in 351 to 32 pt"
+    },
+    {
+      "iteration": 1,
+      "action": "xml",
+      "result": "slide 3: shrunk text in 763 to 20 pt"
+    },
+    {
+      "iteration": 1,
+      "action": "xml",
+      "result": "slide 4: shrunk text in 276 to 20 pt"
+    },
+    {
+      "iteration": 1,
+      "action": "xml",
+      "result": "slide 6: shrunk text in 887 to 20 pt"
+    }
+  ],
+  "slide_images": {
+    "1": "/Users/h.u.1.l.a/Downloads/Конкурсы/VK tech/verstka/examples/outputs/education/visual/slides/slide-001.jpg",
+    "2": "/Users/h.u.1.l.a/Downloads/Конкурсы/VK tech/verstka/examples/outputs/education/visual/slides/slide-002.jpg",
+    "3": "/Users/h.u.1.l.a/Downloads/Конкурсы/VK tech/verstka/examples/outputs/education/visual/slides/slide-003.jpg",
+    "4": "/Users/h.u.1.l.a/Downloads/Конкурсы/VK tech/verstka/examples/outputs/education/visual/slides/slide-004.jpg",
+    "5": "/Users/h.u.1.l.a/Downloads/Конкурсы/VK tech/verstka/examples/outputs/education/visual/slides/slide-005.jpg",
+    "6": "/Users/h.u.1.l.a/Downloads/Конкурсы/VK tech/verstka/examples/outputs/education/visual/slides/slide-006.jpg",
+    "7": "/Users/h.u.1.l.a/Downloads/Конкурсы/VK tech/verstka/examples/outputs/education/visual/slides/slide-007.jpg",
+    "8": "/Users/h.u.1.l.a/Downloads/Конкурсы/VK tech/verstka/examples/outputs/education/visual/slides/slide-008.jpg",
+    "9": "/Users/h.u.1.l.a/Downloads/Конкурсы/VK tech/verstka/examples/outputs/education/visual/slides/slide-009.jpg",
+    "10": "/Users/h.u.1.l.a/Downloads/Конкурсы/VK tech/verstka/examples/outputs/education/visual/slides/slide-010.jpg"
+  },
+  "seconds": 0.1
+}

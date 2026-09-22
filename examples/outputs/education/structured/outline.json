@@ -1,0 +1,522 @@
+{
+  "title": "Образовательная программа VK Education «Инженер данных»",
+  "subtitle": "партнёрские университеты и абитуриенты",
+  "audience": "партнёрские университеты и абитуриенты",
+  "purpose": "product",
+  "strategy": "structured",
+  "language": "ru",
+  "slides": [
+    {
+      "id": "sl1",
+      "kind": "title",
+      "section": null,
+      "headline": "Образовательная программа VK Education «Инженер данных»",
+      "subtitle": "партнёрские университеты и абитуриенты",
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "",
+      "fact_refs": []
+    },
+    {
+      "id": "sl2",
+      "kind": "agenda",
+      "section": null,
+      "headline": "О чём поговорим",
+      "subtitle": null,
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [
+          {
+            "title": "Зачем программа",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Что мы предлагаем",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Результаты первого набора",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Как устроено обучение",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Что нужно от партнёров",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Следующие шаги",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          }
+        ],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "",
+      "fact_refs": []
+    },
+    {
+      "id": "sl3",
+      "kind": "bullets",
+      "section": "Зачем программа",
+      "headline": "Рынку не хватает инженеров данных",
+      "subtitle": null,
+      "content": {
+        "bullets": [
+          "По оценке отрасли дефицит составляет 25 000 специалистов, а средний срок закрытия вакансии 74 дня",
+          "Университетские курсы дают теорию, но не практику на реальных данных"
+        ],
+        "paragraphs": [],
+        "items": [],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "",
+      "fact_refs": []
+    },
+    {
+      "id": "sl4",
+      "kind": "cards",
+      "section": "Что мы предлагаем",
+      "headline": "Годовая программа из 4 модулей",
+      "subtitle": "Каждый модуль заканчивается проектом на реальных обезличенных данных VK",
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [
+          {
+            "title": "Основы SQL и Python",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Потоковая обработка",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Хранилища и витрины",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Инженерия ML-пайплайнов",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          }
+        ],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "Наставники — действующие инженеры VK Tech.",
+      "fact_refs": []
+    },
+    {
+      "id": "sl5",
+      "kind": "stat_row",
+      "section": "Результаты первого набора",
+      "headline": "В первом наборе учились 640 студентов из 12 университетов",
+      "subtitle": null,
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [],
+        "numbers": [
+          {
+            "value": "71%",
+            "label": "до конца дошли",
+            "fact_id": "f5"
+          },
+          {
+            "value": "58%",
+            "label": "трудоустроены в течение трёх месяцев после выпуска 58%",
+            "fact_id": "f6"
+          },
+          {
+            "value": "145 000 ₽",
+            "label": "средняя стартовая зарплата",
+            "fact_id": "f7"
+          },
+          {
+            "value": "4,8 из 5",
+            "label": "оценка программы студентами",
+            "fact_id": "f8"
+          }
+        ],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "",
+      "fact_refs": [
+        "f5",
+        "f6",
+        "f7",
+        "f8"
+      ]
+    },
+    {
+      "id": "sl6",
+      "kind": "table",
+      "section": "Результаты первого набора",
+      "headline": "Результаты первого набора: сравнение",
+      "subtitle": null,
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [],
+        "numbers": [],
+        "table": {
+          "columns": [
+            "Показатель",
+            "Набор 2024",
+            "Набор 2025"
+          ],
+          "rows": [
+            [
+              "Студентов",
+              "640",
+              "1 100"
+            ],
+            [
+              "Дошли до конца",
+              "71%",
+              "76%"
+            ],
+            [
+              "Трудоустроены за 3 месяца",
+              "58%",
+              "63%"
+            ]
+          ],
+          "unit": null,
+          "caption": null,
+          "source_span": "| Показатель | Набор 2024 | Набор 2025 |"
+        },
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "",
+      "fact_refs": []
+    },
+    {
+      "id": "sl7",
+      "kind": "cards",
+      "section": "Как устроено обучение",
+      "headline": "Как устроено обучение",
+      "subtitle": null,
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [
+          {
+            "title": "Онлайн-лекции по вечерам",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Практикумы по субботам",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Проверка проектов ревьюерами",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Карьерный трек с разбором резюме и пробными собеседованиями",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          }
+        ],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "",
+      "fact_refs": []
+    },
+    {
+      "id": "sl8",
+      "kind": "cards",
+      "section": "Что нужно от партнёров",
+      "headline": "Что нужно от партнёров",
+      "subtitle": null,
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [
+          {
+            "title": "Зачёт модулей программы как дисциплин по выбору",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Аудитории для практикумов",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Продвижение среди студентов 3–4 курсов",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          }
+        ],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "",
+      "fact_refs": []
+    },
+    {
+      "id": "sl9",
+      "kind": "process",
+      "section": "Следующие шаги",
+      "headline": "Следующие шаги",
+      "subtitle": null,
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [
+          {
+            "title": "Подписание соглашений с университетами до 1 декабря",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Набор третьего потока в феврале",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Запуск программы в 20 университетах к сентябрю следующего",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          }
+        ],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "",
+      "fact_refs": []
+    },
+    {
+      "id": "sl10",
+      "kind": "thanks",
+      "section": null,
+      "headline": "Спасибо за внимание",
+      "subtitle": null,
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "",
+      "fact_refs": []
+    }
+  ],
+  "facts": [
+    {
+      "id": "f1",
+      "value": "25 000",
+      "unit": null,
+      "label": "по оценке отрасли дефицит составляет 25 000 специалистов",
+      "source_span": "Рынку не хватает инженеров данных: по оценке отрасли дефицит составляет 25 000 специалистов, а средний срок закрытия вакансии 74 дня."
+    },
+    {
+      "id": "f2",
+      "value": "74",
+      "unit": "дня",
+      "label": "средний срок закрытия вакансии",
+      "source_span": "Рынку не хватает инженеров данных: по оценке отрасли дефицит составляет 25 000 специалистов, а средний срок закрытия вакансии 74 дня."
+    },
+    {
+      "id": "f3",
+      "value": "640",
+      "unit": null,
+      "label": "студентов из 12 университетов в первом наборе",
+      "source_span": "В первом наборе учились 640 студентов из 12 университетов."
+    },
+    {
+      "id": "f4",
+      "value": "12",
+      "unit": null,
+      "label": "В первом наборе учились 640 студентов из 12 университетов.",
+      "source_span": "В первом наборе учились 640 студентов из 12 университетов."
+    },
+    {
+      "id": "f5",
+      "value": "71",
+      "unit": "%",
+      "label": "до конца дошли",
+      "source_span": "До конца дошли 71%."
+    },
+    {
+      "id": "f6",
+      "value": "58",
+      "unit": "%",
+      "label": "трудоустроены в течение трёх месяцев после выпуска 58%",
+      "source_span": "Трудоустроены в течение трёх месяцев после выпуска 58% выпускников, средняя стартовая зарплата 145 000 рублей."
+    },
+    {
+      "id": "f7",
+      "value": "145 000",
+      "unit": null,
+      "label": "средняя стартовая зарплата",
+      "source_span": "Трудоустроены в течение трёх месяцев после выпуска 58% выпускников, средняя стартовая зарплата 145 000 рублей."
+    },
+    {
+      "id": "f8",
+      "value": "4,8",
+      "unit": null,
+      "label": "оценка программы студентами",
+      "source_span": "Оценка программы студентами 4,8 из 5."
+    },
+    {
+      "id": "f9",
+      "value": "10",
+      "unit": "%",
+      "label": "со своей стороны VK Education даёт платформу",
+      "source_span": "Со своей стороны VK Education даёт платформу, наставников и стажировки для лучших 10% выпускников."
+    },
+    {
+      "id": "f10",
+      "value": "20",
+      "unit": null,
+      "label": "запуск программы в 20 университетах к сентябрю следующего",
+      "source_span": "Подписание соглашений с университетами до 1 декабря, набор третьего потока в феврале, запуск программы в 20 университетах к сентябрю следующего года."
+    }
+  ],
+  "series": [],
+  "tables": [
+    {
+      "columns": [
+        "Показатель",
+        "Набор 2024",
+        "Набор 2025"
+      ],
+      "rows": [
+        [
+          "Студентов",
+          "640",
+          "1 100"
+        ],
+        [
+          "Дошли до конца",
+          "71%",
+          "76%"
+        ],
+        [
+          "Трудоустроены за 3 месяца",
+          "58%",
+          "63%"
+        ]
+      ],
+      "unit": null,
+      "caption": null,
+      "source_span": "| Показатель | Набор 2024 | Набор 2025 |"
+    }
+  ]
+}

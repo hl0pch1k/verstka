@@ -1,0 +1,281 @@
+{
+  "deck": "examples/pitch/structured/deck.pptx",
+  "template_id": "1604aa9146b82cac",
+  "strategy": "structured",
+  "issues": [
+    {
+      "id": "grid_alignment-1-1",
+      "slide": 1,
+      "check_id": "grid_alignment",
+      "severity": "info",
+      "kind": "deterministic",
+      "message": "2 блоков не выровнены по колонкам шаблона",
+      "bboxes": [
+        {
+          "x": 8.202099737532809e-8,
+          "y": 0.5678788276465442,
+          "w": 0.5144229822834646,
+          "h": 0.24886891221930593
+        },
+        {
+          "x": 0.0,
+          "y": 0.8252407407407407,
+          "w": 0.7325000820209974,
+          "h": 0.11040740740740741
+        }
+      ],
+      "element_ids": [
+        "3",
+        "5"
+      ],
+      "suggestion": null,
+      "autofix": null,
+      "details": {},
+      "outline_id": "sl1"
+    },
+    {
+      "id": "grid_alignment-9-2",
+      "slide": 9,
+      "check_id": "grid_alignment",
+      "severity": "info",
+      "kind": "deterministic",
+      "message": "4 блоков не выровнены по колонкам шаблона",
+      "bboxes": [
+        {
+          "x": 0.6827024278215224,
+          "y": 0.6197182852143482,
+          "w": 0.2642808398950131,
+          "h": 0.26713473315835523
+        },
+        {
+          "x": 0.6827022637795276,
+          "y": 0.5281595217264509,
+          "w": 0.24031471456692913,
+          "h": 0.09155876348789735
+        },
+        {
+          "x": 0.052420767716535435,
+          "y": 0.6197182852143482,
+          "w": 0.2642808398950131,
+          "h": 0.26713473315835523
+        },
+        {
+          "x": 0.05242060367454068,
+          "y": 0.5281595217264509,
+          "w": 0.24031471456692913,
+          "h": 0.09155876348789735
+        }
+      ],
+      "element_ids": [
+        "60",
+        "61",
+        "9",
+        "15"
+      ],
+      "suggestion": null,
+      "autofix": null,
+      "details": {},
+      "outline_id": "sl9"
+    },
+    {
+      "id": "size_not_in_scale-5-3",
+      "slide": 5,
+      "check_id": "size_not_in_scale",
+      "severity": "info",
+      "kind": "deterministic",
+      "message": "кегль 9.4 пт не из шкалы шаблона",
+      "bboxes": [],
+      "element_ids": [
+        "57",
+        "60",
+        "63",
+        "66",
+        "9"
+      ],
+      "suggestion": null,
+      "autofix": null,
+      "details": {
+        "size": 9.4
+      },
+      "outline_id": "sl5"
+    },
+    {
+      "id": "size_not_in_scale-6-4",
+      "slide": 6,
+      "check_id": "size_not_in_scale",
+      "severity": "warn",
+      "kind": "deterministic",
+      "message": "кегль 28.8 пт не из шкалы шаблона",
+      "bboxes": [],
+      "element_ids": [
+        "31",
+        "35"
+      ],
+      "suggestion": null,
+      "autofix": null,
+      "details": {
+        "size": 28.8
+      },
+      "outline_id": "sl6"
+    },
+    {
+      "id": "size_not_in_scale-13-5",
+      "slide": 13,
+      "check_id": "size_not_in_scale",
+      "severity": "warn",
+      "kind": "deterministic",
+      "message": "кегль 48 пт не из шкалы шаблона",
+      "bboxes": [],
+      "element_ids": [
+        "3"
+      ],
+      "suggestion": null,
+      "autofix": null,
+      "details": {
+        "size": 48.0
+      },
+      "outline_id": "sl13"
+    },
+    {
+      "id": "chrome_moved-1-6",
+      "slide": 1,
+      "check_id": "chrome_moved",
+      "severity": "info",
+      "kind": "deterministic",
+      "message": "элемент шаблона «2» отсутствует или сдвинут",
+      "bboxes": [
+        {
+          "x": 0.9361472276902887,
+          "y": 0.9268530183727034,
+          "w": 0.04585949803149606,
+          "h": 0.05324074074074074
+        }
+      ],
+      "element_ids": [],
+      "suggestion": null,
+      "autofix": null,
+      "details": {},
+      "outline_id": "sl1"
+    },
+    {
+      "id": "chrome_moved-13-7",
+      "slide": 13,
+      "check_id": "chrome_moved",
+      "severity": "info",
+      "kind": "deterministic",
+      "message": "элемент шаблона «2» отсутствует или сдвинут",
+      "bboxes": [
+        {
+          "x": 0.9361472276902887,
+          "y": 0.9268530183727034,
+          "w": 0.04585949803149606,
+          "h": 0.05324074074074074
+        }
+      ],
+      "element_ids": [],
+      "suggestion": null,
+      "autofix": null,
+      "details": {},
+      "outline_id": "sl13"
+    },
+    {
+      "id": "fill_ratio-7-8",
+      "slide": 7,
+      "check_id": "fill_ratio",
+      "severity": "warn",
+      "kind": "deterministic",
+      "message": "слайд заполнен только на 20%",
+      "bboxes": [],
+      "element_ids": [],
+      "suggestion": null,
+      "autofix": null,
+      "details": {
+        "ratio": 0.2
+      },
+      "outline_id": "sl7"
+    }
+  ],
+  "summary": {
+    "errors": 0,
+    "warnings": 3,
+    "infos": 5,
+    "model_flags": 0,
+    "score": 91,
+    "checks_run": [
+      "out_of_bounds",
+      "text_clipped",
+      "overlap",
+      "text_overflow",
+      "margin_violation",
+      "grid_alignment",
+      "image_stretched",
+      "table_cell_wrap",
+      "font_not_in_template",
+      "size_not_in_scale",
+      "color_not_in_palette",
+      "layout_not_from_template",
+      "chrome_moved",
+      "contrast_low",
+      "too_many_bullets",
+      "bullet_too_long",
+      "table_too_big",
+      "too_many_series",
+      "fill_ratio",
+      "file_opens",
+      "empty_deck",
+      "placeholder_text",
+      "empty_slide",
+      "content_missing",
+      "slide_is_picture",
+      "chart_missing_labels",
+      "duplicate_slides"
+    ]
+  },
+  "per_slide": {
+    "1": [
+      "grid_alignment-1-1",
+      "chrome_moved-1-6"
+    ],
+    "9": [
+      "grid_alignment-9-2"
+    ],
+    "5": [
+      "size_not_in_scale-5-3"
+    ],
+    "6": [
+      "size_not_in_scale-6-4"
+    ],
+    "13": [
+      "size_not_in_scale-13-5",
+      "chrome_moved-13-7"
+    ],
+    "7": [
+      "fill_ratio-7-8"
+    ]
+  },
+  "iterations": 1,
+  "applied_fixes": [
+    {
+      "iteration": 1,
+      "outline_id": "sl11",
+      "action": "rematch",
+      "result": "rematch → p3"
+    }
+  ],
+  "slide_images": {
+    "1": "examples/pitch/structured/slides/slide-001.jpg",
+    "2": "examples/pitch/structured/slides/slide-002.jpg",
+    "3": "examples/pitch/structured/slides/slide-003.jpg",
+    "4": "examples/pitch/structured/slides/slide-004.jpg",
+    "5": "examples/pitch/structured/slides/slide-005.jpg",
+    "6": "examples/pitch/structured/slides/slide-006.jpg",
+    "7": "examples/pitch/structured/slides/slide-007.jpg",
+    "8": "examples/pitch/structured/slides/slide-008.jpg",
+    "9": "examples/pitch/structured/slides/slide-009.jpg",
+    "10": "examples/pitch/structured/slides/slide-010.jpg",
+    "11": "examples/pitch/structured/slides/slide-011.jpg",
+    "12": "examples/pitch/structured/slides/slide-012.jpg",
+    "13": "examples/pitch/structured/slides/slide-013.jpg"
+  },
+  "seconds": 0.4
+}
