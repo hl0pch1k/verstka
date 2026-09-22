@@ -345,3 +345,72 @@ def test_chart_axis_ids_are_unsigned(tmp_path):
     ids = [e.get("val") for e in gf.chart._chartSpace.iter(ns + "axId")]
     cross = {e.get("val") for e in gf.chart._chartSpace.iter(ns + "crossAx")}
     assert ids and all(int(v) >= 0 for v in ids) and cross <= set(ids)
+
+
+def test_filled_text_never_inherits_the_sample_hyperlink():
+    """textfill.fill_text: a sample run that is a link (LCT «Полезные материалы») gives its style, not its URL."""
+    from verstka.rendering.textfill import ParagraphSpec, fill_text
+
+    prs = Presentation()
+    s = prs.slides.add_slide(prs.slide_layouts[6])
+    tb = s.shapes.add_textbox(Emu(0), Emu(0), Emu(3000000), Emu(500000))
+    run = tb.text_frame.paragraphs[0].add_run()
+    run.text = "https://colorscheme.ru"
+    run.hyperlink.address = "https://colorscheme.ru"
+    run.font.underline = True
+    fill_text(tb._element, [ParagraphSpec("Наш текст")])
+    xml = etree.tostring(tb._element).decode()
+    assert "hlinkClick" not in xml and 'u="sng"' not in xml
+
+
+def test_cell_roles_follow_shapes_not_positions():
+    """clone._cell_entries: LCT team cards list [card, photo, body, title] in one cell and [card, body, title, photo]
+    in the next — a role by position put the heading into the photo and lost it. Only copies inherit, by origin."""
+    from types import SimpleNamespace
+
+    from verstka.rendering.clone import _cell_entries, _SlideCtx
+    from verstka.schemas.common import SlotRole
+    from verstka.schemas.template import RepeatGroup
+    from verstka.schemas.common import BboxFrac
+
+    prs = Presentation()
+    s = prs.slides.add_slide(prs.slide_layouts[6])
+    shapes = {name: s.shapes.add_textbox(Emu(0), Emu(0), Emu(10), Emu(10)) for name in ("card1", "photo1", "body1", "title1", "card2", "body2", "title2", "photo2")}
+    sid = {k: str(v.shape_id) for k, v in shapes.items()}
+    group = RepeatGroup(id="g1", member_shape_ids=[[sid["card1"], sid["photo1"], sid["body1"], sid["title1"]], [sid["card2"], sid["body2"], sid["title2"], sid["photo2"]]], max_n=2, axis="row", cell_bbox=BboxFrac(x=0, y=0, w=0.1, h=0.1))
+    roles = {sid["body1"]: SlotRole.card_body, sid["title1"]: SlotRole.card_title, sid["body2"]: SlotRole.card_body, sid["title2"]: SlotRole.card_title}
+    ctx = SimpleNamespace(role_of=roles, slot_of={}, origin={}, id_of=lambda el: _SlideCtx.id_of(None, el))
+    cell2 = [shapes[k]._element for k in ("card2", "body2", "title2", "photo2")]
+    got = {ctx.id_of(e): r for e, _, r in _cell_entries(ctx, group, cell2, [])}
+    assert got[sid["title2"]] == SlotRole.card_title and got[sid["photo2"]] is None
+    # a copy of title2 (fresh id) is a heading because it was copied from one
+    ctx.origin["999"] = sid["title2"]
+    copy_el = etree.fromstring(etree.tostring(shapes["title2"]._element))
+    copy_el.find(".//" + q("p:cNvPr")).set("id", "999")
+    assert _cell_entries(ctx, group, [copy_el], [])[0][2] == SlotRole.card_title
+
+
+def test_logos_baked_into_backgrounds_are_found_in_renders(tmp_path):
+    """chrome.visual_chrome: a logo that is part of the background picture (LCT) exists only in the renders — edges
+    repeated at the same place on most slides inside the top band come back as background chrome."""
+    import random
+
+    from PIL import ImageDraw
+
+    from verstka.analysis.chrome import visual_chrome
+
+    paths = []
+    rnd = random.Random(1)
+    for i in range(6):
+        im = Image.new("RGB", (1600, 900), (90, 20, 120))
+        d = ImageDraw.Draw(im)
+        d.rectangle((1200, 40, 1500, 120), outline=(255, 255, 255), width=6)  # the logo
+        d.text((1230, 60), "LOGO", fill=(255, 255, 255))
+        x = rnd.randint(100, 900)
+        d.rectangle((x, 300, x + 400, 700), fill=(255, 255, 255))  # content that moves from slide to slide
+        p = tmp_path / f"s{i}.png"
+        im.save(p)
+        paths.append(str(p))
+    found = visual_chrome(paths)
+    assert any(0.7 <= c.bbox.x <= 0.78 and c.bbox.y < 0.1 and c.source == "background" for c in found), [(c.bbox.x, c.bbox.y) for c in found]
+    assert not any(c.bbox.y > 0.25 and c.bbox.y2 < 0.8 for c in found)  # the moving content is not chrome

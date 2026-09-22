@@ -17,7 +17,7 @@ from verstka.analysis.xmlns import q
 from verstka.ingest.workspace import TemplateWorkspace
 from verstka.rendering.assets_pick import pick_asset
 from verstka.rendering.charts import add_chart
-from verstka.rendering.clone import renumber_page_chrome
+from verstka.rendering.clone import _SlideCtx, clear_width, renumber_page_chrome
 from verstka.rendering.deck import DeckBuilder, element_bbox, is_nested, remove_element, slide_shape_elements
 from verstka.rendering.fit import fit_size
 from verstka.rendering.images import insert_picture
@@ -340,6 +340,17 @@ def render_synth(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
         else:
             box = Bbox(x=sx, y=sy, w=sw, h=title_h)
         insets = (91440, 45720, 91440, 45720)
+        if canvas is not None:
+            # the canvas keeps the template's heading label (a pill): the same rules as on a cloned slide
+            hctx = _SlideCtx(builder, slide, canvas, manifest, ws, outline)
+            nb = hctx._widen_on_backing(title_ph._element, (box.x, box.y, box.w, box.h), [oslide.headline], title_font, h1, title_bold, insets)
+            box = Bbox(x=nb[0], y=nb[1], w=nb[2], h=nb[3])
+            warnings.extend(hctx.warnings)
+        else:
+            w_clear = clear_width(manifest, W, H, box)
+            if w_clear < box.w:  # never under the logos: the heading wraps instead
+                box = Bbox(x=box.x, y=box.y, w=w_clear, h=box.h)
+                title_ph.width = Emu(w_clear)
         res = fit_size([oslide.headline], box, title_font, h1, title_bold, scale, insets_emu=insets, line_spacing=typo.line_spacing)
         fill_text(title_ph._element, [ParagraphSpec(oslide.headline)], size_pt=res.size_pt)
         text_h = int(res.height_pt * EMU_PER_PT) + insets[1] + insets[3]
@@ -469,8 +480,11 @@ def render_synth(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
     if comp == "table" and c.table is not None:
         rows = len(c.table.rows) + 1
         tbl_h = min(avail_h, int(rows * H * 0.075))
+        style = manifest.components.table_style
+        if not style.body_text_hex or contrast_ratio(style.body_text_hex, pal.bg) < 4.5:
+            style = style.model_copy(update={"body_text_hex": pal.text, "band_fill_hex": None})  # dark template text on a dark ground
         try:
-            add_table(slide, Bbox(x=sx, y=top, w=sw, h=tbl_h), c.table, manifest.components.table_style, typo)
+            add_table(slide, Bbox(x=sx, y=top, w=sw, h=tbl_h), c.table, style, typo)
         except Exception as e:  # noqa: BLE001
             warnings.append(f"table failed: {str(e)[:120]}")
         if c.paragraphs and tbl_h < avail_h - int(H * 0.08):

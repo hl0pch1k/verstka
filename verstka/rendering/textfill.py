@@ -109,6 +109,12 @@ def fill_text(sp_el: etree._Element, paragraphs: list[ParagraphSpec], size_pt: O
         template_rPr.set("lang", "ru-RU")
     template_rPr = copy.deepcopy(template_rPr)
     template_rPr.tag = q("a:rPr")
+    # the sample's hyperlink (and the underline that came with it) must not turn our text into someone else's link
+    links = template_rPr.findall(q("a:hlinkClick")) + template_rPr.findall(q("a:hlinkMouseOver"))
+    for h in links:
+        template_rPr.remove(h)
+    if links and template_rPr.get("u"):
+        del template_rPr.attrib["u"]
     for p in ps:
         txBody.remove(p)
     # stale autofit scaling would shrink the new text unpredictably

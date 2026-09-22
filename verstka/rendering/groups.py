@@ -157,7 +157,7 @@ def transform_element(e: etree._Element, old: Bbox, new: Bbox, axis: str) -> Non
         set_element_pos(e, x=b[0] + cross, y=p2, h=s2)
 
 
-def adjust_group(slide: Slide, group: RepeatGroup, n_needed: int, slide_w: int, slide_h: int, next_id: int, protected_ids: Optional[set[str]] = None) -> tuple[list[list[etree._Element]], int]:
+def adjust_group(slide: Slide, group: RepeatGroup, n_needed: int, slide_w: int, slide_h: int, next_id: int, protected_ids: Optional[set[str]] = None, origin: Optional[dict[str, str]] = None) -> tuple[list[list[etree._Element]], int]:
     """Delete or duplicate cells so that exactly n cells remain, then let rows/columns reflow over the group's span.
 
     Row groups (and column groups of cards) keep their span: two cards of three grow to fill it, four narrower
@@ -240,6 +240,10 @@ def adjust_group(slide: Slide, group: RepeatGroup, n_needed: int, slide_w: int, 
             for e in src:
                 ne = copy.deepcopy(e)
                 next_id = renumber_ids(ne, next_id)
+                if origin is not None:
+                    # every copied shape remembers the shape it was taken from (roles and slots follow it)
+                    for a, b in zip(e.iter(q("p:cNvPr")), ne.iter(q("p:cNvPr"))):
+                        origin[b.get("id")] = origin.get(a.get("id"), a.get("id"))
                 new_els.append(ne)
             if step is not None:
                 dx, dy = step

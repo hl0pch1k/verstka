@@ -15,7 +15,7 @@ SIZE_NOT_IN_SCALE = CheckSpec(id="size_not_in_scale", title="Кегль не и�
 COLOR_NOT_IN_PALETTE = CheckSpec(id="color_not_in_palette", title="Цвет не из палитры шаблона", severity="warn", category="template", description="Цвет текста или заливки отстоит от ближайшего цвета палитры шаблона больше чем на ΔE 6.")
 LAYOUT_NOT_FROM_TEMPLATE = CheckSpec(id="layout_not_from_template", title="Слайд собран не на макете из шаблона", severity="error", category="template", description="Слайд ссылается на макет, которого нет в пакете шаблона.")
 CHROME_MOVED = CheckSpec(id="chrome_moved", title="Логотип или колонтитул сдвинуты с положенного места", severity="warn", category="template", description="Элемент хрома шаблона (логотип, колонтитул на слайдах) отсутствует или стоит в другом месте.")
-CONTRAST_LOW = CheckSpec(id="contrast_low", title="Контраст текста к фону ниже 4.5:1", severity="warn", category="template", description="Контраст по WCAG между цветом текста и фоном (карточка с учётом прозрачности заливки или фон слайда) ниже 4.5:1 для обычного текста и 3:1 для крупного (≥24 пт).")
+CONTRAST_LOW = CheckSpec(id="contrast_low", title="Контраст текста к фону ниже 4.5:1", severity="warn", category="template", description="Контраст по WCAG между цветом текста и фоном (карточка с учётом прозрачности заливки или фон слайда) ниже 4.5:1 для обычного текста и 3:1 для крупного (≥18 пт или ≥14 пт жирным).")
 
 CONTRAST_CANDIDATE_ROLES = ("text.primary", "text.secondary")
 
@@ -170,7 +170,8 @@ def contrast_low(ctx: AuditContext) -> list[Issue]:
             except ValueError:
                 continue
             size = e.dominant_size or 14.0
-            need = 3.0 if size >= 24 else 4.5
+            bold = any(r.bold for p in e.paragraphs for r in p.runs if r.text.strip())
+            need = 3.0 if size >= 18 or (bold and size >= 14) else 4.5  # WCAG: large text is 18 pt, or 14 pt bold
             if cr < need:
                 accent_text = any(t.hex == color and any(r.startswith("accent.") for r in t.roles) for t in tokens.colors)
                 severity = "error" if cr < 2.5 else ("info" if (accent_text and cr >= 3.0) else "warn")  # brand accent on dark is the template's own choice

@@ -139,7 +139,7 @@ def test_contrast_low_targets_real_background_and_composites_alpha():
     manifest = _manifest(dark=True)
     # WorkSpace compact slide 5: a 0077FF card at alpha 0.298 over a black slide → #00234C; blue text on it → 3.78:1 → info (accent ≥ 3.0)
     card = _el("10", "", 0.1, 0.2, 0.3, 0.5, etype="shape", fill="0077FF", alpha=0.298)
-    txt = _el("11", "Дайджест", 0.12, 0.25, 0.25, 0.1, color="0077FF", size=18)
+    txt = _el("11", "Дайджест", 0.12, 0.25, 0.25, 0.1, color="0077FF", size=14)  # regular text: 4.5:1 applies
     slide = IRSlide(index=1, family="dark", background_hex="000000", elements=[card, txt], outline_id="sl5")
     assert composite_hex("0077FF", 0.298, "000000") == "00234C"
     assert enclosing_fill(slide, txt) == "00234C"
@@ -150,7 +150,7 @@ def test_contrast_low_targets_real_background_and_composites_alpha():
     assert fx is not None and fx.action == "recolor" and fx.params["to"] == "FFFFFF" and fx.params["scope"] == "text"
     # opaque dark card, blue text: the candidate is text.primary (FFFFFF) and it reaches 4.5:1
     card2 = _el("20", "", 0.1, 0.2, 0.3, 0.5, etype="shape", fill="151515")
-    txt2 = _el("21", "Каждый третий", 0.12, 0.25, 0.25, 0.1, color="0077FF", size=18)
+    txt2 = _el("21", "Каждый третий", 0.12, 0.25, 0.25, 0.1, color="0077FF", size=14)
     slide2 = IRSlide(index=2, family="dark", background_hex="000000", elements=[card2, txt2], outline_id="sl3")
     issues = contrast_low(AuditContext(ir=_ir(slide2), manifest=manifest))
     assert len(issues) == 1 and issues[0].autofix.params["to"] == "FFFFFF"

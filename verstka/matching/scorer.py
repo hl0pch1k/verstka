@@ -226,6 +226,17 @@ def score_pattern(
         style = 0.04 if n_decor == 0 else 0.0
     if style:
         reasons.append(f"стиль стратегии {strategy.name}: +{style:.2f}")
+    if slide.kind in _STANDALONE_KINDS and slide.kind != PatternKind.quote:
+        # a cover: the heading is the design — the bigger it is set (relative to the template's own scale) and the
+        # fewer content boxes stand around it, the more the sample is a cover rather than a content page
+        typo = manifest.tokens.typography
+        titles = [x for x in pattern.slots if x.role == SlotRole.title]
+        size = max((x.style.size_pt or 0.0 for x in titles), default=0.0)
+        ref = typo.size_for("display", typo.size_for("h1", 24.0) * 1.6)
+        others = sum(1 for x in pattern.slots if x.role in (SlotRole.body, SlotRole.bullet_list, SlotRole.card_title, SlotRole.card_body))
+        cover = 0.12 * min(size / ref, 1.0) - 0.03 * min(others, 4) if ref else 0.0
+        style += cover
+        reasons.append(f"обложка: заголовок {size:.0f} пт, других текстов {others}: {cover:+.2f}")
     # the strategy weight scales only the kind term, so it cannot lift a pattern with failed capacity above 1.0
     base = 0.45 * kind * weight + 0.25 * cap + 0.1 * text + 0.05 * fam + 0.1 * pattern.quality + diversity - clutter + style
     score = max(0.0, min(1.2, base))

@@ -69,6 +69,7 @@ class _SlideCtx:
         self.role_of = {s.shape_id: s.role for s in pattern.slots}
         self.slot_of = {s.shape_id: s for s in pattern.slots}
         self.used_assets: set[str] = set()
+        self.origin: dict[str, str] = {}  # id of a duplicated shape → id of the sample shape it was copied from
 
     # ---- helpers ----------------------------------------------------------------
     def slots(self, *roles: SlotRole, unfilled: bool = True) -> list[Slot]:
@@ -181,9 +182,14 @@ class _SlideCtx:
         return (bx.x, bx.y, bx.w, limit - bx.y)
 
     def _widen_on_backing(self, el: etree._Element, box: tuple[int, int, int, int], texts: list[str], family: Optional[str], size: float, bold: bool, insets: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
-        """A heading printed on a label (pill, plate) that is too short for the new text: the label and the text box
-        grow to the right together, up to the next element in the same band (logos of the layout included) or the
-        safe area; a heading that still needs two lines makes both one line taller."""
+        """Headings keep to their own ground.
+
+        On a label (a pill or plate painted under the start of the heading box — the LCT titles sit on short pills
+        inside a wide box) the text is held to the label's width, and the label grows to the right with the text up
+        to the next obstacle (logos of the layout included) or the safe area; a heading that still needs two lines
+        makes both one line taller. Without a label the box is cut before logos and other chrome in its band, so the
+        heading wraps instead of running under them.
+        """
         if is_nested(el):
             return box
         bx = Bbox(x=box[0], y=box[1], w=box[2], h=box[3])
@@ -193,40 +199,47 @@ class _SlideCtx:
             if other is el or is_nested(other) or other.getparent() is None or etree.QName(other).localname != "sp" or shape_text(other).strip() or not _has_fill(other):
                 continue
             b = element_bbox(other)
-            if not b or b[2] * b[3] > max(4 * bx.area, 1) or b[2] * b[3] > 0.25 * self.W * self.H:
+            if not b or b[2] * b[3] > 0.25 * self.W * self.H:
                 continue
             ob = Bbox(x=b[0], y=b[1], w=b[2], h=b[3])
-            if ob.x - tol <= bx.x and ob.y - tol <= bx.y and ob.x2 + tol >= bx.x2 and ob.y2 + tol >= bx.y2 and (backing is None or ob.area < backing[1].area):
+            under_start = ob.x - tol <= bx.x <= ob.x2 - int(0.04 * self.W) and ob.y - tol <= bx.y and ob.y2 + tol >= bx.y2
+            if under_start and (backing is None or ob.area < backing[1].area):
                 backing = (other, ob)
-        if backing is None:
-            return box
-        back_el, ob = backing
-        need_w = int(max(text_width_pt(t, family, size, bold) for t in texts) * EMU_PER_PT * 1.05) + insets[0] + insets[2]
-        if need_w <= bx.w:
-            return box
         limit = int(self.manifest.tokens.spacing.safe_area.x2 * self.W)
-        obstacles = [element_bbox(o) for o in self.els.values() if o is not el and o is not back_el and not is_nested(o) and o.getparent() is not None]
+        obstacles = [element_bbox(o) for o in self.els.values() if o is not el and (backing is None or o is not backing[0]) and not is_nested(o) and o.getparent() is not None]
         obstacles += [(lambda b: (b.x, b.y, b.w, b.h))(c.bbox.to_emu(self.W, self.H)) for c in self.manifest.tokens.chrome]
+        band = backing[1] if backing is not None else bx
         for b in obstacles:
             if not b or b[2] * b[3] >= 0.6 * self.W * self.H:
                 continue
-            if b[1] < ob.y2 and b[1] + b[3] > ob.y and b[0] >= ob.x2 - tol:
+            if b[1] < band.y2 and b[1] + b[3] > band.y and b[0] >= bx.x + int(0.1 * self.W):
                 limit = min(limit, b[0] - int(0.015 * self.W))
-        grow = min(need_w - bx.w, limit - ob.x2)
-        if grow <= 0:
-            grow = 0
-        width = bx.w + grow
+        need_w = int(max(text_width_pt(t, family, size, bold) for t in texts) * EMU_PER_PT * 1.05) + insets[0] + insets[2]
+        if backing is None:
+            if bx.x2 > limit and bx.x + need_w > limit and limit - bx.x >= int(0.25 * self.W):
+                set_element_pos(el, w=limit - bx.x)
+                self.warnings.append("heading kept clear of the logos")
+                return (bx.x, bx.y, limit - bx.x, bx.h)
+            return box
+        back_el, ob = backing
+        pad_r = max(ob.x2 - (bx.x + need_w), 0) if bx.x + need_w <= ob.x2 else int(0.012 * self.W)
+        inner = ob.x2 - bx.x - int(0.008 * self.W)  # the label's own width is the text's to use
+        width = min(max(bx.w, min(need_w, inner)), max(inner, int(0.05 * self.W)))
+        grow = 0
+        if need_w > width:
+            target_x2 = min(limit, bx.x + need_w + pad_r)
+            grow = max(0, target_x2 - ob.x2)
+            width = min(max(width, target_x2 - bx.x), max(bx.w, target_x2 - bx.x))
         height_grow = 0
         res = fit_size(texts, Bbox(x=bx.x, y=bx.y, w=width, h=bx.h), family, size, bold, self.scale, insets_emu=insets, line_spacing=self.typo.line_spacing, min_ratio=0.8)
         if not res.fits:
             two = fit_size(texts, Bbox(x=bx.x, y=bx.y, w=width, h=10 ** 9), family, size, bold, self.scale, insets_emu=insets, line_spacing=self.typo.line_spacing, min_ratio=0.8)
             if two.lines == 2:
                 height_grow = max(0, int(two.height_pt * EMU_PER_PT) + insets[1] + insets[3] - bx.h)
-        if grow == 0 and height_grow == 0:
-            return box
         set_element_pos(el, w=width, h=bx.h + height_grow)
-        set_element_pos(back_el, w=ob.w + grow, h=ob.h + height_grow)
-        self.warnings.append(f"label widened by {grow * 100 // self.W}% of the slide for the heading")
+        if grow or height_grow:
+            set_element_pos(back_el, w=ob.w + grow, h=ob.h + height_grow)
+            self.warnings.append(f"label widened by {grow * 100 // self.W}% of the slide for the heading")
         return (bx.x, bx.y, width, bx.h + height_grow)
 
     def fill_slot(self, slot: Slot, paragraphs: list[ParagraphSpec], **kw) -> bool:
@@ -255,7 +268,20 @@ class _SlideCtx:
         return min(slots, key=lambda s: (s.style.size_pt or 99.0)) if slots else None
 
 
+
 _GROWABLE = {SlotRole.body, SlotRole.bullet_list, SlotRole.card_body, SlotRole.card_title, SlotRole.number_label, SlotRole.caption}
+
+
+def clear_width(manifest: TemplateManifest, W: int, H: int, box: Bbox) -> int:
+    """Width a heading box may use without running under logos and other chrome standing in its band."""
+    limit = int(manifest.tokens.spacing.safe_area.x2 * W)
+    for c in manifest.tokens.chrome:
+        b = c.bbox.to_emu(W, H)
+        if b.w * b.h >= 0.6 * W * H:
+            continue
+        if b.y < box.y2 and b.y2 > box.y and b.x >= box.x + int(0.1 * W):
+            limit = min(limit, b.x - int(0.015 * W))
+    return box.w if limit - box.x < int(0.25 * W) else min(box.w, limit - box.x)
 
 
 def _wrap_inside(el: etree._Element, texts: list[str], family: Optional[str], size: float, bold: bool, box: tuple[int, int, int, int], insets: tuple[int, int, int, int]) -> None:
@@ -465,20 +491,20 @@ def _companions(ctx: _SlideCtx, group: RepeatGroup, before: list[Optional[Bbox]]
 
 
 def _cell_entries(ctx: _SlideCtx, group: RepeatGroup, cell: list[etree._Element], extra: list[etree._Element]) -> list[tuple[etree._Element, Optional[Slot], Optional[SlotRole]]]:
-    """(element, slot, role) for every member of a cell; duplicated cells (fresh ids) take roles by position."""
-    src_ids = group.member_shape_ids[0]
+    """(element, slot, role) for every member of a cell; a duplicated shape takes the role of the shape it was copied
+    from (never a role by position: the cells of a sample list their shapes in different orders)."""
     out = []
-    for j, e in enumerate(cell):
+    for e in cell:
         sid = ctx.id_of(e) or ""
-        if sid in ctx.role_of:
-            out.append((e, ctx.slot_of.get(sid), ctx.role_of[sid]))
-        elif len(src_ids) == len(cell):
-            out.append((e, ctx.slot_of.get(src_ids[j]), ctx.role_of.get(src_ids[j])))
+        src = ctx.origin.get(sid, sid)
+        if src in ctx.role_of:
+            out.append((e, ctx.slot_of.get(src), ctx.role_of[src]))
         else:
             out.append((e, None, None))
     for e in extra:
         sid = ctx.id_of(e) or ""
-        out.append((e, ctx.slot_of.get(sid), ctx.role_of.get(sid)))
+        src = ctx.origin.get(sid, sid)
+        out.append((e, ctx.slot_of.get(src), ctx.role_of.get(src)))
     return out
 
 
@@ -626,7 +652,7 @@ def _fill_cells(ctx: _SlideCtx, items: list[SlideItem], use_ordinals: bool = Tru
     # titles, subtitles and companion cells are never riders: companions are mapped to their primary cell below
     protected = {sl.shape_id for sl in ctx.pattern.slots if sl.role in (SlotRole.title, SlotRole.subtitle)}
     protected |= {sid for g, _ in companions for cell in g.member_shape_ids for sid in cell}
-    cells, ctx.next_id = adjust_group(ctx.slide, group, n_needed, ctx.W, ctx.H, ctx.next_id, protected_ids=protected)
+    cells, ctx.next_id = adjust_group(ctx.slide, group, n_needed, ctx.W, ctx.H, ctx.next_id, protected_ids=protected, origin=ctx.origin)
     if not cells:
         return False
     cells.sort(key=_cell_sort_key(cells, ctx.H))  # same order as `before`: items, shifts and companions go by index
@@ -661,12 +687,11 @@ def _fill_cells(ctx: _SlideCtx, items: list[SlideItem], use_ordinals: bool = Tru
                 anchor.addnext(ne)
                 anchor = ne
                 transform_element(ne, after[src_i], after[i], group.axis)
-                old_id, new_id = ctx.id_of(e), ctx.id_of(ne)
-                if old_id and new_id:
+                for a, b in zip(e.iter(q("p:cNvPr")), ne.iter(q("p:cNvPr"))):
+                    ctx.origin[b.get("id")] = ctx.origin.get(a.get("id"), a.get("id"))
+                new_id = ctx.id_of(ne)
+                if new_id:
                     ctx.els[new_id] = ne
-                    if old_id in ctx.slot_of:
-                        ctx.slot_of[new_id] = ctx.slot_of[old_id]
-                        ctx.role_of[new_id] = ctx.role_of[old_id]
                 extra[i].append(ne)
     capacity = len(cells) * per_cell
     overflow: list[SlideItem] = []
@@ -865,6 +890,45 @@ def _clamp_to_safe(box: Bbox, ctx: _SlideCtx) -> Bbox:
     return box
 
 
+def _fill_hex(el: etree._Element) -> Optional[str]:
+    spPr = el.find(q("p:spPr"))
+    clr = spPr.find(q("a:solidFill") + "/" + q("a:srgbClr")) if spPr is not None else None
+    return clr.get("val").upper() if clr is not None and clr.get("val") else None
+
+
+def _ground_hex(ctx: _SlideCtx, box: Bbox) -> Optional[str]:
+    """What lies under a box: the smallest painted shape holding it, else the sample slide's own ground."""
+    best = None
+    for el in ctx.slide._element.cSld.find(q("p:spTree")):
+        if etree.QName(el).localname != "sp" or not _has_fill(el):
+            continue
+        b = element_bbox(el)
+        if not b:
+            continue
+        ob = Bbox(x=b[0], y=b[1], w=b[2], h=b[3])
+        if ob.intersection(box) >= 0.8 * box.area and (best is None or ob.area < best[0]):
+            hx = _fill_hex(el)
+            if hx:
+                best = (ob.area, hx)
+    if best:
+        return best[1]
+    bg = next((b.hex for b in ctx.manifest.tokens.backgrounds if ctx.pattern.source_slide in b.slides and b.hex), None)
+    return bg or ctx.manifest.tokens.color_for("background.dark" if ctx.pattern.family.value == "dark" else "background.light")
+
+
+def _readable_on(ground: Optional[str], preferred: list[Optional[str]], manifest: TemplateManifest) -> Optional[str]:
+    if not ground:
+        return next((c for c in preferred if c), None)
+    from verstka.schemas.common import contrast_ratio
+
+    cands = [c for c in preferred if c] + [manifest.tokens.color_for(r) for r in ("text.secondary", "background.light", "background.dark")] + ["FFFFFF", "000000"]
+    cands = [c for c in cands if c]
+    for c in cands:
+        if contrast_ratio(c, ground) >= 4.5:
+            return c
+    return max(cands, key=lambda c: contrast_ratio(c, ground))
+
+
 def _grow_into_free_area(box: Bbox, ctx: _SlideCtx, oslide: Optional[OutlineSlide] = None) -> Bbox:
     """A sample table/chart area far smaller than the free content area (Education keeps a 25%-wide sample table)
     grows inside the safe area below its top edge — over text slots that will stay empty, never over anything else."""
@@ -984,11 +1048,17 @@ def _place_native_object(ctx: _SlideCtx, oslide: OutlineSlide) -> None:
         if box.intersection(pic_box) > 0.3 * pic_box.area:
             remove_element(el)
             ctx.removed.add(sid)
+    ground = _ground_hex(ctx, box)
+    text_hex = _readable_on(ground, [manifest.tokens.color_for("text.primary"), manifest.components.table_style.body_text_hex], manifest)
     try:
         if c.chart is not None:
-            add_chart(ctx.slide, box, c.chart, ctx.outline, manifest.components.chart_style, ctx.typo, text_hex=manifest.tokens.color_for("text.primary"), neutral_hex=next((t.hex for t in manifest.tokens.colors if t.role and t.role.startswith("neutral")), None))
+            add_chart(ctx.slide, box, c.chart, ctx.outline, manifest.components.chart_style, ctx.typo, text_hex=text_hex, neutral_hex=next((t.hex for t in manifest.tokens.colors if t.role and t.role.startswith("neutral")), None))
         elif c.table is not None:
-            add_table(ctx.slide, box, c.table, manifest.components.table_style, ctx.typo)
+            style = manifest.components.table_style
+            if text_hex and text_hex != style.body_text_hex:
+                # the template's table text is dark; on a dark ground (LCT purple) it must turn light, bands go
+                style = style.model_copy(update={"body_text_hex": text_hex, "band_fill_hex": None})
+            add_table(ctx.slide, box, c.table, style, ctx.typo)
     except Exception as e:  # noqa: BLE001
         ctx.warnings.append(f"native object failed: {str(e)[:120]}")
 
@@ -1207,7 +1277,7 @@ def render_clone(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
         if below:
             subs = [min(below, key=lambda s: s.bbox.y)]
     if subs and subtitle_text:
-        ctx.fill_slot(subs[0], [ParagraphSpec(subtitle_text)])
+        ctx.fill_slot(subs[0], [ParagraphSpec(subtitle_text, bullet=False)])
     elif oslide.subtitle:
         ctx.warnings.append("subtitle had no slot")
 

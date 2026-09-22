@@ -18,15 +18,21 @@ _WIDTH_FACTORS = {
     "calibri": 0.93,
     "segoe ui": 0.98,
     "roboto": 0.98,
-    "inter": 1.0,
-    "montserrat": 1.08,
+    "inter": 1.03,
+    "montserrat": 1.2,  # a wide geometric sans: 1.08 let LCT headings overflow their pills
     "vk sans display": 1.02,
     "vk sans": 1.0,
+    "golos": 1.02,
+    "pt sans": 0.98,
+    "open sans": 1.08,
+    "verdana": 1.25,
+    "tahoma": 1.05,
+    "georgia": 1.12,
     "consolas": 1.12,
     "courier new": 1.2,
     "times new roman": 0.92,
-    "georgia": 1.0,
 }
+_UNKNOWN_FACTOR = 1.08  # a family we cannot measure is assumed a little wider than Play: overflow costs more than air
 _MEASURE_PX = 64  # render size used for measuring; widths scale linearly
 
 
@@ -39,10 +45,12 @@ def width_factor(family: Optional[str]) -> float:
     if not family:
         return 1.0
     key = family.lower().strip()
+    if key.startswith("+"):
+        return 1.0  # a theme font reference: resolved elsewhere, measured as Play
     for k, v in _WIDTH_FACTORS.items():
         if key.startswith(k):
             return v
-    return 1.0
+    return _UNKNOWN_FACTOR
 
 
 @lru_cache(maxsize=8)
