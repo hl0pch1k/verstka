@@ -193,8 +193,9 @@ def adjust_group(slide: Slide, group: RepeatGroup, n_needed: int, slide_w: int, 
         pitch0 = (starts[1] - starts[0]) if n_orig > 1 else size0 + int(group.gap * (slide_w if row else slide_h))
         gap = max(pitch0 - size0, 0)
         span_end0 = starts[-1] + size0
-        edge = int((slide_w if row else slide_h) * 0.97)
-        room_end = min(max(span_end0, starts[0] + max(group.max_n, n_orig) * pitch0 - gap), edge)
+        edge = int((slide_w if row else slide_h) * (0.95 if row else 0.92))
+        # free room runs to the slide margin; whatever stands in the band (below) cuts it short
+        room_end = max(span_end0, edge)
         # never reflow over something else standing in the group's band after its last cell (a highlighted card,
         # a picture): the free room ends a gap before it
         cross0 = min((b.y if row else b.x) for b in boxes0)

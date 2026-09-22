@@ -576,7 +576,11 @@ def _fill_one_cell(ctx: _SlideCtx, entries, chunk: list[SlideItem], cell_idx: in
         return
     if len(text) == 1:
         e, s, _ = text[0]
-        ctx.fill_el(e, s, _item_single_paragraphs(item, include_number=include_number))
+        paras = _item_single_paragraphs(item, include_number=include_number)
+        if item.number and include_number and paras and paras[0].text == item.number:
+            base = s.style.size_pt if s is not None and s.style.size_pt else ctx.typo.size_for("body", 14.0)
+            paras[0] = ParagraphSpec(item.number, bullet=False, bold=True, size_pt=min(max(base * 1.7, base + 8), ctx.typo.size_for("h1", base * 2.4)))
+        ctx.fill_el(e, s, paras)
         return
     if item.number and not include_number:
         # the figure goes to a standalone number slot: the cell shows the label only
@@ -785,7 +789,21 @@ def _harmonize(ctx: _SlideCtx, pairs: list[tuple[etree._Element, Optional[Slot]]
     if sizes:
         common = min(sizes)
         for e, _ in pairs:
-            set_text_size(e, common)
+            _scale_text(e, common)
+
+
+def _scale_text(e: etree._Element, size: float) -> None:
+    """Set the running text of a shape to `size`; emphasised lines (a figure set larger) keep their proportion."""
+    runs = [r for r in e.iter(q("a:rPr")) if r.get("sz")]
+    if not runs:
+        set_text_size(e, size)
+        return
+    from collections import Counter
+
+    modal = Counter(int(r.get("sz")) for r in runs).most_common(1)[0][0]
+    for r in list(e.iter(q("a:rPr"))) + list(e.iter(q("a:endParaRPr"))):
+        old = int(r.get("sz")) if r.get("sz") else modal
+        r.set("sz", str(int(round(size * 100 * (old / modal if old > modal else 1.0)))))
 
 
 def _harmonize_first_lines(els: list[etree._Element]) -> None:
