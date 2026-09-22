@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import shutil
 import subprocess
 import tempfile
+import zipfile
 from pathlib import Path
 from typing import Optional
 
@@ -27,6 +29,46 @@ def find_pdftoppm() -> Optional[str]:
     return shutil.which("pdftoppm")
 
 
+_LAYOUT_PART_RE = re.compile(r"^ppt/(slideLayouts/slideLayout|slideMasters/slideMaster)\d+\.xml$")
+_SERVICE_PH = {"sldNum", "dt", "ftr", "hdr"}
+
+
+def _blank_prompts(xml: bytes) -> bytes:
+    """Empty the prompt text («Образец текста», «Click to edit…») of every content placeholder of a layout/master."""
+    from lxml import etree
+
+    ns = {"p": "http://schemas.openxmlformats.org/presentationml/2006/main", "a": "http://schemas.openxmlformats.org/drawingml/2006/main"}
+    root = etree.fromstring(xml)
+    changed = False
+    for sp in root.iterfind(".//p:sp", ns):
+        ph = sp.find("p:nvSpPr/p:nvPr/p:ph", ns)
+        if ph is None or ph.get("type") in _SERVICE_PH:
+            continue
+        for t in sp.iterfind(".//a:r/a:t", ns):
+            if t.text:
+                t.text = ""
+                changed = True
+    return etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True) if changed else xml
+
+
+def render_copy(pptx: Path, out_dir: Path) -> Path:
+    """A copy of the deck for LibreOffice only, named like the original (the PDF takes the stem).
+
+    PowerPoint never shows layout placeholders on a slide, but LibreOffice imports the extra placeholders of a
+    custom layout as plain master shapes: their prompt text shows through wherever the sample covered it with a
+    card that the renderer removed. The .pptx handed to the user is not touched.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    dst = out_dir / pptx.name
+    with zipfile.ZipFile(pptx) as zin, zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zout:
+        for item in zin.infolist():
+            data = zin.read(item.filename)
+            if _LAYOUT_PART_RE.match(item.filename):
+                data = _blank_prompts(data)
+            zout.writestr(item, data)
+    return dst
+
+
 def pptx_to_pdf(pptx: Path, out_dir: Path, timeout_s: float = 240.0) -> Path:
     soffice = find_soffice()
     if not soffice:
@@ -35,16 +77,21 @@ def pptx_to_pdf(pptx: Path, out_dir: Path, timeout_s: float = 240.0) -> Path:
     env = os.environ.copy()
     env["SAL_USE_VCLPLUGIN"] = "svp"
     with tempfile.TemporaryDirectory(prefix="verstka_lo_", ignore_cleanup_errors=True) as profile:
+        try:
+            src = render_copy(Path(pptx), Path(profile) / "src")
+        except (zipfile.BadZipFile, OSError, ValueError) as e:  # a broken package still gets its LibreOffice verdict
+            log.warning("render copy failed, converting the original: %s", e)
+            src = Path(pptx)
         cmd = [
             soffice,
-            f"-env:UserInstallation={Path(profile).as_uri()}",
+            f"-env:UserInstallation={(Path(profile) / 'profile').as_uri()}",
             "--headless",
             "--norestore",
             "--convert-to",
             "pdf",
             "--outdir",
             str(out_dir),
-            str(pptx),
+            str(src),
         ]
         try:
             proc = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=timeout_s)

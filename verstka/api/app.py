@@ -507,8 +507,7 @@ def apply_fixes(gid: str, strategy: str, req: FixRequest) -> dict:
 
     def run(job: Job) -> dict:
         from verstka.audit.autofix import autofix_loop
-        from verstka.export.html import export_html
-        from verstka.export.pdf import export_pdf
+        from verstka.pipeline.generate import render_outputs
 
         try:
             ws = store.workspace(meta["template_id"])
@@ -518,17 +517,17 @@ def apply_fixes(gid: str, strategy: str, req: FixRequest) -> dict:
             only = None if req.all_deterministic else set(req.issue_ids)
             job.emit("применяю исправления", 0.2)
             final, plan2, outline2, _ = autofix_loop(vdir / "deck.pptx", report, outline, plan, manifest, ws, max_iterations=2, only_ids=only, images_dir=vdir / "slides")
+            job.emit("экспортирую", 0.8)
+            # previews and the exports that existed before are rebuilt from one LibreOffice run
+            exports = [fmt for fmt in ("pdf", "html") if (vdir / f"deck.{fmt}").exists()]
+            _, images, warns, _ = render_outputs(vdir, manifest, outline2.title, exports, images=True)
+            for w in warns:
+                log.warning("re-export: %s", w)
+            if images:
+                final.slide_images = {k: str(p) for k, p in enumerate(images, 1)}
             (vdir / "audit_report.json").write_text(final.model_dump_json(indent=2), encoding="utf-8")
             (vdir / "outline.json").write_text(outline2.model_dump_json(indent=2), encoding="utf-8")
             (vdir / "layout_plan.json").write_text(plan2.model_dump_json(indent=2), encoding="utf-8")
-            job.emit("экспортирую", 0.8)
-            try:
-                if (vdir / "deck.pdf").exists():
-                    export_pdf(vdir / "deck.pptx", vdir / "deck.pdf")
-                if (vdir / "deck.html").exists():
-                    export_html(vdir / "deck.pptx", manifest, vdir / "deck.html", title=outline2.title)
-            except Exception as e:  # noqa: BLE001
-                log.warning("re-export failed: %s", e)
             summary = meta.get("summary", {})
             summary[strategy] = {**summary.get(strategy, {}), "score": final.summary.score, "errors": final.summary.errors, "warnings": final.summary.warnings}
             meta["summary"] = summary
