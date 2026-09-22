@@ -57,3 +57,31 @@ def fit_size(
         if last.fits:
             return last
     return last
+
+
+def grow_size(
+    paragraphs: list[str],
+    bbox: Bbox,
+    family: Optional[str],
+    size_pt: float,
+    bold: bool,
+    scale_sizes: list[float],
+    cap_pt: float,
+    insets_emu: tuple[int, int, int, int] = (91440, 45720, 91440, 45720),
+    line_spacing: float = 1.2,
+    fill: float = 0.7,
+) -> float:
+    """The largest step of the template scale in (size_pt, cap_pt] at which the text takes at most `fill` of the box.
+
+    Three short bullets at 12 pt in a box meant for a paragraph read as a mistake; a designer sets them larger,
+    but only along the template's own scale and never past the cap of the role (body text stays body text).
+    """
+    usable_w = max((bbox.w - insets_emu[0] - insets_emu[2]) / EMU_PER_PT, 1.0)
+    usable_h = max((bbox.h - insets_emu[1] - insets_emu[3]) / EMU_PER_PT, 1.0)
+    best = size_pt
+    for s in sorted({round(x, 2) for x in scale_sizes if size_pt < x <= cap_pt}):
+        height = _lines_for(paragraphs, family, s, bold, usable_w) * s * line_spacing
+        if height > fill * usable_h:
+            break
+        best = s
+    return best

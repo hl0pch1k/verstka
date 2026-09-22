@@ -17,7 +17,8 @@ from verstka.analysis.xmlns import q
 from verstka.ingest.workspace import TemplateWorkspace
 from verstka.rendering.assets_pick import pick_asset
 from verstka.rendering.charts import add_chart
-from verstka.rendering.deck import DeckBuilder
+from verstka.rendering.clone import renumber_page_chrome
+from verstka.rendering.deck import DeckBuilder, element_bbox, is_nested, remove_element, slide_shape_elements
 from verstka.rendering.fit import fit_size
 from verstka.rendering.images import insert_picture
 from verstka.rendering.tables import add_table
@@ -112,6 +113,80 @@ def _layout_for(builder: DeckBuilder, manifest: TemplateManifest, family: Family
 
     layouts = builder.layouts()
     return (min(layouts, key=rank) if layouts else builder.prs.slide_layouts[0]), family
+
+
+_CANVAS_KINDS = {
+    "title": (PatternKind.title, PatternKind.section, PatternKind.thanks),
+    "section": (PatternKind.section,),
+    "thanks": (PatternKind.thanks, PatternKind.title, PatternKind.section),
+}
+_NOT_CONTENT_CANVAS = {PatternKind.title, PatternKind.section, PatternKind.thanks, PatternKind.quote}
+
+
+def _top_title(p: Pattern) -> Optional[object]:
+    titles = [s for s in p.slots if s.role == SlotRole.title]
+    return min(titles, key=lambda s: s.bbox.y) if titles else None
+
+
+def _canvas_for(manifest: TemplateManifest, family: Family, comp: str) -> Optional[Pattern]:
+    """The sample slide a synthesized slide is drawn on: same family, a writable title at the top, as little content
+    as possible. Cloning it keeps what a layout alone would lose — backgrounds and chrome that a designer drew on
+    the slides themselves (hand-made decks, picture backgrounds) and the look of the template's headings."""
+    kinds = _CANVAS_KINDS.get(comp)
+    best: Optional[tuple] = None
+    for p in manifest.patterns:
+        if p.family != family or p.quality < 0.5 or p.reference:
+            continue
+        title = _top_title(p)
+        if title is None:
+            continue
+        if kinds is not None:
+            if p.kind not in kinds:
+                continue
+            rank = kinds.index(p.kind)
+        else:
+            if p.kind in _NOT_CONTENT_CANVAS or title.bbox.y > 0.3 or title.bbox.w < 0.2:
+                continue
+            rank = 0
+        big_pictures = sum(1 for s in p.slots if s.role == SlotRole.image and s.bbox.area >= 0.05)
+        clutter = len(p.slots) + sum(len(g.member_shape_ids) for g in p.repeat_groups) + len(p.decor_assets) + 5 * big_pictures
+        key = (rank, clutter, -p.quality, p.source_slide)
+        if best is None or key < best[0]:
+            best = (key, p)
+    return best[1] if best else None
+
+
+def _slide_on_canvas(builder: DeckBuilder, canvas: Pattern, W: int, H: int):
+    """Clone the canvas sample and strip it to background + chrome + the title slot. Returns (slide, title shape)."""
+    slide = builder.clone_slide(canvas.source_slide)
+    els = slide_shape_elements(slide)
+    title = _top_title(canvas)
+    keep = set(canvas.chrome_shape_ids) | ({title.shape_id} if title else set())
+    for sid, el in els.items():
+        if sid in keep or is_nested(el) or el.getparent() is None:
+            continue
+        b = element_bbox(el)
+        full_bleed = b is not None and b[2] * b[3] >= 0.9 * W * H and not "".join(t.text or "" for t in el.iter(q("a:t"))).strip()
+        if full_bleed:
+            continue  # a background drawn as a slide-sized rectangle or picture
+        remove_element(el)
+    renumber_page_chrome(slide_shape_elements(slide), canvas.chrome_shape_ids, canvas.source_slide, len(builder.created))
+    title_shape = next((sh for sh in slide.shapes if title is not None and str(sh.shape_id) == title.shape_id), None)
+    if title_shape is not None and is_nested(title_shape._element):
+        title_shape = None
+    return slide, title_shape
+
+
+def _adopt_canvas_colors(pal: "_Palette", canvas: Pattern, manifest: TemplateManifest) -> None:
+    """On a cloned sample the ground is the sample's own (often a picture): its heading colour is known to read on it,
+    so running text takes that colour too; a solid ground of the sample replaces the family's generic one."""
+    bg = next((b.hex for b in manifest.tokens.backgrounds if canvas.source_slide in b.slides and b.hex), None)
+    if bg:
+        pal.bg = bg
+    title = _top_title(canvas)
+    color = title.style.color_hex if title is not None else None
+    if color and contrast_ratio(color, pal.bg) >= 3.0 or (color and not bg):
+        pal.text = pal.text2 = color
 
 
 def _title_style(manifest: TemplateManifest, family: Family, pal: _Palette) -> tuple[float, str, bool, Optional[str]]:
@@ -222,10 +297,19 @@ def _items(oslide: OutlineSlide) -> list[SlideItem]:
 
 def render_synth(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineSlide, manifest: TemplateManifest, ws: TemplateWorkspace, outline: DeckOutline) -> tuple[Slide, list[str]]:
     warnings: list[str] = []
-    layout, family = _layout_for(builder, manifest, _family_for(oslide, manifest), oslide.kind)
-    pal = _Palette(manifest, family)  # palette of the layout's real family: text must contrast with its background
-    slide = builder.prs.slides.add_slide(layout)
-    builder.created.append(slide)
+    comp = plan_slide.composition or "bullets"
+    family = _family_for(oslide, manifest)
+    canvas = _canvas_for(manifest, family, comp)
+    if canvas is not None:
+        slide, title_ph = _slide_on_canvas(builder, canvas, builder.slide_w, builder.slide_h)
+    else:
+        layout, family = _layout_for(builder, manifest, family, oslide.kind)
+        slide = builder.prs.slides.add_slide(layout)
+        builder.created.append(slide)
+        title_ph = None
+    pal = _Palette(manifest, family)  # palette of the real family: text must contrast with its background
+    if canvas is not None:
+        _adopt_canvas_colors(pal, canvas, manifest)
     t = manifest.tokens
     typo = t.typography
     W, H = builder.slide_w, builder.slide_h
@@ -239,14 +323,13 @@ def render_synth(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
     small = typo.size_for("small", body * 0.85)
     display = typo.size_for("display", h1 * 1.8)
 
-    # keep only the title placeholder (fill it) — everything else is drawn from tokens
-    title_ph = None
-    for shp in list(slide.shapes):
-        if shp.is_placeholder and shp.placeholder_format.type is not None and str(shp.placeholder_format.type).split(".")[-1].split(" ")[0] in ("TITLE", "CENTER_TITLE"):
-            title_ph = shp
-        else:
-            shp._element.getparent().remove(shp._element)
-    comp = plan_slide.composition or "bullets"
+    # keep only the title (fill it) — everything else is drawn from tokens
+    if canvas is None:
+        for shp in list(slide.shapes):
+            if shp.is_placeholder and shp.placeholder_format.type is not None and str(shp.placeholder_format.type).split(".")[-1].split(" ")[0] in ("TITLE", "CENTER_TITLE"):
+                title_ph = shp
+            else:
+                shp._element.getparent().remove(shp._element)
     c = oslide.content
     title_h = int(H * (0.16 if comp not in ("title", "section", "thanks") else 0.3))
     if title_ph is not None and comp not in ("title", "section", "thanks"):
@@ -269,10 +352,28 @@ def render_synth(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
             title_ph._element.getparent().remove(title_ph._element)
         _textbox(slide, Bbox(x=sx, y=sy, w=sw, h=title_h), [ParagraphSpec(oslide.headline)], size=h1, color=title_color, font=title_font, bold=title_bold, scale=scale, anchor="t")
         y_after = sy + title_h
+    elif canvas is not None and title_ph is not None:
+        # title / section / thanks on a sample of that kind: its own title box, the subtitle right under it
+        box = Bbox(x=int(title_ph.left), y=int(title_ph.top), w=int(title_ph.width), h=int(title_ph.height))
+        insets = (91440, 45720, 91440, 45720)
+        res = fit_size([oslide.headline], box, title_font, h1, title_bold, scale, insets_emu=insets, line_spacing=typo.line_spacing, min_ratio=0.6)
+        fill_text(title_ph._element, [ParagraphSpec(oslide.headline)], size_pt=res.size_pt)
+        text_h = int(res.height_pt * EMU_PER_PT) + insets[1] + insets[3]
+        if text_h > box.h:
+            title_ph.height = Emu(min(text_h, int(H * 0.95) - box.y))
+        sub = oslide.subtitle or (oslide.section if comp == "section" else None)
+        if sub:
+            y_sub = box.y + max(box.h, text_h) + int(H * 0.02)
+            _textbox(slide, Bbox(x=box.x, y=y_sub, w=box.w, h=min(int(H * 0.16), int(H * 0.92) - y_sub)), [ParagraphSpec(sub)], size=h2, color=pal.text2, font=font, scale=scale)
+        return slide, warnings
     else:
         if title_ph is not None:
             title_ph._element.getparent().remove(title_ph._element)
         y_after = sy
+    if title_ph is not None and title_ph.left is not None and comp not in ("title", "section", "thanks") and 0 < int(title_ph.left) < sx + sw // 2:
+        # content is aligned to the heading's left edge, as the template's own slides are
+        sw = sx + sw - int(title_ph.left)
+        sx = int(title_ph.left)
     top = y_after + int(H * 0.02)
     avail_h = sy + sh - top
     gap = int((t.spacing.gutter or 0.03) * W)

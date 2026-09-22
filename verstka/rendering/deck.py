@@ -68,7 +68,8 @@ class DeckBuilder:
             else:
                 new_rid = new.part.relate_to(rel.target_part, rel.reltype)
             rid_map[rid] = new_rid
-        for el in new_tree.iter():
+        # the whole cSld: a picture background (<p:bg>) references the part rels as well
+        for el in new_cSld.iter():
             for attr in _R_ATTRS:
                 v = el.get(attr)
                 if v is not None and v in rid_map:
