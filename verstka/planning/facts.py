@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from typing import Optional
 
+from verstka.planning import heuristics as H
 from verstka.providers.base import ProviderError
 from verstka.providers.registry import ProviderRegistry
 from verstka.schemas.outline import Brief, Fact, FactsExtraction, Series, TableData
@@ -51,13 +52,14 @@ def _series_from_table(tbl: TableData, idx: int) -> Optional[Series]:
     return Series(id=f"s{idx}", name=row[0], categories=cats, values=vals, source_span=tbl.source_span)
 
 
-def basic_facts(text: str, max_facts: int = 12) -> FactsExtraction:
+def basic_facts(text: str, max_facts: int = 16) -> FactsExtraction:
+    """Numbers with their unit and a short label (heuristics.kpis_of), tables with their lead line, chart series."""
     facts: list[Fact] = []
     seen: set[str] = set()
-    for sent in _SENT_RE.split(text):
-        s = sent.strip()
-        if not s:
-            continue
+    _, sections = H.parse_sections(text)
+    sentences = [sn for sec in sections for sn in sec.sentences] or [x.strip() for x in _SENT_RE.split(text) if x.strip()]
+    for s in sentences:
+        kpis = H.kpis_of(s)
         for m in _NUM_RE.finditer(s):
             value = re.sub(r"\s+", " ", m.group(1)).strip()
             unit = (m.group(2) or "").strip() or None
@@ -67,14 +69,19 @@ def basic_facts(text: str, max_facts: int = 12) -> FactsExtraction:
             if key in seen or (unit is None and len(value.replace(" ", "")) <= 1):
                 continue
             seen.add(key)
-            label = s[:120]
+            digits = re.sub(r"\D", "", value)
+            k = next((k for k in kpis if digits and digits in re.sub(r"\D", "", k.value)), None)
+            label = k.label if k is not None else s[:120]
             facts.append(Fact(id=f"f{len(facts) + 1}", value=value, unit=unit, label=label, source_span=s[:200]))
             if len(facts) >= max_facts:
                 break
         if len(facts) >= max_facts:
             break
-    tables = _markdown_tables(text)
-    series = [s for i, t in enumerate(tables, 1) if (s := _series_from_table(t, i))]
+    tables = [t for sec in sections for t in sec.tables] or _markdown_tables(text)
+    series: list[Series] = []
+    for t in tables:
+        ss, _ = H.table_series(t, start_id=len(series) + 1)
+        series.extend(ss)
     return FactsExtraction(facts=facts, series=series, tables=tables)
 
 

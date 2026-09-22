@@ -58,7 +58,12 @@ def test_basic_facts_and_outline():
     outline = basic_outline(brief, facts, get_strategy("structured"), 8)
     kinds = [s.kind for s in outline.slides]
     assert kinds[0] == PatternKind.title and kinds[-1] == PatternKind.thanks
-    assert PatternKind.stat_row in kinds and PatternKind.chart in kinds and PatternKind.table in kinds
+    # a one-row numeric table is a time series: it becomes a chart, and the same figures are not repeated as a table
+    assert PatternKind.stat_row in kinds and PatternKind.chart in kinds and PatternKind.table not in kinds
+    chart = next(s for s in outline.slides if s.kind == PatternKind.chart)
+    assert "с 1 200 до 6 100" in chart.headline  # the heading states what the series shows
+    stat = next(s for s in outline.slides if s.kind == PatternKind.stat_row)
+    assert [n.value for n in stat.content.numbers][:3] == ["12 400", "+34%", "2,1 ч"]
     assert len(outline.slides) <= 9
     assert trim_words("один два три четыре пять шесть", 3) == "один два три"
 
