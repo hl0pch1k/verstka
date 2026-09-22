@@ -54,6 +54,23 @@ def resolve_series(spec: ChartSpec, outline: DeckOutline) -> list[Series]:
     return out
 
 
+_AX_TAGS = ("axId", "crossAx")
+
+
+def fix_axis_ids(chart_space) -> None:
+    """python-pptx writes negative axis ids (-2068027336); the schema wants xs:unsignedInt. Every id is mapped to a
+    positive one consistently, so c:axId / c:crossAx pairs keep pointing at each other."""
+    ns = "http://schemas.openxmlformats.org/drawingml/2006/chart"
+    mapping: dict[str, str] = {}
+    for el in chart_space.iter(*(f"{{{ns}}}{t}" for t in _AX_TAGS)):
+        v = el.get("val")
+        if v is None or not v.lstrip("-").isdigit() or int(v) >= 0:
+            continue
+        if v not in mapping:
+            mapping[v] = str(int(v) & 0xFFFFFFFF)
+        el.set("val", mapping[v])
+
+
 def add_chart(slide: Slide, bbox: Bbox, spec: ChartSpec, outline: DeckOutline, style: ChartStyleSpec, typography: Typography, text_hex: Optional[str] = None, neutral_hex: Optional[str] = None):
     series = resolve_series(spec, outline)
     if not series:
@@ -66,6 +83,7 @@ def add_chart(slide: Slide, bbox: Bbox, spec: ChartSpec, outline: DeckOutline, s
     chart_type = _TYPE_MAP.get(spec.type, XL_CHART_TYPE.COLUMN_CLUSTERED)
     gf = slide.shapes.add_chart(chart_type, Emu(bbox.x), Emu(bbox.y), Emu(bbox.w), Emu(bbox.h), data)
     chart = gf.chart
+    fix_axis_ids(chart._chartSpace)
     colors = style.series_colors or ["0077FF"]
     font_size = style.font_size_pt or typography.size_for("small", 12.0)
     chart.font.size = Pt(font_size)

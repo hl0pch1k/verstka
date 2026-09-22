@@ -328,3 +328,20 @@ def test_a_label_pill_without_its_text_is_removed(tmp_path):
     slide, _ = render_clone(DeckBuilder(ws.source), LayoutSlide(outline_id="s1", mode="clone", pattern_id=p.id), oslide, p, m, ws, DeckOutline(title="t", slides=[oslide]))
     names = [sh.shape_id for sh in slide.shapes]
     assert pill.shape_id not in names, "the empty pill stayed"
+
+
+def test_chart_axis_ids_are_unsigned(tmp_path):
+    """charts.fix_axis_ids: c:axId / c:crossAx must be xs:unsignedInt (python-pptx writes negative ids)."""
+    from verstka.rendering.charts import add_chart
+    from verstka.schemas.common import Bbox
+    from verstka.schemas.outline import ChartSpec, DeckOutline, Series
+    from verstka.schemas.template import ChartStyleSpec, Typography
+
+    prs = Presentation()
+    s = prs.slides.add_slide(prs.slide_layouts[6])
+    outline = DeckOutline(title="t", series=[Series(id="s1", name="Клиенты", categories=["Май", "Июнь", "Июль"], values=[1, 2, 3])])
+    gf = add_chart(s, Bbox(x=0, y=0, w=5000000, h=3000000), ChartSpec(type="column", series_ids=["s1"]), outline, ChartStyleSpec(), Typography())
+    ns = "{http://schemas.openxmlformats.org/drawingml/2006/chart}"
+    ids = [e.get("val") for e in gf.chart._chartSpace.iter(ns + "axId")]
+    cross = {e.get("val") for e in gf.chart._chartSpace.iter(ns + "crossAx")}
+    assert ids and all(int(v) >= 0 for v in ids) and cross <= set(ids)
