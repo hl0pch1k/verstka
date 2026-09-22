@@ -1,10 +1,26 @@
 // Pure helpers shared by the «Варианты» panel pieces (filmstrip, preview overlays, slide issues).
-import type { AuditReport, BboxFrac, Issue, Severity, Variant } from "../types";
+import type { AuditReport, BboxFrac, Issue, LayoutSlide, Severity, Variant } from "../types";
 import { plural } from "../lib/utils";
 import type { BadgeTone } from "./ui/Badge";
 
 export const SEVERITY_ORDER: Record<Severity, number> = { error: 0, warn: 1, info: 2 };
 export const SEVERITY_TONE: Record<Severity, BadgeTone> = { error: "error", warn: "warn", info: "info" };
+export const MODE_LABEL: Record<LayoutSlide["mode"], string> = { clone: "Клон паттерна", synth: "Синтез из токенов" };
+/** localStorage key of the «Показывать замечания» switch ("0" = hidden). */
+export const KEY_ISSUES = "verstka.variants.issues";
+
+/** Plan entry of a 1-based slide: outline slide id → layout_plan.slides[].outline_id. */
+export function planEntryFor(v: Variant, slide: number): LayoutSlide | null {
+  const id = v.outline?.slides[slide - 1]?.id;
+  if (!id) return null;
+  return v.plan?.slides.find((s) => s.outline_id === id) ?? null;
+}
+
+/** Tone of a planner fit score (0..1). */
+export function fitTone(score: number): BadgeTone {
+  if (!Number.isFinite(score)) return "neutral";
+  return score >= 0.8 ? "success" : score >= 0.6 ? "warn" : "error";
+}
 
 /** Issues grouped by 1-based slide number (0 = deck level), each group sorted error → warn → info. */
 export function issuesBySlide(audit: AuditReport | null | undefined): Map<number, Issue[]> {
