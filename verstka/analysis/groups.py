@@ -37,6 +37,8 @@ def _composition(members: list[ShapeInfo]) -> tuple:
             items.append("pic")
         elif m.has_text:
             items.append(f"txt{round((m.text.dominant_size_pt or 0) / 2) * 2}")
+        elif m.kind == ShapeKind.sp and not m.is_visual_shape and not m.image_part:
+            continue  # an empty invisible text box does not change what the cell looks like
         else:
             items.append("shape")
     return tuple(sorted(items))
@@ -147,6 +149,21 @@ def detect_repeat_groups(
                 out.append(m)
         return out
 
+    def _on_other_anchor(a: ShapeInfo, m: ShapeInfo, cluster_ids: set[str]) -> bool:
+        """m sits on a visual anchor other than a (a neighbouring card of the same cluster, a wider card, a picture)
+        that does not also enclose a: it is that shape's member, not a's satellite. Anchors enclosing a as well (one
+        big card holding an icon row) are ignored so the labels inside stay with their icons. For anchors of the same
+        cluster a 30% overlap is enough; for foreign anchors only the centre counts (a label may graze the bounding
+        box of a decorative picture without belonging to it)."""
+        for o in anchors:
+            if o is a or o.bbox.contains_point(*a.bbox.center):
+                continue
+            if o.bbox.contains_point(*m.bbox.center):
+                return True
+            if o.id in cluster_ids and m.bbox.intersection(o.bbox) > 0.3 * min(m.bbox.area, o.bbox.area):
+                return True
+        return False
+
     def _union(shapes_: list[ShapeInfo]) -> Bbox:
         b = shapes_[0].bbox
         for m in shapes_[1:]:
@@ -162,7 +179,7 @@ def detect_repeat_groups(
         sat_owner: dict[str, ShapeInfo] = {}
         for a in cl:
             for m in _satellites(a, cand):
-                if m.id in anchor_ids:
+                if m.id in anchor_ids or _on_other_anchor(a, m, anchor_ids):
                     continue
                 prev = sat_owner.get(m.id)
                 if prev is None or abs(m.bbox.center[1] - a.bbox.center[1]) + abs(m.bbox.center[0] - a.bbox.center[0]) < abs(m.bbox.center[1] - prev.bbox.center[1]) + abs(m.bbox.center[0] - prev.bbox.center[0]):

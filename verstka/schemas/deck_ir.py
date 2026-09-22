@@ -54,6 +54,7 @@ class IRElement(BaseModel):
     bbox_frac: BboxFrac
     paragraphs: list[IRParagraph] = Field(default_factory=list)
     fill_hex: Optional[str] = None
+    fill_alpha: float = 1.0  # opacity of fill_hex (0..1); consumers composite translucent fills over the slide
     line_hex: Optional[str] = None
     image_part: Optional[str] = None
     image_size: Optional[tuple[int, int]] = None
@@ -131,6 +132,12 @@ class IRSlide(BaseModel):
 
     @property
     def texts(self) -> list[IRElement]:
+        """Text boxes only: tables and charts keep their own IR (IRTable / IRChart) and are not text checks' business."""
+        return [e for e in self.elements if e.type == "text" and e.has_text]
+
+    @property
+    def all_text(self) -> list[IRElement]:
+        """Every element carrying text, including table frames (one paragraph per cell): for duplicate/summary consumers."""
         return [e for e in self.elements if e.has_text]
 
     def by_id(self, eid: str) -> Optional[IRElement]:

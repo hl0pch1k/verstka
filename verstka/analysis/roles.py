@@ -79,6 +79,23 @@ def heuristic_roles(
             if -0.02 * slide_h <= gap <= 0.08 * slide_h and overlaps_x and _size(s) < _size(title) and len(s.plain_text) <= 160:
                 roles[s.id] = SlotRole.subtitle
                 break
+    # an empty subtitle placeholder is still the subtitle slot; an empty, low body placeholder directly under the
+    # title on a sparse slide (title / section / thanks samples) is the designer's subtitle box, not a bullet list
+    if title is not None and SlotRole.subtitle not in roles.values():
+        for s in shapes:
+            if s.id in roles or s.id in membership or s.kind != ShapeKind.sp or not s.is_placeholder or s.has_text:
+                continue
+            if s.ph_type == "subTitle":
+                roles[s.id] = SlotRole.subtitle
+                break
+            if s.ph_type not in ("body", "obj"):
+                continue
+            gap = s.bbox.y - title.bbox.y2
+            overlaps_x = s.bbox.x < title.bbox.x2 and s.bbox.x2 > title.bbox.x
+            sparse = len(texts) <= 3 or title.ph_type == "ctrTitle"
+            if -0.02 * slide_h <= gap <= 0.08 * slide_h and overlaps_x and s.bbox.h <= 0.15 * slide_h and sparse:
+                roles[s.id] = SlotRole.subtitle
+                break
 
     # numbers and labels
     numbers: list[ShapeInfo] = []
@@ -107,7 +124,9 @@ def heuristic_roles(
     for g in groups:
         for cell in g.member_shape_ids:
             members = [by_id[i] for i in cell if i in by_id and by_id[i].id not in roles]
-            cell_texts = sorted([m for m in members if m.text is not None and (m.has_text or not m.is_visual_shape)], key=lambda m: (-(_size(m)), m.bbox.y))
+            # an empty invisible text box next to real text is a leftover, not a slot (VK Tech cards keep an emptied title box)
+            with_text = [m for m in members if m.text is not None and m.has_text]
+            cell_texts = sorted(with_text or [m for m in members if m.text is not None and not m.is_visual_shape], key=lambda m: (-(_size(m)), m.bbox.y))
             if cell_texts:
                 head = cell_texts[0]
                 bold_first = next((m for m in sorted(cell_texts, key=lambda m: m.bbox.y) if m.text.bold_share > 0.5), None)
@@ -117,7 +136,8 @@ def heuristic_roles(
                 elif len(cell_texts) == 1:
                     roles[head.id] = SlotRole.card_body
                 else:
-                    roles[head.id] = SlotRole.card_title
+                    # a numeric head is a KPI (number + label), not a card title
+                    roles[head.id] = SlotRole.number if is_numeric_text(head.plain_text) else SlotRole.card_title
                     for m in cell_texts:
                         if m.id not in roles:
                             roles[m.id] = SlotRole.number if is_numeric_text(m.plain_text) and _size(m) >= body_size * 1.5 else SlotRole.card_body

@@ -282,7 +282,7 @@ class TemplateManifest(BaseModel):
     style_rules: list[StyleRule] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     n_slides: int = 0
-    analysis_version: str = "7"
+    analysis_version: str = "8"
     embedded_fonts: list[str] = Field(default_factory=list)
 
     def patterns_of_kind(self, kind: PatternKind) -> list[Pattern]:

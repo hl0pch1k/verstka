@@ -129,6 +129,7 @@ class ShapeInfo:
     ph_idx: Optional[str] = None
     geometry: Optional[str] = None
     fill_hex: Optional[str] = None
+    fill_alpha: float = 1.0  # opacity of the solid fill (a:alpha/@val ÷ 100000), 1.0 when opaque
     line_hex: Optional[str] = None
     line_w_emu: Optional[int] = None
     corner_radius: Optional[float] = None
@@ -469,6 +470,9 @@ def _extract_one(el: etree._Element, ctx: SlideContext, xform: _Xform, z: int, g
         if kind != ShapeKind.pic:
             if not resolver.has_no_fill(spPr):
                 info.fill_hex = resolver.resolve_fill(spPr)
+                alpha = find(spPr, "a:solidFill/*/a:alpha")
+                if info.fill_hex is not None and alpha is not None:
+                    info.fill_alpha = max(0.0, min(1.0, (attr_int(alpha, "val", 100000) or 0) / 100000.0))
                 if info.fill_hex is None and find(spPr, "a:blipFill") is not None:
                     info.fill_hex = None
                     blip = find(spPr, "a:blipFill/a:blip")
@@ -529,6 +533,20 @@ def _extract_one(el: etree._Element, ctx: SlideContext, xform: _Xform, z: int, g
                 rows = findall(tbl, "a:tr")
                 cols = findall(tbl, "a:tblGrid/a:gridCol")
                 info.table_dims = (len(rows), len(cols))
+                # Google-Slides exports carry a dummy p:xfrm on table frames; the rendered size is the grid
+                # (Σ gridCol/@w × Σ tr/@h), so take the larger of the two and keep it inside the slide
+                grid_w = sum(attr_int(c, "w", 0) or 0 for c in cols)
+                grid_h = sum(attr_int(r, "h", 0) or 0 for r in rows)
+                if grid_w > 0 and grid_h > 0:
+                    _, _, gw, gh = xform.apply(0, 0, grid_w, grid_h)
+                    slide_w, slide_h = ctx.package.slide_size
+                    w = max(bbox.w, gw)
+                    h = max(bbox.h, gh)
+                    if bbox.x < slide_w:
+                        w = min(w, slide_w - bbox.x)
+                    if bbox.y < slide_h:
+                        h = min(h, slide_h - bbox.y)
+                    info.bbox = Bbox(x=bbox.x, y=bbox.y, w=max(w, 0), h=max(h, 0))
                 # collect cell text as paragraphs for placeholder detection
                 ti = TextInfo()
                 for tr in rows:
