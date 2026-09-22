@@ -6,7 +6,7 @@ import re
 from collections import defaultdict
 
 from verstka.analysis.shapes import ShapeInfo
-from verstka.schemas.common import ShapeKind
+from verstka.schemas.common import BboxFrac, ShapeKind
 from verstka.schemas.template import ChromeElement
 
 _NUM_RE = re.compile(r"^[\d\s‹›#/]+$")
@@ -126,4 +126,67 @@ def inherited_chrome(part_shapes: dict[str, list[ShapeInfo]], slides_using: dict
                     source=f"{source_kind}:{part}",
                 )
             )
+    return out
+
+
+def visual_chrome(image_paths: list[str], min_share: float = 0.4, grid: tuple[int, int] = (160, 90)) -> list[ChromeElement]:
+    """Logos and marks baked into background pictures: no shape carries them, but the renders do.
+
+    Edges that stand at the same place on at least `min_share` of the rendered slides, inside the top or bottom
+    band (where templates put logos, contacts, page marks), are joined into boxes and returned as background chrome.
+    Text must keep clear of them just as of logo shapes.
+    """
+    try:
+        import numpy as np
+        from PIL import Image
+    except ImportError:  # pragma: no cover
+        return []
+    w, h = grid
+    maps = []
+    for p in image_paths:
+        try:
+            with Image.open(p) as im:
+                g = np.asarray(im.convert("L").resize((w, h)), dtype=np.float32)
+        except Exception:  # noqa: BLE001
+            continue
+        gx = np.abs(np.diff(g, axis=1, prepend=g[:, :1]))
+        gy = np.abs(np.diff(g, axis=0, prepend=g[:1, :]))
+        maps.append((gx + gy) > 40)
+    if len(maps) < 3:
+        return []
+    share = np.mean(np.stack(maps), axis=0)
+    mask = share >= min_share
+    band = np.zeros_like(mask)
+    band[: int(h * 0.2), :] = True
+    band[int(h * 0.85) :, :] = True
+    mask &= band
+    # join nearby edges (a logo is many strokes): dilate by 2 cells, then label connected regions
+    from itertools import product
+
+    dil = mask.copy()
+    for dy, dx in product(range(-2, 3), repeat=2):
+        dil |= np.roll(np.roll(mask, dy, axis=0), dx, axis=1)
+    seen = np.zeros_like(dil)
+    out: list[ChromeElement] = []
+    for y0 in range(h):
+        for x0 in range(w):
+            if not dil[y0, x0] or seen[y0, x0]:
+                continue
+            stack = [(y0, x0)]
+            seen[y0, x0] = True
+            ys, xs = [], []
+            while stack:
+                y, x = stack.pop()
+                ys.append(y)
+                xs.append(x)
+                for ny, nx in ((y + 1, x), (y - 1, x), (y, x + 1), (y, x - 1)):
+                    if 0 <= ny < h and 0 <= nx < w and dil[ny, nx] and not seen[ny, nx]:
+                        seen[ny, nx] = True
+                        stack.append((ny, nx))
+            if len(ys) < 12:
+                continue
+            bx, by, bw, bh = min(xs) / w, min(ys) / h, (max(xs) - min(xs) + 1) / w, (max(ys) - min(ys) + 1) / h
+            if bw * bh > 0.25 or bw > 0.9:
+                continue  # a band-wide stripe is ornament of the whole slide, not an obstacle
+            out.append(ChromeElement(signature=f"visual:{round(bx, 2)},{round(by, 2)},{round(bw, 2)},{round(bh, 2)}", bbox=BboxFrac(x=round(bx, 4), y=round(by, 4), w=round(bw, 4), h=round(bh, 4)), share=round(float(share[ys, xs].mean()), 3), kind="pic", sample_slide=1, source="background"))
     return out

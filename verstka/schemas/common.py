@@ -81,6 +81,11 @@ class BboxFrac(BaseModel):
     def area(self) -> float:
         return max(self.w, 0.0) * max(self.h, 0.0)
 
+    def intersection(self, other: "BboxFrac") -> float:
+        ix = max(0.0, min(self.x2, other.x2) - max(self.x, other.x))
+        iy = max(0.0, min(self.y2, other.y2) - max(self.y, other.y))
+        return ix * iy
+
     def close_to(self, other: "BboxFrac", tol: float = 0.01) -> bool:
         return (
             abs(self.x - other.x) <= tol

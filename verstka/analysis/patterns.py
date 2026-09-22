@@ -45,9 +45,17 @@ def reference_reason(shapes: list[ShapeInfo], roles: dict[str, SlotRole]) -> Opt
     texts = sum(1 for s in shapes if s.has_text and roles.get(s.id) not in (None, SlotRole.chrome))
     if max(icons, small_pics) >= 12 and max(icons, small_pics) >= 2 * max(texts, 1):
         return f"лист иконок или логотипов ({max(icons, small_pics)} шт.)"
+    if shapes:
+        area = max(max(s.bbox.x2 for s in shapes), 1) * max(max(s.bbox.y2 for s in shapes), 1)
+        tiny = sum(1 for s in shapes if not s.has_text and s.kind in (ShapeKind.sp, ShapeKind.pic) and s.bbox.area < 0.004 * area)
+        if tiny >= 40 and tiny >= 4 * max(texts, 1):
+            return f"лист графических элементов ({tiny} шт.)"
     swatches = sum(1 for s in shapes if s.has_text and _HEX_RE.search(s.plain_text))
     if swatches >= 3:
         return f"палитра шаблона ({swatches} образцов цвета)"
+    links = sum(len(s.element.findall(".//{http://schemas.openxmlformats.org/drawingml/2006/main}hlinkClick")) for s in shapes if s.element is not None and s.has_text)
+    if links >= 3:
+        return f"список полезных ссылок ({links} ссылок)"
     return None
 
 

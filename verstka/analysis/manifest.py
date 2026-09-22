@@ -13,7 +13,7 @@ import yaml
 
 from verstka.analysis.assets import extract_assets, tag_assets_with_vlm
 from verstka.analysis.chrome import chrome_ids as _chrome_ids
-from verstka.analysis.chrome import detect_chrome, inherited_chrome
+from verstka.analysis.chrome import detect_chrome, inherited_chrome, visual_chrome
 from verstka.analysis.classify import classify_slide
 from verstka.analysis.colors import assign_color_roles, cluster_colors, collect_color_samples
 from verstka.analysis.components import derive_components
@@ -21,7 +21,7 @@ from verstka.analysis.gallery import write_gallery, write_thumbnails
 from verstka.analysis.groups import detect_repeat_groups
 from verstka.analysis.patterns import build_pattern, dedupe_patterns
 from verstka.analysis.rules import harvest_rules
-from verstka.analysis.shapes import ShapeInfo, SlideContext, extract_shapes, slide_family
+from verstka.analysis.shapes import ShapeInfo, SlideContext, extract_shapes, slide_background, slide_family
 from verstka.analysis.spacing import compute_spacing
 from verstka.analysis.typography import build_type_scale
 from verstka.ingest.package import PptxPackage
@@ -92,6 +92,21 @@ def template_summary_text(n_slides: int, slide_w: int, slide_h: int, tokens: Tok
     return f"{n_slides} slides, {slide_w / 914400:.2f}x{slide_h / 914400:.2f} in; fonts {fonts}; accents {accents}; slide families {fam}"
 
 
+def _draws(s: ShapeInfo) -> bool:
+    return s.kind == ShapeKind.pic or s.is_visual_shape or s.has_text
+
+
+def _drawn_box(s: ShapeInfo, slide_w: int, slide_h: int):
+    """Where a shape actually puts ink: a wide text box only as far as its longest line reaches."""
+    f = s.bbox.to_frac(slide_w, slide_h)
+    if s.kind == ShapeKind.pic or s.is_visual_shape or not s.has_text:
+        return f
+    size = (s.text.dominant_size_pt or 18.0) if s.text else 18.0
+    longest = max((len(line) for line in s.plain_text.splitlines()), default=0)
+    width = min(f.w, longest * size * 0.6 * 12700 / slide_w)
+    return f.model_copy(update={"w": width})
+
+
 def text_color_on(under_hex: Optional[str], tokens: Tokens) -> Optional[str]:
     """The template's own text colour that reads best on `under_hex` (primary text first, then the backgrounds)."""
     if not under_hex:
@@ -160,6 +175,7 @@ def analyze_template(
     shapes_by_slide: dict[int, list[ShapeInfo]] = {}
     family_by_slide: dict[int, Family] = {}
     bg_by_slide: dict[int, Optional[str]] = {}
+    image_bg: set[int] = set()
     layout_by_slide: dict[int, Optional[str]] = {}
     slide_texts: list[str] = []
     for i, part in enumerate(slide_parts, 1):
@@ -174,6 +190,8 @@ def analyze_template(
         shapes_by_slide[i] = shapes
         family_by_slide[i] = fam
         bg_by_slide[i] = bg
+        if bg and slide_background(pkg, part, ctx)[1] == "image":
+            image_bg.add(i)  # a median colour of a picture ground, not a solid fill
         layout_by_slide[i] = ctx.layout_part
         slide_texts.append("\n".join(s.plain_text for s in shapes if s.has_text))
     report("extracted shapes", 0.3)
@@ -202,6 +220,17 @@ def analyze_template(
             warnings.append(f"layout {lp}: chrome extraction failed: {str(e)[:120]}")
     chrome.extend(inherited_chrome(layout_shapes, layout_users, n_slides, slide_w, slide_h, "layout"))
     chrome.extend(inherited_chrome(master_shapes, master_users, n_slides, slide_w, slide_h, "master"))
+    if images:
+        # logos baked into background pictures exist only in the renders
+        known = [c.bbox for c in chrome]
+        for vc in visual_chrome([str(p) for _, p in sorted(images.items())]):
+            if any(vc.bbox.intersection(k) > 0.5 * vc.bbox.area for k in known if k.area > 0):
+                continue
+            # edges drawn by real shapes (title pills, headings standing at the same place) are not baked chrome
+            drawn = sum(1 for shapes in shapes_by_slide.values() if any(_drawn_box(s, slide_w, slide_h).intersection(vc.bbox) >= 0.4 * vc.bbox.area for s in shapes if _draws(s)))
+            if drawn >= 0.3 * max(len(shapes_by_slide), 1):
+                continue
+            chrome.append(vc)
     chrome_image_parts = {c.image_part for c in chrome if c.image_part}
 
     # 4. assets
@@ -233,8 +262,9 @@ def analyze_template(
     shape_stats = _shape_style_stats(shapes_by_slide, chrome_by_slide)
     backgrounds: dict[tuple, BackgroundFamily] = {}
     for i, fam in family_by_slide.items():
-        key = (fam.value, bg_by_slide.get(i) or "image")
-        bf = backgrounds.setdefault(key, BackgroundFamily(family=fam, fill_kind="solid" if bg_by_slide.get(i) else "image", hex=bg_by_slide.get(i)))
+        solid = bg_by_slide.get(i) and i not in image_bg
+        key = (fam.value, bg_by_slide.get(i) if solid else "image")
+        bf = backgrounds.setdefault(key, BackgroundFamily(family=fam, fill_kind="solid" if solid else "image", hex=bg_by_slide.get(i)))
         bf.slides.append(i)
     tokens = Tokens(colors=colors, typography=typography, spacing=spacing, shapes=shape_stats, chrome=chrome, backgrounds=sorted(backgrounds.values(), key=lambda b: -len(b.slides)))
     report("built tokens", 0.45)

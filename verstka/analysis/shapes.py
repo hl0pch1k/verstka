@@ -666,7 +666,11 @@ def slide_family(package: PptxPackage, slide_part: str, ctx: SlideContext, shape
             with Image.open(image_path) as im:
                 small = im.convert("L").resize((32, 18))
                 mean = sum(small.tobytes()) / (32 * 18)
-            return (Family.dark if mean < 90 else Family.light), None
+                rgb = im.convert("RGB").resize((32, 18))
+                chans = [sorted(rgb.getchannel(c).tobytes()) for c in range(3)]
+            median = "".join(f"{ch[len(ch) // 2]:02X}" for ch in chans)
+            # the picture's median colour stands for the ground in contrast decisions (LCT purple photos)
+            return (Family.dark if mean < 90 else Family.light), median
         except Exception:  # noqa: BLE001
             pass
     # fall back to majority text colour: light text → dark slide
