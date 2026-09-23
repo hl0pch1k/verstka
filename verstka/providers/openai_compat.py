@@ -51,6 +51,7 @@ class _MinuteLimiter:
             time.sleep(delay)
 
 
+_MIN_REQUEST_S = 5.0  # less time than this left in the generation's budget: do not start a request
 _LIMITERS: dict[str, _MinuteLimiter] = {}
 _EXHAUSTED: set[str] = set()  # accounts whose daily quota is spent: every later call fails fast → deterministic fallbacks
 _GUARD = threading.Lock()
@@ -190,7 +191,7 @@ class OpenAICompatProvider:
             return None
         return usage.prompt_tokens / 1e6 * self.price_in + usage.completion_tokens / 1e6 * self.price_out
 
-    def _call(self, messages: list[dict], temperature: float, max_tokens: int, want_json: bool) -> tuple[str, Usage]:
+    def _call(self, messages: list[dict], temperature: float, max_tokens: int, want_json: bool, deadline: Optional[float] = None) -> tuple[str, Usage]:
         client = self._get_client()
         kwargs: dict[str, Any] = dict(model=self.model, messages=messages, temperature=temperature, max_tokens=max_tokens)
         if self.extra_body:
@@ -201,6 +202,12 @@ class OpenAICompatProvider:
             raise RateLimited(f"{self.model}: daily request quota of the provider is spent", daily=True)
         if self._limiter is not None:
             self._limiter.wait()
+        if deadline is not None:
+            # a request never outlives the generation's budget (the limiter may have waited)
+            left = deadline - time.monotonic()
+            if left < _MIN_REQUEST_S:
+                raise ProviderError(f"{self.model}: time budget of the generation is spent")
+            kwargs["timeout"] = min(self.timeout_s, left)
         try:
             resp = client.chat.completions.create(**kwargs)
         except Exception as e:  # provider may reject response_format; retry without it once
@@ -230,6 +237,7 @@ class OpenAICompatProvider:
         schema: Optional[type[BaseModel]] = None,
         temperature: float = 0.2,
         max_tokens: int = 4096,
+        deadline: Optional[float] = None,
     ) -> CompletionResult:
         oai_messages = to_openai_messages(messages)
         if schema is not None:
@@ -243,19 +251,23 @@ class OpenAICompatProvider:
         rate_waits = 0
         while attempt < self.max_attempts:
             attempt += 1
+            if deadline is not None and deadline - time.monotonic() < _MIN_REQUEST_S:
+                raise ProviderError(f"{self.model}: time budget of the generation is spent ({last_err or 'no answer yet'})")
             try:
-                text, usage = self._call(oai_messages, temperature, max_tokens, want_json=schema is not None)
+                text, usage = self._call(oai_messages, temperature, max_tokens, want_json=schema is not None, deadline=deadline)
             except RateLimited as e:
                 if e.daily:
                     _EXHAUSTED.add(self._account)
                     log.warning("provider daily quota spent: deterministic fallbacks from now on (%s)", e)
                     raise
                 last_err = e
+                wait = min(max(e.retry_after or 20.0, 1.0), 65.0)
+                if deadline is not None and deadline - time.monotonic() < wait + _MIN_REQUEST_S:
+                    raise ProviderError(f"{self.model}: time budget of the generation is spent, no room to wait out a 429 ({e})") from e
                 if rate_waits < 6:
                     # a per-minute cap: wait the window out, the attempt does not count
                     rate_waits += 1
                     attempt -= 1
-                    wait = min(max(e.retry_after or 20.0, 1.0), 65.0)
                     log.info("rate limited, waiting %.0f s: %s", wait, str(e)[:160])
                     time.sleep(wait)
                 continue

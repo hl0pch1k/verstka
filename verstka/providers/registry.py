@@ -33,6 +33,9 @@ class ProviderLimits:
     timeout_s: float = 120.0
     max_attempts: int = 3
     requests_per_minute: Optional[int] = None
+    # model time per generation (brief → decks): past it every step falls back to its deterministic twin, so render,
+    # audit and export still fit the 5 minutes a deck may take
+    time_budget_s: float = 240.0
 
 
 @dataclass
@@ -50,6 +53,7 @@ class ProviderRegistry:
             timeout_s=float(limits_cfg.get("timeout_s", 120)),
             max_attempts=int(limits_cfg.get("max_attempts", 3)),
             requests_per_minute=int(limits_cfg["requests_per_minute"]) if limits_cfg.get("requests_per_minute") else None,
+            time_budget_s=float(limits_cfg.get("time_budget_s", 240)),
         )
         roles: dict[str, Provider] = {}
         for role, spec in (cfg.get("roles") or {}).items():
@@ -67,6 +71,11 @@ class ProviderRegistry:
         p = MockProvider(responses or {})
         return cls(roles={"llm": p, "vlm": p, "t2i": p})
 
+    def with_deadline(self, deadline: float) -> "ProviderRegistry":
+        """The same providers bound to one generation's deadline (time.monotonic()); the shared registry stays
+        unbound, so concurrent generations each keep their own budget."""
+        return ProviderRegistry(roles={r: _Deadlined(p, deadline) for r, p in self.roles.items()}, limits=self.limits, config=self.config)
+
     def get(self, role: str) -> Provider:
         if role not in self.roles:
             raise ProviderError(f"no provider configured for role {role!r}; roles: {sorted(self.roles)}")
@@ -77,6 +86,23 @@ class ProviderRegistry:
 
     def describe(self) -> dict[str, dict]:
         return {role: {"backend": p.name, "model": p.model} for role, p in self.roles.items()}
+
+
+class _Deadlined:
+    """A provider whose every call carries the generation's deadline (the tighter one if the caller passes its own)."""
+
+    def __init__(self, inner: Provider, deadline: float) -> None:
+        self.inner = inner
+        self.deadline = deadline
+        self.name = inner.name
+        self.model = inner.model
+
+    def complete(self, messages, *, schema=None, temperature: float = 0.2, max_tokens: int = 4096, deadline: Optional[float] = None):
+        d = self.deadline if deadline is None else min(deadline, self.deadline)
+        return self.inner.complete(messages, schema=schema, temperature=temperature, max_tokens=max_tokens, deadline=d)
+
+    def __getattr__(self, item: str) -> Any:
+        return getattr(self.inner, item)
 
 
 def build_provider(spec: dict, limits: ProviderLimits) -> Provider:

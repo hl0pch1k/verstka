@@ -134,6 +134,10 @@ def generate_variants(
     ta = time.time()
     manifest = analyze_template(template, workspace_root=workspace_root, providers=providers, skills=skills, use_llm=use_llm, use_vlm=use_vlm, force=force_analyze, progress=lambda s, f: report(f"analyze: {s}", 0.15 * f))
     analyze_s = round(time.time() - ta, 2)
+    if providers is not None:
+        # brief → decks gets a fixed model budget: past it every model step takes its deterministic path, so a slow
+        # or congested backend costs quality, never the 5 minutes a deck may take
+        providers = providers.with_deadline(time.monotonic() + providers.limits.time_budget_s)
     ws = TemplateWorkspace.open(manifest.template_id, workspace_root)
     result = GenerateResult(template_id=manifest.template_id, manifest=manifest)
     facts: Optional[FactsExtraction] = None

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any, Callable, Optional, Union
 
 from pydantic import BaseModel, ValidationError
@@ -48,7 +49,10 @@ class MockProvider:
         schema: Optional[type[BaseModel]] = None,
         temperature: float = 0.2,
         max_tokens: int = 4096,
+        deadline: Optional[float] = None,
     ) -> CompletionResult:
+        if deadline is not None and time.monotonic() >= deadline:
+            raise ProviderError("mock provider: time budget of the generation is spent")
         self.calls.append({"messages": messages, "schema": schema.__name__ if schema else None, "n_images": sum(len(m.images) for m in messages)})
         value = self._pick(messages)
         text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)

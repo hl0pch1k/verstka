@@ -54,4 +54,5 @@ class Provider(Protocol):
         schema: Optional[type[BaseModel]] = None,
         temperature: float = 0.2,
         max_tokens: int = 4096,
+        deadline: Optional[float] = None,
     ) -> CompletionResult: ...

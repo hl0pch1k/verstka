@@ -27,3 +27,4 @@ limits:
   max_concurrency: 6
   timeout_s: 120
   max_attempts: 3
+  time_budget_s: 240  # model time per generation; past it the deterministic steps take over (≤5 min per deck)

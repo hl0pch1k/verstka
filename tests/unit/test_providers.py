@@ -70,7 +70,7 @@ def test_rate_limits_wait_per_minute_and_fail_fast_when_the_day_is_spent(monkeyp
     p = oc.OpenAICompatProvider(model="qwen/qwen3.8-27b:free", base_url="https://example.invalid/v1", api_key="sk-test-123456789", max_attempts=2)
     calls = {"n": 0}
 
-    def minute_then_ok(messages, temperature, max_tokens, want_json):
+    def minute_then_ok(messages, temperature, max_tokens, want_json, deadline=None):
         calls["n"] += 1
         if calls["n"] <= 3:
             raise oc.RateLimited("429 rate limit exceeded: free-models-per-min", retry_after=30)
@@ -80,7 +80,7 @@ def test_rate_limits_wait_per_minute_and_fail_fast_when_the_day_is_spent(monkeyp
     assert p.complete([ChatMessage(role="user", content="hi")]).text == "ok"
     assert sleeps == [30, 30, 30] and calls["n"] == 4  # three waits, the two real attempts untouched
 
-    def daily(messages, temperature, max_tokens, want_json):
+    def daily(messages, temperature, max_tokens, want_json, deadline=None):
         raise oc.RateLimited("429 Rate limit exceeded: free-models-per-day", daily=True)
 
     monkeypatch.setattr(p, "_call", daily)
@@ -104,7 +104,7 @@ def test_json_mode_is_dropped_when_the_backend_garbles_it(monkeypatch):
     p = oc.OpenAICompatProvider(model="qwen/qwen3.8-27b:free", base_url="https://example.invalid/v1", api_key="sk-test-json")
     seen: list[bool] = []
 
-    def garbled_in_json_mode(messages, temperature, max_tokens, want_json):
+    def garbled_in_json_mode(messages, temperature, max_tokens, want_json, deadline=None):
         json_mode = want_json and p.json_mode
         seen.append(json_mode)
         if json_mode:
@@ -117,3 +117,37 @@ def test_json_mode_is_dropped_when_the_backend_garbles_it(monkeypatch):
     assert p.complete([ChatMessage(role="user", content="again")], schema=Out).attempts == 1
     assert seen == [True, False, False]  # one wasted call per run, not per request
     assert ProviderRegistry.from_config({"roles": {"llm": {"model": "m", "api_key": "k", "json_mode": False}}}).get("llm").json_mode is False
+
+
+def test_a_generation_deadline_bounds_waits_and_requests(monkeypatch):
+    """≤5 minutes per deck whatever the backend: a registry bound to a deadline never waits out a 429 or starts a
+    request past it; the planner then falls back to its deterministic steps."""
+    import time as _time
+
+    from verstka.providers import openai_compat as oc
+
+    sleeps: list[float] = []
+    monkeypatch.setattr(oc.time, "sleep", lambda s: sleeps.append(s))
+    reg = ProviderRegistry.from_config({"roles": {"llm": {"model": "m", "base_url": "https://example.invalid/v1", "api_key": "sk-deadline"}}, "limits": {"time_budget_s": 90}})
+    assert reg.limits.time_budget_s == 90
+    inner = reg.get("llm")
+    got: dict = {}
+
+    def congested(messages, temperature, max_tokens, want_json, deadline=None):
+        got["deadline"] = deadline
+        raise oc.RateLimited("429 temporarily rate-limited upstream", retry_after=30)
+
+    monkeypatch.setattr(inner, "_call", congested)
+    bound = reg.with_deadline(_time.monotonic() + 10)
+    assert bound.get("llm").model == "m" and reg.get("llm") is inner  # the shared registry stays unbound
+    with pytest.raises(ProviderError, match="time budget"):
+        bound.get("llm").complete([ChatMessage(role="user", content="hi")])
+    assert sleeps == [] and got["deadline"] is not None  # no 30 s wait with 10 s left
+
+    calls = {"n": 0}
+    monkeypatch.setattr(inner, "_call", lambda *a, **k: calls.__setitem__("n", calls["n"] + 1))
+    with pytest.raises(ProviderError, match="time budget"):
+        reg.with_deadline(_time.monotonic() - 1).get("llm").complete([ChatMessage(role="user", content="hi")])
+    assert calls["n"] == 0  # nothing is sent once the budget is spent
+    with pytest.raises(ProviderError, match="time budget"):
+        ProviderRegistry.mock({}).with_deadline(_time.monotonic() - 1).get("llm").complete([ChatMessage(role="user", content="hi")])
