@@ -6,7 +6,7 @@ from __future__ import annotations
 from collections import Counter
 from typing import Optional
 
-from verstka.ru import ru_count
+from verstka.ru import TYPE_ROLE_RU, ru_count, ru_num
 from verstka.schemas.audit import AuditReport
 from verstka.schemas.layout import LayoutPlan
 from verstka.schemas.outline import DeckOutline
@@ -24,16 +24,13 @@ def kind_ru(kind: str) -> str:
     return _KIND_RU.get(kind, kind)
 
 
-_SCALE_RU = {"display": "обложка", "h1": "заголовок", "h2": "подзаголовок", "h3": "заголовок блока", "body": "текст", "small": "мелкий текст", "caption": "подпись"}
-
-
 def describe_template(m: TemplateManifest) -> str:
     t = m.tokens
     kinds = Counter(p.kind.value for p in m.patterns)
     top = ", ".join(f"{kind_ru(k)} ×{v}" for k, v in kinds.most_common(6))
     fonts = [f.family for f in t.typography.families[:2]]
     accents = ", ".join("#" + a for a in t.accents()[:3])
-    scale = ", ".join(f"{_SCALE_RU.get(s.role, s.role)} {s.size_pt:g} пт" for s in t.typography.scale)
+    scale = ", ".join(f"{TYPE_ROLE_RU.get(s.role, s.role)} {ru_num(s.size_pt)} пт" for s in t.typography.scale)
     fam = Counter(p.family.value for p in m.patterns)
     dark = fam.get("dark", 0) > fam.get("light", 0)
     look = f"Оформление {'тёмное' if dark else 'светлое'}"
@@ -41,11 +38,8 @@ def describe_template(m: TemplateManifest) -> str:
         look += f", {'шрифт' if len(fonts) == 1 else 'шрифты'} {', '.join(fonts)}"
     if accents:
         look += f", акцентные цвета {accents}"
-    lines = [
-        f"Разобрал шаблон «{m.source_file}»: {ru_count(m.n_slides, 'слайд', 'слайда', 'слайдов')}, из них "
-        f"{ru_count(len(m.patterns), 'подходит', 'подходят', 'подходят')} как образцы для новых слайдов.",
-        look + ".",
-    ]
+    usable = "все подходят" if len(m.patterns) >= m.n_slides else f"из них {ru_count(len(m.patterns), 'подходит', 'подходят', 'подходят')}"
+    lines = [f"Разобрал шаблон «{m.source_file}»: {ru_count(m.n_slides, 'слайд', 'слайда', 'слайдов')}, {usable} как образцы для новых слайдов.", look + "."]
     if scale:
         lines.append(f"Размеры шрифтов: {scale}.")
     if top:

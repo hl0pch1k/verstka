@@ -111,6 +111,18 @@ def layout_not_from_template(ctx: AuditContext) -> list[Issue]:
     return out
 
 
+def _chrome_name(c) -> str:
+    """What a person calls a repeated template element: a logo, the slide number, a caption."""
+    text = (c.text or "").strip()
+    if c.kind == "pic":
+        return "логотип или картинка шаблона"
+    if text.isdigit():
+        return "номер слайда"
+    if text:
+        return f"надпись шаблона «{text[:30]}»"
+    return "элемент оформления шаблона"
+
+
 @check(CHROME_MOVED)
 def chrome_moved(ctx: AuditContext) -> list[Issue]:
     out: list[Issue] = []
@@ -127,7 +139,7 @@ def chrome_moved(ctx: AuditContext) -> list[Issue]:
                     present = True
                     break
             if not present:
-                out.append(ctx.new_issue(CHROME_MOVED, s.index, f"элемент шаблона «{c.text or c.kind}» отсутствует или сдвинут", bboxes=[c.bbox], severity="info"))
+                out.append(ctx.new_issue(CHROME_MOVED, s.index, f"{_chrome_name(c)} отсутствует или стоит не на своём месте", bboxes=[c.bbox], severity="info"))
     return out
 
 

@@ -11,6 +11,7 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
+from verstka.analysis.rules import with_fresh_derived_rules
 from verstka.ingest.workspace import SAFE_ID_RE, TemplateWorkspace, default_workspace_root
 from verstka.schemas.template import TemplateManifest
 
@@ -94,7 +95,7 @@ class Store:
             return None
         if not ws.is_analyzed:
             return None
-        return TemplateManifest.model_validate_json(ws.manifest_path.read_text(encoding="utf-8"))
+        return with_fresh_derived_rules(TemplateManifest.model_validate_json(ws.manifest_path.read_text(encoding="utf-8")))
 
     def workspace(self, template_id: str) -> TemplateWorkspace:
         """Raises FileNotFoundError for unknown and for malformed ids."""

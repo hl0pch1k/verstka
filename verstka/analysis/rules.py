@@ -10,7 +10,8 @@ from pydantic import BaseModel, Field
 
 from verstka.providers.base import ProviderError
 from verstka.providers.registry import ProviderRegistry
-from verstka.schemas.template import StyleRule, Tokens
+from verstka.ru import TYPE_ROLE_RU, ru_num
+from verstka.schemas.template import StyleRule, TemplateManifest, Tokens
 from verstka.skills_registry.registry import SkillsRegistry
 
 log = logging.getLogger(__name__)
@@ -51,25 +52,31 @@ def derived_rules(tokens: Tokens) -> list[StyleRule]:
     typo = tokens.typography
     if typo.families:
         main = [f.family for f in typo.families if f.weight >= 0.05][:2] or [typo.families[0].family]
-        rules.append(StyleRule(text=f"Шрифты шаблона: {', '.join(main)}. Другие гарнитуры не использовать.", source="derived"))
+        rules.append(StyleRule(text=f"Шрифты шаблона: {', '.join(main)}. Другие шрифты не использовать.", source="derived"))
     if typo.left_align_share >= 0.8:
         rules.append(StyleRule(text="Текст выравнивается по левому краю (исключения: схемы и таблицы).", source="derived", confidence=round(typo.left_align_share, 2)))
     elif typo.left_align_share <= 0.4:
         rules.append(StyleRule(text="Текст в шаблоне преимущественно центрирован.", source="derived", confidence=round(1 - typo.left_align_share, 2)))
     if typo.scale:
-        steps = ", ".join(f"{s.role} {s.size_pt:g} pt" for s in typo.scale)
-        rules.append(StyleRule(text=f"Шкала кеглей: {steps}. Кегли вне шкалы не использовать.", source="derived"))
+        steps = ", ".join(f"{TYPE_ROLE_RU.get(s.role, s.role)} {ru_num(s.size_pt)} пт" for s in typo.scale)
+        rules.append(StyleRule(text=f"Размеры шрифтов: {steps}. Другие размеры не использовать.", source="derived"))
     accents = tokens.accents()
     if accents:
         rules.append(StyleRule(text=f"Акцентные цвета по приоритету: {', '.join('#' + a for a in accents)}.", source="derived"))
     tp = tokens.color_for("text.primary")
     if tp:
-        rules.append(StyleRule(text=f"Основной цвет текста #{tp}.", source="derived"))
+        rules.append(StyleRule(text=f"Основной цвет текста — #{tp}.", source="derived"))
     if tokens.shapes.corner_radius_share >= 0.6 and tokens.shapes.typical_radius:
         rules.append(StyleRule(text="Карточки и блоки со скруглёнными углами.", source="derived", confidence=round(tokens.shapes.corner_radius_share, 2)))
     if tokens.shapes.shadow_share <= 0.05:
         rules.append(StyleRule(text="Тени не используются; границы блоков задаются заливкой или тонким контуром.", source="derived", confidence=0.7))
     return rules
+
+
+def with_fresh_derived_rules(m: TemplateManifest) -> TemplateManifest:
+    """Derived rules are a pure function of the tokens: recompute them on load, so cached manifests use today's wording."""
+    m.style_rules = derived_rules(m.tokens) + [r for r in m.style_rules if r.source != "derived"]
+    return m
 
 
 def harvest_rules(

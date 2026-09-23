@@ -20,7 +20,7 @@ from verstka.analysis.components import derive_components
 from verstka.analysis.gallery import write_gallery, write_thumbnails
 from verstka.analysis.groups import detect_repeat_groups
 from verstka.analysis.patterns import build_pattern, dedupe_patterns
-from verstka.analysis.rules import harvest_rules
+from verstka.analysis.rules import harvest_rules, with_fresh_derived_rules
 from verstka.analysis.shapes import ShapeInfo, SlideContext, extract_shapes, slide_background, slide_family
 from verstka.analysis.spacing import compute_spacing
 from verstka.analysis.typography import build_type_scale
@@ -147,7 +147,7 @@ def analyze_template(
         cached = TemplateManifest.model_validate_json(ws.manifest_path.read_text(encoding="utf-8"))
         if cached.analysis_version == TemplateManifest.model_fields["analysis_version"].default:
             report("loaded cached manifest", 1.0)
-            return cached
+            return with_fresh_derived_rules(cached)
         log.info("cached manifest has analysis_version %s, re-analyzing", cached.analysis_version)
 
     warnings: list[str] = []
