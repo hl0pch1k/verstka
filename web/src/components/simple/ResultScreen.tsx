@@ -26,9 +26,9 @@ const isEditable = (el: EventTarget | null) => {
 
 function MoreLink({ icon: Icon, label, hint, onClick }: { icon: LucideIcon; label: string; hint: string; onClick(): void }) {
   return (
-    <button type="button" onClick={onClick} className="group flex w-full cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/30">
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-zinc-100 text-zinc-600 transition-colors group-hover:bg-white">
-        <Icon className="h-[18px] w-[18px]" aria-hidden />
+    <button type="button" onClick={onClick} className="group flex w-full cursor-pointer items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/30">
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-zinc-100 text-zinc-600 transition-colors group-hover:bg-white">
+        <Icon className="h-4 w-4" aria-hidden />
       </span>
       <span className="min-w-0 flex-1">
         <span className="block text-[13px] font-semibold text-zinc-900">{label}</span>
