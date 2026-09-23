@@ -66,3 +66,32 @@ def test_tables_become_series_only_when_they_are_charts():
 def test_ranges_are_one_figure():
     got = {k.value: k.label for s in ["Три варианта собираются за 8–25 секунд на шаблон.", "Оценка аудита 88–100 из 100."] for k in kpis_of(s)}
     assert "8–25 с" in got and got["88–100"] == "оценка аудита"
+
+
+def test_plain_briefs_without_markdown_get_a_title_and_sections():
+    """Juries paste briefs as plain paragraphs: «Проблема: …», a lead line before a table, a closing ask. The first
+    line becomes the title, labelled paragraphs become sections; step lines stay inside their section."""
+    text = (
+        "Запуск функции «Умные сводки» в VK WorkSpace: итоги пилота за Q2 2026 и план масштабирования.\n\n"
+        "Проблема: сотрудники тратят 47 минут в день на чтение чатов. 38% сообщений не читают.\n\n"
+        "Решение: автоматическое резюме непрочитанных веток.\n\n"
+        "Результаты пилота (12 команд, 8 недель):\n\n| Метрика | До | После |\n|---|---|---|\n| Время, мин | 47 | 29 |\n\n"
+        "Дорожная карта: Q3 — раскатка на 30%, Q4 — сводки по звонкам.\n"
+        "Этап 1: пилот.\nЭтап 2: раскатка.\n\n"
+        "Просим одобрить бюджет 14,5 млн ₽ на второе полугодие."
+    )
+    title, secs = parse_sections(text)
+    assert title == "Запуск функции «Умные сводки» в VK WorkSpace"
+    assert [s.title for s in secs] == ["Проблема", "Решение", "Результаты пилота", "Дорожная карта", "Что просим"]
+    assert secs[0].sentences == ["Сотрудники тратят 47 минут в день на чтение чатов.", "38% сообщений не читают."]
+    assert secs[2].tables[0].caption == "Результаты пилота (12 команд, 8 недель)" and not secs[2].sentences
+    assert "Этап 1: пилот." in secs[3].sentences
+    # markdown briefs keep their own structure; a lone paragraph is not taken for a title
+    assert parse_sections("# Отчёт\n\nПроблема: всё медленно.\n\n## Итоги\n\nВсё выросло.")[1][0].title == ""
+    assert parse_sections("Одна мысль без структуры, но достаточно длинная для брифа.")[0] is None
+
+
+def test_a_roadmap_in_one_line_is_a_process():
+    steps, rest = steps_of(["Q3 — раскатка на 30% компании; Q4 — сводки по звонкам; Q1 2027 — сводки по проектам.", "Команда: 6 человек."])
+    assert [s.title for s in steps] == ["Q3", "Q4", "Q1 2027"] and steps[2].text == "Сводки по проектам" and rest == ["Команда: 6 человек."]
+    assert steps_of(["Сделали A; сделали B; сделали C."]) == ([], ["Сделали A; сделали B; сделали C."])

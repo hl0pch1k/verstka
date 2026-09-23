@@ -109,17 +109,70 @@ class Section:
     table_leads: list[str] = field(default_factory=list)  # the line right before each table («Динамика …:»)
 
 
+_PARA_LABEL_RE = re.compile(r"^(?P<label>[A-ZА-ЯЁ][^:.;!?\d]{1,40}?)\s*:\s+(?P<text>\S.*)$")
+_ASK_RE = re.compile(r"^(просим|прошу|предлагаем утвердить|предлагаем одобрить|нужно решение|решение, которое)", re.I)
+
+
+def _plain_title(par: str) -> str:
+    """The first line of a plain brief as the deck title: «Тема: уточнение» keeps the theme when both halves are real."""
+    t = strip_end(par)
+    head, sep, tail = t.partition(": ")
+    if sep and 2 <= len(head.split()) and len(tail.split()) >= 2 and len(head) <= 90:
+        return head.strip()
+    return t
+
+
+def _plain_sections(lines: list[str]) -> tuple[Optional[str], dict[int, str], set[int]]:
+    """Structure of a brief written as plain paragraphs (no markdown headings): the title line, section titles by
+    line index («Проблема: …», a «Результаты пилота (…):» lead, a closing «Просим …»), lines to drop (the title)."""
+    starts = [i for i, ln in enumerate(lines) if ln.strip() and (i == 0 or not lines[i - 1].strip())]
+    heads: dict[int, str] = {}
+    for i in starts:
+        s = lines[i].strip()
+        if _TABLE_ROW_RE.match(lines[i]) or _STEP_RE.match(s):
+            continue
+        m = _PARA_LABEL_RE.match(s)
+        if m and len(m.group("label").split()) <= 5:
+            heads[i] = cap_first(m.group("label").strip())
+        elif s.endswith(":") and len(s.split()) <= 12:
+            heads[i] = cap_first(strip_end(re.sub(r"\s*\([^)]*\)", "", s)))
+        elif _ASK_RE.match(s) and heads:
+            heads[i] = "Что просим"
+    title: Optional[str] = None
+    drop: set[int] = set()
+    first = starts[0] if starts else None
+    if first is not None and first not in heads and len(starts) >= 3 and len(lines[first].strip()) <= 200 and len(split_sentences(lines[first])) <= 1:
+        title = _plain_title(lines[first].strip())
+        drop.add(first)
+    return title, heads, drop
+
+
 def parse_sections(text: str) -> tuple[Optional[str], list[Section]]:
-    """(# title, [## sections]) — paragraphs become sentences, markdown tables are parsed with their lead line."""
+    """(# title, [## sections]) — paragraphs become sentences, markdown tables are parsed with their lead line.
+    A brief without markdown headings is read by paragraphs: first line → title, «Метка: …» → section."""
     title: Optional[str] = None
     sections: list[Section] = []
     cur: Optional[Section] = None
     lines = text.splitlines()
+    plain_heads: dict[int, str] = {}
+    drop: set[int] = set()
+    if not any(ln.lstrip().startswith("#") for ln in lines):
+        title, plain_heads, drop = _plain_sections(lines)
     i = 0
     last_text = ""
     while i < len(lines):
         raw = lines[i]
         s = raw.strip()
+        if i in drop:
+            i += 1
+            continue
+        if i in plain_heads:
+            cur = Section(title=plain_heads[i])
+            sections.append(cur)
+            m = _PARA_LABEL_RE.match(s)
+            if m and cap_first(m.group("label").strip()) == plain_heads[i]:
+                s = cap_first(m.group("text").strip())
+                raw = s
         if s.startswith("#"):
             level = len(s) - len(s.lstrip("#"))
             head = s.lstrip("#").strip()
@@ -173,15 +226,19 @@ class Item:
 
 
 def steps_of(sentences: list[str]) -> tuple[list[Item], list[str]]:
-    """«Неделя 1: …», «Этап 2, месяц 3–4: …», «Далее: …» → ordered steps; the rest is returned untouched."""
+    """«Неделя 1: …», «Этап 2, месяц 3–4: …», «Далее: …» → ordered steps; the rest is returned untouched. A roadmap
+    written in one line («Q3 — …; Q4 — …; Q1 2027 — …») counts too when every «;» part is a step."""
     steps: list[Item] = []
     rest: list[str] = []
     for s in sentences:
-        m = _STEP_RE.match(s.strip())
-        if m:
-            steps.append(Item(title=cap_first(strip_end(m.group("marker"))), text=cap_first(strip_end(m.group("text")))))
-        else:
-            rest.append(s)
+        parts = [p.strip() for p in s.split(";") if p.strip()]
+        inline = len(parts) > 1 and all(_STEP_RE.match(p) for p in parts)
+        for part in parts if inline else [s]:
+            m = _STEP_RE.match(part.strip())
+            if m:
+                steps.append(Item(title=cap_first(strip_end(m.group("marker"))), text=cap_first(strip_end(m.group("text")))))
+            else:
+                rest.append(part)
     if len(steps) < 3:
         return [], sentences
     return steps, rest
