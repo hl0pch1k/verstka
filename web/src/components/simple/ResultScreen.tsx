@@ -65,6 +65,14 @@ function Deck({ generation }: { generation: Generation }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [selectedSlide, total, setSelectedSlide]);
 
+  // warm the cache with the neighbours: ← and → show the next slide at once
+  useEffect(() => {
+    for (const n of [selectedSlide + 1, selectedSlide - 1]) {
+      const url = variant.slides[n - 1];
+      if (url) new Image().src = withRev(url, rev);
+    }
+  }, [selectedSlide, variant, rev]);
+
   const outlineSlide = variant.outline?.slides[selectedSlide - 1] ?? null;
   const raw = variant.slides[selectedSlide - 1];
   const src = raw ? withRev(raw, rev) : null;

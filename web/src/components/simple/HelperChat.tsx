@@ -1,6 +1,7 @@
 // The assistant as every site's support chat: a round button in the corner, a chat window above it.
 import { useEffect, useState } from "react";
 import { MessageCircle, X } from "lucide-react";
+import { usePresence } from "../../lib/motion";
 import { cn } from "../../lib/utils";
 import { useApp } from "../../store";
 import { Chat } from "../Chat";
@@ -14,14 +15,17 @@ export function HelperChat() {
     if (agentOpen) setSeen(replies);
   }, [agentOpen, replies]);
   const unread = agentOpen ? 0 : Math.max(0, replies - seen);
+  const { mounted, leaving } = usePresence(agentOpen, 150);
 
   return (
     <>
       <div
         aria-label="Помощник Verstka"
+        // the chat stays mounted while hidden: a half-written message survives closing the window
         className={cn(
-          "fixed bottom-24 right-6 z-40 h-[min(640px,calc(100vh-128px))] w-[400px] flex-col overflow-hidden rounded-3xl bg-white shadow-pop",
-          agentOpen ? "flex animate-fade-in" : "hidden",
+          "fixed bottom-24 right-6 z-40 h-[min(640px,calc(100vh-128px))] w-[400px] origin-bottom-right flex-col overflow-hidden rounded-3xl bg-white shadow-pop",
+          mounted ? "flex" : "hidden",
+          mounted && (leaving ? "animate-scale-out" : "animate-scale-in"),
         )}
       >
         <Chat onClose={() => setAgentOpen(false)} />
@@ -35,10 +39,12 @@ export function HelperChat() {
           agentOpen ? "bg-zinc-900" : "bg-accent",
         )}
       >
-        {agentOpen ? <X className="h-5 w-5" aria-hidden /> : <MessageCircle className="h-5 w-5" aria-hidden />}
+        <span key={agentOpen ? "x" : "chat"} className="animate-pop">
+          {agentOpen ? <X className="h-5 w-5" aria-hidden /> : <MessageCircle className="h-5 w-5" aria-hidden />}
+        </span>
         {agentOpen ? "Закрыть" : "Помощник"}
         {unread > 0 && (
-          <span className="absolute -right-1 -top-1 flex h-6 min-w-6 items-center justify-center rounded-full bg-red-500 px-1.5 text-xs font-bold ring-2 ring-canvas">{unread}</span>
+          <span key={unread} className="absolute -right-1 -top-1 flex h-6 min-w-6 animate-pop items-center justify-center rounded-full bg-red-500 px-1.5 text-xs font-bold ring-2 ring-canvas">{unread}</span>
         )}
       </button>
     </>

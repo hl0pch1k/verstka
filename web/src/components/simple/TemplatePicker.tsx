@@ -28,7 +28,7 @@ function Cover({ t, selected, onPick }: { t: TemplateListItem; selected: boolean
           <span className="flex h-full items-center justify-center text-zinc-400"><ImageOff className="h-6 w-6" aria-hidden /></span>
         )}
         {selected && (
-          <span className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-accent text-white shadow-glow" aria-hidden>
+          <span className="absolute right-2 top-2 flex h-7 w-7 animate-pop items-center justify-center rounded-full bg-accent text-white shadow-glow" aria-hidden>
             <Check className="h-4 w-4" strokeWidth={3} />
           </span>
         )}

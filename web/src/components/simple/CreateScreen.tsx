@@ -1,7 +1,7 @@
 // The first screen: ① choose a template, ② say what the deck is about, one button. Everything else (purpose,
 // variants of layout, the model) waits behind «Дополнительные настройки». The draft survives reloads.
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
-import { ChevronDown, FileText, Minus, Paperclip, Plus, Sparkles } from "lucide-react";
+import { Check, ChevronDown, FileText, Minus, Paperclip, Plus, ShieldCheck, Sparkles, Unlock, Wand2 } from "lucide-react";
 import { errText } from "../../lib/narrate";
 import { cn, LS, plural, storage } from "../../lib/utils";
 import { useApp } from "../../store";
@@ -28,11 +28,16 @@ function loadDraft(): Draft {
   }
 }
 
-function Step({ n, title, hint, done, children }: { n: number; title: string; hint: string; done: boolean; children: ReactNode }) {
+function Step({ n, title, hint, done, delay, children }: { n: number; title: string; hint: string; done: boolean; delay: number; children: ReactNode }) {
   return (
-    <section className="rounded-3xl bg-white p-7 shadow-card">
+    <section className="animate-rise rounded-3xl bg-white p-7 shadow-card" style={{ animationDelay: `${delay}ms` }}>
       <div className="mb-5 flex items-start gap-4">
-        <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[15px] font-bold transition-colors", done ? "bg-accent text-white" : "bg-accent-50 text-accent")}>{n}</span>
+        <span
+          className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[15px] font-bold transition-colors duration-300", done ? "bg-accent text-white" : "bg-accent-50 text-accent")}
+          aria-label={done ? `Шаг ${n} готов` : `Шаг ${n}`}
+        >
+          {done ? <Check key="done" className="h-[18px] w-[18px] animate-pop" strokeWidth={3} aria-hidden /> : n}
+        </span>
         <div>
           <h2 className="text-xl font-bold tracking-tight text-zinc-900">{title}</h2>
           <p className="mt-0.5 text-sm text-zinc-500">{hint}</p>
@@ -141,18 +146,30 @@ export function CreateScreen() {
 
   return (
     <form onSubmit={(e) => void onSubmit(e)} noValidate className="mx-auto max-w-[980px] space-y-6 pb-10">
-      <div className="pb-2 pt-4 text-center">
+      <div className="animate-rise pb-2 pt-4 text-center">
         <h1 className="text-[40px] font-bold leading-[48px] tracking-tight text-zinc-900">Презентация в стиле вашего шаблона</h1>
         <p className="mx-auto mt-3 max-w-2xl text-[17px] leading-7 text-zinc-500">
           Выберите фирменный шаблон и напишите, о чём рассказать. Verstka соберёт три варианта — их можно скачать и править в PowerPoint.
         </p>
+        <ul className="mt-5 flex flex-wrap items-center justify-center gap-2 text-[13px] font-medium text-zinc-600">
+          {[
+            { icon: Wand2, text: "Редактируемый PowerPoint, не картинки" },
+            { icon: ShieldCheck, text: "Проверка качества каждого слайда" },
+            { icon: Unlock, text: "Только открытые модели" },
+          ].map(({ icon: Icon, text }) => (
+            <li key={text} className="flex items-center gap-1.5 rounded-full bg-white/80 px-3 py-1.5 shadow-card">
+              <Icon className="h-3.5 w-3.5 text-accent" aria-hidden />
+              {text}
+            </li>
+          ))}
+        </ul>
       </div>
 
-      <Step n={1} title="Выберите шаблон" hint="Фирменный шаблон PowerPoint — по нему будут оформлены слайды" done={!!templateId && !manifestLoading}>
+      <Step n={1} title="Выберите шаблон" hint="Фирменный шаблон PowerPoint — по нему будут оформлены слайды" done={!!templateId && !manifestLoading} delay={60}>
         <TemplatePicker />
       </Step>
 
-      <Step n={2} title="О чём презентация" hint="Тезисы, цифры и таблицы — всё попадёт на слайды, заголовки станут выводами" done={briefLen >= BRIEF_MIN}>
+      <Step n={2} title="О чём презентация" hint="Тезисы, цифры и таблицы — всё попадёт на слайды, заголовки станут выводами" done={briefLen >= BRIEF_MIN} delay={120}>
         <textarea
           ref={briefRef}
           id="brief"
@@ -167,7 +184,7 @@ export function CreateScreen() {
           )}
         />
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <Button size="sm" variant="tonal" icon={FileText} disabled={busy} onClick={fillSample}>Вставить пример</Button>
+          {briefLen === 0 && <Button size="sm" variant="tonal" icon={FileText} disabled={busy} onClick={fillSample} className="animate-fade">Вставить пример</Button>}
           <input ref={fileRef} type="file" accept=".md,.txt,.markdown,text/markdown,text/plain" className="hidden" onChange={(e) => void onFile(e)} />
           <Button size="sm" variant="ghost" icon={Paperclip} disabled={busy} onClick={() => fileRef.current?.click()}>Загрузить из файла</Button>
           <span className={cn("ml-auto text-xs tabular-nums", briefLen > 0 && briefLen < BRIEF_MIN ? "text-amber-600" : "text-zinc-400")}>
@@ -278,8 +295,9 @@ export function CreateScreen() {
         )}
       </Step>
 
-      <div className="flex flex-col items-center gap-3 pt-2">
-        <Button type="submit" variant="primary" size="lg" icon={Sparkles} loading={busy} className="h-14 rounded-2xl px-10 text-[17px] shadow-glow">
+      <div className="flex animate-rise flex-col items-center gap-3 pt-2" style={{ animationDelay: "180ms" }}>
+        <Button type="submit" variant="primary" size="lg" icon={Sparkles} loading={busy} className="group relative h-14 overflow-hidden rounded-2xl px-10 text-[17px] shadow-glow hover:shadow-[0_12px_32px_rgba(0,119,255,0.38)]">
+          <span className="pointer-events-none absolute inset-y-0 left-0 w-1/3 -translate-x-[120%] bg-gradient-to-r from-transparent via-white/30 to-transparent group-hover:animate-sheen" aria-hidden />
           Создать презентацию
         </Button>
         <p className={cn("text-sm", showErrors && problem ? "font-semibold text-red-600" : "text-zinc-500")} role={showErrors && problem ? "alert" : undefined}>

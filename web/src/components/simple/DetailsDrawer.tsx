@@ -2,7 +2,9 @@
 // person who only needs the deck: the quality check, why a slide looks so, the plan, the template, files and runs.
 import { useEffect, useRef, type ComponentType } from "react";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
+import { usePresence } from "../../lib/motion";
 import { slideCount } from "../../lib/narrate";
+import { cn } from "../../lib/utils";
 import { useApp } from "../../store";
 import type { DetailKey } from "../../types";
 import { AuditPanel } from "../AuditPanel";
@@ -70,6 +72,11 @@ export function DetailsDrawer() {
   const hasDeck = screen === "result" && !!generation && generation.variants.length > 0;
   const tabs = TABS.filter((t) => hasDeck || !t.needsDeck);
   const current = tabs.find((t) => t.key === detail) ?? null;
+  // the closing drawer keeps showing its last tab while it slides out
+  const { mounted, leaving } = usePresence(!!current, 170);
+  const last = useRef(current);
+  if (current) last.current = current;
+  const shown = current ?? last.current;
 
   useEffect(() => {
     if (!current) return;
@@ -79,15 +86,15 @@ export function DetailsDrawer() {
     return () => window.removeEventListener("keydown", onKey);
   }, [current, setDetail]);
 
-  if (!current) return null;
-  const View = current.view;
+  if (!mounted || !shown) return null;
+  const View = shown.view;
   return (
-    <div className="fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label="Подробнее">
-      <div className="absolute inset-0 bg-ink/40 backdrop-blur-[2px] animate-fade" onClick={() => setDetail(null)} aria-hidden />
-      <div className="absolute inset-y-0 right-0 flex w-[min(920px,94vw)] flex-col bg-canvas shadow-pop animate-slide-in-right">
+    <div className={cn("fixed inset-0 z-50", leaving && "pointer-events-none")} role="dialog" aria-modal="true" aria-label="Подробнее">
+      <div className={cn("absolute inset-0 bg-ink/40 backdrop-blur-[2px]", leaving ? "animate-fade-out" : "animate-fade")} onClick={() => setDetail(null)} aria-hidden />
+      <div className={cn("absolute inset-y-0 right-0 flex w-[min(920px,94vw)] flex-col bg-canvas shadow-pop", leaving ? "animate-slide-out-right" : "animate-slide-in-right")}>
         <header className="flex shrink-0 items-center gap-4 bg-white px-6 py-4 shadow-[0_1px_0_rgba(0,16,61,0.06)]">
           {tabs.length > 1 ? (
-            <Tabs variant="pills" value={current.key} onChange={setDetail} items={tabs.map((t) => ({ key: t.key, label: t.label }))} />
+            <Tabs variant="pills" value={shown.key} onChange={setDetail} items={tabs.map((t) => ({ key: t.key, label: t.label }))} />
           ) : (
             <h2 className="text-lg font-bold text-zinc-900">Что Verstka поняла из шаблона</h2>
           )}
@@ -101,7 +108,7 @@ export function DetailsDrawer() {
             <X className="h-5 w-5" aria-hidden />
           </button>
         </header>
-        <div key={current.key} className="scroll-thin min-h-0 flex-1 overflow-y-auto px-6 py-6 animate-fade-in">
+        <div key={shown.key} className="scroll-thin min-h-0 flex-1 overflow-y-auto px-6 py-6 animate-fade-in">
           <View />
         </div>
       </div>

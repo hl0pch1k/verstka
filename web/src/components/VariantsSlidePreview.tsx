@@ -130,8 +130,13 @@ export function VariantsSlidePreview({ src, slide, total, headline, kind, issues
           // the slide shrinks with the window height so the thumbnails under it stay on screen
           style={{ aspectRatio: String(aspect), width: `min(100%, max(560px, calc((100vh - 460px) * ${aspect.toFixed(4)})))` }}
         >
+          {/* the previous slide stays under the next one until it has loaded: no flash of a placeholder */}
+          {loading && loadedSrc && loadedSrc !== src && (
+            <img src={loadedSrc} alt="" aria-hidden draggable={false} className="absolute inset-0 h-full w-full object-contain" />
+          )}
           {src && !failed && (
             <img
+              key={src}
               src={src}
               alt={`Слайд ${slide}${headline ? `: ${headline}` : ""}`}
               draggable={false}
@@ -142,10 +147,10 @@ export function VariantsSlidePreview({ src, slide, total, headline, kind, issues
                 setLoadedSrc(src);
               }}
               onError={() => setFailedSrc(src)}
-              className={cn("absolute inset-0 h-full w-full object-contain transition-opacity duration-200", loading ? "opacity-0" : "opacity-100")}
+              className={cn("absolute inset-0 h-full w-full object-contain transition-opacity duration-200 ease-out", loading ? "opacity-0" : "opacity-100")}
             />
           )}
-          {loading && <div className="skeleton absolute inset-0 rounded-none" aria-hidden />}
+          {loading && !loadedSrc && <div className="skeleton absolute inset-0 rounded-none" aria-hidden />}
           {failed && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-8 text-center text-zinc-400">
               <ImageOff className="h-6 w-6" aria-hidden />

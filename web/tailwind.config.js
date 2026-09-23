@@ -44,8 +44,10 @@ export default {
         canvas: "#F2F3F5",
       },
       fontFamily: {
-        sans: ["Onest", "VK Sans Display", "ui-sans-serif", "system-ui", "-apple-system", "Segoe UI", "Roboto", "Helvetica Neue", "Arial", "sans-serif"],
-        display: ["Onest", "VK Sans Display", "ui-sans-serif", "system-ui", "-apple-system", "sans-serif"],
+        // VK Sans is VK's own typeface (TypeType, not openly licensed): used when installed on the machine, otherwise
+        // Onest — the closest open grotesque with a full Cyrillic set — loaded from Google Fonts
+        sans: ["VK Sans Text", "VK Sans Display", "Onest", "ui-sans-serif", "system-ui", "-apple-system", "Segoe UI", "Roboto", "Helvetica Neue", "Arial", "sans-serif"],
+        display: ["VK Sans Display", "Onest", "ui-sans-serif", "system-ui", "-apple-system", "sans-serif"],
         mono: ["JetBrains Mono", "ui-monospace", "SFMono-Regular", "Menlo", "Consolas", "monospace"],
       },
       fontSize: {
@@ -68,6 +70,13 @@ export default {
         shimmer: { "0%": { backgroundPosition: "-200% 0" }, "100%": { backgroundPosition: "200% 0" } },
         "pulse-ring": { "0%": { transform: "scale(0.9)", opacity: "0.7" }, "100%": { transform: "scale(1.6)", opacity: "0" } },
         sweep: { "0%": { transform: "translateX(-100%)" }, "100%": { transform: "translateX(100%)" } },
+        pop: { "0%": { transform: "scale(0.4)", opacity: "0" }, "60%": { transform: "scale(1.12)", opacity: "1" }, "100%": { transform: "scale(1)" } },
+        "scale-in": { from: { opacity: "0", transform: "translateY(12px) scale(0.96)" }, to: { opacity: "1", transform: "translateY(0) scale(1)" } },
+        "scale-out": { from: { opacity: "1", transform: "translateY(0) scale(1)" }, to: { opacity: "0", transform: "translateY(12px) scale(0.96)" } },
+        "fade-out": { from: { opacity: "1" }, to: { opacity: "0" } },
+        "slide-out-right": { from: { opacity: "1", transform: "translateX(0)" }, to: { opacity: "0", transform: "translateX(32px)" } },
+        rise: { from: { opacity: "0", transform: "translateY(16px)" }, to: { opacity: "1", transform: "translateY(0)" } },
+        sheen: { "0%": { transform: "translateX(-120%) skewX(-20deg)" }, "100%": { transform: "translateX(220%) skewX(-20deg)" } },
       },
       animation: {
         "fade-in": "fade-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1)",
@@ -76,6 +85,13 @@ export default {
         shimmer: "shimmer 1.6s linear infinite",
         "pulse-ring": "pulse-ring 1.6s cubic-bezier(0.2, 0.8, 0.2, 1) infinite",
         sweep: "sweep 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite",
+        pop: "pop 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both",
+        "scale-in": "scale-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both",
+        "scale-out": "scale-out 150ms ease-in both",
+        "fade-out": "fade-out 150ms ease-in both",
+        "slide-out-right": "slide-out-right 160ms ease-in both",
+        rise: "rise 420ms cubic-bezier(0.2, 0.8, 0.2, 1) both",
+        sheen: "sheen 900ms cubic-bezier(0.4, 0, 0.2, 1)",
       },
     },
   },

@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { WifiOff } from "lucide-react";
 import { Header } from "./components/shell/Header";
 import { CreateScreen } from "./components/simple/CreateScreen";
@@ -10,7 +11,14 @@ import { useApp } from "./store";
 // Two screens a person understands without a manual — «Создать» and «Результат» — plus the «Подробнее» drawer
 // for the expert views and the helper chat in the corner.
 export default function App() {
-  const { healthError, screen } = useApp();
+  const { healthError, screen, generation, activeJob } = useApp();
+  const building = !!activeJob && activeJob.kind === "generate" && (activeJob.status === "queued" || activeJob.status === "running");
+  const deckTitle = generation?.variants[0]?.outline?.title;
+  useEffect(() => {
+    document.title = building
+      ? `Готовлю презентацию ${Math.round((activeJob?.progress ?? 0) * 100)}% · Verstka`
+      : screen === "result" && deckTitle ? `${deckTitle} · Verstka` : "Verstka — презентации в стиле вашего шаблона";
+  }, [building, activeJob?.progress, screen, deckTitle]);
 
   return (
     <div className="flex h-full min-h-0 flex-col">

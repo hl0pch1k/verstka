@@ -78,7 +78,7 @@ export function BuildScreen({ job }: { job: ActiveJob }) {
                   )}
                   aria-hidden
                 >
-                  {done ? <Check className="h-4 w-4" strokeWidth={3} /> : active ? <Loader2 className="h-4 w-4 animate-spin" /> : i + 1}
+                  {done ? <Check key="done" className="h-4 w-4 animate-pop" strokeWidth={3} /> : active ? <Loader2 className="h-4 w-4 animate-spin" /> : i + 1}
                 </span>
                 <span className="min-w-0">
                   <span className={cn("block text-[15px] font-semibold", done || active ? "text-white" : "text-white/45")}>{s.title}</span>
