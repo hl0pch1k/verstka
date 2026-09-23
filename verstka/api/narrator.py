@@ -1,10 +1,12 @@
-"""Deterministic explanations for the chat agent: what the pipeline did and why (Russian)."""
+"""Deterministic explanations for the chat helper: what the pipeline did and why, in plain Russian (no ids, no scores
+that only the matcher understands)."""
 
 from __future__ import annotations
 
 from collections import Counter
 from typing import Optional
 
+from verstka.ru import ru_count
 from verstka.schemas.audit import AuditReport
 from verstka.schemas.layout import LayoutPlan
 from verstka.schemas.outline import DeckOutline
@@ -22,73 +24,89 @@ def kind_ru(kind: str) -> str:
     return _KIND_RU.get(kind, kind)
 
 
+_SCALE_RU = {"display": "обложка", "h1": "заголовок", "h2": "подзаголовок", "h3": "заголовок блока", "body": "текст", "small": "мелкий текст", "caption": "подпись"}
+
+
 def describe_template(m: TemplateManifest) -> str:
     t = m.tokens
     kinds = Counter(p.kind.value for p in m.patterns)
     top = ", ".join(f"{kind_ru(k)} ×{v}" for k, v in kinds.most_common(6))
-    fonts = ", ".join(f.family for f in t.typography.families[:2]) or "не определены"
-    accents = ", ".join("#" + a for a in t.accents()[:3]) or "не найдены"
-    scale = ", ".join(f"{s.role} {s.size_pt:g}" for s in t.typography.scale)
+    fonts = [f.family for f in t.typography.families[:2]]
+    accents = ", ".join("#" + a for a in t.accents()[:3])
+    scale = ", ".join(f"{_SCALE_RU.get(s.role, s.role)} {s.size_pt:g} пт" for s in t.typography.scale)
     fam = Counter(p.family.value for p in m.patterns)
-    family_txt = "тёмная" if fam.get("dark", 0) > fam.get("light", 0) else "светлая"
+    dark = fam.get("dark", 0) > fam.get("light", 0)
+    look = f"Оформление {'тёмное' if dark else 'светлое'}"
+    if fonts:
+        look += f", {'шрифт' if len(fonts) == 1 else 'шрифты'} {', '.join(fonts)}"
+    if accents:
+        look += f", акцентные цвета {accents}"
     lines = [
-        f"Разобрал шаблон «{m.source_file}»: {m.n_slides} слайдов, {len(m.patterns)} паттернов, {len(m.assets)} ассетов, {len(t.chrome)} элементов хрома (логотипы, колонтитулы, узоры).",
-        f"Дизайн-система: основная семья {family_txt}, шрифты {fonts}, акценты {accents}, шкала кеглей {scale}.",
-        f"Типы слайдов: {top}.",
+        f"Разобрал шаблон «{m.source_file}»: {ru_count(m.n_slides, 'слайд', 'слайда', 'слайдов')}, из них "
+        f"{ru_count(len(m.patterns), 'подходит', 'подходят', 'подходят')} как образцы для новых слайдов.",
+        look + ".",
     ]
+    if scale:
+        lines.append(f"Размеры шрифтов: {scale}.")
+    if top:
+        lines.append(f"Какие слайды есть: {top}.")
+    if t.chrome:
+        lines.append("Логотип и колонтитулы шаблона сохраняются на каждом слайде.")
     if m.style_rules:
         rules = [r.text for r in m.style_rules if r.source != "derived"][:3]
         if rules:
             lines.append("Правила дизайнера из шаблона: " + " ".join(f"«{r}»" for r in rules))
     if m.warnings:
-        lines.append(f"Предупреждений при разборе: {len(m.warnings)}.")
+        lines.append(f"Не удалось разобрать: {ru_count(len(m.warnings), 'место', 'места', 'мест')} — подробности в «Что Verstka поняла из шаблона».")
     return "\n".join(lines)
+
+
+def _match(score: float) -> str:
+    return f"совпадение {max(0, min(100, round(score * 100)))}%"
 
 
 def describe_plan(outline: DeckOutline, plan: LayoutPlan, manifest: TemplateManifest, strategy_title: str) -> str:
     patterns = {p.id: p for p in manifest.patterns}
-    n_clone = sum(1 for s in plan.slides if s.mode == "clone")
+    n_clone = sum(1 for s in plan.slides if s.mode == "clone" and s.pattern_id in patterns)
     n_synth = len(plan.slides) - n_clone
-    lines = [f"Вариант «{strategy_title}»: {len(outline.slides)} слайдов, {n_clone} собраны на образцах шаблона, {n_synth} синтезированы из его дизайн-токенов."]
-    for osl in outline.slides:
+    head = f"Вариант «{strategy_title}»: {ru_count(len(outline.slides), 'слайд', 'слайда', 'слайдов')}"
+    head += f" — {n_clone} по образцам слайдов шаблона" + (f", {n_synth} собраны с нуля в его стиле" if n_synth else "") + "."
+    lines = [head]
+    for i, osl in enumerate(outline.slides, 1):
         ps = plan.for_outline(osl.id)
         if ps is None:
             continue
-        if ps.mode == "clone" and ps.pattern_id in patterns:
-            p = patterns[ps.pattern_id]
-            why = next((r for r in ps.reasons if "ёмкост" in r or "ячеек" in r or "помещ" in r), "")
-            lines.append(f"{osl.id[2:] if osl.id.startswith('sl') else osl.id}. {kind_ru(osl.kind.value)} «{osl.headline[:60]}» → слайд {p.source_slide} шаблона ({kind_ru(p.kind.value)}), балл {ps.score:.2f}{'; ' + why if why else ''}.")
-        else:
-            lines.append(f"{osl.id[2:] if osl.id.startswith('sl') else osl.id}. {kind_ru(osl.kind.value)} «{osl.headline[:60]}» → композиция «{ps.composition}» из токенов: {ps.reasons[0] if ps.reasons else ''}.")
+        how = f"по образцу слайда {patterns[ps.pattern_id].source_slide}" if ps.mode == "clone" and ps.pattern_id in patterns else "собран с нуля"
+        lines.append(f"{i}. {kind_ru(osl.kind.value).capitalize()}: «{osl.headline[:60]}» — {how}")
     return "\n".join(lines)
 
 
 def describe_slide_choice(outline: DeckOutline, plan: LayoutPlan, manifest: TemplateManifest, index: int) -> str:
     if not (1 <= index <= len(outline.slides)):
-        return f"В колоде {len(outline.slides)} слайдов."
+        return f"В презентации {ru_count(len(outline.slides), 'слайд', 'слайда', 'слайдов')} — слайда {index} нет."
     osl = outline.slides[index - 1]
     ps = plan.for_outline(osl.id)
     if ps is None:
-        return "Для этого слайда нет записи в плане."
+        return f"Для слайда {index} нет записи в плане."
     patterns = {p.id: p for p in manifest.patterns}
-    head = f"Слайд {index} ({kind_ru(osl.kind.value)}): «{osl.headline}»."
+    head = f"Слайд {index} — {kind_ru(osl.kind.value)}: «{osl.headline}»."
     if ps.mode == "clone" and ps.pattern_id in patterns:
         p = patterns[ps.pattern_id]
-        body = f"Взят слайд {p.source_slide} шаблона (тип {kind_ru(p.kind.value)}, балл {ps.score:.2f}). Причины: " + "; ".join(ps.reasons[1:6]) + "."
+        body = f"Собран по образцу слайда {p.source_slide} шаблона ({kind_ru(p.kind.value)}), {_match(ps.score)}."
+        others = len({pid for pid, _ in ps.alternatives if pid != ps.pattern_id})
+        if others:
+            body += f" Подходили ещё {ru_count(others, 'макет', 'макета', 'макетов')}."
     else:
-        body = f"Синтезирован как «{ps.composition}»: " + "; ".join(ps.reasons[:3]) + "."
-    alts = ", ".join(f"{pid} ({sc:.2f})" for pid, sc in ps.alternatives[:3])
-    if alts:
-        body += f" Запасные варианты: {alts}."
-    return head + " " + body
+        body = "Подходящего образца в шаблоне не нашлось, поэтому слайд собран с нуля — в цветах, шрифтах и сетке шаблона."
+    return f"{head} {body} Причины выбора — в панели «Почему этот слайд такой»."
 
 
 FIX_RU = {
     "rematch": "подбор другого макета",
-    "synth": "сборка слайда из токенов",
+    "synth": "сборка слайда заново",
     "condense_text": "сокращение текста",
-    "xml": "правка разметки",
-    "rollback": "откат неудачной правки",
+    "xml": "правка оформления",
+    "rollback": "отмена неудачной правки",
 }
 
 
@@ -105,11 +123,15 @@ def describe_audit(report: AuditReport, check_titles: Optional[dict[str, str]] =
     title = lambda cid: titles.get(cid, cid)  # noqa: E731
     s = report.summary
     if not report.issues:
-        return "Аудит: оценка 100 из 100, замечаний нет."
+        return "Проверка качества: 100 из 100, замечаний нет."
     errs = Counter(i.check_id for i in report.issues if i.severity == "error")
     warns = Counter(i.check_id for i in report.issues if i.severity == "warn")
-    head = f"Аудит: оценка {s.score:g} из 100, " + ("ошибок нет" if not s.errors else f"ошибок {s.errors}")
-    head += f", предупреждений {s.warnings}" + (f", замечаний модели {s.model_flags}" if s.model_flags else "") + "."
+    head = f"Проверка качества: {s.score:g} из 100, " + ("ошибок нет" if not s.errors else ru_count(s.errors, "ошибка", "ошибки", "ошибок"))
+    if s.warnings:
+        head += ", " + ru_count(s.warnings, "предупреждение", "предупреждения", "предупреждений")
+    if s.model_flags:
+        head += ", " + ru_count(s.model_flags, "замечание модели", "замечания модели", "замечаний модели")
+    head += "."
     lines = [head]
     if errs:
         lines.append("Ошибки: " + "; ".join(f"{title(k)} ×{v}" if v > 1 else title(k) for k, v in errs.most_common()) + ".")
@@ -119,10 +141,10 @@ def describe_audit(report: AuditReport, check_titles: Optional[dict[str, str]] =
         fixes = Counter(f.get("action") for f in report.applied_fixes)
         passes = report.iterations
         lines.append(
-            f"Автофикс ({passes} {'проход' if passes == 1 else 'прохода' if 2 <= passes <= 4 else 'проходов'}): "
+            f"Уже исправлено автоматически ({ru_count(passes, 'проход', 'прохода', 'проходов')}): "
             + ", ".join(f"{FIX_RU.get(k, k)} ×{v}" if v > 1 else FIX_RU.get(k, k) for k, v in fixes.items()) + "."
         )
     fixable = [i for i in report.issues if i.autofix and i.autofix.action != "none"]
     if fixable:
-        lines.append(f"Ещё {len(fixable)} можно исправить автоматически — кнопка «Исправить все автоматические» на шаге «Аудит».")
+        lines.append(f"Ещё {len(fixable)} можно исправить автоматически: скажите «исправь всё» или нажмите «Исправить всё автоматически» в «Проверке качества».")
     return "\n".join(lines)

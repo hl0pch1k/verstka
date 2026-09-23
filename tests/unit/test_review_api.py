@@ -434,9 +434,9 @@ def test_audit_is_told_in_words_not_check_ids():
         "iterations": 2,
     })
     text = describe_audit(report)
-    assert text.startswith("Аудит: оценка 94 из 100, ошибок нет, предупреждений 2.")
-    assert "Кегль не из типографической шкалы шаблона ×2" in text and "size_not_in_scale" not in text
-    assert "Автофикс (2 прохода): подбор другого макета, правка разметки." in text
+    assert text.startswith("Проверка качества: 94 из 100, ошибок нет, 2 предупреждения.")
+    assert "Размер шрифта не из шкалы шаблона ×2" in text and "size_not_in_scale" not in text
+    assert "Уже исправлено автоматически (2 прохода): подбор другого макета, правка оформления." in text
 
 
 def test_uploaded_template_keeps_the_users_file_name_and_gets_a_card(client, simple_deck):

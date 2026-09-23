@@ -20,7 +20,7 @@ EMPTY_SLIDE = CheckSpec(id="empty_slide", title="Пустой слайд или 
 SLIDE_IS_PICTURE = CheckSpec(id="slide_is_picture", title="Слайд оказался картинкой, а не редактируемыми объектами", severity="error", category="integrity", description="Одна картинка занимает ≥ 90% слайда и на слайде нет текста.")
 CHART_MISSING_LABELS = CheckSpec(id="chart_missing_labels", title="У диаграммы нет подписей осей, единиц или легенды", severity="warn", category="integrity", description="Нативная диаграмма без подписей данных и без оси значений, либо многосерийная без легенды, либо без единиц измерения.")
 DUPLICATE_SLIDES = CheckSpec(id="duplicate_slides", title="Два слайда дублируют друг друга", severity="warn", category="integrity", description="Текст двух слайдов совпадает более чем на 90%.")
-CONTENT_MISSING = CheckSpec(id="content_missing", title="Часть запланированного контента пропала со слайда", severity="error", category="integrity", description="Заголовок, буллеты, названия карточек, числа с подписями и заголовки колонок из плана ищутся в тексте слайда (включая ячейки таблиц) без учёта пробелов и регистра по первым 18 символам; ошибка, если нет трети и более строк, иначе предупреждение.")
+CONTENT_MISSING = CheckSpec(id="content_missing", title="Часть запланированного контента пропала со слайда", severity="error", category="integrity", description="Заголовок, пункты списков, названия карточек, числа с подписями и заголовки колонок из плана ищутся в тексте слайда (включая ячейки таблиц) без учёта пробелов и регистра по первым 18 символам; ошибка, если нет трети и более строк, иначе предупреждение.")
 
 CONTENT_KEY_CHARS = 18
 _WS_RE = re.compile(r"[\s\u00a0\u202f\u2009\u2007]+")
@@ -132,7 +132,7 @@ def content_missing(ctx: AuditContext) -> list[Issue]:
             continue
         severity = "error" if len(missing) * 3 >= len(wanted) else "warn"
         shown = ", ".join(f"«{m[:40]}»" for m in missing[:3]) + ("…" if len(missing) > 3 else "")
-        out.append(ctx.new_issue(CONTENT_MISSING, s.index, f"{len(missing)} из {len(wanted)} текстов плана нет на слайде: {shown}", severity=severity, details={"missing": missing, "wanted": len(wanted)}, autofix=fix("rematch", "перевыбрать макет, чтобы весь контент поместился", outline_id=s.outline_id)))
+        out.append(ctx.new_issue(CONTENT_MISSING, s.index, f"{len(missing)} из {len(wanted)} {'текста' if len(wanted) % 10 == 1 and len(wanted) % 100 != 11 else 'текстов'} плана нет на слайде: {shown}", severity=severity, details={"missing": missing, "wanted": len(wanted)}, autofix=fix("rematch", "перевыбрать макет, чтобы весь контент поместился", outline_id=s.outline_id)))
     return out
 
 

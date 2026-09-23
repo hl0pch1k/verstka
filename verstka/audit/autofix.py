@@ -205,12 +205,22 @@ def _move_inside(el: etree._Element, safe: Bbox, slide_w: int, slide_h: int, int
     return nx, ny, nw, nh
 
 
-def _xml_fixes(pptx: Path, actions: list[tuple[int, FixAction]], manifest: TemplateManifest, slide_w: int, slide_h: int) -> list[str]:
-    """In-place edits that need no re-render: recolor, refont, drop_element, move_inside, shrink_text. Returns what changed."""
+_SCOPE_RU = {"text": "текста", "fill": "заливки", "line": "обводки", "all": "элемента"}
+
+
+def _xml_fixes(pptx: Path, actions: list[tuple[int, FixAction]], manifest: TemplateManifest, slide_w: int, slide_h: int) -> list[dict]:
+    """In-place edits that need no re-render: recolor, refont, drop_element, move_inside, shrink_text.
+
+    Returns what changed, one record per edit: {"slide", "kind", "element_id", "result"} — the result in plain Russian
+    for the history of fixes shown to people."""
     if not actions:
         return []
     prs = Presentation(str(pptx))
-    applied: list[str] = []
+    applied: list[dict] = []
+
+    def done(slide_index: int, kind: str, eid: object, text: str) -> None:
+        applied.append({"slide": slide_index, "kind": kind, "element_id": str(eid), "result": text})
+
     palette = manifest.tokens.palette()
     primary_font = manifest.tokens.typography.primary_family
     text_primary = manifest.tokens.color_for("text.primary")
@@ -228,7 +238,7 @@ def _xml_fixes(pptx: Path, actions: list[tuple[int, FixAction]], manifest: Templ
                 continue
             if act.action == "drop_element":
                 el.getparent().remove(el)
-                applied.append(f"slide {slide_index}: removed {eid}")
+                done(slide_index, "drop_element", eid, "Убран лишний элемент")
             elif act.action == "refont" and primary_font:
                 n = 0
                 for latin in el.iter(q("a:latin")):
@@ -240,7 +250,7 @@ def _xml_fixes(pptx: Path, actions: list[tuple[int, FixAction]], manifest: Templ
                         etree.SubElement(rPr, q("a:latin")).set("typeface", primary_font)
                         n += 1
                 if n:
-                    applied.append(f"slide {slide_index}: font → {primary_font} in {eid} ({n} runs)")
+                    done(slide_index, "refont", eid, f"Шрифт заменён на {primary_font} — основной шрифт шаблона")
             elif act.action == "recolor":
                 target_hex = (act.params.get("to") or "").upper() or None
                 if not target_hex and act.params.get("target") == "text.primary" and text_primary:
@@ -249,16 +259,17 @@ def _xml_fixes(pptx: Path, actions: list[tuple[int, FixAction]], manifest: Templ
                 scope = act.params.get("scope") or "text"
                 n = _recolor(el, scope, only_hex, target_hex, palette)
                 if n:
-                    applied.append(f"slide {slide_index}: recolored {n} colour(s) in {eid} → {target_hex or 'палитра'} ({scope})")
+                    what = _SCOPE_RU.get(scope, "элемента")
+                    done(slide_index, "recolor", eid, f"Цвет {what} заменён на #{target_hex}" if target_hex else f"Цвет {what} приведён к палитре шаблона")
             elif act.action == "move_inside":
                 moved = _move_inside(el, safe, slide_w, slide_h, bool(act.params.get("safe")))
                 if moved:
                     x, y, w, h = element_bbox(el)  # type: ignore[misc]
                     nx, ny, nw, nh = moved
                     set_element_pos(el, x=nx, y=ny, w=nw if nw != w else None, h=nh if nh != h else None)
-                    where = "в безопасную область" if act.params.get("safe") else "внутрь слайда"
-                    resized = f", размер {nw}×{nh}" if (nw, nh) != (w, h) else ""
-                    applied.append(f"slide {slide_index}: moved {eid} {where}{resized}")
+                    where = "в поля шаблона" if act.params.get("safe") else "внутрь слайда"
+                    resized = " и уменьшен по размеру" if (nw, nh) != (w, h) else ""
+                    done(slide_index, "move_inside", eid, f"Элемент возвращён {where}{resized}")
             elif act.action == "shrink_text":
                 ratio = float(act.params.get("ratio", 1.2))
                 factor = max(0.6, min(0.95, 1 / ratio))
@@ -273,7 +284,7 @@ def _xml_fixes(pptx: Path, actions: list[tuple[int, FixAction]], manifest: Templ
                         rPr.set("sz", str(int(round(new * 100))))
                         sizes.append(new)
                 if sizes:
-                    applied.append(f"slide {slide_index}: shrunk text in {eid} to {', '.join(f'{s:g}' for s in sorted(set(sizes), reverse=True))} pt")
+                    done(slide_index, "shrink_text", eid, f"Шрифт уменьшен до {', '.join(f'{s:g}' for s in sorted(set(sizes), reverse=True))} пт, чтобы текст поместился")
     if applied:
         prs.save(str(pptx))
     return applied
@@ -379,8 +390,8 @@ def autofix_loop(
                     if idx:
                         xml_actions.extend((idx, a) for a in actions)
             if xml_actions:
-                for line in _xml_fixes(pptx, xml_actions, manifest, slide_w, slide_h):
-                    applied.append({"iteration": it, "action": "xml", "result": line})
+                for fix in _xml_fixes(pptx, xml_actions, manifest, slide_w, slide_h):
+                    applied.append({"iteration": it, "action": "xml", **fix})
             if not applied:
                 break
             new_report = run_audit(pptx, manifest, outline, ws, **audit_kw)
@@ -392,7 +403,14 @@ def autofix_loop(
             # the iteration made things worse: ship the previous deck, re-audit it so slide images match
             plan, outline, render_result = snapshot.restore(pptx)
             restored = run_audit(pptx, manifest, outline, ws, **audit_kw)
-            rollback = {"iteration": it, "action": "rollback", "result": f"ошибок было {current.summary.errors}, стало {new_report.summary.errors} (предупреждений {current.summary.warnings} → {new_report.summary.warnings}, оценка {current.summary.score} → {new_report.summary.score}) — откат"}
+            old_s, new_s = current.summary, new_report.summary
+            why = (
+                f"ошибок стало {new_s.errors} вместо {old_s.errors}" if new_s.errors > old_s.errors
+                else f"предупреждений стало {new_s.warnings} вместо {old_s.warnings}" if new_s.warnings > old_s.warnings
+                else f"оценка стала {new_s.score:g} вместо {old_s.score:g}" if new_s.score < old_s.score
+                else "правки ничего не улучшили"
+            )
+            rollback = {"iteration": it, "action": "rollback", "result": f"{why} — возвращена предыдущая версия"}
             log.info("autofix iteration %d rolled back: %s", it, rollback["result"])
             restored.applied_fixes = current.applied_fixes + applied + [rollback]
             restored.iterations = it

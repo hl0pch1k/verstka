@@ -119,7 +119,8 @@ def test_recolor_text_scope_leaves_card_fill_alone(tmp_path):
     fill, runs, line = _colors(path, sid)
     assert fill == "151515" and line == "0077FF", "card fill and outline must not be recoloured"
     assert runs and all(c == "FFFFFF" for c in runs)
-    assert len(lines) == 1 and "recolored" in lines[0]
+    assert len(lines) == 1 and lines[0]["kind"] == "recolor" and lines[0]["slide"] == 1
+    assert lines[0]["result"] == "Цвет текста заменён на #FFFFFF"
     # nothing left to change → nothing recorded
     assert af._xml_fixes(path, [(1, act)], manifest, W, H) == []
 
@@ -200,7 +201,7 @@ def test_autofix_rolls_back_a_regressing_iteration(tmp_path, monkeypatch):
     assert final.summary.errors == 1 and final.iterations == 1
     assert plan2.for_outline("s1").pattern_id == "p1" and plan2.for_outline("s1").mode == "clone", "plan restored with the deck"
     rollbacks = [f for f in final.applied_fixes if f.get("action") == "rollback"]
-    assert len(rollbacks) == 1 and rollbacks[0]["iteration"] == 1 and "откат" in rollbacks[0]["result"]
+    assert len(rollbacks) == 1 and rollbacks[0]["iteration"] == 1 and "возвращена предыдущая версия" in rollbacks[0]["result"]
     assert audits[-1] == "ORIGINAL", "the restored deck is audited again so slide images match"
     assert not [p for p in tmp_path.iterdir() if p.name != "deck.pptx"], "snapshots are deleted"
 
@@ -288,12 +289,12 @@ def test_xml_fixes_are_rederived_after_a_rerender(tmp_path, monkeypatch):
     monkeypatch.setattr(af, "render_deck", lambda outline, plan, manifest, ws, out, **kw: (Path(out).write_bytes(b"NEW"), RenderResult(pptx_path=Path(out)))[1])
     monkeypatch.setattr(af, "run_audit", fake_audit)
     monkeypatch.setattr(af, "_ir_slides", lambda report: [SimpleNamespace(outline_id="s1", index=1), SimpleNamespace(outline_id="s2", index=2)])
-    monkeypatch.setattr(af, "_xml_fixes", lambda p, actions, manifest, w, h: calls.append(list(actions)) or [f"slide {i}: font in {a.params['element_ids'][0]}" for i, a in actions])
+    monkeypatch.setattr(af, "_xml_fixes", lambda p, actions, manifest, w, h: calls.append(list(actions)) or [{"slide": i, "kind": a.action, "element_id": a.params["element_ids"][0], "result": "Шрифт заменён"} for i, a in actions])
     final, *_ = af.autofix_loop(pptx, report0, outline, plan, _manifest(), None, max_iterations=2)
     assert calls == [[(2, fresh_refont)]], calls
     assert audits == [False, False]  # without models no audit of the loop starts LibreOffice
     xml = [f for f in final.applied_fixes if f.get("action") == "xml"]
-    assert xml and xml[0]["iteration"] == 1 and "77" in xml[0]["result"]
+    assert xml and xml[0]["iteration"] == 1 and xml[0]["element_id"] == "77" and xml[0]["slide"] == 2
     assert final.summary.errors == 0
 
 

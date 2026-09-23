@@ -5,13 +5,13 @@ from __future__ import annotations
 from typing import Optional
 
 from verstka.analysis.chrome import shape_signature
-from verstka.audit.checks.common import composite_hex, enclosing_fill, fill_alpha, fix, is_chrome_like, text_elements
+from verstka.audit.checks.common import composite_hex, enclosing_fill, fill_alpha, fix, is_chrome_like, ru_count, text_elements
 from verstka.audit.registry import AuditContext, check
 from verstka.schemas.audit import CheckSpec, Issue
 from verstka.schemas.common import Color, contrast_ratio
 
 FONT_NOT_IN_TEMPLATE = CheckSpec(id="font_not_in_template", title="Шрифт не из шаблона или гарнитур больше двух", severity="error", category="template", description="Гарнитура рана отсутствует среди шрифтов шаблона (используемых или встроенных), либо на слайде больше двух гарнитур.")
-SIZE_NOT_IN_SCALE = CheckSpec(id="size_not_in_scale", title="Кегль не из типографической шкалы шаблона", severity="warn", category="template", description="Кегль отличается более чем на 0.75 пт от всех кеглей, встречающихся в шаблоне.")
+SIZE_NOT_IN_SCALE = CheckSpec(id="size_not_in_scale", title="Размер шрифта не из шкалы шаблона", severity="warn", category="template", description="Размер шрифта отличается более чем на 0,75 пт от всех размеров, встречающихся в шаблоне.")
 COLOR_NOT_IN_PALETTE = CheckSpec(id="color_not_in_palette", title="Цвет не из палитры шаблона", severity="warn", category="template", description="Цвет текста или заливки отстоит от ближайшего цвета палитры шаблона больше чем на ΔE 6.")
 LAYOUT_NOT_FROM_TEMPLATE = CheckSpec(id="layout_not_from_template", title="Слайд собран не на макете из шаблона", severity="error", category="template", description="Слайд ссылается на макет, которого нет в пакете шаблона.")
 CHROME_MOVED = CheckSpec(id="chrome_moved", title="Логотип или колонтитул сдвинуты с положенного места", severity="warn", category="template", description="Элемент хрома шаблона (логотип, колонтитул на слайдах) отсутствует или стоит в другом месте.")
@@ -44,7 +44,7 @@ def font_not_in_template(ctx: AuditContext) -> list[Issue]:
         for f, ids in bad.items():
             out.append(ctx.new_issue(FONT_NOT_IN_TEMPLATE, s.index, f"шрифт «{f}» отсутствует в шаблоне", element_ids=sorted(set(ids)), bboxes=[s.by_id(i).bbox_frac for i in sorted(set(ids))[:3] if s.by_id(i)], autofix=fix("refont", "заменить на основной шрифт шаблона", element_ids=sorted(set(ids)))))
         if len(used) > 2:
-            out.append(ctx.new_issue(FONT_NOT_IN_TEMPLATE, s.index, f"на слайде {len(used)} гарнитуры: {', '.join(sorted(used))}", severity="warn"))
+            out.append(ctx.new_issue(FONT_NOT_IN_TEMPLATE, s.index, f"на слайде {ru_count(len(used), 'шрифт', 'шрифта', 'шрифтов')}: {', '.join(sorted(used))}", severity="warn"))
     return out
 
 
@@ -62,7 +62,7 @@ def size_not_in_scale(ctx: AuditContext) -> list[Issue]:
                     if r.size_pt and r.text.strip() and all(abs(r.size_pt - t) > 0.75 for t in sizes):
                         bad.setdefault(r.size_pt, []).append(e.id)
         for sz, ids in bad.items():
-            out.append(ctx.new_issue(SIZE_NOT_IN_SCALE, s.index, f"кегль {sz:g} пт не из шкалы шаблона", element_ids=sorted(set(ids)), severity="info" if any(abs(sz - t) <= 2.0 for t in sizes) else "warn", details={"size": sz}))
+            out.append(ctx.new_issue(SIZE_NOT_IN_SCALE, s.index, f"размер шрифта {sz:g} пт не из шкалы шаблона", element_ids=sorted(set(ids)), severity="info" if any(abs(sz - t) <= 2.0 for t in sizes) else "warn", details={"size": sz}))
     return out
 
 

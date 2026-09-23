@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Optional
 
 from verstka.rendering.fonts import wrap_lines
+from verstka.ru import ru_count, ru_times  # noqa: F401  (re-exported for the checks)
 from verstka.schemas.audit import FixAction
 from verstka.schemas.common import EMU_PER_PT, Bbox, hex_to_rgb, rgb_to_hex
 from verstka.schemas.deck_ir import DeckIR, IRElement, IRSlide

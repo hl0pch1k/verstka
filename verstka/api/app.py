@@ -621,13 +621,13 @@ def chat(req: ChatRequest) -> dict:
     actions: list[dict] = []
     if intent == "template":
         m = store.manifest(template_id) if template_id else None
-        reply = describe_template(m) if m else "Загрузите шаблон (.pptx) — я разберу его дизайн-систему и паттерны слайдов."
+        reply = describe_template(m) if m else "Сначала выберите или загрузите шаблон (.pptx) — расскажу, какие в нём цвета, шрифты и макеты слайдов."
         actions.append({"type": "open_tab", "tab": "template"})
     elif intent in ("plan", "explain_slide", "audit", "export") and gen_id:
         payload = _generation_payload(gen_id)
         variants = payload.get("variants", [])
         if not variants:
-            reply = "Генерация ещё не завершена."
+            reply = "Презентация ещё собирается — подождите немного."
         else:
             v = variants[0]
             manifest = store.manifest(payload["template_id"])
@@ -639,14 +639,16 @@ def chat(req: ChatRequest) -> dict:
                 reply = "\n\n".join(describe_plan(DeckOutline.model_validate(vv["outline"]), LayoutPlan.model_validate(vv["plan"]), manifest, name(vv)) for vv in variants)
                 actions.append({"type": "open_tab", "tab": "plan"})
             elif intent == "explain_slide":
-                reply = describe_slide_choice(outline, plan, manifest, int(params.get("index", 1)))
-                actions.append({"type": "open_tab", "tab": "variants"})
+                index = int(params.get("index", 1))
+                reply = describe_slide_choice(outline, plan, manifest, index)
+                if 1 <= index <= len(outline.slides):
+                    actions.append({"type": "open_tab", "tab": "why", "slide": index})
             elif intent == "audit":
                 reply = "\n\n".join(f"Вариант «{name(vv)}». " + describe_audit(AuditReport.model_validate(vv["audit"])) for vv in variants if vv.get("audit"))
                 actions.append({"type": "open_tab", "tab": "audit"})
             else:
                 kinds = {"deck.pptx": "PPTX", "deck.pdf": "PDF", "deck.html": "HTML"}
-                reply = "Файлы готовы — скачайте на шаге «Экспорт»:\n" + "\n".join(
+                reply = "Файлы готовы — открыл список для скачивания:\n" + "\n".join(
                     f"• {name(vv)}: " + ", ".join(kinds[f] for f in kinds if f in vv["files"]) for vv in variants
                 )
                 actions.append({"type": "open_tab", "tab": "export"})
@@ -661,7 +663,7 @@ def chat(req: ChatRequest) -> dict:
                     raise
                 continue  # already running for this variant
             jobs.append({"strategy": vv["strategy"], "job_id": r["job_id"]})
-        reply = "Запустил автофикс для всех вариантов. Результаты появятся в панели аудита." if jobs else "Автофикс уже выполняется — дождитесь результатов в панели аудита."
+        reply = "Запустил автоматические исправления для всех вариантов — расскажу, что изменилось." if jobs else "Исправления уже выполняются — дождитесь результата."
         actions.append({"type": "jobs", "jobs": jobs})
     elif intent == "generate":
         if not template_id:
@@ -670,12 +672,12 @@ def chat(req: ChatRequest) -> dict:
             brief_text = req.message
             r = create_generation(GenerateRequest(template_id=template_id, brief=brief_text, use_models=models_configured()))
             session["generation_id"] = r["generation_id"]
-            reply = "Принял бриф. Извлекаю факты, планирую структуру, подбираю макеты шаблона и собираю три варианта — сборка идёт на шаге «Варианты»."
+            reply = "Принял текст. Выделяю факты и цифры, составляю план и собираю три варианта по макетам шаблона — прогресс видно на экране."
             actions.append({"type": "generation_started", "job_id": r["job_id"], "generation_id": r["generation_id"]})
     else:
         reply = (
-            "Я помогу собрать презентацию в стиле вашего шаблона. Что умею: «расскажи о шаблоне», «сгенерируй презентацию: <бриф>», "
-            "«почему слайд 4 такой», «покажи аудит», «исправь всё», «экспорт». Загрузите шаблон и пришлите бриф текстом."
+            "Я помогу собрать презентацию в стиле вашего шаблона. Можно спросить: «расскажи о шаблоне», «сделай презентацию: <текст>», "
+            "«почему слайд 4 такой», «проверь качество», «исправь всё», «где скачать файлы». Выберите шаблон и пришлите текст."
         )
     session["history"].append({"role": "user", "text": req.message})
     session["history"].append({"role": "assistant", "text": reply})

@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from verstka.audit.checks.common import content_elements, fix, text_elements
+from verstka.audit.checks.common import content_elements, fix, ru_count, text_elements
 from verstka.audit.registry import AuditContext, check
 from verstka.schemas.audit import CheckSpec, Issue
 from verstka.schemas.common import Bbox
 
-TOO_MANY_BULLETS = CheckSpec(id="too_many_bullets", title="Больше 6 буллетов на слайде", severity="warn", category="density", description="Один текстовый блок содержит больше шести абзацев-буллетов.")
-BULLET_TOO_LONG = CheckSpec(id="bullet_too_long", title="Буллет длиннее 15 слов", severity="warn", category="density", description="Абзац с маркером содержит больше 15 слов.")
+TOO_MANY_BULLETS = CheckSpec(id="too_many_bullets", title="Больше 6 пунктов в одном списке", severity="warn", category="density", description="В одном текстовом блоке больше шести пунктов списка.")
+BULLET_TOO_LONG = CheckSpec(id="bullet_too_long", title="Пункт списка длиннее 15 слов", severity="warn", category="density", description="Пункт списка (абзац с маркером) содержит больше 15 слов.")
 TABLE_TOO_BIG = CheckSpec(id="table_too_big", title="Таблица больше 7 строк или 5 колонок", severity="warn", category="density", description="Нативная таблица превышает 7 строк (с шапкой) или 5 колонок.")
 TOO_MANY_SERIES = CheckSpec(id="too_many_series", title="Больше 5 серий на диаграмме", severity="warn", category="density", description="Нативная диаграмма содержит больше пяти рядов данных.")
 FILL_RATIO = CheckSpec(id="fill_ratio", title="Слайд заполнен меньше чем на четверть или больше чем на 80%", severity="warn", category="density", description="Площадь объединения контентных блоков относительно безопасной области шаблона меньше 25% (меньше 20% при одном-двух блоках — сведение) или больше 80%.")
@@ -21,7 +21,7 @@ def too_many_bullets(ctx: AuditContext) -> list[Issue]:
         for e in text_elements(s):
             n = sum(1 for p in e.paragraphs if (p.bullet or p.level > 0) and p.text.strip())
             if n > 6:
-                out.append(ctx.new_issue(TOO_MANY_BULLETS, s.index, f"{n} буллетов в одном блоке", bboxes=[e.bbox_frac], element_ids=[e.id], autofix=fix("condense_text", "сократить список до 6 пунктов", outline_id=s.outline_id, element_id=e.id)))
+                out.append(ctx.new_issue(TOO_MANY_BULLETS, s.index, f"{ru_count(n, 'пункт', 'пункта', 'пунктов')} в одном списке", bboxes=[e.bbox_frac], element_ids=[e.id], autofix=fix("condense_text", "сократить список до 6 пунктов", outline_id=s.outline_id, element_id=e.id)))
     return out
 
 
@@ -32,7 +32,7 @@ def bullet_too_long(ctx: AuditContext) -> list[Issue]:
         for e in text_elements(s):
             long = [p.text for p in e.paragraphs if (p.bullet or p.level > 0) and len(p.text.split()) > 15]
             if long:
-                out.append(ctx.new_issue(BULLET_TOO_LONG, s.index, f"{len(long)} буллетов длиннее 15 слов: «{long[0][:50]}…»", bboxes=[e.bbox_frac], element_ids=[e.id], autofix=fix("condense_text", "сократить буллеты до 15 слов", outline_id=s.outline_id, element_id=e.id)))
+                out.append(ctx.new_issue(BULLET_TOO_LONG, s.index, f"{ru_count(len(long), 'пункт длиннее', 'пункта длиннее', 'пунктов длиннее')} 15 слов: «{long[0][:50]}…»", bboxes=[e.bbox_frac], element_ids=[e.id], autofix=fix("condense_text", "сократить пункты до 15 слов", outline_id=s.outline_id, element_id=e.id)))
     return out
 
 
@@ -55,7 +55,7 @@ def too_many_series(ctx: AuditContext) -> list[Issue]:
     for s in ctx.ir.slides:
         for e in s.elements:
             if e.type == "chart" and e.chart and len(e.chart.series) > 5:
-                out.append(ctx.new_issue(TOO_MANY_SERIES, s.index, f"{len(e.chart.series)} серий на диаграмме", bboxes=[e.bbox_frac], element_ids=[e.id]))
+                out.append(ctx.new_issue(TOO_MANY_SERIES, s.index, f"{ru_count(len(e.chart.series), 'серия', 'серии', 'серий')} данных на одной диаграмме", bboxes=[e.bbox_frac], element_ids=[e.id]))
     return out
 
 

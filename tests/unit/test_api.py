@@ -66,7 +66,7 @@ def test_api_flow(client, simple_deck):
     r = c.post("/api/chat", json={"session_id": "s1", "message": "почему слайд 4 такой?"}).json()
     assert r["intent"] == "explain_slide" and "Слайд 4" in r["reply"]
     r = c.post("/api/chat", json={"session_id": "s1", "message": "покажи аудит"}).json()
-    assert r["intent"] == "audit" and "Аудит" in r["reply"] and {"type": "open_tab", "tab": "audit"} in r["actions"]
+    assert r["intent"] == "audit" and "Проверка качества" in r["reply"] and {"type": "open_tab", "tab": "audit"} in r["actions"]
     assert "«Структурный»" in r["reply"] and "structured" not in r["reply"]  # strategy titles, not ids
     # fixes endpoint accepts a request
     r = c.post(f"/api/generations/{gid}/structured/fixes", json={"all_deterministic": True})

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from verstka.audit.checks.common import CONTENT_TYPES, at_template_position, contains, fix, is_chrome_like, text_elements, text_height_needed_pt, title_element, usable_height_pt
+from verstka.audit.checks.common import CONTENT_TYPES, at_template_position, contains, fix, is_chrome_like, ru_count, ru_times, text_elements, text_height_needed_pt, title_element, usable_height_pt
 from verstka.audit.registry import AuditContext, check
 from verstka.rendering.fonts import text_width_pt
 from verstka.schemas.audit import CheckSpec, Issue
@@ -17,7 +17,7 @@ TEXT_CLIPPED = CheckSpec(id="text_clipped", title="Текст обрезан к�
 MARGIN_VIOLATION = CheckSpec(id="margin_violation", title="Контент заходит в поля у краёв", severity="warn", category="layout", description="Текстовый блок начинается за пределами безопасной области шаблона (допуск 3% ширины).")
 GRID_ALIGNMENT = CheckSpec(id="grid_alignment", title="Блоки не выровнены по направляющим макета", severity="info", category="layout", description="Левый край текстового блока не совпадает ни с одной колонкой шаблона (допуск 1.5% ширины).")
 IMAGE_STRETCHED = CheckSpec(id="image_stretched", title="Картинка растянута, пропорции нарушены", severity="warn", category="layout", description="Пропорции рамки картинки отличаются от пропорций исходного изображения (с учётом кадрирования) более чем на 12%.")
-TABLE_CELL_WRAP = CheckSpec(id="table_cell_wrap", title="Слово в ячейке таблицы переносится по буквам", severity="warn", category="layout", description="Самое длинное слово в колонке нативной таблицы шире колонки (ширина рамки / число колонок минус отступы 2×7.2 пт) при кегле таблицы шаблона — PowerPoint рвёт его посреди слова.")
+TABLE_CELL_WRAP = CheckSpec(id="table_cell_wrap", title="Слово в ячейке таблицы переносится по буквам", severity="warn", category="layout", description="Самое длинное слово в колонке нативной таблицы шире колонки (ширина рамки / число колонок минус отступы 2×7.2 пт) при размере шрифта таблицы шаблона — PowerPoint рвёт его посреди слова.")
 
 TABLE_CELL_INSET_PT = 7.2  # default a:tcPr marL/marR
 _HARD_SPACE_RE = re.compile(r"[ \t\r\n]+")  # NBSP stays inside a word, as PowerPoint keeps it on one line
@@ -113,13 +113,13 @@ def text_overflow(ctx: AuditContext) -> list[Issue]:
                 severe = ratio > (2.5 if is_title else 1.5)  # title boxes are generous and rarely collide
                 if grows:
                     severity = "error" if grown_bottom > ctx.ir.slide_h * 1.0 else "warn"
-                    msg = f"текст «{e.text[:40]}» вырастит рамку в {ratio:.1f} раза ({lines} строк)"
+                    msg = f"текст «{e.text[:40]}» вырастит рамку {ru_times(ratio)} ({ru_count(lines, 'строка', 'строки', 'строк')})"
                 elif shrinks:
                     severity = "info"
-                    msg = f"текст «{e.text[:40]}» выше рамки в {ratio:.1f} раза ({lines} строк), рамка сама уменьшает кегль"
+                    msg = f"текст «{e.text[:40]}» выше рамки {ru_times(ratio)} ({ru_count(lines, 'строка', 'строки', 'строк')}), рамка сама уменьшит шрифт"
                 else:
                     severity = "error" if severe else "warn"
-                    msg = f"текст «{e.text[:40]}» выше рамки в {ratio:.1f} раза ({lines} строк)"
+                    msg = f"текст «{e.text[:40]}» выше рамки {ru_times(ratio)} ({ru_count(lines, 'строка', 'строки', 'строк')})"
                 rematch = severe and not grows and not shrinks
                 out.append(
                     ctx.new_issue(
@@ -130,7 +130,7 @@ def text_overflow(ctx: AuditContext) -> list[Issue]:
                         element_ids=[e.id],
                         severity=severity,
                         details={"ratio": round(ratio, 2), "lines": lines, "autofit": e.autofit},
-                        autofix=None if shrinks else fix("rematch" if rematch else "shrink_text", "перевыбрать макет" if rematch else "уменьшить кегль по шкале шаблона", outline_id=s.outline_id, element_id=e.id, ratio=round(ratio, 2)),
+                        autofix=None if shrinks else fix("rematch" if rematch else "shrink_text", "перевыбрать макет" if rematch else "уменьшить шрифт по шкале шаблона", outline_id=s.outline_id, element_id=e.id, ratio=round(ratio, 2)),
                     )
                 )
     return out
@@ -164,7 +164,7 @@ def grid_alignment(ctx: AuditContext) -> list[Issue]:
             if all(abs(e.bbox_frac.x - c) > 0.015 for c in cols):
                 misaligned.append(e)
         if len(misaligned) >= 2:
-            out.append(ctx.new_issue(GRID_ALIGNMENT, s.index, f"{len(misaligned)} блоков не выровнены по колонкам шаблона", bboxes=[e.bbox_frac for e in misaligned[:4]], element_ids=[e.id for e in misaligned]))
+            out.append(ctx.new_issue(GRID_ALIGNMENT, s.index, f"{ru_count(len(misaligned), 'блок не выровнен', 'блока не выровнены', 'блоков не выровнены')} по колонкам шаблона", bboxes=[e.bbox_frac for e in misaligned[:4]], element_ids=[e.id for e in misaligned]))
     return out
 
 
