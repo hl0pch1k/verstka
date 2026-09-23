@@ -45,14 +45,18 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--dataset", type=Path, default=ROOT.parent / "Датасет")
     ap.add_argument("--out", type=Path, default=ROOT / "examples" / "outputs")
-    ap.add_argument("--models", type=Path, default=ROOT / "configs" / "models.yaml")
+    ap.add_argument("--models", type=Path, default=None, help="models.yaml (default: $VERSTKA_MODELS or configs/models.yaml)")
     ap.add_argument("--only", choices=sorted(DEMOS), action="append")
     ap.add_argument("--offline", action="store_true", help="no model calls at all")
     ap.add_argument("--audit-models", action="store_true", help="also run VLM/LLM content checks")
     ap.add_argument("--keep-slides", action="store_true", help="keep slides/*.jpg renders next to the decks")
     args = ap.parse_args()
 
-    providers = None if args.offline else models_ready(args.models)
+    from verstka.env import load_env
+    from verstka.providers.registry import default_models_path
+
+    load_env()
+    providers = None if args.offline else models_ready(args.models or default_models_path())
     skills = SkillsRegistry.load() if providers else None
     mode = "models" if providers else "offline"
     print(f"mode: {mode}")

@@ -32,6 +32,7 @@ class ProviderLimits:
     max_concurrency: int = 6
     timeout_s: float = 120.0
     max_attempts: int = 3
+    requests_per_minute: Optional[int] = None
 
 
 @dataclass
@@ -48,6 +49,7 @@ class ProviderRegistry:
             max_concurrency=int(limits_cfg.get("max_concurrency", 6)),
             timeout_s=float(limits_cfg.get("timeout_s", 120)),
             max_attempts=int(limits_cfg.get("max_attempts", 3)),
+            requests_per_minute=int(limits_cfg["requests_per_minute"]) if limits_cfg.get("requests_per_minute") else None,
         )
         roles: dict[str, Provider] = {}
         for role, spec in (cfg.get("roles") or {}).items():
@@ -97,5 +99,19 @@ def build_provider(spec: dict, limits: ProviderLimits) -> Provider:
             extra_body=spec.get("extra_body"),
             json_mode=bool(spec.get("json_mode", True)),
             headers=headers,
+            requests_per_minute=int(spec["requests_per_minute"]) if spec.get("requests_per_minute") else limits.requests_per_minute,
         )
     raise ProviderError(f"unknown provider backend {backend!r}")
+
+
+def default_models_path() -> Path:
+    """models.yaml to use: $VERSTKA_MODELS (a path relative to the repository is fine) or configs/models.yaml."""
+    import os
+
+    root = Path(__file__).resolve().parents[2]
+    env = os.environ.get("VERSTKA_MODELS")
+    if env:
+        p = Path(env)
+        return p if p.is_absolute() else (root / p)
+    return root / "configs" / "models.yaml"
+

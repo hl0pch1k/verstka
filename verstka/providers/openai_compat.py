@@ -6,7 +6,9 @@ import base64
 import json
 import logging
 import re
+import threading
 import time
+from collections import deque
 from typing import Any, Optional
 
 from pydantic import BaseModel, ValidationError
@@ -16,6 +18,61 @@ from verstka.providers.base import ChatMessage, CompletionResult, ProviderError,
 log = logging.getLogger(__name__)
 
 _FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.S)
+
+
+class RateLimited(ProviderError):
+    """429 from the provider: `daily` when the day's quota is spent (retrying today is pointless)."""
+
+    def __init__(self, message: str, retry_after: Optional[float] = None, daily: bool = False) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
+        self.daily = daily
+
+
+class _MinuteLimiter:
+    """At most `rpm` requests in any 60 s window, shared by every provider on the same account (llm and vlm roles
+    both count against e.g. OpenRouter's 20 requests/min for free models)."""
+
+    def __init__(self, rpm: int) -> None:
+        self.rpm = max(1, rpm)
+        self.lock = threading.Lock()
+        self.stamps: deque = deque()
+
+    def wait(self) -> None:
+        while True:
+            with self.lock:
+                now = time.monotonic()
+                while self.stamps and now - self.stamps[0] >= 60.0:
+                    self.stamps.popleft()
+                if len(self.stamps) < self.rpm:
+                    self.stamps.append(now)
+                    return
+                delay = 60.0 - (now - self.stamps[0]) + 0.05
+            time.sleep(delay)
+
+
+_LIMITERS: dict[str, _MinuteLimiter] = {}
+_EXHAUSTED: set[str] = set()  # accounts whose daily quota is spent: every later call fails fast → deterministic fallbacks
+_GUARD = threading.Lock()
+
+
+def _rate_limit_info(e: Exception) -> Optional[RateLimited]:
+    status = getattr(e, "status_code", None)
+    text = str(e)
+    low = text.lower()
+    if status != 429 and "429" not in text and "rate limit" not in low and "rate-limit" not in low:
+        return None
+    retry_after: Optional[float] = None
+    headers = getattr(getattr(e, "response", None), "headers", None) or {}
+    try:
+        if headers.get("retry-after"):
+            retry_after = float(headers.get("retry-after"))
+        elif headers.get("x-ratelimit-reset"):
+            retry_after = max(0.0, float(headers.get("x-ratelimit-reset")) / 1000.0 - time.time())
+    except (TypeError, ValueError):
+        retry_after = None
+    daily = "per-day" in low or "per day" in low or "free-models-per-day" in low or (retry_after is not None and retry_after > 300)
+    return RateLimited(text[:300], retry_after=retry_after, daily=daily)
 
 
 def extract_json(text: str) -> Any:
@@ -97,6 +154,7 @@ class OpenAICompatProvider:
         extra_body: Optional[dict] = None,
         json_mode: bool = True,
         headers: Optional[dict] = None,
+        requests_per_minute: Optional[int] = None,
     ) -> None:
         self.model = model
         self.base_url = base_url
@@ -109,6 +167,11 @@ class OpenAICompatProvider:
         self.json_mode = json_mode
         self.headers = headers or {}
         self._client = None
+        self._account = f"{base_url}|{api_key[-8:]}"
+        self._limiter: Optional[_MinuteLimiter] = None
+        if requests_per_minute:
+            with _GUARD:
+                self._limiter = _LIMITERS.setdefault(f"{self._account}|{requests_per_minute}", _MinuteLimiter(requests_per_minute))
 
     # lazy client so tests can construct the provider without the SDK doing network setup
     def _get_client(self):
@@ -132,9 +195,16 @@ class OpenAICompatProvider:
             kwargs["extra_body"] = self.extra_body
         if want_json and self.json_mode:
             kwargs["response_format"] = {"type": "json_object"}
+        if self._account in _EXHAUSTED:
+            raise RateLimited(f"{self.model}: daily request quota of the provider is spent", daily=True)
+        if self._limiter is not None:
+            self._limiter.wait()
         try:
             resp = client.chat.completions.create(**kwargs)
         except Exception as e:  # provider may reject response_format; retry without it once
+            rl = _rate_limit_info(e)
+            if rl is not None:
+                raise rl from e
             if want_json and self.json_mode and "response_format" in kwargs:
                 log.warning("json_mode rejected by provider (%s); retrying without it", e)
                 kwargs.pop("response_format")
@@ -167,9 +237,26 @@ class OpenAICompatProvider:
             )
         total = Usage()
         last_err: Optional[Exception] = None
-        for attempt in range(1, self.max_attempts + 1):
+        attempt = 0
+        rate_waits = 0
+        while attempt < self.max_attempts:
+            attempt += 1
             try:
                 text, usage = self._call(oai_messages, temperature, max_tokens, want_json=schema is not None)
+            except RateLimited as e:
+                if e.daily:
+                    _EXHAUSTED.add(self._account)
+                    log.warning("provider daily quota spent: deterministic fallbacks from now on (%s)", e)
+                    raise
+                last_err = e
+                if rate_waits < 6:
+                    # a per-minute cap: wait the window out, the attempt does not count
+                    rate_waits += 1
+                    attempt -= 1
+                    wait = min(max(e.retry_after or 20.0, 1.0), 65.0)
+                    log.info("rate limited, waiting %.0f s", wait)
+                    time.sleep(wait)
+                continue
             except ProviderError as e:
                 last_err = e
                 log.warning("provider call failed (attempt %d/%d): %s", attempt, self.max_attempts, e)

@@ -57,3 +57,39 @@ def test_registry_builds_openai_compat_without_network(monkeypatch):
     reg = ProviderRegistry.from_config(cfg)
     p = reg.get("llm")
     assert p.name == "openai_compat" and p.model == "qwen/qwen3.8-27b" and p.api_key == "sk-test"
+
+
+def test_rate_limits_wait_per_minute_and_fail_fast_when_the_day_is_spent(monkeypatch):
+    """Free model tiers (OpenRouter: 20 req/min, 50 req/day): a per-minute 429 is waited out without spending an
+    attempt; a spent daily quota fails fast for every later call so the pipeline drops to its deterministic steps."""
+    from verstka.providers import openai_compat as oc
+    from verstka.providers.base import ChatMessage, ProviderError
+
+    sleeps: list[float] = []
+    monkeypatch.setattr(oc.time, "sleep", lambda s: sleeps.append(s))
+    p = oc.OpenAICompatProvider(model="qwen/qwen3.8-27b:free", base_url="https://example.invalid/v1", api_key="sk-test-123456789", max_attempts=2)
+    calls = {"n": 0}
+
+    def minute_then_ok(messages, temperature, max_tokens, want_json):
+        calls["n"] += 1
+        if calls["n"] <= 3:
+            raise oc.RateLimited("429 rate limit exceeded: free-models-per-min", retry_after=30)
+        return "ok", oc.Usage(1, 1)
+
+    monkeypatch.setattr(p, "_call", minute_then_ok)
+    assert p.complete([ChatMessage(role="user", content="hi")]).text == "ok"
+    assert sleeps == [30, 30, 30] and calls["n"] == 4  # three waits, the two real attempts untouched
+
+    def daily(messages, temperature, max_tokens, want_json):
+        raise oc.RateLimited("429 Rate limit exceeded: free-models-per-day", daily=True)
+
+    monkeypatch.setattr(p, "_call", daily)
+    import pytest
+
+    with pytest.raises(ProviderError):
+        p.complete([ChatMessage(role="user", content="hi")])
+    assert p._account in oc._EXHAUSTED
+    oc._EXHAUSTED.discard(p._account)
+    assert oc._rate_limit_info(RuntimeError("Error code: 429 - free-models-per-day")).daily
+    assert not oc._rate_limit_info(RuntimeError("Error code: 429 - too many requests per minute")).daily
+    assert oc._rate_limit_info(RuntimeError("Error code: 500")) is None

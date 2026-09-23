@@ -1,0 +1,31 @@
+# Free tier of OpenRouter: the same open model (Qwen3.8-27B, Apache 2.0) through its «:free» variant.
+# Limits of the free tier (openrouter.ai/docs/api-reference/limits): 20 requests/min; 50 requests/day, or
+# 1000 requests/day once 10 USD of credits were ever bought. The client keeps under 18 requests/min, waits out
+# per-minute 429s and, when the day's quota is spent, the pipeline continues with its deterministic steps.
+# Enable: VERSTKA_MODELS=configs/models.free.yaml in .env (or --models configs/models.free.yaml).
+roles:
+  llm:
+    backend: openai_compat
+    model: qwen/qwen3.8-27b:free
+    base_url: https://openrouter.ai/api/v1
+    api_key: ${OPENROUTER_API_KEY}
+    price_in_per_m: 0.0
+    price_out_per_m: 0.0
+    temperature: 0.2
+    extra_body:
+      reasoning: { enabled: false }
+  vlm:
+    backend: openai_compat
+    model: qwen/qwen3.8-27b:free
+    base_url: https://openrouter.ai/api/v1
+    api_key: ${OPENROUTER_API_KEY}
+    price_in_per_m: 0.0
+    price_out_per_m: 0.0
+    temperature: 0.1
+    extra_body:
+      reasoning: { enabled: false }
+limits:
+  max_concurrency: 2
+  requests_per_minute: 18
+  timeout_s: 180
+  max_attempts: 3

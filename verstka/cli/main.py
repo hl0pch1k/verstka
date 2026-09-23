@@ -25,8 +25,9 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 def _providers(models: Optional[Path], need: bool) -> Optional[ProviderRegistry]:
     if not need:
         return None
-    path = models or (_REPO_ROOT / "configs" / "models.yaml")
-    return ProviderRegistry.from_yaml(path)
+    from verstka.providers.registry import default_models_path
+
+    return ProviderRegistry.from_yaml(models or default_models_path())
 
 
 @app.callback()

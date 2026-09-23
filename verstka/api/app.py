@@ -68,7 +68,9 @@ _fix_lock = threading.Lock()
 def providers() -> Optional[ProviderRegistry]:
     global _providers
     if _providers is None:
-        path = Path(os.environ.get("VERSTKA_MODELS", _REPO_ROOT / "configs" / "models.yaml"))
+        from verstka.providers.registry import default_models_path
+
+        path = default_models_path()
         try:
             _providers = ProviderRegistry.from_yaml(path)
         except Exception as e:  # noqa: BLE001
