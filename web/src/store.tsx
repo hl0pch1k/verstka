@@ -3,7 +3,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { api, ApiError } from "./api";
 import { pushToast } from "./components/ui/Toasts";
 import { generationFlow, uploadTemplateFlow } from "./lib/flows";
-import { humanizeJobMessage } from "./lib/jobText";
+import { humanizeJobMessage, variantProgress, type VariantProgress } from "./lib/jobText";
 import { trackJob } from "./lib/jobs";
 import { errText, firstLine, newestTemplate, slideCount } from "./lib/narrate";
 import { LS, storage, uid } from "./lib/utils";
@@ -11,7 +11,7 @@ import type {
   ChatMessage, DetailKey, GenerateRequest, Generation, GenerationMeta, Health, Job, JobKind, JobStatus, Screen, StrategyInfo, TabKey, TemplateListItem, TemplateManifest, Variant,
 } from "./types";
 
-export interface ActiveJob { id: string; label: string; progress: number; message: string; status: JobStatus; kind: JobKind; startedAt: number; items?: string[] }
+export interface ActiveJob { id: string; label: string; progress: number; message: string; status: JobStatus; kind: JobKind; startedAt: number; items?: string[]; variants?: Record<string, VariantProgress> }
 /** `items`: what the job works on (the strategies of a generation) — the build screen shows one card per item. */
 export interface RunJobOptions { kind?: JobKind; items?: string[]; onDone?: (job: Job) => void; onFailed?: (job: Job) => void }
 
@@ -197,7 +197,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
       onEvent: (ev) => {
         if (ev.status === "done" || ev.status === "failed") return; // settled below, once the full job record is fetched
         const message = ev.message ? humanizeJobMessage(ev.message, (name) => titleIn(latest.current.strategies, name)) : "";
-        setActiveJob((cur) => (cur && cur.id === jobId ? { ...cur, status: ev.status, progress: Math.max(cur.progress, clamp01(ev.progress)), message: message || cur.message } : cur));
+        // every event is folded in here (renders may coalesce several): the per-variant cards never miss a step
+        const step = ev.message ? variantProgress(ev.message) : null;
+        setActiveJob((cur) =>
+          cur && cur.id === jobId
+            ? {
+                ...cur,
+                status: ev.status,
+                progress: Math.max(cur.progress, clamp01(ev.progress)),
+                message: message || cur.message,
+                variants: step ? { ...cur.variants, [step.name]: step.state } : cur.variants,
+              }
+            : cur,
+        );
       },
       onDone: (job) => {
         settle({ status: "done", progress: 1, message: "Готово" });

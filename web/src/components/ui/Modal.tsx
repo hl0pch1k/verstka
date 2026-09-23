@@ -38,15 +38,16 @@ export function Modal({ open, onClose, title, description, footer, size = "md", 
     const overflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     panelRef.current?.focus();
+    // capture phase: Esc closes only the modal, not the drawer it was opened from
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape" && dismissible) {
         e.stopPropagation();
         closeRef.current();
       }
     };
-    window.addEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, true);
     return () => {
-      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keydown", onKey, true);
       document.body.style.overflow = overflow;
       previous?.focus?.();
     };

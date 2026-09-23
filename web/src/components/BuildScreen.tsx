@@ -2,6 +2,7 @@
 // a card per variant that follows it from «в очереди» to «готово». The clock makes the five-minute promise visible.
 import { useEffect, useState } from "react";
 import { Check, Loader2 } from "lucide-react";
+import type { VariantProgress } from "../lib/jobText";
 import { variantHint } from "../lib/plain";
 import { cn } from "../lib/utils";
 import { useApp, type ActiveJob } from "../store";
@@ -30,22 +31,6 @@ const clock = (ms: number) => {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 };
 
-type VariantState = { text: string; done: boolean; frac: number };
-
-/** «Визуальный: свёрстан слайд 6 из 10» → the state of that variant (messages are humanized in the store). */
-function readVariant(message: string): { title: string; state: VariantState } | null {
-  const m = message.match(/^([^:]+):\s*(.+)$/);
-  if (!m) return null;
-  const [, title, what] = m;
-  let r: RegExpMatchArray | null;
-  if ((r = what.match(/^свёрстан слайд (\d+) из (\d+)/))) return { title, state: { text: `вёрстка ${r[1]} из ${r[2]}`, done: false, frac: 0.25 + 0.45 * (Number(r[1]) / Number(r[2])) } };
-  if (/^план готов/.test(what)) return { title, state: { text: "план готов", done: false, frac: 0.2 } };
-  if (/^проверка качества/.test(what)) return { title, state: { text: "проверка качества", done: false, frac: 0.75 } };
-  if (/^исправляю замечания/.test(what)) return { title, state: { text: "исправляю замечания", done: false, frac: 0.85 } };
-  if (/^готово/.test(what)) return { title, state: { text: "готово", done: true, frac: 1 } };
-  return null;
-}
-
 export function BuildScreen({ job }: { job: ActiveJob }) {
   const { strategies, strategyTitle } = useApp();
   // the interval only asks for a re-render; the clock is read at render time (throttled background tabs never lag)
@@ -56,12 +41,7 @@ export function BuildScreen({ job }: { job: ActiveJob }) {
   }, []);
 
   const names = job.items?.length ? job.items : strategies.map((s) => s.name);
-  const [states, setStates] = useState<Record<string, VariantState>>({});
   const message = job.message;
-  useEffect(() => {
-    const read = readVariant(message);
-    if (read) setStates((cur) => ({ ...cur, [read.title]: read.state }));
-  }, [message]);
   // saving the files means every variant has been laid out and checked
   const exporting = /^сохраняю файлы/i.test(message);
 
@@ -112,7 +92,7 @@ export function BuildScreen({ job }: { job: ActiveJob }) {
         <div className={cn("grid gap-4", names.length >= 3 ? "grid-cols-3" : "grid-cols-2")}>
           {names.map((name, i) => {
             const title = strategyTitle(name);
-            const st: VariantState | undefined = exporting ? { text: "готово", done: true, frac: 1 } : states[title];
+            const st: VariantProgress | undefined = exporting ? { text: "готово", done: true, frac: 1 } : job.variants?.[name];
             return (
               <section key={name} className="animate-rise rounded-2xl bg-white p-4 shadow-card" style={{ animationDelay: `${80 + i * 60}ms` }}>
                 <div className="flex items-center gap-3">

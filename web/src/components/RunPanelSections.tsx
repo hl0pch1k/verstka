@@ -1,28 +1,17 @@
-// «Запуск»: the sections of a run_manifest — facts, providers, skills, timings, fixes and audit summary.
+// «Паспорт запуска»: the sections of a run_manifest — facts, models, skills, timings, fixes and the check summary.
 import type { ReactNode } from "react";
-import type { LucideIcon } from "lucide-react";
-import { AlertTriangle, Bot, Info, OctagonAlert } from "lucide-react";
-import { cn, fmtDate, fmtSeconds, scoreTone, shortSha } from "../lib/utils";
+import { cn, fmtSeconds, fmtWhen, plural, scoreTone, shortSha } from "../lib/utils";
 import type { AuditSummary, RunManifest } from "../types";
+import { describeFix } from "./AuditFixes";
+import { normalizeFix } from "./AuditHelpers";
 import { Badge } from "./ui/Badge";
 import { Card, CardBody, CardHeader, CardTitle } from "./ui/Card";
 
-/** Safe text for unknown JSON values (fix results, usage counters). */
-export function str(v: unknown): string {
-  if (v === null || v === undefined) return "—";
-  if (typeof v === "string") return v;
-  if (typeof v === "number" || typeof v === "boolean") return String(v);
-  try {
-    return JSON.stringify(v);
-  } catch {
-    return String(v);
-  }
-}
-
-const STAGE_LABEL: Record<string, string> = { analyze: "Разбор шаблона", plan: "План", render: "Сборка PPTX", audit: "Проверка и исправления", export: "PDF, HTML и превью", total: "Всего" };
+const STAGE_LABEL: Record<string, string> = { analyze: "Разбор шаблона", plan: "План", render: "Сборка PPTX", audit: "Проверка и правки", export: "PDF, HTML и превью", total: "Всего" };
 export const stageLabel = (k: string) => STAGE_LABEL[k] ?? k;
 
-const ROLE_LABEL: Record<string, string> = { llm: "Тексты и план (LLM)", vlm: "Проверка по картинке (VLM)", embed: "Эмбеддинги", audit: "Проверка" };
+const ROLE_LABEL: Record<string, string> = { llm: "Тексты и план", vlm: "Проверка по картинке", embed: "Поиск похожего", audit: "Проверка" };
+const noModels = (m: RunManifest) => Object.values(m.providers).every((p) => p.backend === "none" || p.backend === "mock");
 
 export function Section({ title, hint, actions, children, className }: { title: string; hint?: ReactNode; actions?: ReactNode; children: ReactNode; className?: string }) {
   return (
@@ -62,11 +51,11 @@ export function Table({ head, rows, empty }: { head: string[]; rows: ReactNode[]
 export function Facts({ m, strategyTitle }: { m: RunManifest; strategyTitle(name: string): string }) {
   const facts: Array<{ label: string; value: ReactNode; title?: string }> = [
     { label: "Версия Verstka", value: <span>{m.verstka_version}{m.git_commit && <span className="ml-1.5 font-mono text-xs text-zinc-500">{shortSha(m.git_commit)}</span>}</span>, title: m.git_commit ? `git commit ${m.git_commit}` : undefined },
-    { label: "Создан", value: fmtDate(m.created_at), title: m.created_at },
-    { label: "Стратегия", value: strategyTitle(m.strategy), title: m.strategy },
+    { label: "Собран", value: fmtWhen(m.created_at), title: m.created_at },
+    { label: "Вариант", value: strategyTitle(m.strategy), title: m.strategy },
     { label: "Шаблон", value: m.template.file, title: m.template.id },
     { label: "Платформа", value: m.platform },
-    { label: "Хэш брифа / аутлайна", value: <span className="font-mono text-xs">{shortSha(m.inputs.brief_sha256)} / {shortSha(m.inputs.outline_sha256)}</span>, title: `brief ${m.inputs.brief_sha256 ?? "—"}\noutline ${m.inputs.outline_sha256}` },
+    { label: "Хэш текста / плана", value: <span className="font-mono text-xs">{shortSha(m.inputs.brief_sha256)} / {shortSha(m.inputs.outline_sha256)}</span>, title: `brief ${m.inputs.brief_sha256 ?? "—"}\noutline ${m.inputs.outline_sha256}` },
   ];
   return (
     <div className="grid grid-cols-3 gap-x-6 gap-y-4">
@@ -87,8 +76,8 @@ export function Providers({ m }: { m: RunManifest }) {
     <span key="m" className="font-mono text-xs text-zinc-700">{p.model ?? "—"}</span>,
   ]);
   return (
-    <Section title="Провайдеры" hint="Какой backend и модель отвечали за каждую роль">
-      <Table head={["Роль", "Backend", "Модель"]} rows={rows} empty="Запуск выполнен без моделей — планировщик и аудит работали детерминированно." />
+    <Section title="Модели" hint="Какая модель отвечала за каждую роль">
+      <Table head={["Роль", "Где работает", "Модель"]} rows={rows} empty="Запуск выполнен без моделей — план и проверка работали по правилам." />
     </Section>
   );
 }
@@ -101,7 +90,7 @@ export function Skills({ m }: { m: RunManifest }) {
   ]);
   return (
     <Section title="Навыки" hint="Версии и хэши инструкций, с которыми собран вариант">
-      <Table head={["Навык", "Версия", "SHA-256"]} rows={rows} empty="Реестр навыков в манифесте пуст." />
+      <Table head={["Навык", "Версия", "SHA-256"]} rows={rows} empty={noModels(m) ? "Вариант собран без моделей — навыки не вызывались." : "Навыки в паспорте не записаны."} />
     </Section>
   );
 }
@@ -111,13 +100,13 @@ export function Timings({ m }: { m: RunManifest }) {
   const total = m.timings_s.total ?? stages.reduce((s, [, v]) => s + v, 0);
   const max = Math.max(...stages.map(([, v]) => v), 0.001);
   return (
-    <Section title="Тайминги" hint="Секунды на каждый этап" actions={<Badge tone="neutral">{fmtSeconds(total)} всего</Badge>}>
+    <Section title="Время по этапам" hint="Сколько занял каждый шаг сборки" actions={<Badge tone="neutral">{fmtSeconds(total)} всего</Badge>}>
       {stages.length === 0 ? (
         <p className="py-2 text-[13px] text-zinc-500">Этапы не измерялись.</p>
       ) : (
         <ul className="space-y-2.5">
           {stages.map(([k, v]) => (
-            <li key={k} className="grid grid-cols-[150px_1fr_64px] items-center gap-3 text-[13px]">
+            <li key={k} className="grid grid-cols-[140px_1fr_56px] items-center gap-3 text-[13px]">
               <span className="truncate text-zinc-700" title={k}>{stageLabel(k)}</span>
               <div className="h-2 overflow-hidden rounded-full bg-zinc-100">
                 <div className="h-full rounded-full bg-accent transition-[width] duration-500" style={{ width: `${Math.max(2, (v / max) * 100)}%` }} />
@@ -131,22 +120,28 @@ export function Timings({ m }: { m: RunManifest }) {
   );
 }
 
-export function Fixes({ m }: { m: RunManifest }) {
+export function Fixes({ m, slideOf, templateSlide }: { m: RunManifest; slideOf(outlineId: string): number | null; templateSlide(patternId: string): number | null }) {
   const list = m.applied_fixes;
   return (
-    <Section title="Автоисправления" hint="Что аудит поправил сам" actions={<Badge tone={list.length ? "accent" : "neutral"}>{list.length}</Badge>}>
+    <Section title="Автоисправления" hint="Что проверка качества поправила сама, по проходам" actions={<Badge tone={list.length ? "accent" : "neutral"}>{list.length}</Badge>}>
       {list.length === 0 ? (
-        <p className="py-2 text-[13px] text-zinc-500">Автофикс ничего не менял — вариант прошёл аудит без правок.</p>
+        <p className="py-2 text-[13px] text-zinc-500">Исправлять ничего не пришлось.</p>
       ) : (
         <ul className="scroll-thin max-h-72 divide-y divide-zinc-100 overflow-y-auto">
-          {list.map((f, i) => (
-            <li key={i} className="flex items-start gap-3 py-2 text-[13px]">
-              <span className="w-8 shrink-0 text-xs tabular-nums text-zinc-400">#{str(f.iteration)}</span>
-              <Badge size="sm" tone="info" className="font-mono">{str(f.action)}</Badge>
-              {f.outline_id !== undefined && <span className="shrink-0 font-mono text-xs text-zinc-500">{str(f.outline_id)}</span>}
-              <span className="min-w-0 flex-1 break-words text-zinc-700">{str(f.result ?? f.description)}</span>
-            </li>
-          ))}
+          {list.map((f, i) => {
+            const r = normalizeFix(f);
+            const d = describeFix(r, slideOf, templateSlide);
+            return (
+              <li key={i} className="flex items-baseline gap-3 py-2 text-[13px]" title={JSON.stringify(f)}>
+                <span className="w-16 shrink-0 text-xs tabular-nums text-zinc-400">{r.iteration !== null ? `проход ${r.iteration}` : ""}</span>
+                <span className="w-16 shrink-0 text-zinc-500">{d.slide ? `Слайд ${d.slide}` : "Все слайды"}</span>
+                <span className="min-w-0 flex-1 text-zinc-900">
+                  {d.title}
+                  {d.extra && <span className="text-zinc-500"> — {d.extra}</span>}
+                </span>
+              </li>
+            );
+          })}
         </ul>
       )}
     </Section>
@@ -161,29 +156,26 @@ export function Audit({ m, fallback }: { m: RunManifest; fallback: AuditSummary 
   };
   const score = num("score");
   const checks = (Array.isArray(a.checks_run) ? a.checks_run : fallback?.checks_run ?? []) as string[];
-  const items: Array<{ icon: LucideIcon; label: string; value: number | null; cls: string }> = [
-    { icon: OctagonAlert, label: "Ошибки", value: num("errors"), cls: "text-red-600" },
-    { icon: AlertTriangle, label: "Предупреждения", value: num("warnings"), cls: "text-amber-600" },
-    { icon: Info, label: "Заметки", value: num("infos"), cls: "text-sky-600" },
-    { icon: Bot, label: "Флаги модели", value: num("model_flags"), cls: "text-accent-700" },
+  const items: Array<{ label: string; value: number | null; cls: string }> = [
+    { label: "Ошибки", value: num("errors"), cls: "text-red-600" },
+    { label: "Предупреждения", value: num("warnings"), cls: "text-amber-600" },
+    { label: "Заметки", value: num("infos"), cls: "text-sky-600" },
+    { label: "Замечания модели", value: num("model_flags"), cls: "text-accent-700" },
   ];
   return (
     <Section
-      title="Итог аудита"
-      hint={checks.length ? `${checks.length} проверок: ${checks.join(", ")}` : "Аудит не запускался"}
-      actions={<Badge tone={scoreTone(score)}>{score === null ? "нет оценки" : `${Math.round(score)} / 100`}</Badge>}
+      title="Итог проверки"
+      hint={<span title={checks.join(", ")}>{checks.length ? `${plural(checks.length, "проверка", "проверки", "проверок")} по правилам шаблона` : "Проверка не запускалась"}</span>}
+      actions={<Badge tone={scoreTone(score)}>{score === null ? "нет оценки" : `${Math.round(score)}/100`}</Badge>}
     >
-      <div className="grid grid-cols-4 gap-4">
+      <dl className="divide-y divide-zinc-100">
         {items.map((it) => (
-          <div key={it.label}>
-            <div className="flex items-center gap-1.5 text-xs text-zinc-500">
-              <it.icon className="h-3.5 w-3.5" aria-hidden />
-              {it.label}
-            </div>
-            <div className={cn("mt-1 text-xl font-semibold tabular-nums", it.value ? it.cls : "text-zinc-900")}>{it.value ?? "—"}</div>
+          <div key={it.label} className="flex items-baseline justify-between py-2 text-[13px]">
+            <dt className="text-zinc-600">{it.label}</dt>
+            <dd className={cn("text-[15px] font-semibold tabular-nums", it.value ? it.cls : "text-zinc-900")}>{it.value ?? "—"}</dd>
           </div>
         ))}
-      </div>
+      </dl>
     </Section>
   );
 }

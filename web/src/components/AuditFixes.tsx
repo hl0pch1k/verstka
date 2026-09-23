@@ -5,7 +5,7 @@ import { api } from "../api";
 import { errText } from "../lib/narrate";
 import { cn, plural, SEVERITY_LABEL } from "../lib/utils";
 import type { CheckSpec } from "../types";
-import { ACTION_DONE, categoryLabel, normalizeFix, SEVERITY_RANK } from "./AuditHelpers";
+import { ACTION_DONE, categoryLabel, normalizeFix, SEVERITY_RANK, type FixRecord } from "./AuditHelpers";
 import { Button } from "./ui/Button";
 import { Collapsible } from "./ui/Collapsible";
 import { Spinner } from "./ui/Spinner";
@@ -22,6 +22,18 @@ function resultText(result: string | null, templateSlide: (patternId: string) =>
   return /[а-яё]/i.test(result) && !/^slide \d+:/.test(result) ? result : null;
 }
 
+/** A fix record in words: the slide it touched, what was done and, when known, how. */
+export function describeFix(r: FixRecord, slideOf: (outlineId: string) => number | null, templateSlide: (patternId: string) => number | null): { slide: number | null; title: string; extra: string | null } {
+  const said = resultText(r.result, templateSlide);
+  // an in-place edit describes itself in full («Шрифт заменён на Play…»); the others get a done-deed title
+  const own = r.action === "xml" && said ? said : null;
+  return {
+    slide: r.slide ?? (r.outlineId ? slideOf(r.outlineId) : null),
+    title: own ?? ACTION_DONE[r.kind ?? ""] ?? ACTION_DONE[r.action ?? ""] ?? "Поправлено оформление",
+    extra: own ? null : said,
+  };
+}
+
 export function AppliedFixes({ fixes, slideOf, templateSlide }: {
   fixes: Record<string, unknown>[];
   /** outline id (sl3) → 1-based slide number */
@@ -35,12 +47,7 @@ export function AppliedFixes({ fixes, slideOf, templateSlide }: {
     <Collapsible title="Что уже исправлено автоматически" hint={plural(rows.length, "правка", "правки", "правок")} defaultOpen={false} keepMounted={false} bodyClassName="px-0 pb-2 pt-0">
       <ol className="divide-y divide-zinc-100">
         {rows.map((r, idx) => {
-          const n = r.slide ?? (r.outlineId ? slideOf(r.outlineId) : null);
-          const said = resultText(r.result, templateSlide);
-          // an in-place edit describes itself in full («Шрифт заменён на Play…»); the others get a done-deed title
-          const own = r.action === "xml" && said ? said : null;
-          const title = own ?? ACTION_DONE[r.kind ?? ""] ?? ACTION_DONE[r.action ?? ""] ?? "Поправлено оформление";
-          const extra = own ? null : said;
+          const { slide: n, title, extra } = describeFix(r, slideOf, templateSlide);
           return (
             <li key={idx} className="flex items-baseline gap-3 px-6 py-2.5 text-[13px]">
               <span className="w-16 shrink-0 text-zinc-500">{n ? `Слайд ${n}` : "Все слайды"}</span>

@@ -22,6 +22,23 @@ function templateStep(s: string): string {
   return s;
 }
 
+/** Where one variant of a generation is: a short status for its card and the share of its work done. */
+export interface VariantProgress { text: string; done: boolean; frac: number }
+
+/** «visual: rendered slide 6/10» → the progress of that variant; null for messages about the whole job. */
+export function variantProgress(message: string): { name: string; state: VariantProgress } | null {
+  const m = message.trim().match(/^([a-z_]+): (.+)$/);
+  if (!m || m[1] === "analyze" || m[1] === "plan" || m[1] === "export") return null;
+  const [, name, what] = m;
+  let r: RegExpMatchArray | null;
+  if ((r = what.match(/^rendered slide (\d+)\/(\d+)$/))) return { name, state: { text: `вёрстка ${r[1]} из ${r[2]}`, done: false, frac: 0.25 + 0.45 * (Number(r[1]) / Math.max(1, Number(r[2]))) } };
+  if (/^planned \d+ slides/.test(what)) return { name, state: { text: "план готов", done: false, frac: 0.2 } };
+  if (what === "audit") return { name, state: { text: "проверка качества", done: false, frac: 0.75 } };
+  if (/^autofix/.test(what)) return { name, state: { text: "исправляю замечания", done: false, frac: 0.85 } };
+  if (/^done in /.test(what)) return { name, state: { text: "готово", done: true, frac: 1 } };
+  return null;
+}
+
 export function humanizeJobMessage(message: string, titleOf: (strategy: string) => string): string {
   const msg = message.trim();
   let m = msg.match(/^analyze: (.+)$/);

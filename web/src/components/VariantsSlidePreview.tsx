@@ -2,7 +2,7 @@
 // the way to the full screen.
 import { useState } from "react";
 import { ChevronLeft, ChevronRight, ImageOff, Maximize2 } from "lucide-react";
-import { cn, SEVERITY_LABEL } from "../lib/utils";
+import { cn, plural, SEVERITY_LABEL } from "../lib/utils";
 import type { BboxFrac, Issue, Severity } from "../types";
 import { Badge } from "./ui/Badge";
 import { Button } from "./ui/Button";
@@ -25,6 +25,8 @@ interface Props {
   onSelect(n: number): void;
   onAspect(a: number): void;
   onZoom(): void;
+  /** Opens the full list of remarks (the quality check). */
+  onOpenIssues(): void;
 }
 
 const BOX: Record<Severity, string> = {
@@ -37,6 +39,7 @@ const TAG: Record<Severity, string> = { error: "bg-red-600", warn: "bg-amber-500
 function Overlay({ issue, box, highlighted, onHighlight }: { issue: Issue; box: BboxFrac; highlighted: boolean; onHighlight(id: string | null): void }) {
   const sev = issue.severity;
   const tagInside = box.y < 0.035; // no room above the box — keep the label inside the slide
+  const tagRight = box.x > 0.86; // a label hung from the left edge would run off the slide
   const tipRight = box.x + box.w / 2 > 0.5;
   const tipAbove = box.y + box.h > 0.72;
   return (
@@ -51,9 +54,10 @@ function Overlay({ issue, box, highlighted, onHighlight }: { issue: Issue; box: 
     >
       <span
         className={cn(
-          "absolute left-0 whitespace-nowrap px-1.5 text-[10px] font-semibold leading-4 text-white",
+          "absolute whitespace-nowrap px-1.5 text-[10px] font-semibold leading-4 text-white",
           TAG[sev],
-          tagInside ? "top-0 rounded-br" : "-top-0.5 -translate-y-full rounded-t",
+          tagRight ? "right-0" : "left-0",
+          tagInside ? (tagRight ? "top-0 rounded-bl" : "top-0 rounded-br") : "-top-0.5 -translate-y-full rounded-t",
         )}
       >
         {SEVERITY_LABEL[sev]}
@@ -75,7 +79,7 @@ function Overlay({ issue, box, highlighted, onHighlight }: { issue: Issue; box: 
   );
 }
 
-export function VariantsSlidePreview({ src, slide, total, headline, kind, issues, aspect, showIssues, onToggleIssues, highlightId, onHighlight, onSelect, onAspect, onZoom }: Props) {
+export function VariantsSlidePreview({ src, slide, total, headline, kind, issues, aspect, showIssues, onToggleIssues, highlightId, onHighlight, onSelect, onAspect, onZoom, onOpenIssues }: Props) {
   const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
   const failed = !src || failedSrc === src;
@@ -91,6 +95,8 @@ export function VariantsSlidePreview({ src, slide, total, headline, kind, issues
       });
     }
   }
+
+  const unplaced = issues.length - new Set(boxes.map((b) => b.issue.id)).size;
 
   return (
     <Card className="min-w-0">
@@ -163,12 +169,22 @@ export function VariantsSlidePreview({ src, slide, total, headline, kind, issues
           {boxes.map(({ issue, box, key }) => (
             <Overlay key={key} issue={issue} box={box} highlighted={highlightId === issue.id} onHighlight={onHighlight} />
           ))}
+          {/* remarks without a place on the slide (a font size, the whole slide) get a pill instead of a frame */}
+          {showIssues && !loading && unplaced > 0 && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenIssues();
+              }}
+              className="absolute bottom-3 left-3 z-20 inline-flex cursor-pointer items-center gap-2 rounded-full bg-white/95 py-1.5 pl-3 pr-3.5 text-xs font-semibold text-zinc-800 shadow-raise backdrop-blur-sm transition-colors hover:bg-white animate-fade focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+            >
+              <span className={cn("h-2 w-2 rounded-full", worst === "error" ? "bg-red-500" : worst === "warn" ? "bg-amber-400" : "bg-sky-500")} aria-hidden />
+              {unplaced === issues.length ? plural(unplaced, "замечание", "замечания", "замечаний") : `Ещё ${plural(unplaced, "замечание", "замечания", "замечаний")} без места на слайде`}
+              <span className="font-medium text-accent-700">Открыть список</span>
+            </button>
+          )}
         </div>
-        {showIssues && issues.length > 0 && (
-          <p className="mt-2 px-1 text-xs text-zinc-500">
-            {boxes.length === 0 && !loading ? "У замечаний этого слайда нет области на макете — они перечислены в «Подробнее»." : "Наведите на рамку, чтобы прочитать замечание."}
-          </p>
-        )}
       </CardBody>
     </Card>
   );

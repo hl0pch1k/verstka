@@ -10,7 +10,7 @@ export function FactsRegistry({ facts, used }: { facts: Fact[]; used: Set<string
   if (facts.length === 0) return null;
   const inUse = facts.filter((f) => used.has(f.id)).length;
   return (
-    <Collapsible title="Цифры из текста" hint={`${plural(facts.length, "цифра", "цифры", "цифр")}, на слайдах ${inUse} — других чисел на слайдах нет`} bodyClassName="px-0 pb-2 pt-0">
+    <Collapsible title="Цифры из текста" hint={`${plural(facts.length, "цифра", "цифры", "цифр")} в тексте, ${inUse} — на слайдах. Своих чисел Verstka не добавляет`} bodyClassName="px-0 pb-2 pt-0">
       <table className="w-full border-collapse text-[13px]">
         <thead className="text-left text-xs font-medium text-zinc-400">
           <tr>

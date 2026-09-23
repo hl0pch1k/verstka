@@ -1,10 +1,11 @@
-// «Запуск»: паспорт варианта (run_manifest) — версии навыков, модели, тайминги, автофиксы, итог аудита,
-// живой реестр навыков сервера и сравнение с другим запуском.
+// «Паспорт запуска» of a variant (run_manifest): versions of skills, models, timings, fixes, the check summary, the
+// live skills registry of the server and a comparison with another run.
 import { useEffect, useMemo, useState } from "react";
 import { ArrowRight, FileJson, GitCompare, Info } from "lucide-react";
 import { api } from "../api";
 import { errText } from "../lib/narrate";
-import { fmtDate, scoreTone, shortSha } from "../lib/utils";
+import { templateName } from "../lib/plain";
+import { fmtWhen, scoreTone, shortSha } from "../lib/utils";
 import { useApp } from "../store";
 import type { DiffResponse } from "../types";
 import { RunPanelRegistry } from "./RunPanelRegistry";
@@ -21,15 +22,15 @@ function DiffView({ d, strategyTitle }: { d: DiffResponse; strategyTitle(name: s
   const skills = Object.entries(d.diff.skills);
   const providers = Object.entries(d.diff.providers);
   const rows: Array<{ label: string; from: string; to: string }> = [];
-  if (d.diff.strategy) rows.push({ label: "Стратегия", from: strategyTitle(d.diff.strategy.from), to: strategyTitle(d.diff.strategy.to) });
-  if (d.diff.audit_score) rows.push({ label: "Оценка аудита", from: d.diff.audit_score.from === null ? "—" : String(d.diff.audit_score.from), to: d.diff.audit_score.to === null ? "—" : String(d.diff.audit_score.to) });
-  for (const [role, ch] of providers) rows.push({ label: `Провайдер · ${role}`, from: ch.from ? `${ch.from.backend} · ${ch.from.model ?? "—"}` : "без модели", to: ch.to ? `${ch.to.backend} · ${ch.to.model ?? "—"}` : "без модели" });
+  if (d.diff.strategy) rows.push({ label: "Вариант", from: strategyTitle(d.diff.strategy.from), to: strategyTitle(d.diff.strategy.to) });
+  if (d.diff.audit_score) rows.push({ label: "Оценка качества", from: d.diff.audit_score.from === null ? "—" : String(d.diff.audit_score.from), to: d.diff.audit_score.to === null ? "—" : String(d.diff.audit_score.to) });
+  for (const [role, ch] of providers) rows.push({ label: `Модель · ${role}`, from: ch.from ? `${ch.from.backend} · ${ch.from.model ?? "—"}` : "без модели", to: ch.to ? `${ch.to.backend} · ${ch.to.model ?? "—"}` : "без модели" });
   for (const [name, ch] of skills) rows.push({ label: `Навык · ${name}`, from: ch.from ? `v${ch.from.version} · ${shortSha(ch.from.sha256)}` : "не участвовал", to: ch.to ? `v${ch.to.version} · ${shortSha(ch.to.sha256)}` : "не участвовал" });
   if (rows.length === 0) {
     return (
       <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-[13px] text-emerald-800">
         <Info className="h-4 w-4" aria-hidden />
-        Отличий нет: те же версии навыков, модели, стратегия и оценка аудита.
+        Отличий нет: те же версии навыков, модели, вариант и оценка качества.
       </div>
     );
   }
@@ -91,17 +92,18 @@ function Compare() {
   };
 
   return (
-    <Section title="Сравнить с другим запуском" hint="Версии навыков, модели, стратегия и оценка аудита двух паспортов">
+    <Section title="Сравнить с другим запуском" hint="Чем отличаются версии навыков, модели, вариант и оценка качества">
       <div className="flex flex-wrap items-center gap-2">
-        <select className={selectCls} value={otherGid} onChange={(e) => setOtherGid(e.target.value)} aria-label="Другая генерация">
-          <option value="">Выберите генерацию…</option>
+        <select className={selectCls} value={otherGid} onChange={(e) => setOtherGid(e.target.value)} aria-label="Другой запуск">
+          <option value="">Выберите запуск…</option>
           {done.map((g) => (
             <option key={g.id} value={g.id}>
-              {fmtDate(g.created_at)} · {g.template_file ?? g.template_id}{g.id === generationId ? " · текущая" : ""}
+              {fmtWhen(g.created_at)} · {templateName(g.template_file, g.template_id)}{g.id === generationId ? " · этот" : ""}
             </option>
           ))}
         </select>
-        <select className={selectCls} value={otherStrategy} onChange={(e) => setOtherStrategy(e.target.value)} disabled={!other} aria-label="Стратегия другого запуска">
+        <select className={selectCls} value={otherStrategy} onChange={(e) => setOtherStrategy(e.target.value)} disabled={!other} aria-label="Вариант другого запуска">
+          {!other && <option value="">Вариант…</option>}
           {otherStrategies.map((s) => (
             <option key={s} value={s}>{strategyTitle(s)}</option>
           ))}
@@ -116,7 +118,7 @@ function Compare() {
         ) : result ? (
           <DiffView d={result} strategyTitle={strategyTitle} />
         ) : (
-          <p className="text-[13px] text-zinc-500">Выберите генерацию и стратегию — покажем, чем отличаются паспорта запусков: это ответ на вопрос «какая версия навыка собрала эту презентацию».</p>
+          <p className="text-[13px] text-zinc-500">Выберите запуск и вариант — покажем, чем отличаются их паспорта: какими версиями навыков и какими моделями собрана каждая презентация.</p>
         )}
       </div>
     </Section>
@@ -124,7 +126,7 @@ function Compare() {
 }
 
 export function RunPanel() {
-  const { generation, generationLoading, activeVariant, activeStrategy, setActiveStrategy, strategyTitle, setTab } = useApp();
+  const { generation, generationLoading, activeVariant, activeStrategy, setActiveStrategy, strategyTitle, setTab, manifest } = useApp();
 
   if (generationLoading && !generation) {
     return (
@@ -137,13 +139,19 @@ export function RunPanel() {
     return (
       <EmptyState
         icon={FileJson}
-        title="Паспорт запуска появится после генерации"
-        hint="Каждый вариант сохраняет run_manifest.json: версии и хэши навыков, модели, конфиг, тайминги и коммит — так видно, какая версия чего собрала презентацию."
+        title="Паспорт запуска появится после сборки"
+        hint="Каждый вариант сохраняет run_manifest.json: версии навыков, модели, настройки, время этапов и коммит — по нему видно, чем собрана презентация."
       />
     );
   }
   const m = activeVariant?.run_manifest ?? null;
   const variants = generation.variants;
+  const outline = activeVariant?.outline ?? null;
+  const slideOf = (outlineId: string) => {
+    const i = outline?.slides.findIndex((s) => s.id === outlineId) ?? -1;
+    return i >= 0 ? i + 1 : null;
+  };
+  const templateSlide = (pid: string) => (manifest?.template_id === generation.template_id ? manifest.patterns.find((p) => p.id === pid)?.source_slide ?? null : null);
   return (
     <div className="space-y-4 animate-fade-in">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -156,10 +164,10 @@ export function RunPanel() {
         {m?.git_commit && <Badge tone="neutral" className="font-mono">commit {shortSha(m.git_commit)}</Badge>}
       </div>
       {!m ? (
-        <EmptyState compact icon={FileJson} title="У этого варианта нет run_manifest.json" hint="Вариант собран без паспорта — так бывает, если генерация прервалась." action={<Button size="sm" onClick={() => setTab("variants")}>К слайдам</Button>} />
+        <EmptyState compact icon={FileJson} title="У этого варианта нет паспорта" hint="run_manifest.json не сохранился — так бывает, если сборка прервалась." action={<Button size="sm" onClick={() => setTab("variants")}>К слайдам</Button>} />
       ) : (
         <>
-          <Section title="Паспорт запуска" hint="run_manifest.json варианта">
+          <Section title="Сведения о запуске" hint="Из run_manifest.json — по нему любую презентацию можно воспроизвести">
             <Facts m={m} strategyTitle={strategyTitle} />
           </Section>
           <div className="grid grid-cols-2 gap-4">
@@ -170,7 +178,7 @@ export function RunPanel() {
             <Timings m={m} />
             <Audit m={m} fallback={activeVariant?.audit?.summary ?? null} />
           </div>
-          <Fixes m={m} />
+          <Fixes m={m} slideOf={slideOf} templateSlide={templateSlide} />
         </>
       )}
       <RunPanelRegistry manifest={m} />

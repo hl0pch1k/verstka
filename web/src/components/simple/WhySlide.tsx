@@ -62,6 +62,8 @@ export function WhySlide() {
   const issues = issuesBySlide(v.audit).get(selectedSlide) ?? [];
   const reasons = entry ? humanReasons(entry.reasons, strategyTitle, (pid) => patternById(pid)?.source_slide ?? null) : [];
   const match = entry ? Math.round(Math.min(1, Math.max(0, entry.score)) * 100) : null;
+  const others = (entry?.alternatives ?? []).filter(([pid]) => pid !== entry?.pattern_id).map(([, s]) => s);
+  const runnerUp = others.length ? Math.round(Math.min(1, Math.max(0, Math.max(...others))) * 100) : null;
   const alternatives = (entry?.alternatives ?? [])
     .map(([pid, score]) => ({ p: patternById(pid), score }))
     .filter((a): a is { p: Pattern; score: number } => !!a.p && a.score > 0.05 && a.p.id !== pattern?.id)
@@ -95,12 +97,23 @@ export function WhySlide() {
         {match !== null && (
           <div className="mt-5">
             <div className="flex items-baseline justify-between text-[13px]">
-              <span className="font-medium text-zinc-700">{pattern ? `Образец подходит к содержанию` : "Совпадение с лучшим образцом"}</span>
-              <span className="font-semibold tabular-nums text-zinc-900">{match}%</span>
+              <span className="font-medium text-zinc-700">Оценка подбора</span>
+              <span className="font-semibold tabular-nums text-zinc-900">{match}/100</span>
             </div>
             <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-zinc-100">
-              <div className={cn("h-full rounded-full transition-[width] duration-700 ease-out", match >= 70 ? "bg-emerald-500" : match >= 45 ? "bg-accent" : "bg-amber-400")} style={{ width: `${match}%` }} />
+              <div className={cn("h-full rounded-full transition-[width] duration-700 ease-out", !pattern ? "bg-zinc-400" : match >= 70 ? "bg-emerald-500" : "bg-accent")} style={{ width: `${match}%` }} />
             </div>
+            <p className="mt-1.5 text-xs text-zinc-500">
+              {!pattern
+                ? "Ни один образец не подошёл достаточно хорошо — слайд собран с нуля в стиле шаблона"
+                : runnerUp === null
+                  ? "Единственный макет шаблона, подходящий для такого слайда"
+                  : runnerUp <= match
+                    ? `Лучший из рассмотренных: у остальных макетов ${runnerUp}/100 и ниже`
+                    : entry?.reasons.some((r) => r.startsWith("автофикс:"))
+                      ? `Заменён проверкой качества: макет с оценкой ${runnerUp}/100 дал замечания`
+                      : "Выбран с учётом стиля варианта и соседних слайдов"}
+            </p>
           </div>
         )}
         {reasons.length > 0 && (
@@ -130,7 +143,7 @@ export function WhySlide() {
                 </div>
                 <figcaption className="mt-1.5 flex items-baseline justify-between gap-2 text-xs">
                   <span className="truncate text-zinc-600">Слайд {p.source_slide} · {kindLabel(p.kind)}</span>
-                  <span className="shrink-0 font-semibold tabular-nums text-zinc-900">{Math.round(score * 100)}%</span>
+                  <span className="shrink-0 font-semibold tabular-nums text-zinc-900">{Math.round(score * 100)}/100</span>
                 </figcaption>
               </figure>
             ))}

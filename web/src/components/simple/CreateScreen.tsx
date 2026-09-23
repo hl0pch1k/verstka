@@ -186,6 +186,9 @@ export function CreateScreen() {
 
       <Step n={1} title="Выберите шаблон" hint="Фирменный шаблон PowerPoint — по нему будут оформлены слайды" done={!!templateId && !manifestLoading} delay={60} shake={shaking === 1}>
         <TemplatePicker />
+        {showErrors && !templateId && !healthError && (
+          <p role="alert" className="mt-3 text-[13px] font-medium text-red-600 animate-fade">Выберите шаблон или загрузите свой .pptx</p>
+        )}
       </Step>
 
       <Step n={2} title="О чём презентация" hint="Тезисы, цифры и таблицы — всё попадёт на слайды, заголовки станут выводами" done={briefLen >= BRIEF_MIN} delay={120} shake={shaking === 2}>
@@ -206,9 +209,15 @@ export function CreateScreen() {
           {briefLen === 0 && <Button size="sm" variant="tonal" icon={FileText} disabled={busy} onClick={fillSample} className="animate-fade">Вставить пример</Button>}
           <input ref={fileRef} type="file" accept=".md,.txt,.markdown,text/markdown,text/plain" className="hidden" onChange={(e) => void onFile(e)} />
           <Button size="sm" variant="ghost" icon={Paperclip} disabled={busy} onClick={() => fileRef.current?.click()}>Загрузить из файла</Button>
-          <span className={cn("ml-auto text-xs tabular-nums", briefLen > 0 && briefLen < BRIEF_MIN ? "text-amber-600" : "text-zinc-400")}>
-            {briefLen > 0 ? plural(briefLen, "символ", "символа", "символов").replace(/^\d+/, briefLen.toLocaleString("ru-RU")) : ""}
-          </span>
+          {showErrors && templateId && briefLen < BRIEF_MIN ? (
+            <span role="alert" className="ml-auto text-xs font-medium text-red-600 animate-fade">
+              {briefLen === 0 ? "Напишите, о чём рассказать, — или вставьте пример" : `Пока ${plural(briefLen, "символ", "символа", "символов")} — нужно хотя бы ${BRIEF_MIN}`}
+            </span>
+          ) : (
+            <span className={cn("ml-auto text-xs tabular-nums", briefLen > 0 && briefLen < BRIEF_MIN ? "text-amber-600" : "text-zinc-400")}>
+              {briefLen > 0 ? plural(briefLen, "символ", "символа", "символов").replace(/^\d+/, briefLen.toLocaleString("ru-RU")) : ""}
+            </span>
+          )}
         </div>
 
         <div className="mt-6 grid grid-cols-[auto_minmax(0,1fr)] items-end gap-6 border-t border-zinc-100 pt-6">

@@ -14,7 +14,7 @@ import { variantRev, withRev } from "./VariantsHelpers";
 function Thumb({ src, aspect, n }: { src: string | null; aspect: string; n: number }) {
   const [broken, setBroken] = useState(false);
   return (
-    <div className="relative w-44 shrink-0 overflow-hidden rounded-xl bg-zinc-100 shadow-inner-line" style={{ aspectRatio: aspect }}>
+    <div className="relative w-44 shrink-0 self-start overflow-hidden rounded-xl bg-zinc-100 shadow-inner-line" style={{ aspectRatio: aspect }}>
       {src && !broken && <img src={src} alt="" loading="lazy" draggable={false} onError={() => setBroken(true)} className="h-full w-full object-cover" />}
       <span className="absolute bottom-1.5 left-1.5 rounded-md bg-ink/70 px-1.5 text-[11px] font-semibold tabular-nums text-white backdrop-blur-sm">{n}</span>
     </div>

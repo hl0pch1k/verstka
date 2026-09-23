@@ -46,7 +46,7 @@ export function sessionId(): string {
 export function fmtSeconds(s: number | undefined | null): string {
   if (s === undefined || s === null || Number.isNaN(s)) return "—";
   if (s < 1) return `${(s * 1000).toFixed(0)} мс`;
-  if (s < 60) return `${s.toFixed(1)} с`;
+  if (s < 60) return `${s.toFixed(1).replace(".", ",")} с`;
   const m = Math.floor(s / 60);
   return `${m} мин ${Math.round(s - m * 60)} с`;
 }

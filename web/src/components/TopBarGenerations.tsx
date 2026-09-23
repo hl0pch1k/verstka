@@ -16,6 +16,17 @@ function bestScore(g: GenerationMeta): number | null {
   return scores.length ? Math.max(...scores) : null;
 }
 
+/** «10 слайдов» or «8–10 слайдов» — what was built (the variants may differ), else what was asked for. */
+function slidesText(g: GenerationMeta): string | null {
+  const built = Object.values(g.summary ?? {})
+    .map((s) => s.n_slides)
+    .filter((n): n is number => typeof n === "number" && n > 0);
+  if (built.length === 0) return g.slides ? plural(g.slides, "слайд", "слайда", "слайдов") : null;
+  const lo = Math.min(...built);
+  const hi = Math.max(...built);
+  return lo === hi ? plural(hi, "слайд", "слайда", "слайдов") : `${lo}–${plural(hi, "слайд", "слайда", "слайдов")}`;
+}
+
 const titleOf = (g: GenerationMeta) =>
   g.brief
     ?.split("\n")
@@ -154,7 +165,6 @@ export function TopBarGenerations({ generations, currentId, onSelect }: Props) {
                 const current = g.id === currentId;
                 const running = g.status === "running" || g.status === "queued";
                 const failed = g.status === "failed";
-                const slides = g.slides ?? Object.values(g.summary ?? {})[0]?.n_slides;
                 return (
                   <li key={g.id}>
                     <button
@@ -173,7 +183,7 @@ export function TopBarGenerations({ generations, currentId, onSelect }: Props) {
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-[14px] font-semibold text-zinc-900" title={titleOf(g)}>{titleOf(g)}</span>
                         <span className="mt-0.5 block truncate text-xs text-zinc-500">
-                          {[fmtWhen(g.created_at), plural(g.strategies.length, "вариант", "варианта", "вариантов"), slides ? plural(slides, "слайд", "слайда", "слайдов") : null].filter(Boolean).join(" · ")}
+                          {[fmtWhen(g.created_at), plural(g.strategies.length, "вариант", "варианта", "вариантов"), slidesText(g)].filter(Boolean).join(" · ")}
                         </span>
                       </span>
                       {running ? (

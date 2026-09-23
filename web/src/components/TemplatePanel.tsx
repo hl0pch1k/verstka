@@ -2,10 +2,10 @@
 // palette by area — then the expert sections: slide layouts with slots and votes, palette roles, type scale, grid,
 // designer rules, analysis warnings.
 import { useState } from "react";
-import { ExternalLink, FileWarning, ImageOff } from "lucide-react";
+import { FileWarning, ImageOff } from "lucide-react";
 import { fontStack, useTemplateFont } from "../lib/fonts";
 import { templateName } from "../lib/plain";
-import { cn, fmtDate, isLightHex, plural } from "../lib/utils";
+import { cn, fmtWhen, isLightHex, plural } from "../lib/utils";
 import { useApp } from "../store";
 import type { TemplateManifest } from "../types";
 import { PatternGallery } from "./TemplatePanelPatterns";
@@ -64,7 +64,7 @@ function Overview({ manifest }: { manifest: TemplateManifest }) {
         </div>
         <div className="flex min-w-0 flex-col gap-3">
           <h3 className="text-xl font-bold leading-7 tracking-tight text-zinc-900">{templateName(manifest.source_file, manifest.template_id)}</h3>
-          <p className="text-[13px] text-zinc-500">{item ? `Разобран ${fmtDate(item.analyzed_at)}` : "Разобран"} · анализ v{manifest.analysis_version}</p>
+          <p className="text-[13px] text-zinc-500" title={`Версия анализа ${manifest.analysis_version}`}>{item ? `Разобран ${fmtWhen(item.analyzed_at)}` : "Шаблон разобран"}</p>
           <dl className="grid grid-cols-2 gap-2">
             {facts.map(([k, v]) => (
               <div key={k} className="rounded-xl bg-zinc-100 px-3 py-2">
@@ -92,10 +92,6 @@ function Overview({ manifest }: { manifest: TemplateManifest }) {
           <Ribbon manifest={manifest} />
         </div>
       </div>
-      {manifest.narration && <p className="text-[13px] leading-5 text-zinc-600">{manifest.narration}</p>}
-      <a href={manifest.gallery_url} target="_blank" rel="noreferrer" className="inline-flex w-fit items-center gap-1.5 text-[13px] font-semibold text-accent-700 hover:underline">
-        <ExternalLink className="h-3.5 w-3.5" aria-hidden /> Все слайды шаблона на одной странице
-      </a>
     </section>
   );
 }

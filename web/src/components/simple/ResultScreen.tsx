@@ -167,6 +167,7 @@ function Deck({ generation }: { generation: Generation }) {
             onSelect={setSelectedSlide}
             onAspect={setNaturalAspect}
             onZoom={() => setZoom(true)}
+            onOpenIssues={() => open("quality")}
           />
           <SlideStrip variant={variant} rev={rev} total={total} selected={selectedSlide} aspect={aspect} issueMap={issueMap} onSelect={setSelectedSlide} />
           <SlideLightbox open={zoom} src={src} slide={selectedSlide} total={total} headline={outlineSlide?.headline ?? ""} aspect={aspect} onSelect={setSelectedSlide} onClose={() => setZoom(false)} />
