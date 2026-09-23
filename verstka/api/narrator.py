@@ -83,21 +83,46 @@ def describe_slide_choice(outline: DeckOutline, plan: LayoutPlan, manifest: Temp
     return head + " " + body
 
 
-def describe_audit(report: AuditReport) -> str:
+FIX_RU = {
+    "rematch": "подбор другого макета",
+    "synth": "сборка слайда из токенов",
+    "condense_text": "сокращение текста",
+    "xml": "правка разметки",
+    "rollback": "откат неудачной правки",
+}
+
+
+def _check_titles() -> dict[str, str]:
+    from verstka.audit.model_checks import DECK_COHERENCE, SLIDE_CONTENT
+    from verstka.audit.registry import all_checks
+
+    return {spec.id: spec.title for spec in [s for s, _ in all_checks()] + [SLIDE_CONTENT, DECK_COHERENCE]}
+
+
+def describe_audit(report: AuditReport, check_titles: Optional[dict[str, str]] = None) -> str:
+    """The audit in words a person reads: the score, problems by their titles (not check ids), what autofix did."""
+    titles = check_titles if check_titles is not None else _check_titles()
+    title = lambda cid: titles.get(cid, cid)  # noqa: E731
     s = report.summary
     if not report.issues:
-        return "Аудит: замечаний нет, оценка 100."
-    by_check = Counter(i.check_id for i in report.issues if i.severity == "error")
-    warn_by = Counter(i.check_id for i in report.issues if i.severity == "warn")
-    lines = [f"Аудит: оценка {s.score}, ошибок {s.errors}, предупреждений {s.warnings}, замечаний модели {s.model_flags}."]
-    if by_check:
-        lines.append("Ошибки: " + ", ".join(f"{k} ×{v}" for k, v in by_check.most_common()) + ".")
-    if warn_by:
-        lines.append("Предупреждения: " + ", ".join(f"{k} ×{v}" for k, v in warn_by.most_common(6)) + ".")
+        return "Аудит: оценка 100 из 100, замечаний нет."
+    errs = Counter(i.check_id for i in report.issues if i.severity == "error")
+    warns = Counter(i.check_id for i in report.issues if i.severity == "warn")
+    head = f"Аудит: оценка {s.score:g} из 100, " + ("ошибок нет" if not s.errors else f"ошибок {s.errors}")
+    head += f", предупреждений {s.warnings}" + (f", замечаний модели {s.model_flags}" if s.model_flags else "") + "."
+    lines = [head]
+    if errs:
+        lines.append("Ошибки: " + "; ".join(f"{title(k)} ×{v}" if v > 1 else title(k) for k, v in errs.most_common()) + ".")
+    if warns:
+        lines.append("Предупреждения: " + "; ".join(f"{title(k)} ×{v}" if v > 1 else title(k) for k, v in warns.most_common(6)) + ".")
     if report.applied_fixes:
         fixes = Counter(f.get("action") for f in report.applied_fixes)
-        lines.append(f"Автофикс за {report.iterations} итерац.: " + ", ".join(f"{k} ×{v}" for k, v in fixes.items()) + ".")
+        passes = report.iterations
+        lines.append(
+            f"Автофикс ({passes} {'проход' if passes == 1 else 'прохода' if 2 <= passes <= 4 else 'проходов'}): "
+            + ", ".join(f"{FIX_RU.get(k, k)} ×{v}" if v > 1 else FIX_RU.get(k, k) for k, v in fixes.items()) + "."
+        )
     fixable = [i for i in report.issues if i.autofix and i.autofix.action != "none"]
     if fixable:
-        lines.append(f"{len(fixable)} замечаний можно исправить автоматически — отметьте нужные в панели аудита.")
+        lines.append(f"Ещё {len(fixable)} можно исправить автоматически — кнопка «Исправить все автоматические» на шаге «Аудит».")
     return "\n".join(lines)

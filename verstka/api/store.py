@@ -17,6 +17,21 @@ from verstka.schemas.template import TemplateManifest
 _META_LOCK = threading.RLock()
 
 
+def _card_of(tdir: Path, m: dict) -> dict:
+    """What a template card in the UI shows without loading the manifest: cover, main colours, main font, format."""
+    tid = m["template_id"]
+    cover = next((f"thumbs/{p.name}" for p in sorted((tdir / "thumbs").glob("slide-*.jpg"))[:1]), None)
+    colors = sorted(m.get("tokens", {}).get("colors", []), key=lambda c: -float(c.get("weight", 0)))
+    families = m.get("tokens", {}).get("typography", {}).get("families", [])
+    size = m.get("slide_size") or {}
+    return {
+        "cover_url": f"/api/templates/{tid}/files/{cover}" if cover else None,
+        "palette": [c["hex"] for c in colors[:6] if c.get("hex")],
+        "font": families[0].get("family") if families else None,
+        "aspect": round(size["w"] / size["h"], 4) if size.get("w") and size.get("h") else None,
+    }
+
+
 def _write_json_atomic(path: Path, data: dict) -> None:
     """Readers (the UI polls generation.json while the job thread rewrites it) see the old file or the new one,
     never a truncated one: write aside, then rename over."""
@@ -63,7 +78,7 @@ class Store:
             if mp.exists():
                 try:
                     m = json.loads(mp.read_text(encoding="utf-8"))
-                    out.append({"template_id": m["template_id"], "source_file": m.get("source_file"), "n_slides": m.get("n_slides"), "n_patterns": len(m.get("patterns", [])), "analyzed_at": mp.stat().st_mtime})
+                    out.append({"template_id": m["template_id"], "source_file": m.get("source_file"), "n_slides": m.get("n_slides"), "n_patterns": len(m.get("patterns", [])), "analyzed_at": mp.stat().st_mtime, **_card_of(d, m)})
                 except Exception:  # noqa: BLE001
                     continue
         out.sort(key=lambda t: -t["analyzed_at"])

@@ -417,3 +417,23 @@ def test_generation_meta_is_never_read_half_written(tmp_path):
         stop[0] = True
         t.join()
     assert errors == [] and not list(s.generation_dir(gid).glob("*.tmp"))
+
+
+def test_audit_is_told_in_words_not_check_ids():
+    from verstka.api.narrator import describe_audit
+    from verstka.schemas.audit import AuditReport
+
+    report = AuditReport.model_validate({
+        "deck": "deck.pptx", "template_id": "t1",
+        "summary": {"score": 94, "errors": 0, "warnings": 2, "infos": 0, "model_flags": 0, "checks_run": []},
+        "issues": [
+            {"id": "i1", "check_id": "size_not_in_scale", "severity": "warn", "kind": "deterministic", "slide": 3, "message": "кегль 48"},
+            {"id": "i2", "check_id": "size_not_in_scale", "severity": "warn", "kind": "deterministic", "slide": 4, "message": "кегль 44"},
+        ],
+        "applied_fixes": [{"iteration": 1, "action": "rematch"}, {"iteration": 2, "action": "xml"}],
+        "iterations": 2,
+    })
+    text = describe_audit(report)
+    assert text.startswith("Аудит: оценка 94 из 100, ошибок нет, предупреждений 2.")
+    assert "Кегль не из типографической шкалы шаблона ×2" in text and "size_not_in_scale" not in text
+    assert "Автофикс (2 прохода): подбор другого макета, правка разметки." in text

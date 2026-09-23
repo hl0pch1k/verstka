@@ -618,6 +618,7 @@ def chat(req: ChatRequest) -> dict:
     if intent == "template":
         m = store.manifest(template_id) if template_id else None
         reply = describe_template(m) if m else "Загрузите шаблон (.pptx) — я разберу его дизайн-систему и паттерны слайдов."
+        actions.append({"type": "open_tab", "tab": "template"})
     elif intent in ("plan", "explain_slide", "audit", "export") and gen_id:
         payload = _generation_payload(gen_id)
         variants = payload.get("variants", [])
@@ -628,15 +629,22 @@ def chat(req: ChatRequest) -> dict:
             manifest = store.manifest(payload["template_id"])
             outline = DeckOutline.model_validate(v["outline"])
             plan = LayoutPlan.model_validate(v["plan"])
+            titles = {s.name: s.title for s in load_strategies().values()}
+            name = lambda vv: titles.get(vv["strategy"], vv["strategy"])  # noqa: E731
             if intent == "plan":
-                titles = {s.name: s.title for s in load_strategies().values()}
-                reply = "\n\n".join(describe_plan(DeckOutline.model_validate(vv["outline"]), LayoutPlan.model_validate(vv["plan"]), manifest, titles.get(vv["strategy"], vv["strategy"])) for vv in variants)
+                reply = "\n\n".join(describe_plan(DeckOutline.model_validate(vv["outline"]), LayoutPlan.model_validate(vv["plan"]), manifest, name(vv)) for vv in variants)
+                actions.append({"type": "open_tab", "tab": "plan"})
             elif intent == "explain_slide":
                 reply = describe_slide_choice(outline, plan, manifest, int(params.get("index", 1)))
+                actions.append({"type": "open_tab", "tab": "variants"})
             elif intent == "audit":
-                reply = "\n\n".join(f"Вариант «{vv['strategy']}». " + describe_audit(AuditReport.model_validate(vv["audit"])) for vv in variants if vv.get("audit"))
+                reply = "\n\n".join(f"Вариант «{name(vv)}». " + describe_audit(AuditReport.model_validate(vv["audit"])) for vv in variants if vv.get("audit"))
+                actions.append({"type": "open_tab", "tab": "audit"})
             else:
-                reply = "Файлы готовы: " + "; ".join(f"{vv['strategy']}: " + ", ".join(vv["files"]) for vv in variants)
+                kinds = {"deck.pptx": "PPTX", "deck.pdf": "PDF", "deck.html": "HTML"}
+                reply = "Файлы готовы — скачайте на шаге «Экспорт»:\n" + "\n".join(
+                    f"• {name(vv)}: " + ", ".join(kinds[f] for f in kinds if f in vv["files"]) for vv in variants
+                )
                 actions.append({"type": "open_tab", "tab": "export"})
     elif intent == "fix_all" and gen_id:
         payload = _generation_payload(gen_id)
@@ -658,7 +666,7 @@ def chat(req: ChatRequest) -> dict:
             brief_text = req.message
             r = create_generation(GenerateRequest(template_id=template_id, brief=brief_text, use_models=models_configured()))
             session["generation_id"] = r["generation_id"]
-            reply = "Принял бриф. Извлекаю факты, планирую структуру, подбираю макеты шаблона и собираю три варианта — следите за прогрессом справа."
+            reply = "Принял бриф. Извлекаю факты, планирую структуру, подбираю макеты шаблона и собираю три варианта — сборка идёт на шаге «Варианты»."
             actions.append({"type": "generation_started", "job_id": r["job_id"], "generation_id": r["generation_id"]})
     else:
         reply = (
