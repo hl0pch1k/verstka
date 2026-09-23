@@ -180,7 +180,9 @@ class OpenAICompatProvider:
                 raise ProviderError(f"no API key configured for model {self.model} at {self.base_url}")
             from openai import OpenAI
 
-            self._client = OpenAI(base_url=self.base_url, api_key=self.api_key, timeout=self.timeout_s, default_headers=self.headers or None)
+            # retries are ours (complete(): attempts, per-minute waits, daily fail-fast); the SDK's own sub-second
+            # retries of a 429 only spend the free quota
+            self._client = OpenAI(base_url=self.base_url, api_key=self.api_key, timeout=self.timeout_s, default_headers=self.headers or None, max_retries=0)
         return self._client
 
     def _cost(self, usage: Usage) -> Optional[float]:
@@ -254,7 +256,7 @@ class OpenAICompatProvider:
                     rate_waits += 1
                     attempt -= 1
                     wait = min(max(e.retry_after or 20.0, 1.0), 65.0)
-                    log.info("rate limited, waiting %.0f s", wait)
+                    log.info("rate limited, waiting %.0f s: %s", wait, str(e)[:160])
                     time.sleep(wait)
                 continue
             except ProviderError as e:
@@ -272,6 +274,11 @@ class OpenAICompatProvider:
             except (ValueError, ValidationError) as e:
                 last_err = e
                 log.warning("invalid JSON from model (attempt %d/%d): %s", attempt, self.max_attempts, str(e)[:300])
+                if self.json_mode:
+                    # some hosts garble guided JSON (': ' glued to values, empty keys) yet answer clean JSON without
+                    # it; the schema is in the prompt, so plain mode for the rest of the run
+                    self.json_mode = False
+                    log.warning("%s: response_format=json_object gave invalid JSON, plain mode from now on", self.model)
                 oai_messages.append({"role": "assistant", "content": text[:4000]})
                 oai_messages.append(
                     {"role": "user", "content": f"Your previous answer was not valid. Error: {str(e)[:800]}. Return only the corrected JSON object."}

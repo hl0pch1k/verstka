@@ -9,6 +9,7 @@ roles:
     price_in_per_m: 0.42
     price_out_per_m: 3.00
     temperature: 0.2
+    json_mode: false  # the host garbles response_format=json_object; the schema is in the prompt
     extra_body:
       reasoning: { enabled: false }
   vlm:
@@ -19,6 +20,7 @@ roles:
     price_in_per_m: 0.42
     price_out_per_m: 3.00
     temperature: 0.1
+    json_mode: false
     extra_body:
       reasoning: { enabled: false }
 limits:

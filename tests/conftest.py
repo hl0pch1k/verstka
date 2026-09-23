@@ -5,6 +5,11 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+# hermetic: importing verstka loads .env, and a real OPENROUTER_API_KEY there must not turn tests into network calls
+os.environ["VERSTKA_NO_DOTENV"] = "1"
+os.environ.pop("OPENROUTER_API_KEY", None)
+os.environ.pop("VERSTKA_MODELS", None)
+
 import pytest
 from PIL import Image
 from pptx import Presentation

@@ -93,3 +93,27 @@ def test_rate_limits_wait_per_minute_and_fail_fast_when_the_day_is_spent(monkeyp
     assert oc._rate_limit_info(RuntimeError("Error code: 429 - free-models-per-day")).daily
     assert not oc._rate_limit_info(RuntimeError("Error code: 429 - too many requests per minute")).daily
     assert oc._rate_limit_info(RuntimeError("Error code: 500")) is None
+
+
+def test_json_mode_is_dropped_when_the_backend_garbles_it(monkeypatch):
+    """Some hosts break structured output under response_format=json_object (OpenRouter free Qwen: values start with
+    ': ', keys come back empty) while the same model answers clean JSON without it. The first invalid answer in JSON
+    mode switches the provider to plain mode for the rest of the run; the schema is in the prompt anyway."""
+    from verstka.providers import openai_compat as oc
+
+    p = oc.OpenAICompatProvider(model="qwen/qwen3.8-27b:free", base_url="https://example.invalid/v1", api_key="sk-test-json")
+    seen: list[bool] = []
+
+    def garbled_in_json_mode(messages, temperature, max_tokens, want_json):
+        json_mode = want_json and p.json_mode
+        seen.append(json_mode)
+        if json_mode:
+            return '{"": "tip", "confidence": ": 0.9"}', oc.Usage(1, 1)
+        return '{"kind": "tip", "confidence": 0.9}', oc.Usage(1, 1)
+
+    monkeypatch.setattr(p, "_call", garbled_in_json_mode)
+    res = p.complete([ChatMessage(role="user", content="classify")], schema=Out)
+    assert res.parsed == Out(kind="tip", confidence=0.9) and res.attempts == 2
+    assert p.complete([ChatMessage(role="user", content="again")], schema=Out).attempts == 1
+    assert seen == [True, False, False]  # one wasted call per run, not per request
+    assert ProviderRegistry.from_config({"roles": {"llm": {"model": "m", "api_key": "k", "json_mode": False}}}).get("llm").json_mode is False

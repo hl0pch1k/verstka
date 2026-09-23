@@ -30,9 +30,13 @@ def parse_env(text: str) -> dict[str, str]:
 
 
 def load_env(paths: list[Path] | None = None, force: bool = False) -> list[Path]:
-    """Load .env from the current directory and the repo root (first wins); never overrides real env vars."""
+    """Load .env from the current directory and the repo root (first wins); never overrides real env vars.
+
+    VERSTKA_NO_DOTENV=1 skips the implicit files (the test suite sets it: tests never pick up a real API key)."""
     global _loaded
     if _loaded and not force and paths is None:
+        return []
+    if paths is None and os.environ.get("VERSTKA_NO_DOTENV"):
         return []
     _loaded = True
     used: list[Path] = []
