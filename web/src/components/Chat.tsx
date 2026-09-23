@@ -1,6 +1,7 @@
 // Left column: the conversation with the Verstka agent — feed, composer, brief attachment and quick actions.
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
-import { FileText, Layers, Paperclip, SendHorizontal, Sparkles, Upload, X } from "lucide-react";
+import { FileText, Layers, Paperclip, SendHorizontal, Upload, X } from "lucide-react";
+import { LogoMark } from "./shell/Logo";
 import { api } from "../api";
 import { errText } from "../lib/narrate";
 import { cn, sessionId } from "../lib/utils";
@@ -27,39 +28,31 @@ function fmtBytes(n: number): string {
 
 function Intro() {
   return (
-    <div className="mt-4 animate-fade-in rounded-xl border border-zinc-200 bg-gradient-to-b from-white to-zinc-50 p-4 shadow-card">
-      <div className="flex items-center gap-2.5">
-        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent-50 text-accent ring-1 ring-inset ring-accent-100">
-          <Sparkles className="h-4 w-4" strokeWidth={2.25} aria-hidden />
-        </span>
-        <div>
-          <p className="text-sm font-semibold text-zinc-900">Здравствуйте! Я соберу презентацию в стиле вашего шаблона</p>
-          <p className="text-xs text-zinc-500">Три шага — и у вас три варианта вёрстки с аудитом</p>
-        </div>
+    <div className="mt-5 animate-fade-in">
+      <div className="rounded-2xl bg-zinc-100 p-4">
+        <p className="text-[15px] font-semibold leading-6 text-zinc-900">Привет! Я соберу презентацию в стиле вашего шаблона</p>
+        <p className="mt-1 text-[13px] leading-5 text-zinc-600">Пришлите бриф текстом или файлом — сделаю три варианта вёрстки с аудитом. Могу объяснить любой слайд и исправить замечания.</p>
       </div>
-      <ol className="mt-4 space-y-3">
+      <ol className="mt-3 space-y-1">
         {STEPS.map((s, i) => (
-          <li key={s.title} className="flex gap-3">
-            <span className="relative mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-zinc-200 bg-white text-zinc-600 shadow-card">
-              <s.icon className="h-3.5 w-3.5" aria-hidden />
-              <span className="absolute -left-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-accent text-[10px] font-semibold leading-none text-white">{i + 1}</span>
-            </span>
+          <li key={s.title} className="flex gap-3 rounded-xl px-2 py-2">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent-50 text-[13px] font-bold text-accent">{i + 1}</span>
             <div className="min-w-0">
-              <p className="text-[13px] font-medium leading-5 text-zinc-900">{s.title}</p>
+              <p className="text-[13px] font-semibold leading-5 text-zinc-900">{s.title}</p>
               <p className="text-xs leading-[18px] text-zinc-500">{s.text}</p>
             </div>
           </li>
         ))}
       </ol>
-      <p className="mt-4 border-t border-zinc-200 pt-3 text-xs text-zinc-500">
-        Спросите «почему слайд 4 такой», попросите «исправь всё» или «экспорт» — я отвечу и сделаю. <kbd className="rounded border border-zinc-300 bg-white px-1 font-sans text-[11px]">Enter</kbd> — отправить,{" "}
-        <kbd className="rounded border border-zinc-300 bg-white px-1 font-sans text-[11px]">Shift+Enter</kbd> — новая строка.
+      <p className="mt-2 px-2 text-xs leading-5 text-zinc-500">
+        <kbd className="rounded-md bg-zinc-100 px-1.5 py-0.5 font-sans text-[11px] font-semibold text-zinc-700">Enter</kbd> — отправить,{" "}
+        <kbd className="rounded-md bg-zinc-100 px-1.5 py-0.5 font-sans text-[11px] font-semibold text-zinc-700">Shift+Enter</kbd> — новая строка
       </p>
     </div>
   );
 }
 
-export function Chat() {
+export function Chat({ onClose }: { onClose?: () => void }) {
   const { messages, pushMessage, toast, templateId, generationId, manifest, activeJob, healthError } = useApp();
   const handleActions = useChatActions();
   const [text, setText] = useState("");
@@ -85,7 +78,8 @@ export function Chat() {
     const el = areaRef.current;
     if (!el) return;
     el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, MAX_ROWS * LINE_PX + PAD_PX)}px`;
+    // a hidden dock measures 0 — keep one line until it is shown and measured again
+    el.style.height = `${Math.max(LINE_PX + PAD_PX + 4, Math.min(el.scrollHeight, MAX_ROWS * LINE_PX + PAD_PX))}px`;
   }, []);
   useEffect(resize, [text, resize]);
 
@@ -149,21 +143,23 @@ export function Chat() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-zinc-200 px-5">
-        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-white shadow-sm">
-          <Sparkles className="h-4 w-4" strokeWidth={2.25} aria-hidden />
+      <header className="flex h-16 shrink-0 items-center gap-3 border-b border-zinc-100 px-5">
+        <span className="relative shrink-0">
+          <LogoMark size={36} />
+          <span className={cn("absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full ring-2 ring-white", healthError ? "bg-red-500" : pending || activeJob ? "animate-pulse bg-accent-300" : "bg-emerald-500")} aria-hidden />
         </span>
         <div className="min-w-0 flex-1">
-          <h2 className="truncate text-sm font-semibold leading-5 text-zinc-900">Агент Verstka</h2>
+          <h2 className="truncate text-[15px] font-semibold leading-5 text-zinc-900">Агент Verstka</h2>
           <p className="truncate text-xs leading-4 text-zinc-500">
-            {context}
-            {generationId && <span className="text-zinc-400"> · генерация {generationId.slice(0, 8)}</span>}
+            {healthError ? "нет связи с сервером" : pending ? "печатает…" : activeJob ? "работает над задачей" : context}
+            {generationId && !pending && !activeJob && !healthError && <span className="text-zinc-400"> · генерация {generationId.slice(0, 8)}</span>}
           </p>
         </div>
-        <span className={cn("flex items-center gap-1.5 text-[11px] font-medium", healthError ? "text-red-600" : pending || activeJob ? "text-accent" : "text-emerald-600")}>
-          <span className={cn("h-1.5 w-1.5 rounded-full", healthError ? "bg-red-500" : pending || activeJob ? "animate-pulse bg-accent" : "bg-emerald-500")} aria-hidden />
-          {healthError ? "Нет связи" : pending ? "Отвечает" : activeJob ? "Работает" : "На связи"}
-        </span>
+        {onClose && (
+          <button type="button" onClick={onClose} aria-label="Скрыть агента" className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/30">
+            <X className="h-[18px] w-[18px]" aria-hidden />
+          </button>
+        )}
       </header>
 
       <div ref={feedRef} className="scroll-thin min-h-0 flex-1 overflow-y-auto px-4 pb-4">
@@ -180,7 +176,7 @@ export function Chat() {
         )}
       </div>
 
-      <div className="shrink-0 border-t border-zinc-200 bg-zinc-50/70 px-4 pb-4 pt-3">
+      <div className="shrink-0 border-t border-zinc-100 bg-white px-4 pb-4 pt-3">
         <div className="mb-2.5 flex flex-wrap gap-1.5">
           {QUICK_ACTIONS.map((q) => (
             <button
@@ -188,16 +184,16 @@ export function Chat() {
               type="button"
               disabled={pending || healthError}
               onClick={() => void send(q)}
-              className="h-7 rounded-full border border-zinc-200 bg-white px-2.5 text-xs font-medium text-zinc-700 shadow-sm transition-colors hover:border-accent-200 hover:bg-accent-50 hover:text-accent-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/30 disabled:cursor-not-allowed disabled:opacity-50"
+              className="h-8 cursor-pointer rounded-full bg-accent-50 px-3 text-xs font-semibold text-accent-700 transition-colors hover:bg-accent-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/30 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {q}
             </button>
           ))}
         </div>
 
-        <div className={cn("rounded-xl border bg-white shadow-card transition-colors focus-within:border-accent focus-within:ring-1 focus-within:ring-accent/30", healthError ? "border-red-200" : "border-zinc-200")}>
+        <div className={cn("rounded-2xl bg-zinc-100 transition-shadow focus-within:bg-white focus-within:shadow-[0_0_0_2px_#0077FF]", healthError && "shadow-[0_0_0_1px_#FCA5A5]")}>
           {attached && (
-            <div className="flex items-center gap-2 border-b border-zinc-100 px-3 py-1.5 text-xs text-zinc-600">
+            <div className="flex items-center gap-2 border-b border-zinc-200/70 px-3.5 py-2 text-xs text-zinc-600">
               <FileText className="h-3.5 w-3.5 shrink-0 text-accent" aria-hidden />
               <span className="min-w-0 flex-1 truncate">
                 <span className="font-medium text-zinc-800">{attached.name}</span> · {fmtBytes(attached.size)}
@@ -216,17 +212,15 @@ export function Chat() {
             disabled={healthError}
             placeholder={healthError ? "API недоступен — дождитесь переподключения" : "Опишите презентацию или вставьте бриф…"}
             aria-label="Сообщение агенту"
-            className="scroll-thin block w-full resize-none bg-transparent px-3.5 py-2.5 text-[13px] leading-5 text-zinc-900 placeholder:text-zinc-400 focus:outline-none disabled:cursor-not-allowed"
+            className="scroll-thin block w-full resize-none bg-transparent px-4 py-3 text-sm leading-5 text-zinc-900 placeholder:text-zinc-500 focus:outline-none disabled:cursor-not-allowed"
           />
-          <div className="flex items-center gap-2 border-t border-zinc-100 px-2 py-1.5">
+          <div className="flex items-center gap-2 px-2 pb-2">
             <input ref={fileRef} type="file" accept=".md,.txt,.markdown,text/markdown,text/plain" className="hidden" onChange={(e) => void onFile(e)} />
-            <Button size="sm" variant="ghost" icon={Paperclip} disabled={pending || healthError} onClick={() => fileRef.current?.click()}>
-              Прикрепить бриф (.md/.txt)
+            <Button size="sm" variant="ghost" icon={Paperclip} disabled={pending || healthError} onClick={() => fileRef.current?.click()} title="Прикрепить бриф .md или .txt">
+              Бриф
             </Button>
             <span className="ml-auto text-[11px] tabular-nums text-zinc-400">{text.length > 0 && `${text.length.toLocaleString("ru-RU")} зн.`}</span>
-            <Button size="sm" variant="primary" icon={SendHorizontal} loading={pending} disabled={!canSend} onClick={() => void send(text)} aria-label="Отправить">
-              Отправить
-            </Button>
+            <Button size="sm" variant="primary" icon={SendHorizontal} loading={pending} disabled={!canSend} onClick={() => void send(text)} aria-label="Отправить" className="w-8 rounded-full px-0" />
           </div>
         </div>
       </div>

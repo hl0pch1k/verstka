@@ -39,16 +39,16 @@ function Votes({ trace }: { trace: ClassificationTrace }) {
 function PatternCard({ pattern, aspect, onOpen }: { pattern: Pattern; aspect: string; onOpen: () => void }) {
   const groups = pattern.repeat_groups;
   return (
-    <article className="group flex flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-card transition-shadow hover:shadow-pop">
+    <article className="group flex flex-col overflow-hidden rounded-2xl bg-zinc-50 shadow-inner-line transition-shadow duration-200 hover:bg-white hover:shadow-raise">
       <button
         type="button"
         onClick={onOpen}
         title="Открыть разбор слайда"
-        className="relative block w-full overflow-hidden border-b border-zinc-100 bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/50"
+        className="relative block w-full cursor-pointer overflow-hidden bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/50"
         style={{ aspectRatio: aspect }}
       >
         <PatternThumb src={pattern.thumbnail_url} alt={`Слайд ${pattern.source_slide}: ${kindLabel(pattern.kind)}`} className="transition-transform duration-300 group-hover:scale-[1.02]" />
-        <span className="absolute left-2 top-2 rounded-md bg-zinc-900/75 px-1.5 py-0.5 text-[11px] font-medium text-white">слайд {pattern.source_slide}</span>
+        <span className="absolute left-2 top-2 rounded-full bg-ink/75 px-2 py-0.5 text-[11px] font-semibold text-white backdrop-blur-sm">слайд {pattern.source_slide}</span>
       </button>
       <div className="flex flex-1 flex-col gap-2 px-3 py-2.5">
         <div className="flex flex-wrap items-center gap-1.5">
@@ -89,8 +89,8 @@ function Chip({ active, label, count, onClick }: { active: boolean; label: strin
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        "inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-[13px] font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/30",
-        active ? "border-accent bg-accent text-white" : "border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300 hover:bg-zinc-50",
+        "inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full border px-3 text-[13px] font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/30",
+        active ? "border-transparent bg-zinc-900 text-white" : "border-transparent bg-zinc-100 text-zinc-700 hover:bg-zinc-200/70",
       )}
     >
       {label}
@@ -124,7 +124,7 @@ export function PatternGallery({ manifest }: { manifest: TemplateManifest }) {
             href={manifest.gallery_url}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 text-[13px] font-medium text-zinc-800 shadow-sm transition-colors hover:border-zinc-300 hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/30"
+            className="inline-flex h-9 items-center gap-1.5 rounded-[10px] bg-zinc-100 px-3 text-[13px] font-semibold text-zinc-900 transition-colors hover:bg-zinc-200/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/30"
           >
             <ExternalLink className="h-3.5 w-3.5" aria-hidden /> Открыть галерею
           </a>

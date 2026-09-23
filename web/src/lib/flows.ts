@@ -3,12 +3,12 @@
 // resolve: failures are reported through toasts / assistant messages, never thrown at the caller.
 import { api } from "../api";
 import { pushToast } from "../components/ui/Toasts";
-import type { GenerateRequest, GenerateResponse, Generation, Job, TabKey, TemplateListItem, TemplateManifest, UploadResponse } from "../types";
+import type { GenerateRequest, GenerateResponse, Generation, Job, JobKind, TabKey, TemplateListItem, TemplateManifest, UploadResponse } from "../types";
 import { describeGeneration, firstLine, newestTemplate } from "./narrate";
 import { plural } from "./utils";
 
 interface CommonDeps {
-  runJob(jobId: string, label: string, opts?: { onDone?: (job: Job) => void; onFailed?: (job: Job) => void }): void;
+  runJob(jobId: string, label: string, opts?: { kind?: JobKind; onDone?: (job: Job) => void; onFailed?: (job: Job) => void }): void;
   report(e: unknown, prefix: string): void;
   pushMessage(role: "user" | "assistant", text: string): void;
   setTab(t: TabKey): void;
@@ -36,6 +36,7 @@ export function uploadTemplateFlow(file: File, useModels: boolean, d: UploadDeps
       }
       if (useModels && !res.use_models) pushToast("info", "Модели не настроены — шаблон разбирается эвристиками");
       d.runJob(res.job_id, `Анализ шаблона «${file.name}»`, {
+        kind: "analyze",
         onDone: async (job) => {
           try {
             const list = await api.templates();
@@ -79,7 +80,9 @@ export function generationFlow(req: GenerateRequest, d: GenerationDeps): Promise
         d.report(e, "Не удалось запустить генерацию");
         return resolve();
       }
+      d.setTab("variants"); // the variants step shows the build while the job runs
       d.runJob(res.job_id, `Генерация: ${plural(req.strategies.length, "вариант", "варианта", "вариантов")}`, {
+        kind: "generate",
         onDone: async () => {
           await d.refreshGenerations();
           const g = await d.fetchGeneration(res.generation_id);

@@ -28,7 +28,7 @@ const FILL: Record<ProgressTone, string> = {
   neutral: "bg-zinc-500",
 };
 
-const HEIGHT = { xs: "h-0.5", sm: "h-1", md: "h-2" } as const;
+const HEIGHT = { xs: "h-[3px]", sm: "h-1.5", md: "h-2" } as const;
 
 export function Progress({ value, tone = "accent", size = "sm", indeterminate = false, label, showValue = false, flat = false, className }: ProgressProps) {
   const frac = Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0;
@@ -46,7 +46,7 @@ export function Progress({ value, tone = "accent", size = "sm", indeterminate = 
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={indeterminate ? undefined : pct}
-        className={cn("relative w-full overflow-hidden bg-zinc-200/80", HEIGHT[size], !flat && "rounded-full")}
+        className={cn("relative w-full overflow-hidden bg-zinc-200/70", HEIGHT[size], !flat && "rounded-full")}
       >
         {indeterminate ? (
           <div

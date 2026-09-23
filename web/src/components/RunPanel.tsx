@@ -15,7 +15,7 @@ import { EmptyState } from "./ui/EmptyState";
 import { Spinner } from "./ui/Spinner";
 import { Tabs } from "./ui/Tabs";
 
-const selectCls = "h-9 min-w-0 rounded-lg border border-zinc-200 bg-white px-2.5 text-[13px] text-zinc-900 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20";
+const selectCls = "h-10 min-w-0 cursor-pointer rounded-xl border-0 bg-zinc-100 px-3 text-[13px] font-medium text-zinc-900 focus:bg-white focus:shadow-[0_0_0_2px_#0077FF] focus:outline-none";
 
 function DiffView({ d, strategyTitle }: { d: DiffResponse; strategyTitle(name: string): string }) {
   const skills = Object.entries(d.diff.skills);

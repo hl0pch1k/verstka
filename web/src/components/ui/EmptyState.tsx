@@ -20,16 +20,16 @@ export function EmptyState({ icon, title, hint, action, compact = false, classNa
       {icon && (
         <div
           className={cn(
-            "flex items-center justify-center rounded-2xl border border-zinc-200 bg-gradient-to-b from-white to-zinc-50 text-zinc-500 shadow-card",
-            compact ? "mb-3 h-10 w-10" : "mb-4 h-12 w-12",
+            "flex items-center justify-center rounded-2xl bg-accent-50 text-accent",
+            compact ? "mb-3 h-11 w-11" : "mb-5 h-14 w-14",
           )}
         >
-          {renderIcon(icon, compact ? "h-5 w-5" : "h-6 w-6", 1.75)}
+          {renderIcon(icon, compact ? "h-5 w-5" : "h-7 w-7", 1.75)}
         </div>
       )}
-      <h4 className="text-sm font-semibold text-zinc-900">{title}</h4>
-      {hint && <p className="mt-1 max-w-sm text-[13px] leading-5 text-zinc-500">{hint}</p>}
-      {action && <div className="mt-4 flex items-center gap-2">{action}</div>}
+      <h4 className={cn("font-semibold text-zinc-900", compact ? "text-[15px]" : "text-lg")}>{title}</h4>
+      {hint && <p className={cn("mt-1.5 max-w-md text-zinc-500", compact ? "text-[13px] leading-5" : "text-sm leading-6")}>{hint}</p>}
+      {action && <div className="mt-5 flex items-center gap-2">{action}</div>}
     </div>
   );
 }

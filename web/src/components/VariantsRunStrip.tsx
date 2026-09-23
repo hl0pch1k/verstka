@@ -35,7 +35,7 @@ export function VariantsRunStrip({ variant, generation, score, strategyTitle, on
   const providersTitle = providers.length ? providers.map(([role, p]) => `${role}: ${p.backend}${p.model ? ` · ${p.model}` : ""}`).join("\n") : undefined;
 
   return (
-    <footer className="flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border border-zinc-200 bg-white px-5 py-2.5 shadow-card">
+    <footer className="flex flex-wrap items-center gap-x-7 gap-y-2 rounded-2xl bg-white px-6 py-3.5 shadow-card">
       <Item icon={Route} label="Стратегия">
         {strategyTitle(m?.strategy ?? variant.strategy)}
       </Item>

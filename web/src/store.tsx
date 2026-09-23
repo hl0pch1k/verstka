@@ -3,15 +3,16 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { api, ApiError } from "./api";
 import { pushToast } from "./components/ui/Toasts";
 import { generationFlow, uploadTemplateFlow } from "./lib/flows";
+import { humanizeJobMessage } from "./lib/jobText";
 import { trackJob } from "./lib/jobs";
 import { errText, firstLine, newestTemplate, slideCount } from "./lib/narrate";
 import { LS, storage, uid } from "./lib/utils";
 import type {
-  ChatMessage, GenerateRequest, Generation, GenerationMeta, Health, Job, JobStatus, StrategyInfo, TabKey, TemplateListItem, TemplateManifest, Variant,
+  ChatMessage, GenerateRequest, Generation, GenerationMeta, Health, Job, JobKind, JobStatus, StrategyInfo, TabKey, TemplateListItem, TemplateManifest, Variant,
 } from "./types";
 
-export interface ActiveJob { id: string; label: string; progress: number; message: string; status: JobStatus }
-export interface RunJobOptions { onDone?: (job: Job) => void; onFailed?: (job: Job) => void }
+export interface ActiveJob { id: string; label: string; progress: number; message: string; status: JobStatus; kind: JobKind; startedAt: number }
+export interface RunJobOptions { kind?: JobKind; onDone?: (job: Job) => void; onFailed?: (job: Job) => void }
 
 export interface AppState {
   health: Health | null; healthError: boolean;
@@ -26,6 +27,9 @@ export interface AppState {
   activeStrategy: string | null; setActiveStrategy(s: string): void; activeVariant: Variant | null;
   selectedSlide: number; setSelectedSlide(n: number): void; // 1-based
   tab: TabKey; setTab(t: TabKey): void;
+  /** The template step shows the library (upload + all templates) instead of the selected template's passport. */
+  showLibrary: boolean; setShowLibrary(v: boolean): void;
+  agentOpen: boolean; setAgentOpen(v: boolean): void;
   activeJob: ActiveJob | null;
   runJob(jobId: string, label: string, opts?: RunJobOptions): void;
   messages: ChatMessage[]; pushMessage(role: "user" | "assistant", text: string): void; // ts = unix seconds (fmtDate-compatible)
@@ -61,6 +65,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [activeStrategy, setActiveStrategyState] = useState<string | null>(null);
   const [selectedSlide, setSelectedSlideState] = useState(1);
   const [tab, setTab] = useState<TabKey>("template");
+  const [showLibrary, setShowLibrary] = useState(false);
+  const [agentOpen, setAgentOpenState] = useState(() => storage.get(LS.agent) === "1");
+  const setAgentOpen = useCallback((v: boolean) => {
+    setAgentOpenState(v);
+    storage.set(LS.agent, v ? "1" : "0");
+  }, []);
   const [activeJob, setActiveJob] = useState<ActiveJob | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
 
@@ -175,11 +185,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       patch(p);
       window.setTimeout(() => setActiveJob((cur) => (cur && cur.id === jobId ? null : cur)), 1500);
     };
-    setActiveJob({ id: jobId, label, progress: 0, message: "В очереди…", status: "queued" });
+    setActiveJob({ id: jobId, label, progress: 0, message: "В очереди…", status: "queued", kind: opts?.kind ?? "other", startedAt: Date.now() });
     const stop = trackJob(jobId, {
       onEvent: (ev) => {
         if (ev.status === "done" || ev.status === "failed") return; // settled below, once the full job record is fetched
-        setActiveJob((cur) => (cur && cur.id === jobId ? { ...cur, status: ev.status, progress: Math.max(cur.progress, clamp01(ev.progress)), message: ev.message || cur.message } : cur));
+        const message = ev.message ? humanizeJobMessage(ev.message, (name) => titleIn(latest.current.strategies, name)) : "";
+        setActiveJob((cur) => (cur && cur.id === jobId ? { ...cur, status: ev.status, progress: Math.max(cur.progress, clamp01(ev.progress)), message: message || cur.message } : cur));
       },
       onDone: (job) => {
         settle({ status: "done", progress: 1, message: "Готово" });
@@ -292,11 +303,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AppState>(() => ({
     health, healthError, strategies, strategyTitle, templates, refreshTemplates, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, activeStrategy, setActiveStrategy, activeVariant,
-    selectedSlide, setSelectedSlide, tab, setTab, activeJob, runJob, messages, pushMessage, toast, uploadTemplate, startGeneration,
+    selectedSlide, setSelectedSlide, tab, setTab, showLibrary, setShowLibrary, agentOpen, setAgentOpen, activeJob, runJob, messages, pushMessage, toast, uploadTemplate, startGeneration,
   }), [
     health, healthError, strategies, strategyTitle, templates, refreshTemplates, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, activeStrategy, setActiveStrategy, activeVariant,
-    selectedSlide, setSelectedSlide, tab, activeJob, runJob, messages, pushMessage, toast, uploadTemplate, startGeneration,
+    selectedSlide, setSelectedSlide, tab, showLibrary, agentOpen, setAgentOpen, activeJob, runJob, messages, pushMessage, toast, uploadTemplate, startGeneration,
   ]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

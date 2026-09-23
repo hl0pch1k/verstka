@@ -59,7 +59,7 @@ function PlanEntry({ entry, pattern, aspect }: { entry: LayoutSlide; pattern: Pa
         </Badge>
       </div>
       {pattern && (
-        <div className="flex items-center gap-3 rounded-lg border border-zinc-200 p-2">
+        <div className="flex items-center gap-3 rounded-xl bg-zinc-50 p-2 shadow-inner-line">
           <div className="w-24 shrink-0 overflow-hidden rounded bg-zinc-100 ring-1 ring-zinc-200" style={{ aspectRatio: String(aspect) }}>
             {pattern.thumbnail_url && <img src={pattern.thumbnail_url} alt="" loading="lazy" decoding="async" draggable={false} className="h-full w-full object-cover" />}
           </div>
@@ -129,7 +129,7 @@ export function VariantsExplain({ generationId, strategy, slide, rev, entry, has
         </CardTitle>
       </CardHeader>
       <CardBody className="space-y-4">
-        <div className="rounded-lg bg-zinc-50 px-3.5 py-3 text-[13px] leading-5 text-zinc-700" aria-live="polite" aria-busy={state.status === "loading"}>
+        <div className="rounded-2xl bg-accent-50/70 px-4 py-3.5 text-[13px] leading-5 text-zinc-800" aria-live="polite" aria-busy={state.status === "loading"}>
           {state.status === "loading" && (
             <div className="space-y-2 py-0.5">
               <div className="skeleton h-3 w-11/12" />

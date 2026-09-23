@@ -20,7 +20,7 @@ export function str(v: unknown): string {
   }
 }
 
-const STAGE_LABEL: Record<string, string> = { plan: "Планирование", render: "Рендер PPTX", audit: "Аудит и автофикс", export: "Экспорт PDF/HTML", total: "Всего" };
+const STAGE_LABEL: Record<string, string> = { analyze: "Разбор шаблона", plan: "Планирование", render: "Рендер PPTX", audit: "Аудит и автофикс", export: "Экспорт PDF/HTML", total: "Всего" };
 export const stageLabel = (k: string) => STAGE_LABEL[k] ?? k;
 
 const ROLE_LABEL: Record<string, string> = { llm: "LLM · тексты и структура", vlm: "VLM · визуальные проверки", embed: "Эмбеддинги", audit: "Аудит" };

@@ -11,7 +11,7 @@ const COLS: Record<number, string> = { 1: "grid-cols-1", 2: "grid-cols-2", 3: "g
 
 function ItemCard({ item }: { item: SlideItem }) {
   return (
-    <div className="min-w-0 rounded-lg border border-zinc-200 bg-zinc-50/70 px-3 py-2">
+    <div className="min-w-0 rounded-xl bg-zinc-50 px-3 py-2">
       {item.number && <p className="text-base font-semibold leading-6 tabular-nums text-accent-700">{item.number}</p>}
       <p className="text-[13px] font-medium leading-5 text-zinc-900">{item.title}</p>
       {item.text && <p className="mt-0.5 text-xs leading-[18px] text-zinc-600">{item.text}</p>}
@@ -29,7 +29,7 @@ function ItemGrid({ items }: { items: SlideItem[] }) {
 function MiniTable({ table }: { table: TableData }) {
   const rows = table.rows.slice(0, TABLE_ROWS);
   return (
-    <div className="overflow-hidden rounded-lg border border-zinc-200">
+    <div className="overflow-hidden rounded-xl bg-zinc-50 shadow-inner-line">
       <table className="w-full border-collapse text-xs">
         {table.columns.length > 0 && (
           <thead className="bg-zinc-50 text-left text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
@@ -122,7 +122,7 @@ export function LayoutDecision({ decision, pattern, aspect }: { decision: Layout
   return (
     <div className="flex w-52 shrink-0 flex-col gap-1.5" title={tip}>
       {clone && (
-        <div className="relative overflow-hidden rounded-md border border-zinc-200 bg-zinc-100" style={{ aspectRatio: aspect }}>
+        <div className="relative overflow-hidden rounded-lg bg-zinc-100 shadow-inner-line" style={{ aspectRatio: aspect }}>
           <PatternThumb src={pattern?.thumbnail_url} alt={decision.pattern_id ?? "паттерн"} />
           {pattern && <span className="absolute left-1 top-1 rounded bg-zinc-900/75 px-1 text-[10px] font-medium text-white">слайд {pattern.source_slide}</span>}
         </div>

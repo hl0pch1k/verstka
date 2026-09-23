@@ -8,7 +8,10 @@ export type PatternKind =
   | "comparison" | "timeline" | "process" | "table" | "chart" | "image_text" | "team" | "quote"
   | "code" | "mockup" | "thanks" | "freeform";
 
-export type TabKey = "template" | "plan" | "variants" | "audit" | "export" | "run";
+/** Views of the app. The header shows five steps; «plan» lives inside «variants», «run» inside «export». */
+export type TabKey = "template" | "brief" | "plan" | "variants" | "audit" | "export" | "run";
+export type StepKey = "template" | "brief" | "variants" | "audit" | "export";
+export type JobKind = "analyze" | "generate" | "fix" | "other";
 export type JobStatus = "queued" | "running" | "done" | "failed";
 
 export interface BboxFrac { x: number; y: number; w: number; h: number }
@@ -28,6 +31,11 @@ export interface TemplateListItem {
   n_slides: number | null;
   n_patterns: number;
   analyzed_at: number;
+  /** Card data (optional: older servers do not send it). */
+  cover_url?: string | null;
+  palette?: string[];
+  font?: string | null;
+  aspect?: number | null;
 }
 
 export interface ColorToken {

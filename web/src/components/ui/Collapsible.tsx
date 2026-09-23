@@ -37,17 +37,17 @@ export function Collapsible({
   };
 
   return (
-    <section className={cn(card && "rounded-xl border border-zinc-200 bg-white shadow-card", className)}>
-      <div className={cn("flex items-center gap-3", card ? "px-5" : "px-0")}>
+    <section className={cn(card && "rounded-2xl bg-white shadow-card", className)}>
+      <div className={cn("flex items-center gap-3", card ? "px-6" : "px-0")}>
         <button
           type="button"
           onClick={toggle}
           aria-expanded={open}
           aria-controls={bodyId}
-          className={cn("group flex min-w-0 flex-1 items-center gap-2.5 text-left focus:outline-none", card ? "h-[52px]" : "h-10")}
+          className={cn("group flex min-w-0 flex-1 cursor-pointer items-center gap-3 text-left focus:outline-none", card ? "h-[60px]" : "h-10")}
         >
-          {icon && <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-zinc-100 text-zinc-600">{renderIcon(icon, "h-4 w-4")}</span>}
-          <span className="truncate text-sm font-semibold text-zinc-900">{title}</span>
+          {icon && <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-zinc-100 text-zinc-600">{renderIcon(icon, "h-4 w-4")}</span>}
+          <span className="truncate text-[15px] font-semibold text-zinc-900">{title}</span>
           {hint && <span className="min-w-0 flex-1 truncate text-[13px] font-normal text-zinc-500">{hint}</span>}
           <ChevronDown
             className={cn("ml-auto h-4 w-4 shrink-0 text-zinc-400 transition-transform duration-200 group-hover:text-zinc-700 group-focus-visible:text-accent", open && "rotate-180")}
@@ -63,7 +63,7 @@ export function Collapsible({
           // Hidden content must leave the tab order, but only after the collapse animation has played.
           style={{ visibility: open ? "visible" : "hidden", transition: `visibility 0s linear ${open ? "0s" : "200ms"}` }}
         >
-          {(open || keepMounted) && <div className={cn(card ? "border-t border-zinc-100 px-5 py-4" : "pb-3 pt-1", bodyClassName)}>{children}</div>}
+          {(open || keepMounted) && <div className={cn(card ? "px-6 pb-5 pt-1" : "pb-3 pt-1", bodyClassName)}>{children}</div>}
         </div>
       </div>
     </section>

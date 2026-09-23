@@ -17,7 +17,7 @@ export interface TabsProps<K extends string = string> {
   items: TabItem<K>[];
   value: K;
   onChange: (key: K) => void;
-  /** "underline" — page-level tab bar; "pills" — compact segmented switch inside cards. */
+  /** "underline" — section-level tab bar; "pills" — VK segmented control. */
   variant?: "underline" | "pills";
   className?: string;
 }
@@ -39,7 +39,7 @@ export function Tabs<K extends string = string>({ items, value, onChange, varian
     <div
       role="tablist"
       onKeyDown={onKey}
-      className={cn(pills ? "inline-flex items-center gap-0.5 rounded-lg bg-zinc-100 p-0.5" : "flex items-stretch gap-1 border-b border-zinc-200", className)}
+      className={cn(pills ? "inline-flex items-center gap-0.5 rounded-xl bg-zinc-200/60 p-[3px]" : "flex items-stretch gap-6 border-b border-zinc-200", className)}
     >
       {items.map((item) => {
         const active = item.key === value;
@@ -55,10 +55,10 @@ export function Tabs<K extends string = string>({ items, value, onChange, varian
             disabled={item.disabled}
             onClick={() => onChange(item.key)}
             className={cn(
-              "relative inline-flex items-center gap-2 whitespace-nowrap font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/30 disabled:cursor-not-allowed disabled:opacity-40",
+              "relative inline-flex cursor-pointer items-center gap-2 whitespace-nowrap font-semibold transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/30 disabled:cursor-not-allowed disabled:opacity-40",
               pills
-                ? cn("h-7 rounded-md px-2.5 text-[13px]", active ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-600 hover:text-zinc-900")
-                : cn("-mb-px h-11 rounded-t-md border-b-2 px-3 text-sm", active ? "border-accent text-accent-700" : "border-transparent text-zinc-500 hover:border-zinc-300 hover:text-zinc-800"),
+                ? cn("h-8 rounded-[9px] px-3 text-[13px]", active ? "bg-white text-zinc-900 shadow-[0_1px_3px_rgba(0,16,61,0.12)]" : "text-zinc-600 hover:text-zinc-900")
+                : cn("-mb-px h-11 border-b-2 text-sm", active ? "border-accent text-zinc-900" : "border-transparent text-zinc-500 hover:text-zinc-800"),
             )}
           >
             {renderIcon(item.icon, "h-4 w-4 shrink-0")}

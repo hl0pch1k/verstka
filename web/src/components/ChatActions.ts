@@ -6,7 +6,7 @@ import { plural } from "../lib/utils";
 import { useApp, type AppState } from "../store";
 import type { ChatResponse, FixResult, Generation, TabKey } from "../types";
 
-const TABS: readonly TabKey[] = ["template", "plan", "variants", "audit", "export", "run"];
+const TABS: readonly TabKey[] = ["template", "brief", "plan", "variants", "audit", "export", "run"];
 const asTab = (name: string): TabKey | null => TABS.find((t) => t === name) ?? null;
 
 interface FixOutcome { strategy: string; before: number | null; done: boolean; result: FixResult | null; error: string | null }
@@ -40,7 +40,9 @@ function describeFixes(list: FixOutcome[], title: (name: string) => string): str
 }
 
 function trackGeneration(app: () => AppState, jobId: string, gid: string) {
+  app().setTab("variants"); // the variants step shows the build while the job runs
   app().runJob(jobId, "Генерация презентации", {
+    kind: "generate",
     onDone: async () => {
       let g: Generation;
       try {
@@ -82,6 +84,7 @@ function trackFixes(app: () => AppState, jobs: { strategy: string; job_id: strin
 
   jobs.forEach((j, i) => {
     app().runJob(j.job_id, `Автофикс: ${app().strategyTitle(j.strategy)}`, {
+      kind: "fix",
       onDone: (job) => {
         outcomes[i].done = true;
         outcomes[i].result = asFixResult(job.result);

@@ -57,7 +57,7 @@ function Overlay({ issue, box, highlighted, onHighlight }: { issue: Issue; box: 
       </span>
       <div
         className={cn(
-          "pointer-events-none absolute z-30 hidden w-72 rounded-lg border border-zinc-200 bg-white p-3 text-left shadow-pop group-hover:block",
+          "pointer-events-none absolute z-30 hidden w-72 rounded-2xl bg-white p-3.5 text-left shadow-pop group-hover:block",
           tipRight ? "right-0" : "left-0",
           tipAbove ? "bottom-full mb-1.5" : "top-full mt-1.5",
         )}
@@ -103,12 +103,12 @@ export function VariantsSlidePreview({ src, slide, total, headline, kind, issues
               role="switch"
               aria-checked={showIssues}
               onClick={() => onToggleIssues(!showIssues)}
-              className="inline-flex h-8 items-center gap-2 rounded-lg px-1.5 text-[13px] text-zinc-700 transition-colors hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/30"
+              className="inline-flex h-8 cursor-pointer items-center gap-2 rounded-full px-2 text-[13px] font-semibold text-zinc-700 transition-colors hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/30"
             >
               <span className={cn("relative h-5 w-9 shrink-0 rounded-full transition-colors", showIssues ? "bg-accent" : "bg-zinc-300")} aria-hidden>
                 <span className={cn("absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform", showIssues ? "translate-x-[18px]" : "translate-x-0.5")} />
               </span>
-              Показывать замечания
+              Замечания на слайде
               {issues.length > 0 && (
                 <Badge size="sm" tone={worst ? SEVERITY_TONE[worst] : "neutral"}>
                   {issues.length}
@@ -128,8 +128,8 @@ export function VariantsSlidePreview({ src, slide, total, headline, kind, issues
           Слайд {slide} из {total}
         </CardTitle>
       </CardHeader>
-      <CardBody className="p-3">
-        <div className="relative w-full overflow-hidden rounded-lg bg-zinc-100 ring-1 ring-zinc-200" style={{ aspectRatio: String(aspect) }}>
+      <CardBody className="px-4 pb-4 pt-1">
+        <div className="relative w-full overflow-hidden rounded-xl bg-zinc-100 shadow-inner-line" style={{ aspectRatio: String(aspect) }}>
           {src && !failed && (
             <img
               src={src}

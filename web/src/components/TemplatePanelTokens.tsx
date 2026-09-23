@@ -42,12 +42,12 @@ function Swatch({ color, share }: { color: ColorToken; share: number }) {
     void navigator.clipboard?.writeText(hex).then(() => toast("success", `Цвет ${hex} скопирован`), () => undefined);
   };
   return (
-    <div className="overflow-hidden rounded-lg border border-zinc-200 bg-white">
+    <div className="overflow-hidden rounded-2xl bg-zinc-50 shadow-inner-line">
       <button
         type="button"
         onClick={copy}
         title="Скопировать HEX"
-        className={cn("flex h-16 w-full items-end justify-between border-b border-zinc-200/70 px-2.5 pb-2 text-left focus:outline-none", isLightHex(hex) ? "text-zinc-900" : "text-white")}
+        className={cn("flex h-20 w-full cursor-pointer items-end justify-between px-3 pb-2.5 text-left focus:outline-none", isLightHex(hex) ? "text-zinc-900" : "text-white")}
         style={{ backgroundColor: hex }}
       >
         <span className="font-mono text-xs font-semibold tracking-wide">{hex}</span>
@@ -98,7 +98,7 @@ export function PaletteCard({ manifest }: { manifest: TemplateManifest }) {
           <div className="flex flex-wrap items-center gap-2 border-t border-zinc-100 pt-3">
             <span className="text-xs font-medium text-zinc-500">Фоны слайдов</span>
             {backgrounds.map((b, i) => (
-              <span key={i} className="inline-flex h-6 items-center gap-1.5 rounded-full border border-zinc-200 bg-white pl-1.5 pr-2.5 text-xs text-zinc-700">
+              <span key={i} className="inline-flex h-7 items-center gap-1.5 rounded-full bg-zinc-100 pl-1.5 pr-3 text-xs font-medium text-zinc-700">
                 <span className="h-3.5 w-3.5 rounded-full border border-zinc-300" style={{ background: b.hex ? hexOf(b.hex) : "repeating-linear-gradient(45deg,#e4e4e7 0 3px,#fff 3px 6px)" }} />
                 {b.family === "dark" ? "тёмный" : "светлый"} · {FILL_RU[b.fill_kind] ?? b.fill_kind}
                 <span className="text-zinc-400">{plural(b.slides.length, "слайд", "слайда", "слайдов")}</span>
@@ -152,7 +152,7 @@ export function TypographyCard({ manifest }: { manifest: TemplateManifest }) {
           </div>
         )}
         {typo.scale.length > 0 && (
-          <div className="divide-y divide-zinc-100 rounded-lg border border-zinc-200">
+          <div className="divide-y divide-zinc-200/70 rounded-2xl bg-zinc-50">
             {typo.scale.map((s) => {
               const meta = SCALE_RU[s.role] ?? { label: s.role, sample: "Пример текста в этом кегле" };
               return (
@@ -215,7 +215,7 @@ export function SpacingCard({ manifest }: { manifest: TemplateManifest }) {
         <CardTitle icon={Ruler} hint="поля и направляющие, общие для слайдов шаблона">Сетка и поля</CardTitle>
       </CardHeader>
       <CardBody className="space-y-4">
-        <div className="relative w-full overflow-hidden rounded-md border border-zinc-300 bg-zinc-50" style={{ aspectRatio: w && h ? `${w} / ${h}` : "16 / 9" }}>
+        <div className="relative w-full overflow-hidden rounded-xl bg-zinc-100 shadow-inner-line" style={{ aspectRatio: w && h ? `${w} / ${h}` : "16 / 9" }}>
           <div className="absolute rounded-sm border border-dashed border-accent bg-accent/5" style={{ left: `${sa.x * 100}%`, top: `${sa.y * 100}%`, width: `${sa.w * 100}%`, height: `${sa.h * 100}%` }} />
           {spacing.columns.map((c) => <div key={c} className="absolute inset-y-0 w-px bg-pink-500/70" style={{ left: `${c * 100}%` }} />)}
           <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-[11px] font-medium text-accent-700">безопасная область</span>

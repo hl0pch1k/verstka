@@ -15,9 +15,9 @@ import { EmptyState } from "./ui/EmptyState";
 import { Tabs, type TabItem } from "./ui/Tabs";
 
 const CHIP_ON: Record<Severity, string> = {
-  error: "border-red-200 bg-red-50 text-red-700",
-  warn: "border-amber-200 bg-amber-50 text-amber-800",
-  info: "border-sky-200 bg-sky-50 text-sky-700",
+  error: "border-transparent bg-red-50 text-red-700",
+  warn: "border-transparent bg-amber-50 text-amber-800",
+  info: "border-transparent bg-sky-50 text-sky-700",
 };
 
 export function AuditPanel() {
@@ -76,6 +76,7 @@ export function AuditPanel() {
     try {
       const { job_id } = await api.fixes(gid, activeStrategy, body);
       runJob(job_id, "Применяю исправления", {
+        kind: "fix",
         onDone: async (job) => {
           await loadGeneration(gid);
           const r = (job.result ?? null) as Partial<FixResult> | null;
@@ -169,8 +170,8 @@ export function AuditPanel() {
               aria-pressed={on}
               onClick={() => toggleSeverity(s)}
               className={cn(
-                "inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/30",
-                on ? CHIP_ON[s] : "border-zinc-200 bg-white text-zinc-400 hover:text-zinc-700",
+                "inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full border px-3 text-xs font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/30",
+                on ? CHIP_ON[s] : "border-transparent bg-zinc-100 text-zinc-400 hover:text-zinc-700",
               )}
             >
               {SEVERITY_LABEL[s]}
@@ -183,8 +184,8 @@ export function AuditPanel() {
           aria-pressed={filter.fixableOnly}
           onClick={() => setFilter((f) => ({ ...f, fixableOnly: !f.fixableOnly }))}
           className={cn(
-            "inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/30",
-            filter.fixableOnly ? "border-accent-200 bg-accent-50 text-accent-700" : "border-zinc-200 bg-white text-zinc-500 hover:text-zinc-800",
+            "inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full border px-3 text-xs font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/30",
+            filter.fixableOnly ? "border-transparent bg-accent-50 text-accent-700" : "border-transparent bg-zinc-100 text-zinc-500 hover:text-zinc-800",
           )}
         >
           <Wand2 className="h-3.5 w-3.5" aria-hidden />

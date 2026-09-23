@@ -27,7 +27,7 @@ function slotColor(role: string): string {
 
 function SlotMap({ pattern, aspect, show }: { pattern: Pattern; aspect: string; show: boolean }) {
   return (
-    <div className="relative overflow-hidden rounded-lg border border-zinc-200 bg-zinc-100" style={{ aspectRatio: aspect }}>
+    <div className="relative overflow-hidden rounded-2xl bg-zinc-100 shadow-inner-line" style={{ aspectRatio: aspect }}>
       <PatternThumb src={pattern.thumbnail_url} alt={`Слайд ${pattern.source_slide}`} className="object-contain" />
       {show && pattern.slots.map((s) => {
         const color = slotColor(s.role);
@@ -124,7 +124,7 @@ export function PatternModal({ pattern, aspect, position, onClose, onStep }: Pro
             </div>
           </div>
           {pattern.classification && (
-            <div className="rounded-lg border border-zinc-200 bg-zinc-50/60 p-3">
+            <div className="rounded-2xl bg-zinc-50 p-4">
               <p className="mb-2 text-xs font-semibold text-zinc-700">Голоса классификации · согласие {fmtPct(pattern.classification.agreement)}</p>
               <ul className="space-y-1.5">
                 {votes.map(({ source, vote }) => (

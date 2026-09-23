@@ -52,7 +52,7 @@ export function FactsRegistry({ facts, used }: { facts: Fact[]; used: Set<string
 function SeriesCard({ series }: { series: Series }) {
   const max = Math.max(0, ...series.values);
   return (
-    <div className="rounded-lg border border-zinc-200 p-3">
+    <div className="rounded-2xl bg-zinc-50 p-4">
       <div className="mb-2 flex items-baseline justify-between gap-2">
         <p className="min-w-0 truncate text-[13px] font-medium text-zinc-900">{series.name}</p>
         <span className="shrink-0 font-mono text-[11px] text-zinc-400">{series.id}{series.unit && ` · ${series.unit}`}</span>

@@ -31,6 +31,8 @@ export const LS = {
   session: "verstka.session_id",
   template: "verstka.template_id",
   generation: "verstka.generation_id",
+  agent: "verstka.agent_open",
+  brief: "verstka.brief_draft",
 };
 
 export function sessionId(): string {

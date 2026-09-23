@@ -49,7 +49,7 @@ function DeckTile({ file, href }: { file: DeckFile; href: string | null }) {
       download={file.newTab ? undefined : file.name}
       target={file.newTab ? "_blank" : undefined}
       rel={file.newTab ? "noopener noreferrer" : undefined}
-      className={cn(base, "group border-zinc-200 bg-white shadow-sm hover:border-accent/50 hover:bg-accent-50/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/30")}
+      className={cn(base, "group border-transparent bg-zinc-100 hover:bg-accent-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/30")}
     >
       <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-zinc-100 text-zinc-600 transition-colors group-hover:bg-accent group-hover:text-white">
         <Icon className="h-[18px] w-[18px]" aria-hidden />
@@ -128,7 +128,7 @@ function Skeleton() {
   return (
     <div className="space-y-4" aria-busy>
       {[0, 1, 2].map((i) => (
-        <div key={i} className="rounded-xl border border-zinc-200 bg-white p-5 shadow-card">
+        <div key={i} className="rounded-2xl bg-white p-6 shadow-card">
           <div className="skeleton h-4 w-48" />
           <div className="mt-4 flex gap-3">
             <div className="skeleton h-14 flex-1" />
@@ -142,7 +142,7 @@ function Skeleton() {
 }
 
 export function ExportPanel() {
-  const { generationId, generation, generationLoading, activeStrategy, setActiveStrategy, strategies, strategyTitle, setTab } = useApp();
+  const { generationId, generation, generationLoading, activeStrategy, setActiveStrategy, strategies, strategyTitle } = useApp();
 
   if (!generationId) {
     return (
@@ -174,9 +174,6 @@ export function ExportPanel() {
         <span className="truncate">шаблон «{generation.template_file ?? generation.template_id}»</span>
         <span className="text-zinc-300" aria-hidden>·</span>
         <span>{plural(generation.variants.length, "вариант", "варианта", "вариантов")}</span>
-        <button type="button" onClick={() => setTab("run")} className="ml-auto text-xs font-medium text-accent-700 hover:underline">
-          Паспорт запуска →
-        </button>
       </div>
 
       {ordered.map((v) => (
@@ -191,7 +188,7 @@ export function ExportPanel() {
         />
       ))}
 
-      <div className="flex items-start gap-3 rounded-xl border border-zinc-200 bg-zinc-50/70 px-5 py-4 text-[13px] leading-5 text-zinc-600">
+      <div className="flex items-start gap-3 rounded-2xl bg-accent-50/70 px-6 py-4 text-[13px] leading-5 text-zinc-700">
         <PenLine className="mt-0.5 h-4 w-4 shrink-0 text-accent" aria-hidden />
         <p>
           <span className="font-medium text-zinc-800">PPTX содержит нативные редактируемые объекты.</span> Заголовки, текст, таблицы, карточки и числа — это

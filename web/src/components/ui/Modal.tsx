@@ -50,34 +50,34 @@ export function Modal({ open, onClose, title, description, footer, size = "md", 
 
   return createPortal(
     <div className="fixed inset-0 z-[90] flex items-center justify-center p-8">
-      <div className="absolute inset-0 bg-zinc-900/40 backdrop-blur-[2px] animate-fade-in" onClick={dismissible ? onClose : undefined} aria-hidden />
+      <div className="absolute inset-0 bg-ink/50 backdrop-blur-[3px] animate-fade" onClick={dismissible ? onClose : undefined} aria-hidden />
       <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         tabIndex={-1}
-        className={cn("relative flex max-h-full w-full flex-col overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-pop outline-none animate-fade-in", WIDTH[size], className)}
+        className={cn("relative flex max-h-full w-full flex-col overflow-hidden rounded-3xl bg-white shadow-pop outline-none animate-fade-in", WIDTH[size], className)}
       >
         {(title || dismissible) && (
-          <header className="flex shrink-0 items-start gap-4 border-b border-zinc-100 px-6 py-4">
+          <header className="flex shrink-0 items-start gap-4 px-7 pb-3 pt-6">
             <div className="min-w-0 flex-1">
-              {title && <h2 className="text-base font-semibold leading-6 text-zinc-900">{title}</h2>}
-              {description && <p className="mt-0.5 text-[13px] leading-5 text-zinc-500">{description}</p>}
+              {title && <h2 className="text-xl font-semibold leading-7 text-zinc-900">{title}</h2>}
+              {description && <p className="mt-1 text-sm leading-5 text-zinc-500">{description}</p>}
             </div>
             {dismissible && (
               <button
                 type="button"
                 onClick={onClose}
                 aria-label="Закрыть"
-                className="-mr-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/30"
+                className="-mr-2 flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full bg-zinc-100 text-zinc-500 transition-colors hover:bg-zinc-200 hover:text-zinc-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/30"
               >
                 <X className="h-4 w-4" />
               </button>
             )}
           </header>
         )}
-        <div className={cn("scroll-thin min-h-0 flex-1 overflow-y-auto", !flush && "px-6 py-5")}>{children}</div>
-        {footer && <footer className="flex shrink-0 items-center justify-end gap-2 border-t border-zinc-100 bg-zinc-50/60 px-6 py-3.5">{footer}</footer>}
+        <div className={cn("scroll-thin min-h-0 flex-1 overflow-y-auto", !flush && "px-7 pb-6 pt-2")}>{children}</div>
+        {footer && <footer className="flex shrink-0 items-center justify-end gap-2 border-t border-zinc-100 px-7 py-4">{footer}</footer>}
       </div>
     </div>,
     document.body,

@@ -29,7 +29,7 @@ function NoGeneration() {
           <div className="flex flex-wrap items-center justify-center gap-1.5">
             <span className="text-xs text-zinc-500">или откройте недавнюю:</span>
             {recent.map((g) => (
-              <button key={g.id} type="button" onClick={() => void loadGeneration(g.id)} className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700 hover:border-zinc-300 hover:bg-zinc-50">
+              <button key={g.id} type="button" onClick={() => void loadGeneration(g.id)} className="cursor-pointer rounded-full bg-zinc-100 px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-200/70 hover:bg-zinc-50">
                 {g.brief?.trim().slice(0, 40) || shortSha(g.id)}{g.brief && g.brief.trim().length > 40 ? "…" : ""} · {fmtDate(g.created_at)}
               </button>
             ))}
@@ -69,11 +69,11 @@ function SlideRow({ index, slide, outline, decision, pattern, aspect, selected, 
       onKeyDown={onKey}
       title="Открыть слайд во вкладке «Варианты»"
       className={cn(
-        "flex cursor-pointer gap-4 rounded-xl border bg-white px-4 py-3.5 shadow-card transition-shadow hover:shadow-pop focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/30",
-        selected ? "border-accent ring-1 ring-accent/30" : "border-zinc-200",
+        "flex cursor-pointer gap-5 rounded-2xl bg-white px-5 py-4 transition-shadow duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/30",
+        selected ? "shadow-[0_0_0_2px_#0077FF]" : "shadow-card hover:shadow-raise",
       )}
     >
-      <span className={cn("w-8 shrink-0 pt-0.5 text-right text-lg font-semibold leading-6 tabular-nums", selected ? "text-accent" : "text-zinc-300")}>{index}</span>
+      <span className={cn("w-8 shrink-0 pt-0.5 text-right text-2xl font-bold leading-7 tabular-nums", selected ? "text-accent" : "text-zinc-300")}>{index}</span>
       <div className="min-w-0 flex-1 space-y-1.5">
         <div className="flex flex-wrap items-center gap-1.5">
           <Badge size="sm" tone="accent">{kindLabel(slide.kind)}</Badge>
@@ -82,7 +82,7 @@ function SlideRow({ index, slide, outline, decision, pattern, aspect, selected, 
             <span className="ml-auto font-mono text-[11px] text-zinc-400" title="Факты из реестра, использованные на слайде">факты: {slide.fact_refs.join(", ")}</span>
           )}
         </div>
-        <h4 className="text-[15px] font-semibold leading-5 text-zinc-900">{slide.headline || <span className="font-normal italic text-zinc-400">без заголовка</span>}</h4>
+        <h4 className="text-base font-semibold leading-6 text-zinc-900">{slide.headline || <span className="font-normal italic text-zinc-400">без заголовка</span>}</h4>
         {slide.subtitle && <p className="text-[13px] leading-5 text-zinc-600">{slide.subtitle}</p>}
         <SlideContentView content={slide.content} outline={outline} />
         {slide.notes && (
@@ -97,7 +97,7 @@ function SlideRow({ index, slide, outline, decision, pattern, aspect, selected, 
   );
 }
 
-export function PlanPanel() {
+export function PlanPanel({ embedded = false }: { embedded?: boolean } = {}) {
   const { generation, generationLoading, activeVariant, activeStrategy, setActiveStrategy, strategies, strategyTitle, manifest, selectedSlide, setSelectedSlide, setTab } = useApp();
   const outline = activeVariant?.outline ?? null;
   const plan = activeVariant?.plan ?? null;
@@ -128,18 +128,20 @@ export function PlanPanel() {
   return (
     <div className="space-y-4 pb-6">
       <div className="flex items-center gap-3">
-        <Tabs
-          variant="pills"
-          value={activeStrategy ?? generation.variants[0].strategy}
-          onChange={setActiveStrategy}
-          items={generation.variants.map((v) => ({ key: v.strategy, label: strategyTitle(v.strategy), badge: v.outline?.slides.length ?? null }))}
-        />
+        {!embedded && (
+          <Tabs
+            variant="pills"
+            value={activeStrategy ?? generation.variants[0].strategy}
+            onChange={setActiveStrategy}
+            items={generation.variants.map((v) => ({ key: v.strategy, label: strategyTitle(v.strategy), badge: v.outline?.slides.length ?? null }))}
+          />
+        )}
         {plan && (
-          <span className="text-xs text-zinc-500">
-            {plural(plan.slides.length, "слайд", "слайда", "слайдов")} · клонов {clones} · синтез {synths}
+          <span className="text-[13px] text-zinc-500">
+            {plural(plan.slides.length, "слайд", "слайда", "слайдов")} · клон паттерна {clones} · синтез из токенов {synths}
           </span>
         )}
-        <Button size="sm" icon={Layers} className="ml-auto" onClick={() => open(selectedSlide)}>Открыть слайды</Button>
+        {!embedded && <Button size="sm" icon={Layers} className="ml-auto" onClick={() => open(selectedSlide)}>Открыть слайды</Button>}
       </div>
 
       {!outline ? (
@@ -149,7 +151,7 @@ export function PlanPanel() {
           <Card>
             <CardBody className="space-y-3 py-5">
               <div>
-                <h2 className="text-xl font-semibold leading-7 text-zinc-900">{outline.title}</h2>
+                <h2 className="text-2xl font-bold leading-8 tracking-tight text-zinc-900">{outline.title}</h2>
                 {outline.subtitle && <p className="mt-1 text-sm leading-5 text-zinc-600">{outline.subtitle}</p>}
               </div>
               <div className="flex flex-wrap items-center gap-1.5">
