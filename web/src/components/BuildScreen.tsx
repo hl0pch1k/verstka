@@ -6,11 +6,11 @@ import { cn } from "../lib/utils";
 import type { ActiveJob } from "../store";
 
 const STAGES = [
-  { title: "Бриф и факты", hint: "реестр чисел, таблиц и тезисов" },
-  { title: "План колоды", hint: "заголовки-выводы, типы слайдов, три стратегии" },
-  { title: "Вёрстка по паттернам", hint: "клон образцов шаблона или синтез из токенов" },
-  { title: "Аудит и автофикс", hint: "27 проверок: контраст, сетка, кегли, переполнение" },
-  { title: "Экспорт", hint: "PPTX из нативных объектов, PDF и HTML" },
+  { title: "Читаю текст", hint: "нахожу цифры, таблицы и главные мысли" },
+  { title: "Составляю план", hint: "что будет на каждом слайде" },
+  { title: "Оформляю слайды", hint: "по макетам вашего шаблона" },
+  { title: "Проверяю качество", hint: "шрифты, цвета, отступы, читаемость — и исправляю" },
+  { title: "Сохраняю файлы", hint: "PowerPoint, PDF и веб-версия" },
 ];
 
 function stageOf(job: ActiveJob): number {
@@ -30,14 +30,16 @@ const clock = (ms: number) => {
 };
 
 export function BuildScreen({ job }: { job: ActiveJob }) {
-  const [now, setNow] = useState(() => Date.now());
+  // the interval only asks for a re-render; the clock itself is read at render time, so throttled timers of a
+  // background tab never make it lag behind
+  const [, tick] = useState(0);
   useEffect(() => {
-    const t = window.setInterval(() => setNow(Date.now()), 1000);
+    const t = window.setInterval(() => tick((n) => n + 1), 1000);
     return () => window.clearInterval(t);
   }, []);
   const stage = stageOf(job);
   const pct = Math.round(job.progress * 100);
-  const elapsed = now - job.startedAt;
+  const elapsed = Date.now() - job.startedAt;
 
   return (
     <div className="relative overflow-hidden rounded-[28px] bg-ink px-12 py-11 text-white animate-fade-in">
@@ -45,9 +47,8 @@ export function BuildScreen({ job }: { job: ActiveJob }) {
       <div className="absolute -right-32 -top-40 h-[420px] w-[420px] rounded-full bg-accent/25 blur-[120px]" aria-hidden />
       <div className="relative grid grid-cols-[minmax(0,1fr)_340px] gap-12">
         <div>
-          <p className="text-[13px] font-semibold text-accent-300">Шаг 3 из 5 · сборка</p>
-          <h1 className="mt-2 text-[34px] font-bold leading-[42px] tracking-tight">Собираю три варианта презентации</h1>
-          <p className="mt-2 max-w-xl text-[15px] leading-6 text-white/60">Каждый вариант проходит аудит и автофикс. Можно переключиться на другой шаг — сборка продолжится.</p>
+          <h1 className="text-[34px] font-bold leading-[42px] tracking-tight">Готовлю презентацию</h1>
+          <p className="mt-2 max-w-xl text-[15px] leading-6 text-white/60">Сразу три варианта оформления — потом выберете лучший. Обычно это занимает меньше минуты.</p>
 
           <div className="mt-9 flex items-end gap-4">
             <span className="text-[72px] font-bold leading-none tabular-nums tracking-tight">{pct}<span className="text-4xl text-white/40">%</span></span>
@@ -60,7 +61,7 @@ export function BuildScreen({ job }: { job: ActiveJob }) {
           </div>
           <div className="mt-4 flex items-center gap-6 text-[13px] text-white/55">
             <span>Прошло <span className="font-semibold tabular-nums text-white">{clock(elapsed)}</span></span>
-            <span>Лимит на колоду <span className="font-semibold tabular-nums text-white">5:00</span></span>
+            <span>Гарантированно не дольше <span className="font-semibold tabular-nums text-white">5 минут</span></span>
           </div>
         </div>
 

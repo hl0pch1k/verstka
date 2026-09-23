@@ -169,13 +169,13 @@ interface IssuesProps {
 }
 
 export function VariantsSlideIssues({ issues, audited, highlightId, onHighlight, onOpenAudit }: IssuesProps) {
-  const hint = audited ? issuesSummary(issues) || "замечаний нет" : "аудит не запускался";
+  const hint = audited ? issuesSummary(issues) || "замечаний нет" : "проверка не запускалась";
   return (
     <Card className="flex min-w-0 flex-col">
       <CardHeader
         actions={
           <Button size="sm" iconRight={ArrowUpRight} onClick={onOpenAudit}>
-            Открыть в аудите
+            Все замечания
           </Button>
         }
       >

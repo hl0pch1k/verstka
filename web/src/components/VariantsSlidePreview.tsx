@@ -5,7 +5,7 @@ import { cn, SEVERITY_LABEL } from "../lib/utils";
 import type { BboxFrac, Issue, Severity } from "../types";
 import { Badge } from "./ui/Badge";
 import { Button } from "./ui/Button";
-import { Card, CardBody, CardHeader, CardTitle } from "./ui/Card";
+import { Card, CardBody } from "./ui/Card";
 import { clampBox, pct, SEVERITY_TONE, worstSeverity } from "./VariantsHelpers";
 
 interface Props {
@@ -94,42 +94,42 @@ export function VariantsSlidePreview({ src, slide, total, headline, kind, issues
 
   return (
     <Card className="min-w-0">
-      <CardHeader
-        actions={
-          <>
-            {kind && <Badge>{kind}</Badge>}
-            <button
-              type="button"
-              role="switch"
-              aria-checked={showIssues}
-              onClick={() => onToggleIssues(!showIssues)}
-              className="inline-flex h-8 cursor-pointer items-center gap-2 rounded-full px-2 text-[13px] font-semibold text-zinc-700 transition-colors hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/30"
-            >
-              <span className={cn("relative h-5 w-9 shrink-0 rounded-full transition-colors", showIssues ? "bg-accent" : "bg-zinc-300")} aria-hidden>
-                <span className={cn("absolute left-0 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform", showIssues ? "translate-x-[18px]" : "translate-x-0.5")} />
-              </span>
-              Замечания на слайде
-              {issues.length > 0 && (
-                <Badge size="sm" tone={worst ? SEVERITY_TONE[worst] : "neutral"}>
-                  {issues.length}
-                </Badge>
-              )}
-            </button>
-            <span className="mx-1 h-5 w-px bg-zinc-200" aria-hidden />
-            <span className="text-xs tabular-nums text-zinc-500">
-              {slide} / {total}
+      <div className="flex items-center gap-3 px-5 pb-3 pt-4">
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-[15px] font-semibold leading-5 text-zinc-900">{headline || "Без заголовка"}</p>
+          <p className="truncate text-xs text-zinc-500">
+            Слайд {slide} из {total}
+            {kind ? ` · ${kind}` : ""}
+          </p>
+        </div>
+        {issues.length > 0 && (
+          <button
+            type="button"
+            role="switch"
+            aria-checked={showIssues}
+            onClick={() => onToggleIssues(!showIssues)}
+            className="inline-flex h-9 shrink-0 cursor-pointer items-center gap-2 rounded-full px-2.5 text-[13px] font-semibold text-zinc-700 transition-colors hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/30"
+          >
+            <span className={cn("relative h-5 w-9 shrink-0 rounded-full transition-colors", showIssues ? "bg-accent" : "bg-zinc-300")} aria-hidden>
+              <span className={cn("absolute left-0 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform", showIssues ? "translate-x-[18px]" : "translate-x-0.5")} />
             </span>
-            <Button size="sm" icon={ChevronLeft} aria-label="Предыдущий слайд" title="Предыдущий слайд (←)" disabled={slide <= 1} onClick={() => onSelect(slide - 1)} />
-            <Button size="sm" icon={ChevronRight} aria-label="Следующий слайд" title="Следующий слайд (→)" disabled={slide >= total} onClick={() => onSelect(slide + 1)} />
-          </>
-        }
-      >
-        <CardTitle hint={headline || "Без заголовка"}>
-          Слайд {slide} из {total}
-        </CardTitle>
-      </CardHeader>
+            Показать замечания
+            <Badge size="sm" tone={worst ? SEVERITY_TONE[worst] : "neutral"}>
+              {issues.length}
+            </Badge>
+          </button>
+        )}
+        <div className="flex shrink-0 items-center gap-1">
+          <Button icon={ChevronLeft} aria-label="Предыдущий слайд" title="Предыдущий слайд (←)" disabled={slide <= 1} onClick={() => onSelect(slide - 1)} className="rounded-full" />
+          <Button icon={ChevronRight} aria-label="Следующий слайд" title="Следующий слайд (→)" disabled={slide >= total} onClick={() => onSelect(slide + 1)} className="rounded-full" />
+        </div>
+      </div>
       <CardBody className="px-4 pb-4 pt-1">
-        <div className="relative w-full overflow-hidden rounded-xl bg-zinc-100 shadow-inner-line" style={{ aspectRatio: String(aspect) }}>
+        <div
+          className="relative mx-auto overflow-hidden rounded-xl bg-zinc-100 shadow-inner-line"
+          // the slide shrinks with the window height so the thumbnails under it stay on screen
+          style={{ aspectRatio: String(aspect), width: `min(100%, max(560px, calc((100vh - 460px) * ${aspect.toFixed(4)})))` }}
+        >
           {src && !failed && (
             <img
               src={src}
@@ -157,11 +157,11 @@ export function VariantsSlidePreview({ src, slide, total, headline, kind, issues
             <Overlay key={key} issue={issue} box={box} highlighted={highlightId === issue.id} onHighlight={onHighlight} />
           ))}
         </div>
-        <p className="mt-2 flex items-center gap-3 px-1 text-[11px] text-zinc-400">
-          <span>← → — переключение слайдов</span>
-          {showIssues && issues.length > 0 && <span>наведите на рамку, чтобы прочитать замечание</span>}
-          {showIssues && issues.length > 0 && boxes.length === 0 && !loading && <span>у замечаний этого слайда нет области на макете</span>}
-        </p>
+        {showIssues && issues.length > 0 && (
+          <p className="mt-2 px-1 text-xs text-zinc-500">
+            {boxes.length === 0 && !loading ? "У замечаний этого слайда нет области на макете — они перечислены в «Подробнее»." : "Наведите на рамку, чтобы прочитать замечание."}
+          </p>
+        )}
       </CardBody>
     </Card>
   );

@@ -83,8 +83,8 @@ function VariantCard({ g, v, active, title, description, onActivate }: {
                 Сделать активным
               </button>
             )}
-            <Badge tone={scoreTone(score)} title="Оценка аудита">
-              {score === null ? "аудит не запускался" : `Аудит ${Math.round(score)} / 100`}
+            <Badge tone={scoreTone(score)} title="Оценка качества">
+              {score === null ? "проверка не запускалась" : `Качество ${Math.round(score)} / 100`}
             </Badge>
           </>
         }

@@ -8,7 +8,7 @@ import { trackJob } from "./lib/jobs";
 import { errText, firstLine, newestTemplate, slideCount } from "./lib/narrate";
 import { LS, storage, uid } from "./lib/utils";
 import type {
-  ChatMessage, GenerateRequest, Generation, GenerationMeta, Health, Job, JobKind, JobStatus, StrategyInfo, TabKey, TemplateListItem, TemplateManifest, Variant,
+  ChatMessage, DetailKey, GenerateRequest, Generation, GenerationMeta, Health, Job, JobKind, JobStatus, Screen, StrategyInfo, TabKey, TemplateListItem, TemplateManifest, Variant,
 } from "./types";
 
 export interface ActiveJob { id: string; label: string; progress: number; message: string; status: JobStatus; kind: JobKind; startedAt: number }
@@ -26,9 +26,10 @@ export interface AppState {
   loadGeneration(gid: string): Promise<void>;
   activeStrategy: string | null; setActiveStrategy(s: string): void; activeVariant: Variant | null;
   selectedSlide: number; setSelectedSlide(n: number): void; // 1-based
-  tab: TabKey; setTab(t: TabKey): void;
-  /** The template step shows the library (upload + all templates) instead of the selected template's passport. */
-  showLibrary: boolean; setShowLibrary(v: boolean): void;
+  /** Old view names (the agent and flows speak them) → screen + drawer. */
+  setTab(t: TabKey): void;
+  screen: Screen; setScreen(s: Screen): void;
+  detail: DetailKey | null; setDetail(d: DetailKey | null): void;
   agentOpen: boolean; setAgentOpen(v: boolean): void;
   activeJob: ActiveJob | null;
   runJob(jobId: string, label: string, opts?: RunJobOptions): void;
@@ -64,13 +65,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [generationLoading, setGenerationLoading] = useState(() => !!storage.get(LS.generation));
   const [activeStrategy, setActiveStrategyState] = useState<string | null>(null);
   const [selectedSlide, setSelectedSlideState] = useState(1);
-  const [tab, setTab] = useState<TabKey>("template");
-  const [showLibrary, setShowLibrary] = useState(false);
-  const [agentOpen, setAgentOpenState] = useState(() => storage.get(LS.agent) === "1");
-  const setAgentOpen = useCallback((v: boolean) => {
-    setAgentOpenState(v);
-    storage.set(LS.agent, v ? "1" : "0");
+  const [screen, setScreen] = useState<Screen>("create");
+  const [detail, setDetail] = useState<DetailKey | null>(null);
+  const setTab = useCallback((t: TabKey) => {
+    if (t === "template") return setDetail("template");
+    if (t === "brief") {
+      setScreen("create");
+      return setDetail(null);
+    }
+    setScreen("result");
+    setDetail(t === "plan" ? "plan" : t === "audit" ? "quality" : t === "run" ? "tech" : null);
   }, []);
+  const [agentOpen, setAgentOpen] = useState(false); // the helper starts closed: the page itself must be self-explanatory
   const [activeJob, setActiveJob] = useState<ActiveJob | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
 
@@ -209,7 +215,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const adoptManifest = useCallback((m: TemplateManifest) => {
     setManifest(m); // same batch as the id: the manifest effect sees a match and skips the refetch
     selectTemplate(m.template_id);
-    setShowLibrary(false); // a freshly analysed template opens on its passport
   }, [selectTemplate]);
 
   const uploadTemplate = useCallback(
@@ -304,11 +309,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AppState>(() => ({
     health, healthError, strategies, strategyTitle, templates, refreshTemplates, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, activeStrategy, setActiveStrategy, activeVariant,
-    selectedSlide, setSelectedSlide, tab, setTab, showLibrary, setShowLibrary, agentOpen, setAgentOpen, activeJob, runJob, messages, pushMessage, toast, uploadTemplate, startGeneration,
+    selectedSlide, setSelectedSlide, setTab, screen, setScreen, detail, setDetail, agentOpen, setAgentOpen, activeJob, runJob, messages, pushMessage, toast, uploadTemplate, startGeneration,
   }), [
     health, healthError, strategies, strategyTitle, templates, refreshTemplates, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, activeStrategy, setActiveStrategy, activeVariant,
-    selectedSlide, setSelectedSlide, tab, showLibrary, agentOpen, setAgentOpen, activeJob, runJob, messages, pushMessage, toast, uploadTemplate, startGeneration,
+    selectedSlide, setSelectedSlide, setTab, screen, detail, agentOpen, setAgentOpen, activeJob, runJob, messages, pushMessage, toast, uploadTemplate, startGeneration,
   ]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

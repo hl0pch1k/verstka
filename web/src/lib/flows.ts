@@ -46,7 +46,6 @@ export function uploadTemplateFlow(file: File, useModels: boolean, d: UploadDeps
             if (!tid) throw new Error("сервер не вернул идентификатор шаблона");
             const m = await api.template(tid);
             d.adoptManifest(m);
-            d.setTab("template");
             const fallback = `Шаблон «${m.source_file}» разобран: ${plural(m.patterns.length, "паттерн", "паттерна", "паттернов")} из ${plural(m.n_slides, "слайда", "слайдов", "слайдов")}.`;
             d.pushMessage("assistant", m.narration || fallback);
             pushToast("success", "Шаблон разобран");

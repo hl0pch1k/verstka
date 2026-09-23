@@ -42,7 +42,7 @@ export function AuditSummaryCard({ audit }: { audit: AuditReport }) {
     { icon: AlertTriangle, label: "Предупреждения", value: String(summary.warnings), tone: summary.warnings > 0 ? "warn" : "neutral" },
     { icon: Info, label: "Заметки", value: String(summary.infos), tone: summary.infos > 0 ? "info" : "neutral" },
     { icon: Bot, label: "Флаги модели", value: String(summary.model_flags), tone: summary.model_flags > 0 ? "accent" : "neutral", hint: "Замечания LLM/VLM-проверок" },
-    { icon: RefreshCw, label: "Итерации", value: String(audit.iterations), hint: "Проходов аудит → автофикс" },
+    { icon: RefreshCw, label: "Проходов", value: String(audit.iterations), hint: "Проходов «проверка → исправление»" },
     { icon: Wand2, label: "Исправлений", value: String(audit.applied_fixes.length), tone: audit.applied_fixes.length > 0 ? "accent" : "neutral", hint: "Применено автоисправлений" },
     { icon: Timer, label: "Время", value: fmtSeconds(audit.seconds) },
     { icon: ListChecks, label: "Проверок", value: String(summary.checks_run.length), hint: summary.checks_run.join(", ") || undefined },
@@ -56,7 +56,7 @@ export function AuditSummaryCard({ audit }: { audit: AuditReport }) {
             <span className={cn("text-5xl font-semibold leading-none tabular-nums tracking-tight", style.text)}>{scoreText(summary.score)}</span>
             <span className="text-sm font-medium text-zinc-400">/100</span>
           </div>
-          <div className="mt-2 text-xs font-medium text-zinc-600">Оценка аудита</div>
+          <div className="mt-2 text-xs font-medium text-zinc-600">Оценка качества</div>
           <div className="mt-2.5 h-1.5 w-full overflow-hidden rounded-full bg-white/80 ring-1 ring-inset ring-black/5" aria-hidden>
             <div className={cn("h-full rounded-full transition-[width] duration-500", style.bar)} style={{ width: `${score}%` }} />
           </div>

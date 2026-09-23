@@ -140,7 +140,7 @@ export function AuditPanel() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         {switcher}
         <div className="flex items-center gap-2">
           <Button icon={Wand2} disabled={busy || fixableTotal === 0} loading={submitting} onClick={() => void runFixes({ all_deterministic: true })} title="Применить все детерминированные автоисправления">

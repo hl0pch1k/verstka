@@ -10,16 +10,23 @@ import { useChatActions } from "./ChatActions";
 import { JobBubble, MessageBubble, TypingIndicator } from "./ChatParts";
 import { Button } from "./ui/Button";
 
-const QUICK_ACTIONS = ["Расскажи о шаблоне", "Покажи план", "Покажи аудит", "Исправь всё", "Экспорт"] as const;
+// labels in plain words; the messages are the phrases the server's intent router knows
+const QUICK_ACTIONS: Array<{ label: string; message: string }> = [
+  { label: "Что в шаблоне?", message: "Расскажи о шаблоне" },
+  { label: "Покажи план", message: "Покажи план" },
+  { label: "Проверь качество", message: "Покажи аудит" },
+  { label: "Исправь всё", message: "Исправь всё" },
+  { label: "Где файлы?", message: "Экспорт" },
+];
 const MAX_ROWS = 8;
 const LINE_PX = 20; // leading-5
 const PAD_PX = 20; // py-2.5, top + bottom
 const MAX_BRIEF_BYTES = 2 * 1024 * 1024;
 
 const STEPS = [
-  { icon: Upload, title: "Загрузите шаблон", text: "Файл .pptx — я разберу его дизайн-систему: цвета, шрифты, сетку и паттерны слайдов." },
-  { icon: FileText, title: "Пришлите бриф", text: "Текстом в чат или файлом .md/.txt. Чем больше фактов и цифр, тем точнее получатся слайды." },
-  { icon: Layers, title: "Получите три варианта", text: "Структурный, визуальный и компактный — каждый с аудитом и экспортом в PPTX, PDF и HTML." },
+  { icon: Upload, title: "Соберу презентацию из текста", text: "Вставьте текст сюда или напишите «сделай 8 слайдов для руководства: …» — получите три варианта." },
+  { icon: FileText, title: "Объясню любой слайд", text: "Спросите «почему слайд 4 такой» — расскажу, какой макет выбран и почему." },
+  { icon: Layers, title: "Исправлю замечания", text: "Скажите «исправь всё» — применю автоматические исправления и пересоберу файлы." },
 ] as const;
 
 function fmtBytes(n: number): string {
@@ -30,8 +37,8 @@ function Intro() {
   return (
     <div className="mt-5 animate-fade-in">
       <div className="rounded-2xl bg-zinc-100 p-4">
-        <p className="text-[15px] font-semibold leading-6 text-zinc-900">Привет! Я соберу презентацию в стиле вашего шаблона</p>
-        <p className="mt-1 text-[13px] leading-5 text-zinc-600">Пришлите бриф текстом или файлом — сделаю три варианта вёрстки с аудитом. Могу объяснить любой слайд и исправить замечания.</p>
+        <p className="text-[15px] font-semibold leading-6 text-zinc-900">Привет! Я помощник Verstka</p>
+        <p className="mt-1 text-[13px] leading-5 text-zinc-600">Пишите обычными словами — я пойму. Вот что я умею:</p>
       </div>
       <ol className="mt-3 space-y-1">
         {STEPS.map((s, i) => (
@@ -149,7 +156,7 @@ export function Chat({ onClose }: { onClose?: () => void }) {
           <span className={cn("absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full ring-2 ring-white", healthError ? "bg-red-500" : pending || activeJob ? "animate-pulse bg-accent-300" : "bg-emerald-500")} aria-hidden />
         </span>
         <div className="min-w-0 flex-1">
-          <h2 className="truncate text-[15px] font-semibold leading-5 text-zinc-900">Агент Verstka</h2>
+          <h2 className="truncate text-[15px] font-semibold leading-5 text-zinc-900">Помощник Verstka</h2>
           <p className="truncate text-xs leading-4 text-zinc-500">
             {healthError ? "нет связи с сервером" : pending ? "печатает…" : activeJob ? "работает над задачей" : context}
             {generationId && !pending && !activeJob && !healthError && <span className="text-zinc-400"> · генерация {generationId.slice(0, 8)}</span>}
@@ -178,15 +185,15 @@ export function Chat({ onClose }: { onClose?: () => void }) {
 
       <div className="shrink-0 border-t border-zinc-100 bg-white px-4 pb-4 pt-3">
         <div className="mb-2.5 flex flex-wrap gap-1.5">
-          {QUICK_ACTIONS.map((q) => (
+          {QUICK_ACTIONS.map(({ label, message }) => (
             <button
-              key={q}
+              key={label}
               type="button"
               disabled={pending || healthError}
-              onClick={() => void send(q)}
+              onClick={() => void send(message)}
               className="h-8 cursor-pointer rounded-full bg-accent-50 px-3 text-xs font-semibold text-accent-700 transition-colors hover:bg-accent-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/30 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {q}
+              {label}
             </button>
           ))}
         </div>
@@ -210,14 +217,14 @@ export function Chat({ onClose }: { onClose?: () => void }) {
             onKeyDown={onKeyDown}
             rows={1}
             disabled={healthError}
-            placeholder={healthError ? "API недоступен — дождитесь переподключения" : "Опишите презентацию или вставьте бриф…"}
+            placeholder={healthError ? "API недоступен — дождитесь переподключения" : "Напишите вопрос или текст презентации…"}
             aria-label="Сообщение агенту"
             className="scroll-thin block w-full resize-none bg-transparent px-4 py-3 text-sm leading-5 text-zinc-900 placeholder:text-zinc-500 focus:outline-none disabled:cursor-not-allowed"
           />
           <div className="flex items-center gap-2 px-2 pb-2">
             <input ref={fileRef} type="file" accept=".md,.txt,.markdown,text/markdown,text/plain" className="hidden" onChange={(e) => void onFile(e)} />
-            <Button size="sm" variant="ghost" icon={Paperclip} disabled={pending || healthError} onClick={() => fileRef.current?.click()} title="Прикрепить бриф .md или .txt">
-              Бриф
+            <Button size="sm" variant="ghost" icon={Paperclip} disabled={pending || healthError} onClick={() => fileRef.current?.click()} title="Вставить текст из файла .txt или .md">
+              Файл
             </Button>
             <span className="ml-auto text-[11px] tabular-nums text-zinc-400">{text.length > 0 && `${text.length.toLocaleString("ru-RU")} зн.`}</span>
             <Button size="sm" variant="primary" icon={SendHorizontal} loading={pending} disabled={!canSend} onClick={() => void send(text)} aria-label="Отправить" className="w-8 rounded-full px-0" />

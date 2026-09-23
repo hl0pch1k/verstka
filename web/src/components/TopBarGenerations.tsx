@@ -74,7 +74,7 @@ export function TopBarGenerations({ generations, currentId, onSelect, tone = "li
         )}
       >
         <History className={cn("h-4 w-4", tone === "dark" ? "text-white/60" : "text-zinc-500")} aria-hidden />
-        История
+        Мои презентации
         {generations.length > 0 && (
           <span className={cn("rounded-full px-1.5 text-[11px] font-bold tabular-nums", tone === "dark" ? "bg-white/10 text-white/80" : "bg-white text-zinc-600")}>{generations.length}</span>
         )}
@@ -84,18 +84,18 @@ export function TopBarGenerations({ generations, currentId, onSelect, tone = "li
       {open && (
         <div
           role="listbox"
-          aria-label="Недавние генерации"
+          aria-label="Мои презентации"
           className="absolute right-0 top-full z-40 mt-2 w-[460px] overflow-hidden rounded-2xl bg-white text-zinc-900 shadow-pop animate-fade-in"
         >
           <div className="flex items-center justify-between px-5 pb-2 pt-4">
-            <span className="text-[15px] font-semibold text-zinc-900">Недавние генерации</span>
+            <span className="text-[15px] font-semibold text-zinc-900">Мои презентации</span>
             <span className="text-xs text-zinc-400">{plural(generations.length, "запуск", "запуска", "запусков")}</span>
           </div>
           {list.length === 0 ? (
             <div className="flex flex-col items-center gap-2 px-6 py-8 text-center">
               <Layers className="h-5 w-5 text-zinc-400" aria-hidden />
-              <p className="text-[13px] font-medium text-zinc-700">Генераций пока нет</p>
-              <p className="text-xs text-zinc-500">Опишите бриф в форме «Новая презентация» — первый запуск появится здесь.</p>
+              <p className="text-[13px] font-medium text-zinc-700">Презентаций пока нет</p>
+              <p className="text-xs text-zinc-500">Созданные презентации появятся здесь.</p>
             </div>
           ) : (
             <ul className="scroll-thin max-h-[440px] overflow-y-auto px-2 pb-2">
@@ -134,7 +134,7 @@ export function TopBarGenerations({ generations, currentId, onSelect, tone = "li
                         </Badge>
                       ) : (
                         <Badge size="sm" tone={scoreTone(score)}>
-                          {score === null ? "без аудита" : `${Math.round(score)} / 100`}
+                          {score === null ? "без проверки" : `${Math.round(score)} / 100`}
                         </Badge>
                       )}
                     </button>

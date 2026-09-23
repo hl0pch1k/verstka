@@ -12,13 +12,13 @@ export function LogoMark({ size = 32 }: { size?: number }) {
 
 export function Logo({ onClick }: { onClick?: () => void }) {
   return (
-    <button type="button" onClick={onClick} className="group flex shrink-0 cursor-pointer items-center gap-3 rounded-xl pr-2 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40" aria-label="Verstka — на главную">
+    <button type="button" onClick={onClick} className="group flex shrink-0 cursor-pointer items-center gap-3 rounded-xl pr-2 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/40" aria-label="Verstka — на главную">
       <span className="transition-transform duration-200 group-hover:scale-105">
-        <LogoMark />
+        <LogoMark size={34} />
       </span>
       <span className="leading-tight">
-        <span className="block text-[17px] font-bold tracking-tight text-white">Verstka</span>
-        <span className="hidden text-[11px] font-medium text-white/45 min-[1600px]:block">дизайнер презентаций</span>
+        <span className="block text-lg font-bold tracking-tight text-zinc-900">Verstka</span>
+        <span className="block text-xs font-medium text-zinc-500">презентации в стиле вашего шаблона</span>
       </span>
     </button>
   );

@@ -10,7 +10,9 @@ export type PatternKind =
 
 /** Views of the app. The header shows five steps; «plan» lives inside «variants», «run» inside «export». */
 export type TabKey = "template" | "brief" | "plan" | "variants" | "audit" | "export" | "run";
-export type StepKey = "template" | "brief" | "variants" | "audit" | "export";
+/** The two screens a person sees; everything expert lives in the «Подробнее» drawer. */
+export type Screen = "create" | "result";
+export type DetailKey = "quality" | "why" | "plan" | "template" | "tech";
 export type JobKind = "analyze" | "generate" | "fix" | "other";
 export type JobStatus = "queued" | "running" | "done" | "failed";
 
