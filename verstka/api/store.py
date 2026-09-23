@@ -64,7 +64,10 @@ class Store:
     # ---- templates ----------------------------------------------------------------
     def upload_path(self, filename: str) -> Path:
         safe = "".join(ch for ch in Path(filename).name if ch.isalnum() or ch in "._- ()") or "upload.pptx"
-        return self.uploads / f"{uuid.uuid4().hex[:8]}_{safe}"
+        # a folder per upload keeps the user's file name intact (it becomes the template's source_file)
+        d = self.uploads / uuid.uuid4().hex[:8]
+        d.mkdir(parents=True, exist_ok=True)
+        return d / safe
 
     def save_upload(self, filename: str, data: bytes) -> Path:
         path = self.upload_path(filename)

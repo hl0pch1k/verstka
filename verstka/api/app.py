@@ -193,6 +193,8 @@ def _discard_failed_upload(path: Path) -> None:
     except OSError as e:
         log.warning("cleanup after failed analysis: %s", e)
     path.unlink(missing_ok=True)
+    if path.parent != store.uploads and not any(path.parent.iterdir()):
+        path.parent.rmdir()
 
 
 def _variant_payload(gdir: Path, strategy: str) -> Optional[dict]:
@@ -344,6 +346,8 @@ async def upload_template(file: UploadFile = File(...), use_models: bool = Form(
             raise HTTPException(400, "not a PowerPoint file: expected a zip package with ppt/presentation.xml")
     except BaseException:
         path.unlink(missing_ok=True)
+        if path.parent != store.uploads and not any(path.parent.iterdir()):
+            path.parent.rmdir()
         raise
     use = use_models and models_configured()
 

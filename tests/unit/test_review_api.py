@@ -437,3 +437,15 @@ def test_audit_is_told_in_words_not_check_ids():
     assert text.startswith("Аудит: оценка 94 из 100, ошибок нет, предупреждений 2.")
     assert "Кегль не из типографической шкалы шаблона ×2" in text and "size_not_in_scale" not in text
     assert "Автофикс (2 прохода): подбор другого макета, правка разметки." in text
+
+
+def test_uploaded_template_keeps_the_users_file_name_and_gets_a_card(client, simple_deck):
+    c, mod = client
+    with open(simple_deck, "rb") as f:
+        r = c.post("/api/templates", files={"file": ("Годовой отчёт.pptx", f, "application/octet-stream")}, data={"use_models": "false"})
+    job = _wait(c, r.json()["job_id"])
+    assert job["status"] == "done", job["error"]
+    card = c.get("/api/templates").json()[0]
+    assert card["source_file"] == "Годовой отчёт.pptx"  # not «<uuid>_Годовой отчёт.pptx»
+    assert card["palette"] and card["aspect"] and card["font"]
+    assert card["cover_url"] is None or c.get(card["cover_url"]).status_code == 200
