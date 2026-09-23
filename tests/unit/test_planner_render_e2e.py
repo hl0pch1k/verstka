@@ -133,3 +133,33 @@ def test_generate_variants_offline(simple_deck, tmp_path):
         assert (v.out_dir / "deck.pptx").exists() and (v.out_dir / "outline.json").exists() and (v.out_dir / "layout_plan.json").exists()
         assert len(Presentation(str(v.out_dir / "deck.pptx")).slides) == len(v.outline.slides)
     assert len(res.variants[1].outline.slides) <= len(res.variants[0].outline.slides)
+
+
+def test_variants_are_planned_side_by_side_with_a_model(simple_deck, tmp_path, monkeypatch):
+    """With a model each plan is a chain of slow calls; the strategies are independent, so the deck waits for the
+    slowest chain rather than the sum (the 5-minute budget). Each plan gets its own copy of the facts."""
+    import threading
+    import time as _time
+
+    import verstka.pipeline.generate as gen
+
+    analyze_template(simple_deck, workspace_root=tmp_path / "ws", use_llm=False, use_vlm=False, render=False)
+    live, peak, seen_facts, lock = [0], [0], [], threading.Lock()
+
+    def slow_plan(brief, manifest, strategy, facts, skills=None, providers=None, target=None):
+        with lock:
+            live[0] += 1
+            peak[0] = max(peak[0], live[0])
+            seen_facts.append(id(facts))
+        _time.sleep(0.4)
+        with lock:
+            live[0] -= 1
+        return basic_outline(brief, facts, strategy, target), []
+
+    monkeypatch.setattr(gen, "plan_outline", slow_plan)
+    providers = ProviderRegistry.mock({})
+    t = _time.time()
+    res = generate_variants(simple_deck, brief=parse_brief_text(BRIEF), out_dir=tmp_path / "out", workspace_root=tmp_path / "ws", providers=providers, skills=SkillsRegistry.load(), use_vlm=False, audit=False, autofix=False, exports=[], render_images=False)
+    assert [v.strategy for v in res.variants] == ["structured", "visual", "compact"]
+    assert peak[0] == 3 and len(set(seen_facts)) == 3
+    assert all(v.timings["plan"] >= 0.4 for v in res.variants) and _time.time() - t < 3 * 0.4 + 5

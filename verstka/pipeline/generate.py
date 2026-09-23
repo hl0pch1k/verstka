@@ -142,6 +142,25 @@ def generate_variants(
         facts, fact_warnings = extract_facts(brief, skills if use_llm else None, providers if use_llm else None)
     n = len(strategies)
     audit_render = bool(audit_models and use_vlm)  # the VLM checks look at slide images; deterministic ones read XML
+    planned: dict[str, tuple[DeckOutline, list[str], float]] = {}
+    if outline is None:
+        # the strategies are independent: with a model each plan is a chain of 2–3 calls (plan, fact check, repair),
+        # so they run side by side and the deck waits for the slowest chain, not for the sum of them
+        def _plan(name: str) -> tuple[str, DeckOutline, list[str], float]:
+            tp = time.time()
+            strategy = all_strategies[name]
+            # own copy of the facts: the deterministic planner adds the brief's table series to them
+            o, w = plan_outline(brief, manifest, strategy, facts.model_copy(deep=True), skills if use_llm else None, providers if use_llm else None, target=target_slide_count(brief, strategy))
+            return name, o, w, round(time.time() - tp, 2)
+
+        report(f"plan: {n} variants", 0.15)
+        workers = min(n, providers.limits.max_concurrency) if (use_llm and providers is not None and skills is not None) else 1
+        if workers > 1:
+            with ThreadPoolExecutor(max_workers=workers) as ex:
+                done = list(ex.map(_plan, strategies))
+        else:
+            done = [_plan(name) for name in strategies]
+        planned = {name: (o, w, sec) for name, o, w, sec in done}
     pending: list[dict] = []
     for i, name in enumerate(strategies):
         strategy: Strategy = all_strategies[name]
@@ -152,15 +171,13 @@ def generate_variants(
         warnings = list(fact_warnings)
         base = 0.15 + 0.7 * i / n
         span = 0.7 / n
-        tp = time.time()
         if outline is not None:
             v_outline = outline.model_copy(deep=True)
             v_outline.strategy = name
+            timings["plan"] = 0.0
         else:
-            target = target_slide_count(brief, strategy)
-            v_outline, w = plan_outline(brief, manifest, strategy, facts, skills if use_llm else None, providers if use_llm else None, target=target)
+            v_outline, w, timings["plan"] = planned[name]
             warnings.extend(w)
-        timings["plan"] = round(time.time() - tp, 2)
         plan = match_outline(v_outline, manifest, strategy)
         report(f"{name}: planned {len(v_outline.slides)} slides, rendering", base + span * 0.2)
         tr = time.time()
