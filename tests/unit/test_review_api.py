@@ -386,3 +386,34 @@ def test_chat_sessions_are_capped(client):
         assert c.post("/api/chat", json={"session_id": f"s{i}", "message": "привет"}).status_code == 200
     assert len(mod._chat_sessions) <= 500
     assert "s504" in mod._chat_sessions and "s0" not in mod._chat_sessions
+
+
+def test_generation_meta_is_never_read_half_written(tmp_path):
+    """The job thread rewrites generation.json while the UI polls it: a reader must always see a whole file."""
+    import threading
+
+    from verstka.api.store import Store
+
+    s = Store(tmp_path)
+    gid, _ = s.new_generation_dir()
+    s.write_generation_meta(gid, {"id": gid, "status": "running", "brief": "x" * 20000})
+    stop, errors = [False], []
+
+    def writer():
+        i = 0
+        while not stop[0]:
+            s.merge_generation_meta(gid, {"status": "running" if i % 2 else "failed", "n": i})
+            i += 1
+
+    t = threading.Thread(target=writer)
+    t.start()
+    try:
+        for _ in range(3000):
+            try:
+                assert s.read_generation_meta(gid)["id"] == gid
+            except Exception as e:  # noqa: BLE001
+                errors.append(type(e).__name__)
+    finally:
+        stop[0] = True
+        t.join()
+    assert errors == [] and not list(s.generation_dir(gid).glob("*.tmp"))

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import threading
 import time
@@ -14,6 +15,14 @@ from verstka.ingest.workspace import SAFE_ID_RE, TemplateWorkspace, default_work
 from verstka.schemas.template import TemplateManifest
 
 _META_LOCK = threading.RLock()
+
+
+def _write_json_atomic(path: Path, data: dict) -> None:
+    """Readers (the UI polls generation.json while the job thread rewrites it) see the old file or the new one,
+    never a truncated one: write aside, then rename over."""
+    tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex[:8]}.tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, path)
 
 _ID_RE = SAFE_ID_RE
 
@@ -100,7 +109,7 @@ class Store:
         if d is None:
             return False
         with _META_LOCK:
-            (d / "generation.json").write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            _write_json_atomic(d / "generation.json", data)
         return True
 
     def merge_generation_meta(self, gid: str, data: dict, only_missing: bool = False) -> Optional[dict]:
@@ -114,7 +123,7 @@ class Store:
             for k, v in data.items():
                 if not only_missing or k not in meta:
                     meta[k] = v
-            p.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+            _write_json_atomic(p, meta)
         return meta
 
     def read_generation_meta(self, gid: str) -> Optional[dict]:
