@@ -53,7 +53,7 @@ function VariantCover({ g, v, active, title, compact, onPick }: { g: Generation;
         active ? "bg-white shadow-[0_0_0_2px_#0077FF]" : "bg-white/60 shadow-card hover:bg-white hover:shadow-raise",
       )}
     >
-      <span className={cn("block shrink-0 overflow-hidden rounded-xl bg-zinc-100 shadow-inner-line", compact ? "w-[88px]" : "w-[132px]")} style={{ aspectRatio: "16 / 9" }}>
+      <span className={cn("shrink-0 overflow-hidden rounded-xl bg-zinc-100 shadow-inner-line", compact ? "hidden w-[88px] min-[1500px]:block" : "block w-[132px]")} style={{ aspectRatio: "16 / 9" }}>
         {cover && !broken && <img src={cover} alt="" loading="lazy" draggable={false} onError={() => setBroken(true)} className="h-full w-full object-cover" />}
       </span>
       <span className="min-w-0 flex-1">
@@ -62,7 +62,7 @@ function VariantCover({ g, v, active, title, compact, onPick }: { g: Generation;
           {plural(n, "слайд", "слайда", "слайдов")}
           {seconds !== null && ` · ${fmtSeconds(seconds)}`}
         </span>
-        <span className={cn("mt-1.5 inline-flex h-5 items-center rounded-full px-2 text-[11px] font-bold", errors === null ? "bg-zinc-100 text-zinc-500" : errors === 0 ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700")}>
+        <span className={cn("mt-1.5 inline-flex h-5 items-center whitespace-nowrap rounded-full px-2 text-[11px] font-bold", errors === null ? "bg-zinc-100 text-zinc-500" : errors === 0 ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700")}>
           {errors === null ? "без аудита" : errors === 0 ? "без ошибок" : plural(errors, "ошибка", "ошибки", "ошибок")}
         </span>
       </span>

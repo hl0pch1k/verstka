@@ -18,7 +18,7 @@ export function Logo({ onClick }: { onClick?: () => void }) {
       </span>
       <span className="leading-tight">
         <span className="block text-[17px] font-bold tracking-tight text-white">Verstka</span>
-        <span className="block text-[11px] font-medium text-white/45">дизайнер презентаций</span>
+        <span className="hidden text-[11px] font-medium text-white/45 min-[1600px]:block">дизайнер презентаций</span>
       </span>
     </button>
   );

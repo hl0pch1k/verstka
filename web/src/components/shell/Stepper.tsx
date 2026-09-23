@@ -40,7 +40,7 @@ export function Stepper() {
         const isBusy = !!busy[s.key];
         return (
           <Fragment key={s.key}>
-            {i > 0 && <span className={cn("mx-1 h-px w-5 shrink-0", i <= currentIdx ? "bg-white/30" : "bg-white/10")} aria-hidden />}
+            {i > 0 && <span className={cn("mx-0.5 h-px w-3 shrink-0 min-[1600px]:mx-1 min-[1600px]:w-5", i <= currentIdx ? "bg-white/30" : "bg-white/10")} aria-hidden />}
             <button
               type="button"
               disabled={locked}

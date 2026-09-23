@@ -209,6 +209,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const adoptManifest = useCallback((m: TemplateManifest) => {
     setManifest(m); // same batch as the id: the manifest effect sees a match and skips the refetch
     selectTemplate(m.template_id);
+    setShowLibrary(false); // a freshly analysed template opens on its passport
   }, [selectTemplate]);
 
   const uploadTemplate = useCallback(

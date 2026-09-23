@@ -101,7 +101,7 @@ export default function App() {
             <View />
           </div>
         </main>
-        <aside aria-label="Агент Verstka" className={cn("w-[400px] shrink-0 flex-col border-l border-zinc-200/80 bg-white", agentOpen ? "flex animate-slide-in-right" : "hidden")}>
+        <aside aria-label="Агент Verstka" className={cn("w-[360px] shrink-0 flex-col border-l border-zinc-200/80 bg-white min-[1440px]:w-[400px]", agentOpen ? "flex animate-slide-in-right" : "hidden")}>
           <Chat onClose={() => setAgentOpen(false)} />
         </aside>
       </div>

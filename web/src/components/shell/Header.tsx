@@ -21,12 +21,12 @@ function JobPill() {
       onClick={() => target && stepOf(tab) !== target && setTab(target)}
       title={activeJob.message}
       className={cn(
-        "flex h-9 max-w-[260px] cursor-pointer items-center gap-2 rounded-full pl-2.5 pr-3 text-[13px] font-semibold animate-fade",
+        "flex h-9 max-w-[260px] shrink-0 cursor-pointer items-center gap-2 rounded-full pl-2.5 pr-3 text-[13px] font-semibold animate-fade",
         failed ? "bg-red-500/15 text-red-300" : done ? "bg-emerald-500/15 text-emerald-300" : "bg-accent/20 text-accent-200",
       )}
     >
       <Icon className={cn("h-4 w-4 shrink-0", !failed && !done && "animate-spin")} aria-hidden />
-      <span className="truncate">{label}</span>
+      <span className="hidden truncate min-[1600px]:inline">{label}</span>
       {!failed && !done && <span className="shrink-0 tabular-nums text-white/70">{Math.round(progress * 100)}%</span>}
     </button>
   );
@@ -48,7 +48,7 @@ function ModelStatus() {
         {!healthError && health && <span className={cn("absolute inset-0 rounded-full opacity-60 animate-pulse-ring", s.dot)} aria-hidden />}
         <span className={cn("relative h-2 w-2 rounded-full", s.dot)} aria-hidden />
       </span>
-      {s.text}
+      <span className="hidden min-[1500px]:inline">{s.text}</span>
     </span>
   );
 }
@@ -64,7 +64,7 @@ export function Header({ unread }: { unread: number }) {
   };
 
   return (
-    <header className="relative z-30 flex h-16 shrink-0 items-center gap-6 bg-ink px-6 text-white">
+    <header className="relative z-30 flex h-16 shrink-0 items-center gap-4 bg-ink px-5 text-white min-[1600px]:gap-6 min-[1600px]:px-6">
       <Logo
         onClick={() => {
           setShowLibrary(false);
