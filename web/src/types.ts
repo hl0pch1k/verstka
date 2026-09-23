@@ -9,7 +9,7 @@ export type PatternKind =
   | "code" | "mockup" | "thanks" | "freeform";
 
 /** Views of the app. The header shows five steps; «plan» lives inside «variants», «run» inside «export». */
-export type TabKey = "template" | "brief" | "plan" | "variants" | "audit" | "export" | "run";
+export type TabKey = "template" | "brief" | "plan" | "variants" | "why" | "audit" | "export" | "run";
 /** The two screens a person sees; everything expert lives in the «Подробнее» drawer. */
 export type Screen = "create" | "result";
 export type DetailKey = "quality" | "why" | "plan" | "template" | "tech";
@@ -270,6 +270,6 @@ export interface DiffResponse {
 export type ChatAction =
   | { type: "generation_started"; job_id: string; generation_id: string }
   | { type: "jobs"; jobs: { strategy: string; job_id: string }[] }
-  | { type: "open_tab"; tab: string };
+  | { type: "open_tab"; tab: string; slide?: number };
 export interface ChatResponse { reply: string; intent: string; actions: ChatAction[]; template_id: string | null; generation_id: string | null }
 export interface ChatMessage { id: string; role: "user" | "assistant"; text: string; ts: number; pending?: boolean }

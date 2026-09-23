@@ -1,13 +1,11 @@
 import { useId, useState, type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 import { cn } from "../../lib/utils";
-import { renderIcon, type IconProp } from "./icon";
 
 export interface CollapsibleProps {
   title: ReactNode;
   /** Secondary text after the title (shown in both states). */
   hint?: ReactNode;
-  icon?: IconProp;
   /** Extra header content on the right (badges, buttons); clicks inside do not toggle the section. */
   right?: ReactNode;
   /** Controlled state. Omit to let the component manage itself (see `defaultOpen`). */
@@ -24,7 +22,7 @@ export interface CollapsibleProps {
 }
 
 export function Collapsible({
-  title, hint, icon, right, open: controlled, defaultOpen = false, onOpenChange, variant = "card", keepMounted = true, className, bodyClassName, children,
+  title, hint, right, open: controlled, defaultOpen = false, onOpenChange, variant = "card", keepMounted = true, className, bodyClassName, children,
 }: CollapsibleProps) {
   const [inner, setInner] = useState(defaultOpen);
   const open = controlled ?? inner;
@@ -46,7 +44,6 @@ export function Collapsible({
           aria-controls={bodyId}
           className={cn("group flex min-w-0 flex-1 cursor-pointer items-center gap-3 text-left focus:outline-none", card ? "h-[60px]" : "h-10")}
         >
-          {icon && <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-zinc-100 text-zinc-600">{renderIcon(icon, "h-4 w-4")}</span>}
           <span className="truncate text-[15px] font-semibold text-zinc-900">{title}</span>
           {hint && <span className="min-w-0 flex-1 truncate text-[13px] font-normal text-zinc-500">{hint}</span>}
           <ChevronDown

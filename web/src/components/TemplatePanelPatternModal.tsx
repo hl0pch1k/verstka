@@ -1,5 +1,5 @@
 // Detail view of one pattern: slot map over the thumbnail, slot list, repeat groups and the classification trace.
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Eye, EyeOff, Repeat } from "lucide-react";
 import { cn, fmtPct, kindLabel, plural } from "../lib/utils";
 import type { Pattern, Slot } from "../types";
@@ -54,9 +54,8 @@ function SlotRow({ slot }: { slot: Slot }) {
       <span className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: slotColor(slot.role) }} aria-hidden />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-2">
-          <span className="text-[13px] font-medium text-zinc-900">{slotRoleLabel(slot.role)}</span>
-          <span className="font-mono text-[11px] text-zinc-400">{slot.id}</span>
-          {slot.group_id && <span className="text-[11px] text-zinc-500">группа {slot.group_id}</span>}
+          <span className="text-[13px] font-medium text-zinc-900" title={slot.id}>{slotRoleLabel(slot.role)}</span>
+          {slot.group_id && <span className="text-[11px] text-zinc-500">в повторяющейся группе</span>}
           <span className="ml-auto text-[11px] tabular-nums text-zinc-400">{Math.round(slot.bbox.w * 100)}×{Math.round(slot.bbox.h * 100)}%</span>
         </div>
         {slot.sample_text && <p className="truncate text-xs text-zinc-500" title={slot.sample_text}>«{slot.sample_text}»</p>}
@@ -74,9 +73,13 @@ interface Props {
   onStep: (delta: number) => void;
 }
 
-export function PatternModal({ pattern, aspect, position, onClose, onStep }: Props) {
+export function PatternModal({ pattern: current, aspect, position, onClose, onStep }: Props) {
   const [showSlots, setShowSlots] = useState(true);
-  const open = !!pattern;
+  const open = !!current;
+  // the modal plays its exit animation after the gallery has let go of the pattern: keep showing the last one
+  const last = useRef(current);
+  if (current) last.current = current;
+  const pattern = current ?? last.current;
 
   useEffect(() => {
     if (!open) return;
@@ -90,21 +93,19 @@ export function PatternModal({ pattern, aspect, position, onClose, onStep }: Pro
 
   if (!pattern) return null;
   const votes = pattern.classification ? votesOf(pattern.classification) : [];
-  const layoutName = pattern.layout_part?.split("/").pop()?.replace(/\.xml$/, "");
 
   return (
     <Modal
       open={open}
       onClose={onClose}
       size="xl"
-      title={<span>Слайд {pattern.source_slide} · {kindLabel(pattern.kind)}</span>}
-      description={`${pattern.id} · ${pattern.family === "dark" ? "тёмный фон" : "светлый фон"}${layoutName ? ` · макет ${layoutName}` : ""}${pattern.classification?.purpose ? ` · ${pattern.classification.purpose}` : ""}`}
+      title={<span>Слайд {pattern.source_slide} шаблона · {kindLabel(pattern.kind)}</span>}
+      description={`${pattern.family === "dark" ? "Тёмный фон" : "Светлый фон"} · цветные рамки — места, куда Verstka ставит текст, числа и картинки`}
       footer={
         <>
           <span className="mr-auto text-[13px] tabular-nums text-zinc-500">{position}</span>
-          <Button size="sm" icon={ChevronLeft} onClick={() => onStep(-1)} aria-label="Предыдущий образец" />
-          <Button size="sm" icon={ChevronRight} onClick={() => onStep(1)} aria-label="Следующий образец" />
-          <Button size="sm" variant="primary" onClick={onClose}>Закрыть</Button>
+          <Button icon={ChevronLeft} onClick={() => onStep(-1)} aria-label="Предыдущий образец" className="rounded-full" />
+          <Button icon={ChevronRight} onClick={() => onStep(1)} aria-label="Следующий образец" className="rounded-full" />
         </>
       }
     >
@@ -113,10 +114,10 @@ export function PatternModal({ pattern, aspect, position, onClose, onStep }: Pro
           <SlotMap pattern={pattern} aspect={aspect} show={showSlots} />
           <div className="flex items-center gap-3">
             <Button size="sm" variant="ghost" icon={showSlots ? EyeOff : Eye} onClick={() => setShowSlots(!showSlots)}>
-              {showSlots ? "Скрыть слоты" : "Показать слоты"}
+              {showSlots ? "Скрыть разметку" : "Показать разметку"}
             </Button>
-            <div className="ml-auto flex items-center gap-2" title="Качество образца: чистота структуры и пригодность для повторного использования">
-              <span className="text-[11px] text-zinc-500">качество</span>
+            <div className="ml-auto flex items-center gap-2" title="Насколько чистая структура у образца и насколько он пригоден для новых слайдов">
+              <span className="text-[11px] text-zinc-500">пригодность</span>
               <span className="h-1 w-24 overflow-hidden rounded-full bg-zinc-200">
                 <span className={cn("block h-full rounded-full", qualityTone(pattern.quality))} style={{ width: `${Math.round(Math.min(1, Math.max(0, pattern.quality)) * 100)}%` }} />
               </span>
@@ -125,11 +126,11 @@ export function PatternModal({ pattern, aspect, position, onClose, onStep }: Pro
           </div>
           {pattern.classification && (
             <div className="rounded-2xl bg-zinc-50 p-4">
-              <p className="mb-2 text-xs font-semibold text-zinc-700">Голоса классификации · согласие {fmtPct(pattern.classification.agreement)}</p>
+              <p className="mb-2 text-xs font-semibold text-zinc-700">Как определён тип слайда · согласие {fmtPct(pattern.classification.agreement)}</p>
               <ul className="space-y-1.5">
                 {votes.map(({ source, vote }) => (
                   <li key={source} className="text-xs leading-[18px] text-zinc-600">
-                    <span className="inline-block w-20 font-medium text-zinc-800">{source}</span>
+                    <span className="inline-block w-[116px] font-medium text-zinc-800">{source}</span>
                     <Badge size="sm" tone={vote.kind === pattern.kind ? "success" : "warn"}>{kindLabel(vote.kind)}</Badge>
                     <span className="ml-1.5 tabular-nums text-zinc-900">{fmtPct(vote.confidence)}</span>
                     {vote.rationale && <span className="ml-1.5 text-zinc-500">— {vote.rationale}</span>}
@@ -142,7 +143,7 @@ export function PatternModal({ pattern, aspect, position, onClose, onStep }: Pro
 
         <div className="space-y-4">
           <section>
-            <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">{plural(pattern.slots.length, "слот", "слота", "слотов")}</h4>
+            <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">{plural(pattern.slots.length, "место", "места", "мест")} для содержания</h4>
             {pattern.slots.length === 0 ? (
               <p className="text-[13px] text-zinc-500">Слотов нет — слайд используется как декоративный фон.</p>
             ) : (
@@ -156,7 +157,6 @@ export function PatternModal({ pattern, aspect, position, onClose, onStep }: Pro
                 {pattern.repeat_groups.map((g) => (
                   <li key={g.id} className="flex items-center gap-2 text-[13px] text-zinc-700">
                     <Repeat className="h-3.5 w-3.5 shrink-0 text-zinc-400" aria-hidden />
-                    <span className="font-mono text-[11px] text-zinc-400">{g.id}</span>
                     <span>{groupSummary(g)}</span>
                   </li>
                 ))}
@@ -166,7 +166,7 @@ export function PatternModal({ pattern, aspect, position, onClose, onStep }: Pro
           {pattern.decor_assets.length > 0 && (
             <section>
               <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">Декор</h4>
-              <div className="flex flex-wrap gap-1">{pattern.decor_assets.map((a) => <Badge key={a} size="sm">{a}</Badge>)}</div>
+              <p className="text-[13px] text-zinc-600">{plural(pattern.decor_assets.length, "декоративный элемент сохраняется", "декоративных элемента сохраняются", "декоративных элементов сохраняются")} как в образце</p>
             </section>
           )}
         </div>

@@ -1,0 +1,56 @@
+// The matcher records its reasons for the audit trail («тип section для title: 0.6», «текст не помещается (×1.84)»).
+// The interface retells them in words; a reason that only makes sense to the scorer (weights, ids) is left out.
+import { kindLabel } from "./utils";
+
+export interface Reason { text: string; good: boolean }
+
+const x = (v: string) => Number(v.replace(",", ".")).toLocaleString("ru-RU", { maximumFractionDigits: 1 });
+
+export function humanReasons(reasons: string[], strategyTitle: (name: string) => string, templateSlide: (patternId: string) => number | null): Reason[] {
+  const out: Reason[] = [];
+  const push = (text: string, good: boolean) => {
+    if (!out.some((r) => r.text === text)) out.push({ text, good });
+  };
+  for (const raw of reasons) {
+    const r = raw.trim();
+    let m: RegExpMatchArray | null;
+    if (/^слайд \d+ шаблона$/.test(r) || /^вес стратегии/.test(r) || /^композиция /.test(r)) continue;
+    if ((m = r.match(/^тип (\w+) для (\w+): ([\d.]+)$/))) {
+      const v = Number(m[3]);
+      if (m[1] === m[2] || v >= 0.95) push(`Тип макета совпадает с типом слайда: «${kindLabel(m[2])}»`, true);
+      else if (v >= 0.5) push(`Макет «${kindLabel(m[1])}» хорошо подходит для слайда «${kindLabel(m[2])}»`, true);
+      else push(`Макет «${kindLabel(m[1])}» — не идеальный тип для слайда «${kindLabel(m[2])}»`, false);
+    } else if (r === "текст помещается") push("Весь текст помещается без сокращений", true);
+    else if ((m = r.match(/^текст чуть длиннее ёмкости/))) push("Текст чуть длиннее места — шрифт немного уменьшен", true);
+    else if ((m = r.match(/^текст заметно длиннее ёмкости \(×([\d.]+)\)/))) push(`Текст в ${x(m[1])} раза длиннее места — его сократили`, false);
+    else if ((m = r.match(/^текст не помещается \(×([\d.]+)\)/))) push(`Текст в ${x(m[1])} раза длиннее места — его сократили до главного`, false);
+    else if ((m = r.match(/^(\d+) лишних текстовых слотов останутся пустыми/))) push(`В образце есть лишние текстовые поля (${m[1]}) — их убрали`, false);
+    else if ((m = r.match(/^ёмкость группы (\d+) из (\d+) ячеек/))) push(`Карточек в макете хватает: нужно ${m[1]}, помещается до ${m[2]}`, true);
+    else if ((m = r.match(/^группа из (\d+) ячеек заметно больше нужных (\d+)/))) push(`В образце ${m[1]} карточек, а нужно ${m[2]} — лишние убраны`, false);
+    else if ((m = r.match(/^не хватает ячеек: нужно (\d+), максимум (\d+)/))) push(`Карточек в образце меньше, чем пунктов: нужно ${m[1]}, есть ${m[2]}`, false);
+    else if (r === "ячейки слишком малы для карточек") push("Ячейки образца маловаты для карточек", false);
+    else if (r === "список помещается в один слот") push("Список помещается в одно текстовое поле", true);
+    else if ((m = r.match(/^(\d+) отдельных слотов под (\d+) элементов/))) push(`Под ${m[2]} пунктов в образце ${m[1]} отдельных полей`, true);
+    else if ((m = r.match(/^нет повторяющейся группы под (\d+) элементов/))) push(`В образце нет повторяющихся карточек под ${m[1]} пунктов`, false);
+    else if ((m = r.match(/^область под данные: (\d+)% слайда/))) push(`Под таблицу или диаграмму отведено ${m[1]}% слайда`, true);
+    else if (r === "нет крупной области под диаграмму или таблицу") push("В образце нет крупной области под таблицу или диаграмму", false);
+    else if (r.startsWith("в образце нет слота под заголовок")) push("В образце нет места под заголовок", false);
+    else if ((m = r.match(/^ёмкость слотов \((\d+) симв\.\) намного меньше объёма содержимого \((\d+) симв\.\)/))) push(`Текста больше, чем мест: ${m[2]} символов на ${m[1]}`, false);
+    else if ((m = r.match(/^числа не поместятся и будут потеряны: (\d+) чисел, мест (\d+)/))) push(`Не все числа поместились бы: ${m[1]} чисел на ${m[2]} мест`, false);
+    else if ((m = r.match(/^семья (\w+) отличается от предыдущего слайда/))) push(`Фон ${m[1] === "dark" ? "тёмный" : "светлый"} — не такой, как у соседнего слайда`, false);
+    else if (r === "паттерн уже использован недавно") push("Этот макет недавно уже был в презентации", false);
+    else if (r === "крупная картинка-образец останется без замены") push("На слайде останется картинка из образца", false);
+    else if (r.startsWith("крупная иллюстрация образца")) push("Иллюстрация образца не относится к теме слайда", false);
+    else if ((m = r.match(/^стиль стратегии (\w+): \+/))) push(`Подходит стилю варианта «${strategyTitle(m[1])}»`, true);
+    else if ((m = r.match(/^обложка: заголовок (\d+) пт/))) push(`Обложка с крупным заголовком (${m[1]} пт)`, true);
+    else if ((m = r.match(/^лучший паттерн (p\d+) набрал/))) {
+      const n = templateSlide(m[1]);
+      push(n ? `Ни один образец не подошёл достаточно хорошо (лучший — слайд ${n} шаблона), поэтому слайд собран заново` : "Ни один образец не подошёл достаточно хорошо, поэтому слайд собран заново", false);
+    } else if ((m = r.match(/^автофикс: перевыбран паттерн (p\d+)/))) {
+      const n = templateSlide(m[1]);
+      push(n ? `Проверка качества заменила макет на слайд ${n} шаблона` : "Проверка качества заменила макет", true);
+    } else if (r.startsWith("балл опущен ниже порога синтеза")) push("Числа не поместились бы в образец — слайд собран заново", false);
+    else if (r.startsWith("слоты слишком малы для цитаты") || r.startsWith("список ячеек не подходит для цитаты")) push("Образец не подходит для цитаты", false);
+  }
+  return out;
+}

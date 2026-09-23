@@ -14,9 +14,9 @@ import { Button } from "./ui/Button";
 const QUICK_ACTIONS: Array<{ label: string; message: string }> = [
   { label: "Что в шаблоне?", message: "Расскажи о шаблоне" },
   { label: "Покажи план", message: "Покажи план" },
-  { label: "Проверь качество", message: "Покажи аудит" },
+  { label: "Проверь качество", message: "Проверь качество" },
   { label: "Исправь всё", message: "Исправь всё" },
-  { label: "Где файлы?", message: "Экспорт" },
+  { label: "Где файлы?", message: "Где скачать файлы?" },
 ];
 const MAX_ROWS = 8;
 const LINE_PX = 20; // leading-5
@@ -159,7 +159,6 @@ export function Chat({ onClose }: { onClose?: () => void }) {
           <h2 className="truncate text-[15px] font-semibold leading-5 text-zinc-900">Помощник Verstka</h2>
           <p className="truncate text-xs leading-4 text-zinc-500">
             {healthError ? "нет связи с сервером" : pending ? "печатает…" : activeJob ? "работает над задачей" : context}
-            {generationId && !pending && !activeJob && !healthError && <span className="text-zinc-400"> · генерация {generationId.slice(0, 8)}</span>}
           </p>
         </div>
         {onClose && (

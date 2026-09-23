@@ -91,7 +91,7 @@ function Compare() {
   };
 
   return (
-    <Section icon={GitCompare} title="Сравнить с другим запуском" hint="Версии навыков, модели, стратегия и оценка аудита двух паспортов">
+    <Section title="Сравнить с другим запуском" hint="Версии навыков, модели, стратегия и оценка аудита двух паспортов">
       <div className="flex flex-wrap items-center gap-2">
         <select className={selectCls} value={otherGid} onChange={(e) => setOtherGid(e.target.value)} aria-label="Другая генерация">
           <option value="">Выберите генерацию…</option>
@@ -159,7 +159,7 @@ export function RunPanel() {
         <EmptyState compact icon={FileJson} title="У этого варианта нет run_manifest.json" hint="Вариант собран без паспорта — так бывает, если генерация прервалась." action={<Button size="sm" onClick={() => setTab("variants")}>К слайдам</Button>} />
       ) : (
         <>
-          <Section icon={FileJson} title="Паспорт запуска" hint="run_manifest.json варианта">
+          <Section title="Паспорт запуска" hint="run_manifest.json варианта">
             <Facts m={m} strategyTitle={strategyTitle} />
           </Section>
           <div className="grid grid-cols-2 gap-4">

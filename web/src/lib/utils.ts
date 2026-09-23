@@ -58,6 +58,21 @@ export function fmtDate(ts: number | string | undefined | null): string {
   return d.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
+/** «сегодня, 19:41» · «вчера, 09:05» · «12 сент., 19:41» · «12.09.2025» (unix seconds or an ISO string). */
+export function fmtWhen(ts: number | string | undefined | null): string {
+  if (ts === undefined || ts === null || ts === "") return "";
+  const d = typeof ts === "number" ? new Date(ts * 1000) : new Date(ts);
+  if (Number.isNaN(d.getTime())) return String(ts);
+  const now = new Date();
+  const time = d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+  const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((day(now) - day(d)) / 86_400_000);
+  if (diff === 0) return `сегодня, ${time}`;
+  if (diff === 1) return `вчера, ${time}`;
+  if (d.getFullYear() === now.getFullYear()) return `${d.toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}, ${time}`;
+  return d.toLocaleDateString("ru-RU");
+}
+
 export function fmtPct(v: number | undefined | null, digits = 0): string {
   if (v === undefined || v === null) return "—";
   return `${(v * 100).toFixed(digits)}%`;
@@ -75,7 +90,7 @@ export function plural(n: number, one: string, few: string, many: string): strin
   return `${n} ${many}`;
 }
 
-export const SEVERITY_LABEL: Record<Severity, string> = { error: "Ошибка", warn: "Предупреждение", info: "Инфо" };
+export const SEVERITY_LABEL: Record<Severity, string> = { error: "Ошибка", warn: "Предупреждение", info: "Заметка" };
 
 export const KIND_LABEL: Record<string, string> = {
   title: "Титул",

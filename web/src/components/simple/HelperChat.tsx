@@ -35,7 +35,7 @@ export function HelperChat() {
         onClick={() => setAgentOpen(!agentOpen)}
         aria-expanded={agentOpen}
         className={cn(
-          "fixed bottom-6 right-6 z-40 flex h-14 cursor-pointer items-center gap-2.5 rounded-full pl-4 pr-5 text-[15px] font-semibold text-white shadow-glow transition-all duration-200 hover:scale-[1.03] focus:outline-none focus-visible:ring-4 focus-visible:ring-accent/30",
+          "fixed bottom-6 right-6 z-40 flex h-14 cursor-pointer items-center gap-2.5 rounded-full pl-4 pr-5 text-[15px] font-semibold text-white shadow-pop transition-[transform,background-color] duration-200 hover:-translate-y-0.5 active:translate-y-0 focus:outline-none focus-visible:ring-4 focus-visible:ring-accent/30",
           agentOpen ? "bg-zinc-900" : "bg-accent",
         )}
       >

@@ -1,7 +1,7 @@
 // The first screen: ① choose a template, ② say what the deck is about, one button. Everything else (purpose,
 // variants of layout, the model) waits behind «Дополнительные настройки». The draft survives reloads.
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
-import { Check, ChevronDown, FileText, Minus, Paperclip, Plus, ShieldCheck, Sparkles, Unlock, Wand2 } from "lucide-react";
+import { ArrowRight, Check, ChevronDown, FileText, Minus, Paperclip, Plus, Presentation, ShieldCheck, Unlock } from "lucide-react";
 import { errText } from "../../lib/narrate";
 import { cn, LS, plural, storage } from "../../lib/utils";
 import { useApp } from "../../store";
@@ -28,9 +28,15 @@ function loadDraft(): Draft {
   }
 }
 
-function Step({ n, title, hint, done, delay, children }: { n: number; title: string; hint: string; done: boolean; delay: number; children: ReactNode }) {
+function Step({ n, title, hint, done, delay, shake, children }: { n: number; title: string; hint: string; done: boolean; delay: number; shake: boolean; children: ReactNode }) {
+  // the card rises once; later a shake must not replay the entrance (a changed animation-name restarts it)
+  const [entered, setEntered] = useState(false);
   return (
-    <section className="animate-rise rounded-3xl bg-white p-7 shadow-card" style={{ animationDelay: `${delay}ms` }}>
+    <section
+      onAnimationEnd={(e) => e.target === e.currentTarget && setEntered(true)}
+      className={cn("rounded-3xl bg-white p-7 shadow-card", shake ? "animate-shake" : !entered && "animate-rise")}
+      style={shake || entered ? undefined : { animationDelay: `${delay}ms` }}
+    >
       <div className="mb-5 flex items-start gap-4">
         <span
           className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[15px] font-bold transition-colors duration-300", done ? "bg-accent text-white" : "bg-accent-50 text-accent")}
@@ -65,6 +71,13 @@ export function CreateScreen() {
   const [showErrors, setShowErrors] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const briefRef = useRef<HTMLTextAreaElement>(null);
+  // the step that is missing something shakes once when «Создать» is pressed
+  const [shaking, setShaking] = useState<1 | 2 | null>(null);
+  useEffect(() => {
+    if (!shaking) return;
+    const t = window.setTimeout(() => setShaking(null), 420);
+    return () => window.clearTimeout(t);
+  }, [shaking]);
 
   useEffect(() => {
     const t = window.setTimeout(() => storage.set(LS.brief, JSON.stringify({ brief, audience, purpose, slides } satisfies Draft)), 300);
@@ -122,7 +135,13 @@ export function CreateScreen() {
     e.preventDefault();
     setShowErrors(true);
     if (problem || busy || !templateId) {
-      if (templateId && briefLen < BRIEF_MIN) briefRef.current?.focus();
+      if (busy || healthError) return;
+      if (!templateId) setShaking(1);
+      else {
+        setShaking(2);
+        if (briefLen < BRIEF_MIN) briefRef.current?.focus();
+        else if (selected.length === 0) setMore(true);
+      }
       return;
     }
     setSubmitting(true);
@@ -153,7 +172,7 @@ export function CreateScreen() {
         </p>
         <ul className="mt-5 flex flex-wrap items-center justify-center gap-2 text-[13px] font-medium text-zinc-600">
           {[
-            { icon: Wand2, text: "Редактируемый PowerPoint, не картинки" },
+            { icon: Presentation, text: "Редактируемый PowerPoint, не картинки" },
             { icon: ShieldCheck, text: "Проверка качества каждого слайда" },
             { icon: Unlock, text: "Только открытые модели" },
           ].map(({ icon: Icon, text }) => (
@@ -165,11 +184,11 @@ export function CreateScreen() {
         </ul>
       </div>
 
-      <Step n={1} title="Выберите шаблон" hint="Фирменный шаблон PowerPoint — по нему будут оформлены слайды" done={!!templateId && !manifestLoading} delay={60}>
+      <Step n={1} title="Выберите шаблон" hint="Фирменный шаблон PowerPoint — по нему будут оформлены слайды" done={!!templateId && !manifestLoading} delay={60} shake={shaking === 1}>
         <TemplatePicker />
       </Step>
 
-      <Step n={2} title="О чём презентация" hint="Тезисы, цифры и таблицы — всё попадёт на слайды, заголовки станут выводами" done={briefLen >= BRIEF_MIN} delay={120}>
+      <Step n={2} title="О чём презентация" hint="Тезисы, цифры и таблицы — всё попадёт на слайды, заголовки станут выводами" done={briefLen >= BRIEF_MIN} delay={120} shake={shaking === 2}>
         <textarea
           ref={briefRef}
           id="brief"
@@ -188,7 +207,7 @@ export function CreateScreen() {
           <input ref={fileRef} type="file" accept=".md,.txt,.markdown,text/markdown,text/plain" className="hidden" onChange={(e) => void onFile(e)} />
           <Button size="sm" variant="ghost" icon={Paperclip} disabled={busy} onClick={() => fileRef.current?.click()}>Загрузить из файла</Button>
           <span className={cn("ml-auto text-xs tabular-nums", briefLen > 0 && briefLen < BRIEF_MIN ? "text-amber-600" : "text-zinc-400")}>
-            {briefLen > 0 ? `${briefLen.toLocaleString("ru-RU")} символов` : ""}
+            {briefLen > 0 ? plural(briefLen, "символ", "символа", "символов").replace(/^\d+/, briefLen.toLocaleString("ru-RU")) : ""}
           </span>
         </div>
 
@@ -226,8 +245,10 @@ export function CreateScreen() {
           <ChevronDown className={cn("h-4 w-4 transition-transform", more && "rotate-180")} aria-hidden />
           Дополнительные настройки
         </button>
-        {more && (
-          <div className="mt-4 space-y-6 rounded-2xl bg-zinc-50 p-5 animate-fade-in">
+        {/* the settings unfold smoothly; while folded they leave the tab order once the animation has played */}
+        <div className={cn("grid transition-[grid-template-rows] duration-300 ease-out", more ? "grid-rows-[1fr]" : "grid-rows-[0fr]")}>
+          <div className="min-h-0 overflow-hidden" style={{ visibility: more ? "visible" : "hidden", transition: `visibility 0s linear ${more ? "0s" : "300ms"}` }}>
+          <div className="mt-4 space-y-6 rounded-2xl bg-zinc-50 p-5">
             <div>
               <p className="mb-2 text-[13px] font-semibold text-zinc-700">Тип презентации</p>
               <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Тип презентации">
@@ -292,12 +313,12 @@ export function CreateScreen() {
               />
             </div>
           </div>
-        )}
+          </div>
+        </div>
       </Step>
 
       <div className="flex animate-rise flex-col items-center gap-3 pt-2" style={{ animationDelay: "180ms" }}>
-        <Button type="submit" variant="primary" size="lg" icon={Sparkles} loading={busy} className="group relative h-14 overflow-hidden rounded-2xl px-10 text-[17px] shadow-glow hover:shadow-[0_12px_32px_rgba(0,119,255,0.38)]">
-          <span className="pointer-events-none absolute inset-y-0 left-0 w-1/3 -translate-x-[120%] bg-gradient-to-r from-transparent via-white/30 to-transparent group-hover:animate-sheen" aria-hidden />
+        <Button type="submit" variant="primary" size="lg" iconRight={ArrowRight} loading={busy} className="h-14 rounded-2xl px-10 text-[17px] transition-[background-color,transform,box-shadow] hover:-translate-y-px hover:shadow-raise">
           Создать презентацию
         </Button>
         <p className={cn("text-sm", showErrors && problem ? "font-semibold text-red-600" : "text-zinc-500")} role={showErrors && problem ? "alert" : undefined}>

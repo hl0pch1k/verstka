@@ -1,86 +1,73 @@
-// «Аудит»: the collapsible list of applied fixes and the «Справочник проверок» reference loaded from /api/checks.
+// Quality check, below the remarks: what was already fixed automatically (in words), and which checks exist.
 import { useEffect, useMemo, useState } from "react";
-import { BookOpen, History, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { api } from "../api";
 import { errText } from "../lib/narrate";
-import { plural, SEVERITY_LABEL } from "../lib/utils";
+import { cn, plural, SEVERITY_LABEL } from "../lib/utils";
 import type { CheckSpec } from "../types";
-import { actionLabel, categoryLabel, KIND_SHORT, normalizeFix, resultTone, SEVERITY_RANK, SEVERITY_TONE } from "./AuditHelpers";
-import { Badge } from "./ui/Badge";
+import { ACTION_DONE, categoryLabel, normalizeFix, SEVERITY_RANK } from "./AuditHelpers";
 import { Button } from "./ui/Button";
 import { Collapsible } from "./ui/Collapsible";
-import { EmptyState } from "./ui/EmptyState";
 import { Spinner } from "./ui/Spinner";
 
-export function AppliedFixes({ fixes, iterations }: { fixes: Record<string, unknown>[]; iterations: number }) {
+/** «rematch → p9» → «слайд 9 шаблона»; anything else is shown as is. */
+function resultText(result: string | null, templateSlide: (patternId: string) => number | null): string | null {
+  if (!result) return null;
+  const m = result.match(/→\s*(p\d+)/);
+  if (m) {
+    const n = templateSlide(m[1]);
+    return n ? `теперь по образцу слайда ${n} шаблона` : null;
+  }
+  // technical tokens and the English lines of older runs add nothing in words
+  return /[а-яё]/i.test(result) && !/^slide \d+:/.test(result) ? result : null;
+}
+
+export function AppliedFixes({ fixes, slideOf, templateSlide }: {
+  fixes: Record<string, unknown>[];
+  /** outline id (sl3) → 1-based slide number */
+  slideOf(outlineId: string): number | null;
+  /** pattern id (p9) → slide number of the template */
+  templateSlide(patternId: string): number | null;
+}) {
   const rows = useMemo(() => fixes.map(normalizeFix), [fixes]);
-  const hint = rows.length === 0 ? "исправления не применялись" : `${plural(rows.length, "запись", "записи", "записей")} · ${plural(iterations, "итерация", "итерации", "итераций")}`;
+  if (rows.length === 0) return null;
   return (
-    <Collapsible title="Применённые исправления" hint={hint} icon={History} defaultOpen={false} keepMounted={false} bodyClassName="px-0 py-0">
-      {rows.length === 0 ? (
-        <EmptyState compact icon={History} title="Пока ничего не исправлялось" hint="Отметьте замечания и нажмите «Исправить выбранные» или примените все автоматические исправления." />
-      ) : (
-        <ol className="scroll-thin max-h-80 divide-y divide-zinc-100 overflow-y-auto">
-          {rows.map((r, idx) => (
-            <li key={idx} className="flex items-start gap-3 px-5 py-2.5 text-[13px]">
-              <span className="w-5 shrink-0 pt-0.5 text-right text-[11px] tabular-nums text-zinc-400">{idx + 1}</span>
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {r.iteration !== null && (
-                    <Badge tone="neutral" size="sm">
-                      итерация {r.iteration}
-                    </Badge>
-                  )}
-                  <span className="font-medium text-zinc-900">{actionLabel(r.action)}</span>
-                  {r.action && <code className="rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-[11px] text-zinc-500">{r.action}</code>}
-                  {r.outlineId && (
-                    <span className="text-xs text-zinc-500">
-                      слайд <code className="font-mono text-[11px] text-zinc-600">{r.outlineId}</code>
-                    </span>
-                  )}
-                </div>
-                {r.result && (
-                  <div className="mt-1 flex items-start gap-1.5">
-                    <Badge tone={resultTone(r.result)} size="sm" className="mt-px">
-                      результат
-                    </Badge>
-                    <span className="min-w-0 break-words text-xs leading-4 text-zinc-600">{r.result}</span>
-                  </div>
-                )}
-                {r.extra.length > 0 && (
-                  <dl className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-zinc-500">
-                    {r.extra.map(([k, v]) => (
-                      <div key={k} className="flex gap-1">
-                        <dt className="font-mono text-[11px] text-zinc-400">{k}:</dt>
-                        <dd className="break-all">{v}</dd>
-                      </div>
-                    ))}
-                  </dl>
-                )}
-              </div>
+    <Collapsible title="Что уже исправлено автоматически" hint={plural(rows.length, "правка", "правки", "правок")} defaultOpen={false} keepMounted={false} bodyClassName="px-0 pb-2 pt-0">
+      <ol className="divide-y divide-zinc-100">
+        {rows.map((r, idx) => {
+          const n = r.slide ?? (r.outlineId ? slideOf(r.outlineId) : null);
+          const said = resultText(r.result, templateSlide);
+          // an in-place edit describes itself in full («Шрифт заменён на Play…»); the others get a done-deed title
+          const own = r.action === "xml" && said ? said : null;
+          const title = own ?? ACTION_DONE[r.kind ?? ""] ?? ACTION_DONE[r.action ?? ""] ?? "Поправлено оформление";
+          const extra = own ? null : said;
+          return (
+            <li key={idx} className="flex items-baseline gap-3 px-6 py-2.5 text-[13px]">
+              <span className="w-16 shrink-0 text-zinc-500">{n ? `Слайд ${n}` : "Все слайды"}</span>
+              <span className="min-w-0 text-zinc-900">
+                {title}
+                {extra && <span className="text-zinc-500"> — {extra}</span>}
+              </span>
             </li>
-          ))}
-        </ol>
-      )}
+          );
+        })}
+      </ol>
     </Collapsible>
   );
 }
 
 type LoadState = { status: "idle" | "loading" | "error" | "ready"; checks: CheckSpec[]; error: string | null };
 
-/** The check registry is static for a running server: fetched once per page load, shared across tab switches. */
+/** The check registry is static for a running server: fetched once per page load. */
 let checksCache: CheckSpec[] | null = null;
 
 export function ChecksReference() {
   const [open, setOpen] = useState(false);
-  const [wanted, setWanted] = useState(false); // latches on the first open; the fetch is not tied to the open state
   const [attempt, setAttempt] = useState(0);
-  const [state, setState] = useState<LoadState>(() =>
-    checksCache ? { status: "ready", checks: checksCache, error: null } : { status: "idle", checks: [], error: null },
-  );
+  const [state, setState] = useState<LoadState>(() => (checksCache ? { status: "ready", checks: checksCache, error: null } : { status: "idle", checks: [], error: null }));
 
   useEffect(() => {
-    if (!wanted || checksCache) return;
+    if (!open || checksCache) return;
     let alive = true;
     setState({ status: "loading", checks: [], error: null });
     api.checks().then(
@@ -93,87 +80,41 @@ export function ChecksReference() {
     return () => {
       alive = false;
     };
-  }, [wanted, attempt]);
+  }, [open, attempt]);
 
   const groups = useMemo(() => {
     const map = new Map<string, CheckSpec[]>();
-    for (const c of state.checks) {
-      const list = map.get(c.category);
-      if (list) list.push(c);
-      else map.set(c.category, [c]);
-    }
-    return [...map.entries()].map(([category, list]) => ({
-      category,
-      list: [...list].sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] || a.id.localeCompare(b.id)),
-    }));
+    for (const c of state.checks) map.set(c.category, [...(map.get(c.category) ?? []), c]);
+    return [...map.entries()].map(([category, list]) => ({ category, list: [...list].sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] || a.title.localeCompare(b.title, "ru")) }));
   }, [state.checks]);
 
-  const hint = state.status === "ready" ? `${plural(state.checks.length, "проверка", "проверки", "проверок")} · ${plural(groups.length, "категория", "категории", "категорий")}` : "что именно проверяет аудит";
-
   return (
-    <Collapsible
-      title="Справочник проверок"
-      hint={hint}
-      icon={BookOpen}
-      open={open}
-      onOpenChange={(o) => {
-        setOpen(o);
-        if (o) setWanted(true);
-      }}
-      keepMounted={false}
-      bodyClassName="px-0 py-0"
-    >
-      {state.status === "loading" && (
-        <div className="flex items-center justify-center py-8">
-          <Spinner showLabel label="Загружаю справочник" />
-        </div>
-      )}
+    <Collapsible title="Какие проверки выполняются" hint="правила шаблона, читаемость, целостность файла" open={open} onOpenChange={setOpen} keepMounted={false} bodyClassName="px-0 pb-3 pt-0">
+      {state.status === "loading" && <div className="flex justify-center py-6"><Spinner showLabel label="Загружаю список" /></div>}
       {state.status === "error" && (
-        <EmptyState
-          compact
-          icon={BookOpen}
-          title="Не удалось загрузить справочник"
-          hint={state.error}
-          action={
-            <Button size="sm" icon={RefreshCw} onClick={() => setAttempt((n) => n + 1)}>
-              Повторить
-            </Button>
-          }
-        />
-      )}
-      {state.status === "ready" && groups.length === 0 && <EmptyState compact icon={BookOpen} title="Справочник пуст" hint="Сервер не вернул ни одной проверки." />}
-      {state.status === "ready" && groups.length > 0 && (
-        <div className="scroll-thin max-h-[28rem] overflow-y-auto">
-          {groups.map(({ category, list }) => (
-            <section key={category} className="border-b border-zinc-100 last:border-b-0">
-              <h4 className="sticky top-0 z-[1] border-b border-zinc-100 bg-zinc-50 px-5 py-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                {categoryLabel(category)} <span className="font-normal normal-case tracking-normal text-zinc-400">· {list.length}</span>
-              </h4>
-              <ul className="divide-y divide-zinc-100">
-                {list.map((c) => (
-                  <li key={c.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 px-5 py-2.5">
-                    <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="text-[13px] font-medium text-zinc-900">{c.title}</span>
-                        <code className="rounded bg-zinc-100 px-1.5 py-0.5 font-mono text-[11px] text-zinc-500">{c.id}</code>
-                      </div>
-                      {c.description && <p className="mt-0.5 text-xs leading-4 text-zinc-500">{c.description}</p>}
-                    </div>
-                    <div className="flex shrink-0 items-center gap-1.5">
-                      <Badge tone={SEVERITY_TONE[c.severity]} size="sm">
-                        {SEVERITY_LABEL[c.severity]}
-                      </Badge>
-                      <Badge tone={c.kind === "model" ? "accent" : "neutral"} size="sm">
-                        {KIND_SHORT[c.kind]}
-                      </Badge>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ))}
+        <div className="flex items-center gap-3 px-6 py-4 text-[13px] text-red-700">
+          Не удалось загрузить список: {state.error}
+          <Button size="sm" icon={RefreshCw} onClick={() => setAttempt((n) => n + 1)}>Повторить</Button>
         </div>
       )}
+      {state.status === "ready" &&
+        groups.map(({ category, list }) => (
+          <section key={category} className="px-6 pt-3">
+            <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-zinc-400">{categoryLabel(category)}</h4>
+            <ul>
+              {list.map((c) => (
+                <li key={c.id} className="flex items-baseline gap-3 py-1.5" title={c.id}>
+                  <span className={cn("mt-1.5 h-1.5 w-1.5 shrink-0 self-start rounded-full", c.severity === "error" ? "bg-red-500" : c.severity === "warn" ? "bg-amber-400" : "bg-sky-400")} aria-hidden />
+                  <span className="min-w-0 flex-1 text-[13px] text-zinc-800">
+                    {c.title}
+                    {c.kind === "model" && <span className="text-zinc-400"> · открытой моделью</span>}
+                  </span>
+                  <span className="shrink-0 text-xs text-zinc-400">{SEVERITY_LABEL[c.severity].toLowerCase()}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))}
     </Collapsible>
   );
 }

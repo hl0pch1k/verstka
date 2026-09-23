@@ -1,6 +1,6 @@
 // Presentational pieces of the chat feed: message bubbles, the typing indicator and the inline job status.
 import { memo, useState } from "react";
-import { Sparkles } from "lucide-react";
+import { LogoMark } from "./shell/Logo";
 import { cn } from "../lib/utils";
 import type { ActiveJob } from "../store";
 import type { ChatMessage } from "../types";
@@ -18,12 +18,9 @@ function AgentAvatar({ hidden = false }: { hidden?: boolean }) {
   return (
     <span
       aria-hidden
-      className={cn(
-        "mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-white",
-        hidden && "invisible",
-      )}
+      className={cn("mt-0.5 shrink-0", hidden && "invisible")}
     >
-      <Sparkles className="h-3.5 w-3.5" strokeWidth={2.25} />
+      <LogoMark size={28} />
     </span>
   );
 }

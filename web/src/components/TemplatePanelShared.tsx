@@ -16,9 +16,9 @@ export const qualityTone = (q: number) => (q >= 0.9 ? "bg-emerald-500" : q >= 0.
 
 export function votesOf(c: ClassificationTrace): Array<{ source: string; vote: SignalVote }> {
   const list: Array<{ source: string; vote: SignalVote | null }> = [
-    { source: "эвристика", vote: c.heuristic },
-    { source: "LLM", vote: c.llm },
-    { source: "VLM", vote: c.vlm },
+    { source: "правила", vote: c.heuristic },
+    { source: "языковая модель", vote: c.llm },
+    { source: "модель зрения", vote: c.vlm },
   ];
   return list.filter((v): v is { source: string; vote: SignalVote } => !!v.vote);
 }

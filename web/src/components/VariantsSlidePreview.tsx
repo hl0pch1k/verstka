@@ -1,6 +1,7 @@
-// Large preview of the selected slide: natural aspect, audit overlays with hover tooltips, prev/next controls.
+// Large preview of the selected slide: natural aspect, audit overlays with hover tooltips, prev/next controls and
+// the way to the full screen.
 import { useState } from "react";
-import { ChevronLeft, ChevronRight, ImageOff } from "lucide-react";
+import { ChevronLeft, ChevronRight, ImageOff, Maximize2 } from "lucide-react";
 import { cn, SEVERITY_LABEL } from "../lib/utils";
 import type { BboxFrac, Issue, Severity } from "../types";
 import { Badge } from "./ui/Badge";
@@ -23,6 +24,7 @@ interface Props {
   onHighlight(id: string | null): void;
   onSelect(n: number): void;
   onAspect(a: number): void;
+  onZoom(): void;
 }
 
 const BOX: Record<Severity, string> = {
@@ -40,7 +42,8 @@ function Overlay({ issue, box, highlighted, onHighlight }: { issue: Issue; box: 
   return (
     <div
       role="note"
-      aria-label={`${SEVERITY_LABEL[sev]} ${issue.check_id}: ${issue.message}`}
+      aria-label={`${SEVERITY_LABEL[sev]}: ${issue.message}`}
+      onClick={(e) => e.stopPropagation()}
       onMouseEnter={() => onHighlight(issue.id)}
       onMouseLeave={() => onHighlight(null)}
       className={cn("group absolute border-2 transition-shadow", BOX[sev], highlighted ? "z-20 shadow-[0_0_0_2px_rgba(24,24,27,0.55)]" : "z-10 hover:z-20")}
@@ -48,12 +51,12 @@ function Overlay({ issue, box, highlighted, onHighlight }: { issue: Issue; box: 
     >
       <span
         className={cn(
-          "absolute left-0 whitespace-nowrap px-1 font-mono text-[9px] leading-[13px] text-white",
+          "absolute left-0 whitespace-nowrap px-1.5 text-[10px] font-semibold leading-4 text-white",
           TAG[sev],
           tagInside ? "top-0 rounded-br" : "-top-0.5 -translate-y-full rounded-t",
         )}
       >
-        {issue.check_id}
+        {SEVERITY_LABEL[sev]}
       </span>
       <div
         className={cn(
@@ -62,20 +65,17 @@ function Overlay({ issue, box, highlighted, onHighlight }: { issue: Issue; box: 
           tipAbove ? "bottom-full mb-1.5" : "top-full mt-1.5",
         )}
       >
-        <div className="flex items-center gap-1.5">
-          <Badge tone={SEVERITY_TONE[sev]} size="sm" dot>
-            {SEVERITY_LABEL[sev]}
-          </Badge>
-          <span className="font-mono text-[11px] text-zinc-500">{issue.check_id}</span>
-        </div>
-        <p className="mt-1.5 text-xs leading-4 text-zinc-800">{issue.message}</p>
-        {issue.suggestion && <p className="mt-1 text-[11px] leading-4 text-zinc-500">{issue.suggestion}</p>}
+        <Badge tone={SEVERITY_TONE[sev]} size="sm" dot>
+          {SEVERITY_LABEL[sev]}
+        </Badge>
+        <p className="mt-2 text-[13px] leading-5 text-zinc-800">{issue.message}</p>
+        {issue.suggestion && <p className="mt-1 text-xs leading-4 text-zinc-500">{issue.suggestion}</p>}
       </div>
     </div>
   );
 }
 
-export function VariantsSlidePreview({ src, slide, total, headline, kind, issues, aspect, showIssues, onToggleIssues, highlightId, onHighlight, onSelect, onAspect }: Props) {
+export function VariantsSlidePreview({ src, slide, total, headline, kind, issues, aspect, showIssues, onToggleIssues, highlightId, onHighlight, onSelect, onAspect, onZoom }: Props) {
   const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
   const failed = !src || failedSrc === src;
@@ -122,13 +122,15 @@ export function VariantsSlidePreview({ src, slide, total, headline, kind, issues
         <div className="flex shrink-0 items-center gap-1">
           <Button icon={ChevronLeft} aria-label="Предыдущий слайд" title="Предыдущий слайд (←)" disabled={slide <= 1} onClick={() => onSelect(slide - 1)} className="rounded-full" />
           <Button icon={ChevronRight} aria-label="Следующий слайд" title="Следующий слайд (→)" disabled={slide >= total} onClick={() => onSelect(slide + 1)} className="rounded-full" />
+          <Button icon={Maximize2} aria-label="На весь экран" title="На весь экран" disabled={failed} onClick={onZoom} className="rounded-full" />
         </div>
       </div>
       <CardBody className="px-4 pb-4 pt-1">
         <div
-          className="relative mx-auto overflow-hidden rounded-xl bg-zinc-100 shadow-inner-line"
+          onClick={failed ? undefined : onZoom}
+          className={cn("relative mx-auto overflow-hidden rounded-xl bg-zinc-100 shadow-inner-line", !failed && "cursor-zoom-in")}
           // the slide shrinks with the window height so the thumbnails under it stay on screen
-          style={{ aspectRatio: String(aspect), width: `min(100%, max(560px, calc((100vh - 460px) * ${aspect.toFixed(4)})))` }}
+          style={{ aspectRatio: String(aspect), width: `min(100%, max(520px, calc((100vh - 500px) * ${aspect.toFixed(4)})))` }}
         >
           {/* the previous slide stays under the next one until it has loaded: no flash of a placeholder */}
           {loading && loadedSrc && loadedSrc !== src && (

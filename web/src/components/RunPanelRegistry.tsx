@@ -1,7 +1,7 @@
 // «Запуск»: the live skills registry (GET /api/skills) — what the server would use for the next run,
 // with a per-skill comparison against the versions recorded in the open run_manifest.
 import { useCallback, useEffect, useState } from "react";
-import { BookOpen, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { api } from "../api";
 import { errText } from "../lib/narrate";
 import { plural, shortSha } from "../lib/utils";
@@ -53,7 +53,6 @@ export function RunPanelRegistry({ manifest }: { manifest: RunManifest | null })
     <Collapsible
       title="Реестр навыков и агентов на сервере"
       hint={hint}
-      icon={BookOpen}
       right={
         <>
           {changed > 0 && (

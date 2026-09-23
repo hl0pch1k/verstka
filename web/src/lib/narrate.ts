@@ -21,9 +21,9 @@ export function newestTemplate(list: TemplateListItem[]): TemplateListItem | nul
   return list.reduce<TemplateListItem | null>((best, t) => (!best || t.analyzed_at > best.analyzed_at ? t : best), null);
 }
 
-/** Assistant message after a finished generation: one line per variant with the audit score. */
+/** Assistant message after a finished generation: one line per variant with its quality score. */
 export function describeGeneration(g: Generation, strategyTitle: (name: string) => string): string {
-  if (g.variants.length === 0) return "Генерация завершилась, но ни один вариант не собрался. Загляните во вкладку «Запуск» или попробуйте ещё раз.";
+  if (g.variants.length === 0) return "Не получилось собрать ни одного варианта. Попробуйте ещё раз или измените текст — причина записана в технических деталях.";
   const rows = g.variants.map((v) => {
     const s = v.audit?.summary;
     const fromMeta = g.summary?.[v.strategy];
@@ -31,16 +31,16 @@ export function describeGeneration(g: Generation, strategyTitle: (name: string) 
     const errors = s?.errors ?? fromMeta?.errors ?? null;
     const warnings = s?.warnings ?? fromMeta?.warnings ?? null;
     const parts = [plural(slideCount(v), "слайд", "слайда", "слайдов")];
-    parts.push(score === null ? "аудит не запускался" : `аудит ${Math.round(score)}/100`);
+    parts.push(score === null ? "без проверки качества" : `качество ${Math.round(score)}/100`);
     if (errors !== null) parts.push(errors === 0 ? "без ошибок" : plural(errors, "ошибка", "ошибки", "ошибок"));
     if (warnings) parts.push(plural(warnings, "предупреждение", "предупреждения", "предупреждений"));
     return { strategy: v.strategy, score, line: `• ${strategyTitle(v.strategy)} — ${parts.join(", ")}` };
   });
-  const head = `Готово: ${plural(g.variants.length, "вариант", "варианта", "вариантов")} вёрстки${g.seconds ? ` за ${fmtSeconds(g.seconds)}` : ""}.`;
+  const head = `Готово: ${plural(g.variants.length, "вариант", "варианта", "вариантов")}${g.seconds ? ` за ${fmtSeconds(g.seconds)}` : ""}.`;
   const scored = rows.filter((r) => r.score !== null);
   const best = scored.length > 1 ? scored.reduce((a, b) => ((b.score ?? 0) > (a.score ?? 0) ? b : a)) : null;
   const tail = best
-    ? `Лучший результат аудита — «${strategyTitle(best.strategy)}». Сравните варианты во вкладке «Варианты», замечания — во вкладке «Аудит».`
-    : "Слайды — во вкладке «Варианты», замечания — во вкладке «Аудит».";
+    ? `Лучшая оценка качества — у варианта «${strategyTitle(best.strategy)}». Переключайте варианты над слайдом, замечания — в «Проверке качества».`
+    : "Переключайте варианты над слайдом, замечания — в «Проверке качества».";
   return [head, ...rows.map((r) => r.line), tail].join("\n");
 }

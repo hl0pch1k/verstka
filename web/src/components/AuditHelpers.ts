@@ -1,23 +1,37 @@
 // Pure helpers for the «Аудит» panel: grouping, filtering, labels for fix actions and check categories.
-import type { AuditReport, Issue, IssueKind, Severity } from "../types";
-import { plural } from "../lib/utils";
+import type { AuditReport, Issue, Severity } from "../types";
 import type { BadgeTone } from "./ui/Badge";
 
 export const SEVERITIES: Severity[] = ["error", "warn", "info"];
 export const SEVERITY_RANK: Record<Severity, number> = { error: 0, warn: 1, info: 2 };
 export const SEVERITY_TONE: Record<Severity, BadgeTone> = { error: "error", warn: "warn", info: "info" };
-export const KIND_SHORT: Record<IssueKind, string> = { deterministic: "детерм.", model: "модель" };
 
 export const ACTION_LABEL: Record<string, string> = {
-  rematch: "перевыбрать макет",
-  synth: "пересобрать слайд",
+  rematch: "подобрать другой макет",
+  synth: "собрать слайд заново",
   condense_text: "сократить текст",
-  drop_element: "убрать элемент",
-  move_inside: "вернуть в кадр",
-  recolor: "перекрасить",
+  drop_element: "убрать лишний элемент",
+  move_inside: "вернуть элемент в кадр",
+  recolor: "поправить цвет",
   refont: "заменить шрифт",
-  xml: "правка XML",
+  shrink_text: "уменьшить шрифт",
+  xml: "поправить оформление",
+  rollback: "отменить неудачную правку",
   none: "без автоисправления",
+};
+
+/** The same actions as done deeds, for the history of fixes. */
+export const ACTION_DONE: Record<string, string> = {
+  rematch: "Подобран другой макет",
+  synth: "Слайд собран заново",
+  condense_text: "Сокращён текст",
+  drop_element: "Убран лишний элемент",
+  move_inside: "Элемент возвращён в кадр",
+  recolor: "Поправлен цвет",
+  refont: "Заменён шрифт",
+  shrink_text: "Уменьшен шрифт",
+  xml: "Поправлено оформление",
+  rollback: "Неудачная правка отменена",
 };
 
 export const CATEGORY_LABEL: Record<string, string> = {
@@ -34,17 +48,6 @@ export const categoryLabel = (c: string): string => CATEGORY_LABEL[c] ?? c;
 /** An issue the backend can repair on request. */
 export function isFixable(issue: Issue): boolean {
   return !!issue.autofix && issue.autofix.action !== "none";
-}
-
-export interface IssueFilter {
-  severities: Set<Severity>;
-  fixableOnly: boolean;
-}
-
-export const DEFAULT_FILTER: IssueFilter = { severities: new Set<Severity>(SEVERITIES), fixableOnly: false };
-
-export function applyFilter(issues: Issue[], f: IssueFilter): Issue[] {
-  return issues.filter((i) => f.severities.has(i.severity) && (!f.fixableOnly || isFixable(i)));
 }
 
 export interface SlideGroup {
@@ -83,16 +86,7 @@ export function worstSeverity(issues: Issue[]): Severity | null {
   return issues.reduce<Severity>((worst, i) => (SEVERITY_RANK[i.severity] < SEVERITY_RANK[worst] ? i.severity : worst), "info");
 }
 
-export const slideLabel = (slide: number): string => (slide === 0 ? "Колода" : `Слайд ${slide}`);
-
-/** «2 ошибки · 1 предупреждение · 3 заметки» */
-export function countsText(counts: Record<Severity, number>): string {
-  const parts: string[] = [];
-  if (counts.error) parts.push(plural(counts.error, "ошибка", "ошибки", "ошибок"));
-  if (counts.warn) parts.push(plural(counts.warn, "предупреждение", "предупреждения", "предупреждений"));
-  if (counts.info) parts.push(plural(counts.info, "заметка", "заметки", "заметок"));
-  return parts.join(" · ");
-}
+export const slideLabel = (slide: number): string => (slide === 0 ? "Вся презентация" : `Слайд ${slide}`);
 
 /** Revision key of an audit report — changes whenever fixes were applied, used to reset selections. */
 export function auditRev(a: AuditReport | null | undefined): string {
@@ -100,21 +94,20 @@ export function auditRev(a: AuditReport | null | undefined): string {
   return [a.applied_fixes.length, a.iterations, a.issues.length, Math.round(a.summary.score * 10)].join(".");
 }
 
-export function scoreText(score: number | null | undefined): string {
-  if (score === null || score === undefined || !Number.isFinite(score)) return "—";
-  return String(Math.round(score));
-}
-
 /** A loose applied-fix record from the backend, normalised for display. */
 export interface FixRecord {
   iteration: number | null;
   action: string | null;
+  /** What exactly an in-place («xml») edit did: refont, recolor, move_inside, shrink_text, drop_element. */
+  kind: string | null;
   outlineId: string | null;
+  /** 1-based slide of an in-place edit (older runs wrote it only into the English result line). */
+  slide: number | null;
   result: string | null;
   extra: [string, string][];
 }
 
-const KNOWN_KEYS = new Set(["iteration", "action", "outline_id", "result"]);
+const KNOWN_KEYS = new Set(["iteration", "action", "kind", "outline_id", "slide", "result", "element_id"]);
 
 export function normalizeFix(raw: Record<string, unknown>): FixRecord {
   const str = (v: unknown): string | null => {
@@ -125,13 +118,8 @@ export function normalizeFix(raw: Record<string, unknown>): FixRecord {
   const extra = Object.entries(raw)
     .filter(([k, v]) => !KNOWN_KEYS.has(k) && v !== null && v !== undefined && v !== "")
     .map(([k, v]) => [k, str(v) ?? ""] as [string, string]);
-  return { iteration, action: str(raw.action), outlineId: str(raw.outline_id), result: str(raw.result), extra };
-}
-
-export function resultTone(result: string | null): BadgeTone {
-  if (!result) return "neutral";
-  const r = result.toLowerCase();
-  if (r === "skip" || r.startsWith("skip") || r.startsWith("noop")) return "neutral";
-  if (r.startsWith("fail") || r.startsWith("error")) return "error";
-  return "success";
+  const result = str(raw.result);
+  const legacySlide = result?.match(/^slide (\d+):/)?.[1];
+  const slide = typeof raw.slide === "number" ? raw.slide : legacySlide ? Number(legacySlide) : null;
+  return { iteration, action: str(raw.action), kind: str(raw.kind), outlineId: str(raw.outline_id), slide, result, extra };
 }

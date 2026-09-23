@@ -6,7 +6,7 @@ import { plural } from "../lib/utils";
 import { useApp, type AppState } from "../store";
 import type { ChatResponse, FixResult, Generation, TabKey } from "../types";
 
-const TABS: readonly TabKey[] = ["template", "brief", "plan", "variants", "audit", "export", "run"];
+const TABS: readonly TabKey[] = ["template", "brief", "plan", "variants", "why", "audit", "export", "run"];
 const asTab = (name: string): TabKey | null => TABS.find((t) => t === name) ?? null;
 
 interface FixOutcome { strategy: string; before: number | null; done: boolean; result: FixResult | null; error: string | null }
@@ -32,23 +32,23 @@ function describeFixes(list: FixOutcome[], title: (name: string) => string): str
     return `• ${title(o.strategy)} — ${parts.join(", ")}`;
   });
   const head =
-    okCount === list.length ? `Автофикс завершён: ${plural(list.length, "вариант", "варианта", "вариантов")} обновлено.`
-    : okCount > 0 ? `Автофикс завершён частично: ${okCount} из ${list.length}.`
-    : "Автофикс не удался.";
-  const tail = okCount > 0 ? "Слайды и файлы экспорта пересобраны, оставшиеся замечания — во вкладке «Аудит»." : "Попробуйте исправить замечания точечно во вкладке «Аудит».";
+    okCount === list.length ? `Исправления готовы: ${list.length === 1 ? "вариант обновлён" : `${plural(list.length, "вариант", "варианта", "вариантов")} обновлены`}.`
+    : okCount > 0 ? `Исправлено ${okCount} из ${list.length} вариантов.`
+    : "Исправить автоматически не получилось.";
+  const tail = okCount > 0 ? "Слайды и файлы пересобраны, оставшиеся замечания — в «Проверке качества»." : "Попробуйте исправить замечания по одному в «Проверке качества».";
   return [head, ...rows, tail].join("\n");
 }
 
 function trackGeneration(app: () => AppState, jobId: string, gid: string) {
-  app().setTab("variants"); // the variants step shows the build while the job runs
-  app().runJob(jobId, "Генерация презентации", {
+  app().setTab("variants"); // the result screen shows the build while the job runs
+  app().runJob(jobId, "Собираю презентацию", {
     kind: "generate",
     onDone: async () => {
       let g: Generation;
       try {
         g = await api.generation(gid);
       } catch (e) {
-        app().toast("error", `Генерация завершилась, но результат не загрузился: ${errText(e)}`);
+        app().toast("error", `Презентация собрана, но не открылась: ${errText(e)}`);
         return;
       }
       await app().refreshGenerations();
@@ -58,7 +58,7 @@ function trackGeneration(app: () => AppState, jobId: string, gid: string) {
       app().toast("success", "Презентация готова");
     },
     onFailed: (job) => {
-      app().pushMessage("assistant", `Генерация не удалась: ${firstLine(job.error ?? job.message)}. Попробуйте ещё раз или уточните бриф.`);
+      app().pushMessage("assistant", `Не получилось собрать презентацию: ${firstLine(job.error ?? job.message)}. Попробуйте ещё раз или уточните текст.`);
       void app().refreshGenerations();
     },
   });
@@ -83,7 +83,7 @@ function trackFixes(app: () => AppState, jobs: { strategy: string; job_id: strin
   };
 
   jobs.forEach((j, i) => {
-    app().runJob(j.job_id, `Автофикс: ${app().strategyTitle(j.strategy)}`, {
+    app().runJob(j.job_id, `Исправляю: ${app().strategyTitle(j.strategy)}`, {
       kind: "fix",
       onDone: (job) => {
         outcomes[i].done = true;
@@ -111,6 +111,7 @@ export function useChatActions(): (res: ChatResponse) => void {
       else if (action.type === "jobs") trackFixes(app, action.jobs ?? [], res.generation_id ?? app().generationId);
       else if (action.type === "open_tab") {
         const tab = asTab(action.tab);
+        if (action.slide) app().setSelectedSlide(action.slide);
         if (tab) app().setTab(tab);
       }
     }

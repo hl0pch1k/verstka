@@ -1,9 +1,8 @@
 // «Подробнее»: a drawer from the right with everything an expert (or a jury) wants to see, out of the way of a
 // person who only needs the deck: the quality check, why a slide looks so, the plan, the template, files and runs.
 import { useEffect, useRef, type ComponentType } from "react";
-import { ChevronLeft, ChevronRight, X } from "lucide-react";
+import { X } from "lucide-react";
 import { usePresence } from "../../lib/motion";
-import { slideCount } from "../../lib/narrate";
 import { cn } from "../../lib/utils";
 import { useApp } from "../../store";
 import type { DetailKey } from "../../types";
@@ -12,36 +11,8 @@ import { ExportPanel } from "../ExportPanel";
 import { PlanPanel } from "../PlanPanel";
 import { RunPanel } from "../RunPanel";
 import { TemplateDetails } from "../TemplatePanel";
-import { Button } from "../ui/Button";
 import { Tabs } from "../ui/Tabs";
-import { VariantsExplain, VariantsSlideIssues } from "../VariantsExplain";
-import { issuesBySlide, planEntryFor, variantRev } from "../VariantsHelpers";
-
-function WhySlide() {
-  const { generation, activeVariant, selectedSlide, setSelectedSlide, manifest, setDetail } = useApp();
-  const v = activeVariant ?? generation?.variants[0];
-  if (!generation || !v) return null;
-  const total = slideCount(v);
-  const entry = planEntryFor(v, selectedSlide);
-  const pattern = manifest && manifest.template_id === generation.template_id && entry?.pattern_id ? manifest.patterns.find((p) => p.id === entry.pattern_id) ?? null : null;
-  const aspect = manifest ? manifest.slide_size.w / manifest.slide_size.h : 16 / 9;
-  const issues = issuesBySlide(v.audit).get(selectedSlide) ?? [];
-  const headline = v.outline?.slides[selectedSlide - 1]?.headline ?? "";
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-3 rounded-2xl bg-white px-5 py-3 shadow-card">
-        <Button icon={ChevronLeft} aria-label="Предыдущий слайд" disabled={selectedSlide <= 1} onClick={() => setSelectedSlide(selectedSlide - 1)} className="rounded-full" />
-        <div className="min-w-0 flex-1 text-center">
-          <p className="text-xs text-zinc-500">Слайд {selectedSlide} из {total}</p>
-          <p className="truncate text-[15px] font-semibold text-zinc-900">{headline || "Без заголовка"}</p>
-        </div>
-        <Button icon={ChevronRight} aria-label="Следующий слайд" disabled={selectedSlide >= total} onClick={() => setSelectedSlide(selectedSlide + 1)} className="rounded-full" />
-      </div>
-      <VariantsExplain generationId={generation.id} strategy={v.strategy} slide={selectedSlide} rev={variantRev(v)} entry={entry} hasPlan={!!v.plan} pattern={pattern} aspect={aspect} />
-      <VariantsSlideIssues issues={issues} audited={!!v.audit} highlightId={null} onHighlight={() => undefined} onOpenAudit={() => setDetail("quality")} />
-    </div>
-  );
-}
+import { WhySlide } from "./WhySlide";
 
 function Tech() {
   return (
@@ -61,7 +32,7 @@ function Tech() {
 const TABS: Array<{ key: DetailKey; label: string; view: ComponentType; needsDeck: boolean }> = [
   { key: "quality", label: "Проверка качества", view: AuditPanel, needsDeck: true },
   { key: "why", label: "Почему слайд такой", view: WhySlide, needsDeck: true },
-  { key: "plan", label: "План", view: () => <PlanPanel embedded />, needsDeck: true },
+  { key: "plan", label: "План", view: PlanPanel, needsDeck: true },
   { key: "template", label: "Шаблон", view: TemplateDetails, needsDeck: false },
   { key: "tech", label: "Файлы и детали", view: Tech, needsDeck: true },
 ];

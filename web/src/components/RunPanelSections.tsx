@@ -1,12 +1,11 @@
 // «Запуск»: the sections of a run_manifest — facts, providers, skills, timings, fixes and audit summary.
 import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
-import { AlertTriangle, Bot, Clock3, Cpu, Info, ListChecks, OctagonAlert, Puzzle, Wand2 } from "lucide-react";
+import { AlertTriangle, Bot, Info, OctagonAlert } from "lucide-react";
 import { cn, fmtDate, fmtSeconds, scoreTone, shortSha } from "../lib/utils";
 import type { AuditSummary, RunManifest } from "../types";
 import { Badge } from "./ui/Badge";
 import { Card, CardBody, CardHeader, CardTitle } from "./ui/Card";
-import type { IconProp } from "./ui/icon";
 
 /** Safe text for unknown JSON values (fix results, usage counters). */
 export function str(v: unknown): string {
@@ -20,16 +19,16 @@ export function str(v: unknown): string {
   }
 }
 
-const STAGE_LABEL: Record<string, string> = { analyze: "Разбор шаблона", plan: "Планирование", render: "Рендер PPTX", audit: "Аудит и автофикс", export: "Экспорт PDF/HTML", total: "Всего" };
+const STAGE_LABEL: Record<string, string> = { analyze: "Разбор шаблона", plan: "План", render: "Сборка PPTX", audit: "Проверка и исправления", export: "PDF, HTML и превью", total: "Всего" };
 export const stageLabel = (k: string) => STAGE_LABEL[k] ?? k;
 
-const ROLE_LABEL: Record<string, string> = { llm: "LLM · тексты и структура", vlm: "VLM · визуальные проверки", embed: "Эмбеддинги", audit: "Аудит" };
+const ROLE_LABEL: Record<string, string> = { llm: "Тексты и план (LLM)", vlm: "Проверка по картинке (VLM)", embed: "Эмбеддинги", audit: "Проверка" };
 
-export function Section({ icon, title, hint, actions, children, className }: { icon: IconProp; title: string; hint?: ReactNode; actions?: ReactNode; children: ReactNode; className?: string }) {
+export function Section({ title, hint, actions, children, className }: { title: string; hint?: ReactNode; actions?: ReactNode; children: ReactNode; className?: string }) {
   return (
     <Card className={className}>
       <CardHeader actions={actions}>
-        <CardTitle icon={icon} hint={hint}>{title}</CardTitle>
+        <CardTitle hint={hint}>{title}</CardTitle>
       </CardHeader>
       <CardBody>{children}</CardBody>
     </Card>
@@ -88,7 +87,7 @@ export function Providers({ m }: { m: RunManifest }) {
     <span key="m" className="font-mono text-xs text-zinc-700">{p.model ?? "—"}</span>,
   ]);
   return (
-    <Section icon={Cpu} title="Провайдеры" hint="Какой backend и модель отвечали за каждую роль">
+    <Section title="Провайдеры" hint="Какой backend и модель отвечали за каждую роль">
       <Table head={["Роль", "Backend", "Модель"]} rows={rows} empty="Запуск выполнен без моделей — планировщик и аудит работали детерминированно." />
     </Section>
   );
@@ -101,7 +100,7 @@ export function Skills({ m }: { m: RunManifest }) {
     <span key="s" className="font-mono text-xs text-zinc-500" title={s.sha256}>{shortSha(s.sha256)}</span>,
   ]);
   return (
-    <Section icon={Puzzle} title="Навыки" hint="Версии и хэши инструкций, с которыми собран вариант">
+    <Section title="Навыки" hint="Версии и хэши инструкций, с которыми собран вариант">
       <Table head={["Навык", "Версия", "SHA-256"]} rows={rows} empty="Реестр навыков в манифесте пуст." />
     </Section>
   );
@@ -112,7 +111,7 @@ export function Timings({ m }: { m: RunManifest }) {
   const total = m.timings_s.total ?? stages.reduce((s, [, v]) => s + v, 0);
   const max = Math.max(...stages.map(([, v]) => v), 0.001);
   return (
-    <Section icon={Clock3} title="Тайминги" hint="Секунды на каждый этап" actions={<Badge tone="neutral">{fmtSeconds(total)} всего</Badge>}>
+    <Section title="Тайминги" hint="Секунды на каждый этап" actions={<Badge tone="neutral">{fmtSeconds(total)} всего</Badge>}>
       {stages.length === 0 ? (
         <p className="py-2 text-[13px] text-zinc-500">Этапы не измерялись.</p>
       ) : (
@@ -135,7 +134,7 @@ export function Timings({ m }: { m: RunManifest }) {
 export function Fixes({ m }: { m: RunManifest }) {
   const list = m.applied_fixes;
   return (
-    <Section icon={Wand2} title="Автоисправления" hint="Что аудит поправил сам" actions={<Badge tone={list.length ? "accent" : "neutral"}>{list.length}</Badge>}>
+    <Section title="Автоисправления" hint="Что аудит поправил сам" actions={<Badge tone={list.length ? "accent" : "neutral"}>{list.length}</Badge>}>
       {list.length === 0 ? (
         <p className="py-2 text-[13px] text-zinc-500">Автофикс ничего не менял — вариант прошёл аудит без правок.</p>
       ) : (
@@ -170,7 +169,6 @@ export function Audit({ m, fallback }: { m: RunManifest; fallback: AuditSummary 
   ];
   return (
     <Section
-      icon={ListChecks}
       title="Итог аудита"
       hint={checks.length ? `${checks.length} проверок: ${checks.join(", ")}` : "Аудит не запускался"}
       actions={<Badge tone={scoreTone(score)}>{score === null ? "нет оценки" : `${Math.round(score)} / 100`}</Badge>}

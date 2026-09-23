@@ -8,7 +8,7 @@ import { describeGeneration, firstLine, newestTemplate } from "./narrate";
 import { plural } from "./utils";
 
 interface CommonDeps {
-  runJob(jobId: string, label: string, opts?: { kind?: JobKind; onDone?: (job: Job) => void; onFailed?: (job: Job) => void }): void;
+  runJob(jobId: string, label: string, opts?: { kind?: JobKind; items?: string[]; onDone?: (job: Job) => void; onFailed?: (job: Job) => void }): void;
   report(e: unknown, prefix: string): void;
   pushMessage(role: "user" | "assistant", text: string): void;
   setTab(t: TabKey): void;
@@ -35,7 +35,7 @@ export function uploadTemplateFlow(file: File, useModels: boolean, d: UploadDeps
         return resolve();
       }
       if (useModels && !res.use_models) pushToast("info", "Модели не настроены — шаблон разбирается эвристиками");
-      d.runJob(res.job_id, `Анализ шаблона «${file.name}»`, {
+      d.runJob(res.job_id, `Разбираю шаблон «${file.name}»`, {
         kind: "analyze",
         onDone: async (job) => {
           try {
@@ -46,7 +46,7 @@ export function uploadTemplateFlow(file: File, useModels: boolean, d: UploadDeps
             if (!tid) throw new Error("сервер не вернул идентификатор шаблона");
             const m = await api.template(tid);
             d.adoptManifest(m);
-            const fallback = `Шаблон «${m.source_file}» разобран: ${plural(m.patterns.length, "паттерн", "паттерна", "паттернов")} из ${plural(m.n_slides, "слайда", "слайдов", "слайдов")}.`;
+            const fallback = `Шаблон «${m.source_file}» разобран: ${plural(m.patterns.length, "макет", "макета", "макетов")} из ${plural(m.n_slides, "слайда", "слайдов", "слайдов")}.`;
             d.pushMessage("assistant", m.narration || fallback);
             pushToast("success", "Шаблон разобран");
           } catch (e) {
@@ -76,12 +76,13 @@ export function generationFlow(req: GenerateRequest, d: GenerationDeps): Promise
       try {
         res = await api.createGeneration(req);
       } catch (e) {
-        d.report(e, "Не удалось запустить генерацию");
+        d.report(e, "Не удалось начать сборку презентации");
         return resolve();
       }
-      d.setTab("variants"); // the variants step shows the build while the job runs
-      d.runJob(res.job_id, `Генерация: ${plural(req.strategies.length, "вариант", "варианта", "вариантов")}`, {
+      d.setTab("variants"); // the result screen shows the build while the job runs
+      d.runJob(res.job_id, `Собираю ${plural(req.strategies.length, "вариант", "варианта", "вариантов")}`, {
         kind: "generate",
+        items: req.strategies,
         onDone: async () => {
           await d.refreshGenerations();
           const g = await d.fetchGeneration(res.generation_id);
@@ -93,7 +94,7 @@ export function generationFlow(req: GenerateRequest, d: GenerationDeps): Promise
           resolve();
         },
         onFailed: (job) => {
-          d.pushMessage("assistant", `Генерация не удалась: ${firstLine(job.error ?? job.message)}`);
+          d.pushMessage("assistant", `Не получилось собрать презентацию: ${firstLine(job.error ?? job.message)}`);
           void d.refreshGenerations();
           resolve();
         },

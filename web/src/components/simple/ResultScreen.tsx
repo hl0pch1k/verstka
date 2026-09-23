@@ -5,7 +5,7 @@ import { ArrowLeft, ChevronRight, Download, FileText, HelpCircle, LayoutTemplate
 import type { LucideIcon } from "lucide-react";
 import { slideCount } from "../../lib/narrate";
 import { templateName, variantHint } from "../../lib/plain";
-import { cn, fmtDate, kindLabel, plural, storage } from "../../lib/utils";
+import { cn, fmtWhen, kindLabel, plural, storage } from "../../lib/utils";
 import { useApp } from "../../store";
 import type { DetailKey, Generation, Issue } from "../../types";
 import { BuildScreen } from "../BuildScreen";
@@ -14,6 +14,7 @@ import { EmptyState } from "../ui/EmptyState";
 import { ScoreRing } from "../ui/ScoreRing";
 import { issuesBySlide, KEY_ISSUES, variantRev, variantScore, withRev } from "../VariantsHelpers";
 import { VariantsSlidePreview } from "../VariantsSlidePreview";
+import { SlideLightbox } from "./SlideLightbox";
 import { SlideStrip } from "./SlideStrip";
 
 const NO_ISSUES: Issue[] = [];
@@ -48,6 +49,7 @@ function Deck({ generation }: { generation: Generation }) {
   const [showIssues, setShowIssues] = useState(() => storage.get(KEY_ISSUES) === "1");
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const [naturalAspect, setNaturalAspect] = useState<number | null>(null);
+  const [zoom, setZoom] = useState(false);
   useEffect(() => setNaturalAspect(null), [generation.id]);
   const templateLoaded = !!manifest && manifest.template_id === generation.template_id;
   const aspect = naturalAspect ?? (templateLoaded && manifest ? manifest.slide_size.w / manifest.slide_size.h : 16 / 9);
@@ -89,9 +91,9 @@ function Deck({ generation }: { generation: Generation }) {
     <div className="mx-auto max-w-[1280px] space-y-5 pb-10">
       <div className="flex items-end gap-6">
         <div className="min-w-0 flex-1">
-          <h1 className="line-clamp-2 text-[28px] font-bold leading-9 tracking-tight text-zinc-900">{variant.outline?.title || "Презентация"}</h1>
+          <h1 className="truncate text-[28px] font-bold leading-9 tracking-tight text-zinc-900" title={variant.outline?.title || undefined}>{variant.outline?.title || "Презентация"}</h1>
           <p className="mt-1 flex flex-wrap items-center gap-x-3 text-[15px] text-zinc-500">
-            <span>Шаблон «{templateName(generation.template_file, generation.template_id)}» · {fmtDate(generation.created_at)}</span>
+            <span>Шаблон «{templateName(generation.template_file, generation.template_id)}» · {fmtWhen(generation.created_at)}</span>
             <button type="button" onClick={() => setScreen("create")} className="inline-flex cursor-pointer items-center gap-1 font-semibold text-accent-700 hover:underline">
               <ArrowLeft className="h-4 w-4" aria-hidden /> Изменить текст или шаблон
             </button>
@@ -104,7 +106,7 @@ function Deck({ generation }: { generation: Generation }) {
             </a>
           )}
           {pptx && (
-            <a href={pptx} download="deck.pptx" className="inline-flex h-12 items-center gap-2 rounded-xl bg-accent px-6 text-[15px] font-semibold text-white shadow-glow transition-colors hover:bg-accent-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/40">
+            <a href={pptx} download="deck.pptx" className="inline-flex h-12 items-center gap-2 rounded-xl bg-accent px-6 text-[15px] font-semibold text-white transition-[background-color,transform] hover:-translate-y-px hover:bg-accent-600 active:translate-y-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/40">
               <Download className="h-5 w-5" aria-hidden /> Скачать PowerPoint
             </a>
           )}
@@ -164,8 +166,10 @@ function Deck({ generation }: { generation: Generation }) {
             onHighlight={setHighlightId}
             onSelect={setSelectedSlide}
             onAspect={setNaturalAspect}
+            onZoom={() => setZoom(true)}
           />
           <SlideStrip variant={variant} rev={rev} total={total} selected={selectedSlide} aspect={aspect} issueMap={issueMap} onSelect={setSelectedSlide} />
+          <SlideLightbox open={zoom} src={src} slide={selectedSlide} total={total} headline={outlineSlide?.headline ?? ""} aspect={aspect} onSelect={setSelectedSlide} onClose={() => setZoom(false)} />
         </div>
 
         <aside className="space-y-4">
@@ -184,10 +188,10 @@ function Deck({ generation }: { generation: Generation }) {
 
           <section className="rounded-2xl bg-white p-2 shadow-card">
             <p className="px-3 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-zinc-400">Подробнее</p>
-            <MoreLink icon={HelpCircle} label="Почему этот слайд такой" hint={`Слайд ${selectedSlide}: выбор макета и причины`} onClick={() => open("why")} />
-            <MoreLink icon={ListTree} label="План презентации" hint="Структура, факты и цифры из текста" onClick={() => open("plan")} />
-            <MoreLink icon={LayoutTemplate} label="Что Verstka поняла из шаблона" hint="Цвета, шрифты, макеты слайдов" onClick={() => open("template")} />
-            <MoreLink icon={Wrench} label="Все файлы и технические детали" hint="PPTX, PDF, HTML, JSON, версии" onClick={() => open("tech")} />
+            <MoreLink icon={HelpCircle} label="Почему слайд такой" hint={`Слайд ${selectedSlide}: макет и причины`} onClick={() => open("why")} />
+            <MoreLink icon={ListTree} label="План презентации" hint="Структура и цифры из текста" onClick={() => open("plan")} />
+            <MoreLink icon={LayoutTemplate} label="Что понято из шаблона" hint="Цвета, шрифты, макеты" onClick={() => open("template")} />
+            <MoreLink icon={Wrench} label="Файлы и детали" hint="PPTX, PDF, HTML, JSON" onClick={() => open("tech")} />
           </section>
         </aside>
       </div>

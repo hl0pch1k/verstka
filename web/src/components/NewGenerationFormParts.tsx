@@ -42,32 +42,6 @@ export const SAMPLE_BRIEF = `Запуск функции «Умные сводк
 
 Просим одобрить бюджет 14,5 млн ₽ на второе полугодие и выделить 2 дополнительные GPU-ноды.`;
 
-/** Label + control + optional hint / error line. */
-export function Field({ label, hint, error, required, htmlFor, right, className, children }: {
-  label: string;
-  hint?: ReactNode;
-  error?: string | null;
-  required?: boolean;
-  htmlFor?: string;
-  right?: ReactNode;
-  className?: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className={cn("min-w-0", className)}>
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <label htmlFor={htmlFor} className="text-[13px] font-semibold text-zinc-700">
-          {label}
-          {required && <span className="ml-0.5 text-red-500" aria-hidden>*</span>}
-        </label>
-        {right}
-      </div>
-      {children}
-      {error ? <p role="alert" className="mt-1.5 text-xs font-medium text-red-600">{error}</p> : hint ? <p className="mt-1.5 text-xs leading-4 text-zinc-500">{hint}</p> : null}
-    </div>
-  );
-}
-
 export const INPUT_CLS =
   "h-11 w-full rounded-xl border-0 bg-zinc-100 px-3.5 text-sm text-zinc-900 placeholder:text-zinc-500 transition-shadow hover:bg-zinc-200/60 focus:bg-white focus:shadow-[0_0_0_2px_#0077FF] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60";
 

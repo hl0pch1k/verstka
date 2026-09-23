@@ -1,6 +1,5 @@
 import type { HTMLAttributes, ReactNode } from "react";
 import { cn } from "../../lib/utils";
-import { renderIcon, type IconProp } from "./icon";
 
 export interface CardProps extends HTMLAttributes<HTMLDivElement> {
   /** Hover affordance for clickable cards. */
@@ -39,21 +38,18 @@ export function CardHeader({ actions, className, children, ...rest }: CardHeader
 }
 
 export interface CardTitleProps extends HTMLAttributes<HTMLHeadingElement> {
-  icon?: IconProp;
   /** Secondary line under the title. */
   hint?: ReactNode;
 }
 
-export function CardTitle({ icon, hint, className, children, ...rest }: CardTitleProps) {
+// No icon tiles next to titles: the heading and one plain line of context carry the section.
+export function CardTitle({ hint, className, children, ...rest }: CardTitleProps) {
   return (
-    <div className="flex min-w-0 items-center gap-3">
-      {icon && <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent-50 text-accent">{renderIcon(icon, "h-[18px] w-[18px]")}</span>}
-      <div className="min-w-0">
-        <h3 className={cn("truncate text-[17px] font-semibold leading-6 text-zinc-900", className)} {...rest}>
-          {children}
-        </h3>
-        {hint && <p className="truncate text-[13px] leading-5 text-zinc-500">{hint}</p>}
-      </div>
+    <div className="min-w-0">
+      <h3 className={cn("truncate text-[17px] font-semibold leading-6 text-zinc-900", className)} {...rest}>
+        {children}
+      </h3>
+      {hint && <p className="mt-0.5 text-[13px] leading-5 text-zinc-500">{hint}</p>}
     </div>
   );
 }

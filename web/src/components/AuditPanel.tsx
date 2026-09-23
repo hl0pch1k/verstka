@@ -1,65 +1,53 @@
-// «Аудит»: the active variant's audit report — score, filters, issues by slide, fixes and the checks reference.
+// «Проверка качества» (details drawer): the verdict, one filter row, remarks by slide with the fixes a person can
+// apply, what was already fixed automatically, and the list of checks.
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Filter, Layers, ShieldCheck, Sparkles, SquareCheckBig, Wand2, X } from "lucide-react";
+import { CheckCircle2, ShieldCheck } from "lucide-react";
 import { api } from "../api";
 import { errText } from "../lib/narrate";
-import { cn, plural, SEVERITY_LABEL } from "../lib/utils";
+import { cn, plural } from "../lib/utils";
 import { useApp } from "../store";
-import type { FixRequest, FixResult, Severity } from "../types";
-import { ChecksReference, AppliedFixes } from "./AuditFixes";
-import { applyFilter, auditRev, countBySeverity, DEFAULT_FILTER, groupBySlide, isFixable, SEVERITIES, type IssueFilter } from "./AuditHelpers";
+import type { FixRequest, FixResult, Issue, Severity } from "../types";
+import { AppliedFixes, ChecksReference } from "./AuditFixes";
+import { auditRev, groupBySlide, isFixable } from "./AuditHelpers";
 import { SlideIssueGroup } from "./AuditIssues";
 import { AuditSummaryCard } from "./AuditSummary";
 import { Button } from "./ui/Button";
 import { EmptyState } from "./ui/EmptyState";
-import { Tabs, type TabItem } from "./ui/Tabs";
+import { Tabs } from "./ui/Tabs";
+import { variantScore } from "./VariantsHelpers";
 
-const CHIP_ON: Record<Severity, string> = {
-  error: "border-transparent bg-red-50 text-red-700",
-  warn: "border-transparent bg-amber-50 text-amber-800",
-  info: "border-transparent bg-sky-50 text-sky-700",
-};
+type FilterKey = "all" | Severity | "fixable";
+
+const FILTERS: Array<{ key: FilterKey; label: string; test(i: Issue): boolean }> = [
+  { key: "all", label: "Все", test: () => true },
+  { key: "error", label: "Ошибки", test: (i) => i.severity === "error" },
+  { key: "warn", label: "Предупреждения", test: (i) => i.severity === "warn" },
+  { key: "info", label: "Заметки", test: (i) => i.severity === "info" },
+  { key: "fixable", label: "Исправимые", test: isFixable },
+];
 
 export function AuditPanel() {
-  const {
-    generation, generationLoading, generationId, activeStrategy, setActiveStrategy, activeVariant, strategyTitle,
-    selectedSlide, setSelectedSlide, setTab, activeJob, runJob, loadGeneration, toast,
-  } = useApp();
+  const { generation, generationLoading, generationId, activeStrategy, setActiveStrategy, activeVariant, strategyTitle, selectedSlide, setSelectedSlide, setDetail, activeJob, runJob, loadGeneration, toast, manifest } = useApp();
 
   const audit = activeVariant?.audit ?? null;
-  const rev = auditRev(audit);
-  const scopeKey = `${generationId ?? ""}/${activeStrategy ?? ""}/${rev}`;
-
-  const [filter, setFilter] = useState<IssueFilter>(DEFAULT_FILTER);
+  const scopeKey = `${generationId ?? ""}/${activeStrategy ?? ""}/${auditRev(audit)}`;
+  const [filter, setFilter] = useState<FilterKey>("all");
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
-  const [openSlides, setOpenSlides] = useState<Set<number>>(() => new Set());
   const [submitting, setSubmitting] = useState(false);
 
   const allIssues = useMemo(() => audit?.issues ?? [], [audit]);
-  const totalCounts = useMemo(() => countBySeverity(allIssues), [allIssues]);
   const fixableTotal = useMemo(() => allIssues.filter(isFixable).length, [allIssues]);
-  const visible = useMemo(() => applyFilter(allIssues, filter), [allIssues, filter]);
-  const groups = useMemo(() => groupBySlide(visible), [visible]);
-  const filtered = visible.length !== allIssues.length;
+  const counts = useMemo(() => Object.fromEntries(FILTERS.map((f) => [f.key, allIssues.filter(f.test).length])) as Record<FilterKey, number>, [allIssues]);
+  const current = FILTERS.find((f) => f.key === filter) ?? FILTERS[0];
+  const groups = useMemo(() => groupBySlide(allIssues.filter(current.test)), [allIssues, current]);
 
-  // A new report (another variant, another generation, or fixes just applied) resets the selection and the accordion.
+  // a new report (another variant, or fixes just applied) clears the selection
+  useEffect(() => setSelected(new Set()), [scopeKey]);
   useEffect(() => {
-    setSelected(new Set());
-    const all = groupBySlide(allIssues);
-    const withErrors = all.filter((g) => g.counts.error > 0).map((g) => g.slide);
-    setOpenSlides(new Set(all.length <= 6 || withErrors.length === 0 ? all.map((g) => g.slide) : withErrors));
-  }, [scopeKey]);
+    if (filter !== "all" && counts[filter] === 0) setFilter("all");
+  }, [counts, filter]);
 
-  const busy = !!activeJob || submitting;
-
-  const toggleSeverity = (s: Severity) =>
-    setFilter((f) => {
-      const next = new Set(f.severities);
-      if (next.has(s)) next.delete(s);
-      else next.add(s);
-      return { ...f, severities: next };
-    });
-
+  const busy = (!!activeJob && (activeJob.status === "queued" || activeJob.status === "running")) || submitting;
   const select = useCallback((id: string, on: boolean) => {
     setSelected((cur) => {
       const next = new Set(cur);
@@ -75,175 +63,135 @@ export function AuditPanel() {
     setSubmitting(true);
     try {
       const { job_id } = await api.fixes(gid, activeStrategy, body);
-      runJob(job_id, "Применяю исправления", {
+      runJob(job_id, "Исправляю замечания", {
         kind: "fix",
         onDone: async (job) => {
           await loadGeneration(gid);
           const r = (job.result ?? null) as Partial<FixResult> | null;
           const score = typeof r?.score === "number" && Number.isFinite(r.score) ? Math.round(r.score) : null;
-          const applied = Array.isArray(r?.applied) ? r.applied.length : null;
-          const tail = applied !== null ? `, ${plural(applied, "исправление", "исправления", "исправлений")}` : "";
-          toast("success", score !== null ? `Исправления применены: новая оценка ${score}/100${tail}` : "Исправления применены: отчёт аудита обновлён");
+          toast("success", score !== null ? `Готово: оценка качества ${score} из 100` : "Готово: замечания исправлены");
         },
       });
     } catch (e) {
-      toast("error", `Не удалось запустить исправления: ${errText(e)}`);
+      toast("error", `Не удалось запустить исправление: ${errText(e)}`);
     } finally {
       setSubmitting(false);
     }
   };
 
-  // ---- empty states -------------------------------------------------------------------------------------------------
   if (generationLoading && !generation) {
     return (
       <div className="space-y-4" aria-busy>
-        <div className="skeleton h-8 w-72" />
-        <div className="skeleton h-36 w-full" />
-        <div className="skeleton h-24 w-full" />
-        <div className="skeleton h-24 w-full" />
+        <div className="skeleton h-36 w-full rounded-3xl" />
+        <div className="skeleton h-28 w-full rounded-2xl" />
+        <div className="skeleton h-28 w-full rounded-2xl" />
       </div>
     );
   }
   if (!generation || generation.variants.length === 0) {
-    return (
-      <EmptyState
-        icon={ShieldCheck}
-        title="Пока нечего проверять"
-        hint="Аудит появится после первой генерации: каждый вариант вёрстки проверяется по детерминированным правилам шаблона и, при желании, моделью."
-        action={<Button variant="primary" icon={Sparkles} onClick={() => setTab("template")}>Начать с шаблона</Button>}
-      />
-    );
+    return <EmptyState icon={ShieldCheck} title="Пока нечего проверять" hint="Проверка появится вместе с первой презентацией." />;
   }
 
-  const strategyItems: TabItem<string>[] = generation.variants.map((v) => {
-    const errors = v.audit?.summary.errors ?? null;
-    return { key: v.strategy, label: strategyTitle(v.strategy), badge: errors, badgeTone: errors === null ? "neutral" : errors > 0 ? "error" : "success" };
-  });
-  const switcher = <Tabs items={strategyItems} value={activeStrategy ?? strategyItems[0].key} onChange={setActiveStrategy} variant="pills" />;
+  const switcher = generation.variants.length > 1 && (
+    <Tabs
+      variant="pills"
+      value={activeStrategy ?? generation.variants[0].strategy}
+      onChange={setActiveStrategy}
+      items={generation.variants.map((v, i) => {
+        const s = variantScore(v, generation.summary?.[v.strategy]?.score);
+        return { key: v.strategy, label: `${i + 1} · ${strategyTitle(v.strategy)}`, badge: s === null ? null : Math.round(s), badgeTone: s === null ? "neutral" : s >= 90 ? "success" : s >= 70 ? "warn" : "error" };
+      })}
+    />
+  );
 
   if (!audit) {
     return (
-      <div className="space-y-4">
+      <div className="space-y-5">
         {switcher}
-        <EmptyState
-          icon={ShieldCheck}
-          title="Аудит для этого варианта не запускался"
-          hint="Отчёт не был сохранён — вероятно, генерация ещё идёт или завершилась с ошибкой. Другие варианты могут быть проверены."
-          action={<Button icon={Layers} onClick={() => setTab("variants")}>К вариантам</Button>}
-        />
+        <EmptyState icon={ShieldCheck} title="Для этого варианта проверки нет" hint="Отчёт не сохранился — вероятно, сборка ещё идёт или прервалась." />
       </div>
     );
   }
 
-  const selectedCount = selected.size;
-  const headlineOf = (slide: number) => (slide > 0 ? activeVariant?.outline?.slides[slide - 1]?.headline ?? null : null);
+  const outline = activeVariant?.outline ?? null;
+  const headlineOf = (slide: number) => (slide > 0 ? outline?.slides[slide - 1]?.headline ?? null : null);
+  const slideOf = (outlineId: string) => {
+    const i = outline?.slides.findIndex((s) => s.id === outlineId) ?? -1;
+    return i >= 0 ? i + 1 : null;
+  };
+  const templateSlide = (pid: string) => (manifest?.template_id === generation.template_id ? manifest.patterns.find((p) => p.id === pid)?.source_slide ?? null : null);
+  const picked = selected.size;
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        {switcher}
-        <div className="flex items-center gap-2">
-          <Button icon={Wand2} disabled={busy || fixableTotal === 0} loading={submitting} onClick={() => void runFixes({ all_deterministic: true })} title="Применить все детерминированные автоисправления">
-            Исправить все автоматические
-          </Button>
-          <Button variant="primary" icon={SquareCheckBig} disabled={busy || selectedCount === 0} loading={submitting} onClick={() => void runFixes({ issue_ids: [...selected] })}>
-            Исправить выбранные ({selectedCount})
-          </Button>
-        </div>
-      </div>
-
-      <AuditSummaryCard audit={audit} />
-
-      <AppliedFixes fixes={audit.applied_fixes} iterations={audit.iterations} />
-
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="flex items-center gap-1.5 text-xs font-medium text-zinc-500">
-          <Filter className="h-3.5 w-3.5" aria-hidden />
-          Фильтр
-        </span>
-        {SEVERITIES.map((s) => {
-          const on = filter.severities.has(s);
-          return (
-            <button
-              key={s}
-              type="button"
-              aria-pressed={on}
-              onClick={() => toggleSeverity(s)}
-              className={cn(
-                "inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full border px-3 text-xs font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/30",
-                on ? CHIP_ON[s] : "border-transparent bg-zinc-100 text-zinc-400 hover:text-zinc-700",
+    <div className="space-y-5">
+      {switcher}
+      <AuditSummaryCard
+        audit={audit}
+        actions={
+          (fixableTotal > 0 || picked > 0) && (
+            <>
+              {picked > 0 && (
+                <Button variant="primary" loading={submitting} disabled={busy} onClick={() => void runFixes({ issue_ids: [...selected] })} className="animate-fade">
+                  Исправить отмеченные ({picked})
+                </Button>
               )}
-            >
-              {SEVERITY_LABEL[s]}
-              <span className="tabular-nums opacity-70">{totalCounts[s]}</span>
-            </button>
-          );
-        })}
-        <button
-          type="button"
-          aria-pressed={filter.fixableOnly}
-          onClick={() => setFilter((f) => ({ ...f, fixableOnly: !f.fixableOnly }))}
-          className={cn(
-            "inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full border px-3 text-xs font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/30",
-            filter.fixableOnly ? "border-transparent bg-accent-50 text-accent-700" : "border-transparent bg-zinc-100 text-zinc-500 hover:text-zinc-800",
-          )}
-        >
-          <Wand2 className="h-3.5 w-3.5" aria-hidden />
-          Только исправимые
-          <span className="tabular-nums opacity-70">{fixableTotal}</span>
-        </button>
-        {filtered && (
-          <Button size="sm" variant="ghost" icon={X} onClick={() => setFilter(DEFAULT_FILTER)}>
-            Сбросить
-          </Button>
-        )}
-        <span className="ml-auto text-xs text-zinc-500">
-          {filtered ? `${visible.length} из ${plural(allIssues.length, "замечания", "замечаний", "замечаний")}` : plural(allIssues.length, "замечание", "замечания", "замечаний")}
-          {selectedCount > 0 && ` · выбрано ${selectedCount}`}
-        </span>
-      </div>
+              {fixableTotal > 0 && (
+                <Button variant={picked > 0 ? "secondary" : "primary"} loading={submitting && picked === 0} disabled={busy} onClick={() => void runFixes({ all_deterministic: true })}>
+                  Исправить всё автоматически
+                </Button>
+              )}
+            </>
+          )
+        }
+      />
 
       {allIssues.length === 0 ? (
-        <EmptyState icon={CheckCircle2} title="Замечаний нет" hint="Все проверки пройдены — вариант готов к экспорту." action={<Button icon={Layers} onClick={() => setTab("variants")}>Посмотреть слайды</Button>} />
-      ) : groups.length === 0 ? (
-        <EmptyState compact icon={Filter} title="Под фильтр ничего не попало" hint="Включите другие уровни важности или снимите «только исправимые»." action={<Button size="sm" onClick={() => setFilter(DEFAULT_FILTER)}>Сбросить фильтр</Button>} />
+        <EmptyState icon={CheckCircle2} title="Замечаний нет" hint="Все проверки пройдены — вариант готов к показу." />
       ) : (
-        <div className="space-y-2.5">
-          {groups.map((g) => (
-            <SlideIssueGroup
-              key={g.slide}
-              group={g}
-              headline={headlineOf(g.slide)}
-              open={openSlides.has(g.slide)}
-              current={g.slide > 0 && g.slide === selectedSlide}
-              selected={selected}
-              disabled={busy}
-              onToggle={() =>
-                setOpenSlides((cur) => {
-                  const next = new Set(cur);
-                  if (next.has(g.slide)) next.delete(g.slide);
-                  else next.add(g.slide);
-                  return next;
-                })
-              }
-              onPick={() => g.slide > 0 && setSelectedSlide(g.slide)}
-              onShow={() => {
-                setSelectedSlide(g.slide);
-                setTab("variants");
-              }}
-              onSelect={select}
-              onSelectGroup={(on) =>
-                setSelected((cur) => {
-                  const next = new Set(cur);
-                  g.issues.filter(isFixable).forEach((i) => (on ? next.add(i.id) : next.delete(i.id)));
-                  return next;
-                })
-              }
-            />
-          ))}
-        </div>
+        <>
+          <div className="flex flex-wrap items-center gap-1.5" role="radiogroup" aria-label="Какие замечания показать">
+            {FILTERS.filter((f) => f.key === "all" || counts[f.key] > 0).map((f) => (
+              <button
+                key={f.key}
+                type="button"
+                role="radio"
+                aria-checked={filter === f.key}
+                onClick={() => setFilter(f.key)}
+                className={cn(
+                  "inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-full px-3.5 text-[13px] font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/30",
+                  filter === f.key ? "bg-zinc-900 text-white" : "bg-white text-zinc-700 shadow-card hover:bg-zinc-50",
+                )}
+              >
+                {f.label}
+                <span className={cn("tabular-nums", filter === f.key ? "text-white/60" : "text-zinc-400")}>{counts[f.key]}</span>
+              </button>
+            ))}
+            {fixableTotal > 0 && picked === 0 && <span className="ml-auto text-xs text-zinc-500">Отметьте исправимые замечания галочкой</span>}
+          </div>
+          <div className="space-y-3">
+            {groups.map((g) => (
+              <SlideIssueGroup
+                key={g.slide}
+                group={g}
+                headline={headlineOf(g.slide)}
+                current={g.slide > 0 && g.slide === selectedSlide}
+                selected={selected}
+                disabled={busy}
+                onSelect={select}
+                onShow={() => {
+                  setSelectedSlide(g.slide);
+                  setDetail(null);
+                }}
+              />
+            ))}
+          </div>
+          <p className="text-center text-xs text-zinc-400">
+            {plural(allIssues.length, "замечание", "замечания", "замечаний")} · оценка = 100 − 10 за ошибку − 3 за предупреждение; заметки её не снижают
+          </p>
+        </>
       )}
 
+      <AppliedFixes fixes={audit.applied_fixes} slideOf={slideOf} templateSlide={templateSlide} />
       <ChecksReference />
     </div>
   );

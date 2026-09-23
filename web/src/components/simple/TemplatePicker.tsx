@@ -28,7 +28,7 @@ function Cover({ t, selected, onPick }: { t: TemplateListItem; selected: boolean
           <span className="flex h-full items-center justify-center text-zinc-400"><ImageOff className="h-6 w-6" aria-hidden /></span>
         )}
         {selected && (
-          <span className="absolute right-2 top-2 flex h-7 w-7 animate-pop items-center justify-center rounded-full bg-accent text-white shadow-glow" aria-hidden>
+          <span className="absolute right-2 top-2 flex h-7 w-7 animate-pop items-center justify-center rounded-full bg-accent text-white ring-2 ring-white" aria-hidden>
             <Check className="h-4 w-4" strokeWidth={3} />
           </span>
         )}
@@ -84,8 +84,11 @@ export function TemplatePicker() {
       {analyzing && activeJob ? (
         <>
           <Loader2 className="h-7 w-7 animate-spin text-accent" aria-hidden />
-          <span className="text-[13px] font-semibold text-zinc-900">Разбираю шаблон… {Math.round(activeJob.progress * 100)}%</span>
-          <span className="line-clamp-2 text-xs text-zinc-500">{activeJob.message}</span>
+          <span className="text-[13px] font-semibold text-zinc-900">Разбираю шаблон</span>
+          <span className="h-1 w-28 overflow-hidden rounded-full bg-zinc-200">
+            <span className="block h-full rounded-full bg-accent transition-[width] duration-500 ease-out" style={{ width: `${Math.max(4, Math.round(activeJob.progress * 100))}%` }} />
+          </span>
+          <span className="line-clamp-2 text-xs text-zinc-500">{activeJob.message.replace(/^Шаблон:\s*/, "")}</span>
         </>
       ) : (
         <>

@@ -1,6 +1,7 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
+import { usePresence } from "../../lib/motion";
 import { cn } from "../../lib/utils";
 
 export interface ModalProps {
@@ -25,6 +26,11 @@ export function Modal({ open, onClose, title, description, footer, size = "md", 
   const panelRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
+  const { mounted, leaving } = usePresence(open, 150);
+  // while the exit animation plays the caller may already have dropped the content: show the last one
+  const last = useRef({ title, description, footer, children });
+  if (open) last.current = { title, description, footer, children };
+  const view = open ? { title, description, footer, children } : last.current;
 
   useEffect(() => {
     if (!open) return;
@@ -46,23 +52,23 @@ export function Modal({ open, onClose, title, description, footer, size = "md", 
     };
   }, [open, dismissible]);
 
-  if (!open) return null;
+  if (!mounted) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-[90] flex items-center justify-center p-8">
-      <div className="absolute inset-0 bg-ink/50 backdrop-blur-[3px] animate-fade" onClick={dismissible ? onClose : undefined} aria-hidden />
+    <div className={cn("fixed inset-0 z-[90] flex items-center justify-center p-8", leaving && "pointer-events-none")}>
+      <div className={cn("absolute inset-0 bg-ink/50 backdrop-blur-[3px]", leaving ? "animate-fade-out" : "animate-fade")} onClick={dismissible ? onClose : undefined} aria-hidden />
       <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         tabIndex={-1}
-        className={cn("relative flex max-h-full w-full flex-col overflow-hidden rounded-3xl bg-white shadow-pop outline-none animate-fade-in", WIDTH[size], className)}
+        className={cn("relative flex max-h-full w-full flex-col overflow-hidden rounded-3xl bg-white shadow-pop outline-none", leaving ? "animate-zoom-out" : "animate-zoom-in", WIDTH[size], className)}
       >
-        {(title || dismissible) && (
+        {(view.title || dismissible) && (
           <header className="flex shrink-0 items-start gap-4 px-7 pb-3 pt-6">
             <div className="min-w-0 flex-1">
-              {title && <h2 className="text-xl font-semibold leading-7 text-zinc-900">{title}</h2>}
-              {description && <p className="mt-1 text-sm leading-5 text-zinc-500">{description}</p>}
+              {view.title && <h2 className="text-xl font-semibold leading-7 text-zinc-900">{view.title}</h2>}
+              {view.description && <p className="mt-1 text-sm leading-5 text-zinc-500">{view.description}</p>}
             </div>
             {dismissible && (
               <button
@@ -76,8 +82,8 @@ export function Modal({ open, onClose, title, description, footer, size = "md", 
             )}
           </header>
         )}
-        <div className={cn("scroll-thin min-h-0 flex-1 overflow-y-auto", !flush && "px-7 pb-6 pt-2")}>{children}</div>
-        {footer && <footer className="flex shrink-0 items-center justify-end gap-2 border-t border-zinc-100 px-7 py-4">{footer}</footer>}
+        <div className={cn("scroll-thin min-h-0 flex-1 overflow-y-auto", !flush && "px-7 pb-6 pt-2")}>{view.children}</div>
+        {view.footer && <footer className="flex shrink-0 items-center justify-end gap-2 border-t border-zinc-100 px-7 py-4">{view.footer}</footer>}
       </div>
     </div>,
     document.body,

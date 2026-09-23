@@ -2,15 +2,15 @@
 import { plural } from "./utils";
 
 const TEMPLATE_STEPS: Array<[RegExp, (m: RegExpMatchArray) => string]> = [
-  [/^loaded cached manifest$/, () => "разбор шаблона взят из кэша"],
+  [/^loaded cached manifest$/, () => "этот шаблон уже разобран раньше"],
   [/^opened package: (\d+) slides$/, (m) => `открыт файл: ${plural(Number(m[1]), "слайд", "слайда", "слайдов")}`],
-  [/^extracted shapes$/, () => "фигуры и тексты извлечены"],
-  [/^extracted (\d+) assets$/, (m) => `извлечено ассетов: ${m[1]}`],
+  [/^extracted shapes$/, () => "фигуры и тексты прочитаны"],
+  [/^extracted (\d+) assets$/, (m) => `найдено картинок и иконок: ${m[1]}`],
   [/^rendered slides$/, () => "слайды отрисованы"],
-  [/^built tokens$/, () => "палитра, шрифты и сетка собраны"],
-  [/^classified slides$/, () => "слайды классифицированы"],
-  [/^assembled (\d+) patterns$/, (m) => `собрано ${plural(Number(m[1]), "паттерн", "паттерна", "паттернов")}`],
-  [/^derived components and rules$/, () => "компоненты и правила выведены"],
+  [/^built tokens$/, () => "цвета, шрифты и сетка собраны"],
+  [/^classified slides$/, () => "типы слайдов определены"],
+  [/^assembled (\d+) patterns$/, (m) => `найдено ${plural(Number(m[1]), "макет", "макета", "макетов")} слайдов`],
+  [/^derived components and rules$/, () => "правила оформления собраны"],
   [/^done$/, () => "готово"],
 ];
 
@@ -28,18 +28,18 @@ export function humanizeJobMessage(message: string, titleOf: (strategy: string) 
   if (m) return `Шаблон: ${templateStep(m[1])}`;
   m = msg.match(/^plan: (\d+) variants?$/);
   if (m) return `Планирую ${plural(Number(m[1]), "вариант", "варианта", "вариантов")}`;
-  if (/^export: /.test(msg)) return "Экспорт: PPTX, PDF, HTML и превью слайдов";
+  if (/^export: /.test(msg)) return "Сохраняю файлы: PowerPoint, PDF и веб-версию";
   m = msg.match(/^([a-z_]+): (.+)$/);
   if (m) {
     const who = titleOf(m[1]);
     const what = m[2];
     let r = what.match(/^planned (\d+) slides, rendering$/);
-    if (r) return `${who}: план готов, ${plural(Number(r[1]), "слайд", "слайда", "слайдов")} — вёрстка`;
+    if (r) return `${who}: план готов, ${plural(Number(r[1]), "слайд", "слайда", "слайдов")}`;
     r = what.match(/^rendered slide (\d+)\/(\d+)$/);
     if (r) return `${who}: свёрстан слайд ${r[1]} из ${r[2]}`;
-    if (what === "audit") return `${who}: аудит`;
+    if (what === "audit") return `${who}: проверка качества`;
     r = what.match(/^autofix \((\d+) errors?\)$/);
-    if (r) return `${who}: автофикс${Number(r[1]) ? `, ошибок ${r[1]}` : ""}`;
+    if (r) return `${who}: исправляю замечания${Number(r[1]) ? ` (${plural(Number(r[1]), "ошибка", "ошибки", "ошибок")})` : ""}`;
     r = what.match(/^done in ([\d.]+)s$/);
     if (r) return `${who}: готово за ${r[1].replace(".", ",")} с`;
     return `${who}: ${templateStep(what)}`;

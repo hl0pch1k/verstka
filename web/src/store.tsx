@@ -11,8 +11,9 @@ import type {
   ChatMessage, DetailKey, GenerateRequest, Generation, GenerationMeta, Health, Job, JobKind, JobStatus, Screen, StrategyInfo, TabKey, TemplateListItem, TemplateManifest, Variant,
 } from "./types";
 
-export interface ActiveJob { id: string; label: string; progress: number; message: string; status: JobStatus; kind: JobKind; startedAt: number }
-export interface RunJobOptions { kind?: JobKind; onDone?: (job: Job) => void; onFailed?: (job: Job) => void }
+export interface ActiveJob { id: string; label: string; progress: number; message: string; status: JobStatus; kind: JobKind; startedAt: number; items?: string[] }
+/** `items`: what the job works on (the strategies of a generation) — the build screen shows one card per item. */
+export interface RunJobOptions { kind?: JobKind; items?: string[]; onDone?: (job: Job) => void; onFailed?: (job: Job) => void }
 
 export interface AppState {
   health: Health | null; healthError: boolean;
@@ -74,7 +75,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return setDetail(null);
     }
     setScreen("result");
-    setDetail(t === "plan" ? "plan" : t === "audit" ? "quality" : t === "run" ? "tech" : null);
+    setDetail(t === "plan" ? "plan" : t === "why" ? "why" : t === "audit" ? "quality" : t === "export" || t === "run" ? "tech" : null);
   }, []);
   const [agentOpen, setAgentOpen] = useState(false); // the helper starts closed: the page itself must be self-explanatory
   const [activeJob, setActiveJob] = useState<ActiveJob | null>(null);
@@ -131,7 +132,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const current = latest.current.generation?.id; // a loaded generation that was deleted meanwhile
       if (current && !list.some((g) => g.id === current)) clearGeneration();
     } catch (e) {
-      report(e, "Не удалось обновить историю генераций");
+      report(e, "Не удалось обновить список презентаций");
     }
   }, [report, clearGeneration]);
 
@@ -161,7 +162,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } catch (e) {
       if (seq !== genSeq.current) return null;
       if (e instanceof ApiError && e.status === 404) clearGeneration();
-      if (!quiet) report(e, "Не удалось загрузить генерацию");
+      if (!quiet) report(e, "Не удалось открыть презентацию");
       return null;
     } finally {
       if (seq === genSeq.current) setGenerationLoading(false);
@@ -191,7 +192,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       patch(p);
       window.setTimeout(() => setActiveJob((cur) => (cur && cur.id === jobId ? null : cur)), 1500);
     };
-    setActiveJob({ id: jobId, label, progress: 0, message: "В очереди…", status: "queued", kind: opts?.kind ?? "other", startedAt: Date.now() });
+    setActiveJob({ id: jobId, label, progress: 0, message: "В очереди…", status: "queued", kind: opts?.kind ?? "other", startedAt: Date.now(), items: opts?.items });
     const stop = trackJob(jobId, {
       onEvent: (ev) => {
         if (ev.status === "done" || ev.status === "failed") return; // settled below, once the full job record is fetched
