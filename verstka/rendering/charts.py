@@ -10,7 +10,7 @@ from pptx.enum.chart import XL_CHART_TYPE, XL_LABEL_POSITION, XL_LEGEND_POSITION
 from pptx.slide import Slide
 from pptx.util import Emu, Pt
 
-from verstka.schemas.common import Bbox
+from verstka.schemas.common import Bbox, relative_luminance
 from verstka.schemas.outline import ChartSpec, DeckOutline, Series
 from verstka.schemas.template import ChartStyleSpec, Typography
 
@@ -150,7 +150,9 @@ def add_chart(slide: Slide, bbox: Bbox, spec: ChartSpec, outline: DeckOutline, s
                 ser.smooth = False
         if spec.highlight_index is not None and not multi and spec.type in ("column", "bar"):
             ser = plot.series[0]
-            muted = neutral_hex or _lighten(colors[0])
+            # the other bars step back: a mid grey of the template, never its black (LCT and Education name black
+            # «neutral») — a heavy black next to the accent reads as the point of the chart
+            muted = neutral_hex if neutral_hex and 0.12 <= relative_luminance(neutral_hex) <= 0.75 else _lighten(colors[0])
             for j, pt in enumerate(ser.points):
                 pt.format.fill.solid()
                 pt.format.fill.fore_color.rgb = _rgb(colors[0] if j == spec.highlight_index else muted)

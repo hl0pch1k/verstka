@@ -11,6 +11,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
+from verstka.ru import clip_words
 from verstka.schemas.outline import Series, TableData
 
 # ------------------------------------------------------------------ text primitives
@@ -72,7 +73,7 @@ def short(text: str, max_words: int) -> str:
     ws = text.split()
     if len(ws) <= max_words:
         return strip_end(text)
-    cut = " ".join(ws[:max_words])
+    cut = clip_words(text, max_words)
     m = list(re.finditer(r"[,;:—–]\s", cut))
     if m and m[-1].start() > len(cut) * 0.5:
         cut = cut[: m[-1].start()]

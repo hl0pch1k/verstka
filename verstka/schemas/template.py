@@ -41,7 +41,15 @@ class Typography(BaseModel):
     scale: list[TypeStep] = Field(default_factory=list)
     sizes_used: list[float] = Field(default_factory=list)  # every size the template uses (audit tolerance ±0.75 pt)
     left_align_share: float = 1.0
-    line_spacing: float = 1.2
+    line_spacing: float = 1.2  # the template's paragraph spacing (spcPct: 1.0 single, 0.9 = 90%); 1.2 = not specified
+
+    @property
+    def line_height(self) -> float:
+        """Height of one line in em for fitting text: a single-spaced line of type is ~1.2 em (ascent + descent), so
+        a 90% template sets its lines 1.08 em apart, not 0.9 em (fitting with 0.9 let three lines of a WorkSpace
+        heading «fit» a two-line box). The analysis default 1.2 means «not specified», i.e. single spacing."""
+        ls = self.line_spacing or 1.0
+        return 1.2 if abs(ls - 1.2) < 1e-6 else round(ls * 1.2, 3)
 
     def size_for(self, role: str, default: float = 18.0) -> float:
         for step in self.scale:

@@ -393,6 +393,10 @@ def _merge_into_previous(slides: list[OutlineSlide], victim: OutlineSlide) -> bo
     return False
 
 
+def _norm_words(text: str) -> list[str]:
+    return re.sub(r"[^\w%]+", " ", text.lower()).split()
+
+
 def validate_outline(
     outline: DeckOutline,
     manifest: Optional[TemplateManifest],
@@ -425,6 +429,10 @@ def validate_outline(
         if c.chart is not None and len(c.chart.series_ids) > MAX_SERIES:
             c.chart.series_ids = c.chart.series_ids[:MAX_SERIES]
         s.headline = condense_text(s.headline, 14, skills, providers, outline.language)
+        # a bullet that only repeats the heading (the closing statement of a section is often both) leaves the body
+        head = _norm_words(s.headline)
+        if len(head) >= 5:  # a statement, not a topic word («Контекст» may well open a bullet)
+            c.bullets = [b for b in c.bullets if not (_norm_words(b)[: len(head)] == head and len(_norm_words(b)) - len(head) <= 5)]
         if s.kind in (PatternKind.stat_row, PatternKind.big_number) and not c.numbers:
             s.kind = PatternKind.bullets
         if s.kind == PatternKind.chart and c.chart is None:

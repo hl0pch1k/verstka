@@ -248,6 +248,10 @@ def _textbox(slide: Slide, box: Bbox, paragraphs: list[ParagraphSpec], *, size: 
     tf.margin_left = tf.margin_right = Emu(45720)
     tf.margin_top = tf.margin_bottom = Emu(22860)
     tf.vertical_anchor = {"t": MSO_ANCHOR.TOP, "ctr": MSO_ANCHOR.MIDDLE, "b": MSO_ANCHOR.BOTTOM}[anchor]
+    # a size asked as a multiple of a role («display × 0.8») lands on the next size the template really uses
+    on_scale = [s for s in (scale or []) if s <= size + 0.05]
+    if on_scale:
+        size = max(on_scale)
     target = size
     if fit:
         res = fit_size([p.text for p in paragraphs], box, font, size, bold, scale or [], insets_emu=(45720, 22860, 45720, 22860), line_spacing=line_spacing, min_ratio=0.55)
@@ -358,7 +362,8 @@ def render_synth(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
         if ghex:
             pal.bg = ghex
             pal.text = pal.text2 = _readable(ghex, [pal.text, t.color_for("text.primary")])
-    scale = [s.size_pt for s in typo.scale]
+    # every size the template uses (not only the role scale): text fits and grows along the template's own steps
+    scale = sorted({s.size_pt for s in typo.scale} | {float(x) for x in (typo.sizes_used or []) if x >= 8})
     font = typo.primary_family
     h1, title_color, title_bold, title_font = _title_style(manifest, family, pal)
     body = typo.size_for("body", 14.0)
@@ -394,7 +399,7 @@ def render_synth(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
             if w_clear < box.w:  # never under the logos: the heading wraps instead
                 box = Bbox(x=box.x, y=box.y, w=w_clear, h=box.h)
                 title_ph.width = Emu(w_clear)
-        res = fit_size([oslide.headline], box, title_font, h1, title_bold, scale, insets_emu=insets, line_spacing=typo.line_spacing)
+        res = fit_size([oslide.headline], box, title_font, h1, title_bold, scale, insets_emu=insets, line_spacing=typo.line_height)
         fill_text(title_ph._element, [ParagraphSpec(oslide.headline)], size_pt=res.size_pt)
         text_h = int(res.height_pt * EMU_PER_PT) + insets[1] + insets[3]
         if text_h > box.h or title_ph.top is None:
@@ -410,7 +415,7 @@ def render_synth(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
         # title / section / thanks on a sample of that kind: its own title box, the subtitle right under it
         box = Bbox(x=int(title_ph.left), y=int(title_ph.top), w=int(title_ph.width), h=int(title_ph.height))
         insets = (91440, 45720, 91440, 45720)
-        res = fit_size([oslide.headline], box, title_font, h1, title_bold, scale, insets_emu=insets, line_spacing=typo.line_spacing, min_ratio=0.6)
+        res = fit_size([oslide.headline], box, title_font, h1, title_bold, scale, insets_emu=insets, line_spacing=typo.line_height, min_ratio=0.6)
         fill_text(title_ph._element, [ParagraphSpec(oslide.headline)], size_pt=res.size_pt)
         text_h = int(res.height_pt * EMU_PER_PT) + insets[1] + insets[3]
         if text_h > box.h:
@@ -445,7 +450,7 @@ def render_synth(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
         paras = [ParagraphSpec(b, bullet=True) for b in c.bullets] or [ParagraphSpec(p, bullet=False) for p in c.paragraphs] or [ParagraphSpec(i.title, bullet=True) for i in _items(oslide)]
         if oslide.subtitle:
             paras = [ParagraphSpec(oslide.subtitle, bullet=False, bold=True)] + paras
-        _textbox(slide, Bbox(x=sx, y=top, w=int(sw * 0.9), h=avail_h), paras, size=body, color=pal.text, font=font, scale=scale, line_spacing=typo.line_spacing)
+        _textbox(slide, Bbox(x=sx, y=top, w=int(sw * 0.9), h=avail_h), paras, size=body, color=pal.text, font=font, scale=scale, line_spacing=typo.line_height)
         return slide, warnings
 
     if comp == "image_text":
@@ -486,7 +491,7 @@ def render_synth(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
             _textbox(slide, Bbox(x=box.x + inset, y=y_head, w=cw - 2 * inset, h=head_h), [ParagraphSpec(item.title)], size=h2 if comp != "agenda" else h2, color=pal.accent if comp in ("cards", "comparison") else pal.text, font=font, bold=True, scale=scale, anchor="t")
             body_paras = [ParagraphSpec(b, bullet=True) for b in item.bullets] or ([ParagraphSpec(item.text)] if item.text else [])
             if body_paras:
-                _textbox(slide, Bbox(x=box.x + inset, y=y_head + head_h, w=cw - 2 * inset, h=box.y2 - (y_head + head_h) - inset), body_paras, size=body, color=pal.text, font=font, scale=scale, line_spacing=typo.line_spacing)
+                _textbox(slide, Bbox(x=box.x + inset, y=y_head + head_h, w=cw - 2 * inset, h=box.y2 - (y_head + head_h) - inset), body_paras, size=body, color=pal.text, font=font, scale=scale, line_spacing=typo.line_height)
         return slide, warnings
 
     if comp in ("stat_row", "big_number"):

@@ -65,6 +65,9 @@ class _SlideCtx:
         self.next_id = builder.next_shape_id(slide)
         self.typo = manifest.tokens.typography
         self.scale = [s.size_pt for s in self.typo.scale]
+        # text grows along every size the template really uses (VK Tech: 12 → 13.22, 14, 15, 16), not only the role
+        # scale, whose steps can be far apart (12 → 24)
+        self.grow_scale = sorted(set(self.scale) | {float(x) for x in (self.typo.sizes_used or []) if x >= 8})
         self.W, self.H = manifest.slide_size.w, manifest.slide_size.h
         self.role_of = {s.shape_id: s.role for s in pattern.slots}
         self.slot_of = {s.shape_id: s for s in pattern.slots}
@@ -104,10 +107,10 @@ class _SlideCtx:
         if box and box[2] > 0 and box[3] > 0 and slot is not None and (widen or slot.role in (SlotRole.title, SlotRole.subtitle)):
             box = self._widen_on_backing(el, box, [p.text for p in paragraphs], family, size, bold, insets)
         if box and box[2] > 0 and box[3] > 0:
-            res = fit_size([p.text for p in paragraphs], Bbox(x=box[0], y=box[1], w=box[2], h=box[3]), family, size, bold, self.scale, insets_emu=insets, line_spacing=self.typo.line_spacing, min_ratio=min_ratio)
+            res = fit_size([p.text for p in paragraphs], Bbox(x=box[0], y=box[1], w=box[2], h=box[3]), family, size, bold, self.grow_scale, insets_emu=insets, line_spacing=self.typo.line_height, min_ratio=min_ratio)
             target_size = res.size_pt
             if grow_to and res.fits and target_size >= size:
-                target_size = grow_size([p.text for p in paragraphs], Bbox(x=box[0], y=box[1], w=box[2], h=box[3]), family, target_size, bold, self.scale, grow_to, insets_emu=insets, line_spacing=self.typo.line_spacing)
+                target_size = grow_size([p.text for p in paragraphs], Bbox(x=box[0], y=box[1], w=box[2], h=box[3]), family, target_size, bold, self.grow_scale, grow_to, insets_emu=insets, line_spacing=self.typo.line_height)
             if not res.fits:
                 if slot is not None and slot.role == SlotRole.number and len(paragraphs) == 1 and not is_nested(el):
                     # a single figure never wraps well: widen the box instead of clipping
@@ -116,22 +119,27 @@ class _SlideCtx:
                         set_element_pos(el, w=need_w)
                         self.warnings.append(f"widened number slot {slot.id}")
                     elif need_w > box[2]:
-                        shrink = fit_size([p.text for p in paragraphs], Bbox(x=box[0], y=box[1], w=box[2], h=box[3]), family, size, bold, self.scale, insets_emu=insets, line_spacing=self.typo.line_spacing, min_ratio=0.2)
+                        shrink = fit_size([p.text for p in paragraphs], Bbox(x=box[0], y=box[1], w=box[2], h=box[3]), family, size, bold, self.grow_scale, insets_emu=insets, line_spacing=self.typo.line_height, min_ratio=0.2)
                         target_size = shrink.size_pt
                 else:
                     self.warnings.append(f"text may overflow in {slot.id if slot else 'shape'} ({res.lines} lines)")
         if box and box[2] > 0 and box[3] > 0 and any(p.size_pt for p in paragraphs):
             # an emphasised line (a figure) may be larger than the rest only as far as the box height allows
-            ls = self.typo.line_spacing
+            ls = self.typo.line_height
             usable_w = max((box[2] - insets[0] - insets[2]) / EMU_PER_PT, 1.0)
             usable_h = max((box[3] - insets[1] - insets[3]) / EMU_PER_PT, 1.0)
             rest = sum(max(len(wrap_lines(p.text, family, target_size, bold, usable_w)), 1) for p in paragraphs if not p.size_pt) * target_size * ls
             paragraphs = [ParagraphSpec(p.text, bullet=p.bullet, level=p.level, bold=p.bold, size_pt=p.size_pt, color_hex=p.color_hex) for p in paragraphs]
             for p in paragraphs:
                 if p.size_pt and p.size_pt > target_size:
-                    lines = max(len(wrap_lines(p.text, family, p.size_pt, True, usable_w)), 1)
+                    size = p.size_pt
+                    if len(p.text) <= 16:
+                        # a figure is read at a glance: one line («4,6 из 5», not «4,6 из» over «5»)
+                        while size > target_size and text_width_pt(p.text, family, size, True) > usable_w * 0.98:
+                            size = round(size * 0.94, 1)
+                    lines = max(len(wrap_lines(p.text, family, size, True, usable_w)), 1)
                     room = (usable_h - rest) / (ls * lines)
-                    p.size_pt = round(max(target_size, min(p.size_pt, room)), 1)
+                    p.size_pt = _snap_down(max(target_size, min(size, room)), self.grow_scale)
         explicit = size_hint is not None or target_size != slot_size or container
         fill_text(el, paragraphs, size_pt=target_size if explicit else None)
         if container:
@@ -231,11 +239,11 @@ class _SlideCtx:
             grow = max(0, target_x2 - ob.x2)
             width = min(max(width, target_x2 - bx.x), max(bx.w, target_x2 - bx.x))
         height_grow = 0
-        res = fit_size(texts, Bbox(x=bx.x, y=bx.y, w=width, h=bx.h), family, size, bold, self.scale, insets_emu=insets, line_spacing=self.typo.line_spacing, min_ratio=0.8)
+        res = fit_size(texts, Bbox(x=bx.x, y=bx.y, w=width, h=bx.h), family, size, bold, self.grow_scale, insets_emu=insets, line_spacing=self.typo.line_height, min_ratio=0.8)
         if not res.fits:
             # two lines at a size down to 0.7 of the heading's: the label grows by one line, the heading stays legible
-            h2 = int(2 * size * self.typo.line_spacing * EMU_PER_PT) + insets[1] + insets[3]
-            two = fit_size(texts, Bbox(x=bx.x, y=bx.y, w=width, h=h2), family, size, bold, self.scale, insets_emu=insets, line_spacing=self.typo.line_spacing, min_ratio=0.7)
+            h2 = int(2 * size * self.typo.line_height * EMU_PER_PT) + insets[1] + insets[3]
+            two = fit_size(texts, Bbox(x=bx.x, y=bx.y, w=width, h=h2), family, size, bold, self.grow_scale, insets_emu=insets, line_spacing=self.typo.line_height, min_ratio=0.7)
             if two.fits and two.lines <= 2:
                 height_grow = max(0, int(two.height_pt * EMU_PER_PT) + insets[1] + insets[3] - bx.h)
         set_element_pos(el, w=width, h=bx.h + height_grow)
@@ -527,6 +535,40 @@ def _reading_order(entries, under=None):
     return sorted(entries, key=key)
 
 
+def _figure_color(ctx: "_SlideCtx", el: etree._Element, slot: Optional[Slot]) -> Optional[str]:
+    """A figure set large reads as the point of the card: when the card's own text colour is a muted grey (VK Tech
+    captions) or weak on its ground, it takes the first accent of the template that stands out there."""
+    from verstka.schemas.common import contrast_ratio, hex_to_rgb
+
+    b = element_bbox(el)
+    ground = _ground_hex(ctx, Bbox(x=b[0], y=b[1], w=b[2], h=b[3])) if b else None
+    own = slot.style.color_hex if slot is not None and slot.style and slot.style.color_hex else None
+    if own and ground:
+        r, g, bl = hex_to_rgb(own)
+        grey = max(r, g, bl) - min(r, g, bl) < 40 and 70 < (r + g + bl) / 3 < 200
+        if not grey and contrast_ratio(own, ground) >= 4.5:
+            return None  # the template's own colour for such text is strong enough
+    for a in ctx.manifest.tokens.accents()[:3]:
+        if ground is None or contrast_ratio(a, ground) >= 3.0:
+            return a
+    return None
+
+
+def _figure_size(ctx: "_SlideCtx", base: float) -> float:
+    """A figure leading a card is set well above its label — about 2.4× (12 pt → 29 pt), never past the template's
+    display size; the box it lands in may still cut it down to fit one line."""
+    return min(max(base * 2.4, base + 12), ctx.typo.size_for("display", base * 3))
+
+
+def _holds_line(el: etree._Element, size_pt: float) -> bool:
+    """Whether a text box is tall enough for one line set at `size_pt`."""
+    b = element_bbox(el)
+    if not b or b[3] <= 0:
+        return False
+    ins = _body_insets(el)
+    return (b[3] - ins[1] - ins[3]) / EMU_PER_PT >= size_pt * 1.05
+
+
 def _fill_one_cell(ctx: _SlideCtx, entries, chunk: list[SlideItem], cell_idx: int, *, include_number: bool, use_ordinals: bool, per_cell: int) -> None:
     """Write one item (or `per_cell` consecutive figures) into the text slots of a cell."""
     text = _reading_order([x for x in entries if x[2] in CELL_TEXT_ROLES and etree.QName(x[0]).localname == "sp"])
@@ -581,7 +623,7 @@ def _fill_one_cell(ctx: _SlideCtx, entries, chunk: list[SlideItem], cell_idx: in
         paras = _item_single_paragraphs(item, include_number=include_number)
         if item.number and include_number and paras and paras[0].text == item.number:
             base = s.style.size_pt if s is not None and s.style.size_pt else ctx.typo.size_for("body", 14.0)
-            paras[0] = ParagraphSpec(item.number, bullet=False, bold=True, size_pt=min(max(base * 1.7, base + 8), ctx.typo.size_for("h1", base * 2.4)))
+            paras[0] = ParagraphSpec(item.number, bullet=False, bold=True, size_pt=_figure_size(ctx, base))
         ctx.fill_el(e, s, paras)
         return
     if item.number and not include_number:
@@ -594,9 +636,10 @@ def _fill_one_cell(ctx: _SlideCtx, entries, chunk: list[SlideItem], cell_idx: in
         else:
             # no figure slot in the card: the figure leads it, set a few steps above the card's text
             host = titles[0][1] if titles else (bodies[0][1] if bodies else None)
+            host_el = titles[0][0] if titles else (bodies[0][0] if bodies else None)
             base = (host.style.size_pt if host is not None and host.style.size_pt else ctx.typo.size_for("body", 14.0))
-            big = min(max(base * 1.7, base + 8), ctx.typo.size_for("h1", base * 2.4))
-            head = ParagraphSpec(item.number, bullet=False, bold=True, size_pt=big)
+            big = _figure_size(ctx, base)
+            head = ParagraphSpec(item.number, bullet=False, bold=True, size_pt=big, color_hex=_figure_color(ctx, host_el, host) if host_el is not None else None)
         title = item.title if item.title and item.title != item.number else ""
     else:
         if nums:
@@ -605,10 +648,20 @@ def _fill_one_cell(ctx: _SlideCtx, entries, chunk: list[SlideItem], cell_idx: in
     body_paras = _item_body_paragraphs(item)
     body_slots = _reading_order(labels + bodies, under=titles[0][0] if titles else None)
     if head is not None:
-        if titles:
+        if titles and (_holds_line(titles[0][0], head.size_pt or 0) or not body_slots):
             write(titles, [head])
             body = ([ParagraphSpec(title, bullet=False, bold=True)] if title else []) + body_paras
         else:
+            # the card's title line is too low for a figure (VK Tech cards: an 11 pt caption over a tall text box):
+            # the figure leads the text box at its size and the caption line leaves the card
+            for e, _, _ in titles:
+                if not is_nested(e) and e.getparent() is not None:
+                    ctx.remove_el(e)
+                else:
+                    clear_text(e)
+            titles = []
+            if body_slots:
+                head.color_hex = _figure_color(ctx, body_slots[0][0], body_slots[0][1])
             body = [head] + ([ParagraphSpec(title, bullet=False, bold=True)] if title else []) + body_paras
     elif titles and title:
         if not body_paras:
@@ -748,9 +801,12 @@ def _fill_cells(ctx: _SlideCtx, items: list[SlideItem], use_ordinals: bool = Tru
                         cell_titles.append((e, slot))
                 elif role in _BODY_ROLES or role == SlotRole.number_label:
                     cell_bodies.append((e, slot))
+                    if item is not None and item.number and shape_text(e).startswith(item.number):
+                        cell_heads.append(e)  # the figure leads the text box: one size with the other figures
     # one size for the same role in every card: the smallest that fits all of them, grown along the scale when all have room
     _harmonize(ctx, cell_bodies, cap=_text_cap(ctx))
-    _harmonize(ctx, cell_titles, cap=None)
+    # thesis cards (a heading and nothing under it) are read like running text: they may grow the same way
+    _harmonize(ctx, cell_titles, cap=None if cell_bodies else _text_cap(ctx))
     _harmonize(ctx, cell_numbers, cap=None, min_ratio=0.35)
     _harmonize_first_lines(cell_heads)
     if numeric_items and not include_number:
@@ -763,9 +819,12 @@ def _fill_cells(ctx: _SlideCtx, items: list[SlideItem], use_ordinals: bool = Tru
 
 
 def _text_cap(ctx: _SlideCtx) -> float:
-    """Running text may grow up to ~1.4× the body size of the template (never into heading sizes)."""
+    """How far running text may grow when it has room: to a comfortable reading size on a slide (16 pt, or 1.4× the
+    template's body when that is larger), always clearly below the slide heading. VK Tech's body is 9 pt: three
+    bullets in a panel two thirds of the slide high at 9–12 pt read as a mistake."""
     body = ctx.typo.size_for("body", 14.0)
-    return min(ctx.typo.size_for("h2", body * 1.4), body * 1.4)
+    h1 = ctx.typo.size_for("h1", body * 2)
+    return max(body, min(max(body * 1.4, 16.0), h1 * 0.8))
 
 
 def _harmonize(ctx: _SlideCtx, pairs: list[tuple[etree._Element, Optional[Slot]]], cap: Optional[float], min_ratio: float = 0.6) -> None:
@@ -783,18 +842,25 @@ def _harmonize(ctx: _SlideCtx, pairs: list[tuple[etree._Element, Optional[Slot]]
         bold = bool(style and style.bold)
         box = Bbox(x=b[0], y=b[1], w=b[2], h=b[3])
         ins = _body_insets(e)
-        res = fit_size(texts, box, family, base, bold, ctx.scale, insets_emu=ins, line_spacing=ctx.typo.line_spacing, min_ratio=min_ratio)
+        res = fit_size(texts, box, family, base, bold, ctx.grow_scale, insets_emu=ins, line_spacing=ctx.typo.line_height, min_ratio=min_ratio)
         size = res.size_pt
         if cap is not None and res.fits:
-            size = grow_size(texts, box, family, size, bold, ctx.scale, cap, insets_emu=ins, line_spacing=ctx.typo.line_spacing)
+            size = grow_size(texts, box, family, size, bold, ctx.grow_scale, cap, insets_emu=ins, line_spacing=ctx.typo.line_height)
         sizes.append(size)
     if sizes:
         common = min(sizes)
         for e, _ in pairs:
-            _scale_text(e, common)
+            _scale_text(e, common, ctx.grow_scale)
 
 
-def _scale_text(e: etree._Element, size: float) -> None:
+def _snap_down(size: float, scale: list[float]) -> float:
+    """The largest size the template uses that is not above `size` (an emphasised figure stays on the template's
+    scale: 43.2 pt → 40 pt), or `size` itself below the scale."""
+    below = [s for s in scale if s <= size + 0.05]
+    return max(below) if below else round(size, 1)
+
+
+def _scale_text(e: etree._Element, size: float, snap: Optional[list[float]] = None) -> None:
     """Set the running text of a shape to `size`; emphasised lines (a figure set larger) keep their proportion."""
     runs = [r for r in e.iter(q("a:rPr")) if r.get("sz")]
     if not runs:
@@ -802,10 +868,24 @@ def _scale_text(e: etree._Element, size: float) -> None:
         return
     from collections import Counter
 
-    modal = Counter(int(r.get("sz")) for r in runs).most_common(1)[0][0]
+    # the running text is the size that carries the most characters — a figure of four characters over a label of
+    # thirty is the emphasis, not the text (counting runs would pick the figure and flatten it to the label size)
+    chars: Counter = Counter()
+    for r in e.iter(q("a:r")):
+        rpr, t = r.find(q("a:rPr")), r.find(q("a:t"))
+        if rpr is not None and rpr.get("sz"):
+            chars[int(rpr.get("sz"))] += len(t.text or "") if t is not None else 0
+    modal = chars.most_common(1)[0][0] if chars else Counter(int(r.get("sz")) for r in runs).most_common(1)[0][0]
     for r in list(e.iter(q("a:rPr"))) + list(e.iter(q("a:endParaRPr"))):
         old = int(r.get("sz")) if r.get("sz") else modal
-        r.set("sz", str(int(round(size * 100 * (old / modal if old > modal else 1.0)))))
+        if old > modal:
+            # an emphasised figure shrinks with its text but never grows past the size that fitted its box
+            new = min(old, size * 100 * old / modal)
+            if snap and new < old:
+                new = _snap_down(new / 100, snap) * 100
+            r.set("sz", str(int(round(new))))
+        else:
+            r.set("sz", str(int(round(size * 100))))
 
 
 def _harmonize_first_lines(els: list[etree._Element]) -> None:
@@ -1341,14 +1421,16 @@ def render_clone(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
         return body_cap if sz > body_cap * 1.2 else None  # a KPI-sized slot must not carry running text at 60 pt
 
     if c.bullets and not bullets_as_items and oslide.kind not in _ITEM_KINDS:
-        target = ctx.slots(SlotRole.bullet_list) or ctx.slots(SlotRole.body) or ctx.slots(SlotRole.card_body)
+        # the biggest text area of the slide, whatever the sample called it (VK Tech p9 has a one-line «body» next to
+        # a panel-sized «bullet list»: the role order alone would put the text into the one-liner)
+        target = ctx.slots(SlotRole.bullet_list, SlotRole.body) or ctx.slots(SlotRole.card_body)
         if target:
             big = ctx.largest(target)
             ctx.fill_slot(big, [ParagraphSpec(b, bullet=True) for b in c.bullets], size_hint=_running_size(big), grow_to=text_cap)
         else:
             ctx.warnings.append("no slot for bullets")
     if c.paragraphs:
-        target = ctx.slots(SlotRole.body) or ctx.slots(SlotRole.bullet_list) or ctx.slots(SlotRole.card_body) or ctx.slots(SlotRole.caption)
+        target = ctx.slots(SlotRole.body, SlotRole.bullet_list) or ctx.slots(SlotRole.card_body) or ctx.slots(SlotRole.caption)
         if target:
             big = ctx.largest(target)
             lone = len(c.paragraphs) == 1 and len(c.paragraphs[0].split()) <= 25 and not c.bullets and not items

@@ -7,6 +7,7 @@ from typing import Optional
 
 from verstka.providers.base import ProviderError
 from verstka.providers.registry import ProviderRegistry
+from verstka.ru import clip_words
 from verstka.schemas.outline import CondensedText
 from verstka.skills_registry.registry import SkillsRegistry
 
@@ -15,7 +16,7 @@ def trim_words(text: str, max_words: int) -> str:
     words = text.split()
     if len(words) <= max_words:
         return text.strip()
-    cut = " ".join(words[:max_words])
+    cut = clip_words(text, max_words)
     # prefer a clause boundary inside the kept part
     m = list(re.finditer(r"[,;:—–-]\s", cut))
     if m and m[-1].start() > len(cut) * 0.5:

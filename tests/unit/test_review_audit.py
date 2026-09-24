@@ -431,3 +431,19 @@ def test_empty_deck_is_an_error(tmp_path):
     report = run_audit(tmp_path / "empty.pptx", _manifest(), render=False)
     assert report.summary.errors >= 1 and report.summary.score < 100
     assert any(i.check_id == "empty_deck" and i.slide == 0 and i.severity == "error" for i in report.issues)
+
+
+def test_a_grid_of_roomy_cards_is_not_too_dense_but_a_wall_of_text_is():
+    """«Слишком плотно» is about ink, not boxes: four big cards with a line of text each fill the grid of the template
+    (86% of the safe area by their boxes) and read as airy; the same boxes full of lines are a wall of text."""
+    from verstka.audit.checks.density import fill_ratio
+
+    def slide(text: str) -> IRSlide:
+        els = [_el(f"c{i}", text, 0.06 + (i % 2) * 0.45, 0.1 + (i // 2) * 0.42, 0.43, 0.4, size=16.0) for i in range(4)]
+        return IRSlide(index=2, elements=els)
+
+    airy = fill_ratio(AuditContext(ir=_ir(IRSlide(index=1, elements=[]), slide("Экономия 2,1 часа в неделю"), IRSlide(index=3, elements=[])), manifest=_manifest()))
+    assert not [i for i in airy if i.slide == 2 and i.severity == "warn"], [i.message for i in airy]
+    wall = "\n".join(["Длинный абзац текста, который занимает всю ширину карточки и много строк подряд"] * 9)
+    dense = fill_ratio(AuditContext(ir=_ir(IRSlide(index=1, elements=[]), slide(wall), IRSlide(index=3, elements=[])), manifest=_manifest()))
+    assert any(i.slide == 2 and i.severity == "warn" and "заполнен на" in i.message for i in dense), [i.message for i in dense]

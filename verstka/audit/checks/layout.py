@@ -94,7 +94,7 @@ def overlap(ctx: AuditContext) -> list[Issue]:
 @check(TEXT_OVERFLOW)
 def text_overflow(ctx: AuditContext) -> list[Issue]:
     out: list[Issue] = []
-    spacing = ctx.manifest.tokens.typography.line_spacing or 1.2
+    spacing = ctx.manifest.tokens.typography.line_height
     for s in ctx.ir.slides:
         title = title_element(s)
         for e in text_elements(s):

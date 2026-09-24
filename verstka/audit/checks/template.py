@@ -54,6 +54,8 @@ def size_not_in_scale(ctx: AuditContext) -> list[Issue]:
     sizes = ctx.manifest.tokens.typography.sizes_used or [st.size_pt for st in ctx.manifest.tokens.typography.scale]
     if not sizes:
         return out
+    # sizes the samples inherit from their layouts (a cover title set at 48 pt by the placeholder) are the template's own
+    sizes = sorted(set(sizes) | {sl.style.size_pt for p in ctx.manifest.patterns for sl in p.slots if sl.style.size_pt})
     for s in ctx.ir.slides:
         bad: dict[float, list[str]] = {}
         for e in text_elements(s):

@@ -157,6 +157,46 @@ def transform_element(e: etree._Element, old: Bbox, new: Bbox, axis: str) -> Non
         set_element_pos(e, x=b[0] + cross, y=p2, h=s2)
 
 
+def _clusters(values: list[int], tol: int) -> list[int]:
+    out: list[int] = []
+    for v in sorted(values):
+        if not out or v - out[-1] > tol:
+            out.append(v)
+    return out
+
+
+def _rebalance_grid(cells: list[list[etree._Element]], riders: list[list[etree._Element]], boxes_all: list[Optional[Bbox]], slide_w: int, slide_h: int) -> None:
+    """A grid that keeps fewer cells than it had rows × columns: whole rows of wider cells instead of a full row and a
+    lone cell under it (a 3×2 grid with four figures becomes 2+2, not 3+1). Rows keep their places and heights."""
+    n = len(cells)
+    if n == 0 or any(b is None for b in boxes_all):
+        return
+    xs = _clusters([b.x for b in boxes_all], int(0.02 * slide_w))
+    ys = _clusters([b.y for b in boxes_all], int(0.02 * slide_h))
+    cols0, rows0 = len(xs), len(ys)
+    if rows0 < 2 or cols0 < 2 or n <= cols0 or n % cols0 == 0:
+        return
+    cols = -(-n // rows0)
+    if cols >= cols0:
+        return
+    w0 = sorted(b.w for b in boxes_all)[len(boxes_all) // 2]
+    gx = max(xs[1] - xs[0] - w0, 0)
+    x0, x1 = xs[0], xs[-1] + w0
+    w_new = (x1 - x0 - (cols - 1) * gx) / cols
+    for i, (c, r) in enumerate(zip(cells, riders)):
+        old = cell_bbox(c)
+        row_i, col_i = divmod(i, cols)
+        if old is None or row_i >= rows0:
+            continue
+        new = Bbox(x=int(x0 + col_i * (w_new + gx)), y=ys[row_i], w=int(w_new), h=old.h)
+        mid = Bbox(x=new.x, y=old.y, w=new.w, h=old.h)
+        for e in c + r:
+            if is_nested(e):
+                continue
+            transform_element(e, old, mid, "row")
+            transform_element(e, mid, new, "column")
+
+
 def adjust_group(slide: Slide, group: RepeatGroup, n_needed: int, slide_w: int, slide_h: int, next_id: int, protected_ids: Optional[set[str]] = None, origin: Optional[dict[str, str]] = None) -> tuple[list[list[etree._Element]], int]:
     """Delete or duplicate cells so that exactly n cells remain, then let rows/columns reflow over the group's span.
 
@@ -215,11 +255,14 @@ def adjust_group(slide: Slide, group: RepeatGroup, n_needed: int, slide_w: int, 
         n_fit = max(1, int((room_end - starts[0] + gap) // max(0.6 * size0 + gap, 1)))
         n = max(1, min(n_needed, max(n_fit, n_orig)))
     if n < n_orig:
+        boxes_all = [cell_bbox(c) for c in cells]
         for c, r in zip(cells[n:], riders[n:]):
             for e in c + r:
                 remove_element(e)
         cells = cells[:n]
         riders = riders[:n]
+        if group.axis == "grid":
+            _rebalance_grid(cells, riders, boxes_all, slide_w, slide_h)
     elif n > n_orig:
         boxes = [cell_bbox(c) for c in cells]
         cw = boxes[-1].w

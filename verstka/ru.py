@@ -12,6 +12,34 @@ def ru_num(value: float) -> str:
     return f"{value:g}".replace(".", ",")
 
 
+# words that open a phrase (prepositions, conjunctions, particles): a shortened text never ends on one
+_FUNCTION_WORDS = frozenset(
+    "в во на за с со к ко по о об обо от до из у для при про без над под перед через между среди после около вокруг "
+    "и а но или либо да что чтобы как если когда где куда который которая которое которые не ни же ли бы то это".split()
+)
+
+
+def _bare(word: str) -> str:
+    return word.lower().strip(",;:—–-«»\"()")
+
+
+def clip_words(text: str, max_words: int) -> str:
+    """At most `max_words` words, cut where a phrase ends: right before a preposition or conjunction that opens the
+    next phrase, never after one («…окупает разработку», not «…окупает разработку за»)."""
+    words = text.split()
+    if len(words) <= max_words:
+        return text.strip()
+    for k in range(max_words, max(max_words - 5, 1), -1):
+        if _bare(words[k - 1]) in _FUNCTION_WORDS:
+            continue
+        if _bare(words[k]) in _FUNCTION_WORDS or words[k - 1][-1] in ",;:":
+            return " ".join(words[:k]).rstrip(" ,;:—–-")
+    out = words[:max_words]
+    while len(out) > 2 and _bare(out[-1]) in _FUNCTION_WORDS:
+        out.pop()
+    return " ".join(out).rstrip(" ,;:—–-")
+
+
 def ru_count(n: int, one: str, few: str, many: str) -> str:
     """«1 строка», «3 строки», «11 строк» — a number with the noun in the matching form."""
     m10, m100 = n % 10, n % 100
