@@ -21,7 +21,7 @@ from verstka.ingest.workspace import TemplateWorkspace
 from verstka.matching.matcher import match_outline
 from verstka.pipeline.run_manifest import build_run_manifest, write_run_manifest
 from verstka.planning.facts import extract_facts
-from verstka.planning.outline import plan_outline, target_slide_count
+from verstka.planning.outline import adapt_outline, plan_outline, target_slide_count
 from verstka.planning.strategies import STRATEGY_NAMES, Strategy, load_strategies
 from verstka.providers.registry import ProviderRegistry
 from verstka.rendering.renderer import RenderResult, render_deck
@@ -165,6 +165,18 @@ def generate_variants(
         else:
             done = [_plan(name) for name in strategies]
         planned = {name: (o, w, sec) for name, o, w, sec in done}
+        # a congested endpoint may answer one variant and not the others: the variants whose own model plan failed
+        # take the model's content (reshaped for their strategy) rather than a thin plan made by the rules
+        order = sorted(planned, key=lambda nm: STRATEGY_NAMES.index(nm) if nm in STRATEGY_NAMES else len(STRATEGY_NAMES))
+        donor = next((nm for nm in order if planned[nm][0].planned_by == "model"), None)
+        if donor is not None:
+            for name in strategies:
+                o, w, sec = planned[name]
+                if o.planned_by == "model":
+                    continue
+                st = all_strategies[name]
+                adapted = adapt_outline(planned[donor][0], st, manifest, target_slide_count(brief, st), hard_limit=bool(brief.slide_count))
+                planned[name] = (adapted, w + [f"own model plan failed: the model plan of «{donor}» adapted to «{name}»"], sec)
     pending: list[dict] = []
     for i, name in enumerate(strategies):
         strategy: Strategy = all_strategies[name]

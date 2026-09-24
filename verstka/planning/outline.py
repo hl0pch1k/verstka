@@ -233,13 +233,61 @@ def _two_column(a: _Block, b: _Block) -> _Block:
     return _Block(PatternKind.two_column, head, a.section, SlideContent(columns=[col(a), col(b)]), "text")
 
 
+# the sections a deck of this purpose usually has: a topic without theses becomes this skeleton, not invented content
+_SKELETONS: dict[str, list[str]] = {
+    "feature": ["Проблема", "Решение", "Как это работает", "Результаты", "Следующие шаги"],
+    "product": ["Рынок и проблема", "Продукт", "Преимущества", "Метрики", "Планы развития"],
+    "project": ["Цели проекта", "Команда и сроки", "Ход работ", "Риски", "Следующие шаги"],
+    "initiative": ["Контекст", "Предложение", "Эффект", "Что нужно", "Следующие шаги"],
+    "report": ["Цели периода", "Что сделано", "Результаты", "Сложности", "Планы"],
+}
+_SKELETON_DEFAULT = ["Контекст", "Главное", "Детали", "Выводы", "Следующие шаги"]
+
+
+def _title_from_first_statement(sections: list[H.Section]) -> tuple[Optional[str], bool]:
+    """A brief without a heading is titled by its first statement: «Итоги пилота …: время сократилось …» → the part
+    before the colon; a short statement alone → the whole of it. Returns (title, the whole statement was used)."""
+    first = next((s for sec in sections for s in sec.sentences), None)
+    if not first:
+        return None, False
+    lead, _, rest = first.partition(":")
+    if rest.strip() and 2 <= len(lead.split()) <= 12:
+        return H.cap_first(H.strip_end(lead.strip())), False
+    if not rest.strip() and len(first.split()) <= 14:
+        return H.cap_first(H.strip_end(first.strip())), True
+    return None, False
+
+
+def _skeleton(brief: Brief, title: str, facts: FactsExtraction, strategy: Strategy, target: int) -> DeckOutline:
+    """A topic with nothing to lay out: the title, an agenda and one divider per usual section of such a deck, each
+    with a speaker note on what to add. Nothing is invented; the person fills the sections in PowerPoint or adds
+    theses and runs Verstka again."""
+    heads = _SKELETONS.get(brief.purpose or "", _SKELETON_DEFAULT)
+    slides = [
+        OutlineSlide(id="sl1", kind=PatternKind.title, headline=title, subtitle=brief.audience or None),
+        OutlineSlide(id="sl2", kind=PatternKind.agenda, headline="О чём поговорим", content=SlideContent(items=[SlideItem(title=h) for h in heads])),
+    ]
+    for h in heads:
+        slides.append(OutlineSlide(id=f"sl{len(slides) + 1}", kind=PatternKind.section, headline=h, notes=f"Добавьте сюда тезисы и цифры раздела «{h}» — по ним Verstka соберёт слайды этого раздела."))
+    slides.append(OutlineSlide(id=f"sl{len(slides) + 1}", kind=PatternKind.thanks, headline="Спасибо за внимание"))
+    outline = DeckOutline(title=title, subtitle=brief.audience, audience=brief.audience, purpose=brief.purpose, strategy=strategy.name, language=brief.language, planned_by="skeleton", slides=slides, facts=facts.facts, series=facts.series, tables=facts.tables)
+    return validate_outline(outline, None, target, hard_limit=bool(brief.slide_count))
+
+
 def basic_outline(brief: Brief, facts: FactsExtraction, strategy: Strategy, target: int) -> DeckOutline:
     """Deterministic planner: read the brief's sections into typed slides (steps → process, «X: …» → cards,
     figures → KPI row, tables → chart or table, the rest → theses headed by a conclusion), then assemble them the
     way the strategy asks — structured (agenda, one idea per slide), visual (key figure first, cards, charts),
     compact (paired text sections, tables)."""
     doc_title, sections = H.parse_sections(brief.text)
-    title = brief.title_hint or doc_title or "Презентация"
+    title = brief.title_hint or doc_title
+    if not title:
+        title, whole = _title_from_first_statement(sections)
+        if whole:  # the statement that titles the deck is not repeated as a slide of its own
+            next(sec for sec in sections if sec.sentences).sentences.pop(0)
+    title = title or "Презентация"
+    if not any(sec.sentences or sec.tables for sec in sections):
+        return _skeleton(brief, title, facts, strategy, target)
     series_by_span: dict = {}
     k = len(facts.series)
     for sec in sections:
@@ -422,6 +470,42 @@ def validate_outline(
 
 # ------------------------------------------------------------------ LLM planning
 
+# a congested or confused model answers with an apology or an «error» deck instead of a plan
+_REFUSAL_RE = re.compile(
+    r"^\s*(error|ошибка)\s*$|невозможно (сформировать|создать|составить|подготовить|сделать)|не могу (сформировать|создать|составить|подготовить|помочь)"
+    r"|недостаточно (данных|информации|сведений)|\bas an ai\b|\bi (cannot|can't|am unable)\b|\bunable to (create|generate)\b",
+    re.I,
+)
+_FRAME_KINDS = {PatternKind.title, PatternKind.thanks, PatternKind.section, PatternKind.agenda}
+
+
+def unusable_plan(planned: PlannedDeck) -> Optional[str]:
+    """Why a model plan cannot become a deck (None when it can): no content slides, or a refusal instead of a plan."""
+    if not any(s.kind not in _FRAME_KINDS for s in planned.slides):
+        return "no content slides"
+    if any(_REFUSAL_RE.search(t or "") for t in [planned.title] + [s.headline for s in planned.slides[:3]]):
+        return "the model declined"
+    return None
+
+
+def adapt_outline(source: DeckOutline, strategy: Strategy, manifest: Optional[TemplateManifest], target: int, hard_limit: bool = False) -> DeckOutline:
+    """Another variant's model plan reshaped for this strategy without a model: the visual and compact decks do
+    without section dividers, the visual one shows figures as KPI rows, the compact one is merged down to its
+    shorter target. Used when this variant's own model call failed — the deck keeps the model's content."""
+    o = source.model_copy(deep=True)
+    o.strategy = strategy.name
+    o.planned_by = f"shared:{source.strategy}"
+    if strategy.name in ("visual", "compact"):
+        o.slides = [s for s in o.slides if s.kind != PatternKind.section]
+    if strategy.name == "visual":
+        for s in o.slides:
+            n = len(s.content.numbers)
+            if s.kind in (PatternKind.bullets, PatternKind.two_column) and n >= 2 and not s.content.items:
+                s.kind = PatternKind.stat_row
+            elif s.kind == PatternKind.bullets and n == 1 and len(s.content.bullets) <= 1:
+                s.kind = PatternKind.big_number
+    return validate_outline(o, manifest, target, hard_limit=hard_limit)
+
 
 def plan_outline(
     brief: Brief,
@@ -457,8 +541,12 @@ def plan_outline(
     except (ProviderError, ValueError, KeyError) as e:
         warnings.append(f"outline_planner failed, deterministic outline used: {str(e)[:160]}")
         return basic_outline(brief, facts, strategy, target), warnings
+    problem = unusable_plan(planned)
+    if problem:
+        warnings.append(f"outline_planner answer rejected ({problem}), deterministic outline used")
+        return basic_outline(brief, facts, strategy, target), warnings
     hard_limit = bool(brief.slide_count)  # «не более N слайдов» / slides: N in the brief is binding
-    outline = DeckOutline(title=planned.title or brief.title_hint or "Презентация", subtitle=planned.subtitle, audience=brief.audience, purpose=brief.purpose, strategy=strategy.name, language=brief.language, slides=planned.slides, facts=facts.facts, series=facts.series, tables=facts.tables)
+    outline = DeckOutline(title=planned.title or brief.title_hint or "Презентация", subtitle=planned.subtitle, audience=brief.audience, purpose=brief.purpose, strategy=strategy.name, language=brief.language, planned_by="model", slides=planned.slides, facts=facts.facts, series=facts.series, tables=facts.tables)
     outline = validate_outline(outline, manifest, target, skills, providers, hard_limit=hard_limit)
     # fact check + one repair pass
     try:
@@ -470,6 +558,8 @@ def plan_outline(
             try:
                 res2 = skills.run("outline_planner", providers, variables)
                 planned2: PlannedDeck = res2.parsed
+                if unusable_plan(planned2):
+                    raise ValueError(f"repaired plan rejected ({unusable_plan(planned2)})")
                 outline.slides = planned2.slides
                 outline = validate_outline(outline, manifest, target, skills, providers, hard_limit=hard_limit)
                 warnings.append(f"fact_checker found {len(errors)} issues; outline regenerated once")

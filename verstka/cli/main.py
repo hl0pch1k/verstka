@@ -282,5 +282,10 @@ def serve(
         os.environ["VERSTKA_MODELS"] = str(models.resolve())
     if not (_REPO_ROOT / "web" / "dist" / "index.html").exists():
         console.print("[yellow]web/dist not found: only the API is served. Build the UI: cd web && npm install && npm run build[/yellow]")
+    # the service log shows each generation's steps with time stamps (plan, model calls, fallbacks, export)
+    for h in logging.getLogger().handlers:
+        h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s", "%H:%M:%S"))
+    if logging.getLogger("verstka").getEffectiveLevel() > logging.INFO:
+        logging.getLogger("verstka").setLevel(logging.INFO)
     console.print(f"Verstka → http://{host}:{port}")
     uvicorn.run("verstka.api.app:app", host=host, port=port, reload=reload, log_level="info")

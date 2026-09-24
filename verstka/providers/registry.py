@@ -35,7 +35,7 @@ class ProviderLimits:
     requests_per_minute: Optional[int] = None
     # model time per generation (brief → decks): past it every step falls back to its deterministic twin, so render,
     # audit and export still fit the 5 minutes a deck may take
-    time_budget_s: float = 240.0
+    time_budget_s: float = 210.0
 
 
 @dataclass
@@ -53,7 +53,7 @@ class ProviderRegistry:
             timeout_s=float(limits_cfg.get("timeout_s", 120)),
             max_attempts=int(limits_cfg.get("max_attempts", 3)),
             requests_per_minute=int(limits_cfg["requests_per_minute"]) if limits_cfg.get("requests_per_minute") else None,
-            time_budget_s=float(limits_cfg.get("time_budget_s", 240)),
+            time_budget_s=float(limits_cfg.get("time_budget_s", 210)),
         )
         roles: dict[str, Provider] = {}
         for role, spec in (cfg.get("roles") or {}).items():

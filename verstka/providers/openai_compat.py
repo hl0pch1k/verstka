@@ -38,7 +38,7 @@ class _MinuteLimiter:
         self.lock = threading.Lock()
         self.stamps: deque = deque()
 
-    def wait(self) -> None:
+    def wait(self, deadline: Optional[float] = None) -> None:
         while True:
             with self.lock:
                 now = time.monotonic()
@@ -48,6 +48,9 @@ class _MinuteLimiter:
                     self.stamps.append(now)
                     return
                 delay = 60.0 - (now - self.stamps[0]) + 0.05
+            # never sleep past the generation's budget: the caller takes its deterministic path instead
+            if deadline is not None and time.monotonic() + delay > deadline - _MIN_REQUEST_S:
+                raise ProviderError("time budget of the generation is spent while waiting for a rate-limit slot")
             time.sleep(delay)
 
 
@@ -201,7 +204,7 @@ class OpenAICompatProvider:
         if self._account in _EXHAUSTED:
             raise RateLimited(f"{self.model}: daily request quota of the provider is spent", daily=True)
         if self._limiter is not None:
-            self._limiter.wait()
+            self._limiter.wait(deadline)
         if deadline is not None:
             # a request never outlives the generation's budget (the limiter may have waited)
             left = deadline - time.monotonic()

@@ -31,4 +31,4 @@ limits:
   requests_per_minute: 18
   timeout_s: 180
   max_attempts: 3
-  time_budget_s: 240  # model time per generation; past it the deterministic steps take over (≤5 min per deck)
+  time_budget_s: 210  # model time per generation; past it the deterministic steps take over (render, checks and export fit the rest of the 5 minutes)

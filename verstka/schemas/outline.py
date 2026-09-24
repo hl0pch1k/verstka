@@ -104,6 +104,9 @@ class DeckOutline(BaseModel):
     purpose: Optional[str] = None
     strategy: str = "structured"
     language: str = "ru"
+    # who wrote the plan: "rules" (deterministic planner), "model" (outline_planner skill) or "shared:<strategy>"
+    # (another variant's model plan reshaped for this strategy when this variant's own model call failed)
+    planned_by: str = "rules"
     slides: list[OutlineSlide] = Field(default_factory=list)
     facts: list[Fact] = Field(default_factory=list)
     series: list[Series] = Field(default_factory=list)
