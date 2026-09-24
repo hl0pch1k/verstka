@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from typing import Optional
 
 from verstka.analysis.chrome import shape_signature
@@ -11,10 +13,11 @@ from verstka.schemas.audit import CheckSpec, Issue
 from verstka.schemas.common import Color, contrast_ratio
 
 FONT_NOT_IN_TEMPLATE = CheckSpec(id="font_not_in_template", title="Шрифт не из шаблона или гарнитур больше двух", severity="error", category="template", description="Гарнитура рана отсутствует среди шрифтов шаблона (используемых или встроенных), либо на слайде больше двух гарнитур.")
-SIZE_NOT_IN_SCALE = CheckSpec(id="size_not_in_scale", title="Размер шрифта не из шкалы шаблона", severity="warn", category="template", description="Размер шрифта отличается более чем на 0,75 пт от всех размеров, встречающихся в шаблоне.")
+SIZE_NOT_IN_SCALE = CheckSpec(id="size_not_in_scale", title="Размер шрифта не из шкалы шаблона", severity="warn", category="template", description="Размер шрифта отличается более чем на 0,75 пт от всех размеров, встречающихся в шаблоне. Крупные числа (значение с единицей, от наибольшего кегля шаблона или вдвое крупнее основного текста) — отдельная ступень шкалы: они не проверяются.")
 COLOR_NOT_IN_PALETTE = CheckSpec(id="color_not_in_palette", title="Цвет не из палитры шаблона", severity="warn", category="template", description="Цвет текста или заливки отстоит от ближайшего цвета палитры шаблона больше чем на ΔE 6.")
 LAYOUT_NOT_FROM_TEMPLATE = CheckSpec(id="layout_not_from_template", title="Слайд собран не на макете из шаблона", severity="error", category="template", description="Слайд ссылается на макет, которого нет в пакете шаблона.")
 CHROME_MOVED = CheckSpec(id="chrome_moved", title="Логотип или колонтитул сдвинуты с положенного места", severity="warn", category="template", description="Элемент хрома шаблона (логотип, колонтитул на слайдах) отсутствует или стоит в другом месте.")
+TABLE_CONTRAST_LOW = CheckSpec(id="table_contrast_low", title="Контраст текста в таблице ниже нормы", severity="warn", category="template", description="Контраст по WCAG между текстом ячейки таблицы и её заливкой (или фоном слайда) ниже 4.5:1 для обычного текста и 3:1 для крупного (≥18 пт или ≥14 пт жирным) и для значков ✓ / —. Пара цветов шаблона (белый на фирменном синем) от 3:1 — только справка.")
 CONTRAST_LOW = CheckSpec(id="contrast_low", title="Контраст текста к фону ниже 4.5:1", severity="warn", category="template", description="Контраст по WCAG между цветом текста и фоном (карточка с учётом прозрачности заливки или фон слайда) ниже 4.5:1 для обычного текста и 3:1 для крупного (≥18 пт или ≥14 пт жирным).")
 
 CONTRAST_CANDIDATE_ROLES = ("text.primary", "text.secondary")
@@ -48,6 +51,15 @@ def font_not_in_template(ctx: AuditContext) -> list[Issue]:
     return out
 
 
+_FIGURE_RE = re.compile(r"^[\s+\-−–×x~≈«»]*\d[\d\s\u00a0\u202f.,]*(%|[a-zа-яё₽$€]{0,6}\.?(?:[\s\u00a0][₽$€])?)?(\s?[→\-–/]\s?[\d\s.,]+(%|[a-zа-яё₽]{0,6}\.?)?)?\s*$", re.I)
+
+
+def is_figure(text: str) -> bool:
+    """«6,5», «40%», «×4,8», «27 млн», «31% → 12%»: a value set as a figure, not running text."""
+    t = text.strip()
+    return 0 < len(t) <= 16 and bool(_FIGURE_RE.match(t))
+
+
 @check(SIZE_NOT_IN_SCALE)
 def size_not_in_scale(ctx: AuditContext) -> list[Issue]:
     out: list[Issue] = []
@@ -56,11 +68,15 @@ def size_not_in_scale(ctx: AuditContext) -> list[Issue]:
         return out
     # sizes the samples inherit from their layouts (a cover title set at 48 pt by the placeholder) are the template's own
     sizes = sorted(set(sizes) | {sl.style.size_pt for p in ctx.manifest.patterns for sl in p.slots if sl.style.size_pt})
+    body = ctx.manifest.tokens.typography.size_for("body", 14.0)
+    display_from = min(max(sizes), 2 * body)
     for s in ctx.ir.slides:
         bad: dict[float, list[str]] = {}
         for e in text_elements(s):
             for p in e.paragraphs:
                 for r in p.runs:
+                    if r.size_pt and r.size_pt >= display_from and is_figure(r.text):
+                        continue  # the display step of the scale: figures may be set larger than any text
                     if r.size_pt and r.text.strip() and all(abs(r.size_pt - t) > 0.75 for t in sizes):
                         bad.setdefault(r.size_pt, []).append(e.id)
         for sz, ids in bad.items():
@@ -198,4 +214,45 @@ def contrast_low(ctx: AuditContext) -> list[Issue]:
                 if uncertain:
                     severity = "info"
                 out.append(ctx.new_issue(CONTRAST_LOW, s.index, f"контраст {cr:.1f}:1 у «{e.text[:30]}» (#{color} на #{bg})", bboxes=[e.bbox_frac], element_ids=[e.id], severity=severity, details={"contrast": round(cr, 2), "background": bg}, autofix=autofix))
+    return out
+
+
+_TABLE_MARKS = {"✓", "✔", "✗", "✕", "×", "—", "–", "-", "−", "+"}
+
+
+@check(TABLE_CONTRAST_LOW)
+def table_contrast_low(ctx: AuditContext) -> list[Issue]:
+    """Table text against its cell fill, or the slide ground under an unfilled cell. One issue per table (the worst
+    cell). A pairing of two template colours (white on the brand blue) between 3:1 and 4.5:1 is the template's own
+    choice: reported as info."""
+    out: list[Issue] = []
+    tokens = ctx.manifest.tokens
+    palette = {t.hex.upper() for t in tokens.colors} | {"FFFFFF", "000000"}
+    for s in ctx.ir.slides:
+        ground = s.background_hex
+        for e in s.elements:
+            if e.type != "table" or not e.table or not e.table.cells:
+                continue
+            worst = None
+            for r_i, row in enumerate(e.table.cells):
+                for c_i, cell in enumerate(row):
+                    text = e.table.rows[r_i][c_i] if r_i < len(e.table.rows) and c_i < len(e.table.rows[r_i]) else ""
+                    bg = cell.fill_hex or ground
+                    if not text.strip() or not cell.color_hex or not bg:
+                        continue
+                    try:
+                        cr = contrast_ratio(cell.color_hex, bg)
+                    except ValueError:
+                        continue
+                    size = cell.size_pt or 14.0
+                    mark = text.strip() in _TABLE_MARKS  # ✓ / — are marks, not text: the icon gate (3:1) applies
+                    need = 3.0 if mark or size >= 18 or (cell.bold and size >= 14) else 4.5
+                    if cr < need and (worst is None or cr / need < worst[0]):
+                        worst = (cr / need, cr, need, text, cell.color_hex, bg, cell.fill_hex is None)
+            if worst is None:
+                continue
+            _, cr, need, text, color, bg, _ = worst
+            brand = color.upper() in palette and bg.upper() in palette and cr >= 3.0
+            severity = "error" if cr < 2.5 else ("info" if brand else "warn")
+            out.append(ctx.new_issue(TABLE_CONTRAST_LOW, s.index, f"контраст {cr:.1f}:1 у «{text[:30]}» в таблице (#{color} на #{bg}, нужно {need:g}:1)", bboxes=[e.bbox_frac], element_ids=[e.id], severity=severity, details={"contrast": round(cr, 2), "background": bg, "brand_pair": brand}))
     return out

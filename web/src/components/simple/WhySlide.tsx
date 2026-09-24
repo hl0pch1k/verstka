@@ -56,6 +56,9 @@ export function WhySlide() {
   const templateOk = !!manifest && manifest.template_id === generation.template_id;
   const patternById = (id: string | null | undefined): Pattern | null => (templateOk && id ? manifest.patterns.find((p) => p.id === id) ?? null : null);
   const pattern = entry?.mode === "clone" ? patternById(entry.pattern_id) : null;
+  // a composed slide shows the template's nearest sample next to it: same style, geometry fitted to the content
+  const nearest = entry?.mode === "synth" ? patternById(entry.alternatives[0]?.[0]) : null;
+  const composed = entry?.mode === "synth";
   const aspect = templateOk ? manifest.slide_size.w / manifest.slide_size.h : 16 / 9;
   const outlineSlide = v.outline?.slides[selectedSlide - 1] ?? null;
   const own = v.slides[selectedSlide - 1] ? withRev(v.slides[selectedSlide - 1], rev) : null;
@@ -66,7 +69,7 @@ export function WhySlide() {
   const runnerUp = others.length ? Math.round(Math.min(1, Math.max(0, Math.max(...others))) * 100) : null;
   const alternatives = (entry?.alternatives ?? [])
     .map(([pid, score]) => ({ p: patternById(pid), score }))
-    .filter((a): a is { p: Pattern; score: number } => !!a.p && a.score > 0.05 && a.p.id !== pattern?.id)
+    .filter((a): a is { p: Pattern; score: number } => !!a.p && a.score > 0.05 && a.p.id !== pattern?.id && a.p.id !== nearest?.id)
     .slice(0, 3);
 
   return (
@@ -88,13 +91,20 @@ export function WhySlide() {
         <div className="mt-4 flex items-center gap-4">
           {pattern ? (
             <Frame src={pattern.thumbnail_url ?? null} label={`Образец: слайд ${pattern.source_slide} шаблона`} aspect={aspect} muted />
+          ) : nearest ? (
+            <Frame src={nearest.thumbnail_url ?? null} label={`Ближайший образец: слайд ${nearest.source_slide} шаблона`} aspect={aspect} muted />
           ) : (
-            <Frame src={null} label="Подходящего образца нет — слайд собран из цветов, шрифтов и сетки шаблона" aspect={aspect} />
+            <Frame src={null} label="Слайд собран из цветов, шрифтов и сетки шаблона" aspect={aspect} />
           )}
           <ArrowRight className="h-5 w-5 shrink-0 text-zinc-400" aria-hidden />
           <Frame src={own} label="Ваш слайд" aspect={aspect} />
         </div>
-        {match !== null && (
+        {composed && (
+          <p className="mt-5 text-[13px] leading-5 text-zinc-600">
+            Раскладка рассчитана под ваш текст: сетка, шкала шрифтов, цвета и карточки взяты из шаблона, а размеры блоков подобраны под объём содержания.
+          </p>
+        )}
+        {match !== null && !composed && (
           <div className="mt-5">
             <div className="flex items-baseline justify-between text-[13px]">
               <span className="font-medium text-zinc-700">Оценка подбора</span>
@@ -133,8 +143,8 @@ export function WhySlide() {
 
       {alternatives.length > 0 && (
         <section className="rounded-3xl bg-white p-6 shadow-card">
-          <h3 className="text-[17px] font-semibold text-zinc-900">Другие подходящие макеты</h3>
-          <p className="mt-0.5 text-[13px] text-zinc-500">Их тоже рассматривали для этого слайда</p>
+          <h3 className="text-[17px] font-semibold text-zinc-900">{composed ? "Похожие образцы шаблона" : "Другие подходящие макеты"}</h3>
+          <p className="mt-0.5 text-[13px] text-zinc-500">{composed ? "Их стиль тоже учтён: заголовки, карточки, цвета" : "Их тоже рассматривали для этого слайда"}</p>
           <div className="mt-4 grid grid-cols-3 gap-4">
             {alternatives.map(({ p, score }) => (
               <figure key={p.id} className="min-w-0">

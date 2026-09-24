@@ -73,6 +73,8 @@ def _rematch(plan: LayoutPlan, outline: DeckOutline, oid: str) -> str:
     osl = next((s for s in outline.slides if s.id == oid), None)
     if ps is None or osl is None:
         return "skip"
+    if ps.mode == "synth" and ps.composition and ps.composition not in ("title", "section", "thanks"):
+        return "skip"  # a composed slide is laid out from the content: a sample slide would only fit it worse
     tried = set(ps.fit.get("tried", []))
     if ps.pattern_id:
         tried.add(ps.pattern_id)

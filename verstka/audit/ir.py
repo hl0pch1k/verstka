@@ -13,11 +13,69 @@ from verstka.analysis.shapes import SlideContext, extract_shapes, slide_family
 from verstka.analysis.xmlns import NS, find, findall, q
 from verstka.ingest.package import PptxPackage
 from verstka.schemas.common import ShapeKind
-from verstka.schemas.deck_ir import DeckIR, IRChart, IRChartSeries, IRElement, IRParagraph, IRRun, IRSlide, IRTable
+from verstka.schemas.deck_ir import DeckIR, IRChart, IRChartSeries, IRElement, IRParagraph, IRPointLabel, IRRun, IRSlide, IRTable, IRTableCell
 
 OUTLINE_MARK_RE = re.compile(r"\[verstka:([A-Za-z0-9_\-]+)\]")
 
 _CHART_TAGS = {"barChart": "bar", "bar3DChart": "bar", "lineChart": "line", "line3DChart": "line", "areaChart": "area", "pieChart": "pie", "pie3DChart": "pie", "doughnutChart": "doughnut", "scatterChart": "scatter", "radarChart": "radar"}
+
+
+def _srgb(el: Optional[etree._Element], path: str) -> Optional[str]:
+    c = find(el, path) if el is not None else None
+    v = c.get("val") if c is not None else None
+    return v.upper() if v and len(v) == 6 else None
+
+
+def _text_style(holder: Optional[etree._Element]) -> tuple[Optional[str], Optional[bool], Optional[float]]:
+    """(colour, bold, size) of the default run properties in a c:txPr under `holder`."""
+    d = find(holder, "c:txPr/a:p/a:pPr/a:defRPr") if holder is not None else None
+    if d is None:
+        return None, None, None
+    b = d.get("b")
+    sz = d.get("sz")
+    return _srgb(d, "a:solidFill/a:srgbClr"), (b in ("1", "true")) if b is not None else None, (int(sz) / 100 if sz and sz.isdigit() else None)
+
+
+def _on(el: Optional[etree._Element], path: str) -> Optional[bool]:
+    f = find(el, path) if el is not None else None
+    return None if f is None else f.get("val") in ("1", "true", None)
+
+
+def _series_style(ser: etree._Element, series: IRChartSeries) -> None:
+    """Paint and label overrides of one c:ser, as a chart made by verstka.rendering.charts writes them."""
+    sp = find(ser, "c:spPr")
+    fill = _srgb(sp, "a:solidFill/a:srgbClr")
+    line = _srgb(sp, "a:ln/a:solidFill/a:srgbClr")
+    series.color = series.color or fill or line
+    series.outline_only = sp is not None and find(sp, "a:noFill") is not None and line is not None
+    series.dashed = sp is not None and find(sp, "a:ln/a:prstDash") is not None and find(sp, "a:ln/a:prstDash").get("val") not in ("solid", None)
+    for dpt in findall(ser, "c:dPt"):
+        idx = find(dpt, "c:idx")
+        col = _srgb(dpt, "c:spPr/a:solidFill/a:srgbClr")
+        if idx is not None and col:
+            series.point_colors[int(idx.get("val"))] = col
+    dl = find(ser, "c:dLbls")
+    if dl is None:
+        return
+    series.labels_shown = _on(dl, "c:showVal")
+    nf = find(dl, "c:numFmt")
+    series.label_format = nf.get("formatCode") if nf is not None else series.label_format
+    series.label_color, series.label_bold, series.label_size_pt = _text_style(dl)
+    for lbl in findall(dl, "c:dLbl"):
+        idx = find(lbl, "c:idx")
+        if idx is None:
+            continue
+        o = IRPointLabel(deleted=bool(_on(lbl, "c:delete")))
+        if not o.deleted:
+            nf = find(lbl, "c:numFmt")
+            o.format = nf.get("formatCode") if nf is not None else None
+            o.color, o.bold, o.size_pt = _text_style(lbl)
+            o.series_name = bool(_on(lbl, "c:showSerName"))
+            pos = find(lbl, "c:dLblPos")
+            o.position = pos.get("val") if pos is not None else None
+            if not _on(lbl, "c:showVal") and not o.series_name:
+                o.deleted = True
+        series.point_labels[int(idx.get("val"))] = o
 
 
 def _chart_from_part(pkg: PptxPackage, chart_part: str) -> Optional[IRChart]:
@@ -81,7 +139,26 @@ def _chart_from_part(pkg: PptxPackage, chart_part: str) -> Optional[IRChart]:
     val_ax = find(plot, "c:valAx")
     has_val_axis = val_ax is not None and (find(val_ax, "c:delete") is None or find(val_ax, "c:delete").get("val") in ("0", "false"))
     nf = find(chart_el, "c:dLbls/c:numFmt")
-    return IRChart(type=ctype, categories=categories, series=series, has_data_labels=has_labels, has_legend=has_legend, has_value_axis=has_val_axis, colors=colors, number_format=nf.get("formatCode") if nf is not None else None)
+    for ser, s in zip(findall(chart_el, "c:ser"), series):
+        _series_style(ser, s)
+    # an area drawn with its top edge as a line series over it: the edge carries the area's labels
+    if ctype == "area":
+        nxt = chart_el.getnext()
+        if nxt is not None and etree.QName(nxt).localname == "lineChart":
+            for ser, s in zip(findall(nxt, "c:ser"), series):
+                s.point_labels = {}
+                _series_style(ser, s)
+    title = " ".join(t.text or "" for t in root.iter(q("a:t")) if any(etree.QName(a).localname == "title" for a in t.iterancestors())).strip() or None
+    cat_ax = find(plot, "c:catAx")
+    orient = find(cat_ax, "c:scaling/c:orientation") if cat_ax is not None else None
+    return IRChart(
+        type=ctype, categories=categories, series=series, has_data_labels=has_labels, has_legend=has_legend, has_value_axis=has_val_axis,
+        colors=colors, number_format=nf.get("formatCode") if nf is not None else None, title=title,
+        series_labels=any(e.get("val") in ("1", "true") for e in plot.iter(q("c:showSerName"))),
+        axis_color=_text_style(cat_ax)[0] if cat_ax is not None else None,
+        rule_color=_srgb(cat_ax, "c:spPr/a:ln/a:solidFill/a:srgbClr") if cat_ax is not None else None,
+        reversed_categories=orient is not None and orient.get("val") == "maxMin",
+    )
 
 
 def _table_from_frame(el: etree._Element) -> Optional[IRTable]:
@@ -89,13 +166,43 @@ def _table_from_frame(el: etree._Element) -> Optional[IRTable]:
     if tbl is None:
         return None
     rows: list[list[str]] = []
+    cells: list[list[IRTableCell]] = []
     for tr in findall(tbl, "a:tr"):
         rows.append(["".join(t.text or "" for t in tc.iter(q("a:t"))) for tc in findall(tr, "a:tc")])
+        cells.append([_table_cell(tc) for tc in findall(tr, "a:tc")])
     header_fill = None
     first_tc = find(tbl, "a:tr/a:tc/a:tcPr/a:solidFill/a:srgbClr")
     if first_tc is not None:
         header_fill = (first_tc.get("val") or "").upper() or None
-    return IRTable(rows=rows, header_fill_hex=header_fill)
+    cols = [int(g.get("w") or 0) for g in findall(tbl, "a:tblGrid/a:gridCol")]
+    return IRTable(rows=rows, header_fill_hex=header_fill, col_widths_emu=cols, cells=cells)
+
+
+def _table_cell(tc: etree._Element) -> IRTableCell:
+    cell = IRTableCell()
+    tcPr = find(tc, "a:tcPr")
+    if tcPr is not None:
+        for attr, name in (("marL", "mar_l_pt"), ("marR", "mar_r_pt")):
+            v = tcPr.get(attr)
+            if v is not None and v.lstrip("-").isdigit():
+                setattr(cell, name, int(v) / 12700)
+        clr = find(tcPr, "a:solidFill/a:srgbClr")
+        if clr is not None:
+            alpha = find(clr, "a:alpha")
+            if alpha is None or int(alpha.get("val") or 100000) >= 50000:
+                cell.fill_hex = _srgb(tcPr, "a:solidFill/a:srgbClr")
+    for r in tc.iter(q("a:r")):
+        t = find(r, "a:t")
+        if t is None or not (t.text or "").strip():
+            continue
+        rPr = find(r, "a:rPr")
+        if rPr is not None:
+            if (rPr.get("sz") or "").isdigit():
+                cell.size_pt = int(rPr.get("sz")) / 100
+            cell.bold = rPr.get("b") in ("1", "true")
+            cell.color_hex = _srgb(rPr, "a:solidFill/a:srgbClr")
+        break
+    return cell
 
 
 def _image_size(pkg: PptxPackage, part: Optional[str]) -> Optional[tuple[int, int]]:
@@ -138,7 +245,7 @@ def build_deck_ir(pptx: Path | str, with_images: bool = True) -> DeckIR:
             paragraphs = []
             if s.text is not None:
                 for p in s.text.paragraphs:
-                    paragraphs.append(IRParagraph(text=p.text, bullet=p.has_bullet, level=p.level, align=p.align, runs=[IRRun(text=r.text, font=r.font, size_pt=r.size_pt, bold=r.bold, italic=r.italic, color_hex=r.color_hex) for r in p.runs]))
+                    paragraphs.append(IRParagraph(text=p.text, bullet=p.has_bullet, level=p.level, align=p.align, line_spacing=p.line_spacing, runs=[IRRun(text=r.text, font=r.font, size_pt=r.size_pt, bold=r.bold, italic=r.italic, color_hex=r.color_hex) for r in p.runs]))
             el = IRElement(
                 id=s.id,
                 type=etype,

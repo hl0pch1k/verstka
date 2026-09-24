@@ -72,7 +72,9 @@ def content_elements(slide: IRSlide, ir: DeckIR, manifest: Optional["TemplateMan
 
 
 def text_height_needed_pt(e: IRElement, line_spacing: float = 1.2) -> tuple[float, int]:
-    """(height in pt, lines) the text needs given the element width."""
+    """(height in pt, lines) the text needs given the element width. `line_spacing` is the template's line height in
+    em; a paragraph that sets its own spacing (a:lnSpc spcPct, e.g. a display heading at 90 %) is measured with it —
+    a single-spaced line is 1.2 em, so 90 % sets lines 1.08 em apart, as the renderers size such boxes."""
     usable_w = max((e.bbox.w - e.insets_emu[0] - e.insets_emu[2]) / EMU_PER_PT, 1.0)
     height = 0.0
     lines = 0
@@ -80,14 +82,22 @@ def text_height_needed_pt(e: IRElement, line_spacing: float = 1.2) -> tuple[floa
         size = next((r.size_pt for r in p.runs if r.size_pt), None) or e.dominant_size or 14.0
         font = next((r.font for r in p.runs if r.font), None)
         bold = any(r.bold for r in p.runs)
+        sizes = {r.size_pt for r in p.runs if r.size_pt and r.text.strip()}
         if not p.text.strip():
             n = 1
+        elif e.wrap and len(sizes) > 1:
+            # runs of different sizes («145 000» with a small «₽»): the line holds the sum of their widths
+            from verstka.rendering.fonts import text_width_pt
+
+            total = sum(text_width_pt(r.text, r.font or font, r.size_pt or size, r.bold) for r in p.runs)
+            n = max(1, -(-int(total) // max(int(usable_w), 1)))
+            size = max(sizes)
         elif e.wrap:
             n = max(len(wrap_lines(p.text, font, size, bold, usable_w)), 1)
         else:
             n = 1
         lines += n
-        height += n * size * line_spacing
+        height += n * size * (1.2 * p.line_spacing if p.line_spacing else line_spacing)
     return height, lines
 
 

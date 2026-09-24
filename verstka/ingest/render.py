@@ -35,6 +35,23 @@ def _fontconfig(profile: Path) -> Optional[str]:
     return str(conf)
 
 
+_warned_fonts = False
+
+
+def _warn_missing_mac_fonts() -> None:
+    """macOS: LibreOffice cannot be pointed at the bundled fonts — without Play installed, previews of the VK decks are
+    set in a fallback (Arial Black for bold: wider figures, other line breaks). Say so once, with the fix."""
+    global _warned_fonts
+    if _warned_fonts or sys.platform != "darwin" or not _FONT_DIR.is_dir():
+        return
+    _warned_fonts = True
+    dirs = [Path.home() / "Library/Fonts", Path("/Library/Fonts")]
+    installed = {p.name.lower() for d in dirs if d.is_dir() for p in d.iterdir()}
+    missing = [f.name for f in sorted(_FONT_DIR.glob("*.ttf")) if f.name.lower() not in installed]
+    if missing:
+        log.warning("шрифты %s не установлены: превью и PDF LibreOffice наберёт запасным шрифтом; установите: cp %s/*.ttf ~/Library/Fonts/", ", ".join(missing), _FONT_DIR)
+
+
 class RenderError(RuntimeError):
     pass
 
@@ -92,6 +109,7 @@ def pptx_to_pdf(pptx: Path, out_dir: Path, timeout_s: float = 240.0) -> Path:
     if not soffice:
         raise RenderError("LibreOffice (soffice) not found; install it to render slides")
     out_dir.mkdir(parents=True, exist_ok=True)
+    _warn_missing_mac_fonts()
     env = os.environ.copy()
     env["SAL_USE_VCLPLUGIN"] = "svp"
     with tempfile.TemporaryDirectory(prefix="verstka_lo_", ignore_cleanup_errors=True) as profile:

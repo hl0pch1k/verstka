@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional
@@ -62,7 +63,7 @@ def text_width_pt(text: str, family: Optional[str], size_pt: float, bold: bool =
     if not text:
         return 0.0
     f = _font(bold)
-    px = f.getlength(text)
+    px = f.getlength(text.replace("\u00a0", " ").replace("\u202f", " ").replace("\u2060", ""))
     return px / _MEASURE_PX * size_pt * width_factor(family)
 
 
@@ -72,7 +73,8 @@ def wrap_lines(text: str, family: Optional[str], size_pt: float, bold: bool, wid
         return [text]
     lines: list[str] = []
     for raw in text.split("\n"):
-        words = raw.split()
+        # break at ordinary spaces only: a no-break space keeps «27 млн» and «в VK» together, as PowerPoint does
+        words = [w for w in re.split(r"[ \t\r]+", raw) if w]
         if not words:
             lines.append("")
             continue
@@ -101,3 +103,27 @@ def wrap_lines(text: str, family: Optional[str], size_pt: float, bold: bool, wid
 
 def measure_text_lines(text: str, family: Optional[str], size_pt: float, bold: bool, width_pt: float) -> int:
     return len(wrap_lines(text, family, size_pt, bold, width_pt))
+
+
+@lru_cache(maxsize=256)
+def left_bearing_em(ch: str, bold: bool = False) -> float:
+    """How far the ink of a glyph starts right of its origin, in em (Play): the «1» of a 120 pt figure stands 14 pt
+    right of the edge its heading starts at — a large figure is set that much to the left to look aligned."""
+    from PIL import Image, ImageDraw
+
+    if not ch or ch.isspace():
+        return 0.0
+    f = ImageFont.truetype(str(font_path(None, bold)), 200)
+    im = Image.new("L", (480, 360), 0)
+    ImageDraw.Draw(im).text((120, 40), ch, font=f, fill=255)
+    bb = im.getbbox()
+    return max(0.0, (bb[0] - 120) / 200) if bb else 0.0
+
+
+@lru_cache(maxsize=4)
+def figure_metrics_em(bold: bool = False) -> tuple[float, float]:
+    """(descent, digit height) of the measuring font, in em: where the top of a figure's digits sits in its line."""
+    f = ImageFont.truetype(str(font_path(None, bold)), 200)
+    _, descent = f.getmetrics()
+    top = f.getbbox("0", anchor="ls")[1]
+    return descent / 200, -top / 200

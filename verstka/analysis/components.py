@@ -7,7 +7,7 @@ from statistics import median
 from typing import Optional
 
 from verstka.analysis.shapes import ShapeInfo
-from verstka.schemas.common import PatternKind, ShapeKind, SlotRole, contrast_ratio
+from verstka.schemas.common import PatternKind, ShapeKind, SlotRole, contrast_ratio, relative_luminance
 from verstka.schemas.template import BulletSpec, CardSpec, ChartStyleSpec, Components, IconChipSpec, NumberSpec, Pattern, TableStyleSpec, Tokens
 
 
@@ -19,6 +19,27 @@ def _med(values: list[float]) -> Optional[float]:
 def _mode(values: list) -> Optional[object]:
     vals = [v for v in values if v]
     return Counter(vals).most_common(1)[0][0] if vals else None
+
+
+def _table_rule(tokens: Tokens, text_hex: str) -> Optional[str]:
+    """A hairline colour for table rows: a quiet neutral of the palette on the ground the table text sits on (1.12–2.2:1,
+    lighter than a dark ground), not merely the first neutral (LCT's neutral.1 is black: rows ruled like a form)."""
+    dark_text = relative_luminance(text_hex) < 0.4
+    ground = (tokens.color_for("background.light") or "FFFFFF") if dark_text else (tokens.color_for("background.dark") or tokens.color_for("surface") or "000000")
+
+    def sat(h: str) -> float:
+        r, g, b = (int(h[i : i + 2], 16) for i in (0, 2, 4))
+        return 0.0 if max(r, g, b) == 0 else (max(r, g, b) - min(r, g, b)) / max(r, g, b)
+
+    cands = []
+    for c in tokens.colors:
+        if not (c.role and c.role.startswith("neutral")) or sat(c.hex) >= 0.25:
+            continue
+        cr = contrast_ratio(c.hex, ground)
+        if not 1.12 <= cr <= 2.2 or (not dark_text and relative_luminance(c.hex) < relative_luminance(ground)):
+            continue
+        cands.append((abs(cr - 1.6), c.hex))
+    return min(cands)[1] if cands else None
 
 
 def derive_components(patterns: list[Pattern], shapes_by_slide: dict[int, list[ShapeInfo]], tokens: Tokens) -> Components:
@@ -102,7 +123,7 @@ def derive_components(patterns: list[Pattern], shapes_by_slide: dict[int, list[S
         header_text_hex=header_text,
         body_text_hex=text_primary,
         band_fill_hex=tokens.color_for("surface"),
-        border_hex=next((c.hex for c in tokens.colors if c.role and c.role.startswith("neutral")), None),
+        border_hex=_table_rule(tokens, text_primary),
         font_size_pt=typo.size_for("small", typo.size_for("body") * 0.85),
         numbers_align="right",
     )

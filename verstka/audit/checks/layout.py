@@ -4,20 +4,21 @@ from __future__ import annotations
 
 import re
 
+from verstka.audit.checks.template import is_figure
 from verstka.audit.checks.common import CONTENT_TYPES, at_template_position, contains, fix, is_chrome_like, ru_count, ru_times, text_elements, text_height_needed_pt, title_element, usable_height_pt
 from verstka.audit.registry import AuditContext, check
 from verstka.rendering.fonts import text_width_pt
 from verstka.schemas.audit import CheckSpec, Issue
-from verstka.schemas.common import EMU_PER_PT
+from verstka.schemas.common import EMU_PER_PT, Bbox
 
 OUT_OF_BOUNDS = CheckSpec(id="out_of_bounds", title="Элемент вышел за границы слайда", severity="error", category="layout", description="Текст, таблица или диаграмма выходит за край слайда более чем на 1%; картинка — более чем на 25% своей площади.")
-OVERLAP = CheckSpec(id="overlap", title="Два блока наложились друг на друга", severity="error", category="layout", description="Два текстовых блока пересекаются более чем на 30% меньшего из них (вложенность в карточку не считается).")
+OVERLAP = CheckSpec(id="overlap", title="Два блока наложились друг на друга", severity="error", category="layout", description="Два текстовых блока пересекаются более чем на 30% меньшего из них (вложенность в карточку не считается). У рамки без заливки и обводки считается полоса, которую занимают её строки (по привязке к верху, центру или низу): пустая часть рамки ничего не закрывает.")
 TEXT_OVERFLOW = CheckSpec(id="text_overflow", title="Текст не поместился в свою рамку", severity="error", category="layout", description="Оценка высоты текста по метрикам шрифта превышает высоту рамки более чем на 8% (сильное переполнение — ошибка, лёгкое — предупреждение).")
 TEXT_CLIPPED = CheckSpec(id="text_clipped", title="Текст обрезан краем слайда", severity="error", category="layout", description="Рамка с текстом частично за пределами слайда.")
 MARGIN_VIOLATION = CheckSpec(id="margin_violation", title="Контент заходит в поля у краёв", severity="warn", category="layout", description="Текстовый блок начинается за пределами безопасной области шаблона (допуск 3% ширины).")
 GRID_ALIGNMENT = CheckSpec(id="grid_alignment", title="Блоки не выровнены по направляющим макета", severity="info", category="layout", description="Левый край текстового блока не совпадает ни с одной колонкой шаблона (допуск 1.5% ширины).")
 IMAGE_STRETCHED = CheckSpec(id="image_stretched", title="Картинка растянута, пропорции нарушены", severity="warn", category="layout", description="Пропорции рамки картинки отличаются от пропорций исходного изображения (с учётом кадрирования) более чем на 12%.")
-TABLE_CELL_WRAP = CheckSpec(id="table_cell_wrap", title="Слово в ячейке таблицы переносится по буквам", severity="warn", category="layout", description="Самое длинное слово в колонке нативной таблицы шире колонки (ширина рамки / число колонок минус отступы 2×7.2 пт) при размере шрифта таблицы шаблона — PowerPoint рвёт его посреди слова.")
+TABLE_CELL_WRAP = CheckSpec(id="table_cell_wrap", title="Слово в ячейке таблицы переносится по буквам", severity="warn", category="layout", description="Самое длинное слово в ячейке нативной таблицы шире своей колонки (ширина из a:gridCol минус поля ячейки; без сетки — ширина рамки / число колонок минус 2×7.2 пт) при кегле и начертании самой ячейки — PowerPoint рвёт его посреди слова.")
 
 TABLE_CELL_INSET_PT = 7.2  # default a:tcPr marL/marR
 _HARD_SPACE_RE = re.compile(r"[ \t\r\n]+")  # NBSP stays inside a word, as PowerPoint keeps it on one line
@@ -54,9 +55,31 @@ def text_clipped(ctx: AuditContext) -> list[Issue]:
     return out
 
 
+def _occupied(e, spacing: float) -> Bbox:
+    """The band of a text box its lines fill: a box without fill or outline shows only its text, so its empty part
+    (the ascender room over a figure set on the box's bottom) overlaps nothing."""
+    if e.fill_hex or e.line_hex:
+        return e.bbox
+    need, lines = text_height_needed_pt(e, spacing)
+    if lines == 1 and is_figure(e.text.strip()):
+        # a figure shows its digits: the ascender room of a 160 pt line over them is empty
+        from verstka.rendering.fonts import figure_metrics_em
+
+        size = max((r.size_pt or 0.0) for p in e.paragraphs for r in p.runs) or need
+        descent, digit_h = figure_metrics_em(any(r.bold for p in e.paragraphs for r in p.runs))
+        need = min(need, (descent + digit_h) * size * 1.05)
+    h = int(need * EMU_PER_PT) + e.insets_emu[1] + e.insets_emu[3]
+    if h >= e.bbox.h:
+        return e.bbox
+    anchor = e.anchor or "t"
+    y = e.bbox.y if anchor == "t" else (e.bbox.y2 - h if anchor == "b" else e.bbox.y + (e.bbox.h - h) // 2)
+    return Bbox(x=e.bbox.x, y=y, w=e.bbox.w, h=h)
+
+
 @check(OVERLAP)
 def overlap(ctx: AuditContext) -> list[Issue]:
     out: list[Issue] = []
+    spacing = ctx.manifest.tokens.typography.line_height
     for s in ctx.ir.slides:
         texts = [e for e in text_elements(s) if not is_chrome_like(e, ctx.ir, ctx.manifest)]
         seen: set[tuple[str, str]] = set()
@@ -64,10 +87,11 @@ def overlap(ctx: AuditContext) -> list[Issue]:
             for b in texts[i + 1 :]:
                 if (a.id, b.id) in seen:
                     continue
-                inter = a.bbox.intersection(b.bbox)
+                oa, ob = _occupied(a, spacing), _occupied(b, spacing)
+                inter = oa.intersection(ob)
                 if inter <= 0:
                     continue
-                smaller = min(a.bbox.area, b.bbox.area)
+                smaller = min(oa.area, ob.area)
                 if smaller <= 0:
                     continue
                 # a filled card holding a text box is intended nesting
@@ -201,23 +225,31 @@ def table_cell_wrap(ctx: AuditContext) -> list[Issue]:
             n_cols = max((len(r) for r in e.table.rows), default=0)
             if n_cols == 0:
                 continue
-            col_pt = e.bbox.w / EMU_PER_PT / n_cols - 2 * TABLE_CELL_INSET_PT  # the renderer and IR use uniform columns
-            worst: tuple[float, str, int] | None = None
+            grid = e.table.col_widths_emu if len(e.table.col_widths_emu) == n_cols and all(w > 0 for w in e.table.col_widths_emu) else None
+            uniform_pt = e.bbox.w / EMU_PER_PT / n_cols - 2 * TABLE_CELL_INSET_PT  # no grid: uniform columns
+            worst: tuple[float, str, int, float, float] | None = None
             for r_i, row in enumerate(e.table.rows):
                 for c_i, cell in enumerate(row):
+                    info = e.table.cells[r_i][c_i] if r_i < len(e.table.cells) and c_i < len(e.table.cells[r_i]) else None
+                    if grid and c_i < len(grid):  # the real column, less this cell's own margins, at its own size
+                        col_pt = grid[c_i] / EMU_PER_PT - ((info.mar_l_pt + info.mar_r_pt) if info else 2 * TABLE_CELL_INSET_PT)
+                    else:
+                        col_pt = uniform_pt
+                    cell_size = (info.size_pt if info and info.size_pt else size)
+                    cell_bold = info.bold if info and info.size_pt else (r_i == 0)
                     for word in _HARD_SPACE_RE.split(cell or ""):
                         if not word:
                             continue
-                        w_pt = text_width_pt(word, family, size, bold=(r_i == 0))
+                        w_pt = text_width_pt(word, family, cell_size, bold=cell_bold)
                         if w_pt > col_pt + 0.5 and (worst is None or w_pt - col_pt > worst[0]):
-                            worst = (w_pt - col_pt, word, c_i)
+                            worst = (w_pt - col_pt, word, c_i, col_pt, cell_size)
             if worst is not None:
-                over, word, c_i = worst
+                over, word, c_i, col_pt, w_size = worst
                 out.append(
                     ctx.new_issue(
                         TABLE_CELL_WRAP,
                         s.index,
-                        f"слово «{word}» ({col_pt + over:.0f} пт) шире колонки {c_i + 1} таблицы ({col_pt:.0f} пт при {size:g} пт) и рвётся по буквам",
+                        f"слово «{word}» ({col_pt + over:.0f} пт) шире колонки {c_i + 1} таблицы ({col_pt:.0f} пт при {w_size:g} пт) и рвётся по буквам",
                         bboxes=[e.bbox_frac],
                         element_ids=[e.id],
                         details={"word": word, "column": c_i, "word_pt": round(col_pt + over, 1), "column_pt": round(col_pt, 1), "cols": n_cols},

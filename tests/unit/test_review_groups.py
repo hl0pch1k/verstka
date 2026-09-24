@@ -292,9 +292,12 @@ def test_synth_cards_are_not_capsules_and_gutter_is_capped(simple_deck, tmp_path
     slide, _ = render_synth(b, LayoutSlide(outline_id="c", mode="synth", composition="cards"), oslide, m, ws, DeckOutline(title="T", slides=[oslide]))
     rects = [sh for sh in slide.shapes if sh.shape_type is not None and "AUTO_SHAPE" in str(sh.shape_type) and sh.width > W * 0.15]
     assert len(rects) == 3
+    # the cards are the template's own card (the fixture's default rounded rectangle, 0.4 H tall): its absolute corner
+    # is kept, capped at a quarter of the shorter side
+    sample_radius = 0.16667 * 0.40 * H
     for r in rects:
         assert r.adjustments[0] <= 0.25
-        assert r.adjustments[0] * min(r.width, r.height) <= 0.13 * 914400  # ≈ 0.12 inch corner
+        assert r.adjustments[0] * min(r.width, r.height) <= sample_radius * 1.02
     xs = sorted(r.left for r in rects)
     gap = xs[1] - (xs[0] + rects[0].width)
     assert gap <= 0.03 * W + 1

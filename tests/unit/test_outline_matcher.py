@@ -50,15 +50,18 @@ def test_matcher_on_simple_deck(simple_deck, tmp_path):
     assert len(plan.slides) == 12
     by_id = {s.outline_id: s for s in plan.slides}
     assert by_id["sl1"].mode == "clone" and manifest.patterns[0].kind == PatternKind.title
-    # 3 cards on the template, 4 needed → still the best clone candidate, with a capacity reason
+    # content slides are composed from the design system; the nearest sample stays on record as an explained alternative
     cards_plan = by_id["sl5"]
-    assert cards_plan.reasons and any("ячеек" in r or "ёмкость" in r for r in cards_plan.reasons)
-    # three KPI numbers fit the three-card pattern (cards is a fallback for stat_row) → clone with reasons; table has no fallback → synth
-    assert by_id["sl4"].mode == "clone" and by_id["sl4"].pattern_id == cards_plan.pattern_id
+    assert cards_plan.mode == "synth" and cards_plan.composition == "cards"
+    assert any("композиция cards" in r for r in cards_plan.reasons) and any("ближайший образец" in r for r in cards_plan.reasons)
+    assert cards_plan.alternatives and cards_plan.fit.get("items")
+    assert by_id["sl4"].mode == "synth" and by_id["sl4"].composition in ("stat_row", "big_number")
     assert by_id["sl7"].mode == "synth" and by_id["sl7"].composition == "table"
-    # chart → the image_text pattern (chart goes into the image slot)
-    image_pattern = next(p for p in manifest.patterns if p.kind == PatternKind.image_text)
-    assert by_id["sl6"].mode == "clone" and by_id["sl6"].pattern_id == image_pattern.id
+    assert by_id["sl6"].mode == "synth" and by_id["sl6"].composition == "chart_text"
+    # a sample that fits snugly may still be cloned: the threshold is the strategy's
+    loose = strategy.model_copy(update={"clone_fit": 0.0})
+    plan2 = match_outline(outline, manifest, loose)
+    assert {s.mode for s in plan2.slides} == {"clone", "synth"} and plan2.for_outline("sl5").mode == "clone"
     # score result is explainable
     cards_pattern = next(p for p in manifest.patterns if p.kind == PatternKind.cards)
     res = score_pattern(outline.slides[4], cards_pattern, manifest, strategy)

@@ -23,7 +23,7 @@ DUPLICATE_SLIDES = CheckSpec(id="duplicate_slides", title="Два слайда �
 CONTENT_MISSING = CheckSpec(id="content_missing", title="Часть запланированного контента пропала со слайда", severity="error", category="integrity", description="Заголовок, пункты списков, названия карточек, числа с подписями и заголовки колонок из плана ищутся в тексте слайда (включая ячейки таблиц) без учёта пробелов и регистра по первым 18 символам; ошибка, если нет трети и более строк, иначе предупреждение.")
 
 CONTENT_KEY_CHARS = 18
-_WS_RE = re.compile(r"[\s\u00a0\u202f\u2009\u2007]+")
+_WS_RE = re.compile(r"[\s\u00a0\u202f\u2009\u2007\u2060]+")
 
 
 @check(FILE_OPENS)
@@ -157,7 +157,7 @@ def chart_missing_labels(ctx: AuditContext) -> list[Issue]:
             problems = []
             if not c.has_data_labels and not c.has_value_axis:
                 problems.append("нет ни подписей данных, ни оси значений")
-            if len(c.series) > 1 and not c.has_legend:
+            if len(c.series) > 1 and not (c.has_legend or c.series_labels):  # series named on their labels need no legend
                 problems.append("несколько серий без легенды")
             fmt = c.number_format or ""
             has_unit = any(ch in fmt for ch in "%₽$") or '"' in fmt

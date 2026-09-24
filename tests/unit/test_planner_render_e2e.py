@@ -107,10 +107,10 @@ def test_render_demo_outline_on_simple_deck(simple_deck, tmp_path):
     result = render_deck(outline, plan, manifest, ws, tmp_path / "deck.pptx")
     prs = Presentation(str(result.pptx_path))
     assert len(prs.slides) == 12
-    texts = _deck_texts(result.pptx_path)
+    texts = [t.replace("\u00a0", " ") for t in _deck_texts(result.pptx_path)]  # no-break spaces are typesetting
     assert not any(looks_like_placeholder(t) for t in texts if t.strip()), [t for t in texts if looks_like_placeholder(t)]
     assert any("Умные напоминания" in t for t in texts) and any("Спасибо" in t for t in texts)
-    # cards slide cloned with the item titles
+    # the cards slide carries the item titles
     assert any("Напоминание из чата" in t for t in texts) and any("Дайджест" in t for t in texts)
     # native chart and table exist somewhere in the deck
     has_chart = any(sh.has_chart for s in prs.slides for sh in s.shapes)

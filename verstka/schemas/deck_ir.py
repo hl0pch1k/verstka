@@ -24,11 +24,34 @@ class IRParagraph(BaseModel):
     bullet: bool = False
     level: int = 0
     align: Optional[str] = None
+    line_spacing: Optional[float] = None  # explicit a:lnSpc/a:spcPct of the paragraph (0.9 = 90 %); None = inherited
+
+
+class IRPointLabel(BaseModel):
+    """A per-point data label override (c:dLbl)."""
+
+    deleted: bool = False
+    format: Optional[str] = None
+    color: Optional[str] = None
+    bold: Optional[bool] = None
+    size_pt: Optional[float] = None
+    series_name: bool = False  # «Было: 48» — the label names its series
+    position: Optional[str] = None
 
 
 class IRChartSeries(BaseModel):
     name: str
     values: list[float] = Field(default_factory=list)
+    color: Optional[str] = None  # fill (bars, areas, slices' default) or line colour
+    outline_only: bool = False  # a hollow bar (a plan)
+    dashed: bool = False
+    point_colors: dict[int, str] = Field(default_factory=dict)  # c:dPt fills (a highlighted bar, pie slices)
+    labels_shown: Optional[bool] = None  # the series' own c:dLbls/c:showVal
+    label_format: Optional[str] = None
+    label_color: Optional[str] = None
+    label_bold: Optional[bool] = None
+    label_size_pt: Optional[float] = None
+    point_labels: dict[int, IRPointLabel] = Field(default_factory=dict)
 
 
 class IRChart(BaseModel):
@@ -40,11 +63,29 @@ class IRChart(BaseModel):
     has_value_axis: bool = True
     colors: list[str] = Field(default_factory=list)
     number_format: Optional[str] = None
+    title: Optional[str] = None  # chart title or unit caption, top left
+    series_labels: bool = False  # series are named on their data labels (a legend's job)
+    axis_color: Optional[str] = None  # category label colour
+    rule_color: Optional[str] = None  # the category axis line
+    reversed_categories: bool = False
+
+
+class IRTableCell(BaseModel):
+    """How one table cell is set: the first run with text and the cell's own fill and side margins."""
+
+    size_pt: Optional[float] = None
+    bold: bool = False
+    color_hex: Optional[str] = None  # explicit srgb only (theme colours are left unresolved)
+    fill_hex: Optional[str] = None  # an opaque-enough solid cell fill
+    mar_l_pt: float = 7.2
+    mar_r_pt: float = 7.2
 
 
 class IRTable(BaseModel):
     rows: list[list[str]] = Field(default_factory=list)
     header_fill_hex: Optional[str] = None
+    col_widths_emu: list[int] = Field(default_factory=list)  # a:gridCol — the real columns, not width / n
+    cells: list[list[IRTableCell]] = Field(default_factory=list)  # same shape as rows
 
 
 class IRElement(BaseModel):

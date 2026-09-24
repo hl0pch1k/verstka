@@ -42,7 +42,10 @@ def _expand(hint: Optional[str]) -> set[str]:
     return words
 
 
-def pick_asset(manifest: TemplateManifest, ws: TemplateWorkspace, hint: Optional[str], kinds: tuple[str, ...] = ("illustration", "photo"), exclude: Optional[set[str]] = None, min_px: int = 200) -> Optional[Path]:
+def pick_asset(manifest: TemplateManifest, ws: TemplateWorkspace, hint: Optional[str], kinds: tuple[str, ...] = ("illustration", "photo"), exclude: Optional[set[str]] = None, min_px: int = 200, require_match: bool = False) -> Optional[Path]:
+    """The template picture that answers the hint. With require_match, a picture whose tags say nothing about the
+    hint is not returned: an untagged template (no vision model) would otherwise put a tablet frame or a store
+    screenshot next to a slide about operators."""
     exclude = exclude or set()
     cands = [a for a in manifest.assets if a.kind in kinds and a.id not in exclude and max(a.width, a.height) >= min_px and not a.path.endswith(".svg")]
     if not cands:
@@ -50,6 +53,8 @@ def pick_asset(manifest: TemplateManifest, ws: TemplateWorkspace, hint: Optional
     words = _expand(hint)
     cands.sort(key=lambda a: (-_score(a, words), -(a.width * a.height)))
     best = cands[0]
+    if require_match and _score(best, words) == 0:
+        return None
     return ws.dir / best.path
 
 

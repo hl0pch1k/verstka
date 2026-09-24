@@ -63,6 +63,30 @@ def _rollback(builder: DeckBuilder, snapshot: tuple[int, set[str]]) -> int:
     return removed
 
 
+def _give_geometry(builder: DeckBuilder) -> None:
+    """Every shape that is not a placeholder carries its own geometry: a box cut loose from a layout placeholder
+    would otherwise be a shape of no known kind to PowerPoint's object model and to python-pptx."""
+    from lxml import etree
+
+    from verstka.analysis.xmlns import q
+
+    for slide in builder.created:
+        for sp in slide._element.iter(q("p:sp")):
+            if sp.find(".//" + q("p:ph")) is not None:
+                continue
+            spPr = sp.find(q("p:spPr"))
+            if spPr is None or spPr.find(q("a:prstGeom")) is not None or spPr.find(q("a:custGeom")) is not None:
+                continue
+            geom = etree.Element(q("a:prstGeom"))
+            geom.set("prst", "rect")
+            etree.SubElement(geom, q("a:avLst"))
+            xfrm = spPr.find(q("a:xfrm"))
+            if xfrm is not None:
+                xfrm.addnext(geom)
+            else:
+                spPr.insert(0, geom)
+
+
 def render_deck(
     outline: DeckOutline,
     plan: LayoutPlan,
@@ -106,6 +130,7 @@ def render_deck(
         if progress:
             progress(f"rendered slide {i}/{n}", i / max(n, 1))
     builder.delete_original_slides()
+    _give_geometry(builder)
     builder.save(out_pptx)
     result.seconds = round(time.time() - t0, 2)
     log.info("rendered %d slides to %s in %.1fs", len(result.slides), out_pptx, result.seconds)

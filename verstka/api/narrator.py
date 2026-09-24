@@ -64,13 +64,18 @@ def describe_plan(outline: DeckOutline, plan: LayoutPlan, manifest: TemplateMani
     n_clone = sum(1 for s in plan.slides if s.mode == "clone" and s.pattern_id in patterns)
     n_synth = len(plan.slides) - n_clone
     head = f"Вариант «{strategy_title}»: {ru_count(len(outline.slides), 'слайд', 'слайда', 'слайдов')}"
-    head += f" — {n_clone} по образцам слайдов шаблона" + (f", {n_synth} собраны с нуля в его стиле" if n_synth else "") + "."
+    parts = []
+    if n_synth:
+        parts.append(f"{n_synth} свёрстаны по дизайн-системе шаблона (сетка, шрифты, цвета и карточки шаблона, размеры — под текст)")
+    if n_clone:
+        parts.append(f"{n_clone} — по образцам слайдов шаблона (обложка, разделители, финал)")
+    head += " — " + "; ".join(parts) + "."
     lines = [head]
     for i, osl in enumerate(outline.slides, 1):
         ps = plan.for_outline(osl.id)
         if ps is None:
             continue
-        how = f"по образцу слайда {patterns[ps.pattern_id].source_slide}" if ps.mode == "clone" and ps.pattern_id in patterns else "собран с нуля"
+        how = f"по образцу слайда {patterns[ps.pattern_id].source_slide}" if ps.mode == "clone" and ps.pattern_id in patterns else _composed(ps, patterns)
         lines.append(f"{i}. {kind_ru(osl.kind.value).capitalize()}: «{osl.headline[:60]}» — {how}")
     return "\n".join(lines)
 
@@ -91,8 +96,16 @@ def describe_slide_choice(outline: DeckOutline, plan: LayoutPlan, manifest: Temp
         if others:
             body += f" Подходили ещё {ru_count(others, 'макет', 'макета', 'макетов')}."
     else:
-        body = "Подходящего образца в шаблоне не нашлось, поэтому слайд собран с нуля — в цветах, шрифтах и сетке шаблона."
+        near = next((patterns[pid] for pid, _ in ps.alternatives if pid in patterns), None)
+        body = "Свёрстан по дизайн-системе шаблона: его сетка, шкала шрифтов, цвета и карточки, а размеры блоков рассчитаны под этот текст."
+        if near is not None:
+            body += f" Ближайший образец в шаблоне — слайд {near.source_slide} ({kind_ru(near.kind.value)}), {_match(ps.score)}; его геометрия под этот текст не подошла бы без пустот и мелкого шрифта."
     return f"{head} {body} Причины выбора — в панели «Почему этот слайд такой»."
+
+
+def _composed(ps, patterns) -> str:
+    near = next((patterns[pid] for pid, _ in ps.alternatives if pid in patterns), None)
+    return "свёрстан по дизайн-системе шаблона" + (f" (ближайший образец — слайд {near.source_slide})" if near is not None else "")
 
 
 FIX_RU = {

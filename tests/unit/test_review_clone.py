@@ -173,9 +173,10 @@ def test_r3_table_takes_grid_extent_and_stays_in_safe_area(tmp_path):
     assert t.left >= int(safe.x * W) - 1 and t.left + t.width <= int(safe.x2 * W) + 1
     assert t.top + t.height <= int(safe.y2 * H) + 1
     assert t.width >= 0.8 * W, f"table must use the grid width, got {t.width / W:.3f} of the slide"
-    # header alignment follows the column: text columns left, numeric columns right — same as the body
+    # header alignment follows the column: labels left, да/нет columns centred (as ✓ / —), numeric columns right — same
+    # as the body
     tbl = t.table
-    assert tbl.cell(0, 1).text_frame.paragraphs[0].alignment == tbl.cell(1, 1).text_frame.paragraphs[0].alignment == PP_ALIGN.LEFT
+    assert tbl.cell(0, 1).text_frame.paragraphs[0].alignment == tbl.cell(1, 1).text_frame.paragraphs[0].alignment == PP_ALIGN.CENTER
     assert tbl.cell(0, 3).text_frame.paragraphs[0].alignment == tbl.cell(1, 3).text_frame.paragraphs[0].alignment == PP_ALIGN.RIGHT
     assert tbl.cell(0, 0).text_frame.paragraphs[0].alignment == PP_ALIGN.LEFT
 
@@ -248,7 +249,8 @@ def test_r4c_title_subtitle_uses_empty_body_slot_below_title(tmp_path):
     pat = _pattern("p", 1, PatternKind.title, [_slot(title, SlotRole.title, size=60), _slot(sub, SlotRole.bullet_list, size=20)])
     oslide = OutlineSlide(id="s1", kind=PatternKind.title, headline="Умные напоминания", subtitle="Итоги пилота и план запуска")
     slide, warnings, _ = _clone(pptx, _manifest([pat]), pat, oslide, tmp_path)
-    texts = _texts(slide)
+    # covers bind short words to the next one with a no-break space («и\u00a0план»): compare the words
+    texts = {k: v.replace("\u00a0", " ") for k, v in _texts(slide).items()}
     assert texts[_sid(title)] == "Умные напоминания"
     assert texts.get(_sid(sub)) == "Итоги пилота и план запуска", texts
 
@@ -640,7 +642,7 @@ def test_vk_templates_render_demo_outline_without_lost_content(tmp_path):
                 elif sh.has_text_frame:
                     yield sh.text_frame.text
 
-        texts = "\n".join(t for s in prs.slides for t in _walk(s.shapes))
+        texts = "\n".join(t for s in prs.slides for t in _walk(s.shapes)).replace("\u00a0", " ").replace("\x0b", " ")
         assert "Итоги пилота" in texts, f"{name}: title subtitle lost"
         for b in outline.slides[7].content.columns[0].bullets + outline.slides[7].content.columns[1].bullets:
             assert b in texts, f"{name}: two_column bullet lost: {b!r}"

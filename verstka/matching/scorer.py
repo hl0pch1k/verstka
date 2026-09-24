@@ -9,6 +9,7 @@ from typing import Optional
 
 from verstka.matching.compat import kind_compat, needed_chars, needed_items
 from verstka.planning.strategies import Strategy
+from verstka.ru import bind_compounds
 from verstka.schemas.common import Family, PatternKind, SlotRole
 from verstka.schemas.outline import OutlineSlide
 from verstka.schemas.template import Pattern, TemplateManifest
@@ -19,11 +20,232 @@ _CONTENT_ROLES = (SlotRole.body, SlotRole.bullet_list, SlotRole.card_title, Slot
 _NUMBER_KINDS = {PatternKind.stat_row, PatternKind.big_number}
 
 
+_BOOKEND_KINDS = (PatternKind.title, PatternKind.section, PatternKind.thanks)
+# texts of a cover or closing sample that stand for data a deck never has (a speaker, his photo, a QR code): the
+# renderer removes them with their frames, so they neither count as clutter nor as competition for the heading
+_PLACEHOLDER_RE = re.compile(r"имя|фамили|должност|спикер|speaker|\bname\b|position|вставить|insert|\bqr\b|qr-|фото|photo|логотип|logo", re.I)
+# words a line must not end on (a preposition, a conjunction): they are bound to the next word with a no-break space
+_BOUND_WORDS = frozenset("в во на за с со к ко по о об от до из у и а но не ни да же ли бы".split())
+
+
 @dataclass
 class ScoreResult:
     score: float
     reasons: list[str] = field(default_factory=list)
     fit: dict = field(default_factory=dict)
+
+
+def is_placeholder_text(text: Optional[str]) -> bool:
+    """A sample text that asks for a speaker, a photo, a QR code or a logo."""
+    return bool(text and _PLACEHOLDER_RE.search(text))
+
+
+def bind_short_words(text: str) -> str:
+    """No-break spaces after one- and two-letter words and prepositions («в VK», «и план»), so that a display line
+    never ends on one."""
+    words = text.split(" ")
+    out = []
+    for i, w in enumerate(words):
+        out.append(w)
+        if i < len(words) - 1:
+            bare = w.lower().strip("«»\"(),.:;")
+            nxt = words[i + 1]
+            if nxt and not any(ch.isalnum() for ch in nxt):
+                out.append("\u00a0")  # a dash or a separator stays at the end of its line, never opens the next one
+            elif bare and any(ch.isalnum() for ch in bare) and (len(bare) <= 2 or bare in _BOUND_WORDS) and w[-1:] not in ",.:;":
+                out.append("\u00a0")
+            else:
+                out.append(" ")
+    return bind_compounds("".join(out))
+
+
+def display_lines(text: str, family: Optional[str], size_pt: float, bold: bool, width_pt: float) -> list[str]:
+    """Greedy wrap the way PowerPoint and LibreOffice break a heading: at ordinary spaces and after hyphens, never at a
+    no-break space. A word wider than the line is kept whole (the caller treats that as not fitting)."""
+    from verstka.rendering.fonts import text_width_pt
+
+    def width(s: str) -> float:
+        return text_width_pt(s.replace("\u00a0", " "), family, size_pt, bold)
+
+    tokens: list[str] = []  # pieces that may start a line; each keeps its trailing separator
+    for word in text.replace("\n", " ").split(" "):
+        if not word:
+            continue
+        parts = re.split(r"(?<=[^\s\u00a0-]-)(?=[^\s\u00a0\u2060-])", word)
+        tokens.extend(parts[:-1])
+        tokens.append(parts[-1] + " ")
+    lines: list[str] = []
+    cur = ""
+    for tok in tokens:
+        cand = cur + tok
+        if cur and width(cand.rstrip()) > width_pt:
+            lines.append(cur.rstrip())
+            cur = tok
+        else:
+            cur = cand
+    if cur.strip():
+        lines.append(cur.rstrip())
+    return lines or [""]
+
+
+def display_fit(text: str, family: Optional[str], size_pt: float, bold: bool, width_pt: float, max_lines: int, scale: Optional[list[float]] = None, floor: float = 0.45, word_room: float = 1.0) -> tuple[float, int]:
+    """The largest size ≤ `size_pt` at which a display heading takes at most `max_lines` lines of `width_pt` with no
+    word wider than `word_room` of the line: (size, lines). Steps follow the template's own sizes where they fall in
+    the range, with 5 % steps between them; below `floor` × size the smallest candidate is returned with its line
+    count."""
+    from verstka.rendering.fonts import text_width_pt
+
+    cands = {round(size_pt, 2)}
+    cands |= {round(s, 2) for s in (scale or []) if floor * size_pt <= s < size_pt}
+    k = 0.95
+    while k >= floor - 1e-9:
+        cands.add(round(size_pt * k, 1))
+        k -= 0.05
+    words = [w for w in re.split(r"[\s\u00a0]+|(?<=-)(?!\u2060)", text) if w]
+    last = (round(size_pt * floor, 1), 99)
+    for s in sorted(cands, reverse=True):
+        if any(text_width_pt(w, family, s, bold) > width_pt * word_room for w in words):
+            last = (s, 99)
+            continue
+        n = len(display_lines(text, family, s, bold, width_pt))
+        last = (s, n)
+        if n <= max_lines:
+            return s, n
+    return last
+
+
+def _break_tokens(text: str) -> list[str]:
+    """Pieces a display line may start with, as display_lines breaks: each keeps its trailing space."""
+    tokens: list[str] = []
+    for word in text.replace("\n", " ").split(" "):
+        if not word:
+            continue
+        parts = re.split(r"(?<=[^\s\u00a0-]-)(?=[^\s\u00a0\u2060-])", word)
+        tokens.extend(parts[:-1])
+        tokens.append(parts[-1] + " ")
+    return tokens
+
+
+# a word that closes a phrase («итоги пилота: …», «проблема — решение», a comma): a line likes to end after it
+_PHRASE_END = re.compile(r"[:;,\u2014\u2013.!?\u00bb)]$")
+# a Russian adjective or participle ending: it belongs with the noun that follows («умные / напоминания» reads broken)
+_ADJ_END = re.compile(r"(?:ый|ий|ой|ая|яя|ое|ее|ые|ие|ого|его|ому|ему|ую|юю|ых|их|ыми|ими)$", re.I)
+
+
+def balanced_lines(text: str, family: Optional[str], size_pt: float, bold: bool, width_pt: float, n_lines: int) -> Optional[list[str]]:
+    """The heading broken into exactly `n_lines` lines of at most `width_pt`, the way a typesetter breaks a display
+    heading: lines of even length, never a lone short word on the last line, a break after a colon, a dash or a comma
+    rather than inside a phrase, never between an adjective and its noun. None when no such break exists."""
+    from itertools import combinations
+
+    from verstka.rendering.fonts import text_width_pt
+
+    tokens = _break_tokens(text)
+    k = len(tokens)
+    if n_lines <= 1 or k < n_lines:
+        return None
+    cache: dict[tuple[int, int], float] = {}
+
+    def width(a: int, b: int) -> float:
+        if (a, b) not in cache:
+            cache[(a, b)] = text_width_pt("".join(tokens[a:b]).rstrip().replace("\u00a0", " "), family, size_pt, bold)
+        return cache[(a, b)]
+
+    best: Optional[tuple[float, tuple[int, ...]]] = None
+    for cuts in combinations(range(1, k), n_lines - 1):
+        bounds = (0, *cuts, k)
+        ws = [width(a, b) for a, b in zip(bounds, bounds[1:])]
+        top = max(ws)
+        if top > width_pt:
+            continue
+        cost = (top - min(ws)) / top if top else 0.0
+        if bounds[-1] - bounds[-2] == 1 and ws[-1] < 0.45 * top:
+            cost += 0.3  # a lone short word on the last line
+        for c in cuts:
+            word = tokens[c - 1].rstrip()
+            if _PHRASE_END.search(word):
+                cost -= 0.2
+            elif _ADJ_END.search(word.lower()) and len(word) > 3 and tokens[c][:1].isalpha():
+                cost += 0.15
+        if best is None or cost < best[0] - 1e-9:
+            best = (cost, bounds)
+    if best is None:
+        return None
+    b = best[1]
+    return ["".join(tokens[x:y]).rstrip() for x, y in zip(b, b[1:])]
+
+
+def awkward_breaks(lines: list[str]) -> int:
+    """How many line ends of a display heading split an adjective from its noun («Умные / напоминания»)."""
+    n = 0
+    for a, b in zip(lines, lines[1:]):
+        words = a.replace("\u00a0", " ").split()
+        last = words[-1] if words else ""
+        if len(last) > 3 and _ADJ_END.search(last.lower()) and not _PHRASE_END.search(last) and b[:1].isalpha():
+            n += 1
+    return n
+
+
+_TITLE_SPLIT = re.compile(r":\s+|\s+[—–]\s+")
+
+
+def split_display_title(text: str) -> tuple[str, Optional[str]]:
+    """«Умные напоминания в VK WorkSpace: итоги пилота и план запуска» → the cover heading «Умные напоминания в VK
+    WorkSpace» and its subtitle «Итоги пилота и план запуска». A heading of two phrases joined by a colon or a dash is
+    a title and a subtitle set on one line; on a cover each gets its own size. Unsplit when either part is a single
+    word or the head is too short to stand as a title."""
+    t = " ".join((text or "").split())
+    m = _TITLE_SPLIT.search(t)
+    if not m:
+        return t, None
+    head, tail = t[: m.start()].strip(), t[m.end() :].strip()
+    if len(head.split()) < 2 or len(head) < 10 or len(tail.split()) < 2:
+        return t, None
+    return head, tail[:1].upper() + tail[1:]
+
+
+def bookend_max_lines(kind: PatternKind, slot) -> int:
+    """How many lines the heading of a cover or a divider (3) or of a closing slide (2) may take."""
+    if kind == PatternKind.title:
+        return 3
+    if kind == PatternKind.section:
+        return 3
+    return 2
+
+
+def _bookend_title_fit(slide: OutlineSlide, pattern: Pattern, manifest: TemplateManifest) -> Optional[tuple[float, int, float, object]]:
+    """(fitted size, lines, fitted / sample size, title slot) of the slide heading set in the sample's title box —
+    measured, not counted in characters: a cover title may take three lines at up to 0.85 of the sample size."""
+    titles = [s for s in pattern.slots if s.role == SlotRole.title]
+    if not titles or not slide.headline:
+        return None
+    t = max(titles, key=lambda s: s.bbox.area)
+    typo = manifest.tokens.typography
+    size0 = t.style.size_pt or typo.size_for("display", typo.size_for("h1", 24.0) * 1.6)
+    x2 = t.bbox.x + t.bbox.w
+    for c in manifest.tokens.chrome:
+        # a picture of the layout that covers half of the heading box (a placeholder sized for the whole slide next
+        # to a supergraphic) is not meant to be written over: the heading ends where it begins
+        b = c.bbox
+        if c.kind == "pic" and pattern.layout_part and c.source == f"layout:{pattern.layout_part}" and b.w * b.h < 0.6:
+            if b.y < t.bbox.y + t.bbox.h and b.y + b.h > t.bbox.y and t.bbox.x + 0.12 < b.x < x2 and x2 - b.x >= 0.4 * t.bbox.w:
+                x2 = b.x - 0.015
+    # measured as the renderer sets it: 5 % of the line kept free, no word wider than 3/4 (bold) or 4/5 of the line
+    w_pt = ((x2 - t.bbox.x) * manifest.slide_size.w / 12700 - 14.4) * 0.95
+    if w_pt <= 20:
+        return None
+    scale = sorted({float(x) for x in (typo.sizes_used or [])} | {s.size_pt for s in typo.scale})
+    head = split_display_title(slide.headline)[0] if slide.kind == PatternKind.title else slide.headline.strip()
+    bold = bool(t.style.bold)
+    size, lines = display_fit(bind_short_words(head), t.style.font_family or typo.primary_family, size0, bold, w_pt, bookend_max_lines(slide.kind, t), scale, word_room=0.75 if bold else 0.8)
+    return size, lines, size / size0 if size0 else 1.0, t
+
+
+def same_words(a: Optional[str], b: Optional[str]) -> bool:
+    """Whether a heading repeats the sample's own text («Спасибо за внимание» on a «Спасибо за внимание!» sample)."""
+    wa = set(re.findall(r"\w{3,}", (a or "").lower()))
+    wb = set(re.findall(r"\w{3,}", (b or "").lower()))
+    return bool(wa and wb) and len(wa & wb) >= 0.5 * max(len(wa), len(wb))
 
 
 def _slot_capacity(pattern: Pattern, role: SlotRole) -> int:
@@ -54,7 +276,13 @@ def score_pattern(
     strategy: Strategy,
     prev_family: Optional[Family] = None,
     recent_ids: Optional[list[str]] = None,
+    cover: Optional[Pattern] = None,
+    divider: Optional[Pattern] = None,
 ) -> ScoreResult:
+    """How well `pattern` suits `slide` (0…1.2) with the reasons. `cover` is the sample the deck's cover was cloned
+    from: a closing slide answers it (same ground, ideally the same layout), the way a designer closes a deck, and a
+    divider is set a step below it. `divider` is the sample of the deck's first section divider: every divider of a
+    deck looks the same."""
     recent_ids = recent_ids or []
     reasons: list[str] = []
     fit: dict = {}
@@ -141,8 +369,30 @@ def score_pattern(
         cap = data_room  # no items to count: the capacity of such a slide is the room for its chart or table
     # text fit
     worst = 0.0
+    bookend = slide.kind in _BOOKEND_KINDS
+    title_fit = _bookend_title_fit(slide, pattern, manifest) if bookend else None
     for role_name, need in needed_chars(slide).items():
         role = SlotRole(role_name)
+        if title_fit is not None and role == SlotRole.title:
+            # the heading of a cover is measured in its box: three lines at 0.85 of the sample size are a perfect fit
+            # below that it still reads as a cover while it stays a display size, clearly above the slide headings
+            size_fit, lines_fit, ratio_fit, _ = title_fit
+            h1 = manifest.tokens.typography.size_for("h1", 0.0)
+            if ratio_fit >= 0.85 - 1e-6:
+                ratio = 1.0
+            elif ratio_fit >= 0.7 or (h1 and size_fit >= 1.2 * h1):
+                ratio = 1.15
+            elif not h1 or size_fit >= h1:
+                ratio = 1.5
+            else:
+                ratio = 2.0
+            fit["title_fit"] = f"{size_fit:g} пт, строк {lines_fit}"
+            worst = max(worst, ratio)
+            if ratio > 1.0:
+                fit[f"overflow_{role_name}"] = round(ratio, 2)
+            continue
+        if bookend and role == SlotRole.subtitle and any(s.role == SlotRole.subtitle for s in pattern.slots):
+            need = min(need, _slot_capacity(pattern, role))  # the subtitle box is re-set under the heading: it may wrap
         capacity = _slot_capacity(pattern, role)
         if capacity == 0:
             # bullets may go into a body slot and vice versa
@@ -186,6 +436,8 @@ def score_pattern(
             reasons.append("кольцевая инфографика, а числа — не проценты")
     n_items = needed_items(slide)
     text_slots = [s for s in pattern.slots if s.role in (SlotRole.body, SlotRole.bullet_list, SlotRole.card_title, SlotRole.card_body, SlotRole.number, SlotRole.number_label, SlotRole.caption)]
+    if bookend:
+        text_slots = [s for s in text_slots if not is_placeholder_text(s.sample_text)]  # speaker/QR blocks leave with their frames
     needed_slots = sum(1 for r in needed_roles if r not in ("title", "subtitle")) + max(n_items - 1, 0) * sum(1 for r in ("card_title", "card_body", "number", "number_label") if r in needed_roles)
     extra = max(len(text_slots) - max(needed_slots, 1), 0)
     clutter = min(0.3, 0.03 * extra)
@@ -215,10 +467,13 @@ def score_pattern(
         fam = 0.5
         reasons.append(f"семья {pattern.family.value} отличается от предыдущего слайда")
 
-    diversity = -0.15 if pattern.id in recent_ids else 0.0
+    # covers and closing slides are single; the same divider for every section is the template's own rhythm — a
+    # repeat only breaks ties between equally good dividers
+    diversity = (0.0 if slide.kind in (PatternKind.title, PatternKind.thanks) else -0.04 if bookend else -0.15) if pattern.id in recent_ids else 0.0
     if diversity:
         reasons.append("паттерн уже использован недавно")
-    weight = strategy.weight(pattern.kind.value) if pattern.kind == slide.kind else 1.0
+    # the strategy weighs which kinds of slides to plan; the sample of a cover, divider or closing slide is chosen on fit
+    weight = strategy.weight(pattern.kind.value) if pattern.kind == slide.kind and not bookend else 1.0
     if weight != 1.0:
         reasons.append(f"вес стратегии {strategy.name} для типа: ×{weight:.2f}")
     # a large sample image (photo, screenshot, chart picture) that the content cannot replace would stay as stale sample content
@@ -229,7 +484,7 @@ def score_pattern(
         reasons.append("крупная картинка-образец останется без замены")
     # a decorative picture in the middle of the content area (a chart snapshot, a KPI ring) says the sample's own story
     stale_decor = [b for b in pattern.decor_boxes if b.area >= 0.08 and 0.15 < b.y + b.h / 2 < 0.85 and 0.15 < b.x + b.w / 2 < 0.85]
-    if stale_decor and not has_visual:
+    if stale_decor and not has_visual and not bookend:  # on a cover or divider the sample's art is the point
         kind *= 0.6
         reasons.append("крупная иллюстрация образца посреди слайда не относится к содержанию")
     # strategy flavour: visual favours decorated/illustrated samples, compact favours denser samples, structured plain ones
@@ -249,10 +504,41 @@ def score_pattern(
         titles = [x for x in pattern.slots if x.role == SlotRole.title]
         size = max((x.style.size_pt or 0.0 for x in titles), default=0.0)
         ref = typo.size_for("display", typo.size_for("h1", 24.0) * 1.6)
-        others = sum(1 for x in pattern.slots if x.role in (SlotRole.body, SlotRole.bullet_list, SlotRole.card_title, SlotRole.card_body))
-        cover = 0.12 * min(size / ref, 1.0) - 0.03 * min(others, 4) if ref else 0.0
-        style += cover
-        reasons.append(f"обложка: заголовок {size:.0f} пт, других текстов {others}: {cover:+.2f}")
+        if title_fit is not None:
+            size = title_fit[0]  # the size the heading really gets, not the sample's
+        others = sum(1 for x in pattern.slots if x.role in (SlotRole.body, SlotRole.bullet_list, SlotRole.card_title, SlotRole.card_body) and not is_placeholder_text(x.sample_text))
+        hero = 0.12 * min(size / ref, 1.0) - 0.03 * min(others, 4) if ref else 0.0
+        style += hero
+        reasons.append(f"обложка: заголовок {size:.0f} пт, других текстов {others}: {hero:+.2f}")
+        h1 = typo.size_for("h1", 0.0)
+        sample_size = max((x.style.size_pt or 0.0 for x in titles), default=0.0)
+        if h1 and sample_size and sample_size < 1.15 * h1:
+            # a heading at the size of a content heading: the sample is a content page, not a cover or a divider
+            style -= 0.15
+            reasons.append(f"заголовок образца ({sample_size:.0f} пт) не крупнее заголовка слайда ({h1:.0f} пт): это не обложка")
+        photos = [x for x in pattern.slots if x.role == SlotRole.image and x.bbox.area >= 0.015]
+        if photos and not content.image_hint:
+            style -= 0.06
+            reasons.append("место под фото спикера останется пустым и уйдёт: слайд без него беднее")
+        if title_fit is not None and title_fit[1] >= 2 and (title_fit[3].style.align or "") == "ctr":
+            style -= 0.12
+            reasons.append("заголовок по центру в несколько строк читается хуже, чем выровненный влево")
+        if same_words(slide.headline, next((x.sample_text for x in titles if x.sample_text), None)):
+            style += 0.06
+            reasons.append("образец сделан под этот же текст заголовка")
+        if slide.kind == PatternKind.section and cover is not None:
+            cover_size = max((x.style.size_pt or 0.0 for x in cover.slots if x.role == SlotRole.title), default=0.0)
+            if pattern.id == cover.id or (cover_size and abs(sample_size - cover_size) <= 0.05 * cover_size):
+                style -= 0.08
+                reasons.append("разделитель того же кегля, что обложка, выглядит второй обложкой")
+        if slide.kind == PatternKind.section and divider is not None and pattern.id == divider.id:
+            style += 0.1
+            reasons.append("все разделители колоды одинаковы")
+        if slide.kind == PatternKind.thanks and cover is not None:
+            echo = (0.05 if pattern.family == cover.family else 0.0) + (0.03 if pattern.layout_part and pattern.layout_part == cover.layout_part else 0.0)
+            if echo:
+                style += echo
+                reasons.append(f"закрывает колоду в паре с обложкой (слайд {cover.source_slide}): {echo:+.2f}")
     # the strategy weight scales only the kind term, so it cannot lift a pattern with failed capacity above 1.0
     base = 0.45 * kind * weight + 0.25 * cap + 0.1 * text + 0.05 * fam + 0.1 * pattern.quality + diversity - clutter + style
     score = max(0.0, min(1.2, base))

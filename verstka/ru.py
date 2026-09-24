@@ -50,3 +50,44 @@ def ru_count(n: int, one: str, few: str, many: str) -> str:
 def ru_times(ratio: float) -> str:
     """«в 1,3 раза» — a ratio the Russian way (decimal comma)."""
     return f"в {ratio:.1f} раза".replace(".", ",")
+
+
+NBSP = "\u00a0"
+_BIND_AFTER = frozenset("в во на за с со к ко по о об от до из у и а но не ни же ли бы".split())
+_UNIT_RE = __import__("re").compile(r"(?<=\d)[ ](?=(?:%|₽|руб|тыс|млн|млрд|ч\b|мин|сек|дн|мес|лет|год|раз|шт|ГБ|ТБ|МБ|×))")
+_THOUSANDS_RE = __import__("re").compile(r"(?<=\d)[ ](?=\d{3}\b)")
+_NUM_NOUN_RE = __import__("re").compile(r"(?<![\w.,])(\d+(?:[.,]\d+)?)[ ](?=[A-Za-zА-Яа-яЁё])")  # «4 GPU-сервера», «за 2 секунды»
+
+
+WJ = "\u2060"  # word joiner: invisible, no glyph needed (Play has no no-break hyphen)
+_COMPOUND_RE = __import__("re").compile(r"(?<=[^\W_])-(?=[^\W_])")
+
+
+def bind_compounds(text: str) -> str:
+    """A short compound word never breaks at its hyphen («GPU-сервера», «контакт-центра»): a word joiner after the
+    hyphen. A long compound may still break there."""
+    if "-" not in text:
+        return text
+    return "".join(_COMPOUND_RE.sub("-" + WJ, w) if len(w.strip("«»\"(),.:;!?")) <= 16 and WJ not in w else w for w in __import__("re").split(r"([ \u00a0]+)", text))
+
+
+def typeset(text: str) -> str:
+    """Russian display typesetting with no-break spaces: a dash never starts a line, a short preposition or
+    conjunction never ends one, a figure stays with its unit, its thousands and its noun («12 400», «27 млн ₽»,
+    «4 сервера»), a short compound word keeps its hyphen («GPU-сервера»)."""
+    if not text:
+        return text
+    t = text.replace(" — ", NBSP + "— ").replace(" – ", NBSP + "– ")
+    t = _THOUSANDS_RE.sub(NBSP, t)
+    t = _UNIT_RE.sub(NBSP, t)
+    t = _NUM_NOUN_RE.sub(lambda m: m.group(1) + NBSP, t)
+    t = t.replace(" ₽", NBSP + "₽")
+    t = bind_compounds(t)
+    words = t.split(" ")
+    out = []
+    for i, w in enumerate(words):
+        out.append(w)
+        if i < len(words) - 1:
+            bare = w.lower().strip("«»\"(")
+            out.append(NBSP if bare in _BIND_AFTER and not w.endswith((",", ".", ":", ";")) else " ")
+    return "".join(out)

@@ -116,6 +116,19 @@ def _attach(block: "_Block", extra: list[str]) -> None:
         block.notes = (block.notes + "\n" if block.notes else "") + " ".join(e + "." for e in extra)
 
 
+def _table_head(title: str, tbl) -> str:
+    """A table slide's heading when the brief gives none: the section's topic said as a comparison — «Результаты
+    пилота: до и после», and «Сравнение вариантов» as it is (not «Сравнение вариантов: сравнение»)."""
+    if not title:
+        return "Сравнение"
+    if "сравн" in title.lower():
+        return title
+    cols = " ".join(tbl.columns).lower()
+    if re.search(r"\bдо\b", cols) and "после" in cols:
+        return f"{title}: до и после"
+    return f"{title}: сравнение"
+
+
 def _blocks_of(sec: H.Section, facts: FactsExtraction, series_by_span: dict, closing: bool) -> list[_Block]:
     out: list[_Block] = []
     title = sec.title or ""
@@ -181,10 +194,10 @@ def _blocks_of(sec: H.Section, facts: FactsExtraction, series_by_span: dict, clo
                 unit = tbl.columns[0].split(",", 1)[1].strip() if "," in tbl.columns[0] else ""
                 head = f"{title or tot[0]}: {tot[1][0]} → {tot[1][1]} {unit}".strip()
             spec = ChartSpec(type=chart_type or "column", series_ids=[x.id for x in series], unit=series[0].unit, highlight_index=len(series[0].values) - 1 if chart_type == "column" else None)
-            out.append(_Block(PatternKind.chart, head or lead or (f"{title}: сравнение" if title else "Сравнение"), title, SlideContent(chart=spec), "chart"))
+            out.append(_Block(PatternKind.chart, head or lead or _table_head(title, tbl), title, SlideContent(chart=spec), "chart"))
             out[-1].content.table = tbl  # kept for strategies that prefer the table
         else:
-            out.append(_Block(PatternKind.table, lead or (f"{title}: сравнение" if title else "Сравнение"), title, SlideContent(table=tbl), "table"))
+            out.append(_Block(PatternKind.table, lead or _table_head(title, tbl), title, SlideContent(table=tbl), "table"))
     # what is left is running text: a thesis slide, headed by its first statement
     rest = [r for r in rest if r.strip()]
     if rest:
@@ -229,7 +242,12 @@ def _two_column(a: _Block, b: _Block) -> _Block:
         if x.content.items and x.headline and x.headline != x.section:
             return SlideItem(title=x.headline, bullets=[H.short(l, 12) for l in lines[:4]])
         return SlideItem(title=x.section or x.headline, bullets=[H.short(l, 12) for l in lines[:4]])
-    head = f"{a.section or a.headline} и {b.section[:1].lower() + b.section[1:] if b.section else b.headline}" if a.section and b.section else a.headline
+    head = a.headline
+    if a.section and b.section:
+        first, second = a.section, b.section[:1].lower() + b.section[1:]
+        # «Контекст и проблема и что сделали» doubles the «и»: a name that has its own «и» is joined by a dash
+        joint = " — " if " и " in f" {first} " or " и " in f" {second} " else " и "
+        head = f"{first}{joint}{second}"
     return _Block(PatternKind.two_column, head, a.section, SlideContent(columns=[col(a), col(b)]), "text")
 
 
@@ -319,6 +337,15 @@ def basic_outline(brief: Brief, facts: FactsExtraction, strategy: Strategy, targ
         for b in blocks:
             if b.role == "kpi_small":
                 b.role = "kpi"
+                # the figures are said once: on the tiles, not again in the text slide of their section
+                said = {H.strip_end(k.sentence) for k in b.kpis}
+                for t in blocks:
+                    if t.role == "text" and t.section == b.section:
+                        t.content.bullets = [x for x in t.content.bullets if H.strip_end(x) not in said]
+                        t.content.paragraphs = [x for x in t.content.paragraphs if H.strip_end(x) not in said]
+                        if len(t.content.bullets) == 1:
+                            t.content.paragraphs, t.content.bullets = t.content.bullets + t.content.paragraphs, []
+        blocks = [b for b in blocks if not (b.role == "text" and not (b.content.bullets or b.content.paragraphs or b.content.items))]
     else:
         blocks = [b for b in blocks if b.role != "kpi_small"]
     if name == "visual":
@@ -330,6 +357,15 @@ def basic_outline(brief: Brief, facts: FactsExtraction, strategy: Strategy, targ
         if key_kpi is not None:
             summary = _Block(PatternKind.big_number, H.short(key_kpi.sentence, 11), "", SlideContent(numbers=[NumberCallout(value=key_kpi.value, label=key_kpi.label, fact_id=_fact_id(facts, key_kpi.value))]), "kpi")
             blocks.insert(0, summary)
+            # the hero figure is said once: the tiles it came from keep the other figures (when two or more remain)
+            same = lambda v: re.sub(r"\s", "", v) == re.sub(r"\s", "", key_kpi.value)  # noqa: E731
+            for b in blocks[1:]:
+                nums = b.content.numbers
+                if any(same(n.value) for n in nums) and len([n for n in nums if not same(n.value)]) >= 2:
+                    b.content.numbers = [n for n in nums if not same(n.value)]
+                items = b.content.items
+                if any(it.number and same(it.number) for it in items) and len([it for it in items if not (it.number and same(it.number))]) >= 2:
+                    b.content.items = [it for it in items if not (it.number and same(it.number))]
     elif name == "compact":
         merged: list[_Block] = []
         floor = 8 - 2  # title and thanks come on top: a compact deck still has at least eight slides
@@ -354,7 +390,7 @@ def basic_outline(brief: Brief, facts: FactsExtraction, strategy: Strategy, targ
                 b.content.table = None
     slides: list[OutlineSlide] = [OutlineSlide(id="sl1", kind=PatternKind.title, headline=title, subtitle=brief.audience or None)]
     if name == "structured" and len(sections) >= 3:
-        agenda_items = [SlideItem(title=sec.title) for sec in sections if sec.title][:6]
+        agenda_items = [SlideItem(title=sec.title) for sec in sections if sec.title][:8]  # the agenda names every section
         slides.append(OutlineSlide(id="sl2", kind=PatternKind.agenda, headline="О чём поговорим", content=SlideContent(items=agenda_items)))
     for b in blocks:
         slides.append(OutlineSlide(id=f"sl{len(slides) + 1}", kind=b.kind, section=b.section or None, headline=b.headline, subtitle=b.subtitle, content=b.content, notes=b.notes, fact_refs=b.fact_refs))

@@ -20,6 +20,10 @@ class Strategy(BaseModel):
     slide_ratio: float = 1.0
     synth_threshold: float = 0.45
     prefer_clone: float = 1.0
+    # content slides are composed from the template's design system (grid, type scale, its card shape); a sample
+    # slide is cloned for covers, dividers and the final slide, and for content only when its fit reaches clone_fit
+    compose_content: bool = True
+    clone_fit: float = 9.0  # off: no content sample has shown a fit worth its geometry yet
 
     def weight(self, kind: str) -> float:
         return float(self.kind_weights.get(kind, 1.0))
