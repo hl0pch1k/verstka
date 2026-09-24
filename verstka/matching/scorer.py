@@ -114,6 +114,11 @@ def score_pattern(
             elif n > group.max_n:
                 cap = 0.15 if n > group.max_n + 1 else 0.4
                 reasons.append(f"не хватает ячеек: нужно {n}, максимум {group.max_n}")
+            if group.axis == "grid" and group.rows * group.cols > n_cells and n < n_cells:
+                # cells set in a zigzag (LCT roadmap: three above, two below, joined by lines): with a cell left
+                # empty the figure breaks — a hole in the zigzag and connectors leading nowhere
+                cap = min(cap, 0.55)
+                reasons.append("ячейки стоят зигзагом: с пустой ячейкой макет развалится")
             if group.cell_bbox.area < 0.02 and slide_kind in (PatternKind.cards, PatternKind.process, PatternKind.comparison, PatternKind.team, PatternKind.two_column):
                 cap = min(cap, 0.2)
                 reasons.append("ячейки слишком малы для карточек")
