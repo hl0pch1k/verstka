@@ -144,6 +144,8 @@ export interface DeckOutline {
   purpose: string | null;
   strategy: string;
   language: string;
+  /** "rules" | "model" | "skeleton" (a topic without theses) | "shared:<strategy>" (another variant's model plan). */
+  planned_by?: string;
   slides: OutlineSlide[];
   facts: Fact[];
   series: Series[];

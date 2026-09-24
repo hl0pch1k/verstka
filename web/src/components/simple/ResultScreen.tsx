@@ -1,7 +1,7 @@
 // The second screen: the deck. Three variants to switch, the slide big with thumbnails under it, one «Скачать»
 // button. What an expert wants (quality check, why a slide looks so, plan, template, files) opens in the drawer.
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ChevronRight, Download, FileText, HelpCircle, LayoutTemplate, ListTree, ShieldCheck, Wrench } from "lucide-react";
+import { ArrowLeft, ChevronRight, Download, FileText, HelpCircle, Info, LayoutTemplate, ListTree, ShieldCheck, Wrench } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { slideCount } from "../../lib/narrate";
 import { templateName, variantHint } from "../../lib/plain";
@@ -86,6 +86,14 @@ function Deck({ generation }: { generation: Generation }) {
   const quality =
     errors === null ? "Проверка не запускалась" : errors === 0 ? (warnings ? `Ошибок нет, ${plural(warnings, "мелкое замечание", "мелких замечания", "мелких замечаний")}` : "Ошибок нет") : `${plural(errors, "ошибка", "ошибки", "ошибок")} — можно исправить автоматически`;
   const open = (d: DetailKey) => setDetail(d);
+  // why the deck is thin, when it is: a topic without theses, or much less text than slides asked for
+  const skeleton = variant.outline?.planned_by === "skeleton";
+  const asked = generation.slides ?? null;
+  const notice = skeleton
+    ? "Это каркас: в тексте была только тема. Допишите тезисы и цифры — слайды станут содержательными."
+    : asked && asked - total >= 3
+      ? `${plural(total, "слайд", "слайда", "слайдов")} вместо ${asked}: материала в тексте меньше, а факты Verstka не придумывает.`
+      : null;
 
   return (
     <div className="mx-auto max-w-[1280px] space-y-5 pb-10">
@@ -112,6 +120,14 @@ function Deck({ generation }: { generation: Generation }) {
           )}
         </div>
       </div>
+
+      {notice && (
+        <div className="flex items-center gap-3 rounded-2xl bg-amber-50 py-2 pl-4 pr-2 text-[14px] leading-5 text-amber-950 animate-fade">
+          <Info className="h-[18px] w-[18px] shrink-0 text-amber-600" aria-hidden />
+          <p className="min-w-0 flex-1 truncate" title={notice}>{notice}</p>
+          <Button size="sm" variant="secondary" className="bg-white shadow-card hover:bg-zinc-50" onClick={() => setScreen("create")}>Дописать текст</Button>
+        </div>
+      )}
 
       {generation.variants.length > 1 && (
         <div role="radiogroup" aria-label="Вариант оформления" className={cn("grid gap-3", generation.variants.length >= 3 ? "grid-cols-3" : "grid-cols-2")}>
@@ -168,6 +184,7 @@ function Deck({ generation }: { generation: Generation }) {
             onAspect={setNaturalAspect}
             onZoom={() => setZoom(true)}
             onOpenIssues={() => open("quality")}
+            reserve={notice ? 56 : 0}
           />
           <SlideStrip variant={variant} rev={rev} total={total} selected={selectedSlide} aspect={aspect} issueMap={issueMap} onSelect={setSelectedSlide} />
           <SlideLightbox open={zoom} src={src} slide={selectedSlide} total={total} headline={outlineSlide?.headline ?? ""} aspect={aspect} onSelect={setSelectedSlide} onClose={() => setZoom(false)} />

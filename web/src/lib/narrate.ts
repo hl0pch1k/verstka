@@ -37,6 +37,9 @@ export function describeGeneration(g: Generation, strategyTitle: (name: string) 
     return { strategy: v.strategy, score, line: `• ${strategyTitle(v.strategy)} — ${parts.join(", ")}` };
   });
   const head = `Готово: ${plural(g.variants.length, "вариант", "варианта", "вариантов")}${g.seconds ? ` за ${fmtSeconds(g.seconds)}` : ""}.`;
+  if (g.variants.every((v) => v.outline?.planned_by === "skeleton")) {
+    return `${head}\nВ тексте была только тема, поэтому это каркас: титул, повестка и разделы с подсказками в заметках. Допишите тезисы и цифры — Verstka соберёт содержательные слайды.`;
+  }
   const scored = rows.filter((r) => r.score !== null);
   const best = scored.length > 1 ? scored.reduce((a, b) => ((b.score ?? 0) > (a.score ?? 0) ? b : a)) : null;
   const tail = best

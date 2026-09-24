@@ -1,7 +1,7 @@
 // The first screen: ① choose a template, ② say what the deck is about, one button. Everything else (purpose,
 // variants of layout, the model) waits behind «Дополнительные настройки». The draft survives reloads.
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
-import { ArrowRight, Check, ChevronDown, FileText, Minus, Paperclip, Plus, Presentation, ShieldCheck, Unlock } from "lucide-react";
+import { ArrowRight, Check, ChevronDown, FileText, Info, Minus, Paperclip, Plus, Presentation, ShieldCheck, Unlock } from "lucide-react";
 import { errText } from "../../lib/narrate";
 import { cn, LS, plural, storage } from "../../lib/utils";
 import { useApp } from "../../store";
@@ -11,6 +11,7 @@ import { TemplatePicker } from "./TemplatePicker";
 
 const clampSlides = (n: number) => Math.min(SLIDES_MAX, Math.max(SLIDES_MIN, Number.isFinite(n) ? Math.round(n) : SLIDES_DEFAULT));
 const MAX_BRIEF_BYTES = 2 * 1024 * 1024;
+const SHORT_BRIEF = 280; // shorter than this a brief is a topic rather than theses
 
 interface Draft { brief: string; audience: string; purpose: string; slides: number }
 
@@ -219,6 +220,16 @@ export function CreateScreen() {
             </span>
           )}
         </div>
+
+        {/* a topic alone makes a skeleton: say so before the person waits for a full deck */}
+        {briefLen >= BRIEF_MIN && briefLen < SHORT_BRIEF && !(showErrors && problem) && (
+          <p className="mt-3 flex items-start gap-2 rounded-xl bg-amber-50 px-3.5 py-2.5 text-[13px] leading-5 text-amber-900 animate-fade">
+            <Info className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" aria-hidden />
+            {useModels && modelsConfigured
+              ? "Текста немного: модель предложит структуру, но цифры и факты возьмёт только из вашего текста — добавьте их, если есть."
+              : "Текста немного: Verstka не придумывает факты, поэтому получится каркас из разделов. Добавьте тезисы и цифры — слайды станут содержательными."}
+          </p>
+        )}
 
         <div className="mt-6 grid grid-cols-[auto_minmax(0,1fr)] items-end gap-6 border-t border-zinc-100 pt-6">
           <div>

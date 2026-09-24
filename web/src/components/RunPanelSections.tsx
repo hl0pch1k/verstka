@@ -2,6 +2,7 @@
 import type { ReactNode } from "react";
 import { cn, fmtSeconds, fmtWhen, plural, scoreTone, shortSha } from "../lib/utils";
 import type { AuditSummary, RunManifest } from "../types";
+import { plannedByText } from "../lib/plain";
 import { describeFix } from "./AuditFixes";
 import { normalizeFix } from "./AuditHelpers";
 import { Badge } from "./ui/Badge";
@@ -48,13 +49,13 @@ export function Table({ head, rows, empty }: { head: string[]; rows: ReactNode[]
   );
 }
 
-export function Facts({ m, strategyTitle }: { m: RunManifest; strategyTitle(name: string): string }) {
+export function Facts({ m, strategyTitle, plannedBy }: { m: RunManifest; strategyTitle(name: string): string; plannedBy?: string }) {
   const facts: Array<{ label: string; value: ReactNode; title?: string }> = [
-    { label: "Версия Verstka", value: <span>{m.verstka_version}{m.git_commit && <span className="ml-1.5 font-mono text-xs text-zinc-500">{shortSha(m.git_commit)}</span>}</span>, title: m.git_commit ? `git commit ${m.git_commit}` : undefined },
+    { label: "Версия Verstka", value: <span>{m.verstka_version}{m.git_commit && <span className="ml-1.5 font-mono text-xs text-zinc-500">{shortSha(m.git_commit)}</span>}</span>, title: [m.git_commit ? `git commit ${m.git_commit}` : null, m.platform].filter(Boolean).join("\n") },
     { label: "Собран", value: fmtWhen(m.created_at), title: m.created_at },
     { label: "Вариант", value: strategyTitle(m.strategy), title: m.strategy },
     { label: "Шаблон", value: m.template.file, title: m.template.id },
-    { label: "Платформа", value: m.platform },
+    { label: "План составил", value: plannedByText(plannedBy, strategyTitle), title: plannedBy },
     { label: "Хэш текста / плана", value: <span className="font-mono text-xs">{shortSha(m.inputs.brief_sha256)} / {shortSha(m.inputs.outline_sha256)}</span>, title: `brief ${m.inputs.brief_sha256 ?? "—"}\noutline ${m.inputs.outline_sha256}` },
   ];
   return (

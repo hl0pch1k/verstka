@@ -168,7 +168,7 @@ export function RunPanel() {
       ) : (
         <>
           <Section title="Сведения о запуске" hint="Из run_manifest.json — по нему любую презентацию можно воспроизвести">
-            <Facts m={m} strategyTitle={strategyTitle} />
+            <Facts m={m} strategyTitle={strategyTitle} plannedBy={outline?.planned_by} />
           </Section>
           <div className="grid grid-cols-2 gap-4">
             <Providers m={m} />

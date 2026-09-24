@@ -27,6 +27,8 @@ interface Props {
   onZoom(): void;
   /** Opens the full list of remarks (the quality check). */
   onOpenIssues(): void;
+  /** Extra height taken above the slide on this screen (a notice): the slide shrinks so the thumbnails stay in view. */
+  reserve?: number;
 }
 
 const BOX: Record<Severity, string> = {
@@ -79,7 +81,7 @@ function Overlay({ issue, box, highlighted, onHighlight }: { issue: Issue; box: 
   );
 }
 
-export function VariantsSlidePreview({ src, slide, total, headline, kind, issues, aspect, showIssues, onToggleIssues, highlightId, onHighlight, onSelect, onAspect, onZoom, onOpenIssues }: Props) {
+export function VariantsSlidePreview({ src, slide, total, headline, kind, issues, aspect, showIssues, onToggleIssues, highlightId, onHighlight, onSelect, onAspect, onZoom, onOpenIssues, reserve = 0 }: Props) {
   const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
   const failed = !src || failedSrc === src;
@@ -136,7 +138,7 @@ export function VariantsSlidePreview({ src, slide, total, headline, kind, issues
           onClick={failed ? undefined : onZoom}
           className={cn("relative mx-auto overflow-hidden rounded-xl bg-zinc-100 shadow-inner-line", !failed && "cursor-zoom-in")}
           // the slide shrinks with the window height so the thumbnails under it stay on screen
-          style={{ aspectRatio: String(aspect), width: `min(100%, max(520px, calc((100vh - 500px) * ${aspect.toFixed(4)})))` }}
+          style={{ aspectRatio: String(aspect), width: `min(100%, max(520px, calc((100vh - ${500 + reserve}px) * ${aspect.toFixed(4)})))` }}
         >
           {/* the previous slide stays under the next one until it has loaded: no flash of a placeholder */}
           {loading && loadedSrc && loadedSrc !== src && (
