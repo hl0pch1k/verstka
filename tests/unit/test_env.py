@@ -35,3 +35,18 @@ def test_no_dotenv_switch_skips_implicit_files_only(tmp_path, monkeypatch):
     assert load_env([env]) == [env] and os.environ["VERSTKA_TEST_EXPLICIT"] == "yes"
     monkeypatch.delenv("VERSTKA_TEST_EXPLICIT", raising=False)
     assert "OPENROUTER_API_KEY" not in os.environ  # the repo's .env never leaks into tests
+
+
+def test_linux_previews_see_the_bundled_play_font(tmp_path, monkeypatch):
+    """LibreOffice ignores the fonts embedded in a PPTX: on Linux the bundled Play is added through fontconfig, so the
+    previews and PDFs of VK decks are set in the template's font rather than a substitute."""
+    import verstka.ingest.render as render
+
+    monkeypatch.setattr(render.sys, "platform", "linux")
+    conf = render._fontconfig(tmp_path)
+    assert conf is not None
+    text = open(conf, encoding="utf-8").read()
+    assert str(render._FONT_DIR) in text and "/etc/fonts/fonts.conf" in text
+    assert (render._FONT_DIR / "Play-Regular.ttf").exists()
+    monkeypatch.setattr(render.sys, "platform", "darwin")
+    assert render._fontconfig(tmp_path) is None

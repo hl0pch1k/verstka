@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import zipfile
 from pathlib import Path
@@ -15,6 +16,23 @@ from typing import Optional
 log = logging.getLogger(__name__)
 
 _MAC_SOFFICE = "/Applications/LibreOffice.app/Contents/MacOS/soffice"
+_FONT_DIR = Path(__file__).resolve().parents[1] / "fonts"  # Play (OFL): the font of the VK templates
+
+
+def _fontconfig(profile: Path) -> Optional[str]:
+    """Linux: a fontconfig file that adds the bundled fonts to the system ones, so previews and PDFs of VK decks are
+    set in Play even where it is not installed (PowerPoint uses the font embedded in the deck; LibreOffice does not).
+    macOS builds of LibreOffice read installed fonts only."""
+    if not sys.platform.startswith("linux") or not _FONT_DIR.is_dir():
+        return None
+    conf = profile / "fonts.conf"
+    conf.write_text(
+        '<?xml version="1.0"?>\n<!DOCTYPE fontconfig SYSTEM "fonts.dtd">\n<fontconfig>\n'
+        '  <include ignore_missing="yes">/etc/fonts/fonts.conf</include>\n'
+        f"  <dir>{_FONT_DIR}</dir>\n</fontconfig>\n",
+        encoding="utf-8",
+    )
+    return str(conf)
 
 
 class RenderError(RuntimeError):
@@ -77,6 +95,9 @@ def pptx_to_pdf(pptx: Path, out_dir: Path, timeout_s: float = 240.0) -> Path:
     env = os.environ.copy()
     env["SAL_USE_VCLPLUGIN"] = "svp"
     with tempfile.TemporaryDirectory(prefix="verstka_lo_", ignore_cleanup_errors=True) as profile:
+        fc = _fontconfig(Path(profile))
+        if fc:
+            env["FONTCONFIG_FILE"] = fc
         try:
             src = render_copy(Path(pptx), Path(profile) / "src")
         except (zipfile.BadZipFile, OSError, ValueError) as e:  # a broken package still gets its LibreOffice verdict
