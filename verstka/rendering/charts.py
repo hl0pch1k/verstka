@@ -71,6 +71,74 @@ def fix_axis_ids(chart_space) -> None:
         el.set("val", mapping[v])
 
 
+def _mix(fg: str, bg: str, share: float) -> str:
+    """`share` of fg over bg."""
+    a = [int(fg[i : i + 2], 16) for i in (0, 2, 4)]
+    b = [int(bg[i : i + 2], 16) for i in (0, 2, 4)]
+    return "".join(f"{int(round(x * share + y * (1 - share))):02X}" for x, y in zip(a, b))
+
+
+def add_ring(slide: Slide, bbox: Bbox, percent: float, color_hex: str, ground_hex: Optional[str] = None):
+    """A native doughnut showing `percent` — the true value in place of a ring drawn as a picture. The track is a
+    faint tint of the colour over the ground; no legend, no labels (the figure sits in the hole), transparent back."""
+    percent = max(0.0, min(100.0, percent))
+    data = CategoryChartData()
+    data.categories = ["value", "rest"]
+    data.add_series("share", (percent, 100.0 - percent))
+    gf = slide.shapes.add_chart(XL_CHART_TYPE.DOUGHNUT, Emu(bbox.x), Emu(bbox.y), Emu(bbox.w), Emu(bbox.h), data)
+    chart = gf.chart
+    chart.has_legend = False
+    chart.has_title = False
+    plot = chart.plots[0]
+    plot.has_data_labels = False
+    track = _mix(color_hex, ground_hex or "FFFFFF", 0.14)
+    for j, pt in enumerate(plot.series[0].points):
+        pt.format.fill.solid()
+        pt.format.fill.fore_color.rgb = _rgb(color_hex if j == 0 else track)
+        pt.format.line.fill.background()
+    ns = "{http://schemas.openxmlformats.org/drawingml/2006/chart}"
+    dn = chart._chartSpace.find(f".//{ns}doughnutChart")
+    if dn is not None:
+        for tag, val in (("firstSliceAng", "0"), ("holeSize", "78")):
+            el = dn.find(f"{ns}{tag}")
+            if el is not None:
+                el.set("val", val)
+    from lxml import etree
+
+    # the ring fills its frame, centred: the figure placed in the middle of the frame sits in the hole
+    plot_area = chart._chartSpace.find(f".//{ns}plotArea")
+    if plot_area is not None:
+        layout = plot_area.find(f"{ns}layout")
+        if layout is None:
+            layout = etree.Element(f"{ns}layout")
+            plot_area.insert(0, layout)
+        for child in list(layout):
+            layout.remove(child)
+        ml = etree.SubElement(layout, f"{ns}manualLayout")
+        for tag, val in (("layoutTarget", "inner"), ("xMode", "edge"), ("yMode", "edge"), ("x", "0.02"), ("y", "0.02"), ("w", "0.96"), ("h", "0.96")):
+            etree.SubElement(ml, f"{ns}{tag}").set("val", val)
+    # no white box behind the ring: the chart and its plot area are transparent
+
+    a = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+    for holder in (chart._chartSpace, chart._chartSpace.find(f".//{ns}plotArea")):
+        if holder is None:
+            continue
+        sp = holder.find(f"{ns}spPr")
+        if sp is None:
+            sp = etree.SubElement(holder, f"{ns}spPr")
+            # c:spPr goes before c:txPr/c:externalData/… in chartSpace; after the plot content in plotArea
+            if holder is chart._chartSpace:
+                chart_el = holder.find(f"{ns}chart")
+                if chart_el is not None:
+                    chart_el.addnext(sp)
+        for child in list(sp):
+            sp.remove(child)
+        etree.SubElement(sp, f"{a}noFill")
+        ln = etree.SubElement(sp, f"{a}ln")
+        etree.SubElement(ln, f"{a}noFill")
+    return gf
+
+
 def add_chart(slide: Slide, bbox: Bbox, spec: ChartSpec, outline: DeckOutline, style: ChartStyleSpec, typography: Typography, text_hex: Optional[str] = None, neutral_hex: Optional[str] = None):
     series = resolve_series(spec, outline)
     if not series:

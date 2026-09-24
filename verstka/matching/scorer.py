@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -173,6 +175,15 @@ def score_pattern(
             kind *= 0.5
             numbers_lost = True
             reasons.append(f"числа не поместятся и будут потеряны: {n} чисел, мест {holders}")
+        # figures set in rings drawn as pictures (VK Tech 41, 42, 45): only a percentage gets a true ring in their
+        # place; «5 ч» or «31% → 12%» would stand without one next to a ring — the infographic falls apart
+        rings = [s for s in pattern.slots if s.role == SlotRole.number and any(
+            b.x <= s.bbox.x + s.bbox.w / 2 <= b.x + b.w and b.y <= s.bbox.y + s.bbox.h / 2 <= b.y + b.h
+            and b.w * b.h >= 2 * s.bbox.w * s.bbox.h for b in pattern.decor_boxes)]
+        values = [x.value for x in content.numbers]
+        if rings and values and not all(re.match(r"^\s*\d{1,3}(?:[.,]\d+)?\s*%\s*$", v or "") for v in values):
+            kind *= 0.6
+            reasons.append("кольцевая инфографика, а числа — не проценты")
     n_items = needed_items(slide)
     text_slots = [s for s in pattern.slots if s.role in (SlotRole.body, SlotRole.bullet_list, SlotRole.card_title, SlotRole.card_body, SlotRole.number, SlotRole.number_label, SlotRole.caption)]
     needed_slots = sum(1 for r in needed_roles if r not in ("title", "subtitle")) + max(n_items - 1, 0) * sum(1 for r in ("card_title", "card_body", "number", "number_label") if r in needed_roles)

@@ -16,7 +16,7 @@ from verstka.analysis.shapes import looks_like_placeholder
 from verstka.analysis.xmlns import q
 from verstka.ingest.workspace import TemplateWorkspace
 from verstka.rendering.assets_pick import pick_asset, pick_icon
-from verstka.rendering.charts import add_chart
+from verstka.rendering.charts import add_chart, add_ring
 from verstka.rendering.deck import DeckBuilder, element_bbox, is_nested, remove_element, renumber_ids, set_element_pos, shift_element, slide_shape_elements
 from verstka.rendering.fonts import text_width_pt, wrap_lines
 from verstka.rendering.fit import fit_size, grow_size
@@ -1236,6 +1236,88 @@ def _fill_label(ctx: _SlideCtx, title: Slot, oslide: OutlineSlide) -> None:
         ctx.removed.add(label.shape_id)
 
 
+_PCT_RE = re.compile(r"^\s*(\d{1,3}(?:[.,]\d+)?)\s*%\s*$")
+
+
+def _true_rings(ctx: _SlideCtx) -> None:
+    """Ring infographics drawn as pictures (VK Tech 41, 42, 45: a ring filled to 75% under the sample «10%») cannot
+    show our figure — «18%» over a three-quarter ring is a lie. A percentage gets a native doughnut in the ring's place
+    showing that share; any other figure («5 ч», «31% → 12%») stands without the ring."""
+    accent = next(iter(ctx.manifest.tokens.accents()), None) or "0077FF"
+
+    def pieces_of(ring: Bbox) -> list[tuple[str, etree._Element]]:
+        """The ring and the pictures it is drawn with (a gradient arc over a grey track, a highlight)."""
+        out = []
+        for pid, pic in list(ctx.els.items()):
+            if etree.QName(pic).localname != "pic" or pid in ctx.filled or pid in ctx.removed or pic.getparent() is None or is_nested(pic):
+                continue
+            pb = element_bbox(pic)
+            if pb and pb[2] * pb[3] > 0 and Bbox(x=pb[0], y=pb[1], w=pb[2], h=pb[3]).intersection(ring) >= 0.6 * pb[2] * pb[3]:
+                out.append((pid, pic))
+        return out
+
+    def ring_at(x: float, y: float, min_area: float) -> Optional[tuple[str, etree._Element, Bbox]]:
+        for pid, pic in list(ctx.els.items()):
+            if etree.QName(pic).localname != "pic" or pid in ctx.filled or pid in ctx.removed or pic.getparent() is None or is_nested(pic):
+                continue
+            pb = element_bbox(pic)
+            if not pb or pb[3] <= 0 or not (pb[0] <= x <= pb[0] + pb[2] and pb[1] <= y <= pb[1] + pb[3]):
+                continue
+            if 0.8 <= pb[2] / pb[3] <= 1.25 and pb[2] * pb[3] >= min_area:
+                return pid, pic, Bbox(x=pb[0], y=pb[1], w=pb[2], h=pb[3])
+        return None
+
+    # rings drawn for sample figures that are no longer inside them — the cell left, or the row reflowed and moved
+    # the figure away (two figures on a three-ring slide): such a ring leaves with all its pieces
+    for slot in ctx.pattern.slots:
+        if slot.role != SlotRole.number:
+            continue
+        b = slot.bbox.to_emu(ctx.W, ctx.H)
+        hit = ring_at(b.x + b.w / 2, b.y + b.h / 2, 2 * b.w * b.h)
+        if hit is None:
+            continue
+        ring = hit[2]
+        el = ctx.els.get(slot.shape_id)
+        cur = element_bbox(el) if el is not None and el.getparent() is not None and slot.shape_id in ctx.filled else None
+        if cur and ring.x <= cur[0] + cur[2] / 2 <= ring.x2 and ring.y <= cur[1] + cur[3] / 2 <= ring.y2:
+            continue  # its figure is still there: handled below
+        for pid, pic in pieces_of(ring):
+            remove_element(pic)
+            ctx.removed.add(pid)
+    for sid in list(ctx.filled):
+        el = ctx.els.get(sid)
+        slot = ctx.slot_of.get(ctx.origin.get(sid, sid))
+        if el is None or el.getparent() is None or slot is None or slot.role != SlotRole.number:
+            continue
+        nb = element_bbox(el)
+        text = shape_text(el).strip()
+        if not nb or not text:
+            continue
+        cx, cy = nb[0] + nb[2] / 2, nb[1] + nb[3] / 2
+        hit = ring_at(cx, cy, 2 * nb[2] * nb[3])  # a square picture around the figure: a ring, not a photo
+        if hit is None:
+            continue
+        _, pic, box = hit
+        m = _PCT_RE.match(text)
+        if m and float(m.group(1).replace(",", ".")) <= 100:
+            gf = add_ring(ctx.slide, box, float(m.group(1).replace(",", ".")), accent, _ground_hex(ctx, box))
+            pic.addprevious(gf._element)  # the ring's place in the z-order: under the figure
+            # the figure sits in the hole: centred on the ring
+            set_element_pos(el, x=int(box.x + box.w / 2 - nb[2] / 2), y=int(box.y + box.h / 2 - nb[3] / 2))
+            for p in el.iter(q("a:p")):
+                ppr = p.find(q("a:pPr"))
+                if ppr is None:
+                    ppr = etree.Element(q("a:pPr"))
+                    p.insert(0, ppr)
+                ppr.set("algn", "ctr")
+            ctx.warnings.append(f"ring picture under «{text}» replaced by a doughnut of the real value")
+        else:
+            ctx.warnings.append(f"ring picture under «{text}» removed: it cannot show this figure")
+        for pid, piece in pieces_of(box):
+            remove_element(piece)
+            ctx.removed.add(pid)
+
+
 def _remove_qr_codes(ctx: _SlideCtx) -> None:
     """QR codes of the template (a contact card on the closing slide) point to someone else's page."""
     qr_parts = {a.media_part for a in ctx.manifest.assets if a.kind == "qr" and a.media_part}
@@ -1495,6 +1577,7 @@ def render_clone(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
         if txt.strip() and looks_like_placeholder(txt):
             clear_text(el)
     _remove_orphan_holders(ctx)
+    _true_rings(ctx)
     # sample content pictures (photos, screenshots, chart images) that nothing replaced are stale: drop them
     has_visual = bool(c.image_hint or c.chart is not None or c.table is not None)
     drop_icons = oslide.kind in (PatternKind.thanks, PatternKind.title, PatternKind.section, PatternKind.quote)
