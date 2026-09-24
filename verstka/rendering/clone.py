@@ -73,6 +73,9 @@ class _SlideCtx:
         self.slot_of = {s.shape_id: s for s in pattern.slots}
         self.used_assets: set[str] = set()
         self.origin: dict[str, str] = {}  # id of a duplicated shape → id of the sample shape it was copied from
+        # whether the slide keeps the sample's content pictures (it has an image of its own); when it does not, the
+        # big pictures in cards are dropped at the end and must not hold text back while it is being placed
+        self.keeps_pictures = True
 
     # ---- helpers ----------------------------------------------------------------
     def slots(self, *roles: SlotRole, unfilled: bool = True) -> list[Slot]:
@@ -181,6 +184,8 @@ class _SlideCtx:
                 continue
             inside = holder.x <= b[0] + b[2] / 2 <= holder.x2 and holder.y <= b[1] + b[3] / 2 <= holder.y2
             overlaps_x = b[0] < bx.x2 and b[0] + b[2] > bx.x
+            if etree.QName(other).localname == "pic" and not self.keeps_pictures and b[2] > _ICON_MAX_W * self.W:
+                continue  # a sample screenshot in the card: it leaves at the end, the text may take its place
             is_content = etree.QName(other).localname != "sp" or shape_text(other).strip() or (self.id_of(other) or "") in self.slot_of
             if inside and overlaps_x and b[1] >= bx.y2 - tol and is_content:
                 limit = min(limit, b[1] - int(0.012 * self.H))
@@ -807,6 +812,7 @@ def _fill_cells(ctx: _SlideCtx, items: list[SlideItem], use_ordinals: bool = Tru
     _harmonize(ctx, cell_bodies, cap=_text_cap(ctx))
     # thesis cards (a heading and nothing under it) are read like running text: they may grow the same way
     _harmonize(ctx, cell_titles, cap=None if cell_bodies else _text_cap(ctx))
+    _keep_title_above_body(ctx, cell_titles, cell_bodies)
     _harmonize(ctx, cell_numbers, cap=None, min_ratio=0.35)
     _harmonize_first_lines(cell_heads)
     if numeric_items and not include_number:
@@ -816,6 +822,50 @@ def _fill_cells(ctx: _SlideCtx, items: list[SlideItem], use_ordinals: bool = Tru
     if overflow:
         _fill_standalone_items(ctx, overflow)
     return True
+
+
+def _running_size(e: etree._Element) -> Optional[float]:
+    """The size carrying most of a shape's characters."""
+    from collections import Counter
+
+    chars: Counter = Counter()
+    for r in e.iter(q("a:r")):
+        rpr, t = r.find(q("a:rPr")), r.find(q("a:t"))
+        if rpr is not None and rpr.get("sz"):
+            chars[int(rpr.get("sz")) / 100] += len(t.text or "") if t is not None else 0
+    return chars.most_common(1)[0][0] if chars else None
+
+
+def _keep_title_above_body(ctx: _SlideCtx, titles: list[tuple[etree._Element, Optional[Slot]]], bodies: list[tuple[etree._Element, Optional[Slot]]]) -> None:
+    """Card text that grew into its card must not outgrow the card's heading («Неделя 1» at 11 pt over a 16 pt
+    text): the headings follow at the template's own ratio of heading to text, as far as their boxes allow."""
+    if not titles or not bodies:
+        return
+    t_sizes = [s for s in (_running_size(e) for e, _ in titles) if s]
+    b_sizes = [s for s in (_running_size(e) for e, _ in bodies) if s]
+    if not t_sizes or not b_sizes:
+        return
+    t, b = min(t_sizes), min(b_sizes)
+    ts = next((s.style.size_pt for _, s in titles if s is not None and s.style.size_pt), None)
+    bs = next((s.style.size_pt for _, s in bodies if s is not None and s.style.size_pt), None)
+    ratio = max(1.0, ts / bs) if ts and bs else 1.15
+    want = _snap_down(b * ratio, ctx.grow_scale)
+    if want <= t:
+        return
+    fitted = []
+    for e, slot in titles:
+        box = element_bbox(e)
+        if not box or box[2] <= 0 or box[3] <= 0:
+            return
+        style = slot.style if slot is not None else None
+        family = style.font_family if style and style.font_family else ctx.typo.primary_family
+        texts = shape_text(e).split("\n")
+        res = fit_size(texts, Bbox(x=box[0], y=box[1], w=box[2], h=box[3]), family, want, bool(style and style.bold), ctx.grow_scale, insets_emu=_body_insets(e), line_spacing=ctx.typo.line_height, min_ratio=t / want)
+        fitted.append(res.size_pt if res.fits else t)
+    common = min(fitted)
+    if common > t:
+        for e, _ in titles:
+            _scale_text(e, common, ctx.grow_scale)
 
 
 def _text_cap(ctx: _SlideCtx) -> float:
@@ -1456,6 +1506,7 @@ def render_clone(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
     slide = builder.clone_slide(pattern.source_slide)
     ctx = _SlideCtx(builder, slide, pattern, manifest, ws, outline)
     c = oslide.content
+    ctx.keeps_pictures = bool(c.image_hint or c.chart is not None or c.table is not None)
     renumber_page_chrome(ctx.els, pattern.chrome_shape_ids, pattern.source_slide, len(builder.created))
 
     # title / subtitle
