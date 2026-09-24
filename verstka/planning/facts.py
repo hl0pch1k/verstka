@@ -87,6 +87,9 @@ def basic_facts(text: str, max_facts: int = 16) -> FactsExtraction:
 
 def extract_facts(brief: Brief, skills: Optional[SkillsRegistry] = None, providers: Optional[ProviderRegistry] = None) -> tuple[FactsExtraction, list[str]]:
     warnings: list[str] = []
+    # facts are figures: a brief without a single digit has none, and asking a model for them only spends its budget
+    if not any(ch.isdigit() for ch in brief.text):
+        return basic_facts(brief.text), warnings
     if skills is not None and providers is not None and providers.has("llm"):
         try:
             res = skills.run("data_extractor", providers, {"brief": brief.text, "language": brief.language})

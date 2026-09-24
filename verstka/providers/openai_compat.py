@@ -23,10 +23,13 @@ _FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.S)
 class RateLimited(ProviderError):
     """429 from the provider: `daily` when the day's quota is spent (retrying today is pointless)."""
 
-    def __init__(self, message: str, retry_after: Optional[float] = None, daily: bool = False) -> None:
+    def __init__(self, message: str, retry_after: Optional[float] = None, daily: bool = False, upstream: bool = False) -> None:
         super().__init__(message)
         self.retry_after = retry_after
         self.daily = daily
+        # congestion on the model host («temporarily rate-limited upstream»), not a cap of our account
+        low = message.lower()
+        self.upstream = upstream or "upstream" in low or "temporarily rate-limited" in low
 
 
 class _MinuteLimiter:
@@ -57,6 +60,9 @@ class _MinuteLimiter:
 _MIN_REQUEST_S = 5.0  # less time than this left in the generation's budget: do not start a request
 _LIMITERS: dict[str, _MinuteLimiter] = {}
 _EXHAUSTED: set[str] = set()  # accounts whose daily quota is spent: every later call fails fast → deterministic fallbacks
+_CONGESTED: dict[str, float] = {}  # account → monotonic time until which its host counts as congested (calls fail fast)
+_STRIKES: dict[str, int] = {}  # consecutive upstream 429s of an account
+_CONGESTION_S = 120.0  # how long a congested host is left alone before the next deck tries it again
 _GUARD = threading.Lock()
 
 
@@ -76,7 +82,8 @@ def _rate_limit_info(e: Exception) -> Optional[RateLimited]:
     except (TypeError, ValueError):
         retry_after = None
     daily = "per-day" in low or "per day" in low or "free-models-per-day" in low or (retry_after is not None and retry_after > 300)
-    return RateLimited(text[:300], retry_after=retry_after, daily=daily)
+    upstream = "upstream" in low or "temporarily rate-limited" in low
+    return RateLimited(text[:300], retry_after=retry_after, daily=daily, upstream=upstream)
 
 
 def extract_json(text: str) -> Any:
@@ -203,6 +210,8 @@ class OpenAICompatProvider:
             kwargs["response_format"] = {"type": "json_object"}
         if self._account in _EXHAUSTED:
             raise RateLimited(f"{self.model}: daily request quota of the provider is spent", daily=True)
+        if _CONGESTED.get(self._account, 0.0) > time.monotonic():
+            raise ProviderError(f"{self.model}: the model host is congested upstream, deterministic steps for now")
         if self._limiter is not None:
             self._limiter.wait(deadline)
         if deadline is not None:
@@ -256,6 +265,8 @@ class OpenAICompatProvider:
             attempt += 1
             if deadline is not None and deadline - time.monotonic() < _MIN_REQUEST_S:
                 raise ProviderError(f"{self.model}: time budget of the generation is spent ({last_err or 'no answer yet'})")
+            if _CONGESTED.get(self._account, 0.0) > time.monotonic():
+                raise ProviderError(f"{self.model}: the model host is congested upstream, deterministic steps for now ({last_err or 'marked earlier'})")
             try:
                 text, usage = self._call(oai_messages, temperature, max_tokens, want_json=schema is not None, deadline=deadline)
             except RateLimited as e:
@@ -264,6 +275,23 @@ class OpenAICompatProvider:
                     log.warning("provider daily quota spent: deterministic fallbacks from now on (%s)", e)
                     raise
                 last_err = e
+                if e.upstream:
+                    # the host is congested: a short pause and one more try; two in a row mark it congested for a
+                    # while — waiting it out spent two minutes of every deck on the free Qwen and got nothing
+                    wait = min(max(e.retry_after or 5.0, 1.0), 8.0)
+                    if deadline is not None and deadline - time.monotonic() < wait + _MIN_REQUEST_S:
+                        raise ProviderError(f"{self.model}: time budget of the generation is spent, no room to wait out a 429 ({e})") from e
+                    with _GUARD:
+                        _STRIKES[self._account] = _STRIKES.get(self._account, 0) + 1
+                        strikes = _STRIKES[self._account]
+                        if strikes >= 2:
+                            _CONGESTED[self._account] = time.monotonic() + _CONGESTION_S
+                    if strikes >= 2:
+                        log.warning("%s: host congested upstream, deterministic steps for %.0f s", self.model, _CONGESTION_S)
+                        raise ProviderError(f"{self.model}: the model host is congested upstream, deterministic steps for now ({e})") from e
+                    log.info("host busy upstream, one more try in %.0f s: %s", wait, str(e)[:160])
+                    time.sleep(wait)
+                    continue
                 wait = min(max(e.retry_after or 20.0, 1.0), 65.0)
                 if deadline is not None and deadline - time.monotonic() < wait + _MIN_REQUEST_S:
                     raise ProviderError(f"{self.model}: time budget of the generation is spent, no room to wait out a 429 ({e})") from e
@@ -280,6 +308,7 @@ class OpenAICompatProvider:
                 time.sleep(min(2**attempt, 8))
                 continue
             total = total.add(usage)
+            _STRIKES.pop(self._account, None)  # the host answered: it is not congested
             if schema is None:
                 return CompletionResult(text=text, parsed=None, usage=total, model=self.model, attempts=attempt)
             try:

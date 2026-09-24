@@ -151,3 +151,31 @@ def test_a_generation_deadline_bounds_waits_and_requests(monkeypatch):
     assert calls["n"] == 0  # nothing is sent once the budget is spent
     with pytest.raises(ProviderError, match="time budget"):
         ProviderRegistry.mock({}).with_deadline(_time.monotonic() - 1).get("llm").complete([ChatMessage(role="user", content="hi")])
+
+
+def test_upstream_congestion_fails_fast_instead_of_waiting_out_the_budget(monkeypatch):
+    """OpenRouter's free Qwen «temporarily rate-limited upstream» is congestion on the host, not our per-minute cap:
+    waiting 20 s six times per call spent two minutes of every deck and still got nothing. Two such answers in a
+    row mark the endpoint congested for a while — every call fails at once and the deterministic steps take over."""
+    from verstka.providers import openai_compat as oc
+    from verstka.providers.base import ChatMessage, ProviderError
+
+    sleeps: list[float] = []
+    monkeypatch.setattr(oc.time, "sleep", lambda s: sleeps.append(s))
+    p = oc.OpenAICompatProvider(model="qwen/qwen3.8-27b:free", base_url="https://example.invalid/v1", api_key="sk-congested-1", max_attempts=3)
+    calls = {"n": 0}
+
+    def congested(messages, temperature, max_tokens, want_json, deadline=None):
+        calls["n"] += 1
+        raise oc.RateLimited("Error code: 429 - qwen/qwen3.8-27b:free is temporarily rate-limited upstream", retry_after=None)
+
+    monkeypatch.setattr(p, "_call", congested)
+    with pytest.raises(ProviderError, match="congested"):
+        p.complete([ChatMessage(role="user", content="hi")])
+    assert calls["n"] == 2 and sum(sleeps) <= 10  # two tries and a short pause, not a minute of waiting
+    with pytest.raises(ProviderError, match="congested"):
+        p.complete([ChatMessage(role="user", content="again")])
+    assert calls["n"] == 2  # the next call does not even knock
+    assert oc._rate_limit_info(RuntimeError("Error code: 429 - temporarily rate-limited upstream")).upstream
+    assert not oc._rate_limit_info(RuntimeError("Error code: 429 - rate limit exceeded: free-models-per-min")).upstream
+    oc._CONGESTED.pop(p._account, None)
