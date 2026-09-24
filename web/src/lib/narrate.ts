@@ -37,13 +37,15 @@ export function describeGeneration(g: Generation, strategyTitle: (name: string) 
     return { strategy: v.strategy, score, line: `• ${strategyTitle(v.strategy)} — ${parts.join(", ")}` };
   });
   const head = `Готово: ${plural(g.variants.length, "вариант", "варианта", "вариантов")}${g.seconds ? ` за ${fmtSeconds(g.seconds)}` : ""}.`;
+  const modelSilent = !!g.use_models && !g.variants.some((v) => v.outline?.planned_by === "model" || v.outline?.planned_by?.startsWith("shared:"));
+  const silentNote = modelSilent ? "Модель сейчас не ответила — план составлен встроенным планировщиком." : "";
   if (g.variants.every((v) => v.outline?.planned_by === "skeleton")) {
-    return `${head}\nВ тексте была только тема, поэтому это каркас: титул, повестка и разделы с подсказками в заметках. Допишите тезисы и цифры — Verstka соберёт содержательные слайды.`;
+    return [head, silentNote, "В тексте была только тема, поэтому это каркас: титул, повестка и разделы с подсказками в заметках. Допишите тезисы и цифры — Verstka соберёт содержательные слайды."].filter(Boolean).join("\n");
   }
   const scored = rows.filter((r) => r.score !== null);
   const best = scored.length > 1 ? scored.reduce((a, b) => ((b.score ?? 0) > (a.score ?? 0) ? b : a)) : null;
   const tail = best
     ? `Лучшая оценка качества — у варианта «${strategyTitle(best.strategy)}». Переключайте варианты над слайдом, замечания — в «Проверке качества».`
     : "Переключайте варианты над слайдом, замечания — в «Проверке качества».";
-  return [head, ...rows.map((r) => r.line), tail].join("\n");
+  return [head, ...rows.map((r) => r.line), silentNote, tail].filter(Boolean).join("\n");
 }

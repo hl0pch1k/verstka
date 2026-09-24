@@ -89,11 +89,18 @@ function Deck({ generation }: { generation: Generation }) {
   // why the deck is thin, when it is: a topic without theses, or much less text than slides asked for
   const skeleton = variant.outline?.planned_by === "skeleton";
   const asked = generation.slides ?? null;
+  // the model was asked but every plan came from the rules: it did not answer in time (a congested host)
+  const modelSilent = !!generation.use_models && !generation.variants.some((v) => v.outline?.planned_by === "model" || v.outline?.planned_by?.startsWith("shared:"));
   const notice = skeleton
-    ? "Это каркас: в тексте была только тема. Допишите тезисы и цифры — слайды станут содержательными."
-    : asked && asked - total >= 3
-      ? `${plural(total, "слайд", "слайда", "слайдов")} вместо ${asked}: материала в тексте меньше, а факты Verstka не придумывает.`
-      : null;
+    ? modelSilent
+      ? "Модель не ответила вовремя, а в тексте только тема — это каркас. Допишите тезисы или соберите ещё раз позже."
+      : "Это каркас: в тексте была только тема. Допишите тезисы и цифры — слайды станут содержательными."
+    : modelSilent
+      ? "Модель сейчас не ответила — план составлен встроенным планировщиком по вашему тексту."
+      : asked && asked - total >= 3
+        ? `${plural(total, "слайд", "слайда", "слайдов")} вместо ${asked}: материала в тексте меньше, а факты Verstka не придумывает.`
+        : null;
+  const noticeAction = modelSilent && !skeleton ? "Собрать ещё раз" : "Дописать текст";
 
   return (
     <div className="mx-auto max-w-[1280px] space-y-5 pb-10">
@@ -125,7 +132,7 @@ function Deck({ generation }: { generation: Generation }) {
         <div className="flex items-center gap-3 rounded-2xl bg-amber-50 py-2 pl-4 pr-2 text-[14px] leading-5 text-amber-950 animate-fade">
           <Info className="h-[18px] w-[18px] shrink-0 text-amber-600" aria-hidden />
           <p className="min-w-0 flex-1 truncate" title={notice}>{notice}</p>
-          <Button size="sm" variant="secondary" className="bg-white shadow-card hover:bg-zinc-50" onClick={() => setScreen("create")}>Дописать текст</Button>
+          <Button size="sm" variant="secondary" className="bg-white shadow-card hover:bg-zinc-50" onClick={() => setScreen("create")}>{noticeAction}</Button>
         </div>
       )}
 
