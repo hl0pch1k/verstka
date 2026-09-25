@@ -29,6 +29,7 @@ CLOUDRU = "https://foundation-models.api.cloud.ru/v1"
 KEY = "sk-test-chain-00000001"
 PAID, FREE = "qwen/qwen3.8-27b", "qwen/qwen3.8-27b:free"
 GEMMA, GEMMA_MOE = "google/gemma-4-31b-it:free", "google/gemma-4-26b-a4b-it:free"
+QWEN_VL = "qwen/qwen3-vl-30b-a3b-instruct"
 QWEN32 = "Qwen/Qwen3-32B"
 _REQ = httpx.Request("POST", "https://router.example.invalid/api/v1/chat/completions")
 MSGS = [ChatMessage(role="user", content="classify this slide")]
@@ -530,10 +531,10 @@ def test_a_second_pass_also_runs_while_the_402_and_404_links_are_on_hold(sleeps)
 def test_the_default_config_makes_its_second_pass_without_credits(config_env, sleeps):
     """The user's current state: the paid Qwen answers 402, Groq and Cloud.ru have no key, the free links are busy."""
     ch = ProviderRegistry.from_yaml(ROOT / "configs" / "models.yaml").get("llm")
-    c = wire(ch, [NO_CREDITS], None, [UPSTREAM, answer("free qwen")], None, [UPSTREAM], [http_error(502, "Bad gateway")])
+    c = wire(ch, [NO_CREDITS], None, [UPSTREAM, answer("free qwen")], None, None, [UPSTREAM], [http_error(502, "Bad gateway")])
     r = ch.complete(MSGS)
     assert r.model == FREE and r.text == "free qwen" and len(sleeps) == 2 and 3.0 <= sleeps[1] <= 5.0
-    assert [len(c[i].calls) for i in range(6)] == [1, 0, 2, 0, 1, 2]
+    assert [len(c[i].calls) for i in range(7)] == [1, 0, 2, 0, 0, 1, 2]
 
 
 def test_no_second_pass_after_a_real_failure_short_budget_or_when_every_link_is_on_hold(sleeps):
@@ -993,16 +994,18 @@ def test_the_default_config_paid_qwen_groq_free_qwen_cloudru_then_gemma(config_e
         (PAID, "openrouter.ai"),
         (PAID, "api.groq.com"),
         (FREE, "openrouter.ai"),
+        (QWEN_VL, "foundation-models.api.cloud.ru"),
         (QWEN32, "foundation-models.api.cloud.ru"),
         (GEMMA, "openrouter.ai"),
         (GEMMA_MOE, "openrouter.ai"),
     ]
-    assert [p.model for p in vlm.links] == [PAID, PAID, FREE, GEMMA, GEMMA_MOE]  # Qwen3-32B reads no images
+    assert [p.model for p in vlm.links] == [PAID, PAID, FREE, QWEN_VL, GEMMA, GEMMA_MOE]  # Qwen3-32B reads no images
     assert vlm.links[0].health is llm.links[0].health  # llm and vlm share the records
-    paid, groq, free, cloudru, gemma, moe = llm.links
+    paid, groq, free, cloudru_vl, cloudru, gemma, moe = llm.links
     assert paid.extra_body == {"reasoning": {"enabled": False}, "provider": {"allow_fallbacks": True, "quantizations": ["bf16", "fp8"]}}
     assert (paid.price_in, paid.price_out) == (0.42, 3.00) and paid._limiter.rpm == 60
-    assert groq.off and cloudru.off  # GROQ_API_KEY / CLOUDRU_API_KEY are not set: skipped silently
+    assert groq.off and cloudru.off and cloudru_vl.off  # GROQ_API_KEY / CLOUDRU_API_KEY are not set: skipped silently
+    assert cloudru_vl.label == "Qwen3-VL 30B (Cloud.ru)" and cloudru_vl.extra_body == {} and cloudru_vl.system_suffix is None
     assert groq.label == "Qwen3.8-27B (Groq)" and groq._limiter.rpm == 20 and groq.max_tokens_cap == 3000
     assert groq.extra_body == {"reasoning_effort": "none"} and groq.json_mode is False and groq.price_in == 0.0
     assert cloudru.label == "Qwen3 32B (Cloud.ru)" and cloudru.extra_body == {} and cloudru._limiter.rpm == 60
@@ -1013,21 +1016,21 @@ def test_the_default_config_paid_qwen_groq_free_qwen_cloudru_then_gemma(config_e
     assert all(p.json_mode is False for p in llm.links)
     assert all(p.api_key == "sk-test-config-000001" for p in (paid, free, gemma, moe))
     assert llm.label == "Qwen3.8-27B (OpenRouter)"
-    assert [x["state"] for x in status.snapshot(reg, role="llm")] == ["unknown", "off", "unknown", "off", "unknown", "unknown"]
+    assert [x["state"] for x in status.snapshot(reg, role="llm")] == ["unknown", "off", "unknown", "off", "off", "unknown", "unknown"]
     # with the keys set, both links take part
     monkeypatch.setenv("GROQ_API_KEY", "gsk_test_config_000001")
     monkeypatch.setenv("CLOUDRU_API_KEY", "cloudru-test-config-01")
     llm = ProviderRegistry.from_yaml(ROOT / "configs" / "models.yaml").get("llm")
-    assert not llm.links[1].off and llm.links[1].api_key == "gsk_test_config_000001" and not llm.links[3].off
+    assert not llm.links[1].off and llm.links[1].api_key == "gsk_test_config_000001" and not llm.links[3].off and not llm.links[4].off
 
 
 def test_the_default_config_end_to_end_with_fake_hosts(config_env, monkeypatch, sleeps):
     """Paid Qwen without credits, Groq off, free Qwen congested, Cloud.ru off: Gemma answers, nothing waits."""
     ch = ProviderRegistry.from_yaml(ROOT / "configs" / "models.yaml").get("llm")
-    c = wire(ch, [NO_CREDITS], None, [UPSTREAM], None, [answer("gemma")], None)
+    c = wire(ch, [NO_CREDITS], None, [UPSTREAM], None, None, [answer("gemma")], None)
     r = ch.complete(MSGS)
     assert r.model == GEMMA and r.label == "Gemma 4 31B (бесплатно)" and sleeps == []
-    assert [len(c[i].calls) for i in range(6)] == [1, 0, 1, 0, 1, 0]
+    assert [len(c[i].calls) for i in range(7)] == [1, 0, 1, 0, 0, 1, 0]
 
 
 def test_the_ui_names_the_failed_link_by_its_label_not_by_the_wording(config_env, monkeypatch, sleeps):
@@ -1038,7 +1041,7 @@ def test_the_ui_names_the_failed_link_by_its_label_not_by_the_wording(config_env
     monkeypatch.setenv("GROQ_API_KEY", "gsk_test_config_000001")
     reg = ProviderRegistry.from_yaml(ROOT / "configs" / "models.yaml")
     ch = reg.get("llm")
-    wire(ch, [NO_CREDITS], [http_error(401, "Invalid API Key")], [UPSTREAM], None, [UPSTREAM], [UPSTREAM])
+    wire(ch, [NO_CREDITS], [http_error(401, "Invalid API Key")], [UPSTREAM], None, None, [UPSTREAM], [UPSTREAM])
     with pytest.raises(ProviderError) as ei:
         ch.complete(MSGS)
     text = str(ei.value)

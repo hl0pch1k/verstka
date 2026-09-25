@@ -23,9 +23,10 @@
 #   1. qwen/qwen3.8-27b @ OpenRouter   paid, bf16/fp8 hosts only; needs credits, answers 402 until then
 #   2. qwen/qwen3.8-27b @ Groq          free plan (GROQ_API_KEY): 30 req/min, 8K tokens/min, 200K tokens/day
 #   3. qwen/qwen3.8-27b:free            the same model free on OpenRouter, one host (ModelRun) — often congested
-#   4. Qwen/Qwen3-32B @ Cloud.ru         paid in rubles (CLOUDRU_API_KEY), text only — not in the vlm chain
-#   5. google/gemma-4-31b-it:free       Gemma 4 31B, Apache 2.0, multimodal, free (Google AI Studio host)
-#   6. google/gemma-4-26b-a4b-it:free   Gemma 4 26B-A4B (MoE, 4B active), Apache 2.0, multimodal, free
+#   4. Qwen3-VL-30B-A3B-Instruct @ Cloud.ru   paid in rubles (CLOUDRU_API_KEY), ≈ 3 ₽ per generation, reads images
+#   5. Qwen/Qwen3-32B @ Cloud.ru         the same key, text only — not in the vlm chain
+#   6. google/gemma-4-31b-it:free       Gemma 4 31B, Apache 2.0, multimodal, free (Google AI Studio host)
+#   7. google/gemma-4-26b-a4b-it:free   Gemma 4 26B-A4B (MoE, 4B active), Apache 2.0, multimodal, free
 #
 # A local model can be the last link (works without internet and without quotas) — see configs/models.local.yaml.
 # Append to both chains below:
@@ -75,6 +76,17 @@ roles:
         price_out_per_m: 0.0
         extra_body:
           reasoning: { enabled: false }
+      - &cloudru_vl
+        # Cloud.ru's best model inside the rules (catalog of 2026-09-25): Qwen3-VL-30B-A3B-Instruct — Apache 2.0,
+        # 31.07B parameters, answers without a thinking phase, reads images (so it serves the vlm role too), 131K context.
+        # Qwen3.6-35B-A3B (Cloud.ru's own host) is newer but has 35.95B parameters — over the ≤35B rule, left out.
+        model: qwen/qwen3-vl-30b-a3b-instruct
+        label: Qwen3-VL 30B (Cloud.ru)
+        base_url: https://foundation-models.api.cloud.ru/v1
+        api_key: ${CLOUDRU_API_KEY}  # cloud.ru Foundation Models, Russian card; empty → this link is off
+        # 34.16 ₽ in / 136.64 ₽ out per 1M tokens (≈ 3 ₽ per generation); the cost in rubles is not in the USD manifest
+        requests_per_minute: 60  # Cloud.ru allows 20 requests/s per key
+        extra_body: {}
       - &cloudru_qwen
         model: Qwen/Qwen3-32B
         label: Qwen3 32B (Cloud.ru)
@@ -101,7 +113,7 @@ roles:
     <<: *llm
     temperature: 0.1
     # the same links without Cloud.ru's Qwen3-32B, which reads no images
-    chain: [*paid_qwen, *groq_qwen, *free_qwen, *gemma_31b, *gemma_26b]
+    chain: [*paid_qwen, *groq_qwen, *free_qwen, *cloudru_vl, *gemma_31b, *gemma_26b]
 limits:
   max_concurrency: 6
   requests_per_minute: 18  # OpenRouter's free models: 20 requests/min per account; the free links share this bucket
