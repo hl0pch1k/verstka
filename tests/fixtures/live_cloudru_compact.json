@@ -1,0 +1,464 @@
+{
+  "title": "Итоги пилота «Умные сводки» за квартал",
+  "subtitle": "Сокращение времени на чтение чатов и рост удовлетворенности",
+  "audience": "Генеральный директор",
+  "purpose": null,
+  "strategy": "compact",
+  "language": "ru",
+  "planned_by": "model",
+  "slides": [
+    {
+      "id": "sl1",
+      "kind": "title",
+      "section": null,
+      "headline": "Пилот подтвердил эффект на 12 тысячах пользователей",
+      "subtitle": "Результаты за квартал: сокращение времени на чтение чатов и рост NPS",
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "Начинаем с обобщения ключевых результатов пилота для генерального директора.",
+      "fact_refs": []
+    },
+    {
+      "id": "sl2",
+      "kind": "stat_row",
+      "section": null,
+      "headline": "Время на чтение чатов сократилось на 18 минут",
+      "subtitle": "От 47 до 29 минут в день",
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [],
+        "numbers": [
+          {
+            "value": "47",
+            "label": "время на чтение чатов (до)",
+            "fact_id": "f1"
+          },
+          {
+            "value": "29",
+            "label": "время на чтение чатов (после)",
+            "fact_id": "f2"
+          }
+        ],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "Демонстрируем значительное улучшение производительности сотрудников.",
+      "fact_refs": [
+        "f1",
+        "f2"
+      ]
+    },
+    {
+      "id": "sl3",
+      "kind": "big_number",
+      "section": null,
+      "headline": "NPS вырос до 64%",
+      "subtitle": "Удовлетворенность пользователями после внедрения",
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [],
+        "numbers": [
+          {
+            "value": "64",
+            "label": "NPS после пилота",
+            "fact_id": "f3"
+          }
+        ],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "Подчеркиваем высокий уровень удовлетворенности, достигнутый в ходе пилота.",
+      "fact_refs": [
+        "f3"
+      ]
+    },
+    {
+      "id": "sl4",
+      "kind": "cards",
+      "section": null,
+      "headline": "Ключевые преимущества решения",
+      "subtitle": "Эффективность, удобство, снижение нагрузки",
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [
+          {
+            "title": "Снижение времени",
+            "text": "Сокращение времени на чтение чатов на 18 минут в день",
+            "icon_hint": "clock",
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Увеличение NPS",
+            "text": "Уровень удовлетворенности достиг 64%",
+            "icon_hint": "smile",
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Удобство",
+            "text": "Упрощение доступа к важной информации",
+            "icon_hint": "lightbulb",
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Производительность",
+            "text": "Сотрудники тратят меньше времени на непроизводительные задачи",
+            "icon_hint": "chart",
+            "number": null,
+            "bullets": []
+          }
+        ],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "Перечисляем основные выгоды от использования системы.",
+      "fact_refs": [
+        "f1",
+        "f2",
+        "f3"
+      ]
+    },
+    {
+      "id": "sl5",
+      "kind": "two_column",
+      "section": null,
+      "headline": "Проблема и решение",
+      "subtitle": "Оригинальная ситуация и результаты пилота",
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": [
+          {
+            "title": "Проблема",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": [
+              "Сотрудники тратят 47 минут в день на чтение чатов",
+              "Высокая нагрузка на внимание",
+              "Снижение продуктивности"
+            ]
+          },
+          {
+            "title": "Решение",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": [
+              "Внедрение «Умных сводок»",
+              "Сокращение времени до 29 минут",
+              "NPS 64%"
+            ]
+          }
+        ]
+      },
+      "notes": "Сравниваем исходную проблему с достижениями после внедрения.",
+      "fact_refs": [
+        "f1",
+        "f2",
+        "f3"
+      ]
+    },
+    {
+      "id": "sl6",
+      "kind": "comparison",
+      "section": null,
+      "headline": "Сравнение до и после пилота",
+      "subtitle": "Основные показатели до и после внедрения",
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [
+          {
+            "title": "Время на чтение чатов",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "NPS",
+            "text": "",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          }
+        ],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "Показываем динамику изменений по ключевым метрикам.",
+      "fact_refs": [
+        "f1",
+        "f2",
+        "f3"
+      ]
+    },
+    {
+      "id": "sl7",
+      "kind": "freeform",
+      "section": null,
+      "headline": "Масштабирование — следующий шаг",
+      "subtitle": "Требуется бюджет для расширения проекта",
+      "content": {
+        "bullets": [],
+        "paragraphs": [
+          "Пилот показал стабильный положительный эффект. Для дальнейшего развития проекта требуется финансирование."
+        ],
+        "items": [],
+        "numbers": [
+          {
+            "value": "14,5",
+            "label": "бюджет на масштабирование",
+            "fact_id": "f4"
+          }
+        ],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "Переходим к запросу на масштабирование, подкрепляя его данными.",
+      "fact_refs": [
+        "f4"
+      ]
+    },
+    {
+      "id": "sl8",
+      "kind": "big_number",
+      "section": null,
+      "headline": "Бюджет на масштабирование — 14,5 млн ₽",
+      "subtitle": "Необходимые средства для полномасштабного внедрения",
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [],
+        "numbers": [
+          {
+            "value": "14,5",
+            "label": "бюджет на масштабирование",
+            "fact_id": "f4"
+          }
+        ],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "Акцентируем внимание на конкретной сумме, необходимой для реализации плана.",
+      "fact_refs": [
+        "f4"
+      ]
+    },
+    {
+      "id": "sl9",
+      "kind": "cards",
+      "section": null,
+      "headline": "План масштабирования",
+      "subtitle": "Этапы и ожидаемые результаты",
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [
+          {
+            "title": "Фаза 1",
+            "text": "Расширение на 50% пользователей",
+            "icon_hint": "arrow-up",
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Фаза 2",
+            "text": "Внедрение в все отделы компании",
+            "icon_hint": "target",
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Фаза 3",
+            "text": "Оптимизация и анализ метрик",
+            "icon_hint": "analytics",
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Фаза 4",
+            "text": "Обучение и поддержка пользователей",
+            "icon_hint": "user",
+            "number": null,
+            "bullets": []
+          }
+        ],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "Описываем стратегию перехода от пилота к полномасштабному внедрению.",
+      "fact_refs": []
+    },
+    {
+      "id": "sl10",
+      "kind": "chart",
+      "section": null,
+      "headline": "Динамика NPS и времени на чтение чатов",
+      "subtitle": "Сравнение до и после пилота",
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [],
+        "numbers": [],
+        "table": null,
+        "chart": {
+          "type": "bar",
+          "series_ids": [
+            "f1",
+            "f2",
+            "f3"
+          ],
+          "title": null,
+          "unit": "минуты / %",
+          "highlight_index": null
+        },
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "Визуализация ключевых показателей для наглядного сравнения.",
+      "fact_refs": [
+        "f1",
+        "f2",
+        "f3"
+      ]
+    },
+    {
+      "id": "sl11",
+      "kind": "bullets",
+      "section": null,
+      "headline": "Рекомендации по действию",
+      "subtitle": "Дальнейшие шаги для успешного масштабирования",
+      "content": {
+        "bullets": [
+          "Утвердить бюджет на масштабирование",
+          "Назначить ответственного за внедрение",
+          "Запланировать этапы реализации"
+        ],
+        "paragraphs": [],
+        "items": [],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "Формулируем четкие рекомендации для принятия решения.",
+      "fact_refs": [
+        "f4"
+      ]
+    },
+    {
+      "id": "sl12",
+      "kind": "thanks",
+      "section": null,
+      "headline": "Благодарим за внимание",
+      "subtitle": "Контакты: [email] | [телефон]",
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "Завершаем презентацию с призывом к действию и контактными данными.",
+      "fact_refs": []
+    }
+  ],
+  "facts": [
+    {
+      "id": "f1",
+      "value": "47",
+      "unit": "минут",
+      "label": "время на чтение чатов",
+      "source_span": "Проблема: сотрудники тратят 47 минут в день на чтение чатов."
+    },
+    {
+      "id": "f2",
+      "value": "29",
+      "unit": "минут",
+      "label": "время на чтение чатов",
+      "source_span": "Результаты: время сократилось до 29 минут, NPS 64."
+    },
+    {
+      "id": "f3",
+      "value": "64",
+      "unit": "%",
+      "label": "NPS после пилота",
+      "source_span": "Результаты: время сократилось до 29 минут, NPS 64."
+    },
+    {
+      "id": "f4",
+      "value": "14,5",
+      "unit": "млн ₽",
+      "label": "бюджет на масштабирование",
+      "source_span": "Просим: бюджет 14,5 млн ₽ на масштабирование."
+    }
+  ],
+  "series": [],
+  "tables": [],
+  "_source": "workspace/runs/20260925-155033-1006b5/compact/outline.json (planned_by model); planner warnings: fact_checker found 2 issues; outline regenerated once"
+}

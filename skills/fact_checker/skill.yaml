@@ -1,5 +1,5 @@
 name: fact_checker
-version: 0.1.0
+version: 0.1.1
 role: llm
 description: Checks that every number and claim in the planned deck is supported by the brief and the facts registry.
 prompt_files:
@@ -11,3 +11,5 @@ params:
   max_tokens: 1500
 changelog:
   - "0.1.0: initial version"
+  - "0.1.1: no sample figure in the answer format; also reports units the brief does not give (NPS is points, not %),
+    invented phases, plans, benefits and recommendations, and placeholders"

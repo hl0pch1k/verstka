@@ -473,14 +473,23 @@ class _Backup(MockProvider):
         return res
 
 
-def _only_compact_plans(messages):
-    from verstka.schemas.outline import DeckOutline
+# a model plan of SHORT (a plan is grounded in its own brief: verstka.planning.grounding)
+SHORT_PLAN = {
+    "title": "Итоги пилота «Умные сводки» за второй квартал",
+    "slides": [
+        {"id": "sl1", "kind": "title", "headline": "Итоги пилота «Умные сводки» за второй квартал"},
+        {"id": "sl2", "kind": "big_number", "headline": "Время на чтение чатов сократилось на 18 минут в день", "content": {"numbers": [{"value": "47 → 29 минут", "label": "в день на чтение чатов"}]}},
+        {"id": "sl3", "kind": "bullets", "headline": "Сводки экономят время сотрудников", "content": {"bullets": ["Время на чтение чатов сократилось с 47 до 29 минут в день", "Это на 38% меньше, чем до пилота"]}},
+        {"id": "sl4", "kind": "thanks", "headline": "Спасибо за внимание"},
+    ],
+}
 
+
+def _only_compact_plans(messages):
     text = "\n".join(m.content for m in messages)
     if "Return the JSON plan only" in text:
         if "Стратегия «Компактный»" in text:
-            demo = DeckOutline.model_validate_json(FIXTURE.read_text(encoding="utf-8"))
-            return {"title": demo.title, "slides": [s.model_dump(mode="json") for s in demo.slides]}
+            return SHORT_PLAN
         raise ProviderError("all model links failed: qwen/qwen3.8-27b:free: congested upstream, skipped for 95 s more")
     if "List the issues" in text:
         return {"issues": []}

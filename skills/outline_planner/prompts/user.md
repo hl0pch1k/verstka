@@ -1,21 +1,21 @@
 Language: {{ language }}. Tone: {{ tone }}. Audience: {{ audience }}. Purpose: {{ purpose }}.
-Target slide count: {{ target }}.
+Maximum number of slides: {{ target }} (use fewer when the brief has less content).
 {% if title_hint %}Title hint: {{ title_hint }}{% endif %}
 {% if extra_instructions %}User instructions (must be honoured): {{ extra_instructions }}{% endif %}
 
 Strategy:
 {{ strategy_instructions }}
 
-Available slide kinds in the template (with samples count and max repeated items):
+Slide kinds of the template (samples count, max repeated items):
 {{ kinds_json }}
 
-Facts registry (the only allowed source of numbers):
+Facts registry — the only source of numbers ("facts": single figures with ids f…, "series": chart data with ids s…, "tables"):
 {{ facts_json }}
 
 Brief:
 {{ brief }}
 {% if issues %}
-Previous plan had these problems; fix them:
+The previous plan had these problems; fix them (remove what the brief does not support):
 {{ issues }}
 {% endif %}
 

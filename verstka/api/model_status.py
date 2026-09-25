@@ -182,8 +182,8 @@ def _best(codes: Iterable[Optional[str]]) -> Optional[str]:
 
 def _classified(text: str) -> list[tuple[str, str]]:
     """(reason code, the part of the text it comes from) per failed link of one warning; [] when not about the model."""
-    if not isinstance(text, str) or not text or not _MODEL_STEP.search(text):
-        return []
+    if not isinstance(text, str) or not text or text.startswith("grounding:") or not _MODEL_STEP.search(text):
+        return []  # (grounding: what the plan lost for not being in the brief — quoted slide text, not a failure)
     low = text.lower()
     if low.startswith("no llm provider"):
         return [("off", text)]

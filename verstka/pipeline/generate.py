@@ -184,6 +184,7 @@ def generate_variants(
     audit_render = bool(audit_models and use_vlm)  # the VLM checks look at slide images; deterministic ones read XML
     planned: dict[str, tuple[DeckOutline, list[str], float]] = {}
     plan_models: dict[str, Optional[str]] = {}  # strategy → the model that wrote its plan (None: the rules did)
+    plan_raw: dict[str, list] = {}  # strategy → the planner's answers as the model wrote them (planner_raw.json)
     if outline is None:
         # the strategies are independent: with a model each plan is a chain of 2–3 calls (plan, fact check, repair),
         # so they run side by side and the deck waits for the slowest chain, not for the sum of them
@@ -191,8 +192,10 @@ def generate_variants(
             tp = time.time()
             strategy = all_strategies[name]
             rec, answered = _recording(providers if use_llm else None)
+            raw: list = []
+            plan_raw[name] = raw
             # own copy of the facts: the deterministic planner adds the brief's table series to them
-            o, w = plan_outline(brief, manifest, strategy, facts.model_copy(deep=True), skills if use_llm else None, rec, target=target_slide_count(brief, strategy))
+            o, w = plan_outline(brief, manifest, strategy, facts.model_copy(deep=True), skills if use_llm else None, rec, target=target_slide_count(brief, strategy), raw=raw)
             plan_models[name] = answered[0] if answered and o.planned_by == "model" else None
             return name, o, w, round(time.time() - tp, 2)
 
@@ -214,8 +217,9 @@ def generate_variants(
                 if o.planned_by == "model":
                     continue
                 st = all_strategies[name]
-                adapted = adapt_outline(planned[donor][0], st, manifest, target_slide_count(brief, st), hard_limit=bool(brief.slide_count))
-                planned[name] = (adapted, w + [f"own model plan failed: the model plan of «{donor}» adapted to «{name}»"], sec)
+                aw: list[str] = []
+                adapted = adapt_outline(planned[donor][0], st, manifest, target_slide_count(brief, st), hard_limit=bool(brief.slide_count), brief=brief, warnings=aw)
+                planned[name] = (adapted, w + [f"own model plan failed: the model plan of «{donor}» adapted to «{name}»"] + aw, sec)
                 plan_models[name] = plan_models.get(donor)
     pending: list[dict] = []
     for i, name in enumerate(strategies):
@@ -284,6 +288,9 @@ def generate_variants(
             (vdir / "audit_report.json").write_text(audit_report.model_dump_json(indent=2), encoding="utf-8")
         (vdir / "outline.json").write_text(v["outline"].model_dump_json(indent=2), encoding="utf-8")
         (vdir / "layout_plan.json").write_text(v["plan"].model_dump_json(indent=2), encoding="utf-8")
+        if plan_raw.get(name):
+            # the planner's own answer (before grounding and validation): what the model wrote, for the audit trail
+            (vdir / "planner_raw.json").write_text(json.dumps({"strategy": name, "answers": plan_raw[name]}, ensure_ascii=False, indent=2), encoding="utf-8")
         export_paths = {"pptx": vdir / "deck.pptx", **v["exports"]}
         timings = v["timings"]
         vr = VariantResult(strategy=name, out_dir=vdir, outline=v["outline"], plan=v["plan"], render=v["render"], images=v["images"], warnings=v["warnings"], seconds=round(time.time() - v["ts"], 2), audit=audit_report, exports=export_paths, timings=timings)

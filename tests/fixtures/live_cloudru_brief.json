@@ -1,0 +1,13 @@
+{
+  "_source": "workspace/runs/20260925-155033-1006b5/generation.json (UI example brief, live Cloud.ru run 2026-09-25)",
+  "text": "Например: итоги пилота «Умные сводки» за квартал.\n\nПроблема: сотрудники тратят 47 минут в день на чтение чатов.\nРезультаты: время сократилось до 29 минут, NPS 64.\nПросим: бюджет 14,5 млн ₽ на масштабирование.",
+  "audience": "Генеральный директор",
+  "slide_count": 12,
+  "language": "ru",
+  "strategies": [
+    "structured",
+    "visual",
+    "compact"
+  ],
+  "model": "qwen/qwen3-vl-30b-a3b-instruct"
+}

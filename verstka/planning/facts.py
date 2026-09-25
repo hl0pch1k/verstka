@@ -6,6 +6,7 @@ import re
 from typing import Optional
 
 from verstka.planning import heuristics as H
+from verstka.planning.grounding import grounded_facts
 from verstka.providers.base import ProviderError
 from verstka.providers.registry import ProviderRegistry
 from verstka.schemas.outline import Brief, Fact, FactsExtraction, Series, TableData
@@ -101,6 +102,10 @@ def extract_facts(brief: Brief, skills: Optional[SkillsRegistry] = None, provide
                 s.id = s.id or f"s{i}"
             if not out.tables:
                 out.tables = _markdown_tables(brief.text)
+            # the registry is the planner's only source of figures: a figure the brief does not have, or a unit the
+            # brief does not give it («NPS 64» registered as «64 %»), must not reach the plan
+            out.facts, changed = grounded_facts(out.facts, brief)
+            warnings.extend(changed)
             return out, warnings
         except (ProviderError, ValueError, KeyError) as e:
             warnings.append(f"data_extractor failed, using regex facts: {str(e)[:160]}")

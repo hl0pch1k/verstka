@@ -1,0 +1,44 @@
+{
+  "_source": "Synthetic plans as a careful model would write them in its own words (review of grounding, 2026-09-25): synonyms instead of the brief's words («работники экономят», «переписка», «расширение»), a change with its unit written once («с 47 до 29 минут»), a change the brief gives as было/стало or до/после внедрения, derived values (a difference, a percent change from the earlier value, a ratio, points of a score), a rounding («27%» for 27,4%), a date in another format («15 октября 2026 года» for 15.10.2026). Grounding must keep every slide and figure of them. «live» is the create screen's four-line example brief (live_cloudru_brief.json).",
+  "ui": {
+    "brief": "live",
+    "plan": {
+      "title": "Итоги пилота «Умные сводки» за квартал",
+      "subtitle": null,
+      "slides": [
+        {"id": "sl1", "kind": "title", "headline": "Итоги пилота «Умные сводки» за квартал", "subtitle": "Для генерального директора"},
+        {"id": "sl2", "kind": "big_number", "section": "Проблема", "headline": "Чтение чатов отнимает у сотрудников 47 минут в день",
+         "content": {"numbers": [{"value": "47 минут", "label": "в день уходит на переписку"}]},
+         "notes": "Работники ежедневно тратят на переписку 47 минут."},
+        {"id": "sl3", "kind": "stat_row", "section": "Результаты", "headline": "Время на чтение чатов сократилось с 47 до 29 минут",
+         "content": {"numbers": [{"value": "29 минут", "label": "в день после пилота"}, {"value": "−38%", "label": "времени на переписку"}, {"value": "18 минут", "label": "экономии ежедневно"}],
+                     "paragraphs": ["Работники экономят 18 минут в день"]},
+         "notes": "Переписка стала короче на 18 минут, то есть на 38%."},
+        {"id": "sl4", "kind": "big_number", "section": "Результаты", "headline": "Сотрудники оценили сводки на 64 балла NPS",
+         "content": {"numbers": [{"value": "64", "label": "NPS после пилота"}]}},
+        {"id": "sl5", "kind": "bullets", "section": "Просим", "headline": "Для масштабирования нужен бюджет 14,5 млн ₽",
+         "content": {"bullets": ["Требуется 14,5 млн ₽ для расширения", "Время на переписку уже сократилось на 18 минут в день", "Сводки экономят каждому 18 минут в день"]}},
+        {"id": "sl6", "kind": "thanks", "headline": "Спасибо за внимание"}
+      ]
+    }
+  },
+  "before_after": {
+    "brief": "Итоги автоматизации поддержки клиентов.\n\nВремя ответа: было 47 минут, стало 29 минут. Выручка: было 120 млн ₽, стало 150 млн ₽.\nСрок обработки заявки до внедрения 12 дней, после внедрения 4 дня. NPS 64 (было 41).\nДоля повторных обращений 27,4%. Старт второго этапа 15.10.2026. Бюджет второго этапа 14,5 млн ₽.",
+    "plan": {
+      "title": "Итоги автоматизации поддержки клиентов",
+      "subtitle": null,
+      "slides": [
+        {"id": "sl1", "kind": "title", "headline": "Итоги автоматизации поддержки клиентов"},
+        {"id": "sl2", "kind": "stat_row", "section": "Время ответа", "headline": "Время ответа сократилось с 47 до 29 минут", "subtitle": "На 18 минут быстрее, или на 38%",
+         "content": {"numbers": [{"value": "47 минут", "label": "было"}, {"value": "29 минут", "label": "стало"}]}},
+        {"id": "sl3", "kind": "bullets", "section": "Выручка", "headline": "Выручка выросла с 120 до 150 млн ₽",
+         "content": {"bullets": ["Рост выручки до 150 млн ₽", "Заявку обрабатывают за 4 дня вместо 12", "Срок обработки сократился с 12 до 4 дней — в 3 раза"]}},
+        {"id": "sl4", "kind": "big_number", "headline": "NPS вырос на 23 пункта",
+         "content": {"numbers": [{"value": "64", "label": "NPS, было 41"}]}},
+        {"id": "sl5", "kind": "bullets", "headline": "Второй этап стартует 15 октября 2026 года",
+         "content": {"bullets": ["Повторно обращаются около 27% клиентов", "Бюджет второго этапа — 14.5 млн ₽", "Время ответа снизилось на 38%"]}},
+        {"id": "sl6", "kind": "thanks", "headline": "Спасибо за внимание"}
+      ]
+    }
+  }
+}

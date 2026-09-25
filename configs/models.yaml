@@ -23,8 +23,8 @@
 #   1. qwen/qwen3.8-27b @ OpenRouter   paid, bf16/fp8 hosts only; needs credits, answers 402 until then
 #   2. qwen/qwen3.8-27b @ Groq          free plan (GROQ_API_KEY): 30 req/min, 8K tokens/min, 200K tokens/day
 #   3. qwen/qwen3.8-27b:free            the same model free on OpenRouter, one host (ModelRun) — often congested
-#   4. Qwen3-VL-30B-A3B-Instruct @ Cloud.ru   paid in rubles (CLOUDRU_API_KEY), ≈ 3 ₽ per generation, reads images
-#   5. Qwen/Qwen3-32B @ Cloud.ru         the same key, text only — not in the vlm chain
+#   4. Qwen/Qwen3-32B @ Cloud.ru         paid in rubles (CLOUDRU_API_KEY), ≈ 3 ₽ per generation, text only — not in vlm
+#   5. Qwen3-VL-30B-A3B-Instruct @ Cloud.ru   the same key, reads images (the Cloud.ru link of the vlm chain)
 #   6. google/gemma-4-31b-it:free       Gemma 4 31B, Apache 2.0, multimodal, free (Google AI Studio host)
 #   7. google/gemma-4-26b-a4b-it:free   Gemma 4 26B-A4B (MoE, 4B active), Apache 2.0, multimodal, free
 #
@@ -76,6 +76,19 @@ roles:
         price_out_per_m: 0.0
         extra_body:
           reasoning: { enabled: false }
+      - &cloudru_qwen
+        # First of Cloud.ru for text: in live checks (25.09.2026) it kept closest to the brief — the VL model wrote
+        # livelier headlines and was faster, but added claims the brief does not make («растёт экспоненциально»)
+        model: Qwen/Qwen3-32B
+        label: Qwen3 32B (Cloud.ru)
+        base_url: https://foundation-models.api.cloud.ru/v1
+        api_key: ${CLOUDRU_API_KEY}  # cloud.ru Foundation Models, Russian card; empty → this link is off
+        # 37.08 ₽ in / 148.29 ₽ out per 1M tokens (≈ 3 ₽ per generation); the cost in rubles is not in the USD manifest
+        requests_per_minute: 60  # Cloud.ru allows 20 requests/s per key
+        extra_body: {}  # Cloud.ru documents no parameter to switch Qwen3's thinking off
+        # Qwen3's own soft switch (Qwen3-32B model card): "/no_think" in the system message turns thinking off for
+        # this link only; the empty <think></think> block the model still starts with is dropped from the answer
+        system_suffix: "/no_think"
       - &cloudru_vl
         # Cloud.ru's best model inside the rules (catalog of 2026-09-25): Qwen3-VL-30B-A3B-Instruct — Apache 2.0,
         # 31.07B parameters, answers without a thinking phase, reads images (so it serves the vlm role too), 131K context.
@@ -87,17 +100,6 @@ roles:
         # 34.16 ₽ in / 136.64 ₽ out per 1M tokens (≈ 3 ₽ per generation); the cost in rubles is not in the USD manifest
         requests_per_minute: 60  # Cloud.ru allows 20 requests/s per key
         extra_body: {}
-      - &cloudru_qwen
-        model: Qwen/Qwen3-32B
-        label: Qwen3 32B (Cloud.ru)
-        base_url: https://foundation-models.api.cloud.ru/v1
-        api_key: ${CLOUDRU_API_KEY}  # cloud.ru Foundation Models, Russian card; empty → this link is off
-        # 37.08 ₽ in / 148.29 ₽ out per 1M tokens (≈ 3 ₽ per generation); the cost in rubles is not in the USD manifest
-        requests_per_minute: 60  # Cloud.ru allows 20 requests/s per key
-        extra_body: {}  # Cloud.ru documents no parameter to switch Qwen3's thinking off
-        # Qwen3's own soft switch (Qwen3-32B model card): "/no_think" in the system message turns thinking off for
-        # this link only; the empty <think></think> block the model still starts with is dropped from the answer
-        system_suffix: "/no_think"
       # Gemma 4 thinks only when asked to (no `reasoning` sent); json_mode stays off like for the other links
       - &gemma_31b
         model: google/gemma-4-31b-it:free

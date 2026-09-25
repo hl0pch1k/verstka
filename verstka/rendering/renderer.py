@@ -11,6 +11,7 @@ from typing import Callable, Optional
 from verstka.ingest.workspace import TemplateWorkspace
 from verstka.rendering.clone import RenderedSlide, render_clone
 from verstka.rendering.deck import DeckBuilder
+from verstka.rendering.fallbacks import fallback_composition, prepare_slide
 from verstka.rendering.synth import render_synth
 from verstka.schemas.layout import LayoutPlan, LayoutSlide
 from verstka.schemas.outline import DeckOutline
@@ -102,7 +103,16 @@ def render_deck(
     n = len(outline.slides)
     for i, oslide in enumerate(outline.slides, 1):
         ps = plan.for_outline(oslide.id) or LayoutSlide(outline_id=oslide.id, mode="synth", composition="bullets", reasons=["no plan entry"])
+        # render-time guards (fallbacks.py): a chart without data, empty columns, a kind with no composition, template
+        # stubs. What the deck shows is written back, so the audit and outline.json / layout_plan.json describe it
+        safe, safe_ps, notes = prepare_slide(oslide, ps, outline)
+        if safe is not oslide:
+            outline.slides[i - 1] = oslide = safe
+        if safe_ps is not ps:
+            plan.slides = [safe_ps if s is ps else s for s in plan.slides]
+            ps = safe_ps
         rendered = RenderedSlide(outline_id=oslide.id, index=i, mode=ps.mode, pattern_id=ps.pattern_id, composition=ps.composition)
+        rendered.warnings.extend(notes)
         before = _snapshot(builder)
         try:
             if ps.mode == "clone" and ps.pattern_id in patterns:
@@ -116,9 +126,9 @@ def render_deck(
             # a half-filled clone must not stay in the deck next to its synth replacement
             _rollback(builder, before)
             try:
-                fallback = LayoutSlide(outline_id=oslide.id, mode="synth", composition=ps.composition or "bullets")
+                fallback = LayoutSlide(outline_id=oslide.id, mode="synth", composition=fallback_composition(oslide, ps))
                 _, warns = render_synth(builder, fallback, oslide, manifest, ws, outline)
-                rendered.mode = "synth"
+                rendered.mode, rendered.composition = "synth", fallback.composition
                 rendered.warnings.extend(warns)
             except Exception as e2:  # noqa: BLE001
                 log.exception("synth fallback failed for slide %d", i)

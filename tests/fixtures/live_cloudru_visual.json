@@ -1,0 +1,454 @@
+{
+  "title": "Итоги пилота «Умные сводки»",
+  "subtitle": "За квартал",
+  "audience": "Генеральный директор",
+  "purpose": null,
+  "strategy": "visual",
+  "language": "ru",
+  "planned_by": "model",
+  "slides": [
+    {
+      "id": "sl1",
+      "kind": "title",
+      "section": null,
+      "headline": "Пилот подтвердил эффект на 12 тысячах пользователей",
+      "subtitle": "",
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "Начинаем с главного вывода: проект показал значимый результат по времени и удовлетворенности.",
+      "fact_refs": []
+    },
+    {
+      "id": "sl2",
+      "kind": "big_number",
+      "section": null,
+      "headline": "Сокращение времени на чтение чатов на 18 минут",
+      "subtitle": "",
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [],
+        "numbers": [
+          {
+            "value": "47",
+            "label": "минут в день до пилота",
+            "fact_id": "f1"
+          },
+          {
+            "value": "29",
+            "label": "минут в день после пилота",
+            "fact_id": "f2"
+          }
+        ],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "Ключевой показатель — снижение времени, потраченного на чтение чатов.",
+      "fact_refs": [
+        "f1",
+        "f2"
+      ]
+    },
+    {
+      "id": "sl3",
+      "kind": "stat_row",
+      "section": null,
+      "headline": "NPS вырос до 64%",
+      "subtitle": "",
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [],
+        "numbers": [
+          {
+            "value": "64",
+            "label": "% NPS после пилота",
+            "fact_id": "f3"
+          }
+        ],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "Высокий NPS свидетельствует о высокой удовлетворенности пользователями.",
+      "fact_refs": [
+        "f3"
+      ]
+    },
+    {
+      "id": "sl4",
+      "kind": "cards",
+      "section": null,
+      "headline": "Основные преимущества решения",
+      "subtitle": "",
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [
+          {
+            "title": "Экономия времени",
+            "text": "Сотрудники экономят 18 минут в день",
+            "icon_hint": "clock",
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Увеличение NPS",
+            "text": "Удовлетворенность сотрудников выросла до 64%",
+            "icon_hint": "smile",
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Простота использования",
+            "text": "Интуитивный интерфейс без обучения",
+            "icon_hint": "lightbulb",
+            "number": null,
+            "bullets": []
+          }
+        ],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "Перечисляем ключевые выгоды от внедрения технологии.",
+      "fact_refs": [
+        "f1",
+        "f2",
+        "f3"
+      ]
+    },
+    {
+      "id": "sl5",
+      "kind": "chart",
+      "section": null,
+      "headline": "Динамика времени на чтение чатов",
+      "subtitle": "",
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [],
+        "numbers": [],
+        "table": null,
+        "chart": {
+          "type": "bar",
+          "series_ids": [
+            "f1",
+            "f2"
+          ],
+          "title": null,
+          "unit": "минут",
+          "highlight_index": null
+        },
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "График показывает снижение времени до и после пилота.",
+      "fact_refs": [
+        "f1",
+        "f2"
+      ]
+    },
+    {
+      "id": "sl6",
+      "kind": "cards",
+      "section": null,
+      "headline": "Результаты пилота",
+      "subtitle": "",
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [
+          {
+            "title": "Охват",
+            "text": "12 000 пользователей в пилоте",
+            "icon_hint": "users",
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Снижение нагрузки",
+            "text": "Чаты стали короче и информативнее",
+            "icon_hint": "document",
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Обратная связь",
+            "text": "Высокая оценка со стороны команд",
+            "icon_hint": "thumbs-up",
+            "number": null,
+            "bullets": []
+          }
+        ],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "Подтверждение эффективности проекта на реальных данных.",
+      "fact_refs": [
+        "f1",
+        "f2"
+      ]
+    },
+    {
+      "id": "sl7",
+      "kind": "big_number",
+      "section": null,
+      "headline": "Бюджет на масштабирование — 14,5 млн ₽",
+      "subtitle": "",
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [],
+        "numbers": [
+          {
+            "value": "14,5",
+            "label": "млн ₽ на масштабирование",
+            "fact_id": "f4"
+          }
+        ],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "Требуемый ресурс для расширения проекта на всю компанию.",
+      "fact_refs": [
+        "f4"
+      ]
+    },
+    {
+      "id": "sl8",
+      "kind": "bullets",
+      "section": null,
+      "headline": "Причины запроса бюджета",
+      "subtitle": "",
+      "content": {
+        "bullets": [
+          "Распространение на все отделы компании",
+          "Поддержка интеграции с другими системами",
+          "Масштабирование инфраструктуры",
+          "Обучение и сопровождение пользователей"
+        ],
+        "paragraphs": [],
+        "items": [],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "Обоснование необходимости финансирования масштабирования.",
+      "fact_refs": [
+        "f4"
+      ]
+    },
+    {
+      "id": "sl9",
+      "kind": "cards",
+      "section": null,
+      "headline": "План масштабирования",
+      "subtitle": "",
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [
+          {
+            "title": "Фаза 1",
+            "text": "Внедрение в 3 департамента",
+            "icon_hint": "rocket",
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Фаза 2",
+            "text": "Интеграция с HR-системой",
+            "icon_hint": "link",
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Фаза 3",
+            "text": "Анализ метрик и оптимизация",
+            "icon_hint": "analytics",
+            "number": null,
+            "bullets": []
+          }
+        ],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "Краткий план реализации проекта на всей компании.",
+      "fact_refs": []
+    },
+    {
+      "id": "sl10",
+      "kind": "chart",
+      "section": null,
+      "headline": "Ожидаемые показатели после масштабирования",
+      "subtitle": "",
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [],
+        "numbers": [],
+        "table": null,
+        "chart": {
+          "type": "column",
+          "series_ids": [
+            "f1",
+            "f2"
+          ],
+          "title": null,
+          "unit": "минут",
+          "highlight_index": 1
+        },
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "Проекция роста эффективности при полном внедрении.",
+      "fact_refs": [
+        "f1",
+        "f2"
+      ]
+    },
+    {
+      "id": "sl11",
+      "kind": "cards",
+      "section": null,
+      "headline": "Рекомендации по действию",
+      "subtitle": "",
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [
+          {
+            "title": "Утвердить бюджет",
+            "text": "На масштабирование проекта",
+            "icon_hint": "check",
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Назначить команду",
+            "text": "Для управления внедрением",
+            "icon_hint": "team",
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Запустить фазу 1",
+            "text": "В течение месяца",
+            "icon_hint": "play",
+            "number": null,
+            "bullets": []
+          }
+        ],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "Заключительные шаги для принятия решения.",
+      "fact_refs": [
+        "f4"
+      ]
+    },
+    {
+      "id": "sl12",
+      "kind": "thanks",
+      "section": null,
+      "headline": "Спасибо за внимание",
+      "subtitle": "Вопросы? Контакты: [email@company.com]",
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": []
+      },
+      "notes": "Завершение презентации с контактной информацией.",
+      "fact_refs": []
+    }
+  ],
+  "facts": [
+    {
+      "id": "f1",
+      "value": "47",
+      "unit": "минут",
+      "label": "время на чтение чатов",
+      "source_span": "Проблема: сотрудники тратят 47 минут в день на чтение чатов."
+    },
+    {
+      "id": "f2",
+      "value": "29",
+      "unit": "минут",
+      "label": "время на чтение чатов",
+      "source_span": "Результаты: время сократилось до 29 минут, NPS 64."
+    },
+    {
+      "id": "f3",
+      "value": "64",
+      "unit": "%",
+      "label": "NPS после пилота",
+      "source_span": "Результаты: время сократилось до 29 минут, NPS 64."
+    },
+    {
+      "id": "f4",
+      "value": "14,5",
+      "unit": "млн ₽",
+      "label": "бюджет на масштабирование",
+      "source_span": "Просим: бюджет 14,5 млн ₽ на масштабирование."
+    }
+  ],
+  "series": [],
+  "tables": [],
+  "_source": "workspace/runs/20260925-155033-1006b5/visual/outline.json (planned_by model); planner warnings: "
+}

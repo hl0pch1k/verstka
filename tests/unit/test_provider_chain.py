@@ -994,14 +994,14 @@ def test_the_default_config_paid_qwen_groq_free_qwen_cloudru_then_gemma(config_e
         (PAID, "openrouter.ai"),
         (PAID, "api.groq.com"),
         (FREE, "openrouter.ai"),
-        (QWEN_VL, "foundation-models.api.cloud.ru"),
         (QWEN32, "foundation-models.api.cloud.ru"),
+        (QWEN_VL, "foundation-models.api.cloud.ru"),
         (GEMMA, "openrouter.ai"),
         (GEMMA_MOE, "openrouter.ai"),
     ]
     assert [p.model for p in vlm.links] == [PAID, PAID, FREE, QWEN_VL, GEMMA, GEMMA_MOE]  # Qwen3-32B reads no images
     assert vlm.links[0].health is llm.links[0].health  # llm and vlm share the records
-    paid, groq, free, cloudru_vl, cloudru, gemma, moe = llm.links
+    paid, groq, free, cloudru, cloudru_vl, gemma, moe = llm.links
     assert paid.extra_body == {"reasoning": {"enabled": False}, "provider": {"allow_fallbacks": True, "quantizations": ["bf16", "fp8"]}}
     assert (paid.price_in, paid.price_out) == (0.42, 3.00) and paid._limiter.rpm == 60
     assert groq.off and cloudru.off and cloudru_vl.off  # GROQ_API_KEY / CLOUDRU_API_KEY are not set: skipped silently

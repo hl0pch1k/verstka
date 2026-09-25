@@ -8,7 +8,7 @@ import pytest
 
 from verstka.analysis.manifest import analyze_template
 from verstka.pipeline.generate import generate_variants
-from verstka.planning.brief import parse_brief_text
+from verstka.planning.brief import load_brief, parse_brief_text
 from verstka.planning.facts import basic_facts
 from verstka.planning.outline import plan_outline
 from verstka.planning.strategies import get_strategy
@@ -20,6 +20,8 @@ from verstka.schemas.outline import DeckOutline
 from verstka.skills_registry.registry import SkillsRegistry
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "outline_demo.json"
+# the brief the demo plan was written for: a model plan is grounded in its own brief (verstka.planning.grounding)
+DEMO_BRIEF = Path(__file__).resolve().parents[2] / "examples" / "briefs" / "vk_workspace_feature.md"
 SHORT = "Итоги пилота «Умные сводки» за второй квартал: время на чтение чатов сократилось с 47 до 29 минут в день."
 
 
@@ -54,7 +56,7 @@ def test_a_good_model_plan_is_marked(manifest):
     demo = DeckOutline.model_validate_json(FIXTURE.read_text(encoding="utf-8"))
     planned = {"title": demo.title, "slides": [s.model_dump() for s in demo.slides]}
     providers = ProviderRegistry.mock({"Return the JSON plan only": planned, "List the issues": {"issues": []}})
-    brief = parse_brief_text(SHORT)
+    brief = load_brief(DEMO_BRIEF)
     outline, _ = plan_outline(brief, manifest, get_strategy("visual"), basic_facts(brief.text), SkillsRegistry.load(), providers, target=12)
     assert outline.planned_by == "model" and len(outline.slides) >= 10
 
@@ -76,7 +78,7 @@ def test_one_good_model_plan_serves_every_variant(simple_deck, manifest, tmp_pat
         return {"facts": [], "series": [], "tables": []}
 
     providers = ProviderRegistry.mock(answer)
-    res = generate_variants(simple_deck, brief=parse_brief_text(SHORT), out_dir=tmp_path / "out", workspace_root=tmp_path / "ws", providers=providers, skills=SkillsRegistry.load(), use_vlm=False, audit=False, autofix=False, exports=[], render_images=False)
+    res = generate_variants(simple_deck, brief=load_brief(DEMO_BRIEF), out_dir=tmp_path / "out", workspace_root=tmp_path / "ws", providers=providers, skills=SkillsRegistry.load(), use_vlm=False, audit=False, autofix=False, exports=[], render_images=False)
     by = {v.strategy: v.outline for v in res.variants}
     assert by["compact"].planned_by == "model"
     assert by["structured"].planned_by == "shared:compact" and by["visual"].planned_by == "shared:compact"

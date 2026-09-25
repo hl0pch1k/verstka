@@ -12,10 +12,13 @@ from typing import Optional
 
 from verstka.planning import heuristics as H
 from verstka.planning.condense import condense_text
+from verstka.planning.grounding import BriefIndex, ground_outline
+from verstka.planning.plan_json import retype_frames
 from verstka.planning.strategies import Strategy
 from verstka.providers.base import ProviderError
 from verstka.providers.registry import ProviderRegistry
 from verstka.schemas.common import PatternKind
+from verstka.ru import ru_count
 from verstka.schemas.outline import Brief, ChartSpec, DeckOutline, FactCheck, FactsExtraction, NumberCallout, OutlineSlide, PlannedDeck, SlideContent, SlideItem
 from verstka.schemas.template import TemplateManifest
 from verstka.skills_registry.registry import SkillsRegistry
@@ -1132,7 +1135,9 @@ _FRAME_KINDS = {PatternKind.title, PatternKind.thanks, PatternKind.section, Patt
 
 
 def unusable_plan(planned: PlannedDeck) -> Optional[str]:
-    """Why a model plan cannot become a deck (None when it can): no content slides, or a refusal instead of a plan."""
+    """Why a model plan cannot become a deck (None when it can): no content slides, or a refusal instead of a plan. A
+    «section» that carries bullets or figures is a content slide (plan_json.retype_frames types it by its content)."""
+    retype_frames(planned.slides)
     if not any(s.kind not in _FRAME_KINDS for s in planned.slides):
         return "no content slides"
     if any(_REFUSAL_RE.search(t or "") for t in [planned.title] + [s.headline for s in planned.slides[:3]]):
@@ -1140,10 +1145,71 @@ def unusable_plan(planned: PlannedDeck) -> Optional[str]:
     return None
 
 
-def adapt_outline(source: DeckOutline, strategy: Strategy, manifest: Optional[TemplateManifest], target: int, hard_limit: bool = False) -> DeckOutline:
+
+_COUNT_NOUNS = {"балл": ("балл", "балла", "баллов"), "пункт": ("пункт", "пункта", "пунктов")}
+_COUNT_RE = re.compile(r"(?<![\w,.])(\d[\d\s\u00a0]*)(?:([,.]\d+))?(\s|\u00a0)(балл|пункт)(?:а|ов)?(?![\wё])", re.I)
+
+
+def _agree(text: str) -> str:
+    """«64 баллов» → «64 балла», «1 пунктов» → «1 пункт» (a decimal takes «балла»): a model's number agreement."""
+    def fix(m: re.Match) -> str:
+        whole, frac, sp, noun = m.group(1), m.group(2), m.group(3), m.group(4).lower()
+        one, few, many = _COUNT_NOUNS[noun]
+        if frac:
+            form = few
+        else:
+            n = int(re.sub(r"\D", "", whole) or 0)
+            form = ru_count(n, one, few, many).split(" ", 1)[1]
+        return f"{whole}{frac or ''}{sp}{form}"
+    return _COUNT_RE.sub(fix, text) if text else text
+
+
+def polish_plan(o: DeckOutline) -> DeckOutline:
+    """A model plan made to read like a designed deck (after grounding, before layout): a short deck (≤ 5 content
+    slides) has no section dividers and no agenda — a divider per slide is noise; a slide of one bullet is set as its
+    figure (a big number) when the bullet holds one, else as a statement; a figure's label is what the slide will show
+    (heuristics.label_beside, the rule compose.distinct_label uses), so the audit finds the plan's text on the slide;
+    «64 баллов» agrees with its number. Rules plans are left as they are."""
+    if o.planned_by in ("rules", "skeleton"):
+        return o
+    o = o.model_copy(deep=True)
+    content = [s for s in o.slides if s.kind not in _FRAME_KINDS]
+    if 0 < len(content) <= 5:
+        o.slides = [s for s in o.slides if s.kind not in (PatternKind.section, PatternKind.agenda)]
+    for s in o.slides:
+        c = s.content
+        s.headline = _agree(s.headline)
+        c.bullets = [_agree(b) for b in c.bullets]
+        c.paragraphs = [_agree(t) for t in c.paragraphs]
+        one_bullet = len(c.bullets) == 1 and not c.paragraphs
+        short_para = len(c.paragraphs) == 1 and not c.bullets and len(c.paragraphs[0].split()) <= 8
+        if s.kind == PatternKind.bullets and (one_bullet or short_para) and not (c.items or c.numbers or c.table or c.chart):
+            line = (c.bullets or c.paragraphs)[0]
+            ks = H.kpis_of(line)
+            if len(ks) == 1 and not s.content.columns:
+                k = ks[0]
+                label = k.label or ""
+                span = H.figure_span(k.value, label)
+                if span:  # «NPS: 64 баллов» → «NPS»: the label never repeats its figure
+                    label = label[: span[0]] + label[span[1]:]
+                    label = re.sub(r"(?<![\wё])(?:балл|пункт)(?:а|ов)?(?![\wё])", " ", label, flags=re.I)
+                    label = " ".join(label.replace(":", " ").split()).strip(" ,;—–-")
+                label = H.label_beside(k.value, label, s.headline) or label
+                s.kind = PatternKind.big_number
+                c.numbers = [NumberCallout(value=k.value, label=_agree(label))]
+                c.bullets, c.paragraphs = [], []
+            else:
+                c.paragraphs, c.bullets = [line], []  # one line reads as a statement, not a list of one
+        for n in c.numbers:
+            n.label = _agree(H.label_beside(n.value, n.label or "", s.headline) or n.label or "")
+    return o
+
+def adapt_outline(source: DeckOutline, strategy: Strategy, manifest: Optional[TemplateManifest], target: int, hard_limit: bool = False, brief: Optional[Brief] = None, warnings: Optional[list[str]] = None) -> DeckOutline:
     """Another variant's model plan reshaped for this strategy without a model: the visual and compact decks do
     without section dividers, the visual one shows figures as KPI rows, the compact one is merged down to its
-    shorter target. Used when this variant's own model call failed — the deck keeps the model's content."""
+    shorter target. Used when this variant's own model call failed — the deck keeps the model's content. With the
+    `brief`, the reshaped plan is grounded again (grounding.ground_outline: a divider left without its slides, an
+    agenda item without a slide; what it changes goes to `warnings`)."""
     o = source.model_copy(deep=True)
     o.strategy = strategy.name
     o.planned_by = f"shared:{source.strategy}"
@@ -1156,7 +1222,28 @@ def adapt_outline(source: DeckOutline, strategy: Strategy, manifest: Optional[Te
                 s.kind = PatternKind.stat_row
             elif s.kind == PatternKind.bullets and n == 1 and len(s.content.bullets) <= 1:
                 s.kind = PatternKind.big_number
-    return validate_outline(o, manifest, target, hard_limit=hard_limit)
+    o = validate_outline(o, manifest, target, hard_limit=hard_limit)
+    if brief is not None:
+        o, gw = ground_outline(o, brief)  # a divider left without its slides, an agenda item without a slide
+        if warnings is not None:
+            warnings.extend(gw)
+    return polish_plan(o)
+
+
+def _keep_raw(raw: Optional[list], step: str, res=None, error: Optional[Exception] = None) -> None:
+    """The planner's answer as the model wrote it (or why there is none), for planner_raw.json of the run."""
+    if raw is None:
+        return
+    if res is not None:
+        raw.append({"step": step, "model": getattr(res, "model", None), "label": getattr(res, "label", None), "text": getattr(res, "text", None)})
+    else:
+        from verstka.providers.status import mask
+
+        raw.append({"step": step, "error": mask(str(error))[:2000]})
+
+
+def _has_content(outline: DeckOutline) -> bool:
+    return any(s.kind not in _FRAME_KINDS for s in outline.slides)
 
 
 def plan_outline(
@@ -1167,7 +1254,12 @@ def plan_outline(
     skills: Optional[SkillsRegistry] = None,
     providers: Optional[ProviderRegistry] = None,
     target: Optional[int] = None,
+    raw: Optional[list] = None,
 ) -> tuple[DeckOutline, list[str]]:
+    """The deck's plan: the outline_planner skill's, grounded in the brief (grounding.ground_outline: no figure,
+    unit, name, placeholder or slide the brief does not support) and trimmed to at most `target` slides — never padded
+    to it; the rules' plan (basic_outline) when there is no model, the model fails, or nothing it planned is grounded.
+    `raw` collects the planner's answers as written (planner_raw.json of the run)."""
     warnings: list[str] = []
     target = target or target_slide_count(brief, strategy)
     if skills is None or providers is None or not providers.has("llm"):
@@ -1189,8 +1281,10 @@ def plan_outline(
     }
     try:
         res = skills.run("outline_planner", providers, variables)
+        _keep_raw(raw, "plan", res)
         planned: PlannedDeck = res.parsed
     except (ProviderError, ValueError, KeyError) as e:
+        _keep_raw(raw, "plan", error=e)
         warnings.append(f"outline_planner failed, deterministic outline used: {str(e)[:160]}")
         return basic_outline(brief, facts, strategy, target), warnings
     problem = unusable_plan(planned)
@@ -1198,7 +1292,14 @@ def plan_outline(
         warnings.append(f"outline_planner answer rejected ({problem}), deterministic outline used")
         return basic_outline(brief, facts, strategy, target), warnings
     hard_limit = bool(brief.slide_count)  # «не более N слайдов» / slides: N in the brief is binding
+    index = BriefIndex.of(brief)
     outline = DeckOutline(title=planned.title or brief.title_hint or "Презентация", subtitle=planned.subtitle, audience=brief.audience, purpose=brief.purpose, strategy=strategy.name, language=brief.language, planned_by="model", slides=planned.slides, facts=facts.facts, series=facts.series, tables=facts.tables)
+    # what the brief does not say goes before anything is laid out; the deck may come out shorter than the target
+    outline, grounded = ground_outline(outline, brief, index)
+    warnings.extend(grounded)
+    if not _has_content(outline):
+        warnings.append("outline_planner answer rejected (nothing in it is grounded in the brief), deterministic outline used")
+        return basic_outline(brief, facts, strategy, target), warnings
     outline = validate_outline(outline, manifest, target, skills, providers, hard_limit=hard_limit)
     # fact check + one repair pass
     try:
@@ -1209,14 +1310,25 @@ def plan_outline(
             variables["issues"] = "\n".join(f"- слайд {i.slide_id}: {i.text}" for i in errors)
             try:
                 res2 = skills.run("outline_planner", providers, variables)
+                _keep_raw(raw, "repair", res2)
                 planned2: PlannedDeck = res2.parsed
                 if unusable_plan(planned2):
                     raise ValueError(f"repaired plan rejected ({unusable_plan(planned2)})")
-                outline.slides = planned2.slides
-                outline = validate_outline(outline, manifest, target, skills, providers, hard_limit=hard_limit)
+                repaired = outline.model_copy(deep=True)
+                repaired.slides = planned2.slides
+                repaired, grounded2 = ground_outline(repaired, brief, index)
+                if not _has_content(repaired):
+                    raise ValueError("repaired plan rejected (nothing in it is grounded in the brief)")
+                outline = validate_outline(repaired, manifest, target, skills, providers, hard_limit=hard_limit)
                 warnings.append(f"fact_checker found {len(errors)} issues; outline regenerated once")
+                warnings.extend(grounded2)
             except (ProviderError, ValueError, KeyError) as e:
+                if not isinstance(e, ValueError) or "rejected" not in str(e):
+                    _keep_raw(raw, "repair", error=e)
                 warnings.append(f"repair pass failed: {str(e)[:120]}")
     except (ProviderError, ValueError, KeyError) as e:
         warnings.append(f"fact_checker skipped: {str(e)[:120]}")
-    return outline, warnings
+    # the condenser (a model) may have rewritten a line: the final plan is checked once more
+    outline, last = ground_outline(outline, brief, index)
+    warnings.extend(last)
+    return polish_plan(outline), warnings

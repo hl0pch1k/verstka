@@ -582,7 +582,9 @@ def unit_caption(spec: ChartSpec, outline: DeckOutline) -> Optional[str]:
     if spec.type in ("pie", "doughnut"):
         return None
     series = resolve_series(spec, outline)
-    unit = spec.unit or (series[0].unit if series else None)
+    if not series:
+        return None  # no chart, no caption: a unit over an empty frame is a stray word
+    unit = spec.unit or series[0].unit
     u = " ".join((unit or "").split())
     return u if u and not glyph_unit(u) else None
 
@@ -676,10 +678,23 @@ def _nice_scale(lo: float, hi: float) -> tuple[float, float, float]:
 
 
 def resolve_series(spec: ChartSpec, outline: DeckOutline) -> list[Series]:
+    """The series a chart draws. Ids that name no series fall back to the deck's first series — unless they name
+    facts: a chart «of f1, f2» asks for those figures, and another series of the deck would be someone else's data."""
     out = [s for sid in spec.series_ids if (s := outline.series_by_id(sid)) is not None]
-    if not out and outline.series:
+    if not out and outline.series and not any(outline.fact_by_id(sid) is not None for sid in spec.series_ids):
         out = outline.series[:1]
     return out
+
+
+def chart_data_ok(spec: Optional[ChartSpec], outline: DeckOutline) -> bool:
+    """True when `add_chart` has something to draw: a series with categories and at least one value."""
+    if spec is None:
+        return False
+    series = resolve_series(spec, outline)
+    if not series or not series[0].categories:
+        return False
+    n = len(series[0].categories)
+    return any(v is not None for s in series for v in list(s.values)[:n])
 
 
 def prefer_bar(spec: ChartSpec, outline: DeckOutline) -> bool:

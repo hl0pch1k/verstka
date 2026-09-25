@@ -93,10 +93,15 @@ def test_plan_outline_with_mock_llm(simple_deck, tmp_path):
     brief = parse_brief_text(BRIEF)
     from verstka.planning.facts import extract_facts
 
-    facts, _ = extract_facts(brief, skills, providers)
-    assert len(facts.facts) == 6
+    facts, fact_warnings = extract_facts(brief, skills, providers)
+    # the registry keeps the figures this brief states; the demo's «4,6 из 5», «91%» and «3 недели» are not in it
+    assert [f.value for f in facts.facts] == ["12 400", "34", "2,1"] and len(fact_warnings) == 3
     outline, warnings = plan_outline(brief, manifest, get_strategy("visual"), facts, skills, providers, target=12)
-    assert len(outline.slides) in (12, 13) and outline.strategy == "visual" and not any("failed" in w for w in warnings)
+    assert outline.strategy == "visual" and outline.planned_by == "model" and not any("failed" in w for w in warnings)
+    # the demo plan's slides this brief supports, never padded up to the target; its figures are the brief's
+    assert 5 <= len(outline.slides) <= 12, [s.headline for s in outline.slides]
+    shown = " ".join(n.value for s in outline.slides for n in s.content.numbers)
+    assert "91%" not in shown and "4,6" not in shown and any(w.startswith("grounding:") for w in warnings)
 
 
 def test_render_demo_outline_on_simple_deck(simple_deck, tmp_path):
@@ -146,7 +151,7 @@ def test_variants_are_planned_side_by_side_with_a_model(simple_deck, tmp_path, m
     analyze_template(simple_deck, workspace_root=tmp_path / "ws", use_llm=False, use_vlm=False, render=False)
     live, peak, seen_facts, lock = [0], [0], [], threading.Lock()
 
-    def slow_plan(brief, manifest, strategy, facts, skills=None, providers=None, target=None):
+    def slow_plan(brief, manifest, strategy, facts, skills=None, providers=None, target=None, **kwargs):
         with lock:
             live[0] += 1
             peak[0] = max(peak[0], live[0])

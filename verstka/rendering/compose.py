@@ -593,6 +593,9 @@ def single_figure(text: str) -> Optional[tuple[str, str]]:
     return value, rest[:1].upper() + rest[1:]
 
 
+_FIG_UNIT_RE = re.compile(r"^([+\-−–~≈×]?\s?\d[\d\s\u00a0]*(?:[.,]\d+)?\s?%?)\s*([A-Za-zА-Яа-яЁё₽$€].{0,12})$")
+
+
 def distinct_label(value: str, label: str, headline: str) -> str:
     """A figure's label that does not repeat the heading above it: when the label is the heading's own sentence
     («оператор тратит в среднем 6,5 минуты» under «Оператор тратит в среднем 6,5 минуты на одно обращение»), the
@@ -852,10 +855,17 @@ class Composer:
         parts = re.split(r"\s*(?:→|->|⟶)\s*", value.strip())
         if len(parts) == 2 and all(any(ch.isdigit() for ch in x) for x in parts):
             small = k.snap(size * 0.55, k.h3, size * 0.7)
-            runs = [Run(typeset(parts[0]), small, muted, b, k.font), Run("\u00a0→\u00a0", small, muted, False, k.font), Run(typeset(parts[1]), size, color, b, k.font)]
-            width = text_width_pt(parts[0], k.font, small, b) + text_width_pt(" → ", k.font, small, False) + text_width_pt(parts[1], k.font, size, b)
-            return Para(runs), width
-        m = re.match(r"^([+\-−–~≈×]?\s?\d[\d\s\u00a0]*(?:[.,]\d+)?\s?%?)\s*([A-Za-zА-Яа-яЁё₽$€].{0,12})$", value.strip())
+            runs = [Run(typeset(parts[0]), small, muted, b, k.font), Run("\u00a0→\u00a0", small, muted, False, k.font)]
+            width = text_width_pt(parts[0], k.font, small, b) + text_width_pt(" → ", k.font, small, False)
+            m = _FIG_UNIT_RE.match(parts[1])
+            if m and m.group(2).strip() and size >= 1.6 * k.h2:
+                # «47 → 29 минут»: the new figure leads, its word unit rides on the baseline at the old figure's size
+                num, unit = m.group(1).strip(), m.group(2).strip()
+                runs += [Run(typeset(num), size, color, b, k.font), Run("\u00a0" + typeset(unit), small, color, b, k.font)]
+                return Para(runs), width + text_width_pt(num, k.font, size, b) + text_width_pt(" " + unit, k.font, small, b)
+            runs.append(Run(typeset(parts[1]), size, color, b, k.font))
+            return Para(runs), width + text_width_pt(parts[1], k.font, size, b)
+        m = _FIG_UNIT_RE.match(value.strip())
         if m and m.group(2).strip() and size >= 1.6 * k.h2:
             # the unit is set smaller on the figure's baseline: «145 000 ₽», «2,1 ч», «4,6 из 5»
             num, unit = m.group(1).strip(), m.group(2).strip()
@@ -1414,19 +1424,34 @@ class Composer:
         chart_h = int(area.h * 0.92) if (show_side or bars) else min(int(area.h * 0.82), int(area.w * 0.42))
         y = area.y
         caption = unit_caption(spec, self.outline)
+        cap_h = 0
         if caption:
             # the full unit once, above the chart; the labels carry its short form
             cap_h = _emu(k.small * k.line) + _emu(2)
-            self.cv.text(Bbox(x=area.x, y=y, w=chart_w, h=cap_h), [self.P(caption, k.small, k.colors.muted)], name="Unit")
             y += cap_h + int(k.vgap * 0.3)
             chart_h = min(chart_h, area.y2 - y)
         box = Bbox(x=area.x, y=y, w=chart_w, h=chart_h)
         style = self.manifest.components.chart_style
         style = style.model_copy(update={"font_size_pt": max(style.font_size_pt or 0, k.small), "font_family": k.font or style.font_family})
+        tree = self.slide.shapes._spTree
+        n0 = len(tree)
         try:
             add_chart(self.slide, box, spec, self.outline, style, k.manifest.tokens.typography, text_hex=k.colors.text, neutral_hex=k.colors.divider, ground_hex=k.colors.ground)
         except Exception as e:  # noqa: BLE001
-            self.warnings.append(f"chart failed: {str(e)[:120]}")
+            # no chart, no unit caption over an empty frame: a half-built chart goes, the slide shows what else it has
+            for el in list(tree)[n0:]:
+                for ref in el.iter("{http://schemas.openxmlformats.org/drawingml/2006/chart}chart"):
+                    rid = ref.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id")
+                    if rid:
+                        try:
+                            self.slide.part.drop_rel(rid)
+                        except KeyError:
+                            pass
+                tree.remove(el)
+            self.warnings.append(f"chart failed: {str(e)[:120]}; shown as {self._chart_fallback(area)}")
+            return
+        if caption:
+            self.cv.text(Bbox(x=area.x, y=area.y, w=chart_w, h=cap_h), [self.P(caption, k.small, k.colors.muted)], name="Unit")
         if not show_side:
             return
         x = area.x + chart_w + k.gap * 2
@@ -1448,6 +1473,31 @@ class Composer:
         # a hairline as tall as what it sets apart
         self.cv.line(x - k.gap, y, x - k.gap, y + min(hh, area.h), k.colors.divider, 1.0)
         self.cv.text(Bbox(x=x, y=y, w=w, h=min(hh, area.h)), paras, name="Takeaway")
+
+
+    def _chart_fallback(self, area: Bbox) -> str:
+        """A chart that could not be drawn gives its area to the slide's figures (its numbers, else the facts the chart
+        names) as tiles or one big number, else to its text or its cards. Returns what was set, for the warning."""
+        from verstka.rendering.fallbacks import fact_numbers
+
+        c = self.o.content
+        numbers = list(c.numbers) or fact_numbers(self.o, self.outline, chart_only=True)
+        running = [t for t in self._running() if t.strip()]
+        items = [it for it in (c.items or c.columns)]
+        if len(numbers) == 1:
+            self.big_number(area, numbers[0], extra=running, others=[])
+            return "one big number"
+        if numbers:
+            self.kpis(area, numbers[:4], extra=running)
+            return f"{len(numbers[:4])} KPI tiles"
+        if running:
+            self.bullets(area, running)
+            return "bullets"
+        if items:
+            self.cards(area, items)
+            return "cards"
+        self.warnings.append("empty slide content")
+        return "nothing"
 
 
 # ---------------------------------------------------------------------------------------------- data helpers

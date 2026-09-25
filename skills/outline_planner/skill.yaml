@@ -1,15 +1,24 @@
 name: outline_planner
-version: 0.1.0
+version: 0.2.0
 role: llm
 description: >
   Plans the deck: slide kinds, order, headlines as conclusions and per-slide content, respecting the strategy,
-  the target slide count, density limits and the facts registry.
+  the maximum slide count, density limits and the facts registry. Adds nothing the brief does not say; the plan is
+  then checked deterministically against the brief (verstka.planning.grounding) before rendering.
 prompt_files:
   system: prompts/system.md
   user: prompts/user.md
-output_schema: verstka.schemas.outline.PlannedDeck
+output_schema: verstka.planning.plan_json.PlannedDeckAnswer
 params:
   temperature: 0.3
   max_tokens: 6000
 changelog:
   - "0.1.0: initial version"
+  - "0.2.0: no concrete example with figures or facts in the prompt (a model copied the sample headline verbatim);
+    the slide count is a maximum, not a target (4 lines of brief were padded to 12 slides of invented content);
+    explicit ban on anything not in the brief (figures, units, names, dates, contacts, phases, plans, benefits,
+    recommendations; NPS is points, not %); thanks subtitle only from the brief; chart only with series ids of the
+    registry; only the listed kinds. Lenient answer schema (plan_json.PlannedDeckAnswer): content slides typed as
+    «section», a missing headline, kind aliases and misplaced fields are normalised instead of rejected; the JSON
+    schema shown to the model is PlannedDeck's own, its kind enum narrowed to the listed kinds. The strategies'
+    instructions skip the steps the brief has no content for and set no card counts."

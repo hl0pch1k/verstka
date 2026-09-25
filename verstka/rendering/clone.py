@@ -1227,6 +1227,10 @@ def _place_native_object(ctx: _SlideCtx, oslide: OutlineSlide) -> None:
                 style = style.model_copy(update={"body_text_hex": text_hex, "band_fill_hex": None})
             add_table(ctx.slide, box, c.table, style, ctx.typo)
     except Exception as e:  # noqa: BLE001
+        if c.chart is not None:
+            # the sample's chart area left empty is worse than a composed slide: the renderer rolls this clone back
+            # and composes the slide, which shows its figures or its text instead
+            raise RuntimeError(f"native chart failed: {str(e)[:120]}") from e
         ctx.warnings.append(f"native object failed: {str(e)[:120]}")
 
 
