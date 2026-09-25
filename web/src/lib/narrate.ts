@@ -1,5 +1,6 @@
 // Pure helpers used by the app store: assistant-side chat texts and small derivations over API payloads.
 import type { Generation, TemplateListItem, Variant } from "../types";
+import { silentNote as modelSilentNote } from "./modelText";
 import { fmtSeconds, plural } from "./utils";
 
 export function errText(e: unknown): string {
@@ -37,8 +38,7 @@ export function describeGeneration(g: Generation, strategyTitle: (name: string) 
     return { strategy: v.strategy, score, line: `• ${strategyTitle(v.strategy)} — ${parts.join(", ")}` };
   });
   const head = `Готово: ${plural(g.variants.length, "вариант", "варианта", "вариантов")}${g.seconds ? ` за ${fmtSeconds(g.seconds)}` : ""}.`;
-  const modelSilent = !!g.use_models && !g.variants.some((v) => v.outline?.planned_by === "model" || v.outline?.planned_by?.startsWith("shared:"));
-  const silentNote = modelSilent ? "Модель сейчас не ответила — план составлен встроенным планировщиком." : "";
+  const silentNote = modelSilentNote(g);
   if (g.variants.every((v) => v.outline?.planned_by === "skeleton")) {
     return [head, silentNote, "В тексте была только тема, поэтому это каркас: титул, повестка и разделы с подсказками в заметках. Допишите тезисы и цифры — Verstka соберёт содержательные слайды."].filter(Boolean).join("\n");
   }

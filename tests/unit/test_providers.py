@@ -88,8 +88,9 @@ def test_rate_limits_wait_per_minute_and_fail_fast_when_the_day_is_spent(monkeyp
 
     with pytest.raises(ProviderError):
         p.complete([ChatMessage(role="user", content="hi")])
-    assert p._account in oc._EXHAUSTED
-    oc._EXHAUSTED.discard(p._account)
+    # the quota of the account's free models is spent (per pool since the fallback chain, not per account)
+    assert oc.status.blocked(p.health)[0] == "quota"
+    oc.status.reset()
     assert oc._rate_limit_info(RuntimeError("Error code: 429 - free-models-per-day")).daily
     assert not oc._rate_limit_info(RuntimeError("Error code: 429 - too many requests per minute")).daily
     assert oc._rate_limit_info(RuntimeError("Error code: 500")) is None
@@ -178,4 +179,5 @@ def test_upstream_congestion_fails_fast_instead_of_waiting_out_the_budget(monkey
     assert calls["n"] == 2  # the next call does not even knock
     assert oc._rate_limit_info(RuntimeError("Error code: 429 - temporarily rate-limited upstream")).upstream
     assert not oc._rate_limit_info(RuntimeError("Error code: 429 - rate limit exceeded: free-models-per-min")).upstream
-    oc._CONGESTED.pop(p._account, None)
+    assert oc.status.blocked(p.health)[0] == "congested"  # the breaker is per (account, model) now
+    oc.status.reset()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import logging
@@ -48,6 +49,9 @@ class VariantResult:
     audit: Optional[AuditReport] = None
     exports: dict[str, Path] = field(default_factory=dict)
     timings: dict[str, float] = field(default_factory=dict)
+    # who wrote the plan: {"planned_by": "model" | "rules" | "skeleton" | "shared:<strategy>", "model": the model that answered,
+    # "supplied": True when the outline came with the request}
+    planner: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -60,6 +64,38 @@ class GenerateResult:
 
 def _sha(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+class _Recorder:
+    """A provider that notes which model answered each call (CompletionResult.model — with a fallback chain it may be
+    a backup model), so a deck can say which model planned it."""
+
+    def __init__(self, inner, sink: list) -> None:
+        self.inner = inner
+        self.sink = sink
+        self.name = getattr(inner, "name", "provider")
+        self.model = getattr(inner, "model", None)
+
+    def complete(self, messages, **kwargs):
+        res = self.inner.complete(messages, **kwargs)
+        self.sink.append(getattr(res, "model", None) or self.model)
+        return res
+
+    def __getattr__(self, item: str):
+        return getattr(self.inner, item)
+
+
+def _recording(providers: Optional[ProviderRegistry]) -> tuple[Optional[ProviderRegistry], list]:
+    """The registry with every role wrapped in a _Recorder (one sink per call site); the registry itself if it cannot be."""
+    sink: list = []
+    if providers is None:
+        return None, sink
+    try:
+        reg = copy.copy(providers)
+        reg.roles = {role: _Recorder(p, sink) for role, p in providers.roles.items()}
+        return reg, sink
+    except Exception:  # noqa: BLE001 - recording is a nicety, planning must not depend on it
+        return providers, sink
 
 
 def render_outputs(vdir: Path, manifest: TemplateManifest, title: Optional[str], exports: list[str], *, images: bool = True, dpi: int = 110) -> tuple[dict[str, Path], list[Path], list[str], Optional[bool]]:
@@ -147,14 +183,17 @@ def generate_variants(
     n = len(strategies)
     audit_render = bool(audit_models and use_vlm)  # the VLM checks look at slide images; deterministic ones read XML
     planned: dict[str, tuple[DeckOutline, list[str], float]] = {}
+    plan_models: dict[str, Optional[str]] = {}  # strategy → the model that wrote its plan (None: the rules did)
     if outline is None:
         # the strategies are independent: with a model each plan is a chain of 2–3 calls (plan, fact check, repair),
         # so they run side by side and the deck waits for the slowest chain, not for the sum of them
         def _plan(name: str) -> tuple[str, DeckOutline, list[str], float]:
             tp = time.time()
             strategy = all_strategies[name]
+            rec, answered = _recording(providers if use_llm else None)
             # own copy of the facts: the deterministic planner adds the brief's table series to them
-            o, w = plan_outline(brief, manifest, strategy, facts.model_copy(deep=True), skills if use_llm else None, providers if use_llm else None, target=target_slide_count(brief, strategy))
+            o, w = plan_outline(brief, manifest, strategy, facts.model_copy(deep=True), skills if use_llm else None, rec, target=target_slide_count(brief, strategy))
+            plan_models[name] = answered[0] if answered and o.planned_by == "model" else None
             return name, o, w, round(time.time() - tp, 2)
 
         report(f"plan: {n} variants", 0.15)
@@ -177,6 +216,7 @@ def generate_variants(
                 st = all_strategies[name]
                 adapted = adapt_outline(planned[donor][0], st, manifest, target_slide_count(brief, st), hard_limit=bool(brief.slide_count))
                 planned[name] = (adapted, w + [f"own model plan failed: the model plan of «{donor}» adapted to «{name}»"], sec)
+                plan_models[name] = plan_models.get(donor)
     pending: list[dict] = []
     for i, name in enumerate(strategies):
         strategy: Strategy = all_strategies[name]
@@ -248,6 +288,9 @@ def generate_variants(
         timings = v["timings"]
         vr = VariantResult(strategy=name, out_dir=vdir, outline=v["outline"], plan=v["plan"], render=v["render"], images=v["images"], warnings=v["warnings"], seconds=round(time.time() - v["ts"], 2), audit=audit_report, exports=export_paths, timings=timings)
         timings["total"] = vr.seconds
+        vr.planner = {"planned_by": v["outline"].planned_by, "model": plan_models.get(name)}
+        if outline is not None:
+            vr.planner["supplied"] = True  # the plan came with the request: no model was asked to plan it
         slides_info = [{"index": s.index, "outline_id": s.outline_id, "mode": s.mode, "pattern_id": s.pattern_id, "composition": s.composition, "warnings": s.warnings} for s in v["render"].slides]
         rm = build_run_manifest(
             template_id=manifest.template_id,
@@ -261,7 +304,7 @@ def generate_variants(
             applied_fixes=audit_report.applied_fixes if audit_report else [],
             audit_summary=audit_report.summary.model_dump() if audit_report else {},
             slides=slides_info,
-            extra={"warnings": v["warnings"], "exports": {k: str(p) for k, p in export_paths.items()}},
+            extra={"warnings": v["warnings"], "exports": {k: str(p) for k, p in export_paths.items()}, "planner": vr.planner},
         )
         write_run_manifest(vdir / "run_manifest.json", rm)
         result.variants.append(vr)

@@ -11,6 +11,7 @@ from typing import Any, Optional
 import yaml
 
 from verstka.providers.base import Provider, ProviderError
+from verstka.providers.chain import ChainProvider
 from verstka.providers.mock import MockProvider
 from verstka.providers.openai_compat import OpenAICompatProvider
 
@@ -85,7 +86,14 @@ class ProviderRegistry:
         return role in self.roles
 
     def describe(self) -> dict[str, dict]:
-        return {role: {"backend": p.name, "model": p.model} for role, p in self.roles.items()}
+        out: dict[str, dict] = {}
+        for role, p in self.roles.items():
+            d: dict[str, Any] = {"backend": p.name, "model": p.model}
+            inner = p.inner if isinstance(p, _Deadlined) else p
+            if isinstance(inner, ChainProvider):
+                d["chain"] = inner.describe()
+            out[role] = d
+        return out
 
 
 class _Deadlined:
@@ -106,6 +114,25 @@ class _Deadlined:
 
 
 def build_provider(spec: dict, limits: ProviderLimits) -> Provider:
+    """One role's backend. `{chain: [spec, spec, ...]}` is a fallback chain (keys next to `chain` are defaults of
+    every link, a link's own keys win); a single spec is one provider, exactly as before. A link whose `api_key`
+    expands to an empty string (its variable is not set) is built "off": the chain skips it silently.
+    `max_tokens_cap` (a link option) caps max_tokens of every request of that link; `system_suffix` is added to the
+    system message of every request of that link (e.g. Qwen3's "/no_think" on a host without a thinking switch)."""
+    if isinstance(spec, dict) and "chain" in spec:
+        shared = {k: v for k, v in spec.items() if k != "chain"}
+        link_specs = spec.get("chain") or []
+        if not isinstance(link_specs, list) or not link_specs:
+            raise ProviderError("a model chain must be a non-empty list of provider specs")
+        links: list[Provider] = []
+        for ls in link_specs:
+            if not isinstance(ls, dict):
+                raise ProviderError(f"a chain link must be a provider spec, got {ls!r}")
+            if "chain" in ls:
+                raise ProviderError("model chains do not nest")
+            links.append(build_provider({**shared, **ls}, limits))
+        # one link is a single provider: it keeps the single-provider waits
+        return links[0] if len(links) == 1 else ChainProvider(links)
     backend = (spec.get("backend") or "openai_compat").lower()
     if backend == "mock":
         return MockProvider(spec.get("responses") or {}, model=spec.get("model", "mock-model"))
@@ -125,9 +152,19 @@ def build_provider(spec: dict, limits: ProviderLimits) -> Provider:
             extra_body=spec.get("extra_body"),
             json_mode=bool(spec.get("json_mode", True)),
             headers=headers,
-            requests_per_minute=int(spec["requests_per_minute"]) if spec.get("requests_per_minute") else limits.requests_per_minute,
+            requests_per_minute=_rpm(spec, limits),
+            label=spec.get("label"),
+            max_tokens_cap=spec.get("max_tokens_cap"),
+            system_suffix=spec.get("system_suffix"),
         )
     raise ProviderError(f"unknown provider backend {backend!r}")
+
+
+def _rpm(spec: dict, limits: ProviderLimits) -> Optional[int]:
+    """A link's per-minute cap: its own `requests_per_minute` (0 or null: none, e.g. a local server), else the limits'."""
+    if "requests_per_minute" in spec:
+        return int(spec["requests_per_minute"]) if spec["requests_per_minute"] else None
+    return limits.requests_per_minute
 
 
 def default_models_path() -> Path:

@@ -1,14 +1,22 @@
 # Final stage: the same Qwen3.8-27B served by VK inference. Only the endpoint and key change.
+# One model, no fallback chain on purpose: the final runs Qwen3.8-27B on VK inference only.
+# A single model behaves as before the chain: up to 3 attempts with backoff; an upstream 429 gets a short pause and
+# one more try (two in a row: the model is skipped for 2 minutes; a 429 with no budget left for the pause does not
+# count); per-minute caps are waited out; a 402 / 401 / 403 / 404 is reported after the attempts and the model is
+# skipped for at most 1 minute. No long holds. A chain here whose other links have no key behaves the same way.
+# The few differences from the pre-chain code are listed in MODELS.md («Одна модель (финал)»).
 roles:
   llm:
     backend: openai_compat
     model: qwen3.8-27b
+    label: Qwen3.8-27B (VK)
     base_url: ${VK_INFERENCE_BASE_URL}
     api_key: ${VK_INFERENCE_API_KEY}
     temperature: 0.2
   vlm:
     backend: openai_compat
     model: qwen3.8-27b
+    label: Qwen3.8-27B (VK)
     base_url: ${VK_INFERENCE_BASE_URL}
     api_key: ${VK_INFERENCE_API_KEY}
     temperature: 0.1

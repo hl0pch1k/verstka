@@ -1,7 +1,7 @@
 // «Паспорт запуска»: the sections of a run_manifest — facts, models, skills, timings, fixes and the check summary.
 import type { ReactNode } from "react";
 import { cn, fmtSeconds, fmtWhen, plural, scoreTone, shortSha } from "../lib/utils";
-import type { AuditSummary, RunManifest } from "../types";
+import type { AuditSummary, PlannerInfo, RunManifest } from "../types";
 import { plannedByText } from "../lib/plain";
 import { describeFix } from "./AuditFixes";
 import { normalizeFix } from "./AuditHelpers";
@@ -49,13 +49,13 @@ export function Table({ head, rows, empty }: { head: string[]; rows: ReactNode[]
   );
 }
 
-export function Facts({ m, strategyTitle, plannedBy }: { m: RunManifest; strategyTitle(name: string): string; plannedBy?: string }) {
+export function Facts({ m, strategyTitle, plannedBy, planner }: { m: RunManifest; strategyTitle(name: string): string; plannedBy?: string; planner?: PlannerInfo | null }) {
   const facts: Array<{ label: string; value: ReactNode; title?: string }> = [
     { label: "Версия Verstka", value: <span>{m.verstka_version}{m.git_commit && <span className="ml-1.5 font-mono text-xs text-zinc-500">{shortSha(m.git_commit)}</span>}</span>, title: [m.git_commit ? `git commit ${m.git_commit}` : null, m.platform].filter(Boolean).join("\n") },
     { label: "Собран", value: fmtWhen(m.created_at), title: m.created_at },
     { label: "Вариант", value: strategyTitle(m.strategy), title: m.strategy },
     { label: "Шаблон", value: m.template.file, title: m.template.id },
-    { label: "План составил", value: plannedByText(plannedBy, strategyTitle), title: plannedBy },
+    { label: "План составил", value: plannedByText(plannedBy, strategyTitle, planner), title: [plannedBy, planner?.model].filter(Boolean).join(" · ") },
     { label: "Хэш текста / плана", value: <span className="font-mono text-xs">{shortSha(m.inputs.brief_sha256)} / {shortSha(m.inputs.outline_sha256)}</span>, title: `brief ${m.inputs.brief_sha256 ?? "—"}\noutline ${m.inputs.outline_sha256}` },
   ];
   return (

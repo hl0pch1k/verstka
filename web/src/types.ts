@@ -20,6 +20,78 @@ export interface BboxFrac { x: number; y: number; w: number; h: number }
 
 // ---- meta -------------------------------------------------------------------
 export interface Health { ok: boolean; version: string; models_configured: boolean; workspace: string }
+
+// ---- models (GET /api/models/status) ------------------------------------------------
+/** A link of the model chain: the primary model first, then the backups.
+ * ok — answered last time; unknown — not tried since the server started; congested — the host is overloaded (429
+ * upstream / 5xx); rate — the account's per-minute cap (under 90 s); quota — the free daily quota of OpenRouter (until
+ * 00:00 UTC); no_credits — 402; auth — the key is refused; missing — no such model; error — anything else; off — its
+ * key is not set: skipped, never a failure. */
+export type ModelLinkState = "ok" | "unknown" | "congested" | "rate" | "quota" | "no_credits" | "auth" | "missing" | "error" | "off";
+export interface ModelLink {
+  model: string | null;
+  label: string;
+  /** The label without «(бесплатно)» / «(OpenRouter)». */
+  short_label?: string;
+  /** Host name only («openrouter.ai»). */
+  host?: string | null;
+  state: ModelLinkState;
+  /** False while the link pauses after a failure (see `until`). */
+  available: boolean;
+  last_ok: number | null;
+  last_error: string | null;
+  last_error_at?: number | null;
+  /** Seconds until a congested / exhausted link is tried again. */
+  until: number | null;
+  free: boolean;
+  roles?: string[];
+}
+/** ok — the primary answers; unknown — not called yet; retry — failed lately, will be tried again; fallback — a
+ * backup works; down — the built-in planner; off — no model configured. */
+export type ModelsOverall = "ok" | "unknown" | "retry" | "fallback" | "down" | "off";
+export interface ModelsStatus {
+  configured: boolean;
+  config: string | null;
+  active_model: string | null;
+  active_model_label: string | null;
+  host: string | null;
+  links: ModelLink[];
+  source: string;
+  state: ModelsOverall;
+  /** The indicator line as is: «Модель: Qwen3.8-27B — доступна». */
+  summary: string;
+  /** What helps when the model is not available (the detailed hint) or null. */
+  hint: string | null;
+  working_label: string | null;
+  /** Seconds until a paused link is tried again, and that link's state (quota: after 00:00 UTC). */
+  retry_in: number | null;
+  retry_state?: ModelLinkState | null;
+  /** What the notice above a failed deck advises now («Соберите ещё раз через минуту.»), or null. */
+  advice?: string | null;
+  /** Building again can work now or once `retry_in` is over (false: a key, an account or a model id needs a fix). */
+  retryable?: boolean;
+}
+/** Who wrote the plan of a variant (or of the whole generation) and, when the built-in planner did, why. */
+export interface PlannerInfo {
+  /** model | shared:<strategy> | rules | skeleton | supplied (the outline came with the request) | null (not recorded) */
+  planned_by?: string | null;
+  /** null: an older deck that does not say who planned it (no notice is shown). */
+  by_model: boolean | null;
+  model: string | null;
+  model_label: string | null;
+  tried_model?: string | null;
+  tried_label?: string | null;
+  /** congested | rate | quota | no_credits | auth | missing | timeout | unreachable | rejected | error | off */
+  reason_code: string | null;
+  /** Plain Russian clause: «бесплатные модели OpenRouter сейчас перегружены». */
+  reason: string | null;
+  /** What helps, one sentence. */
+  advice: string | null;
+  /** The same deck built again can get past the reason (congestion, a cap, the time budget…); false: fix first. */
+  retryable?: boolean;
+  /** «Чтобы не зависеть от очереди бесплатных, пополните OpenRouter…» when a free model failed; added to the live advice. */
+  steady?: string | null;
+}
 export interface StrategyInfo { name: string; title: string; description: string }
 export interface SkillInfo { name: string; version: string; role: string; sha256: string; description: string; changelog: unknown }
 export interface AgentInfo { name: string; version: string; sha256: string }
@@ -209,10 +281,15 @@ export interface RunManifest {
   applied_fixes: Record<string, unknown>[];
   audit: Partial<AuditSummary> & Record<string, unknown>;
   slides: unknown[];
+  /** Who wrote the plan (newer runs): planned_by and the model that answered. */
+  planner?: { planned_by?: string; model?: string | null; supplied?: boolean };
 }
 
 // ---- generations ------------------------------------------------------------------
-export interface VariantSummary { n_slides?: number; score?: number | null; errors?: number | null; warnings?: number | null; seconds?: number }
+export interface VariantSummary {
+  n_slides?: number; score?: number | null; errors?: number | null; warnings?: number | null; seconds?: number;
+  planned_by?: string; model?: string | null; model_label?: string | null; reason_code?: string | null; reason?: string | null;
+}
 export interface GenerationMeta {
   id: string;
   template_id: string;
@@ -227,9 +304,20 @@ export interface GenerationMeta {
   created_at?: number;
   status?: string;
   summary?: Record<string, VariantSummary>;
+  /** Did a model plan the decks; if none did — why (older servers do not send it). */
+  planner?: PlannerInfo | null;
+  /** The request's switches (newer runs): «Собрать ещё раз» repeats them. */
+  audit_models?: boolean;
+  autofix?: boolean;
+  exports?: string[];
+  language?: string;
+  extra_instructions?: string | null;
+  /** The plan came with the request (no model was asked to plan). */
+  outline_supplied?: boolean;
 }
 export interface Variant {
   strategy: string;
+  planner?: PlannerInfo;
   outline: DeckOutline | null;
   plan: LayoutPlan | null;
   audit: AuditReport | null;
@@ -245,6 +333,8 @@ export interface GenerateRequest {
   audience?: string | null;
   purpose?: string | null;
   slides?: number | null;
+  language?: string;
+  extra_instructions?: string | null;
   strategies: string[];
   use_models: boolean;
   audit_models: boolean;

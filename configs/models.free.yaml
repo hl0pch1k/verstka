@@ -1,34 +1,53 @@
-# Free tier of OpenRouter: the same open model (Qwen3.8-27B, Apache 2.0) through its «:free» variant.
-# Limits of the free tier (openrouter.ai/docs/api-reference/limits): 20 requests/min; 50 requests/day, or
-# 1000 requests/day once 10 USD of credits were ever bought. The client keeps under 18 requests/min, waits out
-# per-minute 429s and, when the day's quota is spent, the pipeline continues with its deterministic steps.
+# Free models only: a fallback chain that needs no credits.
+#   1. qwen/qwen3.8-27b @ Groq         Qwen3.8-27B (Apache 2.0) on Groq's free plan — only when GROQ_API_KEY is set
+#                                      (console.groq.com, no card); without the key the link is off and skipped silently
+#   2. qwen/qwen3.8-27b:free           Qwen3.8-27B on OpenRouter, one host (ModelRun), often congested upstream
+#   3. google/gemma-4-31b-it:free      Gemma 4 31B (Apache 2.0), Google AI Studio host
+#   4. google/gemma-4-26b-a4b-it:free  Gemma 4 26B-A4B (Apache 2.0, MoE, 4B active), Google AI Studio host
+# Every link but the last hands over at once when it cannot answer («temporarily rate-limited upstream», 5xx...);
+# the last one keeps a short pause and one more try. Two upstream 429s in a row skip a model for 2 minutes; each
+# model has its own hold, so a congested Qwen does not block Gemma. If a link was only busy, the other failed links
+# are on hold anyway and ≥ 30 s of the budget are left, the chain makes one more pass after a 3-5 s pause. When only
+# one link has a key, it works as a single model (its own 3 attempts and waits, no long holds).
+# Limits of OpenRouter's free tier (openrouter.ai/docs/api-reference/limits), per account and shared by every free
+# model: 20 requests/min; 50 requests/day, or 1000 requests/day once 10 USD of credits were ever bought. The client
+# keeps under 18 requests/min; a per-minute 429 skips every free OpenRouter link till the minute window ends; when
+# the day's quota is spent they are skipped until 00:00 UTC and the pipeline continues with its deterministic steps.
+# Groq's free plan for this model: 30 requests/min, 8K tokens/min, 200K tokens/day (about 4 generations a day).
 # Enable: VERSTKA_MODELS=configs/models.free.yaml in .env (or --models configs/models.free.yaml).
 roles:
-  llm:
+  llm: &llm
     backend: openai_compat
-    model: qwen/qwen3.8-27b:free
     base_url: https://openrouter.ai/api/v1
     api_key: ${OPENROUTER_API_KEY}
     price_in_per_m: 0.0
     price_out_per_m: 0.0
+    json_mode: false  # the free Qwen host garbles response_format=json_object; the schema is in the prompt
     temperature: 0.2
-    json_mode: false  # the host garbles response_format=json_object; the schema is in the prompt
-    extra_body:
-      reasoning: { enabled: false }
+    chain:
+      - model: qwen/qwen3.8-27b
+        label: Qwen3.8-27B (Groq)
+        base_url: https://api.groq.com/openai/v1
+        api_key: ${GROQ_API_KEY}  # empty → this link is off
+        requests_per_minute: 20
+        max_tokens_cap: 3000  # a request's prompt + max_tokens must fit Groq's 8K tokens per minute
+        extra_body:
+          reasoning_effort: "none"  # Groq docs: "none" switches Qwen3.8-27B's thinking off
+      - model: qwen/qwen3.8-27b:free
+        label: Qwen3.8-27B (бесплатно)
+        extra_body:
+          reasoning: { enabled: false }
+      # Gemma 4 thinks only when asked to: no `reasoning` sent
+      - model: google/gemma-4-31b-it:free
+        label: Gemma 4 31B (бесплатно)
+      - model: google/gemma-4-26b-a4b-it:free
+        label: Gemma 4 26B A4B (бесплатно)
   vlm:
-    backend: openai_compat
-    model: qwen/qwen3.8-27b:free
-    base_url: https://openrouter.ai/api/v1
-    api_key: ${OPENROUTER_API_KEY}
-    price_in_per_m: 0.0
-    price_out_per_m: 0.0
+    <<: *llm  # the same chain: all of them read images
     temperature: 0.1
-    json_mode: false
-    extra_body:
-      reasoning: { enabled: false }
 limits:
   max_concurrency: 3
   requests_per_minute: 18
-  timeout_s: 180
+  timeout_s: 120
   max_attempts: 3
   time_budget_s: 210  # model time per generation; past it the deterministic steps take over (render, checks and export fit the rest of the 5 minutes)

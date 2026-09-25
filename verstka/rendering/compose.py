@@ -19,6 +19,7 @@ from lxml import etree
 from pptx.slide import Slide
 
 from verstka.analysis.xmlns import q
+from verstka.planning.heuristics import label_beside
 from verstka.rendering.charts import add_chart
 from verstka.rendering.fonts import figure_metrics_em, left_bearing_em, text_width_pt, wrap_lines
 from verstka.rendering.tables import add_table
@@ -592,25 +593,13 @@ def single_figure(text: str) -> Optional[tuple[str, str]]:
     return value, rest[:1].upper() + rest[1:]
 
 
-def _words(t: str) -> list[str]:
-    return [w for w in re.findall(r"[\wё]+", t.lower()) if len(w) > 2]
-
-
 def distinct_label(value: str, label: str, headline: str) -> str:
     """A figure's label that does not repeat the heading above it: when the label is the heading's own sentence
     («оператор тратит в среднем 6,5 минуты» under «Оператор тратит в среднем 6,5 минуты на одно обращение»), the
-    words around the figure in the heading say what it measures («минуты на одно обращение»)."""
-    lw, hw = _words(label), set(_words(headline))
-    if not lw or sum(w in hw for w in lw) < 0.6 * len(lw):
-        return label
-    pos = headline.find(value.strip())
-    if pos < 0:
-        return label
-    tail = headline[pos + len(value.strip()) :].strip(" ,.:;—-")
-    if len(tail.split()) >= 2:
-        return tail
-    head = headline[:pos].strip(" ,.:;—-").split()
-    return " ".join(head[-5:]) if len(head) >= 2 else label
+    words around the figure in the heading say what it measures («минуты на одно обращение»). One rule shared with the
+    planner (heuristics.label_beside): the figure is found as whole words («3 мес» is «3 месяца», never a piece of
+    «13 месяцев»), so the plan says what the slide shows."""
+    return label_beside(value, label, headline)
 
 
 def _pt(emu: int) -> float:

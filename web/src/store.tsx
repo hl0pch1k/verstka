@@ -8,7 +8,7 @@ import { trackJob } from "./lib/jobs";
 import { errText, firstLine, newestTemplate, slideCount } from "./lib/narrate";
 import { LS, storage, uid } from "./lib/utils";
 import type {
-  ChatMessage, DetailKey, GenerateRequest, Generation, GenerationMeta, Health, Job, JobKind, JobStatus, Screen, StrategyInfo, TabKey, TemplateListItem, TemplateManifest, Variant,
+  ChatMessage, DetailKey, GenerateRequest, Generation, GenerationMeta, Health, Job, JobKind, JobStatus, ModelsStatus, Screen, StrategyInfo, TabKey, TemplateListItem, TemplateManifest, Variant,
 } from "./types";
 
 export interface ActiveJob { id: string; label: string; progress: number; message: string; status: JobStatus; kind: JobKind; startedAt: number; items?: string[]; variants?: Record<string, VariantProgress> }
@@ -17,6 +17,8 @@ export interface RunJobOptions { kind?: JobKind; items?: string[]; onDone?: (job
 
 export interface AppState {
   health: Health | null; healthError: boolean;
+  /** How the model answers lately (GET /api/models/status); null until the first answer. */
+  modelStatus: ModelsStatus | null; refreshModelStatus(): Promise<void>;
   strategies: StrategyInfo[];
   strategyTitle(name: string): string;
   templates: TemplateListItem[]; refreshTemplates(): Promise<void>;
@@ -55,6 +57,7 @@ const titleIn = (list: StrategyInfo[], name: string) => list.find((s) => s.name 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [health, setHealth] = useState<Health | null>(null);
   const [healthError, setHealthError] = useState(false);
+  const [modelStatus, setModelStatus] = useState<ModelsStatus | null>(null);
   const [strategies, setStrategies] = useState<StrategyInfo[]>([]);
   const [templates, setTemplates] = useState<TemplateListItem[]>([]);
   const [templateId, setTemplateId] = useState<string | null>(() => storage.get(LS.template));
@@ -105,6 +108,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const selectTemplate = useCallback((id: string | null) => {
     setTemplateId(id);
     storage.set(LS.template, id);
+  }, []);
+
+  // quiet: the indicator simply keeps its last state when the call fails (the red banner covers a lost server)
+  const refreshModelStatus = useCallback(async () => {
+    try {
+      const st = await api.modelsStatus();
+      setModelStatus((prev) => (prev && JSON.stringify(prev) === JSON.stringify(st) ? prev : st));
+    } catch {
+      /* an older server without the endpoint, or offline */
+    }
   }, []);
 
   const refreshTemplates = useCallback(async () => {
@@ -237,8 +250,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const startGeneration = useCallback(
     (req: GenerateRequest) =>
-      generationFlow(req, { runJob, report, pushMessage, setTab, refreshGenerations, fetchGeneration, titleOf: (name) => titleIn(latest.current.strategies, name) }),
-    [runJob, report, pushMessage, refreshGenerations, fetchGeneration],
+      generationFlow(req, { runJob, report, pushMessage, setTab, refreshGenerations, fetchGeneration, refreshModelStatus, titleOf: (name) => titleIn(latest.current.strategies, name) }),
+    [runJob, report, pushMessage, refreshGenerations, fetchGeneration, refreshModelStatus],
   );
 
   // Health loop: first success boots the data (lists + restore from localStorage); afterwards keeps the banner truthful.
@@ -320,11 +333,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const activeVariant = useMemo(() => generation?.variants.find((v) => v.strategy === activeStrategy) ?? null, [generation, activeStrategy]);
 
   const value = useMemo<AppState>(() => ({
-    health, healthError, strategies, strategyTitle, templates, refreshTemplates, templateId, selectTemplate, manifest, manifestLoading,
+    health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, activeStrategy, setActiveStrategy, activeVariant,
     selectedSlide, setSelectedSlide, setTab, screen, setScreen, detail, setDetail, agentOpen, setAgentOpen, activeJob, runJob, messages, pushMessage, toast, uploadTemplate, startGeneration,
   }), [
-    health, healthError, strategies, strategyTitle, templates, refreshTemplates, templateId, selectTemplate, manifest, manifestLoading,
+    health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, activeStrategy, setActiveStrategy, activeVariant,
     selectedSlide, setSelectedSlide, setTab, screen, detail, agentOpen, setAgentOpen, activeJob, runJob, messages, pushMessage, toast, uploadTemplate, startGeneration,
   ]);

@@ -1,0 +1,58 @@
+# Optional: a local open model through an OpenAI-compatible server — no internet, no quotas, no congestion.
+# Nothing here is installed by the project; the user sets up the server (commands for a Mac with Homebrew):
+#   Ollama (simplest):
+#     brew install ollama
+#     OLLAMA_CONTEXT_LENGTH=16384 OLLAMA_NUM_PARALLEL=3 OLLAMA_KEEP_ALIVE=-1 OLLAMA_FLASH_ATTENTION=1 ollama serve
+#     ollama pull qwen3.5:9b          (in a second terminal; ~6.6 GB)
+#   The default context of Ollama is only 4K tokens on this Mac: without OLLAMA_CONTEXT_LENGTH long prompts are cut.
+#   llama.cpp (base_url http://127.0.0.1:8080/v1, model qwen3.5-9b):
+#     brew install llama.cpp
+#     llama-server -hf unsloth/Qwen3.5-9B-GGUF:Q4_K_M -a qwen3.5-9b --host 127.0.0.1 --port 8080 -c 32768 -np 3 -kvu -fa on --chat-template-kwargs '{"enable_thinking":false}'
+#   LM Studio is not recommended: it ignores enable_thinking=false for Qwen3.5-9B and answers come back empty.
+# The `model` below MUST match what you pulled, letter for letter (`ollama list` shows the tags). Only open models
+# with an Apache 2.0 / MIT license and ≤35B parameters — e.g. Qwen3.5 9B (Apache 2.0) fits an M2 Pro with 16 GB
+# of RAM in 4-bit (~6-7 GB); a 27B model does not fit comfortably next to LibreOffice and the app.
+# A small local model plans worse and much slower than Qwen3.8-27B (about 6-10 minutes per generation on an M2 Pro
+# with 16 GB, estimate): past the 210 s budget the remaining steps take their deterministic path. Last resort only.
+#
+# Enable alone: VERSTKA_MODELS=configs/models.local.yaml in .env.
+# Or as the last link of the default chain — append to both `chain:` lists (llm and vlm) in configs/models.yaml:
+#       - model: qwen3.5:9b
+#         label: Qwen3.5 9B (локально)
+#         base_url: http://localhost:11434/v1
+#         api_key: ollama
+#         requests_per_minute: 0   # no per-minute cap for a local server
+#         timeout_s: 150
+#         extra_body: {}
+# A server that is not running answers «connection refused» at once: as the last link it costs about 2 s (one more
+# try), then it is skipped for a minute.
+roles:
+  llm:
+    backend: openai_compat
+    model: qwen3.5:9b  # ← the tag you pulled
+    label: Qwen3.5 9B (локально)
+    base_url: http://localhost:11434/v1
+    api_key: ollama  # Ollama ignores the key, the client needs a non-empty one
+    price_in_per_m: 0.0
+    price_out_per_m: 0.0
+    json_mode: true  # Ollama supports response_format=json_object; the first invalid answer switches it off anyway
+    requests_per_minute: 0
+    temperature: 0.2
+    # Qwen3.5 may think before answering, which is slow on a laptop; recent Ollama versions take `reasoning_effort`
+    # on the OpenAI endpoint (see docs.ollama.com/api/openai-compatibility) if you want to turn it down
+  vlm:
+    backend: openai_compat
+    model: qwen3.5:9b  # a vision-capable model is needed for the image checks; otherwise drop this role
+    label: Qwen3.5 9B (локально)
+    base_url: http://localhost:11434/v1
+    api_key: ollama
+    price_in_per_m: 0.0
+    price_out_per_m: 0.0
+    json_mode: true
+    requests_per_minute: 0
+    temperature: 0.1
+limits:
+  max_concurrency: 1  # Ollama answers one request at a time by default
+  timeout_s: 150
+  max_attempts: 2
+  time_budget_s: 210

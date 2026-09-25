@@ -26,6 +26,22 @@ _NUMBER_RE = re.compile(
 _RANGE_RE = re.compile(r"(?<![\w.,])(?P<a>\d+(?:[.,]\d+)?)\s?[–—-]\s?(?P<b>\d+(?:[.,]\d+)?)(?:\s?(?P<unit>%|секунд[аы]?|сек|с\b|мин(?:ут[аы]?)?|ч(?:ас(?:ов|а)?)?\b|дн(?:ей|я)?\b|мес(?:яц(?:а|ев)?)?\b|млн|млрд|тыс\.?))?")
 _OF_RE = re.compile(r"(?P<a>\d+(?:[.,]\d+)?)\s+(?:[а-яё]+\s+)?из\s+(?P<b>\d+(?:[.,]\d+)?)", re.I)
 _FROM_TO_RE = re.compile(r"\bс\s+(?P<a>\d[\d\s]*(?:[.,]\d+)?\s?%?)\s+до\s+(?P<b>\d[\d\s]*(?:[.,]\d+)?\s?%?)", re.I)
+_FT_UNITS = r"минут[ыа]?|мин|секунд[ыа]?|сек|час(?:ов|а)?|ч|дн(?:ей|я)|недел[ьиюя]|месяц(?:ев|а)?|мес|млн ₽|млрд ₽|тыс\. ₽|млн|млрд|тыс\.?|₽|руб(?:лей|ля|\.)?|раз(?:а)?|шт\.?"
+_FT_UNIT_RE = re.compile(rf"\s?({_FT_UNITS})(?![\wё])", re.I)
+# a change the brief writes itself inside one clause: «47 → 29 минут», «было 47 минут, стало 29». Nothing else is a
+# change — two figures said in different sentences are never joined into one («A → B» is not made up)
+_CHANGE_NUM = r"\d+(?:[\u00a0\u202f ]\d{3})*(?:[.,]\d+)?(?:\s?%)?"
+_ARROW_RE = re.compile(rf"(?<![\w.,])(?P<a>{_CHANGE_NUM})\s*(?:→|->)\s*(?P<b>{_CHANGE_NUM})")
+# «было 47 минут в день, стало 29», «было 120 заявок в день, стало 300»: the start may carry a few words of its own
+# (what it counts, per what) before «стало», never a figure or a clause boundary
+_WAS_NOW_RE = re.compile(
+    rf"(?<![\wё])был[оаи]?\s+(?P<a>{_CHANGE_NUM})(?:\s?(?P<ua>{_FT_UNITS})(?![\wё]))?(?P<ta>(?:\s+[^\s\d,;:.!?—–]+){{0,4}}?)"
+    rf"\s*[,;]?\s*(?:а\s+)?стал[оаи]?\s+(?P<b>{_CHANGE_NUM})",
+    re.I,
+)
+_WAS_TAIL_RE = re.compile(r"(?<![\wё])был[оаи]?\s+\d[^,;]*$", re.I)
+_NOW_HEAD_RE = re.compile(r"^(?:а\s+)?стал[оаи]?\s+\d", re.I)
+_WAS_LEAD_RE = re.compile(r"^был[оаи]?\s+\d", re.I)  # «было 5 дней, стало 2 дня»: a change without its subject
 _UP_RE = re.compile(r"\b(вырос\w*|увеличил\w*|рост\w*|прибав\w*|повысил\w*)\b", re.I)
 _DOWN_RE = re.compile(r"\b(снизил\w*|сократил\w*|упал\w*|уменьшил\w*|сниж\w*)\b", re.I)
 _PREPS = {"в", "во", "на", "до", "с", "со", "за", "по", "от", "из", "к", "ко", "у", "при", "о", "об", "для", "через", "без", "под", "над"}
@@ -41,7 +57,10 @@ _STEP_RE = re.compile(
     r"|далее|затем|потом|после этого|then|next)(?:\s*:\s*|\s+[—–-]\s+)(?P<text>.+)$",
     re.I,
 )
-_LABELLED_RE = re.compile(r"^(?P<label>[^:.;]{2,40}?)\s*:\s*(?P<text>.{3,})$")
+# «Метка: текст»; a colon with digits on both sides is a time or a ratio («в 10:30», «1:1»), not a label — while
+# «Вариант 2: базовый» and «Бюджет:25 млн ₽» still are labels
+_LABELLED_RE = re.compile(r"^(?P<label>[^:.;]{2,40}?)\s*:(?!(?<=\d:)\d)\s*(?P<text>.{3,})$")
+_LABEL_COLON_RE = re.compile(r":(?!(?<=\d:)\d)")
 _CLAUSE_WORDS = {"но", "а", "из-за", "поэтому", "что", "который", "которая", "которые", "чтобы", "так", "однако", "хотя", "если", "где", "когда"}
 _CURRENCY_AFTER_RE = re.compile(r"^(рублей|рубля|руб\.?|₽|долларов|\$|евро|€)\s*", re.I)
 _TOTAL_RE = re.compile(r"^\s*(итого|всего|total|сумма)\b", re.I)
@@ -62,6 +81,13 @@ def strip_end(text: str) -> str:
 
 def cap_first(text: str) -> str:
     return text[:1].upper() + text[1:] if text else text
+
+
+def label_split(text: str) -> Optional[tuple[str, str]]:
+    """«Итоги пилота: время сократилось …» → («Итоги пилота», «время сократилось …»); None when the text has no label
+    colon — a colon between digits («Созвон в 10:30 занимает 45 минут», «1:1») is part of a figure."""
+    m = _LABEL_COLON_RE.search(text)
+    return (text[: m.start()], text[m.end() :]) if m else None
 
 
 def words(text: str) -> list[str]:
@@ -108,10 +134,17 @@ class Section:
     sentences: list[str] = field(default_factory=list)
     tables: list[TableData] = field(default_factory=list)
     table_leads: list[str] = field(default_factory=list)  # the line right before each table («Динамика …:»)
+    listed: bool = False  # the lines of a «Метка:» lead over its list: headed by the label, said as its items
+    heading: bool = False  # named by a markdown heading («## Что просим»): every line under it belongs to it
+    # how the lines were typed (cap_first forms of the sentences): one written on the line of the sentence before it
+    # («Результаты: … . NPS вырос до 64.»), one typed as a list item («- бюджет: 14,5 млн ₽;»)
+    joined: set[str] = field(default_factory=set)
+    marked: set[str] = field(default_factory=set)
 
 
 _PARA_LABEL_RE = re.compile(r"^(?P<label>[A-ZА-ЯЁ][^:.;!?\d]{1,40}?)\s*:\s+(?P<text>\S.*)$")
 _ASK_RE = re.compile(r"^(просим|прошу|предлагаем утвердить|предлагаем одобрить|нужно решение|решение, которое)", re.I)
+_TITLE_LABEL_RE = re.compile(r"^(например|пример|тема|название|заголовок|title|topic|example)$", re.I)
 
 
 def _plain_title(par: str) -> str:
@@ -123,9 +156,14 @@ def _plain_title(par: str) -> str:
     return t
 
 
-def _plain_sections(lines: list[str]) -> tuple[Optional[str], dict[int, str], set[int]]:
+def _plain_sections(lines: list[str]) -> tuple[Optional[str], dict[int, str], set[int], dict[int, str]]:
     """Structure of a brief written as plain paragraphs (no markdown headings): the title line, section titles by
-    line index («Проблема: …», a «Результаты пилота (…):» lead, a closing «Просим …»), lines to drop (the title)."""
+    line index («Проблема: …», a «Результаты пилота (…):» lead, a closing «Просим …»), lines to drop (the title) and
+    lines to read without their first words (a title marker taken off).
+
+    A paragraph is one section: labelled lines typed under its first line («Бюджет: …», «Срок: …») stay its
+    sentences — the planner cuts them into sections of their own only for a short brief. A first line labelled
+    «Например:», «Тема:» or «Название:» is the title, not a section."""
     starts = [i for i, ln in enumerate(lines) if ln.strip() and (i == 0 or not lines[i - 1].strip())]
     heads: dict[int, str] = {}
     for i in starts:
@@ -141,11 +179,23 @@ def _plain_sections(lines: list[str]) -> tuple[Optional[str], dict[int, str], se
             heads[i] = "Что просим"
     title: Optional[str] = None
     drop: set[int] = set()
+    rewrite: dict[int, str] = {}
     first = starts[0] if starts else None
-    if first is not None and first not in heads and len(starts) >= 3 and len(lines[first].strip()) <= 200 and len(split_sentences(lines[first])) <= 1:
+    marker = _PARA_LABEL_RE.match(lines[first].strip()) if first is not None and first in heads else None
+    if marker and _TITLE_LABEL_RE.match(marker.group("label").strip()):
+        # «Например: итоги пилота «Умные сводки» за квартал.» — the marker is not a section, the text is the title
+        text = marker.group("text").strip()
+        sents = split_sentences(text) or [text]
+        del heads[first]
+        title = cap_first(_plain_title(sents[0]))
+        if len(sents) > 1:
+            rewrite[first] = " ".join(sents[1:])
+        else:
+            drop.add(first)
+    elif first is not None and first not in heads and len(starts) >= 3 and len(lines[first].strip()) <= 200 and len(split_sentences(lines[first])) <= 1:
         title = _plain_title(lines[first].strip())
         drop.add(first)
-    return title, heads, drop
+    return title, heads, drop, rewrite
 
 
 def parse_sections(text: str) -> tuple[Optional[str], list[Section]]:
@@ -157,12 +207,13 @@ def parse_sections(text: str) -> tuple[Optional[str], list[Section]]:
     lines = text.splitlines()
     plain_heads: dict[int, str] = {}
     drop: set[int] = set()
+    rewrite: dict[int, str] = {}
     if not any(ln.lstrip().startswith("#") for ln in lines):
-        title, plain_heads, drop = _plain_sections(lines)
+        title, plain_heads, drop, rewrite = _plain_sections(lines)
     i = 0
     last_text = ""
     while i < len(lines):
-        raw = lines[i]
+        raw = rewrite.get(i, lines[i])
         s = raw.strip()
         if i in drop:
             i += 1
@@ -180,7 +231,7 @@ def parse_sections(text: str) -> tuple[Optional[str], list[Section]]:
             if level == 1 and title is None:
                 title = head
             else:
-                cur = Section(title=head)
+                cur = Section(title=head, heading=True)
                 sections.append(cur)
             i += 1
             continue
@@ -208,10 +259,15 @@ def parse_sections(text: str) -> tuple[Optional[str], list[Section]]:
                 cur = Section(title="")
                 sections.append(cur)
             body = s.lstrip("-•* ").strip()
+            item = body != s
             if re.match(r"^\d+[.)]\s", body):
                 body = re.sub(r"^\d+[.)]\s*", "", body)
+                item = True
             parts = split_sentences(body) if not body.endswith(":") else [body]
             cur.sentences.extend(parts)
+            cur.joined.update(cap_first(p.strip()) for p in parts[1:])
+            if item:
+                cur.marked.update(cap_first(p.strip()) for p in parts)
             last_text = body
         i += 1
     return title, [s for s in sections if s.sentences or s.tables]
@@ -245,8 +301,9 @@ def steps_of(sentences: list[str]) -> tuple[list[Item], list[str]]:
     return steps, rest
 
 
-def labelled_items(sentences: list[str]) -> tuple[list[Item], list[str]]:
-    """«Совместимость: 2 из 140 отчётов …» → (title, text) pairs when at least two sentences share the form."""
+def labelled_items(sentences: list[str], min_items: int = 2) -> tuple[list[Item], list[str]]:
+    """«Совместимость: 2 из 140 отчётов …» → (title, text) pairs when at least `min_items` sentences share the form
+    (two for cards; the short-brief planner also takes a single labelled line)."""
     items: list[Item] = []
     rest: list[str] = []
     for s in sentences:
@@ -255,7 +312,7 @@ def labelled_items(sentences: list[str]) -> tuple[list[Item], list[str]]:
             items.append(Item(title=cap_first(strip_end(m.group("label"))), text=cap_first(strip_end(m.group("text")))))
         else:
             rest.append(s)
-    if len(items) < 2:
+    if len(items) < min_items:
         return [], sentences
     return items, rest
 
@@ -266,8 +323,8 @@ def enumeration(sentence: str) -> tuple[Optional[str], list[str]]:
     s = strip_end(sentence)
     lead = None
     body = s
-    if ":" in s:
-        lead, body = s.split(":", 1)
+    if label_split(s):
+        lead, body = label_split(s)
         lead = strip_end(lead)
     parts = [p.strip() for p in re.split(r",\s+(?![^()]*\))", body) if p.strip()]
     if any(p.split()[0].lower() in _CLAUSE_WORDS for p in parts[1:] if p.split()):
@@ -297,6 +354,7 @@ class Kpi:
     label: str
     sentence: str
     number: float
+    clause: str = ""  # the part of the sentence the figure was read from
 
 
 def _clean_before(text: str) -> list[str]:
@@ -334,25 +392,150 @@ def clauses(sentence: str) -> list[str]:
     return out
 
 
-def kpis_of(sentence: str) -> list[Kpi]:
-    out = []
+def kpis_of(sentence: str, text: Optional[str] = None) -> list[Kpi]:
+    """The figures of one sentence, clause by clause, each as it is written. «было 47 минут, стало 29» is one change
+    («47 минут → 29»), not two figures; a figure of another sentence is never joined to one of this sentence. `text`
+    (the brief) tells a change's label that starts with a common word from one that starts with a name (kpi_of)."""
+    parts: list[str] = []
     for c in clauses(sentence):
-        k = kpi_of(c)
+        joined = f"{parts[-1]}, {c}" if parts else ""
+        if parts and _NOW_HEAD_RE.match(c) and _WAS_TAIL_RE.search(parts[-1]) and _WAS_NOW_RE.search(joined):
+            parts[-1] = joined  # joined only when the two read as one change: each figure is kept otherwise
+        else:
+            parts.append(c)
+    out = []
+    for c in parts:
+        k = kpi_of(c, text)
         if k is not None:
             k.sentence = sentence
+            k.clause = c
             out.append(k)
     return out
 
 
-def kpi_of(sentence: str) -> Optional[Kpi]:
-    """The headline figure of a clause with a short label, or None when the clause has no real number."""
+# a figure's unit written as a word of its own («120 млн ₽ за год» → «млн», «₽»): part of the figure, never its label
+_UNIT_WORD_RE = re.compile(r"^(₽|\$|€|%|руб\w*|долл\w*|евро|млн|млрд|тыс\.?|минут\w*|мин\.?|час\w*|ч\.?|дн\w*|дней|секунд\w*|сек\.?|недел\w*|месяц\w*|мес\.?)$", re.I)
+
+
+# the short units kpi_of writes for words of the brief: «3 мес» stands for «3 месяца», «8–25 с» for «8–25 секунд»
+_UNIT_FORMS = {
+    "мес": r"мес(?:яц(?:а|ев)?)?", "дн": r"(?:дн(?:ей|я)?|день)", "ч": r"ч(?:ас(?:ов|а)?)?", "мин": r"мин(?:ут[аы]?)?",
+    "нед": r"нед(?:ел[ьиюя])?", "г": r"г(?:од(?:а|у)?)?", "с": r"с(?:ек(?:унд[аы]?)?)?",
+}
+
+
+def figure_span(value: str, text: str) -> Optional[tuple[int, int]]:
+    """Where a figure («3 мес», «47 минут», «14,5 млн ₽») is written in a text, as whole words: the short unit of a
+    plan covers the unit written in full («3 мес» → «3 месяца»), and a figure is never found inside another word or
+    number («3 мес» is not in «13 месяцев», «5» is not in «15» or «0,5»). None when it is not there."""
+    v = value.strip()
+    if not v:
+        return None
+    toks = v.split()
+    pat = r"\s+".join(re.escape(t) for t in toks[:-1])
+    last = toks[-1]
+    last_pat = _UNIT_FORMS.get(last, re.escape(last)) if len(toks) > 1 else re.escape(last)
+    pat = (pat + r"\s+" if pat else "") + last_pat
+    m = re.search(rf"(?<![\wё])(?<!\d[.,]){pat}(?![\wё]|[.,]\d)", text, re.I)
+    return (m.start(), m.end()) if m else None
+
+
+_BARE_NUMBER_RE = re.compile(r"^[+\-−]?\d[\d\s  ]*(?:[.,]\d+)?$")
+
+
+def is_statement(text: str) -> bool:
+    """«Сотрудники тратят 47 минут …» reads as a heading; «120 млн ₽ за год» (a figure first) and «Снизились до 80 млн
+    ₽» (a verb first — its subject was the label cut off before the colon) do not."""
+    ws = text.split()
+    if len(ws) < 3 or re.match(r"^[+\-−×]?\d", ws[0]):
+        return False
+    if _WAS_LEAD_RE.match(text.strip()):
+        return False  # «было 5 дней, стало 2 дня» says a change without its subject: the figures, not a heading
+    first = ws[0].lower().strip(",«»\"")
+    return not (_VERB_END_RE.search(first) and len(first) > 4)
+
+
+def _label_words(text: str) -> list[str]:
+    return [w for w in re.findall(r"[\wё]+", text.lower()) if len(w) > 2]
+
+
+def _written_lower(word: str, text: str) -> bool:
+    """The text writes this word in lowercase somewhere: a common word («время»), not a name («Москва», «Сбер»)."""
+    w = word.lower()
+    return bool(w) and re.search(rf"(?<![\wё]){re.escape(w)}(?![\wё])", text) is not None
+
+
+def name_case(label: str, text: str) -> str:
+    """A label whose first word the brief writes only with a capital, and at least once inside a sentence, after a
+    label's colon or in quotes («в Москве», «Результаты: Сбер снизил …», «пилот «Умные сводки»»), gets its capital
+    back: a name is never lowercased. A common word — one the brief also writes in lowercase, or only ever at the start
+    of a sentence — is left as it is."""
+    ws = label.split()
+    if not ws or not ws[0][:1].islower() or _written_lower(ws[0], text):
+        return label
+    cap = ws[0][:1].upper() + ws[0][1:]
+    stem = cap[: max(4, len(cap) - 2)]  # «Москва» is written «в Москве», «Сбер» — «у Сбера»
+    if re.search(rf"(?:[\wё,:][ \t\u00a0]+|[«\"„(]){re.escape(stem)}", text):  # inside a line, not at its start
+        return cap + label[len(ws[0]) :]
+    return label
+
+
+def label_beside(value: str, label: str, headline: str, text: Optional[str] = None) -> str:
+    """A figure's label that does not repeat the heading above it — the words the slide shows under the figure. When
+    the label is the heading's own sentence («оператор тратит в среднем 6,5 минуты» under «Оператор тратит в среднем
+    6,5 минуты на одно обращение»), the words after the figure in the heading say what it measures («минуты на одно
+    обращение»), else the words before it. A short name («NPS», «время ответа») is kept as it is. The planner and the
+    composer both use this one rule, so the plan says what the slide will show.
+
+    A heading's first word starts the label in lowercase only when it is a common word: `text` (the brief, for the
+    planner) or else the label itself writes it in lowercase. A name keeps its capital («Сбер сэкономил на поддержке»)."""
+    lw, hw = _label_words(label), set(_label_words(headline))
+    if len(label.split()) <= 2 or not lw or sum(w in hw for w in lw) < 0.6 * len(lw):
+        return label
+    span = figure_span(value, headline)
+    if span is None:
+        return label
+    tail = headline[span[1] :].strip(" ,.:;—-")
+    if len(tail.split()) >= 2 or (len(tail.split()) == 1 and _BARE_NUMBER_RE.match(value.strip())):
+        return tail  # «минуты на одно обращение»; a bare number takes the one word it counts («12» → «человек»)
+    head = headline[: span[0]].strip(" ,.:;—-").split()
+    while head and head[-1].lower() in _PREPS:
+        head.pop()  # «Команда выросла до» → «Команда выросла»: a label never ends on a preposition
+    if len(head) < 2:
+        return label
+    whole = len(head) <= 6  # a clause start of six words or fewer is kept whole («Отдел продаж сократил время на отчёты»)
+    out = " ".join(head if whole else head[-5:])
+    if whole and out[:1].isupper() and not out[:2].isupper() and _written_lower(head[0].strip(",;:«»\"()"), label if text is None else text):
+        out = out[:1].lower() + out[1:]  # the capital of the heading's first common word is not the label's
+    return out
+
+
+def kpi_of(sentence: str, text: Optional[str] = None) -> Optional[Kpi]:
+    """The headline figure of a clause with a short label, or None when the clause has no real number. A change's label
+    is its subject as written: with `text` (the brief) its first word is lowercased only when the brief also writes it
+    in lowercase — a name keeps its capital («Сбер снизил расходы», «Москва сократила время ответа»)."""
     s = strip_end(sentence)
-    m_ft = _FROM_TO_RE.search(s)
+    m_ft = _FROM_TO_RE.search(s) or _ARROW_RE.search(s) or _WAS_NOW_RE.search(s)
     if m_ft:
+        # a change written in the clause: «с 47 до 29 минут», «47 → 29 минут», «было 47 минут, стало 29 минут»
         a, b = strip_end(m_ft.group("a")), strip_end(m_ft.group("b"))
-        before = s[: m_ft.start()]
-        label = " ".join(_after_last_verb(before)) or " ".join(_clean_before(before)) or s
-        return Kpi(value=f"{a} → {b}", label=short(label, 7), sentence=sentence, number=parse_number(b) or 0.0)
+        # what changed is said in the clause of the change, not in a lead before a colon («Итоги пилота: время …»)
+        before = re.split(r"[:;]\s", s[: m_ft.start()])[-1]
+        # no subject before the change: what the start counts («было 120 заявок в день» → «заявок в день»), else no
+        # label at all — never the clause itself, which says the figures again
+        own = [w for w in (m_ft.groupdict().get("ta") or "").split() if w.lower() not in _FILLERS]
+        label = " ".join(_after_last_verb(before)) or " ".join(_clean_before(before)) or " ".join(own)
+        unit_b = _FT_UNIT_RE.match(s[m_ft.end():]) if not b.endswith("%") else None
+        ub, ua = (unit_b.group(1) if unit_b else ""), (m_ft.groupdict().get("ua") or "")
+        if ua and ua.lower() != ub.lower():
+            value = f"{a} {ua} → {b} {ub}".strip()  # each end with its own unit, as written
+        else:
+            value = f"{a} → {b} {ub}" if ub else f"{a} → {b}"  # «с 47 до 29 минут» → «47 → 29 минут»
+        label = short(label, 7)
+        first = label.split()[0].strip("«»\"„“”()") if label.split() else ""
+        if label[:1].isupper() and not label[:2].isupper() and (text is None or _written_lower(first, text)):
+            label = label[:1].lower() + label[1:]
+        return Kpi(value=value, label=label, sentence=sentence, number=parse_number(b) or 0.0)
     m_rg = _RANGE_RE.search(s)
     if m_rg and (parse_number(m_rg.group("a")) or 0) < (parse_number(m_rg.group("b")) or 0):
         # «8–25 секунд», «88–100 из 100»: a range is one figure
@@ -361,6 +544,12 @@ def kpi_of(sentence: str) -> Optional[Kpi]:
         before = s[: m_rg.start()]
         after = re.split(r"[,;:]\s", s[m_rg.end():].strip())[0].strip()
         after = re.sub(r"^из\s+\d+\s*", "", after)
+        cur = _CURRENCY_AFTER_RE.match(after)
+        if cur and unit in ("млн", "млрд", "тыс", "тыс.", ""):
+            # «10–20 млн ₽ на …»: the currency is part of the figure, not the first word of its label
+            sign = "₽" if cur.group(1).lower().startswith(("руб", "₽")) else ("$" if cur.group(1) in ("$", "долларов") else "€")
+            value = f"{value} {sign}"
+            after = after[cur.end() :]
         words_b = [w for w in before.split() if w.lower() not in _FILLERS]
         while words_b and words_b[-1].lower() in _PREPS:
             words_b.pop()
@@ -409,9 +598,11 @@ def kpi_of(sentence: str) -> Optional[Kpi]:
         else:
             value = f"{num} {unit_short}".strip()
         before_txt = s[:start]
-        if unit_short == "%" and _UP_RE.search(before_txt) and not value.startswith(("+", "-", "−")):
+        # a signed figure is a change «на 34%»; «снизилась до 8%» is the level reached, shown as it is (8%, not −8%)
+        delta = bool(re.search(r"(?<![\wё])на\s*$", before_txt, re.I))
+        if unit_short == "%" and delta and _UP_RE.search(before_txt) and not value.startswith(("+", "-", "−")):
             value = "+" + value
-        elif unit_short == "%" and _DOWN_RE.search(before_txt) and not value.startswith(("+", "-", "−")):
+        elif unit_short == "%" and delta and _DOWN_RE.search(before_txt) and not value.startswith(("+", "-", "−")):
             value = "−" + value
     before = s[:start].strip()
     after = re.split(r"\s+и\s+|[,;:]\s|\s[—–]\s", s[end:].strip().lstrip(",").strip())[0].strip()

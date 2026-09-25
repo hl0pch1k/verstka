@@ -66,6 +66,8 @@ export function uploadTemplateFlow(file: File, useModels: boolean, d: UploadDeps
 export interface GenerationDeps extends CommonDeps {
   refreshGenerations(): Promise<void>;
   fetchGeneration(gid: string): Promise<Generation | null>;
+  /** The model indicator follows every generation: it may have found the host congested or back. */
+  refreshModelStatus(): Promise<void>;
   titleOf(strategy: string): string;
 }
 
@@ -84,6 +86,7 @@ export function generationFlow(req: GenerateRequest, d: GenerationDeps): Promise
         kind: "generate",
         items: req.strategies,
         onDone: async () => {
+          void d.refreshModelStatus();
           await d.refreshGenerations();
           const g = await d.fetchGeneration(res.generation_id);
           if (g) {
@@ -96,6 +99,7 @@ export function generationFlow(req: GenerateRequest, d: GenerationDeps): Promise
         onFailed: (job) => {
           d.pushMessage("assistant", `Не получилось собрать презентацию: ${firstLine(job.error ?? job.message)}`);
           void d.refreshGenerations();
+          void d.refreshModelStatus();
           resolve();
         },
       });

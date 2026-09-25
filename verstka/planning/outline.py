@@ -59,6 +59,106 @@ def _split_sentences(text: str) -> list[str]:
 
 _STEP_TITLES_RE = re.compile(r"шаг|этап|план|дорожн|roadmap|запуск|timeline|сроки|следующ", re.I)
 _CLOSING_RE = re.compile(r"вывод|итог|решени|просим|предлагаем утвердить|summary|conclusion|next steps", re.I)
+# a section that asks for something: said as one statement, not cut into figures. The name is the ask word alone
+# («Просим», «Что нужно», «Запрос») or an ask verb with its object («Просим утвердить»); a noun with words of its own
+# («Запрос пользователей», «Предложение для клиентов», «Нужна интеграция с 1С») names a topic, and asks only when its
+# text asks (_asks_by_text)
+_ASK_TITLE_RE = re.compile(
+    r"^(?:(?P<what>что)\s+|(?:наш[аеи]?|мо[йяеи])\s+)?(?P<word>просим|прошу|предлагаем|предложение|нужн[оаы]|требуется|решение|запрос|ask|request|proposal)(?![\wё])(?P<tail>.*)$",
+    re.I,
+)
+_ASK_VERB_WORDS = ("просим", "прошу", "предлагаем")
+# «предлагаем» asks only with what it asks for («предлагаем утвердить», «предлагаем бюджет …»), not in «предлагаем бот,
+# который экономит …»
+_ASK_VERB_RE = re.compile(
+    r"(?<![\wё])(?:(?:просим|прошу|утверди(?:ть|те)|одобри(?:ть|те)|выдели(?:ть|те)|согласовать|согласуйте)(?![\wё])"
+    r"|предлагаем\s+(?:утверди|одобри|выдели|согласова|бюджет|инвестиц|финансирова))",
+    re.I,
+)
+_MONEY_RE = re.compile(r"\d\s*(?:млн|млрд|тыс\.?)?\s*(?:₽|руб|\$|€|долл|евро)", re.I)
+_ASK_NOUN_RE = re.compile(r"(?<![\wё])(бюджет\w*|инвестици\w*|финансировани\w*)", re.I)
+_REACHED_RE = re.compile(r"(?<![\wё])до\s+\d", re.I)  # «снизился до 3 млн ₽»: a level reached, not an amount asked for
+# «увеличить бюджет до 14,5 млн ₽»: an infinitive before «до N» asks for the level (a reflexive «увеличиться» does not)
+_INFINITIVE_RE = re.compile(r"(?<![\wё])[а-яё]{3,}(?:ить|ать|ять|еть|уть|ести|асти)(?![\wё])", re.I)
+_NOT_INFINITIVES = {"память", "печать", "кровать"}
+# «Нужен бюджет 14,5 млн ₽ на масштабирование», «Требуется 2 млн ₽»: a need said with money asks for it
+_NEED_RE = re.compile(r"^(?:нам\s+|ещё\s+|еще\s+)?(?:нуж(?:ен|на|но|ны)|требу(?:ется|ются))(?![\wё])", re.I)
+# a short brief is cut into one section per labelled line and read figure by figure (_short_mode)
+SHORT_BRIEF_SENTENCES = 6
+ASK_STATEMENT_CHARS = 200  # two ask lines up to this long are said as one statement
+
+
+def _is_ask(title: str, text: str) -> bool:
+    """A request to the audience: a statement that opens with «Просим …», or a section named «Просим», «Предлагаем»,
+    «Что нужно», «Запрос». «Решение» is an ask only when it asks (просим, утвердить, выделить …) or names money for a
+    budget («бюджет 3 млн ₽»); in «Проблема / Решение / Результаты» it is the solution, and its figure gets a figure
+    slide («бот экономит 2 млн ₽ в год»)."""
+    s = text.strip()
+    return bool(H._ASK_RE.match(s)) or bool(_NEED_RE.match(s) and (_MONEY_RE.search(s) or _asks_by_text(s))) or _ask_title(title, text)
+
+
+def _reached(text: str) -> bool:
+    """A level reached («бюджет поддержки снизился до 3 млн ₽», «расходы сократятся до 8 млн ₽»), not one asked for
+    («увеличить бюджет до 14,5 млн ₽»: an infinitive before «до N»)."""
+    if H._UP_RE.search(text) or H._DOWN_RE.search(text):
+        return True
+    m = _REACHED_RE.search(text)
+    if m is None:
+        return False
+    return not any(w.group(0).lower() not in _NOT_INFINITIVES for w in _INFINITIVE_RE.finditer(text[: m.start()]))
+
+
+def _asks_by_text(text: str) -> bool:
+    """The text asks: an ask verb («выделить», «утвердить», «предлагаем утвердить»), or money for a budget («бюджет
+    14,5 млн ₽», «увеличить бюджет до 14,5 млн ₽») — not a result said in money («бюджет поддержки снизился до 3 млн
+    ₽»)."""
+    if _ASK_VERB_RE.search(text):
+        return True
+    return bool(_ASK_NOUN_RE.search(text) and _MONEY_RE.search(text) and not _reached(text))
+
+
+def _ask_name(title: str):
+    """The ask word of a section's name («Просим», «Что нужно», «Запрос», «Решение»), or None."""
+    return _ASK_TITLE_RE.match(H.strip_end(title or ""))
+
+
+def _ask_title(title: str, text: str) -> bool:
+    """The section's name asks: the ask word alone («Просим», «Предлагаем», «Что нужно», «Запрос»), «что …» or an ask
+    verb with its object («Просим утвердить»). «Решение», and a noun with words of its own («Запрос пользователей»,
+    «Нужна интеграция с 1С»), only when the text asks too (_asks_by_text)."""
+    m = _ask_name(title)
+    if not m:
+        return False
+    word, tail = m.group("word").lower(), m.group("tail").strip()
+    if not word.startswith("решени") and (not tail or m.group("what") or word in _ASK_VERB_WORDS):
+        return True
+    return _asks_by_text(f"{tail} {text}")
+
+
+def _ask_line(sentence: str, title: str = "") -> bool:
+    """A sentence that asks: «Просим одобрить …», a labelled line «Предлагаем: …», «Что нужно: …», «Запрос: …»,
+    «Решение: выделить …», or any sentence of a section named so (_is_ask)."""
+    s = sentence.strip()
+    if _is_ask(title, s):
+        return True
+    m = H._LABELLED_RE.match(s)
+    return bool(m and len(m.group("label").split()) <= 4 and _ask_title(H.strip_end(m.group("label")), m.group("text")))
+
+
+def _asking_section(title: str) -> bool:
+    """A section that is all ask by its name («Просим», «Что просим», «Предлагаем»); «Решение» is not one — an ask said
+    inside it is taken out into a section of its own — nor is a topic named by an ask noun («Запрос пользователей»)."""
+    m = _ask_name(title)
+    if not m or m.group("word").lower().startswith("решени"):
+        return False
+    return not m.group("tail").strip() or bool(m.group("what")) or m.group("word").lower() in _ASK_VERB_WORDS
+
+
+def _ask_section(sec: H.Section) -> bool:
+    """A short brief's section that is one ask as a whole: named so («Просим», «Что просим», «Запрос»), or a «Решение»
+    whose lines ask («Решение:» / «- выделить бюджет 14,5 млн ₽» / «- утвердить срок 3 месяца»). Every slide of it is
+    the ask, kept to the last; none of its figures is a tile or the deck's key figure."""
+    return _asking_section(sec.title) or bool(sec.title and sec.sentences and _ask_title(sec.title, " ".join(sec.sentences)))
 
 
 @dataclass
@@ -90,7 +190,8 @@ def _headline(sentences: list[str], fallback: str, max_words: int = 12) -> str:
     for s in sentences:
         if len(s.split()) < 3:
             continue
-        head = s.split(":", 1)[0] if ":" in s and len(s.split(":", 1)[0].split()) >= 3 else s
+        parts = H.label_split(s)  # a colon between digits («в 10:30») is not where a statement ends
+        head = parts[0] if parts and len(parts[0].split()) >= 3 else s
         words = head.split()
         if len(words) <= max_words:
             return H.strip_end(head)
@@ -129,23 +230,91 @@ def _table_head(title: str, tbl) -> str:
     return f"{title}: сравнение"
 
 
-def _blocks_of(sec: H.Section, facts: FactsExtraction, series_by_span: dict, closing: bool) -> list[_Block]:
+_FIGURE_TOKEN_RE = re.compile(r"^[+\-−×]?\d[\d\s.,]*%?$")
+
+
+def _only_the_figure(k: H.Kpi) -> bool:
+    """«25 млн ₽» labelled «25 млн ₽», «3 мес» labelled «3 месяца»: the label says nothing but the figure itself."""
+    vals = [t.lower() for t in k.value.split()]
+    rest = [t for t in k.label.split() if not (_FIGURE_TOKEN_RE.match(t) or H._UNIT_WORD_RE.match(t) or any(v and t.lower().startswith(v) for v in vals))]
+    return not rest
+
+
+def _own_label(k: H.Kpi, text: Optional[str] = None) -> str:
+    """A tile's label read against the figure's own clause, so it never repeats its own figure: «Команда выросла до 40
+    человек» → «40 | человек» (basic_outline then fits every label of a short brief to its slide's heading). `text` is
+    the brief: it tells a common first word from a name (H.label_beside)."""
+    return H.label_beside(k.value, k.label, H.cap_first(k.clause or H.strip_end(k.sentence)), text)
+
+
+def _one_sentence_block(sec: H.Section, facts: FactsExtraction, kpis_for, enum_parts: list[str], text: Optional[str] = None) -> Optional[_Block]:
+    """A section of one sentence (a labelled line «Проблема: …» of a short brief) is one slide of its own: an ask
+    («Просим», «Предлагаем», «Что нужно») is a statement, one figure is a big-number slide, two or more figures are a
+    KPI row. None when the sentence is plain text or a list — the general rules read it then."""
+    title = sec.title or ""
+    s0 = sec.sentences[0]
+    if _is_ask(title, s0):
+        # the ask is said once, in large type (its figures in the accent colour), under the section's own name; it is
+        # the last slide to give way when the deck has fewer slides than its sections (_keep_priority)
+        return _Block(PatternKind.bullets, title or "Что просим", title, SlideContent(paragraphs=[H.cap_first(H.strip_end(s0))]), "ask")
+    ks = _without_starts(kpis_for(s0))
+    if not ks or len(s0.split()) > 30:
+        return None
+    if enum_parts and not all(re.search(r"\d", p) for p in enum_parts):
+        return None  # «A, B и C» of which only one part has a figure is a list, not a row of figures
+    bare = len(ks) == 1 and _only_the_figure(ks[0])  # «Бюджет: 25 млн ₽.»: nothing but the figure
+    if title and (bare or not H.is_statement(s0)):
+        # «Выручка: 120 млн ₽ за год», «Затраты: снизились до 80 млн ₽»: the label names what the figure is
+        head = title
+    else:
+        head = _headline([s0], title) or H.strip_end(s0)
+    if len(ks) >= 2:
+        # a row of figures is headed by the clause of its key figure (a change first): «Время сократилось до 29
+        # минут», not the whole «…, NPS 64» — the other figures speak on their tiles, under their own labels
+        lead = next((k.clause for k in ks if "→" in k.value and H.is_statement(k.clause)), None) or next((k.clause for k in ks if H.is_statement(k.clause)), None)
+        if lead:
+            head = H.cap_first(_headline([lead], head))
+    nums = []
+    for k in ks[:4]:
+        if _only_the_figure(k):
+            # «Бюджет: 25 млн ₽»: the heading above says what the figure is, the tile does not say it again
+            label = "" if not title or head == title else title
+        else:
+            label = _own_label(k, text)
+        nums.append(NumberCallout(value=k.value, label=label, fact_id=_fact_id(facts, k.value)))
+    kind = PatternKind.big_number if len(nums) == 1 else PatternKind.stat_row
+    blk = _Block(kind, head, title, SlideContent(numbers=nums), "kpi", [n.fact_id for n in nums if n.fact_id], kpis=ks)
+    if H.strip_end(s0) != head and not bare:
+        blk.notes = H.strip_end(s0) + "."  # the heading was cut: the whole statement stays with the speaker
+    return blk
+
+
+def _blocks_of(sec: H.Section, facts: FactsExtraction, series_by_span: dict, closing: bool, kpis_for=H.kpis_of, short: bool = False, text: Optional[str] = None) -> list[_Block]:
     out: list[_Block] = []
     title = sec.title or ""
     sentences = list(sec.sentences)
+    ask_sec = short and _ask_section(sec)  # the whole section asks: its lines are the ask's lines, never cards or tiles
     steps, rest = H.steps_of(sentences)
-    labelled, rest = H.labelled_items(rest) if not steps else ([], rest)
+    labelled, rest = H.labelled_items(rest) if not steps and not ask_sec else ([], rest)
     enum_lead, enum_parts, enum_src = None, [], None
     if not steps and not labelled:
         for sn in rest:
             lead, parts = H.enumeration(sn)
+            if short and parts and all(re.search(r"\d", p) for p in parts):
+                continue  # «было 5 дней, стало 2 дня, NPS 64»: a short brief reads figures as figures, not as a list
             if len(parts) >= 3:
                 enum_lead, enum_parts, enum_src = lead, parts, sn
                 break
-    kpis = [k for sn in rest if sn != enum_src for k in H.kpis_of(sn)]
+    if short and not steps and len(sentences) == 1 and not sec.tables:
+        blk = _one_sentence_block(sec, facts, kpis_for, enum_parts, text)
+        if blk is not None:
+            return [blk]
+    # a short brief never turns the figure of an ask («Предлагаем: бюджет 14,5 млн ₽ …») into a tile: the ask is said
+    # as a statement
+    kpis = [k for sn in rest if sn != enum_src and not (short and (ask_sec or _ask_line(sn, title))) for k in kpis_for(sn)]
     kpi_sentences = {k.sentence for k in kpis}
     if steps:
-        statements = [r for r in rest if ":" not in r and len(r.split()) >= 3]
+        statements = [r for r in rest if not H.label_split(r) and len(r.split()) >= 3]
         head = H.short(statements[0], 11) if statements else title
         blk = _Block(PatternKind.process, head, title, SlideContent(items=[SlideItem(title=i.title, text=i.text) for i in steps[:6]]), "steps")
         out.append(blk)
@@ -173,14 +342,17 @@ def _blocks_of(sec: H.Section, facts: FactsExtraction, series_by_span: dict, clo
     # figures: three or more in a section make a KPI row; fewer stay in the text
     if len(kpis) >= 2 and len(kpi_sentences) >= 2 or len(kpis) >= 3:
         # the section's first statement heads the slide (with or without a figure of its own)
-        head_sentence = next((x for x in sentences if len(x.split()) >= 3 and not H.steps_of([x, x, x])[0]), kpis[0].sentence)
+        head_sentence = next((x for x in sentences if len(x.split()) >= 3 and not H.steps_of([x, x, x])[0] and not (short and H._WAS_LEAD_RE.match(x))), kpis[0].sentence)
         tiles = [k for k in kpis if k.sentence != head_sentence]
         if len(tiles) < 3:
             tiles = kpis
         tiles = tiles[:4]
-        nums = [NumberCallout(value=k.value, label=k.label, fact_id=_fact_id(facts, k.value)) for k in tiles]
+        if short:
+            tiles = _without_starts(tiles)  # «47 минут» next to «47 → 29 минут» is said once, as the change
+        nums = [NumberCallout(value=k.value, label=_own_label(k, text) if short else k.label, fact_id=_fact_id(facts, k.value)) for k in tiles]
         head = _headline([head_sentence], title)
-        blk = _Block(PatternKind.stat_row, head, title, SlideContent(numbers=nums), "kpi", [n.fact_id for n in nums if n.fact_id], kpis=kpis)
+        kind = PatternKind.big_number if len(nums) == 1 else PatternKind.stat_row
+        blk = _Block(kind, head, title, SlideContent(numbers=nums), "kpi", [n.fact_id for n in nums if n.fact_id], kpis=kpis)
         if len(kpis) < 3:
             blk.role = "kpi_small"  # two figures: a KPI row for the visual strategy, running text for the others
         out.append(blk)
@@ -206,30 +378,53 @@ def _blocks_of(sec: H.Section, facts: FactsExtraction, series_by_span: dict, clo
             if not first.content.paragraphs and len(rest[0].split()) <= 20:
                 first.content.paragraphs = [H.strip_end(rest[0])]
                 rest = []
+        if rest and short and title and len(rest) >= 2 and (sec.listed or ask_sec):
+            # a «Метка:» lead over its list, or an ask said in several lines: headed by its label, every line an item
+            out.insert(0 if not closing else len(out), _Block(PatternKind.bullets, title, title, SlideContent(bullets=[H.cap_first(H.strip_end(r)) for r in rest]), "text"))
+            rest = []
         if rest:
             head = _headline(rest, title) if len(rest) >= 2 else (title or H.short(rest[0], 11))
+            if short and title and len(rest) >= 2 and _bare_figure(rest[0], kpis_for):
+                head = title  # «Срок: 3 месяца. …»: a bare figure says what it is by its label, not under the next line
             body = []
             for r in rest:
                 if H.short(r, 11) == head:
                     continue
-                if ":" in r and H.short(r.split(":", 1)[0], 11) == head:
-                    body.append(H.cap_first(H.strip_end(r.split(":", 1)[1].strip())))  # the heading took the part before the colon
+                parts = H.label_split(r)
+                if parts and H.short(parts[0], 11) == head:
+                    body.append(H.cap_first(H.strip_end(parts[1].strip())))  # the heading took the part before the colon
                     continue
                 body.append(H.strip_end(r))
             if not body:
                 body = [H.strip_end(rest[0])]
                 head = title or head
+                dash = re.split(r"\s[—–]\s", body[0], maxsplit=1) if short and not title else []
+                if len(dash) == 2 and len(dash[0].split()) >= 2 and len(dash[1].split()) >= 2:
+                    # a line of its own, «Следующий шаг — раскатка на всю компанию»: headed by what precedes the dash,
+                    # not said twice
+                    head, body = dash[0].strip(), [H.cap_first(dash[1].strip())]
             kind = PatternKind.bullets
             content = SlideContent(bullets=body) if len(body) >= 2 else SlideContent(paragraphs=body)
             out.insert(0 if not closing else len(out), _Block(kind, head, title, content, "text"))
     # two figures inside running text: the text slide stays, the small KPI row is only offered to «visual»
+    if ask_sec:
+        for b in out:
+            if b.role in ("text", "items", "steps"):
+                b.role = "ask"  # the ask said in several lines (or as a list, or steps) is kept to the last as well
     return out
 
 
+def _bare_figure(sentence: str, kpis_for=H.kpis_of) -> bool:
+    """«3 месяца.», «25 млн ₽»: a line that is nothing but its figure."""
+    ks = kpis_for(sentence)
+    return len(ks) == 1 and len(sentence.split()) <= 4 and _only_the_figure(ks[0])
+
+
 def _to_cards(b: _Block) -> _Block:
-    """Visual strategy: two to four theses become cards with short titles instead of a bulleted list."""
+    """Visual strategy: two to four theses become cards with short titles instead of a bulleted list. The ask stays as
+    it is: said as a statement, and kept to the last when the deck is trimmed (its role)."""
     lines = b.content.bullets or b.content.paragraphs
-    if b.kind != PatternKind.bullets or not (2 <= len(lines) <= 4):
+    if b.kind != PatternKind.bullets or b.role == "ask" or not (2 <= len(lines) <= 4):
         return b
     items = [SlideItem(title=_headline([l], H.strip_end(l), max_words=10), icon_hint=H.short(l, 2)) for l in lines]
     return _Block(PatternKind.cards, b.headline, b.section, SlideContent(items=items), "items", b.fact_refs)
@@ -251,6 +446,140 @@ def _two_column(a: _Block, b: _Block) -> _Block:
     return _Block(PatternKind.two_column, head, a.section, SlideContent(columns=[col(a), col(b)]), "text")
 
 
+def _read_blocks(sections: list[H.Section], facts: FactsExtraction, series_by_span: dict, short: bool = False, text: Optional[str] = None) -> tuple[list[_Block], dict]:
+    """Every section's slide candidates and the figures of every sentence, each figure as the brief writes it (a
+    change only when one clause tells it: «с 47 до 29 минут»; two figures of different sentences are never joined). A
+    short brief gives a one-sentence section a slide of its own. `text` is the brief: a change's label keeps a name's
+    capital by it (H.kpi_of)."""
+    figures = {sn: H.kpis_of(sn, text) for sec in sections for sn in sec.sentences}
+    kpis_for = lambda sn: figures[sn] if sn in figures else H.kpis_of(sn, text)  # noqa: E731
+    blocks: list[_Block] = []
+    for i, sec in enumerate(sections):
+        closing = i == len(sections) - 1 and bool(_CLOSING_RE.search(sec.title or ""))
+        blocks.extend(_blocks_of(sec, facts, series_by_span, closing, kpis_for, short, text if short else None))
+    return blocks, figures
+
+
+def _other_clause(b: "_Block", same) -> str:
+    """The clause of the figure a KPI pair keeps once its hero figure opens the deck («NPS 64»)."""
+    k = next((k for k in b.kpis if not same(k.value)), None)
+    return k.clause if k is not None else ""
+
+
+def _lead_label(sentence: str) -> Optional[str]:
+    """«Результаты:», «Просим:» — a short label that ends its line, over the list that follows it; None otherwise."""
+    s = sentence.strip()
+    if not s.endswith(":") or H._STEP_RE.match(s):
+        return None
+    label = H.strip_end(s)
+    return H.cap_first(label) if label and len(label.split()) <= 4 and not H._LABEL_COLON_RE.search(label) else None
+
+
+def _split_labelled(sections: list[H.Section]) -> list[H.Section]:
+    """Sections whose sentences are «Метка: текст» statements («Результаты: …», «Просим: …») cut into one section per
+    label. The sentences are read in order: an unlabelled sentence written on a label's line belongs to that label
+    («Результаты: время сократилось до 29 минут. NPS вырос до 64.» is one section), those before the first label stay
+    under the section's own title; a «Метка:» lead that ends its line is the label of the list under it. The paragraph's own
+    label counts as one: «Проблема: … / Результаты: …» is cut in two just as «Проблема: … / Результаты: … / Просим: …»
+    is cut in three, while a paragraph that opens with a lead («Преимущества:») keeps its labelled lines together. An
+    ask said among other sentences («Просим бюджет …», «Предлагаем: …», «Что нужно: …», «Запрос: …», «Решение:
+    выделить …», «Нужен бюджет 14,5 млн ₽ …») always becomes a section of its own, even as the one labelled line. The
+    same list when there is nothing to cut.
+
+    An ask is never cut into figures: the lines under «## Что просим» (or «## Запрос», or a «## Решение» that asks) and
+    the items of a «Просим:» lead stay the ask's lines, «- Бюджет: 14,5 млн ₽» / «- Срок: 3 месяца» included. A line
+    typed on its own after «Метка: значение» lines is not the last label's («Бюджет: 25 млн ₽.» / «Срок: 3 месяца.» /
+    «Команда из 8 человек начнёт работу в июле.»): it starts a section of its own — only a sentence written on the
+    label's own line, or a list item under it, belongs to the label."""
+    out: list[H.Section] = []
+    changed = False
+    for sec in sections:
+        if sec.heading and _ask_section(sec):
+            out.append(sec)  # «## Что просим» / «- Бюджет: 14,5 млн ₽» / «- Срок: 3 месяца»: one ask, not two figures
+            continue
+        steps, _ = H.steps_of(sec.sentences)
+        sents = list(sec.sentences)
+        # a paragraph that opens with a lead («Результаты:», «Преимущества:») is the list under it: headed by the label
+        # (the section's own, or the lead's when the section has none), the lead not said again as a line of its own; the
+        # labelled lines right under it are its items («Преимущества:» / «Скорость: …» / «Цена: …»)
+        own_lead = bool(sents) and sents[0].rstrip().endswith(":")
+        lead0 = _lead_label(sents[0]) if own_lead else None
+        listed = bool(lead0) and len(sents) >= 2 and (not sec.title or lead0 == H.cap_first(sec.title))
+        title = (sec.title or lead0 or "") if listed else sec.title
+        if listed:
+            sents = [H.cap_first(x.strip()) for x in sents[1:]]
+        cut = not steps and (not own_lead or listed)  # a long lead («Результаты пилота (…):») keeps its lines together
+        groups: list[H.Section] = [H.Section(title=title, listed=listed)]
+        asks: list[str] = []
+        labelled_run = listed  # the lines under a lead so far are all labelled («Преимущества:» / «Скорость: …»)
+        by_label = False  # the current group was opened by a «Метка: значение» line of this paragraph
+        for sn in sents:
+            m = H._LABELLED_RE.match(sn.strip())
+            labelled = cut and bool(m) and len(m.group("label").split()) <= 4 and not H._STEP_RE.match(sn.strip())
+            lead = _lead_label(sn) if cut else None
+            key = H.cap_first(sn.strip())
+            item, same_line = key in sec.marked, key in sec.joined  # typed as a list item / on the line before it
+            cur = groups[-1]
+            if lead:
+                groups.append(H.Section(title=lead, listed=True))
+                labelled_run, by_label = True, False
+            elif (
+                not labelled and len(sents) >= 2 and not _asking_section(title) and not _asking_section(cur.title)
+                and not (cur.listed and item and _ask_name(cur.title)) and _ask_line(sn, cur.title)
+            ):
+                asks.append(sn)  # (the items of a «Решение:» lead stay its own: the lead is the ask then, _ask_section)
+            elif labelled and not (cur.listed and (labelled_run or item) and (_asking_section(cur.title) or not _ask_line(sn, ""))):
+                # (an item of a lead stays its item — «Просим:» / «- бюджет: 14,5 млн ₽» — unless it is an ask of its own
+                # under another lead: «Результаты:» / … / «Просим: бюджет …»)
+                text = H.cap_first(H.strip_end(m.group("text")))
+                groups.append(H.Section(title=H.cap_first(H.strip_end(m.group("label"))), sentences=H.split_sentences(text + ".") or [text + "."]))
+                # only a «Метка: значение» line (a bare figure or a few words: «Бюджет: 25 млн ₽», «Срок: 3 месяца»)
+                # lets the next line of its own start a section; a statement («Результаты: время сократилось до 29
+                # минут.») keeps the lines that go on after it («NPS вырос с 41 до 64.»)
+                labelled_run, by_label = False, len(text.split()) <= 3 or _bare_figure(text + ".")
+            elif by_label and not labelled and not same_line and not item and not _asking_section(cur.title):
+                groups.append(H.Section(title="", sentences=[sn]))  # a line of its own: not the last label's
+                by_label = False
+            else:
+                cur.sentences.append(H.cap_first(sn.strip()) if cur.listed else sn)
+                labelled_run = labelled_run and labelled
+        for k in range(len(groups) - 1, 0, -1):
+            if groups[k].listed and not groups[k].sentences:
+                groups[k - 1].sentences.append(groups[k].title + ":")  # a lead with nothing under it stays a line
+                del groups[k]
+        own = bool(title) and any(not r.rstrip().endswith(":") for r in groups[0].sentences)  # a statement under the section's label
+        if len(groups) - 1 + own < 2 and not any(g.listed for g in groups[1:]):
+            # nothing to cut by labels: an ask said among the other sentences still gets a section of its own (a listed
+            # section that asks as a whole — «Решение:» / «- бюджет: 14,5 млн ₽» / «- срок: 3 месяца» — stays one ask)
+            rest = list(sents)
+            whole_ask = listed and _ask_section(H.Section(title=title, sentences=list(sents)))
+            asks = [x for x in rest if _ask_line(x, title)] if len(sents) >= 2 and not _asking_section(title) and not whole_ask else []
+            rest = [x for x in rest if x not in asks]
+            if not (asks and (rest or sec.tables)):
+                if listed:
+                    out.append(H.Section(title=title, sentences=sents, tables=list(sec.tables), table_leads=list(sec.table_leads), listed=True))
+                    changed = True
+                else:
+                    out.append(sec)
+                continue
+            groups = [H.Section(title=title, sentences=rest, listed=listed)]
+        changed = True
+        head = groups[0]
+        if head.sentences or sec.tables:
+            out.append(H.Section(title=title, sentences=list(head.sentences), tables=list(sec.tables), table_leads=list(sec.table_leads), listed=head.listed))
+        out.extend(groups[1:])
+        for a in asks:
+            # «Просим: утвердить план найма» under its own label; «Просим одобрить бюджет …» under «Что просим»
+            m = H._LABELLED_RE.match(a.strip())
+            if m and len(m.group("label").split()) <= 4:
+                out.append(H.Section(title=H.cap_first(H.strip_end(m.group("label"))), sentences=[H.cap_first(H.strip_end(m.group("text"))) + "."]))
+            elif out and out[-1].title == "Что просим":
+                out[-1].sentences.append(a)
+            else:
+                out.append(H.Section(title="Что просим", sentences=[a]))
+    return out if changed else sections
+
+
 # the sections a deck of this purpose usually has: a topic without theses becomes this skeleton, not invented content
 _SKELETONS: dict[str, list[str]] = {
     "feature": ["Проблема", "Решение", "Как это работает", "Результаты", "Следующие шаги"],
@@ -268,7 +597,7 @@ def _title_from_first_statement(sections: list[H.Section]) -> tuple[Optional[str
     first = next((s for sec in sections for s in sec.sentences), None)
     if not first:
         return None, False
-    lead, _, rest = first.partition(":")
+    lead, rest = H.label_split(first) or (first, "")  # «Созвон в 10:30 …» has no lead: the time is not a colon
     if rest.strip() and 2 <= len(lead.split()) <= 12:
         return H.cap_first(H.strip_end(lead.strip())), False
     if not rest.strip() and len(first.split()) <= 14:
@@ -292,19 +621,256 @@ def _skeleton(brief: Brief, title: str, facts: FactsExtraction, strategy: Strate
     return validate_outline(outline, None, target, hard_limit=bool(brief.slide_count))
 
 
+def _short_mode(sections: list[H.Section], blocks: list[_Block], target: int) -> bool:
+    """A short brief: a few statements (SHORT_BRIEF_SENTENCES at most) that the general rules turn into a thin deck
+    (fewer than eight slides). Only such a brief has its labelled lines cut into sections and its one-sentence sections
+    given slides of their own; a fixed small deck (four slides or more) is then trimmed with the ask kept to the last
+    (_keep_priority), rather than read by rules that fold the ask into cards. A longer brief is read exactly as it
+    always was (its labelled lines stay cards); so is a deck of three slides, where one slide of columns says more than
+    one figure. Either way a figure is shown as it is written."""
+    n = sum(1 for sec in sections for sn in sec.sentences if not sn.rstrip().endswith(":"))  # a lead «Результаты:» is not a statement
+    return n <= SHORT_BRIEF_SENTENCES and target >= 4 and len([b for b in blocks if b.role != "kpi_small"]) + 2 < 8
+
+
+def _short_sections(parsed: list[H.Section], popped: Optional[tuple[H.Section, str]]) -> list[H.Section]:
+    """A short brief's sections: «Проблема: …», «Результаты: …», «Просим: …» written in one run are sections of their
+    own (a figure slide, a KPI row, a statement), not the columns of one slide. The statement that titles the deck comes
+    back when it is the one statement of a labelled section with a figure («Проблема: сотрудники тратят 47 минут …»):
+    the figure keeps its slide rather than live in the title alone."""
+    if popped is not None:
+        popped[0].sentences.insert(0, popped[1])
+    split = _split_labelled([sec for sec in parsed if sec.sentences or sec.tables])
+    if popped is not None:
+        sn = popped[1]
+        home = next((sec for sec in split if sec.sentences and sec.sentences[0] == sn), None)
+        if home is not None and not (home.title and len(home.sentences) == 1 and not home.tables and H.kpis_of(sn)):
+            home.sentences.pop(0)
+    return [sec for sec in split if sec.sentences or sec.tables]
+
+
+def _repeats(label: str, headline: str) -> bool:
+    lw, hw = H._label_words(label), set(H._label_words(headline))
+    return len(label.split()) > 2 and bool(lw) and sum(w in hw for w in lw) >= 0.6 * len(lw)
+
+
+def _stand_alone(b: _Block, n: NumberCallout, same, text: Optional[str] = None) -> None:
+    """A row of two figures gave its key figure to the opening slide: the other one stands alone, headed by its own
+    clause («Команда выросла до 40 человек») and labelled by what the heading does not say («человек»), or headed by
+    the section when its clause is too short to be a heading («NPS 64»)."""
+    clause = _other_clause(b, same)
+    b.kind, b.content.numbers = PatternKind.big_number, [n]
+    if len(clause.split()) < 3:
+        b.headline = b.section or b.headline
+        return
+    b.headline = H.cap_first(H.short(clause, 11))
+    span = H.figure_span(n.value, b.headline)
+    tail = b.headline[span[1] :].strip(" ,.:;—-") if span else ""
+    if tail:
+        n.label = tail
+        return
+    label = H.label_beside(n.value, n.label, b.headline, text)
+    n.label = (b.section or label) if label == n.label and _repeats(n.label, b.headline) else label
+
+
+def _text_beside_row(t: _Block, row: _Block) -> None:
+    """A short brief's text slide headed like the KPI row its figures went to: one line left goes onto the row, above
+    its figures (the text slide is then empty and dropped); more lines are headed by their own first statement."""
+    lines = t.content.bullets + t.content.paragraphs
+    if len(lines) == 1 and not (row.content.paragraphs or row.content.bullets) and len(lines[0].split()) <= 20:
+        row.content.paragraphs = lines
+        t.content.bullets, t.content.paragraphs = [], []
+    elif lines:
+        _rehead(t, {row.headline})
+        body = [x for x in lines if H.strip_end(x) != t.headline] or lines
+        t.content.bullets, t.content.paragraphs = (body, []) if len(body) >= 2 else ([], body)
+
+
+def _hero_first(blocks: list[_Block], key_kpi: H.Kpi, facts: FactsExtraction) -> list[_Block]:
+    """Visual deck of a longer brief: its key figure opens it on a slide of its own; the tiles it came from keep the
+    other figures (when two or more remain)."""
+    summary = _Block(PatternKind.big_number, H.cap_first(H.short(key_kpi.sentence, 11)), "", SlideContent(numbers=[NumberCallout(value=key_kpi.value, label=key_kpi.label, fact_id=_fact_id(facts, key_kpi.value))]), "kpi", kpis=[key_kpi])
+    blocks.insert(0, summary)
+    same = lambda v: re.sub(r"\s", "", v) == re.sub(r"\s", "", key_kpi.value)  # noqa: E731
+    for b in blocks[1:]:
+        nums = b.content.numbers
+        if any(same(n.value) for n in nums) and len([n for n in nums if not same(n.value)]) >= 2:
+            b.content.numbers = [n for n in nums if not same(n.value)]
+        items = b.content.items
+        if any(it.number and same(it.number) for it in items) and len([it for it in items if not (it.number and same(it.number))]) >= 2:
+            b.content.items = [it for it in items if not (it.number and same(it.number))]
+    return blocks
+
+
+def _rehead(b: _Block, taken: set[str]) -> None:
+    """A slide whose heading another slide says: headed by its section, else by the first statement among its own
+    figures or lines that no other slide says."""
+    if b.section and b.section not in taken:
+        b.headline = b.section
+        return
+    shown = {re.sub(r"\s", "", n.value) for n in b.content.numbers}
+    clauses = [k.clause for k in b.kpis if re.sub(r"\s", "", k.value) in shown and k.clause and H.is_statement(k.clause)]
+    for c in clauses + b.content.bullets + b.content.paragraphs:
+        head = H.cap_first(_headline([c], H.strip_end(c)))
+        if head not in taken:
+            b.headline = head
+            return
+    for k in b.kpis:  # else the figure's own clause, however short («NPS 64»): a heading no other slide says
+        head = H.cap_first(H.strip_end(k.clause or ""))
+        if re.sub(r"\s", "", k.value) in shown and head and head not in taken:
+            b.headline = head
+            return
+
+
+def _lead_with_key_figure(blocks: list[_Block], key_kpi: H.Kpi, figures: dict, facts: FactsExtraction, target: int, text: Optional[str] = None) -> list[_Block]:
+    """Visual deck of a short brief: it opens with its key figure, said once.
+    - The figure already has a slide of its own (or a pair whose other figure has no heading to stand under): that
+      slide opens the deck.
+    - Otherwise, when the deck has room for one more slide, a big-number slide opens it and the tiles it came from give
+      the figure up (a pair's other figure then stands alone, _stand_alone).
+    - At or over the deck's size, or when the figure would stay on its tile anyway, no slide is added: a slide that
+      only repeats a figure is not worth the place of the ask or of another figure."""
+    same = lambda v: re.sub(r"\s", "", v) == re.sub(r"\s", "", key_kpi.value)  # noqa: E731
+    own = next((b for b in blocks if b.kind == PatternKind.big_number and len(b.content.numbers) == 1 and same(b.content.numbers[0].value)), None)
+    pair = next((b for b in blocks if b.kind == PatternKind.stat_row and b.role == "kpi" and len(b.content.numbers) == 2 and any(same(n.value) for n in b.content.numbers)), None)
+    if own is None and pair is not None and not (pair.section or len(_other_clause(pair, same).split()) >= 3):
+        own = pair  # the other figure of the pair has no heading of its own to stand alone under: the pair leads
+    if own is None and len(figures.get(key_kpi.sentence, [])) >= 2 and not H.is_statement(key_kpi.clause or ""):
+        # the figure has no statement of its own to head a slide («было 5 дней, стало 2 дня, NPS 64»): the slide it is
+        # on leads, rather than a heading that says the other figures again
+        own = next((b for b in blocks if any(same(n.value) for n in b.content.numbers)), None)
+    if own is not None:
+        blocks.remove(own)
+        blocks.insert(0, own)
+        return blocks
+    if len(blocks) + 2 >= target:
+        return blocks
+
+    def keeps(b: _Block) -> bool:  # the figure stays on this slide even when a hero slide takes it
+        nums = b.content.numbers
+        if any(same(n.value) for n in nums):
+            others = [n for n in nums if not same(n.value)]
+            if not (len(others) >= 2 or (len(others) == 1 and b.kind == PatternKind.stat_row and b.role == "kpi")):
+                return True
+        items = b.content.items
+        return any(it.number and same(it.number) for it in items) and len([it for it in items if not (it.number and same(it.number))]) < 2
+
+    if any(keeps(b) for b in blocks):
+        return blocks
+    hero_head = H.short(key_kpi.sentence, 11)
+    if key_kpi.clause and len(figures.get(key_kpi.sentence, [])) >= 2 and H.is_statement(key_kpi.clause):
+        hero_head = H.short(key_kpi.clause, 11)  # «Время сократилось до 29 минут», not the NPS said next to it
+    hero_head = H.cap_first(hero_head)
+    hero = NumberCallout(value=key_kpi.value, label=H.label_beside(key_kpi.value, key_kpi.label, hero_head, text), fact_id=_fact_id(facts, key_kpi.value))
+    summary = _Block(PatternKind.big_number, hero_head, "", SlideContent(numbers=[hero]), "kpi", kpis=[key_kpi])
+    blocks.insert(0, summary)
+    for b in blocks[1:]:
+        nums = b.content.numbers
+        others = [n for n in nums if not same(n.value)]
+        took = any(same(n.value) for n in nums) and len(others) >= 2
+        if took:
+            b.content.numbers = others
+        elif any(same(n.value) for n in nums) and len(others) == 1 and b.kind == PatternKind.stat_row and b.role == "kpi":
+            _stand_alone(b, others[0], same, text)
+        if b.headline == hero_head or (took and H.figure_span(key_kpi.value, b.headline)):
+            _rehead(b, {hero_head})  # the opening slide says this heading (and its figure) now
+        items = b.content.items
+        if any(it.number and same(it.number) for it in items) and len([it for it in items if not (it.number and same(it.number))]) >= 2:
+            b.content.items = [it for it in items if not (it.number and same(it.number))]
+    return blocks
+
+
+def _norm_value(value: str) -> str:
+    return re.sub(r"\s", "", value).lower()
+
+
+def _change_ends(value: str) -> list[str]:
+    """«47 → 29 минут» → [«47 минут», «29 минут»]: the two ends of a change (the start takes the end's unit when it is
+    written without one); a single figure is its own one end."""
+    if "→" not in value:
+        return [value]
+    a, b = (x.strip() for x in value.split("→", 1))
+    unit = re.sub(r"^[+\-−]?\d[\d\s.,]*", "", b).strip()
+    if unit and not re.search(r"[^\d\s.,+\-−]", a):
+        a = f"{a}{unit}" if unit == "%" else f"{a} {unit}"
+    return [a, b]
+
+
+def _without_starts(ks: list) -> list:
+    """A figure said next to the change it starts («47 минут» and «47 → 29 минут» of one section) is said once."""
+    starts = {_norm_value(_change_ends(k.value)[0]) for k in ks if "→" in k.value}
+    return [k for k in ks if "→" in k.value or _norm_value(k.value) not in starts] if starts else ks
+
+
+def _said(s: OutlineSlide) -> str:
+    c = s.content
+    parts = [s.headline, s.subtitle or ""] + c.bullets + c.paragraphs + [f"{n.value} {n.label}" for n in c.numbers]
+    parts += [f"{i.title} {i.text or ''} {i.number or ''} {' '.join(i.bullets)}" for i in c.items + c.columns]
+    return " ".join(parts)
+
+
+_BARE_VALUE_RE = re.compile(r"[+\-−]?\d[\d\s.,]*")
+_NEXT_WORD_RE = re.compile(r"\s*([^\s,.;:!?)»]+)")
+
+
+def _written_in(value: str, text: str) -> bool:
+    """The figure is written in the text as a value: as whole words (H.figure_span), and a bare number («30») not as
+    the number of some unit («30 минут», «30%»)."""
+    bare = _BARE_VALUE_RE.fullmatch(value.strip()) is not None
+    pos = 0
+    while (span := H.figure_span(value, text[pos:])) is not None:
+        nxt = _NEXT_WORD_RE.match(text[pos + span[1] :])
+        if not bare or not (nxt and H._UNIT_WORD_RE.match(nxt.group(1))):
+            return True
+        pos += span[1]
+    return False
+
+
+def _stands_on(value: str, o: OutlineSlide) -> bool:
+    """The figure is on slide `o` as a value — one of its figures, an end of one of its changes, or written in its text
+    — not merely its digits: «30 минут» is not on a slide that says «30 команд», nor «30» on one that says «30 минут»."""
+    v = _norm_value(value)
+    if any(v == _norm_value(n.value) or v in {_norm_value(e) for e in _change_ends(n.value)} for n in o.content.numbers):
+        return True
+    return _written_in(value, _said(o))
+
+
+def _keep_priority(ask_ids: set[str]):
+    """Which slides of a short brief's deck give way first when the deck has fewer slides than its sections: a figure
+    slide whose figures all stand on other slides goes right after the agenda; the ask («Просим бюджет …») goes last,
+    after every figure — cutting the request is the worst cut a deck for a decision-maker can take."""
+
+    def keep(slides: list[OutlineSlide], s: OutlineSlide) -> Optional[float]:
+        if s.id in ask_ids:
+            return 6.5
+        values = [n.value for n in s.content.numbers]
+        if values and s.kind in (PatternKind.big_number, PatternKind.stat_row):
+            others = [o for o in slides[1:-1] if o is not s and o.kind != PatternKind.agenda]
+            if all(any(_stands_on(v, o) for o in others) for v in values):
+                return 2.5
+        return None
+
+    return keep
+
+
 def basic_outline(brief: Brief, facts: FactsExtraction, strategy: Strategy, target: int) -> DeckOutline:
     """Deterministic planner: read the brief's sections into typed slides (steps → process, «X: …» → cards,
     figures → KPI row, tables → chart or table, the rest → theses headed by a conclusion), then assemble them the
     way the strategy asks — structured (agenda, one idea per slide), visual (key figure first, cards, charts),
-    compact (paired text sections, tables)."""
-    doc_title, sections = H.parse_sections(brief.text)
+    compact (paired text sections, tables). A short brief far below the deck's size is read line by line
+    (_short_mode): one slide per labelled line, the ask kept to the last. A figure is always shown as the brief writes
+    it: a change «A → B» only when one clause tells it («с 47 до 29 минут»), never two figures of different sentences
+    joined."""
+    doc_title, parsed = H.parse_sections(brief.text)
     title = brief.title_hint or doc_title
+    popped: Optional[tuple[H.Section, str]] = None
     if not title:
-        title, whole = _title_from_first_statement(sections)
+        title, whole = _title_from_first_statement(parsed)
         if whole:  # the statement that titles the deck is not repeated as a slide of its own
-            next(sec for sec in sections if sec.sentences).sentences.pop(0)
+            sec0 = next(sec for sec in parsed if sec.sentences)
+            popped = (sec0, sec0.sentences.pop(0))
     title = title or "Презентация"
-    if not any(sec.sentences or sec.tables for sec in sections):
+    sections = [sec for sec in parsed if sec.sentences or sec.tables]
+    if not sections:
         return _skeleton(brief, title, facts, strategy, target)
     series_by_span: dict = {}
     k = len(facts.series)
@@ -322,18 +888,26 @@ def basic_outline(brief: Brief, facts: FactsExtraction, strategy: Strategy, targ
                 series_by_span[tbl.source_span] = (ss, ctype)
             if not any(t.source_span == tbl.source_span for t in facts.tables):
                 facts.tables.append(tbl)
-    blocks: list[_Block] = []
-    for i, sec in enumerate(sections):
-        closing = i == len(sections) - 1 and bool(_CLOSING_RE.search(sec.title or ""))
-        blocks.extend(_blocks_of(sec, facts, series_by_span, closing))
+    blocks, figures = _read_blocks(sections, facts, series_by_span, text=brief.text)
+    short = _short_mode(sections, blocks, target)
+    if short:
+        sections = _short_sections(parsed, popped)
+        blocks, figures = _read_blocks(sections, facts, series_by_span, short=True, text=brief.text)
+
+    def asked(sec: H.Section, sn: str) -> bool:  # a short brief's ask never gives the deck its key figure
+        return short and (_ask_section(sec) or _ask_line(sn, sec.title))
+
     # the deck's key figure: a change «с A до B» anywhere, else the first figure of the last KPI row (results come last)
-    key_kpi = next((k for sec in sections for sn in sec.sentences for k in H.kpis_of(sn) if "→" in k.value), None)
+    key_kpi = next((k for sec in sections for sn in sec.sentences if not asked(sec, sn) for k in figures.get(sn, []) if "→" in k.value), None)
     if key_kpi is None:
-        kb = next((b for b in reversed(blocks) if b.role == "kpi"), None)
+        # (a short brief's two figures of two sentences are a KPI row too, in every variant)
+        kb = next((b for b in reversed(blocks) if b.role == "kpi" or (short and b.role == "kpi_small")), None)
         if kb and kb.kpis:
             key_kpi = kb.kpis[0]
     name = strategy.name
-    if name == "visual":
+    # a short brief keeps a section's two figures as a KPI row in every variant (a longer one says them in its text
+    # slide and gives the row to «visual» only)
+    if name == "visual" or short:
         for b in blocks:
             if b.role == "kpi_small":
                 b.role = "kpi"
@@ -345,9 +919,27 @@ def basic_outline(brief: Brief, facts: FactsExtraction, strategy: Strategy, targ
                         t.content.paragraphs = [x for x in t.content.paragraphs if H.strip_end(x) not in said]
                         if len(t.content.bullets) == 1:
                             t.content.paragraphs, t.content.bullets = t.content.bullets + t.content.paragraphs, []
+                        if short and t.headline == b.headline:
+                            _text_beside_row(t, b)
+        if short:
+            # a text slide headed like the KPI row of its section (its first statement heads both) is not a second
+            # slide with the same heading
+            for b in [x for x in blocks if x.role == "kpi"]:
+                for t in blocks:
+                    if t.role == "text" and t.section == b.section and t.headline == b.headline and (t.content.bullets or t.content.paragraphs):
+                        _text_beside_row(t, b)
         blocks = [b for b in blocks if not (b.role == "text" and not (b.content.bullets or b.content.paragraphs or b.content.items))]
     else:
         blocks = [b for b in blocks if b.role != "kpi_small"]
+    if short and name != "visual":
+        for b in blocks:
+            if b.role == "ask" and b.kind == PatternKind.bullets and len(b.content.bullets) == 2 and not b.content.paragraphs:
+                one = ". ".join(H.strip_end(x) for x in b.content.bullets)
+                if len(one) <= ASK_STATEMENT_CHARS:
+                    # two short lines of an ask are said as one statement, as a one-line ask is (the composer sets it in
+                    # large type, its figures in the accent colour): two thin bullets leave three quarters of the slide
+                    # empty. The visual variant keeps the lines, which its composer sets as cards.
+                    b.content.paragraphs, b.content.bullets = [one], []
     if name == "visual":
         blocks = [_to_cards(b) for b in blocks]
         blocks = [b for b in blocks if not (b.role == "table" and any(x.role == "chart" for x in blocks if x.section == b.section))]
@@ -355,17 +947,7 @@ def basic_outline(brief: Brief, facts: FactsExtraction, strategy: Strategy, targ
             if b.kind == PatternKind.chart:
                 b.content.table = None
         if key_kpi is not None:
-            summary = _Block(PatternKind.big_number, H.short(key_kpi.sentence, 11), "", SlideContent(numbers=[NumberCallout(value=key_kpi.value, label=key_kpi.label, fact_id=_fact_id(facts, key_kpi.value))]), "kpi")
-            blocks.insert(0, summary)
-            # the hero figure is said once: the tiles it came from keep the other figures (when two or more remain)
-            same = lambda v: re.sub(r"\s", "", v) == re.sub(r"\s", "", key_kpi.value)  # noqa: E731
-            for b in blocks[1:]:
-                nums = b.content.numbers
-                if any(same(n.value) for n in nums) and len([n for n in nums if not same(n.value)]) >= 2:
-                    b.content.numbers = [n for n in nums if not same(n.value)]
-                items = b.content.items
-                if any(it.number and same(it.number) for it in items) and len([it for it in items if not (it.number and same(it.number))]) >= 2:
-                    b.content.items = [it for it in items if not (it.number and same(it.number))]
+            blocks = _lead_with_key_figure(blocks, key_kpi, figures, facts, target, brief.text) if short else _hero_first(blocks, key_kpi, facts)
     elif name == "compact":
         merged: list[_Block] = []
         floor = 8 - 2  # title and thanks come on top: a compact deck still has at least eight slides
@@ -388,15 +970,37 @@ def basic_outline(brief: Brief, facts: FactsExtraction, strategy: Strategy, targ
                 b.kind, b.content = PatternKind.table, SlideContent(table=b.content.table)  # structured: exact figures
             elif b.kind == PatternKind.chart:
                 b.content.table = None
+    for b in blocks:
+        if b.headline.strip().lower() == title.strip().lower():
+            # the statement that titles the deck («Итоги пилота …: время сократилось …») heads its slide by what
+            # follows the lead, or by the section's name — not by the title again
+            parts = H.label_split(next((k.sentence for k in b.kpis), ""))
+            after = parts[1].strip() if parts else ""
+            if len(after.split()) >= 3:
+                b.headline = H.cap_first(_headline([after], after))
+            elif b.section:
+                b.headline = b.section
     slides: list[OutlineSlide] = [OutlineSlide(id="sl1", kind=PatternKind.title, headline=title, subtitle=brief.audience or None)]
     if name == "structured" and len(sections) >= 3:
         agenda_items = [SlideItem(title=sec.title) for sec in sections if sec.title][:8]  # the agenda names every section
         slides.append(OutlineSlide(id="sl2", kind=PatternKind.agenda, headline="О чём поговорим", content=SlideContent(items=agenda_items)))
+    ask_ids: set[str] = set()
     for b in blocks:
         slides.append(OutlineSlide(id=f"sl{len(slides) + 1}", kind=b.kind, section=b.section or None, headline=b.headline, subtitle=b.subtitle, content=b.content, notes=b.notes, fact_refs=b.fact_refs))
+        if b.role == "ask":
+            ask_ids.add(slides[-1].id)
     slides.append(OutlineSlide(id=f"sl{len(slides) + 1}", kind=PatternKind.thanks, headline="Спасибо за внимание", subtitle=None))
     outline = DeckOutline(title=title, subtitle=brief.audience, audience=brief.audience, purpose=brief.purpose, strategy=strategy.name, language=brief.language, slides=slides, facts=facts.facts, series=facts.series, tables=facts.tables)
-    return validate_outline(outline, None, target, hard_limit=bool(brief.slide_count))
+    outline = validate_outline(outline, None, target, hard_limit=bool(brief.slide_count), keep=_keep_priority(ask_ids) if short else None)
+    if short:
+        # a heading starts with a capital («Время сократилось до 29 минут», a list's first line); the plan says what
+        # the slide shows: every label as the composer renders it under the slide's final heading (compose.distinct_label
+        # is this same rule), a name in it with its capital
+        for sl in outline.slides:
+            sl.headline = H.cap_first(sl.headline)
+            for n in sl.content.numbers:
+                n.label = H.name_case(H.label_beside(n.value, n.label, sl.headline, brief.text), brief.text)
+    return outline
 
 
 # ------------------------------------------------------------------ validation
@@ -410,10 +1014,12 @@ def _drop_priority(s: OutlineSlide) -> int:
     return 6 if s.kind in _DATA_KINDS else _DROP_PRIORITY.get(s.kind, 5)
 
 
-def _drop_key(slides: list[OutlineSlide], s: OutlineSlide) -> tuple[int, int, int]:
-    """Lower sorts first: priority, then (bullets slides only) the fewest bullets, then the later slide."""
+def _drop_key(slides: list[OutlineSlide], s: OutlineSlide, keep=None) -> tuple[float, int, int]:
+    """Lower sorts first: priority, then (bullets slides only) the fewest bullets, then the later slide. `keep` may
+    give a slide its own priority (the rules' deck of a short brief: the ask last, a repeated figure early)."""
     n_bullets = len(s.content.bullets) if s.kind == PatternKind.bullets else 0
-    return (_drop_priority(s), n_bullets, -slides.index(s))
+    own = keep(slides, s) if keep is not None else None
+    return (_drop_priority(s) if own is None else own, n_bullets, -slides.index(s))
 
 
 def _merge_into_previous(slides: list[OutlineSlide], victim: OutlineSlide) -> bool:
@@ -440,8 +1046,10 @@ def validate_outline(
     skills: Optional[SkillsRegistry] = None,
     providers: Optional[ProviderRegistry] = None,
     hard_limit: bool = False,
+    keep=None,
 ) -> DeckOutline:
-    """Normalise density and structure; trim to `target` (+1 tolerance) or, when the brief fixed the count (`hard_limit`), to exactly `target`."""
+    """Normalise density and structure; trim to `target` (+1 tolerance) or, when the brief fixed the count (`hard_limit`), to exactly `target`.
+    `keep(slides, slide)` → a drop priority of its own for a slide, or None for the usual one by kind."""
     slides = list(outline.slides)
     # density limits
     for s in slides:
@@ -486,11 +1094,11 @@ def validate_outline(
         candidates = slides[1:-1]
         if not candidates:
             break
-        victim = min(candidates, key=lambda s: _drop_key(slides, s))
+        victim = min(candidates, key=lambda s: _drop_key(slides, s, keep))
         if _merge_into_previous(slides, victim):
             slides.remove(victim)
             continue
-        if not hard_limit and _drop_priority(victim) >= 3 and len(slides) <= target + 2:
+        if not hard_limit and _drop_key(slides, victim, keep)[0] >= 3 and len(slides) <= target + 2:
             break  # soft target: keep real content rather than lose it for one slide
         slides.remove(victim)
     # unique headlines

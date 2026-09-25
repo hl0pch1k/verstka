@@ -40,6 +40,8 @@ class CompletionResult:
     model: str
     attempts: int = 1
     raw_json: Any = None
+    # human name of the link that answered («Qwen3.8-27B (Groq)»): two hosts may serve the same model id
+    label: Optional[str] = None
 
 
 @runtime_checkable

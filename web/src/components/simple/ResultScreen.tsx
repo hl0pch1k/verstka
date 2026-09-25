@@ -1,8 +1,9 @@
 // The second screen: the deck. Three variants to switch, the slide big with thumbnails under it, one «Скачать»
 // button. What an expert wants (quality check, why a slide looks so, plan, template, files) opens in the drawer.
-import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ChevronRight, Download, FileText, HelpCircle, Info, LayoutTemplate, ListTree, ShieldCheck, Wrench } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowLeft, ChevronRight, Download, FileText, HelpCircle, Info, LayoutTemplate, ListTree, PenLine, RotateCcw, ShieldCheck, Wrench } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { deckNotice } from "../../lib/modelText";
 import { slideCount } from "../../lib/narrate";
 import { templateName, variantHint } from "../../lib/plain";
 import { cn, fmtWhen, kindLabel, plural, storage } from "../../lib/utils";
@@ -14,6 +15,7 @@ import { EmptyState } from "../ui/EmptyState";
 import { ScoreRing } from "../ui/ScoreRing";
 import { issuesBySlide, KEY_ISSUES, variantRev, variantScore, withRev } from "../VariantsHelpers";
 import { VariantsSlidePreview } from "../VariantsSlidePreview";
+import { useRetryIn } from "./ModelStatus";
 import { SlideLightbox } from "./SlideLightbox";
 import { SlideStrip } from "./SlideStrip";
 
@@ -40,7 +42,7 @@ function MoreLink({ icon: Icon, label, hint, onClick }: { icon: LucideIcon; labe
 }
 
 function Deck({ generation }: { generation: Generation }) {
-  const { activeVariant, setActiveStrategy, selectedSlide, setSelectedSlide, strategyTitle, strategies, manifest, setScreen, setDetail } = useApp();
+  const { activeVariant, setActiveStrategy, selectedSlide, setSelectedSlide, strategyTitle, strategies, manifest, setScreen, setDetail, health, modelStatus, refreshModelStatus, startGeneration, activeJob, generations } = useApp();
   const variant = activeVariant ?? generation.variants[0];
   const total = slideCount(variant);
   const rev = variantRev(variant);
@@ -86,23 +88,57 @@ function Deck({ generation }: { generation: Generation }) {
   const quality =
     errors === null ? "Проверка не запускалась" : errors === 0 ? (warnings ? `Ошибок нет, ${plural(warnings, "мелкое замечание", "мелких замечания", "мелких замечаний")}` : "Ошибок нет") : `${plural(errors, "ошибка", "ошибки", "ошибок")} — можно исправить автоматически`;
   const open = (d: DetailKey) => setDetail(d);
-  // why the deck is thin, when it is: a topic without theses, or much less text than slides asked for
-  const skeleton = variant.outline?.planned_by === "skeleton";
-  const asked = generation.slides ?? null;
-  // the model was asked but every plan came from the rules: it did not answer in time (a congested host)
-  const modelSilent = !!generation.use_models && !generation.variants.some((v) => v.outline?.planned_by === "model" || v.outline?.planned_by?.startsWith("shared:"));
-  const notice = skeleton
-    ? modelSilent
-      ? "Модель не ответила вовремя, а в тексте только тема — это каркас. Допишите тезисы или соберите ещё раз позже."
-      : "Это каркас: в тексте была только тема. Допишите тезисы и цифры — слайды станут содержательными."
-    : modelSilent
-      ? asked && asked - total >= 3
-        ? `Модель сейчас не ответила, а по самому тексту вышло ${plural(total, "слайд", "слайда", "слайдов")} вместо ${asked}. Допишите тезисы или соберите ещё раз позже.`
-        : "Модель сейчас не ответила — план составлен встроенным планировщиком по вашему тексту."
-      : asked && asked - total >= 3
-        ? `${plural(total, "слайд", "слайда", "слайдов")} вместо ${asked}: материала в тексте меньше, а факты Verstka не придумывает.`
-        : null;
-  const noticeAction = modelSilent && !skeleton ? "Собрать ещё раз" : "Дописать текст";
+  // the newest deck built with the model: the live model state is about the same failure
+  const latest = useMemo(() => {
+    if (!generations.some((x) => x.id === generation.id)) return false;
+    const t = generation.created_at ?? 0;
+    return !generations.some((x) => x.id !== generation.id && x.use_models && x.status === "done" && (x.created_at ?? 0) > t);
+  }, [generations, generation.id, generation.created_at]);
+  // every model was marked paused a moment ago: a new build before the pause is over would get the same answer
+  const retryIn = useRetryIn(modelStatus);
+  // why the deck is thin, when it is: the model did not plan it (and why), a topic without theses, or a short text.
+  // The rebuild button and the advice beside it follow the live model state, so they never disagree
+  const notice = deckNotice(generation, variant, total, { status: modelStatus, latest, retryIn });
+  const failed = !!generation.use_models && generation.planner?.by_model === false;
+  useEffect(() => {
+    if (failed) void refreshModelStatus();
+  }, [failed, generation.id, refreshModelStatus]);
+  const recheckIn = modelStatus?.state === "down" && modelStatus.retry_in ? Math.min(modelStatus.retry_in + 2, 600) : 0;
+  useEffect(() => {
+    if (!failed || !recheckIn) return;
+    const t = window.setTimeout(() => void refreshModelStatus(), recheckIn * 1000);
+    return () => window.clearTimeout(t);
+  }, [failed, recheckIn, refreshModelStatus]);
+  const jobRunning = !!activeJob && (activeJob.status === "queued" || activeJob.status === "running");
+  // one rebuild at a time: a double click must not start two generations (each spends model requests)
+  const inFlight = useRef(false);
+  const [submitting, setSubmitting] = useState(false);
+  const rebuild = async () => {
+    if (inFlight.current) return;
+    if (!generation.brief || !health?.models_configured) return setScreen("create");
+    inFlight.current = true;
+    setSubmitting(true);
+    try {
+      // the same inputs as the deck on screen, only the model gets another chance
+      await startGeneration({
+        template_id: generation.template_id,
+        brief: generation.brief,
+        audience: generation.audience ?? null,
+        purpose: generation.purpose ?? null,
+        slides: generation.slides ?? null,
+        language: generation.language,
+        extra_instructions: generation.extra_instructions ?? null,
+        strategies: generation.strategies,
+        use_models: true,
+        audit_models: generation.audit_models ?? false,
+        autofix: generation.autofix ?? true,
+        exports: generation.exports ?? ["pdf", "html"],
+      });
+    } finally {
+      inFlight.current = false;
+      setSubmitting(false);
+    }
+  };
 
   return (
     <div className="mx-auto max-w-[1280px] space-y-5 pb-10">
@@ -131,10 +167,27 @@ function Deck({ generation }: { generation: Generation }) {
       </div>
 
       {notice && (
-        <div className="flex items-center gap-3 rounded-2xl bg-amber-50 py-2 pl-4 pr-2 text-[14px] leading-5 text-amber-950 animate-fade">
-          <Info className="h-[18px] w-[18px] shrink-0 text-amber-600" aria-hidden />
-          <p className="min-w-0 flex-1 truncate" title={notice}>{notice}</p>
-          <Button size="sm" variant="secondary" className="bg-white shadow-card hover:bg-zinc-50" onClick={() => setScreen("create")}>{noticeAction}</Button>
+        <div role="status" className="flex items-start gap-3 rounded-2xl bg-amber-50 py-3 pl-4 pr-3 text-amber-950 animate-fade">
+          <Info className="mt-px h-[18px] w-[18px] shrink-0 text-amber-600" aria-hidden />
+          <div className="min-w-0 flex-1 text-[13px] leading-5">
+            <p className="text-[14px] font-semibold">{notice.title}</p>
+            <p className="text-amber-950/85">{notice.basis}</p>
+            {notice.help && (
+              <p className="text-amber-900/75">
+                <span className="font-semibold text-amber-950/85">Что поможет:</span> {notice.help}
+              </p>
+            )}
+          </div>
+          <div className="flex shrink-0 flex-col items-stretch gap-1.5 self-center">
+            {notice.retry && (
+              <Button size="sm" variant="secondary" icon={RotateCcw} loading={submitting} disabled={jobRunning || notice.retryWait > 0} className="bg-white shadow-card hover:bg-zinc-50" onClick={() => void rebuild()} title={notice.retryWait > 0 ? "Модель только что не ответила — повторная попытка имеет смысл чуть позже" : "Собрать ту же презентацию заново"}>
+                {notice.retryLabel}
+              </Button>
+            )}
+            {notice.rewrite && (
+              <Button size="sm" variant="secondary" icon={PenLine} className="bg-white shadow-card hover:bg-zinc-50" onClick={() => setScreen("create")}>Дописать текст</Button>
+            )}
+          </div>
         </div>
       )}
 
@@ -193,7 +246,7 @@ function Deck({ generation }: { generation: Generation }) {
             onAspect={setNaturalAspect}
             onZoom={() => setZoom(true)}
             onOpenIssues={() => open("quality")}
-            reserve={notice ? 56 : 0}
+            reserve={notice ? (notice.help ? 104 : 84) : 0}
           />
           <SlideStrip variant={variant} rev={rev} total={total} selected={selectedSlide} aspect={aspect} issueMap={issueMap} onSelect={setSelectedSlide} />
           <SlideLightbox open={zoom} src={src} slide={selectedSlide} total={total} headline={outlineSlide?.headline ?? ""} aspect={aspect} onSelect={setSelectedSlide} onClose={() => setZoom(false)} />

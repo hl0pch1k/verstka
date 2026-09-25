@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from verstka import __version__
 from verstka.api.jobs import Job, JobRunner
+from verstka.api.model_status import ChainContext, active_chain_context, config_label, generation_planner, models_status, planner_info
 from verstka.api.narrator import describe_audit, describe_plan, describe_slide_choice, describe_template
 from verstka.api.store import SAFE_ID_RE, Store
 from verstka.ingest.workspace import file_sha256
@@ -88,6 +89,13 @@ def models_configured() -> bool:
         return llm.name == "mock" or bool(getattr(llm, "api_key", ""))
     except Exception:  # noqa: BLE001
         return False
+
+
+def _chain_ctx() -> ChainContext:
+    """The active model chain (the advice under a deck depends on it: is there a paid link to top up for?)."""
+    from verstka.providers.registry import default_models_path
+
+    return active_chain_context(providers(), config=config_label(default_models_path(), _REPO_ROOT))
 
 
 def skills() -> SkillsRegistry:
@@ -197,7 +205,7 @@ def _discard_failed_upload(path: Path) -> None:
         path.parent.rmdir()
 
 
-def _variant_payload(gdir: Path, strategy: str) -> Optional[dict]:
+def _variant_payload(gdir: Path, strategy: str, use_models: Optional[bool] = None, ctx: Optional[ChainContext] = None, supplied: bool = False) -> Optional[dict]:
     vdir = gdir / strategy
     if not (vdir / "deck.pptx").exists():
         return None
@@ -210,6 +218,7 @@ def _variant_payload(gdir: Path, strategy: str) -> Optional[dict]:
     files = {name: f"/api/generations/{gid}/{strategy}/files/{name}" for name in ("deck.pptx", "deck.pdf", "deck.html") if (vdir / name).exists()}
     return {
         "strategy": strategy,
+        "planner": planner_info(outline, run_manifest, use_models=use_models, ctx=ctx, supplied=supplied),
         "outline": outline,
         "plan": plan,
         "audit": audit,
@@ -224,8 +233,13 @@ def _generation_payload(gid: str) -> dict:
     if gdir is None:
         raise HTTPException(404, "generation not found")
     meta = store.read_generation_meta(gid) or {"id": gid}
-    variants = [v for s in meta.get("strategies", list(STRATEGY_NAMES)) if (v := _variant_payload(gdir, s))]
-    return {**meta, "variants": variants}
+    use_models = meta.get("use_models")
+    supplied = bool(meta.get("outline_supplied"))
+    ctx = _chain_ctx()
+    variants = [v for s in meta.get("strategies", list(STRATEGY_NAMES)) if (v := _variant_payload(gdir, s, use_models, ctx, supplied))]
+    # who planned the decks and, if no model did, why — derived from the variants' warnings, so older runs get it too
+    planner = generation_planner(variants, use_models=use_models, supplied=supplied) if variants else meta.get("planner")
+    return {**meta, "planner": planner, "variants": variants}
 
 
 def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job) -> dict:
@@ -258,6 +272,12 @@ def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job) -> dic
         exports=req.exports,
         progress=lambda msg, frac: job.emit(msg, frac),
     )
+    planners = {}
+    supplied = req.outline is not None  # the plan came with the request: no model was asked to plan
+    ctx = _chain_ctx()
+    for v in res.variants:
+        rm = {"planner": v.planner, "warnings": v.warnings, "providers": providers().describe() if use_models and providers() else {}}
+        planners[v.strategy] = planner_info(v.outline.model_dump(mode="json"), rm, use_models=use_models, ctx=ctx, supplied=supplied)
     meta = {
         "id": gid,
         "template_id": req.template_id,
@@ -268,14 +288,29 @@ def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job) -> dic
         "purpose": req.purpose,
         "slides": req.slides,
         "use_models": use_models,
+        **_request_options(req),
         "seconds": res.seconds,
         "created_at": gdir.stat().st_mtime,
         "status": "done",
         "job_id": job.id,
-        "summary": {v.strategy: {"n_slides": len(v.outline.slides), "score": v.audit.summary.score if v.audit else None, "errors": v.audit.summary.errors if v.audit else None, "warnings": v.audit.summary.warnings if v.audit else None, "seconds": v.seconds} for v in res.variants},
+        "summary": {
+            v.strategy: {
+                "n_slides": len(v.outline.slides), "score": v.audit.summary.score if v.audit else None, "errors": v.audit.summary.errors if v.audit else None, "warnings": v.audit.summary.warnings if v.audit else None, "seconds": v.seconds,
+                # which model planned the variant and, when the built-in planner did, why (plain Russian)
+                "planned_by": planners[v.strategy]["planned_by"], "model": planners[v.strategy]["model"], "model_label": planners[v.strategy]["model_label"],
+                "reason_code": planners[v.strategy]["reason_code"], "reason": planners[v.strategy]["reason"],
+            }
+            for v in res.variants
+        },
+        "planner": generation_planner([{"planner": planners[v.strategy]} for v in res.variants], use_models=use_models, supplied=supplied),
     }
     store.write_generation_meta(gid, meta)
     return meta
+
+
+def _request_options(req: GenerateRequest) -> dict:
+    """The request's switches, kept in generation.json: «Собрать ещё раз» repeats the deck with the same inputs."""
+    return {"audit_models": req.audit_models, "autofix": req.autofix, "exports": list(req.exports), "language": req.language, "extra_instructions": req.extra_instructions, "outline_supplied": req.outline is not None}
 
 
 def _generation_job(gid: str, gdir: Path, req: GenerateRequest) -> Callable[[Job], dict]:
@@ -298,6 +333,14 @@ def _generation_job(gid: str, gdir: Path, req: GenerateRequest) -> Callable[[Job
 @app.get("/api/health")
 def health() -> dict:
     return {"ok": True, "version": __version__, "models_configured": models_configured(), "workspace": str(store.root)}
+
+
+@app.get("/api/models/status")
+def model_status() -> dict:
+    """Which models are configured and how they answered lately (the providers' own records, no network probing)."""
+    from verstka.providers.registry import default_models_path
+
+    return models_status(providers(), configured=models_configured(), config_path=default_models_path(), repo_root=_REPO_ROOT)
 
 
 @app.get("/api/strategies")
@@ -450,7 +493,7 @@ def create_generation(req: GenerateRequest) -> dict:
     elif not _brief_from_request(req).text.strip():
         raise HTTPException(422, "brief is empty")
     gid, gdir = store.new_generation_dir()
-    store.write_generation_meta(gid, {"id": gid, "template_id": req.template_id, "strategies": req.strategies, "brief": req.brief, "audience": req.audience, "purpose": req.purpose, "slides": req.slides, "status": "running", "created_at": time.time()})
+    store.write_generation_meta(gid, {"id": gid, "template_id": req.template_id, "strategies": req.strategies, "brief": req.brief, "audience": req.audience, "purpose": req.purpose, "slides": req.slides, **_request_options(req), "status": "running", "created_at": time.time()})
     job = runner.submit("generate", _generation_job(gid, gdir, req))
     store.merge_generation_meta(gid, {"job_id": job.id}, only_missing=True)  # visible at once, whatever the thread did
     return {"job_id": job.id, "generation_id": gid}

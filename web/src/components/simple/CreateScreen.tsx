@@ -7,6 +7,7 @@ import { cn, LS, plural, storage } from "../../lib/utils";
 import { useApp } from "../../store";
 import { BRIEF_MIN, INPUT_CLS, PURPOSES, SAMPLE_AUDIENCE, SAMPLE_BRIEF, SLIDES_DEFAULT, SLIDES_MAX, SLIDES_MIN, StrategyOption, Toggle } from "../NewGenerationFormParts";
 import { Button } from "../ui/Button";
+import { ModelStatus } from "./ModelStatus";
 import { TemplatePicker } from "./TemplatePicker";
 
 const clampSlides = (n: number) => Math.min(SLIDES_MAX, Math.max(SLIDES_MIN, Number.isFinite(n) ? Math.round(n) : SLIDES_DEFAULT));
@@ -346,6 +347,7 @@ export function CreateScreen() {
             ? problem
             : `${plural(selected.length || 3, "вариант", "варианта", "вариантов")} по ${plural(clampSlides(slides), "слайду", "слайда", "слайдов")} · ${useModels && modelsConfigured ? "с моделью — до 5 минут" : "обычно меньше минуты"}`}
         </p>
+        <ModelStatus enabled={useModels && modelsConfigured} />
       </div>
     </form>
   );

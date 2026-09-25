@@ -2,7 +2,7 @@
 // works behind the Vite dev proxy and when FastAPI serves web/dist directly.
 import type {
   ChatResponse, CheckSpec, DiffResponse, ExplainResponse, FixRequest, GenerateRequest, GenerateResponse,
-  Generation, GenerationMeta, Health, Job, SkillsResponse, StrategyInfo, TemplateListItem, TemplateManifest, UploadResponse,
+  Generation, GenerationMeta, Health, Job, ModelsStatus, SkillsResponse, StrategyInfo, TemplateListItem, TemplateManifest, UploadResponse,
 } from "./types";
 
 export class ApiError extends Error {
@@ -43,6 +43,7 @@ const json = (body: unknown, method = "POST"): RequestInit => ({
 
 export const api = {
   health: () => request<Health>("/api/health"),
+  modelsStatus: () => request<ModelsStatus>("/api/models/status"),
   strategies: () => request<StrategyInfo[]>("/api/strategies"),
   skills: () => request<SkillsResponse>("/api/skills"),
   checks: () => request<CheckSpec[]>("/api/checks"),
