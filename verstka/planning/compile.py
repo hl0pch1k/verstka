@@ -15,8 +15,12 @@ without a model:
   (`apply_alternative`), never a slide whose chart or table the user asked for;
 - turns the data written into charts into registry series (ids `s_<slide id>_<n>`, the chart's `series_ids`), so the
   renderer, the audit and grounding see one set of data;
-- sets the deck's title and subtitle from the brief («Название: …», «Подзаголовок: …») and puts the brief's disclaimer
-  («Все исходные данные и прогнозы условные») on the cover as a footnote;
+- sets the deck's title and subtitle from the brief («Название: …», «Подзаголовок: …»), puts the goal line of the cover
+  the brief describes («Главная цель: увеличить …») under the subtitle as «Цель: увеличить …» (content.paragraphs[0],
+  the renderer's line under the subtitle) and the brief's disclaimer («Все исходные данные и прогнозы условные») on the
+  cover as a footnote;
+- keeps the user's formula's figures and operators, its factors named as the slide's text names them («100 покупок
+  в день × 300 ₽ × 30 рабочих дней = 900 000 ₽» of «100 × 300 × 30 = 900 000 рублей»);
 - then grounds the deck in the brief (grounding.ground_outline with the structure: chart values rounded as the brief
   allows, the user's slides never dropped) and fills a slide of the user's that grounding left empty from the
   brief's text.
@@ -148,6 +152,79 @@ def _spec_lines(text: str) -> list[str]:
                 continue
             out.append(t[:1].upper() + t[1:])
     return out
+
+
+_FORMULA_OP_RE = re.compile(r"[×x*хX·+\-−–÷/=]")
+
+
+def formula_terms(text: Optional[str]) -> tuple[tuple[float, ...], tuple[str, ...]]:
+    """The figures of a formula and the operators between them, whatever words label them: «100 покупок в день ×
+    300 ₽ × 30 дней = 900 000 ₽» and «100 × 300 × 30 = 900 000 рублей» are the same calculation."""
+    t = " ".join((text or "").split())
+    figs = [f for f in figures(t) if f.date is None]
+    vals = tuple(round(f.mag if f.scale != 1.0 else f.value, 6) for f in figs)
+    ops = []
+    for a, b in zip(figs, figs[1:]):
+        found = _FORMULA_OP_RE.findall(t[a.end : b.start])
+        ops.append("=" if "=" in found else (found[-1] if found else ""))
+    norm = {"x": "×", "х": "×", "X": "×", "*": "×", "·": "×", "−": "-", "–": "-", "÷": "/"}
+    return vals, tuple(norm.get(o, o) for o in ops)
+
+
+def same_formula(a: Optional[str], b: Optional[str]) -> bool:
+    ta, tb = formula_terms(a), formula_terms(b)
+    return bool(ta[0]) and ta == tb
+
+
+_RUB_RE = re.compile(r"(?<![\wё])(?:рубл(?:ей|я|ь)|руб\.?)(?![\wё])", re.I)
+
+
+def label_formula(formula: Optional[str], source: str) -> Optional[str]:
+    """The user's formula with its factors named as the slide's source names them: «100 × 300 × 30 = 900 000 рублей»
+    over «— 100 покупок в день; — средний чек — 300 рублей; — 30 рабочих дней в расчетном месяце» → «100 покупок в
+    день × 300 ₽ × 30 рабочих дней = 900 000 ₽». A factor keeps what the formula writes when the source gives it no
+    words of its own; the formula is returned as it is when no factor gets a name."""
+    t = " ".join((formula or "").split()).rstrip(".")
+    if not t or "=" not in t:
+        return formula
+    figs = [f for f in figures(t) if f.date is None]
+    lines = [H.strip_end(ln.strip().lstrip("—–-•*·").strip()) for ln in (source or "").splitlines() if ln.strip()]
+    lines = [x for ln in lines for x in re.split(r";\s+", ln)]
+    out, pos, named = [], 0, 0
+    eq = t.index("=")
+    for f in figs:
+        out.append(t[pos : f.start])
+        times = f.unit == "times"  # «100 ×» reads as a multiple: the operator after it is not its unit
+        end = f.end if times else f.uend
+        word = t[f.start : end]
+        pos = end
+        if f.start > eq or (f.unit is not None and not times) or (not times and t[f.end : f.uend].strip()):
+            out.append(word)
+            continue
+        label = None
+        for ln in lines:
+            for g in figures(ln):
+                if g.date is not None or abs(g.value - f.value) > 1e-9 or g.scale != f.scale:
+                    continue
+                tail = ln[g.uend :]
+                words = re.match(r"\s+((?:[а-яё]+\s+){0,3}?[а-яё]{3,})(?=\s*(?:$|[,;.(]|\s(?:в|на)\s+(?:расч|месяц|среднем)))", tail, re.I)
+                if g.unit is None and words and not re.match(r"\s*(?:—|–|-|:)", tail):
+                    label = f"{ln[g.start : g.uend].strip()} {words.group(1).strip()}"
+                elif g.unit is not None:
+                    label = ln[g.start : g.uend].strip()
+                if label:
+                    break
+            if label:
+                break
+        if label:
+            named += 1
+            out.append(label)
+        else:
+            out.append(word)
+    out.append(t[pos:])
+    if not named:
+        return formula
+    return _RUB_RE.sub("₽", "".join(out)).replace(" ₽", " ₽")
 
 
 def _item_of(line: str) -> SlideItem:
@@ -345,7 +422,7 @@ def fallback_slide(spec: SlideSpec, structure: BriefStructure, slide_id: Optiona
     if spec.table and spec.table_ids and 0 <= spec.table_ids[0] < len(structure.tables):
         c.table = structure.tables[spec.table_ids[0]].model_copy(deep=True)
     if spec.formula:
-        c.formula = spec.formula.strip().rstrip(".")
+        c.formula = (label_formula(spec.formula, spec.text) or spec.formula).strip().rstrip(".")
     lines = _spec_lines(spec.text)
     if c.chart is not None or c.table is not None:
         c.bullets = [x for x in lines if len(x.split()) <= 16][:3]  # the chart shows the figures; a few short lines
@@ -502,9 +579,11 @@ def _requests(o: DeckOutline, structure: BriefStructure, idx: BriefIndex, run: _
         if spec is None or s.kind in _FRAMES:
             continue
         c = s.content
-        if spec.formula and (c.formula or "").strip() != spec.formula.strip().rstrip("."):
+        if spec.formula and not same_formula(c.formula, spec.formula):
+            # the user's calculation; its factors named as the slide's text names them (the words may differ, the
+            # figures and the operators never)
             had = bool((c.formula or "").strip())
-            c.formula = spec.formula.strip().rstrip(".")
+            c.formula = (label_formula(spec.formula, spec.text) or spec.formula).strip().rstrip(".")
             run.say(f"Слайд {_name(s)}: " + ("формула — как в брифе." if had else "добавил формулу из брифа."), s)
         if spec.footnote and not (s.footnote or "").strip():
             s.footnote = spec.footnote.strip()
@@ -707,6 +786,11 @@ def _cover(o: DeckOutline, structure: BriefStructure, run: _Run) -> None:
             cover.subtitle = o.subtitle
     if title:
         run.say(f"Название презентации — как в брифе: «{title}».", cover)
+    goal = cover_goal(structure, cover.spec_ref if cover is not None else None)
+    if cover is not None and goal and not any(" ".join(x.split()).lower() == goal.lower() for x in cover.content.paragraphs):
+        # «Главная цель: увеличить …» of the cover's description: a line under the subtitle, in the brief's words
+        cover.content.paragraphs = [goal, *cover.content.paragraphs]
+        run.say(f"На титульный слайд под подзаголовком добавил цель из брифа: «{goal}».", cover)
     d = " ".join((structure.disclaimer or "").split()).strip()
     target = cover or (o.slides[0] if o.slides else None)
     if d and target is not None:
@@ -714,6 +798,48 @@ def _cover(o: DeckOutline, structure: BriefStructure, run: _Run) -> None:
         if d.lower().rstrip(".") not in have.lower():
             target.footnote = f"{have.rstrip('.')}. {d}" if have else d
         run.say(f"На {'титульный' if cover is not None else 'первый'} слайд мелким текстом добавил: «{d.rstrip('.')}».", target)
+
+
+_GOAL_LINE_RE = re.compile(
+    r"^\s*(?:[—–\-•*]\s*)?(?:главная|основная|ключевая)?\s*(?:цель|задача)(?!\s+(?:презентаци|доклад|выступлени|слайд))\s*[:—–]\s*(?P<g>\S.+?)\s*[.;]?\s*$",
+    re.I,
+)
+
+
+def cover_goal(structure: BriefStructure, spec_ref: Optional[int] = None) -> Optional[str]:
+    """The goal line of the cover the brief describes («Главная цель: увеличить ежемесячную операционную прибыль со
+    120 000 до 255 000 рублей») as the cover shows it: «Цель: увеличить … рублей». None when the cover's description
+    has none (the deck's purpose, «Цель презентации — …», is not a goal to show)."""
+    specs = [sp for sp in structure.specs if (spec_ref is not None and sp.number == spec_ref) or (spec_ref is None and _is_cover(sp))]
+    for sp in specs[:1]:
+        for line in (sp.text or "").splitlines():
+            m = _GOAL_LINE_RE.match(line)
+            if m:
+                g = m.group("g").strip().rstrip(".;")
+                return f"Цель: {g[:1].lower() + g[1:] if g[1:2].islower() else g}" if len(g.split()) >= 2 else None
+    return None
+
+
+def _takeaway_guard(o: DeckOutline, structure: BriefStructure, run: _Run) -> None:
+    """The last word on a slide's conclusion, once the deck is final: a takeaway that says the headline again goes —
+    or, when it is the user's own conclusion («Вывод: …»), the headline gives way to the user's heading."""
+    try:
+        from verstka.planning.agent import adds_nothing, same_text
+    except Exception:  # noqa: BLE001
+        return
+    specs = {sp.number: sp for sp in structure.specs}
+    for s in o.slides:
+        if s.kind in _FRAMES or not s.takeaway:
+            continue
+        if not (same_text(s.takeaway, s.headline) or adds_nothing(s.takeaway, s.headline)):
+            continue
+        spec = specs.get(s.spec_ref) if s.spec_ref is not None else None
+        if spec is not None and spec.takeaway and same_text(s.takeaway, unquote(spec.takeaway)) and spec.title and not same_text(spec.title, s.takeaway):
+            run.warn(f"slide {s.id}: the headline repeated the user's conclusion → the user's heading «{unquote(spec.title)[:60]}»")
+            s.headline = unquote(spec.title)
+        else:
+            run.warn(f"slide {s.id}: the takeaway «{s.takeaway[:60]}» repeated the headline, dropped")
+            s.takeaway = None
 
 
 def _sync_charts(o: DeckOutline) -> None:
@@ -822,6 +948,13 @@ def compile_outline(
         use(structure)
     _requests(o, structure, idx, run)
     _variety(o, structure, run)
+    try:
+        from verstka.planning.agent import polish_case
+
+        for s in o.slides:
+            polish_case(s, brief.text)  # the lines another form made («Партнёрства: с пятью ближайшими офисами»)
+    except Exception:  # noqa: BLE001 - capitals are cosmetics: the deck stands without them
+        pass
     made = _compile_charts(o, run)
     if made:
         n = sum(1 for s in o.slides for ch in (s.content.chart, s.content.chart2) if ch is not None and ch.series_ids)
@@ -841,5 +974,6 @@ def compile_outline(
         run.o = o
         run.warnings.extend(x for x in more if x not in run.warnings)
     _sync_charts(o)
+    _takeaway_guard(o, structure, run)
     _grounding_say(run, run.warnings, o, idx)
     return o, run.warnings

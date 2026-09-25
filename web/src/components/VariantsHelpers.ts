@@ -50,7 +50,7 @@ export function issuesSummary(issues: Issue[] | undefined): string {
 export function variantRev(v: Variant): string {
   const a = v.audit;
   if (!a) return "0";
-  return [a.applied_fixes.length, a.iterations, a.issues.length, Math.round(a.summary.score * 10)].join(".");
+  return [a.applied_fixes.length, a.iterations, a.issues.length, Math.round(a.summary.score * 10), v.edits?.length ?? 0].join(".");
 }
 
 export function withRev(url: string, rev: string): string {

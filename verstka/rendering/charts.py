@@ -797,6 +797,42 @@ _PAST_RE = re.compile(r"(было|\bдо\b|\bбез\b|прошл|стар|withou
 _YEAR_RE = re.compile(r"(?<!\d)(19\d\d|20\d\d)(?!\d)")
 
 
+_MONTH_SHORT = {
+    "январ": "янв", "феврал": "фев", "март": "мар", "апрел": "апр", "июн": "июн", "июл": "июл",
+    "август": "авг", "сентябр": "сен", "октябр": "окт", "ноябр": "ноя", "декабр": "дек",
+}
+_PERIOD_WORDS = (
+    (re.compile(r"(?i)\bмесяц(?:а|ев|ы)?\b"), "мес."),
+    (re.compile(r"(?i)\bквартал(?:а|ов|ы)?\b"), "кв."),
+    (re.compile(r"(?i)\bнедел(?:я|и|ь)\b"), "нед."),
+    (re.compile(r"(?i)\bполугоди(?:е|я)\b"), "полуг."),
+)
+_MONTH_WORD_RE = re.compile(r"(?i)\b(январ|феврал|март|апрел|ма|июн|июл|август|сентябр|октябр|ноябр|декабр)[а-яё]*\b")
+
+
+def short_categories(cats: Sequence[str]) -> list[str]:
+    """Category labels of a time axis set short, for a chart whose slots are too narrow for them: «1-й месяц» →
+    «1-й мес.», «Месяц 3» → «Мес. 3», «Январь 2026» → «Янв 2026», «2 квартал» → «2 кв.». Only the period words are
+    shortened (the figures and the other words stay), and only in the chart: the plan keeps its words."""
+    out = []
+    for c in cats:
+        t = " ".join(str(c).split())
+        for rx, rep in _PERIOD_WORDS:
+            t = rx.sub(lambda m, rep=rep: rep if m.group(0)[:1].islower() else rep[:1].upper() + rep[1:], t)
+
+        def month(m: re.Match) -> str:
+            word = m.group(0)
+            if m.group(1).lower() == "ма":
+                return word  # «май», «мая» are short already («март» is caught above; «макет» is no month)
+            short = _MONTH_SHORT.get(m.group(1).lower(), word)
+            return short[:1].upper() + short[1:] if word[:1].isupper() else short
+
+        t = _MONTH_WORD_RE.sub(month, t)
+        # a shortened label is one word for the renderer: «1-й мес.» never breaks after «1-» or «1-й»
+        out.append(t.replace(" ", "\u00a0").replace("-", "-\u2060") if t != " ".join(str(c).split()) else t)
+    return out
+
+
 def is_other_category(name: str) -> bool:
     """«Прочее», «Другие», «Other»: a remainder slice, coloured quietly rather than as a category of its own."""
     return bool(_OTHER_RE.match(name or ""))
@@ -1846,6 +1882,18 @@ def _area_overlay(k: _Kit, area_el, colors: list[str]) -> list:
     return out
 
 
+def _set_categories(k: _Kit, cats: list[str]) -> None:
+    """The chart's categories rewritten (its data sheet too): the shortened labels of a crowded time axis."""
+    data = CategoryChartData()
+    data.categories = cats
+    for ser, vals in zip(k.series, k.values):
+        data.add_series(ser.name, vals)
+    try:
+        k.chart.replace_data(data)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _style_line(k: _Kit) -> None:
     """One series (≤ 8 points): every point labelled off the line, the highlight (or the last point) in the accent on a
     larger marker, no value axis. Several series or many points: a quiet value axis on round ticks and each line named
@@ -1894,13 +1942,11 @@ def _style_line(k: _Kit) -> None:
     end_size = fs_val if multi else _snap(fs_val * ratio)
     end_w = max((text_width_pt(end_text(i), family, end_size, k.bold) for i in range(ns)), default=0.0) if ends else 0.0
 
-    # category labels: one step smaller when crowded; still too wide, every k-th label (a line is continuous)
+    # category labels stay at the chart's text size (never under the deck's small size) on one line each: measured
+    # against the real slot — the plot's width over the points, the value axis and the end label take their share of
+    # the frame — a time axis too narrow for its words shortens them («1-й месяц» → «1-й мес.»), and still too
+    # wide, every k-th label is shown (a line is continuous)
     cat_fs = fs
-    longest = max((text_width_pt(c, family, fs) for c in cats), default=0.0)
-    if longest > slot * 0.75:  # headroom: a substituted font runs wider and the renderer breaks words
-        cat_fs = max(_snap(fs * 0.85), _snap(fs * slot * 0.75 / max(longest, 1)))
-    longest = max((text_width_pt(c, family, cat_fs) for c in cats), default=0.0)
-    skip = max(1, math.ceil(longest / (slot * 0.85))) if longest > slot * 0.85 else 1
 
     # value range
     lo = hi = step = None
@@ -1934,6 +1980,19 @@ def _style_line(k: _Kit) -> None:
         left = max(1.0, widest(fs_val) / 2 - slot / 2 + 4)
     right = max(1.0, end_w + fs * 0.9 - slot / 2 + 6) if ends else max(1.0, widest(fs_val) / 2 - slot / 2 + 4)
     pw, ph = max(W - left - right, W * 0.3), max(H - top - bottom, H * 0.3)
+    real_slot = pw / n
+    room = real_slot * 0.92  # a label wider than its slot is broken by the renderer, even inside a word
+    longest = max((text_width_pt(c, family, cat_fs) for c in cats), default=0.0)
+    if longest > room:
+        short = short_categories(cats)
+        if short != cats:
+            cats = k.cats = short
+            _set_categories(k, short)
+            longest = max((text_width_pt(c, family, cat_fs) for c in cats), default=0.0)
+    skip = max(1, math.ceil(longest / room)) if longest > room else 1
+    if skip > 1 and n > 2:
+        # the labels shown are the first, the last and every k-th between: pick k so that the last one falls on it
+        skip = next((kk for kk in range(skip, n) if (n - 1) % kk == 0), skip)
 
     # paint
     area_lines = []

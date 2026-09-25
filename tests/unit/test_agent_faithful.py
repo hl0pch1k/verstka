@@ -104,7 +104,9 @@ def test_derived_percents_only_of_the_changes_the_brief_states(long_idx, short_i
 def test_hedges_ordinals_and_notes(long_idx, short_idx):
     assert not short_idx.clean("Прибыль увеличится более чем в 2 раза").bad  # 2,12 is more than 2
     assert long_idx.clean("Операционная прибыль вырастет почти в 2,1 раза").bad  # 2,12 is not «почти» 2,1
-    assert long_idx.fix_hedges("Операционная прибыль вырастет почти в 2,1 раза") == "Операционная прибыль вырастет более чем в 2,1 раза"
+    # 2,1 is 2,12 rounded: no hedge on it, either side («более чем в 2,1 раза» reads oddly)
+    assert long_idx.fix_hedges("Операционная прибыль вырастет почти в 2,1 раза") == "Операционная прибыль вырастет в 2,1 раза"
+    assert long_idx.fix_hedges("Операционная прибыль вырастет более чем в 2,1 раза") == "Операционная прибыль вырастет в 2,1 раза"
     assert not long_idx.clean("Прибыль вырастет к 6-му месяцу").bad  # «к шестому месяцу» in digits
     # notes: only the clause of a figure the brief does not have goes, the rest of the sentence stays
     from verstka.planning.grounding import _Log, _notes
@@ -124,7 +126,7 @@ def test_forecasts_are_told_as_plans_after_compile():
     ])
     out, warns = compile_outline(o, st, brief)
     s = next(x for x in out.slides if x.spec_ref == 5)
-    assert s.headline == "Операционная прибыль вырастет более чем в 2,1 раза", s.headline
+    assert s.headline == "Операционная прибыль вырастет в 2,1 раза", s.headline
     assert "вырастет до 22,4%" in " ".join(s.content.bullets) or not s.content.bullets
     assert s.takeaway is None or "достигнет" in s.takeaway
     assert any("tense" in w for w in warns)
@@ -145,7 +147,11 @@ def test_a_wrong_formula_goes_and_the_users_formula_wins():
     unit = next(u for u in A._units_from_specs(ctx) if u.spec is not None and u.spec.formula)
     d = A.design_from_answer(SlideDesignAnswer.model_validate({"kind": "big_number", "headline": "Выручка — 900 000 рублей", "formula": "3 000 × 300 = 900 000 рублей", "numbers": [{"value": "900 000 ₽", "label": "выручка"}]}), unit, ctx)
     A.enforce_requests(d, ctx)
-    assert d.slide.content.formula == unit.spec.formula
+    # the user's calculation, its factors named from the slide's text
+    from verstka.planning.compile import same_formula
+
+    assert same_formula(d.slide.content.formula, unit.spec.formula)
+    assert d.slide.content.formula == "100 покупок в день × 300 ₽ × 30 рабочих дней = 900 000 ₽"
 
 
 # ------------------------------------------------------------------ charts: the brief's labels, parts of one whole

@@ -34,6 +34,7 @@ def run_audit(
     images_dir: Optional[Path] = None,
     existing_images: Optional[dict[int, Path]] = None,
     strategy: Optional[str] = None,
+    brief_text: Optional[str] = None,
 ) -> AuditReport:
     t0 = time.time()
     pptx = Path(pptx)
@@ -60,11 +61,12 @@ def run_audit(
             log.warning("render failed: %s", e)
     elif images:
         render_ok = True
-    ctx = AuditContext(ir=ir, manifest=manifest, outline=outline, ws=ws, slide_images=images, render_ok=render_ok, opens_ok=opens_ok)
+    ctx = AuditContext(ir=ir, manifest=manifest, outline=outline, ws=ws, slide_images=images, render_ok=render_ok, opens_ok=opens_ok, brief_text=brief_text)
     if opens_ok:
         issues, ran = run_checks(ctx)
         report.issues.extend(issues)
         report.summary.checks_run = ran
+        report.summary.figures = ctx.figure_stats
         if providers is not None and skills is not None and (use_vlm or use_llm):
             from verstka.audit.model_checks import run_model_checks
 

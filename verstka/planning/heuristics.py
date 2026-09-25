@@ -448,6 +448,7 @@ def figure_span(value: str, text: str) -> Optional[tuple[int, int]]:
 
 
 _BARE_NUMBER_RE = re.compile(r"^[+\-−]?\d[\d\s  ]*(?:[.,]\d+)?$")
+_UNIT_ONLY_RE = re.compile(r"^(?:₽|\$|€|%|руб\.?|рубл(?:ей|я|ь)|тыс\.?(?:\s*₽)?|млн(?:\s*₽)?|шт\.?|п\.\s*п\.)$", re.I)  # a unit, never a label
 
 
 def is_statement(text: str) -> bool:
@@ -503,11 +504,13 @@ def label_beside(value: str, label: str, headline: str, text: Optional[str] = No
     if span is None:
         return label
     tail = headline[span[1] :].strip(" ,.:;—-")
+    if _UNIT_ONLY_RE.match(tail):
+        return label  # «… до 330 ₽»: a unit after the figure is the figure's, never its label
     if len(tail.split()) >= 2 or (len(tail.split()) == 1 and _BARE_NUMBER_RE.match(value.strip())):
         return tail  # «минуты на одно обращение»; a bare number takes the one word it counts («12» → «человек»)
     head = headline[: span[0]].strip(" ,.:;—-").split()
-    while head and head[-1].lower() in _PREPS:
-        head.pop()  # «Команда выросла до» → «Команда выросла»: a label never ends on a preposition
+    while head and (head[-1].lower() in _PREPS or head[-1] in ("—", "–", "-")):
+        head.pop()  # «Команда выросла до» → «Команда выросла»: a label never ends on a preposition or a dash
     if len(head) < 2:
         return label
     whole = len(head) <= 6  # a clause start of six words or fewer is kept whole («Отдел продаж сократил время на отчёты»)

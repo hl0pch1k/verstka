@@ -56,6 +56,7 @@ export function AgentLog() {
   }, [v, events]);
   if (!generation || !v) return null;
   const log = v.agent?.log ?? [];
+  const edits = v.edits ?? [];
   const openSlide = (n: number) => {
     setSelectedSlide(n);
     setDetail("why");
@@ -107,6 +108,28 @@ export function AgentLog() {
           )}
         </div>
       </section>
+      {edits.length > 0 && (
+        <section className="rounded-3xl bg-white p-6 shadow-card">
+          <h3 className="text-[15px] font-semibold text-zinc-900">Правки по вашим просьбам</h3>
+          <p className="mt-1 text-[13px] leading-5 text-zinc-500">Каждая правка сохраняет прежнюю версию — скажите помощнику «верни как было», чтобы откатить последнюю.</p>
+          <ol className="mt-4 space-y-3">
+            {edits.map((e, i) => (
+              <li key={i} className="flex gap-3">
+                <span className="mt-px flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent-50 text-[11px] font-bold text-accent">{i + 1}</span>
+                <div className="min-w-0 flex-1 text-[13px] leading-5">
+                  <p className="font-semibold text-zinc-900">«{e.request}»</p>
+                  <p className="text-zinc-600">{e.reply}</p>
+                  {e.slides?.length && e.kind !== "delete" ? (
+                    <button type="button" onClick={() => openSlide(e.slides[0])} className="mt-0.5 cursor-pointer text-[12px] font-semibold text-accent-700 hover:underline focus:outline-none focus-visible:underline">
+                      Слайд {e.slides[0]}: почему он такой
+                    </button>
+                  ) : null}
+                </div>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
       {events.length > 0 && log.length > 0 && (
         <details className="group rounded-2xl bg-white px-6 py-4 shadow-card">
           <summary className={cn("cursor-pointer list-none text-[14px] font-semibold text-zinc-900 marker:hidden")}>

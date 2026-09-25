@@ -28,7 +28,7 @@ A reviewer found problems in your previous design of this slide:
 {{ issues }}
 Your previous design:
 {{ previous }}
-Fix these problems and keep what was right. A wording the reviewer suggests is only a hint: every statement must come from the source text of this slide.
+Fix these problems and keep everything else of your previous design as it is (its lines, items, figures and charts): add what the notes ask for, do not drop what they do not mention. A wording the reviewer suggests is only a hint: every statement must come from the source text of this slide; a headline states the slide's conclusion with its key figure, never a list announced, never the slide's takeaway, never a cause the source does not state.
 {% endif %}
 
 Return the JSON object of this one slide only.

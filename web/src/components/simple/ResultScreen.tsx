@@ -90,6 +90,11 @@ function Deck({ generation }: { generation: Generation }) {
   const pdf = variant.files["deck.pdf"] ?? null;
   const quality =
     errors === null ? "Проверка не запускалась" : errors === 0 ? (warnings ? `Ошибок нет, ${plural(warnings, "мелкое замечание", "мелких замечания", "мелких замечаний")}` : "Ошибок нет") : `${plural(errors, "ошибка", "ошибки", "ошибок")} — можно исправить автоматически`;
+  // the figures on the slides compared with the source text: the one promise a reader checks first
+  const figs = variant.audit?.summary.figures ?? null;
+  const figuresLine = !figs || !figs.checked ? null
+    : figs.unverified ? `Цифры сверены с текстом: ${plural(figs.unverified, "число", "числа", "чисел")} в нём нет`
+    : `Цифры сверены с текстом: ${plural(figs.checked, "число", "числа", "чисел")}, лишних нет`;
   const open = (d: DetailKey) => setDetail(d);
   // the newest deck built with the model: the live model state is about the same failure
   const latest = useMemo(() => {
@@ -264,6 +269,14 @@ function Deck({ generation }: { generation: Generation }) {
               <div className="min-w-0">
                 <p className="text-[15px] font-semibold text-zinc-900">Проверка качества</p>
                 <p className="text-[13px] leading-5 text-zinc-500">{quality}</p>
+                {figuresLine ? (
+                  <p
+                    className={cn("mt-0.5 text-[13px] leading-5", figs?.unverified ? "text-amber-700" : "text-zinc-500")}
+                    title={figs && !figs.unverified && figs.derived ? `${plural(figs.checked - figs.derived, "взято", "взяты", "взяты")} из текста, ${plural(figs.derived, "посчитано", "посчитаны", "посчитаны")} из его чисел: доли, изменения, суммы` : undefined}
+                  >
+                    {figuresLine}
+                  </p>
+                ) : null}
                 <button type="button" onClick={() => open("quality")} className="mt-0.5 inline-flex cursor-pointer items-center gap-1 text-[13px] font-semibold text-accent-700 hover:underline focus:outline-none focus-visible:underline">
                   <ShieldCheck className="h-3.5 w-3.5" aria-hidden /> {errors ? "Посмотреть и исправить" : "Что проверено"}
                 </button>

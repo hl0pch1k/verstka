@@ -23,6 +23,8 @@ class AuditContext:
     slide_images: dict[int, Path] = field(default_factory=dict)
     render_ok: Optional[bool] = None
     opens_ok: bool = True
+    brief_text: Optional[str] = None  # the source text: the figures on the slides are compared with it (checks/facts.py)
+    figure_stats: Optional[dict] = None  # what that comparison counted, for the report's summary
     _issue_counter: int = 0
 
     def new_issue(self, spec: CheckSpec, slide: int, message: str, **kw) -> Issue:
@@ -54,7 +56,7 @@ def load_builtin_checks() -> None:
     if _BUILTIN_LOADED:
         return
     _BUILTIN_LOADED = True
-    for mod in ("layout", "template", "density", "integrity"):
+    for mod in ("layout", "template", "density", "integrity", "facts"):
         importlib.import_module(f"verstka.audit.checks.{mod}")
 
 

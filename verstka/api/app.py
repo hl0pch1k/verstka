@@ -63,7 +63,7 @@ _providers: Optional[ProviderRegistry] = None
 _skills: Optional[SkillsRegistry] = None
 _chat_sessions: dict[str, dict] = {}
 _chat_lock = threading.Lock()
-_fix_active: set[tuple[str, str]] = set()  # (generation id, strategy) with an autofix job in flight
+_fix_active: set[tuple[str, str]] = set()  # (generation id, strategy) with an autofix job or an edit in flight
 _fix_lock = threading.Lock()
 
 
@@ -136,6 +136,12 @@ class ChatRequest(BaseModel):
     template_id: Optional[str] = None
     generation_id: Optional[str] = None
     strategy: Optional[str] = None  # the variant on screen: «почему слайд 3 такой» is about it
+    slide: Optional[int] = None  # the slide on screen: «сделай тут цифры крупнее» is about it
+
+
+class EditRequestBody(BaseModel):
+    message: str  # what the person asks, in their words: «на слайде 3 покажи расходы таблицей»
+    slide: Optional[int] = None  # the slide on screen (1-based)
 
 
 # ---------------------------------------------------------------------------- helpers
@@ -231,7 +237,16 @@ def _variant_payload(gdir: Path, strategy: str, use_models: Optional[bool] = Non
         # slide, why the designer chose the form and what else it proposed — empty for older runs
         "agent": variant_agent(outline, agent_events if agent_events is not None else read_agent_events(gdir), strategy),
         "design": slide_design(outline),
+        # the chat agent's edits of this variant (pipeline/revise.py): what was asked and answered, oldest first; the
+        # count versions the slide previews (their names stay slide-001.jpg…)
+        "edits": [{k: e.get(k) for k in ("at", "request", "reply", "kind", "slides", "score_before", "score_after")} for e in _edits_of(vdir)],
     }
+
+
+def _edits_of(vdir: Path) -> list[dict]:
+    from verstka.pipeline.revise import read_edits
+
+    return read_edits(vdir)
 
 
 def _generation_payload(gid: str) -> dict:
@@ -584,7 +599,7 @@ def apply_fixes(gid: str, strategy: str, req: FixRequest) -> dict:
             report = AuditReport.model_validate_json((vdir / "audit_report.json").read_text(encoding="utf-8"))
             only = None if req.all_deterministic else set(req.issue_ids)
             job.emit("применяю исправления", 0.2)
-            final, plan2, outline2, _ = autofix_loop(vdir / "deck.pptx", report, outline, plan, manifest, ws, max_iterations=2, only_ids=only, images_dir=vdir / "slides")
+            final, plan2, outline2, _ = autofix_loop(vdir / "deck.pptx", report, outline, plan, manifest, ws, max_iterations=2, only_ids=only, images_dir=vdir / "slides", brief_text=meta.get("brief"))
             job.emit("экспортирую", 0.8)
             # previews and the exports that existed before are rebuilt from one LibreOffice run
             exports = [fmt for fmt in ("pdf", "html") if (vdir / f"deck.{fmt}").exists()]
@@ -607,6 +622,139 @@ def apply_fixes(gid: str, strategy: str, req: FixRequest) -> dict:
 
     try:
         job = runner.submit("fix", run)
+    except BaseException:
+        with _fix_lock:
+            _fix_active.discard(key)
+        raise
+    return {"job_id": job.id}
+
+
+def _brief_of_meta(meta: dict) -> Optional[Brief]:
+    """The generation's brief as it was parsed for the build (grounding and the figures check need the same one)."""
+    if not (meta.get("brief") or "").strip():
+        return None
+    return _brief_from_request(GenerateRequest(
+        template_id=meta.get("template_id") or "x", brief=meta.get("brief"), audience=meta.get("audience"), purpose=meta.get("purpose"),
+        slides=meta.get("slides"), language=meta.get("language") or "ru", extra_instructions=meta.get("extra_instructions"),
+    ))
+
+
+def _slide_name(o: DeckOutline, i: int) -> str:
+    return f"{i} «{o.slides[i - 1].headline}»" if 1 <= i <= len(o.slides) else str(i)
+
+
+def _edit_job(gid: str, strategy: str, body: EditRequestBody) -> Callable[[Job], dict]:
+    """One chat edit of one variant: read the request, change the plan (exactly, or by the slide designer), keep the
+    previous version, render and audit the variant again, log the edit, answer in plain words."""
+    from verstka.api.edits import parse_edit
+    from verstka.pipeline import revise as R
+
+    def run(job: Job) -> dict:
+        vdir = _variant_dir(gid, strategy)
+        meta = store.read_generation_meta(gid) or {}
+        manifest = store.manifest(meta.get("template_id", ""))
+        if manifest is None or not (vdir / "outline.json").exists():
+            raise ValueError("variant not found")
+        outline = DeckOutline.model_validate_json((vdir / "outline.json").read_text(encoding="utf-8"))
+        total = len(outline.slides)
+        req = parse_edit(body.message, body.slide, total)
+        if req is None:
+            return {"reply": "Не понял, какой слайд поменять. Назовите номер: «на слайде 3 покажи расходы таблицей».", "changed": False}
+        before = None
+        if (vdir / "audit_report.json").exists():
+            before = AuditReport.model_validate_json((vdir / "audit_report.json").read_text(encoding="utf-8")).summary.score
+        brief = _brief_of_meta(meta)
+        focus: Optional[int] = None
+        new = outline.model_copy(deep=True)
+        undone: Optional[int] = None
+        if req.kind == "undo":
+            last = R.last_version(vdir)
+            if last is None:
+                return {"reply": "Этот вариант ещё не меняли — возвращать нечего.", "changed": False}
+            undone, new = last
+            edits = R.read_edits(vdir)
+            what = next((e.get("request") for e in reversed(edits) if e.get("version") == undone), None)
+            reply = "Вернул как было" + (f" до правки «{what}»" if what else "") + "."
+        elif req.kind == "delete":
+            i = req.slides[0]
+            if not 1 <= i <= total:
+                return {"reply": f"В этом варианте {total} слайдов — слайда {i} нет.", "changed": False}
+            if i == 1 or new.slides[i - 1].kind.value == "title":
+                return {"reply": "Обложку убирать не буду — без неё презентация начнётся с середины. Могу поменять на ней заголовок или подзаголовок.", "changed": False}
+            gone = new.slides.pop(i - 1)
+            focus = min(i, len(new.slides))
+            reply = f"Убрал слайд {i} «{gone.headline}» — теперь слайдов {len(new.slides)}."
+        elif req.kind in ("swap", "move"):
+            idx = [i - 1 for i in req.slides]
+            if any(new.slides[i].kind.value == "title" for i in idx) or (req.kind == "move" and req.target == 1):
+                return {"reply": "Обложка остаётся первой — остальные слайды могу переставить как скажете.", "changed": False}
+            if req.kind == "swap":
+                a, b = idx
+                new.slides[a], new.slides[b] = new.slides[b], new.slides[a]
+                focus = req.slides[1]
+                reply = f"Поменял местами слайды {req.slides[0]} и {req.slides[1]}."
+            else:
+                s = new.slides.pop(idx[0])
+                new.slides.insert(req.target - 1, s)
+                focus = req.target
+                reply = f"Перенёс слайд «{s.headline}» на место {req.target}."
+        else:
+            from verstka.planning.slide_edit import revise_slide
+
+            i = req.slides[0]
+            job.emit(f"Дизайнер переделывает слайд {i}", 0.1)
+            use_models = bool(meta.get("use_models", True)) and models_configured()
+            try:
+                new, reply = revise_slide(
+                    outline, i, req.text, brief, manifest,
+                    skills=skills() if use_models else None, providers=providers() if use_models else None,
+                    progress=job_progress(job),
+                )
+            except ValueError as e:
+                msg = str(e)
+                return {"reply": f"Не получилось: {msg[:1].lower() + msg[1:]}.", "changed": False}
+            focus = i
+        job.emit("Перерисовываю вариант", 0.55)
+        version = None if undone is not None else R.snapshot(vdir)
+        v = R.rerender_variant(vdir, strategy, new, store.workspace(meta["template_id"]).source, store.root, brief=brief, exports=list(meta.get("exports") or []))
+        if undone is not None:
+            R.drop_version(vdir, undone)
+        after = v.audit.summary.score if v.audit else None
+        R.log_edit(vdir, {"version": version, "undo_of": undone, "request": body.message, "kind": req.kind, "slides": req.slides, "reply": reply, "score_before": before, "score_after": after})
+        summary = meta.get("summary", {})
+        if v.audit is not None:
+            summary[strategy] = {**summary.get(strategy, {}), "n_slides": len(v.outline.slides), "score": v.audit.summary.score, "errors": v.audit.summary.errors, "warnings": v.audit.summary.warnings}
+            store.merge_generation_meta(gid, {"summary": summary})
+        if before is not None and after is not None and round(after) != round(before):
+            reply += f" Проверка качества: {before:g} → {after:g}."
+        elif after is not None:
+            reply += f" Проверка качества: {after:g} из 100."
+        tail = " Можно вернуть и более раннюю версию — снова «верни как было»." if undone is not None and R.version_numbers(vdir) else "" if undone is not None else " Если не понравится — скажите «верни как было»."
+        return {"reply": reply + tail, "changed": True, "slide": focus, "strategy": strategy, "score": after, "kind": req.kind}
+
+    return run
+
+
+@app.post("/api/generations/{gid}/{strategy}/edits")
+def edit_variant(gid: str, strategy: str, body: EditRequestBody) -> dict:
+    """The chat agent's edit of one variant (a job: the model may redesign a slide, the variant is rendered again)."""
+    _variant_dir(gid, strategy)
+    key = (gid, strategy)
+    with _fix_lock:
+        if key in _fix_active:
+            raise HTTPException(409, "this variant is being changed already")
+        _fix_active.add(key)
+    inner = _edit_job(gid, strategy, body)
+
+    def run(job: Job) -> dict:
+        try:
+            return inner(job)
+        finally:
+            with _fix_lock:
+                _fix_active.discard(key)
+
+    try:
+        job = runner.submit("edit", run)
     except BaseException:
         with _fix_lock:
             _fix_active.discard(key)
@@ -640,6 +788,29 @@ _INTENT_RULES = [
     ("template", re.compile(r"\bшаблон|template|дизайн-систем|палитр|шрифт", re.I)),
     ("plan", re.compile(r"\bплан\w*|структур|какие слайды|outline|макет", re.I)),
 ]
+
+
+def _is_edit(message: str, intent: str) -> bool:
+    """A change of the deck on screen («на слайде 3 покажи расходы таблицей», «сделай слайд 4 таблицей», «верни как
+    было») — not a question about it, a new deck («сделай презентацию…») or «покажи план»."""
+    from verstka.api.edits import looks_like_edit
+
+    if intent in ("explain_slide", "agent", "fix_all", "audit", "export") or not looks_like_edit(message):
+        return False
+    return not (intent == "plan" and re.search(r"(покажи|какой|расскажи)\s+(мне\s+)?план", message, re.I))
+
+
+def _edit_ack(req) -> str:
+    """What the agent says at once, before the job: which change it is making."""
+    if req.kind == "undo":
+        return "Возвращаю предыдущую версию варианта…"
+    if req.kind == "delete":
+        return f"Убираю слайд {req.slides[0]} и пересобираю вариант…"
+    if req.kind == "swap":
+        return f"Меняю местами слайды {req.slides[0]} и {req.slides[1]}…"
+    if req.kind == "move":
+        return f"Переношу слайд {req.slides[0]} на место {req.target}…"
+    return f"Понял. Дизайнер переделывает слайд {req.slides[0]}: «{req.text[:120]}». Цифры возьму только из вашего текста…"
 
 
 def _looks_like_brief(text: str) -> bool:
@@ -683,7 +854,39 @@ def chat(req: ChatRequest) -> dict:
     gen_id = session.get("generation_id")
     reply: str
     actions: list[dict] = []
-    if intent == "template":
+    if gen_id and _is_edit(req.message, intent):
+        intent = "edit"
+    if intent == "edit":
+        from verstka.api.edits import parse_edit
+
+        if req.strategy:
+            session["strategy"] = req.strategy
+        payload = _generation_payload(gen_id)
+        variants = payload.get("variants", [])
+        v = next((vv for vv in variants if vv["strategy"] == session.get("strategy")), variants[0] if variants else None)
+        if v is None:
+            reply = "Презентация ещё собирается — подождите немного, потом поменяю."
+        else:
+            total = len((v.get("outline") or {}).get("slides") or [])
+            parsed = parse_edit(req.message, req.slide, total)
+            cover_first = (v.get("outline") or {}).get("slides", [{}])[0].get("kind") == "title"
+            if parsed is None:
+                reply = "Какой слайд поменять? Назовите номер: «на слайде 3 покажи расходы таблицей»."
+            elif cover_first and (parsed.kind == "delete" and parsed.slides == [1] or parsed.kind in ("swap", "move") and (1 in parsed.slides or parsed.target == 1)):
+                reply = "Обложка остаётся первой — без неё презентация начнётся с середины. На ней могу поменять заголовок или подзаголовок."
+            else:
+                try:
+                    r = edit_variant(gen_id, v["strategy"], EditRequestBody(message=req.message, slide=req.slide))
+                except HTTPException as e:
+                    if e.status_code != 409:
+                        raise
+                    r = None
+                if r is None:
+                    reply = "Этот вариант уже меняется — дождитесь, пока закончу."
+                else:
+                    reply = _edit_ack(parsed)
+                    actions.append({"type": "edit", "job_id": r["job_id"], "strategy": v["strategy"], "generation_id": gen_id, "slide": parsed.slides[0] if parsed.slides else None})
+    elif intent == "template":
         m = store.manifest(template_id) if template_id else None
         reply = describe_template(m) if m else "Сначала выберите или загрузите шаблон (.pptx) — расскажу, какие в нём цвета, шрифты и макеты слайдов."
         actions.append({"type": "open_tab", "tab": "template"})

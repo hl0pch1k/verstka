@@ -113,7 +113,9 @@ def display_fit(text: str, family: Optional[str], size_pt: float, bold: bool, wi
     while k >= floor - 1e-9:
         cands.add(round(size_pt * k, 1))
         k -= 0.05
-    words = [w for w in re.split(r"[\s\u00a0]+|(?<=-)(?!\u2060)", text) if w]
+    # a word is what a line cannot break: words a no-break space binds («Точка кофе») are measured together, as the
+    # renderer keeps them on one line
+    words = [w for w in re.split(r"[ \t\r\n]+|(?<=-)(?!\u2060)", text) if w]
     last = (round(size_pt * floor, 1), 99)
     for s in sorted(cands, reverse=True):
         if any(text_width_pt(w, family, s, bold) > width_pt * word_room for w in words):
@@ -253,6 +255,27 @@ def _bookend_title_fit(slide: OutlineSlide, pattern: Pattern, manifest: Template
     return size, lines, size / size0 if size0 else 1.0, t
 
 
+def cover_goal(slide: OutlineSlide) -> Optional[str]:
+    """The cover's own line under its subtitle (Agent v2: the goal of the plan, «Цель: увеличить прибыль со 120 000 до
+    255 000 рублей»): the first paragraph of a title slide's content. None on other slides or without one."""
+    if slide.kind != PatternKind.title or not slide.content.paragraphs:
+        return None
+    first = " ".join((slide.content.paragraphs[0] or "").split())
+    return first or None
+
+
+def _needed_chars(slide: OutlineSlide) -> dict[str, int]:
+    """needed_chars, less a cover's goal line: the renderer sets it under the subtitle on its own (a cover sample
+    without a body box holds it as well as one with a speaker's name box)."""
+    out = needed_chars(slide)
+    goal = cover_goal(slide)
+    if goal and "body" in out:
+        out["body"] -= len(slide.content.paragraphs[0]) + 1
+        if out["body"] <= 0:
+            del out["body"]
+    return out
+
+
 def same_words(a: Optional[str], b: Optional[str]) -> bool:
     """Whether a heading repeats the sample's own text («Спасибо за внимание» on a «Спасибо за внимание!» sample)."""
     wa = set(re.findall(r"\w{3,}", (a or "").lower()))
@@ -383,7 +406,7 @@ def score_pattern(
     worst = 0.0
     bookend = slide.kind in _BOOKEND_KINDS
     title_fit = _bookend_title_fit(slide, pattern, manifest) if bookend else None
-    for role_name, need in needed_chars(slide).items():
+    for role_name, need in _needed_chars(slide).items():
         role = SlotRole(role_name)
         if title_fit is not None and role == SlotRole.title:
             # the heading of a cover is measured in its box: three lines at 0.85 of the sample size are a perfect fit
@@ -420,7 +443,7 @@ def score_pattern(
     fit["text_ratio"] = round(worst, 2)
     # hard gates: a pattern without room for the slide's content would render a headline over stale sample shapes
     content = slide.content
-    needed_roles = needed_chars(slide)
+    needed_roles = _needed_chars(slide)
     content_need = sum(v for k, v in needed_roles.items() if k not in ("title", "subtitle"))
     content_cap = sum(s.capacity.max_chars for s in pattern.slots if s.role in _CONTENT_ROLES)
     has_data_object = content.chart is not None or content.table is not None

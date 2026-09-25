@@ -178,6 +178,7 @@ def audit(
     deck: Path = typer.Argument(..., exists=True, help="Generated deck.pptx"),
     template: Path = typer.Option(..., "--template", "-t", help="Template .pptx the deck was built on"),
     outline: Optional[Path] = typer.Option(None, "--outline", help="outline.json of the deck (enables content checks)"),
+    brief: Optional[Path] = typer.Option(None, "--brief", help="The source text: every figure on the slides is compared with it"),
     workspace: Optional[Path] = typer.Option(None, "--workspace", "-w"),
     models: Optional[Path] = typer.Option(None, "--models"),
     with_models: bool = typer.Option(False, "--with-models", help="Run VLM/LLM content checks"),
@@ -195,7 +196,7 @@ def audit(
     outline_obj = DeckOutline.model_validate_json(outline.read_text(encoding="utf-8")) if outline else None
     providers = _providers(models, with_models)
     skills = SkillsRegistry.load() if with_models else None
-    report = run_audit(deck, manifest, outline_obj, ws, providers=providers, skills=skills, use_vlm=with_models, use_llm=with_models, render=not no_render, images_dir=deck.parent / "slides")
+    report = run_audit(deck, manifest, outline_obj, ws, providers=providers, skills=skills, use_vlm=with_models, use_llm=with_models, render=not no_render, images_dir=deck.parent / "slides", brief_text=brief.read_text(encoding="utf-8") if brief else None)
     target = out or deck.parent / "audit_report.json"
     target.write_text(report.model_dump_json(indent=2), encoding="utf-8")
     console.print(f"score {report.summary.score} · errors {report.summary.errors} · warnings {report.summary.warnings} · model flags {report.summary.model_flags} · checks {len(report.summary.checks_run)}")

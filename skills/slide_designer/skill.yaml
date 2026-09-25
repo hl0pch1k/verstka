@@ -1,5 +1,5 @@
 name: slide_designer
-version: 1.2.0
+version: 1.3.1
 role: llm
 description: >
   Designs ONE slide of the deck (Agent v2): chooses its visual form by the visual-form guide and the user's explicit
@@ -45,3 +45,24 @@ changelog:
     never merged. Deterministic guards (planning/agent.py, compile.py, grounding.py) enforce the same: the tense and
     hedge guard, figure–label binding, the comparison check against the slide's data, the user's formula verbatim,
     pies only of the parts of one whole."
+  - "1.3.0: editor's review of two live runs (Qwen3-32B, coffee briefs): vague headlines («Расходы распределены
+    неравномерно»), causes the brief does not state («… снижает операционную прибыль до 13,3%», suggested by the
+    critic), takeaways restating the headline in other words («Рост выручки на 26,5%» under «Выручка вырастет на
+    26,5%»), 3 of 5 observations kept, «более чем в 2,1 раза», a bare formula, plan items titled «Месяц 2» next to
+    untitled ones. Now: a specific headline with the key figure (a neutral example of a vague one), no cause, effect
+    or classification the source does not state (anywhere on the slide or in the notes), a takeaway adds a figure, a
+    total, a condition or a consequence, every item of every list, a formula names its factors, steps titled one way,
+    a plain hedge; the revision keeps everything the notes do not ask to change. Deterministic guards (planning/
+    agent.py): paraphrase check (adds_nothing) for takeaways and lines, lines repeating the chart / takeaway / headline /
+    footnote dropped (tidy_design), causal claims absent from the source dropped (invented_cause), notes the source does
+    not say dropped (clean_notes), step titles made uniform, the formula labelled from the slide's text
+    (compile.label_formula), key figures and a takeaway the brief asks for added from the brief (complete_slide), the
+    revision taken part by part (merge_revision)."
+  - "1.3.1: the final live run showed «330» · «Средний чек, ₽» and «30%» · «Цель — доля чеков с едой» (the before values
+    gone; the renderer then showed «₽» as the label), card texts «С пятью ближайшими офисами» under their titles, and a
+    takeaway beside a chart repeating its value («… до 254 795 рублей в месяц — это 112,3% роста»). Now: a figure's
+    value carries its unit and a before/after as «300 → 330 ₽», its label names the measure; a chart slide's lines and
+    takeaway never repeat the chart's figures; «рост на 12%». Deterministic guards (planning/agent.py): fix_callouts
+    (unit to the value, «Цель —» prefix off, a figure of a before/after pair of the slide's data shown as its change),
+    heuristics.label_beside never returns a bare unit, polish_case (lowercase after a label's colon and in a card's
+    text that continues its title), plain_change and trim_chart_restatement."

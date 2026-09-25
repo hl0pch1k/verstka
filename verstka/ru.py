@@ -71,6 +71,9 @@ def bind_compounds(text: str) -> str:
     return "".join(_COMPOUND_RE.sub("-" + WJ, w) if len(w.strip("«»\"(),.:;!?")) <= 16 and WJ not in w else w for w in __import__("re").split(r"([ \u00a0]+)", text))
 
 
+_ABBR2_RE = __import__("re").compile(r"(?<![А-Яа-яЁё])(п\.|т\.)\s+(п\.|е\.|д\.|к\.)")
+
+
 def typeset(text: str) -> str:
     """Russian display typesetting with no-break spaces: a dash never starts a line, a short preposition or
     conjunction never ends one, a figure stays with its unit, its thousands and its noun («12 400», «27 млн ₽»,
@@ -82,6 +85,8 @@ def typeset(text: str) -> str:
     t = _UNIT_RE.sub(NBSP, t)
     t = _NUM_NOUN_RE.sub(lambda m: m.group(1) + NBSP, t)
     t = t.replace(" ₽", NBSP + "₽")
+    # «п. п.», «т. е.», «т. д.»: an abbreviation of two letters is one word on the slide («на 2 п.| п.» broke a headline)
+    t = _ABBR2_RE.sub(lambda m: m.group(1) + NBSP + m.group(2), t)
     t = bind_compounds(t)
     words = t.split(" ")
     out = []

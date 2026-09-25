@@ -718,7 +718,8 @@ _NOW_BEFORE_RE = re.compile(r"(?<![\wё])(?:нынешн\w*|текущ\w*|сей
 _PAIR_LEAD_RE = re.compile(r"(?:сейчас|было|до|текущ\w*|факт)\s*/\s*(?:цель|стало|после|прогноз|план)", re.I)
 _HEADING_LINE_RE = re.compile(r"^\s*(?:слайд|slide)\s*\d{1,2}\b", re.I)
 _DASH_LINE_RE = re.compile(r"^\s*[—–\-•*·]\s+")
-_CTX_STOP_RE = re.compile(r"[,;!?]|\.(?!\d)|\s(?:а|но|и|—|–)\s")
+_CTX_STOP_RE = re.compile(r"[,;!?()]|\.(?!\d)|\s(?:а|но|и|—|–)\s")  # a parenthesis ends a figure's words too
+_DASH_AFTER_RE = re.compile(r"\s*[—–]\s+(?:на\s+|в\s+|у\s+|для\s+)?(?=[а-яёa-z])", re.I)
 _PAIR_BETWEEN_RE = re.compile(r"\s*(?:[^\s\d]{1,12}\s*)?(?:до|по|из|→|->|/|—|–|-)\s*", re.I)
 
 
@@ -760,6 +761,12 @@ def _figure_labels(sn: str, figs: list[Fig], line: bool = False) -> list[frozens
         nxt = figs[k + 1].start if k + 1 < len(figs) else len(sn)
         m = _CTX_STOP_RE.search(sn, f.uend, nxt)
         after = sn[f.uend : m.start() if m else nxt]
+        # «25% — на десерты и выпечку, и 15% — на чай и другие напитки»: nothing before the figure names it, the words
+        # after its dash do (the figure is the subject, the dash the verb)
+        dash = _DASH_AFTER_RE.match(sn, f.uend) if not _subject(after) and not _subject(sn[seg : f.start]) else None
+        if dash is not None and dash.end() < nxt:
+            m2 = _CTX_STOP_RE.search(sn, dash.end(), nxt)
+            after = sn[dash.end() : m2.start() if m2 else nxt]
         paired = bool(k) and bool(_PAIR_BETWEEN_RE.fullmatch(sn[figs[k - 1].end : f.start]))
         # a share's words after it are its base («35% выручки», «13,3% выручки»), not its subject: they count only
         # when nothing before names one («65% покупок приходится на утренние часы»)
@@ -1607,6 +1614,17 @@ class BriefIndex:
             v = self._derived_near(f)
             if v is None or _eq(v, f.value):
                 continue
+            if f.dec and _eq(_half_up(v, f.dec), f.value):
+                # the figure is the true value rounded («2,1» of 2,12): a hedge on it reads oddly on either side («более
+                # чем в 2,1 раза», «почти в 2,1 раза») — the rounded figure says it plainly: «в 2,1 раза»
+                m = _HEDGE_BEFORE_RE.search(out, max(0, f.start - 40), f.start)
+                if m is not None:
+                    prep = re.search(r"(на|в|у|за)\s+$", m.group(0))
+                    lead = f"{prep.group(1)} " if prep else ""
+                    if m.group("h")[:1].isupper():
+                        lead = lead[:1].upper() + lead[1:]
+                    out = out[: m.start()] + lead + out[f.start :]
+                continue
             want = "более чем" if v > f.value and f.hedge in ("almost", "lt") else "почти" if v < f.value and f.hedge == "gt" else None
             if want is None:
                 continue
@@ -1841,7 +1859,13 @@ def _ordinal(text: str, f: Fig) -> bool:
     """«Этап 1», «Неделя 2», «1. …»: the number of a step or of a list line."""
     if f.unit is not None or f.dec or f.value > 20 or f.date is not None:
         return False
-    return bool(_ORDINAL_BEFORE_RE.search(text[: f.start])) or (f.start <= 3 and bool(_LIST_NUMBER_RE.match(text)))
+    before = text[: f.start]
+    return bool(_ORDINAL_BEFORE_RE.search(before) or _STEP_HEAD_RE.search(before)) or (f.start <= 3 and bool(_LIST_NUMBER_RE.match(text)))
+
+
+# «Месяц 1 — учёт показателей», «Квартал 2: …»: a step's title at the start of a line (the brief's «1-й месяц»); not
+# «в месяц 5 новых клиентов» inside a sentence
+_STEP_HEAD_RE = re.compile(r"(?:^|[\n•·—–:;(]\s*)(?:месяц|квартал|month|quarter)\s*$", re.I)
 
 
 _CLAUSE_SEP_RE = re.compile(r"\s*[;,]\s+|\s+[—–-]\s+|:\s+|\s*\(\s*|\s*\)\s*|(?<=[.!?])\s+")
@@ -1862,6 +1886,26 @@ def _drop_clauses(t: str, spans: list[tuple[int, int]], edits: list[tuple[int, i
     clauses.append((pos, len(t)))
     sep_before.append(last_sep)
     keep = [not any(ca <= sa < cb or ca < sb <= cb or (sa <= ca and cb <= sb) for sa, sb in spans) for ca, cb in clauses]
+    # a dash joins a label and its value («чай и другие напитки — 15%», «15% — на чай»): one goes, both go — never a
+    # label left without its value, nor a value («— на чай и другие напитки») hung on the clause before
+    def dash_at(j: int) -> bool:  # the separator before clause j is a dash
+        sep = sep_before[j] if 0 <= j < len(clauses) else None
+        return sep is not None and bool(re.fullmatch(r"\s+[—–-]\s+", t[sep[0] : sep[1]]))
+
+    changed = True
+    while changed:
+        changed = False
+        for i in range(len(clauses) - 1):
+            if keep[i] == keep[i + 1]:
+                continue
+            sep = sep_before[i + 1]
+            if dash_at(i + 1):
+                keep[i] = keep[i + 1] = False
+                changed = True
+            elif keep[i] and sep is not None and _CONJ_RE.fullmatch(t[sep[0] : sep[1]]) and dash_at(i + 2) and not re.search(r"\d", t[clauses[i][0] : clauses[i][1]]):
+                # the label of a dash may be words joined by «и» («десерты и выпечка — 25%»): all of it goes with its value
+                keep[i] = False
+                changed = True
     out: list[str] = []
     new_edits: list[tuple[int, int]] = []
     first, offset = True, 0
@@ -1880,7 +1924,8 @@ def _drop_clauses(t: str, spans: list[tuple[int, int]], edits: list[tuple[int, i
             if len(gap) > 1:
                 # clauses went between: a new sentence after an end mark («… 23%. Время …», not «23%.; Время»), a
                 # comma for a parenthesis whose other half went («NPS 64, время …», not «NPS 64 (время …»)
-                if re.search(r"[.!?…]$", out[-1].rstrip()) or (re.search(r"[()]", s) and re.match(r"(?:и|а|но|and)\s", t[ca:cb], re.I)):
+                whole_paren = len(gap) == 2 and "(" in gap[0] and ")" in gap[1]  # «26,5% (900 000 → …) достигается»
+                if re.search(r"[.!?…]$", out[-1].rstrip()) or whole_paren or (re.search(r"[()]", s) and re.match(r"(?:и|а|но|and)\s", t[ca:cb], re.I)):
                     s = " "
                 elif re.search(r"[()]", s):
                     s = ", "
@@ -2594,21 +2639,33 @@ def _notes(idx: BriefIndex, notes: str, log: _Log) -> str:
     if not notes:
         return notes
     out = []
-    for sn in re.split(r"(?<=[.!?])\s+", notes):
+    for sn in H.split_sentences(notes) or [notes]:  # «на 2 п. п.», «т. е.» do not end a sentence
         c = idx.clean(sn)
         if c.placeholders:
             log.take(_Clean("", placeholders=c.placeholders))
         if c.bad:
             log.notes.append(sn.strip())
             # only the clause of the figure the brief does not have goes: the rest of a sentence of right figures stays
-            # when it still says something
+            # when it still says something and reads as the sentence's own beginning (the clauses after it went) —
+            # a clause cut out of the middle leaves broken grammar («25% — на десерты и выпечку — на чай …»,
+            # «… 25% — на десерты» without its «Из них»): then the whole sentence goes
             rest = c.text.strip()
-            if rest and len(content_stems(rest, neutral=True)) >= 4 and not idx.clean(rest).bad:
+            if rest and len(content_stems(rest, neutral=True)) >= 4 and not idx.clean(rest).bad and _leading_part(rest, sn):
                 out.append(rest if rest.endswith((".", "!", "?")) else rest + ".")
             continue
         if c.text:
             out.append(c.text)
     return " ".join(out)
+
+
+def _leading_part(rest: str, sentence: str) -> bool:
+    """`rest` is the beginning of `sentence` up to a clause's end (what is left when its last clauses went)."""
+    a = " ".join(rest.split()).rstrip(" .!?…;,")
+    b = " ".join(sentence.split())
+    if not a or not b.startswith(a):
+        return False
+    tail = b[len(a):]
+    return not tail or bool(re.match(r"\s*[,;.!?…(]", tail))
 
 
 def _slide_words(s: OutlineSlide) -> str:
@@ -2683,6 +2740,16 @@ def ground_outline(outline: DeckOutline, brief: Union[Brief, str], index: Option
                 s.subtitle = _keep_line(fx, sc) or None
             s.takeaway = _ground_side(fx, s.takeaway, log)
             s.footnote = _ground_side(fx, s.footnote, log)  # «Все исходные данные и прогнозы условные»
+            # the lines under the title («Цель: увеличить прибыль со 120 000 до 255 000 рублей»): whole, with the brief's
+            # figures only (a line that loses one goes: a goal without its figure says something else)
+            for field_ in ("paragraphs", "bullets"):
+                lines = []
+                for x in getattr(s.content, field_):
+                    lc = fx.clean(x)
+                    log.take(lc)
+                    if lc.text and not lc.bad:
+                        lines.append(lc.text)
+                setattr(s.content, field_, lines)
             kept.append(s)
             continue
         if s.kind == K.thanks:

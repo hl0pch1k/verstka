@@ -41,6 +41,8 @@ class AuditSummary(BaseModel):
     model_flags: int = 0
     score: int = 100
     checks_run: list[str] = Field(default_factory=list)
+    # the figures on the slides compared with the source text: {"checked", "derived", "unverified"} (checks/facts.py)
+    figures: Optional[dict] = None
 
 
 class AuditReport(BaseModel):
@@ -59,7 +61,7 @@ class AuditReport(BaseModel):
         return [i for i in self.issues if i.slide == slide]
 
     def recompute(self) -> "AuditReport":
-        s = AuditSummary(checks_run=self.summary.checks_run)
+        s = AuditSummary(checks_run=self.summary.checks_run, figures=self.summary.figures)
         for i in self.issues:
             if i.kind == "model":
                 s.model_flags += 1

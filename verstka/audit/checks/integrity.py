@@ -108,6 +108,27 @@ def wanted_strings(osl: OutlineSlide) -> list[str]:
     return out
 
 
+def _present(wanted: str, have: str) -> bool:
+    """The planned line is on the slide: verbatim (by its first characters); as a cover's title and subtitle («Итоги
+    пилота: план на 2027 год» set as «Итоги пилота» over «План на 2027 год»); or as a callout — a line that carries
+    one figure («Средний чек — 300 рублей») set as its figure large and its words under it («300 ₽» over «Средний
+    чек»), as the visual variant presents a chart's side lines."""
+    if _norm_text(wanted)[:CONTENT_KEY_CHARS] in have:
+        return True
+    from verstka.matching.scorer import split_display_title
+    from verstka.rendering.compose import kpi_callout
+
+    head, tail = split_display_title(wanted)
+    if tail and _norm_text(head)[:CONTENT_KEY_CHARS] in have and _norm_text(tail)[:CONTENT_KEY_CHARS] in have:
+        return True  # a cover heading of two phrases set as a title and its subtitle
+
+    got = kpi_callout(wanted)
+    if got is None:
+        return False
+    value, label = got
+    return _norm_text(label)[:CONTENT_KEY_CHARS] in have and _norm_text(value) in have
+
+
 def slide_text_norm(s: IRSlide) -> str:
     parts = [e.text for e in s.elements if e.type == "text" and e.has_text]
     for e in s.elements:
@@ -127,7 +148,7 @@ def content_missing(ctx: AuditContext) -> list[Issue]:
         if not wanted:
             continue
         have = slide_text_norm(s)
-        missing = [w for w in wanted if _norm_text(w)[:CONTENT_KEY_CHARS] not in have]
+        missing = [w for w in wanted if not _present(w, have)]
         if not missing:
             continue
         severity = "error" if len(missing) * 3 >= len(wanted) else "warn"

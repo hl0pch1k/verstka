@@ -18,7 +18,13 @@
 - Variants share the designs: structured takes the primary forms, visual the alternatives that show more (charts,
   figures), compact the denser ones and merges thin neighbours when the user did not fix the slide count. A slide
   whose form the user asked for keeps it in every variant. No two neighbours of one kind when an alternative fits.
-- Critic: one call per variant, skipped when the deadline is near; the designer revises only the flagged slides.
+- Critic: one call per variant, skipped when the deadline is near; next to it the agent's own check (slide_gaps: the
+  lists, the key figures, the takeaway the brief asks for, a headline without its figure); the designer revises only
+  the flagged slides, and a revision is taken part by part (merge_revision).
+- Editor's pass, deterministic: a line repeating the chart, the takeaway, the headline or the footnote goes, a takeaway
+  that restates the headline or claims a cause the brief does not state goes, notes say only what the source says,
+  steps are titled one way (tidy_design, clean_notes); after the revisions every slide the user described shows its
+  key figures and, when the brief asks for it, a takeaway from the brief's own sentences (complete_slide).
 - Compiler: planning/compile.py `compile_outline(outline, structure, brief) -> (DeckOutline, warnings)` (inline
   chart data → registry series, spec slides kept, the user's slide count); a minimal built-in step when it is not
   there. Then grounding.ground_outline (every figure from the brief) and outline.polish_plan.
@@ -64,7 +70,7 @@ from verstka.schemas.template import TemplateManifest
 log = logging.getLogger(__name__)
 
 AGENT_NAME = "deck_designer"
-AGENT_VERSION = "2.1.0"
+AGENT_VERSION = "2.2.0"
 EventFn = Callable[[dict], None]
 FactsSource = Union[FactsExtraction, tuple, Callable[[], Any], None]
 
@@ -398,6 +404,9 @@ class _Ctx:
     rules: str
     count: Optional[int]
     index: Any = None  # grounding's BriefIndex of the brief, built on first use (_headline_checked)
+    takeaway_rule: bool = False  # the brief asks for a conclusion on every slide («…содержательный заголовок и короткий вывод»)
+    unit_index: dict = field(default_factory=dict)  # unit key → grounding's index of that slide's own source (and the brief's frame)
+    lock: Any = field(default_factory=threading.Lock)
 
 
 def _dupe_series(a: Series, b: Series) -> bool:
@@ -454,6 +463,7 @@ def _build_ctx(brief: Brief, structure: BriefStructure, facts: FactsExtraction, 
         brief=brief, structure=structure, series=series, tables=tables, table_index=index, facts=fdict,
         allowed=sorted(set(allowed)), title=title, kinds=_kinds_text(manifest), rules="\n".join(f"- {r}" for r in rules),
         count=structure.slide_count or brief.slide_count,
+        takeaway_rule=takeaway_rule(structure, brief.text),
     )
     try:
         # grounding's index of the brief, built once here (not lazily from the designer's worker threads)
@@ -466,6 +476,20 @@ def _build_ctx(brief: Brief, structure: BriefStructure, facts: FactsExtraction, 
     except Exception:  # noqa: BLE001 - the checks that need it are skipped; grounding checks the deck anyway
         ctx.index = None
     return ctx
+
+
+# «На каждом слайде должен быть … короткий вывод», «Каждый слайд заканчивай выводом», «вывод на всех слайдах»
+_TAKEAWAY_RULE_RE = re.compile(
+    r"(?:кажд\w*|вс[еёи]\w*|любо\w*)\s+(?:\S+\s+){0,2}?слайд\w*[^.\n]{0,80}?(?:вывод|итог|takeaway)|"
+    r"(?:вывод|итог)\w*[^.\n]{0,60}?(?:на|для|в)\s+(?:кажд\w*|вс[еёи]\w*)\s+(?:\S+\s+){0,1}?слайд|"
+    r"every\s+slide[^.\n]{0,60}?(?:takeaway|conclusion)",
+    re.I,
+)
+
+
+def takeaway_rule(structure: BriefStructure, text: str = "") -> bool:
+    """The brief asks for a conclusion (a takeaway) on every slide."""
+    return any(_TAKEAWAY_RULE_RE.search(r) for r in [*structure.rules, text or ""])
 
 
 def _kinds_text(manifest: Optional[TemplateManifest]) -> str:
@@ -674,6 +698,7 @@ class _Source:
     groups: list[_Group] = field(default_factory=list)
     steps: list[tuple[str, str]] = field(default_factory=list)
     asks: list[str] = field(default_factory=list)
+    steps_label: Optional[str] = None  # the lead line of the steps («План на 6 месяцев:»)
 
 
 def _figure_item(x: str) -> bool:
@@ -717,6 +742,8 @@ def _read_source(text: str) -> _Source:
             continue
         m = _MONTH_RE.match(line)
         if m:
+            if label and not items and not src.steps:
+                src.steps_label = _label(label)
             close()
             src.steps.append((H.strip_end(m.group("t")), H.cap_first(H.strip_end(m.group("x")))))
             continue
@@ -774,6 +801,7 @@ _RESULT_STRONG_RE = re.compile(
 )
 _RESULT_WEAK_RE = re.compile(r"(?:прибыл|выручк|итог|рентабельност|бюджет|экономи|снижени|рост\b|больше|меньше)", re.I)
 TAKEAWAY_MAX_WORDS = 22
+_BACKREF_RE = re.compile(r"(?<![\wё])(?:эт(?:и|их|им|ими|от|ого|ому|ом|а|ой|у|о)|данн(?:ые|ых|ым|ыми|ая|ой|ую|ое)|таки[ехм]|из\s+них|из\s+этой)\s", re.I)
 
 
 def _takeaway_sentence(sentences: list[str], labels: list[str], shown: set[str]) -> Optional[str]:
@@ -785,12 +813,14 @@ def _takeaway_sentence(sentences: list[str], labels: list[str], shown: set[str])
     cands = [*labels, *sentences]  # a list's lead loses a tie to a sentence
     for i, sn in enumerate(cands):
         text = H.strip_end(sn)
-        if sn in shown or not figures(text) or _ASK_RE.match(text) or not 4 <= len(text.split()) <= TAKEAWAY_MAX_WORDS:
+        if sn in shown or text in shown or not figures(text) or _ASK_RE.match(text) or not 4 <= len(text.split()) <= TAKEAWAY_MAX_WORDS:
             continue
         # a result in money for the business (profit, revenue) says more than a ratio next to it
         score = 2 * bool(_RESULT_STRONG_RE.search(text)) + bool(_RESULT_WEAK_RE.search(text)) + bool(re.search(r"прибыл|выручк", text, re.I))
         if score <= 0:
             continue
+        if _BACKREF_RE.search(text):
+            score -= 2  # «При выручке … эти расходы составят …» leans on the sentence before it: another result first
         if best is None or (score, i) >= best[:2]:
             best = (score, i, text)
     return best[2] if best else None
@@ -1199,6 +1229,44 @@ def auto_alternatives(s: OutlineSlide) -> list[Alternative]:
 # ------------------------------------------------------------------ the model's design → a slide
 
 
+
+
+_UNIT_TAIL_RE = re.compile(r"^(?P<label>.*?)[\s,;(]*(?P<unit>₽|руб\.?|рубл(?:ей|я|ь)|%|процент\w*|шт\.?|штук)\)?$", re.I)
+_STATE_PREFIX_RE = re.compile(r"^(?:сейчас|было|стало|текущ\w*|нынешн\w*|исходн\w*|цель|целев\w*|план\w*|прогноз\w*|до|после)\s*(?:[—–:-]\s*|$)", re.I)
+_UNIT_SIGN = {"₽": "₽", "руб": "₽", "руб.": "₽", "рублей": "₽", "рубля": "₽", "рубль": "₽", "%": "%", "шт": "шт.", "шт.": "шт.", "штук": "шт."}
+
+
+def fix_callouts(numbers: list[NumberCallout], unit: _Unit, ctx: Optional[_Ctx]) -> list[NumberCallout]:
+    """A row of figures as the audience reads it: a label is never only a unit nor a «Цель — / Сейчас —» prefix — the
+    unit goes to the value («330» · «Средний чек, ₽» → «330 ₽» · «Средний чек»), the prefix goes; and a figure that is
+    one end of a before/after pair the slide's data gives (the analyst's «Сейчас / Цель» series, the brief's «с 300 до
+    330») is shown as the change of its measure with the measure's name: «300 → 330 ₽» · «Средний чек», «20% → 30%» ·
+    «Доля чеков с едой». Two figures of one pair become one callout."""
+    pairs = _series_figures(unit, ctx) if ctx is not None else []
+    out: list[NumberCallout] = []
+    for n in numbers:
+        value, label = " ".join((n.value or "").split()), H.strip_end(" ".join((n.label or "").split()))
+        m = _UNIT_TAIL_RE.match(label)
+        if m and not figures(label):
+            sign = _UNIT_SIGN.get(m.group("unit").lower(), m.group("unit"))
+            label = H.strip_end(m.group("label"))
+            if figures(value) and not re.search(r"[^\d\s  .,+\-−→]", value):
+                value = f"{value}%" if sign == "%" else f"{value} {sign}"
+        label = _STATE_PREFIX_RE.sub("", label).strip(" —–:-")
+        label = H.cap_first(label) if label else ""
+        vals = figures(value)
+        if "→" not in value and len(vals) == 1:
+            for p in pairs:
+                ends = figures(p.value)
+                if len(ends) == 2 and any(abs(vals[0] - e) <= 1e-6 * max(1.0, abs(e)) for e in ends) and (not label or _meet(_stems(label), _stems(p.label))):
+                    value, label = p.value, label or p.label  # the designer's name of the measure, else the data's
+                    break
+        if any(x.value == value for x in out):
+            continue  # the other end of a pair already shown as its change
+        out.append(n.model_copy(update={"value": value, "label": label}))
+    return out
+
+
 def _resolve_chart(ch: Optional[ChartSpec], unit: _Unit, ctx: _Ctx, changes: list[str]) -> Optional[ChartSpec]:
     """A chart of the designer's answer with its data inline and supported by the brief: series ids of the data list
     are copied in; a chart whose values are not in the brief is dropped (the request is then served by the rules)."""
@@ -1264,11 +1332,36 @@ _CAVEAT_RE = re.compile(
 )
 
 
+def _title_text(it: SlideItem) -> str:
+    """A card as one line: «Партнёрства — с пятью ближайшими офисами» (the text after the dash continues the title)."""
+    t, x = H.strip_end(it.title or ""), H.strip_end(it.text or "")
+    if not x and it.bullets:
+        x = "; ".join(H.strip_end(b) for b in it.bullets)  # a card of a list keeps its lines
+        return f"{t}: {x}" if t else x
+    if t and x and re.search(r"\s[—–]\s", x):
+        return f"{t}: {x}"  # the text has its own dash: «Свободные часы: 65% покупок — утром»
+    if t and x:
+        first = x.split()[0] if x.split() else ""
+        keep = len(first) >= 2 and first.isupper() or bool(re.match(r"[A-Za-z]", first))  # «NPS», «VK Tech»
+        return f"{t} — {x if keep else x[:1].lower() + x[1:]}"
+    return t or x
+
+
 def _fit_form(kind: str, c: SlideContent, changes: list[str], key: str) -> str:
     """Every field the designer filled is one the chosen form shows (a field it does not show would be lost on the
     slide — the audit calls that «content missing»): columns next to a small table become the slide (the table's
     figures are in them) or lines under the block; figures on a form without a row of figures become lines; the
     paragraphs past the lead line join the lines."""
+    if c.columns and c.items:
+        # the same blocks given twice (as cards and as columns): the form's own field keeps them
+        ct = [" ".join(H.strip_end(x.title).lower().split()) for x in c.columns]
+        it = [" ".join(H.strip_end(x.title).lower().split()) for x in c.items]
+        if ct == it or set(it) <= set(ct) or set(ct) <= set(it):
+            if kind in ("two_column", "comparison"):
+                c.items = []
+            else:
+                c.columns = []
+            changes.append(f"slide {key}: the same blocks as cards and as columns: kept once")
     if c.columns and kind not in ("two_column", "comparison"):
         col_text = " ".join(b for col in c.columns for b in [col.title, *col.bullets, col.text])
         col_figs = figures(col_text)
@@ -1301,7 +1394,7 @@ def _fit_form(kind: str, c: SlideContent, changes: list[str], key: str) -> str:
             body = "; ".join(x for x in [*(col.bullets or [col.text])] if x)
             if body:
                 lines.append(f"{col.title}: {body}" if col.title else body)
-        lines += [f"{H.strip_end(it.title)} — {it.text}" if it.title and it.text else (it.title or it.text) for it in c.items]
+        lines += [_title_text(it) for it in c.items]
         lines = [x for x in list(c.bullets) + lines if x]
         if len(lines) <= MAX_BULLETS and all(len(x.split()) <= 14 for x in lines):
             changes.append(f"slide {key}: {kind} with {len(c.numbers)} figures → a row of figures with the list under it")
@@ -1382,6 +1475,62 @@ def same_text(a: Optional[str], b: Optional[str]) -> bool:
     return len(small) >= 3 and len(small & big) / len(small) >= 0.85
 
 
+def _subject_stems(text: str) -> frozenset:
+    """The stems of what a line is about: its content words without the words of measure, change, period and plan
+    («рост», «вырастет», «месяц», «цель» …), which any two lines about one figure share."""
+    try:
+        from verstka.planning.grounding import _GENERIC_STEMS
+    except Exception:  # noqa: BLE001
+        _GENERIC_STEMS = ()  # noqa: N806
+    return frozenset(s for s in _stems(text) if not s.startswith(tuple(_GENERIC_STEMS)))
+
+
+# «за 6 месяцев», «в течение 30 дней»: the deck's horizon, not a figure a line adds
+_PERIOD_RE = re.compile(r"(?<![\d.,])\d{1,3}\s*(?:-?\s*(?:й|го|м)\s+)?(?:месяц\w*|мес\.|дн(?:я|ей)|день|недел\w*|год(?:а|у)?|лет|квартал\w*)(?![\wё])", re.I)
+
+
+def _figure_set(text: str) -> frozenset:
+    return frozenset(round(v, 6) for v in figures(_PERIOD_RE.sub(" ", text or "")))
+
+
+def adds_nothing(line: Optional[str], ref: Optional[str]) -> bool:
+    """`line` says nothing `ref` does not: the same words (same_text), or its figures are all ref's and what it speaks
+    of is ref's subject in other words — «Рост выручки на 26,5% за 6 месяцев» under «Выручка вырастет на 26,5% за 6
+    месяцев». A line that adds a figure or a subject of its own adds something («Рентабельность вырастет до 22,4%»
+    under «Прибыль вырастет вдвое»)."""
+    if not line or not ref:
+        return False
+    wl, wr = set(_words(line)), set(_words(ref))
+    if wl and len(wl & wr) / len(wl) >= 0.85:
+        return True  # its words are ref's (a line that holds ref's words and more of its own adds them)
+    fl, fr = _figure_set(line), _figure_set(ref)
+    if not fl <= fr:
+        return False
+    if len(fl) >= 2:
+        return True  # the same two figures: the same statement («Экономия 22 770 ₽ при выручке 1 138 500 ₽» twice)
+    mine, theirs = _subject_stems(line), _subject_stems(ref)
+    if not mine:
+        return bool(fl)  # only figures and measure words, all of them ref's
+    hit = sum(1 for x in mine if _meet(frozenset([x]), theirs))
+    return hit / len(mine) >= (0.75 if fl else 0.85) and (bool(fl) or len(mine) >= 2)
+
+
+# a footnote's kinds of caveat: a line under the block with the same one repeats it («Результат не гарантирован» over
+# the footnote «Прогноз не гарантирован»)
+_CAVEAT_KINDS = (
+    re.compile(r"не\s+гарантир|гаранти\w*\s+нет|без\s+гаранти", re.I),
+    re.compile(r"не\s+учитыва|не\s+учт[её]н|не\s+включ|без\s+уч[её]та|в\s+расч[её]т\s+не", re.I),
+    re.compile(r"условн|вымышлен|учебн\w*\s+кейс", re.I),
+    re.compile(r"учитыва\w*\s+отдельно|отдельно\s+от", re.I),
+)
+
+
+def same_caveat(a: Optional[str], b: Optional[str]) -> bool:
+    if not a or not b:
+        return False
+    return any(rx.search(a) and rx.search(b) for rx in _CAVEAT_KINDS)
+
+
 _SAM = r"сам(?:ый|ая|ое|ые|ого|ой|ую|ых|ым|ыми)"
 _MIN_CLAIM_RE = re.compile(rf"минимальн|наименьш|{_SAM}\s+(?:маленьк|низк|мал|скромн)|меньше\s+всего|незначительн", re.I)
 _MAX_CLAIM_RE = re.compile(rf"максимальн|наибольш|{_SAM}\s+(?:крупн|больш|высок|значим|дорог)|больше\s+всего|львин", re.I)
@@ -1429,6 +1578,20 @@ def _visible_text_of(headline: str, c: SlideContent) -> str:
     return " ".join(p for p in parts if p)
 
 
+def _shown_sentences(src: "_Source", headline: str, c: SlideContent) -> set[str]:
+    """The source's sentences and list leads the slide already says: in its words, or every figure of them written on
+    it (the headline, the lines, the figures — a chart's values are not counted: a coincidence of amounts is not the
+    same statement)."""
+    text = _visible_text_of(headline, c)
+    figs = figures(text)
+    out = set()
+    for x in [*src.sentences, *(g.label for g in src.groups if g.label)]:
+        vals = figures(x)
+        if said_in(x, text) or (vals and all(any(abs(v - y) <= 1e-6 * max(1.0, abs(v)) for y in figs) for v in vals)):
+            out.add(x)
+    return out
+
+
 def _filler_takeaway(takeaway: str, headline: str, c: SlideContent, source: str = "") -> bool:
     """A takeaway that adds nothing: it repeats a line, a figure's label or the formula of the slide; or it has no
     figure and at most one content word the headline does not have; or, without a figure, it does not say what the
@@ -1457,11 +1620,16 @@ def _tidy_lines(c: SlideContent) -> None:
 
 
 def _fallback_headline(unit: _Unit, ctx: _Ctx) -> str:
-    """A headline when the designer's cannot stay: the source's goal sentence with its figure, when grounding keeps it
-    whole and it is short («Цель — поднять средний чек с 300 до 330 рублей»), else the slide's title."""
-    goal = _goal_sentence(_read_source(unit.text).sentences)
-    if goal:
-        g = H.strip_end(goal)
+    """A headline when the designer's cannot stay: the source's goal sentence with its figure («Цель — поднять
+    средний чек с 300 до 330 рублей»), else its first key figure («Операционная прибыль — 120 000 рублей»), else its
+    sentence of a result («На запуск изменений потребуется 180 000 рублей»), when grounding keeps it whole and it is
+    short; else the slide's title — never a sentence of context («Кофейня площадью 45 м² рассчитана на 18 посадочных
+    мест»)."""
+    src = _read_source(unit.text)
+    goal = _goal_sentence(src.sentences)
+    result = _takeaway_sentence(src.sentences, [], set())
+    cands = ([goal] if goal and _GOAL_RE.match(goal) else []) + key_lines(unit.text) + ([result] if result else [])
+    for g in (H.strip_end(x) for x in cands):
         try:
             ok = ctx.index is None or not ctx.index.clean(g).bad
         except Exception:  # noqa: BLE001
@@ -1469,6 +1637,104 @@ def _fallback_headline(unit: _Unit, ctx: _Ctx) -> str:
         if ok and len(g.split()) <= 12:
             return H.cap_first(g)
     return unit.title
+
+
+def _invented_figures(text: Optional[str], ctx: Optional[_Ctx]) -> bool:
+    """The line has a figure the brief does not give (grounding's check; False when it cannot be run)."""
+    if not text or ctx is None or ctx.index is None:
+        return False
+    try:
+        return bool(ctx.index.clean(text).bad)
+    except Exception:  # noqa: BLE001 - grounding checks the deck again anyway
+        return False
+
+
+# a cause or an effect claimed: «… снижает операционную прибыль до 13,3%», «объясняется ростом выручки и контролем
+# расходов», «позволяет сосредоточиться на…»
+_CAUSE_RE = re.compile(
+    r"(?<![\wё])(?:снижа\w*|понижа\w*|повыша\w*|увеличива\w*|уменьша\w*|привод\w*|привед[её]т|позволя\w*|обеспечива\w*|"
+    r"влия\w*|объясня\w*|вызыва\w*|требу\w*|из-за|благодаря|вследствие|поэтому|следовательно|потому\s+что|за\s+сч[её]т|в\s+результате)(?![\wё])",
+    re.I,
+)
+
+
+def invented_cause(line: Optional[str], source: str) -> bool:
+    """The line claims a cause or an effect («Неравномерное распределение расходов снижает прибыль до 13,3%») with a
+    word of cause the slide's source does not use: a claim the brief does not make."""
+    if not line:
+        return False
+    src = (source or "").lower()
+    for m in _CAUSE_RE.finditer(line):
+        w = m.group(0).lower()
+        stem = w[:5] if len(w) > 5 and " " not in w and "-" not in w else w
+        if stem not in src:
+            return True
+    return False
+
+
+# «Дополнительные покупки при среднем чеке 330 ₽»: a noun and a condition, the result cut off
+_CONDITION_TAIL_RE = re.compile(r"\s+(?:при|с\s+учетом|с\s+учётом)\s+[^—–:;]*$", re.I)
+_CONDITION_ONLY_RE = re.compile(r"^[^\d]*?(?<![\wё])(?:при|с\s+учетом|с\s+учётом|для|за\s+сч[её]т|в\s+случае)\s[^—–:]*\d", re.I)
+
+
+def takeaway_states(text: Optional[str]) -> bool:
+    """A takeaway that states something (a figure, a verb, a dash or a colon for the verb: «Рост постепенный: это
+    прогноз, а не гарантия»), not a label or a list announced («Три ключевых направления для роста прибыли»), nor a
+    phrase whose only figures are a condition's («Дополнительные покупки при среднем чеке 330 ₽» — its result is cut
+    off)."""
+    t = (text or "").strip()
+    if not t:
+        return False
+    has_verb = any(m.group(0).lower() not in _NOT_VERBS for m in _VERB_RE.finditer(t))
+    if not has_verb and not re.search(r"\s[—–]\s|:\s", t) and _CONDITION_ONLY_RE.match(t):
+        return False
+    return headline_states(t) or (bool(re.search(r":\s", t)) and not _QUESTION_HEAD_RE.search(t))
+
+
+def _copied_context(subtitle: str, headline: str, unit: _Unit) -> bool:
+    """A subtitle that is a sentence of the slide's source copied as it is, and neither the slide's goal or key figure
+    nor about the headline's subject: context, not a subtitle."""
+    if unit.spec is None or not (unit.text or "").strip():
+        return False
+    src = _read_source(unit.text)
+    copy = next((sn for sn in src.sentences if same_text(subtitle, sn)), None)
+    if copy is None:
+        return False
+    if _GOAL_RE.match(copy) or any(same_text(copy, k) for k in key_lines(unit.text)):
+        return False
+    mine, theirs = _subject_stems(subtitle), _subject_stems(headline)
+    shared = sum(1 for x in mine if _meet(frozenset([x]), theirs))
+    return shared * 2 < max(1, len(mine))
+
+
+# «… показаны графически», «на диаграмме видно»: a line about the slide, not about its subject
+_SHOWN_RE = re.compile(r"(?<![\wё])(?:показан\w*\s+(?:графически|на\s+(?:графике|диаграмме|слайде))|на\s+(?:графике|диаграмме|слайде)\s+(?:видн|показан|представлен)\w*|представлен\w*\s+(?:графически|наглядно))", re.I)
+# a sentence about the deck's making, not its subject: «вывод сделан на основе текста брифа», «как указано в брифе»
+_META_RE = re.compile(r"(?<![\wё])(?:бриф\w*|brief|промпт\w*|пользовател\w*\s+(?:просил|указал))", re.I)
+
+
+def clean_notes(notes: str, unit: _Unit, charts: list, ctx: Optional[_Ctx], changes: Optional[list[str]] = None) -> str:
+    """The designer's speaker notes without what the slide's source does not say: a sentence with no figure whose words
+    are mostly not the source's («Это позволяет сосредоточиться на оптимизации закупок», «Риски требуют постоянного
+    мониторинга»), a ranking the data contradicts («… а прочие расходы — наименьшую»). Notes left empty take the
+    source's sentences the slide does not show (the explanations and calculations of the brief)."""
+    text = " ".join((notes or "").split())
+    if unit.spec is None or not (unit.text or "").strip():
+        return text
+    keep, gone = [], []
+    for sn in H.split_sentences(text) or ([text] if text else []):
+        if not sn.strip():
+            continue
+        if _META_RE.search(sn) or comparative_false(sn, charts, ctx) or invented_cause(sn, unit.text) or (not figures(sn) and not said_in(sn, unit.text, 0.6)):
+            gone.append(sn)
+            continue
+        keep.append(sn)
+    if gone and changes is not None:
+        changes.append(f"slide {unit.key}: notes the source does not say dropped: {' '.join(gone)[:120]}")
+    if not keep and gone:
+        src = _read_source(unit.text)
+        keep = [H.strip_end(sn) + "." for sn in src.sentences if not _ASK_RE.match(sn)][:4]
+    return " ".join(keep)
 
 
 def design_from_answer(ans: SlideDesignAnswer, unit: _Unit, ctx: _Ctx) -> Optional[_Design]:
@@ -1490,6 +1756,17 @@ def design_from_answer(ans: SlideDesignAnswer, unit: _Unit, ctx: _Ctx) -> Option
     )
     if c.chart is None and c.chart2 is not None:
         c.chart, c.chart2 = c.chart2, None
+    listed = [it for it in c.items if len(it.bullets) >= 2]
+    if listed and not c.columns:
+        if 2 <= len(c.items) <= 3 and len(listed) == len(c.items):
+            # «two_column» answered with its lists under «items»: the lists are columns (a card shows no list)
+            c.columns, c.items = [SlideItem(title=it.title, text=it.text, number=it.number, bullets=list(it.bullets)) for it in c.items], []
+            changes.append(f"slide {unit.key}: blocks with lists given as cards → columns")
+        else:
+            for it in listed:  # a card of a list: its lines as its text, never lost
+                if not it.text:
+                    it.text = "; ".join(H.strip_end(b) for b in it.bullets[:4])
+                    it.bullets = []
     body = c.model_dump()
     if not (c.bullets or c.paragraphs or c.items or c.numbers or c.table or c.chart or c.columns or c.quote or c.formula):
         return None
@@ -1504,6 +1781,13 @@ def design_from_answer(ans: SlideDesignAnswer, unit: _Unit, ctx: _Ctx) -> Option
             kind = "big_number" if c.formula else "bullets"
     if kind == "stat_row" and len(c.numbers) == 1:
         kind = "big_number"
+    if c.numbers:
+        fixed = fix_callouts(c.numbers, unit, ctx)
+        if [(n.value, n.label) for n in fixed] != [(n.value, n.label) for n in c.numbers]:
+            changes.append(f"slide {unit.key}: figures «{'; '.join(f'{n.value} · {n.label}' for n in c.numbers)[:120]}» → «{'; '.join(f'{n.value} · {n.label}' for n in fixed)[:120]}»")
+            c.numbers = fixed
+        if kind == "stat_row" and len(c.numbers) == 1:
+            kind = "big_number"
     kind = _fit_form(kind, c, changes, unit.key)
     _tidy_lines(c)
     charts = [x for x in (c.chart, c.chart2) if x is not None]
@@ -1557,14 +1841,27 @@ def design_from_answer(ans: SlideDesignAnswer, unit: _Unit, ctx: _Ctx) -> Option
             footnote = None
         elif not _CAVEAT_RE.search(footnote):
             # a statement of the source set in small print («Маркетинговый бюджет вырастет до 35 000 ₽»): content, a line
-            if len(c.bullets) < MAX_BULLETS:
-                c.bullets.append(H.strip_end(footnote))
+            for sn in H.split_sentences(footnote) or [footnote]:
+                if len(c.bullets) < MAX_BULLETS and H.strip_end(sn):
+                    c.bullets.append(H.strip_end(sn))  # a line per sentence
             changes.append(f"slide {unit.key}: footnote that is content moved to the slide's lines: {footnote[:80]}")
             footnote = None
     takeaway = H.strip_end(ans.takeaway or "") or None
-    if takeaway and same_text(takeaway, headline):
-        takeaway = None  # a conclusion said twice: the headline already carries it
+    if takeaway and adds_nothing(takeaway, headline):
+        takeaway = None  # a conclusion said twice (in other words: «Рост выручки на 26,5%» under «Выручка вырастет на 26,5%»)
         changes.append(f"slide {unit.key}: the takeaway repeated the headline, dropped")
+    if takeaway and not takeaway_states(takeaway):
+        # «Три ключевых направления для роста прибыли»: a label, not a conclusion
+        changes.append(f"slide {unit.key}: the takeaway «{takeaway[:80]}» states nothing, dropped")
+        takeaway = None
+    if takeaway and not (unit.spec is not None and unit.spec.takeaway) and invented_cause(takeaway, unit.text):
+        changes.append(f"slide {unit.key}: the takeaway «{takeaway[:80]}» claims a cause the brief does not state, dropped")
+        takeaway = None
+    if takeaway and _invented_figures(takeaway, ctx):
+        # «На зарплаты и продукты уходит 65% всех расходов» (they are 75%): grounding would cut the figure out and leave
+        # a broken line — the source's own result takes its place
+        changes.append(f"slide {unit.key}: the takeaway «{takeaway[:80]}» has figures not in the brief, dropped")
+        takeaway = None
     if takeaway and figures(takeaway) and any(same_text(takeaway, b) for b in c.bullets):
         # a result with its figure said twice: the conclusion strip keeps it, the line under the block goes
         c.bullets = [b for b in c.bullets if not same_text(takeaway, b)]
@@ -1575,13 +1872,23 @@ def design_from_answer(ans: SlideDesignAnswer, unit: _Unit, ctx: _Ctx) -> Option
     if takeaway is None and unit.spec is not None and not unit.spec.takeaway:
         # the source's own sentence with its result and figure («+90 000 ₽ выручки в месяц — это выручка, а не прибыль»)
         src = _read_source(unit.text)
-        shown = {x for x in src.sentences if said_in(x, _visible_text_of(headline, c))}
+        shown = _shown_sentences(src, headline, c)
         takeaway = _takeaway_sentence(src.sentences, [g.label for g in src.groups if g.label], shown)
-        if takeaway and (same_text(takeaway, headline) or _filler_takeaway(takeaway, headline, c, unit.text)):
+        if takeaway and (adds_nothing(takeaway, headline) or _filler_takeaway(takeaway, headline, c, unit.text)):
             takeaway = None
+    subtitle = H.strip_end(ans.subtitle or "") or None
+    notes = ans.notes or ""
+    if subtitle and _copied_context(subtitle, headline, unit):
+        # a sentence of the source copied under the headline («Кофейня площадью 45 м² рассчитана на 18 посадочных
+        # мест» under «Кофе — 60% выручки»): context for the speaker, not the slide's subtitle
+        changes.append(f"slide {unit.key}: the subtitle «{subtitle[:80]}» copies the source's context: moved to the notes")
+        if not said_in(subtitle, notes, 0.8):
+            notes = f"{subtitle}. {notes}".strip()
+        subtitle = None
+    notes = clean_notes(notes, unit, charts, ctx, changes)
     s = OutlineSlide(
-        id=unit.key, kind=PatternKind(kind), section=unit.section, headline=headline, subtitle=ans.subtitle, content=c,
-        notes=ans.notes or "", takeaway=takeaway, footnote=footnote, rationale=ans.rationale or None,
+        id=unit.key, kind=PatternKind(kind), section=unit.section, headline=headline, subtitle=subtitle, content=c,
+        notes=notes, takeaway=takeaway, footnote=footnote, rationale=ans.rationale or None,
         spec_ref=unit.spec.number if unit.spec else None,
     )
     if not s.rationale:
@@ -1657,16 +1964,23 @@ def enforce_requests(d: _Design, ctx: _Ctx) -> None:
             s.kind = PatternKind.table
             c.chart, c.chart2 = None, None
             s.rationale = _why(s, requested=True)
-    if spec.formula and (c.formula or "").strip() != spec.formula.strip():
-        # the user's formula, in the user's words («Покажи формулу: 100 × 300 × 30 = 900 000 рублей»): never the model's
-        if c.formula:
-            d.changes.append(f"slide {d.unit.key}: the designer's formula «{c.formula[:60]}» → the brief's")
-        c.formula = spec.formula
+    if spec.formula:
+        # the user's calculation («Покажи формулу: 100 × 300 × 30 = 900 000 рублей»): the designer's words may name its
+        # factors («100 покупок в день × 300 ₽ × 30 дней = 900 000 ₽»), its figures and operators are the user's; a
+        # bare formula gets its factors named from the slide's text
+        from verstka.planning.compile import label_formula, same_formula
+
+        if not same_formula(c.formula, spec.formula):
+            if c.formula:
+                d.changes.append(f"slide {d.unit.key}: the designer's formula «{c.formula[:60]}» → the brief's")
+            c.formula = spec.formula
+        if not re.search(r"[а-яё]{3,}.*[×x*·÷/+]", (c.formula or "").split("=")[0], re.I):
+            c.formula = label_formula(c.formula, d.unit.text) or c.formula
     if spec.footnote and not same_text(s.footnote, spec.footnote):
         s.footnote = spec.footnote  # the user's footnote, in the user's words
     if spec.takeaway:
         s.takeaway = spec.takeaway
-        if same_text(s.takeaway, s.headline) and d.unit.title and not same_text(d.unit.title, s.takeaway):
+        if (same_text(s.takeaway, s.headline) or adds_nothing(s.headline, s.takeaway)) and d.unit.title and not same_text(d.unit.title, s.takeaway):
             # the user's conclusion is the takeaway: the headline states the slide's key figure (its goal sentence),
             # else it goes back to the user's heading — not a copy of the conclusion
             s.headline = _fallback_headline(d.unit, ctx)
@@ -1675,25 +1989,370 @@ def enforce_requests(d: _Design, ctx: _Ctx) -> None:
         s.kind = PatternKind(kind_by_content(c.model_dump()))
 
 
-def _split_merged_lists(d: _Design) -> None:
-    """A column that merges two lists of the source («Меры и риски»: three measures, then three risks) is split into a
-    column per list, in the source's words and order: the pairs risk → measure stay readable."""
+_ORD_TOKEN_RE = re.compile(r"(?<![\d.,])\d{1,2}\s*-\s*(?:й|ый|ой|ий|го|ого|его|му|ому|м|ом|я|е)(?![\wё])|(?<![\wё])(?:месяц|квартал|неделя|этап|шаг)\s+\d{1,2}(?!\d)", re.I)
+
+
+def _plain_figures(text: str) -> list[float]:
+    """The figures of a line that are values — not a step's number («6-й месяц», «Месяц 2»)."""
+    return figures(_ORD_TOKEN_RE.sub(" ", text or ""))
+
+
+def _content_text(s: OutlineSlide) -> str:
+    """What the slide's block says (not its headline, takeaway or notes): lines, cards, columns, figures, formula."""
+    c = s.content
+    parts = [c.formula or "", *c.bullets, *c.paragraphs]
+    parts += [f"{it.title} {it.text} {' '.join(it.bullets)}" for it in [*c.items, *c.columns]]
+    parts += [f"{n.value} {n.label}" for n in c.numbers]
+    return " ".join(p for p in parts if p)
+
+
+def takeaway_ok(t: Optional[str], s: OutlineSlide, unit: _Unit, ctx: Optional[_Ctx]) -> Optional[str]:
+    """Why a takeaway cannot stay on the slide (None: it can): it states nothing, repeats the headline or what the
+    slide's block already says (its cards, its formula: «100 покупок в день × 300 ₽ × 30 дней» under the formula),
+    claims a cause the brief does not state, or has a figure the brief does not give. The user's own conclusion
+    always stays."""
+    if not t:
+        return None
+    if unit.spec is not None and unit.spec.takeaway and same_text(t, unit.spec.takeaway):
+        return None
+    if not takeaway_states(t):
+        return "states nothing"
+    if adds_nothing(t, s.headline):
+        return "repeats the headline"
+    if _CONDITION_TAIL_RE.search(t) and adds_nothing(_CONDITION_TAIL_RE.sub("", t), s.headline):
+        return "repeats the headline with a condition"  # «… 22 770 ₽ в месяц при выручке 1 138 500 ₽»
+    body = _content_text(s)
+    if body and adds_nothing(t, body):
+        return "repeats the slide's block"
+    if (unit.text or "").strip() and invented_cause(t, unit.text):
+        return "claims a cause the brief does not state"
+    if _META_RE.search(t) or _SHOWN_RE.search(t):
+        return "speaks of the slide, not of the subject"
+    if _invented_figures(t, ctx):
+        return "has figures not in the brief"
+    return None
+
+
+_SPEC_HEAD_LINE_RE = re.compile(r"^\s*(?:#{1,6}\s*)?(?:слайд|slide)\s*\d{1,2}\b.*$", re.I | re.M)
+
+
+def _frame_text(ctx: _Ctx) -> str:
+    """The brief without the slides it describes: its title line, its context and its rules — what every slide may say
+    («за 6 месяцев» of «Кофейня «Точка кофе»: план увеличения прибыли за 6 месяцев»)."""
+    rest = ctx.brief.text or ""
+    for sp in ctx.structure.specs:
+        if sp.text:
+            rest = rest.replace(sp.text, " ")
+    return _SPEC_HEAD_LINE_RE.sub(" ", rest)
+
+
+def unit_index(unit: _Unit, ctx: Optional[_Ctx]) -> Any:
+    """Grounding's index of one slide's own source (its text, its data, the brief's frame): a figure it does not give
+    or derive comes from another slide («Операционная прибыль вырастет на 112,3%» on the slide of the investments)."""
+    if ctx is None or not (unit.text or "").strip():
+        return None
+    with ctx.lock:
+        if unit.key in ctx.unit_index:
+            return ctx.unit_index[unit.key]
+    try:
+        from verstka.planning.grounding import BriefIndex
+
+        extra = [f"{s.name}: " + "; ".join(f"{c} — {_fmt_ru(v, s.unit)}" for c, v in zip(s.categories, s.values)) for s in (ctx.series.get(x) for x in unit.series_ids) if s is not None]
+        extra += [" ".join([*t.columns, *(c for r in t.rows for c in r)]) for t in (ctx.tables.get(x) for x in unit.table_ids) if t is not None]
+        idx = BriefIndex("\n".join([unit.text, *extra, _frame_text(ctx)]))
+        idx.use_structure(BriefStructure(series=[ctx.series[x] for x in unit.series_ids if x in ctx.series], tables=[ctx.tables[x] for x in unit.table_ids if x in ctx.tables]))
+    except Exception:  # noqa: BLE001 - the deck-wide grounding still checks every figure
+        idx = None
+    with ctx.lock:
+        ctx.unit_index[unit.key] = idx
+    return idx
+
+
+def foreign_figures(text: Optional[str], unit: _Unit, ctx: Optional[_Ctx]) -> list[str]:
+    """The figures of a line that the slide's own source neither gives nor derives (they are another slide's, or
+    nobody's)."""
+    idx = unit_index(unit, ctx)
+    if idx is None or not text:
+        return []
+    try:
+        from verstka.planning.grounding import figures as gfigs
+    except Exception:  # noqa: BLE001
+        return []
+    out = []
+    for f in gfigs(text):
+        if f.date is not None or f.approx:
+            continue
+        if idx.verdict(f) == "bad" and not re.fullmatch(r"\d{1,2}", text[f.start : f.uend].strip()):
+            out.append(text[f.start : f.uend].strip())
+    return out
+
+
+# the words of a deck about any business («статья расходов», «направление», «этап», «мера»): never a claim of their own
+_DECK_WORDS = ("стат", "направлен", "фактор", "этап", "шаг", "мер", "задач", "итог", "результат", "эффект", "действ", "пункт")
+
+
+def _unbriefed_words(line: str, ctx: Optional[_Ctx]) -> list[str]:
+    """The content words of a line without figures that the brief nowhere uses (a classification or a claim of the
+    model's: «Аренда и зарплаты — основные постоянные расходы» when the brief never calls anything «постоянные»). A
+    line with a figure is grounding's to judge."""
+    if ctx is None or ctx.index is None or figures(line):
+        return []
+    try:
+        from verstka.planning.grounding import _GENERIC_STEMS, content_stems
+
+        return [x for x in content_stems(line, neutral=True) if not x.startswith(_GENERIC_STEMS) and not x.startswith(_DECK_WORDS) and not ctx.index.stems.has(x)]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+_FUNCTION_WORDS = frozenset(
+    """с со в во на для по до от из к ко за при без через про об о у и а или но либо как чтобы если когда где
+    между перед после над под""".split()
+)
+_COLON_LINE_RE = re.compile(r"^(?P<head>[^:\d]{2,60}?):\s+(?P<first>[A-ZА-ЯЁ][^\s,;:]*)")
+
+
+def _lowered(word: str, text: str) -> bool:
+    """The word may start in lowercase: not an abbreviation («NPS», «ВКС»), not a Latin name, not a quotation, and not a
+    name — a word the brief writes with its capital in the middle of a sentence («… в Москве»)."""
+    core = word.strip("«»\"'()")
+    if core.lower() in _FUNCTION_WORDS:
+        return True
+    if not core or core[:1] in "«\"" or re.match(r"[A-Za-z]", core) or (len(core) >= 2 and core.isupper()) or any(ch.isupper() for ch in core[1:]):
+        return False
+    stem = core if len(core) <= 5 else core[: len(core) - 2]
+    if re.search(rf"(?<![\wё]){re.escape(stem.lower())}", text or ""):
+        return True  # the brief writes it in lowercase: a common word
+    return not re.search(rf"(?:[a-zа-яё0-9,;:)»]\s+|«){re.escape(stem)}", text or "")
+
+
+_GROWTH_NOUN = {"роста": "рост", "прироста": "прирост", "снижения": "снижение", "сокращения": "сокращение", "падения": "падение"}
+# «— это 112,3% роста» → «— рост на 112,3%»: a change said the way a person says it (only a clause's own end: «12% роста
+# выручки» is left alone)
+_PCT_GROWTH_RE = re.compile(
+    r"(?P<lead>^|[—–,:]\s*)(?:это\s+)?(?P<v>[+\-−]?\d[\d\s  ]*(?:[.,]\d+)?\s?%)\s+(?P<w>роста|прироста|снижения|сокращения|падения)(?=\s*(?:$|[.,;!?)]))",
+    re.I,
+)
+
+
+def plain_change(line: Optional[str]) -> Optional[str]:
+    if not line:
+        return line
+    out = _PCT_GROWTH_RE.sub(lambda m: f"{m.group('lead')}{_GROWTH_NOUN[m.group('w').lower()]} на {m.group('v')}", line)
+    return H.cap_first(out) if out != line else line
+
+
+def trim_chart_restatement(line: Optional[str], charts: list) -> Optional[str]:
+    """A line beside a chart that first says again what the chart draws and then adds a figure of its own
+    («Операционная прибыль вырастет до 254 795 рублей в месяц — рост на 112,3%» over the columns 120 000 and
+    254 795): the part that adds, on its own («Рост на 112,3%»). The line as it is when nothing of it repeats the
+    chart, or when what is left would not stand."""
+    if not line or not charts:
+        return line
+    vals = [v for ch in charts for sr in ch.series for v in sr.values]
+    m = re.match(r"^(?P<head>.*\d.*?)\s*\((?P<sign>[+\-−])\s?(?P<v>\d+(?:[.,]\d+)?)\s?%\)\s*$", line)
+    if m:  # «… до 254 795 рублей в месяц (+112,3%)»
+        head, rest = m.group("head"), ("Рост на " if m.group("sign") == "+" else "Снижение на ") + m.group("v") + "%"
+    else:
+        parts = re.split(r"\s+[—–]\s+(?=[^\d]*\d)", line, maxsplit=1)
+        if len(parts) != 2:
+            return line
+        head, rest = parts
+    hv, rv = _plain_figures(head), _plain_figures(rest)
+    on_chart = lambda v: any(abs(v - x) <= 1e-6 * max(1.0, abs(v)) or (abs(v) >= 1000 and abs(v - x) <= 500) for x in vals)  # noqa: E731
+    if hv and all(on_chart(v) for v in hv) and rv and not all(on_chart(v) for v in rv) and len(rest.split()) >= 2:
+        return H.cap_first(H.strip_end(rest))
+    return line
+
+
+def polish_case(s: OutlineSlide, text: str) -> None:
+    """Capitals where Russian has them: the text after a label's colon starts in lowercase («Партнёрства: с пятью
+    ближайшими офисами», «Меры: учёт остатков»), and so does a card's text that continues its title with a preposition or
+    a conjunction («Дневные предложения» · «с 15:00 до 18:00») — never a name or an abbreviation («Партнёр: VK Tech»,
+    «Город: Москва» when the brief writes «Москва» with its capital)."""
+    def colon(line: str) -> str:
+        m = _COLON_LINE_RE.match(line or "")
+        if m and _lowered(m.group("first"), text):
+            i = m.start("first")
+            return line[:i] + line[i].lower() + line[i + 1:]
+        return line
+
+    c = s.content
+    c.bullets = [colon(b) for b in c.bullets]
+    c.paragraphs = [colon(b) for b in c.paragraphs]
+    for n in c.numbers:
+        n.label = colon(n.label or "")
+    for it in [*c.items, *c.columns]:
+        it.bullets = [colon(b) for b in it.bullets]
+        t = (it.text or "").strip()
+        first = t.split()[0] if t.split() else ""
+        if it.title and first and first[:1].isupper() and first.lower() in _FUNCTION_WORDS:
+            it.text = t[:1].lower() + t[1:]
+        elif it.text:
+            it.text = colon(it.text)
+    if s.takeaway:
+        s.takeaway = colon(s.takeaway)
+
+
+def tidy_design(d: _Design, ctx: Optional[_Ctx] = None) -> None:
+    """The slide once its form is final (after the user's requests are enforced — a requested chart may have been
+    added, a headline replaced): no line says again what the slide says elsewhere — the chart's own values, the
+    takeaway, the headline, the footnote's caveat («Результат не гарантирован» over «Прогноз не гарантирован»); no
+    takeaway that repeats the headline in other words; the steps of a plan titled one way («1-й месяц», not «Месяц 2»
+    next to untitled ones)."""
+    s, c = d.slide, d.slide.content
+    if d.unit.frame or s.kind.value in FRAME_KINDS:
+        return
+    users = d.unit.spec.takeaway if d.unit.spec is not None else None
+    if d.by == "model" and d.unit.spec is not None:
+        # what another slide's source says (a reviewer's note sent to the wrong slide, the model's memory of the deck):
+        # never on this one
+        foreign = foreign_figures(s.headline, d.unit, ctx)
+        if foreign:
+            new = _fallback_headline(d.unit, ctx)
+            d.changes.append(f"slide {d.unit.key}: the headline «{s.headline[:80]}» has figures of another slide ({', '.join(foreign[:3])}) → «{new[:80]}»")
+            s.headline = new
+        if s.takeaway and not users and foreign_figures(s.takeaway, d.unit, ctx):
+            d.changes.append(f"slide {d.unit.key}: the takeaway «{s.takeaway[:80]}» has figures of another slide, dropped")
+            s.takeaway = None
+        for field_ in ("bullets", "paragraphs"):
+            lines = getattr(c, field_)
+            keep = [b for b in lines if not foreign_figures(b, d.unit, ctx) and not _unbriefed_words(b, ctx)]
+            if len(keep) < len(lines):
+                d.changes.append(f"slide {d.unit.key}: lines with figures of another slide or words the brief does not use dropped: {'; '.join(b for b in lines if b not in keep)[:120]}")
+                setattr(c, field_, keep)
+    why = takeaway_ok(s.takeaway, s, d.unit, ctx)
+    if why:
+        old_tk = s.takeaway
+        s.takeaway = None
+        if d.unit.spec is not None and (d.unit.text or "").strip():
+            # the source's own sentence of a result the slide does not show yet, if there is one
+            src = _read_source(d.unit.text)
+            cand = _takeaway_sentence(src.sentences, [g.label for g in src.groups if g.label], _shown_sentences(src, s.headline, s.content))
+            if cand and takeaway_ok(cand, s, d.unit, ctx) is None and not _filler_takeaway(cand, s.headline, s.content, d.unit.text):
+                s.takeaway = cand
+        if s.takeaway is None and why == "repeats the headline with a condition":
+            s.takeaway = old_tk  # its condition is still something the headline does not say: better than none
+        else:
+            d.changes.append(f"slide {d.unit.key}: the takeaway «{(old_tk or '')[:80]}» {why}, " + (f"replaced by the source's «{s.takeaway[:60]}»" if s.takeaway else "dropped"))
+    if c.formula and c.numbers and all(set(figures(n.value)) <= set(figures(c.formula)) for n in c.numbers):
+        # «900 000 · руб.» next to «100 × 300 × 30 = 900 000 ₽»: the formula shows its result large already
+        d.changes.append(f"slide {d.unit.key}: figures that repeat the formula's dropped")
+        c.numbers = []
+        if s.kind == PatternKind.stat_row:
+            s.kind = PatternKind.big_number
+    vals = [v for ch in (c.chart, c.chart2) if ch is not None for sr in ch.series for v in sr.values]
+    vals += [v for n in c.numbers for v in figures(n.value)] + figures(c.formula or "")
+
+    def repeats(b: str) -> Optional[str]:
+        if d.by == "model" and (d.unit.text or "").strip() and invented_cause(b, d.unit.text):
+            return "nothing: a cause the brief does not state"
+        if vals and _plain_figures(b) and all(any(abs(v - x) <= 1e-6 * max(1.0, abs(v)) or (abs(v) >= 1000 and abs(v - x * 1000) <= 500) for x in vals) for v in _plain_figures(b)) and (c.chart is not None or c.numbers or c.formula):
+            return "the figures the slide shows"
+        if s.takeaway and (adds_nothing(b, s.takeaway) or same_caveat(b, s.takeaway)):
+            return "the takeaway"
+        if adds_nothing(b, s.headline):
+            return "the headline"
+        if s.footnote and (same_caveat(b, s.footnote) or adds_nothing(b, s.footnote)):
+            return "the footnote"
+        return None
+
+    for field_ in ("bullets", "paragraphs"):
+        lines = getattr(c, field_)
+        keep = []
+        for b in lines:
+            why = repeats(b)
+            if why is None:
+                keep.append(b)
+            else:
+                d.changes.append(f"slide {d.unit.key}: the line «{b[:60]}» repeated {why}, dropped")
+        if len(keep) < len(lines) and (keep or c.chart is not None or c.table is not None or c.items or c.columns or c.numbers or c.formula or field_ == "paragraphs" or c.paragraphs):
+            setattr(c, field_, keep)
+    _uniform_steps(d)
+    s.takeaway = plain_change(s.takeaway)
+    c.bullets = [plain_change(b) or b for b in c.bullets]
+    charts = [x for x in (c.chart, c.chart2) if x is not None]
+    if charts and s.takeaway and not users:
+        t2 = trim_chart_restatement(s.takeaway, charts)
+        if t2 != s.takeaway and takeaway_ok(t2, s, d.unit, ctx) is None:
+            d.changes.append(f"slide {d.unit.key}: the takeaway «{s.takeaway[:80]}» said the chart's figures again → «{t2}»")
+            s.takeaway = t2
+    c.bullets = [trim_chart_restatement(b, charts) or b for b in c.bullets]
+    polish_case(s, ctx.brief.text if ctx is not None else d.unit.text)
+    # «2 п. п.» never breaks between its dots at a line's end
+    s.headline = _PP_RE.sub("\\1\u00a0п.\u00a0п.", s.headline or "")
+    if s.takeaway:
+        s.takeaway = _PP_RE.sub("\\1\u00a0п.\u00a0п.", s.takeaway)
+    c.bullets = [_PP_RE.sub("\\1\u00a0п.\u00a0п.", b) for b in c.bullets]
+
+
+_PP_RE = re.compile(r"(\d)\s+п\.\s*п\.")
+_STEP_ORD_RE = re.compile(r"^(?:(?P<n1>\d{1,2})\s*-?\s*(?:й|ый|ой|ий)?\s*(?P<w1>месяц|недел[яи]|квартал|этап|шаг|день)|(?P<w2>месяц|неделя|квартал|этап|шаг)\s+(?P<n2>\d{1,2}))$", re.I)
+
+
+def _uniform_steps(d: _Design) -> None:
+    """The steps of a timeline or a process (or a column of steps) titled one way: the source's own step titles
+    («1-й месяц», …) when the slide shows as many steps as the source gives, in order; else an untitled step between
+    titled ones gets its number's title in the form of the others («Месяц 2» … → «Месяц 3»)."""
+    src = _read_source(d.unit.text) if (d.unit.text or "").strip() else _Source()
     c = d.slide.content
-    if not c.columns:
+
+    def low(x: str) -> str:
+        return x[:1].lower() + x[1:] if x[1:2].islower() else x
+
+    if d.slide.kind.value in ("timeline", "process") and len(c.items) >= 3:
+        items = c.items
+        titled = [bool(_STEP_ORD_RE.match(H.strip_end(it.title or ""))) for it in items]
+        if src.steps and len(src.steps) == len(items) and [H.strip_end(it.title or "") for it in items] != [t for t, _ in src.steps]:
+            for it, ok, (t, _) in zip(items, titled, src.steps):
+                if not ok and it.title and not it.text:
+                    it.text = it.title
+                it.title = t
+            d.changes.append(f"slide {d.unit.key}: steps titled as the source titles them")
+        elif any(titled) and not all(titled):
+            m = next(_STEP_ORD_RE.match(H.strip_end(it.title)) for it, ok in zip(items, titled) if ok)
+            word = (m.group("w1") or m.group("w2") or "").lower()
+            ordinal = m.group("n1") is not None
+            for i, (it, ok) in enumerate(zip(items, titled), 1):
+                if not ok:
+                    if it.title and not it.text:
+                        it.text = it.title
+                    it.title = f"{i}-й {word}" if ordinal else f"{word.capitalize()} {i}"
+            d.changes.append(f"slide {d.unit.key}: untitled steps titled like the others")
+    for col in c.columns:
+        bl = col.bullets
+        if len(bl) >= 3 and src.steps and len(src.steps) == len(bl) and any(_step_item(b) for b in bl) != all(_step_item(b) for b in bl) or (
+            len(bl) >= 3 and src.steps and len(src.steps) == len(bl) and all(_step_item(b) for b in bl) and [_step_item(b).title for b in bl] != [t for t, _ in src.steps]
+        ):
+            new = []
+            for b, (t, _) in zip(bl, src.steps):
+                it = _step_item(b)
+                new.append(f"{t} — {low(it.text if it is not None else H.strip_end(b))}")
+            col.bullets = new
+            d.changes.append(f"slide {d.unit.key}: the plan's lines titled as the source titles them")
+
+
+def _split_merged_lists(d: _Design) -> None:
+    """A column (or a card of lines) that merges two lists of the source («Меры и риски»: three measures, then three
+    risks) is split into one per list, in the source's words and order: the pairs risk → measure stay readable."""
+    c = d.slide.content
+    if not (c.columns or any(it.bullets for it in c.items)):
         return
     src = _read_source(d.unit.text)
     risks = next((g for g in src.groups if g.label and _RISK_RE.search(g.label)), None)
     measures = next((g for g in src.groups if g.label and _MEASURE_RE.search(g.label) and not _RISK_RE.search(g.label)), None)
     if risks is None or measures is None:
         return
-    for i, col in enumerate(c.columns):
-        t = col.title or ""
-        if _RISK_RE.search(t) and _MEASURE_RE.search(t):
-            new = [SlideItem(title=_label(risks.label or "Риски"), bullets=[H.short(x, 8) for x in risks.items]),
-                   SlideItem(title=_label(measures.label or "Меры"), bullets=[H.short(x, 8) for x in measures.items])]
-            c.columns = (c.columns[:i] + new + c.columns[i + 1:])[:3]
-            d.changes.append(f"slide {d.unit.key}: the column «{t}» merged two lists of the brief: split into «{new[0].title}» and «{new[1].title}»")
-            return
+    for field_ in ("columns", "items"):
+        blocks = getattr(c, field_)
+        for i, col in enumerate(blocks):
+            t = col.title or ""
+            if _RISK_RE.search(t) and _MEASURE_RE.search(t):
+                new = [SlideItem(title=_label(risks.label or "Риски"), bullets=[H.short(x, 8) for x in risks.items]),
+                       SlideItem(title=_label(measures.label or "Меры"), bullets=[H.short(x, 8) for x in measures.items])]
+                setattr(c, field_, (blocks[:i] + new + blocks[i + 1:])[: 3 if field_ == "columns" else MAX_ITEMS])
+                d.changes.append(f"slide {d.unit.key}: the block «{t}» merged two lists of the brief: split into «{new[0].title}» and «{new[1].title}»")
+                return
 
 
 # ------------------------------------------------------------------ one slide's content in another form
@@ -1763,11 +2422,106 @@ def _lines_of(s: OutlineSlide) -> list[str]:
     c = s.content
     out = [*c.paragraphs, *c.bullets]
     for it in c.items:
-        t = it.title.strip()
-        out.append(f"{t}: {it.text.strip()}" if t and it.text.strip() else (t or it.text.strip()))
+        out.append(_title_text(it))
     for col in c.columns:
         out.extend(f"{col.title}: {b}" if col.title else b for b in col.bullets)
     return [x for x in out if x]
+
+
+_ONLY_RE = re.compile(r"^(?:только|лишь|всего|уже|около|примерно|почти)\s+", re.I)
+
+
+def figures_of_items(items: list[SlideItem]) -> Optional[list[NumberCallout]]:
+    """2–4 cards of one figure each as a row of figures: the figure with its unit, under it the card's words without
+    it («Только 20% чеков содержат еду» → «20%» · «чеков содержат еду»), or the card's title when its text says no
+    more than the figure («Потери от списаний» · «27 000 рублей в месяц» → «27 000 ₽» · «Потери от списаний, в
+    месяц»). None when a card has no figure or more than one."""
+    if not 2 <= len(items) <= 4:
+        return None
+    out: list[NumberCallout] = []
+    for it in items:
+        body = H.strip_end(it.text or "") or H.strip_end(it.title or "")
+        ks = H.kpis_of(body)
+        vals = figures(body)
+        if len(ks) != 1 or len(vals) != 1 or it.bullets:
+            return None
+        k = ks[0]
+        m = re.search(r"[+\-−]?\d[\d\s\u00a0]*(?:[.,]\d+)?\s*(?:%|₽|руб\w*|млн|тыс\.?|минут\w*|час\w*|дн\w*|мест\w*|чел\w*)?", body)
+        rest = (body[: m.start()] + " " + body[m.end():]) if m else body
+        rest = _ONLY_RE.sub("", " ".join(rest.split()).strip(" ,;:—–"))
+        title = H.strip_end(it.title or "")
+        if len(_subject_stems(rest)) < 2:
+            label = f"{title}, {rest}" if title and rest and title.lower() not in rest.lower() else (title or rest)
+        else:
+            label = rest
+        if not label or len(label.split()) > 8:
+            return None
+        out.append(NumberCallout(value=k.value, label=label))
+    return out
+
+
+def _table_of_changes(numbers: list[NumberCallout]) -> Optional[TableData]:
+    """2–5 figures of changes («300 → 330 ₽» · «Средний чек») as a table «Показатель | Сейчас | Цель» (the unit on
+    both sides); None when one of them is not a change or has no label."""
+    if not 2 <= len(numbers) <= 5:
+        return None
+    rows = []
+    for n in numbers:
+        parts = [p.strip() for p in re.split(r"\s*→\s*", n.value or "")]
+        if len(parts) != 2 or not all(figures(p) for p in parts) or not (n.label or "").strip():
+            return None
+        a, b = parts
+        unit = _unit_of_value(b)
+        if unit and not _unit_of_value(a):
+            a = f"{a}{unit}" if unit == "%" else f"{a} {unit}"
+        rows.append([H.cap_first(H.strip_end(n.label)), a, b])
+    return TableData(columns=["Показатель", "Сейчас", "Цель"], rows=rows)
+
+
+_VAL = r"[+\-−]?\d{1,3}(?:[\s  ]\d{3})*(?:[.,]\d+)?(?:\s?(?:%|₽|руб\.?|рубл(?:ей|я|ь)|тыс\.?\s?₽|млн\s?₽|час(?:а|ов)?|минут[аы]?|дн(?:я|ей)|день))?"
+_FIG_FIRST_RE = re.compile(rf"^(?:только\s+|лишь\s+|всего\s+)?(?P<v>{_VAL})\s+(?P<rest>[а-яёa-z«].*)$", re.I)
+_FIG_AFTER_DASH_RE = re.compile(rf"^(?P<label>[^\d—–]*?(?:\d+\s+(?:дн\w*|дня|месяц\w*|недел\w*|час\w*|минут\w*)[^\d—–]*?)?)[\s,]*[—–]\s+(?:только\s+|около\s+)?(?P<v>{_VAL})(?P<tail>(?:\s+[а-яё]+){{0,3}})$", re.I)
+_PERIOD_LABEL_RE = re.compile(r"\d+\s+(?:дн\w*|дня|месяц\w*|недел\w*|час\w*|минут\w*)|\d{1,2}:\d{2}", re.I)
+
+
+def _money(v: str) -> str:
+    return re.sub(r"\s?(?:руб\.?|рубл(?:ей|я|ь))$", " ₽", v.strip())
+
+
+def _kpi_figure(line: str) -> Optional[NumberCallout]:
+    """The figure of a line as the plan's rules read it («Доля задач в срок выросла на 34%» → «+34%» · «Доля задач в
+    срок», «Средняя оценка удобства: 4,6 из 5»): one figure, a label without figures of at most 7 words — one word only
+    for a short line (never «Покупок» of «65% покупок приходится на утренние часы …»), not cut on a preposition."""
+    k = [x for x in _kpis([line]) if not re.search(r"\d", x.label) and len(x.label.split()) <= 7]
+    if len(k) != 1 or (len(k[0].label.split()) == 1 and len(line.split()) > 4):
+        return None
+    return None if re.search(r"(?<![\wё])(?:с|до|на|в|по|за|из|от|к|и)$", k[0].label, re.I) else k[0]
+
+
+def line_figure(line: str) -> Optional[NumberCallout]:
+    """A line of a list as one figure with its words, the way a row of figures shows it: a figure first («Только 20%
+    чеков содержат еду» → «20%» · «чеков содержат еду»), or a label, a dash and the figure («Списания продуктов —
+    27 000 ₽ в месяц» → «27 000 ₽» · «Списания продуктов в месяц»); a title before a colon is the card's, not the
+    figure's. None for a line of words, of times only, or with a label of more than 8 words."""
+    head, sep, tail = line.partition(": ")
+    body = H.strip_end(tail if sep and not figures(head) and figures(tail) else line)
+    if not figures(_PERIOD_LABEL_RE.sub(" ", body)):
+        return None  # «Пик нагрузки — с 08:00 до 11:00»: times, no value
+    m = _FIG_FIRST_RE.match(body)
+    if m:
+        value, label = _money(m.group("v")), m.group("rest").strip(" ,")
+    else:
+        m = _FIG_AFTER_DASH_RE.match(body)
+        if m is None:
+            return _kpi_figure(line)
+        value = _money(m.group("v"))
+        label = " ".join(f"{m.group('label')} {m.group('tail') or ''}".split()).strip(" ,")
+        label = H.cap_first(label)
+    if not label or len(label.split()) > 8 or not re.search(r"[а-яёa-z]{3,}", label, re.I) or re.search(r"\d", _PERIOD_LABEL_RE.sub(" ", label)):
+        return _kpi_figure(line)
+    if re.search(r"(?<![\wё])(?:с|со|до|на|в|во|по|за|из|от|к|при|и)$", label, re.I):
+        return None  # a label cut on a preposition
+    return NumberCallout(value=value, label=label)
 
 
 def figures_of_lines(lines: list[str]) -> Optional[tuple[list[NumberCallout], list[str]]]:
@@ -1777,8 +2531,7 @@ def figures_of_lines(lines: list[str]) -> Optional[tuple[list[NumberCallout], li
     nums: list[NumberCallout] = []
     rest: list[str] = []
     for ln in lines:
-        k = _kpis([ln])
-        k = [x for x in k if not re.search(r"\d", x.label) and len(x.label.split()) <= 7]
+        k = [line_figure(ln)] if line_figure(ln) is not None else []
         if len(k) == 1 and len(nums) < 4:
             nums.append(k[0])
         else:
@@ -1899,6 +2652,13 @@ def reshape(s: OutlineSlide, kind: str, chart_type: Optional[str] = None) -> Opt
     new = SlideContent(formula=c.formula)
     pairs = _pairs(s)
     text = bool(c.bullets or c.paragraphs or c.items or c.columns)
+    if kind == "stat_row" and c.items and not (c.chart or c.table or c.numbers or c.columns) and len(c.bullets) <= 4:
+        # cards of one figure each («Только 20% чеков содержат еду», «Потери от списаний — 27 000 рублей в месяц»): the
+        # figures big, each with its card's words
+        nums = figures_of_items(c.items)
+        if nums is not None:
+            new.numbers, new.bullets = nums, list(c.bullets)
+            return s.model_copy(update={"kind": PatternKind.stat_row, "content": new}, deep=True)
     if kind == "stat_row" and text and not (c.chart or c.table or c.numbers):
         figs = figures_of_lines(_lines_of(s))
         if figs is None:
@@ -1906,6 +2666,12 @@ def reshape(s: OutlineSlide, kind: str, chart_type: Optional[str] = None) -> Opt
         nums, rest = figs
         new.numbers, new.bullets = nums, rest
         return s.model_copy(update={"kind": PatternKind.stat_row, "content": new}, deep=True)
+    if kind == "table" and c.numbers and not (c.chart or c.table or c.items or c.columns or c.paragraphs) and len(c.bullets) <= 5:
+        # changes «300 → 330 ₽» as a table «Показатель | Сейчас | Цель», the list under it: the denser form
+        t = _table_of_changes(c.numbers)
+        if t is not None:
+            new.table, new.bullets = t, list(c.bullets)
+            return s.model_copy(update={"kind": PatternKind.table, "content": new}, deep=True)
     if kind != s.kind.value and kind in ("chart", "stat_row", "big_number", "table") and text:
         return None  # a figure form cannot carry the slide's lines: the variant keeps its form
     if kind in ("bullets", "cards", "process", "timeline", "two_column", "comparison") and (c.chart is not None or c.table is not None):
@@ -1968,11 +2734,11 @@ def reshape(s: OutlineSlide, kind: str, chart_type: Optional[str] = None) -> Opt
         new.columns = cols
         new.numbers = [n.model_copy() for n in c.numbers]
     elif kind == "bullets":
-        lines = _lines_of(s)
+        # a list shows its figures as lines («Покупок в день: 100 → 115»), never as a row of figures under another name
+        lines = [f"{H.strip_end(n.label)}: {n.value}" if n.label else n.value for n in c.numbers] + _lines_of(s)
         if not lines or len(lines) > MAX_BULLETS or any(len(x.split()) > 18 for x in lines):
             return None
         new.bullets = lines
-        new.numbers = [n.model_copy() for n in c.numbers]
     else:
         return None
     return s.model_copy(update={"kind": PatternKind(kind), "content": new}, deep=True)
@@ -2040,9 +2806,13 @@ def _merge(a: _Placed, b: _Placed) -> Optional[_Placed]:
     return _Placed(slide=merged, units=[*a.units, *b.units])
 
 
-def _variety(placed: list[_Placed], alts: dict[str, list[Alternative]], primary: Optional[dict[str, OutlineSlide]] = None) -> list[str]:
-    """No two neighbours of one form when the second (or, if it is locked, the first) has an alternative that fits."""
+def _variety(placed: list[_Placed], alts: dict[str, list[Alternative]], primary: Optional[dict[str, OutlineSlide]] = None, prefer: Optional[list[str]] = None) -> list[str]:
+    """No two neighbours of one form when one of them has an alternative that fits: of the two, the switch whose new
+    form the variant prefers most (`prefer`, best first; the second slide on a tie). Two neighbours of one of the
+    variant's three favourite forms stay (the visual variant's figures, the compact one's tables): its style, not a
+    monotony — three in a row the compiler still breaks."""
     notes = []
+    prefer = list(prefer or [])
 
     def form(p: _Placed) -> str:
         s = p.slide
@@ -2052,12 +2822,14 @@ def _variety(placed: list[_Placed], alts: dict[str, list[Alternative]], primary:
         prev, cur = placed[i - 1], placed[i]
         if form(prev) != form(cur) or cur.slide.kind.value in FRAME_KINDS:
             continue
-        for j in (i, i - 1):
+        if prefer and cur.slide.kind.value in prefer[:3]:
+            continue
+        best: Optional[tuple[int, int, _Placed, str, str]] = None  # (rank, order, the new placed slide, old kind, note)
+        for order, j in enumerate((i, i - 1)):
             p = placed[j]
             if p.locked or len(p.units) != 1:
                 continue
             around = {form(placed[k]) for k in (j - 1, j + 1) if 0 <= k < len(placed) and k != j}
-            done = False
             base = (primary or {}).get(p.units[0])
             options = ([Alternative(kind=base.kind.value, chart_type=base.content.chart.type if base.content.chart else None, why=base.rationale or "")] if base is not None else []) + alts.get(p.units[0], [])
             for a in options:
@@ -2070,13 +2842,44 @@ def _variety(placed: list[_Placed], alts: dict[str, list[Alternative]], primary:
                     continue
                 if a.why:
                     r.rationale = a.why if a.why.endswith(".") else a.why[:1].upper() + a.why[1:] + "."
-                notes.append(f"variety: slide {j + 1} {p.slide.kind.value} → {r.kind.value}")
-                placed[j] = probe
-                done = True
+                key = (_rank(r.kind.value, prefer) if prefer else 0, order)
+                if best is None or key < best[:2]:
+                    best = (key[0], key[1], probe, p.slide.kind.value, f"variety: slide {j + 1} {p.slide.kind.value} → {r.kind.value}")
                 break
-            if done:
-                break
+        if best is not None:
+            j = i if best[1] == 0 else i - 1
+            placed[j] = best[2]
+            notes.append(best[4])
     return notes
+
+
+def series_form(d: _Design, ctx: _Ctx) -> Optional[OutlineSlide]:
+    """The slide as a row of its before/after figures («35% → 33%» · доля расходов на продукты, «27 000 → 15 000 ₽» ·
+    списания) with its list of words under them (the measures): the visual form of a slide that states its changes in
+    words. None when the slide has fewer than two such series, a chart, a table or a formula, a figure the row would
+    lose, or more lines than fit under it."""
+    s, c = d.slide, d.slide.content
+    if c.chart is not None or c.table is not None or c.formula:
+        return None
+    nums = _series_figures(d.unit, ctx)
+    if not 2 <= len(nums) <= 4:
+        return None
+    big = [v for n in nums for v in figures(n.value)]
+    lines = [*c.paragraphs, *c.bullets]
+    lines += [_title_text(it) for it in c.items]
+    lines += [b for col in c.columns for b in (col.bullets or ([col.text] if col.text else []))]
+    lines += [f"{n.value} {n.label}" for n in c.numbers]
+    keep = []
+    for ln in (x for x in lines if x and x.strip()):
+        vs = figures(ln)
+        if vs:
+            if all(any(abs(v - x) <= 1e-6 * max(1.0, abs(v)) for x in big) for v in vs):
+                continue  # the row shows it big
+            return None
+        keep.append(H.strip_end(ln))
+    if len(keep) > 5 or any(len(x.split()) > 14 for x in keep):
+        return None
+    return s.model_copy(update={"kind": PatternKind.stat_row, "content": SlideContent(numbers=nums, bullets=keep)}, deep=True)
 
 
 def assemble(designs: list[_Design], strategy: Strategy, prefs: dict, ctx: _Ctx, overrides: Optional[dict[str, _Design]] = None) -> tuple[list[_Placed], list[str]]:
@@ -2089,12 +2892,23 @@ def assemble(designs: list[_Design], strategy: Strategy, prefs: dict, ctx: _Ctx,
     notes: list[str] = []
     placed: list[_Placed] = []
     alts: dict[str, list[Alternative]] = {}
+    fixed = bool(ctx.count or ctx.structure.specs)
+    if pref.get("merge_thin") and fixed:
+        # the user fixed the slides (their number, their order): the compact variant cannot merge them — it takes the
+        # denser form of a slide instead (changes as a table, figures as lines)
+        switch_from = switch_from | {"stat_row", "big_number"}
     for d in designs:
         d = (overrides or {}).get(d.unit.key, d)
         alts[d.unit.key] = d.alternatives
         s = d.slide.model_copy(deep=True)
         if prefer and not d.unit.locked and s.kind.value in switch_from:
             best, best_rank = s, _rank(s.kind.value, prefer)
+            if "stat_row" in prefer[:3]:
+                # the slide's own before/after data as big figures, its list of words under them
+                r = series_form(d, ctx)
+                if r is not None and _rank("stat_row", prefer) < best_rank:
+                    best, best_rank = r, _rank("stat_row", prefer)
+                    best.rationale = "Изменения показателей — крупными цифрами, список действий под ними."
             tries = list(d.alternatives)
             if prefer[:3].count("stat_row") and not any(a.kind == "stat_row" for a in tries):
                 tries.append(Alternative(kind="stat_row", why="цифры списка крупно"))
@@ -2110,7 +2924,6 @@ def assemble(designs: list[_Design], strategy: Strategy, prefs: dict, ctx: _Ctx,
                     best.rationale = (a.why[:1].upper() + a.why[1:] + ".") if a.why else best.rationale
             s = best
         placed.append(_Placed(slide=s, units=[d.unit.key], locked=d.unit.locked))
-    fixed = bool(ctx.count or ctx.structure.specs)
     if pref.get("merge_thin") and not fixed:
         content = [p for p in placed if p.slide.kind.value not in FRAME_KINDS]
         floor = max(3, math.ceil(len(content) * float(strategy.slide_ratio or 0.7)))
@@ -2139,7 +2952,7 @@ def assemble(designs: list[_Design], strategy: Strategy, prefs: dict, ctx: _Ctx,
                 out.append(p)
             placed = out
     primary = {d.unit.key: (overrides or {}).get(d.unit.key, d).slide for d in designs}
-    notes.extend(_variety(placed, alts, primary))
+    notes.extend(_variety(placed, alts, primary, prefer))
     return placed, notes
 
 
@@ -2476,6 +3289,7 @@ class _Agent:
 
         def finish(d: _Design) -> None:
             enforce_requests(d, ctx)
+            tidy_design(d, ctx)
             results[d.unit.key] = d
             pos = pos_of[d.unit.key]
             s = d.slide
@@ -2570,6 +3384,7 @@ class _Agent:
             raise
         out: list[tuple[str, str]] = []
         titles = {u.key: u.title for u in units}
+        units_by_key = {u.key: u for u in units}
         for it in res.parsed.issues[:6]:
             it.slide = _quoted_slide(it.problem, it.slide, placed)
             if not 1 <= it.slide <= len(placed):
@@ -2581,6 +3396,16 @@ class _Agent:
             if why is not None:
                 _keep_raw(self.raw, "critic_dropped", p.units[0], variant=name, error=ValueError(f"{why}: {it.problem[:160]}"))
                 continue
+            harm = _harmful_fix(it.problem, it.fix or "", p.slide, units_by_key.get(p.units[0]), ctx)
+            if harm is not None:
+                # the reviewer's own fix would make the slide worse: a note about the headline goes whole (its problem is
+                # the fix's premise — «the headline must be the user's conclusion»), so does a note resting on figures
+                # the brief does not give or bringing another slide's; a note about the takeaway keeps its problem
+                # without the fix
+                if _HEAD_NOTE_RE.search(it.problem) or harm in ("the note rests on figures the brief does not give", "the fix brings another slide's figures"):
+                    _keep_raw(self.raw, "critic_dropped", p.units[0], variant=name, error=ValueError(f"{harm}: {it.problem[:120]} → {it.fix[:80]}"))
+                    continue
+                it.fix = ""
             if takeaway_note(it.problem):
                 # acted on without a model: the takeaway goes, the source's own result takes its place
                 out.append((p.units[0], TAKEAWAY_FIX + it.problem))
@@ -2723,6 +3548,44 @@ def _false_alarm(text: str, pos: int, placed: list["_Placed"], ctx: _Ctx, titles
     return None
 
 
+_HEAD_NOTE_RE = re.compile(r"заголов|headline", re.I)
+_TAKEAWAY_NOTE_RE = re.compile(r"вывод|takeaway|conclusion", re.I)
+
+
+def _harmful_fix(problem: str, fix: str, s: OutlineSlide, unit: Optional[_Unit], ctx: Optional[_Ctx] = None) -> Optional[str]:
+    """Why a reviewer's note would make the slide worse (None: it would not): it rests on a figure the brief does not
+    give («… соответствует 1 134 000 рублей»), or its proposed wording brings another slide's figures (a note sent to
+    the wrong slide), makes the user's own conclusion the headline (the takeaway's place), is a topic question, a list
+    announced, a cause the brief does not state, or a takeaway that is the headline in other words."""
+    if ctx is not None and ctx.index is not None:
+        try:
+            from verstka.planning.grounding import figures as gfigs
+
+            note = f"{problem} {fix}"
+            bad = [f for f in gfigs(note) if f.date is None and not f.approx and ctx.index.verdict(f) == "bad" and not re.fullmatch(r"\d{1,2}", note[f.start : f.uend].strip())]
+            if bad:
+                return "the note rests on figures the brief does not give"
+        except Exception:  # noqa: BLE001
+            pass
+    quotes = [q.strip() for q in re.findall(r"«([^«»]{6,200})»", fix or "")]
+    if not quotes:
+        return None
+    if unit is not None and unit.spec is not None and any(foreign_figures(q, unit, ctx) for q in quotes):
+        return "the fix brings another slide's figures"
+    about_head = bool(_HEAD_NOTE_RE.search(problem or ""))
+    users = unit.spec.takeaway if unit is not None and unit.spec is not None else None
+    for q in quotes:
+        if about_head and users and (same_text(q, users) or adds_nothing(q, users)):
+            return "the fix makes the user's conclusion the headline"
+        if about_head and (_QUESTION_HEAD_RE.search(q) or _announces(q)):
+            return "the fix proposes a topic or a list announced as the headline"
+        if unit is not None and invented_cause(q, unit.text):
+            return "the fix states a cause the brief does not"
+        if not about_head and _TAKEAWAY_NOTE_RE.search(problem or "") and adds_nothing(q, s.headline):
+            return "the fix proposes the headline as the takeaway"
+    return None
+
+
 def _quoted_slide(text: str, pos: int, placed: list["_Placed"]) -> int:
     """The slide a critic's note is about: the number it gives, unless the note quotes («…») the headline or a line of
     exactly one other slide and nothing of that one — a reviewer model counts slides off by one now and then (the
@@ -2767,6 +3630,9 @@ def _visible_text(s: OutlineSlide) -> str:
     return " ".join(p for p in parts if p)
 
 
+_TIME_RE = re.compile(r"(?<!\d)\d{1,2}:\d{2}(?!\d)")
+
+
 class _Shown:
     """The words a slide shows, by stem (grounding's stems: «кассой» and «кассы» are one word), and its figures."""
 
@@ -2784,14 +3650,19 @@ class _Shown:
         self.figs = figures(text)
 
     def line(self, line: str) -> bool:
-        """The slide shows this line of its source: half of its words, or its figures («65%», «27 000»)."""
+        """The slide shows this line of its source: its figures («65%», «27 000» — a line of a figure is shown by its
+        figure, not by its words: «Доля покупателей, вернувшихся в течение 30 дней, — 25%» is not shown by «доля» and
+        «покупок» elsewhere), or, for a line of words, half of them."""
+        vals = [v for v in figures(_PERIOD_RE.sub(" ", _TIME_RE.sub(" ", line or ""))) if v]
+        if vals:
+            if any(any(abs(v - x) <= 1e-6 * max(1.0, abs(v)) for x in self.figs) for v in vals):
+                return True
+            if any(v >= 10 or not float(v).is_integer() for v in vals):
+                return False
         stems = self.stems_of(line)
         if not stems:
             return True
-        if sum(1 for w in stems if self.stems.has(w)) * 2 >= len(stems):
-            return True
-        vals = figures(line)
-        return bool(vals) and all(any(abs(v - x) <= 1e-6 * max(1.0, abs(v)) for x in self.figs) for v in vals)
+        return sum(1 for w in stems if self.stems.has(w)) * 2 >= len(stems)
 
     def figure(self, v: float) -> bool:
         return any(abs(v - x) <= 1e-6 * max(1.0, abs(v)) or (abs(v) >= 1000 and abs(v - x * 1000) <= 500) for x in self.figs)
@@ -2816,35 +3687,121 @@ def _content_lines(s: OutlineSlide) -> list[str]:
     return [x for x in out if x and x.strip()]
 
 
-def coverage_gaps(d: _Design, ctx: Optional[_Ctx] = None) -> list[str]:
-    """What the designed slide misses of its source or says beyond it, as notes for the revision («problem → fix») —
-    the agent's own check (a reviewer model does not reliably see what a slide left out):
-    - the user's topic heading kept as the headline («Что контролировать каждую неделю»), a list announced instead
-      of a conclusion («Три направления для роста прибыли», «Пять стратегий…» — and a count that is not the list's);
-    - a list of the source (a lead line and its dash items, «Добавь риски: a, b, c», steps by months) that the slide
-      does not show whole: every item of a list of words (actions, measures, risks, steps), half of a list of figures;
-    - a column that merges two lists of the source («Меры и риски»);
-    - the goal and the totals of the source («Цель — …», «Общие расходы — 780 000 рублей») missing on the slide;
-    - a line with no figure that its source text does not say (about 60% of its words not the source's)."""
+# a short statement of a business measure with its figure, the measure first («Операционная прибыль — 120 000
+# рублей», «Ежемесячные расходы кофейни составляют 780 000 рублей»): a key figure of its slide
+_KEY_MEASURE_RE = re.compile(
+    r"^(?!(?:при|если|в\s+случае)\s)(?:[а-яё0-9]+\s+){0,3}?(?:прибыл\w*|выручк\w*|расход\w*|затрат\w*|рентабельност\w*|бюджет\w*|вложени\w*|экономи\w*|"
+    r"окупаемост\w*|доход\w*|марж\w*)(?![\wё])",
+    re.I,
+)
+_KEY_VERB_RE = re.compile(
+    r"\s[—–]\s|составля|состав(?:ит|ят)\b|достигн|обход(?:ится|ятся)|потребует|вырастет|вырастут|увеличится|снизится|\bдаст\b|\bдадут\b",
+    re.I,
+)
+KEY_MAX_WORDS = 16
+_BUSINESS_RESULT_RE = re.compile(r"(?:руб\w*|₽)\s+(?:дополнительно\s+)?(?:выручк|прибыл|экономи)|(?:выручк|прибыл|экономи)\w*\s+(?:\S+\s+){0,3}?(?:на|в|до|—)\s+\d", re.I)
+KEY_LINE_MAX_WORDS = 14  # a key line longer than this is asked of the designer, never pasted under the block
+
+
+def _has_figure(text: str) -> bool:
+    """A figure in digits or in words («три четверти», «вдвое»)."""
+    if figures(text):
+        return True
+    try:
+        from verstka.planning.grounding import figures as gfigs
+
+        return bool(gfigs(text or ""))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def key_lines(text: str) -> list[str]:
+    """The key figures of a slide, as its source states them: the goal («Цель — поднять средний чек с 300 до 330
+    рублей»), the totals («Общие расходы — 780 000 рублей»), short statements of a business measure with its figure
+    («Операционная прибыль — 120 000 рублей», «Ежемесячные расходы кофейни составляют 780 000 рублей»). Not a list's
+    items (a list is checked whole) nor a calculation's details («При выручке 1 138 500 рублей эти расходы составят
+    …»): they belong in the notes."""
+    src = _read_source(text)
+    out: list[str] = []
+    goal = _goal_sentence(src.sentences)
+    if goal and _GOAL_RE.match(goal):
+        out.append(H.strip_end(goal))
+    for sn in src.sentences:
+        t = H.strip_end(sn)
+        if not figures(t) or _ASK_RE.match(t) or t in out:
+            continue
+        n = len(t.split())
+        if n <= KEY_MAX_WORDS and (_TOTAL_RE.match(t) or (_KEY_MEASURE_RE.match(t) and _KEY_VERB_RE.search(t))):
+            out.append(t)
+        elif n <= TAKEAWAY_MAX_WORDS and _RESULT_STRONG_RE.search(t) and _BUSINESS_RESULT_RE.search(t) and not _BACKREF_RE.search(t):
+            # the slide's business result in money, whatever its subject: «Дополнительные 15 покупок в день при среднем
+            # чеке 330 рублей дадут 148 500 рублей выручки за 30 дней»
+            out.append(t)
+    out += [H.strip_end(g.label) for g in src.groups if g.label and _TOTAL_RE.match(g.label) and figures(g.label) and H.strip_end(g.label) not in out]
+    return out
+
+
+def missing_key_lines(s: OutlineSlide, text: str) -> list[str]:
+    """The key lines of the source (key_lines) none of whose figures the slide shows — in its text, or on a chart of
+    the same measure (a coincidence of amounts on a chart of another measure is not the figure shown: «Операционная
+    прибыль — 120 000» is not on a pie of costs where «Аренда» is 120 000)."""
+    shown = _Shown(_visible_text(s))
+    charts = [ch for ch in (s.content.chart, s.content.chart2) if ch is not None]
+    out = []
+    for sn in key_lines(text):
+        vals = [v for v in figures(sn) if v >= 10 or not float(v).is_integer()]
+        if not vals or any(shown.figure(v) for v in vals):
+            continue
+        subj = _subject_stems(sn)
+        on_chart = any(
+            all(any(abs(v - x) <= 1e-6 * max(1.0, abs(v)) for sr in ch.series for x in sr.values) for v in vals)
+            and _meet(subj, _subject_stems(" ".join([ch.title or "", *(sr.name or "" for sr in ch.series)])))
+            for ch in charts
+        )
+        if not on_chart:
+            out.append(sn)
+    return out
+
+
+def slide_gaps(d: _Design, ctx: Optional[_Ctx] = None) -> list[tuple[str, str]]:
+    """What the designed slide misses of its source or says beyond it, as (kind, «problem → fix») notes for the
+    revision — the agent's own check (a reviewer model does not reliably see what a slide left out). Kinds:
+    - "headline": the user's topic heading kept as the headline («Что контролировать каждую неделю»), a list announced
+      instead of a conclusion («Три направления для роста прибыли» — and a count that is not the list's), a headline
+      without a figure on a slide whose source states its key figures;
+    - "list": a list of the source (a lead line and its dash items, «Добавь риски: a, b, c», steps by months) that the
+      slide does not show whole: every item of a list of words (actions, measures, risks, steps), half of a list of
+      figures;
+    - "column": a column that merges two lists of the source («Меры и риски»);
+    - "key": the key figures of the source (key_lines: the goal, the totals, the measures it states) missing on the
+      slide — every one of them in one note;
+    - "takeaway": no takeaway on a slide of a brief that asks for a conclusion on every slide, or one that says
+      nothing the headline does not;
+    - "line": a line with no figure that its source text does not say (about 60% of its words not the source's)."""
     u = d.unit
     if u.frame or not (u.text or "").strip():
         return []
     src = _read_source(u.text)
     shown = _Shown(_visible_text(d.slide))
-    out = []
+    out: list[tuple[str, str]] = []
     head, own = H.strip_end(d.slide.headline or ""), H.strip_end(u.title or "")
     lists = [(g.label, g.items, not g.figure) for g in src.groups]
     if src.steps:
         lists.append(("план по шагам", [f"{t} — {x}" for t, x in src.steps], True))
+    keys = key_lines(u.text)
+    users_takeaway = bool(u.spec is not None and u.spec.takeaway and same_text(head, u.spec.takeaway))
     if own and head.lower() == own.lower() and not figures(head) and (_QUESTION_HEAD_RE.search(head) or len(head.split()) <= 4):
-        out.append(f"Заголовок повторяет тему слайда из брифа («{head}») → Сформулируй в заголовке вывод слайда, с его ключевой цифрой из текста слайда.")
-    elif not headline_states(head) and not (u.spec is not None and u.spec.takeaway and same_text(head, u.spec.takeaway)):
+        out.append(("headline", f"Заголовок повторяет тему слайда из брифа («{head}») → Сформулируй в заголовке вывод слайда, с его ключевой цифрой из текста слайда."))
+    elif not headline_states(head) and not users_takeaway:
         m = _ANNOUNCE_RE.search(head)
         count = _COUNT_WORD.get(m.group(0).split()[0].lower()) if m else None
         sizes = {len(items) for _, items, _ in lists}
         wrong = f" (в брифе {', '.join(map(str, sorted(sizes)))}, а не {count})" if count and sizes and count not in sizes else ""
         what = "объявляет список" if m else "называет тему"
-        out.append(f"Заголовок {what} («{head}»){wrong}, а не говорит вывод → Сформулируй в заголовке вывод слайда с его ключевой цифрой из текста слайда, без числа пунктов.")
+        out.append(("headline", f"Заголовок {what} («{head}»){wrong}, а не говорит вывод → Сформулируй в заголовке вывод слайда с его ключевой цифрой из текста слайда, без числа пунктов."))
+    elif not _has_figure(head) and not users_takeaway and any(figures(k) for k in keys):
+        sample = H.strip_end(keys[0])[:90]
+        out.append(("headline", f"Заголовок без цифры («{head}»), хотя у слайда есть ключевая цифра («{sample}») → Сформулируй вывод слайда с этой цифрой (не более 10 слов), только то, что сказано в брифе."))
     for label, items, whole in lists:
         if len(items) < 2:
             continue
@@ -2855,43 +3812,61 @@ def coverage_gaps(d: _Design, ctx: Optional[_Ctx] = None) -> list[str]:
         what = f"«{H.strip_end(label)}»" if label else "из брифа"
         if hit * 2 < len(items):
             sample = "; ".join(H.short(it, 6) for it in items[:3]) + ("…" if len(items) > 3 else "")
-            out.append(
+            out.append((
+                "list",
                 f"На слайде нет списка {what} ({ru_count(len(items), 'пункт', 'пункта', 'пунктов')}: {sample})"
-                f" → Покажи этот список на слайде коротко (строками под основным блоком, карточками или второй колонкой), не убирая остальное."
-            )
+                f" → Покажи этот список на слайде коротко (строками под основным блоком, карточками или второй колонкой), не убирая остальное.",
+            ))
         else:
             sample = "; ".join(H.short(it, 6) for it in missing[:3])
-            out.append(f"В списке {what} на слайде не хватает пунктов: {sample} → Покажи каждый пункт этого списка, коротко; не объединяй пункты.")
+            out.append(("list", f"В списке {what} на слайде не хватает пунктов: {sample} → Покажи каждый пункт этого списка, коротко; не объединяй пункты."))
     # a column whose title joins two lists of the source («Меры и риски»): the pairs of risk and measure are lost
     labels = [g.label for g in src.groups if g.label]
     for col in d.slide.content.columns:
         hits = [lb for lb in labels if _meet(_stems(col.title), _stems(lb))]
         if len(hits) >= 2 or (_RISK_RE.search(col.title or "") and _MEASURE_RE.search(col.title or "")):
-            out.append(f"Колонка «{col.title}» смешивает два списка брифа → Покажи их отдельно: риски — одной колонкой, меры — другой (или три колонки).")
+            out.append(("column", f"Колонка «{col.title}» смешивает два списка брифа → Покажи их отдельно: риски — одной колонкой, меры — другой (или три колонки)."))
             break
-    # the goal and the totals the source states: on the slide, not only in the notes
-    goal = _goal_sentence(src.sentences)
-    keys = [goal] if goal and _GOAL_RE.match(goal) else []
-    keys += [sn for sn in src.sentences if _TOTAL_RE.match(sn.strip()) and figures(sn)]
-    keys += [g.label for g in src.groups if g.label and _TOTAL_RE.match(g.label) and figures(g.label)]
-    for sn in keys:
-        vals = [v for v in figures(sn) if v >= 10]
-        if vals and not any(shown.figure(v) for v in vals):
-            out.append(f"На слайде нет ключевой цифры из брифа: «{H.strip_end(sn)[:90]}» → Покажи её на слайде (в заголовке, в строке над блоком или крупной цифрой).")
-            break
+    # the goal, the totals and the measures the source states: on the slide, not only in the notes
+    missing_keys = missing_key_lines(d.slide, u.text)
+    if missing_keys:
+        quoted = "; ".join(f"«{x[:90]}»" for x in missing_keys[:3])
+        one = len(missing_keys) == 1
+        out.append((
+            "key",
+            f"На слайде нет {'ключевой цифры' if one else 'ключевых цифр'} из брифа: {quoted} → Покажи {'её' if one else 'их'} на слайде "
+            f"(в заголовке, в выводе или короткой строкой рядом с основным блоком), не убирая остального.",
+        ))
+    # a conclusion on every slide, when the brief asks for it; never a copy of the headline
+    tk = d.slide.takeaway
+    tk_why = takeaway_ok(tk, d.slide, u, ctx) if tk else None
+    if tk and tk_why in ("repeats the headline", "repeats the slide's block", "states nothing"):
+        what = {"repeats the headline": "повторяет заголовок другими словами", "repeats the slide's block": "повторяет то, что уже есть на слайде", "states nothing": "ничего не утверждает"}[tk_why]
+        out.append(("takeaway", f"Вывод «{H.strip_end(tk)}» {what} → Напиши вывод, который добавляет смысл: итог, условие или следствие из текста слайда."))
+    elif not tk and ctx is not None and ctx.takeaway_rule:
+        out.append(("takeaway", "На слайде нет короткого вывода, а бриф просит вывод на каждом слайде → Добавь вывод (takeaway) до 12 слов: итог, условие или следствие из текста слайда, не повторяя заголовок."))
     # a statement of the designer's that its source does not make («Рост начался с июня», «… — минимальная доля»)
     if d.by == "model":
         for line in _content_lines(d.slide):
             if figures(line) or said_in(line, u.text, 0.4):
                 continue
-            out.append(f"Строка «{H.short(line, 10)}» не опирается на текст слайда в брифе → Убери её или скажи то, что написано в брифе.")
+            out.append(("line", f"Строка «{H.short(line, 10)}» не опирается на текст слайда в брифе → Убери её или скажи то, что написано в брифе."))
             break
     return out
 
 
+def coverage_gaps(d: _Design, ctx: Optional[_Ctx] = None) -> list[str]:
+    """slide_gaps' notes, as the revision reads them («problem → fix»)."""
+    return [text for _, text in slide_gaps(d, ctx)]
+
+
+_CONTENT_GAPS = ("list", "column", "key", "line")
+
+
 def _revision_worse(old: _Design, new: _Design, ctx: Optional[_Ctx] = None) -> Optional[str]:
     """Why a revision is not taken (None: it is): it leaves out more of its source than the first version did, or it
-    lost the chart, the table or the figures the first version showed."""
+    lost the chart, the table or the figures the first version showed. (merge_revision takes the parts of a revision
+    that are better and keeps the first version's where the revision is worse.)"""
     a, b = old.slide.content, new.slide.content
     spec = old.unit.spec
     if a.chart is not None and b.chart is None and spec is not None and spec.charts:
@@ -2900,9 +3875,263 @@ def _revision_worse(old: _Design, new: _Design, ctx: Optional[_Ctx] = None) -> O
         return "the requested table is gone"
     if len(a.numbers) >= 2 and not (b.numbers or b.chart is not None or b.table is not None):
         return "the figures are gone"
-    ga, gb = coverage_gaps(old, ctx), coverage_gaps(new, ctx)
+    ga = [k for k, _ in slide_gaps(old, ctx) if k in _CONTENT_GAPS]
+    gb = [k for k, _ in slide_gaps(new, ctx) if k in _CONTENT_GAPS]
     if len(gb) > len(ga):
         return f"more gaps ({len(gb)} > {len(ga)})"
+    return None
+
+
+def _announces(head: Optional[str]) -> bool:
+    """«Три ключевых фактора для роста прибыли»: a list announced, no statement."""
+    h = (head or "").strip()
+    return bool(_ANNOUNCE_RE.search(h)) and not headline_states(h)
+
+
+def merge_revision(old: _Design, new: _Design, ctx: Optional[_Ctx] = None) -> tuple[Optional[_Design], list[str]]:
+    """The revision as it is taken, part by part (a reviewer's note fixes one thing, and the revised answer may break
+    another — the critic's own suggestion for a headline announces a list more often than not): the revised content
+    when it leaves out no more of its source than the first version (else the first version's content); the revised
+    headline when it is no worse as a headline (else the first one); the revised takeaway when it says something the
+    headline does not (else the first one's, if that one does). None when nothing of the revision is better."""
+    why: list[str] = []
+    ga, gb = slide_gaps(old, ctx), slide_gaps(new, ctx)
+    kinds_a, kinds_b = [k for k, _ in ga], [k for k, _ in gb]
+    content_worse = _revision_worse(old, new, ctx)
+    base = old if content_worse else new
+    out = _Design(unit=base.unit, slide=base.slide.model_copy(deep=True), alternatives=list(base.alternatives), by=base.by, model=new.model or old.model, changes=list(new.changes))
+    s = out.slide
+    if content_worse:
+        why.append(f"the revised content is worse ({content_worse}): the first version's content kept")
+        # the revision's headline and takeaway may still be better
+        if kinds_b.count("headline") < kinds_a.count("headline"):
+            s.headline = new.slide.headline
+            why.append("the revised headline taken")
+        if kinds_b.count("takeaway") < kinds_a.count("takeaway") and new.slide.takeaway and takeaway_ok(new.slide.takeaway, s, out.unit, ctx) is None:
+            s.takeaway = new.slide.takeaway
+            why.append("the revised takeaway taken")
+    else:
+        ha, hb = kinds_a.count("headline"), kinds_b.count("headline")
+        # a revised headline that is no better as a headline does not replace the designer's first one — unless that one
+        # announces a list («Три ключевых фактора…» over a slide of indicators, risks and measures): the user's own
+        # heading is then the lesser evil
+        if hb > ha or (hb and hb == ha and not _announces(old.slide.headline)):
+            s.headline = old.slide.headline
+            why.append(f"the revised headline «{new.slide.headline[:60]}» is no better: the first one kept")
+        worse_tk = kinds_b.count("takeaway") > kinds_a.count("takeaway") or (not s.takeaway and bool(old.slide.takeaway))
+        if worse_tk and old.slide.takeaway and takeaway_ok(old.slide.takeaway, s, out.unit, ctx) is None:
+            s.takeaway = old.slide.takeaway
+            why.append("the revised takeaway is worse (or gone): the first one kept")
+    if s.takeaway and takeaway_ok(s.takeaway, s, out.unit, ctx) is not None:
+        # the parts of two versions: the revision's takeaway may be the first version's headline («15 дополнительных
+        # покупок…» moved down when the critic asked for a topic headline) — never both on one slide
+        other = old.slide.takeaway if s.takeaway != old.slide.takeaway else new.slide.takeaway
+        s.takeaway = other if other and takeaway_ok(other, s, out.unit, ctx) is None else None
+        why.append("the combined takeaway repeated the combined headline: " + ("the other version's taken" if s.takeaway else "dropped"))
+    if content_worse and s.headline == old.slide.headline and s.takeaway == old.slide.takeaway:
+        return None, why
+    return out, why
+
+
+_LINE_ROOM = {"chart": 3, "stat_row": 4, "big_number": 4, "cards": 5, "timeline": 5, "process": 5, "table": 5, "bullets": MAX_BULLETS}
+
+
+def complete_slide(s: OutlineSlide, unit: _Unit, ctx: _Ctx) -> list[str]:
+    """The agent's safety net for a slide the user described, once the model is done with it (what changed, in English,
+    for the warnings): when the brief asks for a conclusion on every slide and the slide has none, the source's own
+    sentence that states its result (not one the slide already shows, not a copy of the headline), else its first key
+    figure the slide leaves out; then the key figures still missing (key_lines: the goal, the totals, the measures the
+    source states) as short lines next to the slide's block, as many as its form shows."""
+    if unit.frame or unit.spec is None or s.kind.value in FRAME_KINDS or not (unit.text or "").strip():
+        return []
+    said: list[str] = []
+    missing = missing_key_lines(s, unit.text)
+    users = unit.spec.takeaway
+    # a takeaway without a figure whose words are mostly not its source's («Разовые вложения покрывают запуск, план
+    # распределен по месяцам») gives way to a result of the source with its figure, when there is one
+    weak = bool(s.takeaway) and not users and not _figure_set(s.takeaway) and not said_in(s.takeaway, unit.text, 0.6)
+    if (not s.takeaway or weak) and ctx.takeaway_rule:
+        src = _read_source(unit.text)
+        shown = _shown_sentences(src, s.headline, s.content)
+        cand = _takeaway_sentence(src.sentences, [g.label for g in src.groups if g.label], shown)
+        if cand and (takeaway_ok(cand, s, unit, ctx) or _filler_takeaway(cand, s.headline, s.content, unit.text)):
+            cand = None
+        if cand is None:
+            cand = next((k for k in missing if len(k.split()) <= TAKEAWAY_MAX_WORDS and takeaway_ok(k, s, unit, ctx) is None), None)
+        if cand is None:
+            cand = _largest_item(src, s)
+        if cand is None and not weak:
+            cand = _unshown_figure_item(src, s)
+        if cand is None:
+            cand = _asked_list(src, s)
+        if cand:
+            old_tk = s.takeaway
+            s.takeaway = H.strip_end(cand)
+            said.append((f"a vague takeaway «{old_tk[:60]}» replaced" if weak else "no takeaway (the brief asks for one on every slide)") + f": «{s.takeaway[:80]}» from the brief")
+            missing = missing_key_lines(s, unit.text)
+    c = s.content
+    room = _LINE_ROOM.get(s.kind.value, 0) - len(c.bullets)
+    added = []
+    for line in missing:
+        if room <= 0:
+            break
+        if len(line.split()) > KEY_LINE_MAX_WORDS:
+            continue
+        c.bullets.append(H.strip_end(line))
+        added.append(H.strip_end(line))
+        room -= 1
+    if added:
+        said.append("key figures of the brief added as lines: " + "; ".join(f"«{x[:60]}»" for x in added))
+    said.extend(_restore_lists(s, unit))
+    said.extend(_rescue_lists(s, unit, ctx))
+    return said
+
+
+def _restore_lists(s: OutlineSlide, unit: _Unit) -> list[str]:
+    """A slide whose content is only the titles of its lists («Разовые вложения», «План действий» — the lines were
+    lost on the way: a model's lists under a key the form does not show) gets the lists back from its source, in the
+    source's words: one column per list the slide leaves out whole (up to three), titled with the slide's own titles
+    when they are as many, else the source's leads; a single list as the slide's lines."""
+    c = s.content
+    if c.chart is not None or c.table is not None or any(col.bullets for col in c.columns) or any(it.bullets or it.text for it in c.items):
+        return []
+    titles = [H.strip_end(b) for b in c.bullets] + [H.strip_end(it.title) for it in [*c.items, *c.columns] if it.title]
+    if not titles or any(len(t.split()) > 5 or figures(t) for t in titles):
+        return []
+    src = _read_source(unit.text)
+    lists = [(g.label, list(g.items)) for g in src.groups if len(g.items) >= 2]
+    if len(src.steps) >= 2:
+        lists.append((None, [f"{t} — {x[:1].lower() + x[1:]}" for t, x in src.steps]))
+    shown = _Shown(_visible_text(s))
+    if any(sum(shown.line(it) for it in items) * 2 >= len(items) for _, items in lists):
+        return []  # the titles are a list's items themselves («Увеличение среднего чека», …): content, not lost lists
+    lost = [(lb, items) for lb, items in lists if not any(shown.line(it) for it in items)]
+    if not lost:
+        return []
+    lost = lost[:3]
+    names = titles if len(titles) == len(lost) else [H.strip_end(re.split(r"\s+[—–]\s+", lb or "")[0]) or t for (lb, _), t in zip(lost, titles + [""] * len(lost))]
+    cols = [SlideItem(title=H.cap_first(n or ""), bullets=[H.short(H.strip_end(x), 9) for x in items[:6]]) for n, (_, items) in zip(names, lost)]
+    if len(cols) >= 2:
+        s.kind, s.content = PatternKind.two_column, SlideContent(columns=cols, numbers=list(c.numbers), formula=c.formula)
+    else:
+        s.kind, s.content = PatternKind.bullets, SlideContent(bullets=cols[0].bullets, numbers=list(c.numbers), formula=c.formula)
+    s.rationale = "Списки из брифа — в колонки рядом."
+    return [f"the slide showed only the titles of its lists: {len(cols)} list(s) restored from the brief"]
+
+
+def _largest_item(src: "_Source", s: OutlineSlide) -> Optional[str]:
+    """«Крупнейшая статья — витрина для десертов: 70 000 рублей»: the largest amount of a budget the source lists (3–8
+    amounts of one unit, one of them the largest) — a conclusion its figures state."""
+    for g in src.groups:
+        got = _amount_lines(g.items) if g.figure else None
+        if got is None:
+            continue
+        labels, values, unit = got
+        i = max(range(len(values)), key=lambda k: values[k])
+        if sorted(values)[-1] == sorted(values)[-2]:
+            continue  # two largest: no «the largest»
+        return f"Крупнейшая статья — {labels[i][:1].lower() + labels[i][1:]}: {_fmt_ru(values[i])} {unit}".strip()
+    return None
+
+
+def _asked_list(src: "_Source", s: OutlineSlide) -> Optional[str]:
+    """The list the user asked the slide to single out («Выдели три направления роста: увеличение среднего чека,
+    привлечение гостей в свободные часы и снижение потерь») as its conclusion, in the user's words: «Три направления
+    роста: увеличение среднего чека, привлечение гостей в свободные часы и снижение потерь»."""
+    for g in src.groups:
+        if not g.ask or not g.label or not 2 <= len(g.items) <= 4:
+            continue
+        items = [x[:1].lower() + x[1:] if x[1:2].islower() else x for x in (H.strip_end(i) for i in g.items)]
+        line = f"{H.strip_end(g.label)}: {', '.join(items[:-1])} и {items[-1]}"
+        if len(line.split()) <= TAKEAWAY_MAX_WORDS and not adds_nothing(line, s.headline):
+            return line
+    return None
+
+
+def _unshown_figure_item(src: "_Source", s: OutlineSlide) -> Optional[str]:
+    """The first figure of the source's lists that the slide does not show («3 000 покупок в месяц»): the last resort
+    for a conclusion the brief asks for — a fact of the brief, not a made-up one."""
+    shown = _Shown(_visible_text(s))
+    for g in src.groups:
+        if not g.figure:
+            continue
+        for it in g.items:
+            vals = figures(it)
+            if vals and not any(shown.figure(v) for v in vals) and 2 <= len(it.split()) <= 10:
+                return H.cap_first(H.strip_end(it))
+    return None
+
+
+def _rescue_lists(s: OutlineSlide, unit: _Unit, ctx: _Ctx) -> list[str]:
+    """The lists of words the source gives for the slide (actions, measures, observations) that the slide still leaves
+    out after the revision: their missing items as short lines under the slide's block when its form has room for
+    them; a list left out whole on a slide whose form the user did not ask for, with no room for it, as the lines under
+    a row of the slide's before/after figures (its series) — the form that carries both."""
+    said: list[str] = []
+    src = _read_source(unit.text)
+    for g in src.groups:
+        if len(g.items) < 2:
+            continue
+        # a list of figures is shown by the slide's block (one of its figures quoted in the headline or the takeaway —
+        # «Крупнейшая статья — витрина: 70 000 рублей» — shows no budget); a list of words by anything the slide says
+        shown = _Shown(_visible_text(s.model_copy(update={"headline": "", "takeaway": None, "subtitle": None}) if g.figure else s))
+        missing = [it for it in g.items if not shown.line(it)]
+        if not missing or any(len(x.split()) > 12 for x in missing) or (g.figure and len(missing) < len(g.items)):
+            continue  # a list of figures counts when it is left out whole (its figures may be on a chart)
+        c = s.content
+        room = _LINE_ROOM.get(s.kind.value, 0) - len(c.bullets)
+        lines = [H.strip_end(x) for x in missing]
+        if len(lines) <= room:
+            c.bullets.extend(lines)
+            said.append(f"items of the list «{(g.label or '')[:40]}» the slide left out added as lines: " + "; ".join(f"«{x[:40]}»" for x in lines))
+            continue
+        other = _one_other_list(s, src, g)
+        if len(missing) == len(g.items) and other is not None and not unit.locked and not c.table and not c.chart and not c.formula:
+            # the slide shows one list of its source and leaves out the other (the plan by months, not the budget): the
+            # two lists side by side, in the source's order
+            first, second = (g, other) if _source_pos(unit.text, g.items[0]) <= _source_pos(unit.text, other.items[0]) else (other, g)
+            cols = [SlideItem(title=H.strip_end(re.split(r"\s+[—–]\s+", x.label or "")[0]), bullets=[H.short(H.strip_end(i), 9) for i in x.items[:6]]) for x in (first, second)]
+            s.kind, s.content = PatternKind.two_column, SlideContent(columns=cols, numbers=list(c.numbers))
+            s.rationale = "Два списка из брифа — рядом, в две колонки."
+            said.append(f"the list «{(g.label or '')[:40]}» the slide left out shown next to the one it shows")
+            continue
+        if len(missing) == len(g.items) and not unit.locked and not c.table and not c.formula and not c.items and not c.columns:
+            nums = _series_figures(unit, ctx) if not c.numbers else list(c.numbers)
+            if not 2 <= len(nums) <= 4:
+                continue
+            big = [v for n in nums for v in figures(n.value)]
+            keep = [b for b in [*c.paragraphs, *c.bullets] if not (figures(b) and all(any(abs(v - x) < 1e-6 for x in big) for v in figures(b)))]
+            new_lines = keep + lines
+            if len(new_lines) > MAX_BULLETS:
+                continue
+            s.kind = PatternKind.stat_row
+            s.content = SlideContent(numbers=nums, bullets=new_lines)
+            s.rationale = "Изменения показателей — крупными цифрами, список мер под ними."
+            said.append(f"the list «{(g.label or '')[:40]}» the slide left out shown under a row of its figures")
+    return said
+
+
+def _source_pos(text: str, item: str) -> int:
+    i = (text or "").lower().find(item[:20].lower())
+    return i if i >= 0 else 10**6
+
+
+def _one_other_list(s: OutlineSlide, src: "_Source", g: "_Group") -> Optional["_Group"]:
+    """The one other list of the source the slide shows whole as its only content (its lines, or its steps as a
+    timeline), as a group; None otherwise."""
+    c = s.content
+    if c.columns or c.numbers or c.chart is not None or c.table is not None:
+        return None
+    lines = [*c.bullets] + [f"{it.title} — {it.text}" if it.title and it.text else (it.title or it.text) for it in c.items]
+    if not lines:
+        return None
+    cands = [x for x in src.groups if x is not g and len(x.items) >= 2]
+    if len(src.steps) >= 2:
+        cands.append(_Group(label=src.steps_label or "План", items=[f"{t} — {x[:1].lower() + x[1:]}" for t, x in src.steps]))
+    shown = _Shown(" ".join(lines))
+    for x in cands:
+        if len(lines) <= len(x.items) + 1 and sum(shown.line(i) for i in x.items) == len(x.items):
+            return x
     return None
 
 
@@ -2932,12 +4161,15 @@ def _previous_json(s: OutlineSlide) -> str:
     return json.dumps(d, ensure_ascii=False)
 
 
-SIMILAR_VARIANTS_RU = "Формы слайдов заданы в брифе — варианты отличаются подачей, а не составом слайдов."
+SIMILAR_VARIANTS_RU = "Формы всех слайдов заданы в брифе — варианты отличаются подачей: раскладкой текста и крупных цифр рядом с диаграммами."
+SIMILAR_VARIANTS_SOME_RU = "Формы большинства слайдов заданы в брифе — варианты отличаются подачей этих слайдов и формой остальных."
 
 
-def _similar_variants_note(outlines: dict[str, DeckOutline], strategies: list[Strategy], tracker: _Tracker, per: dict[str, list[str]]) -> None:
+def _similar_variants_note(outlines: dict[str, DeckOutline], strategies: list[Strategy], tracker: _Tracker, per: dict[str, list[str]], structure: Optional[BriefStructure] = None) -> None:
     """When the variants differ on fewer than 30% of their slides (the user dictated the forms: charts, a table), say
-    so plainly rather than offering them as real alternatives."""
+    so plainly rather than offering them as real alternatives — and say it truly: every slide's form dictated (the
+    variants differ only in how the renderer lays a chart's slide out), or most of them (the others take another
+    form)."""
     names = [st.name for st in strategies if st.name in outlines]
     if len(names) < 2:
         return
@@ -2954,11 +4186,15 @@ def _similar_variants_note(outlines: dict[str, DeckOutline], strategies: list[St
         fracs.append(diff / n)
     if max(fracs) >= 0.3:
         return
+    specs = {sp.number: sp for sp in (structure.specs if structure is not None else [])}
+    content = [s for s in outlines[names[0]].slides if s.kind.value not in FRAME_KINDS]
+    pinned = [s for s in content if s.spec_ref in specs and (specs[s.spec_ref].charts or specs[s.spec_ref].table)]
+    text = SIMILAR_VARIANTS_RU if content and len(pinned) == len(content) else SIMILAR_VARIANTS_SOME_RU
     for nm in names:
-        line = f"Сборка: {SIMILAR_VARIANTS_RU}"
+        line = f"Сборка: {text}"
         outlines[nm].agent_log = [*outlines[nm].agent_log, line]
         per[nm].append(f"variants: differ on {int(round(max(fracs) * 100))}% of slides (forms dictated by the brief)")
-        tracker.relay({"type": "agent", "step": "compile", "message": SIMILAR_VARIANTS_RU, "slide": None, "variant": nm})
+        tracker.relay({"type": "agent", "step": "compile", "message": text, "slide": None, "variant": nm})
 
 
 def run_agent(
@@ -3124,14 +4360,16 @@ def run_agent(
             try:
                 nd = agent.model_design(d.unit, pos_of_unit[key], units, ctx, r_deadline, issues="\n".join(f"- {t}" for t in texts), previous=_previous_json(d.slide))
                 enforce_requests(nd, ctx)
+                tidy_design(nd, ctx)
             except Exception as e:  # noqa: BLE001
                 agent.failed(e)
                 return key, None, str(e) or type(e).__name__
             agent.answered(time.monotonic() - t_call)
-            worse = _revision_worse(d, nd, ctx)
-            if worse:
-                return key, None, f"the revision was worse ({worse}): the first version stays"
-            return key, nd, None
+            merged, why = merge_revision(d, nd, ctx)
+            if merged is None:
+                return key, None, f"the revision was worse ({'; '.join(why)}): the first version stays"
+            merged.changes.extend(f"slide {key}: revision: {w}" for w in why)
+            return key, merged, None
 
         revised = revised_all
         with ThreadPoolExecutor(max_workers=max(1, min(len(keys), agent.workers))) as ex:
@@ -3169,12 +4407,30 @@ def run_agent(
                 continue  # the user's own conclusion stays
             s = p.slide
             src = _read_source(u.text)
-            shown = {x for x in src.sentences if said_in(x, _visible_text_of(s.headline, s.content))}
+            shown = _shown_sentences(src, s.headline, s.content)
             new = _takeaway_sentence(src.sentences, [g.label for g in src.groups if g.label], shown)
             if new and (same_text(new, s.headline) or _filler_takeaway(new, s.headline, s.content, u.text)):
                 new = None
             s.takeaway = new
             tracker.emit("revise", f"Правка: слайд {i} — вывод повторял заголовок" + (f", теперь: «{new}»." if new else ", убран."), slide=i, variant=name)
+
+    # the safety net once the model is done: the key figures of every slide the user described are on it, and every
+    # content slide has its conclusion when the brief asks for one — from the source's own sentences, no model call
+    for st in strategies:
+        done_msgs: list[tuple[int, str]] = []
+        for i, p in enumerate(placed.get(st.name, []), 1):
+            if len(p.units) != 1:
+                continue
+            u = by_unit.get(p.units[0])
+            if u is None:
+                continue
+            said = complete_slide(p.slide, u, ctx) if coverage else []
+            polish_case(p.slide, ctx.brief.text)  # the lines a variant's form made («title: text») too
+            if said:
+                per[st.name].extend(f"slide {u.key}: {x}" for x in said)
+                done_msgs.append((i, said[0]))
+        for i, _ in done_msgs:
+            tracker.emit("revise", f"Правка: слайд {i} — добавил из брифа ключевые цифры или вывод, которых на слайде не было.", slide=i, variant=st.name)
 
     # 6. compile, ground, polish — per variant
     by_model = any(d.by == "model" for d in designs)
@@ -3244,7 +4500,7 @@ def run_agent(
         tracker.emit("compile", done, variant=st.name)
         o.agent_log = [*o.agent_log, done]
         outlines[st.name] = o
-    _similar_variants_note(outlines, strategies, tracker, per)
+    _similar_variants_note(outlines, strategies, tracker, per, structure)
     return AgentResult(
         outlines=outlines, warnings={name: common + per[name] for name in per}, structure=structure, by_model=by_model,
         model_slides=model_slides, slides=len(designs), calls=agent.calls.n, critic_issues=issues_n, seconds=round(time.time() - t0, 2),

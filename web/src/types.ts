@@ -13,7 +13,7 @@ export type TabKey = "template" | "brief" | "plan" | "variants" | "why" | "audit
 /** The two screens a person sees; everything expert lives in the «Подробнее» drawer. */
 export type Screen = "create" | "result";
 export type DetailKey = "quality" | "why" | "agent" | "plan" | "template" | "tech";
-export type JobKind = "analyze" | "generate" | "fix" | "other";
+export type JobKind = "analyze" | "generate" | "fix" | "edit" | "other";
 export type JobStatus = "queued" | "running" | "done" | "failed";
 
 export interface BboxFrac { x: number; y: number; w: number; h: number }
@@ -290,7 +290,9 @@ export interface Issue {
   details: Record<string, unknown>;
   outline_id: string | null;
 }
-export interface AuditSummary { errors: number; warnings: number; infos: number; model_flags: number; score: number; checks_run: string[] }
+// figures: every number on the slides compared with the source text (audit/checks/facts.py); null without a brief
+export interface FigureStats { checked: number; derived: number; unverified: number }
+export interface AuditSummary { errors: number; warnings: number; infos: number; model_flags: number; score: number; checks_run: string[]; figures?: FigureStats | null }
 export interface AuditReport {
   deck: string;
   template_id: string;
@@ -354,9 +356,11 @@ export interface GenerationMeta {
   /** The plan came with the request (no model was asked to plan). */
   outline_supplied?: boolean;
 }
+export interface VariantEdit { at: number; request: string; reply: string; kind: string; slides: number[]; score_before: number | null; score_after: number | null }
 export interface Variant {
   strategy: string;
   planner?: PlannerInfo;
+  edits?: VariantEdit[]; // the chat agent's edits of this variant, oldest first
   outline: DeckOutline | null;
   plan: LayoutPlan | null;
   audit: AuditReport | null;
@@ -404,6 +408,9 @@ export interface DiffResponse {
 export type ChatAction =
   | { type: "generation_started"; job_id: string; generation_id: string }
   | { type: "jobs"; jobs: { strategy: string; job_id: string }[] }
-  | { type: "open_tab"; tab: string; slide?: number };
+  | { type: "open_tab"; tab: string; slide?: number }
+  | { type: "edit"; job_id: string; strategy: string; generation_id: string; slide?: number | null };
+// what an edit job answers (verstka/api/app.py _edit_job): the agent's reply and the slide to show
+export interface EditResult { reply: string; changed: boolean; slide?: number | null; strategy?: string; score?: number | null; kind?: string }
 export interface ChatResponse { reply: string; intent: string; actions: ChatAction[]; template_id: string | null; generation_id: string | null }
 export interface ChatMessage { id: string; role: "user" | "assistant"; text: string; ts: number; pending?: boolean }

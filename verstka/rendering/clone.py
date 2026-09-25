@@ -16,7 +16,7 @@ from verstka.analysis.patterns import container_inset
 from verstka.analysis.shapes import looks_like_placeholder
 from verstka.analysis.xmlns import q
 from verstka.ingest.workspace import TemplateWorkspace
-from verstka.matching.scorer import awkward_breaks, balanced_lines, bind_short_words, bookend_max_lines, display_fit, display_lines, is_placeholder_text, same_words, split_display_title
+from verstka.matching.scorer import awkward_breaks, balanced_lines, bind_short_words, bookend_max_lines, cover_goal, display_fit, display_lines, is_placeholder_text, same_words, split_display_title
 from verstka.rendering.assets_pick import pick_asset, pick_icon
 from verstka.rendering.charts import add_chart, add_ring
 from verstka.rendering.deck import DeckBuilder, element_bbox, is_nested, remove_element, renumber_ids, set_element_pos, shift_element, slide_shape_elements
@@ -1514,20 +1514,22 @@ _OPAQUE_CACHE: dict[tuple, Optional[tuple[float, float, float, float]]] = {}
 
 
 def _bookend_lines(oslide: OutlineSlide) -> list[str]:
-    """The short text lines a cover or closing slide may carry beyond its heading (a contact, the audience)."""
+    """The short text lines a cover or closing slide may carry beyond its heading (a contact, the audience) — a
+    cover's goal line (`cover_goal`) is set on its own, under the subtitle."""
     c = oslide.content
-    return [t.strip() for t in list(c.paragraphs) + list(c.bullets) if t and t.strip()]
+    paras = list(c.paragraphs)[1:] if cover_goal(oslide) else list(c.paragraphs)
+    return [t.strip() for t in paras + list(c.bullets) if t and t.strip()]
 
 
 def _is_bookend(oslide: OutlineSlide) -> bool:
     """A cover, a section divider or a closing slide with nothing but its heading and a line or two under it (a
-    subtitle, a contact): these are set as a heading and a subtitle on the sample's ground."""
+    subtitle, a contact, a cover's goal): these are set as a heading and a subtitle on the sample's ground."""
     if oslide.kind not in _BOOKENDS:
         return False
     c = oslide.content
     lines = _bookend_lines(oslide)
     only_text = not (c.items or c.numbers or c.table or c.chart or c.quote or c.columns)
-    return only_text and len(lines) <= 2 and sum(len(t) for t in lines) <= 140
+    return only_text and len(lines) <= 2 and sum(len(t) for t in lines) <= 140 and len(cover_goal(oslide) or "") <= 220
 
 
 def _cap_first(text: str) -> str:
@@ -1822,6 +1824,28 @@ def _art_above(ctx: _SlideCtx, x0: int, x1: int, y_from: int, hidden: list[Bbox]
     for y in range(min(int(y_from * ky), h) - 1, run - 1, -1):
         if all(rows[y - i] > 12 for i in range(run)):
             return int((y + 1) / ky)
+    return None
+
+
+def _art_below(ctx: _SlideCtx, x0: int, x1: int, y_from: int, hidden: list[Bbox]) -> Optional[int]:
+    """The upper edge of the art painted under `y_from` over the columns x0…x1 (the VK Tech glass cube under a centred
+    cover heading: art drawn into the background, which no shape measures), read off the sample's render with the
+    sample's own texts masked out; None when the column is calm to the foot of the slide."""
+    import numpy as np
+
+    dm = _detail_map(ctx, hidden)
+    if dm is None:
+        return None
+    act, kx, ky = dm
+    h, w = act.shape
+    c0, c1 = max(int(x0 * kx), 0), min(int(x1 * kx) + 1, w)
+    if c1 - c0 < 3:
+        return None
+    rows = np.percentile(act[:, c0:c1], 75, axis=1)  # most of the column busy: art, not a stray line
+    run = max(int(0.02 * h), 3)
+    for y in range(max(int(y_from * ky), 0), h - run):
+        if all(rows[y + i] > 25 for i in range(run)):
+            return int(y / ky)
     return None
 
 
@@ -2431,6 +2455,7 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
     title = max(ctx.slots(SlotRole.title), key=lambda s: s.bbox.area)
     t_el = ctx.els[title.shape_id]
     head, sub_text, kicker_text, footer_text = _bookend_texts(ctx, oslide)
+    goal = bind_short_words(cover_goal(oslide) or "") or None
     carrier = _subtitle_carrier(ctx, title) if sub_text else None
     s_el = ctx.els.get(carrier.shape_id) if carrier is not None else None
     if s_el is not None and has_visible_style(s_el) and len(sub_text) > max(20, 2 * len((carrier.sample_text or "").strip())):
@@ -2541,6 +2566,18 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
     art = _art_edge(ctx, band, tb.x + int(0.12 * W), hidden, designed_to=tb.x2)
     if art is not None:
         limit = min(limit, art - int(0.02 * W))  # a gutter from the art, not a hairline
+    art_low = None
+    if kind == PatternKind.title:
+        # art painted under the heading (a centred cover over its picture): the whole stack keeps above it — the
+        # heading steps down a size rather than running over the art
+        art_low = _art_below(ctx, tb.x + tb.w // 10, tb.x2 - tb.w // 10, tb.y + tb.h // 2, hidden)
+        if art_low is not None:
+            # the sample's own texts reach over the edge of its art (a subtitle on the cube's rings): the stack may go
+            # as low as they do, a little more, never onto the body of the art
+            own = max((sl.bbox.to_emu(W, H).y2 for sl in ctx.pattern.slots if sl.role in (SlotRole.title, SlotRole.subtitle)), default=0)
+            art_low = max(art_low, own + int(0.05 * H))
+            bot_lim = min(bot_lim, art_low)
+            below.append(Bbox(x=tb.x, y=art_low + int(0.03 * H), w=tb.w, h=max(int(safe.y2 * H) - art_low, 1)))
     w_sample = max(min(tb.w, limit - tb.x), int(0.2 * W))
     w_max = max(w_sample, min(limit - tb.x, max(tb.w, int(0.6 * W) - tb.x)))
     above = _art_above(ctx, tb.x, tb.x + w_max, tb.y + min(tb.h // 2, int(0.08 * H)), hidden)
@@ -2690,8 +2727,8 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
         footer_text = " · ".join(t for t in (kicker_text, footer_text) if t)
         kicker_text = None
     y = tb.y
-    h_title = h_sub = gap = h_k = gap_k = 0
-    sub_size = 0.0
+    h_title = h_sub = gap = h_k = gap_k = h_goal = gap_goal = 0
+    sub_size = g_size = 0.0
     split: list[str] = []
     for _ in range(14):
         n = len(display_lines(measured, family, size, bold, inner(w_used)))
@@ -2706,15 +2743,24 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
             h_sub = int((s_lines * 1.2 + 0.25) * sub_size * EMU_PER_PT) + s_ins[1] + s_ins[3]
             want = sample_gap if sample_gap is not None and carrier is not None and not is_placeholder_text(carrier.sample_text) else 0.45 * size
             gap = int(max(0.35 * size, min(want, 0.6 * size)) * EMU_PER_PT)
+        if goal:
+            # the goal: a short line a step under the subtitle, in its colour, never under the caption size
+            ref = sub_size or min(s_size or _bookend_subtitle_size(ctx), _snap_down(size * 0.6, ctx.grow_scale))
+            g_size = legible(max(_snap_down(0.8 * ref, ctx.grow_scale), typo.size_for("caption", 10.0), 0.022 * H / EMU_PER_PT), sub_color)
+            g_lines = max(1, len(display_lines(goal, family, g_size, False, inner(w_max) * 0.92)))
+            h_goal = int((g_lines * 1.2 + 0.25) * g_size * EMU_PER_PT) + s_ins[1] + s_ins[3]
+            gap_goal = int(max(0.5 * g_size, 0.012 * H / EMU_PER_PT) * EMU_PER_PT) if sub_text else int(0.45 * size * EMU_PER_PT)
         k_size = legible(kicker_size(size), k_color) if (kicker_text or frame_text) else 0.0
         if kicker_above:
             h_k = int((1.2 + 0.25) * k_size * EMU_PER_PT) + k_ins[1] + k_ins[3]
             gap_k = max(int(max(0.3 * size, 0.5 * k_size) * EMU_PER_PT) - k_ins[3] - t_ins[1], 0)
         k_room = h_k + gap_k if kicker_above else 0
-        body = h_title + gap + h_sub
+        body = h_title + gap + h_sub + gap_goal + h_goal
         reach = max(text_width_pt(t, family, size, bold) for t in split)
         if sub_text:
             reach = max(reach, min(text_width_pt(sub_text, family, sub_size, False), inner(w_max)))
+        if goal:
+            reach = max(reach, min(text_width_pt(goal, family, g_size, False), inner(w_max)))
         bot_room = floor_under(tb.x + t_ins[0] + marl + int(reach * EMU_PER_PT) + int(0.02 * W) if align == "l" else tb.x + w_used)
         ref_h = h_title
         if kind == PatternKind.section and st.divider_pattern == ctx.pattern.id and st.divider_lines > lines:
@@ -2770,6 +2816,25 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
         sid = ctx.id_of(s_el)
         if sid:
             ctx.filled.add(sid)
+    if goal:
+        # the cover's goal under the subtitle (on the subtitle's edge and in its colour), drawn like it
+        g_src = s_el if s_el is not None else t_el
+        g_el = _new_text(ctx, g_src, "Цель", family, sub_color)
+        fill_text(g_el, [ParagraphSpec(goal, bullet=False)], size_pt=g_size)
+        _set_paragraph_box(g_el, marl, align, bold=False, line_spacing=1.0)
+        if sub_color:
+            style_runs(g_el, None, sub_color, align=None)
+        _no_autofit(g_el, "t")
+        g_ins = _body_insets(g_el)
+        g_w = w_max - (t_ins[0] - g_ins[0])
+        g_x = tb.x + t_ins[0] - g_ins[0] if align == "l" else (x + w_used // 2 - g_w // 2 if align == "ctr" else x + w_used - g_w)
+        g_y = block_bottom + gap_goal
+        g_lines = max(1, len(display_lines(goal, family, g_size, False, inner(w_max) * 0.92)))
+        set_element_pos(g_el, x=g_x, y=g_y, w=g_w, h=int((g_lines * 1.2 + 0.25) * g_size * EMU_PER_PT) + g_ins[1] + g_ins[3])
+        block_bottom = g_y + int((g_lines * 1.2 + 0.25) * g_size * EMU_PER_PT) + g_ins[1] + g_ins[3]
+        gid = ctx.id_of(g_el)
+        if gid:
+            ctx.filled.add(gid)
 
     def line_box(txt: str, sz: float, name: str, color: Optional[str], weight: bool, box: tuple[int, int, int], anchor_to: str = "t") -> etree._Element:
         sz = legible(sz, color, weight)
@@ -2823,25 +2888,28 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
         n_bold = low_contrast(sub_color) and n_size < 14.0
         if n_bold:
             n_size = 14.0
+        # the column under a heading that stands over art is no place for small print: it goes to the slide's foot
+        # at the left margin, clear of the art
+        n_x = int(safe.x * W) if art_low is not None else text_x
         n_room = int(safe.x2 * W)
         for ob in obstacles:
-            if ob.y2 > int(0.7 * H) and ob.x > text_x + int(0.1 * W):
+            if ob.y2 > int(0.7 * H) and ob.x > n_x + int(0.1 * W):
                 n_room = min(n_room, ob.x - int(0.02 * W))
-        n_art = _art_edge(ctx, (int(0.8 * H), int(safe.y2 * H)), text_x + int(0.05 * W), hidden)
+        n_art = _art_edge(ctx, (int(0.8 * H), int(safe.y2 * H)), n_x + int(0.05 * W), hidden)
         if n_art is not None:
             n_room = min(n_room, n_art - int(0.02 * W))
-        n_width = max(min(w_max, n_room - text_x), int(0.25 * W))
+        n_width = max(min(w_max, n_room - n_x), int(0.2 * W))
         n_lines = display_lines(bind_short_words(note), family, n_size, n_bold, n_width / EMU_PER_PT * 0.92) or [note]
         n_w = int(max(text_width_pt(t, family, n_size, n_bold) for t in n_lines) * 1.1 * EMU_PER_PT)
         l_ins = s_ins if s_el is not None and kind != PatternKind.section else t_ins  # the insets line_box gives its box
         n_h = int((1.2 * len(n_lines) + 0.25) * n_size * EMU_PER_PT) + l_ins[1] + l_ins[3]
-        ny = floor_under(text_x + n_w + int(0.02 * W)) - n_h
-        if ny - block_bottom < max(int(0.05 * H), int(1.2 * n_size * EMU_PER_PT)):
+        ny = floor_under(n_x + n_w + int(0.02 * W)) - n_h
+        if ny - block_bottom < max(int(0.05 * H), int(1.2 * n_size * EMU_PER_PT)) and art_low is None:
             ny = block_bottom + max(int(0.04 * H), int(1.2 * n_size * EMU_PER_PT))  # no foot room: under the subtitle
             block_bottom = ny + n_h
         else:
             note_top = ny  # at the foot: the date stands over it
-        line_box("\n".join(n_lines), n_size, "Сноска", sub_color, n_bold, (text_x, ny, min(n_w, n_width)))
+        line_box("\n".join(n_lines), n_size, "Сноска", sub_color, n_bold, (n_x, ny, min(n_w, n_width)))
     # the footer: the date (and whatever had no room above the heading) at the foot of the heading's column
     if footer_text:
         f_size = legible(max(_snap_down(0.85 * (s_size or _bookend_subtitle_size(ctx)), ctx.grow_scale), typo.size_for("caption", 10.0)), sub_color)

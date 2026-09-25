@@ -421,7 +421,8 @@ def test_reshape_never_loses_the_slides_text_for_a_figure_form():
     s = OutlineSlide(id="x", kind=K.cards, headline="h", content=SlideContent(items=[{"title": "А"}, {"title": "Б"}], numbers=[NumberCallout(value="1", label="a"), NumberCallout(value="2", label="b")]))
     assert A.reshape(s, "stat_row") is None and A.reshape(s, "chart") is None
     b = A.reshape(s, "bullets")
-    assert b is not None and b.content.bullets == ["А", "Б"] and len(b.content.numbers) == 2
+    # a list shows the figures as its lines, never a row of figures under another kind's name
+    assert b is not None and b.content.bullets == ["a: 1", "b: 2", "А", "Б"] and not b.content.numbers
     figs = OutlineSlide(id="y", kind=K.stat_row, headline="h", content=SlideContent(numbers=[NumberCallout(value="315 000 ₽", label="продукты"), NumberCallout(value="270 000 ₽", label="зарплаты")]))
     # a row of figures is not the parts of one whole: never a pie (its «shares» would be made up), columns
     assert A.reshape(figs, "chart", "pie") is None

@@ -4,7 +4,7 @@ import { api } from "../api";
 import { describeGeneration, errText, firstLine } from "../lib/narrate";
 import { plural } from "../lib/utils";
 import { useApp, type AppState } from "../store";
-import type { ChatResponse, FixResult, Generation, TabKey } from "../types";
+import type { ChatResponse, EditResult, FixResult, Generation, TabKey } from "../types";
 
 const TABS: readonly TabKey[] = ["template", "brief", "plan", "variants", "why", "audit", "export", "run", "agent"];
 const asTab = (name: string): TabKey | null => TABS.find((t) => t === name) ?? null;
@@ -98,6 +98,33 @@ function trackFixes(app: () => AppState, jobs: { strategy: string; job_id: strin
   });
 }
 
+function asEditResult(value: unknown): EditResult | null {
+  if (!value || typeof value !== "object") return null;
+  const r = value as Partial<EditResult>;
+  return typeof r.reply === "string" ? { reply: r.reply, changed: !!r.changed, slide: r.slide ?? null, strategy: r.strategy, score: r.score ?? null, kind: r.kind } : null;
+}
+
+/** An edit of the deck on screen: the agent changes a slide (or the order), the variant is rendered again, the chat
+ *  tells what changed and the screen shows the changed slide. */
+function trackEdit(app: () => AppState, jobId: string, gid: string, strategy: string) {
+  app().runJob(jobId, "Меняю презентацию", {
+    kind: "edit",
+    onDone: async (job) => {
+      const res = asEditResult(job.result);
+      if (res?.changed) {
+        await app().refreshGenerations();
+        await app().loadGeneration(gid);
+        if (app().activeStrategy !== strategy) app().setActiveStrategy(strategy);
+        if (res.slide) app().setSelectedSlide(res.slide);
+      }
+      app().pushMessage("assistant", res?.reply ?? "Готово.");
+    },
+    onFailed: (job) => {
+      app().pushMessage("assistant", `Не получилось поменять: ${firstLine(job.error ?? job.message)}. Попробуйте сказать иначе или повторите позже.`);
+    },
+  });
+}
+
 /** Returns a stable handler that performs the `actions` of a chat response (jobs to follow, tabs to open). */
 export function useChatActions(): (res: ChatResponse) => void {
   const state = useApp();
@@ -109,6 +136,7 @@ export function useChatActions(): (res: ChatResponse) => void {
     for (const action of res.actions ?? []) {
       if (action.type === "generation_started") trackGeneration(app, action.job_id, action.generation_id);
       else if (action.type === "jobs") trackFixes(app, action.jobs ?? [], res.generation_id ?? app().generationId);
+      else if (action.type === "edit") trackEdit(app, action.job_id, action.generation_id, action.strategy);
       else if (action.type === "open_tab") {
         const tab = asTab(action.tab);
         if (action.slide) app().setSelectedSlide(action.slide);

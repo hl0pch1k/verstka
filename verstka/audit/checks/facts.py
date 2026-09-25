@@ -1,0 +1,186 @@
+"""Figures on the slides against the brief (criterion Q4 of the ТЗ: every figure and fact comes from the source).
+
+The planner grounds the plan's figures before rendering (planning/grounding.py); this check reads the finished deck —
+text boxes, table cells, chart values — so what the renderer computed on its own (a pie legend's shares, a doughnut's
+total, a before/after delta) is checked too, and the report can say how many figures were compared. A figure passes
+when the brief writes it (units compatible, rounded as a person rounds), when it follows from two of the brief's
+figures of one measure (difference, percent change, ratio — the analyst's before/after pairs included), or when it is a
+share or a total of a chart's own values on the same slide. Step badges («01», «3»), page numbers and a cover's date
+are not facts and are skipped."""
+
+from __future__ import annotations
+
+import re
+from typing import Optional
+
+from verstka.audit.checks.common import is_chrome_like
+from verstka.audit.registry import AuditContext, check
+from verstka.schemas.audit import CheckSpec, Issue
+from verstka.schemas.deck_ir import IRElement, IRSlide
+
+FIGURE_NOT_IN_BRIEF = CheckSpec(
+    id="figure_not_in_brief",
+    title="Число на слайде не найдено в тексте",
+    severity="warn",
+    category="content",
+    description=(
+        "Каждое число в тексте, таблицах и диаграммах слайда ищется среди чисел исходного текста (с единицами измерения) "
+        "и того, что из них прямо следует: разность, процент изменения, во сколько раз, доли и сумма частей диаграммы. "
+        "Номера шагов, страниц и дата на обложке не проверяются."
+    ),
+)
+
+_BADGE_RE = re.compile(r"^\s*0?\d{1,2}[.)]?\s*$")
+# a step's number, not a quantity: «Месяц 2», «Этап 1», «Шаг 3:», «3‑й мес.» (a label shortened on a chart axis)
+_STEP_BEFORE_RE = re.compile(r"(?:месяц|мес\.|этап|шаг|недел[яи]|квартал|день|пункт|слайд|раздел|волна|спринт|№|Q)\s*$", re.I)
+_ORDINAL_AFTER_RE = re.compile(r"^[-‑\u2060]*(?:й|я|е|го|м|ом|ый|ой|ая|ую)\b", re.I)
+
+
+def _step_number(text: str, f) -> bool:
+    if f.unit is not None or f.dec or f.value > 99:
+        return False
+    return bool(_STEP_BEFORE_RE.search(text[: f.start]) or _ORDINAL_AFTER_RE.match(text[f.end :]))
+_SKIP_PH = {"sldNum", "dt", "ftr", "SLIDE_NUMBER", "DATE", "FOOTER"}
+
+
+def _texts(e: IRElement) -> list[str]:
+    if e.table is not None:
+        return [c for row in e.table.rows for c in row if c and c.strip()]
+    if e.chart is not None:
+        return []  # a chart's values are checked as numbers (below), its categories are labels
+    if not e.has_text or _BADGE_RE.match(e.text):
+        return []
+    return [p.text for p in e.paragraphs if p.text.strip()]
+
+
+def _chart_parts(slide: IRSlide) -> tuple[list[float], list[float]]:
+    """Shares (in %) and totals the slide's charts imply: a legend beside a pie says «40%» of 315 000 in 780 000."""
+    shares: list[float] = []
+    totals: list[float] = []
+    for e in slide.elements:
+        if e.chart is None:
+            continue
+        for s in e.chart.series:
+            vals = [v for v in s.values if v is not None and v >= 0]
+            total = sum(vals)
+            if total <= 0 or len(vals) < 2:
+                continue
+            totals.append(total)
+            shares.extend(v / total * 100 for v in vals)
+    return shares, totals
+
+
+def _near(value: float, dec: int, candidates: list[float]) -> bool:
+    step = 10 ** -dec
+    return any(abs(value - c) <= step * 0.51 + 1e-9 for c in candidates)
+
+
+class FigureStats:
+    """What the check compared, for the report's summary («72 числа сверены с текстом, 4 посчитаны из его чисел»)."""
+
+    def __init__(self) -> None:
+        self.checked = 0
+        self.derived = 0
+        self.unverified = 0
+
+    def as_dict(self) -> dict:
+        return {"checked": self.checked, "derived": self.derived, "unverified": self.unverified}
+
+
+def _index(ctx: AuditContext):
+    from verstka.planning.brief_structure import read_structure
+    from verstka.planning.grounding import BriefIndex
+
+    idx = BriefIndex(ctx.brief_text or "", ctx.outline.title if ctx.outline is not None else None)
+    try:
+        idx.use_structure(read_structure(ctx.brief_text or ""))
+    except Exception:  # noqa: BLE001  (the rules' reading only adds derived pairs; the brief's figures stand without it)
+        pass
+    return idx
+
+
+def _cover(slide: IRSlide, ctx: AuditContext) -> bool:
+    if slide.index == 1:
+        return True
+    if ctx.outline is not None and slide.outline_id:
+        o = next((s for s in ctx.outline.slides if s.id == slide.outline_id), None)
+        return o is not None and o.kind.value in ("title", "thanks")
+    return False
+
+
+@check(FIGURE_NOT_IN_BRIEF)
+def figure_not_in_brief(ctx: AuditContext) -> list[Issue]:
+    if not (ctx.brief_text or "").strip():
+        return []
+    from verstka.planning.grounding import figures
+
+    idx = _index(ctx)
+    stats = FigureStats()
+    out: list[Issue] = []
+    for s in ctx.ir.slides:
+        shares, totals = _chart_parts(s)
+        cover = _cover(s, ctx)
+        for e in s.elements:
+            if (e.ph_type or "") in _SKIP_PH or is_chrome_like(e, ctx.ir, ctx.manifest):
+                continue
+            found: list[tuple[str, str]] = []  # (as written, verdict)
+            for t in _texts(e):
+                for f in figures(t):
+                    if cover and (f.date is not None or (f.plain and 1900 <= f.value <= 2100)):
+                        continue  # the cover's date is the deck's, not a fact of the brief
+                    if _step_number(t, f):
+                        continue
+                    written = t[f.start : f.uend].strip()
+                    v = idx.verdict(f)
+                    if v != "ok" and f.unit == "pct" and _near(f.value, f.dec, shares):
+                        v = "derived"
+                    elif v != "ok" and _near(f.mag, 0, totals):
+                        v = "derived"
+                    elif v == "ok" and not idx._same(f):
+                        v = "derived"  # a difference, a percent change or a ratio of the brief's figures
+                    found.append((written, v))
+            if e.chart is not None:
+                for ser in e.chart.series:
+                    for val in ser.values:
+                        if val is None:
+                            continue
+                        written = f"{val:.12g}".replace(".", ",")  # 1138500, not 1.1385e+06
+                        f = next(iter(figures(written)), None)
+                        if f is None:
+                            continue
+                        v = idx.verdict(f)
+                        found.append((written, "derived" if v != "ok" and _near(val, 0, totals) else v))
+            bad = []
+            for written, v in found:
+                stats.checked += 1
+                if v == "derived":
+                    stats.derived += 1
+                elif v != "ok":
+                    stats.unverified += 1
+                    bad.append(written)
+            if bad:
+                shown = ", ".join(f"«{b}»" for b in dict.fromkeys(bad))
+                out.append(ctx.new_issue(
+                    FIGURE_NOT_IN_BRIEF, s.index,
+                    f"{shown}: такого числа нет в исходном тексте и оно не следует из его чисел",
+                    bboxes=[e.bbox_frac], element_ids=[e.id],
+                    suggestion="Проверьте число по исходному тексту или уберите его со слайда.",
+                ))
+    ctx.figure_stats = stats.as_dict()
+    return out
+
+
+def figure_summary(stats: Optional[dict]) -> Optional[str]:
+    """«Сверил с исходным текстом 72 числа на слайдах — лишних нет: 60 взяты из текста, 12 посчитаны из его чисел» —
+    for the result screen and the chat."""
+    if not stats or not stats.get("checked"):
+        return None
+    from verstka.ru import ru_count
+
+    n, d, u = stats["checked"], stats.get("derived", 0), stats.get("unverified", 0)
+    head = f"Сверил с исходным текстом {ru_count(n, 'число', 'числа', 'чисел')} на слайдах"
+    if u:
+        return f"{head}: {ru_count(u, 'число', 'числа', 'чисел')} в нём нет — посмотрите замечания."
+    if not d:
+        return f"{head} — все взяты из него."
+    return f"{head} — лишних нет: {n - d} взяты из текста, {d} посчитаны из его чисел (доли, изменения, суммы)."

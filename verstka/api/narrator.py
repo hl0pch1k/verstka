@@ -140,8 +140,11 @@ def describe_audit(report: AuditReport, check_titles: Optional[dict[str, str]] =
     titles = check_titles if check_titles is not None else _check_titles()
     title = lambda cid: titles.get(cid, cid)  # noqa: E731
     s = report.summary
+    from verstka.audit.checks.facts import figure_summary
+
+    figures_line = figure_summary(s.figures)
     if not report.issues:
-        return "Проверка качества: 100 из 100, замечаний нет."
+        return "Проверка качества: 100 из 100, замечаний нет." + (f"\n{figures_line}" if figures_line else "")
     errs = Counter(i.check_id for i in report.issues if i.severity == "error")
     warns = Counter(i.check_id for i in report.issues if i.severity == "warn")
     head = f"Проверка качества: {s.score:g} из 100, " + ("ошибок нет" if not s.errors else ru_count(s.errors, "ошибка", "ошибки", "ошибок"))
@@ -150,7 +153,7 @@ def describe_audit(report: AuditReport, check_titles: Optional[dict[str, str]] =
     if s.model_flags:
         head += ", " + ru_count(s.model_flags, "замечание модели", "замечания модели", "замечаний модели")
     head += "."
-    lines = [head]
+    lines = [head] + ([figures_line] if figures_line else [])
     if errs:
         lines.append("Ошибки: " + "; ".join(f"{title(k)} ×{v}" if v > 1 else title(k) for k, v in errs.most_common()) + ".")
     if warns:

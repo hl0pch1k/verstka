@@ -1,6 +1,6 @@
 // Left column: the conversation with the Verstka agent — feed, composer, brief attachment and quick actions.
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
-import { FileText, Layers, Paperclip, SendHorizontal, Upload, X } from "lucide-react";
+import { FileText, Layers, Paperclip, PenLine, SendHorizontal, Upload, X } from "lucide-react";
 import { LogoMark } from "./shell/Logo";
 import { api } from "../api";
 import { errText } from "../lib/narrate";
@@ -32,6 +32,7 @@ const MAX_BRIEF_BYTES = 2 * 1024 * 1024;
 const STEPS = [
   { icon: Upload, title: "Соберу презентацию из текста", text: "Вставьте текст сюда или напишите «сделай 8 слайдов для руководства: …» — получите три варианта." },
   { icon: FileText, title: "Объясню любой слайд", text: "Спросите «почему слайд 4 такой» — расскажу, почему агент выбрал такую форму и что ещё рассматривал." },
+  { icon: PenLine, title: "Поправлю по вашей просьбе", text: "«На слайде 3 покажи расходы таблицей», «убери слайд 5», «поменяй местами 2 и 3». Не понравится — «верни как было»." },
   { icon: Layers, title: "Исправлю замечания", text: "Скажите «исправь всё» — применю автоматические исправления и пересоберу файлы." },
 ] as const;
 
@@ -106,7 +107,7 @@ export function Chat({ onClose }: { onClose?: () => void }) {
       pushMessage("user", message);
       try {
         // the variant on screen: «почему слайд 3 такой» is about the slide the person looks at
-        const res = await api.chat({ session_id: sessionId(), message, template_id: templateId, generation_id: generationId, strategy: activeStrategy });
+        const res = await api.chat({ session_id: sessionId(), message, template_id: templateId, generation_id: generationId, strategy: activeStrategy, slide: generation ? selectedSlide : null });
         pushMessage("assistant", res.reply);
         handleActions(res);
       } catch (e) {
@@ -223,7 +224,7 @@ export function Chat({ onClose }: { onClose?: () => void }) {
             onKeyDown={onKeyDown}
             rows={1}
             disabled={healthError}
-            placeholder={healthError ? "API недоступен — дождитесь переподключения" : "Напишите вопрос или текст презентации…"}
+            placeholder={healthError ? "API недоступен — дождитесь переподключения" : generation ? `Например: «на слайде ${selectedSlide} покажи цифры крупнее»` : "Напишите вопрос или текст презентации…"}
             aria-label="Сообщение агенту"
             className="scroll-thin block w-full resize-none bg-transparent px-4 py-3 text-sm leading-5 text-zinc-900 placeholder:text-zinc-500 focus:outline-none disabled:cursor-not-allowed"
           />

@@ -21,7 +21,10 @@ IMAGE_STRETCHED = CheckSpec(id="image_stretched", title="Картинка рас
 TEXT_OUTSIDE_CARD = CheckSpec(id="text_outside_card", title="Текст выходит за свою карточку", severity="error", category="layout", description="Строки текстового блока, который начинается внутри карточки (залитой или обведённой фигуры), заходят за её нижний или правый край более чем на 1,5% размера слайда (больше 3% — ошибка): текст висит под карточкой и наезжает на то, что ниже.")
 TABLE_CELL_WRAP = CheckSpec(id="table_cell_wrap", title="Слово в ячейке таблицы переносится по буквам", severity="warn", category="layout", description="Самое длинное слово в ячейке нативной таблицы шире своей колонки (ширина из a:gridCol минус поля ячейки; без сетки — ширина рамки / число колонок минус 2×7.2 пт) при кегле и начертании самой ячейки — PowerPoint рвёт его посреди слова.")
 
+WORD_BREAK = CheckSpec(id="word_break", title="Слово шире своей рамки и рвётся посередине", severity="warn", category="layout", description="Слово абзаца (по метрикам шрифта, при кегле и начертании своего фрагмента) шире рамки текста за вычетом полей и отступа маркера — рендерер разорвёт его посреди слова («Корректировк / а»). Допуск 3%: рендерер набирает текст чуть шире, чем его меряют; неразрывный пробел держит слова вместе, дефис без словосоединителя — место переноса. Рамки, которые сами уменьшают шрифт (normAutofit), и служебные элементы шаблона (номер слайда, дата, колонтитул) не проверяются.")
+
 TABLE_CELL_INSET_PT = 7.2  # default a:tcPr marL/marR
+WORD_ROOM = 0.97  # a word wider than this share of its line is broken by the renderer
 _HARD_SPACE_RE = re.compile(r"[ \t\r\n]+")  # NBSP stays inside a word, as PowerPoint keeps it on one line
 
 
@@ -301,6 +304,51 @@ def table_cell_wrap(ctx: AuditContext) -> list[Issue]:
                         element_ids=[e.id],
                         details={"word": word, "column": c_i, "word_pt": round(col_pt + over, 1), "column_pt": round(col_pt, 1), "cols": n_cols},
                         autofix=fix("rematch", "перевыбрать макет с более широкой областью таблицы", outline_id=s.outline_id),
+                    )
+                )
+    return out
+
+
+_WORD_SPLIT_RE = re.compile(r"[ \t\r\n]+|(?<=-)(?!\u2060)")
+
+
+@check(WORD_BREAK)
+def word_break(ctx: AuditContext) -> list[Issue]:
+    """A word wider than the line it stands on: a column too narrow for it (six steps in a row, a card of a long
+    word) — the renderer breaks it in the middle."""
+    out: list[Issue] = []
+    for s in ctx.ir.slides:
+        for e in text_elements(s):
+            if not e.wrap or e.autofit == "norm" or e.rotation or e.bbox.w <= 0:
+                continue
+            if e.ph_type in ("sldNum", "dt", "ftr") or is_chrome_like(e, ctx.ir, ctx.manifest):
+                continue  # the template's own page number, date and footer boxes: its chrome, not the deck's text
+            usable = (e.bbox.w - e.insets_emu[0] - e.insets_emu[2]) / EMU_PER_PT
+            if usable <= 0:
+                continue
+            worst: tuple[float, str, float] | None = None
+            for p in e.paragraphs:
+                size_p = next((r.size_pt for r in p.runs if r.size_pt), None) or e.dominant_size or 14.0
+                line = usable - (size_p * 1.1 if p.bullet else 0.0)
+                for r in p.runs:
+                    size = r.size_pt or size_p
+                    for word in _WORD_SPLIT_RE.split(r.text or ""):
+                        if not word.strip():
+                            continue
+                        w_pt = text_width_pt(word, r.font, size, r.bold)
+                        if w_pt > line * WORD_ROOM and (worst is None or w_pt - line > worst[0] - worst[2]):
+                            worst = (w_pt, word, line)
+            if worst is not None:
+                w_pt, word, line = worst
+                out.append(
+                    ctx.new_issue(
+                        WORD_BREAK,
+                        s.index,
+                        f"слово «{word.strip()}» ({w_pt:.0f} пт) не помещается в строку рамки ({line:.0f} пт) и рвётся посередине",
+                        bboxes=[e.bbox_frac],
+                        element_ids=[e.id],
+                        details={"word": word.strip(), "word_pt": round(w_pt, 1), "line_pt": round(line, 1)},
+                        autofix=fix("shrink_text", "уменьшить шрифт по шкале шаблона, чтобы слово встало в строку", outline_id=s.outline_id, element_id=e.id, ratio=round(w_pt / (line * WORD_ROOM), 2)),
                     )
                 )
     return out

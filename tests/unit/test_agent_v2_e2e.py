@@ -18,6 +18,7 @@ import pytest
 
 from verstka.planning import agent as A
 from verstka.planning.brief import parse_brief_text
+from verstka.planning.compile import same_formula
 from verstka.providers.mock import MockProvider
 from verstka.providers.registry import ProviderLimits, ProviderRegistry
 from verstka.schemas.common import PatternKind as K
@@ -210,8 +211,9 @@ def short_run(vk_tech, workspace, tmp_path_factory):
 def test_three_variants_planned_by_the_agent(short_run):
     res, _, _, fake, _ = short_run
     assert [v.strategy for v in res.variants] == ["structured", "visual", "compact"]
-    # one critic call per distinct plan (the variants of one plan share it), one revision of the flagged slide
-    assert fake.calls["designer"] == 5 and 1 <= fake.calls["critic"] <= 3 and fake.calls["revise"] == 1
+    # one critic call per distinct plan (the variants of one plan share it), one revision per flagged slide: the
+    # critic's (slide 6) and the agent's own check's (slide 3 leaves out the brief's total «780 000 рублей»)
+    assert fake.calls["designer"] == 5 and 1 <= fake.calls["critic"] <= 3 and fake.calls["revise"] == 2
     assert "architect" not in fake.calls and fake.calls.get("other", 0) <= 2  # no whole-brief extraction next to the analyst's
     for v in res.variants:
         assert v.outline.planned_by == "agent" and v.planner["planned_by"] == "agent" and v.planner["model"] == "qwen/qwen3.8-27b"
@@ -336,12 +338,14 @@ def test_without_a_model_the_long_brief_has_its_formula_table_charts_and_takeawa
         sp = _by_spec(o)
         cover = sp[1]
         assert cover.kind == K.title and cover.headline == "Больше прибыли с каждой чашки" and "условн" in (cover.footnote or "")
-        assert (sp[2].content.formula or "").replace(" ", "").startswith("100×300×30=900000")
+        # the user's calculation, its factors named from the slide's text
+        assert same_formula(sp[2].content.formula, "100 × 300 × 30 = 900 000 рублей") and "покупок в день" in sp[2].content.formula
         assert sp[3].content.chart is not None and sp[3].content.chart.type in ("pie", "doughnut") and "налог" in (sp[3].footnote or "").lower()
         assert sp[9].content.table is not None and len(sp[9].content.table.rows) == 7 and sp[9].takeaway
         assert sp[10].takeaway and sp[10].takeaway.startswith("Рост прибыли зависит")
-        # the 6-month plan: steps on a timeline (the compact variant may set it as a short list)
-        assert sp[8].kind in (K.timeline, K.process) or (v.strategy == "compact" and sp[8].kind == K.bullets)
+        # the 6-month plan: steps on a timeline (the compact variant sets it next to the budget, in two columns)
+        assert sp[8].kind in (K.timeline, K.process) or (v.strategy == "compact" and sp[8].kind in (K.bullets, K.two_column))
+        assert "Витрина для десертов" in " ".join([*sp[8].content.bullets, *(b for c in sp[8].content.columns for b in c.bullets)])
         assert sum(1 for s in o.slides if s.takeaway) >= 5
         assert [s.kind for s in o.slides].count(K.bullets) <= 4
         for _, ch in _charts(o):

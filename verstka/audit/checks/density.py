@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from verstka.audit.checks.common import content_elements, fix, ru_count, text_elements, text_height_needed_pt
 from verstka.audit.registry import AuditContext, check
+from verstka.rendering.fonts import text_width_pt, wrap_lines
 from verstka.schemas.audit import CheckSpec, Issue
 from verstka.schemas.common import EMU_PER_PT, Bbox
 
@@ -45,8 +46,26 @@ def table_too_big(ctx: AuditContext) -> list[Issue]:
                 rows = len(e.table.rows)
                 cols = max((len(r) for r in e.table.rows), default=0)
                 if rows > 7 or cols > 5:
-                    out.append(ctx.new_issue(TABLE_TOO_BIG, s.index, f"таблица {rows}×{cols}", bboxes=[e.bbox_frac], element_ids=[e.id]))
+                    if _asked_table(ctx, s):
+                        # the person dictated this table row by row («Сделай сравнительную таблицу «Сейчас / Цель»: …»):
+                        # its size is theirs — noted, not held against the deck
+                        out.append(ctx.new_issue(TABLE_TOO_BIG, s.index, f"таблица {rows}×{cols} — такой её задали в тексте", severity="info", bboxes=[e.bbox_frac], element_ids=[e.id]))
+                    else:
+                        out.append(ctx.new_issue(TABLE_TOO_BIG, s.index, f"таблица {rows}×{cols}", bboxes=[e.bbox_frac], element_ids=[e.id]))
     return out
+
+
+def _asked_table(ctx: AuditContext, s) -> bool:
+    """The slide is one the brief describes («Слайд 9. …», spec_ref) and the brief asks for a table on it."""
+    import re
+
+    if not ctx.brief_text or ctx.outline is None or not s.outline_id:
+        return False
+    o = next((x for x in ctx.outline.slides if x.id == s.outline_id), None)
+    if o is None or not getattr(o, "spec_ref", None):
+        return False
+    m = re.search(rf"(?:^|\n)\s*(?:слайд|slide)\s*{o.spec_ref}\b(.*?)(?=\n\s*(?:слайд|slide)\s*\d+\b|\Z)", ctx.brief_text, re.I | re.S)
+    return bool(m and re.search(r"таблиц", m.group(1), re.I))
 
 
 @check(TOO_MANY_SERIES)
@@ -60,12 +79,35 @@ def too_many_series(ctx: AuditContext) -> list[Issue]:
 
 
 def _ink(e) -> Bbox:
-    """What a block really covers: a text box its lines (at the top of the box), anything else the whole box."""
+    """What a block really covers: a text box the band its lines fill (at its anchor: a figure set on the bottom of a
+    tall box covers the bottom) and, without a fill or an outline of its own, no wider than its longest line — a
+    short label in a wide column leaves the rest of the column empty; anything else the whole box."""
     if e.type != "text" or not e.has_text:
         return e.bbox
     need, _ = text_height_needed_pt(e)
-    h = min(e.bbox.h, int(need * EMU_PER_PT) + e.insets_emu[1] + e.insets_emu[3])
-    return Bbox(x=e.bbox.x, y=e.bbox.y, w=e.bbox.w, h=max(h, 1))
+    h = max(min(e.bbox.h, int(need * EMU_PER_PT) + e.insets_emu[1] + e.insets_emu[3]), 1)
+    anchor = e.anchor or "t"
+    y = e.bbox.y if anchor == "t" else (e.bbox.y2 - h if anchor == "b" else e.bbox.y + (e.bbox.h - h) // 2)
+    x, w = e.bbox.x, e.bbox.w
+    if not (e.fill_hex or e.line_hex) and e.wrap:
+        usable = max((e.bbox.w - e.insets_emu[0] - e.insets_emu[2]) / EMU_PER_PT, 1.0)
+        widest = 0.0
+        for p in e.paragraphs:
+            if not p.text.strip():
+                continue
+            size = next((r.size_pt for r in p.runs if r.size_pt), None) or e.dominant_size or 14.0
+            font = next((r.font for r in p.runs if r.font), None)
+            bold = any(r.bold for r in p.runs)
+            indent = size * 1.1 if p.bullet else 0.0
+            lines = wrap_lines(p.text, font, size, bold, max(usable - indent, 1.0))
+            widest = max(widest, indent + max((text_width_pt(t, font, size, bold) for t in lines), default=0.0))
+        w = min(e.bbox.w, int(widest * EMU_PER_PT) + e.insets_emu[0] + e.insets_emu[2])
+        align = next((p.align for p in e.paragraphs if p.text.strip() and p.align), None) or "l"
+        if align in ("r",):
+            x = e.bbox.x2 - w
+        elif align in ("ctr", "c"):
+            x = e.bbox.x + (e.bbox.w - w) // 2
+    return Bbox(x=x, y=y, w=max(w, 1), h=h)
 
 
 @check(FILL_RATIO)

@@ -598,6 +598,52 @@ def single_figure(text: str) -> Optional[tuple[str, str]]:
     return value, rest[:1].upper() + rest[1:]
 
 
+_ORDINAL_RE = re.compile(r"(?<![\w])\d+\s?-\s?(?:й|я|е|го|му|м|х|ый|ой|ий|ая|ое|ые)(?![а-яё])", re.I)
+_MONEY_WORD_RE = re.compile(r"(\d)\s?(?:рубл(?:ей|я|ь)|руб\.?)(?![а-яё])", re.I)
+_PLAIN_FIG_RE = re.compile(r"(?<![\w.,:])\d{1,3}(?: \d{3})+(?:[.,]\d+)?(?![\w:])|(?<![\w.,:])\d+(?:[.,]\d+)?(?![\w:%])")
+_LABEL_TAIL_PREP = ("на", "в", "до", "с", "со", "от", "за", "по", "около", "почти", "более", "менее", "—", "–", "-", ":")
+
+
+def kpi_callout(text: str) -> Optional[tuple[str, str]]:
+    """(figure, label) of a short side line that carries one figure — the figure a visual slide sets large beside its
+    chart: «Ежемесячная выручка — 900 000 рублей» → («900 000 ₽», «Ежемесячная выручка»), «Прогноз: 1 138 500 ₽ на
+    6-й месяц» → («1 138 500 ₽», «Прогноз на 6-й месяц»), «100 покупок в день» → («100», «Покупок в день»). An ordinal
+    («6-й месяц») is a word, not a figure; a line with two figures, a time («15:00»), a year or a figure without words
+    around it is no callout (None) and stays a line of text."""
+    t = " ".join((text or "").replace("\xa0", " ").split()).rstrip(".")
+    if not t or len(t) > 100:
+        return None
+    t = _MONEY_WORD_RE.sub(r"\1 ₽", t)
+    masked = _ORDINAL_RE.sub(lambda m: "#" * len(m.group(0)), t)  # same length: positions stay valid in `t`
+    digits = re.findall(r"\d+(?:[.,]\d+)?", masked)
+    hero = [m for m in _HERO_FIG_RE.finditer(masked) if any(ch.isdigit() for ch in m.group(1))]
+    if len(hero) == 1:
+        s, e = hero[0].span(1)
+    elif not hero:
+        plain = list(_PLAIN_FIG_RE.finditer(masked))
+        if len(plain) != 1:
+            return None
+        s, e = plain[0].span(0)
+        if re.fullmatch(r"(?:19|20)\d\d", t[s:e].strip()):
+            return None  # a year is a date, not a figure to set large
+        if s and not re.search(r"[—–:]\s*$", t[:s]):
+            return None  # a bare number after a word is an index («Месяц 2», «Этап 3»), not a figure
+    else:
+        return None
+    if len(digits) != len(re.findall(r"\d+(?:[.,]\d+)?", masked[s:e])):
+        return None
+    value = " ".join(t[s:e].split())
+    words = t[:s].split()
+    while words and words[-1].lower().strip(":") in _LABEL_TAIL_PREP:
+        words.pop()  # «рост на 34%» → «рост»: the preposition (and a dash before the figure) leaves with its figure
+    before = " ".join(words).rstrip(" :—–-,")
+    after = t[e:].strip(" ,;:—–-")
+    label = " ".join(x for x in (before, after) if x)
+    if not re.search(r"[A-Za-zА-Яа-яЁё]{3,}", label):
+        return None
+    return value, label[:1].upper() + label[1:]
+
+
 _FIG_UNIT_RE = re.compile(r"^([+\-−–~≈×]?\s?\d[\d\s\u00a0]*(?:[.,]\d+)?\s?%?)\s*([A-Za-zА-Яа-яЁё₽$€].{0,12})$")
 
 
@@ -640,23 +686,105 @@ class Composer:
         # the run names the template font: measuring and rendering see the same face (Montserrat is 20% wider than Play)
         return Para([Run(typeset(text), size, color, bold, self.kit.font)], align=align, space_after=space_after, marker=marker, marker_color=marker_color)
 
+    WORD_ROOM = 0.95  # a word may fill this much of its column: the renderer sets it a little wider than measured
+
     def fits_width(self, texts: list[str], size: float, bold: bool, width_emu: int) -> bool:
         """Every word of the texts fits the width at this size: a line breaks only on a real space, so the words a
-        no-break space binds as typeset («по результатам», «180 000 ₽») are measured as one."""
-        w = _pt(width_emu)
+        no-break space binds as typeset («по результатам», «180 000 ₽») are measured as one. A word that fills the
+        column to the last point is broken by the renderer («Корректировк / а»): it keeps 5% of the width free."""
+        w = _pt(width_emu) * self.WORD_ROOM
         return all(text_width_pt(word, self.kit.font, size, bold) <= w for t in texts for word in typeset(t).split(" ") if word)
 
+    def _size_pairs(self, top: Optional[list[tuple[float, float]]] = None) -> list[tuple[float, float]]:
+        """(title, text) sizes a block of columns, cards or steps tries, largest first: the roles of the type scale
+        (heading 2 over lead, lead over lead, lead over body…) with every size the template uses between them — a
+        block that does not fit at the lead size takes the next size of the template (18, 17, 16 pt) rather than the
+        body size four points below, and fills its area. A title stays a visible step (≥ 1.1×) over its text."""
+        k = self.kit
+        base = top if top is not None else [(k.h2, k.lead), (k.lead, k.lead)]
+        if top is None and getattr(self, "_boost", 0) >= 1:
+            # the fill pass: a short block may climb above the usual cap — text up to the h2 size, titles up to the
+            # statement size, a clear step over their text
+            texts = [x for x in k.sizes if k.lead - 0.05 <= x <= k.h2 + 0.05]
+            heads = [x for x in k.sizes if k.h2 - 0.05 <= x <= k.statement + 0.05]
+            ext = [(ts, bs) for bs in texts for ts in heads if ts >= bs * 1.15 - 0.05]
+            ext.sort(key=lambda p: (-p[1], -p[0]))
+            base = ext + base
+        mids = [x for x in reversed(k.sizes) if k.small - 0.05 <= x < k.lead - 0.05]
+        tail: list[tuple[float, float]] = []
+        for bs in dict.fromkeys(mids + [k.body, k.small]):
+            for ts in (k.lead, k.h3, k.body):
+                if ts >= bs * 1.1 - 0.05:
+                    tail.append((ts, bs))
+        tail.sort(key=lambda p: (-p[1], -p[0]))
+        out = list(dict.fromkeys(base + tail))
+        return out
+
     # ---- entry -------------------------------------------------------------------------------------------------
+    # the fill pass: a block that takes less than FILL_LOW of its area's height is composed again, larger — first its
+    # type may climb the template's scale above the usual cap, then the block itself grows to FILL_TARGET
+    FILL_LOW = 0.75
+    FILL_TARGET = 0.86
+    _GROWABLE = ("cards", "process", "two_column", "comparison", "stat_row", "table", "bullets")
+
     def compose(self, comp: str, area: Bbox) -> None:
-        c = self.o.content
-        kind = self.o.kind
         # the slide's footnote and conclusion (Agent v2) keep their room at the foot of the area: the content is
         # composed above them, the conclusion then follows it
+        self._comp = comp
         area = self._reserve_notes(area)
         n0 = len(self.cv.tree)
+        o0, w0 = self.o, list(self.warnings)
+        self._boost = 0
+        self._compose_body(comp, area)
+        growable = comp in self._GROWABLE and not (comp == "stat_row" and len(self.o.content.numbers) <= 1)
+        fill = self._fill(n0, area) if growable else None
+        if fill is not None and fill < self.FILL_LOW:
+            # a short block over an empty band, its text small for the room it has: set again, larger, while it
+            # fits; the level that fills the area best (never past its foot) is kept
+            best = (fill, 0)
+            for boost in (1, 2):
+                self._undo(n0)
+                self.o, self.warnings = o0, list(w0)
+                self._boost = boost
+                self._compose_body(comp, area)
+                got = self._fill(n0, area)
+                if got is None or got > 1.0 + 1e-3:
+                    break
+                if got > best[0] + 0.02:
+                    best = (got, boost)
+                if got >= self.FILL_LOW:
+                    break
+            if best[1] != self._boost:
+                self._undo(n0)
+                self.o, self.warnings = o0, list(w0)
+                self._boost = best[1]
+                self._compose_body(comp, area)
+        self._boost = 0
+        self._draw_notes(n0)
+
+    def _fill(self, n0: int, area: Bbox) -> Optional[float]:
+        """The share of the area's height the content composed after the first `n0` elements takes."""
+        bottom = self._content_bottom(n0)
+        if bottom is None or area.h <= 0:
+            return None
+        return (bottom - area.y) / area.h
+
+    def _grow_to(self, area_h: int, rows: int, gap: int, content_h: int) -> int:
+        """The height a block's row may take at the fill pass's second level: the rows together about FILL_TARGET of
+        the area, a row never more than 1.6 × its content (a card is a frame for its text, not a half-empty slab)."""
+        if getattr(self, "_boost", 0) < 2 or rows <= 0:
+            return content_h
+        want = int((area_h * self.FILL_TARGET - gap * (rows - 1)) / rows)
+        return max(content_h, min(want, int(content_h * 1.6)))
+
+    def _compose_body(self, comp: str, area: Bbox) -> None:
+        c = self.o.content
+        kind = self.o.kind
         intro = self._intro_text(comp)
         if intro and comp not in ("statement", "quote"):
             area = self._intro(intro, area, formula=intro == (c.formula or "").strip())
+        if getattr(self, "_take_lead", False):
+            area = self._lead_line(area, " ".join((self.o.takeaway or "").split()))
         if comp == "formula" and (c.formula or "").strip():
             self.formula(area, c.formula)
         elif comp == "chart_pair" and c.chart is not None and c.chart2 is not None:
@@ -717,35 +845,49 @@ class Composer:
                 self.kpis(area, c.numbers, extra=[])
             else:
                 self.warnings.append("empty slide content")
-        self._draw_notes(n0)
 
     @contextmanager
     def _lines_under(self, area: Bbox, lines: list[str]):
         """Short lines that go with a block of steps, cards or a table (a timeline and the budget of the launch):
         the block gets the area less their height, the lines follow right under what it drew, in two columns when
         there are more than three. No lines: the block gets the whole area."""
-        k = self.kit
         lines = [t for t in lines if t and t.strip()]
         if not lines:
             yield area
             return
-        cols = 2 if len(lines) > 3 else 1
-        per = math.ceil(len(lines) / cols)
+        plan = self._under_plan(area, lines)
+        n0 = len(self.cv.tree)
+        yield plan["main"]
+        self._under_draw(plan, n0)
+
+    def _under_plan(self, area: Bbox, lines: list[str], spread: bool = False) -> dict:
+        """Where short lines go under a block: the block's box (the area less their height) and the lines' columns —
+        two columns for more than three lines; `spread` (the visual variant's lines under its charts): one column per
+        line up to three, so they read as captions of the picture rather than as a list."""
+        k = self.kit
+        n = len(lines)
+        cols = (n if n <= 3 else (2 if n == 4 else 3)) if spread else (2 if n > 3 else 1)
+        per = math.ceil(n / cols)
         gap = k.gap * 2
         cw = int((area.w - gap * (cols - 1)) / cols) if cols > 1 else int(area.w * 0.8)
         size = k.body
+        if (spread or getattr(self, "_boost", 0) >= 1) and self.fits_width(lines, k.lead, False, cw - _emu(k.lead * 1.1)) and sum(len(t) for t in lines) <= 40 * cols * per:
+            size = k.lead  # captions of a few words each (or the lines of a short block, on the fill pass) at the lead size
         groups = [lines[i * per:(i + 1) * per] for i in range(cols)]
-        paras = [[self.P(t, size, k.colors.text, space_after=size * 0.5, marker="•", marker_color=k.colors.accent) for t in g] for g in groups]
+        paras = [[self.P(t, size, k.colors.text, space_after=size * 0.5, marker="•", marker_color=k.colors.accent) for t in g] for g in groups if g]
         eh = max(self.h(p, cw) for p in paras)
         room = eh + int(k.vgap * 1.4)
         main = Bbox(x=area.x, y=area.y, w=area.w, h=max(area.h - room, int(area.h * 0.5)))
-        n0 = len(self.cv.tree)
-        yield main
+        return dict(main=main, paras=paras, eh=eh, cw=cw, gap=gap, x=area.x)
+
+    def _under_draw(self, plan: dict, n0: int) -> None:
+        """The lines of `_under_plan`, right under what the block drew (a block that grew past its share pushes the
+        lines down with it)."""
+        k = self.kit
         bottom = self._content_bottom(n0)
-        # right under what the block drew (a block that grew past its share pushes the lines down with it)
-        y = main.y2 + int(k.vgap * 1.4) if bottom is None else bottom + int(k.vgap * 1.4)
-        for i, p in enumerate(paras):
-            self.cv.text(Bbox(x=area.x + i * (cw + gap), y=y, w=cw, h=eh), p, name="Note")
+        y = plan["main"].y2 + int(k.vgap * 1.4) if bottom is None else bottom + int(k.vgap * 1.4)
+        for i, p in enumerate(plan["paras"]):
+            self.cv.text(Bbox(x=plan["x"] + i * (plan["cw"] + plan["gap"]), y=y, w=plan["cw"], h=plan["eh"]), p, name="Note")
 
     # ---- content accessors -------------------------------------------------------------------------------------
     def _items(self) -> list[SlideItem]:
@@ -836,20 +978,24 @@ class Composer:
         colors = st.colors
         title_color = colors.heading
 
-        def pick(cols: int, rows: int):
+        def pick(cols: int, rows: int, tight: bool = False):
             cw = int((area.w - gap * (cols - 1)) / cols)
             pad = max(int(min(cw * 0.085, 0.05 * k.H)), int(0.026 * k.H))
+            if tight:
+                pad = max(int(pad * 0.6), int(0.022 * k.H))
             inner_w = cw - 2 * pad
             # sizes: the largest pair at which every card reads well (title ≤ 3 lines, text ≤ 7) and the row fits
             max_row_h = int((area.h - k.vgap * (rows - 1)) / rows)
-            ladders = [(k.h2, k.lead), (k.lead, k.lead), (k.lead, k.body), (k.h3, k.body), (k.h3, k.small), (k.body, k.small)]
+            ladders = self._size_pairs()
             if n <= 3 and longest <= 70:
                 ladders.insert(0, (k.statement, k.h2))  # three short items: the type grows before the card does
             chosen = None
             fallback = None
             long_ok = None  # fits, but with more lines than we like: kept when the next step down is a big drop
+            bodies = [b for i in items for b in ([i.text] if i.text else []) + list(i.bullets)]
             for ts, bs in ladders:
-                if not self.fits_width([i.title for i in items], ts, k.bold, inner_w):
+                # a word wider than the card breaks in the middle: its title and its text are measured
+                if not self.fits_width([i.title for i in items], ts, k.bold, inner_w) or not self.fits_width(bodies, bs, False, inner_w - _emu(bs * 1.1)):
                     continue
                 h = max(self._card_content_h(it, inner_w, ts, bs, badge, colors, i) for i, it in enumerate(items)) + 2 * pad
                 if h > max_row_h:
@@ -877,6 +1023,11 @@ class Composer:
             return cw, pad, inner_w, chosen
 
         cw, pad, inner_w, chosen = pick(cols, rows)
+        if chosen[1] < k.body - 0.05:
+            # text in small type inside roomy cards: a tighter padding gives the text the room first
+            cw2, pad2, inner2, chosen2 = pick(cols, rows, tight=True)
+            if chosen2[1] > chosen[1] + 0.05:
+                cw, pad, inner_w, chosen = cw2, pad2, inner2, chosen2
         if n == 4 and cols == 4 and chosen[1] < k.body:
             # four cards that only fit in small type read better as a 2×2 block
             cw2, pad2, inner2, chosen2 = pick(2, 2)
@@ -891,7 +1042,7 @@ class Composer:
             return
         # cards hug their content (the tallest one sets the row): a card is never a half-empty slab — nor shorter than
         # its text (when even the smallest step does not fit the row, the card grows rather than the text hanging out)
-        ch = content_h
+        ch = self._grow_to(area.h, rows, k.vgap, content_h)
         block_h = rows * ch + (rows - 1) * k.vgap
         y0 = self._place_v(area, block_h)
         last_row_n = n - cols * (rows - 1)
@@ -959,8 +1110,11 @@ class Composer:
         return _emu(left), _emu(top * 0.95)
 
     def _index_size(self, ts: float) -> float:
-        """The «01» over a card: the accent numeral, a step above the card title (never the small accent text)."""
+        """The «01» over a card: the accent numeral, a step above the card title (never the small accent text) — in
+        the visual variant a display numeral, twice the title («крупные цифры»)."""
         k = self.kit
+        if self.strategy == "visual":
+            return k.snap(max(ts * 2.0, k.statement), ts * 1.5, max(k.display, ts * 2.4))
         return k.snap(max(ts * 1.4, k.h2), ts * 1.2, max(k.statement, ts * 1.8))
 
     def _badge_size(self, ts: float) -> int:
@@ -1065,7 +1219,8 @@ class Composer:
             per = math.ceil(len(extra) / ecols)
             ew = int((area.w - k.gap) / 2) if ecols == 2 else int(area.w * 0.8)
             groups = [extra[i * per:(i + 1) * per] for i in range(ecols)]
-            paras_g = [[self.P(t, k.body, k.colors.text, space_after=k.body * 0.5, marker="•" if len(extra) > 1 else None, marker_color=k.colors.accent) for t in g] for g in groups if g]
+            esize = k.lead if getattr(self, "_boost", 0) >= 1 and self.fits_width(extra, k.lead, False, ew - _emu(k.lead * 1.1)) else k.body
+            paras_g = [[self.P(t, esize, k.colors.text, space_after=esize * 0.5, marker="•" if len(extra) > 1 else None, marker_color=k.colors.accent) for t in g] for g in groups if g]
             eh = max(self.h(pg, ew) for pg in paras_g)
             extra_block = (paras_g, eh, ew)
         avail = Bbox(x=area.x, y=area.y, w=area.w, h=area.h - ((extra_block[1] + k.vgap) if extra_block else 0))
@@ -1085,7 +1240,8 @@ class Composer:
             # one figure size for the row: the largest size under the cap for this many figures at which every
             # figure fits its tile on one line and the tiles fit the area
             fs = k.h3
-            for s_ in k.figure_sizes(k.figure_cap(max(cols, 2) if cols < n else n, use_cards, self.strategy), k.h3):
+            cap_ = k.figure_cap(max(cols, 2) if cols < n else n, use_cards, self.strategy) * (1.3 if getattr(self, "_boost", 0) >= 1 else 1.0)
+            for s_ in k.figure_sizes(cap_, k.h3):
                 fs = s_
                 # slack for the rendering font: a figure that breaks («12 40 / 0») is the worst thing a slide can show
                 wide_ok = all(self.figure_para(x.value, s_, colors.figure, colors.muted)[1] <= _pt(inner) * (0.88 if use_cards else 0.8) for x in numbers)
@@ -1119,7 +1275,7 @@ class Composer:
             lab_h = max(self.h([self.P(distinct_label(x.value, x.label, self.o.headline), label_size, colors.muted)], inner) for x in numbers)
             content_h = rule + (int(k.vgap * 0.6) if rule else 0) + fig_h - tg + int(k.vgap * 0.35) + lab_h
         # the tile holds its figure and label, never shorter than them (a label hanging below its card)
-        tile_h = content_h + 2 * pad
+        tile_h = self._grow_to(avail.h, rows, k.vgap, content_h + 2 * pad) if use_cards else content_h + 2 * pad
         block_h = rows * tile_h + (rows - 1) * k.vgap + ((extra_block[1] + k.vgap * 1.4) if extra_block else 0)
         y0 = self._place_v(area, int(block_h))
         for i, num in enumerate(numbers):
@@ -1197,6 +1353,8 @@ class Composer:
         per_col = math.ceil(n / cols)
         # the largest size at which the list fits; rows separated by hairlines
         sizes = [k.h2, k.lead, k.body, k.small] if n <= 4 and total <= 260 else ([k.lead, k.body, k.small] if total <= 700 else [k.body, k.small])
+        if getattr(self, "_boost", 0) >= 1:
+            sizes = [x for x in k.sizes if sizes[0] + 0.05 < x <= k.h2 + 0.05][::-1] + sizes
         for size in sizes:
             marker_w = _emu(size * 1.6)
             row_pad = int(max(size * 0.75, 6) * EMU_PER_PT)
@@ -1205,9 +1363,11 @@ class Composer:
             if col_h <= area.h:
                 break
         # the rows breathe: the gap between them grows (up to 2.5 lines) until the list fills about 60% of the band
+        # (on the fill pass, most of it)
         rows_n = max(min(per_col, n), 1)
-        if rows_n > 1 and col_h < 0.6 * area.h:
-            extra = min(int((0.6 * area.h - col_h) / (rows_n - 1) / 2), _emu(size * k.line * 1.25) - row_pad)
+        share = self.FILL_TARGET if getattr(self, "_boost", 0) >= 2 else 0.6
+        if rows_n > 1 and col_h < share * area.h:
+            extra = min(int((share * area.h - col_h) / (rows_n - 1) / 2), _emu(size * k.line * 1.25) - row_pad)
             if extra > 0:
                 row_pad += extra
                 col_h += extra * 2 * (rows_n - 1)
@@ -1306,17 +1466,19 @@ class Composer:
         if n > 6:
             self.cards(area, items, badge="number")
             return
-        gap = k.gap
+        # five or six steps in a row: a narrower gutter and padding give each step the width its longest word needs
+        # at a readable size («Корректировка» at the body size)
+        gap = k.gap if n <= 4 else int(k.gap * 0.6)
         cw = int((area.w - gap * (n - 1)) / n)
         colors = k.colors
         st = k.card
         in_cards = self.strategy == "visual" and bool(st.fill or st.proto is not None)
-        pad = int(min(cw * 0.09, 0.045 * k.H)) if in_cards else 0
+        pad = int(min(cw * (0.09 if n <= 4 else 0.07), 0.045 * k.H)) if in_cards else 0
         inner = cw - 2 * pad
         tcolors = st.colors if in_cards else colors
         bodies = [b for i in items for b in ([i.text] if i.text else []) + list(i.bullets)]
         fitted = False
-        for ts, bs in ((k.h2, k.lead), (k.lead, k.lead), (k.lead, k.body), (k.h3, k.body), (k.h3, k.small), (k.body, k.small)):
+        for ts, bs in self._size_pairs():
             # a word wider than the step's column breaks in the middle («Корректиров|ка»): a smaller size, or a grid
             if not self.fits_width([i.title for i in items], ts, k.bold, inner) or not self.fits_width(bodies, bs, False, inner):
                 continue
@@ -1328,10 +1490,13 @@ class Composer:
             titled = any(i.text or i.bullets for i in items)
             if total <= area.h and t_lines <= (2 if titled else 4):
                 break
+        if n >= 5 and (not fitted or bs < k.body - 0.05) and self._steps_grid(area, items, better_than=bs if fitted else 0.0):
+            return  # too many steps for one row at a readable size: a grid of steps, each its badge beside its text
         if not fitted:
-            self.cards(area, items, badge="number")  # too narrow for a row of steps: numbered cards in a grid
+            # too narrow for a row of steps (a word would break): numbered cards in a grid
+            self.cards(area, items, badge="number")
             return
-        block_h = total
+        block_h = self._grow_to(area.h, 1, 0, total) if in_cards else total
         y0 = self._place_v(area, block_h)
         # the axis runs through the badges' centres, behind them
         cy = y0 + d // 2
@@ -1352,6 +1517,66 @@ class Composer:
             ty = by + d + int(k.vgap * 0.9)
             paras = self._card_paras(it, ts, bs, tcolors)
             self.cv.text(Bbox(x=bx, y=ty, w=inner, h=max(text_h, y0 + block_h - pad - ty)), paras, name="Step")
+
+    def _steps_grid(self, area: Bbox, items: list[SlideItem], better_than: float) -> bool:
+        """Five to eight steps too many for one row at the body size: rows of three (four for seven or eight), each
+        step its number badge at the left of its title and text — a row as tall as its text, not a badge stacked over
+        it, so two rows hold the type larger than one row of narrow columns did. Drawn only when its text comes out
+        larger than `better_than`; returns whether it was drawn."""
+        k = self.kit
+        n = len(items)
+        cols = 3 if n <= 6 else 4
+        rows = math.ceil(n / cols)
+        gap = k.gap
+        st = k.card
+        boxed = bool(st.fill or st.proto is not None)
+        cw = int((area.w - gap * (cols - 1)) / cols)
+        pad = int(min(cw * 0.07, 0.035 * k.H)) if boxed else 0
+        d = _emu(max(k.hpt * 0.06, 28.0))
+        dgap = int(k.gap * 0.6)
+        inner = cw - 2 * pad - d - dgap
+        colors = st.colors if boxed else k.colors
+        lead_off = 0 if boxed else int(k.vgap * 0.6)  # under the hairline that opens a step without a card
+        bodies = [b for i in items for b in ([i.text] if i.text else []) + list(i.bullets)]
+        titled = any(i.text or i.bullets for i in items)
+        chosen = None
+        for ts, bs in self._size_pairs():
+            if bs <= better_than + 0.05:
+                break
+            if not self.fits_width([i.title for i in items], ts, k.bold, inner) or not self.fits_width(bodies, bs, False, inner - _emu(bs * 1.1)):
+                continue
+            first = _emu((ts if any(i.title for i in items) else bs) * k.line)
+            text_h = max(self.h(self._card_paras(it, ts, bs, colors), inner) for it in items)
+            shift = max(0, (d - first) // 2)  # the first line centred on the badge
+            row_h = max(d, shift + text_h) + 2 * pad + lead_off
+            t_lines = max(para_lines(self.P(i.title, ts, colors.text, bold=k.bold), _pt(inner)) for i in items if i.title) if any(i.title for i in items) else 0
+            if rows * row_h + (rows - 1) * k.vgap <= area.h and t_lines <= (2 if titled else 4):
+                chosen = (ts, bs, text_h, shift, row_h)
+                break
+        if chosen is None:
+            return False
+        ts, bs, text_h, shift, row_h = chosen
+        row_h = self._grow_to(area.h, rows, k.vgap, row_h)
+        y0 = self._place_v(area, rows * row_h + (rows - 1) * k.vgap)
+        digit = k.snap(max(_pt(d) * 0.5, 12.0), 10.0, _pt(d) * 0.62)
+        on_accent = "FFFFFF" if contrast_ratio("FFFFFF", colors.accent) >= 3 else colors.text
+        last_n = n - cols * (rows - 1)
+        for i, it in enumerate(items):
+            r, c_ = divmod(i, cols)
+            x_off = int((cols - last_n) * (cw + gap) / 2) if r == rows - 1 and last_n < cols else 0
+            box = Bbox(x=area.x + x_off + c_ * (cw + gap), y=y0 + r * (row_h + k.vgap), w=cw, h=row_h)
+            if boxed:
+                self.cv.card(box, st)
+            else:
+                # no card style: a hairline over each step keeps the grid
+                self.cv.rect(Bbox(x=box.x, y=box.y, w=box.w, h=max(_emu(1.5), 1)), colors.divider, name="Rule")
+            top = box.y + pad + lead_off
+            el = self.cv.ellipse(Bbox(x=box.x + pad, y=top, w=d, h=d), colors.accent)
+            self._label_in(el, str(i + 1), digit, on_accent)
+            tx = box.x + pad + d + dgap
+            ty = top + shift
+            self.cv.text(Bbox(x=tx, y=ty, w=inner, h=max(text_h, box.y2 - pad - ty)), self._card_paras(it, ts, bs, colors), name="Step")
+        return True
 
     def agenda(self, area: Bbox, items: list[SlideItem]) -> None:
         k = self.kit
@@ -1389,11 +1614,10 @@ class Composer:
         gap = k.gap
         cw = int((area.w - gap * (n - 1)) / n)
         st = k.card
-        pad = int(min(cw * 0.07, 0.05 * k.H))
-        inner = cw - 2 * pad
         rule_h = _emu(3) + int(k.vgap * 0.6)
 
-        def parts(ts: float, bs: float):
+        def parts(ts: float, bs: float, pad: int):
+            inner = cw - 2 * pad
             # titles share one band (as tall as the longest title), so every body starts on one line across the columns;
             # a column's figure («22 770 ₽ экономии») is set large over its lines, never left out
             heads = [self._card_paras(SlideItem(title=it.title), ts, bs, st.colors) if it.title else [] for it in items]
@@ -1404,20 +1628,31 @@ class Composer:
             lines = max(sum(para_lines(p, _pt(inner)) for p in bp) for bp in bodies) if bodies else 0
             return heads, bodies, head_h, head_gap, body_h, rule_h + head_h + head_gap + body_h + 2 * pad, lines
 
-        steps = ((k.h2, k.lead), (k.lead, k.lead), (k.lead, k.body), (k.h3, k.body), (k.h3, k.small), (k.body, k.small))
-        best = None
-        for ts, bs in steps:
-            got = parts(ts, bs)
-            if best is None or got[5] < best[1][5]:
-                best = ((ts, bs), got)
-            if got[5] <= area.h * 0.9 and got[6] <= 11:
-                best = ((ts, bs), got)
-                break
+        def choose(pad: int):
+            # the largest pair at which the columns fit the area (a little air kept under them) in ≤ 11 lines each
+            best = None
+            for ts, bs in self._size_pairs():
+                got = parts(ts, bs, pad)
+                if best is None or got[5] < best[1][5]:
+                    best = ((ts, bs), got)
+                if got[5] <= area.h * 0.96 and got[6] <= 11:
+                    return ((ts, bs), got), True
+            return best, False
+
+        pad = int(min(cw * 0.07, 0.05 * k.H))
+        best, ok = choose(pad)
+        if best[0][1] < k.body - 0.05 or not ok:
+            # small type inside roomy columns: a tighter padding gives the text the room first
+            tight = max(int(pad * 0.6), int(0.022 * k.H))
+            alt, ok2 = choose(tight)
+            if (ok2 and not ok) or (ok2 == ok and alt[0][1] > best[0][1] + 0.05):
+                best, pad = alt, tight
+        inner = cw - 2 * pad
         (ts, bs), (heads, bodies, head_h, head_gap, body_h, need, _) = best
         # the columns are as tall as their content, never a tall empty frame — and never shorter than it: when even
         # the smallest step does not fit the area, the cards grow with their text (the lines under them follow the
         # cards' real bottom) rather than the text running out of its card
-        ch = need
+        ch = self._grow_to(area.h, 1, 0, need)
         y0 = self._place_v(area, ch, fill_top=True)
         for i, it in enumerate(items):
             box = Bbox(x=area.x + i * (cw + gap), y=y0, w=cw, h=ch)
@@ -1485,6 +1720,23 @@ class Composer:
         text_h = self.h([best["para"]], best["text_w"])
         best["text_h"] = text_h
         best["h"] = text_h + 2 * best["pad_y"]
+        fig = _aside_figure(text) if self.strategy == "visual" else None
+        if fig:
+            # the visual variant's strip leads with the conclusion's key figure, set large in the template's figure
+            # colour where the other variants have the accent bar: the eye takes the number first, then the sentence
+            size, colors = best["size"], best["colors"]
+            fs = k.snap(max(size * 2.0, k.h2), k.h2, max(k.statement, k.h2))
+            para_f, fw = self.figure_para(fig, fs, colors.figure, colors.muted)
+            fig_w = _emu(fw * 1.08) + _emu(4)  # a figure never wraps: its box keeps the renderer's slack
+            fig_gap = _emu(size * 1.2)
+            text_w = width - 2 * best["pad_x"] - fig_w - fig_gap
+            if text_w >= 0.45 * width:
+                text = label_without_figure(text, fig)
+                para = Para(highlight_runs(text, size, colors.heading, colors.accent if size >= 18 else colors.accent_text, bold=k.bold, accent_bold=k.bold, font=k.font))
+                t_h = self.h([para], text_w)
+                fig_h = _emu(fs * max(1.15, k.line))
+                inner = max(t_h, fig_h)
+                best.update(fig=(para_f, fig_w, fig_h, fig_gap), para=para, text_w=text_w, text_h=t_h, h=inner + 2 * best["pad_y"])
         return best
 
     def _deck_takeaway_size(self, width: int, strip: bool, bar_w: int) -> Optional[float]:
@@ -1507,9 +1759,17 @@ class Composer:
         """Room for the footnote (small print at the foot of the area, just above the template's footer) and the
         conclusion over it; the content is composed in what is left."""
         self._notes = None
+        self._aside = None
+        self._aside = self._takeaway_aside()
+        # the compact variant says its conclusion first: a bold line over the content (a chart's text column leads
+        # with it instead), no strip at the foot
+        self._take_lead = (
+            self.strategy == "compact" and bool((self.o.takeaway or "").strip()) and not self._aside
+            and getattr(self, "_comp", None) not in (None, "chart", "chart_text", "chart_pair")
+        )
         foot = " ".join((self.o.footnote or "").split())
         foot = foot[:1].upper() + foot[1:] if foot[:1].islower() else foot
-        take = "" if self._takeaway_aside() else " ".join((self.o.takeaway or "").split())
+        take = "" if (self._aside or self._take_lead) else " ".join((self.o.takeaway or "").split())
         if not (foot or take):
             return area
         k = self.kit
@@ -1530,14 +1790,63 @@ class Composer:
         return Bbox(x=area.x, y=area.y, w=area.w, h=max(bottom - area.y, int(area.h * 0.4)))
 
     def _takeaway_aside(self) -> bool:
-        """The visual variant sets a one-chart slide's conclusion beside the chart, its key figure large (the other
-        variants: a strip under the chart). Not next to a second chart, a table, a formula or the slide's own text."""
+        """Whether the slide's conclusion stands in the chart's side column instead of a strip under the content. The
+        structured variant keeps the strip. The visual variant sets a lone chart's conclusion beside it, its key figure
+        large, when the column has room for it (at most two other lines). The compact variant leads its text column
+        with it (a chart or a pair of charts): no strip, the chart keeps the height. Never next to a table or a
+        formula, and only on a slide composed as a chart (a chart slide the plan set otherwise keeps its strip)."""
+        cached = getattr(self, "_aside", None)
+        if cached is not None:
+            return cached  # decided once, when the notes' room was reserved (a pair that falls back to one chart keeps it)
         c = self.o.content
-        return (
-            self.strategy == "visual" and self.o.kind == PatternKind.chart and c.chart is not None and c.chart2 is None
-            and c.table is None and not (c.formula or "").strip() and not any(t.strip() for t in list(c.bullets) + list(c.paragraphs))
-            and bool((self.o.takeaway or "").strip())
-        )
+        if not (self.o.takeaway or "").strip() or getattr(self, "_comp", None) not in ("chart", "chart_text", "chart_pair"):
+            return False
+        if c.chart is None or c.table is not None or (c.formula or "").strip():
+            return False
+        pair = getattr(self, "_comp", None) == "chart_pair" and c.chart2 is not None
+        side = [t for t in list(c.bullets) + list(c.paragraphs) if t.strip()]
+        if self.strategy == "compact":
+            return True
+        if self.strategy == "visual":
+            # beside a lone chart when the column has room; a pair with a pie (which needs the whole width) sets it
+            # as the first callout of the row under the charts, in the strip's place
+            return self._pair_has_pie() if pair else len(side) <= 2
+        return False
+
+    def _lead_line(self, area: Bbox, text: str) -> Bbox:
+        """The compact variant's conclusion over the content: one or two bold lines in the heading colour, figures in
+        the accent, an accent bar at their left (the strip's bar, without the strip). Returns the area under it."""
+        k = self.kit
+        colors = k.colors
+        text = text[:1].upper() + text[1:]
+        if text.endswith(".") and not text.endswith("..") and not ABBR_END_RE.search(text):
+            text = text[:-1]
+        bar_w = max(_emu(3), int(0.006 * k.H))
+        width = int(area.w * 0.9)
+        for size in dict.fromkeys((k.lead, k.body)):
+            gap = _emu(size * 0.8)
+            para = Para(highlight_runs(text, size, colors.heading, colors.accent if size >= 18 else colors.accent_text, bold=True, accent_bold=True, font=k.font))
+            if para_lines(para, _pt(width - bar_w - gap)) <= 2:
+                break
+        text_w = width - bar_w - gap
+        hh = self.h([para], text_w)
+        self.cv.rect(Bbox(x=area.x, y=area.y + _emu(size * 0.12), w=bar_w, h=max(hh - _emu(size * 0.24), bar_w * 3)), colors.accent, name="Conclusion bar")
+        self.cv.text(Bbox(x=area.x + bar_w + gap, y=area.y, w=text_w, h=hh), [para], name="Conclusion")
+        dy = hh + int(k.vgap * 1.2)
+        return Bbox(x=area.x, y=area.y + dy, w=area.w, h=max(area.h - dy, int(area.h * 0.5)))
+
+    def _takeaway_to_strip(self, area: Bbox) -> Bbox:
+        """The chart the conclusion was to stand beside could not be drawn: the conclusion takes its strip under what
+        the slide shows instead (the footnote keeps its place). Returns the area left above the strip."""
+        take = " ".join((self.o.takeaway or "").split())
+        notes = getattr(self, "_notes", None)
+        if not take or (notes and notes[1] is not None):
+            return area
+        k = self.kit
+        plan = self._takeaway_plan(take, area.w)
+        plan["y_max"] = area.y2 - plan["h"]
+        self._notes = (notes[0] if notes else None, plan, notes[2] if notes else area)
+        return Bbox(x=area.x, y=area.y, w=area.w, h=max(plan["y_max"] - int(k.vgap * 1.2) - area.y, int(area.h * 0.4)))
 
     def _content_bottom(self, n0: int) -> Optional[int]:
         from verstka.rendering.deck import element_bbox
@@ -1583,10 +1892,19 @@ class Composer:
             if plan["strip"]:
                 self.cv.card(Bbox(x=x, y=y, w=w, h=plan["h"]), k.card, name="Conclusion strip")
             bx = x + plan["pad_x"]
-            by = y + plan["pad_y"] + _emu(plan["size"] * 0.12)
-            self.cv.rect(Bbox(x=bx, y=by, w=plan["bar_w"], h=max(plan["text_h"] - _emu(plan["size"] * 0.24), plan["bar_w"] * 3)), plan["colors"].accent, name="Conclusion bar")
-            tx = bx + plan["bar_w"] + plan["bar_gap"]
-            self.cv.text(Bbox(x=tx, y=y + plan["pad_y"], w=plan["text_w"], h=plan["text_h"]), [plan["para"]], name="Conclusion")
+            if plan.get("fig"):
+                # the key figure and the sentence beside it, both centred on the strip's middle line
+                para_f, fig_w, fig_h, fig_gap = plan["fig"]
+                inner = plan["h"] - 2 * plan["pad_y"]
+                lsb, _ = self._figure_optics(para_f, fig_h)
+                self.cv.text(Bbox(x=bx - lsb, y=y + plan["pad_y"] + (inner - fig_h) // 2, w=fig_w + lsb, h=fig_h), [para_f], anchor="ctr", name="Conclusion figure")
+                tx = bx + fig_w + fig_gap
+                self.cv.text(Bbox(x=tx, y=y + plan["pad_y"] + (inner - plan["text_h"]) // 2, w=plan["text_w"], h=plan["text_h"]), [plan["para"]], name="Conclusion")
+            else:
+                by = y + plan["pad_y"] + _emu(plan["size"] * 0.12)
+                self.cv.rect(Bbox(x=bx, y=by, w=plan["bar_w"], h=max(plan["text_h"] - _emu(plan["size"] * 0.24), plan["bar_w"] * 3)), plan["colors"].accent, name="Conclusion bar")
+                tx = bx + plan["bar_w"] + plan["bar_gap"]
+                self.cv.text(Bbox(x=tx, y=y + plan["pad_y"], w=plan["text_w"], h=plan["text_h"]), [plan["para"]], name="Conclusion")
         if foot_box is not None:
             box, para = foot_box
             self.cv.text(box, para, name="Footnote")
@@ -1703,6 +2021,23 @@ class Composer:
             if lay["total"] <= area.w:
                 chosen, rows = lay, [list(range(len(terms)))]
                 break
+        rest_texts = [t for t in list(c.bullets) + list(c.paragraphs) if t.strip()]
+        if chosen is not None and res is not None and len(rows[0]) >= 3 and not rest_texts and self.strategy != "compact":
+            # the equation is the slide, and one line leaves most of the area empty under it: the operands on one line
+            # and «= result» under them set much larger (the compact variant keeps its one dense line)
+            split = res
+            room_h = int(area.h * 0.9)
+            for fs2 in k.figure_sizes(cap, chosen["fs"] * 1.25):
+                lay2 = layout(fs2)
+                first = sum(lay2["blocks"][i]["w"] for i in range(split)) + sum(lay2["op_w"][: split - 1])
+                second = sum(lay2["blocks"][i]["w"] for i in range(split, len(terms))) + sum(lay2["op_w"][split - 1:])
+                fig_h2 = _emu(fs2 * max(1.15, k.line))
+                lab_h2 = max((self.h([self.P(b["lab"], lab_size, colors.muted)], b["w"]) for b in lay2["blocks"] if b["lab"]), default=0)
+                row_h2 = fig_h2 + lay2["pad"] + (int(k.vgap * 0.15) + lab_h2 if lab_h2 else 0)
+                block2 = 2 * row_h2 + int(k.vgap * 1.4) + lay2["pad"]
+                if max(first, second) <= area.w and block2 <= room_h:
+                    chosen, rows = lay2, [list(range(split)), list(range(split, len(terms)))]
+                    break
         if chosen is None:
             # two lines: the operands, then «= result»
             split = res if res is not None else math.ceil(len(terms) / 2)
@@ -1794,22 +2129,27 @@ class Composer:
         # columns) set at body size is a thin strip over an empty slide: it may take the lead size when nothing wraps
         header_bold = template_bold(k.manifest.tokens.typography)
 
+        boost = getattr(self, "_boost", 0)
+
         def sizes_for(t: TableData) -> list[float]:
             small_table = len(t.rows) + 1 <= 5 and len(t.columns) <= 4
-            lead = [k.lead] if small_table and k.lead > k.body and (not k.head_size or k.lead <= 0.7 * k.head_size) else []
-            return [s for s in (*lead, k.body, k.small) if s >= floor] or [k.small]
+            lead = [k.lead] if (small_table or boost >= 1) and k.lead > k.body and (not k.head_size or k.lead <= 0.7 * k.head_size) else []
+            mids = [x for x in k.sizes if k.body + 0.05 < x < k.lead - 0.05] if boost >= 1 else []
+            return [s for s in sorted({*lead, *mids, k.body, k.small}, reverse=True) if s >= floor] or [k.small]
 
         def measure(t: TableData, sizes: list[float]):
+            # a cell is set single-spaced (the renderer's 1.2 em), whatever the template's leading for running text;
+            # on the fill pass the rows grow until the table takes most of its area
             return measure_table(
-                t, width, k.font, sizes, k.line,
-                max_h_emu=area.h, fill_h_emu=int(0.62 * area.h), min_row_h_emu=int(0.065 * k.H), max_row_h_emu=int(0.10 * k.H),
+                t, width, k.font, sizes, 1.2,
+                max_h_emu=area.h, fill_h_emu=int((0.9 if boost >= 2 else 0.62) * area.h), min_row_h_emu=int(0.065 * k.H), max_row_h_emu=int((0.13 if boost >= 2 else 0.10) * k.H),
                 header_bold=header_bold,
             )
 
         # one table size for the deck: every table is set at the size the densest one allows (two tables of one deck
         # at 15 and 11 pt read as two designers)
         cache = self.slide.part.package.__dict__.setdefault("_verstka_table_size", {})  # one deck, one build
-        key = (width, area.h)
+        key = (width, area.h, boost)
         if key not in cache:
             tables = [s.content.table for s in self.outline.slides if s.content.table is not None and s.content.table.columns]
             cache[key] = min((measure(t, sizes_for(t))[0] for t in tables), default=None)
@@ -1845,6 +2185,145 @@ class Composer:
             self.cv.line(x - k.gap, area.y, x - k.gap, area.y + total_h, k.colors.divider, 1.0)  # as tall as the table
             self.cv.text(Bbox(x=x, y=area.y, w=w, h=min(hh, area.h)), paras, name="Takeaway")
 
+    # ---- chart slides: one content, three presentations ------------------------------------------------------------
+    #
+    # The brief often dictates every slide's form (a pie here, two columns there): the three variants would then be
+    # the same deck three times. Each variant presents a chart slide its own way, inside the template's design system:
+    #   structured — the chart at the left (64%), the lines in a column at its right behind a hairline, the conclusion
+    #                in a strip under both;
+    #   visual     — a wider chart; the lines that carry a figure become callouts beside it (the figure large in the
+    #                accent, its words under it), the other lines stay short lines; the conclusion of a lone chart stands
+    #                beside it with its key figure large. Lines without a figure go under the chart as captions;
+    #   compact    — mirrored and denser: a text column at the left led by the conclusion in bold, the lines under it,
+    #                the chart at the right taking the full height (no strip).
+
+    def _side_split(self, texts: list[str]) -> tuple[list[tuple[str, str, bool]], list[str]]:
+        """The visual variant's reading of a chart's side lines: up to three lines that carry one figure become
+        callouts (figure, label, statement=False); the others stay lines."""
+        kpis: list[tuple[str, str, bool]] = []
+        lines: list[str] = []
+        for t in texts:
+            got = kpi_callout(t) if len(kpis) < 3 else None
+            if got is not None:
+                kpis.append((got[0], got[1], False))
+            else:
+                lines.append(t)
+        return kpis, lines
+
+    def _kpi_column(self, box: Bbox, kpis: list[tuple[str, str, bool]], lines: list[str], dry: bool = False) -> Optional[int]:
+        """The visual variant's column beside a chart: each callout a short accent rule, its figure large in the
+        template's figure colour (one size for the column: the largest at which every figure stays on one line and the
+        column fits the height) and its words under it; a statement (the slide's conclusion) in the text colour at the
+        lead size; the lines without a figure under the callouts. Returns the height it takes (None: it does not fit
+        even at the smallest sizes — the caller sets the lines as a plain column). `dry`: measure only."""
+        k = self.kit
+        colors = k.colors
+        figs = [v for v, _, _ in kpis if v]
+        w_pt = _pt(box.w)
+        cap = min(k.figure_cap(max(len(figs), 2), False, "visual"), 0.15 * k.hpt)
+        floor = max(k.h2, k.h3)
+        fig_sizes = [s for s in k.figure_sizes(cap, floor) if all(self.figure_para(v, s, colors.figure, colors.muted)[1] <= w_pt * 0.94 for v in figs)] if figs else [0.0]
+        if not fig_sizes:
+            return None  # a figure too wide for the column at a callout size: no callouts
+        rule_h = _emu(3)
+        for rules in (True, False):
+            for lab_size in dict.fromkeys((k.lead, k.body)):
+                for line_size in dict.fromkeys((k.body, k.small)):
+                    for fs in fig_sizes:
+                        layout = self._kpi_layout(box, kpis, lines, fs, lab_size, line_size, rules, rule_h)
+                        if layout["h"] <= box.h:
+                            if not dry:
+                                self._kpi_draw(box, layout)
+                            return layout["h"]
+        return None
+
+    def _kpi_layout(self, box: Bbox, kpis, lines, fs: float, lab_size: float, line_size: float, rules: bool, rule_h: int) -> dict:
+        k = self.kit
+        colors = k.colors
+        blocks = []
+        y = 0
+        between = int(k.vgap * 1.15)
+        for i, (value, label, statement) in enumerate(kpis):
+            b: dict = {"y": y}
+            if rules:
+                b["rule"] = y
+                y += rule_h + int(k.vgap * 0.9)
+            if value:
+                para = self.figure_para(value, fs, colors.figure, colors.muted)[0]
+                fig_h = _emu(fs * max(1.15, k.line))
+                lsb, tg = self._figure_optics(para, fig_h)
+                b["fig"] = (para, y - tg, fig_h, lsb)
+                y += fig_h - tg + int(k.vgap * 0.3)
+            size = k.lead if statement else lab_size
+            if statement:
+                lp = [Para(highlight_runs(label, size, colors.text, colors.accent if size >= 18 else colors.accent_text, bold=False, accent_bold=k.bold, font=k.font) if not value else [Run(typeset(label), size, colors.text, False, k.font)])]
+            else:
+                lp = [self.P(label, size, colors.muted)]
+            lh = self.h(lp, box.w)
+            b["label"] = (lp, y, lh)
+            y += lh
+            blocks.append(b)
+            if i < len(kpis) - 1:
+                y += between
+        lines_block = None
+        if lines:
+            if blocks:
+                y += between
+            paras = [self.P(t, line_size, colors.text, space_after=line_size * 0.55, marker="•" if len(lines) > 1 else None, marker_color=colors.accent) for t in lines]
+            lh = self.h(paras, box.w)
+            lines_block = (paras, y, lh)
+            y += lh
+        return dict(h=y, blocks=blocks, lines=lines_block, rule_h=rule_h)
+
+    def _kpi_draw(self, box: Bbox, layout: dict) -> None:
+        k = self.kit
+        colors = k.colors
+        for b in layout["blocks"]:
+            if "rule" in b:
+                self.cv.rect(Bbox(x=box.x, y=box.y + b["rule"], w=min(_emu(k.hpt * 0.07), box.w), h=layout["rule_h"]), colors.accent, name="Rule")
+            if "fig" in b:
+                para, fy, fh, lsb = b["fig"]
+                self.cv.text(Bbox(x=box.x - lsb, y=box.y + fy, w=box.w + lsb, h=fh), [para], anchor="b", name="Figure")
+            lp, ly, lh = b["label"]
+            self.cv.text(Bbox(x=box.x, y=box.y + ly, w=box.w, h=lh), lp, name="Label")
+        if layout["lines"] is not None:
+            paras, ly, lh = layout["lines"]
+            self.cv.text(Bbox(x=box.x, y=box.y + ly, w=box.w, h=lh), paras, name="Chart note")
+
+    def _text_column(self, box: Bbox, lead: Optional[str], figure: Optional[tuple[str, str]], texts: list[str]) -> int:
+        """The compact variant's text column beside a chart: the conclusion as its bold lead line (in the heading
+        colour, its figures in the accent), a computed figure of the series under it, then the lines — set dense (a
+        short gap between them) at the largest size at which the column fits the height. A hairline at its right
+        edge sets it apart from the chart. Returns the height it took."""
+        k = self.kit
+        colors = k.colors
+        lead = (lead[:1].upper() + lead[1:]) if lead else None
+        if lead and lead.endswith(".") and not lead.endswith("..") and not ABBR_END_RE.search(lead):
+            lead = lead[:-1]
+        best = None
+        for lead_size, size in ((k.lead, k.lead), (k.lead, k.body), (k.h3, k.body), (k.body, k.body), (k.body, k.small)):
+            paras: list[Para] = []
+            if lead:
+                paras.append(Para(highlight_runs(lead, lead_size, colors.heading, colors.accent if lead_size >= 18 else colors.accent_text, bold=True, accent_bold=True, font=k.font), space_after=lead_size * (0.9 if (texts or figure) else 0)))
+            if figure is not None:
+                value, label = figure
+                fs = k.h2
+                paras.append(Para(self.figure_para(value, fs, colors.figure, colors.muted)[0].runs, space_after=2))
+                paras.append(self.P(label, size, colors.muted, space_after=size * (0.9 if texts else 0)))
+            for j, t in enumerate(texts):
+                paras.append(self.P(t, size, colors.text, space_after=size * 0.4 if j < len(texts) - 1 else 0, marker="•" if len(texts) > 1 else None, marker_color=colors.accent))
+            hh = self.h(paras, box.w)
+            best = (paras, hh)
+            if hh <= box.h and self.fits_width(texts + ([lead] if lead else []), size, True, box.w - _emu(size * 1.1)):
+                break
+        paras, hh = best
+        self.cv.text(Bbox(x=box.x, y=box.y, w=box.w, h=hh), paras, name="Chart note")
+        return hh
+
+    def _chart_split(self, area: Bbox) -> float:
+        """The share of the width the visual variant's callout column takes beside a chart."""
+        return 0.28 if area.w >= 0.6 * self.kit.W else 0.32
+
     def chart(self, area: Bbox) -> None:
         from verstka.rendering.charts import effective_chart_type
 
@@ -1858,23 +2337,66 @@ class Composer:
         # slide states its own conclusion under the chart
         takeaway = None if (pie or (self.o.takeaway or "").strip()) else _series_takeaway(spec, self.outline, self.o.headline)
         aside = self._takeaway_aside()
+        take = " ".join((self.o.takeaway or "").split())
+        take = take[:1].upper() + take[1:]
+        n0 = len(self.cv.tree)
+        tall_h = int(area.h * 0.92)
+        gap = k.gap * 2
+        if self.strategy == "compact" and (side_texts or aside or takeaway is not None):
+            # mirrored: the text column at the left, the chart at the right over the full height
+            col_w = int(area.w * (0.34 if sum(len(t) for t in side_texts + [take if aside else ""]) <= 220 else 0.38))
+            hh = self._text_column(Bbox(x=area.x, y=area.y, w=col_w, h=area.h), take if aside else None, takeaway, side_texts)
+            self.cv.line(area.x + col_w + gap // 2, area.y, area.x + col_w + gap // 2, area.y + min(hh, area.h), k.colors.divider, 1.0)
+            err = self._chart_block(Bbox(x=area.x + col_w + gap, y=area.y, w=area.w - col_w - gap, h=tall_h), spec, prominent=False, center=False)
+            if err is not None:
+                self._chart_failed(n0, area, err)
+            return
+        if self.strategy == "visual":
+            kpis, lines = self._side_split(side_texts)
+            if aside:
+                fig = _aside_figure(take) or ""
+                kpis.insert(0, (fig, label_without_figure(take, fig), True))
+            elif takeaway is not None:
+                kpis.insert(0, (takeaway[0], takeaway[1], False))
+            elif pie and not side_texts and kind == "pie":
+                # a lone pie of the visual variant is a doughnut: the whole, when the deck states it, large in its hole
+                spec = spec.model_copy(update={"type": "doughnut"})
+                self._hole_large = True
+            side_w = int(area.w * self._chart_split(area))
+            side = Bbox(x=area.x + area.w - side_w, y=area.y, w=side_w, h=area.h)
+            if kpis and self._kpi_column(side, kpis, lines, dry=True) is not None:
+                err = self._chart_block(Bbox(x=area.x, y=area.y, w=area.w - side_w - gap, h=tall_h), spec, prominent=False, center=False)
+                if err is not None:
+                    self._chart_failed(n0, area, err)
+                    return
+                self._kpi_column(side, kpis, lines)
+                return
+            if lines and not kpis:
+                # lines without a figure: captions under a chart as wide as the slide
+                plan = self._under_plan(area, lines, spread=True)
+                main = plan["main"]
+                err = self._chart_block(Bbox(x=main.x, y=main.y, w=main.w, h=main.h), spec, prominent=False, center=True)
+                if err is not None:
+                    self._chart_failed(n0, area, err)
+                    return
+                self._under_draw(plan, n0)
+                return
         if aside:
-            take = " ".join((self.o.takeaway or "").split())
-            takeaway = (_aside_figure(take) or "", take[:1].upper() + take[1:])
+            takeaway = (_aside_figure(take) or "", take)  # a column of callouts did not fit: the conclusion leads the lines
         show_side = bool(side_texts) or (takeaway is not None and self.strategy != "structured")
         chart_w = int(area.w * (0.64 if show_side else 1.0))
         tall = show_side or kind == "bar" or pie
-        chart_h = int(area.h * 0.92) if tall else min(int(area.h * 0.82), int(area.w * 0.42))
-        n0 = len(self.cv.tree)
+        chart_h = tall_h if tall else min(int(area.h * 0.82), int(area.w * 0.42))
+        self._pie_mirror = self.strategy == "compact" and pie and not show_side
         err = self._chart_block(Bbox(x=area.x, y=area.y, w=chart_w, h=chart_h), spec, prominent=False, center=not show_side)
+        self._pie_mirror = False
+        self._hole_large = False
         if err is not None:
-            # no chart, no caption over an empty frame: a half-built chart goes, the slide shows what else it has
-            self._undo(n0)
-            self.warnings.append(f"chart failed: {err[:120]}; shown as {self._chart_fallback(area)}")
+            self._chart_failed(n0, area, err)
             return
         if not show_side:
             return
-        x = area.x + chart_w + k.gap * 2
+        x = area.x + chart_w + gap
         w = area.x + area.w - x
         paras: list[Para] = []
         if takeaway is not None:
@@ -1896,23 +2418,216 @@ class Composer:
         self.cv.line(x - k.gap, y, x - k.gap, y + min(hh, area.h), k.colors.divider, 1.0)
         self.cv.text(Bbox(x=x, y=y, w=w, h=min(hh, area.h)), paras, name="Takeaway")
 
+    def _chart_failed(self, n0: int, area: Bbox, err: str) -> None:
+        """No chart, no caption over an empty frame: a half-built chart goes (and the column set beside it), the slide
+        shows what else it has — the conclusion the column was to hold goes back to its strip."""
+        self._undo(n0)
+        if self._takeaway_aside():
+            area = self._takeaway_to_strip(area)
+        self.warnings.append(f"chart failed: {err[:120]}; shown as {self._chart_fallback(area)}")
+
+    def _pair_share(self) -> float:
+        """The first chart's share of a pair's width: a trend over time (a line, an area, bars of five periods or more)
+        is read along its axis and takes 60% — its labels stay on one line; the other one (a structure, a before/after
+        pair) 40%: a pie sets its legend's names on two lines rather than its trend partner breaking its labels."""
+        from verstka.rendering.charts import effective_chart_type, resolve_series
+
+        def trend(spec) -> bool:
+            kind = effective_chart_type(spec, self.outline)
+            if kind in ("pie", "doughnut"):
+                return False
+            if kind in ("line", "area"):
+                return True
+            try:
+                series = resolve_series(spec, self.outline)
+            except Exception:  # noqa: BLE001
+                return False
+            return bool(series) and len(series[0].categories) >= 5
+
+        c = self.o.content
+        a, b = trend(c.chart), trend(c.chart2)
+        return 0.6 if a and not b else (0.4 if b and not a else 0.5)
+
+    def _pair_has_pie(self) -> bool:
+        from verstka.rendering.charts import effective_chart_type
+
+        c = self.o.content
+        return any(spec is not None and effective_chart_type(spec, self.outline) in ("pie", "doughnut") for spec in (c.chart, c.chart2))
+
+    def _text_band(self, area: Bbox, lead: Optional[str], texts: list[str]) -> int:
+        """The compact variant's text over a pair of charts that needs the whole width: the conclusion as a bold lead
+        line across the area, the lines under it side by side (up to three columns). Returns the band's height."""
+        k = self.kit
+        colors = k.colors
+        y = area.y
+        if lead:
+            lead = lead[:1].upper() + lead[1:]
+            if lead.endswith(".") and not lead.endswith("..") and not ABBR_END_RE.search(lead):
+                lead = lead[:-1]
+            for size in dict.fromkeys((k.lead, k.body)):
+                para = [Para(highlight_runs(lead, size, colors.heading, colors.accent if size >= 18 else colors.accent_text, bold=True, accent_bold=True, font=k.font))]
+                hh = self.h(para, area.w)
+                if para_lines(para[0], _pt(area.w)) <= 2:
+                    break
+            self.cv.text(Bbox(x=area.x, y=y, w=area.w, h=hh), para, name="Chart note")
+            y += hh + (int(k.vgap * 0.5) if texts else 0)
+        if texts:
+            n = len(texts)
+            cols = n if n <= 3 else 2
+            per = math.ceil(n / cols)
+            gap = k.gap * 2
+            cw = int((area.w - gap * (cols - 1)) / cols)
+            size = k.body
+            groups = [texts[i * per:(i + 1) * per] for i in range(cols)]
+            paras = [[self.P(t, size, colors.text, space_after=size * 0.4, marker="•", marker_color=colors.accent) for t in g] for g in groups if g]
+            eh = max(self.h(p, cw) for p in paras)
+            for i, p in enumerate(paras):
+                self.cv.text(Bbox(x=area.x + i * (cw + gap), y=y, w=cw, h=eh), p, name="Chart note")
+            y += eh
+        return y - area.y
+
+    def _kpi_row_plan(self, area: Bbox, kpis: list[tuple[str, str, bool]], lines: list[str]) -> Optional[dict]:
+        """The visual variant's callouts under a pair of charts that needs the whole width: each callout a column (an
+        accent rule, the figure large, its words under it), the lines without a figure a last column. One figure size
+        for the row: the largest at which every figure stays on one line in its column and the row keeps under 40% of
+        the area. None when even the smallest size does not fit."""
+        k = self.kit
+        colors = k.colors
+        cols = len(kpis) + (1 if lines else 0)
+        gap = k.gap * 2
+        cw = int((area.w - gap * (cols - 1)) / cols)
+        budget = int(area.h * 0.36)
+        rule_h = _emu(3)
+        # the charts stay the picture: the row's figures stop at the display size (the column beside a lone chart
+        # may go larger)
+        for fs in k.figure_sizes(min(k.figure_cap(max(len(kpis), 2), False, "visual"), k.display), k.h3):
+            if not all(self.figure_para(v, fs, colors.figure, colors.muted)[1] <= _pt(cw) * 0.94 for v, _, _ in kpis if v):
+                continue
+            blocks = []
+            band = 0
+            fig_h = _emu(fs * max(1.15, k.line))
+            for value, label, statement in kpis:
+                lp = [self.P(label, k.lead if statement and not value else k.body, colors.text if statement else colors.muted)]
+                lh = self.h(lp, cw)
+                y_fig = rule_h + int(k.vgap * 0.9)
+                if value:
+                    para = self.figure_para(value, fs, colors.figure, colors.muted)[0]
+                    lsb, tg = self._figure_optics(para, fig_h)
+                    y_lab = y_fig + fig_h - tg + int(k.vgap * 0.3)
+                    blocks.append(dict(para=para, fig=(y_fig - tg, fig_h, lsb), label=(lp, y_lab, lh)))
+                else:
+                    y_lab = y_fig
+                    blocks.append(dict(para=None, fig=None, label=(lp, y_lab, lh)))
+                band = max(band, y_lab + lh)
+            line_paras = [self.P(t, k.body, colors.text, space_after=k.body * 0.5, marker="•" if len(lines) > 1 else None, marker_color=colors.accent) for t in lines]
+            # the lines without a figure stand level with the callouts' words, under the rule of their own column
+            lines_y = blocks[0]["label"][1] if blocks else rule_h + int(k.vgap * 0.9)
+            if line_paras:
+                band = max(band, lines_y + self.h(line_paras, cw))
+            if band <= budget:
+                room = band + int(k.vgap * 1.4)
+                main = Bbox(x=area.x, y=area.y, w=area.w, h=max(area.h - room, int(area.h * 0.5)))
+                return dict(main=main, blocks=blocks, lines=line_paras, lines_y=lines_y, cw=cw, gap=gap, band=band, rule_h=rule_h, x=area.x)
+        return None
+
+    def _kpi_row_draw(self, row: dict, n0: int) -> None:
+        k = self.kit
+        colors = k.colors
+        bottom = self._content_bottom(n0)
+        y = row["main"].y2 + int(k.vgap * 1.4) if bottom is None else bottom + int(k.vgap * 1.4)
+        cw, gap = row["cw"], row["gap"]
+        for i, b in enumerate(row["blocks"]):
+            x = row["x"] + i * (cw + gap)
+            self.cv.rect(Bbox(x=x, y=y, w=min(_emu(k.hpt * 0.07), cw), h=row["rule_h"]), colors.accent, name="Rule")
+            if b["fig"] is not None:
+                fy, fh, lsb = b["fig"]
+                self.cv.text(Bbox(x=x - lsb, y=y + fy, w=cw + lsb, h=fh), [b["para"]], anchor="b", name="Figure")
+            lp, ly, lh = b["label"]
+            self.cv.text(Bbox(x=x, y=y + ly, w=cw, h=lh), lp, name="Label")
+        if row["lines"]:
+            x = row["x"] + len(row["blocks"]) * (cw + gap)
+            ly = y + row["lines_y"]
+            self.cv.text(Bbox(x=x, y=ly, w=cw, h=self.h(row["lines"], cw)), row["lines"], name="Chart note")
+
     def chart_pair(self, area: Bbox) -> None:
-        """Two charts side by side («до и после», a structure next to a trend): two equal columns, each under its own
-        title in the heading colour; a column of text to the right when the slide has some."""
+        """Two charts side by side («до и после», a structure next to a trend), each under its own title in the heading
+        colour — a trend takes the larger share. The slide's lines as the variant sets them: a column at the right
+        (structured), callouts at the right or captions under the charts (visual), a text column at the left led by
+        the conclusion (compact)."""
         k = self.kit
         c = self.o.content
         side_texts = [t for t in (list(c.bullets) + list(c.paragraphs)) if t.strip()]
-        gap = k.gap * 3
-        text_w = int(area.w * 0.27) if side_texts else 0
-        charts_w = area.w - (text_w + gap if side_texts else 0)
-        cw = int((charts_w - gap) / 2)
+        aside = self._takeaway_aside()
+        take = " ".join((self.o.takeaway or "").split())
+        gap = int(k.gap * 2.5)
         n0 = len(self.cv.tree)
+        region = area
+        after = None  # what is drawn once the charts stand
+        # a pie carries its legend beside its circle and needs half the width: next to it the lines leave the side
+        # column for a band over (compact) or under (structured, visual) the charts
+        pie = self._pair_has_pie()
+        if self.strategy == "compact" and (side_texts or aside):
+            if pie:
+                hh = self._text_band(area, take if aside else None, side_texts)
+                dy = hh + int(k.vgap * 1.3)
+                region = Bbox(x=area.x, y=area.y + dy, w=area.w, h=max(area.h - dy, int(area.h * 0.5)))
+            else:
+                col_w = int(area.w * 0.3)
+                hh = self._text_column(Bbox(x=area.x, y=area.y, w=col_w, h=area.h), take if aside else None, None, side_texts)
+                self.cv.line(area.x + col_w + gap // 2, area.y, area.x + col_w + gap // 2, area.y + min(hh, area.h), k.colors.divider, 1.0)
+                region = Bbox(x=area.x + col_w + gap, y=area.y, w=area.w - col_w - gap, h=area.h)
+        elif self.strategy == "visual" and (side_texts or aside):
+            kpis, lines = self._side_split(side_texts)
+            side_w = int(area.w * 0.25)
+            side = Bbox(x=area.x + area.w - side_w, y=area.y, w=side_w, h=area.h)
+            if pie:
+                # the callouts (the conclusion first) in a row under the charts, in the strip's place
+                if aside:
+                    fig = _aside_figure(take) or ""
+                    kpis.insert(0, (fig, label_without_figure(take[:1].upper() + take[1:], fig), True))
+                row = self._kpi_row_plan(area, kpis, lines) if kpis else None
+                if row is not None and row["main"].h >= 0.6 * area.h:
+                    region = row["main"]
+                    after = lambda: self._kpi_row_draw(row, n0)  # noqa: E731
+                else:
+                    if aside:
+                        area = self._takeaway_to_strip(area)  # no room for the row: the conclusion takes its strip
+                    if side_texts:
+                        plan = self._under_plan(area, side_texts, spread=True)
+                        region = plan["main"]
+                        after = lambda: self._under_draw(plan, n0)  # noqa: E731
+                    else:
+                        region = area
+            elif kpis and self._kpi_column(side, kpis, lines, dry=True) is not None:
+                region = Bbox(x=area.x, y=area.y, w=area.w - side_w - gap, h=area.h)
+                after = lambda: self._kpi_column(side, kpis, lines)  # noqa: E731
+            else:
+                plan = self._under_plan(area, side_texts, spread=True)
+                region = plan["main"]
+                after = lambda: self._under_draw(plan, n0)  # noqa: E731
+        elif side_texts and pie:
+            plan = self._under_plan(area, side_texts)
+            region = plan["main"]
+            after = lambda: self._under_draw(plan, n0)  # noqa: E731
+        elif side_texts:
+            text_w = int(area.w * 0.27)
+            region = Bbox(x=area.x, y=area.y, w=area.w - text_w - gap, h=area.h)
+
+            def after() -> None:
+                x = area.x + area.w - text_w
+                paras = [self.P(t, k.body if len(t) > 90 else k.lead, k.colors.text, space_after=k.body * 0.7, marker="•" if len(side_texts) > 1 else None, marker_color=k.colors.accent) for t in side_texts]
+                hh = min(self.h(paras, text_w), area.h)
+                self.cv.line(x - gap // 2, area.y, x - gap // 2, area.y + hh, k.colors.divider, 1.0)
+                self.cv.text(Bbox(x=x, y=area.y, w=text_w, h=hh), paras, name="Chart note")
+        share = self._pair_share()
+        w1 = int((region.w - gap) * share)
+        boxes = [Bbox(x=region.x, y=region.y, w=w1, h=region.h), Bbox(x=region.x + w1 + gap, y=region.y, w=region.w - gap - w1, h=region.h)]
         self._legend_used: list[float] = []
         self._pie_ds: list[int] = []
+        n1 = len(self.cv.tree)
         for attempt in range(2):
             for i, spec in enumerate((c.chart, c.chart2)):
-                box = Bbox(x=area.x + i * (cw + gap), y=area.y, w=cw, h=area.h)
-                err = self._chart_block(box, spec, prominent=True, center=False)
+                err = self._chart_block(boxes[i], spec, prominent=True, center=False)
                 if err is not None:
                     # one chart of the pair could not be drawn: the other one takes the slide
                     self._undo(n0)
@@ -1925,18 +2640,14 @@ class Composer:
             if attempt or len(self._legend_used) < 2 or (len(set(self._legend_used)) <= 1 and max(self._pie_ds) - min(self._pie_ds) <= _emu(2)):
                 break
             # two pies of one slide: one legend size and one diameter for both (the smaller ones), set again
-            self._undo(n0)
+            self._undo(n1)
             self._legend_force = min(self._legend_used)
             self._pie_force_d = min(self._pie_ds)
             self._legend_used, self._pie_ds = [], []
         self._legend_force = None
         self._pie_force_d = None
-        if side_texts:
-            x = area.x + charts_w + gap
-            paras = [self.P(t, k.body if len(t) > 90 else k.lead, k.colors.text, space_after=k.body * 0.7, marker="•" if len(side_texts) > 1 else None, marker_color=k.colors.accent) for t in side_texts]
-            hh = min(self.h(paras, text_w), area.h)
-            self.cv.line(x - gap // 2, area.y, x - gap // 2, area.y + hh, k.colors.divider, 1.0)
-            self.cv.text(Bbox(x=x, y=area.y, w=text_w, h=hh), paras, name="Chart note")
+        if after is not None:
+            after()
 
     def _chart_caption(self, spec, named: bool = False) -> Optional[str]:
         """What stands over a chart, once: its title with the word unit («Прогноз выручки, тыс. ₽»), else the word
@@ -2076,14 +2787,19 @@ class Composer:
         k = self.kit
         gap = k.gap
         # the legend beside the circle: the largest size (and the narrowest name column, then two columns of rows) at
-        # which the circle keeps most of the height; below the circle only in a tall, narrow box
-        sizes = [k.lead, k.body, k.small] if len(rows) <= 5 else [k.body, k.snap(k.body * 0.9, k.small, k.body), k.small]
+        # which the circle keeps most of the height (0.8 of it) — from the lead size (the body size for more than seven
+        # parts) down to the body size; below it, the small sizes only when the circle would otherwise keep less than
+        # 0.55 of the height. Below the circle only in a tall, narrow box
+        top = k.lead if len(rows) <= 7 else k.body
+        sizes = [x for x in reversed(k.sizes) if k.small - 0.05 <= x <= top + 0.05] or [k.body, k.small]
         sizes = list(dict.fromkeys(sizes))
         force = getattr(self, "_legend_force", None)
         if force:
             sizes = [s_ for s_ in sizes if s_ <= force + 0.05] or [force]
         best = None
         for size in sizes:
+            if size < k.body - 0.05 and best is not None and best[1] >= 0.55 * box.h:
+                break  # the body size keeps a circle of more than half the height: the legend never goes smaller
             natural = _emu(max(text_width_pt(cats[j], k.font, size, False) for j in rows) + size * 0.6)
             # the names on one line first (a legend of even rows), narrower columns when the circle needs the room
             tries = [(cap, 1) for cap in (min(natural, int(box.w * 0.55)), int(box.w * 0.45), int(box.w * 0.36))]
@@ -2096,10 +2812,10 @@ class Composer:
                 dd = min(box.h, box.w - cand["w"] - gap * 2)
                 if best is None or dd > best[1] + _emu(2):
                     best = (cand, dd)
-                if dd >= 0.6 * box.h:
+                if dd >= 0.8 * box.h:
                     best = (cand, dd)
                     break
-            if best is not None and best[1] >= 0.6 * box.h:
+            if best is not None and best[1] >= 0.8 * box.h:
                 break  # a legend that reads (the larger type) next to a circle of most of the height
         lg, d = best if best is not None else (None, 0)
         below = False
@@ -2124,12 +2840,17 @@ class Composer:
         x0 = box.x
         if center:
             x0 = box.x + max(0, (box.w - (max(d, lg["w"]) if below else group_w)) // 2)
-        gf = add_chart(self.slide, Bbox(x=x0, y=box.y, w=d, h=d), spec, self.outline, self._chart_style(), k.manifest.tokens.typography, text_hex=colors.text, neutral_hex=colors.divider, ground_hex=colors.ground, legend=False, amounts=amounts)
+        # the compact variant mirrors a lone pie as it mirrors its chart slides: the legend (the text) at the left
+        mirror = bool(getattr(self, "_pie_mirror", False)) and not below
+        cx = x0 + lg["w"] + gap * 2 if mirror else x0
+        gf = add_chart(self.slide, Bbox(x=cx, y=box.y, w=d, h=d), spec, self.outline, self._chart_style(), k.manifest.tokens.typography, text_hex=colors.text, neutral_hex=colors.divider, ground_hex=colors.ground, legend=False, amounts=amounts)
         if amounts:
             self._doughnut_total(gf, spec, total, unit_txt)
         shades = list(getattr(gf, "verstka_shades", None) or []) or [(colors.accent, 1.0)] * len(cats)
         if below:
             lx, ly = x0, box.y + d + k.vgap
+        elif mirror:
+            lx, ly = x0, box.y + max(0, (d - lg["h"]) // 2)
         else:
             lx, ly = x0 + d + gap * 2, box.y + max(0, (d - lg["h"]) // 2)
         size, sw = lg["size"], lg["sw"]
@@ -2173,10 +2894,18 @@ class Composer:
         k = self.kit
         text = typeset(_amount_text(total, unit))
         size = k.h3
+        if getattr(self, "_hole_large", False):
+            # the visual variant's doughnut: the whole as its figure, as large as the hole takes it — one line through
+            # the centre may run a little wider than the inscribed square (the hole's chord there is 1.38 × its side;
+            # the slices' own labels keep the rest)
+            wide = int(box.w * 1.15)
+            box = Bbox(x=box.x - (wide - box.w) // 2, y=box.y, w=wide, h=box.h)
+            size = next((s_ for s_ in k.figure_sizes(k.display, k.h3) if text_width_pt(text, k.font, s_, k.figure_bold) <= _pt(box.w) * 0.88 and s_ * 1.3 <= _pt(box.h) * 0.45), k.h3)
         while size > k.small and text_width_pt(text, k.font, size, k.figure_bold) > _pt(box.w) * 0.95:
             size = k.snap(size * 0.9, k.small, size - 0.5)
         hh = _emu(size * 1.3)
-        self.cv.text(Bbox(x=box.x, y=box.y + (box.h - hh) // 2, w=box.w, h=hh), [self.P(text, size, k.colors.heading, bold=k.figure_bold, align="c")], name="Total", anchor="ctr")
+        color = k.colors.figure if getattr(self, "_hole_large", False) else k.colors.heading
+        self.cv.text(Bbox(x=box.x, y=box.y + (box.h - hh) // 2, w=box.w, h=hh), [self.P(text, size, color, bold=k.figure_bold, align="c")], name="Total", anchor="ctr")
 
     def _chart_fallback(self, area: Bbox) -> str:
         """A chart that could not be drawn gives its area to the slide's figures (its numbers, else the facts the chart
@@ -2331,6 +3060,40 @@ def _in_sentence(cat: str) -> str:
 
 
 _MONEY_UNIT_RE = re.compile(r"\s*(?:рубл(?:ь|я|ей)|руб\.?)$", re.I)
+
+
+_TAIL_LINK_RE = re.compile(r"(?:\s+(?:до|на|в|с|—|–|-|:)|\s+(?:составит|составляет|составят|составляют|равна|равен|равно|—\s*это))+\s*$", re.I)
+
+
+def label_without_figure(text: str, fig: Optional[str]) -> str:
+    """The words under a figure set large, without the figure said again: «Рентабельность увеличится до 22,4%» under
+    «22,4%» reads «Рентабельность увеличится», «Месячная выручка составит 1 138 500 ₽» → «Месячная выручка», a figure
+    in brackets goes with its brackets. A figure in the middle of the sentence stays (cutting it would break the
+    sentence), as does the sentence when too little of it would be left."""
+    text = " ".join((text or "").split())
+    if not fig:
+        return text
+    want = re.sub(r"\D", "", fig)
+    for m in _FIG_RE.finditer(text):
+        if re.sub(r"\D", "", m.group(1)) != want:
+            continue
+        a, b = m.start(1), m.end(1)
+        before, after = text[:a], text[b:]
+        if before.rstrip().endswith("(") and after.lstrip().startswith(")"):
+            out = (before.rstrip()[:-1].rstrip() + " " + after.lstrip()[1:].lstrip()).strip()
+        elif re.fullmatch(r"\s*(?:в\s+месяц|в\s+год|в\s+день)?\s*[.!]?\s*", after):
+            out = _TAIL_LINK_RE.sub("", before.rstrip()).strip(" ,;:—–-")
+        elif re.match(r"\s*(?:в\s+месяц\s*)?,\s*или\s+\S", after):
+            # «Операционная прибыль составляет 120 000 рублей, или 13,3% выручки» → «Операционная прибыль — 13,3% выручки»
+            subject = _TAIL_LINK_RE.sub("", before.rstrip()).strip(" ,;:—–-")
+            rest = re.sub(r"^\s*(?:в\s+месяц\s*)?,\s*или\s+", "", after).strip().rstrip(".")
+            out = f"{subject} — {rest}" if subject else ""
+        else:
+            return text
+        if not out or (len(out.split()) < 2 and len(out) < 4):
+            return text
+        return out[:1].upper() + out[1:]
+    return text
 
 
 def _aside_figure(text: str) -> Optional[str]:

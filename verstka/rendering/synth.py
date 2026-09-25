@@ -1429,6 +1429,27 @@ def _cover_note(slide: Slide, oslide: OutlineSlide, col: Bbox, small: float, pal
     _textbox(slide, Bbox(x=col.x, y=col.y2 - h, w=col.w, h=h), [ParagraphSpec(note, bullet=False)], size=size, color=pal.text2, font=font, scale=scale, anchor="b")
 
 
+def _cover_goal_line(slide: Slide, oslide: OutlineSlide, box: Bbox, y: int, size: float, pal: "_Palette", font: Optional[str], scale: list[float], H: int, align: str = "l") -> None:
+    """A cover's goal (the first paragraph of a title slide, Agent v2: «Цель: …») as a short line under the subtitle,
+    a step smaller and in the subtitle's colour, inside the heading's column (never over the art)."""
+    from verstka.matching.scorer import cover_goal
+    from verstka.rendering.fonts import wrap_lines
+
+    goal = cover_goal(oslide)
+    if not goal:
+        return
+    lines = max(1, len(wrap_lines(goal, font, size, False, box.w / EMU_PER_PT - 7.2)))
+    h = int((lines * 1.2 + 0.3) * size * EMU_PER_PT)
+    y = min(y, int(H * 0.95) - h)
+    _textbox(slide, Bbox(x=box.x, y=y, w=box.w, h=h), [ParagraphSpec(goal, bullet=False)], size=size, color=pal.text2, font=font, scale=scale, align=align)
+
+
+def _sub_height(text: str, font: Optional[str], size: float, w: int) -> int:
+    from verstka.rendering.fonts import wrap_lines
+
+    return int((len(wrap_lines(text, font, size, False, w / EMU_PER_PT - 7.2)) * 1.2 + 0.2) * size * EMU_PER_PT)
+
+
 def _render_cover(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineSlide, manifest: TemplateManifest, ws: TemplateWorkspace, outline: DeckOutline) -> tuple[Slide, list[str]]:
     warnings: list[str] = []
     comp = plan_slide.composition or "bullets"
@@ -1520,9 +1541,11 @@ def _render_cover(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: Outline
         if text_h > box.h:
             title_ph.height = Emu(min(text_h, int(H * 0.95) - box.y))
         sub = oslide.subtitle or (oslide.section if comp == "section" else None)
+        y_sub = box.y + max(box.h, text_h) + int(H * 0.02)
         if sub:
-            y_sub = box.y + max(box.h, text_h) + int(H * 0.02)
             _textbox(slide, Bbox(x=box.x, y=y_sub, w=box.w, h=min(int(H * 0.16), int(H * 0.92) - y_sub)), [ParagraphSpec(sub)], size=h2, color=pal.text2, font=font, scale=scale)
+            y_sub += min(_sub_height(sub, font, h2, box.w), int(H * 0.16)) + int(H * 0.015)
+        _cover_goal_line(slide, oslide, box, y_sub, max(min(body, h2 * 0.8), small), pal, font, scale, H)
         _cover_note(slide, oslide, Bbox(x=box.x, y=sy, w=min(box.w, sw), h=sh), small, pal, font, scale)
         return slide, warnings
     else:
@@ -1542,8 +1565,11 @@ def _render_cover(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: Outline
         box = Bbox(x=sx, y=int(H * 0.30), w=int(sw * 0.8), h=int(H * 0.3))
         _textbox(slide, box, [ParagraphSpec(oslide.headline)], size=max(h1, display * 0.8) if comp == "title" else h1, color=title_color, font=title_font, bold=title_bold, scale=scale, anchor="b")
         sub = oslide.subtitle or (oslide.section if comp == "section" else None)
+        y_goal = int(H * 0.62)
         if sub:
             _textbox(slide, Bbox(x=sx, y=int(H * 0.62), w=int(sw * 0.8), h=int(H * 0.16)), [ParagraphSpec(sub)], size=h2, color=pal.text2, font=font, scale=scale)
+            y_goal += min(_sub_height(sub, font, h2, int(sw * 0.8)), int(H * 0.16)) + int(H * 0.015)
+        _cover_goal_line(slide, oslide, Bbox(x=sx, y=y_goal, w=int(sw * 0.8), h=int(H * 0.1)), y_goal, max(min(body, h2 * 0.8), small), pal, font, scale, H)
         _cover_note(slide, oslide, Bbox(x=sx, y=sy, w=int(sw * 0.8), h=sh), small, pal, font, scale)
         return slide, warnings
 

@@ -390,10 +390,10 @@ def generate_variants(
         if audit:
             tau = time.time()
             report(f"{name}: audit", base + span * 0.65)
-            audit_report = run_audit(vdir / "deck.pptx", manifest, v_outline, ws, providers=providers if audit_models else None, skills=skills if audit_models else None, use_vlm=audit_models and use_vlm, use_llm=audit_models and use_llm, render=audit_render, images_dir=vdir / "slides", strategy=name)
+            audit_report = run_audit(vdir / "deck.pptx", manifest, v_outline, ws, providers=providers if audit_models else None, skills=skills if audit_models else None, use_vlm=audit_models and use_vlm, use_llm=audit_models and use_llm, render=audit_render, images_dir=vdir / "slides", strategy=name, brief_text=brief.text if brief else None)
             if autofix and audit_report.summary.errors + audit_report.summary.warnings > 0:
                 report(f"{name}: autofix ({audit_report.summary.errors} errors)", base + span * 0.8)
-                audit_report, plan, v_outline, rr = autofix_loop(vdir / "deck.pptx", audit_report, v_outline, plan, manifest, ws, providers=providers, skills=skills, use_models=audit_models, images_dir=vdir / "slides", render=audit_render)
+                audit_report, plan, v_outline, rr = autofix_loop(vdir / "deck.pptx", audit_report, v_outline, plan, manifest, ws, providers=providers, skills=skills, use_models=audit_models, images_dir=vdir / "slides", render=audit_render, brief_text=brief.text if brief else None)
                 if rr is not None:
                     render = rr
             timings["audit"] = round(time.time() - tau, 2)
