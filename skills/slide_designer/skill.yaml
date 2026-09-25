@@ -1,0 +1,47 @@
+name: slide_designer
+version: 1.2.0
+role: llm
+description: >
+  Designs ONE slide of the deck (Agent v2): chooses its visual form by the visual-form guide and the user's explicit
+  requests for the slide (chart type, table, formula, footnote, conclusion), writes the headline as a conclusion,
+  a one-line takeaway, speaker notes with the explanations and calculations, short bullets or cards, and puts chart
+  data inline (categories + series copied from the data given in the call). Never invents figures or facts: every
+  number comes from the slide's source text or data list. Returns why this form was chosen and two alternative
+  forms (a more visual one and a more compact one) that the other variants use. One small JSON answer per slide;
+  a revision call gets the critic's issues and the previous design.
+prompt_files:
+  system: prompts/system.md
+  user: prompts/user.md
+output_schema: verstka.schemas.agent.SlideDesignAnswer
+params:
+  temperature: 0.3
+  max_tokens: 1800
+changelog:
+  - "1.0.0: initial version (Agent v2). One call per slide instead of one call «distributing the brief over the
+    slides»: the slide's verbatim source text, the user's requests for it, its data with ids and values, the deck
+    context (title, audience, purpose, neighbours' titles), the template's kinds and the visual-form guide. Flat
+    model-agnostic JSON (content fields next to the headline), inline chart data, rationale + 2 alternatives. The
+    answer is repaired leniently (schemas/agent.py) but an object without a headline and a kind is rejected, so a
+    truncated answer never passes as an empty slide."
+  - "1.1.0: live run on Cloud.ru Qwen3-32B (long coffee brief): the model copied the user's topic headings («Как
+    увеличить средний чек») as headlines, moved the slide's own lists (actions, risks) to the notes, added generic
+    footnotes («Результаты зависят от…») and wrote «+10%» for a 20% → 30% share. Now: the headline answers the user's
+    heading with the slide's key figure (a neutral example, not from any test brief), the takeaway never repeats it,
+    every list of the source stays on the slide, footnotes only when asked or stated by the source, «п. п.» for
+    shares, and combined forms (figures + short bullets, a chart + bullets, a lead line over cards / a timeline / a
+    table, up to 5 lines under cards / a timeline / a table, which the renderer now shows); a figure keeps its meaning
+    and a forecast is never told as done. Deterministic guards in planning/agent.py (design_from_answer): a takeaway
+    repeating the headline and a footnote the slide's source does not state are dropped, a footnote that is content
+    becomes a line, lines repeating the figures the slide shows big are dropped, fields the chosen form cannot show are
+    folded into ones it shows (_fit_form), a headline figure the brief does not give is cut with its preposition or the
+    slide's title is used (_headline_checked)."
+  - "1.2.0: review of the live decks: a forecast told as done («Операционная прибыль выросла почти в 2,1 раза» over a
+    «Цель» column, «почти» on the wrong side of 2,12), a figure given another item's label, «Дополнительно заработать
+    90 000 ₽» for the brief's revenue, rankings the data contradicts («Маркетинг и прочие расходы — минимальная
+    доля»), headlines announcing lists («Пять стратегий…» for four), a merged «Меры и риски» list, budgets and month
+    plans left as text. Now: a figure keeps its label and its source's word for the measure, hedges must be true, no
+    ranking the data does not show, no announced lists, takeaways of about 70 characters without a period, a budget
+    of amounts → a chart with its total, a plan by months → a timeline, a cost is not an action, risks and measures
+    never merged. Deterministic guards (planning/agent.py, compile.py, grounding.py) enforce the same: the tense and
+    hedge guard, figure–label binding, the comparison check against the slide's data, the user's formula verbatim,
+    pies only of the parts of one whole."

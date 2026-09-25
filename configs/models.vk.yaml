@@ -13,6 +13,16 @@ roles:
     base_url: ${VK_INFERENCE_BASE_URL}
     api_key: ${VK_INFERENCE_API_KEY}
     temperature: 0.2
+    # Thinking OFF. Qwen3.8-27B thinks before answering by default; left on, the reasoning is billed as output and
+    # uses up the small answers' limits (designer 1800, critic 900 tokens): every answer comes back cut off and the
+    # deck is built by the rules after minutes of calls. Two switches, both harmless where unsupported:
+    # - vLLM / SGLang (the usual host of an open model): the chat template's own flag;
+    # - Qwen3's documented soft switch "/no_think" at the end of the system message (a host without the flag).
+    # A host that rejects the unknown field (a plain 400) is asked once more without it, and the provider logs a
+    # warning when completion tokens far exceed the answer (thinking still on). Check with scripts/vk_smoke.py first.
+    extra_body:
+      chat_template_kwargs: { enable_thinking: false }
+    system_suffix: "/no_think"
   vlm:
     backend: openai_compat
     model: qwen3.8-27b
@@ -20,6 +30,9 @@ roles:
     base_url: ${VK_INFERENCE_BASE_URL}
     api_key: ${VK_INFERENCE_API_KEY}
     temperature: 0.1
+    extra_body:
+      chat_template_kwargs: { enable_thinking: false }
+    system_suffix: "/no_think"
 limits:
   max_concurrency: 4
   timeout_s: 180

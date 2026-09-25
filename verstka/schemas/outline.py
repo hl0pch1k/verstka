@@ -47,12 +47,23 @@ class TableData(BaseModel):
     source_span: Optional[str] = None
 
 
+class InlineSeries(BaseModel):
+    """One data series written into a chart by the planner (Agent v2): its values are checked against the brief."""
+
+    name: str = ""
+    values: list[float] = Field(default_factory=list)
+
+
 class ChartSpec(BaseModel):
     type: Literal["bar", "column", "line", "area", "pie", "doughnut"] = "column"
     series_ids: list[str] = Field(default_factory=list)
     title: Optional[str] = None
     unit: Optional[str] = None
     highlight_index: Optional[int] = None
+    # Agent v2: the data of the chart written by the slide designer (categories + one or more series). The compiler
+    # (planning/compile.py) turns it into registry Series and fills series_ids; grounding checks every value.
+    categories: list[str] = Field(default_factory=list)
+    series: list[InlineSeries] = Field(default_factory=list)
 
 
 class SlideItem(BaseModel):
@@ -80,10 +91,25 @@ class SlideContent(BaseModel):
     quote_author: Optional[str] = None
     image_hint: Optional[str] = None
     columns: list[SlideItem] = Field(default_factory=list)
+    # Agent v2: a second chart on the same slide («два небольших графика: до и после»), and a formula shown large
+    # («100 × 300 × 30 = 900 000 ₽»)
+    chart2: Optional[ChartSpec] = None
+    formula: Optional[str] = None
 
     @property
     def is_empty(self) -> bool:
         return not (self.bullets or self.paragraphs or self.items or self.numbers or self.table or self.chart or self.quote or self.columns)
+
+
+class SlideAlternative(BaseModel):
+    """Another form the slide designer proposed for a slide (Agent v2): the kind and what changes with it, in Russian
+    («table» — «те же расходы таблицей: статья, сумма, доля»). Other variants may use it."""
+
+    kind: str = ""
+    change: str = ""
+    # the alternative's own content when the designer wrote it (its fields replace the slide's); without it the
+    # compiler (planning/compile.py) converts the slide's content to the kind itself when it can
+    content: Optional[SlideContent] = None
 
 
 class OutlineSlide(BaseModel):
@@ -95,6 +121,15 @@ class OutlineSlide(BaseModel):
     content: SlideContent = Field(default_factory=SlideContent)
     notes: str = ""
     fact_refs: list[str] = Field(default_factory=list)
+    # Agent v2: the slide's short conclusion shown under its content («Вывод: …»), a small footnote (a disclaimer,
+    # «налоги не учитываются»), why the designer chose this form (shown in «Почему слайд такой»), and the number of
+    # the slide the user asked for in the brief («Слайд 3.») — such slides are never dropped.
+    takeaway: Optional[str] = None
+    footnote: Optional[str] = None
+    rationale: Optional[str] = None
+    spec_ref: Optional[int] = None
+    # Agent v2 (UI): the other forms the designer proposed for this slide (shown in «Почему слайд такой»)
+    alternatives: list[SlideAlternative] = Field(default_factory=list)
 
 
 class DeckOutline(BaseModel):
@@ -111,6 +146,8 @@ class DeckOutline(BaseModel):
     facts: list[Fact] = Field(default_factory=list)
     series: list[Series] = Field(default_factory=list)
     tables: list[TableData] = Field(default_factory=list)
+    # Agent v2: what the agent did, in plain Russian, step by step (shown in the UI as the agent's work)
+    agent_log: list[str] = Field(default_factory=list)
 
     def series_by_id(self, sid: str) -> Optional[Series]:
         return next((s for s in self.series if s.id == sid), None)

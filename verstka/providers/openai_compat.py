@@ -107,6 +107,15 @@ class _MinuteLimiter:
 
 
 _MIN_REQUEST_S = 5.0  # less time than this left in the generation's budget: do not start a request
+_TLS = threading.local()
+
+
+def requests_sent() -> int:
+    """HTTP requests this thread has sent so far (every attempt, retry and repair): a caller that wraps one
+    complete() reads it before and after to know what the call really cost."""
+    return getattr(_TLS, "sent", 0)
+
+
 _LIMITERS: dict[str, _MinuteLimiter] = {}
 _GUARD = threading.Lock()
 # how long a link is skipped (status.py keeps the holds per account + model)
@@ -119,6 +128,12 @@ _TOO_LARGE_S = 30.0  # 413 «request too large … tokens per minute»: a short 
 # a single provider (the final's VK inference): a 402 / 401 / 403 / 404 is reported after its attempts, then at most
 # this short hold, so a hiccup of the only model never costs more than a minute
 _SINGLE_HOLD_S = 60.0
+# a JSON answer cut off at max_tokens is asked again once with twice the room, up to this many tokens (or the link's cap)
+_CUT_MAX_TOKENS = 8192
+_CUT_RETRY = (
+    "Your previous answer was cut off at the length limit and is lost. Answer again from the start with a much shorter "
+    "JSON object: fewer items, short strings, no quotes from the source text. Close every bracket."
+)
 
 
 def _status_of(e: Exception) -> Optional[int]:
@@ -235,48 +250,119 @@ def default_label(model: str, base_url: str) -> str:
     return f"{name} ({suffix})" if suffix else name
 
 
-def extract_json(text: str) -> Any:
-    """Pull the first JSON object/array out of model output (fenced or inline)."""
+class TruncatedJSON(ValueError):
+    """The model's JSON was cut off (the answer hit max_tokens, or the host stopped it): no object of it may stand in
+    for the answer — an inner object of a cut-off answer validates as an empty (all-default) answer."""
+
+
+_PAIRS = {"{": "}", "[": "]"}
+
+
+def _balanced(text: str, start: int) -> Optional[int]:
+    """End (exclusive) of the bracket structure opened at text[start], or None when it never closes (cut off)."""
+    stack: list[str] = []
+    in_str = esc = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch in _PAIRS:
+            stack.append(_PAIRS[ch])
+        elif stack and ch == stack[-1]:
+            stack.pop()
+            if not stack:
+                return i + 1
+    return None
+
+
+def _fits(data: Any, keys: Optional[set[str]], whole: bool) -> bool:
+    """A candidate stands for the answer: with `keys` (the schema's top-level fields) it is an object holding at least
+    one of them — an inner object of the answer («{"id": "f1", …}») never does. An empty object counts only as the
+    whole answer («{}»: nothing found), never as a piece of it."""
+    if keys is None:
+        return True
+    if not isinstance(data, dict):
+        return False
+    if not data:
+        return whole
+    return any(k in keys for k in data)
+
+
+def schema_keys(schema: type[BaseModel]) -> set[str]:
+    """Top-level field names (and aliases) of a schema: what extract_json requires of the object it picks."""
+    keys: set[str] = set()
+    for name, f in schema.model_fields.items():
+        keys.add(name)
+        if f.alias:
+            keys.add(f.alias)
+    return keys
+
+
+def extract_json(text: str, keys: Optional[set[str]] = None) -> Any:
+    """Pull the JSON answer out of model output (fenced or inline).
+
+    `keys`: the schema's top-level fields — the object picked must hold at least one of them (see _fits). An object
+    that opens and never closes means the answer was cut off: nothing inside it is picked (TruncatedJSON), since an
+    inner object of a cut-off answer would validate silently as an empty answer."""
     text = text.strip()
     for m in _FENCE_RE.finditer(text):
         candidate = m.group(1).strip()
         try:
-            return json.loads(candidate)
+            data = json.loads(candidate)
         except json.JSONDecodeError:
             continue
+        if _fits(data, keys, whole=True):
+            return data
     try:
-        return json.loads(text)
+        data = json.loads(text)
     except json.JSONDecodeError:
         pass
-    # scan for first balanced {...} or [...]
-    for opener, closer in (("{", "}"), ("[", "]")):
-        start = text.find(opener)
+    else:
+        if _fits(data, keys, whole=True):
+            return data
+        # a wrapper around the answer ({"result": {...}}): an object inside it may still be the answer
+    # the top-level structures in order: one that never closes is the cut-off answer, and everything after its opening
+    # bracket is inside it
+    cut_at: Optional[int] = None
+    pos = 0
+    while True:
+        opener = min((i for i in (text.find("{", pos), text.find("[", pos)) if i != -1), default=-1)
+        if opener == -1:
+            break
+        end = _balanced(text, opener)
+        if end is None:
+            cut_at = opener
+            break
+        pos = end
+    # scan for balanced {...} or [...] before the cut
+    limit = len(text) if cut_at is None else cut_at
+    found_any = False
+    for opener in ("{", "["):
+        start = text.find(opener, 0, limit)
         while start != -1:
-            depth = 0
-            in_str = False
-            esc = False
-            for i in range(start, len(text)):
-                ch = text[i]
-                if in_str:
-                    if esc:
-                        esc = False
-                    elif ch == "\\":
-                        esc = True
-                    elif ch == '"':
-                        in_str = False
-                    continue
-                if ch == '"':
-                    in_str = True
-                elif ch == opener:
-                    depth += 1
-                elif ch == closer:
-                    depth -= 1
-                    if depth == 0:
-                        try:
-                            return json.loads(text[start : i + 1])
-                        except json.JSONDecodeError:
-                            break
-            start = text.find(opener, start + 1)
+            end = _balanced(text, start)
+            if end is not None:
+                try:
+                    data = json.loads(text[start:end])
+                except json.JSONDecodeError:
+                    data = None
+                else:
+                    found_any = True
+                    if _fits(data, keys, whole=False):
+                        return data
+            start = text.find(opener, start + 1, limit)
+    if cut_at is not None:
+        raise TruncatedJSON("the JSON answer is cut off (it opens and never closes)")
+    if found_any and keys is not None:
+        raise ValueError(f"the JSON answer has none of the expected fields ({', '.join(sorted(keys))})")
     raise ValueError("no JSON found in model output")
 
 
@@ -421,12 +507,29 @@ class OpenAICompatProvider:
             self._client = OpenAI(base_url=self.base_url, api_key=self.api_key, timeout=self.timeout_s, default_headers=self.headers or None, max_retries=0)
         return self._client
 
+    hidden_reasoning = False  # set once an answer's completion tokens far exceed its text (thinking left on)
+
+    def _check_hidden_reasoning(self, text: str, usage: Usage) -> None:
+        """A host that serves a Qwen3 model with its thinking on bills the reasoning as completion tokens and returns
+        only the answer (or nothing): warn once, so the config gets its switch (extra_body chat_template_kwargs
+        enable_thinking=false, or system_suffix "/no_think"). About 3 characters of Russian or JSON per token."""
+        out = int(getattr(usage, "completion_tokens", 0) or 0)
+        est = max(1.0, len(text or "") / 3.0)
+        if out >= 300 and out > 3 * est and not self.hidden_reasoning:
+            self.hidden_reasoning = True
+            log.warning(
+                "%s: %d completion tokens for an answer of about %d — the host seems to run the model with thinking on; "
+                "turn it off in the model config (extra_body.chat_template_kwargs.enable_thinking: false or system_suffix: /no_think)",
+                self.model, out, int(est),
+            )
+
     def _cost(self, usage: Usage) -> Optional[float]:
         if self.price_in is None or self.price_out is None:
             return None
         return usage.prompt_tokens / 1e6 * self.price_in + usage.completion_tokens / 1e6 * self.price_out
 
     def _create(self, client: Any, kwargs: dict, capped: bool) -> Any:
+        _TLS.sent = getattr(_TLS, "sent", 0) + 1  # every request sent, answered or not (requests_sent)
         try:
             return client.chat.completions.create(**kwargs)
         except Exception as e:
@@ -438,7 +541,8 @@ class OpenAICompatProvider:
 
     def _call(
         self, messages: list[dict], temperature: float, max_tokens: int, want_json: bool, deadline: Optional[float] = None, nonblocking: bool = False
-    ) -> tuple[str, Usage]:
+    ) -> tuple[str, Usage, Optional[str]]:
+        """(answer text, usage, finish_reason): "length" means the answer hit max_tokens and is cut off."""
         client = self._get_client()
         kwargs: dict[str, Any] = dict(model=self.model, messages=messages, temperature=temperature, max_tokens=max_tokens)
         if self.extra_body:
@@ -468,13 +572,27 @@ class OpenAICompatProvider:
         except BudgetSpent:
             raise
         except ProviderError as err:
-            # a host may reject response_format: one more try without it (only for a plain 4xx, not for a 402/429/5xx)
-            if type(err) is ProviderError and want_json and self.json_mode and "response_format" in kwargs:
+            # a host may reject response_format: one more try without it (only for a plain 4xx, not for a 402/429/5xx);
+            # then the same for the link's extra_body (a thinking switch the host does not know), for the rest of the run
+            if type(err) is not ProviderError:
+                raise
+            resp = None
+            if want_json and self.json_mode and "response_format" in kwargs:
                 log.warning("json_mode rejected by provider (%s); retrying without it", err)
                 kwargs.pop("response_format")
+                try:
+                    resp = self._create(client, kwargs, capped)
+                except ProviderError as err2:
+                    if type(err2) is not ProviderError or "extra_body" not in kwargs:
+                        raise
+                    err = err2
+            if resp is None:
+                if "extra_body" not in kwargs:
+                    raise
+                log.warning("%s: the host rejected the link's extra_body %s (%s); retrying without it for this run", self.model, list(self.extra_body), str(err)[:200])
+                kwargs.pop("extra_body")
+                self.extra_body = {}
                 resp = self._create(client, kwargs, capped)
-            else:
-                raise
         choices = getattr(resp, "choices", None)
         if not choices:
             raise classify_error(_body_error(resp) or _BodyError("empty answer: no choices", None), self.model, self.api_key)
@@ -487,7 +605,7 @@ class OpenAICompatProvider:
         u = getattr(resp, "usage", None)
         usage = Usage(getattr(u, "prompt_tokens", 0) or 0, getattr(u, "completion_tokens", 0) or 0)
         usage.cost_usd = self._cost(usage)
-        return text, usage
+        return text, usage, getattr(choice, "finish_reason", None)
 
     def complete(
         self,
@@ -525,6 +643,9 @@ class OpenAICompatProvider:
         if self.max_tokens_cap:
             max_tokens = min(max_tokens, self.max_tokens_cap)
         call_kw = {"nonblocking": True} if in_chain else {}  # a chain link never waits for a per-minute slot
+        keys = schema_keys(schema) if schema is not None else None
+        base_messages = list(oai_messages)
+        cut_retried = False  # a cut-off answer gets one more request, asked shorter with more room (not an attempt)
         total = Usage()
         last_err: Optional[Exception] = None
         attempt = 0
@@ -539,7 +660,9 @@ class OpenAICompatProvider:
                 raise _fail(_unavailable(self.model, *hit), total)
             started = time.monotonic()
             try:
-                text, usage = self._call(oai_messages, temperature, max_tokens, want_json=schema is not None, deadline=deadline, **call_kw)
+                got = self._call(oai_messages, temperature, max_tokens, want_json=schema is not None, deadline=deadline, **call_kw)
+                # (text, usage, finish_reason); a stand-in without the finish reason (tests) is read as before
+                text, usage, finish = got[0], got[1], (got[2] if len(got) > 2 else None)
             except BudgetSpent as e:
                 raise _fail(e, total)  # the budget ran out, the link did nothing wrong: nothing is recorded
             except RateLimited as e:
@@ -639,14 +762,29 @@ class OpenAICompatProvider:
                 continue
             total = total.add(usage)
             status.record_ok(h)  # the host answered: not congested, not out of credits
+            self._check_hidden_reasoning(text, usage)
             if schema is None:
                 return CompletionResult(text=text, parsed=None, usage=total, model=self.model, attempts=attempt, label=self.label)
             try:
-                data = extract_json(text)
+                data = extract_json(text, keys)
                 parsed = schema.model_validate(data)
                 return CompletionResult(text=text, parsed=parsed, usage=total, model=self.model, attempts=attempt, raw_json=data, label=self.label)
             except (ValueError, ValidationError) as e:
                 last_err = e
+                if finish == "length" or isinstance(e, TruncatedJSON):
+                    # the answer ran out of max_tokens: asked again from the start, shorter, with more room — never
+                    # repaired from its cut-off text, and not a reason to leave the JSON mode (the host did no wrong)
+                    last_err = TruncatedJSON(f"the answer was cut off at {max_tokens} tokens (finish_reason={finish}): {str(e)[:200]}")
+                    log.warning("%s: JSON answer cut off at %d tokens (attempt %d/%d)", self.model, max_tokens, attempt, self.max_attempts)
+                    if cut_retried:
+                        # cut again with twice the room: the next attempts at that room are cut too (a model thinking
+                        # aloud, a host that ignores the length) — each would cost the most output of any request
+                        raise _fail(ProviderError(f"{self.model}: no valid completion, the answer was cut off twice: {last_err}"), total)
+                    cut_retried = True
+                    attempt -= 1
+                    max_tokens = max(max_tokens, min(max_tokens * 2, self.max_tokens_cap or _CUT_MAX_TOKENS))
+                    oai_messages = base_messages + [{"role": "user", "content": _CUT_RETRY}]
+                    continue
                 log.warning("invalid JSON from model (attempt %d/%d): %s", attempt, self.max_attempts, str(e)[:300])
                 if self.json_mode:
                     # some hosts garble guided JSON (': ' glued to values, empty keys) yet answer clean JSON without

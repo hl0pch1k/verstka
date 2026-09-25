@@ -45,12 +45,24 @@ def bind_short_words(text: str) -> str:
     never ends on one."""
     words = text.split(" ")
     out = []
+    # a name in guillemets of up to three words («Точка кофе») is one unit: never broken across lines
+    quoted: set[int] = set()
+    i = 0
+    while i < len(words):
+        if words[i].startswith("«") and not words[i].rstrip(",.:;").endswith("»"):
+            j = next((k for k in range(i + 1, min(i + 3, len(words))) if words[k].rstrip(",.:;").endswith("»")), None)
+            if j is not None:
+                quoted.update(range(i, j))
+                i = j
+        i += 1
     for i, w in enumerate(words):
         out.append(w)
         if i < len(words) - 1:
             bare = w.lower().strip("«»\"(),.:;")
             nxt = words[i + 1]
-            if nxt and not any(ch.isalnum() for ch in nxt):
+            if i in quoted:
+                out.append("\u00a0")
+            elif nxt and not any(ch.isalnum() for ch in nxt):
                 out.append("\u00a0")  # a dash or a separator stays at the end of its line, never opens the next one
             elif bare and any(ch.isalnum() for ch in bare) and (len(bare) <= 2 or bare in _BOUND_WORDS) and w[-1:] not in ",.:;":
                 out.append("\u00a0")

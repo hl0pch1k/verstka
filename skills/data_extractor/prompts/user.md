@@ -1,6 +1,6 @@
 Language: {{ language }}
 
-Brief:
+Text:
 {{ brief }}
 
-Extract facts, series and tables. JSON only.
+Extract facts, series and tables (with chart hints). JSON only.

@@ -1052,8 +1052,12 @@ def validate_outline(
     keep=None,
 ) -> DeckOutline:
     """Normalise density and structure; trim to `target` (+1 tolerance) or, when the brief fixed the count (`hard_limit`), to exactly `target`.
-    `keep(slides, slide)` → a drop priority of its own for a slide, or None for the usual one by kind."""
+    `keep(slides, slide)` → a drop priority of its own for a slide, or None for the usual one by kind.
+    A deck of the slides the user asked for (Agent v2: slides with `spec_ref`, compiled by planning/compile.py) keeps
+    them all in their order: no title or closing slide is added (the compiler set its frames), and only slides nobody
+    asked for may go to meet the count."""
     slides = list(outline.slides)
+    spec_deck = any(s.spec_ref is not None for s in slides)
     # density limits
     for s in slides:
         c = s.content
@@ -1073,28 +1077,31 @@ def validate_outline(
         if c.table is not None:
             c.table.columns = c.table.columns[:MAX_TABLE_COLS]
             c.table.rows = [r[:MAX_TABLE_COLS] for r in c.table.rows[:MAX_TABLE_ROWS]]
-        if c.chart is not None and len(c.chart.series_ids) > MAX_SERIES:
-            c.chart.series_ids = c.chart.series_ids[:MAX_SERIES]
+        for ch in (c.chart, c.chart2):
+            if ch is not None and len(ch.series_ids) > MAX_SERIES:
+                ch.series_ids = ch.series_ids[:MAX_SERIES]
+        if c.chart is None and c.chart2 is not None:
+            c.chart, c.chart2 = c.chart2, None  # a second chart alone is the slide's chart
         s.headline = condense_text(s.headline, 14, skills, providers, outline.language)
         # a bullet that only repeats the heading (the closing statement of a section is often both) leaves the body
         head = _norm_words(s.headline)
         if len(head) >= 5:  # a statement, not a topic word («Контекст» may well open a bullet)
             c.bullets = [b for b in c.bullets if not (_norm_words(b)[: len(head)] == head and len(_norm_words(b)) - len(head) <= 5)]
-        if s.kind in (PatternKind.stat_row, PatternKind.big_number) and not c.numbers:
+        if s.kind in (PatternKind.stat_row, PatternKind.big_number) and not c.numbers and not c.formula:  # a formula alone is shown large
             s.kind = PatternKind.bullets
         if s.kind == PatternKind.chart and c.chart is None:
             s.kind = PatternKind.bullets
         if s.kind == PatternKind.table and c.table is None:
             s.kind = PatternKind.bullets
     # first/last slides
-    if slides and slides[0].kind != PatternKind.title:
+    if slides and slides[0].kind != PatternKind.title and not spec_deck:
         slides.insert(0, OutlineSlide(id="sl_title", kind=PatternKind.title, headline=outline.title, subtitle=outline.subtitle))
-    if slides and slides[-1].kind != PatternKind.thanks:
+    if slides and slides[-1].kind != PatternKind.thanks and not spec_deck:
         slides.append(OutlineSlide(id="sl_thanks", kind=PatternKind.thanks, headline="Спасибо за внимание"))
     # count: drop low-priority slides beyond the limit; small bullets slides are merged into a neighbour before anything is lost
     limit = target if hard_limit else target + 1
     while len(slides) > limit:
-        candidates = slides[1:-1]
+        candidates = [s for s in slides[1:-1] if s.spec_ref is None]  # a slide the user asked for never goes
         if not candidates:
             break
         victim = min(candidates, key=lambda s: _drop_key(slides, s, keep))
@@ -1169,12 +1176,15 @@ def polish_plan(o: DeckOutline) -> DeckOutline:
     slides) has no section dividers and no agenda — a divider per slide is noise; a slide of one bullet is set as its
     figure (a big number) when the bullet holds one, else as a statement; a figure's label is what the slide will show
     (heuristics.label_beside, the rule compose.distinct_label uses), so the audit finds the plan's text on the slide;
-    «64 баллов» agrees with its number. Rules plans are left as they are."""
+    «64 баллов» agrees with its number. Rules plans are left as they are. The agent's deck (planned_by "agent") is
+    polished the same way, but never undoes its compiler: a deck of the slides the user asked for (`spec_ref`) keeps
+    its dividers and agenda, and a slide with a chart, a table or a formula stays as it is."""
     if o.planned_by in ("rules", "skeleton"):
         return o
     o = o.model_copy(deep=True)
     content = [s for s in o.slides if s.kind not in _FRAME_KINDS]
-    if 0 < len(content) <= 5:
+    spec_deck = any(s.spec_ref is not None for s in o.slides)
+    if 0 < len(content) <= 5 and not spec_deck:
         o.slides = [s for s in o.slides if s.kind not in (PatternKind.section, PatternKind.agenda)]
     for s in o.slides:
         c = s.content
@@ -1183,7 +1193,7 @@ def polish_plan(o: DeckOutline) -> DeckOutline:
         c.paragraphs = [_agree(t) for t in c.paragraphs]
         one_bullet = len(c.bullets) == 1 and not c.paragraphs
         short_para = len(c.paragraphs) == 1 and not c.bullets and len(c.paragraphs[0].split()) <= 8
-        if s.kind == PatternKind.bullets and (one_bullet or short_para) and not (c.items or c.numbers or c.table or c.chart):
+        if s.kind == PatternKind.bullets and (one_bullet or short_para) and not (c.items or c.numbers or c.table or c.chart or c.chart2 or c.formula):
             line = (c.bullets or c.paragraphs)[0]
             ks = H.kpis_of(line)
             if len(ks) == 1 and not s.content.columns:

@@ -1,0 +1,19 @@
+name: deck_architect
+version: 1.0.0
+role: llm
+description: >
+  Makes the storyline of a brief that does not describe its slides (Agent v2): which content slides the deck has,
+  in what order, and which sentences (by number) and data (by id) of the brief each slide presents, with a working
+  title, a section and a suggested form. Honours the slide count, the purpose and the audience. Writes no slide
+  text: the slide_designer does that next, one call per slide. Small answer: sentence numbers instead of quotes.
+prompt_files:
+  system: prompts/system.md
+  user: prompts/user.md
+output_schema: verstka.schemas.agent.StorylineAnswer
+params:
+  temperature: 0.2
+  max_tokens: 1400
+changelog:
+  - "1.0.0: initial version (Agent v2). The brief is shown as numbered sentences and the answer refers to them by
+    number, so the storyline stays small (no copied text to truncate) and every slide's source text is the brief's
+    own; the data list shows the registry ids with values."

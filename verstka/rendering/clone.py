@@ -2669,12 +2669,16 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
     else:
         k_color = sub_color
 
-    def legible(sz: float, color: Optional[str]) -> float:
-        """A line in a colour that holds only 3:1 against the ground (white on a brand blue) is set at 18 pt at least:
-        large text reads at that contrast, small text needs 4.5:1."""
-        if color and ground and contrast_ratio(color, ground) < 4.5 and sz < 18:
-            return 18.0
+    def legible(sz: float, color: Optional[str], bold: bool = False) -> float:
+        """A line in a colour that holds only 3:1 against the ground (white on a brand blue) is set as large text:
+        18 pt at least, or 14 pt in bold (WCAG); small text needs 4.5:1."""
+        big = 14.0 if bold else 18.0
+        if color and ground and contrast_ratio(color, ground) < 4.5 and sz < big:
+            return big
         return sz
+
+    def low_contrast(color: Optional[str]) -> bool:
+        return bool(color and ground and contrast_ratio(color, ground) < 4.5)
 
     # ---- lines, heights, the vertical stack: kicker, heading, subtitle
     sample_gap = (s_box0[1] - (tb.y + tb.h)) / EMU_PER_PT if s_box0 else None
@@ -2768,7 +2772,7 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
             ctx.filled.add(sid)
 
     def line_box(txt: str, sz: float, name: str, color: Optional[str], weight: bool, box: tuple[int, int, int], anchor_to: str = "t") -> etree._Element:
-        sz = legible(sz, color)
+        sz = legible(sz, color, weight)
         src = s_el if s_el is not None and kind != PatternKind.section else t_el
         el = _new_text(ctx, src, name, family, color)
         rows = txt.split("\n")
@@ -2807,12 +2811,46 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
             _drop_frames(ctx, [frame_el], cleared)
             if kind == PatternKind.title:
                 footer_text = frame_text
+    # the slide's footnote (Agent v2: a cover's disclaimer «Все цифры условные»): small print at the very foot of the
+    # heading's column, under the date; with no room there, a line under the subtitle
+    note = " ".join((oslide.footnote or "").split())
+    note_top: Optional[int] = None
+    if note:
+        ref = sub_size or s_size or _bookend_subtitle_size(ctx)
+        n_size = max(_snap_down(0.62 * ref, ctx.grow_scale), typo.size_for("caption", 10.0), 0.018 * H / EMU_PER_PT)
+        # «мелким текстом»: on a ground where small text lacks contrast (white on a brand blue) the small print is set
+        # at 14 pt bold — large text by WCAG — never at the subtitle's or the date's 18 pt
+        n_bold = low_contrast(sub_color) and n_size < 14.0
+        if n_bold:
+            n_size = 14.0
+        n_room = int(safe.x2 * W)
+        for ob in obstacles:
+            if ob.y2 > int(0.7 * H) and ob.x > text_x + int(0.1 * W):
+                n_room = min(n_room, ob.x - int(0.02 * W))
+        n_art = _art_edge(ctx, (int(0.8 * H), int(safe.y2 * H)), text_x + int(0.05 * W), hidden)
+        if n_art is not None:
+            n_room = min(n_room, n_art - int(0.02 * W))
+        n_width = max(min(w_max, n_room - text_x), int(0.25 * W))
+        n_lines = display_lines(bind_short_words(note), family, n_size, n_bold, n_width / EMU_PER_PT * 0.92) or [note]
+        n_w = int(max(text_width_pt(t, family, n_size, n_bold) for t in n_lines) * 1.1 * EMU_PER_PT)
+        l_ins = s_ins if s_el is not None and kind != PatternKind.section else t_ins  # the insets line_box gives its box
+        n_h = int((1.2 * len(n_lines) + 0.25) * n_size * EMU_PER_PT) + l_ins[1] + l_ins[3]
+        ny = floor_under(text_x + n_w + int(0.02 * W)) - n_h
+        if ny - block_bottom < max(int(0.05 * H), int(1.2 * n_size * EMU_PER_PT)):
+            ny = block_bottom + max(int(0.04 * H), int(1.2 * n_size * EMU_PER_PT))  # no foot room: under the subtitle
+            block_bottom = ny + n_h
+        else:
+            note_top = ny  # at the foot: the date stands over it
+        line_box("\n".join(n_lines), n_size, "Сноска", sub_color, n_bold, (text_x, ny, min(n_w, n_width)))
     # the footer: the date (and whatever had no room above the heading) at the foot of the heading's column
     if footer_text:
         f_size = legible(max(_snap_down(0.85 * (s_size or _bookend_subtitle_size(ctx)), ctx.grow_scale), typo.size_for("caption", 10.0)), sub_color)
         f_h = int((1.2 + 0.25) * f_size * EMU_PER_PT)
         f_w = int(text_width_pt(footer_text, family, f_size, False) * 1.1 * EMU_PER_PT)
         fy = floor_under(text_x + f_w + int(0.02 * W)) - f_h
+        if note_top is not None:
+            f_ins = s_ins if s_el is not None and kind != PatternKind.section else t_ins
+            fy = min(fy, note_top - int(0.6 * f_size * EMU_PER_PT) - f_h - f_ins[1] - f_ins[3])  # the date stands over the small print
         f_room = int(safe.x2 * W)
         for ob in obstacles:
             if ob.y < fy + f_h and ob.y2 > fy and ob.x > text_x:
@@ -2821,6 +2859,9 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
         if f_art is not None:
             f_room = min(f_room, f_art - int(0.02 * W))
         clear = fy - block_bottom >= max(int(0.06 * H), int(1.5 * (sub_size or f_size) * EMU_PER_PT))
+        if note_top is not None and not clear:
+            # the small print took the foot: the date keeps a plain line's distance from the subtitle
+            clear = fy - block_bottom >= max(int(0.035 * H), int(0.9 * (sub_size or f_size) * EMU_PER_PT))
         if clear and text_x + f_w <= f_room:
             line_box(footer_text, f_size, "Дата", sub_color, False, (text_x, fy, f_w))
         elif s_el is not None and sub_text and kind == PatternKind.title and footer_text != _deck_date(ctx.outline.language):

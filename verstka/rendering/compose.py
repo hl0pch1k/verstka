@@ -9,6 +9,8 @@ template's colours — and its card shape itself when a sample has one.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 import copy
 import math
 import re
@@ -19,7 +21,7 @@ from lxml import etree
 from pptx.slide import Slide
 
 from verstka.analysis.xmlns import q
-from verstka.planning.heuristics import label_beside
+from verstka.planning.heuristics import ABBR_END_RE, label_beside
 from verstka.rendering.charts import add_chart
 from verstka.rendering.fonts import figure_metrics_em, left_bearing_em, text_width_pt, wrap_lines
 from verstka.rendering.tables import add_table
@@ -406,7 +408,7 @@ class Canvas:
             end.set("sz", str(int(round(para.size * 100))))
 
     # ---- shapes ------------------------------------------------------------------------------------------------
-    def rect(self, box: Bbox, fill: Optional[str], line: Optional[str] = None, radius_emu: int = 0, line_w_pt: float = 0.75, name: str = "Shape", geom: Optional[str] = None) -> etree._Element:
+    def rect(self, box: Bbox, fill: Optional[str], line: Optional[str] = None, radius_emu: int = 0, line_w_pt: float = 0.75, name: str = "Shape", geom: Optional[str] = None, alpha: Optional[float] = None) -> etree._Element:
         sp = etree.Element(q("p:sp"))
         nv = etree.SubElement(sp, q("p:nvSpPr"))
         c = etree.SubElement(nv, q("p:cNvPr"))
@@ -427,7 +429,10 @@ class Canvas:
             gd.set("fmla", f"val {int(min(radius_emu / side, 0.5) * 100000)}")
         if fill:
             sf = etree.SubElement(spPr, q("a:solidFill"))
-            etree.SubElement(sf, q("a:srgbClr")).set("val", fill.upper())
+            clr = etree.SubElement(sf, q("a:srgbClr"))
+            clr.set("val", fill.upper())
+            if alpha is not None and alpha < 1.0:
+                etree.SubElement(clr, q("a:alpha")).set("val", str(int(round(max(alpha, 0.0) * 100000))))
         else:
             etree.SubElement(spPr, q("a:noFill"))
         ln = etree.SubElement(spPr, q("a:ln"))
@@ -545,7 +550,7 @@ def _xfrm_box(spPr: Optional[etree._Element]) -> Optional[Bbox]:
 
 # ---------------------------------------------------------------------------------------------- helpers
 
-_FIG_RE = re.compile(r"(?<![\w])([+\-−–]?\d[\d\s  ]*(?:[.,]\d+)?\s?(?:%|млн|млрд|тыс\.?|₽|руб\.?|ч|мин|сек|дн(?:ей|я)?|мес(?:\.|яц(?:а|ев)?)?|раз[а]?|×)?(?:\s?₽)?)", re.I)
+_FIG_RE = re.compile(r"(?<![\w])([+\-−–]?\d[\d\s\u00a0\u202f]*(?:[.,]\d+)?\s?(?:%|₽|×|(?:млн|млрд|тыс)\.?(?![а-яё])|рубл(?:ь|я|ей)(?![а-яё])|руб\.?(?![а-яё])|час(?:а|ов)?(?![а-яё])|ч\.?(?![а-яё])|мин(?:ут[аы]?|\.)?(?![а-яё])|сек(?:унд[аы]?|\.)?(?![а-яё])|дн(?:ей|я|\.)?(?![а-яё])|мес(?:яц(?:а|ев)?|\.)?(?![а-яё])|раз[а]?(?![а-яё]))?(?:\s?₽)?)", re.I)  # a unit is a whole word: «рублей», never «руб|лей»
 
 
 def highlight_runs(text: str, size: float, color: str, accent: str, bold: bool = False, accent_bold: bool = True, font: Optional[str] = None) -> list[Run]:
@@ -636,18 +641,29 @@ class Composer:
         return Para([Run(typeset(text), size, color, bold, self.kit.font)], align=align, space_after=space_after, marker=marker, marker_color=marker_color)
 
     def fits_width(self, texts: list[str], size: float, bold: bool, width_emu: int) -> bool:
+        """Every word of the texts fits the width at this size: a line breaks only on a real space, so the words a
+        no-break space binds as typeset («по результатам», «180 000 ₽») are measured as one."""
         w = _pt(width_emu)
-        return all(widest_word_pt(t, self.kit.font, size, bold) <= w for t in texts)
+        return all(text_width_pt(word, self.kit.font, size, bold) <= w for t in texts for word in typeset(t).split(" ") if word)
 
     # ---- entry -------------------------------------------------------------------------------------------------
     def compose(self, comp: str, area: Bbox) -> None:
         c = self.o.content
         kind = self.o.kind
-        intro = self._intro_text()
+        # the slide's footnote and conclusion (Agent v2) keep their room at the foot of the area: the content is
+        # composed above them, the conclusion then follows it
+        area = self._reserve_notes(area)
+        n0 = len(self.cv.tree)
+        intro = self._intro_text(comp)
         if intro and comp not in ("statement", "quote"):
-            area = self._intro(intro, area)
-        if comp in ("table",) and c.table is not None:
-            self.table(area, c.table)
+            area = self._intro(intro, area, formula=intro == (c.formula or "").strip())
+        if comp == "formula" and (c.formula or "").strip():
+            self.formula(area, c.formula)
+        elif comp == "chart_pair" and c.chart is not None and c.chart2 is not None:
+            self.chart_pair(area)
+        elif comp in ("table",) and c.table is not None:
+            with self._lines_under(area, list(c.bullets)) as main:
+                self.table(main, c.table)
         elif comp in ("chart_text", "chart") and c.chart is not None:
             self.chart(area)
         elif comp in ("stat_row", "big_number") and c.numbers:
@@ -658,7 +674,8 @@ class Composer:
         elif comp in ("process",) or kind in (PatternKind.process, PatternKind.timeline):
             items = self._items()
             if items:
-                self.process(area, items)
+                with self._lines_under(area, list(c.bullets) if (c.items or c.columns) else []) as main:
+                    self.process(main, items)
             else:
                 self.bullets(area, self._running())
         elif comp == "agenda" or kind == PatternKind.agenda:
@@ -666,13 +683,15 @@ class Composer:
         elif comp in ("comparison", "two_column") or kind in (PatternKind.comparison, PatternKind.two_column):
             items = self._items()
             if len(items) >= 2:
-                self.columns(area, items)
+                with self._lines_under(area, list(c.bullets) if (c.items or c.columns) else []) as main:
+                    self.columns(main, items)
             else:
                 self.bullets(area, self._running())
         elif comp in ("cards",) or kind in (PatternKind.cards, PatternKind.team):
             items = self._items()
             if items:
-                self.cards(area, items)
+                with self._lines_under(area, list(c.bullets) if (c.items or c.columns) else []) as main:
+                    self.cards(main, items)
             else:
                 self.bullets(area, self._running())
         elif comp == "quote" and c.quote:
@@ -698,6 +717,35 @@ class Composer:
                 self.kpis(area, c.numbers, extra=[])
             else:
                 self.warnings.append("empty slide content")
+        self._draw_notes(n0)
+
+    @contextmanager
+    def _lines_under(self, area: Bbox, lines: list[str]):
+        """Short lines that go with a block of steps, cards or a table (a timeline and the budget of the launch):
+        the block gets the area less their height, the lines follow right under what it drew, in two columns when
+        there are more than three. No lines: the block gets the whole area."""
+        k = self.kit
+        lines = [t for t in lines if t and t.strip()]
+        if not lines:
+            yield area
+            return
+        cols = 2 if len(lines) > 3 else 1
+        per = math.ceil(len(lines) / cols)
+        gap = k.gap * 2
+        cw = int((area.w - gap * (cols - 1)) / cols) if cols > 1 else int(area.w * 0.8)
+        size = k.body
+        groups = [lines[i * per:(i + 1) * per] for i in range(cols)]
+        paras = [[self.P(t, size, k.colors.text, space_after=size * 0.5, marker="•", marker_color=k.colors.accent) for t in g] for g in groups]
+        eh = max(self.h(p, cw) for p in paras)
+        room = eh + int(k.vgap * 1.4)
+        main = Bbox(x=area.x, y=area.y, w=area.w, h=max(area.h - room, int(area.h * 0.5)))
+        n0 = len(self.cv.tree)
+        yield main
+        bottom = self._content_bottom(n0)
+        # right under what the block drew (a block that grew past its share pushes the lines down with it)
+        y = main.y2 + int(k.vgap * 1.4) if bottom is None else bottom + int(k.vgap * 1.4)
+        for i, p in enumerate(paras):
+            self.cv.text(Bbox(x=area.x + i * (cw + gap), y=y, w=cw, h=eh), p, name="Note")
 
     # ---- content accessors -------------------------------------------------------------------------------------
     def _items(self) -> list[SlideItem]:
@@ -710,11 +758,16 @@ class Composer:
             return [SlideItem(title=n.value, text=n.label, number=n.value) for n in c.numbers]
         return [SlideItem(title=b) for b in c.bullets]
 
-    def _intro_text(self) -> Optional[str]:
-        """A subtitle, or the one paragraph that stands next to structured content (cards, a table, a chart)."""
+    def _intro_text(self, comp: str = "") -> Optional[str]:
+        """A subtitle, or the one paragraph that stands next to structured content (cards, a table, a chart), or —
+        on a slide whose chart or table takes the area — its formula as one line."""
         c = self.o.content
         if self.o.subtitle and self.o.kind not in (PatternKind.title, PatternKind.section, PatternKind.thanks):
             return self.o.subtitle
+        if comp == "formula":
+            return None  # the formula is the slide; its paragraphs explain it under the equation
+        if (c.formula or "").strip():
+            return c.formula.strip()  # the slide's chart, table or cards take the area: the formula is a line over them
         structured = c.items or c.columns or c.table is not None or c.chart is not None or c.numbers
         if structured and len(c.paragraphs) == 1 and len(c.paragraphs[0]) <= 200 and not c.bullets:
             return c.paragraphs[0]
@@ -728,11 +781,13 @@ class Composer:
         return out
 
     # ---- blocks ------------------------------------------------------------------------------------------------
-    def _intro(self, text: str, area: Bbox) -> Bbox:
+    def _intro(self, text: str, area: Bbox, formula: bool = False) -> Bbox:
         k = self.kit
         width = min(area.w, int(area.w * 0.78))
         size = k.lead if len(text) <= 120 else k.body
         para = [self.P(text, size, k.colors.muted if k.colors.muted != k.colors.text else k.colors.text)]
+        if formula:  # «100 × 300 × 30 = 900 000 ₽» as a line: its figures in the accent
+            para = [Para(highlight_runs(text, size, k.colors.text, k.colors.accent_text, bold=False, accent_bold=k.bold, font=k.font))]
         hh = self.h(para, width)
         self.cv.text(Bbox(x=area.x, y=area.y, w=width, h=hh), para, name="Intro")
         dy = hh + int(k.vgap * 1.1)
@@ -829,8 +884,14 @@ class Composer:
                 cols, rows, cw, pad, inner_w, chosen = 2, 2, cw2, pad2, inner2, chosen2
         ts, bs, content_h = chosen
         max_row_h = int((area.h - k.vgap * (rows - 1)) / rows)
-        # cards hug their content (the tallest one sets the row): a card is never a half-empty slab
-        ch = min(content_h, max_row_h)
+        if content_h > max_row_h and rows == 1 and 2 <= n <= 3 and any(it.bullets for it in items):
+            # cards with lists that do not fit their row at any size: columns set the same content denser (no badge,
+            # the figure over the lines) — never a card running into the conclusion under it
+            self.columns(area, items)
+            return
+        # cards hug their content (the tallest one sets the row): a card is never a half-empty slab — nor shorter than
+        # its text (when even the smallest step does not fit the row, the card grows rather than the text hanging out)
+        ch = content_h
         block_h = rows * ch + (rows - 1) * k.vgap
         y0 = self._place_v(area, block_h)
         last_row_n = n - cols * (rows - 1)
@@ -998,10 +1059,15 @@ class Composer:
         n = len(numbers)
         extra_block = None
         if extra:
-            # the running text goes under the tiles as a short note
-            paras = [self.P(t, k.body, k.colors.text, space_after=k.body * 0.5) for t in extra]
-            eh = self.h(paras, int(area.w * 0.8))
-            extra_block = (paras, eh)
+            # the running text goes under the tiles as a short note — in two columns when there are more than three
+            # lines (a list of measures under two figures), so the figures keep their size
+            ecols = 2 if len(extra) > 3 else 1
+            per = math.ceil(len(extra) / ecols)
+            ew = int((area.w - k.gap) / 2) if ecols == 2 else int(area.w * 0.8)
+            groups = [extra[i * per:(i + 1) * per] for i in range(ecols)]
+            paras_g = [[self.P(t, k.body, k.colors.text, space_after=k.body * 0.5, marker="•" if len(extra) > 1 else None, marker_color=k.colors.accent) for t in g] for g in groups if g]
+            eh = max(self.h(pg, ew) for pg in paras_g)
+            extra_block = (paras_g, eh, ew)
         avail = Bbox(x=area.x, y=area.y, w=area.w, h=area.h - ((extra_block[1] + k.vgap) if extra_block else 0))
         st = k.card
         use_cards = bool(st.fill or st.proto is not None) and self.strategy != "compact"
@@ -1047,9 +1113,13 @@ class Composer:
         # the same amount (one size), each one left by its own first glyph's bearing
         tg = min(self._figure_optics(f, fig_h)[1] for f in figs)
         content_h = rule + (int(k.vgap * 0.6) if rule else 0) + fig_h - tg + int(k.vgap * 0.35) + lab_h
-        tile_h = content_h + 2 * pad
         max_tile = int((avail.h - k.vgap * (rows - 1)) / rows)
-        tile_h = min(tile_h, max_tile)
+        if content_h + 2 * pad > max_tile and label_size > k.body:
+            label_size = k.body  # a step down for the labels before the tile outgrows its share
+            lab_h = max(self.h([self.P(distinct_label(x.value, x.label, self.o.headline), label_size, colors.muted)], inner) for x in numbers)
+            content_h = rule + (int(k.vgap * 0.6) if rule else 0) + fig_h - tg + int(k.vgap * 0.35) + lab_h
+        # the tile holds its figure and label, never shorter than them (a label hanging below its card)
+        tile_h = content_h + 2 * pad
         block_h = rows * tile_h + (rows - 1) * k.vgap + ((extra_block[1] + k.vgap * 1.4) if extra_block else 0)
         y0 = self._place_v(area, int(block_h))
         for i, num in enumerate(numbers):
@@ -1066,9 +1136,10 @@ class Composer:
             y += fig_h - tg + int(k.vgap * 0.35)
             self.cv.text(Bbox(x=box.x + pad, y=y, w=inner, h=max(lab_h, box.y2 - pad - y)), [self.P(distinct_label(num.value, num.label, self.o.headline), label_size, colors.muted)], name="Label")
         if extra_block:
-            paras, eh = extra_block
+            paras_g, eh, ew = extra_block
             ey = y0 + rows * tile_h + (rows - 1) * k.vgap + int(k.vgap * 1.4)
-            self.cv.text(Bbox(x=area.x, y=ey, w=int(area.w * 0.8), h=eh), paras, name="Note")
+            for gi, pg in enumerate(paras_g):
+                self.cv.text(Bbox(x=area.x + gi * (ew + k.gap), y=ey, w=ew, h=eh), pg, name="Note")
 
     def big_number(self, area: Bbox, num: NumberCallout, extra: list[str], others: list[NumberCallout]) -> None:
         k = self.kit
@@ -1243,9 +1314,13 @@ class Composer:
         pad = int(min(cw * 0.09, 0.045 * k.H)) if in_cards else 0
         inner = cw - 2 * pad
         tcolors = st.colors if in_cards else colors
+        bodies = [b for i in items for b in ([i.text] if i.text else []) + list(i.bullets)]
+        fitted = False
         for ts, bs in ((k.h2, k.lead), (k.lead, k.lead), (k.lead, k.body), (k.h3, k.body), (k.h3, k.small), (k.body, k.small)):
-            if not self.fits_width([i.title for i in items], ts, k.bold, inner):
+            # a word wider than the step's column breaks in the middle («Корректиров|ка»): a smaller size, or a grid
+            if not self.fits_width([i.title for i in items], ts, k.bold, inner) or not self.fits_width(bodies, bs, False, inner):
                 continue
+            fitted = True
             text_h = max(self.h(self._card_paras(it, ts, bs, tcolors), inner) for it in items)
             d = self._badge_size(ts)
             total = d + int(k.vgap * 0.9) + text_h + 2 * pad
@@ -1253,6 +1328,9 @@ class Composer:
             titled = any(i.text or i.bullets for i in items)
             if total <= area.h and t_lines <= (2 if titled else 4):
                 break
+        if not fitted:
+            self.cards(area, items, badge="number")  # too narrow for a row of steps: numbered cards in a grid
+            return
         block_h = total
         y0 = self._place_v(area, block_h)
         # the axis runs through the badges' centres, behind them
@@ -1314,19 +1392,32 @@ class Composer:
         pad = int(min(cw * 0.07, 0.05 * k.H))
         inner = cw - 2 * pad
         rule_h = _emu(3) + int(k.vgap * 0.6)
-        for ts, bs in ((k.h2, k.lead), (k.lead, k.lead), (k.lead, k.body), (k.h3, k.body), (k.h3, k.small), (k.body, k.small)):
-            heights = [self.h(self._card_paras(it, ts, bs, st.colors), inner) for it in items]
-            lines = max(sum(para_lines(p, _pt(inner)) for p in self._card_paras(it, ts, bs, st.colors)) for it in items)
-            if max(heights) + 2 * pad + rule_h <= area.h * 0.9 and lines <= 11:
+
+        def parts(ts: float, bs: float):
+            # titles share one band (as tall as the longest title), so every body starts on one line across the columns;
+            # a column's figure («22 770 ₽ экономии») is set large over its lines, never left out
+            heads = [self._card_paras(SlideItem(title=it.title), ts, bs, st.colors) if it.title else [] for it in items]
+            bodies = [self._column_figure(it, ts, st.colors) + self._card_paras(SlideItem(title="", text=it.text, bullets=it.bullets), ts, bs, st.colors) for it in items]
+            head_h = max((self.h(hp, inner) for hp in heads if hp), default=0)
+            head_gap = int(bs * 0.55 * EMU_PER_PT) if head_h else 0
+            body_h = max((self.h(bp, inner) for bp in bodies if bp), default=0)
+            lines = max(sum(para_lines(p, _pt(inner)) for p in bp) for bp in bodies) if bodies else 0
+            return heads, bodies, head_h, head_gap, body_h, rule_h + head_h + head_gap + body_h + 2 * pad, lines
+
+        steps = ((k.h2, k.lead), (k.lead, k.lead), (k.lead, k.body), (k.h3, k.body), (k.h3, k.small), (k.body, k.small))
+        best = None
+        for ts, bs in steps:
+            got = parts(ts, bs)
+            if best is None or got[5] < best[1][5]:
+                best = ((ts, bs), got)
+            if got[5] <= area.h * 0.9 and got[6] <= 11:
+                best = ((ts, bs), got)
                 break
-        # titles share one band (as tall as the longest title), so every body starts on one line across the columns
-        heads = [self._card_paras(SlideItem(title=it.title), ts, bs, st.colors) if it.title else [] for it in items]
-        bodies = [self._card_paras(SlideItem(title="", text=it.text, bullets=it.bullets), ts, bs, st.colors) for it in items]
-        head_h = max((self.h(hp, inner) for hp in heads if hp), default=0)
-        head_gap = int(bs * 0.55 * EMU_PER_PT) if head_h else 0
-        body_h = max((self.h(bp, inner) for bp in bodies if bp), default=0)
-        # the columns are as tall as their content, never a tall empty frame
-        ch = min(rule_h + head_h + head_gap + body_h + 2 * pad, area.h)
+        (ts, bs), (heads, bodies, head_h, head_gap, body_h, need, _) = best
+        # the columns are as tall as their content, never a tall empty frame — and never shorter than it: when even
+        # the smallest step does not fit the area, the cards grow with their text (the lines under them follow the
+        # cards' real bottom) rather than the text running out of its card
+        ch = need
         y0 = self._place_v(area, ch, fill_top=True)
         for i, it in enumerate(items):
             box = Bbox(x=area.x + i * (cw + gap), y=y0, w=cw, h=ch)
@@ -1340,18 +1431,362 @@ class Composer:
             if bodies[i]:
                 self.cv.text(Bbox(x=box.x + pad, y=y, w=inner, h=max(body_h, box.y2 - pad - y)), bodies[i], name="Column")
 
+    def _column_figure(self, it: SlideItem, ts: float, colors: Colors) -> list[Para]:
+        """A column's own figure (SlideItem.number) over its lines, when its title and lines do not say it already."""
+        num = (it.number or "").strip()
+        if not num or num in f"{it.title} {it.text} {' '.join(it.bullets)}":
+            return []
+        para, _ = self.figure_para(num, max(ts * 1.25, self.kit.h3), colors.figure, colors.muted)
+        para.space_after = ts * 0.4
+        return [para]
+
+    # ---- the slide's conclusion and footnote (Agent v2) ----------------------------------------------------------
+    def _footnote_size(self) -> float:
+        """Small print that still reads from the back of the room: about 2% of the slide height, never under 8 pt,
+        never above the deck's small size."""
+        k = self.kit
+        return k.snap(max(0.02 * k.hpt, 8.0), max(0.017 * k.hpt, 7.5), max(k.small, 8.0))
+
+    def _takeaway_plan(self, text: str, width: int) -> dict:
+        """How the conclusion is set: one line at the lead size (a step down, then two lines, when it is longer), on a
+        strip of the template's card colour with an accent bar at its left — or, when the template's cards have no
+        fill of their own, as an accent bar and the line beside it."""
+        k = self.kit
+        st = k.card
+        strip = bool(st.fill) and contrast_ratio(st.fill, k.colors.ground) >= 1.04
+        colors = st.colors if strip else k.colors
+        bar_w = max(_emu(3), int(0.006 * k.H))
+        best = None
+        cand = None
+        text = text[:1].upper() + text[1:] if text[:1].islower() else text
+        if text.endswith(".") and not text.endswith("..") and not ABBR_END_RE.search(text):
+            text = text[:-1]  # a conclusion line, like a headline, has no period («… на 10 п. п.» keeps it)
+        deck = self._deck_takeaway_size(width, strip, bar_w)
+        for size in ([deck] if deck else dict.fromkeys((k.lead, k.body, k.small))):
+            pad_x = _emu(size * 1.0) if strip else 0
+            pad_y = _emu(size * 0.62) if strip else 0
+            bar_gap = _emu(size * 0.8)
+            text_w = width - 2 * pad_x - bar_w - bar_gap
+            runs = highlight_runs(text, size, colors.heading, colors.accent if size >= 18 else colors.accent_text, bold=k.bold, accent_bold=k.bold, font=k.font)
+            para = Para(runs)
+            lines = para_lines(para, _pt(text_w))
+            cand = dict(size=size, strip=strip, colors=colors, pad_x=pad_x, pad_y=pad_y, bar_w=bar_w, bar_gap=bar_gap, text_w=text_w, para=para, lines=lines)
+            if lines == 1 and size >= k.body - 0.05:
+                best = cand
+                break
+            if lines <= 2 and size <= k.body + 0.05:
+                best = cand  # two lines at the body size rather than one line of small type
+                break
+            if deck:
+                best = cand  # the deck's one size: one or two lines
+                break
+        if best is None:
+            best = cand
+        text_h = self.h([best["para"]], best["text_w"])
+        best["text_h"] = text_h
+        best["h"] = text_h + 2 * best["pad_y"]
+        return best
+
+    def _deck_takeaway_size(self, width: int, strip: bool, bar_w: int) -> Optional[float]:
+        """One size for every conclusion strip of the deck: the largest step (lead, body) at which every takeaway of the
+        deck fits in two lines — the strip does not jump between 20 and 14 pt from slide to slide."""
+        k = self.kit
+        takes = [" ".join((s.takeaway or "").split()) for s in self.outline.slides if (s.takeaway or "").strip() and s.kind not in (PatternKind.title, PatternKind.thanks, PatternKind.section)]
+        if not takes:
+            return None
+        chosen = None
+        for size in dict.fromkeys((k.lead, k.body)):
+            pad_x = _emu(size * 1.0) if strip else 0
+            text_w = width - 2 * pad_x - bar_w - _emu(size * 0.8)
+            if all(para_lines(Para(highlight_runs(x, size, "000000", "000000", bold=k.bold, font=k.font)), _pt(text_w)) <= 2 for x in takes):
+                chosen = size
+                break
+        return chosen
+
+    def _reserve_notes(self, area: Bbox) -> Bbox:
+        """Room for the footnote (small print at the foot of the area, just above the template's footer) and the
+        conclusion over it; the content is composed in what is left."""
+        self._notes = None
+        foot = " ".join((self.o.footnote or "").split())
+        foot = foot[:1].upper() + foot[1:] if foot[:1].islower() else foot
+        take = "" if self._takeaway_aside() else " ".join((self.o.takeaway or "").split())
+        if not (foot or take):
+            return area
+        k = self.kit
+        bottom = area.y2
+        foot_box = None
+        if foot:
+            size = self._footnote_size()
+            para = [self.P(foot, size, k.colors.muted)]
+            fh = self.h(para, area.w)
+            foot_box = (Bbox(x=area.x, y=bottom - fh, w=area.w, h=fh), para)
+            bottom -= fh + int(k.vgap * (0.8 if take else 1.2))
+        plan = None
+        if take:
+            plan = self._takeaway_plan(take, area.w)
+            plan["y_max"] = bottom - plan["h"]
+            bottom = plan["y_max"] - int(k.vgap * 1.2)
+        self._notes = (foot_box, plan, area)
+        return Bbox(x=area.x, y=area.y, w=area.w, h=max(bottom - area.y, int(area.h * 0.4)))
+
+    def _takeaway_aside(self) -> bool:
+        """The visual variant sets a one-chart slide's conclusion beside the chart, its key figure large (the other
+        variants: a strip under the chart). Not next to a second chart, a table, a formula or the slide's own text."""
+        c = self.o.content
+        return (
+            self.strategy == "visual" and self.o.kind == PatternKind.chart and c.chart is not None and c.chart2 is None
+            and c.table is None and not (c.formula or "").strip() and not any(t.strip() for t in list(c.bullets) + list(c.paragraphs))
+            and bool((self.o.takeaway or "").strip())
+        )
+
+    def _content_bottom(self, n0: int) -> Optional[int]:
+        from verstka.rendering.deck import element_bbox
+
+        bottoms = []
+        for el in list(self.cv.tree)[n0:]:
+            b = element_bbox(el)
+            if b and b[2] > 0 and b[3] > 0:
+                bottoms.append(b[1] + b[3])
+        return max(bottoms) if bottoms else None
+
+    def _draw_notes(self, n0: int) -> None:
+        """The conclusion right under the content (a gap below its last block, never lower than its reserved place),
+        the footnote at the foot of the area."""
+        notes = getattr(self, "_notes", None)
+        if not notes:
+            return
+        foot_box, plan, area = notes
+        k = self.kit
+        if plan is not None:
+            bottom = self._content_bottom(n0)
+            room_below = area.y2 - (foot_box[0].h + int(k.vgap * 0.8) if foot_box else 0)
+            if bottom is not None and bottom + int(k.vgap * 0.6) > plan["y_max"] and bottom + int(k.vgap * 0.6) + plan["h"] > room_below:
+                # the content grew past its share and leaves no room for the conclusion: it goes to the speaker notes
+                # rather than over the content (a slide with every line of its lists, the takeaway said aloud)
+                take = " ".join((self.o.takeaway or "").split())
+                try:
+                    self.o.notes = (f"Вывод: {take.rstrip('.')}. " + (self.o.notes or "")).strip()
+                except Exception:  # noqa: BLE001
+                    pass
+                self.warnings.append("the conclusion moved to the speaker notes: no room under the content")
+                plan = None
+        if plan is not None:
+            y = plan["y_max"] if bottom is None else min(plan["y_max"], bottom + int(k.vgap * 1.4))
+            if bottom is not None and bottom + int(k.vgap * 1.4) > plan["y_max"] and bottom + int(k.vgap * 1.4) + plan["h"] <= area.y2 - (foot_box[0].h if foot_box else 0):
+                y = bottom + int(k.vgap * 1.4)  # the content grew past its share: the conclusion follows it, never over it
+            if bottom is not None and plan["y_max"] - (bottom + int(k.vgap * 1.4)) > 0.28 * area.h:
+                # a short block leaves a large empty band: the conclusion stands at the foot of the area (its reserved
+                # place), so the slide has a top and a bottom rather than everything in its upper half
+                y = plan["y_max"]
+            y = max(y, area.y)
+            x, w = area.x, area.w
+            if plan["strip"]:
+                self.cv.card(Bbox(x=x, y=y, w=w, h=plan["h"]), k.card, name="Conclusion strip")
+            bx = x + plan["pad_x"]
+            by = y + plan["pad_y"] + _emu(plan["size"] * 0.12)
+            self.cv.rect(Bbox(x=bx, y=by, w=plan["bar_w"], h=max(plan["text_h"] - _emu(plan["size"] * 0.24), plan["bar_w"] * 3)), plan["colors"].accent, name="Conclusion bar")
+            tx = bx + plan["bar_w"] + plan["bar_gap"]
+            self.cv.text(Bbox(x=tx, y=y + plan["pad_y"], w=plan["text_w"], h=plan["text_h"]), [plan["para"]], name="Conclusion")
+        if foot_box is not None:
+            box, para = foot_box
+            self.cv.text(box, para, name="Footnote")
+
+    def _undo(self, n0: int) -> None:
+        """Remove what was added to the slide after the first `n0` elements (a chart that failed half-way: its part
+        relationship goes too)."""
+        tree = self.cv.tree
+        for el in list(tree)[n0:]:
+            for ref in el.iter("{http://schemas.openxmlformats.org/drawingml/2006/chart}chart"):
+                rid = ref.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id")
+                if rid:
+                    try:
+                        self.slide.part.drop_rel(rid)
+                    except KeyError:
+                        pass
+            tree.remove(el)
+            if el in self.cv.added:
+                self.cv.added.remove(el)
+
+    # ---- formula ---------------------------------------------------------------------------------------------------
+    def _quiet(self) -> str:
+        """A quiet colour for large glyphs (operators, rules): the template's grey that reads as large text on the
+        ground (3:1) and stands apart from the running text; the muted text colour when it has none."""
+        k = self.kit
+        g, text = k.colors.ground, k.colors.text
+
+        def sat(h: str) -> float:
+            r, gg, b = (int(h[i : i + 2], 16) / 255 for i in (0, 2, 4))
+            mx, mn = max(r, gg, b), min(r, gg, b)
+            return 0.0 if mx == 0 else (mx - mn) / mx
+
+        for c in [k.colors.muted] + [x for x in k.palette]:
+            if c and c.upper() != text.upper() and sat(c) < 0.25 and contrast_ratio(c, g) >= 3.0 and contrast_ratio(c, text) >= 1.6:
+                return c
+        return k.colors.muted
+    def formula(self, area: Bbox, text: str) -> None:
+        """An equation set large: every figure in the accent at one display size (its unit smaller on the baseline),
+        the operators muted and smaller, the result on an accent panel; the words of a term («покупок», «дней») under
+        its figure. Too wide for one line at a display size, the result moves to a second line. The slide's other
+        text follows under the equation."""
+        k = self.kit
+        terms, ops = parse_formula(text)
+        if len(terms) < 2 or not any(fig for fig, _ in terms):
+            self.statement(area, text)
+            return
+        words = max((i for i, (fig, _) in enumerate(terms) if not fig), default=None)
+        if words is not None and words + 1 < len(terms) and ops[words] in ("=", "≈") and len(terms) - words - 1 >= 2:
+            # «Прибыль = Выручка − Расходы = 900 000 − 780 000 = 120 000 ₽»: the definition in words is a line over
+            # the equation of figures, which is set large
+            line = " ".join(x for i, (_, w) in enumerate(terms[: words + 1]) for x in ([w] + ([ops[i]] if i < words else [])))
+            quiet_ = self._quiet()
+            size = k.h2
+            runs: list[Run] = []
+            for tok in re.split(r"(\s[=≈×−+÷]\s)", typeset(line)):
+                op = tok.strip() in ("=", "≈", "×", "−", "+", "÷")
+                runs.append(Run(tok, size, quiet_ if op else k.colors.heading, k.bold and not op, k.font))
+            para = [Para(runs)]
+            hh = self.h(para, area.w)
+            words_line = (para, hh, hh + int(k.vgap * 1.2))
+            dy = words_line[2]
+            area = Bbox(x=area.x, y=area.y + dy, w=area.w, h=max(area.h - dy, int(area.h * 0.5)))
+            terms, ops = terms[words + 1 :], ops[words + 1 :]
+        else:
+            words_line = None
+        c = self.o.content
+        # a term without words of its own takes the label of the slide's figure it repeats («100» → «покупок в день»)
+        used: set[int] = set()
+        labeled: list[tuple[Optional[str], str]] = []
+        for fig, lab in terms:
+            if fig and not lab:
+                d = re.sub(r"\D", "", fig)
+                hit = next((i for i, n in enumerate(c.numbers) if i not in used and re.sub(r"\D", "", n.value) == d and n.label.strip()), None)
+                if hit is not None:
+                    used.add(hit)
+                    lab = c.numbers[hit].label.strip()
+                    value = " ".join(c.numbers[hit].value.split())
+                    if re.search(r"[^\d\s.,]", value) and not re.search(r"[^\d\s.,]", fig):
+                        fig = value  # «300» of the formula is the slide's «300 ₽»: the figure keeps its unit
+            labeled.append((fig, lab))
+        terms = labeled
+        res = next((i + 1 for i in range(len(ops) - 1, -1, -1) if ops[i] in ("=", "≈")), None)
+        colors = k.colors
+        lab_size = k.body
+        on_accent = "FFFFFF" if contrast_ratio("FFFFFF", colors.accent) >= 3.0 else colors.text
+        quiet = self._quiet()
+        descent, digit_h = figure_metrics_em(k.figure_bold)
+
+        def layout(fs: float) -> dict:
+            op_size = k.snap(fs * 0.55, k.h3, fs * 0.7)
+            pad = _emu(fs * 0.28)
+            blocks = []
+            for i, (fig, lab) in enumerate(terms):
+                if fig:
+                    color = on_accent if i == res else colors.figure
+                    para, w = self.figure_para(fig, fs, color, on_accent if i == res else colors.muted)
+                else:
+                    para = self.P(lab, k.snap(fs * 0.45, k.lead, fs * 0.6), colors.text)
+                    w = text_width_pt(lab, k.font, para.size, False)
+                    lab = ""
+                lw = text_width_pt(lab, k.font, lab_size, False) if lab else 0.0
+                bw = _emu(max(w, min(lw, max(w * 1.8, 150.0))) * 1.04)
+                if i == res:
+                    bw += 2 * pad
+                blocks.append(dict(para=para, w=bw, fig_w=_emu(w), lab=lab))
+            op_w = [_emu(text_width_pt(op, k.font, op_size, False) + fs * 0.5) for op in ops]
+            return dict(fs=fs, op_size=op_size, pad=pad, blocks=blocks, op_w=op_w, total=sum(b["w"] for b in blocks) + sum(op_w))
+
+        cap = k.figure_cap(2, False, self.strategy)
+        floor = max(k.h2 * 1.25, k.h3)
+        chosen = None
+        for fs in k.figure_sizes(cap, floor):
+            lay = layout(fs)
+            if lay["total"] <= area.w:
+                chosen, rows = lay, [list(range(len(terms)))]
+                break
+        if chosen is None:
+            # two lines: the operands, then «= result»
+            split = res if res is not None else math.ceil(len(terms) / 2)
+            for fs in k.figure_sizes(cap, k.h3):
+                lay = layout(fs)
+                first = sum(lay["blocks"][i]["w"] for i in range(split)) + sum(lay["op_w"][: split - 1])
+                second = sum(lay["blocks"][i]["w"] for i in range(split, len(terms))) + sum(lay["op_w"][split - 1 :])
+                chosen, rows = lay, [list(range(split)), list(range(split, len(terms)))]
+                if max(first, second) <= area.w:
+                    break
+            else:
+                # too long for two lines at a readable size: the formula is a statement, its figures in the accent
+                self.statement(area, text)
+                return
+        lay = chosen
+        fs = lay["fs"]
+        fig_h = _emu(fs * max(1.15, k.line))
+        pad = lay["pad"]
+        # the digits of a figure set bottom-anchored in its box: baseline and centre, for the operators and the panel
+        base_off = _emu(descent * fs)
+        dig_h = _emu(digit_h * fs)
+        lab_h = max((self.h([self.P(b["lab"], lab_size, colors.muted)], b["w"]) for b in lay["blocks"] if b["lab"]), default=0)
+        lab_gap = int(k.vgap * 0.15)
+        row_h = fig_h + (pad if res is not None else 0) + (lab_gap + lab_h if lab_h else 0)
+        block_h = len(rows) * row_h + (len(rows) - 1) * int(k.vgap * 1.4) + (pad if res is not None else 0)
+        rest = [t for t in list(c.bullets) + list(c.paragraphs) if t.strip()]
+        rest += [f"{n.value} — {n.label}" for i, n in enumerate(c.numbers) if i not in used and n.label.strip()]
+        y = area.y + (pad if res is not None else 0)
+        if not rest:
+            # the equation is the slide: it stands in the upper middle of the free area (with the conclusion that
+            # follows it), not pressed under the heading
+            notes = getattr(self, "_notes", None)
+            plan = notes[1] if notes else None
+            group_h = block_h + ((plan["h"] + int(k.vgap * 1.4)) if plan else 0) + (words_line[2] if words_line else 0)
+            free = (plan["y_max"] + plan["h"] - area.y) + (words_line[2] if words_line else 0) if plan else area.h + (words_line[2] if words_line else 0)
+            y += max(0, min(int((free - group_h) * 0.42), area.h - block_h))
+        if words_line is not None:
+            # the definition in words right over its equation
+            self.cv.text(Bbox(x=area.x, y=y - (pad if res is not None else 0) - words_line[2], w=area.w, h=words_line[1]), words_line[0], name="Formula words")
+        for r, row in enumerate(rows):
+            x = area.x
+            base = y + fig_h - base_off  # the digits' baseline on this row
+            for n, i in enumerate(row):
+                if n or r:
+                    oi = i - 1  # the operator before term i
+                    ow = lay["op_w"][oi]
+                    osz = lay["op_size"]
+                    oh = _emu(osz * 1.3)
+                    cy = base - dig_h // 2
+                    self.cv.text(Bbox(x=x, y=cy - oh // 2, w=ow, h=oh), [self.P(ops[oi], osz, quiet, align="ctr")], anchor="ctr", name="Operator")
+                    x += ow
+                b = lay["blocks"][i]
+                bx = x
+                if i == res:
+                    self.cv.rect(Bbox(x=x, y=base - dig_h - pad, w=b["w"], h=dig_h + 2 * pad), colors.accent, radius_emu=_emu(fs * 0.18), name="Result")
+                    bx = x + pad
+                lsb, _ = self._figure_optics(b["para"], fig_h)
+                self.cv.text(Bbox(x=bx - lsb, y=y, w=b["fig_w"] + lsb + _emu(4), h=fig_h), [b["para"]], anchor="b", name="Figure" if i != res else "Result figure")
+                if b["lab"]:
+                    ly = y + fig_h + (pad if res is not None and terms[res][1] else 0) + lab_gap
+                    self.cv.text(Bbox(x=bx, y=ly, w=b["w"] - (2 * pad if i == res else 0), h=lab_h), [self.P(b["lab"], lab_size, colors.muted)], name="Term label")
+                x += b["w"]
+            y += row_h + int(k.vgap * 1.4)
+        # what explains the equation, under it
+        if rest:
+            below = Bbox(x=area.x, y=y + int(k.vgap * 0.6), w=area.w, h=max(area.y2 - y - int(k.vgap * 0.6), int(0.12 * k.H)))
+            if len(rest) == 1 and not c.bullets:
+                self.paragraphs(below, rest)
+            else:
+                self.bullets(below, rest)
+
     # ---- data ----------------------------------------------------------------------------------------------------
     def table(self, area: Bbox, table: TableData) -> None:
         """A native table measured for its content (tables.measure_table): one size, columns by content, rows that
         grow to fill about half the area; a note or the caption under it."""
-        from verstka.rendering.tables import measure_table, table_style_for_ground, template_bold
+        from verstka.rendering.tables import emphasis_column, measure_table, table_style_for_ground, template_bold
 
         k = self.kit
         style = self.manifest.components.table_style
         n_cols = max(len(table.columns), 1)
         n_rows = len(table.rows) + 1
         width = area.w if n_cols >= 3 else int(area.w * 0.72)
-        deltas = table_deltas(table) if self.strategy == "visual" and area.w * 0.36 >= 0.3 * k.W else []
+        # what changed most, beside the table (visual) — unless the slide states its own conclusion under it
+        deltas = table_deltas(table) if self.strategy == "visual" and area.w * 0.36 >= 0.3 * k.W and not (self.o.takeaway or "").strip() else []
         if deltas:
             width = int(area.w * 0.64)  # the table and, beside it, what changed most
         floor = 0.022 * k.hpt
@@ -1389,7 +1824,7 @@ class Composer:
             self.slide, Bbox(x=area.x, y=area.y, w=sum(widths), h=total_h), table, spec, k.manifest.tokens.typography,
             font_family=k.font, col_widths=widths, row_heights=heights, size_pt=size,
             accent_hex=k.colors.accent, muted_hex=k.colors.muted, ground_hex=k.colors.ground, header_bold=header_bold,
-            accent_text_hex=k.colors.accent_text,
+            accent_text_hex=k.colors.accent_text, highlight_col=emphasis_column(table),
         )
         if table.caption and total_h + k.vgap + _emu(k.small * 2) <= area.h:
             self.cv.text(Bbox(x=area.x, y=area.y + total_h + int(k.vgap * 0.6), w=width, h=_emu(k.small * 1.6)), [self.P(table.caption, k.small, k.colors.muted)], name="Caption")
@@ -1411,47 +1846,32 @@ class Composer:
             self.cv.text(Bbox(x=x, y=area.y, w=w, h=min(hh, area.h)), paras, name="Takeaway")
 
     def chart(self, area: Bbox) -> None:
+        from verstka.rendering.charts import effective_chart_type
+
         k = self.kit
         c = self.o.content
         spec = c.chart
         side_texts = [t for t in (list(c.bullets) + list(c.paragraphs)) if t.strip()]
-        takeaway = _series_takeaway(spec, self.outline, self.o.headline)
+        kind = effective_chart_type(spec, self.outline)
+        pie = kind in ("pie", "doughnut")
+        # the figure a reader takes from a series (its growth) — never for the parts of a whole, and not when the
+        # slide states its own conclusion under the chart
+        takeaway = None if (pie or (self.o.takeaway or "").strip()) else _series_takeaway(spec, self.outline, self.o.headline)
+        aside = self._takeaway_aside()
+        if aside:
+            take = " ".join((self.o.takeaway or "").split())
+            takeaway = (_aside_figure(take) or "", take[:1].upper() + take[1:])
         show_side = bool(side_texts) or (takeaway is not None and self.strategy != "structured")
-        from verstka.rendering.charts import effective_chart_type, unit_caption
-
         chart_w = int(area.w * (0.64 if show_side else 1.0))
-        bars = effective_chart_type(spec, self.outline) == "bar"
-        chart_h = int(area.h * 0.92) if (show_side or bars) else min(int(area.h * 0.82), int(area.w * 0.42))
-        y = area.y
-        caption = unit_caption(spec, self.outline)
-        cap_h = 0
-        if caption:
-            # the full unit once, above the chart; the labels carry its short form
-            cap_h = _emu(k.small * k.line) + _emu(2)
-            y += cap_h + int(k.vgap * 0.3)
-            chart_h = min(chart_h, area.y2 - y)
-        box = Bbox(x=area.x, y=y, w=chart_w, h=chart_h)
-        style = self.manifest.components.chart_style
-        style = style.model_copy(update={"font_size_pt": max(style.font_size_pt or 0, k.small), "font_family": k.font or style.font_family})
-        tree = self.slide.shapes._spTree
-        n0 = len(tree)
-        try:
-            add_chart(self.slide, box, spec, self.outline, style, k.manifest.tokens.typography, text_hex=k.colors.text, neutral_hex=k.colors.divider, ground_hex=k.colors.ground)
-        except Exception as e:  # noqa: BLE001
-            # no chart, no unit caption over an empty frame: a half-built chart goes, the slide shows what else it has
-            for el in list(tree)[n0:]:
-                for ref in el.iter("{http://schemas.openxmlformats.org/drawingml/2006/chart}chart"):
-                    rid = ref.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id")
-                    if rid:
-                        try:
-                            self.slide.part.drop_rel(rid)
-                        except KeyError:
-                            pass
-                tree.remove(el)
-            self.warnings.append(f"chart failed: {str(e)[:120]}; shown as {self._chart_fallback(area)}")
+        tall = show_side or kind == "bar" or pie
+        chart_h = int(area.h * 0.92) if tall else min(int(area.h * 0.82), int(area.w * 0.42))
+        n0 = len(self.cv.tree)
+        err = self._chart_block(Bbox(x=area.x, y=area.y, w=chart_w, h=chart_h), spec, prominent=False, center=not show_side)
+        if err is not None:
+            # no chart, no caption over an empty frame: a half-built chart goes, the slide shows what else it has
+            self._undo(n0)
+            self.warnings.append(f"chart failed: {err[:120]}; shown as {self._chart_fallback(area)}")
             return
-        if caption:
-            self.cv.text(Bbox(x=area.x, y=area.y, w=chart_w, h=cap_h), [self.P(caption, k.small, k.colors.muted)], name="Unit")
         if not show_side:
             return
         x = area.x + chart_w + k.gap * 2
@@ -1459,13 +1879,15 @@ class Composer:
         paras: list[Para] = []
         if takeaway is not None:
             value, label = takeaway
-            fs = k.display
-            for s in k.steps_down(k.display, k.h3):
-                fs = s
-                if text_width_pt(value, k.font, s, k.bold) <= _pt(w) * 0.95:
-                    break
-            paras.append(self.P(value, fs, k.colors.accent, bold=k.bold, space_after=4))
-            paras.append(self.P(label, k.body, k.colors.muted, space_after=k.body * 1.4))
+            if value:
+                fs = k.display
+                for s in k.steps_down(k.display, k.h3):
+                    fs = s
+                    if text_width_pt(value, k.font, s, k.bold) <= _pt(w) * 0.95:
+                        break
+                paras.append(self.P(value, fs, k.colors.accent, bold=k.bold, space_after=4))
+            # the slide's own conclusion reads as a statement (lead, text colour); a computed figure's label is muted
+            paras.append(self.P(label, k.lead if aside else k.body, k.colors.text if aside else k.colors.muted, space_after=k.body * 1.4))
         for t in side_texts:
             paras.append(self.P(t, k.body if len(t) > 90 else k.lead, k.colors.text, space_after=k.body * 0.7, marker="•" if len(side_texts) > 1 else None, marker_color=k.colors.accent))
         hh = self.h(paras, w)
@@ -1474,6 +1896,287 @@ class Composer:
         self.cv.line(x - k.gap, y, x - k.gap, y + min(hh, area.h), k.colors.divider, 1.0)
         self.cv.text(Bbox(x=x, y=y, w=w, h=min(hh, area.h)), paras, name="Takeaway")
 
+    def chart_pair(self, area: Bbox) -> None:
+        """Two charts side by side («до и после», a structure next to a trend): two equal columns, each under its own
+        title in the heading colour; a column of text to the right when the slide has some."""
+        k = self.kit
+        c = self.o.content
+        side_texts = [t for t in (list(c.bullets) + list(c.paragraphs)) if t.strip()]
+        gap = k.gap * 3
+        text_w = int(area.w * 0.27) if side_texts else 0
+        charts_w = area.w - (text_w + gap if side_texts else 0)
+        cw = int((charts_w - gap) / 2)
+        n0 = len(self.cv.tree)
+        self._legend_used: list[float] = []
+        self._pie_ds: list[int] = []
+        for attempt in range(2):
+            for i, spec in enumerate((c.chart, c.chart2)):
+                box = Bbox(x=area.x + i * (cw + gap), y=area.y, w=cw, h=area.h)
+                err = self._chart_block(box, spec, prominent=True, center=False)
+                if err is not None:
+                    # one chart of the pair could not be drawn: the other one takes the slide
+                    self._undo(n0)
+                    self._legend_force = None
+                    self.warnings.append(f"chart {i + 1} of 2 failed: {err[:120]}; the other one is shown alone")
+                    keep = c.chart2 if i == 0 else c.chart
+                    self.o = self.o.model_copy(update={"content": c.model_copy(update={"chart": keep, "chart2": None})})
+                    self.chart(area)
+                    return
+            if attempt or len(self._legend_used) < 2 or (len(set(self._legend_used)) <= 1 and max(self._pie_ds) - min(self._pie_ds) <= _emu(2)):
+                break
+            # two pies of one slide: one legend size and one diameter for both (the smaller ones), set again
+            self._undo(n0)
+            self._legend_force = min(self._legend_used)
+            self._pie_force_d = min(self._pie_ds)
+            self._legend_used, self._pie_ds = [], []
+        self._legend_force = None
+        self._pie_force_d = None
+        if side_texts:
+            x = area.x + charts_w + gap
+            paras = [self.P(t, k.body if len(t) > 90 else k.lead, k.colors.text, space_after=k.body * 0.7, marker="•" if len(side_texts) > 1 else None, marker_color=k.colors.accent) for t in side_texts]
+            hh = min(self.h(paras, text_w), area.h)
+            self.cv.line(x - gap // 2, area.y, x - gap // 2, area.y + hh, k.colors.divider, 1.0)
+            self.cv.text(Bbox(x=x, y=area.y, w=text_w, h=hh), paras, name="Chart note")
+
+    def _chart_caption(self, spec, named: bool = False) -> Optional[str]:
+        """What stands over a chart, once: its title with the word unit («Прогноз выручки, тыс. ₽»), else the word
+        unit alone (a one-glyph unit rides on the labels, a pie shows shares). A chart without a title of its own is
+        named by its one series («Средний чек»): two charts side by side must say which is which."""
+        from verstka.rendering.charts import resolve_series, unit_caption
+
+        unit = unit_caption(spec, self.outline)
+        title = " ".join((spec.title or "").split())
+        if not title:
+            series = resolve_series(spec, self.outline)
+            name = " ".join((series[0].name or "").split()) if len(series) == 1 else ""
+            generic = re.fullmatch(r"(?i)(series|ряд|серия|значени[яе]|values?)\s*\d*", name or "")
+            if name and not generic and (named or not _same_words(name, self.o.headline)):
+                title = name[:1].upper() + name[1:]
+        if title and unit and unit.lower() not in title.lower():
+            return f"{title.rstrip(' ,.:;')}, {unit}"
+        return title or unit
+
+    def _chart_block(self, box: Bbox, spec, *, prominent: bool, center: bool) -> Optional[str]:
+        """A chart under its caption inside `box` (a pie with a legend of its own beside it). `prominent`: the caption
+        is the chart's title in the heading colour (a pair of charts), else a muted caption line. Returns an error
+        message when the chart could not be drawn (the caller removes what was added)."""
+        from verstka.rendering.charts import effective_chart_type
+
+        k = self.kit
+        y = box.y
+        cap = self._chart_caption(spec, named=prominent)
+        pie = effective_chart_type(spec, self.outline) in ("pie", "doughnut")
+        if cap and pie and not prominent:
+            cap, legend_head = None, cap  # a lone pie's caption heads its legend
+        else:
+            legend_head = None
+        if cap:
+            size = k.lead if prominent else k.small
+            para = [self.P(cap, size, k.colors.heading if prominent else k.colors.muted, bold=k.bold and prominent)]
+            ch = self.h(para, box.w)
+            # drawn before the chart: the chart finds its word unit written above it and prints plain numbers
+            self.cv.text(Bbox(x=box.x, y=y, w=box.w, h=ch), para, name="Chart title" if prominent else "Unit")
+            y += ch + int(k.vgap * (0.6 if prominent else 0.3))
+        cbox = Bbox(x=box.x, y=y, w=box.w, h=max(box.y2 - y, int(0.2 * k.H)))
+        plain = spec.model_copy(update={"title": None, "highlight_index": _after_index(spec, self.outline)})
+        try:
+            if pie:
+                self._pie(cbox, plain, center=center, head=legend_head)
+            else:
+                add_chart(self.slide, cbox, plain, self.outline, self._chart_style(), k.manifest.tokens.typography, text_hex=k.colors.text, neutral_hex=k.colors.divider, ground_hex=k.colors.ground)
+        except Exception as e:  # noqa: BLE001
+            return str(e) or type(e).__name__
+        return None
+
+    def _chart_style(self):
+        k = self.kit
+        style = self.manifest.components.chart_style
+        return style.model_copy(update={"font_size_pt": max(style.font_size_pt or 0, k.small), "font_family": k.font or style.font_family})
+
+    def _pie(self, box: Bbox, spec, center: bool, head: Optional[str] = None) -> None:
+        """A pie or a doughnut with its legend set as text beside it (below it in a narrow box): a swatch, the
+        category and its share — the one place every share is read, the thin slices included. Shares are of the
+        total, whatever the unit of the values (money, people)."""
+        from verstka.rendering.charts import is_other_category, resolve_series
+        from verstka.schemas.outline import InlineSeries
+
+        k = self.kit
+        series = resolve_series(spec, self.outline)
+        if not series:
+            raise ValueError("chart has no series data")
+        s = series[0]
+        cats0 = [str(x) for x in s.categories]
+        vals0 = [max(0.0, float(v or 0.0)) for v in list(s.values)[: len(cats0)]]
+        # the slices from the largest down, a remainder («Прочие», «Резерв») last: the legend's tints step down with
+        # the sizes (the brief's order put «Резерв 17%» next to «Программа лояльности 19%» in nearly one tint)
+        rest = lambda c: is_other_category(c) or bool(re.match(r"(?i)резерв|остал|прочи|друг", c))  # noqa: E731
+        order = sorted(range(len(cats0)), key=lambda j: (rest(cats0[j]), -vals0[j]))
+        cats = [cats0[j] for j in order]
+        vals = [vals0[j] for j in order]
+        if order != list(range(len(cats0))):
+            spec = spec.model_copy(update={"series_ids": [], "categories": cats, "series": [InlineSeries(name=s.name, values=vals)], "unit": spec.unit or s.unit})
+        total = sum(vals)
+        if total <= 0:
+            raise ValueError("pie without positive values")
+        unit_txt = (spec.unit or s.unit or "").strip()
+        is_pct = unit_txt == "%" and 95 <= total <= 105
+        shares = [v if is_pct else v / total * 100 for v in vals]
+        pct = [(f"{sh:.1f}".replace(".", ",") if 0 < sh < 1 else f"{sh:.0f}") + "%" for sh in shares]
+        # a pie of amounts: each part's amount (the brief's figure) and its share of the parts' total, the legend
+        # headed as such — the share is not a figure of the brief («Продукты 40%» of the costs next to «35% от
+        # выручки» read as a contradiction when unlabelled)
+        amounts = not is_pct
+        shares_only, head_plain = list(pct), head
+        if amounts:
+            amt = [typeset(_amount_text(v, unit_txt)) for v in vals]
+            pct = [f"{a}  ·  {p_}" for a, p_ in zip(amt, pct)]
+            share_head = "сумма · доля от общей суммы"
+            head = f"{head}\n{share_head}" if head else share_head[:1].upper() + share_head[1:]
+        rows = [j for j in range(len(cats)) if vals[j] > 0]
+        colors = k.colors
+        gap = k.gap
+        big = max(rows, key=lambda j: vals[j])
+
+        def legend(size: float, name_cap: int, cols: int = 1) -> dict:
+            sw = _emu(size * 0.72)
+            pct_w = _emu(max(text_width_pt(pct[j], k.font, size, k.figure_bold) for j in rows) + size * 0.5)
+            name_nat = _emu(max(text_width_pt(cats[j], k.font, size, False) for j in rows) + size * 0.6)
+            name_w = max(min(name_nat, name_cap), _emu(size * 5))
+            row_gap = _emu(size * 0.5)
+            col_gap = _emu(size * 1.6)
+            hs = [self.h([self.P(cats[j], size, colors.text)], name_w) for j in rows]
+            per = math.ceil(len(rows) / cols)
+            chunks = [list(range(c_ * per, min((c_ + 1) * per, len(rows)))) for c_ in range(cols)]
+            col_w = sw + int(sw * 0.8) + name_w + pct_w
+            w = cols * col_w + (cols - 1) * col_gap
+            head_paras = [self.P(line_, size, colors.muted) for line_ in head.split("\n")] if head else []
+            head_h = self.h(head_paras, w) + _emu(size * 0.7) if head else 0
+            body_h = max(sum(hs[i] for i in ch) + row_gap * (len(ch) - 1) for ch in chunks if ch)
+            return dict(size=size, sw=sw, pct_w=pct_w, name_w=name_w, row_gap=row_gap, hs=hs, w=w, col_w=col_w, col_gap=col_gap,
+                        chunks=chunks, h=head_h + body_h, head=head_paras, head_h=head_h)
+
+        for legend_mode in (("amounts", "shares") if amounts else ("shares",)):
+            if legend_mode == "shares" and amounts:
+                # a narrow box: the amounts stay on the slices, the legend gives the shares only, headed as such
+                pct = shares_only
+                head = f"{head_plain}\nдоля от общей суммы" if head_plain else "Доля от общей суммы"
+            lg, d, below, sizes = self._pie_legend_fit(box, legend, rows, cats)
+            if legend_mode == "shares" or (d >= 0.4 * box.h and not below) or (below and d >= 0.35 * box.h):
+                break
+        force_d = getattr(self, "_pie_force_d", None)
+        if force_d and force_d < d:
+            d = force_d  # two pies of one slide: one diameter
+        if isinstance(getattr(self, "_legend_used", None), list):
+            self._legend_used.append(lg["size"])
+            self.__dict__.setdefault("_pie_ds", []).append(d)
+        self._pie_draw(box, spec, center, lg, d, below, rows, cats, vals, pct, big, colors, amounts, total, unit_txt)
+
+    def _pie_legend_fit(self, box: Bbox, legend, rows: list[int], cats: list[str]):
+        """(legend, diameter, legend below?, sizes) of a pie's legend set beside (or under) its circle."""
+        k = self.kit
+        gap = k.gap
+        # the legend beside the circle: the largest size (and the narrowest name column, then two columns of rows) at
+        # which the circle keeps most of the height; below the circle only in a tall, narrow box
+        sizes = [k.lead, k.body, k.small] if len(rows) <= 5 else [k.body, k.snap(k.body * 0.9, k.small, k.body), k.small]
+        sizes = list(dict.fromkeys(sizes))
+        force = getattr(self, "_legend_force", None)
+        if force:
+            sizes = [s_ for s_ in sizes if s_ <= force + 0.05] or [force]
+        best = None
+        for size in sizes:
+            natural = _emu(max(text_width_pt(cats[j], k.font, size, False) for j in rows) + size * 0.6)
+            # the names on one line first (a legend of even rows), narrower columns when the circle needs the room
+            tries = [(cap, 1) for cap in (min(natural, int(box.w * 0.55)), int(box.w * 0.45), int(box.w * 0.36))]
+            if len(rows) >= 4:
+                tries += [(min(natural, int(box.w * 0.3)), 2)]
+            for cap, cols in tries:
+                cand = legend(size, cap, cols)
+                if cand["h"] > box.h:
+                    continue
+                dd = min(box.h, box.w - cand["w"] - gap * 2)
+                if best is None or dd > best[1] + _emu(2):
+                    best = (cand, dd)
+                if dd >= 0.6 * box.h:
+                    best = (cand, dd)
+                    break
+            if best is not None and best[1] >= 0.6 * box.h:
+                break  # a legend that reads (the larger type) next to a circle of most of the height
+        lg, d = best if best is not None else (None, 0)
+        below = False
+        if lg is None or d < 0.5 * box.h or box.h > 0.7 * box.w:
+            # a narrow box (a third of the slide): the legend under the circle when that gives a clearly larger circle
+            for size in sizes:
+                alt = legend(size, box.w - _emu(size * 2.2) - _emu(size * 3))
+                d_alt = min(int(box.w * 0.85), box.h - alt["h"] - k.vgap)
+                if d_alt > d * 1.15 and d_alt >= 0.35 * box.h:
+                    lg, d, below = alt, d_alt, True
+                    break
+        if lg is None:
+            # nothing fits beside or under the circle: the smallest legend in two columns, the circle as tall as the box
+            lg = legend(sizes[-1], int(box.w * 0.25), 2 if len(rows) >= 4 else 1)
+            d = max(min(box.h, box.w - lg["w"] - gap * 2), int(0.3 * box.h))
+        return lg, d, below, sizes
+
+    def _pie_draw(self, box: Bbox, spec, center: bool, lg: dict, d: int, below: bool, rows: list[int], cats: list[str], vals: list[float], pct: list[str], big: int, colors, amounts: bool, total: float, unit_txt: str) -> None:
+        k = self.kit
+        gap = k.gap
+        group_w = d if below else d + gap * 2 + lg["w"]
+        x0 = box.x
+        if center:
+            x0 = box.x + max(0, (box.w - (max(d, lg["w"]) if below else group_w)) // 2)
+        gf = add_chart(self.slide, Bbox(x=x0, y=box.y, w=d, h=d), spec, self.outline, self._chart_style(), k.manifest.tokens.typography, text_hex=colors.text, neutral_hex=colors.divider, ground_hex=colors.ground, legend=False, amounts=amounts)
+        if amounts:
+            self._doughnut_total(gf, spec, total, unit_txt)
+        shades = list(getattr(gf, "verstka_shades", None) or []) or [(colors.accent, 1.0)] * len(cats)
+        if below:
+            lx, ly = x0, box.y + d + k.vgap
+        else:
+            lx, ly = x0 + d + gap * 2, box.y + max(0, (d - lg["h"]) // 2)
+        size, sw = lg["size"], lg["sw"]
+        if lg["head"]:
+            self.cv.text(Bbox(x=lx, y=ly, w=lg["w"], h=lg["head_h"]), lg["head"], name="Legend title")
+            ly += lg["head_h"]
+        line_h = _emu(size * k.line)
+        for ci, chunk in enumerate(lg["chunks"]):
+            y = ly
+            cx = lx + ci * (lg["col_w"] + lg["col_gap"])
+            for n in chunk:
+                j = rows[n]
+                nh = lg["hs"][n]
+                base, share = shades[j % len(shades)]
+                self.cv.rect(Bbox(x=cx, y=y + (line_h - sw) // 2, w=sw, h=sw), base, radius_emu=sw // 4, name="Swatch", alpha=share if share < 1.0 else None)
+                nx = cx + sw + int(sw * 0.8)
+                self.cv.text(Bbox(x=nx, y=y, w=lg["name_w"], h=nh), [self.P(cats[j], size, colors.text)], name="Legend")
+                self.cv.text(Bbox(x=nx + lg["name_w"], y=y, w=lg["pct_w"], h=line_h + _emu(2)), [self.P(pct[j], size, colors.accent_text if j == big else colors.text, bold=k.figure_bold, align="r")], name="Share")
+                y += nh + lg["row_gap"]
+
+    def _doughnut_total(self, gf, spec, total: float, unit: str) -> None:
+        """The whole in a doughnut's hole («780 000 ₽»), when the deck states that total (its facts or a slide's text):
+        the parts' sum is not written on a slide as a figure the brief does not give."""
+        from verstka.rendering.charts import doughnut_hole_bbox, effective_chart_type
+
+        if effective_chart_type(spec, self.outline) != "doughnut" or total <= 0:
+            return
+        stated = False
+        for f in self.outline.facts:
+            v = _num(f.value or "")
+            if v is not None and abs(v - total) <= 0.5:
+                stated = True
+                break
+        if not stated:
+            texts = [x for sl in self.outline.slides for x in (sl.headline, sl.subtitle or "", sl.takeaway or "", sl.notes or "", *sl.content.bullets)]
+            want = _amount_text(total, "").replace(" ", "").replace("\u00a0", "")
+            stated = any(want in re.sub(r"[\s\u00a0\u2060]", "", x) for x in texts)
+        box = doughnut_hole_bbox(gf) if stated else None
+        if box is None:
+            return
+        k = self.kit
+        text = typeset(_amount_text(total, unit))
+        size = k.h3
+        while size > k.small and text_width_pt(text, k.font, size, k.figure_bold) > _pt(box.w) * 0.95:
+            size = k.snap(size * 0.9, k.small, size - 0.5)
+        hh = _emu(size * 1.3)
+        self.cv.text(Bbox(x=box.x, y=box.y + (box.h - hh) // 2, w=box.w, h=hh), [self.P(text, size, k.colors.heading, bold=k.figure_bold, align="c")], name="Total", anchor="ctr")
 
     def _chart_fallback(self, area: Bbox) -> str:
         """A chart that could not be drawn gives its area to the slide's figures (its numbers, else the facts the chart
@@ -1501,6 +2204,79 @@ class Composer:
 
 
 # ---------------------------------------------------------------------------------------------- data helpers
+
+
+_FORMULA_OP_RE = re.compile(r"\s*(=|≈|×|\*|·|÷|\+|(?<=\s)[−–-](?=\s)|(?<=[\d\s])[xх](?=[\s\d])|(?<=\s)/(?=\s))\s*")
+_OP_NORM = {"*": "×", "·": "×", "x": "×", "х": "×", "-": "−", "–": "−", "/": "÷"}
+_TERM_NUM_RE = re.compile(
+    r"(?<![\w])([+\-−]?\d[\d\s\u00a0]*(?:[.,]\d+)?)"
+    r"((?:\s*(?:тыс\.?|млн\.?|млрд\.?))?(?:\s*(?:%|₽|\$|€|руб\.?(?![а-я])|рубл[а-я]*))?)",
+    re.I,
+)
+
+
+_BEFORE_CAT_RE = re.compile(r"(?i)^\s*(сейчас|было|до\b|текущ|факт|исходн|сегодня|now|before|current)")
+_AFTER_CAT_RE = re.compile(r"(?i)(цел[ьи]|план|прогноз|после|стало|через|будет|к\s+\d|target|goal|after|forecast)")
+
+
+def _amount_text(v: float, unit: str) -> str:
+    """315000 → «315 000 ₽», 13.3 → «13,3»: a part's amount as the brief writes it."""
+    n = f"{int(round(v)):,}".replace(",", " ") if abs(v - round(v)) < 1e-9 else f"{v:g}".replace(".", ",")
+    u = (unit or "").strip()
+    if u.lower() in ("рублей", "руб.", "руб", "рубли", "rub"):
+        u = "₽"
+    return f"{n} {u}".strip() if u else n
+
+
+def _after_index(spec, outline: DeckOutline) -> Optional[int]:
+    """The bar to highlight: the chart's own choice, else — a before/after chart of one series («Сейчас» / «Через 6
+    месяцев», «Было» / «Стало») — the «after» bar."""
+    if spec.highlight_index is not None or spec.type not in ("column", "bar"):
+        return spec.highlight_index
+    from verstka.rendering.charts import resolve_series
+
+    try:
+        series = resolve_series(spec, outline)
+    except Exception:  # noqa: BLE001
+        return None
+    if len(series) != 1 or len(series[0].categories) != 2:
+        return None
+    a, b = (str(x) for x in series[0].categories)
+    return 1 if _BEFORE_CAT_RE.search(a) and _AFTER_CAT_RE.search(b) else None
+
+
+def _same_words(a: str, b: str) -> bool:
+    """`a` says nothing `b` does not (every word of it is in b): a chart named like its slide's heading."""
+    wa = set(re.findall(r"\w+", (a or "").lower().replace("ё", "е")))
+    wb = set(re.findall(r"\w+", (b or "").lower().replace("ё", "е")))
+    return bool(wa) and wa <= wb
+
+
+def parse_formula(text: str) -> tuple[list[tuple[Optional[str], str]], list[str]]:
+    """«100 покупок × 300 ₽ × 30 дней = 900 000 рублей» → terms [(figure, words)] and the operators between them:
+    [("100", "покупок"), ("300 ₽", ""), ("30", "дней"), ("900 000 ₽", "")], ["×", "×", "="]. A figure keeps its
+    scale and currency («1,14 млн ₽»; рублей → ₽); the other words of a term are its label. A term without a figure
+    («Выручка = покупки × чек») is (None, words)."""
+    parts = _FORMULA_OP_RE.split(" ".join((text or "").replace("\u00a0", " ").split()))
+    terms_raw, ops = parts[0::2], [_OP_NORM.get(o, o) for o in parts[1::2]]
+    while len(terms_raw) > 1 and not terms_raw[0].strip() and ops and ops[0] in ("+", "−"):
+        # a leading sign belongs to its figure («+15% × …»), it is no operator
+        terms_raw = [(("−" if ops[0] == "−" else "+") + terms_raw[1].strip())] + terms_raw[2:]
+        ops = ops[1:]
+    terms: list[tuple[Optional[str], str]] = []
+    for t in terms_raw:
+        t = t.strip()
+        m = next((m for m in _TERM_NUM_RE.finditer(t) if any(ch.isdigit() for ch in m.group(1))), None)
+        if m is None:
+            terms.append((None, t))
+            continue
+        num = " ".join(m.group(1).split())
+        unit = " ".join((m.group(2) or "").split())
+        unit = re.sub(r"(?i)рубл[а-я]*|руб\.?", "₽", unit)
+        fig = f"{num} {unit}".strip() if unit and unit != "%" else num + unit
+        label = " ".join((t[: m.start()] + " " + t[m.end() :]).split()).strip(" ,.:;—–-()")
+        terms.append((fig, label))
+    return terms, ops
 
 
 def _num(cell: str) -> Optional[float]:
@@ -1554,6 +2330,21 @@ def _in_sentence(cat: str) -> str:
     return c[:1].lower() + c[1:] if c.lower().startswith(_MONTHS) else c
 
 
+_MONEY_UNIT_RE = re.compile(r"\s*(?:рубл(?:ь|я|ей)|руб\.?)$", re.I)
+
+
+def _aside_figure(text: str) -> Optional[str]:
+    """The key figure of a conclusion, as the large figure beside the chart: the first sum or share
+    («120 000 рублей» → «120 000 ₽», «112,3%»), else the first figure of three digits or more; None without one."""
+    found = [m.group(1).strip() for m in _FIG_RE.finditer(text or "")]
+    unit = [f for f in found if re.search(r"%|₽|руб|млн|млрд|тыс", f, re.I)]
+    big = [f for f in found if len(re.sub(r"\D", "", f)) >= 3]
+    pick = (unit or big or [None])[0]
+    if pick is None:
+        return None
+    return typeset(_MONEY_UNIT_RE.sub(" ₽", pick).strip())
+
+
 def _series_takeaway(spec, outline: DeckOutline, headline: str = "") -> Optional[tuple[str, str]]:
     """The figure a reader takes from a series: its growth (last/first) or its last value. Computed, never invented.
     When the heading already names the multiple («рост в 5 раз»), the panel gives the last value instead of a
@@ -1571,16 +2362,22 @@ def _series_takeaway(spec, outline: DeckOutline, headline: str = "") -> Optional
     if len(vals) < 2 or any(v is None for v in vals):
         return None
     first, last = vals[0], vals[-1]
+    # the heading already states the change («вырастет на 112,3%», «в 2 раза»): a second, differently computed
+    # measure of it beside the chart («×2,1») says nothing new and is not the brief's figure
+    if re.search(r"\d\s?%|\bв\s+\d+([.,]\d+)?\s*раз|[×x]\s?\d|вдвое|втрое", headline or "", re.I):
+        return None
+    periods = all(re.search(r"(?i)месяц|квартал|год|недел|янв|фев|мар|апр|ма[йя]|июн|июл|авг|сен|окт|ноя|дек|\b\d{4}\b", c or "") for c in s.categories[1:]) if s.categories else False
     span = f"{_in_sentence(s.categories[0])} → {_in_sentence(s.categories[-1])}" if s.categories else ""
-    says_multiple = bool(re.search(r"\bв\s+\d+([.,]\d+)?\s*раз|[×x]\s?\d", headline or "", re.I))
+    span = f"за период {span}" if periods and span else (f"{span}" if span else "")
+    says_multiple = False
     if first > 0 and last > 0 and not says_multiple:
         ratio = last / first
         if ratio >= 1.5:
             txt = f"×{ratio:.1f}".replace(".", ",").replace(",0", "")
-            return txt, f"рост за период {span}".strip()
+            return txt, f"рост: {span}".strip(": ") if span and not span.startswith("за период") else f"рост {span}".strip()
         if ratio <= 0.67:
             pct = int(round((1 - ratio) * 100))
-            return f"−{pct}%", f"снижение за период {span}".strip()
+            return f"−{pct}%", f"снижение: {span}".strip(": ") if span and not span.startswith("за период") else f"снижение {span}".strip()
     # the change in the series' own unit — never the last value, which the highlighted bar already shows
     delta = last - first
     if not delta:
@@ -1590,4 +2387,5 @@ def _series_takeaway(spec, outline: DeckOutline, headline: str = "") -> Optional
     v = f"{mag:,.0f}".replace(",", " ") if mag >= 100 else f"{mag:g}".replace(".", ",")
     if re.sub(r"\s", "", v) in re.sub(r"\s", "", headline or ""):
         return None  # the heading already says it
-    return f"{'+' if delta > 0 else '−'}{v}{unit}", f"{'прирост' if delta > 0 else 'снижение'} за период {span}".strip()
+    word = "прирост" if delta > 0 else "снижение"
+    return f"{'+' if delta > 0 else '−'}{v}{unit}", (f"{word}: {span}" if span and not span.startswith("за период") else f"{word} {span}").strip(": ")

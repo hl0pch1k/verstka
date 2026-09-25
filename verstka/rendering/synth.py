@@ -336,13 +336,13 @@ def _items(oslide: OutlineSlide) -> list[SlideItem]:
 
 _COVER_COMPS = ("title", "section", "thanks")
 # compositions that need the whole width of the slide (a half-slide panel of the canvas is too narrow for them)
-_WIDE_COMPS = ("cards", "process", "agenda", "comparison", "two_column", "table", "chart_text", "stat_row")
+_WIDE_COMPS = ("cards", "process", "agenda", "comparison", "two_column", "table", "chart_text", "stat_row", "chart_pair", "formula")
 
 
 def _needs_width(oslide: OutlineSlide, comp: str) -> bool:
     c = oslide.content
     n = len(c.items) or len(c.columns) or len(c.numbers) or len(c.bullets)
-    if comp in ("table", "chart_text") or c.table is not None or c.chart is not None:
+    if comp in ("table", "chart_text", "chart_pair", "formula") or c.table is not None or c.chart is not None or c.chart2 is not None or (c.formula or "").strip():
         return True
     if comp in _WIDE_COMPS and n >= 3:
         return True
@@ -795,7 +795,9 @@ def _choose_art(builder: DeckBuilder, manifest: TemplateManifest, ds: "DeckStyle
     variant, and never two in a row: at most one slide in three stands next to the template's art."""
     strategy = outline.strategy or "structured"
     c = oslide.content
-    few = len(c.bullets) <= 4 and sum(len(b) for b in c.bullets) <= 300 and not c.items and not c.table and not c.chart
+    # the column beside the art also holds the lede, the conclusion strip and the footnote
+    extra = sum(len(x or "") for x in (oslide.subtitle, oslide.takeaway, oslide.footnote))
+    few = len(c.bullets) <= 4 and sum(len(b) for b in c.bullets) + extra <= 300 and not c.items and not c.table and not c.chart and not c.chart2 and not (c.formula or "").strip()
     eligible = comp in ("statement", "big_number", "quote") or (comp == "bullets" and few) or (comp == "stat_row" and len(c.numbers) == 1)
     if comp == "bullets" and not c.bullets and len(c.paragraphs) == 1:
         eligible = True  # a single paragraph is set as a statement
@@ -937,7 +939,11 @@ def _render_content(builder: DeckBuilder, comp: str, oslide: OutlineSlide, manif
         kit.card.colors = kit.colors_on(proto[1] or pal.bg, prefer=None if proto[1] else title_color, inside_card=bool(proto[1]))
     composer = Composer(slide, kit, oslide, outline, outline.strategy or "structured", manifest)
     if comp == "image_text" and oslide.content.image_hint:
-        comp = _image_text(builder, slide, oslide, manifest, ws, kit, composer, area)
+        # the picture and its text above the slide's conclusion and footnote (compose() keeps the same room)
+        n0 = len(composer.cv.tree)
+        comp = _image_text(builder, slide, oslide, manifest, ws, kit, composer, composer._reserve_notes(area))
+        if comp is None:
+            composer._draw_notes(n0)
     if comp:
         composer.compose(comp, area)
     warnings.extend(composer.warnings)
@@ -1005,7 +1011,18 @@ _KIND_LABEL = {
     PatternKind.process: "План", PatternKind.timeline: "Этапы", PatternKind.cards: "Главное", PatternKind.bullets: "Тезисы",
     PatternKind.agenda: "Содержание", PatternKind.quote: "Цитата", PatternKind.image_text: "Пример", PatternKind.team: "Команда",
 }
+_CHART_LABEL = {"pie": "Структура", "doughnut": "Структура", "line": "Динамика", "area": "Динамика", "column": "Сравнение", "bar": "Сравнение"}
 _COVER_KINDS = (PatternKind.title, PatternKind.section, PatternKind.thanks)
+
+
+def _kind_label(oslide: OutlineSlide) -> str:
+    """The label that names the kind of slide: a chart by what it shows (the parts of a whole are not a trend)."""
+    c = oslide.content
+    if oslide.kind == PatternKind.chart and c.chart is not None:
+        return _CHART_LABEL.get(str(c.chart.type or "").lower(), "Данные")
+    if oslide.kind == PatternKind.bullets and (c.formula or "").strip():
+        return "Расчёт"
+    return _KIND_LABEL.get(oslide.kind, "")
 
 
 @dataclass
@@ -1118,13 +1135,13 @@ def _place_heading(builder, slide, title_ph, canvas, oslide, manifest, ws, outli
                 if len(headline.split()) <= 5:
                     tag, only_label = headline, True  # the headline is itself a section name: it goes on the label
                 else:
-                    tag = _KIND_LABEL.get(oslide.kind, "")
+                    tag = _kind_label(oslide)
             short_tag = _short_kicker(tag)
             if only_label and short_tag.lower().strip(" .:") != headline.lower().strip(" .:"):
                 # a label would cut the headline («Результаты пилота: до и после» → «Результаты пилота»): the whole
                 # headline is set under a label that names the kind of slide
                 only_label = False
-                short_tag = _short_kicker(_KIND_LABEL.get(oslide.kind, "") or short_tag)
+                short_tag = _short_kicker(_kind_label(oslide) or short_tag)
             tag = short_tag
             label = tag.upper() if upper else tag
             hctx = _SlideCtx(builder, slide, canvas, manifest, ws, outline)
@@ -1401,6 +1418,17 @@ def _snap_heading(target: float, scale: list[float]) -> float:
     return min(near, key=lambda s: abs(s - target)) if near else round(target)
 
 
+def _cover_note(slide: Slide, oslide: OutlineSlide, col: Bbox, small: float, pal: "_Palette", font: Optional[str], scale: list[float]) -> None:
+    """The footnote of a cover, divider or closing slide drawn without a sample (a disclaimer «Все цифры условные»):
+    small print at the foot of the heading's column."""
+    note = " ".join((oslide.footnote or "").split())
+    if not note:
+        return
+    size = max(min(small, 12.0), 9.0)
+    h = int(size * 2.8 * EMU_PER_PT)
+    _textbox(slide, Bbox(x=col.x, y=col.y2 - h, w=col.w, h=h), [ParagraphSpec(note, bullet=False)], size=size, color=pal.text2, font=font, scale=scale, anchor="b")
+
+
 def _render_cover(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineSlide, manifest: TemplateManifest, ws: TemplateWorkspace, outline: DeckOutline) -> tuple[Slide, list[str]]:
     warnings: list[str] = []
     comp = plan_slide.composition or "bullets"
@@ -1495,6 +1523,7 @@ def _render_cover(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: Outline
         if sub:
             y_sub = box.y + max(box.h, text_h) + int(H * 0.02)
             _textbox(slide, Bbox(x=box.x, y=y_sub, w=box.w, h=min(int(H * 0.16), int(H * 0.92) - y_sub)), [ParagraphSpec(sub)], size=h2, color=pal.text2, font=font, scale=scale)
+        _cover_note(slide, oslide, Bbox(x=box.x, y=sy, w=min(box.w, sw), h=sh), small, pal, font, scale)
         return slide, warnings
     else:
         if title_ph is not None:
@@ -1515,6 +1544,7 @@ def _render_cover(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: Outline
         sub = oslide.subtitle or (oslide.section if comp == "section" else None)
         if sub:
             _textbox(slide, Bbox(x=sx, y=int(H * 0.62), w=int(sw * 0.8), h=int(H * 0.16)), [ParagraphSpec(sub)], size=h2, color=pal.text2, font=font, scale=scale)
+        _cover_note(slide, oslide, Bbox(x=sx, y=sy, w=int(sw * 0.8), h=sh), small, pal, font, scale)
         return slide, warnings
 
     if comp == "bullets" or (comp in ("image_text",) and not c.image_hint):

@@ -75,8 +75,15 @@ def split_sentences(text: str) -> list[str]:
     return out
 
 
+# a line that ends with an abbreviation keeps its period: «на 10 п. п.», «315 тыс.», «2026 г.»
+ABBR_END_RE = re.compile(r"(?:^|[\s(\d])(?:п\.\s?п|тыс|руб|млн|млрд|трлн|г|гг|др|пр|т\.\s?е|т\.\s?д|т\.\s?п|ед|чел|шт|мин|сек|коп|долл|кв)\.$", re.I)
+
+
 def strip_end(text: str) -> str:
-    return text.strip().rstrip(".;:").strip()
+    t = text.strip()
+    if ABBR_END_RE.search(t):
+        return t
+    return t.rstrip(".;:").strip()
 
 
 def cap_first(text: str) -> str:

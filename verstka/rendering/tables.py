@@ -164,6 +164,30 @@ def is_total_row(row: list[str]) -> bool:
     return bool(row) and bool(_TOTAL_RE.match(row[0] or ""))
 
 
+_TARGET_COL_RE = re.compile(r"(?<![\w])(цел[ьи]|план\w*|прогноз\w*|после|стало|будет|через\s+\d|к\s+\d|target|goal|plan|forecast|after)", re.I)
+_PAST_COL_RE = re.compile(r"(?<![\w])(сейчас|было|до|текущ\w*|факт\w*|исходн\w*|now|before|current|actual)(?![\w])", re.I)
+_YEAR_COL_RE = re.compile(r"(?<!\d)(19\d\d|20\d\d)(?!\d)")
+
+
+def emphasis_column(table: TableData) -> Optional[int]:
+    """The column a comparison table argues for — the target («Цель», «План», «Прогноз», «После», «Стало»,
+    «Через 6 месяцев») when exactly one header names it, else the last column of a table whose other value columns
+    are the past («Сейчас», «Было», earlier years). None for a table of options, where no column is the answer."""
+    cols = [c or "" for c in table.columns]
+    if len(cols) < 3 or not table.rows:
+        return None
+    hits = [j for j, c in enumerate(cols) if j > 0 and _TARGET_COL_RE.search(c)]
+    if len(hits) == 1:
+        return hits[0]
+    last = len(cols) - 1
+    years = {j: int(m.group(1)) for j, c in enumerate(cols) if j > 0 and (m := _YEAR_COL_RE.search(c))}
+    if len(years) >= 2 and max(years, key=lambda j: years[j]) == last:
+        return last
+    if any(_PAST_COL_RE.search(c) for c in cols[1:last]) and not _PAST_COL_RE.search(cols[last]):
+        return last
+    return None
+
+
 def recommended_row(table: TableData) -> Optional[int]:
     """The body row the table argues for («Наш подсказчик», «Рекомендуем…»): exactly one such row among ≥ 2."""
     if len(table.rows) < 2 or len(table.columns) < 2:
@@ -1521,6 +1545,7 @@ def add_table(
     auto_highlight: bool = True,
     ground_hex: Optional[str] = None,
     native: object = _AUTO,
+    highlight_col: Optional[int] = None,
 ):
     """A native table. The composer passes the geometry from :func:`measure_table` (column widths, row heights, one
     type size); without it the table measures itself inside ``bbox`` (rows capped at 0.10 H, never taller than
@@ -1538,7 +1563,9 @@ def add_table(
     stripes; never in a shorter table with a recommended row). A total row (Итого/Всего/Total/Сумма) sits under a thin
     accent rule, bold only in a bold template. The recommended row («Наш …») takes the sample's accent-row fill, else a
     tint that visibly stands off the ground, with a label in ``accent_text_hex``/the accent at a readable contrast (or
-    an accent bar when no accent reads). Margins scale with the size; every run names its latin/ea/cs typeface.
+    an accent bar when no accent reads). ``highlight_col`` (the target column, see :func:`emphasis_column`): its body
+    cells take the same tint and their values the accent at a readable contrast, an unfilled header the accent too.
+    Margins scale with the size; every run names its latin/ea/cs typeface.
     """
     n_rows = len(table.rows) + 1
     n_cols = max(len(table.columns), 1)
@@ -1646,6 +1673,17 @@ def add_table(
             label_hex, mark_bar = look.text, True
         mark_bar = mark_bar or look.tint_mark
     check_on_tint = _readable(look.accent, tint_bg, 3.0, look.text) or look.text
+    hcol = highlight_col if highlight_col is not None and 0 < highlight_col < n_cols else None
+    col_text = None
+    if hcol is not None:
+        need_c = _need(size, False)
+        for cand in (look.accent, accent_text_hex):
+            if cand and _saturation(cand) >= 0.2:
+                col_text = _readable(cand.upper(), tint_bg, need_c, look.text)
+                if col_text and _saturation(col_text) >= 0.2:
+                    break
+                col_text = None
+        col_text = col_text or look.text
     separator = None
     if hl_full and highlight == 0 and header_fill and contrast_ratio(header_fill, look.hl_fill) < 1.3:
         separator = (look.ground, SEPARATOR_PT)  # a gap between two bands of one colour
@@ -1675,7 +1713,10 @@ def add_table(
     edges = [sum(widths[:j]) / max(sum(widths), 1) for j in range(n_cols + 1)]
     for j in range(n_cols):
         cell = tbl.cell(0, j)
-        write(cell, heads[j], bold=hb, color_hex=header_text if header_fill else look.header_text, align=aligns[j], extra_left=gut[j])
+        h_color = header_text if header_fill else look.header_text
+        if j == hcol and not header_fill:
+            h_color = col_text or h_color  # an unfilled header names the target column in the accent
+        write(cell, heads[j], bold=hb, color_hex=h_color, align=aligns[j], extra_left=gut[j])
         if header_fill:
             xml = look.header_fill_xml
             if xml is not None and _local(xml) == "gradFill":
@@ -1706,6 +1747,11 @@ def add_table(
             text = row[j]
             color = look.text
             bold = is_total and total_bold
+            cell_fill = fill
+            if j == hcol and not (is_hl and hl_full):
+                cell_fill = (look.tint, look.tint_alpha)
+                if not (booleans[j] and text in (CHECK, DASH)):
+                    color = col_text or look.text
             if is_hl and hl_full:
                 color = look.hl_text
                 bold = bold or (j == 0 and hb)
@@ -1726,7 +1772,7 @@ def add_table(
                 lines["T"] = separator
             if is_hl and mark_bar and j == 0:
                 lines["L"] = (look.accent, MARK_RULE_PT)
-            _style_tcpr(cell, lines, fill)
+            _style_tcpr(cell, lines, cell_fill)
     return gf
 
 

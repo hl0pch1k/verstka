@@ -12,6 +12,7 @@ import { PlanPanel } from "../PlanPanel";
 import { RunPanel } from "../RunPanel";
 import { TemplateDetails } from "../TemplatePanel";
 import { Tabs } from "../ui/Tabs";
+import { AgentLog } from "./AgentPanel";
 import { WhySlide } from "./WhySlide";
 
 function Tech() {
@@ -32,6 +33,7 @@ function Tech() {
 const TABS: Array<{ key: DetailKey; label: string; view: ComponentType; needsDeck: boolean }> = [
   { key: "quality", label: "Проверка качества", view: AuditPanel, needsDeck: true },
   { key: "why", label: "Почему слайд такой", view: WhySlide, needsDeck: true },
+  { key: "agent", label: "Как работал агент", view: AgentLog, needsDeck: true },
   { key: "plan", label: "План", view: PlanPanel, needsDeck: true },
   { key: "template", label: "Шаблон", view: TemplateDetails, needsDeck: false },
   { key: "tech", label: "Файлы и детали", view: Tech, needsDeck: true },

@@ -18,6 +18,12 @@ const QUICK_ACTIONS: Array<{ label: string; message: string }> = [
   { label: "Исправь всё", message: "Исправь всё" },
   { label: "Где файлы?", message: "Где скачать файлы?" },
 ];
+// with a deck on screen: questions about it first (the slide on screen, the agent's work)
+const deckActions = (slide: number): Array<{ label: string; message: string }> => [
+  { label: `Почему слайд ${slide} такой?`, message: `Почему слайд ${slide} такой?` },
+  { label: "Как работал агент?", message: "Как работал агент?" },
+  ...QUICK_ACTIONS.filter((a) => a.label !== "Что в шаблоне?" && a.label !== "Покажи план"),
+];
 const MAX_ROWS = 8;
 const LINE_PX = 20; // leading-5
 const PAD_PX = 20; // py-2.5, top + bottom
@@ -25,7 +31,7 @@ const MAX_BRIEF_BYTES = 2 * 1024 * 1024;
 
 const STEPS = [
   { icon: Upload, title: "Соберу презентацию из текста", text: "Вставьте текст сюда или напишите «сделай 8 слайдов для руководства: …» — получите три варианта." },
-  { icon: FileText, title: "Объясню любой слайд", text: "Спросите «почему слайд 4 такой» — расскажу, какой макет выбран и почему." },
+  { icon: FileText, title: "Объясню любой слайд", text: "Спросите «почему слайд 4 такой» — расскажу, почему агент выбрал такую форму и что ещё рассматривал." },
   { icon: Layers, title: "Исправлю замечания", text: "Скажите «исправь всё» — применю автоматические исправления и пересоберу файлы." },
 ] as const;
 
@@ -60,7 +66,7 @@ function Intro() {
 }
 
 export function Chat({ onClose }: { onClose?: () => void }) {
-  const { messages, pushMessage, toast, templateId, generationId, manifest, activeJob, healthError } = useApp();
+  const { messages, pushMessage, toast, templateId, generationId, manifest, activeJob, healthError, activeStrategy, selectedSlide, generation } = useApp();
   const handleActions = useChatActions();
   const [text, setText] = useState("");
   const [pending, setPending] = useState(false);
@@ -99,7 +105,8 @@ export function Chat({ onClose }: { onClose?: () => void }) {
       setPending(true);
       pushMessage("user", message);
       try {
-        const res = await api.chat({ session_id: sessionId(), message, template_id: templateId, generation_id: generationId });
+        // the variant on screen: «почему слайд 3 такой» is about the slide the person looks at
+        const res = await api.chat({ session_id: sessionId(), message, template_id: templateId, generation_id: generationId, strategy: activeStrategy });
         pushMessage("assistant", res.reply);
         handleActions(res);
       } catch (e) {
@@ -111,7 +118,7 @@ export function Chat({ onClose }: { onClose?: () => void }) {
         areaRef.current?.focus();
       }
     },
-    [pending, pushMessage, templateId, generationId, handleActions, toast],
+    [pending, pushMessage, templateId, generationId, activeStrategy, handleActions, toast],
   );
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -184,7 +191,7 @@ export function Chat({ onClose }: { onClose?: () => void }) {
 
       <div className="shrink-0 border-t border-zinc-100 bg-white px-4 pb-4 pt-3">
         <div className="mb-2.5 flex flex-wrap gap-1.5">
-          {QUICK_ACTIONS.map(({ label, message }) => (
+          {(generation?.variants.length ? deckActions(selectedSlide) : QUICK_ACTIONS).map(({ label, message }) => (
             <button
               key={label}
               type="button"

@@ -15,6 +15,7 @@ AUTOFIX = {
     "text_clipped": "перевыбор макета",
     "overlap": "перевыбор макета",
     "text_overflow": "уменьшение кегля по шкале / перевыбор макета",
+    "text_outside_card": "перевыбор макета",
     "margin_violation": "сдвиг в безопасную область",
     "font_not_in_template": "замена на шрифт шаблона",
     "color_not_in_palette": "ближайший цвет палитры",

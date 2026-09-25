@@ -29,6 +29,9 @@ interface Props {
   onOpenIssues(): void;
   /** Extra height taken above the slide on this screen (a notice): the slide shrinks so the thumbnails stay in view. */
   reserve?: number;
+  /** Why the agent chose the slide's form (Agent v2), shown after the slide number; `onWhy` opens the whole story. */
+  why?: string | null;
+  onWhy?: () => void;
 }
 
 const BOX: Record<Severity, string> = {
@@ -81,7 +84,7 @@ function Overlay({ issue, box, highlighted, onHighlight }: { issue: Issue; box: 
   );
 }
 
-export function VariantsSlidePreview({ src, slide, total, headline, kind, issues, aspect, showIssues, onToggleIssues, highlightId, onHighlight, onSelect, onAspect, onZoom, onOpenIssues, reserve = 0 }: Props) {
+export function VariantsSlidePreview({ src, slide, total, headline, kind, issues, aspect, showIssues, onToggleIssues, highlightId, onHighlight, onSelect, onAspect, onZoom, onOpenIssues, reserve = 0, why, onWhy }: Props) {
   const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
   const failed = !src || failedSrc === src;
@@ -108,6 +111,27 @@ export function VariantsSlidePreview({ src, slide, total, headline, kind, issues
           <p className="truncate text-xs text-zinc-500">
             Слайд {slide} из {total}
             {kind ? ` · ${kind}` : ""}
+            {why && (
+              <>
+                {" · "}
+                {/* an inline span, not a button: a button is one unbreakable box and the ellipsis would swallow it whole */}
+                <span
+                  role="button"
+                  tabIndex={0}
+                  onClick={onWhy}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onWhy?.();
+                    }
+                  }}
+                  title={why}
+                  className="cursor-pointer text-zinc-600 hover:text-accent-700 hover:underline focus:outline-none focus-visible:underline"
+                >
+                  почему: {/^.\p{Ll}/u.test(why) ? why.charAt(0).toLowerCase() + why.slice(1) : why}
+                </span>
+              </>
+            )}
           </p>
         </div>
         {issues.length > 0 && (

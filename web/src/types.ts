@@ -9,10 +9,10 @@ export type PatternKind =
   | "code" | "mockup" | "thanks" | "freeform";
 
 /** Views of the app. The header shows five steps; «plan» lives inside «variants», «run» inside «export». */
-export type TabKey = "template" | "brief" | "plan" | "variants" | "why" | "audit" | "export" | "run";
+export type TabKey = "template" | "brief" | "plan" | "variants" | "why" | "audit" | "export" | "run" | "agent";
 /** The two screens a person sees; everything expert lives in the «Подробнее» drawer. */
 export type Screen = "create" | "result";
-export type DetailKey = "quality" | "why" | "plan" | "template" | "tech";
+export type DetailKey = "quality" | "why" | "agent" | "plan" | "template" | "tech";
 export type JobKind = "analyze" | "generate" | "fix" | "other";
 export type JobStatus = "queued" | "running" | "done" | "failed";
 
@@ -177,14 +177,41 @@ export interface Job {
   created_at: number;
   finished_at: number | null;
   result: unknown;
+  /** The planning agent's steps so far (a polling client gets the timeline from here). */
+  agent?: JobEvent[];
 }
-export interface JobEvent { job_id: string; status: JobStatus; progress: number; message: string; t: number }
+/** A progress event of a job. `type: "agent"` marks a step of the planning agent (Agent v2): who did it (`step`), on
+ * which slide and for which variant (null: shared by all variants); `message` is a plain Russian sentence. `seq` is
+ * the event's number within the job (the stream and the polled record may both deliver it). */
+export interface JobEvent {
+  job_id: string; status: JobStatus; progress: number; message: string; t: number;
+  type?: "agent"; step?: string; slide?: number | null; variant?: string | null; seq?: number;
+}
+
+// ---- the planning agent (Agent v2) ------------------------------------------------------
+/** analyst | architect | designer | critic | revise | compile (other values may come from newer servers). */
+export interface AgentEvent { step: string; message: string; slide: number | null; variant: string | null; t?: number; seq?: number }
+/** What the agent did for a variant: its log (outline.agent_log), the timeline the build screen showed (shared steps
+ * and this variant's own) and the critic's notes with the revisions. Empty for runs made before Agent v2. */
+export interface VariantAgent { log: string[]; events: AgentEvent[]; critic: AgentEvent[] }
+/** Another form the designer proposed for a slide; `used_in`: the variants that show the slide in that form. */
+export interface SlideAlternativeInfo { kind: string | null; label: string | null; text: string | null; used_in?: string[] }
+/** Per slide of a variant: why the designer chose this form, the other forms, the conclusion and footnote on it and
+ * the number of the slide in the user's text. */
+export interface SlideDesign {
+  index: number; kind?: string | null; rationale: string | null; alternatives: SlideAlternativeInfo[];
+  takeaway: string | null; footnote: string | null; spec_ref: number | null;
+}
 
 // ---- outline / plan ---------------------------------------------------------------
 export interface Fact { id: string; value: string; unit: string | null; label: string; source_span: string | null }
 export interface Series { id: string; name: string; categories: string[]; values: number[]; unit: string | null }
 export interface TableData { columns: string[]; rows: string[][]; unit: string | null; caption: string | null }
-export interface ChartSpec { type: string; series_ids: string[]; title: string | null; unit: string | null; highlight_index: number | null }
+export interface ChartSpec {
+  type: string; series_ids: string[]; title: string | null; unit: string | null; highlight_index: number | null;
+  /** Agent v2: the chart's data written by the designer. */
+  categories?: string[]; series?: { name: string; values: number[] }[];
+}
 export interface SlideItem { title: string; text: string; icon_hint: string | null; number: string | null; bullets: string[] }
 export interface NumberCallout { value: string; label: string; fact_id: string | null }
 export interface SlideContent {
@@ -198,6 +225,9 @@ export interface SlideContent {
   quote_author: string | null;
   image_hint: string | null;
   columns: SlideItem[];
+  /** Agent v2: a second chart beside the first, a formula shown large. */
+  chart2?: ChartSpec | null;
+  formula?: string | null;
 }
 export interface OutlineSlide {
   id: string;
@@ -208,6 +238,13 @@ export interface OutlineSlide {
   content: SlideContent;
   notes: string;
   fact_refs: string[];
+  /** Agent v2 (absent in older runs): the conclusion and the footnote on the slide, why the designer chose its form,
+   * the slide of the user's text it answers, the other forms the designer proposed. */
+  takeaway?: string | null;
+  footnote?: string | null;
+  rationale?: string | null;
+  spec_ref?: number | null;
+  alternatives?: { kind: string; change: string }[];
 }
 export interface DeckOutline {
   title: string;
@@ -222,6 +259,8 @@ export interface DeckOutline {
   facts: Fact[];
   series: Series[];
   tables: TableData[];
+  /** Agent v2: what the agent did, step by step, in plain Russian. */
+  agent_log?: string[];
 }
 export interface LayoutSlide {
   outline_id: string;
@@ -324,6 +363,9 @@ export interface Variant {
   run_manifest: RunManifest | null;
   slides: string[];
   files: Record<string, string>;
+  /** Agent v2 (newer servers; empty lists for older runs). */
+  agent?: VariantAgent;
+  design?: SlideDesign[];
 }
 export interface Generation extends GenerationMeta { variants: Variant[] }
 

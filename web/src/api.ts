@@ -75,6 +75,6 @@ export const api = {
   fileUrl: (gid: string, strategy: string, name: string) =>
     `/api/generations/${encodeURIComponent(gid)}/${encodeURIComponent(strategy)}/files/${name}`,
 
-  chat: (body: { session_id: string; message: string; template_id?: string | null; generation_id?: string | null }) =>
+  chat: (body: { session_id: string; message: string; template_id?: string | null; generation_id?: string | null; strategy?: string | null }) =>
     request<ChatResponse>("/api/chat", json(body)),
 };

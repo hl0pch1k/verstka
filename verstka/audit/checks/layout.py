@@ -18,6 +18,7 @@ TEXT_CLIPPED = CheckSpec(id="text_clipped", title="Текст обрезан к�
 MARGIN_VIOLATION = CheckSpec(id="margin_violation", title="Контент заходит в поля у краёв", severity="warn", category="layout", description="Текстовый блок начинается за пределами безопасной области шаблона (допуск 3% ширины).")
 GRID_ALIGNMENT = CheckSpec(id="grid_alignment", title="Блоки не выровнены по направляющим макета", severity="info", category="layout", description="Левый край текстового блока не совпадает ни с одной колонкой шаблона (допуск 1.5% ширины).")
 IMAGE_STRETCHED = CheckSpec(id="image_stretched", title="Картинка растянута, пропорции нарушены", severity="warn", category="layout", description="Пропорции рамки картинки отличаются от пропорций исходного изображения (с учётом кадрирования) более чем на 12%.")
+TEXT_OUTSIDE_CARD = CheckSpec(id="text_outside_card", title="Текст выходит за свою карточку", severity="error", category="layout", description="Строки текстового блока, который начинается внутри карточки (залитой или обведённой фигуры), заходят за её нижний или правый край более чем на 1,5% размера слайда (больше 3% — ошибка): текст висит под карточкой и наезжает на то, что ниже.")
 TABLE_CELL_WRAP = CheckSpec(id="table_cell_wrap", title="Слово в ячейке таблицы переносится по буквам", severity="warn", category="layout", description="Самое длинное слово в ячейке нативной таблицы шире своей колонки (ширина из a:gridCol минус поля ячейки; без сетки — ширина рамки / число колонок минус 2×7.2 пт) при кегле и начертании самой ячейки — PowerPoint рвёт его посреди слова.")
 
 TABLE_CELL_INSET_PT = 7.2  # default a:tcPr marL/marR
@@ -112,6 +113,52 @@ def overlap(ctx: AuditContext) -> list[Issue]:
                             autofix=fix("rematch", "перевыбрать макет слайда", outline_id=s.outline_id),
                         )
                     )
+    return out
+
+
+@check(TEXT_OUTSIDE_CARD)
+def text_outside_card(ctx: AuditContext) -> list[Issue]:
+    """A text that starts inside a card (the smallest filled or outlined shape holding its first line) and whose lines
+    run past the card's bottom or right edge: the column of a two-column slide whose list hangs below its card."""
+    out: list[Issue] = []
+    W, H = ctx.ir.slide_w, ctx.ir.slide_h
+    spacing = ctx.manifest.tokens.typography.line_height
+    for s in ctx.ir.slides:
+        cards = [o for o in s.elements if o.type in ("shape", "text") and (o.fill_hex or o.line_hex) and o.bbox.area > 0 and not o.has_text]
+        for e in text_elements(s):
+            if is_chrome_like(e, ctx.ir, ctx.manifest) or e.fill_hex or e.line_hex:
+                continue
+            occ = _occupied(e, spacing)
+            x0, y0 = occ.x + min(occ.w // 20, int(0.01 * W)), occ.y + min(occ.h // 20, int(0.01 * H))
+            hosts = [c for c in cards if c.bbox.x <= x0 <= c.bbox.x2 and c.bbox.y <= y0 <= c.bbox.y2 and c.bbox.area > occ.area * 0.3]
+            if not hosts:
+                continue
+            host = min(hosts, key=lambda c: c.bbox.area)
+            below = occ.y2 - host.bbox.y2
+            right = occ.x2 - host.bbox.x2
+            over = max(below / max(H, 1), right / max(W, 1))
+            # or its lines run into another card under or beside it (a card that grew into the conclusion strip)
+            for c in cards:
+                if c is host or c.bbox.area <= 0 or contains(c.bbox, host.bbox) or contains(host.bbox, c.bbox):
+                    continue
+                inter_h = min(occ.y2, c.bbox.y2) - max(occ.y, c.bbox.y)
+                inter_w = min(occ.x2, c.bbox.x2) - max(occ.x, c.bbox.x)
+                if inter_h > 0 and inter_w > 0.3 * occ.w:
+                    over = max(over, inter_h / max(H, 1))
+            if over <= 0.015:
+                continue
+            out.append(
+                ctx.new_issue(
+                    TEXT_OUTSIDE_CARD,
+                    s.index,
+                    f"текст «{e.text[:40]}» выходит за свою карточку на {int(round(over * 100))}% слайда",
+                    bboxes=[e.bbox_frac, host.bbox_frac],
+                    element_ids=[e.id, host.id],
+                    severity="error" if over > 0.03 else "warn",
+                    details={"over": round(over, 3)},
+                    autofix=fix("rematch", "перевыбрать макет слайда", outline_id=s.outline_id),
+                )
+            )
     return out
 
 

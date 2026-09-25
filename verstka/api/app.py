@@ -21,6 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError
 
 from verstka import __version__
+from verstka.api.agent_view import describe_agent_work, describe_slide_design, job_progress, link_alternatives, read_agent_events, slide_design, variant_agent, write_agent_file
 from verstka.api.jobs import Job, JobRunner
 from verstka.api.model_status import ChainContext, active_chain_context, config_label, generation_planner, models_status, planner_info
 from verstka.api.narrator import describe_audit, describe_plan, describe_slide_choice, describe_template
@@ -134,6 +135,7 @@ class ChatRequest(BaseModel):
     message: str
     template_id: Optional[str] = None
     generation_id: Optional[str] = None
+    strategy: Optional[str] = None  # the variant on screen: «почему слайд 3 такой» is about it
 
 
 # ---------------------------------------------------------------------------- helpers
@@ -205,7 +207,7 @@ def _discard_failed_upload(path: Path) -> None:
         path.parent.rmdir()
 
 
-def _variant_payload(gdir: Path, strategy: str, use_models: Optional[bool] = None, ctx: Optional[ChainContext] = None, supplied: bool = False) -> Optional[dict]:
+def _variant_payload(gdir: Path, strategy: str, use_models: Optional[bool] = None, ctx: Optional[ChainContext] = None, supplied: bool = False, agent_events: Optional[list[dict]] = None) -> Optional[dict]:
     vdir = gdir / strategy
     if not (vdir / "deck.pptx").exists():
         return None
@@ -225,6 +227,10 @@ def _variant_payload(gdir: Path, strategy: str, use_models: Optional[bool] = Non
         "run_manifest": run_manifest,
         "slides": [f"/api/generations/{gid}/{strategy}/slides/{p.name}" for p in slides],
         "files": files,
+        # Agent v2: what the agent did (its log, the timeline the build screen showed, the critic's notes) and, per
+        # slide, why the designer chose the form and what else it proposed — empty for older runs
+        "agent": variant_agent(outline, agent_events if agent_events is not None else read_agent_events(gdir), strategy),
+        "design": slide_design(outline),
     }
 
 
@@ -236,7 +242,9 @@ def _generation_payload(gid: str) -> dict:
     use_models = meta.get("use_models")
     supplied = bool(meta.get("outline_supplied"))
     ctx = _chain_ctx()
-    variants = [v for s in meta.get("strategies", list(STRATEGY_NAMES)) if (v := _variant_payload(gdir, s, use_models, ctx, supplied))]
+    events = read_agent_events(gdir)
+    variants = [v for s in meta.get("strategies", list(STRATEGY_NAMES)) if (v := _variant_payload(gdir, s, use_models, ctx, supplied, events))]
+    link_alternatives(variants)
     # who planned the decks and, if no model did, why — derived from the variants' warnings, so older runs get it too
     planner = generation_planner(variants, use_models=use_models, supplied=supplied) if variants else meta.get("planner")
     return {**meta, "planner": planner, "variants": variants}
@@ -270,8 +278,10 @@ def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job) -> dic
         autofix=req.autofix,
         audit_models=req.audit_models and use_models,
         exports=req.exports,
-        progress=lambda msg, frac: job.emit(msg, frac),
+        # plain progress messages and the planning agent's step events (the live timeline of the build screen)
+        progress=job_progress(job),
     )
+    write_agent_file(gdir, job.agent_events())
     planners = {}
     supplied = req.outline is not None  # the plan came with the request: no model was asked to plan
     ctx = _chain_ctx()
@@ -321,6 +331,7 @@ def _generation_job(gid: str, gdir: Path, req: GenerateRequest) -> Callable[[Job
         try:
             return _run_generation(gid, gdir, req, job)
         except BaseException as e:
+            write_agent_file(gdir, job.agent_events())  # how far the agent got
             store.merge_generation_meta(gid, {"status": "failed", "job_id": job.id, "error": str(e)[:300]})
             raise
 
@@ -535,9 +546,18 @@ def explain_slide(gid: str, strategy: str, index: int) -> dict:
     manifest = store.manifest(meta.get("template_id", ""))
     if manifest is None or not (vdir / "outline.json").exists():
         raise HTTPException(404, "variant not found")
-    outline = DeckOutline.model_validate_json((vdir / "outline.json").read_text(encoding="utf-8"))
+    raw = json.loads((vdir / "outline.json").read_text(encoding="utf-8"))
+    outline = DeckOutline.model_validate(raw)
     plan = LayoutPlan.model_validate_json((vdir / "layout_plan.json").read_text(encoding="utf-8"))
-    return {"index": index, "text": describe_slide_choice(outline, plan, manifest, index)}
+    gdir = vdir.parent
+    return {"index": index, "text": _explain_text(raw, outline, plan, manifest, index, variant_agent(raw, read_agent_events(gdir), strategy)["critic"])}
+
+
+def _explain_text(raw: Optional[dict], outline: DeckOutline, plan: LayoutPlan, manifest, index: int, critic: list[dict]) -> str:
+    """«Почему слайд N такой»: the designer's reason, the other forms and the critic's notes first (Agent v2), then how
+    the slide was laid out in the template."""
+    design = next((d for d in slide_design(raw) if d["index"] == index), None)
+    return describe_slide_choice(outline, plan, manifest, index, design_note=describe_slide_design(design, critic, index))
 
 
 @app.post("/api/generations/{gid}/{strategy}/fixes")
@@ -613,6 +633,7 @@ def diff_runs(gid: str, strategy: str, other_gid: str, other_strategy: str) -> d
 _GEN_RX = re.compile(r"сгенерируй|(сделай|собери|создай|подготовь)\s+(презентац|слайд|дек|колод)|\bgenerate\b", re.I)
 _INTENT_RULES = [
     ("explain_slide", re.compile(r"(почему|объясни|как выбран|why).*слайд\w*\s*(\d+)|слайд\w*\s*(\d+).*(почему|объясни|why)", re.I)),
+    ("agent", re.compile(r"как\s+(ты\s+|агент\s+)?(работал|действовал|думал|рассуждал)|что\s+(ты\s+|агент\s+)?(сделал|делал)|журнал|ход\s+работы|шаги\s+агента|работ\w*\s+агента|критик", re.I)),
     ("fix_all", re.compile(r"(исправь|почини|поправь)\s+(вс|ошибк|замечан)|fix all|автофикс", re.I)),
     ("audit", re.compile(r"\bаудит(?!ор)\w*|\bпроверь|\bошибк|замечани|\baudit\b|\bissues\b", re.I)),
     ("export", re.compile(r"экспорт|скачать|\bpdf\b|\bhtml\b|download", re.I)),
@@ -666,13 +687,16 @@ def chat(req: ChatRequest) -> dict:
         m = store.manifest(template_id) if template_id else None
         reply = describe_template(m) if m else "Сначала выберите или загрузите шаблон (.pptx) — расскажу, какие в нём цвета, шрифты и макеты слайдов."
         actions.append({"type": "open_tab", "tab": "template"})
-    elif intent in ("plan", "explain_slide", "audit", "export") and gen_id:
+    elif intent in ("plan", "explain_slide", "audit", "export", "agent") and gen_id:
+        if req.strategy:
+            session["strategy"] = req.strategy
         payload = _generation_payload(gen_id)
         variants = payload.get("variants", [])
         if not variants:
             reply = "Презентация ещё собирается — подождите немного."
         else:
-            v = variants[0]
+            # the variant on screen (the UI sends it), else the first one
+            v = next((vv for vv in variants if vv["strategy"] == session.get("strategy")), variants[0])
             manifest = store.manifest(payload["template_id"])
             outline = DeckOutline.model_validate(v["outline"])
             plan = LayoutPlan.model_validate(v["plan"])
@@ -683,9 +707,14 @@ def chat(req: ChatRequest) -> dict:
                 actions.append({"type": "open_tab", "tab": "plan"})
             elif intent == "explain_slide":
                 index = int(params.get("index", 1))
-                reply = describe_slide_choice(outline, plan, manifest, index)
+                reply = _explain_text(v["outline"], outline, plan, manifest, index, v.get("agent", {}).get("critic", []))
+                if len(variants) > 1:
+                    reply = f"Вариант «{name(v)}». " + reply
                 if 1 <= index <= len(outline.slides):
                     actions.append({"type": "open_tab", "tab": "why", "slide": index})
+            elif intent == "agent":
+                reply = describe_agent_work(v.get("agent") or {}, name(v))
+                actions.append({"type": "open_tab", "tab": "agent"})
             elif intent == "audit":
                 reply = "\n\n".join(f"Вариант «{name(vv)}». " + describe_audit(AuditReport.model_validate(vv["audit"])) for vv in variants if vv.get("audit"))
                 actions.append({"type": "open_tab", "tab": "audit"})
@@ -720,7 +749,7 @@ def chat(req: ChatRequest) -> dict:
     else:
         reply = (
             "Я помогу собрать презентацию в стиле вашего шаблона. Можно спросить: «расскажи о шаблоне», «сделай презентацию: <текст>», "
-            "«почему слайд 4 такой», «проверь качество», «исправь всё», «где скачать файлы». Выберите шаблон и пришлите текст."
+            "«почему слайд 4 такой», «как работал агент», «проверь качество», «исправь всё», «где скачать файлы». Выберите шаблон и пришлите текст."
         )
     session["history"].append({"role": "user", "text": req.message})
     session["history"].append({"role": "assistant", "text": reply})

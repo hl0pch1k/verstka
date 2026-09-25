@@ -6,7 +6,7 @@ import { plural } from "../lib/utils";
 import { useApp, type AppState } from "../store";
 import type { ChatResponse, FixResult, Generation, TabKey } from "../types";
 
-const TABS: readonly TabKey[] = ["template", "brief", "plan", "variants", "why", "audit", "export", "run"];
+const TABS: readonly TabKey[] = ["template", "brief", "plan", "variants", "why", "audit", "export", "run", "agent"];
 const asTab = (name: string): TabKey | null => TABS.find((t) => t === name) ?? null;
 
 interface FixOutcome { strategy: string; before: number | null; done: boolean; result: FixResult | null; error: string | null }

@@ -157,6 +157,7 @@ def test_the_chart_takeaway_is_the_change_never_the_last_bar_again():
     outline = DeckOutline(title="t", series=[Series(id="cc", name="Обращения", categories=["Июль", "Август", "Сентябрь"], values=[12, 31, 58], unit="тыс.")])
     spec = ChartSpec(type="column", series_ids=["cc"])
     assert _series_takeaway(spec, outline, "Обращения растут") == ("×4,8", "рост за период июль → сентябрь")
-    # the heading already names the multiple: the panel gives the increase, not «58 тыс.» the bar already shows
-    assert _series_takeaway(spec, outline, "С 12 до 58, рост в 5 раз") == ("+46 тыс.", "прирост за период июль → сентябрь")
+    # the heading already states the change (a multiple, a percent): no second, differently computed measure of it
+    assert _series_takeaway(spec, outline, "С 12 до 58, рост в 5 раз") is None
+    assert _series_takeaway(spec, outline, "Обращения выросли на 383%") is None
     assert _series_takeaway(spec, outline, "Рост в 5 раз: +46 тыс. обращений") is None  # nothing left to add

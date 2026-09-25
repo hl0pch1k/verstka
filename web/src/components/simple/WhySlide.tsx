@@ -1,12 +1,15 @@
-// «Почему слайд такой»: the sample of the template next to the slide made from it, how well it matched, the reasons
-// in words, other layouts that also fit, and the remarks of the quality check. The raw trace stays folded below.
+// «Почему слайд такой»: first the designer's own reason for the form of the slide and the other forms it proposed
+// (Agent v2; one of them may be the form another variant shows), with the critic's notes on it; then the sample of
+// the template next to the slide made from it, the reasons of the layout in words, other layouts that also fit, and
+// the remarks of the quality check. The raw trace stays folded below.
 import { useState } from "react";
-import { ArrowRight, Check, ChevronLeft, ChevronRight, Minus } from "lucide-react";
+import { ArrowRight, Check, ChevronLeft, ChevronRight, Lightbulb, Minus } from "lucide-react";
+import { eventText } from "../../lib/agent";
 import { slideCount } from "../../lib/narrate";
 import { humanReasons } from "../../lib/reasons";
 import { cn, kindLabel } from "../../lib/utils";
 import { useApp } from "../../store";
-import type { LayoutSlide, Pattern } from "../../types";
+import type { LayoutSlide, Pattern, SlideAlternativeInfo, Variant } from "../../types";
 import { IssueLine } from "../AuditIssues";
 import { Button } from "../ui/Button";
 import { Collapsible } from "../ui/Collapsible";
@@ -25,6 +28,96 @@ function Frame({ src, label, aspect, muted }: { src: string | null; label: strin
       </div>
       <figcaption className="mt-2 text-center text-xs font-medium text-zinc-500">{label}</figcaption>
     </figure>
+  );
+}
+
+/** What the slide designer said about the slide: why this form, the other forms, the conclusion, the critic's notes. */
+function DesignNote({ v, index }: { v: Variant; index: number }) {
+  const { strategyTitle, setActiveStrategy, generation } = useApp();
+  const d = v.design?.find((x) => x.index === index) ?? null;
+  const o = v.outline?.slides[index - 1] ?? null;
+  const rationale = d?.rationale ?? o?.rationale ?? null;
+  const alts: SlideAlternativeInfo[] = d?.alternatives ?? (o?.alternatives ?? []).map((a) => ({ kind: a.kind || null, label: null, text: a.change || null }));
+  const takeaway = d?.takeaway ?? o?.takeaway ?? null;
+  const footnote = d?.footnote ?? o?.footnote ?? null;
+  const spec = d?.spec_ref ?? o?.spec_ref ?? null;
+  const notes = (v.agent?.critic ?? []).filter((e) => e.slide === index);
+  if (!rationale && alts.length === 0 && notes.length === 0 && !takeaway) return null;
+  const variantNo = (name: string) => (generation?.variants.findIndex((x) => x.strategy === name) ?? -1) + 1;
+  return (
+    <section className="rounded-3xl bg-white p-6 shadow-card animate-fade-in">
+      <div className="flex items-start gap-3">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent-50 text-accent" aria-hidden>
+          <Lightbulb className="h-[18px] w-[18px]" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h3 className="text-[17px] font-semibold text-zinc-900">Почему такая форма</h3>
+          <p className="text-[13px] text-zinc-500">Решение агента-дизайнера{spec ? ` · в вашем тексте это слайд ${spec}` : ""}</p>
+        </div>
+      </div>
+      {rationale && <p className="mt-4 text-[15px] leading-6 text-zinc-800">{rationale}</p>}
+      {(takeaway || footnote) && (
+        <dl className="mt-3 space-y-1 text-[13px] leading-5">
+          {takeaway && (
+            <div className="flex gap-2">
+              <dt className="shrink-0 font-semibold text-zinc-700">Вывод на слайде:</dt>
+              <dd className="text-zinc-600">{takeaway}</dd>
+            </div>
+          )}
+          {footnote && (
+            <div className="flex gap-2">
+              <dt className="shrink-0 font-semibold text-zinc-700">Сноска:</dt>
+              <dd className="text-zinc-600">{footnote}</dd>
+            </div>
+          )}
+        </dl>
+      )}
+      {alts.length > 0 && (
+        <div className="mt-5">
+          <p className="text-[13px] font-semibold text-zinc-900">Другие формы, которые агент рассматривал</p>
+          <ul className="mt-2 space-y-2">
+            {alts.map((a, i) => {
+              const label = a.label ?? (a.kind ? kindLabel(a.kind) : null);
+              const used = (a.used_in ?? []).filter((s) => s !== v.strategy);
+              return (
+                <li key={i} className="flex items-center gap-3 rounded-2xl bg-zinc-50 px-4 py-2.5">
+                  <span className="min-w-0 flex-1 text-[13px] leading-5">
+                    {label && <span className="font-semibold text-zinc-900">{label.charAt(0).toUpperCase() + label.slice(1)}</span>}
+                    {label && a.text && <span className="text-zinc-400"> — </span>}
+                    {a.text && <span className="text-zinc-600">{a.text}</span>}
+                  </span>
+                  {used.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setActiveStrategy(used[0])}
+                      title="Переключиться на этот вариант"
+                      className="shrink-0 cursor-pointer rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-accent-700 shadow-card transition-colors hover:bg-accent-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/30"
+                    >
+                      так в варианте {variantNo(used[0]) || ""} · {strategyTitle(used[0])}
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+      {notes.length > 0 && (
+        <div className="mt-5">
+          <p className="text-[13px] font-semibold text-zinc-900">Замечания критика и правка</p>
+          <ul className="mt-2 space-y-1.5">
+            {notes.map((e, i) => (
+              <li key={e.seq ?? i} className="flex items-start gap-2.5 text-[13px] leading-5 text-zinc-700">
+                <span className={cn("mt-px inline-flex h-5 shrink-0 items-center rounded-md px-1.5 text-[11px] font-semibold", e.step === "revise" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800")}>
+                  {e.step === "revise" ? "Правка" : "Критик"}
+                </span>
+                <span className="min-w-0 flex-1">{eventText(e)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -85,6 +178,8 @@ export function WhySlide() {
         </div>
         <Button icon={ChevronRight} aria-label="Следующий слайд" disabled={selectedSlide >= total} onClick={() => setSelectedSlide(selectedSlide + 1)} className="rounded-full" />
       </div>
+
+      <DesignNote key={`d${selectedSlide}/${v.strategy}`} v={v} index={selectedSlide} />
 
       <section key={`${selectedSlide}/${rev}`} className="animate-fade-in rounded-3xl bg-white p-6 shadow-card">
         <h3 className="text-[17px] font-semibold text-zinc-900">Как собран слайд</h3>

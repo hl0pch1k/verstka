@@ -15,6 +15,7 @@ export function plannedByText(plannedBy: string | undefined, strategyTitle: (nam
   const model = planner?.model_label ? `модель ${planner.model_label}` : "модель";
   if (by === "supplied") return "ваш готовый план";
   if (by === "model") return model;
+  if (by === "agent") return planner?.model_label ? `агент: слайды продумала модель ${planner.model_label}` : "агент: слайды продумала модель";
   if (by === "skeleton") return "каркас по теме";
   if (by?.startsWith("shared:")) return `${model}, план варианта «${strategyTitle(by.slice(7))}»`;
   if (!by) return "не записано";

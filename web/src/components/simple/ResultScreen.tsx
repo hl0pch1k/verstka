@@ -15,6 +15,7 @@ import { EmptyState } from "../ui/EmptyState";
 import { ScoreRing } from "../ui/ScoreRing";
 import { issuesBySlide, KEY_ISSUES, variantRev, variantScore, withRev } from "../VariantsHelpers";
 import { VariantsSlidePreview } from "../VariantsSlidePreview";
+import { AgentCard } from "./AgentPanel";
 import { useRetryIn } from "./ModelStatus";
 import { SlideLightbox } from "./SlideLightbox";
 import { SlideStrip } from "./SlideStrip";
@@ -28,7 +29,7 @@ const isEditable = (el: EventTarget | null) => {
 
 function MoreLink({ icon: Icon, label, hint, onClick }: { icon: LucideIcon; label: string; hint: string; onClick(): void }) {
   return (
-    <button type="button" onClick={onClick} className="group flex w-full cursor-pointer items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/30">
+    <button type="button" onClick={onClick} className="group flex w-full cursor-pointer items-center gap-3 rounded-xl px-3 py-1.5 text-left transition-colors hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/30">
       <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-zinc-100 text-zinc-600 transition-colors group-hover:bg-white">
         <Icon className="h-4 w-4" aria-hidden />
       </span>
@@ -78,6 +79,8 @@ function Deck({ generation }: { generation: Generation }) {
   }, [selectedSlide, variant, rev]);
 
   const outlineSlide = variant.outline?.slides[selectedSlide - 1] ?? null;
+  // why the designer chose this form (Agent v2): one line under the headline, the whole story in «Почему слайд такой»
+  const why = variant.design?.find((d) => d.index === selectedSlide)?.rationale ?? outlineSlide?.rationale ?? null;
   const raw = variant.slides[selectedSlide - 1];
   const src = raw ? withRev(raw, rev) : null;
   const score = variantScore(variant, generation.summary?.[variant.strategy]?.score);
@@ -246,6 +249,8 @@ function Deck({ generation }: { generation: Generation }) {
             onAspect={setNaturalAspect}
             onZoom={() => setZoom(true)}
             onOpenIssues={() => open("quality")}
+            why={why}
+            onWhy={() => open("why")}
             reserve={notice ? (notice.help ? 104 : 84) : 0}
           />
           <SlideStrip variant={variant} rev={rev} total={total} selected={selectedSlide} aspect={aspect} issueMap={issueMap} onSelect={setSelectedSlide} />
@@ -253,22 +258,24 @@ function Deck({ generation }: { generation: Generation }) {
         </div>
 
         <aside className="space-y-4">
-          <section className="rounded-2xl bg-white p-5 shadow-card">
+          <section className="rounded-2xl bg-white p-4 shadow-card">
             <div className="flex items-center gap-4">
-              <ScoreRing score={score} size={60} stroke={5} />
+              <ScoreRing score={score} size={56} stroke={5} />
               <div className="min-w-0">
                 <p className="text-[15px] font-semibold text-zinc-900">Проверка качества</p>
                 <p className="text-[13px] leading-5 text-zinc-500">{quality}</p>
+                <button type="button" onClick={() => open("quality")} className="mt-0.5 inline-flex cursor-pointer items-center gap-1 text-[13px] font-semibold text-accent-700 hover:underline focus:outline-none focus-visible:underline">
+                  <ShieldCheck className="h-3.5 w-3.5" aria-hidden /> {errors ? "Посмотреть и исправить" : "Что проверено"}
+                </button>
               </div>
             </div>
-            <Button variant="tonal" block icon={ShieldCheck} className="mt-4" onClick={() => open("quality")}>
-              {errors ? "Посмотреть и исправить" : "Что проверено"}
-            </Button>
           </section>
+
+          <AgentCard variant={variant} onOpen={() => open("agent")} />
 
           <section className="rounded-2xl bg-white p-2 shadow-card">
             <p className="px-3 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-zinc-400">Подробнее</p>
-            <MoreLink icon={HelpCircle} label="Почему слайд такой" hint={`Слайд ${selectedSlide}: макет и причины`} onClick={() => open("why")} />
+            <MoreLink icon={HelpCircle} label="Почему слайд такой" hint={why ? `Слайд ${selectedSlide}: замысел и макет` : `Слайд ${selectedSlide}: макет и причины`} onClick={() => open("why")} />
             <MoreLink icon={ListTree} label="План презентации" hint="Структура и цифры из текста" onClick={() => open("plan")} />
             <MoreLink icon={LayoutTemplate} label="Что понято из шаблона" hint="Цвета, шрифты, макеты" onClick={() => open("template")} />
             <MoreLink icon={Wrench} label="Файлы и детали" hint="PPTX, PDF, HTML, JSON" onClick={() => open("tech")} />

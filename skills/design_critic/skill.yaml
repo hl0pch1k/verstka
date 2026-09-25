@@ -1,0 +1,38 @@
+name: design_critic
+version: 1.2.0
+role: llm
+description: >
+  Reviews one variant's plan against the brief and the user's rules (Agent v2): every requested chart, table,
+  formula, footnote and conclusion present with data; no two neighbouring slides of the same kind when another
+  form fits; no text walls; headlines are conclusions; numbers only from the brief; the deck tells a story.
+  Returns at most 6 issues, each with the slide number, the problem and the fix. The designer revises only the
+  flagged slides, once.
+prompt_files:
+  system: prompts/system.md
+  user: prompts/user.md
+output_schema: verstka.schemas.agent.CritiqueAnswer
+params:
+  temperature: 0.1
+  max_tokens: 900
+changelog:
+  - "1.0.0: initial version (Agent v2): one call per variant on a compact plan (one line per slide: kind, headline,
+    what the slide shows), the requests per slide and the brief; small answer."
+  - "1.1.0: live run on Cloud.ru Qwen3-32B: the critic claimed figures of the brief were «not in the brief» (300,
+    27 000) and the revision dropped a table column; it reported neighbours «of the same form» that were not. Now it
+    does not check numbers (grounding does, by value) nor requested charts / tables (the compiler adds them); it checks
+    topic headlines, a slide leaving out its own lists, text walls, a takeaway repeating the headline, same-form
+    neighbours (as the plan's brackets show), the story; at most 5 issues. The agent checks each note before a slide
+    is redone and drops what the plan contradicts (planning/agent.py _false_alarm): a figure «not in the brief» that
+    the brief has, same-form neighbours that are not, a takeaway «repeating» a headline it does not repeat, a slide
+    «overloaded» with at most 6 lines and 70 words («4 пункта превышает рекомендуемое»), a «topic» headline that
+    states something. Next to the critic, the agent's own check (coverage_gaps) sends back a slide that left out a
+    list its brief text gives, or kept the user's topic heading as the headline."
+  - "1.2.0: review of the live decks: nothing checked meaning — grounding compares values, and the critic had been told
+    not to report numbers, while the agent dropped every «not in the brief» note without a figure. Now the critic
+    checks meaning first (a figure given a meaning its source sentence does not give, a claim the source does not
+    make, a plan or forecast stated as done), announced lists as headlines («Три направления…»), a missing goal or
+    total, a takeaway that repeats a line; it still leaves the values themselves to the program. The agent keeps every
+    note on meaning (_false_alarm drops a «not in the brief» note only when each quoted figure is written in the brief
+    as it is and the note says nothing about meaning), tests a vague headline as a topic before a repeat, and acts on a
+    «takeaway repeats the headline» note itself (the source's own result, no model call). Variants whose plans are the
+    same share one critic call; the brief the critic reads is capped at 6 000 characters."

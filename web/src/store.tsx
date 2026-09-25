@@ -3,15 +3,20 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { api, ApiError } from "./api";
 import { pushToast } from "./components/ui/Toasts";
 import { generationFlow, uploadTemplateFlow } from "./lib/flows";
+import { addAgentEvent, laterPhase, phaseOfEvent, toAgentEvent, type PhaseKey } from "./lib/agent";
 import { humanizeJobMessage, variantProgress, type VariantProgress } from "./lib/jobText";
 import { trackJob } from "./lib/jobs";
 import { errText, firstLine, newestTemplate, slideCount } from "./lib/narrate";
 import { LS, storage, uid } from "./lib/utils";
 import type {
-  ChatMessage, DetailKey, GenerateRequest, Generation, GenerationMeta, Health, Job, JobKind, JobStatus, ModelsStatus, Screen, StrategyInfo, TabKey, TemplateListItem, TemplateManifest, Variant,
+  AgentEvent, ChatMessage, DetailKey, GenerateRequest, Generation, GenerationMeta, Health, Job, JobKind, JobStatus, ModelsStatus, Screen, StrategyInfo, TabKey, TemplateListItem, TemplateManifest, Variant,
 } from "./types";
 
-export interface ActiveJob { id: string; label: string; progress: number; message: string; status: JobStatus; kind: JobKind; startedAt: number; items?: string[]; variants?: Record<string, VariantProgress> }
+export interface ActiveJob {
+  id: string; label: string; progress: number; message: string; status: JobStatus; kind: JobKind; startedAt: number; items?: string[]; variants?: Record<string, VariantProgress>;
+  /** The planning agent's steps so far (Agent v2) and the latest phase of the timeline the job has reached. */
+  agent?: AgentEvent[]; phase?: PhaseKey | null;
+}
 /** `items`: what the job works on (the strategies of a generation) — the build screen shows one card per item. */
 export interface RunJobOptions { kind?: JobKind; items?: string[]; onDone?: (job: Job) => void; onFailed?: (job: Job) => void }
 
@@ -73,6 +78,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [detail, setDetail] = useState<DetailKey | null>(null);
   const setTab = useCallback((t: TabKey) => {
     if (t === "template") return setDetail("template");
+    if (t === "agent") {
+      setScreen("result");
+      return setDetail("agent");
+    }
     if (t === "brief") {
       setScreen("create");
       return setDetail(null);
@@ -209,9 +218,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const stop = trackJob(jobId, {
       onEvent: (ev) => {
         if (ev.status === "done" || ev.status === "failed") return; // settled below, once the full job record is fetched
-        const message = ev.message ? humanizeJobMessage(ev.message, (name) => titleIn(latest.current.strategies, name)) : "";
-        // every event is folded in here (renders may coalesce several): the per-variant cards never miss a step
-        const step = ev.message ? variantProgress(ev.message) : null;
+        const agent = ev.type === "agent";
+        // the agent speaks plain Russian already; the pipeline's own messages are for logs and get translated
+        const message = agent ? ev.message : ev.message ? humanizeJobMessage(ev.message, (name) => titleIn(latest.current.strategies, name)) : "";
+        // every event is folded in here (renders may coalesce several): the per-variant cards and the agent's
+        // timeline never miss a step
+        const step = !agent && ev.message ? variantProgress(ev.message) : null;
+        const phase = phaseOfEvent(ev);
         setActiveJob((cur) =>
           cur && cur.id === jobId
             ? {
@@ -220,6 +233,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
                 progress: Math.max(cur.progress, clamp01(ev.progress)),
                 message: message || cur.message,
                 variants: step ? { ...cur.variants, [step.name]: step.state } : cur.variants,
+                agent: agent ? addAgentEvent(cur.agent, toAgentEvent(ev)) : cur.agent,
+                phase: laterPhase(cur.phase, phase),
               }
             : cur,
         );

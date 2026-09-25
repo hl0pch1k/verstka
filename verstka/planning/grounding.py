@@ -47,8 +47,15 @@ before anything is rendered:
   в день»: a paraphrase) — and so does a slide left without them («План масштабирования: Фаза 1 …»,
   «Рекомендации по действию»). A section label («Детали», «План или сроки»), a table caption and a quotation's author
   must be the brief's words. Headings, dividers, the agenda and the closing slide are not judged by their words.
-- title: the deck's title is grounded in the brief's title line or its first statement, otherwise it is the brief's
-  own title.
+- title: the deck's title is grounded in the brief's title line («Название: «Больше прибыли с каждой чашки»»), its
+  first statement, otherwise it is the brief's own title.
+- Agent v2 (planning/compile.py runs this pass with the brief's structure): every value of a chart — registry series,
+  the data written into a chart and its second chart — is a figure of the brief (a value in «тыс. ₽» counts in
+  thousands); when the brief allows it («Денежные суммы на диаграммах можно округлять до тысяч рублей») a chart value
+  may be the brief's rounded to that step. A formula keeps every operand of the brief or goes whole; a takeaway and a
+  footnote lose the clauses of invented figures like any line, never for their words. A slide the user asked for
+  («Слайд 3.», `spec_ref`) is never dropped: only its invented figures (and placeholders) go, the model's wording
+  stays — the words check is for slides nobody asked for.
 
 The pass never adds content: a deck may come out shorter than its target, which is what the brief supports. It is
 idempotent and reports what it changed as warning lines («grounding: …»).
@@ -64,8 +71,9 @@ from typing import Iterable, Optional, Union
 
 from verstka.planning import heuristics as H
 from verstka.planning.plan_json import ALLOWED_KINDS, has_body, kind_by_content
+from verstka.schemas.brief_structure import BriefStructure
 from verstka.schemas.common import PatternKind as K
-from verstka.schemas.outline import Brief, DeckOutline, Fact, NumberCallout, OutlineSlide, Series, SlideItem
+from verstka.schemas.outline import Brief, ChartSpec, DeckOutline, Fact, NumberCallout, OutlineSlide, Series, SlideContent, SlideItem
 
 # ------------------------------------------------------------------ figures
 
@@ -108,7 +116,7 @@ _DATE_RE = re.compile(
 )
 # «Этап 1», «Неделя 2», «Шаг 3»: a step's number, not a figure
 _ORDINAL_BEFORE_RE = re.compile(
-    r"(?<![\wё])(?:этап\w*|шаг\w*|фаз\w*|недел\w*|волн\w*|спринт\w*|итераци\w*|верси\w*|вариант\w*|уров\w*|пункт\w*|step|phase|stage|week|wave|sprint|version|option|level|№|#)\s*$",
+    r"(?<![\wё])(?:этап\w*|шаг\w*|фаз\w*|недел\w*|волн\w*|спринт\w*|итераци\w*|верси\w*|вариант\w*|уров\w*|пункт\w*|слайд\w*|step|phase|stage|week|wave|sprint|version|option|level|slide|№|#)\s*$",
     re.I,
 )
 _LIST_NUMBER_RE = re.compile(r"^\s*\d{1,2}[.)]\s")
@@ -121,11 +129,20 @@ _CHANGE_RE = re.compile(
     re.I,
 )
 _SAVING_RE = re.compile(r"(?:эконом|сэконом|sav)", re.I)
+# the size of a change written without a verb of change: «на 238 500 рублей больше текущей» (a difference), «Рост
+# составит 112,3%», «Прирост — 15%» (a change noun and its size)
+_COMPARE_AFTER_RE = re.compile(r"\s*(?:больше|меньше|выше|ниже|дороже|дешевле|more|less|higher|lower)(?![\wё])", re.I)
+_SIZE_BEFORE_RE = re.compile(
+    r"(?<![\wё])(?:рост|прирост|снижение|сокращение|увеличение|уменьшение|падение)(?:\s+[\wё]+){0,3}\s*(?:состав\w*|—|–|:)\s*"
+    r"(?:(?:примерно|около|почти|порядка|более|менее|свыше)\s+)?$",
+    re.I,
+)
 # a change written with its ends: «с 47 до 29», «от 1 200 до 12 400», «47 → 29»; a range «8–25 секунд»
 _FROM_RE = re.compile(r"(?<![\wё])(?:с|со|от|from)\s*$", re.I)
 _ARROW_BETWEEN_RE = re.compile(r"\s*(?:→|->|—>|=>)\s*")
 _TO_BETWEEN_RE = re.compile(r"\s*(?:до|по|to)\s*", re.I)
 _RANGE_BETWEEN_RE = re.compile(r"[–—-]")
+_SLASH_BETWEEN_RE = re.compile(r"\s*/\s*")  # «Сейчас / Цель: 465 000 / 508 000 рублей» — the unit written once
 # «на 18 минут» (the size of a change), «до 29 минут» (the level it came to)
 _PREP_RE = re.compile(r"(?<![\wё])(на|до|by|to)\s*[−+\-–]?\s*$", re.I)
 _NEXT_WORD_RE = re.compile(rf"{_SP}*([а-яёa-z]+)", re.I)
@@ -397,8 +414,8 @@ def figures(text: str) -> list[Fig]:
     """The figures of a text, each with the unit written right after it («47 минут», «14,5 млн ₽», «64%», «15млн»,
     «13K»), dates and figures in words. Digits of a name («Qwen3.8», «Q3») are not figures. A unit written once is the
     unit of both values of a change or a range: «с 47 до 29 минут», «8–25 секунд», «с 47 минут до 29», «12 дней → 4»,
-    «было 47, стало 29 минут», «до внедрения 12 дней, после — 4», and of the figures after a label that names it
-    («Срок, дней: 12 → 4»)."""
+    «было 47, стало 29 минут», «до внедрения 12 дней, после — 4», «465 000 / 508 000 рублей», and of the figures
+    after a label that names it («Срок, дней: 12 → 4»)."""
     names = [(a, b) for a, b, _ in name_tokens(text)]
     out: list[Fig] = [f for f in _dates(text) if not any(a < f.uend and f.start < b for a, b in names)]
     spans = [(f.start, f.uend) for f in out]
@@ -434,8 +451,8 @@ def figures(text: str) -> list[Fig]:
             continue
         between = text[a.uend : b.start]
         written = bool(_ARROW_BETWEEN_RE.fullmatch(between) or (_TO_BETWEEN_RE.fullmatch(between) and _FROM_RE.search(text[: a.start])))
-        if a_bare and (written or _RANGE_BETWEEN_RE.fullmatch(between)):
-            a.unit, a.scale, a.inherited = b.unit, b.scale, True  # «с 47 до 29 минут», «8–25 секунд»
+        if a_bare and (written or _RANGE_BETWEEN_RE.fullmatch(between) or _SLASH_BETWEEN_RE.fullmatch(between)):
+            a.unit, a.scale, a.inherited = b.unit, b.scale, True  # «с 47 до 29 минут», «8–25 секунд», «465 000 / 508 000 рублей»
         elif b_bare and written:
             b.unit, b.scale, b.inherited = a.unit, a.scale, True  # «с 47 минут до 29», «12 дней → 4»
         elif _LATER_BETWEEN_RE.fullmatch(between) and (
@@ -445,6 +462,16 @@ def figures(text: str) -> list[Fig]:
             # without a unit stands alone, the unit is its pair's
             x, y = (a, b) if a_bare else (b, a)
             x.unit, x.scale, x.inherited = y.unit, y.scale, True
+    for f in out:
+        # «более чем в 2 раза», «почти 2,1», «примерно на 112%»: the side of the true value the figure says it is on
+        if f.hedge is None and not f.approx and f.date is None:
+            hm = _HEDGE_BEFORE_RE.search(text, max(0, f.start - 40), f.start)
+            side = _HEDGE_SIDE[hm.group("h").lower()] if hm else None
+            # «больше на 450» is a difference, «более чем на 30%» and «более 900 000» are hedges
+            if side in ("gt", "lt") and re.search(r"(?:на|в|у|за)\s+$", hm.group(0), re.I) and not re.search(r"\sчем\s", hm.group(0), re.I):
+                side = None
+            if side:
+                f.hedge = side
     lm = _LABEL_UNIT_RE.match(text)
     um = _UNIT_IN_RE.fullmatch(_PER_RE.sub("", lm.group("unit")).strip()) if lm else None
     if lm and um:
@@ -484,6 +511,10 @@ class _Placed:
     earlier: bool = False  # it is written as the earlier value: «было 41», «с 47», «в 2024 году»
     seq: int = -1  # its place among the figures of the brief's text: a figure's neighbours are seq ± 1
     context: bool = False  # its sentence speaks of a change or a comparison (see _CONTEXT_RE): a lenient «changed»
+    ctx: Optional[frozenset] = None  # the subject stems of its label («зарплаты — в 270 000 рублей»: {зарплат}); None: none
+    base: bool = False  # its label is the base of a share («35% выручки»), not its subject
+    lead: frozenset = frozenset()  # the stems of the lead its list or sentence has («Прогноз выручки: …»)
+    future: bool = False  # it is a plan, a target or a forecast («составит», «Цель», «к шестому месяцу»)
 
 
 @dataclass
@@ -493,6 +524,7 @@ class _BriefFigures:
     ranges: set[frozenset[int]] = field(default_factory=set)  # «месяц 1–2», «8–25 секунд»: not a change
     shares: list[float] = field(default_factory=list)  # «в 6 случаях из 30»: 20%
     stated: list[tuple[set[str], "_Stems"]] = field(default_factory=list)  # the changes it states: directions, subjects
+    texts: dict[int, str] = field(default_factory=dict)  # sentence group → its text
 
 
 def _clauses(text: str, pos: int = 0, end: Optional[int] = None) -> list[tuple[int, int]]:
@@ -587,6 +619,19 @@ def _prep(text: str, f: Fig) -> Optional[str]:
     return "by"
 
 
+def _change_context(text: str, f: Fig) -> bool:
+    """The text speaks of `f` as a change or a difference: «на 30 рублей», «в 2 раза», «+15», «рост 112%», «на 238 500
+    больше», a change word in its clause."""
+    if f.unit == "times" or _prep(text, f) == "by" or _COMPARE_AFTER_RE.match(text, f.uend):
+        return True
+    if re.search(r"[+−]\s*$", text[max(0, f.start - 2) : f.start]):
+        return True
+    for a, b in _clauses(text):
+        if a <= f.start < b:
+            return bool(_CHANGE_RE.search(text, a, b) or re.search(r"(?<![\wё])(?:разниц|прирост|больше|меньше|выше|ниже|дополнительн|эконом|сэконом|быстрее|дешевле|дороже)\w*", text[a:b], re.I))
+    return False
+
+
 def _pair_written(text: str, a: Fig, b: Fig) -> bool:
     """«с 47 до 29 минут», «от 1 200 до 12 400», «47 → 29»: a change with both ends."""
     between = text[a.uend : b.start]
@@ -651,6 +696,93 @@ def _whens(sn: str, figs: list[Fig], cands: list[Fig]) -> dict[int, int]:
     return out
 
 
+# words that name no subject of a figure (a measure's frame, a period, a change, a plan): «доля», «месяц», «составит»
+_GENERIC_STEMS = (
+    "дол", "процент", "рубл", "руб", "тыс", "млн", "сумм", "итог", "всег", "общ", "состав", "стои", "обход", "показател",
+    "значен", "уров", "величин", "текущ", "нынешн", "сейчас", "цел", "план", "прогноз", "рост", "раст", "выраст", "вырос",
+    "увелич", "сниж", "сниз", "сократ", "сокращ", "достиг", "будет", "стан", "ожида", "получ", "потреб", "месяц", "месяч",
+    "ежемесяч", "ежеднев", "недел", "год", "дней", "дня", "ден", "раз", "перв", "втор", "трет", "четв", "пят", "шест",
+    "седьм", "восьм", "девят", "десят", "примерн", "около", "более", "менее", "почт", "нужн", "покаж", "диаграм", "график",
+    "кругов", "столбч", "линейн", "структур", "распредел", "сравнен", "добав", "дополнит", "сделай", "таблиц", "слайд",
+    "вывод", "финальн", "главн", "основн", "ключев", "включ", "учит", "част", "прочи", "друг", "из", "эт",
+    "январ", "феврал", "март", "апрел", "мае", "май", "мая", "июн", "июл", "август", "сентябр", "октябр", "ноябр", "декабр",
+    "квартал", "полугод", "начал", "конц", "пилот",
+)
+_FUTURE_RE = re.compile(
+    r"(?<![\wё])(?:цел[ьиеюя]\w*|план\w*|прогноз\w*|планир\w*|будет|будут|составит|составят|вырастет|вырастут|увеличится|"
+    r"увеличатся|увеличит|снизится|снизятся|снизит|сократится|сократятся|сократит|достигнет|достигнут|дадут|даст|потребуется|"
+    r"потребуют|принес[её]т|окупится|ожида\w*|предполага\w*|пойд[её]т|останется|к\s+\S+\s+месяцу|к\s+концу|через\s+\S+\s+месяц\w*)",
+    re.I,
+)
+_NOW_BEFORE_RE = re.compile(r"(?<![\wё])(?:нынешн\w*|текущ\w*|сейчас|сегодня|было|исходн\w*|против|с|со|от)\s+(?:\S+\s+)?$", re.I)
+_PAIR_LEAD_RE = re.compile(r"(?:сейчас|было|до|текущ\w*|факт)\s*/\s*(?:цель|стало|после|прогноз|план)", re.I)
+_HEADING_LINE_RE = re.compile(r"^\s*(?:слайд|slide)\s*\d{1,2}\b", re.I)
+_DASH_LINE_RE = re.compile(r"^\s*[—–\-•*·]\s+")
+_CTX_STOP_RE = re.compile(r"[,;!?]|\.(?!\d)|\s(?:а|но|и|—|–)\s")
+_PAIR_BETWEEN_RE = re.compile(r"\s*(?:[^\s\d]{1,12}\s*)?(?:до|по|из|→|->|/|—|–|-)\s*", re.I)
+
+
+_MARKER_WORDS = frozenset(
+    """было был была были стало стал стала стали станет станут теперь после раньше ранее прежде против вместо итого всего
+    больше меньше выше ниже число числа количество количества""".split()
+)
+
+
+def _subject(text: str) -> frozenset:
+    """The stems of a text that can name a figure's subject: content words, no measure, period or before/after words."""
+    words = " ".join(w for w in _WORD_RE.findall(text or "") if w.lower() not in _MARKER_WORDS)
+    return frozenset(s for s in content_stems(words, neutral=True) if not s.startswith(_GENERIC_STEMS))
+
+
+class _BaseLabel(frozenset):
+    """The words after a share that name its base, not its subject («35% выручки»): compared leniently."""
+
+
+def _figure_labels(sn: str, figs: list[Fig], line: bool = False) -> list[frozenset]:
+    """For each figure of a sentence (or a list line), the subject its label gives: the words since the figure before
+    it (or since a colon — «структуры выручки: кофе — 60%» labels 60% «кофе»), and after it up to the next figure or
+    the clause's end («… 35% выручки»). The words before a colon count when the label after it has none."""
+    out: list[frozenset] = []
+    for k, f in enumerate(figs):
+        prev_end = figs[k - 1].uend if k else 0
+        # its own clause: after the last comma since the figure before it («1 950 пользователей, 3,2 секунды на …»),
+        # after a colon when the words after it name something («структуры выручки: кофе — 60%»)
+        seg = prev_end
+        if k:  # the first figure's label may hold a comma of its own («продукты, упаковка и списания — 315 000»)
+            for m in re.finditer(r"[,;]\s", sn[prev_end : f.start]):
+                seg = prev_end + m.end()
+        colon = sn.rfind(":", seg, f.start)
+        before = sn[(colon + 1) if colon >= 0 else seg : f.start]
+        if not _subject(before):
+            before = sn[seg : f.start]
+        if k and re.search(r"[×*=+÷·]|\s[xх/]\s", sn[figs[k - 1].end : f.start]):
+            before = ""  # a formula («100 покупок × 300 рублей»): the words before an operand are the previous one's unit
+        nxt = figs[k + 1].start if k + 1 < len(figs) else len(sn)
+        m = _CTX_STOP_RE.search(sn, f.uend, nxt)
+        after = sn[f.uend : m.start() if m else nxt]
+        paired = bool(k) and bool(_PAIR_BETWEEN_RE.fullmatch(sn[figs[k - 1].end : f.start]))
+        # a share's words after it are its base («35% выручки», «13,3% выручки»), not its subject: they count only
+        # when nothing before names one («65% покупок приходится на утренние часы»)
+        if f.unit in ("pct", "pp"):
+            label = _subject(before) or (out[k - 1] if paired else frozenset())
+            if not label and _subject(after):
+                label = _BaseLabel(_subject(after))
+            elif line and label:
+                label = label | _subject(after)  # a slide's line: «Первый набор: 71% студентов дошли до конца»
+        else:
+            label = _subject(f"{before} {after}")
+        if paired:
+            label = label | out[k - 1]  # «с 13,3% до 22,4%», «100 / 115», «8–25 секунд»: one label for both ends
+        if not label:
+            # «доля покупателей, вернувшихся в течение 30 дней, — 25%»: the label stands before another figure — the
+            # words no figure before it has taken («Бюджет 14,5 млн ₽ и 29 минут»: «бюджет» is 14,5's)
+            start = sn.rfind(":", 0, f.start)
+            taken = frozenset().union(*out) if out else frozenset()
+            label = _subject(sn[start + 1 if start >= 0 else 0 : f.start]) - taken
+        out.append(label)
+    return out
+
+
 def _brief_figures(text: str) -> _BriefFigures:
     """Every figure of the brief; a table cell without a unit takes the unit its row or its header names. What the
     brief says of each: whether it states a change of it, whether it is a change's size, whether it is the earlier
@@ -663,6 +795,9 @@ def _brief_figures(text: str) -> _BriefFigures:
     header_unit: Optional[tuple[Optional[str], float]] = None
     col_units: list[Optional[tuple[Optional[str], float]]] = []
     in_table = False
+    header_cells: list[str] = []
+    heading = ""  # the heading of the block («Слайд 4. Вложения и прогноз роста»)
+    lead_line = ""  # the lead of a dash list («Ежемесячные расходы:», «Сделай сравнительную таблицу «Сейчас / Цель»:»)
     group = 0
     sides: dict[int, tuple[str, int, int]] = {}
     whens: dict[int, int] = {}
@@ -678,6 +813,7 @@ def _brief_figures(text: str) -> _BriefFigures:
                 in_table = True
                 header_unit = _unit_in(cells[0]) if cells else None
                 col_units = [_unit_in(c) for c in cells]
+                header_cells = cells
                 for j, c in enumerate(cells):
                     out.extend(_Placed(f, group, j, True, _ordinal(c, f)) for f in figures(c))
                 continue
@@ -688,7 +824,9 @@ def _brief_figures(text: str) -> _BriefFigures:
                     u = row_unit or (col_units[j] if j < len(col_units) else None)
                     if f.unit is None and f.scale == 1.0 and f.date is None and j > 0 and u is not None:
                         f.unit, f.scale = u
-                    row.append(_Placed(f, group, j, True, False))
+                    q = _Placed(f, group, j, True, False, ctx=_subject(cells[0]) if j > 0 else None, lead=_subject(heading))
+                    q.future = j > 0 and j < len(header_cells) and bool(re.search(r"цел|план|прогноз|после|стало|target|after|plan|forecast", header_cells[j], re.I))
+                    row.append(q)
             # a row of several figures is a series (months, years): the figures of a dynamic, a change is its reading
             for x in row:
                 x.changed = len(row) >= 2 or any(_CHANGE_RE.search(c) for c in cells)
@@ -700,12 +838,30 @@ def _brief_figures(text: str) -> _BriefFigures:
             continue
         in_table = False
         if not s:
+            lead_line = ""
             continue
+        if _HEADING_LINE_RE.match(s):
+            heading, lead_line = s, ""
+        dash = bool(_DASH_LINE_RE.match(s))
+        if not dash and not s.endswith(":"):
+            lead_line = ""
         for sn in H.split_sentences(s) or [s]:
             group += 1
             texts[group] = sn
             figs = figures(sn)
             placed = {id(f): _Placed(f, group, k, False, _ordinal(sn, f)) for k, f in enumerate(figs)}
+            labels = _figure_labels(sn, figs)
+            sn_future = bool(_FUTURE_RE.search(sn)) or (dash and bool(_FUTURE_RE.search(lead_line))) or (bool(_FUTURE_RE.search(heading)) and bool(_CHANGE_RE.search(sn)))
+            pair_lead = dash and bool(_PAIR_LEAD_RE.search(lead_line))
+            lead_stems = _subject(f"{heading} {lead_line if dash else ''} {sn[: sn.rfind(':')] if ':' in sn else ''}")
+            for k, f in enumerate(figs):
+                q = placed[id(f)]
+                q.ctx, q.lead, q.base = labels[k], lead_stems, isinstance(labels[k], _BaseLabel)
+                if pair_lead:
+                    # «— покупки в день: 100 / 115» under «Сейчас / Цель»: the second value is the target
+                    q.future = k % 2 == 1 and bool(_SLASH_BETWEEN_RE.fullmatch(sn[figs[k - 1].uend : f.start]))
+                else:
+                    q.future = sn_future and not _NOW_BEFORE_RE.search(sn, max(0, f.start - 30), f.start)
             for words, gov, _ in _change_governed(sn, [f for f in figs if not placed[id(f)].ordinal]):
                 saving = any(_SAVING_RE.match(sn, a) for a, _ in words)
                 for f in gov:
@@ -713,6 +869,16 @@ def _brief_figures(text: str) -> _BriefFigures:
                     p.changed = True
                     p.saving = p.saving or saving
                     p.delta = p.delta or saving or _prep(sn, f) == "by"
+            # a change's size the verb of another clause speaks for («выручка увеличивается на 26,5%, а прибыль —
+            # примерно на 112%»), a difference («на 238 500 рублей больше»), a change noun's size («Рост составит 112,3%»)
+            change_sn = bool(_CHANGE_RE.search(sn))
+            for f in figs:
+                p = placed[id(f)]
+                if p.ordinal or f.date is not None or _is_year(f):
+                    continue
+                by = _prep(sn, f) == "by"
+                if (by and (change_sn or _COMPARE_AFTER_RE.match(sn, f.uend))) or (p.changed and _SIZE_BEFORE_RE.search(sn, 0, f.start)):
+                    p.changed = p.delta = True
             for a, b in _clauses(sn):
                 if _CHANGE_RE.search(sn, a, b):
                     dirs, stems = _change_subject(sn, a, b)
@@ -732,7 +898,11 @@ def _brief_figures(text: str) -> _BriefFigures:
             for f, y in _whens(sn, figs, cands).items():
                 whens[id(next(p for p in placed.values() if id(p.fig) == f))] = y
             out.extend(placed[id(f)] for f in figs)
+        if s.endswith(":"):
+            lead_line = s
+    res.texts = texts
     text_figs = [p for p in out if not p.cell and not p.ordinal and p.fig.date is None and not _is_year(p.fig) and not p.fig.approx]
+    by_id = {id(p): p for p in out}
     for k, p in enumerate(text_figs):
         p.seq = k
     def marks(rx: re.Pattern, sn: str) -> bool:
@@ -769,6 +939,7 @@ def _brief_figures(text: str) -> _BriefFigures:
     for p in text_figs:
         if sides.get(id(p), ("",))[0] == "earlier":
             p.earlier = True
+            p.future = False
     for pa, pb in combinations(text_figs, 2):
         if abs(pa.group - pb.group) > 1:
             continue
@@ -799,10 +970,53 @@ def _brief_figures(text: str) -> _BriefFigures:
             continue
         pa.changed = pb.changed = True
         first.earlier = True
+        first.future = False
         res.pairs.add(frozenset((id(pa), id(pb))))
         up = "up" if (pb if first is pa else pa).fig.mag > first.fig.mag else "down"
         for g in {pa.group, pb.group}:
             res.stated.append(({up}, _Stems(content_stems(_LATER_MARK_RE.sub(" ", _EARLIER_MARK_RE.sub(" ", texts[g])), neutral=True))))
+    # the two values of a change share their label: «Время ответа: было 47, стало 29 минут» labels 29 too, and so
+    # does a level the next sentence says changed («тратят 47 минут на чтение чатов» … «время сократилось до 29 минут»)
+    ends_of = [[by_id[i] for i in pair if i in by_id] for pair in res.pairs]
+    # «До миграции: 1 950 пользователей, 3,2 секунды … После миграции: 2 400 пользователей, 0,8 секунды»: two
+    # sentences of a before/after, their figures of one unit in the same order
+    groups = sorted({p.group for p in text_figs if p.context})
+    for g in groups:
+        for unit in {p.fig.unit for p in text_figs if p.group == g}:
+            a = [p for p in text_figs if p.group == g and p.fig.unit == unit]
+            if len(a) == 2:
+                ends_of.append(a)  # «В мае 18 000 заказов, в августе — 31 000»: one measure at two times
+            b = [p for p in text_figs if p.group == g + 1 and p.fig.unit == unit] if g + 1 in groups else []
+            if a and len(a) == len(b):
+                ends_of.extend([x, y] for x, y in zip(a, b))
+    for p in text_figs:
+        if p.changed and not p.delta and p.fig.unit is not None:
+            q = next((x for x in text_figs if x.seq == p.seq - 1 and x.group in (p.group - 1, p.group - 2) and x.fig.unit == p.fig.unit and not x.changed), None)
+            if q is not None:
+                ends_of.append([q, p])
+    # one label for every figure linked so (transitively: «тратили 47 минут» … «сократилось с 47 минут до 29»)
+    parent: dict[int, int] = {}
+
+    def find(i: int) -> int:
+        while parent.get(i, i) != i:
+            i = parent[i]
+        return i
+
+    for ends in ends_of:
+        if len(ends) == 2:
+            ra, rb = find(id(ends[0])), find(id(ends[1]))
+            if ra != rb:
+                parent[ra] = rb
+    linked = {i for e in ends_of if len(e) == 2 for i in (id(e[0]), id(e[1]))}
+    comps: dict[int, list[_Placed]] = {}
+    for p in out:
+        if id(p) in linked:
+            comps.setdefault(find(id(p)), []).append(p)
+    for members in comps.values():
+        both = frozenset().union(*[m.ctx or frozenset() for m in members])
+        base = all(m.base for m in members)
+        for m in members:
+            m.ctx, m.base = both, base
     return res
 
 
@@ -843,6 +1057,42 @@ def _approx_ok(f: Fig, v: float, tol: float) -> bool:
     if f.hedge == "about":
         return abs(d) <= 5.0
     return abs(d) <= tol
+
+
+def _hedged_ok(f: Fig, v: float) -> bool:
+    """A hedged figure in digits against the true value `v` (in the figure's scale): «более чем в 2 раза» for 2,12
+    (above it, not far), «почти 2,1 раза» only for a value just under 2,1, «примерно на 112%» for 112,3."""
+    x = f.value
+    if not x:
+        return False
+    if f.hedge == "gt":
+        return x < v <= x * 1.5 + (15.0 if f.unit in ("pct", "pp") else 0.0)
+    if f.hedge == "lt":
+        return x * 0.5 <= v < x
+    if f.hedge == "almost":
+        return x * 0.9 <= v < x
+    if f.hedge == "about":
+        return abs(v - x) <= 0.05 * max(abs(v), abs(x)) or _eq(_half_up(v, f.dec), x)
+    return False
+
+
+def _same_unit(a: Fig, b: Fig) -> bool:
+    return a.unit == b.unit or ({a.unit, b.unit} <= {"pct", "pp"})
+
+
+def _stems_meet(a: Iterable[str], b: Iterable[str]) -> bool:
+    """Two sets of stems share a word (a stem of the other's by four letters or more: «зарплат» / «зарплаты»)."""
+    bs = list(b)
+    if not bs:
+        return False
+    for x in a:
+        for y in bs:
+            k = min(len(x), len(y), 5)
+            if k >= 4 and x[:k] == y[:k]:
+                return True
+            if k == 3 and x == y:
+                return True
+    return False
 
 
 def _date_eq(a: tuple[int, int, Optional[int]], b: tuple[int, int, Optional[int]]) -> bool:
@@ -959,6 +1209,11 @@ class _Clean:
     stripped: list[str] = field(default_factory=list)  # «64%» → «64»
     placeholders: list[str] = field(default_factory=list)
     changes: list[str] = field(default_factory=list)  # clauses of a change the brief does not state (also in `bad`)
+    misread: list[str] = field(default_factory=list)  # the brief's figures given another subject (also in `bad`)
+
+
+_ORDINAL_TOKEN_RE = re.compile(r"(\d{1,2})-?(?:й|ый|ой|ий|го|ого|его|му|ому|ему|м|ом|ем|я|ая|яя|е|ое|ее|х|ых|их|ти|и)", re.I)
+_ORDINAL_WORDS = {1: "перв", 2: "втор", 3: "трет|тр[её]х", 4: "четв[её]рт|четыр[её]х", 5: "пят", 6: "шест", 7: "седьм|сем", 8: "восьм|восем", 9: "девят", 10: "десят"}
 
 
 class BriefIndex:
@@ -979,12 +1234,20 @@ class BriefIndex:
         self._pairs, self._ranges, self._shares, self._stated = bf.pairs, bf.ranges, bf.shares, bf.stated
         self.figs = [p.fig for p in self.placed]
         self.stems = _Stems(content_stems(body, neutral=True))
+        self._texts = bf.texts
+        self._extra: list[tuple[float, Optional[str], str, bool]] = []  # derived of the analyst's before/after pairs
         self._derived = self._derive()
         self._cache: dict[tuple, str] = {}
+        self.categories: set[str] = set()  # the analyst's chart categories (lowercase), the neutral words of a chart
+        first_line = next((ln for ln in body.splitlines() if ln.strip()), "")
+        self._title_subject = _subject(f"{title or ''} {first_line}")
+        self.no_guarantee = bool(re.search(r"не\s+(?:представляй|подавай|выдавай|показывай)\s+\w*\s*(?:прогноз|результат)\w*[^.]{0,40}гарантир", body, re.I))
+        self._structure_used = False
         doc_title, sections = H.parse_sections(text or "")
         first = next((sn for sec in sections for sn in sec.sentences), "")
-        self.title = H.strip_end(title or doc_title or _first_statement_title(first) or "") or None
-        self.title_stems = _Stems(content_stems(f"{self.title or ''} {doc_title or ''} {first}", neutral=True))
+        named = title_line(text or "")  # «Название: «Больше прибыли с каждой чашки»» — the user's own title
+        self.title = H.strip_end(title or named or doc_title or _first_statement_title(first) or "") or None
+        self.title_stems = _Stems(content_stems(f"{self.title or ''} {named or ''} {doc_title or ''} {first}", neutral=True))
 
     @property
     def frame(self) -> "BriefIndex":
@@ -1021,6 +1284,15 @@ class BriefIndex:
                 continue
             key2 = frozenset((id(pa), id(pb)))
             kinds = {"diff", "pct", "ratio"}
+            level_change = ua is not None and pa.group != pb.group and (
+                (pb.changed and not pb.delta and not pa.changed and pa.seq < pb.seq) or (pa.changed and not pa.delta and not pb.changed and pb.seq < pa.seq)
+            )
+            if not (pa.cell or pb.cell) and key2 not in self._pairs and not level_change:
+                # two figures of one unit side by side that the brief does not write as a change of one measure: their
+                # difference may be read off («на 238 500 рублей больше»), a percent change or a ratio of them would be
+                # a new figure (of two unrelated sums). A level the next sentence says changed («тратят 47 минут» …
+                # «время сократилось до 29 минут») is such a change
+                kinds = {"diff"}
             if pa.cell or pb.cell:
                 # a table compares along its rows: neighbouring cells («До | После») or the row's ends (a series)
                 if not (pa.cell and pb.cell and pa.group == pb.group):
@@ -1049,9 +1321,58 @@ class BriefIndex:
             if base.fig.mag and "pct" in kinds:
                 out.add((round(d / abs(base.fig.mag) * 100, 6), "pct", "pct"))
             lo, hi = sorted((abs(a), abs(b)))
-            if lo:
+            if lo and "ratio" in kinds:
                 out.add((round(hi / lo, 6), "times", "ratio"))
+        out.update((v, u, k) for v, u, k, _ in getattr(self, "_extra", []))
         return sorted(out, key=lambda x: x[0])
+
+    def use_structure(self, structure: Optional[BriefStructure]) -> "BriefIndex":
+        """The analyst's reading of the brief: every before/after pair it built (a two-point series «Сейчас / Цель», the
+        ends of a run over time, a «Сейчас | Цель» table row) is a change of one measure however far apart the brief
+        writes its values — its difference, percent change and ratio are the brief's («Выручка вырастет на 26,5%» of
+        900 000 → 1 138 500); the target ends are forecasts; the series' categories are a chart's own words. Idempotent."""
+        if structure is None or self._structure_used:
+            return self
+        self._structure_used = True
+        pairs: list[tuple[float, float, Optional[str]]] = []
+        for s in structure.series:
+            vals = [v for v in s.values if v is not None]
+            self.categories.update(" ".join(c.lower().split()) for c in s.categories)
+            if len(vals) >= 2 and len(vals) == len(s.categories):
+                unit = figures(f"1 {s.unit}")[0].unit if s.unit and figures(f"1 {s.unit}") else None
+                pairs.append((vals[0], vals[-1], unit))
+        for tb in structure.tables:
+            if len(tb.columns) < 3:
+                continue
+            for row in tb.rows:
+                cells = [figures(c) for c in row[1:3]]
+                if len(cells) == 2 and len(cells[0]) == 1 and len(cells[1]) == 1:
+                    a, b = cells[0][0], cells[1][0]
+                    if (a.unit == b.unit or None in (a.unit, b.unit)) and not (a.date or b.date):
+                        pairs.append((a.mag, b.mag, a.unit or b.unit))
+        extra = []
+        for a, b, unit in pairs:
+            if not a or _eq(a, b):
+                continue
+            d = abs(b - a)
+            if unit in ("pct", "pp"):
+                extra += [(round(d, 6), "pct", "diff", True), (round(d, 6), "pp", "diff", True)]
+                continue
+            extra += [(round(d, 6), unit, "diff", True), (round(d / abs(a) * 100, 6), "pct", "pct", True)]
+            lo, hi = sorted((abs(a), abs(b)))
+            if lo:
+                extra.append((round(hi / lo, 6), "times", "ratio", True))
+            self._future_values.add(round(b, 6))
+        self._extra = extra
+        self._derived = self._derive()
+        self._cache.clear()
+        return self
+
+    @property
+    def _future_values(self) -> set:
+        if not hasattr(self, "_fv"):
+            self._fv: set = set()
+        return self._fv
 
     def _same(self, f: Fig) -> list[_Placed]:
         """The brief's figures the plan's figure writes: the same value (as written or in full), the same date, a word
@@ -1062,6 +1383,8 @@ class BriefIndex:
         out = []
         for p in self.placed:
             b = p.fig
+            if p.ordinal:
+                continue  # «Этап 1», «Слайд 2»: a step's number grounds no figure
             if b.date is not None:
                 if _is_year(f) and b.date[2] == int(f.value):
                     out.append(p)  # «в 2026 году» of «15.10.2026»
@@ -1098,9 +1421,77 @@ class BriefIndex:
             if f.approx:
                 if _approx_ok(f, v, f.approx):
                     return True
+            elif f.hedge:
+                # «более чем в 2 раза» of 2,12 is true, «почти в 2,1 раза» of it is not: the hedge's side counts
+                if _hedged_ok(f, v) or (f.hedge == "about" and _eq(v, f.value)):
+                    return True
             elif _eq(v, f.value) or (v and _eq(_half_up(v, f.dec), f.value) and abs(v - f.value) <= 0.05 * abs(v)):
                 return True
         return False
+
+    def _derived_near(self, f: Fig) -> Optional[float]:
+        """The derived value (in the figure's scale) a hedged figure speaks of: the nearest within 10% of it."""
+        best: Optional[float] = None
+        for x, ux, kind in self._derived:
+            if not (f.unit == ux or (f.unit in ("pct", "pp") and ux in ("pct", "pp")) or (f.unit is None and ux not in ("pct", "pp", "times"))):
+                continue
+            v = x / f.scale
+            if f.value and abs(v - f.value) <= 0.1 * abs(f.value) and (best is None or abs(v - f.value) < abs(best - f.value)):
+                best = v
+        return best
+
+    # -------------------------------------------------------------- what a figure means
+
+    def bound(self, text: str, f: Fig, figs: Optional[list[Fig]] = None) -> bool:
+        """Whether the text uses the brief's figure for what the brief says it is: the words of its label (since the
+        figure before it, up to the next one) name the subject the brief's label gives it, or its list's lead, or do not
+        name another item of the same list or sentence. «Аренда обходится в 25 000 рублей» when the brief's 25 000 is
+        «коммунальные услуги» (and its 120 000 «аренда») is not; «Зарплаты — 315 000» when 315 000 is «продукты» is
+        not; «Вложения — 180 000 ₽» under the brief's «Вложения и прогноз роста» is. A text that names no subject,
+        and a figure the brief gives no label, pass: nothing to compare."""
+        figs = figs if figs is not None else [x for x in figures(text) if not _ordinal(text, x)]
+        if f not in figs:
+            return True
+        mine = _figure_labels(text, figs, line=True)[figs.index(f)]
+        if not mine or isinstance(mine, _BaseLabel):
+            return True  # nothing named, or only a share's base («13,3% выручки»)
+        same = [p for p in self._same(f) if f.unit is None or p.fig.unit is None or _compatible(f.unit, p.fig.unit)]
+        if not same or any(not p.ctx for p in same):
+            return True  # the brief writes this figure somewhere without a label: nothing to compare
+        for p in same:
+            own = p.ctx or frozenset()
+            if not own or _stems_meet(mine, own):
+                return True  # the brief gives it no label (nothing to compare), or the same one
+            # the items of the same enumeration («зарплаты — в 270 000 рублей, аренда — в 120 000 рублей»): figures of
+            # the same unit in its sentence or its list, not the other end of its own pair or range
+            sibs = frozenset().union(*[q.ctx for q in self.placed if self._sibling(p, q)]) - own
+            if _stems_meet(mine, sibs):
+                continue  # it names another item's subject: the figure is that item's neighbour, not its value
+            if _stems_meet(mine, p.lead) or _stems_meet(mine, self._title_subject):
+                return True
+            # a word that labels another figure of the same unit («чеки с едой» — 20% → 30%) for this one («35%»): the
+            # figure is given that other subject; a word the brief labels nothing with says nothing against it
+            others = [q.ctx for q in self.placed if q.ctx and not q.base and q is not p and not _eq(q.fig.mag, p.fig.mag)]
+            if any(_stems_meet(mine, c - own) for c in others):
+                continue
+            return True
+        return False
+
+    def _sibling(self, p: "_Placed", q: "_Placed") -> bool:
+        if q is p or not q.ctx or q.base or not _same_unit(p.fig, q.fig) or q.cell != p.cell:
+            return False
+        if q.group == p.group:
+            sn = self._texts.get(p.group, "")
+            a, b = (q, p) if q.fig.start < p.fig.start else (p, q)
+            return not (sn and _PAIR_BETWEEN_RE.fullmatch(sn[a.fig.end : b.fig.start]))
+        return bool(q.lead) and q.lead == p.lead and abs(q.group - p.group) <= 8 and not p.cell
+
+    def future_figure(self, f: Fig) -> bool:
+        """The brief states this figure (or the change it is of) as a plan, a target or a forecast."""
+        same = self._same(f)
+        if same:
+            return all(p.future or round(p.fig.mag, 6) in self._future_values for p in same)
+        return self._derived_ok(f) and bool(self._future_values or any(p.future for p in self.placed))
 
     def verdict(self, f: Fig) -> str:
         """«ok» — the brief's figure (or one derived from two of them); «strip» — the brief's number with a unit the
@@ -1204,8 +1595,46 @@ class BriefIndex:
                 return True
         return False
 
+    def fix_hedges(self, text: str) -> str:
+        """A hedge on the wrong side of the true value turned: «почти в 2,1 раза» of 2,12 → «более чем в 2,1 раза»,
+        «более чем на 30%» of 26,5% → «почти на 30%». A figure the brief writes as it is keeps its hedge."""
+        out = text
+        for f in sorted(figures(text), key=lambda x: -x.start):
+            if f.approx or f.hedge not in ("almost", "gt", "lt") or f.date is not None:
+                continue
+            if any(_eq(p.fig.value, f.value) for p in self._same(f)):
+                continue
+            v = self._derived_near(f)
+            if v is None or _eq(v, f.value):
+                continue
+            want = "более чем" if v > f.value and f.hedge in ("almost", "lt") else "почти" if v < f.value and f.hedge == "gt" else None
+            if want is None:
+                continue
+            m = _HEDGE_BEFORE_RE.search(out, max(0, f.start - 40), f.start)
+            if m is None:
+                continue
+            prep = re.search(r"(на|в|у|за)\s+$", m.group(0))
+            word = want if not m.group("h")[:1].isupper() else want[:1].upper() + want[1:]
+            out = out[: m.start()] + word + (f" {prep.group(1)}" if prep else "") + " " + out[f.start :]
+        return out
+
+    def forecast_line(self, text: str) -> bool:
+        """The line states a figure the brief gives as a plan, a target or a forecast (or a change of one)."""
+        figs = [f for f in figures(text) if not _ordinal(text, f) and f.date is None and not _is_year(f)]
+        return any(self.verdict(f) == "ok" and self.future_figure(f) for f in figs)
+
     def token_ok(self, tok: str) -> bool:
-        return re.search(rf"(?<![\w]){re.escape(tok.lower())}(?![\w])", self.lower) is not None
+        if re.search(rf"(?<![\w]){re.escape(tok.lower())}(?![\w])", self.lower) is not None:
+            return True
+        # «к 6-му месяцу» of «к шестому месяцу», «3-х» of «трёх»: an ordinal (or a count) in digits of the brief's word
+        m = _ORDINAL_TOKEN_RE.fullmatch(tok)
+        if m is None:
+            return False
+        n = int(m.group(1))
+        if any(not p.fig.date and not p.fig.approx and _eq(p.fig.value, n) and p.fig.scale == 1.0 for p in self.placed):
+            return True
+        word = _ORDINAL_WORDS.get(n)
+        return bool(word and re.search(rf"(?<![\wё])(?:{word})\w*", self.lower))
 
     def written(self, fragment: str) -> bool:
         return fragment.strip().lower() in self.lower
@@ -1235,7 +1664,22 @@ class BriefIndex:
 
     def clean(self, text: Optional[str]) -> _Clean:
         """The text without placeholders, with units the brief does not use taken off its figures, and without the
-        clauses of figures, names and changes the brief does not have."""
+        clauses of figures, names and changes the brief does not have (or of its figures given another subject).
+        Repeated until nothing more goes: a clause that went can leave a figure next to other words."""
+        c = self._clean_once(text)
+        for _ in range(3):
+            if not c.changed or not c.text:
+                break
+            c2 = self._clean_once(c.text)
+            if not c2.changed:
+                break
+            c = _Clean(
+                c2.text, True, c.bad + [x for x in c2.bad if x not in c.bad], c.stripped + c2.stripped, c.placeholders + c2.placeholders,
+                c.changes + [x for x in c2.changes if x not in c.changes], c.misread + [x for x in c2.misread if x not in c.misread],
+            )
+        return c
+
+    def _clean_once(self, text: Optional[str]) -> _Clean:
         if not text:
             return _Clean(text or "")
         t = text
@@ -1259,10 +1703,25 @@ class BriefIndex:
         edits: list[tuple[int, int]] = []
         stripped: list[str] = []
         good: list[Fig] = []
-        for f in figures(t):
-            if _ordinal(t, f):
-                continue
+        misread: list[str] = []
+        figs_t = [f for f in figures(t) if not _ordinal(t, f)]
+        for f in figs_t:
             v = self.verdict(f)
+            if v == "ok" and f.date is None and not _is_year(f) and not f.approx:
+                literal = [p for p in self._same(f) if f.unit is None or p.fig.unit is None or _compatible(f.unit, p.fig.unit)]
+                # the size of a change («на 30 рублей», «в 2 раза», «рост 112%»), not a level it came to («до 35%»)
+                change = _change_context(t, f) and _prep(t, f) != "to"
+                if literal:
+                    # the brief's figure with another subject («Аренда обходится в 25 000 рублей» for the brief's
+                    # «коммунальные услуги — 25 000»): as wrong as an invented one — unless the text states a change
+                    # and the figure is one of the brief's changes («на 30 рублей» of 300 → 330)
+                    if not self.bound(t, f, figs_t) and not (change and self._derived_ok(f)):
+                        v = "bad"
+                        misread.append(t[f.start : f.uend].strip())
+                elif not change and not self._derived_ok(f, ("share",)):
+                    # a percent change or a ratio of the brief's figures is a change: «Расходы на аренду составляют
+                    # 75% бюджета» is not «маркетинг вырастет на 75%»
+                    v = "bad"
             if v == "strip":
                 edits.append((f.end, f.uend))
                 stripped.append(t[f.start : f.uend])
@@ -1297,12 +1756,72 @@ class BriefIndex:
             t = t[:a] + t[b:]
         if edits or bad_spans:
             t = _tidy(t)
-        return _Clean(t, t != text, bad, stripped, ph, changes)
+        return _Clean(t, t != text, bad, stripped, ph, changes, misread)
+
+
+# a change told as done → the same change as a plan: (past forms, singular future, plural future)
+_PAST_TO_FUTURE = [
+    (r"вырос(?:ла|ло)?", "вырастет", None), (r"выросли", None, "вырастут"),
+    (r"увеличил(?:ся|ась|ось)", "увеличится", None), (r"увеличились", None, "увеличатся"),
+    (r"увеличил[аo]?", "увеличит", None), (r"увеличили", None, "увеличат"),
+    (r"снизил(?:ся|ась|ось)", "снизится", None), (r"снизились", None, "снизятся"),
+    (r"снизил[ао]?", "снизит", None), (r"снизили", None, "снизят"),
+    (r"сократил(?:ся|ась|ось)", "сократится", None), (r"сократились", None, "сократятся"),
+    (r"сократил[ао]?", "сократит", None), (r"сократили", None, "сократят"),
+    (r"уменьшил(?:ся|ась|ось)", "уменьшится", None), (r"уменьшились", None, "уменьшатся"),
+    (r"повысил(?:ся|ась|ось)", "повысится", None), (r"повысились", None, "повысятся"),
+    (r"повысил[ао]?", "повысит", None), (r"повысили", None, "повысят"),
+    (r"удвоил(?:ся|ась|ось)", "удвоится", None), (r"удвоились", None, "удвоятся"),
+    (r"достиг(?:ла|ло)?", "достигнет", None), (r"достигли", None, "достигнут"),
+    (r"составил[ао]?", "составит", None), (r"составили", None, "составят"),
+    (r"упал[ао]?", "упадёт", None), (r"упали", None, "упадут"),
+    (r"сэкономил[ао]?", "сэкономит", None), (r"сэкономили", None, "сэкономят"),
+    (r"принесл[аио]|принёс|принес", "принесёт", None), (r"стал[ао]?", "станет", None), (r"стали", None, "станут"),
+]
+_PAST_RES = [(re.compile(rf"(?<![\wё])(?:{rx})(?![\wё])", re.I), s or p) for rx, s, p in _PAST_TO_FUTURE]
+PAST_CHANGE_RE = re.compile(r"(?<![\wё])(?:" + "|".join(rx for rx, _, _ in _PAST_TO_FUTURE) + r")(?![\wё])", re.I)
+
+
+def to_future(text: str) -> str:
+    """«Прибыль выросла в 2 раза» → «Прибыль вырастет в 2 раза»: past-tense change verbs as the same change planned."""
+    out = text
+    for rx, fut in _PAST_RES:
+        out = rx.sub(lambda m, fut=fut: (fut[:1].upper() + fut[1:]) if m.group(0)[:1].isupper() else fut, out)
+    return out
 
 
 def _clause_text(t: str, spans: list[tuple[int, int]]) -> str:
     cl = [(a, b) for a, b in _clauses(t) if any(a <= s < b or a < e <= b for s, e in spans)]
     return t[min(a for a, _ in cl) : max(b for _, b in cl)].strip(" .;,") if cl else ""
+
+
+_TITLE_LINE_RE = re.compile(
+    r"^[ \t]*(?:название|заголовок|тема)(?:[ \t]+(?:презентации|доклада|выступления))?[ \t]*[:—–-][ \t]*(?P<t>\S[^\n]*?)[ \t]*$", re.I | re.M
+)
+
+
+def unquote(text: Optional[str]) -> str:
+    """«Больше прибыли с каждой чашки». → Больше прибыли с каждой чашки: a title as the user wrote it in quotes."""
+    t = (text or "").strip().rstrip(".;").strip()
+    pairs = {"«": "»", '"': '"', "“": "”", "„": "“", "'": "'"}
+    if len(t) >= 2 and t[0] in pairs and t.endswith(pairs[t[0]]):
+        o, c, inner = t[0], pairs[t[0]], t[1:-1]
+        depth = 0
+        for ch in inner:  # «А» и «Б» is two quotations, not one
+            depth += 1 if ch == o and o != c else -1 if ch == c else 0
+            if depth < 0:
+                break
+        if depth == 0:
+            t = inner.strip()
+    return t
+
+
+def title_line(text: str) -> Optional[str]:
+    """The deck's title the brief states on a line of its own: «Название: «…»», «Заголовок презентации: …»,
+    «Тема: …»."""
+    m = _TITLE_LINE_RE.search(text or "")
+    t = unquote(m.group("t")) if m else ""
+    return t if 1 <= len(t.split()) <= 16 else None
 
 
 def _first_statement_title(first: str) -> Optional[str]:
@@ -1390,10 +1909,12 @@ class _Log:
         self.lines: list[str] = []
         self.changes: list[str] = []
         self.notes: list[str] = []
+        self.misread: list[str] = []
 
     def take(self, c: _Clean) -> None:
         self.changes.extend(x for x in c.changes if x not in self.changes)
-        self.bad.extend(x for x in c.bad if x not in self.bad and x not in c.changes)
+        self.misread.extend(x for x in c.misread if x not in self.misread)
+        self.bad.extend(x for x in c.bad if x not in self.bad and x not in c.changes and x not in c.misread)
         self.units.extend(x for x in c.stripped if x not in self.units)
         self.placeholders.extend(x for x in c.placeholders if x not in self.placeholders)
 
@@ -1403,6 +1924,8 @@ class _Log:
             out.append("grounding: figures and names not in the brief removed: " + ", ".join(f"«{x}»" for x in self.bad[:12]) + (" …" if len(self.bad) > 12 else ""))
         if self.changes:
             out.append("grounding: changes the brief does not state removed: " + ", ".join(f"«{x}»" for x in self.changes[:12]))
+        if self.misread:
+            out.append("grounding: figures of the brief given another subject removed: " + ", ".join(f"«{x}»" for x in self.misread[:12]))
         if self.units:
             out.append("grounding: units the brief does not give removed: " + ", ".join(f"«{x}»" for x in self.units[:12]))
         if self.placeholders:
@@ -1488,11 +2011,19 @@ def _ground_number(idx: BriefIndex, n: NumberCallout, log: _Log) -> Optional[Num
         log.take(c)
         n.label = c.text
         return n  # a value without digits («да», «×2»): as it is
+    all_figs = [x for x in figures(joined) if not _ordinal(joined, x)]
     for f in figs:
         v = idx.verdict(f)
         if v == "bad":
             log.bad.append(joined[f.start : f.uend].strip())
             return None
+        if v == "ok" and label.strip() and f.date is None and not _is_year(f) and not f.approx:
+            literal = [p for p in idx._same(f) if f.unit is None or p.fig.unit is None or _compatible(f.unit, p.fig.unit)]
+            change = _change_context(joined, f) and _prep(joined, f) != "to"
+            if literal and not idx.bound(joined, f, all_figs) and not (change and idx._derived_ok(f)):
+                # «315 000 ₽ — Зарплаты» when the brief's 315 000 is «продукты»
+                log.misread.append(joined.strip())
+                return None
         if v == "strip":
             log.units.append(joined[f.start : f.uend].strip())
             value, label = _cut(value, label, f.end, f.uend)
@@ -1572,13 +2103,65 @@ def grounded_facts(facts: list[Fact], brief: Union[Brief, str]) -> tuple[list[Fa
     return out, log.report()
 
 
-def _series_ok(s: Series, idx: BriefIndex) -> bool:
-    for v in s.values:
-        text = str(int(v)) if float(v).is_integer() else str(v)
-        figs = figures(text)
-        if not figs or idx.verdict(figs[0]) == "bad":
-            return False
-    return True
+def unit_scale(unit: Optional[str]) -> float:
+    """What one of a chart's values is worth by its unit: «тыс. ₽» — a thousand, «млн руб.» — a million."""
+    u = (unit or "").lower()
+    for word, k in (("трлн", 1e12), ("млрд", 1e9), ("миллиард", 1e9), ("млн", 1e6), ("миллион", 1e6), ("тыс", 1e3)):
+        if re.search(rf"(?<![а-яё]){word}", u):
+            return k
+    return 1.0
+
+
+def rounding_step(rule: Optional[str]) -> Optional[float]:
+    """The step the brief lets chart values be rounded to («можно округлять до тысяч рублей» → 1000), or None."""
+    r = (rule or "").lower()
+    if not r or "округл" not in r and "до тысяч" not in r:
+        return None
+    for rx, step in ((r"миллион|млн", 1e6), (r"тысяч|тыс\.", 1e3), (r"сот(?:ен|ни)", 100.0), (r"десятк|десятков", 10.0)):
+        if re.search(rx, r):
+            return step
+    return None
+
+
+def _num_text(v: float) -> str:
+    v = round(float(v), 6)
+    return str(int(v)) if v.is_integer() else f"{v:.6f}".rstrip("0").rstrip(".")
+
+
+def value_ok(idx: BriefIndex, v: float, scale: float = 1.0, step: Optional[float] = None) -> bool:
+    """A chart's value is a figure of the brief (in the chart's unit: `scale` 1000 for «тыс. ₽»), or — when the brief
+    allows rounding to `step` — the brief's figure rounded to it (half up; either neighbour of a figure exactly between
+    two: 1 138 500 → 1 139 000 or 1 138 000)."""
+    full = round(float(v) * scale, 6)
+    for x in dict.fromkeys((full, round(float(v), 6))):  # a value written in full under a «тыс.» unit is read as it is
+        figs = figures(_num_text(x))
+        if figs and idx.verdict(figs[0]) != "bad":
+            return True
+    if not step or not full or abs(full) < step or not _eq(round(full / step) * step, full):
+        return False
+    for p in idx.placed:
+        b = p.fig
+        if b.date is not None or p.ordinal or _is_year(b) or abs(b.mag) < step:
+            continue
+        q = Decimal(repr(abs(b.mag))) / Decimal(repr(step))
+        near = float(q.quantize(Decimal(1), rounding=ROUND_HALF_UP)) * step
+        low = float(q.to_integral_value(rounding=ROUND_FLOOR)) * step
+        sign = -1.0 if b.mag < 0 else 1.0
+        if _eq(sign * near, full) or (q - q.to_integral_value(rounding=ROUND_FLOOR) == Decimal("0.5") and _eq(sign * low, full)):
+            return True
+    return False
+
+
+def _series_ok(s: Series, idx: BriefIndex, step: Optional[float] = None) -> bool:
+    scale = unit_scale(s.unit)
+    return bool(s.values) and all(v is not None and value_ok(idx, v, scale, step) for v in s.values)
+
+
+def inline_ok(chart: ChartSpec, idx: BriefIndex, step: Optional[float] = None) -> bool:
+    """The data written into a chart (Agent v2) is the brief's: every value of every series."""
+    scale = unit_scale(chart.unit)
+    vals = [v for ser in chart.series for v in ser.values]
+    return bool(vals) and all(v is not None and value_ok(idx, v, scale, step) for v in vals)
 
 
 def _headline_from(idx: BriefIndex, s: OutlineSlide) -> str:
@@ -1597,17 +2180,22 @@ def _headline_from(idx: BriefIndex, s: OutlineSlide) -> str:
     return ""
 
 
-def _ground_headline(idx: BriefIndex, s: OutlineSlide, log: _Log, notes: Optional[list[str]] = None) -> bool:
+def _ground_headline(idx: BriefIndex, s: OutlineSlide, log: _Log, notes: Optional[list[str]] = None, fallback: Optional[str] = None) -> bool:
     """False when the heading had to go and nothing grounded replaces it. The change is said in `notes` (the caller
-    reports it once the slide is kept), or in the log."""
+    reports it once the slide is kept), or in the log. A slide the user asked for keeps the model's wording of what is
+    left of its heading, else takes `fallback` (the title the user gave that slide)."""
     c = idx.clean(s.headline)
     log.take(c)
     old = s.headline
     ok = c.text and not c.bad and not c.placeholders
+    lenient = s.spec_ref is not None
     if c.bad:
         rest = c.text
-        if rest and len(rest.split()) >= 3 and (idx.ratio(rest) or 0) >= 0.5:
+        if rest and len(rest.split()) >= 3 and (lenient or (idx.ratio(rest) or 0) >= 0.5):
             s.headline = H.cap_first(rest)
+            ok = True
+        elif lenient and fallback:
+            s.headline = fallback
             ok = True
     elif c.placeholders and c.text:
         s.headline = c.text
@@ -1655,27 +2243,181 @@ def _as_lines(s: OutlineSlide, lines: list[str]) -> None:
     s.kind = K.bullets if len(lines) >= 2 or not s.content.numbers else (K.big_number if len(s.content.numbers) == 1 else K.stat_row)
 
 
-def _ground_content_slide(idx: BriefIndex, s: OutlineSlide, log: _Log, series_ids: set[str], facts: dict[str, Fact], from_chart: set[int], thinned: set[int]) -> Optional[OutlineSlide]:
+def _model_line(idx: BriefIndex, c: _Clean) -> str:
+    """A line the model wrote on a slide the user asked for (or a takeaway, a footnote): kept in the model's words,
+    only the clauses of invented figures, names and changes (and placeholders) gone — and what is left of such a line
+    must still say something (three content words), not «Окупаемость вложений» of «Окупаемость вложений — 2 месяца»."""
+    t = c.text.strip()
+    if not t:
+        return ""
+    if c.bad and len(content_stems(t, neutral=True)) < 3:
+        return ""
+    return t
+
+
+def _line(idx: BriefIndex, c: _Clean, lenient: bool) -> str:
+    return _model_line(idx, c) if lenient else _keep_line(idx, c)
+
+
+def _body(c: SlideContent) -> bool:
+    """The slide shows something besides its heading (a formula and a second chart count)."""
+    return has_body(c.model_dump()) or bool((c.formula or "").strip()) or c.chart2 is not None
+
+
+def _kind_for(c: SlideContent) -> K:
+    """The kind of what is left on a slide the user asked for: by its content; a formula alone is shown large."""
+    if has_body(c.model_dump()):
+        return K(kind_by_content(c.model_dump()))
+    return K.big_number if (c.formula or "").strip() else K.bullets
+
+
+def _chart_data(idx: BriefIndex, chart: ChartSpec, series_ids: set[str], step: Optional[float], log: _Log, s: OutlineSlide, which: str, lenient: bool) -> Optional[ChartSpec]:
+    """The chart with the brief's data only: the data written into it goes when a value is not the brief's (rounded
+    to `step` when the brief allows it); its ids name only registry series left after grounding. None when no data
+    is left."""
+    if chart.series and not inline_ok(chart, idx, step):
+        scale = unit_scale(chart.unit)
+        bad = [_num_text(v) for ser in chart.series for v in ser.values if v is None or not value_ok(idx, v, scale, step)]
+        log.lines.append(f"grounding: slide {s.id}: {which} data not in the brief removed: " + ", ".join(f"«{x}»" for x in bad[:8]))
+        chart.categories, chart.series = [], []
+    ids = [x for x in chart.series_ids if x in series_ids]
+    if not ids and not chart.series:
+        return None
+    chart.series_ids = ids
+    if chart.title:
+        chart.title = _line(idx, _take(idx.clean(chart.title), log), lenient) or None
+    return chart
+
+
+_OP_RE = re.compile(r"\s*([×x*хX·+\-−–÷/:=])\s*")
+
+
+def formula_arithmetic_ok(text: Optional[str]) -> bool:
+    """Whether a formula's sides agree («100 × 300 × 30 = 900 000» yes; «115 × 300 × 30 = 900 000» no): the figures
+    and the operators between them (×, ·, *, +, −, ÷, /) on each side of «=», computed left to right with × and ÷
+    first; a difference of 0,5% (a rounded result) is fine. A formula of words («Выручка = покупки × чек × дни»), or
+    one without «=», is not a calculation to check."""
+    t = " ".join((text or "").split())
+    if "=" not in t:
+        return True
+    figs = [f for f in figures(t) if f.date is None]
+    if len(figs) < 2:
+        return True
+    tokens: list = []
+    pos = 0
+    for f in figs:
+        between = t[pos : f.start]
+        ops = [m.group(1) for m in _OP_RE.finditer(between)]
+        if tokens and ops:
+            tokens.append(ops[-1] if ops[-1] != "=" or "=" not in ops else "=")
+            if "=" in ops:
+                tokens[-1] = "="
+        elif tokens and not ops:
+            return True  # two figures without an operator: not a formula this check reads
+        tokens.append(f.mag if f.scale != 1.0 else f.value)
+        pos = f.end  # «115 ×» reads as a multiple: the operator is what follows the number
+    if "=" not in tokens:
+        return True
+
+    def value(side: list) -> Optional[float]:
+        if not side or not isinstance(side[0], float):
+            return None
+        terms: list[float] = []
+        signs: list[str] = []
+        cur = side[0]
+        i = 1
+        while i + 1 < len(side):
+            op, x = side[i], side[i + 1]
+            if not isinstance(x, float):
+                return None
+            if op in "×x*хX·":
+                cur *= x
+            elif op in "÷/:":
+                if not x:
+                    return None
+                cur /= x
+            elif op in "+-−–":
+                terms.append(cur)
+                signs.append(op)
+                cur = x
+            else:
+                return None
+            i += 2
+        terms.append(cur)
+        total = terms[0]
+        for op, x in zip(signs, terms[1:]):
+            total = total + x if op == "+" else total - x
+        return total
+
+    k = tokens.index("=")
+    left, right = value(tokens[:k]), value(tokens[k + 1 :])
+    if left is None or right is None:
+        return True
+    return abs(left - right) <= 0.005 * max(abs(left), abs(right), 1.0)
+
+
+def _ground_formula(idx: BriefIndex, text: Optional[str], log: _Log, s: OutlineSlide) -> Optional[str]:
+    """A formula («100 × 300 × 30 = 900 000 рублей») shows every operand as the brief has it, or goes whole: a
+    formula with one invented figure is a wrong calculation. An operand may carry a unit the brief writes apart from
+    it («30 дней» of «30 рабочих дней»), never a percent it does not have. Its sides must agree: «115 × 300 × 30 =
+    900 000» of the brief's figures is a wrong calculation too."""
+    t = " ".join((text or "").split())
+    if not t:
+        return None
+    if not formula_arithmetic_ok(t):
+        log.lines.append(f"grounding: slide {s.id}: formula «{_q(t, 80)}» removed (its sides do not agree)")
+        return None
+    for f in figures(t):
+        if idx.verdict(f) != "bad":
+            continue
+        bare = figures(t[f.start : f.end])
+        if f.unit not in ("pct", "pp") and bare and idx.verdict(bare[0]) != "bad":
+            continue
+        log.bad.append(t[f.start : f.uend].strip())
+        log.lines.append(f"grounding: slide {s.id}: formula «{_q(t, 80)}» removed (a figure not in the brief)")
+        return None
+    for _, _, tok in name_tokens(t):
+        if not idx.token_ok(tok):
+            log.bad.append(tok)
+            log.lines.append(f"grounding: slide {s.id}: formula «{_q(t, 80)}» removed (a name not in the brief)")
+            return None
+    return t
+
+
+def _ground_side(idx: BriefIndex, text: Optional[str], log: _Log) -> Optional[str]:
+    """A takeaway or a footnote: the model's (or the user's) words, without invented figures and placeholders."""
+    if not text or not text.strip():
+        return None
+    c = idx.clean(text)
+    log.take(c)
+    return _model_line(idx, c) or None
+
+
+def _ground_content_slide(idx: BriefIndex, s: OutlineSlide, log: _Log, series_ids: set[str], facts: dict[str, Fact], from_chart: set[int], thinned: set[int], step: Optional[float] = None, fallback: Optional[str] = None) -> Optional[OutlineSlide]:
+    """A content slide with only what the brief says. A slide the user asked for (`spec_ref`) is `lenient`: its lines
+    are the model's wording and stay unless an invented figure took their substance; it is never dropped — whatever
+    is left of it keeps a kind its content supports (`fallback`: the heading the user gave it)."""
     c = s.content
+    lenient = s.spec_ref is not None
     # subtitle
     if s.subtitle:
         sc = idx.clean(s.subtitle)
         log.take(sc)
-        s.subtitle = _keep_line(idx, sc) or None
+        s.subtitle = _line(idx, sc, lenient) or None
     # lines
     units = len(c.bullets) + len(c.paragraphs) + len(c.items) + sum(len(col.bullets) + bool(col.text) for col in c.columns)
-    c.bullets = [x for x in (_keep_line(idx, _take(idx.clean(b), log)) for b in c.bullets) if x]
-    c.paragraphs = [x for x in (_keep_line(idx, _take(idx.clean(p), log)) for p in c.paragraphs) if x]
+    c.bullets = [x for x in (_line(idx, _take(idx.clean(b), log), lenient) for b in c.bullets) if x]
+    c.paragraphs = [x for x in (_line(idx, _take(idx.clean(p), log), lenient) for p in c.paragraphs) if x]
     # items and columns
-    c.items = [x for x in (_ground_item(idx, it, log) for it in c.items) if x is not None]
+    c.items = [x for x in (_ground_item(idx, it, log, judge=not lenient) for it in c.items) if x is not None]
     cols = []
     for col in c.columns:
         t = idx.clean(col.title)
         log.take(t)
         col.title = t.text if not t.bad else ""
-        col.bullets = [x for x in (_keep_line(idx, _take(idx.clean(b), log)) for b in col.bullets) if x]
+        col.bullets = [x for x in (_line(idx, _take(idx.clean(b), log), lenient) for b in col.bullets) if x]
         if col.text:
-            col.text = _keep_line(idx, _take(idx.clean(col.text), log))
+            col.text = _line(idx, _take(idx.clean(col.text), log), lenient)
         if col.bullets or col.text:
             cols.append(col)
     c.columns = cols
@@ -1690,7 +2432,7 @@ def _ground_content_slide(idx: BriefIndex, s: OutlineSlide, log: _Log, series_id
             log.take(h)
         tbl.columns = [h.text for h in head]
         if tbl.caption:
-            tbl.caption = _keep_line(idx, _take(idx.clean(tbl.caption), log)) or None
+            tbl.caption = _line(idx, _take(idx.clean(tbl.caption), log), lenient) or None
         rows = []
         for row in tbl.rows:
             cells = [idx.clean(x) for x in row]
@@ -1700,7 +2442,7 @@ def _ground_content_slide(idx: BriefIndex, s: OutlineSlide, log: _Log, series_id
                 continue
             joined = " ".join(x.text for x in cells)
             r = idx.ratio(joined)
-            if r is not None and r < 0.5 and not idx.grounded_figure(joined):
+            if not lenient and r is not None and r < 0.5 and not idx.grounded_figure(joined):
                 continue  # a row of words the brief does not have
             rows.append([x.text for x in cells])
         units += len(tbl.rows)
@@ -1716,13 +2458,21 @@ def _ground_content_slide(idx: BriefIndex, s: OutlineSlide, log: _Log, series_id
             c.quote, c.quote_author = None, None
         else:
             c.quote_author = _ground_label(idx, c.quote_author, log)
-    # chart: its series must be the registry's
+    # a formula, a takeaway, a footnote
+    if c.formula:
+        c.formula = _ground_formula(idx, c.formula, log, s)
+    s.takeaway = _ground_side(idx, s.takeaway, log)
+    s.footnote = _ground_side(idx, s.footnote, log)
+    # charts: every value the brief's; a second chart without data goes, and takes the place of a first one without
+    if c.chart2 is not None:
+        c.chart2 = _chart_data(idx, c.chart2, series_ids, step, log, s, "second chart", lenient)
     if c.chart is not None:
-        ids = [x for x in c.chart.series_ids if x in series_ids]
-        if ids:
-            c.chart.series_ids = ids
-            if c.chart.title:
-                c.chart.title = _keep_line(idx, _take(idx.clean(c.chart.title), log)) or None
+        ch = _chart_data(idx, c.chart, series_ids, step, log, s, "chart", lenient)
+        if ch is None and c.chart2 is not None:
+            ch, c.chart2 = c.chart2, None
+            log.lines.append(f"grounding: slide {s.id}: the second chart takes the place of a chart without data")
+        if ch is not None:
+            c.chart = ch
         else:
             refs = [x for x in list(c.chart.series_ids) + list(s.fact_refs) if x in facts]
             nums = list(c.numbers)
@@ -1733,20 +2483,28 @@ def _ground_content_slide(idx: BriefIndex, s: OutlineSlide, log: _Log, series_id
                     nums.append(n)
             c.chart = None
             c.numbers = nums
-            s.kind = K.stat_row if len(nums) >= 2 else K.big_number
-            from_chart.add(id(s))
-            if not nums:
+            if nums:
+                s.kind = K.stat_row if len(nums) >= 2 else K.big_number
+                if not lenient:
+                    from_chart.add(id(s))
+            elif lenient:
+                log.lines.append(f"grounding: slide {s.id} «{_q(s.headline)}»: chart without data removed (the slide the brief asks for stays)")
+                s.kind = _kind_for(c)
+            else:
                 log.dropped.append(f"{s.id} «{_q(s.headline or s.section)}» (chart without data)")
                 return None
+    elif c.chart2 is not None:
+        c.chart, c.chart2 = c.chart2, None
     # the kind the content now supports
     lines = c.bullets + c.paragraphs
     k = s.kind
+    gone: Optional[str] = None  # why a slide nobody asked for goes
     if k in (K.stat_row, K.big_number):
         if not c.numbers:
             if not lines:
-                log.dropped.append(f"{s.id} «{_q(s.headline or s.section)}» (no figure of the brief left)")
-                return None
-            s.kind = K.bullets
+                gone = "no figure of the brief left"
+            else:
+                s.kind = K.bullets
         else:
             s.kind = K.big_number if len(c.numbers) == 1 else K.stat_row
     elif k in (K.cards, K.process, K.timeline, K.team):
@@ -1759,8 +2517,7 @@ def _ground_content_slide(idx: BriefIndex, s: OutlineSlide, log: _Log, series_id
         elif lines or c.numbers:
             s.kind = K(kind_by_content(c.model_dump()))
         else:
-            log.dropped.append(f"{s.id} «{_q(s.headline or s.section)}»")
-            return None
+            gone = ""
     elif k in (K.two_column, K.comparison):
         if not c.columns and len([i for i in c.items if i.text or i.bullets]) >= 2:
             c.columns, c.items = [i for i in c.items if i.text or i.bullets], []
@@ -1774,37 +2531,49 @@ def _ground_content_slide(idx: BriefIndex, s: OutlineSlide, log: _Log, series_id
         elif lines or c.numbers or c.items:
             s.kind = K(kind_by_content(c.model_dump()))
         else:
-            log.dropped.append(f"{s.id} «{_q(s.headline or s.section)}» (empty columns)")
-            return None
+            gone = "empty columns"
     elif k == K.table:
         if c.table is None:
             if lines or c.numbers:
                 s.kind = K(kind_by_content(c.model_dump()))
             else:
-                log.dropped.append(f"{s.id} «{_q(s.headline or s.section)}» (no row of the brief left)")
-                return None
+                gone = "no row of the brief left"
+    elif k == K.chart and c.chart is None:
+        if _body(c):
+            s.kind = _kind_for(c)
+        else:
+            gone = "chart without data"
     elif k == K.quote:
         if not c.quote:
             if lines:
                 s.kind = K.bullets
             else:
-                log.dropped.append(f"{s.id} «{_q(s.headline or s.section)}» (a quotation the brief does not have)")
-                return None
+                gone = "a quotation the brief does not have"
     elif k in (K.bullets, K.image_text):
-        if not (lines or c.numbers or c.items or c.columns or c.table):
-            log.dropped.append(f"{s.id} «{_q(s.headline or s.section)}»")
-            return None
-        if len(lines) <= 1 and (c.numbers or c.items or c.columns or c.table):
+        if not (lines or c.numbers or c.items or c.columns or c.table or c.chart):
+            gone = ""
+        elif len(lines) <= 1 and (c.numbers or c.items or c.columns or c.table or c.chart):
             s.kind = K(kind_by_content(c.model_dump()))  # one line and a figure: the figure's slide, the line under it
+    if gone is not None:
+        if not lenient and not c.formula:
+            log.dropped.append(f"{s.id} «{_q(s.headline or s.section)}»" + (f" ({gone})" if gone else ""))
+            return None
+        s.kind = _kind_for(c)
     # the heading
     said: list[str] = []
-    if not _ground_headline(idx, s, log, said):
-        log.dropped.append(f"{s.id} «{_q(s.section)}» (no grounded heading)")
-        return None
+    if not _ground_headline(idx, s, log, said, fallback):
+        if not lenient:
+            log.dropped.append(f"{s.id} «{_q(s.section)}» (no grounded heading)")
+            return None
+        s.headline = H.cap_first(idx.clean(s.headline).text) or fallback or ""
     # the slide as a whole: invented when its words are mostly not the brief's, or when most of its lines were not
-    # the brief's («Рекомендации по действию»: one of three lines survives), and no figure of the brief is left on it
+    # the brief's («Рекомендации по действию»: one of three lines survives), and no figure of the brief is left on it —
+    # never a slide the user asked for (its wording is the model's by design)
+    if lenient:
+        log.lines.extend(said)
+        return s
     body = " ".join([s.headline, s.subtitle or ""] + s.content.bullets + s.content.paragraphs + [_item_text(i) for i in s.content.items + s.content.columns])
-    has_fig = bool(s.content.numbers or s.content.chart or s.content.table) or idx.grounded_figure(body)
+    has_fig = bool(s.content.numbers or s.content.chart or s.content.table or s.content.formula) or idx.grounded_figure(body)
     r = idx.ratio(body)
     if not has_fig and ((r is not None and r < 0.34) or (units >= 2 and left * 2 < units)):
         log.dropped.append(f"{s.id} «{_q(s.headline or s.section)}»")
@@ -1831,6 +2600,11 @@ def _notes(idx: BriefIndex, notes: str, log: _Log) -> str:
             log.take(_Clean("", placeholders=c.placeholders))
         if c.bad:
             log.notes.append(sn.strip())
+            # only the clause of the figure the brief does not have goes: the rest of a sentence of right figures stays
+            # when it still says something
+            rest = c.text.strip()
+            if rest and len(content_stems(rest, neutral=True)) >= 4 and not idx.clean(rest).bad:
+                out.append(rest if rest.endswith((".", "!", "?")) else rest + ".")
             continue
         if c.text:
             out.append(c.text)
@@ -1842,14 +2616,22 @@ def _slide_words(s: OutlineSlide) -> str:
     return " ".join([s.headline, s.section or "", s.subtitle or ""] + c.bullets + c.paragraphs + [_item_text(i) for i in c.items + c.columns] + [n.label for n in c.numbers])
 
 
-def ground_outline(outline: DeckOutline, brief: Union[Brief, str], index: Optional[BriefIndex] = None) -> tuple[DeckOutline, list[str]]:
-    """The plan with only what the brief says, and what was changed (warning lines). See the module docstring."""
+def ground_outline(outline: DeckOutline, brief: Union[Brief, str], index: Optional[BriefIndex] = None, structure: Optional[BriefStructure] = None) -> tuple[DeckOutline, list[str]]:
+    """The plan with only what the brief says, and what was changed (warning lines). See the module docstring.
+    `structure` (Agent v2, the analyst's reading of the brief) gives the rounding the brief allows for chart values
+    and the titles of the slides the user asked for (a heading left without anything grounded takes its slide's)."""
     idx = index or BriefIndex.of(brief)
+    if structure is not None:
+        idx.use_structure(structure)
     o = outline.model_copy(deep=True)
     log = _Log()
+    step = rounding_step(structure.rounding) if structure is not None else None
+    if structure is not None:
+        _ground_series_labels(o, idx, structure, log)
+    spec_titles = {sp.number: unquote(sp.title) for sp in structure.specs if sp.title} if structure is not None else {}
     o.facts = ground_facts(o.facts, idx, log)
     before = [x.id for x in o.series]
-    o.series = [x for x in o.series if _series_ok(x, idx)]
+    o.series = [x for x in o.series if _series_ok(x, idx, step)]
     if len(o.series) != len(before):
         log.lines.append("grounding: series not in the brief dropped: " + ", ".join(x for x in before if x not in {y.id for y in o.series}))
     facts = {f.id: f for f in o.facts}
@@ -1860,6 +2642,10 @@ def ground_outline(outline: DeckOutline, brief: Union[Brief, str], index: Option
     if title_ok and idx.title:
         stems = content_stems(o.title, neutral=True)
         title_ok = not stems or sum(idx.title_stems.has(x) for x in stems) / len(stems) >= 0.6
+        # the brief's own words: a title it writes (its first line «Кофейня «Точка кофе»: план …»), the one the analyst
+        # read from it («Название: …»)
+        named = unquote(structure.title) if structure is not None and structure.title else None
+        title_ok = title_ok or idx.written(o.title) or (named is not None and o.title.strip() == named)
     if not title_ok and idx.title:
         log.lines.append(f"grounding: deck title «{_q(o.title)}» → «{_q(idx.title)}» (the brief's own title)")
         o.title = idx.title
@@ -1895,6 +2681,8 @@ def ground_outline(outline: DeckOutline, brief: Union[Brief, str], index: Option
                 sc = fx.clean(s.subtitle)
                 log.take(sc)
                 s.subtitle = _keep_line(fx, sc) or None
+            s.takeaway = _ground_side(fx, s.takeaway, log)
+            s.footnote = _ground_side(fx, s.footnote, log)  # «Все исходные данные и прогнозы условные»
             kept.append(s)
             continue
         if s.kind == K.thanks:
@@ -1912,12 +2700,18 @@ def ground_outline(outline: DeckOutline, brief: Union[Brief, str], index: Option
                     log.lines.append(f"grounding: closing slide subtitle «{_q(old)}» → {('«' + _q(s.subtitle) + '»') if s.subtitle else 'none'}")
             s.content.bullets = [x for x in (_keep_line(idx, _take(idx.clean(b), log)) for b in s.content.bullets) if x]
             s.content.paragraphs = [x for x in (_keep_line(idx, _take(idx.clean(b), log)) for b in s.content.paragraphs) if x]
+            s.takeaway = _ground_side(idx, s.takeaway, log)
+            s.footnote = _ground_side(idx, s.footnote, log)
             kept.append(s)
             continue
         if s.kind == K.section:
-            if not _ground_headline(idx, s, log):
-                log.dropped.append(f"{s.id} (divider without a grounded name)")
-                continue
+            if not _ground_headline(idx, s, log, fallback=spec_titles.get(s.spec_ref) if s.spec_ref is not None else None):
+                if s.spec_ref is None:
+                    log.dropped.append(f"{s.id} (divider without a grounded name)")
+                    continue
+                s.headline = spec_titles.get(s.spec_ref) or H.cap_first(idx.clean(s.headline).text)
+            s.takeaway = _ground_side(idx, s.takeaway, log)
+            s.footnote = _ground_side(idx, s.footnote, log)
             kept.append(s)
             continue
         if s.kind == K.agenda:
@@ -1934,7 +2728,7 @@ def ground_outline(outline: DeckOutline, brief: Union[Brief, str], index: Option
             s.headline = c.text if c.text and not c.bad else "О чём поговорим"
             kept.append(s)
             continue
-        g = _ground_content_slide(idx, s, log, series_ids, facts, from_chart, thinned)
+        g = _ground_content_slide(idx, s, log, series_ids, facts, from_chart, thinned, step, spec_titles.get(s.spec_ref) if s.spec_ref is not None else None)
         if g is not None:
             kept.append(g)
     kept = _dedupe_figures(kept, idx, log, from_chart, thinned)
@@ -1953,6 +2747,65 @@ def ground_outline(outline: DeckOutline, brief: Union[Brief, str], index: Option
     return o, log.report()
 
 
+_NEUTRAL_CATEGORY_RE = re.compile(
+    r"^(?:сейчас|цель|целев\w*|прогноз\w*|план\w*|текущ\w*|нынешн\w*|было|стало|до|после|факт|итого|всего|остальное|прочее|"
+    r"\d{1,2}\s*-?\s*(?:й|ый|ой|ий)?\s*(?:месяц|квартал|недел[яи]|год)|(?:месяц|квартал|неделя)\s+\d{1,2}|now|target|before|after|forecast)$",
+    re.I,
+)
+
+
+def _category_ok(idx: BriefIndex, cat: str) -> bool:
+    """A chart's category is the brief's words, the analyst's category, or a neutral label («Сейчас», «Цель», «Прогноз»,
+    «3-й месяц») — never an invented year, city or name («2027 год», «2028 год (Москва)»)."""
+    c = " ".join((cat or "").split())
+    if not c:
+        return False
+    if c.lower() in idx.categories or _NEUTRAL_CATEGORY_RE.match(c):
+        return True
+    cl = idx.clean(c)
+    if cl.bad or cl.placeholders:
+        return False
+    r = idx.ratio(c)
+    return r is None or r >= 0.5
+
+
+def _ground_series_labels(o: DeckOutline, idx: BriefIndex, structure: BriefStructure, log: _Log) -> None:
+    """The series the slides draw carry the brief's labels: invented categories («2027 год», «Москва») take the
+    brief's series' of the same values, or the series goes; the brief's values under other labels than the brief's
+    («Продукты» at 270 000 when the brief's «Продукты» is 315 000) take the brief's series."""
+    try:
+        from verstka.planning.agent import _similar_data, chart_of, label_conflicts
+    except Exception:  # noqa: BLE001 - the agent's helpers: without them the values are still checked
+        return
+    brief_series = [s for s in structure.series if s.values and len(s.values) == len(s.categories)]
+    own = {id(s) for s in brief_series}
+    keep = []
+    for s in o.series:
+        if id(s) in own or any(s.id == b.id and s.values == b.values and s.categories == b.categories for b in brief_series):
+            keep.append(s)
+            continue
+        probe = ChartSpec(type="column", unit=s.unit, categories=list(s.categories), series=[{"name": s.name, "values": list(s.values)}])
+        match = None
+        for b in brief_series:
+            want = chart_of([b])
+            if want is not None and _similar_data(want, probe):
+                match = (b, label_conflicts(want, probe))
+                break
+        bad_cats = [c for c in s.categories if not _category_ok(idx, c)]
+        if match is not None and (match[1] or bad_cats):
+            b = match[0]
+            why = f"labels not the brief's ({', '.join(bad_cats[:3])})" if bad_cats else f"values under other labels than the brief's ({', '.join(match[1][:3])})"
+            log.lines.append(f"grounding: series {s.id}: {why} → the brief's series «{_q(b.name, 40)}»")
+            s.categories, s.values, s.unit = list(b.categories), list(b.values), b.unit  # the brief's values in full
+            keep.append(s)
+            continue
+        if bad_cats:
+            log.lines.append(f"grounding: series {s.id} dropped: categories not in the brief ({', '.join(f'«{_q(c, 30)}»' for c in bad_cats[:3])})")
+            continue
+        keep.append(s)
+    o.series = keep
+
+
 def _dedupe_figures(slides: list[OutlineSlide], idx: BriefIndex, log: _Log, from_chart: set[int], thinned: set[int]) -> list[OutlineSlide]:
     """Figure slides the grounding made or emptied say only what no other slide says: a chart turned into figures
     keeps only the figures no other slide shows (and goes when none is left); a slide that lost most of its lines goes
@@ -1962,7 +2815,7 @@ def _dedupe_figures(slides: list[OutlineSlide], idx: BriefIndex, log: _Log, from
     problem → result pair («47 минут» → «47 → 29 минут») and a summary KPI slide after the single figures stay."""
     out = list(slides)
     for s in list(out):
-        if id(s) not in from_chart:
+        if id(s) not in from_chart or s.spec_ref is not None:
             continue
         others = set().union(*[_figures_on(x) for x in out if x is not s]) if len(out) > 1 else set()
         nums = [n for n in s.content.numbers if not any(any(_eq(f.value, v) for v in others) for f in figures(n.value))]
@@ -1975,8 +2828,8 @@ def _dedupe_figures(slides: list[OutlineSlide], idx: BriefIndex, log: _Log, from
         log.lines.append(f"grounding: slide {s.id} «{_q(s.headline)}»: a chart without data → {s.kind.value} of its figures")
     figs = [s for s in out if s.kind in (K.big_number, K.stat_row) and s.content.numbers and len(s.content.bullets) + len(s.content.paragraphs) <= 1 and not s.content.items]
     for a in figs:
-        if a not in out:
-            continue
+        if a not in out or a.spec_ref is not None:
+            continue  # a slide the user asked for stays, whatever other slides show
         va = _number_values(a)
         if not va:
             continue
@@ -1993,7 +2846,7 @@ def _dedupe_figures(slides: list[OutlineSlide], idx: BriefIndex, log: _Log, from
                 log.dropped.append(f"{a.id} «{_q(a.headline)}» (repeats the figures of {b.id})")
                 break
     for s in list(out):
-        if id(s) not in thinned:
+        if id(s) not in thinned or s.spec_ref is not None:
             continue
         others = [x for x in out if x is not s and id(x) not in thinned and x.kind not in (K.title, K.thanks)]
         shown = set().union(*[_figures_on(x) for x in others]) if others else set()
@@ -2009,7 +2862,7 @@ def _prune_frames(slides: list[OutlineSlide], idx: BriefIndex, log: _Log) -> lis
     with no content slide after it goes."""
     out = []
     for i, s in enumerate(slides):
-        if s.kind == K.section:
+        if s.kind == K.section and s.spec_ref is None:
             nxt = next((x for x in slides[i + 1 :]), None)
             if nxt is None or nxt.kind in (K.section, K.thanks, K.agenda):
                 log.dropped.append(f"{s.id} «{_q(s.headline or s.section)}» (a divider with nothing after it)")
@@ -2028,7 +2881,7 @@ def _prune_frames(slides: list[OutlineSlide], idx: BriefIndex, log: _Log) -> lis
                 gone = [it.title for it in s.content.items if it not in items]
                 log.lines.append("grounding: agenda items without slides removed: " + ", ".join(f"«{_q(x, 40)}»" for x in gone))
             s.content.items = items
-            if len(items) < 2:
+            if len(items) < 2 and s.spec_ref is None:
                 log.dropped.append(f"{s.id} «{_q(s.headline or s.section)}» (agenda with fewer than two sections left)")
                 continue
         final.append(s)

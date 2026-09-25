@@ -1137,8 +1137,27 @@ def _fingerprint(s: OutlineSlide) -> str:
     return f"{s.kind.value} | {s.headline}" + (" | " + "; ".join(bits) if bits else "")
 
 
+_V2_SLIDE = ("takeaway", "footnote", "rationale", "spec_ref")  # Agent v2 fields: left out while at their defaults
+_V2_CONTENT = ("chart2", "formula")
+
+
 def _digest(o: DeckOutline) -> str:
-    dump = [s.model_dump(mode="json", exclude={"id"}) for s in o.slides]
+    dump = []
+    for s in o.slides:
+        d = s.model_dump(mode="json", exclude={"id"})
+        for k in _V2_SLIDE:
+            if d.get(k) is None:
+                d.pop(k, None)
+        if d.get("alternatives") == []:  # Agent v2 (UI): the designer's other forms, empty by default
+            d.pop("alternatives")
+        for k in _V2_CONTENT:
+            if d["content"].get(k) is None:
+                d["content"].pop(k, None)
+        if d["content"].get("chart"):
+            for k, empty in (("categories", []), ("series", [])):
+                if d["content"]["chart"].get(k) == empty:
+                    d["content"]["chart"].pop(k, None)
+        dump.append(d)
     return hashlib.sha256(json.dumps(dump, ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:16]
 
 

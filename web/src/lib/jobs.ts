@@ -1,5 +1,6 @@
 // Job tracking: Server-Sent Events from /api/jobs/{id}/events with a 2 s polling fallback on /api/jobs/{id}.
-// Every `data:` line is a JSON JobEvent; the stream ends after status done/failed.
+// Every `data:` line is a JSON JobEvent; the stream ends after status done/failed. The planning agent's steps
+// (`type: "agent"`) come through both: the polled job record carries them in `agent` — each is delivered once (`seq`).
 import { api } from "../api";
 import type { Job, JobEvent, JobStatus } from "../types";
 
@@ -17,6 +18,7 @@ export function trackJob(jobId: string, handlers: JobHandlers, pollMs = 2000): (
   let es: EventSource | null = null;
   let timer: number | null = null;
   let last: JobEvent | null = null;
+  const seen = new Set<number>(); // numbered events already handed over
 
   const cleanup = () => {
     if (es) {
@@ -57,6 +59,10 @@ export function trackJob(jobId: string, handlers: JobHandlers, pollMs = 2000): (
 
   const handle = (ev: JobEvent) => {
     if (finished) return;
+    if (typeof ev.seq === "number") {
+      if (seen.has(ev.seq)) return;
+      seen.add(ev.seq);
+    }
     last = ev;
     handlers.onEvent?.(ev);
     if (TERMINAL.includes(ev.status)) void finish(ev.status);
@@ -86,6 +92,8 @@ export function trackJob(jobId: string, handlers: JobHandlers, pollMs = 2000): (
     if (finished) return;
     try {
       const job = await api.job(jobId);
+      // the agent's steps the stream has not brought (no stream, or a reconnect gap) — before the status, which may end it
+      for (const ev of job.agent ?? []) if (ev.status !== "done" && ev.status !== "failed") handle(ev);
       handle({ job_id: job.id, status: job.status, progress: job.progress, message: job.message, t: 0 });
     } catch {
       /* transient; keep polling */

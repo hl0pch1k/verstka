@@ -134,9 +134,10 @@ _RULES: list[tuple[str, re.Pattern]] = [
 # the most telling reason first when several links / steps failed differently
 _PRIORITY = ["auth", "no_credits", "quota", "missing", "congested", "rate", "timeout", "unreachable", "rejected", "error", "off"]
 # warnings that come from a model step (the rest are layout notes: «заголовок набран 36 пт»)
-_MODEL_STEP = re.compile(r"^(outline_planner|data_extractor|fact_checker|repair pass|own model plan failed|no LLM provider)|provider|model", re.I)
+_MODEL_STEP = re.compile(r"^(outline_planner|data_extractor|fact_checker|repair pass|own model plan failed|no LLM provider|slide_designer|deck_architect|design_critic|revision of slide|analyst: data_extractor)|provider|model", re.I)
 # the planner's own step: its failure (or a rejected answer) is why a deck was planned by the rules
-_PLANNER_STEP = re.compile(r"^(outline_planner (failed|answer rejected)|no LLM provider)", re.I)
+# (the planning agent's: no slide designed by a model, the storyline failed or was skipped)
+_PLANNER_STEP = re.compile(r"^(outline_planner (failed|answer rejected)|no LLM provider|agent: no slide was designed by a model|deck_architect (failed|skipped)|agent failed)", re.I)
 # these steps run only on a plan the model wrote (a failed repair pass keeps it): an older deck with one of them and
 # without a planner failure was planned by the model
 _MODEL_PLANNED = re.compile(r"^(fact_checker|repair pass)", re.I)
@@ -447,7 +448,7 @@ def planner_info(outline: Optional[dict], run_manifest: Optional[dict], *, use_m
     if supplied or recorded.get("supplied"):
         return {**base, "planned_by": "supplied", "by_model": False}  # the plan came with the request: no model was asked
     planned_by = (outline or {}).get("planned_by") or recorded.get("planned_by")
-    if planned_by == "model" or (planned_by or "").startswith("shared:"):
+    if planned_by in ("model", "agent") or (planned_by or "").startswith("shared:"):
         model = recorded.get("model") or tried
         return {**base, "planned_by": planned_by, "by_model": True, "model": model, "model_label": model_label(model)}
     warnings = rm.get("warnings") or []

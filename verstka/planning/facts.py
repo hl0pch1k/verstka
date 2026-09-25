@@ -1,4 +1,8 @@
-"""Facts registry: numbers, series and tables extracted from the brief."""
+"""Facts registry: numbers, series and tables extracted from the brief.
+
+The series and tables of the brief's structure (planning/brief_structure.py: lists, enumerations, «с X до Y», «Сейчас
+/ Цель» tables, markdown tables) come first and keep their ids — the slide specs name them; series found otherwise
+that are not the same data follow with ids of their own."""
 
 from __future__ import annotations
 
@@ -6,9 +10,11 @@ import re
 from typing import Optional
 
 from verstka.planning import heuristics as H
+from verstka.planning.brief_structure import read_structure
 from verstka.planning.grounding import grounded_facts
 from verstka.providers.base import ProviderError
 from verstka.providers.registry import ProviderRegistry
+from verstka.schemas.brief_structure import BriefStructure
 from verstka.schemas.outline import Brief, Fact, FactsExtraction, Series, TableData
 from verstka.skills_registry.registry import SkillsRegistry
 
@@ -53,8 +59,38 @@ def _series_from_table(tbl: TableData, idx: int) -> Optional[Series]:
     return Series(id=f"s{idx}", name=row[0], categories=cats, values=vals, source_span=tbl.source_span)
 
 
-def basic_facts(text: str, max_facts: int = 16) -> FactsExtraction:
-    """Numbers with their unit and a short label (heuristics.kpis_of), tables with their lead line, chart series."""
+def _data_key(s: Series) -> tuple:
+    return (tuple(round(v, 6) for v in s.values), tuple(c.lower() for c in s.categories))
+
+
+def merge_data(primary: FactsExtraction, series: list[Series], tables: list[TableData]) -> FactsExtraction:
+    """`primary` keeps its series ids; the other series that are not the same data (values and categories) are added
+    with an id no series of `primary` has, the other tables when not the same cells."""
+    out_series = list(primary.series)
+    keys = {_data_key(s) for s in out_series}
+    ids = {s.id for s in out_series}
+    for s in series:
+        if _data_key(s) in keys:
+            continue
+        s = s.model_copy()
+        if not s.id or s.id in ids:
+            n = len(out_series) + 1
+            while f"s{n}" in ids:
+                n += 1
+            s.id = f"s{n}"
+        ids.add(s.id)
+        keys.add(_data_key(s))
+        out_series.append(s)
+    out_tables = list(primary.tables)
+    for t in tables:
+        if not any(t.columns == u.columns and t.rows == u.rows for u in out_tables):
+            out_tables.append(t)
+    return FactsExtraction(facts=list(primary.facts), series=out_series, tables=out_tables)
+
+
+def basic_facts(text: str, max_facts: int = 16, structure: Optional[BriefStructure] = None) -> FactsExtraction:
+    """Numbers with their unit and a short label (heuristics.kpis_of), the structure's series and tables (read here
+    when not given), then the tables' own chart series."""
     facts: list[Fact] = []
     seen: set[str] = set()
     _, sections = H.parse_sections(text)
@@ -83,11 +119,37 @@ def basic_facts(text: str, max_facts: int = 16) -> FactsExtraction:
     for t in tables:
         ss, _ = H.table_series(t, start_id=len(series) + 1)
         series.extend(ss)
-    return FactsExtraction(facts=facts, series=series, tables=tables)
+    st = structure if structure is not None else read_structure(text)
+    return merge_data(FactsExtraction(facts=facts, series=[s.model_copy() for s in st.series], tables=list(st.tables)), series, tables)
 
 
-def extract_facts(brief: Brief, skills: Optional[SkillsRegistry] = None, providers: Optional[ProviderRegistry] = None) -> tuple[FactsExtraction, list[str]]:
+def _with_model_facts(out: FactsExtraction, extra: list[Fact]) -> FactsExtraction:
+    """The model's facts of the structure (per block) after the rules' ones, one per figure, ids renumbered."""
+    seen = {(re.sub(r"\D", "", f.value), f.unit or "") for f in out.facts}
+    facts = list(out.facts)
+    for f in extra:
+        key = (re.sub(r"\D", "", f.value), f.unit or "")
+        if key in seen:
+            continue
+        seen.add(key)
+        facts.append(f.model_copy())
+    for i, f in enumerate(facts, 1):
+        f.id = f"f{i}"
+    return FactsExtraction(facts=facts, series=out.series, tables=out.tables)
+
+
+def extract_facts(
+    brief: Brief, skills: Optional[SkillsRegistry] = None, providers: Optional[ProviderRegistry] = None, structure: Optional[BriefStructure] = None
+) -> tuple[FactsExtraction, list[str]]:
+    """The registry of the brief. With `structure` (Agent v2: read_structure + enrich_with_model already ran, the model
+    per block) no model is called here: the rules' figures, the structure's model facts, series and tables. Without it
+    the data_extractor reads the whole brief as before, and the structure's series and tables are added."""
     warnings: list[str] = []
+    if structure is not None:
+        out = _with_model_facts(basic_facts(brief.text, max_facts=40, structure=structure), structure.facts)
+        out.facts, changed = grounded_facts(out.facts, brief)
+        warnings.extend(changed)
+        return out, warnings
     # facts are figures: a brief without a single digit has none, and asking a model for them only spends its budget
     if not any(ch.isdigit() for ch in brief.text):
         return basic_facts(brief.text), warnings
@@ -102,6 +164,8 @@ def extract_facts(brief: Brief, skills: Optional[SkillsRegistry] = None, provide
                 s.id = s.id or f"s{i}"
             if not out.tables:
                 out.tables = _markdown_tables(brief.text)
+            st = read_structure(brief.text)
+            out = merge_data(FactsExtraction(facts=out.facts, series=out.series, tables=out.tables), st.series, st.tables)
             # the registry is the planner's only source of figures: a figure the brief does not have, or a unit the
             # brief does not give it («NPS 64» registered as «64 %»), must not reach the plan
             out.facts, changed = grounded_facts(out.facts, brief)

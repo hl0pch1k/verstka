@@ -12,6 +12,12 @@ structured:
   slide_ratio: 1.0
   synth_threshold: 0.45
   prefer_clone: 1.0
+  # Agent v2 (planning/agent.py): the slide designer's primary form of every slide; section dividers in a long deck
+  # whose slide count the user did not fix
+  designer:
+    hint: "Основная форма каждого слайда: одна мысль, ясная структура, разделители секций в длинной колоде."
+    prefer: []
+    sections: true
 visual:
   title: Визуальный
   description: "Числа крупно, ряды данных в диаграммах, тезисы под иконками, иллюстрации шаблона, минимум текста, выводы в начале."
@@ -24,6 +30,11 @@ visual:
   slide_ratio: 1.0
   synth_threshold: 0.45
   prefer_clone: 0.9
+  # Agent v2: the alternative that shows more (a chart, big figures, a timeline, cards) replaces a text form
+  designer:
+    hint: "Наглядные формы: диаграммы и крупные цифры вместо текста, где есть данные; тезисы карточками."
+    prefer: [chart, big_number, stat_row, timeline, process, cards, comparison, table, two_column, bullets]
+    switch_from: [bullets, two_column, comparison, table, cards]
 compact:
   title: Компактный
   description: "На треть меньше слайдов, плотные композиции: две колонки, сравнения и таблицы, смежные тезисы объединены, без разделителей."
@@ -36,3 +47,10 @@ compact:
   slide_ratio: 0.7
   synth_threshold: 0.45
   prefer_clone: 1.0
+  # Agent v2: denser alternatives (a table, two columns, a short list) and thin neighbours merged — never below the
+  # user's slide count (then only denser forms)
+  designer:
+    hint: "Плотные формы: таблицы, две колонки, короткие списки; соседние короткие слайды объединены."
+    prefer: [table, two_column, comparison, bullets, stat_row, chart, process, timeline, cards, big_number]
+    switch_from: [cards, process, timeline, big_number]
+    merge_thin: true

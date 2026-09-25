@@ -66,6 +66,7 @@ MIN_SERIES_DE = 20.0  # CIE76 distance between two series colours that a reader 
 SAME_HUE_DE = 32.0  # … and between two shades of the same hue
 MUTED_TOWARD_GROUND = 0.58  # the bars that step back: accent.1 moved this share of the way to the ground
 LONG_LABEL_CHARS = 12  # a category label longer than this reads better as a horizontal bar
+PAIR_LABEL_CHARS = 20  # … unless the chart has only two categories: two wide columns take labels this long
 MAX_COLUMNS = 7  # more categories than this: horizontal bars
 HOLE_SIZE = 56  # doughnut hole, % of the diameter
 BOLD_VOICE_SHARE = 0.3  # the template sets its display / h1 in bold at least this often: emphasis may be bold
@@ -273,6 +274,52 @@ def chart_palette(base: Sequence[str], ground: Optional[str], n: int, extra: Ite
         out.append(out[i % len(out)])
         i += 1
     return out
+
+
+def pie_shades(values: Sequence[Optional[float]], accent: str, ground: Optional[str], quiet_idx: Iterable[int] = (), text: Optional[str] = None) -> list[tuple[str, float]]:
+    """Slice colours of a pie or a doughnut as (base colour, share over the ground): the largest slice in the accent
+    (share 1), the others in tints of it that step toward the ground with the slice's rank (the bigger the part, the
+    stronger the colour), every tint still visible on the ground; a remainder («Прочее») the text colour eased
+    toward the ground. One hue reads as one whole; the eye goes to the largest part first. A tint is the accent laid
+    over the ground at that share — the solid colour of a slice, or the accent at that opacity on a legend swatch."""
+    accent = _norm(accent) or "0077FF"
+    ground_ = _norm(ground) or "FFFFFF"
+    text_ = _readable_text(text, ground_)
+    n = len(values)
+    quiet_set = set(quiet_idx)
+    quiet_share = next((sh for sh in (0.22, 0.28, 0.36, 0.46) if contrast_ratio(_mix(text_, ground_, sh), ground_) >= MIN_FILL_CONTRAST), 0.55)
+    out: list[tuple[str, float]] = [(text_, quiet_share)] * n
+    order = sorted((j for j in range(n) if j not in quiet_set), key=lambda j: (-(values[j] or 0.0), j))
+    if not order:
+        return out
+    out[order[0]] = (accent, 1.0)
+    m = len(order) - 1
+    if m:
+        # tints evenly spaced by how different they look (CIE ΔE along the way from the accent to the ground): two
+        # neighbours up to ΔE 32 apart, closer only when many slices share the room; the palest still clearly off the
+        # ground (a shade on a dark ground keeps 1.6:1)
+        floor = 1.6 if _is_dark(ground_) else MIN_FILL_CONTRAST
+        path: list[tuple[float, float]] = [(1.0, 0.0)]
+        share = 1.0
+        while share > 0.1:
+            share = round(share - 0.02, 3)
+            c = _mix(accent, ground_, share)
+            if contrast_ratio(c, ground_) < floor:
+                break
+            path.append((share, path[-1][1] + delta_e(c, _mix(accent, ground_, share + 0.02))))
+        total = path[-1][1]
+        step = min(32.0, total / m) if total > 0 else 0.0
+        for r, j in enumerate(order[1:]):
+            target = step * (r + 1)
+            sh = next((a for a, d in path if d >= target - 1e-6), path[-1][0])
+            out[j] = (accent, sh)
+    return out
+
+
+def pie_palette(values: Sequence[Optional[float]], accent: str, ground: Optional[str], quiet_idx: Iterable[int] = (), text: Optional[str] = None) -> list[str]:
+    """The solid colours of `pie_shades`: each base colour laid over the ground at its share."""
+    ground_ = _norm(ground) or "FFFFFF"
+    return [base if share >= 1.0 else _mix(base, ground_, share) for base, share in pie_shades(values, accent, ground_, quiet_idx, text)]
 
 
 # ---------------------------------------------------------------------------------------------- theme & ground
@@ -677,11 +724,35 @@ def _nice_scale(lo: float, hi: float) -> tuple[float, float, float]:
 # ---------------------------------------------------------------------------------------------- decisions
 
 
+def inline_series(spec: ChartSpec) -> list[Series]:
+    """The data the slide designer wrote into the chart itself (Agent v2: `categories` + `series`), as registry-like
+    Series: values cut to the categories, a missing tail padded with None; series without a value are left out."""
+    cats = [str(c) for c in (spec.categories or []) if str(c).strip()]
+    if not cats:
+        return []
+    out: list[Series] = []
+    for i, s in enumerate(spec.series or []):
+        vals = [(float(v) if v is not None else None) for v in list(s.values or [])[: len(cats)]]
+        if not any(v is not None for v in vals):
+            continue
+        name = (s.name or spec.title or "").strip()
+        if len(vals) == len(cats) and all(v is not None for v in vals):
+            out.append(Series(id=f"inline_{i + 1}", name=name, categories=cats, values=vals, unit=spec.unit))
+        else:  # a short series: its missing tail is a gap in the chart, not a zero
+            vals += [None] * (len(cats) - len(vals))
+            out.append(Series.model_construct(id=f"inline_{i + 1}", name=name, categories=cats, values=vals, unit=spec.unit, source_span=None))
+    return out
+
+
 def resolve_series(spec: ChartSpec, outline: DeckOutline) -> list[Series]:
-    """The series a chart draws. Ids that name no series fall back to the deck's first series — unless they name
-    facts: a chart «of f1, f2» asks for those figures, and another series of the deck would be someone else's data."""
+    """The series a chart draws: the registry series its ids name; else the data written into the chart itself
+    (`categories` + `series`); else — ids that name nothing and no data of its own — the deck's first series, unless
+    the ids name facts: a chart «of f1, f2» asks for those figures, and another series of the deck would be someone
+    else's data."""
     out = [s for sid in spec.series_ids if (s := outline.series_by_id(sid)) is not None]
-    if not out and outline.series and not any(outline.fact_by_id(sid) is not None for sid in spec.series_ids):
+    if not out:
+        out = inline_series(spec)
+    if not out and outline.series and not (spec.categories or spec.series) and not any(outline.fact_by_id(sid) is not None for sid in spec.series_ids):
         out = outline.series[:1]
     return out
 
@@ -709,7 +780,8 @@ def prefer_bar(spec: ChartSpec, outline: DeckOutline) -> bool:
         return False
     cats = [str(c) for c in series[0].categories]
     longest = max((len(c.strip()) for c in cats), default=0)
-    if longest > LONG_LABEL_CHARS:
+    # two columns (before / after) are wide: a label of a few words wraps under its column in two lines
+    if longest > (PAIR_LABEL_CHARS if len(cats) <= 2 else LONG_LABEL_CHARS):
         return True
     return len(cats) > MAX_COLUMNS and (longest > 5 or len(cats) > 12)
 
@@ -1140,6 +1212,8 @@ class _Kit:
     legend_w: float = 0.0
     roles: Optional[list] = None
     styles: list = field(default_factory=list)  # per series: {"fill", "line", "dash", "label"}
+    outside: bool = True  # a pie may set a label outside a thin slice (False: the caller's legend carries it)
+    slice_labels: bool = True  # a pie of amounts with the caller's legend: no computed shares on the slices
 
     def plain(self, v) -> str:
         return _fmt_value(v, self.unit_plain, self.decimals)
@@ -1214,9 +1288,16 @@ def add_chart(
     *,
     ground_hex: Optional[str] = None,
     accent_hex: Optional[str] = None,
+    legend: bool = True,
+    amounts: bool = False,
 ):
-    """A native chart at `bbox`, finished to the rules in the module docstring. `ground_hex` is the colour under the
-    chart (read from the slide when omitted); `accent_hex` overrides accent.1 (the highlight)."""
+    """A native chart at `bbox`, finished to the rules in the module docstring. `amounts` (a pie or a doughnut of
+    amounts, not percents, drawn with the caller's legend): the chart keeps the amounts as its data and labels its
+    slices with them (the brief's figures) — no computed share is written on a slice as if it were a figure of the
+    brief; the caller's legend gives each part's amount and its share, headed as a share. `ground_hex` is the colour
+    under the chart (read from the slide when omitted); `accent_hex` overrides accent.1 (the highlight). `legend=False`: a pie
+    or a doughnut without its own legend (the caller sets one beside it) — the circle takes the whole frame and a
+    slice too thin for its label inside carries none (the caller's legend gives every share)."""
     series = resolve_series(spec, outline)
     if not series:
         raise ValueError("chart has no series data")
@@ -1245,13 +1326,14 @@ def add_chart(
         lead = text
     extra = template_chart_colors(slide) + _theme_accents(slide) + manifest[1:] + ([manifest[0]] if manifest else [])
     others = [j for j, c in enumerate(cats) if is_other_category(c)] if kind in ("pie", "doughnut") and n > 2 else []
-    n_colors = (n - len(others)) if kind in ("pie", "doughnut") else len(series)
-    palette = chart_palette([lead], ground, max(1, n_colors), extra=extra)
-    accent = palette[0]
-    if others:
-        quiet = _quiet_fill(text, ground)
-        it = iter(palette)
-        palette = [quiet if j in others else next(it) for j in range(n)]
+    if kind in ("pie", "doughnut"):
+        # the largest slice in the accent, the others in its tints (a remainder quiet): one whole, one hue
+        shades = pie_shades(values[0], lead, ground, others, text)
+        palette = [base if share >= 1.0 else _mix(base, ground, share) for base, share in shades]
+        accent = lead
+    else:
+        palette = chart_palette([lead], ground, max(1, len(series)), extra=extra)
+        accent = palette[0]
 
     # --- type: sizes on the template scale, weight from its voice
     W, H = max(bbox.w, EMU_PER_PT) / EMU_PER_PT, max(bbox.h, EMU_PER_PT) / EMU_PER_PT
@@ -1274,9 +1356,10 @@ def add_chart(
         vals = [max(0.0, v or 0.0) for v in values[0]]
         total = sum(vals)
         is_pct = (short_unit(unit) == "%") and 95 <= total <= 105
-        shares = vals if is_pct or total <= 0 else [round(v / total * 100, 1) for v in vals]
+        keep = amounts and not legend and not is_pct and total > 0
+        shares = vals if is_pct or total <= 0 or keep else [round(v / total * 100, 1) for v in vals]
         values = [shares]
-        unit = "%"
+        unit = unit if keep else "%"
         data.add_series(series[0].name, shares)
     else:
         for s, vals in zip(series, values):
@@ -1300,7 +1383,11 @@ def add_chart(
         else:
             head = unit_full  # a word unit is written once, above the chart: the labels are plain numbers
             unit_in_head = True
-    if kind in ("pie", "doughnut"):
+    if kind in ("pie", "doughnut") and unit != "%":
+        decimals = _decimals(all_vals)  # a pie of the brief's amounts: its slices say the amounts
+        fmt_unit = fmt_plain = fmt_emph = label_format(unit, all_vals)
+        unit_plain = unit_emph = unit
+    elif kind in ("pie", "doughnut"):
         decimals = 0
         fmt_unit = fmt_plain = fmt_emph = label_format("%", [])
         unit_plain = unit_emph = "%"
@@ -1353,6 +1440,7 @@ def add_chart(
         fmt_unit=fmt_unit, fmt_plain=fmt_plain, fmt_emph=fmt_emph, unit=unit, unit_plain=unit_plain, unit_emph=unit_emph,
         decimals=decimals, W=W, H=H, sw=sw, sh=sh, title_h=title_h,
     )
+    k.slice_labels = True
     if multi and kind not in ("pie", "doughnut"):
         k.roles = series_roles([s.name for s in series])
     k.styles = _series_styles(k)
@@ -1360,7 +1448,8 @@ def add_chart(
     # --- legend: pies always; bars with several series (horizontal bars name their series on the first row
     # instead); lines and areas name each line at its end
     chart.has_legend = False
-    if kind in ("pie", "doughnut"):
+    k.outside = legend
+    if kind in ("pie", "doughnut") and legend:
         _legend(k, cats, side=W / max(H, 1) >= 1.45)
     elif multi and kind == "column":
         _legend(k, [s.name for s in series], side=False)
@@ -1373,6 +1462,10 @@ def add_chart(
         _style_pie(k)
     _transparent(chart)
     _fonts_everywhere(cs, family)
+    # for a caller's own legend: the colour of every slice (series), and for a pie its tint as (base, share over the
+    # ground) — a swatch drawn in the base colour at that opacity looks the same and stays a colour of the template
+    gf.verstka_colors = list(palette) if kind in ("pie", "doughnut") else [st.get("fill") or st.get("line") or accent for st in k.styles]
+    gf.verstka_shades = list(shades) if kind in ("pie", "doughnut") else None
     return gf
 
 
@@ -1980,8 +2073,10 @@ def _style_pie(k: _Kit) -> None:
         pt.format.line.width = Pt(1.5 if not ring else 2.0)
     fine = label_format("%", [0.5])  # one decimal, for a slice under 1 % only
 
+    amounts = (k.unit or "%") != "%"
+
     def label(v: float) -> str:
-        return _fmt_value(v, "%", 1 if v < 1 else 0)
+        return _fmt_value(v, k.unit, k.decimals) if amounts else _fmt_value(v, "%", 1 if v < 1 else 0)
 
     def geometry(outside: bool):
         m = fs * (2.6 if outside else 0.6)
@@ -2011,15 +2106,18 @@ def _style_pie(k: _Kit) -> None:
             elif chord(max(r - max(w, h) / 2 - 4, r * 0.4) - h / 2) >= w:
                 out[j] = "inEnd"
             else:
-                out[j] = "outEnd"
+                out[j] = "outEnd" if k.outside else "none"
         return out
 
     size = k.fs_value
     m, avail_h, side = geometry(False)
     where = decide(side, size)
     if any(v in ("outEnd", "none") for v in where.values()) and size > fs:
-        size = fs
-        where = decide(side, size)
+        smaller = decide(side, fs)
+        # a step down when it brings a label inside (without a legend of its own, a thin slice stays unlabelled
+        # whatever the size: the rest keep the larger type)
+        if k.outside or sum(v not in ("outEnd", "none") for v in smaller.values()) > sum(v not in ("outEnd", "none") for v in where.values()):
+            size, where = fs, smaller
     outside = any(v == "outEnd" for v in where.values())
     if outside:
         m, avail_h, side = geometry(True)
@@ -2027,7 +2125,7 @@ def _style_pie(k: _Kit) -> None:
 
     pts: dict[int, dict] = {}
     for j, v in enumerate(shares):
-        if not v or where.get(j) == "none":
+        if not v or where.get(j) == "none" or not k.slice_labels:
             pts[j] = {"delete": True}
             continue
         fill = palette[j % len(palette)]
@@ -2037,13 +2135,14 @@ def _style_pie(k: _Kit) -> None:
             pts[j] = {"color": _label_on(fill, k.text, k.ground)}
             if not ring:
                 pts[j]["pos"] = where[j]
-        if v < 1:
+        if v < 1 and not amounts:
             pts[j]["fmt"] = fine
     pos = None if ring else "ctr"
-    k.plot.has_data_labels = True
+    k.plot.has_data_labels = k.slice_labels
     if k.chart_el is not None:
-        _set_plot_dlbls(k.chart_el, _dlbls(k.fmt_unit, size, k.text, family, pos, leader_lines=False, bold=k.bold))
-        _set_ser_dlbls(ser._element, _dlbls(k.fmt_unit, size, k.text, family, pos, pts, leader_lines=False, bold=k.bold))
+        if k.slice_labels:
+            _set_plot_dlbls(k.chart_el, _dlbls(k.fmt_unit, size, k.text, family, pos, leader_lines=False, bold=k.bold))
+            _set_ser_dlbls(ser._element, _dlbls(k.fmt_unit, size, k.text, family, pos, pts, leader_lines=False, bold=k.bold))
         for tag, val in (("firstSliceAng", "0"), ("holeSize", str(HOLE_SIZE))):
             el = k.chart_el.find(_c(tag))
             if el is not None:

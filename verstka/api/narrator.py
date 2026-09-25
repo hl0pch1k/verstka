@@ -80,15 +80,26 @@ def describe_plan(outline: DeckOutline, plan: LayoutPlan, manifest: TemplateMani
     return "\n".join(lines)
 
 
-def describe_slide_choice(outline: DeckOutline, plan: LayoutPlan, manifest: TemplateManifest, index: int) -> str:
+def describe_slide_choice(outline: DeckOutline, plan: LayoutPlan, manifest: TemplateManifest, index: int, design_note: Optional[str] = None) -> str:
+    """Why slide `index` looks so. `design_note`: what the slide designer said about it (Agent v2: its reason, the other
+    forms, the critic's notes) — it comes first, the layout in the template follows."""
     if not (1 <= index <= len(outline.slides)):
         return f"В презентации {ru_count(len(outline.slides), 'слайд', 'слайда', 'слайдов')} — слайда {index} нет."
     osl = outline.slides[index - 1]
     ps = plan.for_outline(osl.id)
+    head = f"Слайд {index} — {kind_ru(osl.kind.value)}: «{osl.headline}»."
+    patterns = {p.id: p for p in manifest.patterns}
+    if design_note:
+        # the designer's reason is the answer; the layout follows in one short line
+        if ps is None:
+            layout = "записи в плане раскладки нет."
+        elif ps.mode == "clone" and ps.pattern_id in patterns:
+            layout = f"по образцу слайда {patterns[ps.pattern_id].source_slide} шаблона, {_match(ps.score)}."
+        else:
+            layout = "по дизайн-системе шаблона — его сетка, шрифты и цвета, размеры блоков под этот текст."
+        return f"{head}\n{design_note}\nВёрстка: {layout}"
     if ps is None:
         return f"Для слайда {index} нет записи в плане."
-    patterns = {p.id: p for p in manifest.patterns}
-    head = f"Слайд {index} — {kind_ru(osl.kind.value)}: «{osl.headline}»."
     if ps.mode == "clone" and ps.pattern_id in patterns:
         p = patterns[ps.pattern_id]
         body = f"Собран по образцу слайда {p.source_slide} шаблона ({kind_ru(p.kind.value)}), {_match(ps.score)}."
@@ -100,7 +111,7 @@ def describe_slide_choice(outline: DeckOutline, plan: LayoutPlan, manifest: Temp
         body = "Свёрстан по дизайн-системе шаблона: его сетка, шкала шрифтов, цвета и карточки, а размеры блоков рассчитаны под этот текст."
         if near is not None:
             body += f" Ближайший образец в шаблоне — слайд {near.source_slide} ({kind_ru(near.kind.value)}), {_match(ps.score)}; его геометрия под этот текст не подошла бы без пустот и мелкого шрифта."
-    return f"{head} {body} Причины выбора — в панели «Почему этот слайд такой»."
+    return f"{head} {body} Подробнее — в панели «Почему слайд такой»."
 
 
 def _composed(ps, patterns) -> str:

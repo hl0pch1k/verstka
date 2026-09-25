@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import inspect
 import json
 import logging
 import time
@@ -21,7 +22,7 @@ from verstka.ingest.render import RenderError, find_pdftoppm, find_soffice, pdf_
 from verstka.ingest.workspace import TemplateWorkspace
 from verstka.matching.matcher import match_outline
 from verstka.pipeline.run_manifest import build_run_manifest, write_run_manifest
-from verstka.planning.facts import extract_facts
+from verstka.planning.facts import basic_facts, extract_facts
 from verstka.planning.outline import adapt_outline, plan_outline, target_slide_count
 from verstka.planning.strategies import STRATEGY_NAMES, Strategy, load_strategies
 from verstka.providers.registry import ProviderRegistry
@@ -33,7 +34,14 @@ from verstka.schemas.template import TemplateManifest
 from verstka.skills_registry.registry import SkillsRegistry
 
 log = logging.getLogger(__name__)
-ProgressFn = Callable[[str, float], None]
+ProgressFn = Callable[..., None]
+# the plans a model wrote: the outline planner's ("model") and the planning agent's ("agent")
+MODEL_PLANNED = ("model", "agent")
+# the progress share of each agent step (the plan phase runs from 0.15 to _AGENT_PLAN_END when the agent plans)
+_AGENT_PLAN_END = 0.4
+# a slow first analysis of a template leaves the models at least this much of the budget (then the rules)
+_MIN_MODEL_BUDGET_S = 30.0
+_AGENT_SHARE = {"analyst": 0.17, "architect": 0.19, "designer": 0.2, "critic": 0.33, "revise": 0.36, "compile": 0.38}
 
 
 @dataclass
@@ -49,8 +57,8 @@ class VariantResult:
     audit: Optional[AuditReport] = None
     exports: dict[str, Path] = field(default_factory=dict)
     timings: dict[str, float] = field(default_factory=dict)
-    # who wrote the plan: {"planned_by": "model" | "rules" | "skeleton" | "shared:<strategy>", "model": the model that answered,
-    # "supplied": True when the outline came with the request}
+    # who wrote the plan: {"planned_by": "agent" | "model" | "rules" | "skeleton" | "shared:<strategy>", "model": the model
+    # that answered, "supplied": True when the outline came with the request, "agent": what the planning agent did}
     planner: dict = field(default_factory=dict)
 
 
@@ -68,34 +76,110 @@ def _sha(text: str) -> str:
 
 class _Recorder:
     """A provider that notes which model answered each call (CompletionResult.model — with a fallback chain it may be
-    a backup model), so a deck can say which model planned it."""
+    a backup model), so a deck can say which model planned it; and what every call cost (`stats`: the skill's answer
+    schema, seconds, HTTP requests sent — attempts, retries and repairs included —, prompt and completion tokens, also
+    of a call that failed), for the run manifest."""
 
-    def __init__(self, inner, sink: list) -> None:
+    def __init__(self, inner, sink: list, stats: Optional[list] = None) -> None:
         self.inner = inner
         self.sink = sink
+        self.stats = stats if stats is not None else []
         self.name = getattr(inner, "name", "provider")
         self.model = getattr(inner, "model", None)
 
     def complete(self, messages, **kwargs):
-        res = self.inner.complete(messages, **kwargs)
-        self.sink.append(getattr(res, "model", None) or self.model)
-        return res
+        from verstka.providers.openai_compat import requests_sent
+
+        schema = kwargs.get("schema")
+        rec = {"skill": getattr(schema, "__name__", None) or "text", "ok": False}
+        t, sent = time.monotonic(), requests_sent()
+        try:
+            res = self.inner.complete(messages, **kwargs)
+        except Exception as e:
+            u = getattr(e, "usage", None)
+            rec.update(tokens_in=getattr(u, "prompt_tokens", 0) or 0, tokens_out=getattr(u, "completion_tokens", 0) or 0, error=str(e)[:120])
+            raise
+        else:
+            u = getattr(res, "usage", None)
+            rec.update(ok=True, tokens_in=getattr(u, "prompt_tokens", 0) or 0, tokens_out=getattr(u, "completion_tokens", 0) or 0, attempts=getattr(res, "attempts", 1))
+            self.sink.append(getattr(res, "model", None) or self.model)
+            return res
+        finally:
+            n = requests_sent() - sent
+            # a provider without HTTP (a mock, a replay) sends nothing: its call counts as its attempts
+            rec.update(seconds=round(time.monotonic() - t, 2), requests=n if n > 0 else int(rec.get("attempts", 1)))
+            self.stats.append(rec)
 
     def __getattr__(self, item: str):
         return getattr(self.inner, item)
 
 
-def _recording(providers: Optional[ProviderRegistry]) -> tuple[Optional[ProviderRegistry], list]:
-    """The registry with every role wrapped in a _Recorder (one sink per call site); the registry itself if it cannot be."""
+def _recording(providers: Optional[ProviderRegistry], stats: Optional[list] = None) -> tuple[Optional[ProviderRegistry], list]:
+    """The registry with every role wrapped in a _Recorder (one sink per call site, `stats` for what the calls cost);
+    the registry itself if it cannot be."""
     sink: list = []
     if providers is None:
         return None, sink
     try:
         reg = copy.copy(providers)
-        reg.roles = {role: _Recorder(p, sink) for role, p in providers.roles.items()}
+        reg.roles = {role: _Recorder(p, sink, stats) for role, p in providers.roles.items()}
         return reg, sink
     except Exception:  # noqa: BLE001 - recording is a nicety, planning must not depend on it
         return providers, sink
+
+
+def call_totals(stats: list) -> dict:
+    """What the model calls of a step cost: calls, HTTP requests, tokens in and out, failed calls, by skill."""
+    by: dict[str, dict] = {}
+    for r in stats:
+        b = by.setdefault(r.get("skill") or "text", {"calls": 0, "requests": 0, "tokens_in": 0, "tokens_out": 0, "failed": 0, "seconds": 0.0})
+        b["calls"] += 1
+        b["requests"] += int(r.get("requests") or 0)
+        b["tokens_in"] += int(r.get("tokens_in") or 0)
+        b["tokens_out"] += int(r.get("tokens_out") or 0)
+        b["failed"] += 0 if r.get("ok") else 1
+        b["seconds"] = round(b["seconds"] + float(r.get("seconds") or 0.0), 2)
+    tot = {k: sum(b[k] for b in by.values()) for k in ("calls", "requests", "tokens_in", "tokens_out", "failed")}
+    return {**tot, "by_skill": by}
+
+
+def _cost_of(stats: list) -> dict:
+    """The agent's model use for run_manifest.planner.agent: every call (the analyst's data_extractor included), the
+    HTTP requests they sent (retries, repairs), tokens in and out."""
+    if not stats:
+        return {}
+    t = call_totals(stats)
+    return {"calls_made": t["calls"], "requests": t["requests"], "tokens_in": t["tokens_in"], "tokens_out": t["tokens_out"], "failed_calls": t["failed"], "by_skill": t["by_skill"]}
+
+
+def _event_sink(progress: Optional[ProgressFn]) -> Callable[[dict], None]:
+    """The planning agent's events ({"type": "agent", "step", "message", "slide", "variant"}) for a progress callback:
+    one that takes an `event` keyword (or any keyword: api.agent_view.job_progress) gets the event as `event=`, one
+    that takes (message, share) only gets the message; the share grows with the agent's steps."""
+    if progress is None:
+        return lambda ev: None
+    try:
+        params = inspect.signature(progress).parameters
+    except (TypeError, ValueError):
+        params = {}
+    takes_event = "event" in params or any(p.kind == p.VAR_KEYWORD for p in params.values())
+    state = {"designed": 0}
+
+    def sink(ev: dict) -> None:
+        step = ev.get("step") or "analyst"
+        share = _AGENT_SHARE.get(step, 0.2)
+        if step == "designer":
+            state["designed"] += 1
+            share = min(0.32, 0.2 + 0.01 * state["designed"])
+        try:
+            if takes_event:
+                progress(ev["message"], share, event=ev)
+            else:
+                progress(ev["message"], share)
+        except Exception:  # noqa: BLE001 - a listener never stops the deck
+            log.debug("progress listener failed on an agent event", exc_info=True)
+
+    return sink
 
 
 def render_outputs(vdir: Path, manifest: TemplateManifest, title: Optional[str], exports: list[str], *, images: bool = True, dpi: int = 110) -> tuple[dict[str, Path], list[Path], list[str], Optional[bool]]:
@@ -153,10 +237,18 @@ def generate_variants(
     audit_models: bool = False,
     exports: Optional[list[str]] = None,
     progress: Optional[ProgressFn] = None,
+    agent: Optional[bool] = None,
 ) -> GenerateResult:
+    """`agent`: plan with the planning agent (planning/agent.py: analyst → designer per slide → critic → compiler);
+    None = for every brief: with models the designer writes each slide, without them (or past the budget) the
+    deterministic designer builds the slides the brief describes («Слайд 1…N») with their charts, tables, formulas and
+    takeaways. The agent's variants that it could not plan (a brief without slide specs and no storyline — no model
+    for the architect —, a deck grounding emptied) are planned as before (plan_outline, its model plan shared,
+    basic_outline)."""
     if brief is None and outline is None:
         raise ValueError("either brief or outline is required")
     t0 = time.time()
+    t_start = time.monotonic()  # the model budget counts from here: template analysis is part of the 5 minutes
     out_dir = Path(out_dir)
     strategies = strategies or list(STRATEGY_NAMES)
     all_strategies = load_strategies()
@@ -172,20 +264,67 @@ def generate_variants(
     analyze_s = round(time.time() - ta, 2)
     if providers is not None:
         # brief → decks gets a fixed model budget: past it every model step takes its deterministic path, so a slow
-        # or congested backend costs quality, never the 5 minutes a deck may take
-        providers = providers.with_deadline(time.monotonic() + providers.limits.time_budget_s)
+        # or congested backend costs quality, never the 5 minutes a deck may take. It counts from the start of the
+        # generation: a template analysed now (the jury's own, not cached yet) takes its time out of the same budget,
+        # so analysis + planning + rendering stay inside the limit (the analysis itself is never cut: it is cached)
+        budget = float(providers.limits.time_budget_s)
+        budget_end = t_start + budget
+        if budget >= 2 * _MIN_MODEL_BUDGET_S:
+            budget_end = max(budget_end, time.monotonic() + _MIN_MODEL_BUDGET_S)
+        providers = providers.with_deadline(budget_end)
     ws = TemplateWorkspace.open(manifest.template_id, workspace_root)
     result = GenerateResult(template_id=manifest.template_id, manifest=manifest)
     facts: Optional[FactsExtraction] = None
     fact_warnings: list[str] = []
-    if brief is not None and outline is None:
-        facts, fact_warnings = extract_facts(brief, skills if use_llm else None, providers if use_llm else None)
+    models_on = bool(use_llm and providers is not None and skills is not None and providers.has("llm"))
+    use_agent = (True if agent is None else bool(agent)) and brief is not None and outline is None
+    agent_result = None
+    agent_raw: list = []
+    agent_models: list = []
+    agent_stats: list = []  # what the agent's model calls cost (the analyst's included): the run manifest
+    if use_agent:
+        from verstka.planning.agent import run_agent
+
+        report("plan: agent", 0.15)
+        rec, agent_models = _recording(providers if models_on else None, agent_stats)
+        try:
+            # the analyst reads the brief's data per block (data_extractor), so the registry needs no model call of
+            # its own here: run_agent takes the rules' figures with the analyst's series, tables and facts
+            agent_result = run_agent(
+                brief, manifest, [all_strategies[nm] for nm in strategies], facts=None,
+                skills=skills if models_on else None, providers=rec if models_on else None, progress=_event_sink(progress), raw=agent_raw,
+            )
+        except Exception as e:  # noqa: BLE001 - the planner takes over
+            log.warning("planning agent failed, the planner takes over", exc_info=True)
+            fact_warnings.append(f"agent failed, the planner takes over: {str(e)[:200]}")
+            agent_result = None
+    agent_done = agent_result is not None and all(nm in agent_result.outlines for nm in strategies)
+    if brief is not None and outline is None and not agent_done:
+        # the analyst has read the brief per block (with the model when there is one): no second whole-brief call
+        st = agent_result.structure if agent_result is not None else None
+        facts, more = extract_facts(brief, skills if use_llm else None, providers if use_llm else None, structure=st)
+        fact_warnings.extend(more)
+    elif brief is not None and outline is None:
+        facts = basic_facts(brief.text, structure=agent_result.structure)
     n = len(strategies)
     audit_render = bool(audit_models and use_vlm)  # the VLM checks look at slide images; deterministic ones read XML
     planned: dict[str, tuple[DeckOutline, list[str], float]] = {}
     plan_models: dict[str, Optional[str]] = {}  # strategy → the model that wrote its plan (None: the rules did)
     plan_raw: dict[str, list] = {}  # strategy → the planner's answers as the model wrote them (planner_raw.json)
-    if outline is None:
+    plan_end = 0.15
+    agent_info: dict[str, dict] = {}
+    if agent_result is not None and agent_result.outlines:
+        plan_end = _AGENT_PLAN_END
+        model_of_agent = next((m for m in agent_models if m), None)
+        for name in strategies:
+            o = agent_result.outlines.get(name)
+            if o is None:
+                continue
+            planned[name] = (o, list(agent_result.warnings.get(name, [])), agent_result.seconds)
+            plan_models[name] = model_of_agent if o.planned_by in MODEL_PLANNED else None
+            plan_raw[name] = [e for e in agent_raw if not e.get("variant") or e.get("variant") == name]
+            agent_info[name] = {**agent_result.summary(name), **_cost_of(agent_stats)}
+    if outline is None and len(planned) < len(strategies):
         # the strategies are independent: with a model each plan is a chain of 2–3 calls (plan, fact check, repair),
         # so they run side by side and the deck waits for the slowest chain, not for the sum of them
         def _plan(name: str) -> tuple[str, DeckOutline, list[str], float]:
@@ -196,25 +335,28 @@ def generate_variants(
             plan_raw[name] = raw
             # own copy of the facts: the deterministic planner adds the brief's table series to them
             o, w = plan_outline(brief, manifest, strategy, facts.model_copy(deep=True), skills if use_llm else None, rec, target=target_slide_count(brief, strategy), raw=raw)
-            plan_models[name] = answered[0] if answered and o.planned_by == "model" else None
+            plan_models[name] = answered[0] if answered and o.planned_by in MODEL_PLANNED else None
+            if agent_result is not None:
+                w = list(agent_result.warnings.get(name, [])) + w  # why the agent did not plan this variant
             return name, o, w, round(time.time() - tp, 2)
 
-        report(f"plan: {n} variants", 0.15)
-        workers = min(n, providers.limits.max_concurrency) if (use_llm and providers is not None and skills is not None) else 1
+        todo = [name for name in strategies if name not in planned]
+        report(f"plan: {len(todo)} variants", plan_end)
+        workers = min(len(todo), providers.limits.max_concurrency) if (use_llm and providers is not None and skills is not None) else 1
         if workers > 1:
             with ThreadPoolExecutor(max_workers=workers) as ex:
-                done = list(ex.map(_plan, strategies))
+                done = list(ex.map(_plan, todo))
         else:
-            done = [_plan(name) for name in strategies]
-        planned = {name: (o, w, sec) for name, o, w, sec in done}
+            done = [_plan(name) for name in todo]
+        planned.update({name: (o, w, sec) for name, o, w, sec in done})
         # a congested endpoint may answer one variant and not the others: the variants whose own model plan failed
         # take the model's content (reshaped for their strategy) rather than a thin plan made by the rules
         order = sorted(planned, key=lambda nm: STRATEGY_NAMES.index(nm) if nm in STRATEGY_NAMES else len(STRATEGY_NAMES))
-        donor = next((nm for nm in order if planned[nm][0].planned_by == "model"), None)
+        donor = next((nm for nm in order if planned[nm][0].planned_by in MODEL_PLANNED), None)
         if donor is not None:
-            for name in strategies:
+            for name in todo:
                 o, w, sec = planned[name]
-                if o.planned_by == "model":
+                if o.planned_by in MODEL_PLANNED:
                     continue
                 st = all_strategies[name]
                 aw: list[str] = []
@@ -229,8 +371,8 @@ def generate_variants(
         vdir = out_dir / name
         vdir.mkdir(parents=True, exist_ok=True)
         warnings = list(fact_warnings)
-        base = 0.15 + 0.7 * i / n
-        span = 0.7 / n
+        base = plan_end + (0.85 - plan_end) * i / n
+        span = (0.85 - plan_end) / n
         if outline is not None:
             v_outline = outline.model_copy(deep=True)
             v_outline.strategy = name
@@ -296,6 +438,8 @@ def generate_variants(
         vr = VariantResult(strategy=name, out_dir=vdir, outline=v["outline"], plan=v["plan"], render=v["render"], images=v["images"], warnings=v["warnings"], seconds=round(time.time() - v["ts"], 2), audit=audit_report, exports=export_paths, timings=timings)
         timings["total"] = vr.seconds
         vr.planner = {"planned_by": v["outline"].planned_by, "model": plan_models.get(name)}
+        if name in agent_info and v["outline"].planned_by in ("agent", "rules"):
+            vr.planner["agent"] = agent_info[name]  # the planning agent's own plan (not another variant's, shared)
         if outline is not None:
             vr.planner["supplied"] = True  # the plan came with the request: no model was asked to plan it
         slides_info = [{"index": s.index, "outline_id": s.outline_id, "mode": s.mode, "pattern_id": s.pattern_id, "composition": s.composition, "warnings": s.warnings} for s in v["render"].slides]

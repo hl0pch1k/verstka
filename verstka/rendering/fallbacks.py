@@ -164,6 +164,7 @@ def _scrub_slide(o: OutlineSlide, outline: DeckOutline) -> tuple[OutlineSlide, b
             "quote_author": f(c.quote_author) or None,
         }
     )
+    takeaway, footnote = f(o.takeaway) or None, f(o.footnote) or None
     headline = f(o.headline) or ""
     if not headline.strip():
         # a heading that was nothing but a stub: the cover takes the deck's title, any other slide keeps its words
@@ -171,7 +172,7 @@ def _scrub_slide(o: OutlineSlide, outline: DeckOutline) -> tuple[OutlineSlide, b
     subtitle, section = f(o.subtitle) or None, f(o.section) or None
     if not changed:
         return o, False
-    return o.model_copy(update={"headline": headline, "subtitle": subtitle, "section": section, "content": content}), True
+    return o.model_copy(update={"headline": headline, "subtitle": subtitle, "section": section, "content": content, "takeaway": takeaway, "footnote": footnote}), True
 
 
 # ---------------------------------------------------------------------------------------------- figures from facts
@@ -270,11 +271,14 @@ def _substitute(o: OutlineSlide, outline: DeckOutline, *, chart_facts: bool) -> 
         kind, content, how = K.cards, SlideContent(items=items, bullets=bullets, paragraphs=paragraphs), "cards"
     elif bullets or paragraphs:
         kind, content, how = K.bullets, SlideContent(bullets=bullets, paragraphs=paragraphs), "bullets"
+    elif (c.formula or "").strip():
+        kind, content, how = K.big_number, SlideContent(), "its formula"
     elif len(titles := [it.title.strip() for it in all_items if it.title.strip()]) >= 2:
         kind, content, how = K.bullets, SlideContent(bullets=titles), "a list of its item titles"
     else:
         kind, content, how = K.section, SlideContent(), "a statement of its headline"
     content.image_hint = c.image_hint
+    content.formula = c.formula  # a formula is text, not data: it stays with the slide
     return o.model_copy(update={"kind": kind, "content": content}), how
 
 
@@ -288,19 +292,42 @@ def _as_list(o: OutlineSlide, outline: DeckOutline) -> OutlineSlide:
     else:
         content = SlideContent(paragraphs=list(c.paragraphs), quote=c.quote, quote_author=c.quote_author)
     content.table, content.chart, content.image_hint = c.table, c.chart, c.image_hint
+    content.chart2, content.formula = c.chart2, c.formula
     return o.model_copy(update={"kind": K.bullets, "content": content})
 
 
 def _model_plan(outline: DeckOutline) -> bool:
-    """A model wrote the plan (its own or another variant's, reshaped): it was asked for cards with text under their
+    """A model wrote the plan (its own or another variant's, reshaped, or the planning agent's designer): it was asked for cards with text under their
     titles, so cards that are titles alone lost their text. The rules planner sets a list of short lines as title-only
     cards on purpose (programme modules, parts of a whole) — those stay cards."""
     by = outline.planned_by or ""
-    return by == "model" or by.startswith("shared:")
+    return by in ("model", "agent") or by.startswith("shared:")
 
 
 def _has_body(c: SlideContent, *, chart: bool = True) -> bool:
-    return bool(c.bullets or c.paragraphs or c.items or c.columns or c.numbers or c.table is not None or c.quote or (chart and c.chart is not None))
+    return bool(
+        c.bullets or c.paragraphs or c.items or c.columns or c.numbers or c.table is not None or c.quote or (c.formula or "").strip()
+        or (chart and (c.chart is not None or c.chart2 is not None))
+    )
+
+
+def _second_chart(s: OutlineSlide, outline: DeckOutline, notes: list[str]) -> tuple[OutlineSlide, bool]:
+    """The second chart of a slide (Agent v2 `chart2`): drawn only with data; alone (no first chart, or a first chart
+    without data) it becomes the slide's chart. Returns the slide and whether its composition changes."""
+    c = s.content
+    if c.chart2 is None:
+        return s, False
+    ok2 = chart_data_ok(c.chart2, outline)
+    if c.chart is None or not chart_data_ok(c.chart, outline):
+        if ok2:
+            gone = "" if c.chart is None else f" (the first has no series data: ids {', '.join(c.chart.series_ids) or 'none'})"
+            notes.append(f"the second chart is the slide's chart{gone}")
+            return s.model_copy(update={"content": c.model_copy(update={"chart": c.chart2, "chart2": None})}), True
+        return s.model_copy(update={"content": c.model_copy(update={"chart2": None})}), c.chart is None
+    if not ok2:
+        notes.append(f"second chart dropped: no series data (ids: {', '.join(c.chart2.series_ids) or 'none'})")
+        return s.model_copy(update={"content": c.model_copy(update={"chart2": None})}), True
+    return s, False
 
 
 def prepare_slide(o: OutlineSlide, ps: LayoutSlide, outline: DeckOutline) -> tuple[OutlineSlide, LayoutSlide, list[str]]:
@@ -310,9 +337,9 @@ def prepare_slide(o: OutlineSlide, ps: LayoutSlide, outline: DeckOutline) -> tup
     s, scrubbed = _scrub_slide(o, outline)
     if scrubbed:
         notes.append("template stubs removed from the text ([email], [телефон], …)")
+    s, replan = _second_chart(s, outline, notes)
     c = s.content
     why: Optional[str] = None
-    replan = False
     chart_facts = False
     if c.chart is not None and not chart_data_ok(c.chart, outline):
         ids = ", ".join(c.chart.series_ids) or "none"
@@ -339,7 +366,7 @@ def prepare_slide(o: OutlineSlide, ps: LayoutSlide, outline: DeckOutline) -> tup
                 why = f"{s.kind.value} columns have nothing under their titles"
         elif s.kind in _CARD_KINDS and cols and all(_bare(it) for it in cols) and _model_plan(outline):
             why = "every card is a bare title"
-        elif s.kind in _FIGURE_KINDS and not c.numbers:
+        elif s.kind in _FIGURE_KINDS and not c.numbers and not (c.formula or "").strip() and c.chart is None:
             why = "figure slide without figures"
         elif s.kind in _FREE_KINDS:
             s = _as_list(s, outline)

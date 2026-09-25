@@ -10,6 +10,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
+_MAX_AGENT_POLLED = 400
+
 
 @dataclass
 class Job:
@@ -30,18 +32,27 @@ class Job:
         if progress is not None:
             self.progress = max(0.0, min(1.0, progress))
         self.message = message
-        ev = {"job_id": self.id, "status": self.status, "progress": round(self.progress, 3), "message": message, "t": round(time.time() - self.created_at, 2), **extra}
-        # append + fan-out under the lock so a subscriber that is replaying history never misses an event
+        # append + fan-out under the lock so a subscriber that is replaying history never misses an event; `seq` lets
+        # a client that reads both the stream and the polled job record drop the events it already has
         with self._lock:
+            ev = {"job_id": self.id, "status": self.status, "progress": round(self.progress, 3), "message": message, "t": round(time.time() - self.created_at, 2), **extra, "seq": len(self.events)}
             self.events.append(ev)
             for q in list(self._subscribers):
                 q.put(ev)
 
+    def agent_events(self) -> list[dict]:
+        """The steps of the planning agent («Аналитик нашёл…», «Слайд 3 — круговая диаграмма…») in order."""
+        with self._lock:
+            return [ev for ev in self.events if ev.get("type") == "agent"]
+
     def subscribe(self) -> queue.Queue:
         q: queue.Queue = queue.Queue()
         with self._lock:
-            for ev in self.events[-50:]:
-                q.put(ev)
+            # a late subscriber (a reloaded page) gets the whole agent timeline, the rest only from the last 50 events
+            tail = len(self.events) - 50
+            for i, ev in enumerate(self.events):
+                if i >= tail or ev.get("type") == "agent":
+                    q.put(ev)
             self._subscribers.append(q)
         return q
 
@@ -51,7 +62,11 @@ class Job:
                 self._subscribers.remove(q)
 
     def to_dict(self) -> dict:
-        return {"id": self.id, "kind": self.kind, "status": self.status, "progress": round(self.progress, 3), "message": self.message, "error": self.error, "created_at": self.created_at, "finished_at": self.finished_at, "result": self.result if isinstance(self.result, (dict, list, str, int, float)) or self.result is None else str(self.result)}
+        out = {"id": self.id, "kind": self.kind, "status": self.status, "progress": round(self.progress, 3), "message": self.message, "error": self.error, "created_at": self.created_at, "finished_at": self.finished_at, "result": self.result if isinstance(self.result, (dict, list, str, int, float)) or self.result is None else str(self.result)}
+        agent = self.agent_events()
+        if agent:
+            out["agent"] = agent[-_MAX_AGENT_POLLED:]  # the timeline for a client that polls instead of streaming
+        return out
 
 
 class JobRunner:
