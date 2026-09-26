@@ -6,6 +6,7 @@ export interface EmptyStateProps {
   /** Lucide component (`icon={Inbox}`) or element. */
   icon?: IconProp;
   title: string;
+  /** Optional, ≤ 40 characters: how to recover. */
   hint?: ReactNode;
   /** Usually a <Button/>. */
   action?: ReactNode;
@@ -16,20 +17,11 @@ export interface EmptyStateProps {
 
 export function EmptyState({ icon, title, hint, action, compact = false, className }: EmptyStateProps) {
   return (
-    <div className={cn("flex w-full flex-col items-center justify-center text-center animate-fade-in", compact ? "px-4 py-6" : "px-6 py-14", className)}>
-      {icon && (
-        <div
-          className={cn(
-            "flex items-center justify-center rounded-2xl bg-accent-50 text-accent",
-            compact ? "mb-3 h-11 w-11" : "mb-5 h-14 w-14",
-          )}
-        >
-          {renderIcon(icon, compact ? "h-5 w-5" : "h-7 w-7", 1.75)}
-        </div>
-      )}
-      <h4 className={cn("font-semibold text-zinc-900", compact ? "text-[15px]" : "text-lg")}>{title}</h4>
-      {hint && <p className={cn("mt-1.5 max-w-md text-zinc-500", compact ? "text-[13px] leading-5" : "text-sm leading-6")}>{hint}</p>}
-      {action && <div className="mt-5 flex items-center gap-2">{action}</div>}
+    <div className={cn("flex w-full flex-col items-center justify-center text-center animate-fade-in", compact ? "px-4 py-6" : "px-6 py-12", className)}>
+      {icon && <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-zinc-100 text-zinc-500">{renderIcon(icon, "h-6 w-6")}</div>}
+      <h4 className="text-title3 font-semibold text-zinc-900">{title}</h4>
+      {hint && <p className="mt-1 max-w-md text-footnote text-zinc-500">{hint}</p>}
+      {action && <div className="mt-6 flex items-center gap-2">{action}</div>}
     </div>
   );
 }

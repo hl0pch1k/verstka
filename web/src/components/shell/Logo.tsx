@@ -16,10 +16,10 @@ export function Logo({ onClick }: { onClick?: () => void }) {
       type="button"
       onClick={onClick}
       aria-label="Verstka — на главную"
-      className="group flex h-11 shrink-0 cursor-pointer items-center gap-2.5 rounded-xl pr-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+      className="group -ml-2 flex h-10 shrink-0 cursor-pointer items-center gap-2 rounded-xl px-2"
     >
-      <span className="transition-transform duration-300 ease-out group-hover:-rotate-6 group-hover:scale-105 group-active:scale-95">
-        <LogoMark size={36} />
+      <span className="transition-transform duration-200 ease-out group-hover:-rotate-6 group-hover:scale-105 group-active:scale-95">
+        <LogoMark size={32} />
       </span>
       <span className="font-display text-[26px] font-bold leading-none tracking-[-0.03em] text-zinc-900">Verstka</span>
     </button>

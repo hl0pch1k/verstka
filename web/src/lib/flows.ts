@@ -5,10 +5,11 @@ import { api } from "../api";
 import { pushToast } from "../components/ui/Toasts";
 import type { GenerateRequest, GenerateResponse, Generation, Job, JobKind, TabKey, TemplateListItem, TemplateManifest, UploadResponse } from "../types";
 import { describeGeneration, firstLine, newestTemplate } from "./narrate";
+import { templateTitle } from "./plain";
 import { plural } from "./utils";
 
 interface CommonDeps {
-  runJob(jobId: string, label: string, opts?: { kind?: JobKind; items?: string[]; onDone?: (job: Job) => void; onFailed?: (job: Job) => void }): void;
+  runJob(jobId: string, label: string, opts?: { kind?: JobKind; items?: string[]; template?: string | null; onDone?: (job: Job) => void; onFailed?: (job: Job) => void }): void;
   report(e: unknown, prefix: string): void;
   pushMessage(role: "user" | "assistant", text: string): void;
   setTab(t: TabKey): void;
@@ -34,8 +35,8 @@ export function uploadTemplateFlow(file: File, useModels: boolean, d: UploadDeps
         d.report(e, "Не удалось загрузить шаблон");
         return resolve();
       }
-      if (useModels && !res.use_models) pushToast("info", "Модели не настроены — шаблон разбирается эвристиками");
-      d.runJob(res.job_id, `Разбираю шаблон «${file.name}»`, {
+      if (useModels && !res.use_models) pushToast("info", "Модель не подключена — разберу шаблон по правилам");
+      d.runJob(res.job_id, `Разбираю шаблон «${templateTitle(file.name)}»`, {
         kind: "analyze",
         onDone: async (job) => {
           try {
@@ -46,7 +47,7 @@ export function uploadTemplateFlow(file: File, useModels: boolean, d: UploadDeps
             if (!tid) throw new Error("сервер не вернул идентификатор шаблона");
             const m = await api.template(tid);
             d.adoptManifest(m);
-            const fallback = `Шаблон «${m.source_file}» разобран: ${plural(m.patterns.length, "макет", "макета", "макетов")} из ${plural(m.n_slides, "слайда", "слайдов", "слайдов")}.`;
+            const fallback = `Шаблон «${templateTitle(m.source_file)}» разобран: ${plural(m.patterns.length, "макет", "макета", "макетов")} из ${plural(m.n_slides, "слайда", "слайдов", "слайдов")}.`;
             d.pushMessage("assistant", m.narration || fallback);
             pushToast("success", "Шаблон разобран");
           } catch (e) {
@@ -55,7 +56,7 @@ export function uploadTemplateFlow(file: File, useModels: boolean, d: UploadDeps
           resolve();
         },
         onFailed: (job) => {
-          d.pushMessage("assistant", `Не получилось разобрать «${file.name}»: ${firstLine(job.error ?? job.message)}`);
+          d.pushMessage("assistant", `Не получилось разобрать «${templateTitle(file.name)}»: ${firstLine(job.error ?? job.message)}`);
           resolve();
         },
       });
@@ -69,6 +70,10 @@ export interface GenerationDeps extends CommonDeps {
   /** The model indicator follows every generation: it may have found the host congested or back. */
   refreshModelStatus(): Promise<void>;
   titleOf(strategy: string): string;
+  /** The helper steps aside when a build starts: the build screen needs the whole width. */
+  setAgentOpen?(open: boolean): void;
+  /** «Презентация готова» is only worth a toast when the person is not looking at the result already. */
+  currentScreen?(): string;
 }
 
 export function generationFlow(req: GenerateRequest, d: GenerationDeps): Promise<void> {
@@ -82,9 +87,11 @@ export function generationFlow(req: GenerateRequest, d: GenerationDeps): Promise
         return resolve();
       }
       d.setTab("variants"); // the result screen shows the build while the job runs
-      d.runJob(res.job_id, `Собираю ${plural(req.strategies.length, "вариант", "варианта", "вариантов")}`, {
+      d.setAgentOpen?.(false);
+      d.runJob(res.job_id, "Собираю презентацию", {
         kind: "generate",
         items: req.strategies,
+        template: req.template_id,
         onDone: async () => {
           void d.refreshModelStatus();
           await d.refreshGenerations();
@@ -92,7 +99,7 @@ export function generationFlow(req: GenerateRequest, d: GenerationDeps): Promise
           if (g) {
             d.setTab("variants");
             d.pushMessage("assistant", describeGeneration(g, d.titleOf));
-            pushToast("success", "Презентация готова");
+            if (d.currentScreen?.() !== "result") pushToast("success", "Презентация готова");
           }
           resolve();
         },

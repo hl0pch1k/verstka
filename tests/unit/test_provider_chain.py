@@ -1033,7 +1033,7 @@ def test_the_default_config_end_to_end_with_fake_hosts(config_env, monkeypatch, 
     assert [len(c[i].calls) for i in range(7)] == [1, 0, 1, 0, 0, 1, 0]
 
 
-def test_the_ui_names_the_failed_link_by_its_label_not_by_the_wording(config_env, monkeypatch, sleeps):
+def test_the_ui_names_the_failed_link_by_its_label_not_by_the_wording(config_env, monkeypatch, sleeps, caplog):
     """The paid OpenRouter link and Groq run the same model id, and Groq's 401 carries no Groq wording: the label the
     chain puts before each failed link tells the notice which of them it is about."""
     from verstka.api.model_status import chain_context, collect_links, planner_info
@@ -1051,12 +1051,19 @@ def test_the_ui_names_the_failed_link_by_its_label_not_by_the_wording(config_env
     assert source == "status" and [x["label"] for x in links][:2] == ["Qwen3.8-27B (OpenRouter)", "Qwen3.8-27B (Groq)"]
     ctx = chain_context(links, "configs/models.yaml")
     manifest = {"providers": {"llm": {"backend": "chain", "model": PAID}}}
+    import logging
+
+    def detail():
+        return getattr(caplog.records[-1], "reason_detail", None)
+
+    caplog.set_level(logging.INFO, logger="verstka.api.model_status")
     info = planner_info({"planned_by": "rules"}, {**manifest, "warnings": ["outline_planner failed, deterministic outline used: " + text]}, use_models=True, ctx=ctx)
-    assert info["reason_code"] == "auth" and info["reason"] == "ключ доступа к Groq не подходит"
-    assert info["advice"] == "Проверьте ключ доступа к Groq в настройках сервера."
+    # the API's reason names no provider or key; the server log says which link failed and why
+    assert info["reason_code"] == "auth" and info["reason"] == "модель недоступна" and detail() == "ключ доступа к Groq не подходит"
+    assert info["advice"] == "Модель недоступна."  # the key is for the server's owner (reason_code, log), not the screen
     # the planner's warning keeps the first 160 characters: the paid link's own part, about OpenRouter
     cut = planner_info({"planned_by": "rules"}, {**manifest, "warnings": ["outline_planner failed, deterministic outline used: " + text[:160]]}, use_models=True, ctx=ctx)
-    assert cut["reason_code"] == "no_credits" and cut["reason"] == "на счёте OpenRouter нет средств для платной модели"
+    assert cut["reason_code"] == "no_credits" and cut["reason"] == "модель недоступна" and detail() == "на счёте OpenRouter нет средств для платной модели"
 
 
 def test_the_free_local_and_vk_configs(config_env):

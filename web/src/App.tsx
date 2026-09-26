@@ -6,12 +6,13 @@ import { DetailsDrawer } from "./components/simple/DetailsDrawer";
 import { HelperChat } from "./components/simple/HelperChat";
 import { ResultScreen } from "./components/simple/ResultScreen";
 import { Toasts } from "./components/ui/Toasts";
+import { cn } from "./lib/utils";
 import { useApp } from "./store";
 
-// Two screens a person understands without a manual — «Создать» and «Результат» — plus the «Подробнее» drawer
-// for the expert views and the helper chat in the corner.
+// Two screens a person understands without a manual — «Создать» and «Результат» — plus the details drawer for the
+// expert views and the helper docked on the right (the page reflows beside it). Each screen owns its container.
 export default function App() {
-  const { healthError, screen, generation, activeJob } = useApp();
+  const { healthError, screen, generation, activeJob, agentOpen } = useApp();
   const building = !!activeJob && activeJob.kind === "generate" && (activeJob.status === "queued" || activeJob.status === "running");
   const deckTitle = generation?.variants[0]?.outline?.title;
   useEffect(() => {
@@ -24,20 +25,22 @@ export default function App() {
     <div className="flex h-full min-h-0 flex-col">
       <Header />
       {healthError && (
-        <div role="alert" className="flex shrink-0 items-center justify-center gap-2.5 bg-red-600 px-6 py-2 text-[13px] text-white">
+        <div role="alert" className="flex h-10 shrink-0 items-center justify-center gap-2 bg-red-600 px-8 text-footnote font-semibold text-white">
           <WifiOff className="h-4 w-4 shrink-0" aria-hidden />
-          <span className="font-semibold">Нет связи с сервером.</span>
-          <span className="text-red-100">
-            Запустите <code className="rounded-md bg-red-700/60 px-1.5 py-0.5 font-mono text-xs text-white">verstka serve</code> — страница переподключится сама.
-          </span>
+          Нет связи с сервером — переподключаюсь…
         </div>
       )}
-      <main key={screen} className="scroll-thin min-h-0 flex-1 overflow-y-auto">
-        <div className="px-10 py-8 animate-fade-in">{screen === "create" ? <CreateScreen /> : <ResultScreen />}</div>
-      </main>
+      <div className="flex min-h-0 flex-1">
+        {/* scroll padding: a control focused by Tab (or the caret of a long text) stops clear of the create screen's
+            sticky action bar and of the build screen's sticky title bar */}
+        <main key={screen} data-follow className={cn("scroll-thin min-w-0 flex-1 overflow-y-auto scroll-pb-24", building && screen === "result" && "scroll-pt-24")}>
+          <div className="h-full animate-fade-in">{screen === "create" ? <CreateScreen /> : <ResultScreen />}</div>
+        </main>
+        <HelperChat />
+      </div>
       <DetailsDrawer />
-      <HelperChat />
-      <Toasts />
+      {/* centred on the content: the docked helper takes 360px on the right */}
+      <Toasts insetRight={agentOpen ? 360 : 0} />
     </div>
   );
 }

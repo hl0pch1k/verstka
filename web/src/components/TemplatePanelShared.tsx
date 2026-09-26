@@ -1,8 +1,9 @@
-// Small helpers shared by the template panel pieces (gallery, pattern modal) and reused by the plan panel.
-import { useState } from "react";
+// Small helpers shared by the template panel pieces (the layouts gallery and the pattern modal).
+import { useEffect, useState } from "react";
 import { ImageOff } from "lucide-react";
 import { cn, plural } from "../lib/utils";
 import type { ClassificationTrace, RepeatGroup, SignalVote } from "../types";
+import type { ProgressTone } from "./ui/Progress";
 
 /** «3 ячейки · ряд · до 5» */
 export function groupSummary(g: RepeatGroup): string {
@@ -12,7 +13,8 @@ export function groupSummary(g: RepeatGroup): string {
   return `${plural(cells, "ячейка", "ячейки", "ячеек")} · ${axis} · ${range}`;
 }
 
-export const qualityTone = (q: number) => (q >= 0.9 ? "bg-emerald-500" : q >= 0.75 ? "bg-accent" : q >= 0.5 ? "bg-amber-500" : "bg-red-500");
+/** The tone of a sample's quality bar. */
+export const qualityTone = (q: number): ProgressTone => (q >= 0.9 ? "success" : q >= 0.75 ? "accent" : q >= 0.5 ? "warn" : "error");
 
 export function votesOf(c: ClassificationTrace): Array<{ source: string; vote: SignalVote }> {
   const list: Array<{ source: string; vote: SignalVote | null }> = [
@@ -23,16 +25,23 @@ export function votesOf(c: ClassificationTrace): Array<{ source: string; vote: S
   return list.filter((v): v is { source: string; vote: SignalVote } => !!v.vote);
 }
 
-/** Lazy slide thumbnail with a graceful «нет превью» fallback. Fills its positioned parent. */
-export function PatternThumb({ src, alt, className }: { src?: string | null; alt: string; className?: string }) {
+/** Lazy slide thumbnail with a quiet fallback. Fills its positioned parent. `fallback`: a smaller picture to show when
+ *  `src` fails (the full-size render → its thumbnail). */
+export function PatternThumb({ src: wanted, fallback, alt, className }: { src?: string | null; fallback?: string | null; alt: string; className?: string }) {
+  const [src, setSrc] = useState(wanted);
   const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    setSrc(wanted);
+    setFailed(false);
+  }, [wanted]);
   if (!src || failed) {
     return (
-      <div className={cn("flex h-full w-full flex-col items-center justify-center gap-1 text-zinc-400", className)}>
-        <ImageOff className="h-5 w-5" aria-hidden />
-        <span className="text-[11px]">нет превью</span>
+      <div className={cn("flex h-full w-full flex-col items-center justify-center gap-1 text-zinc-400", className)} role="img" aria-label={alt}>
+        <ImageOff className="h-6 w-6" aria-hidden />
+        <span className="text-caption text-zinc-500">нет превью</span>
       </div>
     );
   }
-  return <img src={src} alt={alt} loading="lazy" decoding="async" draggable={false} onError={() => setFailed(true)} className={cn("h-full w-full object-cover", className)} />;
+  const onError = () => (fallback && src !== fallback ? setSrc(fallback) : setFailed(true));
+  return <img src={src} alt={alt} loading="lazy" decoding="async" draggable={false} onError={onError} className={cn("h-full w-full object-cover", className)} />;
 }

@@ -1,8 +1,9 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
-import { usePresence } from "../../lib/motion";
+import { MOTION, usePresence } from "../../lib/motion";
 import { cn } from "../../lib/utils";
+import { Button } from "./Button";
 
 export interface ModalProps {
   open: boolean;
@@ -26,7 +27,7 @@ export function Modal({ open, onClose, title, description, footer, size = "md", 
   const panelRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
-  const { mounted, leaving } = usePresence(open, 150);
+  const { mounted, leaving } = usePresence(open, MOTION.fast);
   // while the exit animation plays the caller may already have dropped the content: show the last one
   const last = useRef({ title, description, footer, children });
   if (open) last.current = { title, description, footer, children };
@@ -66,25 +67,17 @@ export function Modal({ open, onClose, title, description, footer, size = "md", 
         className={cn("relative flex max-h-full w-full flex-col overflow-hidden rounded-3xl bg-white shadow-pop outline-none", leaving ? "animate-zoom-out" : "animate-zoom-in", WIDTH[size], className)}
       >
         {(view.title || dismissible) && (
-          <header className="flex shrink-0 items-start gap-4 px-7 pb-3 pt-6">
-            <div className="min-w-0 flex-1">
-              {view.title && <h2 className="text-xl font-semibold leading-7 text-zinc-900">{view.title}</h2>}
-              {view.description && <p className="mt-1 text-sm leading-5 text-zinc-500">{view.description}</p>}
+          <header className="flex shrink-0 items-start gap-4 px-6 pb-2 pt-6">
+            <div className="min-w-0 flex-1 self-center">
+              {view.title && <h2 className="text-title2 font-semibold text-zinc-900">{view.title}</h2>}
+              {view.description && <p className="mt-0.5 text-footnote text-zinc-500">{view.description}</p>}
             </div>
-            {dismissible && (
-              <button
-                type="button"
-                onClick={onClose}
-                aria-label="Закрыть"
-                className="-mr-2 flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full bg-zinc-100 text-zinc-500 transition-colors hover:bg-zinc-200 hover:text-zinc-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/30"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            )}
+            {/* one close look on every white surface (drawer, helper, modal): a ghost circle */}
+            {dismissible && <Button variant="ghost" shape="circle" size="md" icon={X} aria-label="Закрыть" onClick={onClose} />}
           </header>
         )}
-        <div className={cn("scroll-thin min-h-0 flex-1 overflow-y-auto", !flush && "px-7 pb-6 pt-2")}>{view.children}</div>
-        {view.footer && <footer className="flex shrink-0 items-center justify-end gap-2 border-t border-zinc-100 px-7 py-4">{view.footer}</footer>}
+        <div className={cn("scroll-thin min-h-0 flex-1 overflow-y-auto", !flush && "px-6 pb-6 pt-2")}>{view.children}</div>
+        {view.footer && <footer className="flex shrink-0 items-center justify-end gap-2 border-t border-zinc-100 px-6 py-4">{view.footer}</footer>}
       </div>
     </div>,
     document.body,

@@ -47,35 +47,55 @@ export function fmtSeconds(s: number | undefined | null): string {
   if (s === undefined || s === null || Number.isNaN(s)) return "—";
   if (s < 1) return `${(s * 1000).toFixed(0)} мс`;
   if (s < 60) return `${s.toFixed(1).replace(".", ",")} с`;
-  const m = Math.floor(s / 60);
-  return `${m} мин ${Math.round(s - m * 60)} с`;
+  const total = Math.round(s); // round first: 119.6 → «2 мин», never «1 мин 60 с»
+  const m = Math.floor(total / 60);
+  const rest = total - m * 60;
+  return rest === 0 ? `${m} мин` : `${m} мин ${rest} с`;
 }
 
-export function fmtDate(ts: number | string | undefined | null): string {
-  if (ts === undefined || ts === null) return "—";
-  const d = typeof ts === "number" ? new Date(ts * 1000) : new Date(ts);
+const toDate = (ts: number | string) => (typeof ts === "number" ? new Date(ts * 1000) : new Date(ts));
+const dayStart = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+
+/** «Сегодня» · «Вчера» · «24 сент.» · «24 сент. 2025» (unix seconds or an ISO string). */
+export function fmtDay(ts: number | string | undefined | null): string {
+  if (ts === undefined || ts === null || ts === "") return "";
+  const d = toDate(ts);
   if (Number.isNaN(d.getTime())) return String(ts);
-  return d.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  const now = new Date();
+  const diff = Math.round((dayStart(now) - dayStart(d)) / 86_400_000);
+  if (diff === 0) return "Сегодня";
+  if (diff === 1) return "Вчера";
+  const opts: Intl.DateTimeFormatOptions = d.getFullYear() === now.getFullYear() ? { day: "numeric", month: "short" } : { day: "numeric", month: "short", year: "numeric" };
+  return d.toLocaleDateString("ru-RU", opts).replace(/\s*г\.$/, "");
+}
+
+/** «10:05» (unix seconds or an ISO string). */
+export function fmtTime(ts: number | string | undefined | null): string {
+  if (ts === undefined || ts === null || ts === "") return "";
+  const d = toDate(ts);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
 }
 
 /** «сегодня, 19:41» · «вчера, 09:05» · «12 сент., 19:41» · «12.09.2025» (unix seconds or an ISO string). */
 export function fmtWhen(ts: number | string | undefined | null): string {
   if (ts === undefined || ts === null || ts === "") return "";
-  const d = typeof ts === "number" ? new Date(ts * 1000) : new Date(ts);
+  const d = toDate(ts);
   if (Number.isNaN(d.getTime())) return String(ts);
   const now = new Date();
   const time = d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
-  const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
-  const diff = Math.round((day(now) - day(d)) / 86_400_000);
+  const diff = Math.round((dayStart(now) - dayStart(d)) / 86_400_000);
   if (diff === 0) return `сегодня, ${time}`;
   if (diff === 1) return `вчера, ${time}`;
   if (d.getFullYear() === now.getFullYear()) return `${d.toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}, ${time}`;
   return d.toLocaleDateString("ru-RU");
 }
 
+/** 0.563 → «56 %» with a narrow no-break space, Russian decimal comma («56,3 %» with digits = 1). */
 export function fmtPct(v: number | undefined | null, digits = 0): string {
-  if (v === undefined || v === null) return "—";
-  return `${(v * 100).toFixed(digits)}%`;
+  if (v === undefined || v === null || Number.isNaN(v)) return "—";
+  const n = (v * 100).toLocaleString("ru-RU", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  return `${n}\u202F%`;
 }
 
 export function shortSha(s: string | undefined | null, n = 8): string {
@@ -102,7 +122,7 @@ export const KIND_LABEL: Record<string, string> = {
   big_number: "Большое число",
   stat_row: "Ряд чисел",
   comparison: "Сравнение",
-  timeline: "Таймлайн",
+  timeline: "Хронология",
   process: "Процесс",
   table: "Таблица",
   chart: "Диаграмма",
@@ -110,13 +130,13 @@ export const KIND_LABEL: Record<string, string> = {
   team: "Команда",
   quote: "Цитата",
   code: "Код",
-  mockup: "Мокап",
+  mockup: "Макет экрана",
   thanks: "Финал",
-  freeform: "Свободный",
+  freeform: "Другое",
 };
 
-export function kindLabel(kind: string): string {
-  return KIND_LABEL[kind] ?? kind;
+export function kindLabel(kind: string | null | undefined): string {
+  return (kind && KIND_LABEL[kind]) || "Слайд";
 }
 
 export function scoreTone(score: number | null | undefined): "success" | "warn" | "error" | "neutral" {
@@ -125,6 +145,14 @@ export function scoreTone(score: number | null | undefined): "success" | "warn" 
   if (score >= 70) return "warn";
   return "error";
 }
+
+/** Text colour per score tone (status text follows the fixed shades of the palette). */
+export const TONE_TEXT: Record<ReturnType<typeof scoreTone>, string> = {
+  success: "text-emerald-700",
+  warn: "text-amber-700",
+  error: "text-red-600",
+  neutral: "text-zinc-500",
+};
 
 export function isLightHex(hex: string): boolean {
   const h = hex.replace("#", "");

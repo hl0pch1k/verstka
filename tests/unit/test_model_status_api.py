@@ -3,6 +3,7 @@
 import importlib
 import json
 import logging
+import re
 import sys
 import time
 import types
@@ -11,7 +12,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from verstka.api.model_status import CONTRACT_PHRASES, ChainContext, advice, chain_context, generation_planner, model_label, planner_info, reason_code, reason_text, summarize
+from verstka.api.model_status import CONTRACT_PHRASES, ChainContext, advice, chain_context, generation_planner, model_label, planner_info, reason_code, reason_detail, reason_text, summarize
 from verstka.providers.base import ProviderError
 from verstka.providers.mock import MockProvider
 from verstka.providers.registry import ProviderLimits, ProviderRegistry
@@ -30,6 +31,13 @@ CONGESTED = [
 FREE_ONLY = ChainContext(openrouter=True, free=True, paid_label=None, config="configs/models.free.yaml")
 WITH_PAID = ChainContext(openrouter=True, free=True, paid_label="Qwen3.8-27B", config="configs/models.yaml")
 PLANNER_FAILED = "outline_planner failed, deterministic outline used: "
+# what a person must never read in the status line, its hint or the advice: money, keys, config files, providers
+_BANNED = re.compile(r"\$|₽|пополн|сч[её]т|средств|баланс|(?<![а-яё])ключ|\.env|groq|openrouter|cloud\.ru|configs/|\.ya?ml|платн|бесплатн", re.I)
+
+
+def _plain(*texts):
+    for t in texts:
+        assert not t or not _BANNED.search(t), t
 
 
 @pytest.fixture
@@ -122,32 +130,44 @@ def test_reason_prefers_the_planners_own_failure_and_says_it_in_russian():
     assert reason_code([timeout, rejected]) == "rejected"
     daily = "data_extractor failed, using regex facts: Error code: 429 - free-models-per-day"
     assert reason_code([timeout, daily]) == "quota"  # no planner warning: the other steps tell
-    assert reason_text("congested") == "бесплатные модели OpenRouter сейчас перегружены"
-    assert reason_text("no_credits") == "на счёте OpenRouter нет средств для платной модели"
-    assert reason_text("quota") == "исчерпан дневной лимит бесплатных запросов OpenRouter"
-    assert reason_text("rate") == "превышен лимит бесплатных запросов OpenRouter в минуту"
+    # the API's reason is the UI's words: no provider, money or key, whatever the chain
+    assert reason_text("congested") == reason_text("congested", WITH_PAID) == "сервер модели перегружен"
+    assert reason_text("no_credits") == reason_text("auth") == reason_text("missing") == "модель недоступна"
+    assert reason_text("quota") == "дневной лимит запросов исчерпан"
+    assert reason_text("rate") == "слишком много запросов за минуту"
+    assert reason_text("unreachable") == "нет связи с сервером модели"
     assert reason_text("error") == "модель вернула ошибку"
-    assert "время на модель вышло" in reason_text("timeout")
-    assert reason_text("congested", ChainContext(openrouter=False, free=False)) == "сервер модели сейчас перегружен"
+    assert reason_text("timeout") == "время на ответ вышло"
+    assert reason_text(None) is None
+    codes = ("congested", "rate", "quota", "no_credits", "auth", "missing", "timeout", "unreachable", "rejected", "error", "off")
+    _plain(*(reason_text(code, ctx) for code in codes for ctx in (FREE_ONLY, WITH_PAID)))
+    # the log keeps the link-specific clause
+    assert reason_detail("congested") == "бесплатные модели OpenRouter сейчас перегружены"
+    assert reason_detail("no_credits") == "на счёте OpenRouter нет средств для платной модели"
+    assert reason_detail("quota") == "исчерпан дневной лимит бесплатных запросов OpenRouter"
+    assert reason_detail("rate") == "превышен лимит бесплатных запросов OpenRouter в минуту"
+    assert reason_detail("error") == "модель вернула ошибку"
+    assert "время на модель вышло" in reason_detail("timeout")
+    assert reason_detail("congested", ChainContext(openrouter=False, free=False)) == "сервер модели сейчас перегружен"
 
 
-def test_advice_depends_on_the_active_chain():
-    # a paid OpenRouter link in the active config: topping up is enough
+def test_advice_says_when_to_build_again_never_money_or_keys():
+    # whatever the active chain offers, the advice is about when to build again: no top-up, key, config or provider
     paid = advice("congested", WITH_PAID)
-    assert "пополните OpenRouter на $5–10 — платный Qwen3.8-27B отвечает стабильно" in paid
-    # free models only: a top-up alone changes nothing, the paid model must be switched on
     free = advice("congested", FREE_ONLY)
-    assert "платный Qwen3.8-27B отвечает стабильно" not in free
-    assert "пополните OpenRouter на $5–10 и включите платную модель: configs/models.yaml" in free
+    assert paid == free == "Соберите ещё раз через несколько минут."
     daily = advice("quota", FREE_ONLY)
-    assert "после 03:00" in daily and "configs/models.yaml" in daily
+    assert daily.startswith("Соберите ещё раз") and "после 03:00" in daily
     assert advice("rate", FREE_ONLY) == "Соберите ещё раз через минуту."  # the per-minute cap resets within a minute
     # a 400: the same inputs get the same answer — say what to fix, never «соберите ещё раз»
     bad = advice("error", FREE_ONLY)
-    assert "сократите текст" in bad and "configs/models.free.yaml" in bad and "Соберите ещё раз" not in bad
-    assert "Groq" not in (paid + free + daily)  # the optional Groq key is for the detailed hint only
+    assert bad == "Та же сборка получит ту же ошибку: сократите текст."
+    # money, a key or a model id need the server's owner: the person only learns that the model is unavailable
+    for code in ("no_credits", "auth", "missing"):
+        assert advice(code, WITH_PAID) == advice(code, FREE_ONLY) == "Модель недоступна."
     assert advice("congested", ChainContext(openrouter=False, free=False)) == "Соберите ещё раз через несколько минут."
-    assert ".env" not in advice("auth", FREE_ONLY)
+    codes = ("congested", "rate", "quota", "no_credits", "auth", "missing", "timeout", "unreachable", "rejected", "error", "off", None)
+    _plain(*(advice(code, ctx) for code in codes for ctx in (FREE_ONLY, WITH_PAID, ChainContext(openrouter=False, free=False))))
 
 
 def test_model_labels():
@@ -164,9 +184,9 @@ def test_planner_info_for_rules_and_model_plans():
     rm = {"warnings": CONGESTED, "providers": {"llm": {"backend": "openai_compat", "model": QWEN}}}
     info = planner_info({"planned_by": "rules"}, rm, use_models=True, ctx=FREE_ONLY)
     assert info["by_model"] is False and info["reason_code"] == "congested" and info["tried_label"] == "Qwen3.8-27B"
-    assert info["reason"] == "бесплатные модели OpenRouter сейчас перегружены"
-    assert "включите платную модель: configs/models.yaml" in info["advice"] and "платный Qwen3.8-27B отвечает" not in info["advice"]
-    assert "платный Qwen3.8-27B отвечает стабильно" in planner_info({"planned_by": "rules"}, rm, use_models=True, ctx=WITH_PAID)["advice"]
+    assert info["reason"] == "сервер модели перегружен"
+    assert info["advice"] == "Соберите ещё раз через несколько минут." and info["steady"] is None
+    assert planner_info({"planned_by": "rules"}, rm, use_models=True, ctx=WITH_PAID)["advice"] == info["advice"]
     # the fallback chain answered with the backup model: the recorded model wins over the configured one
     ok = planner_info({"planned_by": "model"}, {**rm, "warnings": [], "planner": {"planned_by": "model", "model": GEMMA}}, use_models=True)
     assert ok["by_model"] and ok["model_label"] == "Gemma 4 31B" and ok["reason"] is None
@@ -208,7 +228,7 @@ def test_status_without_a_configured_model(api, monkeypatch):
     monkeypatch.setattr(mod, "_providers", _openrouter_registry(key=""))
     st = c.get("/api/models/status").json()
     assert st["configured"] is False and st["state"] == "off"
-    assert st["summary"] == "Модель не подключена · соберёт встроенный планировщик"
+    assert st["summary"] == "Модель не подключена" and st["hint"] is None
     assert st["active_model_label"] == "Qwen3.8-27B" and st["links"] == []
 
 
@@ -223,11 +243,10 @@ def test_status_uses_the_fallback_chain_snapshot(api, monkeypatch):
     assert r.status_code == 200
     st = r.json()
     assert st["source"] == "status" and st["state"] == "fallback"
-    assert st["summary"] == "Модель: Qwen3.8-27B перегружена · отвечает запасная Gemma 4 31B"
+    assert st["summary"] == "Gemma 4 31B · запасная модель"
     assert st["working_label"] == "Gemma 4 31B" and st["retry_in"] == 95 and st["retry_state"] == "congested"
-    # the active chain has no paid link: say what to switch on, never «платный … отвечает стабильно»
-    assert st["hint"].startswith("Презентацию соберёт запасная модель") and "configs/models.yaml" in st["hint"]
-    assert "платный Qwen3.8-27B отвечает" not in st["hint"]
+    assert st["hint"] == "Презентацию соберёт запасная модель."
+    _plain(st["summary"], st["hint"], st["advice"])
     assert [link["state"] for link in st["links"]] == ["congested", "ok"]
     body = r.text
     assert "0123456789abcdef" not in body and "account" not in st["links"][0]  # no key, no account id
@@ -235,7 +254,7 @@ def test_status_uses_the_fallback_chain_snapshot(api, monkeypatch):
     assert sys.modules["verstka.providers.status"].calls[-1] == "llm"  # the llm chain, in chain order
 
 
-def test_status_with_a_paid_link_and_the_optional_groq_key(api, monkeypatch):
+def test_status_with_a_paid_link_never_mentions_money_or_keys(api, monkeypatch):
     c, mod = api
     monkeypatch.setattr(mod, "_providers", _openrouter_registry())
     _status_module(monkeypatch, [
@@ -245,13 +264,12 @@ def test_status_with_a_paid_link_and_the_optional_groq_key(api, monkeypatch):
     ])
     st = c.get("/api/models/status").json()
     assert st["state"] == "fallback"
-    # two links share the short name: the backup's tag tells them apart and the line stays short
-    assert st["summary"] == "Модель: Qwen3.8-27B — нет средств на счёте · отвечает бесплатная Qwen3.8-27B"
-    assert len(st["summary"]) <= 80 and st["working_label"] == "бесплатная Qwen3.8-27B"
-    assert st["advice"] == "Сейчас отвечает бесплатная Qwen3.8-27B — соберите ещё раз." and st["retryable"] is True
-    assert "Пополните счёт OpenRouter на $5–10" in st["hint"]
-    assert "бесплатный ключ Groq для той же Qwen3.8-27B — строка GROQ_API_KEY в .env" in st["hint"]
-    assert "Groq" not in st["summary"]
+    # the paid link has no money left and the Groq link waits for its key: neither reaches the person
+    assert st["summary"] == "Qwen3.8-27B · запасная модель"
+    assert len(st["summary"]) <= 80 and st["working_label"] == "Qwen3.8-27B"
+    assert st["advice"] == "Сейчас отвечает запасная модель — соберите ещё раз." and st["retryable"] is True
+    assert st["hint"] == "Презентацию соберёт запасная модель."
+    _plain(st["summary"], st["hint"], st["advice"])
     assert [link["state"] for link in st["links"]] == ["no_credits", "off", "ok"]
     assert st["links"][1]["available"] is False and st["links"][1]["until"] is None
 
@@ -261,7 +279,7 @@ def test_links_waiting_for_their_key_are_not_failures(api, monkeypatch):
     monkeypatch.setattr(mod, "_providers", _openrouter_registry())
     _status_module(monkeypatch, [_link("qwen/qwen3-32b", "off", host="api.groq.com", label="Qwen3.8-27B (Groq)"), _link(QWEN, "ok", label="Qwen3.8-27B (бесплатно)", last_ok=time.time())])
     st = c.get("/api/models/status").json()
-    assert st["state"] == "ok" and st["summary"] == "Модель: Qwen3.8-27B — доступна" and st["hint"] is None
+    assert st["state"] == "ok" and st["summary"] == "Qwen3.8-27B · доступна" and st["hint"] is None
     assert st["active_model"] == QWEN
 
 
@@ -271,16 +289,17 @@ def test_status_all_links_down(api, monkeypatch):
     _status_module(monkeypatch, [_link(QWEN, "congested", until=60), _link(GEMMA, "quota", until=50000)])
     st = c.get("/api/models/status").json()
     assert st["state"] == "down"
-    assert st["summary"] == "Модель недоступна · соберёт встроенный планировщик"
+    assert st["summary"] == "Qwen3.8-27B · недоступна"
     assert st["retry_in"] == 60 and st["retry_state"] == "congested"
-    assert "включите платную модель: configs/models.yaml" in st["hint"]
+    assert st["hint"] == "Соберите ещё раз через несколько минут."
+    _plain(st["summary"], st["hint"], st["advice"])
     _status_module(monkeypatch, [_link(QWEN, "ok", last_ok=time.time())])
     st = c.get("/api/models/status").json()
-    assert st["state"] == "ok" and st["summary"] == "Модель: Qwen3.8-27B — доступна" and st["hint"] is None
+    assert st["state"] == "ok" and st["summary"] == "Qwen3.8-27B · доступна" and st["hint"] is None
     # the pause after a failure is over: the next deck tries the model again
     _status_module(monkeypatch, [_link(QWEN, "congested", available=True, until=0)])
     st = c.get("/api/models/status").json()
-    assert st["state"] == "retry" and st["summary"] == "Модель: Qwen3.8-27B — недавно была перегружена, попробую снова"
+    assert st["state"] == "retry" and st["summary"] == "Qwen3.8-27B · доступна"
 
 
 def test_per_minute_cap_is_not_the_daily_quota(api, monkeypatch):
@@ -289,16 +308,17 @@ def test_per_minute_cap_is_not_the_daily_quota(api, monkeypatch):
     _status_module(monkeypatch, [_link(QWEN, "rate", until=45, available=False, last_error="per-minute request cap: Error code: 429")])
     st = c.get("/api/models/status").json()
     assert st["state"] == "down" and st["retry_state"] == "rate" and st["retry_in"] == 45
-    assert st["summary"] == "Модель: Qwen3.8-27B — лимит запросов в минуту · соберёт встроенный планировщик"
+    assert st["summary"] == "Qwen3.8-27B · недоступна"
     assert st["hint"].startswith("Соберите ещё раз через минуту") and "03:00" not in st["hint"]
     # the status module records the per-minute cap as «rate»: a daily quota in its last minutes before 00:00 UTC
     # stays the daily quota (no guessing from the length of the pause)
     _status_module(monkeypatch, [_link(QWEN, "quota", until=40, available=False, last_error="daily request quota of the account is spent")])
     st = c.get("/api/models/status").json()
-    assert st["links"][0]["state"] == "quota" and st["retry_state"] == "quota" and "дневной лимит исчерпан" in st["summary"]
+    assert st["links"][0]["state"] == "quota" and st["retry_state"] == "quota" and st["summary"] == "Qwen3.8-27B · недоступна"
     _status_module(monkeypatch, [_link(QWEN, "quota", until=50000, available=False, last_error="daily request quota of OpenRouter is spent")])
     st = c.get("/api/models/status").json()
-    assert st["retry_state"] == "quota" and "дневной лимит исчерпан" in st["summary"] and "после 03:00" in st["hint"]
+    assert st["retry_state"] == "quota" and "после 03:00" in st["hint"]
+    _plain(st["summary"], st["hint"], st["advice"])
 
 
 def test_a_bad_request_is_an_error_not_congestion(api, monkeypatch):
@@ -306,7 +326,7 @@ def test_a_bad_request_is_an_error_not_congestion(api, monkeypatch):
     monkeypatch.setattr(mod, "_providers", _openrouter_registry())
     _status_module(monkeypatch, [_link(QWEN, "error", until=30, available=False, last_error="Error code: 400 - Provider returned error")])
     st = c.get("/api/models/status").json()
-    assert st["summary"] == "Модель: Qwen3.8-27B вернула ошибку · соберёт встроенный планировщик"
+    assert st["summary"] == "Qwen3.8-27B · недоступна" and st["links"][0]["state"] == "error"
     assert "перегруж" not in st["summary"] and "перегруж" not in (st["hint"] or "")
 
 
@@ -338,11 +358,11 @@ def test_status_with_the_real_status_module(api, monkeypatch):
         status.record_ok(h_gemma)
         st = c.get("/api/models/status").json()
         assert st["source"] == "status" and [link["model"] for link in st["links"]] == [QWEN, GEMMA]
-        assert st["state"] == "fallback" and st["summary"] == "Модель: Qwen3.8-27B перегружена · отвечает запасная Gemma 4 31B"
+        assert st["state"] == "fallback" and st["summary"] == "Gemma 4 31B · запасная модель"
         assert 100 <= st["retry_in"] <= 120 and st["links"][0]["available"] is False and st["links"][0]["host"] == OR
         status.record_error(h_gemma, "quota", "free-models-per-day", hold_s=3600)
         st = c.get("/api/models/status").json()
-        assert st["state"] == "down" and "встроенный планировщик" in st["summary"]
+        assert st["state"] == "down" and st["summary"] == "Qwen3.8-27B · недоступна"
     finally:
         status.record_ok(h_qwen)
         status.record_ok(h_gemma)
@@ -364,7 +384,7 @@ def test_a_broken_snapshot_is_logged_and_the_configured_links_shown(api, monkeyp
     with caplog.at_level(logging.WARNING, logger="verstka.api.model_status"):
         st = c.get("/api/models/status").json()
     assert "snapshot() failed" in caplog.text
-    assert st["source"] == "config" and st["state"] == "unknown" and st["summary"] == "Модель: Qwen3.8-27B — подключена"
+    assert st["source"] == "config" and st["state"] == "unknown" and st["summary"] == "Qwen3.8-27B · доступна"
 
 
 def test_status_host_never_carries_credentials(api, monkeypatch):
@@ -390,7 +410,7 @@ def test_summarize_is_short_and_never_counts_off_links():
         {"model": GEMMA, "label": "Gemma 4 31B (бесплатно)", "state": "unknown", "available": True, "until": None, "free": True, "host": OR},
     ]
     s = summarize(links, configured=True, ctx=chain_context(links))
-    assert s["summary"] == "Модель: Qwen3.8-27B перегружена · попробую запасную Gemma 4 31B"
+    assert s["summary"] == "Gemma 4 31B · запасная модель" and s["advice"] == "Соберите ещё раз — попробую запасную модель."
     off_only = [{**links[0], "state": "off", "available": False}]
     assert summarize(off_only, configured=True)["state"] == "off"
 
@@ -423,13 +443,13 @@ def test_generation_says_why_the_model_did_not_plan(api, monkeypatch):
     v = g["variants"][0]
     assert v["planner"]["planned_by"] == "rules" and v["planner"]["reason_code"] == "congested"
     assert g["planner"]["by_model"] is False
-    assert g["planner"]["reason"] == "бесплатные модели OpenRouter сейчас перегружены"
+    assert g["planner"]["reason"] == "сервер модели перегружен"
     assert g["planner"]["tried_label"] == "Qwen3.8-27B"
-    # the advice follows the ACTIVE chain: free models only here
-    assert "включите платную модель: configs/models.yaml" in g["planner"]["advice"]
+    # the advice says when to build again, whatever the active chain offers (free models only here, a paid link next)
+    assert g["planner"]["advice"] == "Соберите ещё раз через несколько минут."
     _status_module(monkeypatch, [_link(QWEN_PAID, "unknown", label="Qwen3.8-27B (OpenRouter)"), _link(QWEN, "unknown")])
     g = c.get(f"/api/generations/{_fake_generation(mod)}").json()
-    assert "платный Qwen3.8-27B отвечает стабильно" in g["planner"]["advice"]
+    assert g["planner"]["advice"] == "Соберите ещё раз через несколько минут." and g["planner"]["steady"] is None
     g = c.get(f"/api/generations/{_fake_generation(mod, 'model', [], {'planned_by': 'model', 'model': GEMMA})}").json()
     assert g["planner"]["by_model"] is True and g["planner"]["model_label"] == "Gemma 4 31B"
     assert g["variants"][0]["planner"]["reason"] is None
@@ -575,7 +595,22 @@ OLD_MODEL_PLANNED = [
 
 
 def _rules(warning, ctx=FULL):
-    return planner_info({"planned_by": "rules"}, {**CONFIGURED, "warnings": [PLANNER_FAILED + warning]}, use_models=True, ctx=ctx)
+    """The planner info of a rules deck, plus `detail`: the link-specific reason the server logs (the API's `reason`
+    names no provider, money or key)."""
+    seen = []
+    handler = logging.Handler(logging.INFO)
+    handler.emit = lambda record: seen.append(getattr(record, "reason_detail", None))
+    logger = logging.getLogger("verstka.api.model_status")
+    level = logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    try:
+        info = planner_info({"planned_by": "rules"}, {**CONFIGURED, "warnings": [PLANNER_FAILED + warning]}, use_models=True, ctx=ctx)
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(level)
+    _plain(info["reason"])
+    return {**info, "detail": seen[-1] if seen else None}
 
 
 def test_contract_phrases_are_the_status_modules():
@@ -638,29 +673,29 @@ def test_an_older_deck_via_the_api(api, monkeypatch):
 def test_reason_words_are_about_the_link_that_failed():
     # the paid OpenRouter model is congested: no «бесплатные модели», no top-up for that same paid model
     paid = _rules("all model links failed: qwen/qwen3.8-27b: congested upstream, skipped for 120 s more (Error code: 429 - temporarily rate-limited upstream)")
-    assert paid["reason"] == "платная модель на OpenRouter сейчас перегружена"
+    assert paid["detail"] == "платная модель на OpenRouter сейчас перегружена"
     assert paid["advice"] == "Соберите ещё раз через несколько минут." and paid["steady"] is None
     free = _rules("all model links failed: qwen/qwen3.8-27b:free: congested upstream, skipped for 120 s more")
-    assert free["reason"] == "бесплатные модели OpenRouter сейчас перегружены"
-    assert "платный Qwen3.8-27B отвечает стабильно" in free["advice"]
-    assert free["steady"].startswith("Чтобы не зависеть от очереди бесплатных, пополните OpenRouter") and "платный Qwen3.8-27B" in free["steady"]
-    assert generation_planner([{"planner": free}], use_models=True)["steady"] == free["steady"]
+    assert free["detail"] == "бесплатные модели OpenRouter сейчас перегружены"
+    assert free["advice"] == "Соберите ещё раз через несколько минут." and free["steady"] is None
+    assert generation_planner([{"planner": free}], use_models=True)["steady"] is None
     # Groq's daily limit (the same model id as the paid link: Groq's own wording tells them apart): no OpenRouter reset
     groq = _rules("all model links failed: qwen/qwen3.8-27b: daily request quota of the account is spent, skipped for 3000 s (Error code: 429 - {'error': {'message': 'Rate limit reached for model `qwen/qwen3.8-27b` in organization `org_1` service tier `on_demand` on requests per day (RPD): Limit 1000, Used 1000'")
-    assert groq["reason_code"] == "quota" and groq["reason"] == "исчерпан дневной лимит запросов Groq"
-    assert groq["advice"] == "Соберите ещё раз, когда обновится дневной лимит Groq." and "03:00" not in groq["advice"] and groq["steady"] is None
+    assert groq["reason_code"] == "quota" and groq["detail"] == "исчерпан дневной лимит запросов Groq"
+    assert groq["advice"] == "Соберите ещё раз, когда обновится дневной лимит запросов." and "03:00" not in groq["advice"] and groq["steady"] is None
     openrouter_daily = _rules("all model links failed: qwen/qwen3.8-27b:free: daily request quota of the account is spent, skipped for 50000 s (free-models-per-day)")
-    assert openrouter_daily["reason"] == "исчерпан дневной лимит бесплатных запросов OpenRouter" and "после 03:00" in openrouter_daily["advice"]
+    assert openrouter_daily["detail"] == "исчерпан дневной лимит бесплатных запросов OpenRouter" and "после 03:00" in openrouter_daily["advice"]
     cloud = _rules("all model links failed: Qwen/Qwen3-32B: no credits (402) on the account (Error code: 402 - insufficient balance)")
-    assert cloud["reason"] == "на счёте Cloud.ru нет средств" and cloud["advice"] == "Пополните счёт Cloud.ru."
+    assert cloud["detail"] == "на счёте Cloud.ru нет средств" and cloud["advice"] == "Модель недоступна."
     or_credits = _rules("all model links failed: qwen/qwen3.8-27b: no credits (402) on the account (Error code: 402 - This request requires more credits); qwen/qwen3.8-27b:free: congested upstream; google/gemma-4-31b-it:free: congested upstream")
-    assert or_credits["reason_code"] == "no_credits" and or_credits["reason"] == "на счёте OpenRouter нет средств для платной модели"
-    assert "Пополните счёт OpenRouter на $5–10" in or_credits["advice"]
+    assert or_credits["reason_code"] == "no_credits" and or_credits["detail"] == "на счёте OpenRouter нет средств для платной модели"
+    assert or_credits["advice"] == "Модель недоступна."
+    _plain(paid["advice"], free["advice"], groq["advice"], openrouter_daily["advice"], cloud["advice"], or_credits["advice"])
     # a model of an older config, not in the active chain: what the text says, else the chain's own service
     old = _rules("qwen/qwen3.6-35b-a3b:free: congested upstream (Provider returned error)")
-    assert old["reason"] == "бесплатные модели OpenRouter сейчас перегружены"
+    assert old["detail"] == "бесплатные модели OpenRouter сейчас перегружены"
     vk = chain_context([_link("qwen3.8-27b", "unknown", host="inference.vk.example", label="Qwen3.8-27B (VK)", free=False)], "configs/models.vk.yaml")
-    assert _rules("qwen3.8-27b: congested upstream (500 server error)", vk)["reason"] == "сервер модели сейчас перегружен"
+    assert _rules("qwen3.8-27b: congested upstream (500 server error)", vk)["detail"] == "сервер модели сейчас перегружен"
     assert "OpenRouter" not in (_rules("qwen3.8-27b: congested upstream (500 server error)", vk)["advice"] or "")
 
 
@@ -669,28 +704,28 @@ def test_the_failed_link_is_the_one_the_chain_named_by_its_label():
     failed, whatever the wording (a Groq 401 «Invalid API Key» has no Groq word in it)."""
     two = "all model links failed: [Qwen3.8-27B (OpenRouter)] qwen/qwen3.8-27b: no credits (402) on the account (Error code: 402 - Insufficient credits); [Qwen3.8-27B (Groq)] qwen/qwen3.8-27b: access refused (401/403): HTTP 401, check the key (Error code: 401 - Invalid API Key)"
     info = _rules(two)
-    assert info["reason_code"] == "auth" and info["reason"] == "ключ доступа к Groq не подходит"
-    assert info["advice"] == "Проверьте ключ доступа к Groq в настройках сервера."
-    # the paid link's own part: OpenRouter, with its top-up
+    assert info["reason_code"] == "auth" and info["detail"] == "ключ доступа к Groq не подходит"
+    assert info["advice"] == "Модель недоступна."
+    # the paid link's own part: OpenRouter (the logged detail keeps the provider; the API's reason and the advice never do)
     paid = _rules("all model links failed: [Qwen3.8-27B (OpenRouter)] qwen/qwen3.8-27b: no credits (402) on the account (Error code: 402 - Insufficient credits)")
-    assert paid["reason"] == "на счёте OpenRouter нет средств для платной модели" and "Пополните счёт OpenRouter" in paid["advice"]
+    assert paid["detail"] == "на счёте OpenRouter нет средств для платной модели" and paid["advice"] == "Модель недоступна."
     # Groq's daily limit without Groq's own wording (cut off), and a Groq 404 or 5xx: still Groq
     groq_quota = _rules("all model links failed: [Qwen3.8-27B (Groq)] qwen/qwen3.8-27b: daily request quota of the account is spent, skipped for 3000 s (Error code: 429")
-    assert groq_quota["reason"] == "исчерпан дневной лимит запросов Groq" and "03:00" not in groq_quota["advice"]
+    assert groq_quota["detail"] == "исчерпан дневной лимит запросов Groq" and "03:00" not in groq_quota["advice"]
     groq_busy = _rules("all model links failed: [Qwen3.8-27B (OpenRouter)] qwen/qwen3.8-27b: no credits (402); again: [Qwen3.8-27B (Groq)] qwen/qwen3.8-27b: 498 server error, congested upstream")
     assert groq_busy["reason_code"] == "no_credits"
-    assert _rules("all model links failed: again: [Qwen3.8-27B (Groq)] qwen/qwen3.8-27b: 498 server error, congested upstream")["reason"] == "сервер Groq сейчас перегружен"
+    assert _rules("all model links failed: again: [Qwen3.8-27B (Groq)] qwen/qwen3.8-27b: 498 server error, congested upstream")["detail"] == "сервер Groq сейчас перегружен"
     # the paid OpenRouter link congested, though the text has Groq-like words in it: the label wins
     paid_busy = _rules("all model links failed: [Qwen3.8-27B (OpenRouter)] qwen/qwen3.8-27b: congested upstream (Error code: 429 - service tier on_demand)")
-    assert paid_busy["reason"] == "платная модель на OpenRouter сейчас перегружена"
+    assert paid_busy["detail"] == "платная модель на OpenRouter сейчас перегружена"
     # labels of one's own that name no service: looked up in the active chain
     own = chain_context([_link(QWEN_PAID, "unknown", label="Qwen основная"), _link(QWEN_PAID, "unknown", host=QWEN_GROQ_HOST, label="Qwen резерв", free=True)], "configs/models.yaml")
-    assert _rules("all model links failed: [Qwen основная] qwen/qwen3.8-27b: no credits (402); [Qwen резерв] qwen/qwen3.8-27b: access refused (401/403)", own)["reason"] == "ключ доступа к Groq не подходит"
+    assert _rules("all model links failed: [Qwen основная] qwen/qwen3.8-27b: no credits (402); [Qwen резерв] qwen/qwen3.8-27b: access refused (401/403)", own)["detail"] == "ключ доступа к Groq не подходит"
     # a label of an older config, not in the active chain: the service its tag names
     old_groq = _rules("all model links failed: [Qwen3.8-30B (Groq)] qwen/qwen3.8-30b: access refused (401/403)")
-    assert old_groq["reason"] == "ключ доступа к Groq не подходит"
+    assert old_groq["detail"] == "ключ доступа к Groq не подходит"
     old_free = _rules("all model links failed: [Gemma 3 27B (бесплатно)] google/gemma-3-27b-it: congested upstream", FREE_ONLY)
-    assert old_free["reason"] == "бесплатные модели OpenRouter сейчас перегружены"
+    assert old_free["detail"] == "бесплатные модели OpenRouter сейчас перегружены"
     # a label is a name, never a reason: «402» or «404» in it is not a status code
     assert reason_code([PLANNER_FAILED + "all model links failed: [Qwen 402B (VK)] qwen-402b: congested upstream"]) == "congested"
     assert reason_code([PLANNER_FAILED + "all model links failed: [Model 404 (local)] m404: request timed out"]) == "timeout"
@@ -724,9 +759,10 @@ def test_the_live_advice_follows_the_live_state():
     ok = summarize([_link(QWEN, "ok", available=True)], configured=True)
     assert ok["advice"] == "Модель снова отвечает — соберите ещё раз." and ok["retryable"] is True
     assert summarize([_link(QWEN, "unknown", available=True)], configured=True)["advice"] == "Соберите ещё раз — модель попробует снова."
-    assert summarize([_link(QWEN, "congested", available=True)], configured=True)["advice"] == "Пауза после сбоя закончилась — соберите ещё раз."
+    # the provider's pause is not a person's business: the words are the same as for an unknown state
+    assert summarize([_link(QWEN, "congested", available=True)], configured=True)["advice"] == "Соберите ещё раз — модель попробует снова."
     fb = summarize([_link(QWEN, "congested", available=False, until=90, label="Qwen3.8-27B (бесплатно)"), _link(GEMMA, "unknown", available=True, label="Gemma 4 31B (бесплатно)")], configured=True)
-    assert fb["advice"] == "Соберите ещё раз — попробую запасную Gemma 4 31B." and fb["retryable"] is True
+    assert fb["advice"] == "Соберите ещё раз — попробую запасную модель." and fb["retryable"] is True
     # every link pauses: the advice is about the link whose pause ends first (the one the button waits for)
     down = summarize([_link(QWEN, "quota", available=False, until=50000), _link(GEMMA, "congested", available=False, until=90)], configured=True, ctx=chain_context([_link(QWEN, "quota"), _link(GEMMA, "congested")], "configs/models.free.yaml"))
     assert down["state"] == "down" and down["retry_state"] == "congested" and down["retryable"] is True
@@ -735,10 +771,10 @@ def test_the_live_advice_follows_the_live_state():
     assert "после 03:00" in quota["advice"] and quota["retryable"] is True
     # a key that does not fit is not waited out: no rebuild, the advice says what to fix
     auth = summarize([_link(QWEN_PAID, "auth", available=False, until=1800)], configured=True)
-    assert auth["retryable"] is False and auth["advice"] == "Проверьте ключ доступа к OpenRouter в настройках сервера."
+    assert auth["retryable"] is False and auth["advice"] == "Модель недоступна." and auth["summary"] == "Qwen3.8-27B · недоступна"
     # «error» with a pause is a connection that kept dropping: worth waiting out, and it is not «the same error again»
     conn = summarize([_link(QWEN, "error", available=False, until=60, last_error="qwen: connection error (Connection refused)")], configured=True)
-    assert conn["retryable"] is True and conn["advice"].startswith("Проверьте подключение") and "не отвечает" in conn["summary"]
+    assert conn["retryable"] is True and conn["advice"].startswith("Проверьте подключение") and conn["summary"] == "Qwen3.8-27B · недоступна"
     assert summarize([], configured=False)["retryable"] is False
 
 
@@ -895,34 +931,36 @@ def test_web_wait_texts(tmp_path, tz):
 def test_web_rebuild_offer_and_advice_agree(tmp_path):
     o = _run_web(tmp_path)["offers"]
     assert o["congestedDown"] == {"retry": True, "wait": 80, "help": "Соберите ещё раз через несколько минут."}
-    assert o["authUnknown"] == {"retry": False, "wait": 0, "help": "Проверьте ключ доступа к OpenRouter в настройках сервера."}
+    # a key, an account or a model id need the server's owner: the person reads only that the model is unavailable
+    assert o["authUnknown"] == {"retry": False, "wait": 0, "help": "Модель недоступна"}
     assert o["authOkLatest"] == {"retry": True, "wait": 0, "help": "Модель снова отвечает — соберите ещё раз."}
-    assert o["authOkOlder"]["retry"] is False and o["authOkOlder"]["help"] == "Проверьте ключ."
-    assert o["congestedBlockedByKey"] == {"retry": False, "wait": 0, "help": "Проверьте ключ доступа к OpenRouter в настройках сервера."}
+    assert o["authOkOlder"]["retry"] is False and o["authOkOlder"]["help"] == "Модель недоступна"
+    assert o["congestedBlockedByKey"] == {"retry": False, "wait": 0, "help": "Модель недоступна"}
     assert o["error400"]["retry"] is False and "сократите текст" in o["error400"]["help"]
     assert o["quotaOlderOk"] == {"retry": True, "wait": 0, "help": "Модель снова отвечает — соберите ещё раз."}
     assert o["noStatus"]["retry"] is True and o["noStatusAuth"]["retry"] is False
-    # while a model answers, the deck's word about the paid model stays after the live advice; when every model
-    # pauses, the live advice (about the link the button waits for) is the whole help
-    assert o["unknownKeepsSteady"]["help"] == "Соберите ещё раз — модель попробует снова. Чтобы не зависеть от очереди бесплатных, пополните OpenRouter."
+    # an older server's word about the paid model is dropped: the live advice alone says when to build again
+    assert o["unknownKeepsSteady"]["help"] == "Соберите ещё раз — модель попробует снова."
     assert o["downHasItsOwn"]["help"] == "Соберите ещё раз через несколько минут."
     # every model pauses, the paused links can be retried, the deck's reason needs a fix: the button waits for the
-    # live pause and the deck's fix stays after the live advice (said once when the live advice offers it already)
-    assert o["noCreditsDown"] == {"retry": True, "wait": 80, "help": "Соберите ещё раз через несколько минут или пополните OpenRouter на $5–10 — платный Qwen3.8-27B отвечает стабильно."}
-    assert o["noCreditsDownPlain"] == {"retry": True, "wait": 80, "help": "Соберите ещё раз через несколько минут. Пополните счёт OpenRouter на $5–10."}
-    assert o["authDown"] == {"retry": True, "wait": 80, "help": "Соберите ещё раз через несколько минут. Проверьте ключ доступа к Groq в настройках сервера."}
-    assert o["authDownBlockedByKey"] == {"retry": False, "wait": 0, "help": "Проверьте ключ доступа к Groq в настройках сервера."}
+    # live pause; the fix itself (money, a key) never reaches the screen, the clause «или пополните …» neither
+    assert o["noCreditsDown"] == {"retry": True, "wait": 80, "help": "Соберите ещё раз через несколько минут."}
+    assert o["noCreditsDownPlain"] == {"retry": True, "wait": 80, "help": "Соберите ещё раз через несколько минут."}
+    assert o["authDown"] == {"retry": True, "wait": 80, "help": "Соберите ещё раз через несколько минут."}
+    assert o["authDownBlockedByKey"] == {"retry": False, "wait": 0, "help": "Модель недоступна"}
     assert o["error400OkLatest"] == {"retry": False, "wait": 0, "help": "Та же сборка получит ту же ошибку: сократите текст."}
     assert o["error400FallbackLatest"] == {"retry": True, "wait": 0, "help": "Сейчас отвечает запасная Gemma 4 31B — соберите ещё раз."}
     # every model pauses and the pause will end, but a 400 comes back after it: no button, only the deck's own fix
     for name in ("error400Down", "error400DownOlder", "error400DownOldServer"):
         assert o[name] == {"retry": False, "wait": 0, "help": "Та же сборка получит ту же ошибку: сократите текст."}, name
-    # the paused links need a fix themselves: that fix leads, the deck's own follows, still no button
-    assert o["error400DownBlockedByKey"] == {"retry": False, "wait": 0, "help": "Проверьте ключ доступа к Groq в настройках сервера. Та же сборка получит ту же ошибку: сократите текст."}
-    assert o["authDownOldServer"] == {"retry": False, "wait": 0, "help": "Проверьте ключ."}
-    # the advice never promises a rebuild the notice does not offer, and a shown button always has advice beside it
+    # the paused links need a fix themselves (a key: not for the screen); the deck's own fix follows, still no button
+    assert o["error400DownBlockedByKey"] == {"retry": False, "wait": 0, "help": "Та же сборка получит ту же ошибку: сократите текст."}
+    assert o["authDownOldServer"] == {"retry": False, "wait": 0, "help": "Модель недоступна"}
+    # the advice never promises a rebuild the notice does not offer, a shown button always has advice beside it, and
+    # no advice mentions money, keys, config files or providers
     for name, offer in o.items():
         assert offer["help"], name
+        _plain(offer["help"])
         if not offer["retry"]:
             assert "оберите ещё раз" not in offer["help"], name
 
@@ -933,7 +971,8 @@ def test_web_notice_of_a_400_while_every_model_pauses_offers_no_rebuild(tmp_path
     assert "сократите текст" in n["help"] and "оберите" not in n["help"]
 
 
-def test_web_notice_button_and_advice_name_the_same_time(tmp_path):
+def test_web_notice_button_waits_without_a_timer(tmp_path):
     n = _run_web(tmp_path)["notice"]
-    assert n["retry"] is True and n["retryWait"] > 0 and n["retryLabel"] == "Собрать завтра после 03:00"
+    # the button waits (disabled) without a timer in its words; the advice beside it says when
+    assert n["retry"] is True and n["retryWait"] > 0 and n["retryLabel"] == "Собрать ещё раз"
     assert "завтра после 03:00" in n["help"] and n["help"].startswith("бесплатный лимит")

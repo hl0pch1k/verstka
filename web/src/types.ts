@@ -186,11 +186,13 @@ export interface Job {
 export interface JobEvent {
   job_id: string; status: JobStatus; progress: number; message: string; t: number;
   type?: "agent"; step?: string; slide?: number | null; variant?: string | null; seq?: number;
+  /** The critic's «what to do» of an agent event, apart from the problem (newer servers). */
+  fix?: string | null;
 }
 
 // ---- the planning agent (Agent v2) ------------------------------------------------------
 /** analyst | architect | designer | critic | revise | compile (other values may come from newer servers). */
-export interface AgentEvent { step: string; message: string; slide: number | null; variant: string | null; t?: number; seq?: number }
+export interface AgentEvent { step: string; message: string; slide: number | null; variant: string | null; t?: number; seq?: number; fix?: string | null }
 /** What the agent did for a variant: its log (outline.agent_log), the timeline the build screen showed (shared steps
  * and this variant's own) and the critic's notes with the revisions. Empty for runs made before Agent v2. */
 export interface VariantAgent { log: string[]; events: AgentEvent[]; critic: AgentEvent[] }
@@ -335,6 +337,8 @@ export interface GenerationMeta {
   id: string;
   template_id: string;
   template_file?: string;
+  /** The deck's title (the first variant's outline; newer servers). */
+  title?: string | null;
   strategies: string[];
   brief?: string | null;
   audience?: string | null;

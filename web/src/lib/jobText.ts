@@ -19,7 +19,8 @@ function templateStep(s: string): string {
     const m = s.match(re);
     if (m) return fn(m);
   }
-  return s;
+  // a log line this table does not know stays out of the interface
+  return /[а-яё]/i.test(s) ? s : "работаю…";
 }
 
 /** Where one variant of a generation is: a short status for its card and the share of its work done. */

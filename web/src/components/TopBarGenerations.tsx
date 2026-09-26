@@ -1,12 +1,15 @@
-// «Мои презентации»: the recent decks with their cover, a plain date and the quality score; a click reopens one.
+// «Мои презентации»: the recent decks by day — cover, title, time, template, slides and the best quality score; a click
+// reopens one. One Tab stop for the whole list (roving tabindex: ↑/↓/Home/End walk it); leaving it closes the popover.
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { AlertCircle, ChevronDown, History, Layers, Loader2 } from "lucide-react";
-import { usePresence } from "../lib/motion";
-import { cn, fmtWhen, plural, scoreTone } from "../lib/utils";
+import { AlertCircle, History, Layers, Loader2 } from "lucide-react";
+import { MOTION, usePresence } from "../lib/motion";
+import { templateTitle } from "../lib/plain";
+import { cn, fmtDay, fmtTime, plural, scoreTone, TONE_TEXT } from "../lib/utils";
 import type { GenerationMeta } from "../types";
 import { Badge } from "./ui/Badge";
+import { Button } from "./ui/Button";
 
-const LIMIT = 12;
+const LIMIT = 50;
 
 /** Best audit score across the variants of a generation (from the list summary). */
 function bestScore(g: GenerationMeta): number | null {
@@ -27,12 +30,15 @@ function slidesText(g: GenerationMeta): string | null {
   return lo === hi ? plural(hi, "слайд", "слайда", "слайдов") : `${lo}–${plural(hi, "слайд", "слайда", "слайдов")}`;
 }
 
+/** The deck title; older runs without one fall back to the first line of the text. */
 const titleOf = (g: GenerationMeta) =>
+  g.title?.trim() ||
   g.brief
     ?.split("\n")
-    .map((l) => l.replace(/^#+\s*/, "").trim())
+    .map((l) => l.replace(/^#+\s*/, "").replace(/\*\*/g, "").trim())
     .find(Boolean)
-    ?.slice(0, 80) || (g.template_file ?? g.template_id).replace(/\.pptx$/i, "");
+    ?.slice(0, 120) ||
+  (g.template_file ?? g.template_id).replace(/\.pptx$/i, "");
 
 function Cover({ g, busy }: { g: GenerationMeta; busy: boolean }) {
   const [broken, setBroken] = useState(false);
@@ -40,7 +46,7 @@ function Cover({ g, busy }: { g: GenerationMeta; busy: boolean }) {
   const failed = g.status === "failed";
   const src = g.strategies[0] ? `/api/generations/${g.id}/${g.strategies[0]}/slides/slide-001.jpg` : null;
   return (
-    <span className="relative flex aspect-video w-[92px] shrink-0 items-center justify-center overflow-hidden rounded-lg bg-zinc-100 shadow-inner-line">
+    <span className="relative flex aspect-video w-24 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-zinc-100 ring-1 ring-zinc-900/[0.08]">
       {running ? (
         <Loader2 className="h-4 w-4 animate-spin text-zinc-400" aria-hidden />
       ) : failed ? (
@@ -68,18 +74,24 @@ interface Props {
 export function TopBarGenerations({ generations, currentId, onSelect }: Props) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  const busyRef = useRef<string | null>(null);
+  const [rovId, setRovId] = useState<string | null>(null); // the one row in the Tab order
+  const [atEnd, setAtEnd] = useState(true);
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const listRef = useRef<HTMLUListElement>(null);
-  const { mounted, leaving } = usePresence(open, 140);
+  const listRef = useRef<HTMLDivElement>(null);
+  const { mounted, leaving } = usePresence(open, MOTION.fast);
 
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
       if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
     };
+    // Esc closes the popover only (the helper behind it stays)
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
       setOpen(false);
       triggerRef.current?.focus();
     };
@@ -92,114 +104,164 @@ export function TopBarGenerations({ generations, currentId, onSelect }: Props) {
   }, [open]);
 
   const list = [...generations].sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0)).slice(0, LIMIT);
+  const pickable = (g: GenerationMeta) => g.status !== "running" && g.status !== "queued";
+  // the roving stop: the row last walked to, else the open deck, else the newest one that can be opened
+  const tabId =
+    (rovId && list.some((g) => g.id === rovId && pickable(g)) ? rovId : null) ??
+    (currentId && list.some((g) => g.id === currentId && pickable(g)) ? currentId : null) ??
+    list.find(pickable)?.id ??
+    null;
+  // day groups in order: «Сегодня», «Вчера», «24 сент.»
+  const groups: Array<{ day: string; items: GenerationMeta[] }> = [];
+  for (const g of list) {
+    const day = fmtDay(g.created_at) || "Раньше";
+    const last = groups[groups.length - 1];
+    if (last && last.day === day) last.items.push(g);
+    else groups.push({ day, items: [g] });
+  }
+
+  // the bottom fade shows only while there is more below
+  const measure = () => {
+    const el = listRef.current;
+    if (el) setAtEnd(el.scrollHeight - el.scrollTop - el.clientHeight < 8);
+  };
+  useEffect(() => {
+    if (mounted) window.requestAnimationFrame(measure);
+  }, [mounted, list.length]);
 
   const pick = async (id: string) => {
+    busyRef.current = id;
     setBusy(id);
     try {
       await onSelect(id);
     } finally {
+      busyRef.current = null;
       setBusy(null);
       setOpen(false);
+      triggerRef.current?.focus(); // the picked row unmounts: the focus goes back to where the popover came from
     }
   };
 
   // ↑/↓ walk the rows, Home/End jump to the ends
-  const onListKey = (e: ReactKeyboardEvent<HTMLUListElement>) => {
-    const rows = [...(listRef.current?.querySelectorAll<HTMLButtonElement>("[role=option]") ?? [])];
+  const onListKey = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    const rows = [...(listRef.current?.querySelectorAll<HTMLButtonElement>("button[data-row]:not(:disabled)") ?? [])];
     if (rows.length === 0) return;
     const at = rows.indexOf(document.activeElement as HTMLButtonElement);
     const next = e.key === "ArrowDown" ? at + 1 : e.key === "ArrowUp" ? at - 1 : e.key === "Home" ? 0 : e.key === "End" ? rows.length - 1 : null;
     if (next === null) return;
     e.preventDefault();
-    rows[(next + rows.length) % rows.length].focus();
+    const row = rows[(next + rows.length) % rows.length];
+    setRovId(row.dataset.id ?? null);
+    row.focus();
   };
 
   return (
-    <div ref={rootRef} className="relative">
-      <button
+    <div
+      ref={rootRef}
+      className="relative"
+      onBlur={(e) => {
+        // Tab (or a click) out of the trigger and the list closes the popover; a deck that is loading keeps it open
+        if (open && busyRef.current === null && !rootRef.current?.contains(e.relatedTarget as Node | null)) setOpen(false);
+      }}
+    >
+      <Button
         ref={triggerRef}
-        type="button"
+        variant="ghost"
+        size="md"
+        icon={History}
         onClick={() => setOpen((v) => !v)}
         onKeyDown={(e) => {
           if (e.key !== "ArrowDown") return;
           e.preventDefault();
           setOpen(true);
-          window.requestAnimationFrame(() => listRef.current?.querySelector<HTMLButtonElement>("[role=option]")?.focus());
+          window.requestAnimationFrame(() => listRef.current?.querySelector<HTMLButtonElement>('button[data-row][tabindex="0"]')?.focus());
         }}
-        aria-haspopup="listbox"
+        aria-haspopup="dialog"
         aria-expanded={open}
-        className={cn(
-          "inline-flex h-10 cursor-pointer items-center gap-2 rounded-full bg-zinc-100 pl-3.5 pr-3 text-[14px] font-semibold text-zinc-800 transition-colors hover:bg-zinc-200/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/30",
-          open && "bg-zinc-200/80",
-        )}
       >
-        <History className="h-4 w-4 text-zinc-500" aria-hidden />
         Мои презентации
-        {generations.length > 0 && <span className="min-w-[20px] rounded-full bg-white px-1.5 text-center text-[11px] font-bold leading-5 tabular-nums text-zinc-600">{generations.length}</span>}
-        <ChevronDown className={cn("h-4 w-4 text-zinc-400 transition-transform duration-200", open && "rotate-180")} aria-hidden />
-      </button>
+      </Button>
 
       {mounted && (
         <div
+          role="dialog"
+          aria-label="Мои презентации"
+          tabIndex={-1} // a click on a day label keeps the focus inside, so the popover stays open
           className={cn(
-            "absolute right-0 top-full z-40 mt-2 w-[480px] origin-top-right overflow-hidden rounded-2xl bg-white text-zinc-900 shadow-pop",
+            // 20px under the 40px trigger = 8px under the 64px header
+            "absolute right-0 top-[calc(100%+20px)] z-40 w-[440px] origin-top-right overflow-hidden rounded-2xl bg-white text-zinc-900 shadow-pop outline-none",
             leaving ? "pointer-events-none animate-drop-out" : "animate-drop-in",
           )}
         >
-          <div className="flex items-baseline justify-between px-5 pb-2 pt-4">
-            <span className="font-display text-[16px] font-semibold text-zinc-900">Мои презентации</span>
-            {generations.length > 0 && <span className="text-xs text-zinc-400">{plural(generations.length, "презентация", "презентации", "презентаций")}</span>}
-          </div>
           {list.length === 0 ? (
-            <div className="flex flex-col items-center gap-1.5 px-6 pb-9 pt-6 text-center">
-              <span className="mb-1 flex h-11 w-11 items-center justify-center rounded-full bg-zinc-100">
-                <Layers className="h-5 w-5 text-zinc-400" aria-hidden />
+            <div className="flex flex-col items-center px-6 py-8 text-center">
+              <span className="mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-zinc-100">
+                <Layers className="h-6 w-6 text-zinc-500" aria-hidden />
               </span>
-              <p className="text-[14px] font-semibold text-zinc-800">Здесь пока пусто</p>
-              <p className="text-[13px] text-zinc-500">Созданные презентации появятся в этом списке.</p>
+              <p className="text-body font-semibold text-zinc-900">Пока пусто</p>
             </div>
           ) : (
-            <ul ref={listRef} role="listbox" aria-label="Мои презентации" onKeyDown={onListKey} className="scroll-thin max-h-[min(460px,calc(100vh-140px))] space-y-0.5 overflow-y-auto px-2 pb-2">
-              {list.map((g) => {
-                const score = bestScore(g);
-                const current = g.id === currentId;
-                const running = g.status === "running" || g.status === "queued";
-                const failed = g.status === "failed";
-                return (
-                  <li key={g.id}>
-                    <button
-                      type="button"
-                      role="option"
-                      aria-selected={current}
-                      disabled={busy !== null || running}
-                      onClick={() => void pick(g.id)}
-                      className={cn(
-                        "flex w-full cursor-pointer items-center gap-3.5 rounded-xl p-2 pr-3 text-left transition-colors focus:outline-none focus-visible:bg-zinc-100 disabled:cursor-default",
-                        current ? "bg-accent-50" : "hover:bg-zinc-100",
-                        busy !== null && busy !== g.id && "opacity-60",
-                      )}
-                    >
-                      <Cover g={g} busy={busy === g.id} />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[14px] font-semibold text-zinc-900" title={titleOf(g)}>{titleOf(g)}</span>
-                        <span className="mt-0.5 block truncate text-xs text-zinc-500">
-                          {[fmtWhen(g.created_at), plural(g.strategies.length, "вариант", "варианта", "вариантов"), slidesText(g)].filter(Boolean).join(" · ")}
-                        </span>
-                      </span>
-                      {running ? (
-                        <Badge size="sm" tone="info" dot>собирается</Badge>
-                      ) : failed ? (
-                        <Badge size="sm" tone="error">не удалось</Badge>
-                      ) : score !== null ? (
-                        <Badge size="sm" tone={scoreTone(score)} title="Лучшая оценка качества среди вариантов">{Math.round(score)}/100</Badge>
-                      ) : null}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
+            <div
+              ref={listRef}
+              onKeyDown={onListKey}
+              onScroll={measure}
+              className={cn(
+                "scroll-thin max-h-[min(560px,calc(100vh-96px))] overflow-y-auto pb-2",
+                !atEnd && "[mask-image:linear-gradient(to_bottom,#000_calc(100%-24px),transparent)]",
+              )}
+            >
+              {groups.map((grp) => (
+                <section key={grp.day} aria-label={grp.day}>
+                  <h3 className="sticky top-0 z-[1] bg-white px-4 pb-1 pt-3 font-sans text-caption font-semibold text-zinc-500">{grp.day}</h3>
+                  <ul>
+                    {grp.items.map((g) => {
+                      const score = bestScore(g);
+                      const current = g.id === currentId;
+                      const running = g.status === "running" || g.status === "queued";
+                      const failed = g.status === "failed";
+                      const title = titleOf(g);
+                      const meta = [fmtTime(g.created_at), g.template_file ? templateTitle(g.template_file) : null, slidesText(g)].filter(Boolean).join(" · ");
+                      return (
+                        <li key={g.id}>
+                          <button
+                            type="button"
+                            data-row
+                            data-id={g.id}
+                            tabIndex={g.id === tabId ? 0 : -1}
+                            onFocus={() => setRovId(g.id)}
+                            aria-current={current || undefined}
+                            disabled={busy !== null || running}
+                            onClick={() => void pick(g.id)}
+                            title={`${title}\n${meta}`}
+                            className={cn(
+                              "mx-2 flex min-h-[72px] w-[calc(100%-16px)] cursor-pointer items-start gap-3 rounded-xl p-2 text-left transition-colors duration-150 focus-visible:outline-offset-[-2px] disabled:cursor-default",
+                              current ? "bg-accent-50" : "hover:bg-zinc-100",
+                              busy !== null && busy !== g.id && "opacity-60",
+                            )}
+                          >
+                            <Cover g={g} busy={busy === g.id} />
+                            <span className="min-w-0 flex-1">
+                              <span className="line-clamp-2 text-body font-semibold text-zinc-900">{title}</span>
+                              <span className="block truncate text-caption text-zinc-500">{meta}</span>
+                            </span>
+                            {running ? (
+                              <Badge size="sm" tone="accent" dot>собирается</Badge>
+                            ) : failed ? (
+                              <Badge size="sm" tone="error">не удалось</Badge>
+                            ) : score !== null ? (
+                              <span className={cn("shrink-0 text-footnote font-semibold tabular-nums", TONE_TEXT[scoreTone(score)])} title="Лучшая оценка качества среди вариантов">
+                                {Math.round(score)}
+                              </span>
+                            ) : null}
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </section>
+              ))}
+            </div>
           )}
-          {generations.length > LIMIT && <p className="border-t border-zinc-100 px-5 py-2.5 text-xs text-zinc-400">Показаны последние {LIMIT} из {generations.length}</p>}
         </div>
       )}
     </div>

@@ -32,7 +32,7 @@ export function describeGeneration(g: Generation, strategyTitle: (name: string) 
     const errors = s?.errors ?? fromMeta?.errors ?? null;
     const warnings = s?.warnings ?? fromMeta?.warnings ?? null;
     const parts = [plural(slideCount(v), "слайд", "слайда", "слайдов")];
-    parts.push(score === null ? "без проверки качества" : `качество ${Math.round(score)}/100`);
+    parts.push(score === null ? "без проверки качества" : `оценка ${Math.round(score)}`);
     if (errors !== null) parts.push(errors === 0 ? "без ошибок" : plural(errors, "ошибка", "ошибки", "ошибок"));
     if (warnings) parts.push(plural(warnings, "предупреждение", "предупреждения", "предупреждений"));
     return { strategy: v.strategy, score, line: `• ${strategyTitle(v.strategy)} — ${parts.join(", ")}` };
@@ -42,10 +42,31 @@ export function describeGeneration(g: Generation, strategyTitle: (name: string) 
   if (g.variants.every((v) => v.outline?.planned_by === "skeleton")) {
     return [head, silentNote, "В тексте была только тема, поэтому это каркас: титул, повестка и разделы с подсказками в заметках. Допишите тезисы и цифры — Verstka соберёт содержательные слайды."].filter(Boolean).join("\n");
   }
+  // the best variant is named only when the scores differ; no tutorial tail (the page shows where things are)
   const scored = rows.filter((r) => r.score !== null);
-  const best = scored.length > 1 ? scored.reduce((a, b) => ((b.score ?? 0) > (a.score ?? 0) ? b : a)) : null;
-  const tail = best
-    ? `Лучшая оценка качества — у варианта «${strategyTitle(best.strategy)}». Переключайте варианты над слайдом, замечания — в «Проверке качества».`
-    : "Переключайте варианты над слайдом, замечания — в «Проверке качества».";
+  const differ = new Set(scored.map((r) => Math.round(r.score ?? 0))).size > 1;
+  const best = differ ? scored.reduce((a, b) => ((b.score ?? 0) > (a.score ?? 0) ? b : a)) : null;
+  const tail = best ? `Лучшая оценка — у варианта «${strategyTitle(best.strategy)}».` : null;
   return [head, ...rows.map((r) => r.line), silentNote, tail].filter(Boolean).join("\n");
+}
+
+// «1 число сверено», «3 числа сверены», «70 чисел сверены»: the verb agrees with the count
+const agrees = (n: number, one: string, many: string) => (n % 10 === 1 && n % 100 !== 11 ? one : many);
+
+/** The one sentence about the figures checked against the text — the same words on the result card, in the audit tab
+ *  and in the plan. ok: «70 чисел сверены с текстом»; warn: «3 числа не найдены в тексте»; `title` (tooltip) splits the
+ *  checked ones: «60 взяты из текста, 10 посчитаны из его чисел». null when nothing was checked. */
+export function figuresLine(f: { checked: number; derived?: number; unverified?: number } | null | undefined): { text: string; tone: "ok" | "warn"; title?: string } | null {
+  if (!f || !f.checked) return null;
+  const derived = f.derived ?? 0;
+  const unverified = f.unverified ?? 0;
+  if (unverified > 0) {
+    return { text: `${plural(unverified, "число", "числа", "чисел")} ${agrees(unverified, "не найдено", "не найдены")} в тексте`, tone: "warn" };
+  }
+  const taken = Math.max(0, f.checked - derived);
+  return {
+    text: `${plural(f.checked, "число", "числа", "чисел")} ${agrees(f.checked, "сверено", "сверены")} с текстом`,
+    tone: "ok",
+    title: derived > 0 ? `${taken} ${agrees(taken, "взято", "взяты")} из текста, ${derived} ${agrees(derived, "посчитано", "посчитаны")} из его чисел` : undefined,
+  };
 }

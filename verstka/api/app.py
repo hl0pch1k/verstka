@@ -303,10 +303,13 @@ def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job) -> dic
     for v in res.variants:
         rm = {"planner": v.planner, "warnings": v.warnings, "providers": providers().describe() if use_models and providers() else {}}
         planners[v.strategy] = planner_info(v.outline.model_dump(mode="json"), rm, use_models=use_models, ctx=ctx, supplied=supplied)
+    first_outline = res.variants[0].outline if res.variants else None
     meta = {
         "id": gid,
         "template_id": req.template_id,
         "template_file": manifest.source_file,
+        # the deck's title for «Мои презентации» (older runs have none: the UI falls back to the brief's first line)
+        "title": (getattr(first_outline, "title", None) or None) if first_outline is not None else None,
         "strategies": req.strategies,
         "brief": req.brief,
         "audience": req.audience,
@@ -497,9 +500,37 @@ def job_events(job_id: str):
 # ---------------------------------------------------------------------------- routes: generations
 
 
+_TITLE_CACHE: dict[str, tuple[float, Optional[str]]] = {}
+
+
+def _outline_title(gid: str, strategy: str) -> Optional[str]:
+    """The deck title of a finished run written before generation.json carried it (read once per outline version)."""
+    d = store.generation_dir(gid)
+    path = d / strategy / "outline.json" if d is not None else None
+    if path is None or not path.exists():
+        return None
+    try:
+        mtime = path.stat().st_mtime
+        hit = _TITLE_CACHE.get(gid)
+        if hit and hit[0] == mtime:
+            return hit[1]
+        title = json.loads(path.read_text(encoding="utf-8")).get("title") or None
+    except Exception:  # noqa: BLE001  (a broken outline only costs the title)
+        return None
+    _TITLE_CACHE[gid] = (mtime, title)
+    return title
+
+
 @app.get("/api/generations")
 def list_generations() -> list[dict]:
-    return store.list_generations()
+    out = store.list_generations()
+    for meta in out:
+        if meta.get("title") or meta.get("status") != "done" or not meta.get("strategies"):
+            continue
+        title = _outline_title(str(meta.get("id", "")), str(meta["strategies"][0]))
+        if title:
+            meta["title"] = title
+    return out
 
 
 @app.post("/api/generations")
@@ -905,8 +936,9 @@ def chat(req: ChatRequest) -> dict:
             plan = LayoutPlan.model_validate(v["plan"])
             titles = {s.name: s.title for s in load_strategies().values()}
             name = lambda vv: titles.get(vv["strategy"], vv["strategy"])  # noqa: E731
+            # plan, audit and files speak about the variant on screen, like the drawer tab they open beside the chat
             if intent == "plan":
-                reply = "\n\n".join(describe_plan(DeckOutline.model_validate(vv["outline"]), LayoutPlan.model_validate(vv["plan"]), manifest, name(vv)) for vv in variants)
+                reply = describe_plan(outline, plan, manifest, name(v))
                 actions.append({"type": "open_tab", "tab": "plan"})
             elif intent == "explain_slide":
                 index = int(params.get("index", 1))
@@ -919,13 +951,13 @@ def chat(req: ChatRequest) -> dict:
                 reply = describe_agent_work(v.get("agent") or {}, name(v))
                 actions.append({"type": "open_tab", "tab": "agent"})
             elif intent == "audit":
-                reply = "\n\n".join(f"Вариант «{name(vv)}». " + describe_audit(AuditReport.model_validate(vv["audit"])) for vv in variants if vv.get("audit"))
+                reply = f"Вариант «{name(v)}». " + (describe_audit(AuditReport.model_validate(v["audit"])) if v.get("audit") else "Проверка качества для него не запускалась.")
                 actions.append({"type": "open_tab", "tab": "audit"})
             else:
-                kinds = {"deck.pptx": "PPTX", "deck.pdf": "PDF", "deck.html": "HTML"}
-                reply = "Файлы готовы — открыл список для скачивания:\n" + "\n".join(
-                    f"• {name(vv)}: " + ", ".join(kinds[f] for f in kinds if f in vv["files"]) for vv in variants
-                )
+                kinds = {"deck.pptx": "PowerPoint", "deck.pdf": "PDF", "deck.html": "веб-версия"}
+                have = [kinds[f] for f in kinds if f in (v.get("files") or {})]
+                listed = ", ".join(have[:-1]) + " и " + have[-1] if len(have) > 1 else "".join(have)
+                reply = f"Вариант «{name(v)}»: {listed} — открыл «Файлы»." if have else "Файлы ещё сохраняются — подождите немного."
                 actions.append({"type": "open_tab", "tab": "export"})
     elif intent == "fix_all" and gen_id:
         payload = _generation_payload(gen_id)
@@ -942,7 +974,7 @@ def chat(req: ChatRequest) -> dict:
         actions.append({"type": "jobs", "jobs": jobs})
     elif intent == "generate":
         if not template_id:
-            reply = "Сначала загрузите шаблон, затем пришлите бриф — и я соберу три варианта презентации."
+            reply = "Сначала выберите шаблон, затем пришлите текст — соберу три варианта."
         else:
             brief_text = req.message
             r = create_generation(GenerateRequest(template_id=template_id, brief=brief_text, use_models=models_configured()))
@@ -950,10 +982,13 @@ def chat(req: ChatRequest) -> dict:
             reply = "Принял текст. Выделяю факты и цифры, составляю план и собираю три варианта по макетам шаблона — прогресс видно на экране."
             actions.append({"type": "generation_started", "job_id": r["job_id"], "generation_id": r["generation_id"]})
     else:
-        reply = (
-            "Я помогу собрать презентацию в стиле вашего шаблона. Можно спросить: «расскажи о шаблоне», «сделай презентацию: <текст>», "
-            "«почему слайд 4 такой», «как работал агент», «проверь качество», «исправь всё», «где скачать файлы». Выберите шаблон и пришлите текст."
-        )
+        # one short answer for where the person is: a deck on screen, a template only, or nothing yet
+        if gen_id:
+            reply = "Могу объяснить любой слайд или изменить его — например: «на слайде 3 покажи расходы таблицей»."
+        elif template_id:
+            reply = "Пришлите текст — соберу три варианта."
+        else:
+            reply = "Выберите шаблон и пришлите текст."
     session["history"].append({"role": "user", "text": req.message})
     session["history"].append({"role": "assistant", "text": reply})
     return {"reply": reply, "intent": intent, "actions": actions, "template_id": template_id, "generation_id": session.get("generation_id")}

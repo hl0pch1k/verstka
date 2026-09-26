@@ -1,5 +1,5 @@
 name: design_critic
-version: 1.3.0
+version: 1.3.1
 role: llm
 description: >
   Reviews one variant's plan against the brief and the user's rules (Agent v2): every requested chart, table,
@@ -45,3 +45,6 @@ changelog:
     plan line's (the critic counted from the first content slide and sent notes to the neighbour). The agent drops a
     note resting on figures the brief does not give or bringing another slide's figures (_harmful_fix) and takes a revision
     part by part (planning/agent.py merge_revision): a worse revised headline or takeaway never replaces a better one."
+  - "1.3.1: the UI showed fixes that were only cut teasers («Снижение доли расходов на 2…», «Доля чеков с едой должна
+    вырасти с 20%…»): the fix is written in full, a proposed headline or takeaway quoted whole, never shortened with
+    «…» (the agent also keeps up to 400 characters of a fix instead of 200)."

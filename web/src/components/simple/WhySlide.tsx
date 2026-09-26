@@ -1,39 +1,147 @@
-// «Почему слайд такой»: first the designer's own reason for the form of the slide and the other forms it proposed
-// (Agent v2; one of them may be the form another variant shows), with the critic's notes on it; then the sample of
-// the template next to the slide made from it, the reasons of the layout in words, other layouts that also fit, and
-// the remarks of the quality check. The raw trace stays folded below.
+// «Почему так»: first the designer's own reason for the form of the slide, the other forms it proposed (one of them
+// may be the form another variant shows) and the critic's notes with their fixes; then how the slide was laid out in
+// the template, other layouts that also fit (for slides cloned from a sample) and the slide's quality check in a row.
 import { useState } from "react";
-import { ArrowRight, Check, ChevronLeft, ChevronRight, Lightbulb, Minus } from "lucide-react";
-import { eventText } from "../../lib/agent";
+import { AlertTriangle, ArrowRight, CheckCircle2, ChevronLeft, ChevronRight } from "lucide-react";
+import { eventParts, plainWords } from "../../lib/agent";
 import { slideCount } from "../../lib/narrate";
 import { humanReasons } from "../../lib/reasons";
-import { cn, kindLabel } from "../../lib/utils";
+import { cn, KIND_LABEL, kindLabel, plural } from "../../lib/utils";
 import { useApp } from "../../store";
-import type { LayoutSlide, Pattern, SlideAlternativeInfo, Variant } from "../../types";
-import { IssueLine } from "../AuditIssues";
+import type { OutlineSlide, Pattern, SlideAlternativeInfo, Variant } from "../../types";
+import { isMinor } from "../AuditHelpers";
 import { Button } from "../ui/Button";
-import { Collapsible } from "../ui/Collapsible";
+import { Progress } from "../ui/Progress";
 import { issuesBySlide, planEntryFor, variantRev, withRev } from "../VariantsHelpers";
 
-function Frame({ src, label, aspect, muted }: { src: string | null; label: string; aspect: number; muted?: boolean }) {
+const CARD = "rounded-2xl bg-white p-6 shadow-card";
+
+function Frame({ src, label, aspect }: { src: string | null; label: string; aspect: number }) {
   const [broken, setBroken] = useState(false);
   return (
     <figure className="min-w-0 flex-1">
-      <div className={cn("overflow-hidden rounded-xl bg-zinc-100 shadow-inner-line", muted && "opacity-90")} style={{ aspectRatio: String(aspect) }}>
+      <div className="overflow-hidden rounded-xl bg-zinc-100 ring-1 ring-zinc-900/[0.08]" style={{ aspectRatio: String(aspect) }}>
         {src && !broken ? (
           <img src={src} alt={label} draggable={false} onError={() => setBroken(true)} className="h-full w-full object-cover" />
         ) : (
-          <div className="flex h-full items-center justify-center px-4 text-center text-xs text-zinc-500">{label}</div>
+          <div className="flex h-full items-center justify-center px-4 text-center text-caption text-zinc-500">Превью не сохранилось</div>
         )}
       </div>
-      <figcaption className="mt-2 text-center text-xs font-medium text-zinc-500">{label}</figcaption>
+      <figcaption className="mt-2 text-caption text-zinc-500">{label}</figcaption>
     </figure>
   );
 }
 
+const capital = (t: string) => (t ? t.charAt(0).toUpperCase() + t.slice(1) : t);
+
+// «столбчатая диаграмма: График позволит…» (a chart type in front of the reason): the type is the form's name
+const CHART_HEAD = /^((?:[а-яё]+\s+)?(?:диаграмма|график)(?:\s+с\s+[а-яё]+)?)\s*:\s*(.+)$/is;
+// an adjective in front of the noun it describes («статистический ряд», «краткий список», «круговая диаграмма»)
+const ADJECTIVE = /(?:ий|ый|ой|ая|яя|ое|ее|ые|ие)$/i;
+const NUMERAL = /^(?:два|две|три|четыре)$/i;
+const CHART_NOUNS = ["диаграмма", "график"];
+
+/** «таблица» and «таблицей», «ряд» and «ряда»: one word in another case; «табличное» is another word. */
+function sameWord(a: string, b: string): boolean {
+  const x = a.toLowerCase();
+  const y = b.toLowerCase();
+  const stem = y.length <= 4 ? y : y.slice(0, -1);
+  return x.startsWith(stem) && x.length <= y.length + 2;
+}
+
+/** The noun a verb agrees with: masculine, feminine, neuter or plural, by its ending. */
+type Agreement = "m" | "f" | "n" | "p";
+const agreementOf = (noun: string): Agreement => (/[ыи]$/i.test(noun) ? "p" : /[ая]$/i.test(noun) ? "f" : /[оеё]$/i.test(noun) ? "n" : "m");
+const PAST: Record<Agreement, string> = { m: "л", f: "ла", n: "ло", p: "ли" };
+const VERB = /^(?:[а-яё]*[аеиоуяы](?:л|ла|ло|ли)|[а-яё]+(?:ет|ёт|ит|ют|ят|ут))$/i;
+
+/** A verb said of one noun, said of another: «график показал» → «(диаграмма) показала», «форма позволяет» →
+ *  «(карточки) позволяют». */
+function agree(verb: string, from: Agreement, to: Agreement): string {
+  if (from === to) return verb;
+  const past = /^([а-яё]*[аеиоуяы])(?:л|ла|ло|ли)$/i.exec(verb);
+  if (past) return past[1] + PAST[to];
+  if (to === "p" && from !== "p") {
+    if (/^может$/i.test(verb)) return "могут";
+    if (/[аеиоуяю]ет$/i.test(verb) || /ёт$/i.test(verb)) return verb.replace(/[её]т$/i, "ют");
+    if (/ит$/i.test(verb)) return verb.replace(/ит$/i, "ят");
+  }
+  return verb;
+}
+
+/** The reason told after the form's name: without a leading repeat of the name («Таблица позволит…», «Статистический
+ *  ряд покажет…», «Форма «карточки» позволяет…», «График позволит…» after «столбчатая диаграмма») and with its verb
+ *  agreeing with the name, from a small letter (an acronym keeps its capitals) and, when it is one sentence, without
+ *  its full stop. */
+function reasonAfter(label: string, text: string): string {
+  let t = text.trim();
+  const words = label.toLowerCase().split(/\s+/).filter(Boolean);
+  const head = words.find((w) => !ADJECTIVE.test(w) && !NUMERAL.test(w)) ?? words[words.length - 1] ?? "";
+  // the subject the reason was written for, when it is not the name itself
+  let subject: Agreement | null = null;
+  const form = /^Форма\s+«[^«»]+»\s*/i.exec(t);
+  if (form) {
+    t = t.slice(form[0].length);
+    subject = "f";
+  } else if (label && t.toLowerCase().startsWith(label.toLowerCase()) && !/^[а-яёa-z0-9]/i.test(t.slice(label.length))) {
+    t = t.slice(label.length);
+  } else if (head) {
+    const m = /^(?:([а-яё]+)\s+)?([а-яё]+)(?=[\s,.:—–-]|$)/i.exec(t);
+    if (m) {
+      // «Статистический ряд …»: the adjective goes with its noun; «Ряд …»: the noun alone
+      const [lead, noun] = m[1] && ADJECTIVE.test(m[1]) ? [m[0], m[2]] : [m[1] ?? m[2], m[1] ?? m[2]];
+      const synonyms = CHART_NOUNS.includes(head) ? CHART_NOUNS : [head];
+      // «График столбцов поможет…»: a noun that takes the next word with it stays whole
+      const next = /^\s+([а-яё]+)/i.exec(t.slice(lead.length))?.[1] ?? "";
+      if (synonyms.some((w) => sameWord(noun, w)) && !/(?:ов|ев|ей)$/i.test(next)) {
+        t = t.slice(lead.length);
+        subject = agreementOf(noun);
+      }
+    }
+  }
+  t = t.replace(/^[\s,:;—–-]+/, "");
+  // «(Таблица) бы ясно показала…» → «ясно показала бы…»; the verb agrees with the name
+  const lone = /^бы\s+/i.exec(t);
+  if (lone) t = t.slice(lone[0].length);
+  const parts = t.split(" ");
+  const at = parts.slice(0, 3).findIndex((w) => VERB.test(w));
+  // «Позволяет визуализировать…», «Визуально выделит…» said of plural «Карточки»: the reason's own subject is left out
+  // («форма»), its verb is singular
+  if (!subject && at >= 0 && (at === 0 || (at === 1 && /о$/i.test(parts[0]))) && agreementOf(head) === "p" && /(?:ет|ёт|ит)$/i.test(parts[at])) subject = "f";
+  if (at >= 0) {
+    if (subject) {
+      const to = agreementOf(head);
+      parts[at] = agree(parts[at], subject, to);
+      // «…позволяют разделить цель и меры, соответствует стилю и позволяет…»: the present-tense verbs joined to the
+      // first one by a comma or «и» share its subject (a «что делает…» clause has its own; «и доли» is a noun)
+      for (let i = at + 1; i < parts.length; i++) {
+        if (/^[а-яё]{4,}(?:ет|ёт|ит)$/i.test(parts[i]) && (/,$/.test(parts[i - 1]) || /^и$/i.test(parts[i - 1]))) parts[i] = agree(parts[i], subject, to);
+      }
+    }
+    if (lone) parts[at] += " бы";
+    t = parts.join(" ");
+  } else if (lone) t = `бы ${t}`;
+  if (/^[А-ЯЁA-Z][а-яёa-z]/.test(t)) t = t.charAt(0).toLowerCase() + t.slice(1);
+  if (/[^.]\.$/.test(t) && !/[.!?…]\s/.test(t.slice(0, -1))) t = t.slice(0, -1);
+  return t;
+}
+
+/** An alternative form in the interface's words: the slide kinds named as the tabs name them («Ряд чисел», a chart type
+ *  the reason starts with taken for the name) and the reason told after the name, the same way on every row. */
+function altWords(a: SlideAlternativeInfo): { label: string; text: string } {
+  let label = a.kind && KIND_LABEL[a.kind] ? kindLabel(a.kind) : a.label ?? "";
+  let text = a.text ? plainWords(a.text) : "";
+  const m = CHART_HEAD.exec(text);
+  if (m) {
+    label = m[1].toLowerCase();
+    text = m[2];
+  }
+  return label ? { label: capital(label), text: reasonAfter(label, text) } : { label: "", text: capital(text.trim()) };
+}
+
 /** What the slide designer said about the slide: why this form, the other forms, the conclusion, the critic's notes. */
 function DesignNote({ v, index }: { v: Variant; index: number }) {
-  const { strategyTitle, setActiveStrategy, generation } = useApp();
+  const { strategyTitle, setActiveStrategy } = useApp();
   const d = v.design?.find((x) => x.index === index) ?? null;
   const o = v.outline?.slides[index - 1] ?? null;
   const rationale = d?.rationale ?? o?.rationale ?? null;
@@ -43,58 +151,48 @@ function DesignNote({ v, index }: { v: Variant; index: number }) {
   const spec = d?.spec_ref ?? o?.spec_ref ?? null;
   const notes = (v.agent?.critic ?? []).filter((e) => e.slide === index);
   if (!rationale && alts.length === 0 && notes.length === 0 && !takeaway) return null;
-  const variantNo = (name: string) => (generation?.variants.findIndex((x) => x.strategy === name) ?? -1) + 1;
   return (
-    <section className="rounded-3xl bg-white p-6 shadow-card animate-fade-in">
-      <div className="flex items-start gap-3">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent-50 text-accent" aria-hidden>
-          <Lightbulb className="h-[18px] w-[18px]" />
-        </span>
-        <div className="min-w-0 flex-1">
-          <h3 className="text-[17px] font-semibold text-zinc-900">Почему такая форма</h3>
-          <p className="text-[13px] text-zinc-500">Решение агента-дизайнера{spec ? ` · в вашем тексте это слайд ${spec}` : ""}</p>
-        </div>
+    <section className={cn(CARD, "animate-fade-in")}>
+      <div className="flex items-baseline gap-3">
+        <h3 className="text-title3 font-semibold text-zinc-900">Почему такая форма</h3>
+        {spec !== null && spec !== index && <span className="text-footnote text-zinc-500">В вашем тексте — слайд {spec}</span>}
       </div>
-      {rationale && <p className="mt-4 text-[15px] leading-6 text-zinc-800">{rationale}</p>}
+      {rationale && <p className="mt-2 max-w-[680px] text-body leading-6 text-zinc-900">{plainWords(rationale)}</p>}
       {(takeaway || footnote) && (
-        <dl className="mt-3 space-y-1 text-[13px] leading-5">
+        <dl className="mt-4 grid max-w-[680px] grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-footnote">
           {takeaway && (
-            <div className="flex gap-2">
-              <dt className="shrink-0 font-semibold text-zinc-700">Вывод на слайде:</dt>
-              <dd className="text-zinc-600">{takeaway}</dd>
-            </div>
+            <>
+              <dt className="font-semibold text-zinc-700">Вывод</dt>
+              <dd className="text-zinc-700">{takeaway}</dd>
+            </>
           )}
           {footnote && (
-            <div className="flex gap-2">
-              <dt className="shrink-0 font-semibold text-zinc-700">Сноска:</dt>
-              <dd className="text-zinc-600">{footnote}</dd>
-            </div>
+            <>
+              <dt className="font-semibold text-zinc-700">Сноска</dt>
+              <dd className="text-zinc-700">{footnote}</dd>
+            </>
           )}
         </dl>
       )}
       {alts.length > 0 && (
-        <div className="mt-5">
-          <p className="text-[13px] font-semibold text-zinc-900">Другие формы, которые агент рассматривал</p>
+        <div className="mt-6">
+          <h4 className="text-footnote font-semibold text-zinc-900">Другие формы</h4>
           <ul className="mt-2 space-y-2">
             {alts.map((a, i) => {
-              const label = a.label ?? (a.kind ? kindLabel(a.kind) : null);
+              const { label, text } = altWords(a);
               const used = (a.used_in ?? []).filter((s) => s !== v.strategy);
               return (
-                <li key={i} className="flex items-center gap-3 rounded-2xl bg-zinc-50 px-4 py-2.5">
-                  <span className="min-w-0 flex-1 text-[13px] leading-5">
-                    {label && <span className="font-semibold text-zinc-900">{label.charAt(0).toUpperCase() + label.slice(1)}</span>}
-                    {label && a.text && <span className="text-zinc-400"> — </span>}
-                    {a.text && <span className="text-zinc-600">{a.text}</span>}
+                <li key={i} className="flex min-h-14 items-center gap-3 rounded-xl bg-zinc-100 px-4 py-3">
+                  {/* every row reads the same: «**Таблица** — позволит увидеть точные значения…» */}
+                  <span className="min-w-0 flex-1 text-footnote">
+                    {label && <span className="font-semibold text-zinc-900">{label}</span>}
+                    {label && text && <span className="text-zinc-500">{"\u00a0— "}</span>}
+                    {text && <span className="text-zinc-700">{text}</span>}
                   </span>
                   {used.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => setActiveStrategy(used[0])}
-                      title="Переключиться на этот вариант"
-                      className="shrink-0 cursor-pointer rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-accent-700 shadow-card transition-colors hover:bg-accent-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/30"
-                    >
-                      так в варианте {variantNo(used[0]) || ""} · {strategyTitle(used[0])}
-                    </button>
+                    <Button variant="white" size="sm" iconRight={ArrowRight} onClick={() => setActiveStrategy(used[0])} title="Переключиться на этот вариант">
+                      {strategyTitle(used[0])}
+                    </Button>
                   )}
                 </li>
               );
@@ -103,17 +201,32 @@ function DesignNote({ v, index }: { v: Variant; index: number }) {
         </div>
       )}
       {notes.length > 0 && (
-        <div className="mt-5">
-          <p className="text-[13px] font-semibold text-zinc-900">Замечания критика и правка</p>
-          <ul className="mt-2 space-y-1.5">
-            {notes.map((e, i) => (
-              <li key={e.seq ?? i} className="flex items-start gap-2.5 text-[13px] leading-5 text-zinc-700">
-                <span className={cn("mt-px inline-flex h-5 shrink-0 items-center rounded-md px-1.5 text-[11px] font-semibold", e.step === "revise" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800")}>
-                  {e.step === "revise" ? "Правка" : "Критик"}
-                </span>
-                <span className="min-w-0 flex-1">{eventText(e)}</span>
-              </li>
-            ))}
+        <div className="mt-6">
+          <h4 className="text-footnote font-semibold text-zinc-900">Критик и правка</h4>
+          <ul className="mt-2 space-y-2">
+            {notes.map((e, i) => {
+              const { text, fix } = eventParts(e);
+              const revise = e.step === "revise";
+              return (
+                <li key={e.seq ?? i} className="flex items-start gap-3 text-footnote">
+                  <span className={cn("inline-flex h-5 min-w-[72px] shrink-0 items-center justify-center rounded-lg px-2 text-caption font-semibold", revise ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700")}>
+                    {revise ? "Правка" : "Критик"}
+                  </span>
+                  <div className="min-w-0 max-w-[680px] flex-1">
+                    <p className="text-zinc-700">{text}</p>
+                    {fix && (
+                      <p className="mt-1 flex gap-1 text-zinc-500">
+                        <ArrowRight className="mt-[3px] h-3.5 w-3.5 shrink-0 text-zinc-400" aria-hidden />
+                        <span className="min-w-0">
+                          <span className="sr-only">Исправление: </span>
+                          {fix}
+                        </span>
+                      </p>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}
@@ -121,26 +234,12 @@ function DesignNote({ v, index }: { v: Variant; index: number }) {
   );
 }
 
-/** The record of the layout plan as the matcher wrote it — for whoever wants to check the reasoning. */
-function Trace({ entry }: { entry: LayoutSlide }) {
-  const head = [entry.mode === "clone" ? `clone ${entry.pattern_id ?? ""}`.trim() : `synth ${entry.composition ?? ""}`.trim(), `score ${entry.score.toFixed(2)}`];
-  return (
-    <Collapsible title="Технический след" hint="как это записано в плане раскладки" keepMounted={false}>
-      <div className="space-y-2 font-mono text-xs leading-5 text-zinc-600">
-        <p>{head.join(" · ")}</p>
-        {entry.reasons.length > 0 && (
-          <ul className="space-y-0.5">
-            {entry.reasons.map((r, i) => <li key={i}>· {r}</li>)}
-          </ul>
-        )}
-        {entry.alternatives.length > 0 && <p className="text-zinc-500">alternatives: {entry.alternatives.slice(0, 5).map(([id, sc]) => `${id} ${sc.toFixed(2)}`).join(", ")}</p>}
-      </div>
-    </Collapsible>
-  );
-}
+/** A composed slide shows the template's nearest sample only when that sample is the same kind of slide (a chart
+ *  sample of another chart type would mislead). */
+const sameKind = (p: Pattern | null, s: OutlineSlide | null) => !!p && !!s && p.kind === s.kind && s.kind !== "chart";
 
 export function WhySlide() {
-  const { generation, activeVariant, selectedSlide, setSelectedSlide, manifest, strategyTitle } = useApp();
+  const { generation, activeVariant, selectedSlide, setSelectedSlide, manifest, strategyTitle, setDetail } = useApp();
   const v = activeVariant ?? generation?.variants[0];
   if (!generation || !v) return null;
   const total = slideCount(v);
@@ -148,128 +247,137 @@ export function WhySlide() {
   const entry = planEntryFor(v, selectedSlide);
   const templateOk = !!manifest && manifest.template_id === generation.template_id;
   const patternById = (id: string | null | undefined): Pattern | null => (templateOk && id ? manifest.patterns.find((p) => p.id === id) ?? null : null);
-  const pattern = entry?.mode === "clone" ? patternById(entry.pattern_id) : null;
-  // a composed slide shows the template's nearest sample next to it: same style, geometry fitted to the content
-  const nearest = entry?.mode === "synth" ? patternById(entry.alternatives[0]?.[0]) : null;
-  const composed = entry?.mode === "synth";
-  const aspect = templateOk ? manifest.slide_size.w / manifest.slide_size.h : 16 / 9;
   const outlineSlide = v.outline?.slides[selectedSlide - 1] ?? null;
+  const composed = entry?.mode === "synth";
+  const pattern = entry?.mode === "clone" ? patternById(entry.pattern_id) : null;
+  const nearestRaw = composed ? patternById(entry?.alternatives[0]?.[0]) : null;
+  const nearest = sameKind(nearestRaw, outlineSlide) ? nearestRaw : null;
+  const sample = pattern ?? nearest;
+  const aspect = templateOk ? manifest.slide_size.w / manifest.slide_size.h : 16 / 9;
   const own = v.slides[selectedSlide - 1] ? withRev(v.slides[selectedSlide - 1], rev) : null;
-  const issues = issuesBySlide(v.audit).get(selectedSlide) ?? [];
+  const issues = (issuesBySlide(v.audit).get(selectedSlide) ?? []).filter((i) => !isMinor(i));
+  const worst = issues.some((i) => i.severity === "error") ? "error" : issues.length ? "warn" : null;
   const reasons = entry ? humanReasons(entry.reasons, strategyTitle, (pid) => patternById(pid)?.source_slide ?? null) : [];
-  const match = entry ? Math.round(Math.min(1, Math.max(0, entry.score)) * 100) : null;
+  const match = entry && !composed ? Math.round(Math.min(1, Math.max(0, entry.score)) * 100) : null;
   const others = (entry?.alternatives ?? []).filter(([pid]) => pid !== entry?.pattern_id).map(([, s]) => s);
   const runnerUp = others.length ? Math.round(Math.min(1, Math.max(0, Math.max(...others))) * 100) : null;
-  const alternatives = (entry?.alternatives ?? [])
-    .map(([pid, score]) => ({ p: patternById(pid), score }))
-    .filter((a): a is { p: Pattern; score: number } => !!a.p && a.score > 0.05 && a.p.id !== pattern?.id && a.p.id !== nearest?.id)
-    .slice(0, 3);
+  const alternatives = composed
+    ? []
+    : (entry?.alternatives ?? [])
+        .map(([pid, score]) => ({ p: patternById(pid), score }))
+        .filter((a): a is { p: Pattern; score: number } => !!a.p && a.score > 0.05 && a.p.id !== pattern?.id)
+        .slice(0, 3);
+  // one or two layouts take half the width each, three a third: a lone sample never stretches across the card
+  const COLS = ["grid-cols-2", "grid-cols-2", "grid-cols-3"];
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-3 rounded-2xl bg-white px-4 py-3 shadow-card">
-        <Button icon={ChevronLeft} aria-label="Предыдущий слайд" disabled={selectedSlide <= 1} onClick={() => setSelectedSlide(selectedSlide - 1)} className="rounded-full" />
+    <div>
+      <nav aria-label="Слайд" className="sticky -top-6 z-10 -mx-6 -mt-6 mb-4 flex items-center gap-3 border-b border-zinc-200/70 bg-canvas/95 px-6 py-3 backdrop-blur">
+        <Button variant="ghost" shape="circle" size="md" icon={ChevronLeft} aria-label="Предыдущий слайд" disabled={selectedSlide <= 1} onClick={() => setSelectedSlide(selectedSlide - 1)} />
         <div className="min-w-0 flex-1 text-center">
-          <p className="text-xs text-zinc-500">
-            Слайд {selectedSlide} из {total}
+          <p className="text-caption text-zinc-500">
+            Слайд {selectedSlide} / {total}
             {outlineSlide ? ` · ${kindLabel(outlineSlide.kind)}` : ""}
           </p>
-          <p className="truncate text-[15px] font-semibold text-zinc-900">{outlineSlide?.headline || "Без заголовка"}</p>
+          <p className="line-clamp-1 text-body font-semibold text-zinc-900" title={outlineSlide?.headline || undefined}>
+            {outlineSlide?.headline || "Без заголовка"}
+          </p>
         </div>
-        <Button icon={ChevronRight} aria-label="Следующий слайд" disabled={selectedSlide >= total} onClick={() => setSelectedSlide(selectedSlide + 1)} className="rounded-full" />
-      </div>
+        <Button variant="ghost" shape="circle" size="md" icon={ChevronRight} aria-label="Следующий слайд" disabled={selectedSlide >= total} onClick={() => setSelectedSlide(selectedSlide + 1)} />
+      </nav>
 
-      <DesignNote key={`d${selectedSlide}/${v.strategy}`} v={v} index={selectedSlide} />
+      <div className="space-y-4">
+        <DesignNote key={`d${selectedSlide}/${v.strategy}`} v={v} index={selectedSlide} />
 
-      <section key={`${selectedSlide}/${rev}`} className="animate-fade-in rounded-3xl bg-white p-6 shadow-card">
-        <h3 className="text-[17px] font-semibold text-zinc-900">Как собран слайд</h3>
-        <div className="mt-4 flex items-center gap-4">
-          {pattern ? (
-            <Frame src={pattern.thumbnail_url ?? null} label={`Образец: слайд ${pattern.source_slide} шаблона`} aspect={aspect} muted />
-          ) : nearest ? (
-            <Frame src={nearest.thumbnail_url ?? null} label={`Ближайший образец: слайд ${nearest.source_slide} шаблона`} aspect={aspect} muted />
+        <section key={`${selectedSlide}/${rev}`} className={cn(CARD, "animate-fade-in")}>
+          <h3 className="text-title3 font-semibold text-zinc-900">Как собран слайд</h3>
+          {sample ? (
+            <div className="mt-4 flex items-center gap-4">
+              <Frame src={sample.thumbnail_url ?? null} label={pattern ? `Образец: слайд ${sample.source_slide} шаблона` : `Ближайший образец: слайд ${sample.source_slide} шаблона`} aspect={aspect} />
+              <ArrowRight className="mb-6 h-5 w-5 shrink-0 text-zinc-400" aria-hidden />
+              <Frame src={own} label="Ваш слайд" aspect={aspect} />
+            </div>
           ) : (
-            <Frame src={null} label="Слайд собран из цветов, шрифтов и сетки шаблона" aspect={aspect} />
+            <div className="mt-4">
+              <Frame src={own} label={composed ? "Собран по сетке, шрифтам и цветам шаблона" : "Ваш слайд"} aspect={aspect} />
+            </div>
           )}
-          <ArrowRight className="h-5 w-5 shrink-0 text-zinc-400" aria-hidden />
-          <Frame src={own} label="Ваш слайд" aspect={aspect} />
-        </div>
-        {composed && (
-          <p className="mt-5 text-[13px] leading-5 text-zinc-600">
-            Раскладка рассчитана под ваш текст: сетка, шкала шрифтов, цвета и карточки взяты из шаблона, а размеры блоков подобраны под объём содержания.
-          </p>
-        )}
-        {match !== null && !composed && (
-          <div className="mt-5">
-            <div className="flex items-baseline justify-between text-[13px]">
-              <span className="font-medium text-zinc-700">Оценка подбора</span>
-              <span className="font-semibold tabular-nums text-zinc-900">{match}/100</span>
+          {match !== null && (
+            <div className="mt-6">
+              <div className="flex items-baseline justify-between text-footnote">
+                <span className="font-semibold text-zinc-700">Сходство с образцом</span>
+                <span className="font-semibold tabular-nums text-zinc-900">{match}%</span>
+              </div>
+              <Progress size="md" value={match / 100} tone={!pattern ? "neutral" : match >= 70 ? "success" : "accent"} className="mt-2" />
+              <p className="mt-2 text-footnote text-zinc-500">
+                {!pattern
+                  ? "Ни один образец не подошёл достаточно хорошо — слайд собран с нуля в стиле шаблона"
+                  : runnerUp === null
+                    ? "Единственный макет шаблона, подходящий для такого слайда"
+                    : runnerUp <= match
+                      ? `Лучший из рассмотренных: у остальных сходство ${runnerUp}% и ниже`
+                      : entry?.reasons.some((r) => r.startsWith("автофикс:"))
+                        ? `Заменён проверкой качества: макет со сходством ${runnerUp}% дал замечания`
+                        : "Выбран с учётом стиля варианта и соседних слайдов"}
+              </p>
             </div>
-            <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-zinc-100">
-              <div className={cn("h-full rounded-full transition-[width] duration-700 ease-out", !pattern ? "bg-zinc-400" : match >= 70 ? "bg-emerald-500" : "bg-accent")} style={{ width: `${match}%` }} />
-            </div>
-            <p className="mt-1.5 text-xs text-zinc-500">
-              {!pattern
-                ? "Ни один образец не подошёл достаточно хорошо — слайд собран с нуля в стиле шаблона"
-                : runnerUp === null
-                  ? "Единственный макет шаблона, подходящий для такого слайда"
-                  : runnerUp <= match
-                    ? `Лучший из рассмотренных: у остальных макетов ${runnerUp}/100 и ниже`
-                    : entry?.reasons.some((r) => r.startsWith("автофикс:"))
-                      ? `Заменён проверкой качества: макет с оценкой ${runnerUp}/100 дал замечания`
-                      : "Выбран с учётом стиля варианта и соседних слайдов"}
-            </p>
-          </div>
-        )}
-        {reasons.length > 0 && (
-          <ul className="mt-5 space-y-2">
-            {reasons.map((r) => (
-              <li key={r.text} className="flex items-start gap-2.5 text-[14px] leading-5 text-zinc-800">
-                <span className={cn("mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full", r.good ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700")} aria-hidden>
-                  {r.good ? <Check className="h-3 w-3" strokeWidth={3} /> : <Minus className="h-3 w-3" strokeWidth={3} />}
-                </span>
-                {r.text}
-              </li>
-            ))}
-          </ul>
-        )}
-        {!entry && <p className="mt-4 text-[13px] text-zinc-500">Для этого слайда нет записи в плане раскладки.</p>}
-      </section>
-
-      {alternatives.length > 0 && (
-        <section className="rounded-3xl bg-white p-6 shadow-card">
-          <h3 className="text-[17px] font-semibold text-zinc-900">{composed ? "Похожие образцы шаблона" : "Другие подходящие макеты"}</h3>
-          <p className="mt-0.5 text-[13px] text-zinc-500">{composed ? "Их стиль тоже учтён: заголовки, карточки, цвета" : "Их тоже рассматривали для этого слайда"}</p>
-          <div className="mt-4 grid grid-cols-3 gap-4">
-            {alternatives.map(({ p, score }) => (
-              <figure key={p.id} className="min-w-0">
-                <div className="overflow-hidden rounded-xl bg-zinc-100 shadow-inner-line" style={{ aspectRatio: String(aspect) }}>
-                  {p.thumbnail_url && <img src={p.thumbnail_url} alt="" loading="lazy" draggable={false} className="h-full w-full object-cover" />}
-                </div>
-                <figcaption className="mt-1.5 flex items-baseline justify-between gap-2 text-xs">
-                  <span className="truncate text-zinc-600">Слайд {p.source_slide} · {kindLabel(p.kind)}</span>
-                  <span className="shrink-0 font-semibold tabular-nums text-zinc-900">{Math.round(score * 100)}/100</span>
-                </figcaption>
-              </figure>
-            ))}
-          </div>
+          )}
+          {reasons.length > 0 && (
+            <ul className="mt-6 max-w-[680px] space-y-2">
+              {reasons.map((r) => (
+                <li key={r.text} className="flex items-start gap-3 text-footnote text-zinc-700">
+                  {r.good ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" aria-hidden /> : <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" aria-hidden />}
+                  {r.text}
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
-      )}
 
-      <section className="overflow-hidden rounded-3xl bg-white shadow-card">
-        <h3 className="px-6 pb-2 pt-5 text-[17px] font-semibold text-zinc-900">Проверка качества этого слайда</h3>
-        {!v.audit ? (
-          <p className="px-6 pb-5 text-[13px] text-zinc-500">Проверка для этого варианта не запускалась.</p>
-        ) : issues.length === 0 ? (
-          <p className="flex items-center gap-2 px-6 pb-5 text-[14px] text-emerald-700">
-            <Check className="h-4 w-4" strokeWidth={3} aria-hidden /> Замечаний нет
-          </p>
-        ) : (
-          <ul className="divide-y divide-zinc-100 pb-1">{issues.map((i) => <IssueLine key={i.id} issue={i} />)}</ul>
+        {alternatives.length > 0 && (
+          <section className={CARD}>
+            <h3 className="text-title3 font-semibold text-zinc-900">Другие подходящие макеты</h3>
+            <div className={cn("mt-4 grid gap-4", COLS[alternatives.length - 1])}>
+              {alternatives.map(({ p, score }) => (
+                <figure key={p.id} className="min-w-0">
+                  <div className="overflow-hidden rounded-xl bg-zinc-100 ring-1 ring-zinc-900/[0.08]" style={{ aspectRatio: String(aspect) }}>
+                    {p.thumbnail_url && <img src={p.thumbnail_url} alt="" loading="lazy" draggable={false} className="h-full w-full object-cover" />}
+                  </div>
+                  <figcaption className="mt-2 flex items-baseline justify-between gap-2 text-caption text-zinc-500">
+                    <span className="truncate" title={`Слайд ${p.source_slide} шаблона · ${kindLabel(p.kind)}`}>
+                      Слайд {p.source_slide} · {kindLabel(p.kind)}
+                    </span>
+                    <span className="shrink-0 tabular-nums">сходство {Math.round(score * 100)}%</span>
+                  </figcaption>
+                </figure>
+              ))}
+            </div>
+          </section>
         )}
-      </section>
 
-      {entry && <Trace entry={entry} />}
+        {!v.audit ? (
+          <div className="flex h-12 items-center gap-3 rounded-2xl bg-white px-6 text-body text-zinc-500 shadow-card">Проверка слайда не запускалась</div>
+        ) : worst === null ? (
+          <div className="flex h-12 items-center gap-3 rounded-2xl bg-white px-6 text-body text-zinc-900 shadow-card">
+            <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" aria-hidden />
+            <span>
+              Проверка слайда <span className="text-zinc-500">· замечаний нет</span>
+            </span>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setDetail("quality")}
+            className="flex h-12 w-full cursor-pointer items-center gap-3 rounded-2xl bg-white px-6 text-left text-body text-zinc-900 shadow-card transition-colors duration-150 hover:bg-zinc-50"
+          >
+            <AlertTriangle className={cn("h-4 w-4 shrink-0", worst === "error" ? "text-red-500" : "text-amber-500")} aria-hidden />
+            <span>
+              Проверка слайда <span className={worst === "error" ? "text-red-600" : "text-amber-700"}>· {plural(issues.length, "замечание", "замечания", "замечаний")}</span>
+            </span>
+            <ChevronRight className="ml-auto h-4 w-4 shrink-0 text-zinc-400" aria-hidden />
+          </button>
+        )}
+      </div>
     </div>
   );
 }

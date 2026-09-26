@@ -93,10 +93,11 @@ TAKEAWAY_FIX = "\x00takeaway:"  # a critic's note the agent acts on itself (the 
 BREAKER_STREAK = 3  # this many model failures in a row (or a whole first wave): the model is not answering
 SKILLS = ("slide_designer", "deck_architect", "design_critic")
 
+# the forms in the timeline's words, as the interface's tabs name them («Ряд чисел», «Хронология», «Большое число»)
 _KIND_RU = {
     "title": "обложка", "section": "разделитель", "agenda": "повестка", "bullets": "список", "cards": "карточки",
-    "two_column": "две колонки", "comparison": "сравнение", "process": "шаги", "timeline": "таймлайн",
-    "big_number": "большая цифра", "stat_row": "ряд показателей", "table": "таблица", "chart": "диаграмма",
+    "two_column": "две колонки", "comparison": "сравнение", "process": "процесс", "timeline": "хронология",
+    "big_number": "большое число", "stat_row": "ряд чисел", "table": "таблица", "chart": "диаграмма",
     "quote": "цитата", "thanks": "финальный слайд", "image_text": "картинка и текст", "team": "команда",
 }
 _CHART_RU = {
@@ -2965,11 +2966,14 @@ def form_ru(s: OutlineSlide) -> str:
     if k == "chart" and c.chart is not None:
         text = f"{_CHART_RU.get(c.chart.type, 'диаграмма')} ({ru_count(len(c.chart.categories), 'категория', 'категории', 'категорий')})"
         if c.chart2 is not None:
-            text = f"две диаграммы: {_CHART_RU.get(c.chart.type, 'диаграмма')} и {_CHART_RU.get(c.chart2.type, 'диаграмма')}"
+            a, b = _CHART_RU.get(c.chart.type, "диаграмма"), _CHART_RU.get(c.chart2.type, "диаграмма")
+            # «две столбчатые диаграммы», «два линейных графика»; two different charts are named one by one
+            two = {"линейный график": "два линейных графика", "диаграмма с областями": "две диаграммы с областями", "диаграмма": "две диаграммы"}
+            text = (two.get(a) or "две " + a.replace("ая диаграмма", "ые диаграммы")) if a == b else f"{a} и {b}"
     elif k == "table" and c.table is not None:
         text = f"таблица {len(c.table.rows)}×{len(c.table.columns)}"
     elif k in ("stat_row",):
-        text = f"ряд показателей ({ru_count(len(c.numbers), 'число', 'числа', 'чисел')})"
+        text = f"ряд чисел ({ru_count(len(c.numbers), 'число', 'числа', 'чисел')})"
     elif k in ("cards", "process", "timeline"):
         text = f"{_KIND_RU[k]} ({len(c.items)})"
     elif k == "bullets":
@@ -3844,7 +3848,7 @@ def slide_gaps(d: _Design, ctx: Optional[_Ctx] = None) -> list[tuple[str, str]]:
         what = {"repeats the headline": "повторяет заголовок другими словами", "repeats the slide's block": "повторяет то, что уже есть на слайде", "states nothing": "ничего не утверждает"}[tk_why]
         out.append(("takeaway", f"Вывод «{H.strip_end(tk)}» {what} → Напиши вывод, который добавляет смысл: итог, условие или следствие из текста слайда."))
     elif not tk and ctx is not None and ctx.takeaway_rule:
-        out.append(("takeaway", "На слайде нет короткого вывода, а бриф просит вывод на каждом слайде → Добавь вывод (takeaway) до 12 слов: итог, условие или следствие из текста слайда, не повторяя заголовок."))
+        out.append(("takeaway", "На слайде нет короткого вывода, а бриф просит вывод на каждом слайде → Добавь вывод до 12 слов: итог, условие или следствие из текста слайда, не повторяя заголовок."))
     # a statement of the designer's that its source does not make («Рост начался с июня», «… — минимальная доля»)
     if d.by == "model":
         for line in _content_lines(d.slide):
@@ -4330,7 +4334,14 @@ def run_agent(
                         tracker.emit("critic", f"Критик: {ru_count(len(found_issues), 'замечание', 'замечания', 'замечаний')} — {where}.", variant=name)
                         for key, text in found_issues:
                             pos = pos_of.get(key)
-                            tracker.emit("critic", f"Критик: слайд {pos} — {text[:200]}" if pos else f"Критик: {text[:200]}", slide=pos, variant=name)
+                            # «problem → fix», each part cut at a word near its limit (the timeline shows them apart);
+                            # the fix gets room for a whole proposed headline and takeaway (a cut one says nothing)
+                            problem, _, fix = text.partition(" → ")
+                            said = " → ".join(
+                                part if len(part) <= limit else part[:limit].rsplit(" ", 1)[0].rstrip(" ,;:—–-") + "…"
+                                for part, limit in ((problem, 280), (fix, 400)) if part
+                            )
+                            tracker.emit("critic", f"Критик: слайд {pos} — {said}" if pos else f"Критик: {said}", slide=pos, variant=name)
                     else:
                         tracker.emit("critic", "Критик: замечаний нет.", variant=name)
     elif critic and agent.models and (agent.broken or model_made == 0):

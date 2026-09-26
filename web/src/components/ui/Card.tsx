@@ -4,18 +4,18 @@ import { cn } from "../../lib/utils";
 export interface CardProps extends HTMLAttributes<HTMLDivElement> {
   /** Hover affordance for clickable cards. */
   interactive?: boolean;
-  /** Accent outline for the selected card in a set. */
+  /** 2px VK-blue outline for the selected card in a set. */
   selected?: boolean;
 }
 
-// VK surfaces: white on the grey canvas, 16px radius, a hairline instead of a border.
+// VK surfaces: white on the grey canvas, 16px radius, a hairline shadow instead of a border.
 export function Card({ interactive = false, selected = false, className, ...rest }: CardProps) {
   return (
     <div
       className={cn(
         "rounded-2xl bg-white",
-        selected ? "shadow-[0_0_0_2px_#0077FF]" : "shadow-card",
-        interactive && "cursor-pointer transition-shadow duration-200 hover:shadow-raise",
+        selected ? "shadow-selected" : "shadow-card",
+        interactive && "cursor-pointer transition-shadow duration-150 hover:shadow-raise",
         className,
       )}
       {...rest}
@@ -30,7 +30,7 @@ export interface CardHeaderProps extends HTMLAttributes<HTMLDivElement> {
 
 export function CardHeader({ actions, className, children, ...rest }: CardHeaderProps) {
   return (
-    <div className={cn("flex min-h-[60px] items-center justify-between gap-3 px-6 pb-2 pt-5", className)} {...rest}>
+    <div className={cn("flex min-h-16 items-center gap-3 px-6 pb-2 pt-6", className)} {...rest}>
       <div className="min-w-0 flex-1">{children}</div>
       {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
     </div>
@@ -38,27 +38,36 @@ export function CardHeader({ actions, className, children, ...rest }: CardHeader
 }
 
 export interface CardTitleProps extends HTMLAttributes<HTMLHeadingElement> {
-  /** Secondary line under the title. */
+  /** @deprecated Cards carry no subtitle sentences: pass a short fact only (a count, «70 чисел сверены с текстом»). */
   hint?: ReactNode;
+  /** A number after the title, lighter: «Макеты 37». */
+  count?: ReactNode;
 }
 
-// No icon tiles next to titles: the heading and one plain line of context carry the section.
-export function CardTitle({ hint, className, children, ...rest }: CardTitleProps) {
+// The heading alone carries the section: no icon tiles, no subtitle.
+export function CardTitle({ hint, count, className, children, ...rest }: CardTitleProps) {
+  const hasCount = count !== undefined && count !== null && count !== "";
+  const title = (
+    <h3 className={cn("truncate text-title3 font-semibold text-zinc-900", className)} {...rest}>
+      {children}
+      {hasCount && <span className="ml-2 text-footnote font-normal tabular-nums text-zinc-500">{count}</span>}
+    </h3>
+  );
+  if (!hint) return title;
   return (
     <div className="min-w-0">
-      <h3 className={cn("truncate text-[17px] font-semibold leading-6 text-zinc-900", className)} {...rest}>
-        {children}
-      </h3>
-      {hint && <p className="mt-0.5 text-[13px] leading-5 text-zinc-500">{hint}</p>}
+      {title}
+      <p className="mt-0.5 text-footnote text-zinc-500">{hint}</p>
     </div>
   );
 }
 
-// Default paddings step aside per axis when the caller sets its own (no tailwind-merge: two paddings would fight).
-const PAD_X = /(^|\s)p[xlr]?-/;
-const PAD_Y = /(^|\s)p[ytb]?-/;
+// Default paddings step aside per side when the caller sets its own (no tailwind-merge: two paddings would fight).
+const PAD_TOP = /(^|\s)(p|py|pt)-/;
+const PAD_BOTTOM = /(^|\s)(p|py|pb)-/;
+const PAD_X = /(^|\s)(p|px|pl|pr)-/;
 
 export function CardBody({ className, ...rest }: HTMLAttributes<HTMLDivElement>) {
   const c = className ?? "";
-  return <div className={cn(!PAD_X.test(c) && "px-6", !PAD_Y.test(c) && "pb-6 pt-3", className)} {...rest} />;
+  return <div className={cn(!PAD_X.test(c) && "px-6", !PAD_TOP.test(c) && "pt-2", !PAD_BOTTOM.test(c) && "pb-6", className)} {...rest} />;
 }

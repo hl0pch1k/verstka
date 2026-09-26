@@ -1,11 +1,12 @@
-// Building blocks of the «Новая презентация» form: field wrapper, switch, strategy option, constants.
-import { useId, type ReactNode } from "react";
+// Building blocks of the create form: the text field look, the switch, the strategy option and the constants.
+import { useId } from "react";
 import { Check } from "lucide-react";
+import { variantHint } from "../lib/plain";
 import { cn } from "../lib/utils";
 import type { StrategyInfo } from "../types";
 
 export const PURPOSES: Array<{ value: string; label: string }> = [
-  { value: "feature", label: "Фича" },
+  { value: "feature", label: "Функция" },
   { value: "product", label: "Продукт" },
   { value: "project", label: "Проект" },
   { value: "initiative", label: "Инициатива" },
@@ -43,19 +44,19 @@ export const SAMPLE_BRIEF = `Запуск функции «Умные сводк
 Просим одобрить бюджет 14,5 млн ₽ на второе полугодие и выделить 2 дополнительные GPU-ноды.`;
 
 export const INPUT_CLS =
-  "h-11 w-full rounded-xl border-0 bg-zinc-100 px-3.5 text-sm text-zinc-900 placeholder:text-zinc-500 transition-shadow hover:bg-zinc-200/60 focus:bg-white focus:shadow-[0_0_0_2px_#0077FF] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60";
+  "h-10 w-full rounded-xl bg-zinc-100 px-4 text-body text-zinc-900 placeholder:text-zinc-500 outline-none transition-[background-color,box-shadow] duration-150 focus:bg-white focus:shadow-selected disabled:cursor-not-allowed disabled:opacity-40";
 
-/** Switch with a label and a description. */
-export function Toggle({ label, hint, checked, disabled, onChange }: {
+/** A switch with a one-line label. `title` explains a disabled row on hover. */
+export function Toggle({ label, checked, disabled, title, onChange }: {
   label: string;
-  hint?: ReactNode;
   checked: boolean;
   disabled?: boolean;
+  title?: string;
   onChange(v: boolean): void;
 }) {
   const id = useId();
   return (
-    <div className={cn("flex items-start gap-3", disabled && "opacity-55")}>
+    <div className={cn("flex items-center gap-3", disabled && "opacity-40")} title={title}>
       <button
         id={id}
         type="button"
@@ -64,15 +65,14 @@ export function Toggle({ label, hint, checked, disabled, onChange }: {
         disabled={disabled}
         onClick={() => onChange(!checked)}
         className={cn(
-          "relative mt-0.5 h-6 w-10 shrink-0 cursor-pointer rounded-full transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/30 disabled:cursor-not-allowed",
+          "relative h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors duration-200 disabled:cursor-not-allowed",
           checked ? "bg-accent" : "bg-zinc-300",
         )}
       >
-        <span className={cn("absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-[left] duration-200", checked ? "left-[18px]" : "left-0.5")} aria-hidden />
+        <span className={cn("absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-knob transition-transform duration-200", checked && "translate-x-4")} aria-hidden />
       </button>
-      <label htmlFor={id} className={cn("min-w-0 select-none", disabled ? "cursor-not-allowed" : "cursor-pointer")}>
-        <span className="block text-[13px] font-semibold leading-5 text-zinc-900">{label}</span>
-        {hint && <span className="block text-xs leading-4 text-zinc-500">{hint}</span>}
+      <label htmlFor={id} className={cn("min-w-0 select-none whitespace-nowrap text-footnote font-semibold text-zinc-900", disabled ? "cursor-not-allowed" : "cursor-pointer")}>
+        {label}
       </label>
     </div>
   );
@@ -82,16 +82,17 @@ export function Toggle({ label, hint, checked, disabled, onChange }: {
 function StrategyArt({ name, active }: { name: string; active: boolean }) {
   const a = active ? "#0077FF" : "#99A2AD";
   const l = active ? "#ADD3FF" : "#E1E3E6";
-  const d = active ? "#19191A" : "#6D7885";
+  const d = active ? "#19191A" : "#626D7A";
   return (
     <svg viewBox="0 0 160 90" className="h-full w-full" aria-hidden>
-      <rect width="160" height="90" rx="8" fill="white" />
+      <rect width="160" height="90" fill="white" />
       {name === "visual" ? (
         <>
           <rect x="12" y="12" width="70" height="7" rx="3.5" fill={d} />
-          <text x="12" y="58" fontSize="30" fontWeight="800" fill={a} fontFamily="Onest, sans-serif">+34%</text>
+          <text x="12" y="58" fontSize="30" fontWeight="700" fill={a} fontFamily="Onest, sans-serif">+34%</text>
           <rect x="12" y="66" width="52" height="4" rx="2" fill={l} />
-          {[0, 1, 2, 3].map((i) => <rect key={i} x={98 + i * 14} y={70 - (i + 1) * 12} width="9" height={(i + 1) * 12} rx="2" fill={i === 3 ? a : l} />)}
+          {/* the tallest bar tops out at y 30: clear of the selection badge in the corner at any card width */}
+          {[0, 1, 2, 3].map((i) => <rect key={i} x={98 + i * 14} y={70 - (i + 1) * 10} width="9" height={(i + 1) * 10} rx="2" fill={i === 3 ? a : l} />)}
         </>
       ) : name === "compact" ? (
         <>
@@ -120,37 +121,42 @@ function StrategyArt({ name, active }: { name: string; active: boolean }) {
   );
 }
 
-/** Selectable strategy card: illustration, title and description. */
+/** A selectable strategy card: the drawing, the name and one line of what it does (the full text on hover). */
 export function StrategyOption({ strategy, checked, disabled, onChange }: {
   strategy: StrategyInfo;
   checked: boolean;
   disabled?: boolean;
   onChange(v: boolean): void;
 }) {
+  const hint = variantHint(strategy.name, strategy.description);
   return (
     <label
       className={cn(
-        "group relative flex cursor-pointer flex-col gap-3 rounded-2xl p-3 transition-all duration-200",
-        checked ? "bg-accent-50 shadow-[0_0_0_2px_#0077FF]" : "bg-zinc-100 hover:bg-zinc-200/60",
-        disabled && "cursor-not-allowed opacity-60",
+        // relative: the sr-only checkbox stays inside the card (an absolute box without a positioned parent would
+        // stretch the document past the scrolling main)
+        "relative flex cursor-pointer flex-col gap-3 rounded-xl bg-white p-4 transition-shadow duration-150",
+        "has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent",
+        checked ? "shadow-selected" : "shadow-card hover:shadow-raise",
+        disabled && "cursor-not-allowed opacity-40",
       )}
     >
       <input type="checkbox" className="sr-only" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
-      <span className="block aspect-video overflow-hidden rounded-xl shadow-card">
+      {/* the hairline is drawn over the drawing (a white slide on a white card keeps its edge on all four sides) */}
+      <span className="relative block aspect-video overflow-hidden rounded-lg after:pointer-events-none after:absolute after:inset-0 after:rounded-lg after:shadow-inner-line after:content-['']">
         <StrategyArt name={strategy.name} active={checked} />
+        <span
+          className={cn(
+            "absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full transition-colors duration-150",
+            checked ? "bg-accent-fill text-white" : "bg-white text-transparent shadow-inner-line",
+          )}
+          aria-hidden
+        >
+          <Check className="h-3.5 w-3.5" strokeWidth={2.5} />
+        </span>
       </span>
-      <span
-        className={cn(
-          "absolute right-5 top-5 flex h-6 w-6 items-center justify-center rounded-full transition-colors",
-          checked ? "bg-accent text-white" : "bg-white text-transparent shadow-inner-line",
-        )}
-        aria-hidden
-      >
-        <Check className="h-3.5 w-3.5" strokeWidth={3} />
-      </span>
-      <span className="px-1 pb-1">
-        <span className="block text-[15px] font-semibold leading-5 text-zinc-900">{strategy.title}</span>
-        <span className="mt-1 block text-xs leading-[18px] text-zinc-600">{strategy.description}</span>
+      <span className="min-w-0">
+        <span className="block text-body font-semibold text-zinc-900">{strategy.title}</span>
+        <span className="mt-0.5 block truncate text-caption text-zinc-500" title={strategy.description || hint}>{hint}</span>
       </span>
     </label>
   );

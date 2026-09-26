@@ -50,6 +50,12 @@ export function isFixable(issue: Issue): boolean {
   return !!issue.autofix && issue.autofix.action !== "none";
 }
 
+/** A minor note of the rules (grid alignment and the like): it does not lower the score and stays folded. The model's
+ *  remarks on the slide picture are never minor. */
+export function isMinor(issue: Issue): boolean {
+  return issue.severity === "info" && issue.kind !== "model";
+}
+
 export interface SlideGroup {
   slide: number; // 0 = deck level
   issues: Issue[];

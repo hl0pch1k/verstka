@@ -20,8 +20,16 @@ body {
   background: rgba(0, 119, 255, 0.18);
 }
 
-/* VK-style focus: a clear blue ring on keyboard focus only */
+/* keyboard focus: one visible 2px VK-blue outline everywhere; text fields draw their own ring */
 :focus-visible {
+  outline: 2px solid #0077FF;
+  outline-offset: 2px;
+}
+input:focus-visible, textarea:focus-visible, select:focus-visible {
+  outline: none;
+}
+/* a container focused by script (a dialog panel, tabIndex -1) draws no ring around itself */
+[tabindex="-1"]:focus-visible {
   outline: none;
 }
 
@@ -42,18 +50,6 @@ h1, h2, h3 {
   background-size: 200% 100%;
   animation: shimmer 1.6s linear infinite;
 }
-
-/* the layout grid motif: dots on an 8px rhythm, used on hero and drop surfaces */
-.dot-grid {
-  background-image: radial-gradient(rgba(0, 16, 61, 0.09) 1px, transparent 1px);
-  background-size: 16px 16px;
-}
-.dot-grid-dark {
-  background-image: radial-gradient(rgba(255, 255, 255, 0.07) 1px, transparent 1px);
-  background-size: 16px 16px;
-}
-
-.prose-narration p + p { margin-top: 0.5rem; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

@@ -1,5 +1,5 @@
 // Side effects of the agent's replies: tracks the jobs the agent has started and narrates their results back into the chat.
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useSyncExternalStore } from "react";
 import { api } from "../api";
 import { describeGeneration, errText, firstLine } from "../lib/narrate";
 import { plural } from "../lib/utils";
@@ -8,6 +8,26 @@ import type { ChatResponse, EditResult, FixResult, Generation, TabKey } from "..
 
 const TABS: readonly TabKey[] = ["template", "brief", "plan", "variants", "why", "audit", "export", "run", "agent"];
 const asTab = (name: string): TabKey | null => TABS.find((t) => t === name) ?? null;
+
+// «Верни как было» is offered right after an edit changed the deck, until the person writes something else
+let edited = false;
+const editListeners = new Set<() => void>();
+function setEdited(v: boolean) {
+  if (edited === v) return;
+  edited = v;
+  editListeners.forEach((l) => l());
+}
+export const clearEdited = () => setEdited(false);
+export function useJustEdited(): boolean {
+  return useSyncExternalStore(
+    (l) => {
+      editListeners.add(l);
+      return () => void editListeners.delete(l);
+    },
+    () => edited,
+    () => edited,
+  );
+}
 
 interface FixOutcome { strategy: string; before: number | null; done: boolean; result: FixResult | null; error: string | null }
 
@@ -35,14 +55,16 @@ function describeFixes(list: FixOutcome[], title: (name: string) => string): str
     okCount === list.length ? `Исправления готовы: ${list.length === 1 ? "вариант обновлён" : `${plural(list.length, "вариант", "варианта", "вариантов")} обновлены`}.`
     : okCount > 0 ? `Исправлено ${okCount} из ${list.length} вариантов.`
     : "Исправить автоматически не получилось.";
-  const tail = okCount > 0 ? "Слайды и файлы пересобраны, оставшиеся замечания — в «Проверке качества»." : "Попробуйте исправить замечания по одному в «Проверке качества».";
+  const tail = okCount > 0 ? "Слайды и файлы пересобраны, оставшиеся замечания — в разделе «Качество»." : "Попробуйте исправить замечания по одному в разделе «Качество».";
   return [head, ...rows, tail].join("\n");
 }
 
 function trackGeneration(app: () => AppState, jobId: string, gid: string) {
   app().setTab("variants"); // the result screen shows the build while the job runs
+  app().setAgentOpen(false); // the build screen needs the whole width; the helper steps aside
   app().runJob(jobId, "Собираю презентацию", {
     kind: "generate",
+    template: app().templateId, // the chat builds from the template on screen
     onDone: async () => {
       let g: Generation;
       try {
@@ -55,7 +77,7 @@ function trackGeneration(app: () => AppState, jobId: string, gid: string) {
       await app().loadGeneration(gid);
       app().setTab("variants");
       app().pushMessage("assistant", describeGeneration(g, app().strategyTitle));
-      app().toast("success", "Презентация готова");
+      if (app().screen !== "result") app().toast("success", "Презентация готова");
     },
     onFailed: (job) => {
       app().pushMessage("assistant", `Не получилось собрать презентацию: ${firstLine(job.error ?? job.message)}. Попробуйте ещё раз или уточните текст.`);
@@ -112,6 +134,7 @@ function trackEdit(app: () => AppState, jobId: string, gid: string, strategy: st
     onDone: async (job) => {
       const res = asEditResult(job.result);
       if (res?.changed) {
+        setEdited(res.kind !== "undo"); // after «верни как было» the chip does not offer itself again
         await app().refreshGenerations();
         await app().loadGeneration(gid);
         if (app().activeStrategy !== strategy) app().setActiveStrategy(strategy);

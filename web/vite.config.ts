@@ -9,7 +9,8 @@ export default defineConfig({
     strictPort: true,
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:8000",
+        // VERSTKA_API: another backend (a second `verstka serve` on its own port while the first one keeps running)
+        target: process.env.VERSTKA_API || "http://127.0.0.1:8000",
         changeOrigin: true,
         // SSE streams must not be buffered by the proxy
         configure: (proxy) => {

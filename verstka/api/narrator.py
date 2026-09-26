@@ -6,17 +6,19 @@ from __future__ import annotations
 from collections import Counter
 from typing import Optional
 
+from verstka.api.agent_view import clip_text, plain_terms
 from verstka.ru import TYPE_ROLE_RU, ru_count, ru_num
 from verstka.schemas.audit import AuditReport
 from verstka.schemas.layout import LayoutPlan
 from verstka.schemas.outline import DeckOutline
 from verstka.schemas.template import TemplateManifest
 
+# the slide kinds as the interface names them (web KIND_LABEL, lower case): the chat and the tabs say the same words
 _KIND_RU = {
-    "title": "титульный", "section": "разделитель", "agenda": "повестка", "bullets": "список", "cards": "карточки", "two_column": "две колонки",
-    "big_number": "большая цифра", "stat_row": "ряд показателей", "comparison": "сравнение", "timeline": "таймлайн", "process": "шаги",
+    "title": "титул", "section": "раздел", "agenda": "повестка", "bullets": "список", "cards": "карточки", "two_column": "две колонки",
+    "big_number": "большое число", "stat_row": "ряд чисел", "comparison": "сравнение", "timeline": "хронология", "process": "процесс",
     "table": "таблица", "chart": "диаграмма", "image_text": "картинка и текст", "team": "команда", "quote": "цитата", "code": "код",
-    "mockup": "мокап", "thanks": "финальный", "freeform": "свободный",
+    "mockup": "макет экрана", "thanks": "финал", "freeform": "другое",
 }
 
 
@@ -51,8 +53,8 @@ def describe_template(m: TemplateManifest) -> str:
         if rules:
             lines.append("Правила дизайнера из шаблона: " + " ".join(f"«{r}»" for r in rules))
     if m.warnings:
-        lines.append(f"Не удалось разобрать: {ru_count(len(m.warnings), 'место', 'места', 'мест')} — подробности в «Что Verstka поняла из шаблона».")
-    return "\n".join(lines)
+        lines.append(f"Не удалось разобрать: {ru_count(len(m.warnings), 'место', 'места', 'мест')} — подробности в «Разборе шаблона».")
+    return plain_terms("\n".join(lines))
 
 
 def _match(score: float) -> str:
@@ -76,8 +78,8 @@ def describe_plan(outline: DeckOutline, plan: LayoutPlan, manifest: TemplateMani
         if ps is None:
             continue
         how = f"по образцу слайда {patterns[ps.pattern_id].source_slide}" if ps.mode == "clone" and ps.pattern_id in patterns else _composed(ps, patterns)
-        lines.append(f"{i}. {kind_ru(osl.kind.value).capitalize()}: «{osl.headline[:60]}» — {how}")
-    return "\n".join(lines)
+        lines.append(f"{i}. {kind_ru(osl.kind.value).capitalize()}: «{clip_text(osl.headline, 60)}» — {how}")
+    return plain_terms("\n".join(lines))
 
 
 def describe_slide_choice(outline: DeckOutline, plan: LayoutPlan, manifest: TemplateManifest, index: int, design_note: Optional[str] = None) -> str:
@@ -97,7 +99,7 @@ def describe_slide_choice(outline: DeckOutline, plan: LayoutPlan, manifest: Temp
             layout = f"по образцу слайда {patterns[ps.pattern_id].source_slide} шаблона, {_match(ps.score)}."
         else:
             layout = "по дизайн-системе шаблона — его сетка, шрифты и цвета, размеры блоков под этот текст."
-        return f"{head}\n{design_note}\nВёрстка: {layout}"
+        return plain_terms(f"{head}\n{design_note}\nВёрстка: {layout}")
     if ps is None:
         return f"Для слайда {index} нет записи в плане."
     if ps.mode == "clone" and ps.pattern_id in patterns:
@@ -111,7 +113,7 @@ def describe_slide_choice(outline: DeckOutline, plan: LayoutPlan, manifest: Temp
         body = "Свёрстан по дизайн-системе шаблона: его сетка, шкала шрифтов, цвета и карточки, а размеры блоков рассчитаны под этот текст."
         if near is not None:
             body += f" Ближайший образец в шаблоне — слайд {near.source_slide} ({kind_ru(near.kind.value)}), {_match(ps.score)}; его геометрия под этот текст не подошла бы без пустот и мелкого шрифта."
-    return f"{head} {body} Подробнее — в панели «Почему слайд такой»."
+    return plain_terms(f"{head} {body}")  # the chat opens the «why» tab itself: no pointer to it
 
 
 def _composed(ps, patterns) -> str:
@@ -167,5 +169,5 @@ def describe_audit(report: AuditReport, check_titles: Optional[dict[str, str]] =
         )
     fixable = [i for i in report.issues if i.autofix and i.autofix.action != "none"]
     if fixable:
-        lines.append(f"Ещё {len(fixable)} можно исправить автоматически: скажите «исправь всё» или нажмите «Исправить всё автоматически» в «Проверке качества».")
-    return "\n".join(lines)
+        lines.append(f"Ещё {len(fixable)} можно исправить автоматически: скажите «исправь всё» или нажмите «Исправить всё автоматически» во вкладке «Качество».")
+    return plain_terms("\n".join(lines))

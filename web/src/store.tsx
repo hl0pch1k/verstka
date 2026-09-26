@@ -16,9 +16,11 @@ export interface ActiveJob {
   id: string; label: string; progress: number; message: string; status: JobStatus; kind: JobKind; startedAt: number; items?: string[]; variants?: Record<string, VariantProgress>;
   /** The planning agent's steps so far (Agent v2) and the latest phase of the timeline the job has reached. */
   agent?: AgentEvent[]; phase?: PhaseKey | null;
+  /** The template a generation is built from (the build screen names it under its title). */
+  template?: string | null;
 }
 /** `items`: what the job works on (the strategies of a generation) — the build screen shows one card per item. */
-export interface RunJobOptions { kind?: JobKind; items?: string[]; onDone?: (job: Job) => void; onFailed?: (job: Job) => void }
+export interface RunJobOptions { kind?: JobKind; items?: string[]; template?: string | null; onDone?: (job: Job) => void; onFailed?: (job: Job) => void }
 
 export interface AppState {
   health: Health | null; healthError: boolean;
@@ -94,8 +96,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
 
   // Latest values for callbacks that must stay referentially stable.
-  const latest = useRef({ templateId, templates, manifest, generationId, generation, activeStrategy, strategies });
-  latest.current = { templateId, templates, manifest, generationId, generation, activeStrategy, strategies };
+  const latest = useRef({ templateId, templates, manifest, generationId, generation, activeStrategy, strategies, screen, agentOpen });
+  latest.current = { templateId, templates, manifest, generationId, generation, activeStrategy, strategies, screen, agentOpen };
   const genSeq = useRef(0);
   const jobSubs = useRef(new Map<string, () => void>());
 
@@ -214,7 +216,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       patch(p);
       window.setTimeout(() => setActiveJob((cur) => (cur && cur.id === jobId ? null : cur)), 1500);
     };
-    setActiveJob({ id: jobId, label, progress: 0, message: "В очереди…", status: "queued", kind: opts?.kind ?? "other", startedAt: Date.now(), items: opts?.items });
+    setActiveJob({ id: jobId, label, progress: 0, message: "В очереди…", status: "queued", kind: opts?.kind ?? "other", startedAt: Date.now(), items: opts?.items, template: opts?.template });
     const stop = trackJob(jobId, {
       onEvent: (ev) => {
         if (ev.status === "done" || ev.status === "failed") return; // settled below, once the full job record is fetched
@@ -246,7 +248,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       onFailed: (job) => {
         const reason = firstLine(job.error ?? job.message);
         settle({ status: "failed", message: reason });
-        pushToast("error", `${label}: ${reason}`);
+        // one notice per failure: with the helper open, its own message tells the story
+        if (!opts?.onFailed || !latest.current.agentOpen) pushToast("error", `Не получилось: ${reason}`);
         opts?.onFailed?.(job);
       },
     });
@@ -265,7 +268,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const startGeneration = useCallback(
     (req: GenerateRequest) =>
-      generationFlow(req, { runJob, report, pushMessage, setTab, refreshGenerations, fetchGeneration, refreshModelStatus, titleOf: (name) => titleIn(latest.current.strategies, name) }),
+      generationFlow(req, { runJob, report, pushMessage, setTab, refreshGenerations, fetchGeneration, refreshModelStatus, titleOf: (name) => titleIn(latest.current.strategies, name), setAgentOpen, currentScreen: () => latest.current.screen }),
     [runJob, report, pushMessage, refreshGenerations, fetchGeneration, refreshModelStatus],
   );
 

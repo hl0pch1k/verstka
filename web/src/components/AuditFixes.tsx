@@ -6,8 +6,10 @@ import { errText } from "../lib/narrate";
 import { cn, plural, SEVERITY_LABEL } from "../lib/utils";
 import type { CheckSpec } from "../types";
 import { ACTION_DONE, categoryLabel, normalizeFix, SEVERITY_RANK, type FixRecord } from "./AuditHelpers";
+import { SlideTag } from "./AuditIssues";
 import { Button } from "./ui/Button";
 import { Collapsible } from "./ui/Collapsible";
+import { Notice } from "./ui/Notice";
 import { Spinner } from "./ui/Spinner";
 
 /** «rematch → p9» → «слайд 9 шаблона»; anything else is shown as is. */
@@ -34,30 +36,47 @@ export function describeFix(r: FixRecord, slideOf: (outlineId: string) => number
   };
 }
 
-export function AppliedFixes({ fixes, slideOf, templateSlide }: {
+export function AppliedFixes({ fixes, slideOf, templateSlide, onShow }: {
   fixes: Record<string, unknown>[];
   /** outline id (sl3) → 1-based slide number */
   slideOf(outlineId: string): number | null;
   /** pattern id (p9) → slide number of the template */
   templateSlide(patternId: string): number | null;
+  /** Opens the slide on the result screen (the slide tag is a button then). */
+  onShow?(slide: number): void;
 }) {
-  const rows = useMemo(() => fixes.map(normalizeFix), [fixes]);
+  // the same fix repeated by the passes of the check is one row with its count (×2)
+  const rows = useMemo(() => {
+    const out: Array<{ slide: number | null; title: string; extra: string | null; n: number }> = [];
+    const seen = new Map<string, (typeof out)[number]>();
+    for (const r of fixes.map(normalizeFix)) {
+      const d = describeFix(r, slideOf, templateSlide);
+      const key = `${d.slide ?? ""}|${d.title}|${d.extra ?? ""}`;
+      const had = seen.get(key);
+      if (had) had.n += 1;
+      else {
+        const row = { ...d, n: 1 };
+        seen.set(key, row);
+        out.push(row);
+      }
+    }
+    return out;
+  }, [fixes, slideOf, templateSlide]);
   if (rows.length === 0) return null;
   return (
-    <Collapsible title="Что уже исправлено автоматически" hint={plural(rows.length, "правка", "правки", "правок")} defaultOpen={false} keepMounted={false} bodyClassName="px-0 pb-2 pt-0">
-      <ol className="divide-y divide-zinc-100">
-        {rows.map((r, idx) => {
-          const { slide: n, title, extra } = describeFix(r, slideOf, templateSlide);
-          return (
-            <li key={idx} className="flex items-baseline gap-3 px-6 py-2.5 text-[13px]">
-              <span className="w-16 shrink-0 text-zinc-500">{n ? `Слайд ${n}` : "Все слайды"}</span>
-              <span className="min-w-0 text-zinc-900">
-                {title}
-                {extra && <span className="text-zinc-500"> — {extra}</span>}
-              </span>
-            </li>
-          );
-        })}
+    <Collapsible title="Исправлено автоматически" hint={plural(fixes.length, "правка", "правки", "правок")} defaultOpen={false} keepMounted={false}>
+      {/* full-bleed rows in the card's 24px body; the last row's padding is part of the card's bottom */}
+      <ol className="-mx-6 -mb-3 divide-y divide-zinc-100">
+        {rows.map((r, idx) => (
+          <li key={idx} className="flex items-start gap-3 px-6 py-3 text-footnote">
+            <SlideTag slide={r.slide} onShow={onShow} />
+            <span className="min-w-0 max-w-[680px] flex-1 text-zinc-900">
+              {r.title}
+              {r.extra && <span className="text-zinc-500">: {r.extra}</span>}
+              {r.n > 1 && <span className="tabular-nums text-zinc-500"> ×{r.n}</span>}
+            </span>
+          </li>
+        ))}
       </ol>
     </Collapsible>
   );
@@ -68,7 +87,7 @@ type LoadState = { status: "idle" | "loading" | "error" | "ready"; checks: Check
 /** The check registry is static for a running server: fetched once per page load. */
 let checksCache: CheckSpec[] | null = null;
 
-export function ChecksReference() {
+export function ChecksReference({ total }: { total?: number }) {
   const [open, setOpen] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [state, setState] = useState<LoadState>(() => (checksCache ? { status: "ready", checks: checksCache, error: null } : { status: "idle", checks: [], error: null }));
@@ -96,27 +115,32 @@ export function ChecksReference() {
   }, [state.checks]);
 
   return (
-    <Collapsible title="Какие проверки выполняются" hint="правила шаблона, читаемость, целостность файла" open={open} onOpenChange={setOpen} keepMounted={false} bodyClassName="px-0 pb-3 pt-0">
+    <Collapsible
+      title="Что проверяется"
+      hint={total ? plural(total, "проверка", "проверки", "проверок") : undefined}
+      open={open}
+      onOpenChange={setOpen}
+      keepMounted={false}
+    >
       {state.status === "loading" && <div className="flex justify-center py-6"><Spinner showLabel label="Загружаю список" /></div>}
       {state.status === "error" && (
-        <div className="flex items-center gap-3 px-6 py-4 text-[13px] text-red-700">
-          Не удалось загрузить список: {state.error}
-          <Button size="sm" icon={RefreshCw} onClick={() => setAttempt((n) => n + 1)}>Повторить</Button>
-        </div>
+        <Notice tone="danger" title="Список проверок не загрузился" action={<Button variant="white" size="sm" icon={RefreshCw} onClick={() => setAttempt((n) => n + 1)}>Повторить</Button>}>
+          {state.error}
+        </Notice>
       )}
       {state.status === "ready" &&
         groups.map(({ category, list }) => (
-          <section key={category} className="px-6 pt-3">
-            <h4 className="mb-1 text-xs font-semibold uppercase tracking-wide text-zinc-400">{categoryLabel(category)}</h4>
+          <section key={category} className="pt-4 first:pt-0">
+            <h4 className="mb-1 text-footnote font-semibold text-zinc-900">{categoryLabel(category)}</h4>
             <ul>
               {list.map((c) => (
-                <li key={c.id} className="flex items-baseline gap-3 py-1.5" title={c.id}>
-                  <span className={cn("mt-1.5 h-1.5 w-1.5 shrink-0 self-start rounded-full", c.severity === "error" ? "bg-red-500" : c.severity === "warn" ? "bg-amber-400" : "bg-sky-400")} aria-hidden />
-                  <span className="min-w-0 flex-1 text-[13px] text-zinc-800">
+                <li key={c.id} className="flex items-center gap-3 py-1 text-footnote">
+                  <span className={cn("h-2 w-2 shrink-0 rounded-full", c.severity === "error" ? "bg-red-500" : c.severity === "warn" ? "bg-amber-500" : "bg-accent")} aria-hidden />
+                  <span className="min-w-0 flex-1 text-zinc-700">
                     {c.title}
-                    {c.kind === "model" && <span className="text-zinc-400"> · открытой моделью</span>}
+                    {c.kind === "model" && <span className="text-zinc-500"> · моделью</span>}
                   </span>
-                  <span className="shrink-0 text-xs text-zinc-400">{SEVERITY_LABEL[c.severity].toLowerCase()}</span>
+                  <span className="shrink-0 text-zinc-500">{SEVERITY_LABEL[c.severity].toLowerCase()}</span>
                 </li>
               ))}
             </ul>

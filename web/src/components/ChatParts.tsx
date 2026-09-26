@@ -1,104 +1,152 @@
-// Presentational pieces of the chat feed: message bubbles, the typing indicator and the inline job status.
-import { memo, useState } from "react";
-import { LogoMark } from "./shell/Logo";
-import { cn } from "../lib/utils";
+// Presentational pieces of the helper's feed: message bubbles, the typing indicator and the inline job status.
+import { memo, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { cn, fmtTime } from "../lib/utils";
 import type { ActiveJob } from "../store";
 import type { ChatMessage } from "../types";
 import { Progress } from "./ui/Progress";
 
-const COLLAPSE_AFTER = 640; // long briefs are folded so the feed stays readable
+const BUBBLE = "min-w-0 break-words rounded-2xl px-4 py-2 text-body leading-6 [text-wrap:pretty]";
 
-/** `ts` is unix seconds (see store.pushMessage). */
-function fmtTime(ts: number): string {
-  const d = new Date(ts * 1000);
-  return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+/** Russian typesetting for the assistant's prose: «900 000», «слайд 5», «6 категорий», «во вкладке», «из текста» and
+ *  «— вывод» never break across lines: a one- or two-letter word never ends a line. */
+function typeset(text: string): string {
+  return text
+    .replace(/(\d) (?=\d{3}(?!\d))/g, "$1 ")
+    .replace(/(слайд\S*) (\d)/gi, "$1 $2")
+    .replace(/(\d) (?=[а-яё%₽])/gi, "$1 ")
+    .replace(/(?<=^|[\s(«])(в|во|и|к|ко|с|со|на|не|но|по|о|об|у|за|из|от|до|а|я) /gi, "$1 ")
+    .replace(/ ([—–]) /g, " $1 ");
 }
 
-function AgentAvatar({ hidden = false }: { hidden?: boolean }) {
+/** The assistant's text as paragraphs: «• » lines hang, so a list reads as a list; a blank line is a gap. */
+function Paragraphs({ text }: { text: string }) {
+  const out: ReactNode[] = [];
+  let gap = false;
+  typeset(text)
+    .split("\n")
+    .forEach((raw, i) => {
+      const line = raw.trimEnd();
+      if (!line.trim()) return void (gap = out.length > 0);
+      const bullet = /^\s*[•·-]\s+/.exec(line);
+      out.push(
+        <p key={i} className={cn(bullet && "pl-4 -indent-4", gap && "mt-2")}>
+          {bullet ? (
+            <>
+              <span className="inline-block w-4 indent-0" aria-hidden>
+                •
+              </span>
+              {line.slice(bullet[0].length)}
+            </>
+          ) : (
+            line
+          )}
+        </p>,
+      );
+      gap = false;
+    });
+  return <>{out}</>;
+}
+
+/** An assistant bubble: grey, from the left edge of the feed. */
+export function AssistantBubble({ children, title, className }: { children: ReactNode; title?: string; className?: string }) {
   return (
-    <span
-      aria-hidden
-      className={cn("mt-0.5 shrink-0", hidden && "invisible")}
-    >
-      <LogoMark size={28} />
-    </span>
+    <div className={cn("flex animate-fade-in", className)}>
+      <div title={title} className={cn(BUBBLE, "max-w-[92%] rounded-tl-lg bg-zinc-100 text-zinc-900")}>
+        {typeof children === "string" ? <Paragraphs text={children} /> : children}
+      </div>
+    </div>
   );
 }
 
-export interface MessageBubbleProps {
-  message: ChatMessage;
-  /** First message in a run of the same author: shows the avatar and adds a larger gap above. */
-  first: boolean;
+/** Folds a long text by height: 6 lines for the person's own text, 10 for a reply; the toggle shows only when needed. */
+function useFold(text: string, expanded: boolean) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [foldable, setFoldable] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || expanded) return;
+    // re-measured on resize too: a reply that arrives while the helper is hidden measures 0 until it is shown
+    const measure = () => el.clientHeight > 0 && setFoldable(el.scrollHeight > el.clientHeight + 1);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [text, expanded]);
+  return { ref, foldable };
 }
 
-export const MessageBubble = memo(function MessageBubble({ message, first }: MessageBubbleProps) {
+export const MessageBubble = memo(function MessageBubble({ message }: { message: ChatMessage }) {
   const [expanded, setExpanded] = useState(false);
   const isUser = message.role === "user";
-  const foldable = isUser && message.text.length > COLLAPSE_AFTER;
-  const text = foldable && !expanded ? `${message.text.slice(0, COLLAPSE_AFTER).trimEnd()}…` : message.text;
-  const time = fmtTime(message.ts);
+  const { ref, foldable } = useFold(message.text, expanded);
+  const time = fmtTime(message.ts) || undefined; // `ts` is unix seconds (store.pushMessage)
+  const toggle = (foldable || expanded) && (
+    <button
+      type="button"
+      onClick={() => setExpanded((v) => !v)}
+      aria-expanded={expanded}
+      className={cn(
+        "mt-1 block cursor-pointer text-footnote font-semibold",
+        isUser
+          ? "text-white underline decoration-white/60 underline-offset-2 hover:decoration-white focus-visible:outline-white"
+          : "text-accent-700 hover:underline",
+      )}
+    >
+      {expanded ? "Свернуть" : "Показать полностью"}
+    </button>
+  );
 
-  if (isUser) {
+  if (!isUser)
     return (
-      <div className={cn("flex animate-fade-in flex-col items-end", first ? "mt-4" : "mt-1.5")}>
-        <div className="max-w-[86%] whitespace-pre-wrap break-words rounded-[18px] rounded-br-md bg-accent-100 px-3.5 py-2.5 text-[13px] leading-5 text-zinc-900">
-          {text}
-          {foldable && (
-            <button
-              type="button"
-              onClick={() => setExpanded((v) => !v)}
-              className="mt-1.5 block cursor-pointer text-xs font-semibold text-accent-700 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
-            >
-              {expanded ? "Свернуть" : `Показать полностью · ${message.text.length.toLocaleString("ru-RU")} зн.`}
-            </button>
-          )}
+      <div data-msg={message.id} className="flex animate-fade-in">
+        <div title={time} className={cn(BUBBLE, "max-w-[92%] rounded-tl-lg bg-zinc-100 text-zinc-900")}>
+          <div ref={ref} className={cn(!expanded && "line-clamp-[10]")}>
+            <Paragraphs text={message.text} />
+          </div>
+          {toggle}
         </div>
-        {time && <span className="mt-1 pr-1 text-[11px] tabular-nums text-zinc-400">{time}</span>}
       </div>
     );
-  }
-
   return (
-    <div className={cn("flex animate-fade-in items-start gap-2", first ? "mt-4" : "mt-1.5")}>
-      <AgentAvatar hidden={!first} />
-      <div className="flex min-w-0 max-w-[86%] flex-col items-start">
-        <div className="whitespace-pre-wrap break-words rounded-[18px] rounded-tl-md bg-zinc-100 px-3.5 py-2.5 text-[13px] leading-5 text-zinc-900">
-          {text}
+    <div data-msg={message.id} className="flex animate-fade-in justify-end">
+      <div title={time} className={cn(BUBBLE, "ml-auto max-w-[85%] rounded-br-lg bg-accent-fill text-white")}>
+        <div ref={ref} className={cn("whitespace-pre-wrap", !expanded && "line-clamp-6")}>
+          {message.text}
         </div>
-        {time && <span className="mt-1 pl-1 text-[11px] tabular-nums text-zinc-400">{time}</span>}
+        {toggle}
       </div>
     </div>
   );
 });
 
-/** Three bouncing dots in an assistant bubble — shown while /api/chat is in flight. */
-export function TypingIndicator({ first }: { first: boolean }) {
+/** Three dots in an assistant bubble while /api/chat is in flight. */
+export function TypingIndicator() {
   return (
-    <div role="status" aria-label="Агент печатает" className={cn("flex animate-fade-in items-start gap-2", first ? "mt-4" : "mt-1.5")}>
-      <AgentAvatar hidden={!first} />
-      <div className="flex h-10 items-center gap-1 rounded-[18px] rounded-tl-md bg-zinc-100 px-4">
+    <div role="status" aria-label="Помощник печатает" className="flex animate-fade-in">
+      <div className="flex h-10 items-center gap-1 rounded-2xl rounded-tl-lg bg-zinc-100 px-4">
         {[0, 1, 2].map((i) => (
-          <span key={i} className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-400" style={{ animationDelay: `${i * 140}ms`, animationDuration: "900ms" }} />
+          <span key={i} className="h-2 w-2 animate-bounce rounded-full bg-zinc-400" style={{ animationDelay: `${i * 140}ms`, animationDuration: "900ms" }} />
         ))}
       </div>
     </div>
   );
 }
 
-/** Compact mirror of the global job bar, so the conversation itself shows that the agent is working. */
+/** An edit, a fix or a template analysis at work: its label, a bar and the share done. */
 export function JobBubble({ job }: { job: ActiveJob }) {
   const failed = job.status === "failed";
   const done = job.status === "done";
+  const pct = Math.round(job.progress * 100);
+  // queued, or started with nothing done yet: the bar runs indeterminate, so a «0%» beside it would contradict it
+  const waiting = !failed && !done && (job.status === "queued" || pct === 0);
   return (
-    <div role="status" aria-live="polite" className="mt-4 flex animate-fade-in items-start gap-2">
-      <AgentAvatar />
-      <div className={cn("min-w-0 flex-1 rounded-[18px] rounded-tl-md px-3.5 py-3", failed ? "bg-red-50" : done ? "bg-emerald-50" : "bg-accent-50")}>
-        <div className="flex items-baseline gap-2">
-          <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-zinc-900">{job.label}</span>
-          {!failed && <span className="shrink-0 text-xs font-medium tabular-nums text-zinc-500">{Math.round(job.progress * 100)}%</span>}
+    <div role="status" aria-live="polite" className="w-[92%] animate-fade-in">
+      <div className={cn("rounded-2xl rounded-tl-lg px-4 py-3", failed ? "bg-red-50" : done ? "bg-emerald-50" : "bg-accent-50")}>
+        <div className="flex items-center gap-2">
+          <span className="min-w-0 flex-1 truncate text-footnote font-semibold text-zinc-900" title={job.label}>{job.label}</span>
+          {!failed && !waiting && <span className="shrink-0 text-caption tabular-nums text-zinc-500">{pct}%</span>}
         </div>
-        <Progress className="mt-2" value={failed ? 1 : job.progress} tone={failed ? "error" : done ? "success" : "accent"} size="sm" indeterminate={job.status === "queued"} />
-        {job.message && <p className={cn("mt-1.5 truncate text-xs", failed ? "text-red-600" : "text-zinc-500")}>{job.message}</p>}
+        <Progress className="mt-2" value={failed ? 1 : job.progress} tone={failed ? "error" : done ? "success" : "accent"} size="sm" indeterminate={waiting} />
       </div>
     </div>
   );

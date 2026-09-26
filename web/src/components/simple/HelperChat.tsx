@@ -1,52 +1,58 @@
-// The assistant as every site's support chat: a round button in the corner, a chat window above it.
-import { useEffect, useState } from "react";
-import { MessageCircle, X } from "lucide-react";
-import { usePresence } from "../../lib/motion";
+// The helper as a docked right sidebar under the header: the page reflows beside it, so nothing is ever covered.
+// It stays mounted while closed (a half-written message survives), Esc closes it when it is the topmost layer and a
+// build start closes it (flows.ts / ChatActions). Over the details drawer it rises above the dim and up to the top
+// edge of the window, side by side with the sheet.
+import { useEffect, useRef } from "react";
+import { MOTION, usePresence } from "../../lib/motion";
 import { cn } from "../../lib/utils";
 import { useApp } from "../../store";
 import { Chat } from "../Chat";
 
 export function HelperChat() {
-  const { agentOpen, setAgentOpen, messages } = useApp();
-  // replies that arrived while the window was closed light a counter on the button
-  const replies = messages.filter((m) => m.role === "assistant").length;
-  const [seen, setSeen] = useState(replies);
+  const { agentOpen, setAgentOpen, detail } = useApp();
+  const { mounted, leaving } = usePresence(agentOpen, MOTION.fast);
+  const ref = useRef<HTMLElement>(null);
+
+  // Esc closes the helper only when no modal layer (drawer, lightbox, modal) is open — those handle Esc themselves
   useEffect(() => {
-    if (agentOpen) setSeen(replies);
-  }, [agentOpen, replies]);
-  const unread = agentOpen ? 0 : Math.max(0, replies - seen);
-  const { mounted, leaving } = usePresence(agentOpen, 150);
+    if (!agentOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      if (document.querySelector('[aria-modal="true"]')) return;
+      if ((e.target as HTMLElement | null)?.closest?.('[role="menu"],[role="listbox"]')) return;
+      setAgentOpen(false);
+      document.getElementById("helper-toggle")?.focus();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [agentOpen, setAgentOpen]);
+
+  // on open the composer takes the focus
+  useEffect(() => {
+    if (!agentOpen) return;
+    const raf = window.requestAnimationFrame(() => ref.current?.querySelector<HTMLTextAreaElement>("textarea")?.focus({ preventScroll: true }));
+    return () => window.cancelAnimationFrame(raf);
+  }, [agentOpen]);
 
   return (
-    <>
-      <div
-        aria-label="Помощник Verstka"
-        // the chat stays mounted while hidden: a half-written message survives closing the window
-        className={cn(
-          "fixed bottom-24 right-6 z-40 h-[min(640px,calc(100vh-128px))] w-[400px] origin-bottom-right flex-col overflow-hidden rounded-3xl bg-white shadow-pop",
-          mounted ? "flex" : "hidden",
-          mounted && (leaving ? "animate-scale-out" : "animate-scale-in"),
-        )}
-      >
-        <Chat onClose={() => setAgentOpen(false)} />
-      </div>
-      <button
-        type="button"
-        onClick={() => setAgentOpen(!agentOpen)}
-        aria-expanded={agentOpen}
-        className={cn(
-          "fixed bottom-6 right-6 z-40 flex h-14 cursor-pointer items-center gap-2.5 rounded-full pl-4 pr-5 text-[15px] font-semibold text-white shadow-pop transition-[transform,background-color] duration-200 hover:-translate-y-0.5 active:translate-y-0 focus:outline-none focus-visible:ring-4 focus-visible:ring-accent/30",
-          agentOpen ? "bg-zinc-900" : "bg-accent",
-        )}
-      >
-        <span key={agentOpen ? "x" : "chat"} className="animate-pop">
-          {agentOpen ? <X className="h-5 w-5" aria-hidden /> : <MessageCircle className="h-5 w-5" aria-hidden />}
-        </span>
-        {agentOpen ? "Закрыть" : "Помощник"}
-        {unread > 0 && (
-          <span key={unread} className="absolute -right-1 -top-1 flex h-6 min-w-6 animate-pop items-center justify-center rounded-full bg-red-500 px-1.5 text-xs font-bold ring-2 ring-canvas">{unread}</span>
-        )}
-      </button>
-    </>
+    <aside
+      ref={ref}
+      id="helper"
+      aria-label="Помощник"
+      className={cn(
+        "relative z-20 w-[360px] shrink-0 flex-col border-l border-zinc-200/70 bg-white",
+        mounted ? "flex" : "hidden",
+        mounted && (leaving ? "pointer-events-none animate-slide-out-right" : "animate-slide-in-right"),
+        // beside the drawer: above its dim and pulled up over the header, so both 56px headers share y = 0
+        detail && mounted && "z-[60] -mt-16",
+      )}
+    >
+      <Chat
+        onClose={() => {
+          setAgentOpen(false);
+          document.getElementById("helper-toggle")?.focus();
+        }}
+      />
+    </aside>
   );
 }

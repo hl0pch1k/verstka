@@ -1,5 +1,6 @@
-// The model's state in words: the indicator on the Create screen and the notice above a deck that the built-in
-// planner had to plan. The reasons and the advice come from the server (verstka/api/model_status.py).
+// The model's state in words: the one grey line on the Create screen (only when no model can answer) and the notice
+// above a deck built without the model. The advice comes from the server (verstka/api/model_status.py);
+// whatever an older server still sends about money, keys, config files or providers never reaches the screen.
 import type { Generation, ModelLinkState, ModelsStatus, PlannerInfo, Variant } from "../types";
 import { plural } from "./utils";
 
@@ -56,17 +57,58 @@ export function waitText(seconds: number, state?: ModelLinkState | null, now: nu
   return m >= 5 ? `через ${h} ч ${m} мин` : `через ${h} ч`;
 }
 
-/** «Модель: Qwen3.8-27B — доступна» and friends. `enabled`: the person left the model switched on; `retryIn`: seconds
- * left until a paused model is tried again (counted down by the caller). */
-export function modelIndicator(st: ModelsStatus | null, enabled: boolean, retryIn?: number): Indicator | null {
+/** The line on the Create screen, or null: nothing is said while any model can answer (ok, unknown, retry, fallback)
+ * or when the person switched the model off. `enabled`: the person left the model switched on. */
+export function modelIndicator(st: ModelsStatus | null, enabled: boolean, _retryIn?: number): Indicator | null {
   if (!st) return null;
-  if (!st.configured || st.state === "off") return { text: "Модель не подключена · соберёт встроенный планировщик", tone: "off", hint: null, retry: null };
-  if (!enabled) return { text: "Модель выключена · соберёт встроенный планировщик", tone: "off", hint: null, retry: null };
-  const tone: Tone = st.state === "ok" ? "ok" : st.state === "unknown" ? "neutral" : st.state === "retry" ? "retry" : "warn";
-  const left = retryIn ?? st.retry_in ?? 0;
-  const retry = left > 0 ? `новая попытка ${waitText(left, st.retry_state)}` : null;
-  return { text: st.summary, tone, hint: (st.state === "fallback" || st.state === "down") && st.hint ? keepRanges(st.hint) : null, retry };
+  if (!st.configured || st.state === "off") return { text: "Без модели · быстрая сборка", tone: "off", hint: null, retry: null };
+  if (!enabled) return null;
+  if (st.state === "down") return { text: "Модель недоступна · соберу без неё", tone: "off", hint: null, retry: null };
+  return null;
 }
+
+/** Words a person never reads about the model: money, balances, keys, `.env`, config files, provider names. */
+const TECH = /\$|₽|пополн|(?<![а-яё])сч[её]т|средств|баланс|(?<![а-яё])ключ|\.env|groq|openrouter|cloud\.ru|configs\/|\.ya?ml|файл\S* настроек/i;
+const RETRY_LATER = "Модель временно недоступна — соберите позже";
+const UNAVAILABLE = "Модель недоступна";
+/** The server's own «Модель недоступна.» is the same words. */
+const isUnavailable = (help: string | null) => help?.replace(/\.$/, "") === UNAVAILABLE;
+const stop = (s: string) => (/[.!?…]$/.test(s) ? s : `${s}.`);
+/** Sentences joined into one text: a one-line label (no stop of its own) gets one before the next sentence; the last
+ *  keeps its stop only in running text (`closed`), so a lone «Модель недоступна» stays a label. */
+const sentences = (parts: Array<string | null | undefined>, closed = false) => {
+  const xs = parts.filter((x): x is string => !!x);
+  return xs.map((x, i) => (i < xs.length - 1 || closed ? stop(x) : x)).join(" ");
+};
+
+/** A provider's retry timer («Пауза после сбоя закончилась…», «…через 2 мин»): not a person's business (copy rule 6). */
+const TIMER = /пауз|через\s+\d/i;
+/** A sentence without its timer: «Соберите ещё раз через 2 мин.» and an older server's «Пауза после сбоя закончилась —
+ *  соберите ещё раз.» both say «Соберите ещё раз.» (the rebuild button waits by itself). */
+const untimed = (x: string) =>
+  cap(x.replace(/^пауза[^—–-]*[—–-]\s*/i, "").replace(/\s+через\s+\d+(?:[.,]\d+)?\s*(?:мин|ч|сек|с)[а-яё]*(?:\s+\d+\s*мин[а-яё]*)?/gi, ""));
+
+/** The advice without its technical sentences (an older server's «… или пополните OpenRouter на $5–10», «Проверьте
+ * ключ …», «Пауза после сбоя закончилась…»): the clause about money goes, the rest of the sentence stays. Null when
+ * nothing plain is left. */
+export function plainAdvice(text: string | null | undefined): string | null {
+  if (!text) return null;
+  const t = text.replace(/[,;]?\s+или\s+(?:пополните|включите|проверьте|выберите)[\s\S]*?(?=[.!?…](?:\s|$))/gi, "");
+  const kept = t
+    .split(/(?<=[.!?…])\s+/)
+    .map((x) => untimed(x.trim()))
+    .filter((x) => x && !TECH.test(x) && !TIMER.test(x));
+  return kept.length ? kept.join(" ") : null;
+}
+
+/** «Модель не ответила: …» — the reason in plain words, from its code (the server's `reason` may name providers). */
+const WHY: Record<string, string> = {
+  congested: "сервер модели перегружен",
+  rate: "слишком много запросов за минуту",
+  quota: "дневной лимит запросов исчерпан",
+  timeout: "время на ответ вышло",
+  unreachable: "нет связи с сервером модели",
+};
 
 /** The built-in planner took over because a model failed — and the server knows why (a notice is worth showing). */
 function modelFailed(g: Generation): boolean {
@@ -76,12 +118,27 @@ function modelFailed(g: Generation): boolean {
 
 const cap = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 
-/** «Qwen3.8-27B не ответила: бесплатные модели OpenRouter сейчас перегружены.» */
+/** Why the model did not plan, as a plain clause for any screen («сервер модели перегружен»), or null. The server's
+ * `reason` names providers and money («на счёте OpenRouter нет средств»): it is shown only when it has none of that. */
+export function reasonWords(p: PlannerInfo | null | undefined): string | null {
+  const code = p?.reason_code ?? "";
+  if (!code || code === "off") return null;
+  if (code === "rejected") return "план модели не прошёл проверку";
+  if (code === "no_credits" || code === "auth" || code === "missing") return "модель недоступна";
+  if (code === "error") return "модель вернула ошибку";
+  return WHY[code] ?? (p?.reason && !TECH.test(p.reason) ? p.reason : null);
+}
+
+/** «Модель не ответила: сервер модели перегружен» — a one-line label, no stop. It says «Модель», never a backend
+ *  name (the name lives in the «Файлы» tab). */
 export function whyNoModel(p: PlannerInfo | null | undefined): string {
-  const who = p?.tried_label ?? "Модель";
-  if (p?.reason_code === "rejected") return `${who} ответила, но её план не прошёл проверку.`;
-  if (!p?.reason) return `${who} не составила план.`;
-  return `${who} не ответила: ${p.reason}.`;
+  const who = "Модель";
+  const code = p?.reason_code ?? "";
+  if (code === "rejected") return `${who} ответила, но её план не прошёл проверку`;
+  if (code === "no_credits" || code === "auth" || code === "missing") return `${who} сейчас недоступна`;
+  if (code === "error") return `${who} вернула ошибку`;
+  const why = reasonWords(p);
+  return why ? `${who} не ответила: ${why}` : `${who} не составила план`;
 }
 
 /** What the page knows about the model right now, for the notice above a deck. */
@@ -94,7 +151,7 @@ export interface LiveModel {
 }
 
 export interface DeckNotice {
-  /** What happened, one sentence. */
+  /** What happened: a one-line label without a stop. */
   title: string;
   /** What the deck is based on. */
   basis: string;
@@ -104,7 +161,7 @@ export interface DeckNotice {
   retry: boolean;
   /** Seconds before a rebuild makes sense (the button waits, disabled); 0: now. */
   retryWait: number;
-  /** The button's words: «Собрать ещё раз» or «Собрать через 2 мин». */
+  /** The button's words, always «Собрать ещё раз»: while it waits (`retryWait`) it is disabled, never a timer. */
   retryLabel: string;
   /** Offer to add theses (the text is short or only a topic). */
   rewrite: boolean;
@@ -114,7 +171,7 @@ export interface DeckNotice {
  * (the server sends `retryable`; this is for older payloads). */
 const RETRYABLE = new Set(["congested", "rate", "quota", "timeout", "unreachable", "rejected"]);
 
-/** The live advice already offers the deck's own fix (a top-up of OpenRouter): saying it twice adds nothing. */
+/** The live advice already offers the deck's own fix (an older server's word about a top-up): saying it twice adds nothing. */
 function sameFix(liveAdvice: string, deckAdvice: string): boolean {
   if (liveAdvice === deckAdvice) return true;
   const topUp = /пополните (?:счёт )?OpenRouter/i;
@@ -124,8 +181,14 @@ function sameFix(liveAdvice: string, deckAdvice: string): boolean {
 /** The rebuild button and the advice beside it. Both follow the live state when it is known, so they never disagree:
  * while every model pauses, the live status decides the button (it waits for the link whose pause ends first) and
  * its advice leads; a deck whose own reason needs a fix (a key, an account, a model id) keeps that advice after it.
- * A 400 never gets the button: the same deck gets the same answer from any state of the models. */
+ * A 400 never gets the button: the same deck gets the same answer from any state of the models. The advice is plain:
+ * a sentence about money or keys is dropped, and when nothing is left it says the model is (temporarily) unavailable. */
 export function rebuildOffer(p: PlannerInfo | null | undefined, live?: LiveModel | null): { retry: boolean; wait: number; help: string | null } {
+  const o = offerOf(p, live);
+  return { ...o, help: o.help ? plainAdvice(o.help) ?? (o.retry ? RETRY_LATER : UNAVAILABLE) : null };
+}
+
+function offerOf(p: PlannerInfo | null | undefined, live?: LiveModel | null): { retry: boolean; wait: number; help: string | null } {
   const reasonFits = p?.retryable ?? RETRYABLE.has(p?.reason_code ?? "");
   const st = live?.status ?? null;
   if (!st || !st.configured || st.state === "off") return { retry: reasonFits, wait: 0, help: p?.advice ?? null };
@@ -171,27 +234,28 @@ export function deckNotice(g: Generation, v: Variant, total: number, live?: Live
     const p = g.planner ?? null;
     const basis = skeleton
       ? "В тексте только тема, поэтому это каркас: разделы с подсказками в заметках."
-      : `Слайды собраны встроенным планировщиком строго по вашему тексту${slidesText ? ` — ${slidesText}` : ""}.`;
+      : `Собрано по вашему тексту без модели${slidesText ? ` — ${slidesText}` : ""}.`;
     const offer = rebuildOffer(p, live);
-    const parts = [offer.help ? lowerFirst(offer.help) : null, skeleton || short ? (offer.help ? cap(addTheses) : addTheses) : null].filter(Boolean);
+    // «Модель недоступна» after the title «Модель сейчас недоступна» says nothing new
+    const help = isUnavailable(offer.help) ? null : offer.help;
+    const parts = [help ? lowerFirst(help) : null, skeleton || short ? (help ? cap(addTheses) : addTheses) : null];
     return {
       title: whyNoModel(p),
       basis,
-      help: parts.length ? keepRanges(parts.join(" ")) : null,
+      help: parts.some(Boolean) ? keepRanges(sentences(parts)) : null,
       retry: offer.retry,
       retryWait: offer.wait,
-      retryLabel: offer.wait > 0 ? `Собрать ${waitText(offer.wait, live?.status?.retry_state)}` : "Собрать ещё раз",
+      retryLabel: "Собрать ещё раз",
       rewrite: skeleton || short,
     };
   }
   if (skeleton) {
-    return { title: "Это каркас: в тексте была только тема.", basis: "Слайды — разделы с подсказками в заметках.", help: addTheses, ...none, rewrite: true };
+    return { title: "Это каркас: в тексте была только тема", basis: "Слайды — разделы с подсказками в заметках.", help: addTheses, ...none, rewrite: true };
   }
   if (short) {
-    const who = g.planner?.by_model && g.planner.model_label ? `модель ${g.planner.model_label}` : "Verstka";
     return {
-      title: `${cap(slidesText)}: материала в тексте меньше.`,
-      basis: `План составила ${who} строго по фактам из текста — Verstka их не придумывает.`.replace("составила Verstka", "составлен"),
+      title: `${cap(slidesText)}: в тексте меньше материала`,
+      basis: "План составлен строго по фактам из текста.",
       help: addTheses,
       ...none,
       rewrite: true,
@@ -203,5 +267,5 @@ export function deckNotice(g: Generation, v: Variant, total: number, live?: Live
 /** One line for the chat after a deck whose plan no model wrote because the model failed. */
 export function silentNote(g: Generation): string {
   if (!modelFailed(g)) return "";
-  return `${whyNoModel(g.planner)} План составлен встроенным планировщиком по вашему тексту.${g.planner?.advice ? ` ${g.planner.advice}` : ""}`;
+  return sentences([whyNoModel(g.planner), "Собрал по вашему тексту без модели", plainAdvice(g.planner?.advice)], true);
 }

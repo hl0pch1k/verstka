@@ -1,139 +1,220 @@
-// «① Выберите шаблон»: covers of the analysed templates to click, and one tile to add your own .pptx
-// (click or drop a file anywhere on the section). While a file is being analysed the tile shows the progress.
-import { useRef, useState, type DragEvent } from "react";
-import { Check, ImageOff, Loader2, Plus } from "lucide-react";
-import { templateName } from "../../lib/plain";
+// «① Выберите шаблон»: the covers of the analysed templates in one stable row, «Разбор шаблона ›» and «Свой .pptx» in
+// the step header (TemplateActions), and a .pptx dropped anywhere on the step (useTemplateDrop). While a file is being
+// analysed a skeleton tile stands where the new template will appear.
+import { useEffect, useRef, useState, useSyncExternalStore, type DragEvent } from "react";
+import { Check, ChevronRight, ImageOff, Plus, Upload } from "lucide-react";
+import { templateTitle } from "../../lib/plain";
 import { cn, plural } from "../../lib/utils";
 import { useApp } from "../../store";
 import type { TemplateListItem } from "../../types";
+import { Button } from "../ui/Button";
+import { Progress } from "../ui/Progress";
 
-const VISIBLE = 3; // one tidy row: three covers and the «свой шаблон» tile
+const ROW = 4; // one row of four tiles
+const PPTX_ACCEPT = ".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation";
+
+// ---- the upload shared by the header button, the drop zone and the grid (a tiny module store: no store fields)
+
+interface UploadState { name: string | null; over: boolean }
+let upload: UploadState = { name: null, over: false };
+const listeners = new Set<() => void>();
+const setUpload = (patch: Partial<UploadState>) => {
+  upload = { ...upload, ...patch };
+  listeners.forEach((f) => f());
+};
+const subscribe = (f: () => void) => {
+  listeners.add(f);
+  return () => void listeners.delete(f);
+};
+const useUploadState = () => useSyncExternalStore(subscribe, () => upload);
+
+function useTemplateUpload() {
+  const { uploadTemplate, activeJob, healthError } = useApp();
+  const state = useUploadState();
+  const running = !!activeJob && (activeJob.status === "queued" || activeJob.status === "running");
+  const job = running && activeJob.kind === "analyze" ? activeJob : null;
+  const blocked = !!state.name || running || !!healthError;
+  const take = async (file: File | undefined) => {
+    if (!file || blocked) return;
+    if (!/\.pptx$/i.test(file.name)) return void uploadTemplate(file, false); // the flow says what is wrong, no skeleton
+    setUpload({ name: file.name });
+    try {
+      await uploadTemplate(file, false); // resolves once the analysis is over (or failed)
+    } finally {
+      setUpload({ name: null });
+    }
+  };
+  const pick = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = PPTX_ACCEPT;
+    input.onchange = () => void take(input.files?.[0]);
+    input.click();
+  };
+  return { take, pick, blocked, job, name: state.name, over: state.over };
+}
+
+/** Drag-and-drop of a .pptx anywhere on the element the handlers go on (step 1). */
+export function useTemplateDrop() {
+  const { take, blocked } = useTemplateUpload();
+  const files = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes("Files");
+  return {
+    onDragOver: (e: DragEvent<HTMLElement>) => {
+      if (!files(e)) return;
+      e.preventDefault();
+      if (!blocked && !upload.over) setUpload({ over: true });
+    },
+    onDragLeave: (e: DragEvent<HTMLElement>) => {
+      if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setUpload({ over: false });
+    },
+    onDrop: (e: DragEvent<HTMLElement>) => {
+      if (!files(e)) return;
+      e.preventDefault();
+      setUpload({ over: false });
+      void take(e.dataTransfer.files?.[0]);
+    },
+  };
+}
+
+/** The step header's right side: «Разбор шаблона ›» (with a loaded template) and «Свой .pptx». When the drawer the
+ *  first one opened closes, the focus comes back to it (the drawer itself does not know who opened it). */
+export function TemplateActions() {
+  const { templates, templateId, detail, setDetail } = useApp();
+  const { pick, blocked } = useTemplateUpload();
+  const known = !!templateId && templates.some((t) => t.template_id === templateId);
+  const opener = useRef<HTMLButtonElement>(null);
+  const opened = useRef(false);
+  useEffect(() => {
+    if (detail || !opened.current) return;
+    opened.current = false;
+    requestAnimationFrame(() => {
+      const el = opener.current;
+      if (el?.isConnected && (!document.activeElement || document.activeElement === document.body)) el.focus();
+    });
+  }, [detail]);
+  return (
+    <>
+      {known && (
+        <Button
+          ref={opener}
+          size="sm"
+          variant="ghost"
+          iconRight={ChevronRight}
+          onClick={() => {
+            opened.current = true;
+            setDetail("template");
+          }}
+        >
+          Разбор шаблона
+        </Button>
+      )}
+      <Button size="sm" variant="tonal" icon={Upload} disabled={blocked} onClick={pick}>
+        Свой .pptx
+      </Button>
+    </>
+  );
+}
+
+// ---- tiles
+
+const TILE = "relative flex flex-col overflow-hidden rounded-xl bg-white text-left";
 
 function Cover({ t, selected, onPick }: { t: TemplateListItem; selected: boolean; onPick(): void }) {
   const [broken, setBroken] = useState(false);
+  const name = templateTitle(t.source_file, t.template_id);
   return (
     <button
       type="button"
       onClick={onPick}
       aria-pressed={selected}
-      className={cn(
-        "group relative flex cursor-pointer flex-col overflow-hidden rounded-2xl bg-white text-left transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/40",
-        selected ? "shadow-[0_0_0_3px_#0077FF]" : "shadow-card hover:-translate-y-0.5 hover:shadow-raise",
-      )}
+      className={cn(TILE, "cursor-pointer transition-shadow duration-150", selected ? "shadow-selected" : "shadow-card hover:shadow-raise")}
     >
-      <span className="relative block w-full overflow-hidden bg-zinc-100" style={{ aspectRatio: "16 / 9" }}>
+      <span className="relative block aspect-video w-full overflow-hidden bg-zinc-100 after:absolute after:inset-x-0 after:bottom-0 after:h-px after:bg-zinc-900/[0.06] after:content-['']">
         {t.cover_url && !broken ? (
           <img src={t.cover_url} alt="" loading="lazy" draggable={false} onError={() => setBroken(true)} className="h-full w-full object-cover" />
         ) : (
           <span className="flex h-full items-center justify-center text-zinc-400"><ImageOff className="h-6 w-6" aria-hidden /></span>
         )}
         {selected && (
-          <span className="absolute right-2 top-2 flex h-7 w-7 animate-pop items-center justify-center rounded-full bg-accent text-white ring-2 ring-white" aria-hidden>
-            <Check className="h-4 w-4" strokeWidth={3} />
+          <span className="absolute right-2 top-2 flex h-6 w-6 animate-pop items-center justify-center rounded-full bg-accent-fill text-white ring-2 ring-white" aria-hidden>
+            <Check className="h-3.5 w-3.5" strokeWidth={2.5} />
           </span>
         )}
       </span>
-      <span className="block px-3 py-2.5">
-        <span className="block truncate text-[13px] font-semibold text-zinc-900">{templateName(t.source_file, t.template_id)}</span>
-        <span className="block truncate text-xs text-zinc-500">{t.n_slides !== null ? plural(t.n_slides, "слайд", "слайда", "слайдов") : "шаблон"}</span>
+      <span className="block min-w-0 px-3 py-2">
+        <span className="block truncate text-footnote font-semibold text-zinc-900" title={name}>{name}</span>
+        <span className="mt-0.5 block text-caption text-zinc-500">{t.n_slides !== null ? plural(t.n_slides, "слайд", "слайда", "слайдов") : "шаблон"}</span>
       </span>
     </button>
   );
 }
 
-export function TemplatePicker() {
-  const { templates, templateId, selectTemplate, uploadTemplate, activeJob, healthError, setDetail, manifest } = useApp();
-  const [over, setOver] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [all, setAll] = useState(false);
-  const input = useRef<HTMLInputElement>(null);
-  const analyzing = !!activeJob && activeJob.kind === "analyze" && (activeJob.status === "queued" || activeJob.status === "running");
-  const blocked = busy || analyzing || healthError || (!!activeJob && (activeJob.status === "queued" || activeJob.status === "running"));
-
-  const sorted = [...templates].sort((a, b) => b.analyzed_at - a.analyzed_at);
-  // the selected template is always visible, even when the list is folded
-  const shown = all ? sorted : [...sorted.filter((t) => t.template_id === templateId), ...sorted.filter((t) => t.template_id !== templateId)].slice(0, VISIBLE);
-
-  const take = async (file: File | undefined) => {
-    if (!file || blocked) return;
-    setBusy(true);
-    try {
-      await uploadTemplate(file, false);
-    } finally {
-      setBusy(false);
-      if (input.current) input.current.value = "";
-    }
-  };
-  const onDrop = (e: DragEvent<HTMLElement>) => {
-    e.preventDefault();
-    setOver(false);
-    void take(e.dataTransfer.files?.[0]);
-  };
-
-  const uploadTile = (
-    <button
-      type="button"
-      disabled={blocked && !analyzing}
-      onClick={() => input.current?.click()}
-      className={cn(
-        "flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed px-3 text-center transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/40",
-        over ? "border-accent bg-accent-50" : "border-zinc-300 bg-white/60 hover:border-accent hover:bg-accent-50/60",
-        sorted.length === 0 ? "min-h-[180px] w-full py-10" : "min-h-full py-6",
-      )}
-    >
-      {analyzing && activeJob ? (
-        <>
-          <Loader2 className="h-7 w-7 animate-spin text-accent" aria-hidden />
-          <span className="text-[13px] font-semibold text-zinc-900">Разбираю шаблон</span>
-          <span className="h-1 w-28 overflow-hidden rounded-full bg-zinc-200">
-            <span className="block h-full rounded-full bg-accent transition-[width] duration-500 ease-out" style={{ width: `${Math.max(4, Math.round(activeJob.progress * 100))}%` }} />
-          </span>
-          <span className="line-clamp-2 text-xs text-zinc-500">{activeJob.message.replace(/^Шаблон:\s*/, "")}</span>
-        </>
-      ) : (
-        <>
-          <span className="flex h-11 w-11 items-center justify-center rounded-full bg-accent-50 text-accent">
-            {busy ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden /> : <Plus className="h-5 w-5" strokeWidth={2.5} aria-hidden />}
-          </span>
-          <span className="text-[13px] font-semibold text-zinc-900">{sorted.length === 0 ? "Загрузите шаблон .pptx" : "Свой шаблон"}</span>
-          <span className="text-xs text-zinc-500">{sorted.length === 0 ? "Нажмите или перетащите файл сюда" : "нажмите или перетащите .pptx"}</span>
-        </>
-      )}
-    </button>
+function Analysing({ name, value }: { name: string; value: number | null }) {
+  return (
+    <div className={cn(TILE, "shadow-card animate-fade")} aria-busy="true" aria-label={`Разбираю шаблон «${templateTitle(name)}»`}>
+      <span className="skeleton block aspect-video w-full rounded-none" aria-hidden />
+      <span className="block min-w-0 px-3 py-2">
+        <span className="block truncate text-footnote font-semibold text-zinc-900" title={name}>{templateTitle(name)}</span>
+        <span className="mt-0.5 flex h-4 items-center">
+          <Progress size="sm" value={value ?? 0} indeterminate={value === null} />
+        </span>
+      </span>
+    </div>
   );
+}
+
+export function TemplatePicker() {
+  const { templates, templateId, selectTemplate, healthError } = useApp();
+  const { pick, blocked, job, name, over } = useTemplateUpload();
+  const [all, setAll] = useState(false);
+
+  // the order is the server's (newest first) and never changes on a click
+  const list = templates;
+  const analysing = !!name;
+  const folded = list.length > ROW && !all;
+  // the file being analysed lands first (it is the newest): its skeleton stands there and the row keeps its length
+  const room = all ? list.length : (folded ? ROW - 1 : ROW) - (analysing ? 1 : 0);
+  let covers = list.slice(0, room);
+  // a folded row still shows the selected template: it takes the last visible slot
+  const chosen = list.find((t) => t.template_id === templateId);
+  if (chosen && room > 0 && !covers.includes(chosen)) covers = [...covers.slice(0, room - 1), chosen];
 
   return (
-    <div
-      onDragOver={(e) => {
-        e.preventDefault();
-        if (!blocked) setOver(true);
-      }}
-      onDragLeave={() => setOver(false)}
-      onDrop={onDrop}
-    >
-      <input ref={input} type="file" accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation" className="hidden" onChange={(e) => void take(e.target.files?.[0])} />
-      {sorted.length === 0 ? (
-        uploadTile
+    <div className={cn("rounded-xl transition-[outline-color] duration-150", over ? "outline-dashed outline-2 outline-offset-4 outline-accent" : "outline-none")}>
+      {list.length === 0 && !analysing && healthError ? (
+        // the list did not load (no server): not «no templates» — the row waits for the server
+        <div className="grid grid-cols-4 gap-4" aria-busy="true" aria-label="Шаблоны загружаются">
+          {Array.from({ length: ROW }, (_, i) => <div key={i} className="skeleton aspect-[221/178] rounded-xl" />)}
+        </div>
+      ) : list.length === 0 && !analysing ? (
+        <button
+          type="button"
+          disabled={!!blocked}
+          onClick={pick}
+          className="flex h-44 w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-xl bg-zinc-100 text-body font-semibold text-zinc-700 transition-colors duration-150 hover:bg-zinc-200/70 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <Upload className="h-6 w-6 text-zinc-500" aria-hidden />
+          Загрузите .pptx
+        </button>
       ) : (
         <div className="grid grid-cols-4 gap-4">
-          {shown.map((t) => (
+          {analysing && <Analysing name={name} value={job ? job.progress : null} />}
+          {covers.map((t) => (
             <Cover key={t.template_id} t={t} selected={t.template_id === templateId} onPick={() => selectTemplate(t.template_id)} />
           ))}
-          {uploadTile}
+          {list.length > ROW && (
+            <button
+              type="button"
+              onClick={() => setAll(!all)}
+              aria-expanded={all}
+              className="flex min-h-full cursor-pointer flex-col items-center justify-center gap-2 rounded-xl bg-zinc-100 text-footnote font-semibold text-zinc-700 transition-colors duration-150 hover:bg-zinc-200/70"
+            >
+              <Plus className={cn("h-5 w-5 text-zinc-500 transition-transform duration-200", all && "rotate-45")} aria-hidden />
+              {all ? "Свернуть" : `Ещё ${list.length - covers.length}`}
+            </button>
+          )}
         </div>
       )}
-      <div className="mt-3 flex items-center gap-4 text-[13px]">
-        {sorted.length > VISIBLE && (
-          <button type="button" onClick={() => setAll(!all)} className="cursor-pointer font-semibold text-accent-700 hover:underline">
-            {all ? "Свернуть" : `Показать все шаблоны (${sorted.length})`}
-          </button>
-        )}
-        {manifest && (
-          <button type="button" onClick={() => setDetail("template")} className="ml-auto cursor-pointer font-semibold text-accent-700 hover:underline">
-            Что Verstka поняла из шаблона →
-          </button>
-        )}
-      </div>
     </div>
   );
 }

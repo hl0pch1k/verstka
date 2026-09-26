@@ -5,7 +5,7 @@ import { AlertCircle, CheckCircle2, Info, X } from "lucide-react";
 import { cn, uid } from "../../lib/utils";
 
 export type ToastKind = "error" | "success" | "info";
-export interface ToastItem { id: string; kind: ToastKind; text: string }
+export interface ToastItem { id: string; kind: ToastKind; text: string; leaving?: boolean }
 
 const MAX_VISIBLE = 4;
 const TTL_MS: Record<ToastKind, number> = { error: 7000, success: 3500, info: 4500 };
@@ -19,18 +19,24 @@ function emit(next: ToastItem[]) {
   listeners.forEach((l) => l());
 }
 
+const EXIT_MS = 150; // drop-out
+
 export function dismissToast(id: string) {
   const t = timers.get(id);
   if (t !== undefined) {
     window.clearTimeout(t);
     timers.delete(id);
   }
-  if (items.some((i) => i.id === id)) emit(items.filter((i) => i.id !== id));
+  const item = items.find((i) => i.id === id);
+  if (!item || item.leaving) return;
+  // play the exit, then drop the item
+  emit(items.map((i) => (i.id === id ? { ...i, leaving: true } : i)));
+  window.setTimeout(() => emit(items.filter((i) => i.id !== id)), EXIT_MS);
 }
 
 export function pushToast(kind: ToastKind, text: string): string {
   // The same message fired twice in a row (e.g. two panels reporting one failure) is shown once.
-  const dup = items.find((i) => i.kind === kind && i.text === text);
+  const dup = items.find((i) => i.kind === kind && i.text === text && !i.leaving);
   if (dup) return dup.id;
   const id = uid("t");
   const next = [...items, { id, kind, text }];
@@ -54,17 +60,22 @@ const subscribe = (l: () => void) => {
 };
 const snapshot = () => items;
 
-const STYLE: Record<ToastKind, { icon: typeof Info; iconCls: string; bar: string }> = {
-  error: { icon: AlertCircle, iconCls: "text-red-400", bar: "bg-red-500" },
-  success: { icon: CheckCircle2, iconCls: "text-emerald-400", bar: "bg-emerald-500" },
-  info: { icon: Info, iconCls: "text-accent-300", bar: "bg-accent" },
+const STYLE: Record<ToastKind, { icon: typeof Info; iconCls: string }> = {
+  error: { icon: AlertCircle, iconCls: "text-red-400" },
+  success: { icon: CheckCircle2, iconCls: "text-emerald-400" },
+  info: { icon: Info, iconCls: "text-accent-300" },
 };
 
-export function Toasts() {
+/** `insetRight`: the width docked on the right (the helper), so the stack centres on the content, not on the window. */
+export function Toasts({ insetRight = 0 }: { insetRight?: number }) {
   const list = useSyncExternalStore(subscribe, snapshot, snapshot);
   if (list.length === 0) return null;
   return (
-    <div className="pointer-events-none fixed bottom-6 left-1/2 z-[100] flex w-[420px] -translate-x-1/2 flex-col items-center gap-2" aria-live="polite">
+    <div
+      className="pointer-events-none fixed top-20 z-[100] flex w-[420px] -translate-x-1/2 flex-col items-center gap-2"
+      style={{ left: `calc(50% - ${insetRight / 2}px)` }}
+      aria-live="polite"
+    >
       {list.map((t) => {
         const s = STYLE[t.kind];
         const Icon = s.icon;
@@ -72,18 +83,22 @@ export function Toasts() {
           <div
             key={t.id}
             role={t.kind === "error" ? "alert" : "status"}
-            className="pointer-events-auto relative flex w-full items-start gap-3 overflow-hidden rounded-2xl bg-ink py-3 pl-4 pr-2.5 text-white shadow-pop animate-fade-in"
+            className={cn(
+              "pointer-events-auto relative flex w-full items-center gap-3 overflow-hidden rounded-2xl bg-ink py-3 pl-4 pr-2 text-white shadow-pop",
+              t.leaving ? "animate-drop-out" : "animate-drop-in",
+            )}
           >
-            
-            <Icon className={cn("mt-0.5 h-4 w-4 shrink-0", s.iconCls)} aria-hidden />
-            <p className="min-w-0 flex-1 whitespace-pre-line break-words text-[13px] font-medium leading-5 text-white/90">{t.text}</p>
+            <span className="flex h-5 shrink-0 items-center self-start">
+              <Icon className={cn("h-4 w-4", s.iconCls)} aria-hidden />
+            </span>
+            <p className="min-w-0 flex-1 whitespace-pre-line break-words text-footnote text-white/90">{t.text}</p>
             <button
               type="button"
               onClick={() => dismissToast(t.id)}
               aria-label="Закрыть уведомление"
-              className="flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-white/50 transition-colors hover:bg-white/10 hover:text-white"
+              className="-my-1 flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full text-white/60 transition-colors duration-150 hover:bg-white/10 hover:text-white focus-visible:outline-white"
             >
-              <X className="h-3.5 w-3.5" />
+              <X className="h-4 w-4" />
             </button>
           </div>
         );

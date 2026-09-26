@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-from verstka.api.agent_view import job_progress, normalize_alternatives, normalize_event, read_agent_events, slide_design, write_agent_file
+from verstka.api.agent_view import describe_agent_work, job_progress, normalize_alternatives, normalize_event, read_agent_events, slide_design, write_agent_file
 from verstka.api.jobs import Job
 
 TID = "t0agentui000001"
@@ -146,8 +146,10 @@ def test_agent_events_reach_the_job_and_the_generation(api, monkeypatch):
     # «как работал агент» → the timeline by steps and the panel
     r = c.post("/api/chat", json={"session_id": "a1", "message": "Как работал агент?", "strategy": "structured"}).json()
     assert r["intent"] == "agent" and {"type": "open_tab", "tab": "agent"} in r["actions"]
-    assert "• Аналитик: нашёл 2 слайда" in r["reply"] and "• Критик: слайд 2: подпись длиннее 12 слов." in r["reply"] and "• Правка: слайд 2 переделан." in r["reply"]
-    assert "• Дизайнер: продумал форму 1 слайда, например: слайд 2: круговая диаграмма расходов, 2 категории." in r["reply"]
+    # three short lines and a pointer to the tab the chat opens beside it (every step by slide is there)
+    assert r["reply"].startswith("Вариант «Структурный»:\n• Аналитик: нашёл 2 слайда") and len(r["reply"].splitlines()) == 5
+    assert "• Дизайнер: продумал форму 1 слайда.\n• Критик: 1 замечание, 1 слайд переделан.\n" in r["reply"]
+    assert r["reply"].endswith("Все шаги по слайдам — во вкладке «Агент».")
     # the explain endpoint says the same
     ex = c.get(f"/api/generations/{gid}/structured/explain/2").json()
     assert "Почему так:" in ex["text"]
@@ -202,3 +204,15 @@ def test_event_normalisation_and_agent_file(tmp_path):
     assert normalize_alternatives([{"form": "line", "note": "динамика по месяцам"}, 5, {}, "карточки"]) == [
         {"kind": "line", "label": "линейный график", "text": "динамика по месяцам"}, {"kind": None, "label": None, "text": "карточки"}]
     assert slide_design(None) == [] and slide_design({"slides": ["bad"]}) == []
+
+
+def test_agent_work_names_the_title_slide_the_designer_added():
+    # the analyst counts the text's slides, the designer adds a title in front: the chat says both, not «5» then «6»
+    events = [{"step": "analyst", "message": "Нашёл в тексте 2 слайда и 1 ряд данных.", "slide": None, "variant": None}]
+    events += [{"step": "designer", "message": "Обложка «Итоги пилота».", "slide": 1, "variant": None}]
+    events += [{"step": "designer", "message": f"«Слайд {i}» — таблица.", "slide": i, "variant": None} for i in (2, 3)]
+    reply = describe_agent_work({"events": events}, "Структурный")
+    assert "• Дизайнер: продумал титул и форму 2 слайдов." in reply
+    # without a title slide in front the count stays as it is
+    reply = describe_agent_work({"events": [events[0], *events[2:]]}, "Структурный")
+    assert "• Дизайнер: продумал форму 2 слайдов." in reply

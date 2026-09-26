@@ -9,7 +9,7 @@ export interface ProgressProps {
   tone?: ProgressTone;
   /** Track height: xs = 2px, sm = 4px, md = 8px. */
   size?: "xs" | "sm" | "md";
-  /** Animated stripe for work without a known fraction. */
+  /** A 30% segment sweeping across, for work without a known fraction (static under reduced motion). */
   indeterminate?: boolean;
   /** Text above the bar (left). */
   label?: ReactNode;
@@ -17,6 +17,8 @@ export interface ProgressProps {
   showValue?: boolean;
   /** Square ends — for bars glued to a container edge. */
   flat?: boolean;
+  /** Offsets the indeterminate sweep, so several bars in a column never move in lockstep. */
+  delayMs?: number;
   className?: string;
 }
 
@@ -28,17 +30,17 @@ const FILL: Record<ProgressTone, string> = {
   neutral: "bg-zinc-500",
 };
 
-const HEIGHT = { xs: "h-[3px]", sm: "h-1.5", md: "h-2" } as const;
+const HEIGHT = { xs: "h-0.5", sm: "h-1", md: "h-2" } as const;
 
-export function Progress({ value, tone = "accent", size = "sm", indeterminate = false, label, showValue = false, flat = false, className }: ProgressProps) {
+export function Progress({ value, tone = "accent", size = "sm", indeterminate = false, label, showValue = false, flat = false, delayMs = 0, className }: ProgressProps) {
   const frac = Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0;
   const pct = Math.round(frac * 100);
   return (
     <div className={cn("w-full", className)}>
       {(label || showValue) && (
-        <div className="mb-1.5 flex items-center justify-between gap-3 text-xs">
-          <span className="min-w-0 truncate text-zinc-600">{label}</span>
-          {showValue && <span className="shrink-0 font-medium tabular-nums text-zinc-700">{pct}%</span>}
+        <div className="mb-2 flex items-center justify-between gap-3 text-caption">
+          <span className="min-w-0 truncate text-zinc-700">{label}</span>
+          {showValue && <span className="shrink-0 font-semibold tabular-nums text-zinc-700">{pct}%</span>}
         </div>
       )}
       <div
@@ -46,12 +48,13 @@ export function Progress({ value, tone = "accent", size = "sm", indeterminate = 
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={indeterminate ? undefined : pct}
-        className={cn("relative w-full overflow-hidden bg-zinc-200/70", HEIGHT[size], !flat && "rounded-full")}
+        aria-busy={indeterminate || undefined}
+        className={cn("relative w-full overflow-hidden bg-zinc-100", HEIGHT[size], !flat && "rounded-full")}
       >
         {indeterminate ? (
           <div
-            className={cn("absolute inset-0 animate-shimmer opacity-80", !flat && "rounded-full")}
-            style={{ backgroundImage: "linear-gradient(90deg, transparent 0%, #0077FF 50%, transparent 100%)", backgroundSize: "200% 100%" }}
+            className={cn("absolute inset-y-0 left-0 w-[30%] animate-sweep motion-reduce:animate-none", FILL[tone], !flat && "rounded-full")}
+            style={delayMs ? { animationDelay: `${delayMs}ms` } : undefined}
           />
         ) : (
           <div className={cn("h-full transition-[width] duration-500 ease-out", FILL[tone], !flat && "rounded-full")} style={{ width: `${pct}%` }} />

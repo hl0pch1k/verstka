@@ -1166,8 +1166,10 @@ def enrich_with_model(
                     req.type = hints[req.series_ids[0]]
     st.series = reg.series
     st.tables = reg.tables
-    if progress is not None:
-        progress({"type": "agent", "step": "analyst", "message": f"Модель добавила {added_series} {_plural(added_series, 'ряд', 'ряда', 'рядов')} данных и {added_tables} {_plural(added_tables, 'таблицу', 'таблицы', 'таблиц')}", "slide": None, "variant": None})
+    # what the model added, the non-zero parts only; nothing added — no line
+    added = [f"{n} {_plural(n, *words)}" for n, words in ((added_series, ("ряд данных", "ряда данных", "рядов данных")), (added_tables, ("таблицу", "таблицы", "таблиц"))) if n]
+    if progress is not None and added:
+        progress({"type": "agent", "step": "analyst", "message": f"Модель добавила {' и '.join(added)}", "slide": None, "variant": None})
     return st
 
 

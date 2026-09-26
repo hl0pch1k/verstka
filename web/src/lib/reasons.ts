@@ -15,15 +15,8 @@ export function humanReasons(reasons: string[], strategyTitle: (name: string) =>
     const r = raw.trim();
     let m: RegExpMatchArray | null;
     if (/^слайд \d+ шаблона$/.test(r) || /^вес стратегии/.test(r)) continue;
-    if ((m = r.match(/^композиция (\w+):/))) {
-      const kind = m[1].replace(/_text$/, "");
-      push(`Раскладка «${kindLabel(kind)}» рассчитана под ваш текст: сетка, шрифты, цвета и карточки шаблона`, true);
-      continue;
-    }
-    if ((m = r.match(/^ближайший образец — слайд (\d+) шаблона/))) {
-      push(`Ближайший образец в шаблоне — слайд ${m[1]}: его стиль сохранён, геометрия подогнана под содержание`, true);
-      continue;
-    }
+    // a composed slide's layout and its nearest sample are shown by the card itself (the frame and its caption)
+    if (/^композиция \w+:/.test(r) || /^ближайший образец — слайд \d+ шаблона/.test(r)) continue;
     if ((m = r.match(/^тип (\w+) для (\w+): ([\d.]+)$/))) {
       const v = Number(m[3]);
       if (m[1] === m[2] || v >= 0.95) push(`Тип макета совпадает с типом слайда: «${kindLabel(m[2])}»`, true);

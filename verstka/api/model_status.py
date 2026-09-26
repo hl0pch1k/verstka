@@ -5,9 +5,11 @@ The link states come from `verstka.providers.status.snapshot()` (the fallback ch
 ok · unknown · congested · rate · quota · no_credits · auth · missing · error · off.
 A reason is read from the contract wording of the chain's errors first (status.PHRASES), then from bare status codes;
 its words are about the link that failed (a free or the paid OpenRouter model, Groq, Cloud.ru): the chain names each
-failed link by its label («[Qwen3.8-27B (Groq)] qwen/qwen3.8-27b: …»), looked up in the active chain. The advice depends
-on the ACTIVE chain: a top-up is offered as «платный Qwen3.8-27B отвечает стабильно» only when the active config has
-a paid OpenRouter link; with a free-only config the advice says what to switch on.
+failed link by its label («[Qwen3.8-27B (Groq)] qwen/qwen3.8-27b: …»), looked up in the active chain.
+
+The strings a person reads (`summary`, `hint`, `advice`) say only what to do: build again now, later or without the
+model. They never mention money, balances, keys, `.env`, config paths or provider plans — those stay in the machine
+fields (`reason_code`, `links[].last_error`) and in the server log.
 """
 
 from __future__ import annotations
@@ -26,7 +28,6 @@ log = logging.getLogger(__name__)
 # the contract shared with verstka/providers/status.py and the web UI
 LINK_STATES = ("ok", "unknown", "congested", "rate", "quota", "no_credits", "auth", "missing", "error", "off")
 _LEGACY_CODES = {"no_key": "auth", "gone": "missing"}  # reason codes of the first version of this module
-PAID_CONFIG = "configs/models.yaml"  # the config with the paid Qwen3.8-27B link
 
 # ---------------------------------------------------------------------------- model names
 
@@ -339,8 +340,33 @@ def _quota_reset_words(now: Optional[float] = None) -> str:
     return "сегодня после 03:00" if utc_hour >= 21 else "завтра после 03:00"
 
 
+# what kept the model from planning, for anyone who reads the API (`planner.reason`): the same words as the UI's own
+# (web/src/lib/modelText.ts), never a provider, money or a key — those stay in the log (reason_detail)
+_REASONS = {
+    "congested": "сервер модели перегружен",
+    "rate": "слишком много запросов за минуту",
+    "quota": "дневной лимит запросов исчерпан",
+    "no_credits": "модель недоступна",
+    "auth": "модель недоступна",
+    "missing": "модель недоступна",
+    "timeout": "время на ответ вышло",
+    "unreachable": "нет связи с сервером модели",
+    "rejected": "план модели не прошёл проверку",
+    "off": "модель не подключена",
+}
+
+
 def reason_text(code: Optional[str], ctx: Optional[ChainContext] = None, who: Optional[FailedLink] = None) -> Optional[str]:
-    """One plain Russian clause: what kept the model from planning — about the link that failed (`who`)."""
+    """One plain Russian clause for the API: what kept the model from planning, without providers, money or keys (the
+    link-specific clause is `reason_detail`, for the server log). `ctx` and `who` are kept for older callers."""
+    if code is None:
+        return None
+    return _REASONS.get(code, "модель вернула ошибку")
+
+
+def reason_detail(code: Optional[str], ctx: Optional[ChainContext] = None, who: Optional[FailedLink] = None) -> Optional[str]:
+    """The technical clause for the server log: what kept the model from planning — about the link that failed (`who`),
+    naming its service («ключ доступа к Groq не подходит»). Never sent to the API or the screen."""
     ctx = ctx or ChainContext()
     who = who or ctx.primary
     where = who.service
@@ -375,58 +401,34 @@ def reason_text(code: Optional[str], ctx: Optional[ChainContext] = None, who: Op
     return texts.get(code, "модель вернула ошибку")
 
 
-def _steady_way(ctx: ChainContext) -> str:
-    """What makes the model answer steadily: the paid link of the active config, or switching it on."""
-    if ctx.paid_label:
-        return f"пополните OpenRouter на $5–10 — платный {ctx.paid_label} отвечает стабильно, ≈ 1–5 ₽ за презентацию"
-    return f"пополните OpenRouter на $5–10 и включите платную модель: {PAID_CONFIG}"
-
-
-def steady_tip(ctx: ChainContext) -> str:
-    """The paid model, in a sentence of its own (the notice adds it to the live advice)."""
-    return f"Чтобы не зависеть от очереди бесплатных, {_steady_way(ctx)}."
+# the words a person reads when the model cannot help: what to do, never why in provider terms (money, keys, configs)
+UNAVAILABLE = "Модель недоступна."
 
 
 def advice(code: Optional[str], ctx: Optional[ChainContext] = None, who: Optional[FailedLink] = None) -> Optional[str]:
     """What helps, in one sentence (None when nothing needs doing). Used in the notice above a deck: short, no extras.
-    A top-up is offered only when a free OpenRouter model failed (never for the paid model that just failed)."""
+    It says when to build again; a reason that needs the server's owner (money, a key, a model id) is «Модель
+    недоступна.» — the details stay in `reason_code` and the log."""
     ctx = ctx or ChainContext()
     who = who or ctx.primary
-    where = who.service
-    steady = who.openrouter_free and ctx.openrouter
     if code in ("congested", "timeout"):
-        return f"Соберите ещё раз через несколько минут или {_steady_way(ctx)}." if steady else "Соберите ещё раз через несколько минут."
+        return "Соберите ещё раз через несколько минут."
     if code == "rate":
         return "Соберите ещё раз через минуту."
     if code == "quota":
         if who.openrouter_free:
-            first = f"Бесплатный лимит обновится {_quota_reset_words()}."
-            return f"{first} Чтобы не ждать, {_steady_way(ctx)}." if ctx.openrouter else first
-        return f"Соберите ещё раз, когда обновится дневной лимит {where or 'сервиса модели'}."
-    if code == "no_credits":
-        if where == "OpenRouter":
-            return "Пополните счёт OpenRouter на $5–10 — хватит на сотни презентаций (≈ 1–5 ₽ за каждую)."
-        return f"Пополните счёт {where or 'сервиса модели'}."
-    if code == "auth":
-        return f"Проверьте ключ доступа к {where or 'модели'} в настройках сервера."
-    if code == "missing":
-        return f"Выберите другую модель в файле настроек {ctx.config or PAID_CONFIG}."
+            return f"Соберите ещё раз {_quota_reset_words()}."
+        return "Соберите ещё раз, когда обновится дневной лимит запросов."
+    if code in ("no_credits", "auth", "missing"):
+        return UNAVAILABLE
     if code == "unreachable":
         return "Проверьте подключение к интернету и соберите ещё раз."
     if code == "rejected":
         return "Соберите ещё раз — модель отвечает по-разному."
     if code == "error":
         # a 400 (a text too long for the model, a parameter it does not take): the same inputs get the same answer
-        return f"Та же сборка получит ту же ошибку: сократите текст или выберите другую модель в файле настроек {ctx.config or PAID_CONFIG}."
+        return "Та же сборка получит ту же ошибку: сократите текст."
     return None
-
-
-def groq_tip(ctx: ChainContext) -> Optional[str]:
-    """The optional free Groq key — only in the detailed hint under the indicator, never in every notice."""
-    if not ctx.groq_label:
-        return None
-    same = ctx.primary_label and short_label(ctx.groq_label) == ctx.primary_label
-    return f"Ещё поможет бесплатный ключ Groq для {'той же ' if same else ''}{ctx.groq_label} — строка GROQ_API_KEY в .env."
 
 
 # ---------------------------------------------------------------------------- who planned a variant
@@ -437,9 +439,9 @@ def planner_info(outline: Optional[dict], run_manifest: Optional[dict], *, use_m
 
     by_model: True (a model, possibly another variant's plan), False (the rules / a supplied outline), None (not
     recorded: an older deck without planned_by and without a planner failure — no notice is shown for it).
-    retryable: the same deck built again can get past the reason (see RETRYABLE_REASONS). steady: the sentence about
-    the paid model when a free OpenRouter model was congested or out of requests — the notice adds it to the live
-    advice (which says when to build again), so it is not lost when that advice replaces the deck's own."""
+    retryable: the same deck built again can get past the reason (see RETRYABLE_REASONS). `reason` is a plain clause
+    without providers, money or keys (the link-specific one goes to the log); the UI prints its own words for
+    `reason_code`. steady: always None (kept for older clients: the paid-model tip is gone from the interface)."""
     rm = run_manifest or {}
     recorded = rm.get("planner") if isinstance(rm.get("planner"), dict) else {}
     configured = ((rm.get("providers") or {}).get("llm") or {})
@@ -469,6 +471,9 @@ def planner_info(outline: Optional[dict], run_manifest: Optional[dict], *, use_m
         code, failed_text = _reason(warnings)
     ctx = ctx or ChainContext(free=is_free(tried))
     who = failed_link(failed_text, ctx) if failed_text else ctx.primary
+    if code not in (None, "off"):
+        detail = reason_detail(code, ctx, who)
+        log.info("model did not plan (%s): %s", code, detail, extra={"reason_detail": detail})
     return {
         **base,
         "planned_by": planned_by or "rules",
@@ -477,7 +482,7 @@ def planner_info(outline: Optional[dict], run_manifest: Optional[dict], *, use_m
         "reason": reason_text(code, ctx, who),
         "advice": advice(code, ctx, who) if code not in (None, "off") else None,
         "retryable": code in RETRYABLE_REASONS,
-        "steady": steady_tip(ctx) if code in ("congested", "timeout", "rate", "quota") and who.openrouter_free and ctx.openrouter else None,
+        "steady": None,
     }
 
 
@@ -668,26 +673,6 @@ def collect_links(registry: Any, configured: bool = True) -> tuple[list[dict], s
     return _configured_links(registry), "config"
 
 
-_STATE_PHRASE = {
-    "congested": "{name} перегружена",
-    "rate": "{name} — лимит запросов в минуту",
-    "quota": "{name} — дневной лимит исчерпан",
-    "no_credits": "{name} — нет средств на счёте",
-    "auth": "{name} — ключ не подходит",
-    "missing": "{name} не найдена",
-    "error": "{name} вернула ошибку",
-    "unreachable": "{name} не отвечает",
-    "timeout": "{name} не отвечает",
-}
-# a failed link whose pause is over: the next deck tries it again
-_RECENT_WORD = {
-    "congested": "недавно была перегружена, попробую снова",
-    "rate": "недавно был лимит запросов, попробую снова",
-    "quota": "лимит обновился, попробую снова",
-    "no_credits": "недавно не было средств на счёте, попробую снова",
-}
-
-
 def _usable(link: dict) -> bool:
     """The chain will call this link: it answered, was never called, or its pause after a failure is over."""
     if link["state"] == "off":
@@ -701,24 +686,6 @@ def _label(link: dict) -> str:
 
 def _short_name(link: dict) -> str:
     return link.get("short_label") or short_label(_label(link)) or _label(link)
-
-
-def _backup_words(backup: dict, primary: dict) -> tuple[str, str, str]:
-    """How the indicator names the backup: (after «отвечает», after «попробую», the name alone). The same model as
-    the primary is told apart by its label's tag, so the line stays short: «отвечает бесплатная Qwen3.8-27B»,
-    «попробую Qwen3.8-27B на Groq»; another model is «запасная Gemma 4 31B»."""
-    name = _short_name(backup)
-    if name != _short_name(primary):
-        return f"запасная {name}", f"запасную {name}", name
-    m = re.search(r"\(([^()]*)\)\s*$", _label(backup))
-    tag = m.group(1).strip() if m else ""
-    if tag.lower() == "бесплатно":
-        return f"бесплатная {name}", f"бесплатную {name}", f"бесплатная {name}"
-    if tag.lower() == "локально":
-        return f"{name} локально", f"{name} локально", f"{name} локально"
-    if tag:
-        return f"{name} на {tag}", f"{name} на {tag}", f"{name} на {tag}"
-    return f"запасная {_label(backup)}", f"запасную {_label(backup)}", _label(backup)
 
 
 def _link_code(link: dict) -> str:
@@ -738,27 +705,15 @@ def _retryable_link(link: dict) -> bool:
 
 
 def _hint(primary: dict, ctx: ChainContext, *, backup: bool) -> Optional[str]:
-    """The detailed hint under the indicator: what helps, plus the optional free Groq key."""
-    code = _link_code(primary)
-    who = link_of(primary)
+    """The line under the indicator (older clients show it): what happens next, in plain words."""
     if backup:
-        head = "Презентацию соберёт запасная модель."
-        if code in ("congested", "rate", "quota") and ctx.openrouter and who.openrouter_free:
-            body: Optional[str] = steady_tip(ctx)
-        elif code in ("no_credits", "auth", "missing"):
-            body = advice(code, ctx, who)
-        else:
-            body = None
-        parts = [head, body]
-    else:
-        parts = [advice(code, ctx, who)]
-    parts.append(groq_tip(ctx))
-    text = " ".join(p for p in parts if p)
-    return text or None
+        return "Презентацию соберёт запасная модель."
+    return advice(_link_code(primary), ctx, link_of(primary))
 
 
 def summarize(links: list[dict], *, configured: bool, ctx: Optional[ChainContext] = None) -> dict:
-    """Overall state + one short line for the indicator («Модель: Qwen3.8-27B — доступна») + the detailed hint.
+    """Overall state + one short line («Qwen3.8-27B · доступна», «Qwen3.8-27B · недоступна», «Gemma 4 31B · запасная
+    модель») + the hint. The failed link's reason stays in `links[].state` / `last_error`: never in these words.
 
     `advice` is what the notice above a failed deck says now (the live button's words agree with it); `retryable`:
     building again can work now or once `retry_in` is over (False when a key, an account or a model id needs a fix)."""
@@ -766,39 +721,39 @@ def summarize(links: list[dict], *, configured: bool, ctx: Optional[ChainContext
     none = {"hint": None, "working_label": None, "retry_in": None, "retry_state": None, "advice": None, "retryable": True}
     active = [link for link in links if link["state"] != "off"]
     if not configured or not active:
-        return {**none, "state": "off", "summary": "Модель не подключена · соберёт встроенный планировщик", "hint": groq_tip(ctx) if configured else None, "retryable": False}
+        return {**none, "state": "off", "summary": "Модель не подключена", "retryable": False}
     primary = active[0]
     pname = _short_name(primary)
     if _usable(primary):
-        if primary["state"] == "ok":
-            return {**none, "state": "ok", "summary": f"Модель: {pname} — доступна", "working_label": pname, "advice": "Модель снова отвечает — соберите ещё раз."}
-        if primary["state"] == "unknown":
-            return {**none, "state": "unknown", "summary": f"Модель: {pname} — подключена", "working_label": pname, "advice": "Соберите ещё раз — модель попробует снова."}
-        word = _RECENT_WORD.get(primary["state"], "недавно не ответила, попробую снова")
-        return {**none, "state": "retry", "summary": f"Модель: {pname} — {word}", "working_label": pname, "advice": "Пауза после сбоя закончилась — соберите ещё раз."}
-    phrase = _STATE_PHRASE.get(_link_code(primary), _STATE_PHRASE.get(primary["state"], "{name} недоступна")).format(name=pname)
+        state = primary["state"] if primary["state"] in ("ok", "unknown") else "retry"
+        words = {
+            "ok": "Модель снова отвечает — соберите ещё раз.",
+            "unknown": "Соберите ещё раз — модель попробует снова.",
+            "retry": "Соберите ещё раз — модель попробует снова.",
+        }
+        return {**none, "state": state, "summary": f"{pname} · доступна", "working_label": pname, "advice": words[state]}
     backup = next((link for link in active[1:] if _usable(link)), None)
     if backup is not None:
-        answers, will_try, bname = _backup_words(backup, primary)
+        bname = _short_name(backup)
         ok = backup["state"] == "ok"
         return {
             **none,
             "state": "fallback",
-            "summary": f"Модель: {phrase} · {'отвечает ' + answers if ok else 'попробую ' + will_try}",
+            "summary": f"{bname} · запасная модель",
             "hint": _hint(primary, ctx, backup=True),
             "working_label": bname,
             "retry_in": primary.get("until"),
             "retry_state": primary["state"] if primary.get("until") else None,
-            "advice": f"Сейчас отвечает {answers} — соберите ещё раз." if ok else f"Соберите ещё раз — попробую {will_try}.",
+            "advice": "Сейчас отвечает запасная модель — соберите ещё раз." if ok else "Соберите ещё раз — попробую запасную модель.",
         }
     waiting = [link for link in active if link.get("until")]
     soonest = min(waiting, key=lambda link: link["until"]) if waiting else None
     blocking = soonest or primary  # the link whose pause ends first: the live button waits for it
-    summary = f"Модель: {phrase} · соберёт встроенный планировщик" if len(active) == 1 else "Модель недоступна · соберёт встроенный планировщик"
+    log.info("model status: every link is down (%s)", ", ".join(f"{_short_name(link)}: {_link_code(link)}" for link in active))
     return {
         **none,
         "state": "down",
-        "summary": summary,
+        "summary": f"{pname} · недоступна",
         "hint": _hint(primary, ctx, backup=False),
         "retry_in": soonest["until"] if soonest else None,
         "retry_state": soonest["state"] if soonest else None,
