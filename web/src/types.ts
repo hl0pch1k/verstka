@@ -13,7 +13,7 @@ export type TabKey = "template" | "brief" | "plan" | "variants" | "why" | "audit
 /** The two screens a person sees; everything expert lives in the «Подробнее» drawer. */
 export type Screen = "create" | "result";
 export type DetailKey = "quality" | "why" | "agent" | "plan" | "template" | "tech";
-export type JobKind = "analyze" | "generate" | "fix" | "edit" | "other";
+export type JobKind = "analyze" | "generate" | "fix" | "edit" | "slide_fix" | "other";
 export type JobStatus = "queued" | "running" | "done" | "failed";
 
 export interface BboxFrac { x: number; y: number; w: number; h: number }
@@ -360,7 +360,11 @@ export interface GenerationMeta {
   /** The plan came with the request (no model was asked to plan). */
   outline_supplied?: boolean;
 }
-export interface VariantEdit { at: number; request: string; reply: string; kind: string; slides: number[]; score_before: number | null; score_after: number | null }
+export interface VariantEdit {
+  at: number; request: string; reply: string; kind: string; slides: number[]; score_before: number | null; score_after: number | null;
+  /** A slide fix (kind "fix", newer servers): the remarks it fixed, how (model | rules | autofix) and the snapshot version. */
+  fixed?: string[]; how?: string; version?: number | null;
+}
 export interface Variant {
   strategy: string;
   planner?: PlannerInfo;
@@ -394,6 +398,18 @@ export interface GenerateRequest {
 export interface GenerateResponse { job_id: string; generation_id: string }
 export interface FixRequest { issue_ids?: string[]; all_deterministic?: boolean }
 export interface FixResult { score: number; errors: number; warnings: number; applied: Record<string, unknown>[] }
+/** «Исправить слайд»: POST /api/generations/{gid}/{strategy}/slides/{n}/fix — the remarks of one slide, the person's
+ *  wishes; only that slide of the deck changes. */
+export interface SlideFixRequest { wishes?: string | null; issue_ids?: string[] }
+/** A stage remark of the fixed slide after the fix; `new`: its check was not among the slide's remarks before. */
+export interface SlideFixRemaining { id: string; check_id: string; severity: Severity; message: string; new: boolean }
+export interface SlideFixResult {
+  reply: string; changed: boolean; applied: boolean; kind: "fix"; strategy: string; slide: number;
+  requested: string[]; fixed: string[]; remaining: SlideFixRemaining[];
+  score_before: number | null; new_score: number | null; errors?: number; warnings?: number;
+  changed_other_slides: boolean; other_slides: number[];
+  how: "model" | "rules" | "autofix"; notes: string[]; why: string | null; version: number | null; at: number | null;
+}
 export interface ExplainResponse { index: number; text: string }
 
 export interface DiffChange<T = unknown> { from: T; to: T }

@@ -3,12 +3,14 @@ import { useCallback, useEffect, useRef, useState, type ChangeEvent, type Keyboa
 import { ArrowUp, FileText, Paperclip, X } from "lucide-react";
 import { api } from "../api";
 import { errText } from "../lib/narrate";
+import { smoothScroll, stagger } from "../lib/motion";
 import { cn, sessionId } from "../lib/utils";
 import { useApp } from "../store";
 import { clearEdited, useChatActions, useJustEdited } from "./ChatActions";
 import { AssistantBubble, JobBubble, MessageBubble, TypingIndicator } from "./ChatParts";
 import { Button } from "./ui/Button";
 import { Chip } from "./ui/Chip";
+import { Collapse } from "./ui/Collapse";
 
 const MAX_ROWS = 8;
 const LINE_PX = 20; // leading-5
@@ -48,7 +50,7 @@ export function Chat({ onClose }: { onClose?: () => void }) {
   useEffect(() => {
     const feed = feedRef.current;
     if (!feed) return;
-    const behavior = messages.length > 1 ? "smooth" : "auto";
+    const behavior = messages.length > 1 ? smoothScroll() : "auto";
     const lastEl = last && !pending && !job && last.role === "assistant" ? feed.querySelector<HTMLElement>(`[data-msg="${last.id}"]`) : null;
     if (lastEl && lastEl.offsetHeight > feed.clientHeight - 32) feed.scrollTo({ top: lastEl.offsetTop - 16, behavior });
     else feed.scrollTo({ top: feed.scrollHeight, behavior });
@@ -135,6 +137,13 @@ export function Chat({ onClose }: { onClose?: () => void }) {
             ? ["Что в шаблоне?"]
             : [];
 
+  // the chips row and the file row leave with a collapse: their last content stays for the exit
+  const lastChips = useRef(chips);
+  if (chips.length > 0) lastChips.current = chips;
+  const lastAttached = useRef(attached);
+  if (attached) lastAttached.current = attached;
+  const shownFile = attached ?? lastAttached.current;
+
   const canSend = text.trim().length > 0 && !pending && !healthError;
   // offline: only the red dot here — the bar under the header already says it
   const status = healthError ? null : pending ? "печатает…" : activeJob && (activeJob.status === "queued" || activeJob.status === "running") ? "работает над задачей" : null;
@@ -156,7 +165,7 @@ export function Chat({ onClose }: { onClose?: () => void }) {
       <header className="flex h-14 shrink-0 items-center gap-2 border-b border-zinc-200/70 pl-4 pr-2">
         <h2 className="text-title3 font-semibold text-zinc-900">Помощник</h2>
         {(status || healthError) && (
-          <span className={cn("h-2 w-2 shrink-0 rounded-full", healthError ? "bg-red-500" : "animate-pulse bg-accent")} title={healthError ? "Нет связи с сервером" : undefined} aria-hidden />
+          <span className={cn("h-2 w-2 shrink-0 rounded-full", healthError ? "bg-red-500" : "animate-breathe bg-accent")} title={healthError ? "Нет связи с сервером" : undefined} aria-hidden />
         )}
         {status && <span className="min-w-0 truncate text-caption text-zinc-500" role="status">{status}</span>}
         {onClose && <Button variant="ghost" shape="circle" size="md" icon={X} aria-label="Закрыть помощника" onClick={onClose} className="ml-auto" />}
@@ -168,7 +177,7 @@ export function Chat({ onClose }: { onClose?: () => void }) {
         className={cn("scroll-thin relative min-h-0 flex-1 space-y-3 overflow-y-auto p-4", scrolled && "[mask-image:linear-gradient(to_bottom,transparent,#000_16px)]")}
       >
         {empty ? (
-          <AssistantBubble>{intro}</AssistantBubble>
+          <AssistantBubble id={`intro:${intro}`}>{intro}</AssistantBubble>
         ) : (
           <>
             {messages.map((m) => (
@@ -182,26 +191,28 @@ export function Chat({ onClose }: { onClose?: () => void }) {
       </div>
 
       <div className="shrink-0 border-t border-zinc-200/70 p-4">
-        {chips.length > 0 && (
-          <div className="mb-3 flex flex-wrap gap-2">
-            {chips.map((label) => (
-              <Chip key={label} disabled={healthError} onClick={() => void send(label)} className="animate-fade-in">
+        <Collapse open={chips.length > 0}>
+          <div className="flex flex-wrap gap-2 pb-3">
+            {(chips.length > 0 ? chips : lastChips.current).map((label, i) => (
+              <Chip key={label} disabled={healthError || chips.length === 0} onClick={() => void send(label)} className="animate-fade-in" style={stagger(i)}>
                 {label}
               </Chip>
             ))}
           </div>
-        )}
+        </Collapse>
 
         <div className={cn("rounded-xl bg-zinc-100 transition-[background-color,box-shadow] duration-150 focus-within:bg-white focus-within:shadow-selected", healthError && "opacity-60")}>
-          {attached && (
-            <div className="flex h-10 items-center gap-2 border-b border-zinc-200/70 pl-4 pr-1 text-footnote text-zinc-700">
-              <FileText className="h-4 w-4 shrink-0 text-accent" aria-hidden />
-              <span className="min-w-0 flex-1 truncate" title={`${attached.name} · ${fmtBytes(attached.size)}`}>
-                Текст из «{attached.name.replace(/\.(md|txt|markdown)$/i, "").replace(/_/g, " ")}»
-              </span>
-              <Button variant="ghost" size="sm" shape="circle" icon={X} aria-label="Убрать текст из файла" onClick={clearDraft} />
-            </div>
-          )}
+          <Collapse open={!!attached} appear>
+            {shownFile && (
+              <div className="flex h-10 items-center gap-2 border-b border-zinc-200/70 pl-4 pr-1 text-footnote text-zinc-700">
+                <FileText className="h-4 w-4 shrink-0 text-accent" aria-hidden />
+                <span className="min-w-0 flex-1 truncate" title={`${shownFile.name} · ${fmtBytes(shownFile.size)}`}>
+                  Текст из «{shownFile.name.replace(/\.(md|txt|markdown)$/i, "").replace(/_/g, " ")}»
+                </span>
+                <Button variant="ghost" size="sm" shape="circle" icon={X} aria-label="Убрать текст из файла" onClick={clearDraft} disabled={!attached} />
+              </div>
+            )}
+          </Collapse>
           <textarea
             ref={areaRef}
             value={text}

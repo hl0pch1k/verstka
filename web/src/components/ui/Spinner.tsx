@@ -12,7 +12,8 @@ export interface SpinnerProps {
 
 export function Spinner({ size = 16, className, label = "Загрузка", showLabel = false }: SpinnerProps) {
   return (
-    <span role="status" aria-label={label} className={cn("inline-flex items-center gap-2 text-zinc-500", className)}>
+    // delayed: a load under 150 ms never flashes a spinner
+    <span role="status" aria-label={label} className={cn("inline-flex animate-[fade_200ms_var(--ease-out)_150ms_backwards] items-center gap-2 text-zinc-500", className)}>
       <Loader2 className="animate-spin" style={{ width: size, height: size }} aria-hidden />
       {showLabel && <span className="text-footnote">{label}…</span>}
     </span>

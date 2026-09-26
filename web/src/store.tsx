@@ -8,6 +8,8 @@ import { humanizeJobMessage, variantProgress, type VariantProgress } from "./lib
 import { trackJob } from "./lib/jobs";
 import { errText, firstLine, newestTemplate, slideCount } from "./lib/narrate";
 import { LS, storage, uid } from "./lib/utils";
+import { decodeImage, viewTransition } from "./lib/motion";
+import { variantRev, withRev } from "./components/VariantsHelpers";
 import type {
   AgentEvent, ChatMessage, DetailKey, GenerateRequest, Generation, GenerationMeta, Health, Job, JobKind, JobStatus, ModelsStatus, Screen, StrategyInfo, TabKey, TemplateListItem, TemplateManifest, Variant,
 } from "./types";
@@ -18,9 +20,15 @@ export interface ActiveJob {
   agent?: AgentEvent[]; phase?: PhaseKey | null;
   /** The template a generation is built from (the build screen names it under its title). */
   template?: string | null;
+  /** The slide a job works on (a slide fix): the stage and the thumbnails mark it. */
+  target?: { generation: string; strategy: string; slide: number };
 }
-/** `items`: what the job works on (the strategies of a generation) — the build screen shows one card per item. */
-export interface RunJobOptions { kind?: JobKind; items?: string[]; template?: string | null; onDone?: (job: Job) => void; onFailed?: (job: Job) => void }
+/** `items`: what the job works on (the strategies of a generation) — the build screen shows one card per item.
+ *  `quiet`: the caller tells the failure itself (no «Не получилось: …» toast from the store). */
+export interface RunJobOptions {
+  kind?: JobKind; items?: string[]; template?: string | null; onDone?: (job: Job) => void; onFailed?: (job: Job) => void;
+  target?: { generation: string; strategy: string; slide: number }; quiet?: boolean;
+}
 
 export interface AppState {
   health: Health | null; healthError: boolean;
@@ -33,7 +41,8 @@ export interface AppState {
   manifest: TemplateManifest | null; manifestLoading: boolean;
   generations: GenerationMeta[]; refreshGenerations(): Promise<void>;
   generationId: string | null; generation: Generation | null; generationLoading: boolean;
-  loadGeneration(gid: string): Promise<void>;
+  /** `hold`: keep the open deck on screen until the new one is ready, then swap inside a view transition (history). */
+  loadGeneration(gid: string, opts?: { hold?: boolean }): Promise<void>;
   activeStrategy: string | null; setActiveStrategy(s: string): void; activeVariant: Variant | null;
   selectedSlide: number; setSelectedSlide(n: number): void; // 1-based
   /** Old view names (the agent and flows speak them) → screen + drawer. */
@@ -76,7 +85,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [generationLoading, setGenerationLoading] = useState(() => !!storage.get(LS.generation));
   const [activeStrategy, setActiveStrategyState] = useState<string | null>(null);
   const [selectedSlide, setSelectedSlideState] = useState(1);
-  const [screen, setScreen] = useState<Screen>("create");
+  // a reload on a deck opens on the result screen at once (its skeleton covers the load and cross-fades into the deck),
+  // never on the create screen first; boot goes back to «Создать» when the stored deck does not load
+  const [screen, setScreen] = useState<Screen>(() => (storage.get(LS.generation) ? "result" : "create"));
   const [detail, setDetail] = useState<DetailKey | null>(null);
   const setTab = useCallback((t: TabKey) => {
     if (t === "template") return setDetail("template");
@@ -160,13 +171,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [report, clearGeneration]);
 
-  /** Loads a generation. A reload of the already open one keeps the chosen variant and slide (clamped). */
-  const fetchGeneration = useCallback(async (gid: string, quiet = false): Promise<Generation | null> => {
+  /** Loads a generation. A reload of the already open one keeps the chosen variant and slide (clamped). `hold` (another
+   *  deck picked over an open one, from the history): the open deck stays on screen while the new one loads and its
+   *  first slide decodes, then the new deck replaces it inside a view transition — never a skeleton in between (the
+   *  history row shows the wait); a failed load leaves the open deck as it was. */
+  const fetchGeneration = useCallback(async (gid: string, quiet = false, hold = false): Promise<Generation | null> => {
     const seq = ++genSeq.current;
     const sameAsOpen = latest.current.generation?.id === gid;
-    setGenerationId(gid);
-    storage.set(LS.generation, gid);
-    if (!sameAsOpen) {
+    const holding = hold && !sameAsOpen && !!latest.current.generation;
+    if (!holding) {
+      setGenerationId(gid);
+      storage.set(LS.generation, gid);
+    }
+    if (!sameAsOpen && !holding) {
       setGeneration(null);
       setGenerationLoading(true);
     }
@@ -176,16 +193,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const names = g.variants.map((v) => v.strategy);
       const keep = sameAsOpen ? latest.current.activeStrategy : null;
       const nextStrategy = keep && names.includes(keep) ? keep : names[0] ?? null;
-      const max = slideCount(g.variants.find((v) => v.strategy === nextStrategy));
-      setGeneration(g);
-      setActiveStrategyState(nextStrategy);
-      setSelectedSlideState((cur) => (sameAsOpen ? clamp(cur, 1, max) : 1));
+      const next = g.variants.find((v) => v.strategy === nextStrategy);
+      const max = slideCount(next);
+      if (holding) {
+        // the slide the deck opens on, decoded first (it paints at once, no blank stage); a slow image does not hold it
+        const first = next?.slides[0];
+        if (next && first) await Promise.race([decodeImage(withRev(first, variantRev(next))).catch(() => {}), new Promise((r) => window.setTimeout(r, 800))]);
+        if (seq !== genSeq.current) return g;
+      }
+      const apply = () => {
+        if (holding) {
+          setGenerationId(gid);
+          storage.set(LS.generation, gid);
+        }
+        setGeneration(g);
+        setActiveStrategyState(nextStrategy);
+        setSelectedSlideState((cur) => (sameAsOpen ? clamp(cur, 1, max) : 1));
+      };
+      if (holding) viewTransition(apply);
+      else apply();
       const { templateId: tid, templates: list } = latest.current;
       if (g.template_id && g.template_id !== tid && list.some((t) => t.template_id === g.template_id)) selectTemplate(g.template_id);
       return g;
     } catch (e) {
       if (seq !== genSeq.current) return null;
-      if (e instanceof ApiError && e.status === 404) clearGeneration();
+      if (e instanceof ApiError && e.status === 404 && !holding) clearGeneration();
       if (!quiet) report(e, "Не удалось открыть презентацию");
       return null;
     } finally {
@@ -193,7 +225,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [report, selectTemplate, clearGeneration]);
 
-  const loadGeneration = useCallback(async (gid: string) => void (await fetchGeneration(gid)), [fetchGeneration]);
+  const loadGeneration = useCallback(async (gid: string, opts?: { hold?: boolean }) => void (await fetchGeneration(gid, false, !!opts?.hold)), [fetchGeneration]);
 
   const setActiveStrategy = useCallback((s: string) => {
     const variant = latest.current.generation?.variants.find((v) => v.strategy === s);
@@ -216,7 +248,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       patch(p);
       window.setTimeout(() => setActiveJob((cur) => (cur && cur.id === jobId ? null : cur)), 1500);
     };
-    setActiveJob({ id: jobId, label, progress: 0, message: "В очереди…", status: "queued", kind: opts?.kind ?? "other", startedAt: Date.now(), items: opts?.items, template: opts?.template });
+    setActiveJob({ id: jobId, label, progress: 0, message: "В очереди…", status: "queued", kind: opts?.kind ?? "other", startedAt: Date.now(), items: opts?.items, template: opts?.template, target: opts?.target });
     const stop = trackJob(jobId, {
       onEvent: (ev) => {
         if (ev.status === "done" || ev.status === "failed") return; // settled below, once the full job record is fetched
@@ -249,7 +281,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const reason = firstLine(job.error ?? job.message);
         settle({ status: "failed", message: reason });
         // one notice per failure: with the helper open, its own message tells the story
-        if (!opts?.onFailed || !latest.current.agentOpen) pushToast("error", `Не получилось: ${reason}`);
+        if (!opts?.quiet && (!opts?.onFailed || !latest.current.agentOpen)) pushToast("error", `Не получилось: ${reason}`);
         opts?.onFailed?.(job);
       },
     });
@@ -291,7 +323,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       const storedGen = storage.get(LS.generation);
       if (storedGen && (await fetchGeneration(storedGen, true)) && alive) setTab("variants");
-      else if (alive) setGenerationLoading(false);
+      else if (alive) {
+        setGenerationLoading(false);
+        // the stored deck is gone (404 cleared it) or did not load, and no other deck was opened meanwhile
+        const now = storage.get(LS.generation);
+        if (storedGen && (now === null || now === storedGen) && latest.current.screen === "result") setScreen("create");
+      }
     };
     const tick = async () => {
       let ok = true;

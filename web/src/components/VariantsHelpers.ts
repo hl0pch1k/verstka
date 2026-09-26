@@ -1,6 +1,6 @@
 // Pure helpers shared by the «Варианты» panel pieces (filmstrip, preview overlays, slide issues).
 import type { AuditReport, BboxFrac, Issue, LayoutSlide, Severity, Variant } from "../types";
-import { plural } from "../lib/utils";
+import { plural, SEVERITY_LABEL } from "../lib/utils";
 import type { BadgeTone } from "./ui/Badge";
 
 export const SEVERITY_ORDER: Record<Severity, number> = { error: 0, warn: 1, info: 2 };
@@ -143,7 +143,15 @@ const hits = (a: Rect, b: Rect, gap = 0) => a.x < b.x + b.w + gap && b.x < a.x +
  * pills); one that also leaves the other frames uncovered wins. No spot left: null — the frame stays, its remarks are
  * in its tooltip. A label is never cut.
  */
-export function placeTags(boxes: StageBox[], w: number, h: number, size: (sev: Severity) => { w: number; h: number }, avoid: Rect[] = []): Map<string, TagSpot | null> {
+export function placeTags(
+  boxes: StageBox[],
+  w: number,
+  h: number,
+  size: (place: StageBox) => { w: number; h: number },
+  avoid: Rect[] = [],
+  /** The candidate spots, best first (the default: the tag spots below). */
+  spotsFor?: (r: Rect, t: { w: number; h: number }) => TagSpot[],
+): Map<string, TagSpot | null> {
   const out = new Map<string, TagSpot | null>();
   if (w <= 0 || h <= 0) return out;
   const px = (b: BboxFrac): Rect => ({ x: b.x * w, y: b.y * h, w: b.w * w, h: b.h * h });
@@ -153,10 +161,10 @@ export function placeTags(boxes: StageBox[], w: number, h: number, size: (sev: S
     .sort((a, b) => SEVERITY_ORDER[a.sev] - SEVERITY_ORDER[b.sev] || a.box.y - b.box.y || a.box.x - b.box.x);
   for (const b of order) {
     const r = px(b.box);
-    const t = size(b.sev);
+    const t = size(b);
     const others = boxes.filter((o) => o !== b).map((o) => px(o.box));
     const rect = (s: TagSpot): Rect => ({ x: r.x + s.dx, y: r.y + s.dy, w: t.w, h: t.h });
-    const spots: TagSpot[] = [
+    const spots: TagSpot[] = spotsFor ? spotsFor(r, t) : [
       { dx: 0, dy: -t.h, side: "above", right: false },
       { dx: r.w - t.w, dy: -t.h, side: "above", right: true },
       { dx: 0, dy: 0, side: "inside", right: false },
@@ -184,4 +192,133 @@ export function placeTags(boxes: StageBox[], w: number, h: number, size: (sev: S
 export function variantScore(v: Variant, metaScore?: number | null): number | null {
   const score = v.audit?.summary.score ?? metaScore ?? v.run_manifest?.audit?.score ?? null;
   return typeof score === "number" && Number.isFinite(score) ? score : null;
+}
+
+// ---- remarks on the stage (the «Замечания» switch, the RemarksPanel, the lightbox) -------------------------------
+
+/** A remark of the current slide as the stage and the panel show it: the same number `n` on the slide's pin and the
+ *  list row. `boxes`: its own usable frames; `whole`: it has no place on the slide (it is about the whole slide). */
+export interface StageRemark { issue: Issue; n: number; title: string; text: string; boxes: BboxFrac[]; whole: boolean }
+
+/** A remark as a person reads it: the colour codes of a contrast note stay in the data, a decimal point is a comma. */
+const plainMessage = (text: string) => {
+  const t = text
+    .replace(/\s*\(#[0-9a-f]{3,8}\s+на\s+#[0-9a-f]{3,8}(?:,\s*([^)]*))?\)/gi, (_m, rest?: string) => (rest ? ` (${rest})` : ""))
+    .replace(/(\d)\.(\d)/g, "$1,$2")
+    .trim();
+  return t ? t.charAt(0).toUpperCase() + t.slice(1) : t;
+};
+
+/** The titles the UI words itself (the check registry's are too technical or too long for a list row). */
+const REMARK_TITLE: Record<string, string> = {
+  slide_content: "Содержание слайда",
+  deck_coherence: "Связность презентации",
+  contrast_low: "Контраст текста к фону ниже 4,5:1",
+  font_not_in_template: "Шрифт не из шаблона",
+  fill_ratio: "Слайд слишком пустой или слишком плотный",
+  chrome_moved: "Логотип или колонтитул не на месте",
+};
+
+/** The row title of a remark: the UI's own words, else the check's title (no «(VLM)», a decimal comma), else the
+ *  severity. */
+export function remarkTitle(checkId: string, specTitle?: string | null, severity: Severity = "warn"): string {
+  const own = REMARK_TITLE[checkId];
+  if (own) return own;
+  const spec = (specTitle ?? "").replace(/\s*\((?:VLM|LLM)\)\s*/g, " ").replace(/(\d)\.(\d)/g, "$1,$2").trim();
+  return spec || SEVERITY_LABEL[severity];
+}
+
+/** The remarks of one slide, numbered: errors, then warnings, then the model's notes; within a severity in reading
+ *  order (the top-left of the first frame: y, then x), the whole-slide remarks last. A remark without a frame of its
+ *  own that names an element of a framed remark takes that frame's place (it is not «whole»). */
+export function stageRemarks(issues: Issue[], titleOf: (checkId: string) => string | null | undefined): StageRemark[] {
+  const places = stagePlaces(issues);
+  const loose = new Set(places.unplaced.map((i) => i.id));
+  const anchor = (i: Issue): BboxFrac | null => {
+    for (const b of i.bboxes) {
+      const c = clampBox(b);
+      if (c) return c;
+    }
+    return places.boxes.find((p) => p.issues.includes(i))?.box ?? null;
+  };
+  const rows = issues.map((issue) => ({ issue, at: anchor(issue), whole: loose.has(issue.id) }));
+  rows.sort((a, b) => {
+    const s = SEVERITY_ORDER[a.issue.severity] - SEVERITY_ORDER[b.issue.severity];
+    if (s) return s;
+    if (a.whole !== b.whole) return a.whole ? 1 : -1;
+    const ay = a.at?.y ?? 2;
+    const by = b.at?.y ?? 2;
+    // one text line apart counts as the same row: then left to right
+    if (Math.abs(ay - by) > 0.02) return ay - by;
+    return (a.at?.x ?? 2) - (b.at?.x ?? 2);
+  });
+  return rows.map(({ issue, whole }, k) => ({
+    issue,
+    n: k + 1,
+    title: remarkTitle(issue.check_id, titleOf(issue.check_id), issue.severity),
+    text: plainMessage(issue.message),
+    boxes: issue.bboxes.map(clampBox).filter((b): b is BboxFrac => !!b),
+    whole,
+  }));
+}
+
+export type RemarkTone = "error" | "warn" | "neutral";
+/** The switch badge's colour: the worst severity among the remarks (neutral for the model's notes only). */
+export function remarkTone(issues: Issue[]): RemarkTone {
+  const worst = worstSeverity(issues);
+  return worst === "error" ? "error" : worst === "warn" ? "warn" : "neutral";
+}
+
+/** The next slide after `from` that has remarks (wrapping around); null when no other slide has any. */
+export function nextFlagged(bySlide: Map<number, Issue[]>, from: number, total: number): number | null {
+  for (let k = 1; k < total; k += 1) {
+    const n = ((from - 1 + k) % total) + 1;
+    if ((bySlide.get(n)?.length ?? 0) > 0) return n;
+  }
+  return null;
+}
+
+/** Spots for the numbered pins: a pin straddles its frame's corner like a badge (8px out to the side, 10px above),
+ *  top-left first; then the other corners; then inside the top corners; then just outside the frame. A frame too thin
+ *  for that (one line of text, a rule) would have the pin cover the very text it flags: its pins sit just outside it
+ *  first — above its start, beside it, level with its middle — and straddle a corner only when there is no room. */
+export function pinSpots(r: Rect, t: { w: number; h: number }): TagSpot[] {
+  const o = 8;
+  const up = 10;
+  const gap = 4;
+  const corners: TagSpot[] = [
+    { dx: -o, dy: -up, side: "above", right: false },
+    { dx: r.w - t.w + o, dy: -up, side: "above", right: true },
+    { dx: -o, dy: r.h - t.h + up, side: "below", right: false },
+    { dx: r.w - t.w + o, dy: r.h - t.h + up, side: "below", right: true },
+    { dx: 4, dy: 4, side: "inside", right: false },
+    { dx: r.w - t.w - 4, dy: 4, side: "inside", right: true },
+  ];
+  const outside: TagSpot[] = [
+    { dx: 0, dy: -t.h - gap, side: "above", right: false },
+    { dx: 0, dy: r.h + gap, side: "below", right: false },
+    { dx: -t.w - gap, dy: 0, side: "beside", right: false },
+    { dx: r.w + gap, dy: 0, side: "beside", right: true },
+  ];
+  const mid = (r.h - t.h) / 2;
+  if (r.h < t.h + 8) {
+    return [
+      { dx: 0, dy: -t.h - gap, side: "above", right: false },
+      { dx: -t.w - gap, dy: mid, side: "beside", right: false },
+      { dx: r.w - t.w, dy: -t.h - gap, side: "above", right: true },
+      { dx: 0, dy: r.h + gap, side: "below", right: false },
+      { dx: r.w + gap, dy: mid, side: "beside", right: true },
+      ...corners,
+    ];
+  }
+  if (r.w < t.w + 8) {
+    return [
+      { dx: -t.w - gap, dy: 0, side: "beside", right: false },
+      { dx: r.w + gap, dy: 0, side: "beside", right: true },
+      { dx: 0, dy: -t.h - gap, side: "above", right: false },
+      { dx: 0, dy: r.h + gap, side: "below", right: false },
+      ...corners,
+    ];
+  }
+  return [...corners, ...outside];
 }

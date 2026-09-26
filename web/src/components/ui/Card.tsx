@@ -15,7 +15,7 @@ export function Card({ interactive = false, selected = false, className, ...rest
       className={cn(
         "rounded-2xl bg-white",
         selected ? "shadow-selected" : "shadow-card",
-        interactive && "cursor-pointer transition-shadow duration-150 hover:shadow-raise",
+        interactive && "tap-soft cursor-pointer hover:shadow-raise",
         className,
       )}
       {...rest}

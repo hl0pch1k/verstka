@@ -1,19 +1,22 @@
 // «Качество» (details drawer): the verdict, the errors and warnings by slide with the fixes a person can apply, the
 // minor notes folded, what was already fixed automatically, and the list of checks. The variant follows the drawer's
-// menu.
-import { useCallback, useEffect, useMemo, useState } from "react";
+// menu. Motion: a filter swaps the list with a short cross-fade; during a fix the remarks it works on dim, and after
+// it the slides with nothing left fold away while the score ring counts to the new score.
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ShieldCheck } from "lucide-react";
 import { api } from "../api";
 import { errText } from "../lib/narrate";
 import { useApp } from "../store";
 import type { FixRequest, FixResult, Issue } from "../types";
 import { AppliedFixes, ChecksReference } from "./AuditFixes";
-import { auditRev, groupBySlide, isFixable, isMinor } from "./AuditHelpers";
-import { MinorNotes, SlideIssueGroup } from "./AuditIssues";
+import { auditRev, groupBySlide, isFixable, isMinor, type SlideGroup } from "./AuditHelpers";
+import { MinorNotes, SlideIssueGroup, useLeaving } from "./AuditIssues";
 import { AuditSummaryCard } from "./AuditSummary";
 import { Button } from "./ui/Button";
 import { Chip } from "./ui/Chip";
+import { Collapse } from "./ui/Collapse";
 import { Collapsible } from "./ui/Collapsible";
+import { CountUp } from "./ui/CountUp";
 import { EmptyState } from "./ui/EmptyState";
 
 type FilterKey = "all" | "error" | "warn" | "fixable";
@@ -25,14 +28,38 @@ const FILTERS: Array<{ key: FilterKey; label: string; test(i: Issue): boolean }>
   { key: "fixable", label: "Исправимые", test: isFixable },
 ];
 
+/** The slides' groups: a group whose remarks a fix removed folds away (300 ms) and the groups below glide up. The gap
+ *  above each group lives inside its fold (a padded box: padding on the clipped box itself would stay behind as a
+ *  16px strip and snap shut at the end), so it folds with it and an empty list takes no room at all. */
+function IssueGroups({ groups, render }: { groups: SlideGroup[]; render(g: SlideGroup, leaving: boolean): JSX.Element }) {
+  const list = useLeaving(groups, (g) => String(g.slide), (a, b) => a.slide - b.slide);
+  return (
+    <div>
+      {list.map(({ item, leaving }) => (
+        <Collapse key={item.slide} open={!leaving}>
+          <div className="pt-4">{render(item, leaving)}</div>
+        </Collapse>
+      ))}
+    </div>
+  );
+}
+
 export function AuditPanel() {
   const { generation, generationLoading, generationId, activeStrategy, activeVariant, selectedSlide, setSelectedSlide, setDetail, activeJob, runJob, loadGeneration, toast, manifest } = useApp();
 
   const audit = activeVariant?.audit ?? null;
   const scopeKey = `${generationId ?? ""}/${activeStrategy ?? ""}/${auditRev(audit)}`;
-  const [filter, setFilter] = useState<FilterKey>("all");
+  const [filter, setFilterState] = useState<FilterKey>("all");
+  // the list cross-fades when the person picks another filter (not when the tab opens: the cards rise then)
+  const filtered = useRef(false);
+  const setFilter = (f: FilterKey) => {
+    filtered.current = true;
+    setFilterState(f);
+  };
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [submitting, setSubmitting] = useState(false);
+  // what the running fix works on: the marked remarks, or every fixable one («Исправить всё»)
+  const [fixing, setFixing] = useState<Set<string> | "all" | null>(null);
 
   const allIssues = useMemo(() => audit?.issues ?? [], [audit]);
   // errors, warnings and the model's remarks are the list; the minor notes of the rules stay folded below
@@ -51,10 +78,14 @@ export function AuditPanel() {
   // a new report (another variant, or fixes just applied) clears the selection
   useEffect(() => setSelected(new Set()), [scopeKey]);
   useEffect(() => {
-    if (filter !== "all" && counts[filter] === 0) setFilter("all");
+    if (filter !== "all" && counts[filter] === 0) setFilterState("all");
   }, [counts, filter]);
 
   const busy = (!!activeJob && (activeJob.status === "queued" || activeJob.status === "running")) || submitting;
+  useEffect(() => {
+    if (!busy) setFixing(null);
+  }, [busy]);
+  const isFixing = (i: Issue) => !!fixing && busy && (fixing === "all" ? isFixable(i) : fixing.has(i.id));
   const select = useCallback((id: string, on: boolean) => {
     setSelected((cur) => {
       const next = new Set(cur);
@@ -68,6 +99,7 @@ export function AuditPanel() {
     if (!generationId || !activeStrategy || busy) return;
     const gid = generationId;
     setSubmitting(true);
+    setFixing(body.issue_ids ? new Set(body.issue_ids) : "all");
     try {
       const { job_id } = await api.fixes(gid, activeStrategy, body);
       runJob(job_id, "Исправляю замечания", {
@@ -80,6 +112,7 @@ export function AuditPanel() {
         },
       });
     } catch (e) {
+      setFixing(null);
       toast("error", `Не удалось запустить исправление: ${errText(e)}`);
     } finally {
       setSubmitting(false);
@@ -123,8 +156,8 @@ export function AuditPanel() {
           (fixableMain > 0 || picked > 0 || fixableTotal > 0) && (
             <>
               {picked > 0 && (
-                <Button variant="primary" loading={submitting} disabled={busy} onClick={() => void runFixes({ issue_ids: [...selected] })} className="animate-fade">
-                  Исправить отмеченные ({picked})
+                <Button variant="primary" loading={submitting} disabled={busy} onClick={() => void runFixes({ issue_ids: [...selected] })} className="animate-fade-in">
+                  Исправить отмеченные (<CountUp value={picked} ms={400} />)
                 </Button>
               )}
               {fixableMain > 0 && (
@@ -143,31 +176,40 @@ export function AuditPanel() {
         }
       />
 
-      {mainIssues.length > 0 && (
-        <>
-          {showFilters && (
-            <div className="flex flex-wrap items-center gap-2" role="radiogroup" aria-label="Какие замечания показать">
-              {shownFilters.map((f) => (
-                <Chip key={f.key} surface="tinted" role="radio" aria-checked={filter === f.key} selected={filter === f.key} count={counts[f.key]} onClick={() => setFilter(f.key)}>
-                  {f.label}
-                </Chip>
-              ))}
-            </div>
-          )}
-          {groups.map((g) => (
-            <SlideIssueGroup
-              key={g.slide}
-              group={g}
-              headline={headlineOf(g.slide)}
-              current={g.slide > 0 && g.slide === selectedSlide}
-              selected={selected}
-              disabled={busy}
-              onSelect={select}
-              onShow={() => show(g.slide)}
-            />
-          ))}
-        </>
-      )}
+      {/* the filter row and the slides' groups carry their own 16px gaps inside their folds (hence no gap of the column
+          here: !mt-0), so when a fix leaves nothing, everything folds away and the cards below glide up by exactly that
+          much — no strip left behind, no snap at the end */}
+      <div className="!mt-0">
+        <Collapse open={mainIssues.length > 0 && showFilters}>
+          <div className="flex flex-wrap items-center gap-2 pt-4" role="radiogroup" aria-label="Какие замечания показать">
+            {shownFilters.map((f) => (
+              <Chip key={f.key} surface="tinted" role="radio" aria-checked={filter === f.key} selected={filter === f.key} count={counts[f.key]} onClick={() => setFilter(f.key)}>
+                {f.label}
+              </Chip>
+            ))}
+          </div>
+        </Collapse>
+        {/* keyed by the filter (a cross-fade when it changes) and the variant (another variant's list is a swap, not a
+            fold); a fix keeps the key, so the slides it cleared fold away — also the last one */}
+        <div key={filter} className={filtered.current ? "animate-fade [animation-duration:150ms]" : undefined}>
+          <IssueGroups
+            key={`${generationId ?? ""}/${activeStrategy ?? ""}`}
+            groups={groups}
+            render={(g, leaving) => (
+              <SlideIssueGroup
+                group={g}
+                headline={headlineOf(g.slide)}
+                current={g.slide > 0 && g.slide === selectedSlide}
+                selected={selected}
+                disabled={busy || leaving}
+                onSelect={select}
+                onShow={() => show(g.slide)}
+                fixing={(i) => leaving || isFixing(i)}
+              />
+            )}
+          />
+        </div>
+      </div>
 
       {minor.length > 0 && (
         <Collapsible

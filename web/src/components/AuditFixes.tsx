@@ -1,5 +1,6 @@
-// Quality check, below the remarks: what was already fixed automatically (in words), and which checks exist.
-import { useEffect, useMemo, useState } from "react";
+// Quality check, below the remarks: what was already fixed automatically (in words), and which checks exist. The
+// checks list, when it had to be fetched, fades in where the (delayed) spinner stood.
+import { useEffect, useMemo, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { api } from "../api";
 import { errText } from "../lib/narrate";
@@ -108,6 +109,9 @@ export function ChecksReference({ total }: { total?: number }) {
     };
   }, [open, attempt]);
 
+  // the list fades in only when it replaces the spinner (a cached list is simply there when the section opens)
+  const fetched = useRef(false);
+  if (state.status === "loading") fetched.current = true;
   const groups = useMemo(() => {
     const map = new Map<string, CheckSpec[]>();
     for (const c of state.checks) map.set(c.category, [...(map.get(c.category) ?? []), c]);
@@ -128,8 +132,9 @@ export function ChecksReference({ total }: { total?: number }) {
           {state.error}
         </Notice>
       )}
-      {state.status === "ready" &&
-        groups.map(({ category, list }) => (
+      {state.status === "ready" && (
+        <div className={fetched.current ? "animate-fade" : undefined}>
+          {groups.map(({ category, list }) => (
           <section key={category} className="pt-4 first:pt-0">
             <h4 className="mb-1 text-footnote font-semibold text-zinc-900">{categoryLabel(category)}</h4>
             <ul>
@@ -145,7 +150,9 @@ export function ChecksReference({ total }: { total?: number }) {
               ))}
             </ul>
           </section>
-        ))}
+          ))}
+        </div>
+      )}
     </Collapsible>
   );
 }

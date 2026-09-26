@@ -14,6 +14,7 @@ import json
 import logging
 import re
 import time
+from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 from verstka.schemas.outline import Brief, DeckOutline, OutlineSlide
@@ -149,19 +150,55 @@ def _ground(o: DeckOutline, brief: Brief, structure) -> DeckOutline:
     return o
 
 
-def revise_slide(
+def describe_change(old: OutlineSlide, new: OutlineSlide) -> str:
+    """What a redesign changed, in plain words: «было — список (5 пунктов), стало — этапы (5); заголовок «…»»."""
+    from verstka.planning import agent as A
+
+    before, after = A.form_ru(old), A.form_ru(new)
+    changed = []
+    if before != after:
+        changed.append(f"было — {before}, стало — {after}")
+    if new.headline != old.headline:
+        changed.append(f"заголовок «{new.headline}»")
+    if (new.takeaway or "") != (old.takeaway or ""):
+        changed.append(f"вывод «{new.takeaway}»" if new.takeaway else "без отдельного вывода")
+    return "; ".join(changed) if changed else "переписан текст"
+
+
+@dataclass
+class SlideRedesign:
+    """One slide redesigned: the grounded outline (the caller takes slide `index` and the registry), the agent's reply,
+    who designed it ("model" | "rules") and what changed («было — пункты, стало — этапы (6 шагов)»)."""
+
+    outline: DeckOutline
+    reply: str
+    how: str
+    what: str
+
+
+def redesign_slide(
     outline: DeckOutline,
     index: int,
-    request: str,
     brief: Optional[Brief],
     manifest: Optional[TemplateManifest],
     *,
+    request: str = "",
+    note: Optional[str] = None,
+    start_line: Optional[str] = None,
+    rationale: Optional[str] = None,
+    log_line: Optional[str] = None,
     skills: Any = None,
     providers: Any = None,
     progress: Optional[Callable[..., None]] = None,
-) -> tuple[DeckOutline, str]:
-    """The outline with slide `index` (1-based) redesigned by `request`, and what the agent says about it. Raises
-    ValueError with a plain Russian message when it cannot do it (the job reports it in the chat)."""
+) -> SlideRedesign:
+    """Slide `index` (1-based) redesigned by the slide designer's revision mode.
+
+    `request` is what the person asks («покажи этапами»; may be empty for a fix of remarks), `note` the designer's
+    `issues` block (default: the person's request), `start_line` what the designer says it does («переделываю по
+    замечаниям»; default: the request in quotes), `rationale` the start of the slide's «почему так» (default: «По вашей
+    просьбе «…»»), `log_line` the agent log's line with a `{what}` placeholder. Without a model (or when it fails) the
+    form the request names is made by the rules; with a `note` and no form named it raises ValueError("model_unavailable")
+    (the slide fix then fixes the slide in place). Raises ValueError with a plain Russian message otherwise."""
     from verstka.planning import agent as A
     from verstka.planning.strategies import load_strategies
 
@@ -170,6 +207,8 @@ def revise_slide(
     old = outline.slides[index - 1]
     if old.kind.value in FRAME_KINDS:
         raise ValueError("обложку и разделители агент собирает из названия и разделов текста — поменяйте их в тексте и соберите презентацию заново")
+    request = request or ""
+    fixing = note is not None
     brief = brief or Brief(text=_slide_text(old))
     tracker = A._Tracker(progress)
     structure, _ = A.analyse_brief(brief)  # the rules' reading: no model call, the data the deck was built from
@@ -188,15 +227,17 @@ def revise_slide(
     strategy = strategies.get(outline.strategy or "structured") or next(iter(strategies.values()))
     clock = A._Clock(providers if skills is not None else None, time.monotonic() + EDIT_BUDGET_S)
     agent = A._Agent(brief, manifest, [strategy], skills, providers, tracker, clock, raw=[])
+    form = requested_form(request) if request.strip() else None
     new: Optional[OutlineSlide] = None
     how = ""
     if agent.models:
-        tracker.emit("designer", f"Дизайнер: слайд {index} — «{request[:140]}».", slide=index)
-        note = (
-            f"- The person who reads this deck asks to change this slide: «{request}». Do exactly what they ask and keep the "
-            "rest of your design. Their request overrides the form the brief asked for this slide. Every figure still comes "
-            "from the source text or the data list."
-        )
+        tracker.emit("designer", f"Дизайнер: слайд {index} — {start_line if start_line is not None else '«' + request[:140] + '»'}.", slide=index)
+        if note is None:
+            note = (
+                f"- The person who reads this deck asks to change this slide: «{request}». Do exactly what they ask and keep the "
+                "rest of your design. Their request overrides the form the brief asked for this slide. Every figure still comes "
+                "from the source text or the data list."
+            )
         try:
             d = agent.model_design(unit, index, neighbours, ctx, clock.deadline, issues=note, previous=A._previous_json(old))
             A.tidy_design(d, ctx)
@@ -204,42 +245,70 @@ def revise_slide(
             how = "model"
         except Exception as e:  # noqa: BLE001 - the rules try the form the request names
             log.warning("slide edit: the designer failed", exc_info=True)
-            tracker.emit("designer", "Дизайнер: модель не ответила — пробую сделать по правилам.", slide=index)
+            if not fixing or form is not None:
+                tracker.emit("designer", "Дизайнер: модель не ответила — пробую сделать по правилам.", slide=index)
             how = f"model failed: {str(e)[:120]}"
     if new is None:
-        form = requested_form(request)
         if form is not None:
             new = rules_form(outline, old, form[0], form[1])
             if new is not None:
                 how = "rules"
         if new is None:
             if form is None:
+                if fixing:
+                    raise ValueError("model_unavailable")
                 raise ValueError("без модели могу только сменить форму слайда («таблицей», «круговой диаграммой», «карточками»), а модель сейчас недоступна")
             raise ValueError(f"содержимое слайда {index} не ложится в такую форму: для неё нет подходящих данных в тексте")
     new = keep_what_was_asked(old, new.model_copy(deep=True), request, outline)
     new.id = old.id
     new.spec_ref = old.spec_ref
     why = (new.rationale or "").strip()
-    new.rationale = f"По вашей просьбе «{request.strip()}»." + (f" {why}" if why else "")
+    lead = rationale if rationale is not None else f"По вашей просьбе «{request.strip()}»"
+    lead = lead.strip()
+    if lead and lead[-1] not in ".!?…":
+        lead += "."
+    new.rationale = lead + (f" {why}" if why else "")
     edited = outline.model_copy(deep=True)
     edited.slides[index - 1] = new
-    grounded = _ground(edited, brief, structure)
-    result = grounded.slides[index - 1] if index <= len(grounded.slides) else None
+    checked = _ground(edited, brief, structure)
+    # the slide by its id: the checks may drop slides whose figures the text does not have (a deck built from a plan
+    # has only this slide's text to check against), and every other slide stays exactly as it was
+    result = next((s for s in checked.slides if s.id == new.id), None)
     if result is None:
         raise ValueError("после проверки цифр на слайде ничего не осталось — попросите иначе")
-    before, after = A.form_ru(old), A.form_ru(result)
-    changed = []
-    if before != after:
-        changed.append(f"было — {before}, стало — {after}")
-    if result.headline != old.headline:
-        changed.append(f"заголовок «{result.headline}»")
-    if (result.takeaway or "") != (old.takeaway or ""):
-        changed.append(f"вывод «{result.takeaway}»" if result.takeaway else "без отдельного вывода")
-    what = "; ".join(changed) if changed else "переписан текст"
+    grounded = outline.model_copy(deep=True)
+    grounded.slides[index - 1] = result
+    have = {x.id for x in grounded.series}
+    grounded.series.extend(x for x in checked.series if x.id not in have)
+    have = {x.id for x in grounded.facts}
+    grounded.facts.extend(x for x in checked.facts if x.id not in have)
+    for t in checked.tables:
+        if not any(t.columns == u.columns and t.rows == u.rows for u in grounded.tables):
+            grounded.tables.append(t)
+    after = A.form_ru(result)
+    what = describe_change(old, result)
     reply = f"Слайд {index} переделан: {what}."
     if how == "rules":
         reply += " Модель не ответила, форму сменил по правилам."
     tracker.emit("designer", f"Дизайнер: слайд {index} — {after}.", slide=index)
-    grounded.agent_log = [*outline.agent_log, f"Правка: слайд {index} по просьбе «{request.strip()[:160]}» — {what}."]
-    log.info("slide edit %s: %s", how, json.dumps({"slide": index, "request": request[:200]}, ensure_ascii=False))
-    return grounded, reply
+    line = log_line if log_line is not None else f"Правка: слайд {index} по просьбе «{request.strip()[:160]}» — {{what}}."
+    grounded.agent_log = [*outline.agent_log, line.replace("{what}", what)]
+    log.info("slide edit %s: %s", how, json.dumps({"slide": index, "request": request[:200], "fix": fixing}, ensure_ascii=False))
+    return SlideRedesign(outline=grounded, reply=reply, how=how, what=what)
+
+
+def revise_slide(
+    outline: DeckOutline,
+    index: int,
+    request: str,
+    brief: Optional[Brief],
+    manifest: Optional[TemplateManifest],
+    *,
+    skills: Any = None,
+    providers: Any = None,
+    progress: Optional[Callable[..., None]] = None,
+) -> tuple[DeckOutline, str]:
+    """The outline with slide `index` (1-based) redesigned by `request`, and what the agent says about it. Raises
+    ValueError with a plain Russian message when it cannot do it (the job reports it in the chat)."""
+    r = redesign_slide(outline, index, brief, manifest, request=request, skills=skills, providers=providers, progress=progress)
+    return r.outline, r.reply

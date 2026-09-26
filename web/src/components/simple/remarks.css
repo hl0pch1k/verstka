@@ -1,0 +1,51 @@
+/* Remarks on the slide and «Исправить слайд» (REMARKS_SPEC §1.7, MOTION_SPEC §3.9). The shared tokens (curves,
+   durations, the pop / fade / rise animations) live in tailwind.config.js and index.css; only this feature's own
+   keyframes are here. Transform and opacity only, except the box-shadow ping and the row flash (paint only). */
+
+/* the light band that sweeps the slide while the agent rebuilds it; it reads on dark and white slides alike */
+@keyframes remark-scan { from { transform: translateX(-100%); } to { transform: translateX(350%); } }
+.remark-scan {
+  position: absolute; inset-block: 0; left: 0; width: 40%; pointer-events: none;
+  background: linear-gradient(100deg, transparent, rgba(0, 119, 255, 0.1) 30%, rgba(255, 255, 255, 0.55) 50%, rgba(0, 119, 255, 0.1) 70%, transparent);
+  animation: remark-scan 1.8s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+/* the frames of the remarks being fixed breathe */
+@keyframes remark-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+.remark-breathe { animation: remark-breathe 1.6s var(--ease-in-out, ease-in-out) infinite; }
+
+/* a ring that expands from a frame (a row was clicked) or from the timeline's active dot (looping) */
+@keyframes remark-ping {
+  from { box-shadow: 0 0 0 0 var(--ping, rgba(0, 119, 255, 0.35)); }
+  to { box-shadow: 0 0 0 10px transparent; }
+}
+.remark-ping { animation: remark-ping 600ms var(--ease-out, ease-out) 1; }
+.remark-ping-loop { animation: remark-ping 1.2s var(--ease-out, ease-out) infinite; }
+
+/* a list row picked on the slide flashes once */
+@keyframes remark-flash { from { background-color: #ebf4ff; } to { background-color: transparent; } }
+.remark-flash { animation: remark-flash 700ms var(--ease-out, ease-out) 1; }
+
+/* the emerald check where a fixed remark was: pops in (spring), holds, fades out — 1240 ms in all */
+@keyframes remark-done {
+  0% { opacity: 0; transform: scale(0.5); }
+  19% { opacity: 1; transform: scale(1.08); }
+  26% { transform: scale(1); }
+  76% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(0.9); }
+}
+.remark-done { animation: remark-done 1240ms var(--ease-out, ease-out) forwards; }
+
+/* the frame glow of a whole-slide remark and the fixing ring: colour and opacity only */
+.remark-glow { transition: opacity 150ms var(--ease-std, ease); }
+
+@media (prefers-reduced-motion: reduce) {
+  .remark-scan { display: none; }
+  .remark-breathe, .remark-ping, .remark-ping-loop, .remark-flash { animation: none !important; }
+  .remark-done { display: none; }
+}
+
+/* a whole-slide remark was clicked in the list: the frame's inset glow flashes once */
+@keyframes remark-inset-flash { 0% { opacity: 0; } 30% { opacity: 1; } 100% { opacity: 0; } }
+.remark-inset-flash { animation: remark-inset-flash 700ms var(--ease-out, ease-out) 1 forwards; }
+@media (prefers-reduced-motion: reduce) { .remark-inset-flash { animation: none; opacity: 0; } }

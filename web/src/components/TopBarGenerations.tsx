@@ -42,6 +42,7 @@ const titleOf = (g: GenerationMeta) =>
 
 function Cover({ g, busy }: { g: GenerationMeta; busy: boolean }) {
   const [broken, setBroken] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const running = g.status === "running" || g.status === "queued";
   const failed = g.status === "failed";
   const src = g.strategies[0] ? `/api/generations/${g.id}/${g.strategies[0]}/slides/slide-001.jpg` : null;
@@ -52,7 +53,18 @@ function Cover({ g, busy }: { g: GenerationMeta; busy: boolean }) {
       ) : failed ? (
         <AlertCircle className="h-4 w-4 text-zinc-400" aria-hidden />
       ) : src && !broken ? (
-        <img src={src} alt="" loading="lazy" decoding="async" onError={() => setBroken(true)} className="h-full w-full object-cover" />
+        <img
+          ref={(el) => {
+            if (el?.complete && el.naturalWidth > 0 && !loaded) setLoaded(true);
+          }}
+          src={src}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          onLoad={() => setLoaded(true)}
+          onError={() => setBroken(true)}
+          className={cn("h-full w-full object-cover transition-opacity duration-200 ease-out", loaded ? "opacity-100" : "opacity-0")}
+        />
       ) : (
         <Layers className="h-4 w-4 text-zinc-400" aria-hidden />
       )}
@@ -190,7 +202,7 @@ export function TopBarGenerations({ generations, currentId, onSelect }: Props) {
           className={cn(
             // 20px under the 40px trigger = 8px under the 64px header
             "absolute right-0 top-[calc(100%+20px)] z-40 w-[440px] origin-top-right overflow-hidden rounded-2xl bg-white text-zinc-900 shadow-pop outline-none",
-            leaving ? "pointer-events-none animate-drop-out" : "animate-drop-in",
+            leaving ? "pointer-events-none animate-drop-out rm-fade-out" : "animate-drop-in rm-fade",
           )}
         >
           {list.length === 0 ? (
@@ -234,7 +246,7 @@ export function TopBarGenerations({ generations, currentId, onSelect }: Props) {
                             onClick={() => void pick(g.id)}
                             title={`${title}\n${meta}`}
                             className={cn(
-                              "mx-2 flex min-h-[72px] w-[calc(100%-16px)] cursor-pointer items-start gap-3 rounded-xl p-2 text-left transition-colors duration-150 focus-visible:outline-offset-[-2px] disabled:cursor-default",
+                              "tap-soft mx-2 flex min-h-[72px] w-[calc(100%-16px)] cursor-pointer items-start gap-3 rounded-xl p-2 text-left focus-visible:outline-offset-[-2px] disabled:cursor-default",
                               current ? "bg-accent-50" : "hover:bg-zinc-100",
                               busy !== null && busy !== g.id && "opacity-60",
                             )}

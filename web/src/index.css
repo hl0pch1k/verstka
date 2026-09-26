@@ -4,6 +4,18 @@
 
 :root {
   color-scheme: light;
+  /* motion tokens (MOTION_SPEC §1): the same curves are `EASE` in lib/motion.ts and the tailwind `ease-*` classes */
+  --ease-std: cubic-bezier(0.2, 0, 0, 1); /* hovers and state changes: colour, background, shadow */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1); /* every arrival */
+  --ease-in: cubic-bezier(0.4, 0, 1, 1); /* every departure */
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1); /* cross-fades between two visible states, loops */
+  --ease-glide: cubic-bezier(0.32, 0.72, 0, 1); /* anything that travels while visible: sheets, thumbs, FLIP */
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1); /* small confirmations only (≈10% overshoot) */
+  --dur-instant: 100ms;
+  --dur-fast: 150ms;
+  --dur-base: 200ms;
+  --dur-slow: 300ms;
+  --dur-data: 600ms;
 }
 
 html, body, #root {
@@ -18,6 +30,32 @@ body {
 
 ::selection {
   background: rgba(0, 119, 255, 0.18);
+}
+
+@layer components {
+  /* controls: colours in 150 ms; the press goes in fast (100 ms) and springs back (250 ms); the focus ring settles from
+     4 px to its offset (outline-offset is paint-only). The press scale composes with tailwind's transform variables, so a
+     control that is also positioned by a translate utility keeps its place while pressed. Never combine with a tailwind
+     transition-* / duration-* / active:scale-* utility on the same element (utilities would replace this list). */
+  .tap,
+  .tap-soft {
+    outline-offset: 4px;
+    transition-property: background-color, color, box-shadow, opacity, transform, outline-offset;
+    transition-duration: 150ms, 150ms, 150ms, 150ms, 250ms, 150ms;
+    transition-timing-function: var(--ease-std), var(--ease-std), var(--ease-std), var(--ease-std), var(--ease-spring), var(--ease-out);
+  }
+  .tap:active:not(:disabled):not([aria-disabled="true"]),
+  .tap-soft:active:not(:disabled):not([aria-disabled="true"]) {
+    --tw-scale-x: 0.97;
+    --tw-scale-y: 0.97;
+    transform: translate(var(--tw-translate-x), var(--tw-translate-y)) rotate(var(--tw-rotate)) skewX(var(--tw-skew-x)) skewY(var(--tw-skew-y)) scaleX(var(--tw-scale-x)) scaleY(var(--tw-scale-y));
+    transition-duration: 150ms, 150ms, 150ms, 150ms, 100ms, 150ms;
+    transition-timing-function: var(--ease-std), var(--ease-std), var(--ease-std), var(--ease-std), var(--ease-out), var(--ease-out);
+  }
+  .tap-soft:active:not(:disabled):not([aria-disabled="true"]) {
+    --tw-scale-x: 0.99;
+    --tw-scale-y: 0.99;
+  }
 }
 
 /* keyboard focus: one visible 2px VK-blue outline everywhere; text fields draw their own ring */
@@ -46,16 +84,68 @@ h1, h2, h3 {
 
 .skeleton {
   @apply rounded-lg bg-zinc-200/70;
-  background-image: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,.75) 50%, rgba(255,255,255,0) 100%);
+  background-image: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,.6) 50%, rgba(255,255,255,0) 100%);
   background-size: 200% 100%;
   animation: shimmer 1.6s linear infinite;
 }
 
+/* the keyframes this file uses by name (tailwind emits its own only next to a used animate-* class) */
+@keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+@keyframes fade { from { opacity: 0; } }
+@keyframes fade-out { to { opacity: 0; } }
+@keyframes rise { from { opacity: 0; transform: translateY(12px); } }
+
+/* the top-level cards of a drawer tab rise in order when the tab opens. Zero specificity (:where), so a card's own
+   animation class still wins. */
+:where(.stagger-children > * > *) { animation: rise 300ms var(--ease-out) backwards; }
+:where(.stagger-children > * > :nth-child(2)) { animation-delay: 40ms; }
+:where(.stagger-children > * > :nth-child(3)) { animation-delay: 80ms; }
+:where(.stagger-children > * > :nth-child(n + 4)) { animation-delay: 120ms; }
+
+/* screen changes: View Transitions (lib/motion.ts viewTransition). The header, the helper and the toasts stay still.
+   The page never dips: the old page stays opaque under the new one, which rises 8px (300 ms) and fades in over it (a
+   quicker 220 ms, so the old page's ghost clears soon), and the old one fades out only once it is covered. Normal compositing on purpose: the UA pairs old and new with plus-lighter, which
+   sums the two pages (two faint pages are a washed-out one, two opaque ones burn to white). The build / result title swaps
+   as a fade-through (the old words are gone before the new ones come, two titles never overprint); the status column's
+   cards stay under the aside's incoming ones. A name on one side only (the create page has none) leaves fast or arrives
+   with the page. */
+::view-transition { pointer-events: none; }
+::view-transition-group(*) { animation-duration: var(--dur-slow); animation-timing-function: var(--ease-glide); }
+::view-transition-old(root), ::view-transition-new(root),
+::view-transition-old(vt-title), ::view-transition-new(vt-title),
+::view-transition-old(vt-aside), ::view-transition-new(vt-aside) { mix-blend-mode: normal; }
+::view-transition-old(root), ::view-transition-old(vt-aside) { animation: 120ms var(--ease-in) 180ms both vt-out; }
+::view-transition-new(root) { animation: vt-fade 220ms var(--ease-out) 60ms both, vt-rise var(--dur-slow) var(--ease-out) 60ms both; }
+::view-transition-new(vt-aside) { animation: var(--dur-slow) var(--ease-out) 60ms both vt-fade; }
+::view-transition-old(vt-title) { animation: 90ms var(--ease-in) both vt-out; }
+::view-transition-new(vt-title) { animation: 220ms var(--ease-out) 100ms both vt-fade; }
+::view-transition-old(vt-aside):only-child { animation: var(--dur-fast) var(--ease-in) both vt-out; }
+/* text never stretches while the title box morphs */
+::view-transition-old(vt-title), ::view-transition-new(vt-title) { width: auto; height: 100%; object-fit: none; object-position: left center; }
+@keyframes vt-out { to { opacity: 0; } }
+@keyframes vt-fade { from { opacity: 0; } }
+@keyframes vt-rise { from { transform: translateY(8px); } }
+.vt-header { view-transition-name: vt-header; }
+.vt-helper { view-transition-name: vt-helper; }
+.vt-toasts { view-transition-name: vt-toasts; }
+.vt-title { view-transition-name: vt-title; }
+.vt-aside { view-transition-name: vt-aside; }
+
+/* reduced motion: instant, or a ≤ 120 ms opacity cross-fade. Nothing travels, scales, bounces, loops or scrolls. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 1ms !important;
+    transition-delay: 0ms !important;
     scroll-behavior: auto !important;
   }
+  /* the few layers that keep a short cross-fade (opacity only): slide swaps, screens, drawer, modal, lightbox, helper,
+     popovers, toasts, the remarks overlay */
+  .rm-fade { animation: fade 120ms var(--ease-std) backwards !important; }
+  .rm-fade-out { animation: fade-out 100ms var(--ease-std) forwards !important; }
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+  /* no press scale either */
+  .tap:active, .tap-soft:active { --tw-scale-x: 1 !important; --tw-scale-y: 1 !important; }
 }

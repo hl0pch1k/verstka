@@ -1,5 +1,6 @@
 import { forwardRef, type ButtonHTMLAttributes } from "react";
 import { cn } from "../../lib/utils";
+import { CountUp } from "./CountUp";
 import { renderIcon, type IconProp } from "./icon";
 
 export interface ChipProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -23,7 +24,7 @@ export const Chip = forwardRef<HTMLButtonElement, ChipProps>(function Chip(
       ref={ref}
       type={type}
       className={cn(
-        "inline-flex h-8 shrink-0 cursor-pointer select-none items-center gap-2 whitespace-nowrap rounded-full px-3 text-footnote font-semibold transition-[background-color,color,box-shadow] duration-150 disabled:pointer-events-none disabled:opacity-40",
+        "tap inline-flex h-8 shrink-0 cursor-pointer select-none items-center gap-2 whitespace-nowrap rounded-full px-3 text-footnote font-semibold disabled:pointer-events-none disabled:opacity-40",
         selected
           ? "bg-accent-50 text-accent-700 shadow-selected-inset"
           : surface === "tinted"
@@ -35,7 +36,11 @@ export const Chip = forwardRef<HTMLButtonElement, ChipProps>(function Chip(
     >
       {renderIcon(icon, "h-4 w-4 shrink-0")}
       {children}
-      {hasCount && <span className={cn("text-caption tabular-nums", selected ? "text-accent-700" : "text-zinc-500")}>{count}</span>}
+      {hasCount && (
+        <span className={cn("text-caption tabular-nums transition-colors", selected ? "text-accent-700" : "text-zinc-500")}>
+          {typeof count === "number" ? <CountUp value={count} ms={400} /> : count}
+        </span>
+      )}
     </button>
   );
 });

@@ -81,6 +81,8 @@ export function RunPanelRegistry({ manifest }: { manifest: RunManifest | null })
           <Spinner showLabel label="Загружаю" />
         </div>
       ) : (
+        // the list arrives where the (delayed) spinner stood: it fades in
+        <div className="animate-fade">
         <Table
           head={["Название", "Роль", "Версия", manifest ? "К запуску" : ""]}
           empty="На сервере нет навыков"
@@ -96,6 +98,7 @@ export function RunPanelRegistry({ manifest }: { manifest: RunManifest | null })
             ];
           })}
         />
+        </div>
       )}
     </Collapsible>
   );

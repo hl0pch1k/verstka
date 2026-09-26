@@ -29,6 +29,7 @@ from verstka.api.store import SAFE_ID_RE, Store
 from verstka.ingest.workspace import file_sha256
 from verstka.planning.brief import normalize_purpose, parse_brief_text
 from verstka.planning.strategies import STRATEGY_NAMES, load_strategies
+from verstka.ru import ru_count
 from verstka.providers.registry import ProviderRegistry
 from verstka.schemas.audit import AuditReport
 from verstka.schemas.layout import LayoutPlan
@@ -65,6 +66,7 @@ _chat_sessions: dict[str, dict] = {}
 _chat_lock = threading.Lock()
 _fix_active: set[tuple[str, str]] = set()  # (generation id, strategy) with an autofix job or an edit in flight
 _fix_lock = threading.Lock()
+_VARIANT_BUSY = "Этот вариант уже меняется — дождитесь, пока агент закончит"
 
 
 def providers() -> Optional[ProviderRegistry]:
@@ -142,6 +144,11 @@ class ChatRequest(BaseModel):
 class EditRequestBody(BaseModel):
     message: str  # what the person asks, in their words: «на слайде 3 покажи расходы таблицей»
     slide: Optional[int] = None  # the slide on screen (1-based)
+
+
+class SlideFixBody(BaseModel):
+    wishes: Optional[str] = Field(None, max_length=500)  # what the person wants of the fixed slide: «покажи этапами»
+    issue_ids: Optional[list[str]] = None  # the remarks to fix (default: every remark the stage shows on the slide)
 
 
 # ---------------------------------------------------------------------------- helpers
@@ -224,6 +231,7 @@ def _variant_payload(gdir: Path, strategy: str, use_models: Optional[bool] = Non
     slides = sorted((vdir / "slides").glob("slide-*.jpg")) if (vdir / "slides").is_dir() else []
     gid = gdir.name
     files = {name: f"/api/generations/{gid}/{strategy}/files/{name}" for name in ("deck.pptx", "deck.pdf", "deck.html") if (vdir / name).exists()}
+    edits = _edits_of(vdir)
     return {
         "strategy": strategy,
         "planner": planner_info(outline, run_manifest, use_models=use_models, ctx=ctx, supplied=supplied),
@@ -235,11 +243,11 @@ def _variant_payload(gdir: Path, strategy: str, use_models: Optional[bool] = Non
         "files": files,
         # Agent v2: what the agent did (its log, the timeline the build screen showed, the critic's notes) and, per
         # slide, why the designer chose the form and what else it proposed — empty for older runs
-        "agent": variant_agent(outline, agent_events if agent_events is not None else read_agent_events(gdir), strategy),
+        "agent": _current_agent(outline, agent_events if agent_events is not None else read_agent_events(gdir), strategy, edits),
         "design": slide_design(outline),
         # the chat agent's edits of this variant (pipeline/revise.py): what was asked and answered, oldest first; the
         # count versions the slide previews (their names stay slide-001.jpg…)
-        "edits": [{k: e.get(k) for k in ("at", "request", "reply", "kind", "slides", "score_before", "score_after")} for e in _edits_of(vdir)],
+        "edits": [{k: e.get(k) for k in ("at", "request", "reply", "kind", "slides", "score_before", "score_after", "fixed", "how", "version", "undo_of")} for e in edits],
     }
 
 
@@ -247,6 +255,27 @@ def _edits_of(vdir: Path) -> list[dict]:
     from verstka.pipeline.revise import read_edits
 
     return read_edits(vdir)
+
+
+def _redone_slides(edits: list[dict]) -> set[int]:
+    """The slides redesigned or fixed since the build by an edit that is still in place (not undone): the critic's
+    notes of the build are about their previous version."""
+    active: dict[Any, dict] = {}
+    for e in edits:
+        if e.get("undo_of") is not None:
+            active.pop(e.get("undo_of"), None)
+        elif e.get("version") is not None:
+            active[e.get("version")] = e
+    return {int(n) for e in active.values() if e.get("kind") in ("fix", "slide") for n in (e.get("slides") or []) if isinstance(n, int)}
+
+
+def _current_agent(outline: Optional[dict], events: list[dict], strategy: str, edits: list[dict]) -> dict:
+    """variant_agent without the critic's notes of the slides redone since the build."""
+    agent = variant_agent(outline, events, strategy)
+    redone = _redone_slides(edits)
+    if redone:
+        agent["critic"] = [e for e in agent["critic"] if e.get("slide") not in redone]
+    return agent
 
 
 def _generation_payload(gid: str) -> dict:
@@ -270,7 +299,7 @@ def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job) -> dic
 
     manifest = store.manifest(req.template_id)
     if manifest is None:
-        raise ValueError("template is not analyzed")
+        raise ValueError("Шаблон ещё не разобран — загрузите его снова")
     brief = None
     outline = None
     if req.outline is not None:
@@ -596,7 +625,7 @@ def explain_slide(gid: str, strategy: str, index: int) -> dict:
     outline = DeckOutline.model_validate(raw)
     plan = LayoutPlan.model_validate_json((vdir / "layout_plan.json").read_text(encoding="utf-8"))
     gdir = vdir.parent
-    return {"index": index, "text": _explain_text(raw, outline, plan, manifest, index, variant_agent(raw, read_agent_events(gdir), strategy)["critic"])}
+    return {"index": index, "text": _explain_text(raw, outline, plan, manifest, index, _current_agent(raw, read_agent_events(gdir), strategy, _edits_of(vdir))["critic"])}
 
 
 def _explain_text(raw: Optional[dict], outline: DeckOutline, plan: LayoutPlan, manifest, index: int, critic: list[dict]) -> str:
@@ -612,14 +641,15 @@ def apply_fixes(gid: str, strategy: str, req: FixRequest) -> dict:
     meta = store.read_generation_meta(gid) or {}
     manifest = store.manifest(meta.get("template_id", ""))
     if manifest is None or not (vdir / "audit_report.json").exists():
-        raise HTTPException(404, "variant or audit not found")
+        raise HTTPException(404, "Вариант не найден")
     key = (gid, strategy)
     with _fix_lock:
         if key in _fix_active:
-            raise HTTPException(409, "autofix is already running for this variant")
+            raise HTTPException(409, _VARIANT_BUSY)
         _fix_active.add(key)
 
     def run(job: Job) -> dict:
+        from verstka.api.remarks import carry_report_ids
         from verstka.audit.autofix import autofix_loop
         from verstka.pipeline.generate import render_outputs
 
@@ -629,9 +659,9 @@ def apply_fixes(gid: str, strategy: str, req: FixRequest) -> dict:
             plan = LayoutPlan.model_validate_json((vdir / "layout_plan.json").read_text(encoding="utf-8"))
             report = AuditReport.model_validate_json((vdir / "audit_report.json").read_text(encoding="utf-8"))
             only = None if req.all_deterministic else set(req.issue_ids)
-            job.emit("применяю исправления", 0.2)
+            job.emit("Применяю исправления", 0.2)
             final, plan2, outline2, _ = autofix_loop(vdir / "deck.pptx", report, outline, plan, manifest, ws, max_iterations=2, only_ids=only, images_dir=vdir / "slides", brief_text=meta.get("brief"))
-            job.emit("экспортирую", 0.8)
+            job.emit("Готовлю превью и файлы", 0.8)
             # previews and the exports that existed before are rebuilt from one LibreOffice run
             exports = [fmt for fmt in ("pdf", "html") if (vdir / f"deck.{fmt}").exists()]
             _, images, warns, _ = render_outputs(vdir, manifest, outline2.title, exports, images=True)
@@ -639,6 +669,8 @@ def apply_fixes(gid: str, strategy: str, req: FixRequest) -> dict:
                 log.warning("re-export: %s", w)
             if images:
                 final.slide_images = {k: str(p) for k, p in enumerate(images, 1)}
+            # the remarks that stayed keep the ids the person saw (the audit numbers them through the deck)
+            carry_report_ids(report, final)
             (vdir / "audit_report.json").write_text(final.model_dump_json(indent=2), encoding="utf-8")
             (vdir / "outline.json").write_text(outline2.model_dump_json(indent=2), encoding="utf-8")
             (vdir / "layout_plan.json").write_text(plan2.model_dump_json(indent=2), encoding="utf-8")
@@ -685,7 +717,7 @@ def _edit_job(gid: str, strategy: str, body: EditRequestBody) -> Callable[[Job],
         meta = store.read_generation_meta(gid) or {}
         manifest = store.manifest(meta.get("template_id", ""))
         if manifest is None or not (vdir / "outline.json").exists():
-            raise ValueError("variant not found")
+            raise ValueError("Вариант не найден")
         outline = DeckOutline.model_validate_json((vdir / "outline.json").read_text(encoding="utf-8"))
         total = len(outline.slides)
         req = parse_edit(body.message, body.slide, total)
@@ -701,6 +733,9 @@ def _edit_job(gid: str, strategy: str, body: EditRequestBody) -> Callable[[Job],
         if req.kind == "undo":
             last = R.last_version(vdir)
             if last is None:
+                # a variant changed and then restored has a log but no kept version: say so, not «never changed»
+                if R.read_edits(vdir):
+                    return {"reply": "Все правки уже отменены — возвращать нечего.", "changed": False}
                 return {"reply": "Этот вариант ещё не меняли — возвращать нечего.", "changed": False}
             undone, new = last
             edits = R.read_edits(vdir)
@@ -745,16 +780,23 @@ def _edit_job(gid: str, strategy: str, body: EditRequestBody) -> Callable[[Job],
                 msg = str(e)
                 return {"reply": f"Не получилось: {msg[:1].lower() + msg[1:]}.", "changed": False}
             focus = i
-        job.emit("Перерисовываю вариант", 0.55)
-        version = None if undone is not None else R.snapshot(vdir)
-        v = R.rerender_variant(vdir, strategy, new, store.workspace(meta["template_id"]).source, store.root, brief=brief, exports=list(meta.get("exports") or []))
+        version = None
         if undone is not None:
+            # the kept files come back exactly (deck, plan, audit, previews): nothing is planned or rendered again
+            job.emit("Возвращаю как было", 0.55)
+            audit = R.restore_version(vdir, undone, manifest, new.title, list(meta.get("exports") or []))
             R.drop_version(vdir, undone)
-        after = v.audit.summary.score if v.audit else None
+            n_slides = len(new.slides)
+        else:
+            job.emit("Перерисовываю вариант", 0.55)
+            version = R.snapshot(vdir)
+            v = R.rerender_variant(vdir, strategy, new, store.workspace(meta["template_id"]).source, store.root, brief=brief, exports=list(meta.get("exports") or []))
+            audit, n_slides = v.audit, len(v.outline.slides)
+        after = audit.summary.score if audit else None
         R.log_edit(vdir, {"version": version, "undo_of": undone, "request": body.message, "kind": req.kind, "slides": req.slides, "reply": reply, "score_before": before, "score_after": after})
         summary = meta.get("summary", {})
-        if v.audit is not None:
-            summary[strategy] = {**summary.get(strategy, {}), "n_slides": len(v.outline.slides), "score": v.audit.summary.score, "errors": v.audit.summary.errors, "warnings": v.audit.summary.warnings}
+        if audit is not None:
+            summary[strategy] = {**summary.get(strategy, {}), "n_slides": n_slides, "score": audit.summary.score, "errors": audit.summary.errors, "warnings": audit.summary.warnings}
             store.merge_generation_meta(gid, {"summary": summary})
         if before is not None and after is not None and round(after) != round(before):
             reply += f" Проверка качества: {before:g} → {after:g}."
@@ -773,7 +815,7 @@ def edit_variant(gid: str, strategy: str, body: EditRequestBody) -> dict:
     key = (gid, strategy)
     with _fix_lock:
         if key in _fix_active:
-            raise HTTPException(409, "this variant is being changed already")
+            raise HTTPException(409, _VARIANT_BUSY)
         _fix_active.add(key)
     inner = _edit_job(gid, strategy, body)
 
@@ -786,6 +828,96 @@ def edit_variant(gid: str, strategy: str, body: EditRequestBody) -> dict:
 
     try:
         job = runner.submit("edit", run)
+    except BaseException:
+        with _fix_lock:
+            _fix_active.discard(key)
+        raise
+    return {"job_id": job.id}
+
+
+
+def _slide_fix_job(gid: str, strategy: str, n: int, requested: list, wishes: Optional[str]) -> Callable[[Job], dict]:
+    """«Исправить слайд»: the remarks of one slide fixed on that slide only (pipeline/revise.py fix_slide) — the critic
+    reads them, the designer redesigns the slide when its content is at stake (with the person's wishes), the rules fix
+    the rest in place, the slide is spliced into the deck and checked with the others, and the fix is logged so «верни
+    как было» can undo it."""
+    from verstka.pipeline import revise as R
+
+    def run(job: Job) -> dict:
+        vdir = _variant_dir(gid, strategy)
+        meta = store.read_generation_meta(gid) or {}
+        manifest = store.manifest(meta.get("template_id", ""))
+        if manifest is None or not (vdir / "outline.json").exists() or not (vdir / "audit_report.json").exists():
+            raise ValueError("Вариант не найден")
+        use_models = bool(meta.get("use_models", True)) and models_configured()
+        res = R.fix_slide(
+            vdir, strategy, n, manifest=manifest, ws=store.workspace(meta["template_id"]), remarks=requested, wishes=wishes,
+            brief=_brief_of_meta(meta), use_models=use_models, skills=skills() if use_models else None,
+            providers=providers() if use_models else None, exports=list(meta.get("exports") or []), progress=job_progress(job),
+        )
+        s = res.report.summary
+        if res.applied:
+            summary = meta.get("summary", {})
+            summary[strategy] = {**summary.get(strategy, {}), "n_slides": res.n_slides, "score": s.score, "errors": s.errors, "warnings": s.warnings}
+            store.merge_generation_meta(gid, {"summary": summary})
+        return {
+            "reply": res.reply, "changed": res.applied, "applied": res.applied, "kind": "fix", "strategy": strategy, "slide": n,
+            "requested": [i.id for i in res.requested], "fixed": res.fixed, "remaining": res.remaining,
+            "score_before": res.score_before, "new_score": res.score_after, "errors": s.errors, "warnings": s.warnings,
+            "changed_other_slides": bool(res.other), "other_slides": res.other,
+            "how": res.how, "notes": res.notes, "why": res.why, "version": res.version, "at": res.at,
+        }
+
+    return run
+
+
+@app.post("/api/generations/{gid}/{strategy}/slides/{n}/fix")
+def fix_slide(gid: str, strategy: str, n: int, body: SlideFixBody) -> dict:
+    """Fix the remarks of slide `n` (and follow the person's wishes) on that slide only — a job."""
+    from verstka.api.remarks import is_stage
+
+    try:
+        vdir = _variant_dir(gid, strategy)
+    except HTTPException:
+        raise HTTPException(404, "Вариант не найден")
+    meta = store.read_generation_meta(gid) or {}
+    if store.manifest(meta.get("template_id", "")) is None or not all((vdir / f).exists() for f in ("deck.pptx", "outline.json", "audit_report.json", "layout_plan.json")):
+        raise HTTPException(404, "Вариант не найден")
+    try:
+        outline = DeckOutline.model_validate_json((vdir / "outline.json").read_text(encoding="utf-8"))
+        report = AuditReport.model_validate_json((vdir / "audit_report.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raise HTTPException(404, "Вариант не найден")
+    total = len(outline.slides)
+    if not 1 <= n <= total:
+        raise HTTPException(422, f"В этом варианте {ru_count(total, 'слайд', 'слайда', 'слайдов')} — слайда {n} нет")
+    wishes = (body.wishes or "").strip() or None
+    on_slide = [i for i in report.issues if i.slide == n]
+    if body.issue_ids is not None and body.issue_ids:
+        wanted = set(body.issue_ids)
+        requested = [i for i in on_slide if i.id in wanted]
+        if not requested:
+            raise HTTPException(422, f"На слайде {n} нет таких замечаний")
+    else:
+        requested = [i for i in on_slide if is_stage(i)]
+    if not requested and not wishes:
+        raise HTTPException(422, f"На слайде {n} нет замечаний")
+    key = (gid, strategy)
+    with _fix_lock:
+        if key in _fix_active:
+            raise HTTPException(409, _VARIANT_BUSY)
+        _fix_active.add(key)
+    inner = _slide_fix_job(gid, strategy, n, requested, wishes)
+
+    def run(job: Job) -> dict:
+        try:
+            return inner(job)
+        finally:
+            with _fix_lock:
+                _fix_active.discard(key)
+
+    try:
+        job = runner.submit("slide_fix", run)
     except BaseException:
         with _fix_lock:
             _fix_active.discard(key)

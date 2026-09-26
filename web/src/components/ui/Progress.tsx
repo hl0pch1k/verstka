@@ -1,4 +1,5 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { prefersReducedMotion } from "../../lib/motion";
 import { cn } from "../../lib/utils";
 
 export type ProgressTone = "accent" | "success" | "warn" | "error" | "neutral";
@@ -19,7 +20,32 @@ export interface ProgressProps {
   flat?: boolean;
   /** Offsets the indeterminate sweep, so several bars in a column never move in lockstep. */
   delayMs?: number;
+  /** Fill from empty on mount (a number: after that many ms — the stagger of a column of bars). */
+  appear?: boolean | number;
   className?: string;
+}
+
+/** On mount with `appear`: false for the first frames (and the delay), then true — the fill has an empty start. */
+function useAppear(appear: boolean | number | undefined): boolean {
+  const [on, setOn] = useState(() => appear === undefined || appear === false || prefersReducedMotion());
+  useEffect(() => {
+    if (on) return;
+    const delay = typeof appear === "number" ? appear : 0;
+    let t = 0;
+    let r2 = 0;
+    const r1 = requestAnimationFrame(() => {
+      r2 = requestAnimationFrame(() => {
+        t = window.setTimeout(() => setOn(true), delay);
+      });
+    });
+    return () => {
+      cancelAnimationFrame(r1);
+      cancelAnimationFrame(r2);
+      window.clearTimeout(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return on;
 }
 
 const FILL: Record<ProgressTone, string> = {
@@ -32,9 +58,11 @@ const FILL: Record<ProgressTone, string> = {
 
 const HEIGHT = { xs: "h-0.5", sm: "h-1", md: "h-2" } as const;
 
-export function Progress({ value, tone = "accent", size = "sm", indeterminate = false, label, showValue = false, flat = false, delayMs = 0, className }: ProgressProps) {
+// The fill is full width and slides in by transform (never a width animation), 600 ms on the arrival curve.
+export function Progress({ value, tone = "accent", size = "sm", indeterminate = false, label, showValue = false, flat = false, delayMs = 0, appear, className }: ProgressProps) {
   const frac = Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0;
   const pct = Math.round(frac * 100);
+  const shown = useAppear(appear);
   return (
     <div className={cn("w-full", className)}>
       {(label || showValue) && (
@@ -57,7 +85,10 @@ export function Progress({ value, tone = "accent", size = "sm", indeterminate = 
             style={delayMs ? { animationDelay: `${delayMs}ms` } : undefined}
           />
         ) : (
-          <div className={cn("h-full transition-[width] duration-500 ease-out", FILL[tone], !flat && "rounded-full")} style={{ width: `${pct}%` }} />
+          <div
+            className={cn("h-full w-full transition-[transform,background-color] duration-600 ease-out", FILL[tone], !flat && "rounded-full")}
+            style={{ transform: `translateX(${(shown ? frac * 100 : 0) - 100}%)` }}
+          />
         )}
       </div>
     </div>

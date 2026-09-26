@@ -43,7 +43,8 @@ function SlideRow({ index, slide, outline, thumb, aspect, selected, onOpen }: {
       onClick={onOpen}
       onKeyDown={onKey}
       aria-label={`Слайд ${index}: ${slide.headline || "без заголовка"}`}
-      className={cn("flex cursor-pointer gap-4 rounded-xl p-4 transition-[background-color,box-shadow] duration-150", selected ? "shadow-selected" : "hover:bg-zinc-50")}
+      // the selection ring and the hover tint change in 150 ms (tap-soft); a press sinks the row a touch
+      className={cn("tap-soft flex cursor-pointer gap-4 rounded-xl p-4", selected ? "shadow-selected" : "hover:bg-zinc-50")}
     >
       <Thumb src={thumb} aspect={aspect} n={index} />
       <div className="min-w-0 flex-1">

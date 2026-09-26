@@ -1,4 +1,4 @@
-import { forwardRef, type AnchorHTMLAttributes, type ButtonHTMLAttributes, type ReactNode } from "react";
+import { forwardRef, useRef, type AnimationEvent, type AnchorHTMLAttributes, type ButtonHTMLAttributes, type ReactNode } from "react";
 import { Loader2 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { renderIcon, type IconProp } from "./icon";
@@ -27,8 +27,11 @@ export interface ButtonLook {
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement>, ButtonLook {}
 
+// `tap` (index.css): colours in 150 ms, a 0.97 press that springs back, the focus ring settling from 4 to 2 px, and the
+// disabled fade — so the send button eases in when text appears. A loading button keeps its full colour (it is busy,
+// not unavailable): only the spinner says it works.
 const BASE =
-  "inline-flex shrink-0 cursor-pointer select-none items-center justify-center gap-2 whitespace-nowrap font-semibold transition-[background-color,color,box-shadow,transform] duration-150 active:scale-[0.98] disabled:pointer-events-none disabled:opacity-40 aria-disabled:pointer-events-none aria-disabled:opacity-40";
+  "tap inline-flex shrink-0 cursor-pointer select-none items-center justify-center gap-2 whitespace-nowrap font-semibold disabled:pointer-events-none disabled:[&:not([aria-busy=true])]:opacity-40 aria-disabled:pointer-events-none aria-disabled:opacity-40";
 
 const VARIANTS: Record<ButtonVariant, string> = {
   primary: "bg-accent-fill text-white hover:bg-accent-600 active:bg-accent-700",
@@ -53,13 +56,46 @@ export function buttonClass({ variant = "secondary", size = "md", shape = "rect"
 
 const isEmpty = (children: ReactNode) => children === undefined || children === null || children === false || children === "";
 
+function Spin({ cls }: { cls: string }) {
+  // two animations on two nodes: the slot fades in, the icon spins
+  return (
+    <span className="inline-flex shrink-0 animate-fade" aria-hidden>
+      <Loader2 className={cn(cls, "animate-spin")} />
+    </span>
+  );
+}
+
+// a finished entrance drops its class, so a panel shown again (display: none → flex) never replays it
+const settle = (e: AnimationEvent<HTMLElement>) => {
+  if (e.target === e.currentTarget) e.currentTarget.classList.remove("animate-fade");
+};
+
+// Loading never changes the button's width: the spinner takes the leading icon's slot, else the trailing one's, else it
+// sits over the label (which keeps its place, invisible). The icon that comes back afterwards fades in.
 function Content({ size, loading, icon, iconRight, iconOnly, children }: { size: ButtonSize; loading: boolean; icon?: IconProp; iconRight?: IconProp; iconOnly: boolean; children: ReactNode }) {
   const iconCls = cn("shrink-0", iconOnly ? SIZES[size].iconOnlyIcon : SIZES[size].icon);
+  // once this button has loaded, its icons sit in a fading slot: coming back after the spinner they fade in (a slot
+  // that stays mounted never replays)
+  const hadLoading = useRef(false);
+  if (loading) hadLoading.current = true;
+  const again = (node: ReactNode) => (hadLoading.current && node ? <span className="inline-flex shrink-0 animate-fade" onAnimationEnd={settle}>{node}</span> : node);
+  const lead = !!icon;
+  const trail = !lead && !!iconRight;
+  if (loading && !lead && !trail) {
+    return (
+      <span className="inline-grid place-items-center">
+        <span className="invisible inline-flex items-center gap-2 [grid-area:1/1]">{children}</span>
+        <span className="[grid-area:1/1]">
+          <Spin cls={iconCls} />
+        </span>
+      </span>
+    );
+  }
   return (
     <>
-      {loading ? <Loader2 className={cn(iconCls, "animate-spin")} aria-hidden /> : renderIcon(icon, iconCls)}
+      {loading && lead ? <Spin cls={iconCls} /> : again(renderIcon(icon, iconCls))}
       {children}
-      {!loading && renderIcon(iconRight, iconCls)}
+      {loading && trail ? <Spin cls={iconCls} /> : again(renderIcon(iconRight, iconCls))}
     </>
   );
 }

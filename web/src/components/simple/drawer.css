@@ -1,0 +1,20 @@
+/* The drawer's tab change (DetailsDrawer, MOTION_SPEC §3.11). The new tab is readable at once: the panel fades in over
+   120 ms (from 30 %, so no frame between the tabs is blank) while it comes 12 px in from the side of its tab, and its
+   top-level cards settle 6 px up in the 40 ms cascade with transform only. Two fades that multiplied (the panel's and
+   every card's) left the tab faint for ≈150 ms; only one of them fades now, and briefly. The travel is short and
+   decelerates hard (200 ms, --ease-out), so small text is at rest, not resampled mid-pixel, by ≈120 ms. Opening the
+   drawer keeps index.css `stagger-children` (the sheet itself travels then). Reduced motion: the panel carries
+   `rm-fade` (a 120 ms fade, nothing travels). */
+@keyframes drawer-tab-from-r { from { transform: translateX(12px); } }
+@keyframes drawer-tab-from-l { from { transform: translateX(-12px); } }
+@keyframes drawer-card-settle { from { transform: translateY(6px); } }
+@keyframes drawer-tab-fade { from { opacity: 0.3; } }
+
+.drawer-tab-r { animation: drawer-tab-fade 120ms var(--ease-out) backwards, drawer-tab-from-r 200ms var(--ease-out) backwards; }
+.drawer-tab-l { animation: drawer-tab-fade 120ms var(--ease-out) backwards, drawer-tab-from-l 200ms var(--ease-out) backwards; }
+
+/* zero specificity, like `stagger-children`: a card's own animation class still wins */
+:where(.drawer-tab-cards > * > *) { animation: drawer-card-settle 200ms var(--ease-out) backwards; }
+:where(.drawer-tab-cards > * > :nth-child(2)) { animation-delay: 40ms; }
+:where(.drawer-tab-cards > * > :nth-child(3)) { animation-delay: 80ms; }
+:where(.drawer-tab-cards > * > :nth-child(n + 4)) { animation-delay: 120ms; }

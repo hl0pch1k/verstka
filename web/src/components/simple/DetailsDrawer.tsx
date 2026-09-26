@@ -1,6 +1,10 @@
 // The details drawer: a quiet reading room from the right with everything an expert (or a jury) wants to see, out of
 // the way of a person who only needs the deck — quality, why a slide looks so, the agent's work, the plan, the
 // template and the files. One variant menu in the header serves every tab; the helper, when open, stays beside it.
+// Motion: the sheet travels its full width in from the right (300 ms glide, always opaque) and back out (200 ms), the
+// scrim fades under it; the cards of the first tab rise in a 40 ms cascade. A tab change glides the underline; the new
+// tab fades in fast (120 ms) from its side and its cards settle in the same cascade by transform only, so it is crisp
+// at once. The helper docking beside it shifts the sheet with `translate`.
 import { useEffect, useLayoutEffect, useRef, useState, type ComponentType, type KeyboardEvent } from "react";
 import { Check, ChevronDown, X } from "lucide-react";
 import { MOTION, usePresence } from "../../lib/motion";
@@ -16,6 +20,7 @@ import { Button } from "../ui/Button";
 import { tabId, Tabs } from "../ui/Tabs";
 import { variantScore } from "../VariantsHelpers";
 import { AgentLog } from "./AgentPanel";
+import "./drawer.css";
 import { WhySlide } from "./WhySlide";
 
 function Tech() {
@@ -96,7 +101,7 @@ function VariantMenu() {
           ref={menu}
           role="menu"
           aria-label="Вариант оформления"
-          className={cn("absolute right-0 top-full z-10 mt-2 w-60 origin-top-right rounded-2xl bg-white p-1 shadow-pop", leaving ? "pointer-events-none animate-drop-out" : "animate-drop-in")}
+          className={cn("absolute right-0 top-full z-10 mt-2 w-60 origin-top-right rounded-2xl bg-white p-1 shadow-pop", leaving ? "pointer-events-none animate-drop-out rm-fade-out" : "animate-drop-in rm-fade")}
         >
           {generation.variants.map((v, i) => {
             const score = variantScore(v, generation.summary?.[v.strategy]?.score);
@@ -114,7 +119,7 @@ function VariantMenu() {
                 }}
                 className={cn(
                   // the item that holds the focus is marked like a hovered one: the arrows show which item Enter picks
-                  "flex h-10 w-full cursor-pointer items-center gap-2 rounded-xl px-3 text-left text-body transition-colors duration-150 hover:bg-zinc-100 focus:bg-zinc-100 focus-visible:outline-offset-[-2px]",
+                  "tap flex h-10 w-full cursor-pointer items-center gap-2 rounded-xl px-3 text-left text-body hover:bg-zinc-100 focus:bg-zinc-100 focus-visible:outline-offset-[-2px]",
                   checked ? "font-semibold text-zinc-900" : "text-zinc-700",
                 )}
               >
@@ -147,6 +152,9 @@ function focusables(roots: HTMLElement[]): HTMLElement[] {
 const TABS_ID = "drawer";
 const PANEL_ID = "drawer-panel";
 
+/** The sheet leaves faster than it came (300 ms in, 200 ms out). */
+const SHEET_OUT_MS = 200;
+
 /** The keys the result screen turns into slide steps (← → Home End): under the drawer they stay in the drawer, except
  *  on «Почему так», which walks the slides it explains. */
 const SLIDE_KEYS = ["ArrowLeft", "ArrowRight", "Home", "End"];
@@ -164,12 +172,21 @@ export function DetailsDrawer() {
   const hasDeck = screen === "result" && !!generation && generation.variants.length > 0;
   const tabs = TABS.filter((t) => hasDeck || !t.needsDeck);
   const current = tabs.find((t) => t.key === detail) ?? null;
-  // the closing drawer keeps showing its last tab while it slides out
-  const { mounted, leaving } = usePresence(!!current, MOTION.fast);
+  // the closing drawer keeps showing its last tab while it slides out (200 ms, faster than the 300 ms entrance)
+  const { mounted, leaving } = usePresence(!!current, SHEET_OUT_MS);
   const last = useRef(current);
   if (current) last.current = current;
   const shown = current ?? last.current;
   shownTab.current = shown?.key ?? null;
+  // the content of a new tab slides in from the side the tab sits on (right of the previous one → from the right);
+  // opening the drawer has no side: the sheet itself travels and the cards rise
+  const idx = shown ? TABS.findIndex((t) => t.key === shown.key) : -1;
+  const nav = useRef<{ key: DetailKey | null; idx: number; dir: 0 | 1 | -1 }>({ key: null, idx: -1, dir: 0 });
+  if (!mounted) nav.current = { key: null, idx: -1, dir: 0 };
+  else if (shown && nav.current.key !== shown.key) {
+    nav.current = { key: shown.key, idx, dir: nav.current.key === null ? 0 : idx > nav.current.idx ? 1 : -1 };
+  }
+  const dir = nav.current.dir;
 
   useEffect(() => {
     if (!current) return;
@@ -235,14 +252,22 @@ export function DetailsDrawer() {
     // the helper open beside the drawer belongs to the same modal layer: the Tab key cycles through both, and aria-owns
     // puts the helper inside the dialog for a screen reader (aria-modal would hide it otherwise)
     <div ref={dialog} className={cn("fixed inset-0 z-50", leaving && "pointer-events-none")} role="dialog" aria-modal="true" aria-owns={agentOpen ? "helper" : undefined} aria-label={title}>
-      <div className={cn("absolute inset-0 bg-ink/40 backdrop-blur-[2px]", leaving ? "animate-fade-out" : "animate-fade")} onClick={() => setDetail(null)} aria-hidden />
+      {/* the scrim fades with the sheet's travel: in over 300 ms, out over 200 ms (the blur itself is static) */}
+      <div
+        className={cn("absolute inset-0 bg-ink/40 backdrop-blur-[2px]", leaving ? "animate-fade-out rm-fade-out [animation-duration:200ms]" : "animate-fade rm-fade [animation-duration:300ms]")}
+        onClick={() => setDetail(null)}
+        aria-hidden
+      />
+      {/* always opaque: the sheet travels its full width (translateX 100% → 0); the helper beside it shifts it with the
+          independent `translate` property, which composes with the travel instead of fighting it */}
       <div
         ref={sheet}
         className={cn(
-          "absolute inset-y-0 flex flex-col bg-canvas shadow-pop transition-[right] duration-300",
-          agentOpen ? "right-[360px] w-[min(800px,calc(100vw-360px-48px))]" : "right-0 w-[min(800px,94vw)]",
-          leaving ? "animate-slide-out-right" : "animate-slide-in-right",
+          "absolute inset-y-0 right-0 flex flex-col bg-canvas shadow-pop",
+          agentOpen ? "w-[min(800px,calc(100vw-360px-48px))]" : "w-[min(800px,94vw)]",
+          leaving ? "animate-sheet-out rm-fade-out" : "animate-sheet-in rm-fade",
         )}
+        style={{ translate: agentOpen ? "-360px 0" : "0 0", transition: "translate 300ms var(--ease-glide)" }}
       >
         {/* above the content's sticky rows (the «Почему так» nav): the variant menu opens over them */}
         <header className="relative z-20 flex h-14 shrink-0 items-stretch gap-4 border-b border-zinc-200/70 bg-white px-6">
@@ -260,7 +285,14 @@ export function DetailsDrawer() {
           </div>
         </header>
         <div ref={scroller} className="scroll-thin min-h-0 flex-1 overflow-y-auto px-6 py-6">
-          <div key={shown.key} {...(tabs.length > 1 ? { role: "tabpanel", id: PANEL_ID, "aria-labelledby": tabId(TABS_ID, shown.key) } : {})} className="animate-fade-in">
+          {/* the tab's top-level cards cascade 40 ms apart on open (stagger-children: they rise while the sheet travels)
+              and on a tab change, where the panel itself fades in 120 ms from the tab's side and the cards only settle
+              (drawer.css) — the new tab is crisp at once. Never on a variant switch: the key is the tab only */}
+          <div
+            key={shown.key}
+            {...(tabs.length > 1 ? { role: "tabpanel", id: PANEL_ID, "aria-labelledby": tabId(TABS_ID, shown.key) } : {})}
+            className={dir === 0 ? "stagger-children" : cn("drawer-tab-cards rm-fade", dir > 0 ? "drawer-tab-r" : "drawer-tab-l")}
+          >
             <View />
           </div>
         </div>

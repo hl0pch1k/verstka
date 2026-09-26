@@ -96,7 +96,8 @@ function SeriesCard({ series }: { series: Series }) {
           return (
             <li key={i} className="grid grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_auto] items-center gap-2 text-caption">
               <span className="truncate text-zinc-600" title={cat}>{cat}</span>
-              <Progress size="sm" value={share} />
+              {/* the bars grow in one after another (40 ms apart, capped) when the section opens */}
+              <Progress size="sm" value={share} appear={Math.min(i, 6) * 40} />
               <span className="w-16 text-right tabular-nums text-zinc-900">{typeof v === "number" ? num(v) : "—"}</span>
             </li>
           );

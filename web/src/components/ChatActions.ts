@@ -120,7 +120,7 @@ function trackFixes(app: () => AppState, jobs: { strategy: string; job_id: strin
   });
 }
 
-function asEditResult(value: unknown): EditResult | null {
+export function asEditResult(value: unknown): EditResult | null {
   if (!value || typeof value !== "object") return null;
   const r = value as Partial<EditResult>;
   return typeof r.reply === "string" ? { reply: r.reply, changed: !!r.changed, slide: r.slide ?? null, strategy: r.strategy, score: r.score ?? null, kind: r.kind } : null;

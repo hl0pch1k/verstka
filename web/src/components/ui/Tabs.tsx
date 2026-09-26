@@ -1,4 +1,5 @@
-import type { KeyboardEvent } from "react";
+import { useRef, type KeyboardEvent } from "react";
+import { useIndicator } from "../../lib/motion";
 import { cn } from "../../lib/utils";
 import { Badge, type BadgeTone } from "./Badge";
 import { renderIcon, type IconProp } from "./icon";
@@ -35,7 +36,10 @@ export const tabId = (prefix: string, key: string) => `${prefix}-tab-${key}`;
 const UNDERLINE_RING =
   "focus-visible:outline-none focus-visible:before:pointer-events-none focus-visible:before:absolute focus-visible:before:-inset-x-2 focus-visible:before:inset-y-2 focus-visible:before:rounded-xl focus-visible:before:outline focus-visible:before:outline-2 focus-visible:before:outline-accent";
 
+// One indicator glides to the selected tab (300 ms glide): a 2px underline, or the white thumb of the pills.
 export function Tabs<K extends string = string>({ items, value, onChange, variant = "underline", className, "aria-label": ariaLabel, idPrefix, panelId }: TabsProps<K>) {
+  const listRef = useRef<HTMLDivElement>(null);
+  const ind = useIndicator(listRef, '[role="tab"][aria-selected="true"]', value);
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (!["ArrowRight", "ArrowLeft", "Home", "End"].includes(e.key)) return;
     const enabled = items.filter((i) => !i.disabled);
@@ -54,11 +58,21 @@ export function Tabs<K extends string = string>({ items, value, onChange, varian
   const pills = variant === "pills";
   return (
     <div
+      ref={listRef}
       role="tablist"
       aria-label={ariaLabel}
       onKeyDown={onKey}
-      className={cn(pills ? "inline-flex h-10 shrink-0 items-center gap-1 rounded-xl bg-zinc-100 p-1" : "flex h-full items-stretch gap-6", className)}
+      className={cn("relative", pills ? "inline-flex h-10 shrink-0 items-center gap-1 rounded-xl bg-zinc-100 p-1" : "flex h-full items-stretch gap-6", className)}
     >
+      {pills ? (
+        <span aria-hidden className="pointer-events-none absolute left-0 top-0 rounded-lg bg-white shadow-card transition-[transform,width,height] duration-300 ease-glide" style={ind.style} />
+      ) : (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute bottom-0 left-0 z-[1] h-0.5 rounded-full bg-accent transition-[transform,width] duration-300 ease-glide"
+          style={ind.box ? { transform: `translate3d(${ind.box.x}px, 0, 0)`, width: ind.box.w, ...(ind.instant ? { transitionDuration: "0ms" } : null) } : { visibility: "hidden", width: 0 }}
+        />
+      )}
       {items.map((item) => {
         const active = item.key === value;
         const hasBadge = item.badge !== undefined && item.badge !== null && item.badge !== "";
@@ -75,10 +89,10 @@ export function Tabs<K extends string = string>({ items, value, onChange, varian
             disabled={item.disabled}
             onClick={() => onChange(item.key)}
             className={cn(
-              "relative inline-flex cursor-pointer items-center gap-2 whitespace-nowrap font-semibold transition-[background-color,color,box-shadow,border-color] duration-150 disabled:cursor-not-allowed disabled:opacity-40",
+              "tap relative inline-flex cursor-pointer items-center gap-2 whitespace-nowrap font-semibold disabled:cursor-not-allowed disabled:opacity-40",
               pills
-                ? cn("h-8 rounded-lg px-3 text-footnote", active ? "bg-white text-zinc-900 shadow-card" : "text-zinc-600 hover:text-zinc-900")
-                : cn("-mb-px h-full border-b-2 text-body", UNDERLINE_RING, active ? "border-accent text-zinc-900" : "border-transparent text-zinc-500 hover:text-zinc-900"),
+                ? cn("z-[1] h-8 rounded-lg px-3 text-footnote", active ? "text-zinc-900" : "text-zinc-600 hover:text-zinc-900")
+                : cn("-mb-px h-full border-b-2 border-transparent text-body", UNDERLINE_RING, active ? "text-zinc-900" : "text-zinc-500 hover:text-zinc-900"),
             )}
           >
             {renderIcon(item.icon, "h-4 w-4 shrink-0")}

@@ -141,7 +141,7 @@ export function PatternModal({ pattern: current, aspect, position, onClose, onSt
             <div className="ml-auto flex items-center gap-2" title="Насколько чистая структура у образца и насколько он пригоден для новых слайдов">
               <span className="whitespace-nowrap text-caption text-zinc-500">Качество образца</span>
               <span className="block w-24 shrink-0">
-                <Progress size="sm" value={quality} tone={qualityTone(quality)} />
+                <Progress size="sm" value={quality} tone={qualityTone(quality)} appear={120} />
               </span>
               <span className="text-caption font-semibold tabular-nums text-zinc-700">{fmtPct(quality)}</span>
             </div>

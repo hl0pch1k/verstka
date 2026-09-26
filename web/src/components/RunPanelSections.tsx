@@ -148,13 +148,13 @@ export function Timings({ m, className }: { m: RunManifest; className?: string }
         <p className="text-footnote text-zinc-500">Этапы не измерялись</p>
       ) : (
         <ul className="space-y-3">
-          {stages.map(([k, v]) => (
+          {stages.map(([k, v], i) => (
             <li key={k} className="text-footnote" title={STAGE_TITLE[k]}>
               <div className="flex items-baseline justify-between gap-3">
                 <span className="text-zinc-700">{stageLabel(k)}</span>
                 <span className="font-semibold tabular-nums text-zinc-900">{fmtSeconds(v)}</span>
               </div>
-              <Progress size="sm" value={v / max} className="mt-1" />
+              <Progress size="sm" value={v / max} appear={Math.min(i, 6) * 40} className="mt-1" />
             </li>
           ))}
         </ul>

@@ -1,4 +1,5 @@
 import { isValidElement, useRef, type KeyboardEvent, type ReactNode } from "react";
+import { useIndicator } from "../../lib/motion";
 import { cn } from "../../lib/utils";
 
 export interface SegmentedItem<K extends string> {
@@ -31,10 +32,12 @@ function textOf(node: ReactNode): string {
   return "";
 }
 
-// The VK segmented control: one choice out of a few, a white pill slides over a grey track. Keyboard: ←/→/Home/End
+// The VK segmented control: one choice out of a few, one white thumb glides over a grey track (300 ms glide) while the
+// labels change colour in 150 ms, so the text lights up as the thumb arrives. Keyboard: ←/→/Home/End
 // move and select (the events stop here, so page-level arrow handlers — the slide keys — do not fire).
 export function Segmented<K extends string>({ items, value, onChange, ariaLabel, metaLabel, className }: SegmentedProps<K>) {
   const ref = useRef<HTMLDivElement>(null);
+  const thumb = useIndicator(ref, '[role="radio"][aria-checked="true"]', value);
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (!["ArrowRight", "ArrowLeft", "Home", "End"].includes(e.key)) return;
     e.preventDefault();
@@ -50,7 +53,8 @@ export function Segmented<K extends string>({ items, value, onChange, ariaLabel,
     ref.current?.querySelector<HTMLButtonElement>(`[data-seg="${next.key}"]`)?.focus();
   };
   return (
-    <div ref={ref} role="radiogroup" aria-label={ariaLabel} onKeyDown={onKey} className={cn("inline-flex h-10 shrink-0 items-center gap-1 rounded-xl bg-zinc-100 p-1", className)}>
+    <div ref={ref} role="radiogroup" aria-label={ariaLabel} onKeyDown={onKey} className={cn("relative inline-flex h-10 shrink-0 items-center gap-1 rounded-xl bg-zinc-100 p-1", className)}>
+      <span aria-hidden className="pointer-events-none absolute left-0 top-0 rounded-lg bg-white shadow-card transition-[transform,width,height] duration-300 ease-glide" style={thumb.style} />
       {items.map((item) => {
         const active = item.key === value;
         return (
@@ -67,8 +71,8 @@ export function Segmented<K extends string>({ items, value, onChange, ariaLabel,
             aria-label={hasMeta(item) ? `${textOf(item.label)}, ${metaLabel ? `${metaLabel} ` : ""}${textOf(item.meta)}` : undefined}
             onClick={() => !active && onChange(item.key)}
             className={cn(
-              "inline-flex h-8 cursor-pointer items-center whitespace-nowrap rounded-lg px-3 text-footnote font-semibold transition-[background-color,color,box-shadow] duration-150 disabled:cursor-not-allowed disabled:opacity-40",
-              active ? "bg-white text-zinc-900 shadow-card" : "text-zinc-600 hover:text-zinc-900",
+              "tap relative z-[1] inline-flex h-8 cursor-pointer items-center whitespace-nowrap rounded-lg px-3 text-footnote font-semibold disabled:cursor-not-allowed disabled:opacity-40",
+              active ? "text-zinc-900" : "text-zinc-600 hover:text-zinc-900",
             )}
           >
             {item.label}

@@ -1,7 +1,9 @@
 // «Почему так»: first the designer's own reason for the form of the slide, the other forms it proposed (one of them
 // may be the form another variant shows) and the critic's notes with their fixes; then how the slide was laid out in
 // the template, other layouts that also fit (for slides cloned from a sample) and the slide's quality check in a row.
-import { useState } from "react";
+// Motion: the next slide's explanation slides in from the right (the previous one from the left); another variant or a
+// new version of the slide cross-fades in place; the match bar fills in.
+import { useRef, useState } from "react";
 import { AlertTriangle, ArrowRight, CheckCircle2, ChevronLeft, ChevronRight } from "lucide-react";
 import { eventParts, plainWords } from "../../lib/agent";
 import { slideCount } from "../../lib/narrate";
@@ -152,7 +154,7 @@ function DesignNote({ v, index }: { v: Variant; index: number }) {
   const notes = (v.agent?.critic ?? []).filter((e) => e.slide === index);
   if (!rationale && alts.length === 0 && notes.length === 0 && !takeaway) return null;
   return (
-    <section className={cn(CARD, "animate-fade-in")}>
+    <section className={CARD}>
       <div className="flex items-baseline gap-3">
         <h3 className="text-title3 font-semibold text-zinc-900">Почему такая форма</h3>
         {spec !== null && spec !== index && <span className="text-footnote text-zinc-500">В вашем тексте — слайд {spec}</span>}
@@ -238,9 +240,22 @@ function DesignNote({ v, index }: { v: Variant; index: number }) {
  *  sample of another chart type would mislead). */
 const sameKind = (p: Pattern | null, s: OutlineSlide | null) => !!p && !!s && p.kind === s.kind && s.kind !== "chart";
 
+/** How the explanation arrives: nothing of its own on the first render (the drawer's cards rise then), from the side of
+ *  travel when the slide changes, a cross-fade in place when the variant or the slide's version changes. */
+function useSwap(slide: number, strategy: string | undefined, rev: string | number): { key: string; className?: string } {
+  const key = `${slide}/${strategy ?? ""}/${rev}`;
+  const at = useRef<{ key: string; slide: number; className?: string }>({ key, slide });
+  if (at.current.key !== key) {
+    const d = slide - at.current.slide;
+    at.current = { key, slide, className: d > 0 ? "animate-slide-in-r" : d < 0 ? "animate-slide-in-l" : "animate-fade" };
+  }
+  return { key, className: at.current.className };
+}
+
 export function WhySlide() {
   const { generation, activeVariant, selectedSlide, setSelectedSlide, manifest, strategyTitle, setDetail } = useApp();
   const v = activeVariant ?? generation?.variants[0];
+  const swap = useSwap(selectedSlide, v?.strategy, v ? variantRev(v) : "");
   if (!generation || !v) return null;
   const total = slideCount(v);
   const rev = variantRev(v);
@@ -274,7 +289,8 @@ export function WhySlide() {
     <div>
       <nav aria-label="Слайд" className="sticky -top-6 z-10 -mx-6 -mt-6 mb-4 flex items-center gap-3 border-b border-zinc-200/70 bg-canvas/95 px-6 py-3 backdrop-blur">
         <Button variant="ghost" shape="circle" size="md" icon={ChevronLeft} aria-label="Предыдущий слайд" disabled={selectedSlide <= 1} onClick={() => setSelectedSlide(selectedSlide - 1)} />
-        <div className="min-w-0 flex-1 text-center">
+        {/* the slide's name cross-fades (up 4px) when the slide changes; the arrows stay put */}
+        <div key={swap.key} className={cn("min-w-0 flex-1 text-center", swap.className && "animate-fade-in [animation-duration:150ms]")}>
           <p className="text-caption text-zinc-500">
             Слайд {selectedSlide} / {total}
             {outlineSlide ? ` · ${kindLabel(outlineSlide.kind)}` : ""}
@@ -286,10 +302,11 @@ export function WhySlide() {
         <Button variant="ghost" shape="circle" size="md" icon={ChevronRight} aria-label="Следующий слайд" disabled={selectedSlide >= total} onClick={() => setSelectedSlide(selectedSlide + 1)} />
       </nav>
 
-      <div className="space-y-4">
-        <DesignNote key={`d${selectedSlide}/${v.strategy}`} v={v} index={selectedSlide} />
+      {/* one block per slide, variant and version: it arrives as a whole (from the side of travel, or cross-fading) */}
+      <div key={swap.key} className={cn("space-y-4", swap.className)}>
+        <DesignNote v={v} index={selectedSlide} />
 
-        <section key={`${selectedSlide}/${rev}`} className={cn(CARD, "animate-fade-in")}>
+        <section className={CARD}>
           <h3 className="text-title3 font-semibold text-zinc-900">Как собран слайд</h3>
           {sample ? (
             <div className="mt-4 flex items-center gap-4">
@@ -308,7 +325,7 @@ export function WhySlide() {
                 <span className="font-semibold text-zinc-700">Сходство с образцом</span>
                 <span className="font-semibold tabular-nums text-zinc-900">{match}%</span>
               </div>
-              <Progress size="md" value={match / 100} tone={!pattern ? "neutral" : match >= 70 ? "success" : "accent"} className="mt-2" />
+              <Progress size="md" value={match / 100} tone={!pattern ? "neutral" : match >= 70 ? "success" : "accent"} appear={120} className="mt-2" />
               <p className="mt-2 text-footnote text-zinc-500">
                 {!pattern
                   ? "Ни один образец не подошёл достаточно хорошо — слайд собран с нуля в стиле шаблона"
@@ -368,13 +385,13 @@ export function WhySlide() {
           <button
             type="button"
             onClick={() => setDetail("quality")}
-            className="flex h-12 w-full cursor-pointer items-center gap-3 rounded-2xl bg-white px-6 text-left text-body text-zinc-900 shadow-card transition-colors duration-150 hover:bg-zinc-50"
+            className="tap-soft group flex h-12 w-full cursor-pointer items-center gap-3 rounded-2xl bg-white px-6 text-left text-body text-zinc-900 shadow-card hover:bg-zinc-50"
           >
             <AlertTriangle className={cn("h-4 w-4 shrink-0", worst === "error" ? "text-red-500" : "text-amber-500")} aria-hidden />
             <span>
               Проверка слайда <span className={worst === "error" ? "text-red-600" : "text-amber-700"}>· {plural(issues.length, "замечание", "замечания", "замечаний")}</span>
             </span>
-            <ChevronRight className="ml-auto h-4 w-4 shrink-0 text-zinc-400" aria-hidden />
+            <ChevronRight className="ml-auto h-4 w-4 shrink-0 text-zinc-400 transition-transform duration-150 ease-out group-hover:translate-x-0.5" aria-hidden />
           </button>
         )}
       </div>

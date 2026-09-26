@@ -1,7 +1,7 @@
 // «Паспорт запуска» of the variant in the drawer's menu (run_manifest): facts with the models, timings, the check
 // summary and the fixes; «Для разработчиков» (folded) holds the JSON files, the skills and agents, the agent's journal and the
 // comparison with another run.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, FileJson, GitCompare } from "lucide-react";
 import { api } from "../api";
 import { errText } from "../lib/narrate";
@@ -117,7 +117,12 @@ function Compare() {
           Сравнить
         </Button>
       </div>
-      {error ? <Notice tone="danger" title="Не удалось сравнить">{error}</Notice> : result ? <DiffView d={result} strategyTitle={strategyTitle} /> : null}
+      {/* the answer (or the error) arrives under the controls with a short fade */}
+      {error ? (
+        <div className="animate-fade"><Notice tone="danger" title="Не удалось сравнить">{error}</Notice></div>
+      ) : result ? (
+        <div className="animate-fade"><DiffView d={result} strategyTitle={strategyTitle} /></div>
+      ) : null}
     </div>
   );
 }
@@ -154,6 +159,9 @@ function Developers() {
 
 export function RunPanel() {
   const { generation, generationLoading, activeVariant, strategyTitle, manifest } = useApp();
+  // the passport fades in where the (delayed) spinner stood — only when it had to wait for the deck
+  const waited = useRef(false);
+  if (generationLoading && !generation) waited.current = true;
 
   if (generationLoading && !generation) {
     return (
@@ -170,7 +178,7 @@ export function RunPanel() {
     return i >= 0 ? i + 1 : null;
   };
   const templateSlide = (pid: string) => (manifest?.template_id === generation.template_id ? manifest.patterns.find((p) => p.id === pid)?.source_slide ?? null : null);
-  return (
+  const body = (
     <>
       {!m ? (
         <Card>
@@ -189,4 +197,5 @@ export function RunPanel() {
       <Developers />
     </>
   );
+  return waited.current ? <div className="space-y-4 animate-fade">{body}</div> : body;
 }

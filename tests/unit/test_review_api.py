@@ -248,7 +248,7 @@ def test_sse_stream_survives_progress_message_starting_with_failed(client):
     events = _collect_events(c, job.id, on_event=lambda ev: gate.set() if ev["message"].startswith("failed to reach") else None)
     msgs = [e["message"] for e in events]
     assert "failed to reach model, retrying" in msgs and "almost" in msgs
-    assert events[-1]["status"] == "done" and events[-1]["message"] == "done"
+    assert events[-1]["status"] == "done" and events[-1]["message"] == "Готово"
 
 
 def test_sse_stream_ends_on_failed_job(client):
@@ -260,7 +260,7 @@ def test_sse_stream_ends_on_failed_job(client):
     job = mod.runner.submit("test", fn)
     _wait(c, job.id)
     events = _collect_events(c, job.id)
-    assert events[-1]["status"] == "failed" and events[-1]["message"].startswith("failed: kaput")
+    assert events[-1]["status"] == "failed" and events[-1]["message"] == "Не получилось: kaput"
 
 
 def test_subscribe_does_not_lose_a_concurrent_final_event():

@@ -12,6 +12,16 @@ from typing import Any, Callable, Optional
 
 _MAX_AGENT_POLLED = 400
 
+# the runner's own messages reach the interface (the job line, the chat's job bubble): they are Russian like the rest
+MSG_STARTED = "Начинаю"
+MSG_DONE = "Готово"
+
+
+def failed_message(reason: str) -> str:
+    """The last event of a failed job: «Не получилось: {the reason's first line}»."""
+    first = next((ln.strip() for ln in str(reason or "").splitlines() if ln.strip()), "")
+    return f"Не получилось: {first}" if first else "Не получилось"
+
 
 @dataclass
 class Job:
@@ -93,17 +103,19 @@ class JobRunner:
 
         def run() -> None:
             job.status = "running"
-            job.emit("started", 0.0)
+            job.emit(MSG_STARTED, 0.0)
             try:
                 job.result = fn(job)
                 job.status = "done"
                 job.finished_at = time.time()
-                job.emit("done", 1.0)
+                job.emit(MSG_DONE, 1.0)
             except Exception as e:  # noqa: BLE001
                 job.status = "failed"
-                job.error = f"{e}\n{traceback.format_exc()[-1200:]}"
+                # the first line is what the interface shows (the reason); the traceback after it is for the logs
+                reason = str(e).strip() or type(e).__name__
+                job.error = f"{reason}\n{traceback.format_exc()[-1200:]}"
                 job.finished_at = time.time()
-                job.emit(f"failed: {e}", job.progress)
+                job.emit(failed_message(reason), job.progress)
 
         threading.Thread(target=run, daemon=True, name=f"job-{job.id}").start()
         return job

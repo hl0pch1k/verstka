@@ -36,7 +36,8 @@ export function ExportPanel() {
           // on the tinted row of the variant on screen the buttons are white, as on every tinted surface
           const current = v.strategy === active;
           return (
-            <li key={v.strategy} className={cn("flex h-14 items-center gap-3 px-6", current && "bg-accent-50")} aria-current={current || undefined}>
+            // the tint follows the variant on screen (150 ms), and the buttons on it turn white with it
+            <li key={v.strategy} className={cn("flex h-14 items-center gap-3 px-6 transition-colors duration-150", current && "bg-accent-50")} aria-current={current || undefined}>
               <span className="min-w-0 truncate text-body font-semibold text-zinc-900">
                 <span className="font-normal tabular-nums text-zinc-500">{i + 1}</span> · {name}
               </span>

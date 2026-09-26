@@ -58,13 +58,13 @@ export function Modal({ open, onClose, title, description, footer, size = "md", 
 
   return createPortal(
     <div className={cn("fixed inset-0 z-[90] flex items-center justify-center p-8", leaving && "pointer-events-none")}>
-      <div className={cn("absolute inset-0 bg-ink/50 backdrop-blur-[3px]", leaving ? "animate-fade-out" : "animate-fade")} onClick={dismissible ? onClose : undefined} aria-hidden />
+      <div className={cn("absolute inset-0 bg-ink/50 backdrop-blur-[3px]", leaving ? "animate-fade-out rm-fade-out" : "animate-fade rm-fade")} onClick={dismissible ? onClose : undefined} aria-hidden />
       <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         tabIndex={-1}
-        className={cn("relative flex max-h-full w-full flex-col overflow-hidden rounded-3xl bg-white shadow-pop outline-none", leaving ? "animate-zoom-out" : "animate-zoom-in", WIDTH[size], className)}
+        className={cn("relative flex max-h-full w-full origin-center flex-col overflow-hidden rounded-3xl bg-white shadow-pop outline-none", leaving ? "animate-zoom-out rm-fade-out" : "animate-zoom-in rm-fade", WIDTH[size], className)}
       >
         {(view.title || dismissible) && (
           <header className="flex shrink-0 items-start gap-4 px-6 pb-2 pt-6">

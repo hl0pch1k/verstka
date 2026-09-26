@@ -1,8 +1,11 @@
 // «① Выберите шаблон»: the covers of the analysed templates in one stable row, «Разбор шаблона ›» and «Свой .pptx» in
 // the step header (TemplateActions), and a .pptx dropped anywhere on the step (useTemplateDrop). While a file is being
-// analysed a skeleton tile stands where the new template will appear.
-import { useEffect, useRef, useState, useSyncExternalStore, type DragEvent } from "react";
+// analysed a skeleton tile stands where the new template will appear. Motion: skeletons until the list arrives, then the
+// covers fade up in a 40 ms cascade (once); «Ещё N» cascades the revealed covers; a new template's cover fades in over
+// its skeleton when the picture has loaded.
+import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type DragEvent } from "react";
 import { Check, ChevronRight, ImageOff, Plus, Upload } from "lucide-react";
+import { stagger } from "../../lib/motion";
 import { templateTitle } from "../../lib/plain";
 import { cn, plural } from "../../lib/utils";
 import { useApp } from "../../store";
@@ -119,19 +122,38 @@ export function TemplateActions() {
 
 const TILE = "relative flex flex-col overflow-hidden rounded-xl bg-white text-left";
 
-function Cover({ t, selected, onPick }: { t: TemplateListItem; selected: boolean; onPick(): void }) {
+function Cover({ t, selected, onPick, fresh, className, style }: {
+  t: TemplateListItem;
+  selected: boolean;
+  onPick(): void;
+  /** A template that arrived after the row was shown (a file just analysed): its picture fades in over a skeleton. */
+  fresh?: boolean;
+  className?: string;
+  style?: CSSProperties;
+}) {
   const [broken, setBroken] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const name = templateTitle(t.source_file, t.template_id);
   return (
     <button
       type="button"
       onClick={onPick}
       aria-pressed={selected}
-      className={cn(TILE, "cursor-pointer transition-shadow duration-150", selected ? "shadow-selected" : "shadow-card hover:shadow-raise")}
+      // the ring moves between tiles in 150 ms (box-shadow through tap-soft); a press sinks the tile a touch
+      className={cn(TILE, "tap-soft cursor-pointer", selected ? "shadow-selected" : "shadow-card hover:shadow-raise", className)}
+      style={style}
     >
-      <span className="relative block aspect-video w-full overflow-hidden bg-zinc-100 after:absolute after:inset-x-0 after:bottom-0 after:h-px after:bg-zinc-900/[0.06] after:content-['']">
+      <span className={cn("relative block aspect-video w-full overflow-hidden after:absolute after:inset-x-0 after:bottom-0 after:h-px after:bg-zinc-900/[0.06] after:content-['']", fresh && !loaded && !broken ? "skeleton rounded-none" : "bg-zinc-100")}>
         {t.cover_url && !broken ? (
-          <img src={t.cover_url} alt="" loading="lazy" draggable={false} onError={() => setBroken(true)} className="h-full w-full object-cover" />
+          <img
+            src={t.cover_url}
+            alt=""
+            loading="lazy"
+            draggable={false}
+            onLoad={() => setLoaded(true)}
+            onError={() => setBroken(true)}
+            className={cn("h-full w-full object-cover", fresh && (loaded ? "animate-fade" : "opacity-0"))}
+          />
         ) : (
           <span className="flex h-full items-center justify-center text-zinc-400"><ImageOff className="h-6 w-6" aria-hidden /></span>
         )}
@@ -163,10 +185,21 @@ function Analysing({ name, value }: { name: string; value: number | null }) {
   );
 }
 
+/** How long the first covers keep their entrance class: past the longest cascade (6 × 40 + 200 ms). */
+const INTRO_MS = 800;
+
 export function TemplatePicker() {
-  const { templates, templateId, selectTemplate, healthError } = useApp();
+  const { templates, templateId, selectTemplate, healthError, strategies } = useApp();
   const { pick, blocked, job, name, over } = useTemplateUpload();
   const [all, setAll] = useState(false);
+
+  // the covers of the first list cascade in once (40 ms apart); the ids seen then, so a template added later (a file
+  // just analysed) fades its own picture in instead
+  const intro = useRef<{ at: number; ids: Set<string> } | null>(null);
+  if (!intro.current && templates.length > 0) intro.current = { at: performance.now(), ids: new Set(templates.map((t) => t.template_id)) };
+  const introOn = !!intro.current && performance.now() - intro.current.at < INTRO_MS;
+  // «Ещё N» opens: the covers it reveals cascade in (not on the first render, not on the way back)
+  const [revealAt, setRevealAt] = useState(0);
 
   // the order is the server's (newest first) and never changes on a click
   const list = templates;
@@ -179,10 +212,20 @@ export function TemplatePicker() {
   const chosen = list.find((t) => t.template_id === templateId);
   if (chosen && room > 0 && !covers.includes(chosen)) covers = [...covers.slice(0, room - 1), chosen];
 
+  // the list has not arrived yet (templates and strategies come in one request) or cannot (no server): the row waits
+  // for it as skeletons — the upload prompt shows only when the server really has no templates
+  const waiting = list.length === 0 && !analysing && (!!healthError || strategies.length === 0);
+  const revealing = all && performance.now() - revealAt < INTRO_MS;
+  const tileMotion = (t: TemplateListItem, i: number): { className?: string; style?: CSSProperties } => {
+    if (introOn && intro.current?.ids.has(t.template_id)) return { className: "animate-fade-in", style: stagger(i) };
+    // the folded row shows ROW − 1 covers: the ones after them are the revealed ones
+    if (revealing && i >= ROW - 1) return { className: "animate-fade-in", style: stagger(i - (ROW - 1)) };
+    return {};
+  };
+
   return (
     <div className={cn("rounded-xl transition-[outline-color] duration-150", over ? "outline-dashed outline-2 outline-offset-4 outline-accent" : "outline-none")}>
-      {list.length === 0 && !analysing && healthError ? (
-        // the list did not load (no server): not «no templates» — the row waits for the server
+      {waiting ? (
         <div className="grid grid-cols-4 gap-4" aria-busy="true" aria-label="Шаблоны загружаются">
           {Array.from({ length: ROW }, (_, i) => <div key={i} className="skeleton aspect-[221/178] rounded-xl" />)}
         </div>
@@ -191,7 +234,7 @@ export function TemplatePicker() {
           type="button"
           disabled={!!blocked}
           onClick={pick}
-          className="flex h-44 w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-xl bg-zinc-100 text-body font-semibold text-zinc-700 transition-colors duration-150 hover:bg-zinc-200/70 disabled:cursor-not-allowed disabled:opacity-40"
+          className="tap-soft flex h-44 w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-xl bg-zinc-100 text-body font-semibold text-zinc-700 hover:bg-zinc-200/70 animate-fade disabled:cursor-not-allowed disabled:opacity-40"
         >
           <Upload className="h-6 w-6 text-zinc-500" aria-hidden />
           Загрузите .pptx
@@ -199,17 +242,28 @@ export function TemplatePicker() {
       ) : (
         <div className="grid grid-cols-4 gap-4">
           {analysing && <Analysing name={name} value={job ? job.progress : null} />}
-          {covers.map((t) => (
-            <Cover key={t.template_id} t={t} selected={t.template_id === templateId} onPick={() => selectTemplate(t.template_id)} />
+          {covers.map((t, i) => (
+            <Cover
+              key={t.template_id}
+              t={t}
+              selected={t.template_id === templateId}
+              onPick={() => selectTemplate(t.template_id)}
+              fresh={!!intro.current && !intro.current.ids.has(t.template_id)}
+              {...tileMotion(t, i)}
+            />
           ))}
           {list.length > ROW && (
             <button
               type="button"
-              onClick={() => setAll(!all)}
+              onClick={() => {
+                if (!all) setRevealAt(performance.now());
+                setAll(!all);
+              }}
               aria-expanded={all}
-              className="flex min-h-full cursor-pointer flex-col items-center justify-center gap-2 rounded-xl bg-zinc-100 text-footnote font-semibold text-zinc-700 transition-colors duration-150 hover:bg-zinc-200/70"
+              className={cn("tap-soft flex min-h-full cursor-pointer flex-col items-center justify-center gap-2 rounded-xl bg-zinc-100 text-footnote font-semibold text-zinc-700 hover:bg-zinc-200/70", introOn && "animate-fade-in")}
+              style={introOn ? stagger(covers.length) : undefined}
             >
-              <Plus className={cn("h-5 w-5 text-zinc-500 transition-transform duration-200", all && "rotate-45")} aria-hidden />
+              <Plus className={cn("h-5 w-5 text-zinc-500 transition-transform duration-300 ease-glide", all && "rotate-45")} aria-hidden />
               {all ? "Свернуть" : `Ещё ${list.length - covers.length}`}
             </button>
           )}

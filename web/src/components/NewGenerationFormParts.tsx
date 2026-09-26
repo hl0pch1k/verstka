@@ -1,9 +1,10 @@
 // Building blocks of the create form: the text field look, the switch, the strategy option and the constants.
-import { useId } from "react";
+import { useId, useRef } from "react";
 import { Check } from "lucide-react";
 import { variantHint } from "../lib/plain";
 import { cn } from "../lib/utils";
 import type { StrategyInfo } from "../types";
+import { SwitchTrack } from "./ui/Switch";
 
 export const PURPOSES: Array<{ value: string; label: string }> = [
   { value: "feature", label: "Функция" },
@@ -46,7 +47,8 @@ export const SAMPLE_BRIEF = `Запуск функции «Умные сводк
 export const INPUT_CLS =
   "h-10 w-full rounded-xl bg-zinc-100 px-4 text-body text-zinc-900 placeholder:text-zinc-500 outline-none transition-[background-color,box-shadow] duration-150 focus:bg-white focus:shadow-selected disabled:cursor-not-allowed disabled:opacity-40";
 
-/** A switch with a one-line label. `title` explains a disabled row on hover. */
+/** A switch with a one-line label (the VK switch of ui/Switch: the knob springs across, the track's colour follows).
+ *  `title` explains a disabled row on hover. */
 export function Toggle({ label, checked, disabled, title, onChange }: {
   label: string;
   checked: boolean;
@@ -64,12 +66,9 @@ export function Toggle({ label, checked, disabled, title, onChange }: {
         aria-checked={checked}
         disabled={disabled}
         onClick={() => onChange(!checked)}
-        className={cn(
-          "relative h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors duration-200 disabled:cursor-not-allowed",
-          checked ? "bg-accent" : "bg-zinc-300",
-        )}
+        className="group flex shrink-0 cursor-pointer rounded-full disabled:cursor-not-allowed"
       >
-        <span className={cn("absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow-knob transition-transform duration-200", checked && "translate-x-4")} aria-hidden />
+        <SwitchTrack checked={checked} size="sm" />
       </button>
       <label htmlFor={id} className={cn("min-w-0 select-none whitespace-nowrap text-footnote font-semibold text-zinc-900", disabled ? "cursor-not-allowed" : "cursor-pointer")}>
         {label}
@@ -129,12 +128,16 @@ export function StrategyOption({ strategy, checked, disabled, onChange }: {
   onChange(v: boolean): void;
 }) {
   const hint = variantHint(strategy.name, strategy.description);
+  // the check springs in when the person turns the option on (not on the first render: every option starts on)
+  const was = useRef(checked);
+  const turnedOn = checked && !was.current;
+  if (!checked) was.current = false;
   return (
     <label
       className={cn(
         // relative: the sr-only checkbox stays inside the card (an absolute box without a positioned parent would
-        // stretch the document past the scrolling main)
-        "relative flex cursor-pointer flex-col gap-3 rounded-xl bg-white p-4 transition-shadow duration-150",
+        // stretch the document past the scrolling main); the ring moves in 150 ms and a press sinks the card (tap-soft)
+        "tap-soft relative flex cursor-pointer flex-col gap-3 rounded-xl bg-white p-4",
         "has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent",
         checked ? "shadow-selected" : "shadow-card hover:shadow-raise",
         disabled && "cursor-not-allowed opacity-40",
@@ -146,12 +149,12 @@ export function StrategyOption({ strategy, checked, disabled, onChange }: {
         <StrategyArt name={strategy.name} active={checked} />
         <span
           className={cn(
-            "absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full transition-colors duration-150",
+            "absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full transition-[background-color,color,box-shadow] duration-150",
             checked ? "bg-accent-fill text-white" : "bg-white text-transparent shadow-inner-line",
           )}
           aria-hidden
         >
-          <Check className="h-3.5 w-3.5" strokeWidth={2.5} />
+          <Check key={checked ? "on" : "off"} className={cn("h-3.5 w-3.5", turnedOn && "animate-pop")} strokeWidth={2.5} />
         </span>
       </span>
       <span className="min-w-0">

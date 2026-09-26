@@ -1,8 +1,10 @@
 // The first screen, a calm one-screen composer: ① choose a template, ② say what the deck is about, and a sticky bar
 // with the slide count and the one «Создать презентацию». Everything else waits behind «Настройки». The draft
-// survives reloads.
+// survives reloads. Motion: the title, the two steps and the bar rise in a 40 ms cascade on first load, «Настройки»
+// unfolds (rows glide, the content fades in after them), and the whole form glides aside when the helper docks.
 import { useEffect, useRef, useState, type ChangeEvent, type FocusEvent, type FormEvent, type HTMLAttributes, type KeyboardEvent, type ReactNode } from "react";
 import { ArrowRight, Check, ChevronDown, FileText, Minus, Paperclip, Plus, SlidersHorizontal } from "lucide-react";
+import { smoothScroll, stagger, useFlip } from "../../lib/motion";
 import { errText } from "../../lib/narrate";
 import { cn, LS, storage } from "../../lib/utils";
 import { useApp } from "../../store";
@@ -78,12 +80,25 @@ function loadDraft(): Draft {
   }
 }
 
-function Step({ n, title, done, actions, delay, shake, zone, children }: {
+/** `true` at once, `false` only once it has held for `ms`: switching templates reloads the template's analysis for a
+ *  moment, and the step's check must not blink off and pop back in for that. */
+function useHeldTrue(value: boolean, ms: number): boolean {
+  const [held, setHeld] = useState(value);
+  useEffect(() => {
+    if (value) return void setHeld(true);
+    const t = window.setTimeout(() => setHeld(false), ms);
+    return () => window.clearTimeout(t);
+  }, [value, ms]);
+  return value || held;
+}
+
+function Step({ n, title, done, actions, order, shake, zone, children }: {
   n: number;
   title: string;
   done: boolean;
   actions?: ReactNode;
-  delay: number;
+  /** Place in the entrance cascade (40 ms steps). */
+  order: number;
   shake: boolean;
   zone?: HTMLAttributes<HTMLElement>;
   children: ReactNode;
@@ -96,12 +111,12 @@ function Step({ n, title, done, actions, delay, shake, zone, children }: {
       aria-labelledby={`step-${n}`}
       onAnimationEnd={(e) => e.target === e.currentTarget && setEntered(true)}
       className={cn("rounded-2xl bg-white p-6 shadow-card [@media(max-height:760px)]:py-5", shake ? "animate-shake" : !entered && "animate-rise")}
-      style={shake || entered ? undefined : { animationDelay: `${delay}ms` }}
+      style={shake || entered ? undefined : stagger(order)}
     >
       <div className="mb-4 flex h-9 items-center gap-3 [@media(max-height:760px)]:mb-3">
         <span
           className={cn(
-            "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-body font-bold transition-colors duration-200",
+            "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-body font-bold transition-colors duration-300",
             done ? "bg-accent-fill text-white" : "bg-accent-50 text-accent-700",
           )}
         >
@@ -117,7 +132,7 @@ function Step({ n, title, done, actions, delay, shake, zone, children }: {
 }
 
 export function CreateScreen() {
-  const { health, healthError, modelStatus, strategies, templateId, manifestLoading, activeJob, startGeneration, toast } = useApp();
+  const { health, healthError, modelStatus, strategies, templateId, manifestLoading, activeJob, startGeneration, toast, agentOpen } = useApp();
   // a server with a model in its config whose every link is off builds without one: the switches say so too
   const modelsConfigured = (health?.models_configured ?? false) && modelStatus?.state !== "off";
   const drop = useTemplateDrop();
@@ -139,6 +154,11 @@ export function CreateScreen() {
   const briefRef = useRef<HTMLTextAreaElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
   const purposeRef = useRef<HTMLDivElement>(null);
+  // a template chosen and read; a switch to another template keeps the check unless its analysis takes a while
+  const templateDone = useHeldTrue(!!templateId && !manifestLoading, 400) && !!templateId;
+  // the helper docks (or leaves) in one reflow: the centred form glides the 180px instead of jumping
+  const formRef = useRef<HTMLDivElement>(null);
+  useFlip(formRef, agentOpen);
   // the last input was the pointer (a click moves the focus itself; only the keyboard's focus is scrolled clear)
   const byPointer = useRef(false);
   useEffect(() => {
@@ -244,10 +264,7 @@ export function CreateScreen() {
       const b = bar.getBoundingClientRect();
       // never past the element's own top (a tall text field stays readable from its first line)
       const by = Math.min(t.bottom - b.top + 16, t.top - main.getBoundingClientRect().top - 16);
-      if (t.bottom > b.top - 8 && by > 0) {
-        const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-        main.scrollBy({ top: by, behavior: still ? "auto" : "smooth" });
-      }
+      if (t.bottom > b.top - 8 && by > 0) main.scrollBy({ top: by, behavior: smoothScroll() });
     });
   };
 
@@ -306,10 +323,10 @@ export function CreateScreen() {
       className="px-8 pt-6 [@media(max-height:760px)]:pt-3"
     >
       {/* a short window (1280×720) tightens the rhythm by 48px, so «Настройки» clears the sticky bar on first load */}
-      <div className="mx-auto max-w-[980px]">
+      <div ref={formRef} className="mx-auto max-w-[980px]">
         <h1 className="mb-6 [@media(max-height:760px)]:mb-4 animate-rise text-center text-display font-bold tracking-tight text-zinc-900">Презентация в стиле вашего шаблона</h1>
 
-        <Step n={1} title="Выберите шаблон" done={!!templateId && !manifestLoading} actions={<TemplateActions />} delay={40} shake={shaking === 1} zone={drop}>
+        <Step n={1} title="Выберите шаблон" done={templateDone} actions={<TemplateActions />} order={1} shake={shaking === 1} zone={drop}>
           <TemplatePicker />
         </Step>
 
@@ -318,7 +335,7 @@ export function CreateScreen() {
             n={2}
             title="О чём презентация"
             done={briefLen >= BRIEF_MIN}
-            delay={80}
+            order={2}
             shake={shaking === 2}
             actions={
               <>
@@ -370,12 +387,13 @@ export function CreateScreen() {
 
             <Button size="sm" variant="ghost" icon={SlidersHorizontal} aria-expanded={more} aria-controls="create-settings" onClick={() => setMore(!more)} className="-ml-3 mt-4 [@media(max-height:760px)]:mt-3">
               Настройки
-              <ChevronDown className={cn("h-4 w-4 shrink-0 text-zinc-500 transition-transform duration-200", more && "rotate-180")} aria-hidden />
+              <ChevronDown className={cn("h-4 w-4 shrink-0 text-zinc-500 transition-transform duration-300 ease-glide", more && "rotate-180")} aria-hidden />
             </Button>
-            {/* the settings unfold smoothly; while folded they leave the tab order once the animation has played */}
-            <div className={cn("grid transition-[grid-template-rows] duration-300 ease-out", more ? "grid-rows-[1fr]" : "grid-rows-[0fr]")}>
+            {/* the settings unfold smoothly (the rows glide open, the panel fades in just after them, and fades out first
+                on the way back); while folded they leave the tab order once the animation has played */}
+            <div className={cn("grid transition-[grid-template-rows] duration-300 ease-glide", more ? "grid-rows-[1fr]" : "grid-rows-[0fr]")}>
               <div id="create-settings" className="min-h-0 overflow-hidden" style={{ visibility: more ? "visible" : "hidden", transition: `visibility 0s linear ${more ? "0s" : "300ms"}` }}>
-                <div className="mt-4 space-y-6 rounded-xl bg-zinc-50 p-6">
+                <div className={cn("mt-4 space-y-6 rounded-xl bg-zinc-50 p-6 transition-opacity", more ? "opacity-100 delay-[60ms] duration-200 ease-out" : "opacity-0 duration-150 ease-in")}>
                   <div>
                     <label htmlFor="audience" className="mb-2 block text-footnote font-semibold text-zinc-700">Аудитория</label>
                     <input id="audience" type="text" value={audience} disabled={busy} onChange={(e) => setAudience(e.target.value)} placeholder="Руководство, инвесторы, команда" className={cn(INPUT_CLS, "max-w-[420px]")} />
@@ -453,7 +471,7 @@ export function CreateScreen() {
             Its controls are always in view: the page's bottom scroll padding (kept for the form above it) must not nudge
             the page when one of them takes the focus */}
         <div className="sticky bottom-0 z-10 mt-4 pb-4 [background:linear-gradient(to_top,theme(colors.canvas)_16px,transparent_16px)] [&_button]:-scroll-mb-24 [&_input]:-scroll-mb-24">
-          <div ref={barRef} className="flex h-[72px] animate-rise items-center gap-4 rounded-2xl bg-white/90 px-6 shadow-pop backdrop-blur" style={{ animationDelay: "80ms" }}>
+          <div ref={barRef} className="flex h-[72px] animate-rise items-center gap-4 rounded-2xl bg-white/90 px-6 shadow-pop backdrop-blur" style={stagger(3)}>
             <div className="flex shrink-0 items-center gap-3">
               <label htmlFor="slides" className="text-footnote text-zinc-500">Слайдов</label>
               <div
@@ -487,12 +505,12 @@ export function CreateScreen() {
               </div>
               {byText && <span className="text-caption text-zinc-500 animate-fade">по тексту</span>}
             </div>
-            <div className="flex min-w-0 flex-1 items-center">
-              {barProblem ? (
-                <p role="alert" className="truncate text-footnote font-semibold text-red-600 animate-fade" title={barProblem}>{barProblem}</p>
-              ) : (
-                <ModelStatus enabled={useModels && modelsConfigured} />
+            {/* the problem and the model line share one spot: one cross-fades into the other (150 ms), nothing moves */}
+            <div className="grid min-w-0 flex-1 items-center [&>*]:col-start-1 [&>*]:row-start-1">
+              {barProblem && (
+                <p key={barProblem} role="alert" className="truncate text-footnote font-semibold text-red-600 animate-fade [animation-duration:150ms]" title={barProblem}>{barProblem}</p>
               )}
+              <ModelStatus enabled={useModels && modelsConfigured} hidden={!!barProblem} className="min-w-0" />
             </div>
             <Button type="submit" variant="primary" size="lg" iconRight={ArrowRight} loading={busy}>
               Создать презентацию

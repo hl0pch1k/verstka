@@ -2,7 +2,7 @@
 // works behind the Vite dev proxy and when FastAPI serves web/dist directly.
 import type {
   ChatResponse, CheckSpec, DiffResponse, ExplainResponse, FixRequest, GenerateRequest, GenerateResponse,
-  Generation, GenerationMeta, Health, Job, ModelsStatus, SkillsResponse, StrategyInfo, TemplateListItem, TemplateManifest, UploadResponse,
+  Generation, GenerationMeta, Health, Job, ModelsStatus, SkillsResponse, SlideFixRequest, StrategyInfo, TemplateListItem, TemplateManifest, UploadResponse,
 } from "./types";
 
 export class ApiError extends Error {
@@ -68,6 +68,12 @@ export const api = {
     request<ExplainResponse>(`/api/generations/${encodeURIComponent(gid)}/${encodeURIComponent(strategy)}/explain/${index}`),
   fixes: (gid: string, strategy: string, body: FixRequest) =>
     request<{ job_id: string }>(`/api/generations/${encodeURIComponent(gid)}/${encodeURIComponent(strategy)}/fixes`, json(body)),
+  /** Fixes the remarks of one slide (and follows the person's wishes); only that slide of the deck changes. */
+  fixSlide: (gid: string, strategy: string, n: number, body: SlideFixRequest) =>
+    request<{ job_id: string }>(`/api/generations/${encodeURIComponent(gid)}/${encodeURIComponent(strategy)}/slides/${n}/fix`, json(body)),
+  /** An edit of the variant in words («верни как было» undoes the last change exactly). */
+  editVariant: (gid: string, strategy: string, body: { message: string; slide?: number | null }) =>
+    request<{ job_id: string }>(`/api/generations/${encodeURIComponent(gid)}/${encodeURIComponent(strategy)}/edits`, json(body)),
   diff: (gid: string, strategy: string, other: string, otherStrategy: string) =>
     request<DiffResponse>(
       `/api/generations/${encodeURIComponent(gid)}/${encodeURIComponent(strategy)}/diff/${encodeURIComponent(other)}/${encodeURIComponent(otherStrategy)}`,

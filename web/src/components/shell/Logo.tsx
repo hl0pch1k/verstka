@@ -18,7 +18,7 @@ export function Logo({ onClick }: { onClick?: () => void }) {
       aria-label="Verstka — на главную"
       className="group -ml-2 flex h-10 shrink-0 cursor-pointer items-center gap-2 rounded-xl px-2"
     >
-      <span className="transition-transform duration-200 ease-out group-hover:-rotate-6 group-hover:scale-105 group-active:scale-95">
+      <span className="transition-transform duration-300 ease-spring group-hover:-rotate-6 group-hover:scale-105 group-active:scale-95 group-active:duration-100">
         <LogoMark size={32} />
       </span>
       <span className="font-display text-[26px] font-bold leading-none tracking-[-0.03em] text-zinc-900">Verstka</span>

@@ -1,7 +1,9 @@
 // One grey line in the create bar, only when no model can answer: «Модель недоступна · соберу без неё».
 // Refreshed when the Create screen opens, after every generation (flows.ts) and every 30 s while the screen is open.
-import { useEffect, useMemo, useState } from "react";
-import { modelIndicator } from "../../lib/modelText";
+// It fades in when it appears and out when it goes (or while the bar shows a problem in its place).
+import { useEffect, useMemo, useRef, useState } from "react";
+import { MOTION, usePresence } from "../../lib/motion";
+import { modelIndicator, type Indicator } from "../../lib/modelText";
 import { cn } from "../../lib/utils";
 import { useApp } from "../../store";
 import type { ModelsStatus } from "../../types";
@@ -19,7 +21,7 @@ export function useRetryIn(st: ModelsStatus | null): number {
   return Math.max(0, Math.ceil(got.s - Math.max(0, now - got.at) / 1000));
 }
 
-export function ModelStatus({ enabled, className }: { enabled: boolean; className?: string }) {
+export function ModelStatus({ enabled, hidden = false, className }: { enabled: boolean; /** Something else speaks in this spot now: fade out. */ hidden?: boolean; className?: string }) {
   const { modelStatus, refreshModelStatus, healthError } = useApp();
   useEffect(() => {
     void refreshModelStatus();
@@ -28,11 +30,22 @@ export function ModelStatus({ enabled, className }: { enabled: boolean; classNam
   }, [refreshModelStatus]);
 
   const ind = modelIndicator(modelStatus, enabled);
-  if (!ind || healthError) return null;
+  const show = !!ind && !healthError && !hidden;
+  const { mounted, leaving } = usePresence(show, MOTION.fast);
+  // the line that is fading out keeps its words
+  const last = useRef<Indicator | null>(ind);
+  if (ind) last.current = ind;
+  const shown = ind ?? last.current;
+  if (!mounted || !shown) return null;
   return (
-    <span className={cn("inline-flex min-w-0 items-center gap-2 text-footnote text-zinc-500 animate-fade", className)} role="status" aria-live="polite">
+    <span
+      className={cn("inline-flex min-w-0 items-center gap-2 text-footnote text-zinc-500", leaving ? "animate-fade-out" : "animate-fade", className)}
+      role="status"
+      aria-live="polite"
+      aria-hidden={leaving || undefined}
+    >
       <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-400" aria-hidden />
-      <span className="truncate" title={ind.text}>{ind.text}</span>
+      <span className="truncate" title={shown.text}>{shown.text}</span>
     </span>
   );
 }

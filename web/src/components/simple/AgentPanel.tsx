@@ -1,15 +1,17 @@
 // «Как работал агент»: a compact card beside the slide (what the analyst found, what the designer made, what the
 // critic said) and the full view in the drawer's «Агент» tab — the variant's timeline step by step with the critic's
-// notes per slide and their fixes, then the person's own edits. Older runs show a calm empty state.
-import { useMemo, useState } from "react";
+// notes per slide and their fixes, then the person's own edits. Older runs show a calm empty state. The card rises
+// with the aside (its owner staggers it); on another variant only its lines cross-fade. The log is not live: no line
+// animations there.
+import { useMemo, useRef, useState } from "react";
 import { Bot, ChevronRight, PenTool, RotateCcw, ScanText, ShieldCheck, type LucideIcon } from "lucide-react";
 import { api } from "../../api";
 import { agentSummary, buildTimeline, formsSummary, hasAgentWork, mendCut } from "../../lib/agent";
 import { errText } from "../../lib/narrate";
 import { plainTerms } from "../../lib/plain";
-import { plural, sessionId } from "../../lib/utils";
+import { cn, plural, sessionId } from "../../lib/utils";
 import { useApp } from "../../store";
-import type { Variant } from "../../types";
+import type { Variant, VariantEdit } from "../../types";
 import { useChatActions } from "../ChatActions";
 import { Button } from "../ui/Button";
 import { EmptyState } from "../ui/EmptyState";
@@ -21,19 +23,24 @@ const STEP_ICON: Record<string, LucideIcon> = { Аналитик: ScanText, Ди
  *  journal. The whole card opens the drawer's «Агент». */
 export function AgentCard({ variant, onOpen }: { variant: Variant; onOpen(): void }) {
   const lines = useMemo(() => agentSummary(variant).slice(0, 3), [variant]);
+  // the lines cross-fade when the variant changes — also back to the first one (not when the card first appears: it
+  // rises with the aside then)
+  const firstVariant = useRef(variant.strategy);
+  const swapped = useRef(false);
+  if (variant.strategy !== firstVariant.current) swapped.current = true;
   if (!hasAgentWork(variant) || lines.length === 0) return null;
   return (
     <button
       type="button"
       onClick={onOpen}
-      className="group w-full shrink-0 cursor-pointer rounded-2xl bg-white p-4 text-left shadow-card transition-colors duration-150 hover:bg-zinc-50 animate-fade"
+      className="tap-soft group w-full shrink-0 cursor-pointer rounded-2xl bg-white p-4 text-left shadow-card hover:bg-zinc-50"
     >
       <span className="flex items-center gap-2">
         <span className="text-title3 font-semibold text-zinc-900">Как работал агент</span>
-        <ChevronRight className="ml-auto h-4 w-4 shrink-0 text-zinc-400 transition-transform duration-150 group-hover:translate-x-0.5" aria-hidden />
+        <ChevronRight className="ml-auto h-4 w-4 shrink-0 text-zinc-400 transition-transform duration-150 ease-out group-hover:translate-x-0.5" aria-hidden />
       </span>
       {/* a button holds phrasing content only: the mini timeline is spans laid out as blocks */}
-      <span className="mt-3 block space-y-2">
+      <span key={variant.strategy} className={cn("mt-3 block space-y-2", swapped.current && "animate-fade")}>
         {lines.map((l, i) => {
           const Icon = STEP_ICON[l.step] ?? Bot;
           const last = i === lines.length - 1;
@@ -50,6 +57,23 @@ export function AgentCard({ variant, onOpen }: { variant: Variant; onOpen(): voi
       </span>
     </button>
   );
+}
+
+/** An entry of the edit log; an undo names the version it took back (`undo_of`, newer servers). */
+type LoggedEdit = VariantEdit & { undo_of?: number | null };
+
+/** Is a change still in place, one «Вернуть как было» would take back? The log replayed as the server keeps it: every
+ *  change keeps a version, every undo takes back the newest version still kept (its `undo_of`). A variant fixed and
+ *  restored twice has nothing left to undo, even though its log is not empty. */
+function hasUndo(edits: LoggedEdit[]): boolean {
+  const kept: number[] = [];
+  for (const e of edits) {
+    if (e.kind === "undo" || e.undo_of != null) {
+      const at = e.undo_of != null ? kept.lastIndexOf(e.undo_of) : kept.length - 1;
+      if (at >= 0) kept.splice(at, 1);
+    } else if (e.version != null) kept.push(e.version);
+  }
+  return kept.length > 0;
 }
 
 /** «Вернуть как было»: the same words the helper understands, sent the same way (the reply and the job show in it). */
@@ -148,9 +172,12 @@ export function AgentLog() {
             <h3 className="text-title3 font-semibold text-zinc-900">
               Ваши правки<span className="ml-2 text-footnote font-normal tabular-nums text-zinc-500">{edits.length}</span>
             </h3>
-            <Button variant="tonal" size="sm" icon={RotateCcw} loading={busy} disabled={jobBusy} onClick={() => void undo()} className="ml-auto">
-              Вернуть как было
-            </Button>
+            {/* only while a change is still in place: after every change was taken back there is nothing to return to */}
+            {hasUndo(edits) && (
+              <Button variant="tonal" size="sm" icon={RotateCcw} loading={busy} disabled={jobBusy} onClick={() => void undo()} className="ml-auto">
+                Вернуть как было
+              </Button>
+            )}
           </div>
           <ol className="mt-4 space-y-3">
             {edits.map((e, i) => (
