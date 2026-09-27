@@ -1,7 +1,7 @@
 // The remarks workspace of the result screen's aside (the «Замечания» switch is on): the remarks of the slide on screen,
 // numbered like the pins on the slide, and «Исправить слайд» — the agent fixes them on this slide only, following the
 // person's wishes. The footer morphs between the form, the agent's live steps and the outcome.
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { AlertCircle, AlertTriangle, ArrowRight, CheckCircle2, RotateCcw, WandSparkles } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { api } from "../../api";
@@ -115,9 +115,13 @@ export interface RemarksPanelProps {
   busy: boolean;
   wishes: string;
   onWishes(v: string): void;
-  /** How the panel comes in: rises in the aside, or slides in with the aside column (the helper is open). */
-  enter: "rise" | "slide";
+  /** How the panel comes in: rises in the aside (over the cards that clear before it), or rides in with the aside
+   *  column that slides out from under the open helper (no entrance of its own). */
+  enter: "rise" | "none";
   leaving: boolean;
+  /** How it leaves: fades out over the cards that come back, or stays opaque while the column slides back under the
+   *  helper. */
+  exit?: "fade" | "tuck";
 }
 
 /** The phase a person sees: an undo whose restored slide is not on screen yet still reads «Возвращаю как было». */
@@ -197,6 +201,13 @@ export function RemarksPanel(props: RemarksPanelProps) {
   // their collapse), so the list never stalls on an empty card. Not with the deck's line under the list (the state
   // fills the list's height, that line would sit under it)
   const emptySoon = !empty && step === "collapse" && !!result && result.remaining.length === 0 && props.deckRemarks === 0 && rows.every((r) => fixedIds.has(r.issue.id));
+  // remarks come back on the same slide («Вернуть как было»): the state leaves over the rows that rise in (90 ms), it
+  // is never cut. Another slide or variant swaps the list at once, as the rows do
+  const emptyShown = empty || emptySoon;
+  const emptyP = usePresence(emptyShown, MOTION.fast);
+  const emptyKey = useRef(listKey);
+  if (emptyShown) emptyKey.current = listKey;
+  const emptyLeaving = emptyP.leaving && emptyKey.current === listKey;
   const scrollRef = useRef<HTMLDivElement>(null);
   const edges = useScrollEdges(scrollRef, [listKey, empty]);
   const count = remarks.length;
@@ -218,7 +229,10 @@ export function RemarksPanel(props: RemarksPanelProps) {
       className={cn(
         // relative: it paints over the aside cards that fade out under it (the mode turned on)
         "relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl bg-white shadow-card",
-        leaving ? "pointer-events-none animate-fade-out rm-fade-out" : cn(enter === "slide" ? "animate-slide-in-r" : "animate-rise", "rm-fade"),
+        // the swap with the cards is a fade-through: out in 90 ms, in 25 ms later (ResultScreen)
+        leaving
+          ? cn("pointer-events-none rm-fade-out", props.exit !== "tuck" && "animate-fade-out [animation-duration:90ms] [animation-timing-function:var(--ease-out)]")
+          : cn(enter === "rise" && "animate-rise [animation-delay:25ms]", "rm-fade"),
       )}
     >
       <header className="flex h-14 shrink-0 items-center gap-2 px-4">
@@ -234,7 +248,8 @@ export function RemarksPanel(props: RemarksPanelProps) {
 
       <div ref={scrollRef} className={cn("scroll-thin relative min-h-0 flex-1 overflow-y-auto px-2 pb-2", edges.top && edges.bottom ? EDGE_FADE.both : edges.top ? EDGE_FADE.top : edges.bottom ? EDGE_FADE.bottom : null)}>
         {!empty && (
-          <ul key={listKey} ref={listRef} aria-label={`Замечания слайда ${slide}`} className="animate-fade space-y-0.5">
+          // a new slide's list fades in as a whole; rows that come back under the leaving «замечаний нет» only rise
+          <RemarkList key={listKey} listRef={listRef} slide={slide} fade={!emptyLeaving}>
             {rows.map((r, i) => {
               const isFixed = step !== "live" && fixedIds.has(r.issue.id);
               const collapsing = step === "collapse" && isFixed;
@@ -259,10 +274,10 @@ export function RemarksPanel(props: RemarksPanelProps) {
                 </li>
               );
             })}
-          </ul>
+          </RemarkList>
         )}
         {/* its own slot and key: the state that came in over the folding rows stays the same node once they are gone */}
-        {(empty || emptySoon) && <EmptyRemarks key={`e-${listKey}`} nextSlide={props.nextSlide} onGoto={props.onGoto} early={!empty} />}
+        {(emptyShown || emptyLeaving) && <EmptyRemarks key={`e-${listKey}`} nextSlide={props.nextSlide} onGoto={props.onGoto} early={!empty} leaving={!emptyShown} />}
         {props.deckRemarks > 0 && (
           <div className="mx-2 mt-2 flex items-center gap-2 rounded-xl bg-zinc-50 px-3 py-2">
             <span className="min-w-0 flex-1 text-footnote text-zinc-700">Ещё {plural(props.deckRemarks, "замечание", "замечания", "замечаний")} ко всей презентации</span>
@@ -351,16 +366,33 @@ function RemarkRow({ remark, index, fixed, dim, breathing, active, flashK, enter
   );
 }
 
-/** `early`: it comes in over the last fixed rows while they fold (the same box the list gives it once they are gone),
- *  100ms after they start to fold. Its timing is fixed at mount, so taking its place in the list later never skips
- *  its fade. */
-function EmptyRemarks({ nextSlide, onGoto, early = false }: { nextSlide: number | null; onGoto(n: number): void; early?: boolean }) {
-  const [delay] = useState(early ? 100 : 0);
+/** The rows of one slide. `fade` is read at mount: a class added later would replay the fade from 0. */
+function RemarkList({ listRef, slide, fade, children }: { listRef: RefObject<HTMLUListElement>; slide: number; fade: boolean; children: ReactNode }) {
+  const [fadeIn] = useState(fade);
+  return (
+    <ul ref={listRef} aria-label={`Замечания слайда ${slide}`} className={cn("space-y-0.5", fadeIn && "animate-fade")}>
+      {children}
+    </ul>
+  );
+}
+
+/** `early`: it comes in over the last fixed rows while they fold, in the very box the list gives it once they are gone
+ *  (absolute inset-x-2 top-0 bottom-2 = the scroll box's content box: nothing moves when the rows unmount), 30 ms after
+ *  they start to fold — more than half in when their height is gone. Its timing is fixed at mount, so taking its place
+ *  in the list later never skips its fade. `leaving`: remarks came back on this slide — it takes that same absolute box
+ *  and clears in 90 ms over the rows that rise in. */
+function EmptyRemarks({ nextSlide, onGoto, early = false, leaving = false }: { nextSlide: number | null; onGoto(n: number): void; early?: boolean; leaving?: boolean }) {
+  const [delay] = useState(early ? 30 : 0);
   return (
     <div
-      className={cn("flex h-full min-h-[160px] animate-fade flex-col items-center justify-center gap-3 px-4 py-6 text-center", early && "pointer-events-none absolute inset-x-2 bottom-2 top-0")}
+      className={cn(
+        "flex min-h-[160px] flex-col items-center justify-center gap-3 px-4 py-6 text-center",
+        early || leaving ? "pointer-events-none absolute inset-x-2 bottom-2 top-0" : "h-full",
+        // reduced motion: the global 1 ms override makes both instant, as the rows are
+        leaving ? "animate-fade-out [animation-duration:90ms] [animation-timing-function:var(--ease-out)]" : "animate-fade",
+      )}
       // an arrival over a leaving row: front-loaded, so the two cross-fade instead of meeting at half
-      style={delay ? { animationDelay: `${delay}ms`, animationTimingFunction: "var(--ease-out)" } : undefined}
+      style={delay && !leaving ? { animationDelay: `${delay}ms`, animationTimingFunction: "var(--ease-out)" } : undefined}
     >
       <span className="flex h-12 w-12 animate-pop items-center justify-center rounded-xl bg-emerald-50" style={delay ? { animationDelay: `${delay}ms` } : undefined}>
         <CheckCircle2 className="h-6 w-6 text-emerald-500" aria-hidden />

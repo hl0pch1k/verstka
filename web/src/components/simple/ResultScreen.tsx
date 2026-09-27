@@ -10,7 +10,7 @@ import { plainWords, variantsNote } from "../../lib/agent";
 import { deckNotice } from "../../lib/modelText";
 import { figuresLine } from "../../lib/narrate";
 import { fileSafe, templateTitle, variantHint } from "../../lib/plain";
-import { decodeImage, EASE, MOTION, prefersReducedMotion, useFlip, usePresence, viewTransition } from "../../lib/motion";
+import { decodeImage, EASE, MOTION, prefersReducedMotion, useCountUp, useFlip, usePresence, viewTransition } from "../../lib/motion";
 import { cn, fmtWhen, plural, storage } from "../../lib/utils";
 import { useApp } from "../../store";
 import type { DetailKey, Generation, Issue, Variant } from "../../types";
@@ -101,35 +101,55 @@ function useSurfaceGlide(ref: RefObject<HTMLElement>, key: unknown) {
   });
 }
 
-/** The aside column glides with the slide when the helper docks or leaves (translate only, from where it visibly was).
- *  A start beyond the right edge of the page's scroll column would be clipped away — for a few frames the column would
- *  be missing, then wipe in from that edge — so the start is clamped to that edge and the column fades in on the way. */
-function useAsideGlide(ref: RefObject<HTMLElement>, key: unknown) {
+/** The aside column rides on the slide's right edge whenever the layout changes (the helper docks or leaves, the column
+ *  comes or goes): a translate from where that edge was, on the slide FLIP's own timing and curve, so the column keeps
+ *  its distance to the slide on every frame — the two never overlap and the column never has to fade over the slide.
+ *  A column that comes in beside the open helper starts past the page's right edge: it slides out from under the
+ *  helper. `tuck`: the column goes while the helper stays — it has left the flow where it stood, and slides back under
+ *  the helper with the slide's edge (held there until it hides). While either runs the scroll column stops clipping
+ *  (see Deck), so a column arriving with the helper is never cut off at the page's edge. */
+function useAsideGlide(ref: RefObject<HTMLElement>, frame: RefObject<HTMLElement>, key: unknown, tuck: boolean) {
   const lastKey = useRef(key);
-  const before = useRef<DOMRect | null>(null);
-  if (key !== lastKey.current && ref.current && !before.current) before.current = ref.current.getBoundingClientRect();
+  const before = useRef<{ aside: DOMRect; frame: DOMRect | null } | null>(null);
+  if (key !== lastKey.current && ref.current && !before.current) before.current = { aside: ref.current.getBoundingClientRect(), frame: frame.current?.getBoundingClientRect() ?? null };
   useLayoutEffect(() => {
     const el = ref.current;
     const was = before.current;
     const changed = lastKey.current !== key;
     lastKey.current = key;
     before.current = null;
-    if (!el || !was || !changed || prefersReducedMotion()) return;
-    el.getAnimations().forEach((a) => (a.id === "aside-glide" || a.id === "aside-fade") && a.cancel());
+    if (!el || !was || !changed) return;
+    el.getAnimations().forEach((a) => a.id.startsWith("aside-") && a.cancel());
+    if (prefersReducedMotion()) return;
     const now = el.getBoundingClientRect();
-    if (now.width === 0 || was.width === 0) return;
-    let dx = was.left - now.left;
-    const dy = was.top - now.top;
-    const edge = el.closest("main")?.getBoundingClientRect().right ?? document.documentElement.clientWidth;
-    const clipped = dx > 0 && now.right + dx > edge + 0.5;
-    if (clipped) dx = Math.max(0, edge - now.right);
-    if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
-      const a = el.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "none" }], { duration: MOTION.slow, easing: EASE.glide });
-      a.id = "aside-glide";
+    if (now.width === 0) return; // it has just hidden
+    // how far the slide's right edge travels in this change (null without a slide): to its layout box — its own FLIP
+    // has already put it back where it was, so its rect would say it stays (offsets ignore transforms; the well that
+    // holds it never moves by a transform)
+    const fe = frame.current;
+    const well = fe?.offsetParent;
+    const fRight = fe && well && fe.offsetWidth ? well.getBoundingClientRect().left + well.clientLeft + fe.offsetLeft + fe.offsetWidth : null;
+    const edgeDx = was.frame?.width && fRight !== null ? fRight - was.frame.right : null;
+    const shown = was.aside.width > 0;
+    // the offset that puts the column (and its shadow) past the scroll column's right edge: under the helper
+    const under = (el.closest("main")?.getBoundingClientRect().right ?? document.documentElement.clientWidth) - now.left + 8;
+    const timing = { duration: MOTION.slow, easing: EASE.glide };
+    if (tuck) {
+      const from = shown ? was.aside.left - now.left : 0;
+      const a = el.animate([{ transform: `translateX(${from}px)` }, { transform: `translateX(${Math.max(from + (edgeDx ?? 0), under)}px)` }], { ...timing, fill: "forwards" });
+      a.id = "aside-tuck";
+      return;
     }
-    if (clipped) {
-      const f = el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: MOTION.base, easing: EASE.out });
-      f.id = "aside-fade";
+    let dx = edgeDx !== null ? -edgeDx : shown ? was.aside.left - now.left : 0;
+    if (!shown && dx > 0) dx = Math.max(dx, under);
+    const dy = shown ? was.aside.top - now.top : 0;
+    if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
+      const a = el.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "none" }], timing);
+      a.id = "aside-glide";
+    } else if (!shown) {
+      // nothing to ride on (the slide kept its right edge): the column still comes in, by a short fade
+      const a = el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: MOTION.base, easing: EASE.out });
+      a.id = "aside-fade";
     }
   });
 }
@@ -151,6 +171,54 @@ function DrawerLink({ icon: Icon, label, onClick }: { icon: LucideIcon; label: s
   );
 }
 
+type VerdictKind = "none" | "count" | "clean";
+const verdictText = (kind: VerdictKind, n: number) => (kind === "none" ? "Не проверено" : kind === "clean" ? "Ошибок нет" : plural(n, "ошибка", "ошибки", "ошибок"));
+const VERDICT_TONE: Record<VerdictKind, string> = { none: "text-zinc-900", count: "text-red-600", clean: "text-zinc-900" };
+
+/** «2 ошибки»: the number rolls to a new count (a fix, an undo, another variant) and the word follows it. */
+function VerdictCount({ value }: { value: number }) {
+  const n = Math.max(0, Math.round(useCountUp(value, { ms: 400, from: value }) ?? value));
+  return (
+    <>
+      <span className="tabular-nums">{n}</span> {plural(n, "ошибка", "ошибки", "ошибок").replace(/^\d+\s/, "")}
+    </>
+  );
+}
+
+/** The quality verdict never blinks out: within «N ошибок» the number rolls; «Ошибок нет» ↔ «N ошибок» ↔ «Не
+ *  проверено» cross-fade — the old words leave in 90 ms on a layer of their own (the same grid cell) while the new ones
+ *  fade in just after, so the line is never empty and the two never print over each other. Reduced motion: instant (the
+ *  global 1 ms override), the number jumps. */
+function Verdict({ errors, className }: { errors: number | null; className?: string }) {
+  const kind: VerdictKind = errors === null ? "none" : errors > 0 ? "count" : "clean";
+  const [layer, setLayer] = useState({ kind, k: 0 });
+  const [old, setOld] = useState<{ kind: VerdictKind; n: number; k: number } | null>(null);
+  const lastCount = useRef(errors && errors > 0 ? errors : 0);
+  if (kind !== layer.kind) {
+    // derived in render: the words that were on screen become the leaving layer
+    setOld({ kind: layer.kind, n: lastCount.current, k: layer.k });
+    setLayer({ kind, k: layer.k + 1 });
+  }
+  if (errors && errors > 0) lastCount.current = errors;
+  useEffect(() => {
+    if (!old) return;
+    const t = window.setTimeout(() => setOld(null), MOTION.fast);
+    return () => window.clearTimeout(t);
+  }, [old]);
+  return (
+    <span className={cn("grid min-w-0 flex-1", className)}>
+      {old && (
+        <span key={`o${old.k}`} aria-hidden className={cn("pointer-events-none col-start-1 row-start-1 animate-fade-out truncate [animation-duration:90ms] [animation-timing-function:var(--ease-out)]", VERDICT_TONE[old.kind])}>
+          {verdictText(old.kind, old.n)}
+        </span>
+      )}
+      <span key={layer.k} className={cn("col-start-1 row-start-1 truncate", VERDICT_TONE[layer.kind], layer.k > 0 && "animate-fade [animation-delay:25ms] [animation-timing-function:var(--ease-out)]")}>
+        {layer.kind === "count" ? <VerdictCount value={errors ?? 0} /> : verdictText(layer.kind, 0)}
+      </span>
+    </span>
+  );
+}
+
 /** The quality card: the ring, one verdict and the figures checked against the text. Warnings get their own meta
  *  line: «1 предупреждение» (the word the remark tags and the drawer use) does not fit beside the verdict in 180px. */
 function QualityCard({ variant, score, errors, onOpen, className }: { variant: Variant; score: number | null; errors: number | null; onOpen(): void; className?: string }) {
@@ -166,7 +234,7 @@ function QualityCard({ variant, score, errors, onOpen, className }: { variant: V
         <ScoreRing score={score} size={44} stroke={4} tone={errors ? "error" : undefined} />
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-1">
-            <span key={verdict} className={cn("min-w-0 flex-1 animate-fade text-body font-semibold transition-colors duration-150", errors ? "text-red-600" : "text-zinc-900")}>{verdict}</span>
+            <Verdict errors={errors} className="text-body font-semibold" />
             <CardChevron />
           </span>
           {warned && <span className="mt-0.5 block text-footnote text-zinc-500">{warned}</span>}
@@ -554,14 +622,31 @@ function Deck({ generation }: { generation: Generation }) {
   // The panel and the cards cross-fade (below). A hidden aside stays mounted (display: none): the quality ring keeps
   // its score instead of drawing from 0 again, and the cards still rise when it shows (a shown element restarts its
   // CSS animations)
-  const panel = usePresence(remarksOn, MOTION.fast);
-  const asideShown = remarksOn || panel.mounted || !agentOpen;
+  // With the helper open the column exists only for the remarks: it comes out from under the helper when the mode turns
+  // on. When it goes (the mode turns off, or the helper docks over the cards) it leaves the flow at once (the slide
+  // takes the room in the same reflow) and slides back under the helper with the slide's edge, opaque, cards and panel
+  // and all (MOTION.slow) — nothing in it blinks out
+  const asideInFlow = remarksOn || !agentOpen;
+  const column = usePresence(asideInFlow, MOTION.slow);
+  const tucking = !asideInFlow && column.mounted;
+  const panel = usePresence(remarksOn, agentOpen ? MOTION.slow : MOTION.fast);
+  const asideShown = asideInFlow || tucking;
   const withPanel = panel.mounted;
-  // the mode turns on with the helper closed: the cards fade out under the rising panel (never an empty column)
+  // how the column's cards come in when it appears: they rise (the helper closed), or ride in with the column that
+  // slides out from under the helper (decided when it appears: a later helper toggle never replays an entrance)
+  const [asideEnter, setAsideEnter] = useState<"rise" | "none">("rise");
+  const [shownBefore, setShownBefore] = useState(asideShown);
+  if (asideShown !== shownBefore) {
+    setShownBefore(asideShown);
+    if (asideShown) setAsideEnter(agentOpen ? "none" : "rise");
+  }
+  // The cards and the panel swap as a fade-through, both ways: the leaving layer clears in 90 ms (front-loaded), the
+  // arriving one comes in 25 ms later — never an empty column, never two texts printed over each other.
+  // The mode turns on with the helper closed: the cards fade out under the rising panel
   const cards = usePresence(!remarksOn, MOTION.fast);
   const cardsLeaving = cards.leaving && withPanel && !agentOpen;
   // the mode turns off with the helper closed: the cards rise in under the fading panel (a still copy), then the live
-  // cards take their place without a second entrance — the column is never empty either way
+  // cards take their place without a second entrance
   const cardsArriving = panel.leaving && !agentOpen;
   const [wasArriving, setWasArriving] = useState(false);
   const [cardsSettle, setCardsSettle] = useState(false);
@@ -603,21 +688,26 @@ function Deck({ generation }: { generation: Generation }) {
   // the helper or the remarks column toggles, and the slide would jump a second time in the middle of its glide. Not
   // while the helper and the remarks workspace are both open: the list gets the column's full height (it is not cut
   // while the page has room below), and the stage keeps its height through both toggles (only the slide glides)
-  const capH = empty ? undefined : `calc((100cqw - ${asideShown ? ASIDE_W : 0}px - 32px) / ${aspect.toFixed(4)} + ${STAGE_CHROME}px)`;
+  const capH = empty ? undefined : `calc((100cqw - ${asideInFlow ? ASIDE_W : 0}px - 32px) / ${aspect.toFixed(4)} + ${STAGE_CHROME}px)`;
+  // the column that slides back under the helper keeps the height it had (the grid may take the cap in that reflow)
+  const tuckH = useRef<number | null>(null);
+  if (!tucking) tuckH.current = null;
+  else if (tuckH.current === null) tuckH.current = aside.current?.offsetHeight || null;
 
   // the helper docks or the aside comes and goes: the page reflows once, the slide glides between its two sizes (a
   // translate + uniform scale, 300ms) and the thumbnails re-flow under a short fade instead of jumping
   const frameRef = useRef<HTMLDivElement>(null);
   const stripRef = useRef<HTMLDivElement>(null);
-  const layoutKey = `${agentOpen ? 1 : 0}${asideShown ? 1 : 0}`;
+  const layoutKey = `${agentOpen ? 1 : 0}${asideInFlow ? 1 : 0}`;
   useFlip(frameRef, layoutKey, { scale: true });
   // the header follows the slide's edges: its two ends glide with it
   const segRef = useRef<HTMLDivElement>(null);
   const ctrlRef = useRef<HTMLDivElement>(null);
   useFlip(segRef, layoutKey);
   useFlip(ctrlRef, layoutKey);
-  // the remarks column stays through a helper toggle: it glides to its new place with the slide instead of teleporting
-  useAsideGlide(aside, layoutKey);
+  // the column rides on the slide's right edge through every one of these changes (it stays through a helper toggle,
+  // comes out from under the open helper, slides back under it)
+  useAsideGlide(aside, frameRef, layoutKey, tucking);
   // the aside's cards change height with the slide (the reasoning) and the variant (the agent's summary): the cards
   // below glide to their new places and the «Почему так» surface glides to its new height
   const whyKey = `${variant.strategy}/${selectedSlide}/${rev}`;
@@ -638,15 +728,24 @@ function Deck({ generation }: { generation: Generation }) {
     if (prefersReducedMotion()) return;
     stripRef.current?.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, delay: 100, easing: EASE.inOut, fill: "backwards" });
     // the stage card stops clipping while the slide and the header glide from their old boxes: a slide that shrinks
-    // into a narrower card is never cropped by it (it keeps its own rounded ring), the column arriving beside it paints
-    // over it
+    // into a narrower card is never cropped by it (it keeps its own rounded ring). The page's scroll column too, while
+    // it has nothing to scroll (the deck fits the window): the column that rides in with the docking helper is never
+    // cut off at the column's right edge before the helper has got there
     const stage = stageRef.current;
     if (!stage) return;
+    const main = stage.closest("main");
+    // (vertical only: the glides that have just started run past its right edge on purpose)
+    const unclip = !!main && main.scrollTop === 0 && main.scrollLeft === 0 && main.scrollHeight <= main.clientHeight + 1;
     stage.style.overflow = "visible";
-    const t = window.setTimeout(() => (stage.style.overflow = ""), MOTION.slow + 20);
+    if (unclip) main.style.overflow = "visible";
+    const restore = () => {
+      stage.style.overflow = "";
+      if (unclip) main.style.overflow = "";
+    };
+    const t = window.setTimeout(restore, MOTION.slow + 20);
     return () => {
       window.clearTimeout(t);
-      stage.style.overflow = "";
+      restore();
     };
   }, [layoutKey]);
 
@@ -762,7 +861,7 @@ function Deck({ generation }: { generation: Generation }) {
         </div>
       </Collapse>
 
-      <div className={cn("grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)] gap-4", asideShown ? "grid-cols-[minmax(0,1fr)_288px]" : "grid-cols-1")} style={{ maxHeight: withPanel && agentOpen ? undefined : capH }}>
+      <div className={cn("relative grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)] gap-4", asideInFlow ? "grid-cols-[minmax(0,1fr)_288px]" : "grid-cols-1")} style={{ maxHeight: remarksOn && agentOpen ? undefined : capH }}>
         {/* overflow-hidden at rest; while the slide glides between two sizes the card lets it show in full (above) */}
         <section ref={stageRef} aria-label="Просмотр слайдов" className="flex min-h-0 min-w-0 animate-fade flex-col gap-3 overflow-hidden rounded-2xl bg-white p-4 shadow-card" style={{ containerType: "size" }}>
           <div ref={header} className="mx-auto flex h-10 w-full shrink-0 items-center gap-2" style={{ maxWidth: headerW }}>
@@ -835,20 +934,26 @@ function Deck({ generation }: { generation: Generation }) {
           )}
         </section>
 
-        <aside ref={aside} aria-label="О презентации" className={cn("vt-aside min-h-0 flex-col", asideShown ? "flex" : "hidden")}>
+        {/* tucking: out of the flow where it stood (the grid's right edge), until it is under the helper */}
+        <aside
+          ref={aside}
+          aria-label="О презентации"
+          className={cn("vt-aside min-h-0 flex-col", asideShown ? "flex" : "hidden", tucking && "pointer-events-none absolute right-0 top-0 w-[288px] rm-fade-out")}
+          style={tucking && tuckH.current ? { height: tuckH.current } : undefined}
+        >
           {/* the cards that change per slide come last, so turning the slides never moves the others; the list scrolls
               only in a window too short for it (the p-1 keeps the focus rings and shadows unclipped) */}
           <div ref={list} className={cn("scroll-thin -m-1 flex min-h-0 flex-col gap-3 p-1", withPanel ? "flex-1 overflow-hidden" : cn("overflow-y-auto", ASIDE_STAGGER, cardsSettle && CARDS_SETTLE))}>
-            <QualityCard variant={variant} score={score} errors={errors} onOpen={() => open("quality")} className="animate-rise" />
+            <QualityCard variant={variant} score={score} errors={errors} onOpen={() => open("quality")} className={asideEnter === "rise" ? "animate-rise" : undefined} />
             {withPanel ? (
               <div className="relative flex min-h-0 flex-1 flex-col">
                 {cardsLeaving && (
-                  <div aria-hidden {...({ inert: "" } as Record<string, string>)} className="pointer-events-none absolute inset-x-0 top-0 flex animate-fade-out flex-col gap-3 rm-fade-out [&_*]:!animate-none">
+                  <div aria-hidden {...({ inert: "" } as Record<string, string>)} className="pointer-events-none absolute inset-x-0 top-0 flex animate-fade-out flex-col gap-3 rm-fade-out [animation-duration:90ms] [animation-timing-function:var(--ease-out)] [&_*]:!animate-none">
                     {asideCards(false)}
                   </div>
                 )}
                 {cardsArriving && (
-                  <div aria-hidden {...({ inert: "" } as Record<string, string>)} className="pointer-events-none absolute inset-x-0 top-0 flex animate-rise flex-col gap-3 [animation-duration:120ms] [&_*]:!animate-none">
+                  <div aria-hidden {...({ inert: "" } as Record<string, string>)} className="pointer-events-none absolute inset-x-0 top-0 flex animate-rise flex-col gap-3 [animation-delay:25ms] [animation-duration:120ms] [&_*]:!animate-none">
                     {asideCards(false)}
                   </div>
                 )}
@@ -871,8 +976,9 @@ function Deck({ generation }: { generation: Generation }) {
                   busy={jobRunning}
                   wishes={drafts[draftKey] ?? ""}
                   onWishes={(v) => setDrafts((d) => ({ ...d, [draftKey]: v }))}
-                  enter={agentOpen ? "slide" : "rise"}
+                  enter={agentOpen ? "none" : "rise"}
                   leaving={panel.leaving}
+                  exit={tucking ? "tuck" : "fade"}
                 />
               </div>
             ) : (
@@ -971,7 +1077,8 @@ export function ResultScreen() {
   }, [fresh, generation, firstSrc]);
   useLayoutEffect(() => {
     if (building === shownBuilding) return;
-    if (building) return viewTransition(() => setShownBuilding(true));
+    // a deck → its rebuild: two unrelated pages, a fade-through (the build → deck hand-off below keeps the morph)
+    if (building) return viewTransition(() => setShownBuilding(true), { through: true });
     // a failed build hands over at once; a finished one once its deck is ready (or after the wait)
     if (built && !waitedOut && !(fresh && decodedFor === generation?.id)) return;
     viewTransition(() => setShownBuilding(false));

@@ -350,28 +350,53 @@ export function flipFromRect(el: HTMLElement, rect: DOMRect | DOMRectReadOnly, {
 // screen changes
 
 interface VTHandle { finished: Promise<void>; ready?: Promise<void>; updateCallbackDone?: Promise<void> }
-type VTDocument = Document & { startViewTransition?: (cb: () => void) => VTHandle };
+type VTDocument = Document & { startViewTransition?: (arg: (() => void) | { update: () => void; types?: string[] }) => VTHandle };
 
 /** The browser can cross-fade two DOM states (View Transitions API). */
 export const supportsViewTransitions = typeof document !== "undefined" && typeof (document as VTDocument).startViewTransition === "function";
 
+/** Transition types (`:active-view-transition-type()`) are known to the browser. */
+const supportsVTTypes = (() => {
+  try {
+    return typeof CSS !== "undefined" && CSS.supports("selector(:active-view-transition-type(through))");
+  } catch {
+    return false;
+  }
+})();
+
 let vtRunning = false;
+
+export interface ViewTransitionOptions {
+  /** Two unrelated screens (create → build, a deck → its rebuild): a fade-through — the old page clears in 90 ms,
+   *  the new one fades and rises in just after it, so the two never print over each other. Without it the new page
+   *  fades in over the old one and the named parts morph (build → deck). */
+  through?: boolean;
+}
 
 /** Applies a screen change inside a View Transition: the old DOM is captured first, then `update` commits synchronously
  *  (flushSync). No API, reduced motion, or a transition already running → a plain update (the running transition shows
  *  the live new state anyway). The owner of the switch keeps rendering the old screen until it calls this. */
-export function viewTransition(update: () => void): void {
+export function viewTransition(update: () => void, opts: ViewTransitionOptions = {}): void {
   const doc = document as VTDocument;
   if (!doc.startViewTransition || prefersReducedMotion() || vtRunning || document.hidden) return update();
   vtRunning = true;
+  const root = document.documentElement;
+  // the type: a transition type where the browser has them, else an attribute on <html> for the length of the transition
+  const flag = opts.through && !supportsVTTypes;
+  if (flag) root.dataset.vt = "through";
+  const run = () => flushSync(update);
   try {
-    const vt = doc.startViewTransition(() => flushSync(update));
+    const vt = opts.through && supportsVTTypes ? doc.startViewTransition({ update: run, types: ["through"] }) : doc.startViewTransition(run);
     // a skipped transition rejects `ready`: the update has still run, nothing to report
     vt.ready?.catch(() => {});
     vt.updateCallbackDone?.catch(() => {});
-    void vt.finished.catch(() => {}).finally(() => (vtRunning = false));
+    void vt.finished.catch(() => {}).finally(() => {
+      vtRunning = false;
+      if (flag) delete root.dataset.vt;
+    });
   } catch {
     vtRunning = false;
+    if (flag) delete root.dataset.vt;
     update();
   }
 }

@@ -13,7 +13,7 @@ import { useApp } from "./store";
 // Two screens a person understands without a manual — «Создать» and «Результат» — plus the details drawer for the
 // expert views and the helper docked on the right (the page reflows beside it). Each screen owns its container.
 // A screen change (create ↔ result) plays as a View Transition: the old screen stays on screen for one commit, then the
-// header holds still while the next page rises and fades in over the old one. One deck → another from the history swaps
+// header holds still while the old page clears and the next one rises and fades in (a fade-through). One deck → another from the history swaps
 // inside the store's own transition once the new deck has loaded (loadGeneration with `hold`); a reload on a deck opens
 // on the result screen straight away (its skeleton, then the deck).
 export default function App() {
@@ -31,8 +31,9 @@ export default function App() {
     // store), so there is no old view left to capture — and an empty transition would only block the next real one
     // (the build → deck hand-off that follows a new deck's id)
     if (want.current.screen === shown.screen) return setShown(want.current);
-    // the callback reads the latest wish: a switch back before the transition started never lands on a stale screen
-    viewTransition(() => setShown(want.current));
+    // the callback reads the latest wish: a switch back before the transition started never lands on a stale screen.
+    // Create and result share nothing but the header: a fade-through, the two pages never print over each other
+    viewTransition(() => setShown(want.current), { through: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewKey]);
   const building = !!activeJob && activeJob.kind === "generate" && (activeJob.status === "queued" || activeJob.status === "running");

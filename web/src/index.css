@@ -103,7 +103,8 @@ h1, h2, h3 {
 :where(.stagger-children > * > :nth-child(n + 4)) { animation-delay: 120ms; }
 
 /* screen changes: View Transitions (lib/motion.ts viewTransition). The header, the helper and the toasts stay still.
-   The page never dips: the old page stays opaque under the new one, which rises 8px (300 ms) and fades in over it (a
+   Unrelated screens fade through (the `through` type, below). Related ones (build → deck, one deck → another) never
+   dip: the old page stays opaque under the new one, which rises 8px (300 ms) and fades in over it (a
    quicker 220 ms, so the old page's ghost clears soon), and the old one fades out only once it is covered. Normal compositing on purpose: the UA pairs old and new with plus-lighter, which
    sums the two pages (two faint pages are a washed-out one, two opaque ones burn to white). The build / result title swaps
    as a fade-through (the old words are gone before the new ones come, two titles never overprint); the status column's
@@ -120,6 +121,16 @@ h1, h2, h3 {
 ::view-transition-old(vt-title) { animation: 90ms var(--ease-in) both vt-out; }
 ::view-transition-new(vt-title) { animation: 220ms var(--ease-out) 100ms both vt-fade; }
 ::view-transition-old(vt-aside):only-child { animation: var(--dur-fast) var(--ease-in) both vt-out; }
+/* two unrelated screens (create → build, a deck → its rebuild; viewTransition `through`): a fade-through. The old page
+   clears in 90 ms (front-loaded), the new one fades in 200 ms and rises 8 px from 25 ms: the two never print over each
+   other (at most ≈10% each at the crossover) and the dip between them lasts about one frame. The deck's aside leaves
+   with its page. Separate rules for the type and for the <html data-vt> fallback: one unknown selector would drop both. */
+html:active-view-transition-type(through)::view-transition-old(root),
+html:active-view-transition-type(through)::view-transition-old(vt-aside) { animation: 90ms var(--ease-out) both vt-out; }
+html:active-view-transition-type(through)::view-transition-new(root) { animation: vt-fade 200ms var(--ease-out) 25ms both, vt-rise var(--dur-slow) var(--ease-out) 25ms both; }
+html[data-vt="through"]::view-transition-old(root),
+html[data-vt="through"]::view-transition-old(vt-aside) { animation: 90ms var(--ease-out) both vt-out; }
+html[data-vt="through"]::view-transition-new(root) { animation: vt-fade 200ms var(--ease-out) 25ms both, vt-rise var(--dur-slow) var(--ease-out) 25ms both; }
 /* text never stretches while the title box morphs */
 ::view-transition-old(vt-title), ::view-transition-new(vt-title) { width: auto; height: 100%; object-fit: none; object-position: left center; }
 @keyframes vt-out { to { opacity: 0; } }
