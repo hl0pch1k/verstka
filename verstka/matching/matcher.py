@@ -64,6 +64,20 @@ def match_outline(outline: DeckOutline, manifest: TemplateManifest, strategy: St
             same = next((i for i, (r, q) in enumerate(scored) if q.id == divider.id and r.score >= strategy.synth_threshold), None)
             if same:
                 scored.insert(0, scored.pop(same))
+        if slide.kind == PatternKind.title and len(scored) > 1 and not _cover_room_ok(slide, scored[0][1], manifest):
+            # a cover whose stack (heading, subtitle, goal) does not fit the room its sample's own texts take gives way
+            # to another cover of the template within the margin that holds it: «История VK» with a 50-character
+            # subtitle takes VK Tech's left-aligned cover, not the centred one whose cube stands right under a one-line
+            # subtitle (G1-20). Never a cover whose layout draws a mock-up or a photo frame left empty
+            top = scored[0]
+            for i, (r, q) in enumerate(scored[1:], 1):
+                if top[0].score - r.score > VISUAL_COVER_MARGIN:
+                    break
+                stays_empty = bool(q.mockup_boxes) and q.mockup_on_layout and not slide.content.image_hint
+                if q.kind == PatternKind.title and r.score >= strategy.synth_threshold and not any(s.role == SlotRole.image for s in q.slots) and not stays_empty and _cover_room_ok(slide, q, manifest):
+                    r.reasons.append(f"обложка: весь блок текста помещается в образец {q.id} ({r.score:.2f}), в {top[1].id} ({top[0].score:.2f}) — нет")
+                    scored.insert(0, scored.pop(i))
+                    break
         if slide.kind == PatternKind.title and strategy.name == "visual" and len(scored) > 1:
             # the visual variant opens on the template's other cover when it is nearly as good (another layout, no speaker
             # photo to leave empty, the title fits): flipping between variants, the first slide differs too. «Nearly»
@@ -73,7 +87,10 @@ def match_outline(outline: DeckOutline, manifest: TemplateManifest, strategy: St
             for i, (r, q) in enumerate(scored[1:], 1):
                 if top[0].score - r.score > VISUAL_COVER_MARGIN:
                     break
-                if q.layout_part != top[1].layout_part and q.kind == PatternKind.title and not any(s.role == SlotRole.image for s in q.slots) and r.fit.get("text_ratio", 9.0) <= 1.0 and _cover_room_ok(slide, q, manifest):
+                # a device mock-up or an empty photo frame the layout draws stays empty on the slide: never the
+                # «other cover» (the −0.3 of the scorer is within the margin)
+                stays_empty = bool(q.mockup_boxes) and q.mockup_on_layout and not slide.content.image_hint
+                if q.layout_part != top[1].layout_part and q.kind == PatternKind.title and not any(s.role == SlotRole.image for s in q.slots) and not stays_empty and r.fit.get("text_ratio", 9.0) <= 1.0 and _cover_room_ok(slide, q, manifest):
                     r.reasons.append(f"вариант visual: другой титульный образец ({r.score:.2f} против {top[0].score:.2f}), чтобы варианты различались с первого слайда")
                     scored.insert(0, scored.pop(i))
                     break

@@ -265,9 +265,9 @@ class _StyleChain:
     def level_props(self, level: int) -> list[etree._Element]:
         out = []
         for src in self.sources:
-            lvl = find(src, f"a:lvl{level + 1}pPr")
-            if lvl is not None:
-                out.append(lvl)
+            # every lvlNpPr of a list style, in order: a style written twice for one level (size in the first, colour
+            # in the second) is merged by the office suites, so both count
+            out.extend(findall(src, f"a:lvl{level + 1}pPr"))
         return out
 
     def def_rpr(self, level: int) -> list[etree._Element]:
@@ -638,17 +638,19 @@ def _bg_hex(root: etree._Element, resolver: ThemeResolver) -> tuple[Optional[str
     return None, None
 
 
-def slide_background(package: PptxPackage, slide_part: str, ctx: SlideContext) -> tuple[Optional[str], str]:
+def slide_background(package: PptxPackage, slide_part: str, ctx: SlideContext) -> tuple[Optional[str], Optional[str]]:
+    """(hex, kind) of the first p:bg of slide → layout → master; (None, None) when no part defines one (the slide
+    is then white unless a layer paints it: see `ground.slide_ground`)."""
     for part_root in (package.xml(slide_part), ctx.layout, ctx.master):
         if part_root is None:
             continue
         hex_, kind = _bg_hex(part_root, ctx.resolver)
         if kind:
             return hex_, kind
-    return "FFFFFF", "solid"
+    return None, None
 
 
-_BG_COLOR_CACHE: dict[tuple[int, str], Optional[str]] = {}
+_BG_COLOR_CACHE: dict[tuple, Optional[str]] = {}
 
 
 def background_picture_color(package: PptxPackage, slide_part: str, ctx: SlideContext) -> Optional[str]:
@@ -667,7 +669,9 @@ def background_picture_color(package: PptxPackage, slide_part: str, ctx: SlideCo
         target = package.target_of(part, blip.get(q("r:embed")) or "")
         if not target or not package.exists(target):
             return None
-        key = (id(package), target)
+        from verstka.analysis.ground import package_key
+
+        key = (package_key(package), target)
         if key not in _BG_COLOR_CACHE:
             try:
                 from io import BytesIO
@@ -685,45 +689,32 @@ def background_picture_color(package: PptxPackage, slide_part: str, ctx: SlideCo
 
 
 def slide_family(package: PptxPackage, slide_part: str, ctx: SlideContext, shapes: list[ShapeInfo], image_path: Optional[str] = None) -> tuple[Family, Optional[str]]:
-    """Light/dark family and the effective background hex (None when unknown)."""
-    slide_w, slide_h = package.slide_size
-    slide_area = slide_w * slide_h
-    # a full-bleed filled shape at the bottom of the z-order overrides the master background
-    for s in sorted(shapes, key=lambda s: s.z)[:3]:
-        if s.kind == ShapeKind.sp and s.fill_hex and s.bbox.area >= 0.85 * slide_area and not s.has_text:
-            return (Family.dark if relative_luminance(s.fill_hex) < 0.3 else Family.light), s.fill_hex
-    hex_, kind = slide_background(package, slide_part, ctx)
-    if hex_ and kind != "image":
-        return (Family.dark if relative_luminance(hex_) < 0.3 else Family.light), hex_
-    if kind == "image":
-        pic = background_picture_color(package, slide_part, ctx)
-        if pic:
-            return (Family.dark if relative_luminance(pic) < 0.3 else Family.light), pic
-    if image_path:
-        try:
-            from PIL import Image
+    """Light/dark family and the effective background hex (None when unknown).
 
-            with Image.open(image_path) as im:
-                small = im.convert("L").resize((32, 18))
-                mean = sum(small.tobytes()) / (32 * 18)
-                rgb = im.convert("RGB").resize((32, 18))
-                chans = [sorted(rgb.getchannel(c).tobytes()) for c in range(3)]
-            median = "".join(f"{ch[len(ch) // 2]:02X}" for ch in chans)
-            # the picture's median colour stands for the ground in contrast decisions (LCT purple photos)
-            return (Family.dark if mean < 90 else Family.light), median
-        except Exception:  # noqa: BLE001
-            pass
-    # fall back to majority text colour: light text → dark slide
-    lum = [relative_luminance(s.text.dominant_color) for s in shapes if s.text and s.text.dominant_color]
-    if lum and sum(1 for l in lum if l > 0.6) > len(lum) / 2:
-        return Family.dark, None
-    return Family.light, hex_
+    The ground is what the slide really stands on — a full-bleed picture or panel of the master, the layout or the
+    slide, a panel under the body, else the p:bg chain (see `ground.slide_ground`)."""
+    from verstka.analysis.ground import slide_ground
+
+    g = slide_ground(package, slide_part, ctx, shapes, image_path)
+    return g.family, g.hex
 
 
 PLACEHOLDER_RE = re.compile(
-    r"lorem|ipsum|заголовок в (две|одну)|в две или (в )?одну|вставить\s*(фото|qr)|имя фамилия|должность|^x{2,}%?$|xxx|"
+    r"lorem|ipsum|заголовок в (две|одну)|в две или (в )?одну|вставить\s*(фото|qr)|^x{2,}%?$|xxx|"
+    # a speaker's sample name and title: the whole text, or the template's own phrase — never the words inside real
+    # content («вступил в должность президента», «имя и фамилия автора указаны…»)
+    r"^\s*(имя\s+фамилия|фамилия\s+имя)\b|^\s*должность\s*[.:]?\s*$|должность\s+и\s+регали|"
+    r"^\s*(имя|фамилия|должность)(\s*[,\n—-]\s*(имя|фамилия|должность|компания))+\s*$|"
     r"текст описания|^текст$|^описание$|^пункт$|^заголовок$|^подзаголовок$|^название презентации$|^имя спикера|^дата$|^основной текст$|"
-    r"^\s*текст\s*$|^показатель$|^примечание$|^заметка$|^ссылка$|^кнопка$|^qr-?code$|^призыв к действию|^call to action$",
+    r"^\s*текст\s*$|^показатель$|^примечание$|^заметка$|^ссылка$|^кнопка$|^qr-?code$|^призыв к действию|^call to action$|"
+    # English sample copy of third-party templates («DEMO SLIDE», «Title Text Demo», «Slide Title Goes Here»,
+    # «Click to edit Master title style», «Put Your Awesome Word In Here»): a specific phrase, never a lone word
+    # that a real heading may contain («Demo Day» stays content)
+    r"\bdemo\s+(slide|text|title|page|content|copy)\b|\b(title|text|sample|slide|subtitle)\s+(text\s+)?demo\b|^demo$|"
+    r"\b(sample|dummy|placeholder)\s+text\b|\btitle\s+text\b|\bclick\s+to\s+(edit|add)\b|\bslide\s+title\b|\bgoes\s+here\b|"
+    r"\byour\s+(awesome\s+)?(text|title|logo|word|headline|subtitle|content|company)\b|"
+    r"\b(insert|add)\s+(your\s+|an?\s+)?(picture|image|photo|logo)\b|\bcompany\s+name\b|\bspeaker\s+name\b|"
+    r"^(image|picture|photo|logo|info text|text style|text here)$",
     re.I,
 )
 

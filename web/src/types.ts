@@ -359,6 +359,28 @@ export interface GenerationMeta {
   extra_instructions?: string | null;
   /** The plan came with the request (no model was asked to plan). */
   outline_supplied?: boolean;
+  /** Writer mode (newer servers): the text was a topic, and the agent wrote the deck's text from it first. */
+  writer?: WriterInfo | null;
+}
+/** What the agent wrote from a topic (generation.json `writer`, planning/writer.py `WriterResult.meta`). */
+export interface WriterInfo {
+  mode: "topic" | "expand";
+  status: "written" | "private" | "refused" | "failed" | "skipped";
+  kind?: string;
+  /** The written text as the agent read it («Слайд 1. Титульный…»); empty unless written. */
+  text?: string;
+  /** The person's topic, as they wrote it. */
+  topic?: string;
+  /** Slides of the written deck, the cover included (0 unless written). */
+  slides?: number;
+  /** The slide count the person chose. */
+  asked?: number;
+  /** The encyclopedia article the text was written from; null: from the model's own knowledge. */
+  source?: { title: string; url: string } | null;
+  removed?: number;
+  checked?: "reference" | "model" | null;
+  model_label?: string | null;
+  seconds?: number;
 }
 export interface VariantEdit {
   at: number; request: string; reply: string; kind: string; slides: number[]; score_before: number | null; score_after: number | null;

@@ -15,21 +15,24 @@ from verstka.analysis.assets import extract_assets, tag_assets_with_vlm
 from verstka.analysis.chrome import chrome_ids as _chrome_ids
 from verstka.analysis.chrome import detect_chrome, inherited_chrome, visual_chrome
 from verstka.analysis.classify import classify_slide
-from verstka.analysis.colors import ColorSample, assign_color_roles, cluster_colors, collect_color_samples
+from verstka.analysis.colors import ColorSample, assign_color_roles, cluster_colors, collect_color_samples, dominant_saturated_hex, has_saturated_drawn, is_drawn, is_stock_theme_color
 from verstka.analysis.components import derive_components
 from verstka.analysis.gallery import write_gallery, write_thumbnails
 from verstka.analysis.groups import detect_repeat_groups
-from verstka.analysis.patterns import build_pattern, dedupe_patterns
+from verstka.analysis.patterns import build_pattern, dedupe_patterns, mockup_boxes, mockup_on_layout
 from verstka.analysis.rules import harvest_rules, with_fresh_derived_rules
-from verstka.analysis.shapes import ShapeInfo, SlideContext, extract_shapes, slide_background, slide_family
-from verstka.analysis.spacing import compute_spacing
+from verstka.analysis.ground import art_boxes, largest_free_share, painted_layers, slide_ground
+from verstka.analysis.shapes import ShapeInfo, SlideContext, extract_shapes
+from verstka.analysis.spacing import compute_spacing, extend_safe_bottom
+from verstka.analysis.theme import ThemeResolver
 from verstka.analysis.typography import build_type_scale
 from verstka.ingest.package import PptxPackage
 from verstka.ingest.render import RenderError, find_pdftoppm, find_soffice, render_slides
 from verstka.ingest.workspace import TemplateWorkspace
 from verstka.providers.registry import ProviderRegistry
-from verstka.schemas.common import Family, ShapeKind, contrast_ratio
-from verstka.schemas.template import BackgroundFamily, ShapeStyleStats, SlideSize, TemplateManifest, Tokens
+from verstka.rendering.fonts import substitute_of
+from verstka.schemas.common import Bbox, Family, ShapeKind, contrast_ratio
+from verstka.schemas.template import BackgroundFamily, FontUsage, ShapeStyleStats, SlideSize, TemplateManifest, Tokens
 from verstka.skills_registry.registry import SkillsRegistry
 
 log = logging.getLogger(__name__)
@@ -97,14 +100,65 @@ def _draws(s: ShapeInfo) -> bool:
 
 
 def _drawn_box(s: ShapeInfo, slide_w: int, slide_h: int):
-    """Where a shape actually puts ink: a wide text box only as far as its longest line reaches."""
+    """Where a shape actually puts ink: a wide text box only as far as its longest line reaches — from the left
+    edge, around the centre or from the right edge, as the text is aligned (a centred heading does not ink the
+    box's left end, where a logo may be baked into the ground)."""
     f = s.bbox.to_frac(slide_w, slide_h)
     if s.kind == ShapeKind.pic or s.is_visual_shape or not s.has_text:
         return f
     size = (s.text.dominant_size_pt or 18.0) if s.text else 18.0
     longest = max((len(line) for line in s.plain_text.splitlines()), default=0)
     width = min(f.w, longest * size * 0.6 * 12700 / slide_w)
-    return f.model_copy(update={"w": width})
+    align = (s.text.dominant_align if s.text else None) or "l"
+    x = f.x + (f.w - width) / 2 if align == "ctr" else f.x + f.w - width if align == "r" else f.x
+    return f.model_copy(update={"x": x, "w": width})
+
+
+def chrome_picture_samples(pkg: PptxPackage, chrome, images: dict, slide_w: int, slide_h: int, grounds: Optional[list[str]] = None) -> list[ColorSample]:
+    """Light colour votes from the template's chrome pictures (logos) and baked marks (the render's pixels in a
+    background chrome box): each one's dominant saturated colour — unless it is only a shade of the slide's ground
+    (the darker grain of a paper texture is not a mark)."""
+    from verstka.schemas.common import Color
+
+    ground_colors = [Color(hex=h) for h in set(grounds or [])]
+    out: list[ColorSample] = []
+    seen: set = set()
+    try:
+        import numpy as np
+        from io import BytesIO
+
+        from PIL import Image
+    except ImportError:  # pragma: no cover
+        return out
+    for c in chrome:
+        try:
+            if c.image_part and c.image_part not in seen and pkg.exists(c.image_part) and not c.image_part.lower().endswith((".svg", ".emf", ".wmf")):
+                seen.add(c.image_part)
+                with Image.open(BytesIO(pkg.read(c.image_part))) as im:
+                    a = np.asarray(im.convert("RGBA").resize((64, 64)), dtype=np.float32)
+                px = a[..., :3][a[..., 3] > 200]
+            elif c.source == "background" and images:
+                px_list = []
+                for _, path in sorted(images.items())[:12]:
+                    with Image.open(path) as im:
+                        w, h = im.size
+                        box = (int(c.bbox.x * w), int(c.bbox.y * h), int(c.bbox.x2 * w), int(c.bbox.y2 * h))
+                        if box[2] - box[0] < 2 or box[3] - box[1] < 2:
+                            continue
+                        px_list.append(np.asarray(im.convert("RGB").crop(box).resize((24, 24)), dtype=np.float32).reshape(-1, 3))
+                px = np.concatenate(px_list) if px_list else None
+            else:
+                continue
+            hx = dominant_saturated_hex(px) if px is not None and len(px) else None
+            if hx and not any(Color.delta_e(Color(hex=hx), g) < 20 for g in ground_colors):
+                out.append(ColorSample(hx, "fill", 0.5))
+        except Exception:  # noqa: BLE001
+            continue
+    return out
+
+
+def _font_key(name: str) -> str:
+    return "".join((name or "").lower().split())
 
 
 def text_color_on(under_hex: Optional[str], tokens: Tokens) -> Optional[str]:
@@ -177,22 +231,27 @@ def analyze_template(
     bg_by_slide: dict[int, Optional[str]] = {}
     image_bg: set[int] = set()
     layout_by_slide: dict[int, Optional[str]] = {}
+    ctx_by_slide: dict[int, SlideContext] = {}
+    frame_votes: list[str] = []
     slide_texts: list[str] = []
     for i, part in enumerate(slide_parts, 1):
         try:
             ctx = SlideContext(pkg, part)
             shapes = extract_shapes(pkg, part, ctx)
-            fam, bg = slide_family(pkg, part, ctx, shapes, str(images[i]) if i in images else None)
+            ground = slide_ground(pkg, part, ctx, shapes, str(images[i]) if i in images else None)
         except Exception as e:  # noqa: BLE001
             warnings.append(f"slide {i}: extraction failed: {str(e)[:200]}")
             log.exception("slide %d extraction failed", i)
             continue
         shapes_by_slide[i] = shapes
-        family_by_slide[i] = fam
-        bg_by_slide[i] = bg
-        if bg and slide_background(pkg, part, ctx)[1] == "image":
-            image_bg.add(i)  # a median colour of a picture ground, not a solid fill
+        family_by_slide[i] = ground.family
+        bg_by_slide[i] = ground.hex
+        if ground.hex and ground.kind in ("image", "render"):
+            image_bg.add(i)  # a median colour of a picture ground (or of the render), not a solid fill
+        if ground.bg_hex and ground.cover < 0.97 and ground.bg_hex != ground.hex:
+            frame_votes.append(ground.bg_hex)
         layout_by_slide[i] = ctx.layout_part
+        ctx_by_slide[i] = ctx
         slide_texts.append("\n".join(s.plain_text for s in shapes if s.has_text))
     report("extracted shapes", 0.3)
 
@@ -221,10 +280,13 @@ def analyze_template(
     chrome.extend(inherited_chrome(layout_shapes, layout_users, n_slides, slide_w, slide_h, "layout"))
     chrome.extend(inherited_chrome(master_shapes, master_users, n_slides, slide_w, slide_h, "master"))
     if images:
-        # logos baked into background pictures exist only in the renders
-        known = [c.bbox for c in chrome]
+        # logos baked into background pictures exist only in the renders (a full-bleed picture chrome is the
+        # ground they are baked into, not an explanation of them: Vintage's bookmark and ink blots)
+        known = [c.bbox for c in chrome if c.bbox.area < 0.85]
         for vc in visual_chrome([str(p) for _, p in sorted(images.items())]):
-            if any(vc.bbox.intersection(k) > 0.5 * vc.bbox.area for k in known if k.area > 0):
+            # a mark of a real chrome shape seen through the edges of the render (dilated: the edge cluster is
+            # larger than the logo shape) is that shape, not a second obstacle
+            if any(vc.bbox.intersection(k) > 0.5 * min(vc.bbox.area, k.area) for k in known if k.area > 0):
                 continue
             # edges drawn by real shapes (title pills, headings standing at the same place) are not baked chrome
             drawn = sum(1 for shapes in shapes_by_slide.values() if any(_drawn_box(s, slide_w, slide_h).intersection(vc.bbox) >= 0.4 * vc.bbox.area for s in shapes if _draws(s)))
@@ -242,7 +304,32 @@ def analyze_template(
     report(f"extracted {len(assets)} assets", 0.38)
 
     # 5. typography, colours
-    typography = build_type_scale(shapes_by_slide, chrome_by_slide)
+    typography = build_type_scale(shapes_by_slide, chrome_by_slide, slide_h=slide_h)
+    # the theme's heading and body fonts are the template's own even when no sample sets them (a «+mj-lt» title of a
+    # generated slide renders in them): listed after the text families, weight 0, so the primary family stays
+    known_fonts = {f.family.strip().lower() for f in typography.families}
+    for mp in pkg.master_parts:
+        try:
+            res = ThemeResolver(pkg, mp)
+            theme_fonts = (res.major_font, res.minor_font)
+        except Exception:  # noqa: BLE001
+            theme_fonts = ()
+        for fam_name in theme_fonts:
+            if fam_name and fam_name.strip().lower() not in known_fonts and not fam_name.startswith("+"):
+                typography.families.append(FontUsage(family=fam_name, weight=0.0, bold_share=0.0, source="theme"))
+                known_fonts.add(fam_name.strip().lower())
+    embedded = {_font_key(f) for f in pkg.embedded_fonts}
+    font_substitutes: dict[str, str] = {}
+    for fu in typography.families:
+        if fu.weight <= 0 or _font_key(fu.family) in embedded:
+            continue
+        try:
+            sub = substitute_of(fu.family)
+        except Exception:  # noqa: BLE001
+            sub = None
+        if sub:
+            # a missing face is not a failure to read the template (the narrator reports `warnings` as such)
+            font_substitutes[fu.family] = sub
     families = Counter(f.value for f in family_by_slide.values())
     primary_family = Family.dark if families.get("dark", 0) > families.get("light", 0) else Family.light
     samples = []
@@ -254,18 +341,31 @@ def analyze_template(
             samples.append(ColorSample(bg_by_slide[i].upper(), "background", 0.5))
     # the brand also lives on masters and layouts (rules, bars, logos) and in the theme: light votes, so that a
     # template whose slides are all black-on-white still has its accent (instead of a VK blue default)
-    art = [s for shapes in list(layout_shapes.values()) + list(master_shapes.values()) for s in shapes if not s.is_placeholder]
+    # a painted panel of most of the slide is the ground the slides stand on (Sunset's orange panel): it is sampled as
+    # the slides' ground above, not as a brand fill
+    art = [s for shapes in list(layout_shapes.values()) + list(master_shapes.values()) for s in shapes if not s.is_placeholder and not (s.kind == ShapeKind.sp and s.fill_hex and s.bbox.area >= 0.6 * slide_w * slide_h)]
+    for hx in frame_votes:
+        samples.append(ColorSample(hx.upper(), "fill", 1.0))  # the p:bg framing a panel ground is drawn, visibly
     for smp in collect_color_samples(art, slide_w, slide_h):
         if smp.context != "background":
             samples.append(ColorSample(smp.hex, smp.context, smp.weight * 0.5))
+    drawn_samples = list(samples)
     try:
         theme = SlideContext(pkg, slide_parts[0]).resolver if slide_parts else None
         for k, name in enumerate(("accent1", "accent2")):
             hx = theme.scheme_hex(name) if theme is not None else None
+            if hx and is_stock_theme_color(hx) and not is_drawn(hx.upper(), drawn_samples):
+                continue  # the office suite's stock accent, never drawn by the template: not its brand
             if hx:
                 samples.append(ColorSample(hx.upper(), "fill", 0.2 - 0.05 * k))
     except Exception:  # noqa: BLE001
         pass
+    if not has_saturated_drawn(drawn_samples):
+        # nothing saturated is drawn with shapes: the brand lives in pictures (a red bookmark baked into the paper
+        # ground, a coloured logo) — their dominant saturated colour votes lightly
+        grounds = [h for h in bg_by_slide.values() if h]
+        for smp in chrome_picture_samples(pkg, chrome, images, slide_w, slide_h, grounds=grounds):
+            samples.append(smp)
     colors = assign_color_roles(cluster_colors(samples, float(cfg.get("colors", {}).get("delta_e_tolerance", 1.8))), primary_family)
 
     # 6. spacing (preliminary) and groups
@@ -353,11 +453,40 @@ def analyze_template(
                 text_on=lambda fill, i=i: text_color_on(fill or bg_by_slide.get(i) or tokens.color_for("background.dark" if family_by_slide[i] == Family.dark else "background.light"), tokens),
             )
         )
+    # how much of the content band each sample's layout and master leave free of art (Focus's triangles, Candy's
+    # quarter-circle): dedupe keeps the freer of two equal samples on different layouts, the renderer ranks canvases
+    sa = tokens.spacing.safe_area
+    band = Bbox(x=int(sa.x * slide_w), y=int(max(sa.y, 0.2) * slide_h), w=int(sa.w * slide_w), h=int(max(sa.y2 - max(sa.y, 0.2), 0.05) * slide_h))
+    for pat in patterns:
+        ctx = ctx_by_slide.get(pat.source_slide)
+        if ctx is None:
+            continue
+        try:
+            layers = painted_layers(pkg, slide_parts[pat.source_slide - 1], ctx)
+            pat.free_share = largest_free_share(art_boxes(layers, slide_w, slide_h), band)
+        except Exception as e:  # noqa: BLE001
+            log.warning("free share of slide %d failed: %s", pat.source_slide, e)
+    for pat in patterns:
+        lp = layout_by_slide.get(pat.source_slide)
+        try:
+            pat.mockup_boxes = mockup_boxes(shapes_by_slide[pat.source_slide], slide_w, slide_h, layout_shapes.get(lp) if lp else None)
+            pat.mockup_on_layout = mockup_on_layout(pat.mockup_boxes, layout_shapes.get(lp) if lp else None, slide_w, slide_h)
+            pat.layout_type = pkg.xml(lp).get("type") if lp else None
+        except Exception as e:  # noqa: BLE001
+            log.warning("mock-ups of slide %d failed: %s", pat.source_slide, e)
     patterns = dedupe_patterns(patterns)
+    # the safe area's foot, now that the samples are classified (content samples vs covers)
+    body_feet: dict[int, list[float]] = {}
+    for i, lp in layout_by_slide.items():
+        body_feet[i] = [
+            sh.bbox.to_frac(slide_w, slide_h).y2 for sh in layout_shapes.get(lp, []) if lp
+            and sh.is_placeholder and sh.ph_type in ("body", "obj", "tbl", "chart", "pic") and sh.bbox.h >= 0.3 * slide_h and sh.bbox.y2 <= slide_h
+        ]
+    tokens.spacing = extend_safe_bottom(tokens.spacing, patterns, shapes_by_slide, body_feet, tokens.chrome, slide_w, slide_h)
     report(f"assembled {len(patterns)} patterns", 0.86)
 
     # 9. components, rules, optional asset tagging
-    components = derive_components(patterns, shapes_by_slide, tokens)
+    components = derive_components(patterns, shapes_by_slide, tokens, slide_h=slide_h)
     rules, w = harvest_rules(slide_texts, tokens, skills, providers, use_llm=use_llm)
     warnings.extend(w)
     if tag_assets and use_vlm and skills is not None and providers is not None:
@@ -376,6 +505,7 @@ def analyze_template(
         warnings=warnings,
         n_slides=n_slides,
         embedded_fonts=pkg.embedded_fonts,
+        font_substitutes=font_substitutes,
     )
     ws.manifest_path.write_text(manifest.model_dump_json(indent=2), encoding="utf-8")
     try:

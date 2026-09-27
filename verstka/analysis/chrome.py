@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 
-from verstka.analysis.shapes import ShapeInfo
+from verstka.analysis.shapes import ShapeInfo, looks_like_placeholder
 from verstka.schemas.common import BboxFrac, ShapeKind
 from verstka.schemas.template import ChromeElement
 
@@ -34,6 +34,31 @@ def shape_signature(s: ShapeInfo, slide_w: int, slide_h: int) -> str:
     return f"{s.kind.value}|{geo}|{content}"
 
 
+def _title_box(shapes: list[ShapeInfo], slide_h: int):
+    """The heading of a sample: its title placeholder, else the largest text in the top 40 % of the slide."""
+    t = next((s for s in shapes if s.ph_type in ("title", "ctrTitle") and s.bbox.area > 0), None)
+    if t is not None:
+        return t.bbox
+    texts = [s for s in shapes if s.has_text and s.bbox.area > 0 and s.bbox.y < 0.4 * slide_h and not _NUM_RE.match(s.plain_text.strip())]
+    if not texts:
+        return None
+    return max(texts, key=lambda s: ((s.text.dominant_size_pt or 0.0) if s.text else 0.0, -s.bbox.y)).bbox
+
+
+def is_kicker(s: ShapeInfo, title, slide_h: int) -> bool:
+    """A short text standing in the content band right above or below the slide's heading, over the same columns:
+    the sample's kicker («DEMO SLIDE», a section label) — content of the sample, not chrome to keep on every slide."""
+    if title is None or s.bbox is title or not s.has_text:
+        return False
+    if s.bbox.x == title.x and s.bbox.y == title.y and s.bbox.w == title.w and s.bbox.h == title.h:
+        return False
+    if not 0.08 * slide_h < s.bbox.y < 0.85 * slide_h:
+        return False
+    gap = max(title.y - s.bbox.y2, s.bbox.y - title.y2, 0)
+    overlaps_x = s.bbox.x < title.x2 and s.bbox.x2 > title.x
+    return gap <= 0.12 * slide_h and overlaps_x
+
+
 def detect_chrome(shapes_per_slide: dict[int, list[ShapeInfo]], slide_w: int, slide_h: int, min_share: float = 0.4, min_slides: int = 3) -> list[ChromeElement]:
     n = len(shapes_per_slide)
     if n == 0:
@@ -41,6 +66,7 @@ def detect_chrome(shapes_per_slide: dict[int, list[ShapeInfo]], slide_w: int, sl
     seen: dict[str, set[int]] = defaultdict(set)
     sample: dict[str, tuple[int, ShapeInfo]] = {}
     for idx, shapes in shapes_per_slide.items():
+        title = None
         for s in shapes:
             if s.ph_type in _CONTENT_PH:
                 continue
@@ -48,6 +74,15 @@ def detect_chrome(shapes_per_slide: dict[int, list[ShapeInfo]], slide_w: int, sl
                 continue
             if s.bbox.area <= 0:
                 continue
+            if s.has_text and _text_sig(s.plain_text) != "num":
+                # sample copy repeated on every sample («DEMO SLIDE», «Your logo») and kickers over the heading are
+                # the sample's content: kept as chrome, they would stand above every generated heading
+                if looks_like_placeholder(s.plain_text):
+                    continue
+                if title is None:
+                    title = _title_box(shapes, slide_h) or False
+                if title and is_kicker(s, title, slide_h):
+                    continue
             sig = shape_signature(s, slide_w, slide_h)
             seen[sig].add(idx)
             sample.setdefault(sig, (idx, s))

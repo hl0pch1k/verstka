@@ -27,6 +27,7 @@ class FontUsage(BaseModel):
     family: str
     weight: float = 0.0  # share of characters
     bold_share: float = 0.0
+    source: str = "text"  # text: set on the slides; theme: the theme's major/minor font (weight 0, allowed by audits)
 
 
 class TypeStep(BaseModel):
@@ -40,6 +41,9 @@ class Typography(BaseModel):
     families: list[FontUsage] = Field(default_factory=list)
     scale: list[TypeStep] = Field(default_factory=list)
     sizes_used: list[float] = Field(default_factory=list)  # every size the template uses (audit tolerance ±0.75 pt)
+    # a sparse template's own sizes (two placeholder defaults on an LibreOffice template) are completed with a ladder
+    # relative to the slide height; the ladder is also merged into sizes_used, so every consumer picks it up
+    derived_sizes: list[float] = Field(default_factory=list)
     left_align_share: float = 1.0
     line_spacing: float = 1.2  # the template's paragraph spacing (spcPct: 1.0 single, 0.9 = 90%); 1.2 = not specified
 
@@ -196,6 +200,11 @@ class Pattern(BaseModel):
     chrome_shape_ids: list[str] = Field(default_factory=list)  # logos, footers, page numbers drawn on this sample
     reference: Optional[str] = None  # why the sample is template documentation, not a layout (icon sheet, palette)
     decor_boxes: list[BboxFrac] = Field(default_factory=list)  # decorative pictures (a chart snapshot, a ring) and where they stand
+    free_share: Optional[float] = None  # share of the content band left free by the layout/master art (None: not measured)
+    title_ph: Optional[str] = None  # placeholder type of the title slot's shape (ctrTitle / title), None for a text box
+    layout_type: Optional[str] = None  # the layout's own type (title, obj, secHead, …) when it declares one
+    mockup_boxes: list[BboxFrac] = Field(default_factory=list)  # device mock-ups and empty picture frames of the sample
+    mockup_on_layout: bool = False  # a mock-up drawn by the layout: it stays on every slide cloned from the sample
 
     def slots_by_role(self, role: SlotRole) -> list[Slot]:
         return [s for s in self.slots if s.role == role]
@@ -294,8 +303,12 @@ class TemplateManifest(BaseModel):
     style_rules: list[StyleRule] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     n_slides: int = 0
-    analysis_version: str = "20"
+    analysis_version: str = "21"
     embedded_fonts: list[str] = Field(default_factory=list)
+    # template families this machine does not have (not installed, not embedded) → the face previews and PDFs set them
+    # in (the LibreOffice replacement table of ingest.render, fonts.render_standin; else fontconfig's substitute);
+    # kept apart from `warnings`, which list what the analysis could not read
+    font_substitutes: dict[str, str] = Field(default_factory=dict)
 
     def patterns_of_kind(self, kind: PatternKind) -> list[Pattern]:
         return [p for p in self.patterns if p.kind == kind]

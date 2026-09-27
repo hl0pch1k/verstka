@@ -4,7 +4,7 @@
 // with the aside (its owner staggers it); on another variant only its lines cross-fade. The log is not live: no line
 // animations there.
 import { useMemo, useRef, useState } from "react";
-import { Bot, ChevronRight, PenTool, RotateCcw, ScanText, ShieldCheck, type LucideIcon } from "lucide-react";
+import { Bot, ChevronRight, PenLine, PenTool, RotateCcw, ScanText, ShieldCheck, type LucideIcon } from "lucide-react";
 import { api } from "../../api";
 import { agentSummary, buildTimeline, formsSummary, hasAgentWork, mendCut } from "../../lib/agent";
 import { errText } from "../../lib/narrate";
@@ -17,7 +17,7 @@ import { Button } from "../ui/Button";
 import { EmptyState } from "../ui/EmptyState";
 import { AgentTimeline } from "./AgentTimeline";
 
-const STEP_ICON: Record<string, LucideIcon> = { Аналитик: ScanText, Дизайнер: PenTool, Критик: ShieldCheck };
+const STEP_ICON: Record<string, LucideIcon> = { Автор: PenLine, Аналитик: ScanText, Дизайнер: PenTool, Критик: ShieldCheck };
 
 /** The card on the result screen: a mini timeline of three steps; nothing for a deck made before the agent kept a
  *  journal. The whole card opens the drawer's «Агент». */

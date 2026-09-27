@@ -714,6 +714,14 @@ def measure_table(
     return TableFit(size, col_emu, row_emu, content_w=int(round(content * EMU_PER_PT)), overflow=overflow, too_dense=too_dense)
 
 
+def neutral_run(rPr: etree._Element) -> None:
+    """An engine-written run does not inherit the template's capitals, tracking or baseline shift (a master body style
+    with cap="all" spc="500" would set «П О К А З А Т Е Л Ь»): capitals the design wants are typed as capitals."""
+    rPr.set("cap", "none")
+    rPr.set("spc", "0")
+    rPr.set("baseline", "0")
+
+
 def default_sizes(typography: Typography, slide_h_emu: int, style_size: Optional[float] = None) -> list[float]:
     """Candidate table sizes, largest first, when no composer chose them: body B = max(scale body, 0.026 H) down to
     the dense-table floor 0.022 H, through the template's own sizes in between."""
@@ -721,6 +729,10 @@ def default_sizes(typography: Typography, slide_h_emu: int, style_size: Optional
     body = typography.size_for("body", style_size or 12.0)
     b = round(max(body, 0.026 * h_pt) * 2) / 2
     floor = round(0.022 * h_pt * 2) / 2
+    sparse = bool(getattr(typography, "derived_sizes", None))
+    if sparse or (style_size or 0.0) > 0.026 * h_pt:
+        # a bullet placeholder's 24 pt is not a table size on an 11″ slide: capped relative to the slide
+        b = min(b, math.floor(0.026 * h_pt * 2) / 2)
     cands = {b, floor}
     cands.update(s for s in list(typography.sizes_used) + [st.size_pt for st in typography.scale] + [style_size or 0] if floor <= s <= b)
     return sorted(cands, reverse=True)
@@ -1704,6 +1716,7 @@ def add_table(
         run.font.color.rgb = RGBColor.from_string(color_hex)
         if family:
             _set_typeface(run._r.get_or_add_rPr(), family)
+        neutral_run(run._r.get_or_add_rPr())
         cell.margin_left = Emu(int((px + extra_left) * EMU_PER_PT))
         cell.margin_right = Emu(int(px * EMU_PER_PT))
         cell.margin_top = cell.margin_bottom = Emu(int(py * EMU_PER_PT))

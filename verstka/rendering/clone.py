@@ -19,11 +19,12 @@ from verstka.ingest.workspace import TemplateWorkspace
 from verstka.matching.scorer import awkward_breaks, balanced_lines, bind_short_words, bookend_max_lines, cover_goal, display_fit, display_lines, is_placeholder_text, same_words, split_display_title
 from verstka.rendering.assets_pick import pick_asset, pick_icon
 from verstka.rendering.charts import add_chart, add_ring
-from verstka.rendering.deck import DeckBuilder, element_bbox, is_nested, remove_element, renumber_ids, set_element_pos, shift_element, slide_shape_elements
+from verstka.rendering.deck import DeckBuilder, element_bbox, is_nested, materialize_xfrm, remove_element, renumber_ids, set_element_pos, shift_element, slide_shape_elements
 from verstka.rendering.fonts import text_width_pt, wrap_lines
 from verstka.rendering.fit import fit_size, grow_size
 from verstka.rendering.groups import adjust_group, cell_bbox, cell_riders, cells_elements, reading_order_key, transform_element
 from verstka.rendering.images import replace_picture
+from verstka.rendering.layers import ground_under, heading_band, opaque_box
 from verstka.rendering.tables import add_table
 from verstka.rendering.textfill import ParagraphSpec, clear_text, ensure_txbody, fill_text, has_visible_style, set_text_size, shape_text, style_runs
 from verstka.schemas.common import EMU_PER_PT, Bbox, PatternKind, SlotRole, contrast_ratio, relative_luminance
@@ -78,6 +79,7 @@ class _SlideCtx:
         # whether the slide keeps the sample's content pictures (it has an image of its own); when it does not, the
         # big pictures in cards are dropped at the end and must not hold text back while it is being placed
         self.keeps_pictures = True
+        self.band_limited = False  # the heading being filled stands in a layout/master band (T12)
 
     # ---- helpers ----------------------------------------------------------------
     def slots(self, *roles: SlotRole, unfilled: bool = True) -> list[Slot]:
@@ -109,8 +111,11 @@ class _SlideCtx:
             _wrap_inside(el, [p.text for p in paragraphs], family, size, bold, box, insets)
         if box and box[2] > 0 and box[3] > 0 and slot is not None and slot.role in _GROWABLE and not container:
             box = self._room_in_holder(el, box)
+        self.band_limited = False
         if box and box[2] > 0 and box[3] > 0 and slot is not None and (widen or slot.role in (SlotRole.title, SlotRole.subtitle)):
             box = self._widen_on_backing(el, box, [p.text for p in paragraphs], family, size, bold, insets)
+        if self.band_limited:
+            min_ratio = min(min_ratio, 0.55)  # a heading in a band steps down rather than leaving the band
         if box and box[2] > 0 and box[3] > 0:
             res = fit_size([p.text for p in paragraphs], Bbox(x=box[0], y=box[1], w=box[2], h=box[3]), family, size, bold, self.grow_scale, insets_emu=insets, line_spacing=self.typo.line_height, min_ratio=min_ratio)
             target_size = res.size_pt
@@ -231,6 +236,9 @@ class _SlideCtx:
                 limit = min(limit, b[0] - int(0.015 * self.W))
         need_w = int(max(text_width_pt(t, family, size, bold) for t in texts) * EMU_PER_PT * 1.05) + insets[0] + insets[2]
         if backing is None:
+            banded = self._hold_in_band(el, bx, need_w, limit)
+            if banded is not None:
+                return banded
             if bx.x2 > limit and bx.x + need_w > limit and limit - bx.x >= int(0.25 * self.W):
                 set_element_pos(el, w=limit - bx.x)
                 self.warnings.append("heading kept clear of the logos")
@@ -258,6 +266,32 @@ class _SlideCtx:
             set_element_pos(back_el, w=ob.w + grow, h=ob.h + height_grow)
             self.warnings.append(f"label widened by {grow * 100 // self.W}% of the slide for the heading")
         return (bx.x, bx.y, width, bx.h + height_grow)
+
+    def _hold_in_band(self, el: etree._Element, bx: Bbox, need_w: int, limit: int) -> Optional[tuple[int, int, int, int]]:
+        """A heading standing in a band its layout or master paints (T12: the band is a hard limit): the box keeps to
+        the band's height — a one-line band holds one line, set smaller rather than spilling its second line onto the
+        slide's ground in the band's text colour — and may widen along the band up to the next obstacle. None when no
+        such band holds the heading (the slide's own pills are the label logic's)."""
+        try:
+            band = heading_band(self.slide, bx)
+        except Exception:  # noqa: BLE001 - layers are advice
+            band = None
+        if band is None or band.source == "slide":
+            return None
+        b = band.box
+        tol = int(0.01 * self.H)
+        y0, y1 = max(bx.y, b.y), min(bx.y2, b.y2)
+        if y1 - y0 < 0.5 * min(bx.h, b.h):
+            return None  # the heading box mostly lies off the band: the band is not its ground
+        x2 = min(limit, b.x2 - int(0.015 * self.W))
+        width = max(bx.w, min(x2 - bx.x, need_w)) if x2 > bx.x else bx.w
+        if bx.y >= b.y - tol and bx.y2 <= b.y2 + tol and width == bx.w:
+            self.band_limited = True
+            return (bx.x, bx.y, bx.w, bx.h)
+        set_element_pos(el, x=bx.x, y=y0, w=width, h=y1 - y0)
+        self.band_limited = True
+        self.warnings.append("heading held inside the layout's band")
+        return (bx.x, y0, width, y1 - y0)
 
     def fill_slot(self, slot: Slot, paragraphs: list[ParagraphSpec], **kw) -> bool:
         el = self.els.get(slot.shape_id)
@@ -1064,7 +1098,9 @@ def _fill_hex(el: etree._Element) -> Optional[str]:
 
 
 def _ground_hex(ctx: _SlideCtx, box: Bbox) -> Optional[str]:
-    """What lies under a box: the smallest painted shape holding it, else the sample slide's own ground."""
+    """What lies under a box: the smallest painted shape of the slide holding it, else what the layout or master
+    paints there (a band, a panel, a gradient picture — measured where the box is) when it differs from the sample
+    slide's ground, else the sample slide's own ground."""
     best = None
     for el in ctx.slide._element.cSld.find(q("p:spTree")):
         if etree.QName(el).localname != "sp" or not _has_fill(el):
@@ -1080,7 +1116,53 @@ def _ground_hex(ctx: _SlideCtx, box: Bbox) -> Optional[str]:
     if best:
         return best[1]
     bg = next((b.hex for b in ctx.manifest.tokens.backgrounds if ctx.pattern.source_slide in b.slides and b.hex), None)
-    return bg or ctx.manifest.tokens.color_for("background.dark" if ctx.pattern.family.value == "dark" else "background.light")
+    bg = bg or ctx.manifest.tokens.color_for("background.dark" if ctx.pattern.family.value == "dark" else "background.light")
+    try:
+        under = ground_under(ctx.slide, box)
+    except Exception:  # noqa: BLE001 - layers are advice
+        under = None
+    if under is not None and (not bg or contrast_ratio(under[0], bg) >= 1.2):
+        return under[0]
+    return bg
+
+
+def _mixed_ground(ctx: _SlideCtx, box: Bbox) -> bool:
+    """The box straddles an edge of what the layout or master paints: no single ground colour to judge it on."""
+    from verstka.rendering.layers import ground_is_mixed
+
+    try:
+        return ground_is_mixed(ctx.slide, box)
+    except Exception:  # noqa: BLE001 - layers are advice: unsure means mixed
+        return True
+
+
+def _ground_panel(ctx: _SlideCtx, box: Bbox) -> Optional[Bbox]:
+    """The painted rectangular panel (the slide's own, or its layout's or master's) a heading box stands on when it is
+    not the whole slide: the topmost opaque rectangle or picture that holds most of the box, covers 15–85 % of the
+    slide and differs from the slide's ground. None when the heading stands on the slide's own ground."""
+    from verstka.rendering.layers import drawn_layers
+
+    try:
+        layers = drawn_layers(ctx.slide)
+    except Exception:  # noqa: BLE001 - layers are advice
+        return None
+    W, H = ctx.W, ctx.H
+    bg = next((b.hex for b in ctx.manifest.tokens.backgrounds if ctx.pattern.source_slide in b.slides and b.hex), None)
+    for lay in reversed(layers):
+        if lay.placeholder or not lay.paints or lay.kind not in ("sp", "pic") or lay.custom_geom or lay.has_text:
+            continue
+        if lay.kind == "sp":
+            prst = lay.el.find(q("p:spPr") + "/" + q("a:prstGeom"))
+            if prst is None or (prst.get("prst") or "rect") not in ("rect", "snip1Rect", "round1Rect", "round2SameRect"):
+                continue
+        if lay.box.intersection(box) < 0.8 * max(box.area, 1):
+            continue
+        if not 0.15 <= lay.cover < 0.85:
+            return None  # the heading's ground is the slide (a full-bleed layer) or a pill the label logic handles
+        if not lay.fill_hex or (bg and contrast_ratio(lay.fill_hex, bg) < 1.2):
+            return None
+        return Bbox(x=max(lay.box.x, 0), y=max(lay.box.y, 0), w=min(lay.box.x2, W) - max(lay.box.x, 0), h=min(lay.box.y2, H) - max(lay.box.y, 0))
+    return None
 
 
 def _readable_on(ground: Optional[str], preferred: list[Optional[str]], manifest: TemplateManifest) -> Optional[str]:
@@ -1510,7 +1592,6 @@ def renumber_page_chrome(els: dict[str, etree._Element], chrome_ids: list[str], 
 _BOOKENDS = (PatternKind.title, PatternKind.section, PatternKind.thanks)
 _A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
 _R_EMBED = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed"
-_OPAQUE_CACHE: dict[tuple, Optional[tuple[float, float, float, float]]] = {}
 
 
 def _bookend_lines(oslide: OutlineSlide) -> list[str]:
@@ -1652,61 +1733,22 @@ def _first_line_offset(ctx: _SlideCtx, el: etree._Element) -> int:
 
 
 def _ensure_xfrm(ctx: _SlideCtx, el: etree._Element) -> Optional[tuple[int, int, int, int]]:
-    """The geometry of a placeholder that inherits its position from the layout, written onto the slide."""
+    """The geometry of a placeholder that inherits its position from the layout, written onto the slide (a thin
+    alias of `deck.materialize_xfrm`; DeckBuilder already materializes every placeholder of a cloned slide)."""
     b = element_bbox(el)
     if b:
         return b
     sid = ctx.id_of(el)
     sh = next((s for s in ctx.slide.shapes if str(s.shape_id) == sid), None)
-    if sh is None or sh.width is None:
+    if sh is None:
         return None
-    spPr = el.find(q("p:spPr"))
-    if spPr is None:
-        return None
-    xfrm = etree.Element(q("a:xfrm"))
-    etree.SubElement(xfrm, q("a:off")).attrib.update({"x": str(int(sh.left)), "y": str(int(sh.top))})
-    etree.SubElement(xfrm, q("a:ext")).attrib.update({"cx": str(int(sh.width)), "cy": str(int(sh.height))})
-    spPr.insert(0, xfrm)
+    materialize_xfrm(sh)
     return element_bbox(el)
 
 
 def _opaque_part(part, pic: etree._Element, box: Bbox) -> Bbox:
-    """The painted part of a picture: a transparent PNG laid over the whole slide (a glass cube, a supergraphic)
-    only occupies its opaque pixels."""
-    import io
-
-    from PIL import Image
-
-    blip = pic.find(".//" + _A + "blip")
-    rid = blip.get(_R_EMBED) if blip is not None else None
-    if not rid:
-        return box
-    try:
-        img_part = part.related_part(rid)
-    except Exception:  # noqa: BLE001
-        return box
-    src = pic.find(".//" + _A + "srcRect")
-    crop = tuple(int(src.get(k) or 0) / 100000 for k in ("l", "t", "r", "b")) if src is not None else (0.0, 0.0, 0.0, 0.0)
-    key = (str(img_part.partname), crop)
-    if key not in _OPAQUE_CACHE:
-        frac = None
-        try:
-            im = Image.open(io.BytesIO(img_part.blob))
-            if "A" in im.getbands():
-                iw, ih = im.size
-                l, t, r, b = crop
-                vis = (int(l * iw), int(t * ih), max(int((1 - r) * iw), int(l * iw) + 1), max(int((1 - b) * ih), int(t * ih) + 1))
-                a = im.getchannel("A").crop(vis)
-                bb = a.point(lambda v: 255 if v > 40 else 0).getbbox()
-                vw, vh = vis[2] - vis[0], vis[3] - vis[1]
-                frac = (bb[0] / vw, bb[1] / vh, (bb[2] - bb[0]) / vw, (bb[3] - bb[1]) / vh) if bb else (0.0, 0.0, 0.0, 0.0)
-        except Exception:  # noqa: BLE001
-            frac = None
-        _OPAQUE_CACHE[key] = frac
-    frac = _OPAQUE_CACHE[key]
-    if frac is None:
-        return box
-    return Bbox(x=int(box.x + frac[0] * box.w), y=int(box.y + frac[1] * box.h), w=int(frac[2] * box.w), h=int(frac[3] * box.h))
+    """The painted part of a picture (a thin alias of `layers.opaque_box`)."""
+    return opaque_box(part, pic, box)
 
 
 def _drawn_boxes(ctx: _SlideCtx, exclude: set[int]) -> list[Bbox]:
@@ -1913,6 +1955,26 @@ def _strip_bookend(ctx: _SlideCtx, keep: set[str], oslide: OutlineSlide) -> tupl
         drop(el)
         if b:
             gone.append(Bbox(x=b[0], y=b[1], w=b[2], h=b[3]))
+    # a device mock-up (a phone frame around an empty screen) or an empty photo frame shows nothing without the
+    # content's own picture: the slide's copy of it leaves (one the layout draws stays — the matcher avoids those)
+    if not oslide.content.image_hint and ctx.pattern.kind == PatternKind.title:
+        for mb in getattr(ctx.pattern, "mockup_boxes", None) or []:
+            m = mb.to_emu(W, H)
+            if m.area <= 0:
+                continue
+            for sid, el in list(ctx.els.items()):
+                if sid in keep or sid in chrome or sid in ctx.removed or el.getparent() is not tree:
+                    continue
+                b = element_bbox(el)
+                if not b or b[2] <= 0 or b[3] <= 0:
+                    continue
+                eb = Bbox(x=b[0], y=b[1], w=b[2], h=b[3])
+                inside = eb.intersection(m) >= 0.8 * eb.area
+                # the picture that draws the device (a phone on its decorative circles) holds the mock-up's box
+                device = etree.QName(el).localname in ("pic", "grpSp") and eb.intersection(m) >= 0.8 * m.area and eb.area < 0.6 * W * H
+                if inside or device:
+                    drop(el)
+                    gone.append(eb)
     # the subtitle moves under the heading: whatever was drawn beside it where it stood leaves too
     for sid in keep:
         slot = ctx.slot_of.get(sid)
@@ -2193,6 +2255,20 @@ def _move_rows(rows: list[list[etree._Element]], dy: int) -> None:
 # ---- heading and subtitle
 
 
+def _inherits_caps(ctx: _SlideCtx, el: etree._Element) -> bool:
+    """The text of this shape shows in capitals whatever case it is typed in: `cap="all"` (or small capitals) on its
+    first run, its list style, its layout's and master's placeholder or the master's title/body/other text style."""
+    if (_eff_rpr(ctx, el, "cap") or "") in ("all", "small"):
+        return True
+    from verstka.rendering.textfill import inherited_caps_spc
+
+    shp = next((s for s in ctx.slide.shapes if s._element is el), None)
+    try:
+        return bool(inherited_caps_spc(shp if shp is not None else el)[0])
+    except Exception:  # noqa: BLE001 - unknown: measured as typed
+        return False
+
+
 def _caps_convention(ctx: _SlideCtx, el: etree._Element, slot: Slot) -> bool:
     """Whether the template sets this heading in capitals: its layout prompt or sample text is written so."""
     if (_eff_rpr(ctx, el, "cap") or "") == "all":
@@ -2234,7 +2310,14 @@ def _new_text(ctx: _SlideCtx, src: etree._Element, name: str, family: Optional[s
         if not any(spPr.find(q(t)) is not None for t in ("a:noFill", "a:solidFill", "a:gradFill", "a:blipFill", "a:pattFill")):
             geom.addnext(etree.Element(q("a:noFill")))
     for r in list(el.iter(q("a:rPr"))) + list(el.iter(q("a:endParaRPr"))):
-        r.attrib.pop("cap", None)  # the heading's capitals are its own
+        # the heading's capitals are its own; cut loose from its placeholder, the box would otherwise take the master's
+        # «other text» style — capitals and letter-spacing (spc 500) that spread a sentence wider than it was measured
+        r.set("cap", "none")
+        if r.get("spc") is None:
+            r.set("spc", "0")
+    for para in el.iter(q("a:p")):
+        if all(r.find(q("a:rPr")) is None for r in para.findall(q("a:r"))) and para.find(q("a:endParaRPr")) is None:
+            para.append(etree.Element(q("a:endParaRPr"), {"lang": "ru-RU", "cap": "none", "spc": "0"}))
     src.addnext(el)
     style_runs(el, family or ctx.typo.primary_family, color, align=None)
     sid = ctx.id_of(el)
@@ -2430,6 +2513,216 @@ def _pick_frame(ctx: _SlideCtx, frames: list[etree._Element]) -> Optional[etree.
     return best[1] if best else None
 
 
+def _straddles(ctx: _SlideCtx, el: Optional[etree._Element]) -> bool:
+    """The element's box straddles an edge of what the layout or master paints (half on a triangle, half off it).
+    Unsure (no geometry, layers unreadable) is False: nothing moves on a guess."""
+    b = element_bbox(el) if el is not None else None
+    if not b or b[2] <= 0 or b[3] <= 0:
+        return False
+    from verstka.rendering.layers import ground_is_mixed
+
+    try:
+        return ground_is_mixed(ctx.slide, Bbox(x=b[0], y=b[1], w=b[2], h=b[3]))
+    except Exception:  # noqa: BLE001 - layers are advice
+        return False
+
+
+def _calm_at(ctx: _SlideCtx, box: Bbox) -> bool:
+    """Nothing the layout or master paints has an edge inside the box: the box lies wholly on one painted layer (or on
+    none of them). Stricter than `ground_is_mixed`: the tip of a triangle reaching 5 % into the box already counts."""
+    from verstka.rendering.layers import _ground_layers
+
+    try:
+        for lay, share, _got in _ground_layers(ctx.slide, box) or ():
+            if lay is None or share >= 0.9:
+                return True
+            if share > 0.03:
+                return False
+    except Exception:  # noqa: BLE001 - unsure is not calm
+        return False
+    return True
+
+
+def _recolor_for_ground(ctx: _SlideCtx, el: etree._Element, color: Optional[str], size: float, bold: bool, prefs: list[Optional[str]]) -> Optional[str]:
+    """The line's colour where it really stands (a note at the foot on another triangle than the heading's): kept when
+    it reads there (4.5:1, large text 3:1), else a colour of the template that does. Returns the colour set."""
+    b = element_bbox(el)
+    if not b or not color:
+        return color
+    g = _ground_hex(ctx, Bbox(x=b[0], y=b[1], w=b[2], h=b[3]))
+    if not g:
+        return color
+    need = 3.0 if size >= 18 or (bold and size >= 14) else 4.5
+    if contrast_ratio(color, g) >= need:
+        return color
+    better = _readable_on(g, [c for c in prefs if c] + [color], ctx.manifest)
+    if better and better != color and contrast_ratio(better, g) > contrast_ratio(color, g):
+        style_runs(el, None, better, align=None)
+        return better
+    return color
+
+
+def _lines_on_one_ground(ctx: _SlideCtx, oslide: OutlineSlide, title_box: Bbox, s_el: Optional[etree._Element], s_box0, carrier, g_el: Optional[etree._Element], goal: Optional[str], g_size: float, sub_size: float, family: Optional[str], own_sub: Optional[str], foot: int) -> tuple[bool, Optional[etree._Element], bool]:
+    """A cover's lines under the heading each stand on one ground (T15): a subtitle that straddles the edge of what
+    the layout paints (half on a triangle, half off it) goes back to where the sample set its subtitle when that place
+    is calm and clear of the heading; a goal line that straddles an edge follows the subtitle there when it fits under
+    it, else it is said aloud (speaker notes). Returns (subtitle moved, goal element or None, goal went to the notes)."""
+    W, H = ctx.W, ctx.H
+    s_moved = goal_gone = False
+    home: Optional[Bbox] = None
+    s_color = own_sub
+    if s_el is not None and s_box0 and carrier is not None and _straddles(ctx, s_el):
+        hb = Bbox(x=s_box0[0], y=s_box0[1], w=s_box0[2], h=s_box0[3])
+        ins = _body_insets(s_el)
+        text = shape_text(s_el).strip()
+        lines = max(1, len(display_lines(text, family, sub_size, False, max((hb.w - ins[0] - ins[2]) / EMU_PER_PT * 0.92, 10.0))))
+        hh = int((lines * 1.2 + 0.25) * sub_size * EMU_PER_PT) + ins[1] + ins[3]
+        # the lines in the middle of the sample's box (the calm place the template designed for them), else at its
+        # top or its foot
+        cand = None
+        for top in (hb.y + (hb.h - hh) // 2, hb.y, hb.y2 - hh):
+            c = Bbox(x=hb.x, y=max(top, 0), w=hb.w, h=hh)
+            if c.y2 <= foot and c.intersection(title_box) <= 0 and _calm_at(ctx, c):
+                cand = c
+                break
+        if cand is not None:
+            set_element_pos(s_el, x=cand.x, y=cand.y, w=cand.w, h=cand.h)
+            own_align = carrier.style.align if carrier.style.align in ("l", "ctr", "r") else None
+            if own_align:
+                for p in s_el.findall(q("p:txBody") + "/" + q("a:p")):
+                    pPr = p.find(q("a:pPr"))
+                    if pPr is not None:
+                        pPr.set("algn", own_align)
+            color = carrier.style.color_hex or own_sub
+            if color:
+                style_runs(s_el, None, color, align=None)
+            s_color = _recolor_for_ground(ctx, s_el, color, sub_size, False, [carrier.style.color_hex, own_sub])
+            ctx.warnings.append("подзаголовок обложки поставлен на место подзаголовка образца: под заголовком он пересекал край рисунка шаблона")
+            s_moved, home = True, cand
+    if g_el is not None and (s_moved or _straddles(ctx, g_el)):
+        placed = False
+        if s_moved and home is not None:
+            gb = element_bbox(g_el)
+            ins = _body_insets(g_el)
+            lines = max(1, len(display_lines(goal or shape_text(g_el), family, g_size, False, max((home.w - ins[0] - ins[2]) / EMU_PER_PT * 0.92, 10.0))))
+            gh = int((lines * 1.2 + 0.25) * g_size * EMU_PER_PT) + ins[1] + ins[3]
+            cand = Bbox(x=home.x, y=home.y2 + int(max(0.5 * g_size, 0.012 * H / EMU_PER_PT) * EMU_PER_PT), w=home.w, h=gh)
+            if gb and cand.y2 <= foot and cand.intersection(title_box) <= 0 and _calm_at(ctx, cand):
+                set_element_pos(g_el, x=cand.x, y=cand.y, w=cand.w, h=cand.h)
+                for p in g_el.findall(q("p:txBody") + "/" + q("a:p")):
+                    pPr = p.find(q("a:pPr"))
+                    if pPr is not None and s_el is not None:
+                        sp = s_el.find(q("p:txBody") + "/" + q("a:p") + "/" + q("a:pPr"))
+                        if sp is not None and sp.get("algn"):
+                            pPr.set("algn", sp.get("algn"))
+                if s_color:
+                    style_runs(g_el, None, s_color, align=None)
+                _recolor_for_ground(ctx, g_el, s_color, g_size, False, [carrier.style.color_hex if carrier is not None else None, own_sub])
+                placed = True
+        if not placed:
+            # a goal that neither stands calm under the heading nor follows the subtitle to the sample's place (a goal
+            # left alone under the heading without its subtitle reads as a second subtitle)
+            _note_to_speaker_notes(oslide, goal or shape_text(g_el))
+            sid = ctx.id_of(g_el)
+            remove_element(g_el)
+            if sid:
+                ctx.filled.discard(sid)
+            ctx.warnings.append("цель с обложки перенесена в заметки докладчика: на слайде она пересекала край рисунка шаблона")
+            g_el, goal_gone = None, True
+    return s_moved, g_el, goal_gone
+
+
+def _note_to_speaker_notes(oslide: OutlineSlide, text: str) -> None:
+    """A line the slide has no room for is said aloud: it joins the slide's speaker notes (written into the notes page
+    after the render), once — a re-render of the same slide does not repeat it."""
+    text = " ".join((text or "").split())
+    if not text:
+        return
+    notes = (oslide.notes or "").strip()
+    if text in notes:
+        return
+    try:
+        oslide.notes = (notes + "\n" + text).strip()
+    except Exception:  # noqa: BLE001 - a frozen outline keeps the line off the slide rather than failing the render
+        pass
+
+
+def _note_under_goal(ctx: _SlideCtx, oslide: OutlineSlide, g_el: etree._Element, goal: str, g_size: float, family: Optional[str], align: str, t_el: etree._Element, s_el: Optional[etree._Element], hidden: list[Bbox], obstacles: list[Bbox], note: tuple[int, int, int, float], floor: int) -> tuple[Optional[int], Optional[etree._Element]]:
+    """Room for a cover's small print under its goal line when there is none at the foot (G1-01): (1) a goal that
+    wrapped needlessly («…со 120 000 до 255 000 / рублей») is set on one line in the width free at its own height (up to
+    the art or what stands to its right), and the note goes under it; (2) else the goal is said aloud (speaker notes)
+    and the note takes its place under the subtitle — the brief asks for the small print on the slide, the goal is also
+    on the notes page. Returns (the note's top or None, the goal element or None when it left)."""
+    W, H = ctx.W, ctx.H
+    safe = ctx.manifest.tokens.spacing.safe_area
+    n_x, n_w, n_h, n_size = note
+    gb = element_bbox(g_el)
+    if not gb:
+        return None, g_el
+    gap = max(int(0.04 * H), int(1.2 * n_size * EMU_PER_PT))
+
+    def fits_at(top: int) -> bool:
+        nb = Bbox(x=n_x, y=top, w=n_w, h=n_h)
+        return nb.y2 <= floor and not any(o.intersection(nb) > 0 for o in obstacles)
+
+    g_ins = _body_insets(g_el)
+    one_h = int((1.2 + 0.25) * g_size * EMU_PER_PT) + g_ins[1] + g_ins[3]
+    if align == "l" and gb[3] > one_h * 1.3:
+        room = int(safe.x2 * W)
+        for ob in obstacles:
+            if ob.y < gb[1] + one_h and ob.y2 > gb[1] and ob.x > gb[0] + int(0.1 * W):
+                room = min(room, ob.x - int(0.02 * W))
+        art = _art_edge(ctx, (gb[1], gb[1] + one_h), gb[0] + int(0.05 * W), hidden)
+        if art is not None:
+            room = min(room, art - int(0.02 * W))
+        room_pt = (room - gb[0] - g_ins[0] - g_ins[2]) / EMU_PER_PT
+        top = gb[1] + one_h + gap
+        if room_pt > 0 and len(display_lines(goal, family, g_size, False, room_pt * 0.92)) == 1 and fits_at(top):
+            need = int(text_width_pt(goal, family, g_size, False) * 1.1 * EMU_PER_PT) + g_ins[0] + g_ins[2]
+            set_element_pos(g_el, w=min(room - gb[0], max(gb[2], need)), h=one_h)
+            ctx.warnings.append("цель обложки набрана в одну строку: под ней встала сноска")
+            return top, g_el
+    # what stays above the note: the heading and the subtitle standing over the goal
+    prev = 0
+    for el in (t_el, s_el):
+        b = element_bbox(el) if el is not None else None
+        if b and b[1] < gb[1]:
+            prev = max(prev, b[1] + b[3])
+    top = prev + gap if prev else gb[1]
+    if not fits_at(top):
+        return None, g_el
+    _note_to_speaker_notes(oslide, goal)
+    gid = ctx.id_of(g_el)
+    remove_element(g_el)
+    if gid:
+        ctx.filled.discard(gid)
+    ctx.warnings.append("цель с обложки перенесена в заметки докладчика: её место заняла сноска, которой нет места ниже")
+    return top, None
+
+
+def _small_print_color(ctx: _SlideCtx, box: Bbox, color: Optional[str]) -> Optional[str]:
+    """The colour of a cover's small print where it stands (G1-18): its line colour when that reads at the small size
+    (4.5:1); on a light ground where it does not (orange on white), the template's dark text colour — text.primary, else
+    the darkest colour of the palette that reads (black counts: it is the template's own). None: keep the colour."""
+    g = _ground_hex(ctx, box)
+    if not g or not color or contrast_ratio(color, g) >= 4.5 or relative_luminance(g) < 0.5:
+        return None
+    toks = ctx.manifest.tokens
+    primary = toks.color_for("text.primary")
+    cands = [primary, toks.color_for("text.secondary")] + [c.hex for c in toks.colors] + ["000000"]
+    good = [c for c in cands if c and contrast_ratio(c, g) >= 4.5]
+    if not good:
+        return None
+    return primary if primary in good else min(good, key=relative_luminance)
+
+
+def _snap_up(size: float, sizes: list[float]) -> float:
+    """The smallest size of the template's scale at or above `size` (a floor derived from the slide height lands on
+    the scale, not between its steps); `size` itself when the scale has nothing that large."""
+    up = [s for s in sizes if s >= size - 0.25]
+    return min(up) if up else size
+
+
 def _snap_display(size: float, sizes: list[float]) -> float:
     """A display size of the template's own scale when one is close below (38.4 pt → 36 pt), else an even point
     size (45.6 pt → 44 pt): no heading is set at 45.6 pt."""
@@ -2535,6 +2828,16 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
         elif ob.y >= mid:
             bot_lim = min(bot_lim, ob.y - int(0.03 * H))
             below.append(ob)
+    # the panel the heading stands on (a teal band over a navy ground): the whole stack keeps to it — a subtitle set
+    # past its edge lands on another ground in a colour chosen for this one
+    panel = _ground_panel(ctx, tb)
+    if panel is not None:
+        pad = int(0.03 * H)
+        if panel.y2 < int(safe.y2 * H):
+            bot_lim = min(bot_lim, panel.y2 - pad)
+            below.append(Bbox(x=0, y=panel.y2 - pad + int(0.03 * H), w=W, h=max(H - panel.y2, 1)))
+        if panel.y > int(safe.y * H):
+            top_lim = max(top_lim, panel.y + pad)
 
     def floor_under(x_right: int) -> int:
         """How low text reaching `x_right` may come: over what stands below it (art to the right of the text's
@@ -2564,6 +2867,15 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
     if s_box0:
         hidden.append(Bbox(x=s_box0[0], y=s_box0[1], w=s_box0[2], h=s_box0[3]))
     art = _art_edge(ctx, band, tb.x + int(0.12 * W), hidden, designed_to=tb.x2)
+    if art is not None and kind == PatternKind.title and art - int(0.02 * W) - tb.x < 0.6 * tb.w:
+        # the art over the whole band the heading might grow into cuts the sample's own heading box (a triangle
+        # narrowing towards its tip, LO Focus): the heading stands at the wide top — the edge over the two lines the
+        # sample's box holds at the target size, where the heading really stands (G1-17)
+        ins2 = _body_insets(t_el)
+        two = (max(band[0], tb.y), min(band[1], tb.y + max(tb.h, int(2 * 1.2 * ls * size_est * EMU_PER_PT) + ins2[1] + ins2[3])))
+        art2 = _art_edge(ctx, two, tb.x + int(0.12 * W), hidden, designed_to=tb.x2) if two[1] > two[0] else art
+        if art2 is None or art2 > art:
+            art = art2
     if art is not None:
         limit = min(limit, art - int(0.02 * W))  # a gutter from the art, not a hairline
     art_low = None
@@ -2580,7 +2892,18 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
             below.append(Bbox(x=tb.x, y=art_low + int(0.03 * H), w=tb.w, h=max(int(safe.y2 * H) - art_low, 1)))
     w_sample = max(min(tb.w, limit - tb.x), int(0.2 * W))
     w_max = max(w_sample, min(limit - tb.x, max(tb.w, int(0.6 * W) - tb.x)))
-    above = _art_above(ctx, tb.x, tb.x + w_max, tb.y + min(tb.h // 2, int(0.08 * H)), hidden)
+    col_x0 = tb.x
+    if kind == PatternKind.title and align == "ctr":
+        # a centred cover's column grows on both sides of the sample's centre, as far as the nearer side allows (a
+        # subtitle of 50 characters on one line under «История VK», not two lines running onto the cube — G1-17/G1-20)
+        c_mid = tb.x + tb.w // 2
+        half = min(c_mid - int(safe.x * W), limit - c_mid)
+        w_ctr = min(2 * half, max(tb.w, int(0.72 * W)))
+        if w_ctr > w_max:
+            w_max = w_ctr
+            col_x0 = c_mid - w_max // 2
+    top_lim_col = top_lim  # the room above without the art a line as wide as `w_max` would meet
+    above = _art_above(ctx, col_x0, col_x0 + w_max, tb.y + min(tb.h // 2, int(0.08 * H)), hidden)
     if above is not None:
         top_lim = max(top_lim, above + int(max(0.05 * H, 0.6 * target * EMU_PER_PT)))
     t_ins = _body_insets(t_el)
@@ -2652,7 +2975,10 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
                     st.caps = False
                     break
         caps = st.caps
-    measured = text.upper() if caps else text
+    # a heading the template already sets in capitals (cap="all" in its own run, list or title style) renders wider
+    # than its lower-case letters: it is measured the way it shows, or «ЧАШКИ» wraps onto the subtitle
+    shown_caps = caps or _inherits_caps(ctx, t_el)
+    measured = text.upper() if shown_caps else text
 
     size, lines, w_used = fit(measured, target)
     if kind == PatternKind.title:
@@ -2746,7 +3072,7 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
         if goal:
             # the goal: a short line a step under the subtitle, in its colour, never under the caption size
             ref = sub_size or min(s_size or _bookend_subtitle_size(ctx), _snap_down(size * 0.6, ctx.grow_scale))
-            g_size = legible(max(_snap_down(0.8 * ref, ctx.grow_scale), typo.size_for("caption", 10.0), 0.022 * H / EMU_PER_PT), sub_color)
+            g_size = legible(_snap_up(max(_snap_down(0.8 * ref, ctx.grow_scale), typo.size_for("caption", 10.0), 0.022 * H / EMU_PER_PT), snap_sizes), sub_color)
             g_lines = max(1, len(display_lines(goal, family, g_size, False, inner(w_max) * 0.92)))
             h_goal = int((g_lines * 1.2 + 0.25) * g_size * EMU_PER_PT) + s_ins[1] + s_ins[3]
             gap_goal = int(max(0.5 * g_size, 0.012 * H / EMU_PER_PT) * EMU_PER_PT) if sub_text else int(0.45 * size * EMU_PER_PT)
@@ -2793,6 +3119,15 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
     fill_text(t_el, [ParagraphSpec(text, bullet=False)], size_pt=size)
     _write_lines(t_el, _split_like(text, split))
     _set_paragraph_box(t_el, marl, align, caps=caps, bold=bold, line_spacing=ls)
+    t_color = title.style.color_hex
+    if t_color and ground and contrast_ratio(t_color, ground) < 2.5 and not _mixed_ground(ctx, Bbox(x=x, y=y, w=w_used, h=h_title)):
+        # the sample's heading colour is unreadable on the ground it stands on here (white on a light teal band): a
+        # colour of the template that reads on it — the heading's own colour is kept from 2.5:1 up, as the template's
+        # design
+        better = _readable_on(ground, [sub_color, own_sub], ctx.manifest)
+        if better and contrast_ratio(better, ground) >= 3.0:
+            style_runs(t_el, None, better, align=None)
+            ctx.warnings.append(f"цвет заголовка #{t_color} на #{ground} ({contrast_ratio(t_color, ground):.1f}:1) заменён на #{better}")
     _no_autofit(t_el, "t")
     set_element_pos(t_el, x=x, y=y, w=w_used, h=h_title)
     ctx.filled.add(title.shape_id)
@@ -2816,6 +3151,7 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
         sid = ctx.id_of(s_el)
         if sid:
             ctx.filled.add(sid)
+    g_el = k_el = None
     if goal:
         # the cover's goal under the subtitle (on the subtitle's edge and in its colour), drawn like it
         g_src = s_el if s_el is not None else t_el
@@ -2835,6 +3171,27 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
         gid = ctx.id_of(g_el)
         if gid:
             ctx.filled.add(gid)
+    moved_sub: Optional[Bbox] = None
+    if kind == PatternKind.title and ((s_el is not None and sub_text) or g_el is not None):
+        s_moved, g_el, goal_gone = _lines_on_one_ground(ctx, oslide, Bbox(x=x, y=y, w=w_used, h=h_title), s_el if sub_text else None, s_box0, carrier, g_el, goal, g_size, sub_size, family, own_sub, int(safe.y2 * H))
+        mb = element_bbox(s_el) if s_moved and s_el is not None else None
+        if mb:
+            moved_sub = Bbox(x=mb[0], y=mb[1], w=mb[2], h=mb[3])  # the date and the small print keep off it
+        if s_moved or goal_gone:
+            # the heading's column now ends where what stayed in it ends
+            block_bottom = y + h_title
+            for el in (None if s_moved else (s_el if sub_text else None), g_el):
+                b = element_bbox(el) if el is not None else None
+                if b and b[0] < x + w_used and b[0] + b[2] > x:
+                    block_bottom = max(block_bottom, b[1] + b[3])
+
+    from verstka.rendering.fonts import is_pinned
+
+    def roomy(tight: int, room: int) -> int:
+        """A left-aligned line box of a face the deck was not tuned with takes the room it may use, not the width
+        measured with 10 % slack: the renderer may set the face heavier than it was measured (Futura regular shown as
+        its medium cut) and must not wrap a one-line note onto a second line past the slide's foot."""
+        return max(tight, room) if align == "l" and not is_pinned(family) else tight
 
     def line_box(txt: str, sz: float, name: str, color: Optional[str], weight: bool, box: tuple[int, int, int], anchor_to: str = "t") -> etree._Element:
         sz = legible(sz, color, weight)
@@ -2848,6 +3205,10 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
         ins = _body_insets(el)
         bx, by, bw = box
         set_element_pos(el, x=bx - ins[0], y=by, w=bw + ins[0] + ins[2], h=int((1.2 * len(rows) + 0.25) * sz * EMU_PER_PT) + ins[1] + ins[3])
+        if kind == PatternKind.title:
+            # a line at the foot may stand on another ground than the heading (a note on the green triangle under a
+            # heading on the red one): its colour is checked where it stands
+            _recolor_for_ground(ctx, el, color, sz, weight, [own_sub, title.style.color_hex])
         sid = ctx.id_of(el)
         if sid:
             ctx.filled.add(sid)
@@ -2856,7 +3217,7 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
     # the kicker over the heading
     if kicker_above and kicker_text:
         k_w = int(text_width_pt(kicker_text, family, k_size, bold and kind == PatternKind.section) * 1.1 * EMU_PER_PT) + int(0.02 * W)
-        line_box(kicker_text, k_size, "Номер раздела" if kind == PatternKind.section else "Надзаголовок", k_color, bold and kind == PatternKind.section, (text_x, y - gap_k - h_k, min(k_w, w_max)))
+        k_el = line_box(kicker_text, k_size, "Номер раздела" if kind == PatternKind.section else "Надзаголовок", k_color, bold and kind == PatternKind.section, (text_x, y - gap_k - h_k, roomy(min(k_w, w_max), w_max - (text_x - x))))
     # a frame of the sample holds the kicker at its inner bottom edge, on the heading's letter line
     if frame_el is not None and frame_text:
         fb = element_bbox(frame_el)
@@ -2882,10 +3243,13 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
     note_top: Optional[int] = None
     if note:
         ref = sub_size or s_size or _bookend_subtitle_size(ctx)
-        n_size = max(_snap_down(0.62 * ref, ctx.grow_scale), typo.size_for("caption", 10.0), 0.018 * H / EMU_PER_PT)
-        # «мелким текстом»: on a ground where small text lacks contrast (white on a brand blue) the small print is set
-        # at 14 pt bold — large text by WCAG — never at the subtitle's or the date's 18 pt
-        n_bold = low_contrast(sub_color) and n_size < 14.0
+        n_size = _snap_up(max(_snap_down(0.62 * ref, ctx.grow_scale), typo.size_for("caption", 10.0), 0.018 * H / EMU_PER_PT), snap_sizes)
+        # «мелким текстом»: on a dark or brand ground where the subtitle's colour lacks contrast for small text (white
+        # on VK blue) the small print is set at 14 pt bold — large text by WCAG — never at the subtitle's or the date's
+        # 18 pt; on a light ground it keeps the small size and takes the template's dark text colour where it stands
+        # (an orange heading on white: its notes are dark — G1-18, `_small_print_color` below)
+        n_color = sub_color
+        n_bold = low_contrast(sub_color) and n_size < 14.0 and not relative_luminance(ground) >= 0.5
         if n_bold:
             n_size = 14.0
         # the column under a heading that stands over art is no place for small print: it goes to the slide's foot
@@ -2903,35 +3267,132 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
         n_w = int(max(text_width_pt(t, family, n_size, n_bold) for t in n_lines) * 1.1 * EMU_PER_PT)
         l_ins = s_ins if s_el is not None and kind != PatternKind.section else t_ins  # the insets line_box gives its box
         n_h = int((1.2 * len(n_lines) + 0.25) * n_size * EMU_PER_PT) + l_ins[1] + l_ins[3]
+        if align == "ctr":
+            # a centred stack keeps its small print centred under it, not at the left edge of its column; over art
+            # (a band of waves at the foot) when the foot above the art has the room, else at the left margin
+            cx = max(int(safe.x * W), x + w_used // 2 - min(n_w, n_width) // 2)
+            if art_low is None or floor_under(cx + n_w + int(0.02 * W)) - n_h - block_bottom >= max(int(0.05 * H), int(1.2 * n_size * EMU_PER_PT)):
+                n_x = cx
         ny = floor_under(n_x + n_w + int(0.02 * W)) - n_h
-        if ny - block_bottom < max(int(0.05 * H), int(1.2 * n_size * EMU_PER_PT)) and art_low is None:
+        # at the foot beside art the note still never runs into the heading block (the goal line) it shares columns with
+        crosses_block = art_low is not None and n_x < x + w_used and n_x + n_w > x and ny < block_bottom + int(0.01 * H)
+        if (ny - block_bottom < max(int(0.05 * H), int(1.2 * n_size * EMU_PER_PT)) and art_low is None) or crosses_block:
             ny = block_bottom + max(int(0.04 * H), int(1.2 * n_size * EMU_PER_PT))  # no foot room: under the subtitle
-            block_bottom = ny + n_h
+            # the small print under the block must not fall off the foot of the slide nor onto what stands under the
+            # column (a logo): the whole stack rises for it as far as the room above the heading allows
+            floor_n = int(safe.y2 * H)
+            ob_floor = H - int(0.01 * H)  # what the note may never cross: the slide's foot, what stands under it
+            for ob in obstacles:
+                if ob.x < n_x + min(n_w, n_width) and ob.x2 > n_x and ob.y >= block_bottom:
+                    floor_n = min(floor_n, ob.y - int(0.015 * H))
+                    ob_floor = min(ob_floor, ob.y)
+            lift = ny + n_h - floor_n
+            k_room_now = h_k + gap_k if k_el is not None else 0
+            room_up = y - (top_lim + k_room_now)
+            if lift > max(room_up, 0):
+                # the art above was looked for over the widest line the heading might have taken: over what the
+                # stack's lines really span there may be more room (a moon to the right of a two-line heading)
+                parts = [(t_el, max(text_width_pt(t, family, size, bold) for t in split), int(max(0.05 * H, 0.6 * size * EMU_PER_PT)))]
+                if sub_text and s_el is not None:
+                    parts.append((s_el, text_width_pt(bind_short_words(sub_text), family, sub_size, False), int(0.03 * H)))
+                if g_el is not None:
+                    parts.append((g_el, text_width_pt(goal or "", family, g_size, False), int(0.03 * H)))
+                if k_el is not None:
+                    parts.append((k_el, text_width_pt(kicker_text or "", family, k_size, False), int(0.03 * H)))
+                room2 = None
+                for el_p, w_pt, pad_p in parts:
+                    b = element_bbox(el_p)
+                    if not b:
+                        continue
+                    x2 = min(b[0] + b[2], text_x + int(w_pt * EMU_PER_PT) + int(0.02 * W))
+                    a = _art_above(ctx, tb.x, x2, b[1], hidden)
+                    lim = max(top_lim_col, a + pad_p) if a is not None else top_lim_col
+                    room2 = b[1] - lim if room2 is None else min(room2, b[1] - lim)
+                if room2 is not None:
+                    room_up = max(room_up, room2 - k_room_now)
+            if lift > 0 and room_up > 0:
+                lift = min(lift, room_up)
+                for el in (t_el, s_el if sub_text else None, g_el, k_el):
+                    if el is not None:
+                        b = element_bbox(el)
+                        if b:
+                            set_element_pos(el, y=b[1] - lift)
+                ny -= lift
+            if ny + n_h > ob_floor:
+                # something of the template stands under the block (a short rule under the subtitle): the small print
+                # goes under it when the slide has room there; else (a heading block at the foot under the template's
+                # art) it is said aloud — the speaker notes, never off the slide or onto what stands below
+                n_foot = min(int(safe.y2 * H) + int(0.01 * H), H - int(0.01 * H))
+                spot = None
+                for ob in sorted((o for o in obstacles if o.x < n_x + min(n_w, n_width) and o.x2 > n_x and o.y >= block_bottom), key=lambda o: o.y):
+                    cand_n = Bbox(x=n_x, y=ob.y2 + int(0.015 * H), w=min(n_w, n_width), h=n_h)
+                    if cand_n.y2 <= n_foot and not any(o.intersection(cand_n) > 0 for o in obstacles):
+                        spot = cand_n.y
+                        break
+                if spot is None and g_el is not None and goal:
+                    # the brief's small print («Все данные условные» on the first slide) is not given up for a goal
+                    # line: first the goal takes one line where it wrapped needlessly («…255 000 / рублей»), then the
+                    # goal is said aloud and the small print takes its place under the subtitle
+                    spot, g_el = _note_under_goal(ctx, oslide, g_el, goal, g_size, family, align, t_el, s_el if sub_text else None, hidden, obstacles, (n_x, min(n_w, n_width), n_h, n_size), ob_floor)
+                if spot is None:
+                    _note_to_speaker_notes(oslide, note)
+                    ctx.warnings.append("сноска обложки перенесена в заметки докладчика: на слайде для неё нет места")
+                    note = ""
+                else:
+                    ny = spot
+                    block_bottom = ny + n_h
+            else:
+                block_bottom = ny + n_h
         else:
             note_top = ny  # at the foot: the date stands over it
-        line_box("\n".join(n_lines), n_size, "Сноска", sub_color, n_bold, (n_x, ny, min(n_w, n_width)))
+    if note and moved_sub is not None and moved_sub.intersection(Bbox(x=n_x, y=ny, w=min(n_w, n_width), h=n_h)) > 0:
+        # the subtitle went back to the sample's own place at the foot (LO Vivid's band): the small print goes under
+        # it when the slide has room there. Else it stays (the brief wants it on the slide): the audit sees the
+        # overlap and the cover is rematched, never quietly emptied into the speaker notes
+        under = moved_sub.y2 + int(0.015 * H)
+        nb = Bbox(x=n_x, y=under, w=min(n_w, n_width), h=n_h)
+        if nb.y2 <= min(int(safe.y2 * H) + int(0.01 * H), H - int(0.01 * H)) and not any(ob.intersection(nb) > 0 for ob in obstacles):
+            ny = under
+    if note:
+        # small print never stands on the template's drawing (a tree at the foot of the column): it steps right of it
+        for _ in range(4):
+            nb = Bbox(x=n_x, y=ny, w=min(n_w, n_width), h=n_h)
+            hit = next((ob for ob in obstacles if ob.intersection(nb) > 0.02 * nb.area), None)
+            if hit is None:
+                break
+            nx2 = hit.x2 + int(0.02 * W)
+            if nx2 + min(n_w, n_width) > int(safe.x2 * W):
+                break
+            n_x = nx2
+        if not n_bold:
+            n_color = _small_print_color(ctx, Bbox(x=n_x, y=ny, w=min(n_w, n_width), h=n_h), sub_color) or n_color
+        line_box("\n".join(n_lines), n_size, "Сноска", n_color, n_bold, (n_x, ny, roomy(min(n_w, n_width), min(n_width, n_room - n_x))))
     # the footer: the date (and whatever had no room above the heading) at the foot of the heading's column
     if footer_text:
         f_size = legible(max(_snap_down(0.85 * (s_size or _bookend_subtitle_size(ctx)), ctx.grow_scale), typo.size_for("caption", 10.0)), sub_color)
         f_h = int((1.2 + 0.25) * f_size * EMU_PER_PT)
         f_w = int(text_width_pt(footer_text, family, f_size, False) * 1.1 * EMU_PER_PT)
-        fy = floor_under(text_x + f_w + int(0.02 * W)) - f_h
+        # a centred stack keeps its date centred under it, never at the edge of a slide-wide heading box
+        f_x = max(int(safe.x * W), x + w_used // 2 - f_w // 2) if align == "ctr" else text_x
+        fy = floor_under(f_x + f_w + int(0.02 * W)) - f_h
         if note_top is not None:
             f_ins = s_ins if s_el is not None and kind != PatternKind.section else t_ins
             fy = min(fy, note_top - int(0.6 * f_size * EMU_PER_PT) - f_h - f_ins[1] - f_ins[3])  # the date stands over the small print
         f_room = int(safe.x2 * W)
         for ob in obstacles:
-            if ob.y < fy + f_h and ob.y2 > fy and ob.x > text_x:
+            if ob.y < fy + f_h and ob.y2 > fy and ob.x > f_x:
                 f_room = min(f_room, ob.x - int(0.02 * W))
-        f_art = _art_edge(ctx, (fy, fy + f_h), text_x + int(0.05 * W), hidden)
+        f_art = _art_edge(ctx, (fy, fy + f_h), f_x + int(0.05 * W), hidden)
         if f_art is not None:
             f_room = min(f_room, f_art - int(0.02 * W))
         clear = fy - block_bottom >= max(int(0.06 * H), int(1.5 * (sub_size or f_size) * EMU_PER_PT))
         if note_top is not None and not clear:
             # the small print took the foot: the date keeps a plain line's distance from the subtitle
             clear = fy - block_bottom >= max(int(0.035 * H), int(0.9 * (sub_size or f_size) * EMU_PER_PT))
-        if clear and text_x + f_w <= f_room:
-            line_box(footer_text, f_size, "Дата", sub_color, False, (text_x, fy, f_w))
+        if moved_sub is not None and moved_sub.intersection(Bbox(x=f_x, y=fy, w=f_w, h=f_h)) > 0:
+            clear = False  # never on the subtitle that went back to the sample's place
+        if clear and f_x + f_w <= f_room:
+            line_box(footer_text, f_size, "Дата", sub_color, False, (f_x, fy, roomy(f_w, min(f_room - f_x, w_max))))
         elif s_el is not None and sub_text and kind == PatternKind.title and footer_text != _deck_date(ctx.outline.language):
             # an audience line that found no place of its own stays with the subtitle rather than being lost
             longer = bind_short_words(sub_text + " · " + footer_text.rsplit(" · ", 1)[0])

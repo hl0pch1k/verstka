@@ -11,7 +11,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from verstka.analysis.manifest import analyze_template
 from verstka.audit.autofix import autofix_loop
@@ -41,7 +41,7 @@ MODEL_PLANNED = ("model", "agent")
 _AGENT_PLAN_END = 0.4
 # a slow first analysis of a template leaves the models at least this much of the budget (then the rules)
 _MIN_MODEL_BUDGET_S = 30.0
-_AGENT_SHARE = {"analyst": 0.17, "architect": 0.19, "designer": 0.2, "critic": 0.33, "revise": 0.36, "compile": 0.38}
+_AGENT_SHARE = {"writer": 0.16, "analyst": 0.17, "architect": 0.19, "designer": 0.2, "critic": 0.33, "revise": 0.36, "compile": 0.38}
 
 
 @dataclass
@@ -68,6 +68,9 @@ class GenerateResult:
     manifest: TemplateManifest
     variants: list[VariantResult] = field(default_factory=list)
     seconds: float = 0.0
+    # writer mode (planning/writer.py): what the agent wrote from a topic and how (None: the brief was not a topic,
+    # models off, or the writer switched off)
+    writer: Optional[Any] = None
 
 
 def _sha(text: str) -> str:
@@ -80,6 +83,9 @@ class _Recorder:
     schema, seconds, HTTP requests sent — attempts, retries and repairs included —, prompt and completion tokens, also
     of a call that failed), for the run manifest."""
 
+    # a caller may name the call's skill (`skill=`) when it parses the answer itself (schema None: the writer's calls)
+    labels_calls = True
+
     def __init__(self, inner, sink: list, stats: Optional[list] = None) -> None:
         self.inner = inner
         self.sink = sink
@@ -91,7 +97,8 @@ class _Recorder:
         from verstka.providers.openai_compat import requests_sent
 
         schema = kwargs.get("schema")
-        rec = {"skill": getattr(schema, "__name__", None) or "text", "ok": False}
+        label = kwargs.pop("skill", None)
+        rec = {"skill": label or getattr(schema, "__name__", None) or "text", "ok": False}
         t, sent = time.monotonic(), requests_sent()
         try:
             res = self.inner.complete(messages, **kwargs)
@@ -238,8 +245,13 @@ def generate_variants(
     exports: Optional[list[str]] = None,
     progress: Optional[ProgressFn] = None,
     agent: Optional[bool] = None,
+    writer: Optional[bool] = None,
 ) -> GenerateResult:
-    """`agent`: plan with the planning agent (planning/agent.py: analyst → designer per slide → critic → compiler);
+    """`writer`: writer mode (planning/writer.py) — a brief that is only a topic («История VK», «презентация про
+    вторую мировую войну») gets its text written by the agent before planning (the model's text, checked against the
+    topic's Wikipedia article when it is on), and the deck is built from that text as from a user's brief; None = as
+    configs/writer.yaml says (on), False = never. A brief with material of its own is never touched (faithful mode).
+    `agent`: plan with the planning agent (planning/agent.py: analyst → designer per slide → critic → compiler);
     None = for every brief: with models the designer writes each slide, without them (or past the budget) the
     deterministic designer builds the slides the brief describes («Слайд 1…N») with their charts, tables, formulas and
     takeaways. The agent's variants that it could not plan (a brief without slide specs and no storyline — no model
@@ -262,6 +274,7 @@ def generate_variants(
     ta = time.time()
     manifest = analyze_template(template, workspace_root=workspace_root, providers=providers, skills=skills, use_llm=use_llm, use_vlm=use_vlm, force=force_analyze, progress=lambda s, f: report(f"analyze: {s}", 0.15 * f))
     analyze_s = round(time.time() - ta, 2)
+    budget_end: Optional[float] = None
     if providers is not None:
         # brief → decks gets a fixed model budget: past it every model step takes its deterministic path, so a slow
         # or congested backend costs quality, never the 5 minutes a deck may take. It counts from the start of the
@@ -282,17 +295,34 @@ def generate_variants(
     agent_raw: list = []
     agent_models: list = []
     agent_stats: list = []  # what the agent's model calls cost (the analyst's included): the run manifest
+    writer_res = None
+    rec = None
+    if use_agent:
+        rec, agent_models = _recording(providers if models_on else None, agent_stats)
+    if use_agent and models_on and writer is not False:
+        # writer mode: a topic without material of its own gets its text written first (no plain report() here: the
+        # build screen maps «plan: …» to the analyst; the writer's own events put it on «Автор»)
+        writer_res = _write_text(brief, skills, rec, budget_end, progress, agent_raw, workspace_root, force=writer is True)
+        if writer_res is not None:
+            fact_warnings.extend(writer_res.warnings)
+            if writer_res.written:
+                brief = writer_res.brief
+                try:
+                    writer_res.write_files(out_dir)
+                except OSError as e:
+                    fact_warnings.append(f"writer: the text was not saved ({str(e)[:120]})")
+    written = writer_res is not None and writer_res.written
     if use_agent:
         from verstka.planning.agent import run_agent
 
         report("plan: agent", 0.15)
-        rec, agent_models = _recording(providers if models_on else None, agent_stats)
         try:
             # the analyst reads the brief's data per block (data_extractor), so the registry needs no model call of
             # its own here: run_agent takes the rules' figures with the analyst's series, tables and facts
             agent_result = run_agent(
                 brief, manifest, [all_strategies[nm] for nm in strategies], facts=None,
                 skills=skills if models_on else None, providers=rec if models_on else None, progress=_event_sink(progress), raw=agent_raw,
+                written=written,
             )
         except Exception as e:  # noqa: BLE001 - the planner takes over
             log.warning("planning agent failed, the planner takes over", exc_info=True)
@@ -380,6 +410,8 @@ def generate_variants(
         else:
             v_outline, w, timings["plan"] = planned[name]
             warnings.extend(w)
+            if written:
+                v_outline = _mark_written(v_outline, writer_res)
         plan = match_outline(v_outline, manifest, strategy)
         report(f"{name}: planned {len(v_outline.slides)} slides, rendering", base + span * 0.2)
         tr = time.time()
@@ -442,6 +474,10 @@ def generate_variants(
             vr.planner["agent"] = agent_info[name]  # the planning agent's own plan (not another variant's, shared)
         if outline is not None:
             vr.planner["supplied"] = True  # the plan came with the request: no model was asked to plan it
+        if written:
+            # the deck was built from the writer's text (a topic the writer did not write — private, refused, failed — is
+            # built as before; its record is writer.json of the generation and the generation's `writer`)
+            vr.planner["writer"] = writer_res.summary()
         slides_info = [{"index": s.index, "outline_id": s.outline_id, "mode": s.mode, "pattern_id": s.pattern_id, "composition": s.composition, "warnings": s.warnings} for s in v["render"].slides]
         rm = build_run_manifest(
             template_id=manifest.template_id,
@@ -460,5 +496,50 @@ def generate_variants(
         write_run_manifest(vdir / "run_manifest.json", rm)
         result.variants.append(vr)
         report(f"{name}: done in {vr.seconds}s", 0.86 + 0.14 * len(result.variants) / n)
+    result.writer = writer_res
+    if writer_res is not None and not writer_res.written:
+        try:
+            writer_res.write_files(out_dir)  # why no text was written (private, refused, the model failed): the audit trail
+        except OSError:
+            log.debug("writer.json not written", exc_info=True)
     result.seconds = round(time.time() - t0, 2)
     return result
+
+
+def _write_text(brief: Brief, skills, providers, budget_end: Optional[float], progress: Optional[ProgressFn], raw: list, workspace_root, *, force: bool = False):
+    """Writer mode's phase (planning/writer.py) when the brief is a topic: None when writer mode does not apply (a
+    brief with material, the writer switched off). Never raises: a failure is a result the pipeline builds around (the
+    skeleton or the user's own text, as before)."""
+    from verstka.ingest.workspace import default_workspace_root
+    from verstka.planning.writer import load_config, write_deck, writer_mode
+
+    try:
+        cfg = load_config()
+        if not (cfg.get("enabled", True) or force):
+            return None
+        mode = writer_mode(brief)
+        if mode.kind == "off":
+            return None
+        root = Path(workspace_root) if workspace_root else default_workspace_root()
+        return write_deck(
+            brief, mode, skills, providers, budget_end=budget_end, progress=_event_sink(progress), raw=raw,
+            cache_dir=root / "cache" / "reference", config=cfg,
+        )
+    except Exception:  # noqa: BLE001 - the writer never stops the deck: the brief is built as it is
+        log.warning("writer mode failed, the brief is built as it is", exc_info=True)
+        return None
+
+
+def _mark_written(o: DeckOutline, res) -> DeckOutline:
+    """A deck built from the writer's text: the agent's log starts with the writer's lines («Автор: …») and the first
+    slide's notes name the source («Текст написан агентом Verstka по статье «…» из Википедии…»)."""
+    from verstka.planning.writer import attribution
+
+    o = o.model_copy(deep=True)
+    if res.log_lines and not any(str(x).startswith("Автор:") for x in o.agent_log[:1]):
+        o.agent_log = list(res.log_lines) + list(o.agent_log)
+    line = attribution(res)
+    if o.slides and line not in (o.slides[0].notes or ""):
+        notes = (o.slides[0].notes or "").strip()
+        o.slides[0].notes = f"{notes}\n\n{line}" if notes else line
+    return o

@@ -165,6 +165,7 @@ def build_pattern(
     for s in shapes:
         if s.is_placeholder and s.ph_type == "pic" and not s.image_part and 0.04 <= s.bbox.area / slide_area < 0.6:
             decor_boxes.append(s.bbox.to_frac(slide_w, slide_h))
+    title_shape = next((s for s in shapes if roles.get(s.id) == SlotRole.title), None)
     return Pattern(
         id=pattern_id,
         source_slide=slide_index,
@@ -180,27 +181,114 @@ def build_pattern(
         chrome_shape_ids=chrome,
         reference=reference,
         decor_boxes=decor_boxes,
+        title_ph=title_shape.ph_type if title_shape is not None and title_shape.ph_type in ("title", "ctrTitle") else None,
     )
+
+
+_CLOCK_RE = re.compile(r"^\s*\d{1,2}:\d{2}\s*$")
+
+
+def mockup_on_layout(boxes: list, layout_shapes: Optional[list[ShapeInfo]], slide_w: int, slide_h: int) -> bool:
+    """Some mock-up box is drawn by the layout: a shape of the layout's own, about the box's size (not the layout's
+    full-bleed ground), covers most of it."""
+    for b in boxes:
+        box = Bbox(x=int(b.x * slide_w), y=int(b.y * slide_h), w=int(b.w * slide_w), h=int(b.h * slide_h))
+        for s in layout_shapes or []:
+            if s.is_placeholder or s.bbox.area > 2.5 * max(box.area, 1) or s.bbox.area >= 0.85 * slide_w * slide_h:
+                continue
+            if s.bbox.intersection(box) >= 0.8 * max(box.area, 1):
+                return True
+    return False
+
+
+def mockup_boxes(shapes: list[ShapeInfo], slide_w: int, slide_h: int, layout_shapes: Optional[list[ShapeInfo]] = None) -> list:
+    """Device mock-ups and empty picture frames of a sample (slide and layout art together): a portrait frame — a
+    picture, a group holding a picture, or a filled shape — at least 45 % of the slide high and narrower than 0.6 of
+    its height, that holds a screen (a picture of the group, an empty placeholder, a status-bar clock «9:41»); and
+    every empty picture placeholder of ≥ 10 % of the slide (a photo half, not a logo slot). Without the content's own
+    picture they stay empty."""
+    slide_area = float(slide_w * slide_h)
+    pool = list(shapes) + [s for s in (layout_shapes or []) if not s.is_placeholder]
+    out: list[Bbox] = []
+    frames: list[tuple[Bbox, bool]] = []  # (box, holds a picture of its own)
+    groups: dict[str, list[ShapeInfo]] = {}
+    for s in pool:
+        if s.group_path:
+            groups.setdefault(s.group_path[0], []).append(s)
+    for members in groups.values():
+        if any(m.has_text and not _CLOCK_RE.match(m.plain_text) for m in members):
+            continue
+        box = members[0].bbox
+        for m in members[1:]:
+            box = box.union(m.bbox)
+        frames.append((box, any(m.kind == ShapeKind.pic for m in members)))
+    for s in pool:
+        if s.group_path or s.has_text:
+            continue
+        if s.kind == ShapeKind.pic or (s.kind == ShapeKind.sp and s.fill_hex and not s.is_placeholder):
+            frames.append((s.bbox, False))
+
+    def inside(o: ShapeInfo, box: Bbox) -> bool:
+        cx, cy = o.bbox.x + o.bbox.w / 2, o.bbox.y + o.bbox.h / 2
+        return box.x <= cx <= box.x2 and box.y <= cy <= box.y2 and o.bbox.area < box.area
+
+    for box, own_pic in frames:
+        if box.h < 0.45 * slide_h or box.w >= 0.6 * box.h or not 0.02 <= box.area / slide_area < 0.6:
+            continue
+        screen = own_pic or any(
+            inside(o, box) and ((o.is_placeholder and not o.has_text and not o.image_part and o.ph_type in ("pic", "body", "obj", None)) or (o.has_text and _CLOCK_RE.match(o.plain_text)))
+            for o in pool
+        )
+        if screen and not any(b.intersection(box) >= 0.8 * min(b.area, box.area) for b in out):
+            out.append(box)
+    # the device's body: a separate picture of the phone (with its halo) standing behind the screen — it holds the
+    # screen box, is at most 3× larger, not a slide-wide ground and not a landscape strip (MyBrand's black phone left
+    # behind when only the screen group was taken off the cover)
+    for k, box in enumerate(out):
+        for s in pool:
+            if s.kind != ShapeKind.pic or s.group_path or s.has_text or s.bbox.area <= 0:
+                continue
+            b = s.bbox
+            if b.intersection(box) >= 0.9 * box.area and b.area <= 3.0 * box.area and b.area < 0.6 * slide_area and b.w <= 1.2 * b.h:
+                box = box.union(b)
+        out[k] = box
+    for s in shapes:
+        if s.is_placeholder and s.ph_type == "pic" and not s.image_part and 0.10 <= s.bbox.area / slide_area < 0.6:
+            if not any(b.intersection(s.bbox) >= 0.8 * min(b.area, s.bbox.area) for b in out):
+                out.append(s.bbox)
+    return [b.to_frac(slide_w, slide_h) for b in out]
+
+
+_BOOKEND_KINDS = (PatternKind.title, PatternKind.section, PatternKind.thanks, PatternKind.quote)
 
 
 def _slot_signature(p: Pattern) -> tuple:
     return tuple(sorted(s.role.value for s in p.slots))
 
 
-def dedupe_patterns(patterns: list[Pattern], bbox_tol: float = 0.02) -> list[Pattern]:
-    """Drop near-identical patterns (same kind, family, role multiset, same slot geometry); keep the best quality."""
+def dedupe_patterns(patterns: list[Pattern], bbox_tol: float = 0.02, free_tol: float = 0.10) -> list[Pattern]:
+    """Drop near-identical patterns (same kind, family, role multiset, same slot geometry); keep the best quality.
+
+    Two such samples on different layouts may differ in what the layout paints around the slots (a clean layout vs
+    one with trees over the content band): when their free share differs by more than `free_tol`, the freer one is
+    kept whatever the quality order."""
     kept: list[Pattern] = []
     for p in sorted(patterns, key=lambda p: (-p.quality, p.source_slide)):
-        dup = False
-        for k in kept:
+        dup = None
+        for n, k in enumerate(kept):
             if k.kind != p.kind or k.family != p.family or _slot_signature(k) != _slot_signature(p) or len(k.slots) != len(p.slots):
                 continue
             ks = sorted(k.slots, key=lambda s: (s.role.value, s.bbox.y, s.bbox.x))
             ps = sorted(p.slots, key=lambda s: (s.role.value, s.bbox.y, s.bbox.x))
             if all(a.bbox.close_to(b.bbox, bbox_tol) for a, b in zip(ks, ps)):
-                dup = True
+                dup = n
                 break
-        if not dup:
+        if dup is None:
             kept.append(p)
+            continue
+        k = kept[dup]
+        # content samples only: on a cover or a divider the layout's art is the design, not clutter
+        if k.kind not in _BOOKEND_KINDS and k.layout_part != p.layout_part and k.free_share is not None and p.free_share is not None and p.free_share > k.free_share + free_tol:
+            kept[dup] = p
     kept.sort(key=lambda p: p.source_slide)
     return kept

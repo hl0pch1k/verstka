@@ -137,8 +137,9 @@ _PRIORITY = ["auth", "no_credits", "quota", "missing", "congested", "rate", "tim
 # warnings that come from a model step (the rest are layout notes: «заголовок набран 36 пт»)
 _MODEL_STEP = re.compile(r"^(outline_planner|data_extractor|fact_checker|repair pass|own model plan failed|no LLM provider|slide_designer|deck_architect|design_critic|revision of slide|analyst: data_extractor)|provider|model", re.I)
 # the planner's own step: its failure (or a rejected answer) is why a deck was planned by the rules
-# (the planning agent's: no slide designed by a model, the storyline failed or was skipped)
-_PLANNER_STEP = re.compile(r"^(outline_planner (failed|answer rejected)|no LLM provider|agent: no slide was designed by a model|deck_architect (failed|skipped)|agent failed)", re.I)
+# (the planning agent's: no slide designed by a model, the storyline failed or was skipped; writer mode: the text of a
+# topic was not written — the deck is the topic's skeleton)
+_PLANNER_STEP = re.compile(r"^(outline_planner (failed|answer rejected)|no LLM provider|agent: no slide was designed by a model|deck_architect (failed|skipped)|deck_writer (failed|skipped)|agent failed)", re.I)
 # these steps run only on a plan the model wrote (a failed repair pass keeps it): an older deck with one of them and
 # without a planner failure was planned by the model
 _MODEL_PLANNED = re.compile(r"^(fact_checker|repair pass)", re.I)

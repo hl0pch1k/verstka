@@ -12,7 +12,7 @@ TOO_MANY_BULLETS = CheckSpec(id="too_many_bullets", title="Больше 6 пун
 BULLET_TOO_LONG = CheckSpec(id="bullet_too_long", title="Пункт списка длиннее 15 слов", severity="warn", category="density", description="Пункт списка (абзац с маркером) содержит больше 15 слов.")
 TABLE_TOO_BIG = CheckSpec(id="table_too_big", title="Таблица больше 7 строк или 5 колонок", severity="warn", category="density", description="Нативная таблица превышает 7 строк (с шапкой) или 5 колонок.")
 TOO_MANY_SERIES = CheckSpec(id="too_many_series", title="Больше 5 серий на диаграмме", severity="warn", category="density", description="Нативная диаграмма содержит больше пяти рядов данных.")
-FILL_RATIO = CheckSpec(id="fill_ratio", title="Слайд заполнен меньше чем на четверть или больше чем на 80%", severity="warn", category="density", description="Площадь объединения контентных блоков относительно безопасной области шаблона меньше 25% (меньше 20% при одном-двух блоках — сведение) или больше 80% — по тому, что действительно занято: у текста высота его строк, у диаграмм, таблиц и картинок весь блок (просторные карточки шаблона плотными не считаются).")
+FILL_RATIO = CheckSpec(id="fill_ratio", title="Слайд заполнен меньше чем на четверть или больше чем на 80%", severity="warn", category="density", description="Площадь объединения контентных блоков относительно безопасной области шаблона меньше 25% (меньше 20% при одном-двух блоках — сведение) или больше 80% — по тому, что действительно занято: у текста высота его строк, у диаграмм, таблиц и картинок весь блок (просторные карточки шаблона плотными не считаются). Картинка во весь слайд (фон шаблона) контентом не считается.")
 
 
 @check(TOO_MANY_BULLETS)
@@ -99,7 +99,7 @@ def _ink(e) -> Bbox:
             font = next((r.font for r in p.runs if r.font), None)
             bold = any(r.bold for r in p.runs)
             indent = size * 1.1 if p.bullet else 0.0
-            lines = wrap_lines(p.text, font, size, bold, max(usable - indent, 1.0))
+            lines = wrap_lines(p.text.upper() if getattr(e, "caps", False) else p.text, font, size, bold, max(usable - indent, 1.0))
             widest = max(widest, indent + max((text_width_pt(t, font, size, bold) for t in lines), default=0.0))
         w = min(e.bbox.w, int(widest * EMU_PER_PT) + e.insets_emu[0] + e.insets_emu[2])
         align = next((p.align for p in e.paragraphs if p.text.strip() and p.align), None) or "l"
@@ -108,6 +108,12 @@ def _ink(e) -> Bbox:
         elif align in ("ctr", "c"):
             x = e.bbox.x + (e.bbox.w - w) // 2
     return Bbox(x=x, y=y, w=max(w, 1), h=h)
+
+
+def _bleeds(e) -> bool:
+    """The element covers ≥ 85 % of the slide."""
+    f = e.bbox_frac
+    return max(0.0, min(f.x2, 1.0) - max(f.x, 0.0)) * max(0.0, min(f.y2, 1.0) - max(f.y, 0.0)) >= 0.85
 
 
 @check(FILL_RATIO)
@@ -131,7 +137,8 @@ def fill_ratio(ctx: AuditContext) -> list[Issue]:
         return len(cells) / (gx * gy)
 
     for s in ctx.ir.slides:
-        els = content_elements(s, ctx.ir, ctx.manifest)
+        # a full-bleed picture is the slide's ground (a gradient or photo background), not a block of content
+        els = [e for e in content_elements(s, ctx.ir, ctx.manifest) if not (e.type == "picture" and _bleeds(e))]
         if not els:
             continue
         ratio = covered([e.bbox for e in els])

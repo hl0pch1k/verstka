@@ -93,8 +93,13 @@ def _rpr_size(rPr: Optional[etree._Element]) -> Optional[float]:
         return None
 
 
-def fill_text(sp_el: etree._Element, paragraphs: list[ParagraphSpec], size_pt: Optional[float] = None, keep_bullets: bool = True) -> bool:
-    """Replace the text of a shape. Returns False when the element has no text body."""
+def fill_text(sp_el: etree._Element, paragraphs: list[ParagraphSpec], size_pt: Optional[float] = None, keep_bullets: bool = True, *, reset_indent: bool = False, neutral_runs: bool = False) -> bool:
+    """Replace the text of a shape. Returns False when the element has no text body.
+
+    `reset_indent`: every written paragraph without a marker starts at the box's edge (`marL="0" indent="0"`) — for a
+    heading written into a moved or widened sample shape whose own indent belonged to another design.
+    `neutral_runs`: every written run switches off inherited capitals, letter-spacing and baseline shift
+    (`cap="none" spc="0" baseline="0"`): a master body style with `cap="all" spc="500"` must not respace the text."""
     txBody = _txBody(sp_el)
     if txBody is None:
         return False
@@ -151,8 +156,16 @@ def fill_text(sp_el: etree._Element, paragraphs: list[ParagraphSpec], size_pt: O
                 pPr = etree.Element(q("a:pPr"))
                 p.insert(0, pPr)
             pPr.set("lvl", str(spec.level))
+        if reset_indent and not _has_bullet(p):
+            if pPr is None:
+                pPr = etree.Element(q("a:pPr"))
+                p.insert(0, pPr)
+            pPr.set("marL", "0")
+            pPr.set("indent", "0")
         r = etree.Element(q("a:r"))
         rPr = copy.deepcopy(template_rPr)
+        if neutral_runs:
+            neutralize_rpr(rPr)
         sz = spec.size_pt or size_pt
         if sz:
             rPr.set("sz", str(int(round(sz * 100))))
@@ -177,12 +190,122 @@ def fill_text(sp_el: etree._Element, paragraphs: list[ParagraphSpec], size_pt: O
         if spec.text != spec.text.strip() or "  " in spec.text:
             t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
         end = p.find(q("a:endParaRPr"))
+        if neutral_runs and end is not None:
+            neutralize_rpr(end)
         if end is not None:
             p.insert(list(p).index(end), r)
         else:
             p.append(r)
         txBody.append(p)
     return True
+
+
+def neutralize_rpr(rPr: etree._Element) -> etree._Element:
+    """Explicit `cap="none" spc="0" baseline="0"` on a run's properties: nothing inherited respaces or recases it."""
+    rPr.set("cap", "none")
+    rPr.set("spc", "0")
+    rPr.set("baseline", "0")
+    return rPr
+
+
+def _shape_and_el(shape) -> tuple[object, Optional[etree._Element]]:
+    el = getattr(shape, "_element", None)
+    if el is None and isinstance(shape, etree._Element):
+        return None, shape
+    return shape, el
+
+
+def effective_insets(shape) -> tuple[int, int, int, int]:
+    """(left, top, right, bottom) text insets in EMU as the renderer applies them: the shape's own `a:bodyPr`, then
+    the layout's and the master's placeholder it inherits from (python-pptx shape), else the OOXML defaults
+    (91440, 45720, 91440, 45720). An lxml element alone gives only its own insets over the defaults."""
+    from verstka.rendering.deck import placeholder_chain
+
+    shp, el = _shape_and_el(shape)
+    chain = [el] if el is not None else []
+    if shp is not None:
+        try:
+            chain += placeholder_chain(shp)
+        except Exception:  # noqa: BLE001
+            pass
+    out = []
+    for name, default in (("lIns", 91440), ("tIns", 45720), ("rIns", 91440), ("bIns", 45720)):
+        val = None
+        for holder in chain:
+            bp = holder.find(q("p:txBody") + "/" + q("a:bodyPr"))
+            if bp is not None and bp.get(name) is not None:
+                try:
+                    val = int(bp.get(name))
+                except ValueError:
+                    val = None
+                if val is not None:
+                    break
+        out.append(default if val is None else val)
+    return out[0], out[1], out[2], out[3]
+
+
+def _level_defrpr(holder: Optional[etree._Element], level: int = 1) -> Optional[etree._Element]:
+    """`a:lvlNpPr/a:defRPr` of a list style (a:lstStyle, p:titleStyle, p:bodyStyle, p:otherStyle)."""
+    if holder is None:
+        return None
+    lvl = holder.find(q(f"a:lvl{level}pPr"))
+    return lvl.find(q("a:defRPr")) if lvl is not None else None
+
+
+def inherited_caps_spc(shape) -> tuple[bool, float]:
+    """(capitals, letter-spacing in pt) the first run of a text shape is set with: its own `a:rPr`, the shape's list
+    style, the layout's and the master's placeholder list styles, then the master's text style (title style for a
+    title placeholder, body style for other placeholders, «other» style for plain text boxes). `cap="small"` counts
+    as capitals (the glyphs are capitals)."""
+    from verstka.rendering.deck import _ph_of, placeholder_chain
+
+    shp, el = _shape_and_el(shape)
+    if el is None:
+        return False, 0.0
+    holders: list[Optional[etree._Element]] = []
+    txb = el.find(q("p:txBody"))
+    if txb is not None:
+        p0 = txb.find(q("a:p"))
+        if p0 is not None:
+            r0 = next((r for r in p0.findall(q("a:r")) if r.find(q("a:rPr")) is not None), None)
+            holders.append(r0.find(q("a:rPr")) if r0 is not None else p0.find(q("a:endParaRPr")))
+            ppr = p0.find(q("a:pPr"))
+            holders.append(ppr.find(q("a:defRPr")) if ppr is not None else None)
+        holders.append(_level_defrpr(txb.find(q("a:lstStyle"))))
+    chain = []
+    if shp is not None:
+        try:
+            chain = placeholder_chain(shp)
+        except Exception:  # noqa: BLE001
+            chain = []
+    for base in chain:
+        btx = base.find(q("p:txBody"))
+        holders.append(_level_defrpr(btx.find(q("a:lstStyle"))) if btx is not None else None)
+    ph = _ph_of(el)
+    try:
+        master = shp.part.slide.slide_layout.slide_master if shp is not None and hasattr(shp.part, "slide") else None
+    except Exception:  # noqa: BLE001
+        master = None
+    if master is not None:
+        styles = master._element.find(q("p:txStyles"))
+        if styles is not None:
+            typ = (ph.get("type") or "body") if ph is not None else None
+            name = "p:titleStyle" if typ in ("title", "ctrTitle") else ("p:bodyStyle" if ph is not None else "p:otherStyle")
+            holders.append(_level_defrpr(styles.find(q(name))))
+    cap = spc = None
+    for h in holders:
+        if h is None:
+            continue
+        if cap is None and h.get("cap") is not None:
+            cap = h.get("cap")
+        if spc is None and h.get("spc") is not None:
+            try:
+                spc = int(h.get("spc")) / 100.0
+            except ValueError:
+                spc = None
+        if cap is not None and spc is not None:
+            break
+    return (cap in ("all", "small")), float(spc or 0.0)
 
 
 def clear_text(sp_el: etree._Element) -> bool:

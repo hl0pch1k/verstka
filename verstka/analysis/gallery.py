@@ -34,6 +34,8 @@ def write_gallery(manifest: TemplateManifest, ws: TemplateWorkspace) -> Path:
         for c in t.colors[:14]
     )
     fonts = ", ".join(f"{html.escape(f.family)} ({f.weight:.0%})" for f in t.typography.families[:4])
+    if manifest.font_substitutes:
+        fonts += " · not installed: " + ", ".join(f"{html.escape(k)} → {html.escape(v)}" for k, v in manifest.font_substitutes.items())
     scale = ", ".join(f"{s.role} {s.size_pt:g}" for s in t.typography.scale)
     kinds = Counter(p.kind.value for p in manifest.patterns)
     kinds_html = " ".join(f'<span class="tag">{k}: {v}</span>' for k, v in kinds.most_common())

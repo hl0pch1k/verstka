@@ -191,8 +191,9 @@ _PERIOD_RE = re.compile(
 )
 _PART_END_RE = re.compile(r"[,;.](?!\d)")
 _SENTENCE_SEP_RE = re.compile(r"(?<=[.!?])\s+")
-# a letter and a digit glued together: a name («Qwen3.8-27B», «Q3», «1С», «GPT-4», «3-х»), checked as a whole
-_NAME_TOKEN_RE = re.compile(r"(?<![\w.\-])(?=[\w.\-]*\d)(?=[\w.\-]*[^\W\d_])\w+(?:[.\-]\w+)*")
+# a letter and a digit glued together: a name («Qwen3.8-27B», «Q3», «1С», «GPT-4», «3-х»), checked as a whole — also
+# as a rendered deck writes it: a non-breaking hyphen (U+2011) or a word joiner after the hyphen (U+2060, «1930-\u2060х»)
+_NAME_TOKEN_RE = re.compile(r"(?<![\w.\-\u2011\u2060])(?=[\w.\-\u2011\u2060]*\d)(?=[\w.\-\u2011\u2060]*[^\W\d_])\w+(?:[.\-\u2011]\u2060?\w+)*")
 _GLUED_UNIT_RE = re.compile(rf"^\d+(?:[.,]\d+)?{_GLUED}$", re.I)
 
 

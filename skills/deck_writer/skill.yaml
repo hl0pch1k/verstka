@@ -1,0 +1,23 @@
+name: deck_writer
+version: 1.1.0
+role: llm
+description: >
+  Writes the source text of a whole deck from a topic when the user gave no material of their own (writer mode):
+  the deck's title and subtitle and, per content slide, a short title, 4–5 sentences of facts, an optional timeline
+  of dated events and optional data rows for a chart — neutral, encyclopedic, only well-established facts; with a
+  reference text (the topic's Wikipedia article) only the reference's facts. The text then goes through the agent as
+  the user's brief would. A continuation call writes the slides a cut or short answer did not.
+prompt_files:
+  system: prompts/system.md
+  user: prompts/user.md
+output_schema: verstka.schemas.writer.WriterAnswer
+params:
+  temperature: 0.3
+  max_tokens: 4096          # writer.py sets min(6000, 600 + 280 × slides) per call
+changelog:
+  - "1.0.0: initial version. One call per deck (17–35 s for 5–9 slides on Qwen3-32B); the answer is parsed and
+    salvaged by writer.py, not by the provider (no «much shorter» retry: it halved the text); T=0.3."
+  - "1.1.0: the timeline is the deck's one dated list, over the whole story (the WWII deck repeated the three dates of
+    «Начало» as the first half of «Хронология», «Главное» restated it); a topic about a place («…в России») takes
+    that place's facts first, a world figure only as context (the EV deck was filled with the world's top five
+    makers and 240 млн cars in the world)."

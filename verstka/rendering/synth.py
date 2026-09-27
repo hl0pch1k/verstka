@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import dataclasses
 import math
 from collections import Counter
 from dataclasses import dataclass
@@ -67,7 +68,9 @@ class _Palette:
         self.text = text
         sec = t.color_for("text.secondary")
         self.text2 = sec if sec and contrast_ratio(sec, self.bg) >= 3.0 else self.text
-        self.accent = t.accents()[0] if t.accents() else "0077FF"
+        from verstka.rendering.compose import palette_accents
+
+        self.accent = palette_accents(t)[0]
         surf = t.color_for("surface")
         self.surface = surf if surf and 1.02 < contrast_ratio(surf, self.bg) < 2.5 else None
         card = manifest.components.card
@@ -97,6 +100,10 @@ def _layout_for(builder: DeckBuilder, manifest: TemplateManifest, family: Family
     layout of the package, a title-only-like layout is chosen — never blindly the last one.
     """
     by_partname = {str(l.part.partname).lstrip("/"): l for l in builder.layouts()}
+    preferred = builder.__dict__.get("_prefer_layout", {}).get(family)
+    if preferred is not None and kind not in _COVER_KINDS:
+        # every sample of the family carries art over the content band: the package's cleanest layout
+        return preferred, _layout_family(manifest, str(preferred.part.partname).lstrip("/"), family)
     known = [p for p in manifest.patterns if p.layout_part and p.layout_part in by_partname]
     tiers = [
         [p for p in known if p.family == family and p.kind == kind],
@@ -118,6 +125,20 @@ def _layout_for(builder: DeckBuilder, manifest: TemplateManifest, family: Family
     return (min(layouts, key=rank) if layouts else builder.prs.slide_layouts[0]), family
 
 
+def _add_layout_slide(builder: DeckBuilder, layout) -> Slide:
+    """A new slide on a layout, its placeholders' inherited geometry written out (contract C1:
+    DeckBuilder.add_layout_slide when it exists)."""
+    add = getattr(builder, "add_layout_slide", None)
+    if add is not None:
+        return add(layout)
+    slide = builder.prs.slides.add_slide(layout)
+    builder.created.append(slide)
+    for shp in slide.shapes:
+        if shp.is_placeholder:
+            _materialize(shp)
+    return slide
+
+
 _CANVAS_KINDS = {
     "title": (PatternKind.title, PatternKind.section, PatternKind.thanks),
     "section": (PatternKind.section,),
@@ -131,11 +152,38 @@ def _top_title(p: Pattern) -> Optional[object]:
     return min(titles, key=lambda s: s.bbox.y) if titles else None
 
 
+def _grid_x(manifest: TemplateManifest) -> float:
+    """The deck's heading grid: the left edge most content samples start their heading at (a share of the width).
+    Centred and narrow headings (a title set in a column, a label) do not vote; no vote → the safe area's edge."""
+    votes: Counter = Counter()
+    for p in _content_patterns(manifest):
+        t = _top_title(p)
+        if t is None or (t.style.align or "l") == "ctr" or t.bbox.w < 0.45:
+            continue
+        votes[round(t.bbox.x, 2)] += 1
+    return float(votes.most_common(1)[0][0]) if votes else float(manifest.tokens.spacing.safe_area.x)
+
+
+def _on_grid(manifest: TemplateManifest, title) -> bool:
+    """A content canvas whose heading stands on the deck's grid: at its left edge (± 4 % of the width), not a narrow
+    centred box (a composed slide takes its content column from the heading)."""
+    gx = _grid_x(manifest)
+    return abs(title.bbox.x - gx) <= 0.04 and not ((title.style.align or "l") == "ctr" and title.bbox.w < 0.45)
+
+
 def _canvas_for(manifest: TemplateManifest, family: Family, comp: str) -> Optional[Pattern]:
     """The sample slide a synthesized slide is drawn on: same family, a writable title at the top, as little content
     as possible. Cloning it keeps what a layout alone would lose — backgrounds and chrome that a designer drew on
-    the slides themselves (hand-made decks, picture backgrounds) and the look of the template's headings."""
+    the slides themselves (hand-made decks, picture backgrounds) and the look of the template's headings. A content
+    canvas keeps the deck's heading grid (its heading at the grid's left edge) unless no such canvas exists."""
     kinds = _CANVAS_KINDS.get(comp)
+    if kinds is None:
+        on = _canvas_among(manifest, family, None, grid=True)
+        return on if on is not None else _canvas_among(manifest, family, None, grid=False)
+    return _canvas_among(manifest, family, kinds, grid=False)
+
+
+def _canvas_among(manifest: TemplateManifest, family: Family, kinds, grid: bool) -> Optional[Pattern]:
     best: Optional[tuple] = None
     for p in manifest.patterns:
         if p.family != family or p.quality < 0.5 or p.reference:
@@ -149,6 +197,8 @@ def _canvas_for(manifest: TemplateManifest, family: Family, comp: str) -> Option
             rank = kinds.index(p.kind)
         else:
             if p.kind in _NOT_CONTENT_CANVAS or title.bbox.y > 0.3 or title.bbox.w < 0.2:
+                continue
+            if grid and not _on_grid(manifest, title):
                 continue
             rank = 0
         big_pictures = sum(1 for s in p.slots if s.role == SlotRole.image and s.bbox.area >= 0.05) + sum(1 for b in p.decor_boxes if b.area >= 0.05)
@@ -178,10 +228,14 @@ def _paints(el) -> bool:
 def _slide_on_canvas(builder: DeckBuilder, canvas: Pattern, W: int, H: int, keep_extra: Optional[set[str]] = None):
     """Clone the canvas sample and strip it to background + chrome + the title slot (+ the art to keep).
     Returns (slide, title shape, heading ground)."""
+    from verstka.analysis.shapes import looks_like_placeholder
+
     slide = builder.clone_slide(canvas.source_slide)
     els = slide_shape_elements(slide)
     title = _top_title(canvas)
-    keep = set(canvas.chrome_shape_ids) | ({title.shape_id} if title else set()) | set(keep_extra or ())
+    # chrome that is the template's sample copy («DEMO SLIDE», «Title Text Demo») is not kept on a composed slide
+    chrome = {sid for sid in canvas.chrome_shape_ids if not (sid in els and looks_like_placeholder("".join(t.text or "" for t in els[sid].iter(q("a:t")))))}
+    keep = chrome | ({title.shape_id} if title else set()) | set(keep_extra or ())
     # the label the heading is printed on (a pill) is part of the heading's style: its colour was chosen for it
     tb = element_bbox(els[title.shape_id]) if title and title.shape_id in els else None
     ground: Optional[tuple[Bbox, Optional[str]]] = None  # a half-slide panel the heading stands on
@@ -224,7 +278,10 @@ def _adopt_canvas_colors(pal: "_Palette", canvas: Pattern, manifest: TemplateMan
         pal.text = pal.text2 = color
 
 
-def _title_style(manifest: TemplateManifest, family: Family, pal: _Palette) -> tuple[float, str, bool, Optional[str]]:
+def _title_style(manifest: TemplateManifest, family: Family, pal: _Palette, content_only: bool = True) -> tuple[float, str, bool, Optional[str]]:
+    """(size, colour, bold, font) of the template's headings on this ground. The size of a content heading is the
+    median of the content samples' titles (a cover's display title or a one-off size does not set the deck's
+    headings); covers and dividers (`content_only=False`) keep the most frequent title size of every sample."""
     slots = [s for p in manifest.patterns if p.family == family for s in p.slots if s.role == SlotRole.title and s.style.size_pt]
     size = manifest.tokens.typography.size_for("h1", 28.0)
     color = pal.text
@@ -233,6 +290,10 @@ def _title_style(manifest: TemplateManifest, family: Family, pal: _Palette) -> t
     if slots:
         sizes = Counter(round(s.style.size_pt or size) for s in slots)
         size = float(sizes.most_common(1)[0][0])
+        if content_only:
+            content = sorted(round(s.style.size_pt) for p in manifest.patterns if p.family == family and p.kind not in _NOT_CONTENT_CANVAS for s in p.slots if s.role == SlotRole.title and s.style.size_pt)
+            if content:
+                size = float(content[len(content) // 2])  # the median (of two middle sizes, the larger)
         colors = Counter(s.style.color_hex for s in slots if s.style.color_hex)
         if colors:
             cand = colors.most_common(1)[0][0]
@@ -245,7 +306,24 @@ def _title_style(manifest: TemplateManifest, family: Family, pal: _Palette) -> t
     return size, color, bold, font
 
 
-def _textbox(slide: Slide, box: Bbox, paragraphs: list[ParagraphSpec], *, size: float, color: str, font: Optional[str], bold: bool = False, align: str = "l", anchor: str = "t", scale: Optional[list[float]] = None, line_spacing: float = 1.2, fit: bool = True):
+def _clamp_box(slide: Slide, box: Bbox, warnings: Optional[list[str]] = None, name: str = "text") -> Bbox:
+    """A box cut to the slide (a last guard: a coordinate past the slide is a defect), reported when it happens."""
+    from verstka.rendering.compose import _slide_size
+
+    W, H = _slide_size(slide)
+    if not W or not H:
+        return box
+    x, y = min(max(int(box.x), 0), W), min(max(int(box.y), 0), H)
+    x2, y2 = min(max(int(box.x2), x), W), min(max(int(box.y2), y), H)
+    if (x, y, x2 - x, y2 - y) == (int(box.x), int(box.y), int(box.w), int(box.h)):
+        return box
+    if warnings is not None:
+        warnings.append(f"{name} clamped to the slide (y {box.y / H:.2f}, h {box.h / H:.2f})")
+    return Bbox(x=x, y=y, w=x2 - x, h=y2 - y)
+
+
+def _textbox(slide: Slide, box: Bbox, paragraphs: list[ParagraphSpec], *, size: float, color: str, font: Optional[str], bold: bool = False, align: str = "l", anchor: str = "t", scale: Optional[list[float]] = None, line_spacing: float = 1.2, fit: bool = True, warnings: Optional[list[str]] = None):
+    box = _clamp_box(slide, box, warnings)
     tb = slide.shapes.add_textbox(Emu(box.x), Emu(box.y), Emu(box.w), Emu(box.h))
     tf = tb.text_frame
     tf.word_wrap = True
@@ -271,6 +349,10 @@ def _textbox(slide: Slide, box: Bbox, paragraphs: list[ParagraphSpec], *, size: 
         r.font.name = font
     specs = [ParagraphSpec(p.text, bullet=p.bullet, level=p.level, bold=p.bold if p.bold is not None else None, size_pt=p.size_pt, color_hex=p.color_hex) for p in paragraphs]
     fill_text(tb._element, specs, size_pt=target)
+    from verstka.rendering.tables import neutral_run
+
+    for rPr in tb._element.iter(q("a:rPr")):
+        neutral_run(rPr)  # an engine textbox does not inherit the master's capitals or tracking
     if any(p.bullet for p in paragraphs):
         for pPr in tb._element.iter(q("a:pPr")):
             if pPr.find(q("a:buChar")) is not None:
@@ -445,9 +527,11 @@ def _pick_canvas(builder: DeckBuilder, manifest: TemplateManifest, family: Famil
     m = manifest
     first = canvas = _canvas_for(manifest, family, comp)
     fallback = None
+    seen: list[Pattern] = []
     while canvas is not None:
+        seen.append(canvas)
         floor = min(_chrome_floor(builder, manifest, family), 2)
-        ok = _layout_pictures(builder, canvas) < 0.12 and (not need_pill or _has_pill(builder, canvas)) and _bg_art(builder, canvas.source_slide) is None and _bottom_chrome(builder, canvas) >= floor
+        ok = _layout_pictures(builder, canvas) < 0.12 and (not need_pill or _has_pill(builder, canvas)) and _bg_art(builder, canvas.source_slide) is None and _bottom_chrome(builder, canvas) >= floor and not _canvas_photo(builder, canvas)
         if ok and wide:
             g = _canvas_ground(builder, canvas)
             if g is not None and g.w < 0.7 * builder.slide_w:
@@ -458,7 +542,113 @@ def _pick_canvas(builder: DeckBuilder, manifest: TemplateManifest, family: Famil
         tried.add(canvas.id)
         m = m.model_copy(update={"patterns": [p for p in m.patterns if p.id not in tried]})
         canvas = _canvas_for(m, family, comp)
-    return fallback or first
+    if fallback is not None or not seen:
+        return fallback or first
+    # no candidate passes: the one whose content band is freest of the template's art (not the most cluttered one),
+    # on the heading grid, without a photo behind the content; a wide composition needs 60 % of the width free —
+    # or a clean layout of the package when every sample carries art over the content band
+    best = min(seen, key=lambda p: _canvas_rank(builder, manifest, p, wide))
+    rank = _canvas_rank(builder, manifest, best, wide)
+    lay = _clean_layout(builder, manifest)
+    if lay is not None and (rank[0] or lay[1] >= -rank[2] + 0.2) and lay[1] >= 0.7:
+        builder.__dict__.setdefault("_prefer_layout", {})[family] = lay[0]
+        return None
+    return best
+
+
+def _clean_layout(builder: DeckBuilder, manifest: TemplateManifest):
+    """(layout, free share of its content band): the layout of the package with a title placeholder whose content band
+    is freest of drawn art (its master's art included) — for a template whose every sample carries art over the
+    content. None when no layout is measurable."""
+    cache = builder.__dict__.setdefault("_clean_layout", {})
+    if "best" in cache:
+        return cache["best"]
+    best = None
+    try:
+        from verstka.rendering.layers import drawn_layers, largest_free
+    except ImportError:
+        cache["best"] = None
+        return None
+    W, H = builder.slide_w, builder.slide_h
+    safe = manifest.tokens.spacing.safe_area
+    for layout in builder.layouts():
+        title = next((ph for ph in layout.placeholders if str(ph.placeholder_format.type).split(".")[-1].split(" ")[0] in ("TITLE",)), None)
+        if title is None or title.top is None or title.height is None:
+            continue
+        try:
+            y0 = max(int(safe.y * H), int(title.top) + int(title.height) + int(0.04 * H))
+            band = Bbox(x=int(safe.x * W), y=y0, w=int(safe.w * W), h=max(int(safe.y2 * H) - y0, 1))
+            if band.h < 0.3 * H:
+                continue
+            obstacles = _layout_art(drawn_layers(layout), band, W, H)
+            if obstacles is None:
+                continue
+            pad = int(0.015 * W)
+            free = largest_free(band, [Bbox(x=b.x - pad, y=b.y - pad, w=b.w + 2 * pad, h=b.h + 2 * pad) for b in obstacles])
+            share = free.area / max(band.area, 1)
+        except Exception:  # noqa: BLE001
+            continue
+        if best is None or share > best[1] + 1e-6:
+            best = (layout, share)
+    cache["best"] = best
+    return best
+
+
+def _layout_art(layers, band: Bbox, W: int, H: int) -> Optional[list[Bbox]]:
+    """What a bare layout draws over a content band, strictly: every painted layer of the layout and its master that
+    is not a placeholder, a rule or a speck — only a calm full-bleed background and a plain panel holding the whole band
+    are grounds (a mosaic, a group or a picture holding the title is art, not a ground: a composed slide would be laid
+    over it). None when a photo covers 30 % of the slide."""
+    out: list[Bbox] = []
+    for lay in layers:
+        if lay.placeholder or not lay.paints or lay.kind in ("graphicFrame",):
+            continue
+        if lay.busy and lay.cover >= 0.3:
+            return None
+        if lay.box.h <= 0.02 * H or lay.cover < 0.003:
+            continue
+        if lay.cover >= 0.85 and not lay.busy:
+            continue
+        if lay.kind == "sp" and not lay.picture and not lay.custom_geom and lay.box.intersection(band) >= 0.95 * band.area:
+            continue  # a plain panel under the whole content band: its ground
+        out.append(lay.box)
+    return out
+
+
+def _canvas_rank(builder: DeckBuilder, manifest: TemplateManifest, p: Pattern, wide: bool) -> tuple:
+    cache = builder.__dict__.setdefault("_canvas_rank", {})
+    key = (p.id, wide)
+    if key not in cache:
+        share, busy, free_w = _canvas_free(builder, manifest, p)
+        t = _top_title(p)
+        on_grid = t is not None and _on_grid(manifest, t)
+        clutter = len(p.slots) + sum(len(g.member_shape_ids) for g in p.repeat_groups) + len(p.decor_assets)
+        cache[key] = (busy or _canvas_photo(builder, p), bool(wide and free_w < 0.6), -round(share, 1), not on_grid, clutter, -p.quality, p.source_slide)
+    return cache[key]
+
+
+def _canvas_free(builder: DeckBuilder, manifest: TemplateManifest, p: Pattern) -> tuple[float, bool, float]:
+    """(free share of the content band, a photo ≥ 30 % of the slide behind the content, free width share) of a
+    canvas, measured on its sample with only what a cloned canvas keeps (chrome, title, full-bleed grounds)."""
+    W, H = builder.slide_w, builder.slide_h
+    fs = getattr(p, "free_share", None)
+    try:
+        from verstka.rendering.layers import art_layers, free_rect
+
+        src = builder.source_slide(p.source_slide)
+        els = slide_shape_elements(src)
+        t = _top_title(p)
+        keep = set(p.chrome_shape_ids) | ({t.shape_id} if t else set())
+        skip = [sid for sid in els if sid not in keep]
+        safe = manifest.tokens.spacing.safe_area
+        y0 = max(safe.y, (t.bbox.y2 if t else safe.y) + 0.04)
+        band = Bbox(x=int(safe.x * W), y=int(y0 * H), w=int(safe.w * W), h=max(int((safe.y2 - y0) * H), 1))
+        free = free_rect(src, band, skip=skip)
+        busy = any(l.busy and l.cover >= 0.3 for l in art_layers(src, skip=skip))
+        share = free.area / max(band.area, 1) if fs is None else float(fs)
+        return share, busy, free.w / W
+    except Exception:  # noqa: BLE001
+        return (float(fs) if fs is not None else 0.5), False, 1.0
 
 
 def _scheme(builder: DeckBuilder) -> dict[str, str]:
@@ -646,6 +836,86 @@ class Art:
     keep_ids: set[str]
     box: Bbox
     side: str  # "left" | "right"
+    photo: bool = False  # the art is (or holds) a photograph — the template's sample story, not brand decoration
+
+
+def _is_photo(builder: DeckBuilder, part) -> bool:
+    """A photograph (people, a place, a product shot, a screenshot full of photos) rather than drawn art: an opaque
+    raster with many colours and fine mid-contrast texture. A 3D render or an illustration is cut out (alpha) or
+    smooth; a flat pattern has few colours. Measured on the picture, 128 px thumbnail."""
+    cache = builder.__dict__.setdefault("_is_photo", {})
+    key = str(getattr(part, "partname", id(part)))
+    if key in cache:
+        return cache[key]
+    out = False
+    try:
+        import io
+
+        import numpy as np
+        from PIL import Image
+
+        im = Image.open(io.BytesIO(part.blob)).convert("RGBA")
+        im.thumbnail((128, 128))
+        a = np.asarray(im)
+        op = a[..., 3] > 200
+        if op.mean() >= 0.5 and op.sum() >= 400:
+            rgb = a[..., :3][op].astype(np.int32) >> 3
+            colours = len(np.unique(rgb[:, 0] * 1024 + rgb[:, 1] * 32 + rgb[:, 2]))
+            g = np.asarray(im.convert("L"), dtype=np.float32)
+            d = np.abs(np.diff(g, axis=1))
+            both = op[:, 1:] & op[:, :-1]
+            texture = float(((d > 4) & (d < 40))[both].mean()) if both.any() else 0.0
+            out = colours >= 500 and texture >= 0.2
+    except Exception:  # noqa: BLE001
+        out = False
+    cache[key] = out
+    return out
+
+
+def _pic_parts(holder, el) -> list:
+    """The raster parts an element (a picture, a group) draws."""
+    out = []
+    for bl in el.iter(q("a:blip")):
+        rid = bl.get(q("r:embed"))
+        if not rid:
+            continue
+        try:
+            out.append(holder.part.related_part(rid))
+        except KeyError:
+            continue
+    return out
+
+
+def _canvas_photo(builder: DeckBuilder, canvas: Pattern) -> bool:
+    """A composed slide cloned from this canvas would carry a photograph of the template's own story: its layout or
+    master draws one (≥ 8 % of the slide), or the sample keeps one as chrome or as a full-bleed ground."""
+    cache = builder.__dict__.setdefault("_canvas_photo", {})
+    if canvas.id in cache:
+        return cache[canvas.id]
+    W, H = builder.slide_w, builder.slide_h
+    out = False
+    try:
+        src = builder.source_slide(canvas.source_slide)
+        holders = [(src.slide_layout, el) for el in src.slide_layout._element.cSld.find(q("p:spTree"))]
+        holders += [(src.slide_layout.slide_master, el) for el in src.slide_layout.slide_master._element.cSld.find(q("p:spTree"))]
+        els = slide_shape_elements(src)
+        for sid, el in els.items():
+            b = element_bbox(el)
+            if sid in set(canvas.chrome_shape_ids) or (b is not None and b[2] * b[3] >= 0.9 * W * H):
+                holders.append((src, el))
+        for holder, el in holders:
+            if el.find(".//" + q("p:ph")) is not None and holder is not src:
+                continue  # a layout's empty picture placeholder draws nothing on a slide that does not fill it
+            b = element_bbox(el)
+            if not b or b[2] * b[3] < 0.08 * W * H:
+                continue
+            if any(_is_photo(builder, part) for part in _pic_parts(holder, el)):
+                out = True
+                break
+    except Exception:  # noqa: BLE001
+        out = False
+    cache[canvas.id] = out
+    return out
 
 
 _ART_KINDS_EXCLUDED = (PatternKind.title, PatternKind.section, PatternKind.thanks, PatternKind.mockup, PatternKind.image_text, PatternKind.code, PatternKind.team, PatternKind.quote)
@@ -691,6 +961,20 @@ def _bg_art(builder: DeckBuilder, source_slide: int) -> Optional[tuple[str, floa
     return out
 
 
+def _bg_photo(builder: DeckBuilder, source_slide: int) -> bool:
+    """The background picture of a slide (its own, its layout's or its master's) is a photograph."""
+    try:
+        s = builder.source_slide(source_slide)
+        for h in (s, s.slide_layout, s.slide_layout.slide_master):
+            bg = h._element.cSld.find(q("p:bg"))
+            blip = bg.find(".//" + q("a:blip")) if bg is not None else None
+            if blip is not None:
+                return _is_photo(builder, h.part.related_part(blip.get(q("r:embed"))))
+    except Exception:  # noqa: BLE001
+        return False
+    return False
+
+
 def _art_of(builder: DeckBuilder, p: Pattern, manifest: Optional[TemplateManifest] = None) -> Optional[Art]:
     """Brand art is repeated: a picture the template draws on several slides (or on a layout) is decoration; a picture
     drawn once — a screenshot in a phone, a chart snapshot — belongs to its sample's story."""
@@ -719,6 +1003,7 @@ def _find_art(builder: DeckBuilder, p: Pattern, manifest: Optional[TemplateManif
     tree = src._element.cSld.find(q("p:spTree"))
     keep: set[str] = set()
     union: Optional[Bbox] = None
+    photo = False
     for el in tree:
         tag = etree.QName(el).localname
         if tag not in ("pic", "grpSp"):
@@ -740,9 +1025,11 @@ def _find_art(builder: DeckBuilder, p: Pattern, manifest: Optional[TemplateManif
         nv = el.find(".//" + q("p:cNvPr"))
         if nv is not None:
             keep.add(nv.get("id"))
+        photo = photo or any(_is_photo(builder, part) for part in _pic_parts(src, el))
         bb = Bbox(x=b[0], y=b[1], w=b[2], h=b[3])
         union = bb if union is None else union.union(bb)
     lay: list[Bbox] = []
+    lay_photo = False
     try:
         layout_part = str(src.slide_layout.part.partname).lstrip("/")
         usage = builder.__dict__.get("_layout_usage")
@@ -756,6 +1043,7 @@ def _find_art(builder: DeckBuilder, p: Pattern, manifest: Optional[TemplateManif
             b = element_bbox(el)
             if b and 0.05 * W * H <= b[2] * b[3] < 0.9 * W * H:
                 lay.append(Bbox(x=b[0], y=b[1], w=b[2], h=b[3]))
+                lay_photo = lay_photo or any(_is_photo(builder, part) for part in _pic_parts(src.slide_layout, el))
         if lay and not shared:
             # a layout of its own: only a large, broad picture reads as art (a mood collage); a narrow one is a
             # device mockup waiting for its screenshot
@@ -773,8 +1061,10 @@ def _find_art(builder: DeckBuilder, p: Pattern, manifest: Optional[TemplateManif
         if bga is not None:
             side, edge = bga
             union = Bbox(x=int(edge * W), y=0, w=W - int(edge * W), h=H) if side == "right" else Bbox(x=0, y=0, w=int(edge * W), h=H)
+            photo = photo or _bg_photo(builder, p.source_slide)
     if union is None or union.area < 0.15 * W * H:
         return None
+    photo = photo or lay_photo  # the layout draws its pictures on every slide cloned from the sample
     pieces = [element_bbox(el) for el in tree if (nv := el.find(".//" + q("p:cNvPr"))) is not None and nv.get("id") in keep]
     biggest = max([b[2] * b[3] for b in pieces if b] + [bb.area for bb in lay] + ([union.area] if not keep and not lay else [0]))
     if biggest < 0.15 * W * H:
@@ -787,7 +1077,7 @@ def _find_art(builder: DeckBuilder, p: Pattern, manifest: Optional[TemplateManif
         return None
     if free < 0.38 * W:
         return None
-    return Art(pattern=p, keep_ids=keep, box=union, side=side)
+    return Art(pattern=p, keep_ids=keep, box=union, side=side, photo=photo)
 
 
 def _choose_art(builder: DeckBuilder, manifest: TemplateManifest, ds: "DeckStyle", comp: str, oslide: OutlineSlide, outline: DeckOutline) -> Optional[Art]:
@@ -838,6 +1128,8 @@ def _choose_art(builder: DeckBuilder, manifest: TemplateManifest, ds: "DeckStyle
         a = _art_of(builder, p, manifest)
         if a is None or (ds.pill and not _has_pill(builder, p)) or p.id in builder.__dict__.get("_art_used", []):
             continue  # one appearance per deck: a repeated picture reads as a placeholder
+        if a.photo and not c.image_hint:
+            continue  # a photograph is the template's sample story (a smiling student on a war slide), not decoration
         if not column_fits(a):
             continue
         clutter = len(p.slots) + sum(len(g.member_shape_ids) for g in p.repeat_groups)
@@ -870,8 +1162,7 @@ def _render_content(builder: DeckBuilder, comp: str, oslide: OutlineSlide, manif
         family = canvas.family
     else:
         layout, family = _layout_for(builder, manifest, family, oslide.kind)
-        slide = builder.prs.slides.add_slide(layout)
-        builder.created.append(slide)
+        slide = _add_layout_slide(builder, layout)
         title_ph = None
         for shp in list(slide.shapes):
             if shp.is_placeholder and shp.placeholder_format.type is not None and str(shp.placeholder_format.type).split(".")[-1].split(" ")[0] in ("TITLE", "CENTER_TITLE"):
@@ -904,16 +1195,33 @@ def _render_content(builder: DeckBuilder, comp: str, oslide: OutlineSlide, manif
         title_color = pal.text
     if contrast_ratio(title_color, pal.bg) < 4.5:
         title_color = _heading_on(pal.bg, manifest, pal)
+    saved_title = copy.deepcopy(title_ph._element) if title_ph is not None else None
+    n_warn = len(warnings)
     heading_bottom, content_left, lede_used = _place_heading(builder, slide, title_ph, canvas, oslide, manifest, ws, outline, pal, (sx, sy, sw, sh), h1, title_color, title_bold, title_font, scale, warnings, ds)
+    below = _content_top(slide, heading_bottom, h1, W, H)
+    if saved_title is not None and _content_bottom_limit(slide, sy + sh, W, H) - below < int(0.30 * H) and title_ph is not None and _backing_of(slide, title_ph._element, W, H) is None:
+        # the heading left less than 30 % of the slide for the content: it is set again a step (at most two) smaller
+        for size in [x for x in sorted(scale, reverse=True) if x < ds.head_size - 0.05][:2]:
+            title_ph = _restore_shape(slide, title_ph, saved_title)
+            del warnings[n_warn:]
+            heading_bottom, content_left, lede_used = _place_heading(builder, slide, title_ph, canvas, oslide, manifest, ws, outline, pal, (sx, sy, sw, sh), h1, title_color, title_bold, title_font, scale, warnings, dataclasses.replace(ds, head_size=size))
+            below = _content_top(slide, heading_bottom, h1, W, H)
+            if _content_bottom_limit(slide, sy + sh, W, H) - below >= int(0.30 * H):
+                break
+        warnings.append("heading set smaller to leave room for the content")
     if lede_used:
         oslide = _without_lede(oslide)
     page_left = sx
+    if content_left is not None and not (abs(content_left - int(_grid_x(manifest) * W)) <= 0.03 * W or content_left <= page_left + int(0.02 * W)):
+        content_left = None  # an indented or centred heading does not set the content column: the page grid does
     if content_left is not None and sx <= content_left < sx + sw // 2:
         sw = sx + sw - content_left
         sx = content_left
-    # the right margin mirrors the left one — the page's, where the column starts past the art
+    # the right margin mirrors the left one — the page's, where the column starts past the art; a page whose own left
+    # margin is wider than its right one (art down the left edge: a helix, a sidebar) keeps its own right edge
     mirror = page_left if art is not None and art.side == "left" else sx
-    if ground is None and sx + sw > W - mirror:
+    lopsided = page_left - (W - int(safe.x2 * W)) > int(0.04 * W)
+    if ground is None and sx + sw > W - mirror and not lopsided:
         sw = W - mirror - sx
     if art is not None:
         # the content keeps to the free side of the art, a gutter away from it
@@ -923,13 +1231,17 @@ def _render_content(builder: DeckBuilder, comp: str, oslide: OutlineSlide, manif
         else:
             x1 = max(sx, art.box.x2 + g)
             sw, sx = max(sx + sw - x1, int(0.3 * W)), x1
-    gap = max(int(0.05 * H), int(h1 * 0.8 * EMU_PER_PT))
-    top = _below_rules(slide, heading_bottom, heading_bottom + gap, W, H, gap)
-    bottom = sy + sh
-    foot = _foot_top(slide, W, H)
-    if foot is not None:
-        bottom = min(bottom, foot - int(0.035 * H))  # the content keeps clear of the logos and the footer line
-    area = Bbox(x=sx, y=top, w=sw, h=max(bottom - top, int(0.25 * H)))
+    top = _content_top(slide, heading_bottom, h1, W, H)
+    bottom = _content_bottom_limit(slide, sy + sh, W, H)
+    if bottom - top < int(0.25 * H):
+        # never an area past the slide's foot: what does not fit is restructured by the composer, not pushed off
+        warnings.append("little room under the heading")
+    area = Bbox(x=sx, y=top, w=sw, h=max(min(bottom, H) - top, int(0.1 * H)))
+    if area.y2 > H:
+        area = Bbox(x=area.x, y=max(H - area.h, 0), w=area.w, h=min(area.h, H))
+    if art is None:
+        area = _clear_of_art(slide, area, title_ph, W, H, warnings)
+    _true_ground(slide, area, pal, manifest)
     proto = _card_proto(builder, manifest, family, pal.bg)
     kit = Kit(manifest, W, H, pal.bg, card_proto=proto[0] if proto else None, heading_color=title_color)
     kit.head_size = ds.head_size
@@ -948,6 +1260,90 @@ def _render_content(builder: DeckBuilder, comp: str, oslide: OutlineSlide, manif
         composer.compose(comp, area)
     warnings.extend(composer.warnings)
     return slide, warnings
+
+
+def _clear_of_art(slide: Slide, area: Bbox, title_ph, W: int, H: int, warnings: list[str]) -> Bbox:
+    """The content area clear of the template's art (illustrations, triangles, trees, photos the layout or the master
+    draws — contract C2 layers.free_rect): when art covers 3 % of the area or more, the content takes the largest free
+    rectangle inside it (below that, small marks are left to the foot and logo rules)."""
+    try:
+        from verstka.rendering.layers import art_boxes, art_share, free_rect
+    except ImportError:
+        return area
+    skip = (title_ph._element,) if title_ph is not None else ()
+    try:
+        share = art_share(slide, area, skip=skip)
+        # an illustration standing mostly inside the area (a tree in its corner) is art to keep clear of even when it
+        # covers little of the area; specks and small logos are not (the foot and logo rules take them)
+        intrudes = any(b.w * b.h >= 0.008 * W * H and b.intersection(area) >= 0.4 * b.area for b in art_boxes(slide, skip=skip))
+        if share < 0.03 and not intrudes:
+            return area
+        free = free_rect(slide, area, skip=skip)
+        # a composed block reads across the page: a rectangle as wide as the area, cut below the art at its top (a
+        # cloud, a mark under the heading) or above the art at its foot, beats a taller half-width column
+        pad = int(0.015 * W)
+        score = lambda b: b.area * (b.w / max(area.w, 1))  # noqa: E731
+        for b in art_boxes(slide, skip=skip):
+            if b.x2 <= area.x or b.x >= area.x2 or b.y2 <= area.y or b.y >= area.y2:
+                continue
+            cuts = []
+            if b.y2 + pad < area.y + 0.4 * area.h:
+                cuts.append(Bbox(x=area.x, y=b.y2 + pad, w=area.w, h=area.y2 - b.y2 - pad))
+            if b.y - pad > area.y + 0.6 * area.h:
+                cuts.append(Bbox(x=area.x, y=area.y, w=area.w, h=b.y - pad - area.y))
+            for cut in cuts:
+                alt = free_rect(slide, cut, skip=skip)
+                if alt.h >= 0.6 * area.h and score(alt) > score(free) * 1.1:
+                    free = alt
+    except Exception:  # noqa: BLE001
+        return area
+    if free.w < 0.3 * W or free.h < 0.2 * H:
+        warnings.append(f"template art covers {share:.0%} of the content area: no free rectangle large enough")
+        return area
+    warnings.append(f"content kept clear of the template's art ({share:.0%} of the area)")
+    return free
+
+
+def _true_ground(slide: Slide, area: Bbox, pal: "_Palette", manifest: TemplateManifest) -> None:
+    """The ground the content really stands on (what the slide, its layout and master paint under the area — a
+    picture ground, a panel): when it is not the manifest's ground (ΔE > 10) and the palette's text does not read on
+    it, the palette takes that ground and readable text colours (contract C4, T07)."""
+    try:
+        from verstka.rendering.charts import delta_e, slide_ground
+
+        g = slide_ground(slide, area)
+    except Exception:  # noqa: BLE001
+        return
+    if not g or len(g) != 6 or delta_e(g, pal.bg) <= 10 or contrast_ratio(pal.text, g) >= 4.5:
+        return
+    pal.bg = g
+    pal.text = _readable(g, [pal.text, manifest.tokens.color_for("text.primary")])
+    pal.text2 = pal.text if contrast_ratio(pal.text2, g) < 4.5 else pal.text2
+
+
+def _content_top(slide: Slide, heading_bottom: int, h1: float, W: int, H: int) -> int:
+    """The content line: a gap under the heading, below a rule the layout draws under it."""
+    gap = max(int(0.05 * H), int(h1 * 0.8 * EMU_PER_PT))
+    return _below_rules(slide, heading_bottom, heading_bottom + gap, W, H, gap)
+
+
+def _content_bottom_limit(slide: Slide, safe_bottom: int, W: int, H: int) -> int:
+    """The foot of the content area: the safe area's, clear of the logos and the footer line."""
+    bottom = safe_bottom
+    foot = _foot_top(slide, W, H)
+    if foot is not None:
+        bottom = min(bottom, foot - int(0.035 * H))  # the content keeps clear of the logos and the footer line
+    return bottom
+
+
+def _restore_shape(slide: Slide, shape, saved) -> object:
+    """Put a saved copy of a shape back in place of the shape (to set it again) and return its new proxy."""
+    el = shape._element
+    new = copy.deepcopy(saved)
+    el.addprevious(new)
+    el.getparent().remove(el)
+    sid = new.find(".//" + q("p:cNvPr")).get("id")
+    return next((sh for sh in slide.shapes if str(sh.shape_id) == sid), shape)
 
 
 def _snap_header(builder: DeckBuilder, manifest: TemplateManifest, ds: "DeckStyle", slide: Slide, title_ph, art: "Art") -> None:
@@ -1035,6 +1431,47 @@ class DeckStyle:
     head_size: float  # size of plain headings (the whole deck)
     upper: bool  # labels in capitals, as in the samples
     head_bold: bool = False  # headlines set under a label are bold when the template's labels are
+    head_cap_reason: str = ""  # why the heading size is not the template's own content heading size (for the log)
+
+
+def _is_sparse(manifest: TemplateManifest) -> bool:
+    """A template whose own type scale is too thin for composed content (the analysis derived a ladder of sizes from
+    the slide height for it)."""
+    return bool(getattr(manifest.tokens.typography, "derived_sizes", None))
+
+
+def _scale_of(manifest: TemplateManifest) -> list[float]:
+    typo = manifest.tokens.typography
+    return sorted({s.size_pt for s in typo.scale} | {float(x) for x in (typo.sizes_used or []) if x >= 8})
+
+
+def _capped_head(builder: DeckBuilder, manifest: TemplateManifest, outline: DeckOutline, family: Family, h1c: float, font: Optional[str], bold: bool, scale: list[float]) -> tuple[float, str]:
+    """The deck's heading size on a template whose heading size does not suit composed content — a sparse scale or a
+    display-sized heading (> 7.5 % of the slide height): the largest size of the scale, at most the template's own
+    content heading and 6.2 % of the slide height, at which 80 % of the deck's headlines take at most two lines at
+    the heading width; never below the plain rule's minimum (4.6 % of the slide height)."""
+    from verstka.rendering.fonts import wrap_lines
+
+    W, H = builder.slide_w, builder.slide_h
+    hpt = H / EMU_PER_PT
+    floor = _snap_heading(0.046 * hpt, scale)
+    cap = min(h1c, 0.062 * hpt)
+    safe = manifest.tokens.spacing.safe_area
+    std = _canvas_for(manifest, family, "bullets")
+    t = _top_title(std) if std is not None else None
+    x = t.bbox.x if t is not None else safe.x
+    width = min(0.86 * W, max(safe.x2 - x, 0.5) * W) - 2 * 91440
+    heads = [s.headline for s in outline.slides if s.kind not in _COVER_KINDS and s.headline]
+    cands = sorted({x_ for x_ in scale if floor - 0.05 <= x_ <= cap + 0.05}, reverse=True)
+    if not heads:
+        return (cands[0] if cands else floor), "sparse/display heading: capped"
+    from verstka.ru import typeset
+
+    for size in cands:
+        ok = sum(1 for h in heads if len(wrap_lines(typeset(h), font, size, bold, width / EMU_PER_PT)) <= 2)
+        if ok >= 0.8 * len(heads):
+            return size, f"heading {h1c:g} pt capped to {size:g} pt (two lines for {ok}/{len(heads)} headlines)"
+    return floor, f"heading {h1c:g} pt capped to the floor {floor:g} pt"
 
 
 
@@ -1088,9 +1525,13 @@ def deck_style(builder: DeckBuilder, manifest: TemplateManifest, outline: DeckOu
         fails = sum(1 for h in heads if len(h.split()) > 4 or text_width_pt(h, font, size, bold) * EMU_PER_PT + int(0.06 * W) > room)
         kicker = fails > len(heads) / 3
     # one heading size for every content slide of every deck: the template's own (a long headline takes a third
-    # line rather than a smaller size)
-    head = max(h1, _snap_heading(0.046 * H / EMU_PER_PT, scale))
-    ds = DeckStyle(family=family, pill=pill, kicker=kicker, head_size=head, upper=pill and texted > 0 and uppers >= 0.6 * texted, head_bold=pill and bolds > 0)
+    # line rather than a smaller size) — unless it is a display size or the scale is too thin to trust (then capped)
+    reason = ""
+    if _is_sparse(manifest) or h1 > 0.075 * H / EMU_PER_PT:
+        head, reason = _capped_head(builder, manifest, outline, family, h1, font, bold, scale)
+    else:
+        head = max(h1, _snap_heading(0.046 * H / EMU_PER_PT, scale))
+    ds = DeckStyle(family=family, pill=pill, kicker=kicker, head_size=head, upper=pill and texted > 0 and uppers >= 0.6 * texted, head_bold=pill and bolds > 0, head_cap_reason=reason)
     cache[id(outline)] = ds
     return ds
 
@@ -1111,7 +1552,8 @@ def _place_heading(builder, slide, title_ph, canvas, oslide, manifest, ws, outli
         th = int(res.height_pt * EMU_PER_PT) + 45720
         tb.height = Emu(th)
         return box.y + th, sx + 45720, False
-    if title_ph.top is not None:
+    _materialize(title_ph)  # an inherited placeholder gets its own geometry before any write (heading at x=0)
+    if title_ph.top is not None and title_ph.left is not None and title_ph.width is not None and title_ph.height is not None:
         box = Bbox(x=int(title_ph.left), y=int(title_ph.top), w=int(title_ph.width), h=int(title_ph.height))
     else:
         box = Bbox(x=sx, y=sy, w=sw, h=int(H * 0.16))
@@ -1147,7 +1589,7 @@ def _place_heading(builder, slide, title_ph, canvas, oslide, manifest, ws, outli
             hctx = _SlideCtx(builder, slide, canvas, manifest, ws, outline)
             nb = hctx._widen_on_backing(title_ph._element, (box.x, box.y, box.w, box.h), [label], title_font, h1, title_bold, insets)
             # the label keeps the template's own size on every slide; a long kicker was shortened, never shrunk
-            fill_text(title_ph._element, [ParagraphSpec(label)], size_pt=h1)
+            _fill_keep(title_ph._element, [ParagraphSpec(label)], size_pt=h1)
             _hug_label(back_el, title_ph._element, label, title_font, h1, title_bold, insets, W)
             b2 = element_bbox(back_el)
             below = max(bb.y2, (b2[1] + b2[3]) if b2 else bb.y2)
@@ -1196,60 +1638,188 @@ def _place_heading(builder, slide, title_ph, canvas, oslide, manifest, ws, outli
         box = Bbox(x=nb[0], y=nb[1], w=nb[2], h=nb[3])
         warnings.extend(hctx.warnings)
         res = fit_size([oslide.headline], box, title_font, h1, title_bold, scale, insets_emu=insets, line_spacing=typo.line_height)
-        fill_text(title_ph._element, [ParagraphSpec(oslide.headline)], size_pt=res.size_pt)
+        _fill_keep(title_ph._element, [ParagraphSpec(oslide.headline)], size_pt=res.size_pt)
         b2 = element_bbox(back_el)
         return max(box.y2, (b2[1] + b2[3]) if b2 else box.y2), bb.x, False
-    # the heading takes the free width of its band (up to the logos and the right margin), not the sample's box
-    # (the right margin mirrors the heading's left edge — the page margin's when the heading stands in a column past art)
-    safe_x = int(manifest.tokens.spacing.safe_area.x * W)
-    right = min(int(manifest.tokens.spacing.safe_area.x2 * W), W - (box.x if box.x < 0.25 * W else safe_x))
-    w_clear = min(_free_width(slide, box, W, H, right, skip=(title_ph._element,)), int(0.86 * W))
-    if w_clear != box.w and w_clear > 0.3 * W:
-        box = Bbox(x=box.x, y=box.y, w=w_clear, h=box.h)
-        title_ph.width = Emu(w_clear)
-    # one heading size for the whole deck (never autofitted per slide unless the headline cannot fit at all)
-    h1 = ds.head_size if ds is not None else max(h1, _snap_heading(0.046 * H / EMU_PER_PT, scale))
-    from verstka.rendering.fonts import wrap_lines
+    return _place_plain_heading(builder, slide, title_ph, box, oslide, manifest, pal, h1, title_color, title_bold, title_font, scale, warnings, ds, canvas)
+
+
+def _place_plain_heading(builder, slide, title_ph, box: Bbox, oslide, manifest, pal, h1, title_color, title_bold, title_font, scale, warnings, ds, canvas) -> tuple[int, Optional[int], bool]:
+    """A heading written into the canvas's title shape (no label under it). It takes the free width of its band (up
+    to the logos and the right margin), not the sample's box; a centred heading widens about its centre; a heading
+    printed on a band of the layout stays inside the band or is set under it; a rule under the heading is a limit."""
+    import functools
+
+    from verstka.rendering.fit import fit_size as _fit_size
+    from verstka.rendering.fonts import wrap_lines as _wrap_lines
     from verstka.ru import typeset
 
-    head_text = typeset(oslide.headline)
+    typo = manifest.tokens.typography
+    W, H = builder.slide_w, builder.slide_h
+    safe = manifest.tokens.spacing.safe_area
+    sparse = _is_sparse(manifest)
+    insets = _heading_insets(title_ph)
+    lh = typo.line_height
     inner = lambda w: max((w - insets[0] - insets[2]) / EMU_PER_PT, 1.0)  # noqa: E731
+    # the heading keeps the template's look — capitals and letter-spacing it inherits are measured as set (C5, T14)
+    caps, spc = _inherited_caps_spc(title_ph)
+    look = {"caps": caps, "spc_pt": spc} if (caps or spc) else {}
+    fit_size = functools.partial(_fit_size, **look) if look else _fit_size  # noqa: N806
+    wrap_lines = functools.partial(_wrap_lines, **look) if look else _wrap_lines  # noqa: N806
+    # (the right margin mirrors the heading's left edge — the page margin's when the heading stands in a column past art)
+    safe_x = int(safe.x * W)
+    right = min(int(safe.x2 * W), W - (box.x if box.x < 0.25 * W else safe_x))
+    align_ctr = _title_align(title_ph) == "ctr"
+    centred = align_ctr and box.x > safe_x + int(0.04 * W)
+    w_free = _free_width(slide, box, W, H, right, skip=(title_ph._element,))
+    # marks baked into the background picture (a bookmark ribbon, a stamp) stand in the band too: the analysis found
+    # them as visual chrome — the heading stops before them
+    for c in manifest.tokens.chrome:
+        if c.source != "background":
+            continue
+        b = c.bbox.to_emu(W, H)
+        if b.w * b.h < 0.002 * W * H or b.w * b.h >= 0.6 * W * H:
+            continue
+        if b.y < box.y2 and b.y2 > box.y and b.x >= box.x + int(0.3 * W):
+            w_free = min(w_free, b.x - int(0.015 * W) - box.x)
+    w_full = min(w_free, int(0.86 * W))
+    content_left: Optional[int] = None
+    if centred:
+        # a centred heading grows about its centre, as far as the free room on both sides allows — never only to the
+        # right (a centred line would end off-centre)
+        cx = box.x + box.w // 2
+        lim_r = box.x + _free_width(slide, box, W, H, int(safe.x2 * W), skip=(title_ph._element,))
+        lim_l = _free_left(slide, box, W, H, safe_x, skip=(title_ph._element,))
+        half = min(cx - lim_l, lim_r - cx, int(0.43 * W))
+        if 2 * half > box.w:
+            box = Bbox(x=cx - half, y=box.y, w=2 * half, h=box.h)
+        w_full = box.w
+    elif w_full != box.w and w_full > 0.3 * W:
+        box = Bbox(x=box.x, y=box.y, w=w_full, h=box.h)
+    # one heading size for the whole deck (never autofitted per slide unless the headline cannot fit at all)
+    h1 = ds.head_size if ds is not None else max(h1, _snap_heading(0.046 * H / EMU_PER_PT, scale))
+    head_text = typeset(oslide.headline)
+    # something the canvas keeps stands over the left part of the heading's box (a big page number «09» beside the
+    # title): where the heading's letters would start under it, the heading starts after it (a centred line that
+    # clears it, or an indent the template gives its heading to clear it, stays as it is)
+    past = _left_clear(slide, box, W, H, skip=(title_ph._element,))
+    keep_indent = False
+    if past > box.x:
+        indent = _inherited_indent(title_ph)
+        text_left = box.x + insets[0] + indent
+        if align_ctr:
+            iw = inner(box.w) - indent / EMU_PER_PT
+            widest = max((text_width_pt(ln, title_font, h1, title_bold, **look) for ln in wrap_lines(head_text, title_font, h1, title_bold, iw)), default=0.0)
+            text_left += int(max(0.0, (iw - widest) / 2) * EMU_PER_PT)
+        if text_left >= past - int(0.015 * W):
+            keep_indent = indent > 0  # the template indents its heading to clear the mark: the indent stays
+        elif box.x2 - past >= int(0.5 * W):
+            # the box starts after the mark and keeps the free width up to the page's right margin (a line that
+            # filled the old box still fits on one line)
+            w2 = min(_free_width(slide, Bbox(x=past, y=box.y, w=box.x2 - past, h=box.h), W, H, right, skip=(title_ph._element,)), int(0.86 * W))
+            box = Bbox(x=past, y=box.y, w=max(box.x2 - past, w2), h=box.h)
+            w_full = box.w
+            warnings.append("heading moved past a mark at its left")
+    color: Optional[str] = None  # None: the template's own heading colour (inherited)
+    band = _heading_band(slide, box, W, H)
+    if band is not None:
+        # a heading printed on a band of the layout keeps inside the band: it takes the band's whole free width and
+        # steps down the scale (to 55 %) before it spills out of the band
+        inner_h = band.y2 - box.y - int(0.004 * H)
+        fitted = fit_size([head_text], Bbox(x=box.x, y=box.y, w=box.w, h=max(inner_h, 1)), title_font, h1, title_bold, scale, insets_emu=insets, line_spacing=lh, min_ratio=0.55, ladder_only=sparse) if inner_h > 0 else None
+        if fitted is not None and fitted.fits:
+            text_h = int(fitted.height_pt * EMU_PER_PT) + insets[1] + insets[3]
+            h_box = max(min(box.h, inner_h), text_h)
+            _fill_heading(title_ph, head_text, fitted.size_pt, None, insets, W, keep_indent=keep_indent)
+            _set_box(title_ph, Bbox(x=box.x, y=box.y, w=box.w, h=h_box))
+            _check_heading_color(slide, title_ph, canvas, band, pal, manifest)
+            return max(band.y2, box.y + h_box), _heading_left(title_ph, box, insets), False
+        # the headline does not fit the band at any readable size: it is set under the band, on the slide's ground
+        box = Bbox(x=box.x, y=band.y2 + int(0.02 * H), w=box.w, h=int(0.16 * H))
+        color = _heading_on(pal.bg, manifest, pal)
+        warnings.append("heading set under its band")
     n = len(wrap_lines(head_text, title_font, h1, title_bold, inner(box.w)))
     # the deck's heading size holds: a long headline takes up to three lines (the box grows downwards and the
     # content moves with it); only past three lines does the size give way
     rows = min(max(n, 2), 3)
-    need = int((rows + 0.1) * h1 * typo.line_height * EMU_PER_PT) + insets[1] + insets[3]
+    need = int((rows + 0.1) * h1 * lh * EMU_PER_PT) + insets[1] + insets[3]
     rule = _rule_under(slide, box, W, H)
     if rule is not None:
-        need = min(need, max(rule - box.y - int(0.01 * H), box.h))  # the heading keeps above the layout's rule
+        room = rule - box.y - int(0.01 * H)  # the heading keeps above the layout's rule
+        one = int(1.1 * h1 * lh * EMU_PER_PT) + insets[1] + insets[3]
+        if box.h > room:
+            box = Bbox(x=box.x, y=box.y, w=box.w, h=max(room, min(one, box.h)))  # the sample's box itself crosses the rule
+        need = min(need, max(room, box.h))
     if box.h < need:
         box = Bbox(x=box.x, y=box.y, w=box.w, h=need)
-    if 2 <= n <= 3:
-        # balanced lines: the narrowest box that keeps the same number of lines (no one-word last line)
+    min_ratio = 0.6 if rule is not None else 0.8
+    res = fit_size([head_text], box, title_font, h1, title_bold, scale, insets_emu=insets, line_spacing=lh, min_ratio=min_ratio, ladder_only=sparse)
+    if res.broken_word:
+        # a word wider than the box: the box takes the whole free width first, then the size may give way to 55 %
+        if not centred and w_full > box.w:
+            box = Bbox(x=box.x, y=box.y, w=w_full, h=box.h)
+            res = fit_size([head_text], box, title_font, h1, title_bold, scale, insets_emu=insets, line_spacing=lh, min_ratio=min_ratio, ladder_only=sparse)
+        if res.broken_word:
+            res = fit_size([head_text], box, title_font, h1, title_bold, scale, insets_emu=insets, line_spacing=lh, min_ratio=0.55, ladder_only=sparse)
+        if res.broken_word:
+            warnings.append("heading word broken")
+    limit = int(0.42 * H)
+    if box.y + int(res.height_pt * EMU_PER_PT) + insets[1] + insets[3] > limit and box.y < limit - int(0.06 * H):
+        # the heading would take the upper half of the slide: once more at the full free width, a size or two smaller
+        wide = Bbox(x=box.x, y=box.y, w=max(box.w, w_full), h=limit - box.y)
+        again = fit_size([head_text], wide, title_font, h1, title_bold, scale, insets_emu=insets, line_spacing=lh, min_ratio=0.6, ladder_only=sparse)
+        if again.fits and not again.broken_word:
+            box, res = Bbox(x=wide.x, y=wide.y, w=wide.w, h=max(box.h if box.h <= wide.h else wide.h, int(again.height_pt * EMU_PER_PT) + insets[1] + insets[3])), again
+            warnings.append("heading refitted to keep the upper half free")
+    size = res.size_pt
+    lines = res.lines
+    grid_box = box  # the heading's column (a centred heading's narrowed box does not move the content column)
+    if 2 <= lines <= 3 and not res.broken_word:
+        # balanced lines at the final size: the narrowest box that keeps the same number of lines (no one-word last line)
         lo, hi = int(box.w * 0.55), box.w
         for _ in range(12):
             mid = (lo + hi) // 2
-            if len(wrap_lines(head_text, title_font, h1, title_bold, inner(mid))) <= n:
+            if len(wrap_lines(head_text, title_font, size, title_bold, inner(mid))) <= lines:
                 hi = mid
             else:
                 lo = mid
-        balanced = min(box.w, int(hi * 1.03))
+        balanced = min(box.w, int(hi * _balance_slack(title_font)))
         if balanced < box.w:
-            box = Bbox(x=box.x, y=box.y, w=balanced, h=box.h)
-            title_ph.width = Emu(balanced)
-    res = fit_size([head_text], box, title_font, h1, title_bold, scale, insets_emu=insets, line_spacing=typo.line_height, min_ratio=0.6 if rule is not None else 0.8)
-    fill_text(title_ph._element, [ParagraphSpec(head_text)], size_pt=res.size_pt)
+            if align_ctr:
+                # centred lines keep their centre when the box narrows (a left-anchored narrowing moves them left)
+                box = Bbox(x=box.x + (box.w - balanced) // 2, y=box.y, w=balanced, h=box.h)
+            else:
+                box = Bbox(x=box.x, y=box.y, w=balanced, h=box.h)
+    _fill_heading(title_ph, head_text, size, color, insets, W, keep_indent=keep_indent)
     text_h = int(res.height_pt * EMU_PER_PT) + insets[1] + insets[3]
-    if text_h > box.h or title_ph.top is None:
-        title_ph.left, title_ph.top, title_ph.width, title_ph.height = Emu(box.x), Emu(box.y), Emu(box.w), Emu(max(box.h, text_h))
-        bottom = box.y + max(box.h, text_h)
+    if text_h > box.h:
+        _set_box(title_ph, Bbox(x=box.x, y=box.y, w=box.w, h=text_h))
+        bottom = box.y + text_h
     else:
         # the box shrinks to its text where the text is drawn (top / middle / bottom of the sample's box)
         anchor = _title_anchor(title_ph)
         y = box.y if anchor == "t" else (box.y2 - text_h if anchor == "b" else box.y + (box.h - text_h) // 2)
-        title_ph.top, title_ph.height = Emu(y), Emu(text_h)
-        bp = title_ph._element.find(".//" + q("a:bodyPr"))
+        _set_box(title_ph, Bbox(x=box.x, y=y, w=box.w, h=text_h))
         bottom = y + text_h
+    if color is None:
+        _check_heading_color(slide, title_ph, canvas, None, pal, manifest)
+    content_left = None if centred else _heading_left(title_ph, grid_box if align_ctr else box, insets)
+    return bottom, content_left, False
+
+
+def _inherited_caps_spc(shape) -> tuple[bool, float]:
+    """(capitals, letter-spacing pt) a heading inherits (contract C5 textfill.inherited_caps_spc); none when unknown."""
+    try:
+        from verstka.rendering.textfill import inherited_caps_spc
+
+        caps, spc = inherited_caps_spc(shape)
+        return bool(caps), float(spc or 0.0)
+    except Exception:  # noqa: BLE001
+        return False, 0.0
+
+
+def _heading_left(title_ph, box: Bbox, insets: tuple[int, int, int, int]) -> int:
+    """Where the heading's letters start: the box plus its left inset (its own, else the effective one)."""
     left = box.x + insets[0]
     lins = title_ph._element.find(".//" + q("a:bodyPr"))
     if lins is not None and lins.get("lIns") is not None:
@@ -1257,9 +1827,300 @@ def _place_heading(builder, slide, title_ph, canvas, oslide, manifest, ws, outli
             left = box.x + int(lins.get("lIns"))
         except ValueError:
             pass
-    return bottom, left, False
+    return left
 
 
+def _balance_slack(font: Optional[str]) -> float:
+    """Slack of the balanced heading width: a face measured with its own metrics needs 3 %, a face measured as Play ×
+    a factor needs 8 % (its line may be wider than estimated)."""
+    try:
+        from verstka.rendering.fonts import is_measured
+    except ImportError:
+        return 1.03
+    try:
+        return 1.03 if is_measured(font) else 1.08
+    except Exception:  # noqa: BLE001
+        return 1.03
+
+
+def _set_box(shape, box: Bbox) -> None:
+    """Every geometry write is a four-value write: a lone width or top written on a placeholder that inherits its
+    geometry makes python-pptx write an offset of 0 (the heading jumps to the slide's left edge)."""
+    shape.left, shape.top, shape.width, shape.height = Emu(int(box.x)), Emu(int(box.y)), Emu(max(int(box.w), 0)), Emu(max(int(box.h), 0))
+
+
+def _materialize(shape) -> None:
+    """The shape's inherited geometry written as its own xfrm (contract C1: deck.materialize_xfrm when it exists)."""
+    try:
+        from verstka.rendering.deck import materialize_xfrm
+    except ImportError:
+        materialize_xfrm = None
+    if materialize_xfrm is not None:
+        try:
+            materialize_xfrm(shape)
+            return
+        except Exception:  # noqa: BLE001
+            pass
+    spPr = shape._element.find(q("p:spPr"))
+    if spPr is None or spPr.find(q("a:xfrm")) is not None:
+        return
+    try:
+        x, y, w, h = shape.left, shape.top, shape.width, shape.height
+    except Exception:  # noqa: BLE001
+        return
+    if None in (x, y, w, h):
+        return
+    xf = etree.Element(q("a:xfrm"))
+    off = etree.SubElement(xf, q("a:off"))
+    off.set("x", str(int(x)))
+    off.set("y", str(int(y)))
+    ext = etree.SubElement(xf, q("a:ext"))
+    ext.set("cx", str(int(w)))
+    ext.set("cy", str(int(h)))
+    spPr.insert(0, xf)
+
+
+def _ph_chain(shape) -> list:
+    """The shape's element, then its layout and master placeholders (the inheritance chain of a placeholder)."""
+    out = [shape._element]
+    cur = shape
+    for _ in range(2):
+        try:
+            cur = cur._base_placeholder
+        except Exception:  # noqa: BLE001
+            cur = None
+        if cur is None:
+            break
+        out.append(cur._element)
+    return out
+
+
+def _master_title_lvl1(shape):
+    try:
+        master = shape.part.slide.slide_layout.slide_master
+    except Exception:  # noqa: BLE001
+        try:
+            master = shape.part.slide_layout.slide_master
+        except Exception:  # noqa: BLE001
+            return None
+    ts = master._element.find(q("p:txStyles") + "/" + q("p:titleStyle"))
+    return ts.find(q("a:lvl1pPr")) if ts is not None else None
+
+
+def _heading_insets(shape) -> tuple[int, int, int, int]:
+    """Insets the heading is measured with: the effective ones of the shape (its own bodyPr, then its layout and
+    master placeholders — contract C5 textfill.effective_insets when it exists), never less than PowerPoint's
+    defaults (a wordmark placeholder may inherit a large inset that the default measure does not see)."""
+    default = (91440, 45720, 91440, 45720)
+    eff = None
+    try:
+        from verstka.rendering.textfill import effective_insets
+
+        eff = effective_insets(shape)
+    except Exception:  # noqa: BLE001
+        eff = None
+    if eff is None:
+        vals: dict[str, int] = {}
+        for el in _ph_chain(shape):
+            bp = el.find(".//" + q("a:bodyPr"))
+            if bp is None:
+                continue
+            for k in ("lIns", "tIns", "rIns", "bIns"):
+                if k not in vals and bp.get(k) is not None:
+                    try:
+                        vals[k] = int(bp.get(k))
+                    except ValueError:
+                        pass
+        eff = tuple(vals.get(k, d) for k, d in zip(("lIns", "tIns", "rIns", "bIns"), default))
+    return tuple(max(d, int(e)) for d, e in zip(default, eff))  # type: ignore[return-value]
+
+
+def _title_align(title_shape) -> str:
+    """Effective horizontal alignment of a heading's first paragraph: its own pPr / lstStyle, then the layout and
+    master placeholders, then the master's title style."""
+    for el in _ph_chain(title_shape):
+        tx = el.find(q("p:txBody"))
+        if tx is None:
+            continue
+        p0 = tx.find(q("a:p"))
+        ppr = p0.find(q("a:pPr")) if p0 is not None else None
+        if ppr is not None and ppr.get("algn"):
+            return ppr.get("algn")
+        lvl = tx.find(q("a:lstStyle") + "/" + q("a:lvl1pPr"))
+        if lvl is not None and lvl.get("algn"):
+            return lvl.get("algn")
+    lvl = _master_title_lvl1(title_shape)
+    return (lvl.get("algn") if lvl is not None else None) or "l"
+
+
+def _inherited_indent(title_shape) -> int:
+    """The left indent (marL + indent) a heading's first level inherits, in EMU."""
+    for el in _ph_chain(title_shape):
+        tx = el.find(q("p:txBody"))
+        if tx is None:
+            continue
+        for node in [n for n in [tx.find(q("a:p") + "/" + q("a:pPr")), tx.find(q("a:lstStyle") + "/" + q("a:lvl1pPr"))] if n is not None]:
+            if node.get("marL") is not None:
+                try:
+                    return int(node.get("marL")) + int(node.get("indent") or 0)
+                except ValueError:
+                    return 0
+    lvl = _master_title_lvl1(title_shape)
+    if lvl is not None and lvl.get("marL") is not None:
+        try:
+            return int(lvl.get("marL")) + int(lvl.get("indent") or 0)
+        except ValueError:
+            return 0
+    return 0
+
+
+_LOOK_ATTRS = ("cap", "spc", "baseline")
+
+
+def _fill_keep(el, specs, **kw) -> None:
+    """fill_text that keeps the heading's own run look: capitals / letter-spacing / baseline written on the sample's
+    run (cap="none" spc="0" over a master that tracks its text) stay on the new runs — never dropped to inheritance."""
+    look: dict = {}
+    for tag in ("a:rPr", "a:endParaRPr"):  # the sample run's own attributes first, then its paragraph end's
+        src = next(iter(el.iter(q(tag))), None)
+        for a in _LOOK_ATTRS:
+            if src is not None and src.get(a) is not None and a not in look:
+                look[a] = src.get(a)
+    fill_text(el, specs, **kw)
+    if look:
+        for r in el.iter(q("a:rPr")):
+            for a, v in look.items():
+                if r.get(a) is None:
+                    r.set(a, v)
+
+
+def _fill_heading(title_ph, text: str, size: float, color: Optional[str], insets, W: int, keep_indent: bool = False) -> None:
+    """Write the headline into the title shape at `size` (and `color` when given). A heading that inherits a large
+    indent (a wordmark placeholder: 1.27″) is set flush with its box — the content aligns to its letters."""
+    reset = not keep_indent and _inherited_indent(title_ph) > 0.01 * W
+    spec = ParagraphSpec(text, color_hex=color) if color else ParagraphSpec(text)
+    done = False
+    if reset:
+        try:
+            _fill_keep(title_ph._element, [spec], size_pt=size, reset_indent=True)
+            done = True
+        except TypeError:
+            done = False
+    if not done:
+        _fill_keep(title_ph._element, [spec], size_pt=size)
+        if reset:
+            for p_ in title_ph._element.iter(q("a:p")):
+                ppr = p_.find(q("a:pPr"))
+                if ppr is None:
+                    ppr = etree.Element(q("a:pPr"))
+                    p_.insert(0, ppr)
+                ppr.set("marL", "0")
+                ppr.set("indent", "0")
+
+
+def _heading_band(slide: Slide, box: Bbox, W: int, H: int) -> Optional[Bbox]:
+    """A band the layout (or master, or the slide) paints under the heading (contract C2: layers.heading_band)."""
+    try:
+        from verstka.rendering.layers import heading_band
+    except ImportError:
+        return None
+    try:
+        got = heading_band(slide, box)
+    except Exception:  # noqa: BLE001
+        return None
+    if got is None:
+        return None
+    b = getattr(got, "box", got)
+    return b if isinstance(b, Bbox) else None
+
+
+def _check_heading_color(slide: Slide, title_ph, canvas: Optional[Pattern], band: Optional[Bbox], pal: "_Palette", manifest: TemplateManifest) -> None:
+    """The template's heading colour must read on what really stands under the heading (a band or panel painted by
+    the layout, a picture ground): when it does not (< 3:1), the heading takes a readable colour."""
+    t = _top_title(canvas) if canvas is not None else None
+    col = t.style.color_hex if t is not None else None
+    if not col:
+        return
+    try:
+        from verstka.rendering.charts import slide_ground
+
+        b = element_bbox(title_ph._element)
+        ground = slide_ground(slide, band if band is not None else Bbox(x=b[0], y=b[1], w=b[2], h=b[3])) if b else None
+    except Exception:  # noqa: BLE001
+        ground = None
+    if not ground or contrast_ratio(col, ground) >= 3.0:
+        return
+    new = _readable(ground, [col, pal.text, manifest.tokens.color_for("text.primary")])
+    for r in title_ph._element.iter(q("a:rPr")):
+        for old in [c for c in r if etree.QName(c).localname in ("solidFill", "gradFill", "noFill", "pattFill", "blipFill", "grpFill")]:
+            r.remove(old)
+        sf = etree.Element(q("a:solidFill"))
+        etree.SubElement(sf, q("a:srgbClr")).set("val", new)
+        ln = r.find(q("a:ln"))
+        if ln is not None:
+            ln.addnext(sf)
+        else:
+            r.insert(0, sf)
+
+
+def _left_clear(slide: Slide, box: Bbox, W: int, H: int, skip: tuple = ()) -> int:
+    """The x a heading box must start at to clear the text of a mark that stands over its own left part (a page number
+    «09» kept beside the title: in its band, starting before box.x + 10 % of the width and reaching past box.x) —
+    letters over letters; art and pictures are the canvas's and the free-width rules' concern. box.x when nothing."""
+    x = box.x
+    for el in _drawn(slide):
+        if el in skip or etree.QName(el).localname != "sp":
+            continue
+        if not "".join(t.text or "" for t in el.iter(q("a:t"))).strip():
+            continue
+        b = element_bbox(el)
+        if not b or b[2] * b[3] >= 0.25 * W * H or b[2] <= 0 or b[3] <= 0:
+            continue
+        top, bot = max(b[1], box.y), min(b[1] + b[3], box.y2)
+        if bot - top < 0.5 * min(b[3], box.h):
+            continue  # not in the heading's band
+        if b[0] < box.x + int(0.1 * W) and b[0] + b[2] > box.x and b[0] + b[2] < box.x + int(0.3 * W):
+            x = max(x, _ink_right(el, b) + int(0.015 * W))
+    return x
+
+
+def _ink_right(el, b) -> int:
+    """Where a shape really ends on the right: a left-aligned unfilled text box («09») ends where its text does, not at
+    its frame; anything else at its frame."""
+    right = b[0] + b[2]
+    if etree.QName(el).localname != "sp" or _paints(el):
+        return right
+    tx = el.find(q("p:txBody"))
+    if tx is None:
+        return right
+    p0 = tx.find(q("a:p"))
+    ppr = p0.find(q("a:pPr")) if p0 is not None else None
+    if ppr is not None and (ppr.get("algn") or "l") not in ("l", "just"):
+        return right
+    text = "".join(t.text or "" for t in tx.iter(q("a:t"))).strip()
+    rpr = next((r for r in tx.iter(q("a:rPr")) if r.get("sz")), None)
+    if not text or rpr is None or "\n" in text:
+        return right
+    bp = tx.find(q("a:bodyPr"))
+    lins = int(bp.get("lIns")) if bp is not None and (bp.get("lIns") or "").isdigit() else 91440
+    lat = rpr.find(q("a:latin"))
+    w = text_width_pt(text, lat.get("typeface") if lat is not None else None, int(rpr.get("sz")) / 100, rpr.get("b") == "1")
+    return min(right, b[0] + lins + int(w * 1.08 * EMU_PER_PT))
+
+
+def _free_left(slide: Slide, box: Bbox, W: int, H: int, left: int, skip: tuple = ()) -> int:
+    """The leftmost x a heading may reach from its box leftwards: the page margin, cut after whatever stands in its
+    band on the left (a picture, a panel of the layout)."""
+    limit = left
+    for el in _drawn(slide):
+        if el in skip or etree.QName(el).localname not in ("sp", "pic", "grpSp", "graphicFrame", "cxnSp"):
+            continue
+        b = element_bbox(el)
+        if not b or b[2] * b[3] >= 0.6 * W * H:
+            continue
+        if b[1] < box.y2 and b[1] + b[3] > box.y and b[0] + b[2] <= box.x2 - int(0.1 * W) and b[0] + b[2] <= box.x + box.w // 2:
+            limit = max(limit, b[0] + b[2] + int(0.015 * W))
+    return min(limit, box.x)
 
 
 def _free_width(slide: Slide, box: Bbox, W: int, H: int, right: int, skip: tuple = ()) -> int:
@@ -1418,30 +2279,232 @@ def _snap_heading(target: float, scale: list[float]) -> float:
     return min(near, key=lambda s: abs(s - target)) if near else round(target)
 
 
-def _cover_note(slide: Slide, oslide: OutlineSlide, col: Bbox, small: float, pal: "_Palette", font: Optional[str], scale: list[float]) -> None:
+def _art_painted(slide: Slide, box: Bbox, skip: tuple = ()) -> float:
+    """Share of `box` the template's art really paints (a triangle by its outline, not its bounding box)."""
+    if box.w <= 0 or box.h <= 0:
+        return 0.0
+    try:
+        from verstka.rendering.layers import art_layers, painted_share
+
+        return min(1.0, sum(painted_share(lay, box) for lay in art_layers(slide, skip=skip)))
+    except Exception:  # noqa: BLE001
+        return 0.0
+
+
+def _clear_rect(slide: Slide, area: Bbox, skip: tuple = (), n: int = 32) -> Optional[Bbox]:
+    """The largest rectangle inside `area` that the template's art does not paint — measured by the art's real
+    outline (a triangle's empty corner is free), on an n×n grid of the area, a cell's margin kept. None when unknown."""
+    if area.w <= 0 or area.h <= 0:
+        return None
+    try:
+        from verstka.rendering import layers as L
+
+        arts = []
+        for lay in L.art_layers(slide, skip=skip):
+            if lay.box.intersection(area) <= 0:
+                continue
+            arts.append((lay.box, L._outline_of(lay)))
+    except Exception:  # noqa: BLE001
+        return None
+    cw, ch = area.w / n, area.h / n
+
+    def painted(px: float, py: float) -> bool:
+        for box, polys in arts:
+            if not (box.x <= px <= box.x2 and box.y <= py <= box.y2):
+                continue
+            if polys is None or sum(1 for poly in polys if len(poly) > 2 and L._inside(px, py, poly)) % 2 == 1:
+                return True
+        return False
+
+    # a cell is busy when its centre or a corner is painted (the rectangle keeps a hair off the art's edge)
+    busy = [[any(painted(area.x + (i + dx) * cw, area.y + (j + dy) * ch) for dx, dy in ((0.5, 0.5), (0, 0), (1, 0), (0, 1), (1, 1))) for i in range(n)] for j in range(n)]
+    return _largest_empty(busy, area, n)
+
+
+def _panel_rect(slide: Slide, area: Bbox, skip: tuple = (), n: int = 32) -> Optional[Bbox]:
+    """The largest rectangle inside `area` that stands wholly on one shape of the template's art (a coloured triangle
+    of a mosaic: text set on it reads as on a panel), a cell's margin kept from its edge. None when there is none."""
+    if area.w <= 0 or area.h <= 0:
+        return None
+    try:
+        from verstka.rendering import layers as L
+
+        arts = [(lay.box, L._outline_of(lay)) for lay in L.art_layers(slide, skip=skip) if lay.box.intersection(area) > 0 and not lay.picture]
+    except Exception:  # noqa: BLE001
+        return None
+    cw, ch = area.w / n, area.h / n
+    best: Optional[Bbox] = None
+    for k_, (box, polys) in enumerate(arts):
+        def inside(px: float, py: float, box=box, polys=polys) -> bool:
+            if not (box.x <= px <= box.x2 and box.y <= py <= box.y2):
+                return False
+            return polys is None or sum(1 for poly in polys if len(poly) > 2 and L._inside(px, py, poly)) % 2 == 1
+
+        def other(px: float, py: float) -> bool:  # another art shape drawn over this one there
+            for b2, p2 in arts[k_ + 1:]:
+                if b2.x <= px <= b2.x2 and b2.y <= py <= b2.y2 and (p2 is None or sum(1 for poly in p2 if len(poly) > 2 and L._inside(px, py, poly)) % 2 == 1):
+                    return True
+            return False
+
+        pts = ((0.5, 0.5), (0, 0), (1, 0), (0, 1), (1, 1))
+        busy = [[not all(inside(area.x + (i + dx) * cw, area.y + (j + dy) * ch) and not other(area.x + (i + dx) * cw, area.y + (j + dy) * ch) for dx, dy in pts) for i in range(n)] for j in range(n)]
+        got = _largest_empty(busy, area, n)
+        if got is not None and (best is None or got.area > best.area):
+            best = got
+    return best
+
+
+def _largest_empty(busy: list, area: Bbox, n: int) -> Optional[Bbox]:
+    """The largest all-free rectangle of an n×n cell grid over `area` (histogram method), in EMU."""
+    cw, ch = area.w / n, area.h / n
+    best = (0, None)
+    heights = [0] * n
+    for j in range(n):
+        for i in range(n):
+            heights[i] = 0 if busy[j][i] else heights[i] + 1
+        stack: list[int] = []
+        for i in range(n + 1):
+            hgt = heights[i] if i < n else 0
+            while stack and heights[stack[-1]] >= hgt:
+                top_i = stack.pop()
+                left = stack[-1] + 1 if stack else 0
+                a = heights[top_i] * (i - left)
+                if a > best[0]:
+                    best = (a, (left, j - heights[top_i] + 1, i - left, heights[top_i]))
+            stack.append(i)
+    if best[1] is None:
+        return None
+    x0, y0, wc, hc = best[1]
+    return Bbox(x=int(area.x + x0 * cw), y=int(area.y + y0 * ch), w=int(wc * cw), h=int(hc * ch))
+
+
+def _cover_lines_region(slide: Slide, canvas: Optional[Pattern], title_ph, under: Bbox, safe: Bbox, W: int, H: int) -> Optional[tuple[Bbox, str]]:
+    """Where a cover's subtitle, goal line and footnote go when the column under its title stands on the template's
+    art (a mosaic of triangles, an illustration): the clear part of the sample's own subtitle box, else the largest
+    clear rectangle under the title (by the art's real outline). (region, alignment); None when the column is clear
+    (kept as it is) or no clear room is large enough."""
+    skip = (title_ph._element,) if title_ph is not None else ()
+    if under.h < 0.08 * H or _art_painted(slide, under, skip) < 0.05:
+        return None
+    top = under.y
+    sub = next((s_ for s_ in canvas.slots if s_.role == SlotRole.subtitle), None) if canvas is not None else None
+    if sub is not None:
+        b = sub.bbox.to_emu(W, H)
+        y0 = max(b.y, top)
+        box = Bbox(x=b.x, y=y0, w=b.w, h=max(b.y2 - y0, 0))
+        clear = _clear_rect(slide, box, skip) if box.h > 0 else None
+        if clear is not None and clear.w >= 0.18 * W and clear.h >= 0.15 * H:
+            return clear, (sub.style.align or "l")
+    below = Bbox(x=safe.x, y=top, w=safe.w, h=max(safe.y2 - top, 1))
+    clear = _clear_rect(slide, below, skip)
+    if clear is not None and clear.w >= 0.2 * W and clear.h >= 0.15 * H:
+        return clear, "l"
+    # no clear room: the lines stand wholly on one shape of the art (white on a coloured triangle, as the template's
+    # own title does) — never across the edge of a shape
+    panel = _panel_rect(slide, below, skip)
+    if panel is not None and panel.w >= 0.25 * W and panel.h >= 0.15 * H:
+        return panel, "l"
+    return None
+
+
+def _cover_note(slide: Slide, oslide: OutlineSlide, col: Bbox, small: float, pal: "_Palette", font: Optional[str], scale: list[float], prefs: tuple = (), align: str = "l", own: Optional[str] = None) -> Optional[int]:
     """The footnote of a cover, divider or closing slide drawn without a sample (a disclaimer «Все цифры условные»):
     small print at the foot of the heading's column."""
-    note = " ".join((oslide.footnote or "").split())
+    from verstka.ru import typeset
+
+    note = typeset(" ".join((oslide.footnote or "").split()))  # «и прогнозы», «120 000» never torn apart (G1-16)
     if not note:
         return
     size = max(min(small, 12.0), 9.0)
+    try:
+        hpt = slide.part.package.presentation_part.presentation.slide_height / EMU_PER_PT
+    except Exception:  # noqa: BLE001
+        hpt = 0.0
+    if size < 0.017 * hpt:
+        # a large slide (15″ high): 12 pt would be a speck — small print of the slide's own scale (≥ 1.7 % of its height)
+        size = min([x for x in scale if x >= 0.017 * hpt - 0.05] or [round(0.017 * hpt * 2) / 2])
     h = int(size * 2.8 * EMU_PER_PT)
-    _textbox(slide, Bbox(x=col.x, y=col.y2 - h, w=col.w, h=h), [ParagraphSpec(note, bullet=False)], size=size, color=pal.text2, font=font, scale=scale, anchor="b")
+    nb = Bbox(x=col.x, y=col.y2 - h, w=col.w, h=h)
+    _textbox(slide, nb, [ParagraphSpec(note, bullet=False)], size=size, color=_ink(slide, nb, [own, pal.text2, *prefs, pal.text]) or pal.text2, font=font, scale=scale, anchor="b", align=align)
+    from verstka.rendering.fonts import wrap_lines
+
+    lines = min(max(1, len(wrap_lines(note, font, size, False, col.w / EMU_PER_PT - 14.4))), 2)
+    return col.y2 - int((lines * 1.2 + 0.3) * size * EMU_PER_PT)  # where its text starts (the box is bottom-anchored)
 
 
-def _cover_goal_line(slide: Slide, oslide: OutlineSlide, box: Bbox, y: int, size: float, pal: "_Palette", font: Optional[str], scale: list[float], H: int, align: str = "l") -> None:
+def _cover_goal_line(slide: Slide, oslide: OutlineSlide, box: Bbox, y: int, size: float, pal: "_Palette", font: Optional[str], scale: list[float], H: int, align: str = "l", small: Optional[float] = None, limit: Optional[int] = None, prefs: tuple = (), own: Optional[str] = None) -> None:
     """A cover's goal (the first paragraph of a title slide, Agent v2: «Цель: …») as a short line under the subtitle,
-    a step smaller and in the subtitle's colour, inside the heading's column (never over the art)."""
+    a step smaller and in the subtitle's colour, inside the heading's column (never over the art), above the cover's
+    footnote (`limit`: where the footnote starts)."""
     from verstka.matching.scorer import cover_goal
     from verstka.rendering.fonts import wrap_lines
+
+    from verstka.ru import typeset
 
     goal = cover_goal(oslide)
     if not goal:
         return
-    lines = max(1, len(wrap_lines(goal, font, size, False, box.w / EMU_PER_PT - 7.2)))
-    h = int((lines * 1.2 + 0.3) * size * EMU_PER_PT)
-    y = min(y, int(H * 0.95) - h)
-    _textbox(slide, Bbox(x=box.x, y=y, w=box.w, h=h), [ParagraphSpec(goal, bullet=False)], size=size, color=pal.text2, font=font, scale=scale, align=align)
+    shown = typeset(goal)  # «со 120 000 до 255 000 рублей»: a figure keeps its thousands and its unit (G1-16)
+    floor = min(size, small) if small else size
+    sizes = [size] + [s_ for s_ in sorted(scale, reverse=True) if floor - 0.05 <= s_ < size - 0.05]
+    foot = int(H * 0.95) if limit is None else min(int(H * 0.95), limit - int(0.015 * H))
+    for s_ in sizes:
+        lines = max(1, len(wrap_lines(shown, font, s_, False, box.w / EMU_PER_PT - 7.2)))
+        h = int((lines * 1.2 + 0.3) * s_ * EMU_PER_PT)
+        if y + h <= foot or s_ == sizes[-1]:
+            break
+    if y + h > foot:
+        # no room under the title and the subtitle even at the small size: the goal goes to the speaker notes —
+        # never over the title
+        _to_notes(oslide, goal)
+        return
+    line = Bbox(x=box.x, y=y, w=box.w, h=h)
+    _textbox(slide, line, [ParagraphSpec(shown, bullet=False)], size=s_, color=_ink(slide, line, [own, pal.text2, *prefs, pal.text]) or pal.text2, font=font, scale=scale, align=align)
+
+
+def _ink(slide: Slide, box: Bbox, prefs: list) -> Optional[str]:
+    """The first colour of `prefs` that reads (4.5:1) on what the slide, its layout and its master really paint under
+    `box` (a triangle, a band, a photo), else the most readable of them and black/white; None when the ground is
+    unknown (the caller's colour stands)."""
+    try:
+        from verstka.rendering.charts import slide_ground
+
+        g = slide_ground(slide, box)
+    except Exception:  # noqa: BLE001
+        return None
+    cands = [c for c in prefs if c]
+    if not g or len(g) != 6 or not cands:
+        return None
+    for c in cands:
+        if contrast_ratio(c, g) >= 4.5:
+            return c
+    return max(cands + ["FFFFFF", "000000"], key=lambda c: contrast_ratio(c, g))
+
+
+def _has_goal(oslide: OutlineSlide) -> bool:
+    try:
+        from verstka.matching.scorer import cover_goal
+
+        return bool(cover_goal(oslide))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _to_notes(oslide: OutlineSlide, text: str) -> None:
+    """A line the slide has no room for is said aloud: it goes to the slide's speaker notes (the renderer writes
+    `oslide.notes` into the notes page)."""
+    try:
+        oslide.notes = ((oslide.notes or "").strip() + "\n" + text).strip()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _unbreak(text: str, box: Bbox, font: Optional[str], size: float, bold: bool, scale: list[float], insets, line_spacing: float, warnings: list[str]):
+    """A title with a word wider than its box: the size may give way down to 55 % before the word is broken."""
+    res = fit_size([text], box, font, size, bold, scale, insets_emu=insets, line_spacing=line_spacing, min_ratio=0.55)
+    if res.broken_word:
+        warnings.append("heading word broken")
+    return res
 
 
 def _sub_height(text: str, font: Optional[str], size: float, w: int) -> int:
@@ -1460,8 +2523,7 @@ def _render_cover(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: Outline
         slide, title_ph, ground = _slide_on_canvas(builder, canvas, builder.slide_w, builder.slide_h)
     else:
         layout, family = _layout_for(builder, manifest, family, oslide.kind)
-        slide = builder.prs.slides.add_slide(layout)
-        builder.created.append(slide)
+        slide = _add_layout_slide(builder, layout)
         title_ph = None
     pal = _Palette(manifest, family)  # palette of the real family: text must contrast with its background
     if canvas is not None:
@@ -1485,11 +2547,28 @@ def _render_cover(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: Outline
     # every size the template uses (not only the role scale): text fits and grows along the template's own steps
     scale = sorted({s.size_pt for s in typo.scale} | {float(x) for x in (typo.sizes_used or []) if x >= 8})
     font = typo.primary_family
-    h1, title_color, title_bold, title_font = _title_style(manifest, family, pal)
+    h1, title_color, title_bold, title_font = _title_style(manifest, family, pal, content_only=comp not in _COVER_COMPS)
+    if comp in _COVER_COMPS:
+        # a cover or a divider sets its title as the template's own covers do: the canvas's title size, else the
+        # largest title of the template's cover/divider samples — never the deck's most frequent title (on a deck
+        # whose headings are small pill labels, a 20 pt cover title)
+        own = _top_title(canvas) if canvas is not None else None
+        covers = [s_.style.size_pt for p in manifest.patterns if p.kind in _COVER_KINDS and not p.reference for s_ in p.slots if s_.role == SlotRole.title and s_.style.size_pt]
+        cover_size = (own.style.size_pt if own is not None and own.style.size_pt else None) or (max(covers) if covers else None)
+        if cover_size and cover_size > h1:
+            h1 = float(cover_size)
     body = typo.size_for("body", 14.0)
     h2 = typo.size_for("h2", body * 1.25)
     small = typo.size_for("small", body * 0.85)
     display = typo.size_for("display", h1 * 1.8)
+    if _is_sparse(manifest):
+        # a sparse scale's roles are placeholder defaults (a 32 pt body, a 44 pt h2 on an 11″ slide): a cover's
+        # subtitle and its goal line keep to the slide's proportions (≤ 5.5 % / 3.1 % of its height)
+        hpt = H / EMU_PER_PT
+        at_most = lambda cap, v: max([x for x in scale if x <= cap + 0.05] or [round(cap * 2) / 2]) if v > cap else v  # noqa: E731
+        body = at_most(0.031 * hpt, body)
+        h2 = at_most(0.055 * hpt, h2)
+        small = min(small, body)
 
     # keep only the title (fill it) — everything else is drawn from tokens
     if canvas is None:
@@ -1499,6 +2578,8 @@ def _render_cover(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: Outline
             else:
                 shp._element.getparent().remove(shp._element)
     c = oslide.content
+    if title_ph is not None:
+        _materialize(title_ph)  # an inherited placeholder gets its own geometry before any write
     title_h = int(H * (0.16 if comp not in ("title", "section", "thanks") else 0.3))
     if title_ph is not None and comp not in ("title", "section", "thanks"):
         # measure the headline against the placeholder box: the content starts below the fitted text, not below
@@ -1518,13 +2599,15 @@ def _render_cover(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: Outline
             w_clear = clear_width(manifest, W, H, box)
             if w_clear < box.w:  # never under the logos: the heading wraps instead
                 box = Bbox(x=box.x, y=box.y, w=w_clear, h=box.h)
-                title_ph.width = Emu(w_clear)
+                _set_box(title_ph, box)
         res = fit_size([oslide.headline], box, title_font, h1, title_bold, scale, insets_emu=insets, line_spacing=typo.line_height)
-        fill_text(title_ph._element, [ParagraphSpec(oslide.headline)], size_pt=res.size_pt)
+        if res.broken_word:
+            res = _unbreak(oslide.headline, box, title_font, h1, title_bold, scale, insets, typo.line_height, warnings)
+        _fill_keep(title_ph._element, [ParagraphSpec(oslide.headline)], size_pt=res.size_pt)
         text_h = int(res.height_pt * EMU_PER_PT) + insets[1] + insets[3]
         if text_h > box.h or title_ph.top is None:
             # keep the headline inside its own box
-            title_ph.left, title_ph.top, title_ph.width, title_ph.height = Emu(box.x), Emu(box.y), Emu(box.w), Emu(max(box.h, text_h))
+            _set_box(title_ph, Bbox(x=box.x, y=box.y, w=box.w, h=max(box.h, text_h)))
         y_after = box.y + max(box.h, text_h)
     elif comp not in ("title", "section", "thanks"):
         if title_ph is not None:
@@ -1534,19 +2617,47 @@ def _render_cover(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: Outline
     elif canvas is not None and title_ph is not None:
         # title / section / thanks on a sample of that kind: its own title box, the subtitle right under it
         box = Bbox(x=int(title_ph.left), y=int(title_ph.top), w=int(title_ph.width), h=int(title_ph.height))
-        insets = (91440, 45720, 91440, 45720)
-        res = fit_size([oslide.headline], box, title_font, h1, title_bold, scale, insets_emu=insets, line_spacing=typo.line_height, min_ratio=0.6)
-        fill_text(title_ph._element, [ParagraphSpec(oslide.headline)], size_pt=res.size_pt)
+        insets = _heading_insets(title_ph)
+        from verstka.ru import typeset
+
+        headline = typeset(oslide.headline)  # «с каждой» never split after the preposition
+        res = fit_size([headline], box, title_font, h1, title_bold, scale, insets_emu=insets, line_spacing=typo.line_height, min_ratio=0.6)
+        if res.broken_word:
+            res = _unbreak(headline, box, title_font, h1, title_bold, scale, insets, typo.line_height, warnings)
+        _fill_keep(title_ph._element, [ParagraphSpec(headline)], size_pt=res.size_pt)
         text_h = int(res.height_pt * EMU_PER_PT) + insets[1] + insets[3]
         if text_h > box.h:
-            title_ph.height = Emu(min(text_h, int(H * 0.95) - box.y))
+            _set_box(title_ph, Bbox(x=box.x, y=box.y, w=box.w, h=max(min(text_h, int(H * 0.95) - box.y), 0)))
+        # the lines under the title start where its letters start (its own left inset), never at the slide's edge
+        shift = max(insets[0] - 91440, 0)
+        col = Bbox(x=box.x + shift, y=box.y, w=max(box.w - shift, int(0.2 * W)), h=box.h)
         sub = oslide.subtitle or (oslide.section if comp == "section" else None)
+        sub = typeset(sub) if sub else sub  # «на 6 месяцев» never split after the preposition (G1-16)
         y_sub = box.y + max(box.h, text_h) + int(H * 0.02)
+        note_col = Bbox(x=col.x, y=sy, w=min(col.w, sw), h=sh)
+        align = "l"
+        region = _cover_lines_region(slide, canvas, title_ph, Bbox(x=col.x, y=y_sub, w=col.w, h=max(sy + sh - y_sub, 0)), Bbox(x=sx, y=sy, w=sw, h=sh), W, H) if (sub or oslide.footnote or _has_goal(oslide)) else None
+        # the sample's own subtitle: its colour, and its place when it stands lower under the title in the same
+        # column (a band the template prints its subtitle on — never half on the band's edge)
+        sub_slot = next((s_ for s_ in canvas.slots if s_.role == SlotRole.subtitle), None)
+        slot_color = sub_slot.style.color_hex if sub_slot is not None else None
+        if region is None and sub_slot is not None:
+            sbb = sub_slot.bbox.to_emu(W, H)
+            overlap = max(0, min(sbb.x2, col.x2) - max(sbb.x, col.x))
+            if y_sub <= sbb.y <= sy + sh - int(0.12 * H) and overlap >= 0.5 * min(sbb.w, col.w):
+                y_sub = sbb.y
+        if region is not None:
+            # the column under the title stands on the template's art: the lines go where the art leaves room
+            col, align = region
+            y_sub = col.y
+            note_col = col
+            warnings.append("cover lines set clear of the template's art")
         if sub:
-            _textbox(slide, Bbox(x=box.x, y=y_sub, w=box.w, h=min(int(H * 0.16), int(H * 0.92) - y_sub)), [ParagraphSpec(sub)], size=h2, color=pal.text2, font=font, scale=scale)
-            y_sub += min(_sub_height(sub, font, h2, box.w), int(H * 0.16)) + int(H * 0.015)
-        _cover_goal_line(slide, oslide, box, y_sub, max(min(body, h2 * 0.8), small), pal, font, scale, H)
-        _cover_note(slide, oslide, Bbox(x=box.x, y=sy, w=min(box.w, sw), h=sh), small, pal, font, scale)
+            sb = Bbox(x=col.x, y=y_sub, w=col.w, h=min(int(H * 0.16), int(H * 0.92) - y_sub))
+            _textbox(slide, sb, [ParagraphSpec(sub)], size=h2, color=_ink(slide, sb, [slot_color, pal.text2, title_color, pal.text]) or pal.text2, font=font, scale=scale, align=align)
+            y_sub += min(_sub_height(sub, font, h2, col.w), int(H * 0.16)) + int(H * 0.015)
+        note_top = _cover_note(slide, oslide, note_col, small, pal, font, scale, prefs=(title_color,), align=align, own=slot_color)
+        _cover_goal_line(slide, oslide, col, y_sub, max(min(body, h2 * 0.8), small), pal, font, scale, H, align=align, small=small, limit=note_top, prefs=(title_color,), own=slot_color)
         return slide, warnings
     else:
         if title_ph is not None:
@@ -1565,12 +2676,26 @@ def _render_cover(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: Outline
         box = Bbox(x=sx, y=int(H * 0.30), w=int(sw * 0.8), h=int(H * 0.3))
         _textbox(slide, box, [ParagraphSpec(oslide.headline)], size=max(h1, display * 0.8) if comp == "title" else h1, color=title_color, font=title_font, bold=title_bold, scale=scale, anchor="b")
         sub = oslide.subtitle or (oslide.section if comp == "section" else None)
-        y_goal = int(H * 0.62)
         if sub:
-            _textbox(slide, Bbox(x=sx, y=int(H * 0.62), w=int(sw * 0.8), h=int(H * 0.16)), [ParagraphSpec(sub)], size=h2, color=pal.text2, font=font, scale=scale)
-            y_goal += min(_sub_height(sub, font, h2, int(sw * 0.8)), int(H * 0.16)) + int(H * 0.015)
-        _cover_goal_line(slide, oslide, Bbox(x=sx, y=y_goal, w=int(sw * 0.8), h=int(H * 0.1)), y_goal, max(min(body, h2 * 0.8), small), pal, font, scale, H)
-        _cover_note(slide, oslide, Bbox(x=sx, y=sy, w=int(sw * 0.8), h=sh), small, pal, font, scale)
+            from verstka.ru import typeset
+
+            sub = typeset(sub)  # «на 6 месяцев» never split after the preposition (G1-16)
+        y_goal = int(H * 0.62)
+        col = Bbox(x=sx, y=y_goal, w=int(sw * 0.8), h=max(sy + sh - y_goal, 0))
+        note_col = Bbox(x=sx, y=sy, w=int(sw * 0.8), h=sh)
+        align = "l"
+        region = _cover_lines_region(slide, None, None, col, Bbox(x=sx, y=sy, w=sw, h=sh), W, H) if (sub or oslide.footnote or _has_goal(oslide)) else None
+        if region is not None:
+            col, align = region
+            y_goal = col.y
+            note_col = col
+            warnings.append("cover lines set clear of the template's art")
+        if sub:
+            sb = Bbox(x=col.x, y=y_goal, w=col.w, h=int(H * 0.16))
+            _textbox(slide, sb, [ParagraphSpec(sub)], size=h2, color=_ink(slide, sb, [pal.text2, title_color, pal.text]) or pal.text2, font=font, scale=scale, align=align)
+            y_goal += min(_sub_height(sub, font, h2, col.w), int(H * 0.16)) + int(H * 0.015)
+        note_top = _cover_note(slide, oslide, note_col, small, pal, font, scale, prefs=(title_color,), align=align)
+        _cover_goal_line(slide, oslide, Bbox(x=col.x, y=y_goal, w=col.w, h=int(H * 0.1)), y_goal, max(min(body, h2 * 0.8), small), pal, font, scale, H, align=align, small=small, limit=note_top, prefs=(title_color,))
         return slide, warnings
 
     if comp == "bullets" or (comp in ("image_text",) and not c.image_hint):

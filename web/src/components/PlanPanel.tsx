@@ -1,13 +1,16 @@
 // «План» (details drawer): the deck as a document — every slide with its thumbnail, headline and content — then the
 // figures taken from the text and the data behind the charts. The variant follows the drawer's menu.
 import { useMemo, useState, type KeyboardEvent } from "react";
-import { ImageOff, ListTree } from "lucide-react";
+import { ImageOff, ListTree, PenLine } from "lucide-react";
 import { figuresLine } from "../lib/narrate";
 import { cn, kindLabel, plural } from "../lib/utils";
 import { useApp } from "../store";
-import type { DeckOutline, OutlineSlide } from "../types";
+import type { DeckOutline, OutlineSlide, WriterInfo } from "../types";
 import { FactsRegistry, SeriesRegistry } from "./PlanPanelData";
 import { SlideContentView } from "./PlanPanelSlide";
+import { useWriterActions, WriterTextBody } from "./simple/WriterText";
+import { Button } from "./ui/Button";
+import { Collapsible } from "./ui/Collapsible";
 import { EmptyState } from "./ui/EmptyState";
 import { variantRev, withRev } from "./VariantsHelpers";
 
@@ -59,6 +62,20 @@ function SlideRow({ index, slide, outline, thumb, aspect, selected, onOpen }: {
   );
 }
 
+/** Writer mode: the text the agent wrote from the topic, folded to one line above the slides; «Изменить» puts it into
+ *  the create screen's field. */
+function WriterBlock({ writer }: { writer: WriterInfo }) {
+  const text = writer.text ?? "";
+  const { edit } = useWriterActions(text);
+  const hint = [writer.source?.title ? `По статье «${writer.source.title}»` : "По теме", writer.slides ? plural(writer.slides, "слайд", "слайда", "слайдов") : null].filter(Boolean).join(" · ");
+  return (
+    <Collapsible title="Текст агента" hint={hint}>
+      <WriterTextBody text={text} />
+      <Button variant="secondary" size="sm" icon={PenLine} onClick={edit} className="mt-4">Изменить</Button>
+    </Collapsible>
+  );
+}
+
 export function PlanPanel() {
   const { generation, generationLoading, activeVariant, manifest, selectedSlide, setSelectedSlide, setDetail } = useApp();
   const outline = activeVariant?.outline ?? null;
@@ -80,6 +97,7 @@ export function PlanPanel() {
 
   return (
     <div className="space-y-4">
+      {generation.writer?.status === "written" && generation.writer.text && <WriterBlock writer={generation.writer} />}
       <section className="rounded-2xl bg-white p-6 shadow-card">
         <h2 className="text-title2 font-bold text-zinc-900">{outline.title}</h2>
         {outline.subtitle && <p className="mt-1 max-w-[680px] text-body text-zinc-700">{outline.subtitle}</p>}

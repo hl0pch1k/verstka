@@ -87,3 +87,39 @@ def compute_spacing(
         if gs:
             gutter = round(gs[len(gs) // 2], 4)
     return Spacing(safe_area=safe, columns=[round(c, 3) for c in cols], gutter=gutter)
+
+
+_BOOKENDS = {"title", "section", "thanks", "quote"}
+
+
+def extend_safe_bottom(spacing: Spacing, patterns, shapes_by_slide: dict[int, list[ShapeInfo]], layout_body_bottoms: dict[int, list[float]], chrome, slide_w: int, slide_h: int) -> Spacing:
+    """Extend (never shrink) the safe area's foot to where the template's content really reaches.
+
+    The 75th percentile of a few samples (covers and thanks slides vote too; charts and tables are not counted) can
+    leave the bottom quarter of the slide unused (Gradient: y2 0.73 with the footer at 0.93). When the template has
+    at most six content samples, or its content layouts' body placeholders (and its samples' charts, tables and body
+    slots) reach at least 3 % lower than y2, y2 goes down to that foot — bounded by the top of the bottom chrome
+    (footer, page number) less 2 % of the slide."""
+    content = [p for p in patterns if getattr(p.kind, "value", p.kind) not in _BOOKENDS]
+    feet: list[float] = []
+    for p in content:
+        feet.extend(layout_body_bottoms.get(p.source_slide, []))
+        feet.extend(sl.bbox.y2 for sl in p.slots if getattr(sl.role, "value", sl.role) in ("body", "bullet_list", "image") and sl.bbox.h >= 0.3)
+        for sh in shapes_by_slide.get(p.source_slide, []):
+            if sh.kind == ShapeKind.graphic_frame and sh.bbox.area > 0:
+                f = sh.bbox.to_frac(slide_w, slide_h)
+                if 0 <= f.y and f.y2 <= 1.0:
+                    feet.append(f.y2)
+    if not feet:
+        return spacing
+    sa = spacing.safe_area
+    target = max(feet)
+    if not (len(content) <= 6 or sa.y2 < target - 0.03) or target <= sa.y2:
+        return spacing
+    # the footer marks standing under the content column (an ornament strip at the slide's edge is not a foot)
+    foot_chrome = [c.bbox.y for c in chrome if c.bbox.y >= 0.75 and c.bbox.h < 0.2 and c.bbox.area > 0 and min(c.bbox.x2, sa.x2) - max(c.bbox.x, sa.x) >= 0.01]
+    bound = min(foot_chrome) - 0.02 if foot_chrome else 0.98
+    y2 = min(target, bound, 0.98)
+    if y2 <= sa.y2:
+        return spacing
+    return spacing.model_copy(update={"safe_area": sa.model_copy(update={"h": round(y2 - sa.y, 3)})})

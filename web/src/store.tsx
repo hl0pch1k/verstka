@@ -60,6 +60,12 @@ export interface AppState {
   toast(kind: "error" | "success" | "info", text: string): void;
   uploadTemplate(file: File, useModels: boolean): Promise<void>;
   startGeneration(req: GenerateRequest): Promise<void>;
+  /** A text handed to the create screen's field once (the agent's written text, «Изменить»); null when none waits. */
+  composerText: string | null;
+  /** Opens the create screen with `text` in the field (it replaces the saved draft once). */
+  editText(text: string): void;
+  /** The create screen took the handed text. */
+  takeComposerText(): void;
 }
 
 const Ctx = createContext<AppState | null>(null);
@@ -107,6 +113,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setDetail(t === "plan" ? "plan" : t === "why" ? "why" : t === "audit" ? "quality" : t === "export" || t === "run" ? "tech" : null);
   }, []);
   const [agentOpen, setAgentOpen] = useState(false); // the helper starts closed: the page itself must be self-explanatory
+  const [composerText, setComposerText] = useState<string | null>(null);
+  const editText = useCallback((text: string) => {
+    setComposerText(text);
+    setDetail(null);
+    setScreen("create");
+  }, []);
+  const takeComposerText = useCallback(() => setComposerText(null), []);
   const [activeJob, setActiveJob] = useState<ActiveJob | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
 
@@ -406,10 +419,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, activeStrategy, setActiveStrategy, activeVariant,
     selectedSlide, setSelectedSlide, setTab, screen, setScreen, detail, setDetail, agentOpen, setAgentOpen, activeJob, runJob, messages, pushMessage, toast, uploadTemplate, startGeneration,
+    composerText, editText, takeComposerText,
   }), [
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, activeStrategy, setActiveStrategy, activeVariant,
     selectedSlide, setSelectedSlide, setTab, screen, detail, agentOpen, setAgentOpen, activeJob, runJob, messages, pushMessage, toast, uploadTemplate, startGeneration,
+    composerText, editText, takeComposerText,
   ]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

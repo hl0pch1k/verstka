@@ -49,7 +49,9 @@ def test_kit_sizes_come_from_the_template_scale_with_readable_minimums(env):
     assert kit.small < kit.body < kit.h3 <= kit.h2 and kit.lead > kit.body
     # figures may go past the largest text size of the template (the display step), never below the heading step
     figs = kit.figure_sizes(0.2 * hpt, kit.h3)
-    assert figs == sorted(figs, reverse=True) and figs[0] > max(sizes) and figs[-1] >= kit.h3
+    # (a sparse template's derived ladder already reaches the display step: past the template's own sizes)
+    own = sizes - {round(float(x), 2) for x in (manifest.tokens.typography.derived_sizes or [])}
+    assert figs == sorted(figs, reverse=True) and figs[0] > max(own) and figs[-1] >= kit.h3
     assert kit.figure_cap(1, False, "structured") > kit.figure_cap(4, False, "structured") > kit.figure_cap(4, True, "compact") * 0.99
 
 

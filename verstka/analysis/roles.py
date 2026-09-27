@@ -72,6 +72,23 @@ def is_empty_frame(s: ShapeInfo, shapes: list[ShapeInfo], slide_w: int, slide_h:
     return True
 
 
+def wordmark_heading(title_ph: ShapeInfo, texts: list[ShapeInfo], slide_h: int) -> Optional[ShapeInfo]:
+    """The real heading when a TITLE placeholder carries a wordmark: its text is at most two words set at less than
+    0.6 of the largest text of the slide, while another (non-numeric) text in the top 70 % is at least 1.6× larger.
+    None when the placeholder is the heading."""
+    words = title_ph.plain_text.split()
+    size = _size(title_ph)
+    if not words or len(words) > 2 or size <= 0:
+        return None
+    largest = max((_size(t) for t in texts), default=0.0)
+    if size >= 0.6 * largest:
+        return None
+    bigger = [t for t in texts if t.id != title_ph.id and t.bbox.y < 0.7 * slide_h and _size(t) >= 1.6 * size and not is_numeric_text(t.plain_text)]
+    if not bigger:
+        return None
+    return max(bigger, key=lambda t: (_size(t), -t.bbox.y))
+
+
 def heuristic_roles(
     shapes: list[ShapeInfo],
     groups: list[RepeatGroup],
@@ -98,6 +115,15 @@ def heuristic_roles(
 
     # title
     title: Optional[ShapeInfo] = next((s for s in texts if s.ph_type in ("title", "ctrTitle")), None)
+    if title is not None:
+        heading = wordmark_heading(title, texts, slide_h)
+        if heading is not None:
+            # the TITLE placeholder holds the brand's wordmark («mybrand.» at 37 pt next to a 112 pt headline): the
+            # big text is the heading; a one-token mark stays on the slide as chrome (a logo), a two-word label
+            # («Put Your» over «Awesome Word») is just sample text of the slide
+            if len(title.plain_text.split()) == 1:
+                roles[title.id] = SlotRole.chrome
+            title = heading
     if title is None:
         # empty title placeholder still counts as a title slot
         title = next((s for s in shapes if s.ph_type in ("title", "ctrTitle") and s.id not in roles), None)

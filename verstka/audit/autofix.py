@@ -68,7 +68,42 @@ def plan_fixes(report: AuditReport, plan: LayoutPlan, only_ids: Optional[set[str
     return out
 
 
-def _rematch(plan: LayoutPlan, outline: DeckOutline, oid: str) -> str:
+def _empty_frame(pattern, osl) -> bool:
+    """A sample that would show an empty photo frame or a device mock-up on this slide: it has a picture slot or a
+    mock-up and the slide brings no picture of its own."""
+    if pattern is None or getattr(osl.content, "image_hint", None):
+        return False
+    from verstka.schemas.common import SlotRole
+
+    return bool(getattr(pattern, "mockup_boxes", None)) or any(sl.role == SlotRole.image for sl in pattern.slots)
+
+
+def _unsay(outline: DeckOutline) -> int:
+    """Before a re-render: the lines a previous render said aloud because its slide had no room for them (a cover's
+    goal or small print, `clone._note_to_speaker_notes` / synth `_to_notes`) come off the speaker notes — the new
+    render places them on the slide or says them again. Without this a cover re-rendered by another sample showed its
+    goal on the slide and repeated it in the notes (LO Vivid long). Returns the number of lines removed."""
+    from verstka.matching.scorer import cover_goal
+
+    removed = 0
+    for s in outline.slides:
+        if not s.notes:
+            continue
+        said = {" ".join(t.split()) for t in (cover_goal(s), s.footnote) if t and t.strip()}
+        if not said:
+            continue
+        lines = s.notes.split("\n")
+        keep = [ln for ln in lines if " ".join(ln.split()) not in said]
+        if len(keep) != len(lines):
+            removed += len(lines) - len(keep)
+            try:
+                s.notes = "\n".join(keep).strip()
+            except Exception:  # noqa: BLE001 - a frozen outline keeps its notes
+                pass
+    return removed
+
+
+def _rematch(plan: LayoutPlan, outline: DeckOutline, oid: str, manifest: Optional[TemplateManifest] = None) -> str:
     ps = plan.for_outline(oid)
     osl = next((s for s in outline.slides if s.id == oid), None)
     if ps is None or osl is None:
@@ -78,7 +113,11 @@ def _rematch(plan: LayoutPlan, outline: DeckOutline, oid: str) -> str:
     tried = set(ps.fit.get("tried", []))
     if ps.pattern_id:
         tried.add(ps.pattern_id)
+    bookend = getattr(osl.kind, "value", osl.kind) in ("title", "section", "thanks")
+    patterns = {p.id: p for p in manifest.patterns} if manifest is not None else {}
     for pid, score in ps.alternatives:
+        if bookend and _empty_frame(patterns.get(pid), osl):
+            continue  # a cover never trades its heading for an empty photo frame or a phone mock-up
         if pid not in tried and score >= 0.3:
             ps.mode = "clone"
             ps.pattern_id = pid
@@ -207,6 +246,115 @@ def _move_inside(el: etree._Element, safe: Bbox, slide_w: int, slide_h: int, int
     return nx, ny, nw, nh
 
 
+# name families of composed blocks (compose.py names its shapes «Card 12», «Legend 45», «Step 7»…): a marker, its
+# label and its card move together or not at all
+_BLOCK_FAMILIES = (("Card", "Rule", "Column title", "Column"), ("Swatch", "Legend", "Share", "Legend title"), ("Step", "Index", "Badge"))
+_NEW_OVERLAP = 0.02  # a move may not create an overlap larger than this share of the smaller box
+_NAME_NUM_RE = __import__("re").compile(r"\s*\d+$")
+
+
+def _name_of(el: etree._Element) -> str:
+    for nv in el.iter(q("p:cNvPr")):
+        return _NAME_NUM_RE.sub("", nv.get("name") or "")
+    return ""
+
+
+def _family_of(el: etree._Element) -> Optional[int]:
+    name = _name_of(el)
+    return next((i for i, fam in enumerate(_BLOCK_FAMILIES) if name in fam), None)
+
+
+def _box(el: etree._Element) -> Optional[Bbox]:
+    b = element_bbox(el)
+    return Bbox(x=b[0], y=b[1], w=b[2], h=b[3]) if b else None
+
+
+def _paints_or_reads(el: etree._Element) -> bool:
+    from verstka.rendering.textfill import has_visible_style, shape_text
+
+    tag = etree.QName(el).localname
+    return tag in ("pic", "graphicFrame", "grpSp") or has_visible_style(el) or bool(shape_text(el).strip())
+
+
+def _block_of(el: etree._Element, top: list[etree._Element], slide_w: int, slide_h: int) -> list[etree._Element]:
+    """What moves with `el`: the smallest filled or outlined card holding ≥ 80 % of it (not a slide-sized panel) with
+    everything standing inside that card, and the members of its name family (card / rule / column; swatch / legend
+    / share; step / index / badge) in the same row or column."""
+    from verstka.rendering.textfill import has_visible_style
+
+    box = _box(el)
+    if box is None:
+        return [el]
+    members = [el]
+    boxes = {id(o): _box(o) for o in top}
+    cards = [o for o in top if o is not el and boxes[id(o)] is not None and has_visible_style(o) and boxes[id(o)].area > box.area
+             and boxes[id(o)].intersection(box) >= 0.8 * box.area and boxes[id(o)].area < 0.5 * slide_w * slide_h]
+    if cards:
+        card = min(cards, key=lambda o: boxes[id(o)].area)
+        cb = boxes[id(card)]
+        members.append(card)
+        members += [o for o in top if o not in members and boxes[id(o)] is not None and boxes[id(o)].intersection(cb) >= 0.8 * max(boxes[id(o)].area, 1)]
+    fam = _family_of(el)
+    if fam is not None:
+        cx, cy = box.x + box.w / 2, box.y + box.h / 2
+        for o in top:
+            b = boxes[id(o)]
+            if o in members or b is None or _family_of(o) != fam:
+                continue
+            ox, oy = b.x + b.w / 2, b.y + b.h / 2
+            if abs(oy - cy) <= max(box.h, b.h) / 2 or abs(ox - cx) <= max(box.w, b.w) / 2:
+                members.append(o)
+    return members
+
+
+def _move_block(el: etree._Element, slide, safe: Bbox, slide_w: int, slide_h: int, into_safe: bool) -> Optional[list[tuple[etree._Element, tuple[int, int, int, int]]]]:
+    """New boxes for `el` and its block (`_block_of`) inside the slide (or the safe area): one shift for the whole
+    block; a lone element that is larger than the bounds is shrunk to them as before. None when nothing moves, when
+    the block does not fit, or when the move would lay it over another element (> 2 % of the smaller box) — the issue
+    then stays for a re-render rather than an XML move that breaks the layout."""
+    if is_nested(el):
+        return None
+    tree = slide._element.cSld.find(q("p:spTree"))
+    top = [o for o in tree if isinstance(o.tag, str) and etree.QName(o).localname in ("sp", "pic", "graphicFrame", "grpSp", "cxnSp")]
+    members = _block_of(el, top, slide_w, slide_h) if el in top else [el]
+    if len(members) == 1:
+        moved = _move_inside(el, safe, slide_w, slide_h, into_safe)
+        plan = [(el, moved)] if moved else []
+    else:
+        boxes = [_box(m) for m in members]
+        if any(b is None for b in boxes):
+            return None
+        u = boxes[0]
+        for b in boxes[1:]:
+            u = u.union(b)
+        bx, by, bw, bh = (safe.x, safe.y, safe.w, safe.h) if into_safe else (0, 0, slide_w, slide_h)
+        if u.w > bw or u.h > bh:
+            return None  # a block is never squeezed: it is re-rendered instead
+        dx = min(max(u.x, bx), bx + bw - u.w) - u.x
+        dy = min(max(u.y, by), by + bh - u.h) - u.y
+        if dx == 0 and dy == 0:
+            return None
+        plan = [(m, (b.x + dx, b.y + dy, b.w, b.h)) for m, b in zip(members, boxes)]
+    if not plan:
+        return None
+    others = [o for o in top if o not in members and _paints_or_reads(o)]
+    slide_area = slide_w * slide_h
+    for m, (nx, ny, nw, nh) in plan:
+        old = _box(m)
+        new = Bbox(x=nx, y=ny, w=nw, h=nh)
+        for o in others:
+            ob = _box(o)
+            if ob is None or ob.area >= 0.85 * slide_area:
+                continue  # a background picture or panel is under everything
+            limit = _NEW_OVERLAP * max(min(new.area, ob.area), 1)
+            if new.intersection(ob) <= limit:
+                continue
+            if old is not None and old.intersection(ob) > limit:
+                continue  # they overlapped before the move: not a new overlap
+            return None
+    return plan
+
+
 _SCOPE_RU = {"text": "текста", "fill": "заливки", "line": "обводки", "all": "элемента"}
 
 
@@ -264,14 +412,16 @@ def _xml_fixes(pptx: Path, actions: list[tuple[int, FixAction]], manifest: Templ
                     what = _SCOPE_RU.get(scope, "элемента")
                     done(slide_index, "recolor", eid, f"Цвет {what} заменён на #{target_hex}" if target_hex else f"Цвет {what} приведён к палитре шаблона")
             elif act.action == "move_inside":
-                moved = _move_inside(el, safe, slide_w, slide_h, bool(act.params.get("safe")))
-                if moved:
-                    x, y, w, h = element_bbox(el)  # type: ignore[misc]
-                    nx, ny, nw, nh = moved
-                    set_element_pos(el, x=nx, y=ny, w=nw if nw != w else None, h=nh if nh != h else None)
+                plan = _move_block(el, prs.slides[slide_index - 1], safe, slide_w, slide_h, bool(act.params.get("safe")))
+                if plan:
+                    resized = False
+                    for m, (nx, ny, nw, nh) in plan:
+                        x, y, w, h = element_bbox(m)  # type: ignore[misc]
+                        set_element_pos(m, x=nx, y=ny, w=nw if nw != w else None, h=nh if nh != h else None)
+                        resized = resized or (nw, nh) != (w, h)
                     where = "в поля шаблона" if act.params.get("safe") else "внутрь слайда"
-                    resized = " и уменьшен по размеру" if (nw, nh) != (w, h) else ""
-                    done(slide_index, "move_inside", eid, f"Элемент возвращён {where}{resized}")
+                    what = "Элемент" if len(plan) == 1 else f"Блок из {len(plan)} элементов"
+                    done(slide_index, "move_inside", eid, f"{what} возвращён {where}{' и уменьшен по размеру' if resized else ''}")
             elif act.action == "shrink_text":
                 ratio = float(act.params.get("ratio", 1.2))
                 factor = max(0.6, min(0.95, 1 / ratio))
@@ -370,7 +520,7 @@ def autofix_loop(
             for oid, actions in fixes.items():
                 for act in actions:
                     if act.action in STRUCTURAL_ACTIONS:
-                        res = _rematch(plan, outline, oid)
+                        res = _rematch(plan, outline, oid, manifest)
                         applied.append({"iteration": it, "outline_id": oid, "action": act.action, "result": res})
                         need_render = need_render or res != "skip"
                     elif act.action == "condense_text":
@@ -382,6 +532,7 @@ def autofix_loop(
                         if idx:
                             xml_actions.append((idx, act))
             if need_render:
+                _unsay(outline)
                 render_result = render_deck(outline, plan, manifest, ws, pptx)
                 # element ids change after a re-render: re-derive the XML fixes from a render-free audit of the new deck
                 fresh = run_audit(pptx, manifest, outline, ws, render=False, images_dir=images_dir, strategy=report.strategy, brief_text=brief_text)

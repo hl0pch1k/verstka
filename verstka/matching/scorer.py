@@ -26,6 +26,9 @@ _BOOKEND_KINDS = (PatternKind.title, PatternKind.section, PatternKind.thanks)
 _PLACEHOLDER_RE = re.compile(r"имя|фамили|должност|спикер|speaker|\bname\b|position|вставить|insert|\bqr\b|qr-|фото|photo|логотип|logo", re.I)
 # words a line must not end on (a preposition, a conjunction): they are bound to the next word with a no-break space
 _BOUND_WORDS = frozenset("в во на за с со к ко по о об от до из у и а но не ни да же ли бы".split())
+# a figure is one unit on a display line: its thousands («120 000») and its unit («255 000 рублей», «42 %», «18,6 млрд»)
+_DIGIT_GROUP_RE = re.compile(r"(?<=\d) (?=\d{3}(?!\d))")
+_FIGURE_UNIT_RE = re.compile(r"(?<=\d) (?=(?:%|‰|₽|\$|€|руб|тыс|млн|млрд|трлн)(?![A-Za-z]))")
 
 
 @dataclass
@@ -35,14 +38,33 @@ class ScoreResult:
     fit: dict = field(default_factory=dict)
 
 
+def _cover_like(pattern: Pattern, manifest: TemplateManifest, sample_size: float) -> bool:
+    """A sample is a cover by its own means, whatever the size of the content headings: its heading is a display size
+    for the slide (≥ 7 % of the slide height — a template whose content headings are display-sized too, 88 pt on a
+    15-inch slide, must not demote its real cover), or it is the first sample built on the title layout (ctrTitle
+    placeholder or a layout of type «title»)."""
+    if sample_size >= 0.07 * manifest.slide_size.h / 12700:
+        return True
+    first = next((p for p in sorted(manifest.patterns, key=lambda p: p.source_slide) if p.title_ph == "ctrTitle" or p.layout_type == "title"), None)
+    return first is not None and first.id == pattern.id
+
+
 def is_placeholder_text(text: Optional[str]) -> bool:
     """A sample text that asks for a speaker, a photo, a QR code or a logo."""
     return bool(text and _PLACEHOLDER_RE.search(text))
 
 
+def bind_figures(text: str) -> str:
+    """No-break spaces inside a figure and between a figure and its unit: «со 120 000 до 255 000 рублей» never breaks
+    as «120 / 000» or «255 000 / рублей» (G1-16)."""
+    if not text or not any(ch.isdigit() for ch in text):
+        return text
+    return _FIGURE_UNIT_RE.sub("\u00a0", _DIGIT_GROUP_RE.sub("\u00a0", text))
+
+
 def bind_short_words(text: str) -> str:
     """No-break spaces after one- and two-letter words and prepositions («в VK», «и план»), so that a display line
-    never ends on one."""
+    never ends on one; a figure keeps its thousands and its unit (`bind_figures`)."""
     words = text.split(" ")
     out = []
     # a name in guillemets of up to three words («Точка кофе») is one unit: never broken across lines
@@ -68,7 +90,7 @@ def bind_short_words(text: str) -> str:
                 out.append("\u00a0")
             else:
                 out.append(" ")
-    return bind_compounds("".join(out))
+    return bind_compounds(bind_figures("".join(out)))
 
 
 def display_lines(text: str, family: Optional[str], size_pt: float, bold: bool, width_pt: float) -> list[str]:
@@ -547,10 +569,20 @@ def score_pattern(
         reasons.append(f"обложка: заголовок {size:.0f} пт, других текстов {others}: {hero:+.2f}")
         h1 = typo.size_for("h1", 0.0)
         sample_size = max((x.style.size_pt or 0.0 for x in titles), default=0.0)
-        if h1 and sample_size and sample_size < 1.15 * h1:
+        if h1 and sample_size and sample_size < 1.15 * h1 and not _cover_like(pattern, manifest, sample_size):
             # a heading at the size of a content heading: the sample is a content page, not a cover or a divider
             style -= 0.15
             reasons.append(f"заголовок образца ({sample_size:.0f} пт) не крупнее заголовка слайда ({h1:.0f} пт): это не обложка")
+        if pattern.mockup_boxes and not content.image_hint:
+            # a phone mock-up or an empty photo frame stays empty on the cover (no screenshot, no photo in the brief):
+            # drawn by the layout it cannot be taken off the slide (−0.3: another bookend of the template — its closing
+            # slide on the same ground — makes the better cover); drawn on the sample the renderer takes it off and
+            # only an empty stretch of the ground is left, so it just breaks ties (−0.03): the template's real cover
+            # keeps its place against a divider sample borrowed as a cover (MyBrand: a longer title that needs a
+            # smaller size on the real cover must not hand the cover to a section slide)
+            pen = 0.3 if pattern.mockup_on_layout else 0.03
+            style -= pen
+            reasons.append(f"макет устройства или пустая рамка под фото останутся пустыми: −{pen:.2f}")
         photos = [x for x in pattern.slots if x.role == SlotRole.image and x.bbox.area >= 0.015]
         if photos and not content.image_hint:
             style -= 0.06

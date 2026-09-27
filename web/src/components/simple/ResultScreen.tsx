@@ -4,7 +4,7 @@
 // the remarks workspace: the remarks are numbered on the slide and in the list, and «Исправить слайд» lets the agent
 // fix them on that slide only.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { ChevronRight, Download, FileText, FolderDown, ImageOff, LayoutTemplate, ListTree, PenLine, RotateCcw } from "lucide-react";
+import { ChevronRight, Download, FileText, FolderDown, ImageOff, LayoutTemplate, ListTree, PenLine, RotateCcw, ScrollText } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { plainWords, variantsNote } from "../../lib/agent";
 import { deckNotice } from "../../lib/modelText";
@@ -30,6 +30,7 @@ import { RemarksPanel, useCheckTitles } from "./RemarksPanel";
 import { SlideLightbox } from "./SlideLightbox";
 import { SlideStrip } from "./SlideStrip";
 import { useSlideFix, type FixRun } from "./useSlideFix";
+import { WriterTextSheet } from "./WriterText";
 
 const NO_ISSUES: Issue[] = [];
 /** The screen's container, shared with the build screen and the header row: the edges line up across screens. The left
@@ -617,6 +618,8 @@ function Deck({ generation }: { generation: Generation }) {
   const noticeBody = noticeHelp || noticeBasis;
   const noticeFull = [noticeBasis, noticeHelp].filter(Boolean).join(" ");
   const retryWaits = !!notice && notice.retryWait > 0;
+  // writer mode: the text the agent wrote from the topic, in a sheet («Показать текст»)
+  const [textOpen, setTextOpen] = useState(false);
 
   // the aside: the remarks workspace while the switch is on (with the helper open too), else the cards (helper closed).
   // The panel and the cards cross-fade (below). A hidden aside stays mounted (display: none): the quality ring keeps
@@ -837,11 +840,12 @@ function Deck({ generation }: { generation: Generation }) {
           {shownNotice && (
             <Notice
               className="shrink-0"
-              tone="warn"
+              tone={shownNotice.tone ?? "warn"}
               title={noticeTitle}
               action={
-                shownNotice.retry || shownNotice.rewrite ? (
+                shownNotice.retry || shownNotice.rewrite || shownNotice.showText ? (
                   <>
+                    {shownNotice.showText && <Button size="sm" variant="white" icon={ScrollText} onClick={() => setTextOpen(true)}>Показать текст</Button>}
                     {shownNotice.retry && (
                       // a disabled button shows no tooltip: the wrapper carries it while the model is overloaded
                       <span title={retryWaits ? "Модель перегружена — попробуйте через минуту" : undefined}>
@@ -857,6 +861,9 @@ function Deck({ generation }: { generation: Generation }) {
             >
               {noticeBody && <span className="line-clamp-2" title={noticeFull}>{noticeBody}</span>}
             </Notice>
+          )}
+          {generation.writer?.status === "written" && generation.writer.text && (
+            <WriterTextSheet writer={generation.writer} open={textOpen} onClose={() => setTextOpen(false)} />
           )}
         </div>
       </Collapse>

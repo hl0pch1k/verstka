@@ -1,0 +1,22 @@
+name: writer_check
+version: 1.1.0
+role: llm
+description: >
+  Writer mode, after the writer: the fact check of the written text, deletion-only. With the reference (the article
+  the writer used) it is a reading task — does the reference state each sentence, timeline entry and data row?
+  Without one it is a self-check against well-established knowledge. It reports the ids that must go (unsupported,
+  wrong, doubtful, opinion) and never proposes a correction: Verstka removes them and replaces nothing.
+prompt_files:
+  system: prompts/system.md
+  user: prompts/user.md
+output_schema: verstka.schemas.writer.WriterCheckAnswer
+params:
+  temperature: 0.0
+  max_tokens: 1200
+changelog:
+  - "1.0.0: initial version. 1.6–3.7 s with a reference, 6–14 s without; deletion-only because every «fix» the
+    checker proposed in the probes was as likely to add an error as to remove one."
+  - "1.1.0: a paraphrase, a rounded figure or two joined statements of the reference count as supported (the check had
+    removed «погибло более 70 миллионов человек» and «61 государство, 80 % населения», which the article states); a
+    participant's quoted words are not a fact («Целью было устранить угрозу со стороны СССР»). writer.py keeps what the
+    full article states (ArticleSupport) whatever the check reports."

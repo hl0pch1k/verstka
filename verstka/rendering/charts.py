@@ -429,6 +429,14 @@ def _fill_color(holder, scheme: dict[str, str], part=None, region=None) -> Optio
                 return None
             rgb = [sum(_rgb_t(s[0])[i] for s in stops) / len(stops) for i in range(3)]
             return "".join(f"{int(round(x)):02X}" for x in rgb)
+        if kind == "pattFill":
+            # a pattern reads as the blend of its two colours (half and half: the density is not modelled)
+            fg, bg = child.find(_a("fgClr")), child.find(_a("bgClr"))
+            cf = _color_choice(fg[0], scheme) if fg is not None and len(fg) else None
+            cb = _color_choice(bg[0], scheme) if bg is not None and len(bg) else None
+            if cf and cb:
+                return _mix(cf[0], cb[0], 0.5)
+            return (cf or cb or (None,))[0]
         if kind == "blipFill" and part is not None:
             blip = child.find(_a("blip"))
             rid = blip.get(f"{{{_R}}}embed") if blip is not None else None
@@ -508,6 +516,10 @@ def slide_ground(slide: Slide, bbox: Bbox) -> Optional[str]:
                     got = cc[0] if cc and cc[1] >= 0.5 else None
         if got:
             return got
+    # what the layout and the master paint under the box (a band, a panel, a full-bleed picture), topmost first
+    got = _template_ground(slide, bbox, scheme)
+    if got:
+        return got
     region = (bbox.x / sw, bbox.y / sh, (bbox.x + bbox.w) / sw, (bbox.y + bbox.h) / sh)
     holders = []
     try:
@@ -534,6 +546,61 @@ def slide_ground(slide: Slide, bbox: Bbox) -> Optional[str]:
 
 _OWN_PARTS: "weakref.WeakSet" = weakref.WeakSet()
 _TEMPLATE_COLORS: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+
+
+def _template_ground(slide: Slide, bbox: Bbox, scheme: dict[str, str]) -> Optional[str]:
+    """The colour the slide's layout (then its master, unless a showMasterSp="0" hides it) paints under `bbox`: the
+    topmost non-placeholder shape or picture that holds the box's centre and covers half of it (contract C4)."""
+    cx, cy = bbox.x + bbox.w / 2, bbox.y + bbox.h / 2
+    area = max(bbox.w * bbox.h, 1)
+    try:
+        layout = slide.slide_layout
+        holders = [layout]
+        hide = slide._element.get("showMasterSp") == "0" or layout._element.get("showMasterSp") == "0"
+        if not hide:
+            holders.append(layout.slide_master)
+    except Exception:  # noqa: BLE001
+        return None
+    for holder in holders:
+        tree = holder._element.find(f"{{{_P}}}cSld/{{{_P}}}spTree")
+        if tree is None:
+            continue
+        for el in reversed(list(tree)):
+            kind = _local(el)
+            if kind not in ("sp", "pic") or el.find(f".//{{{_P}}}ph") is not None:
+                continue
+            sppr = el.find(f"{{{_P}}}spPr")
+            xfrm = sppr.find(_a("xfrm")) if sppr is not None else None
+            off = xfrm.find(_a("off")) if xfrm is not None else None
+            ext = xfrm.find(_a("ext")) if xfrm is not None else None
+            if off is None or ext is None:
+                continue
+            try:
+                x, y, w, h = int(off.get("x")), int(off.get("y")), int(ext.get("cx")), int(ext.get("cy"))
+            except (TypeError, ValueError):
+                continue
+            if w <= 0 or h <= 0 or not (x <= cx <= x + w and y <= cy <= y + h):
+                continue
+            ox = max(0, min(x + w, bbox.x + bbox.w) - max(x, bbox.x))
+            oy = max(0, min(y + h, bbox.y + bbox.h) - max(y, bbox.y))
+            if ox * oy < 0.5 * area:
+                continue
+            region = ((bbox.x - x) / w, (bbox.y - y) / h, (bbox.x + bbox.w - x) / w, (bbox.y + bbox.h - y) / h)
+            if kind == "pic":
+                bf = el.find(f"{{{_P}}}blipFill")
+                blip = bf.find(_a("blip")) if bf is not None else None
+                rid = blip.get(f"{{{_R}}}embed") if blip is not None else None
+                got = _picture_mean(holder.part, rid, region) if rid else None
+            else:
+                got = _fill_color(sppr, scheme, holder.part, region)
+                if got is None and sppr is not None and not any(_local(c) in ("noFill", "solidFill", "gradFill", "blipFill", "pattFill") for c in sppr):
+                    ref = el.find(f"{{{_P}}}style/{_a('fillRef')}")
+                    if ref is not None and ref.get("idx") not in (None, "0") and len(ref):
+                        cc = _color_choice(ref[0], scheme)
+                        got = cc[0] if cc and cc[1] >= 0.5 else None
+            if got:
+                return got
+    return None
 
 
 def template_chart_colors(slide: Slide) -> list[str]:
@@ -810,10 +877,11 @@ _PERIOD_WORDS = (
 _MONTH_WORD_RE = re.compile(r"(?i)\b(январ|феврал|март|апрел|ма|июн|июл|август|сентябр|октябр|ноябр|декабр)[а-яё]*\b")
 
 
-def short_categories(cats: Sequence[str]) -> list[str]:
+def short_categories(cats: Sequence[str], joiner: bool = True) -> list[str]:
     """Category labels of a time axis set short, for a chart whose slots are too narrow for them: «1-й месяц» →
     «1-й мес.», «Месяц 3» → «Мес. 3», «Январь 2026» → «Янв 2026», «2 квартал» → «2 кв.». Only the period words are
-    shortened (the figures and the other words stay), and only in the chart: the plan keeps its words."""
+    shortened (the figures and the other words stay), and only in the chart: the plan keeps its words. `joiner=False`:
+    no word joiner after a hyphen (U+2060 is not rendered by every reader: a box or a break instead of nothing)."""
     out = []
     for c in cats:
         t = " ".join(str(c).split())
@@ -829,7 +897,11 @@ def short_categories(cats: Sequence[str]) -> list[str]:
 
         t = _MONTH_WORD_RE.sub(month, t)
         # a shortened label is one word for the renderer: «1-й мес.» never breaks after «1-» or «1-й»
-        out.append(t.replace(" ", "\u00a0").replace("-", "-\u2060") if t != " ".join(str(c).split()) else t)
+        if t != " ".join(str(c).split()):
+            t = t.replace(" ", "\u00a0")
+            if joiner:
+                t = t.replace("-", "-\u2060")
+        out.append(t)
     return out
 
 
@@ -1176,6 +1248,22 @@ def _size_at_least(size: float, typography: Optional[Typography], cap: float = 1
     return _snap(size)
 
 
+def _size_at_most(size: float, typography: Optional[Typography], floor: float = 0.8) -> float:
+    """The largest template size ≤ `size` (and not under `floor` × it), else `size` itself rounded down to half a
+    point."""
+    pool = [s for s in _type_sizes(typography, used=True) if size * floor - 0.05 <= s <= size + 0.05]
+    return max(pool) if pool else math.floor(size * 2) / 2
+
+
+def chart_text_capped(typography: Optional[Typography], font_size_pt: Optional[float], slide_h_emu: int) -> bool:
+    """Chart and table text is capped relative to the slide when the template's own chart text is larger than 2.6 %
+    of the slide height (a bullet placeholder's 24 pt taken for chart text) or its type scale is too thin to trust
+    (a derived ladder). The dataset templates set 7–12 pt: never capped."""
+    hpt = slide_h_emu / EMU_PER_PT if slide_h_emu else 0.0
+    sparse = bool(getattr(typography, "derived_sizes", None)) if typography is not None else False
+    return sparse or (hpt > 0 and (font_size_pt or 0.0) > 0.026 * hpt)
+
+
 def _bold_voice(typography: Optional[Typography]) -> bool:
     """Does the template emphasise with weight? Only when its display / h1 are set in bold often enough."""
     if typography is None:
@@ -1250,6 +1338,7 @@ class _Kit:
     styles: list = field(default_factory=list)  # per series: {"fill", "line", "dash", "label"}
     outside: bool = True  # a pie may set a label outside a thin slice (False: the caller's legend carries it)
     slice_labels: bool = True  # a pie of amounts with the caller's legend: no computed shares on the slices
+    capped: bool = False  # chart text capped relative to the slide (chart_text_capped): category labels measured strictly
 
     def plain(self, v) -> str:
         return _fmt_value(v, self.unit_plain, self.decimals)
@@ -1384,6 +1473,16 @@ def add_chart(
     fs_value = _size_at_least(max(fs * 1.1, min(body or fs, fs * 1.5)), typography, cap=1.45)
     bold = _bold_voice(typography)
     fs_hl = fs_value if bold else _size_at_least(fs_value * 1.12, typography, cap=1.4)
+    capped = chart_text_capped(typography, style.font_size_pt, sh)
+    if capped:
+        # chart text relative to the slide (≤ 2.6 % of its height) and to its frame (≤ a tenth of it): a bullet
+        # placeholder's 24 pt on an 11″ slide is not a chart label size
+        hpt = sh / EMU_PER_PT
+        cap = max(min(0.026 * hpt, H / 10.0), 8.0)
+        if fs > cap:
+            fs = _size_at_most(cap, typography)
+        fs_value = max(fs, _size_at_most(min(fs_value, 1.25 * fs, max(0.03 * hpt, fs)), typography))
+        fs_hl = max(fs_value, _size_at_most(min(fs_hl, 1.12 * fs_value), typography)) if not bold else fs_value
 
     # --- data
     data = CategoryChartData()
@@ -1477,6 +1576,7 @@ def add_chart(
         decimals=decimals, W=W, H=H, sw=sw, sh=sh, title_h=title_h,
     )
     k.slice_labels = True
+    k.capped = capped
     if multi and kind not in ("pie", "doughnut"):
         k.roles = series_roles([s.name for s in series])
     k.styles = _series_styles(k)
@@ -1508,7 +1608,7 @@ def add_chart(
 # ---------------------------------------------------------------------------------------------- axes
 
 
-def _cat_axis(k: _Kit, fs: float, reverse: bool = False, line: bool = True, skip: int = 1) -> None:
+def _cat_axis(k: _Kit, fs: float, reverse: bool = False, line: bool = True, skip: int = 1, rotate: bool = False) -> None:
     ca = k.chart.category_axis
     ca.visible = True
     ca.has_major_gridlines = False
@@ -1523,6 +1623,11 @@ def _cat_axis(k: _Kit, fs: float, reverse: bool = False, line: bool = True, skip
         ca.format.line.fill.background()
     _axis_txpr(ca, fs, k.muted, k.family)
     el = ca._element
+    if rotate:
+        bp = el.find(_c("txPr") + "/" + _a("bodyPr"))
+        if bp is not None:
+            bp.set("rot", "-2700000")
+            bp.attrib.pop("vert", None)
     if reverse:
         scaling = el.find(_c("scaling"))
         orient = scaling.find(_c("orientation")) if scaling is not None else None
@@ -1981,15 +2086,34 @@ def _style_line(k: _Kit) -> None:
     right = max(1.0, end_w + fs * 0.9 - slot / 2 + 6) if ends else max(1.0, widest(fs_val) / 2 - slot / 2 + 4)
     pw, ph = max(W - left - right, W * 0.3), max(H - top - bottom, H * 0.3)
     real_slot = pw / n
-    room = real_slot * 0.92  # a label wider than its slot is broken by the renderer, even inside a word
+    # a label wider than its slot is broken by the renderer, even inside a word; the capped mode measures the slot
+    # strictly (LibreOffice ignores tickLblSkip and stacks a long label letter by letter)
+    room = real_slot * (0.75 if k.capped else 0.92)
     longest = max((text_width_pt(c, family, cat_fs) for c in cats), default=0.0)
     if longest > room:
-        short = short_categories(cats)
+        short = short_categories(cats, joiner=not k.capped)
         if short != cats:
             cats = k.cats = short
             _set_categories(k, short)
             longest = max((text_width_pt(c, family, cat_fs) for c in cats), default=0.0)
     skip = max(1, math.ceil(longest / room)) if longest > room else 1
+    rotate = False
+    if k.capped and longest > room:
+        if n >= 5:
+            # still too wide: the labels turn by 45° (their height takes the room under the plot)
+            rotate = True
+            skip = 1
+            bottom += max(0.0, longest * 0.71 + cat_fs * 0.71 - cat_fs * 1.25)
+            ph = max(H - top - bottom, H * 0.3)
+        else:
+            # a few long labels: every k-th label is kept, the others are blank in the chart's data (the readers
+            # that ignore tickLblSkip would stack them letter by letter)
+            keep = max(1, math.ceil(longest / room))
+            blank = [c if (j % keep == 0 or j == n - 1) else "" for j, c in enumerate(cats)]
+            if blank != cats:
+                cats = k.cats = blank
+                _set_categories(k, blank)
+            skip = 1
     if skip > 1 and n > 2:
         # the labels shown are the first, the last and every k-th between: pick k so that the last one falls on it
         skip = next((kk for kk in range(skip, n) if (n - 1) % kk == 0), skip)
@@ -2105,7 +2229,7 @@ def _style_line(k: _Kit) -> None:
                 _set_ser_dlbls(ser_el, _dlbls(k.fmt_plain, fs_val, lab_color, family, None, pts, show_val=False))
 
     # the baseline implies zero: without a value axis over a raised minimum there is none
-    _cat_axis(k, cat_fs, skip=skip, line=axis_on or not (lo and lo > 0))
+    _cat_axis(k, cat_fs, skip=skip, line=axis_on or not (lo and lo > 0), rotate=rotate)
     _value_axis(k, axis_on, cat_fs, lo, hi, step)
     ax = k.chart.category_axis._element
     _set_child_val(ax, "lblOffset", "100", ("tickLblSkip", "tickMarkSkip", "noMultiLvlLbl", "extLst"))
@@ -2170,6 +2294,8 @@ def _style_pie(k: _Kit) -> None:
 
     size = k.fs_value
     m, avail_h, side = geometry(False)
+    if k.capped:
+        size = max(min(size, _snap(side / 8.0)), min(fs, 8.0))  # a slice label never larger than an eighth of the pie
     where = decide(side, size)
     if any(v in ("outEnd", "none") for v in where.values()) and size > fs:
         smaller = decide(side, fs)

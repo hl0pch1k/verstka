@@ -32,6 +32,7 @@ interface VariantState extends VariantProgress { indeterminate?: boolean }
 // what the agent is doing with a variant before the pipeline reports its layout (then: «в очереди на вёрстку»,
 // «вёрстка 4 из 6», «проверка качества», «готово»)
 const AGENT_STATUS: Partial<Record<PhaseKey, string>> = {
+  writer: "пишу текст",
   analyst: "читаю текст",
   architect: "строю сюжет",
   designer: "продумываю слайды",

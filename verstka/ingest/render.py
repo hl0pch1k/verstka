@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import logging
 import os
 import re
@@ -50,6 +51,75 @@ def _warn_missing_mac_fonts() -> None:
     missing = [f.name for f in sorted(_FONT_DIR.glob("*.ttf")) if f.name.lower() not in installed]
     if missing:
         log.warning("шрифты %s не установлены: превью и PDF LibreOffice наберёт запасным шрифтом; установите: cp %s/*.ttf ~/Library/Fonts/", ", ".join(missing), _FONT_DIR)
+
+
+_LATIN_FACE_RE = re.compile(rb"<a:latin\b[^>]*?\btypeface=\"([^\"]+)\"")
+
+
+def _bundled_families() -> set[str]:
+    """Families of the fonts shipped in verstka/fonts (Play): the Linux fontconfig file adds them for LibreOffice."""
+    return {f.stem.split("-")[0].lower() for f in _FONT_DIR.glob("*.[ot]tf")} if _FONT_DIR.is_dir() else set()
+
+
+def font_replacements(pptx: Path, available: frozenset[str] | set[str] = frozenset()) -> dict[str, str]:
+    """{family: stand-in} for every Latin/Cyrillic family the deck names (slides, layouts, masters, theme, charts)
+    that this machine does not have — the table LibreOffice gets so that each run is set in one face of the family's
+    class instead of a glyph-by-glyph fallback («Open Sans» → OpenSymbol digits + Helvetica letters + STIX «₽»).
+    `available`: lower-case families LibreOffice will find anyway (the bundled Play on Linux)."""
+    from verstka.rendering.fonts import render_standin  # lazy: keeps ingest importable without the rendering package
+
+    families: set[str] = set()
+    try:
+        with zipfile.ZipFile(pptx) as z:
+            for name in z.namelist():
+                if name.startswith("ppt/") and name.endswith(".xml"):
+                    for m in _LATIN_FACE_RE.finditer(z.read(name)):
+                        families.add(html.unescape(m.group(1).decode("utf-8", "replace")).strip())
+    except (zipfile.BadZipFile, OSError, KeyError):
+        return {}
+    out: dict[str, str] = {}
+    for fam in sorted(families):
+        if not fam or fam.lower() in available:
+            continue
+        try:
+            sub = render_standin(fam)
+        except Exception:  # noqa: BLE001 — a font probe never fails a render
+            sub = None
+        if sub and sub.lower() != fam.lower():
+            out[fam] = sub
+    return out
+
+
+def _xml_attr(text: str) -> str:
+    return html.escape(text, quote=True)
+
+
+def _write_font_table(profile: Path, pairs: dict[str, str]) -> None:
+    """Seed a fresh LibreOffice profile with a font replacement table (Tools ▸ Options ▸ Fonts, «Always»): only
+    entries applied always reach a PDF export, so the table must list missing families only."""
+    if not pairs:
+        return
+    user = profile / "user"
+    user.mkdir(parents=True, exist_ok=True)
+    items = [
+        '<item oor:path="/org.openoffice.Office.Common/Font/Substitution"><prop oor:name="Replacement" oor:op="fuse">'
+        "<value>true</value></prop></item>"
+    ]
+    for i, (fam, sub) in enumerate(sorted(pairs.items())):
+        items.append(
+            f'<item oor:path="/org.openoffice.Office.Common/Font/Substitution/FontPairs"><node oor:name="_{i}" oor:op="replace">'
+            '<prop oor:name="Always" oor:op="fuse"><value>true</value></prop>'
+            '<prop oor:name="OnScreenOnly" oor:op="fuse"><value>false</value></prop>'
+            f'<prop oor:name="ReplaceFont" oor:op="fuse"><value>{_xml_attr(fam)}</value></prop>'
+            f'<prop oor:name="SubstituteFont" oor:op="fuse"><value>{_xml_attr(sub)}</value></prop></node></item>'
+        )
+    (user / "registrymodifications.xcu").write_text(
+        '<?xml version="1.0" encoding="UTF-8"?>\n<oor:items xmlns:oor="http://openoffice.org/2001/registry" '
+        'xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">\n'
+        + "\n".join(items)
+        + "\n</oor:items>\n",
+        encoding="utf-8",
+    )
 
 
 class RenderError(RuntimeError):
@@ -121,6 +191,11 @@ def pptx_to_pdf(pptx: Path, out_dir: Path, timeout_s: float = 240.0) -> Path:
         except (zipfile.BadZipFile, OSError, ValueError) as e:  # a broken package still gets its LibreOffice verdict
             log.warning("render copy failed, converting the original: %s", e)
             src = Path(pptx)
+        # missing template families → one installed face of their class (see font_replacements)
+        pairs = font_replacements(src, available=_bundled_families() if fc else frozenset())
+        if pairs:
+            log.debug("LibreOffice font stand-ins: %s", pairs)
+            _write_font_table(Path(profile) / "profile", pairs)
         cmd = [
             soffice,
             f"-env:UserInstallation={(Path(profile) / 'profile').as_uri()}",

@@ -7,27 +7,70 @@ import re
 from typing import Optional
 
 from verstka.analysis.chrome import shape_signature
-from verstka.audit.checks.common import composite_hex, enclosing_fill, fill_alpha, fix, is_chrome_like, ru_count, text_elements
+from verstka.audit.checks.common import composite_hex, fill_alpha, fix, ground_of, is_chrome_like, is_template_chrome, ru_count, template_grounds, text_elements, text_height_needed_pt
 from verstka.audit.registry import AuditContext, check
 from verstka.schemas.audit import CheckSpec, Issue
-from verstka.schemas.common import Color, contrast_ratio
+from verstka.schemas.common import EMU_PER_PT, Bbox, Color, contrast_ratio
 
-FONT_NOT_IN_TEMPLATE = CheckSpec(id="font_not_in_template", title="Шрифт не из шаблона или гарнитур больше двух", severity="error", category="template", description="Гарнитура рана отсутствует среди шрифтов шаблона (используемых или встроенных), либо на слайде больше двух гарнитур.")
+FONT_NOT_IN_TEMPLATE = CheckSpec(id="font_not_in_template", title="Шрифт не из шаблона или гарнитур больше двух", severity="error", category="template", description="Гарнитура рана отсутствует среди шрифтов шаблона (используемых, встроенных или шрифтов темы), либо на слайде больше двух гарнитур. Имена сравниваются без регистра и дефисов, начертание в имени — та же гарнитура («Bebas» и «Bebas Neue», «Montserrat-Regular» и «Montserrat»); ссылки на шрифты темы (+mj-lt, +mn-lt) раскрываются; номер слайда и колонтитулы шаблона не проверяются.")
 SIZE_NOT_IN_SCALE = CheckSpec(id="size_not_in_scale", title="Размер шрифта не из шкалы шаблона", severity="warn", category="template", description="Размер шрифта отличается более чем на 0,75 пт от всех размеров, встречающихся в шаблоне. Крупные числа (значение с единицей, от наибольшего кегля шаблона или вдвое крупнее основного текста) — отдельная ступень шкалы: они не проверяются.")
-COLOR_NOT_IN_PALETTE = CheckSpec(id="color_not_in_palette", title="Цвет не из палитры шаблона", severity="warn", category="template", description="Цвет текста или заливки отстоит от ближайшего цвета палитры шаблона больше чем на ΔE 6.")
+COLOR_NOT_IN_PALETTE = CheckSpec(id="color_not_in_palette", title="Цвет не из палитры шаблона", severity="warn", category="template", description="Цвет текста или заливки отстоит от ближайшего цвета палитры шаблона больше чем на ΔE 6 и не является более светлым или тёмным вариантом цветного цвета палитры (тот же тон и насыщенность, как ряды оттенков темы в PowerPoint). Своими считаются и цвета, которые задают макеты и мастер шаблона, а также чёрный и белый; служебные элементы шаблона (номер слайда, колонтитулы) не проверяются.")
 LAYOUT_NOT_FROM_TEMPLATE = CheckSpec(id="layout_not_from_template", title="Слайд собран не на макете из шаблона", severity="error", category="template", description="Слайд ссылается на макет, которого нет в пакете шаблона.")
 CHROME_MOVED = CheckSpec(id="chrome_moved", title="Логотип или колонтитул сдвинуты с положенного места", severity="warn", category="template", description="Элемент хрома шаблона (логотип, колонтитул на слайдах) отсутствует или стоит в другом месте.")
 TABLE_CONTRAST_LOW = CheckSpec(id="table_contrast_low", title="Контраст текста в таблице ниже нормы", severity="warn", category="template", description="Контраст по WCAG между текстом ячейки таблицы и её заливкой (или фоном слайда) ниже 4.5:1 для обычного текста и 3:1 для крупного (≥18 пт или ≥14 пт жирным) и для значков ✓ / —. Пара цветов шаблона (белый на фирменном синем) от 3:1 — только справка.")
-CONTRAST_LOW = CheckSpec(id="contrast_low", title="Контраст текста к фону ниже 4.5:1", severity="warn", category="template", description="Контраст по WCAG между цветом текста и фоном (карточка с учётом прозрачности заливки или фон слайда) ниже 4.5:1 для обычного текста и 3:1 для крупного (≥18 пт или ≥14 пт жирным).")
+CONTRAST_LOW = CheckSpec(id="contrast_low", title="Контраст текста к фону ниже 4.5:1", severity="warn", category="template", description="Контраст по WCAG между цветом текста и фоном ниже 4.5:1 для обычного текста и 3:1 для крупного (≥18 пт или ≥14 пт жирным). Фон — карточка слайда с учётом прозрачности заливки, иначе плашка, панель или картинка, которую рисуют макет и мастер шаблона, иначе фон слайда; градиент и картинка берутся в том месте, где стоит текст. На картинке или градиенте цвет фона — оценка: от 2:1 — сведение, ниже — ошибка. Строки, которые выходят за край своей плашки на другой фон (двухстрочный заголовок в однострочной полосе), проверяются и на том фоне.")
 
 CONTRAST_CANDIDATE_ROLES = ("text.primary", "text.secondary")
 
 
+def _norm_font(name: str) -> str:
+    """«Bebas Neue» → «bebas neue», «Montserrat-Regular» → «montserrat regular»: lower case, separators as spaces."""
+    return " ".join(re.sub(r"[-_]+", " ", (name or "").lower()).split())
+
+
+def _theme_font(name: str, ctx: AuditContext) -> str:
+    """A theme reference (+mj-lt, +mn-ea …) resolved through the deck's theme fonts."""
+    tf = list(getattr(ctx.ir, "theme_fonts", []) or [])
+    if name.startswith("+mj") and tf and tf[0]:
+        return tf[0]
+    if name.startswith("+mn") and len(tf) > 1 and tf[1]:
+        return tf[1]
+    return name
+
+
+def same_family(a: str, b: str) -> bool:
+    """Two names of one family: equal after normalisation, or one is the other plus more words and the shorter has
+    at least 4 characters («Bebas» ≡ «Bebas Neue», «Open Sans» ≡ «Open Sans Light», «Montserrat» ≡ «Montserrat-Regular»)."""
+    a, b = _norm_font(a), _norm_font(b)
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    short, long_ = (a, b) if len(a) <= len(b) else (b, a)
+    return len(short) >= 4 and long_.startswith(short + " ")
+
+
 def _allowed_fonts(ctx: AuditContext) -> set[str]:
-    fam = {f.family.lower() for f in ctx.manifest.tokens.typography.families if f.weight > 0}  # anything the template itself uses
+    typo = ctx.manifest.tokens.typography
+    # anything the template itself uses, and the fonts of its theme (what its placeholders fall back to)
+    fam = {f.family.lower() for f in typo.families if f.weight > 0 or getattr(f, "source", "text") == "theme"}
     fam |= {f.lower() for f in ctx.manifest.embedded_fonts}
     fam |= {f.lower() for f in ctx.ir.embedded_fonts}
+    fam |= {f.lower() for f in (getattr(ctx.ir, "theme_fonts", []) or []) if f}
     return fam
+
+
+def _font_groups(fonts: list[str]) -> list[list[str]]:
+    """Fonts grouped by family (`same_family`), first appearance order."""
+    groups: list[list[str]] = []
+    for f in fonts:
+        for g in groups:
+            if any(same_family(f, x) for x in g):
+                g.append(f)
+                break
+        else:
+            groups.append([f])
+    return groups
 
 
 @check(FONT_NOT_IN_TEMPLATE)
@@ -39,15 +82,18 @@ def font_not_in_template(ctx: AuditContext) -> list[Issue]:
     for s in ctx.ir.slides:
         used: dict[str, list[str]] = {}
         for e in text_elements(s):
+            if is_template_chrome(e, ctx.manifest):
+                continue  # the template's own page number / footer keeps the template's own font
             for p in e.paragraphs:
                 for r in p.runs:
                     if r.font and r.text.strip():
-                        used.setdefault(r.font, []).append(e.id)
-        bad = {f: ids for f, ids in used.items() if f.lower() not in allowed and not f.startswith("+")}
+                        used.setdefault(_theme_font(r.font, ctx), []).append(e.id)
+        bad = {f: ids for f, ids in used.items() if not f.startswith("+") and not any(same_family(f, a) for a in allowed)}
         for f, ids in bad.items():
             out.append(ctx.new_issue(FONT_NOT_IN_TEMPLATE, s.index, f"шрифт «{f}» отсутствует в шаблоне", element_ids=sorted(set(ids)), bboxes=[s.by_id(i).bbox_frac for i in sorted(set(ids))[:3] if s.by_id(i)], autofix=fix("refont", "заменить на основной шрифт шаблона", element_ids=sorted(set(ids)))))
-        if len(used) > 2:
-            out.append(ctx.new_issue(FONT_NOT_IN_TEMPLATE, s.index, f"на слайде {ru_count(len(used), 'шрифт', 'шрифта', 'шрифтов')}: {', '.join(sorted(used))}", severity="warn"))
+        groups = _font_groups(list(used))
+        if len(groups) > 2:
+            out.append(ctx.new_issue(FONT_NOT_IN_TEMPLATE, s.index, f"на слайде {ru_count(len(groups), 'шрифт', 'шрифта', 'шрифтов')}: {', '.join(sorted(g[0] for g in groups))}", severity="warn"))
     return out
 
 
@@ -73,6 +119,8 @@ def size_not_in_scale(ctx: AuditContext) -> list[Issue]:
     for s in ctx.ir.slides:
         bad: dict[float, list[str]] = {}
         for e in text_elements(s):
+            if is_template_chrome(e, ctx.manifest):
+                continue  # the template's own page number (a big «02») is set at the template's own size
             for p in e.paragraphs:
                 for r in p.runs:
                     if r.size_pt and r.size_pt >= display_from and is_figure(r.text):
@@ -84,22 +132,64 @@ def size_not_in_scale(ctx: AuditContext) -> list[Issue]:
     return out
 
 
+SHADE_HUE = 4.0  # degrees
+SHADE_SAT = 0.08
+SHADE_MIN_SAT = 0.15
+
+
+def is_shade_of(hex_: str, palette: list[str]) -> bool:
+    """A lighter or darker variant of a chromatic palette colour — the same hue and saturation (HSL), only another
+    lightness: what PowerPoint lists under each theme colour («Акцент 1, темнее 25%»). A greyed or re-hued colour is
+    not one, and neither is a grey (every grey would be a «shade» of black)."""
+    import colorsys
+
+    def hsl(h: str) -> tuple[float, float, float]:
+        r, g, b = (int(h[i:i + 2], 16) / 255.0 for i in (0, 2, 4))
+        hh, ll, ss = colorsys.rgb_to_hls(r, g, b)
+        return hh * 360.0, ss, ll
+
+    try:
+        h0, s0, l0 = hsl(hex_)
+    except ValueError:
+        return False
+    if s0 < SHADE_MIN_SAT or not 0.08 <= l0 <= 0.92:
+        return False
+    for p in palette:
+        try:
+            h1, s1, _ = hsl(p)
+        except ValueError:
+            continue
+        if s1 < SHADE_MIN_SAT:
+            continue
+        dh = abs(h0 - h1) % 360.0
+        if min(dh, 360.0 - dh) <= SHADE_HUE and abs(s0 - s1) <= SHADE_SAT:
+            return True
+    return False
+
+
 @check(COLOR_NOT_IN_PALETTE)
 def color_not_in_palette(ctx: AuditContext) -> list[Issue]:
     out: list[Issue] = []
     palette = [Color(hex=h) for h in ctx.manifest.tokens.palette()]
     if not palette:
         return out
+    # the colours the template's layouts and masters set themselves (its page-number grey, its text styles), and
+    # pure black and white, are the template's own
+    palette += [Color(hex=h) for h in dict.fromkeys(list(getattr(ctx.ir, "template_colors", []) or []) + ["000000", "FFFFFF"])]
 
     def nearest(hex_: str) -> float:
         c = Color(hex=hex_)
         return min(Color.delta_e(c, p) for p in palette)
+
+    shades_of = [p.hex for p in palette]
 
     for s in ctx.ir.slides:
         seen: dict[str, list[str]] = {}
         for e in s.elements:
             if e.type == "chart":
                 continue  # chart colours come from the palette by construction; sample charts are removed
+            if is_template_chrome(e, ctx.manifest):
+                continue
             cands = []
             if e.fill_hex and e.type in ("shape", "text"):
                 cands.append(e.fill_hex)
@@ -112,7 +202,7 @@ def color_not_in_palette(ctx: AuditContext) -> list[Issue]:
                     d = nearest(h)
                 except ValueError:
                     continue
-                if d > 6.0:
+                if d > 6.0 and not is_shade_of(h, shades_of):
                     seen.setdefault(h, []).append(e.id)
         for h, ids in seen.items():
             out.append(ctx.new_issue(COLOR_NOT_IN_PALETTE, s.index, f"цвет #{h} не из палитры шаблона", element_ids=sorted(set(ids)), autofix=fix("recolor", "заменить ближайшим цветом палитры", hex=h, element_ids=sorted(set(ids)), scope="all")))
@@ -178,6 +268,46 @@ def _contrast_replacement(tokens, bg: str, need: float) -> Optional[str]:
     return None
 
 
+SPILL_LINE = 0.1  # share of a line height the text's lines may run past its band before it counts as spilling
+
+
+def _line_band(e) -> Bbox:
+    """The band the text's lines really fill at the box's anchor — not clipped to the box: an overflowing text runs
+    past its box (down from a top anchor, both ways from a centre anchor, up from a bottom anchor)."""
+    need, _ = text_height_needed_pt(e)
+    h = max(int(need * EMU_PER_PT) + e.insets_emu[1] + e.insets_emu[3], 1)
+    anchor = e.anchor or "t"
+    y = e.bbox.y if anchor == "t" else (e.bbox.y2 - h if anchor == "b" else e.bbox.y + (e.bbox.h - h) // 2)
+    return Bbox(x=e.bbox.x, y=y, w=e.bbox.w, h=h)
+
+
+def _band_spill(s, e, bg_slide: str, color: str, size: float) -> Optional[tuple[float, str]]:
+    """(contrast, ground) of the worst strip where the lines of a text that stands on a template band run past the
+    band's top or bottom edge by more than SPILL_LINE of a line; None when they stay inside it."""
+    grounds = template_grounds(s, e)
+    if not grounds:
+        return None
+    band = min(grounds, key=lambda o: o.bbox.area)
+    lines = e.bbox if e.autofit == "norm" else _line_band(e)  # a shrink-on-overflow box keeps its text inside it
+    line_h = size * 1.2 * EMU_PER_PT
+    strips = []
+    if band.bbox.y - lines.y >= SPILL_LINE * line_h:
+        strips.append(Bbox(x=lines.x, y=lines.y, w=lines.w, h=band.bbox.y - lines.y))
+    if lines.y2 - band.bbox.y2 >= SPILL_LINE * line_h:
+        strips.append(Bbox(x=lines.x, y=band.bbox.y2, w=lines.w, h=lines.y2 - band.bbox.y2))
+    worst = None
+    for strip in strips:
+        probe = e.model_copy(update={"bbox": strip, "fill_hex": None})
+        under = ground_of(s, probe, bg_slide)[0] or bg_slide
+        try:
+            cr = contrast_ratio(color, under)
+        except ValueError:
+            continue
+        if worst is None or cr < worst[0]:
+            worst = (cr, under)
+    return worst
+
+
 @check(CONTRAST_LOW)
 def contrast_low(ctx: AuditContext) -> list[Issue]:
     out: list[Issue] = []
@@ -190,10 +320,14 @@ def contrast_low(ctx: AuditContext) -> list[Issue]:
             color = e.dominant_color
             if not color:
                 continue
-            enclosing = enclosing_fill(s, e, bg_slide)
+            enclosing, ground_kind = ground_of(s, e, bg_slide)
             under = enclosing or bg_slide
-            # a picture or gradient ground: its colour under the text is unknown here — report, never recolour
+            # a ground of unknown colour: report, never recolour
             uncertain = enclosing is None and not s.background_hex
+            # a picture or gradient ground (a layout photo, a gradient panel or background): its colour under the text
+            # is only estimated (the region's mean, or the whole ground's median) — below 2:1 it is still an error,
+            # above it a note, and it is never recoloured
+            estimated = ground_kind in ("picture", "gradient") or (enclosing is None and (s.background_kind or "") in ("image", "gradient", "render"))
             try:
                 bg = composite_hex(e.fill_hex, fill_alpha(e), under) if e.fill_hex else under
                 cr = contrast_ratio(color, bg)
@@ -202,6 +336,13 @@ def contrast_low(ctx: AuditContext) -> list[Issue]:
             size = e.dominant_size or 14.0
             bold = any(r.bold for p in e.paragraphs for r in p.runs if r.text.strip())
             need = 3.0 if size >= 18 or (bold and size >= 14) else 4.5  # WCAG: large text is 18 pt, or 14 pt bold
+            spill = _band_spill(s, e, bg_slide, color, size) if ground_kind == "template" and not e.fill_hex else None
+            if spill is not None and spill[0] < need:
+                # the text is read on its band, but its lines run out of the band onto another ground (a two-line
+                # heading in a one-line band: the second line white on white)
+                cr2, under2 = spill
+                out.append(ctx.new_issue(CONTRAST_LOW, s.index, f"строки «{e.text[:30]}» выходят за плашку шаблона: контраст {cr2:.1f}:1 (#{color} на #{under2})", bboxes=[e.bbox_frac], element_ids=[e.id], severity="error" if cr2 < 2.5 else "warn", details={"contrast": round(cr2, 2), "background": under2, "ground": "band_spill"}))
+                continue
             if cr < need:
                 accent_text = any(t.hex == color and any(r.startswith("accent.") for r in t.roles) for t in tokens.colors)
                 severity = "error" if cr < 2.5 else ("info" if (accent_text and cr >= 3.0) else "warn")  # brand accent on dark is the template's own choice
@@ -209,11 +350,11 @@ def contrast_low(ctx: AuditContext) -> list[Issue]:
                 is_heading = e.ph_type in ("title", "ctrTitle")
                 if is_heading and severity != "error":
                     severity = "info"
-                to = None if uncertain or is_heading else _contrast_replacement(tokens, bg, need)
+                to = None if uncertain or estimated or is_heading else _contrast_replacement(tokens, bg, need)
                 autofix = fix("recolor", f"заменить цвет текста на #{to}", element_ids=[e.id], to=to, scope="text") if to else None
-                if uncertain:
+                if uncertain or (estimated and cr >= 2.0):
                     severity = "info"
-                out.append(ctx.new_issue(CONTRAST_LOW, s.index, f"контраст {cr:.1f}:1 у «{e.text[:30]}» (#{color} на #{bg})", bboxes=[e.bbox_frac], element_ids=[e.id], severity=severity, details={"contrast": round(cr, 2), "background": bg}, autofix=autofix))
+                out.append(ctx.new_issue(CONTRAST_LOW, s.index, f"контраст {cr:.1f}:1 у «{e.text[:30]}» (#{color} на #{bg})", bboxes=[e.bbox_frac], element_ids=[e.id], severity=severity, details={"contrast": round(cr, 2), "background": bg, "ground": ground_kind or ("estimated" if estimated else "slide")}, autofix=autofix))
     return out
 
 

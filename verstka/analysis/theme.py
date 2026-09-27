@@ -158,7 +158,8 @@ class ThemeResolver:
         return _apply_modifiers(base, color_el)
 
     def resolve_fill(self, parent: Optional[etree._Element]) -> Optional[str]:
-        """First solid colour under parent (solidFill, or first gradient stop). None for noFill/absent."""
+        """First solid colour under parent (solidFill, or first gradient stop; a pattern fill reads as its foreground
+        and background blended by the pattern's density). None for noFill, a picture fill (blipFill) or absent."""
         if parent is None:
             return None
         sf = find(parent, "a:solidFill")
@@ -169,6 +170,11 @@ class ThemeResolver:
             gs = find(gf, "a:gsLst/a:gs")
             if gs is not None and len(gs):
                 return self.resolve_color(gs[0])
+        pf = find(parent, "a:pattFill")
+        if pf is not None:
+            from verstka.analysis.ground import pattern_fill_hex
+
+            return pattern_fill_hex(self, pf)
         return None
 
     def has_no_fill(self, parent: Optional[etree._Element]) -> bool:

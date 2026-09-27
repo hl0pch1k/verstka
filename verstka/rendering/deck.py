@@ -75,12 +75,20 @@ class DeckBuilder:
                 if v is not None and v in rid_map:
                     el.set(attr, rid_map[v])
         # timing/transitions from the source (optional, harmless)
+        # placeholders that inherit their geometry from the layout get it written explicitly: every later partial
+        # write (a lone `.width =`) and every bbox reader then sees the real box, not x=0 / None
+        materialize_placeholders(new)
         self.created.append(new)
         return new
 
     def add_blank_slide(self, layout_index: int = 0) -> Slide:
         layout = self.prs.slide_layouts[layout_index]
+        return self.add_layout_slide(layout)
+
+    def add_layout_slide(self, layout) -> Slide:
+        """A new slide made from a layout (its placeholders with their inherited geometry written explicitly)."""
         new = self.prs.slides.add_slide(layout)
+        materialize_placeholders(new)
         self.created.append(new)
         return new
 
@@ -103,6 +111,135 @@ class DeckBuilder:
         path.parent.mkdir(parents=True, exist_ok=True)
         self.prs.save(str(path))
         return path
+
+
+_PH_ALIASES = {"ctrTitle": ("ctrTitle", "title"), "title": ("title", "ctrTitle"), "subTitle": ("subTitle", "body"), "obj": ("obj", "body"), "body": ("body", "obj")}
+
+
+def _ph_of(el: etree._Element) -> Optional[etree._Element]:
+    for path in ("p:nvSpPr/p:nvPr/p:ph", "p:nvPicPr/p:nvPr/p:ph", "p:nvGraphicFramePr/p:nvPr/p:ph"):
+        ph = el.find("/".join(q(t) for t in path.split("/")))
+        if ph is not None:
+            return ph
+    return None
+
+
+def _match_ph(root: etree._Element, ph_type: str, ph_idx: Optional[str]) -> Optional[etree._Element]:
+    """The placeholder of a layout/master a placeholder inherits from — the rule the template analysis uses
+    (`analysis.shapes._match_placeholder`): an explicit idx with a compatible type, then the idx alone, then the type
+    (python-pptx matches idx only, so an untyped `<p:ph/>` body would take the title's box)."""
+    phs = []
+    for sp in root.iter(q("p:sp")):
+        ph = _ph_of(sp)
+        if ph is not None:
+            phs.append((ph.get("type") or "body", ph.get("idx"), sp))
+    if ph_idx is not None:
+        for t, i, sp in phs:
+            if i == ph_idx and (t == ph_type or (ph_type in ("body", "obj") and t in ("body", "obj"))):
+                return sp
+        for t, i, sp in phs:
+            if i == ph_idx:
+                return sp
+    for cand in _PH_ALIASES.get(ph_type, (ph_type,)):
+        for t, i, sp in phs:
+            if t == cand:
+                return sp
+    return None
+
+
+def _xfrm_box(sp: etree._Element) -> Optional[tuple[int, int, int, int]]:
+    spPr = sp.find(q("p:spPr"))
+    xfrm = spPr.find(q("a:xfrm")) if spPr is not None else None
+    off = xfrm.find(q("a:off")) if xfrm is not None else None
+    ext = xfrm.find(q("a:ext")) if xfrm is not None else None
+    if off is None or ext is None:
+        return None
+    return int(off.get("x")), int(off.get("y")), int(ext.get("cx")), int(ext.get("cy"))
+
+
+def placeholder_chain(shape) -> list[etree._Element]:
+    """The placeholders a slide (or layout) placeholder inherits from, nearest first: the layout's, then the master's
+    (matched like the template analysis does). Empty for a shape that is not a placeholder."""
+    from pptx.parts.slide import SlideLayoutPart, SlidePart
+
+    el = getattr(shape, "_element", None)
+    ph = _ph_of(el) if el is not None else None
+    part = getattr(shape, "part", None)
+    if ph is None or part is None:
+        return []
+    ph_type, ph_idx = ph.get("type") or "body", ph.get("idx")
+    chain: list[tuple[etree._Element, Optional[str]]] = []
+    try:
+        if isinstance(part, SlidePart):
+            layout = part.slide.slide_layout
+            chain = [(layout._element, ph_idx), (layout.slide_master._element, None)]
+        elif isinstance(part, SlideLayoutPart):
+            chain = [(part.slide_layout.slide_master._element, None)]
+    except Exception:  # noqa: BLE001
+        return []
+    out = []
+    for root, idx in chain:
+        base = _match_ph(root, ph_type, idx)
+        if base is not None:
+            out.append(base)
+    return out
+
+
+def inherited_box(shape) -> Optional[tuple[int, int, int, int]]:
+    """The geometry a placeholder inherits (layout placeholder, then master placeholder), ignoring its own xfrm."""
+    for base in placeholder_chain(shape):
+        box = _xfrm_box(base)
+        if box is not None:
+            return box
+    return None
+
+
+def materialize_xfrm(shape) -> bool:
+    """Write the inherited geometry of a placeholder (resolved through the layout and master placeholders) as an
+    explicit `a:xfrm` — the first child of `p:spPr`. No-op (False) when the shape already has a complete xfrm, is not
+    a `p:sp`, or its geometry is unknown. A partial xfrm (a lone python-pptx `.width =` writes `a:ext` with cy=0 and
+    no `a:off`) keeps what was deliberately written and takes the rest from the placeholder chain."""
+    el = getattr(shape, "_element", None)
+    if el is None or etree.QName(el).localname != "sp":
+        return False
+    spPr = el.find(q("p:spPr"))
+    if spPr is None:
+        return False
+    xfrm = spPr.find(q("a:xfrm"))
+    off = xfrm.find(q("a:off")) if xfrm is not None else None
+    ext = xfrm.find(q("a:ext")) if xfrm is not None else None
+    if off is not None and ext is not None:
+        return False
+    inh = inherited_box(shape)
+    if inh is None:
+        return False
+    x, y, w, h = inh
+    if off is not None:
+        x, y = int(off.get("x", x)), int(off.get("y", y))
+    if ext is not None:
+        w = int(ext.get("cx") or 0) or w
+        h = int(ext.get("cy") or 0) or h
+    if xfrm is not None:
+        for child in list(xfrm):
+            xfrm.remove(child)
+    else:
+        xfrm = etree.Element(q("a:xfrm"))
+        spPr.insert(0, xfrm)
+    etree.SubElement(xfrm, q("a:off")).attrib.update({"x": str(int(x)), "y": str(int(y))})
+    etree.SubElement(xfrm, q("a:ext")).attrib.update({"cx": str(int(w)), "cy": str(int(h))})
+    return True
+
+
+def materialize_placeholders(slide: Slide) -> int:
+    """`materialize_xfrm` on every top-level placeholder of the slide; returns how many were written."""
+    n = 0
+    for shp in slide.shapes:
+        if getattr(shp, "is_placeholder", False):
+            try:
+                n += bool(materialize_xfrm(shp))
+            except Exception:  # noqa: BLE001 - never break a render over bookkeeping
+                log.debug("materialize_xfrm failed on %s", getattr(shp, "shape_id", "?"), exc_info=True)
+    return n
 
 
 def slide_shape_elements(slide: Slide) -> dict[str, etree._Element]:

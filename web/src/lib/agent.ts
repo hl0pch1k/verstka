@@ -1,17 +1,18 @@
-// The planning agent's work (Agent v2) as a timeline of plain steps: Аналитик → Архитектор (when the text did not
-// describe the slides) → Дизайнер (a line per slide with its form) → Критик → Правка → Вёрстка → Проверка.
+// The planning agent's work (Agent v2) as a timeline of plain steps: Автор (writer mode: a topic without material —
+// the agent writes the text first) → Аналитик → Архитектор (when the text did not describe the slides) → Дизайнер (a line per slide with its form) → Критик → Правка → Вёрстка → Проверка.
 // The agent's own steps come as events {step, message, slide, variant, fix}; «Вёрстка» and «Проверка» follow the
 // pipeline's plain progress messages («visual: rendered slide 3/10», «export: …»). Pure functions, no React.
 import type { AgentEvent, DeckOutline, JobEvent, Variant } from "../types";
 import { plainTerms } from "./plain";
 import { plural } from "./utils";
 
-export type PhaseKey = "analyst" | "architect" | "designer" | "critic" | "revise" | "layout" | "check";
+export type PhaseKey = "writer" | "analyst" | "architect" | "designer" | "critic" | "revise" | "layout" | "check";
 export type PhaseStatus = "done" | "active" | "pending" | "skipped";
 
 export interface PhaseDef { key: PhaseKey; title: string; hint: string; optional?: boolean }
 
 export const PHASES: PhaseDef[] = [
+  { key: "writer", title: "Автор", hint: "пишет текст по теме", optional: true },
   { key: "analyst", title: "Аналитик", hint: "читает текст: какие слайды, цифры и диаграммы нужны" },
   { key: "architect", title: "Архитектор", hint: "выстраивает сюжет: разделы и слайды", optional: true },
   { key: "designer", title: "Дизайнер", hint: "придумывает форму каждого слайда" },
@@ -29,6 +30,7 @@ export const laterPhase = (a: PhaseKey | null | undefined, b: PhaseKey | null | 
 /** The agent's step (contract names) → the phase of the timeline; null for a step this UI does not know. */
 export function phaseOfStep(step: string | null | undefined): PhaseKey | null {
   switch ((step ?? "").toLowerCase()) {
+    case "writer": return "writer";
     case "analyst": return "analyst";
     case "architect": return "architect";
     case "designer": return "designer";
@@ -360,19 +362,23 @@ export interface AgentSummaryLine { step: string; text: string }
 
 const noStop = (s: string) => s.replace(/[.\s]+$/, "");
 
-/** Three lines for the result screen: what the analyst found, what the designer made, what the critic said. */
+/** Three lines for the result screen: what the analyst found, what the designer made, what the critic said. A deck
+ *  whose text the agent wrote (writer mode) starts with the author's line («Написал текст на 10 слайдов») in the
+ *  analyst's place: the analyst only read the author's own text. */
 export function agentSummary(v: Variant | null | undefined): AgentSummaryLine[] {
   const a = v?.agent;
   if (!a) return [];
   const evs = withPhases(a.events ?? []);
   const lines: AgentSummaryLine[] = [];
   if (evs.length) {
+    const wrote = evs.filter((e) => e.phase === "writer" && /^написал\s+текст/i.test(eventText(e))).pop();
+    if (wrote) lines.push({ step: "Автор", text: noStop(eventText(wrote).split(/\s+—\s+/)[0]) });
     // the analyst's last word is its result («Нашёл в тексте 5 слайдов…»), not «Уточняю данные…»
     const results = evs.filter((e) => e.phase === "analyst" && !/^(уточняю|модель добавила)(?![а-яё])/i.test(eventText(e)));
     const analyst = results.filter((e) => /^нашёл/i.test(eventText(e))).pop() ?? results.pop();
     // «Нашёл 5 слайдов, 11 рядов данных и 7 диаграмм»: the card's two lines hold the whole finding
     const found = analyst ? noStop(eventText(analyst).replace(/^нашёл\s+в\s+тексте\s+/i, "Нашёл ").replace(/\s+заказанн\S*/gi, "")) : null;
-    if (found) lines.push({ step: "Аналитик", text: found });
+    if (found && !wrote) lines.push({ step: "Аналитик", text: found });
     const designed = evs.filter((e) => e.phase === "designer");
     const designedSlides = uniqueSlides(designed).length || designed.length;
     const forms = formsSummary(v?.outline);

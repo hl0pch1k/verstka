@@ -1,7 +1,7 @@
 """The planning agent's work as the UI shows it (Agent v2).
 
 The pipeline reports each step of the agent through its progress callback as an event
-{"type": "agent", "step": "analyst"|"architect"|"designer"|"critic"|"revise"|"compile", "message": "<plain Russian>",
+{"type": "agent", "step": "writer"|"analyst"|"architect"|"designer"|"critic"|"revise"|"compile", "message": "<plain Russian>",
 "slide": <int|None>, "variant": "<strategy|None>"} and writes the same messages into DeckOutline.agent_log. Here:
 the progress adapter that turns those events into job events (the live timeline of the build screen), agent.json of a
 generation (the structured timeline kept for the result screen), and the readers the payloads and the chat helper use.
@@ -21,8 +21,9 @@ from verstka.ru import ru_count
 
 log = logging.getLogger(__name__)
 
-AGENT_STEPS = ("analyst", "architect", "designer", "critic", "revise", "compile")
-STEP_RU = {"analyst": "Аналитик", "architect": "Архитектор", "designer": "Дизайнер", "critic": "Критик", "revise": "Правка", "compile": "Сборка плана"}
+# «writer»: writer mode (planning/writer.py) — the agent writes the deck's text from a topic before the analyst reads it
+AGENT_STEPS = ("writer", "analyst", "architect", "designer", "critic", "revise", "compile")
+STEP_RU = {"writer": "Автор", "analyst": "Аналитик", "architect": "Архитектор", "designer": "Дизайнер", "critic": "Критик", "revise": "Правка", "compile": "Сборка плана"}
 AGENT_FILE = "agent.json"
 _MAX_MESSAGE = 400
 _MAX_EVENTS = 1000
@@ -493,6 +494,11 @@ def describe_agent_work(agent: dict, strategy_title: str) -> str:
     if events:
         of = lambda step: [e for e in events if e.get("step") == step]  # noqa: E731
         lines = []
+        # writer mode: the agent wrote the text from the topic first («Написал текст на 10 слайдов — «…», …»)
+        wrote = [e for e in of("writer") if re.match(r"(?i)написал\s+текст", e["message"])]
+        if wrote:
+            head = re.split(r"\s+—\s+", wrote[-1]["message"])[0].rstrip(".")
+            lines.append(f"• Автор: {_lower_first(head)}.")
         analyst = of("analyst")
         found = [e for e in analyst if re.match(r"(?i)нашёл", e["message"])] or analyst
         if found:

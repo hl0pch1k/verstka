@@ -38,6 +38,9 @@ def collect_color_samples(shapes: list[ShapeInfo], slide_w: int, slide_h: int, b
                 out.append(ColorSample(s.fill_hex.upper(), "background", 100.0))
             else:
                 out.append(ColorSample(s.fill_hex.upper(), "fill", max(frac * 100.0, 0.2)))
+            for hx in _pattern_colors(s):
+                # a pattern fill (a hatched band) reads as a blend, but its ink is the template's colour
+                out.append(ColorSample(hx, "fill", max(frac * 50.0, 0.2)))
         if s.line_hex:
             out.append(ColorSample(s.line_hex.upper(), "line", 0.5))
         if s.text:
@@ -45,6 +48,22 @@ def collect_color_samples(shapes: list[ShapeInfo], slide_w: int, slide_h: int, b
                 for r in p.runs:
                     if r.color_hex and r.text.strip():
                         out.append(ColorSample(r.color_hex.upper(), "text", max(len(r.text) / 50.0, 0.05)))
+    return out
+
+
+def _pattern_colors(s: ShapeInfo) -> list[str]:
+    el = s.element
+    if el is None:
+        return []
+    ns = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+    patt = el.find("{http://schemas.openxmlformats.org/presentationml/2006/main}spPr/" + ns + "pattFill")
+    if patt is None:
+        return []
+    out = []
+    for tag in ("fgClr", "bgClr"):
+        c = patt.find(ns + tag + "/" + ns + "srgbClr")
+        if c is not None and c.get("val") and len(c.get("val")) == 6:
+            out.append(c.get("val").upper())
     return out
 
 
@@ -178,6 +197,62 @@ def assign_color_roles(tokens: list[ColorToken], primary_family: Family = Family
     for t in tokens:
         t.role = t.roles[0] if t.roles else None
     return tokens
+
+
+# accent colours of the stock themes the office suites put into every new file: in a template that never draws
+# them they are not the brand (LibreOffice green on a red-bookmark template, Office blue on an orange one)
+STOCK_THEME_COLORS = frozenset(
+    # LibreOffice
+    "18A303 0369A3 A33E03 8E03A3 C99C00 C9211E 729FCF "
+    # Office 2013–2022
+    "4472C4 ED7D31 A5A5A5 FFC000 5B9BD5 70AD47 "
+    # Office 2007–2010
+    "4F81BD C0504D 9BBB59 8064A2 4BACC6 F79646 "
+    # Office 2023+ (Aptos)
+    "156082 E97132 196B24 0F9ED5 A02B93 4EA72E".split()
+)
+
+
+def is_stock_theme_color(hex_: str) -> bool:
+    return (hex_ or "").upper() in STOCK_THEME_COLORS
+
+
+def is_drawn(hex_: str, samples: list[ColorSample], tol: float = 3.0) -> bool:
+    """The colour (within ΔE `tol`) is painted somewhere: a fill, a line or text of a slide, layout or master."""
+    c = Color(hex=hex_)
+    return any(s.context in ("fill", "line", "text") and Color.delta_e(c, Color(hex=s.hex)) <= tol for s in samples)
+
+
+def has_saturated_drawn(samples: list[ColorSample]) -> bool:
+    """Some saturated colour (an accent candidate) is drawn in the template."""
+    return any(s.context in ("fill", "line", "text") and _saturation(s.hex) >= 0.25 and 0.05 < relative_luminance(s.hex) < 0.95 for s in samples)
+
+
+def dominant_saturated_hex(rgb_pixels) -> Optional[str]:
+    """The main saturated colour among pixels (N×3 array, 0–255): the median of the most populated hue sector of the
+    pixels with HSV saturation ≥ 0.35 and value ≥ 0.2; None when fewer than 3 % of the pixels are saturated."""
+    try:
+        import numpy as np
+    except ImportError:  # pragma: no cover
+        return None
+    px = np.asarray(rgb_pixels, dtype=np.float32).reshape(-1, 3)
+    if not len(px):
+        return None
+    mx = px.max(axis=1)
+    mn = px.min(axis=1)
+    sat = np.where(mx > 0, (mx - mn) / np.maximum(mx, 1), 0)
+    keep = (sat >= 0.35) & (mx >= 51)
+    if keep.sum() < max(0.03 * len(px), 4):
+        return None
+    sel = px[keep]
+    r, g, b = sel[:, 0], sel[:, 1], sel[:, 2]
+    mxs, mns = sel.max(axis=1), sel.min(axis=1)
+    d = np.maximum(mxs - mns, 1e-6)
+    hue = np.where(mxs == r, ((g - b) / d) % 6, np.where(mxs == g, (b - r) / d + 2, (r - g) / d + 4)) * 60
+    sector = (hue // 30).astype(int) % 12
+    best = np.bincount(sector, minlength=12).argmax()
+    med = np.median(sel[sector == best], axis=0)
+    return "".join(f"{int(v):02X}" for v in med)
 
 
 def nearest_palette_color(hex_: str, palette: list[str]) -> tuple[str, float]:

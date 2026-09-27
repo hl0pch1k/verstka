@@ -26,6 +26,7 @@ AUTOFIX = {
     "empty_slide": "перевыбор макета",
     "content_missing": "перевыбор макета",
     "table_cell_wrap": "перевыбор макета",
+    "content_over_art": "перевыбор макета",
 }
 
 

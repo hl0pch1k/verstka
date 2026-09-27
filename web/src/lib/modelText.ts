@@ -165,6 +165,10 @@ export interface DeckNotice {
   retryLabel: string;
   /** Offer to add theses (the text is short or only a topic). */
   rewrite: boolean;
+  /** «warn»: the deck is thinner than it could be; «info»: all is well, one thing to know (the agent wrote the text). */
+  tone: "warn" | "info";
+  /** Offer «Показать текст»: the text the agent wrote from the topic. */
+  showText: boolean;
 }
 
 /** Reasons the same deck built again can get past; a key, an empty account, a missing model or a 400 need a fix first
@@ -229,11 +233,31 @@ export function deckNotice(g: Generation, v: Variant, total: number, live?: Live
   const short = !!asked && asked - total >= 3 && !g.outline_supplied;
   const slidesText = short ? `вышло ${plural(total, "слайд", "слайда", "слайдов")} вместо ${asked}` : "";
   const addTheses = "допишите тезисы и цифры — слайды станут содержательнее.";
-  const none = { retry: false, retryWait: 0, retryLabel: "" };
+  const none = { retry: false, retryWait: 0, retryLabel: "", tone: "warn" as const, showText: false };
+  const w = g.writer ?? null;
+  // writer mode: the text was a topic and the agent wrote the deck's text — a calm note, the text one click away
+  if (w?.status === "written" && w.text) {
+    const src = w.source?.title;
+    const basis = src ? `По статье Википедии «${src}».` : "Агент писал по своим знаниям — даты и цифры могут быть неточны.";
+    const want = w.asked ?? asked;
+    const fewer = !!want && want - total >= 3 ? ` Вышло ${plural(total, "слайд", "слайда", "слайдов")} вместо ${want}.` : "";
+    return { title: "Текст написал агент — проверьте факты", basis: basis + fewer, help: null, ...none, rewrite: false, tone: "info", showText: true };
+  }
+  if (skeleton && (w?.status === "private" || w?.status === "refused")) {
+    return {
+      title: w.status === "private" ? "Это каркас: о вашей теме знаете только вы" : "Это каркас: на эту тему агент текст не пишет",
+      basis: "Слайды — разделы с подсказками в заметках.",
+      help: addTheses,
+      ...none,
+      rewrite: true,
+    };
+  }
   if (modelFailed(g)) {
     const p = g.planner ?? null;
     const basis = skeleton
-      ? "В тексте только тема, поэтому это каркас: разделы с подсказками в заметках."
+      ? w?.status === "failed" || w?.status === "skipped"
+        ? "Модель не написала текст по теме, поэтому это каркас."
+        : "В тексте только тема, поэтому это каркас: разделы с подсказками в заметках."
       : `Собрано по вашему тексту без модели${slidesText ? ` — ${slidesText}` : ""}.`;
     const offer = rebuildOffer(p, live);
     // «Модель недоступна» after the title «Модель сейчас недоступна» says nothing new
@@ -247,6 +271,8 @@ export function deckNotice(g: Generation, v: Variant, total: number, live?: Live
       retryWait: offer.wait,
       retryLabel: "Собрать ещё раз",
       rewrite: skeleton || short,
+      tone: "warn",
+      showText: false,
     };
   }
   if (skeleton) {

@@ -3,10 +3,12 @@
 // survives reloads. Motion: the title, the two steps and the bar rise in a 40 ms cascade on first load, «Настройки»
 // unfolds (rows glide, the content fades in after them), and the whole form glides aside when the helper docks.
 import { useEffect, useRef, useState, type ChangeEvent, type FocusEvent, type FormEvent, type HTMLAttributes, type KeyboardEvent, type ReactNode } from "react";
-import { ArrowRight, Check, ChevronDown, FileText, Minus, Paperclip, Plus, SlidersHorizontal } from "lucide-react";
-import { smoothScroll, stagger, useFlip } from "../../lib/motion";
+import { ArrowRight, Check, ChevronDown, FileText, Minus, Paperclip, PenLine, Plus, SlidersHorizontal } from "lucide-react";
+import { MOTION, smoothScroll, stagger, useFlip, usePresence } from "../../lib/motion";
+import { modelIndicator } from "../../lib/modelText";
 import { errText } from "../../lib/narrate";
 import { cn, LS, storage } from "../../lib/utils";
+import { writerModeOf } from "../../lib/writerMode";
 import { useApp } from "../../store";
 import { BRIEF_MIN, INPUT_CLS, PURPOSES, SAMPLE_AUDIENCE, SAMPLE_BRIEF, SLIDES_DEFAULT, SLIDES_MAX, SLIDES_MIN, StrategyOption, Toggle } from "../NewGenerationFormParts";
 import { Button } from "../ui/Button";
@@ -16,8 +18,7 @@ import { TemplateActions, TemplatePicker, useTemplateDrop } from "./TemplatePick
 
 const clampSlides = (n: number) => Math.min(SLIDES_MAX, Math.max(SLIDES_MIN, Number.isFinite(n) ? Math.round(n) : SLIDES_DEFAULT));
 const MAX_BRIEF_BYTES = 2 * 1024 * 1024;
-const PLACEHOLDER =
-  "Например: итоги пилота «Умные сводки» за квартал.\nПроблема: сотрудники тратят 47 минут в день на чтение чатов.\nРезультаты: время сократилось до 29 минут, NPS 64. Просим: бюджет 14,5 млн ₽ на масштабирование.";
+const PLACEHOLDER = "Тема — например, «История VK»: текст напишет агент.\nИли ваш текст с тезисами и цифрами — соберу строго по нему.";
 
 // A text that dictates its slides, by the backend's rules (planning/brief_structure.py, compile.py `_order`, agent.py
 // `_is_cover`): «Слайд 1 … Слайд 5» headings in ascending order (or «1. … 3.» headings with lines under each, in a text
@@ -132,7 +133,7 @@ function Step({ n, title, done, actions, order, shake, zone, children }: {
 }
 
 export function CreateScreen() {
-  const { health, healthError, modelStatus, strategies, templateId, manifestLoading, activeJob, startGeneration, toast, agentOpen } = useApp();
+  const { health, healthError, modelStatus, strategies, templateId, manifestLoading, activeJob, startGeneration, toast, agentOpen, composerText, takeComposerText } = useApp();
   // a server with a model in its config whose every link is off builds without one: the switches say so too
   const modelsConfigured = (health?.models_configured ?? false) && modelStatus?.state !== "off";
   const drop = useTemplateDrop();
@@ -184,6 +185,23 @@ export function CreateScreen() {
     return () => window.clearTimeout(t);
   }, [brief, audience, purpose, slides]);
 
+  // «Изменить» on the agent's text (the result's sheet, the plan): the text replaces the draft once, the field takes the
+  // focus and comes into view
+  useEffect(() => {
+    if (composerText === null) return;
+    setBrief(composerText);
+    setShowErrors(false);
+    takeComposerText();
+    requestAnimationFrame(() => {
+      const el = briefRef.current;
+      if (!el) return;
+      el.focus({ preventScroll: true });
+      el.setSelectionRange(0, 0);
+      el.scrollTop = 0;
+      el.scrollIntoView({ block: "center", behavior: smoothScroll() });
+    });
+  }, [composerText, takeComposerText]);
+
   // a text that dictates its slides fixes the count: the stepper shows it, locked, and the request sends that number
   // (the backend builds the text's slides whatever the count, and the count keeps a closing slide out)
   const dictated = dictatedSlides(brief);
@@ -221,6 +239,12 @@ export function CreateScreen() {
   // a short text is said once, by its own counter in the field (turned red); the bar keeps every other problem
   const shortInvalid = briefInvalid && briefLen > 0;
   const barProblem = showErrors && !shortInvalid ? problem : null;
+  // a topic without material: the agent writes the text first (the server decides; this only says it). Not for a text
+  // about the person's own project («наш», «мы»), and not when no model can answer
+  const writer = writerModeOf(brief);
+  const modelsOn = useModels && modelsConfigured;
+  const writerLine = !!writer.mode && !writer.privateHint && briefLen >= BRIEF_MIN && modelsOn && !modelIndicator(modelStatus, modelsOn) && !healthError && !barProblem;
+  const writerPresence = usePresence(writerLine, MOTION.fast);
 
   const fillSample = () => {
     setBrief(SAMPLE_BRIEF);
@@ -511,6 +535,16 @@ export function CreateScreen() {
                 <p key={barProblem} role="alert" className="truncate text-footnote font-semibold text-red-600 animate-fade [animation-duration:150ms]" title={barProblem}>{barProblem}</p>
               )}
               <ModelStatus enabled={useModels && modelsConfigured} hidden={!!barProblem} className="min-w-0" />
+              {writerPresence.mounted && (
+                <span
+                  className={cn("inline-flex min-w-0 items-center gap-2 text-footnote text-zinc-500", writerPresence.leaving ? "animate-fade-out" : "animate-fade", "[animation-duration:150ms]")}
+                  role="status"
+                  aria-hidden={writerPresence.leaving || undefined}
+                >
+                  <PenLine className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                  <span className="truncate">Текст напишет агент</span>
+                </span>
+              )}
             </div>
             <Button type="submit" variant="primary" size="lg" iconRight={ArrowRight} loading={busy}>
               Создать презентацию

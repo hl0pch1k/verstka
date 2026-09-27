@@ -161,9 +161,9 @@ class _Clock:
         return None if self.deadline is None else self.deadline - seconds_before_end
 
 
-STEP_RU = {"analyst": "Аналитик", "architect": "Архитектор", "designer": "Дизайнер", "critic": "Критик", "revise": "Правка", "compile": "Сборка"}
+STEP_RU = {"writer": "Автор", "analyst": "Аналитик", "architect": "Архитектор", "designer": "Дизайнер", "critic": "Критик", "revise": "Правка", "compile": "Сборка"}
 # «Дизайнер: …», «Критик («Структурный»): …» — the step's name in front of a message
-_STEP_PREFIX_RE = re.compile(r"^(?:Аналитик|Архитектор|Дизайнер|Критик|Правка|Сборка|Вёрстка)(?:\s*\([^)]*\))?\s*:\s*")
+_STEP_PREFIX_RE = re.compile(r"^(?:Автор|Аналитик|Архитектор|Дизайнер|Критик|Правка|Сборка|Вёрстка)(?:\s*\([^)]*\))?\s*:\s*")
 # «слайд 3 «…» — …», «Слайд 3: …» — the slide's number in front of an event that carries it as `slide`
 _SLIDE_LEAD_RE = re.compile(r"^слайд\s*\d+\s*(?:[—–:.\-]\s*)?", re.I)
 
@@ -408,6 +408,7 @@ class _Ctx:
     takeaway_rule: bool = False  # the brief asks for a conclusion on every slide («…содержательный заголовок и короткий вывод»)
     unit_index: dict = field(default_factory=dict)  # unit key → grounding's index of that slide's own source (and the brief's frame)
     lock: Any = field(default_factory=threading.Lock)
+    written: bool = False  # the brief is the writer's text (planning/writer.py): a year is never a slide's key figure
 
 
 def _dupe_series(a: Series, b: Series) -> bool:
@@ -702,10 +703,61 @@ class _Source:
     steps_label: Optional[str] = None  # the lead line of the steps («План на 6 месяцев:»)
 
 
+_MONTHS_GEN = r"(?:январ|феврал|март|апрел|ма[йя]|июн|июл|август|сентябр|октябр|ноябр|декабр)\w*"
+# a date in front of an event («1 сентября 1939 года — …», «май 1945 — …», «1941–1945 гг. — …», «1991 год»)
+_DATE_LEAD_RE = re.compile(
+    rf"^(?:\d{{1,2}}\s+{_MONTHS_GEN}\s+\d{{4}}|{_MONTHS_GEN}\s+\d{{4}}|\d{{4}}(?:\s*[–—-]\s*\d{{4}})?)(?:\s*(?:год\w*|гг?\.?))?"
+    r"(?=\s*(?:[—–:]|-\s|$))",
+    re.I,
+)
+
+
+def _dated_event(x: str) -> Optional[tuple[str, str]]:
+    """(date, event) of a list item that is a dated event with no figure of its own («1 сентября 1939 года — Германия
+    нападает на Польшу»); None for anything else — a year with its value («2023 — 900 000 рублей») is a figure."""
+    m = _DATE_LEAD_RE.match((x or "").strip())
+    if not m:
+        return None
+    when = m.group(0).strip()
+    what = re.sub(r"^\s*[—–:-]\s*", "", x.strip()[m.end():]).strip()
+    if not what or figures(what):
+        return None
+    return H.strip_end(when), H.cap_first(H.strip_end(what))
+
+
+def _dated_items(unit: "_Unit", src: "_Source") -> Optional[list[SlideItem]]:
+    """A slide's dated list as timeline items (date → title, event → text): the analyst's items of the slide's spec
+    when every one is dated, else a source list whose every item is a dated event; None when there is none (≥ 3)."""
+    spec = unit.spec
+    if spec is not None and len(spec.items) >= 3 and all(_DATE_LEAD_RE.match((it.title or "").strip()) and not figures(it.text or "") for it in spec.items):
+        return [SlideItem(title=H.strip_end(it.title), text=H.cap_first(H.strip_end(it.text or ""))) for it in spec.items[:6]]
+    for g in src.groups:
+        ev = [_dated_event(x) for x in g.items]
+        if len(ev) >= 3 and all(ev):
+            return [SlideItem(title=w, text=t) for w, t in ev[:6]]  # type: ignore[misc]
+    return None
+
+
+def _date_callout(n: NumberCallout, any_year: bool = True) -> bool:
+    """A «key figure» that is a date: a day of a month («17» · «сентября СССР начал…»), a year read with its «году»
+    («1939» · «году Германия…») and — `any_year` (the writer's text) — any year («1939 г», «1941–1945»)."""
+    v = " ".join((n.value or "").split())
+    label = (n.label or "").strip()
+    if re.match(r"^\d{1,2}$", v) and re.match(_MONTHS_GEN, label, re.I):
+        return True
+    m = re.match(r"^(\d{4})(?:\s*[–—-]\s*(\d{4}))?\s*(г\.?|гг\.?|год\w*)?$", v, re.I)
+    if not (m and 1000 <= int(m.group(1)) <= 2100):
+        return False
+    return any_year or bool(m.group(3)) or bool(re.match(r"^(?:год\w*|гг?\.)(?![\wё])", label, re.I))
+
+
 def _figure_item(x: str) -> bool:
     """A list item that is a figure with its label, not a statement with a figure in it: «100 покупок в день»,
-    «средний чек — 300 рублей», «доля вернувшихся — 25%»; not «Добавить комбо за 390 рублей»."""
+    «средний чек — 300 рублей», «доля вернувшихся — 25%»; not «Добавить комбо за 390 рублей», not a dated event
+    («1 сентября 1939 года — Германия нападает на Польшу»)."""
     if not figures(x):
+        return False
+    if _dated_event(x) is not None:
         return False
     if re.match(r"^[+\-−]?\d", x):
         return True
@@ -1117,12 +1169,21 @@ def rules_design(unit: _Unit, ctx: _Ctx) -> _Design:
     elif len(src.steps) >= 3:
         kind = "timeline"
         c.items = [SlideItem(title=t, text=x) for t, x in src.steps[:6]]
+    elif (dated := _dated_items(unit, src)) is not None:
+        # a dated list («— 1 сентября 1939 года — Германия нападает на Польшу;»): a timeline, never years as figures
+        kind, c.items = "timeline", dated
+        shown.update(x for g in src.groups if all(_dated_event(i) for i in g.items) for x in g.items)
     else:
         text_groups = [g for g in src.groups if not g.figure]
         text_groups.sort(key=lambda g: (not g.ask, -len(g.items)))  # the lists the user asked to show come first
         fig_items = [x for g in src.groups if g.figure for x in g.items]
         other_items = [x for g in text_groups[1:] for x in g.items]
-        numbers = _series_figures(unit, ctx) or _kpis(fig_items) or _kpis(other_items) or _kpis(src.sentences)
+        def kpis(lines: list[str]) -> list[NumberCallout]:
+            out = _kpis(lines)
+            # the writer's text (a topic): a year or a day of a month is a date, never a slide's key figure
+            return [n for n in out if not _date_callout(n)] if ctx.written else out
+
+        numbers = _series_figures(unit, ctx) or kpis(fig_items) or kpis(other_items) or kpis(src.sentences)
         if text_groups:
             g = text_groups[0]
             pair = text_groups[1] if len(text_groups) > 1 else None
@@ -1333,8 +1394,9 @@ _CAVEAT_RE = re.compile(
 )
 
 
-def _title_text(it: SlideItem) -> str:
-    """A card as one line: «Партнёрства — с пятью ближайшими офисами» (the text after the dash continues the title)."""
+def _title_text(it: SlideItem, text: str = "") -> str:
+    """A card as one line: «Партнёрства — с пятью ближайшими офисами» (the text after the dash continues the title) —
+    a name keeps its capital («1937 год — Япония начала войну»: `text`, the source the card comes from, writes it so)."""
     t, x = H.strip_end(it.title or ""), H.strip_end(it.text or "")
     if not x and it.bullets:
         x = "; ".join(H.strip_end(b) for b in it.bullets)  # a card of a list keeps its lines
@@ -1342,13 +1404,11 @@ def _title_text(it: SlideItem) -> str:
     if t and x and re.search(r"\s[—–]\s", x):
         return f"{t}: {x}"  # the text has its own dash: «Свободные часы: 65% покупок — утром»
     if t and x:
-        first = x.split()[0] if x.split() else ""
-        keep = len(first) >= 2 and first.isupper() or bool(re.match(r"[A-Za-z]", first))  # «NPS», «VK Tech»
-        return f"{t} — {x if keep else x[:1].lower() + x[1:]}"
+        return f"{t} — {_low_first(x, text, date_title=bool(_DATE_TITLE_RE.search(t)))}"
     return t or x
 
 
-def _fit_form(kind: str, c: SlideContent, changes: list[str], key: str) -> str:
+def _fit_form(kind: str, c: SlideContent, changes: list[str], key: str, text: str = "") -> str:
     """Every field the designer filled is one the chosen form shows (a field it does not show would be lost on the
     slide — the audit calls that «content missing»): columns next to a small table become the slide (the table's
     figures are in them) or lines under the block; figures on a form without a row of figures become lines; the
@@ -1395,7 +1455,7 @@ def _fit_form(kind: str, c: SlideContent, changes: list[str], key: str) -> str:
             body = "; ".join(x for x in [*(col.bullets or [col.text])] if x)
             if body:
                 lines.append(f"{col.title}: {body}" if col.title else body)
-        lines += [_title_text(it) for it in c.items]
+        lines += [_title_text(it, text) for it in c.items]
         lines = [x for x in list(c.bullets) + lines if x]
         if len(lines) <= MAX_BULLETS and all(len(x.split()) <= 14 for x in lines):
             changes.append(f"slide {key}: {kind} with {len(c.numbers)} figures → a row of figures with the list under it")
@@ -1757,6 +1817,32 @@ def design_from_answer(ans: SlideDesignAnswer, unit: _Unit, ctx: _Ctx) -> Option
     )
     if c.chart is None and c.chart2 is not None:
         c.chart, c.chart2 = c.chart2, None
+    # a «key figure» that is words («Высокая стоимость», «Низкие эксплуатационные расходы») is a statement, not a figure:
+    # it cannot stand large in a row of figures (it overflows the frame) — it becomes a line of the slide
+    wordy = [n for n in c.numbers if not re.search(r"\d", n.value) and (len(n.value.split()) >= 2 or len(n.value.strip()) > 12)]
+    if ctx.written:
+        # the writer's text (a topic): a year or a day of a month is a date, never a slide's key figure («1999 г»
+        # in large type over «занимает должности главы правительства»)
+        dated = [n for n in c.numbers if _date_callout(n)]
+        if dated:
+            c.numbers = [n for n in c.numbers if n not in dated]
+            lines = [f"{H.strip_end(n.value)} — {H.strip_end(n.label)}" if n.label.strip() else H.strip_end(n.value) for n in dated]
+            c.bullets = (c.bullets + [x for x in lines if x not in c.bullets and len(x.split()) >= 3])[:MAX_BULLETS]
+            changes.append(f"slide {unit.key}: dates given as key figures → lines: {'; '.join(lines)[:120]}")
+    if wordy:
+        c.numbers = [n for n in c.numbers if n not in wordy]
+        case_text = ctx.brief.text if ctx is not None else unit.text
+        lines = [f"{H.cap_first(H.strip_end(n.label))}: {_low_first(H.strip_end(n.value), case_text)}" if n.label.strip() else H.cap_first(H.strip_end(n.value)) for n in wordy]
+        c.bullets = (c.bullets + [x for x in lines if x not in c.bullets])[:MAX_BULLETS]
+        changes.append(f"slide {unit.key}: words given as key figures → lines: {'; '.join(lines)[:120]}")
+    spec_items = unit.spec.items if unit.spec is not None else []
+    if ans.kind in ("timeline", "process", "cards") and not c.items and len(spec_items) >= 2:
+        empty = not (c.bullets or c.paragraphs or c.numbers or c.table or c.chart or c.columns or c.quote or c.formula)
+        if empty or (ctx.written and ans.kind == "timeline"):
+            # «timeline» answered without its entries (a slow host cuts the answer): the slide's own list, which the
+            # analyst read from the source (date → title, event → text), is the form the designer chose
+            c.items = [SlideItem(title=H.strip_end(it.title), text=H.strip_end(it.text or "")) for it in spec_items[:MAX_ITEMS]]
+            changes.append(f"slide {unit.key}: {ans.kind} without items: the slide's list of the source used ({len(c.items)} items)")
     listed = [it for it in c.items if len(it.bullets) >= 2]
     if listed and not c.columns:
         if 2 <= len(c.items) <= 3 and len(listed) == len(c.items):
@@ -1789,7 +1875,7 @@ def design_from_answer(ans: SlideDesignAnswer, unit: _Unit, ctx: _Ctx) -> Option
             c.numbers = fixed
         if kind == "stat_row" and len(c.numbers) == 1:
             kind = "big_number"
-    kind = _fit_form(kind, c, changes, unit.key)
+    kind = _fit_form(kind, c, changes, unit.key, ctx.brief.text if ctx is not None else unit.text)
     _tidy_lines(c)
     charts = [x for x in (c.chart, c.chart2) if x is not None]
     # a line comparing parts («Маркетинг и прочие расходы — минимальная доля») that the slide's own data contradicts
@@ -2111,6 +2197,7 @@ _FUNCTION_WORDS = frozenset(
     между перед после над под""".split()
 )
 _COLON_LINE_RE = re.compile(r"^(?P<head>[^:\d]{2,60}?):\s+(?P<first>[A-ZА-ЯЁ][^\s,;:]*)")
+_DASH_LOW_RE = re.compile(r"(?<=\S)[ \u00a0][—–][ \u00a0](?P<first>[а-яё][а-яё-]*)")
 
 
 def _lowered(word: str, text: str) -> bool:
@@ -2125,6 +2212,54 @@ def _lowered(word: str, text: str) -> bool:
     if re.search(rf"(?<![\wё]){re.escape(stem.lower())}", text or ""):
         return True  # the brief writes it in lowercase: a common word
     return not re.search(rf"(?:[a-zа-яё0-9,;:)»]\s+|«){re.escape(stem)}", text or "")
+
+
+def _keeps_capital(word: str, text: str) -> bool:
+    """A word that keeps its capital at the start of a line's second half («1937 год — Япония начала войну», «Итог —
+    Германия капитулировала»): an abbreviation, a Latin name, or a name the text writes with its capital inside a
+    sentence or after a dash inside a line («войну Германии», «года — Германия») and never in lowercase as the word
+    itself («германские войска» is another word). Function words never («С пятью офисами» → «с пятью»)."""
+    core = word.strip("«»\"'()")
+    if not core or not core[:1].isupper() or core.lower() in _FUNCTION_WORDS:
+        return False
+    if not _lowered(core, text):
+        return True
+    if len(core) < 4:
+        return False
+    own = core.lower()[: len(core) - 1]  # «германи» of «Германия»/«Германии», not «германские»
+    if re.search(rf"(?<![\wё]){re.escape(own)}", text or ""):
+        return False
+    stem = core if len(core) <= 5 else core[: len(core) - 2]
+    return bool(re.search(rf"(?:[a-zа-яё0-9,;:)»][ \t ]+|«|\S[ \t ]+[—–][ \t ]+){re.escape(stem)}", text or ""))
+
+
+_DATE_TITLE_RE = re.compile(rf"(?<!\d)(?:1[5-9]|20)\d{{2}}(?!\d)|{_MONTHS_GEN}|(?:^|\s)(?:январ|феврал|март|апрел|май|июн|июл|август|сентябр|октябр|ноябр|декабр)\w*", re.I)
+
+
+def _low_first(x: str, text: str = "", only_if_next_lower: bool = False, date_title: bool = False) -> str:
+    """The line with its first letter in lowercase where Russian needs it after a dash or a colon — not a name, an
+    abbreviation or a Latin word (_keeps_capital with the text the line comes from: the brief or the slide's source).
+    `only_if_next_lower`: lowercase only a word whose second letter is lowercase («ВКС» stays). `date_title` (the line
+    continues a date: «Июнь 1940 — Италия присоединилась…»): with the text, a word starts in lowercase only when the
+    text writes it so somewhere (a country named only at a sentence's start is still a name)."""
+    words = (x or "").split()
+    if not words:
+        return x
+    if only_if_next_lower and not x[1:2].islower():
+        return x
+    first = words[0]
+    if _keeps_capital(first, text):
+        return x
+    core = first.strip("«»\"'()")
+    if date_title and text and core[:1].isupper() and core.lower() not in _FUNCTION_WORDS:
+        own = core.lower()[: max(3, len(core) - 1)]
+        if not re.search(rf"(?<![\wё]){re.escape(own)}", text):
+            return x
+    if not text:
+        keep = len(first) >= 2 and first.isupper() or bool(re.match(r"[A-Za-z]", first))  # «NPS», «VK Tech»
+        if keep:
+            return x
+    return x[:1].lower() + x[1:]
 
 
 _GROWTH_NOUN = {"роста": "рост", "прироста": "прирост", "снижения": "снижение", "сокращения": "сокращение", "падения": "падение"}
@@ -2178,21 +2313,265 @@ def polish_case(s: OutlineSlide, text: str) -> None:
             return line[:i] + line[i].lower() + line[i + 1:]
         return line
 
+    def name(line: str) -> str:
+        # a name lowercased after a dash by a form that joined a card's title and text («1937 год — япония начала
+        # войну», «Апрель — июнь 1940 — германия завоевала…») gets its capital back when the brief writes it so
+        # («В Азии Япония вела войну»)
+        out = line or ""
+        for m in list(_DASH_LOW_RE.finditer(out)):
+            w = m.group("first")
+            if _keeps_capital(w[:1].upper() + w[1:], text):
+                i = m.start("first")
+                out = out[:i] + out[i].upper() + out[i + 1:]
+        return out
+
     c = s.content
-    c.bullets = [colon(b) for b in c.bullets]
-    c.paragraphs = [colon(b) for b in c.paragraphs]
+    c.bullets = [name(colon(b)) for b in c.bullets]
+    c.paragraphs = [name(colon(b)) for b in c.paragraphs]
     for n in c.numbers:
         n.label = colon(n.label or "")
     for it in [*c.items, *c.columns]:
-        it.bullets = [colon(b) for b in it.bullets]
+        it.bullets = [name(colon(b)) for b in it.bullets]
         t = (it.text or "").strip()
         first = t.split()[0] if t.split() else ""
         if it.title and first and first[:1].isupper() and first.lower() in _FUNCTION_WORDS:
             it.text = t[:1].lower() + t[1:]
         elif it.text:
             it.text = colon(it.text)
+            if it.title and first[:1].islower() and _keeps_capital(first[:1].upper() + first[1:], text):
+                it.text = it.text[:1].upper() + it.text[1:]
     if s.takeaway:
         s.takeaway = colon(s.takeaway)
+
+
+_YEAR_VALUE_RE = re.compile(r"^(?:1[5-9]|20)\d{2}\s*(?:г\.?|год\w*)?$", re.I)
+
+
+def _years_only(nums: list[NumberCallout]) -> bool:
+    """Every «key figure» is a year («1998 г», «2021 год», «2023»): dates, never a row of figures."""
+    return bool(nums) and all(_YEAR_VALUE_RE.match(" ".join((n.value or "").split())) for n in nums)
+
+
+def _years_as_timeline(d: _Design) -> None:
+    """A row of years («1998 г» · «— основана как почтовый сервис Mail.ru», «2021 г» · …) is a timeline: each year the
+    title of a step, its label (without the leading dash) the step's text; one or two years become lines."""
+    s, c = d.slide, d.slide.content
+    if s.kind not in (PatternKind.stat_row, PatternKind.big_number) or not _years_only(c.numbers) or c.chart is not None or c.table is not None:
+        return
+    items = []
+    for n in c.numbers:
+        year = re.match(r"\d{4}", " ".join(n.value.split())).group(0)
+        label = H.strip_end(re.sub(r"^\s*[—–-]\s*", "", n.label or ""))
+        items.append(SlideItem(title=year, text=H.cap_first(label) if label else ""))
+    was = s.kind.value
+    if len(items) >= 3 and not c.items:
+        s.kind, c.items = PatternKind.timeline, items[:MAX_ITEMS]
+    else:
+        lines = [f"{it.title} — {_low_first(it.text, d.unit.text)}" if it.text else it.title for it in items]
+        c.bullets = (lines + [b for b in c.bullets if b not in lines])[:MAX_BULLETS]
+        if not (c.items or c.columns):
+            s.kind = PatternKind.bullets
+    c.numbers = []
+    d.changes.append(f"slide {d.unit.key}: a {was} of years only → {s.kind.value} ({', '.join(it.title for it in items)})")
+
+
+_COUNT_NEXT_SKIP = re.compile(
+    r"^(?:трет|четверт|половин|раз|процент|тысяч|миллион|миллиард|млн|млрд|тыс|час|минут|секунд|дн|недел|месяц|лет|год|век|пункт)", re.I,
+)
+
+
+def _count_words(text: str) -> set[int]:
+    """The counts 2–10 a text gives: as digits («3 сервиса») or in words («трём», «пятью»)."""
+    from verstka.planning.grounding import _CARDINALS
+
+    out = {int(v) for v in figures(text or "") if float(v).is_integer() and 2 <= v <= 10}
+    for w in re.findall(r"[а-яё]+", (text or "").lower()):
+        v = _CARDINALS.get(w)
+        if v and 2 <= v[0] <= 10:
+            out.add(v[0])
+    return out
+
+
+def _list_sizes(s: OutlineSlide, source: str = "") -> set[int]:
+    """How many things the slide and its source list: lines, cards, columns, figures, a chart's categories, a table's
+    rows, and the names or parts one line enumerates («"ВКонтакте", "Одноклассники", "Мой мир"» — 3)."""
+    c = s.content
+    sizes = {len(c.bullets), len(c.items), len(c.columns), len(c.numbers)}
+    sizes |= {len(x.bullets) for x in [*c.items, *c.columns]}
+    for ch in (c.chart, c.chart2):
+        if ch is not None:
+            sizes.add(len(ch.categories))
+    if c.table is not None:
+        sizes.add(len(c.table.rows))
+    lines = [*c.bullets, *c.paragraphs] + [f"{x.title}: {x.text} {' '.join(x.bullets)}" for x in [*c.items, *c.columns]]
+    lines += H.split_sentences(source or "") or []
+    for ln in lines:
+        sizes.add(len(re.findall(r"«[^«»]+»", ln)))
+        body = ln.split(":", 1)[-1]
+        sizes.add(len([p for p in re.split(r",\s*|\s+и\s+", body) if p.strip()]))
+    return {n for n in sizes if n >= 2}
+
+
+def invented_counts(headline: str, source: str, s: OutlineSlide) -> list[str]:
+    """The counts in words a headline gives («шестью социальными сетями и пятью мессенджерами») that neither its source
+    text states (in digits or words) nor the slide shows (a list of that many): the designer's invention."""
+    from verstka.planning.grounding import _CARDINALS
+
+    toks = list(re.finditer(r"[А-Яа-яЁё]+", headline or ""))
+    have: Optional[set[int]] = None
+    bad = []
+    for i, m in enumerate(toks):
+        v = _CARDINALS.get(m.group(0).lower())
+        if not v or not 2 <= v[0] <= 10 or i + 1 >= len(toks):
+            continue
+        nxt = toks[i + 1]
+        if headline[m.end():nxt.start()].strip() or _COUNT_NEXT_SKIP.match(nxt.group(0)) or nxt.group(0).lower() in _CARDINALS:
+            continue
+        if have is None:
+            have = _count_words(source) | _list_sizes(s, source)
+        if v[0] not in have:
+            bad.append(f"{m.group(0)} {nxt.group(0)}")
+    return bad
+
+
+_LABEL_DROP_RE = re.compile(
+    r"^(?:что|и|а|но|это|так|около|более|менее|почти|примерно|свыше|порядка|до|лишь|только|уже|было|будет|был[аио]?|были|"
+    r"составит|составляет|составил[аио]?|составили|достиг\w*|насчитыва\w*|прогнозиру\w*|ожида\w*|оценива\w*)$",
+    re.I,
+)
+
+
+def _values(text: str) -> list[float]:
+    """The magnitudes of a text's figures that are not dates or years («240 млн» → 240 000 000; «1 854» stays, «в 2025
+    году» goes)."""
+    from verstka.planning.grounding import _is_year, figures as g_figures
+
+    return [f.mag for f in g_figures(text or "") if f.date is None and not _is_year(f)]
+
+
+def _same_value(a: float, b: float) -> bool:
+    return abs(a - b) <= 1e-6 * max(1.0, abs(a))
+
+
+def _figure_sentence(value: str, source: str) -> Optional[str]:
+    """The source's sentence that states the figure (every figure of `value` that is not a year in it)."""
+    want = _values(value)
+    if not want:
+        return None
+    for sn in H.split_sentences(source or "") or []:
+        have = _values(sn)
+        if all(any(_same_value(v, x) for x in have) for v in want):
+            return H.strip_end(sn)
+    return None
+
+
+# what a figure measures: a label that names one of these must find it in the figure's sentence
+_KPI_MEASURE_RE = re.compile(
+    r"(?<![\wё])(прод|выручк|доход|прибыл|убыт|пользоват|аудитор|абонент|подписчик|сотрудник|работник|клиент|покупател|"
+    r"экспорт|импорт|производ|выпуск|регистр|инвестиц|расход|затрат|стоимост|цен[аыуе]|населен|жител|потер|погиб|жертв|"
+    r"участник|зрител|посетител|студент|учащ|парк)",
+    re.I,
+)
+
+
+def _label_words_ok(label: str, sentence: str) -> bool:
+    """The measure a figure's label names is the one its sentence states: «Прогноз продаж» over «…в мире будет около 240
+    млн электромобилей» is not («продаж» is another measure); a paraphrase of the same measure is («Доля на рынке» for
+    «менее 1 % от общего числа проданных»)."""
+    low = (sentence or "").lower()
+    return all(re.search(rf"(?<![\wё]){re.escape(m.group(1).lower()[:4])}", low) for m in _KPI_MEASURE_RE.finditer(label or ""))
+
+
+def _label_from_sentence(sentence: str, value: str) -> Optional[str]:
+    """A figure's label in the words of its sentence: what the figure counts (the words after it, up to the clause's
+    end) and where and when (the clause before it, without hedges, «что», auxiliaries): «…что к 2030 году в мире будет
+    около 240 млн электромобилей» → «электромобилей к 2030 году в мире»."""
+    want = figures(value)
+    if not want:
+        return None
+    m = next((m for m in _FIG_RE.finditer(sentence) if number_of(m.group(0)) is not None and abs(number_of(m.group(0)) - want[0]) <= 1e-6 * max(1.0, abs(want[0]))), None)
+    if m is None:
+        return None
+    after = re.split(r"[,;:(]|\s[—–]\s", sentence[m.end():])[0].split()
+    while after and re.match(r"^(?:тыс\.?|млн\.?|млрд\.?|трлн\.?|%|₽|руб\w*|долл\w*|\$|€|шт\.?)$", after[0], re.I):
+        after = after[1:]
+    before = re.split(r"[,;:(]|\s[—–]\s", sentence[: m.start()])[-1].split()
+    before = [w for w in before if not _LABEL_DROP_RE.match(w)]
+    label = " ".join(after[:6] + before[-5:]).strip(" ,.;:")
+    if not label:
+        return None
+    return label[:1].lower() + label[1:] if _lowered(label.split()[0], sentence) else label
+
+
+def misdated(headline: str, source: str) -> list[str]:
+    """The names a headline puts at a date that the source's lines of that date never name: «Германия капитулировала 2
+    сентября 1945 года» where the source says «2 сентября 1945 года — Япония капитулирует» (and «8 мая 1945 года —
+    Германия капитулирует»). Only full dates (day, month, year); a line without a year takes the years of its text."""
+    from verstka.planning.grounding import figures as g_figures
+
+    want = {f.date for f in g_figures(headline or "") if f.date is not None and f.date[2]}
+    if not want:
+        return []
+    names = []
+    for m in re.finditer(r"[А-ЯЁA-Z][а-яёa-zА-ЯЁA-Z-]{2,}", headline):
+        w = m.group(0)
+        if _keeps_capital(w, source) and not re.match(_MONTHS_GEN, w, re.I):
+            names.append(w)
+    if not names:
+        return []
+    years = {int(y) for y in re.findall(r"(?<!\d)(1[5-9]\d{2}|20\d{2})(?!\d)", source or "")}
+    lines = [x for ln in (source or "").splitlines() for x in (H.split_sentences(ln) or [ln])]
+    dated = []
+    for ln in lines:
+        for f in g_figures(ln):
+            if f.date is None:
+                continue
+            day, mo, y = f.date
+            if (day, mo, y) in want or (y is None and any((day, mo, yy) in want for yy in years)):
+                dated.append(ln.lower())
+                break
+    if not dated:
+        return []
+    stem = lambda w: w.lower()[: max(4, len(w) - 2)]  # noqa: E731 - «Германия» · «Германии»
+    return [w for w in names if not any(stem(w) in ln for ln in dated)]
+
+
+def _dated_in(headline: str, source: str) -> bool:
+    """The source writes a full date of the headline (with its year, or a day of a month of a year it writes)."""
+    from verstka.planning.grounding import figures as g_figures
+
+    want = {f.date for f in g_figures(headline or "") if f.date is not None and f.date[2]}
+    years = {int(y) for y in re.findall(r"(?<!\d)(1[5-9]\d{2}|20\d{2})(?!\d)", source or "")}
+    for f in g_figures(source or ""):
+        if f.date is not None and (f.date in want or (f.date[2] is None and any((f.date[0], f.date[1], y) in want for y in years))):
+            return True
+    return False
+
+
+def _true_labels(d: _Design) -> None:
+    """A written deck (the writer's text): a key figure's label says what its sentence says it counts, and a big
+    number's headline states that figure — «240 млн · Прогноз продаж к 2030 году» under «Продажи электромобилей в
+    России: 1854 шт.» said a world fleet was a sales forecast."""
+    s, c = d.slide, d.slide.content
+    src = d.unit.text or ""
+    if not c.numbers or not src.strip():
+        return
+    for n in c.numbers:
+        sn = _figure_sentence(n.value, src)
+        if sn is None or not (n.label or "").strip() or _label_words_ok(n.label, sn):
+            continue
+        new = _label_from_sentence(sn, n.value)
+        if new and new != n.label:
+            d.changes.append(f"slide {d.unit.key}: the label «{n.label[:60]}» of {n.value} is not what its sentence counts → «{new}»")
+            n.label = new
+    if s.kind == PatternKind.big_number and len(c.numbers) == 1:
+        kv = _values(c.numbers[0].value)
+        hv = _values(_ORD_TOKEN_RE.sub(" ", s.headline or ""))
+        if kv and hv and not any(_same_value(a, b) for a in kv for b in hv):
+            sn = _figure_sentence(c.numbers[0].value, src)
+            if sn and len(sn.split()) <= 14:
+                d.changes.append(f"slide {d.unit.key}: the headline «{(s.headline or '')[:60]}» states another figure than the big number {c.numbers[0].value} → its sentence")
+                s.headline = H.cap_first(sn)
 
 
 def tidy_design(d: _Design, ctx: Optional[_Ctx] = None) -> None:
@@ -2205,6 +2584,26 @@ def tidy_design(d: _Design, ctx: Optional[_Ctx] = None) -> None:
     if d.unit.frame or s.kind.value in FRAME_KINDS:
         return
     users = d.unit.spec.takeaway if d.unit.spec is not None else None
+    _years_as_timeline(d)  # years are never a row of key figures
+    written = ctx is not None and ctx.written
+    if d.by == "model" and s.headline and not (users and same_text(s.headline, users)):
+        # a count in words the source does not give («шестью социальными сетями и пятью мессенджерами» over 3 and 3)
+        source = d.unit.text if written or ctx is None else f"{d.unit.text}\n{ctx.brief.text}"
+        bad = invented_counts(s.headline, source, s)
+        if bad:
+            new = H.strip_end(d.unit.title or "") if written or ctx is None else _fallback_headline(d.unit, ctx)
+            if new and not invented_counts(new, source, s):
+                d.changes.append(f"slide {d.unit.key}: the headline «{s.headline[:80]}» gives a count the source does not ({', '.join(bad)}) → «{new[:80]}»")
+                s.headline = new
+    if written:
+        _true_labels(d)
+        if d.by == "model" and s.headline:
+            # a date given to another actor («Германия капитулировала 2 сентября 1945 года»: Japan did)
+            wrong = misdated(s.headline, d.unit.text) or (misdated(s.headline, ctx.brief.text) if not _dated_in(s.headline, d.unit.text) else [])
+            if wrong:
+                new = H.strip_end(d.unit.title or "")
+                d.changes.append(f"slide {d.unit.key}: the headline «{s.headline[:80]}» puts {', '.join(wrong)} at a date the text gives to another → «{new}»")
+                s.headline = new
     if d.by == "model" and d.unit.spec is not None:
         # what another slide's source says (a reviewer's note sent to the wrong slide, the model's memory of the deck):
         # never on this one
@@ -2269,7 +2668,7 @@ def tidy_design(d: _Design, ctx: Optional[_Ctx] = None) -> None:
                 d.changes.append(f"slide {d.unit.key}: the line «{b[:60]}» repeated {why}, dropped")
         if len(keep) < len(lines) and (keep or c.chart is not None or c.table is not None or c.items or c.columns or c.numbers or c.formula or field_ == "paragraphs" or c.paragraphs):
             setattr(c, field_, keep)
-    _uniform_steps(d)
+    _uniform_steps(d, ctx.brief.text if ctx is not None else d.unit.text)
     s.takeaway = plain_change(s.takeaway)
     c.bullets = [plain_change(b) or b for b in c.bullets]
     charts = [x for x in (c.chart, c.chart2) if x is not None]
@@ -2291,15 +2690,17 @@ _PP_RE = re.compile(r"(\d)\s+п\.\s*п\.")
 _STEP_ORD_RE = re.compile(r"^(?:(?P<n1>\d{1,2})\s*-?\s*(?:й|ый|ой|ий)?\s*(?P<w1>месяц|недел[яи]|квартал|этап|шаг|день)|(?P<w2>месяц|неделя|квартал|этап|шаг)\s+(?P<n2>\d{1,2}))$", re.I)
 
 
-def _uniform_steps(d: _Design) -> None:
+def _uniform_steps(d: _Design, text: str = "") -> None:
     """The steps of a timeline or a process (or a column of steps) titled one way: the source's own step titles
     («1-й месяц», …) when the slide shows as many steps as the source gives, in order; else an untitled step between
     titled ones gets its number's title in the form of the others («Месяц 2» … → «Месяц 3»)."""
     src = _read_source(d.unit.text) if (d.unit.text or "").strip() else _Source()
     c = d.slide.content
 
+    case_text = text or d.unit.text or ""
+
     def low(x: str) -> str:
-        return x[:1].lower() + x[1:] if x[1:2].islower() else x
+        return _low_first(x, case_text, only_if_next_lower=True)
 
     if d.slide.kind.value in ("timeline", "process") and len(c.items) >= 3:
         items = c.items
@@ -2419,11 +2820,11 @@ def _table_from_pairs(pairs: list[tuple[str, str, Optional[float]]]) -> Optional
     return TableData(columns=["Показатель", "Значение"], rows=rows[:MAX_TABLE_ROWS])
 
 
-def _lines_of(s: OutlineSlide) -> list[str]:
+def _lines_of(s: OutlineSlide, text: str = "") -> list[str]:
     c = s.content
     out = [*c.paragraphs, *c.bullets]
     for it in c.items:
-        out.append(_title_text(it))
+        out.append(_title_text(it, text))
     for col in c.columns:
         out.extend(f"{col.title}: {b}" if col.title else b for b in col.bullets)
     return [x for x in out if x]
@@ -2522,7 +2923,10 @@ def line_figure(line: str) -> Optional[NumberCallout]:
         return _kpi_figure(line)
     if re.search(r"(?<![\wё])(?:с|со|до|на|в|во|по|за|из|от|к|при|и)$", label, re.I):
         return None  # a label cut on a preposition
-    return NumberCallout(value=value, label=label)
+    n = NumberCallout(value=value, label=label)
+    if _date_callout(n, any_year=False):
+        return None  # «3 сентября Великобритания…», «1939 году …»: a date, not a figure with its words
+    return n
 
 
 def figures_of_lines(lines: list[str]) -> Optional[tuple[list[NumberCallout], list[str]]]:
@@ -2637,10 +3041,19 @@ def _step_item(line: str) -> Optional[SlideItem]:
     return SlideItem(title=H.strip_end(m.group("t")), text=H.cap_first(H.strip_end(m.group("x"))))
 
 
-def reshape(s: OutlineSlide, kind: str, chart_type: Optional[str] = None) -> Optional[OutlineSlide]:
+def reshape(s: OutlineSlide, kind: str, chart_type: Optional[str] = None, case_text: str = "") -> Optional[OutlineSlide]:
     """The slide's content in another form, without a model, or None when the content does not fit it (a chart needs
     figures of one unit, cards need short lines, …). Headline, takeaway, footnote, notes and the formula stay. A pie or
-    a doughnut only of the parts of one whole (never «Сейчас / Цель», never a row of unrelated figures)."""
+    a doughnut only of the parts of one whole (never «Сейчас / Цель», never a row of unrelated figures). Never a row of
+    years as key figures («1998 г», «2021 г», «2023 г» — a timeline's dates). `case_text`: the brief (a name keeps its
+    capital in a card joined into one line)."""
+    r = _reshape(s, kind, chart_type, case_text)
+    if r is not None and r.kind.value in ("stat_row", "big_number") and _years_only(r.content.numbers):
+        return None
+    return r
+
+
+def _reshape(s: OutlineSlide, kind: str, chart_type: Optional[str] = None, case_text: str = "") -> Optional[OutlineSlide]:
     c = s.content
     if kind == s.kind.value and (kind != "chart" or not chart_type or (c.chart is not None and c.chart.type == chart_type)):
         return s.model_copy(deep=True)
@@ -2661,7 +3074,7 @@ def reshape(s: OutlineSlide, kind: str, chart_type: Optional[str] = None) -> Opt
             new.numbers, new.bullets = nums, list(c.bullets)
             return s.model_copy(update={"kind": PatternKind.stat_row, "content": new}, deep=True)
     if kind == "stat_row" and text and not (c.chart or c.table or c.numbers):
-        figs = figures_of_lines(_lines_of(s))
+        figs = figures_of_lines(_lines_of(s, case_text))
         if figs is None:
             return None
         nums, rest = figs
@@ -2736,7 +3149,7 @@ def reshape(s: OutlineSlide, kind: str, chart_type: Optional[str] = None) -> Opt
         new.numbers = [n.model_copy() for n in c.numbers]
     elif kind == "bullets":
         # a list shows its figures as lines («Покупок в день: 100 → 115»), never as a row of figures under another name
-        lines = [f"{H.strip_end(n.label)}: {n.value}" if n.label else n.value for n in c.numbers] + _lines_of(s)
+        lines = [f"{H.strip_end(n.label)}: {n.value}" if n.label else n.value for n in c.numbers] + _lines_of(s, case_text)
         if not lines or len(lines) > MAX_BULLETS or any(len(x.split()) > 18 for x in lines):
             return None
         new.bullets = lines
@@ -2745,7 +3158,7 @@ def reshape(s: OutlineSlide, kind: str, chart_type: Optional[str] = None) -> Opt
     return s.model_copy(update={"kind": PatternKind(kind), "content": new}, deep=True)
 
 
-def _slide_alternatives(s: OutlineSlide, alts: list[Alternative], primary: Optional[OutlineSlide]) -> list[SlideAlternative]:
+def _slide_alternatives(s: OutlineSlide, alts: list[Alternative], primary: Optional[OutlineSlide], text: str = "") -> list[SlideAlternative]:
     """The other forms of the slide for the outline (the compiler's variety pass and «Почему слайд такой»): the
     designer's alternatives and its primary form when the variant shows another one, each with its content when this
     module can reshape the slide into it."""
@@ -2759,7 +3172,7 @@ def _slide_alternatives(s: OutlineSlide, alts: list[Alternative], primary: Optio
             continue
         if any(x.kind == kind for x in out):
             continue
-        r = reshape(base, kind, ctype)
+        r = reshape(base, kind, ctype, text)
         change = why or _ALT_WHY.get(kind, "")
         if kind == "chart" and ctype:
             change = f"{_CHART_RU.get(ctype, ctype)}: {change}" if change else _CHART_RU.get(ctype, ctype)
@@ -2807,7 +3220,7 @@ def _merge(a: _Placed, b: _Placed) -> Optional[_Placed]:
     return _Placed(slide=merged, units=[*a.units, *b.units])
 
 
-def _variety(placed: list[_Placed], alts: dict[str, list[Alternative]], primary: Optional[dict[str, OutlineSlide]] = None, prefer: Optional[list[str]] = None) -> list[str]:
+def _variety(placed: list[_Placed], alts: dict[str, list[Alternative]], primary: Optional[dict[str, OutlineSlide]] = None, prefer: Optional[list[str]] = None, case_text: str = "") -> list[str]:
     """No two neighbours of one form when one of them has an alternative that fits: of the two, the switch whose new
     form the variant prefers most (`prefer`, best first; the second slide on a tie). Two neighbours of one of the
     variant's three favourite forms stay (the visual variant's figures, the compact one's tables): its style, not a
@@ -2835,7 +3248,7 @@ def _variety(placed: list[_Placed], alts: dict[str, list[Alternative]], primary:
             options = ([Alternative(kind=base.kind.value, chart_type=base.content.chart.type if base.content.chart else None, why=base.rationale or "")] if base is not None else []) + alts.get(p.units[0], [])
             for a in options:
                 src_slide = base if base is not None and a.kind == base.kind.value else p.slide
-                r = reshape(src_slide, a.kind, a.chart_type)
+                r = reshape(src_slide, a.kind, a.chart_type, case_text)
                 if r is None:
                     continue
                 probe = _Placed(slide=r, units=p.units)
@@ -2867,7 +3280,7 @@ def series_form(d: _Design, ctx: _Ctx) -> Optional[OutlineSlide]:
         return None
     big = [v for n in nums for v in figures(n.value)]
     lines = [*c.paragraphs, *c.bullets]
-    lines += [_title_text(it) for it in c.items]
+    lines += [_title_text(it, ctx.brief.text) for it in c.items]
     lines += [b for col in c.columns for b in (col.bullets or ([col.text] if col.text else []))]
     lines += [f"{n.value} {n.label}" for n in c.numbers]
     keep = []
@@ -2919,7 +3332,7 @@ def assemble(designs: list[_Design], strategy: Strategy, prefs: dict, ctx: _Ctx,
                 if not any(a.kind == k for a in tries) and not (k in ("timeline", "process") and not _sequential(d.slide)):
                     tries.append(Alternative(kind=k, why=_ALT_WHY.get(k, "")))
             for a in tries:
-                r = reshape(d.slide, a.kind, a.chart_type)
+                r = reshape(d.slide, a.kind, a.chart_type, ctx.brief.text)
                 if r is not None and _rank(r.kind.value, prefer) < best_rank:
                     best, best_rank = r, _rank(r.kind.value, prefer)
                     best.rationale = (a.why[:1].upper() + a.why[1:] + ".") if a.why else best.rationale
@@ -2953,7 +3366,7 @@ def assemble(designs: list[_Design], strategy: Strategy, prefs: dict, ctx: _Ctx,
                 out.append(p)
             placed = out
     primary = {d.unit.key: (overrides or {}).get(d.unit.key, d).slide for d in designs}
-    notes.extend(_variety(placed, alts, primary, prefer))
+    notes.extend(_variety(placed, alts, primary, prefer, ctx.brief.text))
     return placed, notes
 
 
@@ -3892,6 +4305,13 @@ def _announces(head: Optional[str]) -> bool:
     return bool(_ANNOUNCE_RE.search(h)) and not headline_states(h)
 
 
+HEAD_MAX_WORDS = 14
+
+
+def _long_head(head: Optional[str]) -> bool:
+    return len((head or "").split()) > HEAD_MAX_WORDS
+
+
 def merge_revision(old: _Design, new: _Design, ctx: Optional[_Ctx] = None) -> tuple[Optional[_Design], list[str]]:
     """The revision as it is taken, part by part (a reviewer's note fixes one thing, and the revised answer may break
     another — the critic's own suggestion for a headline announces a list more often than not): the revised content
@@ -3908,7 +4328,7 @@ def merge_revision(old: _Design, new: _Design, ctx: Optional[_Ctx] = None) -> tu
     if content_worse:
         why.append(f"the revised content is worse ({content_worse}): the first version's content kept")
         # the revision's headline and takeaway may still be better
-        if kinds_b.count("headline") < kinds_a.count("headline"):
+        if kinds_b.count("headline") < kinds_a.count("headline") and not (_long_head(new.slide.headline) and not _long_head(old.slide.headline)):
             s.headline = new.slide.headline
             why.append("the revised headline taken")
         if kinds_b.count("takeaway") < kinds_a.count("takeaway") and new.slide.takeaway and takeaway_ok(new.slide.takeaway, s, out.unit, ctx) is None:
@@ -3922,6 +4342,10 @@ def merge_revision(old: _Design, new: _Design, ctx: Optional[_Ctx] = None) -> tu
         if hb > ha or (hb and hb == ha and not _announces(old.slide.headline)):
             s.headline = old.slide.headline
             why.append(f"the revised headline «{new.slide.headline[:60]}» is no better: the first one kept")
+        elif _long_head(new.slide.headline) and not _long_head(old.slide.headline):
+            # a critic's «neutral» headline is often two of the source's sentences joined (22 words over a row of figures)
+            s.headline = old.slide.headline
+            why.append(f"the revised headline «{new.slide.headline[:60]}…» is too long ({len(new.slide.headline.split())} words): the first one kept")
         worse_tk = kinds_b.count("takeaway") > kinds_a.count("takeaway") or (not s.takeaway and bool(old.slide.takeaway))
         if worse_tk and old.slide.takeaway and takeaway_ok(old.slide.takeaway, s, out.unit, ctx) is None:
             s.takeaway = old.slide.takeaway
@@ -3963,11 +4387,11 @@ def complete_slide(s: OutlineSlide, unit: _Unit, ctx: _Ctx) -> list[str]:
         if cand is None:
             cand = next((k for k in missing if len(k.split()) <= TAKEAWAY_MAX_WORDS and takeaway_ok(k, s, unit, ctx) is None), None)
         if cand is None:
-            cand = _largest_item(src, s)
+            cand = _largest_item(src, s, ctx.brief.text)
         if cand is None and not weak:
             cand = _unshown_figure_item(src, s)
         if cand is None:
-            cand = _asked_list(src, s)
+            cand = _asked_list(src, s, ctx.brief.text)
         if cand:
             old_tk = s.takeaway
             s.takeaway = H.strip_end(cand)
@@ -4005,7 +4429,7 @@ def _restore_lists(s: OutlineSlide, unit: _Unit) -> list[str]:
     src = _read_source(unit.text)
     lists = [(g.label, list(g.items)) for g in src.groups if len(g.items) >= 2]
     if len(src.steps) >= 2:
-        lists.append((None, [f"{t} — {x[:1].lower() + x[1:]}" for t, x in src.steps]))
+        lists.append((None, [f"{t} — {_low_first(x, unit.text)}" for t, x in src.steps]))
     shown = _Shown(_visible_text(s))
     if any(sum(shown.line(it) for it in items) * 2 >= len(items) for _, items in lists):
         return []  # the titles are a list's items themselves («Увеличение среднего чека», …): content, not lost lists
@@ -4023,7 +4447,7 @@ def _restore_lists(s: OutlineSlide, unit: _Unit) -> list[str]:
     return [f"the slide showed only the titles of its lists: {len(cols)} list(s) restored from the brief"]
 
 
-def _largest_item(src: "_Source", s: OutlineSlide) -> Optional[str]:
+def _largest_item(src: "_Source", s: OutlineSlide, text: str = "") -> Optional[str]:
     """«Крупнейшая статья — витрина для десертов: 70 000 рублей»: the largest amount of a budget the source lists (3–8
     amounts of one unit, one of them the largest) — a conclusion its figures state."""
     for g in src.groups:
@@ -4034,18 +4458,18 @@ def _largest_item(src: "_Source", s: OutlineSlide) -> Optional[str]:
         i = max(range(len(values)), key=lambda k: values[k])
         if sorted(values)[-1] == sorted(values)[-2]:
             continue  # two largest: no «the largest»
-        return f"Крупнейшая статья — {labels[i][:1].lower() + labels[i][1:]}: {_fmt_ru(values[i])} {unit}".strip()
+        return f"Крупнейшая статья — {_low_first(labels[i], text)}: {_fmt_ru(values[i])} {unit}".strip()
     return None
 
 
-def _asked_list(src: "_Source", s: OutlineSlide) -> Optional[str]:
+def _asked_list(src: "_Source", s: OutlineSlide, text: str = "") -> Optional[str]:
     """The list the user asked the slide to single out («Выдели три направления роста: увеличение среднего чека,
     привлечение гостей в свободные часы и снижение потерь») as its conclusion, in the user's words: «Три направления
     роста: увеличение среднего чека, привлечение гостей в свободные часы и снижение потерь»."""
     for g in src.groups:
         if not g.ask or not g.label or not 2 <= len(g.items) <= 4:
             continue
-        items = [x[:1].lower() + x[1:] if x[1:2].islower() else x for x in (H.strip_end(i) for i in g.items)]
+        items = [_low_first(x, text, only_if_next_lower=True) for x in (H.strip_end(i) for i in g.items)]
         line = f"{H.strip_end(g.label)}: {', '.join(items[:-1])} и {items[-1]}"
         if len(line.split()) <= TAKEAWAY_MAX_WORDS and not adds_nothing(line, s.headline):
             return line
@@ -4089,7 +4513,7 @@ def _rescue_lists(s: OutlineSlide, unit: _Unit, ctx: _Ctx) -> list[str]:
             c.bullets.extend(lines)
             said.append(f"items of the list «{(g.label or '')[:40]}» the slide left out added as lines: " + "; ".join(f"«{x[:40]}»" for x in lines))
             continue
-        other = _one_other_list(s, src, g)
+        other = _one_other_list(s, src, g, unit.text)
         if len(missing) == len(g.items) and other is not None and not unit.locked and not c.table and not c.chart and not c.formula:
             # the slide shows one list of its source and leaves out the other (the plan by months, not the budget): the
             # two lists side by side, in the source's order
@@ -4120,7 +4544,7 @@ def _source_pos(text: str, item: str) -> int:
     return i if i >= 0 else 10**6
 
 
-def _one_other_list(s: OutlineSlide, src: "_Source", g: "_Group") -> Optional["_Group"]:
+def _one_other_list(s: OutlineSlide, src: "_Source", g: "_Group", text: str = "") -> Optional["_Group"]:
     """The one other list of the source the slide shows whole as its only content (its lines, or its steps as a
     timeline), as a group; None otherwise."""
     c = s.content
@@ -4131,7 +4555,7 @@ def _one_other_list(s: OutlineSlide, src: "_Source", g: "_Group") -> Optional["_
         return None
     cands = [x for x in src.groups if x is not g and len(x.items) >= 2]
     if len(src.steps) >= 2:
-        cands.append(_Group(label=src.steps_label or "План", items=[f"{t} — {x[:1].lower() + x[1:]}" for t, x in src.steps]))
+        cands.append(_Group(label=src.steps_label or "План", items=[f"{t} — {_low_first(x, text)}" for t, x in src.steps]))
     shown = _Shown(" ".join(lines))
     for x in cands:
         if len(lines) <= len(x.items) + 1 and sum(shown.line(i) for i in x.items) == len(x.items):
@@ -4215,6 +4639,7 @@ def run_agent(
     deadline: Optional[float] = None,
     critic: bool = True,
     coverage: bool = True,
+    written: bool = False,
 ) -> Optional[AgentResult]:
     """Brief → a designed, compiled and grounded DeckOutline per strategy (planned_by "agent" when a model designed
     at least one slide, "rules" otherwise). A variant the agent cannot plan is missing from `outlines`: every one
@@ -4225,7 +4650,10 @@ def run_agent(
     e.g. a future, so the data_extractor runs while the analyst reads the brief). `structure`: the analyst's result
     when the caller has it. `progress` receives the agent's events (module docstring). `raw` collects the model
     answers as written (planner_raw.json). `coverage`: the agent's own check that every list the brief gives for a
-    slide is on it (coverage_gaps) adds its notes to the critic's for the revision round."""
+    slide is on it (coverage_gaps) adds its notes to the critic's for the revision round. `written`: the brief is the
+    text the writer wrote from a topic (planning/writer.py): the analyst reads it by its rules only (its lists and data
+    are in the writer's own format; the data_extractor would read every dated block), and the rules path never makes
+    a year a slide's key figure."""
     t0 = time.time()
     tracker = _Tracker(progress)
     clock = _Clock(providers if skills is not None else None, deadline)
@@ -4237,10 +4665,12 @@ def run_agent(
     if structure is None:
         # the analyst's model calls (data_extractor per block) get a share of the budget, never all of it
         a_deadline = None if clock.deadline is None else min(clock.deadline, time.monotonic() + ANALYST_MAX_S)
-        structure, aw = analyse_brief(brief, skills if agent.models else None, providers if agent.models else None, a_deadline, tracker.forward)
+        by_model = agent.models and not written
+        structure, aw = analyse_brief(brief, skills if by_model else None, providers if by_model else None, a_deadline, tracker.forward)
         common.extend(aw)
     fx = _resolve_facts(facts, brief, common, structure)
     ctx = _build_ctx(brief, structure, fx, manifest)
+    ctx.written = written
     tracker.emit("analyst", f"Аналитик: {describe_structure(structure)}.")
 
     # 2. storyline
@@ -4463,7 +4893,7 @@ def run_agent(
             s = p.slide.model_copy(deep=True)
             s.id = f"sl{i}"
             if p.units and len(p.units) == 1 and s.kind.value not in FRAME_KINDS:
-                s.alternatives = _slide_alternatives(s, alt_of.get(p.units[0], []), primary_of.get(p.units[0]))
+                s.alternatives = _slide_alternatives(s, alt_of.get(p.units[0], []), primary_of.get(p.units[0]), ctx.brief.text)
             slides.append(s)
         o = DeckOutline(
             title=(cover.headline if cover else ctx.title) or ctx.title, subtitle=cover.subtitle if cover else ctx.structure.subtitle,

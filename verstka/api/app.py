@@ -361,6 +361,9 @@ def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job) -> dic
         },
         "planner": generation_planner([{"planner": planners[v.strategy]} for v in res.variants], use_models=use_models, supplied=supplied),
     }
+    if getattr(res, "writer", None) is not None:
+        # writer mode: the text the agent wrote from the topic (the result screen shows it; edits ground against it)
+        meta["writer"] = res.writer.meta()
     store.write_generation_meta(gid, meta)
     return meta
 
@@ -612,6 +615,15 @@ def delete_generation(gid: str) -> dict:
     return {"deleted": store.delete_generation(gid)}
 
 
+@app.get("/api/generations/{gid}/writer.md")
+def writer_text_file(gid: str):
+    """The text the agent wrote from the topic (writer mode) as it built the deck from it: «Скачать текст»."""
+    gdir = store.generation_dir(gid)
+    if gdir is None:
+        raise HTTPException(404, "not found")
+    return _serve_file(gdir, "writer.md", media_type="text/markdown; charset=utf-8", filename="text.md")
+
+
 @app.get("/api/generations/{gid}/{strategy}/slides/{name}")
 def slide_image(gid: str, strategy: str, name: str):
     vdir = _variant_dir(gid, strategy)
@@ -675,7 +687,7 @@ def apply_fixes(gid: str, strategy: str, req: FixRequest) -> dict:
             report = AuditReport.model_validate_json((vdir / "audit_report.json").read_text(encoding="utf-8"))
             only = None if req.all_deterministic else set(req.issue_ids)
             job.emit("Применяю исправления", 0.2)
-            final, plan2, outline2, _ = autofix_loop(vdir / "deck.pptx", report, outline, plan, manifest, ws, max_iterations=2, only_ids=only, images_dir=vdir / "slides", brief_text=meta.get("brief"))
+            final, plan2, outline2, _ = autofix_loop(vdir / "deck.pptx", report, outline, plan, manifest, ws, max_iterations=2, only_ids=only, images_dir=vdir / "slides", brief_text=_brief_text_of_meta(gid, meta))
             job.emit("Готовлю превью и файлы", 0.8)
             # previews and the exports that existed before are rebuilt from one LibreOffice run
             exports = [fmt for fmt in ("pdf", "html") if (vdir / f"deck.{fmt}").exists()]
@@ -707,8 +719,39 @@ def apply_fixes(gid: str, strategy: str, req: FixRequest) -> dict:
     return {"job_id": job.id}
 
 
+def _written_text(gid: Optional[str], meta: dict) -> Optional[str]:
+    """The text the writer wrote from the topic (writer mode), when the deck was built from it: writer.md of the
+    generation (the whole text), else the copy in generation.json; None for a deck built from the user's own text."""
+    w = meta.get("writer") if isinstance(meta.get("writer"), dict) else None
+    if not w or w.get("status") != "written":
+        return None
+    gdir = store.generation_dir(gid) if gid else None
+    if gdir is not None and (gdir / "writer.md").is_file():
+        try:
+            text = (gdir / "writer.md").read_text(encoding="utf-8")
+            if text.strip():
+                return text
+        except OSError:
+            pass
+    return (w.get("text") or "").strip() or None
+
+
+def _brief_text_of_meta(gid: Optional[str], meta: dict) -> Optional[str]:
+    """The text the deck's figures were checked against: the writer's text in writer mode, else the user's brief."""
+    return _written_text(gid, meta) or meta.get("brief")
+
+
 def _brief_of_meta(meta: dict) -> Optional[Brief]:
-    """The generation's brief as it was parsed for the build (grounding and the figures check need the same one)."""
+    """The generation's brief as it was parsed for the build (grounding and the figures check need the same one): in
+    writer mode the text the agent wrote from the topic — edits, «Исправить слайд» and the remarks ground against it
+    (against the topic they would strip every figure the deck shows)."""
+    written = _written_text(str(meta.get("id") or "") or None, meta)
+    if written:
+        w = meta.get("writer") or {}
+        return _brief_from_request(GenerateRequest(
+            template_id=meta.get("template_id") or "x", brief=written, audience=meta.get("audience"), purpose=meta.get("purpose"),
+            slides=w.get("slides") or meta.get("slides"), language=meta.get("language") or "ru", extra_instructions=meta.get("extra_instructions"),
+        ))
     if not (meta.get("brief") or "").strip():
         return None
     return _brief_from_request(GenerateRequest(

@@ -1,0 +1,18 @@
+# Writer mode (verstka/planning/writer.py): a topic without material of its own («История VK», «презентация про
+# вторую мировую войну») — the agent writes the deck's text, then builds the deck from it. A text with data, slide
+# descriptions or lists is always built strictly from the user's text (faithful mode), whatever this file says.
+enabled: true                 # env VERSTKA_WRITER=0 turns writer mode off
+temperature: 0.3              # measured: 0.7 invents battles and conferences
+reference:
+  enabled: true               # the topic's Wikipedia article as the writer's only source; env VERSTKA_WIKI=0 turns it off
+  source: wikipedia
+  # REQUIRED by Wikimedia's User-Agent policy (403 without it): a URL or an e-mail to reach the operator.
+  # Env VERSTKA_WIKI_CONTACT overrides it. Empty → no Wikipedia requests (the writer uses the model's knowledge).
+  # Replace with the team's own page or e-mail before the final.
+  contact: "https://i.moscow/hackaton/lct/a964db5a6bd444a6bc5981770f55a080"
+  max_chars: 12000            # what the writer reads of the article(s)
+  timeout_s: 6                # per request; the whole lookup has 12 s
+  cache_days: 7               # <workspace>/cache/reference; a stale entry is used when the network fails
+check:
+  enabled: true               # the deletion-only fact check (writer_check), when ≥ 120 s of the budget remain
+limits: {writer_max_s: 100, agent_reserve_s: 110, check_min_left_s: 120}

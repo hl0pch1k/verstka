@@ -7,7 +7,7 @@ from statistics import median
 from typing import Optional
 
 from verstka.analysis.shapes import ShapeInfo
-from verstka.schemas.common import PatternKind, ShapeKind, SlotRole, contrast_ratio, relative_luminance
+from verstka.schemas.common import EMU_PER_PT, PatternKind, ShapeKind, SlotRole, contrast_ratio, relative_luminance
 from verstka.schemas.template import BulletSpec, CardSpec, ChartStyleSpec, Components, IconChipSpec, NumberSpec, Pattern, TableStyleSpec, Tokens
 
 
@@ -42,7 +42,7 @@ def _table_rule(tokens: Tokens, text_hex: str) -> Optional[str]:
     return min(cands)[1] if cands else None
 
 
-def derive_components(patterns: list[Pattern], shapes_by_slide: dict[int, list[ShapeInfo]], tokens: Tokens) -> Components:
+def derive_components(patterns: list[Pattern], shapes_by_slide: dict[int, list[ShapeInfo]], tokens: Tokens, *, slide_h: Optional[int] = None) -> Components:
     comp = Components()
     card_fills: list[str] = []
     card_lines: list[Optional[str]] = []
@@ -136,4 +136,17 @@ def derive_components(patterns: list[Pattern], shapes_by_slide: dict[int, list[S
         font_size_pt=typo.size_for("small", typo.size_for("body") * 0.85),
         legend_position="bottom",
     )
+    if slide_h:
+        cap = data_text_cap(typo.sizes_used, slide_h)
+        comp.chart_style.font_size_pt = min(comp.chart_style.font_size_pt, cap)
+        comp.table_style.font_size_pt = min(comp.table_style.font_size_pt, cap)
     return comp
+
+
+def data_text_cap(sizes_used: list[float], slide_h: int) -> float:
+    """The largest size chart and table text may take: 2.6 % of the slide height, snapped down to the template's
+    sizes (derived ladder included). Chart labels sized from a 24 pt bullet placeholder (20.4 pt on a 6.2-inch slide)
+    stack category letters and push legends off the slide; the dataset templates set theirs at 1.7–2.2 % H."""
+    cap = 0.026 * slide_h / EMU_PER_PT
+    below = [s for s in sizes_used if 6 <= s <= cap + 1e-6]
+    return max(below) if below else round(cap * 2) / 2

@@ -88,6 +88,18 @@ class IRTable(BaseModel):
     cells: list[list[IRTableCell]] = Field(default_factory=list)  # same shape as rows
 
 
+class IRPictureCells(BaseModel):
+    """A coarse grid over a template picture's box: per cell the share of opaque pixels, their mean colour and their
+    luminance stdev (0–255) — what the picture really paints where (a sparse dot pattern, a photo with a flat dark
+    part, a glass cube on a transparent sheet). Row-major, `w`×`h` cells."""
+
+    w: int
+    h: int
+    alpha: list[float] = Field(default_factory=list)
+    hex: list[str] = Field(default_factory=list)
+    std: list[float] = Field(default_factory=list)
+
+
 class IRElement(BaseModel):
     id: str
     type: Literal["text", "picture", "shape", "chart", "table", "group", "connector", "other"]
@@ -115,6 +127,20 @@ class IRElement(BaseModel):
     geometry: Optional[str] = None
     corner_radius: Optional[float] = None
     rotation: float = 0.0
+    # template layers (IRSlide.template_elements) only: where the shape comes from, whether a picture is a photo
+    # (luminance stdev > 40) and whether its paint hides what lies under it; `fill_hex` of such a picture is its
+    # median colour
+    source: str = "slide"  # slide | layout | master
+    busy: bool = False
+    opaque: bool = True
+    paint_kind: Optional[str] = None  # solid | gradient | pattern | image (template layers only)
+    # what a non-rectangular template shape really paints (an ellipse, a triangle, a freeform): polygons in EMU;
+    # None when the box is what it paints
+    outline: Optional[list[list[tuple[int, int]]]] = None
+    cells: Optional[IRPictureCells] = None  # template pictures only
+    # the text shows in capitals whatever case it is typed in (cap="all"/"small" on its first run, its list style or
+    # the layout/master placeholder it inherits from): widths are measured on the upper-cased text
+    caps: bool = False
 
     @property
     def text(self) -> str:
@@ -170,6 +196,14 @@ class IRSlide(BaseModel):
     elements: list[IRElement] = Field(default_factory=list)
     notes: str = ""
     outline_id: Optional[str] = None
+    # what the slide stands on (analysis.ground): kind of the ground (solid, gradient, pattern, image, render, None)
+    # and whether its colour is only an estimate (a photo, a gradient, a render median)
+    background_kind: Optional[str] = None
+    background_uncertain: bool = False
+    # the non-placeholder shapes and pictures the slide's layout (and its master, unless hidden) paints under the
+    # slide's own shapes: bands, panels, illustrations, photo grounds. Never part of `elements` (the checks of the
+    # deck's own content and the HTML exporter do not see them); grounds and template-art checks read them.
+    template_elements: list[IRElement] = Field(default_factory=list)
 
     @property
     def texts(self) -> list[IRElement]:
@@ -192,6 +226,11 @@ class DeckIR(BaseModel):
     slides: list[IRSlide] = Field(default_factory=list)
     layout_parts: list[str] = Field(default_factory=list)
     embedded_fonts: list[str] = Field(default_factory=list)
+    # every colour the template's layouts and masters set themselves (shape fills and lines, txStyles, list styles):
+    # text in these colours is the template's own
+    template_colors: list[str] = Field(default_factory=list)
+    # [major, minor] theme fonts of the deck's first master (what +mj-lt / +mn-lt runs are set in)
+    theme_fonts: list[str] = Field(default_factory=list)
 
     @property
     def n_slides(self) -> int:

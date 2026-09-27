@@ -1,0 +1,18 @@
+name: topic_reference
+version: 1.0.0
+role: llm
+description: >
+  Writer mode, before the writer: names the 1–3 encyclopedia articles (Wikipedia titles, the main one first) that
+  cover a topic best and says what kind of topic it is (history, person, politician, company, market, science… or
+  private — the user's own organisation or results, then no titles). Verstka fetches those articles as the writer's
+  reference; the kind picks the deck's storyline. Only the titles leave the machine, never the user's text.
+prompt_files:
+  system: prompts/system.md
+  user: prompts/user.md
+output_schema: verstka.schemas.writer.ReferenceAnswer
+params:
+  temperature: 0.0
+  max_tokens: 150
+changelog:
+  - "1.0.0: initial version. 1–2 s on Qwen3-32B; wrong titles are fine (Verstka validates them and searches the
+    topic), the kind drives the storyline, the politician's biography-only cut and the conflict refusal."

@@ -3,25 +3,26 @@
 from __future__ import annotations
 
 import re
+from typing import Optional
 
 from verstka.audit.checks.template import is_figure
-from verstka.audit.checks.common import CONTENT_TYPES, at_template_position, contains, fix, is_chrome_like, ru_count, ru_times, text_elements, text_height_needed_pt, title_element, usable_height_pt
+from verstka.audit.checks.common import CONTENT_TYPES, at_template_position, contains, fix, is_chrome_like, is_template_chrome, ru_count, ru_times, text_elements, text_height_needed_pt, title_element, usable_height_pt
 from verstka.audit.registry import AuditContext, check
 from verstka.rendering.fonts import text_width_pt
 from verstka.schemas.audit import CheckSpec, Issue
 from verstka.schemas.common import EMU_PER_PT, Bbox
 
-OUT_OF_BOUNDS = CheckSpec(id="out_of_bounds", title="Элемент вышел за границы слайда", severity="error", category="layout", description="Текст, таблица или диаграмма выходит за край слайда более чем на 1%; картинка — более чем на 25% своей площади.")
+OUT_OF_BOUNDS = CheckSpec(id="out_of_bounds", title="Элемент вышел за границы слайда", severity="error", category="layout", description="Текст, таблица или диаграмма выходит за край слайда более чем на 1%; картинка — более чем на 25% своей площади. Служебные элементы шаблона (номер слайда, дата, колонтитул) стоят там, где их поставил шаблон, и не проверяются.")
 OVERLAP = CheckSpec(id="overlap", title="Два блока наложились друг на друга", severity="error", category="layout", description="Два текстовых блока пересекаются более чем на 30% меньшего из них (вложенность в карточку не считается). У рамки без заливки и обводки считается полоса, которую занимают её строки (по привязке к верху, центру или низу): пустая часть рамки ничего не закрывает.")
-TEXT_OVERFLOW = CheckSpec(id="text_overflow", title="Текст не поместился в свою рамку", severity="error", category="layout", description="Оценка высоты текста по метрикам шрифта превышает высоту рамки более чем на 8% (сильное переполнение — ошибка, лёгкое — предупреждение).")
-TEXT_CLIPPED = CheckSpec(id="text_clipped", title="Текст обрезан краем слайда", severity="error", category="layout", description="Рамка с текстом частично за пределами слайда.")
-MARGIN_VIOLATION = CheckSpec(id="margin_violation", title="Контент заходит в поля у краёв", severity="warn", category="layout", description="Текстовый блок начинается за пределами безопасной области шаблона (допуск 3% ширины).")
+TEXT_OVERFLOW = CheckSpec(id="text_overflow", title="Текст не поместился в свою рамку", severity="error", category="layout", description="Оценка высоты текста по метрикам шрифта превышает высоту рамки более чем на 8% (сильное переполнение — ошибка, лёгкое — предупреждение). Текст, который шаблон набирает прописными (cap=all в стиле текста или плейсхолдера макета), меряется прописными. Поля номера слайда и даты шаблона не проверяются.")
+TEXT_CLIPPED = CheckSpec(id="text_clipped", title="Текст обрезан краем слайда", severity="error", category="layout", description="Рамка с текстом частично за пределами слайда (кроме номера слайда, даты и колонтитула шаблона).")
+MARGIN_VIOLATION = CheckSpec(id="margin_violation", title="Контент заходит в поля у краёв", severity="warn", category="layout", description="Текстовый блок начинается за пределами безопасной области шаблона (допуск 3% ширины). Служебные элементы шаблона не проверяются.")
 GRID_ALIGNMENT = CheckSpec(id="grid_alignment", title="Блоки не выровнены по направляющим макета", severity="info", category="layout", description="Левый край текстового блока не совпадает ни с одной колонкой шаблона (допуск 1.5% ширины).")
 IMAGE_STRETCHED = CheckSpec(id="image_stretched", title="Картинка растянута, пропорции нарушены", severity="warn", category="layout", description="Пропорции рамки картинки отличаются от пропорций исходного изображения (с учётом кадрирования) более чем на 12%.")
-TEXT_OUTSIDE_CARD = CheckSpec(id="text_outside_card", title="Текст выходит за свою карточку", severity="error", category="layout", description="Строки текстового блока, который начинается внутри карточки (залитой или обведённой фигуры), заходят за её нижний или правый край более чем на 1,5% размера слайда (больше 3% — ошибка): текст висит под карточкой и наезжает на то, что ниже.")
+TEXT_OUTSIDE_CARD = CheckSpec(id="text_outside_card", title="Текст выходит за свою карточку", severity="error", category="layout", description="Строки текстового блока, который начинается внутри карточки (залитой или обведённой фигуры), заходят за её нижний или правый край более чем на 1,5% размера слайда (больше 3% — ошибка): текст висит под карточкой и наезжает на то, что ниже. Подложка, на которой текст тоже начинается (две перекрывающиеся панели обложки), — его фон, а не карточка, в которую он заходит.")
 TABLE_CELL_WRAP = CheckSpec(id="table_cell_wrap", title="Слово в ячейке таблицы переносится по буквам", severity="warn", category="layout", description="Самое длинное слово в ячейке нативной таблицы шире своей колонки (ширина из a:gridCol минус поля ячейки; без сетки — ширина рамки / число колонок минус 2×7.2 пт) при кегле и начертании самой ячейки — PowerPoint рвёт его посреди слова.")
 
-WORD_BREAK = CheckSpec(id="word_break", title="Слово шире своей рамки и рвётся посередине", severity="warn", category="layout", description="Слово абзаца (по метрикам шрифта, при кегле и начертании своего фрагмента) шире рамки текста за вычетом полей и отступа маркера — рендерер разорвёт его посреди слова («Корректировк / а»). Допуск 3%: рендерер набирает текст чуть шире, чем его меряют; неразрывный пробел держит слова вместе, дефис без словосоединителя — место переноса. Рамки, которые сами уменьшают шрифт (normAutofit), и служебные элементы шаблона (номер слайда, дата, колонтитул) не проверяются.")
+WORD_BREAK = CheckSpec(id="word_break", title="Слово шире своей рамки и рвётся посередине", severity="warn", category="layout", description="Слово абзаца (по метрикам шрифта, при кегле и начертании своего фрагмента, прописными — если шаблон набирает этот текст прописными) шире рамки текста за вычетом полей и отступа маркера — рендерер разорвёт его посреди слова («Корректировк / а»). Допуск 3%: рендерер набирает текст чуть шире, чем его меряют; неразрывный пробел держит слова вместе, дефис без словосоединителя — место переноса. Рамки, которые сами уменьшают шрифт (normAutofit), и служебные элементы шаблона (номер слайда, дата, колонтитул) не проверяются.")
 
 TABLE_CELL_INSET_PT = 7.2  # default a:tcPr marL/marR
 WORD_ROOM = 0.97  # a word wider than this share of its line is broken by the renderer
@@ -36,6 +37,8 @@ def out_of_bounds(ctx: AuditContext) -> list[Issue]:
         for e in s.elements:
             if e.type not in CONTENT_TYPES or e.bbox.area <= 0:
                 continue
+            if is_template_chrome(e, ctx.manifest):
+                continue  # the template's own page number / footer stands where the template put it
             f = e.bbox_frac
             if e.type == "picture":
                 inside_w = max(0.0, min(f.x2, 1.0) - max(f.x, 0.0))
@@ -53,6 +56,8 @@ def text_clipped(ctx: AuditContext) -> list[Issue]:
     out: list[Issue] = []
     for s in ctx.ir.slides:
         for e in text_elements(s):
+            if is_template_chrome(e, ctx.manifest):
+                continue
             f = e.bbox_frac
             if (f.x2 > 1.005 or f.y2 > 1.005 or f.x < -0.005 or f.y < -0.005) and f.x < 1.0 and f.y < 1.0:
                 out.append(ctx.new_issue(TEXT_CLIPPED, s.index, f"текст «{e.text[:40]}» обрезан краем слайда", bboxes=[f], element_ids=[e.id], autofix=fix("rematch", "перевыбрать макет", outline_id=s.outline_id)))
@@ -140,11 +145,15 @@ def text_outside_card(ctx: AuditContext) -> list[Issue]:
             below = occ.y2 - host.bbox.y2
             right = occ.x2 - host.bbox.x2
             over = max(below / max(H, 1), right / max(W, 1))
-            # or its lines run into another card under or beside it (a card that grew into the conclusion strip)
+            # or its lines run into another card under it (a card that grew into the conclusion strip). A card that
+            # also holds the text's first line is its ground too, not a card it runs into (two panels of a cover laid
+            # over each other, neither holding the other), and only what hangs below the host counts: running past its
+            # right edge is `right` above
+            host_ids = {id(c) for c in hosts}
             for c in cards:
-                if c is host or c.bbox.area <= 0 or contains(c.bbox, host.bbox) or contains(host.bbox, c.bbox):
+                if id(c) in host_ids or c.bbox.area <= 0 or contains(c.bbox, host.bbox) or contains(host.bbox, c.bbox):
                     continue
-                inter_h = min(occ.y2, c.bbox.y2) - max(occ.y, c.bbox.y)
+                inter_h = min(occ.y2, c.bbox.y2) - max(occ.y, c.bbox.y, host.bbox.y2)
                 inter_w = min(occ.x2, c.bbox.x2) - max(occ.x, c.bbox.x)
                 if inter_h > 0 and inter_w > 0.3 * occ.w:
                     over = max(over, inter_h / max(H, 1))
@@ -172,8 +181,8 @@ def text_overflow(ctx: AuditContext) -> list[Issue]:
     for s in ctx.ir.slides:
         title = title_element(s)
         for e in text_elements(s):
-            if e.bbox.h <= 0:
-                continue
+            if e.bbox.h <= 0 or e.ph_type in ("sldNum", "dt"):
+                continue  # the template's own slide-number and date fields keep the template's own boxes
             need, lines = text_height_needed_pt(e, spacing)
             have = usable_height_pt(e)
             if have <= 0:
@@ -332,7 +341,7 @@ def word_break(ctx: AuditContext) -> list[Issue]:
                 line = usable - (size_p * 1.1 if p.bullet else 0.0)
                 for r in p.runs:
                     size = r.size_pt or size_p
-                    for word in _WORD_SPLIT_RE.split(r.text or ""):
+                    for word in _WORD_SPLIT_RE.split((r.text or "").upper() if e.caps else (r.text or "")):
                         if not word.strip():
                             continue
                         w_pt = text_width_pt(word, r.font, size, r.bold)
@@ -351,4 +360,215 @@ def word_break(ctx: AuditContext) -> list[Issue]:
                         autofix=fix("shrink_text", "уменьшить шрифт по шкале шаблона, чтобы слово встало в строку", outline_id=s.outline_id, element_id=e.id, ratio=round(w_pt / (line * WORD_ROOM), 2)),
                     )
                 )
+    return out
+
+
+CONTENT_OVER_ART = CheckSpec(
+    id="content_over_art",
+    title="Контент лежит на рисунке шаблона",
+    severity="warn",
+    category="layout",
+    description=(
+        "Текст (по месту, которое занимают его строки), диаграмма, таблица или картинка слайда перекрывает рисунок макета или мастера "
+        "(иллюстрацию, фотографию, фигуру оформления — по её настоящему контуру, а не по рамке) на 15–90% своей площади; текст, "
+        "который пересекает край фотографии или фигурного рисунка (перекрытие 10–90%), — ошибка; горизонтальная линия шаблона "
+        "через строки текста — предупреждение. Фоном, а не рисунком, считаются заливка или спокойная картинка во весь слайд и "
+        "прямоугольная плашка, на которой блок стоит целиком."
+    ),
+)
+
+ART_MIN_AREA = 0.003  # share of the slide: smaller template marks are not art
+ART_WARN = (0.15, 0.90)
+ART_CROSS = (0.10, 0.90)
+
+
+def _inside_poly(px: float, py: float, poly) -> bool:
+    inside = False
+    n = len(poly)
+    j = n - 1
+    for i in range(n):
+        xi, yi = poly[i]
+        xj, yj = poly[j]
+        if (yi > py) != (yj > py) and px < (xj - xi) * (py - yi) / ((yj - yi) or 1e-9) + xi:
+            inside = not inside
+        j = i
+    return inside
+
+
+CELL_ALPHA = 0.5  # a picture cell paints when at least half of it is opaque …
+CELL_STD = 18.0  # … and it is textured (luminance stdev) …
+CELL_CONTRAST = 1.3  # … or differs from the slide's ground
+
+
+def _painted_cells(o, ground: Optional[str], cache: dict) -> Optional[list[bool]]:
+    key = (id(o), ground)
+    if key not in cache:
+        c = o.cells
+        out = None
+        if c is not None and c.w * c.h == len(c.alpha) == len(c.hex) == len(c.std):
+            out = []
+            for a, hx, sd in zip(c.alpha, c.hex, c.std):
+                paint = a >= CELL_ALPHA and (sd >= CELL_STD or not ground or _contrast(hx, ground) >= CELL_CONTRAST)
+                out.append(paint)
+        cache[key] = out
+    return cache[key]
+
+
+def _contrast(a: str, b: str) -> float:
+    from verstka.schemas.common import contrast_ratio
+
+    try:
+        return contrast_ratio(a, b)
+    except ValueError:
+        return 21.0
+
+
+def _paints_at(o, px: float, py: float, ground: Optional[str] = None, cache: Optional[dict] = None) -> bool:
+    """Whether the template layer `o` paints at (px, py): its outline for shapes that are not rectangles, its opaque,
+    textured or ground-contrasting cells for pictures, else its box."""
+    b = o.bbox
+    if not (b.x <= px <= b.x2 and b.y <= py <= b.y2):
+        return False
+    if o.outline:
+        hits = sum(1 for poly in o.outline if len(poly) > 2 and _inside_poly(px, py, poly))
+        return hits % 2 == 1
+    if o.cells is not None:
+        grid = _painted_cells(o, ground, cache if cache is not None else {})
+        if grid is not None:
+            cx = min(int((px - b.x) / max(b.w, 1) * o.cells.w), o.cells.w - 1)
+            cy = min(int((py - b.y) / max(b.h, 1) * o.cells.h), o.cells.h - 1)
+            return grid[cy * o.cells.w + cx]
+    return True
+
+
+def _is_art(o, W: int, H: int, ground: Optional[str] = None) -> bool:
+    """A template layer that is drawing, not ground: painted (fill, outline or picture), not a text box, not a thin
+    rule, not a tiny mark, not a full-bleed ground, not a plain shape in the ground's own colour."""
+    if not (o.fill_hex or o.line_hex or o.type == "picture"):
+        return False
+    if o.type != "picture" and not o.line_hex and o.fill_hex and ground and (o.paint_kind or "solid") == "solid":
+        from verstka.audit.checks.common import composite_hex, fill_alpha
+
+        try:
+            seen = composite_hex(o.fill_hex, fill_alpha(o), ground)
+        except ValueError:
+            seen = o.fill_hex
+        if _contrast(seen, ground) < CELL_CONTRAST:
+            return False  # a panel of (almost) the ground's own colour — a faint veil — draws nothing
+    if o.type == "text" and not o.fill_hex:
+        return False
+    if o.type in ("connector",) or o.bbox.w <= 0 or o.bbox.h <= 0:
+        return False
+    f = o.bbox_frac
+    cover = max(0.0, min(f.x2, 1.0) - max(f.x, 0.0)) * max(0.0, min(f.y2, 1.0) - max(f.y, 0.0))
+    if cover < ART_MIN_AREA or f.h <= 0.02:
+        return False
+    if cover >= 0.85:
+        return False  # the slide's ground, a photo included (text on a photo is contrast_low's question)
+    return True
+
+
+_WRITING_ROLES = ("title", "subtitle", "body", "bullet_list", "card_title", "card_body", "number", "number_label", "caption")
+
+
+def _template_writes_on(o, s, manifest, W: int, H: int, ground: Optional[str], cache: dict) -> bool:
+    """The template's own sample slides set text on this layer (a text slot of a sample on the same layout — any
+    layout for a master layer — lies at least half on what the layer paints): it is a ground the template designed for
+    text (a glow inside a panel, a band under the heading), not art to keep content off."""
+    key = ("writes", id(o), s.layout_part)
+    if key in cache:
+        return cache[key]
+    got = False
+    for p in getattr(manifest, "patterns", []) or []:
+        if o.source == "layout" and p.layout_part and s.layout_part and p.layout_part != s.layout_part:
+            continue
+        for sl in p.slots:
+            role = getattr(sl.role, "value", sl.role)
+            if role not in _WRITING_ROLES:
+                continue
+            b = Bbox(x=int(sl.bbox.x * W), y=int(sl.bbox.y * H), w=max(int(sl.bbox.w * W), 1), h=max(int(sl.bbox.h * H), 1))
+            if b.intersection(o.bbox) <= 0:
+                continue
+            hit = sum(1 for i in range(8) for j in range(4) if _paints_at(o, b.x + (i + 0.5) * b.w / 8, b.y + (j + 0.5) * b.h / 4, ground, cache))
+            if hit >= 16:
+                got = True
+                break
+        if got:
+            break
+    cache[key] = got
+    return got
+
+
+def _rule_through(o, box: Bbox, H: int) -> bool:
+    """A horizontal template line (a connector, a line shape or a thin filled bar) crossing the inside of a text's
+    line band over at least half of its width."""
+    f = o.bbox_frac
+    if not (f.h <= 0.02 and (o.line_hex or o.fill_hex)):
+        return False
+    y = o.bbox.y + o.bbox.h / 2
+    margin = 0.15 * box.h
+    if not (box.y + margin < y < box.y2 - margin):
+        return False
+    return min(o.bbox.x2, box.x2) - max(o.bbox.x, box.x) >= 0.5 * box.w
+
+
+@check(CONTENT_OVER_ART)
+def content_over_art(ctx: AuditContext) -> list[Issue]:
+    from verstka.audit.checks.density import _bleeds, _ink
+
+    out: list[Issue] = []
+    W, H = ctx.ir.slide_w, ctx.ir.slide_h
+    cache: dict = {}
+    for s in ctx.ir.slides:
+        tpl = list(getattr(s, "template_elements", []) or [])
+        if not tpl:
+            continue
+        ground = s.background_hex
+        art = [o for o in tpl if _is_art(o, W, H, ground) and not _template_writes_on(o, s, ctx.manifest, W, H, ground, cache)]
+        rules = [o for o in tpl if o.bbox_frac.h <= 0.02 and o.bbox_frac.w >= 0.05]
+        for e in s.elements:
+            if e.type not in CONTENT_TYPES or e.bbox.area <= 0 or (e.type == "text" and not e.has_text):
+                continue
+            if is_chrome_like(e, ctx.ir, ctx.manifest) or (e.type == "picture" and _bleeds(e)):
+                continue
+            box = _ink(e) if e.type == "text" else e.bbox
+            if box.w <= 0 or box.h <= 0:
+                continue
+            under = []
+            for o in art:
+                if o.bbox.intersection(box) <= 0:
+                    continue
+                # a calm rectangular panel (or picture) the block stands on entirely is its ground, not art
+                if not o.busy and not o.outline and (o.geometry in (None, "rect", "roundRect") or o.type == "picture") and contains(o.bbox, box, 0.0) and o.bbox.intersection(box) >= 0.9 * box.area:
+                    continue
+                under.append(o)
+            if under:
+                nx, ny = 16, 8
+                hit = 0
+                per = {id(o): 0 for o in under}
+                for i in range(nx):
+                    px = box.x + (i + 0.5) * box.w / nx
+                    for j in range(ny):
+                        py = box.y + (j + 0.5) * box.h / ny
+                        any_hit = False
+                        for o in under:
+                            if _paints_at(o, px, py, ground, cache):
+                                per[id(o)] += 1
+                                any_hit = True
+                        hit += any_hit
+                share = hit / float(nx * ny)
+                crossing = [o for o in under if (o.busy or o.outline or o.geometry == "custom") and ART_CROSS[0] <= per[id(o)] / float(nx * ny) <= ART_CROSS[1]]
+                what = (e.text[:40] if e.type == "text" else e.name) or e.type
+                if e.type == "text" and crossing:
+                    o = crossing[0]
+                    out.append(ctx.new_issue(CONTENT_OVER_ART, s.index, f"текст «{what}» заходит на {'фотографию' if o.busy else 'рисунок'} шаблона и пересекает его край", severity="error", bboxes=[e.bbox_frac, o.bbox_frac], element_ids=[e.id], details={"share": round(share, 2), "art": o.id}, autofix=fix("rematch", "перевыбрать макет, где контент не ложится на рисунок", outline_id=s.outline_id)))
+                    continue
+                if ART_WARN[0] <= share <= ART_WARN[1]:
+                    o = max(under, key=lambda o: per[id(o)])
+                    out.append(ctx.new_issue(CONTENT_OVER_ART, s.index, f"«{what}» лежит на рисунке шаблона ({int(round(share * 100))}% блока)", bboxes=[e.bbox_frac, o.bbox_frac], element_ids=[e.id], details={"share": round(share, 2), "art": o.id}, autofix=fix("rematch", "перевыбрать макет, где контент не ложится на рисунок", outline_id=s.outline_id)))
+                    continue
+            if e.type == "text":
+                r = next((o for o in rules if _rule_through(o, box, H)), None)
+                if r is not None:
+                    out.append(ctx.new_issue(CONTENT_OVER_ART, s.index, f"линия шаблона проходит через текст «{e.text[:40]}»", bboxes=[e.bbox_frac, r.bbox_frac], element_ids=[e.id], details={"art": r.id, "rule": True}, autofix=fix("rematch", "перевыбрать макет", outline_id=s.outline_id)))
     return out

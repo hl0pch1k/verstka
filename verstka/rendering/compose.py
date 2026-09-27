@@ -95,6 +95,25 @@ def _mix(fg: str, bg: str, share: float) -> str:
     return "".join(f"{int(round(x * share + y * (1 - share))):02X}" for x, y in zip(a, b))
 
 
+def palette_accents(tokens) -> list[str]:
+    """The template's accent colours; a monochrome template (no accent of its own — stock theme accents are dropped by
+    the analysis) accents with its own colours, the most saturated first, then the text colour and the neutrals —
+    never a colour the template does not use."""
+    acc = list(tokens.accents())
+    if acc:
+        return acc
+
+    def sat(h: str) -> float:
+        r, g, b = (int(h[i:i + 2], 16) / 255 for i in (0, 2, 4))
+        mx, mn = max(r, g, b), min(r, g, b)
+        return 0.0 if mx == 0 else (mx - mn) / mx
+
+    grounds = ("background", "surface")
+    cands = [c for c in tokens.colors if c.hex and len(c.hex) == 6 and not any((r or "").startswith(grounds) for r in (c.roles or [c.role]))]
+    cands.sort(key=lambda c: (-round(sat(c.hex), 1), 0 if (c.role or "").startswith("text") else 1, -(c.weight or 0.0)))
+    return [c.hex.upper() for c in cands] or ["0077FF"]
+
+
 @dataclass
 class Colors:
     """Colours that read on one ground (the slide background or a card)."""
@@ -136,9 +155,17 @@ class Kit:
         self.spacing_pct = typo.line_spacing if abs(typo.line_spacing - 1.2) > 1e-6 else 1.0
         self.sizes = sorted({round(s.size_pt, 2) for s in typo.scale if s.size_pt >= 7} | {round(float(x), 2) for x in (typo.sizes_used or []) if x >= 7})
         hp = self.hpt
+        # a sparse template (its scale completed by a derived ladder): its placeholder body (24–32 pt on an 11″ slide)
+        # is not the size of dense composed content — the body keeps to 2.7–3.1 % of the slide height, the small size
+        # to about 2.2 %
+        self.sparse = bool(getattr(typo, "derived_sizes", None))
         body_t = max(typo.size_for("body", 14.0), 0.027 * hp)
+        if self.sparse:
+            body_t = min(body_t, 0.031 * hp)
         self.body = self.snap(body_t, 0.025 * hp, 0.037 * hp)
         self.small = self.snap(max(typo.size_for("small", self.body * 0.85), 0.022 * hp), 0.019 * hp, self.body - 0.4)
+        if self.sparse:
+            self.small = min(self.small, self.snap(0.022 * hp, 0.019 * hp, 0.025 * hp))
         self.h3 = self.snap(max(self.body * 1.18, 0.032 * hp), self.body * 1.07, 0.044 * hp)
         self.lead = self.snap(0.037 * hp, self.body * 1.12, 0.05 * hp)
         self.h2 = self.snap(0.046 * hp, self.lead * 1.08, 0.06 * hp)
@@ -155,7 +182,7 @@ class Kit:
         self.gap = int(0.024 * W)  # between cards
         self.vgap = int(0.03 * H)  # between rows / blocks
         # colours
-        self.accents = [a for a in t.accents()] or ["0077FF"]
+        self.accents = palette_accents(t)
         self.palette = [c.hex for c in t.colors]
         self.heading_color = heading_color
         self.head_size: Optional[float] = None  # the deck's heading size (set by the caller): statements stay under it
@@ -231,7 +258,16 @@ class Kit:
         text = (neutral or strong or ["FFFFFF" if dark_ground else "000000"])[0]
         if prefer and not inside_card and contrast_ratio(prefer, ground) >= 4.5 and sat(prefer) < 0.25:
             text = prefer  # the slide heading is neutral: the body follows it
+        palette = {c.hex.upper() for c in t.colors}
+        own_text = t.color_for("text.primary")
+        fallback = text.upper() in ("000000", "FFFFFF") and text.upper() not in palette
+        if fallback and own_text and contrast_ratio(own_text, ground) >= 4.5:
+            # plain black/white the template never uses: its own text colour when it reads (a deep brand-tinted
+            # near-black is the template's body text, not decoration)
+            text = own_text
         muted_c = [c for c in [t.color_for("text.secondary")] + [x.hex for x in t.colors if x.role and x.role.startswith("neutral")] if c and c != text]
+        if fallback:
+            muted_c = [c for c in muted_c if sat(c) < 0.25]
         muted = next((c for c in muted_c if 4.5 <= contrast_ratio(c, ground) and contrast_ratio(c, text) >= 1.25), text)
         acc_big = next((a for a in self.accents if contrast_ratio(a, ground) >= 3.0), None)
         acc_small = next((a for a in self.accents if contrast_ratio(a, ground) >= 4.5), None)
@@ -247,6 +283,17 @@ class Kit:
             heading = prefer
         figure = next((c for c in self._slot_colors("number") if contrast_ratio(c, ground) >= 3.0 and sat(c) >= 0.25), None) or accent
         return Colors(ground=ground, text=text, muted=muted, accent=accent, accent_text=accent_text, divider=divider, heading=heading or text, figure=figure)
+
+    def on_accent(self, fill: str, fallback: str) -> str:
+        """Text on an accent-filled shape (a badge, a result panel): white when it reads (3:1, the digits are large),
+        else the fallback when it reads, else the best of the template's dark/light colours and black/white."""
+        if contrast_ratio("FFFFFF", fill) >= 3.0:
+            return "FFFFFF"
+        if contrast_ratio(fallback, fill) >= 4.5:
+            return fallback
+        t = self.manifest.tokens
+        cands = [c for c in ("FFFFFF", t.color_for("background.dark"), t.color_for("text.primary"), t.color_for("background.light"), "000000", fallback) if c]
+        return max(cands, key=lambda c: contrast_ratio(c, fill))
 
     def _card_style(self, ground: str, proto: Optional[etree._Element]) -> CardStyle:
         card = self.manifest.components.card
@@ -319,11 +366,40 @@ class Canvas:
         ids = [int(el.get("id")) for el in slide._element.iter(q("p:cNvPr")) if (el.get("id") or "").isdigit()]
         self.next_id = (max(ids) + 1) if ids else 2
         self.added: list[etree._Element] = []
+        self.W, self.H = (kit.W, kit.H) if kit is not None else _slide_size(slide)
+        self.clamps: list[tuple[str, str]] = []  # (shape id, what was clamped): a last guard, never silent
+        self._pending_clamp: Optional[str] = None
 
     def _id(self) -> int:
-        i = self.next_id
-        self.next_id += 1
+        """A fresh shape id: above every id of the slide — the slide may have grown by elements the canvas did not
+        add (a chart or a table added through python-pptx takes the next free id of the slide)."""
+        ids = [int(el.get("id")) for el in self.slide._element.iter(q("p:cNvPr")) if (el.get("id") or "").isdigit()]
+        i = max(self.next_id, (max(ids) + 1) if ids else 2)
+        self.next_id = i + 1
+        if self._pending_clamp:
+            self.clamps.append((str(i), self._pending_clamp))
+            self._pending_clamp = None
         return i
+
+    def _clamp(self, box: Bbox, name: str) -> Bbox:
+        """Every box inside the slide: a coordinate past the slide is a defect (a file PowerPoint may repair); the
+        box is cut to the slide and the cut is reported to the composer's warnings."""
+        W, H = self.W, self.H
+        if not W or not H:
+            return box
+        x = min(max(int(box.x), 0), W)
+        y = min(max(int(box.y), 0), H)
+        x2 = min(max(int(box.x + box.w), x), W)
+        y2 = min(max(int(box.y + box.h), y), H)
+        if (x, y, x2 - x, y2 - y) == (int(box.x), int(box.y), int(box.w), int(box.h)):
+            return box
+        self._pending_clamp = f"{name} clamped to the slide (x {box.x / W:.2f}, y {box.y / H:.2f}, w {box.w / W:.2f}, h {box.h / H:.2f})"
+        return Bbox(x=x, y=y, w=x2 - x, h=y2 - y)
+
+    def clamp_warnings(self) -> list[str]:
+        """The clamps of shapes still on the slide (a composition pass that was undone does not count)."""
+        live = {el.get("id") for el in self.slide._element.iter(q("p:cNvPr"))}
+        return [msg for sid, msg in self.clamps if sid in live]
 
     def _append(self, el: etree._Element) -> etree._Element:
         """Content goes on top of the canvas — as python-pptx's own element classes, so that `slide.shapes` can read
@@ -337,6 +413,7 @@ class Canvas:
 
     # ---- text --------------------------------------------------------------------------------------------------
     def text(self, box: Bbox, paras: list[Para], *, anchor: str = "t", name: str = "Text", insets: tuple[int, int, int, int] = (0, 0, 0, 0)) -> etree._Element:
+        box = self._clamp(box, name)
         sp = etree.Element(q("p:sp"))
         nv = etree.SubElement(sp, q("p:nvSpPr"))
         c = etree.SubElement(nv, q("p:cNvPr"))
@@ -394,6 +471,10 @@ class Canvas:
                 rPr.set("lang", "ru-RU")
                 rPr.set("sz", str(int(round(r.size * 100))))
                 rPr.set("b", "1" if r.bold else "0")
+                # never the template's inherited capitals, tracking or baseline shift (measured text is what is set)
+                rPr.set("cap", "none")
+                rPr.set("spc", "0")
+                rPr.set("baseline", "0")
                 rPr.set("dirty", "0")
                 sf = etree.SubElement(rPr, q("a:solidFill"))
                 etree.SubElement(sf, q("a:srgbClr")).set("val", r.color.upper())
@@ -409,6 +490,7 @@ class Canvas:
 
     # ---- shapes ------------------------------------------------------------------------------------------------
     def rect(self, box: Bbox, fill: Optional[str], line: Optional[str] = None, radius_emu: int = 0, line_w_pt: float = 0.75, name: str = "Shape", geom: Optional[str] = None, alpha: Optional[float] = None) -> etree._Element:
+        box = self._clamp(box, name)
         sp = etree.Element(q("p:sp"))
         nv = etree.SubElement(sp, q("p:nvSpPr"))
         c = etree.SubElement(nv, q("p:cNvPr"))
@@ -446,6 +528,7 @@ class Canvas:
 
     def card(self, box: Bbox, style: CardStyle, name: str = "Card") -> etree._Element:
         if style.proto is not None:
+            box = self._clamp(box, name)
             el = copy.deepcopy(style.proto)
             for tag in ("p:txBody",):
                 for old in el.findall(q(tag)):
@@ -516,6 +599,14 @@ class Canvas:
         sf = etree.SubElement(ln, q("a:solidFill"))
         etree.SubElement(sf, q("a:srgbClr")).set("val", color.upper())
         return self._append(cx)
+
+
+def _slide_size(slide: Slide) -> tuple[int, int]:
+    try:
+        prs = slide.part.package.presentation_part.presentation
+        return int(prs.slide_width), int(prs.slide_height)
+    except Exception:  # noqa: BLE001
+        return 0, 0
 
 
 def _xfrm(spPr: etree._Element, box: Bbox, replace: bool = False) -> None:
@@ -647,6 +738,28 @@ def kpi_callout(text: str) -> Optional[tuple[str, str]]:
 _FIG_UNIT_RE = re.compile(r"^([+\-−–~≈×]?\s?\d[\d\s\u00a0]*(?:[.,]\d+)?\s?%?)\s*([A-Za-zА-Яа-яЁё₽$€].{0,12})$")
 
 
+_SHORT_UNIT_RE = re.compile(r"(?:%|‰|×|₽|\$|€|£|¥|тыс\.?|млн\.?|млрд\.?|трлн\.?|руб\.?|р\.|шт\.?|x|х)", re.I)
+
+
+def figure_split(value: str) -> Optional[tuple[str, str]]:
+    """(figure, words) of a figure followed by the words it counts — «27 миллионов человек» → («27», «миллионов
+    человек»), «40 стран» → («40», «стран»), «12 млн ₽ выручки» → («12 млн ₽», «выручки»). The short units (%, ₽,
+    млн) stay with the number. None when no words follow, for a change («31% → 12%») and for «4,6 из 5»."""
+    t = " ".join((value or "").replace("\u00a0", " ").split())
+    if not t or re.search(r"→|->|⟶", t):
+        return None
+    m = re.match(r"^([+\-−–~≈<>≤≥]?\s?\d[\d ]*(?:[.,]\d+)?)(.*)$", t)
+    if not m:
+        return None
+    toks = m.group(2).split()
+    head = [m.group(1).strip()]
+    while toks and _SHORT_UNIT_RE.fullmatch(toks[0]):
+        head.append(toks.pop(0))
+    if not toks or not any(len(w) >= 3 and w[0].isalpha() for w in toks):
+        return None
+    return " ".join(head), " ".join(toks)
+
+
 def distinct_label(value: str, label: str, headline: str) -> str:
     """A figure's label that does not repeat the heading above it: when the label is the heading's own sentence
     («оператор тратит в среднем 6,5 минуты» under «Оператор тратит в среднем 6,5 минуты на одно обращение»), the
@@ -718,6 +831,16 @@ class Composer:
                     tail.append((ts, bs))
         tail.sort(key=lambda p: (-p[1], -p[0]))
         out = list(dict.fromkeys(base + tail))
+        if getattr(self, "_dense", False):
+            # the dense pass: text below the small size, down to 1.7 % of the slide height (the template's own
+            # steps there — a derived ladder on a sparse template)
+            floor = max(0.017 * k.hpt, 7.0)
+            dense = [x for x in reversed(k.sizes) if floor - 0.05 <= x < k.small - 0.05]
+            if not dense and k.small * 0.85 >= floor:
+                dense = [math.floor(k.small * 0.85 * 2) / 2]
+            extra = [(ts, bs) for bs in dense for ts in (k.body, k.small, bs) if ts >= bs * 1.1 - 0.05 or ts == bs]
+            extra.sort(key=lambda p: (-p[1], -p[0]))
+            out = list(dict.fromkeys(out + extra))
         return out
 
     # ---- entry -------------------------------------------------------------------------------------------------
@@ -734,9 +857,24 @@ class Composer:
         area = self._reserve_notes(area)
         n0 = len(self.cv.tree)
         o0, w0 = self.o, list(self.warnings)
+        notes0 = getattr(self.o, "notes", None)  # a pass may say lines aloud (speaker notes): undone with the pass
         self._boost = 0
+        self._dense = False
+        self._area = area
         self._compose_body(comp, area)
-        growable = comp in self._GROWABLE and not (comp == "stat_row" and len(self.o.content.numbers) <= 1)
+        if self._overflows(n0, area):
+            # the block runs past the foot of its area at every size of the usual ladder: set again denser — sizes
+            # below the small size (down to 1.7 % of the slide height), grids instead of long rows, the lines under
+            # the block in two columns or in the speaker notes — never drawn past the area
+            self._undo(n0)
+            self.o, self.warnings = o0, list(w0)
+            self._restore_notes(notes0)
+            self._dense = True
+            self._compose_body(comp, area)
+            self.warnings.append("dense content set smaller to stay inside its area")
+            if self._overflows(n0, area):
+                self.warnings.append("content runs past its area")
+        growable = comp in self._GROWABLE and not (comp == "stat_row" and len(self.o.content.numbers) <= 1) and not self._dense
         fill = self._fill(n0, area) if growable else None
         if fill is not None and fill < self.FILL_LOW:
             # a short block over an empty band, its text small for the room it has: set again, larger, while it
@@ -745,11 +883,14 @@ class Composer:
             for boost in (1, 2):
                 self._undo(n0)
                 self.o, self.warnings = o0, list(w0)
+                self._restore_notes(notes0)
                 self._boost = boost
                 self._compose_body(comp, area)
                 got = self._fill(n0, area)
                 if got is None or got > 1.0 + 1e-3:
                     break
+                if comp == "table" and self._coverage(n0, area) > self.FILL_MAX:
+                    break  # a table grown into a wall over the slide (the audit's 80 % of the safe area): it stays smaller
                 if got > best[0] + 0.02:
                     best = (got, boost)
                 if got >= self.FILL_LOW:
@@ -757,10 +898,177 @@ class Composer:
             if best[1] != self._boost:
                 self._undo(n0)
                 self.o, self.warnings = o0, list(w0)
+                self._restore_notes(notes0)
                 self._boost = best[1]
                 self._compose_body(comp, area)
+        if comp == "table" and not self._dense and self._coverage(n0, area) > self.FILL_MAX:
+            # a long table fills the slide past the audit's wall: set again with its rows at their own height (no
+            # growth), then — still over — as wide as its columns need at the same type size (never under 60 % of the
+            # area), at last a size smaller; the conclusion and the heading keep their room around it
+            for level in (1, 2, 3):
+                self._undo(n0)
+                self.o, self.warnings = o0, list(w0)
+                self._restore_notes(notes0)
+                self._tight = level
+                try:
+                    self._compose_body(comp, area)
+                finally:
+                    self._tight = 0
+                if self._coverage(n0, area) <= self.FILL_MAX:
+                    break
         self._boost = 0
         self._draw_notes(n0)
+        self.warnings.extend(self.cv.clamp_warnings())
+
+    FILL_MAX = 0.8  # the share of the safe area past which a slide reads as a wall of content (the audit's fill_ratio)
+
+    def _coverage(self, n0: int, area: Bbox) -> float:
+        try:
+            return self._coverage_of(n0, area)
+        except Exception:  # noqa: BLE001 — a measure never breaks a slide: unmeasured, the table keeps its setting
+            return 0.0
+
+    def _coverage_of(self, n0: int, area: Bbox) -> float:
+        """The share of the template's safe area the slide's content covers, measured as the audit's fill_ratio does
+        (96×54 grid; past 80 % by the blocks' boxes, the text counted by the band its lines fill): the heading (the
+        canvas's text above the area), what was composed after the first `n0` elements (text, tables, charts — not
+        the bare rules and cards) and the room kept for the conclusion and the footnote."""
+        from verstka.rendering.deck import element_bbox
+
+        k = self.kit
+        safe = k.manifest.tokens.spacing.safe_area
+        sx, sy = safe.x * k.W, safe.y * k.H
+        sw, sh = max(safe.w * k.W, 1.0), max(safe.h * k.H, 1.0)
+        gx, gy = 96, 54
+        boxes: list[tuple] = []
+        inks: list[tuple] = []
+        for i, el in enumerate(list(self.cv.tree)):
+            b = element_bbox(el)
+            if not b or b[2] <= 0 or b[3] <= 0:
+                continue
+            tag = etree.QName(el).localname
+            text = "".join(t.text or "" for t in el.iter(q("a:t"))).strip()
+            if i < n0:
+                if not text or b[1] + b[3] > area.y + int(0.01 * k.H) or b[2] * b[3] >= 0.9 * k.W * k.H:
+                    continue  # the template's own chrome and grounds are not content
+            elif tag == "sp" and not text:
+                continue
+            boxes.append(b)
+            inks.append(self._ink_box(el, b, heading=i < n0) if tag == "sp" else b)
+        notes = getattr(self, "_notes", None)
+        if notes:
+            foot_box, plan, _a = notes
+            if foot_box:
+                fb = foot_box[0]
+                boxes.append((fb.x, fb.y, fb.w, fb.h))
+                inks.append(boxes[-1])
+            if plan is not None:
+                # the conclusion's text (its strip and bar are bare shapes: not content), where _draw_notes sets it
+                bottom = self._content_bottom(n0) or area.y
+                y = bottom + int(k.vgap * 1.2) + plan.get("pad_y", 0)
+                x = area.x + plan.get("pad_x", 0)
+                fig = plan.get("fig")
+                if fig:
+                    boxes.append((x, y, fig[1], fig[2]))  # its key figure, a text of its own
+                    inks.append(boxes[-1])
+                x += (fig[1] + fig[3]) if fig else plan.get("bar_w", 0) + plan.get("bar_gap", 0)
+                w = plan.get("text_w") or area.w
+                para = plan.get("para")
+                h = plan.get("text_h") or plan["h"]
+                boxes.append((x, y, w, h))
+                if para is not None and para.runs:
+                    size, font, bold = para.runs[0].size, para.runs[0].font, para.runs[0].bold
+                    lines = wrap_lines(para.text, font, size, bold, _pt(w)) or [""]
+                    widest = max(text_width_pt(t_, font, size, bold) for t_ in lines)
+                    inks.append((x, y, min(w, _emu(widest)), min(h, _emu(len(lines) * size * 1.2 * self.cv.spacing_pct))))
+                else:
+                    inks.append(boxes[-1])
+
+        def covered(bs) -> float:
+            cells = set()
+            for x, y, w, h in bs:
+                x0, x1 = max(0, int((x - sx) / sw * gx)), min(gx, int((x + w - sx) / sw * gx) + 1)
+                y0, y1 = max(0, int((y - sy) / sh * gy)), min(gy, int((y + h - sy) / sh * gy) + 1)
+                cells.update((xi, yi) for xi in range(x0, x1) for yi in range(y0, y1))
+            return len(cells) / (gx * gy)
+
+        ratio = covered(boxes)
+        return max(covered(inks), 0.25) if ratio > 0.8 else ratio
+
+    def _heading_look(self) -> tuple[Optional[str], str, bool]:
+        """(font, alignment, bold) the template's headings inherit when their runs do not say (the title's)."""
+        from collections import Counter
+
+        slots = [s_ for p in self.kit.manifest.patterns for s_ in p.slots if s_.role.value == "title"]
+        fonts = Counter(s_.style.font_family for s_ in slots if s_.style.font_family)
+        aligns = Counter(s_.style.align for s_ in slots if s_.style.align)
+        bold = sum(1 for s_ in slots if s_.style.bold) > len(slots) / 2
+        return (fonts.most_common(1)[0][0] if fonts else self.kit.font), (aligns.most_common(1)[0][0] if aligns else "l"), bold
+
+    def _ink_box(self, el, b, heading: bool = False) -> tuple:
+        """What a text box really covers (the audit's ink): the band its lines fill at its anchor and, without a fill of
+        its own, no wider than its longest line. A heading's runs inherit the title's font and alignment."""
+        k = self.kit
+        own_font, own_align, own_bold = self._heading_look() if heading else (k.font, "l", False)
+        body = el.find(q("p:txBody"))
+        if body is None:
+            return b
+        bp = body.find(q("a:bodyPr"))
+        ins = [int(bp.get(a_, d_)) if bp is not None else d_ for a_, d_ in (("lIns", 91440), ("tIns", 45720), ("rIns", 91440), ("bIns", 45720))]
+        usable = max((b[2] - ins[0] - ins[2]) / EMU_PER_PT, 1.0)
+        spPr = el.find(q("p:spPr"))
+        filled = spPr is not None and any(spPr.find(q(t)) is not None for t in ("a:solidFill", "a:gradFill", "a:blipFill"))
+        height = widest = 0.0
+        align = own_align
+        for p in body.findall(q("a:p")):
+            txt = "".join(t.text or "" for t in p.iter(q("a:t")))
+            rpr = next((r for r in p.iter(q("a:rPr")) if r.get("sz")), None)
+            size = int(rpr.get("sz")) / 100 if rpr is not None else (k.head_size or k.body)
+            bold = rpr.get("b") == "1" if rpr is not None and rpr.get("b") is not None else own_bold
+            lat = rpr.find(q("a:latin")) if rpr is not None else None
+            font = lat.get("typeface") if lat is not None and not (lat.get("typeface") or "").startswith("+") else own_font
+            lines = wrap_lines(txt, font, size, bold, usable) if txt.strip() else [""]
+            spc = p.find(q("a:pPr") + "/" + q("a:lnSpc") + "/" + q("a:spcPct"))
+            pct = int(spc.get("val")) / 100000 if spc is not None and (spc.get("val") or "").isdigit() else None
+            height += max(len(lines), 1) * size * (1.2 * pct if pct else 1.2)
+            if txt.strip():
+                widest = max(widest, max(text_width_pt(t_, font, size, bold) for t_ in lines))
+                ppr = p.find(q("a:pPr"))
+                align = (ppr.get("algn") if ppr is not None and ppr.get("algn") else align)
+        h = max(min(b[3], int(height * EMU_PER_PT) + ins[1] + ins[3]), 1)
+        anchor = bp.get("anchor", "t") if bp is not None else "t"
+        y = b[1] if anchor == "t" else (b[1] + b[3] - h if anchor == "b" else b[1] + (b[3] - h) // 2)
+        x, w = b[0], b[2]
+        if not filled:
+            w = min(b[2], int(widest * EMU_PER_PT) + ins[0] + ins[2])
+            if align == "r":
+                x = b[0] + b[2] - w
+            elif align == "ctr":
+                x = b[0] + (b[2] - w) // 2
+        return (x, y, w, h)
+
+    def _restore_notes(self, notes) -> None:
+        try:
+            self.o.notes = notes
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _overflows(self, n0: int, area: Bbox) -> bool:
+        """What was composed after the first `n0` elements runs past the area's foot (or the slide's edge)."""
+        bottom = self._content_bottom(n0)
+        if bottom is None:
+            return False
+        tol = int(0.01 * self.kit.H)
+        return bottom > min(self._floor(area.y2), self.kit.H) + tol
+
+    def _floor(self, y2: int) -> int:
+        """The foot a block (or the lines under it) may reach: the area's own foot, or — for the composer's whole area
+        — the content floor under the conclusion's room (above the footnote)."""
+        own = getattr(self, "_area", None)
+        floor = getattr(self, "_floor_y", None)
+        if own is not None and floor is not None and abs(y2 - own.y2) <= int(0.01 * self.kit.H):
+            return max(y2, floor)
+        return y2
 
     def _fill(self, n0: int, area: Bbox) -> Optional[float]:
         """The share of the area's height the content composed after the first `n0` elements takes."""
@@ -867,27 +1175,119 @@ class Composer:
         k = self.kit
         n = len(lines)
         cols = (n if n <= 3 else (2 if n == 4 else 3)) if spread else (2 if n > 3 else 1)
-        per = math.ceil(n / cols)
-        gap = k.gap * 2
-        cw = int((area.w - gap * (cols - 1)) / cols) if cols > 1 else int(area.w * 0.8)
         size = k.body
+        dense = getattr(self, "_dense", False)
+        if dense and not spread and n >= 2:
+            cols, size = 2, k.small  # the dense pass: the lines in two columns at the small size
+
+        def lay(cols: int, size: float):
+            per = math.ceil(n / cols)
+            gap = k.gap * 2
+            cw = int((area.w - gap * (cols - 1)) / cols) if cols > 1 else int(area.w * 0.8)
+            groups = [lines[i * per:(i + 1) * per] for i in range(cols)]
+            paras = [[self.P(t, size, k.colors.text, space_after=size * 0.5, marker="•", marker_color=k.colors.accent) for t in g] for g in groups if g]
+            eh = max(self.h(p, cw) for p in paras)
+            return per, gap, cw, paras, eh
+
+        per, gap, cw, _, _ = lay(cols, size)
         if (spread or getattr(self, "_boost", 0) >= 1) and self.fits_width(lines, k.lead, False, cw - _emu(k.lead * 1.1)) and sum(len(t) for t in lines) <= 40 * cols * per:
             size = k.lead  # captions of a few words each (or the lines of a short block, on the fill pass) at the lead size
-        groups = [lines[i * per:(i + 1) * per] for i in range(cols)]
-        paras = [[self.P(t, size, k.colors.text, space_after=size * 0.5, marker="•", marker_color=k.colors.accent) for t in g] for g in groups if g]
-        eh = max(self.h(p, cw) for p in paras)
+        per, gap, cw, paras, eh = lay(cols, size)
         room = eh + int(k.vgap * 1.4)
+        if dense and not spread and n >= 2 and room > 0.3 * area.h:
+            # the dense pass: the block keeps 70 % of the area — the lines step down to the dense floor (1.7 % of the
+            # slide height) in two columns, then one, before they take more
+            floor = max(0.017 * k.hpt, 7.0)
+            best = None
+            for s2 in [x for x in reversed(k.sizes) if floor - 0.05 <= x < size - 0.05]:
+                for c2 in (2, 1):
+                    got = lay(c2, s2)
+                    r2 = got[4] + int(k.vgap * 1.4)
+                    if best is None or r2 < best[0]:
+                        best = (r2, c2, s2, got)
+                    if r2 <= 0.3 * area.h:
+                        break
+                if best is not None and best[0] <= 0.3 * area.h:
+                    break
+            if best is not None and best[0] < room:
+                room, cols, size = best[0], best[1], best[2]
+                per, gap, cw, paras, eh = best[3]
+        if room > 0.5 * area.h and not spread:
+            # the lines would starve the block: two columns, then a step smaller — the block keeps at least 35 %
+            for c2, s2 in ((2, size), (2, k.small)):
+                if n < 2:
+                    break
+                got = lay(c2, s2)
+                if got[4] + int(k.vgap * 1.4) < room:
+                    per, gap, cw, paras, eh = got
+                    cols, size = c2, s2
+                    room = eh + int(k.vgap * 1.4)
+                if room <= 0.5 * area.h:
+                    break
+            if room > 0.65 * area.h:
+                # still more than the block keeps: the lines are said aloud (speaker notes), the block takes the area
+                self._lines_to_notes(lines)
+                return dict(main=area, paras=[], eh=0, cw=cw, gap=gap, x=area.x, y2=area.y2, lines=lines)
+            main = Bbox(x=area.x, y=area.y, w=area.w, h=area.h - room)
+            return dict(main=main, paras=paras, eh=eh, cw=cw, gap=gap, x=area.x, y2=area.y2, lines=lines)
         main = Bbox(x=area.x, y=area.y, w=area.w, h=max(area.h - room, int(area.h * 0.5)))
-        return dict(main=main, paras=paras, eh=eh, cw=cw, gap=gap, x=area.x)
+        return dict(main=main, paras=paras, eh=eh, cw=cw, gap=gap, x=area.x, y2=area.y2, lines=lines)
+
+    def _lines_to_notes(self, lines: list[str]) -> None:
+        """Lines with no room on the slide go to its speaker notes (said aloud), never under the slide's foot."""
+        text = " ".join("• " + " ".join(t.split()) for t in lines if t and t.strip())
+        if not text:
+            return
+        try:
+            if text not in (self.o.notes or ""):
+                self.o.notes = ((self.o.notes or "").strip() + "\n" + text).strip()
+        except Exception:  # noqa: BLE001
+            pass
+        self.warnings.append("строки ушли в заметки: нет места на слайде")
 
     def _under_draw(self, plan: dict, n0: int) -> None:
         """The lines of `_under_plan`, right under what the block drew (a block that grew past its share pushes the
         lines down with it)."""
         k = self.kit
+        if not plan["paras"]:
+            return
         bottom = self._content_bottom(n0)
         y = plan["main"].y2 + int(k.vgap * 1.4) if bottom is None else bottom + int(k.vgap * 1.4)
+        limit = min(self._floor(plan.get("y2") or k.H), k.H)
+        if y + plan["eh"] > limit + int(0.005 * k.H):
+            # the block grew past its share: the lines are set again into what is left (two columns, smaller), else
+            # they go to the speaker notes — never past the area's foot
+            refit = self._under_refit(plan, limit - y)
+            if refit is None and not getattr(self, "_dense", False):
+                pass  # drawn where they fall: the overflow sends the slide to the dense pass (`compose`), which re-plans
+            elif refit is None:
+                self._lines_to_notes(plan.get("lines") or [])
+                return
+            else:
+                plan = refit
         for i, p in enumerate(plan["paras"]):
             self.cv.text(Bbox(x=plan["x"] + i * (plan["cw"] + plan["gap"]), y=y, w=plan["cw"], h=plan["eh"]), p, name="Note")
+
+    def _under_refit(self, plan: dict, room: int) -> Optional[dict]:
+        """The lines of a plan set into `room` (EMU): one or two columns, the body, small and dense sizes."""
+        k = self.kit
+        lines = plan.get("lines") or []
+        if not lines or room <= 0:
+            return None
+        w = plan["main"].w
+        floor = max(0.017 * k.hpt, 7.0)
+        sizes = list(dict.fromkeys([k.body, k.small] + [x for x in reversed(k.sizes) if floor - 0.05 <= x < k.small - 0.05]))
+        for size in sizes:
+            for cols in ((1, 2) if len(lines) >= 2 else (1,)):
+                per = math.ceil(len(lines) / cols)
+                gap = k.gap * 2
+                cw = int((w - gap * (cols - 1)) / cols) if cols > 1 else int(w * 0.8)
+                groups = [lines[i * per:(i + 1) * per] for i in range(cols)]
+                paras = [[self.P(t, size, k.colors.text, space_after=size * 0.5, marker="•", marker_color=k.colors.accent) for t in g] for g in groups if g]
+                eh = max(self.h(p, cw) for p in paras)
+                if eh <= room:
+                    return dict(plan, paras=paras, eh=eh, cw=cw, gap=gap)
+        return None
 
     # ---- content accessors -------------------------------------------------------------------------------------
     def _items(self) -> list[SlideItem]:
@@ -966,6 +1366,8 @@ class Composer:
             items = [SlideItem(title="", text=i.title, icon_hint=i.icon_hint) for i in items]
         longest = max(len(i.title) + len(i.text) + sum(len(b) for b in i.bullets) for i in items)
         cols, rows = self._grid(n, area, longest)
+        if getattr(self, "_dense", False) and rows == 1 and n >= 5:
+            cols, rows = math.ceil(n / 2), 2  # the dense pass: five or six cards in two rows, not one row of slivers
         if badge is None:
             # circles with digits say «in this order» — only steps get them; theses and risks carry an index numeral
             sequence = self.o.kind in (PatternKind.process, PatternKind.timeline)
@@ -977,6 +1379,8 @@ class Composer:
         gap = k.gap
         colors = st.colors
         title_color = colors.heading
+
+        forced_of: dict = {}  # (cols, rows, tight) → no size pair fits (a word breaks or the row overflows)
 
         def pick(cols: int, rows: int, tight: bool = False):
             cw = int((area.w - gap * (cols - 1)) / cols)
@@ -1016,6 +1420,7 @@ class Composer:
             if long_ok is not None and (chosen is None or chosen[1] < 0.8 * long_ok[1]):
                 chosen = long_ok  # a template with sparse sizes (18 → 12) keeps 18 pt in nine lines rather than 12 pt
             chosen = chosen or fallback
+            forced_of[(cols, rows, tight)] = chosen is None
             if chosen is None:
                 ts, bs = k.body, k.small
                 chosen = (ts, bs, max(self._card_content_h(it, inner_w, ts, bs, badge, colors, i) for i, it in enumerate(items)) + 2 * pad)
@@ -1023,11 +1428,56 @@ class Composer:
             return cw, pad, inner_w, chosen
 
         cw, pad, inner_w, chosen = pick(cols, rows)
-        if chosen[1] < k.body - 0.05:
+        forced = forced_of[(cols, rows, False)]
+        if chosen[1] < k.body - 0.05 or forced:
             # text in small type inside roomy cards: a tighter padding gives the text the room first
             cw2, pad2, inner2, chosen2 = pick(cols, rows, tight=True)
-            if chosen2[1] > chosen[1] + 0.05:
+            if (chosen2[1] > chosen[1] + 0.05 and forced_of[(cols, rows, True)] <= forced) or (forced and not forced_of[(cols, rows, True)]):
                 cw, pad, inner_w, chosen = cw2, pad2, inner2, chosen2
+                forced = forced_of[(cols, rows, True)]
+        if forced and rows == 1 and n >= 4:
+            # a row of cards too narrow for their words at every size (a 4:3 slide, a column beside art): two rows
+            c2, r2 = (2, 2) if n == 4 else (math.ceil(n / 2), 2)
+            for tight in (False, True):
+                got = pick(c2, r2, tight)
+                if not forced_of[(c2, r2, tight)]:
+                    cols, rows = c2, r2
+                    cw, pad, inner_w, chosen = got
+                    forced = False
+                    self.warnings.append(f"{n} карточек → сетка {c2}×{r2}")
+                    break
+        if forced and badge == "index":
+            # the index numerals take the room the words need: the same cards without them (one row, then two)
+            grids = [(cols, rows)] + ([(2, 2) if n == 4 else (math.ceil(n / 2), 2)] if rows == 1 and n >= 4 else [])
+            badge = None
+            for c_, r_ in dict.fromkeys(grids):
+                for tight in (False, True):
+                    got = pick(c_, r_, tight)
+                    if not forced_of[(c_, r_, tight)]:
+                        cols, rows = c_, r_
+                        cw, pad, inner_w, chosen = got
+                        forced = False
+                        break
+                if not forced:
+                    break
+            if forced:
+                badge = "index"
+        if forced and all(not i.bullets and not (i.title and i.text) and not i.number for i in items):
+            # theses that fit no grid of cards at a readable size: a list (the words keep whole, the type stays
+            # readable) — never five slivers of 9 pt text
+            self.warnings.append("тезисы не помещаются в карточки: набраны списком")
+            self.bullets(area, [i.title or i.text for i in items], as_list=True)
+            return
+        if forced and not getattr(self, "_dense", False):
+            # still no fit: the dense sizes (below the small size, down to 1.7 % of the slide height)
+            self._dense = True
+            try:
+                got = pick(cols, rows, True)
+            finally:
+                self._dense = False
+            if not forced_of[(cols, rows, True)]:
+                cw, pad, inner_w, chosen = got
+                forced = False
         if n == 4 and cols == 4 and chosen[1] < k.body:
             # four cards that only fit in small type read better as a 2×2 block
             cw2, pad2, inner2, chosen2 = pick(2, 2)
@@ -1163,7 +1613,7 @@ class Composer:
         if badge == "number":
             d = self._badge_size(ts)
             fill = colors.accent
-            num_color = "FFFFFF" if contrast_ratio("FFFFFF", fill) >= 3 else colors.text
+            num_color = self.kit.on_accent(fill, colors.text)
             el = self.cv.ellipse(Bbox(x=box.x, y=y, w=d, h=d), fill)
             self._label_in(el, str(i + 1), self._badge_digit(), num_color)
             y += d + int(k.vgap * 0.7)
@@ -1200,6 +1650,9 @@ class Composer:
         rPr.set("lang", "ru-RU")
         rPr.set("sz", str(int(round(size * 100))))
         rPr.set("b", "1" if self.kit.bold else "0")
+        rPr.set("cap", "none")
+        rPr.set("spc", "0")
+        rPr.set("baseline", "0")
         sf = etree.SubElement(rPr, q("a:solidFill"))
         etree.SubElement(sf, q("a:srgbClr")).set("val", color.upper())
         if self.kit.font:
@@ -1230,7 +1683,15 @@ class Composer:
         gap = k.gap
         hero_min = 1.5 * (k.head_size or k.h2)  # a figure smaller than this stops being the hero of the slide
 
-        def layout(cols: int):
+        # «27 миллионов человек»: the figure with the words it counts is too long for a tile at a figure's size — the
+        # number keeps the figure's size and its words go on the line under it (same text: the value stays whole)
+        splits = [figure_split(x.value) for x in numbers]
+
+        def unit_paras(fs_: float, lab_size: float) -> list[Optional[Para]]:
+            us = k.snap(max(lab_size * 1.2, fs_ * 0.4), lab_size, max(lab_size, fs_ * 0.5))
+            return [self.P(sp[1], us, colors.figure, bold=k.figure_bold) if sp else None for sp in splits]
+
+        def layout(cols: int, stacked: bool = False):
             cw = int((avail.w - gap * (cols - 1)) / cols)
             pad = int(min(cw * 0.1, 0.05 * k.H)) if use_cards else 0
             inner = cw - 2 * pad
@@ -1244,9 +1705,12 @@ class Composer:
             for s_ in k.figure_sizes(cap_, k.h3):
                 fs = s_
                 # slack for the rendering font: a figure that breaks («12 40 / 0») is the worst thing a slide can show
-                wide_ok = all(self.figure_para(x.value, s_, colors.figure, colors.muted)[1] <= _pt(inner) * (0.88 if use_cards else 0.8) for x in numbers)
-                tall_ok = _emu(s_ * max(1.15, k.line)) + lab + int(k.vgap * 1.4) + 2 * pad <= max_tile_
-                if wide_ok and tall_ok:
+                heads = [sp[0] if (stacked and sp) else x.value for x, sp in zip(numbers, splits)]
+                wide_ok = all(self.figure_para(v, s_, colors.figure, colors.muted)[1] <= _pt(inner) * (0.88 if use_cards else 0.8) for v in heads)
+                units_h = max((self.h([u], inner) for u in unit_paras(s_, k.body) if u is not None), default=0) if stacked else 0
+                units_ok = not stacked or all(u is None or para_lines(u, _pt(inner)) <= 2 for u in unit_paras(s_, k.body))
+                tall_ok = _emu(s_ * max(1.15, k.line)) + units_h + lab + int(k.vgap * 1.4) + 2 * pad <= max_tile_
+                if wide_ok and tall_ok and units_ok:
                     break
             return cw, pad, inner, fs
 
@@ -1255,6 +1719,12 @@ class Composer:
         if n == 4 and fs < hero_min and avail.h > 0.55 * area.h:
             cols = 2  # four long figures read as a 2×2 block, not as four small numbers in a row
             cw, pad, inner, fs = layout(cols)
+        stacked = False
+        if any(splits) and fs < 1.6 * k.h2:
+            # a row of figures set at a text size (smaller than their labels) reads as captions: stack the words
+            cw2, pad2, inner2, fs2 = layout(cols, stacked=True)
+            if fs2 >= fs * 1.3:
+                stacked, cw, pad, inner, fs = True, cw2, pad2, inner2, fs2
         rows = math.ceil(n / cols)
         label_size = k.body
         for ls in (k.lead, k.body):
@@ -1264,16 +1734,21 @@ class Composer:
         fig_h = _emu(fs * max(1.15, k.line))
         rule = 0 if use_cards else _emu(3)
         lab_h = max(self.h([self.P(distinct_label(x.value, x.label, self.o.headline), label_size, colors.muted)], inner) for x in numbers)
-        figs = [self.figure_para(x.value, fs, colors.figure, colors.muted)[0] for x in numbers]
+        figs = [self.figure_para(sp[0] if (stacked and sp) else x.value, fs, colors.figure, colors.muted)[0] for x, sp in zip(numbers, splits)]
+        units = unit_paras(fs, label_size) if stacked else [None] * n
+        unit_h = max((self.h([u], inner) - _emu(2) for u in units if u is not None), default=0)
         # the ascender room over the digits is not part of the tile's padding: every figure of the row moves up by
         # the same amount (one size), each one left by its own first glyph's bearing
         tg = min(self._figure_optics(f, fig_h)[1] for f in figs)
-        content_h = rule + (int(k.vgap * 0.6) if rule else 0) + fig_h - tg + int(k.vgap * 0.35) + lab_h
+        content_h = rule + (int(k.vgap * 0.6) if rule else 0) + fig_h + unit_h - tg + int(k.vgap * 0.35) + lab_h
         max_tile = int((avail.h - k.vgap * (rows - 1)) / rows)
         if content_h + 2 * pad > max_tile and label_size > k.body:
             label_size = k.body  # a step down for the labels before the tile outgrows its share
             lab_h = max(self.h([self.P(distinct_label(x.value, x.label, self.o.headline), label_size, colors.muted)], inner) for x in numbers)
-            content_h = rule + (int(k.vgap * 0.6) if rule else 0) + fig_h - tg + int(k.vgap * 0.35) + lab_h
+            if stacked:
+                units = unit_paras(fs, label_size)
+                unit_h = max((self.h([u], inner) - _emu(2) for u in units if u is not None), default=0)
+            content_h = rule + (int(k.vgap * 0.6) if rule else 0) + fig_h + unit_h - tg + int(k.vgap * 0.35) + lab_h
         # the tile holds its figure and label, never shorter than them (a label hanging below its card)
         tile_h = self._grow_to(avail.h, rows, k.vgap, content_h + 2 * pad) if use_cards else content_h + 2 * pad
         block_h = rows * tile_h + (rows - 1) * k.vgap + ((extra_block[1] + k.vgap * 1.4) if extra_block else 0)
@@ -1288,8 +1763,13 @@ class Composer:
                 self.cv.rect(Bbox(x=box.x, y=y, w=min(_emu(k.hpt * 0.09), inner), h=rule), colors.accent, name="Rule")
                 y += rule + int(k.vgap * 0.6)
             lsb = self._figure_optics(figs[i], fig_h)[0]
-            self.cv.text(Bbox(x=box.x + pad - lsb, y=y - tg, w=inner + lsb, h=fig_h), [figs[i]], anchor="b", name="Figure")
-            y += fig_h - tg + int(k.vgap * 0.35)
+            if units[i] is not None:
+                # one text: the number over its words, bottom-anchored so the digits keep the row's top line
+                own_h = self.h([units[i]], inner) - _emu(2)
+                self.cv.text(Bbox(x=box.x + pad - lsb, y=y - tg, w=inner + lsb, h=fig_h + own_h), [figs[i], units[i]], anchor="b", name="Figure")
+            else:
+                self.cv.text(Bbox(x=box.x + pad - lsb, y=y - tg, w=inner + lsb, h=fig_h), [figs[i]], anchor="b", name="Figure")
+            y += fig_h + unit_h - tg + int(k.vgap * 0.35)
             self.cv.text(Bbox(x=box.x + pad, y=y, w=inner, h=max(lab_h, box.y2 - pad - y)), [self.P(distinct_label(num.value, num.label, self.o.headline), label_size, colors.muted)], name="Label")
         if extra_block:
             paras_g, eh, ew = extra_block
@@ -1333,7 +1813,7 @@ class Composer:
             self.cv.text(Bbox(x=x, y=y0 + (max(0, (left_h - right_h) // 2) if right_h < left_h else 0), w=rw, h=right_h), right_paras, name="Explanation")
 
     # ---- lists ---------------------------------------------------------------------------------------------------
-    def bullets(self, area: Bbox, texts: list[str]) -> None:
+    def bullets(self, area: Bbox, texts: list[str], as_list: bool = False) -> None:
         k = self.kit
         texts = [t for t in texts if t and t.strip()]
         if not texts:
@@ -1341,7 +1821,7 @@ class Composer:
             return
         n = len(texts)
         total = sum(len(t) for t in texts)
-        if self.strategy == "visual" and 2 <= n <= 6 and max(len(t) for t in texts) <= 140 and area.w >= 0.6 * k.W:
+        if self.strategy == "visual" and not as_list and 2 <= n <= 6 and max(len(t) for t in texts) <= 140 and area.w >= 0.6 * k.W:
             # a visual variant turns theses into cards: each thesis its own block
             self.cards(area, [SlideItem(title=t) for t in texts], badge="index")
             return
@@ -1513,7 +1993,7 @@ class Composer:
                 by = y0 + pad
             bx = x + pad
             el = self.cv.ellipse(Bbox(x=bx, y=by, w=d, h=d), colors.accent)
-            self._label_in(el, str(i + 1), self._badge_digit(), "FFFFFF" if contrast_ratio("FFFFFF", colors.accent) >= 3 else colors.text)
+            self._label_in(el, str(i + 1), self._badge_digit(), k.on_accent(colors.accent, colors.text))
             ty = by + d + int(k.vgap * 0.9)
             paras = self._card_paras(it, ts, bs, tcolors)
             self.cv.text(Bbox(x=bx, y=ty, w=inner, h=max(text_h, y0 + block_h - pad - ty)), paras, name="Step")
@@ -1559,7 +2039,7 @@ class Composer:
         row_h = self._grow_to(area.h, rows, k.vgap, row_h)
         y0 = self._place_v(area, rows * row_h + (rows - 1) * k.vgap)
         digit = k.snap(max(_pt(d) * 0.5, 12.0), 10.0, _pt(d) * 0.62)
-        on_accent = "FFFFFF" if contrast_ratio("FFFFFF", colors.accent) >= 3 else colors.text
+        on_accent = k.on_accent(colors.accent, colors.text)
         last_n = n - cols * (rows - 1)
         for i, it in enumerate(items):
             r, c_ = divmod(i, cols)
@@ -1770,6 +2250,9 @@ class Composer:
         foot = " ".join((self.o.footnote or "").split())
         foot = foot[:1].upper() + foot[1:] if foot[:1].islower() else foot
         take = "" if (self._aside or self._take_lead) else " ".join((self.o.takeaway or "").split())
+        # the hard floor of the content: the area's foot, above the footnote when there is one (the conclusion's room
+        # is not a floor — a block that needs it takes it and the conclusion is said aloud, `_draw_notes`)
+        self._floor_y = area.y2
         if not (foot or take):
             return area
         k = self.kit
@@ -1781,6 +2264,7 @@ class Composer:
             fh = self.h(para, area.w)
             foot_box = (Bbox(x=area.x, y=bottom - fh, w=area.w, h=fh), para)
             bottom -= fh + int(k.vgap * (0.8 if take else 1.2))
+            self._floor_y = bottom
         plan = None
         if take:
             plan = self._takeaway_plan(take, area.w)
@@ -1989,7 +2473,7 @@ class Composer:
         res = next((i + 1 for i in range(len(ops) - 1, -1, -1) if ops[i] in ("=", "≈")), None)
         colors = k.colors
         lab_size = k.body
-        on_accent = "FFFFFF" if contrast_ratio("FFFFFF", colors.accent) >= 3.0 else colors.text
+        on_accent = k.on_accent(colors.accent, colors.text)
         quiet = self._quiet()
         descent, digit_h = figure_metrics_em(k.figure_bold)
 
@@ -2137,12 +2621,14 @@ class Composer:
             mids = [x for x in k.sizes if k.body + 0.05 < x < k.lead - 0.05] if boost >= 1 else []
             return [s for s in sorted({*lead, *mids, k.body, k.small}, reverse=True) if s >= floor] or [k.small]
 
+        tight = getattr(self, "_tight", 0)
+
         def measure(t: TableData, sizes: list[float]):
             # a cell is set single-spaced (the renderer's 1.2 em), whatever the template's leading for running text;
             # on the fill pass the rows grow until the table takes most of its area
             return measure_table(
                 t, width, k.font, sizes, 1.2,
-                max_h_emu=area.h, fill_h_emu=int((0.9 if boost >= 2 else 0.62) * area.h), min_row_h_emu=int(0.065 * k.H), max_row_h_emu=int((0.13 if boost >= 2 else 0.10) * k.H),
+                max_h_emu=area.h, fill_h_emu=0 if tight else int((0.9 if boost >= 2 else 0.62) * area.h), min_row_h_emu=int((0.052 if tight else 0.065) * k.H), max_row_h_emu=int((0.13 if boost >= 2 else 0.10) * k.H),
                 header_bold=header_bold,
             )
 
@@ -2157,6 +2643,16 @@ class Composer:
         sizes = sizes_for(table)
         if cap:
             sizes = [s for s in sizes if s <= cap + 0.05] or [min(sizes)]
+        if tight >= 2:
+            # as wide as the columns need at the size the full width sets, with air — never under 60 % of the area;
+            # the type keeps that size (a narrower table is not a smaller one) — one step smaller only as the last
+            # level, when the narrower table still covers the slide past the wall
+            probe = measure(table, sizes)
+            sizes = [probe[0]]
+            if tight >= 3:
+                sizes = [x for x in sizes_for(table) if x < probe[0] - 0.05][:1] or sizes
+                probe = measure(table, sizes)
+            width = min(width, max(int(probe.content_w * 1.12), int(0.6 * area.w)))
         size, widths, heights = measure(table, sizes)
         spec = table_style_for_ground(style, ground_hex=k.colors.ground, text_hex=k.colors.text, accent_hex=k.colors.accent, divider_hex=k.colors.divider)
         total_h = sum(heights)
@@ -2527,7 +3023,7 @@ class Composer:
             if band <= budget:
                 room = band + int(k.vgap * 1.4)
                 main = Bbox(x=area.x, y=area.y, w=area.w, h=max(area.h - room, int(area.h * 0.5)))
-                return dict(main=main, blocks=blocks, lines=line_paras, lines_y=lines_y, cw=cw, gap=gap, band=band, rule_h=rule_h, x=area.x)
+                return dict(main=main, blocks=blocks, lines=line_paras, lines_y=lines_y, cw=cw, gap=gap, band=band, rule_h=rule_h, x=area.x, y2=area.y2)
         return None
 
     def _kpi_row_draw(self, row: dict, n0: int) -> None:
@@ -2535,6 +3031,10 @@ class Composer:
         colors = k.colors
         bottom = self._content_bottom(n0)
         y = row["main"].y2 + int(k.vgap * 1.4) if bottom is None else bottom + int(k.vgap * 1.4)
+        limit = min(self._floor(row.get("y2") or k.H), k.H)
+        if y + row["band"] > limit:
+            # the charts ran past their share: the row keeps inside the area (a hair closer to the charts)
+            y = max(limit - row["band"], row["main"].y2 + int(k.vgap * 0.6))
         cw, gap = row["cw"], row["gap"]
         for i, b in enumerate(row["blocks"]):
             x = row["x"] + i * (cw + gap)
@@ -2619,33 +3119,84 @@ class Composer:
                 hh = min(self.h(paras, text_w), area.h)
                 self.cv.line(x - gap // 2, area.y, x - gap // 2, area.y + hh, k.colors.divider, 1.0)
                 self.cv.text(Bbox(x=x, y=area.y, w=text_w, h=hh), paras, name="Chart note")
+        from verstka.rendering.charts import effective_chart_type
+
         share = self._pair_share()
-        w1 = int((region.w - gap) * share)
-        boxes = [Bbox(x=region.x, y=region.y, w=w1, h=region.h), Bbox(x=region.x + w1 + gap, y=region.y, w=region.w - gap - w1, h=region.h)]
-        self._legend_used: list[float] = []
-        self._pie_ds: list[int] = []
+        # side by side first (two bar charts of a few bars read well even in a narrow region); a pie whose legend does
+        # not fit its share takes half the width, then — in a region narrower than 1.25 slide heights (a 4:3 slide, a
+        # column beside text) and tall enough — the two charts are set one over the other
+        plans = [(share, False)]
+        pies = [i for i, sp in enumerate((c.chart, c.chart2)) if sp is not None and effective_chart_type(sp, self.outline) in ("pie", "doughnut")]
+        if len(pies) == 1 and (share if pies[0] == 0 else 1 - share) < 0.5:
+            plans.append((0.5, False))
+        if pies and region.w < 1.25 * k.H and region.h >= 0.45 * k.H:
+            plans.append((0.5, True))
         n1 = len(self.cv.tree)
-        for attempt in range(2):
-            for i, spec in enumerate((c.chart, c.chart2)):
-                err = self._chart_block(boxes[i], spec, prominent=True, center=False)
-                if err is not None:
-                    # one chart of the pair could not be drawn: the other one takes the slide
-                    self._undo(n0)
-                    self._legend_force = None
-                    self.warnings.append(f"chart {i + 1} of 2 failed: {err[:120]}; the other one is shown alone")
-                    keep = c.chart2 if i == 0 else c.chart
-                    self.o = self.o.model_copy(update={"content": c.model_copy(update={"chart": keep, "chart2": None})})
-                    self.chart(area)
-                    return
-            if attempt or len(self._legend_used) < 2 or (len(set(self._legend_used)) <= 1 and max(self._pie_ds) - min(self._pie_ds) <= _emu(2)):
+        w_mark = len(self.warnings)
+
+        def run(share: float, stacked: bool) -> Optional[bool]:
+            """Draw the pair by one plan; None when a chart failed (the other one took the slide), else whether every
+            pie of the pair set its legend cleanly (inside its box)."""
+            del self.warnings[w_mark:]
+            if stacked:
+                vg = int(k.vgap * 1.2)
+                h1 = int((region.h - vg) / 2)
+                boxes = [Bbox(x=region.x, y=region.y, w=region.w, h=h1), Bbox(x=region.x, y=region.y + h1 + vg, w=region.w, h=region.h - h1 - vg)]
+            else:
+                w1 = int((region.w - gap) * share)
+                boxes = [Bbox(x=region.x, y=region.y, w=w1, h=region.h), Bbox(x=region.x + w1 + gap, y=region.y, w=region.w - gap - w1, h=region.h)]
+            self._legend_used: list[float] = []
+            self._pie_ds: list[int] = []
+            self._pie_unclean = False
+            for attempt in range(2):
+                for i, spec in enumerate((c.chart, c.chart2)):
+                    self._pie_clean = True
+                    err = self._chart_block(boxes[i], spec, prominent=True, center=stacked)
+                    if err is not None:
+                        # one chart of the pair could not be drawn: the other one takes the slide
+                        self._undo(n0)
+                        self._legend_force = None
+                        self.warnings.append(f"chart {i + 1} of 2 failed: {err[:120]}; the other one is shown alone")
+                        keep = c.chart2 if i == 0 else c.chart
+                        self.o = self.o.model_copy(update={"content": c.model_copy(update={"chart": keep, "chart2": None})})
+                        self.chart(area)
+                        return None
+                    if not getattr(self, "_pie_clean", True):
+                        self._pie_unclean = True
+                if attempt or len(self._legend_used) < 2 or (len(set(self._legend_used)) <= 1 and max(self._pie_ds) - min(self._pie_ds) <= _emu(2)):
+                    break
+                # two pies of one slide: one legend size and one diameter for both (the smaller ones), set again
+                self._undo(n1)
+                self._legend_force = min(self._legend_used)
+                self._pie_force_d = min(self._pie_ds)
+                self._legend_used, self._pie_ds = [], []
+            self._legend_force = None
+            self._pie_force_d = None
+            return not self._pie_unclean
+
+        tried: list[tuple[int, int]] = []  # (smallest pie diameter, plan index) of the plans whose legend did not fit
+        chosen = None
+        for pi, (share, stacked) in enumerate(plans):
+            ok = run(share, stacked)
+            if ok is None:
+                return
+            if ok:
+                chosen = pi
                 break
-            # two pies of one slide: one legend size and one diameter for both (the smaller ones), set again
-            self._undo(n1)
-            self._legend_force = min(self._legend_used)
-            self._pie_force_d = min(self._pie_ds)
-            self._legend_used, self._pie_ds = [], []
-        self._legend_force = None
-        self._pie_force_d = None
+            tried.append((min(self._pie_ds) if self._pie_ds else 0, pi))
+            if pi < len(plans) - 1:
+                self._undo(n1)
+        if chosen is None:
+            # no plan sets every legend inside its box: the plan with the largest circle (the last one drawn when it
+            # is that plan)
+            best = max(tried)[1] if tried else len(plans) - 1
+            if best != len(plans) - 1:
+                self._undo(n1)
+                if run(*plans[best]) is None:
+                    return
+            chosen = best
+        if chosen:
+            self.warnings.append("два графика одним над другим" if plans[chosen][1] else "круговой диаграмме — половина ширины")
         if after is not None:
             after()
 
@@ -2700,9 +3251,14 @@ class Composer:
         return None
 
     def _chart_style(self):
+        from verstka.rendering.charts import chart_text_capped
+
         k = self.kit
         style = self.manifest.components.chart_style
-        return style.model_copy(update={"font_size_pt": max(style.font_size_pt or 0, k.small), "font_family": k.font or style.font_family})
+        size = max(style.font_size_pt or 0, k.small)
+        if chart_text_capped(k.manifest.tokens.typography, size, k.H):
+            size = min(size, math.floor(0.026 * k.hpt * 2) / 2)  # chart text relative to the slide (≤ 2.6 % of its height)
+        return style.model_copy(update={"font_size_pt": size, "font_family": k.font or style.font_family})
 
     def _pie(self, box: Bbox, spec, center: bool, head: Optional[str] = None) -> None:
         """A pie or a doughnut with its legend set as text beside it (below it in a narrow box): a swatch, the
@@ -2748,14 +3304,19 @@ class Composer:
         gap = k.gap
         big = max(rows, key=lambda j: vals[j])
 
+        stack = False  # the amount · share line under each name (a narrow legend keeps the brief's amounts)
+
         def legend(size: float, name_cap: int, cols: int = 1) -> dict:
             sw = _emu(size * 0.72)
-            pct_w = _emu(max(text_width_pt(pct[j], k.font, size, k.figure_bold) for j in rows) + size * 0.5)
+            pct_nat = _emu(max(text_width_pt(pct[j], k.font, size, k.figure_bold) for j in rows) + size * 0.5)
+            pct_w = 0 if stack else pct_nat
             name_nat = _emu(max(text_width_pt(cats[j], k.font, size, False) for j in rows) + size * 0.6)
-            name_w = max(min(name_nat, name_cap), _emu(size * 5))
+            if stack:
+                name_nat = max(name_nat, pct_nat)
+            name_w = max(min(name_nat, name_cap), _emu(size * 5), pct_nat if stack else 0)
             row_gap = _emu(size * 0.5)
             col_gap = _emu(size * 1.6)
-            hs = [self.h([self.P(cats[j], size, colors.text)], name_w) for j in rows]
+            hs = [self.h([self.P(cats[j], size, colors.text)] + ([self.P(pct[j], size, colors.text, bold=k.figure_bold)] if stack else []), name_w) for j in rows]
             per = math.ceil(len(rows) / cols)
             chunks = [list(range(c_ * per, min((c_ + 1) * per, len(rows)))) for c_ in range(cols)]
             col_w = sw + int(sw * 0.8) + name_w + pct_w
@@ -2764,16 +3325,36 @@ class Composer:
             head_h = self.h(head_paras, w) + _emu(size * 0.7) if head else 0
             body_h = max(sum(hs[i] for i in ch) + row_gap * (len(ch) - 1) for ch in chunks if ch)
             return dict(size=size, sw=sw, pct_w=pct_w, name_w=name_w, row_gap=row_gap, hs=hs, w=w, col_w=col_w, col_gap=col_gap,
-                        chunks=chunks, h=head_h + body_h, head=head_paras, head_h=head_h)
+                        chunks=chunks, h=head_h + body_h, head=head_paras, head_h=head_h, stack=stack)
 
-        for legend_mode in (("amounts", "shares") if amounts else ("shares",)):
+        fits: list[tuple] = []
+        got: dict[str, tuple] = {}
+        for legend_mode in (("amounts", "stacked", "shares") if amounts else ("shares",)):
+            # the amounts beside their names; a narrower legend with each amount on the line under its name; the
+            # shares only — the brief's amounts are dropped only when neither form leaves the circle its room
+            stack = legend_mode == "stacked"
             if legend_mode == "shares" and amounts:
+                if any(v[1] >= self.PIE_KEEP_AMOUNTS * box.h and not v[2] for v in got.values()):
+                    break  # a circle of a little over a third of the height is worth the brief's figures
                 # a narrow box: the amounts stay on the slices, the legend gives the shares only, headed as such
                 pct = shares_only
                 head = f"{head_plain}\nдоля от общей суммы" if head_plain else "Доля от общей суммы"
             lg, d, below, sizes = self._pie_legend_fit(box, legend, rows, cats)
-            if legend_mode == "shares" or (d >= 0.4 * box.h and not below) or (below and d >= 0.35 * box.h):
+            if lg is not None:
+                fits.append((lg, d, below, list(pct), head))
+                got[legend_mode] = fits[-1]
+            if lg is not None and (legend_mode == "shares" or (d >= 0.4 * box.h and not below) or (below and d >= 0.35 * box.h)):
                 break
+        if fits and len(got) >= 2 and "shares" not in got:
+            fits.append(max(got.values(), key=lambda v: v[1]))  # the amounts' form with the larger circle
+        self._pie_clean = bool(fits)
+        if fits:
+            lg, d, below, pct, head = fits[-1]
+        else:
+            # nothing fits beside or under the circle in either mode: one column of shares under the circle, as wide as
+            # the box, the names wrapped, a size down to the dense floor — the circle keeps 45 % of the height
+            lg, d, below = self._pie_legend_last(box, legend, rows)
+            self._pie_clean = bool(getattr(self, "_pie_last_ok", False))  # a dense legend inside its box is clean
         force_d = getattr(self, "_pie_force_d", None)
         if force_d and force_d < d:
             d = force_d  # two pies of one slide: one diameter
@@ -2782,10 +3363,57 @@ class Composer:
             self.__dict__.setdefault("_pie_ds", []).append(d)
         self._pie_draw(box, spec, center, lg, d, below, rows, cats, vals, pct, big, colors, amounts, total, unit_txt)
 
+    PIE_KEEP_AMOUNTS = 0.36  # the share of its box's height a pie keeps beside a legend of the brief's amounts
+
+    def _pie_legend_last(self, box: Bbox, legend, rows: list[int]):
+        """The last resort of a pie's legend: one column under the circle, as wide as the box (names wrapped), the
+        largest size down to the dense floor (1.7 % of the slide height) at which the circle keeps 45 % of the box's
+        height. (legend, diameter, below=True)."""
+        k = self.kit
+        self._pie_last_ok = False
+        min_d = int(0.45 * box.h)
+        floor = max(0.017 * k.hpt, 7.0)
+        sizes = [x for x in reversed(k.sizes) if floor - 0.05 <= x <= k.small + 0.05] or [k.small]
+        # a wide, low box (the band left over a conclusion): beside the circle at the dense sizes first — the circle as
+        # tall as the box, the legend in the width it leaves
+        for size in sizes:
+            best = None
+            for cols in ((1, 2) if len(rows) >= 4 else (1,)):
+                cand = legend(size, int(box.w * (0.45 if cols == 1 else 0.28)), cols)
+                if cand["h"] > box.h:
+                    continue
+                dd = min(box.h, box.w - cand["w"] - k.gap * 2)
+                if dd >= min_d and (best is None or dd > best[1]):
+                    best = (cand, dd)
+            if best is not None:
+                self.warnings.append("pie legend set beside the circle at a dense size")
+                self._pie_last_ok = True
+                return best[0], best[1], False
+        lg = None
+        for size in sizes:
+            sw = _emu(size * 0.72)
+            probe = legend(size, _emu(size * 5))
+            cap = box.w - sw - int(sw * 0.8) - probe["pct_w"]
+            if cap < _emu(size * 5):
+                continue
+            lg = legend(size, cap, 1)
+            d = min(int(box.w * 0.85), box.h - lg["h"] - k.vgap)
+            if lg["w"] <= box.w and d >= min_d:
+                self.warnings.append("pie legend set under the circle (one column)")
+                self._pie_last_ok = True
+                return lg, d, True
+        self._pie_last_ok = False
+        lg = lg or legend(sizes[-1], max(box.w - _emu(sizes[-1] * 4), _emu(sizes[-1] * 5)), 1)
+        self.warnings.append("pie legend does not fit its box")
+        return lg, max(min(int(box.w * 0.85), box.h - lg["h"] - k.vgap), int(0.3 * box.h)), True
+
     def _pie_legend_fit(self, box: Bbox, legend, rows: list[int], cats: list[str]):
-        """(legend, diameter, legend below?, sizes) of a pie's legend set beside (or under) its circle."""
+        """(legend, diameter, legend below?, sizes) of a pie's legend set beside (or under) its circle; legend None
+        when no legend fits the box beside or under a circle of at least a third of its height (a legend past the
+        box — wider than it, or leaving the circle a dot — is no candidate)."""
         k = self.kit
         gap = k.gap
+        min_d = int(0.33 * box.h)
         # the legend beside the circle: the largest size (and the narrowest name column, then two columns of rows) at
         # which the circle keeps most of the height (0.8 of it) — from the lead size (the body size for more than seven
         # parts) down to the body size; below it, the small sizes only when the circle would otherwise keep less than
@@ -2810,6 +3438,8 @@ class Composer:
                 if cand["h"] > box.h:
                     continue
                 dd = min(box.h, box.w - cand["w"] - gap * 2)
+                if dd < min_d:
+                    continue  # a legend that leaves the circle a sliver (or runs past the box) is no candidate
                 if best is None or dd > best[1] + _emu(2):
                     best = (cand, dd)
                 if dd >= 0.8 * box.h:
@@ -2824,13 +3454,11 @@ class Composer:
             for size in sizes:
                 alt = legend(size, box.w - _emu(size * 2.2) - _emu(size * 3))
                 d_alt = min(int(box.w * 0.85), box.h - alt["h"] - k.vgap)
+                if alt["w"] > box.w or d_alt < min_d:
+                    continue  # under the circle only as wide as the box, the circle still a third of the height
                 if d_alt > d * 1.15 and d_alt >= 0.35 * box.h:
                     lg, d, below = alt, d_alt, True
                     break
-        if lg is None:
-            # nothing fits beside or under the circle: the smallest legend in two columns, the circle as tall as the box
-            lg = legend(sizes[-1], int(box.w * 0.25), 2 if len(rows) >= 4 else 1)
-            d = max(min(box.h, box.w - lg["w"] - gap * 2), int(0.3 * box.h))
         return lg, d, below, sizes
 
     def _pie_draw(self, box: Bbox, spec, center: bool, lg: dict, d: int, below: bool, rows: list[int], cats: list[str], vals: list[float], pct: list[str], big: int, colors, amounts: bool, total: float, unit_txt: str) -> None:
@@ -2867,8 +3495,15 @@ class Composer:
                 base, share = shades[j % len(shades)]
                 self.cv.rect(Bbox(x=cx, y=y + (line_h - sw) // 2, w=sw, h=sw), base, radius_emu=sw // 4, name="Swatch", alpha=share if share < 1.0 else None)
                 nx = cx + sw + int(sw * 0.8)
-                self.cv.text(Bbox(x=nx, y=y, w=lg["name_w"], h=nh), [self.P(cats[j], size, colors.text)], name="Legend")
-                self.cv.text(Bbox(x=nx + lg["name_w"], y=y, w=lg["pct_w"], h=line_h + _emu(2)), [self.P(pct[j], size, colors.accent_text if j == big else colors.text, bold=k.figure_bold, align="r")], name="Share")
+                if lg.get("stack"):
+                    # the amount · share on the line under the name: a narrow legend keeps the brief's amounts
+                    name_p = [self.P(cats[j], size, colors.text)]
+                    name_h = self.h(name_p, lg["name_w"]) - _emu(2)
+                    self.cv.text(Bbox(x=nx, y=y, w=lg["name_w"], h=name_h + _emu(2)), name_p, name="Legend")
+                    self.cv.text(Bbox(x=nx, y=y + name_h, w=lg["name_w"], h=max(nh - name_h, line_h + _emu(2))), [self.P(pct[j], size, colors.accent_text if j == big else colors.text, bold=k.figure_bold)], name="Share")
+                else:
+                    self.cv.text(Bbox(x=nx, y=y, w=lg["name_w"], h=nh), [self.P(cats[j], size, colors.text)], name="Legend")
+                    self.cv.text(Bbox(x=nx + lg["name_w"], y=y, w=lg["pct_w"], h=line_h + _emu(2)), [self.P(pct[j], size, colors.accent_text if j == big else colors.text, bold=k.figure_bold, align="r")], name="Share")
                 y += nh + lg["row_gap"]
 
     def _doughnut_total(self, gf, spec, total: float, unit: str) -> None:
@@ -3096,10 +3731,31 @@ def label_without_figure(text: str, fig: Optional[str]) -> str:
     return text
 
 
+_YEAR_RE = re.compile(r"(?:1[89]|20)\d{2}")
+_YEAR_WORD_RE = re.compile(r"\s*(?:год|г\.|гг\.?|-?[мйхго]\b)", re.I)
+_YEAR_BEFORE_RE = re.compile(r"(?:^|[\s(«])(?:в|во|с|со|к|до|по|от|из|квартал[еау]?|полугоди[еия]|январ[ья]|феврал[ья]|марта?|апрел[ья]|ма[йя]|июн[ья]|июл[ья]|августа?|сентябр[ья]|октябр[ья]|ноябр[ья]|декабр[ья])\s*$", re.I)
+
+
+def _is_year(m: "re.Match", text: str) -> bool:
+    """A figure match that is a year, not a quantity: four digits 1800–2099 with no unit, followed by «год/года/г.»,
+    or standing without a counted word after it («в первом квартале 2024», «с 2019 по 2024»). «1854 электромобиля» is
+    a count and stays a figure."""
+    fig = m.group(1).strip()
+    if not _YEAR_RE.fullmatch(fig):
+        return False
+    after = text[m.end(1):]
+    if _YEAR_WORD_RE.match(after):
+        return True
+    if not re.match(r"\s*[а-яёa-z]{3,}", after, re.I):
+        return True  # «… квартале 2024», «с 2019 по 2024»: no counted word after it
+    return bool(_YEAR_BEFORE_RE.search(text[: m.start(1)]))  # «в 2024 выручка выросла»
+
+
 def _aside_figure(text: str) -> Optional[str]:
     """The key figure of a conclusion, as the large figure beside the chart: the first sum or share
     («120 000 рублей» → «120 000 ₽», «112,3%»), else the first figure of three digits or more; None without one."""
-    found = [m.group(1).strip() for m in _FIG_RE.finditer(text or "")]
+    text = text or ""
+    found = [m.group(1).strip() for m in _FIG_RE.finditer(text) if not _is_year(m, text)]
     unit = [f for f in found if re.search(r"%|₽|руб|млн|млрд|тыс", f, re.I)]
     big = [f for f in found if len(re.sub(r"\D", "", f)) >= 3]
     pick = (unit or big or [None])[0]
@@ -3130,6 +3786,11 @@ def _series_takeaway(spec, outline: DeckOutline, headline: str = "") -> Optional
     if re.search(r"\d\s?%|\bв\s+\d+([.,]\d+)?\s*раз|[×x]\s?\d|вдвое|втрое", headline or "", re.I):
         return None
     periods = all(re.search(r"(?i)месяц|квартал|год|недел|янв|фев|мар|апр|ма[йя]|июн|июл|авг|сен|окт|ноя|дек|\b\d{4}\b", c or "") for c in s.categories[1:]) if s.categories else False
+    # a change is read only along an order: periods, or a before/after pair («Сейчас → Цель», «До → После»). Parts of a
+    # set (countries, products, regions) have no first and last: «−89%: СССР → Япония» would be a made-up measure
+    before_after = len(s.categories) == 2 and bool(re.search(r"(?i)сейчас|текущ|было|до\b|старт|начал|база|факт", s.categories[0] or "")) and bool(re.search(r"(?i)цель|прогноз|план|стало|после|итог|будет", s.categories[1] or ""))
+    if not (periods or before_after):
+        return None
     span = f"{_in_sentence(s.categories[0])} → {_in_sentence(s.categories[-1])}" if s.categories else ""
     span = f"за период {span}" if periods and span else (f"{span}" if span else "")
     says_multiple = False

@@ -433,15 +433,22 @@ def test_slide_fix_api_only_this_slide_and_exact_undo(client, simple_deck, monke
     assert set(res["requested"]) == {i.id for i in asked} and set(res["fixed"]) == pushed
     assert {x["check_id"] for x in res["remaining"]} == unfixable and not any(x["new"] for x in res["remaining"])
     assert res["changed_other_slides"] is False and res["other_slides"] == []
-    assert res["reply"].startswith(f"Слайд {k}: исправлено {len(pushed)} из {len(asked)}, осталось: ") and res["new_score"] > res["score_before"]
+    # the reply names what is left, or — when the template layers leave no unfixable remark on this slide — says so
+    if unfixable:
+        assert res["reply"].startswith(f"Слайд {k}: исправлено {len(pushed)} из {len(asked)}, осталось: ")
+    else:
+        assert res["reply"].startswith(f"Слайд {k} исправлен") and "не осталось" in res["reply"]
+    assert res["new_score"] > res["score_before"]
     assert res["notes"] == [] and res["why"] is None and res["errors"] == 0
     steps = [e["step"] for e in job.get("agent", [])]
     assert steps[:1] == ["critic"] and {"designer", "compile", "check"} <= set(steps)
     assert all(e["slide"] == k and e["variant"] == "structured" for e in job["agent"])
     # while the previews render, the check step says so: the timeline never reads as finished before the job is
     last = job["agent"][-1]
-    assert last["step"] == "check" and last["message"] == f"Исправлено {len(pushed)} из {len(asked)} — готовлю превью слайда."
-    assert last["progress"] >= 0.85 and [e["message"] for e in job["agent"] if e["step"] == "check"][-2].startswith(f"Исправлено {len(pushed)} из {len(asked)}, осталось:")
+    verdict = f"Исправлено {len(pushed)} из {len(asked)}" if unfixable else "Замечаний на слайде не осталось"
+    assert last["step"] == "check" and last["message"] == f"{verdict} — готовлю превью слайда."
+    checks = [e["message"] for e in job["agent"] if e["step"] == "check"]
+    assert last["progress"] >= 0.85 and (checks[-2].startswith(f"Исправлено {len(pushed)} из {len(asked)}, осталось:") if unfixable else len(checks) >= 1)
     # the remarks keep their ids through the fix: the ones left on slide k are the ones the person asked about, and
     # every other slide's remarks keep theirs although the audit numbers them through the deck
     fixed_audit = json.loads((vdir / "audit_report.json").read_text(encoding="utf-8"))
