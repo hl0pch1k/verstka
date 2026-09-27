@@ -64,6 +64,7 @@ export const api = {
   generation: (gid: string) => request<Generation>(`/api/generations/${encodeURIComponent(gid)}`),
   createGeneration: (req: GenerateRequest) => request<GenerateResponse>("/api/generations", json(req)),
   deleteGeneration: (gid: string) => request<{ deleted: boolean }>(`/api/generations/${encodeURIComponent(gid)}`, { method: "DELETE" }),
+  deleteTemplate: (id: string) => request<{ deleted: boolean }>(`/api/templates/${encodeURIComponent(id)}`, { method: "DELETE" }),
   explain: (gid: string, strategy: string, index: number) =>
     request<ExplainResponse>(`/api/generations/${encodeURIComponent(gid)}/${encodeURIComponent(strategy)}/explain/${index}`),
   fixes: (gid: string, strategy: string, body: FixRequest) =>

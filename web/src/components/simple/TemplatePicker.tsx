@@ -3,14 +3,17 @@
 // analysed a skeleton tile stands where the new template will appear. Motion: skeletons until the list arrives, then the
 // covers fade up in a 40 ms cascade (once); «Ещё N» cascades the revealed covers; a new template's cover fades in over
 // its skeleton when the picture has loaded.
-import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type DragEvent } from "react";
-import { Check, ChevronRight, ImageOff, Plus, Upload } from "lucide-react";
-import { stagger } from "../../lib/motion";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type DragEvent } from "react";
+import { Check, ChevronRight, ImageOff, Plus, Trash2, Upload } from "lucide-react";
+import { api } from "../../api";
+import { errText } from "../../lib/narrate";
+import { EASE, MOTION, prefersReducedMotion, stagger } from "../../lib/motion";
 import { templateTitle } from "../../lib/plain";
 import { cn, plural } from "../../lib/utils";
 import { useApp } from "../../store";
 import type { TemplateListItem } from "../../types";
 import { Button } from "../ui/Button";
+import { Modal } from "../ui/Modal";
 import { Progress } from "../ui/Progress";
 
 const ROW = 4; // one row of four tiles
@@ -122,12 +125,16 @@ export function TemplateActions() {
 
 const TILE = "relative flex flex-col overflow-hidden rounded-xl bg-white text-left";
 
-function Cover({ t, selected, onPick, fresh, className, style }: {
+function Cover({ t, selected, onPick, onDelete, fresh, leaving, className, style }: {
   t: TemplateListItem;
   selected: boolean;
   onPick(): void;
+  /** The trash button: asks first (the picker's dialog). */
+  onDelete(): void;
   /** A template that arrived after the row was shown (a file just analysed): its picture fades in over a skeleton. */
   fresh?: boolean;
+  /** Deleted: the tile shrinks away before it leaves the row (the others then glide into its place). */
+  leaving?: boolean;
   className?: string;
   style?: CSSProperties;
 }) {
@@ -135,13 +142,15 @@ function Cover({ t, selected, onPick, fresh, className, style }: {
   const [loaded, setLoaded] = useState(false);
   const name = templateTitle(t.source_file, t.template_id);
   return (
+    // the trash is a sibling of the tile's button (a button never holds another): it shows on hover and on keyboard
+    // focus inside the tile, always on touch screens
+    <div data-tile={t.template_id} className={cn("group relative", leaving && "pointer-events-none animate-pop-out rm-fade-out", className)} style={style}>
     <button
       type="button"
       onClick={onPick}
       aria-pressed={selected}
       // the ring moves between tiles in 150 ms (box-shadow through tap-soft); a press sinks the tile a touch
-      className={cn(TILE, "tap-soft cursor-pointer", selected ? "shadow-selected" : "shadow-card hover:shadow-raise", className)}
-      style={style}
+      className={cn(TILE, "tap-soft w-full cursor-pointer", selected ? "shadow-selected" : "shadow-card hover:shadow-raise")}
     >
       <span className={cn("relative block aspect-video w-full overflow-hidden after:absolute after:inset-x-0 after:bottom-0 after:h-px after:bg-zinc-900/[0.06] after:content-['']", fresh && !loaded && !broken ? "skeleton rounded-none" : "bg-zinc-100")}>
         {t.cover_url && !broken ? (
@@ -163,11 +172,77 @@ function Cover({ t, selected, onPick, fresh, className, style }: {
           </span>
         )}
       </span>
-      <span className="block min-w-0 px-3 py-2">
+      <span className="block min-w-0 py-2 pl-3 pr-11">
         <span className="block truncate text-footnote font-semibold text-zinc-900" title={name}>{name}</span>
         <span className="mt-0.5 block text-caption text-zinc-500">{t.n_slides !== null ? plural(t.n_slides, "слайд", "слайда", "слайдов") : "шаблон"}</span>
       </span>
     </button>
+    <button
+      type="button"
+      onClick={onDelete}
+      aria-label={`Удалить шаблон «${name}»`}
+      title="Удалить шаблон"
+      className="tap absolute bottom-2 right-2 flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg text-zinc-500 opacity-0 transition-[opacity,background-color,color] duration-150 ease-out hover:bg-red-50 hover:text-red-600 focus-visible:opacity-100 active:bg-red-100 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100"
+    >
+      <Trash2 className="h-4 w-4" aria-hidden />
+    </button>
+    </div>
+  );
+}
+
+/** «Удалить шаблон?»: the tile's cover and name, one line on what stays, «Отмена» and a red «Удалить». While the
+ *  request runs the dialog stays (not dismissible) and the button spins; a failure says why in the dialog. */
+function DeleteTemplateDialog({ t, onCancel, onDeleted }: { t: TemplateListItem | null; onCancel(): void; onDeleted(id: string): void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const shown = useRef<TemplateListItem | null>(t);
+  if (t) shown.current = t;
+  const view = shown.current;
+  useEffect(() => {
+    if (t) {
+      setBusy(false);
+      setError(null);
+    }
+  }, [t]);
+  if (!view) return null;
+  const name = templateTitle(view.source_file, view.template_id);
+  const confirm = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.deleteTemplate(view.template_id);
+      onDeleted(view.template_id);
+    } catch (e) {
+      setError(errText(e));
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal
+      open={!!t}
+      onClose={onCancel}
+      dismissible={!busy}
+      size="sm"
+      title="Удалить шаблон?"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onCancel} disabled={busy}>Отмена</Button>
+          <Button variant="danger" icon={Trash2} loading={busy} onClick={() => void confirm()}>Удалить</Button>
+        </>
+      }
+    >
+      <div className="flex items-center gap-4">
+        <span className="block aspect-video w-28 shrink-0 overflow-hidden rounded-lg bg-zinc-100 shadow-card">
+          {view.cover_url ? <img src={view.cover_url} alt="" className="h-full w-full object-cover" draggable={false} /> : null}
+        </span>
+        <span className="min-w-0">
+          <span className="block truncate text-body font-semibold text-zinc-900" title={name}>{name}</span>
+          <span className="mt-0.5 block text-footnote text-zinc-500">{view.n_slides !== null ? plural(view.n_slides, "слайд", "слайда", "слайдов") : "шаблон"}</span>
+        </span>
+      </div>
+      <p className="mt-4 text-footnote text-zinc-500">Уже собранные презентации останутся.</p>
+      {error && <p role="alert" className="mt-3 text-footnote text-red-600">{error}</p>}
+    </Modal>
   );
 }
 
@@ -189,9 +264,41 @@ function Analysing({ name, value }: { name: string; value: number | null }) {
 const INTRO_MS = 800;
 
 export function TemplatePicker() {
-  const { templates, templateId, selectTemplate, healthError, strategies } = useApp();
+  const { templates, templateId, selectTemplate, forgetTemplate, healthError, strategies } = useApp();
   const { pick, blocked, job, name, over } = useTemplateUpload();
   const [all, setAll] = useState(false);
+  // deleting: the dialog's template, then the tile that shrinks away before it leaves the list
+  const [asking, setAsking] = useState<TemplateListItem | null>(null);
+  const [leaving, setLeaving] = useState<string | null>(null);
+  const grid = useRef<HTMLDivElement>(null);
+  const flipFrom = useRef<Map<string, DOMRect> | null>(null);
+  const removed = (id: string) => {
+    setAsking(null);
+    if (prefersReducedMotion()) return forgetTemplate(id);
+    setLeaving(id);
+    window.setTimeout(() => {
+      // FLIP: the other tiles' places before the row closes up, so they glide into the gap
+      const rects = new Map<string, DOMRect>();
+      grid.current?.querySelectorAll<HTMLElement>("[data-tile]").forEach((el) => rects.set(el.dataset.tile as string, el.getBoundingClientRect()));
+      flipFrom.current = rects;
+      setLeaving(null);
+      forgetTemplate(id);
+    }, MOTION.fast + 20);
+  };
+  useLayoutEffect(() => {
+    const was = flipFrom.current;
+    if (!was || !grid.current) return;
+    flipFrom.current = null;
+    grid.current.querySelectorAll<HTMLElement>("[data-tile]").forEach((el) => {
+      const from = was.get(el.dataset.tile as string);
+      if (!from) return;
+      const now = el.getBoundingClientRect();
+      const dx = from.left - now.left;
+      const dy = from.top - now.top;
+      if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return;
+      el.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "none" }], { duration: MOTION.slow, easing: EASE.glide });
+    });
+  }, [templates]);
 
   // the covers of the first list cascade in once (40 ms apart); the ids seen then, so a template added later (a file
   // just analysed) fades its own picture in instead
@@ -240,7 +347,7 @@ export function TemplatePicker() {
           Загрузите .pptx
         </button>
       ) : (
-        <div className="grid grid-cols-4 gap-4">
+        <div ref={grid} className="grid grid-cols-4 gap-4">
           {analysing && <Analysing name={name} value={job ? job.progress : null} />}
           {covers.map((t, i) => (
             <Cover
@@ -248,6 +355,8 @@ export function TemplatePicker() {
               t={t}
               selected={t.template_id === templateId}
               onPick={() => selectTemplate(t.template_id)}
+              onDelete={() => setAsking(t)}
+              leaving={leaving === t.template_id}
               fresh={!!intro.current && !intro.current.ids.has(t.template_id)}
               {...tileMotion(t, i)}
             />
@@ -269,6 +378,7 @@ export function TemplatePicker() {
           )}
         </div>
       )}
+      <DeleteTemplateDialog t={asking} onCancel={() => setAsking(null)} onDeleted={removed} />
     </div>
   );
 }

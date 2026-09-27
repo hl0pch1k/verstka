@@ -37,6 +37,10 @@ export interface AppState {
   strategies: StrategyInfo[];
   strategyTitle(name: string): string;
   templates: TemplateListItem[]; refreshTemplates(): Promise<void>;
+  /** Removes a template from the library; the selection moves to the newest one left. Throws with the server's text. */
+  deleteTemplate(id: string): Promise<void>;
+  /** Drops an already deleted template from the list (the picker plays the tile's exit first). */
+  forgetTemplate(id: string): void;
   templateId: string | null; selectTemplate(id: string | null): void;
   manifest: TemplateManifest | null; manifestLoading: boolean;
   generations: GenerationMeta[]; refreshGenerations(): Promise<void>;
@@ -141,6 +145,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
       /* an older server without the endpoint, or offline */
     }
   }, []);
+
+  const forgetTemplate = useCallback((id: string) => {
+    const rest = latest.current.templates.filter((t) => t.template_id !== id);
+    setTemplates(rest);
+    if (latest.current.templateId === id) selectTemplate(newestTemplate(rest)?.template_id ?? null);
+  }, [selectTemplate]);
+
+  const deleteTemplate = useCallback(async (id: string) => {
+    await api.deleteTemplate(id);
+    forgetTemplate(id);
+  }, [forgetTemplate]);
 
   const refreshTemplates = useCallback(async () => {
     try {
@@ -388,11 +403,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const activeVariant = useMemo(() => generation?.variants.find((v) => v.strategy === activeStrategy) ?? null, [generation, activeStrategy]);
 
   const value = useMemo<AppState>(() => ({
-    health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, templateId, selectTemplate, manifest, manifestLoading,
+    health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, activeStrategy, setActiveStrategy, activeVariant,
     selectedSlide, setSelectedSlide, setTab, screen, setScreen, detail, setDetail, agentOpen, setAgentOpen, activeJob, runJob, messages, pushMessage, toast, uploadTemplate, startGeneration,
   }), [
-    health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, templateId, selectTemplate, manifest, manifestLoading,
+    health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, activeStrategy, setActiveStrategy, activeVariant,
     selectedSlide, setSelectedSlide, setTab, screen, detail, agentOpen, setAgentOpen, activeJob, runJob, messages, pushMessage, toast, uploadTemplate, startGeneration,
   ]);

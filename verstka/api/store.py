@@ -101,6 +101,16 @@ class Store:
         """Raises FileNotFoundError for unknown and for malformed ids."""
         return TemplateWorkspace.open(template_id, self.root)
 
+    def delete_template(self, template_id: str) -> bool:
+        """Remove a template from the library: its workspace (analysis, previews, the copy of the file). Decks built on
+        it keep their own files and stay viewable; only rebuilding them needs the template again."""
+        try:
+            ws = TemplateWorkspace.open(template_id, self.root)
+        except FileNotFoundError:
+            return False
+        shutil.rmtree(ws.dir, ignore_errors=True)
+        return not ws.dir.exists()
+
     # ---- generations --------------------------------------------------------------
     def new_generation_dir(self) -> tuple[str, Path]:
         gid = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:6]

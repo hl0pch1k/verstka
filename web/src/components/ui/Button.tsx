@@ -4,9 +4,9 @@ import { cn } from "../../lib/utils";
 import { renderIcon, type IconProp } from "./icon";
 
 // VK button family: primary (filled blue, one per screen), tonal (light blue), secondary (neutral grey),
-// white (on the canvas or a tinted notice) and ghost (text). Sizes 32 / 40 / 48. Callers pass layout classes only;
+// white (on the canvas or a tinted notice), ghost (text) and danger (the confirming button of a delete dialog). Sizes 32 / 40 / 48. Callers pass layout classes only;
 // another look is another variant, never a className override. Focus uses the global 2px outline.
-export type ButtonVariant = "primary" | "tonal" | "secondary" | "white" | "ghost";
+export type ButtonVariant = "primary" | "tonal" | "secondary" | "white" | "ghost" | "danger";
 export type ButtonSize = "sm" | "md" | "lg";
 export type ButtonShape = "rect" | "circle";
 
@@ -40,6 +40,8 @@ const VARIANTS: Record<ButtonVariant, string> = {
   secondary: "bg-zinc-100 text-zinc-900 hover:bg-zinc-200/70 active:bg-zinc-200",
   white: "bg-white text-zinc-900 shadow-card hover:bg-zinc-50 active:bg-zinc-100",
   ghost: "text-zinc-700 hover:bg-zinc-900/[0.06] hover:text-zinc-900 active:bg-zinc-900/10 aria-expanded:bg-zinc-900/[0.06] aria-expanded:text-zinc-900",
+  // a destructive confirmation (delete): only inside a dialog that asked first
+  danger: "bg-red-600 text-white hover:bg-red-700 active:bg-red-800",
 };
 
 const SIZES: Record<ButtonSize, { box: string; iconOnly: string; icon: string; iconOnlyIcon: string }> = {

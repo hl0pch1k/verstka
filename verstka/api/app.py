@@ -466,6 +466,21 @@ async def upload_template(file: UploadFile = File(...), use_models: bool = Form(
     return {"job_id": job.id, "filename": file.filename, "use_models": use}
 
 
+@app.delete("/api/templates/{template_id}")
+def delete_template(template_id: str) -> dict:
+    """Delete a template from the library (the trash button on its tile, after a confirmation). Not while a deck is
+    being built on it or the template is still being analysed."""
+    try:
+        store.workspace(template_id)
+    except FileNotFoundError:
+        raise HTTPException(404, "Шаблон не найден")
+    if any(g.get("template_id") == template_id and g.get("status") == "running" for g in store.list_generations()):
+        raise HTTPException(409, "На этом шаблоне сейчас собирается презентация — удалите его, когда она будет готова")
+    if not store.delete_template(template_id):
+        raise HTTPException(500, "Не удалось удалить шаблон — попробуйте ещё раз")
+    return {"deleted": True}
+
+
 @app.get("/api/templates/{template_id}")
 def get_template(template_id: str) -> dict:
     m = store.manifest(template_id)
