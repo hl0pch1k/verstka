@@ -1801,6 +1801,20 @@ def _veil(el: etree._Element) -> bool:
         return False
 
 
+def _bookend_photo(ctx: "_SlideCtx", slot, el: etree._Element) -> bool:
+    """A picture of a cover, divider or closing sample that is part of its design: a real picture (not an empty
+    «insert your photo» frame) of at least 3 % of the slide, standing clear of the sample's title (a photo beside the
+    title card — Google Slides «Marketing Campaign», «McKinsey»)."""
+    if not getattr(ctx, "keep_photos", True) or slot.bbox.area < 0.03 or el.find(".//" + q("a:blip")) is None:
+        return False
+    for t in ctx.pattern.slots:
+        if t.role == SlotRole.title and t.bbox.area > 0:
+            inter = max(0.0, min(slot.bbox.x2, t.bbox.x2) - max(slot.bbox.x, t.bbox.x)) * max(0.0, min(slot.bbox.y2, t.bbox.y2) - max(slot.bbox.y, t.bbox.y))
+            if inter > 0.1 * t.bbox.area:
+                return False
+    return True
+
+
 def _veil_boxes(ctx: _SlideCtx) -> list[Bbox]:
     """The boxes of the see-through shapes (`_veil`) the slide, its layout and its master draw."""
     out: list[Bbox] = []
@@ -2022,6 +2036,10 @@ def _strip_bookend(ctx: _SlideCtx, keep: set[str], oslide: OutlineSlide) -> tupl
             continue
         if slot.role == SlotRole.image and oslide.content.image_hint:
             continue
+        if slot.role == SlotRole.image and _bookend_photo(ctx, slot, el):
+            if KEPT_PHOTO not in ctx.warnings:
+                ctx.warnings.append(KEPT_PHOTO)
+            continue  # the photo beside the title card is the cover's design: without it half the slide stands empty
         b = element_bbox(el)
         if is_nested(el):
             if etree.QName(el).localname == "sp":
@@ -4158,9 +4176,15 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
 # ---------------------------------------------------------------------------- main
 
 
-def render_clone(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineSlide, pattern: Pattern, manifest: TemplateManifest, ws: TemplateWorkspace, outline: DeckOutline) -> tuple[Slide, list[str]]:
+KEPT_PHOTO = "фото обложки шаблона оставлено"  # the warning a clone gives when it keeps a bookend's photo
+
+
+def render_clone(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineSlide, pattern: Pattern, manifest: TemplateManifest, ws: TemplateWorkspace, outline: DeckOutline, keep_photos: bool = True) -> tuple[Slide, list[str]]:
+    """`keep_photos`: a cover's, divider's or closing slide's photo beside its title stays (`_bookend_photo`); the
+    renderer sets the cover again without it when the kept photo leaves the title no room."""
     slide = builder.clone_slide(pattern.source_slide)
     ctx = _SlideCtx(builder, slide, pattern, manifest, ws, outline)
+    ctx.keep_photos = keep_photos
     c = oslide.content
     ctx.keeps_pictures = bool(c.image_hint or c.chart is not None or c.table is not None)
     renumber_page_chrome(ctx.els, pattern.chrome_shape_ids, pattern.source_slide, len(builder.created))
@@ -4329,6 +4353,10 @@ def render_clone(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
             continue
         if slot.role == SlotRole.icon and not drop_icons:
             continue
+        if drop_icons and slot.role == SlotRole.image and _bookend_photo(ctx, slot, el):
+            if KEPT_PHOTO not in ctx.warnings:
+                ctx.warnings.append(KEPT_PHOTO)
+            continue  # a cover's photo beside its title card is the cover's design: without it half the slide is empty
         if not has_visual or slot.bbox.area >= 0.05:
             remove_element(el)
             ctx.removed.add(slot.shape_id)

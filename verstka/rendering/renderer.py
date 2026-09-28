@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from verstka.ingest.workspace import TemplateWorkspace
-from verstka.rendering.clone import RenderedSlide, render_clone
+from verstka.rendering.clone import KEPT_PHOTO, RenderedSlide, render_clone
 from verstka.rendering.deck import DeckBuilder
 from verstka.rendering.fallbacks import fallback_composition, prepare_slide
 from verstka.rendering.synth import render_synth
@@ -195,6 +195,12 @@ def _render_deck(outline: DeckOutline, plan: LayoutPlan, manifest: TemplateManif
             if ps.mode == "clone" and ps.pattern_id in patterns:
                 slide, warns = render_clone(builder, ps, oslide, patterns[ps.pattern_id], manifest, ws, outline)
                 why = _bookend_trouble(slide, oslide)
+                if why and KEPT_PHOTO in warns:
+                    # the sample's photo kept beside the title left the title no room: the same cover without it
+                    # before a composed one
+                    _rollback(builder, before)
+                    slide, warns = render_clone(builder, ps, oslide, patterns[ps.pattern_id], manifest, ws, outline, keep_photos=False)
+                    why = _bookend_trouble(slide, oslide)
                 if why:
                     # a cover set in a sample made for a short word (a title box a quarter of the slide wide, a word
                     # behind a product shot) breaks the deck's words or runs its lines together: composed instead

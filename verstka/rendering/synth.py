@@ -1780,6 +1780,7 @@ class DeckStyle:
     upper: bool  # labels in capitals, as in the samples
     head_bold: bool = False  # headlines set under a label are bold when the template's labels are
     head_cap_reason: str = ""  # why the heading size is not the template's own content heading size (for the log)
+    caps: bool = False  # plain headings in capitals: the template's own content headings are all typed so
 
 
 def _is_sparse(manifest: TemplateManifest) -> bool:
@@ -1879,7 +1880,12 @@ def deck_style(builder: DeckBuilder, manifest: TemplateManifest, outline: DeckOu
         head, reason = _capped_head(builder, manifest, outline, family, h1, font, bold, scale)
     else:
         head = max(h1, _snap_heading(0.046 * H / EMU_PER_PT, scale))
-    ds = DeckStyle(family=family, pill=pill, kicker=kicker, head_size=head, upper=pill and texted > 0 and uppers >= 0.6 * texted, head_bold=pill and bolds > 0, head_cap_reason=reason)
+    # a template whose content headings are all typed in capitals («OUR SERVICES», SlidesCarnival and Google Slides
+    # decks) keeps that voice on the composed headings (not in pill mode: there the label carries it)
+    typed = [(_top_title(p).sample_text or "").strip() for p in same if _top_title(p) is not None]
+    typed = [t for t in typed if any(ch.isalpha() for ch in t)]
+    caps = not pill and len(typed) >= 3 and sum(1 for t in typed if t.isupper()) >= 0.8 * len(typed)
+    ds = DeckStyle(family=family, pill=pill, kicker=kicker, head_size=head, upper=pill and texted > 0 and uppers >= 0.6 * texted, head_bold=pill and bolds > 0, head_cap_reason=reason, caps=caps)
     cache[id(outline)] = ds
     return ds
 
@@ -2011,6 +2017,7 @@ def _place_plain_heading(builder, slide, title_ph, box: Bbox, oslide, manifest, 
     inner = lambda w: max((w - insets[0] - insets[2]) / EMU_PER_PT, 1.0)  # noqa: E731
     # the heading keeps the template's look — capitals and letter-spacing it inherits are measured as set (C5, T14)
     caps, spc = _inherited_caps_spc(title_ph)
+    caps = caps or bool(ds is not None and getattr(ds, "caps", False))
     look = {"caps": caps, "spc_pt": spc} if (caps or spc) else {}
     fit_size = functools.partial(_fit_size, **look) if look else _fit_size  # noqa: N806
     wrap_lines = functools.partial(_wrap_lines, **look) if look else _wrap_lines  # noqa: N806
@@ -2085,6 +2092,7 @@ def _place_plain_heading(builder, slide, title_ph, box: Bbox, oslide, manifest, 
             text_h = int(fitted.height_pt * EMU_PER_PT) + insets[1] + insets[3]
             h_box = max(min(box.h, inner_h), text_h)
             _fill_heading(title_ph, head_text, fitted.size_pt, None, insets, W, keep_indent=keep_indent)
+            _caps_heading(title_ph, ds)
             _set_box(title_ph, Bbox(x=box.x, y=box.y, w=box.w, h=h_box))
             _check_heading_color(slide, title_ph, canvas, band, pal, manifest)
             return max(band.y2, box.y + h_box), _heading_left(title_ph, box, insets), False
@@ -2148,6 +2156,7 @@ def _place_plain_heading(builder, slide, title_ph, box: Bbox, oslide, manifest, 
             else:
                 box = Bbox(x=box.x, y=box.y, w=balanced, h=box.h)
     _fill_heading(title_ph, head_text, size, color, insets, W, keep_indent=keep_indent)
+    _caps_heading(title_ph, ds)
     text_h = int(res.height_pt * EMU_PER_PT) + insets[1] + insets[3]
     if text_h > box.h:
         _set_box(title_ph, Bbox(x=box.x, y=box.y, w=box.w, h=text_h))
@@ -2373,6 +2382,15 @@ def _fill_heading(title_ph, text: str, size: float, color: Optional[str], insets
                     p_.insert(0, ppr)
                 ppr.set("marL", "0")
                 ppr.set("indent", "0")
+
+
+def _caps_heading(title_ph, ds) -> None:
+    """Capitals on the heading's runs when the deck sets its headings so (`DeckStyle.caps`): the words stay as written
+    in the file, the capitals are the template's voice."""
+    if ds is None or not getattr(ds, "caps", False):
+        return
+    for r in title_ph._element.iter(q("a:rPr")):
+        r.set("cap", "all")
 
 
 def _heading_band(slide: Slide, box: Bbox, W: int, H: int) -> Optional[Bbox]:

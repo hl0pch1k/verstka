@@ -89,11 +89,15 @@ def _norm_text(t: str) -> str:
     return _WS_RE.sub("", t).lower().replace("ё", "е")
 
 
-def wanted_strings(osl: OutlineSlide) -> list[str]:
-    """Texts the plan puts on the slide that must survive rendering (order preserved, duplicates dropped)."""
+def wanted_strings(osl: OutlineSlide, outline=None) -> list[str]:
+    """Texts the plan puts on the slide that must survive rendering (order preserved, duplicates dropped). A line that
+    only repeats a figure of the slide's chart is the chart's own (the composer drops it)."""
+    from verstka.rendering.compose import bare_chart_figure, chart_values
+
     c = osl.content
     raw: list[str] = [osl.headline]
-    raw.extend(c.bullets)
+    values = chart_values(c, outline) if c.bullets else set()
+    raw.extend(b for b in c.bullets if not bare_chart_figure(b, values))
     raw.extend(it.title for it in c.items)
     for n in c.numbers:
         raw.extend((n.value, n.label))
@@ -144,7 +148,7 @@ def content_missing(ctx: AuditContext) -> list[Issue]:
         osl = _outline_slide(ctx, s)
         if osl is None:
             continue
-        wanted = wanted_strings(osl)
+        wanted = wanted_strings(osl, ctx.outline)
         if not wanted:
             continue
         have = slide_text_norm(s)

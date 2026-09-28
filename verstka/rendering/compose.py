@@ -894,6 +894,12 @@ class Composer:
         # the slide's footnote and conclusion (Agent v2) keep their room at the foot of the area: the content is
         # composed above them, the conclusion then follows it
         self._comp = comp
+        c = self.o.content
+        values = chart_values(c, self.outline) if c.bullets else set()
+        if values and any(bare_chart_figure(b, values) for b in c.bullets):
+            # a line that only repeats a figure of the slide's chart leaves (the audit counts it as the chart's own)
+            self.o = self.o.model_copy(update={"content": c.model_copy(update={"bullets": [b for b in c.bullets if not bare_chart_figure(b, values)]})})
+            self.warnings.append("lines repeating a figure of the chart dropped")
         self._unsay_conclusion()
         area = self._reserve_notes(area)
         n0 = len(self.cv.tree)
@@ -4405,6 +4411,35 @@ def parse_formula(text: str) -> tuple[list[tuple[Optional[str], str]], list[str]
         label = " ".join((t[: m.start()] + " " + t[m.end() :]).split()).strip(" ,.:;—–-()")
         terms.append((fig, label))
     return terms, ops
+
+
+_BARE_FIGURE_RE = re.compile(r"^\s*[+\-−]?\d[\d\s\u00a0\u2060]*(?:[.,]\d+)?\s*(?:₽|руб(?:\.|лей|ля|ль)?|%|тыс\.?|млн\.?|млрд\.?)?\s*[.;]?\s*$", re.I)
+
+
+def chart_values(content, outline) -> set[float]:
+    """Every value the slide's charts plot (rounded to cents)."""
+    from verstka.rendering.charts import resolve_series
+
+    out: set[float] = set()
+    for spec in (getattr(content, "chart", None), getattr(content, "chart2", None)):
+        if spec is None:
+            continue
+        try:
+            series = resolve_series(spec, outline)
+        except Exception:  # noqa: BLE001
+            continue
+        for s in series:
+            out.update(round(float(v), 2) for v in s.values if v is not None)
+    return out
+
+
+def bare_chart_figure(text: str, values: set[float]) -> bool:
+    """A line that is nothing but a figure the slide's chart already plots («120 000», «254 795 рублей» beside the
+    bars of those two values): it repeats the chart and says nothing of its own."""
+    if not values or not _BARE_FIGURE_RE.match(text or ""):
+        return False
+    v = _num(text.replace("\u2060", ""))
+    return v is not None and round(v, 2) in values
 
 
 def _num(cell: str) -> Optional[float]:

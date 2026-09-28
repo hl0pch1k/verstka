@@ -148,3 +148,17 @@ def test_empty_placeholders_set_the_margins_of_an_empty_template():
     slide = [ph("1", "title", 0.05, 0.04, 0.9, 0.12), ph("2", "body", 0.05, 0.22, 0.9, 0.68), ph("3", "sldNum", 0.8, 0.94, 0.15, 0.05)]
     sp = compute_spacing({1: slide, 2: slide}, {}, W, H)
     assert sp.safe_area.x <= 0.06 and sp.safe_area.y <= 0.06
+
+
+def test_a_line_that_only_repeats_a_chart_figure_is_the_charts_own():
+    from verstka.audit.checks.integrity import wanted_strings
+    from verstka.rendering.compose import bare_chart_figure
+    from verstka.schemas.outline import ChartSpec, InlineSeries, OutlineSlide, SlideContent
+    from verstka.schemas.common import PatternKind
+
+    values = {120000.0, 254795.0}
+    assert bare_chart_figure("120 000", values) and bare_chart_figure("254 795 рублей", values)
+    assert not bare_chart_figure("120 000 чашек", values) and not bare_chart_figure("Рост 120 000 клиентов", values)
+    chart = ChartSpec(type="column", categories=["Сейчас", "Прогноз"], series=[InlineSeries(name="Прибыль", values=[120000.0, 254795.0])])
+    osl = OutlineSlide(id="s6", kind=PatternKind.chart, headline="Прибыль вырастет на 112,3%", content=SlideContent(bullets=["120 000", "254 795 рублей", "Новые клиенты"], chart=chart))
+    assert wanted_strings(osl) == ["Прибыль вырастет на 112,3%", "Новые клиенты"]

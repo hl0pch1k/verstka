@@ -739,7 +739,9 @@ SAMPLE_VALUE_RE = re.compile(
     r"\b(?:reallygreatsite|borcelle|fauget|larana|salford\s*&\s*co|arowwai|liceria|wardiere|rimberio|ingoude|thynk\s+unlimited)\b|"
     r"\b(?:olivia\s+wilson|juliana\s+silva|harper\s+russo|morgan\s+maxwell|avery\s+davis|claudia\s+alves|benjamin\s+shah)\b|"
     r"\b123\s+anywhere\s+st\b|\+?\(?123\)?[-\s.]?456[-\s.]?7890|\b(?:hello|email|yourname|name)@|"
-    r"^\s*(?:date\s*:?\s*)?(?:dd|mm)[/.\-](?:mm|dd)[/.\-](?:yyyy|yy)\s*$",
+    r"^\s*(?:date\s*:?\s*)?(?:dd|mm)[/.\-](?:mm|dd)[/.\-](?:yyyy|yy)\s*$|"
+    # an English month with its year in a header («July 2024», «Q3 2023») is the sample's date, never the deck's own
+    r"^\s*(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|q[1-4])\.?,?\s+(?:19|20)\d{2}\s*$",
     re.I,
 )
 

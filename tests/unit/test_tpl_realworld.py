@@ -101,7 +101,7 @@ def test_header_and_footer_sample_values():
     from verstka.analysis.shapes import looks_like_sample_value
 
     for t in ("JOHN DOE", "NEW YORK", "2023", "SLIDESCARNIVAL.COM", "BRAND NAME", "www.reallygreatsite.com", "+123-456-7890",
-              "hello@reallygreatsite.com", "Back to overview page", "Date: dd/mm/yyyy", "Borcelle"):
+              "hello@reallygreatsite.com", "Back to overview page", "Date: dd/mm/yyyy", "Borcelle", "July 2024", "Q3 2023"):
         assert looks_like_sample_value(t), t
     for t in ("VK Tech", "Сентябрь 2026", "2023 год", "Отчёт 2023", "12", "Олимпиада 2026", "Далее по плану"):
         assert not looks_like_sample_value(t), t
