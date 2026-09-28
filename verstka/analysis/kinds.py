@@ -58,8 +58,15 @@ def heuristic_kind(
         return PatternKind.thanks, 0.9
     # the first slide of a template is its cover: a photo, a card under the title, the author, the date and a few
     # marks around it (Canva / Google Slides covers carry 8–12 shapes) — never a comparison or a card row
-    if slide_index == 1 and n_slides >= 3 and title is not None and n_numbers < 3 and n_content <= 12 and len(texts) <= 6:
-        return PatternKind.title, 0.85
+    if slide_index == 1 and n_slides >= 3 and n_numbers < 3:
+        # (a cover whose title is set as display words in boxes of their own — «ELEGANT / PITCH / DECK» of a Google
+        # Slides template — or that carries a menu row and footers beside its title is the cover all the same: its
+        # largest type is display-sized and clearly above the rest)
+        sizes = sorted(((s.text.max_size_pt or 0.0) for s in texts if s.text is not None), reverse=True)
+        display = max(32.0, 0.08 * slide_h / 12700)
+        dominant = bool(sizes) and sizes[0] >= display and (len(sizes) == 1 or sizes[0] >= 1.5 * sizes[len(sizes) // 2])
+        if (title is not None and n_content <= 12 and len(texts) <= 6) or dominant:
+            return PatternKind.title, 0.85
     # ordinal markers 01, 02, 03… are sequence numbers, not KPIs → agenda / process / timeline
     ordinals = [s for s in texts if _NUM_SEQ_RE.match(s.plain_text.strip())]
     if len(ordinals) >= 3:

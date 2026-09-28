@@ -37,10 +37,14 @@ def compute_spacing(
         chrome = chrome_ids_per_slide.get(idx, set())
         edges: set[float] = set()
         s_left, s_right, s_top, s_bottom = [], [], [], []
+        # a slide whose placeholders are all empty (a LibreOffice template's own slides) says where its text goes by
+        # those placeholders — its decorations alone (a pencil in a corner) would set the margins
+        empty = not any(s.has_text for s in shapes if s.id not in chrome and not (s.is_placeholder and s.ph_type in ("dt", "ftr", "sldNum")))
         for s in shapes:
             if s.id in chrome or s.bbox.area <= 0 or s.bbox.area / area >= 0.8:
                 continue
-            if not (s.has_text or s.is_visual_shape or s.kind == ShapeKind.pic):
+            placeholder = empty and s.is_placeholder and (s.ph_type or "body") not in ("dt", "ftr", "sldNum", "pic")
+            if not (s.has_text or placeholder or s.is_visual_shape or s.kind == ShapeKind.pic):
                 continue
             if s.kind == ShapeKind.pic and s.bbox.area / area >= 0.3:
                 continue  # large pictures often bleed to the edge

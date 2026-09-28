@@ -93,13 +93,14 @@ def bind_short_words(text: str) -> str:
     return bind_compounds(bind_figures("".join(out)))
 
 
-def display_lines(text: str, family: Optional[str], size_pt: float, bold: bool, width_pt: float) -> list[str]:
+def display_lines(text: str, family: Optional[str], size_pt: float, bold: bool, width_pt: float, spc_pt: float = 0.0) -> list[str]:
     """Greedy wrap the way PowerPoint and LibreOffice break a heading: at ordinary spaces and after hyphens, never at a
-    no-break space. A word wider than the line is kept whole (the caller treats that as not fitting)."""
+    no-break space. A word wider than the line is kept whole (the caller treats that as not fitting). `spc_pt`: the
+    heading's letter-spacing (a badge's title tracked 8 pt a letter)."""
     from verstka.rendering.fonts import text_width_pt
 
     def width(s: str) -> float:
-        return text_width_pt(s.replace("\u00a0", " "), family, size_pt, bold)
+        return text_width_pt(s.replace("\u00a0", " "), family, size_pt, bold, spc_pt=spc_pt)
 
     tokens: list[str] = []  # pieces that may start a line; each keeps its trailing separator
     for word in text.replace("\n", " ").split(" "):
@@ -122,7 +123,7 @@ def display_lines(text: str, family: Optional[str], size_pt: float, bold: bool, 
     return lines or [""]
 
 
-def display_fit(text: str, family: Optional[str], size_pt: float, bold: bool, width_pt: float, max_lines: int, scale: Optional[list[float]] = None, floor: float = 0.45, word_room: float = 1.0) -> tuple[float, int]:
+def display_fit(text: str, family: Optional[str], size_pt: float, bold: bool, width_pt: float, max_lines: int, scale: Optional[list[float]] = None, floor: float = 0.45, word_room: float = 1.0, spc_pt: float = 0.0) -> tuple[float, int]:
     """The largest size ≤ `size_pt` at which a display heading takes at most `max_lines` lines of `width_pt` with no
     word wider than `word_room` of the line: (size, lines). Steps follow the template's own sizes where they fall in
     the range, with 5 % steps between them; below `floor` × size the smallest candidate is returned with its line
@@ -140,10 +141,10 @@ def display_fit(text: str, family: Optional[str], size_pt: float, bold: bool, wi
     words = [w for w in re.split(r"[ \t\r\n]+|(?<=-)(?!\u2060)", text) if w]
     last = (round(size_pt * floor, 1), 99)
     for s in sorted(cands, reverse=True):
-        if any(text_width_pt(w, family, s, bold) > width_pt * word_room for w in words):
+        if any(text_width_pt(w, family, s, bold, spc_pt=spc_pt) > width_pt * word_room for w in words):
             last = (s, 99)
             continue
-        n = len(display_lines(text, family, s, bold, width_pt))
+        n = len(display_lines(text, family, s, bold, width_pt, spc_pt=spc_pt))
         last = (s, n)
         if n <= max_lines:
             return s, n
@@ -168,7 +169,7 @@ _PHRASE_END = re.compile(r"[:;,\u2014\u2013.!?\u00bb)]$")
 _ADJ_END = re.compile(r"(?:ый|ий|ой|ая|яя|ое|ее|ые|ие|ого|его|ому|ему|ую|юю|ых|их|ыми|ими)$", re.I)
 
 
-def balanced_lines(text: str, family: Optional[str], size_pt: float, bold: bool, width_pt: float, n_lines: int) -> Optional[list[str]]:
+def balanced_lines(text: str, family: Optional[str], size_pt: float, bold: bool, width_pt: float, n_lines: int, spc_pt: float = 0.0) -> Optional[list[str]]:
     """The heading broken into exactly `n_lines` lines of at most `width_pt`, the way a typesetter breaks a display
     heading: lines of even length, never a lone short word on the last line, a break after a colon, a dash or a comma
     rather than inside a phrase, never between an adjective and its noun. None when no such break exists."""
@@ -184,7 +185,7 @@ def balanced_lines(text: str, family: Optional[str], size_pt: float, bold: bool,
 
     def width(a: int, b: int) -> float:
         if (a, b) not in cache:
-            cache[(a, b)] = text_width_pt("".join(tokens[a:b]).rstrip().replace("\u00a0", " "), family, size_pt, bold)
+            cache[(a, b)] = text_width_pt("".join(tokens[a:b]).rstrip().replace("\u00a0", " "), family, size_pt, bold, spc_pt=spc_pt)
         return cache[(a, b)]
 
     best: Optional[tuple[float, tuple[int, ...]]] = None
@@ -567,6 +568,11 @@ def score_pattern(
         hero = 0.12 * min(size / ref, 1.0) - 0.03 * min(others, 4) if ref else 0.0
         style += hero
         reasons.append(f"обложка: заголовок {size:.0f} пт, других текстов {others}: {hero:+.2f}")
+        if slide.kind == PatternKind.title and pattern.kind == PatternKind.title:
+            # the template's own cover is the deck's cover: a divider with a giant word set on its own ground
+            # (SlidesCarnival «lettering», «luxury») scored above it on its size alone and lost the cover's design
+            style += 0.1
+            reasons.append("обложка шаблона: +0.10")
         h1 = typo.size_for("h1", 0.0)
         sample_size = max((x.style.size_pt or 0.0 for x in titles), default=0.0)
         if h1 and sample_size and sample_size < 1.15 * h1 and not _cover_like(pattern, manifest, sample_size):

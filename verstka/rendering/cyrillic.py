@@ -148,9 +148,11 @@ def embedded_coverage(pptx: Path | str) -> dict[str, bool]:
 
 def supports_cyrillic(family: str, embedded: Optional[dict[str, bool]] = None) -> Optional[bool]:
     """True / False / None (unknown) for a family name the template uses."""
+    from verstka.rendering.fonts import _SYMBOL_RE
+
     name = (family or "").strip()
-    if not name or name.startswith("+"):
-        return None
+    if not name or name.startswith("+") or _SYMBOL_RE.search(name):
+        return None  # a symbol font (Wingdings, Symbol) draws marks, never letters: it has no stand-in
     base = base_family(name)
     if embedded and base in embedded:
         return embedded[base]
@@ -283,6 +285,87 @@ def _fix_part(xml: bytes, subs: dict[str, str], whole: bool) -> Optional[bytes]:
             for rpr in body.iter(f"{{{_A}}}{tag}"):
                 changed |= _swap(rpr, subs)
     return etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True) if changed else None
+
+
+def _mark_part(xml: bytes) -> Optional[bytes]:
+    from lxml import etree
+
+    try:
+        root = etree.fromstring(xml)
+    except etree.XMLSyntaxError:
+        return None
+    changed = False
+    for r in root.iter(f"{{{_A}}}r"):
+        t = r.find(f"{{{_A}}}t")
+        if t is None or not CYR_RE.search(t.text or ""):
+            continue
+        rpr = r.find(f"{{{_A}}}rPr")
+        if rpr is None:
+            rpr = etree.Element(f"{{{_A}}}rPr")
+            r.insert(0, rpr)
+        if rpr.get("lang") != "ru-RU":
+            rpr.set("lang", "ru-RU")
+            changed = True
+    return etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True) if changed else None
+
+
+def _unhighlight_part(xml: bytes) -> Optional[bytes]:
+    if b"highlight" not in xml:
+        return None
+    from lxml import etree
+
+    try:
+        root = etree.fromstring(xml)
+    except etree.XMLSyntaxError:
+        return None
+    gone = [h for h in root.iter(f"{{{_A}}}highlight")]
+    for h in gone:
+        h.getparent().remove(h)
+    return etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True) if gone else None
+
+
+def strip_highlights(pptx: Path | str) -> int:
+    """Text highlights taken off a finished deck (in place) — slides, layouts, masters: a LibreOffice template carries
+    its character background as a highlight in its text styles (white under the white subtitle of «Piano»), and the
+    deck's own words written in that style disappear. Returns the number of parts changed."""
+    path = Path(pptx)
+    buf = io.BytesIO()
+    n = 0
+    with zipfile.ZipFile(path) as zin, zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zout:
+        for item in zin.infolist():
+            data = zin.read(item.filename)
+            name = item.filename
+            if name.endswith(".xml") and (name.startswith("ppt/slides/slide") or name.startswith("ppt/slideLayouts/") or name.startswith("ppt/slideMasters/")):
+                got = _unhighlight_part(data)
+                if got is not None:
+                    data = got
+                    n += 1
+            zout.writestr(item, data)
+    if n:
+        path.write_bytes(buf.getvalue())
+    return n
+
+
+def mark_russian(pptx: Path | str) -> int:
+    """Russian runs of a finished deck (in place) tagged `lang="ru-RU"`: a run keeps the language of the template's
+    sample it was written into («en-US» in most free templates), and PowerPoint underlines every Russian word of such
+    a run as misspelled. Returns the number of parts changed."""
+    path = Path(pptx)
+    buf = io.BytesIO()
+    n = 0
+    with zipfile.ZipFile(path) as zin, zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zout:
+        for item in zin.infolist():
+            data = zin.read(item.filename)
+            name = item.filename
+            if name.endswith(".xml") and (name.startswith("ppt/slides/slide") or name.startswith("ppt/notesSlides/")):
+                got = _mark_part(data)
+                if got is not None:
+                    data = got
+                    n += 1
+            zout.writestr(item, data)
+    if n:
+        path.write_bytes(buf.getvalue())
+    return n
 
 
 def apply_to_pptx(pptx: Path | str, subs: dict[str, str]) -> int:

@@ -1777,6 +1777,50 @@ def _turned_box(el: etree._Element, box: Bbox) -> Bbox:
     return Bbox(x=box.x + box.w // 2 - w // 2, y=box.y + box.h // 2 - h // 2, w=w, h=h)
 
 
+VEIL_ALPHA = 0.35  # a see-through solid shape up to this opacity is a veil over the ground (the audit's SOLID_VEIL_ALPHA)
+
+
+def _veil(el: etree._Element) -> bool:
+    """A see-through shape without text or outline — a white bubble at 20–30 % over the ground of LibreOffice «Lights»:
+    decoration a heading may run over, as the template's own heading does (the ground shows through)."""
+    if etree.QName(el).localname != "sp" or shape_text(el).strip():
+        return False
+    sppr = el.find(q("p:spPr"))
+    if sppr is None:
+        return False
+    ln = sppr.find(q("a:ln"))
+    if ln is not None and ln.find(q("a:noFill")) is None and (ln.find(q("a:solidFill")) is not None or ln.find(q("a:gradFill")) is not None):
+        return False
+    sf = sppr.find(q("a:solidFill"))
+    if sf is None or not len(sf) or sppr.find(q("a:gradFill")) is not None or sppr.find(q("a:blipFill")) is not None:
+        return False
+    a = sf[0].find(q("a:alpha"))
+    try:
+        return a is not None and int(a.get("val") or 100000) / 100000.0 < VEIL_ALPHA
+    except ValueError:
+        return False
+
+
+def _veil_boxes(ctx: _SlideCtx) -> list[Bbox]:
+    """The boxes of the see-through shapes (`_veil`) the slide, its layout and its master draw."""
+    out: list[Bbox] = []
+    holders = [ctx.slide]
+    try:
+        holders += [ctx.slide.slide_layout, ctx.slide.slide_layout.slide_master]
+    except Exception:  # noqa: BLE001
+        pass
+    for h in holders:
+        tree = h._element.find(q("p:cSld") + "/" + q("p:spTree"))
+        if tree is None:
+            continue
+        for el in tree:
+            if etree.QName(el).localname == "sp" and _veil(el):
+                b = element_bbox(el)
+                if b and b[2] > 0 and b[3] > 0:
+                    out.append(Bbox(x=b[0], y=b[1], w=b[2], h=b[3]))
+    return out
+
+
 def _drawn_boxes(ctx: _SlideCtx, exclude: set[int]) -> list[Bbox]:
     """Everything painted on the slide that a heading must not run under: the slide's own shapes and pictures, the
     pictures and logos of its layout and master (placeholders and slide-sized backgrounds aside), pictures measured by
@@ -1800,6 +1844,8 @@ def _drawn_boxes(ctx: _SlideCtx, exclude: set[int]) -> list[Bbox]:
             continue
         if etree.QName(el).localname == "sp" and not shape_text(el).strip() and not has_visible_style(el):
             continue
+        if _veil(el):
+            continue
         b = element_bbox(el)
         if b:
             add(el, ctx.slide.part, Bbox(x=b[0], y=b[1], w=b[2], h=b[3]))
@@ -1816,6 +1862,8 @@ def _drawn_boxes(ctx: _SlideCtx, exclude: set[int]) -> list[Bbox]:
             if _ph(el) is not None or sh.width is None:
                 continue
             if etree.QName(el).localname == "sp" and not shape_text(el).strip() and not has_visible_style(el):
+                continue
+            if _veil(el):
                 continue
             add(el, part, Bbox(x=int(sh.left or 0), y=int(sh.top or 0), w=int(sh.width or 0), h=int(sh.height or 0)))
     for c in ctx.manifest.tokens.chrome:
@@ -2598,6 +2646,28 @@ def _recolor_for_ground(ctx: _SlideCtx, el: etree._Element, color: Optional[str]
     return color
 
 
+def _lines_ink(lines: list[str], family: Optional[str], size: float, bold: bool, align: str, x: int, y: int, w: int, ins: tuple[int, int, int, int], marl: int, ls: float) -> Optional[Bbox]:
+    """The box a heading's letters cover: each line measured at its alignment inside the box, the lines stacked from
+    the top inset. None without lines."""
+    pitch = int(1.2 * ls * size * EMU_PER_PT)
+    xs: list[tuple[int, int]] = []
+    for ln in lines:
+        if not ln.strip():
+            continue
+        wi = int(text_width_pt(ln, family, size, bold) * 1.04 * EMU_PER_PT)
+        if align == "ctr":
+            c = x + ins[0] + marl + (w - ins[0] - ins[2] - marl) // 2
+            xs.append((c - wi // 2, c + wi // 2))
+        elif align == "r":
+            xs.append((x + w - ins[2] - wi, x + w - ins[2]))
+        else:
+            xs.append((x + ins[0] + marl, x + ins[0] + marl + wi))
+    if not xs:
+        return None
+    a, b = min(v[0] for v in xs), max(v[1] for v in xs)
+    return Bbox(x=a, y=y + ins[1], w=max(b - a, 1), h=max(pitch * len(lines), 1))
+
+
 def _heading_shift_on_ground(ctx: _SlideCtx, lines: list[str], family: Optional[str], size: float, bold: bool, align: str, x: int, y: int, w: int, ins: tuple[int, int, int, int], marl: int, ls: float) -> Optional[int]:
     """How far a cover heading's box must move sideways so that every line's letters lie inside the run of the
     triangle or freeform of the layout it stands on, with 1 % of the slide's width to spare, measured over that line's
@@ -3344,6 +3414,12 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
     marl = _first_line_offset(ctx, t_el)
     ls = _eff_line_spacing(ctx, t_el)
     anchor = _eff_anchor(ctx, t_el)
+    # the heading's own letter-spacing (a badge's title tracked 8 pt a letter — Office «Badge») counts in every width its
+    # lines are measured at: measured without it, «ТОЧКА КОФЕ» broke inside a word
+    try:
+        t_spc = max(int(_eff_rpr(ctx, t_el, "spc") or 0) / 100.0, 0.0)
+    except ValueError:
+        t_spc = 0.0
     safe = ctx.manifest.tokens.spacing.safe_area
     h1 = typo.size_for("h1", 0.0)
     obstacles = _drawn_boxes(ctx, exclude={id(t_el)} | ({id(s_el)} if s_el is not None else set()))
@@ -3380,6 +3456,12 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
 
     # the vertical room: under the logos above the heading, over what stands below it (pager dots, footer logos)
     col_x2 = tb.x + max(tb.w, int(0.3 * W))
+    if align == "l":
+        # a heading set from the left reaches as far as its words on one line at the target size: a mark above the far
+        # end of a wide sample box (a square in the top right corner of LibreOffice «Inspiration») does not hold a
+        # short heading down under it
+        reach = tb.x + int(text_width_pt(text, family, target, bold) * 1.05 * EMU_PER_PT) + int(0.03 * W)
+        col_x2 = min(col_x2, max(reach, tb.x + int(0.3 * W)))
     top_lim, bot_lim = int(safe.y * H), int(safe.y2 * H)
     mid = tb.y + tb.h // 2
     below: list[Bbox] = []
@@ -3429,6 +3511,19 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
     hidden = cleared + _sample_text_boxes(ctx, [title] + ([carrier] if carrier is not None else []))
     if s_box0:
         hidden.append(Bbox(x=s_box0[0], y=s_box0[1], w=s_box0[2], h=s_box0[3]))
+    # a heading printed on a band stays in the band: the band (its edges, its shadow) is the heading's ground, never art
+    # the heading must keep clear of — read off the render, the light green band under the title of LibreOffice
+    # «Inspiration» pushed the heading down across its lower edge and cut its width to a fifth of the slide
+    try:
+        from verstka.rendering.layers import heading_band
+
+        hb = heading_band(ctx.slide, tb)
+    except Exception:  # noqa: BLE001 - layers are advice
+        hb = None
+    if hb is not None:
+        pad = int(0.01 * H)
+        hidden.append(Bbox(x=hb.box.x - pad, y=hb.box.y - pad, w=hb.box.w + 2 * pad, h=hb.box.h + 2 * pad))
+    hidden.extend(_veil_boxes(ctx))  # see-through bubbles the heading may run over, as the template's own heading does
     art = _art_edge(ctx, band, tb.x + int(0.12 * W), hidden, designed_to=tb.x2)
     if art is not None and kind == PatternKind.title and art - int(0.02 * W) - tb.x < 0.6 * tb.w:
         # the art over the whole band the heading might grow into cuts the sample's own heading box (a triangle
@@ -3466,7 +3561,7 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
             w_max = w_ctr
             col_x0 = c_mid - w_max // 2
     top_lim_col = top_lim  # the room above without the art a line as wide as `w_max` would meet
-    above = _art_above(ctx, col_x0, col_x0 + w_max, tb.y + min(tb.h // 2, int(0.08 * H)), hidden)
+    above = None if hb is not None else _art_above(ctx, col_x0, col_x0 + w_max, tb.y + min(tb.h // 2, int(0.08 * H)), hidden)
     if above is not None:
         top_lim = max(top_lim, above + int(max(0.05 * H, 0.6 * target * EMU_PER_PT)))
     t_ins = _body_insets(t_el)
@@ -3483,15 +3578,15 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
         return max(0.2, min(0.45, typo.size_for("h1", 0.45 * ref) / ref))
 
     def fit_lines(txt: str, n: int, ref: float) -> tuple[float, int, int]:
-        s1, n1 = display_fit(txt, family, ref, bold, inner(w_sample), n, ctx.grow_scale, floor=floor_of(ref), word_room=word_room)
+        s1, n1 = display_fit(txt, family, ref, bold, inner(w_sample), n, ctx.grow_scale, floor=floor_of(ref), word_room=word_room, spc_pt=t_spc)
         if s1 >= 0.85 * ref - 0.05 or w_max <= w_sample:
             return s1, n1, w_sample
-        s2, n2 = display_fit(txt, family, ref, bold, inner(w_max), n, ctx.grow_scale, floor=floor_of(ref), word_room=word_room)
+        s2, n2 = display_fit(txt, family, ref, bold, inner(w_max), n, ctx.grow_scale, floor=floor_of(ref), word_room=word_room, spc_pt=t_spc)
         return (s2, n2, w_max) if s2 > s1 else (s1, n1, w_sample)
 
     def breaks(txt: str, sz: float, w: int, n_min: int = 1) -> list[str]:
-        n = max(len(display_lines(txt, family, sz, bold, inner(w))), n_min)
-        return (balanced_lines(txt, family, sz, bold, inner(w), n) if n > 1 else None) or display_lines(txt, family, sz, bold, inner(w))
+        n = max(len(display_lines(txt, family, sz, bold, inner(w), spc_pt=t_spc)), n_min)
+        return (balanced_lines(txt, family, sz, bold, inner(w), n, spc_pt=t_spc) if n > 1 else None) or display_lines(txt, family, sz, bold, inner(w), spc_pt=t_spc)
 
     def clean(txt: str, got: tuple[float, int, int]) -> tuple[float, int, int]:
         """A heading torn between an adjective and its noun («Умные / напоминания») is set a step smaller on fewer
@@ -3561,13 +3656,13 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
             n_max = 1
             for h in heads_of(PatternKind.section) or [text]:
                 m = h.upper() if caps else h
-                n_s = len(display_lines(m, family, shared, bold, inner(w_sample)))
+                n_s = len(display_lines(m, family, shared, bold, inner(w_sample), spc_pt=t_spc))
                 if n_s > max_lines:
-                    n_s = len(display_lines(m, family, shared, bold, inner(w_max)))
+                    n_s = len(display_lines(m, family, shared, bold, inner(w_max), spc_pt=t_spc))
                 n_max = max(n_max, n_s)
             st.divider_size, st.divider_pattern, st.divider_lines = shared, ctx.pattern.id, n_max
         size = min(size, st.divider_size) if st.divider_pattern == ctx.pattern.id else size
-        if len(display_lines(measured, family, size, bold, inner(w_sample))) <= max_lines:
+        if len(display_lines(measured, family, size, bold, inner(w_sample), spc_pt=t_spc)) <= max_lines:
             w_used = w_sample
         else:
             w_used = max(w_used, w_max)
@@ -3620,10 +3715,10 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
     sub_size = g_size = 0.0
     split: list[str] = []
     for _ in range(14):
-        n = len(display_lines(measured, family, size, bold, inner(w_used)))
+        n = len(display_lines(measured, family, size, bold, inner(w_used), spc_pt=t_spc))
         if n < min_lines:
             n = min_lines
-        split = (balanced_lines(measured, family, size, bold, inner(w_used), n) if n > 1 else None) or display_lines(measured, family, size, bold, inner(w_used))
+        split = (balanced_lines(measured, family, size, bold, inner(w_used), n, spc_pt=t_spc) if n > 1 else None) or display_lines(measured, family, size, bold, inner(w_used), spc_pt=t_spc)
         lines = len(split)
         h_title = int((lines * 1.2 * ls + 0.15) * size * EMU_PER_PT) + t_ins[1] + t_ins[3]
         if sub_text:
@@ -3688,8 +3783,8 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
         dx = _heading_shift_on_ground(ctx, split, family, size, bold, align, x, y, w_used, t_ins, marl, ls)
         if dx is None:
             for smaller in sorted((s_ for s_ in snap_sizes if 0.8 * size - 0.05 <= s_ < size - 0.05), reverse=True)[:3]:
-                n_s = max(len(display_lines(measured, family, smaller, bold, inner(w_used))), min_lines)
-                split_s = (balanced_lines(measured, family, smaller, bold, inner(w_used), n_s) if n_s > 1 else None) or display_lines(measured, family, smaller, bold, inner(w_used))
+                n_s = max(len(display_lines(measured, family, smaller, bold, inner(w_used), spc_pt=t_spc)), min_lines)
+                split_s = (balanced_lines(measured, family, smaller, bold, inner(w_used), n_s, spc_pt=t_spc) if n_s > 1 else None) or display_lines(measured, family, smaller, bold, inner(w_used), spc_pt=t_spc)
                 dx_s = _heading_shift_on_ground(ctx, split_s, family, smaller, bold, align, x, y, w_used, t_ins, marl, ls)
                 if dx_s is not None:
                     ctx.warnings.append(f"заголовок обложки набран {smaller:g} пт вместо {size:g}: строки не помещались на своей части рисунка шаблона")
@@ -3703,14 +3798,18 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
     _write_lines(t_el, _split_like(text, split))
     _set_paragraph_box(t_el, marl, align, caps=caps, bold=bold, line_spacing=ls)
     t_color = title.style.color_hex
-    if t_color and ground and contrast_ratio(t_color, ground) < 2.5 and not _mixed_ground(ctx, Bbox(x=x, y=y, w=w_used, h=h_title)):
+    # judged where the letters stand: a title box wider than the band it is printed on (a light green band of half the
+    # width under a short white title — LibreOffice «Inspiration») straddles the band's end, the letters do not
+    ink = _lines_ink(split, family, size, bold, align, x, y, w_used, t_ins, marl, ls) or Bbox(x=x, y=y, w=w_used, h=h_title)
+    g_ink = _ground_hex(ctx, ink) or ground
+    if t_color and g_ink and contrast_ratio(t_color, g_ink) < 2.5 and not _mixed_ground(ctx, ink):
         # the sample's heading colour is unreadable on the ground it stands on here (white on a light teal band): a
         # colour of the template that reads on it — the heading's own colour is kept from 2.5:1 up, as the template's
         # design
-        better = _readable_on(ground, [sub_color, own_sub], ctx.manifest)
-        if better and contrast_ratio(better, ground) >= 3.0:
+        better = _readable_on(g_ink, [sub_color, own_sub], ctx.manifest)
+        if better and contrast_ratio(better, g_ink) >= 3.0:
             style_runs(t_el, None, better, align=None)
-            ctx.warnings.append(f"цвет заголовка #{t_color} на #{ground} ({contrast_ratio(t_color, ground):.1f}:1) заменён на #{better}")
+            ctx.warnings.append(f"цвет заголовка #{t_color} на #{g_ink} ({contrast_ratio(t_color, g_ink):.1f}:1) заменён на #{better}")
     _no_autofit(t_el, "t")
     set_element_pos(t_el, x=x, y=y, w=w_used, h=h_title)
     ctx.filled.add(title.shape_id)

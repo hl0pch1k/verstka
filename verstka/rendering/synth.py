@@ -225,6 +225,16 @@ def _paints(el) -> bool:
     return ref is not None and (ref.get("idx") or "0") != "0"
 
 
+def _veil(el) -> bool:
+    """A see-through solid shape without an outline (a white bubble at 20–30 %): the ground shows through it."""
+    from verstka.rendering.clone import _veil as veil
+
+    try:
+        return veil(el)
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _cover_art_ids(els: dict, title_box: Optional[tuple], W: int, H: int) -> set[str]:
     """The pictures of a cover sample that are its design, not its content: a photo or an illustration of at least 3 %
     of the slide that stands clear of the title (a photo beside a title card — the template's own cover), never an
@@ -679,6 +689,8 @@ def _clean_layout(builder: DeckBuilder, manifest: TemplateManifest):
         title = next((ph for ph in layout.placeholders if str(ph.placeholder_format.type).split(".")[-1].split(" ")[0] in ("TITLE",)), None)
         if title is None or title.top is None or title.height is None:
             continue
+        if int(title.top) > 0.2 * H:
+            continue  # a cover's or a divider's layout (its title stands mid-slide) is no content page
         try:
             y0 = max(int(safe.y * H), int(title.top) + int(title.height) + int(0.04 * H))
             band = Bbox(x=int(safe.x * W), y=y0, w=int(safe.w * W), h=max(int(safe.y2 * H) - y0, 1))
@@ -1320,6 +1332,11 @@ def _render_content(builder: DeckBuilder, comp: str, oslide: OutlineSlide, manif
             if _content_bottom_limit(slide, sy + sh, W, H) - below >= int(0.30 * H):
                 break
         warnings.append("heading set smaller to leave room for the content")
+    if title_ph is not None:
+        turned = _keep_turned_heading(title_ph, manifest, W, H, warnings)
+        if turned is not None and turned > heading_bottom:
+            heading_bottom = turned
+            below = _content_top(slide, heading_bottom, h1, W, H)
     if lede_used:
         oslide = _without_lede(oslide)
     page_left = sx
@@ -1384,8 +1401,128 @@ def _render_content(builder: DeckBuilder, comp: str, oslide: OutlineSlide, manif
             composer._draw_notes(n0)
     if comp:
         composer.compose(comp, area)
+    _ink_pass(slide, composer.cv.added, pal, manifest, warnings)
     warnings.extend(composer.warnings)
     return slide, warnings
+
+
+def _inks(pal: "_Palette", manifest: TemplateManifest) -> list[str]:
+    """The template's own text colours for a ground they were not chosen for, in order: the palette's text colours,
+    the template's text colour, its dark and its light ground (a navy heading on the light top of a navy template
+    reads as the template's; plain black does not) — black and white last."""
+    t = manifest.tokens
+    out = [c for c in (pal.text, pal.text2, t.color_for("text.primary"), t.color_for("background.dark"), t.color_for("background.light")) if c]
+    return list(dict.fromkeys(out + ["000000", "FFFFFF"]))
+
+
+UNREADABLE = 2.0  # under this contrast a text is not read at all (the audit's error line on a picture or a gradient)
+
+
+def unreadable_text_pass(slide: Slide, manifest: TemplateManifest) -> int:
+    """The last guard of every slide, cloned or composed: a text whose colour all but vanishes into what lies under it
+    (under 2:1 — grey type on the grey frame past the edge of a white page, white on a light band) takes a colour of
+    the template that reads there: its text colours, its dark and light grounds, then black or white. Only colours
+    written on the runs are judged. Returns the number of runs recoloured."""
+    from verstka.rendering.charts import slide_ground
+
+    t = manifest.tokens
+    inks = list(dict.fromkeys([c for c in (t.color_for("text.primary"), t.color_for("text.secondary"), t.color_for("background.dark"), t.color_for("background.light")) if c] + ["000000", "FFFFFF"]))
+    fixed = 0
+    tree = slide._element.cSld.find(q("p:spTree"))
+    for el in list(tree):
+        if etree.QName(el).localname != "sp":
+            continue
+        runs = [r for r in el.iter(q("a:r")) if (r.findtext(q("a:t")) or "").strip()]
+        b = element_bbox(el) if runs else None
+        if not b or b[2] <= 0 or b[3] <= 0:
+            continue
+        try:
+            g = slide_ground(slide, Bbox(x=b[0], y=b[1], w=b[2], h=b[3]))
+        except Exception:  # noqa: BLE001
+            g = None
+        if not g or len(g) != 6:
+            continue
+        for r in runs:
+            rpr = r.find(q("a:rPr"))
+            clr = rpr.find(q("a:solidFill") + "/" + q("a:srgbClr")) if rpr is not None else None
+            if clr is None or not clr.get("val") or contrast_ratio(clr.get("val"), g) >= UNREADABLE:
+                continue
+            clr.set("val", next((c for c in inks if contrast_ratio(c, g) >= 4.5), max(inks, key=lambda c: contrast_ratio(c, g))))
+            fixed += 1
+    return fixed
+
+
+def _ink_pass(slide: Slide, added: list, pal: "_Palette", manifest: TemplateManifest, warnings: list[str]) -> None:
+    """Text the composer set in the palette's colours for the area's ground, standing where the ground is another (a
+    background running from light at the top to navy at the bottom — Office «Circuit»: a legend in the light top half
+    was set white for the dark half): such a text takes a colour that reads on what lies under it — the template's
+    own inks first (`_inks`). Text on a card or a badge of its own keeps its colours (the card is its ground); text
+    whose ground is the one the palette was chosen for is never touched."""
+    from verstka.rendering.charts import delta_e, slide_ground
+
+    inks = _inks(pal, manifest)
+    changed = 0
+    for el in added:
+        if etree.QName(el).localname != "sp" or el.find(q("p:txBody")) is None or _paints(el):
+            continue
+        runs = [r for r in el.iter(q("a:r")) if (r.findtext(q("a:t")) or "").strip()]
+        b = element_bbox(el) if runs else None
+        if not b or b[2] <= 0 or b[3] <= 0:
+            continue
+        try:
+            g = slide_ground(slide, Bbox(x=b[0], y=b[1], w=b[2], h=b[3]))
+        except Exception:  # noqa: BLE001
+            g = None
+        if not g or len(g) != 6:
+            continue
+        # on the ground the palette was chosen for only what fails outright (under 3:1: an orange figure on the orange
+        # gradient of Office «Berlin») — its deliberate choices stand; elsewhere the full line
+        own = delta_e(g, pal.bg) <= 10
+        for r in runs:
+            rpr = r.find(q("a:rPr"))
+            clr = rpr.find(q("a:solidFill") + "/" + q("a:srgbClr")) if rpr is not None else None
+            if clr is None or not clr.get("val"):
+                continue
+            size = int(rpr.get("sz") or 1800) / 100.0
+            need = 3.0 if own or size >= 18 or (rpr.get("b") in ("1", "true") and size >= 14) else 4.5
+            if contrast_ratio(clr.get("val"), g) >= need:
+                continue
+            clr.set("val", next((c for c in inks if contrast_ratio(c, g) >= need), max(inks, key=lambda c: contrast_ratio(c, g))))
+            changed += 1
+    if changed:
+        warnings.append(f"{changed} text run(s) recoloured for the ground under them")
+
+
+def _keep_turned_heading(title_ph, manifest: TemplateManifest, W: int, H: int, warnings: list[str]) -> Optional[int]:
+    """A heading turned with its band (LibreOffice «Progress»: titles tilted 8° along a diagonal band): its box narrows
+    to its letters and moves in until its turned corners stand on the slide — a turned box as wide as the slide lifted
+    the end of a long heading over the top edge. Returns the lowest point the turned heading reaches; None when the
+    heading is not turned."""
+    try:
+        rot = float(title_ph.rotation or 0.0)
+    except Exception:  # noqa: BLE001
+        return None
+    a = ((rot + 180.0) % 360.0) - 180.0
+    if abs(a) < 1.5 or None in (title_ph.left, title_ph.top, title_ph.width, title_ph.height):
+        return None
+    box = Bbox(x=int(title_ph.left), y=int(title_ph.top), w=int(title_ph.width), h=int(title_ph.height))
+    insets = _heading_insets(title_ph)
+    ink = _heading_ink(title_ph, box, manifest)
+    x, w = box.x, box.w
+    need = ink.w + insets[0] + insets[2] + int(0.01 * W)
+    if need < w:
+        x, w = max(ink.x - insets[0], box.x), need
+    t = math.radians(a)
+    cx, cy = x + w / 2.0, box.y + box.h / 2.0
+    pts = [(cx + dx * math.cos(t) - dy * math.sin(t), cy + dx * math.sin(t) + dy * math.cos(t)) for dx in (-w / 2.0, w / 2.0) for dy in (-box.h / 2.0, box.h / 2.0)]
+    xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+    mx, my = 0.02 * W, 0.02 * H
+    dx = (mx - min(xs)) if min(xs) < mx else ((W - mx) - max(xs) if max(xs) > W - mx else 0.0)
+    dy = (my - min(ys)) if min(ys) < my else ((H - my) - max(ys) if max(ys) > H - my else 0.0)
+    title_ph.left, title_ph.top, title_ph.width = Emu(int(x + dx)), Emu(int(box.y + dy)), Emu(int(w))
+    if dx or dy or w != box.w:
+        warnings.append("turned heading narrowed to its letters and kept on the slide")
+    return int(max(ys) + dy)
 
 
 def _set_size(title_ph, default: float) -> float:
@@ -1935,7 +2072,13 @@ def _place_plain_heading(builder, slide, title_ph, box: Bbox, oslide, manifest, 
     band = _heading_band(slide, box, W, H)
     if band is not None:
         # a heading printed on a band of the layout keeps inside the band: it takes the band's whole free width and
-        # steps down the scale (to 55 %) before it spills out of the band
+        # steps down the scale (to 55 %) before it spills out of the band — out of its end too: a short tab at the
+        # left edge (LibreOffice «Freshes»: a teal tab of a third of the width under white type) holds the heading's
+        # letters only as far as it reaches; past its end they would stand white on the white page
+        wide = box
+        bx, bx2 = max(box.x, band.x), min(box.x2, band.x2 - int(0.01 * W))
+        if bx2 < box.x2 - int(0.01 * W) and bx2 - bx >= int(0.15 * W):
+            box = Bbox(x=bx, y=box.y, w=bx2 - bx, h=box.h)
         inner_h = band.y2 - box.y - int(0.004 * H)
         fitted = fit_size([head_text], Bbox(x=box.x, y=box.y, w=box.w, h=max(inner_h, 1)), title_font, h1, title_bold, scale, insets_emu=insets, line_spacing=lh, min_ratio=0.55, ladder_only=sparse) if inner_h > 0 else None
         if fitted is not None and fitted.fits:
@@ -1945,8 +2088,11 @@ def _place_plain_heading(builder, slide, title_ph, box: Bbox, oslide, manifest, 
             _set_box(title_ph, Bbox(x=box.x, y=box.y, w=box.w, h=h_box))
             _check_heading_color(slide, title_ph, canvas, band, pal, manifest)
             return max(band.y2, box.y + h_box), _heading_left(title_ph, box, insets), False
-        # the headline does not fit the band at any readable size: it is set under the band, on the slide's ground
-        box = Bbox(x=box.x, y=band.y2 + int(0.02 * H), w=box.w, h=int(0.16 * H))
+        # the headline does not fit the band at any readable size: it is set under the band, on the slide's ground —
+        # from the page's margin across the free width (a tab at the slide's edge is no column)
+        ux = max(wide.x, safe_x)
+        box = Bbox(x=ux, y=band.y2 + int(0.02 * H), w=max(wide.x2 - ux, int(0.3 * W)), h=int(0.16 * H))
+        w_full = max(w_full, box.w)
         color = _heading_on(pal.bg, manifest, pal)
         warnings.append("heading set under its band")
     n = len(wrap_lines(head_text, title_font, h1, title_bold, inner(box.w)))
@@ -2291,6 +2437,12 @@ def _check_heading_color(slide: Slide, title_ph, canvas: Optional[Pattern], band
     t = _top_title(canvas) if canvas is not None else None
     col = t.style.color_hex if t is not None else None
     if not col:
+        # no sample heading to learn the colour from (a template whose slides are empty, a slide without a canvas):
+        # the colour the heading inherits from its layout and master
+        from verstka.rendering.textfill import inherited_color
+
+        col = inherited_color(title_ph)
+    if not col:
         return
     try:
         from verstka.rendering.charts import slide_ground
@@ -2302,7 +2454,7 @@ def _check_heading_color(slide: Slide, title_ph, canvas: Optional[Pattern], band
         ground = None
     if not ground or contrast_ratio(col, ground) >= 3.0:
         return
-    new = _readable(ground, [col, pal.text, manifest.tokens.color_for("text.primary")])
+    new = _readable(ground, [col] + _inks(pal, manifest))
     for r in title_ph._element.iter(q("a:rPr")):
         for old in [c for c in r if etree.QName(c).localname in ("solidFill", "gradFill", "noFill", "pattFill", "blipFill", "grpFill")]:
             r.remove(old)
@@ -2331,6 +2483,8 @@ def _left_clear(slide: Slide, box: Bbox, W: int, H: int, skip: tuple = ()) -> in
         has_text = bool("".join(t.text or "" for t in el.iter(q("a:t"))).strip())
         if plate and not has_text:
             continue
+        if not has_text and _veil(el):
+            continue  # a see-through bubble (LibreOffice «Lights») is no mark the heading must clear
         b = element_bbox(el)
         if not b or b[2] * b[3] >= 0.25 * W * H or b[2] <= 0 or b[3] <= 0:
             continue

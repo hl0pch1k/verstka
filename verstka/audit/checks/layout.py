@@ -6,7 +6,7 @@ import re
 from typing import Optional
 
 from verstka.audit.checks.template import is_figure
-from verstka.audit.checks.common import CONTENT_TYPES, at_template_position, contains, fix, is_chrome_like, is_template_chrome, ru_count, ru_times, text_elements, text_height_needed_pt, title_element, usable_height_pt
+from verstka.audit.checks.common import CONTENT_TYPES, at_template_position, contains, fill_alpha, fix, is_chrome_like, is_template_chrome, ru_count, ru_times, text_elements, text_height_needed_pt, title_element, usable_height_pt
 from verstka.audit.registry import AuditContext, check
 from verstka.rendering.fonts import text_width_pt
 from verstka.schemas.audit import CheckSpec, Issue
@@ -183,6 +183,8 @@ def text_overflow(ctx: AuditContext) -> list[Issue]:
         for e in text_elements(s):
             if e.bbox.h <= 0 or e.ph_type in ("sldNum", "dt"):
                 continue  # the template's own slide-number and date fields keep the template's own boxes
+            if is_template_chrome(e, ctx.manifest):
+                continue  # the template's own menu row or footer keeps the template's own boxes (a spAutoFit label grows)
             need, lines = text_height_needed_pt(e, spacing)
             have = usable_height_pt(e)
             if have <= 0:
@@ -398,6 +400,7 @@ def _inside_poly(px: float, py: float, poly) -> bool:
 
 
 VEIL_ALPHA = 0.25  # a layer nowhere more opaque than this is a glow or a veil over the ground, not art
+SOLID_VEIL_ALPHA = 0.35  # a see-through solid shape up to this opacity is a veil too (white bubbles at 20–30 % over LibreOffice «Lights»)
 CELL_ALPHA = 0.5  # a picture cell paints when at least half of it is opaque …
 CELL_STD = 18.0  # … and it is textured (luminance stdev) …
 CELL_CONTRAST = 1.3  # … or differs from the slide's ground
@@ -450,7 +453,7 @@ def _is_art(o, W: int, H: int, ground: Optional[str] = None) -> bool:
     if not (o.fill_hex or o.line_hex or o.type == "picture"):
         return False
     if o.type != "picture" and not o.line_hex and o.fill_hex and ground and (o.paint_kind or "solid") == "solid":
-        from verstka.audit.checks.common import composite_hex, fill_alpha
+        from verstka.audit.checks.common import composite_hex
 
         try:
             seen = composite_hex(o.fill_hex, fill_alpha(o), ground)
@@ -464,6 +467,8 @@ def _is_art(o, W: int, H: int, ground: Optional[str] = None) -> bool:
         return False
     if o.cells is not None and o.cells.alpha and max(o.cells.alpha) < VEIL_ALPHA and not o.line_hex:
         return False  # a glow or a veil (a gradient at 7 %, a PNG glow at 14 % — Office's «Ion»): the ground shows through
+    if o.cells is None and o.fill_hex and fill_alpha(o) < SOLID_VEIL_ALPHA and not o.line_hex:
+        return False  # a see-through solid shape (a bubble at 30 %): a veil as well
 
     f = o.bbox_frac
     cover = max(0.0, min(f.x2, 1.0) - max(f.x, 0.0)) * max(0.0, min(f.y2, 1.0) - max(f.y, 0.0))

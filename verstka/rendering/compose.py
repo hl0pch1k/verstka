@@ -53,6 +53,7 @@ class Para:
     space_after: float = 0.0  # pt
     marker: Optional[str] = None  # bullet character
     marker_color: Optional[str] = None
+    spacing: Optional[float] = None  # the paragraph's own line spacing (1.0 = single); None: the template's
 
     @property
     def text(self) -> str:
@@ -73,10 +74,15 @@ def para_lines(p: Para, width_pt: float) -> int:
     return max(len(wrap_lines(p.text, font, p.size, p.bold, max(width_pt - indent, 1.0))), 1)
 
 
+def spacing_line(spacing: float) -> float:
+    """The height of a line in em at a paragraph's line spacing (a single-spaced line is 1.2 em)."""
+    return round(spacing * 1.2, 3)
+
+
 def block_height_pt(paras: list[Para], width_pt: float, line: float) -> float:
     h = 0.0
     for i, p in enumerate(paras):
-        h += para_lines(p, width_pt) * p.size * line
+        h += para_lines(p, width_pt) * p.size * (line if p.spacing is None else spacing_line(p.spacing))
         if i < len(paras) - 1:
             h += p.space_after
     return h
@@ -445,7 +451,7 @@ class Canvas:
             pPr = etree.SubElement(p, q("a:pPr"))
             pPr.set("algn", para.align)
             ln = etree.SubElement(pPr, q("a:lnSpc"))
-            etree.SubElement(ln, q("a:spcPct")).set("val", str(int(round(self.spacing_pct * 100000))))
+            etree.SubElement(ln, q("a:spcPct")).set("val", str(int(round((self.spacing_pct if para.spacing is None else para.spacing) * 100000))))
             if para.space_after:
                 sa = etree.SubElement(pPr, q("a:spcAft"))
                 etree.SubElement(sa, q("a:spcPts")).set("val", str(int(round(para.space_after * 100))))
@@ -799,9 +805,18 @@ class Composer:
     def h(self, paras: list[Para], width_emu: int) -> int:
         return _emu(block_height_pt(paras, _pt(width_emu), self.kit.line)) + _emu(2)
 
-    def P(self, text: str, size: float, color: str, bold: bool = False, align: str = "l", space_after: float = 0.0, marker: Optional[str] = None, marker_color: Optional[str] = None) -> Para:
+    def P(self, text: str, size: float, color: str, bold: bool = False, align: str = "l", space_after: float = 0.0, marker: Optional[str] = None, marker_color: Optional[str] = None, spacing: Optional[float] = None) -> Para:
         # the run names the template font: measuring and rendering see the same face (Montserrat is 20% wider than Play)
-        return Para([Run(typeset(text), size, color, bold, self.kit.font)], align=align, space_after=space_after, marker=marker, marker_color=marker_color)
+        return Para([Run(typeset(text), size, color, bold, self.kit.font)], align=align, space_after=space_after, marker=marker, marker_color=marker_color, spacing=spacing)
+
+    LABEL_SPACING = 1.1  # labels in a list (a legend's rows) are set at most this loose
+
+    def label_spacing(self) -> Optional[float]:
+        """The line spacing of a legend's rows: the template's, at most 110 % — a template's loose leading (130–140 %
+        in free Google Slides / Canva templates) is for running text; a legend set that loose ran past its box and
+        left its pie a dot. None when the template's own spacing is already that tight."""
+        sp = self.kit.spacing_pct
+        return self.LABEL_SPACING if sp > self.LABEL_SPACING + 1e-6 else None
 
     WORD_ROOM = 0.95  # a word may fill this much of its column: the renderer sets it a little wider than measured
 
@@ -3741,7 +3756,15 @@ class Composer:
 
             def after() -> None:
                 x = area.x + area.w - text_w
-                paras = [self.P(t, k.body if len(t) > 90 else k.lead, k.colors.text, space_after=k.body * 0.7, marker="•" if len(side_texts) > 1 else None, marker_color=k.colors.accent) for t in side_texts]
+                # the largest size at which the column holds its lines above the conclusion: the lead size for short
+                # lines, then the body and the small size (Office «Ion»: three lines at 24 pt ran under the conclusion)
+                paras = []
+                for sizes in ([k.body if len(t) > 90 else k.lead for t in side_texts], [k.body] * len(side_texts), [k.small] * len(side_texts)):
+                    paras = [self.P(t, sz, k.colors.text, space_after=k.body * 0.7, marker="•" if len(side_texts) > 1 else None, marker_color=k.colors.accent) for t, sz in zip(side_texts, sizes)]
+                    if self.h(paras, text_w) <= area.h:
+                        break
+                else:
+                    self.warnings.append("the side column does not fit above the conclusion at the small size")
                 hh = min(self.h(paras, text_w), area.h)
                 self.cv.line(x - gap // 2, area.y, x - gap // 2, area.y + hh, k.colors.divider, 1.0)
                 self.cv.text(Bbox(x=x, y=area.y, w=text_w, h=hh), paras, name="Chart note")
@@ -3907,7 +3930,7 @@ class Composer:
             if pie:
                 self._pie(cbox, plain, center=center, head=legend_head)
             else:
-                gf = add_chart(self.slide, cbox, plain, self.outline, self._chart_style(), k.manifest.tokens.typography, text_hex=k.colors.text, neutral_hex=k.colors.divider, ground_hex=k.colors.ground)
+                gf = add_chart(self.slide, cbox, plain, self.outline, self._chart_style(), k.manifest.tokens.typography, text_hex=k.colors.text, neutral_hex=k.colors.divider, ground_hex=self._ground_under(cbox, k.colors.ground))
                 self._turned = bool(getattr(self, "_turned", False) or getattr(gf, "verstka_turned", False))
                 from verstka.rendering.charts import chart_plot_bbox
 
@@ -3982,6 +4005,7 @@ class Composer:
         big = max(rows, key=lambda j: vals[j])
 
         stack = False  # the amount · share line under each name (a narrow legend keeps the brief's amounts)
+        ls = self.label_spacing()  # the rows set solid whatever the template's leading
 
         def legend(size: float, name_cap: int, cols: int = 1) -> dict:
             sw = _emu(size * 0.72)
@@ -3993,12 +4017,12 @@ class Composer:
             name_w = max(min(name_nat, name_cap), _emu(size * 5), pct_nat if stack else 0)
             row_gap = _emu(size * 0.5)
             col_gap = _emu(size * 1.6)
-            hs = [self.h([self.P(cats[j], size, colors.text)] + ([self.P(pct[j], size, colors.text, bold=k.figure_bold)] if stack else []), name_w) for j in rows]
+            hs = [self.h([self.P(cats[j], size, colors.text, spacing=ls)] + ([self.P(pct[j], size, colors.text, bold=k.figure_bold, spacing=ls)] if stack else []), name_w) for j in rows]
             per = math.ceil(len(rows) / cols)
             chunks = [list(range(c_ * per, min((c_ + 1) * per, len(rows)))) for c_ in range(cols)]
             col_w = sw + int(sw * 0.8) + name_w + pct_w
             w = cols * col_w + (cols - 1) * col_gap
-            head_paras = [self.P(line_, size, colors.muted) for line_ in head.split("\n")] if head else []
+            head_paras = [self.P(line_, size, colors.muted, spacing=ls) for line_ in head.split("\n")] if head else []
             head_h = self.h(head_paras, w) + _emu(size * 0.7) if head else 0
             body_h = max(sum(hs[i] for i in ch) + row_gap * (len(ch) - 1) for ch in chunks if ch)
             return dict(size=size, sw=sw, pct_w=pct_w, name_w=name_w, row_gap=row_gap, hs=hs, w=w, col_w=col_w, col_gap=col_gap,
@@ -4179,7 +4203,8 @@ class Composer:
         # the compact variant mirrors a lone pie as it mirrors its chart slides: the legend (the text) at the left
         mirror = bool(getattr(self, "_pie_mirror", False)) and not below
         cx = x0 + lg["w"] + gap * 2 if mirror else x0
-        gf = add_chart(self.slide, Bbox(x=cx, y=box.y, w=d, h=d), spec, self.outline, self._chart_style(), k.manifest.tokens.typography, text_hex=colors.text, neutral_hex=colors.divider, ground_hex=colors.ground, legend=False, amounts=amounts)
+        chart_ground = self._ground_under(Bbox(x=cx, y=box.y, w=d, h=d), colors.ground)
+        gf = add_chart(self.slide, Bbox(x=cx, y=box.y, w=d, h=d), spec, self.outline, self._chart_style(), k.manifest.tokens.typography, text_hex=colors.text, neutral_hex=colors.divider, ground_hex=chart_ground, legend=False, amounts=amounts)
         if amounts:
             self._doughnut_total(gf, spec, total, unit_txt)
         shades = list(getattr(gf, "verstka_shades", None) or []) or [(colors.accent, 1.0)] * len(cats)
@@ -4189,11 +4214,20 @@ class Composer:
             lx, ly = x0, box.y + max(0, (d - lg["h"]) // 2)
         else:
             lx, ly = x0 + d + gap * 2, box.y + max(0, (d - lg["h"]) // 2)
+        # a tint drawn as the base colour at its opacity matches its slice only over the slice's own ground: a legend
+        # standing on another part of a gradient takes the slices' exact colours
+        exact = list(getattr(gf, "verstka_colors", None) or [])
+        from verstka.rendering.charts import delta_e
+
+        lg_ground = self._ground_under(Bbox(x=lx, y=ly, w=max(lg["w"], 1), h=max(lg["h"], 1)), colors.ground)
+        if len(exact) >= len(cats) and delta_e(lg_ground, chart_ground) > 3:
+            shades = [(c, 1.0) for c in exact]
         size, sw = lg["size"], lg["sw"]
         if lg["head"]:
             self.cv.text(Bbox(x=lx, y=ly, w=lg["w"], h=lg["head_h"]), lg["head"], name="Legend title")
             ly += lg["head_h"]
-        line_h = _emu(size * k.line)
+        ls = self.label_spacing()
+        line_h = _emu(size * (k.line if ls is None else spacing_line(ls)))
         for ci, chunk in enumerate(lg["chunks"]):
             y = ly
             cx = lx + ci * (lg["col_w"] + lg["col_gap"])
@@ -4205,24 +4239,36 @@ class Composer:
                 nx = cx + sw + int(sw * 0.8)
                 if lg.get("stack"):
                     # the amount · share on the line under the name: a narrow legend keeps the brief's amounts
-                    name_p = self._set_lines(cats[j], size, colors.text, lg["name_w"])
+                    name_p = self._set_lines(cats[j], size, colors.text, lg["name_w"], spacing=ls)
                     name_h = self.h(name_p, lg["name_w"]) - _emu(2)
                     self.cv.text(Bbox(x=nx, y=y, w=lg["name_w"], h=name_h + _emu(2)), name_p, name="Legend")
-                    self.cv.text(Bbox(x=nx, y=y + name_h, w=lg["name_w"], h=max(nh - name_h, line_h + _emu(2))), [self.P(pct[j], size, colors.accent_text if j == big else colors.text, bold=k.figure_bold)], name="Share")
+                    self.cv.text(Bbox(x=nx, y=y + name_h, w=lg["name_w"], h=max(nh - name_h, line_h + _emu(2))), [self.P(pct[j], size, colors.accent_text if j == big else colors.text, bold=k.figure_bold, spacing=ls)], name="Share")
                 else:
-                    self.cv.text(Bbox(x=nx, y=y, w=lg["name_w"], h=nh), self._set_lines(cats[j], size, colors.text, lg["name_w"]), name="Legend")
-                    self.cv.text(Bbox(x=nx + lg["name_w"], y=y, w=lg["pct_w"], h=line_h + _emu(2)), [self.P(pct[j], size, colors.accent_text if j == big else colors.text, bold=k.figure_bold, align="r")], name="Share")
+                    self.cv.text(Bbox(x=nx, y=y, w=lg["name_w"], h=nh), self._set_lines(cats[j], size, colors.text, lg["name_w"], spacing=ls), name="Legend")
+                    self.cv.text(Bbox(x=nx + lg["name_w"], y=y, w=lg["pct_w"], h=line_h + _emu(2)), [self.P(pct[j], size, colors.accent_text if j == big else colors.text, bold=k.figure_bold, align="r", spacing=ls)], name="Share")
                 y += nh + lg["row_gap"]
 
-    def _set_lines(self, text: str, size: float, color: str, width: int) -> list[Para]:
+    def _ground_under(self, box: Bbox, ground: str) -> str:
+        """The ground a chart really stands on: what the slide paints under its box (a gradient measured there) when it
+        is another than the one its colours were chosen for — a chart's bars and slices read against the part of a
+        gradient they stand on (Office «Berlin»: a dark orange bar on the orange gradient was all but invisible)."""
+        from verstka.rendering.charts import delta_e, slide_ground
+
+        try:
+            g = slide_ground(self.slide, box)
+        except Exception:  # noqa: BLE001
+            g = None
+        return g if g and len(g) == 6 and delta_e(g, ground) > 10 else ground
+
+    def _set_lines(self, text: str, size: float, color: str, width: int, spacing: Optional[float] = None) -> list[Para]:
         """A legend name broken into its lines where it was measured (one paragraph a line): the row's height counted
         the measured lines, and a renderer's face a little narrower than the estimate (Open Sans set in Noto Sans) no
         longer joins them into one line under a blank one (B3-4)."""
-        para = self.P(text, size, color)
+        para = self.P(text, size, color, spacing=spacing)
         lines = wrap_lines(para.text, self.kit.font, size, False, max(_pt(width), 1.0))
         if len(lines) <= 1:
             return [para]
-        return [Para([Run(line_, size, color, False, self.kit.font)], align=para.align) for line_ in lines]
+        return [Para([Run(line_, size, color, False, self.kit.font)], align=para.align, spacing=spacing) for line_ in lines]
 
     def _doughnut_total(self, gf, spec, total: float, unit: str) -> None:
         """The whole in a doughnut's hole («780 000 ₽»), when the deck states that total (its facts or a slide's text):

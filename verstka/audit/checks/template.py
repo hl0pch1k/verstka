@@ -194,8 +194,8 @@ def color_not_in_palette(ctx: AuditContext) -> list[Issue]:
     for s in ctx.ir.slides:
         seen: dict[str, list[str]] = {}
         for e in s.elements:
-            if e.type == "chart":
-                continue  # chart colours come from the palette by construction; sample charts are removed
+            if e.type == "chart" or (e.name or "").startswith("Swatch "):
+                continue  # chart colours (and a legend's swatches, which repeat them) come from the palette by construction; sample charts are removed
             if is_template_chrome(e, ctx.manifest):
                 continue
             cands = []

@@ -193,7 +193,7 @@ _LO_TWINS = {
 }
 _CLASS_RULES = (
     ("mono", re.compile(r"mono|consol|courier|menlo|monaco|\bcode\b|typewriter|fixed", re.I)),
-    ("display_condensed", re.compile(r"bebas|anton|league gothic|oswald|fjalla|teko|big shoulders|six caps|antonio", re.I)),
+    ("display_condensed", re.compile(r"bebas|anton|league gothic|oswald|fjalla|teko|big shoulders|six caps|antonio|impact|haettenschweiler", re.I)),
     ("condensed", re.compile(r"condensed|narrow|compressed|\bcond\b", re.I)),
     (
         "serif",

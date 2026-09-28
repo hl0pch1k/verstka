@@ -138,6 +138,23 @@ def _is_dark(hex_: str) -> bool:
     return relative_luminance(hex_) < 0.18
 
 
+def shade_to(hex_: str, ground: str, target: float) -> Optional[str]:
+    """The colour's own hue and saturation made darker (on a light ground) or lighter (on a dark one), in steps of 5 % of
+    its lightness, until it reads at `target` against the ground; None when no step does."""
+    import colorsys
+
+    r, g, b = (x / 255 for x in _rgb_t(hex_))
+    h, l, s = colorsys.rgb_to_hls(r, g, b)
+    light_ground = relative_luminance(ground) >= 0.4
+    for i in range(1, 20):
+        l2 = l * (1 - i / 20) if light_ground else l + (1 - l) * i / 20
+        rr, gg, bb = colorsys.hls_to_rgb(h, l2, s)
+        c = "%02X%02X%02X" % tuple(int(round(min(max(v, 0.0), 1.0) * 255)) for v in (rr, gg, bb))
+        if contrast_ratio(c, ground) >= target:
+            return c
+    return None
+
+
 def _is_data_color(hex_: str) -> bool:
     """False for a text or background colour (a near-black or near-white grey): a slice or a series never takes one."""
     return not (_chroma(hex_) < 12 and not (22 <= _lightness(hex_) <= 92))
@@ -300,6 +317,14 @@ def pie_shades(values: Sequence[Optional[float]], accent: str, ground: Optional[
         # neighbours up to ΔE 32 apart, closer only when many slices share the room; the palest still clearly off the
         # ground (a shade on a dark ground keeps 1.6:1)
         floor = 1.6 if _is_dark(ground_) else MIN_FILL_CONTRAST
+        if _is_dark(ground_):
+            # on a dark ground the parts step toward white: a shade toward the ground sinks into it (VK WorkSpace: a
+            # navy slice on black at 1.6:1 read as a hole in the pie); each tint ≥ 2:1 off the ground
+            alt = _pole_shades(accent, ground_, DARK_SLICE_CONTRAST, m, poles=("FFFFFF",))
+            if alt is not None:
+                for r, j in enumerate(order[1:]):
+                    out[j] = (alt[r], 1.0)
+                return out
         path: list[tuple[float, float]] = [(1.0, 0.0)]
         share = 1.0
         while share > 0.1:
@@ -326,13 +351,14 @@ def pie_shades(values: Sequence[Optional[float]], accent: str, ground: Optional[
 
 
 POLE_SWITCH_DE = 40.0  # the way from the accent to the ground this short (ΔE) leaves no room for distinct tints
+DARK_SLICE_CONTRAST = 2.0  # every part of a pie on a dark ground stands at least this far off it
 
 
-def _pole_shades(accent: str, ground: str, floor: float, m: int) -> Optional[list[str]]:
+def _pole_shades(accent: str, ground: str, floor: float, m: int, poles: tuple[str, ...] = ("FFFFFF", "000000")) -> Optional[list[str]]:
     """`m` solid colours stepping from the accent toward white or black (the pole with the longer visible way), each
     ≥ `floor`:1 off the ground and evenly spaced by ΔE (neighbours up to 32 apart); None when neither pole helps."""
     best: Optional[tuple[float, list[tuple[float, float]], str]] = None
-    for pole in ("FFFFFF", "000000"):
+    for pole in poles:
         path = [(0.0, 0.0)]
         t = 0.0
         while t < 0.9:
@@ -394,12 +420,14 @@ def _theme_scheme(slide: Slide) -> dict[str, str]:
     return out
 
 
-def _hsl_mod(hex_: str, lum_mod: float, lum_off: float) -> str:
+def _hsl_mod(hex_: str, lum_mod: float, lum_off: float, sat_mod: float = 1.0, hue_mod: float = 1.0) -> str:
     import colorsys
 
     r, g, b = (x / 255 for x in _rgb_t(hex_))
     h, l, s = colorsys.rgb_to_hls(r, g, b)
     l = max(0.0, min(1.0, l * lum_mod + lum_off))
+    s = max(0.0, min(1.0, s * sat_mod))
+    h = (h * hue_mod) % 1.0
     r, g, b = colorsys.hls_to_rgb(h, l, s)
     return f"{int(round(r * 255)):02X}{int(round(g * 255)):02X}{int(round(b * 255)):02X}"
 
@@ -425,7 +453,7 @@ def _color_choice(el, scheme: dict[str, str]) -> Optional[tuple[str, float]]:
     if not hex_:
         return None
     alpha = 1.0
-    lum_mod, lum_off = 1.0, 0.0
+    lum_mod, lum_off, sat_mod, hue_mod = 1.0, 0.0, 1.0, 1.0
     for m in el:
         name, v = _local(m), m.get("val")
         try:
@@ -440,18 +468,67 @@ def _color_choice(el, scheme: dict[str, str]) -> Optional[tuple[str, float]]:
             lum_mod = f
         elif name == "lumOff":
             lum_off = f
+        elif name == "satMod":
+            sat_mod = f
+        elif name == "hueMod":
+            hue_mod = f
         elif name == "tint":
             hex_ = _mix(hex_, "FFFFFF", f)
         elif name == "shade":
             hex_ = _mix(hex_, "000000", f)
-    if lum_mod != 1.0 or lum_off != 0.0:
-        hex_ = _hsl_mod(hex_, lum_mod, lum_off)
+    if lum_mod != 1.0 or lum_off != 0.0 or sat_mod != 1.0 or hue_mod != 1.0:
+        hex_ = _hsl_mod(hex_, lum_mod, lum_off, sat_mod, hue_mod)
     return hex_, alpha
 
 
-def _fill_color(holder, scheme: dict[str, str], part=None, region=None) -> Optional[str]:
-    """Visible colour of the fill inside `holder` (spPr / bgPr): solid, gradient (mean of stops) or picture (mean of
-    the region it shows). None for no fill, a mostly transparent fill or an unreadable picture."""
+def _grad_paint(grad, scheme: dict[str, str], region=None, size=None) -> Optional[tuple[str, float]]:
+    """(colour, opacity) a gradient fill paints over `region` = (x0, y0, x1, y1) fractions of its box, sampled on a
+    4 × 4 grid there — by the geometry the audit measures with (`layers.gradient_position`): a background running from
+    light cyan at the top to navy at the bottom is light under a heading at its top (Office «Circuit»), a white glow
+    fading out from the bottom is nearly clear there (LibreOffice «Lights»). `size` = (w, h) of the filled box: the
+    aspect a linear gradient's angle is drawn at. Without a region: the mean of its stops."""
+    from verstka.rendering.layers import gradient_at, gradient_position
+
+    stops = []
+    for gs in grad.iter(_a("gs")):
+        if not len(gs):
+            continue
+        cc = _color_choice(gs[0], scheme)
+        if not cc:
+            continue
+        try:
+            pos = int(gs.get("pos") or 0) / 100000.0
+        except ValueError:
+            pos = 0.0
+        stops.append((pos, tuple(float(x) for x in _rgb_t(cc[0])), float(cc[1])))
+    if not stops:
+        return None
+    stops.sort(key=lambda s: s[0])
+    if region is None:
+        rgb = [sum(s[1][i] for s in stops) / len(stops) for i in range(3)]
+        return "".join(f"{int(round(x)):02X}" for x in rgb), sum(s[2] for s in stops) / len(stops)
+    x0, y0, x1, y1 = (max(0.0, min(1.0, float(v))) for v in region)
+    w, h = size if size and size[0] > 0 and size[1] > 0 else (1.0, 1.0)
+    n = 4
+    acc = [0.0, 0.0, 0.0]
+    tot = 0.0
+    for i in range(n):
+        for j in range(n):
+            u = x0 + (i + 0.5) * (x1 - x0) / n
+            v = y0 + (j + 0.5) * (y1 - y0) / n
+            rgb, a = gradient_at(stops, gradient_position(grad, u, v, w, h))
+            for k in range(3):
+                acc[k] += rgb[k] * a
+            tot += a
+    if tot <= 0:
+        return None
+    return "".join(f"{int(round(min(max(c / tot, 0.0), 255.0))):02X}" for c in acc), tot / (n * n)
+
+
+def _fill_color(holder, scheme: dict[str, str], part=None, region=None, size=None) -> Optional[str]:
+    """Visible colour of the fill inside `holder` (spPr / bgPr): solid, gradient (its colours where `region` lies,
+    `_grad_paint`) or picture (mean of the region it shows). None for no fill, a fill mostly transparent there or an
+    unreadable picture."""
     if holder is None:
         return None
     for child in holder:
@@ -462,12 +539,8 @@ def _fill_color(holder, scheme: dict[str, str], part=None, region=None) -> Optio
             got = _color_choice(child[0], scheme)
             return got[0] if got and got[1] >= 0.5 else None
         if kind == "gradFill":
-            stops = [_color_choice(gs[0], scheme) for gs in child.iter(_a("gs")) if len(gs)]
-            stops = [s for s in stops if s]
-            if not stops or sum(s[1] for s in stops) / len(stops) < 0.5:
-                return None
-            rgb = [sum(_rgb_t(s[0])[i] for s in stops) / len(stops) for i in range(3)]
-            return "".join(f"{int(round(x)):02X}" for x in rgb)
+            got = _grad_paint(child, scheme, region, size)
+            return got[0] if got is not None and got[1] >= 0.5 else None
         if kind == "pattFill":
             # a pattern reads as the blend of its two colours (half and half: the density is not modelled)
             fg, bg = child.find(_a("fgClr")), child.find(_a("bgClr"))
@@ -599,7 +672,7 @@ def slide_ground(slide: Slide, bbox: Bbox) -> Optional[str]:
             rid = blip.get(f"{{{_R}}}embed") if blip is not None else None
             got = _picture_ground(slide.part, rid, region, lambda: _template_ground(slide, bbox, scheme) or _bg_color(slide, bbox, scheme))
         else:
-            got = _fill_color(sppr, scheme, slide.part, region)
+            got = _fill_color(sppr, scheme, slide.part, region, (w, h))
             if got is None and sppr is not None and not any(_local(c) in ("noFill", "solidFill", "gradFill", "blipFill", "pattFill") for c in sppr):
                 ref = el.find(f"{{{_P}}}style/{_a('fillRef')}")
                 if ref is not None and ref.get("idx") not in (None, "0") and len(ref):
@@ -679,7 +752,7 @@ def _bg_color(slide: Slide, bbox: Bbox, scheme: dict[str, str]) -> Optional[str]
             continue
         pr = bg.find(f"{{{_P}}}bgPr")
         if pr is not None:
-            got = _fill_color(pr, scheme, part, region)
+            got = _fill_color(pr, scheme, part, region, (sw, sh))
             if got:
                 return got
             continue
@@ -687,8 +760,31 @@ def _bg_color(slide: Slide, bbox: Bbox, scheme: dict[str, str]) -> Optional[str]
         if ref is not None and len(ref):
             cc = _color_choice(ref[0], scheme)
             if cc:
-                return cc[0]
+                return _bg_style_fill(slide, ref, cc[0], scheme, part, region, (sw, sh)) or cc[0]
     return scheme.get("bg1") or None
+
+
+def _bg_style_fill(slide: Slide, ref, ph_hex: str, scheme: dict[str, str], part, region, size) -> Optional[str]:
+    """What a `p:bgRef idx="1001…"` paints: the theme's background fill style of that index (a:bgFillStyleLst), its
+    placeholder colour (phClr) the ref's own colour — Office themes paint their grounds so (Berlin: an orange-to-red
+    gradient built from bg2, measured where the box is). None for an index outside the list."""
+    try:
+        idx = int(ref.get("idx") or 0)
+    except ValueError:
+        return None
+    if idx < 1001:
+        return None
+    try:
+        theme = etree.fromstring(slide.slide_layout.slide_master.part.part_related_by(RT.THEME).blob)
+    except Exception:  # noqa: BLE001
+        return None
+    lst = theme.find(f".//{_a('bgFillStyleLst')}")
+    fills = [c for c in lst if isinstance(c.tag, str)] if lst is not None else []
+    if idx - 1001 >= len(fills):
+        return None
+    holder = etree.Element("holder")
+    holder.append(copy.deepcopy(fills[idx - 1001]))
+    return _fill_color(holder, {**scheme, "phClr": ph_hex}, part, region, size)
 
 
 _OWN_PARTS: "weakref.WeakSet" = weakref.WeakSet()
@@ -739,7 +835,7 @@ def _template_ground(slide: Slide, bbox: Bbox, scheme: dict[str, str]) -> Option
                 rid = blip.get(f"{{{_R}}}embed") if blip is not None else None
                 got = _picture_ground(holder.part, rid, region, lambda: _bg_color(slide, bbox, scheme))
             else:
-                got = _fill_color(sppr, scheme, holder.part, region)
+                got = _fill_color(sppr, scheme, holder.part, region, (w, h))
                 if got is None and sppr is not None and not any(_local(c) in ("noFill", "solidFill", "gradFill", "blipFill", "pattFill") for c in sppr):
                     ref = el.find(f"{{{_P}}}style/{_a('fillRef')}")
                     if ref is not None and ref.get("idx") not in (None, "0") and len(ref):
@@ -792,6 +888,14 @@ def template_chart_colors(slide: Slide) -> list[str]:
 def _theme_accents(slide: Slide) -> list[str]:
     scheme = _theme_scheme(slide)
     return [scheme[k] for k in ("accent1", "accent2", "accent3", "accent4", "accent5", "accent6") if k in scheme]
+
+
+def _brand_theme_accents(slide: Slide) -> list[str]:
+    """The theme's accents less the stock ones every office suite writes into a new file (LibreOffice green, Office
+    blue): in a template that does not draw them they are no colour of its brand."""
+    from verstka.analysis.colors import is_stock_theme_color
+
+    return [c for c in _theme_accents(slide) if not is_stock_theme_color(_norm(c) or "")]
 
 
 # ---------------------------------------------------------------------------------------------- numbers & units
@@ -1745,10 +1849,18 @@ def add_chart(
     lead = _norm(accent_hex) or (manifest[0] if manifest else None) or "0077FF"
     if contrast_ratio(lead, ground) < LEAD_MIN_CONTRAST:
         # the chart's lead colour must read on its ground (a dark teal on a dark purple picture is lost): the next
-        # colour of the template that does, else the text colour (white bars on a brand-blue slide)
-        cands = [_norm(c) for c in manifest[1:] + template_chart_colors(slide) + _theme_accents(slide) if _norm(c)]
-        lead = next((c for c in cands if contrast_ratio(c, ground) >= LEAD_MIN_CONTRAST and _is_data_color(c)), text)
-    extra = template_chart_colors(slide) + _theme_accents(slide) + manifest[1:] + ([manifest[0]] if manifest else [])
+        # colour of the template that does; else the brand colour itself deepened in its own hue (a honey yellow on
+        # white becomes gold — LibreOffice «Beehive» — not the theme's stock green); else a theme accent; else the
+        # text colour (white bars on a brand-blue slide)
+        cands = [_norm(c) for c in manifest[1:] + template_chart_colors(slide) if _norm(c)]
+        got = next((c for c in cands if contrast_ratio(c, ground) >= LEAD_MIN_CONTRAST and _is_data_color(c)), None)
+        if got is None and _is_data_color(lead) and delta_e(lead, ground) >= 10:
+            # (on a panel of the accent's own colour the text colour leads instead: white bars on brand blue)
+            got = shade_to(lead, ground, LEAD_MIN_CONTRAST + 0.4)
+        if got is None:
+            got = next((c for c in (_norm(x) for x in _brand_theme_accents(slide)) if c and contrast_ratio(c, ground) >= LEAD_MIN_CONTRAST and _is_data_color(c)), None)
+        lead = got or text
+    extra = template_chart_colors(slide) + _brand_theme_accents(slide) + manifest[1:] + ([manifest[0]] if manifest else [])
     others = [j for j, c in enumerate(cats) if is_other_category(c)] if kind in ("pie", "doughnut") and n > 2 else []
     if kind in ("pie", "doughnut"):
         # the largest slice in the accent, the others in its tints (a remainder quiet): one whole, one hue

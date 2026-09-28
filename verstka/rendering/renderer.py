@@ -99,7 +99,7 @@ def render_deck(
 ) -> RenderResult:
     # one percent style for the whole deck — the style of its own words (G5-16: never «42 %» and «42%» on one slide);
     # Russian text in a template family without Cyrillic is measured and set in a stand-in (cyrillic.py)
-    from verstka.rendering.cyrillic import apply_to_pptx, cyrillic_substitutes, deck_fonts
+    from verstka.rendering.cyrillic import apply_to_pptx, cyrillic_substitutes, deck_fonts, mark_russian, strip_highlights
 
     try:
         subs = cyrillic_substitutes(ws.source, extra=[f.family for f in manifest.tokens.typography.families])
@@ -113,6 +113,11 @@ def render_deck(
                 log.info("Russian text set in stand-ins of the template's families without Cyrillic: %s", ", ".join(f"{k} → {v}" for k, v in subs.items()))
         except Exception:  # noqa: BLE001 - the deck stays as rendered
             log.warning("cyrillic stand-ins not written", exc_info=True)
+    try:
+        mark_russian(out_pptx)
+        strip_highlights(out_pptx)
+    except Exception:  # noqa: BLE001 - the deck stays as rendered
+        log.warning("Russian runs not tagged ru-RU / highlights not taken off", exc_info=True)
     return result
 
 
@@ -216,6 +221,14 @@ def _render_deck(outline: DeckOutline, plan: LayoutPlan, manifest: TemplateManif
                 _rollback(builder, before)
         if len(builder.created) > before[0]:
             _mark_notes(builder, oslide)  # only a slide made for this outline entry carries its marker
+            try:
+                from verstka.rendering.synth import unreadable_text_pass
+
+                n_fix = unreadable_text_pass(builder.created[-1], manifest)
+                if n_fix:
+                    rendered.warnings.append(f"{n_fix} text run(s) all but invisible on their ground recoloured")
+            except Exception:  # noqa: BLE001 - a guard, never a failure
+                log.debug("unreadable text pass failed on slide %d", i, exc_info=True)
         result.slides.append(rendered)
         if progress:
             progress(f"rendered slide {i}/{n}", i / max(n, 1))

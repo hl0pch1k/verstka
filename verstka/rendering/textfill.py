@@ -309,6 +309,61 @@ def inherited_caps_spc(shape) -> tuple[bool, float]:
     return (cap in ("all", "small")), float(spc or 0.0)
 
 
+def inherited_color(shape) -> Optional[str]:
+    """The colour (hex) the first run of a text shape is drawn in: its own `a:rPr` fill, the paragraph's default, the
+    shape's list style, the layout's and the master's placeholder list styles, then the master's text style — scheme
+    colours resolved through the theme. None when nothing on the way gives a solid colour. (A LibreOffice template's
+    empty title placeholder names no colour of its own: its white comes from the master's title style.)"""
+    from verstka.rendering.charts import _color_choice, _theme_scheme
+    from verstka.rendering.deck import _ph_of, placeholder_chain
+
+    shp, el = _shape_and_el(shape)
+    if el is None:
+        return None
+    holders: list[Optional[etree._Element]] = []
+    txb = el.find(q("p:txBody"))
+    if txb is not None:
+        p0 = txb.find(q("a:p"))
+        if p0 is not None:
+            r0 = next((r for r in p0.findall(q("a:r")) if r.find(q("a:rPr")) is not None), None)
+            holders.append(r0.find(q("a:rPr")) if r0 is not None else p0.find(q("a:endParaRPr")))
+            ppr = p0.find(q("a:pPr"))
+            holders.append(ppr.find(q("a:defRPr")) if ppr is not None else None)
+        holders.append(_level_defrpr(txb.find(q("a:lstStyle"))))
+    try:
+        chain = placeholder_chain(shp) if shp is not None else []
+    except Exception:  # noqa: BLE001
+        chain = []
+    for base in chain:
+        btx = base.find(q("p:txBody"))
+        holders.append(_level_defrpr(btx.find(q("a:lstStyle"))) if btx is not None else None)
+    ph = _ph_of(el)
+    slide = None
+    try:
+        slide = shp.part.slide if shp is not None and hasattr(shp.part, "slide") else None
+        master = slide.slide_layout.slide_master if slide is not None else None
+    except Exception:  # noqa: BLE001
+        master = None
+    if master is not None:
+        styles = master._element.find(q("p:txStyles"))
+        if styles is not None:
+            typ = (ph.get("type") or "body") if ph is not None else None
+            name = "p:titleStyle" if typ in ("title", "ctrTitle") else ("p:bodyStyle" if ph is not None else "p:otherStyle")
+            holders.append(_level_defrpr(styles.find(q(name))))
+    try:
+        scheme = _theme_scheme(slide) if slide is not None else {}
+    except Exception:  # noqa: BLE001
+        scheme = {}
+    for h in holders:
+        if h is None:
+            continue
+        sf = h.find(q("a:solidFill"))
+        if sf is not None and len(sf):
+            got = _color_choice(sf[0], scheme)
+            return got[0] if got else None
+    return None
+
+
 def clear_text(sp_el: etree._Element) -> bool:
     return fill_text(sp_el, [ParagraphSpec("")])
 
