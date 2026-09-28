@@ -1010,3 +1010,195 @@ def ground_span(slide, box: Bbox, rows: int = 5) -> Optional[tuple[int, int, Lay
             lo, hi = max(lo, run[0]), min(hi, run[1])
         return int(lo), int(hi), lay
     return None
+
+
+def panel_run(layer: Layer, y0: int, y1: int, rows: int = 5) -> list[tuple[int, int]]:
+    """The x-intervals (EMU) a layer paints on every row of the band y0..y1 (round 4.1, C3-1): a rectangle's box, a
+    triangle's or a freeform's run narrowed over the band's height (a slanted edge moves with it). Empty when the band
+    leaves the layer or its outline cannot be read."""
+    if y1 <= y0 or y0 < layer.box.y or y1 > layer.box.y2:
+        return []
+    polys = _outline_of(layer)
+    if polys is None:
+        if layer.kind == "sp" and layer.custom_geom:
+            return []
+        return [(layer.box.x, layer.box.x2)]
+    runs: Optional[list[tuple[float, float]]] = None
+    for j in range(rows):
+        py = y0 + (y1 - y0) * (0.02 + 0.96 * j / max(rows - 1, 1))
+        row = _row_runs(polys, py)
+        if runs is None:
+            runs = row
+            continue
+        runs = [(max(a, c), min(b, d)) for a, b in runs for c, d in row if min(b, d) > max(a, c)]
+        if not runs:
+            return []
+    return [(int(a), int(b)) for a, b in (runs or []) if b > a]
+
+
+# ---------------------------------------------------------------------------------------------------- photo grounds
+
+CELLS_W, CELLS_H = 24, 14  # the audit's grid over a picture (audit/ir.py): the renderer judges a photo on the same cells
+PHOTO_BUSY_STD = 24.0  # a cell of a picture this textured (luminance stdev 0–255 on that grid) is no ground for text
+FINE_W, FINE_H = CELLS_W * 2, CELLS_H * 2  # a finer grid over a photo ground: where inside a busy cell the busy part is
+PHOTO_FLAT_STD = 6.0  # a fine cell this flat is calm whatever its coarse cell holds (an ink blot just under a line)
+_IMG_CELLS: dict[tuple, Optional[tuple]] = {}
+
+
+def image_fine_std(blob: bytes, crop=(0.0, 0.0, 0.0, 0.0), flip_h: bool = False, flip_v: bool = False) -> Optional[list[float]]:
+    """Luminance stdev of every cell of a FINE_W × FINE_H grid over a picture's visible part, row-major (4 × 4 pixels a
+    cell, like the coarse grid): a coarse cell is busy for a line only where its fine cells at the line's height are
+    not flat. None when the image cannot be read."""
+    try:
+        import numpy as np
+        from PIL import Image, ImageOps
+
+        with Image.open(io.BytesIO(blob)) as im:
+            im.draft("RGB", (FINE_W * 8, FINE_H * 8))
+            im = im.convert("RGBA")
+            iw, ih = im.size
+            l, t, r, b = crop or (0.0, 0.0, 0.0, 0.0)
+            im = im.crop((int(l * iw), int(t * ih), max(int((1 - r) * iw), int(l * iw) + 1), max(int((1 - b) * ih), int(t * ih) + 1)))
+            if flip_h:
+                im = ImageOps.mirror(im)
+            if flip_v:
+                im = ImageOps.flip(im)
+            a = np.asarray(im.resize((FINE_W * 4, FINE_H * 4)), dtype=np.float32)
+        cells = a.reshape(FINE_H, 4, FINE_W, 4, 4).transpose(0, 2, 1, 3, 4).reshape(FINE_H, FINE_W, 16, 4)
+        lum = 0.299 * cells[..., 0] + 0.587 * cells[..., 1] + 0.114 * cells[..., 2]
+        return [round(float(v), 1) for v in lum.std(axis=2).reshape(-1)]
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def busy_for_line(std: list[float], fine: Optional[list[float]], col: int, row: int, y0: float, y1: float) -> bool:
+    """Coarse cell (col, row) is busy for a line spanning y0..y1 (fractions of the picture's height): its stdev is at
+    least PHOTO_BUSY_STD and, when the fine grid is known, one of its fine cells overlapping the line's height is not
+    flat (an ink blot in the cell's lower third does not make the line above it busy)."""
+    if std[row * CELLS_W + col] < PHOTO_BUSY_STD:
+        return False
+    if not fine:
+        return True
+    fr0 = max(row * 2, int(y0 * FINE_H))
+    fr1 = min(row * 2 + 1, int(min(y1, 0.999999) * FINE_H))
+    for fr in range(fr0, fr1 + 1):
+        for fc in (col * 2, col * 2 + 1):
+            if fine[fr * FINE_W + fc] >= PHOTO_FLAT_STD:
+                return True
+    return False
+
+
+def image_cells(blob: bytes, crop=(0.0, 0.0, 0.0, 0.0), flip_h: bool = False, flip_v: bool = False) -> Optional[tuple[list[float], list[str], list[float]]]:
+    """(opaque share, mean colour of the opaque pixels, luminance stdev) of every cell of a CELLS_W × CELLS_H grid over
+    a picture's visible part (crop and flips applied), row-major; None when the image cannot be read. The audit's
+    `IRPictureCells` are these values."""
+    try:
+        import numpy as np
+        from PIL import Image, ImageOps
+
+        with Image.open(io.BytesIO(blob)) as im:
+            im.draft("RGB", (CELLS_W * 16, CELLS_H * 16))
+            im = im.convert("RGBA")
+            iw, ih = im.size
+            l, t, r, b = crop or (0.0, 0.0, 0.0, 0.0)
+            im = im.crop((int(l * iw), int(t * ih), max(int((1 - r) * iw), int(l * iw) + 1), max(int((1 - b) * ih), int(t * ih) + 1)))
+            if flip_h:
+                im = ImageOps.mirror(im)
+            if flip_v:
+                im = ImageOps.flip(im)
+            a = np.asarray(im.resize((CELLS_W * 4, CELLS_H * 4)), dtype=np.float32)
+        cells = a.reshape(CELLS_H, 4, CELLS_W, 4, 4).transpose(0, 2, 1, 3, 4).reshape(CELLS_H, CELLS_W, 16, 4)
+        alpha = cells[..., 3] / 255.0
+        cov = alpha.mean(axis=2)
+        wsum = np.maximum(alpha.sum(axis=2), 1e-6)
+        rgb = (cells[..., :3] * alpha[..., None]).sum(axis=2) / wsum[..., None]
+        lum = 0.299 * cells[..., 0] + 0.587 * cells[..., 1] + 0.114 * cells[..., 2]
+        std = lum.std(axis=2)
+        hexes = ["%02X%02X%02X" % tuple(int(round(min(max(v, 0), 255))) for v in rgb[y, x]) for y in range(CELLS_H) for x in range(CELLS_W)]
+        return [round(float(v), 3) for v in cov.reshape(-1)], hexes, [round(float(v), 1) for v in std.reshape(-1)]
+    except Exception:  # noqa: BLE001 - an unreadable picture (EMF/WMF/SVG): no cells
+        return None
+
+
+def _layer_cells(layer: Layer, holder) -> Optional[tuple]:
+    """(alpha, hex, std, fine std) of a picture layer (a pic, or a shape filled with a picture): `image_cells` and
+    `image_fine_std`, cached per image, crop and flips."""
+    el = layer.el
+    blip = el.find(".//" + _A + "blip")
+    rid = blip.get(_R_EMBED) if blip is not None else None
+    part = getattr(holder, "part", None)
+    if not rid or part is None:
+        return None
+    try:
+        img_part = part.related_part(rid)
+    except Exception:  # noqa: BLE001
+        return None
+    src = el.find(".//" + _A + "srcRect")
+    crop = tuple(int(src.get(k) or 0) / 100000 for k in ("l", "t", "r", "b")) if src is not None else (0.0, 0.0, 0.0, 0.0)
+    xfrm = el.find(_P + "spPr/" + _A + "xfrm")
+    fh = xfrm is not None and xfrm.get("flipH") in ("1", "true")
+    fv = xfrm is not None and xfrm.get("flipV") in ("1", "true")
+    key = (_image_key(img_part), crop, fh, fv)
+    if key not in _IMG_CELLS:
+        got = image_cells(img_part.blob, crop, fh, fv)
+        _IMG_CELLS[key] = (*got, image_fine_std(img_part.blob, crop, fh, fv)) if got is not None else None
+    return _IMG_CELLS[key]
+
+
+def photo_calm_run(slide, box: Bbox, anchor_x: Optional[int] = None) -> Optional[tuple[int, int]]:
+    """The calm stretch of a photo a line of text stands on (round 4.1, C3-2 — LO Candy's subtitle running onto the
+    candies): when the topmost layer painting under the line's centre is a picture (of the slide, its layout or its
+    master) with textured cells, the x-interval (EMU) around `anchor_x` (default: the line's left edge) of the cells
+    that are calm (luminance stdev under PHOTO_BUSY_STD) on every cell row the line crosses. (x, x) when the anchor
+    itself stands on a busy cell; None when no such picture lies under the line or it cannot be read."""
+    if box.w <= 0 or box.h <= 0:
+        return None
+    layers = drawn_layers(slide)
+    try:
+        layout = slide.slide_layout
+        holders = {"layout": layout, "master": layout.slide_master, "slide": slide}
+    except Exception:  # noqa: BLE001
+        return None
+    cx, cy = box.x + box.w / 2.0, box.y + box.h / 2.0
+    ax = box.x if anchor_x is None else anchor_x
+    for lay in reversed(layers):
+        if lay.placeholder or not lay.paints or lay.kind in ("graphicFrame", "cxnSp", "grpSp"):
+            continue
+        if not (lay.box.x <= cx <= lay.box.x2 and lay.box.y <= cy <= lay.box.y2):
+            continue
+        if not lay.picture:
+            polys = _outline_of(lay)
+            if polys is not None and sum(1 for poly in polys if len(poly) > 2 and _inside(cx, cy, poly)) % 2 != 1:
+                continue
+            got = layer_paint_at(lay, box, holders.get(lay.source))
+            if got is None or got[1] < 0.6:
+                continue
+            return None  # an opaque panel over the photo: the line stands on the panel
+        b = _xfrm_box(lay.el) or lay.box
+        cells = _layer_cells(lay, holders.get(lay.source))
+        if cells is None or b.w <= 0 or b.h <= 0:
+            return None
+        alpha, _hexes, std, fine = cells
+        if not any(a >= 0.5 and s >= PHOTO_BUSY_STD for a, s in zip(alpha, std)):
+            return None
+        cw, ch = b.w / CELLS_W, b.h / CELLS_H
+        r0 = max(0, min(CELLS_H - 1, int((box.y - b.y) / ch)))
+        r1 = max(0, min(CELLS_H - 1, int((box.y2 - 1 - b.y) / ch)))
+        fy0, fy1 = (box.y - b.y) / b.h, (box.y2 - b.y) / b.h
+        col = int((ax - b.x) / cw)
+        if not 0 <= col < CELLS_W:
+            return None
+
+        def calm(c: int) -> bool:
+            return all(alpha[r * CELLS_W + c] < 0.5 or not busy_for_line(std, fine, c, r, fy0, fy1) for r in range(r0, r1 + 1))
+
+        if not calm(col):
+            return int(ax), int(ax)
+        lo = col
+        while lo - 1 >= 0 and calm(lo - 1):
+            lo -= 1
+        hi = col
+        while hi + 1 < CELLS_W and calm(hi + 1):
+            hi += 1
+        return int(b.x + lo * cw), int(b.x + (hi + 1) * cw)
+    return None

@@ -699,9 +699,20 @@ def _tense_guard(o: DeckOutline, structure: BriefStructure, idx: BriefIndex, run
         run.say(f"Прогнозы и цели — в будущем времени, как план, а не как достигнутый результат ({ru_count(len(changed), 'правка', 'правки', 'правок')}).")
 
 
-def _variety(o: DeckOutline, structure: BriefStructure, run: _Run) -> None:
+def _undated_axis(s: OutlineSlide) -> bool:
+    """A time axis whose steps are not all dates (writer.date_start): not one (gate 3 W3-6: «К месту прибыли военные…»
+    as step 1 of 4)."""
+    if s.kind not in (K.timeline,) or not s.content.items:
+        return False
+    from verstka.planning.writer import date_start
+
+    return not all(date_start(it.title or "") for it in s.content.items)
+
+
+def _variety(o: DeckOutline, structure: BriefStructure, run: _Run, written: bool = False) -> None:
     """More than two slides of one kind in a row: a slide of the run takes one of its alternatives that fits (the
-    third first, then the second), never one whose chart or table the user asked for."""
+    third first, then the second), never one whose chart or table the user asked for. `written` (writer mode): never a
+    timeline of undated steps."""
     specs = {sp.number: sp for sp in structure.specs}
     slides = o.slides
     for i in range(2, len(slides)):
@@ -717,7 +728,7 @@ def _variety(o: DeckOutline, structure: BriefStructure, run: _Run) -> None:
             done = False
             for alt in s.alternatives:
                 new = apply_alternative(s, alt, spec)
-                if new is None or _run_len(kinds, j, new.kind) > 2:
+                if new is None or _run_len(kinds, j, new.kind) > 2 or (written and _undated_axis(new)):
                     continue
                 slides[j] = new
                 run.warn(f"slide {s.id}: {k.value} → {new.kind.value} (three slides of one kind in a row)")
@@ -947,7 +958,14 @@ def compile_outline(
     if callable(use):
         use(structure)
     _requests(o, structure, idx, run)
-    _variety(o, structure, run)
+    written = False
+    try:
+        from verstka.planning.writer import is_written_text
+
+        written = is_written_text(brief.text or "")
+    except Exception:  # noqa: BLE001 - the writer's check or none
+        written = False
+    _variety(o, structure, run, written)
     try:
         from verstka.planning.agent import polish_case
 

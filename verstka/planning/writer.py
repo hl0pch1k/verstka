@@ -41,7 +41,9 @@ REFERENCE_MAX_S = 12.0  # titles call + the article requests
 TITLES_MAX_S = 8.0
 CONTINUE_MIN_S = 35.0  # a continuation call starts only with this much writer time left
 CHECK_MIN_LEFT_S = 120.0  # the check runs only when this much of the whole budget remains
-CHECK_MAX_S = 25.0
+CHECK_MAX_S = 30.0  # one check call's cap (the batches run side by side under it)
+CHECK_BATCH = 12  # statements per check call (with their source sentences)
+CHECK_PARALLEL = 3
 DEFAULT_SLIDES = 10
 POLITICIAN_MAX_CONTENT = 9
 SKILLS = ("topic_reference", "deck_writer", "writer_check")
@@ -52,6 +54,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "enabled": True,
     "temperature": 0.3,
     "reference": {"enabled": True, "source": "wikipedia", "contact": "", "max_chars": 12000, "timeout_s": 6, "cache_days": 7},
+    "anchor": {"enabled": True},
     "check": {"enabled": True},
     "limits": {"writer_max_s": WRITER_MAX_S, "agent_reserve_s": AGENT_RESERVE_S, "check_min_left_s": CHECK_MIN_LEFT_S},
 }
@@ -208,7 +211,7 @@ _H_CAUSES = ("Предпосылки и причины", "the causes and the sit
 _H_START = ("Начало", "how it started: the first events with their exact dates")
 _H_COURSE = ("Ход событий", "the main events of the first stage, in time order, each with its date")
 _H_COURSE2 = ("Ход событий (продолжение)", "the next stage, in time order, each event with its date")
-_H_TURN = ("Переломные события", "the turning points the reference names (battles, operations, landings, treaties), each with its date and its outcome")
+_H_TURN = ("Переломные события", "the turning points the reference names (battles, operations, landings, treaties) — several of different years, each once in the deck, with its date and its outcome")
 _H_TURN2 = ("Переломные события (продолжение)", "the later turning points the reference names, each with its date and its outcome")
 _H_END = ("Окончание", "how it ended: the last events and the exact dates of the end")
 _H_OUTCOME = ("Итоги и потери", "the outcome and the losses in figures the reference gives")
@@ -393,6 +396,9 @@ class _Slide:
     theses: set[str] = field(default_factory=set)
     working: str = ""  # the storyline's working title when the chart's caption replaced it («В цифрах»)
     part: int = -1  # the storyline part the slide was written for (its place in the answer): a refill goes back there
+    cites: dict = field(default_factory=dict)  # sentence → the reference numbers the writer cited for it («[41, 42]»)
+    src: dict = field(default_factory=dict)  # sentence → its anchored sources (ArticleSupport positions)
+    anchors: Any = field(default=None, repr=False, compare=False)  # the deck's Anchors (the orphan fixer reads them)
 
     @property
     def empty(self) -> bool:
@@ -445,7 +451,7 @@ def anaphoric(sentence: str) -> bool:
 
 
 # a conjunction that ties a sentence to the one before it («Однако в других странах…»): without that one, it goes
-_LEAD_CONJ_RE = re.compile(r"^(?:Однако|Но|При\s+этом|Тем\s+не\s+менее|Также|Кроме\s+того|Поэтому|Таким\s+образом|Вместе\s+с\s+тем|Зато|Впрочем)\s*,?\s+(?=\S)")
+_LEAD_CONJ_RE = re.compile(r"^(?:Однако|Но|При\s+этом|Тем\s+не\s+менее|Также|Кроме\s+того|Поэтому|Таким\s+образом|Вместе\s+с\s+тем|Зато|Впрочем|В\s+результате\s+этого|В\s+результате(?=\s*,)|Вследствие\s+этого)\s*,?\s+(?=\S)")
 
 
 def unlinked(sentence: str) -> str:
@@ -464,8 +470,15 @@ def _prune(s: "_Slide", why_of: Callable[[str], Optional[str]], removed: list[di
     n = 0
     for sn in s.sentences:
         why = None if sn in s.theses else why_of(sn)
-        if why is None and gone and sn not in s.theses and anaphoric(sn):
+        if why is None and gone and sn not in s.theses and (anaphoric(sn) or _then_start(sn)):
             why = "no antecedent: the sentence before it was removed"
+            new = orphan_fix(s, sn)
+            if new and not anaphoric(new):
+                # the sentence it cites names its subject: the article's sentence stands in its place
+                _removed(removed, where(sn) if callable(where) else where, sn, "no antecedent: replaced by the sentence it cites")
+                keep.append(new)
+                gone = False
+                continue
         if why:
             _removed(removed, where(sn) if callable(where) else where, sn, why)
             gone = True
@@ -478,16 +491,25 @@ def _prune(s: "_Slide", why_of: Callable[[str], Optional[str]], removed: list[di
 
 
 def _deck_of(a: WriterAnswer) -> _Deck:
-    d = _Deck(title=a.title.strip(), subtitle=a.subtitle.strip(), kind=(a.kind or "other").lower())
+    d = _Deck(title=split_cites(a.title.strip())[0], subtitle=split_cites(a.subtitle.strip())[0], kind=(a.kind or "other").lower())
     for k, s in enumerate(a.slides):
+        pairs = cited_sentences(s.text or "")
         d.slides.append(_Slide(
-            title=s.title.strip(),
-            sentences=sentences_of(s.text or ""),
-            timeline=[e.model_dump() for e in s.timeline] if s.timeline else None,
+            title=split_cites(s.title.strip())[0],
+            sentences=[t for t, _ in pairs],
+            timeline=[_plain_event(e.model_dump()) for e in s.timeline] if s.timeline else None,
             data=s.data.model_dump() if s.data else None,
             part=k,
+            cites={t: ids for t, ids in pairs if ids},
         ))
     return d
+
+
+def _plain_event(e: dict) -> dict:
+    """A timeline entry without an empty «src» (a text written without a reference reads as before)."""
+    if not e.get("src"):
+        e.pop("src", None)
+    return e
 
 
 def fmt_value(v: float) -> str:
@@ -626,11 +648,12 @@ def fix_including(sentence: str) -> str:
 
 def fix_grammar(sentence: str) -> str:
     """The sentence with the model's known governance errors fixed («Войну участвовали 62 страны» → «В войне
-    участвовали 62 страны») and a «part» larger than its whole cut (fix_including)."""
+    участвовали 62 страны»), its agreement slips fixed (fix_agreement: «12 апреля стало», «направлением, связанным»,
+    «техническое превосходство») and a «part» larger than its whole cut (fix_including)."""
     out = sentence
     for rx, rep in _GRAMMAR_FIXES:
         out = rx.sub(rep, out)
-    return fix_including(out)
+    return fix_including(fix_agreement(out))
 
 
 def _clean_title(t: str) -> str:
@@ -734,7 +757,7 @@ def _data_ok(d: Optional[dict]) -> Optional[dict]:
         if not label or not isinstance(v, (int, float)) or label.lower() in seen:
             continue
         seen.add(label.lower())
-        rows.append({"label": label, "value": float(v)})
+        rows.append({"label": label, "value": float(v), **({k: r[k] for k in ("src", "at") if r.get(k)})})
     if len(rows) < 3:
         return None
     years = [bool(re.fullmatch(r"\d{4}", r["label"])) for r in rows]
@@ -747,7 +770,10 @@ def _data_ok(d: Optional[dict]) -> Optional[dict]:
         chart = "column"
     if chart in ("column", "bar") and not any(years):
         rows.sort(key=lambda r: -r["value"])  # items compared: the largest first (years keep their order)
-    return {"caption": " ".join(str(d.get("caption") or "").split()), "unit": " ".join(str(d.get("unit") or "").split()), "chart": chart if chart in ("column", "bar", "line", "pie") else "column", "rows": rows[:6]}
+    out = {"caption": " ".join(str(d.get("caption") or "").split()), "unit": " ".join(str(d.get("unit") or "").split()), "chart": chart if chart in ("column", "bar", "line", "pie") else "column", "rows": rows[:6]}
+    if d.get("src"):
+        out["src"] = d["src"]
+    return out
 
 
 def normalise_answer(a: WriterAnswer | _Deck, topic: str, reference: str = "", theses: Optional[list[str]] = None, language: str = "ru", removed: Optional[list[dict]] = None, first: int = 1) -> _Deck:
@@ -777,6 +803,8 @@ def normalise_answer(a: WriterAnswer | _Deck, topic: str, reference: str = "", t
             word = opinion_sentence(sn, reference)
             if word:
                 return f"opinion: «{word}»"
+            if not strict and _stale_future(sn, time.localtime().tm_year):
+                return "the future tense for a past year"
             if any(same_text(sn, x) for x in earlier + seen):
                 return "duplicate"
             seen.append(sn)
@@ -793,7 +821,7 @@ def normalise_answer(a: WriterAnswer | _Deck, topic: str, reference: str = "", t
                 if _latin_junk(what, known, strict, 2):
                     _removed(removed, f"{i}", f"{when} — {what}", "junk timeline entry")
                     continue
-                tl.append({"when": H.strip_end(when), "what": H.strip_end(what)})
+                tl.append({"when": H.strip_end(when), "what": H.strip_end(what), **({"src": e["src"]} if e.get("src") else {})})
             tl = chrono_sort(tl, lambda e: e["when"])
             s.timeline = _spread(tl, MAX_TIMELINE) if len(tl) >= 3 else None
         s.data = _data_ok(s.data)
@@ -923,9 +951,19 @@ def verify_against(
     stems = _article_stems(full_texts + [topic])
     support = support or ArticleSupport(full_texts, topic)
 
+    clocks = {(h, m) for s_ in support.sents for _a, _b, h, m in _clocks(s_)}
+
     def bad_figs(text: str) -> list[Any]:
         out = []
+        # a clock time the article writes another way («10 часов 25 минут» / «10:25:34») is the article's (gate 3: it
+        # was removed as «25 минут»); one the article never gives is reported as it is written
+        spans = [(a, b, (h, m) in clocks) for a, b, h, m in _clocks(text)]
         for f in figures(text):
+            at_clock = next((ok for a, b, ok in spans if a <= f.start < b), None)
+            if at_clock is not None:
+                if not at_clock:
+                    out.append(f)
+                continue
             try:
                 if idx.verdict(f) == "bad":
                     out.append(f)
@@ -1020,6 +1058,28 @@ def numbered(deck: _Deck, first: int = 1) -> str:
 _ID_RE = re.compile(r"^\s*\[?\s*(\d{1,2})\s*\.\s*([td])?\s*(\d{1,2})\s*\]?\s*$", re.I)
 
 
+def _group_lines(text: str) -> dict[int, int]:
+    """The line of the text each sentence group of grounding.BriefIndex stands in (its groups counted the same way: a
+    table row is one group, every other non-empty line one group per sentence of heuristics.split_sentences)."""
+    out: dict[int, int] = {}
+    group = 0
+    for li, line in enumerate((text or "").splitlines()):
+        s = line.strip()
+        if s.startswith("|") and s.count("|") >= 2:
+            cells = [c.strip() for c in s.strip("|").split("|")]
+            if all(re.fullmatch(r":?-{2,}:?", c) or not c for c in cells):
+                continue
+            group += 1
+            out[group] = li
+            continue
+        if not s:
+            continue
+        for _sn in H.split_sentences(s) or [s]:
+            group += 1
+            out[group] = li
+    return out
+
+
 class ArticleSupport:
     """Whether the full article(s) state a written statement, deterministically — the fact check's model reads only the
     ~12 000-character cut and reported true sentences of the full article as unsupported («погибло более 70 миллионов
@@ -1044,6 +1104,7 @@ class ArticleSupport:
 
     def __init__(self, full_texts: list[str], topic: str = "") -> None:
         from verstka.planning.grounding import BriefIndex, content_stems
+        from verstka.planning.reference import JOIN_TAIL_RE
 
         self.idx = BriefIndex("\n\n".join(full_texts))
         self.stems = _article_stems(list(full_texts) + [topic])
@@ -1065,16 +1126,30 @@ class ArticleSupport:
         self.pos: dict[int, int] = {}
         self.sents: list[str] = []
         self.sstems: list[set[str]] = []
+        self.para: list[int] = []  # the paragraph (line of the joined articles) of each sentence: a neighbour is of the same
+        line_of = _group_lines("\n\n".join(full_texts))
         for k in self.keys:
             t = " ".join(texts[k].split()).strip("= ").strip()
-            if self.sents and self.sents[-1].count("«") > self.sents[-1].count("»"):
+            if self.sents and (self.sents[-1].count("«") > self.sents[-1].count("»") or (
+                    JOIN_TAIL_RE.search(self.sents[-1]) and self.para[-1] == line_of.get(k, -k))):
                 self.sents[-1] = f"{self.sents[-1]} {t}"
                 self.sstems[-1] = self.sstems[-1] | self._group.get(k, set())
             else:
                 self.sents.append(t)
                 self.sstems.append(set(self._group.get(k, set())))
+                self.para.append(line_of.get(k, -k))
             self.pos[k] = len(self.sents) - 1
-        self.low = [s.lower().replace("ё", "е") for s in self.sents]
+        # the page each sentence is from (the joined articles, in order)
+        self.page_of: list[int] = []
+        starts, off = [], 0
+        joined = "\n\n".join(full_texts)
+        for t in full_texts:
+            starts.append(joined[:off].count("\n"))
+            off += len(t) + 2
+        for p in self.para:
+            self.page_of.append(max((k for k, s in enumerate(starts) if p >= s), default=0) if p >= 0 else 0)
+        self._norm: Optional[dict[str, list[int]]] = None
+        self.low = [s.lower().replace("ё", "е").replace("\u0301", "") for s in self.sents]  # «ВКонта́кте»: no stress mark
         self.years = [_statement_years(s) for s in self.sents]
         self.full = "\n".join(self.sents)
         self.full_low = "\n".join(self.low)
@@ -1183,7 +1258,7 @@ class ArticleSupport:
         out = []
         for k, y in enumerate(ys):
             stop = ys[k + 1][0] if k + 1 < len(ys) else len(text)
-            new = [e for e in ents if y[1] <= e.start < stop and re.search(r"(?:\s[вВ]|назван\w*|именем)\s+«?$", text[: e.start])]
+            new = [e for e in ents if y[1] <= e.start < stop and re.search(r"(?:\s[вВ]|\sна|назван\w*|называ\w*|именем)\s+«?$", text[: e.start])]
             if not new:
                 return None
             name = next((nm for nm in when if nm and nm.startswith(new[0].text.lower()[:6])), None)
@@ -1925,12 +2000,18 @@ def cut_list_item(text: str, e: Optional["_Ent"]) -> Optional[str]:
             prev = re.search(r",\s*([^,]+?)\s+и\s+$", before)
             if not prev:
                 return None
+            if re.match(r"(?:как|например|в\s+том\s+числе|включая)\s", prev.group(1)):
+                return None  # «такие сервисы, как «Мой мир» и «ICQ»» would keep one item: no list is left (gate 3)
             out = before[: prev.start()] + " и " + prev.group(1) + after
         elif m2:
             out = before[: m2.start()] + after
         else:
             return None
     out = re.sub(r"\s+([,.;:!?])", r"\1", " ".join(out.split()))
+    # «такие X, как A» with one item left is not a list any more («такие сервисы и как «Мой мир»»): the sentence goes
+    m4 = re.search(r"(?:так\w+\s+[^,]{1,40},\s*как|например|включая)\s+(.+?)[.;!]?$", out)
+    if m4 and not re.search(r",\s|\sи\s", m4.group(1)):
+        return None
     return out if len(out.split()) >= 4 else None
 
 
@@ -1945,8 +2026,10 @@ _SYNONYM_GROUPS = (
     ("начал", "вторг", "вторж", "напал", "напад"),
     ("основ", "созда", "учред"),
     ("переи", "назва", "ребре"),
-    ("запус", "старт", "откры"),
+    ("запус", "запущ", "старт", "откры"),
     ("приоб", "купил", "покуп", "купле"),
+    ("заяви", "заявл", "сообщ", "объяв", "анонс"),
+    ("сдела", "выпол", "соверш"),
 )
 _SYN: dict[str, tuple[str, ...]] = {w: g for g in _SYNONYM_GROUPS for w in g}
 
@@ -2169,6 +2252,16 @@ def cut_apposition(text: str, e: Optional[_Ent]) -> Optional[str]:
     return _sentence(out) if len(out.split()) >= 4 else None
 
 
+# a time told by the sentence before («в этот период», «в том же году»)
+_THEN_RE = re.compile(r"(?<![\wё])(?:в\s+(?:этот|тот\s+же)\s+период|в\s+это\s+(?:же\s+)?время|в\s+том\s+же\s+году|в\s+эти\s+годы|тогда\s+же)(?![\wё])", re.I)
+
+
+def _then_start(sentence: str) -> bool:
+    """The sentence opens with a time told by the sentence before it («В том же году VK и Сбер…»)."""
+    m = _THEN_RE.search(sentence or "")
+    return bool(m) and len((sentence or "")[: m.start()].split()) <= 2
+
+
 def _supported_or_none(text: Optional[str], support: ArticleSupport) -> Optional[str]:
     """A statement left after its wrong year was cut, when the article states the rest (a wrong year often dates a wrong
     event: «В 2006 году компания запустила «ВКонтакте»» — it did not, DST bought into it in 2007)."""
@@ -2191,6 +2284,8 @@ def _repair(sn: str, p: _Pairing, support: ArticleSupport) -> Optional[str]:
         tries = [lambda: replace_when(sn, p.fix[0], p.fix[1])]
     elif p.kind == "event":
         tries = [lambda: support.event_year_fixed(sn, p)]
+    elif p.kind in ("item", "verb") and _THEN_RE.search(sn):
+        tries = []  # «В этот период были запущены …»: the items' year is the sentence before's, which nothing checks
     elif p.kind == "item":
         tries = [lambda: cut_list_item(sn, p.entity)]
     elif p.kind == "verb":
@@ -2225,6 +2320,9 @@ def _repair(sn: str, p: _Pairing, support: ArticleSupport) -> Optional[str]:
     return None
 
 
+_DATE_PAIRINGS = frozenset({"year", "month", "event", "undated", "item"})
+
+
 def fix_pairings(
     deck: _Deck, support: ArticleSupport, removed: Optional[list[dict]] = None, edits: Optional[list[dict]] = None, first: int = 1,
 ) -> int:
@@ -2243,12 +2341,20 @@ def fix_pairings(
                 out.append(sn)
                 continue
             p = support.pair_issue(sn)
+            if p is not None and p.kind in _DATE_PAIRINGS and sn in s.src:
+                p = None  # anchored: its own source sentence gives the date with the event (gate 3 replay: «В августе
+                # 1945 года СССР вступил в войну против Японии» was «repaired» to April, the month of another event)
             if p is None:
                 out.append(sn)
                 continue
             new = _repair(sn, p, support)
-            others = [x for sl in deck.slides for x in sl.sentences if x != sn] + out
-            if new and not any(same_text(new, x) or said_in(x, new, 0.75) or said_in(new, x, 0.75) for x in others):
+            # another copy of the same wrong statement is no reason to drop this one: it goes as a repeat later
+            others = [x for sl in deck.slides for x in sl.sentences if x != sn and not said_in(sn, x, 0.9)] + out
+            # a short repair («VK была основана в 1998 году.») is «said» by any long sentence that has its year and a word
+            # of it: a repeat only when the other sentence names its names too
+            names = [w for w in re.findall(r"[A-Za-zА-ЯЁа-яё][\w.+-]*", new or "")[1:] if w[:1].isupper() or re.search(r"[A-Za-z]", w)]
+            names = names + [w for w in re.findall(r"^[A-Za-z][\w.+-]*", new or "")]
+            if new and not any(same_text(new, x) or ((said_in(x, new, 0.75) or said_in(new, x, 0.75)) and all(nm in x for nm in names)) for x in others):
                 if edits is not None:
                     edits.append({"where": f"{i}", "text": sn, "now": new, "why": f"{p.kind}: {p.why}"})
                 out.append(new)
@@ -2322,7 +2428,8 @@ def _evidence_sentence(evidence: str, support: Optional[ArticleSupport]) -> Opti
 def apply_check(
     deck: _Deck, issues: list[Any], removed: Optional[list[dict]] = None, first: int = 1,
     support: Optional[ArticleSupport] = None, overruled: Optional[list[dict]] = None, edits: Optional[list[dict]] = None,
-    stats: Optional[dict] = None,
+    stats: Optional[dict] = None, clause_of: Optional[Callable[["_Slide", str], Optional[str]]] = None,
+    hedged: Optional[Callable[[str], bool]] = None,
 ) -> int:
     """The fact check's verdicts, applied so that they never do more harm than good:
     - a verdict without a reason, or whose reason says the statement is right («…which is correct», «верно»), is
@@ -2373,6 +2480,8 @@ def apply_check(
     def stays(where: str, text: str, why: str) -> bool:
         if support is None or not support.supported(text):
             return False
+        if "opinion" in why.lower() and hedged is not None and hedged(text):
+            return False  # the article hedges it («рассматриваются как…»): an opinion flag stands (gate 3 W3-11)
         if overruled is not None:
             overruled.append({"where": where, "text": text, "why": why, "kept": "the full article states it"})
         return True
@@ -2389,6 +2498,17 @@ def apply_check(
         for sn in s.sentences:
             j = pos.get(sn)
             key = (i, "s", j)
+            if j and key in kill and clause_of is not None and not stats.get("degenerate") and sn not in s.theses and sn in s.src:
+                # an anchored statement the check read with its own source: that source's words stand in its place
+                new = clause_of(s, sn)
+                if new and new != sn:
+                    if edits is not None:
+                        edits.append({"where": f"{i}.{j}", "text": sn, "now": new, "why": kill[key] + " → its source's words"})
+                    kill.pop(key)
+                    fix_of.pop(key, None)
+                    out.append(new)
+                    n += 1
+                    continue
             if j and key in kill and key in fix_of and sn not in s.theses and not stays(f"{i}.{j}", sn, kill[key]):
                 new = article_clause(support.sents[fix_of[key]], want_year=bool(_statement_years(sn))) if support is not None else None
                 others = [x for sl in deck.slides for x in sl.sentences if x != sn] + out
@@ -2753,13 +2873,20 @@ def dedupe_events(deck: _Deck, removed: Optional[list[dict]] = None, first: int 
         context = " ".join(s.sentences)
         summary = bool(SUMMARY_TITLE_RE.match(s.title or ""))
 
-        def why_of(sn: str, i: int = i, context: str = context, summary: bool = summary) -> Optional[str]:
+        def why_of(sn: str, i: int = i, context: str = context, summary: bool = summary, s: "_Slide" = s) -> Optional[str]:
             if summary:
                 return None
             full, _ = _date_keys(sn, context)
             st = _stems5(sn)
-            for j, d0, st0, text0 in seen:
+            mine_src = set(s.src.get(sn) or [])
+            for j, d0, st0, text0, src0 in seen:
                 if j >= i:
+                    continue
+                if mine_src and src0 and not (mine_src & src0):
+                    # two anchored statements from different article sentences are two facts (the war's duration on
+                    # «Итоги» is not the invasion of 1 сентября 1939 on «Начало»), unless one says the other again
+                    if len(sn.split()) >= 5 and said_in(sn, text0, 0.75) and said_in(text0, sn, 0.75):
+                        return f"says slide {j}'s sentence again"
                     continue
                 if full and d0 & full and len(st & st0) >= 2:
                     return f"the event of slide {j} again"
@@ -2769,7 +2896,7 @@ def dedupe_events(deck: _Deck, removed: Optional[list[dict]] = None, first: int 
 
         n += _prune(s, why_of, removed, f"{i}")
         for sn in s.sentences:
-            seen.append((i, _date_keys(sn, context)[0], _stems5(sn), sn))
+            seen.append((i, _date_keys(sn, context)[0], _stems5(sn), sn, set(s.src.get(sn) or [])))
     deck.slides = [s for s in deck.slides if not s.empty or s.theses]
     return n
 
@@ -2777,6 +2904,12 @@ def dedupe_events(deck: _Deck, removed: Optional[list[dict]] = None, first: int 
 # ------------------------------------------------------------------ a sentence left without its subject
 
 _ORPHAN_RE = re.compile(r"^(?:Он|Она|Оно|Они|Его|Её|Ее|Их|Ему|Ей|Им|Него|Неё|Них)(?![\wё])")
+# «Главным очагом агрессии там стала Японская империя, желавшая доминировать в этом регионе»: a place or a time told by
+# the article's sentence before it
+_DEIXIS_RE = re.compile(r"(?<![\wё])(?:там|здесь|туда|оттуда|в\s+этом\s+регионе|в\s+этой\s+стране|в\s+этот\s+период|в\s+том\s+же\s+году|"
+                        r"того\s+же\s+года|в\s+это\s+время|в\s+ответ)(?![\wё])", re.I)
+# «В ней участвовало 62 государства»: an article sentence that leans on the one before it is no replacement
+_IN_IT_RE = re.compile(r"^(?:В|Во|На|О|Об|При|У|С|К|По|Из|От|До|За|Для|Среди)\s+(?:ней|нём|нем|них|неё|нее|нему|ним|ними|этой|этом|этих)(?![\wё])")
 
 
 def drop_orphans(deck: _Deck, removed: Optional[list[dict]] = None, first: int = 1) -> int:
@@ -2785,7 +2918,15 @@ def drop_orphans(deck: _Deck, removed: Optional[list[dict]] = None, first: int =
     removed = removed if removed is not None else []
     n = 0
     for i, s in enumerate(deck.slides, first):
-        while s.sentences and s.sentences[0] not in s.theses and (_ORPHAN_RE.match(s.sentences[0].strip()) or _PRONOUN_SUBJECT_RE.match(s.sentences[0].strip())):
+        while s.sentences and s.sentences[0] not in s.theses and (_ORPHAN_RE.match(s.sentences[0].strip()) or _PRONOUN_SUBJECT_RE.match(s.sentences[0].strip())
+                                                                   or _then_start(s.sentences[0])):
+            sn = s.sentences[0]
+            new = orphan_fix(s, sn)
+            if new and not anaphoric(new) and not _ORPHAN_RE.match(new) and not _then_start(new):
+                _removed(removed, f"{i}", sn, "no subject (a pronoun opens the slide): replaced by the sentence it cites")
+                s.sentences[0] = new
+                n += 1
+                continue
             _removed(removed, f"{i}", s.sentences.pop(0), "no subject (a pronoun opens the slide)")
             n += 1
         if s.sentences and s.sentences[0] not in s.theses:
@@ -2794,10 +2935,1252 @@ def drop_orphans(deck: _Deck, removed: Optional[list[dict]] = None, first: int =
     return n
 
 
+# ------------------------------------------------------------------ source anchors (round 4: source-anchored writing)
+#
+# The writer reads the reference with a number before each sentence («[41] 19 ноября 1942 года Красная армия…») and
+# builds every sentence of its own by compressing one or two of them, citing their numbers («… [41, 42]»). Its free
+# paraphrase had moved years, ranks and clock times between events (Гуадалканал «1944», «майор» at the launch, «в
+# 1960-х началась космическая гонка», «10:53 отделился»); now every date, name, rank and figure of a written sentence
+# must stand in the sentences it cites (a neighbour of the same paragraph gives only what the cited one lacks), with
+# the event's tense. A sentence that fails is replaced by the cited sentence compressed (article_clause) or dropped;
+# a missing or wrong citation is re-anchored to the article sentence that supports it best, else the statement goes.
+# The marks never reach the designer or the person: they are kept per statement (writer.json «sources»).
+
+_CITE_BODY = r"\d{1,4}(?:\s*(?:[,;]|[-–—])\s*\d{1,4})*"
+_CITE_RE = re.compile(r"\s*\[\s*(?:№\s*)?(" + _CITE_BODY + r")\s*\]")
+_CITE_MOVE_RE = re.compile(r"([.!?…])((?:\s*\[\s*(?:№\s*)?" + _CITE_BODY + r"\s*\])+)")
+
+
+def _cite_numbers(body: str) -> list[int]:
+    out: list[int] = []
+    for part in re.split(r"\s*[,;]\s*", body or ""):
+        part = part.strip()
+        m = re.fullmatch(r"(\d{1,4})\s*[-–—]\s*(\d{1,4})", part)
+        if m:
+            a, b = int(m.group(1)), int(m.group(2))
+            out += list(range(a, b + 1)) if 0 <= b - a <= 4 else [a, b]
+        elif part.isdigit():
+            out.append(int(part))
+    return list(dict.fromkeys(out))
+
+
+def has_cites(text: str) -> bool:
+    return bool(_CITE_RE.search(text or ""))
+
+
+def split_cites(text: str) -> tuple[str, list[int]]:
+    """A written piece without its citation marks («… 1942 года [41, 42].» → «… 1942 года.», [41, 42]); a piece
+    without marks as it is."""
+    if not has_cites(text):
+        return text, []
+    ids: list[int] = []
+    for m in _CITE_RE.finditer(text or ""):
+        ids += _cite_numbers(m.group(1))
+    out = _CITE_RE.sub("", text or "")
+    out = re.sub(r"\s+([,.;:!?…])", r"\1", " ".join(out.split()))
+    return out.strip(), list(dict.fromkeys(ids))
+
+
+def cited_sentences(text: str) -> list[tuple[str, list[int]]]:
+    """The sentences of a slide's text, each with the reference sentences it cites; a mark written after the full stop
+    («… года. [41]») belongs to the sentence before it. A text without marks: sentences_of, nothing cited."""
+    if not has_cites(text):
+        return [(sn, []) for sn in sentences_of(text)]
+    t = _CITE_MOVE_RE.sub(lambda m: m.group(2) + m.group(1), text or "")
+    out: list[tuple[str, list[int]]] = []
+    for sn in sentences_of(t):
+        clean, ids = split_cites(sn)
+        if not clean.strip(" .;,"):
+            if out:
+                out[-1] = (out[-1][0], list(dict.fromkeys(out[-1][1] + ids)))
+            continue
+        out.append((clean, ids))
+    return out
+
+
+# --- what a written sentence must share with its sources
+
+_DECADE_RE = re.compile(r"(?<![\d.,])(1\d|20)?(\d)0\s*[-‑–]?\s*(?:х|е|ые|ых|ым|ми)(?![а-яё])", re.I)
+_ROMAN = {"I": 1, "V": 5, "X": 10, "L": 50}
+_CENTURY_RE = re.compile(r"(?<![\wё])([IVXL]{1,6}|\d{1,2})(?:\s*-?\s*(?:м|й|го|ом))?\s+(?:век\w*|вв?\.)(?![\wё])")
+_DAY_MONTH_RE = re.compile(rf"(?<![\d.,])(\d{{1,2}})(?:\s*[—–-]\s*\d{{1,2}})?\s+({_MONTH_ALT})", re.I)
+_NUM_DATE_RE = re.compile(r"(?<![\d.,])(\d{1,2})\.(\d{1,2})\.(1\d{3}|20\d{2})(?![\d])")
+_CLOCK_RE = re.compile(
+    r"(?<![\d.,:])(\d{1,2})(?:\s*:\s*|\s+(?:час(?:а|ов)?|ч\.?)\s+)(\d{2}|\d)(?:\s*(?:минут[аы]?|мин\.?))?(?:\s*:\s*\d{2})?(?![\d,])", re.I)
+_RANK_RE = re.compile(
+    r"(?<![\wё-])(?:(?:старш\w+|младш\w+)\s+)?(?:(?:генерал|вице|контр)-)?(?:лейтенант\w*|капитан\w*|майор\w*|подполковник\w*|"
+    r"полковник\w*|генерал\w*|маршал\w*|адмирал\w*|сержант\w*|ефрейтор\w*|генералиссимус\w*|л[её]тчик\w*-космонавт\w*|"
+    r"канцлер\w*|премьер-министр\w*|фюрер\w*|рейхсканцлер\w*)(?![\wё])", re.I)
+_RANK_ORG = r"(?:\s+(?:ВВС|СССР|РККА|ВМФ|армии|флота|авиации|[IV]{1,3}\s+ранга|[А-ЯЁ]{2,5}))?"
+_PROMOTION_RE = re.compile(r"присво\w+|получил\w*\s+(?:\S+\s+){0,3}?звани|повышен\w*\s+в\s+звании|произвед[её]н\w*\s+в|звание\s+\S*\s*(?:было\s+)?присвоено", re.I)
+_HEDGE_W_RE = re.compile(
+    r"(?<![\wё])(?:рассматрива\w+\s+как|счита\w+|по\s+мнению|по\s+(?:некоторым|разным|различным)?\s*оценкам|предполага\w+|"
+    r"возможно|вероятно|как\s+полагают|якобы|ожида\w+|может|могут|мог(?:ут)?\s+бы)(?![\wё])", re.I)
+_HEDGE_S_RE = re.compile(
+    r"(?<![\wё])(?:рассматрива\w+|счита\w+|по\s+мнению|по\s+(?:некоторым|разным|различным)?\s*оценкам|предполага\w+|возможно|"
+    r"вероятно|как\s+полагают|ожида\w+|может|могут|около|более|свыше|почти|примерно|порядка|не\s+менее|до)(?![\wё])", re.I)
+_REPORTED_RE = re.compile(r"(?<![\wё])(?:объявил\w*|объявлено|объявлен[аы]?|сообщил\w*|сообщается|сообщалось|заявил\w*|заявлено|анонсировал\w*|анонсирован\w*|планировал\w*|собирал\w*|намеревал\w*|обещал\w*|подтвердил\w*)(?![\wё])", re.I)
+_PAST_VERB_RE = re.compile(r"(?<![\wё«-])([а-яё]{2,}л(?:а|о|и)?(?:сь|ся)?)(?![\wё])")
+_AUX_VERBS = frozenset({"был", "была", "было", "были", "стал", "стала", "стало", "стали", "мог", "могла", "могли", "могло", "шел",
+                        "шла", "шли", "имел", "имела", "имели", "составил", "составила", "составило", "составили", "являлся",
+                        "являлась", "являлось", "являлись"})
+_NOT_VERBS = frozenset({"земли", "цели", "роли", "модели", "недели", "пыли", "мысли", "соли", "дали", "вели", "угли", "сели", "ели",
+                        "мели", "ноли", "силы", "стали", "начала", "начало", "начали", "пола", "дела", "тела", "села", "мало", "было"})
+# the usual names a source writes otherwise («СССР» / «Советский Союз», «США» / «Соединённые Штаты»)
+_ALIASES = (
+    ("ссср", "советск", "союз"), ("сша", "соедин", "америк"), ("герма", "немец", "нацист", "рейх", "вермах"),
+    ("велико", "брита", "англи", "соединённое королевство"), ("япон",), ("итал",), ("франц",), ("росси", "рф"),
+    ("китай", "кнр"), ("польш", "польск"), ("красн", "советск"), ("земл", "земн"),
+)
+_NUM_WORDS = (("один", 1), ("одна", 1), ("одно", 1), ("одн", 1), ("два", 2), ("две", 2), ("двух", 2), ("двум", 2), ("три", 3),
+              ("трёх", 3), ("трех", 3), ("трем", 3), ("четыр", 4), ("пят", 5), ("шест", 6), ("сем", 7), ("восьм", 8), ("восем", 8),
+              ("девят", 9), ("десят", 10))
+
+
+def _roman(s: str) -> int:
+    if s.isdigit():
+        return int(s)
+    total, prev = 0, 0
+    for ch in reversed(s.upper()):
+        v = _ROMAN.get(ch, 0)
+        total += -v if v < prev else v
+        prev = max(prev, v)
+    return total
+
+
+def _decades(text: str) -> set[int]:
+    """«в 1960-х», «1990-е годы» → {1960, 1990}; «60-х» (the century not written) → {60}."""
+    out = set()
+    for m in _DECADE_RE.finditer(text or ""):
+        out.add(int((m.group(1) or "") + m.group(2) + "0"))
+    return out
+
+
+def _centuries(text: str) -> set[int]:
+    return {c for c in (_roman(m.group(1)) for m in _CENTURY_RE.finditer(text or "")) if 1 <= c <= 21}
+
+
+def _day_months(text: str) -> set[tuple[int, int]]:
+    out = {(int(m.group(1)), _month_of(m.group(2))) for m in _DAY_MONTH_RE.finditer(text or "")}
+    out |= {(int(m.group(1)), int(m.group(2))) for m in _NUM_DATE_RE.finditer(text or "")}
+    for m in re.finditer(rf"(?<![\d.,])(\d{{1,2}})\s*[—–-]\s*(\d{{1,2}})\s+({_MONTH_ALT})", text or "", re.I):
+        mo = _month_of(m.group(3))
+        out |= {(d, mo) for d in range(int(m.group(1)), int(m.group(2)) + 1)}
+    return {x for x in out if 1 <= x[0] <= 31 and x[1]}
+
+
+def _months(text: str) -> set[int]:
+    """The months a text names (outside quotes), with or without a day."""
+    t = re.sub(r"«[^«»]*»", " ", text or "")
+    return {_month_of(m.group(1)) for m in re.finditer(rf"(?<![\wё])({_MONTH_ALT})", t, re.I)} - {0}
+
+
+def _clocks(text: str) -> list[tuple[int, int, int, int]]:
+    """(start, end, hours, minutes) of every clock time («9:07», «10 часов 53 минуты», «10 ч 55 мин»)."""
+    out = []
+    for m in _CLOCK_RE.finditer(text or ""):
+        h, mi = int(m.group(1)), int(m.group(2))
+        if h <= 24 and mi < 60 and (":" in m.group(0) or re.search(r"час|ч\b|ч\.", m.group(0))):
+            out.append((m.start(), m.end(), h, mi))
+    return out
+
+
+# light verbs: the event is the noun next to them («посадка произошла», «полёт длился» for «длительность полёта»)
+_LIGHT_VERB_RE = re.compile(r"^(?:произош[её]?л|состоял|прош[её]?л|длил|продолжал|оказал|насчитывал|составлял|находил|имел|велись|вел|проходил|"
+                            r"существовал|действовал|потерпел|совершил|принял|пров[её]л|нан[её]с|получил|добил)")
+
+
+_EVENT_VERB_RE = re.compile(
+    r"^(?:созд|основ|куп|приобр|прода|запус|закры|побед|проигр|напа|захват|освобод|подпис|капитул|погиб|умер|род|назнач|избра|"
+    r"переим|объяв|вступ|вышл|вышел|вывел|присоедин|аннекс|оккуп|разгром|окруж|высад|сбил|уничтож|выпуст|откры|отдел|приземл|стартов|"
+    r"получил|потерял|отказал|отклон|принял|утвердил|сменил|покинул|возглав|ушёл|ушел|ушла)")
+
+
+# the short passive participles of an event («была основана», «подписан», «переименована»)
+_EVENT_PARTICIPLE_RE = re.compile(
+    r"(?<![\wё«-])((?:основ|созд|запущ|откры|подпис|заключ|учрежд|постро|выпущ|прод|купл|приобрет|переименов|образов|сформиров|"
+    r"назв|избр|назнач|уби|взя|освобожд|окруж|разгромл|объявл|утвержд|приня|отменен|ликвидиров|присоедин|аннексиров|"
+    r"оккупиров|захвач|разработ|представл|запрещ|закры)[а-яё]*?(?:ан|ен|ён|ян|ят|ыт|ит|т)(?:а|о|ы)?)(?![\wё])", re.I)
+
+
+def _past_verbs(text: str) -> list[str]:
+    t = re.sub(r"«[^«»]*»", " ", text or "")
+    out = [m.group(1).lower() for m in _EVENT_PARTICIPLE_RE.finditer(t)]
+    for m in _PAST_VERB_RE.finditer(t):
+        w = m.group(1).lower()
+        if w in _AUX_VERBS or w in _NOT_VERBS or len(w) < 4 or _LIGHT_VERB_RE.match(w) or re.search(r"(?:ит|ят|ат|ват)ели$", w):
+            continue
+        if w in out:
+            continue  # «жители», «производители», «двигатели»: nouns, not past verbs
+        out.append(w)
+    return list(dict.fromkeys(out))
+
+
+def _verb_in(word: str, low: str) -> bool:
+    """The verb (or a word of its root: «подписал» / «подписание», a synonym: «напала» / «вторжение») is in the text."""
+    stem5 = word.replace("ё", "е")[:5] if len(word) >= 6 else word.replace("ё", "е")[: max(3, len(word) - 2)]
+    return any(re.search(r"(?<![\wё])" + re.escape(alt), low) for alt in _synonyms(stem5))
+
+
+def _num_word_values(text: str) -> set[float]:
+    out = set()
+    for w in re.findall(r"[а-яё]+", (text or "").lower()):
+        for pre, v in _NUM_WORDS:
+            if w.startswith(pre) and len(w) <= len(pre) + 4:
+                out.add(float(v))
+                break
+    return out
+
+
+_BOUND_WORDS = (
+    ("upper", r"до|не\s+более|не\s+больше|не\s+старше|менее|меньше|моложе|максимум|не\s+выше|ниже"),
+    ("lower", r"свыше|более|больше|не\s+менее|не\s+меньше|старше|минимум|от|не\s+ниже|выше"),
+    ("approx", r"около|примерно|порядка|почти|приблизительно|ориентировочно"),
+)
+
+
+def _bound_of(text: str, at: int) -> Optional[str]:
+    """«upper» / «lower» / «approx» for a figure written after a bound word («не больше 30 лет», «около 30 лет»), else
+    None (a plain figure)."""
+    before = (text or "")[max(0, at - 24):at].lower()
+    for name, words in _BOUND_WORDS:
+        if re.search(rf"(?<![\wё])(?:{words})\s*[—–-]?\s*$", before):
+            return name
+    return None
+
+
+def _sig(v: float) -> int:
+    s = f"{abs(v):.6g}".replace(".", "").lstrip("0").rstrip("0")
+    return max(1, len(s))
+
+
+class Anchors:
+    """The written text's sources: the numbered sentences the writer read (prompt number → ArticleSupport sentence),
+    the anchor check of a written sentence against the sentences it cites, the re-anchoring of a sentence to the
+    article sentence that supports it best, and the article's own clause in place of a sentence that fails."""
+
+    def __init__(self, support: "ArticleSupport", pages: Optional[list[dict]] = None, year_now: Optional[int] = None, topic: str = "") -> None:
+        self.support = support
+        self.pages = list(pages or [])  # [{"title", "url"}] in the order of the articles
+        self.year_now = year_now or time.localtime().tm_year
+        self.at: dict[int, int] = {}  # prompt number → support sentence
+        self.shown: dict[int, str] = {}
+        self._clk: dict[int, list] = {}
+        self.topic4 = {w.lower().replace("ё", "е")[:4] for w in re.findall(r"[A-Za-zА-Яа-яЁё]{2,}", topic or "")}
+
+    # -------------------------------------------------------------- the numbered sentences
+
+    def _norm_index(self) -> dict[str, list[int]]:
+        if self.support._norm is None:
+            idx: dict[str, list[int]] = {}
+            for i, s in enumerate(self.support.sents):
+                idx.setdefault(" ".join(s.split()).strip(" …"), []).append(i)
+            self.support._norm = idx
+        return self.support._norm
+
+    def add(self, sents: list[Any]) -> None:
+        """Map numbered sentences (reference.RefSentence) to the article's sentences: the same text, else the sentence
+        that starts with it (a cut ends a sentence with «…»), else the one that has most of its words."""
+        norm = self._norm_index()
+        last = -1
+        for r in sents:
+            t = " ".join(str(r.text).split()).strip(" …")
+            self.shown[r.id] = r.text
+            got = norm.get(t)
+            if got:
+                i = next((k for k in got if k > last), got[0])
+            else:
+                head = t[:60]
+                i = next((k for k in range(max(0, last), len(self.support.sents)) if self.support.sents[k].startswith(head)), None)
+                if i is None:
+                    i = next((k for k, s in enumerate(self.support.sents) if head and head in s), None)
+                if i is None:
+                    i = _evidence_sentence(t, self.support)
+            if i is not None:
+                self.at[r.id] = i
+                last = i
+
+    def idx(self, ids: Iterable[int]) -> list[int]:
+        return list(dict.fromkeys(self.at[i] for i in ids if i in self.at))
+
+    # -------------------------------------------------------------- the passage of a statement
+
+    def _near(self, at: list[int]) -> list[int]:
+        """The neighbours (± 1, same paragraph) of the cited sentences, not cited themselves."""
+        sup = self.support
+        out = []
+        for i in at:
+            for j in (i - 1, i + 1):
+                if 0 <= j < len(sup.sents) and j not in at and sup.para[j] == sup.para[i] and not _heading(sup.sents[j]):
+                    out.append(j)
+        return list(dict.fromkeys(out))
+
+    def clocks(self, i: int) -> set[tuple[int, int]]:
+        got = self._clk.get(i)
+        if got is None:
+            got = [(h, m) for _a, _b, h, m in _clocks(self.support.sents[i])]
+            self._clk[i] = got
+        return set(got)
+
+    def _entity_in(self, e: "_Ent", low: str) -> bool:
+        for p in e.prefs:
+            alts = next((g for g in _ALIASES if any(p.startswith(a) or a.startswith(p) for a in g if len(a) >= 3)), (p,))
+            if not any(re.search(r"(?<![\wё])" + re.escape(a), low) for a in dict.fromkeys((p,) + tuple(alts))):
+                return False
+        return True
+
+    def issue(self, text: str, at: list[int], strict_verbs: bool = True, tokens_only: bool = False) -> Optional[str]:
+        """Why the written statement is not what the sentences it cites (`at`, ArticleSupport positions) say, or None:
+        every year, decade, century, day and month, clock time, figure, name and rank of it must stand in them (a
+        neighbour of the same paragraph gives only what the cited sentence lacks: its year, its day), the verb of a
+        dated event in the sentence that gives the date, the tense of the article's event, the article's hedge."""
+        from verstka.planning.grounding import _is_year, content_stems, figures
+
+        sup = self.support
+        at = [i for i in at if 0 <= i < len(sup.sents)]
+        if not at:
+            return "no source"
+        text = " ".join((text or "").split())
+        near = self._near(at)
+        cited_txt = [sup.sents[i] for i in at]
+        near_txt = [sup.sents[i] for i in near]
+        c_low = "\n".join(sup.low[i] for i in at)
+        a_low = "\n".join(sup.low[i] for i in at + near)
+        # years: in a cited sentence; a neighbour's only when the cited sentence has none (it tells «в том же году»)
+        c_years = [y for i in at for y in sup.years[i]]
+        n_years = [y for i in near for y in sup.years[i]]
+        own = _years_of(text)
+        for y in own:
+            def within(pool: list, y: tuple = y) -> bool:
+                return all(any(z[2] <= v <= z[3] for z in pool) for v in {y[2], y[3]})
+            if within(c_years) or (not c_years and within(n_years)):
+                continue
+            return f"the year {y[2]}{'–' + str(y[3]) if y[3] != y[2] else ''} is not in its source"
+        dec = _decades(text)
+        if dec:
+            have = _decades(c_low) | {y[2] // 10 * 10 for y in c_years} | {(y[2] // 10 * 10) % 100 for y in c_years}
+            for d in dec:
+                if d not in have:
+                    return f"the decade «{d}-х» is not in its source"
+        cent = _centuries(text)
+        if cent:
+            have = _centuries(" ".join(cited_txt)) | {(y[2] - 1) // 100 + 1 for y in c_years}
+            for c in cent:
+                if c not in have:
+                    return f"the century {c} is not in its source"
+        dm = _day_months(text)
+        if dm:
+            c_dm = set().union(*(_day_months(t) for t in cited_txt)) if cited_txt else set()
+            n_dm = set().union(*(_day_months(t) for t in near_txt)) if near_txt else set()
+            for d in dm:
+                if d not in c_dm and not (d in n_dm and not c_dm):
+                    return f"the date {d[0]} {_MONTH_GEN[d[1] - 1]} is not in its source"
+        mo = _months(text) - {m for _d, m in dm}
+        if mo:
+            have = set().union(*(_months(t) for t in cited_txt + (near_txt if not any(_months(t) for t in cited_txt) else [])))
+            for m in mo:
+                if m not in have:
+                    return f"the month «{_MONTH_NOM[m - 1]}» is not in its source"
+        clk = _clocks(text)
+        if clk:
+            have = set().union(*(self.clocks(i) for i in at + near))
+            for _a, _b, h, m in clk:
+                if (h, m) not in have:
+                    return f"the time {h}:{m:02d} is not in its source"
+        # figures (not years, dates or clock times): the source's value, or its rounding
+        spans = [(a, b) for a, b, _h, _m in clk] + [(y[0], y[1]) for y in _year_spans(text)]
+        mine = [f for f in figures(text) if f.date is None and not _is_year(f) and not any(a <= f.start < b for a, b in spans)]
+        if mine:
+            pairs = [(g, t) for t in cited_txt + near_txt for g in figures(t) if g.date is None]
+            theirs = [g for g, _t in pairs]
+            words = _num_word_values(" ".join(cited_txt + near_txt))
+            hedged = bool(_HEDGE_S_RE.search(text))
+            src_of = {id(g): t for g, t in pairs}
+            for f in mine:
+                same = [g for g in theirs if abs(f.mag - g.mag) <= 1e-6 * max(1.0, abs(g.mag))]
+                ok = bool(same) or (f.scale == 1.0 and f.value in words)
+                if not ok:
+                    ok = any(g.mag and abs(f.mag - g.mag) / abs(g.mag) <= 0.1 and (hedged or _sig(f.mag) < _sig(g.mag)) for g in theirs)
+                if not ok:
+                    return f"the figure «{text[f.start:f.uend].strip()}» is not in its source"
+                # a bound stays a bound: «не больше 30 лет» is not «около 30 лет» or «30 лет»
+                if same:
+                    mine_b = _bound_of(text, f.start)
+                    if all(_bound_of(src_of.get(id(g), ""), g.start) not in (None, mine_b) and _bound_of(src_of.get(id(g), ""), g.start) != "approx" for g in same):
+                        return f"the figure «{text[f.start:f.uend].strip()}» is a bound in its source"
+        # a figure of a month or a quarter told as the whole year's («В 2025 году мировые продажи составили 1,26 млн» of
+        # «в январе 2025 года»)
+        if mine and own:
+            for y in own:
+                if re.search(rf"(?:{_MONTH_ALT}|квартал\w*|половин\w*|полугоди\w*|месяц\w*)\s+{y[2]}", text[max(0, y[0] - 30):y[1]], re.I):
+                    continue
+                spots = [(t, m.start()) for t in cited_txt for m in re.finditer(rf"(?<![\d.,]){y[2]}(?![\d.,])", t)]
+                if spots and all(re.search(rf"(?:{_MONTH_ALT}|квартал\w*|половин\w*|полугоди\w*|месяц\w*)\s+(?:\S+\s+)?$", t[max(0, p - 30):p], re.I) for t, p in spots):
+                    return f"its source gives a part of {y[2]}, not the whole year"
+        # names: every name of the statement in the passage (the topic's own name needs none)
+        for e in sup.entities(text):
+            if sup.subject and e.text.lower().startswith(sup.subject.lower()[:4]):
+                continue
+            if all(p[:4] in self.topic4 for p in e.prefs):
+                continue  # «Полёт Гагарина» of the topic «Полёт Гагарина»
+            if e.start == 0 and _LEAD_WORD_RE.match(e.text.split()[0]):
+                continue  # «Также на этом заводе…», «После войны…»: the sentence's first word, not a name
+            if not self._entity_in(e, a_low):
+                return f"«{e.text}» is not in its source"
+        # ranks and titles: in a cited sentence
+        for m in _RANK_RE.finditer(text):
+            r = m.group(0).lower().replace("ё", "е")
+            key = re.sub(r"(?:ом|ым|ой|ей|ем|у|а|ы|ов|ами|ах)$", "", r.split()[-1])[:7]
+            if not re.search(r"(?<![\wё-])" + re.escape(key), c_low.replace("ё", "е")):
+                return f"the rank «{m.group(0)}» is not in its source"
+        if tokens_only:
+            return None  # its dates, figures, names and ranks are the passage's (the lenient keep of an uncited statement)
+        # the tense of the event
+        fut_s = bool(_FUTURE_ANY_RE.search(text))
+        fut_w = bool(_FUTURE_ANY_RE.search(c_low))
+        past_w = bool(_PAST_RE.search(c_low))
+        if fut_s and not fut_w:
+            return "a done event told as a plan"
+        if fut_s and own and max(y[3] for y in own) < self.year_now and not _REPORTED_RE.search(text):
+            return f"the future tense for {max(y[3] for y in own)}, a past year"
+        if not fut_s and fut_w and not past_w and _PAST_RE.search(text):
+            return "a plan told as done"
+        # the source hedges it («рассматриваются как…», «по оценкам»), the statement does not
+        if _HEDGE_W_RE.search(c_low) and not _HEDGE_S_RE.search(text) and not figures(text) and not own:
+            return "the source hedges it"
+        # a dated event keeps its verb: each verb of the statement in the passage, one of them in a sentence of its date
+        dated = bool(own or dm or clk or dec or cent)
+        verbs = _past_verbs(text) if strict_verbs and not sup._rename_ok(text) else []  # a rename the lead's former
+        # names state («до 2010 года — Digital Sky Technologies») has no «переименована» to find
+        if not dated:
+            # an undated statement keeps its fact-changing verbs (created / bought / won / signed…); a softer verb may be
+            # the writer's plainer word («стремилась» for «желавшая доминировать»)
+            verbs = [v for v in verbs if _EVENT_VERB_RE.match(v)]
+        if verbs:
+            for v in verbs:
+                if not _verb_in(v, a_low):
+                    return f"«{v}» is not what its source tells"
+        if dated and len(at + near) > 1:
+            # each date's own sentence names the name the statement puts next to it (gate 3: «Германия … 2 сентября
+            # 1945 года» citing the German surrender and the Japanese one)
+            named = [e for e in sup.entities(text) if not all(p[:4] in self.topic4 for p in e.prefs)
+                     and not (sup.subject and e.text.lower().startswith(sup.subject.lower()[:4]))]
+            if named:
+                toks: list[tuple[int, int, Callable[[int], bool]]] = []
+                for m in _DAY_MONTH_RE.finditer(text):
+                    d = (int(m.group(1)), _month_of(m.group(2)))
+                    toks.append((m.start(), m.end(), lambda i, d=d: d in _day_months(sup.sents[i])))
+                for a, b, h, mi in clk:
+                    toks.append((a, b, lambda i, hm=(h, mi): hm in self.clocks(i)))
+                if not toks:
+                    for y in own:
+                        toks.append((y[0], y[1], lambda i, y=y: any(z[2] <= y[2] <= z[3] for z in sup.years[i])))
+                cuts = [0] + [m.end() for m in re.finditer(r",\s+(?:а|но|и|однако|тогда\s+как)\s+|;\s+", text)] + [len(text) + 1]
+                for a, b, has in toks:
+                    ds = [i for i in at + near if has(i)]
+                    lo = max(c for c in cuts if c <= a)
+                    hi = min(c for c in cuts if c > a)
+                    mine = [e for e in named if lo <= e.start < hi]
+                    if not mine or not ds:
+                        continue
+                    e = min(mine, key=lambda e: min(abs(e.start - b), abs(a - e.end)))
+                    if not any(self._entity_in(e, sup.low[i]) for i in ds):
+                        return f"the date belongs to another event of its source (not «{e.text}»)"
+        if verbs and dated:
+            date_sents = [i for i in at + near if (own and any(any(z[2] <= y[2] <= z[3] for z in sup.years[i]) for y in own))
+                          or (clk and self.clocks(i) & {(h, m) for _a, _b, h, m in clk})
+                          or (dm and _day_months(sup.sents[i]) & dm)]
+            if date_sents and not any(_verb_in(v, sup.low[i]) for v in verbs for i in date_sents):
+                return "the date belongs to another event of its source"
+        # the statement tells what its sources tell: some of its words are there (a rename the lead's former names state
+        # is checked by its years and names alone)
+        mine_st = self._words(text) if not sup._rename_ok(text) else set()
+        if mine_st:
+            hit = self._shared(mine_st, at + near)
+            if hit < max(1, int(0.4 * len(mine_st) + 0.5)):
+                return "its source tells something else"
+        return None
+
+    def _words(self, text: str) -> set[str]:
+        from verstka.planning.grounding import content_stems
+
+        words = {w.lower() for w in re.findall(r"[а-яё]+", text or "", re.I) if _LIGHT_VERB_RE.match(w.lower()) or w.lower() in _AUX_VERBS}
+        light = {x[:5] for w in words for x in content_stems(w, neutral=True)}
+        return {x[:5] for x in content_stems(text, neutral=True) if not re.match(r"^\d", x) and not _is_month_stem(x[:5])} - self.support.topic - light
+
+    def _shared(self, mine: set[str], at: list[int]) -> int:
+        """How many of the statement's words (5-letter stems, a synonym counts) the sentences `at` have."""
+        have = set().union(*(self.support.sstems[i] for i in at)) if at else set()
+        return sum(1 for x in mine if any(b in have or any(h.startswith(b) for h in have) for b in _synonyms(x)))
+
+    # -------------------------------------------------------------- re-anchoring and the article's own clause
+
+    def candidates(self, text: str, k: int = 10) -> list[int]:
+        """The article sentences that share most of the statement's rare words, names and years."""
+        sup = self.support
+        ents = sup.entities(text)
+        rare = sup.rare(text, [p for e in ents for p in e.prefs])
+        score: dict[int, float] = {}
+        for x in rare:
+            for i in sup.hits(x):
+                score[i] = score.get(i, 0) + 1
+        for e in ents:
+            for i in sup.find(e):
+                score[i] = score.get(i, 0) + 1.5
+        for y in _statement_years(text):
+            for i, ys in enumerate(sup.years):
+                if any(z[2] <= y[2] <= z[3] for z in ys):
+                    score[i] = score.get(i, 0) + 1
+        best = sorted(score, key=lambda i: (-score[i], i))
+        return [i for i in best if score[i] >= 2][:k]
+
+    def reanchor(self, text: str) -> Optional[list[int]]:
+        """The article sentence (or two neighbours) that states the statement — every token of it there and most of its
+        words; None when the article does not state it."""
+        sup = self.support
+        mine = self._words(text)
+        for i in self.candidates(text):
+            for at in ([i], [i, i + 1], [i - 1, i]):
+                if any(j < 0 or j >= len(sup.sents) or sup.para[j] != sup.para[i] for j in at):
+                    continue
+                if self.issue(text, at) is not None:
+                    continue
+                hit = self._shared(mine, at)
+                if len(at) == 1:
+                    ok = hit >= max(2 if len(mine) >= 3 else len(mine), -(-len(mine) // 2))
+                else:
+                    # two sentences: most of the words, each sentence some of them
+                    ok = hit >= max(3 if len(mine) >= 4 else len(mine), -(-2 * len(mine) // 3)) and all(self._shared(mine, [j]) for j in at)
+                if not mine or ok:
+                    return at
+        return self._enumeration(text)
+
+    def _enumeration(self, text: str) -> Optional[list[int]]:
+        """A list of names the article gives in several sentences («Основные производители — «Москвич», «Моторинвест» и
+        «Автотор»»): each name in a sentence that has a word of the statement too; no date, no figure."""
+        from verstka.planning.grounding import figures
+
+        sup = self.support
+        ents = [e for e in sup.entities(text) if not all(p[:4] in self.topic4 for p in e.prefs)]
+        if len(ents) < 3 or _statement_years(text) or figures(text) or _day_months(text):
+            return None
+        rare = sup.rare(text, [p for e in ents for p in e.prefs])
+        if not rare:
+            return None
+        at: list[int] = []
+        for e in ents:
+            hit = next((i for i in sup.find(e) if any(i in sup.hits(x) for x in rare)), None)
+            if hit is None:
+                return None
+            if hit not in at:
+                at.append(hit)
+        at = at[:5]
+        return at if self.issue(text, at) is None else None
+
+    def clause(self, text: str, at: list[int], others: Iterable[str] = ()) -> Optional[tuple[str, int]]:
+        """The cited sentence closest to the statement, compressed (article_clause: no brackets, ≤ 32 words or the clause
+        of the statement's names), when it stands alone and says nothing the deck already says: (clause, its sentence)."""
+        from verstka.planning.agent import said_in, same_text
+        from verstka.planning.grounding import content_stems
+
+        sup = self.support
+        mine = set(x[:5] for x in content_stems(text, neutral=True))
+        order = sorted(at, key=lambda i: -len(mine & sup.sstems[i]))
+        prefs = [p for e in sup.entities(text) for p in e.prefs]
+        others = list(others)
+        for i in order:
+            for pf in ([p for p in prefs if re.search(r"(?<![\wё])" + re.escape(p), sup.low[i])], []):
+                new = article_clause(sup.sents[i], pf, want_year=bool(_statement_years(text)))
+                new = unlinked(new) if new else new
+                if not new or anaphoric(new) or _IN_IT_RE.match(new) or _DEIXIS_RE.search(new) or _stale_future(new, self.year_now) or not _has_subject(new, sup._cap_mid):
+                    continue
+                if any(same_text(new, x) or said_in(x, new, 0.75) or said_in(new, x, 0.75) for x in others):
+                    continue
+                if sup.pair_issue(new) is not None:
+                    continue
+                return new, i
+        return None
+
+    def source(self, at: list[int]) -> dict:
+        """What the person sees under a statement: the article and its sentence(s)."""
+        sup = self.support
+        i = at[0]
+        page = self.pages[sup.page_of[i]] if self.pages and sup.page_of[i] < len(self.pages) else (self.pages[0] if self.pages else {})
+        return {"page": page.get("title") or "", "url": page.get("url") or "", "sentence": " ".join(sup.sents[j] for j in at)[:600]}
+
+
+# the future tense as articles write plans («получит новые названия», «переименуется в 2022 году»): _FUTURE_RE and the
+# usual perfective verbs of a plan
+_FUTURE_ANY_RE = re.compile(
+    _FUTURE_RE.pattern[:-len(r")(?![\wё])")] + r"|получит|получат|переименуется|переименуют|откроет|откроют|выйдет|выйдут|заработает|"
+    r"запустит|запустят|составит|составят|достигнет|достигнут|превысит|увеличится|увеличатся|сократится|вырастет|вырастут|"
+    r"продолжит|продолжат|завершится|завершат|пройд[её]т|построит|построят|создаст|создадут|объединит|перейд[её]т|перейдут)(?![\wё])",
+    re.I,
+)
+
+
+_LEAD_WORD_RE = re.compile(
+    r"^(?:При|В|Во|На|С|Со|По|Для|После|До|Из|За|От|У|К|О|Об|Около|Через|Благодаря|Также|Кроме|Однако|Затем|Помимо|Несмотря|Согласно|"
+    r"Вместе|Тем|Так|Как|Когда|Если|Хотя|Поэтому|Ещё|Еще|Уже|Лишь|Только|Всего|Более|Менее|Около|Почти|Свыше|Способен|Способна)$")
+
+
+def _has_subject(clause: str, cap_mid: Callable[[str], bool]) -> bool:
+    """A sentence that stands alone names what it is about: it opens with a noun or a name, or names someone inside
+    («При максимальной скорости 75 км/ч … способен проехать 20 км» continues the sentence before it: no)."""
+    words = re.findall(r"[«A-Za-zА-Яа-яЁё][\w«»\-.]*", clause or "")
+    if not words:
+        return False
+    first = words[0].strip("«»")
+    if not _LEAD_WORD_RE.match(first) and not re.match(r"^\d", first):
+        return True
+    return any(w[:1].isupper() and len(w) >= 2 or w.startswith("«") or re.search(r"[A-Z]", w) for w in words[1:]) or bool(
+        re.search(r"(?<![\wё])(?:компани\w+|корабл\w+|войн\w+|армия|войска|правительств\w+|завод\w*|сервис\w*|служба|автомобил\w+|электромобил\w+|"
+                  r"государств\w+|стран\w+|город\w*|рынок|продаж\w+|производств\w+|сеть|сети|население|люди|космонавт\w*|корпораци\w+)(?![\wё])", clause or "", re.I))
+
+
+_UNIT_AFTER_RE = re.compile(r"^\s*(?:кг|км|м|т|тонн\w*|л|шт|чел\w*|руб\w*|долл\w*|евро|%|мвт|квт|мм|см|г|мин\w*|сек\w*|ч|кв|единиц\w*|"
+                            r"экземпляр\w*|штук\w*|сотрудник\w*|человек|машин\w*|автомобил\w*|электромобил\w*)(?![\wё])", re.I)
+
+
+def _years_of(text: str) -> list[tuple[int, int, int, int]]:
+    """The years of a statement (outside quoted names), not a count that looks like one («1000 кг», «1500 человек»)."""
+    return [y for y in _statement_years(text) if not _UNIT_AFTER_RE.match(text[y[1]:])]
+
+
+def _stale_future(text: str, year_now: int) -> bool:
+    """A statement in the future tense about a year already past («с 2025 года начнётся производство» in 2026, ««Юла»
+    переименуется в «VK Объявления» в 2022 году»), not told as reported speech («было объявлено, что … будут
+    выпускаться»)."""
+    if not _FUTURE_ANY_RE.search(text or "") or _REPORTED_RE.search(text or ""):
+        return False
+    ys = _statement_years(text)
+    return bool(ys) and max(y[3] for y in ys) < year_now
+
+
+def later_titles(text: str, support: "ArticleSupport") -> Optional[str]:
+    """The statement without a rank or a title the articles tell as given later («Он получил воинское звание майора
+    ВВС… почётное звание Лётчик-космонавт СССР»): «На борту находился лётчик-космонавт СССР майор ВВС Юрий Гагарин» →
+    «На борту находился Юрий Гагарин» (he started as a senior lieutenant). Only a title right before a name goes; None
+    when there is none to cut."""
+    if not _RANK_RE.search(text or "") or _PROMOTION_RE.search(text or ""):
+        return None
+    promoted = getattr(support, "_promoted", None)
+    if promoted is None:
+        promoted = [s.replace("ё", "е") for s in support.low if _PROMOTION_RE.search(s)]
+        support._promoted = promoted
+    if not promoted:
+        return None
+    out = text
+    changed = True
+    while changed:
+        changed = False
+        for m in _RANK_RE.finditer(out):
+            key = m.group(0).lower().replace("ё", "е").split()[-1][:6]
+            if not any(key in s for s in promoted):
+                continue
+            tail = re.match(_RANK_ORG + r"\s+(?=[А-ЯЁ][а-яё])", out[m.end():])
+            if not tail:
+                continue
+            out = out[: m.start()] + out[m.end() + tail.end():]
+            changed = True
+            break
+    out = " ".join(out.split())
+    return out if out != text and len(out.split()) >= 4 else None
+
+
+def _raw_ids(s: "_Slide", sn: str) -> list[int]:
+    """The reference numbers the writer cited for a sentence of the slide: its own, else those of the written sentence it
+    was made from (a conjunction cut, a grammar fix: most of its words)."""
+    got = s.cites.get(sn)
+    if got is not None:
+        return got
+    return _fuzzy_get(s.cites, sn) or []
+
+
+def _fuzzy_get(table: dict[str, list[int]], sn: str) -> Optional[list[int]]:
+    if not table:
+        return None
+    from verstka.planning.grounding import content_stems
+
+    mine = {x[:5] for x in content_stems(sn, neutral=True)}
+    if not mine:
+        return None
+    best, got = 0.0, None
+    for k, v in table.items():
+        theirs = {x[:5] for x in content_stems(k, neutral=True)}
+        if not theirs:
+            continue
+        share = len(mine & theirs) / max(len(mine), len(theirs))
+        if share > best:
+            best, got = share, v
+    return got if best >= 0.6 else None
+
+
+_FOUNDING_TITLE_RE = re.compile(r"основани|создани|истоки|появлени|зарождени", re.I)
+_FOUNDED_RE = re.compile(r"(?<![\wё])(?:основан\w*|создан\w*|учрежд[её]н\w*)\s+(?:\S+\s+){0,3}?в\s+(?:1\d{3}|20\d{2})\s+году", re.I)
+
+
+def _founding_year(s: "_Slide", anchors: Anchors, others: list[str]) -> Optional[tuple[str, int]]:
+    """A founding slide left without its year (gate 3: «Основание» of «История VK» lost «…основана в 1998 году»): the
+    article's founding sentence (the first that says «основан… в 1998 году»), compressed."""
+    if not _FOUNDING_TITLE_RE.search(s.title or "") or any(_statement_years(x) for x in s.sentences):
+        return None
+    sup = anchors.support
+    for i, t in enumerate(sup.sents[:60]):
+        if _FOUNDED_RE.search(t):
+            got = anchors.clause(t, [i], others)
+            if got:
+                return got
+    return None
+
+
+def cited_share(deck: _Deck) -> float:
+    """The share of the written sentences that cite the reference (a model that ignored the numbers cites none)."""
+    sents = [(s, x) for s in deck.slides for x in s.sentences if x not in s.theses]
+    return sum(1 for s, x in sents if _raw_ids(s, x)) / len(sents) if sents else 1.0
+
+
+def anchor_deck(deck: _Deck, anchors: Anchors, removed: list[dict], edits: list[dict], first: int = 1, stats: Optional[dict] = None,
+                lenient: Optional[bool] = None) -> dict:
+    """Every written sentence against the reference sentences it cites (Anchors.issue); a rank or title the article
+    tells as given later is cut (later_titles). A sentence that fails, or cites nothing, is re-anchored to the article
+    sentence that states it (Anchors.reanchor); else it is replaced by its cited sentence compressed (Anchors.clause),
+    else it goes (with a sentence right after it that leans on it — unless that one can take its own cited sentence).
+    Timeline entries are checked the same way (an entry that fails goes); data rows get their sources. The user's theses
+    stay as written. Returns the counts."""
+    stats = stats if stats is not None else {}
+    for k in ("anchored", "reanchored", "replaced", "dropped", "titles", "kept"):
+        stats.setdefault(k, 0)
+    sup = anchors.support
+    # a model that did not cite (fewer than half its sentences): an uncited statement the full article supports stays,
+    # as before the anchors (the final model may follow the numbers less well)
+    lenient = cited_share(deck) < 0.5 if lenient is None else lenient
+    for i, s in enumerate(deck.slides, first):
+        s.anchors = anchors
+        drop: dict[str, str] = {}
+        out: list[str] = []
+        replaced: set[str] = set()
+        for sn in list(s.sentences):
+            if sn in s.theses:
+                out.append(sn)
+                continue
+            ids = _raw_ids(s, sn)
+            cur = sn
+            t2 = later_titles(cur, sup)
+            if t2:
+                edits.append({"where": f"{i}", "text": cur, "now": t2, "why": "anchor: a rank or title the article tells as given later"})
+                s.cites[t2] = ids
+                cur = t2
+                stats["titles"] += 1
+            at = anchors.idx(ids)
+            why = anchors.issue(cur, at) if at else "no citation"
+            if why is None and _THEN_RE.search(cur):
+                # «В том же году …» is dated by the sentence before it: that one's year must be its source's
+                prev = {y[2] for x in out[-1:] for y in _statement_years(x)}
+                mine = {y[2] for j in at for y in sup.years[j]}
+                if not prev or not (prev & mine):
+                    why = "its time («в том же году») is the sentence before's, not its source's"
+            if why is None:
+                out.append(cur)
+                s.src[cur] = at
+                stats["anchored"] += 1
+                continue
+            re_at = anchors.reanchor(cur) if not _THEN_RE.search(cur) else None
+            if re_at:
+                out.append(cur)
+                s.src[cur] = re_at
+                stats["reanchored"] += 1
+                continue
+            if not at and lenient and sup.supported(cur):
+                weak = next((i for i in anchors.candidates(cur)[:3] if anchors.issue(cur, [i], tokens_only=True) is None), None)
+                if weak is not None:
+                    out.append(cur)
+                    s.src[cur] = [weak]
+                    stats["kept"] += 1
+                    continue
+            others = [x for sl in deck.slides for x in sl.sentences if x != sn] + out
+            got = anchors.clause(cur, at, others) if at else None
+            if got:
+                new, j = got
+                edits.append({"where": f"{i}", "text": cur, "now": new, "why": f"anchor: {why}"})
+                out.append(new)
+                s.src[new] = [j]
+                replaced.add(new)
+                stats["replaced"] += 1
+                continue
+            drop[cur] = f"anchor: {why}"
+            out.append(cur)
+        s.sentences = out
+        # a pronoun right after a sentence the article's words replaced may point at another subject now («Длительность
+        # полёта составила 106 минут. Он стал первым…»): its own cited sentence, or it goes
+        for k in range(1, len(s.sentences)):
+            sn = s.sentences[k]
+            if s.sentences[k - 1] in replaced and sn not in s.theses and sn not in drop and _ORPHAN_RE.match(sn.strip()):
+                new = orphan_fix(s, sn)
+                if new and not anaphoric(new):
+                    edits.append({"where": f"{i}", "text": sn, "now": new, "why": "anchor: its antecedent was replaced"})
+                    s.sentences[k] = new
+                else:
+                    drop[sn] = "anchor: its antecedent was replaced"
+        if drop:
+            stats["dropped"] += _prune(s, lambda x, drop=drop: drop.get(x), removed, f"{i}")
+        if s.timeline:
+            tl = []
+            for e in s.timeline:
+                line = f"{e['when']} — {e['what']}"
+                at = anchors.idx(e.get("src") or [])
+                why = anchors.issue(line, at, strict_verbs=False) if at else "no citation"
+                if why is not None:
+                    re_at = anchors.reanchor(line)
+                    if re_at:
+                        at, why = re_at, None
+                if why is None:
+                    tl.append({**e, "at": at})
+                else:
+                    _removed(removed, f"{i}", line, f"anchor: {why}")
+                    stats["dropped"] += 1
+            s.timeline = tl if len(tl) >= 3 else None
+        if s.data:
+            unit = s.data.get("unit") or ""
+            for r in s.data.get("rows") or []:
+                got = anchors.reanchor(f"{r['label']} — {fmt_value(r['value'])} {unit}".strip())
+                if got:
+                    r["at"] = got
+        others = [x for sl in deck.slides for x in sl.sentences]
+        got = _founding_year(s, anchors, others)
+        if got:
+            new, j = got
+            s.sentences.insert(0, new)
+            s.src[new] = [j]
+            edits.append({"where": f"{i}", "text": "", "now": new, "why": "anchor: a founding slide keeps the article's founding year"})
+    deck.slides = [s for s in deck.slides if not s.empty or s.theses]
+    return stats
+
+
+def fill_summary(deck: _Deck, want: int = 3) -> int:
+    """The summing-up slide says the deck's key facts: one of fewer than `want` sentences gets the deck's earliest and
+    latest dated statements (short, standing alone, not said there yet) — the live «История VK» ended on two lines.
+    Returns how many were added."""
+    from verstka.planning.agent import said_in
+
+    if len(deck.slides) < 3:
+        return 0
+    last = deck.slides[-1]
+    if not SUMMARY_TITLE_RE.match(last.title or "") or len(last.sentences) >= want or last.timeline or last.data:
+        return 0
+    cands = []
+    for s in deck.slides[:-1]:
+        for x in s.sentences:
+            ys = _years_of(x)
+            if ys and len(x.split()) <= 18 and not anaphoric(x) and not _then_start(x) and not _LEAD_CONJ_RE.match(x):
+                cands.append((ys[0][2], x, s))
+    cands.sort(key=lambda c: c[0])
+    order = cands[:1] + cands[-1:] + cands[1:-1]
+    n = 0
+    for _y, x, s in order:
+        if len(last.sentences) >= want:
+            break
+        if any(said_in(x, y, 0.75) or said_in(y, x, 0.75) for y in last.sentences):
+            continue
+        last.sentences.append(x)
+        if x in s.src:
+            last.src[x] = s.src[x]
+        n += 1
+    if n:
+        keys = {x: date_start(x) for x in last.sentences}
+        if all(keys.values()):
+            last.sentences.sort(key=lambda x: keys[x])
+    return n
+
+
+def chrono_sentences(deck: _Deck) -> int:
+    """A slide whose every sentence is dated and none leans on the one before it tells its events in time order (the
+    live WWII «Переломные события»: 19 ноября 1942 → 8 ноября 1942 → июнь 1942). Returns how many slides changed."""
+    n = 0
+    for s in deck.slides:
+        if len(s.sentences) < 2 or s.theses or SUMMARY_TITLE_RE.match(s.title or ""):
+            continue
+        if any(anaphoric(x) or _LEAD_CONJ_RE.match(x) or _THEN_RE.search(x) for x in s.sentences):
+            continue
+        keys = [date_start(x) for x in s.sentences]
+        if any(k is None for k in keys):
+            continue
+        order = sorted(range(len(keys)), key=lambda i: (keys[i], i))
+        if order != list(range(len(keys))):
+            s.sentences = [s.sentences[i] for i in order]
+            n += 1
+    return n
+
+
+def check_batches(d: _Deck, anchors: Anchors, first: int = 1, size: int = CHECK_BATCH) -> list[str]:
+    """The text the fact check reads, in batches of about `size` statements (whole slides): every sentence, timeline
+    entry and data row with its id and, under it, the article sentence(s) it was written from."""
+    sup = anchors.support
+
+    def src_line(at: Optional[list[int]]) -> str:
+        if not at:
+            return "    source: —"
+        return "    source: " + " ".join(f"«{sup.sents[k]}»" for k in at if 0 <= k < len(sup.sents))[:900]
+
+    blocks: list[tuple[int, str]] = []
+    for i, s in enumerate(d.slides, first):
+        lines = [f"Slide {i}. {s.title}"]
+        n = 0
+        for j, sn in enumerate(s.sentences, 1):
+            if sn in s.theses:
+                continue
+            lines += [f"[{i}.{j}] {sn}", src_line(s.src.get(sn))]
+            n += 1
+        for k, e in enumerate(s.timeline or [], 1):
+            lines += [f"[{i}.t{k}] {e['when']} — {e['what']}", src_line(e.get("at"))]
+            n += 1
+        if s.data:
+            for k, r in enumerate(s.data.get("rows") or [], 1):
+                lines += [f"[{i}.d{k}] {s.data.get('caption')}: {r['label']} — {fmt_value(r['value'])} {s.data.get('unit') or ''}".rstrip(), src_line(r.get("at"))]
+                n += 1
+        if n:
+            blocks.append((n, "\n".join(lines)))
+    out: list[str] = []
+    cur: list[str] = []
+    count = 0
+    for n, text in blocks:
+        if cur and count + n > size:
+            out.append("\n".join(cur))
+            cur, count = [], 0
+        cur.append(text)
+        count += n
+    if cur:
+        out.append("\n".join(cur))
+    return out
+
+
+def polish_sources(deck: _Deck, anchors: Anchors) -> None:
+    """Words the sources never use go (an intensifier: «начал активно расти» → «начал расти»); a timeline entry's event
+    reads lowercase after its date unless it is a name; a year in a slide's title that none of its statements gives
+    goes from the title."""
+    sup = anchors.support
+    for s in deck.slides:
+        out = []
+        for sn in s.sentences:
+            at = s.src.get(sn)
+            if at and sn not in s.theses:
+                new = plain_words(sn, " ".join(sup.sents[j] for j in at))
+                if new != sn:
+                    s.src[new] = at
+                    if sn in s.cites:
+                        s.cites[new] = s.cites[sn]
+                    sn = new
+            out.append(sn)
+        s.sentences = out
+        for e in s.timeline or []:
+            e["what"] = _what_text(e["what"], names=sup._cap_mid)
+        told = {y[2] for x in s.sentences for y in _statement_years(x)} | {y[2] for e in s.timeline or [] for y in _statement_years(e["when"])}
+        for y in _statement_years(s.title or ""):
+            if y[2] in told:
+                continue
+            t = (s.title[: y[0]] + s.title[y[1]:]).strip()
+            t = re.sub(r"\s*(?:года?|году|гг?\.?)(?=\s|$)", "", t) if not re.search(r"\d", t) else t
+            t = H.strip_end(re.sub(r"\s+[—–-]\s*$|^\s*[—–-]\s+|\s+(?:в|с|до|к)\s*$", "", " ".join(t.split())).strip(" ,:—–-"))
+            if len(t.split()) >= 1 and t:
+                s.title = t
+
+
+_SUBJECT_NAME_RE = re.compile(
+    r"(?:^|[.;:!?]\s+|,\s+|\s—\s)((?:[A-ZА-ЯЁ][\w.+-]*|«[^»]{2,30}»)(?:\s+(?:[A-Z][\w.+-]*|Group))?)\s+"
+    r"(?:(?:уже|также|тогда|впервые|затем|вскоре|официально|окончательно|снова)\s+)?[а-яё]{2,}л(?:а|о)?(?:ся|сь)?(?![\wё])")
+
+
+_NOT_NAMES = frozenset({"это", "эта", "этот", "эти", "там", "тогда", "корабль", "компания", "страна", "война", "полёт", "полет"})
+
+
+def deck_genders(deck: _Deck, full: list[str], topic: str = "") -> dict[str, str]:
+    """One grammatical gender per name that is a subject in the text («VK начал» / «VK изменила» → "f"): the article's
+    majority (entity_gender over its sentences), else the text's own."""
+    text_sents = [x for s in deck.slides for x in s.sentences] + [e["what"] for s in deck.slides for e in s.timeline or []]
+    names: list[str] = []
+    full_join = "\n".join(full or [])
+    for t in text_sents:
+        for m in _SUBJECT_NAME_RE.finditer(t):
+            nm = m.group(1).strip()
+            if len(nm) < 2 or nm in names or _MONTH_WORD_RE.fullmatch(nm) or _ORPHAN_RE.match(nm) or nm.lower() in _NOT_NAMES:
+                continue
+            # a name: Latin, all-caps, quoted, or written capitalised inside the article's sentences
+            if not (re.search(r"[A-Z]", nm) or nm.isupper() or nm.startswith("«") or re.search(r"[a-zа-яё,;:)»]\s+" + re.escape(nm), full_join)):
+                continue
+            names.append(nm)
+    if not names:
+        return {}
+    art = []
+    for t in full or []:
+        art += [x for x in re.split(r"(?<=[.!?])\s+", t) if any(n in x for n in names)]
+    out: dict[str, str] = {}
+    for nm in names:
+        g = entity_gender(nm, art) or entity_gender(nm, text_sents)
+        if g:
+            out[nm] = g
+    return out
+
+
+def apply_genders(deck: _Deck, genders: dict[str, str]) -> None:
+    for s in deck.slides:
+        out = []
+        for sn in s.sentences:
+            new = sn if sn in s.theses else fix_gender(sn, genders)
+            if new != sn:
+                for table in (s.src, s.cites):
+                    if sn in table:
+                        table[new] = table[sn]
+            out.append(new)
+        s.sentences = out
+        for e in s.timeline or []:
+            e["what"] = fix_gender(e["what"], genders)
+
+
+def orphan_fix(s: "_Slide", sn: str) -> Optional[str]:
+    """A sentence that lost its antecedent (the sentence before it went: «Её создатели — российские программисты…»):
+    the sentence it cites, compressed, when that one names its subject (gate 3: the founders' sentence went for «no
+    antecedent», and «Вдохновлённые успехом Hotmail, они предложили…» was left with nobody to be «они»)."""
+    anchors = getattr(s, "anchors", None)
+    if anchors is None:
+        return None
+    at = s.src.get(sn) or anchors.idx(_raw_ids(s, sn))
+    if not at:
+        return None
+    got = anchors.clause(sn, at, [x for x in s.sentences if x != sn])
+    if not got:
+        return None
+    new, j = got
+    s.src[new] = [j]
+    return new
+
+
+def final_sources(deck: _Deck, anchors: Anchors, removed: list[dict], first: int = 1) -> list[dict]:
+    """The source of every statement of the finished text (writer.json «sources», «Показать текст»): the sentence(s) it
+    cites when they state it, else the article sentence that does (a statement the checks rewrote in the article's
+    words); a statement without any goes. Returns [{"slide", "text" (as the text shows it), "page", "url",
+    "sentence"}]."""
+    out: list[dict] = []
+    for i, s in enumerate(deck.slides, first):
+        drop: dict[str, str] = {}
+        for sn in s.sentences:
+            if sn in s.theses:
+                continue
+            at = s.src.get(sn) or _fuzzy_get(s.src, sn)
+            if not at or anchors.issue(sn, at) is not None:
+                at = anchors.reanchor(sn) or (at if at and anchors.support.supported(sn) else None)
+            if not at:
+                drop[sn] = "anchor: no source in the article"
+                continue
+            s.src[sn] = at
+        if drop:
+            _prune(s, lambda x, drop=drop: drop.get(x), removed, f"{i}")
+        for sn in s.sentences:
+            if sn in s.src:
+                out.append({"slide": i + 1, "text": _sentence(sn), **anchors.source(s.src[sn])})
+        for e in s.timeline or []:
+            at = e.get("at") or anchors.reanchor(f"{e['when']} — {e['what']}")
+            if at:
+                out.append({"slide": i + 1, "text": f"{H.strip_end(e['when'])} — {_what_text(e['what'])}", **anchors.source(at)})
+        if s.data:
+            for r in s.data.get("rows") or []:
+                if r.get("at"):
+                    out.append({"slide": i + 1, "text": f"{r['label']} — {fmt_value(r['value'])}", **anchors.source(r["at"])})
+    deck.slides = [s for s in deck.slides if not s.empty or s.theses]
+    return out
+
+
+def _twin_sources(s: "_Slide", a: set[int], b: set[int]) -> bool:
+    """Two article sentences that tell the same event (the VK article: «…объявила о ребрендинге, компания получила
+    название VK» in the lead and «…объявила о ребрендинге, сменив название на VK» in its history)."""
+    anchors = getattr(s, "anchors", None)
+    if anchors is None:
+        return False
+    from verstka.planning.agent import said_in
+
+    sents = anchors.support.sents
+    return any(said_in(sents[x], sents[y], 0.7) and said_in(sents[y], sents[x], 0.7) for x in a for y in b if x < len(sents) and y < len(sents))
+
+
+def dedupe_sources(deck: _Deck, removed: Optional[list[dict]] = None, first: int = 1) -> int:
+    """An event told again on a later slide (gate 3: the VK renames on s4, s7 and s8, Stalingrad on s5 and s6): a
+    statement that cites an article sentence an earlier slide's statement cites, with a year or a date of it, goes; a
+    name told in passing on the slide right before the slide about it goes from the earlier one (cut from its list, or
+    the sentence); the summing-up slide restates by design. Returns how many went."""
+    removed = removed if removed is not None else []
+    seen: list[tuple[int, set[int], set[int], str]] = []
+    n = 0
+    for i, s in enumerate(deck.slides, first):
+        summary = bool(SUMMARY_TITLE_RE.match(s.title or ""))
+
+        def why_of(sn: str, i: int = i, s: "_Slide" = s, summary: bool = summary) -> Optional[str]:
+            if summary:
+                return None
+            at = set(s.src.get(sn) or [])
+            ys = {y[2] for y in _statement_years(sn)} | {d[2] for d in _date_keys(sn)[0]}
+            if not at or not ys:
+                return None
+            st = _stems5(sn)
+            for j, at0, ys0, t0 in seen:
+                if j < i and ys & ys0 and not (at & at0) and _twin_sources(s, at, at0):
+                    return f"the event of slide {j} again (the article tells it twice)"
+                if j < i and at & at0 and ys & ys0:
+                    st0 = _stems5(t0)
+                    common = len(st & st0)
+                    if (common >= 2 and common >= 0.4 * min(len(st), len(st0))) or (common >= 1 and min(len(st), len(st0)) <= 4):
+                        return f"the event of slide {j} again (the same article sentence)"
+            return None
+
+        n += _prune(s, why_of, removed, f"{i}")
+        for sn in s.sentences:
+            seen.append((i, set(s.src.get(sn) or []), {y[2] for y in _statement_years(sn)} | {d[2] for d in _date_keys(sn)[0]}, sn))
+    # a name in passing on the slide right before the slide about it
+    sup = None
+    for s in deck.slides:
+        sup = getattr(getattr(s, "anchors", None), "support", None)
+        if sup is not None:
+            break
+    if sup is not None:
+        for k in range(len(deck.slides) - 1):
+            a, b = deck.slides[k], deck.slides[k + 1]
+            if SUMMARY_TITLE_RE.match(a.title or "") or SUMMARY_TITLE_RE.match(b.title or ""):
+                continue
+            for sn in list(a.sentences):
+                if sn in a.theses:
+                    continue
+                m = _PASSING_RE.search(sn)
+                if not m:
+                    continue
+                low_tail = m.group(1).lower().replace("ё", "е")
+                ents = [e for e in sup.entities(m.group(1)) if not sup.frequent(e)] or [None]
+                for e in ents:
+                    key = e.prefs[0] if e is not None else (_stems5(m.group(1)) or {""}).pop()
+                    if not key or len(key) < 4:
+                        continue
+                    rx = re.compile(r"(?<![\wё])" + re.escape(key[:6]))
+                    there = sum(1 for x in b.sentences if rx.search(x.lower().replace("ё", "е")))
+                    if there >= 2 and rx.search(low_tail):
+                        new = _sentence(sn[: m.start()].rstrip(" ,"))
+                        if len(new.split()) >= 4:
+                            a.sentences[a.sentences.index(sn)] = new
+                            a.src[new] = a.src.get(sn) or []
+                            _removed(removed, f"{k + first}", sn, f"«{m.group(1)}» is the next slide's subject (cut)")
+                            n += 1
+                        break
+    deck.slides = [s for s in deck.slides if not s.empty or s.theses]
+    return n
+
+
+# ------------------------------------------------------------------ grammar the model gets wrong (gate 3)
+
+# «…, включая Сталинградскую битву» at a sentence's end: a mention in passing of what the next slide is about
+_PASSING_RE = re.compile(r",?\s+(?:включая|в\s+том\s+числе|среди\s+них|а\s+также)\s+([^,;.]{3,80})[.!]?$")
+
+_GENDER_END = {"m": "", "f": "а", "n": "о"}
+_REFL_END = {"m": "ся", "f": "сь", "n": "сь"}
+_VERB_AFTER_RE_T = r"(?<![\wё]){name}\s+(?:(?:уже|также|тогда|впервые|затем|вскоре|официально|окончательно|снова)\s+)?([а-яё]{{2,}}?л)(а|о|и)?(ся|сь)?(?![\wё])"
+
+
+def entity_gender(name: str, texts: Iterable[str]) -> Optional[str]:
+    """The grammatical gender the texts give a name as a subject («VK купила», «VK была основана» → "f"): the past
+    verbs right after it, the majority of at least two; None when they do not tell."""
+    rx = re.compile(_VERB_AFTER_RE_T.format(name=re.escape(name)))
+    count = {"m": 0, "f": 0, "n": 0}
+    for t in texts:
+        for m in rx.finditer(t or ""):
+            if m.group(1).lower() in ("бы",):
+                continue
+            end = m.group(2) or ""
+            g = {"": "m", "а": "f", "о": "n"}.get(end)
+            if g:
+                count[g] += 1
+    g, k = max(count.items(), key=lambda x: x[1])
+    return g if k >= 2 and k > sum(count.values()) - k else None
+
+
+def fix_gender(text: str, genders: dict[str, str]) -> str:
+    """The past verbs right after a name in the gender the name takes in the text («VK начал работу» → «VK начала
+    работу» when VK is feminine)."""
+    out = text or ""
+    for name, g in (genders or {}).items():
+        if g not in _GENDER_END:
+            continue
+        rx = re.compile(_VERB_AFTER_RE_T.format(name=re.escape(name)))
+
+        def rep(m: re.Match, g: str = g) -> str:
+            base, end, refl = m.group(1), m.group(2) or "", m.group(3) or ""
+            if end == "и" or base.lower() in ("бы",) or len(base) < 3:
+                return m.group(0)
+            new = base + _GENDER_END[g] + (_REFL_END[g] if refl else "")
+            return m.group(0)[: m.start(1) - m.start()] + new
+        out = rx.sub(rep, out)
+    return out
+
+
+_DATE_SUBJECT_RE = re.compile(
+    rf"(?<![\wё])(?<!\bв\s)(?<!\bс\s)(?<!\bк\s)(?<!\bдо\s)(?<!\bпо\s)(?<!\bна\s)(?<!\bот\s)(?<!\bза\s)(?<!\bпосле\s)(?<!\bоколо\s)(?<!\bчерез\s)(\d{{1,2}}\s+(?:января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря))"
+    r"\s+(стал|был|объявлен|признан|назван)(?![\wё])", re.I)
+# a noun in the instrumental that no adjective can be («направлением», «производством»)
+_INSTR_PARTICIPLE_RE = re.compile(r"(?<![\wё])([а-яё]{3,}(?:ием|ьем|ством))\s*,\s*([а-яё]{3,}(?:анн|енн|янн|ённ|ящ|ющ|ащ|ущ|вш)[а-яё]*?)(ом)(?![\wё])")
+# a masculine adjective (-ый, or -ий after its usual stems: -ский, -кий, -ний, -жий…) right before a neuter noun
+_NEUTER_NOUN_RE = re.compile(
+    r"(?<![\wё])([а-яё]{2,}?(?:(?:ск|цк|к|г|х|ж|ш|ч|щ|[^аеёиоуыэюя\W]н)(?=ий)|[а-яё](?=ый)))(ий|ый)\s+([а-яё]{3,}(?:ство|ние|тие|мо|ье))(?![\wё])")
+
+
+def fix_agreement(sentence: str) -> str:
+    """Agreement slips the model makes (gate 3): a date as the subject takes the neuter («12 апреля стал Днём
+    космонавтики» → «стало»); a participle after a noun in the instrumental agrees with it («направлением, связанном с»
+    → «связанным»); a masculine adjective before a neuter noun («технический превосходство» → «техническое»)."""
+    out = sentence or ""
+    out = _DATE_SUBJECT_RE.sub(lambda m: f"{m.group(1)} {m.group(2)}о", out)
+    out = _INSTR_PARTICIPLE_RE.sub(lambda m: f"{m.group(1)}, {m.group(2)}ым", out)
+
+    def neut(m: re.Match) -> str:
+        base, end, noun = m.group(1), m.group(2), m.group(3)
+        if noun.lower() in ("само", "много"):
+            return m.group(0)
+        soft = end == "ий" and base[-1:].lower() in "жшчщн"
+        return f"{base}{'ее' if soft else 'ое'} {noun}"
+    return _NEUTER_NOUN_RE.sub(neut, out)
+
+
+_INTENSIFIER_RE = re.compile(r"(?<![\wё])(активно|стремительно|значительно|успешно|быстро|существенно|резко|бурно|интенсивно|динамично)\s+(?=[а-яё])", re.I)
+
+
+def plain_words(sentence: str, source: str) -> str:
+    """The sentence without an intensifier its source never uses («В 2000 году сервис начал активно расти» → «…начал
+    расти»)."""
+    low = (source or "").lower()
+
+    def rep(m: re.Match) -> str:
+        return m.group(0) if m.group(1).lower()[:6] in low else ""
+    out = _INTENSIFIER_RE.sub(rep, sentence or "")
+    if out != sentence:
+        out = H.cap_first(" ".join(out.split())) if sentence[:1].isupper() else " ".join(out.split())
+    return out
+
+
+_WHAT_NAME_RE = re.compile(r"^(?:[A-Z]|[А-ЯЁ]{2,}|«|\d)")
+
+
+def _what_text(what: str, names: Optional[Callable[[str], bool]] = None) -> str:
+    """A timeline entry's event as the dash list shows it: lowercase after the dash («2023 — начата редомициляция»),
+    a name as it is («1 сентября 1939 — Германия нападает на Польшу»); without `names` (no article to tell a name by)
+    as written."""
+    w = H.strip_end(what or "")
+    if not w or names is None:
+        return w
+    first = (w.split() or [""])[0].strip("«»\"")
+    if _WHAT_NAME_RE.match(w) or names(first):
+        return w
+    return w[:1].lower() + w[1:]
+
+
 # ------------------------------------------------------------------ the written text (§7)
 
 CHART_RU = {"column": "столбчатая", "bar": "столбчатая", "line": "линейная", "pie": "круговая"}
 RULES_LINE = "Тон нейтральный, энциклопедический. Заголовки — факты из текста, без оценок."
+DATA_NOTE = "Данные приблизительные."
+_CHART_NOTE_RE = re.compile(r"^Диаграмма\s*\((столбчатая|линейная|круговая)\)\s*:\s*(.+)$")
 
 
 def _sentence(t: str) -> str:
@@ -2820,7 +4203,7 @@ def render_text(deck: _Deck, rules: bool = False) -> str:
         tl = s.timeline or []
         if tl:
             out.append("Хронология:")
-            out += [f"— {H.strip_end(e['when'])} — {H.cap_first(H.strip_end(e['what']))}{';' if k < len(tl) - 1 else '.'}" for k, e in enumerate(tl)]
+            out += [f"— {H.strip_end(e['when'])} — {_what_text(e['what'])}{';' if k < len(tl) - 1 else '.'}" for k, e in enumerate(tl)]
         d = s.data
         if d:
             cap = H.strip_end(d.get("caption") or "") or "Данные"
@@ -2828,8 +4211,15 @@ def render_text(deck: _Deck, rules: bool = False) -> str:
             out.append(f"{cap}, {unit}:" if unit else f"{cap}:")
             rows = d["rows"]
             out += [f"— {r['label']} — {fmt_value(r['value'])}{';' if k < len(rows) - 1 else '.'}" for k, r in enumerate(rows)]
-            out.append(f"Нужна {CHART_RU.get(d.get('chart') or 'column', 'столбчатая')} диаграмма: {cap[:1].lower() + cap[1:]}.")
-            out.append("Укажи, что данные приблизительные.")
+            kind = CHART_RU.get(d.get('chart') or 'column', 'столбчатая')
+            if rules:
+                # the agent's brief asks for the chart and the caveat (compile reads them)
+                out.append(f"Нужна {kind} диаграмма: {cap[:1].lower() + cap[1:]}.")
+                out.append("Укажи, что данные приблизительные.")
+            else:
+                # the text the person reads and edits: data notes, not requests to a designer (gate 3 W3-12)
+                out.append(f"Диаграмма ({kind}): {cap[:1].lower() + cap[1:]}.")
+                out.append(DATA_NOTE)
     if rules:
         out += ["", RULES_LINE]
     return "\n".join(out) + "\n"
@@ -2850,7 +4240,23 @@ def with_rules(text: str) -> str:
     t = text or ""
     if not _WRITTEN_RE.match(t) or RULES_LINE in t:
         return t
-    return t.rstrip("\n") + "\n\n" + RULES_LINE + "\n"
+    return agent_lines(t).rstrip("\n") + "\n\n" + RULES_LINE + "\n"
+
+
+def agent_lines(text: str) -> str:
+    """The data notes of the text the person reads («Диаграмма (круговая): доходы VK в 2019 году.», «Данные
+    приблизительные.») as the agent's brief asks for them («Нужна круговая диаграмма: …», «Укажи, что данные
+    приблизительные.»)."""
+    out = []
+    for line in (text or "").split("\n"):
+        s = line.strip()
+        m = _CHART_NOTE_RE.match(s)
+        if m:
+            line = f"Нужна {m.group(1)} диаграмма: {m.group(2)}"
+        elif s == DATA_NOTE:
+            line = "Укажи, что данные приблизительные."
+        out.append(line)
+    return "\n".join(out)
 
 
 # ------------------------------------------------------------------ the result
@@ -2892,6 +4298,11 @@ class WriterResult:
     warnings: list[str] = field(default_factory=list)
     log_lines: list[str] = field(default_factory=list)
     skills: dict[str, dict] = field(default_factory=dict)
+    sources: list[dict] = field(default_factory=list)  # per statement: {"slide", "text", "page", "url", "sentence"}
+    pages_used: list[dict] = field(default_factory=list)  # the articles the statements come from ({"title", "url"})
+    anchor: dict = field(default_factory=dict)  # the anchor check's counts (anchored, reanchored, replaced, dropped…)
+    genders: dict = field(default_factory=dict)  # the grammatical gender of the topic's names («VK»: "f")
+    numbered: list = field(default_factory=list)  # per numbered cut: [[number, page, sentence]] (what the citations point at)
 
     @property
     def written(self) -> bool:
@@ -2904,6 +4315,8 @@ class WriterResult:
             "topic": self.topic, "slides": self.slides + 1 if self.slides else 0, "asked": self.asked, "source": self.source,
             "removed": len(self.removed), "checked": self.checked, "model_label": self.model_label,
             "seconds": self.seconds.get("total", 0.0), "short_by": self.short_by,
+            "pages": self.pages_used, "sources": [{k: x[k] for k in ("text", "page", "url", "sentence")} for x in self.sources],
+            "genders": self.genders,
         }
 
     def summary(self) -> dict:
@@ -2922,6 +4335,8 @@ class WriterResult:
             "skills": self.skills, "model": self.model, "model_label": self.model_label, "seconds": self.seconds, "tokens": self.tokens,
             "reference": {"source": "wikipedia", "lang": self.lang, "pages": self.pages, "cut_chars": self.reference_chars} if self.pages else None,
             "answers": self.answers, "removed": self.removed, "edits": self.edits, "overruled": self.overruled, "continuation": self.continuation, "salvaged": self.salvaged,
+            "sources": self.sources, "pages_used": self.pages_used, "anchor": self.anchor or None, "genders": self.genders,
+            "numbered": self.numbered,
             "check": self.check_state, "check_stats": self.check_stats, "refill": self.refill or None, "short_by": self.short_by,
             "checked": self.checked, "check_skipped": self.check_skipped, "reason": self.reason or None, "warnings": self.warnings,
         }
@@ -2934,17 +4349,28 @@ class WriterResult:
         (out_dir / "writer.json").write_text(json.dumps(self.record(), ensure_ascii=False, indent=2, default=str), encoding="utf-8")
 
 
+ATTRIBUTION_PREFIX = "Текст написан агентом Verstka"  # the notes line a figures check leaves as it is (a fixed marker)
+
+
+def _titles_ru(titles: list[str]) -> str:
+    q = [f"«{t}»" for t in titles]
+    return q[0] if len(q) == 1 else ", ".join(q[:-1]) + " и " + q[-1]
+
+
 def attribution(res: WriterResult) -> str:
-    """The cover's notes line naming the source (no digits in it: the figures check never sees a number)."""
-    src = (res.source or {}).get("title") or ""
-    if src and not re.search(r"\d", src):
-        return f"Текст написан агентом Verstka по статье «{src}» из Википедии (лицензия CC BY-SA). Проверьте факты перед выступлением."
-    if src:
-        return "Текст написан агентом Verstka по статье из Википедии (лицензия CC BY-SA). Проверьте факты перед выступлением."
+    """The cover's notes line naming every article the text comes from (CC BY-SA: «по статьям «Восток-1» и «Гагарин,
+    Юрий Алексеевич» из Википедии»), else the topic. It starts with ATTRIBUTION_PREFIX, the marker a figures check of
+    the notes skips (a title may have digits: «Восток-1»)."""
+    pages = [p.get("title") for p in (res.pages_used or []) if p.get("title")]
+    if not pages and (res.source or {}).get("title"):
+        pages = [res.source["title"]]
+    if pages:
+        word = "статье" if len(pages) == 1 else "статьям"
+        return f"{ATTRIBUTION_PREFIX} по {word} {_titles_ru(pages)} из Википедии (лицензия CC BY-SA). Проверьте факты перед выступлением."
     topic = H.strip_end(" ".join(res.topic.split()))
-    if topic and not re.search(r"\d", topic) and len(topic) <= 80:
-        return f"Текст написан агентом Verstka по теме «{topic}». Проверьте факты перед выступлением."
-    return "Текст написан агентом Verstka по теме презентации. Проверьте факты перед выступлением."
+    if topic and len(topic) <= 80:
+        return f"{ATTRIBUTION_PREFIX} по теме «{topic}». Проверьте факты перед выступлением."
+    return f"{ATTRIBUTION_PREFIX} по теме презентации. Проверьте факты перед выступлением."
 
 
 # ------------------------------------------------------------------ the writer phase
@@ -3007,12 +4433,16 @@ def _insert_at(deck: _Deck, part: int) -> int:
     return len(deck.slides)
 
 
+# a title of a stage of the story, not of a subject («Современный этап», «Первые годы», «Ход событий»)
+_TIME_TITLE_RE = re.compile(r"этап|год|начал|развити|ход\s|оконч|итог|последств|предпосыл|главн|перелом|истори|основан|современ|причин|хронолог", re.I)
+
+
 def _refill(
     deck: _Deck, parts: list[_Part], target: int, skills: Any, provider: Any, variables: Callable[..., dict], temperature: float,
     deadline: float, topic: str, ref_text: str, full: list[str], mode: WriterMode, removed: list[dict], *,
     usage: Callable[[Any], None], keep_raw: Callable[..., None], answers: list[str], checks: Callable[[_Deck], Any],
     model_check: Optional[Callable[[_Deck, str], Any]] = None, check_time: Callable[[], bool] = lambda: False,
-    focus: Optional[str] = None,
+    focus: Optional[str] = None, number: Optional[Callable[[str], str]] = None,
 ) -> dict:
     """One continuation call that writes the slides the checks emptied or dropped (their storyline parts, from the
     article sections the deck does not use yet — reference.fresh_cut — with the facts already told listed) and tops up
@@ -3052,7 +4482,7 @@ def _refill(
     want = " ".join(f"{p.title} {p.hint}" for p in story)
     ref = (fresh_cut(full, " ".join(told_list), limit=REFILL_REF_CHARS, want=want, focus=focus) if full else "") or ref_text
     v = variables(len(story), story, titles, first_number=len(deck.slides) + 1)
-    v.update({"refill": True, "told": told or "—", "reference": ref})
+    v.update({"refill": True, "told": told or "—", "reference": number(ref) if number is not None and ref else ref})
     msgs = skills.build_messages("deck_writer", v)
     r = _complete(provider, msgs, label="WriterAnswer", temperature=temperature, max_tokens=min(4000, 600 + 300 * len(story)), deadline=deadline)
     usage(r)
@@ -3076,7 +4506,11 @@ def _refill(
         s.sentences = [x for x in s.sentences if not any(same_text(x, y) for y in have)]
         if what == "top":
             old = arg
-            add = [x for x in s.sentences if not anaphoric(x)][:4]
+            # a top-up tells about the slide's own subject (live EV: «Инфраструктура» was topped up with the engines of
+            # a truck): a sentence shares a word with the slide's title or its sentence
+            topical = old in deck.slides and not _TIME_TITLE_RE.search(f"{old.title} {old.working}")
+            own = _stems5(" ".join([old.title, old.working])) if topical else set()
+            add = [x for x in s.sentences if not anaphoric(x) and (not own or _stems5(x) & own)][:4]
             if old in deck.slides and add:
                 # the story in time order: the slide's own sentence after the new ones when it tells a later year
                 mine = [y[2] for x in old.sentences for y in _statement_years(x)]
@@ -3088,6 +4522,14 @@ def _refill(
             continue
         if len(deck.slides) >= target or (len(s.sentences) < 2 and not s.timeline and not s.data):
             continue
+        part = parts[arg] if 0 <= arg < len(parts) else None
+        about = _stems5(" ".join([part.title if part else "", part.hint if part else ""]))
+        if part and s.sentences and not s.data and not any(_stems5(x) & about for x in s.sentences):
+            # the article had nothing on this part: the slide tells other facts, its title says so (live EV: a slide
+            # «Инфраструктура» told the engines of a truck) — the writer's own title when it names them, else a plain one
+            own_t = _stems5(s.title) - about
+            if not (s.title and own_t and any(_stems5(x) & own_t for x in s.sentences)):
+                s.title = "Другие факты"
         s.part = arg
         deck.slides.insert(_insert_at(deck, arg), s)
         have.extend(s.sentences)
@@ -3231,6 +4673,29 @@ def write_deck(
             emit("статьи по теме не нашёл — пишу по своим знаниям.")
     ref_text = reference.cut if reference is not None and reference.cut else ""
     full = reference.full_texts if reference is not None and reference.cut else []
+    # source-anchored writing: the writer reads the reference with a number before each sentence and cites them; the
+    # anchors map the numbers to the article's sentences (ArticleSupport) for the anchor check and the sources
+    support = ArticleSupport(full, topic) if full else None
+    anchors: Optional[Anchors] = None
+    ref_prompt = ref_text
+    if support is not None and bool((cfg.get("anchor") or {}).get("enabled", True)):
+        from verstka.planning.reference import number_reference
+
+        ref_prompt, ref_sents = number_reference(ref_text)
+        res.numbered.append([[r.id, r.page, r.text] for r in ref_sents])
+        anchors = Anchors(support, [p.meta() for p in reference.pages] if reference is not None else [], topic=topic)
+        anchors.add(ref_sents)
+        next_id = [max((r.id for r in ref_sents), default=0) + 1]
+
+        def numbered_ref(text: str) -> str:
+            """A refill's cut numbered after the main one (the same anchors)."""
+            out, more = number_reference(text, start=next_id[0])
+            res.numbered.append([[r.id, r.page, r.text] for r in more])
+            anchors.add(more)
+            next_id[0] = max((r.id for r in more), default=next_id[0] - 1) + 1
+            return out
+    else:
+        numbered_ref = None  # type: ignore[assignment]
     private_hint = mode.private_hint or kind == "private"
     # the model's kind, else (none, «other», «private» — the writer decides that one) the keywords' guess
     kind = kind if kind and kind not in ("private", "other") else guess_kind(topic)
@@ -3250,7 +4715,7 @@ def write_deck(
 
     def variables(n: int, story: list, written_titles: str = "", first_number: int = 2) -> dict:
         return {
-            "topic": topic, "theses": theses, "private_hint": private_hint, "reference": ref_text,
+            "topic": topic, "theses": theses, "private_hint": private_hint, "reference": ref_prompt, "cited": anchors is not None,
             "audience": (brief.audience or "").strip() or "широкая аудитория", "language": mode.language, "n_content": n,
             "sentences": "3–4" if n_content >= 13 else "4–5", "max_data": 2 if n_content >= 6 else 1,
             "written_titles": written_titles, "first_number": first_number, "place": place,
@@ -3287,7 +4752,9 @@ def write_deck(
         emit("тема — о вашем проекте, факты о нём знаете только вы.")
         res.kind = "private"
         return finish("private", "private")
-    if ans.status == "refuse" or (ans.kind or "").lower() == "conflict":
+    # «conflict» is an ongoing armed conflict: the writer's own kind counts only when the topic's kind was not told
+    # (live: the WWII article calls the war «крупнейшим вооружённым конфликтом», and the writer answered kind «conflict»)
+    if ans.status == "refuse" or ((ans.kind or "").lower() == "conflict" and (kind is None or kind == "conflict")):
         res.answers["writer"] = answers
         res.seconds["write"] = round(time.monotonic() - tw, 2)
         res.warnings.append("deck_writer: refused")
@@ -3339,34 +4806,83 @@ def write_deck(
     # year next to a name, done vs planned, the direction of a transfer — repaired in the article's words or cut),
     # then the model's fact check (never more harm than good: apply_check), the guards; then the slides the checks
     # emptied, dropped or left with one sentence are written again from the article's unused sections (refill)
-    support = ArticleSupport(full, topic) if full else None
     target = n_content
     check_on = bool((cfg.get("check") or {}).get("enabled", True))
 
     def det_checks(d: _Deck) -> tuple[int, int]:
-        """(removed, repaired) by the deterministic checks of `d`."""
+        """(removed, repaired) by the deterministic checks of `d`: the anchor check (every sentence against the
+        reference sentences it cites), then every figure and name against the full article, then the pairings."""
         if not full:
             return 0, 0
         b_rm, b_ed = len(removed), len(res.edits)
+        if anchors is not None:
+            anchor_deck(d, anchors, removed, res.edits, stats=res.anchor)
+            polish_sources(d, anchors)
         verify_against(d, full, topic, removed, edits=res.edits, support=support)
         fix_pairings(d, support, removed, res.edits)
         return len(removed) - b_rm, len(res.edits) - b_ed
 
     def model_check(d: _Deck, reference_text: str, label: str) -> tuple[int, dict]:
-        """The fact check on `d`: (how many statements it removed or replaced, its stats)."""
-        msgs = skills.build_messages("writer_check", {"topic": topic, "reference": reference_text, "numbered": numbered(d)})
-        r = _complete(provider, msgs, label="WriterCheckAnswer", temperature=0.0, max_tokens=int(skills.get("writer_check").params.get("max_tokens", 1500)), deadline=min(time.monotonic() + CHECK_MAX_S, deadline))
-        usage(r)
-        keep_raw("writer_check", r)
-        if "check" not in res.answers:
-            res.answers["check"] = r.text
-        else:
-            res.answers.setdefault("checks", []).append(r.text)
+        """The fact check on `d`: (how many statements it removed or replaced, its stats). With anchors, the check reads
+        each statement with its own source sentences (no whole reference), in batches of CHECK_BATCH statements run side
+        by side — a batch that times out leaves the others' verdicts (gate 3: one 25-second timeout lost the check)."""
         from verstka.providers.openai_compat import extract_json
 
-        ca = WriterCheckAnswer.model_validate(extract_json(r.text or "", {"issues"}))
-        stats: dict[str, Any] = {"label": label}
-        k = apply_check(d, ca.issues, removed, support=support, overruled=res.overruled, edits=res.edits, stats=stats)
+        max_tokens = int(skills.get("writer_check").params.get("max_tokens", 1500))
+        if anchors is not None:
+            batches = [b for b in check_batches(d, anchors) if b]
+        else:
+            batches = [numbered(d)]
+        cap = min(time.monotonic() + CHECK_MAX_S, deadline)
+
+        def one(text: str) -> Any:
+            v = {"topic": topic, "reference": "" if anchors is not None else reference_text, "numbered": text, "sourced": anchors is not None}
+            return _complete(provider, skills.build_messages("writer_check", v), label="WriterCheckAnswer", temperature=0.0, max_tokens=max_tokens, deadline=cap)
+
+        issues: list[Any] = []
+        errors: list[BaseException] = []
+        if len(batches) == 1:
+            outs: list[Any] = [one(batches[0])]
+        else:
+            from concurrent.futures import ThreadPoolExecutor
+
+            outs = []
+            with ThreadPoolExecutor(max_workers=min(CHECK_PARALLEL, len(batches))) as ex:
+                futs = [ex.submit(one, b) for b in batches]
+                for f in futs:
+                    try:
+                        outs.append(f.result())
+                    except Exception as e:  # noqa: BLE001 - the other batches still count
+                        errors.append(e)
+                        keep_raw("writer_check", error=e)
+            if not outs and errors:
+                raise errors[0]
+        for r in outs:
+            usage(r)
+            keep_raw("writer_check", r)
+            if "check" not in res.answers:
+                res.answers["check"] = r.text
+            else:
+                res.answers.setdefault("checks", []).append(r.text)
+            issues += WriterCheckAnswer.model_validate(extract_json(r.text or "", {"issues"})).issues
+        stats: dict[str, Any] = {"label": label, "batches": len(batches), "failed": len(errors)}
+        def clause_of(sl: _Slide, sn: str) -> Optional[str]:
+            if anchors is None or not sl.src.get(sn):
+                return None
+            got = anchors.clause(sn, sl.src[sn], [x for s2 in d.slides for x in s2.sentences if x != sn])
+            if not got:
+                return None
+            sl.src[got[0]] = [got[1]]
+            return got[0]
+
+        def hedged(text: str) -> bool:
+            if support is None:
+                return False
+            at = next((sl.src.get(text) for sl in d.slides if sl.src.get(text)), None) or (anchors.candidates(text)[:1] if anchors is not None else [])
+            return any(_HEDGE_W_RE.search(support.low[j]) for j in at or [])
+
+        k = apply_check(d, issues, removed, support=support, overruled=res.overruled, edits=res.edits, stats=stats,
+                        clause_of=clause_of, hedged=hedged)
         res.check_stats.append(stats)
         return k, stats
 
@@ -3423,6 +4939,7 @@ def write_deck(
     short = target <= SHORT_DECK_CONTENT
     dedupe_chronology(deck, removed, short=short)
     dedupe_events(deck, removed)
+    dedupe_sources(deck, removed)
     dedupe_totals(deck, removed)
     dedupe_figures(deck, removed)
     drop_orphans(deck, removed)
@@ -3435,13 +4952,14 @@ def write_deck(
                 deck, parts, target, skills, provider, variables, temperature, deadline, topic, ref_text, full, mode, removed,
                 usage=usage, keep_raw=keep_raw, answers=answers, checks=det_checks,
                 model_check=(lambda d, rt: model_check(d, rt, "refill")) if check_on and ref_text else None, check_time=check_time,
-                focus=where[1] if where else None,
+                focus=where[1] if where else None, number=numbered_ref,
             )
             res.refill = got
             if got.get("added") or got.get("topped"):
                 guards(deck)
                 dedupe_chronology(deck, removed, short=short)
                 dedupe_events(deck, removed)
+                dedupe_sources(deck, removed)
                 dedupe_totals(deck, removed)
                 dedupe_figures(deck, removed)
                 drop_orphans(deck, removed)
@@ -3460,11 +4978,38 @@ def write_deck(
         res.warnings.append("deck_writer failed: model answer rejected (fewer than 2 slides left after the checks)")
         emit("после проверки от текста почти ничего не осталось — соберу каркас по теме." if mode.kind == "topic" else "после проверки от текста почти ничего не осталось — соберу по вашему тексту.")
         return finish("failed", "too short")
+
+    # 5. every statement keeps its source (writer.json «sources», «Показать текст»); one gender per name
+    fill_summary(deck)
+    if anchors is not None:
+        polish_sources(deck, anchors)
+        res.sources = final_sources(deck, anchors, removed)
+        used = sorted({anchors.support.page_of[j] for s in deck.slides for at in s.src.values() for j in at} |
+                      {anchors.support.page_of[j] for s in deck.slides for e in s.timeline or [] for j in e.get("at") or []})
+        res.pages_used = [anchors.pages[k] for k in used if k < len(anchors.pages)] or anchors.pages[:1]
+        res.anchor = {**res.anchor, "sources": len(res.sources)}
+    res.genders = deck_genders(deck, full, topic)
+    if res.genders:
+        apply_genders(deck, res.genders)
+    if kind in ("history", "person", "politician", "company"):
+        chrono_sentences(deck)
+    res.removed = removed
+    if len(deck.slides) < 2:
+        res.warnings.append("deck_writer failed: model answer rejected (fewer than 2 slides left after the checks)")
+        return finish("failed", "too short")
     if len(deck.slides) < target:
         res.short_by = target - len(deck.slides)
         emit(f"вышло {_count_ru(len(deck.slides) + 1, 'слайд', 'слайда', 'слайдов')} вместо {target + 1}: на остальные не хватило проверенных фактов.")
+    if res.anchor:
+        a = res.anchor
+        said = []
+        if a.get("replaced"):
+            said.append(f"{_count_ru(a['replaced'], 'утверждение', 'утверждения', 'утверждений')} заменил словами статьи")
+        if a.get("dropped"):
+            said.append(f"{a['dropped']} убрал")
+        emit("сверил каждое утверждение с предложением статьи, из которого оно написано" + (" — " + ", ".join(said) + "." if said else " — всё сходится."))
 
-    # 4. the written text becomes the brief
+    # 6. the written text becomes the brief
     res.text = render_text(deck)
     res.title = deck.title
     res.slides = len(deck.slides)

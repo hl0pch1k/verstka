@@ -98,6 +98,9 @@ class IRPictureCells(BaseModel):
     alpha: list[float] = Field(default_factory=list)
     hex: list[str] = Field(default_factory=list)
     std: list[float] = Field(default_factory=list)
+    # a photo ground (a picture covering ≥ 85 % of the slide): the luminance stdev of a grid twice as fine
+    # (layers.FINE_W × FINE_H), to tell where inside a busy cell its busy part lies (round 4.1)
+    fine_std: list[float] = Field(default_factory=list)
 
 
 class IRElement(BaseModel):
@@ -137,7 +140,7 @@ class IRElement(BaseModel):
     # what a non-rectangular template shape really paints (an ellipse, a triangle, a freeform): polygons in EMU;
     # None when the box is what it paints
     outline: Optional[list[list[tuple[int, int]]]] = None
-    cells: Optional[IRPictureCells] = None  # template pictures only
+    cells: Optional[IRPictureCells] = None  # template pictures, and a slide's own picture covering ≥ 85 % of it
     # the text shows in capitals whatever case it is typed in (cap="all"/"small" on its first run, its list style or
     # the layout/master placeholder it inherits from): widths are measured on the upper-cased text
     caps: bool = False

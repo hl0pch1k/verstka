@@ -123,7 +123,8 @@ def test_render_reads_back_as_a_brief():
     text = W.render_text(deck, rules=True)
     st = read_structure(text)
     # gate 2 W6: the rules line is the agent's, never in the text the person sees («Показать текст», writer.md)
-    assert W.RULES_LINE not in W.render_text(deck) and W.render_text(deck, rules=True).startswith(W.render_text(deck).rstrip("\n"))
+    # (round 4: the person's text writes the chart request and the caveat as data notes; with_rules gives the brief back)
+    assert W.RULES_LINE not in W.render_text(deck) and W.with_rules(W.render_text(deck)) == W.render_text(deck, rules=True)
     assert W.with_rules(W.render_text(deck)) == text and W.with_rules(text) == text and W.with_rules("Кофейня: выручка 900 000 рублей.") == "Кофейня: выручка 900 000 рублей."
     assert len(st.specs) == len(deck.slides) + 1
     assert st.specs[0].title == "Титульный" and st.title == deck.title and st.subtitle
@@ -140,8 +141,9 @@ def test_render_reads_back_as_a_brief():
 
 def test_the_chart_words_follow_the_chart_type():
     deck = W._Deck(title="Рынок", subtitle="", slides=[W._Slide(title="Продажи", sentences=["Продажи росли."], data={"caption": "Продажи", "unit": "тыс. штук", "chart": "line", "rows": [{"label": "2021", "value": 1.0}, {"label": "2022", "value": 2.5}, {"label": "2023", "value": 4.0}]})])
-    text = W.render_text(deck)
+    text = W.render_text(deck, rules=True)
     assert "Нужна линейная диаграмма: продажи." in text and "— 2022 — 2,5;" in text and "— 2023 — 4." in text
+    assert "Диаграмма (линейная): продажи." in W.render_text(deck)  # the person's text: a data note (gate 3 W3-12)
 
 
 # ------------------------------------------------------------------ T3: the deterministic clean-up
@@ -462,7 +464,7 @@ def test_a_written_deck_is_a_brief_with_the_cover_and_the_attribution():
     meta = res.meta()
     assert meta["status"] == "written" and meta["text"] == res.text and meta["slides"] == res.slides + 1 and meta["source"] is None
     rec = res.record()
-    assert rec["skills"]["deck_writer"]["version"] == "1.2.0" and rec["answers"]["writer"]
+    assert rec["skills"]["deck_writer"]["version"] == "2.0.0" and rec["answers"]["writer"]
 
 
 def test_the_config_switches(monkeypatch):
@@ -801,7 +803,9 @@ def test_years_are_never_a_row_of_key_figures():
 
     nums = [NumberCallout(value="1998 г", label="— основана как почтовый сервис Mail.ru"), NumberCallout(value="2021 г", label="— получено новое название"),
             NumberCallout(value="2023 г", label="— созданы две бизнес-группы")]
-    d = _design(K.stat_row, "VK получила новое название", "VK основана в 1998 году.", numbers=nums)
+    # (round 4: the written check drops entries the slide's text does not tell — the text now tells all three)
+    d = _design(K.stat_row, "VK получила новое название", "VK основана в 1998 году как почтовый сервис Mail.ru. В 2021 году компания "
+                "получила новое название. В 2023 году были созданы две бизнес-группы.", numbers=nums)
     A.tidy_design(d, _written_ctx())
     assert d.slide.kind == K.timeline and not d.slide.content.numbers
     assert [(it.title, it.text) for it in d.slide.content.items][0] == ("1998", "Основана как почтовый сервис Mail.ru")

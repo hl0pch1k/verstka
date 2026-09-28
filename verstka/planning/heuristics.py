@@ -506,12 +506,18 @@ def label_beside(value: str, label: str, headline: str, text: Optional[str] = No
     tail = headline[span[1] :].strip(" ,.:;—-")
     if _UNIT_ONLY_RE.match(tail):
         return label  # «… до 330 ₽»: a unit after the figure is the figure's, never its label
+    if re.search(r"\d", re.sub(r"(?<!\d)(?:1\d{3}|20\d{2})(?!\d)", "", tail)):
+        tail = re.split(r"[,;:]\s|\s[—–]\s", tail)[0].strip(" ,.:;—-")  # the clause of this figure, not the next one's
     if len(tail.split()) >= 2 or (len(tail.split()) == 1 and _BARE_NUMBER_RE.match(value.strip())):
         return tail  # «минуты на одно обращение»; a bare number takes the one word it counts («12» → «человек»)
-    head = headline[: span[0]].strip(" ,.:;—-").split()
+    before = headline[: span[0]]
+    cut = [m.end() for m in re.finditer(r"\d(?:[\d\s  ]*(?:[.,]\d+)?)\s*(?:тыс\.?|млн\.?|млрд\.?|%|₽)?[^,;:—–\w]*[,;:—–]", before)]
+    if cut:
+        before = before[cut[-1]:]  # «…59,6 тыс. электромобилей, продано — 17,8 тыс.»: never another figure in the label
+    head = before.strip(" ,.:;—-").split()
     while head and (head[-1].lower() in _PREPS or head[-1] in ("—", "–", "-")):
         head.pop()  # «Команда выросла до» → «Команда выросла»: a label never ends on a preposition or a dash
-    if len(head) < 2:
+    if len(head) < 2 or any(re.match(r"^\d", w) and not re.fullmatch(r"(?:1\d{3}|20\d{2})", w) for w in head):
         return label
     whole = len(head) <= 6  # a clause start of six words or fewer is kept whole («Отдел продаж сократил время на отчёты»)
     out = " ".join(head if whole else head[-5:])

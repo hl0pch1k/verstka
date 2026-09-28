@@ -229,3 +229,15 @@ def test_two_pages_share_the_limit():
     cut = R.cut_pages(pages, 9000)
     assert cut.startswith("# Главная") and "# Вторая" in cut and len(cut) <= 9000 + 10
     assert cut.index("# Вторая") > 5000
+
+
+def test_a_sibling_article_is_not_the_topics():
+    # gate 3 (C, «Возобновляемая энергетика в России»): the deck told nuclear power from «Ядерная энергетика России»
+    assert R.sibling_title("Ядерная энергетика России", "Возобновляемая энергетика в России")
+    assert not R.sibling_title("Автомобильная промышленность России", "Рынок электромобилей в России")
+    assert not R.sibling_title("Возобновляемая энергетика", "Возобновляемая энергетика в России")
+    wiki = Wiki({"Возобновляемая энергетика": "Текст.", "Ядерная энергетика России": "Текст."},
+                search={"Возобновляемая энергетика в России": [("Ядерная энергетика России", 90000), ("Возобновляемая энергетика", 30000)]})
+    client = R.WikiClient("ru", CONTACT, transport=wiki.transport)
+    found, _ = client.resolve(["Возобновляемая энергетика в России"], "Возобновляемая энергетика в России")
+    assert found == ["Возобновляемая энергетика"]

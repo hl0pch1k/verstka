@@ -1,5 +1,5 @@
 name: writer_check
-version: 1.2.0
+version: 1.3.0
 role: llm
 description: >
   Writer mode, after the writer: the fact check of the written text, deletion-only. With the reference (the article
@@ -28,3 +28,8 @@ changelog:
     acceptance phrase («…which is correct»), applies nothing of an answer that flags more than 35 % of the statements,
     and replaces a statement by the quoted evidence (the article's own words) when it is an article sentence fit for a
     slide, else removes it."
+  - "1.3.0: with the anchored text (deck_writer 2.0.0) the check reads each statement with its own source sentences
+    instead of the whole reference, in batches of about 12 statements run side by side (gate 3: one 25-second timeout
+    left the deck without the check); two more mandatory items: the rank or title at that moment (a promotion told
+    later) and the date of the event (a landing time is not a separation time), and a plan for a past year told in the
+    future tense."

@@ -1,5 +1,5 @@
 name: deck_writer
-version: 1.2.0
+version: 2.0.0
 role: llm
 description: >
   Writes the source text of a whole deck from a topic when the user gave no material of their own (writer mode):
@@ -25,3 +25,10 @@ changelog:
     consequences, each working title with a hint of what it tells) with no separate chronology; each figure on one
     slide only; «В войне участвовали», not «Войну участвовали»; the refill branch (a slide the checks emptied is
     written again from the article sections the deck does not use yet, the facts already told listed)."
+  - "2.0.0: source-anchored writing. The reference comes with a number before each sentence («[41] …»); the writer
+    builds each of its sentences by compressing one or two of them and cites their numbers («… [41, 42].»), timeline
+    entries and data rows too. Rule 1 used to say «never copy its sentences: write your own», and the free paraphrase
+    moved years, ranks and clock times between events (gate 3: Гуадалканал «1944», «майор» at the launch, «в 1960-х
+    началась космическая гонка», «10:53 отделился»). writer.py checks every date, name, rank and figure against the
+    cited sentences (Anchors), strips the marks before the designer and the person see the text and keeps them per
+    statement (writer.json «sources»)."

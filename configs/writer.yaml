@@ -14,6 +14,11 @@ reference:
   max_chars_history: 18000    # a history / a conflict: the lead whole and every subsection's opening (the turning points)
   timeout_s: 6                # per request; the whole lookup has 12 s
   cache_days: 7               # <workspace>/cache/reference; a stale entry is used when the network fails
+anchor:
+  enabled: true               # source-anchored writing: the reference is numbered sentence by sentence, the writer cites
+                              # the sentences each of its sentences comes from, and every date, name, rank and figure is
+                              # checked against them (writer.Anchors); off: the free paraphrase of before
 check:
-  enabled: true               # the deletion-only fact check (writer_check), when ≥ 120 s of the budget remain
+  enabled: true               # the fact check (writer_check): each statement read with its source sentences, in parallel
+                              # batches of 12, when ≥ 120 s of the budget remain
 limits: {writer_max_s: 100, agent_reserve_s: 110, check_min_left_s: 120}

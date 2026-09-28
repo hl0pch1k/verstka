@@ -1257,6 +1257,7 @@ def _render_content(builder: DeckBuilder, comp: str, oslide: OutlineSlide, manif
     if comp == "image_text" and oslide.content.image_hint:
         # the picture and its text above the slide's conclusion and footnote (compose() keeps the same room)
         n0 = len(composer.cv.tree)
+        composer._unsay_conclusion()
         comp = _image_text(builder, slide, oslide, manifest, ws, kit, composer, composer._reserve_notes(area))
         if comp is None:
             composer._draw_notes(n0)

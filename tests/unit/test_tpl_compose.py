@@ -679,7 +679,7 @@ def test_a_conclusion_the_block_leaves_no_room_for_stays_on_the_slide(sparse_env
         assert any("free room" in w for w in comp.warnings)
         assert all(bb[0] + bb[2] <= room.x2 + tol and bb[1] + bb[3] <= room.y2 + tol for bb in concl)
     else:
-        assert any("the block set" in w for w in comp.warnings)
+        assert any("the block set" in w or "a size smaller" in w for w in comp.warnings), comp.warnings
         assert all(bb[1] + bb[3] <= area.y2 + tol for bb in concl + others)
 
 
@@ -768,3 +768,284 @@ def test_a_trend_chart_never_leaves_a_label_to_be_broken_inside_its_word(simple_
     cats = [c for c in narrow.chart.plots[0].categories]
     assert not turned(wide)
     assert turned(narrow) or any(c == "" for c in cats)  # turned, or every other label left blank
+
+
+# ------------------------------------------------------------------ gate 3, B3-1: category labels LibreOffice never breaks
+
+COFFEE_MONTHS = ["Сейчас"] + [f"{i}-й месяц" for i in range(1, 7)]
+COFFEE_REVENUE = [900000, 930000, 970000, 1015000, 1060000, 1100000, 1138500]
+
+
+def _line_chart(prs, frame: tuple[float, float], family: str, size: float):
+    """A coffee revenue line chart (the short brief's s5) in a frame of `frame` = (w, h) slide shares."""
+    from verstka.schemas.template import ChartStyleSpec, Typography
+
+    W, H = prs.slide_width, prs.slide_height
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    spec = ChartSpec(type="line", categories=COFFEE_MONTHS, series=[InlineSeries(name="Выручка", values=COFFEE_REVENUE)], unit="₽")
+    outline = DeckOutline(title="T", slides=[OutlineSlide(id="c", kind=PatternKind.chart, headline="h", content=SlideContent(chart=spec))])
+    box = Bbox(x=int(0.03 * W), y=int(0.26 * H), w=int(frame[0] * W), h=int(frame[1] * H))
+    return add_chart(slide, box, spec, outline, ChartStyleSpec(font_family=family, font_size_pt=size), Typography(primary_family=family), text_hex="222222")
+
+
+def _lo_label_faults(gf) -> list[str]:
+    """What LibreOffice would do to the chart's category labels (VCartesianAxis, measured in bfix6/lo): a straight
+    label wider than 95 % of its tick distance wraps — a word wider than that is broken inside; a turned one is cut to
+    «…» when its turned height and one average character pass the room under the axis; turned neighbours closer than
+    their line height overlap."""
+    from verstka.rendering.fonts import text_width_pt
+
+    cs = gf.chart._chartSpace
+    ax = cs.find(".//" + q("c:catAx"))
+    rpr = ax.find(q("c:txPr") + "/" + q("a:p") + "/" + q("a:pPr") + "/" + q("a:defRPr"))
+    size = int(rpr.get("sz")) / 100
+    family = rpr.find(q("a:latin")).get("typeface")
+    rot = int(ax.find(q("c:txPr") + "/" + q("a:bodyPr")).get("rot") or 0)
+    lay = cs.find(".//" + q("c:plotArea") + "/" + q("c:layout") + "/" + q("c:manualLayout"))
+    g = {k: float(lay.find(q("c:" + k)).get("val")) for k in ("x", "y", "w", "h")}
+    fw, fh = gf.width / EMU_PER_PT, gf.height / EMU_PER_PT
+    cats = [str(c) if c is not None else "" for c in gf.chart.plots[0].categories]
+    slot = g["w"] * fw / len(cats)
+    room = fh * (1 - g["y"] - g["h"])
+    faults = []
+    shown = [j for j, c in enumerate(cats) if c and c != "None"]
+    for j in shown:
+        c = cats[j]
+        w = text_width_pt(c, family, size)
+        if rot == 0:
+            if any(text_width_pt(word, family, size) > 0.95 * slot for word in c.split()):
+                faults.append(f"«{c}» broken inside a word")
+            elif w > 0.95 * slot:
+                faults.append(f"«{c}» wraps")
+        elif 0.7071 * (w + 1.2 * size) - room > -w / len(c):
+            faults.append(f"«{c}» cut to «…»")
+    if rot != 0 and len(shown) > 1:
+        gap = min(b - a for a, b in zip(shown, shown[1:])) * slot * 0.7071
+        if gap < 1.2 * size:
+            faults.append("turned labels overlap")
+    return faults
+
+
+def test_coffee_months_at_half_width_on_vk_tech_are_shortened_not_broken():
+    """B3-1: the live coffee deck on VK Tech (10 × 5.63 in, Play 9 pt) set its revenue chart at half width and
+    LibreOffice broke «1-й мес.» into «1-й ме / с.» (33.8 pt in a 31.3 pt slot: under the old 10 % tolerance). Every
+    label is measured against 95 % of its slot: «1-й месяц» → «1-й мес.» → «1 мес.», straight, all whole."""
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Emu(9144000), Emu(5143500)
+    gf = _line_chart(prs, (4031483 / 9144000, 1774287 / 5143500), "Play", 9.0)  # the live frame (20260928-034442-97788d s5)
+    cats = [str(c) for c in gf.chart.plots[0].categories]
+    assert cats == ["Сейчас"] + [f"{i} мес." for i in range(1, 7)]
+    assert _lo_label_faults(gf) == []
+    assert not gf.verstka_turned
+
+
+@pytest.mark.parametrize("plot_w", [0.35, 0.29])
+def test_six_month_labels_at_narrow_widths_are_shortened_turned_or_thinned_never_cut(plot_w):
+    """B3-1: at 0.35 W and 0.29 W the six months no longer fit straight even shortened: they turn by 45° with room under
+    the axis for their turned height (LibreOffice cuts a turned label to «1-й …» otherwise — Handdrawn at gate 3), and
+    every other one is left out when turned neighbours would touch. Nothing is broken, wrapped or cut."""
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Emu(9144000), Emu(5143500)
+    gf = _line_chart(prs, (plot_w, 0.345), "Play", 9.0)
+    assert _lo_label_faults(gf) == []
+    cats = [str(c) for c in gf.chart.plots[0].categories if c]
+    assert all(c in (["Сейчас"] + [f"{i} мес." for i in range(1, 7)]) for c in cats if c != "None")
+    assert gf.verstka_turned
+
+
+def test_turned_labels_get_the_room_libreoffice_measures_under_the_axis():
+    """B3-1: Handdrawn (13.33 in, Verdana 14 pt) turned «1-й мес.» at 0.41 W and reserved 60.9 pt under the axis for a
+    54.4 pt turned height — LibreOffice wants one more average character (6.7 pt) and cut every month to «1-й …»."""
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Emu(12192000), Emu(6858000)
+    gf = _line_chart(prs, (5029200 / 12192000, 2337491 / 6858000), "Verdana", 14.0)
+    assert _lo_label_faults(gf) == []
+
+
+def test_period_levels_shorten_a_time_axis_step_by_step():
+    from verstka.rendering.charts import fit_categories, period_levels
+
+    levels = period_levels(COFFEE_MONTHS)
+    assert [lv[1] for lv in levels] == ["1-й месяц", "1-й мес.", "1 мес."]
+    assert all(" " not in c and "⁠" not in c for lv in levels for c in lv)  # a forced wrap breaks between words
+    assert period_levels(["Q1", "Q2"]) == [["Q1", "Q2"]]
+    assert period_levels(["2 квартал", "Январь 2026"])[-1] == ["2 кв.", "Янв 2026"]
+    # the widest label decides: «Сейчас» fits a 31.3 pt slot (29.4 ≤ 0.95 × 31.3), «1-й мес.» (33.8) does not
+    fit = fit_categories(COFFEE_MONTHS, "Play", [9.0], 31.3, 60.0)
+    assert fit.mode == "flat" and fit.level == 2
+    # no room under the axis for turned labels: whole words on two lines when every word fits its slot
+    fit = fit_categories(["Сейчас", "Через месяц", "Через год"], "Play", [9.0], 36.0, 30.0, turn_first=False)
+    assert fit.mode == "wrap" and fit.lines == 2
+
+
+def test_a_conclusion_is_said_aloud_once_and_never_while_the_slide_shows_it(sparse_env, monkeypatch):
+    """C (gate 3): a saved plan rendered again carried «Вывод: …» from its first setting — the notes said the
+    conclusion twice (short visual s4 on 12 decks) or said it while the slide showed it. The line an earlier setting
+    wrote is dropped before the slide is set again; a conclusion with no room is said once."""
+    from verstka.rendering.compose import Composer
+
+    deck, manifest, ws = sparse_env
+    take = "Все разовые вложения покрываются бюджетом запуска"
+    said = f"Вывод: {take}."
+
+    def setting(area_h: float, notes: str) -> OutlineSlide:
+        b = DeckBuilder(deck)
+        slide = b.add_blank_slide(6)
+        o = OutlineSlide(id="b", kind=PatternKind.bullets, headline="Вложения", content=SlideContent(bullets=["Витрина для десертов", "Программа лояльности"]), takeaway=take, notes=notes)
+        comp = Composer(slide, Kit(manifest, LO_W, LO_H, "FFFFFF"), o, DeckOutline(title="T", slides=[o]), "structured", manifest)
+        comp.compose("bullets", Bbox(x=int(0.05 * LO_W), y=int(0.3 * LO_H), w=int(0.9 * LO_W), h=int(area_h * LO_H)))
+        return o
+
+    shown = setting(0.55, f"{said} Слова спикера.")
+    assert said not in shown.notes and "Слова спикера." in shown.notes
+    # no room anywhere (nor a lead line): the conclusion is said aloud — once
+    monkeypatch.setattr(Composer, "_conclusion_spot", lambda self, n0, last=False: None)
+    monkeypatch.setattr(Composer, "_rehouse_conclusion", lambda self, *a, **kw: None)
+    again = setting(0.55, f"{said} Слова спикера.")
+    assert again.notes.count("Вывод:") == 1 and again.notes.startswith(said)
+
+
+# ------------------------------------------------------------------ gate 3, B3-2 / B3-4 / B3-5: text sized for its room
+
+
+def _composer(env, o: OutlineSlide, strategy: str = "structured"):
+    from verstka.rendering.compose import Composer
+
+    deck, manifest, ws = env
+    b = DeckBuilder(deck)
+    slide = b.add_blank_slide(6)
+    return Composer(slide, Kit(manifest, LO_W, LO_H, "FFFFFF"), o, DeckOutline(title="T", slides=[o], strategy=strategy), strategy, manifest)
+
+
+def _sizes_by_name(comp, n0: int) -> dict:
+    out: dict = {}
+    for el in list(comp.cv.tree)[n0:]:
+        name = (el.find(".//" + q("p:cNvPr")).get("name") or "").rsplit(" ", 1)[0]
+        for r in el.iter(q("a:rPr")):
+            if r.get("sz"):
+                out.setdefault(name, set()).add(int(r.get("sz")) / 100)
+    return out
+
+
+def test_a_list_that_misses_its_size_by_a_hair_closes_its_rows_up_before_the_type_steps_down(sparse_env):
+    """B3-2 (WWII s5): four dated lines missed the lead size by 0.02 pt and fell to the body size four points down,
+    25 % of the slide left empty under them. The hairline gaps close up first; the lead size stays."""
+    from verstka.rendering.compose import Composer, _emu
+
+    texts = ["22 июня 1941 — Германия начала вторжение в СССР", "7 декабря 1941 — Япония атаковала Перл-Харбор", "1942 — Япония потерпела поражение в битве за Мидуэй", "1942 — Советский Союз начал серию побед, включая Сталинградскую битву"]
+    o = OutlineSlide(id="b", kind=PatternKind.bullets, headline="К 1942 году война стала мировой", content=SlideContent(bullets=texts))
+    comp = _composer(sparse_env, o)
+    k = comp.kit
+    w = int(0.8 * LO_W)
+    text_w = int(w * 0.8)
+    # the list's height at the lead size with the usual gaps (0.75 of a line over and under each hairline)
+    marker_w = _emu(k.lead * 1.6)
+    col_h = sum(comp.h([comp.P(t, k.lead, k.colors.text)], text_w - marker_w) for t in texts) + (len(texts) - 1) * 2 * int(max(k.lead * 0.75, 6) * EMU_PER_PT)
+    area = Bbox(x=int(0.1 * LO_W), y=int(0.3 * LO_H), w=w, h=col_h - _emu(0.5))
+    n0 = len(comp.cv.tree)
+    comp.bullets(area, texts)
+    assert min(_sizes_by_name(comp, n0)["Item"]) >= k.lead > k.body  # never the body size four points down
+
+
+def test_theses_too_long_for_four_slivers_take_two_rows_and_a_readable_size(sparse_env):
+    """B3-2 (WWII visual s10, Гагарин s6): four theses in a row of narrow cards were set at 12 pt (a word or two a line
+    at any larger size), 60 % of each card empty. The other grid and the cards without their index numerals are
+    tried: the words read at the body size or larger."""
+    theses = ["Была создана Организация Объединённых Наций (ООН) для предотвращения будущих конфликтов", "Организованы международные трибуналы для осуждения лидеров стран-агрессоров", "Произошли изменения в границах государств", "Были установлены репарации"]
+    o = OutlineSlide(id="c", kind=PatternKind.bullets, headline="Итоги войны", content=SlideContent(bullets=theses))
+    comp = _composer(sparse_env, o, "visual")
+    k = comp.kit
+    area = Bbox(x=int(0.055 * LO_W), y=int(0.34 * LO_H), w=int(0.89 * LO_W), h=int(0.56 * LO_H))
+    n0 = len(comp.cv.tree)
+    comp.bullets(area, theses)
+    sizes = _sizes_by_name(comp, n0)
+    text = sizes.get("Card text") or sizes.get("Item")
+    assert text and min(text) >= k.body - 0.05
+
+
+def test_a_legend_name_is_written_as_the_lines_it_was_measured_in(sparse_env):
+    """B3-4 (Marketing sv5): «Обновление меню и фотографии» was measured on two lines and its row sized for them; the
+    renderer's narrower face set it on one and left a blank line under it. The name is written as its measured lines."""
+    o = OutlineSlide(id="p", kind=PatternKind.chart, headline="h", content=SlideContent())
+    comp = _composer(sparse_env, o)
+    k = comp.kit
+    name = "Обновление меню и фотографии"
+    one = comp._set_lines(name, k.body, "222222", Emu(int(600 * EMU_PER_PT)))
+    two = comp._set_lines(name, k.body, "222222", Emu(int(text_width_pt_(name, k.font, k.body) * 0.7 * EMU_PER_PT)))
+    assert len(one) == 1 and one[0].text.replace(" ", " ") == name
+    assert len(two) == 2 and " ".join(p.text for p in two).replace(" ", " ") == name
+    assert comp.h(two, Emu(int(text_width_pt_(name, k.font, k.body) * 0.7 * EMU_PER_PT))) == comp.h([comp.P(name, k.body, "222222")], Emu(int(text_width_pt_(name, k.font, k.body) * 0.7 * EMU_PER_PT)))
+
+
+def text_width_pt_(text, font, size):
+    from verstka.rendering.fonts import text_width_pt
+
+    return text_width_pt(text, font, size)
+
+
+@pytest.mark.parametrize("strategy", ["structured", "compact"])
+def test_a_conclusion_is_kept_on_the_slide_without_text_under_two_percent(sparse_env, strategy):
+    """B3-5 (Focus / Nature long s8): to keep the conclusion on the slide the two lists shrank to 1.76 % of the slide
+    height (8 pt on 6.2″). The block never goes under 2 % for it: the conclusion is set a size smaller, as the strip
+    at the foot (compact), or — last — said aloud."""
+    o = _plan_slide()
+    comp = _composer(sparse_env, o, strategy)
+    k = comp.kit
+    area = Bbox(x=int(0.2 * LO_W), y=int(0.3 * LO_H), w=int(0.62 * LO_W), h=int(0.55 * LO_H))
+    n0 = len(comp.cv.tree)
+    comp.compose("two_column", area)
+    sizes = _sizes_by_name(comp, n0)
+    body = sizes.get("Column", set())
+    assert body and min(body) >= 0.02 * k.hpt - 0.05
+    said = "Вывод:" in (o.notes or "")
+    assert ("Conclusion" in sizes) != said  # on the slide or said aloud, once
+
+
+@pytest.mark.parametrize("frame_w", [0.3, 0.2])
+def test_a_column_label_word_is_never_left_to_be_broken_inside(frame_w):
+    """B3-1 for columns: a single word wider than 95 % of its column's slot («Нидерланды» in a narrow chart) is set
+    a size smaller or the labels turn — never left for LibreOffice to break inside the word."""
+    from verstka.schemas.template import ChartStyleSpec, Typography
+
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Emu(9144000), Emu(5143500)
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    spec = ChartSpec(type="column", categories=["Нидерланды", "Франция", "Германия", "Португалия"], series=[InlineSeries(name="Потери", values=[450, 600, 7000, 450])])
+    outline = DeckOutline(title="T", slides=[OutlineSlide(id="c", kind=PatternKind.chart, headline="h", content=SlideContent(chart=spec))])
+    gf = add_chart(slide, Bbox(x=0, y=0, w=int(frame_w * 9144000), h=int(0.4 * 5143500)), spec, outline, ChartStyleSpec(font_family="Play", font_size_pt=9), Typography(primary_family="Play"), text_hex="222222")
+    assert gf.chart._chartSpace.find(".//" + q("c:barDir")).get("val") == "col"
+    assert _lo_label_faults(gf) == []
+
+
+@pytest.mark.parametrize("region", [(0.72, 0.5), (0.6, 0.55), (0.5, 0.6)])
+def test_a_pair_of_charts_never_flattens_its_trend_for_a_barely_larger_pie(sparse_env, region):
+    """B3-3 (Sidebar43 / Focus short s5): the stacked plan set the growth line 0.80 × 0.20 H for a pie 4 % smaller. A plan
+    past the first is taken only for a real gain (the pie 15 % larger or of its least size, its legend clean or keeping
+    the amounts) and, stacked, only while the trend keeps a plot of 0.28 H."""
+    from verstka.rendering.charts import chart_plot_bbox
+
+    line = ChartSpec(type="line", title="Прогноз выручки", categories=COFFEE_MONTHS, series=[InlineSeries(name="Выручка", values=COFFEE_REVENUE)], unit="₽")
+    pie = ChartSpec(type="pie", title="Распределение вложений", categories=["Витрина для десертов", "Программа лояльности и учет", "Обновление меню и фотографии", "Обучение сотрудников", "Резерв"], series=[InlineSeries(name="Вложения", values=[70000, 35000, 25000, 20000, 30000])], unit="₽")
+    o = OutlineSlide(id="p", kind=PatternKind.chart, headline="Выручка вырастет на 26,5%", content=SlideContent(chart=line, chart2=pie), takeaway="Траектория роста выручки на 26,5% за 6 месяцев")
+    comp = _composer(sparse_env, o)
+    comp.compose("chart_pair", Bbox(x=int(0.15 * LO_W), y=int(0.3 * LO_H), w=int(region[0] * LO_W), h=int(region[1] * LO_H)))
+    frames = [sh for sh in comp.slide.shapes if getattr(sh, "has_chart", False) and sh.has_chart]
+    trend = next(sh for sh in frames if "LINE" in str(sh.chart.chart_type))
+    other = next(sh for sh in frames if sh is not trend)
+    stacked = other.top >= trend.top + trend.height - int(0.01 * LO_H)
+    assert not stacked or chart_plot_bbox(trend).h >= 0.28 * LO_H
+
+
+def test_the_value_axis_keeps_room_for_its_ticks_with_their_unit():
+    """B3-3 follow-up: the room left of the plot was measured for «1 200 000» while the axis prints «1 200 000 ₽»; in
+    a narrow pair plan LibreOffice cut every tick to «1 200 0…». The ticks are measured as printed."""
+    from verstka.rendering.charts import chart_plot_bbox
+    from verstka.rendering.fonts import text_width_pt
+
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Emu(9144000), Emu(6858000)
+    gf = _line_chart(prs, (0.37, 0.39), "Trebuchet MS", 14.0)
+    va = gf.chart._chartSpace.find(".//" + q("c:valAx"))
+    assert va.find(q("c:delete")).get("val") == "0"  # the axis is shown in this frame
+    left = (chart_plot_bbox(gf).x - gf.left) / EMU_PER_PT
+    assert left >= text_width_pt("1 200 000 ₽", "Trebuchet MS", 14.0) + 0.45 * 14.0 - 0.1  # the tick, with its unit, and a gap

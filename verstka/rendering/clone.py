@@ -81,6 +81,7 @@ class _SlideCtx:
         # big pictures in cards are dropped at the end and must not hold text back while it is being placed
         self.keeps_pictures = True
         self.band_limited = False  # the heading being filled stands in a layout/master band (T12)
+        self.goal_to_place: Optional[str] = None  # a cover goal that left its place under the subtitle (C3-1)
 
     # ---- helpers ----------------------------------------------------------------
     def slots(self, *roles: SlotRole, unfilled: bool = True) -> list[Slot]:
@@ -2699,13 +2700,14 @@ def _lines_on_one_ground(ctx: _SlideCtx, oslide: OutlineSlide, title_box: Bbox, 
                 placed = True
         if not placed:
             # a goal that neither stands calm under the heading nor follows the subtitle to the sample's place (a goal
-            # left alone under the heading without its subtitle reads as a second subtitle)
-            _note_to_speaker_notes(oslide, goal or shape_text(g_el))
+            # left alone under the heading without its subtitle reads as a second subtitle): it leaves the stack and
+            # looks for a calm panel of the layout once every other line of the cover stands (`_goal_on_panel`), else
+            # it is said aloud (speaker notes)
+            ctx.goal_to_place = goal or shape_text(g_el)
             sid = ctx.id_of(g_el)
             remove_element(g_el)
             if sid:
                 ctx.filled.discard(sid)
-            ctx.warnings.append("цель с обложки перенесена в заметки докладчика: на слайде она пересекала край рисунка шаблона")
             g_el, goal_gone = None, True
     return s_moved, g_el, goal_gone
 
@@ -2753,6 +2755,266 @@ def _goal_after_subtitle(ctx: _SlideCtx, oslide: OutlineSlide, title_box: Bbox, 
                     continue
                 if _calm_at(ctx, sb) and _calm_at(ctx, gb):
                     return sb, gb, ss, gs
+    return None
+
+
+def _wrap_to_widths(words: list[str], family: Optional[str], size: float, bold: bool, widths_pt: list[float]) -> Optional[list[str]]:
+    """The words set greedily into lines of their own widths (line i at most widths_pt[i]); None when they need more
+    lines than there are widths, or a word is wider than its line."""
+    lines: list[str] = []
+    cur = ""
+    for w in words:
+        if len(lines) >= len(widths_pt):
+            return None
+        cand = f"{cur} {w}" if cur else w
+        if text_width_pt(cand, family, size, bold) <= widths_pt[len(lines)]:
+            cur = cand
+            continue
+        if not cur:
+            return None
+        lines.append(cur)
+        cur = w
+        if len(lines) >= len(widths_pt) or text_width_pt(cur, family, size, bold) > widths_pt[len(lines)]:
+            return None
+    if cur:
+        lines.append(cur)
+    return lines
+
+
+def _box_gap(a: Bbox, b: Bbox) -> float:
+    dx = max(0, max(a.x, b.x) - min(a.x2, b.x2))
+    dy = max(0, max(a.y, b.y) - min(a.y2, b.y2))
+    return math.hypot(dx, dy)
+
+
+def _goal_on_panel(ctx: _SlideCtx, goal: str, family: Optional[str], sizes: list[float], prefs: list[Optional[str]], near: list[Bbox], hidden: list[Bbox], src: etree._Element) -> Optional[etree._Element]:
+    """A cover's goal line that has no calm place under the heading or beside its subtitle stands on a painted panel
+    of the layout (a triangle, a band) near the stack rather than going to the speaker notes (round 4.1, C3-1 — LO
+    Focus long: the purple triangle under the date). Every line is measured against the panel's run at its own height
+    with 1 % of the slide's width to spare (a slanted edge moves with the line; the lines follow it), inside the safe
+    area, clear of every shape and picture of the slide, on one calm ground and quiet on the sample's own render, and
+    set in the first of `prefs` (the heading's colour first) that reads there as small text. Sizes are tried from the
+    largest: the first size that fits anywhere wins, and the place nearest the stack (`near`). Returns the new text
+    element, or None when no panel holds it."""
+    from verstka.rendering.layers import drawn_layers, ground_under, panel_run
+
+    W, H = ctx.W, ctx.H
+    safe = ctx.manifest.tokens.spacing.safe_area
+    sx0, sx1, sy0, sy1 = int(safe.x * W), int(safe.x2 * W), int(safe.y * H), int(safe.y2 * H)
+    pad, clear, step = int(0.01 * W), int(0.012 * H), max(int(0.01 * H), 1)
+    try:
+        layers = drawn_layers(ctx.slide)
+    except Exception:  # noqa: BLE001 - layers are advice
+        return None
+    panels = [lay for lay in layers if lay.source in ("layout", "master") and not lay.placeholder and lay.paints and lay.kind == "sp"
+              and not lay.picture and not lay.busy and lay.fill_hex and not lay.has_text and 0.03 <= lay.cover < 0.85]
+    if not panels:
+        return None
+    obstacles: list[Bbox] = []
+    for el in ctx.slide._element.cSld.find(q("p:spTree")):
+        tag = etree.QName(el).localname
+        if tag not in ("sp", "pic", "grpSp", "graphicFrame", "cxnSp"):
+            continue
+        if tag == "sp" and not shape_text(el).strip() and not has_visible_style(el):
+            continue
+        b = element_bbox(el)
+        if b:
+            obstacles.append(_turned_box(el, Bbox(x=b[0], y=b[1], w=b[2], h=b[3])))
+    for lay in layers:
+        if lay.source != "slide" and not lay.placeholder and lay.paints and (lay.picture or lay.has_text or lay.kind in ("pic", "graphicFrame", "grpSp")) and lay.cover < 0.6:
+            obstacles.append(lay.box)
+    for c in ctx.manifest.tokens.chrome:
+        if c.source == "background":
+            b = c.bbox.to_emu(W, H)
+            if 0 < b.w * b.h < 0.6 * W * H:
+                obstacles.append(b)
+    words = [w for w in bind_short_words(goal).split(" ") if w]
+    ins = _body_insets(src)
+    for size in sizes:
+        pitch = int(1.2 * size * EMU_PER_PT)
+        need = 3.0 if size >= 18 else 4.5
+        best: Optional[tuple] = None
+        for lay in panels:
+            color = next((c for c in prefs if c and contrast_ratio(c, lay.fill_hex) >= need), None)
+            if color is None:
+                continue
+            y_lo, y_hi = max(lay.box.y, sy0 + ins[1]), min(lay.box.y2, sy1 - ins[3])
+            for n in (1, 2, 3, 4):
+                y = y_lo
+                while y + n * pitch <= y_hi:
+                    rows = []
+                    for i in range(n):
+                        r = panel_run(lay, y + i * pitch, y + (i + 1) * pitch)
+                        if not r:
+                            break
+                        rows.append(max(r, key=lambda ab: ab[1] - ab[0]))
+                    if len(rows) == n:
+                        for align in ("l", "r"):
+                            if align == "l":
+                                x0 = max(max(a for a, _ in rows) + pad, sx0 + ins[0])
+                                edges = [(x0, min(b - pad, sx1 - ins[2])) for _, b in rows]
+                            else:
+                                x1 = min(min(b for _, b in rows) - pad, sx1 - ins[2])
+                                edges = [(max(a + pad, sx0 + ins[0]), x1) for a, _ in rows]
+                            widths = [(b - a) / EMU_PER_PT * 0.95 for a, b in edges]
+                            if min(widths) < 4 * size:
+                                continue
+                            lines = _wrap_to_widths(words, family, size, False, widths)
+                            if lines is None or len(lines) != n:
+                                continue
+                            boxes = []
+                            for (a, b), ln in zip(edges, lines):
+                                w_ln = int(text_width_pt(ln, family, size, False) * EMU_PER_PT)
+                                bx = a if align == "l" else b - w_ln
+                                boxes.append(Bbox(x=bx, y=y + len(boxes) * pitch, w=max(w_ln, 1), h=pitch))
+                            bx0, bx1 = min(b.x for b in boxes), max(b.x2 for b in boxes)
+                            block = Bbox(x=bx0, y=y, w=bx1 - bx0, h=n * pitch)
+                            room = Bbox(x=block.x - pad, y=block.y - clear, w=block.w + 2 * pad, h=block.h + 2 * clear)
+                            if any(ob.intersection(room) > 0 for ob in obstacles):
+                                continue
+                            dist = min((_box_gap(block, nb) for nb in near), default=0.0)
+                            if best is not None and dist >= best[0]:
+                                continue
+                            if not all(_calm_at(ctx, b) for b in boxes):
+                                continue
+                            try:
+                                under = [ground_under(ctx.slide, b) for b in boxes]
+                            except Exception:  # noqa: BLE001
+                                continue
+                            if any(u is None or u[1].el is not lay.el for u in under) or not _quiet_on_render(ctx, block, hidden):
+                                continue
+                            best = (dist, n, y, align, lines, edges, color, block)
+                    y += step
+        if best is None:
+            continue
+        _dist, n, y, align, lines, edges, color, block = best
+        el = _new_text(ctx, src, "Цель", family, color)
+        fill_text(el, [ParagraphSpec(" ".join(lines), bullet=False)], size_pt=size)
+        _set_paragraph_box(el, 0, align, bold=False, line_spacing=1.0)
+        _write_lines(el, lines)
+        style_runs(el, None, color, align=None)
+        _no_autofit(el, "t")
+        x0 = min(a for a, _ in edges) if align == "l" else block.x
+        x1 = block.x2 if align == "l" else max(b for _, b in edges)
+        slack = int(0.5 * size * EMU_PER_PT)  # a face a little wider than measured keeps its lines
+        if align == "l":
+            set_element_pos(el, x=x0 - ins[0], y=y - ins[1], w=x1 - x0 + ins[0] + ins[2] + slack, h=int((n * 1.2 + 0.25) * size * EMU_PER_PT) + ins[1] + ins[3])
+        else:
+            set_element_pos(el, x=x0 - ins[0] - slack, y=y - ins[1], w=x1 - x0 + ins[0] + ins[2] + slack, h=int((n * 1.2 + 0.25) * size * EMU_PER_PT) + ins[1] + ins[3])
+        sid = ctx.id_of(el)
+        if sid:
+            ctx.filled.add(sid)
+        return el
+    return None
+
+
+def _calm_photo_lines(ctx: _SlideCtx, text: str, family: Optional[str], size: float, bold: bool, align: str, x: int, y: int, w: int, ins: tuple[int, int, int, int], marl: int = 0, max_lines: int = 3) -> Optional[tuple]:
+    """A cover line set on a photo of the template keeps to the photo's calm part (round 4.1, C3-2 — LO Candy: the
+    subtitle ran from the blurred table onto the candies): each line of the text as set in the box (x, y, w) is
+    measured against the calm stretch of the photo at its own height (`layers.photo_calm_run`, the audit's cells).
+    None when the text is not on a photo or already keeps to its calm part; else (lines, box width) of the fewest lines
+    (up to `max_lines`) whose every line keeps to the calm stretch at its own height, with 1 % of the slide's width to
+    spare — or () when no such wrap exists (the caller may try a smaller size)."""
+    from verstka.rendering.layers import photo_calm_run
+
+    W = ctx.W
+    pad, tol = int(0.01 * W), int(0.012 * W)
+    pitch = int(1.2 * size * EMU_PER_PT)
+    inner_w = max(w - ins[0] - ins[2] - marl, 1)
+    x0 = x + ins[0] + marl  # where the letters start (left) / the text column
+
+    def ink(ln: str, i: int, col_w: int) -> Bbox:
+        lw = int(text_width_pt(ln, family, size, bold) * EMU_PER_PT)
+        if align == "ctr":
+            a = x0 + (inner_w - lw) // 2
+        elif align == "r":
+            a = x0 + inner_w - lw
+        else:
+            a = x0
+        return Bbox(x=a, y=y + ins[1] + i * pitch, w=max(lw, 1), h=pitch)
+
+    def anchor(b: Bbox) -> int:
+        return b.x + b.w // 2 if align == "ctr" else (b.x2 - 1 if align == "r" else b.x)
+
+    def runs(boxes: list[Bbox]) -> Optional[list[Optional[tuple[int, int]]]]:
+        try:
+            return [photo_calm_run(ctx.slide, b, anchor(b)) for b in boxes]
+        except Exception:  # noqa: BLE001 - layers are advice
+            return None
+
+    def keeps(boxes: list[Bbox], got: list[Optional[tuple[int, int]]]) -> bool:
+        return all(r is None or (b.x >= r[0] - tol and b.x2 <= r[1] + tol) for b, r in zip(boxes, got))
+
+    lines = display_lines(text, family, size, bold, inner_w / EMU_PER_PT * 0.92) or [text]
+    boxes = [ink(ln, i, inner_w) for i, ln in enumerate(lines)]
+    got = runs(boxes)
+    if got is None or all(r is None for r in got) or keeps(boxes, got):
+        return None
+    words = [wd for wd in text.split(" ") if wd]
+    for n in range(max(len(lines), 2), max_lines + 1):
+        # the width the calm stretch leaves on each of the n rows, from where the lines start (or around their centre):
+        # each line takes the room of its own row, as the photo's calm part narrows or widens with the height
+        widths: list[int] = []
+        for i in range(n):
+            rb = Bbox(x=x0, y=y + ins[1] + i * pitch, w=inner_w, h=pitch)
+            try:
+                r = photo_calm_run(ctx.slide, rb, x0 + inner_w // 2 if align == "ctr" else (x0 + inner_w - 1 if align == "r" else x0))
+            except Exception:  # noqa: BLE001
+                r = None
+            lim = inner_w
+            if r is not None:
+                if align == "ctr":
+                    c = x0 + inner_w // 2
+                    lim = min(lim, 2 * min(c - r[0], r[1] - c) - 2 * pad)
+                elif align == "r":
+                    lim = min(lim, x0 + inner_w - r[0] - pad)
+                else:
+                    lim = min(lim, r[1] - x0 - pad)
+            widths.append(lim)
+        if min(widths[:1]) < 0.12 * W:
+            return ()
+        cand = _wrap_to_widths(words, family, size, bold, [max(wd, 1) / EMU_PER_PT * 0.95 for wd in widths])
+        if not cand:
+            continue
+        new_w = max(widths[: len(cand)]) + ins[0] + ins[2] + marl
+        c_boxes = []
+        for i, ln in enumerate(cand):
+            lw = int(text_width_pt(ln, family, size, bold) * EMU_PER_PT)
+            a = x0 + (inner_w - lw) // 2 if align == "ctr" else (x0 + inner_w - lw if align == "r" else x0)
+            c_boxes.append(Bbox(x=a, y=y + ins[1] + i * pitch, w=max(lw, 1), h=pitch))
+        c_got = runs(c_boxes)
+        if c_got is not None and keeps(c_boxes, c_got):
+            return cand, int(new_w)
+    return ()
+
+
+def _keep_off_photo(ctx: _SlideCtx, el: etree._Element, text: str, family: Optional[str], size: float, align: str, scale: list[float], what: str, marl: int = 0) -> Optional[int]:
+    """`_calm_photo_lines` applied to a placed cover line (its box, insets and alignment as set): the line is set again
+    on the lines that keep to the photo's calm part — at its size, else a step smaller (down to 0.85 of it). Returns the
+    box's new bottom (EMU), or None when nothing changed."""
+    b = element_bbox(el)
+    if not b:
+        return None
+    ins = _body_insets(el)
+    if _calm_photo_lines(ctx, text, family, size, False, align, b[0], b[1], b[2], ins, marl, max_lines=1) is None:
+        return None  # not on a photo, or already on its calm part
+    # two lines at its size, else two lines a step smaller (down to 0.85), else three lines: a subtitle of three
+    # short lines over a photo reads worse than one a step smaller on two
+    sizes = [size] + sorted((z for z in scale if 0.85 * size - 0.05 <= z < size - 0.05), reverse=True)[:2]
+    tries = [(sz, 2) for sz in sizes] + [(sz, 3) for sz in sizes]
+    for sz, n_max in tries:
+        got = _calm_photo_lines(ctx, text, family, sz, False, align, b[0], b[1], b[2], ins, marl, max_lines=n_max)
+        if not got:
+            continue
+        lines, new_w = got
+        if sz != size:
+            set_text_size(el, sz)
+        _write_lines(el, _split_like(text, lines))
+        h = int((len(lines) * 1.2 + 0.25) * sz * EMU_PER_PT) + ins[1] + ins[3]
+        x = b[0] + (b[2] - new_w) // 2 if align == "ctr" else (b[0] + b[2] - new_w if align == "r" else b[0])
+        set_element_pos(el, x=x, w=new_w, h=h)
+        ctx.warnings.append(f"{what} обложки набран{'а' if what == 'цель' else ''} в {len(lines)} строки{'' if sz == size else f' ({sz:g} пт)'}: одной строкой {'она заходила' if what == 'цель' else 'он заходил'} на пёструю часть фотографии шаблона")
+        return b[1] + h
     return None
 
 
@@ -2891,12 +3153,12 @@ def _note_under_goal(ctx: _SlideCtx, oslide: OutlineSlide, g_el: etree._Element,
     top = max(gb[1], prev + int(0.5 * n_size * EMU_PER_PT)) if prev else gb[1]
     if not fits_at(top):
         return None, g_el
-    _note_to_speaker_notes(oslide, goal)
+    ctx.goal_to_place = goal  # a calm panel of the layout, once the cover's lines stand; else the speaker notes
     gid = ctx.id_of(g_el)
     remove_element(g_el)
     if gid:
         ctx.filled.discard(gid)
-    ctx.warnings.append("цель с обложки перенесена в заметки докладчика: её место заняла сноска, которой нет места ниже")
+    ctx.warnings.append("цель обложки уступила место сноске под подзаголовком: ниже для сноски нет места")
     return top, None
 
 
@@ -3391,6 +3653,11 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
             # LO Vivid): its colour is checked where it stands
             _recolor_for_ground(ctx, s_el, sub_color, sub_size, False, [own_sub, title.style.color_hex])
         block_bottom = y + h_title + gap + h_sub
+        # on a photo of the template the subtitle keeps to its calm part: more lines, not a run onto the candies (C3-2)
+        s_bottom = _keep_off_photo(ctx, s_el, bind_short_words(sub_text), family, sub_size, align, ctx.grow_scale, "подзаголовок", marl)
+        if s_bottom is not None:
+            h_sub = s_bottom - (y + h_title + gap)
+            block_bottom = s_bottom
         sid = ctx.id_of(s_el)
         if sid:
             ctx.filled.add(sid)
@@ -3413,6 +3680,9 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
         if kind == PatternKind.title and sub_color:
             _recolor_for_ground(ctx, g_el, sub_color, g_size, False, [own_sub, title.style.color_hex])
         block_bottom = g_y + int((g_lines * 1.2 + 0.25) * g_size * EMU_PER_PT) + g_ins[1] + g_ins[3]
+        g_bottom = _keep_off_photo(ctx, g_el, goal, family, g_size, align, ctx.grow_scale, "цель", marl)
+        if g_bottom is not None:
+            block_bottom = g_bottom
         gid = ctx.id_of(g_el)
         if gid:
             ctx.filled.add(gid)
@@ -3665,6 +3935,31 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
                 style_runs(s_el, None, sub_color, align=None)
             s_lines = max(1, len(display_lines(longer, family, sub_size, False, inner(w_max) * 0.92)))
             set_element_pos(s_el, h=int((s_lines * 1.2 + 0.25) * sub_size * EMU_PER_PT) + s_ins[1] + s_ins[3])
+    if ctx.goal_to_place and kind == PatternKind.title:
+        # the goal that found no calm place under the heading or beside its subtitle: on a calm painted panel of the
+        # layout near the stack (the purple triangle under the date on LO Focus), in the heading's colour where it
+        # reads, never under 1.8 % of the slide's height nor at the small print's size (round 4.1, C3-1)
+        homeless, ctx.goal_to_place = ctx.goal_to_place, None
+        floor_pt = max(0.018 * H / EMU_PER_PT, (n_size + 0.5) if note else 0.0)
+        top_pt = max(g_size, floor_pt)
+        g_sizes = [top_pt] + sorted((z for z in snap_sizes if floor_pt - 0.05 <= z < top_pt - 0.05), reverse=True)
+        if not any(abs(z - floor_pt) < 0.3 for z in g_sizes):
+            g_sizes.append(round(floor_pt, 1))
+        near = [Bbox(x=b[0], y=b[1], w=b[2], h=b[3]) for b in (element_bbox(el) for el in (s_el if sub_text else None, t_el) if el is not None) if b][:1]
+        src_el = s_el if s_el is not None and sub_text else t_el
+        toks = ctx.manifest.tokens
+        placed_el = None
+        for prefs in ([title.style.color_hex], [sub_color, own_sub], [toks.color_for("background.light"), toks.color_for("background.dark"), toks.color_for("text.primary"), "FFFFFF", "000000"]):
+            if not any(prefs):
+                continue
+            placed_el = _goal_on_panel(ctx, homeless, family, g_sizes, prefs, near, hidden, src_el)
+            if placed_el is not None:
+                break
+        if placed_el is not None:
+            ctx.warnings.append("цель обложки поставлена на спокойную часть рисунка шаблона рядом с заголовком: под ним для неё нет места")
+        else:
+            _note_to_speaker_notes(oslide, homeless)
+            ctx.warnings.append("цель с обложки перенесена в заметки докладчика: на слайде для неё нет спокойного места")
     # pager dots follow the text: they stand under it at the sample's own distance, not where a subtitle used to be
     if dot_rows and kind == PatternKind.section:
         tops = [min(_abs_bbox(d).y for d in row if _abs_bbox(d)) for row in dot_rows]

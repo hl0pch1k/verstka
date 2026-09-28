@@ -520,10 +520,15 @@ def test_a_sentence_tied_to_a_removed_one_loses_its_conjunction():
 
 def test_every_bought_item_leaves_the_list_and_a_noun_is_not_a_past_tense():
     sup = _support("vk")
-    s = "В этот период компания начала активно расширять портфель продуктов: запустила социальные сети «ВКонтакте», «Одноклассники», «Мой мир», а также сервис объявлений «Юла»."
+    s = "Компания начала активно расширять портфель продуктов: запустила социальные сети «ВКонтакте», «Одноклассники», «Мой мир», а также сервис объявлений «Юла»."
     p = sup.pair_issue(s)
     fixed = W._repair(s, p, sup)
     assert fixed is not None and "ВКонтакте" not in fixed and "Одноклассники" not in fixed and "«Мой мир»" in fixed
+    # gate 3 W3-4: a list told «в этот период» dates its items by the sentence before it — nothing checks that year, so
+    # the sentence goes instead of keeping «запущены в этот период … «Мой мир»» (2010, false)
+    then = "В этот период " + s[0].lower() + s[1:]
+    p2 = sup.pair_issue(then)
+    assert p2 is not None and W._repair(then, p2, sup) is None
     ev = _support("ev")
     t = "В 2026 году ожидается начало производства новой модели электрического кроссовера UMO 5."
     p = ev.pair_issue(t)

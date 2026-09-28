@@ -577,14 +577,16 @@ def test_cover_small_print_stays_on_the_slide_under_a_one_line_goal(tmp_path):
     assert gb[1] + gb[3] <= top and top + note[2] <= logo.y  # the note under the goal, clear of the logo
     assert osl.notes == ""  # nothing said aloud
 
-    # a picture beside the goal: no one-line goal; the goal goes to the notes, the note stands under the subtitle
+    # a picture beside the goal: no one-line goal; the goal leaves the stack, the note stands under the subtitle. The
+    # goal waits in ctx.goal_to_place: the cover puts it on a calm panel of the layout once its lines stand, else it
+    # is said aloud (round 4.1, C3-1)
     ctx, t_el, s_el, g_el = _cover_ctx(tmp_path)
     pic = Bbox(x=int(0.5 * W), y=int(0.70 * H), w=int(0.45 * W), h=int(0.1 * H))
     top, kept = _note_under_goal(ctx, osl, g_el, _GOAL, 16.0, "Play", "l", t_el, s_el, [], [logo, pic], note, logo.y)
     sb = _xfrm(s_el)
     assert kept is None and top is not None and top >= sb[1] + sb[3]
     assert top + note[2] <= logo.y
-    assert "255 000" in osl.notes and g_el.getparent() is None
+    assert "255 000" in (ctx.goal_to_place or "") and g_el.getparent() is None and osl.notes == ""
 
     # no room even there: nothing moves, the caller sends the note to the notes
     ctx, t_el, s_el, g_el = _cover_ctx(tmp_path)
@@ -1002,3 +1004,198 @@ def test_fill_ratio_flags_a_one_sentence_slide_even_beside_template_art():
     got = fill_ratio(_ctx(slides, o))
     sparse = [i for i in got if (i.details or {}).get("text_only")]
     assert [i.slide for i in sparse] == [2, 4] and all(i.severity == "warn" for i in sparse)  # the last slide too: it is no closing slide
+
+
+# ------------------------------------------------------------------------------------------------ round 4.1 (after gate 3)
+
+
+def test_content_in_notes_accepts_the_visual_aside_of_a_two_figure_conclusion():
+    """The visual variant sets «За 30 дней выручка составляет 900 000 рублей» beside its pie as «900 000 ₽» over «За
+    30 дней выручка» (the line has two figures, so kpi_callout declines it): the conclusion is on the slide."""
+    from verstka.audit.checks.integrity import content_in_notes
+    from verstka.schemas.common import PatternKind
+    from verstka.schemas.outline import DeckOutline, OutlineSlide
+
+    o = DeckOutline(title="x", slides=[OutlineSlide(id="a", kind=PatternKind.chart, headline="Кофе приносит 60% выручки", takeaway="За 30 дней выручка составляет 900 000 рублей")])
+    s = _ir_slide(1, [("Кофе приносит 60% выручки", (0.05, 0.05, 0.9, 0.1), 32), ("900 000 ₽", (0.7, 0.3, 0.25, 0.1), 40), ("За 30 дней выручка", (0.7, 0.4, 0.25, 0.05), 14)], oid="a")
+    assert content_in_notes(_ctx([s], o)) == []
+    bare = _ir_slide(1, [("Кофе приносит 60% выручки", (0.05, 0.05, 0.9, 0.1), 32), ("900 000 ₽", (0.7, 0.3, 0.25, 0.1), 40)], oid="a")
+    assert len(content_in_notes(_ctx([bare], o))) == 1  # the figure alone, without its words, is not the conclusion
+
+
+def test_fix_slide_sends_the_new_content_checks_to_the_designer():
+    """«Исправить слайд»: a conclusion said aloud, dates out of order and a slide that is one picture are the slide
+    designer's to fix (CONTENT_CHECKS), each with a hint; the note names the whole line that left the slide."""
+    from verstka.api import remarks as RM
+    from verstka.audit.registry import all_checks, load_builtin_checks
+    from verstka.schemas.audit import Issue
+
+    for cid in ("content_in_notes", "timeline_order", "slide_is_picture"):
+        assert cid in RM.CONTENT_CHECKS and RM.FIX_HINT.get(cid)
+    assert RM.FIX_HINT.get("content_over_art")
+    load_builtin_checks()
+    known = {spec.id for spec, _ in all_checks()}
+    assert RM.CONTENT_CHECKS - {"slide_content", "deck_coherence"} <= known  # no stale id
+    long = "За 30 дней выручка составляет 900 000 рублей при среднем чеке 300 рублей и 100 покупках в день"
+    i = Issue(id="content_in_notes-2-6", slide=2, check_id="content_in_notes", severity="warn", kind="deterministic",
+              message=f"Вывод «{long[:50]}…» есть только в заметках докладчика: на слайде не нашлось места",
+              details={"line": "takeaway", "text": long, "in_notes": True})
+    note = RM.remarks_note([i])
+    assert f"вывод «{long}» есть только в заметках докладчика" in note and "Как исправить: верни эту строку на слайд" in note
+
+
+def _cover_audit(tmp_path: Path, template: str, long: bool = True):
+    """Render slide 1 of the coffee brief on a fixture template and audit it with the analysed manifest (no render)."""
+    import glob
+
+    from verstka.audit.runner import run_audit
+    from verstka.schemas.template import TemplateManifest
+
+    prs, s = _render_cover(tmp_path, template, long=long)
+    run = tmp_path / f"run_{template}_{'long' if long else 'short'}" / "structured"
+    man = TemplateManifest.model_validate_json(Path(glob.glob(str(tmp_path / "ws" / "templates" / "*" / "manifest.json"))[0]).read_text())
+    from verstka.schemas.outline import DeckOutline
+
+    outline = DeckOutline.model_validate_json((run / "outline.json").read_text())
+    report = run_audit(run / "deck.pptx", man, outline, render=False, use_llm=False, use_vlm=False)
+    return prs, s, report
+
+
+def test_focus_long_cover_keeps_its_goal_on_a_calm_panel(tmp_path):
+    """C3-1: the LO Focus long cover's goal found no calm place under the heading or beside the subtitle (the white
+    centre between the triangles); it no longer goes to the speaker notes: it stands on a calm painted panel of the
+    layout, every line on that one panel at its own height, in a colour that reads there as small text, clear of every
+    other text — and the audit finds nothing on slide 1."""
+    from verstka.rendering.layers import ground_under
+    from verstka.schemas.common import Bbox, EMU_PER_PT, contrast_ratio
+
+    prs, s, report = _cover_audit(tmp_path, "lo_focus")
+    goal = _shape_with(s, "Цель:")
+    assert goal is not None, [sh.text_frame.text for sh in s.shapes if sh.has_text_frame]
+    assert "Цель:" not in _notes(s).split("[verstka")[0].replace("Главная цель:", "")
+    size = max(r.font.size.pt for p in goal.text_frame.paragraphs for r in p.runs if r.font.size)
+    assert size >= 0.018 * prs.slide_height / EMU_PER_PT - 0.05
+    color = str(goal.text_frame.paragraphs[0].runs[0].font.color.rgb)
+    lines = goal.text_frame.text.replace("\x0b", "\n").split("\n")
+    assert 1 <= len(lines) <= 4
+    pitch = int(1.2 * size * EMU_PER_PT)
+    top = goal.top + goal.text_frame.margin_top
+    layer = None
+    for i in range(len(lines)):
+        row = Bbox(x=goal.left + goal.text_frame.margin_left, y=top + i * pitch, w=max(goal.width - goal.text_frame.margin_left - goal.text_frame.margin_right, 1), h=pitch)
+        got = ground_under(s, Bbox(x=row.x + row.w // 3, y=row.y, w=row.w // 3, h=row.h))
+        assert got is not None
+        layer = layer or got[1]
+        assert got[1].el is layer.el  # one panel under every line
+        assert contrast_ratio(color, got[0]) >= 4.5
+    for sh in s.shapes:
+        if sh.shape_id == goal.shape_id or not sh.has_text_frame or not sh.text_frame.text.strip():
+            continue
+        a = (goal.left, goal.top, goal.left + goal.width, goal.top + goal.height)
+        b = (sh.left, sh.top, sh.left + sh.width, sh.top + sh.height)
+        assert not (min(a[2], b[2]) > max(a[0], b[0]) and min(a[3], b[3]) > max(a[1], b[1])), f"the goal overlaps «{sh.text_frame.text[:30]}»"
+    bad = [i for i in report.issues if i.slide == 1 and i.severity in ("error", "warn")]
+    assert bad == [], [(i.check_id, i.message) for i in bad]
+
+
+def test_panel_run_follows_a_triangle_edge():
+    """layers.panel_run: the run of the LO Focus red triangle over a band narrows as the band goes down to its tip."""
+    from verstka.rendering.layers import drawn_layers, panel_run
+
+    prs = Presentation(str(TPL / "lo_focus.pptx"))
+    s = prs.slides[0]
+    H = prs.slide_height
+    red = next(l for l in drawn_layers(s) if l.fill_hex == "F10D0C")
+    hi = panel_run(red, int(0.05 * H), int(0.08 * H))
+    lo = panel_run(red, int(0.35 * H), int(0.38 * H))
+    assert hi and lo and (lo[0][1] - lo[0][0]) < (hi[0][1] - hi[0][0])
+    assert panel_run(red, int(0.6 * H), int(0.65 * H)) == []  # past its tip
+
+
+def test_candy_cover_subtitle_keeps_to_the_calm_part_of_the_photo(tmp_path):
+    """C3-2: on LO Candy the cover subtitle ran from the blurred table onto the candies on one line. It is now set on
+    lines that each keep to the photo's calm stretch at their own height (two lines, at most a step smaller), and the
+    audit — which sees a line running onto the busy part of a full-slide photo — finds nothing on it."""
+    from verstka.schemas.common import EMU_PER_PT
+
+    prs, s, report = _cover_audit(tmp_path, "lo_candy", long=False)
+    sub = _shape_with(s, "План увеличения")
+    assert sub is not None
+    lines = sub.text_frame.text.replace("\x0b", "\n").split("\n")
+    assert len(lines) == 2 and " ".join(lines).replace("\xa0", " ") == "План увеличения прибыли за 6 месяцев"
+    art = [i for i in report.issues if i.slide == 1 and i.check_id == "content_over_art"]
+    assert art == [], [i.message for i in art]
+    assert sub.left + sub.width <= 0.6 * prs.slide_width  # off the candies
+
+
+def test_audit_sees_a_cover_line_running_onto_the_busy_part_of_a_photo():
+    """C3-2 (audit): the gate-3 LO Candy short cover — the subtitle on one line from the calm table onto the candies —
+    is flagged by content_over_art line by line (warn), though the photo is the slide's ground, not art."""
+    from verstka.audit.checks.layout import content_over_art
+    from verstka.audit.ir import build_deck_ir
+    from verstka.audit.registry import AuditContext
+
+    ir = build_deck_ir(FIX / "candy_short_cover_g3.pptx")
+    got = content_over_art(AuditContext(ir=ir, manifest=None, outline=None))
+    assert len(got) == 1 and got[0].severity == "warn" and got[0].details.get("photo")
+    assert "План увеличения" in got[0].message
+
+
+def test_audit_sees_a_line_running_onto_a_photo_the_slide_itself_holds(tmp_path):
+    """The same line-by-line photo check on a cover whose photo is a picture of the slide itself (many user templates
+    put it there, not in the layout); a line standing on a card of its own over the photo is not on the photo."""
+    from pptx.dml.color import RGBColor as _RGB
+    from pptx.util import Pt
+
+    from verstka.audit.checks.layout import content_over_art
+    from verstka.audit.ir import build_deck_ir
+    from verstka.audit.registry import AuditContext
+
+    src = Presentation(str(TPL / "lo_candy.pptx"))
+    photo = max((p for p in src.part.package.iter_parts() if p.content_type.startswith("image/")), key=lambda p: len(p.blob))
+    img = tmp_path / ("photo.png" if photo.content_type.endswith("png") else "photo.jpg")
+    img.write_bytes(photo.blob)
+    for card in (False, True):
+        prs = Presentation(str(_blank_template(tmp_path)))
+        W, H = prs.slide_width, prs.slide_height
+        s = prs.slides.add_slide(prs.slide_layouts[6])
+        s.shapes.add_picture(str(img), 0, 0, W, H)
+        tb = s.shapes.add_textbox(int(0.08 * W), int(0.40 * H), int(0.82 * W), int(0.09 * H))
+        tb.text_frame.text = "План увеличения прибыли за 6 месяцев"
+        tb.text_frame.paragraphs[0].runs[0].font.size = Pt(28)
+        if card:
+            tb.fill.solid()
+            tb.fill.fore_color.rgb = _RGB(0xFF, 0xFF, 0xFF)
+        path = tmp_path / f"slide_photo_{card}.pptx"
+        prs.save(path)
+        got = content_over_art(AuditContext(ir=build_deck_ir(path), manifest=None, outline=None))
+        photo_hits = [i for i in got if (i.details or {}).get("photo")]
+        assert (len(photo_hits) == 0) if card else (len(photo_hits) == 1), [i.message for i in got]
+
+
+def test_audit_tells_a_line_over_an_ink_blot_from_a_line_just_above_it(tmp_path):
+    """The photo check reads where inside a busy coarse cell the busy part lies (the fine grid): on LO Vintage's paper a
+    list line standing just above the ink blots at the foot shares their coarse cell but not their pixels — no remark
+    (a near false positive of the full-corpus replay, round 4.1); the same line set over the blots is flagged."""
+    from pptx.util import Pt
+
+    from verstka.audit.checks.layout import content_over_art
+    from verstka.audit.ir import build_deck_ir
+    from verstka.audit.registry import AuditContext
+
+    got = {}
+    # 0.782: the line's letters (12 pt) lie in the coarse cell row of the blot's top (0.786–0.857 of the height) but
+    # above the blot itself (its top at 0.82); 0.86: on the blots
+    for y in (0.782, 0.86):
+        prs = Presentation(str(_blank_template(tmp_path)))
+        W, H = prs.slide_width, prs.slide_height
+        s = prs.slides.add_slide(prs.slide_layouts[6])
+        s.shapes.add_picture(str(FIX / "vintage_paper.jpg"), 0, 0, W, H)
+        tb = s.shapes.add_textbox(int(0.03 * W), int(y * H), int(0.4 * W), int(0.04 * H))
+        tb.text_frame.text = "Обновление меню — 25 000 ₽"
+        tb.text_frame.paragraphs[0].runs[0].font.size = Pt(12)
+        path = tmp_path / f"vintage_{y}.pptx"
+        prs.save(path)
+        ir = build_deck_ir(path)
+        got[y] = [i for i in content_over_art(AuditContext(ir=ir, manifest=None, outline=None)) if (i.details or {}).get("photo")]
+    assert got[0.782] == [] and len(got[0.86]) == 1

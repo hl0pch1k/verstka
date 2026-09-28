@@ -214,6 +214,12 @@ def redesign_slide(
     structure, _ = A.analyse_brief(brief)  # the rules' reading: no model call, the data the deck was built from
     facts = A._resolve_facts(None, brief, [], structure)
     ctx = A._build_ctx(brief, structure, facts, manifest)
+    try:
+        from verstka.planning.writer import is_written_text
+
+        ctx.written = is_written_text(brief.text or "")  # a written deck's slide: the same checks as at the build
+    except Exception:  # noqa: BLE001 - the writer's check or none
+        pass
     units = A._units_from_specs(ctx) if structure.specs else []
     unit = next((u for u in units if u.spec is not None and u.spec.number == old.spec_ref), None) if old.spec_ref else None
     if unit is None:

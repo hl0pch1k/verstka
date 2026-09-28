@@ -23,6 +23,43 @@ from verstka.schemas.agent import number_of
 CHARTS = ("column", "bar", "line", "pie")
 _SPACED_DASH_RE = re.compile(r"\s+[—–-]\s+")
 _DASH_RE = re.compile(r"\s*[—–:]\s*")
+# a citation of the numbered reference («[41]», «[41, 42]», «[41–43]»): writer.py anchors the statement to it
+_MARK_RE = re.compile(r"\s*\[\s*(?:№\s*)?(\d{1,4}(?:\s*(?:[,;]|[-–—])\s*\d{1,4})*)\s*\]")
+
+
+def _ids(body: str) -> list[int]:
+    out: list[int] = []
+    for part in re.split(r"\s*[,;]\s*", body or ""):
+        part = part.strip()
+        m = re.fullmatch(r"(\d{1,4})\s*[-–—]\s*(\d{1,4})", part)
+        if m:
+            a, b = int(m.group(1)), int(m.group(2))
+            out += list(range(a, b + 1)) if 0 <= b - a <= 4 else [a, b]
+        elif part.isdigit():
+            out.append(int(part))
+    return out
+
+
+def _marks(text: str, into: list[int]) -> str:
+    """The text without its citation marks, their numbers added to `into`."""
+    if "[" not in (text or ""):
+        return text
+    for m in _MARK_RE.finditer(text):
+        into.extend(_ids(m.group(1)))
+    out = _MARK_RE.sub("", text)
+    return re.sub(r"\s+([,.;:!?…])", r"\1", " ".join(out.split())).strip()
+
+
+def _src(value: Any) -> list[int]:
+    """The «src» a model wrote on an entry, a row or a chart: [41, 42], "41, 42", «[41]»."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return [int(value)]
+    if isinstance(value, str):
+        return _ids(value.strip("[] "))
+    if isinstance(value, list):
+        return [int(v) for v in value if isinstance(v, (int, float)) and not isinstance(v, bool)] + [
+            i for v in value if isinstance(v, str) for i in _ids(v.strip("[] "))]
+    return []
 
 
 def _s(value: Any) -> str:
@@ -44,28 +81,36 @@ def _s(value: Any) -> str:
 
 def _event(value: Any) -> Optional[dict]:
     """{"when", "what"} of a timeline entry written as an object, a pair or «1939 — Германия нападает на Польшу»."""
+    ids: list[int] = []
+    out: Optional[dict] = None
     if isinstance(value, dict):
-        when = _s(value.get("when") or value.get("date") or value.get("year") or value.get("time"))
-        what = _s(value.get("what") or value.get("event") or value.get("text") or value.get("title"))
-        return {"when": when, "what": what} if when and what else None
-    if isinstance(value, (list, tuple)) and len(value) == 2:
-        when, what = _s(value[0]), _s(value[1])
-        return {"when": when, "what": what} if when and what else None
-    if isinstance(value, str):
-        parts = _SPACED_DASH_RE.split(value.strip(), maxsplit=1)
+        ids += _src(value.get("src") or value.get("source") or value.get("sources"))
+        when = _marks(_s(value.get("when") or value.get("date") or value.get("year") or value.get("time")), ids)
+        what = _marks(_s(value.get("what") or value.get("event") or value.get("text") or value.get("title")), ids)
+        out = {"when": when, "what": what} if when and what else None
+    elif isinstance(value, (list, tuple)) and len(value) == 2:
+        when, what = _marks(_s(value[0]), ids), _marks(_s(value[1]), ids)
+        out = {"when": when, "what": what} if when and what else None
+    elif isinstance(value, str):
+        v = _marks(value.strip(), ids)
+        parts = _SPACED_DASH_RE.split(v, maxsplit=1)
         if len(parts) != 2:
-            parts = _DASH_RE.split(value.strip(), maxsplit=1)
+            parts = _DASH_RE.split(v, maxsplit=1)
         if len(parts) == 2 and parts[0].strip() and parts[1].strip():
-            return {"when": parts[0].strip(), "what": parts[1].strip()}
-    return None
+            out = {"when": parts[0].strip(), "what": parts[1].strip()}
+    if out is not None and ids:
+        out["src"] = list(dict.fromkeys(ids))
+    return out
 
 
 def _row(value: Any) -> Optional[dict]:
     """{"label", "value"} of a data row written as an object, a pair or «СССР — 27»; None without a label or a number."""
     label: str = ""
     raw: Any = None
+    ids: list[int] = []
     if isinstance(value, dict):
-        label = _s(value.get("label") or value.get("name") or value.get("category") or value.get("country") or value.get("year"))
+        ids += _src(value.get("src") or value.get("source") or value.get("sources"))
+        label = _marks(_s(value.get("label") or value.get("name") or value.get("category") or value.get("country") or value.get("year")), ids)
         raw = value.get("value") if value.get("value") is not None else value.get("number", value.get("amount"))
     elif isinstance(value, (list, tuple)) and len(value) == 2:
         label, raw = _s(value[0]), value[1]
@@ -73,10 +118,12 @@ def _row(value: Any) -> Optional[dict]:
         m = re.match(r"^\s*(?P<label>.+?)\s*(?:[—–:]|\s-\s)\s*(?P<value>[+\-−]?\d.*)$", value)
         if m:
             label, raw = m.group("label").strip(), m.group("value")
+    if isinstance(raw, str):
+        raw = _marks(raw, ids)
     v = number_of(raw)
     if not label or v is None:
         return None
-    return {"label": label, "value": v}
+    return {"label": label, "value": v, **({"src": list(dict.fromkeys(ids))} if ids else {})}
 
 
 def _data(value: Any) -> Optional[dict]:
@@ -89,12 +136,16 @@ def _data(value: Any) -> Optional[dict]:
     chart = _s(value.get("chart") or value.get("type")).lower()
     chart = {"bar_chart": "bar", "column_chart": "column", "line_chart": "line", "pie_chart": "pie", "круговая": "pie",
              "линейная": "line", "столбчатая": "column", "doughnut": "pie"}.get(chart, chart)
-    return {
-        "caption": _s(value.get("caption") or value.get("title") or value.get("name")),
+    ids = _src(value.get("src") or value.get("source") or value.get("sources"))
+    out = {
+        "caption": _marks(_s(value.get("caption") or value.get("title") or value.get("name")), ids),
         "unit": _s(value.get("unit")),
         "chart": chart if chart in CHARTS else "column",
         "rows": rows,
     }
+    if ids:
+        out["src"] = list(dict.fromkeys(ids))
+    return out
 
 
 def normalise_writer(data: Any) -> Any:
@@ -145,11 +196,13 @@ def normalise_writer(data: Any) -> Any:
 class WriterEvent(BaseModel):
     when: str
     what: str
+    src: list[int] = Field(default_factory=list)  # the numbered reference sentences it comes from
 
 
 class WriterRow(BaseModel):
     label: str
     value: float
+    src: list[int] = Field(default_factory=list)
 
 
 class WriterData(BaseModel):
@@ -157,6 +210,7 @@ class WriterData(BaseModel):
     unit: str = ""
     chart: Literal["column", "bar", "line", "pie"] = "column"
     rows: list[WriterRow] = Field(default_factory=list)
+    src: list[int] = Field(default_factory=list)
 
 
 class WriterSlide(BaseModel):
@@ -251,7 +305,7 @@ WRITER_SCHEMA: dict[str, Any] = {
             "title": _STR, "text": _STR,
             "timeline": {"type": ["array", "null"], "items": {"type": "object", "properties": {"when": _STR, "what": _STR}}},
             "data": {"type": ["object", "null"], "properties": {
-                "caption": _STR, "unit": _STR, "chart": {"enum": list(CHARTS)},
+                "caption": _STR, "unit": _STR, "chart": {"enum": list(CHARTS)}, "src": {"type": "array", "items": {"type": "integer"}},
                 "rows": {"type": "array", "items": {"type": "object", "properties": {"label": _STR, "value": {"type": "number"}}}}}},
         }}},
     },

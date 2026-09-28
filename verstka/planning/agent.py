@@ -2758,6 +2758,27 @@ def _no_new_future(d: _Design) -> None:
         c.bullets = out
 
 
+def _written_ru(changes: list[str]) -> str:
+    """What the written check changed on a slide, in a few Russian words for the agent's log."""
+    what = []
+    joined = " ".join(changes)
+    if "entries checked" in joined or "lines checked" in joined:
+        what.append("даты и события по тексту")
+    if "headline" in joined:
+        what.append("заголовок")
+    if "takeaway" in joined:
+        what.append("вывод — фраза из текста")
+    if "label" in joined or "key figure" in joined:
+        what.append("подписи чисел")
+    if "timeline" in joined:
+        what.append("шкала без дат заменена")
+    if "short slide" in joined or "one line" in joined:
+        what.append("короткий слайд заполнен")
+    if "enumerates" in joined:
+        what.append("список полностью")
+    return ", ".join(what) or "исправления"
+
+
 def _written_notes(text: str) -> str:
     """The speaker notes of a written deck's slide: its checked text as written (sentences and dated entries; not the
     chart's rows or the chart request) — the designer's own notes added claims the check never saw («США сыграли
@@ -2768,7 +2789,7 @@ def _written_notes(text: str) -> str:
         t = line.strip()
         if not t:
             continue
-        if re.match(r"^(?:Нужна\s.*диаграмма|Укажи,\s+что\s+данные|Название:|Подзаголовок:)", t):
+        if re.match(r"^(?:Нужна\s.*диаграмма|Укажи,\s+что\s+данные|Диаграмма\s*\([^)]*\)\s*:|Данные\s+приблизительные\.?$|Название:|Подзаголовок:)", t):
             continue
         if t.endswith(":"):
             data = not re.match(r"^Хронология:$", t)
@@ -2905,6 +2926,25 @@ def tidy_design(d: _Design, ctx: Optional[_Ctx] = None) -> None:
     if s.takeaway:
         s.takeaway = _PP_RE.sub("\\1\u00a0п.\u00a0п.", s.takeaway)
     c.bullets = [_PP_RE.sub("\\1\u00a0п.\u00a0п.", b) for b in c.bullets]
+    if written:
+        _written_check(d.slide, d.unit, ctx, d.changes)
+
+
+def _written_check(s: OutlineSlide, unit: _Unit, ctx: Optional[_Ctx], changes: list[str]) -> list[str]:
+    """A written deck (writer mode): the slide against its writer text — no date, figure, name or rank the text does
+    not give together with its event, dated steps only on a time axis, labels that are their sentences, takeaways that
+    are sentences, headlines in the text's gender (planning/written_check.py). Never raises."""
+    if unit.frame or not (unit.text or "").strip():
+        return []
+    try:
+        from verstka.planning.written_check import check_slide
+
+        done = check_slide(s, unit.text, deck=ctx.brief.text if ctx is not None else unit.text, title=unit.title, topic=ctx.title if ctx is not None else "", key=unit.key)
+    except Exception:  # noqa: BLE001 - the check never stops the deck
+        log.warning("written check failed on %s", unit.key, exc_info=True)
+        return []
+    changes.extend(done)
+    return done
 
 
 _PP_RE = re.compile(r"(\d)\s+п\.\s*п\.")
@@ -5156,6 +5196,21 @@ def run_agent(
                 warns.append(f"agent plan rejected: grounding failed ({str(e)[:160]})")
                 continue
         o = polish_plan(o)
+        if ctx.written:
+            # the variant's final slides (the compiler's variety pass may have given one another form): each against its
+            # writer text once more
+            unit_of = {u.spec.number: u for u in units if u.spec is not None}
+            fixed_at: list[int] = []
+            all_done: list[str] = []
+            for i, sl in enumerate(o.slides, 1):
+                u = unit_of.get(sl.spec_ref) if sl.spec_ref is not None else None
+                if u is not None and sl.kind.value not in FRAME_KINDS:
+                    done = _written_check(sl, u, ctx, warns)
+                    if done:
+                        fixed_at.append(i)
+                        all_done.extend(done)
+            if fixed_at:
+                tracker.emit("compile", f"Сборка: сверил слайды {', '.join(map(str, fixed_at))} с текстом — {_written_ru(all_done)}.", variant=st.name)
         n_content = sum(1 for s in o.slides if s.kind.value not in FRAME_KINDS)
         if n_content == 0:
             warns.append("agent plan rejected: no content slide left after grounding")

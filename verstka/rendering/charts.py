@@ -755,6 +755,44 @@ def _tick_format(unit: Optional[str], decimals: int) -> str:
     return num
 
 
+def _tick_text(v: Optional[float], unit: Optional[str], decimals: int) -> str:
+    """What a value-axis tick prints (`_tick_format`): «1 200 000 ₽»."""
+    s = f"{abs(v or 0.0):,.{decimals}f}".replace(",", " ").replace(".", ",")
+    s = ("−" if (v or 0.0) < 0 else "") + s
+    u = short_unit(unit)
+    if u == "%":
+        return s + "%"
+    if u in ("₽", "руб", "руб.", "RUB"):
+        return s + " ₽"
+    if u in ("$", "USD"):
+        return "$" + s
+    return s
+
+
+def _axis_room(values: Iterable[float], unit: Optional[str], decimals: int, family: Optional[str], fs: float, gap: float) -> float:
+    """The room left of a plot for its value-axis ticks: the widest tick as printed and 0.45 of a size; a family
+    without «₽» has its whole axis set by the renderer in the face that has it (Trebuchet MS → Noto Sans, 4 % wider)
+    and LibreOffice cuts a tick once it runs within one average character of the room («1 200 0…» at 82 pt for a
+    76 pt tick): that face's width, a tenth more and 0.3 of a size. Never less than the plain number and `gap` sizes,
+    the room it always kept."""
+    from verstka.rendering.fonts import glyph_standin
+
+    vals = list(values) or [0.0]
+    texts = [_tick_text(v, unit, decimals) for v in vals]
+    face = None
+    if any("₽" in t for t in texts):
+        try:
+            face = glyph_standin(family, "₽")
+        except Exception:  # noqa: BLE001
+            face = None
+    if face:
+        need = max(text_width_pt(t, face, fs) for t in texts) * 1.1 + fs * 0.3
+    else:
+        need = max(text_width_pt(t, family, fs) for t in texts) + fs * 0.45
+    plain = max(text_width_pt(_fmt_value(v, None, decimals) or "0", family, fs) for v in vals)
+    return max(need, plain + fs * gap)
+
+
 def _fmt_value(v: Optional[float], unit: Optional[str], decimals: int) -> str:
     """What a label prints (for measuring): 12 400 чел., 4,8 %."""
     if v is None or v == 0:
@@ -903,6 +941,104 @@ def short_categories(cats: Sequence[str], joiner: bool = True) -> list[str]:
                 t = t.replace("-", "-\u2060")
         out.append(t)
     return out
+
+
+_ORDINAL_PERIOD_RE = re.compile(r"(?i)(\d+)\s*[-‑–]\s*(?:й|я|е|ой|ый|ий|ая|ое|го|м)\s+(?=(?:мес|кв|нед|полуг|год|г)\.?(?:\s|$))")
+
+# LibreOffice sets a category label (VCartesianAxis): straight labels wrap at 95 % of the tick distance (the plot's
+# width over the categories) — a word wider than that is broken inside («1-й ме / с.»), whatever tickLblSkip or blank
+# neighbours say; a turned label never wraps but is cut to «…» when its turned height and one average character pass
+# the room under the axis (the frame's bottom). Measured in bfix6/lo (e1–e3): 0.95 fits, 0.97 wraps.
+LO_LABEL_ROOM = 0.95
+CAT_LINE = 1.25  # a category label's line height over its size
+TURN_SIN = 0.7071  # 45°
+
+
+def period_levels(cats: Sequence[str]) -> list[list[str]]:
+    """A time axis's labels at each shortening level: as written; the period word shortened («1-й месяц» → «1-й мес.»,
+    «Январь 2026» → «Янв 2026», «2 квартал» → «2 кв.»); and the ordinal dropped as well («1-й мес.» → «1 мес.»). Plain
+    spaces and no joiners: a label that must wrap after all breaks between its words, never inside one. Levels that
+    change nothing are left out (the first one is always there)."""
+    base = [" ".join(str(c).replace("⁠", "").replace(" ", " ").split()) for c in cats]
+    one = [c.replace(" ", " ") for c in short_categories(base, joiner=False)]
+    two = [_ORDINAL_PERIOD_RE.sub(r"\1 ", c) for c in one]
+    out = [base]
+    for lv in (one, two):
+        if lv != out[-1]:
+            out.append(lv)
+    return out
+
+
+@dataclass
+class CatFit:
+    """How a category axis sets its labels (`fit_categories`)."""
+
+    labels: list  # the labels written into the chart («» for one left out)
+    mode: str  # "flat" (one line each), "wrap" (whole words on ≤ 2 lines), "turn" (45°)
+    size: float  # their size
+    lines: int = 1
+    keep: int = 1  # every k-th turned label is shown (turned labels closer than their line height)
+    below: float = 0.0  # pt the labels take under the axis
+    longest: float = 0.0  # the widest label shown (unturned), pt
+    level: int = 0  # shortening level of `period_levels`
+
+
+def _cat_room(family: Optional[str]) -> float:
+    """Share of the tick distance a label may take: LibreOffice's 95 %, less half a percent for a face measured with its
+    own metrics, less 8 % for one estimated with a stand-in."""
+    from verstka.rendering.fonts import is_measured
+
+    return LO_LABEL_ROOM * (0.995 if is_measured(family) else 0.92)
+
+
+def fit_categories(cats: Sequence[str], family: Optional[str], sizes: Sequence[float], slot: float, below_max: float, *, turn_first: bool = True) -> CatFit:
+    """Category labels measured one by one at the axis font against their slot (`slot` = the plot's width over the
+    categories, pt; `below_max` = the most room under the axis the labels may take). In order, at each size of
+    `sizes` (the axis size first, smaller ones after): every label on one line as written, then shortened
+    (`period_levels`); then turned by 45° (shortest level; every k-th label when turned neighbours would touch) or
+    wrapped between whole words on two lines — `turn_first` picks which is tried first. Nothing is ever left for the
+    renderer to break inside a word: the last resort is the shortest labels turned at the smallest size, as many shown
+    as keep apart."""
+    levels = period_levels(cats)
+    n = max(1, len(cats))
+    room = _cat_room(family)
+    last = levels[-1]
+
+    def width(t: str, size: float) -> float:
+        return text_width_pt(t, family, size) if t else 0.0
+
+    def turned(size: float, force: bool = False) -> Optional[CatFit]:
+        widths = [width(t, size) for t in last]
+        # LibreOffice cuts a turned label once its turned height + one average character pass the room under the axis
+        need = max((TURN_SIN * (w + CAT_LINE * size) + w / max(1, len(t)) for t, w in zip(last, widths) if t), default=0.0) + 0.35 * size
+        if need > below_max and not force:
+            return None
+        keep = max(1, math.ceil(CAT_LINE * size / TURN_SIN / max(slot, 1.0) - 1e-6))
+        labels = [t if (n - 1 - j) % keep == 0 else "" for j, t in enumerate(last)] if keep > 1 else list(last)
+        return CatFit(labels, "turn", size, 1, keep, need, max(widths, default=0.0), len(levels) - 1)
+
+    def wrapped(size: float) -> Optional[CatFit]:
+        lim = slot * room
+        for lv, labs in enumerate(levels):
+            if any(width(w, size) > lim for t in labs for w in t.split()):
+                continue  # a word wider than its slot would be broken inside
+            lines = max((len(wrap_lines(t, family, size, False, lim)) for t in labs if t), default=1)
+            below = lines * size * CAT_LINE + size * 0.6
+            if lines <= 2 and below <= below_max:
+                return CatFit(list(labs), "wrap", size, lines, 1, below, max((width(t, size) for t in labs), default=0.0), lv)
+        return None
+
+    for size in sizes:
+        lim = slot * room
+        for lv, labs in enumerate(levels):
+            longest = max((width(t, size) for t in labs), default=0.0)
+            if longest <= lim:
+                return CatFit(list(labs), "flat", size, 1, 1, size * CAT_LINE + size * 0.6, longest, lv)
+        for step in ((turned, wrapped) if turn_first else (wrapped, turned)):
+            got = step(size)
+            if got is not None:
+                return got
+    return turned(min(sizes) if sizes else 10.0, force=True)
 
 
 def is_other_category(name: str) -> bool:
@@ -1341,6 +1477,8 @@ class _Kit:
     capped: bool = False  # chart text capped relative to the slide (chart_text_capped): category labels measured strictly
     squeeze: float = 0.0  # a trend chart's longest category label over its slot (> 1: the renderer breaks it inside a word)
     turned: bool = False  # its category labels were turned by 45° or thinned out (every other one blank) to stay whole
+    cramped: bool = False  # the plot kept its least width (0.3 of the frame) past the room its axis and end labels leave:
+    # the renderer cuts the value axis's labels («1 200 0…»)
 
     def plain(self, v) -> str:
         return _fmt_value(v, self.unit_plain, self.decimals)
@@ -1608,6 +1746,7 @@ def add_chart(
     # they had to be turned or thinned out
     gf.verstka_squeeze = k.squeeze
     gf.verstka_turned = k.turned
+    gf.verstka_cramped = k.cramped
     return gf
 
 
@@ -1754,6 +1893,8 @@ def _style_bars(k: _Kit) -> None:
         if longest > pitch * 0.75:
             cat_fs = max(_snap(fs * 0.85), _snap(fs * pitch * 0.75 / max(longest, 1)))
 
+    turned_below = 0.0  # the room turned column labels take under the axis (B3-1: a word never broken inside)
+
     def box(labels_on: bool, axis_on: bool, fsv: float):
         if horizontal:
             left = cat_w + cat_fs * 0.8
@@ -1764,10 +1905,10 @@ def _style_bars(k: _Kit) -> None:
             pitch0 = W / n
             lines = max((len(wrap_lines(c, family, cat_fs, False, pitch0 * 0.92)) for c in cats), default=1)
             lines = min(lines, 3)
-            left = (max(text_width_pt(_fmt_value(v, None, k.decimals) or "0", family, fs) for v in (flat or [0])) + fs * 0.8) if axis_on else 1.0
+            left = _axis_room(flat, k.unit, k.decimals, family, fs, 0.8) if axis_on else 1.0
             right = 1.0
             top = k.title_h + ((lab_top(fsv) * 1.3 + 5) if labels_on else fs * 0.7)
-            bottom = k.legend_h + lines * cat_fs * 1.22 + cat_fs * 0.6
+            bottom = k.legend_h + (turned_below if turned_below else lines * cat_fs * 1.22 + cat_fs * 0.6)
         return left, top, max(W - left - right, W * 0.3), max(H - top - bottom, H * 0.3)
 
     labels_on, axis_on = True, False  # values on the bars replace the value axis
@@ -1800,6 +1941,28 @@ def _style_bars(k: _Kit) -> None:
         direct = False
         _legend(k, [s.name for s in series], side=False)
     left, top, pw, ph = box(labels_on, axis_on, fs_val)
+    rotate_cols = False
+    if not horizontal and cats:
+        # B3-1: LibreOffice breaks a column's label inside a word wider than 95 % of its slot — every word measured at
+        # the axis font against the real slot: a size down (never under the floor), else the labels turn by 45°
+        lim = pw / n * _cat_room(family)
+        floor = max(8.0, 0.02 * k.sh / EMU_PER_PT)
+        widest = lambda size: max((text_width_pt(w, family, size) for c in cats for w in c.split()), default=0.0)  # noqa: E731
+        if widest(cat_fs) > lim:
+            for size in [x for x in (_snap(cat_fs * 0.9), _snap(cat_fs * 0.82)) if x >= min(floor, cat_fs) - 0.05]:
+                if widest(size) <= lim:
+                    cat_fs = size
+                    break
+            else:
+                room_h = H - k.title_h - k.legend_h
+                fit = fit_categories(cats, family, [cat_fs], pw / n, max(0.0, room_h - max(H * 0.3, 0.42 * room_h)))
+                if fit.mode == "turn":
+                    rotate_cols = k.turned = True
+                    turned_below = fit.below
+                    if fit.labels != list(cats):
+                        cats = k.cats = list(fit.labels)
+                        _set_categories(k, cats)
+                    left, top, pw, ph = box(labels_on, axis_on, fs_val)
 
     plot = k.plot
     plot.gap_width = gap
@@ -1850,7 +2013,7 @@ def _style_bars(k: _Kit) -> None:
             _set_ser_dlbls(ser._element, _dlbls(k.fmt_plain, fs_val, lab, family, pos, pts))
 
     # axes: columns stand on one hairline baseline; horizontal bars start at a common edge and need none (unless < 0)
-    _cat_axis(k, cat_fs, reverse=horizontal, line=not horizontal or has_neg)
+    _cat_axis(k, cat_fs, reverse=horizontal, line=not horizontal or has_neg, rotate=rotate_cols)
     lo = hi = step = None
     if flat and not has_neg:
         lo = 0.0
@@ -2053,10 +2216,10 @@ def _style_line(k: _Kit) -> None:
     end_size = fs_val if multi else _snap(fs_val * ratio)
     end_w = max((text_width_pt(end_text(i), family, end_size, k.bold) for i in range(ns)), default=0.0) if ends else 0.0
 
-    # category labels stay at the chart's text size (never under the deck's small size) on one line each: measured
-    # against the real slot — the plot's width over the points, the value axis and the end label take their share of
-    # the frame — a time axis too narrow for its words shortens them («1-й месяц» → «1-й мес.»), and still too
-    # wide, every k-th label is shown (a line is continuous)
+    # category labels at the chart's text size, measured one by one against the real slot — the plot's width over the
+    # points (the value axis and the end label take their share of the frame): straight on one line as written, else
+    # shortened («1-й месяц» → «1-й мес.» → «1 мес.»), else turned by 45° with the room under the axis for their turned
+    # height, else wrapped between whole words; a size smaller only when none of these fits (`fit_categories`)
     cat_fs = fs
 
     # value range
@@ -2083,51 +2246,36 @@ def _style_line(k: _Kit) -> None:
     marker = 7 if multi else 8
     lab_h = fs_val * 1.2
     top = k.title_h + ((max(fs_val, _snap(fs_val * ratio)) * 1.25 + marker / 2 + 6) if every_point else (fs * 0.9 if ends else fs * 0.9))
-    bottom = k.legend_h + cat_fs * 1.25 + cat_fs * 0.6
     if axis_on:
-        tick_w = max((text_width_pt(_fmt_value(v, None, k.decimals) or "0", family, cat_fs) for v in ([lo or 0.0, hi or 0.0] + flat)), default=10.0)
-        left = tick_w + fs * 1.2
+        left = _axis_room([lo or 0.0, hi or 0.0] + flat, k.unit, k.decimals, family, fs, 1.2)
     else:
         left = max(1.0, widest(fs_val) / 2 - slot / 2 + 4)
     right = max(1.0, end_w + fs * 0.9 - slot / 2 + 6) if ends else max(1.0, widest(fs_val) / 2 - slot / 2 + 4)
-    pw, ph = max(W - left - right, W * 0.3), max(H - top - bottom, H * 0.3)
+    pw = max(W - left - right, W * 0.3)
+    floor = max(8.0, 0.02 * k.sh / EMU_PER_PT)
+    sizes = sorted({cat_fs, max(min(floor, cat_fs), _snap(cat_fs * 0.9)), max(min(floor, cat_fs), _snap(cat_fs * 0.82))}, reverse=True)
+    room_h = H - top - k.legend_h
+    below_max = max(0.0, room_h - max(H * 0.3, 0.42 * room_h))
+    fit = fit_categories(cats, family, sizes, pw / n, below_max, turn_first=n >= 5)
+    if fit.mode == "turn" and fit.labels and fit.labels[0]:
+        # the first label turned hangs left of its point: the plot starts clear of it
+        hang = TURN_SIN * (text_width_pt(fit.labels[0], family, fit.size) + CAT_LINE * fit.size) - pw / n / 2 + 2
+        if hang > left:
+            left = hang
+            pw = max(W - left - right, W * 0.3)
+    cat_fs = fit.size
+    if fit.labels != list(cats):
+        cats = k.cats = list(fit.labels)
+        _set_categories(k, cats)
+    bottom = k.legend_h + fit.below
+    ph = max(H - top - bottom, H * 0.3)
     real_slot = pw / n
-    # a label wider than its slot is broken by the renderer, even inside a word; the capped mode measures the slot
-    # strictly (LibreOffice ignores tickLblSkip and stacks a long label letter by letter)
-    room = real_slot * (0.75 if k.capped else 0.92)
-    longest = max((text_width_pt(c, family, cat_fs) for c in cats), default=0.0)
-    if longest > room:
-        short = short_categories(cats, joiner=not k.capped)
-        if short != cats:
-            cats = k.cats = short
-            _set_categories(k, short)
-            longest = max((text_width_pt(c, family, cat_fs) for c in cats), default=0.0)
-    skip = max(1, math.ceil(longest / room)) if longest > room else 1
-    k.squeeze = longest / max(real_slot, 1.0)
-    short_before = list(cats)
-    rotate = False
-    # a label past its slot is broken by LibreOffice inside the word («Сейч ас»), whatever tickLblSkip says: the
-    # capped mode measures the slot strictly; the others turn or thin their labels once one runs 10 % past its slot
-    if (k.capped and longest > room) or (not k.capped and longest > 1.1 * real_slot):
-        if n >= 5:
-            # still too wide: the labels turn by 45° (their height takes the room under the plot)
-            rotate = True
-            skip = 1
-            bottom += max(0.0, longest * 0.71 + cat_fs * 0.71 - cat_fs * 1.25)
-            ph = max(H - top - bottom, H * 0.3)
-        else:
-            # a few long labels: every k-th label is kept, the others are blank in the chart's data (the readers
-            # that ignore tickLblSkip would stack them letter by letter)
-            keep = max(1, math.ceil(longest / room))
-            blank = [c if (j % keep == 0 or j == n - 1) else "" for j, c in enumerate(cats)]
-            if blank != cats:
-                cats = k.cats = blank
-                _set_categories(k, blank)
-            skip = 1
-    k.turned = rotate or cats != short_before  # turned or thinned out: every label shown is whole
-    if skip > 1 and n > 2:
-        # the labels shown are the first, the last and every k-th between: pick k so that the last one falls on it
-        skip = next((kk for kk in range(skip, n) if (n - 1) % kk == 0), skip)
+    k.cramped = W - left - right < pw - 0.5
+    rotate = fit.mode == "turn"
+    skip = 1
+    k.squeeze = fit.longest / max(real_slot, 1.0)
+    k.turned = rotate or fit.keep > 1  # turned or thinned out: every label shown is whole
+    k.cat_fit = fit
 
     # paint
     area_lines = []
@@ -2241,7 +2389,7 @@ def _style_line(k: _Kit) -> None:
 
     # the baseline implies zero: without a value axis over a raised minimum there is none
     _cat_axis(k, cat_fs, skip=skip, line=axis_on or not (lo and lo > 0), rotate=rotate)
-    _value_axis(k, axis_on, cat_fs, lo, hi, step)
+    _value_axis(k, axis_on, fs, lo, hi, step)
     ax = k.chart.category_axis._element
     _set_child_val(ax, "lblOffset", "100", ("tickLblSkip", "tickMarkSkip", "noMultiLvlLbl", "extLst"))
     va = k.chart.value_axis._element

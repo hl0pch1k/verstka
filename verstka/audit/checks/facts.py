@@ -5,7 +5,8 @@ text boxes, table cells, chart values — so what the renderer computed on its o
 total, a before/after delta) is checked too, and the report can say how many figures were compared. A figure passes
 when the brief writes it (units compatible, rounded as a person rounds), when it follows from two of the brief's
 figures of one measure (difference, percent change, ratio — the analyst's before/after pairs included), or when it is a
-share or a total of a chart's own values on the same slide. Step badges («01», «3»), page numbers and a cover's date
+share, a total, a ratio, a percent change or a difference of a chart's own values on the same slide (the renderer's
+growth label «×2,1» beside a chart of 120 000 → 254 795). Step badges («01», «3»), page numbers and a cover's date
 are not facts and are skipped."""
 
 from __future__ import annotations
@@ -25,7 +26,9 @@ FIGURE_NOT_IN_BRIEF = CheckSpec(
     category="content",
     description=(
         "Каждое число в тексте, таблицах и диаграммах слайда ищется среди чисел исходного текста (с единицами измерения) "
-        "и того, что из них прямо следует: разность, процент изменения, во сколько раз, доли и сумма частей диаграммы. "
+        "и того, что из них прямо следует: разность, процент изменения, во сколько раз, доли и сумма частей диаграммы, "
+        "а также разность, процент изменения и отношение двух значений диаграммы на том же слайде («×2,1» рядом "
+        "с ростом со 120 000 до 254 795). "
         "Номера шагов, страниц и дата на обложке не проверяются."
     ),
 )
@@ -68,6 +71,61 @@ def _chart_parts(slide: IRSlide) -> tuple[list[float], list[float]]:
             totals.append(total)
             shares.extend(v / total * 100 for v in vals)
     return shares, totals
+
+
+_TIMES_BEFORE_RE = re.compile(r"[×xх]\s?$", re.I)  # «×2,1»: a multiple written before its number
+_PAIRS_ALL = 12  # a series this long or shorter: every two of its values are compared; longer: neighbours and ends
+
+
+def _series_pairs(vals: list[float]) -> list[tuple[float, float]]:
+    """(earlier, later) pairs of one series a reader compares: any two of a short series, else neighbours and the
+    first and last value."""
+    n = len(vals)
+    if n <= _PAIRS_ALL:
+        return [(vals[i], vals[j]) for i in range(n) for j in range(i + 1, n)]
+    return [(vals[i], vals[i + 1]) for i in range(n - 1)] + [(vals[0], vals[-1])]
+
+
+def _chart_changes(slide: IRSlide) -> tuple[list[float], list[float], list[float]]:
+    """(ratios, percent changes, differences) of two values of a chart on the slide: two values of one series (the
+    renderer's growth label «×2,1» beside a chart of 120 000 → 254 795, «−53%», «+134 795 ₽»), or two series at one
+    category. What a person reads off the chart beside it is derived from its values, not a new figure."""
+    ratios: list[float] = []
+    pcts: list[float] = []
+    diffs: list[float] = []
+    for e in slide.elements:
+        if e.chart is None:
+            continue
+        rows = [[v for v in s.values] for s in e.chart.series]
+        pairs: list[tuple[float, float]] = []
+        for r in rows:
+            vals = [v for v in r if v is not None]
+            if len(vals) >= 2:
+                pairs.extend(_series_pairs(vals))
+        for a_row, b_row in zip(rows, rows[1:]):
+            pairs.extend((a, b) for a, b in zip(a_row, b_row) if a is not None and b is not None)
+        for a, b in pairs:
+            if a == b:
+                continue
+            diffs.append(abs(b - a))
+            if a > 0 and b > 0:
+                ratios.append(max(a, b) / min(a, b))
+                pcts.append(abs(b - a) / a * 100.0)
+    return ratios, pcts, diffs
+
+
+def _chart_derived(text: str, f, changes: tuple[list[float], list[float], list[float]]) -> bool:
+    """The figure is a ratio, a percent change or a difference of two values of a chart on the same slide."""
+    ratios, pcts, diffs = changes
+    if not (ratios or diffs):
+        return False
+    if f.unit == "times" or (f.unit is None and _TIMES_BEFORE_RE.search(text[: f.start])):
+        return _near(f.value, f.dec, ratios)
+    if f.unit == "pct":
+        return _near(f.value, f.dec, pcts)
+    if f.unit in ("pp", "pts") or f.date is not None:
+        return False
+    return _near(f.value, f.dec, [d / (f.scale or 1.0) for d in diffs])
 
 
 def _near(value: float, dec: int, candidates: list[float]) -> bool:
@@ -119,6 +177,7 @@ def figure_not_in_brief(ctx: AuditContext) -> list[Issue]:
     out: list[Issue] = []
     for s in ctx.ir.slides:
         shares, totals = _chart_parts(s)
+        changes = _chart_changes(s)
         cover = _cover(s, ctx)
         for e in s.elements:
             if (e.ph_type or "") in _SKIP_PH or is_chrome_like(e, ctx.ir, ctx.manifest):
@@ -136,6 +195,8 @@ def figure_not_in_brief(ctx: AuditContext) -> list[Issue]:
                         v = "derived"
                     elif v != "ok" and _near(f.mag, 0, totals):
                         v = "derived"
+                    elif v != "ok" and _chart_derived(t, f, changes):
+                        v = "derived"  # «×2,1» beside a chart of 120 000 → 254 795: read off the chart's own values
                     elif v == "ok" and not idx._same(f):
                         v = "derived"  # a difference, a percent change or a ratio of the brief's figures
                     found.append((written, v))

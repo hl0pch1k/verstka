@@ -19,7 +19,7 @@ CONTENT_CHECKS = frozenset({
     "text_overflow", "text_outside_card", "overlap", "word_break", "table_cell_wrap", "too_many_bullets",
     "bullet_too_long", "table_too_big", "too_many_series", "fill_ratio", "empty_slide", "content_missing",
     "placeholder_text", "duplicate_slides", "figure_not_in_brief", "chart_missing_labels", "slide_content",
-    "deck_coherence",
+    "deck_coherence", "content_in_notes", "timeline_order", "slide_is_picture",
 })
 # fixed in place first (an element moved back inside, a smaller size); they reach the designer only when they survive
 INPLACE_FIRST = frozenset({"text_clipped", "out_of_bounds", "margin_violation"})
@@ -59,6 +59,10 @@ FIX_HINT: dict[str, str] = {
     "figure_not_in_brief": "оставь только числа из исходного текста",
     "chart_missing_labels": "подпиши значения или оси диаграммы",
     "duplicate_slides": "сделай слайд непохожим на соседний: другой вывод или форма",
+    "content_in_notes": "верни эту строку на слайд: сократи или уплотни основной блок, чтобы под ним осталось для неё место",
+    "timeline_order": "поставь пункты с датами по порядку — от ранней даты к поздней",
+    "slide_is_picture": "добавь на слайд текст: заголовок и главное из текста этого слайда",
+    "content_over_art": "не клади текст на рисунок шаблона: сократи блок или выбери форму, которая оставляет рисунок свободным",
 }
 
 _NOTE_LEAD = (
@@ -175,15 +179,24 @@ def hint_of(issue: Issue) -> Optional[str]:
     return FIX_HINT.get(issue.check_id)
 
 
+_NOTE_LINE_RU = {"takeaway": "вывод", "footnote": "сноска", "goal": "цель обложки"}
+
+
 def _message_of(issue: Issue) -> str:
-    """The remark's message; a content_missing one names every missing text it knows (the message cuts them)."""
+    """The remark's message; a content_missing one names every missing text it knows, a content_in_notes one the whole
+    line that left the slide (the messages cut them)."""
     msg = " ".join((issue.message or "").split())
-    missing = (issue.details or {}).get("missing") if issue.check_id == "content_missing" else None
+    details = issue.details or {}
+    missing = details.get("missing") if issue.check_id == "content_missing" else None
     if isinstance(missing, list) and missing:
         names = [str(m).strip() for m in missing if str(m).strip()]
         head = msg.split(":", 1)[0] if ":" in msg else msg
         listed = ", ".join(f"«{m}»" for m in names[:_MAX_MISSING]) + ("…" if len(names) > _MAX_MISSING else "")
         msg = f"{head}: {listed}"
+    if issue.check_id == "content_in_notes" and str(details.get("text") or "").strip():
+        what = _NOTE_LINE_RU.get(str(details.get("line") or ""), "строка")
+        where_ = "есть только в заметках докладчика" if details.get("in_notes") else "нет ни на слайде, ни в заметках"
+        msg = f"{what} «{' '.join(str(details['text']).split())}» {where_}"
     return msg
 
 

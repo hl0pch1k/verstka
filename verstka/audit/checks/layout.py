@@ -373,7 +373,9 @@ CONTENT_OVER_ART = CheckSpec(
         "(иллюстрацию, фотографию, фигуру оформления — по её настоящему контуру, а не по рамке) на 15–90% своей площади; текст, "
         "который пересекает край фотографии или фигурного рисунка (перекрытие 10–90%), — ошибка; горизонтальная линия шаблона "
         "через строки текста — предупреждение. Фоном, а не рисунком, считаются заливка или спокойная картинка во весь слайд и "
-        "прямоугольная плашка, на которой блок стоит целиком."
+        "прямоугольная плашка, на которой блок стоит целиком. Текст проверяется и построчно: строка, которая пересекает край "
+        "фотографии или фигурного рисунка, хотя блок целиком — нет, — ошибка; строка, которая со спокойной части фотографии "
+        "во весь слайд заходит на её пёструю часть (12–90% букв строки на ячейках с разбросом яркости от 24), — предупреждение."
     ),
 )
 
@@ -499,6 +501,86 @@ def _template_writes_on(o, s, manifest, W: int, H: int, ground: Optional[str], c
     return got
 
 
+PHOTO_CROSS = (0.12, 0.90)  # a line of text with this share of its letters on the busy part of a photo ground crosses onto it
+PHOTO_CROSS_MIN_W = 0.02  # … and at least this share of the slide's width of it
+
+
+def _busy_cell(o, px: float, py: float, y0: float, y1: float) -> bool:
+    """The photo `o` is textured at (px, py) for a line spanning y0..y1 (EMU): its cell there is opaque, its luminance
+    stdev at least layers.PHOTO_BUSY_STD and, on the fine grid, not flat at the line's height (`layers.busy_for_line`
+    — the renderer keeps cover lines off such cells, round 4.1, C3-2)."""
+    from verstka.rendering.layers import busy_for_line
+
+    b, c = o.bbox, o.cells
+    if c is None or not (b.x <= px <= b.x2 and b.y <= py <= b.y2):
+        return False
+    cx = min(int((px - b.x) / max(b.w, 1) * c.w), c.w - 1)
+    cy = min(int((py - b.y) / max(b.h, 1) * c.h), c.h - 1)
+    if c.alpha[cy * c.w + cx] < CELL_ALPHA:
+        return False
+    fine = c.fine_std if c.w == 24 and c.h == 14 else None
+    return busy_for_line(c.std, fine, cx, cy, (y0 - b.y) / max(b.h, 1), (y1 - b.y) / max(b.h, 1))
+
+
+def _photo_crossings(e, s, photos: list, tpl: list, W: int) -> Optional[tuple[float, object]]:
+    """(share, photo) of the first line of a text that runs from the calm part of a photo ground onto its busy part
+    (LO Candy's subtitle on the candies): each line's letters (common.line_boxes), sampled 24 × 3, on the busy cells of
+    a full-slide photo of the template, with no painted layer of the template over the photo there. None when no line
+    crosses."""
+    from verstka.audit.checks.common import fill_alpha, line_boxes
+
+    if e.fill_hex and fill_alpha(e) >= 0.6:
+        return None  # a text on a card of its own stands on the card
+    try:
+        rows = line_boxes(e)
+    except Exception:  # noqa: BLE001
+        return None
+    for box, _size in rows:
+        if box.w <= 0 or box.h <= 0:
+            continue
+        cx, cy = box.x + box.w / 2.0, box.y + box.h / 2.0
+        for o in photos:
+            if not (o.bbox.x <= cx <= o.bbox.x2 and o.bbox.y <= cy <= o.bbox.y2):
+                continue
+            own = o in s.elements
+            over = [t for t in tpl if not own and t.z > o.z] + [t for t in s.elements if t is not e and (not own or t.z > o.z)]
+            if any(t is not o and t.type in ("shape", "text", "group") and ((t.fill_hex and fill_alpha(t) >= 0.6) or t.outline) and _paints_at(t, cx, cy) for t in over):
+                continue  # a panel over the photo (the layout's or the slide's own card): the line stands on the panel
+            nx, ny = 24, 3
+            hit = sum(1 for i in range(nx) for j in range(ny) if _busy_cell(o, box.x + (i + 0.5) * box.w / nx, box.y + (j + 0.5) * box.h / ny, box.y, box.y2))
+            share = hit / float(nx * ny)
+            if PHOTO_CROSS[0] <= share <= PHOTO_CROSS[1] and share * box.w >= PHOTO_CROSS_MIN_W * W:
+                return share, o
+            break
+    return None
+
+
+def _line_crossings(e, under: list, ground: Optional[str], cache: dict) -> Optional[tuple[float, object]]:
+    """(share, art) of the first line of a multi-line text that runs onto the edge of a photo or a shaped drawing of
+    the template (a line's letters 10–90 % on it) when the text as a block does not: a long last line reaching a tree,
+    a second line under a triangle's slanted edge."""
+    from verstka.audit.checks.common import line_boxes
+
+    try:
+        rows = line_boxes(e)
+    except Exception:  # noqa: BLE001
+        return None
+    if len(rows) < 2:
+        return None
+    for box, _size in rows:
+        if box.w <= 0 or box.h <= 0:
+            continue
+        for o in under:
+            if not (o.busy or o.outline or o.geometry == "custom") or o.bbox.intersection(box) <= 0:
+                continue
+            nx, ny = 16, 3
+            hit = sum(1 for i in range(nx) for j in range(ny) if _paints_at(o, box.x + (i + 0.5) * box.w / nx, box.y + (j + 0.5) * box.h / ny, ground, cache))
+            share = hit / float(nx * ny)
+            if ART_CROSS[0] <= share <= ART_CROSS[1]:
+                return share, o
+    return None
+
+
 def _rule_through(o, box: Bbox, H: int) -> bool:
     """A horizontal template line (a connector, a line shape or a thin filled bar) crossing the inside of a text's
     line band over at least half of its width."""
@@ -521,11 +603,15 @@ def content_over_art(ctx: AuditContext) -> list[Issue]:
     cache: dict = {}
     for s in ctx.ir.slides:
         tpl = list(getattr(s, "template_elements", []) or [])
-        if not tpl:
+        if not tpl and not any(o.type == "picture" and o.cells is not None for o in s.elements):
             continue
         ground = s.background_hex
         art = [o for o in tpl if _is_art(o, W, H, ground) and not _template_writes_on(o, s, ctx.manifest, W, H, ground, cache)]
         rules = [o for o in tpl if o.bbox_frac.h <= 0.02 and o.bbox_frac.w >= 0.05]
+        # a full-slide photo is the ground, not art — but a line of text may still run from its calm part onto its busy
+        # part (the candies of LO Candy): checked line by line on the photo's cells
+        photos = [o for o in tpl if o.type == "picture" and o.cells is not None and _is_full_slide(o)]
+        photos += [o for o in s.elements if o.type == "picture" and o.cells is not None and _is_full_slide(o)]  # the slide's own
         for e in s.elements:
             if e.type not in CONTENT_TYPES or e.bbox.area <= 0 or (e.type == "text" and not e.has_text):
                 continue
@@ -534,6 +620,7 @@ def content_over_art(ctx: AuditContext) -> list[Issue]:
             box = _ink(e) if e.type == "text" else e.bbox
             if box.w <= 0 or box.h <= 0:
                 continue
+            n_before = len(out)
             under = []
             for o in art:
                 if o.bbox.intersection(box) <= 0:
@@ -571,4 +658,22 @@ def content_over_art(ctx: AuditContext) -> list[Issue]:
                 r = next((o for o in rules if _rule_through(o, box, H)), None)
                 if r is not None:
                     out.append(ctx.new_issue(CONTENT_OVER_ART, s.index, f"линия шаблона проходит через текст «{e.text[:40]}»", bboxes=[e.bbox_frac, r.bbox_frac], element_ids=[e.id], details={"art": r.id, "rule": True}, autofix=fix("rematch", "перевыбрать макет", outline_id=s.outline_id)))
+            if e.type != "text" or len(out) > n_before:
+                continue
+            # line by line (round 4.1): one line of a block may run onto the art or the photo although the block does not
+            what = e.text[:40]
+            got = _line_crossings(e, under, ground, cache) if under else None
+            if got is not None:
+                share, o = got
+                out.append(ctx.new_issue(CONTENT_OVER_ART, s.index, f"строка текста «{what}» заходит на {'фотографию' if o.busy else 'рисунок'} шаблона и пересекает его край", severity="error", bboxes=[e.bbox_frac, o.bbox_frac], element_ids=[e.id], details={"share": round(share, 2), "art": o.id, "line": True}, autofix=fix("rematch", "перевыбрать макет, где контент не ложится на рисунок", outline_id=s.outline_id)))
+                continue
+            got = _photo_crossings(e, s, photos, tpl, W) if photos else None
+            if got is not None:
+                share, o = got
+                out.append(ctx.new_issue(CONTENT_OVER_ART, s.index, f"строка текста «{what}» заходит на пёструю часть фотографии шаблона ({int(round(share * 100))}% строки)", bboxes=[e.bbox_frac, o.bbox_frac], element_ids=[e.id], details={"share": round(share, 2), "art": o.id, "photo": True}, autofix=fix("rematch", "перевыбрать макет, где текст стоит на спокойной части фотографии", outline_id=s.outline_id)))
     return out
+
+
+def _is_full_slide(o) -> bool:
+    f = o.bbox_frac
+    return max(0.0, min(f.x2, 1.0) - max(f.x, 0.0)) * max(0.0, min(f.y2, 1.0) - max(f.y, 0.0)) >= 0.85

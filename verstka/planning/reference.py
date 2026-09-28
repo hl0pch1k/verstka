@@ -455,6 +455,72 @@ def fresh_cut(full_texts: list[str], used: str, limit: int = 8000, want: str = "
     return "\n\n".join(piece for _p, _k, _h, piece in sorted(chosen))
 
 
+# ------------------------------------------------------------------ the numbered reference (source-anchored writing)
+
+
+@dataclass
+class RefSentence:
+    """One numbered sentence of what the writer reads: its number in the prompt («[41]»), the page it is from, its
+    text as the cut gives it and the paragraph (line) of the cut it stands in."""
+
+    id: int
+    page: str
+    text: str
+    line: int
+
+
+def split_line(line: str) -> list[str]:
+    """A paragraph's sentences the way the article index splits them (heuristics.split_sentences), a piece cut inside a
+    quotation («Территория будущего. Москва 2030») joined back — so that a numbered sentence is one sentence of
+    writer.ArticleSupport."""
+    from verstka.planning import heuristics as H
+
+    out: list[str] = []
+    for p in H.split_sentences(line) or ([line.strip()] if line.strip() else []):
+        if out and (out[-1].count("«") > out[-1].count("»") or JOIN_TAIL_RE.search(out[-1])):
+            out[-1] = f"{out[-1]} {p}"
+        else:
+            out.append(p)
+    return out
+
+
+# a piece that ends with an initial or an abbreviation did not end its sentence («…по инициативе Д.» + «Устинова было
+# принято решение…», «им.» + «Дзержинского»)
+JOIN_TAIL_RE = re.compile(r"(?:^|[\s(«])(?:[А-ЯЁA-Z]|им|св|ул|проф|акад|ген|др|т\.\s?е|т\.\s?д|т\.\s?п)\.$")
+
+
+def number_reference(cut: str, start: int = 1) -> tuple[str, list[RefSentence]]:
+    """The cut with a compact number before each sentence («[41] 19 ноября 1942 года Красная армия перешла…»), the
+    headings («# Вторая мировая война», «## Ход войны») as they are, and the numbered sentences. The writer builds every
+    sentence of its own from one or two of them and cites their numbers; `start` continues the numbering of an earlier
+    cut (the refill reads other sections of the same articles)."""
+    out: list[str] = []
+    sents: list[RefSentence] = []
+    page = ""
+    n = start
+    for li, raw in enumerate((cut or "").splitlines()):
+        line = raw.strip()
+        if not line:
+            out.append("")
+            continue
+        m = re.match(r"^(#{1,6})\s*(.+?)\s*$", line)
+        if m:
+            if len(m.group(1)) == 1:
+                page = m.group(2).strip()
+            out.append(line)
+            continue
+        parts = split_line(line)
+        if not parts:
+            continue
+        shown = []
+        for p in parts:
+            sents.append(RefSentence(n, page, p, li))
+            shown.append(f"[{n}] {p}")
+            n += 1
+        out.append(" ".join(shown))
+    return "\n".join(out).strip() + "\n", sents
+
+
 # ------------------------------------------------------------------ the client
 
 
@@ -574,7 +640,7 @@ class WikiClient:
             if not found:
                 queries = list(dict.fromkeys([t for t in titles] + [lead_free(topic)]))
                 queries = [q for q in queries if tokens(q)]
-                best: list[tuple[int, str]] = []
+                best: list[tuple[int, int, int, str]] = []
                 near: list[str] = []  # the search's own order: the most relevant hit sharing a word with its query
                 with ThreadPoolExecutor(max_workers=max(1, min(4, len(queries)))) as ex:
                     results = list(ex.map(self._search_safe, queries))
@@ -583,16 +649,19 @@ class WikiClient:
                     need = max(1, math.ceil(len(want) / 2))
                     first = True
                     for title, words in hits:
-                        if "(значения)" in title or "(disambiguation)" in title:
+                        if "(значения)" in title or "(disambiguation)" in title or sibling_title(title, topic):
                             continue
                         shared = len(tokens(title) & want)
                         if shared >= need:
-                            best.append((words, title))
+                            # the most of the query's words, then the fewest words of its own (a qualifier the topic does
+                            # not have narrows it to another subject: «Возобновляемая энергетика в России» → not «Ядерная
+                            # энергетика России», gate 3 C), then the main article (the largest)
+                            best.append((shared, -len(tokens(title) - want), words, title))
                         elif shared and first:
                             near.append(title)  # «Рынок электромобилей в России» → «Электромобиль»
                         first = False  # only the search's top hit may stand for a narrow topic
                 if best:
-                    found = [max(best)[1]]
+                    found = [max(best)[3]]
                 elif near:
                     found = [near[0]]
         except Exception as e:  # noqa: BLE001 - no reference: the writer writes from knowledge
@@ -662,7 +731,8 @@ def fetch_reference(
         focus = place[1] if place else None
         if focus and len(found) < MAX_PAGES and not any(focus in t.lower() for t in found):
             hits = client._search_safe(lead_free(topic))
-            extra = next((t for t, _ in hits if focus in t.lower() and t not in found and "(значения)" not in t), None)
+            extra = next((t for t, _ in hits if focus in t.lower() and t not in found and "(значения)" not in t
+                          and not sibling_title(t, topic)), None)
             if extra:
                 found = [*found, extra]
         with ThreadPoolExecutor(max_workers=min(MAX_PAGES, len(found))) as ex:
@@ -686,6 +756,25 @@ def fetch_reference(
         client.close()
 
 
+_ADJ_END_RE = re.compile(r"(?:ая|яя|ый|ий|ой|ое|ее|ые|ие)$")
+
+
+def sibling_title(title: str, topic: str) -> bool:
+    """The title names a sibling of the topic, not the topic: the same noun under another adjective («Ядерная
+    энергетика России» for «Возобновляемая энергетика в России» — gate 3 C: the whole deck told nuclear power)."""
+    tw = [w.lower() for w in _TOKEN_RE.findall(title or "")]
+    pw = [w.lower() for w in _TOKEN_RE.findall(lead_free(topic) or "")]
+    for i in range(1, len(tw)):
+        noun = tw[i][:4]
+        adj = tw[i - 1]
+        if not _ADJ_END_RE.search(adj) or len(noun) < 4:
+            continue
+        for j in range(1, len(pw)):
+            if pw[j][:4] == noun and _ADJ_END_RE.search(pw[j - 1]) and pw[j - 1][:4] != adj[:4]:
+                return True
+    return False
+
+
 def _fetch_safe(client: WikiClient, ref: Reference):
     def run(title: str) -> Optional[RefPage]:
         try:
@@ -698,6 +787,7 @@ def _fetch_safe(client: WikiClient, ref: Reference):
 
 
 __all__ = [
-    "LEAD_WORDS_RE", "RefPage", "Reference", "WikiClient", "contact_ok", "cut_pages", "cut_reference", "drop_quotations",
-    "fetch_reference", "focus_sections", "lead_free", "place_of", "sections", "tokens", "user_agent",
+    "LEAD_WORDS_RE", "RefPage", "RefSentence", "Reference", "WikiClient", "contact_ok", "cut_pages", "cut_reference",
+    "drop_quotations", "fetch_reference", "focus_sections", "lead_free", "number_reference", "place_of", "sections",
+    "sibling_title", "split_line", "tokens", "user_agent",
 ]

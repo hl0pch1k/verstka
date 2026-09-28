@@ -1,4 +1,4 @@
-Topic: «{{ topic }}».{% if reference %}
+Topic: «{{ topic }}».{% if reference and not (sourced is defined and sourced) %}
 
 
 Reference:
@@ -7,7 +7,7 @@ Reference:
 >>>{% endif %}
 
 
-The text:
+The text{% if (sourced is defined and sourced) %} (each statement with its source){% endif %}:
 {{ numbered }}
 
 Return the JSON only.

@@ -265,13 +265,27 @@ def _line_on_slide(text: str, have: str, have_alnum: str) -> bool:
     key = _alnum(text)[:NOTE_KEY_CHARS]
     if (bool(key) and key in have_alnum) or _present(text, have):
         return True
-    from verstka.rendering.compose import kpi_callout
+    from verstka.rendering.compose import _aside_figure, kpi_callout, label_without_figure
 
+    forms = []
     got = kpi_callout(text)
-    if got is None or not _alnum(got[0]) or _alnum(got[0]) not in have_alnum:
-        return False
-    words = [w for w in re.findall(r"\w{3,}", got[1].lower().replace("ё", "е"))]
-    return bool(words) and sum(1 for w in words if w in have_alnum) >= 0.5 * len(words)
+    if got is not None:
+        forms.append(got)
+    try:
+        # the visual variant's own split of a conclusion beside its chart: the key figure large, the rest of the
+        # sentence under it («900 000 ₽» over «За 30 дней выручка» — a line of two figures kpi_callout declines)
+        fig = _aside_figure(text)
+        if fig:
+            forms.append((fig, label_without_figure(text, fig)))
+    except Exception:  # noqa: BLE001 - the renderer's helpers are advice here
+        pass
+    for value, label in forms:
+        if not _alnum(value) or _alnum(value) not in have_alnum:
+            continue
+        words = [w for w in re.findall(r"\w{3,}", (label or "").lower().replace("ё", "е"))]
+        if words and sum(1 for w in words if w in have_alnum) >= 0.5 * len(words):
+            return True
+    return False
 
 
 _KIND_RU = {"takeaway": "Вывод", "footnote": "Сноска", "goal": "Цель обложки"}

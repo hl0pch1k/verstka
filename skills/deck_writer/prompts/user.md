@@ -7,7 +7,7 @@ The user's own statements (keep each of them word for word, first in the slide i
 {{ theses }}
 {% endif %}
 {% if reference %}
-Reference text (the only source of facts):
+Reference text (the only source of facts{% if (cited is defined and cited) %}; cite the numbers of the sentences each of your sentences comes from{% endif %}):
 <<<
 {{ reference }}
 >>>

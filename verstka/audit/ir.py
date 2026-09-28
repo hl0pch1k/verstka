@@ -301,7 +301,7 @@ def _part_template_elements(pkg: PptxPackage, part: str, ctx: SlideContext, sour
             e.paint_kind = "image"
         if e.type == "picture" and s.image_part:
             raster = _raster_part(pkg, part, s.element) or s.image_part  # an SVG picture carries a PNG fallback
-            e.cells = _picture_cells(pkg, raster, s.crop, s.element)
+            e.cells = (_photo_cells if _full_slide(e.bbox_frac) else _picture_cells)(pkg, raster, s.crop, s.element)
             ob = _opaque_box(pkg, raster, s.crop, s.bbox) if e.cells is None else None
             if ob is not None and (ob.w, ob.h) != (s.bbox.w, s.bbox.h):
                 # a transparent PNG laid over the slide paints only its opaque pixels (a glass cube, a supergraphic)
@@ -395,34 +395,48 @@ def _picture_cells(pkg: PptxPackage, image_part: str, crop, el: Optional[etree._
     l, t, r, b = crop or (0.0, 0.0, 0.0, 0.0)
     key = (str(getattr(pkg, "path", "")), image_part, (l, t, r, b), flip_h, flip_v)
     if key not in _CELLS:
+        from verstka.rendering.layers import image_cells  # one grid for the audit and the renderer (round 4.1, C3-2)
+
         got = None
         try:
-            import numpy as np
-            from PIL import Image, ImageOps
-
-            with Image.open(io.BytesIO(pkg.read(image_part))) as im:
-                im.draft("RGB", (CELLS_W * 16, CELLS_H * 16))
-                im = im.convert("RGBA")
-                iw, ih = im.size
-                im = im.crop((int(l * iw), int(t * ih), max(int((1 - r) * iw), int(l * iw) + 1), max(int((1 - b) * ih), int(t * ih) + 1)))
-                if flip_h:
-                    im = ImageOps.mirror(im)
-                if flip_v:
-                    im = ImageOps.flip(im)
-                a = np.asarray(im.resize((CELLS_W * 4, CELLS_H * 4)), dtype=np.float32)
-            cells = a.reshape(CELLS_H, 4, CELLS_W, 4, 4).transpose(0, 2, 1, 3, 4).reshape(CELLS_H, CELLS_W, 16, 4)
-            alpha = cells[..., 3] / 255.0
-            cov = alpha.mean(axis=2)
-            wsum = np.maximum(alpha.sum(axis=2), 1e-6)
-            rgb = (cells[..., :3] * alpha[..., None]).sum(axis=2) / wsum[..., None]
-            lum = 0.299 * cells[..., 0] + 0.587 * cells[..., 1] + 0.114 * cells[..., 2]
-            std = lum.std(axis=2)
-            hexes = ["%02X%02X%02X" % tuple(int(round(min(max(v, 0), 255))) for v in rgb[y, x]) for y in range(CELLS_H) for x in range(CELLS_W)]
-            got = IRPictureCells(w=CELLS_W, h=CELLS_H, alpha=[round(float(v), 3) for v in cov.reshape(-1)], hex=hexes, std=[round(float(v), 1) for v in std.reshape(-1)])
+            vals = image_cells(pkg.read(image_part), (l, t, r, b), flip_h, flip_v)
         except Exception:  # noqa: BLE001
-            got = None
+            vals = None
+        if vals is not None:
+            alpha, hexes, std = vals
+            got = IRPictureCells(w=CELLS_W, h=CELLS_H, alpha=alpha, hex=hexes, std=std)
         _CELLS[key] = got
     return _CELLS[key]
+
+
+_FINE: dict[tuple, Optional[list[float]]] = {}
+
+
+def _photo_cells(pkg: PptxPackage, image_part: str, crop, el: Optional[etree._Element]) -> Optional[IRPictureCells]:
+    """`_picture_cells` of a photo ground (a picture covering ≥ 85 % of the slide) with its fine stdev grid
+    (`layers.image_fine_std`): content_over_art tells a line running onto the photo's busy part from a line standing
+    just above a blot in the same coarse cell (round 4.1)."""
+    cells = _picture_cells(pkg, image_part, crop, el)
+    if cells is None:
+        return None
+    xfrm = el.find(q("p:spPr") + "/" + q("a:xfrm")) if el is not None else None
+    flip_h = xfrm is not None and xfrm.get("flipH") in ("1", "true")
+    flip_v = xfrm is not None and xfrm.get("flipV") in ("1", "true")
+    l, t, r, b = crop or (0.0, 0.0, 0.0, 0.0)
+    key = (str(getattr(pkg, "path", "")), image_part, (l, t, r, b), flip_h, flip_v)
+    if key not in _FINE:
+        from verstka.rendering.layers import image_fine_std
+
+        try:
+            _FINE[key] = image_fine_std(pkg.read(image_part), (l, t, r, b), flip_h, flip_v)
+        except Exception:  # noqa: BLE001
+            _FINE[key] = None
+    fine = _FINE[key]
+    return cells.model_copy(update={"fine_std": list(fine)}) if fine else cells
+
+
+def _full_slide(f) -> bool:
+    return max(0.0, min(f.x2, 1.0) - max(f.x, 0.0)) * max(0.0, min(f.y2, 1.0) - max(f.y, 0.0)) >= 0.85
 
 
 def _opaque_box(pkg: PptxPackage, image_part: str, crop, box):
@@ -700,6 +714,13 @@ def build_deck_ir(pptx: Path | str, with_images: bool = True) -> DeckIR:
                 if s.image_part not in img_cache:
                     img_cache[s.image_part] = _image_size(pkg, s.image_part)
                 el.image_size = img_cache[s.image_part]
+                if s.image_part and _full_slide(el.bbox_frac):
+                    # a photo of the slide itself under everything (a cover's photo ground): its cells, so that a line
+                    # running from its calm part onto its busy part is seen (content_over_art, round 4.1)
+                    try:
+                        el.cells = _photo_cells(pkg, s.image_part, s.crop, s.element)
+                    except Exception:  # noqa: BLE001
+                        el.cells = None
             if etype == "chart" and s.element is not None:
                 c_el = find(s.element, "a:graphic/a:graphicData/c:chart")
                 rid = c_el.get(q("r:id")) if c_el is not None else None
