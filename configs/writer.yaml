@@ -11,6 +11,7 @@ reference:
   # Replace with the team's own page or e-mail before the final.
   contact: "https://i.moscow/hackaton/lct/a964db5a6bd444a6bc5981770f55a080"
   max_chars: 12000            # what the writer reads of the article(s)
+  max_chars_history: 18000    # a history / a conflict: the lead whole and every subsection's opening (the turning points)
   timeout_s: 6                # per request; the whole lookup has 12 s
   cache_days: 7               # <workspace>/cache/reference; a stale entry is used when the network fails
 check:

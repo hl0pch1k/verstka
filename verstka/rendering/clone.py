@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import math
 import re
 import weakref
 from dataclasses import dataclass, field
@@ -26,7 +27,7 @@ from verstka.rendering.groups import adjust_group, cell_bbox, cell_riders, cells
 from verstka.rendering.images import replace_picture
 from verstka.rendering.layers import ground_under, heading_band, opaque_box
 from verstka.rendering.tables import add_table
-from verstka.rendering.textfill import ParagraphSpec, clear_text, ensure_txbody, fill_text, has_visible_style, set_text_size, shape_text, style_runs
+from verstka.rendering.textfill import ParagraphSpec, clear_text, effective_insets, ensure_txbody, fill_text, has_visible_style, set_text_size, shape_text, style_runs
 from verstka.schemas.common import EMU_PER_PT, Bbox, PatternKind, SlotRole, contrast_ratio, relative_luminance
 from verstka.schemas.layout import LayoutSlide
 from verstka.schemas.outline import DeckOutline, OutlineSlide, SlideItem
@@ -1751,6 +1752,29 @@ def _opaque_part(part, pic: etree._Element, box: Bbox) -> Bbox:
     return opaque_box(part, pic, box)
 
 
+def _turned_box(el: etree._Element, box: Bbox) -> Bbox:
+    """The box a rotated shape really covers: a sidebar's vertical brand line is a wide box turned by 270°, standing
+    in the sidebar — not a band across the slide's middle (Synth Sidebar, gate 2 — C3)."""
+    tag = etree.QName(el).localname
+    if tag == "grpSp":
+        xfrm = el.find(q("p:grpSpPr") + "/" + q("a:xfrm"))
+    elif tag == "graphicFrame":
+        xfrm = el.find(q("p:xfrm"))
+    else:
+        sp_pr = el.find(q("p:spPr"))
+        xfrm = sp_pr.find(q("a:xfrm")) if sp_pr is not None else None
+    try:
+        rot = (int(xfrm.get("rot") or 0) / 60000.0) % 180.0 if xfrm is not None else 0.0
+    except ValueError:
+        rot = 0.0
+    if rot < 1.0 or rot > 179.0:
+        return box
+    a = math.radians(rot)
+    c, s_ = abs(math.cos(a)), abs(math.sin(a))
+    w, h = int(box.w * c + box.h * s_), int(box.w * s_ + box.h * c)
+    return Bbox(x=box.x + box.w // 2 - w // 2, y=box.y + box.h // 2 - h // 2, w=w, h=h)
+
+
 def _drawn_boxes(ctx: _SlideCtx, exclude: set[int]) -> list[Bbox]:
     """Everything painted on the slide that a heading must not run under: the slide's own shapes and pictures, the
     pictures and logos of its layout and master (placeholders and slide-sized backgrounds aside), pictures measured by
@@ -1759,6 +1783,7 @@ def _drawn_boxes(ctx: _SlideCtx, exclude: set[int]) -> list[Bbox]:
     out: list[Bbox] = []
 
     def add(el: etree._Element, part, box: Bbox) -> None:
+        box = _turned_box(el, box)
         if box.w <= 0 or box.h <= 0 or box.w * box.h >= 0.6 * W * H:
             return
         if etree.QName(el).localname == "pic":
@@ -2555,11 +2580,55 @@ def _recolor_for_ground(ctx: _SlideCtx, el: etree._Element, color: Optional[str]
     need = 3.0 if size >= 18 or (bold and size >= 14) else 4.5
     if contrast_ratio(color, g) >= need:
         return color
-    better = _readable_on(g, [c for c in prefs if c] + [color], ctx.manifest)
+    # the first colour of the template that reads at this size (white on a brand band holds 3:1 for a large line —
+    # it need not turn black), else the most readable one
+    toks = ctx.manifest.tokens
+    cands = [c for c in prefs if c] + [toks.color_for(r) for r in ("text.secondary", "background.light", "background.dark")] + ["FFFFFF", "000000"]
+    better = next((c for c in cands if c and contrast_ratio(c, g) >= need), None) or _readable_on(g, [c for c in prefs if c] + [color], ctx.manifest)
     if better and better != color and contrast_ratio(better, g) > contrast_ratio(color, g):
         style_runs(el, None, better, align=None)
         return better
     return color
+
+
+def _heading_shift_on_ground(ctx: _SlideCtx, lines: list[str], family: Optional[str], size: float, bold: bool, align: str, x: int, y: int, w: int, ins: tuple[int, int, int, int], marl: int, ls: float) -> Optional[int]:
+    """How far a cover heading's box must move sideways so that every line's letters lie inside the run of the
+    triangle or freeform of the layout it stands on, with 1 % of the slide's width to spare, measured over that line's
+    own height (gate 2, C2): 0 when they already do (or no line stands on a slanted ground), None when no shift of up
+    to 8 % of the slide's width does."""
+    from verstka.rendering.layers import _outline_of, ground_span
+
+    W = ctx.W
+    pad = int(0.01 * W)
+    pitch = int(1.2 * ls * size * EMU_PER_PT)
+    lo, hi = -int(0.08 * W), int(0.08 * W)
+    checked = False
+    for i, ln in enumerate(lines):
+        wi = int(text_width_pt(ln, family, size, bold) * 1.04 * EMU_PER_PT)
+        if align == "ctr":
+            c = x + ins[0] + marl + (w - ins[0] - ins[2] - marl) // 2
+            a, b = c - wi // 2, c + wi // 2
+        elif align == "r":
+            b = x + w - ins[2]
+            a = b - wi
+        else:
+            a = x + ins[0] + marl
+            b = a + wi
+        band = Bbox(x=a, y=y + ins[1] + i * pitch, w=max(b - a, 1), h=max(pitch, 1))
+        try:
+            got = ground_span(ctx.slide, band)
+        except Exception:  # noqa: BLE001 - layers are advice
+            got = None
+        if got is None or _outline_of(got[2]) is None or got[2].cover >= 0.85:
+            continue  # a slide ground, a rectangle or a picture: the heading's panel logic rules there
+        checked = True
+        lo = max(lo, got[0] + pad - a, pad - a)
+        hi = min(hi, got[1] - pad - b, W - pad - b)
+    if not checked or lo <= 0 <= hi:
+        return 0
+    if lo > hi:
+        return None
+    return int(lo) if lo > 0 else int(hi)
 
 
 def _lines_on_one_ground(ctx: _SlideCtx, oslide: OutlineSlide, title_box: Bbox, s_el: Optional[etree._Element], s_box0, carrier, g_el: Optional[etree._Element], goal: Optional[str], g_size: float, sub_size: float, family: Optional[str], own_sub: Optional[str], foot: int) -> tuple[bool, Optional[etree._Element], bool]:
@@ -2603,11 +2672,20 @@ def _lines_on_one_ground(ctx: _SlideCtx, oslide: OutlineSlide, title_box: Bbox, 
         placed = False
         if s_moved and home is not None:
             gb = element_bbox(g_el)
-            ins = _body_insets(g_el)
-            lines = max(1, len(display_lines(goal or shape_text(g_el), family, g_size, False, max((home.w - ins[0] - ins[2]) / EMU_PER_PT * 0.92, 10.0))))
-            gh = int((lines * 1.2 + 0.25) * g_size * EMU_PER_PT) + ins[1] + ins[3]
-            cand = Bbox(x=home.x, y=home.y2 + int(max(0.5 * g_size, 0.012 * H / EMU_PER_PT) * EMU_PER_PT), w=home.w, h=gh)
-            if gb and cand.y2 <= foot and cand.intersection(title_box) <= 0 and _calm_at(ctx, cand):
+            fit = _goal_after_subtitle(ctx, oslide, title_box, s_el, s_box0, home, g_el, goal or shape_text(g_el), g_size, sub_size, family, foot)
+            if gb and fit is not None:
+                s_box, cand, s_new, g_new = fit
+                if s_new != sub_size:
+                    # the subtitle a step smaller on one line, so that the goal keeps its place on the slide (C5)
+                    set_text_size(s_el, s_new)
+                    st = _bookends(ctx)
+                    if st.sub_size and st.sub_size > s_new:
+                        st.sub_size = s_new
+                    ctx.warnings.append(f"подзаголовок обложки набран {s_new:g} пт вместо {sub_size:g}: под ним встала цель")
+                set_element_pos(s_el, x=s_box.x, y=s_box.y, w=s_box.w, h=s_box.h)
+                if g_new != g_size:
+                    set_text_size(g_el, g_new)
+                    g_size = g_new
                 set_element_pos(g_el, x=cand.x, y=cand.y, w=cand.w, h=cand.h)
                 for p in g_el.findall(q("p:txBody") + "/" + q("a:p")):
                     pPr = p.find(q("a:pPr"))
@@ -2632,6 +2710,52 @@ def _lines_on_one_ground(ctx: _SlideCtx, oslide: OutlineSlide, title_box: Bbox, 
     return s_moved, g_el, goal_gone
 
 
+def _goal_after_subtitle(ctx: _SlideCtx, oslide: OutlineSlide, title_box: Bbox, s_el: etree._Element, s_box0, home: Bbox, g_el: etree._Element, goal: str, g_size: float, sub_size: float, family: Optional[str], foot: int) -> Optional[tuple[Bbox, Bbox, float, float]]:
+    """The band fit of a subtitle that went back to the sample's own place and the goal following it (gate 2, C5 — LO
+    Vivid long): the goal at its size under the subtitle; else a smaller goal on one line (down to a step over the
+    small print); else the subtitle a step smaller (down to 0.8 of it, one line) with the goal under it — the room of
+    the cover's small print under the goal kept free when the slide has one. The block stands in the middle of the
+    sample's subtitle box, else at its top, else on the foot; every line calm and clear of the heading. Returns
+    (subtitle box, goal box, subtitle size, goal size) or None when the band really lacks the room."""
+    H = ctx.H
+    hb = Bbox(x=s_box0[0], y=s_box0[1], w=s_box0[2], h=s_box0[3])
+    s_ins, g_ins = _body_insets(s_el), _body_insets(g_el)
+    s_text = shape_text(s_el).strip()
+    scale = sorted({float(x) for x in ctx.grow_scale} | {float(x) for x in (ctx.typo.sizes_used or [])})
+    has_note = bool(" ".join((oslide.footnote or "").split()))
+    n_size = _small_print_size(sub_size, H, ctx.grow_scale, scale, ctx.typo.size_for("caption", 10.0)) if has_note else 0.0
+    note_room = int((1.2 + 0.25) * n_size * EMU_PER_PT) + int(0.015 * H) + g_ins[1] + g_ins[3] if has_note else 0
+    g_floor = max(n_size + 0.5, 0.018 * H / EMU_PER_PT) if has_note else 0.018 * H / EMU_PER_PT
+    g_opts = [g_size] + sorted((x for x in scale if g_floor - 0.05 <= x < g_size - 0.05), reverse=True)
+    s_opts = [sub_size] + sorted((x for x in scale if 0.8 * sub_size - 0.05 <= x < sub_size - 0.05), reverse=True)
+    s_room = max((hb.w - s_ins[0] - s_ins[2]) / EMU_PER_PT * 0.92, 10.0)
+    g_room = max((hb.w - g_ins[0] - g_ins[2]) / EMU_PER_PT * 0.92, 10.0)
+    for si, ss in enumerate(s_opts):
+        s_lines = max(1, len(display_lines(s_text, family, ss, False, s_room)))
+        if si and s_lines > 1:
+            continue  # a subtitle set smaller is set to stand on one line
+        hh = int((s_lines * 1.2 + 0.25) * ss * EMU_PER_PT) + s_ins[1] + s_ins[3]
+        for gi, gs in enumerate(g_opts):
+            g_lines = max(1, len(display_lines(goal, family, gs, False, g_room)))
+            if gi and g_lines > 1:
+                continue  # a goal set smaller is set to stand on one line
+            gh = int((g_lines * 1.2 + 0.25) * gs * EMU_PER_PT) + g_ins[1] + g_ins[3]
+            gap = int(max(0.5 * gs, 0.012 * H / EMU_PER_PT) * EMU_PER_PT)
+            total = hh + gap + gh + note_room
+            tops = [home.y] if si == 0 else []
+            tops += [hb.y + (hb.h - total) // 2, hb.y, foot - total]
+            for top in tops:
+                sb = Bbox(x=home.x, y=max(top, 0), w=home.w, h=hh)
+                gb = Bbox(x=home.x, y=sb.y2 + gap, w=home.w, h=gh)
+                if gb.y2 + note_room > foot or sb.intersection(title_box) > 0 or gb.intersection(title_box) > 0:
+                    continue
+                if sb.y < title_box.y2 and sb.y2 > title_box.y:
+                    continue
+                if _calm_at(ctx, sb) and _calm_at(ctx, gb):
+                    return sb, gb, ss, gs
+    return None
+
+
 def _note_to_speaker_notes(oslide: OutlineSlide, text: str) -> None:
     """A line the slide has no room for is said aloud: it joins the slide's speaker notes (written into the notes page
     after the render), once — a re-render of the same slide does not repeat it."""
@@ -2647,12 +2771,85 @@ def _note_to_speaker_notes(oslide: OutlineSlide, text: str) -> None:
         pass
 
 
-def _note_under_goal(ctx: _SlideCtx, oslide: OutlineSlide, g_el: etree._Element, goal: str, g_size: float, family: Optional[str], align: str, t_el: etree._Element, s_el: Optional[etree._Element], hidden: list[Bbox], obstacles: list[Bbox], note: tuple[int, int, int, float], floor: int) -> tuple[Optional[int], Optional[etree._Element]]:
+def _quiet_on_render(ctx: _SlideCtx, box: Bbox, hidden: list[Bbox]) -> bool:
+    """Nothing is drawn inside the box on the sample's own render (its texts masked): no stripe, dot or line work a
+    shape does not measure. True when the render is missing (the layers decide alone)."""
+    import numpy as np
+
+    dm = _detail_map(ctx, hidden)
+    if dm is None:
+        return True
+    act, kx, ky = dm
+    y0, y1 = max(int(box.y * ky), 0), min(int(box.y2 * ky) + 1, act.shape[0])
+    x0, x1 = max(int(box.x * kx), 0), min(int(box.x2 * kx) + 1, act.shape[1])
+    if y1 <= y0 or x1 <= x0:
+        return True
+    return float(np.percentile(act[y0:y1, x0:x1], 98)) <= 25.0
+
+
+def _note_beside_stack(ctx: _SlideCtx, stack: list[Optional[etree._Element]], note: str, family: Optional[str], size: float, bold: bool, ins: tuple[int, int, int, int], hidden: list[Bbox], foot: int) -> Optional[tuple[int, int, int, list[str], int, str]]:
+    """A cover's small print with no room under its stack stands in the column of a line set beside the stack (the
+    template's date right of a rule, LO Grey Elegant — gate 2, C1): under that line, on its text edge and in its width,
+    when the note fits above the foot in at most three lines, on one calm ground, clear of everything drawn and of the
+    sample's own art. Returns (text x, top, width, lines, height, alignment) or None."""
+    W, H = ctx.W, ctx.H
+    safe = ctx.manifest.tokens.spacing.safe_area
+    boxes = [b for b in (element_bbox(e) for e in stack if e is not None) if b]
+    if not boxes:
+        return None
+    sx0, sx1 = min(b[0] for b in boxes), max(b[0] + b[2] for b in boxes)
+    sy0, sy1 = min(b[1] for b in boxes), max(b[1] + b[3] for b in boxes)
+    own = {id(e) for e in stack if e is not None}
+    tree = ctx.slide._element.cSld.find(q("p:spTree"))
+    cands: list[tuple[etree._Element, Bbox]] = []
+    for el in tree:
+        if id(el) in own or etree.QName(el).localname != "sp" or not shape_text(el).strip():
+            continue
+        ph = _ph(el)
+        if ph is not None and ph.get("type") == "sldNum":
+            continue  # a page number is no column
+        b = element_bbox(el)
+        if not b:
+            continue
+        bx = Bbox(x=b[0], y=b[1], w=b[2], h=b[3])
+        if bx.w < 0.12 * W or bx.y2 <= sy0 or bx.y >= sy1:
+            continue
+        if bx.x >= sx1 - int(0.005 * W) or bx.x2 <= sx0 + int(0.005 * W):
+            cands.append((el, bx))
+    if not cands:
+        return None
+    drawn = _drawn_boxes(ctx, exclude=set())
+    for el, bx in sorted(cands, key=lambda c: c[1].y):
+        sh = next((x for x in ctx.slide.shapes if x._element is el), None)
+        e_ins = effective_insets(sh) if sh is not None else _body_insets(el)  # the layout's zero insets count
+        x = bx.x + e_ins[0]
+        w = min(bx.x2 - e_ins[2], int(safe.x2 * W)) - x
+        if w < 0.1 * W:
+            continue
+        lines = display_lines(bind_short_words(note), family, size, bold, w / EMU_PER_PT * 0.92)
+        if not lines or len(lines) > 3:
+            continue
+        h = int((1.2 * len(lines) + 0.25) * size * EMU_PER_PT) + ins[1] + ins[3]
+        top = bx.y2 + int(0.01 * H)
+        nb = Bbox(x=x - ins[0], y=top, w=w + ins[0] + ins[2], h=h)
+        if nb.y2 - ins[3] > foot or any(o.intersection(nb) > 0 for o in drawn):
+            continue  # the letters keep above the foot (the box's own bottom inset may reach past it)
+        # the line's own letters on the sample's render are no art (their blur reaches a few pixels under its box)
+        own_text = Bbox(x=bx.x, y=bx.y, w=bx.w, h=bx.h + int(0.012 * H))
+        if not _calm_at(ctx, nb) or not _quiet_on_render(ctx, nb, hidden + [own_text]):
+            continue
+        algn = next((lv.get("algn") for lv in _style_levels(ctx, el) if lv.get("algn")), None)
+        return x, top, w, lines, h, algn if algn in ("ctr", "r") else "l"
+    return None
+
+
+def _note_under_goal(ctx: _SlideCtx, oslide: OutlineSlide, g_el: etree._Element, goal: str, g_size: float, family: Optional[str], align: str, t_el: etree._Element, s_el: Optional[etree._Element], hidden: list[Bbox], obstacles: list[Bbox], note: tuple[int, int, int, float], floor: int, drop_goal: bool = True) -> tuple[Optional[int], Optional[etree._Element]]:
     """Room for a cover's small print under its goal line when there is none at the foot (G1-01): (1) a goal that
     wrapped needlessly («…со 120 000 до 255 000 / рублей») is set on one line in the width free at its own height (up to
-    the art or what stands to its right), and the note goes under it; (2) else the goal is said aloud (speaker notes)
-    and the note takes its place under the subtitle — the brief asks for the small print on the slide, the goal is also
-    on the notes page. Returns (the note's top or None, the goal element or None when it left)."""
+    the art or what stands to its right), and the note goes under it; (2) else (with `drop_goal`) the goal is said
+    aloud (speaker notes) and the note takes its place under the subtitle — the brief asks for the small print on the
+    slide, the goal is also on the notes page. Returns (the note's top or None, the goal element or None when it
+    left)."""
     W, H = ctx.W, ctx.H
     safe = ctx.manifest.tokens.spacing.safe_area
     n_x, n_w, n_h, n_size = note
@@ -2682,13 +2879,16 @@ def _note_under_goal(ctx: _SlideCtx, oslide: OutlineSlide, g_el: etree._Element,
             set_element_pos(g_el, w=min(room - gb[0], max(gb[2], need)), h=one_h)
             ctx.warnings.append("цель обложки набрана в одну строку: под ней встала сноска")
             return top, g_el
-    # what stays above the note: the heading and the subtitle standing over the goal
+    if not drop_goal:
+        return None, g_el
+    # the note takes the goal's own place under the subtitle (the stack's gap is already there); never closer to the
+    # heading and the subtitle standing over it than a line's distance
     prev = 0
     for el in (t_el, s_el):
         b = element_bbox(el) if el is not None else None
         if b and b[1] < gb[1]:
             prev = max(prev, b[1] + b[3])
-    top = prev + gap if prev else gb[1]
+    top = max(gb[1], prev + int(0.5 * n_size * EMU_PER_PT)) if prev else gb[1]
     if not fits_at(top):
         return None, g_el
     _note_to_speaker_notes(oslide, goal)
@@ -2714,6 +2914,25 @@ def _small_print_color(ctx: _SlideCtx, box: Bbox, color: Optional[str]) -> Optio
     if not good:
         return None
     return primary if primary in good else min(good, key=relative_luminance)
+
+
+def _small_print_size(ref: float, H: int, grow_scale: list[float], sizes: list[float], caption: float) -> float:
+    """The size of a cover's small print («мелким текстом», gate 2 — C3): a step under the subtitle `ref` as before
+    (0.62 of it, never under the caption size or 1.8 % of the slide height, on the template's scale), but never above
+    the scale step below the subtitle, 0.7 of the subtitle, nor 2.6 % of the slide height — a template whose caption
+    is 20 pt (Synth Sidebar) or a slide twice the usual size (26.67″) no longer sets it at the subtitle's size. On the
+    template's scale where a size of it lies between the floor and that cap."""
+    h_pt = H / EMU_PER_PT
+    floor = 0.018 * h_pt
+    size = _snap_up(max(_snap_down(0.62 * ref, grow_scale), caption, floor), sizes)
+    below = [x for x in sizes if x < ref - 0.05]
+    cap = min(0.7 * ref, 0.026 * h_pt, max(below) if below else ref)
+    if size <= cap + 0.05:
+        return size
+    on_scale = [x for x in sizes if floor - 0.05 <= x <= cap + 0.05]
+    if on_scale:
+        return max(on_scale)
+    return max(round(cap * 2) / 2, round(floor * 2 + 0.49) / 2)
 
 
 def _snap_up(size: float, sizes: list[float]) -> float:
@@ -3072,7 +3291,9 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
         if goal:
             # the goal: a short line a step under the subtitle, in its colour, never under the caption size
             ref = sub_size or min(s_size or _bookend_subtitle_size(ctx), _snap_down(size * 0.6, ctx.grow_scale))
-            g_size = legible(_snap_up(max(_snap_down(0.8 * ref, ctx.grow_scale), typo.size_for("caption", 10.0), 0.022 * H / EMU_PER_PT), snap_sizes), sub_color)
+            # (a template whose caption is set at 20 pt, or a slide twice the usual size, does not lift it to the
+            # subtitle's own size: the caption floor reaches 0.8 of the subtitle at most — gate 2, C3)
+            g_size = legible(_snap_up(max(_snap_down(0.8 * ref, ctx.grow_scale), min(typo.size_for("caption", 10.0), 0.8 * ref), 0.022 * H / EMU_PER_PT), snap_sizes), sub_color)
             g_lines = max(1, len(display_lines(goal, family, g_size, False, inner(w_max) * 0.92)))
             h_goal = int((g_lines * 1.2 + 0.25) * g_size * EMU_PER_PT) + s_ins[1] + s_ins[3]
             gap_goal = int(max(0.5 * g_size, 0.012 * H / EMU_PER_PT) * EMU_PER_PT) if sub_text else int(0.45 * size * EMU_PER_PT)
@@ -3116,6 +3337,24 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
     if sub_text and not st.sub_size:
         st.sub_size = sub_size
     x = tb.x if align == "l" else (tb.x + tb.w // 2 - w_used // 2 if align == "ctr" else tb.x2 - w_used)
+    if kind == PatternKind.title:
+        # every line of the heading on its own piece of the ground: a triangle's slanted edge moves with the height, so
+        # a centred second line may start on the white gap beside it (LO Focus — gate 2, C2): the box shifts, else
+        # the heading steps down a size or two
+        dx = _heading_shift_on_ground(ctx, split, family, size, bold, align, x, y, w_used, t_ins, marl, ls)
+        if dx is None:
+            for smaller in sorted((s_ for s_ in snap_sizes if 0.8 * size - 0.05 <= s_ < size - 0.05), reverse=True)[:3]:
+                n_s = max(len(display_lines(measured, family, smaller, bold, inner(w_used))), min_lines)
+                split_s = (balanced_lines(measured, family, smaller, bold, inner(w_used), n_s) if n_s > 1 else None) or display_lines(measured, family, smaller, bold, inner(w_used))
+                dx_s = _heading_shift_on_ground(ctx, split_s, family, smaller, bold, align, x, y, w_used, t_ins, marl, ls)
+                if dx_s is not None:
+                    ctx.warnings.append(f"заголовок обложки набран {smaller:g} пт вместо {size:g}: строки не помещались на своей части рисунка шаблона")
+                    size, split, lines, dx = smaller, split_s, len(split_s), dx_s
+                    h_title = int((lines * 1.2 * ls + 0.15) * size * EMU_PER_PT) + t_ins[1] + t_ins[3]
+                    st.cover_size = size
+                    break
+        if dx:
+            x += dx
     fill_text(t_el, [ParagraphSpec(text, bullet=False)], size_pt=size)
     _write_lines(t_el, _split_like(text, split))
     _set_paragraph_box(t_el, marl, align, caps=caps, bold=bold, line_spacing=ls)
@@ -3147,6 +3386,10 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
         s_w = w_max - (t_ins[0] - s_ins[0])
         s_x = tb.x + t_ins[0] - s_ins[0] if align == "l" else (x + w_used // 2 - s_w // 2 if align == "ctr" else x + w_used - s_w)
         set_element_pos(s_el, x=s_x, y=y + h_title + gap, w=s_w, h=h_sub)
+        if kind == PatternKind.title and sub_color:
+            # the subtitle on another ground than the heading (under a heading on white, on the layout's blue band —
+            # LO Vivid): its colour is checked where it stands
+            _recolor_for_ground(ctx, s_el, sub_color, sub_size, False, [own_sub, title.style.color_hex])
         block_bottom = y + h_title + gap + h_sub
         sid = ctx.id_of(s_el)
         if sid:
@@ -3167,6 +3410,8 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
         g_y = block_bottom + gap_goal
         g_lines = max(1, len(display_lines(goal, family, g_size, False, inner(w_max) * 0.92)))
         set_element_pos(g_el, x=g_x, y=g_y, w=g_w, h=int((g_lines * 1.2 + 0.25) * g_size * EMU_PER_PT) + g_ins[1] + g_ins[3])
+        if kind == PatternKind.title and sub_color:
+            _recolor_for_ground(ctx, g_el, sub_color, g_size, False, [own_sub, title.style.color_hex])
         block_bottom = g_y + int((g_lines * 1.2 + 0.25) * g_size * EMU_PER_PT) + g_ins[1] + g_ins[3]
         gid = ctx.id_of(g_el)
         if gid:
@@ -3177,6 +3422,11 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
         mb = element_bbox(s_el) if s_moved and s_el is not None else None
         if mb:
             moved_sub = Bbox(x=mb[0], y=mb[1], w=mb[2], h=mb[3])  # the date and the small print keep off it
+            gbx = element_bbox(g_el) if g_el is not None else None
+            if gbx:
+                # the goal followed the subtitle: the small print goes under both
+                x0, y0 = min(moved_sub.x, gbx[0]), min(moved_sub.y, gbx[1])
+                moved_sub = Bbox(x=x0, y=y0, w=max(moved_sub.x2, gbx[0] + gbx[2]) - x0, h=max(moved_sub.y2, gbx[1] + gbx[3]) - y0)
         if s_moved or goal_gone:
             # the heading's column now ends where what stayed in it ends
             block_bottom = y + h_title
@@ -3193,13 +3443,13 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
         its medium cut) and must not wrap a one-line note onto a second line past the slide's foot."""
         return max(tight, room) if align == "l" and not is_pinned(family) else tight
 
-    def line_box(txt: str, sz: float, name: str, color: Optional[str], weight: bool, box: tuple[int, int, int], anchor_to: str = "t") -> etree._Element:
+    def line_box(txt: str, sz: float, name: str, color: Optional[str], weight: bool, box: tuple[int, int, int], anchor_to: str = "t", al: Optional[str] = None) -> etree._Element:
         sz = legible(sz, color, weight)
         src = s_el if s_el is not None and kind != PatternKind.section else t_el
         el = _new_text(ctx, src, name, family, color)
         rows = txt.split("\n")
         fill_text(el, [ParagraphSpec(t, bullet=False) for t in rows], size_pt=sz)
-        _set_paragraph_box(el, 0, "l" if align == "l" else align, bold=weight, line_spacing=1.0)
+        _set_paragraph_box(el, 0, al or ("l" if align == "l" else align), bold=weight, line_spacing=1.0)
         style_runs(el, None, color, align=None)
         _no_autofit(el, anchor_to)
         ins = _body_insets(el)
@@ -3241,9 +3491,11 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
     # heading's column, under the date; with no room there, a line under the subtitle
     note = " ".join((oslide.footnote or "").split())
     note_top: Optional[int] = None
+    beside: Optional[tuple] = None  # the small print in the column beside the stack (C1)
+    beside_al: Optional[str] = None
     if note:
         ref = sub_size or s_size or _bookend_subtitle_size(ctx)
-        n_size = _snap_up(max(_snap_down(0.62 * ref, ctx.grow_scale), typo.size_for("caption", 10.0), 0.018 * H / EMU_PER_PT), snap_sizes)
+        n_size = _small_print_size(ref, H, ctx.grow_scale, snap_sizes, typo.size_for("caption", 10.0))
         # «мелким текстом»: on a dark or brand ground where the subtitle's colour lacks contrast for small text (white
         # on VK blue) the small print is set at 14 pt bold — large text by WCAG — never at the subtitle's or the date's
         # 18 pt; on a light ground it keeps the small size and takes the template's dark text colour where it stands
@@ -3331,8 +3583,17 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
                         break
                 if spot is None and g_el is not None and goal:
                     # the brief's small print («Все данные условные» on the first slide) is not given up for a goal
-                    # line: first the goal takes one line where it wrapped needlessly («…255 000 / рублей»), then the
-                    # goal is said aloud and the small print takes its place under the subtitle
+                    # line: first the goal takes one line where it wrapped needlessly («…255 000 / рублей»)
+                    spot, g_el = _note_under_goal(ctx, oslide, g_el, goal, g_size, family, align, t_el, s_el if sub_text else None, hidden, obstacles, (n_x, min(n_w, n_width), n_h, n_size), ob_floor, drop_goal=False)
+                if spot is None:
+                    # then the column of a line standing beside the stack (the template's date right of its rule)
+                    beside = _note_beside_stack(ctx, [t_el, s_el if sub_text else None, g_el, k_el], note, family, n_size, n_bold, l_ins, hidden, n_foot)
+                    if beside is not None:
+                        n_x, spot, n_width, n_lines, n_h, beside_al = beside
+                        n_w = n_width
+                        ctx.warnings.append("сноска обложки поставлена в колонку рядом с заголовком: под ним для неё нет места")
+                if spot is None and beside is None and g_el is not None and goal:
+                    # then the goal is said aloud and the small print takes its place under the subtitle
                     spot, g_el = _note_under_goal(ctx, oslide, g_el, goal, g_size, family, align, t_el, s_el if sub_text else None, hidden, obstacles, (n_x, min(n_w, n_width), n_h, n_size), ob_floor)
                 if spot is None:
                     _note_to_speaker_notes(oslide, note)
@@ -3340,7 +3601,8 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
                     note = ""
                 else:
                     ny = spot
-                    block_bottom = ny + n_h
+                    if beside is None:
+                        block_bottom = ny + n_h
             else:
                 block_bottom = ny + n_h
         else:
@@ -3366,10 +3628,11 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
             n_x = nx2
         if not n_bold:
             n_color = _small_print_color(ctx, Bbox(x=n_x, y=ny, w=min(n_w, n_width), h=n_h), sub_color) or n_color
-        line_box("\n".join(n_lines), n_size, "Сноска", n_color, n_bold, (n_x, ny, roomy(min(n_w, n_width), min(n_width, n_room - n_x))))
+        line_box("\n".join(n_lines), n_size, "Сноска", n_color, n_bold, (n_x, ny, n_width if beside is not None else roomy(min(n_w, n_width), min(n_width, n_room - n_x))), al=beside_al)
     # the footer: the date (and whatever had no room above the heading) at the foot of the heading's column
     if footer_text:
-        f_size = legible(max(_snap_down(0.85 * (s_size or _bookend_subtitle_size(ctx)), ctx.grow_scale), typo.size_for("caption", 10.0)), sub_color)
+        f_step = _snap_down(0.85 * (s_size or _bookend_subtitle_size(ctx)), ctx.grow_scale)
+        f_size = legible(max(f_step, min(typo.size_for("caption", 10.0), f_step)), sub_color)  # a 20 pt caption does not set the date at the subtitle's size (C3)
         f_h = int((1.2 + 0.25) * f_size * EMU_PER_PT)
         f_w = int(text_width_pt(footer_text, family, f_size, False) * 1.1 * EMU_PER_PT)
         # a centred stack keeps its date centred under it, never at the edge of a slide-wide heading box

@@ -297,6 +297,13 @@ def generate_variants(
     agent_stats: list = []  # what the agent's model calls cost (the analyst's included): the run manifest
     writer_res = None
     rec = None
+    if brief is not None and brief.text:
+        # the agent's written text as the person edited it («Изменить»): the agent reads it with its rules line again
+        from verstka.planning.writer import with_rules
+
+        ruled = with_rules(brief.text)
+        if ruled != brief.text:
+            brief = brief.model_copy(update={"text": ruled})
     if use_agent:
         rec, agent_models = _recording(providers if models_on else None, agent_stats)
     if use_agent and models_on and writer is not False:

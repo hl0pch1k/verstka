@@ -273,6 +273,141 @@ def render_standin(family: Optional[str]) -> Optional[str]:
     return None
 
 
+# ---------------------------------------------------------------------------- installed faces without Cyrillic
+# A family this machine HAS can still lack Cyrillic in the face LibreOffice picks (macOS: Avenir, Optima, Didot,
+# Bodoni 72, Futura Medium…): LibreOffice then sets the Latin letters, digits and punctuation of a run in the family
+# and every Cyrillic letter in a fallback (Helvetica, Times, even Snell Roundhand for Chalkboard) — two faces inside
+# one word. A replacement table would restyle the template's Latin chrome too, so the render copy
+# (verstka.ingest.render) sets only the runs that hold Cyrillic in a stand-in: the family's own Cyrillic sibling
+# (Avenir → Avenir Next, Chalkboard → Chalkboard SE), else a face of its class, within the width the layout measured.
+_HEAVY_WORDS_RE = re.compile(r"semi ?bold|demi ?bold|\bdemi\b|extra ?bold|ultra ?bold|\bbold\b|heavy|black", re.I)
+_NARROW_RE = re.compile(r"condensed|narrow|compressed|\bcond\b", re.I)
+# geometric sans without Cyrillic: a geometric stand-in reads closer than a humanist one (Futura → Avenir Next)
+_GEOMETRIC_RE = re.compile(r"futura|avenir|century gothic|tw cen|gotham|spartan|\bjost\b|brandon|kabel|eurostile", re.I)
+_GEOMETRIC_STANDINS = ("Avenir Next", "Century Gothic", "URW Gothic", "TeX Gyre Adventor")
+
+
+@lru_cache(maxsize=1)
+def _installed_families() -> tuple[str, ...]:
+    """The families fontconfig lists on this machine (first name of each face); () without fontconfig."""
+    exe = shutil.which("fc-list")
+    if not exe:
+        return ()
+    try:
+        res = subprocess.run([exe, ":", "family"], capture_output=True, text=True, timeout=10)
+    except Exception:  # noqa: BLE001
+        return ()
+    return tuple(sorted({line.split(",")[0].strip() for line in (res.stdout or "").splitlines() if line.split(",")[0].strip()}))
+
+
+def _cyrillic_siblings(base: str) -> list[str]:
+    """Installed families of the same design line as `base` («avenir» → Avenir Next, Avenir Next Condensed), plain
+    widths first; the caller checks their Cyrillic."""
+    names = [n for n in _installed_families() if n.lower().startswith(base + " ") and not _WEIGHT_TAIL_RE.search(n)]
+    if not _NARROW_RE.search(base):
+        names = [n for n in names if not _NARROW_RE.search(n)] + [n for n in names if _NARROW_RE.search(n)]
+    return sorted(names, key=lambda n: (bool(_NARROW_RE.search(n)) and not _NARROW_RE.search(base), len(n)))
+
+
+def is_installed(family: Optional[str]) -> bool:
+    """This machine has `family` itself (installed or bundled with LibreOffice), not a fontconfig substitute."""
+    name = (family or "").strip()
+    return bool(name) and not name.startswith("+") and _installed_face(name) is not None
+
+
+def is_heavy_face_name(family: Optional[str]) -> bool:
+    """`family` names a heavy face of its family («Avenir Heavy», «Lato Black», «Open Sans SemiBold»)."""
+    name = (family or "").strip().lower()
+    base = _base_name(name)
+    return base != name and bool(_HEAVY_WORDS_RE.search(name[len(base):]))
+
+
+@lru_cache(maxsize=256)
+def cyrillic_standin(family: Optional[str], bold: bool = False) -> Optional[str]:
+    """The installed family a run of Cyrillic text set in `family` (at this weight) is rendered in, or None.
+
+    Only for a family this machine has whose face LibreOffice picks lacks Cyrillic. A face name with a weight is
+    checked both as named and through its family (bold for a heavy name), since LibreOffice uses either: «Avenir
+    Heavy» → Avenir Black + Helvetica, «Avenir Next Heavy» → its Heavy face + Helvetica, «Futura Medium» → Futura
+    (Medium, no Cyrillic), «Futura Bold» → Futura Bold (has Cyrillic, no stand-in). When only the named face lacks
+    Cyrillic the stand-in is its own family («Avenir Next Heavy» → Avenir Next, set bold). None when those
+    faces have Cyrillic, the family is missing (`render_standin` replaces it everywhere), it is a theme reference or a
+    symbol font, LibreOffice's metric twin sets it (Courier → Liberation Mono), or no stand-in fits the width."""
+    name = (family or "").strip()
+    if not name or name.startswith("+") or _SYMBOL_RE.search(name):
+        return None
+    base = _base_name(name)
+    heavy = bold or is_heavy_face_name(name)  # LibreOffice sets a heavy face name as its family, bold
+    face = _face(name, bold)
+    bface = _face(base, heavy) if base != name.lower() else None
+    named_ok = face is not None and face[2]
+    base_ok = bface is not None and bface[2]
+    if not named_ok and not base_ok:  # a face name fontconfig does not list («Futura Medium») is set in its family
+        return None
+    twin = _LO_TWINS.get(base)
+    if twin:
+        tf = _installed_face(twin)
+        if tf is not None and _has_glyph(tf, "ж"):
+            return None
+    # the faces LibreOffice may set the run in: the named face («Avenir Next Heavy» → its Heavy face) and the family's
+    # («Avenir Heavy» → Avenir Black, «Futura Medium» → Futura); a stand-in when either lacks Cyrillic
+    lacking = []
+    for probe, ok, weight in ((name, named_ok, bold), (base, base_ok, heavy)):
+        pf = _real_font(probe, weight) if ok else None
+        if pf is not None and not _has_glyph(pf, "ж"):
+            lacking.append(probe)
+    if not lacking:
+        return None
+    if base_ok and base not in lacking:
+        # only the named face lacks Cyrillic: its own family at the run's weight (a heavy name is set bold by the caller)
+        return bface[3]  # type: ignore[index]
+    play = _font(False).getlength(_WIDTH_SAMPLE) / _MEASURE_PX
+    limit = text_width_pt(_WIDTH_SAMPLE, name, 1.0) / play * _STANDIN_SLACK
+    geometric = _GEOMETRIC_STANDINS if _GEOMETRIC_RE.search(name) and font_class(name) == "sans" else ()
+    for cand in (*_cyrillic_siblings(base), *geometric, *_STANDINS[font_class(name)]):
+        if _norm(cand) in (_norm(name), _norm(base)):
+            continue
+        cf = _installed_face(cand)
+        if cf is None or not _has_glyph(cf, "ж"):
+            continue
+        if cf.getlength(_WIDTH_SAMPLE) / _MEASURE_PX / play <= limit:
+            return cand
+    return None
+
+
+@lru_cache(maxsize=256)
+def glyph_standin(family: Optional[str], ch: str = "₽", bold: bool = False) -> Optional[str]:
+    """The installed family a lone `ch` of a run LibreOffice sets in `family` is drawn in, or None when that face has
+    it (or `family` is a theme reference or a symbol font, or no face of its class has it).
+
+    LibreOffice takes a glyph the face lacks from whichever face has it: «₽» comes from STIX Two Math, a thin serif
+    sign beside sans digits (Arial, Trebuchet MS, Verdana, Gill Sans, Georgia, Avenir Next have no «₽» on macOS). The
+    stand-in is the first installed face of the family's class (then a sans) with `ch` at this weight. `family` is
+    the family LibreOffice sets the run in (after `render_standin` / `cyrillic_standin`); a family missing here is
+    treated as lacking `ch` (LibreOffice's own fallback face)."""
+    name = (family or "").strip()
+    if not name or name.startswith("+") or _SYMBOL_RE.search(name):
+        return None
+    face = _face(name, bold)
+    if face is not None and face[2]:
+        pf = _real_font(name, bold)
+        if pf is None or _has_glyph(pf, ch):
+            return None
+    cls = font_class(name)
+    for cand in dict.fromkeys((*_STANDINS[cls], *_STANDINS["sans"])):
+        if _norm(cand) == _norm(name):
+            continue
+        cf = _installed_face(cand)
+        if cf is None or not _has_glyph(cf, ch):
+            continue
+        if bold:
+            bf = _real_font(cand, True)
+            if bf is None or not _has_glyph(bf, ch):
+                continue
+        return cand
+    return None
+
+
 def font_path(family: Optional[str] = None, bold: bool = False) -> Path:
     name = "Play-Bold.ttf" if bold else "Play-Regular.ttf"
     return FONT_DIR / name

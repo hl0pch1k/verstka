@@ -738,16 +738,23 @@ def _dated_items(unit: "_Unit", src: "_Source") -> Optional[list[SlideItem]]:
     return None
 
 
-def _date_callout(n: NumberCallout, any_year: bool = True) -> bool:
-    """A «key figure» that is a date: a day of a month («17» · «сентября СССР начал…»), a year read with its «году»
-    («1939» · «году Германия…») and — `any_year` (the writer's text) — any year («1939 г», «1941–1945»)."""
+def _date_callout(n: NumberCallout, any_year: bool = True, source: Optional[str] = None) -> bool:
+    """A «key figure» that is a date: a day of a month («17» · «сентября СССР начал…»; «6 июня 1944»), a year read
+    with its «году» («1939» · «году Германия…») and — `any_year` (the writer's text) — any year («1939 г»,
+    «1941–1945»); with the `source`, a bare four-digit number is a year only when the source writes it as one («1213
+    кораблей» is a count)."""
     v = " ".join((n.value or "").split())
     label = (n.label or "").strip()
     if re.match(r"^\d{1,2}$", v) and re.match(_MONTHS_GEN, label, re.I):
         return True
+    if source is not None and re.match(rf"^\d{{1,2}}\s+{_MONTHS_GEN}\w*\s+\d{{4}}", v, re.I):
+        return True
     m = re.match(r"^(\d{4})(?:\s*[–—-]\s*(\d{4}))?\s*(г\.?|гг\.?|год\w*)?$", v, re.I)
     if not (m and 1000 <= int(m.group(1)) <= 2100):
         return False
+    if source is not None and not m.group(2) and not m.group(3) and not re.match(r"^(?:год\w*|гг?\.)(?![\wё])", label, re.I):
+        y = m.group(1)
+        return bool(re.search(rf"(?:(?<![\wё])(?:в|с|до|по|к|на)\s+(?:\d{{1,2}}\s+\w+\s+)?{y}|{y}\s*(?:год|г\.|гг))", source, re.I))
     return any_year or bool(m.group(3)) or bool(re.match(r"^(?:год\w*|гг?\.)(?![\wё])", label, re.I))
 
 
@@ -1823,7 +1830,7 @@ def design_from_answer(ans: SlideDesignAnswer, unit: _Unit, ctx: _Ctx) -> Option
     if ctx.written:
         # the writer's text (a topic): a year or a day of a month is a date, never a slide's key figure («1999 г»
         # in large type over «занимает должности главы правительства»)
-        dated = [n for n in c.numbers if _date_callout(n)]
+        dated = [n for n in c.numbers if _date_callout(n, source=unit.text)]
         if dated:
             c.numbers = [n for n in c.numbers if n not in dated]
             lines = [f"{H.strip_end(n.value)} — {H.strip_end(n.label)}" if n.label.strip() else H.strip_end(n.value) for n in dated]
@@ -2574,6 +2581,208 @@ def _true_labels(d: _Design) -> None:
                 s.headline = H.cap_first(sn)
 
 
+_LEADING_DATE_RE = re.compile(r"^([^—–:]{0,32}?(?<![\d.,])(?:1\d{3}|20\d{2})(?![\d.,])[^—–:]{0,14}?)\s*[—–:]\s")
+
+
+def _chrono_order(d: _Design) -> None:
+    """A written deck: a timeline, dated cards and a dated list («1998 — …», «Июль 1937 — …») in time order — the
+    narrative's order left «22 июня 1941 → 1931–1937 → Июль 1937 → 7 декабря 1941» (gate 2 W3). Stable; only when at
+    least 80 % of the entries parse as dates (writer.date_start)."""
+    from verstka.planning.writer import chrono_sort
+
+    s, c = d.slide, d.slide.content
+    if c.items and s.kind in (PatternKind.timeline, PatternKind.cards, PatternKind.process):
+        new = chrono_sort(list(c.items), lambda it: it.title or "")
+        if [id(x) for x in new] != [id(x) for x in c.items]:
+            d.changes.append(f"slide {d.unit.key}: the {s.kind.value} in time order ({', '.join(it.title for it in new)[:120]})")
+            c.items = new
+    if len(c.bullets) >= 2:
+        def lead(b: str) -> str:
+            m = _LEADING_DATE_RE.match(b or "")
+            return m.group(1) if m else ""
+
+        new_b = chrono_sort(list(c.bullets), lead)
+        if new_b != c.bullets and sum(1 for b in c.bullets if lead(b)) >= 0.8 * len(c.bullets):
+            d.changes.append(f"slide {d.unit.key}: the dated list in time order")
+            c.bullets = new_b
+
+
+def _hero_supports_headline(d: _Design) -> None:
+    """A written deck: a big number stands under a headline that names it; «2800 · студентов в вузах ежегодно» under
+    «VK охватывает миллионы пользователей по всему миру» (gate 2 W7) becomes a line of the slide."""
+    s, c = d.slide, d.slide.content
+    if s.kind != PatternKind.big_number or len(c.numbers) != 1 or c.chart is not None or c.table is not None:
+        return
+    n = c.numbers[0]
+    kv = _values(n.value)
+    hv = _values(_ORD_TOKEN_RE.sub(" ", s.headline or ""))
+    if not kv or any(_same_value(a, b) for a in kv for b in hv):
+        return
+    sn = _figure_sentence(n.value, d.unit.text or "")
+    line = H.strip_end(sn) if sn and len(sn.split()) <= 24 else H.strip_end(f"{n.value} — {_low_first(n.label or '', d.unit.text)}" if (n.label or "").strip() else n.value)
+    rest = [b for b in c.bullets if not same_text(b, line)]
+    c.bullets = ([line] + rest)[:MAX_BULLETS]
+    c.numbers = []
+    s.kind = PatternKind.bullets
+    d.changes.append(f"slide {d.unit.key}: the big number {n.value} is not what the headline «{(s.headline or '')[:60]}» says → a line")
+
+
+def _sentence_headline(d: _Design) -> None:
+    """A written deck: a headline is a statement, not a section label («Инфраструктура» over production facts, gate 2
+    W7) — a headline of one or two words becomes the slide's first short fact (≤ 14 words)."""
+    from verstka.planning.writer import anaphoric, sentences_of
+
+    s = d.slide
+    h = H.strip_end(s.headline or "")
+    if not h or len(h.split()) > 2 or re.search(r"\d", h):
+        return
+    first = next((x for x in sentences_of(d.unit.text or "") if 4 <= len(x.split()) <= 14 and not anaphoric(x) and not re.match(r"^\s*[—–-]", x)), None)
+    if first:
+        d.changes.append(f"slide {d.unit.key}: the headline «{h}» is a label → «{H.strip_end(first)[:80]}»")
+        s.headline = H.strip_end(first)
+
+
+def _plain_takeaway(d: _Design) -> None:
+    """A written deck: a takeaway with an evaluative word its source never uses («Прогнозируется значительный рост…»,
+    gate 2 W7) goes — the critic's note on it is honoured without a model call."""
+    from verstka.planning.writer import opinion_word
+
+    s = d.slide
+    if s.takeaway and opinion_word(s.takeaway, d.unit.text or ""):
+        d.changes.append(f"slide {d.unit.key}: the takeaway «{s.takeaway[:80]}» is an evaluation, dropped")
+        s.takeaway = None
+
+
+def _written_kpis(d: _Design) -> None:
+    """A written deck: a key figure is a figure — a date («2021 г» · «— ребрендинг») or a word («Москвич» · «Основной
+    производитель») in a row of key figures becomes a line of the slide (gate 2: the visual variants' last slides)."""
+    s, c = d.slide, d.slide.content
+    out = [n for n in c.numbers if _date_callout(n, source=d.unit.text) or not re.search(r"\d", n.value or "")]
+    if not out:
+        return
+    c.numbers = [n for n in c.numbers if n not in out]
+    lines = []
+    for n in out:
+        label = H.strip_end(re.sub(r"^\s*[—–-]\s*", "", n.label or ""))
+        lines.append(f"{H.strip_end(n.value)} — {_low_first(label, d.unit.text)}" if label else H.strip_end(n.value))
+    c.bullets = (c.bullets + [x for x in lines if not any(same_text(x, b) for b in c.bullets)])[:MAX_BULLETS]
+    if not c.numbers and s.kind in (PatternKind.stat_row, PatternKind.big_number) and c.chart is None and c.table is None:
+        s.kind = PatternKind.bullets
+    d.changes.append(f"slide {d.unit.key}: key figures that are dates or words → lines ({', '.join(n.value for n in out)[:80]})")
+
+
+_FIG_LINE_RE = re.compile(r"^\s*([\d][\d\s,.]*(?:\s*(?:млн|млрд|тыс\.?|%|₽))?)\s+[—–-]\s+(.+)$")
+
+
+def _true_bullet_labels(d: _Design) -> None:
+    """A written deck: a «figure — label» line says what its sentence says the figure counts; «1213 — Кораблей США»
+    over «Для операции было выделено 1213 кораблей и 4126 десантных судов» (the ships were the allies') becomes that
+    sentence (or goes when it is too long for a line)."""
+    from verstka.planning.grounding import content_stems
+
+    src = d.unit.text or ""
+    c = d.slide.content
+    out: list[str] = []
+    changed = False
+    for b in c.bullets:
+        m = _FIG_LINE_RE.match(b or "")
+        if not m or _date_callout(NumberCallout(value=m.group(1).strip(), label=m.group(2)), source=src):
+            out.append(b)
+            continue
+        sn = _figure_sentence(m.group(1).strip(), src)
+        if sn is None:
+            out.append(b)
+            continue
+        low = sn.lower()
+        words = {x[:5] for x in content_stems(m.group(2), neutral=True) if not re.match(r"^\d", x)}
+        names = re.findall(r"(?<![\wё])[A-ZА-ЯЁ][\w-]{1,}", m.group(2))[1:]  # a name inside the label (its first word is capitalised anyway)
+        if all(w in low for w in words) and all(x.lower()[:5] in low for x in names):
+            out.append(b)
+            continue
+        changed = True
+        if len(sn.split()) <= 16 and not any(same_text(sn, o) for o in out):
+            out.append(H.strip_end(sn))
+    if changed:
+        d.changes.append(f"slide {d.unit.key}: «figure — label» lines whose label is not what their sentence counts → the sentences")
+        c.bullets = out
+
+
+def _undated_timeline(d: _Design) -> None:
+    """A written deck: a timeline's steps are dates; one titled «Нью-Йорк», «Петербург» or nothing makes it a list of
+    lines («date — event»), not a time axis that is not one."""
+    from verstka.planning.writer import date_start
+
+    s, c = d.slide, d.slide.content
+    if s.kind != PatternKind.timeline or not c.items or all(date_start(it.title or "") for it in c.items):
+        return
+    lines = [f"{H.strip_end(it.title)} — {_low_first(H.strip_end(it.text), d.unit.text)}" if (it.title or "").strip() and (it.text or "").strip()
+             else H.strip_end(it.title or it.text or "") for it in c.items]
+    c.bullets = [x for x in lines if x][:MAX_BULLETS]
+    c.items = []
+    s.kind = PatternKind.bullets
+    d.changes.append(f"slide {d.unit.key}: a timeline with undated steps → lines")
+
+
+_FUTURE_WORD_RE = re.compile(r"(?<![\wё])(станет|станут|будет|будут|окажется|получит|войдёт)(?![\wё])", re.I)
+
+
+def _no_new_future(d: _Design) -> None:
+    """A written deck: the designer never turns a past event into a future one («Гагарин станет самым известным
+    человеком планеты» over «стал»): such a takeaway goes, such a headline takes the slide's title, such a line its
+    source sentence (or goes)."""
+    from verstka.planning.writer import sentences_of
+
+    s, c = d.slide, d.slide.content
+    src = (d.unit.text or "").lower()
+
+    def new_future(x: Optional[str]) -> bool:
+        return bool(x) and any(m.group(1).lower() not in src for m in _FUTURE_WORD_RE.finditer(x or ""))
+
+    if new_future(s.takeaway):
+        d.changes.append(f"slide {d.unit.key}: the takeaway «{(s.takeaway or '')[:60]}» tells a past event as future, dropped")
+        s.takeaway = None
+    if new_future(s.headline) and d.unit.title:
+        d.changes.append(f"slide {d.unit.key}: the headline «{s.headline[:60]}» tells a past event as future → «{d.unit.title}»")
+        s.headline = H.strip_end(d.unit.title)
+    if any(new_future(b) for b in c.bullets):
+        sents = sentences_of(d.unit.text or "")
+        out = []
+        for b in c.bullets:
+            if not new_future(b):
+                out.append(b)
+                continue
+            best = next((H.strip_end(x) for x in sents if said_in(b.replace("станет", "стал").replace("будет", "был"), x, 0.6) and len(x.split()) <= 16), None)
+            if best and not any(same_text(best, o) for o in out):
+                out.append(best)
+        d.changes.append(f"slide {d.unit.key}: lines telling a past event as future → the source's sentences")
+        c.bullets = out
+
+
+def _written_notes(text: str) -> str:
+    """The speaker notes of a written deck's slide: its checked text as written (sentences and dated entries; not the
+    chart's rows or the chart request) — the designer's own notes added claims the check never saw («США сыграли
+    решающую роль…», «ознаменовал начало эпохи…»)."""
+    out: list[str] = []
+    data = False
+    for line in (text or "").splitlines():
+        t = line.strip()
+        if not t:
+            continue
+        if re.match(r"^(?:Нужна\s.*диаграмма|Укажи,\s+что\s+данные|Название:|Подзаголовок:)", t):
+            continue
+        if t.endswith(":"):
+            data = not re.match(r"^Хронология:$", t)
+            continue
+        if re.match(r"^[—–-]\s", t):
+            if data:
+                continue
+            t = re.sub(r"^[—–-]\s*", "", t).rstrip(";.")
+        else:
+            data = False
+        out.append(t if t.endswith((".", "!", "?", "…")) else t + ".")
+    return " ".join(out)
+
+
 def tidy_design(d: _Design, ctx: Optional[_Ctx] = None) -> None:
     """The slide once its form is final (after the user's requests are enforced — a requested chart may have been
     added, a headline replaced): no line says again what the slide says elsewhere — the chart's own values, the
@@ -2596,7 +2805,19 @@ def tidy_design(d: _Design, ctx: Optional[_Ctx] = None) -> None:
                 d.changes.append(f"slide {d.unit.key}: the headline «{s.headline[:80]}» gives a count the source does not ({', '.join(bad)}) → «{new[:80]}»")
                 s.headline = new
     if written:
+        _written_kpis(d)
         _true_labels(d)
+        _true_bullet_labels(d)
+        _undated_timeline(d)
+        _chrono_order(d)
+        _no_new_future(d)
+        notes = _written_notes(d.unit.text)
+        if notes:
+            s.notes = notes
+        _hero_supports_headline(d)
+        _plain_takeaway(d)
+        if not users:
+            _sentence_headline(d)
         if d.by == "model" and s.headline:
             # a date given to another actor («Германия капитулировала 2 сентября 1945 года»: Japan did)
             wrong = misdated(s.headline, d.unit.text) or (misdated(s.headline, ctx.brief.text) if not _dated_in(s.headline, d.unit.text) else [])
@@ -3050,6 +3271,11 @@ def reshape(s: OutlineSlide, kind: str, chart_type: Optional[str] = None, case_t
     r = _reshape(s, kind, chart_type, case_text)
     if r is not None and r.kind.value in ("stat_row", "big_number") and _years_only(r.content.numbers):
         return None
+    if r is not None and r.kind == PatternKind.timeline and case_text:
+        from verstka.planning.writer import date_start, is_written_text
+
+        if is_written_text(case_text) and not all(date_start(it.title or "") for it in r.content.items):
+            return None  # a written deck's time axis has dates on it («Нью-Йорк», a sentence as a step: not one)
     return r
 
 

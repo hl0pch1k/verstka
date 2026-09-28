@@ -569,9 +569,11 @@ def test_a_year_is_never_the_hero_figure_of_a_conclusion():
     assert _aside_figure("Продажи выросли на 12% к 2024") == "12%"
 
 
-def test_pie_of_amounts_keeps_the_amounts_beside_a_smaller_circle(sparse_env):
-    """G1-21: the legend of a pie of the brief's amounts keeps «315 000 ₽ · 40%» while the circle keeps over a third of
-    its box's height — not the shares alone next to a larger circle."""
+@pytest.mark.parametrize("wide", [False, True])
+def test_pie_keeps_the_amounts_only_while_the_circle_keeps_its_size(sparse_env, wide):
+    """G1-21 / gate 2 B1: the legend of a pie of the brief's amounts keeps «315 000 ₽ · 40%» while the circle keeps the
+    pie's least size (0.22 of the slide's height, 0.4 of the box's) — in a box where the amounts would shrink the
+    circle under it (the dataset's pie lost half its area so), the legend gives the shares beside a larger circle."""
     from verstka.rendering.compose import Composer
 
     deck, manifest, ws = sparse_env
@@ -582,16 +584,20 @@ def test_pie_of_amounts_keeps_the_amounts_beside_a_smaller_circle(sparse_env):
     pie = ChartSpec(type="pie", title=None, categories=cats, series=[InlineSeries(name="Расходы", values=[315000, 270000, 120000, 25000, 20000, 30000])], unit="₽")
     o = OutlineSlide(id="p", kind=PatternKind.chart, headline="Структура расходов", content=SlideContent(chart=pie))
     comp = Composer(slide, kit, o, DeckOutline(title="T", slides=[o]), "compact", manifest)
-    box = Bbox(x=int(0.4 * LO_W), y=int(0.25 * LO_H), w=int(0.4 * LO_W), h=int(0.4 * LO_H))
+    if wide:
+        box = Bbox(x=int(0.05 * LO_W), y=int(0.25 * LO_H), w=int(0.6 * LO_W), h=int(0.6 * LO_H))
+    else:
+        box = Bbox(x=int(0.4 * LO_W), y=int(0.25 * LO_H), w=int(0.4 * LO_W), h=int(0.4 * LO_H))
     n0 = len(comp.cv.tree)
     comp._pie(box, pie, center=False)
     drawn = [(el.find(".//" + q("p:cNvPr")).get("name") or "", "".join(t.text or "" for t in el.iter(q("a:t"))), element_bbox(el)) for el in list(comp.cv.tree)[n0:]]
     shares = [t for name, t, _ in drawn if name.startswith("Share")]
-    assert len(shares) == 6 and all("₽" in t for t in shares)
-    circle = [bb for name, _, bb in drawn if name.startswith("Chart") or bb and bb[2] == bb[3]]
+    assert len(shares) == 6
+    assert all("₽" in t for t in shares) if wide else not any("₽" in t for t in shares)
+    circle = [bb for name, _, bb in drawn if name.startswith("Chart")]
     tol = int(0.01 * LO_H)
     assert all(bb[0] + bb[2] <= box.x + box.w + tol and bb[1] + bb[3] <= box.y + box.h + tol for _, _, bb in drawn if bb)
-    assert circle and circle[0][3] >= Composer.PIE_KEEP_AMOUNTS * box.h - tol
+    assert circle and circle[0][3] >= comp._pie_min_d(box) - tol >= int(Composer.PIE_MIN_H * LO_H) - tol
 
 
 def test_a_long_table_is_set_narrower_than_a_wall_over_the_slide(sparse_env, monkeypatch):
@@ -631,3 +637,134 @@ def test_a_long_table_is_set_narrower_than_a_wall_over_the_slide(sparse_env, mon
     assert got <= Composer.FILL_MAX <= 0.8
     assert min(sizes) >= min(sizes0) * 0.75  # a step smaller at most
 
+
+
+# ---------------------------------------------------------------------------------------------- gate 2 (B2–B6)
+
+
+def _plan_slide() -> OutlineSlide:
+    left = ["Витрина для десертов — 70 000 ₽", "Настройка программы лояльности и учета — 35 000 ₽", "Обновление меню, фотографии и оформление — 25 000 ₽", "Обучение сотрудников — 20 000 ₽", "Резерв — 30 000 ₽"]
+    right = ["1-й месяц — учет показателей и обновление меню", "2-й месяц — запуск комбо и обучение сотрудников", "3-й месяц — запуск программы лояльности и партнерств с офисами", "4-й месяц — продвижение дневных предложений и настройка закупок", "5-й месяц — корректировка предложений по результатам продаж", "6-й месяц — оценка результатов и закрепление удачных решений"]
+    items = [SlideItem(title="Разовые вложения", bullets=left), SlideItem(title="План внедрения", bullets=right)]
+    return OutlineSlide(id="tc", kind=PatternKind.comparison, headline="Разовые вложения составляют 180 000 рублей", content=SlideContent(items=items), takeaway="Все разовые вложения покрываются бюджетом запуска")
+
+
+@pytest.mark.parametrize("foot_room", [False, True])
+def test_a_conclusion_the_block_leaves_no_room_for_stays_on_the_slide(sparse_env, foot_room):
+    """B2: two long lists take the conclusion's room. The conclusion is not said aloud: it stands in the free room under
+    the art the area was cut above (`foot_room`), or the block is set again above its room — never over the content."""
+    from verstka.rendering.compose import Composer
+
+    deck, manifest, ws = sparse_env
+    b = DeckBuilder(deck)
+    slide = b.add_blank_slide(6)
+    kit = Kit(manifest, LO_W, LO_H, "FFFFFF")
+    o = _plan_slide()
+    comp = Composer(slide, kit, o, DeckOutline(title="T", slides=[o]), "structured", manifest)
+    area = Bbox(x=int(0.05 * LO_W), y=int(0.3 * LO_H), w=int(0.9 * LO_W), h=int(0.5 * LO_H))
+    room = Bbox(x=area.x, y=area.y2, w=int(0.6 * LO_W), h=int(0.15 * LO_H))
+    if foot_room:
+        comp.foot_room = room
+    n0 = len(comp.cv.tree)
+    comp.compose("two_column", area)
+    assert not any("speaker notes" in w for w in comp.warnings) and "Вывод" not in (o.notes or "")
+    drawn = [((el.find(".//" + q("p:cNvPr")).get("name") or ""), element_bbox(el)) for el in list(comp.cv.tree)[n0:]]
+    concl = [bb for name, bb in drawn if name.startswith("Conclusion") and bb]
+    others = [bb for name, bb in drawn if not name.startswith("Conclusion") and bb]
+    assert concl
+    tol = int(0.01 * LO_H)
+    top = min(bb[1] for bb in concl)
+    assert top >= max(bb[1] + bb[3] for bb in others) - tol  # under the content, never over it
+    if foot_room:
+        assert any("free room" in w for w in comp.warnings)
+        assert all(bb[0] + bb[2] <= room.x2 + tol and bb[1] + bb[3] <= room.y2 + tol for bb in concl)
+    else:
+        assert any("the block set" in w for w in comp.warnings)
+        assert all(bb[1] + bb[3] <= area.y2 + tol for bb in concl + others)
+
+
+def test_four_short_figures_stay_the_heroes_of_their_tiles(simple_deck, tmp_path):
+    """B3: «70 млн / 110 млн / 62 / 80%» over «Погибло / …» — the figures are set a clear step over their labels (a row
+    of four rather than a 2×2 grid at a text size), and the visual strip does not repeat a tile's figure («80%»)."""
+    manifest = analyze_template(simple_deck, workspace_root=tmp_path / "ws", use_llm=False, use_vlm=False, render=False)
+    ws = TemplateWorkspace.open(manifest.template_id, tmp_path / "ws")
+    nums = [NumberCallout(value=v, label=l) for v, l in [("70 млн", "Погибло"), ("110 млн", "Мобилизовано"), ("62", "Государств"), ("80%", "Населения Земли")]]
+    o = OutlineSlide(id="s7", kind=PatternKind.stat_row, headline="Война унесла жизни 70 миллионов человек", content=SlideContent(numbers=nums), takeaway="Конфликт затронул 80% населения и стал крупнейшим в истории")
+    _, out = _render((simple_deck, manifest, ws), [o], "stat_row", "visual")
+    slide = out[0][0]
+    figs, labels, strip_figs = [], [], []
+    for el, _b in _boxes(slide):
+        name = el.find(".//" + q("p:cNvPr")).get("name") or ""
+        sizes = [int(r.get("sz")) / 100 for r in el.iter(q("a:rPr")) if r.get("sz")]
+        if name.startswith("Figure"):
+            figs.append(max(sizes))
+        elif name.startswith("Label"):
+            labels.append(max(sizes))
+        elif name.startswith("Conclusion figure"):
+            strip_figs.append("".join(t.text or "" for t in el.iter(q("a:t"))))
+    assert len(figs) == 4 and labels
+    assert min(figs) >= 1.6 * max(labels) - 0.05
+    assert not strip_figs  # «80%» is a tile already: the strip is the plain one
+
+
+def test_the_hero_figure_of_a_change_is_its_target():
+    """B6: «Рентабельность увеличится с 13,3% до 22,4%» shows 22,4% — where the change goes, not the old value."""
+    from verstka.rendering.compose import _aside_figure
+
+    def fig(text: str) -> str:
+        return " ".join((_aside_figure(text) or "").replace("\u00a0", " ").split())
+
+    assert fig("Рентабельность увеличится с 13,3% до 22,4%") == "22,4%"
+    assert fig("Выручка вырастет от 900 000 ₽ до 1 138 500 ₽") == "1 138 500 ₽"
+    assert fig("Доля расходов 35% → 33%") == "33%"
+    assert fig("Операционная прибыль — 120 000 рублей") == "120 000 ₽"
+    assert fig("Скидка до 15% для 300 постоянных гостей") == "15%"
+
+
+def test_heading_starts_after_a_small_ornament_in_its_band(simple_deck):
+    """B4: a cluster of dots of the layout (a small drawn shape, ≥ 0.3 % of the slide) standing over the heading's left
+    part: the heading starts after it (Grey Elegant); large art and art outside the band move nothing."""
+    from verstka.rendering.synth import _left_clear
+
+    b = DeckBuilder(simple_deck)
+    slide = b.add_blank_slide(6)
+    W, H = b.slide_w, b.slide_h
+    dots = slide.shapes.add_shape(1, Emu(int(-0.015 * W)), Emu(int(0.012 * H)), Emu(int(0.091 * W)), Emu(int(0.161 * H)))
+    dots.fill.solid()
+    dots.fill.fore_color.rgb = RGBColor(0xCC, 0xCC, 0xCC)
+    head = Bbox(x=int(0.046 * W), y=int(0.124 * H), w=int(0.704 * W), h=int(0.083 * H))
+    past = _left_clear(slide, head, W, H)
+    assert abs(past - (int(0.076 * W) + int(0.027 * W))) <= int(0.002 * W)  # its letters 0.012 W clear of the dots
+    below = Bbox(x=head.x, y=int(0.4 * H), w=head.w, h=head.h)
+    assert _left_clear(slide, below, W, H) == below.x
+    big = b.add_blank_slide(6)
+    tri = big.shapes.add_shape(1, Emu(0), Emu(0), Emu(int(0.2 * W)), Emu(int(0.4 * H)))  # 8 % of the slide: the canvas's art
+    tri.fill.solid()
+    tri.fill.fore_color.rgb = RGBColor(0xEE, 0x22, 0x22)
+    assert _left_clear(big, head, W, H) == head.x
+
+
+def test_a_trend_chart_never_leaves_a_label_to_be_broken_inside_its_word(simple_deck):
+    """B5: LibreOffice breaks a category label wider than its slot inside the word («Сейч ас», tickLblSkip ignored).
+    A trend chart whose labels overrun their slots turns them (or thins them out) on every kit, and reports it
+    (`verstka_turned`; `verstka_squeeze` = longest label over its slot) — a chart pair compares it between plans."""
+    from verstka.schemas.template import ChartStyleSpec, Typography
+
+    b = DeckBuilder(simple_deck)
+    slide = b.add_blank_slide(6)
+    W, H = b.slide_w, b.slide_h
+    spec = ChartSpec(type="line", categories=["Сейчас"] + [f"{i}-й мес." for i in range(1, 7)], series=[InlineSeries(name="Выручка", values=[900, 930, 970, 1010, 1060, 1100, 1138])], unit="₽")
+    outline = DeckOutline(title="T", slides=[OutlineSlide(id="c", kind=PatternKind.chart, headline="h", content=SlideContent(chart=spec))])
+    wide = add_chart(slide, Bbox(x=0, y=0, w=int(0.9 * W), h=int(0.4 * H)), spec, outline, ChartStyleSpec(), Typography(), text_hex="222222")
+    narrow = add_chart(slide, Bbox(x=0, y=int(0.5 * H), w=int(0.25 * W), h=int(0.45 * H)), spec, outline, ChartStyleSpec(), Typography(), text_hex="222222")
+    assert wide.verstka_squeeze < narrow.verstka_squeeze and narrow.verstka_squeeze > 1.1
+    assert not wide.verstka_turned and narrow.verstka_turned
+
+    def turned(gf) -> bool:
+        ax = gf.chart._chartSpace.find(".//" + q("c:catAx"))
+        bp = ax.find(q("c:txPr") + "/" + q("a:bodyPr")) if ax is not None else None
+        return bp is not None and (bp.get("rot") or "0") != "0"
+
+    cats = [c for c in narrow.chart.plots[0].categories]
+    assert not turned(wide)
+    assert turned(narrow) or any(c == "" for c in cats)  # turned, or every other label left blank

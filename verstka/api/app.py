@@ -747,9 +747,11 @@ def _brief_of_meta(meta: dict) -> Optional[Brief]:
     (against the topic they would strip every figure the deck shows)."""
     written = _written_text(str(meta.get("id") or "") or None, meta)
     if written:
+        from verstka.planning.writer import with_rules
+
         w = meta.get("writer") or {}
         return _brief_from_request(GenerateRequest(
-            template_id=meta.get("template_id") or "x", brief=written, audience=meta.get("audience"), purpose=meta.get("purpose"),
+            template_id=meta.get("template_id") or "x", brief=with_rules(written), audience=meta.get("audience"), purpose=meta.get("purpose"),
             slides=w.get("slides") or meta.get("slides"), language=meta.get("language") or "ru", extra_instructions=meta.get("extra_instructions"),
         ))
     if not (meta.get("brief") or "").strip():

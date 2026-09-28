@@ -381,6 +381,8 @@ export interface WriterInfo {
   checked?: "reference" | "model" | null;
   model_label?: string | null;
   seconds?: number;
+  /** Content slides fewer than asked after the checks and the refill (0: as asked). */
+  short_by?: number;
 }
 export interface VariantEdit {
   at: number; request: string; reply: string; kind: string; slides: number[]; score_before: number | null; score_after: number | null;

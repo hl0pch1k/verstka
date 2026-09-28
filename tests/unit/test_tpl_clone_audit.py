@@ -771,3 +771,234 @@ def test_cover_small_print_takes_the_template_dark_text_on_a_light_ground(monkey
     assert C._small_print_color(ctx, box, "222222") is None  # it reads: kept
     monkeypatch.setattr(C, "_ground_hex", lambda ctx, b: "0077FF")
     assert C._small_print_color(ctx, box, "FFFFFF") is None  # a brand ground: the 14 pt bold rule stays
+
+
+# ------------------------------------------------------------------------------------------------ gate 2 (C1–C5)
+
+TPL = FIX / "templates"
+_LONG_NOTE = "Все исходные данные и прогнозы условные"
+
+
+def _render_cover(tmp_path: Path, template: str, long: bool = True):
+    """Slide 1 of the coffee brief (long: heading, subtitle, goal, small print; short: a two-phrase heading and small
+    print) rendered on a corpus template of tests/fixtures/tpl_audit/templates. Returns (presentation, slide 1)."""
+    from verstka.pipeline.generate import generate_variants
+    from verstka.schemas.common import PatternKind
+    from verstka.schemas.outline import DeckOutline, OutlineSlide, SlideContent
+
+    if long:
+        cover = OutlineSlide(id="sl1", kind=PatternKind.title, headline="Больше прибыли с каждой чашки", subtitle="План развития кофейни “Точка кофе” на 6 месяцев",
+                             content=SlideContent(paragraphs=[_GOAL]), footnote=_LONG_NOTE, notes="Главная цель: увеличить ежемесячную операционную прибыль со 120 000 до 255 000 рублей.")
+    else:
+        cover = OutlineSlide(id="sl1", kind=PatternKind.title, headline="Кофейня «Точка кофе»: план увеличения прибыли за 6 месяцев", footnote="Все цифры условные")
+    outline = DeckOutline(title=cover.headline, slides=[cover], language="ru")
+    out = tmp_path / f"run_{template}_{'long' if long else 'short'}"
+    generate_variants(TPL / f"{template}.pptx", outline=outline, strategies=["structured"], out_dir=out, workspace_root=tmp_path / "ws", use_llm=False, use_vlm=False, audit=False, exports=[])
+    prs = Presentation(str(out / "structured" / "deck.pptx"))
+    return prs, prs.slides[0]
+
+
+def _shape_with(slide, text: str):
+    return next((sh for sh in slide.shapes if sh.has_text_frame and text in sh.text_frame.text.replace("\xa0", " ")), None)
+
+
+def _notes(slide) -> str:
+    return slide.notes_slide.notes_text_frame.text if slide.has_notes_slide else ""
+
+
+def test_grey_elegant_long_cover_keeps_the_brief_disclaimer_on_slide_one(tmp_path):
+    """C1: on LO Grey Elegant the long cover's goal fills the column under the heading; the small print the brief asks
+    for on the first slide goes into the column beside the stack (under the date, right of the rule) — not into the
+    speaker notes — inside the slide and clear of every other text."""
+    prs, s = _render_cover(tmp_path, "lo_grey_elegant")
+    note = _shape_with(s, "условные")
+    assert note is not None, [sh.text_frame.text for sh in s.shapes if sh.has_text_frame]
+    assert "условные" not in _notes(s)
+    assert _shape_with(s, "Цель:") is not None  # the goal stays too
+    nb = (note.left, note.top, note.left + note.width, note.top + note.height)
+    assert nb[0] >= 0 and nb[2] <= prs.slide_width and nb[3] <= prs.slide_height
+    for sh in s.shapes:
+        if sh.shape_id == note.shape_id or not sh.has_text_frame or not sh.text_frame.text.strip():
+            continue
+        ob = (sh.left, sh.top, sh.left + sh.width, sh.top + sh.height)
+        assert not (min(nb[2], ob[2]) > max(nb[0], ob[0]) and min(nb[3], ob[3]) > max(nb[1], ob[1])), f"the note overlaps «{sh.text_frame.text[:30]}»"
+
+
+def test_grey_elegant_short_cover_keeps_its_small_print_on_the_slide(tmp_path):
+    """C1 (short brief): «Все цифры условные» is on slide 1 of LO Grey Elegant, not in the notes."""
+    _, s = _render_cover(tmp_path, "lo_grey_elegant", long=False)
+    assert _shape_with(s, "условные") is not None and "условные" not in _notes(s)
+
+
+def test_focus_cover_heading_lines_stay_on_their_triangle(tmp_path):
+    """C2: on LO Focus the cover heading stands on the red triangle; each of its lines (a slanted edge moves with the
+    height) keeps its letters on the triangle — the audit's line-by-line ground check finds nothing off it."""
+    from verstka.audit.checks.common import text_elements
+    from verstka.audit.checks.template import _line_off_ground
+    from verstka.audit.ir import build_deck_ir
+
+    _render_cover(tmp_path, "lo_focus")
+    ir = build_deck_ir(tmp_path / "run_lo_focus_long" / "structured" / "deck.pptx")
+    sl = ir.slides[0]
+    title = next(e for e in text_elements(sl) if e.ph_type in ("title", "ctrTitle"))
+    assert "чашки" in title.text
+    assert title.dominant_size and title.dominant_size >= 24  # not shrunk to body size to fit
+    assert _line_off_ground(sl, title, sl.background_hex or "FFFFFF", title.dominant_color or "FFFFFF", 3.0) is None
+
+
+def test_audit_flags_a_heading_line_off_its_triangle():
+    """C2/C4: the gate-2 Focus cover (28 pt heading, its second line centred wider than the red triangle at its own
+    height — «с» on the white gap) is flagged by contrast_low's line-by-line ground check; its goal only in the speaker
+    notes is flagged by content_in_notes."""
+    from verstka.audit.runner import run_audit
+    from verstka.schemas.common import PatternKind
+    from verstka.schemas.outline import DeckOutline, OutlineSlide, SlideContent
+    from verstka.schemas.template import TemplateManifest
+
+    man = TemplateManifest.model_validate_json(gzip.open(FIX / "manifest_368fc0232d0871b3.json.gz", "rt", encoding="utf-8").read())
+    cover = OutlineSlide(id="sl1", kind=PatternKind.title, headline="Больше прибыли с каждой чашки", subtitle="План развития кофейни “Точка кофе” на 6 месяцев",
+                         content=SlideContent(paragraphs=[_GOAL]), footnote=_LONG_NOTE)
+    r = run_audit(FIX / "focus_long_cover_g2.pptx", man, DeckOutline(title="x", slides=[cover]), render=False, use_llm=False, use_vlm=False)
+    off = [i for i in _serious(r, "contrast_low") if (i.details or {}).get("ground") == "line_off_shape"]
+    assert off and "чашки" in off[0].message
+    notes = _serious(r, "content_in_notes")
+    assert len(notes) == 1 and notes[0].details["line"] == "goal" and notes[0].details["in_notes"]
+
+
+def test_small_print_size_stays_small_on_big_captions_and_big_slides():
+    """C3: the cover small print is at most the scale step under the subtitle, 0.7 of it and 2.6 % of the slide
+    height, never under 1.8 % of it: a template whose caption is 20 pt (Sidebar 4:3, subtitle 20 pt) and a 26.67″ slide
+    (subtitle 40 pt) no longer set it at the subtitle's size."""
+    from verstka.rendering.clone import _small_print_size
+    from verstka.schemas.common import EMU_PER_PT
+
+    h43 = 6858000
+    size = _small_print_size(20.0, h43, [10, 12, 14, 16, 20, 24, 28, 36], [10, 12, 14, 16, 20, 24, 28, 36], 20.0)
+    assert size <= 0.7 * 20.0 and size <= 0.026 * h43 / EMU_PER_PT and size >= 0.018 * h43 / EMU_PER_PT - 0.5
+    h_huge = int(15 * 914400)
+    big = _small_print_size(40.0, h_huge, [24, 28, 32, 40, 48, 88], [24, 28, 32, 40, 48, 88], 28.0)
+    assert big <= 0.7 * 40.0 and big <= 0.026 * h_huge / EMU_PER_PT + 0.01
+    assert _small_print_size(28.0, 6858000, [12, 14, 16, 18, 28], [12, 14, 16, 18, 28], 12.0) <= 18.0  # the old rule's size
+
+
+@pytest.mark.parametrize("template", ["synth_sidebar43", "synth_huge2667"])
+def test_cover_small_print_is_set_small_under_the_stack(tmp_path, template):
+    """C3: on Sidebar 4:3 (20 pt caption) and Huge 26.67″ covers the small print is at most 0.7 of the subtitle and
+    2.6 % of the slide height, and stands under the heading's stack (not free-floating mid-slide)."""
+    from verstka.schemas.common import EMU_PER_PT
+
+    prs, s = _render_cover(tmp_path, template)
+    note = _shape_with(s, "условные")
+    sub = _shape_with(s, "План развития")
+    assert note is not None and sub is not None
+    size = lambda sh: max((r.font.size.pt for p in sh.text_frame.paragraphs for r in p.runs if r.font.size), default=0.0)
+    assert size(note) <= 0.7 * size(sub) + 0.01
+    assert size(note) <= 0.026 * prs.slide_height / EMU_PER_PT + 0.51
+    assert note.top >= sub.top + sub.height  # under the stack
+
+
+def test_vivid_long_cover_keeps_its_goal_between_the_subtitle_and_the_small_print(tmp_path):
+    """C5: the LO Vivid long cover (two-line heading over the blue band) keeps the goal on the slide, between the
+    subtitle and the small print, instead of saying it aloud."""
+    prs, s = _render_cover(tmp_path, "lo_vivid")
+    goal, sub, note = _shape_with(s, "Цель:"), _shape_with(s, "План развития"), _shape_with(s, "условные")
+    assert goal is not None and sub is not None and note is not None
+    assert "Цель:" not in _notes(s)
+    tol = int(0.01 * prs.slide_height)
+    assert sub.top + sub.height <= goal.top + tol and goal.top + goal.height <= note.top + tol
+
+
+# ------------------------------------------------------------------------------------------------ gate 2 (C4) checks
+
+
+def _ir_slide(index: int, texts: list[tuple[str, tuple[float, float, float, float], float]], notes: str = "", oid: str | None = None, extra=()):
+    """An IR slide of text boxes (text, frac box, size) on a 13.33×7.5″ slide."""
+    from verstka.schemas.common import Bbox, BboxFrac
+    from verstka.schemas.deck_ir import IRElement, IRParagraph, IRRun, IRSlide
+
+    W, H = 12192000, 6858000
+    els = []
+    for i, (t, (x, y, w, h), size) in enumerate(texts):
+        els.append(IRElement(id=f"e{index}_{i}", type="text", bbox=Bbox(x=int(x * W), y=int(y * H), w=int(w * W), h=int(h * H)), bbox_frac=BboxFrac(x=x, y=y, w=w, h=h),
+                             paragraphs=[IRParagraph(text=t, runs=[IRRun(text=t, size_pt=size, font="Arial")])], ph_type="title" if i == 0 else None, z=i))
+    els.extend(extra)
+    return IRSlide(index=index, elements=els, notes=notes, outline_id=oid)
+
+
+def _ctx(slides, outline=None):
+    from verstka.audit.registry import AuditContext
+    from verstka.schemas.common import BboxFrac
+    from verstka.schemas.deck_ir import DeckIR
+    from verstka.schemas.template import SlideSize, Spacing, TemplateManifest, Tokens
+
+    man = TemplateManifest(template_id="t", source_file="t.pptx", slide_size=SlideSize(w=12192000, h=6858000), tokens=Tokens(spacing=Spacing(safe_area=BboxFrac(x=0.05, y=0.05, w=0.9, h=0.9))), patterns=[], n_slides=1)
+    return AuditContext(ir=DeckIR(source="x.pptx", slide_w=12192000, slide_h=6858000, slides=slides), manifest=man, outline=outline)
+
+
+def test_content_in_notes_flags_a_conclusion_said_only_aloud_and_accepts_its_callout_form():
+    from verstka.audit.checks.integrity import content_in_notes
+    from verstka.schemas.common import PatternKind
+    from verstka.schemas.outline import DeckOutline, OutlineSlide, SlideContent
+
+    o = DeckOutline(title="x", slides=[
+        OutlineSlide(id="a", kind=PatternKind.bullets, headline="Расходы", content=SlideContent(bullets=["Аренда 120 000 ₽"]), takeaway="Все разовые вложения покрываются бюджетом запуска"),
+        OutlineSlide(id="b", kind=PatternKind.chart, headline="Прибыль", takeaway="Прогноз: 254 795 ₽ в месяц", footnote="Налоги не учитываются"),
+        OutlineSlide(id="c", kind=PatternKind.bullets, headline="План", takeaway="Рост на 26,5% за 6 месяцев"),
+    ])
+    s1 = _ir_slide(1, [("Расходы", (0.05, 0.05, 0.9, 0.1), 32), ("Аренда 120 000 ₽", (0.05, 0.3, 0.9, 0.1), 18)], notes="Вывод: Все разовые вложения покрываются бюджетом запуска. [verstka:a]", oid="a")
+    s2 = _ir_slide(2, [("Прибыль", (0.05, 0.05, 0.9, 0.1), 32), ("254 795 ₽", (0.6, 0.3, 0.3, 0.1), 40), ("Прогноз", (0.6, 0.4, 0.3, 0.05), 14), ("Налоги не учитываются", (0.05, 0.9, 0.5, 0.04), 10)], oid="b")
+    s3 = _ir_slide(3, [("План", (0.05, 0.05, 0.9, 0.1), 32)], oid="c")
+    got = content_in_notes(_ctx([s1, s2, s3], o))
+    assert [(i.slide, i.details["line"], i.details["in_notes"]) for i in got] == [(1, "takeaway", True), (3, "takeaway", False)]
+    assert all(i.severity == "warn" for i in got)
+
+
+def test_timeline_order_reads_dates_and_flags_a_list_out_of_order():
+    from verstka.audit.checks.integrity import date_key, timeline_order
+    from verstka.schemas.common import PatternKind
+    from verstka.schemas.outline import DeckOutline, OutlineSlide, SlideContent, SlideItem
+
+    assert date_key("22 июня 1941") == (1941, 6, 22)
+    assert date_key("Апрель — июнь 1940") == (1940, 4, None)
+    assert date_key("1931–1937") == (1931, None, None)
+    assert date_key("III кв. 2025") == (2025, 7, None)
+    assert date_key("Мая 1945") == (1945, 5, None) and date_key("Март 1945") == (1945, 3, None)
+    assert date_key("2800 студентов") is None and date_key("1500 ₽") is None and date_key("1-й месяц") is None
+    items = lambda *ts: SlideContent(items=[SlideItem(title=t) for t in ts])
+    o = DeckOutline(title="x", slides=[
+        OutlineSlide(id="a", kind=PatternKind.timeline, headline="Война на Тихом океане", content=items("22 июня 1941", "1931–1937", "Июль 1937", "7 декабря 1941")),
+        OutlineSlide(id="b", kind=PatternKind.timeline, headline="Итоги", content=items("1 сентября 1939", "1941 год", "Июнь 1941", "8 мая 1945")),
+        OutlineSlide(id="c", kind=PatternKind.timeline, headline="Назад", content=items("2026", "2025", "2024")),
+        OutlineSlide(id="d", kind=PatternKind.process, headline="Этапы", content=items("1-й месяц", "3-й месяц", "2-й месяц")),
+    ])
+    slides = [_ir_slide(i + 1, [("x", (0.05, 0.05, 0.9, 0.1), 32)], oid=oid) for i, oid in enumerate("abcd")]
+    got = timeline_order(_ctx(slides, o))
+    assert [i.slide for i in got] == [1]
+    assert "«1931–1937» после «22 июня 1941»" in got[0].message
+
+
+def test_fill_ratio_flags_a_one_sentence_slide_even_beside_template_art():
+    """C4: a content slide whose text under the heading is one short sentence is nearly empty (warn), whatever a
+    picture of the template fills beside it; a hero figure, a chart slide and a cover are not."""
+    from verstka.audit.checks.density import fill_ratio
+    from verstka.schemas.common import Bbox, BboxFrac, PatternKind
+    from verstka.schemas.deck_ir import IRElement
+    from verstka.schemas.outline import DeckOutline, OutlineSlide, SlideContent
+
+    W, H = 12192000, 6858000
+    art = IRElement(id="pic", type="picture", bbox=Bbox(x=int(0.04 * W), y=int(0.12 * H), w=int(0.55 * W), h=int(0.85 * H)), bbox_frac=BboxFrac(x=0.04, y=0.12, w=0.55, h=0.85), z=9)
+    o = DeckOutline(title="x", slides=[
+        OutlineSlide(id="a", kind=PatternKind.title, headline="История"),
+        OutlineSlide(id="b", kind=PatternKind.bullets, headline="VK начала как почтовый сервис", content=SlideContent(paragraphs=["Основана в 1998 году"])),
+        OutlineSlide(id="c", kind=PatternKind.big_number, headline="Охват", content=SlideContent(paragraphs=["2800"])),
+        OutlineSlide(id="d", kind=PatternKind.bullets, headline="Итог", content=SlideContent(paragraphs=["Основана в 1998 году"])),
+    ])
+    slides = [
+        _ir_slide(1, [("История", (0.05, 0.3, 0.5, 0.2), 54)], oid="a"),
+        _ir_slide(2, [("VK начала как почтовый сервис", (0.63, 0.06, 0.3, 0.2), 28), ("Основана в 1998 году", (0.66, 0.34, 0.31, 0.06), 16)], oid="b", extra=[art]),
+        _ir_slide(3, [("Охват", (0.05, 0.06, 0.5, 0.1), 28), ("2800", (0.05, 0.2, 0.8, 0.3), 120)], oid="c"),
+        _ir_slide(4, [("Итог", (0.05, 0.06, 0.5, 0.1), 28), ("Основана в 1998 году", (0.05, 0.3, 0.5, 0.06), 16)], oid="d"),
+    ]
+    got = fill_ratio(_ctx(slides, o))
+    sparse = [i for i in got if (i.details or {}).get("text_only")]
+    assert [i.slide for i in sparse] == [2, 4] and all(i.severity == "warn" for i in sparse)  # the last slide too: it is no closing slide

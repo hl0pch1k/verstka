@@ -916,9 +916,70 @@ class Composer:
                     self._tight = 0
                 if self._coverage(n0, area) <= self.FILL_MAX:
                     break
+        boost_used = self._boost
         self._boost = 0
+        if comp != "table" and self._notes and self._notes[1] is not None and self._conclusion_spot(n0) is None:
+            self._rehouse_conclusion(comp, area, n0, (o0, w0, notes0), boost_used)
         self._draw_notes(n0)
         self.warnings.extend(self.cv.clamp_warnings())
+
+    def _rehouse_conclusion(self, comp: str, area: Bbox, n0: int, state: tuple, boost_used: int) -> None:
+        """The block took the conclusion's room and `_conclusion_spot` found none under it (B2). Before the conclusion
+        is said aloud: (1) the block is set again steered above that room — the size ladder takes a step down, a row
+        of cards goes to two rows, the lines under number tiles step down —; (2) the conclusion leads the content
+        under the heading (the compact variant's bold line); (3) the block at the dense steps above the room. A pass
+        counts when the block stays above the content's real floor and the conclusion finds its spot. None: the first
+        setting stays and `_draw_notes` says the conclusion aloud (its smallest form tried first)."""
+        o0, w0, notes0 = state
+        foot_box, plan, full = self._notes
+        floor0, area0, dense0 = self._floor_y, self._area, self._dense
+        w_first = list(self.warnings)  # the first setting's own warnings (its dense pass), kept when it stays
+
+        def again(body_area: Bbox, floor: int, lead: bool, dense: bool = False) -> bool:
+            self._undo(n0)
+            self.o, self.warnings = o0, list(w0)
+            self._restore_notes(notes0)
+            self._floor_y, self._area, self._dense, self._boost = floor, body_area, dense0 or dense, 0
+            self._take_lead = lead
+            self._rehousing = not lead
+            try:
+                self._compose_body(comp, body_area)
+            finally:
+                self._take_lead = False
+                self._rehousing = False
+                self._floor_y = floor0
+            # the tighter floor only steers the sizes: the block may not pass the content's real floor, and the
+            # conclusion must find its room under it (`_conclusion_spot`)
+            return not self._overflows(n0, body_area)
+
+        # the block kept above the conclusion's room: a step down the ladder, cards in two rows
+        shorter = area.y2 < floor0 - int(0.01 * self.kit.H)
+        if shorter and again(area, area.y2, False) and self._conclusion_spot(n0) is not None:
+            self._floor_y, self._area = floor0, area0
+            self.warnings.append("the block set a step smaller: the conclusion keeps its room under it")
+            return
+        # the conclusion over the content, under the heading (the footnote keeps its place at the foot)
+        body = Bbox(x=area.x, y=area.y, w=area.w, h=max(floor0 - area.y, int(0.2 * self.kit.H)))
+        self._notes = (foot_box, None, full)
+        if (self.o.takeaway or "").strip() and again(body, floor0, True):
+            self._floor_y, self._area = floor0, area0
+            self.warnings.append("the conclusion leads the content under the heading: no room under it")
+            return
+        self._notes = (foot_box, plan, full)
+        # the dense steps (a size under the small one) above the conclusion's room
+        if shorter and not dense0 and again(area, area.y2, False, True) and self._conclusion_spot(n0) is not None:
+            self._floor_y, self._area = floor0, area0
+            self.warnings.append("the block set denser: the conclusion keeps its room under it")
+            return
+        # neither: the first setting, the conclusion said aloud
+        self._notes = (foot_box, plan, full)
+        self._undo(n0)
+        self.o, self.warnings = o0, list(w0)
+        self._restore_notes(notes0)
+        self._floor_y, self._area, self._dense, self._boost = floor0, area0, dense0, boost_used
+        self._compose_body(comp, area)
+        self._boost = 0
+        self.warnings = w_first
 
     FILL_MAX = 0.8  # the share of the safe area past which a slide reads as a wall of content (the audit's fill_ratio)
 
@@ -1673,8 +1734,18 @@ class Composer:
             ew = int((area.w - k.gap) / 2) if ecols == 2 else int(area.w * 0.8)
             groups = [extra[i * per:(i + 1) * per] for i in range(ecols)]
             esize = k.lead if getattr(self, "_boost", 0) >= 1 and self.fits_width(extra, k.lead, False, ew - _emu(k.lead * 1.1)) else k.body
-            paras_g = [[self.P(t, esize, k.colors.text, space_after=esize * 0.5, marker="•" if len(extra) > 1 else None, marker_color=k.colors.accent) for t in g] for g in groups if g]
-            eh = max(self.h(pg, ew) for pg in paras_g)
+            steps = [esize]
+            if getattr(self, "_rehousing", False):
+                # set again above the conclusion's room (B2): the lines under the tiles step down (the small size, on
+                # the dense pass the dense floor) while they take more than 45 % of the area
+                steps += [x for x in (k.small,) if x < esize - 0.05]
+                if getattr(self, "_dense", False):
+                    steps.append(max(0.017 * k.hpt, 7.0, k.small * 0.85))
+            for esize in steps:
+                paras_g = [[self.P(t, esize, k.colors.text, space_after=esize * 0.5, marker="•" if len(extra) > 1 else None, marker_color=k.colors.accent) for t in g] for g in groups if g]
+                eh = max(self.h(pg, ew) for pg in paras_g)
+                if eh <= 0.45 * area.h:
+                    break
             extra_block = (paras_g, eh, ew)
         avail = Bbox(x=area.x, y=area.y, w=area.w, h=area.h - ((extra_block[1] + k.vgap) if extra_block else 0))
         st = k.card
@@ -1691,9 +1762,15 @@ class Composer:
             us = k.snap(max(lab_size * 1.2, fs_ * 0.4), lab_size, max(lab_size, fs_ * 0.5))
             return [self.P(sp[1], us, colors.figure, bold=k.figure_bold) if sp else None for sp in splits]
 
+        def tile_pad_y(cols: int, pad: int) -> int:
+            # tiles in two rows keep a slimmer top and bottom padding: 0.05 of the slide's height over and under each
+            # figure took 45 % of a 2×2 tile and left the figures at 18 pt under 20 pt labels (B3)
+            return min(pad, int(0.03 * k.H)) if math.ceil(n / cols) > 1 else pad
+
         def layout(cols: int, stacked: bool = False):
             cw = int((avail.w - gap * (cols - 1)) / cols)
             pad = int(min(cw * 0.1, 0.05 * k.H)) if use_cards else 0
+            pad_y = tile_pad_y(cols, pad)
             inner = cw - 2 * pad
             rows_ = math.ceil(n / cols)
             max_tile_ = int((avail.h - k.vgap * (rows_ - 1)) / rows_)
@@ -1709,7 +1786,7 @@ class Composer:
                 wide_ok = all(self.figure_para(v, s_, colors.figure, colors.muted)[1] <= _pt(inner) * (0.88 if use_cards else 0.8) for v in heads)
                 units_h = max((self.h([u], inner) for u in unit_paras(s_, k.body) if u is not None), default=0) if stacked else 0
                 units_ok = not stacked or all(u is None or para_lines(u, _pt(inner)) <= 2 for u in unit_paras(s_, k.body))
-                tall_ok = _emu(s_ * max(1.15, k.line)) + units_h + lab + int(k.vgap * 1.4) + 2 * pad <= max_tile_
+                tall_ok = _emu(s_ * max(1.15, k.line)) + units_h + lab + int(k.vgap * 1.4) + 2 * pad_y <= max_tile_
                 if wide_ok and tall_ok and units_ok:
                     break
             return cw, pad, inner, fs
@@ -1717,8 +1794,12 @@ class Composer:
         cols = n if n <= 4 else math.ceil(n / 2)
         cw, pad, inner, fs = layout(cols)
         if n == 4 and fs < hero_min and avail.h > 0.55 * area.h:
-            cols = 2  # four long figures read as a 2×2 block, not as four small numbers in a row
-            cw, pad, inner, fs = layout(cols)
+            # four long figures read as a 2×2 block, not as four small numbers in a row — when the block gives them
+            # a larger size (short figures «70 млн», «62» keep their row at 48 pt rather than a grid at 18 pt, B3)
+            grid = layout(2)
+            if grid[3] > fs + 0.05:
+                cols = 2
+                cw, pad, inner, fs = grid
         stacked = False
         if any(splits) and fs < 1.6 * k.h2:
             # a row of figures set at a text size (smaller than their labels) reads as captions: stack the words
@@ -1726,9 +1807,12 @@ class Composer:
             if fs2 >= fs * 1.3:
                 stacked, cw, pad, inner, fs = True, cw2, pad2, inner2, fs2
         rows = math.ceil(n / cols)
+        pad_y = tile_pad_y(cols, pad)
         label_size = k.body
         for ls in (k.lead, k.body):
             label_size = ls
+            if ls > k.body + 0.05 and fs <= ls + 0.05:
+                continue  # a figure never set under its own label's size (B3: 18 pt figures under 20 pt labels)
             if max(para_lines(self.P(x.label, ls, colors.muted), _pt(inner)) for x in numbers) <= 3:
                 break
         fig_h = _emu(fs * max(1.15, k.line))
@@ -1742,7 +1826,7 @@ class Composer:
         tg = min(self._figure_optics(f, fig_h)[1] for f in figs)
         content_h = rule + (int(k.vgap * 0.6) if rule else 0) + fig_h + unit_h - tg + int(k.vgap * 0.35) + lab_h
         max_tile = int((avail.h - k.vgap * (rows - 1)) / rows)
-        if content_h + 2 * pad > max_tile and label_size > k.body:
+        if content_h + 2 * pad_y > max_tile and label_size > k.body:
             label_size = k.body  # a step down for the labels before the tile outgrows its share
             lab_h = max(self.h([self.P(distinct_label(x.value, x.label, self.o.headline), label_size, colors.muted)], inner) for x in numbers)
             if stacked:
@@ -1750,13 +1834,13 @@ class Composer:
                 unit_h = max((self.h([u], inner) - _emu(2) for u in units if u is not None), default=0)
             content_h = rule + (int(k.vgap * 0.6) if rule else 0) + fig_h + unit_h - tg + int(k.vgap * 0.35) + lab_h
         # the tile holds its figure and label, never shorter than them (a label hanging below its card)
-        tile_h = self._grow_to(avail.h, rows, k.vgap, content_h + 2 * pad) if use_cards else content_h + 2 * pad
+        tile_h = self._grow_to(avail.h, rows, k.vgap, content_h + 2 * pad_y) if use_cards else content_h + 2 * pad_y
         block_h = rows * tile_h + (rows - 1) * k.vgap + ((extra_block[1] + k.vgap * 1.4) if extra_block else 0)
         y0 = self._place_v(area, int(block_h))
         for i, num in enumerate(numbers):
             r, cidx = divmod(i, cols)
             box = Bbox(x=avail.x + cidx * (cw + gap), y=y0 + r * (tile_h + k.vgap), w=cw, h=tile_h)
-            y = box.y + pad
+            y = box.y + pad_y
             if use_cards:
                 self.cv.card(box, st)
             else:
@@ -1770,7 +1854,7 @@ class Composer:
             else:
                 self.cv.text(Bbox(x=box.x + pad - lsb, y=y - tg, w=inner + lsb, h=fig_h), [figs[i]], anchor="b", name="Figure")
             y += fig_h + unit_h - tg + int(k.vgap * 0.35)
-            self.cv.text(Bbox(x=box.x + pad, y=y, w=inner, h=max(lab_h, box.y2 - pad - y)), [self.P(distinct_label(num.value, num.label, self.o.headline), label_size, colors.muted)], name="Label")
+            self.cv.text(Bbox(x=box.x + pad, y=y, w=inner, h=max(lab_h, box.y2 - pad_y - y)), [self.P(distinct_label(num.value, num.label, self.o.headline), label_size, colors.muted)], name="Label")
         if extra_block:
             paras_g, eh, ew = extra_block
             ey = y0 + rows * tile_h + (rows - 1) * k.vgap + int(k.vgap * 1.4)
@@ -2162,10 +2246,11 @@ class Composer:
         k = self.kit
         return k.snap(max(0.02 * k.hpt, 8.0), max(0.017 * k.hpt, 7.5), max(k.small, 8.0))
 
-    def _takeaway_plan(self, text: str, width: int) -> dict:
+    def _takeaway_plan(self, text: str, width: int, figure: bool = True, sizes: Optional[tuple] = None) -> dict:
         """How the conclusion is set: one line at the lead size (a step down, then two lines, when it is longer), on a
         strip of the template's card colour with an accent bar at its left — or, when the template's cards have no
-        fill of their own, as an accent bar and the line beside it."""
+        fill of their own, as an accent bar and the line beside it. `figure=False`: never the visual variant's large
+        key figure; `sizes`: those sizes only (the slimmer forms of `_takeaway_fit`)."""
         k = self.kit
         st = k.card
         strip = bool(st.fill) and contrast_ratio(st.fill, k.colors.ground) >= 1.04
@@ -2176,8 +2261,8 @@ class Composer:
         text = text[:1].upper() + text[1:] if text[:1].islower() else text
         if text.endswith(".") and not text.endswith("..") and not ABBR_END_RE.search(text):
             text = text[:-1]  # a conclusion line, like a headline, has no period («… на 10 п. п.» keeps it)
-        deck = self._deck_takeaway_size(width, strip, bar_w)
-        for size in ([deck] if deck else dict.fromkeys((k.lead, k.body, k.small))):
+        deck = self._deck_takeaway_size(width, strip, bar_w) if sizes is None else None
+        for size in (sizes if sizes is not None else [deck] if deck else dict.fromkeys((k.lead, k.body, k.small))):
             pad_x = _emu(size * 1.0) if strip else 0
             pad_y = _emu(size * 0.62) if strip else 0
             bar_gap = _emu(size * 0.8)
@@ -2200,7 +2285,9 @@ class Composer:
         text_h = self.h([best["para"]], best["text_w"])
         best["text_h"] = text_h
         best["h"] = text_h + 2 * best["pad_y"]
-        fig = _aside_figure(text) if self.strategy == "visual" else None
+        fig = _aside_figure(text) if self.strategy == "visual" and figure else None
+        if fig and self._figure_on_slide(fig):
+            fig = None  # the slide's tiles already show it large («80%»): the strip does not say it twice (B3)
         if fig:
             # the visual variant's strip leads with the conclusion's key figure, set large in the template's figure
             # colour where the other variants have the accent bar: the eye takes the number first, then the sentence
@@ -2218,6 +2305,15 @@ class Composer:
                 inner = max(t_h, fig_h)
                 best.update(fig=(para_f, fig_w, fig_h, fig_gap), para=para, text_w=text_w, text_h=t_h, h=inner + 2 * best["pad_y"])
         return best
+
+    def _figure_on_slide(self, fig: str) -> bool:
+        """Whether a figure is one the slide already sets large: a value of its number tiles, cards or columns."""
+        c = self.o.content
+        want = re.sub(r"[^\d%]", "", fig or "")
+        if not re.search(r"\d", want):
+            return False
+        shown = [x.value for x in c.numbers] + [getattr(it, "number", None) or "" for it in list(c.items) + list(c.columns)]
+        return any(re.sub(r"[^\d%]", "", v or "") == want for v in shown)
 
     def _deck_takeaway_size(self, width: int, strip: bool, bar_w: int) -> Optional[float]:
         """One size for every conclusion strip of the deck: the largest step (lead, body) at which every takeaway of the
@@ -2342,6 +2438,73 @@ class Composer:
                 bottoms.append(b[1] + b[3])
         return max(bottoms) if bottoms else None
 
+    def _takeaway_fit(self, text: str, width: int, room_h: int, smaller: float = 0.0) -> Optional[dict]:
+        """The conclusion's plan at `width` that fits `room_h`: its own form, then without the visual variant's large
+        figure; `smaller`: at that size instead (the body size, at last the small one: two or three lines) — None when
+        none fits."""
+        k = self.kit
+        if room_h <= 0 or width <= 0:
+            return None
+        if smaller:
+            plans = [lambda: self._takeaway_plan(text, width, figure=False, sizes=(smaller,))]
+        else:
+            plans = [lambda: self._takeaway_plan(text, width), lambda: self._takeaway_plan(text, width, figure=False)]
+        for mk in plans:
+            p_ = mk()
+            if p_["h"] <= room_h and p_["text_w"] >= 0.3 * k.W:
+                return p_
+        return None
+
+    def _conclusion_spot(self, n0: int, last: bool = False):
+        """Where the conclusion goes under what was composed after the first `n0` elements: (plan, x, y, w, foot_box)
+        — its reserved place, or right under the content; else the same words set slimmer (no large figure, a size
+        down) in the room left under the content; else a narrower strip in the free room under an illustration the
+        area was cut above (`foot_room`, B2), the footnote moved to that room's foot. None: no room on the slide."""
+        notes = getattr(self, "_notes", None)
+        if not notes or notes[1] is None:
+            return None
+        foot_box, plan, area = notes
+        k = self.kit
+        bottom = self._content_bottom(n0)
+        room_below = area.y2 - (foot_box[0].h + int(k.vgap * 0.8) if foot_box else 0)
+        if bottom is None or not (bottom + int(k.vgap * 0.6) > plan["y_max"] and bottom + int(k.vgap * 0.6) + plan["h"] > room_below):
+            y = plan["y_max"] if bottom is None else min(plan["y_max"], bottom + int(k.vgap * 1.4))
+            if bottom is not None and bottom + int(k.vgap * 1.4) > plan["y_max"] and bottom + int(k.vgap * 1.4) + plan["h"] <= area.y2 - (foot_box[0].h if foot_box else 0):
+                y = bottom + int(k.vgap * 1.4)  # the content grew past its share: the conclusion follows it, never over it
+            if bottom is not None and plan["y_max"] - (bottom + int(k.vgap * 1.4)) > 0.28 * area.h:
+                # a short block leaves a large empty band: the conclusion stands at the foot of the area (its reserved
+                # place), so the slide has a top and a bottom rather than everything in its upper half
+                y = plan["y_max"]
+            return plan, area.x, max(y, area.y), area.w, foot_box
+        take = " ".join((self.o.takeaway or "").split())
+        top = bottom + int(k.vgap * 1.0)
+        # a narrower strip in the free room under the art the area was cut above (trees, a grass band at one side)
+        fr = getattr(self, "foot_room", None)
+        room = None
+        if fr is not None and fr.y2 > room_below + int(0.02 * k.H) and fr.y <= area.y2 + int(0.02 * k.H):
+            x, w = (area.x, fr.x2 - area.x) if abs(fr.x - area.x) <= int(0.02 * k.W) else (fr.x, fr.w)
+            w = min(w, area.x2 - x)
+            fb2, floor = None, fr.y2
+            if foot_box is not None:
+                para_f = foot_box[1]
+                fh = self.h(para_f, w)
+                fb2 = (Bbox(x=x, y=fr.y2 - fh, w=w, h=fh), para_f)
+                floor = fr.y2 - fh - int(k.vgap * 0.8)
+            if w >= 0.4 * area.w:
+                room = (x, w, floor, fb2)
+        # its own form (without the large figure: a strip with one is twice as tall) where the content left room, then
+        # in the free room by the art; then a size down, in the same order
+        for smaller in ((0.0, k.body) + ((k.small,) if last and k.small < k.body - 0.05 else ())):
+            got = self._takeaway_fit(take, area.w, room_below - top, smaller)
+            if got is not None:
+                return got, area.x, min(bottom + int(k.vgap * 1.4), room_below - got["h"]), area.w, foot_box
+            if room is not None:
+                x, w, floor, fb2 = room
+                got = self._takeaway_fit(take, w, floor - top, smaller)
+                if got is not None:
+                    return got, x, min(bottom + int(k.vgap * 1.4), floor - got["h"]), w, fb2
+        return None
+
     def _draw_notes(self, n0: int) -> None:
         """The conclusion right under the content (a gap below its last block, never lower than its reserved place),
         the footnote at the foot of the area."""
@@ -2351,9 +2514,8 @@ class Composer:
         foot_box, plan, area = notes
         k = self.kit
         if plan is not None:
-            bottom = self._content_bottom(n0)
-            room_below = area.y2 - (foot_box[0].h + int(k.vgap * 0.8) if foot_box else 0)
-            if bottom is not None and bottom + int(k.vgap * 0.6) > plan["y_max"] and bottom + int(k.vgap * 0.6) + plan["h"] > room_below:
+            spot = self._conclusion_spot(n0, last=True)
+            if spot is None:
                 # the content grew past its share and leaves no room for the conclusion: it goes to the speaker notes
                 # rather than over the content (a slide with every line of its lists, the takeaway said aloud)
                 take = " ".join((self.o.takeaway or "").split())
@@ -2363,16 +2525,11 @@ class Composer:
                     pass
                 self.warnings.append("the conclusion moved to the speaker notes: no room under the content")
                 plan = None
+            else:
+                if spot[0] is not plan:
+                    self.warnings.append("the conclusion set slimmer to stay on the slide" if spot[3] == area.w else "the conclusion set in the free room beside the template's art")
+                plan, x, y, w, foot_box = spot
         if plan is not None:
-            y = plan["y_max"] if bottom is None else min(plan["y_max"], bottom + int(k.vgap * 1.4))
-            if bottom is not None and bottom + int(k.vgap * 1.4) > plan["y_max"] and bottom + int(k.vgap * 1.4) + plan["h"] <= area.y2 - (foot_box[0].h if foot_box else 0):
-                y = bottom + int(k.vgap * 1.4)  # the content grew past its share: the conclusion follows it, never over it
-            if bottom is not None and plan["y_max"] - (bottom + int(k.vgap * 1.4)) > 0.28 * area.h:
-                # a short block leaves a large empty band: the conclusion stands at the foot of the area (its reserved
-                # place), so the slide has a top and a bottom rather than everything in its upper half
-                y = plan["y_max"]
-            y = max(y, area.y)
-            x, w = area.x, area.w
             if plan["strip"]:
                 self.cv.card(Bbox(x=x, y=y, w=w, h=plan["h"]), k.card, name="Conclusion strip")
             bx = x + plan["pad_x"]
@@ -3148,9 +3305,12 @@ class Composer:
             self._legend_used: list[float] = []
             self._pie_ds: list[int] = []
             self._pie_unclean = False
+            self._pie_small_any = False
             for attempt in range(2):
+                self._turned = False
                 for i, spec in enumerate((c.chart, c.chart2)):
                     self._pie_clean = True
+                    self._pie_small = False
                     err = self._chart_block(boxes[i], spec, prominent=True, center=stacked)
                     if err is not None:
                         # one chart of the pair could not be drawn: the other one takes the slide
@@ -3163,6 +3323,8 @@ class Composer:
                         return None
                     if not getattr(self, "_pie_clean", True):
                         self._pie_unclean = True
+                    if getattr(self, "_pie_small", False):
+                        self._pie_small_any = True
                 if attempt or len(self._legend_used) < 2 or (len(set(self._legend_used)) <= 1 and max(self._pie_ds) - min(self._pie_ds) <= _emu(2)):
                     break
                 # two pies of one slide: one legend size and one diameter for both (the smaller ones), set again
@@ -3172,24 +3334,33 @@ class Composer:
                 self._legend_used, self._pie_ds = [], []
             self._legend_force = None
             self._pie_force_d = None
-            return not self._pie_unclean
+            # a plan that turns the trend chart's labels (45°, or every other one blank) where the first plan set them
+            # straight is not taken for a larger pie (the dataset's LCT: straight months at full width)
+            self._pair_squeezed = bool(sq0) and self._turned and not sq0[0]
+            return not self._pie_unclean and not self._pie_small_any and not self._pair_squeezed
 
-        tried: list[tuple[int, int]] = []  # (smallest pie diameter, plan index) of the plans whose legend did not fit
+        # (the partner chart's labels as the first plan set them, legend inside its box, smallest pie diameter, plan
+        # index) of the plans not taken at once: a legend past its box, a circle under the pie's least size, or — past
+        # the first plan — a trend chart whose narrower slot turns its category labels
+        tried: list[tuple[bool, bool, int, int]] = []
         chosen = None
+        sq0: list[bool] = []
         for pi, (share, stacked) in enumerate(plans):
             ok = run(share, stacked)
             if ok is None:
                 return
+            if pi == 0:
+                sq0.append(self._turned)
             if ok:
                 chosen = pi
                 break
-            tried.append((min(self._pie_ds) if self._pie_ds else 0, pi))
+            tried.append((not self._pair_squeezed, not self._pie_unclean, min(self._pie_ds) if self._pie_ds else 0, pi))
             if pi < len(plans) - 1:
                 self._undo(n1)
         if chosen is None:
-            # no plan sets every legend inside its box: the plan with the largest circle (the last one drawn when it
-            # is that plan)
-            best = max(tried)[1] if tried else len(plans) - 1
+            # no plan sets every legend inside its box with a circle of its least size: the partner's labels whole, a
+            # clean legend, then the plan with the largest circle (the last one drawn when it is that plan)
+            best = max(tried)[3] if tried else len(plans) - 1
             if best != len(plans) - 1:
                 self._undo(n1)
                 if run(*plans[best]) is None:
@@ -3245,7 +3416,8 @@ class Composer:
             if pie:
                 self._pie(cbox, plain, center=center, head=legend_head)
             else:
-                add_chart(self.slide, cbox, plain, self.outline, self._chart_style(), k.manifest.tokens.typography, text_hex=k.colors.text, neutral_hex=k.colors.divider, ground_hex=k.colors.ground)
+                gf = add_chart(self.slide, cbox, plain, self.outline, self._chart_style(), k.manifest.tokens.typography, text_hex=k.colors.text, neutral_hex=k.colors.divider, ground_hex=k.colors.ground)
+                self._turned = bool(getattr(self, "_turned", False) or getattr(gf, "verstka_turned", False))
         except Exception as e:  # noqa: BLE001
             return str(e) or type(e).__name__
         return None
@@ -3327,29 +3499,35 @@ class Composer:
             return dict(size=size, sw=sw, pct_w=pct_w, name_w=name_w, row_gap=row_gap, hs=hs, w=w, col_w=col_w, col_gap=col_gap,
                         chunks=chunks, h=head_h + body_h, head=head_paras, head_h=head_h, stack=stack)
 
-        fits: list[tuple] = []
         got: dict[str, tuple] = {}
         for legend_mode in (("amounts", "stacked", "shares") if amounts else ("shares",)):
             # the amounts beside their names; a narrower legend with each amount on the line under its name; the
-            # shares only — the brief's amounts are dropped only when neither form leaves the circle its room
+            # shares only
             stack = legend_mode == "stacked"
             if legend_mode == "shares" and amounts:
-                if any(v[1] >= self.PIE_KEEP_AMOUNTS * box.h and not v[2] for v in got.values()):
-                    break  # a circle of a little over a third of the height is worth the brief's figures
                 # a narrow box: the amounts stay on the slices, the legend gives the shares only, headed as such
                 pct = shares_only
                 head = f"{head_plain}\nдоля от общей суммы" if head_plain else "Доля от общей суммы"
             lg, d, below, sizes = self._pie_legend_fit(box, legend, rows, cats)
             if lg is not None:
-                fits.append((lg, d, below, list(pct), head))
-                got[legend_mode] = fits[-1]
-            if lg is not None and (legend_mode == "shares" or (d >= 0.4 * box.h and not below) or (below and d >= 0.35 * box.h)):
-                break
-        if fits and len(got) >= 2 and "shares" not in got:
-            fits.append(max(got.values(), key=lambda v: v[1]))  # the amounts' form with the larger circle
-        self._pie_clean = bool(fits)
-        if fits:
-            lg, d, below, pct, head = fits[-1]
+                got[legend_mode] = (lg, d, below, list(pct), head)
+            if legend_mode == "amounts" and lg is not None and ((d >= 0.4 * box.h and not below) or (below and d >= 0.35 * box.h)) and d >= int(self.PIE_SMALL * self._pie_min_d(box)):
+                break  # the amounts beside a circle of 0.4 of the box's height (under it: 0.35) — the settled look
+        pick = got.get("amounts") if len(got) == 1 and "amounts" in got else None
+        if pick is None and got:
+            # the brief's amounts never cost the circle its size (B1: the stacked legend shrank the dataset's pie by
+            # half): an amounts form is kept when its circle is as large as the shares' one, or still of the pie's
+            # least size (`_pie_min_d`); else the shares only
+            amt = [got[m] for m in ("amounts", "stacked") if m in got]
+            best_amt = max(amt, key=lambda v: v[1]) if amt else None
+            shr = got.get("shares")
+            if best_amt is not None and (shr is None or best_amt[1] >= min(int(shr[1] * 0.98), self._pie_min_d(box))):
+                pick = best_amt
+            else:
+                pick = shr if shr is not None else best_amt
+        self._pie_clean = pick is not None
+        if pick is not None:
+            lg, d, below, pct, head = pick
         else:
             # nothing fits beside or under the circle in either mode: one column of shares under the circle, as wide as
             # the box, the names wrapped, a size down to the dense floor — the circle keeps 45 % of the height
@@ -3358,12 +3536,23 @@ class Composer:
         force_d = getattr(self, "_pie_force_d", None)
         if force_d and force_d < d:
             d = force_d  # two pies of one slide: one diameter
+        # a circle well under the pie's least size (B5): a pair of charts tries its other plans (half the width, one
+        # chart over the other) and keeps the one with the larger circle
+        self._pie_small = d < int(self.PIE_SMALL * self._pie_min_d(box))
         if isinstance(getattr(self, "_legend_used", None), list):
             self._legend_used.append(lg["size"])
             self.__dict__.setdefault("_pie_ds", []).append(d)
         self._pie_draw(box, spec, center, lg, d, below, rows, cats, vals, pct, big, colors, amounts, total, unit_txt)
 
-    PIE_KEEP_AMOUNTS = 0.36  # the share of its box's height a pie keeps beside a legend of the brief's amounts
+    PIE_MIN_H = 0.22  # the least circle of a pie, of the slide's height (B5): smaller, it reads as a mark, not a chart
+    PIE_SMALL = 0.85  # a circle under this share of the least size sends a pair of charts to its other plans
+
+    def _pie_min_d(self, box: Bbox) -> int:
+        """The least diameter a pie keeps in `box`: 0.22 of the slide's height or 0.4 of the box's, whichever is
+        larger — never more than the box holds (0.9 of its height, 0.6 of its width: the legend keeps its room)."""
+        k = self.kit
+        want = max(int(self.PIE_MIN_H * k.H), int(0.4 * box.h))
+        return min(want, int(0.9 * box.h), int(0.6 * box.w))
 
     def _pie_legend_last(self, box: Bbox, legend, rows: list[int]):
         """The last resort of a pie's legend: one column under the circle, as wide as the box (names wrapped), the
@@ -3425,6 +3614,9 @@ class Composer:
         if force:
             sizes = [s_ for s_ in sizes if s_ <= force + 0.05] or [force]
         best = None
+        # two columns of names beside the circle only while it keeps the pie's least size (B5: a low wide box gave a
+        # 0.11 H circle next to a two-column legend) — else the legend goes under the circle
+        min_2col = min(int(self.PIE_MIN_H * k.H), int(0.8 * box.h))
         for size in sizes:
             if size < k.body - 0.05 and best is not None and best[1] >= 0.55 * box.h:
                 break  # the body size keeps a circle of more than half the height: the legend never goes smaller
@@ -3438,7 +3630,7 @@ class Composer:
                 if cand["h"] > box.h:
                     continue
                 dd = min(box.h, box.w - cand["w"] - gap * 2)
-                if dd < min_d:
+                if dd < min_d or (cols == 2 and dd < min_2col):
                     continue  # a legend that leaves the circle a sliver (or runs past the box) is no candidate
                 if best is None or dd > best[1] + _emu(2):
                     best = (cand, dd)
@@ -3452,12 +3644,20 @@ class Composer:
         if lg is None or d < 0.5 * box.h or box.h > 0.7 * box.w:
             # a narrow box (a third of the slide): the legend under the circle when that gives a clearly larger circle
             for size in sizes:
-                alt = legend(size, box.w - _emu(size * 2.2) - _emu(size * 3))
-                d_alt = min(int(box.w * 0.85), box.h - alt["h"] - k.vgap)
-                if alt["w"] > box.w or d_alt < min_d:
-                    continue  # under the circle only as wide as the box, the circle still a third of the height
-                if d_alt > d * 1.15 and d_alt >= 0.35 * box.h:
-                    lg, d, below = alt, d_alt, True
+                alts = [legend(size, box.w - _emu(size * 2.2) - _emu(size * 3))]
+                if len(rows) >= 4 and d < self._pie_min_d(box):
+                    # a circle short of its least size beside the legend: the names in two columns under it (half the
+                    # rows' height) before the legend steps down a size
+                    alts.append(legend(size, int((box.w - _emu(size * 1.6)) / 2) - _emu(size * 2.2) - _emu(size * 3), 2))
+                hit = None
+                for alt in alts:
+                    d_alt = min(int(box.w * 0.85), box.h - alt["h"] - k.vgap)
+                    if alt["w"] > box.w or d_alt < min_d:
+                        continue  # under the circle only as wide as the box, the circle still a third of the height
+                    if d_alt > d * 1.15 and d_alt >= 0.35 * box.h and (hit is None or d_alt > hit[1]):
+                        hit = (alt, d_alt)
+                if hit is not None:
+                    lg, d, below = hit[0], hit[1], True
                     break
         return lg, d, below, sizes
 
@@ -3697,7 +3897,7 @@ def _in_sentence(cat: str) -> str:
 _MONEY_UNIT_RE = re.compile(r"\s*(?:рубл(?:ь|я|ей)|руб\.?)$", re.I)
 
 
-_TAIL_LINK_RE = re.compile(r"(?:\s+(?:до|на|в|с|—|–|-|:)|\s+(?:составит|составляет|составят|составляют|равна|равен|равно|—\s*это))+\s*$", re.I)
+_TAIL_LINK_RE = re.compile(r"(?:\s+(?:до|на|в|с|—|–|-|:|→|->)|\s+(?:составит|составляет|составят|составляют|равна|равен|равно|—\s*это))+\s*$", re.I)
 
 
 def label_without_figure(text: str, fig: Optional[str]) -> str:
@@ -3751,11 +3951,30 @@ def _is_year(m: "re.Match", text: str) -> bool:
     return bool(_YEAR_BEFORE_RE.search(text[: m.start(1)]))  # «в 2024 выручка выросла»
 
 
+_RANGE_TO_RE = re.compile(r"\s*(?:→|->|⟶|—>|до)\s*$", re.I)
+_RANGE_FROM_RE = re.compile(r"(?:^|[\s(«])(?:с|со|от)\s*$", re.I)
+
+
+def _range_start(text: str, m: "re.Match", nxt: Optional["re.Match"]) -> bool:
+    """The figure opens a range whose end is the next figure: «с X до Y», «от X до Y», «X → Y»."""
+    if nxt is None:
+        return False
+    between = text[m.end(1): nxt.start(1)]
+    if not _RANGE_TO_RE.fullmatch(between) and not re.fullmatch(r"\s*(?:→|->|⟶|—>)\s*", between):
+        return False
+    if re.search(r"→|->|⟶|—>", between):
+        return True
+    return bool(_RANGE_FROM_RE.search(text[: m.start(1)]))
+
+
 def _aside_figure(text: str) -> Optional[str]:
     """The key figure of a conclusion, as the large figure beside the chart: the first sum or share
     («120 000 рублей» → «120 000 ₽», «112,3%»), else the first figure of three digits or more; None without one."""
     text = text or ""
-    found = [m.group(1).strip() for m in _FIG_RE.finditer(text) if not _is_year(m, text)]
+    ms = [m for m in _FIG_RE.finditer(text) if not _is_year(m, text)]
+    # a change «с 13,3% до 22,4%», «от X до Y», «X → Y»: the figure is where it goes, the target (B6) — the first
+    # figure beside a growth message read as the old value
+    found = [m.group(1).strip() for i, m in enumerate(ms) if not _range_start(text, m, ms[i + 1] if i + 1 < len(ms) else None)]
     unit = [f for f in found if re.search(r"%|₽|руб|млн|млрд|тыс", f, re.I)]
     big = [f for f in found if len(re.sub(r"\D", "", f)) >= 3]
     pick = (unit or big or [None])[0]

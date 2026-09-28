@@ -1239,8 +1239,11 @@ def _render_content(builder: DeckBuilder, comp: str, oslide: OutlineSlide, manif
     area = Bbox(x=sx, y=top, w=sw, h=max(min(bottom, H) - top, int(0.1 * H)))
     if area.y2 > H:
         area = Bbox(x=area.x, y=max(H - area.h, 0), w=area.w, h=min(area.h, H))
+    foot_room = None
     if art is None:
+        full = area
         area = _clear_of_art(slide, area, title_ph, W, H, warnings)
+        foot_room = _foot_room(slide, full, area, title_ph, W, H)
     _true_ground(slide, area, pal, manifest)
     proto = _card_proto(builder, manifest, family, pal.bg)
     kit = Kit(manifest, W, H, pal.bg, card_proto=proto[0] if proto else None, heading_color=title_color)
@@ -1250,6 +1253,7 @@ def _render_content(builder: DeckBuilder, comp: str, oslide: OutlineSlide, manif
         kit.card.fill, kit.card.line = proto[1], proto[2]
         kit.card.colors = kit.colors_on(proto[1] or pal.bg, prefer=None if proto[1] else title_color, inside_card=bool(proto[1]))
     composer = Composer(slide, kit, oslide, outline, outline.strategy or "structured", manifest)
+    composer.foot_room = foot_room
     if comp == "image_text" and oslide.content.image_hint:
         # the picture and its text above the slide's conclusion and footnote (compose() keeps the same room)
         n0 = len(composer.cv.tree)
@@ -1302,6 +1306,25 @@ def _clear_of_art(slide: Slide, area: Bbox, title_ph, W: int, H: int, warnings: 
         return area
     warnings.append(f"content kept clear of the template's art ({share:.0%} of the area)")
     return free
+
+
+def _foot_room(slide: Slide, full: Bbox, area: Bbox, title_ph, W: int, H: int) -> Optional[Bbox]:
+    """The free room under a content area that was cut above the template's art (trees at one side of the foot, a
+    grass band): the largest rectangle clear of the art between the area's foot and the full area's, at least 0.4 of
+    the area wide and 0.06 of the slide high — where a conclusion the content left no room for can stand (B2)."""
+    if area.y2 >= full.y2 - int(0.06 * H):
+        return None
+    try:
+        from verstka.rendering.layers import free_rect
+
+        skip = (title_ph._element,) if title_ph is not None else ()
+        band = Bbox(x=full.x, y=area.y2, w=full.w, h=full.y2 - area.y2)
+        room = free_rect(slide, band, skip=skip)
+    except Exception:  # noqa: BLE001
+        return None
+    if room.w < 0.4 * area.w or room.h < 0.06 * H or room.y > area.y2 + int(0.02 * H):
+        return None
+    return room
 
 
 def _true_ground(slide: Slide, area: Bbox, pal: "_Palette", manifest: TemplateManifest) -> None:
@@ -2064,23 +2087,37 @@ def _check_heading_color(slide: Slide, title_ph, canvas: Optional[Pattern], band
 
 
 def _left_clear(slide: Slide, box: Bbox, W: int, H: int, skip: tuple = ()) -> int:
-    """The x a heading box must start at to clear the text of a mark that stands over its own left part (a page number
-    «09» kept beside the title: in its band, starting before box.x + 10 % of the width and reaching past box.x) —
-    letters over letters; art and pictures are the canvas's and the free-width rules' concern. box.x when nothing."""
+    """The x a heading box must start at to clear a mark that stands over its own left part, in its band, starting
+    before box.x + 10 % of the width and reaching past box.x: the text of a page number «09» kept beside the title
+    (letters over letters), or a small ornament of the layout — a cluster of dots, a small picture, 0.3–3 % of the
+    slide (B4: Grey Elegant's dots under the first letters). Larger art (triangles, illustrations) is the canvas's
+    and the free-width rules' concern; a heading on a plate of its own (a filled title box) covers the art behind it.
+    box.x when nothing."""
     x = box.x
+    plate = any(etree.QName(el).localname == "sp" and _paints(el) for el in skip)
     for el in _drawn(slide):
-        if el in skip or etree.QName(el).localname != "sp":
+        tag = etree.QName(el).localname
+        if el in skip or tag not in ("sp", "pic", "grpSp"):
             continue
-        if not "".join(t.text or "" for t in el.iter(q("a:t"))).strip():
+        has_text = bool("".join(t.text or "" for t in el.iter(q("a:t"))).strip())
+        if plate and not has_text:
             continue
         b = element_bbox(el)
         if not b or b[2] * b[3] >= 0.25 * W * H or b[2] <= 0 or b[3] <= 0:
             continue
+        if not has_text:
+            if tag == "sp" and not _paints(el):
+                continue  # an empty frame is no mark
+            if not (0.003 * W * H <= b[2] * b[3] <= 0.03 * W * H):
+                continue
         top, bot = max(b[1], box.y), min(b[1] + b[3], box.y2)
         if bot - top < 0.5 * min(b[3], box.h):
             continue  # not in the heading's band
         if b[0] < box.x + int(0.1 * W) and b[0] + b[2] > box.x and b[0] + b[2] < box.x + int(0.3 * W):
-            x = max(x, _ink_right(el, b) + int(0.015 * W))
+            # the caller keeps a heading whose letters start 0.015 W before this x (a text mark's own margin): an
+            # ornament keeps 0.012 W of air between its edge and the first letter
+            right = _ink_right(el, b) if has_text else b[0] + b[2]
+            x = max(x, right + int((0.015 if has_text else 0.027) * W))
     return x
 
 

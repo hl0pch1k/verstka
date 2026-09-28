@@ -279,6 +279,59 @@ def _drop_sections(text: str, headings: list[str]) -> str:
     return "".join(out)
 
 
+DEEP_KINDS = ("history", "conflict")  # a story told by its subsections: the turning points are their first sentences
+DEEP_LEAD_MAX = 5000  # a war's lead is its summary: every turning point with its date (WWII: 4 663 characters)
+DEEP_INTRO_MAX = 350
+
+
+def _sections_raw(text: str) -> list[tuple[str, str]]:
+    """[(level-2 heading, the section's text with its subsection headings kept)]."""
+    heads = list(_HEAD_RE.finditer(text or ""))
+    out: list[tuple[str, str]] = []
+    for i, m in enumerate(heads):
+        if len(m.group(1)) != 2:
+            continue
+        end = next((h.start() for h in heads[i + 1:] if len(h.group(1)) <= 2), len(text))
+        out.append((m.group(2).strip(), text[m.end():end]))
+    return out
+
+
+def _subsections(raw: str) -> tuple[str, list[tuple[str, str]]]:
+    """(the section's intro, [(level-3 heading, its text, deeper headings removed)]) of a level-2 section's raw text."""
+    heads = [m for m in _HEAD_RE.finditer(raw or "") if len(m.group(1)) == 3]
+    if not heads:
+        return _HEAD_RE.sub("", raw or "").strip(), []
+    intro = _HEAD_RE.sub("", raw[: heads[0].start()]).strip()
+    subs = []
+    for k, m in enumerate(heads):
+        end = heads[k + 1].start() if k + 1 < len(heads) else len(raw)
+        subs.append((m.group(2).strip(), _HEAD_RE.sub("", raw[m.end():end]).strip()))
+    return intro, subs
+
+
+def _deep_section_text(raw: str, room: int) -> str:
+    """A level-2 section of a history as its intro (≤ DEEP_INTRO_MAX) and the opening of every subsection under its
+    heading («### Перелом на Восточном фронте» + «19 ноября 1942 года Красная армия перешла в контрнаступление под
+    Сталинградом…»): the turning points of a war stand in its subsections' first sentences, which the plain cut (the
+    first paragraph of each level-2 section) never reached (gate 2: no Сталинград, Курск, Хиросима in the WWII deck)."""
+    intro, subs = _subsections(raw)
+    subs = [(h, b) for h, b in subs if not _SKIP_RE.match(h) and len(b) > 80]
+    if not subs:
+        return _section_text(intro, room)
+    head = _section_text(intro, min(DEEP_INTRO_MAX, max(150, room // 4))) if len(intro) > 80 else ""
+    left = room - len(head) - 2
+    per = max(120, left // len(subs) - 8)
+    parts = [head] if head else []
+    used = len(head)
+    for h, b in subs:
+        piece = f"### {h}\n{_section_text(b, max(80, per - len(h)))}"
+        if used + len(piece) + 1 > room and parts:
+            break
+        parts.append(piece)
+        used += len(piece) + 1
+    return "\n".join(parts)
+
+
 def cut_reference(text: str, limit: int = 12000, kind: Optional[str] = None, focus: Optional[str] = None) -> str:
     """What the writer reads of one article: the lead (≤ 3 000 characters) and the first paragraph of every level-2
     section outside the skip list («Примечания», «Литература»…), each cut at a sentence end so that every section fits
@@ -307,9 +360,20 @@ def cut_reference(text: str, limit: int = 12000, kind: Optional[str] = None, foc
         paras = [p.strip() for p in re.split(r"\n+", lead) if p.strip()]
         lead = "\n".join(paras[:2])
         secs = [(h, b) for h, b in secs if _BIO_RE.search(h)]
-    lead = _cut_at_sentence(lead, min(3000, max(600, limit // 3)))
+    deep = kind in DEEP_KINDS
+    lead = _cut_at_sentence(lead, min(DEEP_LEAD_MAX if deep else 3000, max(600, limit // 3)))
     if not secs:
         return _cut_at_sentence(lead, limit)
+    if deep:
+        raw = {h: r for h, r in _sections_raw(text)}
+        heads = sum(len(h) + 5 for h, _ in secs)
+        # a section's share grows with its subsections (a war's periods), never below 350 characters
+        weight = {h: 1 + min(10, len(_subsections(raw.get(h, ""))[1])) for h, _ in secs}
+        total = sum(weight.values())
+        room_all = max(0, limit - len(lead) - heads - 4)
+        parts = [lead] + [f"## {h}\n{_deep_section_text(raw.get(h, b), max(350, room_all * weight[h] // total))}" for h, b in secs]
+        out = "\n\n".join(p for p in parts if p.strip())
+        return out if len(out) <= limit else _cut_at_sentence(out, limit)
     heads = sum(len(h) + 5 for h, _ in secs)
     room = (limit - len(lead) - heads - 4) // len(secs)
     if room < 400:
@@ -335,9 +399,60 @@ def cut_pages(pages: list[RefPage], limit: int = 12000, kind: Optional[str] = No
         return ""
     if len(pages) == 1:
         return f"# {pages[0].title}\n{cut_reference(pages[0].text, limit - len(pages[0].title) - 4, kind, focus)}"
-    first = int(limit / 2) if focus and focus in pages[1].title.lower() else int(limit * 2 / 3)
+    first = int(limit / 2) if focus and focus in pages[1].title.lower() else int(limit * (3 / 4 if kind in DEEP_KINDS else 2 / 3))
     shares = [first, limit - first]
     return "\n\n".join(f"# {p.title}\n{cut_reference(p.text, s - len(p.title) - 6, kind, focus)}" for p, s in zip(pages, shares))
+
+
+def _parts_any_level(text: str) -> list[tuple[str, str]]:
+    """[(heading, its own text up to the next heading of any level)] of an article, the lead first as ("", lead)."""
+    heads = list(_HEAD_RE.finditer(text or ""))
+    if not heads:
+        return [("", (text or "").strip())]
+    out = [("", text[: heads[0].start()].strip())]
+    for k, m in enumerate(heads):
+        end = heads[k + 1].start() if k + 1 < len(heads) else len(text)
+        out.append((m.group(2).strip(), text[m.end():end].strip()))
+    return out
+
+
+def _stems5(text: str) -> set[str]:
+    return {w.lower()[:5] for w in _TOKEN_RE.findall(text or "") if len(w) >= 5 and not w.isdigit()}
+
+
+# sections a refill never reads: criticism, lawsuits, sanctions, layoffs, incidents (writer rule 3)
+_TROUBLE_HEAD_RE = re.compile(r"критик|скандал|санкц|(?<![\wё])суд|конфликт|увольн|сокращ|инцидент|утечк|блокир|претензи|расследован|"
+                              r"противоречи|обвинени|нарушени|controvers|criticism|lawsuit", re.I)
+
+
+def fresh_cut(full_texts: list[str], used: str, limit: int = 8000, want: str = "", per: int = 700, focus: Optional[str] = None) -> str:
+    """What a refill reads (the slides a check emptied are written again): the article sections whose words the deck
+    does not use yet — freshest and closest to the slides wanted (`want`: their working titles and hints) first —
+    each its opening up to `per` characters, in the article's order, up to `limit`. The lead and the skip sections
+    («Примечания», «Литература»…) are left out; with a `focus` (the stem of the topic's place, «росси»), only the
+    sections that name the place (the EV deck's refill told the USA's subsidies on its «Инфраструктура» slide)."""
+    used_st = _stems5(used)
+    want_st = _stems5(want)
+    cands: list[tuple[float, int, int, str, str]] = []
+    for p, text in enumerate(full_texts or []):
+        for k, (h, body) in enumerate(_parts_any_level(drop_quotations(text or ""))):
+            if not h or _SKIP_RE.match(h) or _TROUBLE_HEAD_RE.search(h) or len(body) < 120:
+                continue
+            st = _stems5(body[:1500])
+            if not st or (focus and focus not in h.lower() and focus not in body[:1500].lower()):
+                continue
+            fresh = len(st - used_st) / len(st)
+            near = len(_stems5(h) & want_st) + 0.2 * len(st & want_st)
+            cands.append((fresh + 0.15 * near, p, k, h, body))
+    chosen: list[tuple[int, int, str, str]] = []
+    used_chars = 0
+    for score, p, k, h, body in sorted(cands, key=lambda x: -x[0]):
+        piece = f"## {h}\n{_section_text(body, per)}"
+        if used_chars + len(piece) + 2 > limit:
+            continue
+        chosen.append((p, k, h, piece))
+        used_chars += len(piece) + 2
+    return "\n\n".join(piece for _p, _k, _h, piece in sorted(chosen))
 
 
 # ------------------------------------------------------------------ the client

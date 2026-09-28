@@ -21,7 +21,7 @@ from verstka.analysis.colors import ColorSample, dominant_saturated_hex, has_sat
 from verstka.analysis.components import data_text_cap
 from verstka.analysis.ground import art_boxes, gradient_mean_hex, largest_free_share, painted_layers, pattern_fill_hex, slide_ground
 from verstka.analysis.patterns import dedupe_patterns, mockup_boxes, mockup_on_layout
-from verstka.analysis.roles import heuristic_roles, wordmark_heading
+from verstka.analysis.roles import heuristic_roles, low_display_heading, wordmark_heading
 from verstka.analysis.shapes import ParagraphInfo, RunInfo, ShapeInfo, SlideContext, TextInfo, extract_shapes, looks_like_placeholder, slide_background, slide_family
 from verstka.analysis.spacing import extend_safe_bottom
 from verstka.analysis.theme import ThemeResolver
@@ -174,6 +174,36 @@ def test_a_real_title_placeholder_keeps_the_title_role():
     assert wordmark_heading(t, [t, kpi], H169) is None
     roles = heuristic_roles([t, kpi], [], set(), Typography(), W169, H169)
     assert roles["2"] == SlotRole.title
+
+
+def test_low_display_heading_on_a_cover_is_the_title():
+    # Marketing p1: «Marketing Report» at 185 pt from 0.49 H of a 26.67×15-inch slide, no placeholder, nothing in the
+    # top 40 % — the cover's heading, not a body slot
+    W, H = 24384000, 13716000
+    big = _text_shape("90", "Marketing Report", 0.193, 0.488, 0.578, 0.348, 185.0, W=W, H=H)
+    assert low_display_heading([big], set(), H) is big
+    roles = heuristic_roles([big], [], set(), Typography(), W, H)
+    assert roles["90"] == SlotRole.title
+    # a note under it stays what it is
+    note = _text_shape("91", "Quarterly results", 0.193, 0.84, 0.4, 0.04, 40.0, W=W, H=H)
+    roles = heuristic_roles([big, note], [], set(), Typography(), W, H)
+    assert roles["90"] == SlotRole.title and roles.get("91") != SlotRole.title
+
+
+def test_low_display_heading_rejects_ordinary_low_text():
+    W, H = 24384000, 13716000
+    # not a display size (< 7 % of the slide height = 75.6 pt here)
+    assert low_display_heading([_text_shape("3", "Marketing Report", 0.2, 0.5, 0.5, 0.1, 60.0, W=W, H=H)], set(), H) is None
+    # a peer text of a similar size: two big texts, no single heading
+    a = _text_shape("3", "Marketing Report", 0.2, 0.45, 0.5, 0.15, 185.0, W=W, H=H)
+    b = _text_shape("4", "Annual Review", 0.2, 0.62, 0.5, 0.15, 150.0, W=W, H=H)
+    assert low_display_heading([a, b], set(), H) is None
+    # a big figure is a KPI, a text starting in the bottom 30 % is a footer, a paragraph is body copy
+    assert low_display_heading([_text_shape("5", "120%", 0.2, 0.5, 0.5, 0.2, 185.0, W=W, H=H)], set(), H) is None
+    assert low_display_heading([_text_shape("6", "Marketing Report", 0.2, 0.75, 0.5, 0.15, 185.0, W=W, H=H)], set(), H) is None
+    assert low_display_heading([_text_shape("7", "Lorem ipsum dolor sit amet " * 4, 0.2, 0.5, 0.5, 0.3, 120.0, W=W, H=H)], set(), H) is None
+    # a card member (a repeated group) is never the slide's heading
+    assert low_display_heading([a], {"3"}, H) is None
 
 
 # ---------------------------------------------------------------------------- T07 grounds
@@ -662,3 +692,263 @@ def test_a_missing_family_renders_in_its_standin(tmp_path):
     out = subprocess.run(["pdffonts", str(pdf)], capture_output=True, text=True).stdout
     faces = [ln.split()[0].split("+", 1)[-1] for ln in out.splitlines()[2:] if ln.strip()]
     assert faces and all(f.replace("-", "").lower().startswith(sub.replace(" ", "").lower()) for f in faces), faces
+
+
+# ---------------------------------------------------------------------------- gate 2: installed faces without Cyrillic
+
+
+def test_installed_faces_with_cyrillic_keep_their_family():
+    """Only a face this machine has and that lacks Cyrillic gets a Cyrillic stand-in: families with Cyrillic, missing
+    families (the replacement table's job), theme references and symbol fonts never do."""
+    fonts.cyrillic_standin.cache_clear()
+    for fam in ("Play", "", "+mn-lt", "+mj-lt", "Wingdings", "Verstka Missing Grotesk"):
+        assert fonts.cyrillic_standin(fam, False) is None and fonts.cyrillic_standin(fam, True) is None, fam
+    assert fonts.is_heavy_face_name("Avenir Heavy") and fonts.is_heavy_face_name("Lato Black") and fonts.is_heavy_face_name("Open Sans SemiBold")
+    assert not fonts.is_heavy_face_name("Avenir") and not fonts.is_heavy_face_name("Avenir Light") and not fonts.is_heavy_face_name("Avenir Book")
+
+
+def test_a_face_without_cyrillic_gets_its_own_design_line_first(monkeypatch):
+    """macOS Avenir: Book (the regular face) has no Cyrillic, Avenir Next has it → Avenir Next; a weight-named face
+    («Avenir Heavy», which LibreOffice sets in Avenir Black + Helvetica) goes through its family; a named face that
+    alone lacks Cyrillic («Avenir Next Heavy») → its own family (set bold by the caller); a face name fontconfig does
+    not list («Futura Medium» → Futura) is checked through its family."""
+    play = fonts._font(False)
+    cyr = {"avenir next", "avenir next bold", "noto sans", "noto sans bold", "geo bold"}  # faces with Cyrillic here
+    installed = {"avenir", "avenir heavy", "avenir next", "avenir next heavy", "avenir next condensed", "noto sans", "geo"}
+
+    class Face:  # a face measured with Play's outlines; Cyrillic present only where listed
+        def __init__(self, fam):
+            self.fam = fam
+
+        def getlength(self, text):
+            return play.getlength(text)
+
+    monkeypatch.setattr(fonts, "_face", lambda family, bold: ("/x.ttf", 0, family.strip().lower() in installed, family.strip().title()))
+    monkeypatch.setattr(fonts, "_real_font", lambda family, bold: Face(family.strip().lower() + (" bold" if bold else "")))
+    monkeypatch.setattr(fonts, "_has_glyph", lambda font, ch: getattr(font, "fam", "") in cyr)
+    monkeypatch.setattr(fonts, "_installed_families", lambda: ("Avenir", "Avenir Next", "Avenir Next Condensed", "Noto Sans"))
+    for fn in (fonts.cyrillic_standin, fonts._installed_face):
+        fn.cache_clear()
+    try:
+        assert fonts._cyrillic_siblings("avenir") == ["Avenir Next", "Avenir Next Condensed"]  # plain width first
+        assert fonts.cyrillic_standin("Avenir", False) == "Avenir Next"
+        assert fonts.cyrillic_standin("Avenir Heavy", False) == "Avenir Next"
+        assert fonts.cyrillic_standin("Avenir Next", False) is None  # has Cyrillic itself
+        assert fonts.cyrillic_standin("Avenir Next Heavy", False) == "Avenir Next"  # only the Heavy face lacks it
+        assert fonts.is_heavy_face_name("Avenir Next Heavy")
+        assert fonts.cyrillic_standin("Avenir Medium", False) == "Avenir Next"  # unlisted name → its family, no Cyrillic
+        assert fonts.cyrillic_standin("Avenir Next Medium", False) is None  # unlisted name → its family, has Cyrillic
+        assert fonts.cyrillic_standin("Geo Bold", False) is None  # a heavy name → its family bold, which has Cyrillic
+        assert fonts.cyrillic_standin("Geo", True) is None and fonts.cyrillic_standin("Geo", False) == "Noto Sans"
+    finally:
+        for fn in (fonts.cyrillic_standin, fonts._installed_face):
+            fn.cache_clear()
+
+
+def _cyr_deck(tmp_path: Path) -> Path:
+    """Slide 1: an explicit «Nocyr Sans» run with Cyrillic, one with Latin only, an Arial run with Cyrillic, a heavy
+    face name, a text box inheriting «Nocyr Sans» from its list style, a table cell and a chart in «Nocyr Sans»."""
+    from pptx.chart.data import CategoryChartData
+    from pptx.enum.chart import XL_CHART_TYPE
+
+    prs = Presentation()
+    s = prs.slides.add_slide(prs.slide_layouts[6])
+    tb = s.shapes.add_textbox(Emu(600000), Emu(300000), Emu(8000000), Emu(900000))
+    p = tb.text_frame.paragraphs[0]
+    for text, fam in (("Выручка 60 %", "Nocyr Sans"), ("Marketing", "Nocyr Sans"), ("Рост", "Arial"), ("Итоги", "Nocyr Sans Heavy")):
+        r = p.add_run()
+        r.text = text
+        r.font.name = fam
+    inh = s.shapes.add_textbox(Emu(600000), Emu(1300000), Emu(8000000), Emu(600000))
+    inh.text_frame.text = "Наследует шрифт"
+    body = inh.text_frame._txBody
+    lst = body.find(f"{{{render_ns()}}}lstStyle")
+    lst.append(etree.fromstring(f'<a:lvl1pPr xmlns:a="{render_ns()}"><a:defRPr><a:latin typeface="Nocyr Sans"/></a:defRPr></a:lvl1pPr>'))
+    tbl = s.shapes.add_table(1, 1, Emu(600000), Emu(2000000), Emu(4000000), Emu(600000)).table
+    tbl.cell(0, 0).text = "Ячейка"
+    tbl.cell(0, 0).text_frame.paragraphs[0].runs[0].font.name = "Nocyr Sans"
+    data = CategoryChartData()
+    data.categories = ["Янв", "Фев"]
+    data.add_series("Выручка", (1, 2))
+    chart = s.shapes.add_chart(XL_CHART_TYPE.COLUMN_CLUSTERED, Emu(600000), Emu(2800000), Emu(4000000), Emu(2500000), data).chart
+    chart.font.name = "Nocyr Sans"
+    path = tmp_path / "deck.pptx"
+    prs.save(path)
+    return path
+
+
+def render_ns() -> str:
+    return "http://schemas.openxmlformats.org/drawingml/2006/main"
+
+
+def test_only_cyrillic_runs_of_a_face_without_cyrillic_change_in_the_render_copy(tmp_path, monkeypatch):
+    import zipfile
+
+    import verstka.ingest.render as render
+    import verstka.rendering.fonts as fonts_mod
+
+    path = _cyr_deck(tmp_path)
+    table = {("Nocyr Sans", False): "Stand In", ("Nocyr Sans", True): "Stand In", ("Nocyr Sans Heavy", False): "Stand In"}
+    monkeypatch.setattr(fonts_mod, "cyrillic_standin", lambda fam, bold=False: table.get(((fam or "").strip(), bool(bold))))
+    parts = render.run_faces(path)
+    slide = etree.fromstring(parts["ppt/slides/slide1.xml"])
+    a = f"{{{render_ns()}}}"
+    runs = {"".join(t.text or "" for t in r.iter(f"{a}t")): r for r in slide.iter(f"{a}r")}
+    face = lambda r: (r.find(f"{a}rPr/{a}latin").get("typeface"), r.find(f"{a}rPr").get("b"))  # noqa: E731
+    assert face(runs["Выручка 60 %"]) == ("Stand In", None)
+    assert face(runs["Marketing"]) == ("Nocyr Sans", None)  # Latin chrome keeps its face
+    assert face(runs["Рост"]) == ("Arial", None)
+    assert face(runs["Итоги"]) == ("Stand In", "1")  # a heavy face name keeps its weight as bold
+    assert face(runs["Наследует шрифт"])[0] == "Stand In"  # inherited through the list style
+    assert face(runs["Ячейка"])[0] == "Stand In"  # table cell
+    rpr = runs["Наследует шрифт"].find(f"{a}rPr")
+    kids = [etree.QName(c).localname for c in rpr]
+    assert not set(kids[kids.index("latin") + 1:]) & {"ln", "noFill", "solidFill", "gradFill", "effectLst", "highlight", "uLn", "uFill"}  # schema order
+    chart_part = next(p for p in parts if p.startswith("ppt/charts/"))
+    assert b'typeface="Stand In"' in parts[chart_part] and b'typeface="Nocyr Sans"' not in parts[chart_part]
+    # the copy LibreOffice gets carries the rewrite; the deck itself is untouched
+    copy = render.render_copy(path, tmp_path / "copy")
+    with zipfile.ZipFile(copy) as z:
+        assert b'typeface="Stand In"' in z.read("ppt/slides/slide1.xml")
+    with zipfile.ZipFile(path) as z:
+        assert b'typeface="Stand In"' not in z.read("ppt/slides/slide1.xml")
+    # no such family in the deck → nothing to rewrite (the dataset decks: Play, Arial)
+    monkeypatch.setattr(fonts_mod, "cyrillic_standin", lambda fam, bold=False: None)
+    assert render.run_faces(path) == {}
+
+
+@pytest.mark.skipif(
+    not (__import__("verstka.ingest.render", fromlist=["find_soffice"]).find_soffice() and __import__("shutil").which("pdffonts")),
+    reason="LibreOffice and poppler are needed",
+)
+def test_a_cyrillic_run_in_an_installed_face_without_cyrillic_renders_in_one_face(tmp_path):
+    """End to end on a machine with such a face (macOS Avenir): the Cyrillic run is set in the stand-in only — no
+    Avenir + Helvetica inside one word — while a Latin-only run keeps the family."""
+    import subprocess
+
+    from verstka.ingest.render import pptx_to_pdf
+
+    fonts.cyrillic_standin.cache_clear()
+    fam = next((f for f in ("Avenir", "Optima", "Didot") if fonts.cyrillic_standin(f, False)), None)
+    if fam is None:
+        pytest.skip("no installed face without Cyrillic on this machine")
+    sub = fonts.cyrillic_standin(fam, False)
+    prs = Presentation()
+    tb = prs.slides.add_slide(prs.slide_layouts[6]).shapes.add_textbox(Emu(600000), Emu(600000), Emu(8000000), Emu(900000))
+    tb.text_frame.text = "Выручка Revenue 900 000 — 60 %"
+    tb.text_frame.paragraphs[0].runs[0].font.name = fam
+    path = tmp_path / "deck.pptx"
+    prs.save(path)
+    pdf = pptx_to_pdf(path, tmp_path / "out")
+    out = subprocess.run(["pdffonts", str(pdf)], capture_output=True, text=True).stdout
+    faces = [ln.split()[0].split("+", 1)[-1] for ln in out.splitlines()[2:] if ln.strip()]
+    assert faces and all(f.replace("-", "").lower().startswith(sub.replace(" ", "").lower()) for f in faces), faces
+
+
+# ---------------------------------------------------------------------------- «₽» in faces without it
+
+
+def test_a_ruble_sign_the_face_lacks_gets_a_run_of_its_own_in_the_render_copy(tmp_path, monkeypatch):
+    """«₽» of a run whose face has no «₽» (Arial, Trebuchet MS, Georgia on macOS) is moved into a run of its own set in
+    a face of its class that has it; the rest of the run keeps its face and properties (bold too); a face with «₽»
+    (Play) and a deck without «₽» are left alone."""
+    import zipfile
+
+    import verstka.ingest.render as render
+    import verstka.rendering.fonts as fonts_mod
+
+    prs = Presentation()
+    s = prs.slides.add_slide(prs.slide_layouts[6])
+    p = s.shapes.add_textbox(Emu(600000), Emu(300000), Emu(8000000), Emu(900000)).text_frame.paragraphs[0]
+    for text, fam, bold in (("Выручка 315 000 ₽ · 40%", "Norub Sans", True), ("20 ₽", "Play", False), ("Итоги ₽₽", "Nocyr Heavy", False),
+                            ("7 ₽", "Missing Grotesk SemiBold", False)):
+        r = p.add_run()
+        r.text, r.font.name, r.font.bold = text, fam, bold
+    tbl = s.shapes.add_table(1, 1, Emu(600000), Emu(2000000), Emu(4000000), Emu(600000)).table
+    tbl.cell(0, 0).text = "5 ₽"
+    tbl.cell(0, 0).text_frame.paragraphs[0].runs[0].font.name = "Norub Sans"
+    path = tmp_path / "deck.pptx"
+    prs.save(path)
+    rub = {"Norub Sans": "Rub Sans", "Cyr Stand In": "Rub Sans", "Missing Grotesk SemiBold": "Rub Sans"}
+    monkeypatch.setattr(fonts_mod, "render_standin", lambda fam: None)
+    monkeypatch.setattr(fonts_mod, "cyrillic_standin", lambda fam, bold=False: "Cyr Stand In" if fam == "Nocyr Heavy" else None)
+    monkeypatch.setattr(fonts_mod, "glyph_standin", lambda fam, ch="₽", bold=False: rub.get(fam))
+    slide = etree.fromstring(render.run_faces(path)["ppt/slides/slide1.xml"])
+    a = f"{{{render_ns()}}}"
+    got = [("".join(t.text or "" for t in r.iter(f"{a}t")), r.find(f"{a}rPr/{a}latin").get("typeface"), r.find(f"{a}rPr").get("b"))
+           for r in slide.iter(f"{a}r")]
+    assert got == [
+        ("Выручка 315 000 ", "Norub Sans", "1"), ("₽", "Rub Sans", "1"), (" · 40%", "Norub Sans", "1"),
+        ("20 ₽", "Play", "0"),  # Play has «₽»
+        ("Итоги ", "Cyr Stand In", "1"), ("₽₽", "Rub Sans", "1"),  # the Cyrillic stand-in first, then its «₽»; heavy → bold
+        ("7 ", "Missing Grotesk SemiBold", "0"), ("₽", "Rub Sans", "0"),  # a missing weight-named face: LibreOffice's weight
+        ("5 ", "Norub Sans", None), ("₽", "Rub Sans", None),  # table cell
+    ], got
+    copy = render.render_copy(path, tmp_path / "copy")
+    with zipfile.ZipFile(copy) as z:
+        assert b'typeface="Rub Sans"' in z.read("ppt/slides/slide1.xml")
+    with zipfile.ZipFile(path) as z:
+        assert b'typeface="Rub Sans"' not in z.read("ppt/slides/slide1.xml")  # the deck itself is untouched
+    monkeypatch.setattr(fonts_mod, "glyph_standin", lambda fam, ch="₽", bold=False: None)
+    monkeypatch.setattr(fonts_mod, "cyrillic_standin", lambda fam, bold=False: None)
+    assert render.run_faces(path) == {}  # every face has Cyrillic and «₽» → nothing to rewrite
+
+
+def test_glyph_standin_keeps_the_family_class(monkeypatch):
+    """A serif without «₽» gets a serif «₽», a sans a sans one; a face with «₽», a theme reference and a symbol font
+    get none; a bold run needs the stand-in's bold face to have «₽» too."""
+    play = fonts._font(False)
+
+    class Face:
+        def __init__(self, fam):
+            self.fam = fam
+
+        def getlength(self, text):
+            return play.getlength(text)
+
+    rub = {"noto serif", "noto serif bold", "pt sans", "helvetica neue", "helvetica neue bold", "play"}
+    installed = {"georgia", "arial", "noto serif", "pt sans", "helvetica neue", "play"}
+    monkeypatch.setattr(fonts, "_face", lambda family, bold: ("/x.ttf", 0, family.strip().lower() in installed, family))
+    monkeypatch.setattr(fonts, "_real_font", lambda family, bold: Face(family.strip().lower() + (" bold" if bold else "")))
+    monkeypatch.setattr(fonts, "_has_glyph", lambda font, ch: getattr(font, "fam", "") in rub)
+    monkeypatch.setattr(fonts, "_STANDINS", {**fonts._STANDINS, "serif": ("Noto Serif",), "sans": ("PT Sans", "Helvetica Neue")})
+    for fn in (fonts.glyph_standin, fonts._installed_face):
+        fn.cache_clear()
+    try:
+        assert fonts.glyph_standin("Georgia", "₽", False) == "Noto Serif"
+        assert fonts.glyph_standin("Arial", "₽", False) == "PT Sans"
+        assert fonts.glyph_standin("Arial", "₽", True) == "Helvetica Neue"  # PT Sans Bold has no «₽» here
+        assert fonts.glyph_standin("Play", "₽", False) is None
+        assert fonts.glyph_standin("Missing Grotesk", "₽", False) == "PT Sans"  # LibreOffice's own fallback face
+        for fam in ("+mn-lt", "", "Wingdings"):
+            assert fonts.glyph_standin(fam, "₽", False) is None
+    finally:
+        for fn in (fonts.glyph_standin, fonts._installed_face):
+            fn.cache_clear()
+
+
+@pytest.mark.skipif(
+    not (__import__("verstka.ingest.render", fromlist=["find_soffice"]).find_soffice() and __import__("shutil").which("pdffonts")),
+    reason="LibreOffice and poppler are needed",
+)
+def test_a_ruble_sign_in_a_face_without_it_renders_in_the_class_standin(tmp_path):
+    """End to end on a machine whose Arial has no «₽» (macOS): the PDF has Arial + the stand-in, no STIX Two Math."""
+    import subprocess
+
+    from verstka.ingest.render import pptx_to_pdf
+
+    fonts.glyph_standin.cache_clear()
+    fam = next((f for f in ("Arial", "Trebuchet MS", "Verdana") if fonts._installed_face(f) and fonts.glyph_standin(f, "₽", False)), None)
+    if fam is None:
+        pytest.skip("every installed candidate face has «₽» here")
+    sub = fonts.glyph_standin(fam, "₽", False)
+    prs = Presentation()
+    tb = prs.slides.add_slide(prs.slide_layouts[6]).shapes.add_textbox(Emu(600000), Emu(600000), Emu(8000000), Emu(900000))
+    tb.text_frame.text = "Выручка 900 000 ₽ — 60 %"
+    tb.text_frame.paragraphs[0].runs[0].font.name = fam
+    path = tmp_path / "deck.pptx"
+    prs.save(path)
+    pdf = pptx_to_pdf(path, tmp_path / "out")
+    out = subprocess.run(["pdffonts", str(pdf)], capture_output=True, text=True).stdout
+    faces = {ln.split()[0].split("+", 1)[-1].split("-")[0].lower() for ln in out.splitlines()[2:] if ln.strip()}
+    assert sub.replace(" ", "").lower() in faces and not any("stix" in f for f in faces), faces

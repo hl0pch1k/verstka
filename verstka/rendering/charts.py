@@ -1339,6 +1339,8 @@ class _Kit:
     outside: bool = True  # a pie may set a label outside a thin slice (False: the caller's legend carries it)
     slice_labels: bool = True  # a pie of amounts with the caller's legend: no computed shares on the slices
     capped: bool = False  # chart text capped relative to the slide (chart_text_capped): category labels measured strictly
+    squeeze: float = 0.0  # a trend chart's longest category label over its slot (> 1: the renderer breaks it inside a word)
+    turned: bool = False  # its category labels were turned by 45° or thinned out (every other one blank) to stay whole
 
     def plain(self, v) -> str:
         return _fmt_value(v, self.unit_plain, self.decimals)
@@ -1602,6 +1604,10 @@ def add_chart(
     # ground) — a swatch drawn in the base colour at that opacity looks the same and stays a colour of the template
     gf.verstka_colors = list(palette) if kind in ("pie", "doughnut") else [st.get("fill") or st.get("line") or accent for st in k.styles]
     gf.verstka_shades = list(shades) if kind in ("pie", "doughnut") else None
+    # a caller trying narrower slots for the chart compares how its labels fit: their width over the slot, and whether
+    # they had to be turned or thinned out
+    gf.verstka_squeeze = k.squeeze
+    gf.verstka_turned = k.turned
     return gf
 
 
@@ -2097,8 +2103,12 @@ def _style_line(k: _Kit) -> None:
             _set_categories(k, short)
             longest = max((text_width_pt(c, family, cat_fs) for c in cats), default=0.0)
     skip = max(1, math.ceil(longest / room)) if longest > room else 1
+    k.squeeze = longest / max(real_slot, 1.0)
+    short_before = list(cats)
     rotate = False
-    if k.capped and longest > room:
+    # a label past its slot is broken by LibreOffice inside the word («Сейч ас»), whatever tickLblSkip says: the
+    # capped mode measures the slot strictly; the others turn or thin their labels once one runs 10 % past its slot
+    if (k.capped and longest > room) or (not k.capped and longest > 1.1 * real_slot):
         if n >= 5:
             # still too wide: the labels turn by 45° (their height takes the room under the plot)
             rotate = True
@@ -2114,6 +2124,7 @@ def _style_line(k: _Kit) -> None:
                 cats = k.cats = blank
                 _set_categories(k, blank)
             skip = 1
+    k.turned = rotate or cats != short_before  # turned or thinned out: every label shown is whole
     if skip > 1 and n > 2:
         # the labels shown are the first, the last and every k-th between: pick k so that the last one falls on it
         skip = next((kk for kk in range(skip, n) if (n - 1) % kk == 0), skip)

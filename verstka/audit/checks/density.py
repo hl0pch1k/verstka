@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from verstka.audit.checks.common import content_elements, fix, ru_count, text_elements, text_height_needed_pt
+from typing import Optional
+
+from verstka.audit.checks.common import content_elements, fix, ru_count, text_elements, text_height_needed_pt, title_element
 from verstka.audit.registry import AuditContext, check
 from verstka.rendering.fonts import text_width_pt, wrap_lines
 from verstka.schemas.audit import CheckSpec, Issue
@@ -12,7 +14,7 @@ TOO_MANY_BULLETS = CheckSpec(id="too_many_bullets", title="Больше 6 пун
 BULLET_TOO_LONG = CheckSpec(id="bullet_too_long", title="Пункт списка длиннее 15 слов", severity="warn", category="density", description="Пункт списка (абзац с маркером) содержит больше 15 слов.")
 TABLE_TOO_BIG = CheckSpec(id="table_too_big", title="Таблица больше 7 строк или 5 колонок", severity="warn", category="density", description="Нативная таблица превышает 7 строк (с шапкой) или 5 колонок.")
 TOO_MANY_SERIES = CheckSpec(id="too_many_series", title="Больше 5 серий на диаграмме", severity="warn", category="density", description="Нативная диаграмма содержит больше пяти рядов данных.")
-FILL_RATIO = CheckSpec(id="fill_ratio", title="Слайд заполнен меньше чем на четверть или больше чем на 80%", severity="warn", category="density", description="Площадь объединения контентных блоков относительно безопасной области шаблона меньше 25% (меньше 20% при одном-двух блоках — сведение) или больше 80% — по тому, что действительно занято: у текста высота его строк, у диаграмм, таблиц и картинок весь блок (просторные карточки шаблона плотными не считаются). Картинка во весь слайд (фон шаблона) контентом не считается.")
+FILL_RATIO = CheckSpec(id="fill_ratio", title="Слайд заполнен меньше чем на четверть или больше чем на 80%", severity="warn", category="density", description="Площадь объединения контентных блоков относительно безопасной области шаблона меньше 25% (меньше 20% при одном-двух блоках — сведение) или больше 80% — по тому, что действительно занято: у текста высота его строк, у диаграмм, таблиц и картинок весь блок (просторные карточки шаблона плотными не считаются). Картинка во весь слайд (фон шаблона) контентом не считается. Слайд, где кроме заголовка только один-два текстовых блока (без диаграммы, таблицы и картинки, которую просил план; картинки-оформление шаблона не в счёт) и их строки занимают меньше 15% безопасной области, — почти пустой: предупреждение, даже если рисунок шаблона заполняет остальное (кроме обложки, разделов, цитат, финального слайда и слайда с одним крупным числом).")
 
 
 @check(TOO_MANY_BULLETS)
@@ -116,6 +118,33 @@ def _bleeds(e) -> bool:
     return max(0.0, min(f.x2, 1.0) - max(f.x, 0.0)) * max(0.0, min(f.y2, 1.0) - max(f.y, 0.0)) >= 0.85
 
 
+SPARSE_TEXT = 0.15  # a text-only slide whose lines cover less of the safe area than this is nearly empty
+SPARSE_EXEMPT = ("title", "section", "thanks", "quote", "big_number", "image_text", "mockup")
+
+
+def _sparse_text(ctx: AuditContext, s, els: list, covered) -> Optional[float]:
+    """The share of the safe area the lines of a text-only slide cover when it is under SPARSE_TEXT (one or two short
+    blocks under the heading — the writer's «one sentence» slide), else None. Pictures the plan did not ask for are the
+    template's decoration and do not fill the slide; a chart, a table or a planned picture make it a different slide."""
+    from verstka.audit.checks.template import is_figure
+
+    osl = None
+    if ctx.outline is not None and s.outline_id:
+        osl = next((o for o in ctx.outline.slides if o.id == s.outline_id), None)
+    kind = (osl.kind.value if hasattr(osl.kind, "value") else str(osl.kind)) if osl is not None else None
+    if kind in SPARSE_EXEMPT or (kind is None and s.index in (1, len(ctx.ir.slides))):
+        return None  # the last slide of a plan is checked by its kind: a content slide there is no closing slide
+    planned_pic = osl is None or bool(osl.content.image_hint)
+    title = title_element(s)
+    body = [e for e in els if e is not title and e.type == "text" and e.has_text]
+    if not body or len(body) > 2 or any(e.type in ("chart", "table") or (e.type == "picture" and planned_pic) for e in els):
+        return None
+    if any(is_figure(e.text) for e in body):
+        return None  # a figure with its label: a hero number, set large on purpose
+    ink = covered([_ink(e) for e in body])
+    return ink if ink < SPARSE_TEXT else None
+
+
 @check(FILL_RATIO)
 def fill_ratio(ctx: AuditContext) -> list[Issue]:
     out: list[Issue] = []
@@ -141,6 +170,11 @@ def fill_ratio(ctx: AuditContext) -> list[Issue]:
         els = [e for e in content_elements(s, ctx.ir, ctx.manifest) if not (e.type == "picture" and _bleeds(e))]
         if not els:
             continue
+        if s.index != 1:
+            sparse = _sparse_text(ctx, s, els, covered)
+            if sparse is not None:
+                out.append(ctx.new_issue(FILL_RATIO, s.index, f"на слайде только короткий текст: его строки занимают {int(round(sparse * 100))}% области", details={"ratio": round(sparse, 2), "text_only": True}))
+                continue
         ratio = covered([e.bbox for e in els])
         if ratio > 0.8:
             # too dense is about ink: roomy cards of the template's own grid with a line each are not a wall of text

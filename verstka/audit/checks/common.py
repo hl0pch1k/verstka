@@ -272,3 +272,45 @@ def title_element(slide: IRSlide) -> Optional[IRElement]:
 
 def fix(action: str, description: str, **params) -> FixAction:
     return FixAction(action=action, params=params, description=description)
+
+
+def line_boxes(e: IRElement) -> list[tuple[Bbox, float]]:
+    """(box, size) of every line a text shows: the width its letters take at the paragraph's alignment and a line's
+    height, stacked at the box's anchor — what the reader sees of the text line by line (a centred heading's short
+    second line is narrower than its box, and may stand on another ground than the first)."""
+    import re as _re
+
+    from verstka.rendering.fonts import text_width_pt
+
+    ins = e.insets_emu
+    usable_w = max((e.bbox.w - ins[0] - ins[2]) / EMU_PER_PT, 1.0)
+    caps = bool(getattr(e, "caps", False))
+    rows: list[tuple[float, float, Optional[str], float]] = []  # (width pt, size, align, line height pt)
+    for p in e.paragraphs:
+        size = next((r.size_pt for r in p.runs if r.size_pt), None) or e.dominant_size or 14.0
+        font = next((r.font for r in p.runs if r.font), None)
+        bold = any(r.bold for r in p.runs)
+        lh = size * (1.2 * p.line_spacing if p.line_spacing else 1.2)
+        indent = size * 1.1 if p.bullet else 0.0
+        if not p.text.strip():
+            rows.append((0.0, size, p.align, lh))
+            continue
+        for seg in _re.split(r"[\n\x0b]", p.text):
+            shown = seg.upper() if caps else seg
+            lines = wrap_lines(shown, font, size, bold, max(usable_w - indent, 1.0)) if e.wrap else [shown]
+            for ln in lines or [""]:
+                rows.append((indent + text_width_pt(ln, font, size, bold) if ln.strip() else 0.0, size, p.align, lh))
+    total = int(sum(r[3] for r in rows) * EMU_PER_PT)
+    top, inner_h = e.bbox.y + ins[1], e.bbox.h - ins[1] - ins[3]
+    anchor = e.anchor or "t"
+    y = top if anchor == "t" else (top + inner_h - total if anchor == "b" else top + (inner_h - total) // 2)
+    x0, x1 = e.bbox.x + ins[0], e.bbox.x2 - ins[2]
+    out: list[tuple[Bbox, float]] = []
+    for w_pt, size, align, lh in rows:
+        h = max(int(lh * EMU_PER_PT), 1)
+        w = int(w_pt * EMU_PER_PT)
+        if w > 0:
+            x = x1 - w if align == "r" else ((x0 + x1) // 2 - w // 2 if align in ("ctr", "c") else x0)
+            out.append((Bbox(x=int(x), y=int(y), w=w, h=h), size))
+        y += h
+    return out

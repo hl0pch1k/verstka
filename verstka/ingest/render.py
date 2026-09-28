@@ -61,13 +61,9 @@ def _bundled_families() -> set[str]:
     return {f.stem.split("-")[0].lower() for f in _FONT_DIR.glob("*.[ot]tf")} if _FONT_DIR.is_dir() else set()
 
 
-def font_replacements(pptx: Path, available: frozenset[str] | set[str] = frozenset()) -> dict[str, str]:
-    """{family: stand-in} for every Latin/Cyrillic family the deck names (slides, layouts, masters, theme, charts)
-    that this machine does not have — the table LibreOffice gets so that each run is set in one face of the family's
-    class instead of a glyph-by-glyph fallback («Open Sans» → OpenSymbol digits + Helvetica letters + STIX «₽»).
-    `available`: lower-case families LibreOffice will find anyway (the bundled Play on Linux)."""
-    from verstka.rendering.fonts import render_standin  # lazy: keeps ingest importable without the rendering package
-
+def _deck_families(pptx: Path) -> set[str]:
+    """Every family an `a:latin` names in the package (slides, layouts, masters, theme, charts); empty when the file
+    is not a readable package."""
     families: set[str] = set()
     try:
         with zipfile.ZipFile(pptx) as z:
@@ -76,7 +72,18 @@ def font_replacements(pptx: Path, available: frozenset[str] | set[str] = frozens
                     for m in _LATIN_FACE_RE.finditer(z.read(name)):
                         families.add(html.unescape(m.group(1).decode("utf-8", "replace")).strip())
     except (zipfile.BadZipFile, OSError, KeyError):
-        return {}
+        return set()
+    return families
+
+
+def font_replacements(pptx: Path, available: frozenset[str] | set[str] = frozenset()) -> dict[str, str]:
+    """{family: stand-in} for every Latin/Cyrillic family the deck names (slides, layouts, masters, theme, charts)
+    that this machine does not have — the table LibreOffice gets so that each run is set in one face of the family's
+    class instead of a glyph-by-glyph fallback («Open Sans» → OpenSymbol digits + Helvetica letters + STIX «₽»).
+    `available`: lower-case families LibreOffice will find anyway (the bundled Play on Linux)."""
+    from verstka.rendering.fonts import render_standin  # lazy: keeps ingest importable without the rendering package
+
+    families = _deck_families(pptx)
     out: dict[str, str] = {}
     for fam in sorted(families):
         if not fam or fam.lower() in available:
@@ -87,6 +94,188 @@ def font_replacements(pptx: Path, available: frozenset[str] | set[str] = frozens
             sub = None
         if sub and sub.lower() != fam.lower():
             out[fam] = sub
+    return out
+
+
+_A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
+_C_NS = "http://schemas.openxmlformats.org/drawingml/2006/chart"
+_CYRILLIC_RE = re.compile("[Ѐ-ӿ]")
+_RPR_AFTER_LATIN = {"ea", "cs", "sym", "hlinkClick", "hlinkMouseOver", "rtl", "extLst"}
+_CHART_PART_RE = re.compile(r"^ppt/charts/chart\d+\.xml$")
+_SLIDE_PART_RE = re.compile(r"^ppt/slides/slide\d+\.xml$")
+
+
+def _set_run_face(run, family: str, bold: bool) -> None:
+    """`run` (a:r / a:fld) set in `family` (and bold): its own a:latin, created in schema order when inherited."""
+    from lxml import etree
+
+    rpr = run.find(f"{{{_A_NS}}}rPr")
+    if rpr is None:
+        rpr = etree.Element(f"{{{_A_NS}}}rPr")
+        run.insert(0, rpr)
+    latin = rpr.find(f"{{{_A_NS}}}latin")
+    if latin is None:
+        latin = etree.Element(f"{{{_A_NS}}}latin")
+        anchor = next((c for c in rpr if isinstance(c.tag, str) and etree.QName(c).localname in _RPR_AFTER_LATIN), None)
+        if anchor is not None:
+            anchor.addprevious(latin)
+        else:
+            rpr.append(latin)
+    latin.set("typeface", family)
+    for attr in ("panose", "pitchFamily", "charset"):
+        latin.attrib.pop(attr, None)
+    if bold:
+        rpr.set("b", "1")
+
+
+def _split_glyph(run, ch: str, family: str, bold: bool) -> bool:
+    """Every `ch` of `run` (an a:r) moved into a run of its own set in `family` (and bold); the rest keeps the run's
+    properties. False when the run holds no `ch`."""
+    import copy
+
+    t_el = run.find(f"{{{_A_NS}}}t")
+    text = t_el.text if t_el is not None and t_el.text else ""
+    if ch not in text or run.getparent() is None:
+        return False
+    pieces = [x for x in re.split(f"({re.escape(ch)}+)", text) if x]
+    anchor = run
+    for i, piece in enumerate(pieces):
+        new = run if i == 0 else copy.deepcopy(run)
+        if i:
+            anchor.addnext(new)
+            anchor = new
+        new.find(f"{{{_A_NS}}}t").text = piece
+        if piece[0] == ch:
+            _set_run_face(new, family, bold)
+    return True
+
+
+def run_faces(pptx: Path) -> dict[str, bytes]:
+    """{slide or chart part: its XML for LibreOffice}, so that LibreOffice draws each run in one face:
+
+    - every run holding Cyrillic whose family this machine has but whose face lacks Cyrillic (see
+      rendering.fonts.cyrillic_standin) is set in the stand-in — not Latin letters and digits in the family +
+      Cyrillic letters in a fallback. Runs without Cyrillic (the template's Latin chrome) keep their family; a heavy
+      face name («Avenir Heavy») keeps its weight as bold;
+    - every «₽» of a run whose face (after the stand-ins) lacks it gets a run of its own in a face of the same class
+      that has it (rendering.fonts.glyph_standin) — not a thin serif «₽» from STIX Two Math beside sans digits; a
+      chart's data labels / value axis whose number format holds «₽» are set in that face as a whole.
+
+    Empty when there is nothing to change (the dataset templates: Play has Cyrillic and «₽»)."""
+    from verstka.rendering.fonts import (  # lazy, as in font_replacements
+        cyrillic_standin,
+        glyph_standin,
+        is_heavy_face_name,
+        is_installed,
+        render_standin,
+    )
+
+    families = _deck_families(pptx)
+    need_cyr = any(cyrillic_standin(f, False) or cyrillic_standin(f, True) for f in families if f)
+    try:
+        with zipfile.ZipFile(pptx) as z:
+            need_rub = any((_SLIDE_PART_RE.match(n) or _CHART_PART_RE.match(n)) and "₽".encode() in z.read(n) for n in z.namelist())
+    except (zipfile.BadZipFile, OSError, KeyError):
+        return {}
+    if not (need_cyr or need_rub):
+        return {}
+    from lxml import etree
+
+    from verstka.analysis.shapes import SlideContext, extract_shapes
+    from verstka.ingest.package import PptxPackage
+    from verstka.schemas.common import ShapeKind
+
+    def fix(run, family, bold: bool) -> bool:
+        if not family:
+            return False
+        bold = bool(bold)
+        t = "".join(x.text or "" for x in run.iter(f"{{{_A_NS}}}t"))
+        changed = False
+        face = render_standin(family) or family  # the family LibreOffice sets the run in (the replacement table)
+        sub = cyrillic_standin(family, bold) if _CYRILLIC_RE.search(t) else None
+        if sub:
+            heavy = not bold and is_heavy_face_name(family)
+            _set_run_face(run, sub, heavy)
+            face, bold, changed = sub, bold or heavy, True
+        if "₽" in t and etree.QName(run).localname == "r":
+            # «Avenir Heavy 900 000 ₽» (installed: LibreOffice sets it bold) → a bold «₽»; a missing weight-named face
+            # («Open Sans SemiBold») is set by LibreOffice at its own weight (regular) → a regular «₽»
+            heavy = not bold and is_heavy_face_name(face) and is_installed(face)
+            rub = glyph_standin(face, "₽", bold or heavy)
+            if rub:
+                changed |= _split_glyph(run, "₽", rub, heavy)
+        return changed
+
+    out: dict[str, bytes] = {}
+    with PptxPackage(pptx) as pkg:
+        for part in pkg.slide_parts:
+            try:
+                ctx = SlideContext(pkg, part)
+                shapes = extract_shapes(pkg, part, ctx)
+            except Exception:  # noqa: BLE001 — a slide the analysis cannot read keeps LibreOffice's own fallback
+                continue
+            changed = False
+            for s in shapes:
+                el = s.element
+                if el is None:
+                    continue
+                if s.text is not None and s.kind == ShapeKind.sp:
+                    tx = el.find("{http://schemas.openxmlformats.org/presentationml/2006/main}txBody")
+                    if tx is None:
+                        continue
+                    for p_el, p_info in zip(tx.findall(f"{{{_A_NS}}}p"), s.text.paragraphs):
+                        runs = [c for c in p_el if isinstance(c.tag, str) and etree.QName(c).localname in ("r", "fld")]
+                        for r_el, r_info in zip(runs, p_info.runs):
+                            changed |= fix(r_el, r_info.font, r_info.bold)
+                elif s.kind == ShapeKind.graphic_frame:
+                    # table cells: their explicit faces (a table style's face stays LibreOffice's)
+                    for r_el in list(el.iter(f"{{{_A_NS}}}r")):
+                        latin = r_el.find(f"{{{_A_NS}}}rPr/{{{_A_NS}}}latin")
+                        fam = latin.get("typeface") if latin is not None else None
+                        if fam and fam.startswith("+"):
+                            fam = ctx.resolver.font_for(fam)
+                        rpr = r_el.find(f"{{{_A_NS}}}rPr")
+                        changed |= fix(r_el, fam, rpr is not None and rpr.get("b") in ("1", "true"))
+            if changed:
+                out[part] = etree.tostring(pkg.xml(part), xml_declaration=True, encoding="UTF-8", standalone=True)
+        for part in pkg.part_names:
+            if not _CHART_PART_RE.match(part):
+                continue
+            root = pkg.xml(part)
+            changed = False
+
+            def set_face(latin, fam: str, props, bold: bool) -> None:
+                latin.set("typeface", fam)
+                for attr in ("panose", "pitchFamily", "charset"):
+                    latin.attrib.pop(attr, None)
+                if bold and props is not None:
+                    props.set("b", "1")
+
+            if need_cyr and _CYRILLIC_RE.search("".join(root.itertext())):
+                for latin in root.iter(f"{{{_A_NS}}}latin"):
+                    fam = latin.get("typeface") or ""
+                    props = latin.getparent()
+                    bold = props is not None and props.get("b") in ("1", "true")
+                    sub = cyrillic_standin(fam, bold)
+                    if sub:
+                        set_face(latin, sub, props, not bold and is_heavy_face_name(fam))
+                        changed = True
+            # «₽» of a number format (data labels, a value axis): the element's own text face → one with «₽» — a
+            # format's literal cannot get a run of its own
+            for fmt in root.iter(f"{{{_C_NS}}}numFmt"):
+                owner = fmt.getparent()
+                txpr = owner.find(f"{{{_C_NS}}}txPr") if owner is not None and "₽" in (fmt.get("formatCode") or "") else None
+                for latin in txpr.iter(f"{{{_A_NS}}}latin") if txpr is not None else ():
+                    fam = latin.get("typeface") or ""
+                    props = latin.getparent()
+                    bold = props is not None and props.get("b") in ("1", "true")
+                    heavy = not bold and is_heavy_face_name(fam) and is_installed(fam)
+                    rub = glyph_standin(render_standin(fam) or fam, "₽", bold or heavy) if fam else None
+                    if rub:
+                        set_face(latin, rub, props, heavy)
+                        changed = True
+            if changed:
+                out[part] = etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
     return out
 
 
@@ -161,14 +350,23 @@ def render_copy(pptx: Path, out_dir: Path) -> Path:
 
     PowerPoint never shows layout placeholders on a slide, but LibreOffice imports the extra placeholders of a
     custom layout as plain master shapes: their prompt text shows through wherever the sample covered it with a
-    card that the renderer removed. The .pptx handed to the user is not touched.
+    card that the renderer removed. Runs of Cyrillic text in an installed face without Cyrillic are set in one
+    stand-in face, a «₽» the face lacks in a face of its class (`run_faces`). The .pptx handed to the user is not
+    touched.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     dst = out_dir / pptx.name
+    try:
+        faces = run_faces(pptx)  # Cyrillic runs of faces without Cyrillic, «₽» of faces without it → stand-in faces
+    except Exception as e:  # noqa: BLE001 — a font probe never fails a render
+        log.warning("cyrillic run faces skipped: %s", e)
+        faces = {}
     with zipfile.ZipFile(pptx) as zin, zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zout:
         for item in zin.infolist():
             data = zin.read(item.filename)
-            if _LAYOUT_PART_RE.match(item.filename):
+            if item.filename in faces:
+                data = faces[item.filename]
+            elif _LAYOUT_PART_RE.match(item.filename):
                 data = _blank_prompts(data)
             zout.writestr(item, data)
     return dst

@@ -211,6 +211,7 @@ class WriterCheckIssue(BaseModel):
     id: str
     verdict: str = ""
     problem: str = ""
+    evidence: str = ""  # the reference's own words that say otherwise (writer.apply_check puts them in, when fit)
 
 
 class WriterCheckAnswer(BaseModel):
@@ -231,7 +232,8 @@ class WriterCheckAnswer(BaseModel):
                 continue
             ident = _s(it.get("id") or it.get("sentence") or it.get("ref")).strip("[] ")
             if ident:
-                out.append({"id": ident, "verdict": _s(it.get("verdict")).lower(), "problem": _s(it.get("problem") or it.get("reason"))})
+                out.append({"id": ident, "verdict": _s(it.get("verdict")).lower(), "problem": _s(it.get("problem") or it.get("reason")),
+                            "evidence": _s(it.get("evidence") or it.get("reference") or it.get("quote"))})
         return {"issues": out}
 
     @classmethod
@@ -258,7 +260,7 @@ REFERENCE_SCHEMA: dict[str, Any] = {"type": "object", "required": ["titles", "ki
 CHECK_SCHEMA: dict[str, Any] = {
     "type": "object",
     "required": ["issues"],
-    "properties": {"issues": {"type": "array", "items": {"type": "object", "properties": {"id": _STR, "verdict": _STR, "problem": _STR}}}},
+    "properties": {"issues": {"type": "array", "items": {"type": "object", "properties": {"id": _STR, "verdict": _STR, "problem": _STR, "evidence": _STR}}}},
 }
 
 __all__ = [

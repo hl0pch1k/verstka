@@ -120,8 +120,11 @@ def test_the_web_mirror_names_the_server_rules():
 
 def test_render_reads_back_as_a_brief():
     deck = _deck("ww2s")
-    text = W.render_text(deck)
+    text = W.render_text(deck, rules=True)
     st = read_structure(text)
+    # gate 2 W6: the rules line is the agent's, never in the text the person sees («Показать текст», writer.md)
+    assert W.RULES_LINE not in W.render_text(deck) and W.render_text(deck, rules=True).startswith(W.render_text(deck).rstrip("\n"))
+    assert W.with_rules(W.render_text(deck)) == text and W.with_rules(text) == text and W.with_rules("Кофейня: выручка 900 000 рублей.") == "Кофейня: выручка 900 000 рублей."
     assert len(st.specs) == len(deck.slides) + 1
     assert st.specs[0].title == "Титульный" and st.title == deck.title and st.subtitle
     assert st.rules == ["Тон нейтральный, энциклопедический.", "Заголовки — факты из текста, без оценок."]
@@ -242,7 +245,7 @@ def test_a_short_answer_is_continued(monkeypatch):
     res = W.write_deck(Brief(text="Как работает фотосинтез", slide_count=6), W.writer_mode("Как работает фотосинтез"), SKILLS, _registry(fake), config={**OFFLINE, "check": {"enabled": False}})
     assert res.status == "written" and res.continuation
     assert res.slides == 5 and res.brief.slide_count == 6
-    cont = seen[-1]
+    cont = next(x for x in seen if "The deck is already written up to slide" in x)
     assert "The deck is already written up to slide 2" in cont and "1. Что такое фотосинтез; 2. Как устроен лист" in cont
     assert "Write exactly 3 content slides" in cont
     assert any("дописал ещё 3 слайда" in x for x in res.log_lines)
@@ -312,9 +315,16 @@ def test_storyline(kind, n):
     parts = W.storyline_parts(kind, n - 1, reference=True)
     want = min(n - 1, W.POLITICIAN_MAX_CONTENT) if kind == "politician" else n - 1
     assert len(parts) == want
-    assert parts[-1].title == "Главное"
+    short = want <= W.SHORT_DECK_CONTENT
+    if kind == "history" and short:
+        # gate 2 W5: a short history is a story — causes → start → course → turning points → end → outcome → after
+        assert parts[-1].title in ("Последствия", "Итоги и последствия") and parts[0].title == "Предпосылки и причины"
+        assert all(p.hint for p in parts)
+    else:
+        assert parts[-1].title == "Главное"
     if kind in ("history", "person", "politician", "company") and n - 1 >= 5:
-        assert any(p.timeline for p in parts)
+        # a deck of ≤ 10 slides has no separate chronology: its narrative slides carry the dates
+        assert any(p.timeline for p in parts) == (not short)
     titles = [p.title for p in parts]
     assert len(set(titles)) == len(titles)
     assert not any("сторона темы" in t.lower() for t in titles)
@@ -358,7 +368,7 @@ def test_apply_check_removes_exactly_the_reported_ids():
 
 def test_apply_check_ignores_the_users_theses():
     deck = W._Deck(slides=[W._Slide(title="A", sentences=["Мой тезис.", "Факт."], theses={"Мой тезис."})])
-    W.apply_check(deck, [{"id": "1.1", "verdict": "doubtful"}, {"id": "1.2", "verdict": "wrong"}])
+    W.apply_check(deck, [{"id": "1.1", "verdict": "doubtful", "problem": "not in the reference"}, {"id": "1.2", "verdict": "wrong", "problem": "another year"}])
     assert deck.slides[0].sentences == ["Мой тезис."]
 
 
@@ -384,7 +394,9 @@ def test_the_guard_leaves_history_alone():
     d = REF["ww2s"]
     res = W.write_deck(Brief(text=d["topic"], slide_count=10), W.writer_mode(d["topic"]), SKILLS, _reg_answers(json.loads(d["raw"])), config=OFFLINE)
     assert res.written and res.kind == "history"
-    assert "вторжение в СССР" in res.text or "вторгается в СССР" in res.text  # the politician lexicon is not applied
+    assert "вторглась в СССР" in res.text  # the politician lexicon is not applied
+    # a 10-slide history has no separate chronology: its narrative slides carry the dates (gate 2 W5)
+    assert "Хронология" not in res.text and any("short deck" in r["why"] for r in res.removed)
     assert not any("politician" in r["why"] for r in res.removed)
 
 
@@ -450,7 +462,7 @@ def test_a_written_deck_is_a_brief_with_the_cover_and_the_attribution():
     meta = res.meta()
     assert meta["status"] == "written" and meta["text"] == res.text and meta["slides"] == res.slides + 1 and meta["source"] is None
     rec = res.record()
-    assert rec["skills"]["deck_writer"]["version"] == "1.1.0" and rec["answers"]["writer"]
+    assert rec["skills"]["deck_writer"]["version"] == "1.2.0" and rec["answers"]["writer"]
 
 
 def test_the_config_switches(monkeypatch):
@@ -592,7 +604,7 @@ def test_a_sentence_that_leans_on_a_removed_one_goes_with_it():
         "Германия завоевала Данию.", "Италия вступила в войну.", "В 1941 году она вторглась в Грецию.", "Война шла в Африке.",
     ])])
     removed: list[dict] = []
-    W.apply_check(deck, [{"id": "1.2", "verdict": "wrong"}], removed)
+    W.apply_check(deck, [{"id": "1.2", "verdict": "wrong", "problem": "Italy entered the war in June 1940, not as told"}], removed)
     assert deck.slides[0].sentences == ["Германия завоевала Данию.", "Война шла в Африке."]
     assert removed[1]["why"].startswith("no antecedent") and removed[1]["where"] == "1.3"
     assert W.anaphoric("Согласно договору, страна теряла территории.") and W.anaphoric("Это событие считается началом войны.")
@@ -621,7 +633,8 @@ WW2_CHECK = [
 def _ww2_deck() -> "W._Deck":
     slides = []
     for i in range(1, 10):
-        slides.append(W._Slide(title=f"Слайд {i}", sentences=list(WW2_TEXT.get(i, [f"Текст слайда номер {i} о войне."]))))
+        # the other slides: three sentences each, as a live deck has (the check reports 6 of ~24 statements)
+        slides.append(W._Slide(title=f"Слайд {i}", sentences=list(WW2_TEXT.get(i, [f"Текст слайда номер {i} о войне.", f"Второе предложение слайда {i}.", f"Третье предложение слайда {i}."]))))
     slides[7].sentences = []
     slides[7].data = {"caption": "Потери по странам", "unit": "млн человек", "chart": "column", "rows": [
         {"label": "Китай", "value": 20.0}, {"label": "СССР", "value": 27.0}, {"label": "Германия", "value": 7.0}]}

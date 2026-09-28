@@ -18,7 +18,7 @@ COLOR_NOT_IN_PALETTE = CheckSpec(id="color_not_in_palette", title="Цвет не
 LAYOUT_NOT_FROM_TEMPLATE = CheckSpec(id="layout_not_from_template", title="Слайд собран не на макете из шаблона", severity="error", category="template", description="Слайд ссылается на макет, которого нет в пакете шаблона.")
 CHROME_MOVED = CheckSpec(id="chrome_moved", title="Логотип или колонтитул сдвинуты с положенного места", severity="warn", category="template", description="Элемент хрома шаблона (логотип, колонтитул на слайдах) отсутствует или стоит в другом месте.")
 TABLE_CONTRAST_LOW = CheckSpec(id="table_contrast_low", title="Контраст текста в таблице ниже нормы", severity="warn", category="template", description="Контраст по WCAG между текстом ячейки таблицы и её заливкой (или фоном слайда) ниже 4.5:1 для обычного текста и 3:1 для крупного (≥18 пт или ≥14 пт жирным) и для значков ✓ / —. Пара цветов шаблона (белый на фирменном синем) от 3:1 — только справка.")
-CONTRAST_LOW = CheckSpec(id="contrast_low", title="Контраст текста к фону ниже 4.5:1", severity="warn", category="template", description="Контраст по WCAG между цветом текста и фоном ниже 4.5:1 для обычного текста и 3:1 для крупного (≥18 пт или ≥14 пт жирным). Фон — карточка слайда с учётом прозрачности заливки, иначе плашка, панель или картинка, которую рисуют макет и мастер шаблона, иначе фон слайда; градиент и картинка берутся в том месте, где стоит текст. На картинке или градиенте цвет фона — оценка: от 2:1 — сведение, ниже — ошибка. Строки, которые выходят за край своей плашки на другой фон (двухстрочный заголовок в однострочной полосе), проверяются и на том фоне.")
+CONTRAST_LOW = CheckSpec(id="contrast_low", title="Контраст текста к фону ниже 4.5:1", severity="warn", category="template", description="Контраст по WCAG между цветом текста и фоном ниже 4.5:1 для обычного текста и 3:1 для крупного (≥18 пт или ≥14 пт жирным). Фон — карточка слайда с учётом прозрачности заливки, иначе плашка, панель или картинка, которую рисуют макет и мастер шаблона, иначе фон слайда; градиент и картинка берутся в том месте, где стоит текст. На картинке или градиенте цвет фона — оценка: от 2:1 — сведение, ниже — ошибка. Строки, которые выходят за край своей плашки на другой фон (двухстрочный заголовок в однострочной полосе), проверяются и на том фоне; у текста на фигуре макета (треугольник, произвольная фигура) каждая строка проверяется по ширине своих букв — буквы, сошедшие с наклонного края на фон рядом, сравниваются с тем фоном.")
 
 CONTRAST_CANDIDATE_ROLES = ("text.primary", "text.secondary")
 
@@ -308,6 +308,50 @@ def _band_spill(s, e, bg_slide: str, color: str, size: float) -> Optional[tuple[
     return worst
 
 
+LINE_OFF = 0.08  # share of a line's letters off its shaped ground before the ground beside it counts
+
+
+def _line_off_ground(s, e, bg_slide: str, color: str, need: float) -> Optional[tuple[float, str, str, float]]:
+    """(contrast, ground, line) of the worst line of a text standing on a shaped template layer (a triangle, a
+    freeform) whose letters leave that shape — measured line by line at the width each line really takes: a centred
+    heading's second line may start on the white gap beside a slanted edge while the box as a whole stands on the
+    triangle (LO Focus, gate 2 — C2). The ground there is the topmost other template layer painting it, else the
+    slide's own ground. Returns (contrast, ground, line, share of the line's letters there) for the worst ground that
+    lacks `need` under at least two samples of a line; None when every line keeps on its shape or on a ground it
+    reads on."""
+    from verstka.audit.checks.common import line_boxes
+    from verstka.audit.checks.layout import _paints_at
+
+    shaped = [o for o in template_grounds(s, e) if o.outline]
+    if not shaped:
+        return None
+    band = shaped[-1]
+    tpl = sorted((o for o in getattr(s, "template_elements", []) or [] if o is not band and o.fill_hex and o.type in ("shape", "text") and o.opaque), key=lambda o: (0 if o.source == "master" else 1, o.z))
+    cache: dict = {}
+    worst = None
+    texts = [ln for p in e.paragraphs for ln in re.split(r"[\n\x0b]", p.text) if ln.strip()]
+    for i, (box, _size) in enumerate(line_boxes(e)):
+        nx = 48  # a letter is about 1/15 of a line: one at the end off the shape is seen
+        pts = [(box.x + (k + 0.5) * box.w / nx, box.y + f * box.h) for k in range(nx) for f in (0.3, 0.5, 0.7)]
+        off = [pt for pt in pts if not _paints_at(band, pt[0], pt[1])]
+        if len(off) < 2:
+            continue
+        seen: dict[str, int] = {}
+        for px, py in off:
+            under = next((o.fill_hex.upper() for o in reversed(tpl) if _paints_at(o, px, py, None, cache)), None) or bg_slide
+            seen[under] = seen.get(under, 0) + 1
+        for under, n in seen.items():
+            try:
+                cr = contrast_ratio(color, under)
+            except ValueError:
+                continue
+            if n < 2 or cr >= need:
+                continue
+            if worst is None or cr < worst[0]:
+                worst = (cr, under, texts[i] if i < len(texts) else e.text, n / float(len(pts)))
+    return worst
+
+
 @check(CONTRAST_LOW)
 def contrast_low(ctx: AuditContext) -> list[Issue]:
     out: list[Issue] = []
@@ -342,6 +386,13 @@ def contrast_low(ctx: AuditContext) -> list[Issue]:
                 # heading in a one-line band: the second line white on white)
                 cr2, under2 = spill
                 out.append(ctx.new_issue(CONTRAST_LOW, s.index, f"строки «{e.text[:30]}» выходят за плашку шаблона: контраст {cr2:.1f}:1 (#{color} на #{under2})", bboxes=[e.bbox_frac], element_ids=[e.id], severity="error" if cr2 < 2.5 else "warn", details={"contrast": round(cr2, 2), "background": under2, "ground": "band_spill"}))
+                continue
+            off = _line_off_ground(s, e, bg_slide, color, need) if ground_kind == "template" and not e.fill_hex else None
+            if off is not None:
+                # the box stands on a triangle of the layout, but a line's letters run off its slanted edge onto the
+                # ground beside it (white on the white gap): a letter or two at the edge — a warning, more — an error
+                cr3, under3, line, share = off
+                out.append(ctx.new_issue(CONTRAST_LOW, s.index, f"строка «{line[:30]}» выходит за фигуру шаблона на другой фон: контраст {cr3:.1f}:1 (#{color} на #{under3})", bboxes=[e.bbox_frac], element_ids=[e.id], severity="error" if cr3 < 2.5 and share >= LINE_OFF else "warn", details={"contrast": round(cr3, 2), "background": under3, "ground": "line_off_shape", "share": round(share, 3)}))
                 continue
             if cr < need:
                 accent_text = any(t.hex == color and any(r.startswith("accent.") for r in t.roles) for t in tokens.colors)

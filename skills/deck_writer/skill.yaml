@@ -1,5 +1,5 @@
 name: deck_writer
-version: 1.1.0
+version: 1.2.0
 role: llm
 description: >
   Writes the source text of a whole deck from a topic when the user gave no material of their own (writer mode):
@@ -21,3 +21,7 @@ changelog:
     «Начало» as the first half of «Хронология», «Главное» restated it); a topic about a place («…в России») takes
     that place's facts first, a world figure only as context (the EV deck was filled with the world's top five
     makers and 240 млн cars in the world)."
+  - "1.2.0: a history of ≤ 10 slides is a story (causes → start → course → turning points → end → outcome and losses →
+    consequences, each working title with a hint of what it tells) with no separate chronology; each figure on one
+    slide only; «В войне участвовали», not «Войну участвовали»; the refill branch (a slide the checks emptied is
+    written again from the article sections the deck does not use yet, the facts already told listed)."

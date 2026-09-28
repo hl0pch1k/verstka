@@ -102,7 +102,7 @@ def test_the_deck_is_built_from_the_written_text(written_run):
         assert len(o.slides) == w.slides + 1, v.strategy
         assert o.agent_log[0].startswith("Автор:")
         assert "Текст написан агентом Verstka по теме «История VK»" in (o.slides[0].notes or "")
-        assert v.planner["writer"]["status"] == "written" and v.planner["writer"]["skills"]["deck_writer"]["version"] == "1.1.0"
+        assert v.planner["writer"]["status"] == "written" and v.planner["writer"]["skills"]["deck_writer"]["version"] == "1.2.0"
         a = v.audit.summary
         assert a.score >= 97, (v.strategy, [(i.check_id, i.message) for i in v.audit.issues if i.severity != "info"])
         assert not [i for i in v.audit.issues if i.check_id == "figure_not_in_brief"], v.strategy
@@ -172,7 +172,9 @@ def test_the_generation_keeps_the_written_text(api, monkeypatch):
     assert json.loads((gdir / "generation.json").read_text(encoding="utf-8"))["writer"]["status"] == "written"
     # edits, «Исправить слайд» and the remarks ground against the written text, not the topic
     b = mod._brief_of_meta(meta)
-    assert b is not None and b.text.strip() == writer.text.strip() and b.slide_count == 3
+    from verstka.planning.writer import with_rules
+
+    assert b is not None and b.text.strip() == with_rules(writer.text).strip() and b.slide_count == 3
     assert mod._brief_text_of_meta(gid, meta) == writer.text
     r = client.get(f"/api/generations/{gid}/writer.md")
     assert r.status_code == 200 and r.text == writer.text

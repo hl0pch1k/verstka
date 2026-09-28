@@ -240,7 +240,8 @@ export function deckNotice(g: Generation, v: Variant, total: number, live?: Live
     const src = w.source?.title;
     const basis = src ? `По статье Википедии «${src}».` : "Агент писал по своим знаниям — даты и цифры могут быть неточны.";
     const want = w.asked ?? asked;
-    const fewer = !!want && want - total >= 3 ? ` Вышло ${plural(total, "слайд", "слайда", "слайдов")} вместо ${want}.` : "";
+    // the asked slide count is a promise in writer mode: any shortfall is said (not only 3 or more)
+    const fewer = !!want && want > total ? ` Вышло ${plural(total, "слайд", "слайда", "слайдов")} вместо ${want}.` : "";
     return { title: "Текст написал агент — проверьте факты", basis: basis + fewer, help: null, ...none, rewrite: false, tone: "info", showText: true };
   }
   if (skeleton && (w?.status === "private" || w?.status === "refused")) {

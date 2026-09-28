@@ -89,6 +89,21 @@ def wordmark_heading(title_ph: ShapeInfo, texts: list[ShapeInfo], slide_h: int) 
     return max(bigger, key=lambda t: (_size(t), -t.bbox.y))
 
 
+def low_display_heading(texts: list[ShapeInfo], membership, slide_h: int) -> Optional[ShapeInfo]:
+    """A cover's heading set low on the slide (Marketing: «Marketing Report» at 185 pt from 0.49 H on its dark panel):
+    the largest non-numeric text starting above 70 % of the slide, of at most 90 characters, set at a display size
+    (≥ 7 % of the slide height) and at least 1.6× any other text of the slide. None when there is no such text."""
+    hpt = slide_h / 12700.0
+    cands = [s for s in texts if s.id not in membership and s.bbox.y < 0.7 * slide_h and not is_numeric_text(s.plain_text) and 0 < len(s.plain_text.strip()) <= 90]
+    if not cands:
+        return None
+    big = max(cands, key=lambda s: (_size(s), -s.bbox.y))
+    others = max((_size(s) for s in texts if s.id != big.id and s.plain_text.strip()), default=0.0)
+    if _size(big) >= 0.07 * hpt and _size(big) >= 1.6 * others:
+        return big
+    return None
+
+
 def heuristic_roles(
     shapes: list[ShapeInfo],
     groups: list[RepeatGroup],
@@ -134,6 +149,9 @@ def heuristic_roles(
             max_non_numeric = max((_size(s) for s in texts if not is_numeric_text(s.plain_text)), default=0.0)
             if _size(biggest) >= max(body_size * 1.15, max_non_numeric * 0.8):
                 title = biggest
+    if title is None:
+        # no placeholder and nothing big in the top 40 %: a display heading set low on a cover is still the title
+        title = low_display_heading(texts, membership, slide_h)
     if title is not None:
         roles[title.id] = SlotRole.title
 

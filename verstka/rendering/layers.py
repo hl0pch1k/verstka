@@ -946,3 +946,67 @@ def ground_is_mixed(slide, box: Bbox) -> bool:
         if share >= 0.2:
             return True
     return False
+
+
+def _row_runs(polys, py: float) -> list[tuple[float, float]]:
+    """The x-intervals the polygons paint on the horizontal line y = py (even-odd over all their edges)."""
+    xs: list[float] = []
+    for poly in polys:
+        n = len(poly)
+        if n < 3:
+            continue
+        for i in range(n):
+            x1, y1 = poly[i]
+            x2, y2 = poly[(i + 1) % n]
+            if (y1 > py) != (y2 > py):
+                xs.append(x1 + (py - y1) * (x2 - x1) / ((y2 - y1) or 1e-9))
+    xs.sort()
+    return [(xs[i], xs[i + 1]) for i in range(0, len(xs) - 1, 2)]
+
+
+def ground_span(slide, box: Bbox, rows: int = 5) -> Optional[tuple[int, int, Layer]]:
+    """The run of the ground a line of text stands on, over the line's whole height (gate 2, C2): the topmost layout
+    or master layer that paints the box's centre (by its real outline, ≥ 60 % opaque), and the x-interval (EMU) it
+    paints on every sampled row of the box around the centre — a triangle's slanted edge moves with the height, so
+    the interval is the narrowest of the rows. A rectangle's is its box. None when nothing of the layout paints the
+    centre, a picture of the slide itself hides the layout there, or the outline cannot be read."""
+    if box.w <= 0 or box.h <= 0:
+        return None
+    layers = drawn_layers(slide)
+    try:
+        layout = slide.slide_layout
+        holders = {"layout": layout, "master": layout.slide_master, "slide": slide}
+    except Exception:  # noqa: BLE001
+        return None
+    cx, cy = box.x + box.w / 2.0, box.y + box.h / 2.0
+    for lay in reversed(layers):
+        if lay.placeholder or not lay.paints or lay.kind in ("graphicFrame", "cxnSp", "grpSp"):
+            continue
+        if lay.source == "slide":
+            if lay.kind == "pic" and lay.box.x <= cx <= lay.box.x2 and lay.box.y <= cy <= lay.box.y2:
+                return None
+            continue
+        if not (lay.box.x <= cx <= lay.box.x2 and lay.box.y <= cy <= lay.box.y2):
+            continue
+        polys = _outline_of(lay)
+        if polys is None:
+            if lay.kind == "sp" and lay.custom_geom:
+                continue  # a freeform we cannot read
+            got = layer_paint_at(lay, box, holders.get(lay.source))
+            if got is None or got[1] < 0.6:
+                continue
+            return lay.box.x, lay.box.x2, lay
+        if sum(1 for poly in polys if len(poly) > 2 and _inside(cx, cy, poly)) % 2 != 1:
+            continue
+        got = layer_paint_at(lay, box, holders.get(lay.source))
+        if got is None or got[1] < 0.6:
+            continue
+        lo, hi = float("-inf"), float("inf")
+        for j in range(rows):
+            py = box.y + box.h * (0.02 + 0.96 * j / max(rows - 1, 1))
+            run = next(((a, b) for a, b in _row_runs(polys, py) if a <= cx <= b), None)
+            if run is None:
+                return int(cx), int(cx), lay  # the centre itself leaves the layer on some row
+            lo, hi = max(lo, run[0]), min(hi, run[1])
+        return int(lo), int(hi), lay
+    return None
