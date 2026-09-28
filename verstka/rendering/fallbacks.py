@@ -279,6 +279,7 @@ def _substitute(o: OutlineSlide, outline: DeckOutline, *, chart_facts: bool) -> 
         kind, content, how = K.section, SlideContent(), "a statement of its headline"
     content.image_hint = c.image_hint
     content.formula = c.formula  # a formula is text, not data: it stays with the slide
+    content.photo_slot = c.photo_slot  # the place the user keeps for their photo stays whatever form the slide takes
     return o.model_copy(update={"kind": kind, "content": content}), how
 
 
@@ -292,7 +293,7 @@ def _as_list(o: OutlineSlide, outline: DeckOutline) -> OutlineSlide:
     else:
         content = SlideContent(paragraphs=list(c.paragraphs), quote=c.quote, quote_author=c.quote_author)
     content.table, content.chart, content.image_hint = c.table, c.chart, c.image_hint
-    content.chart2, content.formula = c.chart2, c.formula
+    content.chart2, content.formula, content.photo_slot = c.chart2, c.formula, c.photo_slot
     return o.model_copy(update={"kind": K.bullets, "content": content})
 
 

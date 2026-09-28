@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import dataclasses
+import logging
 import math
 from collections import Counter
 from dataclasses import dataclass
@@ -27,10 +28,12 @@ from verstka.rendering.fit import fit_size
 from verstka.rendering.images import insert_picture
 from verstka.rendering.tables import add_table
 from verstka.rendering.textfill import ParagraphSpec, fill_text
-from verstka.schemas.common import EMU_PER_INCH, EMU_PER_PT, Bbox, Family, PatternKind, SlotRole, contrast_ratio
+from verstka.schemas.common import EMU_PER_INCH, EMU_PER_PT, Bbox, Family, PatternKind, SlotRole, contrast_ratio, relative_luminance
 from verstka.schemas.layout import LayoutSlide
-from verstka.schemas.outline import DeckOutline, OutlineSlide, SlideItem
+from verstka.schemas.outline import PHOTO_PLACE_NAME, DeckOutline, OutlineSlide, SlideItem
 from verstka.schemas.template import Pattern, TemplateManifest
+
+log = logging.getLogger(__name__)
 
 _DEFAULT_RADIUS_EMU = int(0.12 * EMU_PER_INCH)
 _CONTENT_KINDS = (PatternKind.bullets, PatternKind.cards, PatternKind.freeform, PatternKind.two_column, PatternKind.stat_row)
@@ -1262,6 +1265,213 @@ def _choose_art(builder: DeckBuilder, manifest: TemplateManifest, ds: "DeckStyle
     return best
 
 
+# ------------------------------------------------------------------ a free place for the user's own photo
+
+PHOTO_FRAME_SHARE = 0.4  # the share of the content's width a free photo place takes on a template without a photo sample
+_PHOTO_KIND_RANK = {PatternKind.image_text: 0, PatternKind.stat_row: 1, PatternKind.cards: 1, PatternKind.two_column: 2, PatternKind.bullets: 2}
+
+
+def _photo_place_of(builder: DeckBuilder, p: Pattern) -> Optional[tuple[set[str], Bbox, str]]:
+    """(shape ids, box, side) of a content sample's place for a photo: its picture slot — a photo or a picture
+    placeholder — of 8–50 % of the slide, at least 30 % of its height, standing on one side with a column of 38 % of the
+    width free beside it for the text. None when the sample has none."""
+    if p.reference or p.quality < 0.5 or len(p.slots) > 16 or p.kind in (PatternKind.title, PatternKind.section, PatternKind.thanks, PatternKind.quote, PatternKind.chart, PatternKind.table):
+        return None
+    t = _top_title(p)
+    if t is None or t.bbox.y > 0.3:
+        return None
+    W, H = builder.slide_w, builder.slide_h
+    try:
+        src = builder.source_slide(p.source_slide)
+    except IndexError:
+        return None
+    els = slide_shape_elements(src)
+    for sl in sorted((x for x in p.slots if x.role == SlotRole.image and 0.08 <= x.bbox.area <= 0.5 and x.bbox.h >= 0.3), key=lambda x: -x.bbox.area):
+        el = els.get(sl.shape_id)
+        if el is None or not _meant_for_photo(builder, src, el):
+            continue  # a 3D render, an illustration or an icon of the brand is its design, not a place for a photo
+        b = sl.bbox
+        if b.x + b.w <= 0.6 and 1.0 - (b.x + b.w) >= 0.38:
+            return {sl.shape_id}, b.to_emu(W, H), "left"
+        if b.x >= 0.4:
+            return {sl.shape_id}, b.to_emu(W, H), "right"
+    return None
+
+
+def _meant_for_photo(builder: DeckBuilder, src: Slide, el) -> bool:
+    """The sample's picture is a place for a photo: a picture placeholder (filled with a sample photo or empty), or a
+    photograph the sample shows there (a team, a room, a product shot) — never brand art (a 3D render, an
+    illustration, an icon)."""
+    ph = next((x for x in el.iter(q("p:ph"))), None)
+    if ph is not None and (ph.get("type") or "") in ("pic", "clipArt"):
+        return True
+    # a JPEG is a photograph (a calm one too — two people against a grey sky, which `_is_photo` finds too smooth); brand
+    # renders and illustrations come as PNG, cut out or flat
+    return any(str(getattr(part, "partname", "")).lower().endswith((".jpg", ".jpeg")) or _is_photo(builder, part) for part in _pic_parts(src, el))
+
+
+def _choose_photo_place(builder: DeckBuilder, manifest: TemplateManifest, ds: "DeckStyle") -> Optional[Art]:
+    """The template's own slide for a photo, when a sample has one (`_photo_place_of`): a picture-and-text sample
+    first, then a row of figures or cards beside a photo; the deck's ground first, the photo nearest a quarter of the
+    slide. The canvas keeps its picture place — the user's photo goes there — and the content takes the free side."""
+    cands = []
+    for p in manifest.patterns:
+        got = _photo_place_of(builder, p)
+        if got is None:
+            continue
+        ids, box, side = got
+        share = box.area / float(builder.slide_w * builder.slide_h)
+        cands.append((int(p.family != ds.family), _PHOTO_KIND_RANK.get(p.kind, 3), abs(share - 0.25), p.source_slide, Art(pattern=p, keep_ids=ids, box=box, side=side, photo=False)))
+    if not cands:
+        return None
+    cands.sort(key=lambda t: t[:4])
+    return cands[0][4]
+
+
+PHOTO_FILL_CONTRAST = (1.15, 1.6)  # the free photo place reads as a place on its ground, quietly
+
+
+def _photo_fill(kit, pal: "_Palette", ground: Optional[str] = None) -> str:
+    """A quiet, neutral colour for the free photo place that still reads on the ground it stands on (1.15–1.6:1): the
+    template's own card fill or surface when it is a neutral (never an accent-coloured card), else a neutral of the
+    template's palette, else white on a light ground or black on a dark one, else the text colour laid over the ground
+    just enough."""
+    from verstka.rendering.compose import _mix
+
+    g = ground or pal.bg
+    lo, hi = PHOTO_FILL_CONTRAST
+
+    def sat(hex_: str) -> float:
+        r, gg, b = (int(hex_[i:i + 2], 16) / 255 for i in (0, 2, 4))
+        mx, mn = max(r, gg, b), min(r, gg, b)
+        return 0.0 if mx == 0 else (mx - mn) / mx
+
+    manifest = getattr(kit, "manifest", None)
+    try:
+        own = list(manifest.tokens.palette()) if manifest is not None else []
+    except Exception:  # noqa: BLE001
+        own = []
+    for c in (getattr(kit.card, "fill", None), pal.surface, pal.card_fill, *own, "FFFFFF", "000000"):
+        c = (c or "").upper()
+        if len(c) == 6 and sat(c) < 0.2 and lo <= contrast_ratio(c, g) < hi:
+            return c
+    ink = "FFFFFF" if relative_luminance(g) < 0.4 else "000000"
+    if contrast_ratio(pal.text, g) >= 3.0 and sat(pal.text) < 0.3:
+        ink = pal.text
+    for share in (0.06, 0.08, 0.1, 0.12, 0.15, 0.18, 0.22):
+        c = _mix(ink, g, share)
+        if contrast_ratio(c, g) >= lo:
+            return c
+    return _mix(ink, g, 0.22)
+
+
+def _ground_at(slide: Slide, box: Bbox) -> Optional[str]:
+    try:
+        from verstka.rendering.charts import slide_ground
+
+        g = slide_ground(slide, box)
+    except Exception:  # noqa: BLE001
+        g = None
+    return g if g and len(g) == 6 else None
+
+
+def _photo_descr(name: str) -> str:
+    return f"{name}: место оставлено свободным — вставьте фото в плейсхолдер или через «Формат фигуры → Заливка → Рисунок»"
+
+
+def _empty_photo_place(slide: Slide, ids: set[str], kit, pal: "_Palette", name: str) -> int:
+    """The canvas sample's picture becomes the user's photo place: a picture placeholder stays a placeholder of its kind,
+    empty (a click in PowerPoint puts the photo in, cropped to it); a plain picture gives way to a frame of its shape.
+    Both in a quiet fill, so the place reads on the slide until the photo is in. Returns the number of places made."""
+    tree = slide._element.cSld.find(q("p:spTree"))
+    made = 0
+    for el in list(tree):
+        nv = el.find(".//" + q("p:cNvPr"))
+        if nv is None or nv.get("id") not in ids or etree.QName(el).localname not in ("pic", "sp", "grpSp"):
+            continue
+        b = element_bbox(el)
+        if not b or b[2] <= 0 or b[3] <= 0:
+            continue
+        ph = next((x for x in el.iter(q("p:ph"))), None)
+        old_sppr = el.find(q("p:spPr"))
+        geom = old_sppr.find(q("a:prstGeom")) if old_sppr is not None else None
+        sp = etree.Element(q("p:sp"))
+        nvsp = etree.SubElement(sp, q("p:nvSpPr"))
+        c = etree.SubElement(nvsp, q("p:cNvPr"))
+        c.set("id", nv.get("id"))
+        c.set("name", PHOTO_PLACE_NAME)
+        c.set("descr", _photo_descr(name))
+        cnv = etree.SubElement(nvsp, q("p:cNvSpPr"))
+        nvpr = etree.SubElement(nvsp, q("p:nvPr"))
+        if ph is not None and (ph.get("type") or "") in ("pic", "clipArt", "obj", "body", ""):
+            etree.SubElement(cnv, q("a:spLocks")).set("noGrp", "1")
+            new_ph = etree.SubElement(nvpr, q("p:ph"))
+            new_ph.set("type", "pic")
+            if ph.get("idx"):
+                new_ph.set("idx", ph.get("idx"))
+        sppr = etree.SubElement(sp, q("p:spPr"))
+        xf = etree.SubElement(sppr, q("a:xfrm"))
+        etree.SubElement(xf, q("a:off"), x=str(int(b[0])), y=str(int(b[1])))
+        etree.SubElement(xf, q("a:ext"), cx=str(int(b[2])), cy=str(int(b[3])))
+        if geom is not None:
+            sppr.append(copy.deepcopy(geom))
+        else:
+            g = etree.SubElement(sppr, q("a:prstGeom"))
+            g.set("prst", "rect")
+            etree.SubElement(g, q("a:avLst"))
+        parent, at = el.getparent(), el.getparent().index(el)
+        parent.remove(el)  # what lies under the sample's picture sets the place's colour
+        fill = _photo_fill(kit, pal, _ground_at(slide, Bbox(x=b[0], y=b[1], w=b[2], h=b[3])))
+        sf = etree.SubElement(sppr, q("a:solidFill"))
+        etree.SubElement(sf, q("a:srgbClr")).set("val", fill.upper())
+        ln = etree.SubElement(sppr, q("a:ln"))
+        etree.SubElement(ln, q("a:noFill"))
+        parent.insert(at, sp)
+        made += 1
+    return made
+
+
+def _align_photo_frame(frame_el, added: list, H: int) -> None:
+    """The frame for the user's photo ends where the content beside it ends (the last card, the conclusion): a frame
+    running below the content column reads as unbalanced. Never under 30 % of the slide's height."""
+    xf = frame_el.find(q("p:spPr") + "/" + q("a:xfrm")) if frame_el is not None else None
+    if xf is None:
+        return
+    off, ext = xf.find(q("a:off")), xf.find(q("a:ext"))
+    y0 = int(off.get("y"))
+    bottoms = []
+    for el in added:
+        if el is frame_el:
+            continue
+        b = element_bbox(el)
+        if b and b[3] > 0 and b[1] >= y0 - int(0.02 * H):
+            bottoms.append(b[1] + b[3])
+    if not bottoms:
+        return
+    ext.set("cy", str(int(max(max(bottoms) - y0, 0.3 * H))))
+
+
+def _photo_frame_beside(slide: Slide, area: Bbox, kit, pal: "_Palette", name: str, W: int, H: int) -> Bbox:
+    """A free place for the user's photo at the right of the content area, on a template without a sample for a photo:
+    a quiet frame of the template's card colour and corners, 40 % of the area's width and its whole height; the content
+    keeps the rest, a gutter away. Returns the content's area."""
+    from verstka.rendering.compose import Canvas
+
+    g = int(0.035 * W)
+    pw = int(area.w * PHOTO_FRAME_SHARE)
+    if area.w - pw - g < int(0.3 * W):
+        pw = max(area.w - g - int(0.3 * W), int(0.25 * area.w))
+    frame = Bbox(x=area.x2 - pw, y=area.y, w=pw, h=area.h)
+    cv = Canvas(slide, kit)
+    el = cv.rect(frame, _photo_fill(kit, pal, _ground_at(slide, frame)), radius_emu=int(getattr(kit.card, "radius_emu", 0) or 0), name=PHOTO_PLACE_NAME)
+    nv = el.find(".//" + q("p:cNvPr"))
+    if nv is not None:
+        nv.set("name", PHOTO_PLACE_NAME)
+        nv.set("descr", _photo_descr(name))
+    slide.__dict__["_photo_frame"] = el
+    return Bbox(x=area.x, y=area.y, w=area.w - pw - g, h=area.h)
+
+
 def _render_content(builder: DeckBuilder, comp: str, oslide: OutlineSlide, manifest: TemplateManifest, ws: TemplateWorkspace, outline: DeckOutline) -> tuple[Slide, list[str]]:
     from verstka.rendering.compose import Composer, Kit
 
@@ -1271,7 +1481,11 @@ def _render_content(builder: DeckBuilder, comp: str, oslide: OutlineSlide, manif
     if comp == "image_text" and not (oslide.content.image_hint and pick_asset(manifest, ws, oslide.content.image_hint, require_match=True)):
         comp = "bullets"  # no picture of the template says what the slide says: the text alone (an art canvas may frame it)
     wide = _needs_width(oslide, comp)
-    art = _choose_art(builder, manifest, ds, comp, oslide, outline) if not wide else None
+    photo = oslide.content.photo_slot
+    # the user adds their own photo: the template's own slide for a photo when it has one (its picture place stays
+    # free), else the usual canvas with a quiet frame beside the content
+    place = _choose_photo_place(builder, manifest, ds) if photo else None
+    art = place if place is not None else (_choose_art(builder, manifest, ds, comp, oslide, outline) if not wide and not photo else None)
     canvas = art.pattern if art is not None else _pick_canvas(builder, manifest, family, comp, wide, need_pill=ds.pill)
     ground = None
     if canvas is not None:
@@ -1390,6 +1604,25 @@ def _render_content(builder: DeckBuilder, comp: str, oslide: OutlineSlide, manif
         # colours of the copied card as the analysis sees them (scheme colours resolved)
         kit.card.fill, kit.card.line = proto[1], proto[2]
         kit.card.colors = kit.colors_on(proto[1] or pal.bg, prefer=None if proto[1] else title_color, inside_card=bool(proto[1]))
+    if photo:
+        try:
+            if place is not None:
+                if not _empty_photo_place(slide, place.keep_ids, kit, pal, photo):
+                    # the sample's picture did not survive the canvas: a frame stands at its place
+                    from verstka.rendering.compose import Canvas
+
+                    el = Canvas(slide, kit).rect(place.box, _photo_fill(kit, pal, _ground_at(slide, place.box)), name=PHOTO_PLACE_NAME)
+                    nv = el.find(".//" + q("p:cNvPr"))
+                    if nv is not None:
+                        nv.set("name", PHOTO_PLACE_NAME)
+                        nv.set("descr", _photo_descr(photo))
+                warnings.append(f"the template's own photo place kept free for the user's photo (slide {place.pattern.source_slide} of the template)")
+            else:
+                area = _photo_frame_beside(slide, area, kit, pal, photo, W, H)
+                warnings.append("a free place for the user's photo kept beside the content")
+        except Exception as e:  # noqa: BLE001 - the slide's content is never lost over its photo place
+            log.warning("photo place not made on slide %s: %s", oslide.id, e, exc_info=True)
+            warnings.append(f"the free place for the user's photo was not made: {str(e)[:120]}")
     composer = Composer(slide, kit, oslide, outline, outline.strategy or "structured", manifest)
     composer.foot_room = foot_room
     if comp == "image_text" and oslide.content.image_hint:
@@ -1401,6 +1634,8 @@ def _render_content(builder: DeckBuilder, comp: str, oslide: OutlineSlide, manif
             composer._draw_notes(n0)
     if comp:
         composer.compose(comp, area)
+    if slide.__dict__.get("_photo_frame") is not None:
+        _align_photo_frame(slide.__dict__["_photo_frame"], composer.cv.added, H)
     _ink_pass(slide, composer.cv.added, pal, manifest, warnings)
     warnings.extend(composer.warnings)
     return slide, warnings

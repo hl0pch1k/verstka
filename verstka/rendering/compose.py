@@ -2073,6 +2073,16 @@ class Composer:
             if grid[3] > fs + 0.05:
                 cols = 2
                 cw, pad, inner, fs, one_line = grid
+        if n == 4 and cols == 4 and avail.h > 0.45 * area.h:
+            # four tiles in a narrow column (beside a photo) break their labels inside a word («Трениро / вочный»): the
+            # figures read as a 2×2 block, each label on whole words
+            labels = [distinct_label(x.value, x.label, self.o.headline) for x in numbers]
+            if not self.fits_width(labels, k.body, False, inner):
+                grid = layout(2)
+                ginner = grid[2]
+                if self.fits_width(labels, k.body, False, ginner):
+                    cols = 2
+                    cw, pad, inner, fs, one_line = grid
         stacked = False
         if any(splits) and fs < 1.6 * k.h2:
             # a row of figures set at a text size (smaller than their labels) reads as captions: stack the words
@@ -2087,11 +2097,14 @@ class Composer:
                 cw, pad, inner, fs, one_line = got
             else:
                 slim[0] = False
-        if not one_line:
+        # beside the user's photo the column is narrow and short: tiles in two rows leave the figures at a caption's
+        # size (17 pt under 14 pt labels) — one under the other, each with its label beside it, they read as figures
+        photo_rows = bool(self.o.content.photo_slot) and math.ceil(n / cols) >= 2 and fs < hero_min
+        if not one_line or photo_rows:
             # a figure never wraps (G4, Focus s3: «около 615 тыс. тонн» broke over its tile's accent rule): no size of
             # the row sets every figure on one line in its tile — the figures stand one under the other, each with its
             # label beside it; else the row's figures step down until each one reads on one line
-            plan = self._kpi_rows_plan(avail, numbers, fs)
+            plan = self._kpi_rows_plan(avail, numbers, fs * 1.3 if (photo_rows and one_line) else fs)
             if plan is not None:
                 block_h = plan["h"] + ((extra_block[1] + k.vgap * 1.4) if extra_block else 0)
                 y0 = self._place_v(area, int(block_h))
@@ -2101,8 +2114,9 @@ class Composer:
                     ey = y0 + plan["h"] + int(k.vgap * 1.4)
                     for gi, pg in enumerate(paras_g):
                         self.cv.text(Bbox(x=area.x + gi * (ew + k.gap), y=ey, w=ew, h=eh), pg, name="Note")
-                self.warnings.append("figures too long for a row of tiles stand one under the other, labels beside")
+                self.warnings.append("figures beside the photo place stand one under the other, labels beside" if one_line else "figures too long for a row of tiles stand one under the other, labels beside")
                 return
+        if not one_line:
             heads = [sp[0] if (stacked and sp) else x.value for x, sp in zip(numbers, splits)]
             room = _pt(inner) * (0.88 if use_cards else 0.8)
             for s_ in [x for x in k.steps_down(fs, max(self._dense_floor(), k.small * 0.85)) if x < fs - 0.05] + [max(self._dense_floor(), k.small * 0.85)]:

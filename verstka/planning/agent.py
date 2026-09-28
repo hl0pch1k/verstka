@@ -55,6 +55,7 @@ from typing import Any, Callable, Optional, Union
 import yaml
 
 from verstka.planning import heuristics as H
+from verstka.planning.brief_structure import is_photo_instruction
 from verstka.planning.plan_json import kind_by_content
 from verstka.planning.strategies import Strategy, default_strategies_path
 from verstka.ru import ru_count
@@ -821,6 +822,9 @@ def _read_source(text: str) -> _Source:
                     src.groups.append(_Group(label=_label(parts[0]), items=enum, ask=bool(_SHOW_RE.match(line))))
             continue
         for sn in H.split_sentences(line) or [line]:
+            if is_photo_instruction(sn):
+                src.asks.append(sn)  # «оставь место под фото», «фото я добавлю сам»: an instruction, never the slide's text
+                continue
             src.sentences.append(sn)
     close()
     return src
@@ -900,6 +904,19 @@ def _series_figures(unit: _Unit, ctx: _Ctx) -> list[NumberCallout]:
             value = f"{_fmt_ru(s.values[0])} → {_fmt_ru(s.values[1], u or None)}"
         out.append(NumberCallout(value=value, label=s.name))
     return out
+
+
+def _enumeration_figures(unit: _Unit, ctx: _Ctx) -> list[NumberCallout]:
+    """The parts of an enumeration the slide's text states and nobody asked to chart («тренировочный зал займет 100 м²,
+    раздевалки и душевые — 35 м², …»): two to four figures of one unit, each under its part's name."""
+    for sid in unit.series_ids:
+        s = ctx.series.get(sid)
+        if s is None or not 2 <= len(s.values) <= 4 or len(s.categories) != len(s.values) or not (s.unit or "").strip():
+            continue
+        if any(v <= 0 for v in s.values) or any(not c.strip() or len(c.split()) > 6 for c in s.categories):
+            continue
+        return [NumberCallout(value=_fmt_ru(v, s.unit), label=H.cap_first(c.strip())) for c, v in zip(s.categories, s.values)]
+    return []
 
 
 def _kpis(lines: list[str]) -> list[NumberCallout]:
@@ -1139,6 +1156,9 @@ def _closing_design(unit: _Unit) -> _Design:
     return _Design(unit=unit, slide=OutlineSlide(id=unit.key, kind=PatternKind.thanks, headline=unit.title or "Спасибо за внимание", rationale=_WHY["thanks"]))
 
 
+PHOTO_WHY = "Место под фото оставлено свободным, как просили в брифе: фото вставляется в рамку на слайде."
+
+
 def _why(slide: OutlineSlide, requested: bool = False) -> str:
     k = slide.kind.value
     key = slide.content.chart.type if k == "chart" and slide.content.chart is not None else k
@@ -1195,7 +1215,7 @@ def rules_design(unit: _Unit, ctx: _Ctx) -> _Design:
             # of day, a project number or a bound of a requirement (gate 4 G4-3)
             return [n for n in out if not _date_callout(n) and not _not_key_figure(n, lines)] if ctx.written else out
 
-        numbers = _series_figures(unit, ctx) or kpis(fig_items) or kpis(other_items) or kpis(src.sentences)
+        numbers = _series_figures(unit, ctx) or kpis(fig_items) or _enumeration_figures(unit, ctx) or kpis(other_items) or kpis(src.sentences)
         if text_groups:
             g = text_groups[0]
             pair = text_groups[1] if len(text_groups) > 1 else None
@@ -1269,12 +1289,16 @@ def rules_design(unit: _Unit, ctx: _Ctx) -> _Design:
             headline, section = stated, section or unit.title
             if takeaway and same_text(takeaway, headline):
                 takeaway = None
+    if spec is not None and spec.photo:
+        c.photo_slot = spec.photo  # the user adds their own photo: the slide leaves it a free place
     s = OutlineSlide(
         id=unit.key, kind=PatternKind(kind), section=section, headline=headline, subtitle=subtitle, content=c,
         notes=" ".join(notes[:5]), takeaway=takeaway, footnote=spec.footnote if spec else None,
         spec_ref=spec.number if spec else None,
     )
     s.rationale = _why(s, requested=bool(spec and (spec.charts or spec.table)))
+    if c.photo_slot:
+        s.rationale = (s.rationale + " " if s.rationale else "") + PHOTO_WHY
     d = _Design(unit=unit, slide=s)
     d.alternatives = auto_alternatives(s)
     return d
@@ -2036,6 +2060,43 @@ def design_from_answer(ans: SlideDesignAnswer, unit: _Unit, ctx: _Ctx) -> Option
     return d
 
 
+_PHOTO_PLACE_LINE_RE = re.compile(
+    r"^\s*(?:здесь|тут|справа|слева|ниже|выше|в\s+рамке)\s+(?:будет|появится|разместится|размещ\w+|расположится|вставляется|добавится)\s+(?:\S+\s+){0,2}?(?:фото|фотографи|снимо?к|изображени)|"
+    r"^\s*(?:место|рамка)\s+(?:для|под)\s+(?:фото|фотографи|снимк|изображени)",
+    re.I,
+)
+
+
+def _about_photo_place(line: str) -> bool:
+    """A line of the slide that only speaks of the free photo place («Здесь будет фото помещения», «Место для фото»)."""
+    return bool(line) and bool(_PHOTO_PLACE_LINE_RE.search(line) or is_photo_instruction(line))
+
+
+def photo_requirement(photo: str) -> str:
+    """What the slide designer is told when the slide keeps a free place for the user's own photo."""
+    return (f"a free place for the user's own photo ({photo}): the slide's content takes about half of the slide — "
+            "at most 4 figures or 4 short bullets, no chart unless asked; never describe or fill the photo place")
+
+
+def _keep_photo_places(o: DeckOutline, structure: Optional[BriefStructure], warns: list[str]) -> None:
+    """The brief's «оставь место под фото» holds on the final slide of its spec whatever the later passes did with the
+    slide (reshaped, merged, compiled): the first content slide of the spec keeps the place free."""
+    photos = {sp.number: sp.photo for sp in (structure.specs if structure else []) if sp.photo}
+    if not photos:
+        return
+    done: set[int] = set()
+    for sl in o.slides:
+        ref = sl.spec_ref
+        if ref not in photos or ref in done or sl.kind.value in FRAME_KINDS:
+            continue
+        done.add(ref)
+        if not sl.content.photo_slot:
+            sl.content.photo_slot = photos[ref]
+            warns.append(f"slide {sl.id}: the free place for the user's photo put back ({photos[ref]})")
+        if PHOTO_WHY not in (sl.rationale or ""):
+            sl.rationale = (sl.rationale + " " if sl.rationale else "") + PHOTO_WHY
+
+
 def enforce_requests(d: _Design, ctx: _Ctx) -> None:
     """The user's requests for the slide win over the design: the requested charts (with the requested type), the
     table, the formula, the footnote and the user's own conclusion."""
@@ -2110,6 +2171,24 @@ def enforce_requests(d: _Design, ctx: _Ctx) -> None:
             c.formula = spec.formula
         if not re.search(r"[а-яё]{3,}.*[×x*·÷/+]", (c.formula or "").split("=")[0], re.I):
             c.formula = label_formula(c.formula, d.unit.text) or c.formula
+    if spec.photo:
+        # «оставь место под фотографию помещения»: the place stays free for the user's photo in every variant
+        if not c.photo_slot:
+            d.changes.append(f"slide {d.unit.key}: a free place for the user's photo kept (asked in the brief)")
+        c.photo_slot = spec.photo
+        if PHOTO_WHY not in (s.rationale or ""):
+            s.rationale = (s.rationale + " " if s.rationale else "") + PHOTO_WHY
+        # the place is left free, not described: a line about it («Здесь будет фото помещения») leaves the slide
+        said = [x for x in (*c.bullets, *c.paragraphs, *(it.title for it in c.items), s.takeaway or "", s.subtitle or "") if _about_photo_place(x)]
+        if said:
+            c.bullets = [x for x in c.bullets if not _about_photo_place(x)]
+            c.paragraphs = [x for x in c.paragraphs if not _about_photo_place(x)]
+            c.items = [it for it in c.items if not _about_photo_place(it.title)]
+            if _about_photo_place(s.takeaway or ""):
+                s.takeaway = None
+            if _about_photo_place(s.subtitle or ""):
+                s.subtitle = None
+            d.changes.append(f"slide {d.unit.key}: {len(said)} line(s) about the photo place left the slide (the place stays free)")
     if spec.footnote and not same_text(s.footnote, spec.footnote):
         s.footnote = spec.footnote  # the user's footnote, in the user's words
     if spec.takeaway:
@@ -3773,6 +3852,8 @@ def _requests_of(spec: SlideSpec, ctx: _Ctx) -> list[str]:
         out.append(f"a small footnote: {spec.footnote}")
     if spec.takeaway:
         out.append(f"the takeaway, in the user's words: {spec.takeaway} (the headline then states something else: the slide's key figure or subject)")
+    if spec.photo:
+        out.append(photo_requirement(spec.photo))
     return out
 
 
@@ -5291,6 +5372,7 @@ def run_agent(
                 fixed_at.extend(i for i, sl in enumerate(o.slides, 1) if any(f"slide {sl.id}:" in x for x in done) and i not in fixed_at)
             if fixed_at:
                 tracker.emit("compile", f"Сборка: сверил слайды {', '.join(map(str, fixed_at))} с текстом — {_written_ru(all_done)}.", variant=st.name)
+        _keep_photo_places(o, structure, warns)
         n_content = sum(1 for s in o.slides if s.kind.value not in FRAME_KINDS)
         if n_content == 0:
             warns.append("agent plan rejected: no content slide left after grounding")

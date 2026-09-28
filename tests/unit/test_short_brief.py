@@ -1138,7 +1138,7 @@ def _fingerprint(s: OutlineSlide) -> str:
 
 
 _V2_SLIDE = ("takeaway", "footnote", "rationale", "spec_ref")  # Agent v2 fields: left out while at their defaults
-_V2_CONTENT = ("chart2", "formula")
+_V2_CONTENT = ("chart2", "formula", "photo_slot")  # photo_slot: the free place for the user's photo, None by default
 
 
 def _digest(o: DeckOutline) -> str:

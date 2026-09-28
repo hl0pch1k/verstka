@@ -11,6 +11,7 @@ from verstka.audit.checks.common import composite_hex, fill_alpha, fix, ground_o
 from verstka.audit.registry import AuditContext, check
 from verstka.schemas.audit import CheckSpec, Issue
 from verstka.schemas.common import EMU_PER_PT, Bbox, Color, contrast_ratio
+from verstka.schemas.outline import PHOTO_PLACE_NAME
 
 FONT_NOT_IN_TEMPLATE = CheckSpec(id="font_not_in_template", title="Шрифт не из шаблона или гарнитур больше двух", severity="error", category="template", description="Гарнитура рана отсутствует среди шрифтов шаблона (используемых, встроенных или шрифтов темы), либо на слайде больше двух гарнитур. Имена сравниваются без регистра и дефисов, начертание в имени — та же гарнитура («Bebas» и «Bebas Neue», «Montserrat-Regular» и «Montserrat»); ссылки на шрифты темы (+mj-lt, +mn-lt) раскрываются; номер слайда и колонтитулы шаблона не проверяются.")
 SIZE_NOT_IN_SCALE = CheckSpec(id="size_not_in_scale", title="Размер шрифта не из шкалы шаблона", severity="warn", category="template", description="Размер шрифта отличается более чем на 0,75 пт от всех размеров, встречающихся в шаблоне. Крупные числа (значение с единицей, от наибольшего кегля шаблона или вдвое крупнее основного текста) — отдельная ступень шкалы: они не проверяются.")
@@ -196,6 +197,8 @@ def color_not_in_palette(ctx: AuditContext) -> list[Issue]:
         for e in s.elements:
             if e.type == "chart" or (e.name or "").startswith("Swatch "):
                 continue  # chart colours (and a legend's swatches, which repeat them) come from the palette by construction; sample charts are removed
+            if e.name == PHOTO_PLACE_NAME:
+                continue  # the free place for the user's photo: a stand-in tint of the ground, gone once the photo is in
             if is_template_chrome(e, ctx.manifest):
                 continue
             cands = []

@@ -1,5 +1,5 @@
 name: slide_content_audit
-version: 0.1.0
+version: 0.1.1
 role: vlm
 description: Answers the 11 yes/no content-validation questions from the ТЗ for one rendered slide, with evidence.
 prompt_files:
@@ -11,3 +11,4 @@ params:
   max_tokens: 1200
 changelog:
   - "0.1.0: initial version"
+  - "0.1.1: the free place for the author's own photo (photo_slot) is not a leftover placeholder"

@@ -33,6 +33,7 @@ class SlideSpec(BaseModel):
     formula: Optional[str] = None  # «Покажи формулу: 100 × 300 × 30 = 900 000 рублей»
     footnote: Optional[str] = None  # «Укажи, что налоги … не учитываются»
     takeaway: Optional[str] = None  # «Вывод: …», «Финальный вывод: «…»»
+    photo: Optional[str] = None  # «Оставь свободное место под фотографию помещения»: the photo the user will add («Фото помещения»)
     series_ids: list[str] = Field(default_factory=list)  # data of this slide (registry ids)
     table_ids: list[int] = Field(default_factory=list)  # indexes into BriefStructure.tables
     # the slide's lists that are not data («1-й месяц — учет показателей и обновление меню», «— контроль порций;»):

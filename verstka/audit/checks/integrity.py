@@ -1,4 +1,4 @@
-"""Integrity checks: file opens, empty deck, placeholders, empty/picture slides, lost content, chart labels, duplicates."""
+"""Integrity checks: file opens, empty deck, placeholders, empty/picture slides, lost slides and content, chart labels, duplicates."""
 
 from __future__ import annotations
 
@@ -21,6 +21,8 @@ SLIDE_IS_PICTURE = CheckSpec(id="slide_is_picture", title="Слайд оказа
 CHART_MISSING_LABELS = CheckSpec(id="chart_missing_labels", title="У диаграммы нет подписей осей, единиц или легенды", severity="warn", category="integrity", description="Нативная диаграмма без подписей данных и без оси значений, либо многосерийная без легенды, либо без единиц измерения.")
 DUPLICATE_SLIDES = CheckSpec(id="duplicate_slides", title="Два слайда дублируют друг друга", severity="warn", category="integrity", description="Текст двух слайдов совпадает более чем на 90%.")
 CONTENT_MISSING = CheckSpec(id="content_missing", title="Часть запланированного контента пропала со слайда", severity="error", category="integrity", description="Заголовок, пункты списков, названия карточек, числа с подписями и заголовки колонок из плана ищутся в тексте слайда (включая ячейки таблиц) без учёта пробелов и регистра по первым 18 символам; ошибка, если нет трети и более строк, иначе предупреждение.")
+
+SLIDE_MISSING = CheckSpec(id="slide_missing", title="Слайда из плана нет в колоде", severity="error", category="integrity", description="Слайд плана не нашёлся в готовой колоде ни по метке в заметках докладчика, ни по числу слайдов: рендер не смог собрать его ни одним способом, и колода стала короче плана.")
 
 CONTENT_KEY_CHARS = 18
 _WS_RE = re.compile(r"[\s\u00a0\u202f\u2009\u2007\u2060]+")
@@ -158,6 +160,23 @@ def content_missing(ctx: AuditContext) -> list[Issue]:
         severity = "error" if len(missing) * 3 >= len(wanted) else "warn"
         shown = ", ".join(f"«{m[:40]}»" for m in missing[:3]) + ("…" if len(missing) > 3 else "")
         out.append(ctx.new_issue(CONTENT_MISSING, s.index, f"{len(missing)} из {len(wanted)} {'текста' if len(wanted) % 10 == 1 and len(wanted) % 100 != 11 else 'текстов'} плана нет на слайде: {shown}", severity=severity, details={"missing": missing, "wanted": len(wanted)}, autofix=fix("rematch", "перевыбрать макет, чтобы весь контент поместился", outline_id=s.outline_id)))
+    return out
+
+
+@check(SLIDE_MISSING)
+def slide_missing(ctx: AuditContext) -> list[Issue]:
+    """A planned slide the deck lost: its marker is on no slide and the deck is shorter than the plan (a slide whose
+    marker was not written is still there — the count tells)."""
+    if ctx.outline is None or not ctx.ir.slides:
+        return []
+    marked = {s.outline_id for s in ctx.ir.slides if s.outline_id}
+    lost = [(i, o) for i, o in enumerate(ctx.outline.slides, 1) if o.id not in marked]
+    short = len(ctx.outline.slides) - len(ctx.ir.slides)
+    out: list[Issue] = []
+    for i, o in lost[: max(short, 0)]:
+        issue = ctx.new_issue(SLIDE_MISSING, 0, f"слайда {i} плана «{(o.headline or '').strip()[:60]}» нет в колоде: его не удалось собрать", details={"plan_slide": i, "outline_id": o.id})
+        issue.outline_id = o.id
+        out.append(issue)
     return out
 
 

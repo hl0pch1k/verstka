@@ -8,6 +8,10 @@ from pydantic import BaseModel, Field
 
 from verstka.schemas.common import PatternKind
 
+# the name the free place for the user's photo carries on the slide (SlideContent.photo_slot): the audit knows it by
+# it — a quiet stand-in for a photo, not a colour of the deck's own
+PHOTO_PLACE_NAME = "Место для фото"
+
 Purpose = Literal["feature", "product", "project", "initiative", "report", "other"]
 
 
@@ -95,6 +99,10 @@ class SlideContent(BaseModel):
     # («100 × 300 × 30 = 900 000 ₽»)
     chart2: Optional[ChartSpec] = None
     formula: Optional[str] = None
+    # the user's own photo goes here («оставь место под фотографию помещения»): the slide keeps a free place for it —
+    # the template's own picture placeholder when a sample of the template has one, else a quiet frame — and never fills
+    # it with text, a chart or a picture of ours. The value names the photo («Фото помещения»).
+    photo_slot: Optional[str] = None
 
     @property
     def is_empty(self) -> bool:

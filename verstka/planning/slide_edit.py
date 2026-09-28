@@ -162,6 +162,10 @@ def describe_change(old: OutlineSlide, new: OutlineSlide) -> str:
         changed.append(f"заголовок «{new.headline}»")
     if (new.takeaway or "") != (old.takeaway or ""):
         changed.append(f"вывод «{new.takeaway}»" if new.takeaway else "без отдельного вывода")
+    if new.content.photo_slot and not old.content.photo_slot:
+        changed.append("оставлено свободное место под фото — вставьте его в рамку на слайде")
+    elif old.content.photo_slot and not new.content.photo_slot:
+        changed.append("место под фото убрано")
     return "; ".join(changed) if changed else "переписан текст"
 
 
@@ -234,6 +238,12 @@ def redesign_slide(
     clock = A._Clock(providers if skills is not None else None, time.monotonic() + EDIT_BUDGET_S)
     agent = A._Agent(brief, manifest, [strategy], skills, providers, tracker, clock, raw=[])
     form = requested_form(request) if request.strip() else None
+    # «оставь место под фото»: the slide keeps a free place for the person's own photo (the renderer makes it — the
+    # template's own photo place or a quiet frame); «убери место под фото» takes it back
+    from verstka.planning.brief_structure import photo_dropped, photo_request
+
+    photo = photo_request(request) if request.strip() else None
+    drop_photo = bool(request.strip()) and photo_dropped(request)
     new: Optional[OutlineSlide] = None
     how = ""
     if agent.models:
@@ -244,6 +254,8 @@ def redesign_slide(
                 "rest of your design. Their request overrides the form the brief asked for this slide. Every figure still comes "
                 "from the source text or the data list."
             )
+            if photo:
+                note += f"\n- The slide keeps {A.photo_requirement(photo)}."
         try:
             d = agent.model_design(unit, index, neighbours, ctx, clock.deadline, issues=note, previous=A._previous_json(old))
             A.tidy_design(d, ctx)
@@ -254,6 +266,8 @@ def redesign_slide(
             if not fixing or form is not None:
                 tracker.emit("designer", "Дизайнер: модель не ответила — пробую сделать по правилам.", slide=index)
             how = f"model failed: {str(e)[:120]}"
+    if new is None and (photo or drop_photo) and form is None:
+        new, how = old.model_copy(deep=True), "rules"  # the slide as it is, with its photo place made or taken back
     if new is None:
         if form is not None:
             new = rules_form(outline, old, form[0], form[1])
@@ -268,6 +282,7 @@ def redesign_slide(
     new = keep_what_was_asked(old, new.model_copy(deep=True), request, outline)
     new.id = old.id
     new.spec_ref = old.spec_ref
+    new.content.photo_slot = photo or (None if drop_photo else old.content.photo_slot)
     why = (new.rationale or "").strip()
     lead = rationale if rationale is not None else f"По вашей просьбе «{request.strip()}»"
     lead = lead.strip()

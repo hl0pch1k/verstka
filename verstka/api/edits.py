@@ -1,6 +1,6 @@
 """The chat agent's edits of a finished deck: what the person asks («на слайде 3 покажи расходы таблицей», «убери
-слайд 5», «поменяй местами 2 и 3», «перенеси слайд 6 после второго», «верни как было») read into one operation on one
-variant — the one on screen.
+слайд 5», «поменяй местами 2 и 3», «перенеси слайд 6 после второго», «на слайде 6 оставь место под фото», «верни как
+было») read into one operation on one variant — the one on screen.
 
 Moving and removing slides and undoing are exact operations on the variant's plan; everything else about a slide is the
 slide designer's job (planning/revise.py): it redesigns that slide by the request, the compiler and grounding check it
@@ -89,7 +89,10 @@ def looks_like_edit(message: str) -> bool:
     text = message.strip()
     if len(text) > 400 or re.search(r"презентац|колод", text, re.I):
         return False
-    return bool(EDIT_RX.search(text) or _UNDO_RX.search(text))
+    from verstka.planning.brief_structure import is_photo_instruction, photo_dropped
+
+    # «на слайде 6 оставь место под фото», «убери место под фото»: the free place for the person's own photo
+    return bool(EDIT_RX.search(text) or _UNDO_RX.search(text) or is_photo_instruction(text) or photo_dropped(text))
 
 
 def parse_edit(message: str, on_screen: Optional[int], total: int) -> Optional[EditRequest]:

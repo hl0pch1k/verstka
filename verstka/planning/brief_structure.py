@@ -77,7 +77,8 @@ _ORDINALS = {
 _FUTURE_VERBS = {
     "вырастет", "вырастут", "достигнет", "достигнут", "составит", "составят", "увеличит", "сократит", "снизит",
     "повысит", "упадет", "упадёт", "возрастет", "возрастёт", "пойдет", "пойдёт", "уйдет", "уйдёт", "будет", "будут",
-    "даст", "дадут", "принесет", "принесёт", "стоит", "стоят", "останется", "потребуется",
+    "даст", "дадут", "принесет", "принесёт", "стоит", "стоят", "останется", "потребуется", "займет", "займёт", "займут",
+    "получит", "получат",
 }  # fmt: skip
 _PAST_VERBS = {"вырос", "упал", "стал", "начал", "сделал", "показал", "достиг", "превысил", "составил"}
 _INDECLINABLE = {"меню", "кофе", "какао", "кафе", "шоу", "интервью", "ревю", "такси", "жюри", "пюре", "депо"}
@@ -241,7 +242,53 @@ def _is_rule(sentence: str) -> bool:
     s = sentence.strip()
     if _TASK_RE.match(s):
         return False
-    return bool(_RULE_START_RE.match(s) or _RULE_ANY_RE.search(s))
+    return bool(_RULE_START_RE.match(s) or _RULE_ANY_RE.search(s) or is_photo_instruction(s))
+
+
+# «На этом слайде оставь свободное место под фотографию помещения», «Фото я добавлю самостоятельно», «Не заполняй это
+# место текстом»: the user's own photo goes on the slide — a free place is left for it, the sentences are instructions
+_PHOTO_NOUN = r"(?:фото(?:графи[яиюей]\w*|снимо?к\w*)?|фотк\w*|снимо?к\w*|изображени\w*|картинк\w*|иллюстраци\w*|photos?|images?|pictures?)"
+_PHOTO_ASK_RE = re.compile(
+    rf"(?:мест[оау]|пространств\w*|рамк\w*|плейсхолдер\w*|окошк\w*|окн[оа]|блок\w*|област\w*|зон[аыуе])\s+(?:\S+\s+){{0,2}}?(?:под|для)\s+{_PHOTO_NOUN}|"
+    rf"\b{_PHOTO_NOUN}\s+(?:\S+\s+){{0,3}}?(?:добавлю|вставлю|поставлю|размещу|подставлю|приложу|загружу)\b|"
+    rf"\b(?:добавлю|вставлю|поставлю|размещу|подставлю|приложу|загружу)\s+(?:\S+\s+){{0,2}}?{_PHOTO_NOUN}|"
+    # «добавь фото зала», «вставь фотографию команды»: a photo of the user's own subject — its place is left for it
+    rf"\b(?:добавь|вставь|помести|размести|поставь|прикрепи)(?:те)?\s+(?:сюда\s+|здесь\s+|на\s+слайд\s+)?(?:фото(?:графи[юи]|снимо?к\w*)?|снимо?к\w*)\b|"
+    rf"\b(?:leave|keep|reserve)\s+(?:\S+\s+){{0,3}}?(?:space|room|place)\s+for\s+(?:a\s+|an\s+|the\s+)?{_PHOTO_NOUN}|\b{_PHOTO_NOUN}\s+placeholder",
+    re.I,
+)
+_PHOTO_NEG_RE = re.compile(rf"\b(?:без|не\s+нуж\w*|не\s+надо|не\s+оставляй|не\s+добавляй)\s+(?:\S+\s+){{0,2}}?(?:мест\w*\s+(?:под|для)\s+)?{_PHOTO_NOUN}", re.I)
+_PHOTO_KEEP_RE = re.compile(r"\b(?:эт[оуой]|этом)\s+мест\w*|\bне\s+(?:заполня\w*|занима\w*|ставь|размещай)\b[^.]{0,40}\bмест", re.I)
+_PHOTO_WHAT_RE = re.compile(r"\b(?:фотографи[юяи]|фото|снимок|снимка|снимки|изображение)\s+(?P<what>(?!я\b|сам|потом|позже)[а-яё][а-яё-]{2,}(?:\s+(?!я\b|сам|потом|позже)[а-яё][а-яё-]{2,}){0,2})", re.I)
+
+
+def is_photo_instruction(sentence: str) -> bool:
+    """A sentence about the place for the user's own photo: the request itself or what must not fill that place."""
+    s = sentence or ""
+    return bool((_PHOTO_ASK_RE.search(s) and not _PHOTO_NEG_RE.search(s)) or _PHOTO_KEEP_RE.search(s))
+
+
+# «убери место под фото», «фото не будет»: the free place is no longer wanted
+_PHOTO_DROP_RE = re.compile(
+    rf"\b(?:убери|удали|убрать|удалить|не\s+нужн\w*|не\s+надо)\s+(?:\S+\s+){{0,2}}?(?:мест\w*|рамк\w*|пространств\w*)\s+(?:под|для)\s+{_PHOTO_NOUN}|"
+    rf"\b{_PHOTO_NOUN}\s+(?:не\s+будет|не\s+нужн\w*|не\s+понадобится)",
+    re.I,
+)
+
+
+def photo_dropped(sentence: str) -> bool:
+    """The sentence takes back the free place for a photo («убери место под фото»)."""
+    return bool(_PHOTO_DROP_RE.search(sentence or ""))
+
+
+def photo_request(sentence: str) -> Optional[str]:
+    """The photo a sentence asks a free place for («Фото помещения», «Фото»), None when it asks none."""
+    s = sentence or ""
+    if not _PHOTO_ASK_RE.search(s) or _PHOTO_NEG_RE.search(s) or _PHOTO_DROP_RE.search(s):
+        return None
+    m = _PHOTO_WHAT_RE.search(s)
+    what = m.group("what").strip() if m else ""
+    return f"Фото {what}".strip() if what else "Фото"
 
 
 # ------------------------------------------------------------------ slide-level requests
@@ -346,6 +393,14 @@ def _subject(text_before: str) -> tuple[str, bool]:
     # расходов на продукты, упаковку и списания»)
     cut = max((t.rfind(b) + len(b) for b in _CLAUSE_BOUNDS if t.rfind(b) != -1), default=0)
     ws = t[cut:].split()
+    # «Из общей площади 180 м² тренировочный зал займет …»: a circumstance with a figure of its own at the head of the
+    # clause is not what is measured — the subject follows that figure and its unit
+    # («За 6 месяцев …», a figure right after its preposition, is the leading circumstance the loop below drops)
+    if len(ws) > 3 and ws[0].lower() in _PREPS:
+        clause = " ".join(ws)
+        own = [m for m in _NUM_RE.finditer(clause) if m.group("unit") and 2 <= len(clause[: m.start()].split()) <= 4]
+        if own and clause[own[-1].end():].split():
+            ws = clause[own[-1].end():].split()
     while ws and ws[0].lower() in _CONJ:
         ws.pop(0)
     after_verb = False
@@ -876,6 +931,9 @@ def _read_block(block: _Block, reg: _Registry, all_numbers: list[float]) -> None
             fn = _FOOTNOTE_ASK_RE.match(sent)
             if fn and not spec.footnote:
                 spec.footnote = H.cap_first(H.strip_end(fn.group("t") or fn.group("t2")))
+            ph = photo_request(sent)
+            if ph and (not spec.photo or spec.photo == "Фото"):
+                spec.photo = ph
         prev = sent
         k += 1
     if spec is not None:
