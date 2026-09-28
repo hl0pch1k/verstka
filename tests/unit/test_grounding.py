@@ -1128,3 +1128,17 @@ _BEFORE_AFTER_CASES = [
 def test_a_before_after_written_in_any_common_way_keeps_its_true_changes(brief, line, keep):
     out = BriefIndex(brief).clean(line).text or ""
     assert bool(re.search(r"\d", out)) is keep, out
+
+
+def test_a_sentence_of_the_brief_word_for_word_keeps_its_elided_subject():
+    # gate 4 (writer mode): «…составила 47,2 млн, а ежемесячная — 73,4 млн» lost its contrast clause as «a figure given
+    # another subject» — the brief's own sentence as it is never misreads its figures
+    from verstka.planning.grounding import ground_outline
+    from verstka.schemas.common import PatternKind
+    from verstka.schemas.outline import Brief, DeckOutline, OutlineSlide, SlideContent
+
+    brief = Brief(text="Слайд 5. Аудитория\nПо состоянию на 2022 год ежедневная аудитория «ВКонтакте» в России составила 47,2 млн, а ежемесячная — 73,4 млн. Всемирная месячная аудитория — 100 млн.")
+    line = "По состоянию на 2022 год ежедневная аудитория «ВКонтакте» в России составила 47,2 млн, а ежемесячная — 73,4 млн."
+    s = OutlineSlide(id="s5", kind=PatternKind.bullets, headline="Всемирная месячная аудитория — 100 млн.", content=SlideContent(bullets=[line]), spec_ref=5)
+    o, warns = ground_outline(DeckOutline(title="x", slides=[s]), brief)
+    assert "73,4 млн" in o.slides[0].content.bullets[0], (o.slides[0].content.bullets, warns)

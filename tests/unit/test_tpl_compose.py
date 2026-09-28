@@ -1049,3 +1049,239 @@ def test_the_value_axis_keeps_room_for_its_ticks_with_their_unit():
     assert va.find(q("c:delete")).get("val") == "0"  # the axis is shown in this frame
     left = (chart_plot_bbox(gf).x - gf.left) / EMU_PER_PT
     assert left >= text_width_pt("1 200 000 ₽", "Trebuchet MS", 14.0) + 0.45 * 14.0 - 0.1  # the tick, with its unit, and a gap
+
+
+# ------------------------------------------------------------------ gate 4 (round 5): G4-11, G4-18, G4-19, G4-20, requests
+
+SQ_W, SQ_H = 9144000, 6858000  # 4:3
+
+
+@pytest.fixture
+def sparse43_env(tmp_path):
+    deck = build_sparse_deck(tmp_path / "sparse43.pptx", SQ_W, SQ_H, title_pt=40, body_pt=24)
+    manifest = analyze_template(deck, workspace_root=tmp_path / "ws", use_llm=False, use_vlm=False, render=False)
+    ws = TemplateWorkspace.open(manifest.template_id, tmp_path / "ws")
+    return deck, manifest, ws
+
+
+def _composer_at(env, o: OutlineSlide, strategy: str, W: int, H: int):
+    from verstka.rendering.compose import Composer
+
+    deck, manifest, ws = env
+    slide = DeckBuilder(deck).add_blank_slide(6)
+    return Composer(slide, Kit(manifest, W, H, "FFFFFF"), o, DeckOutline(title="T", slides=[o], strategy=strategy), strategy, manifest)
+
+
+def _drawn(comp, n0: int, base: str) -> list:
+    """(element, bbox) of the shapes named `base N` composed after the first `n0` elements."""
+    out = []
+    for el in list(comp.cv.tree)[n0:]:
+        name = (el.find(".//" + q("p:cNvPr")).get("name") or "").rsplit(" ", 1)[0]
+        if name == base:
+            out.append((el, element_bbox(el)))
+    return out
+
+
+def _one_line_width_pt(el) -> list[float]:
+    """Per paragraph of a text shape, its runs' width on one line (pt), measured in their own face and size."""
+    from verstka.rendering.fonts import text_width_pt
+
+    widths = []
+    for p in el.iter(q("a:p")):
+        w = 0.0
+        for r in p.iter(q("a:r")):
+            rpr = r.find(q("a:rPr"))
+            latin = rpr.find(q("a:latin"))
+            w += text_width_pt(r.find(q("a:t")).text or "", latin.get("typeface") if latin is not None else None, int(rpr.get("sz")) / 100, rpr.get("b") == "1")
+        widths.append(w)
+    return widths
+
+
+@pytest.mark.parametrize("strategy", ["structured", "visual", "compact"])
+@pytest.mark.parametrize("region", [(0.9, 0.62), (0.55, 0.4), (0.4, 0.3), (0.3, 0.25)])
+def test_a_pair_of_charts_on_a_4_3_slide_always_lands_a_plan(sparse43_env, strategy, region):
+    """C's report (Classic43 / Handdrawn / LO_DNA short s5): the pair's fallback took a plan by an index past its list
+    (IndexError) and the slide fell to a picture. Whatever the region — every plan clean or none — a plan is drawn."""
+    line = ChartSpec(type="line", title="Прогноз выручки", categories=COFFEE_MONTHS, series=[InlineSeries(name="Выручка", values=COFFEE_REVENUE)], unit="₽")
+    pie = ChartSpec(type="pie", title="Распределение вложений", categories=["Витрина для десертов", "Программа лояльности и учет", "Обновление меню и фотографии", "Обучение сотрудников", "Резерв"], series=[InlineSeries(name="Вложения", values=[70000, 35000, 25000, 20000, 30000])], unit="₽")
+    o = OutlineSlide(id="p", kind=PatternKind.chart, headline="Выручка вырастет на 26,5%", content=SlideContent(chart=line, chart2=pie, bullets=["Ежемесячная выручка — 900 000 рублей", "Прогноз: 1 138 500 ₽ на 6-й месяц"]), takeaway="Траектория роста выручки на 26,5% за 6 месяцев")
+    comp = _composer_at(sparse43_env, o, strategy, SQ_W, SQ_H)
+    comp.compose("chart_pair", Bbox(x=int(0.06 * SQ_W), y=int(0.3 * SQ_H), w=int(region[0] * SQ_W), h=int(region[1] * SQ_H)))
+    frames = [sh for sh in comp.slide.shapes if getattr(sh, "has_chart", False) and sh.has_chart]
+    assert frames and not any("failed" in w for w in comp.warnings)
+
+
+def _figures_on_one_line(comp, n0: int) -> None:
+    figs = _drawn(comp, n0, "Figure")
+    assert figs
+    for el, (x, y, w, h) in figs:
+        widths = _one_line_width_pt(el)
+        assert max(widths) <= w / EMU_PER_PT + 0.5, (widths, w / EMU_PER_PT)  # one line in its box: never wrapped
+
+
+@pytest.mark.parametrize("tall", [True, False])
+def test_a_figure_never_wraps_in_its_tile(sparse_env, tall):
+    """Focus live s3: «около 615 тыс. тонн» in a third of a narrow area was set at the tile's least size and still broke
+    over its accent rule (text_overflow). Long figures stand one under the other with their labels beside them (a tall
+    area), else they step down until each one reads on one line."""
+    nums = [NumberCallout(value="17,9%", label="выработке электроэнергии в 2024 году"), NumberCallout(value="около 3800 тонн", label="Потребление урана в год"), NumberCallout(value="около 615 тыс. тонн", label="Разведанные запасы урана")]
+    o = OutlineSlide(id="k", kind=PatternKind.stat_row, headline="Доля атомной энергетики — 17,9%", content=SlideContent(numbers=nums))
+    comp = _composer(sparse_env, o, "compact")
+    k = comp.kit
+    area = Bbox(x=int(0.2 * LO_W), y=int(0.35 * LO_H), w=int(0.5 * LO_W), h=int((0.5 if tall else 0.16) * LO_H))
+    n0 = len(comp.cv.tree)
+    comp.kpis(area, nums, [])
+    _figures_on_one_line(comp, n0)
+    if tall:
+        assert any("one under the other" in w for w in comp.warnings)
+        sizes = _sizes_by_name(comp, n0)["Figure"]
+        assert max(sizes) >= k.h2  # the figures read as figures, not as 16 pt captions
+
+
+def test_a_hedge_before_a_figure_is_set_at_its_units_size(sparse_env):
+    """«около 615 тыс. тонн»: the hedge and the unit ride small on the figure's baseline, the number keeps the size."""
+    o = OutlineSlide(id="k", kind=PatternKind.stat_row, headline="h", content=SlideContent())
+    comp = _composer(sparse_env, o)
+    k = comp.kit
+    size = max(k.sizes)
+    para, width = comp.figure_para("около 615 тыс. тонн", size, "111111", "777777")
+    texts = [(r.text.replace(" ", " ").strip(), r.size) for r in para.runs]
+    assert texts[0][0] == "около" and texts[0][1] < size
+    assert texts[1] == ("615", size)
+    assert texts[2][0] == "тыс. тонн" and texts[2][1] < size
+    whole = comp.figure_para("более 10", size, "111111", "777777")[0]
+    assert [r.text.replace(" ", " ").strip() for r in whole.runs] == ["более", "10"]
+
+
+@pytest.mark.parametrize("unit,values", [(None, [42, 32, 18.6, 7.4]), ("%", [42, 32, 18.6, 7.4]), ("%", [60, 25, 15])])
+def test_a_pie_of_percents_says_each_part_once(sparse_env, unit, values):
+    """G4-11 (R_vk s6): «Доходы VK по направлениям, %» lost its unit and its legend read «42 · 42%», «18,6 · 19%»; the
+    slices «42,0». A pie whose unit is «%», or whose parts add up to 100 ± 1, says each part once, as written."""
+    from verstka.rendering.charts import pie_values_are_percents
+
+    cats = ["Онлайн-реклама", "Онлайн-игры", "Платные сервисы", "Новые проекты"][: len(values)]
+    spec = ChartSpec(type="pie", title="Доходы VK по направлениям", categories=cats, series=[InlineSeries(name="Доходы", values=values)], unit=unit)
+    assert pie_values_are_percents(unit, sum(values))
+    o = OutlineSlide(id="p", kind=PatternKind.chart, headline="Доходы VK", content=SlideContent(chart=spec))
+    comp = _composer(sparse_env, o)
+    n0 = len(comp.cv.tree)
+    comp.compose("chart", Bbox(x=int(0.05 * LO_W), y=int(0.25 * LO_H), w=int(0.9 * LO_W), h=int(0.65 * LO_H)))
+    shares = [etree.tostring(el, method="text", encoding="unicode").replace(" ", " ").strip() for el, _ in _drawn(comp, n0, "Share")]
+    want = [f"{v:g}".replace(".", ",") + "%" for v in sorted(values, reverse=True)]
+    assert shares == want and not any("·" in s for s in shares)
+    gf = next(sh for sh in comp.slide.shapes if getattr(sh, "has_chart", False) and sh.has_chart)
+    assert list(gf.chart.plots[0].series[0].values) == sorted(values, reverse=True)  # the slices say the values themselves
+    assert not pie_values_are_percents(None, 180000) and not pie_values_are_percents("₽", 100)
+
+
+def test_captions_under_charts_step_down_before_the_conclusion_leaves_its_strip(sparse_env):
+    """G4-19 (Nature short visual s4): set again above the conclusion's room, three captions under the charts stayed at
+    the lead size in three columns, three lines each, fell past the room — and the hero figure «1 138 500 ₽» gave way to
+    a line under the heading. They step down (body, small; three lines → two columns; never under 2 %) first."""
+    o = OutlineSlide(id="v", kind=PatternKind.chart, headline="h", content=SlideContent())
+    comp = _composer(sparse_env, o, "visual")
+    k = comp.kit
+    lines = ["Комбо с напитками и выпечкой", "Программа лояльности", "Предложения для сотрудников ближайших офисов"]
+    area = Bbox(x=int(0.05 * LO_W), y=int(0.22 * LO_H), w=int(0.89 * LO_W), h=int(0.37 * LO_H))
+    plain = comp._under_plan(area, lines, spread=True)
+    comp._rehousing, comp._floor_2pct = True, True
+    again = comp._under_plan(area, lines, spread=True)
+    assert again["eh"] <= plain["eh"]
+    assert again["eh"] + int(k.vgap * 1.4) <= 0.3 * area.h or again["eh"] < plain["eh"]
+    sizes = {r.size for col in again["paras"] for p in col for r in p.runs}
+    assert min(sizes) >= 0.02 * k.hpt - 0.05
+
+
+def _theses() -> list[SlideItem]:
+    return [SlideItem(title=t) for t in ("Партнёрства с пятью ближайшими офисами", "Программа лояльности с понятными условиями", "Продвижение в районных сообществах", "Дневные предложения с 15:00 до 18:00", "Рост маркетингового бюджета до 35 000 рублей в месяц")]
+
+
+def test_five_theses_keep_their_numerals_where_the_room_allows(sparse_env):
+    """G4-18 (dataset long visual s6: LCT, VK Education, WorkSpace lost «01…05», VK Tech kept them): the numerals are tried
+    at their own size, a step over the title, hanging beside the first line — and kept while the words stay within a
+    step of the size they reach without them."""
+    o = OutlineSlide(id="c", kind=PatternKind.cards, headline="Цель — увеличить число покупок", content=SlideContent(items=_theses()))
+    comp = _composer(sparse_env, o, "visual")
+    area = Bbox(x=int(0.05 * LO_W), y=int(0.3 * LO_H), w=int(0.9 * LO_W), h=int(0.36 * LO_H))
+    n0 = len(comp.cv.tree)
+    comp.cards(area, _theses())
+    idx = _drawn(comp, n0, "Index")
+    assert [etree.tostring(el, method="text", encoding="unicode").strip() for el, _ in idx] == ["01", "02", "03", "04", "05"]
+    texts = _drawn(comp, n0, "Card text")
+    for (iel, ib), (tel, tb) in zip(idx, texts):
+        # a numeral never stands on its words: over them, or beside their first line
+        assert ib[1] + ib[3] <= tb[1] + int(0.003 * LO_H) or ib[0] + ib[2] <= tb[0] + int(0.003 * LO_W)
+
+
+def test_card_words_of_a_row_start_on_one_line(sparse_env):
+    """G4-18 (Focus / Sidebar s4): «Свободные часы» on two lines pushed its card's words a line below its neighbours'."""
+    items = [SlideItem(title="Средний чек", text="Только 20% чеков содержат еду"), SlideItem(title="Свободные часы после обеда", text="4 из 18 мест заняты после 15:00"), SlideItem(title="Потери", text="Списания продуктов — 27 000 ₽ в месяц")]
+    o = OutlineSlide(id="c", kind=PatternKind.cards, headline="h", content=SlideContent(items=items))
+    comp = _composer(sparse_env, o, "structured")
+    k = comp.kit
+    ts = k.lead
+    inner = Emu(int(text_width_pt_("Свободные часы после", k.font, ts) * 1.02 * EMU_PER_PT))
+    pads = comp._title_pads(items, 3, inner, ts)
+    assert pads[1] == 0 and pads[0] == pytest.approx(ts * k.line) and pads[2] == pytest.approx(ts * k.line)
+    starts = []  # where each card's words start under its title (pt): the title's lines and the gap under them
+    for it, pad in zip(items, pads):
+        title = comp._card_paras(it, ts, k.body, k.card.colors, title_pad=pad)[0]
+        starts.append(para_lines_(title, inner) * ts * k.line + title.space_after)
+    assert max(starts) - min(starts) < 0.01
+    # the card's measured height counts the lengthened gap (a card never shorter than its words)
+    h_pad = comp._card_content_h(items[0], inner, ts, k.body, None, k.card.colors, 0, pads[0])
+    assert h_pad - comp._card_content_h(items[0], inner, ts, k.body, None, k.card.colors, 0) == pytest.approx(_emu_(pads[0]), abs=_emu_(0.5))
+
+
+def para_lines_(para, width_emu) -> int:
+    from verstka.rendering.compose import para_lines
+
+    return para_lines(para, width_emu / EMU_PER_PT)
+
+
+def _emu_(pt: float) -> int:
+    return int(pt * EMU_PER_PT)
+
+
+def test_two_sentences_in_cards_read_as_statements(sparse_env):
+    """W2's request (EV compact s7): two title-only cards at the body size in tall cards — 14 % of the slide in lines.
+    One or two sentences in cards take the callout size under the heading, down to the lead size."""
+    items = [SlideItem(title="Эксперты McKinsey включили электромобили в число революционных технологий"), SlideItem(title="В России растёт интерес к электромобилям")]
+    o = OutlineSlide(id="c", kind=PatternKind.cards, headline="Электромобили — революционная технология", content=SlideContent(items=items))
+    comp = _composer(sparse_env, o, "compact")
+    k = comp.kit
+    n0 = len(comp.cv.tree)
+    comp.compose("cards", Bbox(x=int(0.05 * LO_W), y=int(0.3 * LO_H), w=int(0.9 * LO_W), h=int(0.55 * LO_H)))
+    assert min(_sizes_by_name(comp, n0)["Card text"]) > k.h2 + 0.05  # past the usual cap (HEAD: the h2 size at most)
+
+
+def test_six_two_line_points_are_not_squeezed_to_eleven_lines(sparse_env):
+    """G4-20 (Focus long compact s8): a column of six two-line steps is twelve lines; the «≤ 11 lines» cap sent it to the
+    least size with a third of the card empty."""
+    o = _plan_slide()
+    comp = _composer(sparse_env, o, "compact")
+    k = comp.kit
+    items = list(o.content.items)
+    n0 = len(comp.cv.tree)
+    comp.columns(Bbox(x=int(0.05 * LO_W), y=int(0.25 * LO_H), w=int(0.8 * LO_W), h=int(0.7 * LO_H)), items)
+    sizes = _sizes_by_name(comp, n0)
+    assert min(sizes["Column"]) >= k.body - 0.05  # HEAD: 10 pt (eleven lines) where the body size fits the card
+
+
+@pytest.mark.parametrize("env_name,W,H", [("sparse43_env", SQ_W, SQ_H), ("sparse_env", LO_W, LO_H)])
+def test_six_steps_with_their_budget_keep_two_percent(env_name, W, H, request):
+    """G4-20 / B's open item (long visual s8 on Sidebar43, Focus, Nature, Handdrawn): six steps in a row with five
+    budget lines under them were set under 2 % of the slide height. The steps stand one under the other with the
+    lines beside them at ≥ 2 %."""
+    env = request.getfixturevalue(env_name)
+    steps = [SlideItem(title=f"{i}-й месяц", text=t) for i, t in enumerate(["Учет показателей и обновление меню", "Запуск комбо и обучение сотрудников", "Запуск программы лояльности и партнерств с офисами", "Продвижение дневных предложений и настройка закупок", "Корректировка предложений по результатам продаж", "Оценка результатов и закрепление удачных решений"], 1)]
+    budget = ["Витрина для десертов — 70 000 ₽", "Настройка программы лояльности и учета — 35 000 ₽", "Обновление меню, фотографии и оформление — 25 000 ₽", "Обучение сотрудников — 20 000 ₽", "Резерв — 30 000 ₽"]
+    o = OutlineSlide(id="t", kind=PatternKind.timeline, headline="Разовые вложения составляют 180 000 рублей", content=SlideContent(items=steps, bullets=budget), takeaway="Все разовые вложения покрываются бюджетом запуска")
+    comp = _composer_at(env, o, "visual", W, H)
+    k = comp.kit
+    n0 = len(comp.cv.tree)
+    comp.compose("process", Bbox(x=int(0.16 * W), y=int(0.26 * H), w=int(0.79 * W), h=int(0.63 * H)))
+    sizes = _sizes_by_name(comp, n0)
+    body = sizes.get("Step", set()) | sizes.get("Note", set())
+    assert body and min(body) >= 0.02 * k.hpt - 0.05, sizes
+    assert "Вывод" not in (o.notes or "") and "Conclusion" in sizes

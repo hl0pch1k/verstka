@@ -27,6 +27,10 @@ log = logging.getLogger(__name__)
 API = "https://{lang}.wikipedia.org/w/api.php"
 MAX_PAGES = 2
 _CACHE_VERSION = 1
+# the title resolution's own version, part of its cache key: a resolution made by older ranking rules is not reused
+# (gate 4: «Возобновляемая энергетика в России» kept resolving to «Ядерная энергетика России» for 7 days after the
+# sibling rule fixed it) — raise it whenever resolve() or sibling_title() changes what they pick
+RESOLVE_VERSION = 2
 
 # «Презентация про …», «История …», «Как работает …», «на 10 слайдов»: words that say what to make, not what about
 LEAD_WORDS_RE = re.compile(
@@ -309,6 +313,40 @@ def _subsections(raw: str) -> tuple[str, list[tuple[str, str]]]:
     return intro, subs
 
 
+# a turning point of a war told inside a subsection: a dated sentence with a battle, an offensive, a surrender…
+_TURN_RE = re.compile(r"(?<![\wё])(?:битв\w*|сражени\w*|наступлени\w*|контрнаступлени\w*|поражени\w*|капитуляци\w*|бомбардировк\w*|"
+                      r"высадк\w*|окружени\w*|разгром\w*|освобо\w*|штурм\w*|взяти\w*|блокад\w*)(?![\wё])", re.I)
+_DATED_RE = re.compile(r"(?<![\d.,])(?:1\d{3}|20\d{2})(?![\d.,])|(?<![\d.,])\d{1,2}\s+(?:январ|феврал|март|апрел|ма[яй]|июн|июл|август|сентябр|октябр|ноябр|декабр)", re.I)
+TURN_SHARE = 0.45  # the part of a subsection's room its turning points may take
+
+
+def _turning_text(body: str, room: int) -> str:
+    """A war's subsection: its opening, then its turning points further down (a dated sentence with a battle, an
+    offensive, a surrender: «30 сентября 1941 года немецкие войска начали наступление на Москву» stands in the middle of
+    «Вторжение в СССР», whose opening never reached it — gate 4: no Moscow in the WWII deck), as much as `room` holds."""
+    opening = _section_text(body, max(80, int(room * (1 - TURN_SHARE))))
+    left = room - len(opening) - 1
+    if left < 60:
+        return opening
+    rest = body[len(opening):] if body.startswith(opening) else body.replace(opening, " ", 1)
+    sents = [x for x in re.split(r"(?<=[.!?])\s+", " ".join(rest.split())) if 30 <= len(x) and _TURN_RE.search(x) and _DATED_RE.search(x)]
+
+    def rank(k: int) -> tuple:
+        x = sents[k]
+        year = bool(re.search(r"(?<![\d.,])(?:1\d{3}|20\d{2})(?![\d.,])", x))
+        return (-(2 * year + len({m.group(0).lower()[:5] for m in _TURN_RE.finditer(x)})), len(x), k)
+
+    chosen: list[int] = []
+    for k in sorted(range(len(sents)), key=rank):  # a sentence with its year first (the event is dated alone)
+        if len(sents[k]) + 1 <= left:
+            chosen.append(k)
+            left -= len(sents[k]) + 1
+        if left < 60:
+            break
+    extra = [sents[k] for k in sorted(chosen)]  # in the article's order
+    return opening + ("\n" + " ".join(extra) if extra else "")
+
+
 def _deep_section_text(raw: str, room: int) -> str:
     """A level-2 section of a history as its intro (≤ DEEP_INTRO_MAX) and the opening of every subsection under its
     heading («### Перелом на Восточном фронте» + «19 ноября 1942 года Красная армия перешла в контрнаступление под
@@ -324,7 +362,7 @@ def _deep_section_text(raw: str, room: int) -> str:
     parts = [head] if head else []
     used = len(head)
     for h, b in subs:
-        piece = f"### {h}\n{_section_text(b, max(80, per - len(h)))}"
+        piece = f"### {h}\n{_turning_text(b, max(80, per - len(h)))}"
         if used + len(piece) + 1 > room and parts:
             break
         parts.append(piece)
@@ -393,14 +431,20 @@ def cut_reference(text: str, limit: int = 12000, kind: Optional[str] = None, foc
 
 def cut_pages(pages: list[RefPage], limit: int = 12000, kind: Optional[str] = None, focus: Optional[str] = None) -> str:
     """The cut of up to two pages: the main page gets 2/3 of the limit when there are two (half when the second is
-    the page of the topic's place, `focus`)."""
-    pages = [p for p in pages if p.text][:MAX_PAGES]
+    the page of the topic's place, `focus`); a third page (a market part's own article: writer.add_part_page) shares
+    the second half with the second one."""
+    pages = [p for p in pages if p.text][:MAX_PAGES + 1]
     if not pages:
         return ""
     if len(pages) == 1:
         return f"# {pages[0].title}\n{cut_reference(pages[0].text, limit - len(pages[0].title) - 4, kind, focus)}"
-    first = int(limit / 2) if focus and focus in pages[1].title.lower() else int(limit * (3 / 4 if kind in DEEP_KINDS else 2 / 3))
-    shares = [first, limit - first]
+    if len(pages) == 2:
+        first = int(limit / 2) if focus and focus in pages[1].title.lower() else int(limit * (3 / 4 if kind in DEEP_KINDS else 2 / 3))
+        shares = [first, limit - first]
+    else:
+        first = int(limit / 2)
+        rest = (limit - first) // (len(pages) - 1)
+        shares = [first] + [rest] * (len(pages) - 1)
     return "\n\n".join(f"# {p.title}\n{cut_reference(p.text, s - len(p.title) - 6, kind, focus)}" for p, s in zip(pages, shares))
 
 
@@ -630,9 +674,10 @@ class WikiClient:
         search's top hit when it shares a word with its query (a narrow topic's general article: «Рынок электромобилей в
         России» → «Электромобиль»)."""
         titles = [" ".join(t.replace("_", " ").split()) for t in titles if t and t.strip()][:3]
-        key = json.dumps([titles, lead_free(topic)], ensure_ascii=False)
+        key = json.dumps([RESOLVE_VERSION, titles, lead_free(topic)], ensure_ascii=False)
         hit = self._cached("resolve", key)
-        if hit is not None:
+        # a cached resolution is used only when today's rules would keep it (no sibling of the topic among its titles)
+        if hit is not None and hit.get("titles") and not any(sibling_title(t, topic) for t in hit["titles"]):
             return list(hit.get("titles") or []), []
         warnings: list[str] = []
         try:
@@ -666,8 +711,9 @@ class WikiClient:
                     found = [near[0]]
         except Exception as e:  # noqa: BLE001 - no reference: the writer writes from knowledge
             stale = self._cached("resolve", key, stale=True)
-            if stale is not None:
-                return list(stale.get("titles") or []), [f"reference: network failed, cached titles used ({str(e)[:80]})"]
+            kept = [t for t in (stale or {}).get("titles") or [] if not sibling_title(t, topic)]
+            if kept:
+                return kept, [f"reference: network failed, cached titles used ({str(e)[:80]})"]
             raise
         if found:
             self._store("resolve", key, {"titles": found})
@@ -756,6 +802,49 @@ def fetch_reference(
         client.close()
 
 
+def subject_words(topic: str) -> str:
+    """What a place topic is about without its lead words, its place and «рынок» («Рынок электромобилей в России» →
+    «электромобилей»): the words a part's page is searched with."""
+    core = lead_free(topic)
+    where = place_of(topic)
+    if where:
+        core = re.sub(r"(?<![\wё])(?:в|во|на)\s+" + re.escape(where[0]) + r"(?![\wё])", " ", core)
+        core = re.sub(r"(?<![\wё])(?:российск|московск|петербургск)\w*", " ", core, flags=re.I)
+    core = re.sub(r"(?<![\wё])(?:рын(?:ок|ка|ке|ку|ком)|отрасл\w*|сфер\w*|индустри\w*)(?![\wё])", " ", core, flags=re.I)
+    return " ".join(core.split())
+
+
+def fetch_part_page(
+    part: str, topic: str, known: list[str], *, lang: str = "ru", contact: str = "", timeout_s: float = 6.0,
+    cache_dir: Optional[Path] = None, cache_days: float = 7.0, deadline: Optional[float] = None, transport: Any = None,
+) -> Optional[RefPage]:
+    """The article for a storyline part the topic's articles do not cover (gate 4 G4-9: nothing about charging in
+    «Электромобиль» and «Автомобильная промышленность России» — «Зарядная станция для электромобилей» has a «Россия»
+    section): the search's top hit for «<part> <subject>» («инфраструктура электромобилей») that is not a page already
+    fetched, a sibling or a disambiguation. None on any failure (the part then gives its slide to a covered part)."""
+    if not contact_ok(contact):
+        return None
+    subject = subject_words(topic)
+    if not subject:
+        return None
+    query = f"{part.split()[0].lower()} {subject}"
+    client = WikiClient(lang if lang in ("ru", "en") else "ru", contact, timeout_s=timeout_s, cache_dir=cache_dir, cache_days=cache_days,
+                        transport=transport, deadline=deadline)
+    try:
+        hits = client._search_safe(query)
+        title = next((t for t, _ in hits[:3] if t not in known and "(значения)" not in t and "(disambiguation)" not in t
+                      and not sibling_title(t, topic) and tokens(t) & (tokens(query) | tokens(subject))), None)
+        if title is None:
+            return None
+        page = client.fetch(title)
+        return page if page is not None and page.text else None
+    except Exception as e:  # noqa: BLE001 - no page: the part is left out
+        log.info("part page for %r failed: %s", part, e)
+        return None
+    finally:
+        client.close()
+
+
 _ADJ_END_RE = re.compile(r"(?:ая|яя|ый|ий|ой|ое|ее|ые|ие)$")
 
 
@@ -787,7 +876,7 @@ def _fetch_safe(client: WikiClient, ref: Reference):
 
 
 __all__ = [
-    "LEAD_WORDS_RE", "RefPage", "RefSentence", "Reference", "WikiClient", "contact_ok", "cut_pages", "cut_reference",
+    "LEAD_WORDS_RE", "RefPage", "RefSentence", "Reference", "WikiClient", "contact_ok", "cut_pages", "cut_reference", "fetch_part_page",
     "drop_quotations", "fetch_reference", "focus_sections", "lead_free", "number_reference", "place_of", "sections",
     "sibling_title", "split_line", "tokens", "user_agent",
 ]

@@ -11,8 +11,10 @@ import { Button } from "./ui/Button";
 
 const LIMIT = 50;
 
-/** Best audit score across the variants of a generation (from the list summary). */
+/** Best audit score across the variants of a generation (from the list summary). A topic whose text was never written
+ *  (the model failed: a skeleton) has none: «100» would read as a success. */
 function bestScore(g: GenerationMeta): number | null {
+  if (g.writer && g.writer.status !== "written" && g.planner?.planned_by === "skeleton") return null;
   const scores = Object.values(g.summary ?? {})
     .map((s) => s.score)
     .filter((s): s is number => typeof s === "number" && Number.isFinite(s));

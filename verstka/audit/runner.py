@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from verstka.audit.ir import build_deck_ir
 from verstka.audit.registry import AuditContext, run_checks
@@ -35,7 +35,10 @@ def run_audit(
     existing_images: Optional[dict[int, Path]] = None,
     strategy: Optional[str] = None,
     brief_text: Optional[str] = None,
+    writer: Optional[Any] = None,
 ) -> AuditReport:
+    """`writer`: writer mode's record of the generation (WriterResult.summary(), the result or its status): a topic
+    deck whose writer did not write gets `writer_failed` (checks/writing.py)."""
     t0 = time.time()
     pptx = Path(pptx)
     report = AuditReport(deck=str(pptx), template_id=manifest.template_id, strategy=strategy)
@@ -61,7 +64,7 @@ def run_audit(
             log.warning("render failed: %s", e)
     elif images:
         render_ok = True
-    ctx = AuditContext(ir=ir, manifest=manifest, outline=outline, ws=ws, slide_images=images, render_ok=render_ok, opens_ok=opens_ok, brief_text=brief_text)
+    ctx = AuditContext(ir=ir, manifest=manifest, outline=outline, ws=ws, slide_images=images, render_ok=render_ok, opens_ok=opens_ok, brief_text=brief_text, writer=writer)
     if opens_ok:
         issues, ran = run_checks(ctx)
         report.issues.extend(issues)

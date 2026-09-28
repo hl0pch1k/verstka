@@ -63,8 +63,15 @@ export function modelIndicator(st: ModelsStatus | null, enabled: boolean, _retry
   if (!st) return null;
   if (!st.configured || st.state === "off") return { text: "Без модели · быстрая сборка", tone: "off", hint: null, retry: null };
   if (!enabled) return null;
-  if (st.state === "down") return { text: "Модель недоступна · соберу без неё", tone: "off", hint: null, retry: null };
+  // the owner's fix (an account, a key, a project) is the line's tooltip: the line itself stays plain
+  if (st.state === "down") return { text: "Модель недоступна · соберу без неё", tone: "off", hint: st.owner ?? null, retry: null };
   return null;
+}
+
+/** A topic's deck that is only a skeleton (the writer wrote no text: the model failed, refused or the topic is the
+ * person's own): its audit score says nothing about the deck and is never shown as a success. */
+export function skeletonDeck(g: Generation, v: Variant): boolean {
+  return v.outline?.planned_by === "skeleton" && !!g.writer && g.writer.status !== "written";
 }
 
 /** Words a person never reads about the model: money, balances, keys, `.env`, config files, provider names. */
@@ -169,6 +176,8 @@ export interface DeckNotice {
   tone: "warn" | "info";
   /** Offer «Показать текст»: the text the agent wrote from the topic. */
   showText: boolean;
+  /** What the server's owner has to fix (a key, an account, a Cloud.ru project), as the notice's tooltip, or null. */
+  owner?: string | null;
 }
 
 /** Reasons the same deck built again can get past; a key, an empty account, a missing model or a 400 need a fix first
@@ -253,19 +262,23 @@ export function deckNotice(g: Generation, v: Variant, total: number, live?: Live
       rewrite: true,
     };
   }
-  if (modelFailed(g)) {
+  const unwritten = w?.status === "failed" || w?.status === "skipped";
+  if (modelFailed(g) || (skeleton && unwritten)) {
     const p = g.planner ?? null;
     const basis = skeleton
-      ? w?.status === "failed" || w?.status === "skipped"
-        ? "Модель не написала текст по теме, поэтому это каркас."
+      ? unwritten
+        ? "Это каркас: разделы с подсказками в заметках."
         : "В тексте только тема, поэтому это каркас: разделы с подсказками в заметках."
       : `Собрано по вашему тексту без модели${slidesText ? ` — ${slidesText}` : ""}.`;
     const offer = rebuildOffer(p, live);
     // «Модель недоступна» after the title «Модель сейчас недоступна» says nothing new
     const help = isUnavailable(offer.help) ? null : offer.help;
     const parts = [help ? lowerFirst(help) : null, skeleton || short ? (help ? cap(addTheses) : addTheses) : null];
+    // a topic's text was not written: said plainly, whatever the model's reason (gate 4 G4-21)
+    const title = skeleton && unwritten ? (p?.reason_code && p.reason_code !== "off" && p.reason_code !== "rejected" ? "Модель недоступна — текст не написан" : "Текст не написан — это каркас") : whyNoModel(p);
     return {
-      title: whyNoModel(p),
+      owner: p?.owner ?? live?.status?.owner ?? null,
+      title,
       basis,
       help: parts.some(Boolean) ? keepRanges(sentences(parts)) : null,
       retry: offer.retry,

@@ -703,6 +703,14 @@ def unit_caption(spec: ChartSpec, outline: DeckOutline) -> Optional[str]:
     return u if u and not glyph_unit(u) else None
 
 
+def pie_values_are_percents(unit: Optional[str], total: float) -> bool:
+    """A pie whose values are percents already — its unit is «%», or it has no unit and its values add up to
+    100 ± 1 (a writer's «Доходы по направлениям, %» with the unit lost): each part is read as its value, never as
+    «42 · 42%» (G4-11)."""
+    u = short_unit(unit)
+    return u == "%" or (not (unit or "").strip() and abs(total - 100.0) <= 1.0)
+
+
 def _decimals(values: Iterable[Optional[float]]) -> int:
     vals = [abs(float(v)) for v in values if v is not None]
     if not vals or all(abs(v - round(v)) < 1e-6 for v in vals):
@@ -1474,6 +1482,7 @@ class _Kit:
     styles: list = field(default_factory=list)  # per series: {"fill", "line", "dash", "label"}
     outside: bool = True  # a pie may set a label outside a thin slice (False: the caller's legend carries it)
     slice_labels: bool = True  # a pie of amounts with the caller's legend: no computed shares on the slices
+    pct_given: bool = False  # a pie of the brief's own percents: each slice says its value as written («18,6%», «42%»)
     capped: bool = False  # chart text capped relative to the slide (chart_text_capped): category labels measured strictly
     squeeze: float = 0.0  # a trend chart's longest category label over its slot (> 1: the renderer breaks it inside a word)
     turned: bool = False  # its category labels were turned by 45° or thinned out (every other one blank) to stay whole
@@ -1627,11 +1636,13 @@ def add_chart(
     # --- data
     data = CategoryChartData()
     data.categories = cats
+    pie_pct = False
     if kind in ("pie", "doughnut"):
         vals = [max(0.0, v or 0.0) for v in values[0]]
         total = sum(vals)
-        is_pct = (short_unit(unit) == "%") and 95 <= total <= 105
+        is_pct = pie_values_are_percents(unit, total)
         keep = amounts and not legend and not is_pct and total > 0
+        pie_pct = is_pct and total > 0
         shares = vals if is_pct or total <= 0 or keep else [round(v / total * 100, 1) for v in vals]
         values = [shares]
         unit = unit if keep else "%"
@@ -1717,6 +1728,7 @@ def add_chart(
     )
     k.slice_labels = True
     k.capped = capped
+    k.pct_given = pie_pct
     if multi and kind not in ("pie", "doughnut"):
         k.roles = series_roles([s.name for s in series])
     k.styles = _series_styles(k)
@@ -2418,7 +2430,9 @@ def _style_pie(k: _Kit) -> None:
     amounts = (k.unit or "%") != "%"
 
     def label(v: float) -> str:
-        return _fmt_value(v, k.unit, k.decimals) if amounts else _fmt_value(v, "%", 1 if v < 1 else 0)
+        if amounts:
+            return _fmt_value(v, k.unit, k.decimals)
+        return _fmt_value(v, "%", max(1 if v < 1 else 0, _decimals([v]) if k.pct_given else 0))
 
     def geometry(outside: bool):
         m = fs * (2.6 if outside else 0.6)
@@ -2481,6 +2495,8 @@ def _style_pie(k: _Kit) -> None:
                 pts[j]["pos"] = where[j]
         if v < 1 and not amounts:
             pts[j]["fmt"] = fine
+        elif k.pct_given and not amounts and _decimals([v]):
+            pts[j]["fmt"] = label_format("%", [v])  # G4-11: «18,6%» as the brief writes it, «42%» beside it
     pos = None if ring else "ctr"
     k.plot.has_data_labels = k.slice_labels
     if k.chart_el is not None:

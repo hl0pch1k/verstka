@@ -459,9 +459,12 @@ def test_the_refill_reads_a_numbered_cut_that_continues_the_numbers(monkeypatch)
         if len(prompts) == 1:
             c = num(user, r"1 сентября 1939 года нацистская Германия начала вторжение в Польшу")
             d = num(user, r"3 сентября вслед за этим Великобритания")
+            e = num(user, r"стремительное завоевание Германией Дании и Норвегии")
+            # the second slide: one true sentence (a thin slide the refill tops up); round 5: a sentence that fails is no
+            # longer replaced by an unrelated cited sentence («Битва длилась долго [1]» took the lead's definition)
             return {"status": "ok", "kind": "history", "title": "Вторая мировая война", "subtitle": "", "slides": [
-                {"title": "Начало", "text": f"1 сентября 1939 года Германия начала вторжение в Польшу [{c}]. 3 сентября Великобритания и Франция объявили войну Германии [{d}]."},
-                {"title": "Ход событий", "text": "Битва длилась долго [1]."},
+                {"title": "Ход событий и переломные события", "text": f"1 сентября 1939 года Германия начала вторжение в Польшу [{c}]. 3 сентября Великобритания и Франция объявили войну Германии [{d}]."},
+                {"title": "Итоги и последствия", "text": f"Германия завоевала Данию и Норвегию [{e}]."},
             ]}
         # the refill: the numbers of its own cut
         ids = [int(x) for x in re.findall(r"\[(\d+)\]", user.split("Reference text", 1)[1].split(">>>", 1)[0])]

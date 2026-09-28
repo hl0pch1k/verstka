@@ -285,7 +285,9 @@ def test_a_figure_is_told_once_and_a_total_once():
     W.dedupe_totals(deck, removed)
     W.dedupe_figures(deck, removed)
     assert deck.slides[1].sentences == ["Мобилизовано 110 миллионов человек."]
-    assert len(deck.slides[2].sentences) == 1  # the summing-up slide restates one of them
+    # gate 4 G4-9: the summing-up slide restates no figure another slide shows (it was one); left empty, it goes (the
+    # writer's fill_summary gives it the deck's first and last dated statements)
+    assert len(deck.slides) == 2 and deck.slides[-1].title == "В цифрах"
     whys = {r["why"].split(" slide")[0] for r in removed}
     assert "another total than" in whys and "repeats the figures of" in whys
 

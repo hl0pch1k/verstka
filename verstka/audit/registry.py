@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from verstka.ingest.workspace import TemplateWorkspace
 from verstka.schemas.audit import CheckSpec, Issue
@@ -25,6 +25,9 @@ class AuditContext:
     opens_ok: bool = True
     brief_text: Optional[str] = None  # the source text: the figures on the slides are compared with it (checks/facts.py)
     figure_stats: Optional[dict] = None  # what that comparison counted, for the report's summary
+    # writer mode (planning/writer.py): the writer's record of this generation — its summary() dict, the WriterResult or
+    # its status («written», «failed», «refused», «private», «skipped»); None when the brief was not a topic
+    writer: Optional[Any] = None
     _issue_counter: int = 0
 
     def new_issue(self, spec: CheckSpec, slide: int, message: str, **kw) -> Issue:
@@ -56,7 +59,7 @@ def load_builtin_checks() -> None:
     if _BUILTIN_LOADED:
         return
     _BUILTIN_LOADED = True
-    for mod in ("layout", "template", "density", "integrity", "facts"):
+    for mod in ("layout", "template", "density", "integrity", "facts", "writing"):
         importlib.import_module(f"verstka.audit.checks.{mod}")
 
 

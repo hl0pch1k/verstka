@@ -543,11 +543,25 @@ def _name_from_lead(lead: str) -> str:
     if m:
         t = t[m.end() :].strip()
     t = re.split(rf"\s+[—–-]\s+(?={_NUM})|\s+(?:в|на)\s+(?={_NUM})", t)[0]
+    um = _LEAD_UNIT_RE.search(t)
+    if um:
+        t = t[: um.start()]  # «Доходы VK по направлениям, 2019 год, %»: the unit is the series', not its name
     ws = t.split()
     if ws and ws[0].lower() in _HEAD_WORDS:
         ws[0] = _HEAD_WORDS[ws[0].lower()]
-    ws = [w for w in ws if not re.search(r"\d", w)]
+    # a year stays («…, 2019 год»: gate 4 G4-11), other digits go
+    ws = [w for w in ws if not re.search(r"\d", w) or re.fullmatch(r"(?:1\d{3}|20\d{2})(?:[–—-](?:1\d{3}|20\d{2}))?,?", w)]
     return H.cap_first(" ".join(ws[:8]).strip(" ,—–-"))
+
+
+# a unit written after the last comma of a data caption («Доходы VK по направлениям, 2019 год, %», «Выручка, тыс. ₽»)
+_LEAD_UNIT_RE = re.compile(r",\s*(%|п\.\s?п\.|(?:тыс\.?|млн|млрд)\s*(?:₽|руб\.?|рублей|\$|долл\.?)?|₽|руб\.?|рублей|\$|долл\.?|шт\.?|чел\.?|ед\.?|кг|км|ГВт|МВт|т)\s*:?$", re.I)
+
+
+def _lead_unit(lead: str) -> Optional[str]:
+    """The unit a data caption names after its last comma («…, 2019 год, %» → «%»), None without one."""
+    m = _LEAD_UNIT_RE.search(H.strip_end(lead or "").rstrip(":"))
+    return _unit(m.group(1)) if m else None
 
 
 def _name_from_previous(prev: Optional[str], total: float) -> str:
@@ -636,7 +650,7 @@ def _list_series(lead: str, items: list[str]) -> Optional[Series]:
         return None
     if len(set(lab.lower() for lab in labels)) < len(labels):
         return None
-    unit = next(iter(units - {""}), None)
+    unit = next(iter(units - {""}), None) or (_lead_unit(lead) if lead else None)
     return Series(id="", name=_name_from_lead(lead) if lead else "", categories=labels, values=values, unit=unit, source_span=(lead or items[0])[:200])
 
 

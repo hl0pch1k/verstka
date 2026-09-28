@@ -241,3 +241,66 @@ def test_a_sibling_article_is_not_the_topics():
     client = R.WikiClient("ru", CONTACT, transport=wiki.transport)
     found, _ = client.resolve(["Возобновляемая энергетика в России"], "Возобновляемая энергетика в России")
     assert found == ["Возобновляемая энергетика"]
+
+
+def test_a_resolution_cached_by_older_rules_is_not_reused(tmp_path):
+    # gate 4 G4-15: the 7-day «resolve» cache kept «Ядерная энергетика России» for «Возобновляемая энергетика в России»
+    # after the sibling rule was fixed. The key carries RESOLVE_VERSION, and a cached sibling title is never used.
+    topic = "Возобновляемая энергетика в России"
+    wiki = Wiki({"Возобновляемая энергетика": "Текст.", "Ядерная энергетика России": "Текст."},
+                search={topic: [("Ядерная энергетика России", 90000), ("Возобновляемая энергетика", 30000)]})
+    client = R.WikiClient("ru", CONTACT, transport=wiki.transport, cache_dir=tmp_path)
+    old_key = json.dumps([[topic], R.lead_free(topic)], ensure_ascii=False)  # the key of the old code (no version)
+    client._store("resolve", old_key, {"titles": ["Ядерная энергетика России"]})
+    new_key = json.dumps([R.RESOLVE_VERSION, [topic], R.lead_free(topic)], ensure_ascii=False)
+    client._store("resolve", new_key, {"titles": ["Ядерная энергетика России"]})  # a stale sibling under the new key too
+    found, _ = client.resolve([topic], topic)
+    assert found == ["Возобновляемая энергетика"]
+    assert any(dict(r.url.params).get("list") == "search" for r in wiki.requests)  # resolved again, not from the cache
+    # the fresh resolution is cached and reused (no request the second time)
+    n = len(wiki.requests)
+    again, _ = R.WikiClient("ru", CONTACT, transport=wiki.transport, cache_dir=tmp_path).resolve([topic], topic)
+    assert again == ["Возобновляемая энергетика"] and len(wiki.requests) == n
+
+
+EV_MAIN = ("Электромобиль — автомобиль, приводимый в движение электродвигателем.\n\n== Россия ==\n"
+           "В 2024 году в России было продано 17,8 тысячи электромобилей. В 2020 году правительство утвердило программу поддержки.\n\n"
+           "== Китай ==\nВ Китае насчитывалось 5,21 млн зарядных станций для электромобилей.")
+EV_CHARGING = ("Зарядная станция — элемент транспортной инфраструктуры для заряжаемых автомобилей.\n\n== Россия ==\n"
+               "Число публичных зарядных станций в России достигло 8185 в феврале 2025 года. "
+               "Крупнейшими сетями зарядных станций в России являлись «Ситроникс» и IT Charge.\n\n== США ==\nВ США много станций.")
+
+
+def test_a_market_part_the_articles_leave_out_gets_its_own_article(tmp_path):
+    # gate 4 G4-9: nothing about charging in Russia in «Электромобиль» — «Зарядная станция для электромобилей» has it
+    topic = "Рынок электромобилей в России"
+    assert R.subject_words(topic) == "электромобилей"
+    wiki = Wiki({"Электромобиль": EV_MAIN, "Зарядная станция для электромобилей": EV_CHARGING},
+                search={"инфраструктура электромобилей": [("Электромобиль", 9000), ("Зарядная станция для электромобилей", 5000)]})
+    ref = _fetch(wiki, ["Электромобиль"], topic=topic, tmp_path=tmp_path, kind="market")
+    got = W.add_part_page(ref, topic, 7, {"contact": CONTACT}, cache_dir=tmp_path, transport=wiki.transport)
+    assert got == ("Инфраструктура", "Зарядная станция для электромобилей")
+    assert [p.title for p in ref.pages] == ["Электромобиль", "Зарядная станция для электромобилей"]
+    assert "# Зарядная станция для электромобилей" in ref.cut and "8185" in ref.cut
+    sup = W.ArticleSupport(ref.full_texts, topic)
+    assert W.part_covered("Инфраструктура", sup, [p.title for p in ref.pages], "росси")
+    # a page that tells nothing of the place is not taken: the part gives its slide to a covered one
+    wiki2 = Wiki({"Электромобиль": EV_MAIN, "Зарядная станция для электромобилей": EV_CHARGING.split("== Россия ==")[0]},
+                 search={"инфраструктура электромобилей": [("Зарядная станция для электромобилей", 5000)]})
+    ref2 = _fetch(wiki2, ["Электромобиль"], topic=topic, tmp_path=tmp_path / "b", kind="market")
+    assert W.add_part_page(ref2, topic, 7, {"contact": CONTACT}, cache_dir=tmp_path / "b", transport=wiki2.transport) is None
+    assert [p.title for p in ref2.pages] == ["Электромобиль"]
+    # three pages share the cut: the main one half, the others the rest
+    pages = [R.RefPage("Главная", text="Лид. " * 2000), R.RefPage("Место", text="Текст. " * 2000), R.RefPage("Часть", text="Часть. " * 2000)]
+    cut = R.cut_pages(pages, 9000)
+    assert "# Место" in cut and "# Часть" in cut and cut.index("# Место") > 4000 and len(cut) <= 9000 + 20
+
+
+def test_a_wars_cut_reaches_the_turning_points_inside_its_subsections():
+    # gate 4 G4-7: «Вторжение в СССР» opens with the Baltic mines; the offensive on Moscow stands in its middle
+    text = (F / "ww2_full.txt").read_text(encoding="utf-8")
+    cut = R.cut_reference(text, 18000, kind="history")
+    assert "30 сентября 1941 года немецкие войска начали наступление на Москву." in cut
+    assert len(cut) <= 18000 and "### Вторжение в СССР" in cut
+    body = "Первое предложение раздела о ходе войны, длинное и подробное. " * 3 + "Потом пришла зима. 5 декабря 1941 года войска перешли в контрнаступление под Москвой. Итог."
+    assert "5 декабря 1941 года" in R._turning_text(body, 400)

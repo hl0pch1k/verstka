@@ -150,7 +150,9 @@ def test_a_period_the_sentence_names_by_the_one_before_it_is_that_year():
     text = "К 2019 году VK стала одной из крупнейших технологических компаний в России. В этот период компания расширила портфель активов, включив в него мессенджеры и образовательные платформы."
     s = _slide(K.bullets, "Компания расширила портфель", bullets=["2019 — расширила портфель активов: мессенджеры, образовательные платформы", "Ещё одна строка про компанию"])
     W.check_slide(s, text, title="Развитие", topic="История VK")
-    assert s.content.bullets[0].startswith("2019 — расширила портфель активов")
+    assert any(b.startswith("2019 — расширила портфель активов") for b in s.content.bullets), s.content.bullets
+    # gate 4 G4-2: the slide's first dated sentence stays on it
+    assert any(b.startswith("К 2019 году VK стала") for b in s.content.bullets), s.content.bullets
 
 
 # ------------------------------------------------------------------ W3-6: no time axis without dates
@@ -243,10 +245,12 @@ def test_a_headline_never_strengthens_a_hedged_rank():
     s = _slide(K.bullets, "«Москвич 3е» — первая серийная модель 2024 года", paragraphs=["Имеют меньшие расходы на топливо и обслуживание"])
     W.check_slide(s, EV_S5, title="Продукты и цены", topic="Рынок электромобилей в России")
     assert "перв" not in s.headline.split("«")[0] or "одной из" in s.headline
-    assert s.headline == "Продукты и цены"
-    # the subject-less fragment is gone: the slide shows its two sentences (it filled the slide)
-    assert s.kind == K.cards and len(s.content.items) == 2
-    assert not any(it.title.startswith("Имеют") for it in s.content.items)
+    # gate 4 G4-5: not the working title — the slide's own hedged sentence states it
+    assert s.headline == "В 2024 году «Москвич 3е» стал одной из первых серийных моделей на российском рынке"
+    # the subject-less fragment is gone: the slide shows its two sentences
+    shown = _all_text(s)
+    assert "Электромобили в России отличаются более высокой стоимостью" in shown
+    assert not any(x.startswith("Имеют") for x in [*s.content.bullets, *s.content.paragraphs, *(it.title for it in s.content.items)])
 
 
 def test_a_list_of_the_names_a_sentence_enumerates_keeps_them_all():
@@ -321,7 +325,8 @@ def test_a_takeaway_is_a_sentence_of_the_slide_or_nothing():
     s2 = _slide(K.bullets, "Германия начала вторжение в Польшу", bullets=["3 сентября 1939 — Великобритания и Франция объявили войну Германии", "17 сентября 1939 — СССР начал вторжение в Польшу с востока", "Октябрь 1939 — Польша была разделена"],
                 takeaway="В октябре Польша была разделена между Германией и СССР")
     W.check_slide(s2, WW2_S3, title="Начало", topic="Вторая мировая война")
-    assert s2.takeaway == "В октябре Польша была разделена между Германией и СССР"
+    # gate 4 G4-1: a sentence cut where no clause ends is the whole sentence
+    assert s2.takeaway in ("В октябре Польша была разделена между Германией и СССР", "В октябре Польша была разделена между Германией и СССР по пакту Молотова—Риббентропа")
 
 
 # ------------------------------------------------------------------ short slides fill the slide
@@ -411,3 +416,148 @@ def test_a_line_cut_after_its_subject_is_its_sentence():
     W.check_slide(s, EV_S5, title="Продукты и цены", topic="Рынок электромобилей в России")
     shown = [*s.content.bullets, *(f"{it.title} {it.text}".strip() for it in s.content.items), *s.content.paragraphs]
     assert not any(x.startswith("Имеют") for x in shown), shown
+
+
+# ------------------------------------------------------------------ gate 4: whole sentences, lines on their own, headlines
+
+GAG_A1_S3 = (
+    "12 апреля 1961 года, в 9 часов 7 минут по московскому времени, с космодрома Байконур стартовал корабль «Восток-1» с "
+    "Юрием Гагариным на борту. Выключение двигателя произошло только после срабатывания дублирующего механизма, но корабль "
+    "уже поднялся на орбиту, высшая точка которой оказалась на 100 км выше расчётной."
+)
+GAG_A1_S4 = (
+    "В конце полёта ТДУ конструктора Исаева проработала успешно, но отключилась на секунду раньше, в результате чего "
+    "автоматика выдала запрет на штатное разделение отсеков. В ходе спуска произошло вращение корабля со скоростью один "
+    "оборот в секунду, но спускаемый аппарат отделился."
+)
+WW2_S7_G4 = (
+    "6 июня 1944 года союзные силы США, Великобритании и Канады после двух месяцев отвлекающих манёвров провели крупнейшую "
+    "десантную операцию в истории и высадились в Нормандии. В июле 1945 года США отправили Японии Потсдамскую декларацию, "
+    "которую та отклонила. В августе 1945 года СССР вступил в войну против Японии."
+)
+GAG_S4_G4 = (
+    "Ракета-носитель «Восток» проработала без замечаний. Корабль сделал один оборот вокруг Земли, и в 10 часов 53 минуты "
+    "посадка произошла в районе деревни Смеловка Саратовской области. Полёт длился 106 минут."
+)
+ENERGY_S5 = (
+    "В России продолжается строительство новых АЭС, включая проекты в ОЭС Центра, Урала и Сибири. Также развивается "
+    "транспортная ядерная энергетика, включая ледоколы проекта 22220. В апреле 2025 года Россия строила более 10 атомных "
+    "энергоблоков за рубежом."
+)
+ENERGY_S3 = (
+    "Россия потребляет около 3800 тонн природного урана в год для работы АЭС. В стране разведано около 615 тыс. тонн урана, "
+    "основная добыча сосредоточена в Забайкальском крае."
+)
+GAG_S2_G4 = (
+    "Для полёта в космос требовались кандидаты, соответствующие строгим требованиям: возраст около 30 лет, рост не более 170 "
+    "см, вес до 68—70 кг. Отбор кандидатов проводила особая группа специалистов госпиталя."
+)
+
+
+def _shown(s: OutlineSlide) -> list[str]:
+    c = s.content
+    return [s.headline, s.subtitle or "", *c.bullets, *c.paragraphs, *(f"{it.title} {it.text}".strip() for it in c.items), *(f"{n.value} {n.label}" for n in c.numbers)]
+
+
+def test_g4_1_a_line_cut_where_no_clause_ends_is_its_whole_sentence():
+    s = _slide(K.bullets, "Переломные события", bullets=["6 июня 1944 года союзные силы США", "В июле 1945 года США отправили Японии Потсдамскую декларацию, которую та отклонила"])
+    W.check_slide(s, WW2_S7_G4, title="Переломные события (продолжение)", topic="Вторая мировая война")
+    text = _all_text(s)
+    assert "высадились в Нормандии" in text
+    assert not any(x.strip().endswith("союзные силы США") for x in _shown(s))
+    s = _slide(K.bullets, "Ход событий", bullets=["В конце полёта ТДУ конструктора Исаева проработала успешно", "В ходе спуска произошло вращение корабля со скоростью один оборот в секунду"])
+    W.check_slide(s, GAG_A1_S4, title="Ход событий", topic="Полёт Гагарина")
+    assert "но отключилась на секунду раньше" in _all_text(s)
+
+
+def test_g4_2_the_launch_sentence_stays_on_its_slide():
+    s = _slide(K.bullets, "Начало", paragraphs=["Выключение двигателя произошло только"])
+    W.check_slide(s, GAG_A1_S3, title="Начало", topic="Полёт Гагарина")
+    text = _all_text(s)
+    assert "12 апреля 1961 года" in text and "Байконур" in text and "«Восток-1»" in text
+    assert not any(x.strip().endswith("произошло только") for x in _shown(s))
+    assert s.headline != "Начало"
+
+
+def test_g4_2_a_rejected_headline_goes_back_as_the_first_line():
+    s = _slide(K.bullets, "«Москвич 3е» — первая серийная модель 2024 года", bullets=["Электромобили в России отличаются более высокой стоимостью из-за цены на батареи, но имеют меньшие расходы на обслуживание и топливо"])
+    W.check_slide(s, EV_S5, title="Продукты и цены", topic="Рынок электромобилей в России")
+    assert "«Москвич 3е» стал одной из первых серийных моделей" in _all_text(s)
+
+
+def test_g4_3_a_clock_time_a_project_number_and_requirements_are_never_key_figures():
+    s = _slide(K.stat_row, "Ход событий", numbers=[NumberCallout(value="10 ч", label="Корабль сделал один оборот вокруг Земли"), NumberCallout(value="106 минут", label="полёт длился")])
+    W.check_slide(s, GAG_S4_G4, title="Ход событий и переломные события", topic="Полёт Гагарина")
+    assert not any(n.value.startswith("10") for n in s.content.numbers)
+    assert "10 часов 53 минуты" in _all_text(s)  # the sentence, as it is
+    s = _slide(K.stat_row, "Тенденции", numbers=[NumberCallout(value="22220", label="проекта ледоколы"), NumberCallout(value="более 10", label="атомных энергоблоков строит Россия")])
+    W.check_slide(s, ENERGY_S5, title="Тенденции", topic="Возобновляемая энергетика в России")
+    assert not any("22220" in n.value for n in s.content.numbers)
+    s = _slide(K.stat_row, "Предпосылки и причины", numbers=[NumberCallout(value="30 лет", label="Возраст"), NumberCallout(value="68–70", label="Вес кг")])
+    W.check_slide(s, GAG_S2_G4, title="Предпосылки и причины", topic="Полёт Гагарина")
+    assert not s.content.numbers and "не более 170 см" in _all_text(s)
+
+
+def test_g4_3_hedges_and_rates_stay_with_the_figure():
+    s = _slide(K.stat_row, "Уран", numbers=[NumberCallout(value="3800", label="Тонн природного урана потребляет Россия"), NumberCallout(value="615 тыс.", label="Тонн урана в стране разведано")])
+    W.check_slide(s, ENERGY_S3, title="Другие факты", topic="Возобновляемая энергетика в России")
+    vals = {n.value: n.label for n in s.content.numbers}
+    assert "около 3800" in vals and "в год" in vals["около 3800"], vals
+    assert "около 615 тыс." in vals, vals
+
+
+def test_g4_5_a_relative_time_is_resolved_and_a_working_title_becomes_a_statement():
+    text = "По итогам 2024 года в России было зарегистрировано 59,6 тысяч электромобилей. В том же году было продано 17,8 тысячи электромобилей."
+    s = _slide(K.big_number, "В том же году было продано 17,8 тысячи электромобилей", numbers=[NumberCallout(value="17,8 тыс", label="электромобилей продано в 2024 году")])
+    W.check_slide(s, text, title="Объём рынка в цифрах", topic="Рынок электромобилей в России")
+    assert not s.headline.startswith("В том же году")
+    assert s.content.numbers[0].value == "17,8 тыс."  # G4-16
+    s = _slide(K.bullets, "Ход событий (продолжение)", bullets=["22 июня 1941 года Германия начала вторжение в СССР", "7 декабря 1941 года Япония атаковала Перл-Харбор"])
+    W.check_slide(s, WW2_S5, title="Ход событий (продолжение)", topic="Вторая мировая война")
+    assert "продолжение" not in s.headline and W.coverage(s.headline, WW2_S5) >= 0.8
+    assert not any(W.coverage(x, s.headline) >= 0.9 and W.coverage(s.headline, x) >= 0.9 for x in s.content.bullets)  # said once
+
+
+def test_g4_5_no_two_slides_under_one_headline():
+    a = _slide(K.bullets, "VK была основана в 1998 году", bullets=["Первоначально компания занималась разработкой почтовой службы Mail.ru"])
+    b = OutlineSlide(id="s8", kind=K.cards, headline="VK была основана в 1998 году", content=SlideContent(items=[SlideItem(title="В 2021 году компания получила новое название"), SlideItem(title="В 2023 году были созданы две бизнес-группы")]))
+    t2 = "VK была основана в 1998 году. Первоначально компания занималась разработкой почтовой службы Mail.ru."
+    t8 = "VK была основана в 1998 году. В 2021 году компания получила новое название. В 2023 году были созданы две бизнес-группы."
+    done = W.unique_headlines([(a, t2, "Основание"), (b, t8, "Главное")], deck=f"{t2}\n{t8}", topic="История VK")
+    assert done and a.headline == "VK была основана в 1998 году" and b.headline != a.headline
+    assert "1998" in _all_text(b)  # the old headline's sentence stays on its slide
+
+
+def test_g4_6_lines_on_their_own_name_their_subject():
+    text = ("VK владеет социальными сетями «ВКонтакте», «Одноклассники» и «Мой мир». Компания развивает образовательные платформы, "
+            "такие как Skillbox и Geekbrains. Также она владеет поисковой системой «Поиск Mail» и сервисом объявлений «Юла».")
+    s = _slide(K.cards, "VK владеет социальными сетями", items=[SlideItem(title="Компания развивает образовательные платформы"), SlideItem(title="Также она владеет поисковой системой «Поиск Mail» и сервисом объявлений «Юла»")])
+    W.check_slide(s, text, deck=f"Слайд 2. Основание\nVK была основана в 1998 году.\n\nСлайд 5. Продукты\n{text}", title="Продукты и сервисы", topic="История VK")
+    titles = [it.title for it in s.content.items] + s.content.bullets
+    assert any(t.startswith("VK владеет поисковой системой") for t in titles), titles
+    assert not any(t.startswith("Также") for t in titles)
+    s = _slide(K.stat_row, "Итоги и потери", numbers=[NumberCallout(value="62", label="государства в ней"), NumberCallout(value="более 70 млн", label="человек погибло в результате войны")])
+    W.check_slide(s, "Война длилась с 1 сентября 1939 по 2 сентября 1945 года. В ней участвовали 62 государства. В результате войны погибло более 70 миллионов человек.", title="Итоги и потери", topic="Вторая мировая война")
+    labels = [n.label for n in s.content.numbers]
+    assert "государства участвовали в войне" in labels, labels
+
+
+def test_g4_14_a_definition_is_never_a_card():
+    text = ("Вторая мировая война — война двух мировых военно-политических коалиций, ставшая крупнейшим вооружённым конфликтом в истории человечества. "
+            "Версальский договор ограничил военную мощь Германии, что вызвало недовольство. В Азии Япония стремилась к доминированию, начав войны в Китае.")
+    s = _slide(K.cards, "Причины войны", items=[SlideItem(title="Вторая мировая война", text="война двух мировых военно-политических коалиций"),
+                                                SlideItem(title="Версальский договор ограничил военную мощь Германии, что вызвало недовольство"),
+                                                SlideItem(title="В Азии Япония стремилась к доминированию, начав войны в Китае")])
+    W.check_slide(s, text, title="Предпосылки и причины", topic="Вторая мировая война")
+    assert not any(it.title == "Вторая мировая война" for it in s.content.items)
+    assert "коалиций" in (s.headline + " " + (s.subtitle or ""))
+
+
+def test_g4_17_the_writers_notice_passes_the_notes_check_as_it_is():
+    from verstka.planning.grounding import BriefIndex, _Log, _notes
+    from verstka.schemas.outline import Brief
+
+    notice = "Текст написан агентом Verstka по статьям «Аполлон-11» и «Армстронг, Нил» из Википедии (лицензия CC BY-SA). Проверьте факты перед выступлением."
+    idx = BriefIndex.of(Brief(text="Слайд 1. Полёт на Луну\nЛюди впервые высадились на Луну в 1969 году."))
+    out = _notes(idx, f"Люди впервые высадились на Луну в 1969 году.\n\n{notice}", _Log())
+    assert out.endswith(notice) and "1969" in out

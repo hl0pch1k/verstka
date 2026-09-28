@@ -339,6 +339,8 @@ class Source:
     genders: dict = field(default_factory=dict)
     topic: str = ""
     deck_sentences: Optional[list] = None
+    before: list = field(default_factory=list)  # the deck's sentences before this slide's text (the last few)
+    names: Optional[dict] = None  # the deck's names as subjects {nominative: gender} (clauses._nominative_forms)
 
     @classmethod
     def of(cls, text: str, deck: str = "", title: str = "", topic: str = "") -> "Source":
@@ -361,8 +363,17 @@ class Source:
                 d.years.add(last)
             d.years |= ctx_years
             dates.append(d)
-        whole = text if not deck or text in deck else f"{deck}\n{text}"  # the slide's own text is the deck's
-        return cls(sentences=sents, dates=dates, deck=whole, title=title, known=_known_names(whole), genders=entity_genders(whole), topic=topic)
+        whole = text if not deck else deck if text.strip() in deck else f"{deck}\n{text}"  # the slide's own text is the deck's
+        at = whole.find(text.strip()[:80]) if text.strip() else -1
+        before = slide_sentences(whole[:at])[-4:] if at > 0 else []
+        return cls(sentences=sents, dates=dates, deck=whole, title=title, known=_known_names(whole), genders=entity_genders(whole), topic=topic, before=before)
+
+    def name_forms(self) -> dict:
+        if self.names is None:
+            from verstka.planning.clauses import _nominative_forms
+
+            self.names = _nominative_forms(self.deck)
+        return self.names
 
 
 def supports(claim: str, sentence: str, sdates: _Dates, known: set[str], need: float = 0.6, dates: bool = True, names: bool = True) -> bool:
@@ -409,34 +420,27 @@ def _event_sentence(event: str, src: Source, floor: float = 0.5, only: Optional[
 
 # ------------------------------------------------------------------ rebuilding from a sentence
 
-_CUT_RE = re.compile(
-    r",\s+(?:что|который|которая|которое|которые|которых|которой|чтобы|где|включая|в\s+том\s+числе|начав|начиная|большинство|из\s+них|"
-    r"завершив|став|сделав|а\s+также)\s|\s(?:после|из-за|благодаря|несмотря\s+на)\s"
-)
-
-
 def _shorten(sentence: str) -> str:
-    """The sentence without its clock time, its time zone and its parentheses («12 апреля 1961 года в 9 часов 7 минут по
-    московскому времени с космодрома Байконур стартовал…» → «12 апреля 1961 года с космодрома Байконур стартовал…»)."""
-    t = re.sub(r"\s*\([^()]*\)", "", sentence or "")
-    t = re.sub(r"(?<![\wё])в\s+\d{1,2}(?::\d{2}|\s+час\w*(?:\s+\d{1,2}\s+минут\w*)?)", " ", t, flags=re.I)
-    t = re.sub(r"(?<![\wё])по\s+(?:московскому|местному)\s+времени", " ", t, flags=re.I)
-    return re.sub(r"\s{2,}", " ", t).strip()
+    """The sentence as a headline reads it (no clock time, no time zone, no parentheses): _head_form."""
+    return _head_form(sentence)
 
 
 def trim(sentence: str, max_words: int) -> Optional[str]:
-    """The sentence at most `max_words` long: as it is, or cut before a clause that only adds to it («…, что стало
-    переломным моментом», «… после атомных бомбардировок»); None when no cut makes it short enough."""
-    s = H.strip_end(sentence or "")
-    if len(s.split()) <= max_words:
-        return s
-    for m in _CUT_RE.finditer(s):
-        head = H.strip_end(s[: m.start()]).rstrip(",")
-        if re.search(r"(?<![\wё])(?:те|тех|тем|то|тот|та|той|ту|того|такие|таких|такой|такая|такое|все|всех|тот\s+же)$", head, re.I):
-            continue  # «только те, которые…»: the clause is what the word means
-        if 4 <= len(head.split()) <= max_words and head.count("«") == head.count("»") and head.count("(") == head.count(")"):
-            return head
-    return None
+    """The sentence at most `max_words` long: as it is, or cut where a clause ends and the head says a whole thing
+    (clauses.safe_cut — its own verb, no particle or governing word at its end, no contrast dropped: gate 4 G4-1); None
+    when no cut is safe."""
+    from verstka.planning.clauses import safe_cut
+
+    return safe_cut(sentence, max_words)
+
+
+def _fit_line(sentence: str, r: Optional["_Run"] = None) -> str:
+    """A sentence as a line: whole up to 20 words (30 on a slide of three sentences or fewer: there is room), else cut
+    where a clause ends, else whole — never a fragment (gate 4 G4-1)."""
+    from verstka.planning.clauses import fit
+
+    limit = 30 if r is not None and len(r.src.sentences) <= 3 else MAX_LINE_WORDS
+    return fit(sentence, limit)
 
 
 def date_title(sentence: str, sdates: _Dates) -> Optional[str]:
@@ -611,6 +615,9 @@ def label_of(sentence: str, value: str, known: Optional[set] = None, year: Optio
         if _STOP_AFTER_RE.match(w) or len(counted) >= 3 or (counted and w[:1].islower() and re.search(r"(?:[аеиыяу]л[аио]?|[аеиоуя]ли|ет|ит|ют|ят|ется|ются|лся|лась|лись)$", w)):
             break
         counted.append(w)
+    rate = " ".join(after[len(counted): len(counted) + 2]).lower()
+    if counted and re.fullmatch(r"(?:в|за)\s+(?:год|месяц|день|сутки|неделю|час)", rate):
+        counted.append(rate)  # «около 3800 тонн урана в год»: the rate is what the figure counts (gate 4 G4-3)
     b = [w for w in re.sub(r"\s[—–-]\s*$", " ", before).split() if w not in ("—", "–", "-")]
     b = [w for w in b if not re.match(r"^(?:а|но|и|однако|что)$", w, re.I)]
     lead = ""
@@ -693,9 +700,48 @@ def bad_label(label: str, value: str, sentence: Optional[str], known: set[str], 
         low = _norm(sentence)
         if any(not re.search(rf"(?<![а-яa-z]){re.escape(_norm(m.group(1))[:4])}", low) for m in _MEASURE_RE.finditer(lb)):
             return "a measure its sentence does not count"
+        noun = _counted_after(sentence, value)
+        if noun and not any(_same_word(noun, w) for w in _words(lb)):
+            return "loses what the figure counts"  # «54 · Россия экспортирует ядерные технологии» of «в 54 страны»
+        rate = _rate_after(sentence, value)
+        if rate and not re.search(r"(?<![\wё])(?:год|месяц|день|сутки|неделю|час|ежегодно|ежемесячно)", lb, re.I):
+            return "loses the rate its sentence gives"
+    if re.search(r"(?<![\wё])(?:кг|см|км|м|т|ч|мин|г)$", lb) or re.match(r"^[А-ЯЁ][а-яё]+\s+(?:кг|см|км|м|т|ч|мин)$", lb):
+        return "a unit without its noun"  # «Вес кг» (gate 4 G4-3)
     if len(lb.split()) < 2:
         return "one word"
     return None
+
+
+def _counted_after(sentence: str, value: str) -> Optional[str]:
+    """The noun the figure counts, written right after it («в 54 страны» → «страны»); None for a unit, a scale word, a
+    preposition or nothing."""
+    from verstka.planning.grounding import _is_year, figures
+
+    want = _values(value)
+    f = next((f for f in figures(sentence or "") if want and f.date is None and not _is_year(f) and _same_value(f.mag, want[0])), None)
+    if f is None:
+        return None
+    m = re.match(r"\s*([а-яё]{3,})", sentence[f.uend:])
+    if not m:
+        return None
+    w = m.group(1)
+    if _UNIT_WORD_RE.match(w) or _STOP_AFTER_RE.match(w) or re.match(r"^(?:тыс|млн|млрд|трлн|миллион|миллиард|тысяч|процент|раз|лет|год|года)", w):
+        return None
+    return w
+
+
+def _rate_after(sentence: str, value: str) -> Optional[str]:
+    """«около 3800 тонн природного урана в год»: the rate the sentence gives the figure, within five words after it."""
+    from verstka.planning.grounding import _is_year, figures
+
+    want = _values(value)
+    f = next((f for f in figures(sentence or "") if want and f.date is None and not _is_year(f) and _same_value(f.mag, want[0])), None)
+    if f is None:
+        return None
+    tail = " ".join(sentence[f.uend:].split()[:6])
+    m = re.search(r"(?<![\wё])(?:в|за)\s+(год|месяц|день|сутки|неделю)(?![\wё])|ежегодно|ежемесячно", tail, re.I)
+    return m.group(0) if m else None
 
 
 # ------------------------------------------------------------------ the checks
@@ -821,7 +867,7 @@ def _check_items(r: _Run) -> None:
         if i is None:
             changed.append(f"«{claim[:60]}» is not in the slide's text, dropped")
             continue
-        line = trim(src.sentences[i], MAX_LINE_WORDS)
+        line = _fit_line(src.sentences[i], r)
         if line is None:
             changed.append(f"«{claim[:60]}» is not what its sentence says, dropped")
             continue
@@ -891,7 +937,7 @@ def _fragment_of(line: str, src: Source) -> Optional[str]:
     for sn in src.sentences:
         k = re.search(rf"(?:,\s+(?:но|а|однако)|\s+и)\s+{re.escape(verb)}(?![\wё])", sn, re.I)
         if k and coverage(line, sn[k.start():]) >= 0.7:
-            return trim(sn, MAX_LINE_WORDS) or ""
+            return _fit_line(sn)
     return None
 
 
@@ -908,6 +954,10 @@ def _check_lines(r: _Run) -> None:
         changed = []
         for ln in lines:
             b = H.strip_end(ln)
+            parts = [H.strip_end(x) for x in _split(b) if x.strip()]
+            if len(parts) >= 2 and all(any(coverage(x, sn) >= 0.8 and coverage(sn, x) >= 0.8 for sn in src.sentences) for x in parts):
+                out.append(ln)  # sentences of the text joined on one line (a line and the one that leans on it)
+                continue
             m = _LINE_DATE_RE.match(b)
             if m and re.fullmatch(r"\d{4}", m.group(1).strip()) and any(float(m.group(1)) in _values(x) for x in src.sentences):
                 m = None  # «1213 — Кораблей США»: a figure, not a year
@@ -940,7 +990,7 @@ def _check_lines(r: _Run) -> None:
             if ev:
                 # «…— доступные модели»: an evaluation the text does not give — the sentence the line shortens
                 i = _event_sentence(re.sub("|".join(map(re.escape, ev)), " ", b), src)
-                line = trim(src.sentences[i], MAX_LINE_WORDS) if i is not None else None
+                line = _fit_line(src.sentences[i], r) if i is not None else None
                 changed.append(f"«{b[:50]}» evaluates ({', '.join(ev)}) → " + (f"its sentence «{line[:50]}»" if line else "dropped"))
                 if line:
                     out.append(line)
@@ -951,7 +1001,7 @@ def _check_lines(r: _Run) -> None:
                 i = _event_sentence(b, src, only=with_figs)
                 if i is None and figs and with_figs:
                     i = max(with_figs, key=lambda k: coverage(b, src.sentences[k]))  # the figure's own sentence tells it
-                line = trim(src.sentences[i], MAX_LINE_WORDS) if i is not None else None
+                line = _fit_line(src.sentences[i], r) if i is not None else None
                 if line is None:
                     changed.append(f"«{b[:60]}» is not in the slide's text, dropped")
                     continue
@@ -1076,11 +1126,23 @@ def _check_headline(r: _Run) -> None:
             c = s.content
             c.bullets = [x for x in c.bullets if not (coverage(x, new) >= 0.8 and coverage(new, x) >= 0.6)] if len(c.bullets) > 2 else c.bullets
             c.items = [it for it in c.items if not (coverage(f"{it.title} {it.text}", new) >= 0.8 and coverage(new, f"{it.title} {it.text}") >= 0.6)] if len(c.items) > 3 else c.items
+    back = None
     if new is None:
         new = H.strip_end(src.title or "")
+        # G4-2: the sentence the rejected headline told goes back onto the slide, as its first body line
+        k = _event_sentence(h, src)
+        if k is not None:
+            from verstka.planning.clauses import fit
+
+            back = _fit_line(src.sentences[k], r)
     if new and new != h:
         r.say(f"the headline «{h}» {why} → «{new}»")
         s.headline = new
+        c = s.content
+        shown = [*c.bullets, *c.paragraphs, *(f"{it.title} {it.text}" for it in c.items)]
+        if back and not any(coverage(back, x) >= 0.8 for x in shown if x.strip()):
+            _body_insert(r, back)
+            r.say(f"the sentence of the rejected headline back as the first line «{back[:60]}»")
 
 
 def _split_deck(src: Source) -> list[str]:
@@ -1130,8 +1192,29 @@ def _hedge_before(sentence: str, value: str) -> Optional[str]:
     f = next((f for f in figures(sentence) if f.date is None and not _is_year(f) and _same_value(f.mag, want[0])), None)
     if f is None:
         return None
-    m = re.search(r"(?<![\wё])(более|свыше|почти|менее|не\s+менее|не\s+более)\s+$", sentence[: f.start], re.I)  # a side, not «около»
-    return m.group(1).lower() if m else None
+    from verstka.planning.clauses import hedge_of
+
+    return hedge_of(sentence, f.start)  # «около 3800», «более 70 млн» (gate 4 G4-3: «около» too)
+
+
+def _not_a_figure(sentence: str, value: str) -> Optional[str]:
+    """Why the value, as its sentence writes it, is not a key figure: «a time of day», «a project or model number», «a
+    bound of a requirement», «a figure of a requirements list»; None for a figure."""
+    from verstka.planning.clauses import figure_kind
+    from verstka.planning.grounding import _is_year, figures
+
+    want = _values(value)
+    if not want:
+        return _clock_value(value)
+    f = next((f for f in figures(sentence) if f.date is None and not _is_year(f) and _same_value(f.mag, want[0])), None)
+    if f is None:
+        return None
+    kind = figure_kind(sentence, f.start, f.end)
+    return {"clock": "a time of day", "code": "a project or model number", "bound": "a bound of a requirement", "requirement": "a figure of a requirements list"}.get(kind or "")
+
+
+def _clock_value(value: str) -> Optional[str]:
+    return "a time of day" if re.fullmatch(r"\s*\d{1,2}:\d{2}\s*", value or "") else None
 
 
 _SCALE_SHORT = (("трлн", "трлн"), ("триллион", "трлн"), ("млрд", "млрд"), ("миллиард", "млрд"), ("млн", "млн"), ("миллион", "млн"), ("тыс", "тыс."), ("тысяч", "тыс."))
@@ -1161,7 +1244,8 @@ def _check_numbers(r: _Run) -> None:
     if not c.numbers:
         return
     found: list[tuple[NumberCallout, Optional[int]]] = []
-    for n in c.numbers:
+    not_figures: list[str] = []
+    for n in list(c.numbers):
         want = _values(n.value)
         i = next((k for k, x in enumerate(src.sentences) if want and all(any(_same_value(v, y) for y in _values(x)) for v in want)), None)
         if i is None:
@@ -1170,12 +1254,37 @@ def _check_numbers(r: _Run) -> None:
                 r.say(f"the key figure {n.value} without its scale → «{fixed[0]}»")
                 n.value, i = fixed
                 want = _values(n.value)
-        found.append((n, i))
         sn = src.sentences[i] if i is not None else None
+        kind = _not_a_figure(sn, n.value) if sn else _clock_value(n.value)
+        if kind:
+            # G4-3: a time of day, a project number, a bound of a requirement is never a key figure — its sentence is
+            r.say(f"the key figure {n.value} is {kind}, not a figure → its sentence")
+            if sn:
+                not_figures.append(sn)
+            continue
+        found.append((n, i))
         hedge = _hedge_before(sn, n.value) if sn else None
-        if hedge and not re.match(r"^\s*(?:>|<|≈|~|более|свыше|около|почти|примерно|менее|порядка|не\s)", n.value or "", re.I):
+        if hedge and not re.match(r"^\s*(?:>|<|≈|~|более|свыше|около|почти|примерно|менее|порядка|приблизительно|не\s)", n.value or "", re.I):
             r.say(f"the key figure {n.value} as its sentence gives it → «{hedge} {n.value}»")
             n.value = f"{hedge} {n.value}"
+    if not_figures:
+        from verstka.planning.clauses import fit
+
+        c.numbers = [n for n, _ in found]
+        lines = []
+        for sn in not_figures:
+            t = _fit_line(sn, r)
+            if not any(coverage(t, x) >= 0.9 for x in [*lines, *c.bullets]):
+                lines.append(t)
+        c.bullets = (lines + list(c.bullets))[:6]
+        if len(c.numbers) < 2 and s.kind == PatternKind.stat_row or not c.numbers and s.kind == PatternKind.big_number:
+            for n, i in found:
+                t = _fit_line(src.sentences[i], r) if i is not None else None
+                if t and not any(coverage(t, x) >= 0.9 for x in c.bullets):
+                    c.bullets.insert(0, t)
+            c.numbers = []
+            s.kind = PatternKind.bullets
+            return
     probs = {id(n): bad_label(n.label, n.value, src.sentences[i], src.known, src.dates[i]) for n, i in found if i is not None}
     if not any(probs.values()):
         return
@@ -1199,7 +1308,7 @@ def _check_numbers(r: _Run) -> None:
         elif why in _SOFT:
             keep.append(n)
         else:
-            t = trim(sn, MAX_LINE_WORDS)
+            t = _fit_line(sn, r)
             r.say(f"the key figure {n.value} has no label its sentence gives («{(n.label or '')[:40]}»: {why}) → " + (f"the line «{t[:50]}»" if t else "dropped"))
             if t and not any(coverage(t, x) >= 0.9 for x in lines):
                 lines.append(t)
@@ -1217,7 +1326,7 @@ def _check_numbers(r: _Run) -> None:
     if s.kind == PatternKind.stat_row and len(keep) < 2 and not c.chart and not c.table:
         for n in keep:
             i = next((k for m, k in found if m is n), None)
-            t = trim(src.sentences[i], MAX_LINE_WORDS) if i is not None else None
+            t = _fit_line(src.sentences[i], r) if i is not None else None
             if t and not any(coverage(t, x) >= 0.9 for x in lines):
                 lines.insert(0, t)
         keep = []
@@ -1253,7 +1362,9 @@ def _check_table(r: _Run) -> None:
         _check_numbers(r)
 
 
-_CARD_SPLIT_RE = re.compile(r",\s+(?:но|а|однако|включая)\s|\s(?:из-за|благодаря|после)\s")
+# where a card's title ends and its text goes on: never before a contrast («…, но отключилась…» stays in the title's
+# sentence — gate 4 G4-1)
+_CARD_SPLIT_RE = re.compile(r",\s+(?:включая|в\s+том\s+числе)\s|\s(?:из-за|благодаря|после)\s")
 
 
 def _card_of(sentence: str) -> SlideItem:
@@ -1290,8 +1401,10 @@ def _fill_short(r: _Run) -> None:
     head = s.headline or ""
     pool = []
     when: dict[str, _Dates] = {}
-    for sn, sd in zip(src.sentences, src.dates):
-        t = H.strip_end(sn) if len(sn.split()) <= 22 else trim(sn, 20)
+    for k, (sn, sd) in enumerate(zip(src.sentences, src.dates)):
+        t = _fit_line(sn, r)
+        if t:
+            t = _on_its_own(r, t, k)  # «Также она владеет…» → «VK владеет…»; None: it leans on another sentence
         if t:
             when[t] = sd
         if t and s.takeaway and coverage(t, s.takeaway) >= 0.8 and coverage(s.takeaway, t) >= 0.8:
@@ -1301,8 +1414,6 @@ def _fill_short(r: _Run) -> None:
         says_it = coverage(head, t) >= 0.75 and coverage(t, head) >= 0.45  # the headline is this sentence, shortened
         if says_it or coverage(t, head) >= 0.75 or (coverage(t, head) >= 0.5 and dates_of(t).any and dates_of(t).within(dates_of(head))):
             continue  # the headline says it
-        if _orphan(t):
-            continue  # «Вдохновлённые успехом Hotmail, они предложили…» without the sentence it leans on
         if not any(coverage(t, x) >= 0.85 for x in pool):
             pool.append(t)
     if len(pool) == 1 and len(lines) == 1 and s.kind == PatternKind.bullets and not few_cards:
@@ -1379,9 +1490,10 @@ def _refill(r: _Run) -> None:
         return
     head = s.headline or ""
     pool: list[str] = []
-    for sn in src.sentences:
-        t = H.strip_end(sn) if len(sn.split()) <= 22 else trim(sn, 20)
-        if not t or _orphan(t) or coverage(head, t) >= 0.75 or any(coverage(t, x) >= 0.85 for x in pool):
+    for k, sn in enumerate(src.sentences):
+        t = _fit_line(sn, r)
+        t = _on_its_own(r, t, k) if t else None
+        if not t or coverage(head, t) >= 0.75 or any(coverage(t, x) >= 0.85 for x in pool):
             continue
         pool.append(t)
     if not pool:
@@ -1393,6 +1505,551 @@ def _refill(r: _Run) -> None:
         s.kind = PatternKind.bullets
         c.bullets = pool[:1]
     r.say(f"no entry of the slide was in the text → its {len(pool[:4])} sentence(s)")
+
+
+# ------------------------------------------------------------------ gate 4: whole sentences, lines on their own, headlines
+
+HEAD_MAX_SENTENCE = 16  # a whole sentence (without its clock time and parentheses) as a headline
+HEAD_MAX_CUT = 14  # a sentence's safe head as a headline (G4-5)
+_GENERIC_TITLES = frozenset({"другие факты", "ключевые факты", "факты", "главное", "итоги", "в цифрах", "цифры", "данные", "хронология", "основное", "обзор", "введение", "заключение"})
+_RELATIVE_START_RE = re.compile(r"^(?:В|Во)\s+(?:том\s+же|этом\s+же|этом|тот\s+же|этот)\s+году(?![\wё])|^(?:В|Во)\s+(?:этот|тот)\s+(?:же\s+)?период(?![\wё])|^(?:Тогда\s+же|В\s+это\s+время|В\s+то\s+же\s+время)(?![\wё])")
+_CLOCK_PHRASE = r"в\s+\d{1,2}(?::\d{2}|\s+час\w*(?:\s+\d{1,2}\s+минут\w*)?)(?:\s+по\s+(?:московскому|местному)\s+времени)?"
+
+
+def _clean(t: str) -> str:
+    t = re.sub(r",\s*,", ",", t or "")
+    t = re.sub(r"\s+([,.;:])", r"\1", t)
+    t = re.sub(r"^[\s,;:]+", "", t)
+    t = re.sub(r"[\s,;:]+$", "", t)
+    return re.sub(r"\s{2,}", " ", t).strip()
+
+
+def _head_form(sentence: str) -> str:
+    """A sentence as a headline reads it: no clock time, no time zone, no parentheses, both commas of a clock time
+    that stood between them gone («12 апреля 1961 года, в 9 часов 7 минут по московскому времени, с космодрома…» →
+    «12 апреля 1961 года с космодрома…»)."""
+    t = re.sub(r"\s*\([^()]*\)", "", sentence or "")
+    t = re.sub(rf",\s*{_CLOCK_PHRASE}\s*,", " ", t, flags=re.I)
+    t = re.sub(rf"\s*(?<![\wё]){_CLOCK_PHRASE}", " ", t, flags=re.I)
+    t = re.sub(r"(?<![\wё])по\s+(?:московскому|местному)\s+времени", " ", t, flags=re.I)
+    return H.strip_end(_clean(t))
+
+
+def generic_head(h: str, title: str = "") -> bool:
+    """A headline that is a working title of the writer's storyline («Предпосылки и причины», «Ход событий
+    (продолжение)», «Инфраструктура», «Другие факты»), not a statement (G4-5)."""
+    hn = H.strip_end(h or "").strip().lower()
+    if not hn:
+        return True
+    base = re.sub(r"\s*\(продолжение(?:\s+\d+)?\)\s*$", "", hn)
+    if base != hn or base in _GENERIC_TITLES:
+        return True
+    try:
+        from verstka.planning.writer import _working_title
+
+        if _working_title(hn):
+            return True
+    except Exception:  # noqa: BLE001 - the writer's own list, else the rules below
+        pass
+    # a label of one or two words («Начало», «Инфраструктура»); the writer's own title of more («Инвесторы и доли»,
+    # «Статистика пользователей»): a topic, kept
+    return len(hn.split()) <= 2 and not re.search(r"\d", hn)
+
+
+def _resolved_start(sentence: str, sdates: _Dates) -> Optional[str]:
+    """A sentence whose time is told by the one before it («В том же году было продано…») with that year written
+    («В 2024 году было продано…»); None when the year is not one; the sentence as it is without such a start."""
+    m = _RELATIVE_START_RE.match(sentence or "")
+    if not m:
+        return sentence
+    own = dates_of(sentence[m.end():])
+    if own.years:
+        return H.cap_first(_clean(sentence[m.end():]))
+    if len(sdates.years) != 1:
+        return None
+    return f"В {next(iter(sdates.years))} году{sentence[m.end():]}"
+
+
+def _sentence_of(line: str, src: Source, floor: float = 0.6) -> Optional[int]:
+    best: Optional[tuple[float, int]] = None
+    for i, sn in enumerate(src.sentences):
+        cv = coverage(line, sn)
+        if cv >= floor and (best is None or cv > best[0]):
+            best = (cv, i)
+    return best[1] if best else None
+
+
+def _on_its_own(r: _Run, text: str, i: Optional[int]) -> Optional[str]:
+    from verstka.planning.clauses import standalone
+
+    before = list(r.src.before) + (r.src.sentences[:i] if i is not None else list(r.src.sentences))
+    return standalone(text, before, names=r.src.name_forms())
+
+
+def assertion(r: _Run, used: frozenset = frozenset(), skip: tuple = ()) -> Optional[tuple[str, int, bool]]:
+    """A headline that states the slide's point from its own sentences (G4-5): the first sentence that reads on its
+    own and fits whole (≤ 15 words without its clock time), else another one that does, else the first sentence's safe
+    head (≤ 12 words). (headline, sentence index, whole); None when no sentence gives one. `used`: the other slides'
+    headlines (normalised), never repeated."""
+    from verstka.planning.clauses import has_predicate, safe_cut
+
+    src = r.src
+    cands: list[tuple[str, int, bool]] = []
+    for i, (sn, sd) in enumerate(zip(src.sentences, src.dates)):
+        if i in skip:
+            continue
+        t = _resolved_start(sn, sd)
+        if t is None:
+            continue
+        t = _on_its_own(r, t, i)
+        if t is None:
+            continue
+        t = _head_form(t)
+        if len(t.split()) < 4 or not has_predicate(t) or ranks_of(t) and not all(_rank_ok(x, t, sn) for x in ranks_of(t)):
+            continue
+        if len(t.split()) <= HEAD_MAX_SENTENCE:
+            cands.append((t, i, True))
+        else:
+            cut = safe_cut(t, HEAD_MAX_CUT)
+            if cut and len(cut.split()) >= 5:  # (≤ 14 words: a head that keeps its «, но …» is longer than 12)
+                cands.append((H.strip_end(cut), i, False))
+    cands = [c for c in cands if _norm(c[0]) not in used]
+    # a whole sentence (the first two first), else the first sentence's safe head — which leaves that sentence in the
+    # body whole, said twice: the last resort
+    whole = sorted((c for c in cands if c[2]), key=lambda c: (c[1] > 1, c[1]))
+    if whole:
+        return whole[0]
+    first_cut = [c for c in cands if not c[2] and c[1] == 0 and len(c[0].split()) >= 6]
+    return first_cut[0] if first_cut else (cands[0] if cands else None)
+
+
+def _drop_told(r: _Run, i: int) -> None:
+    """The body lines and cards that say the headline's sentence again go (while the body keeps something)."""
+    c, sn = r.s.content, r.src.sentences[i]
+
+    def same(x: str) -> bool:
+        return bool(x) and coverage(x, sn) >= 0.8 and coverage(sn, x) >= 0.6
+
+    for attr in ("bullets", "paragraphs"):
+        lines = getattr(c, attr)
+        keep = [x for x in lines if not same(x)]
+        if len(keep) < len(lines) and (keep or c.items or c.numbers or c.chart or c.table or (attr == "bullets" and c.paragraphs) or (attr == "paragraphs" and c.bullets)):
+            setattr(c, attr, keep)
+    keep_i = [it for it in c.items if not same(f"{it.title} {it.text}".strip())]
+    if len(keep_i) < len(c.items) and (keep_i or c.bullets or c.paragraphs):
+        c.items = keep_i
+        if r.s.kind == PatternKind.cards and len(keep_i) == 1 and not keep_i[0].bullets and not keep_i[0].number:
+            # one card left: a line (the short-slide rule sets it as a statement)
+            c.bullets = [H.strip_end(f"{keep_i[0].title} {keep_i[0].text}".strip())] + list(c.bullets)
+            c.items = []
+            r.s.kind = PatternKind.bullets
+
+
+def _body_insert(r: _Run, line: str, first: bool = True) -> None:
+    """A sentence onto the slide's body, in the form the slide has."""
+    s, c = r.s, r.s.content
+    if s.kind == PatternKind.timeline and c.items:
+        i = _sentence_of(line, r.src)
+        d = date_title(r.src.sentences[i], r.src.dates[i]) if i is not None else None
+        e = event_text(r.src.sentences[i]) if i is not None else None
+        if d and e:
+            c.items.insert(0, SlideItem(title=d, text=H.cap_first(e)))
+            try:
+                from verstka.planning.writer import chrono_sort
+
+                c.items = chrono_sort(c.items, lambda it: it.title or "")
+            except Exception:  # noqa: BLE001 - the text's order
+                pass
+            return
+    if c.items and not c.bullets and s.kind in (PatternKind.cards, PatternKind.process, PatternKind.team) and len(c.items) < 6:
+        c.items.insert(0 if first else len(c.items), SlideItem(title=line))
+        return
+    if c.paragraphs and not c.bullets and not (c.items or c.numbers or c.chart or c.table):
+        c.bullets, c.paragraphs = ([line] if first else []) + list(c.paragraphs) + ([] if first else [line]), []
+        if s.kind not in (PatternKind.bullets,):
+            s.kind = PatternKind.bullets
+        return
+    c.bullets = ([line] + list(c.bullets)) if first else (list(c.bullets) + [line])
+    if not (c.items or c.numbers or c.chart or c.table or c.columns) and s.kind not in (PatternKind.bullets,):
+        s.kind = PatternKind.bullets
+
+
+def _whole_sentences(r: _Run) -> None:
+    """G4-1: a line, a card or a takeaway that is the start of a slide's sentence cut where no clause ends («6 июня
+    1944 года союзные силы США», «Выключение двигателя произошло только», «…проработала успешно» without «, но
+    отключилась…») is the sentence — shortened where a clause ends, else whole."""
+    from verstka.planning.clauses import cut_is_safe, fit
+
+    src, c = r.src, r.s.content
+    changed: list[str] = []
+
+    def fix(x: str) -> str:
+        if not x:
+            return x
+        for sn in src.sentences:
+            if cut_is_safe(x, sn) is False:
+                new = _fit_line(sn, r)
+                changed.append(f"«{H.strip_end(x)[:50]}» → «{new[:50]}»")
+                return new
+        return x
+
+    c.bullets = [fix(b) for b in c.bullets]
+    c.paragraphs = [fix(b) for b in c.paragraphs]
+    for it in c.items:
+        if it.title and not it.text:
+            it.title = fix(it.title)
+    for col in c.columns:
+        col.bullets = [fix(b) for b in col.bullets]
+    if r.s.takeaway:
+        r.s.takeaway = fix(r.s.takeaway)
+    h = r.s.headline or ""
+    for i, sn in enumerate(src.sentences):
+        if cut_is_safe(h, sn) is False:
+            whole = _head_form(sn)
+            new = whole if len(whole.split()) <= HEAD_MAX_SENTENCE else (trim(whole, HEAD_MAX_CUT) or H.strip_end(src.title or ""))
+            changed.append(f"the headline «{h[:50]}» → «{new[:50]}»")
+            if new == H.strip_end(src.title or ""):
+                _body_insert(r, _fit_line(sn, r))
+            r.s.headline = new
+            break
+    if changed:
+        r.say("sentences cut where no clause ends → whole: " + "; ".join(changed))
+
+
+def _assert_headline(r: _Run) -> None:
+    """G4-5: a headline that is the storyline's working title («Предпосылки и причины», «Ход событий (продолжение)»)
+    or starts with a time the sentence before tells («В том же году…») states the slide's point from its own
+    sentences instead; the body line that says the same sentence goes."""
+    s, src = r.s, r.src
+    h = H.strip_end(s.headline or "")
+    m = _RELATIVE_START_RE.match(h)
+    if m:
+        i = _sentence_of(h, src, 0.5)
+        new = _resolved_start(h, src.dates[i]) if i is not None else None
+        if new:
+            r.say(f"the headline «{h}» starts with a time the sentence before tells → «{new}»")
+            s.headline = h = H.strip_end(new)
+        else:
+            h = ""
+    from verstka.planning.clauses import strip_connector
+
+    h2 = strip_connector(h) if h else h
+    if h2 != h:
+        r.say(f"the headline «{h}» without its connector → «{h2}»")
+        s.headline = h = h2
+    if h and not generic_head(h, src.title):
+        return
+    dated_lines = [x for x in s.content.bullets if _LINE_DATE_RE.match(H.strip_end(x))]
+    if (s.kind == PatternKind.timeline and len(s.content.items) >= 3) or (len(dated_lines) >= 3 and len(dated_lines) >= 0.8 * len(s.content.bullets)):
+        # a time axis under its label («Хронология»): a statement of one entry would say one of its steps twice
+        base = re.sub(r"\s*\(продолжение(?:\s+\d+)?\)\s*$", "", h or H.strip_end(src.title or ""), flags=re.I)
+        if base and base != s.headline:
+            s.headline = base
+        return
+    got = assertion(r)
+    if got is not None and got[2] and len(src.sentences) == 1:
+        # the slide's one sentence: as the headline it would leave the body empty — the label stays over it
+        got = None
+    if got is None:
+        base = re.sub(r"\s*\(продолжение(?:\s+\d+)?\)\s*$", "", H.strip_end(h or src.title or ""), flags=re.I)
+        if base and base != s.headline:
+            r.say(f"the headline «{s.headline}» → «{base}»")
+            s.headline = base
+        return
+    new, i, whole = got
+    r.say(f"the headline «{h or s.headline}» is a working title → «{new}»")
+    s.headline = new
+    if whole:
+        _drop_told(r, i)
+
+
+def _standalone_pass(r: _Run) -> None:
+    """G4-6: a sentence on its own card, line or label reads on its own: no leading connector («Также компания…»),
+    a leading «он / она» or a possessive «её» by the name the text gives («Также она владеет…» → «VK владеет…»); one
+    that still leans on another sentence stays only right after that sentence on the slide, else it goes (the notes
+    keep it)."""
+    s, c, src = r.s, r.s.content, r.src
+    changed: list[str] = []
+
+    def one(x: str, shown: list[str]) -> Optional[str]:
+        i = _sentence_of(x, src)
+        y = _on_its_own(r, x, i)
+        if y is not None:
+            if y != x:
+                changed.append(f"«{x[:40]}» → «{y[:40]}»")
+            return y
+        ante = (src.sentences[i - 1] if i else (src.before[-1] if src.before else None)) if i is not None else None
+        if ante and any(p and (coverage(ante, p) >= 0.6 or coverage(p, ante) >= 0.6) for p in shown[-2:]):
+            return "\x00" + x  # right after the sentence it leans on: joined to that line (below)
+        changed.append(f"«{x[:40]}» leans on a sentence the slide does not show, dropped")
+        return None
+
+    for attr in ("bullets", "paragraphs"):
+        lines = getattr(c, attr)
+        out: list[str] = []
+        for x in lines:
+            y = one(x, [s.headline or "", *out])
+            if y is None:
+                continue
+            if y.startswith("\x00"):
+                y = y[1:]
+                if out and len(out[-1].split()) + len(y.split()) <= 40:
+                    # «…, а напиток взбивали до получения пены. Его пили только мужчины…»: one line, never a line that
+                    # starts with a pronoun of the line before
+                    changed.append(f"«{y[:40]}» joined to the line it leans on")
+                    out[-1] = f"{H.strip_end(out[-1])}. {H.strip_end(y)}"
+                    continue
+            out.append(y)
+        if out != lines and (out or c.items or c.numbers or c.chart or c.table):
+            setattr(c, attr, out)
+    items: list[SlideItem] = []
+    for it in c.items:
+        if _date_only(it.title or "") or not it.title:
+            items.append(it)
+            continue
+        y = one(it.title, [s.headline or "", *(x.title for x in items)])
+        if y is None:
+            continue
+        if y.startswith("\x00"):
+            y = y[1:]
+            if items and not items[-1].text and len(items[-1].title.split()) + len(y.split()) <= 30:
+                items[-1] = items[-1].model_copy(update={"text": H.strip_end(y)})  # under the card it leans on
+                changed.append(f"«{y[:40]}» under the card it leans on")
+                continue
+        items.append(it.model_copy(update={"title": y}) if y != it.title else it)
+    if len(items) != len(c.items) or any(a is not b for a, b in zip(items, c.items)):
+        if len(items) >= 2 or s.kind != PatternKind.cards or not c.items:
+            c.items = items
+    if changed:
+        r.say("lines on their own: " + "; ".join(changed))
+
+
+_DEFINITION_RE = re.compile(r"^([А-ЯЁA-Z«][^—–]{1,60}?)\s+[—–]\s+(?:это\s+)?\S")
+
+
+def _definition_lead(r: _Run) -> None:
+    """G4-14: a definition («Вторая мировая война — война двух коалиций…») is never a card: the headline tells it, or
+    it is the slide's lead line (the subtitle)."""
+    s, c, src = r.s, r.s.content, r.src
+    defs = [i for i, sn in enumerate(src.sentences) if _DEFINITION_RE.match(sn) and not dates_of(sn.split("—")[0]).any]
+    if not defs or s.kind not in (PatternKind.cards, PatternKind.process, PatternKind.bullets):
+        return
+    from verstka.planning.clauses import fit
+
+    for i in defs:
+        sn = src.sentences[i]
+        hit = [it for it in c.items if coverage(f"{it.title} {it.text}", sn) >= 0.7 and (it.text or _DEFINITION_RE.match(it.title or ""))]
+        if not hit:
+            continue
+        c.items = [it for it in c.items if it not in hit]
+        told = coverage(s.headline or "", sn) >= 0.6
+        if not told and not s.subtitle:
+            s.subtitle = _fit_line(sn, r)
+        r.say("a definition as a card → " + ("the headline tells it" if told else "the lead line"))
+        if len(c.items) < 2 and s.kind == PatternKind.cards:
+            c.bullets = [H.strip_end(f"{it.title} {it.text}".strip()) for it in c.items] + list(c.bullets)
+            c.items = []
+            s.kind = PatternKind.bullets
+
+
+def _long_cards(r: _Run) -> None:
+    """G4-14: a row of three or more cards that are each a long sentence (small type in small boxes) is a list."""
+    s, c = r.s, r.s.content
+    if s.kind != PatternKind.cards or len(c.items) < 2 or any(it.text or it.bullets or it.number for it in c.items):
+        return
+    n = [len((it.title or "").split()) for it in c.items]
+    if (len(n) >= 3 and sum(n) / len(n) >= 10) or max(n) >= 16:
+        c.bullets = [H.strip_end(it.title) for it in c.items][:6] + list(c.bullets)
+        c.items = []
+        s.kind = PatternKind.bullets
+        r.say("cards of long sentences → a list")
+
+
+def _keep_sentences(r: _Run) -> None:
+    """G4-2: a written slide keeps its first dated sentence (its date with its event) and at least one whole sentence
+    of its text in its body."""
+    from verstka.planning.clauses import fit, has_predicate
+
+    s, c, src = r.s, r.s.content, r.src
+    if c.chart is not None or c.table is not None or s.kind in (PatternKind.chart, PatternKind.table, PatternKind.quote):
+        return
+    body = [*c.bullets, *c.paragraphs, *(f"{it.title} {it.text}".strip() for it in c.items), *(b for col in c.columns for b in col.bullets)]
+    shown = [s.headline or "", s.subtitle or "", s.takeaway or "", *body, *(f"{n.value} {n.label}" for n in c.numbers)]
+    first = next((i for i, sn in enumerate(src.sentences) if dates_of(sn).any), None)
+    thin = len(body) <= 2 or generic_head(s.headline or "", src.title)
+    if first is not None and thin:
+        sn, sd = src.sentences[first], dates_of(src.sentences[first])
+        told = any(x and (dates_of(x).years & sd.years or dates_of(x).days & sd.days) and (coverage(x, sn) >= 0.5 or coverage(sn, x) >= 0.5) for x in shown)
+        if not told and not any(it.title and _date_only(it.title) and coverage(it.text or "", sn) >= 0.5 for it in c.items):
+            line = _fit_line(sn, r)
+            _body_insert(r, line)
+            r.say(f"the slide's first dated sentence was not on it → «{line[:60]}»")
+            body.insert(0, line)
+    if c.numbers and not body:
+        return
+    whole = [x for x in body if has_predicate(x) and any(coverage(x, sn) >= 0.7 for sn in src.sentences)]
+    told = " ".join(x for x in shown if x)
+    if whole or not src.sentences or any(coverage(sn, told) >= 0.8 for sn in src.sentences):
+        return  # a list of the names one sentence enumerates, under a headline that says the rest of it, tells it
+    for i, sn in enumerate(src.sentences):
+        line = _on_its_own(r, _fit_line(sn, r), i)
+        if line and not (coverage(sn, s.headline or "") >= 0.8 and coverage(s.headline or "", sn) >= 0.6):
+            _body_insert(r, line, first=False)
+            r.say(f"no whole sentence on the slide → «{line[:60]}»")
+            return
+
+
+def _label_pronouns(r: _Run) -> None:
+    """G4-6: a key figure's label never leans on another sentence («62 — государства в ней»): it is rebuilt from its
+    sentence read on its own («В войне участвовали 62 государства» → «государства участвовали в войне»), else the
+    figure is its sentence as a line."""
+    from verstka.planning.clauses import _DEM_RE, _PERS_RE
+
+    s, c, src = r.s, r.s.content, r.src
+    if not c.numbers:
+        return
+    keep: list[NumberCallout] = []
+    lines: list[str] = []
+    for n in c.numbers:
+        if not n.label or not (_PERS_RE.search(n.label) or _DEM_RE.search(n.label)):
+            keep.append(n)
+            continue
+        want = _values(n.value)
+        i = next((k for k, x in enumerate(src.sentences) if want and all(any(_same_value(v, y) for y in _values(x)) for v in want)), None)
+        own = _on_its_own(r, src.sentences[i], i) if i is not None else None
+        lb = label_of(own, n.value, src.known) if own else None
+        if lb and not _PERS_RE.search(lb) and not _DEM_RE.search(lb):
+            r.say(f"the label «{n.label}» of {n.value} leans on another sentence → «{lb}»")
+            n.label = lb
+            keep.append(n)
+        else:
+            line = _fit_line(own or (src.sentences[i] if i is not None else ""), r)
+            r.say(f"the key figure {n.value} with the label «{n.label}» → " + (f"the line «{line[:50]}»" if line else "dropped"))
+            if line:
+                lines.append(line)
+    if len(keep) == len(c.numbers):
+        return
+    c.numbers = keep
+    c.bullets = (lines + list(c.bullets))[:6]
+    if s.kind == PatternKind.stat_row and len(keep) < 2 or s.kind == PatternKind.big_number and not keep:
+        c.bullets = [_fit_line(src.sentences[k], r) for n in keep for k in [next((j for j, x in enumerate(src.sentences) if _values(n.value) and all(any(_same_value(v, y) for y in _values(x)) for v in _values(n.value))), None)] if k is not None] + list(c.bullets)
+        c.numbers = []
+        s.kind = PatternKind.bullets
+
+
+def _text_order(r: _Run) -> None:
+    """The slide's lines in the order its text tells them (a line the checks put back went first: «Мирилашвили занял
+    у отца…» before «Первыми инвесторами стали…»), when every line is one sentence of the text."""
+    c, src = r.s.content, r.src
+    for attr in ("bullets", "paragraphs"):
+        lines = getattr(c, attr)
+        if len(lines) < 2:
+            continue
+        if sum(1 for x in lines if _LINE_DATE_RE.match(H.strip_end(x))) >= 0.8 * len(lines):
+            continue  # a dated list is in time order (agent._chrono_order)
+        idx = [_sentence_of(x, src, 0.7) for x in lines]
+        if any(i is None for i in idx) or len(set(idx)) != len(idx) or idx == sorted(idx):
+            continue
+        setattr(c, attr, [x for _, x in sorted(zip(idx, lines), key=lambda t: t[0])])
+
+
+PROSE_WORDS = 15  # a list line longer than this reads as a paragraph («bullet_too_long» for the audit)
+# where a long sentence splits into two lines that each stand on their own: «…, и VK была сформирована…», «…; …»
+_SPLIT_AT_RE = re.compile(r",\s+и\s+(?=[А-ЯЁA-Z«]|[а-яё]+\s+[а-яё]+(?:ся|сь|л|ла|ло|ли|ет|ют|ит|ят)\b)|;\s+")
+
+
+def _split_line(line: str) -> Optional[list[str]]:
+    """A long sentence as two lines (gate 4 G4-1: «…or split it into two lines»): at «, и» before a clause with its own
+    subject and verb, or at «;» — each part says a whole thing (its own predicate, no pronoun of the other); None."""
+    from verstka.planning.clauses import has_predicate, head_ok, leans
+
+    t = H.strip_end(line)
+    for m in _SPLIT_AT_RE.finditer(t):
+        head, tail = t[: m.start()].rstrip(" ,;"), t[m.end():].strip()
+        if len(head.split()) < 5 or len(tail.split()) < 4 or not head_ok(head, t[m.start():]):
+            continue
+        if not has_predicate(tail) or leans(tail) or re.match(r"^[а-яё]+(?:ся|сь|л|ла|ло|ли|ет|ют|ит|ят)\s", tail):
+            continue  # «…, и получила название VK»: the second half has no subject of its own
+        return [head, H.cap_first(tail)]
+    return None
+
+
+def _prose_lines(r: _Run) -> None:
+    """Whole sentences on a list (gate 4 G4-1 keeps them whole): a line of more than 15 words is split into two lines
+    where it joins two clauses that each stand on their own; under key figures two or more long lines are one
+    paragraph (the figures' block marks a list of lines, not one). The lines stay a list at the list's size — as
+    paragraphs they are set smaller (15 pt against 18 pt on VK Tech)."""
+    s, c = r.s, r.s.content
+    lines = [*c.bullets, *c.paragraphs]
+    if not lines or not any(len(x.split()) > PROSE_WORDS for x in lines):
+        return
+    if c.bullets and len(c.bullets) < 6:
+        out: list[str] = []
+        for b in c.bullets:
+            parts = _split_line(b) if len(b.split()) > PROSE_WORDS and len(c.bullets) + len(out) < 6 else None
+            out.extend(parts or [b])
+        if out != c.bullets:
+            r.say("long sentences split where two clauses join")
+            c.bullets = out[:6]
+    if c.numbers and s.kind in (PatternKind.stat_row, PatternKind.big_number):
+        lines = [*c.bullets, *c.paragraphs]
+        if len(lines) >= 2 and any(len(x.split()) > PROSE_WORDS for x in lines):
+            joined = " ".join(x if x.rstrip().endswith((".", "!", "?", "…")) else x.rstrip() + "." for x in lines)
+            c.paragraphs, c.bullets = [H.strip_end(joined)], []
+            r.say("the lines under the key figures as one paragraph")
+
+
+def _fix_values(r: _Run) -> None:
+    """G4-16: «17,8 тыс» → «17,8 тыс.» in key figures and table cells; a label that starts with a name keeps its capital."""
+    from verstka.planning.clauses import fix_scale
+
+    c = r.s.content
+    for n in c.numbers:
+        v = fix_scale(n.value or "")
+        if v != n.value:
+            n.value = v
+        if n.label:
+            n.label = H.name_case(n.label, r.src.deck)
+    if c.table is not None:
+        c.table.rows = [[fix_scale(x) if j else H.name_case(x, r.src.deck) for j, x in enumerate(row)] for row in c.table.rows]
+    for ch in (c.chart, c.chart2):
+        if ch is not None:
+            # G4-4: a category that is a name keeps its capital («Россия экспортирует…», never «россия …»)
+            ch.categories = [H.name_case(x, r.src.deck) for x in ch.categories]
+
+
+def unique_headlines(runs: list[tuple[OutlineSlide, str, str]], deck: str = "", topic: str = "") -> list[str]:
+    """G4-5: no two slides of a deck under one headline («VK была основана в 1998 году» on s2 and s8): a later slide
+    takes another statement of its own sentences. `runs`: (slide, its writer text, its title) in the deck's order.
+    Returns the changes."""
+    out: list[str] = []
+    used: dict[str, int] = {}
+    for k, (s, text, title) in enumerate(runs):
+        if s.kind.value in ("title", "section", "thanks", "agenda") or not (s.headline or "").strip():
+            continue
+        key = _norm(H.strip_end(s.headline))
+        if key not in used:
+            used[key] = k
+            continue
+        src = Source.of(text, deck=deck, title=title, topic=topic)
+        r = _Run(s=s, src=src, changes=out, key=s.id)
+        got = assertion(r, used=frozenset(used))
+        if got is None:
+            continue
+        new, i, whole = got
+        old = H.strip_end(s.headline)
+        r.say(f"the headline «{old}» is another slide's → «{new}»")
+        s.headline = new
+        if whole:
+            _drop_told(r, i)
+        # the old headline was a sentence of this slide: it stays on it, as a line
+        j = _sentence_of(old, src, 0.8)
+        c = s.content
+        body = [*c.bullets, *c.paragraphs, *(f"{it.title} {it.text}".strip() for it in c.items)]
+        if j is not None and j != i and not any(coverage(src.sentences[j], x) >= 0.8 for x in body):
+            _body_insert(r, old)
+        used[_norm(new)] = k
+    return out
 
 
 def check_slide(s: OutlineSlide, text: str, *, deck: str = "", title: str = "", topic: str = "", key: str = "") -> list[str]:
@@ -1409,12 +2066,22 @@ def check_slide(s: OutlineSlide, text: str, *, deck: str = "", title: str = "", 
     _complete_enumeration(r)
     _timeline_form(r)
     _check_lines(r)
+    _whole_sentences(r)
     _check_table(r)
     _check_numbers(r)
     _check_headline(r)
+    _assert_headline(r)
     _check_takeaway(r)
     _refill(r)
     _fill_short(r)
+    _standalone_pass(r)
+    _definition_lead(r)
+    _long_cards(r)
+    _keep_sentences(r)
+    _label_pronouns(r)
+    _text_order(r)
+    _prose_lines(r)
+    _fix_values(r)
     _grammar(r)
     return changes
 

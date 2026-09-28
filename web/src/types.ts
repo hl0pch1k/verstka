@@ -70,6 +70,8 @@ export interface ModelsStatus {
   advice?: string | null;
   /** Building again can work now or once `retry_in` is over (false: a key, an account or a model id needs a fix). */
   retryable?: boolean;
+  /** What the server's owner has to fix for the failed model (a key, an account, a Cloud.ru project), or null. */
+  owner?: string | null;
 }
 /** Who wrote the plan of a variant (or of the whole generation) and, when the built-in planner did, why. */
 export interface PlannerInfo {
@@ -91,6 +93,8 @@ export interface PlannerInfo {
   retryable?: boolean;
   /** «Чтобы не зависеть от очереди бесплатных, пополните OpenRouter…» when a free model failed; added to the live advice. */
   steady?: string | null;
+  /** What the server's owner has to fix (an account, a key, a project — «Cloud.ru не находит проект модели…»), or null. */
+  owner?: string | null;
 }
 export interface StrategyInfo { name: string; title: string; description: string }
 export interface SkillInfo { name: string; version: string; role: string; sha256: string; description: string; changelog: unknown }

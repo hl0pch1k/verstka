@@ -464,7 +464,7 @@ def test_a_written_deck_is_a_brief_with_the_cover_and_the_attribution():
     meta = res.meta()
     assert meta["status"] == "written" and meta["text"] == res.text and meta["slides"] == res.slides + 1 and meta["source"] is None
     rec = res.record()
-    assert rec["skills"]["deck_writer"]["version"] == "2.0.0" and rec["answers"]["writer"]
+    assert rec["skills"]["deck_writer"]["version"] == "2.1.0" and rec["answers"]["writer"]
 
 
 def test_the_config_switches(monkeypatch):
@@ -825,7 +825,8 @@ def test_a_key_figures_label_says_what_its_sentence_counts():
                 numbers=[NumberCallout(value="240 млн", label="Прогноз продаж к 2030 году")])
     A.tidy_design(d, _written_ctx())
     n = d.slide.content.numbers[0]
-    assert n.value == "240 млн" and "продаж" not in n.label.lower() and "электромобилей" in n.label and "в мире" in n.label
+    # the value keeps its sentence's hedge (gate 4 G4-3: «около 240 млн», not «240 млн»)
+    assert n.value == "около 240 млн" and "продаж" not in n.label.lower() and "электромобилей" in n.label and "в мире" in n.label
     assert "240 млн" in d.slide.headline
     # a label that paraphrases its own measure stays
     d = _design(K.stat_row, "В I квартале 2025 года продано 1854 электромобиля", text, title="Объём рынка",

@@ -1,5 +1,5 @@
 name: deck_writer
-version: 2.0.0
+version: 2.1.0
 role: llm
 description: >
   Writes the source text of a whole deck from a topic when the user gave no material of their own (writer mode):
@@ -32,3 +32,9 @@ changelog:
     началась космическая гонка», «10:53 отделился»). writer.py checks every date, name, rank and figure against the
     cited sentences (Anchors), strips the marks before the designer and the person see the text and keeps them per
     statement (writer.json «sources»)."
+  - "2.1.0: the storyline by what a history is the history of (writer.history_subkind: a war — causes … consequences;
+    an event — background → preparation → the event → right after → meaning; a thing or a culture — origins → spread
+    → development → today; gate 4: «История шоколада» was told as a war); a sentence taken from the reference names
+    whom its pronoun, «сын …» or «этот …» stands for; interpretive words only when the cited sentence says them; the
+    story goes forward in time across slides. writer.py checks the same deterministically (needs_context, soft_word,
+    order_story)."

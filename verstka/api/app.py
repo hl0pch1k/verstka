@@ -687,7 +687,8 @@ def apply_fixes(gid: str, strategy: str, req: FixRequest) -> dict:
             report = AuditReport.model_validate_json((vdir / "audit_report.json").read_text(encoding="utf-8"))
             only = None if req.all_deterministic else set(req.issue_ids)
             job.emit("Применяю исправления", 0.2)
-            final, plan2, outline2, _ = autofix_loop(vdir / "deck.pptx", report, outline, plan, manifest, ws, max_iterations=2, only_ids=only, images_dir=vdir / "slides", brief_text=_brief_text_of_meta(gid, meta))
+            final, plan2, outline2, _ = autofix_loop(vdir / "deck.pptx", report, outline, plan, manifest, ws, max_iterations=2, only_ids=only, images_dir=vdir / "slides", brief_text=_brief_text_of_meta(gid, meta),
+                                                    writer=meta.get("writer") if isinstance(meta.get("writer"), dict) else None)
             job.emit("Готовлю превью и файлы", 0.8)
             # previews and the exports that existed before are rebuilt from one LibreOffice run
             exports = [fmt for fmt in ("pdf", "html") if (vdir / f"deck.{fmt}").exists()]

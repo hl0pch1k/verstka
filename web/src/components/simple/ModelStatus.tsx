@@ -45,7 +45,7 @@ export function ModelStatus({ enabled, hidden = false, className }: { enabled: b
       aria-hidden={leaving || undefined}
     >
       <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-400" aria-hidden />
-      <span className="truncate" title={shown.text}>{shown.text}</span>
+      <span className="truncate" title={shown.hint ? `${shown.text}. ${shown.hint}` : shown.text}>{shown.text}</span>
     </span>
   );
 }

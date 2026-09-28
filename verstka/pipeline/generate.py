@@ -319,6 +319,9 @@ def generate_variants(
                 except OSError as e:
                     fact_warnings.append(f"writer: the text was not saved ({str(e)[:120]})")
     written = writer_res is not None and writer_res.written
+    # the audit sees the writer's record: a topic whose text was not written is a skeleton, never a 100-scored success
+    # (gate 4 G4-21, checks/writing.py writer_failed)
+    writer_audit = writer_res.summary() if writer_res is not None else None
     if use_agent:
         from verstka.planning.agent import run_agent
 
@@ -429,10 +432,10 @@ def generate_variants(
         if audit:
             tau = time.time()
             report(f"{name}: audit", base + span * 0.65)
-            audit_report = run_audit(vdir / "deck.pptx", manifest, v_outline, ws, providers=providers if audit_models else None, skills=skills if audit_models else None, use_vlm=audit_models and use_vlm, use_llm=audit_models and use_llm, render=audit_render, images_dir=vdir / "slides", strategy=name, brief_text=brief.text if brief else None)
+            audit_report = run_audit(vdir / "deck.pptx", manifest, v_outline, ws, providers=providers if audit_models else None, skills=skills if audit_models else None, use_vlm=audit_models and use_vlm, use_llm=audit_models and use_llm, render=audit_render, images_dir=vdir / "slides", strategy=name, brief_text=brief.text if brief else None, writer=writer_audit)
             if autofix and audit_report.summary.errors + audit_report.summary.warnings > 0:
                 report(f"{name}: autofix ({audit_report.summary.errors} errors)", base + span * 0.8)
-                audit_report, plan, v_outline, rr = autofix_loop(vdir / "deck.pptx", audit_report, v_outline, plan, manifest, ws, providers=providers, skills=skills, use_models=audit_models, images_dir=vdir / "slides", render=audit_render, brief_text=brief.text if brief else None)
+                audit_report, plan, v_outline, rr = autofix_loop(vdir / "deck.pptx", audit_report, v_outline, plan, manifest, ws, providers=providers, skills=skills, use_models=audit_models, images_dir=vdir / "slides", render=audit_render, brief_text=brief.text if brief else None, writer=writer_audit)
                 if rr is not None:
                     render = rr
             timings["audit"] = round(time.time() - tau, 2)

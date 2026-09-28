@@ -1160,6 +1160,10 @@ def rules_design(unit: _Unit, ctx: _Ctx) -> _Design:
     src = _read_source(unit.text)
     c = SlideContent()
     kind = "bullets"
+    # a writer's sentence is shortened only where a clause ends, else shown whole (gate 4 G4-1); a user's brief keeps
+    # the old word cut
+    lim = 30 if len(src.sentences) <= 3 else 20  # a slide of few sentences has room for them whole
+    cut = (lambda x, n: _clause_cut(x, n, lim)) if ctx.written else H.short
     subtitle: Optional[str] = None
     shown: set[str] = set()
     charts = [ch for ch in _request_charts(unit, ctx) if ch is not None][:2]
@@ -1187,8 +1191,9 @@ def rules_design(unit: _Unit, ctx: _Ctx) -> _Design:
         other_items = [x for g in text_groups[1:] for x in g.items]
         def kpis(lines: list[str]) -> list[NumberCallout]:
             out = _kpis(lines)
-            # the writer's text (a topic): a year or a day of a month is a date, never a slide's key figure
-            return [n for n in out if not _date_callout(n)] if ctx.written else out
+            # the writer's text (a topic): a year or a day of a month is a date, never a slide's key figure; nor a time
+            # of day, a project number or a bound of a requirement (gate 4 G4-3)
+            return [n for n in out if not _date_callout(n) and not _not_key_figure(n, lines)] if ctx.written else out
 
         numbers = _series_figures(unit, ctx) or kpis(fig_items) or kpis(other_items) or kpis(src.sentences)
         if text_groups:
@@ -1196,16 +1201,16 @@ def rules_design(unit: _Unit, ctx: _Ctx) -> _Design:
             pair = text_groups[1] if len(text_groups) > 1 else None
             if pair is not None and g.label and pair.label and g.ask == pair.ask and len(g.items) <= 4 and len(pair.items) <= 4:
                 kind = "two_column"
-                c.columns = [SlideItem(title=x.label or "", bullets=[H.short(i, 12) for i in x.items]) for x in (g, pair)]
+                c.columns = [SlideItem(title=x.label or "", bullets=[cut(i, 12) for i in x.items]) for x in (g, pair)]
                 shown.update(i for x in (g, pair) for i in x.items)
             else:
                 its = g.items[:6]
                 if 2 <= len(its) <= 6 and all(len(x.split()) <= 10 for x in its):
                     kind = "cards"
-                    c.items = [SlideItem(title=H.short(x, 10)) for x in its]
+                    c.items = [SlideItem(title=cut(x, 10)) for x in its]
                 else:
                     kind = "bullets"
-                    c.bullets = [H.short(x, 14) for x in its]
+                    c.bullets = [cut(x, 14) for x in its]
                 shown.update(its)
             # a list is the slide's one block (the composer shows items or figures, not both): its key figure goes
             # into the subtitle as the sentence that states it («Цель — поднять средний чек с 300 до 330 рублей»)
@@ -1218,14 +1223,23 @@ def rules_design(unit: _Unit, ctx: _Ctx) -> _Design:
             kind = "stat_row" if len(nums) >= 2 else "big_number"
             c.numbers = nums
             shown.update(fig_items)
+            if ctx.written:
+                # a writer's slide shows its other sentences under its figures (they went to the notes: gate 4 G4-2)
+                from verstka.planning.grounding import figures as g_figs
+
+                mags = [f.mag for n in nums for f in g_figs(n.value or "") if f.date is None]
+                own = [sn for sn in src.sentences if not _ASK_RE.match(sn) and any(abs(f.mag - m) <= 1e-6 * max(1.0, abs(m)) for f in g_figs(sn) for m in mags)]
+                rest = [sn for sn in src.sentences if sn not in own and not _ASK_RE.match(sn)][:3]
+                c.bullets = [cut(sn, 14) for sn in rest]
+                shown.update(own + rest)
         else:
-            lines = [H.short(sn, 14) for sn in src.sentences if not _ASK_RE.match(sn)][:5]
+            lines = [cut(sn, 14) for sn in src.sentences if not _ASK_RE.match(sn)][:5]
             c.bullets = lines
             shown.update(src.sentences[:5])
     if spec is not None and spec.formula:
         c.formula = spec.formula
     if not (c.bullets or c.items or c.numbers or c.chart or c.table or c.columns or c.formula):
-        c.bullets = [H.short(sn, 14) for sn in src.sentences[:4]] or ([H.short(unit.text, 14)] if unit.text.strip() else [])
+        c.bullets = [cut(sn, 14) for sn in src.sentences[:4]] or ([cut(unit.text, 14)] if unit.text.strip() else [])
         kind = "bullets"
         shown.update(src.sentences[:4])
     if kind == "bullets" and not c.bullets and c.formula:
@@ -1264,6 +1278,32 @@ def rules_design(unit: _Unit, ctx: _Ctx) -> _Design:
     d = _Design(unit=unit, slide=s)
     d.alternatives = auto_alternatives(s)
     return d
+
+
+def _clause_cut(text: str, max_words: int, floor: int = 20) -> str:
+    """A writer's sentence on a line: whole up to `floor` words (20; 30 on a slide of three sentences or fewer), else
+    shortened where a clause ends (clauses.fit), never a fragment — «6 июня 1944 года союзные силы США» was the old
+    word cut (gate 4 G4-1)."""
+    from verstka.planning.clauses import fit
+
+    return fit(text, max(max_words, floor))
+
+
+def _not_key_figure(n: NumberCallout, lines: list[str]) -> bool:
+    """A writer's figure that is not a key figure: a time of day («10 ч» of «в 10 часов 53 минуты»), a project or
+    model number («22220» of «ледоколы проекта 22220»), a bound or a figure of a requirements list («не более 170 см»,
+    «возраст около 30 лет, … вес до 68—70 кг») — gate 4 G4-3."""
+    from verstka.planning.clauses import figure_kind
+    from verstka.planning.grounding import figures as g_figs
+
+    want = g_figs(n.value or "")
+    if not want:
+        return False
+    for ln in lines:
+        for f in g_figs(ln):
+            if f.date is None and abs(f.mag - want[0].mag) <= 1e-6 * max(1.0, abs(f.mag)) and figure_kind(ln, f.start, f.end):
+                return True
+    return False
 
 
 _STEP_TITLE_RE = re.compile(r"^(?:\d{1,2}\s*[-.)]|\d{1,2}\s*-?\s*(?:й|ый|ой|ий)\b|(?:шаг|этап|неделя|месяц|квартал|фаза|step|stage|phase|week)\b|(?:январ|феврал|март|апрел|ма[йя]|июн|июл|август|сентябр|октябр|ноябр|декабр))", re.I)
@@ -2837,8 +2877,8 @@ def tidy_design(d: _Design, ctx: Optional[_Ctx] = None) -> None:
             s.notes = notes
         _hero_supports_headline(d)
         _plain_takeaway(d)
-        if not users:
-            _sentence_headline(d)
+        if not users and not written:
+            _sentence_headline(d)  # a written deck: the written check states a label's slide from its own sentences
         if d.by == "model" and s.headline:
             # a date given to another actor («Германия капитулировала 2 сентября 1945 года»: Japan did)
             wrong = misdated(s.headline, d.unit.text) or (misdated(s.headline, ctx.brief.text) if not _dated_in(s.headline, d.unit.text) else [])
@@ -3308,6 +3348,11 @@ def reshape(s: OutlineSlide, kind: str, chart_type: Optional[str] = None, case_t
     a doughnut only of the parts of one whole (never «Сейчас / Цель», never a row of unrelated figures). Never a row of
     years as key figures («1998 г», «2021 г», «2023 г» — a timeline's dates). `case_text`: the brief (a name keeps its
     capital in a card joined into one line)."""
+    if kind == "chart" and s.content.chart is None and s.content.numbers and case_text:
+        from verstka.planning.writer import is_written_text
+
+        if is_written_text(case_text) and not _one_measure(s.content.numbers):
+            return None  # a written deck: only the writer's data rows are a chart, never unrelated figures (G4-4)
     r = _reshape(s, kind, chart_type, case_text)
     if r is not None and r.kind.value in ("stat_row", "big_number") and _years_only(r.content.numbers):
         return None
@@ -3317,6 +3362,27 @@ def reshape(s: OutlineSlide, kind: str, chart_type: Optional[str] = None, case_t
         if is_written_text(case_text) and not all(date_start(it.title or "") for it in r.content.items):
             return None  # a written deck's time axis has dates on it («Нью-Йорк», a sentence as a step: not one)
     return r
+
+
+def _one_measure(numbers: list[NumberCallout]) -> bool:
+    """Key figures of one measure: one unit and one subject (the same counted word first in every label) — «36
+    энергоблоков» and «54 страны» are two measures, never one chart's columns (gate 4 G4-4)."""
+    if len(numbers) < 2:
+        return False
+    units = set()
+    heads = set()
+    from verstka.planning.grounding import figures as g_figs
+
+    for n in numbers:
+        fs = [f for f in g_figs(n.value or "") if f.date is None]
+        if len(fs) != 1:
+            return False
+        units.add((fs[0].unit, fs[0].scale))
+        w = re.findall(r"[а-яёa-z]{3,}", (n.label or "").lower())
+        if not w:
+            return False
+        heads.add(w[0][:5])
+    return len(units) == 1 and len(heads) == 1
 
 
 def _reshape(s: OutlineSlide, kind: str, chart_type: Optional[str] = None, case_text: str = "") -> Optional[OutlineSlide]:
@@ -3800,13 +3866,14 @@ def _deadline_for(clock: _Clock, seconds: float, before_end: float = 2.0) -> Opt
     return min(clock.deadline - before_end, time.monotonic() + seconds)
 
 
-def _minimal_design(unit: _Unit) -> _Design:
+def _minimal_design(unit: _Unit, written: bool = False) -> _Design:
     """The last resort for a slide whose design failed: its heading and the first lines of its source."""
     if unit.cover:
         return _Design(unit=unit, slide=OutlineSlide(id=unit.key, kind=PatternKind.title, headline=unit.title or "Презентация"))
     if unit.closing:
         return _closing_design(unit)
-    lines = [H.short(x, 14) for x in (H.split_sentences(unit.text) or [])[:4]] or [unit.title or "…"]
+    cut = _clause_cut if written else H.short
+    lines = [cut(x, 14) for x in (H.split_sentences(unit.text) or [])[:4]] or [unit.title or "…"]
     s = OutlineSlide(id=unit.key, kind=PatternKind.bullets, headline=unit.title or lines[0], content=SlideContent(bullets=lines), spec_ref=unit.spec.number if unit.spec else None, rationale=_WHY["bullets"])
     return _Design(unit=unit, slide=s)
 
@@ -3816,7 +3883,7 @@ def _safe_rules(unit: _Unit, ctx: _Ctx) -> _Design:
         return rules_design(unit, ctx)
     except Exception as e:  # noqa: BLE001 - one slide's rules never stop the deck
         log.warning("rules_design failed on slide %s", unit.key, exc_info=True)
-        d = _minimal_design(unit)
+        d = _minimal_design(unit, ctx.written)
         d.failure = f"rules failed: {str(e)[:160]}"
         return d
 
@@ -4021,7 +4088,7 @@ class _Agent:
                 try:
                     finish(d2)
                 except Exception:  # noqa: BLE001
-                    results[d.unit.key] = _minimal_design(d.unit)
+                    results[d.unit.key] = _minimal_design(d.unit, ctx.written)
 
         for u in units:
             if u.frame or not self.models:
@@ -4037,7 +4104,7 @@ class _Agent:
                     except Exception as e:  # noqa: BLE001
                         u = futs[f]
                         log.warning("designing slide %s failed", u.key, exc_info=True)
-                        d = _minimal_design(u)
+                        d = _minimal_design(u, ctx.written)
                         d.failure = str(e)
                     done(d)
         return [results[u.key] for u in units]
@@ -5209,6 +5276,19 @@ def run_agent(
                     if done:
                         fixed_at.append(i)
                         all_done.extend(done)
+            # no two slides under one headline (gate 4 G4-5: «VK была основана в 1998 году» on s2 and s8)
+            try:
+                from verstka.planning.written_check import unique_headlines
+
+                runs = [(sl, unit_of[sl.spec_ref].text, unit_of[sl.spec_ref].title) for sl in o.slides if sl.spec_ref in unit_of and sl.kind.value not in FRAME_KINDS]
+                done = unique_headlines(runs, deck=ctx.brief.text, topic=ctx.title)
+            except Exception:  # noqa: BLE001 - the check never stops the deck
+                log.warning("unique headlines failed on %s", st.name, exc_info=True)
+                done = []
+            if done:
+                warns.extend(done)
+                all_done.extend(done)
+                fixed_at.extend(i for i, sl in enumerate(o.slides, 1) if any(f"slide {sl.id}:" in x for x in done) and i not in fixed_at)
             if fixed_at:
                 tracker.emit("compile", f"Сборка: сверил слайды {', '.join(map(str, fixed_at))} с текстом — {_written_ru(all_done)}.", variant=st.name)
         n_content = sum(1 for s in o.slides if s.kind.value not in FRAME_KINDS)

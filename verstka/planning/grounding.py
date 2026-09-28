@@ -1450,6 +1450,19 @@ class BriefIndex:
 
     # -------------------------------------------------------------- what a figure means
 
+    def _verbatim(self, text: str, f: Fig) -> bool:
+        """The sentence of the text the figure stands in is a sentence of the brief word for word (at least six words):
+        the brief says it so, whatever the label reading makes of an elided subject."""
+        norm = lambda x: re.sub(r"\s+", " ", (x or "").replace("\u00a0", " ").replace("ё", "е").lower()).strip(" .;:!?…")  # noqa: E731
+        starts = [0] + [m.end() for m in re.finditer(r"[.!?…]\s+", text) if m.end() <= f.start]
+        ends = [m.start() for m in re.finditer(r"[.!?…](?:\s+|$)", text) if m.start() >= f.uend - 1]  # «73,4 млн.»: the unit's period ends it
+        sent = norm(text[max(starts): (min(ends) if ends else len(text))])
+        if len(sent.split()) < 6:
+            return False
+        if not hasattr(self, "_norm_body"):
+            self._norm_body = norm(self.text)
+        return sent in self._norm_body
+
     def bound(self, text: str, f: Fig, figs: Optional[list[Fig]] = None) -> bool:
         """Whether the text uses the brief's figure for what the brief says it is: the words of its label (since the
         figure before it, up to the next one) name the subject the brief's label gives it, or its list's lead, or do not
@@ -1460,6 +1473,8 @@ class BriefIndex:
         figs = figs if figs is not None else [x for x in figures(text) if not _ordinal(text, x)]
         if f not in figs:
             return True
+        if self._verbatim(text, f):
+            return True  # the brief's own sentence as it is («…47,2 млн, а ежемесячная — 73,4 млн»: its subject is elided)
         mine = _figure_labels(text, figs, line=True)[figs.index(f)]
         if not mine or isinstance(mine, _BaseLabel):
             return True  # nothing named, or only a share's base («13,3% выручки»)
@@ -2635,10 +2650,29 @@ def _take(c: _Clean, log: _Log) -> _Clean:
     return c
 
 
+def _attribution_prefix() -> str:
+    try:
+        from verstka.planning.writer import ATTRIBUTION_PREFIX
+
+        return ATTRIBUTION_PREFIX
+    except Exception:  # noqa: BLE001 - the writer's marker, as it was written at gate 4
+        return "Текст написан агентом Verstka"
+
+
 def _notes(idx: BriefIndex, notes: str, log: _Log) -> str:
-    """Speaker notes without placeholders and without a sentence with a figure or a change the brief does not have."""
+    """Speaker notes without placeholders and without a sentence with a figure or a change the brief does not have.
+    The writer's notice («Текст написан агентом Verstka по статьям «Аполлон-11» и … Проверьте факты…», a line that
+    starts with writer.ATTRIBUTION_PREFIX) passes as it is: the article titles it names are not the brief's figures
+    (gate 4 G4-17)."""
     if not notes:
         return notes
+    prefix = _attribution_prefix()
+    at = notes.find(prefix)
+    if at >= 0:
+        head, notice = notes[:at], notes[at:]
+        before = _notes(idx, head.strip(), log) if head.strip() else ""
+        sep = "\n\n" if "\n" in head else " "
+        return f"{before}{sep}{notice}" if before else notice
     out = []
     for sn in H.split_sentences(notes) or [notes]:  # «на 2 п. п.», «т. е.» do not end a sentence
         c = idx.clean(sn)

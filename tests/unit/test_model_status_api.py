@@ -893,7 +893,14 @@ const realNow = Date.now;
 Date.now = () => now;
 const notice = m.deckNotice(g, v, 11, { status: quotaDown, latest: true, retryIn: toMidnight - 0.6 });
 Date.now = realNow;
-console.log(JSON.stringify({ quota, late, minutes, rolling, offers, notice, resets, groqQuota, longHold, error400DownNotice }));
+// gate 4 G4-21: the writer failed (Cloud.ru 403 «Project not found»): a topic's skeleton, never a success
+const owner = "Cloud.ru не находит проект модели (403 «Project not found»): проверьте в личном кабинете Cloud.ru, что проект существует, не заблокирован и на его балансе есть средства.";
+const skelG = { id: "g", template_id: "t", strategies: ["structured"], use_models: true, slides: 6, writer: { mode: "topic", status: "failed", text: "" }, planner: { ...p("auth", false, "Модель недоступна."), planned_by: "skeleton", owner }, variants: [] };
+const skelV = { strategy: "structured", outline: { planned_by: "skeleton" }, slides: [], files: {} };
+const skeletonNotice = m.deckNotice(skelG, skelV, 6, { status: st({ state: "down", retryable: false, advice: "Модель недоступна.", owner }), latest: true, retryIn: 0 });
+const skeletonDeck = [m.skeletonDeck(skelG, skelV), m.skeletonDeck({ ...skelG, writer: { status: "written", text: "x" } }, skelV), m.skeletonDeck(skelG, v)];
+const downLine = m.modelIndicator(st({ state: "down", owner }), true);
+console.log(JSON.stringify({ quota, late, minutes, rolling, offers, notice, resets, groqQuota, longHold, error400DownNotice, skeletonNotice, skeletonDeck, downLine }));
 """
 
 
@@ -976,3 +983,41 @@ def test_web_notice_button_waits_without_a_timer(tmp_path):
     # the button waits (disabled) without a timer in its words; the advice beside it says when
     assert n["retry"] is True and n["retryWait"] > 0 and n["retryLabel"] == "Собрать ещё раз"
     assert "завтра после 03:00" in n["help"] and n["help"].startswith("бесплатный лимит")
+
+
+# ---------------------------------------------------------------------------- gate 4 G4-21: the owner's reason
+
+
+PROJECT_GONE = "Qwen3 32B (Cloud.ru): access refused (401/403): Error code: 403 - {'message': 'Project not found. Please contact support'}"
+
+
+def test_cloud_ru_project_not_found_is_an_owner_facing_reason():
+    from verstka.api.model_status import FailedLink, owner_reason
+
+    text = owner_reason("auth", FailedLink(service="Cloud.ru"), PROJECT_GONE)
+    assert text and "Cloud.ru" in text and "проект" in text and "баланс" in text
+    # the plain words for a person stay the same: «модель недоступна», no provider, no money
+    assert reason_text("auth") == "модель недоступна" and advice("auth") == "Модель недоступна."
+    assert owner_reason("congested", FailedLink(service="Cloud.ru"), "congested upstream") is None
+    assert "ключ" in owner_reason("auth", FailedLink(service="Groq"), "Error code: 401 invalid api key")
+
+
+def test_the_generation_and_the_status_carry_the_owners_reason():
+    info = planner_info({"planned_by": "skeleton"}, {**CONFIGURED, "warnings": [PLANNER_FAILED + PROJECT_GONE]}, use_models=True, ctx=FULL)
+    assert info["reason_code"] == "auth" and info["reason"] == "модель недоступна"
+    assert info["owner"] and "Project not found" in info["owner"]
+    assert generation_planner([{"planner": info}], use_models=True)["owner"] == info["owner"]
+    links = [{"model": "Qwen/Qwen3-32B", "label": "Qwen3 32B (Cloud.ru)", "state": "auth", "available": False, "until": None, "free": False,
+              "host": "foundation-models.api.cloud.ru", "last_error": PROJECT_GONE}]
+    s = summarize(links, configured=True, ctx=chain_context(links))
+    assert s["state"] == "down" and "проект" in (s["owner"] or "")
+    assert "Cloud.ru" not in s["summary"] and "Cloud.ru" not in (s["advice"] or "")
+
+
+def test_web_a_failed_writers_skeleton_says_so_and_shows_no_score(tmp_path):
+    r = _run_web(tmp_path)
+    n = r["skeletonNotice"]
+    assert n["title"] == "Модель недоступна — текст не написан" and "каркас" in n["basis"].lower()
+    assert n["owner"] and "Project not found" in n["owner"]
+    assert r["skeletonDeck"] == [True, False, False]
+    assert r["downLine"]["text"] == "Модель недоступна · соберу без неё" and "проект" in r["downLine"]["hint"]

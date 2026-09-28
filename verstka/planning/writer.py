@@ -211,7 +211,7 @@ _H_CAUSES = ("Предпосылки и причины", "the causes and the sit
 _H_START = ("Начало", "how it started: the first events with their exact dates")
 _H_COURSE = ("Ход событий", "the main events of the first stage, in time order, each with its date")
 _H_COURSE2 = ("Ход событий (продолжение)", "the next stage, in time order, each event with its date")
-_H_TURN = ("Переломные события", "the turning points the reference names (battles, operations, landings, treaties) — several of different years, each once in the deck, with its date and its outcome")
+_H_TURN = ("Переломные события", "the turning points the reference names (battles, operations, landings, bombings, treaties) — every one its first paragraphs name and several of different years, each once in the deck, with its date and its outcome")
 _H_TURN2 = ("Переломные события (продолжение)", "the later turning points the reference names, each with its date and its outcome")
 _H_END = ("Окончание", "how it ended: the last events and the exact dates of the end")
 _H_OUTCOME = ("Итоги и потери", "the outcome and the losses in figures the reference gives")
@@ -231,29 +231,125 @@ HISTORY_SHORT: dict[int, list[tuple[str, str]]] = {
 }
 SHORT_DECK_CONTENT = 9  # ≤ 10 slides with the cover: no separate chronology slide (the narrative slides carry the dates)
 
+# a history by what it is the history of (gate 4 G4-7: the war's storyline told «История шоколада» as causes → start →
+# course → «Окончание» — Paris cafés of 1798 after 1847 on the slide before — → «Итоги»: Панин and Приблудный):
+# - "conflict" (a war, a battle, a revolution): the story above (HISTORY_SHORT, STORYLINES["history"]);
+# - "event" (a flight, a landing, a disaster, a reform): background → preparation → the event → right after → meaning;
+# - "culture" (the history of a thing, a product, a craft, a field): origins → spread → development → today.
+_E_BEFORE = ("Предыстория", "what led to it: the decisions, the people and the situation before it, each with its date")
+_E_PREP = ("Подготовка", "how it was prepared: the people chosen, the equipment, the plan, with dates and names")
+_E_EVENT = ("Как это было", "the event itself: its date and place, who took part, and its course step by step with exact times")
+_E_EVENT2 = ("Ход событий", "the rest of the event in time order, with exact times — none of the slide before's steps")
+_E_EVENT3 = ("Завершение", "how the event ended, in time order, with exact times")
+_E_AFTER = ("Сразу после", "what happened right after it: the first hours and days, the reactions, the awards, with dates")
+_E_MEANING = ("Значение", "what it changed, as the reference tells it: its firsts and records, the facts that followed from it")
+_E_MEMORY = ("Память", "how it is remembered: the names, monuments, holidays and dates the reference gives")
+EVENT_SHORT: dict[int, list[tuple[str, str]]] = {
+    1: [_E_EVENT],
+    2: [_E_EVENT, _E_MEANING],
+    3: [_E_BEFORE, _E_EVENT, _E_MEANING],
+    4: [_E_BEFORE, _E_EVENT, _E_AFTER, _E_MEANING],
+    5: [_E_BEFORE, _E_PREP, _E_EVENT, _E_AFTER, _E_MEANING],
+    6: [_E_BEFORE, _E_PREP, _E_EVENT, _E_EVENT2, _E_AFTER, _E_MEANING],
+    7: [_E_BEFORE, _E_PREP, _E_EVENT, _E_EVENT2, _E_AFTER, _E_MEANING, _E_MEMORY],
+    8: [_E_BEFORE, _E_PREP, _E_EVENT, _E_EVENT2, _E_EVENT3, _E_AFTER, _E_MEANING, _E_MEMORY],
+    9: [_E_BEFORE, _E_PREP, _E_EVENT, _E_EVENT2, _E_EVENT3, _E_AFTER, _E_MEANING, _E_MEMORY, ("Участники", "the people who took part and what each of them did, with dates")],
+}
+_C_STORY = ("История", "its main stages in time order, each with its date")
+_C_ORIGINS = ("Истоки", "where, when and by whom it first appeared: the earliest facts, each with its date and place")
+_C_SPREAD = ("Распространение", "how it came to other countries and people, in time order, each step with its date and place")
+_C_SPREAD2 = ("Распространение по миру", "the next steps of its spread, in time order, with dates — none of the slide before's")
+_C_GROWTH = ("Развитие", "the inventions, the first makers and the changes that made it what it is, in time order, with dates and names")
+_C_GROWTH2 = ("Новое время", "the next stage in time order, each change with its date and names — none of the slide before's")
+_C_GROWTH3 = ("Новейшее время", "the latest changes in time order, with dates and names")
+_C_TODAY = ("Современность", "what it is today: where and how it is made, used or known — the figures the reference gives, with their year")
+_C_FACTS = ("В цифрах", "the figures the reference gives about it, each with its year")
+CULTURE_SHORT: dict[int, list[tuple[str, str]]] = {
+    1: [_C_STORY],
+    2: [_C_ORIGINS, _C_GROWTH],
+    3: [_C_ORIGINS, _C_SPREAD, _C_GROWTH],
+    4: [_C_ORIGINS, _C_SPREAD, _C_GROWTH, _C_TODAY],
+    5: [_C_ORIGINS, _C_SPREAD, _C_GROWTH, _C_GROWTH2, _C_TODAY],
+    6: [_C_ORIGINS, _C_SPREAD, _C_SPREAD2, _C_GROWTH, _C_GROWTH2, _C_TODAY],
+    7: [_C_ORIGINS, _C_SPREAD, _C_SPREAD2, _C_GROWTH, _C_GROWTH2, _C_GROWTH3, _C_TODAY],
+    8: [_C_ORIGINS, _C_SPREAD, _C_SPREAD2, _C_GROWTH, _C_GROWTH2, _C_GROWTH3, _C_TODAY, _C_FACTS],
+    9: [_C_ORIGINS, _C_SPREAD, _C_SPREAD2, _C_GROWTH, _C_GROWTH2, _C_GROWTH3, _C_TODAY, _C_FACTS, ("Главное", "the key facts of the deck: dates, names, figures")],
+}
+# a long deck (> 10 slides) of an event or a culture's history: the generic storyline with these parts
+SUB_STORYLINES: dict[str, list[str]] = {
+    "event": ["Предыстория!", "Подготовка!", "Как это было!+", "Сразу после!", "Значение!", "Память", "Участники", "Хронология*!", "Главное!"],
+    "culture": ["Истоки!", "Распространение!+", "Развитие!+", "Современность!", "Хронология*!", "В цифрах†", "Главное!"],
+}
+_SUB_HINTS = {t: h for tbl in (EVENT_SHORT, CULTURE_SHORT) for parts in tbl.values() for t, h in parts}
+_WORKING_TITLES |= {t.lower() for tbl in (HISTORY_SHORT, EVENT_SHORT, CULTURE_SHORT) for parts in tbl.values() for t, _h in parts}
+_WORKING_TITLES |= {raw.rstrip("!*†+").lower() for parts in SUB_STORYLINES.values() for raw in parts}
+# the parts of a story told in time order (the cross-slide chronology keeps them so); outcome, meaning, figures and the
+# summing-up slide are not
+_CHRONO_PART_RE = re.compile(r"^(?:Предпосылки|Начало|Ход\s+событий|Переломные|Окончание|Предыстория|Подготовка|Как\s+это\s+было|Завершение|"
+                             r"Сразу\s+после|Истоки|Распространение|Развитие|Новое\s+время|Новейшее\s+время|Ранние\s+годы|Начало\s+пути|"
+                             r"Основные\s+этапы|Поздние\s+годы)", re.I)
+_CONFLICT_TOPIC_RE = re.compile(
+    r"(?<![\wё])(?:войн[аыуеой]\w*|битв\w*|сражени\w*|революци\w*|восстани\w*|переворот\w*|бунт\w*|мятеж\w*|оборон[аыуе]|осад[аыуе]|"
+    r"блокад[аыуе]|интервенци\w*|вторжени\w*|кампани[яиюей]|операци[яиюей]|конфликт\w*|противостояни\w*|штурм\w*|смут\w*)(?![\wё])", re.I)
+_EVENT_TOPIC_RE = re.compile(
+    r"^(?:полёт|полет|перелёт|перелет|высадк|запуск|авари|катастроф|крушени|гибел|крещени|коронаци|олимпиад|чемпионат|экспедици|"
+    r"путешестви|плавани|кругосветн|землетрясени|извержени|цунами|наводнени|пожар|убийств|покушени|визит|конференци|съезд|саммит|"
+    r"референдум|открыти[ея]|подписани|испытани|спасени|затоплени|восхождени|отречени|казн|распад|объединени|реформ|перестройк|"
+    r"оттепел|индустриализаци|коллективизаци|отмен|освобождени|депортаци|голод|эпидеми|пандеми|холокост|геноцид)", re.I)
 
-def _parts(kind: str) -> list[_Part]:
+
+def _parts(kind: str, subkind: Optional[str] = None) -> list[_Part]:
     out = []
-    for i, raw in enumerate(STORYLINES.get(kind) or STORYLINES["other"]):
+    raws = SUB_STORYLINES[subkind] if kind == "history" and subkind in SUB_STORYLINES else (STORYLINES.get(kind) or STORYLINES["other"])
+    for i, raw in enumerate(raws):
         t = raw.rstrip("!*†+")
         marks = raw[len(t):]
-        out.append(_Part(t, must="!" in marks, timeline="*" in marks, data="†" in marks, repeat="+" in marks, pos=float(i)))
+        out.append(_Part(t, must="!" in marks, timeline="*" in marks, data="†" in marks, repeat="+" in marks, pos=float(i),
+                         hint=_SUB_HINTS.get(t, "") if subkind in SUB_STORYLINES else ""))
     return out
 
 
-def storyline_parts(kind: str, n: int, reference: bool = False) -> list[_Part]:
+def history_subkind(topic: str) -> str:
+    """What a history topic is the history of: "conflict" (a war, a battle, a revolution), "event" (a flight, a landing,
+    a disaster, a reform — the topic's first word names it), else "culture" (a thing, a product, a craft, a field:
+    «История шоколада», «История Московского метро»)."""
+    from verstka.planning.reference import lead_free
+
+    core = " ".join((lead_free(topic) or topic or "").split())
+    if _CONFLICT_TOPIC_RE.search(core):
+        return "conflict"
+    if _EVENT_TOPIC_RE.match(core.lower()):
+        return "event"
+    return "culture"
+
+
+def event_topic(topic: str) -> bool:
+    """The topic names one event by its first word («Полёт Гагарина», «Высадка на Луну», «Крещение Руси»): its storyline
+    is the event's, whatever the kind the model gave (a person's name in it does not make it a biography)."""
+    return history_subkind(topic) == "event"
+
+
+def storyline_parts(kind: str, n: int, reference: bool = False, subkind: Optional[str] = None,
+                    covered: Optional[Callable[[str], bool]] = None) -> list[_Part]:
     """The working titles of `n` content slides for a topic of `kind`, in the story's order: the «!» parts, then the
     data part (when kept: with a reference, or for a market or a company), then the others in order; a long deck
     repeats the «+» parts with «(продолжение)» — never a generic filler (measured: «Ещё одна сторона темы» was filled
-    with policy content); a short one keeps the first two parts, «Главное», the timeline and the data part first."""
+    with policy content); a short one keeps the first two parts, «Главное», the timeline and the data part first. A
+    history's `subkind` (history_subkind: "conflict" — the default —, "event", "culture") picks its story. `covered`
+    (part title → the reference tells it: part_covered) leaves out a part the reference does not cover — its slide
+    goes to the next part, or to a covered part told again («(продолжение)»)."""
     kind = kind if kind in STORYLINES else "other"
     if kind == "politician":
         n = min(n, POLITICIAN_MAX_CONTENT)
     n = max(1, n)
+    sub = subkind if kind == "history" and subkind in SUB_STORYLINES else None
     if kind == "history" and n <= SHORT_DECK_CONTENT:
-        return [_Part(t, must=True, pos=float(i), hint=h, data=t in ("Итоги и потери", "Итоги и последствия") and reference) for i, (t, h) in enumerate(HISTORY_SHORT[n])]
+        table = EVENT_SHORT if sub == "event" else CULTURE_SHORT if sub == "culture" else HISTORY_SHORT
+        data_titles = ("Итоги и потери", "Итоги и последствия", "В цифрах")
+        return [_Part(t, must=True, pos=float(i), hint=h, data=t in data_titles and reference) for i, (t, h) in enumerate(table[n])]
     # a deck of ≤ 10 slides has no separate chronology: its narrative slides carry the dates (a chronology repeated them)
-    parts = [p for p in _parts(kind) if (not p.data or reference or kind in ("market", "company")) and not (p.timeline and n <= SHORT_DECK_CONTENT)]
+    parts = [p for p in _parts(kind, sub) if (not p.data or reference or kind in ("market", "company")) and not (p.timeline and n <= SHORT_DECK_CONTENT)
+             and (covered is None or covered(p.title))]
     last = parts[-1]
     musts = [p for p in parts if p.must]
     rank: list[_Part] = []
@@ -293,8 +389,8 @@ def storyline_parts(kind: str, n: int, reference: bool = False) -> list[_Part]:
     return chosen
 
 
-def storyline(kind: str, n: int, reference: bool = False) -> str:
-    return "\n".join(f"{i}. {p.line}" for i, p in enumerate(storyline_parts(kind, n, reference), 1))
+def storyline(kind: str, n: int, reference: bool = False, subkind: Optional[str] = None) -> str:
+    return "\n".join(f"{i}. {p.line}" for i, p in enumerate(storyline_parts(kind, n, reference, subkind), 1))
 
 
 _KIND_GUESS = (
@@ -472,7 +568,7 @@ def _prune(s: "_Slide", why_of: Callable[[str], Optional[str]], removed: list[di
         why = None if sn in s.theses else why_of(sn)
         if why is None and gone and sn not in s.theses and (anaphoric(sn) or _then_start(sn)):
             why = "no antecedent: the sentence before it was removed"
-            new = orphan_fix(s, sn)
+            new = orphan_fix(s, sn, before=" ".join(keep))
             if new and not anaphoric(new):
                 # the sentence it cites names its subject: the article's sentence stands in its place
                 _removed(removed, where(sn) if callable(where) else where, sn, "no antecedent: replaced by the sentence it cites")
@@ -650,7 +746,7 @@ def fix_grammar(sentence: str) -> str:
     """The sentence with the model's known governance errors fixed («Войну участвовали 62 страны» → «В войне
     участвовали 62 страны»), its agreement slips fixed (fix_agreement: «12 апреля стало», «направлением, связанным»,
     «техническое превосходство») and a «part» larger than its whole cut (fix_including)."""
-    out = sentence
+    out = re.sub(r"~\s*(?=\d)", "около ", sentence or "")  # «~28,6 ГВт» is read aloud «около 28,6 ГВт»
     for rx, rep in _GRAMMAR_FIXES:
         out = rx.sub(rep, out)
     return fix_including(fix_agreement(out))
@@ -757,7 +853,7 @@ def _data_ok(d: Optional[dict]) -> Optional[dict]:
         if not label or not isinstance(v, (int, float)) or label.lower() in seen:
             continue
         seen.add(label.lower())
-        rows.append({"label": label, "value": float(v), **({k: r[k] for k in ("src", "at") if r.get(k)})})
+        rows.append({"label": label, "value": float(v), **({k: r[k] for k in ("src", "at") if r.get(k)}), **({"approx": r["approx"]} if "approx" in r else {})})
     if len(rows) < 3:
         return None
     years = [bool(re.fullmatch(r"\d{4}", r["label"])) for r in rows]
@@ -2021,6 +2117,8 @@ _GENERIC_NAME_WORDS = frozenset({"опера", "плана", "план", "бит
                                  "завод", "проек", "прогр", "конфе", "пакта", "пакт"})
 
 _SYNONYM_GROUPS = (
+    ("битв", "сраже", "сража", "боев"),
+    ("длил", "длит", "продол"),
     ("погиб", "потер", "жертв", "убит", "гибел", "унесл"),
     ("закон", "завер", "оконч", "капит"),
     ("начал", "вторг", "вторж", "напал", "напад"),
@@ -2146,17 +2244,37 @@ _LEAD_DATE_RE = re.compile(
     r"(?:1\d{3}|20\d{2})(?:\s*[—–-]\s*(?:1\d{3}|20\d{2}))?\s*(?:года|году|годах|годов|г\.)?,?\s+"
 )
 REWRITE_MAX_WORDS = 32
+# an item of a list in the article: a line that ends with «;», or «X — 40,96 %» (a label, a dash, a figure, no verb)
+_LIST_ITEM_RE = re.compile(r";\s*$|^\s*(?:(?:[ВвНн]а?|По)\s+)?[^—–.!?]{1,48}?\s+[—–]\s+[~≈]?\s*\d[\d\s,.]*\s*(?:%|[а-яё.]{0,8})\s*[.;]?\s*$")
+
+
+# the words that open a list after a colon («…мощностью ~28,6 ГВт, из них:» + the list on the next lines)
+_LIST_INTRO_RE = re.compile(
+    r"(?:,|\s—)?\s*(?:из\s+(?:них|которых)|в\s+том\s+числе|среди\s+(?:них|которых)|а\s+именно|включая|так(?:ие|их)\s+как|"
+    r"например|следующ\w+(?:\s+[а-яё]+)?|перечислен\w+\s+ниже|ниже)\s*$", re.I)
 
 
 def clean_article_sentence(t: str) -> str:
     """An article's sentence fit for a slide: no brackets, no footnote marks, no list label in front («Стоимость: по
-    состоянию на 2025 год…»), one space, a full stop."""
+    состоянию на 2025 год…»), «~» written «около», one space, a full stop. A sentence that ends with a colon opens a
+    list the slide does not have: it ends before the words that open the list («…мощностью около 28,6 ГВт, из них:» →
+    «…мощностью около 28,6 ГВт.»), or it is no sentence («Основные производители:» → "")."""
     t = re.sub(r"\[\d+\]", "", t or "")
     t = re.sub(r"^\s*[А-ЯЁA-Z][^.:;!?]{0,28}:\s+(?=\S)", "", t)
     prev = None
     while prev != t:
         prev, t = t, _PAREN_RE.sub("", t)
-    t = re.sub(r"\s+([,.;:!?])", r"\1", " ".join(t.split())).strip(" ,;:—–-")
+    t = re.sub(r"~\s*(?=\d)", "около ", t)
+    t = re.sub(r"\s+([,.;:!?])", r"\1", " ".join(t.split())).strip(" ,;—–-")
+    if t.endswith(":"):
+        t = t[:-1].rstrip()
+        m = _LIST_INTRO_RE.search(t)
+        if not m:
+            return ""
+        t = t[: m.start()].rstrip(" ,;:—–-")
+        if len(t.split()) < 4:
+            return ""
+    t = t.strip(" ,;:—–-")
     return _sentence(H.cap_first(t)) if t else ""
 
 
@@ -2167,6 +2285,8 @@ def article_clause(sentence: str, prefs: Iterable[str] = (), want_year: bool = F
     heading, a sentence that leans on the one before it, a long quotation, or a clause of fewer than 5 words."""
     from verstka.planning.reference import drop_quotations
 
+    if _LIST_ITEM_RE.search(sentence or ""):
+        return None  # an item of the article's list («В ОЭС Центра — 40,96 %;»): no sentence alone (gate 4 replay)
     s = clean_article_sentence(sentence)
     if not s or len(s.split()) < 5 or anaphoric(s) or drop_quotations(s).strip() != s.strip():
         return None
@@ -2614,13 +2734,13 @@ def dedupe_totals(deck: _Deck, removed: Optional[list[dict]] = None, first: int 
 
 def dedupe_figures(deck: _Deck, removed: Optional[list[dict]] = None, first: int = 1) -> int:
     """A figure is told on one slide: a sentence whose every figure (not a year, not a date) an earlier slide already
-    gives goes; the summing-up slide may restate one such sentence. The user's theses stay. Returns how many went."""
+    gives goes — the summing-up slide too (gate 4 G4-9: «Главное» repeated the 59,6 / 17,8 тысячи that slide 3 shows as
+    its key figures). The user's theses stay. Returns how many went."""
     removed = removed if removed is not None else []
     told: dict[tuple, int] = {}
     n = 0
     for i, s in enumerate(deck.slides, first):
-        summary = bool(SUMMARY_TITLE_RE.match(s.title or ""))
-        allowed = [1 if summary else 0]
+        allowed = [0]
 
         def why_of(sn: str, i: int = i, allowed: list = allowed) -> Optional[str]:
             keys = _figure_keys(sn)
@@ -2722,6 +2842,119 @@ def guard_company(deck: _Deck, removed: Optional[list[dict]] = None, first: int 
 
 
 # ------------------------------------------------------------------ the chronology is the one dated list (G1-11)
+
+# ------------------------------------------------------------------ a market's parts and its place (gate 4 G4-9)
+
+# what a slide of a market's part tells: a part with such words keeps only sentences that have one of them, and the
+# storyline keeps the part only when the article (or its place page) has them about the place — the EV deck's
+# «Инфраструктура» told «в ряде стран введены требования, чтобы электромобили издавали звук…» (the articles say nothing
+# about charging in Russia)
+PART_WORDS: dict[str, re.Pattern] = {
+    "Инфраструктура": re.compile(r"инфраструктур|зарядн\w*\s+(?:станц|сет|пункт|колон|устройств|инфраструктур)|электрозаправ|"
+                                r"станци\w*\s+(?:для\s+)?(?:зарядк|подзарядк)|сет\w*\s+(?:зарядн|электрозаправ)", re.I),
+    "Регулирование и поддержка": re.compile(
+        r"закон|льгот|субсид|налог|пошлин|утилизац|постановлен|правительств|государствен|программ|регулир|стандарт|"
+        r"норматив|требовани|поддержк|указ[ао]?м?\s|министерств|минпромторг|сертифик|запрет", re.I),
+}
+PART_MIN_SENTENCES = 2
+# the words that show a refilled slide tells its part (its title stays; else it is «Другие факты»)
+PART_TOPIC: dict[str, re.Pattern] = {
+    **PART_WORDS,
+    "Тенденции": re.compile(r"рост|вырос|увелич|сниз|сократ|меньше|больше|прогноз|ожида|планир|тенденц|динамик|перспектив", re.I),
+    "Основные игроки": re.compile(r"завод|компани|производител|автопроизвод|концерн|холдинг|марк[аиу]|бренд|выпуск", re.I),
+    "Объём рынка в цифрах": re.compile(r"продаж|продан|зарегистр|объ[её]м|доля|рын[оке]", re.I),
+    "Продукты и цены": re.compile(r"модел|цен[аыуе]|стоим|рубл|продукт|верси|кроссовер|седан|хэтчбек|внедорожник|грузов", re.I),
+}
+# a sentence about somewhere else than the topic's place («в мире», «в ряде стран», «в Китае»)
+_ELSEWHERE_RE = re.compile(
+    r"(?<![\wё])(?:в\s+мире|мир(?:а|овы\w*|овой|ового|овом)|в\s+ряде\s+стран|во\s+многих\s+странах|в\s+других\s+странах|за\s+рубежом|"
+    r"глобальн\w*|(?:в|во)\s+(?:Китае|КНР|США|Европе|Евросоюзе|ЕС|Норвегии|Германии|Японии|Франции|Великобритании|Швеции|Исландии|"
+    r"Индии|Корее|Канаде|Италии|Нидерландах|Казахстане|Эфиопии|Непале|Азии|Америке))(?![\wё])")
+
+
+def place_sentences(support: "ArticleSupport", page_titles: list[str], stem: Optional[str]) -> set[int]:
+    """The article sentences about the topic's place (`stem`: «росси»): they name it, stand on a page whose title names it
+    («Автомобильная промышленность России»), or stand in a section whose heading names it («Россия», «В России»)."""
+    if not stem:
+        return set(range(len(support.sents)))
+    out: set[int] = set()
+    in_section = False
+    for i, t in enumerate(support.sents):
+        low = support.low[i]
+        if _heading(t):
+            in_section = stem in low
+            continue
+        page = page_titles[support.page_of[i]] if support.page_of[i] < len(page_titles) else ""
+        if stem in low or in_section or stem in page.lower():
+            out.add(i)
+    return out
+
+
+def part_covered(title: str, support: "ArticleSupport", page_titles: list[str], stem: Optional[str]) -> bool:
+    """The reference tells the storyline part (a part without PART_WORDS always): at least PART_MIN_SENTENCES of its
+    sentences about the place have the part's words."""
+    rx = PART_WORDS.get(title)
+    if rx is None:
+        return True
+    where = place_sentences(support, page_titles, stem)
+    return sum(1 for i in where if rx.search(support.sents[i])) >= PART_MIN_SENTENCES
+
+
+PART_PAGE_MAX_S = 5.0  # the part page's search and fetch (a market topic with an uncovered part only)
+
+
+def add_part_page(reference: Any, topic: str, n_content: int, rcfg: dict, *, cache_dir: Optional[Path] = None,
+                  deadline: Optional[float] = None, transport: Any = None) -> Optional[tuple[str, str]]:
+    """A market's storyline part with PART_WORDS that the fetched articles do not cover about the topic's place gets
+    its own article (reference.fetch_part_page: «Инфраструктура» of «Рынок электромобилей в России» → «Зарядная станция
+    для электромобилей», whose «Россия» section tells the charging network) when that article covers it; the page joins
+    the reference and its cut. Returns (part, page title) or None."""
+    from verstka.planning.reference import cut_pages, fetch_part_page, place_of
+
+    where = place_of(topic)
+    if not where or not reference.pages:
+        return None
+    titles = [p.title for p in reference.pages]
+    sup = ArticleSupport(reference.full_texts, topic)
+    wanted = [p.title for p in storyline_parts("market", n_content, reference=True) if p.title in PART_WORDS
+              and not part_covered(p.title, sup, titles, where[1])]
+    for part in wanted[:1]:
+        page = fetch_part_page(part, topic, titles, lang=getattr(reference, "lang", "ru"), contact=str(rcfg.get("contact") or ""),
+                               timeout_s=float(rcfg.get("timeout_s", 6)), cache_dir=cache_dir, cache_days=float(rcfg.get("cache_days", 7)),
+                               deadline=deadline, transport=transport)
+        if page is None or not part_covered(part, ArticleSupport([page.text], topic), [page.title], where[1]):
+            continue
+        reference.pages.append(page)
+        reference.cut = cut_pages(reference.pages, _ref_limit(rcfg, "market"), "market", where[1])
+        return part, page.title
+    return None
+
+
+def fit_parts(deck: _Deck, parts: list[_Part], place_stem: Optional[str], removed: Optional[list[dict]] = None, first: int = 1) -> int:
+    """A market's slide keeps to its part and to the place (gate 4 G4-9): on a part with PART_WORDS a sentence without
+    one of them goes; on a place topic a sentence about somewhere else («в ряде стран», «крупнейшими производителями в
+    мире были…») goes from a slide that tells nothing about the place (a world figure is context only next to the
+    place's own). The user's theses and the summing-up slide stay. Returns how many went."""
+    removed = removed if removed is not None else []
+    n = 0
+    for i, s in enumerate(deck.slides, first):
+        if SUMMARY_TITLE_RE.match(s.title or "") or s.theses:
+            continue
+        part = parts[s.part].title if 0 <= s.part < len(parts) else ""
+        rx = PART_WORDS.get(part)
+        local = bool(place_stem) and any(place_stem in x.lower() for x in s.sentences)
+
+        def why_of(sn: str, rx: Optional[re.Pattern] = rx, local: bool = local, part: str = part) -> Optional[str]:
+            if rx is not None and not rx.search(sn):
+                return f"off its part «{part}»"
+            if place_stem and not local and _ELSEWHERE_RE.search(sn) and place_stem not in sn.lower():
+                return "about somewhere else than the topic's place"
+            return None
+
+        n += _prune(s, why_of, removed, f"{i}")
+    deck.slides = [s for s in deck.slides if not s.empty or s.theses]
+    return n
+
 
 CHRONOLOGY_TITLE_RE = re.compile(r"хронолог|ключев\w*\s+дат|основн\w*\s+дат|главн\w*\s+дат|летопис|даты", re.I)
 
@@ -2911,6 +3144,136 @@ _DEIXIS_RE = re.compile(r"(?<![\wё])(?:там|здесь|туда|оттуда|
 # «В ней участвовало 62 государства»: an article sentence that leans on the one before it is no replacement
 _IN_IT_RE = re.compile(r"^(?:В|Во|На|О|Об|При|У|С|К|По|Из|От|До|За|Для|Среди)\s+(?:ней|нём|нем|них|неё|нее|нему|ним|ними|этой|этом|этих)(?![\wё])")
 
+# ------------------------------------------------------------------ what a lifted article sentence refers to
+# gate 4 (G4-8): an article sentence put on a slide in the place of a written one kept words that point at an earlier
+# sentence of the article — «Сын Гутена, в 1828 году запатентовавший изобретение отца, …» (Гутен is never named on the
+# slide), «Большим гурманом и любителем шоколада был и её первый министр Никита Панин» («её» is Екатерина II, told on
+# another slide). Such a sentence is no replacement, and it never moves to another slide.
+_REF_PRONOUN_RE = re.compile(r"(?<![\wё-])(?:он|она|оно|они|его|её|ее|их|ему|ей|им|ним|ней|нём|нем|них|него|неё|нее|нему|ними)(?![\wё-])", re.I)
+_KIN_WORD_RE = re.compile(
+    r"(?<![\wё-])(сын(?:а|у|ом|е|овья|овей)?|доч(?:ь|ери|ерью)|от(?:ец|ца|цу|цом|це)|мат(?:ь|ери|ерью)|жен(?:а|ы|е|у|ой)|"
+    r"муж(?:а|у|ем|е)?|брат(?:а|у|ом|е|ья)?|сестр(?:а|ы|е|у|ой)|вдов(?:а|ы|е|у|ой)|внук(?:а|у|ом)?|внучк(?:а|и|е|у|ой)|"
+    r"наследник\w*|преемник\w*|супруг\w*)(?![\wё-])", re.I)
+_DEMONSTRATIVE_RE = re.compile(
+    r"(?<![\wё-])(?:этот|эта|это|эти|этого|этой|этом|этих|этим|этими|эту|этому|данн(?:ый|ая|ое|ые|ого|ой|ом|ых|ым)|указанн\w+|"
+    r"вышеупомянут\w+)\s+(?:же\s+)?([а-яё]+)", re.I)
+# a comparison with something told before («Статистика за первое полугодие 2025 года показывает сопоставимые результаты»)
+_RELATIVE_RE = re.compile(r"(?<![\wё])(?:сопоставим\w*|аналогичн\w*|подобн(?:ый|ая|ое|ые|ого|ой|ых|ым)|прежн\w*|так(?:ой|ая|ое|ие|их|им)\s+же|"
+                          r"т(?:от|а|о|е|ех|ем|ой)\s+же|ещё\s+(?:один|одна|одно)|еще\s+(?:один|одна|одно))(?![\wё])", re.I)
+# a person the pronoun may stand for, named inside the sentence before it («жена лесника и её внучка»)
+_PERSON_NOUN_RE = re.compile(
+    r"(?<![\wё-])(?:жен[аыеу]|муж\w?|сын\w{0,3}|доч\w{1,4}|отец|отц\w{1,2}|мать|матер\w{1,3}|брат\w{0,3}|сестр\w{1,3}|лесник\w{0,3}|"
+    r"космонавт\w{0,3}|пилот\w{0,3}|учён\w{1,3}|инженер\w{0,3}|конструктор\w{0,3}|король|корол\w{1,3}|королев\w{1,3}|царь|цар[яюеё]\w{0,2}|"
+    r"императ\w{2,5}|президент\w{0,3}|основател\w{1,3}|автор\w{0,3}|изобретател\w{1,3})(?![\wё-])", re.I)
+
+
+def _named_before(sentence: str, at: int) -> bool:
+    """A name, a quoted name, a figure or a person stands in the sentence before position `at` (a pronoun there may
+    stand for it: «Корабль «Восток-1» … его масса», «36 энергоблоков, из них», «жена лесника и её внучка»)."""
+    head = sentence[:at]
+    words = re.findall(r"[«A-Za-zА-Яа-яЁё][\w«»\-]*", head)
+    if any(w.startswith("«") or re.search(r"[A-Za-z]", w) for w in words):
+        return True
+    if any(w[:1].isupper() and len(w) >= 2 for w in words[1:]):
+        return True
+    # the first word as the subject («Гагарин вернулся, и его встретили…», «Корабль … его масса»), not a lead word or an
+    # adjective («Большим гурманом … был и её первый министр»: «её» is someone told before)
+    if words and words[0][:1].isupper() and len(words[0]) >= 3 and not _LEAD_WORD_RE.match(words[0]) and not re.search(
+            r"(?:ым|им|ой|ей|ая|яя|ое|ее|ые|ие|ий|ый|ых|их|ую|юю|ого|его|ому|ему|ыми|ими)$", words[0].lower()) and words[0].lower() not in (
+            "это", "эти", "этот", "эта", "тот", "та", "те", "там", "тогда", "так"):
+        return True
+    return bool(re.search(r"\d", head) or _PERSON_NOUN_RE.search(head))
+
+
+def needs_context(sentence: str, before: str = "", topic: Iterable[str] = (), antecedents: Iterable[str] = ()) -> Optional[str]:
+    """Why an article sentence cannot stand where the slide's text before it (`before`) puts it — it refers to something
+    neither it nor that text names — or None:
+    - a pronoun with no name, figure or person before it in the sentence, unless one of `antecedents` (the names of the
+      article's sentence before it: what the pronoun stands for) is on the slide («был и её первый министр»);
+    - a kinship word with a name the slide has not named («Сын Гутена») — or with no name at all and nobody before it
+      in the sentence («изобретение отца»);
+    - a demonstrative whose noun is neither the topic's nor on the slide («на этом заводе»)."""
+    s = " ".join((sentence or "").split())
+    if not s:
+        return None
+    low_before = (before or "").lower().replace("ё", "е")
+    topic4 = {t[:4] for t in topic}
+
+    def on_slide(word: str) -> bool:
+        w = word.lower().replace("ё", "е")
+        p = w[: max(4, min(len(w) - 2, 6))] if len(w) > 4 else w
+        return bool(p) and bool(re.search(r"(?<![\wё])" + re.escape(p), low_before))
+
+    for m in _REF_PRONOUN_RE.finditer(s):
+        if _named_before(s, m.start()):
+            continue
+        if any(all(on_slide(w) for w in a.split()[:2]) for a in antecedents if a):
+            continue
+        return f"«{m.group(0)}» points to a sentence before it"
+    for m in _KIN_WORD_RE.finditer(s):
+        nxt = re.match(r"\s+([А-ЯЁA-Z][\w-]+)", s[m.end():])
+        if nxt:
+            if not on_slide(nxt.group(1)):
+                return f"«{m.group(0)} {nxt.group(1)}»: {nxt.group(1)} is not named before it"
+            continue
+        if re.match(r"\s+[а-яё]", s[m.end():]) and not re.match(r"\s+(?:и|а|но|или|из|в|на|с)(?![\wё])", s[m.end():]):
+            continue  # «жена лесника»: whose it is follows
+        if _named_before(s, m.start()):
+            continue
+        return f"«{m.group(0)}»: whose is not told"
+    m = _RELATIVE_RE.search(s)
+    if m and not (before or "").strip():
+        return f"«{m.group(0)}» compares with a sentence before it"
+    for m in _DEMONSTRATIVE_RE.finditer(s):
+        noun = m.group(1).lower().replace("ё", "е")
+        if noun[:4] in topic4 or on_slide(noun) or re.search(r"(?<![\wё])" + re.escape(noun[:4]), s[: m.start()].lower().replace("ё", "е")):
+            continue
+        return f"«{m.group(0)}» points to a sentence before it"
+    return None
+
+
+_PRONOUN_GENDER = {"он": "m", "она": "f", "оно": "n"}
+
+
+def _noun_gender(word: str) -> Optional[str]:
+    w = (word or "").lower().strip("«»")
+    if not re.fullmatch(r"[а-яё]{3,}", w):
+        return None
+    if w.endswith(("а", "я")):
+        return "f"
+    if w.endswith(("о", "е")):
+        return "n"
+    if w.endswith(("ь", "ы", "и")):
+        return None
+    return "m"
+
+
+def fix_pronoun_subjects(deck: _Deck, removed: Optional[list[dict]] = None, first: int = 1) -> int:
+    """A sentence opening with «Он»/«Она»/«Оно» right after a sentence whose subject is a thing of that gender reads as
+    that thing (gate 4 replay: «Полёт Гагарина длился 106 минут. Он стал первым человеком в космосе…»): the article's
+    own sentence it cites stands in its place when it names its subject; else it stays. Returns how many changed."""
+    removed = removed if removed is not None else []
+    n = 0
+    for i, s in enumerate(deck.slides, first):
+        for k in range(1, len(s.sentences)):
+            sn = s.sentences[k]
+            m = re.match(r"^(Он|Она|Оно)(?![\wё])", sn.strip())
+            if not m or sn in s.theses:
+                continue
+            prev = s.sentences[k - 1]
+            w = (re.findall(r"[«A-Za-zА-Яа-яЁё][\w»-]*", prev) or [""])[0].strip("«»")
+            anchors = getattr(s, "anchors", None)
+            if anchors is None or not w or _PERSON_NOUN_RE.match(w) or _noun_gender(w) != _PRONOUN_GENDER[m.group(1).lower()]:
+                continue
+            if not re.search(r"(?<![\wё])" + re.escape(w.lower()[:5]), anchors.support.full):
+                continue  # the article never writes it in lowercase: a name («Гагарин»), the pronoun may stand for it
+            new = orphan_fix(s, sn, before=" ".join(s.sentences[:k]))
+            if new and not anaphoric(new):
+                _removed(removed, f"{i}", sn, f"«{m.group(1)}» would read as «{w}»: replaced by the sentence it cites")
+                s.sentences[k] = new
+                n += 1
+    return n
+
 
 def drop_orphans(deck: _Deck, removed: Optional[list[dict]] = None, first: int = 1) -> int:
     """A slide's text never starts with a personal pronoun («Он происходит в хлоропластах») — its subject was in a
@@ -3025,7 +3388,13 @@ _AUX_VERBS = frozenset({"был", "была", "было", "были", "стал"
                         "шла", "шли", "имел", "имела", "имели", "составил", "составила", "составило", "составили", "являлся",
                         "являлась", "являлось", "являлись"})
 _NOT_VERBS = frozenset({"земли", "цели", "роли", "модели", "недели", "пыли", "мысли", "соли", "дали", "вели", "угли", "сели", "ели",
-                        "мели", "ноли", "силы", "стали", "начала", "начало", "начали", "пола", "дела", "тела", "села", "мало", "было"})
+                        "мели", "ноли", "силы", "стали", "начала", "начало", "начали", "пола", "дела", "тела", "села", "мало", "было",
+                        # nouns and adverbs that end like a past verb (gate 4: «около 28,6 ГВт» failed as the verb «около»)
+                        "около", "число", "числа", "масло", "масла", "стекло", "стекла", "весло", "кресло", "крыло", "крыла",
+                        "русло", "сало", "мыло", "дуло", "жало", "тепло", "зло", "школа", "пила", "сила", "могила", "стрела",
+                        "игла", "скала", "смола", "метла", "мгла", "пчела", "вилла", "правило", "правила", "ремесло", "дело",
+                        "тело", "село", "угла", "стола", "посла", "осла", "детали", "медали", "эмали", "печали", "мили",
+                        "шали", "нули", "кило", "светло", "бегло", "смело", "умело", "тепло", "подолгу", "вдали", "дотла"})
 # the usual names a source writes otherwise («СССР» / «Советский Союз», «США» / «Соединённые Штаты»)
 _ALIASES = (
     ("ссср", "советск", "союз"), ("сша", "соедин", "америк"), ("герма", "немец", "нацист", "рейх", "вермах"),
@@ -3132,6 +3501,27 @@ def _num_word_values(text: str) -> set[float]:
     return out
 
 
+# interpretive predicates: a judgement of what an event meant, not the event (gate 4 G4-10)
+_SOFT_WORD_RE = re.compile(
+    r"(?<![\wё-])(укреп\w*|способств\w*|символ\w*|повлия\w*|влияни\w*|ознаменова\w*|вдохнов\w*|олицетвор\w*|вех[аиуеой]|вехами|"
+    r"триумф\w*|прорыв\w*|беспрецедент\w*|легендарн\w*|эпохальн\w*|судьбоносн\w*|знаменательн\w*|сыграл\w*|предопредел\w*|"
+    r"стимулир\w*|спровоцир\w*|вписал\w*|прославил\w*|увековеч\w*|переломн\w*|поворотн\w*)(?![\wё-])", re.I)
+_SOFT_SYNONYMS = (("повли", "влиян", "влия"), ("укреп", "усили"), ("симво", "олице"), ("ознам", "знаме"))
+
+
+def soft_word(text: str, cited_low: str) -> Optional[str]:
+    """The statement's interpretive predicate («укрепил», «способствовал», «стал символом», «повлиял», «сыграл роль») that
+    the cited sentences (`cited_low`, lowercased) do not use — its root or a synonym —, else None."""
+    low = (cited_low or "").replace("ё", "е")
+    for m in _SOFT_WORD_RE.finditer(re.sub(r"«[^«»]*»", " ", text or "")):
+        w = m.group(1).lower().replace("ё", "е")
+        root = w[:5] if len(w) >= 7 else w[: max(3, len(w) - 2)]
+        alts = next((g for g in _SOFT_SYNONYMS if root[:4] in {a[:4] for a in g}), (root,))
+        if not any(re.search(r"(?<![\wё])(?:по|у|рас|пре)?" + re.escape(a), low) for a in alts):
+            return m.group(1)
+    return None
+
+
 _BOUND_WORDS = (
     ("upper", r"до|не\s+более|не\s+больше|не\s+старше|менее|меньше|моложе|максимум|не\s+выше|ниже"),
     ("lower", r"свыше|более|больше|не\s+менее|не\s+меньше|старше|минимум|от|не\s+ниже|выше"),
@@ -3147,6 +3537,23 @@ def _bound_of(text: str, at: int) -> Optional[str]:
         if re.search(rf"(?<![\wё])(?:{words})\s*[—–-]?\s*$", before):
             return name
     return None
+
+
+def row_approx(value: float, at: list[int], support: "ArticleSupport") -> bool:
+    """A chart value is approximate: its source sentences (`at`) do not give it as it is written, or give it hedged
+    («около 3800», «более 70 млн», «~28,6»); a value with no source is approximate."""
+    from verstka.planning.grounding import figures
+
+    for j in at or []:
+        if not 0 <= j < len(support.sents):
+            continue
+        t = support.sents[j]
+        for g in figures(t):
+            if g.date is not None:
+                continue
+            if abs(g.value - value) <= 1e-9 * max(1.0, abs(value)) or abs(g.mag - value) <= 1e-9 * max(1.0, abs(value)):
+                return _bound_of(t, g.start) is not None or bool(re.search(r"~\s*$", t[max(0, g.start - 3):g.start]))
+    return True
 
 
 def _sig(v: float) -> int:
@@ -3348,6 +3755,11 @@ class Anchors:
         # the source hedges it («рассматриваются как…», «по оценкам»), the statement does not
         if _HEDGE_W_RE.search(c_low) and not _HEDGE_S_RE.search(text) and not figures(text) and not own:
             return "the source hedges it"
+        # an interpretive predicate is the cited sentence's own word (gate 4: «Полёт также укрепил статус Гагарина как
+        # национального героя» of «Москва встречала Гагарина как национального героя»)
+        soft = soft_word(text, c_low)
+        if soft:
+            return f"«{soft}» is not what its source tells"
         # a dated event keeps its verb: each verb of the statement in the passage, one of them in a sentence of its date
         dated = bool(own or dm or clk or dec or cent)
         verbs = _past_verbs(text) if strict_verbs and not sup._rename_ok(text) else []  # a rename the lead's former
@@ -3477,9 +3889,43 @@ class Anchors:
         at = at[:5]
         return at if self.issue(text, at) is None else None
 
-    def clause(self, text: str, at: list[int], others: Iterable[str] = ()) -> Optional[tuple[str, int]]:
+    def antecedents(self, i: int) -> list[str]:
+        """The names of the article's sentence before sentence `i` (same paragraph): what a pronoun of `i` stands for."""
+        sup = self.support
+        if i <= 0 or i >= len(sup.sents) or sup.para[i - 1] != sup.para[i]:
+            return []
+        return [e.text for e in _entities(sup.sents[i - 1], sup._cap_mid, sup._phrase)]
+
+    def about_same(self, text: str, new: str) -> bool:
+        """The article's clause tells what the statement is about: it shares two of the statement's words (all of them
+        when it has fewer; a synonym or a country's other name counts), one of them not the topic's — gate 4: «В 1930-х
+        годах на фабрике Nestlé появился первый белый шоколад» was replaced by «При петербургском дворе обычай … ввела,
+        по-видимому, Екатерина II» (its wrong citation), sharing only «шоколад»."""
+        from verstka.planning.grounding import content_stems
+
+        mine = {x[:5] for x in content_stems(text, neutral=True) if not re.match(r"^\d", x) and not _is_month_stem(x[:5])}
+        if not mine:
+            return True
+        have = {x[:5] for x in content_stems(new, neutral=True)}
+
+        def alts(x: str) -> set[str]:
+            out = set(_synonyms(x))
+            for g in _ALIASES:  # «США» / «американские», «СССР» / «советские»
+                if any(x.startswith(a[:4]) or a.startswith(x[:4]) for a in g if len(a) >= 3):
+                    out |= {a[:5] for a in g if len(a) >= 3}
+            return out
+
+        shared = {x for x in mine if any(b in have or any(h.startswith(b) for h in have) for b in alts(x))}
+        own = mine - self.support.topic  # a word of the topic («шоколад») says nothing about what the statement tells
+        hit = shared & own
+        # two of its own words, or one in five of them (a short statement: «длился около двух часов» / «длительность»)
+        return len(shared) >= min(2, len(mine)) and (not own or len(hit) >= 2 or len(hit) >= max(1.0, 0.2 * len(own)))
+
+    def clause(self, text: str, at: list[int], others: Iterable[str] = (), before: str = "") -> Optional[tuple[str, int]]:
         """The cited sentence closest to the statement, compressed (article_clause: no brackets, ≤ 32 words or the clause
-        of the statement's names), when it stands alone and says nothing the deck already says: (clause, its sentence)."""
+        of the statement's names), when it stands alone where the slide puts it (`before`: the slide's text before it —
+        needs_context), tells what the statement is about (about_same) and says nothing the deck already says:
+        (clause, its sentence)."""
         from verstka.planning.agent import said_in, same_text
         from verstka.planning.grounding import content_stems
 
@@ -3493,6 +3939,8 @@ class Anchors:
                 new = article_clause(sup.sents[i], pf, want_year=bool(_statement_years(text)))
                 new = unlinked(new) if new else new
                 if not new or anaphoric(new) or _IN_IT_RE.match(new) or _DEIXIS_RE.search(new) or _stale_future(new, self.year_now) or not _has_subject(new, sup._cap_mid):
+                    continue
+                if not self.about_same(text, new) or needs_context(new, before, sup.topic, self.antecedents(i)):
                     continue
                 if any(same_text(new, x) or said_in(x, new, 0.75) or said_in(new, x, 0.75) for x in others):
                     continue
@@ -3699,7 +4147,7 @@ def anchor_deck(deck: _Deck, anchors: Anchors, removed: list[dict], edits: list[
                     stats["kept"] += 1
                     continue
             others = [x for sl in deck.slides for x in sl.sentences if x != sn] + out
-            got = anchors.clause(cur, at, others) if at else None
+            got = anchors.clause(cur, at, others, before=" ".join(out)) if at else None
             if got:
                 new, j = got
                 edits.append({"where": f"{i}", "text": cur, "now": new, "why": f"anchor: {why}"})
@@ -3746,6 +4194,9 @@ def anchor_deck(deck: _Deck, anchors: Anchors, removed: list[dict], edits: list[
                 got = anchors.reanchor(f"{r['label']} — {fmt_value(r['value'])} {unit}".strip())
                 if got:
                     r["at"] = got
+                # «Данные приблизительные» only for a value the article hedges or the writer rounded (gate 4 G4-12): its
+                # own sentence, else the sentences the chart cites («42 % совокупного дохода принесла онлайн-реклама…»)
+                r["approx"] = row_approx(float(r["value"]), list(r.get("at") or []) + anchors.idx(s.data.get("src") or []), sup)
         others = [x for sl in deck.slides for x in sl.sentences]
         got = _founding_year(s, anchors, others)
         if got:
@@ -3772,7 +4223,9 @@ def fill_summary(deck: _Deck, want: int = 3) -> int:
     for s in deck.slides[:-1]:
         for x in s.sentences:
             ys = _years_of(x)
-            if ys and len(x.split()) <= 18 and not anaphoric(x) and not _then_start(x) and not _LEAD_CONJ_RE.match(x):
+            # a figure another slide shows is not said again (G4-9); a sentence that points at another stays there
+            if (ys and len(x.split()) <= 18 and not anaphoric(x) and not _then_start(x) and not _LEAD_CONJ_RE.match(x)
+                    and not _figure_keys(x) and needs_context(x, "") is None):
                 cands.append((ys[0][2], x, s))
     cands.sort(key=lambda c: c[0])
     order = cands[:1] + cands[-1:] + cands[1:-1]
@@ -3793,21 +4246,331 @@ def fill_summary(deck: _Deck, want: int = 3) -> int:
     return n
 
 
+MAX_SLIDE_SENTENCES = 6  # a sentence moved by the chronology never makes a slide longer than this
+
+
+# the war's working titles as the stages of an event's or a culture's story (retitle)
+_RETITLE: dict[str, dict[str, str]] = {
+    "event": {"предпосылки и причины": "Предыстория", "начало": "Как это было", "ход событий": "Ход событий",
+              "ход событий и переломные события": "Ход событий", "переломные события": "Ход событий", "окончание": "Сразу после",
+              "итоги и последствия": "Значение", "итоги и потери": "Значение", "последствия": "Значение", "участники": "Участники"},
+    "culture": {"предпосылки и причины": "Истоки", "начало": "Распространение", "ход событий": "Развитие",
+                "ход событий и переломные события": "Развитие", "переломные события": "Развитие", "окончание": "Новое время",
+                "итоги и последствия": "Современность", "итоги и потери": "Современность", "последствия": "Современность"},
+}
+
+
+def retitle(deck: _Deck, parts: list[_Part], subkind: Optional[str] = None) -> int:
+    """A slide that kept another storyline's working title gets its own story's (gate 4 G4-7: «Окончание» over the
+    Paris cafés of «История шоколада»; a model that answers with the war's titles, or an answer written for an older
+    storyline): the stage it names in this story (_RETITLE: «Окончание» of an event is «Сразу после»), else its part's
+    title; a title told twice gets «(продолжение)». Returns how many changed."""
+    def base_of(t: str) -> str:
+        return re.sub(r"\s*\(продолжение(?:\s+\d+)?\)\s*$", "", (t or "").strip(), flags=re.I)
+
+    own = {base_of(p.title).lower() for p in parts}
+    table = _RETITLE.get(subkind or "", {})
+    n = 0
+    for s in deck.slides:
+        if not 0 <= s.part < len(parts) or not _working_title(s.title):
+            continue
+        base = base_of(s.title).lower()
+        if not base or base in own:
+            continue
+        new = table.get(base) or parts[s.part].title
+        taken = {x.title for x in deck.slides if x is not s}
+        k = 1
+        cand = new
+        while cand in taken:
+            cand = f"{base_of(new)} (продолжение)" if k == 1 else f"{base_of(new)} (продолжение {k})"
+            k += 1
+        if cand != s.title:
+            s.title = cand
+            n += 1
+    return n
+
+
+def _later(a: tuple[int, int, int], b: tuple[int, int, int]) -> bool:
+    """Date `a` is surely after date `b` (a month or a day counts only when both give it: «1945» is not after «8 мая
+    1945»)."""
+    if a[0] != b[0]:
+        return a[0] > b[0]
+    if a[1] and b[1] and a[1] != b[1]:
+        return a[1] > b[1]
+    return bool(a[1] and a[1] == b[1] and a[2] and b[2] and a[2] > b[2])
+
+
+def _chrono_key(sentence: str) -> Optional[tuple[int, int, int]]:
+    return date_start(sentence) if _years_of(sentence) else None
+
+
+def _story_slide(s: _Slide, parts: list[_Part]) -> bool:
+    """A slide of the story told in time order (its part's working title: «Начало», «Ход событий», «Истоки»,
+    «Развитие», «Как это было»…) — not an outcome, a meaning, figures or the summing-up."""
+    title = parts[s.part].title if 0 <= s.part < len(parts) else (s.working or s.title or "")
+    return bool(_CHRONO_PART_RE.match(title)) and not s.theses and not s.data and not SUMMARY_TITLE_RE.match(s.title or "")
+
+
+def _movable(s: _Slide, x: str, dest: _Slide) -> bool:
+    """A sentence may go to another slide: it leans on nothing before it, nothing after it leans on it, and it stands
+    alone after the other slide's text."""
+    k = s.sentences.index(x)
+    nxt = s.sentences[k + 1] if k + 1 < len(s.sentences) else ""
+    if anaphoric(x) or _then_start(x) or _LEAD_CONJ_RE.match(x) or _RELATIVE_RE.search(x) or x in s.theses:
+        return False
+    if nxt and (anaphoric(nxt) or _then_start(nxt) or _ORPHAN_RE.match(nxt)):
+        return False
+    return needs_context(x, " ".join(dest.sentences)) is None
+
+
+def _move(x: str, src: _Slide, dest: _Slide) -> None:
+    """Move sentence `x` to `dest`, after its last sentence not dated later (its sources and citations go with it)."""
+    src.sentences.remove(x)
+    kx = _chrono_key(x)
+    at = 0
+    for k, y in enumerate(dest.sentences):
+        ky = _chrono_key(y)
+        if ky is not None and kx is not None and not _later(ky, kx):
+            at = k + 1
+    if kx is None:
+        at = len(dest.sentences)
+    dest.sentences.insert(at, x)
+    for table in ("src", "cites"):
+        got = getattr(src, table)
+        if x in got:
+            getattr(dest, table)[x] = got.pop(x)
+
+
+def order_story(deck: _Deck, parts: list[_Part], support: Optional["ArticleSupport"] = None, moved: Optional[list[dict]] = None,
+                first: int = 1) -> int:
+    """The story in time order across slides (gate 4 G4-7): a slide of the story never starts before the one before it
+    ends — «Окончание» of WWII started at 8 мая 1945 after «Переломные события (продолжение)» ended in August 1945; the
+    chocolate's 1798 came after 1847. Of two neighbouring story slides that overlap, the sentences out of their period
+    move to the other slide (the fewer of them, so that each slide keeps at least two sentences and at most
+    MAX_SLIDE_SENTENCES); then an undated sentence that names a key event another slide dates (its battle, its place:
+    «В Европе Советский Союз одержал победы в Сталинградской и Курской битвах» of «Ход событий» while «Переломные
+    события» dates the Stalingrad counteroffensive) goes to that slide, after it. Returns how many sentences moved."""
+    moved = moved if moved is not None else []
+    n = 0
+    for _ in range(3):
+        story = [s for s in deck.slides if _story_slide(s, parts)]
+        changed = False
+        for a, b in zip(story, story[1:]):
+            ka = [(x, _chrono_key(x)) for x in a.sentences]
+            kb = [(x, _chrono_key(x)) for x in b.sentences]
+            da = [k for _x, k in ka if k]
+            db = [k for _x, k in kb if k]
+            if not da or not db:
+                continue
+            max_a = max(da)
+            min_b = min(db)
+            if not _later(max_a, min_b):
+                continue
+            late = [x for x, k in ka if k and _later(k, min_b)]
+            early = [x for x, k in kb if k and _later(max_a, k)]
+            opts = []
+            for go, frm, to in ((late, a, b), (early, b, a)):
+                if not go or not all(_movable(frm, x, to) for x in go):
+                    continue
+                left, got = len(frm.sentences) - len(go), len(to.sentences) + len(go)
+                if left < min(2, len(frm.sentences)) or got > MAX_SLIDE_SENTENCES:
+                    continue
+                opts.append((len(go), 0 if frm is a else 1, go, frm, to))
+            if not opts:
+                continue
+            _k, _d, go, frm, to = min(opts, key=lambda o: (o[0], o[1]))
+            for x in sorted(go, key=lambda x: _chrono_key(x) or (0, 0, 0)):
+                _move(x, frm, to)
+                moved.append({"text": x, "from": deck.slides.index(frm) + first, "to": deck.slides.index(to) + first, "why": "out of its slide's period"})
+                n += 1
+            changed = True
+        if not changed:
+            break
+    if support is not None:
+        n += _key_event_moves(deck, parts, support, moved, first)
+    return n
+
+
+def _key_names(text: str, support: "ArticleSupport") -> set[str]:
+    """The rare names of a statement (a battle's, a place's — not the article's frequent ones like «Германия», not the
+    topic's), as 7-letter prefixes («сталинг» of «Сталинградской» and «Сталинградом»)."""
+    out = set()
+    rare = max(6, int(0.01 * len(support.sents)))
+    for e in support.entities(text):
+        if support.frequent(e) or len(support.find(e)) > rare or e.start == 0 and _LEAD_WORD_RE.match(e.text.split()[0]):
+            continue
+        for p in e.prefs:
+            # a country is no key event («Франции» of «помогавшая Германии во Франции» is not the declaration of war)
+            if len(p) >= 5 and not re.search(r"[a-z]", p) and not any(p.startswith(a[:5]) or a.startswith(p[:5]) for g in _ALIASES for a in g if len(a) >= 4):
+                out.add(p[:7])
+    return out
+
+
+def _key_event_moves(deck: _Deck, parts: list[_Part], support: "ArticleSupport", moved: list[dict], first: int) -> int:
+    story = [s for s in deck.slides if _story_slide(s, parts)]
+    n = 0
+    for a in story:
+        for x in list(a.sentences):
+            if _chrono_key(x) or _day_months(x) or _months(x) or len(a.sentences) <= 2 or x not in a.sentences:
+                continue
+            keys = _key_names(x, support)
+            if not keys:
+                continue
+            for b in story:
+                if b is a or len(b.sentences) >= MAX_SLIDE_SENTENCES - 1:
+                    continue
+                twin = next((y for y in b.sentences if _chrono_key(y) and keys & _key_names(y, support)), None)
+                if twin is None or not _movable(a, x, b):
+                    continue
+                a.sentences.remove(x)
+                b.sentences.insert(b.sentences.index(twin) + 1, x)
+                for table in ("src", "cites"):
+                    got = getattr(a, table)
+                    if x in got:
+                        getattr(b, table)[x] = got.pop(x)
+                moved.append({"text": x, "from": deck.slides.index(a) + first, "to": deck.slides.index(b) + first,
+                              "why": "its key event is dated on that slide"})
+                n += 1
+                break
+    return n
+
+
+_TURN_EVENT_RE = re.compile(
+    r"(?<![\wё])(?:битв\w*|сражени\w*|бомбардировк\w*|операци\w*|высадк\w*|десант\w*|капитуляци\w*|контрнаступлени\w*|блокад\w*|"
+    r"штурм\w*|осад[аыеу]\w*|атомн\w+\s+бомб\w*)(?![\wё])", re.I)
+LEAD_TURNS_MAX = 2
+
+
+def _year_before(support: "ArticleSupport", j: int, back: int = 8) -> Optional[int]:
+    """The year a sentence without one is told in: the latest year of the nearest sentence before it (same article)."""
+    for k in range(j - 1, max(-1, j - 1 - back), -1):
+        if support.page_of[k] != support.page_of[j]:
+            break
+        ys = [y[3] for y in support.years[k]]
+        if ys:
+            return max(ys)
+    return None
+
+
+def lead_turning_points(deck: _Deck, parts: list[_Part], anchors: "Anchors", edits: list[dict], first: int = 1) -> int:
+    """A war's deck tells the turning points its article's lead names (gate 4 G4-7: the WWII deck left out Hiroshima and
+    Nagasaki, which the lead names): a battle, an operation, a landing or a bombing of the lead whose name no slide
+    tells goes onto the story slide of its period — the lead's sentence, else the article's first sentence that names
+    it with its date, when it stands alone and its date is not told yet (at most LEAD_TURNS_MAX, a slide of at most
+    MAX_SLIDE_SENTENCES − 2 sentences). Returns how many were added."""
+    sup = anchors.support
+    lead = []
+    for i, t in enumerate(sup.sents):
+        if sup.page_of[i] != 0 or (i > 0 and _heading(t)):
+            break
+        lead.append(i)
+    story = [s for s in deck.slides if _story_slide(s, parts)]
+    if not lead or not story:
+        return 0
+    told = [x for s in deck.slides for x in s.sentences] + [f"{e['when']} {e['what']}" for s in deck.slides for e in s.timeline or []]
+    told_keys: set[str] = set().union(*(_key_names(x, sup) for x in told)) if told else set()
+    told_days = set().union(*(_date_keys(x, " ".join(told))[0] for x in told)) if told else set()
+    n = 0
+    for i in lead:
+        if n >= LEAD_TURNS_MAX:
+            break
+        if not _TURN_EVENT_RE.search(sup.sents[i]):
+            continue
+        keys = _key_names(sup.sents[i], sup) - told_keys
+        if not keys:
+            continue
+        cands = [i] + [j for j in range(len(sup.sents)) if j not in lead and _TURN_EVENT_RE.search(sup.sents[j])
+                       and any(re.search(r"(?<![\wё])" + re.escape(k), sup.low[j]) for k in keys)]
+        for j in cands:
+            new = article_clause(sup.sents[j])
+            new = unlinked(new) if new else new
+            if (not new or anaphoric(new) or _IN_IT_RE.match(new) or _DEIXIS_RE.search(new) or not _has_subject(new, sup._cap_mid)
+                    or not keys & _key_names(new, sup) or needs_context(new, "", sup.topic, anchors.antecedents(j))):
+                continue
+            key = _chrono_key(new)
+            if key is None:
+                dm = sorted(_day_months(new), key=lambda d: (d[1], d[0]))
+                year = _year_before(sup, j) if dm else None
+                if not dm or year is None:
+                    continue
+                key = (year, dm[0][1], dm[0][0])
+            if (key[2], key[1], key[0]) in told_days:
+                continue  # its date is told: the event is on a slide in other words
+            dest = None
+            for s in story:
+                ks = [k for k in (_chrono_key(x) for x in s.sentences) if k]
+                if ks and not _later(min(ks), key):
+                    dest = s
+            dest = dest or story[0]
+            if len(dest.sentences) > MAX_SLIDE_SENTENCES - 2:
+                break
+            at = 0
+            for k, y in enumerate(dest.sentences):
+                ky = _chrono_key(y)
+                if ky is not None and not _later(ky, key):
+                    at = k + 1
+            dest.sentences.insert(at, new)
+            dest.src[new] = [j]
+            edits.append({"where": f"{deck.slides.index(dest) + first}", "text": "", "now": new, "why": "anchor: a turning point the article's lead names"})
+            told_keys |= keys
+            n += 1
+            break
+    return n
+
+
+_ALSO_RE = re.compile(r"(?<![\wё])(?<!а\s)(?<!,\s)также\s+", re.I)
+
+
+def thin_also(deck: _Deck) -> int:
+    """One «также» per slide (gate 4: «…также рассматривалось как большой триумф… Полёт также укрепил…»): a later
+    sentence's «также» goes («а также», «, также» stay: they join a list). Returns how many went."""
+    n = 0
+    for s in deck.slides:
+        seen = False
+        out = []
+        for sn in s.sentences:
+            m = _ALSO_RE.search(sn)
+            if m and seen and sn not in s.theses:
+                new = sn[: m.start()] + sn[m.end():]
+                new = H.cap_first(new) if m.start() == 0 else new
+                for table in (s.src, s.cites):
+                    if sn in table:
+                        table[new] = table[sn]
+                out.append(new)
+                n += 1
+                continue
+            seen = seen or bool(m)
+            out.append(sn)
+        s.sentences = out
+    return n
+
+
 def chrono_sentences(deck: _Deck) -> int:
-    """A slide whose every sentence is dated and none leans on the one before it tells its events in time order (the
-    live WWII «Переломные события»: 19 ноября 1942 → 8 ноября 1942 → июнь 1942). Returns how many slides changed."""
+    """A slide tells its events in time order (the live WWII «Переломные события»: 19 ноября 1942 → 8 ноября 1942 →
+    июнь 1942): each dated sentence with the undated ones after it (they tell more of it: «3 сентября Великобритания и
+    Франция…» after «1 сентября 1939 года…») is one block, and the blocks go in the order of their dates; a sentence
+    that leans on the one before it («Однако…», «В том же году…», a pronoun) stays in its block. Returns how many slides
+    changed."""
     n = 0
     for s in deck.slides:
         if len(s.sentences) < 2 or s.theses or SUMMARY_TITLE_RE.match(s.title or ""):
             continue
-        if any(anaphoric(x) or _LEAD_CONJ_RE.match(x) or _THEN_RE.search(x) for x in s.sentences):
+        head: list[str] = []
+        blocks: list[tuple[tuple[int, int, int], list[str]]] = []
+        for x in s.sentences:
+            k = date_start(x) if _years_of(x) else None
+            leans = anaphoric(x) or bool(_LEAD_CONJ_RE.match(x)) or bool(_THEN_RE.search(x))
+            if k is None or (leans and blocks):
+                (blocks[-1][1] if blocks else head).append(x)
+            elif leans:
+                head.append(x)
+            else:
+                blocks.append((k, [x]))
+        if len(blocks) < 2:
             continue
-        keys = [date_start(x) for x in s.sentences]
-        if any(k is None for k in keys):
-            continue
-        order = sorted(range(len(keys)), key=lambda i: (keys[i], i))
-        if order != list(range(len(keys))):
-            s.sentences = [s.sentences[i] for i in order]
+        order = sorted(range(len(blocks)), key=lambda i: (blocks[i][0], i))
+        if order != list(range(len(blocks))):
+            s.sentences = head + [x for i in order for x in blocks[i][1]]
             n += 1
     return n
 
@@ -3936,7 +4699,7 @@ def apply_genders(deck: _Deck, genders: dict[str, str]) -> None:
             e["what"] = fix_gender(e["what"], genders)
 
 
-def orphan_fix(s: "_Slide", sn: str) -> Optional[str]:
+def orphan_fix(s: "_Slide", sn: str, before: Optional[str] = None) -> Optional[str]:
     """A sentence that lost its antecedent (the sentence before it went: «Её создатели — российские программисты…»):
     the sentence it cites, compressed, when that one names its subject (gate 3: the founders' sentence went for «no
     antecedent», and «Вдохновлённые успехом Hotmail, они предложили…» was left with nobody to be «они»)."""
@@ -3946,7 +4709,10 @@ def orphan_fix(s: "_Slide", sn: str) -> Optional[str]:
     at = s.src.get(sn) or anchors.idx(_raw_ids(s, sn))
     if not at:
         return None
-    got = anchors.clause(sn, at, [x for x in s.sentences if x != sn])
+    if before is None:
+        k = s.sentences.index(sn) if sn in s.sentences else len(s.sentences)
+        before = " ".join(s.sentences[:k])
+    got = anchors.clause(sn, at, [x for x in s.sentences if x != sn], before=before)
     if not got:
         return None
     new, j = got
@@ -4126,11 +4892,21 @@ _NEUTER_NOUN_RE = re.compile(
     r"(?<![\wё])([а-яё]{2,}?(?:(?:ск|цк|к|г|х|ж|ш|ч|щ|[^аеёиоуыэюя\W]н)(?=ий)|[а-яё](?=ый)))(ий|ый)\s+([а-яё]{3,}(?:ство|ние|тие|мо|ье))(?![\wё])")
 
 
+# «Россия — четвёртое в мире по мощности атомной генерации» (gate 4): a neuter ordinal with no noun after a dash agrees
+# with nothing — it is the place the subject takes
+_RANK_DASH_RE = re.compile(
+    r"^(?P<subj>[^—–]{2,80}?)\s+[—–]\s+(?P<ord>(?:перв|втор|трет|четв[её]рт|пят|шест|седьм|восьм|девят|десят)(?:ое|ье))\s+"
+    r"(?!мест)(?P<rest>(?:в|во|среди|по|на|из|после)\s.+)$")
+
+
 def fix_agreement(sentence: str) -> str:
     """Agreement slips the model makes (gate 3): a date as the subject takes the neuter («12 апреля стал Днём
     космонавтики» → «стало»); a participle after a noun in the instrumental agrees with it («направлением, связанном с»
-    → «связанным»); a masculine adjective before a neuter noun («технический превосходство» → «техническое»)."""
+    → «связанным»); a masculine adjective before a neuter noun («технический превосходство» → «техническое»); a place
+    in a ranking said with a dash takes «занимает … место» («Россия — четвёртое в мире по …» → «Россия занимает
+    четвёртое место в мире по …», gate 4)."""
     out = sentence or ""
+    out = _RANK_DASH_RE.sub(lambda m: f"{m.group('subj')} занимает {m.group('ord')} место {m.group('rest')}", out)
     out = _DATE_SUBJECT_RE.sub(lambda m: f"{m.group(1)} {m.group(2)}о", out)
     out = _INSTR_PARTICIPLE_RE.sub(lambda m: f"{m.group(1)}, {m.group(2)}ым", out)
 
@@ -4206,6 +4982,7 @@ def render_text(deck: _Deck, rules: bool = False) -> str:
             out += [f"— {H.strip_end(e['when'])} — {_what_text(e['what'])}{';' if k < len(tl) - 1 else '.'}" for k, e in enumerate(tl)]
         d = s.data
         if d:
+            approx = any(r.get("approx", True) for r in d["rows"])
             cap = H.strip_end(d.get("caption") or "") or "Данные"
             unit = H.strip_end(d.get("unit") or "")
             out.append(f"{cap}, {unit}:" if unit else f"{cap}:")
@@ -4215,11 +4992,14 @@ def render_text(deck: _Deck, rules: bool = False) -> str:
             if rules:
                 # the agent's brief asks for the chart and the caveat (compile reads them)
                 out.append(f"Нужна {kind} диаграмма: {cap[:1].lower() + cap[1:]}.")
-                out.append("Укажи, что данные приблизительные.")
+                if approx:
+                    out.append("Укажи, что данные приблизительные.")
             else:
-                # the text the person reads and edits: data notes, not requests to a designer (gate 3 W3-12)
+                # the text the person reads and edits: data notes, not requests to a designer (gate 3 W3-12); the
+                # caveat only when a value is hedged or rounded (gate 4 G4-12: not under the article's exact 42/32/18,6/7 %)
                 out.append(f"Диаграмма ({kind}): {cap[:1].lower() + cap[1:]}.")
-                out.append(DATA_NOTE)
+                if approx:
+                    out.append(DATA_NOTE)
     if rules:
         out += ["", RULES_LINE]
     return "\n".join(out) + "\n"
@@ -4303,6 +5083,8 @@ class WriterResult:
     anchor: dict = field(default_factory=dict)  # the anchor check's counts (anchored, reanchored, replaced, dropped…)
     genders: dict = field(default_factory=dict)  # the grammatical gender of the topic's names («VK»: "f")
     numbered: list = field(default_factory=list)  # per numbered cut: [[number, page, sentence]] (what the citations point at)
+    subkind: Optional[str] = None  # a history's story: "conflict" | "event" | "culture" (history_subkind)
+    moved: list = field(default_factory=list)  # sentences the cross-slide chronology moved: {"text", "from", "to", "why"}
 
     @property
     def written(self) -> bool:
@@ -4322,7 +5104,7 @@ class WriterResult:
     def summary(self) -> dict:
         """run_manifest.planner.writer."""
         return {
-            "mode": self.mode, "status": self.status, "kind": self.kind, "skills": self.skills, "model": self.model,
+            "mode": self.mode, "status": self.status, "kind": self.kind, "subkind": self.subkind, "skills": self.skills, "model": self.model,
             "reference": {"source": "wikipedia", "lang": self.lang, "pages": self.pages} if self.pages else None,
             "slides": self.slides, "asked": self.asked, "removed": len(self.removed), "checked": self.checked,
             "continuation": self.continuation, "seconds": self.seconds, "tokens": self.tokens, "reason": self.reason or None,
@@ -4331,12 +5113,12 @@ class WriterResult:
     def record(self) -> dict:
         """runs/<id>/writer.json: the answers as written, the reference pages with their revisions, what was removed."""
         return {
-            "version": 1, "mode": self.mode, "status": self.status, "kind": self.kind, "topic": self.topic, "theses": self.theses,
+            "version": 1, "mode": self.mode, "status": self.status, "kind": self.kind, "subkind": self.subkind, "topic": self.topic, "theses": self.theses,
             "skills": self.skills, "model": self.model, "model_label": self.model_label, "seconds": self.seconds, "tokens": self.tokens,
             "reference": {"source": "wikipedia", "lang": self.lang, "pages": self.pages, "cut_chars": self.reference_chars} if self.pages else None,
             "answers": self.answers, "removed": self.removed, "edits": self.edits, "overruled": self.overruled, "continuation": self.continuation, "salvaged": self.salvaged,
             "sources": self.sources, "pages_used": self.pages_used, "anchor": self.anchor or None, "genders": self.genders,
-            "numbered": self.numbered,
+            "numbered": self.numbered, "moved": self.moved,
             "check": self.check_state, "check_stats": self.check_stats, "refill": self.refill or None, "short_by": self.short_by,
             "checked": self.checked, "check_skipped": self.check_skipped, "reason": self.reason or None, "warnings": self.warnings,
         }
@@ -4434,7 +5216,8 @@ def _insert_at(deck: _Deck, part: int) -> int:
 
 
 # a title of a stage of the story, not of a subject («Современный этап», «Первые годы», «Ход событий»)
-_TIME_TITLE_RE = re.compile(r"этап|год|начал|развити|ход\s|оконч|итог|последств|предпосыл|главн|перелом|истори|основан|современ|причин|хронолог", re.I)
+_TIME_TITLE_RE = re.compile(r"этап|год|начал|развити|ход\s|оконч|итог|последств|предпосыл|главн|перелом|истори|основан|современ|причин|хронолог|"
+                            r"предыстори|подготовк|как\s+это\s+было|сразу\s+после|значени|истоки|распространени|памят|участник", re.I)
 
 
 def _refill(
@@ -4524,7 +5307,13 @@ def _refill(
             continue
         part = parts[arg] if 0 <= arg < len(parts) else None
         about = _stems5(" ".join([part.title if part else "", part.hint if part else ""]))
-        if part and s.sentences and not s.data and not any(_stems5(x) & about for x in s.sentences):
+        told_part = PART_TOPIC.get(part.title) if part else None
+        if told_part is not None and any(told_part.search(x) for x in s.sentences):
+            # a market's part told in its own words («Тенденции»: «на 69 % меньше, чем в первом квартале 2024 года»);
+            # the answer's title of another part («Инфраструктура» over sales figures) is the asked part's
+            if _working_title(s.title) and s.title != part.title:
+                s.title = part.title
+        elif part and s.sentences and not s.data and not any(_stems5(x) & about for x in s.sentences):
             # the article had nothing on this part: the slide tells other facts, its title says so (live EV: a slide
             # «Инфраструктура» told the engines of a truck) — the writer's own title when it names them, else a plain one
             own_t = _stems5(s.title) - about
@@ -4643,6 +5432,8 @@ def write_deck(
 
             ra = ReferenceAnswer.model_validate(extract_json(r.text or "", {"titles", "kind"}))
             kind = ra.kind if ra.kind in KINDS else None
+            if kind in ("person", "other", None) and event_topic(topic):
+                kind = "history"  # «Полёт Гагарина» is one event, not a biography: the event's story, the deep cut
             if kind == "private":
                 res.kind = "private"
             elif kind == "conflict":
@@ -4663,12 +5454,22 @@ def write_deck(
         except Exception as e:  # noqa: BLE001 - no reference: the writer writes from knowledge
             keep_raw("topic_reference", error=e)
             res.warnings.append(f"reference: {type(e).__name__} ({str(e)[:120]})")
+        part_page = None
+        if reference is not None and reference.cut and (kind or guess_kind(topic)) == "market":
+            # a part of the market's story its articles say nothing about (about its place): that part's own article
+            try:
+                part_page = add_part_page(reference, topic, max(1, asked - 1), rcfg, cache_dir=cache_dir,
+                                          deadline=min(deadline, time.monotonic() + PART_PAGE_MAX_S), transport=transport)
+            except Exception as e:  # noqa: BLE001 - the part is left out instead
+                res.warnings.append(f"reference: part page failed ({str(e)[:100]})")
         res.seconds["reference"] = round(time.monotonic() - tr, 2)
         if reference is not None and reference.cut:
             res.pages = [p.meta() for p in reference.pages]
             res.source = {"title": reference.pages[0].title, "url": reference.pages[0].url}
             res.reference_chars = len(reference.cut)
             emit(f"нашёл статью «{reference.pages[0].title}» в Википедии — пишу текст по ней.")
+            if part_page:
+                emit(f"о части «{part_page[0]}» в ней ничего нет — взял ещё статью «{part_page[1]}».")
         elif ref_on and kind != "private":
             emit("статьи по теме не нашёл — пишу по своим знаниям.")
     ref_text = reference.cut if reference is not None and reference.cut else ""
@@ -4699,19 +5500,27 @@ def write_deck(
     private_hint = mode.private_hint or kind == "private"
     # the model's kind, else (none, «other», «private» — the writer decides that one) the keywords' guess
     kind = kind if kind and kind not in ("private", "other") else guess_kind(topic)
+    if kind == "person" and event_topic(topic):
+        kind = "history"
     res.kind = res.kind if res.kind == "private" else kind
+    subkind = history_subkind(topic) if kind == "history" else None
+    res.subkind = subkind
 
     # 2. the text: one call, a continuation when it is cut or short
     n_content = max(1, asked - 1)
     if kind == "politician":
         n_content = min(n_content, POLITICIAN_MAX_CONTENT)
-    parts = storyline_parts(kind, n_content, reference=bool(ref_text))
-    n_content = len(parts)
-    theses = "\n".join(f"{i}. {t}" for i, t in enumerate(mode.theses, 1))
     from verstka.planning.reference import place_of
 
     where = place_of(topic) if kind != "politician" else None
     place = where[0] if where else ""  # «Рынок электромобилей в России»: the writer takes Russia's facts first
+    covered = None
+    if kind == "market" and support is not None:
+        page_titles = [p.title for p in reference.pages] if reference is not None else []
+        covered = lambda title: part_covered(title, support, page_titles, where[1] if where else None)  # noqa: E731
+    parts = storyline_parts(kind, n_content, reference=bool(ref_text), subkind=subkind, covered=covered)
+    n_content = len(parts)
+    theses = "\n".join(f"{i}. {t}" for i, t in enumerate(mode.theses, 1))
 
     def variables(n: int, story: list, written_titles: str = "", first_number: int = 2) -> dict:
         return {
@@ -4796,6 +5605,7 @@ def write_deck(
     res.answers["writer"] = answers
     res.seconds["write"] = round(time.monotonic() - tw, 2)
     deck.title = deck.title or H.cap_first(_lead_free_title(topic))
+    retitle(deck, parts, subkind)
     if not deck.slides:
         res.warnings.append("deck_writer failed: model answer rejected (no slide in it)")
         emit("модель не написала текст — соберу каркас по теме." if mode.kind == "topic" else "модель не написала текст — соберу по вашему тексту.")
@@ -4869,7 +5679,8 @@ def write_deck(
         def clause_of(sl: _Slide, sn: str) -> Optional[str]:
             if anchors is None or not sl.src.get(sn):
                 return None
-            got = anchors.clause(sn, sl.src[sn], [x for s2 in d.slides for x in s2.sentences if x != sn])
+            k = sl.sentences.index(sn) if sn in sl.sentences else len(sl.sentences)
+            got = anchors.clause(sn, sl.src[sn], [x for s2 in d.slides for x in s2.sentences if x != sn], before=" ".join(sl.sentences[:k]))
             if not got:
                 return None
             sl.src[got[0]] = [got[1]]
@@ -4936,6 +5747,8 @@ def write_deck(
     guards(deck)
     if "politician" in (kind, writer_kind):
         res.kind = "politician"
+    if kind == "market":
+        fit_parts(deck, parts, where[1] if where else None, removed)
     short = target <= SHORT_DECK_CONTENT
     dedupe_chronology(deck, removed, short=short)
     dedupe_events(deck, removed)
@@ -4947,6 +5760,7 @@ def write_deck(
     # 4. the refill: the asked slide count is a promise
     tf = time.monotonic()
     if deck.slides and (len(deck.slides) < target or any(_thin(s) for s in deck.slides)) and deadline - time.monotonic() >= REFILL_MIN_S:
+        n_before = len(deck.slides)
         try:
             got = _refill(
                 deck, parts, target, skills, provider, variables, temperature, deadline, topic, ref_text, full, mode, removed,
@@ -4957,6 +5771,8 @@ def write_deck(
             res.refill = got
             if got.get("added") or got.get("topped"):
                 guards(deck)
+                if kind == "market":
+                    fit_parts(deck, parts, where[1] if where else None, removed)
                 dedupe_chronology(deck, removed, short=short)
                 dedupe_events(deck, removed)
                 dedupe_sources(deck, removed)
@@ -4964,11 +5780,13 @@ def write_deck(
                 dedupe_figures(deck, removed)
                 drop_orphans(deck, removed)
                 said = []
-                if got.get("added"):
-                    said.append(f"дописал {_count_ru(got['added'], 'слайд', 'слайда', 'слайдов')} вместо убранных")
+                added = min(got.get("added", 0), max(0, len(deck.slides) - n_before))  # what the checks after it kept
+                if added:
+                    said.append(f"дописал {_count_ru(added, 'слайд', 'слайда', 'слайдов')} вместо убранных")
                 if got.get("topped"):
                     said.append(f"дополнил {_count_ru(got['topped'], 'слайд', 'слайда', 'слайдов')} из одного предложения")
-                emit(" и ".join(said) + " — по разделам статьи, которые ещё не использованы." if full else " и ".join(said) + ".")
+                if said:
+                    emit(" и ".join(said) + " — по разделам статьи, которые ещё не использованы." if full else " и ".join(said) + ".")
         except Exception as e:  # noqa: BLE001 - the deck stays as it is
             keep_raw("deck_writer", error=e)
             res.warnings.append(f"deck_writer refill failed: {str(e)[:160]}")
@@ -4980,7 +5798,16 @@ def write_deck(
         return finish("failed", "too short")
 
     # 5. every statement keeps its source (writer.json «sources», «Показать текст»); one gender per name
+    if kind in ("history", "person"):
+        # the story in time order across its slides (a sentence out of its slide's period moves to its period's slide)
+        chrono_sentences(deck)
+        if anchors is not None and subkind == "conflict":
+            lead_turning_points(deck, parts, anchors, res.edits)
+        if order_story(deck, parts, support, res.moved):
+            dedupe_chronology(deck, removed, short=short)
     fill_summary(deck)
+    thin_also(deck)
+    fix_pronoun_subjects(deck, removed)
     if anchors is not None:
         polish_sources(deck, anchors)
         res.sources = final_sources(deck, anchors, removed)

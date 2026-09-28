@@ -40,7 +40,12 @@ export function describeGeneration(g: Generation, strategyTitle: (name: string) 
   const head = `Готово: ${plural(g.variants.length, "вариант", "варианта", "вариантов")}${g.seconds ? ` за ${fmtSeconds(g.seconds)}` : ""}.`;
   const silentNote = modelSilentNote(g);
   if (g.variants.every((v) => v.outline?.planned_by === "skeleton")) {
-    return [head, silentNote, "В тексте была только тема, поэтому это каркас: титул, повестка и разделы с подсказками в заметках. Допишите тезисы и цифры — Verstka соберёт содержательные слайды."].filter(Boolean).join("\n");
+    // a topic whose text the model did not write: said plainly, no score (gate 4 G4-21)
+    const unwritten = g.writer?.status === "failed" || g.writer?.status === "skipped";
+    const what = unwritten
+      ? "Модель недоступна — текст по теме не написан, поэтому это каркас: титул, повестка и разделы с подсказками в заметках. Соберите ещё раз позже или допишите тезисы и цифры."
+      : "В тексте была только тема, поэтому это каркас: титул, повестка и разделы с подсказками в заметках. Допишите тезисы и цифры — Verstka соберёт содержательные слайды.";
+    return [head.replace(/^Готово: .*$/, unwritten ? "Текст не написан." : head), silentNote, what].filter(Boolean).join("\n");
   }
   // the best variant is named only when the scores differ; no tutorial tail (the page shows where things are)
   const scored = rows.filter((r) => r.score !== null);

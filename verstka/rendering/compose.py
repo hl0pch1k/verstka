@@ -738,6 +738,10 @@ def kpi_callout(text: str) -> Optional[tuple[str, str]]:
 _FIG_UNIT_RE = re.compile(r"^([+\-−–~≈×]?\s?\d[\d\s\u00a0]*(?:[.,]\d+)?\s?%?)\s*([A-Za-zА-Яа-яЁё₽$€].{0,12})$")
 
 
+# a hedge before a figure — «около 615 тыс. тонн», «более 10», «почти 40%» — (the words, then the figure)
+_HEDGE_RE = re.compile(r"^((?:не\s)?(?:около|более|менее|почти|свыше|порядка|примерно|приблизительно|до|от|ок\.|меньше|больше)(?:\sчем)?)\s+(?=[+\-−–~≈]?\d)", re.I)
+
+
 _SHORT_UNIT_RE = re.compile(r"(?:%|‰|×|₽|\$|€|£|¥|тыс\.?|млн\.?|млрд\.?|трлн\.?|руб\.?|р\.|шт\.?|x|х)", re.I)
 
 
@@ -943,6 +947,8 @@ class Composer:
                     self._compose_body(comp, area)
                 elif not done.startswith("the block set"):
                     self.warnings.append(done)
+            if comp == "process" or self.o.kind in (PatternKind.process, PatternKind.timeline):
+                self._dense_steps_beside(comp, area, n0, (o0, w0, notes0))
             self.warnings.append("dense content set smaller to stay inside its area")
             if self._overflows(n0, area):
                 self.warnings.append("content runs past its area")
@@ -1268,8 +1274,11 @@ class Composer:
                 self.kpis(area, c.numbers, extra=self._running(skip_intro=bool(intro)))
         elif comp in ("process",) or kind in (PatternKind.process, PatternKind.timeline):
             items = self._items()
-            if items:
-                with self._lines_under(area, list(c.bullets) if (c.items or c.columns) else []) as main:
+            lines = list(c.bullets) if (c.items or c.columns) else []
+            if items and getattr(self, "_beside", False) and lines and self._steps_beside(area, items, lines):
+                pass
+            elif items:
+                with self._lines_under(area, lines) as main:
                     self.process(main, items)
             else:
                 self.bullets(area, self._running())
@@ -1353,6 +1362,22 @@ class Composer:
             size = k.lead  # captions of a few words each (or the lines of a short block, on the fill pass) at the lead size
         per, gap, cw, paras, eh = lay(cols, size)
         room = eh + int(k.vgap * 1.4)
+        if spread and getattr(self, "_rehousing", False) and room > 0.3 * area.h:
+            # G4-19 (Nature short visual s4): set again above the conclusion's room, the captions under the charts
+            # step down (the body size, two columns for three lines, the small size — never under the 2 % floor)
+            # before the conclusion leaves its strip at the foot for a line under the heading
+            floor = self._dense_floor()
+            steps = [(cols, x) for x in (k.body, k.small) if floor - 0.05 <= x < size - 0.05]
+            if n == 3:
+                steps = [(c2, x) for x in dict.fromkeys((k.body, k.small)) if floor - 0.05 <= x <= size + 0.05 for c2 in (cols, 2)]
+            for c2, s2 in steps:
+                got = lay(c2, s2)
+                r2 = got[4] + int(k.vgap * 1.4)
+                if r2 < room:
+                    per, gap, cw, paras, eh = got
+                    cols, size, room = c2, s2, r2
+                if room <= 0.3 * area.h:
+                    break
         if dense and not spread and n >= 2 and room > 0.3 * area.h:
             # the dense pass: the block keeps 70 % of the area — the lines step down to the dense floor (1.7 % of the
             # slide height) in two columns, then one, before they take more
@@ -1540,6 +1565,7 @@ class Composer:
         title_color = colors.heading
 
         forced_of: dict = {}  # (cols, rows, tight) → no size pair fits (a word breaks or the row overflows)
+        lone = n <= 2 and all(not (i.title and i.text) and not i.bullets and not i.number for i in items)
 
         def pick(cols: int, rows: int, tight: bool = False):
             cw = int((area.w - gap * (cols - 1)) / cols)
@@ -1552,6 +1578,12 @@ class Composer:
             ladders = self._size_pairs()
             if n <= 3 and longest <= 70:
                 ladders.insert(0, (k.statement, k.h2))  # three short items: the type grows before the card does
+            if lone:
+                # one or two sentences in cards (a written slide's two theses, EV compact s7: body size in two tall
+                # cards, 14 % of the slide in lines): set like a statement — the callout size under the heading, down
+                # to the lead size — before the usual ladder
+                top = min(k.statement, self._under_heading()) if k.head_size else k.statement
+                ladders = [(x, x) for x in k.steps_down(top, k.lead)] + ladders
             chosen = None
             fallback = None
             long_ok = None  # fits, but with more lines than we like: kept when the next step down is a big drop
@@ -1560,7 +1592,8 @@ class Composer:
                 # a word wider than the card breaks in the middle: its title and its text are measured
                 if not self.fits_width([i.title for i in items], ts, k.bold, inner_w) or not self.fits_width(bodies, bs, False, inner_w - _emu(bs * 1.1)):
                     continue
-                h = max(self._card_content_h(it, inner_w, ts, bs, badge, colors, i) for i, it in enumerate(items)) + 2 * pad
+                tp = self._title_pads(items, cols, inner_w, ts, self._hang_w(ts) if badge == "index_h" else 0)
+                h = max(self._card_content_h(it, inner_w, ts, bs, badge, colors, i, tp[i]) for i, it in enumerate(items)) + 2 * pad
                 if h > max_row_h:
                     continue
                 t_lines = max(para_lines(self.P(i.title, ts, colors.text, bold=k.bold), _pt(inner_w)) for i in items)
@@ -1582,7 +1615,8 @@ class Composer:
             forced_of[(cols, rows, tight)] = chosen is None
             if chosen is None:
                 ts, bs = k.body, k.small
-                chosen = (ts, bs, max(self._card_content_h(it, inner_w, ts, bs, badge, colors, i) for i, it in enumerate(items)) + 2 * pad)
+                tp = self._title_pads(items, cols, inner_w, ts, self._hang_w(ts) if badge == "index_h" else 0)
+                chosen = (ts, bs, max(self._card_content_h(it, inner_w, ts, bs, badge, colors, i, tp[i]) for i, it in enumerate(items)) + 2 * pad)
 
             return cw, pad, inner_w, chosen
 
@@ -1608,14 +1642,16 @@ class Composer:
         if forced and badge == "index":
             # the index numerals take the room the words need: the same cards without them (one row, then two)
             grids = [(cols, rows)] + ([(2, 2) if n == 4 else (math.ceil(n / 2), 2)] if rows == 1 and n >= 4 else [])
-            badge = None
-            for c_, r_ in dict.fromkeys(grids):
-                for tight in (False, True):
-                    got = pick(c_, r_, tight)
-                    if not forced_of[(c_, r_, tight)]:
-                        cols, rows = c_, r_
-                        cw, pad, inner_w, chosen = got
-                        forced = False
+            for badge in ("index_s", "index_h", None):  # G4-18: the numerals a step over the title, hanging, then none
+                for c_, r_ in dict.fromkeys(grids):
+                    for tight in (False, True):
+                        got = pick(c_, r_, tight)
+                        if not forced_of[(c_, r_, tight)]:
+                            cols, rows = c_, r_
+                            cw, pad, inner_w, chosen = got
+                            forced = False
+                            break
+                    if not forced:
                         break
                 if not forced:
                     break
@@ -1653,9 +1689,10 @@ class Composer:
             # reads largest is taken when it gains a step (ties keep the numerals, the padding, the first grid)
             grids = [(cols, rows)] + ([(2, 2) if n == 4 else (math.ceil(n / 2), 2)] if rows == 1 and n >= 4 else [])
             badge0 = badge
-            best, best_kept = None, None
+            best, best_kept, best_own = None, None, None
+            # G4-18: the index numerals are tried at their own size, then a step over the title only, then left out
             for gi, (c_, r_) in enumerate(dict.fromkeys(grids)):
-                for bi, b_ in enumerate(dict.fromkeys([badge0] + ([None] if badge0 == "index" else []))):
+                for bi, b_ in enumerate(dict.fromkeys([badge0] + (["index_s", "index_h", None] if badge0 in ("index", "index_s", "index_h") else []))):
                     for tight in (False, True):
                         badge = b_
                         got = pick(c_, r_, tight)
@@ -1664,14 +1701,21 @@ class Composer:
                         key = (reading(got[3]), -bi, -int(tight), -gi)
                         if best is None or key > best[0]:
                             best = (key, c_, r_, b_, got)
-                        if bi == 0 and (best_kept is None or key > best_kept[0]):
+                        if (b_ is not None or badge0 is None) and (best_kept is None or key > best_kept[0]):
                             best_kept = (key, c_, r_, b_, got)
+                        if bi == 0 and (best_own is None or key > best_own[0]):
+                            best_own = (key, c_, r_, b_, got)
             badge = badge0
-            if best_kept is not None and best_kept[0][0] >= k.body - 0.05:
-                best = best_kept  # the numerals stay where the words reach the body size with them
+            if best_own is not None and best_own[0][0] >= k.body - 0.05:
+                best_kept = best_own  # the variant's own numerals, where the words reach the body size with them (VK Tech)
+            keep_at = max(k.small, 0.85 * best[0][0]) if best is not None else k.body
+            if best_kept is not None and (best_kept[0][0] >= k.body - 0.05 or (n >= 3 and best_kept[0][0] >= keep_at - 0.05)):
+                # the numerals stay where the words reach the body size with them — a row of three or more keeps them
+                # (G4-18) while the words stay within a step of what they reach without them
+                best = best_kept
             if best is not None and best[0][0] > reading(chosen) + 0.05:
                 _, cols, rows, badge, (cw, pad, inner_w, chosen) = best
-                self.warnings.append(f"карточки {cols}×{rows}{' без номеров' if badge is None and badge0 == 'index' else ''}: текст {reading(chosen):g} пт")
+                self.warnings.append(f"карточки {cols}×{rows}{' без номеров' if badge is None and badge0 in ('index', 'index_s', 'index_h') else (' с малыми номерами' if badge == 'index_s' else (' с номерами сбоку' if badge == 'index_h' else ''))}: текст {reading(chosen):g} пт")
         ts, bs, content_h = chosen
         max_row_h = int((area.h - k.vgap * (rows - 1)) / rows)
         if content_h > max_row_h and rows == 1 and 2 <= n <= 3 and any(it.bullets for it in items):
@@ -1685,6 +1729,7 @@ class Composer:
         block_h = rows * ch + (rows - 1) * k.vgap
         y0 = self._place_v(area, block_h)
         last_row_n = n - cols * (rows - 1)
+        pads = self._title_pads(items, cols, inner_w, ts, self._hang_w(ts) if badge == "index_h" else 0)
         for i, it in enumerate(items):
             r, cidx = divmod(i, cols)
             x_off = 0
@@ -1696,7 +1741,7 @@ class Composer:
             else:
                 # no card style: an accent rule over each item keeps the columns apart
                 self.cv.rect(Bbox(x=box.x, y=box.y, w=box.w, h=max(_emu(2.25), 1)), colors.accent, name="Rule")
-            self._card_content(it, Bbox(x=box.x + pad, y=box.y + pad, w=inner_w, h=ch - 2 * pad), ts, bs, badge, colors, i, title_color)
+            self._card_content(it, Bbox(x=box.x + pad, y=box.y + pad, w=inner_w, h=ch - 2 * pad), ts, bs, badge, colors, i, title_color, pads[i])
 
     def figure_para(self, value: str, size: float, color: str, muted: str) -> tuple[Para, float]:
         """A figure as one line: «31% → 12%» is two figures — the old one small and muted, the new one in the
@@ -1716,6 +1761,20 @@ class Composer:
                 return Para(runs), width + text_width_pt(num, k.font, size, b) + text_width_pt(" " + unit, k.font, small, b)
             runs.append(Run(typeset(parts[1]), size, color, b, k.font))
             return Para(runs), width + text_width_pt(parts[1], k.font, size, b)
+        hm = _HEDGE_RE.match(value.strip())
+        if hm and size >= 1.6 * k.h2:
+            # «около 615 тыс. тонн», «более 10»: the hedge is a word of the figure, not the figure — it is set at the
+            # unit's size on the figure's baseline, so the number keeps the hero's size in its tile (G4 Focus s3)
+            hedge, rest = hm.group(1), value.strip()[hm.end():]
+            usz = k.snap(size * 0.5, k.h3, size * 0.62)
+            head = [Run(typeset(hedge) + " ", usz, color, b, k.font)]
+            hw = text_width_pt(hedge + " ", k.font, usz, b)
+            m = _FIG_UNIT_RE.match(rest)
+            if m and m.group(2).strip():
+                num, unit = m.group(1).strip(), m.group(2).strip()
+                runs = head + [Run(typeset(num), size, color, b, k.font), Run(" " + typeset(unit), usz, color, b, k.font)]
+                return Para(runs), hw + text_width_pt(num, k.font, size, b) + text_width_pt(" " + unit, k.font, usz, b)
+            return Para(head + [Run(typeset(rest), size, color, b, k.font)]), hw + text_width_pt(typeset(rest), k.font, size, b)
         m = _FIG_UNIT_RE.match(value.strip())
         if m and m.group(2).strip() and size >= 1.6 * k.h2:
             # the unit is set smaller on the figure's baseline: «145 000 ₽», «2,1 ч», «4,6 из 5»
@@ -1748,10 +1807,19 @@ class Composer:
         top = max(0.0, _pt(box_h) - (descent + digit_h) * big) * damp
         return _emu(left), _emu(top * 0.95)
 
-    def _index_size(self, ts: float) -> float:
+    @staticmethod
+    def _index_ref(it: SlideItem, ts: float, bs: float, badge: Optional[str]) -> float:
+        """The size a card's numeral is set from: the title's — the smaller numeral of a thesis (a card of words
+        without a title) goes with its words."""
+        return bs if badge == "index_s" and not (it.title and it.title != it.number) else ts
+
+    def _index_size(self, ts: float, small: bool = False) -> float:
         """The «01» over a card: the accent numeral, a step above the card title (never the small accent text) — in
-        the visual variant a display numeral, twice the title («крупные цифры»)."""
+        the visual variant a display numeral, twice the title («крупные цифры»). `small`: the numeral a step over the
+        title only, when the display numeral would take the room the cards' words need (G4-18)."""
         k = self.kit
+        if small:
+            return k.snap(ts * 1.3, ts * 1.1, ts * 1.5)
         if self.strategy == "visual":
             return k.snap(max(ts * 2.0, k.statement), ts * 1.5, max(k.display, ts * 2.4))
         return k.snap(max(ts * 1.4, k.h2), ts * 1.2, max(k.statement, ts * 1.8))
@@ -1766,24 +1834,67 @@ class Composer:
         d = max(k.hpt * 0.075, 36.0)
         return k.snap(max(18.0, d * 0.48), 18.0, d * 0.6)
 
-    def _card_paras(self, it: SlideItem, ts: float, bs: float, colors: Colors, title_color: Optional[str] = None) -> list[Para]:
+    def _card_paras(self, it: SlideItem, ts: float, bs: float, colors: Colors, title_color: Optional[str] = None, title_pad: float = 0.0) -> list[Para]:
+        """A card's title and its words; `title_pad` (pt) lengthens the gap under a title shorter than the row's
+        tallest one, so the words of a row start on one line (G4-18)."""
         paras: list[Para] = []
         head = it.title if it.title and it.title != it.number else ""
         body_texts = ([it.text] if it.text else []) + list(it.bullets)
         if head:
-            paras.append(self.P(head, ts, title_color or colors.heading, bold=self.kit.bold, space_after=bs * 0.55 if body_texts else 0))
+            paras.append(self.P(head, ts, title_color or colors.heading, bold=self.kit.bold, space_after=(bs * 0.55 + title_pad) if body_texts else 0))
         for j, b in enumerate(body_texts):
             last = j == len(body_texts) - 1
             marker = "•" if (it.bullets and j >= (1 if it.text else 0)) else None
             paras.append(self.P(b, bs, colors.muted if head else colors.text, space_after=0 if last else bs * 0.4, marker=marker, marker_color=colors.accent))
         return paras
 
-    def _card_content_h(self, it: SlideItem, inner_w: int, ts: float, bs: float, badge: Optional[str], colors: Colors, i: int) -> int:
-        h = self.h(self._card_paras(it, ts, bs, colors), inner_w)
+    def _title_pads(self, items: list[SlideItem], cols: int, inner_w: int, ts: float, hang: int = 0) -> list[float]:
+        """Per card, the points its title block is shorter than the tallest one of its row (cards with a title and
+        words only): «Свободные часы» on two lines no longer pushes its row's words out of line (G4-18). `hang`: the
+        titles stand beside a hanging numeral (that much narrower)."""
+        k = self.kit
+        lines = []
+        for it in items:
+            head = it.title if it.title and it.title != it.number else ""
+            has_body = bool(it.text or it.bullets)
+            lines.append(para_lines(self.P(head, ts, "000000", bold=k.bold), _pt(inner_w - hang)) if head and has_body else 0)
+        pads = [0.0] * len(items)
+        for r0 in range(0, len(items), max(cols, 1)):
+            row = range(r0, min(r0 + cols, len(items)))
+            top = max(lines[i] for i in row)
+            for i in row:
+                if lines[i]:
+                    pads[i] = (top - lines[i]) * ts * k.line
+        return pads
+
+    def _hang_w(self, size: float) -> int:
+        """The room of a hanging numeral «05» beside a card's first line: its digits and a gap."""
+        k = self.kit
+        return _emu(text_width_pt("00", k.font, size, k.bold) * 1.05 + size * 0.6)
+
+    def _hung(self, it: SlideItem, paras: list[Para], width: int, ts: float, bs: float) -> tuple[int, list[tuple[int, int, list[Para], int]]]:
+        """A card with its numeral hanging beside the first line (G4-18: the numeral costs a column, not a line):
+        (numeral room, [(x offset, y offset, paras, height)]) — the title beside the numeral and the words under both
+        at the card's width; a thesis (no title) all beside it."""
+        head = bool(it.title and it.title != it.number)
+        nw = self._hang_w(ts if head else bs)
+        if not head or len(paras) < 2:
+            return nw, [(nw, 0, paras, self.h(paras, width - nw))]
+        tp = paras[0]
+        t0 = Para(tp.runs, tp.align, 0.0, tp.marker, tp.marker_color)
+        th = self.h([t0], width - nw)
+        return nw, [(nw, 0, [t0], th), (0, th + _emu(tp.space_after), paras[1:], self.h(paras[1:], width))]
+
+    def _card_content_h(self, it: SlideItem, inner_w: int, ts: float, bs: float, badge: Optional[str], colors: Colors, i: int, title_pad: float = 0.0) -> int:
+        paras = self._card_paras(it, ts, bs, colors, title_pad=title_pad)
+        if badge == "index_h" and paras:
+            _, parts = self._hung(it, paras, inner_w, ts, bs)
+            return max(dy + hh for _, dy, _, hh in parts)
+        h = self.h(paras, inner_w)
         if badge == "number":
             h += self._badge_size(ts) + int(self.kit.vgap * 0.7)
-        elif badge == "index":
-            h += _emu(self._index_size(ts) * self.kit.line) + int(self.kit.vgap * 0.35)
+        elif badge in ("index", "index_s"):
+            h += _emu(self._index_size(self._index_ref(it, ts, bs, badge), small=badge == "index_s") * self.kit.line) + int(self.kit.vgap * 0.35)
         elif badge == "figure" and it.number:
             fs = self._figure_size(it.number, inner_w)
             h += _emu(fs * max(1.1, self.kit.line)) + int(self.kit.vgap * 0.3)
@@ -1796,7 +1907,7 @@ class Composer:
                 return s
         return k.h3
 
-    def _card_content(self, it: SlideItem, box: Bbox, ts: float, bs: float, badge: Optional[str], colors: Colors, i: int, title_color: str) -> None:
+    def _card_content(self, it: SlideItem, box: Bbox, ts: float, bs: float, badge: Optional[str], colors: Colors, i: int, title_color: str, title_pad: float = 0.0) -> None:
         k = self.kit
         y = box.y
         if badge == "number":
@@ -1806,9 +1917,9 @@ class Composer:
             el = self.cv.ellipse(Bbox(x=box.x, y=y, w=d, h=d), fill)
             self._label_in(el, str(i + 1), self._badge_digit(), num_color)
             y += d + int(k.vgap * 0.7)
-        elif badge == "index":
+        elif badge in ("index", "index_s"):
             idx = f"{i + 1:02d}"
-            isz = self._index_size(ts)
+            isz = self._index_size(self._index_ref(it, ts, bs, badge), small=badge == "index_s")
             hh = _emu(isz * k.line)
             self.cv.text(Bbox(x=box.x, y=y, w=box.w, h=hh), [self.P(idx, isz, colors.accent, bold=k.bold)], name="Index")
             y += hh + int(k.vgap * 0.35)
@@ -1817,7 +1928,16 @@ class Composer:
             hh = _emu(fs * max(1.1, k.line))
             self.cv.text(Bbox(x=box.x, y=y, w=box.w, h=hh), [self.figure_para(it.number, fs, colors.figure, colors.muted)[0]], name="Figure", anchor="b")
             y += hh + int(k.vgap * 0.3)
-        paras = self._card_paras(it, ts, bs, colors, title_color)
+        paras = self._card_paras(it, ts, bs, colors, title_color, title_pad=title_pad)
+        if badge == "index_h" and paras:
+            # the numeral hangs beside the first line, at its size (one baseline); the title beside it, the words under
+            ref = paras[0].size
+            nw, parts = self._hung(it, paras, box.w, ts, bs)
+            self.cv.text(Bbox(x=box.x, y=y, w=nw, h=_emu(ref * k.line) + _emu(2)), [self.P(f"{i + 1:02d}", ref, colors.accent, bold=k.bold)], name="Index")
+            for j, (dx, dy, ps, hh) in enumerate(parts):
+                last = j == len(parts) - 1
+                self.cv.text(Bbox(x=box.x + dx, y=y + dy, w=box.w - dx, h=max(hh, box.y2 - y - dy) if last else hh), ps, name="Card text")
+            return
         if paras:
             hh = self.h(paras, box.w)
             self.cv.text(Bbox(x=box.x, y=y, w=box.w, h=max(hh, box.y2 - y)), paras, name="Card text")
@@ -1890,10 +2010,13 @@ class Composer:
             us = k.snap(max(lab_size * 1.2, fs_ * 0.4), lab_size, max(lab_size, fs_ * 0.5))
             return [self.P(sp[1], us, colors.figure, bold=k.figure_bold) if sp else None for sp in splits]
 
+        slim = [False]
+
         def tile_pad_y(cols: int, pad: int) -> int:
             # tiles in two rows keep a slimmer top and bottom padding: 0.05 of the slide's height over and under each
-            # figure took 45 % of a 2×2 tile and left the figures at 18 pt under 20 pt labels (B3)
-            return min(pad, int(0.03 * k.H)) if math.ceil(n / cols) > 1 else pad
+            # figure took 45 % of a 2×2 tile and left the figures at 18 pt under 20 pt labels (B3); so does a row whose
+            # figures the full padding sets under the heading's size (G4-20: «300 → 330 ₽» at 23.5 pt under 33.5)
+            return min(pad, int(0.03 * k.H)) if (math.ceil(n / cols) > 1 or slim[0]) else pad
 
         def layout(cols: int, stacked: bool = False):
             cw = int((avail.w - gap * (cols - 1)) / cols)
@@ -1907,6 +2030,7 @@ class Composer:
             # figure fits its tile on one line and the tiles fit the area
             fs = k.h3
             cap_ = k.figure_cap(max(cols, 2) if cols < n else n, use_cards, self.strategy) * (1.3 if getattr(self, "_boost", 0) >= 1 else 1.0)
+            wide_ok = False
             for s_ in k.figure_sizes(cap_, k.h3):
                 fs = s_
                 # slack for the rendering font: a figure that breaks («12 40 / 0») is the worst thing a slide can show
@@ -1917,23 +2041,53 @@ class Composer:
                 tall_ok = _emu(s_ * max(1.15, k.line)) + units_h + lab + int(k.vgap * 1.4) + 2 * pad_y <= max_tile_
                 if wide_ok and tall_ok and units_ok:
                     break
-            return cw, pad, inner, fs
+            return cw, pad, inner, fs, wide_ok
 
         cols = n if n <= 4 else math.ceil(n / 2)
-        cw, pad, inner, fs = layout(cols)
+        cw, pad, inner, fs, one_line = layout(cols)
         if n == 4 and fs < hero_min and avail.h > 0.55 * area.h:
             # four long figures read as a 2×2 block, not as four small numbers in a row — when the block gives them
             # a larger size (short figures «70 млн», «62» keep their row at 48 pt rather than a grid at 18 pt, B3)
             grid = layout(2)
             if grid[3] > fs + 0.05:
                 cols = 2
-                cw, pad, inner, fs = grid
+                cw, pad, inner, fs, one_line = grid
         stacked = False
         if any(splits) and fs < 1.6 * k.h2:
             # a row of figures set at a text size (smaller than their labels) reads as captions: stack the words
-            cw2, pad2, inner2, fs2 = layout(cols, stacked=True)
-            if fs2 >= fs * 1.3:
-                stacked, cw, pad, inner, fs = True, cw2, pad2, inner2, fs2
+            cw2, pad2, inner2, fs2, ok2 = layout(cols, stacked=True)
+            if fs2 >= fs * 1.3 or (ok2 and not one_line):
+                stacked, cw, pad, inner, fs, one_line = True, cw2, pad2, inner2, fs2, ok2
+        head_pt = k.head_size or k.h2
+        if use_cards and fs < head_pt - 0.05 and math.ceil(n / cols) == 1 and tile_pad_y(cols, pad) > int(0.03 * k.H):
+            slim[0] = True
+            got = layout(cols, stacked=stacked)
+            if got[3] > fs + 0.05 and (got[4] or not one_line):
+                cw, pad, inner, fs, one_line = got
+            else:
+                slim[0] = False
+        if not one_line:
+            # a figure never wraps (G4, Focus s3: «около 615 тыс. тонн» broke over its tile's accent rule): no size of
+            # the row sets every figure on one line in its tile — the figures stand one under the other, each with its
+            # label beside it; else the row's figures step down until each one reads on one line
+            plan = self._kpi_rows_plan(avail, numbers, fs)
+            if plan is not None:
+                block_h = plan["h"] + ((extra_block[1] + k.vgap * 1.4) if extra_block else 0)
+                y0 = self._place_v(area, int(block_h))
+                self._kpi_rows_draw(avail.x, y0, plan)
+                if extra_block:
+                    paras_g, eh, ew = extra_block
+                    ey = y0 + plan["h"] + int(k.vgap * 1.4)
+                    for gi, pg in enumerate(paras_g):
+                        self.cv.text(Bbox(x=area.x + gi * (ew + k.gap), y=ey, w=ew, h=eh), pg, name="Note")
+                self.warnings.append("figures too long for a row of tiles stand one under the other, labels beside")
+                return
+            heads = [sp[0] if (stacked and sp) else x.value for x, sp in zip(numbers, splits)]
+            room = _pt(inner) * (0.88 if use_cards else 0.8)
+            for s_ in [x for x in k.steps_down(fs, max(self._dense_floor(), k.small * 0.85)) if x < fs - 0.05] + [max(self._dense_floor(), k.small * 0.85)]:
+                fs = s_
+                if all(self.figure_para(v, s_, colors.figure, colors.muted)[1] <= room for v in heads):
+                    break
         rows = math.ceil(n / cols)
         pad_y = tile_pad_y(cols, pad)
         label_size = k.body
@@ -1988,6 +2142,54 @@ class Composer:
             ey = y0 + rows * tile_h + (rows - 1) * k.vgap + int(k.vgap * 1.4)
             for gi, pg in enumerate(paras_g):
                 self.cv.text(Bbox(x=area.x + gi * (ew + k.gap), y=ey, w=ew, h=eh), pg, name="Note")
+
+    def _kpi_rows_plan(self, avail: Bbox, numbers: list[NumberCallout], fs_row: float) -> Optional[dict]:
+        """Figures too long for a row of tiles, one under the other: each figure on one line at the left (one size for
+        all, larger than the row could give them), its label beside it at the lead or body size (never larger than
+        the figure, at most three lines), hairlines between the rows. None when no such size fits the area."""
+        k = self.kit
+        colors = k.colors
+        n = len(numbers)
+        gap = int(k.gap * 1.5)
+        between = int(k.vgap * 1.6)
+        labels = [distinct_label(x.value, x.label, self.o.headline) for x in numbers]
+        for fs in k.figure_sizes(k.figure_cap(n, False, self.strategy), k.h3):
+            if fs <= fs_row + 0.05:
+                break
+            figs = [self.figure_para(x.value, fs, colors.figure, colors.muted) for x in numbers]
+            fw = _emu(max(w for _, w in figs) / 0.94)
+            if fw > 0.6 * avail.w:
+                continue
+            lw = avail.w - fw - gap
+            fig_h = _emu(fs * max(1.15, k.line))
+            for ls in dict.fromkeys((k.lead, k.body)):
+                if ls > fs + 0.05:
+                    continue  # a label never over its figure's size
+                labs = [[self.P(t, ls, colors.muted)] for t in labels]
+                if max(para_lines(lp[0], _pt(lw)) for lp in labs) > 3:
+                    continue
+                rows_h = [max(fig_h, self.h(lp, lw)) for lp in labs]
+                total = sum(rows_h) + (n - 1) * between
+                if total <= avail.h:
+                    return dict(fs=fs, fw=fw, lw=lw, gap=gap, between=between, figs=[p for p, _ in figs], labs=labs, rows_h=rows_h, fig_h=fig_h, w=avail.w, h=total)
+        return None
+
+    def _kpi_rows_draw(self, x: int, y0: int, plan: dict) -> None:
+        k = self.kit
+        y = y0
+        fig_h = plan["fig_h"]
+        for i, (fig, lp, rh) in enumerate(zip(plan["figs"], plan["labs"], plan["rows_h"])):
+            lsb, tg = self._figure_optics(fig, fig_h)
+            fy = y + (rh - fig_h) // 2
+            self.cv.text(Bbox(x=x - lsb, y=fy, w=plan["fw"] + lsb, h=fig_h), [fig], anchor="b", name="Figure")
+            lh = self.h(lp, plan["lw"])
+            mid = fy + (tg + fig_h) // 2  # the middle of the digits, not of the ascender room over them
+            ly = min(max(y, mid - lh // 2), y + rh - lh)
+            self.cv.text(Bbox(x=x + plan["fw"] + plan["gap"], y=ly, w=plan["lw"], h=lh), lp, name="Label")
+            if i < len(plan["figs"]) - 1:
+                ry = y + rh + plan["between"] // 2
+                self.cv.line(x, ry, x + plan["w"], ry, k.colors.divider, 0.75)
+            y += rh + plan["between"]
 
     def big_number(self, area: Bbox, num: NumberCallout, extra: list[str], others: list[NumberCallout]) -> None:
         k = self.kit
@@ -2217,6 +2419,100 @@ class Composer:
             paras = self._card_paras(it, ts, bs, tcolors)
             self.cv.text(Bbox(x=bx, y=ty, w=inner, h=max(text_h, y0 + block_h - pad - ty)), paras, name="Step")
 
+    def _dense_steps_beside(self, comp: str, area: Bbox, n0: int, state: tuple) -> None:
+        """G4-20 (long visual s8 on Sidebar43, Focus, Nature, Handdrawn, Marketing): six steps in a row with the budget
+        lines under them came out under 2 % of the slide height in the dense pass (the row is bound by its longest
+        word, «Корректировка», the grid of steps by its height). The steps then stand one under the other at the
+        left, the lines beside them at the right, at ≥ 2 % — taken only when the dense setting was under it and the
+        new one fits."""
+        c = self.o.content
+        if not (c.items or c.columns) or not c.bullets or self._least_text(n0) >= self._dense_floor_2pct() - 0.05:
+            return
+        o0, w0, notes0 = state
+        keep = (list(self.warnings), self.o, getattr(self, "_notes", None))
+        dense_els = list(self.cv.tree)[n0:]
+        dense_added = [el for el in self.cv.added if any(el is d for d in dense_els)]
+        self._beside_done = False
+        self._undo(n0)
+        self.o, self.warnings = o0, list(w0)
+        self._restore_notes(notes0)
+        self._beside, self._floor_2pct = True, True
+        try:
+            self._compose_body(comp, area)
+        finally:
+            self._beside, self._floor_2pct = False, False
+        if self._beside_done and not self._overflows(n0, area) and self._least_text(n0) >= self._dense_floor_2pct() - 0.05:
+            self.warnings.append("steps one under the other, their lines beside them: the row set them under 2 % of the slide")
+            return
+        # the dense setting stays
+        self._undo(n0)
+        for el in dense_els:
+            self.cv.tree.append(el)
+        self.cv.added.extend(dense_added)
+        self.warnings, self.o, self._notes = keep[0], keep[1], keep[2]
+
+    def _steps_beside(self, area: Bbox, items: list[SlideItem], lines: list[str]) -> bool:
+        """Steps as a column — a small number badge on an axis, the step's title leading its line in bold («1-й месяц —
+        учет показателей…») — and the slide's lines as a column beside them, for a slide whose row of steps would set
+        its words too small. The largest size (never under the dense floor) at which both columns fit, the steps' column
+        taking 58 %, 64 % or 70 % of the width."""
+        self._beside_done = False
+        k = self.kit
+        n = len(items)
+        colors = k.colors
+        gap = k.gap * 2
+        floor = self._dense_floor()
+        between = int(k.vgap * 0.8)
+        dgap = int(k.gap * 0.7)
+
+        def step_paras(bs: float) -> list[list[Para]]:
+            out = []
+            for it in items:
+                if not it.title:
+                    out.append(self._card_paras(it, bs, bs, colors))
+                    continue
+                text = it.text or ""
+                if text[:2] != text[:2].upper():
+                    text = text[:1].lower() + text[1:]
+                runs = [Run(typeset(it.title), bs, colors.heading, k.bold, k.font)] + ([Run(typeset(" — " + text), bs, colors.text, False, k.font)] if text else [])
+                out.append([Para(runs)] + [self.P(b, bs, colors.text, marker="•", marker_color=colors.accent) for b in it.bullets])
+            return out
+
+        sizes = list(dict.fromkeys(bs for _, bs in self._size_pairs() if bs >= floor - 0.05))
+        for bs in sizes:
+            d = _emu(max(bs * 1.9, 16.0))
+            paras = step_paras(bs)
+            offs = [max(0, (d - _emu(ps[0].size * k.line)) // 2) if ps else 0 for ps in paras]  # the first line on the badge
+            line_paras = [self.P(t, bs, colors.text, space_after=bs * 0.5, marker="•", marker_color=colors.accent) for t in lines]
+            for share in (0.58, 0.64, 0.7):
+                left_w = int((area.w - gap) * share)
+                right_w = area.w - gap - left_w
+                inner = left_w - d - dgap
+                if not self.fits_width([f"{i.title} {i.text}" for i in items], bs, k.bold, inner) or not self.fits_width(lines, bs, False, right_w - _emu(bs * 1.1)):
+                    continue
+                hs = [max(d, off + self.h(ps, inner)) for ps, off in zip(paras, offs)]
+                steps_h = sum(hs) + between * (n - 1)
+                lines_h = self.h(line_paras, right_w)
+                block_h = max(steps_h, lines_h)
+                if block_h > area.h:
+                    continue
+                y0 = self._place_v(area, block_h)
+                x = area.x
+                if n > 1:
+                    self.cv.line(x + d // 2, y0 + d // 2, x + d // 2, y0 + sum(hs[:-1]) + between * (n - 1) + d // 2, colors.accent, 1.25, name="Axis")
+                y = y0
+                for i, (ps, hh, off) in enumerate(zip(paras, hs, offs)):
+                    el = self.cv.ellipse(Bbox(x=x, y=y, w=d, h=d), colors.accent)
+                    self._label_in(el, str(i + 1), bs, k.on_accent(colors.accent, colors.text))  # the number at the steps' size
+                    self.cv.text(Bbox(x=x + d + dgap, y=y + off, w=inner, h=hh - off), ps, name="Step")
+                    y += hh + between
+                rx = area.x + left_w + gap
+                self.cv.line(rx - gap // 2, y0, rx - gap // 2, y0 + block_h, colors.divider, 1.0)
+                self.cv.text(Bbox(x=rx, y=y0, w=right_w, h=lines_h), line_paras, name="Note")
+                self._beside_done = True
+                return True
+        return False
+
     def _steps_grid(self, area: Bbox, items: list[SlideItem], better_than: float) -> bool:
         """Five to eight steps too many for one row at the body size: rows of three (four for seven or eight), each
         step its number badge at the left of its title and text — a row as tall as its text, not a badge stacked over
@@ -2231,6 +2527,8 @@ class Composer:
         boxed = bool(st.fill or st.proto is not None)
         cw = int((area.w - gap * (cols - 1)) / cols)
         pad = int(min(cw * 0.07, 0.035 * k.H)) if boxed else 0
+        if getattr(self, "_dense", False) and boxed:
+            pad = int(min(cw * 0.05, 0.018 * k.H))  # the dense pass: a slimmer card around each step, before the type steps down
         d = _emu(max(k.hpt * 0.06, 28.0))
         dgap = int(k.gap * 0.6)
         inner = cw - 2 * pad - d - dgap
@@ -2315,46 +2613,64 @@ class Composer:
         st = k.card
         rule_h = _emu(3) + int(k.vgap * 0.6)
 
-        def parts(ts: float, bs: float, pad: int):
-            inner = cw - 2 * pad
+        def parts(ts: float, bs: float, pad: int, ws: list[int]):
+            inners = [w - 2 * pad for w in ws]
             # titles share one band (as tall as the longest title), so every body starts on one line across the columns;
             # a column's figure («22 770 ₽ экономии») is set large over its lines, never left out
             heads = [self._card_paras(SlideItem(title=it.title), ts, bs, st.colors) if it.title else [] for it in items]
             bodies = [self._column_figure(it, ts, st.colors) + self._card_paras(SlideItem(title="", text=it.text, bullets=it.bullets), ts, bs, st.colors) for it in items]
-            head_h = max((self.h(hp, inner) for hp in heads if hp), default=0)
+            head_h = max((self.h(hp, iw) for hp, iw in zip(heads, inners) if hp), default=0)
             head_gap = int(bs * 0.55 * EMU_PER_PT) if head_h else 0
-            body_h = max((self.h(bp, inner) for bp in bodies if bp), default=0)
-            lines = max(sum(para_lines(p, _pt(inner)) for p in bp) for bp in bodies) if bodies else 0
+            body_h = max((self.h(bp, iw) for bp, iw in zip(bodies, inners) if bp), default=0)
+            lines = max(sum(para_lines(p, _pt(iw)) for p in bp) for bp, iw in zip(bodies, inners)) if bodies else 0
             return heads, bodies, head_h, head_gap, body_h, rule_h + head_h + head_gap + body_h + 2 * pad, lines
 
-        def choose(pad: int):
-            # the largest pair at which the columns fit the area (a little air kept under them) in ≤ 11 lines each
+        # ≤ 11 lines a column — a list of six two-line points is twelve lines, not a wall (G4-20, Focus long compact s8:
+        # the cap sent it to 9 pt with a third of each card empty)
+        max_lines = max(11, 2 * max((len(it.bullets) + (1 if it.text else 0) for it in items), default=0))
+
+        def choose(pad: int, ws: list[int]):
+            # the largest pair at which the columns fit the area (a little air kept under them) in ≤ max_lines each
             best = None
             for ts, bs in self._size_pairs():
-                got = parts(ts, bs, pad)
+                got = parts(ts, bs, pad, ws)
                 if best is None or got[5] < best[1][5]:
                     best = ((ts, bs), got)
-                if got[5] <= area.h * 0.96 and got[6] <= 11:
+                if got[5] <= area.h * 0.96 and got[6] <= max_lines:
                     return ((ts, bs), got), True
             return best, False
 
+        ws = [cw] * n
         pad = int(min(cw * 0.07, 0.05 * k.H))
-        best, ok = choose(pad)
+        best, ok = choose(pad, ws)
         if best[0][1] < k.body - 0.05 or not ok:
             # small type inside roomy columns: a tighter padding gives the text the room first
             tight = max(int(pad * 0.6), int(0.022 * k.H))
-            alt, ok2 = choose(tight)
+            alt, ok2 = choose(tight, ws)
             if (ok2 and not ok) or (ok2 == ok and alt[0][1] > best[0][1] + 0.05):
                 best, pad = alt, tight
-        inner = cw - 2 * pad
+        if n == 2 and (best[0][1] < k.body - 0.05 or not ok):
+            # still small: two columns of unequal length (five short amounts beside six two-line steps) share the width
+            # by their words — the longer list takes up to 62 % and both read a step or more larger (G4-20)
+            size = [len(it.title or "") + len(it.text or "") + sum(len(b) for b in it.bullets) for it in items]
+            share = min(max(size[0] / max(sum(size), 1), 0.38), 0.62)
+            if abs(share - 0.5) > 0.04:
+                w0 = int((area.w - gap) * share)
+                ws2 = [w0, area.w - gap - w0]
+                alt, ok2 = choose(pad, ws2)
+                if (ok2 and not ok) or (ok2 == ok and alt[0][1] > best[0][1] + 0.05):
+                    best, ws, ok = alt, ws2, ok2
         (ts, bs), (heads, bodies, head_h, head_gap, body_h, need, _) = best
         # the columns are as tall as their content, never a tall empty frame — and never shorter than it: when even
         # the smallest step does not fit the area, the cards grow with their text (the lines under them follow the
         # cards' real bottom) rather than the text running out of its card
         ch = self._grow_to(area.h, 1, 0, need)
         y0 = self._place_v(area, ch, fill_top=True)
+        x = area.x
         for i, it in enumerate(items):
-            box = Bbox(x=area.x + i * (cw + gap), y=y0, w=cw, h=ch)
+            box = Bbox(x=x, y=y0, w=ws[i], h=ch)
+            x += ws[i] + gap
+            inner = ws[i] - 2 * pad
             if st.fill or st.line or st.proto is not None:
                 self.cv.card(box, st)
             self.cv.rect(Bbox(x=box.x + pad, y=box.y + pad, w=_emu(k.hpt * 0.07), h=_emu(3)), st.colors.accent, name="Rule")
@@ -3620,7 +3936,7 @@ class Composer:
         """A pie or a doughnut with its legend set as text beside it (below it in a narrow box): a swatch, the
         category and its share — the one place every share is read, the thin slices included. Shares are of the
         total, whatever the unit of the values (money, people)."""
-        from verstka.rendering.charts import is_other_category, resolve_series
+        from verstka.rendering.charts import is_other_category, pie_values_are_percents, resolve_series
         from verstka.schemas.outline import InlineSeries
 
         k = self.kit
@@ -3642,9 +3958,14 @@ class Composer:
         if total <= 0:
             raise ValueError("pie without positive values")
         unit_txt = (spec.unit or s.unit or "").strip()
-        is_pct = unit_txt == "%" and 95 <= total <= 105
+        # G4-11: a pie of the brief's own percents (unit «%», or no unit and the parts add up to 100 ± 1) shows one
+        # value a row, as written — never «42 · 42%»
+        is_pct = pie_values_are_percents(unit_txt, total)
         shares = [v if is_pct else v / total * 100 for v in vals]
-        pct = [(f"{sh:.1f}".replace(".", ",") if 0 < sh < 1 else f"{sh:.0f}") + "%" for sh in shares]
+        if is_pct:
+            pct = [f"{round(sh, 1 if sh >= 1 else 2):g}".replace(".", ",") + "%" for sh in shares]
+        else:
+            pct = [(f"{sh:.1f}".replace(".", ",") if 0 < sh < 1 else f"{sh:.0f}") + "%" for sh in shares]
         # a pie of amounts: each part's amount (the brief's figure) and its share of the parts' total, the legend
         # headed as such — the share is not a figure of the brief («Продукты 40%» of the costs next to «35% от
         # выручки» read as a contradiction when unlabelled)

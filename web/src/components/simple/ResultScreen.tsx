@@ -7,7 +7,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { ChevronRight, Download, FileText, FolderDown, ImageOff, LayoutTemplate, ListTree, PenLine, RotateCcw, ScrollText } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { plainWords, variantsNote } from "../../lib/agent";
-import { deckNotice } from "../../lib/modelText";
+import { deckNotice, skeletonDeck } from "../../lib/modelText";
 import { figuresLine } from "../../lib/narrate";
 import { fileSafe, templateTitle, variantHint } from "../../lib/plain";
 import { decodeImage, EASE, MOTION, prefersReducedMotion, useCountUp, useFlip, usePresence, viewTransition } from "../../lib/motion";
@@ -222,12 +222,15 @@ function Verdict({ errors, className }: { errors: number | null; className?: str
 
 /** The quality card: the ring, one verdict and the figures checked against the text. Warnings get their own meta
  *  line: «1 предупреждение» (the word the remark tags and the drawer use) does not fit beside the verdict in 180px. */
-function QualityCard({ variant, score, errors, onOpen, className }: { variant: Variant; score: number | null; errors: number | null; onOpen(): void; className?: string }) {
+function QualityCard({ variant, score, errors, onOpen, className, skeleton = false }: { variant: Variant; score: number | null; errors: number | null; onOpen(): void; className?: string; /** A topic's skeleton: no text was written. */ skeleton?: boolean }) {
   const warnings = variant.audit?.summary.warnings ?? 0;
   const figs = figuresLine(variant.audit?.summary.figures);
   const verdict = errors === null ? "Не проверено" : errors > 0 ? plural(errors, "ошибка", "ошибки", "ошибок") : "Ошибок нет";
   const warned = warnings > 0 ? plural(warnings, "предупреждение", "предупреждения", "предупреждений") : null;
-  const second = figs ?? (errors ? { text: "Можно исправить автоматически", tone: "ok" as const, title: undefined } : null);
+  // a skeleton's checks pass because there is no text to check: said instead of the figures line
+  const second = skeleton
+    ? { text: "Каркас: текст не написан", tone: "warn" as const, title: undefined }
+    : figs ?? (errors ? { text: "Можно исправить автоматически", tone: "ok" as const, title: undefined } : null);
   return (
     <button type="button" onClick={onOpen} aria-label={`Качество: ${verdict}${warned ? ` · ${warned}` : ""}`} className={cn(CARD, className)}>
       <span className="flex items-center gap-3">
@@ -317,7 +320,9 @@ function Deck({ generation }: { generation: Generation }) {
   const why = whyRaw?.trim() ? cap(plainWords(whyRaw).trim()) : null;
   const raw = variant.slides[selectedSlide - 1];
   const src = raw ? withRev(raw, rev) : null;
-  const score = variantScore(variant, generation.summary?.[variant.strategy]?.score);
+  // a topic's skeleton (no text was written) has no score to show: «100» would read as a success (gate 4 G4-21)
+  const scoreOf = (v: Variant) => (skeletonDeck(generation, v) ? null : variantScore(v, generation.summary?.[v.strategy]?.score));
+  const score = scoreOf(variant);
   const errorsOf = (v: Variant) => v.audit?.summary.errors ?? generation.summary?.[v.strategy]?.errors ?? null;
   const errors = errorsOf(variant);
   const pptx = variant.files["deck.pptx"] ?? null;
@@ -533,9 +538,9 @@ function Deck({ generation }: { generation: Generation }) {
   const headerW = `max(${hdrMin}px, min(100cqw, (100cqh - ${STAGE_INNER}px) * ${aspect.toFixed(4)}))`;
 
   // «Структурный, оценка 100» for a screen reader, when every variant has its score
-  const scored = generation.variants.every((v) => variantScore(v, generation.summary?.[v.strategy]?.score) !== null);
+  const scored = generation.variants.every((v) => scoreOf(v) !== null);
   const segments = generation.variants.map((v, i) => {
-    const s = variantScore(v, generation.summary?.[v.strategy]?.score);
+    const s = scoreOf(v);
     const n = counts[i];
     const showCount = n === 0 || (countsDiffer && squeeze < 2);
     const showScore = s !== null && squeeze < 3;
@@ -616,7 +621,8 @@ function Deck({ generation }: { generation: Generation }) {
   const noticeHelp = notice?.help ? plainNotice(cap(notice.help), modelLabels) : "";
   const noticeBasis = notice ? plainNotice(notice.basis, modelLabels) : "";
   const noticeBody = noticeHelp || noticeBasis;
-  const noticeFull = [noticeBasis, noticeHelp].filter(Boolean).join(" ");
+  // the owner's fix (a key, an account, a Cloud.ru project) is in the notice's tooltip
+  const noticeFull = [noticeBasis, noticeHelp, notice?.owner ?? ""].filter(Boolean).join(" ");
   const retryWaits = !!notice && notice.retryWait > 0;
   // writer mode: the text the agent wrote from the topic, in a sheet («Показать текст»)
   const [textOpen, setTextOpen] = useState(false);
@@ -951,7 +957,7 @@ function Deck({ generation }: { generation: Generation }) {
           {/* the cards that change per slide come last, so turning the slides never moves the others; the list scrolls
               only in a window too short for it (the p-1 keeps the focus rings and shadows unclipped) */}
           <div ref={list} className={cn("scroll-thin -m-1 flex min-h-0 flex-col gap-3 p-1", withPanel ? "flex-1 overflow-hidden" : cn("overflow-y-auto", ASIDE_STAGGER, cardsSettle && CARDS_SETTLE))}>
-            <QualityCard variant={variant} score={score} errors={errors} onOpen={() => open("quality")} className={asideEnter === "rise" ? "animate-rise" : undefined} />
+            <QualityCard variant={variant} score={score} errors={errors} skeleton={skeletonDeck(generation, variant)} onOpen={() => open("quality")} className={asideEnter === "rise" ? "animate-rise" : undefined} />
             {withPanel ? (
               <div className="relative flex min-h-0 flex-1 flex-col">
                 {cardsLeaving && (

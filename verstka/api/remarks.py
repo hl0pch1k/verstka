@@ -20,6 +20,8 @@ CONTENT_CHECKS = frozenset({
     "bullet_too_long", "table_too_big", "too_many_series", "fill_ratio", "empty_slide", "content_missing",
     "placeholder_text", "duplicate_slides", "figure_not_in_brief", "chart_missing_labels", "slide_content",
     "deck_coherence", "content_in_notes", "timeline_order", "slide_is_picture",
+    # the words of a written deck (audit/checks/writing.py): the designer rewrites the line from the slide's text
+    "line_fragment", "figure_is_time", "chart_mixed_units", "duplicate_heading", "orphan_opener",
 })
 # fixed in place first (an element moved back inside, a smaller size); they reach the designer only when they survive
 INPLACE_FIRST = frozenset({"text_clipped", "out_of_bounds", "margin_violation"})
@@ -63,6 +65,11 @@ FIX_HINT: dict[str, str] = {
     "timeline_order": "поставь пункты с датами по порядку — от ранней даты к поздней",
     "slide_is_picture": "добавь на слайд текст: заголовок и главное из текста этого слайда",
     "content_over_art": "не клади текст на рисунок шаблона: сократи блок или выбери форму, которая оставляет рисунок свободным",
+    "line_fragment": "возьми из текста слайда предложение целиком или сократи его так, чтобы остались сказуемое и смысл — без обрыва на середине",
+    "figure_is_time": "не делай крупным числом время суток или номер проекта, модели: возьми настоящую величину из текста или покажи строку без крупного числа",
+    "chart_mixed_units": "на одной диаграмме — одна величина в одних единицах: покажи разные числа карточками или раздели на две диаграммы",
+    "duplicate_heading": "дай слайду свой заголовок — о главном именно на этом слайде",
+    "orphan_opener": "начни строку с того, о ком или о чём она: замени «Также», «Этот», «она», «они» на имя или название из текста",
 }
 
 _NOTE_LEAD = (
@@ -193,6 +200,13 @@ def _message_of(issue: Issue) -> str:
         head = msg.split(":", 1)[0] if ":" in msg else msg
         listed = ", ".join(f"«{m}»" for m in names[:_MAX_MISSING]) + ("…" if len(names) > _MAX_MISSING else "")
         msg = f"{head}: {listed}"
+    lines = details.get("lines") if issue.check_id in ("line_fragment", "orphan_opener") else None
+    if isinstance(lines, list) and len(lines) > 1:
+        # every line the check found, each with its reason (the message names the first)
+        what = "строки — обрывки предложений" if issue.check_id == "line_fragment" else "строки начинаются со ссылки на то, чего на слайде нет"
+        parts = [f"«{' '.join(str(x.get('text') or '').split())}» ({x.get('why')})" for x in lines if isinstance(x, dict) and x.get("text")]
+        if parts:
+            msg = f"{what}: " + "; ".join(parts[:_MAX_MISSING])
     if issue.check_id == "content_in_notes" and str(details.get("text") or "").strip():
         what = _NOTE_LINE_RU.get(str(details.get("line") or ""), "строка")
         where_ = "есть только в заметках докладчика" if details.get("in_notes") else "нет ни на слайде, ни в заметках"

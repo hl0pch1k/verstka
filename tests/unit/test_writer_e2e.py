@@ -102,7 +102,7 @@ def test_the_deck_is_built_from_the_written_text(written_run):
         assert len(o.slides) == w.slides + 1, v.strategy
         assert o.agent_log[0].startswith("Автор:")
         assert "Текст написан агентом Verstka по теме «История VK»" in (o.slides[0].notes or "")
-        assert v.planner["writer"]["status"] == "written" and v.planner["writer"]["skills"]["deck_writer"]["version"] == "2.0.0"
+        assert v.planner["writer"]["status"] == "written" and v.planner["writer"]["skills"]["deck_writer"]["version"] == "2.1.0"
         a = v.audit.summary
         assert a.score >= 97, (v.strategy, [(i.check_id, i.message) for i in v.audit.issues if i.severity != "info"])
         assert not [i for i in v.audit.issues if i.check_id == "figure_not_in_brief"], v.strategy

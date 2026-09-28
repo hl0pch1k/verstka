@@ -402,6 +402,40 @@ def reason_detail(code: Optional[str], ctx: Optional[ChainContext] = None, who: 
     return texts.get(code, "модель вернула ошибку")
 
 
+# Cloud.ru answers 403 «Project not found» when the key's project is gone, suspended or out of money (gate 4: the key
+# still authenticates, every chat completion is refused)
+_PROJECT_GONE_RE = re.compile(r"project\s+not\s+found|project\s+(?:is\s+)?(?:blocked|suspended|disabled|inactive|archived)|проект\s+не\s+найден", re.I)
+
+
+def owner_reason(code: Optional[str], who: Optional[FailedLink] = None, text: Optional[str] = None) -> Optional[str]:
+    """What the server's owner has to fix, in one plain sentence — only for a reason no rebuild gets past (an account,
+    a key, a project, a model id); None otherwise. The one place a service is named: the owner runs it (gate 4 G4-21:
+    Cloud.ru's 403 «Project not found» read as a generic «Модель недоступна»)."""
+    if code not in ("no_credits", "auth", "missing"):
+        return None
+    where = (who.service if who else None) or ("Cloud.ru" if text and "cloud.ru" in text.lower() else None)
+    if where == "Cloud.ru" and text and _PROJECT_GONE_RE.search(text):
+        return "Cloud.ru не находит проект модели (403 «Project not found»): проверьте в личном кабинете Cloud.ru, что проект существует, не заблокирован и на его балансе есть средства."
+    if code == "no_credits":
+        return f"На счёте {where} нет средств для модели: пополните баланс." if where else "На счёте сервиса модели нет средств: пополните баланс."
+    if code == "auth":
+        if where == "Cloud.ru":
+            return "Cloud.ru отказал в доступе (401/403): проверьте ключ API и проект в личном кабинете Cloud.ru."
+        return f"{where} отказал в доступе (401/403): проверьте ключ API." if where else "Сервис модели отказал в доступе (401/403): проверьте ключ API."
+    return f"Модели нет на {where} (404): проверьте её название в настройках." if where else "Модели нет на сервере (404): проверьте её название в настройках."
+
+
+def owner_reasons(pairs: Iterable[tuple[Optional[str], Optional[FailedLink], Optional[str]]]) -> Optional[str]:
+    """Every link's fix for the owner, each once (a paid account without money and a Cloud.ru project not found are
+    two things to fix): «На счёте OpenRouter нет средств… Cloud.ru не находит проект модели…»."""
+    out: list[str] = []
+    for code, who, text in pairs:
+        r = owner_reason(code, who, text)
+        if r and r not in out:
+            out.append(r)
+    return " ".join(out) or None
+
+
 # the words a person reads when the model cannot help: what to do, never why in provider terms (money, keys, configs)
 UNAVAILABLE = "Модель недоступна."
 
@@ -447,7 +481,7 @@ def planner_info(outline: Optional[dict], run_manifest: Optional[dict], *, use_m
     recorded = rm.get("planner") if isinstance(rm.get("planner"), dict) else {}
     configured = ((rm.get("providers") or {}).get("llm") or {})
     tried = configured.get("model") if configured.get("backend") not in (None, "none") else None
-    base = {"model": None, "model_label": None, "tried_model": tried, "tried_label": model_label(tried), "reason_code": None, "reason": None, "advice": None, "retryable": False, "steady": None}
+    base = {"model": None, "model_label": None, "tried_model": tried, "tried_label": model_label(tried), "reason_code": None, "reason": None, "advice": None, "retryable": False, "steady": None, "owner": None}
     if supplied or recorded.get("supplied"):
         return {**base, "planned_by": "supplied", "by_model": False}  # the plan came with the request: no model was asked
     planned_by = (outline or {}).get("planned_by") or recorded.get("planned_by")
@@ -484,13 +518,14 @@ def planner_info(outline: Optional[dict], run_manifest: Optional[dict], *, use_m
         "advice": advice(code, ctx, who) if code not in (None, "off") else None,
         "retryable": code in RETRYABLE_REASONS,
         "steady": None,
+        "owner": owner_reasons([(code, who, failed_text)] + [(c, failed_link(t, ctx), t) for w in warnings if isinstance(w, str) for c, t in _classified(w)]) if code not in (None, "off") else None,
     }
 
 
 def generation_planner(variants: list[dict], *, use_models: Optional[bool], supplied: bool = False) -> dict:
     """The generation as a whole: did a model plan any variant, and if none did — the reason (for the notice)."""
     infos = [v.get("planner") or {} for v in variants]
-    empty = {"model": None, "model_label": None, "tried_model": None, "tried_label": None, "reason_code": None, "reason": None, "advice": None, "retryable": False, "steady": None}
+    empty = {"model": None, "model_label": None, "tried_model": None, "tried_label": None, "reason_code": None, "reason": None, "advice": None, "retryable": False, "steady": None, "owner": None}
     if supplied or (infos and all(i.get("planned_by") == "supplied" for i in infos)):
         return {**empty, "planned_by": "supplied", "by_model": False}
     by_model = [i for i in infos if i.get("by_model")]
@@ -719,7 +754,7 @@ def summarize(links: list[dict], *, configured: bool, ctx: Optional[ChainContext
     `advice` is what the notice above a failed deck says now (the live button's words agree with it); `retryable`:
     building again can work now or once `retry_in` is over (False when a key, an account or a model id needs a fix)."""
     ctx = ctx or chain_context(links)
-    none = {"hint": None, "working_label": None, "retry_in": None, "retry_state": None, "advice": None, "retryable": True}
+    none = {"hint": None, "working_label": None, "retry_in": None, "retry_state": None, "advice": None, "retryable": True, "owner": None}
     active = [link for link in links if link["state"] != "off"]
     if not configured or not active:
         return {**none, "state": "off", "summary": "Модель не подключена", "retryable": False}
@@ -746,6 +781,7 @@ def summarize(links: list[dict], *, configured: bool, ctx: Optional[ChainContext
             "retry_in": primary.get("until"),
             "retry_state": primary["state"] if primary.get("until") else None,
             "advice": "Сейчас отвечает запасная модель — соберите ещё раз." if ok else "Соберите ещё раз — попробую запасную модель.",
+            "owner": owner_reasons((_link_code(x), link_of(x), x.get("last_error")) for x in active if not _usable(x)),
         }
     waiting = [link for link in active if link.get("until")]
     soonest = min(waiting, key=lambda link: link["until"]) if waiting else None
@@ -760,6 +796,7 @@ def summarize(links: list[dict], *, configured: bool, ctx: Optional[ChainContext
         "retry_state": soonest["state"] if soonest else None,
         "advice": advice(_link_code(blocking), ctx, link_of(blocking)),
         "retryable": _retryable_link(blocking),
+        "owner": owner_reasons((_link_code(x), link_of(x), x.get("last_error")) for x in active),
     }
 
 
