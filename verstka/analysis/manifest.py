@@ -187,6 +187,7 @@ def analyze_template(
     max_workers: int = 4,
     config: Optional[dict] = None,
     progress: Optional[ProgressFn] = None,
+    display_name: Optional[str] = None,
 ) -> TemplateManifest:
     cfg = config or load_analysis_config()
     t0 = time.time()
@@ -196,7 +197,7 @@ def analyze_template(
         if progress:
             progress(stage, frac)
 
-    ws = TemplateWorkspace.create(pptx, workspace_root)
+    ws = TemplateWorkspace.create(pptx, workspace_root, display_name=display_name)
     if ws.is_analyzed and not force:
         cached = TemplateManifest.model_validate_json(ws.manifest_path.read_text(encoding="utf-8"))
         if cached.analysis_version == TemplateManifest.model_fields["analysis_version"].default:
@@ -205,6 +206,17 @@ def analyze_template(
         log.info("cached manifest has analysis_version %s, re-analyzing", cached.analysis_version)
 
     warnings: list[str] = []
+    try:
+        # a template with (almost) no slides of its own — a .potx, a theme — gets sample slides from its layouts in the
+        # workspace copy: the analysis learns from slides (verstka/ingest/samples.py)
+        from verstka.ingest.samples import ensure_samples
+
+        made = ensure_samples(ws.source)
+        if made:
+            warnings.append(f"the template has few slides of its own: {made} sample slides were made from its layouts")
+            report(f"made {made} sample slides from the layouts", 0.01)
+    except Exception as e:  # noqa: BLE001 - the template is analysed as it is
+        log.warning("sample slides from layouts failed: %s", e)
     pkg = PptxPackage.open(ws.source)
     slide_w, slide_h = pkg.slide_size
     slide_parts = pkg.slide_parts

@@ -9,6 +9,7 @@ from typing import Optional
 from lxml import etree
 
 from verstka.analysis.xmlns import NS, q
+from verstka.ru import typeset_figures
 
 _RUN_TAGS = {"r", "br", "fld"}
 
@@ -186,7 +187,7 @@ def fill_text(sp_el: etree._Element, paragraphs: list[ParagraphSpec], size_pt: O
             rPr.insert(insert_at, sf)
         r.append(rPr)
         t = etree.SubElement(r, q("a:t"))
-        t.text = spec.text
+        t.text = typeset_figures(spec.text)  # ranges, a true minus, the deck's percent style (G5-16)
         if spec.text != spec.text.strip() or "  " in spec.text:
             t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
         end = p.find(q("a:endParaRPr"))

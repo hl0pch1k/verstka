@@ -106,6 +106,30 @@ class _MinuteLimiter:
             time.sleep(delay)
 
 
+class _Pacer:
+    """Request starts on one account at least `gap` seconds apart: calls made side by side (three variants' designer
+    calls, the writer's check batches) go out one after another instead of in one burst that trips a per-minute cap
+    shared by everyone on the key (Cloud.ru's 429 ModelArts.81114). Each caller books the next free start time."""
+
+    def __init__(self, gap: float) -> None:
+        self.gap = max(0.0, float(gap))
+        self.lock = threading.Lock()
+        self.next_at = 0.0
+
+    def book(self) -> float:
+        """Book the next start and return the seconds to wait for it (0 when the account was idle long enough)."""
+        with self.lock:
+            now = time.monotonic()
+            at = max(now, self.next_at)
+            self.next_at = at + self.gap
+            return at - now
+
+    def release(self, delay: float) -> None:
+        """Give back a booked start that is not used (the budget does not allow the wait)."""
+        with self.lock:
+            self.next_at = max(time.monotonic(), self.next_at - self.gap)
+
+
 _MIN_REQUEST_S = 5.0  # less time than this left in the generation's budget: do not start a request
 _TLS = threading.local()
 
@@ -117,6 +141,7 @@ def requests_sent() -> int:
 
 
 _LIMITERS: dict[str, _MinuteLimiter] = {}
+_PACERS: dict[str, _Pacer] = {}
 _GUARD = threading.Lock()
 # how long a link is skipped (status.py keeps the holds per account + model)
 _CONGESTION_S = 120.0  # two upstream 429s in a row — a single provider as before the chain, and a chain link
@@ -461,6 +486,7 @@ class OpenAICompatProvider:
         label: Optional[str] = None,
         max_tokens_cap: Optional[int] = None,
         system_suffix: Optional[str] = None,
+        min_interval_s: Optional[float] = None,
     ) -> None:
         self.model = model
         self.base_url = base_url
@@ -494,6 +520,11 @@ class OpenAICompatProvider:
         if requests_per_minute:
             with _GUARD:
                 self._limiter = _LIMITERS.setdefault(f"{self._account}|{requests_per_minute}", _MinuteLimiter(requests_per_minute))
+        # request starts on the account at least this far apart (every link and role on the key shares the pacer)
+        self._pacer: Optional[_Pacer] = None
+        if min_interval_s and float(min_interval_s) > 0:
+            with _GUARD:
+                self._pacer = _PACERS.setdefault(f"{self._account}|{float(min_interval_s):g}", _Pacer(float(min_interval_s)))
 
     # lazy client so tests can construct the provider without the SDK doing network setup
     def _get_client(self):
@@ -559,6 +590,14 @@ class OpenAICompatProvider:
                     )
             else:
                 self._limiter.wait(deadline)
+        if self._pacer is not None:
+            # calls made side by side go out one after another (always waited: the gap is a second or two per call)
+            delay = self._pacer.book()
+            if delay > 0:
+                if deadline is not None and time.monotonic() + delay > deadline - _MIN_REQUEST_S:
+                    self._pacer.release(delay)
+                    raise BudgetSpent(f"{self.model}: time budget of the generation is spent while waiting for its turn on the account")
+                time.sleep(delay)
         capped = False
         if deadline is not None:
             # a request never outlives the generation's budget (the limiter may have waited)
@@ -710,7 +749,9 @@ class OpenAICompatProvider:
                     raise _fail(LinkUnavailable(msg, "rate", wait), total) from e
                 status.fail(h, "rate", msg)
                 if deadline is not None and deadline - time.monotonic() < wait + _MIN_REQUEST_S:
-                    raise _fail(BudgetSpent(f"{self.model}: time budget of the generation is spent, no room to wait out a 429 ({e})"), total) from e
+                    spent = BudgetSpent(f"{self.model}: time budget of the generation is spent, no room to wait out a 429 ({e})")
+                    spent.retry_in = wait  # type: ignore[attr-defined]  # a caller with a longer budget may ask again then
+                    raise _fail(spent, total) from e
                 if rate_waits < 6:
                     # wait the window out, the attempt does not count
                     rate_waits += 1

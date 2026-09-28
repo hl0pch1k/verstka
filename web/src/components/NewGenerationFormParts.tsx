@@ -14,8 +14,9 @@ export const PURPOSES: Array<{ value: string; label: string }> = [
   { value: "report", label: "Отчёт" },
 ];
 
-// a topic is enough («История VK»: the agent writes the text, planning/writer.py); an empty or 1–2 letter text is not
-export const BRIEF_MIN = 3;
+export const BRIEF_MIN = 40;
+// with writer mode on (the server's /api/health `writer`) a topic is enough («История VK»: the agent writes the text)
+export const BRIEF_MIN_TOPIC = 3;
 export const SLIDES_MIN = 5;
 export const SLIDES_MAX = 20;
 export const SLIDES_DEFAULT = 12;

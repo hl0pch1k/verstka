@@ -397,6 +397,7 @@ def _inside_poly(px: float, py: float, poly) -> bool:
     return inside
 
 
+VEIL_ALPHA = 0.25  # a layer nowhere more opaque than this is a glow or a veil over the ground, not art
 CELL_ALPHA = 0.5  # a picture cell paints when at least half of it is opaque …
 CELL_STD = 18.0  # … and it is textured (luminance stdev) …
 CELL_CONTRAST = 1.3  # … or differs from the slide's ground
@@ -461,6 +462,9 @@ def _is_art(o, W: int, H: int, ground: Optional[str] = None) -> bool:
         return False
     if o.type in ("connector",) or o.bbox.w <= 0 or o.bbox.h <= 0:
         return False
+    if o.cells is not None and o.cells.alpha and max(o.cells.alpha) < VEIL_ALPHA and not o.line_hex:
+        return False  # a glow or a veil (a gradient at 7 %, a PNG glow at 14 % — Office's «Ion»): the ground shows through
+
     f = o.bbox_frac
     cover = max(0.0, min(f.x2, 1.0) - max(f.x, 0.0)) * max(0.0, min(f.y2, 1.0) - max(f.y, 0.0))
     if cover < ART_MIN_AREA or f.h <= 0.02:

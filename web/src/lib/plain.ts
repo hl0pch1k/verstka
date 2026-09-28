@@ -24,14 +24,14 @@ export function plannedByText(plannedBy: string | undefined, strategyTitle: (nam
   return why ? `встроенный планировщик: ${why}` : "встроенный планировщик";
 }
 
-export const templateName = (file: string | null | undefined, fallback = "Шаблон") => (file ?? fallback).replace(/\.pptx$/i, "").replace(/_/g, " ");
+export const templateName = (file: string | null | undefined, fallback = "Шаблон") => (file ?? fallback).replace(/\.(?:pptx|potx|pptm|potm|ppsx|ppsm|thmx|ppt|pot|pps|odp|otp)$/i, "").replace(/_/g, " ");
 
 /** A template's short name for people: «ЛЦТ2026», «VK Tech», «VK Education», «VK WorkSpace Клиентская конференция».
- *  Drops .pptx, underscores, the word «шаблон (презентации)» and a trailing number; falls back to templateName(file). */
+ *  Drops the file extension (.pptx, .potx, .odp …), underscores, the word «шаблон (презентации)» and a trailing number; falls back to templateName(file). */
 export function templateTitle(file: string | null | undefined, fallback?: string): string {
   if (!file) return fallback ?? templateName(file);
   const t = file
-    .replace(/\.pptx$/i, "")
+    .replace(/\.(?:pptx|potx|pptm|potm|ppsx|ppsm|thmx|ppt|pot|pps|odp|otp)$/i, "")
     .replace(/_/g, " ")
     .replace(/\s*шаблон(?:а)?(?:\s+презентаци[ия])?(?![а-яё])\s*/gi, " ")
     .trim()

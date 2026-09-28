@@ -57,6 +57,14 @@ def _allowed_fonts(ctx: AuditContext) -> set[str]:
     fam |= {f.lower() for f in ctx.manifest.embedded_fonts}
     fam |= {f.lower() for f in ctx.ir.embedded_fonts}
     fam |= {f.lower() for f in (getattr(ctx.ir, "theme_fonts", []) or []) if f}
+    # the stand-ins the renderer sets Russian text in where a template family has no Cyrillic (rendering/cyrillic.py)
+    if ctx.ws is not None:
+        try:
+            from verstka.rendering.cyrillic import cyrillic_substitutes
+
+            fam |= {v.lower() for v in cyrillic_substitutes(ctx.ws.source, extra=[f.family for f in typo.families]).values()}
+        except Exception:  # noqa: BLE001 - the template's own families then
+            pass
     return fam
 
 

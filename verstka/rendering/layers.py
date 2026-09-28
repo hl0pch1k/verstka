@@ -318,13 +318,17 @@ def opaque_box(part, pic: etree._Element, box: Bbox) -> Bbox:
         return box
     src = pic.find(".//" + _A + "srcRect")
     crop = tuple(int(src.get(k) or 0) / 100000 for k in ("l", "t", "r", "b")) if src is not None else (0.0, 0.0, 0.0, 0.0)
-    key = (str(img_part.partname), crop)
+    key = (_image_key(img_part), crop)  # by content: /ppt/media/image1.png names a different picture in every package
     if key not in _OPAQUE_CACHE:
         frac = None
         try:
             from PIL import Image
 
             im = Image.open(io.BytesIO(img_part.blob))
+            if im.mode in ("P", "PA", "LA", "La", "RGBa") or "transparency" in im.info:
+                # a palette PNG with a tRNS chunk (Office themes' glows: «Ion» — at most 14 % opaque) has its alpha in
+                # the palette, not in a band: without it every faint overlay counted as a solid picture over the slide
+                im = im.convert("RGBA")
             if "A" in im.getbands():
                 iw, ih = im.size
                 l, t, r, b = crop

@@ -13,6 +13,7 @@ from verstka.rendering.clone import RenderedSlide, render_clone
 from verstka.rendering.deck import DeckBuilder
 from verstka.rendering.fallbacks import fallback_composition, prepare_slide
 from verstka.rendering.synth import render_synth
+from verstka.ru import deck_typography
 from verstka.schemas.layout import LayoutPlan, LayoutSlide
 from verstka.schemas.outline import DeckOutline
 from verstka.schemas.template import TemplateManifest
@@ -96,6 +97,77 @@ def render_deck(
     out_pptx: Path | str,
     progress: Optional[Callable[[str, float], None]] = None,
 ) -> RenderResult:
+    # one percent style for the whole deck — the style of its own words (G5-16: never «42 %» and «42%» on one slide);
+    # Russian text in a template family without Cyrillic is measured and set in a stand-in (cyrillic.py)
+    from verstka.rendering.cyrillic import apply_to_pptx, cyrillic_substitutes, deck_fonts
+
+    try:
+        subs = cyrillic_substitutes(ws.source, extra=[f.family for f in manifest.tokens.typography.families])
+    except Exception:  # noqa: BLE001 - the template's own families then
+        subs = {}
+    with deck_typography([outline.model_dump_json()]), deck_fonts(subs):
+        result = _render_deck(outline, plan, manifest, ws, out_pptx, progress)
+    if subs:
+        try:
+            if apply_to_pptx(out_pptx, subs):
+                log.info("Russian text set in stand-ins of the template's families without Cyrillic: %s", ", ".join(f"{k} → {v}" for k, v in subs.items()))
+        except Exception:  # noqa: BLE001 - the deck stays as rendered
+            log.warning("cyrillic stand-ins not written", exc_info=True)
+    return result
+
+
+class _CoverRedo(RuntimeError):
+    """A cloned cover that reads badly: the slide is rolled back and composed."""
+
+
+def _bookend_trouble(slide, oslide: DeckOutline) -> Optional[str]:
+    """Why a cloned cover, divider or closing slide reads badly, or None: a word of its heading wider than the
+    heading's box at the size it was set (the renderer breaks it), or two of its texts laid over each other."""
+    from verstka.rendering.fonts import text_width_pt
+    from verstka.schemas.common import EMU_PER_PT
+
+    kind = getattr(getattr(oslide, "kind", None), "value", str(getattr(oslide, "kind", "")))
+    if kind not in ("title", "section", "thanks") or slide is None:
+        return None
+    boxes = []
+    for sh in slide.shapes:
+        if not sh.has_text_frame or not sh.text_frame.text.strip() or sh.width is None or sh.left is None or sh.top is None or sh.height is None:
+            continue
+        boxes.append(sh)
+    try:
+        prs = slide.part.package.presentation_part.presentation
+        W, H = int(prs.slide_width), int(prs.slide_height)
+    except Exception:  # noqa: BLE001
+        W = H = 0
+    if W and H:
+        for sh in boxes:
+            if sh.top + sh.height > H * 1.02 or sh.left + sh.width > W * 1.02 or sh.top < -0.02 * H or sh.left < -0.02 * W or sh.height <= 0:
+                return "sets a line of text off the slide"
+    head = (oslide.headline or "").strip()
+    for sh in boxes:
+        text = sh.text_frame.text.replace("\x0b", " ").replace("\n", " ")
+        if not head or head.split()[0].strip("«»\"") not in text:
+            continue
+        sizes = [r.font.size.pt for p in sh.text_frame.paragraphs for r in p.runs if r.font.size is not None]
+        size = max(sizes) if sizes else None
+        if not size:
+            continue
+        family = next((r.font.name for p in sh.text_frame.paragraphs for r in p.runs if r.font.name), None)
+        inner = (int(sh.width) - int(sh.text_frame.margin_left or 91440) - int(sh.text_frame.margin_right or 91440)) / EMU_PER_PT
+        widest = max((text_width_pt(w, family, size) for w in text.split() if w), default=0.0)
+        if widest > inner * 1.02:
+            return f"breaks a word of its heading ({widest:.0f} pt in a {inner:.0f} pt box)"
+    for i, a in enumerate(boxes):
+        for b in boxes[i + 1:]:
+            ox = max(0, min(a.left + a.width, b.left + b.width) - max(a.left, b.left))
+            oy = max(0, min(a.top + a.height, b.top + b.height) - max(a.top, b.top))
+            small = min(a.width * a.height, b.width * b.height)
+            if small > 0 and ox * oy > 0.2 * small:
+                return "lays two of its texts over each other"
+    return None
+
+
+def _render_deck(outline: DeckOutline, plan: LayoutPlan, manifest: TemplateManifest, ws: TemplateWorkspace, out_pptx: Path | str, progress: Optional[Callable[[str, float], None]]) -> RenderResult:
     t0 = time.time()
     builder = DeckBuilder(ws.source)
     patterns = {p.id: p for p in manifest.patterns}
@@ -116,12 +188,20 @@ def render_deck(
         before = _snapshot(builder)
         try:
             if ps.mode == "clone" and ps.pattern_id in patterns:
-                _, warns = render_clone(builder, ps, oslide, patterns[ps.pattern_id], manifest, ws, outline)
+                slide, warns = render_clone(builder, ps, oslide, patterns[ps.pattern_id], manifest, ws, outline)
+                why = _bookend_trouble(slide, oslide)
+                if why:
+                    # a cover set in a sample made for a short word (a title box a quarter of the slide wide, a word
+                    # behind a product shot) breaks the deck's words or runs its lines together: composed instead
+                    raise _CoverRedo(why)
             else:
                 _, warns = render_synth(builder, ps, oslide, manifest, ws, outline)
             rendered.warnings.extend(warns)
         except Exception as e:  # noqa: BLE001
-            log.exception("slide %d (%s) failed in mode %s", i, oslide.id, ps.mode)
+            if isinstance(e, _CoverRedo):
+                log.info("slide %d (%s): the cloned cover %s — composed instead", i, oslide.id, e)
+            else:
+                log.exception("slide %d (%s) failed in mode %s", i, oslide.id, ps.mode)
             rendered.warnings.append(f"{ps.mode} failed: {str(e)[:160]}; fell back to synth")
             # a half-filled clone must not stay in the deck next to its synth replacement
             _rollback(builder, before)

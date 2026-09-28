@@ -225,19 +225,49 @@ def _paints(el) -> bool:
     return ref is not None and (ref.get("idx") or "0") != "0"
 
 
-def _slide_on_canvas(builder: DeckBuilder, canvas: Pattern, W: int, H: int, keep_extra: Optional[set[str]] = None):
-    """Clone the canvas sample and strip it to background + chrome + the title slot (+ the art to keep).
-    Returns (slide, title shape, heading ground)."""
-    from verstka.analysis.shapes import looks_like_placeholder
+def _cover_art_ids(els: dict, title_box: Optional[tuple], W: int, H: int) -> set[str]:
+    """The pictures of a cover sample that are its design, not its content: a photo or an illustration of at least 3 %
+    of the slide that stands clear of the title (a photo beside a title card — the template's own cover), never an
+    empty picture placeholder. A composed cover keeps them; the words are the deck's."""
+    keep: set[str] = set()
+    for sid, el in els.items():
+        tag = etree.QName(el).localname
+        if tag not in ("pic", "grpSp") or is_nested(el):
+            continue
+        if tag == "grpSp" and el.find(".//" + q("p:pic")) is None:
+            continue
+        if el.find(".//" + q("a:blip")) is None:
+            continue  # an empty picture placeholder: the template's «insert your photo»
+        b = element_bbox(el)
+        if not b or b[2] * b[3] < 0.03 * W * H:
+            continue
+        if "".join(t.text or "" for t in el.iter(q("a:t"))).strip():
+            continue
+        if title_box is not None:
+            bx = Bbox(x=b[0], y=b[1], w=b[2], h=b[3])
+            tb = Bbox(x=title_box[0], y=title_box[1], w=title_box[2], h=title_box[3])
+            if bx.intersection(tb) > 0.1 * max(tb.area, 1):
+                continue
+        keep.add(sid)
+    return keep
+
+
+def _slide_on_canvas(builder: DeckBuilder, canvas: Pattern, W: int, H: int, keep_extra: Optional[set[str]] = None, keep_art: bool = False):
+    """Clone the canvas sample and strip it to background + chrome + the title slot (+ the art to keep; `keep_art`: a
+    cover keeps its own photos and illustrations clear of the title). Returns (slide, title shape, heading ground)."""
+    from verstka.analysis.shapes import looks_like_sample_value
 
     slide = builder.clone_slide(canvas.source_slide)
     els = slide_shape_elements(slide)
     title = _top_title(canvas)
-    # chrome that is the template's sample copy («DEMO SLIDE», «Title Text Demo») is not kept on a composed slide
-    chrome = {sid for sid in canvas.chrome_shape_ids if not (sid in els and looks_like_placeholder("".join(t.text or "" for t in els[sid].iter(q("a:t")))))}
+    # chrome that is the template's sample copy («DEMO SLIDE», «Title Text Demo») or a sample value of its header or
+    # footer («JOHN DOE», «NEW YORK», «2023», «SLIDESCARNIVAL.COM») is not kept on a composed slide
+    chrome = {sid for sid in canvas.chrome_shape_ids if not (sid in els and looks_like_sample_value("".join(t.text or "" for t in els[sid].iter(q("a:t")))))}
     keep = chrome | ({title.shape_id} if title else set()) | set(keep_extra or ())
     # the label the heading is printed on (a pill) is part of the heading's style: its colour was chosen for it
     tb = element_bbox(els[title.shape_id]) if title and title.shape_id in els else None
+    if keep_art:
+        keep |= _cover_art_ids(els, tb, W, H)
     ground: Optional[tuple[Bbox, Optional[str]]] = None  # a half-slide panel the heading stands on
     if tb:
         tol = int(0.01 * W)
@@ -520,6 +550,78 @@ def _chrome_floor(builder: DeckBuilder, manifest: TemplateManifest, family: Fami
     return counts[len(counts) // 2] if counts else 0
 
 
+GROUND_STRUCTURE_MAX = 7.0  # a ground a composed slide may stand on: a gradient, a paper texture, a starry sky stay under it
+
+
+def _picture_structure(part) -> float:
+    """Object-scale structure of a picture as the slide shows it (over white where it is transparent): the mean
+    luminance step between neighbouring cells of a 24×14 thumbnail. Calm grounds — gradients, paper, a night sky —
+    stay under GROUND_STRUCTURE_MAX; a photograph of things (a vase on a table, a beach, a cup) is above it."""
+    import io
+
+    import numpy as np
+    from PIL import Image
+
+    im = Image.open(io.BytesIO(part.blob))
+    im = im.convert("RGBA")
+    a = np.asarray(im.resize((24, 14)), dtype=np.float32)
+    alpha = a[..., 3] / 255.0
+    lum = (0.299 * a[..., 0] + 0.587 * a[..., 1] + 0.114 * a[..., 2]) * alpha + 255.0 * (1.0 - alpha)
+    return float((np.abs(np.diff(lum, axis=1)).mean() + np.abs(np.diff(lum, axis=0)).mean()) / 2.0)
+
+
+def _ground_structure(builder: DeckBuilder, canvas: Pattern) -> float:
+    """The structure of the slide-sized pictures the sample itself lays behind its content (the largest step of
+    them; 0 without) — a photo of the sample's own story that a composed slide on it would keep. The ground the
+    layout or the master draws under every slide (Office «Celestial»'s night sky) is the template's designed ground:
+    every canvas shares it, so it never tells one canvas from another."""
+    cache = builder.__dict__.setdefault("_ground_structure", {})
+    if canvas.id in cache:
+        return cache[canvas.id]
+    W, H = builder.slide_w, builder.slide_h
+    worst = 0.0
+    try:
+        src = builder.source_slide(canvas.source_slide)
+        holders = [(src, el) for el in slide_shape_elements(src).values()]
+        for holder, el in holders:
+            if not isinstance(el.tag, str) or etree.QName(el).localname not in ("pic", "sp", "grpSp"):
+                continue
+            if el.find(".//" + q("p:ph")) is not None and holder is not src:
+                continue
+            b = element_bbox(el)
+            if not b or b[2] * b[3] < 0.85 * W * H:
+                continue
+            for part in _pic_parts(holder, el):
+                try:
+                    worst = max(worst, _picture_structure(part))
+                except Exception:  # noqa: BLE001 - an unreadable picture (EMF, SVG) is not judged
+                    continue
+    except Exception:  # noqa: BLE001
+        worst = 0.0
+    cache[canvas.id] = worst
+    return worst
+
+
+def _title_turned(builder: DeckBuilder, canvas: Pattern) -> bool:
+    """The canvas's heading is set turned or vertically («Agenda» running up the side of a photo): a composed
+    heading written into it would run up the slide too."""
+    t = _top_title(canvas)
+    if t is None:
+        return False
+    try:
+        el = slide_shape_elements(builder.source_slide(canvas.source_slide)).get(t.shape_id)
+    except Exception:  # noqa: BLE001
+        return False
+    if el is None:
+        return False
+    xfrm = el.find(".//" + q("a:xfrm"))
+    rot = int(xfrm.get("rot") or 0) if xfrm is not None else 0
+    turned = abs(((rot / 60000.0) + 180.0) % 360.0 - 180.0) > 3.0
+    body = el.find(".//" + q("a:bodyPr"))
+    vert = body is not None and (body.get("vert") or "horz") != "horz"
+    return turned or vert
+
+
 def _pick_canvas(builder: DeckBuilder, manifest: TemplateManifest, family: Family, comp: str, wide: bool, need_pill: bool = False) -> Optional[Pattern]:
     """The cleanest canvas for a composition: no pictures of its layout in the content area, and — for a composition
     that needs the whole width — no half-slide panel under the heading."""
@@ -532,6 +634,8 @@ def _pick_canvas(builder: DeckBuilder, manifest: TemplateManifest, family: Famil
         seen.append(canvas)
         floor = min(_chrome_floor(builder, manifest, family), 2)
         ok = _layout_pictures(builder, canvas) < 0.12 and (not need_pill or _has_pill(builder, canvas)) and _bg_art(builder, canvas.source_slide) is None and _bottom_chrome(builder, canvas) >= floor and not _canvas_photo(builder, canvas)
+        # a heading set turned or vertically, or a photograph of things behind the content: never a composed slide's canvas
+        ok = ok and not _title_turned(builder, canvas) and _ground_structure(builder, canvas) < GROUND_STRUCTURE_MAX
         if ok and wide:
             g = _canvas_ground(builder, canvas)
             if g is not None and g.w < 0.7 * builder.slide_w:
@@ -550,7 +654,7 @@ def _pick_canvas(builder: DeckBuilder, manifest: TemplateManifest, family: Famil
     best = min(seen, key=lambda p: _canvas_rank(builder, manifest, p, wide))
     rank = _canvas_rank(builder, manifest, best, wide)
     lay = _clean_layout(builder, manifest)
-    if lay is not None and (rank[0] or lay[1] >= -rank[2] + 0.2) and lay[1] >= 0.7:
+    if lay is not None and (rank[0] or rank[1] or lay[1] >= -rank[3] + 0.2) and lay[1] >= 0.7:
         builder.__dict__.setdefault("_prefer_layout", {})[family] = lay[0]
         return None
     return best
@@ -623,7 +727,8 @@ def _canvas_rank(builder: DeckBuilder, manifest: TemplateManifest, p: Pattern, w
         t = _top_title(p)
         on_grid = t is not None and _on_grid(manifest, t)
         clutter = len(p.slots) + sum(len(g.member_shape_ids) for g in p.repeat_groups) + len(p.decor_assets)
-        cache[key] = (busy or _canvas_photo(builder, p), bool(wide and free_w < 0.6), -round(share, 1), not on_grid, clutter, -p.quality, p.source_slide)
+        rough = _title_turned(builder, p) or _ground_structure(builder, p) >= GROUND_STRUCTURE_MAX
+        cache[key] = (rough, busy or _canvas_photo(builder, p), bool(wide and free_w < 0.6), -round(share, 1), not on_grid, clutter, -p.quality, p.source_slide)
     return cache[key]
 
 
@@ -1195,9 +1300,14 @@ def _render_content(builder: DeckBuilder, comp: str, oslide: OutlineSlide, manif
         title_color = pal.text
     if contrast_ratio(title_color, pal.bg) < 4.5:
         title_color = _heading_on(pal.bg, manifest, pal)
+    if title_ph is not None:
+        _heading_on_slide(title_ph, (sx, sy, sw, sh), W, H, warnings)
+    if title_ph is not None and art is None and ground is None:
+        _reclaim_left(slide, title_ph, (sx, sy, sw, sh), manifest, W, H, warnings)
     saved_title = copy.deepcopy(title_ph._element) if title_ph is not None else None
     n_warn = len(warnings)
     heading_bottom, content_left, lede_used = _place_heading(builder, slide, title_ph, canvas, oslide, manifest, ws, outline, pal, (sx, sy, sw, sh), h1, title_color, title_bold, title_font, scale, warnings, ds)
+    h1 = _set_size(title_ph, h1)  # the gap under the heading follows the heading as set (a canvas's 150 pt display word was fitted to 26 pt)
     below = _content_top(slide, heading_bottom, h1, W, H)
     if saved_title is not None and _content_bottom_limit(slide, sy + sh, W, H) - below < int(0.30 * H) and title_ph is not None and _backing_of(slide, title_ph._element, W, H) is None:
         # the heading left less than 30 % of the slide for the content: it is set again a step (at most two) smaller
@@ -1205,6 +1315,7 @@ def _render_content(builder: DeckBuilder, comp: str, oslide: OutlineSlide, manif
             title_ph = _restore_shape(slide, title_ph, saved_title)
             del warnings[n_warn:]
             heading_bottom, content_left, lede_used = _place_heading(builder, slide, title_ph, canvas, oslide, manifest, ws, outline, pal, (sx, sy, sw, sh), h1, title_color, title_bold, title_font, scale, warnings, dataclasses.replace(ds, head_size=size))
+            h1 = _set_size(title_ph, h1)
             below = _content_top(slide, heading_bottom, h1, W, H)
             if _content_bottom_limit(slide, sy + sh, W, H) - below >= int(0.30 * H):
                 break
@@ -1219,7 +1330,9 @@ def _render_content(builder: DeckBuilder, comp: str, oslide: OutlineSlide, manif
         sx = content_left
     # the right margin mirrors the left one — the page's, where the column starts past the art; a page whose own left
     # margin is wider than its right one (art down the left edge: a helix, a sidebar) keeps its own right edge
-    mirror = page_left if art is not None and art.side == "left" else sx
+    # (a column that starts far into the slide — past a quarter of it — never mirrors itself: its right edge would
+    # close in on its left one; the page's own margin is mirrored then)
+    mirror = page_left if (art is not None and art.side == "left") or sx - page_left > int(0.15 * W) else sx
     lopsided = page_left - (W - int(safe.x2 * W)) > int(0.04 * W)
     if ground is None and sx + sw > W - mirror and not lopsided:
         sw = W - mirror - sx
@@ -1236,6 +1349,14 @@ def _render_content(builder: DeckBuilder, comp: str, oslide: OutlineSlide, manif
     if bottom - top < int(0.25 * H):
         # never an area past the slide's foot: what does not fit is restructured by the composer, not pushed off
         warnings.append("little room under the heading")
+    if art is None and ground is None and sw < int(0.4 * W):
+        # never a sliver: a column narrower than 40 % of the slide with nothing drawn beside it (a sample's column next
+        # to a picture the composed slide does not keep) sets letters one under the other — the page's width instead
+        wide_x = min(page_left, sx)
+        wide_w = max(int(safe.x2 * W), sx + sw) - wide_x
+        if wide_w > sw:
+            warnings.append(f"content column widened from {sw / W:.0%} to {wide_w / W:.0%} of the slide")
+            sx, sw = wide_x, wide_w
     area = Bbox(x=sx, y=top, w=sw, h=max(min(bottom, H) - top, int(0.1 * H)))
     if area.y2 > H:
         area = Bbox(x=area.x, y=max(H - area.h, 0), w=area.w, h=min(area.h, H))
@@ -1265,6 +1386,68 @@ def _render_content(builder: DeckBuilder, comp: str, oslide: OutlineSlide, manif
         composer.compose(comp, area)
     warnings.extend(composer.warnings)
     return slide, warnings
+
+
+def _set_size(title_ph, default: float) -> float:
+    """The size the heading was set at: its largest run (the canvas's nominal title size when it has no runs)."""
+    if title_ph is None:
+        return default
+    sizes = [int(r.get("sz")) / 100.0 for r in title_ph._element.iter(q("a:rPr")) if (r.get("sz") or "").isdigit()]
+    return max(sizes) if sizes else default
+
+
+def _heading_on_slide(title_ph, safe_box: tuple[int, int, int, int], W: int, H: int, warnings: list[str]) -> None:
+    """A canvas's heading box that starts off the slide or runs past it (a display word set wider than the slide,
+    «Our Services» from x = −2 %): the composed heading keeps to the page — from the safe area's left edge at the
+    least, to its right edge at the most."""
+    if title_ph.left is None or title_ph.width is None:
+        return
+    x, w = int(title_ph.left), int(title_ph.width)
+    sx, sy, sw, sh = safe_box
+    left = max(x, min(sx, int(0.03 * W)) if x < 0 else x)
+    right = min(x + w, W - max(W - (sx + sw), int(0.03 * W)) if x + w > W else x + w)
+    if left == x and right == x + w:
+        return
+    title_ph.left = Emu(left)
+    title_ph.width = Emu(max(right - left, int(0.2 * W)))
+    warnings.append("heading box kept on the slide (the sample's box ran past its edge)")
+
+
+def _reclaim_left(slide: Slide, title_ph, safe_box: tuple[int, int, int, int], manifest: TemplateManifest, W: int, H: int, warnings: list[str]) -> None:
+    """A canvas whose heading stands in a column far into the slide — a sample with a picture of its own on the left
+    («Planet One is Mercury» beside a planet, a report page beside a photo): the composed slide keeps none of that
+    picture, so the heading would open a narrow column beside an empty half. When nothing the slide still draws stands
+    left of the heading (no art, no panel, no chrome), the heading moves to the deck's heading grid (or the page
+    margin) and keeps its right edge."""
+    if title_ph.left is None or title_ph.width is None or title_ph.top is None:
+        return
+    x = int(title_ph.left)
+    sx, sy, sw, sh = safe_box
+    gx = int(_grid_x(manifest) * W)
+    target = gx if sx - int(0.01 * W) <= gx < int(0.25 * W) else sx
+    if x - target < int(0.2 * W):
+        return
+    top = int(title_ph.top)
+    band = Bbox(x=target, y=top, w=x - target, h=max(sy + sh - top, int(0.2 * H)))
+    try:
+        from verstka.rendering.layers import art_boxes, art_share
+
+        skip = (title_ph._element,)
+        if art_share(slide, band, skip=skip) > 0.02 or any(b.intersection(band) > 0.004 * W * H for b in art_boxes(slide, skip=skip)):
+            return
+    except Exception:  # noqa: BLE001 - the layers are advice: the canvas stays as it is
+        return
+    # the slide's own shapes that stay (chrome kept from the canvas: a logo, a page number) must not stand there either
+    for shp in slide.shapes:
+        if shp._element is title_ph._element or shp.left is None or shp.width is None or shp.top is None or shp.height is None:
+            continue
+        b = Bbox(x=int(shp.left), y=int(shp.top), w=int(shp.width), h=int(shp.height))
+        if b.w * b.h < 0.9 * W * H and b.intersection(band) > 0.3 * max(b.area, 1):
+            return
+    right = x + int(title_ph.width)
+    title_ph.left = Emu(target)
+    title_ph.width = Emu(max(right - target, int(title_ph.width)))
+    warnings.append("heading moved to the page grid: its sample's column stood beside a picture the composed slide does not keep")
 
 
 def _clear_of_art(slide: Slide, area: Bbox, title_ph, W: int, H: int, warnings: list[str]) -> Bbox:
@@ -1338,9 +1521,13 @@ def _true_ground(slide: Slide, area: Bbox, pal: "_Palette", manifest: TemplateMa
         g = slide_ground(slide, area)
     except Exception:  # noqa: BLE001
         return
-    if not g or len(g) != 6 or delta_e(g, pal.bg) <= 10 or contrast_ratio(pal.text, g) >= 4.5:
+    if not g or len(g) != 6 or delta_e(g, pal.bg) <= 10:
         return
+    # the ground is recorded even when the text already reads on it: the charts, cards and figures choose their
+    # colours for it (a dark teal accent on a purple picture ground is invisible, whatever the text does)
     pal.bg = g
+    if contrast_ratio(pal.text, g) >= 4.5:
+        return
     pal.text = _readable(g, [pal.text, manifest.tokens.color_for("text.primary")])
     pal.text2 = pal.text if contrast_ratio(pal.text2, g) < 4.5 else pal.text2
 
@@ -2058,6 +2245,46 @@ def _heading_band(slide: Slide, box: Bbox, W: int, H: int) -> Optional[Bbox]:
     return b if isinstance(b, Bbox) else None
 
 
+def _heading_ink(title_ph, box: Bbox, manifest: TemplateManifest) -> Bbox:
+    """Where the heading's letters stand inside its box: its lines as set (the size of its runs, the box's width less
+    the insets), anchored and aligned as the box says. What lies under the rest of the box (a vapour trail across the
+    top of Office «Vapor Trail») is not under the heading."""
+    from verstka.rendering.fonts import text_width_pt, wrap_lines
+
+    text = "".join(t.text or "" for t in title_ph._element.iter(q("a:t"))).strip()
+    if not text:
+        return box
+    size = _set_size(title_ph, 28.0)
+    rpr = next(iter(title_ph._element.iter(q("a:rPr"))), None)
+    bold = rpr is not None and rpr.get("b") in ("1", "true")
+    lat = rpr.find(q("a:latin")) if rpr is not None else None
+    font = (lat.get("typeface") if lat is not None else None) or manifest.tokens.typography.primary_family
+    if font and font.startswith("+"):
+        font = manifest.tokens.typography.primary_family
+    insets = _heading_insets(title_ph)
+    inner_w = max(box.w - insets[0] - insets[2], 1)
+    lines = wrap_lines(text, font, size, bold, inner_w / EMU_PER_PT) or [text]
+    lh = int(size * manifest.tokens.typography.line_height * EMU_PER_PT)
+    text_h = min(len(lines) * lh, box.h)
+    body = title_ph._element.find(".//" + q("a:bodyPr"))
+    anchor = (body.get("anchor") if body is not None else None) or "t"
+    if anchor == "ctr":
+        y = box.y + (box.h - text_h) // 2
+    elif anchor == "b":
+        y = box.y2 - insets[3] - text_h
+    else:
+        y = box.y + insets[1]
+    widest = min(int(max(text_width_pt(ln, font, size, bold) for ln in lines) * EMU_PER_PT), inner_w)
+    align = _title_align(title_ph)
+    if align == "r":
+        x = box.x2 - insets[2] - widest
+    elif align == "ctr":
+        x = box.x + (box.w - widest) // 2
+    else:
+        x = box.x + insets[0]
+    return Bbox(x=max(x, box.x), y=max(y, box.y), w=max(widest, 1), h=max(text_h, 1))
+
+
 def _check_heading_color(slide: Slide, title_ph, canvas: Optional[Pattern], band: Optional[Bbox], pal: "_Palette", manifest: TemplateManifest) -> None:
     """The template's heading colour must read on what really stands under the heading (a band or panel painted by
     the layout, a picture ground): when it does not (< 3:1), the heading takes a readable colour."""
@@ -2069,7 +2296,8 @@ def _check_heading_color(slide: Slide, title_ph, canvas: Optional[Pattern], band
         from verstka.rendering.charts import slide_ground
 
         b = element_bbox(title_ph._element)
-        ground = slide_ground(slide, band if band is not None else Bbox(x=b[0], y=b[1], w=b[2], h=b[3])) if b else None
+        where = band if band is not None else (_heading_ink(title_ph, Bbox(x=b[0], y=b[1], w=b[2], h=b[3]), manifest) if b else None)
+        ground = slide_ground(slide, where) if where is not None else None
     except Exception:  # noqa: BLE001
         ground = None
     if not ground or contrast_ratio(col, ground) >= 3.0:
@@ -2558,7 +2786,7 @@ def _render_cover(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: Outline
     canvas = _canvas_for(manifest, family, comp)
     ground = None
     if canvas is not None:
-        slide, title_ph, ground = _slide_on_canvas(builder, canvas, builder.slide_w, builder.slide_h)
+        slide, title_ph, ground = _slide_on_canvas(builder, canvas, builder.slide_w, builder.slide_h, keep_art=comp in ("title", "thanks"))
     else:
         layout, family = _layout_for(builder, manifest, family, oslide.kind)
         slide = _add_layout_slide(builder, layout)
@@ -2656,16 +2884,58 @@ def _render_cover(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: Outline
         # title / section / thanks on a sample of that kind: its own title box, the subtitle right under it
         box = Bbox(x=int(title_ph.left), y=int(title_ph.top), w=int(title_ph.width), h=int(title_ph.height))
         insets = _heading_insets(title_ph)
+        from verstka.matching.scorer import split_display_title
         from verstka.ru import typeset
 
-        headline = typeset(oslide.headline)  # «с каждой» never split after the preposition
-        res = fit_size([headline], box, title_font, h1, title_bold, scale, insets_emu=insets, line_spacing=typo.line_height, min_ratio=0.6)
+        raw = oslide.headline
+        if comp == "title" and not oslide.subtitle:
+            # a cover heading of two phrases («…: план увеличения прибыли») is a title and its subtitle, as on a
+            # cloned cover
+            head, tail = split_display_title(" ".join(raw.split()))
+            if tail:
+                oslide = oslide.model_copy(update={"headline": head, "subtitle": tail})
+                raw = head
+        headline = typeset(raw)  # «с каждой» never split after the preposition
+        if box.w < int(0.45 * W):
+            # a sample's title box made for one short word (a quarter of the slide): the heading takes the free room
+            # of its band, up to the page's right margin
+            right = int(safe.x2 * W)
+            free = _free_width(slide, box, W, H, right, skip=(title_ph._element,))
+            if free > box.w:
+                box = Bbox(x=box.x, y=box.y, w=free, h=box.h)
+                _set_box(title_ph, box)
+                warnings.append("cover title box widened into the free room of its band")
+        # a cover heading is read from across the room, but never louder than a sixth of the slide per line (a sample's
+        # 168 pt display word set for «SODA»); the subtitle and the note keep room under it
+        cap = max(0.16 * H / EMU_PER_PT, min(scale) if scale else 0.0)
+        h1_cover = min(h1, _snap_heading(cap, scale) if scale else cap)
+        tall = box.h > int(0.5 * H)  # a box set for one giant word: the heading is placed, not stretched, in it
+        if tall:
+            box = Bbox(x=box.x, y=box.y, w=box.w, h=int(0.5 * H))
+        res = fit_size([headline], box, title_font, h1_cover, title_bold, scale, insets_emu=insets, line_spacing=typo.line_height, min_ratio=0.45)
         if res.broken_word:
-            res = _unbreak(headline, box, title_font, h1, title_bold, scale, insets, typo.line_height, warnings)
+            res = _unbreak(headline, box, title_font, h1_cover, title_bold, scale, insets, typo.line_height, warnings)
         _fill_keep(title_ph._element, [ParagraphSpec(headline)], size_pt=res.size_pt)
         text_h = int(res.height_pt * EMU_PER_PT) + insets[1] + insets[3]
         if text_h > box.h:
             _set_box(title_ph, Bbox(x=box.x, y=box.y, w=box.w, h=max(min(text_h, int(H * 0.95) - box.y), 0)))
+        elif text_h < box.h - int(0.04 * H):
+            # the box hugs its lines where the sample's box was set for a taller word: the subtitle follows the
+            # letters, not the sample's empty box (a bottom- or centre-anchored box keeps its lines where they stood)
+            anchor = (title_ph._element.find(".//" + q("a:bodyPr")).get("anchor") if title_ph._element.find(".//" + q("a:bodyPr")) is not None else None) or "t"
+            y_new = box.y2 - text_h if anchor == "b" else box.y + (box.h - text_h) // 2 if anchor == "ctr" else box.y
+            if tall:
+                # the heading and its subtitle stand a little above the optical centre of the slide
+                y_new = max(box.y, int(0.40 * H) - text_h // 2)
+            box = Bbox(x=box.x, y=y_new, w=box.w, h=text_h)
+            _set_box(title_ph, box)
+        if box.x < int(0.035 * W) and _backing_of(slide, title_ph._element, W, H) is None:
+            # the sample's title stood inside a panel this cover does not keep (a sign, an arrow): off the slide's edge
+            m = max(int(safe.x * W), int(0.06 * W))
+            box = Bbox(x=m, y=box.y, w=max(box.w - (m - box.x), int(0.4 * W)), h=box.h)
+            _set_box(title_ph, box)
+        # the heading's colour is read where it now stands (a light title of a dropped blue sign on a light page)
+        _check_heading_color(slide, title_ph, canvas, None, pal, manifest)
         # the lines under the title start where its letters start (its own left inset), never at the slide's edge
         shift = max(insets[0] - 91440, 0)
         col = Bbox(x=box.x + shift, y=box.y, w=max(box.w - shift, int(0.2 * W)), h=box.h)
@@ -2673,7 +2943,7 @@ def _render_cover(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: Outline
         sub = typeset(sub) if sub else sub  # «на 6 месяцев» never split after the preposition (G1-16)
         y_sub = box.y + max(box.h, text_h) + int(H * 0.02)
         note_col = Bbox(x=col.x, y=sy, w=min(col.w, sw), h=sh)
-        align = "l"
+        align = "ctr" if _title_align(title_ph) == "ctr" else "l"  # the lines under a centred heading are centred too
         region = _cover_lines_region(slide, canvas, title_ph, Bbox(x=col.x, y=y_sub, w=col.w, h=max(sy + sh - y_sub, 0)), Bbox(x=sx, y=sy, w=sw, h=sh), W, H) if (sub or oslide.footnote or _has_goal(oslide)) else None
         # the sample's own subtitle: its colour, and its place when it stands lower under the title in the same
         # column (a band the template prints its subtitle on — never half on the band's edge)
@@ -2711,7 +2981,31 @@ def _render_cover(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: Outline
     card_gap = min(gap, int(0.03 * W))  # the template gutter is a column gutter; card grids need a narrower one
 
     if comp in ("title", "section", "thanks"):
+        # a page of its own (no sample of the kind): a comfortable margin, the heading's colour read on what really
+        # stands under it, a heading of two phrases set as a title and its subtitle
+        mx = max(sx, int(0.06 * W))
+        sw = max(sx + sw - mx, int(0.5 * W)) if mx > sx else sw
+        sx = mx
+        if comp == "title" and not oslide.subtitle:
+            from verstka.matching.scorer import split_display_title
+
+            head, tail = split_display_title(" ".join(oslide.headline.split()))
+            if tail:
+                oslide = oslide.model_copy(update={"headline": head, "subtitle": tail})
         box = Bbox(x=sx, y=int(H * 0.30), w=int(sw * 0.8), h=int(H * 0.3))
+        try:
+            from verstka.rendering.charts import slide_ground
+
+            g = slide_ground(slide, box)
+        except Exception:  # noqa: BLE001
+            g = None
+        if g and contrast_ratio(title_color, g) < 3.0:
+            title_color = _readable(g, [title_color, pal.text, manifest.tokens.color_for("text.primary")])
+            pal.bg = g
+            if contrast_ratio(pal.text, g) < 4.5:
+                pal.text = _readable(g, [pal.text, title_color])
+            if contrast_ratio(pal.text2, g) < 4.5:
+                pal.text2 = pal.text
         _textbox(slide, box, [ParagraphSpec(oslide.headline)], size=max(h1, display * 0.8) if comp == "title" else h1, color=title_color, font=title_font, bold=title_bold, scale=scale, anchor="b")
         sub = oslide.subtitle or (oslide.section if comp == "section" else None)
         if sub:

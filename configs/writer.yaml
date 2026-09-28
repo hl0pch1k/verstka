@@ -1,7 +1,8 @@
 # Writer mode (verstka/planning/writer.py): a topic without material of its own («История VK», «презентация про
 # вторую мировую войну») — the agent writes the deck's text, then builds the deck from it. A text with data, slide
 # descriptions or lists is always built strictly from the user's text (faithful mode), whatever this file says.
-enabled: true                 # env VERSTKA_WRITER=0 turns writer mode off
+# Switched off for the submission (2026-09-28): a topic-only text is built as it is (a skeleton the person fills in).
+enabled: false                # env VERSTKA_WRITER=1 turns writer mode on, VERSTKA_WRITER=0 off
 temperature: 0.3              # measured: 0.7 invents battles and conferences
 reference:
   enabled: true               # the topic's Wikipedia article as the writer's only source; env VERSTKA_WIKI=0 turns it off

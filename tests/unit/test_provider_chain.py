@@ -580,6 +580,100 @@ def test_no_second_pass_after_a_real_failure_short_budget_or_when_every_link_is_
     assert status.blocked(ch.links[0].health)[0] == "congested" and status.blocked(ch.links[1].health)[0] == "congested"
 
 
+# Cloud.ru's per-minute cap (gate 5: «Too many requests», no Retry-After): the chain holds the account's pool for 20 s
+CLOUD_CAP = http_error(429, "{'error': {'code': 'ModelArts.81114', 'message': 'Too many requests, the rate limit is 1000'}}")
+
+
+@pytest.fixture
+def clock(monkeypatch, sleeps):
+    """A fake monotonic clock that the (recorded) sleeps advance, so holds really end while the chain waits."""
+    now = [10_000.0]
+    monkeypatch.setattr(oc.time, "monotonic", lambda: now[0])
+
+    def sleep(t: float) -> None:
+        sleeps.append(t)
+        now[0] += t
+
+    monkeypatch.setattr(oc.time, "sleep", sleep)
+    status.reset()
+    return now
+
+
+def _cap_chain():
+    ch = registry([PAID, FREE, {"model": QWEN32, "base_url": CLOUDRU, "requests_per_minute": 0}, GEMMA]).get("llm")
+    return ch
+
+
+def test_a_short_per_minute_hold_on_the_only_working_link_is_waited_out(clock, sleeps):
+    """Gate 5 (Пушкин): paid 402, the free links congested, Cloud.ru on its per-minute cap — the chain waits the 20-s
+    window out and asks Cloud.ru again, instead of failing the writer into a skeleton."""
+    ch = _cap_chain()
+    c = wire(ch, **{s(PAID): [NO_CREDITS], s(FREE): [UPSTREAM], s(QWEN32): [CLOUD_CAP, answer("cloud.ru")], s(GEMMA): [UPSTREAM]})
+    ch.links[1].health.strikes = ch.links[3].health.strikes = 1  # the free links were congested on earlier calls
+    reg_deadline = clock[0] + 120
+    r = ch.complete(MSGS, deadline=reg_deadline)
+    assert r.model == QWEN32 and r.text == "cloud.ru"
+    assert len(c[QWEN32].calls) == 2 and len(c[PAID].calls) == 1 and len(c[FREE].calls) == 1 and len(c[GEMMA].calls) == 1
+    waits = [x for x in sleeps if x >= 20]
+    assert len(waits) == 1 and 20.5 <= waits[0] <= 22.0  # the window (20 s) and a jitter, once
+
+
+def test_a_hold_is_waited_out_only_when_the_budget_leaves_room_and_the_error_says_when_it_ends(clock, sleeps):
+    ch = _cap_chain()
+    c = wire(ch, **{s(PAID): [NO_CREDITS], s(FREE): [UPSTREAM], s(QWEN32): [CLOUD_CAP, answer("late")], s(GEMMA): [UPSTREAM]})
+    ch.links[1].health.strikes = ch.links[3].health.strikes = 1
+    # 40 s left: the 20-s window plus 30 s for the answer do not fit — no wait, the caller learns when it could ask
+    with pytest.raises(ProviderError, match="all model links failed") as ei:
+        ch.complete(MSGS, deadline=clock[0] + 40)
+    assert len(c[QWEN32].calls) == 1 and not [x for x in sleeps if x >= 20]
+    assert ei.value.retry_in is not None and 15.0 <= ei.value.retry_in <= 20.0
+    # a hold longer than 30 s is never waited out (every link on a long hold: nothing to wait for)
+    status.reset()
+    sleeps.clear()
+    ch = registry([PAID, FREE]).get("llm")
+    wire(ch, **{s(PAID): [NO_CREDITS], s(FREE): [UPSTREAM]})
+    with pytest.raises(ProviderError) as ei:
+        ch.complete(MSGS, deadline=clock[0] + 200)
+    assert ei.value.retry_in is None and max(sleeps, default=0) <= 5.0
+
+
+def test_at_most_three_passes_while_the_cap_keeps_coming_back(clock, sleeps):
+    ch = _cap_chain()
+    c = wire(ch, **{s(PAID): [NO_CREDITS], s(FREE): [UPSTREAM], s(QWEN32): [CLOUD_CAP], s(GEMMA): [UPSTREAM]})
+    ch.links[1].health.strikes = ch.links[3].health.strikes = 1
+    with pytest.raises(ProviderError, match="again: "):
+        ch.complete(MSGS, deadline=clock[0] + 200)
+    assert len(c[QWEN32].calls) == 3 and len([x for x in sleeps if x >= 20]) == 2
+
+
+def test_a_single_provider_without_room_to_wait_a_cap_says_when_to_ask_again(clock, sleeps):
+    one = single(QWEN32, CLOUDRU, requests_per_minute=0)
+    wire(one, **{s(QWEN32): [CLOUD_CAP]})
+    with pytest.raises(ProviderError) as ei:
+        one.complete(MSGS, deadline=clock[0] + 8)
+    assert getattr(ei.value, "retry_in", None) == 20.0
+
+
+def test_calls_made_side_by_side_on_a_paced_account_go_out_one_after_another(clock, sleeps):
+    reg = ProviderRegistry.from_config({"roles": {
+        "llm": {"model": QWEN32, "base_url": CLOUDRU, "api_key": "cloudru-test-pace-01", "min_interval_s": 0.5, "json_mode": False},
+        "vlm": {"model": QWEN_VL, "base_url": CLOUDRU, "api_key": "cloudru-test-pace-01", "min_interval_s": 0.5, "json_mode": False},
+    }})
+    llm, vlm = reg.get("llm"), reg.get("vlm")
+    assert llm._pacer is vlm._pacer  # one account, one pacer
+    wire(llm, **{s(QWEN32): [answer("a")]})
+    wire(vlm, **{s(QWEN_VL): [answer("b")]})
+    llm.complete(MSGS)
+    vlm.complete(MSGS)  # at the same (fake) moment: waits for its turn
+    llm.complete(MSGS)
+    assert sleeps == [0.5, 0.5]
+    # a turn the budget cannot wait for is given back, and the call fails as over budget (not as the host's fault)
+    llm._pacer.next_at = clock[0] + 30
+    with pytest.raises(ProviderError, match="time budget"):
+        llm.complete(MSGS, deadline=clock[0] + 10)
+    assert llm._pacer.next_at == clock[0] + 30
+
+
 # ---------------------------------------------------------------------------------------------- holds and pools
 
 
@@ -1008,7 +1102,10 @@ def test_the_default_config_paid_qwen_groq_free_qwen_cloudru_then_gemma(config_e
     assert cloudru_vl.label == "Qwen3-VL 30B (Cloud.ru)" and cloudru_vl.extra_body == {} and cloudru_vl.system_suffix is None
     assert groq.label == "Qwen3.8-27B (Groq)" and groq._limiter.rpm == 20 and groq.max_tokens_cap == 3000
     assert groq.extra_body == {"reasoning_effort": "none"} and groq.json_mode is False and groq.price_in == 0.0
-    assert cloudru.label == "Qwen3 32B (Cloud.ru)" and cloudru.extra_body == {} and cloudru._limiter.rpm == 60
+    assert cloudru.label == "Qwen3 32B (Cloud.ru)" and cloudru.extra_body == {} and cloudru._limiter.rpm == 40
+    # Cloud.ru's per-minute cap is shared by everyone on the key: one limiter and one pacer for both of its links
+    assert cloudru._limiter is cloudru_vl._limiter and cloudru._pacer is cloudru_vl._pacer and cloudru._pacer.gap == 0.5
+    assert paid._pacer is None and free._pacer is None
     assert cloudru.system_suffix == "/no_think" and all(p.system_suffix is None for p in (paid, groq, free, gemma, moe))
     assert free.extra_body == {"reasoning": {"enabled": False}} and free._limiter.rpm == 18
     assert gemma.extra_body == {} and moe.extra_body == {}  # Gemma gets no reasoning parameters

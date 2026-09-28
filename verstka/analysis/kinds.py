@@ -17,7 +17,8 @@ _TIMELINE_RE = re.compile(r"таймлайн|timeline|roadmap|дорожн|эт�
 _QUOTE_RE = re.compile(r"^[«\"“„']", re.U)
 _MONO_RE = re.compile(r"consolas|courier|mono|menlo|fira code|jetbrains", re.I)
 _TEAM_RE = re.compile(r"команд|team|спикер|speaker", re.I)
-_COMPARE_RE = re.compile(r"сравнен|vs\.?|против|до и после|before|after|плюсы|минусы|pros|cons|тариф|saas|on-?premise", re.I)
+# whole words: «McKinsey Consulting» is no comparison («cons» inside a word), «Pros & Cons» is
+_COMPARE_RE = re.compile(r"сравнен|(?<![\w])(?:vs\.?|против|до и после|before|after|плюсы|минусы|pros|cons|тариф\w*|saas|on-?premise)(?![\w])", re.I)
 _NUM_SEQ_RE = re.compile(r"^0?\d{1,2}$")
 
 
@@ -55,6 +56,10 @@ def heuristic_kind(
 
     if _THANKS_RE.search(title_text) and n_content <= 8:
         return PatternKind.thanks, 0.9
+    # the first slide of a template is its cover: a photo, a card under the title, the author, the date and a few
+    # marks around it (Canva / Google Slides covers carry 8–12 shapes) — never a comparison or a card row
+    if slide_index == 1 and n_slides >= 3 and title is not None and n_numbers < 3 and n_content <= 12 and len(texts) <= 6:
+        return PatternKind.title, 0.85
     # ordinal markers 01, 02, 03… are sequence numbers, not KPIs → agenda / process / timeline
     ordinals = [s for s in texts if _NUM_SEQ_RE.match(s.plain_text.strip())]
     if len(ordinals) >= 3:

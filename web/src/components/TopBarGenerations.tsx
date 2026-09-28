@@ -40,7 +40,7 @@ const titleOf = (g: GenerationMeta) =>
     .map((l) => l.replace(/^#+\s*/, "").replace(/\*\*/g, "").trim())
     .find(Boolean)
     ?.slice(0, 120) ||
-  (g.template_file ?? g.template_id).replace(/\.pptx$/i, "");
+  (g.template_file ?? g.template_id).replace(/\.(?:pptx|potx|pptm|potm|ppsx|ppsm|thmx|ppt|pot|pps|odp|otp)$/i, "");
 
 function Cover({ g, busy }: { g: GenerationMeta; busy: boolean }) {
   const [broken, setBroken] = useState(false);

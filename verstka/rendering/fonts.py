@@ -11,6 +11,8 @@ from typing import Optional
 
 from PIL import ImageFont
 
+from verstka.rendering.cyrillic import measured_family  # noqa: E402  (no cycle: cyrillic imports fonts lazily)
+
 FONT_DIR = Path(__file__).resolve().parents[1] / "fonts"
 
 # relative average width vs Play for families we cannot bundle (empirical, conservative)
@@ -196,9 +198,10 @@ _CLASS_RULES = (
     (
         "serif",
         re.compile(
-            r"(?<!sans )serif|times|georgia|garamond|baskerville|playfair|merriweather|\blora\b|bodoni|didot|caslon|cambria|"
+            r"(?<!sans )serif|times|georgia|garamond|baskerville|playfair|merriweather(?! sans)|\blora\b|bodoni|didot|caslon|cambria|"
             r"palatino|antiqua|minion|charter|crimson|cormorant|spectral|literata|tinos|gelasio|caladea|rockwell|slab|"
-            r"constantia|sitka",
+            r"constantia|sitka|\bcardo\b|\bforum\b|\bprata\b|gilda|yeseva|abril|cinzel|marcellus|vollkorn|domine|"
+            r"frank ruhl|old standard|lustria|alice\b|trirong|myeongjo|\bultra\b|\barvo\b|rokkitt|bitter|noticia",
             re.I,
         ),
     ),
@@ -450,6 +453,7 @@ def text_width_pt(text: str, family: Optional[str], size_pt: float, bold: bool =
     master), measured upper-cased; `spc_pt`: letter-spacing (spc/100) added after every character."""
     if not text:
         return 0.0
+    family = measured_family(family)  # a family without Cyrillic is measured in the stand-in the deck will set (cyrillic.py)
     t = text.replace("\u00a0", " ").replace("\u202f", " ").replace("\u2060", "")
     if caps:
         t = t.upper()

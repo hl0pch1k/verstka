@@ -33,6 +33,17 @@ def estimate_capacity(bbox: Bbox, size_pt: float, bold: bool = False, insets_emu
 
 
 _HEX_RE = re.compile(r"(?:#|hex\s*#?)\s*[0-9a-f]{6}\b", re.I)
+# a template's own service slides — credits, «how to use this template», font and colour resources, instructions — as
+# free template sites ship them (SlidesCarnival, Slidesgo, Canva exports): never a layout to build a slide on
+_META_BRAND_RE = re.compile(r"(?<![\w])(?:slides\s?carnival|slidesgo|freepik|flaticon|storyset|pexels|pixabay|unsplash|showeet|slidemodel|presentationgo|envato|creative\s?market)(?![\w])", re.I)
+_META_PHRASE_RE = re.compile(
+    r"this presentation template|presentation template (?:is|was) (?:free|created)|thanks? to the following|happy designing|"
+    r"resource page|design resources|use these (?:design )?resources|how to use this (?:presentation|template|deck)|instructions for use|"
+    r"alternative resources|(?:please )?keep this slide|fonts? (?:&|and) colou?rs|free fonts? used|fonts used in this|"
+    r"click on the [\"«]?(?:google slides|powerpoint|canva)|make a copy|as a google slides theme|"
+    r"шрифты и цвета|как пользоваться (?:этим )?(?:шаблоном|презентацией)|инструкци\w* по использованию|ресурсы шаблона",
+    re.I,
+)
 
 
 def reference_reason(shapes: list[ShapeInfo], roles: dict[str, SlotRole]) -> Optional[str]:
@@ -56,6 +67,13 @@ def reference_reason(shapes: list[ShapeInfo], roles: dict[str, SlotRole]) -> Opt
     links = sum(len(s.element.findall(".//{http://schemas.openxmlformats.org/drawingml/2006/main}hlinkClick")) for s in shapes if s.element is not None and s.has_text)
     if links >= 3:
         return f"список полезных ссылок ({links} ссылок)"
+    # the slide's own words — not its chrome; a brand counts in a sentence («SlidesCarnival for the presentation
+    # template»), never as a bare domain in a header or footer («SLIDESCARNIVAL.COM» stands on every slide)
+    own = [s.plain_text for s in shapes if s.has_text and roles.get(s.id) != SlotRole.chrome]
+    text = " ".join(own)
+    branded = any(_META_BRAND_RE.search(t) and len(re.findall(r"[A-Za-zА-Яа-яЁё]{2,}", _META_BRAND_RE.sub(" ", t))) >= 2 and not re.fullmatch(r"\s*(?:https?://)?(?:www\.)?[\w.-]+\.\w{2,}/?\s*", t) for t in own)
+    if _META_PHRASE_RE.search(text) or (branded and len(text) < 900):
+        return "служебный слайд шаблона (источники, шрифты или инструкция)"
     return None
 
 

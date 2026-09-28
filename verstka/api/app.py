@@ -10,7 +10,6 @@ import re
 import shutil
 import threading
 import time
-import zipfile
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -194,16 +193,6 @@ def _brief_from_request(req: GenerateRequest) -> Brief:
     if "language" not in brief.model_fields_set and req.language:
         brief.language = req.language
     return brief
-
-
-def _looks_like_pptx(path: Path) -> bool:
-    if not zipfile.is_zipfile(path):
-        return False
-    try:
-        with zipfile.ZipFile(path) as z:
-            return "ppt/presentation.xml" in z.namelist()
-    except zipfile.BadZipFile:
-        return False
 
 
 def _discard_failed_upload(path: Path) -> None:
@@ -393,7 +382,17 @@ def _generation_job(gid: str, gdir: Path, req: GenerateRequest) -> Callable[[Job
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"ok": True, "version": __version__, "models_configured": models_configured(), "workspace": str(store.root)}
+    return {"ok": True, "version": __version__, "models_configured": models_configured(), "workspace": str(store.root), "writer": _writer_enabled()}
+
+
+def _writer_enabled() -> bool:
+    """Writer mode (planning/writer.py) is on: a topic-only text is written by the agent. Off by default (configs/writer.yaml)."""
+    try:
+        from verstka.planning.writer import load_config
+
+        return bool(load_config().get("enabled", False))
+    except Exception:  # noqa: BLE001 - a broken config: the mode is off
+        return False
 
 
 @app.get("/api/models/status")
@@ -434,20 +433,32 @@ def list_templates() -> list[dict]:
 
 @app.post("/api/templates")
 async def upload_template(file: UploadFile = File(...), use_models: bool = Form(True)) -> dict:
-    if not file.filename or not file.filename.lower().endswith(".pptx"):
-        raise HTTPException(400, "only .pptx files are accepted")
+    """A template in any presentation format (verstka/ingest/convert.py: .pptx, .potx, .pptm, .ppsx, .thmx, .ppt,
+    .odp …): the file is checked by its bytes, converted to .pptx in the job, then analysed. Errors are said in Russian —
+    the UI shows them as they are."""
+    from verstka.ingest.convert import ACCEPTED_EXTS, ConvertError, check_upload, reason, sniff
+
+    name = file.filename or ""
+    if not name:
+        raise HTTPException(400, "Выберите файл шаблона: .pptx, .potx, .ppt или .odp")
     limit = max_upload_bytes()
-    path = store.upload_path(file.filename)
+    path = store.upload_path(name)
     size = 0
     try:
         with open(path, "wb") as out:
             while chunk := await file.read(_UPLOAD_CHUNK):
                 size += len(chunk)
                 if size > limit:
-                    raise HTTPException(413, f"file is larger than {limit // (1024 * 1024)} MB")
+                    raise HTTPException(413, f"Файл больше {limit // (1024 * 1024)} МБ — уменьшите картинки в шаблоне или удалите лишние слайды")
                 out.write(chunk)
-        if not _looks_like_pptx(path):
-            raise HTTPException(400, "not a PowerPoint file: expected a zip package with ppt/presentation.xml")
+        if size == 0:
+            raise HTTPException(400, "Файл пустой — выберите шаблон ещё раз")
+        try:
+            check_upload(path)  # by the bytes: a .pptx renamed to .ppt still works, a PDF named .pptx does not
+        except ConvertError as e:
+            raise HTTPException(400, str(e))
+        if not path.suffix.lower() in ACCEPTED_EXTS and sniff(path) not in ("pptx", "thmx", "legacy", "odp"):
+            raise HTTPException(400, reason("unknown"))
     except BaseException:
         path.unlink(missing_ok=True)
         if path.parent != store.uploads and not any(path.parent.iterdir()):
@@ -457,10 +468,17 @@ async def upload_template(file: UploadFile = File(...), use_models: bool = Form(
 
     def run(job: Job) -> dict:
         from verstka.analysis.manifest import analyze_template
+        from verstka.ingest.convert import to_pptx
 
+        pptx = path
         try:
-            m = analyze_template(path, workspace_root=store.root, providers=providers() if use else None, skills=skills() if use else None, use_llm=use, use_vlm=use, progress=lambda msg, frac: job.emit(msg, frac))
+            if sniff(path) != "pptx" or path.suffix.lower() != ".pptx":
+                job.emit("Открываю файл шаблона", 0.02)
+            pptx = to_pptx(path)
+            m = analyze_template(pptx, workspace_root=store.root, providers=providers() if use else None, skills=skills() if use else None, use_llm=use, use_vlm=use, progress=lambda msg, frac: job.emit(msg, frac), display_name=path.name)
         except BaseException:
+            if pptx != path:
+                _discard_failed_upload(pptx)
             _discard_failed_upload(path)
             raise
         return {"template_id": m.template_id, "n_slides": m.n_slides, "n_patterns": len(m.patterns)}

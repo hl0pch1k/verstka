@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Optional
+
 
 # roles of the type scale, the way a person names them
 TYPE_ROLE_RU = {"display": "обложка", "h1": "заголовок", "h2": "подзаголовок", "h3": "заголовок блока", "body": "текст", "small": "мелкий текст", "caption": "подпись"}
@@ -73,14 +75,80 @@ def bind_compounds(text: str) -> str:
 
 _ABBR2_RE = __import__("re").compile(r"(?<![А-Яа-яЁё])(п\.|т\.)\s+(п\.|е\.|д\.|к\.)")
 
+# ---------------------------------------------------------------- figures: ranges, the minus, the percent sign (G5-16)
+
+MINUS = "\u2212"  # «−69 %»: a true minus, as wide as a digit (Play, Inter, Roboto… all have it)
+_re = __import__("re")
+# «5-6 тысяч», «1941-1945», «10-15%» — two numbers joined by a hyphen are a range; not a date «2025-09-28», a phone
+# «8-800-555», a code «Ту-144», «COVID-19», «5-6-летние», a time «9:00-18:00»
+_RANGE_HYPHEN_RE = _re.compile(r"(?<![\w.,\-‐‑–—−/:])(\d+(?:[.,]\d+)?)[-‐‑]\u2060?(\d+(?:[.,]\d+)?)(?![\w\-‐‑–—−/:]|[.,]\d)")
+# «5–6», «1941—1945»: the dash of a range never lets the line break before or after it («5 / –6 тыс.»)
+_RANGE_DASH_RE = _re.compile(r"(?<=\d)\u2060?([–—])\u2060?(?=\d)")
+# «-69%», «–5 °C»: a sign before a number that opens the text or follows a space or a bracket
+_LEAD_MINUS_RE = _re.compile(r"(?:^|(?<=[\s\u00a0(«\"„\[/]))[-–](?=\d)")
+_PCT_RE = _re.compile(r"(?<=\d)[ \u00a0\u202f\u2009]?%")
+_PCT_STYLE: "__import__('contextvars').ContextVar[Optional[str]]" = __import__("contextvars").ContextVar("verstka_percent_style", default=None)
+
+
+def percent_style_of(texts) -> Optional[str]:
+    """How the source writes a percent: «tight» («42%») or «spaced» («42 %»), by the majority of its percents (a tie
+    goes to the first one); None when it writes none."""
+    tight = spaced = 0
+    first = None
+    for t in texts:
+        for m in _PCT_RE.finditer(t or ""):
+            kind = "tight" if m.group(0) == "%" else "spaced"
+            first = first or kind
+            tight += kind == "tight"
+            spaced += kind == "spaced"
+    if not tight and not spaced:
+        return None
+    return "tight" if tight > spaced else "spaced" if spaced > tight else first
+
+
+@__import__("contextlib").contextmanager
+def deck_typography(texts):
+    """One percent style for everything typeset inside (a deck is rendered inside): the style of `texts` — the deck's
+    own words, which come from the brief or the written text."""
+    token = _PCT_STYLE.set(percent_style_of(texts))
+    try:
+        yield
+    finally:
+        _PCT_STYLE.reset(token)
+
+
+def _lead_minus(m) -> str:
+    before = m.string[: m.start()].rstrip(" \u00a0")
+    return m.group(0) if before[-1:].isdigit() else MINUS  # «5 -6»: a range, not a sign
+
+
+def typeset_figures(text: str) -> str:
+    """The figures of a text set the Russian way — only these characters change: a range of two numbers takes an en dash
+    bound to both numbers by word joiners («5-6 тыс.» → «5⁠–⁠6 тыс.», never broken as «5 / –6»), a sign before a number
+    is a true minus («-69%» → «−69%»), and every percent follows the deck's style (`deck_typography`: «42%» or «42 %»
+    with a no-break space)."""
+    if not text or not any(ch.isdigit() for ch in text):
+        return text
+    t = _RANGE_HYPHEN_RE.sub(lambda m: f"{m.group(1)}–{m.group(2)}", text)
+    t = _RANGE_DASH_RE.sub(lambda m: WJ + m.group(1) + WJ, t)
+    t = _LEAD_MINUS_RE.sub(_lead_minus, t)
+    style = _PCT_STYLE.get()
+    if style == "tight":
+        t = _PCT_RE.sub("%", t)
+    elif style == "spaced":
+        t = _PCT_RE.sub(NBSP + "%", t)
+    return t
+
 
 def typeset(text: str) -> str:
     """Russian display typesetting with no-break spaces: a dash never starts a line, a short preposition or
     conjunction never ends one, a figure stays with its unit, its thousands and its noun («12 400», «27 млн ₽»,
-    «4 сервера»), a short compound word keeps its hyphen («GPU-сервера»)."""
+    «4 сервера»), a short compound word keeps its hyphen («GPU-сервера»); ranges, minus and percents as
+    `typeset_figures`."""
     if not text:
         return text
-    t = text.replace(" — ", NBSP + "— ").replace(" – ", NBSP + "– ")
+    t = typeset_figures(text)
+    t = t.replace(" — ", NBSP + "— ").replace(" – ", NBSP + "– ")
     t = _THOUSANDS_RE.sub(NBSP, t)
     t = _UNIT_RE.sub(NBSP, t)
     t = _NUM_NOUN_RE.sub(lambda m: m.group(1) + NBSP, t)

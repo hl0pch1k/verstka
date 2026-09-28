@@ -34,7 +34,8 @@ class TemplateWorkspace:
     source: Path  # copy of the original pptx inside the workspace
 
     @classmethod
-    def create(cls, pptx: Path | str, root: Optional[Path | str] = None) -> "TemplateWorkspace":
+    def create(cls, pptx: Path | str, root: Optional[Path | str] = None, display_name: Optional[str] = None) -> "TemplateWorkspace":
+        """`display_name`: the name the person gave the file (a converted «Бренд.potx» is analysed as «Бренд.pptx»)."""
         pptx = Path(pptx)
         root = Path(root) if root else default_workspace_root()
         template_id = file_sha256(pptx)[:16]
@@ -43,7 +44,7 @@ class TemplateWorkspace:
         src = d / "source.pptx"
         if not src.exists():
             shutil.copyfile(pptx, src)
-        (d / "meta.txt").write_text(f"{pptx.name}\n", encoding="utf-8")
+        (d / "meta.txt").write_text(f"{display_name or pptx.name}\n", encoding="utf-8")
         return cls(template_id=template_id, dir=d, source=src)
 
     @classmethod

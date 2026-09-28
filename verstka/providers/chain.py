@@ -9,7 +9,11 @@ key calls it as a single provider (its own attempts and waits, no long holds). W
 because of congestion, 5xx / timeouts or a per-minute cap, every other failed link is on hold anyway (402, 404,
 401/403, spent quota) and at least 30 s of the generation's budget remain, the chain makes one more pass after a
 3-5 s pause; a failure that opens no hold (invalid JSON, a plain 4xx) would only repeat, so it rules the pass out.
-Only then does the caller get a ProviderError, and the pipeline takes its deterministic steps as before.
+When every link is still on hold after that pause, but the earliest hold ends within 30 s (a per-minute cap — Cloud.ru's
+429 ModelArts.81114, a Retry-After, a congestion hold about to end) and the budget leaves that hold plus 30 s, the chain
+waits the hold out instead of giving up; at most three passes in all. Only then does the caller get a ProviderError,
+and the pipeline takes its deterministic steps as before; its `retry_in` (seconds, or None) says when the earliest hold
+ends, so a caller with a short deadline of its own (the writer's titles call) can wait and ask once more.
 
 That error names every link that failed by its label, in brackets before its own message: «all model links failed:
 [Qwen3.8-27B (OpenRouter)] qwen/qwen3.8-27b: no credits (402) …; [Qwen3.8-27B (Groq)] qwen/qwen3.8-27b: access refused
@@ -32,8 +36,11 @@ from verstka.providers.openai_compat import _MIN_REQUEST_S, BudgetSpent, LinkUna
 
 log = logging.getLogger(__name__)
 
-_SECOND_PASS_MIN_S = 30.0  # budget that must remain for the second pass
+_SECOND_PASS_MIN_S = 30.0  # budget that must remain for the second pass (and after a wait for a hold)
 _SECOND_PASS_PAUSE_S = (3.0, 5.0)  # jittered, so the variants planned in parallel do not knock at the same moment
+_WAIT_MAX_S = 30.0  # the longest hold the chain waits out when every link is on hold (a per-minute window)
+_WAIT_JITTER_S = (0.5, 2.0)  # after the hold ends, so parallel calls waiting for the same window do not knock at once
+_MAX_PASSES = 3  # pass 1 and at most two more (after a pause or a wait)
 _RETRY_LATER = ("congested", "rate")
 
 
@@ -103,11 +110,19 @@ class ChainProvider:
 
     def _free_after(self, i: int, pause: float) -> bool:
         """The link can be asked once the pause is over (no hold, or one that ends by then)."""
+        return self._hold_left(i) <= pause
+
+    def _hold_left(self, i: int) -> float:
+        """Seconds until the link (or its pool) may be asked again: 0 without a hold."""
         h = getattr(self.links[i], "health", None)
         if h is None:
-            return True
+            return 0.0
         hit = status.blocked(h)
-        return hit is None or hit[2] <= pause
+        return 0.0 if hit is None else max(0.0, hit[2])
+
+    def _soonest(self, live: list[int]) -> float:
+        """Seconds until the first of the live links may be asked again."""
+        return min((self._hold_left(i) for i in live), default=0.0)
 
     def complete(
         self,
@@ -129,7 +144,10 @@ class ChainProvider:
         failures: list[str] = []
         failed: list[dict[str, Any]] = []  # label, model, state and pass of every link that failed, in order
         spent = Usage()
-        for pass_no in (1, 2):
+        busy = final = False
+        pass_no = 0
+        while pass_no < _MAX_PASSES:
+            pass_no += 1
             busy = False  # some link failed only for congestion, 5xx / timeout or a per-minute cap
             final = False  # some link failed in a way a second pass would repeat (no hold: invalid JSON, a plain 4xx)
             for i in live:
@@ -159,23 +177,36 @@ class ChainProvider:
                         final = True  # a 402 / 404 / 401 / 403 / spent quota is on hold: skipped in pass 2 anyway
                     label = link_label(link)
                     failed.append({"label": label, "model": link.model, "state": getattr(e, "state", None) or "error", "pass": pass_no})
-                    failures.append(("again: " if pass_no == 2 else "") + f"[{label}] " + _summary(e))
+                    failures.append(("again: " if pass_no >= 2 else "") + f"[{label}] " + _summary(e))
                     log.info("model chain: %s did not answer (%s), next link", label, _summary(e, 160))
                     continue
                 if failures:
                     log.info("model chain: answered by %s after %d failed attempt(s)", getattr(res, "label", None) or res.model, len(failures))
                     res.usage = spent.add(res.usage)
                 return res
-            if pass_no == 2 or final or not busy:
+            if pass_no >= _MAX_PASSES or final or not busy:
                 break
-            if deadline is not None and deadline - time.monotonic() < _SECOND_PASS_MIN_S:
+            left = None if deadline is None else deadline - time.monotonic()
+            if left is not None and left < _SECOND_PASS_MIN_S:
                 break
             pause = random.uniform(*_SECOND_PASS_PAUSE_S)
             if not any(self._free_after(i, pause) for i in live):
-                break  # every link is still on hold after the pause: a second pass would only skip them
-            log.info("model chain: every link is busy, one more pass in %.1f s", pause)
+                # every link is still on hold after the pause: a pass now would only skip them. A hold that ends soon
+                # (a per-minute window of the only working link) is waited out while the budget leaves room for the
+                # answer after it — a short cap of Cloud.ru must not turn the deck into a skeleton
+                soonest = self._soonest(live)
+                if soonest > _WAIT_MAX_S or (left is not None and left < soonest + _SECOND_PASS_MIN_S):
+                    break
+                pause = soonest + random.uniform(*_WAIT_JITTER_S)
+                log.info("model chain: every link is on hold, waiting %.1f s for the first one to be free", pause)
+            else:
+                log.info("model chain: every link is busy, one more pass in %.1f s", pause)
             time.sleep(pause)
         err = ProviderError("all model links failed: " + ("; ".join(failures) or f"every link is {status.PHRASES['off']}"))
         err.usage = spent  # type: ignore[attr-defined]
         err.failed = failed  # type: ignore[attr-defined]
+        # when the first link is free again: a caller with a short deadline of its own may wait and ask once more
+        # (only after failures a later pass could cure — congestion, a 5xx, a per-minute cap — and a hold ≤ 30 s)
+        soonest = self._soonest(live) if busy and not final else None
+        err.retry_in = soonest if soonest is not None and 0.0 < soonest <= _WAIT_MAX_S else None  # type: ignore[attr-defined]
         raise err

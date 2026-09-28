@@ -10,7 +10,7 @@ import { errText } from "../../lib/narrate";
 import { cn, LS, storage } from "../../lib/utils";
 import { writerModeOf } from "../../lib/writerMode";
 import { useApp } from "../../store";
-import { BRIEF_MIN, INPUT_CLS, PURPOSES, SAMPLE_AUDIENCE, SAMPLE_BRIEF, SLIDES_DEFAULT, SLIDES_MAX, SLIDES_MIN, StrategyOption, Toggle } from "../NewGenerationFormParts";
+import { BRIEF_MIN, BRIEF_MIN_TOPIC, INPUT_CLS, PURPOSES, SAMPLE_AUDIENCE, SAMPLE_BRIEF, SLIDES_DEFAULT, SLIDES_MAX, SLIDES_MIN, StrategyOption, Toggle } from "../NewGenerationFormParts";
 import { Button } from "../ui/Button";
 import { Chip } from "../ui/Chip";
 import { ModelStatus } from "./ModelStatus";
@@ -221,6 +221,8 @@ export function CreateScreen() {
   }, [modelsConfigured]);
 
   const briefLen = brief.trim().length;
+  // a topic-only text is enough only when the server writes the text itself (writer mode); otherwise the text is the deck
+  const briefMin = health?.writer ? BRIEF_MIN_TOPIC : BRIEF_MIN;
   const jobRunning = !!activeJob && (activeJob.status === "queued" || activeJob.status === "running");
   const problem = healthError
     ? "Нет связи с сервером"
@@ -228,14 +230,14 @@ export function CreateScreen() {
       ? "Выберите или загрузите шаблон"
       : briefLen === 0
         ? "Напишите, о чём презентация"
-        : briefLen < BRIEF_MIN
+        : briefLen < briefMin
           ? "Текст слишком короткий"
           : selected.length === 0
             ? "Выберите хотя бы один вариант оформления"
             : null;
   const busy = submitting || jobRunning;
   // the server being out of reach is the one problem then: the text is not marked
-  const briefInvalid = showErrors && !healthError && !!templateId && briefLen < BRIEF_MIN;
+  const briefInvalid = showErrors && !healthError && !!templateId && briefLen < briefMin;
   // a short text is said once, by its own counter in the field (turned red); the bar keeps every other problem
   const shortInvalid = briefInvalid && briefLen > 0;
   const barProblem = showErrors && !shortInvalid ? problem : null;
@@ -243,7 +245,7 @@ export function CreateScreen() {
   // about the person's own project («наш», «мы»), and not when no model can answer
   const writer = writerModeOf(brief);
   const modelsOn = useModels && modelsConfigured;
-  const writerLine = !!writer.mode && !writer.privateHint && briefLen >= BRIEF_MIN && modelsOn && !modelIndicator(modelStatus, modelsOn) && !healthError && !barProblem;
+  const writerLine = !!health?.writer && !!writer.mode && !writer.privateHint && briefLen >= briefMin && modelsOn && !modelIndicator(modelStatus, modelsOn) && !healthError && !barProblem;
   const writerPresence = usePresence(writerLine, MOTION.fast);
 
   const fillSample = () => {
@@ -311,7 +313,7 @@ export function CreateScreen() {
       if (!templateId) setShaking(1);
       else {
         setShaking(2);
-        if (briefLen < BRIEF_MIN && briefRef.current) {
+        if (briefLen < briefMin && briefRef.current) {
           briefRef.current.focus();
           // the marked field comes clear of the bar after a click too (after a key, the focus handler has done it)
           if (byPointer.current) scrollClearOfBar(briefRef.current);
@@ -358,7 +360,7 @@ export function CreateScreen() {
           <Step
             n={2}
             title="О чём презентация"
-            done={briefLen >= BRIEF_MIN}
+            done={briefLen >= briefMin}
             order={2}
             shake={shaking === 2}
             actions={
@@ -386,7 +388,7 @@ export function CreateScreen() {
                 id="brief"
                 aria-label="О чём презентация"
                 aria-invalid={briefInvalid || undefined}
-                aria-describedby={briefLen > 0 && briefLen < BRIEF_MIN ? "brief-count" : undefined}
+                aria-describedby={briefLen > 0 && briefLen < briefMin ? "brief-count" : undefined}
                 value={brief}
                 disabled={busy}
                 rows={3}
@@ -394,7 +396,7 @@ export function CreateScreen() {
                 placeholder={PLACEHOLDER}
                 className="scroll-thin block max-h-[50vh] min-h-24 w-full resize-none scroll-py-3 bg-transparent px-4 py-3 text-body leading-6 text-zinc-900 outline-none placeholder:text-zinc-500 disabled:opacity-60 [field-sizing:content]"
               />
-              {briefLen > 0 && briefLen < BRIEF_MIN && (
+              {briefLen > 0 && briefLen < briefMin && (
                 <span
                   id="brief-count"
                   className={cn(
@@ -402,7 +404,7 @@ export function CreateScreen() {
                     shortInvalid ? "text-red-600" : "text-amber-700",
                   )}
                 >
-                  ещё {BRIEF_MIN - briefLen}
+                  ещё {briefMin - briefLen}
                 </span>
               )}
               {/* read out once when «Создать» finds the text short (the counter itself changes with every key) */}

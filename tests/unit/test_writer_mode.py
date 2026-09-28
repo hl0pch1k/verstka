@@ -475,7 +475,9 @@ def test_the_config_switches(monkeypatch):
     monkeypatch.delenv("VERSTKA_WIKI")
     monkeypatch.delenv("VERSTKA_WRITER")
     cfg = W.load_config()
-    assert cfg["enabled"] is True and cfg["reference"]["contact"]
+    assert cfg["enabled"] is False and cfg["reference"]["contact"]  # off for the submission (configs/writer.yaml)
+    monkeypatch.setenv("VERSTKA_WRITER", "1")
+    assert W.load_config()["enabled"] is True
 
 
 # ------------------------------------------------------------------ T12 / T13: the written text without a designer

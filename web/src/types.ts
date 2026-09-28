@@ -19,7 +19,7 @@ export type JobStatus = "queued" | "running" | "done" | "failed";
 export interface BboxFrac { x: number; y: number; w: number; h: number }
 
 // ---- meta -------------------------------------------------------------------
-export interface Health { ok: boolean; version: string; models_configured: boolean; workspace: string }
+export interface Health { ok: boolean; version: string; models_configured: boolean; workspace: string; /** writer mode is on (configs/writer.yaml): a topic-only text is written by the agent */ writer?: boolean }
 
 // ---- models (GET /api/models/status) ------------------------------------------------
 /** A link of the model chain: the primary model first, then the backups.

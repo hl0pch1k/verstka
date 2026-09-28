@@ -724,3 +724,27 @@ def looks_like_placeholder(text: str) -> bool:
     if not t:
         return False
     return bool(PLACEHOLDER_RE.search(t))
+
+
+# the sample values free templates put in their headers and footers (Canva, Google Slides, SlidesCarnival): an author
+# «John Doe», a city «New York», a lone year, the template site, Canva's stock company / person / address / phone /
+# e-mail. Only for chrome — a header or a footer the template repeats: a year in the content is the deck's own.
+SAMPLE_VALUE_RE = re.compile(
+    r"^\s*(?:john|jane)\s+(?:doe|smith)\s*$|^\s*(?:name\s+surname|your\s+name|first\s+name|last\s+name|name\s+lastname|presenter\s+name|author\s+name)\s*$|"
+    r"^\s*(?:new\s+york|any\s*city|anytown|your\s+city)\s*$|^\s*(?:19|20)\d{2}\s*$|"
+    r"^\s*(?:brand\s+name|your\s+brand|company\s+logo|logo\s+here|your\s+logo|business\s+name)\s*$|"
+    r"^\s*(?:slides\s?carnival|slidesgo|freepik)\s*$|"
+    r"^\s*(?:back\s+to\s+(?:the\s+)?(?:overview|agenda|contents?|menu|start|home|index)(?:\s+page)?|go\s+to\s+(?:the\s+)?(?:overview|agenda|contents?|menu)|click\s+here(?:\s+to\s+\w+)?|home|menu|next|previous|назад\s+к\s+(?:содержанию|оглавлению|меню))\s*[.!]?\s*$|"
+    r"(?:www\.)?(?:slides\s?carnival|slidesgo|freepik|reallygreatsite|yourwebsite|yoursite|website)\.(?:com|net|org)\b|"
+    r"\b(?:reallygreatsite|borcelle|fauget|larana|salford\s*&\s*co|arowwai|liceria|wardiere|rimberio|ingoude|thynk\s+unlimited)\b|"
+    r"\b(?:olivia\s+wilson|juliana\s+silva|harper\s+russo|morgan\s+maxwell|avery\s+davis|claudia\s+alves|benjamin\s+shah)\b|"
+    r"\b123\s+anywhere\s+st\b|\+?\(?123\)?[-\s.]?456[-\s.]?7890|\b(?:hello|email|yourname|name)@|"
+    r"^\s*(?:date\s*:?\s*)?(?:dd|mm)[/.\-](?:mm|dd)[/.\-](?:yyyy|yy)\s*$",
+    re.I,
+)
+
+
+def looks_like_sample_value(text: str) -> bool:
+    """A header's or a footer's sample value of a free template (see SAMPLE_VALUE_RE) — or its sample copy."""
+    t = (text or "").strip()
+    return bool(t) and (bool(SAMPLE_VALUE_RE.search(t)) or looks_like_placeholder(t))

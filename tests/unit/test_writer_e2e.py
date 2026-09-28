@@ -24,6 +24,12 @@ F = Path(__file__).resolve().parents[1] / "fixtures" / "writer"
 REF = json.loads((F / "answers_ref.json").read_text(encoding="utf-8"))
 
 
+@pytest.fixture(autouse=True)
+def _writer_on(monkeypatch):
+    """Writer mode is off by default for the submission (configs/writer.yaml): these tests switch it on."""
+    monkeypatch.setenv("VERSTKA_WRITER", "1")
+
+
 class Scripted:
     """The model: the topic's kind, the recorded writer answer, an empty fact check; the designer and the critic fail
     (a slow host) — the rules build every slide from the written text."""
@@ -70,6 +76,7 @@ def written_run(vk_tech, tmp_path_factory):
 
     mp = pytest.MonkeyPatch()
     mp.setenv("VERSTKA_WIKI", "0")
+    mp.setenv("VERSTKA_WRITER", "1")  # off by default for the submission
     try:
         fake = Scripted(json.loads(REF["vk"]["raw"]))
         model = MockProvider(fake, model="Qwen/Qwen3-32B")

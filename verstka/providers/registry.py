@@ -118,7 +118,8 @@ def build_provider(spec: dict, limits: ProviderLimits) -> Provider:
     every link, a link's own keys win); a single spec is one provider, exactly as before. A link whose `api_key`
     expands to an empty string (its variable is not set) is built "off": the chain skips it silently.
     `max_tokens_cap` (a link option) caps max_tokens of every request of that link; `system_suffix` is added to the
-    system message of every request of that link (e.g. Qwen3's "/no_think" on a host without a thinking switch)."""
+    system message of every request of that link (e.g. Qwen3's "/no_think" on a host without a thinking switch);
+    `min_interval_s` spaces the request starts on the link's account (calls made side by side go out one by one)."""
     if isinstance(spec, dict) and "chain" in spec:
         shared = {k: v for k, v in spec.items() if k != "chain"}
         link_specs = spec.get("chain") or []
@@ -156,6 +157,7 @@ def build_provider(spec: dict, limits: ProviderLimits) -> Provider:
             label=spec.get("label"),
             max_tokens_cap=spec.get("max_tokens_cap"),
             system_suffix=spec.get("system_suffix"),
+            min_interval_s=spec.get("min_interval_s"),
         )
     raise ProviderError(f"unknown provider backend {backend!r}")
 

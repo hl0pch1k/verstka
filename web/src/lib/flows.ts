@@ -6,6 +6,7 @@ import { pushToast } from "../components/ui/Toasts";
 import type { GenerateRequest, GenerateResponse, Generation, Job, JobKind, TabKey, TemplateListItem, TemplateManifest, UploadResponse } from "../types";
 import { describeGeneration, firstLine, newestTemplate } from "./narrate";
 import { templateTitle } from "./plain";
+import { templateFileProblem } from "./templateFiles";
 import { plural } from "./utils";
 
 interface CommonDeps {
@@ -24,8 +25,9 @@ export interface UploadDeps extends CommonDeps {
 export function uploadTemplateFlow(file: File, useModels: boolean, d: UploadDeps): Promise<void> {
   return new Promise<void>((resolve) => {
     void (async () => {
-      if (!/\.pptx$/i.test(file.name)) {
-        pushToast("error", "Шаблон должен быть файлом .pptx");
+      const problem = templateFileProblem(file.name);
+      if (problem) {
+        pushToast("error", problem);
         return resolve();
       }
       let res: UploadResponse;

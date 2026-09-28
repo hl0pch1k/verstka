@@ -35,6 +35,7 @@ def test_a_topic_the_model_could_not_write_is_audited_as_unwritten(vk_tech, tmp_
     from verstka.pipeline.generate import generate_variants
 
     monkeypatch.setenv("VERSTKA_WIKI", "0")
+    monkeypatch.setenv("VERSTKA_WRITER", "1")  # writer mode is off by default for the submission
     model = MockProvider(_down, model="Qwen/Qwen3-32B")
     providers = ProviderRegistry(roles={"llm": model, "vlm": model}, limits=ProviderLimits(max_concurrency=2, time_budget_s=60))
     res = generate_variants(

@@ -9,12 +9,13 @@
 #   two upstream 429s in a row                           2 min
 #   two 5xx / connection errors in a row, or a timeout   1 min
 #   the free models' daily quota                         until 00:00 UTC (every free link of the key, not the paid one)
-#   the per-minute cap                                   till the minute window ends (every free link of the key)
+#   the per-minute cap                                   till the minute window ends (every link of the pool)
 #   413 «request too large … tokens per minute» (Groq)   30 s
 # Holds are kept per account + model (verstka/providers/status.py): a congested free Qwen does not block Gemma.
 # If some link failed only for congestion / 5xx / a per-minute cap, every other failed link is on hold anyway and
 # ≥ 30 s of the budget are left, the chain makes one more pass after a 3-5 s pause (links on hold are skipped).
-# Only then do the steps fall back to their deterministic twins. When only one link has a key, it works as a single
+# When every link is still on hold then, but the first hold ends within 30 s (a per-minute window), the chain waits it
+# out (at most three passes in all). Only then do the steps fall back to their deterministic twins. When only one link has a key, it works as a single
 # model (its own 3 attempts and waits, no long holds).
 #
 # Links whose API key variable is empty are "off": skipped silently, no request, no error. So Groq and Cloud.ru
@@ -84,7 +85,11 @@ roles:
         base_url: https://foundation-models.api.cloud.ru/v1
         api_key: ${CLOUDRU_API_KEY}  # cloud.ru Foundation Models, Russian card; empty → this link is off
         # 37.08 ₽ in / 148.29 ₽ out per 1M tokens (≈ 3 ₽ per generation); the cost in rubles is not in the USD manifest
-        requests_per_minute: 60  # Cloud.ru allows 20 requests/s per key
+        # Cloud.ru answers 429 ModelArts.81114 («Too many requests») well below its documented 20 requests/s, and the
+        # cap is shared by every generation on the key: at most 40 a minute from this server, request starts ≥ 0.5 s
+        # apart (the variants' parallel calls go out one by one), and the chain waits a held minute window out
+        requests_per_minute: 40
+        min_interval_s: 0.5
         extra_body: {}  # Cloud.ru documents no parameter to switch Qwen3's thinking off
         # Qwen3's own soft switch (Qwen3-32B model card): "/no_think" in the system message turns thinking off for
         # this link only; the empty <think></think> block the model still starts with is dropped from the answer
@@ -98,7 +103,8 @@ roles:
         base_url: https://foundation-models.api.cloud.ru/v1
         api_key: ${CLOUDRU_API_KEY}  # cloud.ru Foundation Models, Russian card; empty → this link is off
         # 34.16 ₽ in / 136.64 ₽ out per 1M tokens (≈ 3 ₽ per generation); the cost in rubles is not in the USD manifest
-        requests_per_minute: 60  # Cloud.ru allows 20 requests/s per key
+        requests_per_minute: 40  # the same key and the same cap as Qwen3-32B above (one limiter and one pacer)
+        min_interval_s: 0.5
         extra_body: {}
       # Gemma 4 thinks only when asked to (no `reasoning` sent); json_mode stays off like for the other links
       - &gemma_31b
@@ -117,7 +123,7 @@ roles:
     # the same links without Cloud.ru's Qwen3-32B, which reads no images
     chain: [*paid_qwen, *groq_qwen, *free_qwen, *cloudru_vl, *gemma_31b, *gemma_26b]
 limits:
-  max_concurrency: 6
+  max_concurrency: 4  # model calls side by side per step (Cloud.ru's per-minute cap is shared by everyone on the key)
   requests_per_minute: 18  # OpenRouter's free models: 20 requests/min per account; the free links share this bucket
   timeout_s: 120
   max_attempts: 3

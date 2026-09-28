@@ -61,6 +61,7 @@ _R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 EMU_PER_PT = 12700
 
 MIN_FILL_CONTRAST = 1.4  # a bar, slice or line must stand off its ground at least this much
+LEAD_MIN_CONTRAST = 2.2  # the lead colour of a chart (its largest slice, its highlighted bar) reads clearly on the ground
 DARK_MUTED_DE = 34.0  # on a dark ground the stepped-back bars are as bright as this distance from the accent allows
 MIN_SERIES_DE = 20.0  # CIE76 distance between two series colours that a reader can tell apart
 SAME_HUE_DE = 32.0  # … and between two shades of the same hue
@@ -308,11 +309,49 @@ def pie_shades(values: Sequence[Optional[float]], accent: str, ground: Optional[
                 break
             path.append((share, path[-1][1] + delta_e(c, _mix(accent, ground_, share + 0.02))))
         total = path[-1][1]
+        if total < POLE_SWITCH_DE and m >= 1:
+            # the accent and the ground are near kin (a coral accent on a magenta slide): tints toward the ground all
+            # look alike — the slices step toward white or black instead, whichever keeps them visible on the ground
+            alt = _pole_shades(accent, ground_, floor, m)
+            if alt is not None:
+                for r, j in enumerate(order[1:]):
+                    out[j] = (alt[r], 1.0)
+                return out
         step = min(32.0, total / m) if total > 0 else 0.0
         for r, j in enumerate(order[1:]):
             target = step * (r + 1)
             sh = next((a for a, d in path if d >= target - 1e-6), path[-1][0])
             out[j] = (accent, sh)
+    return out
+
+
+POLE_SWITCH_DE = 40.0  # the way from the accent to the ground this short (ΔE) leaves no room for distinct tints
+
+
+def _pole_shades(accent: str, ground: str, floor: float, m: int) -> Optional[list[str]]:
+    """`m` solid colours stepping from the accent toward white or black (the pole with the longer visible way), each
+    ≥ `floor`:1 off the ground and evenly spaced by ΔE (neighbours up to 32 apart); None when neither pole helps."""
+    best: Optional[tuple[float, list[tuple[float, float]], str]] = None
+    for pole in ("FFFFFF", "000000"):
+        path = [(0.0, 0.0)]
+        t = 0.0
+        while t < 0.9:
+            t = round(t + 0.02, 3)
+            c = _mix(accent, pole, 1.0 - t)  # the accent moved t of the way to the pole
+            if contrast_ratio(c, ground) < floor:
+                break
+            path.append((t, path[-1][1] + delta_e(c, _mix(accent, pole, 1.0 - (t - 0.02)))))
+        if len(path) > 1 and (best is None or path[-1][1] > best[0]):
+            best = (path[-1][1], path, pole)
+    if best is None or best[0] < 12.0:
+        return None
+    total, path, pole = best
+    step = min(32.0, total / m)
+    out = []
+    for r in range(m):
+        target = step * (r + 1)
+        t = next((a for a, d in path if d >= target - 1e-6), path[-1][0])
+        out.append(_mix(accent, pole, 1.0 - t))
     return out
 
 
@@ -441,8 +480,53 @@ def _fill_color(holder, scheme: dict[str, str], part=None, region=None) -> Optio
             blip = child.find(_a("blip"))
             rid = blip.get(f"{{{_R}}}embed") if blip is not None else None
             if rid:
-                return _picture_mean(part, rid, region)
+                # a picture fill that is mostly transparent there (a grain or noise texture over a gradient) is no
+                # ground: what lies under it is
+                got = _picture_cover(part, rid, region)
+                return got[0] if got is not None and got[1] >= 0.5 else None
     return None
+
+
+def _picture_cover(part, rid: str, region=None) -> Optional[tuple[str, float]]:
+    """(mean colour of the picture's opaque pixels, their coverage 0–1) inside `region` = (x0, y0, x1, y1) fractions."""
+    try:
+        from PIL import Image
+
+        blob = part.related_part(rid).blob
+        im = Image.open(io.BytesIO(blob))
+        im.draft("RGB", (256, 256))
+        im = im.convert("RGBA")
+        w, h = im.size
+        if region:
+            x0, y0, x1, y1 = (max(0.0, min(1.0, v)) for v in region)
+            if x1 - x0 > 0.01 and y1 - y0 > 0.01:
+                im = im.crop((int(x0 * w), int(y0 * h), max(int(x0 * w) + 1, int(x1 * w)), max(int(y0 * h) + 1, int(y1 * h))))
+        px = list(im.resize((24, 24)).getdata())
+        wsum = sum(p[3] for p in px)
+        cover = wsum / (255.0 * len(px))
+        if wsum <= 0:
+            return None
+        rgb = [sum(p[i] * p[3] for p in px) / wsum for i in range(3)]
+        return "".join(f"{int(round(x)):02X}" for x in rgb), cover
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _picture_ground(part, rid: Optional[str], region, base) -> Optional[str]:
+    """The colour a picture paints as a ground: None when it is mostly transparent there (a vapour trail, a glow — the
+    ground is what lies under it), its opaque colour laid over `base()` (the slide's background) where partly see-through."""
+    if not rid:
+        return None
+    got = _picture_cover(part, rid, region)
+    if got is None:
+        return None
+    hx, cover = got
+    if cover < 0.5:
+        return None
+    if cover >= 0.97:
+        return hx
+    under = base() or "FFFFFF"
+    return _mix(hx, under, cover)
 
 
 def _picture_mean(part, rid: str, region=None) -> Optional[str]:
@@ -491,6 +575,13 @@ def slide_ground(slide: Slide, bbox: Bbox) -> Optional[str]:
     for shp in reversed(shapes):
         el = shp._element
         kind = _local(el)
+        if kind == "grpSp":
+            # a picture wrapped in a group (Canva and Google Slides exports group their backgrounds): its box in slide
+            # coordinates through the group's scaling
+            got = _group_picture_ground(slide, el, bbox, scheme)
+            if got:
+                return got
+            continue
         if kind not in ("sp", "pic"):
             continue
         x, y, w, h = shp.left, shp.top, shp.width, shp.height
@@ -506,7 +597,7 @@ def slide_ground(slide: Slide, bbox: Bbox) -> Optional[str]:
             bf = el.find(f"{{{_P}}}blipFill")
             blip = bf.find(_a("blip")) if bf is not None else None
             rid = blip.get(f"{{{_R}}}embed") if blip is not None else None
-            got = _picture_mean(slide.part, rid, region) if rid else None
+            got = _picture_ground(slide.part, rid, region, lambda: _template_ground(slide, bbox, scheme) or _bg_color(slide, bbox, scheme))
         else:
             got = _fill_color(sppr, scheme, slide.part, region)
             if got is None and sppr is not None and not any(_local(c) in ("noFill", "solidFill", "gradFill", "blipFill", "pattFill") for c in sppr):
@@ -520,6 +611,62 @@ def slide_ground(slide: Slide, bbox: Bbox) -> Optional[str]:
     got = _template_ground(slide, bbox, scheme)
     if got:
         return got
+    return _bg_color(slide, bbox, scheme)
+
+
+def _group_picture_ground(slide: Slide, grp, bbox: Bbox, scheme: dict[str, str]) -> Optional[str]:
+    """The ground a group paints under `bbox`: its topmost picture (at any depth) holding the box's centre and
+    covering half of it, in slide coordinates."""
+    cx, cy = bbox.x + bbox.w / 2, bbox.y + bbox.h / 2
+    area = max(bbox.w * bbox.h, 1)
+
+    def to_slide(el, box):
+        x, y, w, h = box
+        parent = el.getparent()
+        while parent is not None and _local(parent) == "grpSp":
+            xf = parent.find(f"{{{_P}}}grpSpPr/{_a('xfrm')}")
+            if xf is None:
+                return None
+            off, ext, choff, chext = xf.find(_a("off")), xf.find(_a("ext")), xf.find(_a("chOff")), xf.find(_a("chExt"))
+            if off is None or ext is None:
+                return None
+            gx, gy, gw, gh = float(off.get("x") or 0), float(off.get("y") or 0), float(ext.get("cx") or 0), float(ext.get("cy") or 0)
+            ox, oy = (float(choff.get("x") or 0), float(choff.get("y") or 0)) if choff is not None else (gx, gy)
+            ow, oh = (float(chext.get("cx") or 0), float(chext.get("cy") or 0)) if chext is not None else (gw, gh)
+            sx, sy = (gw / ow if ow else 1.0), (gh / oh if oh else 1.0)
+            x, y, w, h = gx + (x - ox) * sx, gy + (y - oy) * sy, w * sx, h * sy
+            parent = parent.getparent()
+        return x, y, w, h
+
+    pics = [e for e in grp.iter(f"{{{_P}}}pic")]
+    for el in reversed(pics):
+        xf = el.find(f"{{{_P}}}spPr/{_a('xfrm')}")
+        off = xf.find(_a("off")) if xf is not None else None
+        ext = xf.find(_a("ext")) if xf is not None else None
+        if off is None or ext is None:
+            continue
+        box = to_slide(el, (float(off.get("x") or 0), float(off.get("y") or 0), float(ext.get("cx") or 0), float(ext.get("cy") or 0)))
+        if box is None:
+            continue
+        x, y, w, h = box
+        if w <= 0 or h <= 0 or not (x <= cx <= x + w and y <= cy <= y + h):
+            continue
+        ox = max(0.0, min(x + w, bbox.x + bbox.w) - max(x, bbox.x))
+        oy = max(0.0, min(y + h, bbox.y + bbox.h) - max(y, bbox.y))
+        if ox * oy < 0.5 * area:
+            continue
+        blip = el.find(f"{{{_P}}}blipFill/{_a('blip')}")
+        rid = blip.get(f"{{{_R}}}embed") if blip is not None else None
+        region = ((bbox.x - x) / w, (bbox.y - y) / h, (bbox.x + bbox.w - x) / w, (bbox.y + bbox.h - y) / h)
+        got = _picture_ground(slide.part, rid, region, lambda: _template_ground(slide, bbox, scheme) or _bg_color(slide, bbox, scheme))
+        if got:
+            return got
+    return None
+
+
+def _bg_color(slide: Slide, bbox: Bbox, scheme: dict[str, str]) -> Optional[str]:
+    """The background the slide, its layout or its master sets (solid, gradient or picture, through the theme)."""
+    sw, sh = _slide_size(slide)
     region = (bbox.x / sw, bbox.y / sh, (bbox.x + bbox.w) / sw, (bbox.y + bbox.h) / sh)
     holders = []
     try:
@@ -590,7 +737,7 @@ def _template_ground(slide: Slide, bbox: Bbox, scheme: dict[str, str]) -> Option
                 bf = el.find(f"{{{_P}}}blipFill")
                 blip = bf.find(_a("blip")) if bf is not None else None
                 rid = blip.get(f"{{{_R}}}embed") if blip is not None else None
-                got = _picture_mean(holder.part, rid, region) if rid else None
+                got = _picture_ground(holder.part, rid, region, lambda: _bg_color(slide, bbox, scheme))
             else:
                 got = _fill_color(sppr, scheme, holder.part, region)
                 if got is None and sppr is not None and not any(_local(c) in ("noFill", "solidFill", "gradFill", "blipFill", "pattFill") for c in sppr):
@@ -1596,8 +1743,11 @@ def add_chart(
     # colour takes the lead, as white bars on a brand-blue slide.
     manifest = [c for c in list(style.series_colors or []) if _norm(c)]
     lead = _norm(accent_hex) or (manifest[0] if manifest else None) or "0077FF"
-    if contrast_ratio(lead, ground) < MIN_FILL_CONTRAST:
-        lead = text
+    if contrast_ratio(lead, ground) < LEAD_MIN_CONTRAST:
+        # the chart's lead colour must read on its ground (a dark teal on a dark purple picture is lost): the next
+        # colour of the template that does, else the text colour (white bars on a brand-blue slide)
+        cands = [_norm(c) for c in manifest[1:] + template_chart_colors(slide) + _theme_accents(slide) if _norm(c)]
+        lead = next((c for c in cands if contrast_ratio(c, ground) >= LEAD_MIN_CONTRAST and _is_data_color(c)), text)
     extra = template_chart_colors(slide) + _theme_accents(slide) + manifest[1:] + ([manifest[0]] if manifest else [])
     others = [j for j, c in enumerate(cats) if is_other_category(c)] if kind in ("pie", "doughnut") and n > 2 else []
     if kind in ("pie", "doughnut"):

@@ -165,8 +165,12 @@ def assign_color_roles(tokens: list[ColorToken], primary_family: Family = Family
 
     # accents: saturated colours by weight; saturated backgrounds (brand dividers) count too
     def is_accent_candidate(t: ColorToken) -> bool:
-        if _saturation(t.hex) < 0.25 or not (0.05 < relative_luminance(t.hex) < 0.95):
-            return False
+        lum, sat = relative_luminance(t.hex), _saturation(t.hex)
+        if sat < 0.25 or not (0.05 < lum < 0.95):
+            # a deep brand colour — a burgundy heading, a navy band, a forest green (luminance 0.01–0.05) — is an
+            # accent when it is clearly a hue, never a tinted black
+            if not (0.012 < lum <= 0.05 and sat >= 0.4):
+                return False
         return not any(r.startswith("text.") for r in t.roles) or cw(t, "fill") > 0
 
     accents = [t for t in tokens if is_accent_candidate(t)]

@@ -393,7 +393,7 @@ def _picture_cells(pkg: PptxPackage, image_part: str, crop, el: Optional[etree._
     flip_h = xfrm is not None and xfrm.get("flipH") in ("1", "true")
     flip_v = xfrm is not None and xfrm.get("flipV") in ("1", "true")
     l, t, r, b = crop or (0.0, 0.0, 0.0, 0.0)
-    key = (str(getattr(pkg, "path", "")), image_part, (l, t, r, b), flip_h, flip_v)
+    key = (_pkg_version(pkg), image_part, (l, t, r, b), flip_h, flip_v)
     if key not in _CELLS:
         from verstka.rendering.layers import image_cells  # one grid for the audit and the renderer (round 4.1, C3-2)
 
@@ -423,7 +423,7 @@ def _photo_cells(pkg: PptxPackage, image_part: str, crop, el: Optional[etree._El
     flip_h = xfrm is not None and xfrm.get("flipH") in ("1", "true")
     flip_v = xfrm is not None and xfrm.get("flipV") in ("1", "true")
     l, t, r, b = crop or (0.0, 0.0, 0.0, 0.0)
-    key = (str(getattr(pkg, "path", "")), image_part, (l, t, r, b), flip_h, flip_v)
+    key = (_pkg_version(pkg), image_part, (l, t, r, b), flip_h, flip_v)
     if key not in _FINE:
         from verstka.rendering.layers import image_fine_std
 
@@ -433,6 +433,16 @@ def _photo_cells(pkg: PptxPackage, image_part: str, crop, el: Optional[etree._El
             _FINE[key] = None
     fine = _FINE[key]
     return cells.model_copy(update={"fine_std": list(fine)}) if fine else cells
+
+
+def _pkg_version(pkg: PptxPackage) -> tuple:
+    """A cache key for one version of one file: a deck re-rendered at the same path (autofix) is another file."""
+    try:
+        from verstka.analysis.ground import package_key
+
+        return package_key(pkg)
+    except Exception:  # noqa: BLE001
+        return (str(getattr(pkg, "path", "")), id(pkg))
 
 
 def _full_slide(f) -> bool:
@@ -446,13 +456,15 @@ def _opaque_box(pkg: PptxPackage, image_part: str, crop, box):
     if not image_part or image_part.lower().endswith((".svg", ".emf", ".wmf")) or not pkg.exists(image_part):
         return None
     l, t, r, b = crop or (0.0, 0.0, 0.0, 0.0)
-    key = (str(getattr(pkg, "path", "")), image_part, (l, t, r, b))
+    key = (_pkg_version(pkg), image_part, (l, t, r, b))
     if key not in _OPAQUE:
         frac = None
         try:
             from PIL import Image
 
             with Image.open(io.BytesIO(pkg.read(image_part))) as im:
+                if im.mode in ("P", "PA", "LA", "La", "RGBa") or "transparency" in im.info:
+                    im = im.convert("RGBA")  # a palette PNG keeps its alpha in the palette (tRNS), not in a band
                 if "A" in im.getbands():
                     iw, ih = im.size
                     vis = (int(l * iw), int(t * ih), max(int((1 - r) * iw), int(l * iw) + 1), max(int((1 - b) * ih), int(t * ih) + 1))

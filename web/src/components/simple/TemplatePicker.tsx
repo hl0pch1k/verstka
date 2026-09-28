@@ -1,5 +1,5 @@
-// «① Выберите шаблон»: the covers of the analysed templates in one stable row, «Разбор шаблона ›» and «Свой .pptx» in
-// the step header (TemplateActions), and a .pptx dropped anywhere on the step (useTemplateDrop). While a file is being
+// «① Выберите шаблон»: the covers of the analysed templates in one stable row, «Разбор шаблона ›» and «Свой шаблон» in
+// the step header (TemplateActions), and a template file (.pptx, .potx, .ppt, .odp …) dropped anywhere on the step (useTemplateDrop). While a file is being
 // analysed a skeleton tile stands where the new template will appear. Motion: skeletons until the list arrives, then the
 // covers fade up in a 40 ms cascade (once); «Ещё N» cascades the revealed covers; a new template's cover fades in over
 // its skeleton when the picture has loaded.
@@ -9,6 +9,7 @@ import { api } from "../../api";
 import { errText } from "../../lib/narrate";
 import { EASE, MOTION, prefersReducedMotion, stagger } from "../../lib/motion";
 import { templateTitle } from "../../lib/plain";
+import { isTemplateFile, TEMPLATE_ACCEPT } from "../../lib/templateFiles";
 import { cn, plural } from "../../lib/utils";
 import { useApp } from "../../store";
 import type { TemplateListItem } from "../../types";
@@ -17,7 +18,6 @@ import { Modal } from "../ui/Modal";
 import { Progress } from "../ui/Progress";
 
 const ROW = 4; // one row of four tiles
-const PPTX_ACCEPT = ".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation";
 
 // ---- the upload shared by the header button, the drop zone and the grid (a tiny module store: no store fields)
 
@@ -42,7 +42,7 @@ function useTemplateUpload() {
   const blocked = !!state.name || running || !!healthError;
   const take = async (file: File | undefined) => {
     if (!file || blocked) return;
-    if (!/\.pptx$/i.test(file.name)) return void uploadTemplate(file, false); // the flow says what is wrong, no skeleton
+    if (!isTemplateFile(file.name)) return void uploadTemplate(file, false); // the flow says what is wrong, no skeleton
     setUpload({ name: file.name });
     try {
       await uploadTemplate(file, false); // resolves once the analysis is over (or failed)
@@ -53,14 +53,14 @@ function useTemplateUpload() {
   const pick = () => {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = PPTX_ACCEPT;
+    input.accept = TEMPLATE_ACCEPT;
     input.onchange = () => void take(input.files?.[0]);
     input.click();
   };
   return { take, pick, blocked, job, name: state.name, over: state.over };
 }
 
-/** Drag-and-drop of a .pptx anywhere on the element the handlers go on (step 1). */
+/** Drag-and-drop of a template file anywhere on the element the handlers go on (step 1). */
 export function useTemplateDrop() {
   const { take, blocked } = useTemplateUpload();
   const files = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes("Files");
@@ -82,7 +82,7 @@ export function useTemplateDrop() {
   };
 }
 
-/** The step header's right side: «Разбор шаблона ›» (with a loaded template) and «Свой .pptx». When the drawer the
+/** The step header's right side: «Разбор шаблона ›» (with a loaded template) and «Свой шаблон». When the drawer the
  *  first one opened closes, the focus comes back to it (the drawer itself does not know who opened it). */
 export function TemplateActions() {
   const { templates, templateId, detail, setDetail } = useApp();
@@ -115,7 +115,7 @@ export function TemplateActions() {
         </Button>
       )}
       <Button size="sm" variant="tonal" icon={Upload} disabled={blocked} onClick={pick}>
-        Свой .pptx
+        Свой шаблон
       </Button>
     </>
   );
@@ -344,7 +344,8 @@ export function TemplatePicker() {
           className="tap-soft flex h-44 w-full cursor-pointer flex-col items-center justify-center gap-2 rounded-xl bg-zinc-100 text-body font-semibold text-zinc-700 hover:bg-zinc-200/70 animate-fade disabled:cursor-not-allowed disabled:opacity-40"
         >
           <Upload className="h-6 w-6 text-zinc-500" aria-hidden />
-          Загрузите .pptx
+          Загрузите шаблон
+          <span className="text-footnote font-normal text-zinc-500">.pptx, .potx, .ppt или .odp</span>
         </button>
       ) : (
         <div ref={grid} className="grid grid-cols-4 gap-4">

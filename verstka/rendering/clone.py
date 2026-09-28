@@ -14,7 +14,7 @@ from lxml import etree
 from pptx.slide import Slide
 
 from verstka.analysis.patterns import container_inset
-from verstka.analysis.shapes import looks_like_placeholder
+from verstka.analysis.shapes import looks_like_placeholder, looks_like_sample_value
 from verstka.analysis.xmlns import q
 from verstka.ingest.workspace import TemplateWorkspace
 from verstka.matching.scorer import awkward_breaks, balanced_lines, bind_short_words, bookend_max_lines, cover_goal, display_fit, display_lines, is_placeholder_text, same_words, split_display_title
@@ -27,6 +27,7 @@ from verstka.rendering.groups import adjust_group, cell_bbox, cell_riders, cells
 from verstka.rendering.images import replace_picture
 from verstka.rendering.layers import ground_under, heading_band, opaque_box
 from verstka.rendering.tables import add_table
+from verstka.ru import typeset_figures
 from verstka.rendering.textfill import ParagraphSpec, clear_text, effective_insets, ensure_txbody, fill_text, has_visible_style, set_text_size, shape_text, style_runs
 from verstka.schemas.common import EMU_PER_PT, Bbox, PatternKind, SlotRole, contrast_ratio, relative_luminance
 from verstka.schemas.layout import LayoutSlide
@@ -2344,7 +2345,12 @@ def _new_text(ctx: _SlideCtx, src: etree._Element, name: str, family: Optional[s
     for para in el.iter(q("a:p")):
         if all(r.find(q("a:rPr")) is None for r in para.findall(q("a:r"))) and para.find(q("a:endParaRPr")) is None:
             para.append(etree.Element(q("a:endParaRPr"), {"lang": "ru-RU", "cap": "none", "spc": "0"}))
-    src.addnext(el)
+    # the new box stands on the slide itself, never inside the group its source sits in (the title of a sample may be
+    # grouped with a decorative bar: a subtitle placed in the group's child coordinates would land off the slide)
+    anchor = src
+    while anchor.getparent() is not None and etree.QName(anchor.getparent()).localname == "grpSp":
+        anchor = anchor.getparent()
+    anchor.addnext(el)
     style_runs(el, family or ctx.typo.primary_family, color, align=None)
     sid = ctx.id_of(el)
     if sid:
@@ -2422,7 +2428,7 @@ def _write_lines(el: etree._Element, lines: list[str]) -> None:
                 p.append(br)
         r = copy.deepcopy(r0)
         t = r.find(q("a:t"))
-        t.text = line
+        t.text = typeset_figures(line)
         if line != line.strip():
             t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
         if end is not None:
@@ -3215,6 +3221,79 @@ def _snap_display(size: float, sizes: list[float]) -> float:
     return float(int(size)) if size >= 12 else round(size, 1)
 
 
+def _absolute_bbox(el: etree._Element) -> Optional[tuple[int, int, int, int]]:
+    """The box of an element in slide coordinates, through every group it sits in (their chOff/chExt scaling)."""
+    b = element_bbox(el)
+    if b is None:
+        return None
+    x, y, w, h = (float(v) for v in b)
+    parent = el.getparent()
+    while parent is not None and etree.QName(parent).localname == "grpSp":
+        xfrm = parent.find(q("p:grpSpPr") + "/" + q("a:xfrm"))
+        if xfrm is None:
+            break
+        off, ext = xfrm.find(q("a:off")), xfrm.find(q("a:ext"))
+        choff, chext = xfrm.find(q("a:chOff")), xfrm.find(q("a:chExt"))
+        if off is None or ext is None:
+            break
+        gx, gy, gw, gh = (float(off.get("x") or 0), float(off.get("y") or 0), float(ext.get("cx") or 0), float(ext.get("cy") or 0))
+        cx, cy = (float(choff.get("x") or 0), float(choff.get("y") or 0)) if choff is not None else (gx, gy)
+        cw, ch = (float(chext.get("cx") or 0), float(chext.get("cy") or 0)) if chext is not None else (gw, gh)
+        sx, sy = (gw / cw if cw else 1.0), (gh / ch if ch else 1.0)
+        x, y, w, h = gx + (x - cx) * sx, gy + (y - cy) * sy, w * sx, h * sy
+        parent = parent.getparent()
+    return int(x), int(y), int(w), int(h)
+
+
+def _lift_out_of_group(el: etree._Element) -> None:
+    """Move an element out of the groups it sits in onto the slide itself, at the same place (its box in slide
+    coordinates): what is written and placed in it afterwards is placed on the slide."""
+    parent = el.getparent()
+    if parent is None or etree.QName(parent).localname != "grpSp":
+        return
+    b = _absolute_bbox(el)
+    top = parent
+    while top.getparent() is not None and etree.QName(top.getparent()).localname == "grpSp":
+        top = top.getparent()
+    parent.remove(el)
+    top.addnext(el)
+    if b is not None:
+        set_element_pos(el, x=b[0], y=b[1], w=b[2], h=b[3])
+
+
+def _text_over_pictures(ctx: _SlideCtx) -> None:
+    """A cover whose sample sets its title behind a picture (a word behind a can of soda, a product shot over a big
+    word — a design of the sample's own short title): the deck's longer words would stand hidden behind it. Every text
+    the slide carries is brought in front of the pictures and drawings that cover a quarter of it."""
+    tree = next(iter(ctx.slide._element.iter(q("p:spTree"))), None)
+    if tree is None:
+        return
+    kids = [c for c in tree if isinstance(c.tag, str) and etree.QName(c).localname in ("sp", "pic", "grpSp", "graphicFrame")]
+    texts = [c for c in kids if etree.QName(c).localname == "sp" and "".join(t.text or "" for t in c.iter(q("a:t"))).strip()]
+    moved = 0
+    for el in texts:
+        b = element_bbox(el)
+        if not b or b[2] <= 0 or b[3] <= 0:
+            continue
+        area = b[2] * b[3]
+        after = kids[kids.index(el) + 1:] if el in kids else []
+        for o in after:
+            if etree.QName(o).localname not in ("pic", "grpSp") or o.find(".//" + q("a:blip")) is None:
+                continue
+            ob = element_bbox(o)
+            if not ob:
+                continue
+            ox = max(0, min(b[0] + b[2], ob[0] + ob[2]) - max(b[0], ob[0]))
+            oy = max(0, min(b[1] + b[3], ob[1] + ob[3]) - max(b[1], ob[1]))
+            if ox * oy >= 0.25 * area:
+                tree.remove(el)
+                tree.append(el)
+                moved += 1
+                break
+    if moved:
+        ctx.warnings.append(f"{moved} text block(s) brought in front of the pictures that covered them")
+
+
 def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
     """Cover, divider, closing slide: the heading set large on the sample's own ground and art — up to three
     balanced lines at no less than 0.85 of the sample size where the room allows, never under a logo or a picture;
@@ -3236,6 +3315,9 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
         # a painted button («Ссылка» on the WorkSpace call-to-action) is no place for a sentence: it leaves with the
         # sample's other boxes and the subtitle is set as a plain line under the heading
         carrier, s_el = None, None
+    for el_ in (t_el, s_el):
+        if el_ is not None:
+            _lift_out_of_group(el_)  # a heading or a subtitle grouped with a bar is placed in slide coordinates
     t_box0 = _ensure_xfrm(ctx, t_el)
     s_box0 = _ensure_xfrm(ctx, s_el) if s_el is not None else None
     if not t_box0:
@@ -3983,8 +4065,18 @@ def render_clone(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
     c = oslide.content
     ctx.keeps_pictures = bool(c.image_hint or c.chart is not None or c.table is not None)
     renumber_page_chrome(ctx.els, pattern.chrome_shape_ids, pattern.source_slide, len(builder.created))
+    # a header's or a footer's sample values of a free template («JOHN DOE», «NEW YORK», «2023», the template site)
+    for sid in pattern.chrome_shape_ids:
+        el = ctx.els.get(sid)
+        if el is None or el.getparent() is None or etree.QName(el).localname != "sp":
+            continue
+        txt = shape_text(el)
+        if txt.strip() and looks_like_sample_value(txt):
+            remove_element(el)
+            ctx.removed.add(sid)
     if _is_bookend(oslide) and ctx.slots(SlotRole.title):
         size, lines = _render_bookend(ctx, oslide)
+        _text_over_pictures(ctx)
         if size:
             # the plan explains the slide as it was set, not as the scorer estimated it
             plan_slide.fit["title_fit"] = f"{size:g} пт, строк {lines}"
