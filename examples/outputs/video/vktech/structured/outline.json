@@ -1,0 +1,1442 @@
+{
+  "title": "Verstka — цифровой дизайнер презентаций",
+  "subtitle": null,
+  "audience": null,
+  "purpose": "product",
+  "strategy": "structured",
+  "language": "ru",
+  "planned_by": "agent",
+  "slides": [
+    {
+      "id": "sl2",
+      "kind": "cards",
+      "section": null,
+      "headline": "Оформление отнимает больше времени, чем содержание",
+      "subtitle": null,
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [
+          {
+            "title": "Ручная вёрстка",
+            "text": "Подобрать макет, подвинуть блоки, подогнать цвета под фирменный стиль",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "ИИ ломает стиль",
+            "text": "Нейросети неплохо пишут текст, но не воспроизводят дизайн-систему компании",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Шаблон — не инструкция",
+            "text": "Плейсхолдеры не объясняют, как построить новый слайд",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          }
+        ],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": [],
+        "chart2": null,
+        "formula": null,
+        "photo_slot": null
+      },
+      "notes": "Подготовка презентации занимает часы, а иногда и дни, и большая часть времени уходит не на содержание, а на оформление. Основные проблемы: ручная вёрстка, ИИ, который не воспроизводит стиль компании, и шаблоны, которые не объясняют, как построить новый слайд.",
+      "fact_refs": [],
+      "takeaway": null,
+      "footnote": null,
+      "rationale": "Формат карточек позволяет кратко и ясно представить три ключевые проблемы оформления презентаций, как указано в исходном тексте.",
+      "spec_ref": 1,
+      "alternatives": [
+        {
+          "kind": "bullets",
+          "change": "Более компактный способ отображения информации",
+          "content": {
+            "bullets": [
+              "Ручная вёрстка — подобрать макет, подвинуть блоки, подогнать цвета под фирменный стиль",
+              "ИИ ломает стиль — нейросети неплохо пишут текст, но не воспроизводят дизайн-систему компании",
+              "Шаблон — не инструкция — плейсхолдеры не объясняют, как построить новый слайд"
+            ],
+            "paragraphs": [],
+            "items": [],
+            "numbers": [],
+            "table": null,
+            "chart": null,
+            "quote": null,
+            "quote_author": null,
+            "image_hint": null,
+            "columns": [],
+            "chart2": null,
+            "formula": null,
+            "photo_slot": null
+          }
+        },
+        {
+          "kind": "two_column",
+          "change": "Позволяет разделить проблемы на две колонки для лучшей читаемости",
+          "content": {
+            "bullets": [],
+            "paragraphs": [],
+            "items": [],
+            "numbers": [],
+            "table": null,
+            "chart": null,
+            "quote": null,
+            "quote_author": null,
+            "image_hint": null,
+            "columns": [
+              {
+                "title": "Ручная вёрстка",
+                "text": "",
+                "icon_hint": null,
+                "number": null,
+                "bullets": [
+                  "Подобрать макет, подвинуть блоки, подогнать цвета под фирменный стиль"
+                ]
+              },
+              {
+                "title": "ИИ ломает стиль",
+                "text": "",
+                "icon_hint": null,
+                "number": null,
+                "bullets": [
+                  "Нейросети неплохо пишут текст, но не воспроизводят дизайн-систему компании"
+                ]
+              },
+              {
+                "title": "Шаблон — не инструкция",
+                "text": "",
+                "icon_hint": null,
+                "number": null,
+                "bullets": [
+                  "Плейсхолдеры не объясняют, как построить новый слайд"
+                ]
+              }
+            ],
+            "chart2": null,
+            "formula": null,
+            "photo_slot": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "sl3",
+      "kind": "bullets",
+      "section": null,
+      "headline": "Verstka создаёт три редактируемые презентации за 2–3 минуты",
+      "subtitle": null,
+      "content": {
+        "bullets": [
+          "На входе — шаблон и текст — Verstka использует любой шаблон PowerPoint и текст",
+          "Шаблон — набор правил — палитра, кегли, сетка, поля, логотипы и колонтитулы",
+          "На выходе — три редактируемые презентации — три варианта презентации в стиле шаблона"
+        ],
+        "paragraphs": [],
+        "items": [],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": [],
+        "chart2": null,
+        "formula": null,
+        "photo_slot": null
+      },
+      "notes": "Verstka интерпретирует шаблон как набор дизайнерских правил и применяет их к тексту, создавая три редактируемые презентации за 2–3 минуты.",
+      "fact_refs": [],
+      "takeaway": "Из шаблона и текста формируются три варианта презентации",
+      "footnote": null,
+      "rationale": "Компактно отображает три ключевых пункта.",
+      "spec_ref": 2,
+      "alternatives": [
+        {
+          "kind": "cards",
+          "change": "Форма cards подходит для отображения трёх ключевых этапов процесса решения — вход, обработка, выход — в виде карточек, каждая из которых кратко описывает этап.",
+          "content": {
+            "bullets": [],
+            "paragraphs": [],
+            "items": [
+              {
+                "title": "На входе — шаблон и текст",
+                "text": "Verstka использует любой шаблон PowerPoint и текст",
+                "icon_hint": null,
+                "number": null,
+                "bullets": []
+              },
+              {
+                "title": "Шаблон — набор правил",
+                "text": "Палитра, кегли, сетка, поля, логотипы и колонтитулы",
+                "icon_hint": null,
+                "number": null,
+                "bullets": []
+              },
+              {
+                "title": "На выходе — три редактируемые презентации",
+                "text": "Три варианта презентации в стиле шаблона",
+                "icon_hint": null,
+                "number": null,
+                "bullets": []
+              }
+            ],
+            "numbers": [],
+            "table": null,
+            "chart": null,
+            "quote": null,
+            "quote_author": null,
+            "image_hint": null,
+            "columns": [],
+            "chart2": null,
+            "formula": null,
+            "photo_slot": null
+          }
+        },
+        {
+          "kind": "process",
+          "change": "Показывает этапы как последовательность",
+          "content": {
+            "bullets": [],
+            "paragraphs": [],
+            "items": [
+              {
+                "title": "На входе — шаблон и текст",
+                "text": "Verstka использует любой шаблон PowerPoint и текст",
+                "icon_hint": null,
+                "number": null,
+                "bullets": []
+              },
+              {
+                "title": "Шаблон — набор правил",
+                "text": "Палитра, кегли, сетка, поля, логотипы и колонтитулы",
+                "icon_hint": null,
+                "number": null,
+                "bullets": []
+              },
+              {
+                "title": "На выходе — три редактируемые презентации",
+                "text": "Три варианта презентации в стиле шаблона",
+                "icon_hint": null,
+                "number": null,
+                "bullets": []
+              }
+            ],
+            "numbers": [],
+            "table": null,
+            "chart": null,
+            "quote": null,
+            "quote_author": null,
+            "image_hint": null,
+            "columns": [],
+            "chart2": null,
+            "formula": null,
+            "photo_slot": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "sl4",
+      "kind": "process",
+      "section": null,
+      "headline": "Пять этапов работы агента",
+      "subtitle": null,
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [
+          {
+            "title": "Аналитик",
+            "text": "Находит в тексте слайды, ряды данных и просьбы",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Дизайнер",
+            "text": "Продумывает каждый слайд отдельно",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Критик",
+            "text": "Сверяет план с текстом и правилами",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Компилятор",
+            "text": "Проверяет каждое число",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Вёрстка",
+            "text": "Собирает слайды по дизайн-системе шаблона",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          }
+        ],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": [],
+        "chart2": null,
+        "formula": null,
+        "photo_slot": null
+      },
+      "notes": "Агент работает по пяти этапам: аналитик находит слайды и данные, дизайнер разрабатывает каждый слайд, критик проверяет соответствие тексту и правилам, компилятор проверяет числа, вёрстка собирает слайды по шаблону.",
+      "fact_refs": [],
+      "takeaway": null,
+      "footnote": null,
+      "rationale": "Формат процесса подходит для отображения последовательности этапов работы агента, как описано в тексте.",
+      "spec_ref": 3,
+      "alternatives": [
+        {
+          "kind": "timeline",
+          "change": "Позволит визуализировать этапы как временную последовательность",
+          "content": {
+            "bullets": [],
+            "paragraphs": [],
+            "items": [
+              {
+                "title": "Аналитик",
+                "text": "Находит в тексте слайды, ряды данных и просьбы",
+                "icon_hint": null,
+                "number": null,
+                "bullets": []
+              },
+              {
+                "title": "Дизайнер",
+                "text": "Продумывает каждый слайд отдельно",
+                "icon_hint": null,
+                "number": null,
+                "bullets": []
+              },
+              {
+                "title": "Критик",
+                "text": "Сверяет план с текстом и правилами",
+                "icon_hint": null,
+                "number": null,
+                "bullets": []
+              },
+              {
+                "title": "Компилятор",
+                "text": "Проверяет каждое число",
+                "icon_hint": null,
+                "number": null,
+                "bullets": []
+              },
+              {
+                "title": "Вёрстка",
+                "text": "Собирает слайды по дизайн-системе шаблона",
+                "icon_hint": null,
+                "number": null,
+                "bullets": []
+              }
+            ],
+            "numbers": [],
+            "table": null,
+            "chart": null,
+            "quote": null,
+            "quote_author": null,
+            "image_hint": null,
+            "columns": [],
+            "chart2": null,
+            "formula": null,
+            "photo_slot": null
+          }
+        },
+        {
+          "kind": "bullets",
+          "change": "Более компактное отображение этапов",
+          "content": {
+            "bullets": [
+              "Аналитик — находит в тексте слайды, ряды данных и просьбы",
+              "Дизайнер — продумывает каждый слайд отдельно",
+              "Критик — сверяет план с текстом и правилами",
+              "Компилятор — проверяет каждое число",
+              "Вёрстка — собирает слайды по дизайн-системе шаблона"
+            ],
+            "paragraphs": [],
+            "items": [],
+            "numbers": [],
+            "table": null,
+            "chart": null,
+            "quote": null,
+            "quote_author": null,
+            "image_hint": null,
+            "columns": [],
+            "chart2": null,
+            "formula": null,
+            "photo_slot": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "sl5",
+      "kind": "cards",
+      "section": null,
+      "headline": "Одинаковое содержание, разная подача",
+      "subtitle": null,
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [
+          {
+            "title": "Структурный",
+            "text": "Одна мысль на слайде, строгая сетка",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Визуальный",
+            "text": "Крупные цифры и наглядные схемы",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Компактный",
+            "text": "Вывод первой строкой, данные справа",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          }
+        ],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": [],
+        "chart2": null,
+        "formula": null,
+        "photo_slot": null
+      },
+      "notes": "Одинаковое содержание, разная подача. Нужны три карточки: «Структурный» — одна мысль на слайд и строгая сетка; «Визуальный» — крупные цифры и наглядные схемы; «Компактный» — вывод первой строкой, текст слева, данные справа.",
+      "fact_refs": [],
+      "takeaway": null,
+      "footnote": null,
+      "rationale": "Форма cards подходит для представления трёх вариантов вёрстки с кратким описанием каждого, как указано в исходном тексте.",
+      "spec_ref": 4,
+      "alternatives": [
+        {
+          "kind": "comparison",
+          "change": "Более визуальное сравнение трёх стилей вёрстки.",
+          "content": {
+            "bullets": [],
+            "paragraphs": [],
+            "items": [],
+            "numbers": [],
+            "table": null,
+            "chart": null,
+            "quote": null,
+            "quote_author": null,
+            "image_hint": null,
+            "columns": [
+              {
+                "title": "Структурный",
+                "text": "",
+                "icon_hint": null,
+                "number": null,
+                "bullets": [
+                  "Одна мысль на слайде, строгая сетка"
+                ]
+              },
+              {
+                "title": "Визуальный",
+                "text": "",
+                "icon_hint": null,
+                "number": null,
+                "bullets": [
+                  "Крупные цифры и наглядные схемы"
+                ]
+              },
+              {
+                "title": "Компактный",
+                "text": "",
+                "icon_hint": null,
+                "number": null,
+                "bullets": [
+                  "Вывод первой строкой, данные справа"
+                ]
+              }
+            ],
+            "chart2": null,
+            "formula": null,
+            "photo_slot": null
+          }
+        },
+        {
+          "kind": "table",
+          "change": "Более компактное представление информации в виде таблицы.",
+          "content": null
+        }
+      ]
+    },
+    {
+      "id": "sl6",
+      "kind": "chart",
+      "section": null,
+      "headline": "Целостность — самая большая категория проверок",
+      "subtitle": null,
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [],
+        "numbers": [],
+        "table": null,
+        "chart": {
+          "type": "bar",
+          "series_ids": [
+            "s_sl6_1"
+          ],
+          "title": null,
+          "unit": "проверок",
+          "highlight_index": null,
+          "categories": [
+            "Целостность",
+            "Вёрстка",
+            "Шаблон",
+            "Контент",
+            "Плотность"
+          ],
+          "series": [
+            {
+              "name": "Проверки",
+              "values": [
+                12.0,
+                11.0,
+                7.0,
+                6.0,
+                5.0
+              ]
+            }
+          ]
+        },
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": [],
+        "chart2": null,
+        "formula": null,
+        "photo_slot": null
+      },
+      "notes": "Наибольшее число проверок приходится на категорию «Целостность» — 12 проверок. Всего выполнено 41 детерминированная и 2 модельные проверки.",
+      "fact_refs": [],
+      "takeaway": "Всего проверок: 41 детерминированная и 2 модельные",
+      "footnote": null,
+      "rationale": "Гистограмма наглядно демонстрирует распределение числа проверок по категориям, а заголовок и takeaway отражают ключевые выводы из данных.",
+      "spec_ref": 5,
+      "alternatives": [
+        {
+          "kind": "stat_row",
+          "change": "показать ключевые цифры в виде строк с метками",
+          "content": null
+        },
+        {
+          "kind": "table",
+          "change": "представить данные в компактной табличной форме",
+          "content": {
+            "bullets": [],
+            "paragraphs": [],
+            "items": [],
+            "numbers": [],
+            "table": {
+              "columns": [
+                "",
+                "Проверки"
+              ],
+              "rows": [
+                [
+                  "Целостность",
+                  "12 проверок"
+                ],
+                [
+                  "Вёрстка",
+                  "11 проверок"
+                ],
+                [
+                  "Шаблон",
+                  "7 проверок"
+                ],
+                [
+                  "Контент",
+                  "6 проверок"
+                ],
+                [
+                  "Плотность",
+                  "5 проверок"
+                ]
+              ],
+              "unit": "проверок",
+              "caption": null,
+              "source_span": null
+            },
+            "chart": null,
+            "quote": null,
+            "quote_author": null,
+            "image_hint": null,
+            "columns": [],
+            "chart2": null,
+            "formula": null,
+            "photo_slot": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "sl7",
+      "kind": "stat_row",
+      "section": null,
+      "headline": "9 готовых презентаций без лишних чисел",
+      "subtitle": null,
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [],
+        "numbers": [
+          {
+            "value": "9",
+            "label": "Демо-презентаций",
+            "fact_id": null
+          },
+          {
+            "value": "116 → 123",
+            "label": "Сверенных чисел в каждой",
+            "fact_id": null
+          },
+          {
+            "value": "0",
+            "label": "Лишних чисел",
+            "fact_id": null
+          }
+        ],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": [],
+        "chart2": null,
+        "formula": null,
+        "photo_slot": null
+      },
+      "notes": "Каждое число плана сверяется с текстом до вёрстки и ещё раз в готовом PPTX.",
+      "fact_refs": [],
+      "takeaway": "Все цифры проверены дважды — в тексте и в PPTX",
+      "footnote": null,
+      "rationale": "Формат stat_row подходит для отображения трёх ключевых чисел с краткими пояснениями, что соответствует содержанию слайда.",
+      "spec_ref": 6,
+      "alternatives": [
+        {
+          "kind": "chart",
+          "change": "горизонтальная диаграмма: График может визуализировать количество сверенных чисел в каждой презентации.",
+          "content": null
+        },
+        {
+          "kind": "table",
+          "change": "Таблица может компактно отобразить данные в виде строк и столбцов.",
+          "content": {
+            "bullets": [],
+            "paragraphs": [],
+            "items": [],
+            "numbers": [],
+            "table": {
+              "columns": [
+                "Показатель",
+                "Значение"
+              ],
+              "rows": [
+                [
+                  "Демо-презентаций",
+                  "9"
+                ],
+                [
+                  "Сверенных чисел в каждой",
+                  "116 → 123"
+                ],
+                [
+                  "Лишних чисел",
+                  "0"
+                ]
+              ],
+              "unit": null,
+              "caption": null,
+              "source_span": null
+            },
+            "chart": null,
+            "quote": null,
+            "quote_author": null,
+            "image_hint": null,
+            "columns": [],
+            "chart2": null,
+            "formula": null,
+            "photo_slot": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "sl8",
+      "kind": "table",
+      "section": null,
+      "headline": "87 шаблонов и 99/100 качества",
+      "subtitle": null,
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [],
+        "numbers": [],
+        "table": {
+          "columns": [
+            "Показатель",
+            "Значение"
+          ],
+          "rows": [
+            [
+              "Чужих шаблонов",
+              "87"
+            ],
+            [
+              "Качество проверки",
+              "99/100"
+            ],
+            [
+              "Форматов",
+              "12"
+            ]
+          ],
+          "unit": null,
+          "caption": null,
+          "source_span": null
+        },
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": [],
+        "chart2": null,
+        "formula": null,
+        "photo_slot": null
+      },
+      "notes": "Регрессионный корпус включает 87 чужих шаблонов и 261 презентацию на них. Средняя оценка проверки качества по корпусу — 99 из 100. Сервис поддерживает 12 форматов: pptx, potx, ppt, odp, thmx и другие.",
+      "fact_refs": [],
+      "takeaway": "Поддержка 12 форматов",
+      "footnote": null,
+      "rationale": "Если бы потребовалось показать больше деталей в структурированном виде.",
+      "spec_ref": 7,
+      "alternatives": [
+        {
+          "kind": "stat_row",
+          "change": "Форма stat_row позволяет кратко и ясно показать три ключевые цифры, соответствующие теме слайда «Любой шаблон».",
+          "content": {
+            "bullets": [],
+            "paragraphs": [],
+            "items": [],
+            "numbers": [
+              {
+                "value": "87",
+                "label": "Чужих шаблонов",
+                "fact_id": null
+              },
+              {
+                "value": "99/100",
+                "label": "Качество проверки",
+                "fact_id": null
+              },
+              {
+                "value": "12",
+                "label": "Форматов",
+                "fact_id": null
+              }
+            ],
+            "table": null,
+            "chart": null,
+            "quote": null,
+            "quote_author": null,
+            "image_hint": null,
+            "columns": [],
+            "chart2": null,
+            "formula": null,
+            "photo_slot": null
+          }
+        },
+        {
+          "kind": "big_number",
+          "change": "Если бы был выбран один ключевой показатель, например, 87 шаблонов.",
+          "content": null
+        }
+      ]
+    },
+    {
+      "id": "sl9",
+      "kind": "chart",
+      "section": null,
+      "headline": "Генерация всех шаблонов занимает меньше 5 минут",
+      "subtitle": null,
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [],
+        "numbers": [],
+        "table": null,
+        "chart": {
+          "type": "column",
+          "series_ids": [
+            "s_sl9_1"
+          ],
+          "title": "Время генерации шаблонов, секунды",
+          "unit": "сек",
+          "highlight_index": null,
+          "categories": [
+            "VK Tech",
+            "VK Education",
+            "VK WorkSpace"
+          ],
+          "series": [
+            {
+              "name": "Время генерации",
+              "values": [
+                113.0,
+                145.0,
+                175.0
+              ]
+            }
+          ]
+        },
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": [],
+        "chart2": null,
+        "formula": null,
+        "photo_slot": null
+      },
+      "notes": "Время генерации всех шаблонов меньше 5 минут: VK Tech — 113 секунд, VK Education — 145 секунд, VK WorkSpace — 175 секунд.",
+      "fact_refs": [],
+      "takeaway": "Все шаблоны укладываются в лимит 5 минут с запасом",
+      "footnote": null,
+      "rationale": "Столбчатая диаграмма наглядно показывает время генерации каждого шаблона и позволяет сравнить их между собой.",
+      "spec_ref": 8,
+      "alternatives": [
+        {
+          "kind": "stat_row",
+          "change": "Показать ключевые цифры в компактной форме",
+          "content": {
+            "bullets": [],
+            "paragraphs": [],
+            "items": [],
+            "numbers": [
+              {
+                "value": "113 сек",
+                "label": "VK Tech",
+                "fact_id": null
+              },
+              {
+                "value": "145 сек",
+                "label": "VK Education",
+                "fact_id": null
+              },
+              {
+                "value": "175 сек",
+                "label": "VK WorkSpace",
+                "fact_id": null
+              }
+            ],
+            "table": null,
+            "chart": null,
+            "quote": null,
+            "quote_author": null,
+            "image_hint": null,
+            "columns": [],
+            "chart2": null,
+            "formula": null,
+            "photo_slot": null
+          }
+        },
+        {
+          "kind": "table",
+          "change": "Представить данные в виде таблицы для точного сравнения",
+          "content": {
+            "bullets": [],
+            "paragraphs": [],
+            "items": [],
+            "numbers": [],
+            "table": {
+              "columns": [
+                "Время генерации шаблонов, секунды",
+                "Время генерации"
+              ],
+              "rows": [
+                [
+                  "VK Tech",
+                  "113 сек"
+                ],
+                [
+                  "VK Education",
+                  "145 сек"
+                ],
+                [
+                  "VK WorkSpace",
+                  "175 сек"
+                ]
+              ],
+              "unit": "сек",
+              "caption": "Время генерации шаблонов, секунды",
+              "source_span": null
+            },
+            "chart": null,
+            "quote": null,
+            "quote_author": null,
+            "image_hint": null,
+            "columns": [],
+            "chart2": null,
+            "formula": null,
+            "photo_slot": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "sl10",
+      "kind": "cards",
+      "section": null,
+      "headline": "Три модели с лицензией Apache 2.0",
+      "subtitle": null,
+      "content": {
+        "bullets": [],
+        "paragraphs": [],
+        "items": [
+          {
+            "title": "Qwen3.8-27B",
+            "text": "Основная модель, инференс VK, конфиг готов",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Qwen3-32B",
+            "text": "Запасное звено на Cloud.ru",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          },
+          {
+            "title": "Gemma 4 и Qwen3-VL",
+            "text": "Два запасных звена цепочки",
+            "icon_hint": null,
+            "number": null,
+            "bullets": []
+          }
+        ],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": [],
+        "chart2": null,
+        "formula": null,
+        "photo_slot": null
+      },
+      "notes": "На слайде представлены три модели с лицензией Apache 2.0. Основная модель — Qwen3.8-27B, инференс VK, конфиг готов. Запасное звено — Qwen3-32B на Cloud.ru. Дополнительные запасные звенья — Gemma 4 и Qwen3-VL.",
+      "fact_refs": [],
+      "takeaway": "Все модели открыты и готовы к использованию",
+      "footnote": null,
+      "rationale": "Форма «cards» подходит для отображения трёх моделей с кратким описанием каждой.",
+      "spec_ref": 9,
+      "alternatives": [
+        {
+          "kind": "table",
+          "change": "Таблица позволяет компактно представить модели и их описание.",
+          "content": null
+        },
+        {
+          "kind": "bullets",
+          "change": "Краткий список трёх моделей с описанием подойдёт для упрощённого варианта.",
+          "content": {
+            "bullets": [
+              "Qwen3.8-27B — основная модель, инференс VK, конфиг готов",
+              "Qwen3-32B — запасное звено на Cloud.ru",
+              "Gemma 4 и Qwen3-VL — два запасных звена цепочки"
+            ],
+            "paragraphs": [],
+            "items": [],
+            "numbers": [],
+            "table": null,
+            "chart": null,
+            "quote": null,
+            "quote_author": null,
+            "image_hint": null,
+            "columns": [],
+            "chart2": null,
+            "formula": null,
+            "photo_slot": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "sl11",
+      "kind": "bullets",
+      "section": null,
+      "headline": "2 028 автотестов и форматы экспорта",
+      "subtitle": null,
+      "content": {
+        "bullets": [
+          "PPTX с редактируемыми объектами",
+          "PDF и HTML",
+          "Чат с агентом для правок",
+          "Далее: генерация изображений внутри слайдов",
+          "Переход на инференс VK"
+        ],
+        "paragraphs": [],
+        "items": [],
+        "numbers": [],
+        "table": null,
+        "chart": null,
+        "quote": null,
+        "quote_author": null,
+        "image_hint": null,
+        "columns": [],
+        "chart2": null,
+        "formula": null,
+        "photo_slot": null
+      },
+      "notes": "На данном этапе Verstka предлагает 2 028 автотестов и поддерживает форматы PPTX, PDF и HTML. Дополнительно реализован чат с агентом для правок. В будущем планируется внедрение генерации изображений внутри слайдов и переход на инференс VK.",
+      "fact_refs": [],
+      "takeaway": null,
+      "footnote": null,
+      "rationale": "Формат bullets позволяет кратко и структурированно отразить ключевые достижения и планы развития продукта.",
+      "spec_ref": 10,
+      "alternatives": [
+        {
+          "kind": "stat_row",
+          "change": "Позволит выделить ключевую метрику (2 028 автотестов) и дополнить её краткими фактами",
+          "content": null
+        },
+        {
+          "kind": "table",
+          "change": "Позволит компактно представить достижения и планы в двух колонках",
+          "content": null
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "f1",
+      "value": "2026",
+      "unit": null,
+      "label": "Выступление на финале хакатона «Лидеры цифровой трансформации 2026» перед экспертами VK Tech, 7 минут.",
+      "source_span": "Выступление на финале хакатона «Лидеры цифровой трансформации 2026» перед экспертами VK Tech, 7 минут."
+    },
+    {
+      "id": "f2",
+      "value": "10",
+      "unit": null,
+      "label": "презентация на 10 слайдов",
+      "source_span": "Презентация на 10 слайдов, к каждому слайду нужен текст для докладчика."
+    },
+    {
+      "id": "f3",
+      "value": "41",
+      "unit": null,
+      "label": "детерминированная проверка",
+      "source_span": "41 детерминированная проверка и 2 модельные."
+    },
+    {
+      "id": "f4",
+      "value": "12",
+      "unit": null,
+      "label": "12",
+      "source_span": "Нужна диаграмма числа проверок по категориям: целостность — 12, вёрстка — 11, шаблон — 7, контент — 6, плотность — 5."
+    },
+    {
+      "id": "f5",
+      "value": "11",
+      "unit": null,
+      "label": "11",
+      "source_span": "Нужна диаграмма числа проверок по категориям: целостность — 12, вёрстка — 11, шаблон — 7, контент — 6, плотность — 5."
+    },
+    {
+      "id": "f6",
+      "value": "116",
+      "unit": null,
+      "label": "до 123 сверенных чисел в каждой",
+      "source_span": "Нужны три крупные цифры: 9 демо-презентаций, от 116 до 123 сверенных чисел в каждой, 0 лишних."
+    },
+    {
+      "id": "f7",
+      "value": "123",
+      "unit": null,
+      "label": "Нужны три крупные цифры: 9 демо-презентаций, от 116 до 123 сверенных чисел в каждой, 0 лишних.",
+      "source_span": "Нужны три крупные цифры: 9 демо-презентаций, от 116 до 123 сверенных чисел в каждой, 0 лишних."
+    },
+    {
+      "id": "f8",
+      "value": "87",
+      "unit": null,
+      "label": "регрессионный корпус 87 чужих шаблонов и 261 презентация",
+      "source_span": "Регрессионный корпус — 87 чужих шаблонов и 261 презентация на них."
+    },
+    {
+      "id": "f9",
+      "value": "261",
+      "unit": null,
+      "label": "Регрессионный корпус — 87 чужих шаблонов и 261 презентация на них.",
+      "source_span": "Регрессионный корпус — 87 чужих шаблонов и 261 презентация на них."
+    },
+    {
+      "id": "f10",
+      "value": "99",
+      "unit": null,
+      "label": "средняя оценка проверки качества по корпусу",
+      "source_span": "Средняя оценка проверки качества по корпусу — 99 из 100."
+    },
+    {
+      "id": "f11",
+      "value": "100",
+      "unit": null,
+      "label": "средняя оценка проверки качества по корпусу",
+      "source_span": "Средняя оценка проверки качества по корпусу — 99 из 100."
+    },
+    {
+      "id": "f12",
+      "value": "113",
+      "unit": null,
+      "label": "секунд",
+      "source_span": "Время генерации на шаблонах датасета: VK Tech — 113 секунд, VK Education — 145 секунд, VK WorkSpace — 175 секунд."
+    },
+    {
+      "id": "f13",
+      "value": "145",
+      "unit": null,
+      "label": "секунд",
+      "source_span": "Время генерации на шаблонах датасета: VK Tech — 113 секунд, VK Education — 145 секунд, VK WorkSpace — 175 секунд."
+    },
+    {
+      "id": "f14",
+      "value": "175",
+      "unit": null,
+      "label": "секунд",
+      "source_span": "Время генерации на шаблонах датасета: VK Tech — 113 секунд, VK Education — 145 секунд, VK WorkSpace — 175 секунд."
+    },
+    {
+      "id": "f15",
+      "value": "35",
+      "unit": null,
+      "label": "открытые модели до 35 миллиардов параметров",
+      "source_span": "Только открытые модели до 35 миллиардов параметров с лицензией Apache 2.0."
+    },
+    {
+      "id": "f16",
+      "value": "2.0",
+      "unit": null,
+      "label": "Только открытые модели до 35 миллиардов параметров с лицензией Apache 2.0.",
+      "source_span": "Только открытые модели до 35 миллиардов параметров с лицензией Apache 2.0."
+    },
+    {
+      "id": "f17",
+      "value": "2 028",
+      "unit": null,
+      "label": "автотестов",
+      "source_span": "2 028 автотестов, PPTX с редактируемыми объектами, PDF и HTML, чат с агентом для правок."
+    },
+    {
+      "id": "f18",
+      "value": "9",
+      "unit": "шт.",
+      "label": "демо-презентаций",
+      "source_span": null
+    },
+    {
+      "id": "f19",
+      "value": "116",
+      "unit": "шт.",
+      "label": "минимальное количество сверенных чисел",
+      "source_span": null
+    },
+    {
+      "id": "f20",
+      "value": "123",
+      "unit": "шт.",
+      "label": "максимальное количество сверенных чисел",
+      "source_span": null
+    },
+    {
+      "id": "f21",
+      "value": "0",
+      "unit": "шт.",
+      "label": "лишних чисел",
+      "source_span": null
+    },
+    {
+      "id": "f22",
+      "value": "87",
+      "unit": "шаблонов",
+      "label": "регрессионный корпус",
+      "source_span": null
+    },
+    {
+      "id": "f23",
+      "value": "99",
+      "unit": "из 100",
+      "label": "средняя оценка проверки качества",
+      "source_span": null
+    },
+    {
+      "id": "f24",
+      "value": "12",
+      "unit": "форматов",
+      "label": "принимаемые форматы",
+      "source_span": null
+    },
+    {
+      "id": "f25",
+      "value": "5",
+      "unit": "минут",
+      "label": "лимит времени",
+      "source_span": null
+    },
+    {
+      "id": "f26",
+      "value": "113",
+      "unit": "секунд",
+      "label": "время генерации VK Tech",
+      "source_span": null
+    },
+    {
+      "id": "f27",
+      "value": "145",
+      "unit": "секунд",
+      "label": "время генерации VK Education",
+      "source_span": null
+    },
+    {
+      "id": "f28",
+      "value": "175",
+      "unit": "секунд",
+      "label": "время генерации VK WorkSpace",
+      "source_span": null
+    },
+    {
+      "id": "f29",
+      "value": "35",
+      "unit": "млрд",
+      "label": "параметров моделей",
+      "source_span": null
+    },
+    {
+      "id": "m1",
+      "value": "9",
+      "unit": "шт.",
+      "label": "демо-презентаций",
+      "source_span": null
+    },
+    {
+      "id": "m2",
+      "value": "116",
+      "unit": "шт.",
+      "label": "минимальное количество сверенных чисел",
+      "source_span": null
+    },
+    {
+      "id": "m3",
+      "value": "123",
+      "unit": "шт.",
+      "label": "максимальное количество сверенных чисел",
+      "source_span": null
+    },
+    {
+      "id": "m4",
+      "value": "0",
+      "unit": "шт.",
+      "label": "лишних чисел",
+      "source_span": null
+    },
+    {
+      "id": "m5",
+      "value": "87",
+      "unit": "шаблонов",
+      "label": "регрессионный корпус",
+      "source_span": null
+    },
+    {
+      "id": "m6",
+      "value": "99",
+      "unit": "из 100",
+      "label": "средняя оценка проверки качества",
+      "source_span": null
+    },
+    {
+      "id": "m7",
+      "value": "12",
+      "unit": "форматов",
+      "label": "принимаемые форматы",
+      "source_span": null
+    },
+    {
+      "id": "m8",
+      "value": "5",
+      "unit": "минут",
+      "label": "лимит времени",
+      "source_span": null
+    },
+    {
+      "id": "m9",
+      "value": "113",
+      "unit": "секунд",
+      "label": "время генерации VK Tech",
+      "source_span": null
+    },
+    {
+      "id": "m10",
+      "value": "145",
+      "unit": "секунд",
+      "label": "время генерации VK Education",
+      "source_span": null
+    },
+    {
+      "id": "m11",
+      "value": "175",
+      "unit": "секунд",
+      "label": "время генерации VK WorkSpace",
+      "source_span": null
+    },
+    {
+      "id": "m12",
+      "value": "35",
+      "unit": "млрд",
+      "label": "параметров моделей",
+      "source_span": null
+    }
+  ],
+  "series": [
+    {
+      "id": "s1",
+      "name": "Числа проверок по категориям",
+      "categories": [
+        "Целостность",
+        "Вёрстка",
+        "Шаблон",
+        "Контент",
+        "Плотность"
+      ],
+      "values": [
+        12.0,
+        11.0,
+        7.0,
+        6.0,
+        5.0
+      ],
+      "unit": null,
+      "source_span": "Нужна диаграмма числа проверок по категориям: целостность — 12, вёрстка — 11, шаблон — 7, контент — 6, плотность — 5."
+    },
+    {
+      "id": "s2",
+      "name": "Время генерации на шаблонах датасета",
+      "categories": [
+        "VK Tech",
+        "VK Education",
+        "VK WorkSpace"
+      ],
+      "values": [
+        113.0,
+        145.0,
+        175.0
+      ],
+      "unit": null,
+      "source_span": "Время генерации на шаблонах датасета: VK Tech — 113 секунд, VK Education — 145 секунд, VK WorkSpace — 175 секунд."
+    },
+    {
+      "id": "s_sl6_1",
+      "name": "Проверки",
+      "categories": [
+        "Целостность",
+        "Вёрстка",
+        "Шаблон",
+        "Контент",
+        "Плотность"
+      ],
+      "values": [
+        12.0,
+        11.0,
+        7.0,
+        6.0,
+        5.0
+      ],
+      "unit": "проверок",
+      "source_span": null
+    },
+    {
+      "id": "s_sl9_1",
+      "name": "Время генерации",
+      "categories": [
+        "VK Tech",
+        "VK Education",
+        "VK WorkSpace"
+      ],
+      "values": [
+        113.0,
+        145.0,
+        175.0
+      ],
+      "unit": "сек",
+      "source_span": null
+    }
+  ],
+  "tables": [],
+  "agent_log": [
+    "Аналитик: Уточняю данные слайдов 6, 7, 8, 9 с помощью модели",
+    "Аналитик: Нашёл в брифе 10 слайдов, 2 ряда данных и 2 заказанные диаграммы; нужно 10 слайдов.",
+    "Дизайнер: слайд 1 — обложка «Verstka — цифровой дизайнер презентаций».",
+    "Дизайнер: слайд 3 «Verstka создаёт три редактируемые презентации за 2–3 минуты» — карточки (3).",
+    "Дизайнер: слайд 5 «Три стиля вёрстки для одного контента» — карточки (3).",
+    "Дизайнер: слайд 2 «Оформление отнимает больше времени, чем содержание» — карточки (3).",
+    "Дизайнер: слайд 4 «Пять этапов работы агента» — процесс (5).",
+    "Дизайнер: слайд 7 «9 готовых презентаций без лишних чисел» — ряд чисел (3 числа).",
+    "Дизайнер: слайд 8 «87 шаблонов и 99/100 качества» — ряд чисел (3 числа).",
+    "Дизайнер: слайд 6 «Целостность — ключевая категория проверок» — горизонтальная диаграмма (5 категорий).",
+    "Дизайнер: слайд 9 «Генерация всех шаблонов занимает меньше 5 минут» — столбчатая диаграмма (3 категории).",
+    "Дизайнер: слайд 10 «Три модели с лицензией Apache 2.0» — карточки (3).",
+    "Дизайнер: слайд 11 «2 028 автотестов и форматы для экспорта» — список (4 пункта).",
+    "Критик: слайд 4 — Заголовок объявляет список («Пять этапов работы агента»), а не говорит вывод",
+    "Критик: слайд 5 — Заголовок объявляет список («Три стиля вёрстки для одного контента»), а не говорит вывод",
+    "Критик: 2 замечания — слайды 6, 11.",
+    "Критик: слайд 6 — Заявлено «Целостность — ключевая категория проверок», но в тексте не сказано, что целостность важнее других; в тексте нет утверждения «самая важная категория». → «Целостность — ключевая категория проверок» → «Целостность — самая большая категория проверок»",
+    "Критик: слайд 11 — Слайд 11 не соответствует структуре презентации, которая должна содержать 10 слайдов согласно заданию. → Удалить слайд 11",
+    "Правка: слайд 4 переделан по замечаниям критика — процесс (5).",
+    "Правка: слайд 5 переделан по замечаниям критика — карточки (3).",
+    "Правка: слайд 6 переделан по замечаниям критика — горизонтальная диаграмма (5 категорий).",
+    "Правка: слайд 11 переделан по замечаниям критика — список (5 пунктов).",
+    "Сборка: собрал 10 слайдов в том порядке, который задан в брифе.",
+    "Сборка: подготовил данные для диаграмм: 2 диаграммы.",
+    "Сборка: название презентации — как в брифе: «Verstka — цифровой дизайнер презентаций».",
+    "Сборка: сверил цифры с брифом: убрал то, чего в брифе нет, и цифры, подписанные не тем, к чему они относятся в брифе.",
+    "Сборка: план готов — 10 слайдов, 2 диаграммы, 1 таблица."
+  ]
+}

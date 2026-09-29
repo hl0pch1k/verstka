@@ -1,0 +1,347 @@
+{
+  "deck": "deck.pptx",
+  "template_id": "cbbe3aa6a21d23ce",
+  "strategy": "visual",
+  "issues": [
+    {
+      "id": "grid_alignment-1-1",
+      "slide": 1,
+      "check_id": "grid_alignment",
+      "severity": "info",
+      "kind": "deterministic",
+      "message": "4 блока не выровнены по колонкам шаблона",
+      "bboxes": [
+        {
+          "x": 0.37447233158355203,
+          "y": 0.31063303198211334,
+          "w": 0.24727832458442695,
+          "h": 0.10666666666666667
+        },
+        {
+          "x": 0.37447233158355203,
+          "y": 0.42779955283367355,
+          "w": 0.24727832458442695,
+          "h": 0.35419753086419753
+        },
+        {
+          "x": 0.6963978565179353,
+          "y": 0.31063303198211334,
+          "w": 0.24727832458442695,
+          "h": 0.10666666666666667
+        },
+        {
+          "x": 0.6963978565179353,
+          "y": 0.42779955283367355,
+          "w": 0.24727832458442695,
+          "h": 0.35419753086419753
+        }
+      ],
+      "element_ids": [
+        "1212",
+        "1213",
+        "1215",
+        "1216"
+      ],
+      "suggestion": null,
+      "autofix": null,
+      "details": {},
+      "outline_id": "sl2"
+    },
+    {
+      "id": "grid_alignment-2-2",
+      "slide": 2,
+      "check_id": "grid_alignment",
+      "severity": "info",
+      "kind": "deterministic",
+      "message": "2 блока не выровнены по колонкам шаблона",
+      "bboxes": [
+        {
+          "x": 0.374461176727909,
+          "y": 0.42650199280645473,
+          "w": 0.24730063429571303,
+          "h": 0.24389462428307573
+        },
+        {
+          "x": 0.6963867016622922,
+          "y": 0.42650199280645473,
+          "w": 0.24730063429571303,
+          "h": 0.24389462428307573
+        }
+      ],
+      "element_ids": [
+        "1231",
+        "1234"
+      ],
+      "suggestion": null,
+      "autofix": null,
+      "details": {},
+      "outline_id": "sl3"
+    },
+    {
+      "id": "grid_alignment-4-3",
+      "slide": 4,
+      "check_id": "grid_alignment",
+      "severity": "info",
+      "kind": "deterministic",
+      "message": "4 блока не выровнены по колонкам шаблона",
+      "bboxes": [
+        {
+          "x": 0.37447233158355203,
+          "y": 0.23952192087100224,
+          "w": 0.24727832458442695,
+          "h": 0.16
+        },
+        {
+          "x": 0.37447233158355203,
+          "y": 0.41002177505589577,
+          "w": 0.24727832458442695,
+          "h": 0.32382852143482066
+        },
+        {
+          "x": 0.6963978565179353,
+          "y": 0.23952192087100224,
+          "w": 0.24727832458442695,
+          "h": 0.16
+        },
+        {
+          "x": 0.6963978565179353,
+          "y": 0.41002177505589577,
+          "w": 0.24727832458442695,
+          "h": 0.32382852143482066
+        }
+      ],
+      "element_ids": [
+        "1230",
+        "1231",
+        "1233",
+        "1234"
+      ],
+      "suggestion": null,
+      "autofix": null,
+      "details": {},
+      "outline_id": "sl5"
+    },
+    {
+      "id": "grid_alignment-6-4",
+      "slide": 6,
+      "check_id": "grid_alignment",
+      "severity": "info",
+      "kind": "deterministic",
+      "message": "4 блока не выровнены по колонкам шаблона",
+      "bboxes": [
+        {
+          "x": 0.3750987532808399,
+          "y": 0.20790959463400407,
+          "w": 0.24385050306211722,
+          "h": 0.14222222222222222
+        },
+        {
+          "x": 0.37727373140857395,
+          "y": 0.3606316710411199,
+          "w": 0.2416755249343832,
+          "h": 0.27980110819480897
+        },
+        {
+          "x": 0.6975325896762905,
+          "y": 0.20790959463400407,
+          "w": 0.24334219160104986,
+          "h": 0.14222222222222222
+        },
+        {
+          "x": 0.6991992563429571,
+          "y": 0.3606316710411199,
+          "w": 0.2416755249343832,
+          "h": 0.27980110819480897
+        }
+      ],
+      "element_ids": [
+        "1230",
+        "1231",
+        "1233",
+        "1234"
+      ],
+      "suggestion": null,
+      "autofix": null,
+      "details": {},
+      "outline_id": "sl7"
+    },
+    {
+      "id": "grid_alignment-7-5",
+      "slide": 7,
+      "check_id": "grid_alignment",
+      "severity": "info",
+      "kind": "deterministic",
+      "message": "4 блока не выровнены по колонкам шаблона",
+      "bboxes": [
+        {
+          "x": 0.37610706474190725,
+          "y": 0.21705764557208126,
+          "w": 0.24284219160104986,
+          "h": 0.10666666666666667
+        },
+        {
+          "x": 0.37727373140857395,
+          "y": 0.3342241664236415,
+          "w": 0.2416755249343832,
+          "h": 0.19284553319723924
+        },
+        {
+          "x": 0.6955325896762905,
+          "y": 0.21705764557208126,
+          "w": 0.24534219160104986,
+          "h": 0.10666666666666667
+        },
+        {
+          "x": 0.6991992563429571,
+          "y": 0.3342241664236415,
+          "w": 0.2416755249343832,
+          "h": 0.19284553319723924
+        }
+      ],
+      "element_ids": [
+        "1230",
+        "1231",
+        "1233",
+        "1234"
+      ],
+      "suggestion": null,
+      "autofix": null,
+      "details": {},
+      "outline_id": "sl8"
+    },
+    {
+      "id": "grid_alignment-9-6",
+      "slide": 9,
+      "check_id": "grid_alignment",
+      "severity": "info",
+      "kind": "deterministic",
+      "message": "4 блока не выровнены по колонкам шаблона",
+      "bboxes": [
+        {
+          "x": 0.37447233158355203,
+          "y": 0.23952192087100224,
+          "w": 0.24727832458442695,
+          "h": 0.10666666666666667
+        },
+        {
+          "x": 0.37447233158355203,
+          "y": 0.3566884417225625,
+          "w": 0.24727832458442695,
+          "h": 0.2653086419753086
+        },
+        {
+          "x": 0.6963978565179353,
+          "y": 0.23952192087100224,
+          "w": 0.24727832458442695,
+          "h": 0.10666666666666667
+        },
+        {
+          "x": 0.6963978565179353,
+          "y": 0.3566884417225625,
+          "w": 0.24727832458442695,
+          "h": 0.2653086419753086
+        }
+      ],
+      "element_ids": [
+        "1212",
+        "1213",
+        "1215",
+        "1216"
+      ],
+      "suggestion": null,
+      "autofix": null,
+      "details": {},
+      "outline_id": "sl10"
+    }
+  ],
+  "summary": {
+    "errors": 0,
+    "warnings": 0,
+    "infos": 6,
+    "model_flags": 0,
+    "score": 100,
+    "checks_run": [
+      "font_not_in_template",
+      "size_not_in_scale",
+      "color_not_in_palette",
+      "layout_not_from_template",
+      "chrome_moved",
+      "contrast_low",
+      "table_contrast_low",
+      "out_of_bounds",
+      "text_clipped",
+      "overlap",
+      "text_outside_card",
+      "text_overflow",
+      "margin_violation",
+      "grid_alignment",
+      "image_stretched",
+      "table_cell_wrap",
+      "word_break",
+      "content_over_art",
+      "too_many_bullets",
+      "bullet_too_long",
+      "table_too_big",
+      "too_many_series",
+      "fill_ratio",
+      "file_opens",
+      "empty_deck",
+      "placeholder_text",
+      "empty_slide",
+      "content_missing",
+      "slide_missing",
+      "slide_is_picture",
+      "chart_missing_labels",
+      "duplicate_slides",
+      "content_in_notes",
+      "timeline_order",
+      "figure_not_in_brief",
+      "line_fragment",
+      "figure_is_time",
+      "orphan_opener",
+      "duplicate_heading",
+      "chart_mixed_units",
+      "writer_failed"
+    ],
+    "figures": {
+      "checked": 26,
+      "derived": 0,
+      "unverified": 0
+    }
+  },
+  "per_slide": {
+    "1": [
+      "grid_alignment-1-1"
+    ],
+    "2": [
+      "grid_alignment-2-2"
+    ],
+    "4": [
+      "grid_alignment-4-3"
+    ],
+    "6": [
+      "grid_alignment-6-4"
+    ],
+    "7": [
+      "grid_alignment-7-5"
+    ],
+    "9": [
+      "grid_alignment-9-6"
+    ]
+  },
+  "iterations": 0,
+  "applied_fixes": [],
+  "slide_images": {
+    "1": "slides/slide-001.jpg",
+    "2": "slides/slide-002.jpg",
+    "3": "slides/slide-003.jpg",
+    "4": "slides/slide-004.jpg",
+    "5": "slides/slide-005.jpg",
+    "6": "slides/slide-006.jpg",
+    "7": "slides/slide-007.jpg",
+    "8": "slides/slide-008.jpg",
+    "9": "slides/slide-009.jpg",
+    "10": "slides/slide-010.jpg"
+  },
+  "seconds": 1.35
+}

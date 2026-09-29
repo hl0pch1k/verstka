@@ -27,7 +27,7 @@ from verstka.rendering.deck import DeckBuilder, element_bbox, is_nested, remove_
 from verstka.rendering.fit import fit_size
 from verstka.rendering.images import insert_picture
 from verstka.rendering.tables import add_table
-from verstka.rendering.textfill import ParagraphSpec, fill_text
+from verstka.rendering.textfill import _PPR_ORDER, ParagraphSpec, fill_text, insert_ordered
 from verstka.schemas.common import EMU_PER_INCH, EMU_PER_PT, Bbox, Family, PatternKind, SlotRole, contrast_ratio, relative_luminance
 from verstka.schemas.layout import LayoutSlide
 from verstka.schemas.outline import PHOTO_PLACE_NAME, DeckOutline, OutlineSlide, SlideItem
@@ -2617,6 +2617,36 @@ def _fill_heading(title_ph, text: str, size: float, color: Optional[str], insets
                     p_.insert(0, ppr)
                 ppr.set("marL", "0")
                 ppr.set("indent", "0")
+    _no_list_marker(title_ph)
+
+
+_MARKERS = ("a:buAutoNum", "a:buChar", "a:buBlip")
+
+
+def _no_list_marker(title_ph) -> None:
+    """A headline is never a list item. Google Slides writes a sample's title as a numbered paragraph («1. Идея
+    проекта»): the number goes with the hanging indent that belonged to it, whether it is written on the paragraph or
+    comes from the shape's own list style."""
+    tx = title_ph._element.find(q("p:txBody"))
+    if tx is None:
+        return
+    lst = tx.find(q("a:lstStyle"))
+    for p_ in tx.findall(q("a:p")):
+        ppr = p_.find(q("a:pPr"))
+        own = ppr is not None and any(ppr.find(q(m)) is not None for m in _MARKERS)
+        lvl = int(ppr.get("lvl") or 0) if ppr is not None else 0
+        styled = lst is not None and lst.find(q(f"a:lvl{lvl + 1}pPr")) is not None and any(lst.find(q(f"a:lvl{lvl + 1}pPr")).find(q(m)) is not None for m in _MARKERS)
+        if not own and not styled:
+            continue
+        if ppr is None:
+            ppr = etree.Element(q("a:pPr"))
+            p_.insert(0, ppr)
+        for m in _MARKERS + ("a:buNone",):
+            for el in ppr.findall(q(m)):
+                ppr.remove(el)
+        insert_ordered(ppr, etree.Element(q("a:buNone")), _PPR_ORDER)
+        ppr.set("marL", "0")
+        ppr.set("indent", "0")
 
 
 def _caps_heading(title_ph, ds) -> None:

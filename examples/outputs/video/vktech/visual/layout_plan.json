@@ -1,0 +1,299 @@
+{
+  "strategy": "visual",
+  "template_id": "cbbe3aa6a21d23ce",
+  "slides": [
+    {
+      "outline_id": "sl2",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "cards",
+      "fit": {
+        "items": "3/4",
+        "overflow_title": 1.22,
+        "text_ratio": 1.22
+      },
+      "score": 0.947,
+      "reasons": [
+        "композиция cards: сетка, шкала кеглей и карточки из дизайн-системы шаблона",
+        "ближайший образец — слайд 15 шаблона (0.95)"
+      ],
+      "alternatives": [
+        [
+          "p15",
+          0.947
+        ],
+        [
+          "p14",
+          0.867
+        ],
+        [
+          "p24",
+          0.764
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl3",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "process",
+      "fit": {
+        "items": "3/3",
+        "overflow_title": 1.44,
+        "overflow_card_title": 2.0,
+        "text_ratio": 2.0
+      },
+      "score": 0.642,
+      "reasons": [
+        "композиция process: сетка, шкала кеглей и карточки из дизайн-системы шаблона",
+        "ближайший образец — слайд 24 шаблона (0.64)"
+      ],
+      "alternatives": [
+        [
+          "p24",
+          0.642
+        ],
+        [
+          "p15",
+          0.582
+        ],
+        [
+          "p20",
+          0.582
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl4",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "process",
+      "fit": {
+        "items": "5/4",
+        "text_ratio": 0.61
+      },
+      "score": 0.64,
+      "reasons": [
+        "композиция process: сетка, шкала кеглей и карточки из дизайн-системы шаблона",
+        "ближайший образец — слайд 15 шаблона (0.64)"
+      ],
+      "alternatives": [
+        [
+          "p15",
+          0.64
+        ],
+        [
+          "p7",
+          0.561
+        ],
+        [
+          "p14",
+          0.56
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl5",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "cards",
+      "fit": {
+        "items": "3/4",
+        "text_ratio": 0.88
+      },
+      "score": 0.977,
+      "reasons": [
+        "композиция cards: сетка, шкала кеглей и карточки из дизайн-системы шаблона",
+        "ближайший образец — слайд 15 шаблона (0.98)"
+      ],
+      "alternatives": [
+        [
+          "p15",
+          0.977
+        ],
+        [
+          "p14",
+          0.897
+        ],
+        [
+          "p26",
+          0.817
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl6",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "chart_text",
+      "fit": {
+        "overflow_title": 1.12,
+        "text_ratio": 1.12
+      },
+      "score": 0.82,
+      "reasons": [
+        "композиция chart_text: сетка, шкала кеглей и карточки из дизайн-системы шаблона",
+        "ближайший образец — слайд 44 шаблона (0.82)"
+      ],
+      "alternatives": [
+        [
+          "p44",
+          0.82
+        ],
+        [
+          "p49",
+          0.82
+        ],
+        [
+          "p28",
+          0.585
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl7",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "stat_row",
+      "fit": {
+        "items": "3/7",
+        "text_ratio": 0.93
+      },
+      "score": 0.85,
+      "reasons": [
+        "композиция stat_row: сетка, шкала кеглей и карточки из дизайн-системы шаблона",
+        "ближайший образец — слайд 41 шаблона (0.85)"
+      ],
+      "alternatives": [
+        [
+          "p41",
+          0.85
+        ],
+        [
+          "p24",
+          0.642
+        ],
+        [
+          "p42",
+          0.642
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl8",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "stat_row",
+      "fit": {
+        "items": "3/7",
+        "text_ratio": 0.71
+      },
+      "score": 0.85,
+      "reasons": [
+        "композиция stat_row: сетка, шкала кеглей и карточки из дизайн-системы шаблона",
+        "ближайший образец — слайд 41 шаблона (0.85)"
+      ],
+      "alternatives": [
+        [
+          "p41",
+          0.85
+        ],
+        [
+          "p45",
+          0.656
+        ],
+        [
+          "p24",
+          0.642
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl9",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "chart_text",
+      "fit": {
+        "overflow_title": 1.15,
+        "text_ratio": 1.15
+      },
+      "score": 0.82,
+      "reasons": [
+        "композиция chart_text: сетка, шкала кеглей и карточки из дизайн-системы шаблона",
+        "ближайший образец — слайд 44 шаблона (0.82)"
+      ],
+      "alternatives": [
+        [
+          "p44",
+          0.82
+        ],
+        [
+          "p49",
+          0.82
+        ],
+        [
+          "p28",
+          0.585
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl10",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "cards",
+      "fit": {
+        "items": "3/4",
+        "text_ratio": 0.82
+      },
+      "score": 0.977,
+      "reasons": [
+        "композиция cards: сетка, шкала кеглей и карточки из дизайн-системы шаблона",
+        "ближайший образец — слайд 15 шаблона (0.98)"
+      ],
+      "alternatives": [
+        [
+          "p15",
+          0.977
+        ],
+        [
+          "p14",
+          0.897
+        ],
+        [
+          "p25",
+          0.782
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl11",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "bullets",
+      "fit": {
+        "overflow_title": 1.52,
+        "text_ratio": 1.52
+      },
+      "score": 0.633,
+      "reasons": [
+        "композиция bullets: сетка, шкала кеглей и карточки из дизайн-системы шаблона",
+        "ближайший образец — слайд 9 шаблона (0.63)"
+      ],
+      "alternatives": [
+        [
+          "p9",
+          0.633
+        ],
+        [
+          "p24",
+          0.555
+        ],
+        [
+          "p10",
+          0.526
+        ]
+      ]
+    }
+  ]
+}
