@@ -56,27 +56,49 @@ def _size_css(size_pt: float, slide_w_emu: int) -> str:
     return f"{size_pt / slide_w_pt * 100:.4f}cqw"
 
 
+def _lh(p) -> str:
+    """The paragraph's own line spacing (a:lnSpc, 0.9 = 90 %) on top of single spacing (1.2 of the font size), as
+    PowerPoint sets it: a title typeset at 90 % keeps its lines inside its frame."""
+    ls = getattr(p, "line_spacing", None)
+    return f";line-height:{1.2 * ls:.2f}" if ls else ""
+
+
+def _runs_html(p, slide_w: int, default_color: str, default_font: str) -> str:
+    """The paragraph's runs as spans, with its line breaks (<a:br/>) as <br>: the paragraph's text is its runs' texts
+    with «\n» where the breaks stand, so walking both puts every break back between the right runs."""
+    out: list[str] = []
+    text = p.text or ""
+    i = 0
+    for r in p.runs:
+        if not r.text:
+            continue
+        j = text.find(r.text, i)
+        if j >= 0:
+            out.extend("<br>" for ch in text[i:j] if ch == "\n")
+            i = j + len(r.text)
+        out.append(
+            f'<span style="font-size:{_size_css(r.size_pt or 14, slide_w)};color:#{r.color_hex or default_color};font-weight:{700 if r.bold else 400};font-style:{"italic" if r.italic else "normal"};font-family:\'{html.escape(r.font or default_font)}\',Play,Arial,sans-serif">{html.escape(r.text)}</span>'
+        )
+    return "".join(out)
+
+
 def _text_html(e: IRElement, slide_w: int, default_color: str, default_font: str) -> str:
     align = {"ctr": "center", "r": "right", "just": "justify"}.get(e.paragraphs[0].align or "", "left") if e.paragraphs else "left"
     vpos = {"ctr": "center", "b": "flex-end"}.get(e.anchor or "t", "flex-start")
     inner = []
     in_list = False
     for p in e.paragraphs:
-        runs = "".join(
-            f'<span style="font-size:{_size_css(r.size_pt or 14, slide_w)};color:#{r.color_hex or default_color};font-weight:{700 if r.bold else 400};font-style:{"italic" if r.italic else "normal"};font-family:\'{html.escape(r.font or default_font)}\',Play,Arial,sans-serif">{html.escape(r.text)}</span>'
-            for r in p.runs
-            if r.text
-        ) or "&nbsp;"
+        runs = _runs_html(p, slide_w, default_color, default_font) or "&nbsp;"
         if p.bullet:
             if not in_list:
                 inner.append("<ul>")
                 in_list = True
-            inner.append(f'<li style="margin-left:{p.level * 1.2}em">{runs}</li>')
+            inner.append(f'<li style="margin-left:{p.level * 1.2}em{_lh(p)}">{runs}</li>')
         else:
             if in_list:
                 inner.append("</ul>")
                 in_list = False
-            inner.append(f'<p style="text-align:{align}">{runs}</p>')
+            inner.append(f'<p style="text-align:{align}{_lh(p)}">{runs}</p>')
     if in_list:
         inner.append("</ul>")
     return f'<div class="tx" style="justify-content:{vpos}">{"".join(inner)}</div>'

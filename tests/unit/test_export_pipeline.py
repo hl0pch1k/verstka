@@ -66,3 +66,29 @@ def test_cli_generate_offline(simple_deck, tmp_path):
     assert (tmp_path / "cli_out" / "compact" / "deck.pptx").exists()
     result2 = runner.invoke(app, ["checks"])
     assert result2.exit_code == 0 and "text_overflow" in result2.output
+
+
+def test_html_keeps_the_line_breaks_inside_a_paragraph():
+    # a cover title set in three lines with <a:br/> («Verstka —» / «цифровой дизайнер» / «презентаций»): the web version
+    # must not glue the words together («дизайнерпрезентаций»)
+    from verstka.export.html import _text_html
+    from verstka.schemas.common import Bbox, BboxFrac
+    from verstka.schemas.deck_ir import IRElement, IRParagraph, IRRun
+
+    runs = [IRRun(text="Verstka —", size_pt=40), IRRun(text="цифровой дизайнер", size_pt=40), IRRun(text="презентаций", size_pt=40)]
+    p = IRParagraph(text="Verstka —\nцифровой дизайнер\nпрезентаций", runs=runs)
+    e = IRElement(id="1", type="text", bbox=Bbox(x=0, y=0, w=100, h=100), bbox_frac=BboxFrac(x=0, y=0, w=0.5, h=0.5), paragraphs=[p])
+    out = _text_html(e, 12192000, "000000", "Play")
+    assert out.count("<br>") == 2
+    assert "Verstka —</span><br><span" in out and "цифровой дизайнер</span><br><span" in out
+
+
+def test_html_keeps_the_paragraphs_line_spacing():
+    # a cover title set at 90 % line spacing: at the page's default 1.2 its third line fell out of the frame
+    from verstka.export.html import _text_html
+    from verstka.schemas.common import Bbox, BboxFrac
+    from verstka.schemas.deck_ir import IRElement, IRParagraph, IRRun
+
+    p = IRParagraph(text="Verstka —\nцифровой дизайнер\nпрезентаций", runs=[IRRun(text="Verstka —"), IRRun(text="цифровой дизайнер"), IRRun(text="презентаций")], line_spacing=0.9)
+    e = IRElement(id="1", type="text", bbox=Bbox(x=0, y=0, w=100, h=100), bbox_frac=BboxFrac(x=0, y=0, w=0.5, h=0.5), paragraphs=[p])
+    assert "line-height:1.08" in _text_html(e, 12192000, "000000", "Play")
