@@ -11,6 +11,11 @@ from typing import Optional
 
 from PIL import ImageFont
 
+# Text is measured with the basic layout engine everywhere: a Pillow built with libraqm (Homebrew's, some Linux
+# packages) shapes and kerns the same string ~0.3 % wider or narrower, and a fit or a test at the edge of a column would
+# then depend on how Pillow was built
+_LAYOUT = ImageFont.Layout.BASIC
+
 from verstka.rendering.cyrillic import measured_family  # noqa: E402  (no cycle: cyrillic imports fonts lazily)
 
 FONT_DIR = Path(__file__).resolve().parents[1] / "fonts"
@@ -74,7 +79,7 @@ def _bundled_index() -> dict[tuple[str, bool], str]:
             if f.suffix.lower() not in (".ttf", ".otf"):
                 continue
             try:
-                fam, style = ImageFont.truetype(str(f), 12).getname()
+                fam, style = ImageFont.truetype(str(f), 12, layout_engine=_LAYOUT).getname()
             except Exception:  # noqa: BLE001
                 continue
             st = (style or "").lower()
@@ -119,7 +124,7 @@ def _real_font(family: str, bold: bool) -> Optional[ImageFont.FreeTypeFont]:
     if face is None:
         return None
     try:
-        return ImageFont.truetype(face[0], _MEASURE_PX, index=face[1])
+        return ImageFont.truetype(face[0], _MEASURE_PX, index=face[1], layout_engine=_LAYOUT)
     except Exception:  # noqa: BLE001
         return None
 
@@ -430,7 +435,7 @@ def width_factor(family: Optional[str]) -> float:
 
 @lru_cache(maxsize=8)
 def _font(bold: bool) -> ImageFont.FreeTypeFont:
-    return ImageFont.truetype(str(font_path(None, bold)), _MEASURE_PX)
+    return ImageFont.truetype(str(font_path(None, bold)), _MEASURE_PX, layout_engine=_LAYOUT)
 
 
 def is_measured(family: Optional[str]) -> bool:
@@ -525,7 +530,7 @@ def left_bearing_em(ch: str, bold: bool = False) -> float:
 
     if not ch or ch.isspace():
         return 0.0
-    f = ImageFont.truetype(str(font_path(None, bold)), 200)
+    f = ImageFont.truetype(str(font_path(None, bold)), 200, layout_engine=_LAYOUT)
     im = Image.new("L", (480, 360), 0)
     ImageDraw.Draw(im).text((120, 40), ch, font=f, fill=255)
     bb = im.getbbox()
@@ -535,7 +540,7 @@ def left_bearing_em(ch: str, bold: bool = False) -> float:
 @lru_cache(maxsize=4)
 def figure_metrics_em(bold: bool = False) -> tuple[float, float]:
     """(descent, digit height) of the measuring font, in em: where the top of a figure's digits sits in its line."""
-    f = ImageFont.truetype(str(font_path(None, bold)), 200)
+    f = ImageFont.truetype(str(font_path(None, bold)), 200, layout_engine=_LAYOUT)
     _, descent = f.getmetrics()
     top = f.getbbox("0", anchor="ls")[1]
     return descent / 200, -top / 200
