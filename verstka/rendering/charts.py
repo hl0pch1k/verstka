@@ -2708,6 +2708,7 @@ def _style_pie(k: _Kit) -> None:
     def decide(side: float, size: float) -> dict[int, str]:
         r = side / 2
         out: dict[int, str] = {}
+        before = 0.0  # the share of the slices drawn before this one, clockwise from twelve o'clock
         for j, v in enumerate(shares):
             if not v:
                 continue
@@ -2717,14 +2718,20 @@ def _style_pie(k: _Kit) -> None:
             chord = lambda rho: 2 * rho * math.sin(min(math.pi * s, math.pi / 2)) if s < 0.5 else 2 * rho  # noqa: E731
             # the wedge narrows toward the centre: the chord is taken at the label's inner edge
             if ring:
-                rho = r * (1 + HOLE_SIZE / 100) / 2
-                out[j] = "in" if (chord(rho - h / 2) >= w and r * (1 - HOLE_SIZE / 100) * 0.8 >= h) else "none"
+                # a label is set level at any angle: at three and nine o'clock its width lies across the ring, where
+                # «110 000 ₽» runs over the edge into the total in the hole (the width already carries the headroom
+                # for a wider font: the ring's own tenth is the margin)
+                a = 2 * math.pi * (before + s / 2)
+                across = w * abs(math.sin(a)) + h * abs(math.cos(a))
+                rho, band = r * (1 + HOLE_SIZE / 100) / 2, r * (1 - HOLE_SIZE / 100)
+                out[j] = "in" if (chord(rho - h / 2) >= w and band * 0.8 >= h and band * 0.9 >= across) else "none"
             elif s >= 0.25 and chord(r * 0.5 - h / 2) >= w:
                 out[j] = "ctr"
             elif chord(max(r - max(w, h) / 2 - 4, r * 0.4) - h / 2) >= w:
                 out[j] = "inEnd"
             else:
                 out[j] = "outEnd" if k.outside else "none"
+            before += s
         return out
 
     size = k.fs_value

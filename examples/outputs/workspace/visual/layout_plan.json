@@ -1,0 +1,275 @@
+{
+  "strategy": "visual",
+  "template_id": "1b8883114486c69d",
+  "slides": [
+    {
+      "outline_id": "sl2",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "cards",
+      "fit": {
+        "items": "3/3",
+        "overflow_title": 1.12,
+        "text_ratio": 1.12
+      },
+      "score": 0.897,
+      "reasons": [
+        "композиция cards: сетка, шкала кеглей и карточки из дизайн-системы шаблона",
+        "ближайший образец — слайд 16 шаблона (0.90)"
+      ],
+      "alternatives": [
+        [
+          "p16",
+          0.897
+        ],
+        [
+          "p23",
+          0.779
+        ],
+        [
+          "p3",
+          0.764
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl3",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "chart_text",
+      "fit": {
+        "overflow_title": 1.17,
+        "overflow_bullet_list": 2.0,
+        "text_ratio": 2.0
+      },
+      "score": 0.657,
+      "reasons": [
+        "композиция chart_text: сетка, шкала кеглей и карточки из дизайн-системы шаблона",
+        "ближайший образец — слайд 20 шаблона (0.66)"
+      ],
+      "alternatives": [
+        [
+          "p20",
+          0.657
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl4",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "chart_text",
+      "fit": {
+        "text_ratio": 0.85
+      },
+      "score": 0.85,
+      "reasons": [
+        "композиция chart_text: сетка, шкала кеглей и карточки из дизайн-системы шаблона",
+        "ближайший образец — слайд 20 шаблона (0.85)"
+      ],
+      "alternatives": [
+        [
+          "p20",
+          0.85
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl5",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "table",
+      "fit": {
+        "text_ratio": 0.7
+      },
+      "score": 0.948,
+      "reasons": [
+        "композиция table: сетка, шкала кеглей и карточки из дизайн-системы шаблона",
+        "ближайший образец — слайд 14 шаблона (0.95)"
+      ],
+      "alternatives": [
+        [
+          "p14",
+          0.948
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl6",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "chart_text",
+      "fit": {
+        "overflow_title": 1.06,
+        "overflow_bullet_list": 2.0,
+        "text_ratio": 2.0
+      },
+      "score": 0.657,
+      "reasons": [
+        "композиция chart_text: сетка, шкала кеглей и карточки из дизайн-системы шаблона",
+        "ближайший образец — слайд 20 шаблона (0.66)"
+      ],
+      "alternatives": [
+        [
+          "p20",
+          0.657
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl7",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "stat_row",
+      "fit": {
+        "items": "4/6",
+        "overflow_number": 2.0,
+        "text_ratio": 2.0
+      },
+      "score": 0.657,
+      "reasons": [
+        "композиция stat_row: сетка, шкала кеглей и карточки из дизайн-системы шаблона",
+        "ближайший образец — слайд 23 шаблона (0.66)"
+      ],
+      "alternatives": [
+        [
+          "p23",
+          0.657
+        ],
+        [
+          "p4",
+          0.642
+        ],
+        [
+          "p9",
+          0.642
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl8",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "chart_text",
+      "fit": {
+        "text_ratio": 0.15
+      },
+      "score": 0.85,
+      "reasons": [
+        "композиция chart_text: сетка, шкала кеглей и карточки из дизайн-системы шаблона",
+        "ближайший образец — слайд 20 шаблона (0.85)"
+      ],
+      "alternatives": [
+        [
+          "p20",
+          0.85
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl9",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "chart_text",
+      "fit": {
+        "overflow_bullet_list": 2.0,
+        "text_ratio": 2.0
+      },
+      "score": 0.657,
+      "reasons": [
+        "композиция chart_text: сетка, шкала кеглей и карточки из дизайн-системы шаблона",
+        "ближайший образец — слайд 20 шаблона (0.66)"
+      ],
+      "alternatives": [
+        [
+          "p20",
+          0.657
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl10",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "chart_text",
+      "fit": {
+        "text_ratio": 0.91
+      },
+      "score": 0.85,
+      "reasons": [
+        "композиция chart_text: сетка, шкала кеглей и карточки из дизайн-системы шаблона",
+        "ближайший образец — слайд 20 шаблона (0.85)"
+      ],
+      "alternatives": [
+        [
+          "p20",
+          0.85
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl11",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "chart_text",
+      "fit": {
+        "overflow_title": 1.32,
+        "overflow_bullet_list": 2.0,
+        "text_ratio": 2.0
+      },
+      "score": 0.657,
+      "reasons": [
+        "композиция chart_text: сетка, шкала кеглей и карточки из дизайн-системы шаблона",
+        "ближайший образец — слайд 20 шаблона (0.66)"
+      ],
+      "alternatives": [
+        [
+          "p20",
+          0.657
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl12",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "chart_pair",
+      "fit": {
+        "text_ratio": 0.66
+      },
+      "score": 0.85,
+      "reasons": [
+        "композиция chart_pair: сетка, шкала кеглей и карточки из дизайн-системы шаблона",
+        "ближайший образец — слайд 20 шаблона (0.85)"
+      ],
+      "alternatives": [
+        [
+          "p20",
+          0.85
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl13",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "chart_text",
+      "fit": {
+        "overflow_title": 1.43,
+        "overflow_bullet_list": 2.0,
+        "text_ratio": 2.0
+      },
+      "score": 0.657,
+      "reasons": [
+        "композиция chart_text: сетка, шкала кеглей и карточки из дизайн-системы шаблона",
+        "ближайший образец — слайд 20 шаблона (0.66)"
+      ],
+      "alternatives": [
+        [
+          "p20",
+          0.657
+        ]
+      ]
+    }
+  ]
+}

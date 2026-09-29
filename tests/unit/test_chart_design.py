@@ -415,6 +415,20 @@ def test_pie_labels_that_do_not_fit_their_slice_go_outside_and_other_is_quiet():
     assert all(_chroma(f) >= 12 for f in fills[:4])
 
 
+def test_doughnut_label_wider_than_the_ring_at_its_angle_is_left_to_the_legend():
+    # «110 000 ₽» at nine o'clock lies across the ring: set there it runs over the edge into the total in the hole
+    team = Series(id="team", name="Бюджет команды", categories=["Оплата работы тренеров", "Администраторов", "Уборки", "Резерв на замены"], values=[260000, 110000, 30000, 20000], unit="₽")
+    outline = OUTLINE.model_copy(update={"series": [*OUTLINE.series, team]})
+    prs, s = _slide()
+    box = Bbox(x=int(W * 0.05), y=int(H * 0.25), w=int(W * 0.3), h=int(H * 0.55))
+    gf = add_chart(s, box, ChartSpec(type="doughnut", series_ids=["team"]), outline, STYLE, Typography(), text_hex="1A1A1A", legend=False, amounts=True)
+    lbls = _point_labels(gf.chart._chartSpace.find(f".//{C}doughnutChart/{C}ser"))
+    assert lbls[1].find(f"{C}delete") is not None
+    # short shares keep their labels wherever they sit, three o'clock included
+    cs = _chart(ChartSpec(type="doughnut", series_ids=["pie"]))
+    assert all(d.find(f"{C}delete") is None for d in _point_labels(cs.find(f".//{C}doughnutChart/{C}ser")).values())
+
+
 def test_ground_is_read_from_the_slide_and_drives_the_muted_colour():
     prs, s = _slide("112233")
     assert slide_ground(s, BOX) == "112233"

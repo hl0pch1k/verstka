@@ -5,7 +5,7 @@ brief: examples/briefs/vk_workspace_feature.md
 strategy: all            # structured | visual | compact | all
 slides: 12
 audience: продуктовый комитет
-out: examples/outputs/workspace
+out: out/workspace
 export: all              # pptx | pdf | html | all
 no_llm: false            # true = fully deterministic run (no model calls)
 no_vlm: false
