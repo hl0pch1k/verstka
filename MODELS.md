@@ -20,7 +20,7 @@
 
 | Прогон | API-сервис | Модель, которая составила план и тексты |
 |---|---|---|
-| Видео [`docs/video/verstka-demo.mp4`](docs/video/verstka-demo.mp4): шаблон SlidesCarnival, которого нет в датасете, файлы — [`examples/outputs/video/`](examples/outputs/video) | Cloud.ru Foundation Models, `https://foundation-models.api.cloud.ru/v1` (в этом прогоне первым ответило звено 4 цепочки, см. «Цепочка моделей») | `Qwen/Qwen3-32B` (Qwen3-32B, Apache 2.0, 32.8B) |
+| Видео [`docs/video/verstka-demo.mp4`](docs/video/verstka-demo.mp4): шаблон VK Tech и шаблон SlidesCarnival, которого нет в датасете; файлы — [`examples/outputs/video/`](examples/outputs/video) | Cloud.ru Foundation Models, `https://foundation-models.api.cloud.ru/v1` (в этом прогоне первым ответило звено 4 цепочки, см. «Цепочка моделей») | `Qwen/Qwen3-32B` (Qwen3-32B, Apache 2.0, 32.8B) |
 | 9 демо-презентаций [`examples/outputs/`](examples/outputs): один текст, три шаблона VK | Cloud.ru Foundation Models, `https://foundation-models.api.cloud.ru/v1` | `Qwen/Qwen3-32B` (Qwen3-32B, Apache 2.0, 32.8B) |
 
 Настройки запросов (одинаковые для обоих прогонов, `configs/models.yaml`):
