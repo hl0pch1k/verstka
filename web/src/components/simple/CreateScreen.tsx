@@ -18,7 +18,9 @@ import { TemplateActions, TemplatePicker, useTemplateDrop } from "./TemplatePick
 
 const clampSlides = (n: number) => Math.min(SLIDES_MAX, Math.max(SLIDES_MIN, Number.isFinite(n) ? Math.round(n) : SLIDES_DEFAULT));
 const MAX_BRIEF_BYTES = 2 * 1024 * 1024;
-const PLACEHOLDER = "Тема — например, «История VK»: текст напишет агент.\nИли ваш текст с тезисами и цифрами — соберу строго по нему.";
+// the topic line only when the server writes a text by a topic itself (writer mode); else the text is the deck
+const PLACEHOLDER_WRITER = "Тема — например, «История VK»: текст напишет агент.\nИли ваш текст с тезисами и цифрами — соберу строго по нему.";
+const PLACEHOLDER = "Ваш текст: о чём презентация, тезисы и цифры — соберу строго по нему.\nМожно по слайдам: «Слайд 3. Расходы. Нужна круговая диаграмма».";
 
 // A text that dictates its slides, by the backend's rules (planning/brief_structure.py, compile.py `_order`, agent.py
 // `_is_cover`): «Слайд 1 … Слайд 5» headings in ascending order (or «1. … 3.» headings with lines under each, in a text
@@ -393,7 +395,7 @@ export function CreateScreen() {
                 disabled={busy}
                 rows={3}
                 onChange={(e) => setBrief(e.target.value)}
-                placeholder={PLACEHOLDER}
+                placeholder={health?.writer ? PLACEHOLDER_WRITER : PLACEHOLDER}
                 className="scroll-thin block max-h-[50vh] min-h-24 w-full resize-none scroll-py-3 bg-transparent px-4 py-3 text-body leading-6 text-zinc-900 outline-none placeholder:text-zinc-500 disabled:opacity-60 [field-sizing:content]"
               />
               {briefLen > 0 && briefLen < briefMin && (

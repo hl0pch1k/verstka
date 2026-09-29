@@ -4,7 +4,8 @@ The planner grounds the plan's figures before rendering (planning/grounding.py);
 text boxes, table cells, chart values — so what the renderer computed on its own (a pie legend's shares, a doughnut's
 total, a before/after delta) is checked too, and the report can say how many figures were compared. A figure passes
 when the brief writes it (units compatible, rounded as a person rounds), when it follows from two of the brief's
-figures of one measure (difference, percent change, ratio — the analyst's before/after pairs included), or when it is a
+figures of one measure (difference, percent change, ratio — the analyst's before/after pairs included), when its table
+row gives it (a count its label spells in words, a price per unit of two of the row's figures), or when it is a
 share, a total, a ratio, a percent change or a difference of a chart's own values on the same slide (the renderer's
 growth label «×2,1» beside a chart of 120 000 → 254 795). Step badges («01», «3»), page numbers and a cover's date
 are not facts and are skipped."""
@@ -28,7 +29,8 @@ FIGURE_NOT_IN_BRIEF = CheckSpec(
         "Каждое число в тексте, таблицах и диаграммах слайда ищется среди чисел исходного текста (с единицами измерения) "
         "и того, что из них прямо следует: разность, процент изменения, во сколько раз, доли и сумма частей диаграммы, "
         "а также разность, процент изменения и отношение двух значений диаграммы на том же слайде («×2,1» рядом "
-        "с ростом со 120 000 до 254 795). "
+        "с ростом со 120 000 до 254 795). В строке таблицы своими считаются число, которое подпись строки пишет словами "
+        "(«Четыре занятия» — 4), и цена за единицу из двух чисел той же строки (3 200 ₽ / 4 = 800 ₽). "
         "Номера шагов, страниц и дата на обложке не проверяются."
     ),
 )
@@ -183,6 +185,17 @@ def figure_not_in_brief(ctx: AuditContext) -> list[Issue]:
             if (e.ph_type or "") in _SKIP_PH or is_chrome_like(e, ctx.ir, ctx.manifest):
                 continue
             found: list[tuple[str, str]] = []  # (as written, verdict)
+            # a table row gives its own counts spelled in its label and a per-unit value of two of its figures
+            # («Четыре занятия» | 4 | 3 200 | 800) — as the planner's grounding lets them stand
+            row_given: set[str] = set()
+            if e.table is not None:
+                from verstka.planning.grounding import _row_given
+
+                for row in e.table.rows:
+                    try:
+                        row_given.update(row[j] for j in _row_given(idx, [c or "" for c in row]))
+                    except Exception:  # noqa: BLE001 - the plain verdict then
+                        pass
             for t in _texts(e):
                 for f in figures(t):
                     if cover and (f.date is not None or (f.plain and 1900 <= f.value <= 2100)):
@@ -199,6 +212,8 @@ def figure_not_in_brief(ctx: AuditContext) -> list[Issue]:
                         v = "derived"  # «×2,1» beside a chart of 120 000 → 254 795: read off the chart's own values
                     elif v == "ok" and not idx._same(f):
                         v = "derived"  # a difference, a percent change or a ratio of the brief's figures
+                    if v != "ok" and t in row_given:
+                        v = "derived"  # 3 200 ₽ / 4 занятия = 800 ₽ за занятие, in the same row of the table
                     found.append((written, v))
             if e.chart is not None:
                 for ser in e.chart.series:

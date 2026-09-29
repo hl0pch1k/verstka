@@ -1142,3 +1142,40 @@ def test_a_sentence_of_the_brief_word_for_word_keeps_its_elided_subject():
     s = OutlineSlide(id="s5", kind=PatternKind.bullets, headline="Всемирная месячная аудитория — 100 млн.", content=SlideContent(bullets=[line]), spec_ref=5)
     o, warns = ground_outline(DeckOutline(title="x", slides=[s]), brief)
     assert "73,4 млн" in o.slides[0].content.bullets[0], (o.slides[0].content.bullets, warns)
+
+
+def test_a_table_row_gives_its_spelled_counts_and_per_unit_prices():
+    """«Четыре занятия в месяц будут стоить 3 200 рублей, восемь занятий — 5 200 рублей, двенадцать занятий — 6 600
+    рублей. Нужна таблица сравнения абонементов по цене, количеству занятий и стоимости одного посещения.» — the table
+    keeps its rows: «4» is the row's own «Четыре», «800 ₽» is 3 200 ₽ / 4; a figure no cell of the row gives still goes."""
+    from verstka.schemas.outline import TableData
+
+    brief = parse_brief_text(
+        "Слайд 1. Услуги и цены\nСтудия предложит три абонемента. Четыре занятия в месяц будут стоить 3 200 рублей, "
+        "восемь занятий — 5 200 рублей, двенадцать занятий — 6 600 рублей.\nНужна таблица сравнения абонементов по цене, "
+        "количеству занятий и стоимости одного посещения.\n\nСлайд 2. Итог\nСредняя выручка на клиента — 5 050 рублей.\n"
+    )
+    table = TableData(columns=["Абонемент", "Цена", "Занятий", "Стоимость одного занятия"], rows=[
+        ["Четыре занятия в месяц", "3 200 ₽", "4", "800 ₽"],
+        ["Восемь занятий в месяц", "5 200 ₽", "8", "650 ₽"],
+        ["Двенадцать занятий в месяц", "6 600 ₽", "12", "550 ₽"],
+        ["Абонемент на год", "40 000 ₽", "150", "267 ₽"],
+    ])
+    o = DeckOutline(title="Студия", slides=[OutlineSlide(id="s1", kind=K.table, headline="Абонементы", content=SlideContent(table=table))])
+    got, _ = ground_outline(o, brief)
+    rows = got.slides[0].content.table.rows
+    assert [r[0] for r in rows] == ["Четыре занятия в месяц", "Восемь занятий в месяц", "Двенадцать занятий в месяц"]
+    assert [r[3] for r in rows] == ["800 ₽", "650 ₽", "550 ₽"]
+
+
+def test_a_second_chart_that_repeats_the_first_goes():
+    """Two line charts of one slide with the same numbers (the second one's data was never read) are one chart."""
+    from verstka.schemas.outline import ChartSpec, InlineSeries
+
+    brief = parse_brief_text("Слайд 1. Прогноз\nПрогноз активных клиентов: первый месяц — 80, второй — 120, третий — 160, четвертый — 195.\n"
+                             "Нужны два линейных графика.\n\nСлайд 2. Итог\nКлиентов станет 195.\n")
+    one = ChartSpec(type="line", categories=["1-й", "2-й", "3-й", "4-й"], series=[InlineSeries(name="Клиенты", values=[80, 120, 160, 195])])
+    two = ChartSpec(type="line", categories=["Январь", "Февраль", "Март", "Апрель"], series=[InlineSeries(name="Активные клиенты", values=[80, 120, 160, 195])])
+    o = DeckOutline(title="Студия", slides=[OutlineSlide(id="s1", kind=K.chart, headline="Клиентов станет 195", content=SlideContent(chart=one, chart2=two))])
+    got, warnings = ground_outline(o, brief)
+    assert got.slides[0].content.chart is not None and got.slides[0].content.chart2 is None

@@ -3555,21 +3555,35 @@ class Composer:
             return
         x = area.x + chart_w + gap
         w = area.x + area.w - x
-        paras: list[Para] = []
-        if takeaway is not None:
-            value, label = takeaway
-            if value:
-                fs = k.display
-                for s in k.steps_down(k.display, k.h3):
-                    fs = s
-                    if text_width_pt(value, k.font, s, k.bold) <= _pt(w) * 0.95:
-                        break
-                paras.append(self.P(value, fs, k.colors.accent, bold=k.bold, space_after=4))
-            # the slide's own conclusion reads as a statement (lead, text colour); a computed figure's label is muted
-            paras.append(self.P(label, k.lead if aside else k.body, k.colors.text if aside else k.colors.muted, space_after=k.body * 1.4))
-        for t in side_texts:
-            paras.append(self.P(t, k.body if len(t) > 90 else k.lead, k.colors.text, space_after=k.body * 0.7, marker="•" if len(side_texts) > 1 else None, marker_color=k.colors.accent))
-        hh = self.h(paras, w)
+
+        def column(size: Optional[float]) -> list[Para]:
+            # None: short lines at the lead size, long ones at the body size; else every line at `size`
+            paras: list[Para] = []
+            if takeaway is not None:
+                value, label = takeaway
+                if value:
+                    fs = k.display
+                    for s in k.steps_down(k.display, k.h3):
+                        fs = s
+                        if text_width_pt(value, k.font, s, k.bold) <= _pt(w) * 0.95:
+                            break
+                    paras.append(self.P(value, fs, k.colors.accent, bold=k.bold, space_after=4))
+                # the slide's own conclusion reads as a statement (lead, text colour); a computed figure's label is muted
+                own = k.lead if aside else k.body
+                paras.append(self.P(label, own if size is None else min(own, size), k.colors.text if aside else k.colors.muted, space_after=k.body * 1.4))
+            for t in side_texts:
+                ts = (k.body if len(t) > 90 else k.lead) if size is None else size
+                paras.append(self.P(t, ts, k.colors.text, space_after=k.body * 0.7, marker="•" if len(side_texts) > 1 else None, marker_color=k.colors.accent))
+            return paras
+
+        # the column steps down the template's scale until it fits beside the chart, measured a little narrower than it
+        # is: the renderer sets a line a little wider than measured, and a column clipped to the area ran under the
+        # conclusion's strip
+        for size in [None, *[x for x in k.steps_down(k.lead, k.body) if x < k.lead - 0.05], k.small]:
+            paras = column(size)
+            hh = self.h(paras, int(w * self.WORD_ROOM))
+            if hh <= area.h:
+                break
         y = area.y + max(0, int((area.h - hh) * 0.35))
         # a hairline as tall as what it sets apart
         self.cv.line(x - k.gap, y, x - k.gap, y + min(hh, area.h), k.colors.divider, 1.0)

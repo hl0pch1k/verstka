@@ -132,7 +132,8 @@ def test_every_series_value_is_a_number_of_the_brief(text):
     for s in st.series:
         assert len(s.values) == len(s.categories) >= 2, s
         for v in s.values:
-            assert any(abs(v - p) < 1e-6 for p in pool), (s.name, v)
+            # a loss the text writes «минус 591 200» is the brief's −591 200
+            assert any(abs(v - p) < 1e-6 or (v < 0 and "минус" in text and abs(-v - p) < 1e-6) for p in pool), (s.name, v)
     ids = {s.id for s in st.series}
     assert len(ids) == len(st.series)
     for spec in st.specs:
@@ -143,7 +144,7 @@ def test_every_series_value_is_a_number_of_the_brief(text):
 # ------------------------------------------------------------------ briefs without slide specs, other forms
 
 
-@pytest.mark.parametrize("path", EXAMPLES, ids=lambda p: p.stem)
+@pytest.mark.parametrize("path", [p for p in EXAMPLES if p.stem != "fitness_studio"], ids=lambda p: p.stem)  # the fitness brief dictates its slides
 def test_generic_briefs_do_not_break(path):
     text = path.read_text(encoding="utf-8")
     st = read_structure(text)
@@ -299,3 +300,75 @@ def test_whole_brief_path_keeps_the_model_ids():
     assert out.series[0].id == "s1" and out.series[0].values == [900000, 1138500]
     ids = [s.id for s in out.series]
     assert len(ids) == len(set(ids)) and any(s.values == [60, 25, 15] for s in out.series)
+
+
+def test_a_topic_line_in_the_preamble_names_the_deck():
+    """«Тема презентации: «Открытие фитнес-студии: от идеи до первых результатов». Презентация на 12 слайдов.» — the
+    deck is called by the quoted title, not by the whole line («Тема презентации: «…»» on the cover); a «Тема:» inside
+    a slide's text names that slide's subject, not the deck."""
+    from verstka.planning.brief_structure import read_structure
+
+    text = ("Тема презентации: «Открытие фитнес-студии: от идеи до первых результатов». Презентация на 12 слайдов. "
+            "Все цифры условные.\n\nСлайд 1. Идея проекта\nФитнес-студия «Движение» — 180 м².\n\n"
+            "Слайд 2. Клиенты\nТема: жители района. 18 000 человек.\n")
+    st = read_structure(text)
+    assert st.title == "Открытие фитнес-студии: от идеи до первых результатов"
+    assert read_structure("Тема презентации: «Кофейня «Точка кофе»: план». На 5 слайдов.\n\nСлайд 1. Идея\nТекст.\n\nСлайд 2. План\nЕщё.").title == "Кофейня «Точка кофе»: план"
+    assert read_structure("Тема: как мы ускорили релизы\n\nСлайд 1. Итоги\nРост 20%.\n\nСлайд 2. Планы\nЕщё.").title == "Как мы ускорили релизы"
+    # no topic line in the preamble: a slide's «Тема:» is not the deck's title
+    assert read_structure("Слайд 1. Итоги\nРост 20%.\n\nСлайд 2. Клиенты\nТема: жители района.").title != "Жители района"
+
+
+def test_a_requested_two_figure_chart_keeps_the_briefs_labels():
+    """«Нужен сравнительный график: имеющийся оборотный резерв — 850 000 рублей, прогнозируемая потребность до выхода
+    на месячную прибыль — 1 237 388 рублей.» — the bars are the brief's two things, not «Сейчас» and «Цель»; two bare
+    figures («120 000 и 254 795 рублей») still take the pair's words."""
+    from verstka.planning.brief_structure import read_structure
+
+    text = ("Слайд 1. Риски\nОборотного резерва недостаточно.\nНужен сравнительный график: имеющийся оборотный резерв — "
+            "850 000 рублей, прогнозируемая потребность до выхода на месячную прибыль — 1 237 388 рублей.\n\n"
+            "Слайд 2. Прибыль\nПрибыль вырастет.\nНужен столбчатый график сравнения текущей и прогнозируемой прибыли: 120 000 и 254 795 рублей.\n")
+    st = read_structure(text)
+    by = {s.id: s for s in st.series}
+    cats = [by[i].categories for sp in st.specs for i in sp.series_ids if i in by and len(by[i].values) == 2]
+    assert ["Имеющийся оборотный резерв", "Прогнозируемая потребность до выхода на месячную прибыль"] in cats
+    assert ["Сейчас", "Прогноз"] in cats or ["Сейчас", "Цель"] in cats
+
+
+def test_figures_listed_respectively_follow_the_periods_before_them():
+    """«…месячная выручка составит соответственно 404 000, …, 1 262 500 рублей. … операционный результат составит:
+    минус 591 200, …, плюс 224 375 рублей. Нужны два линейных графика: рост активных клиентов и изменение месячной
+    операционной прибыли.» — both rows are read by the months before them (a loss below zero), and the profit chart
+    draws the operating result, not the revenue."""
+    from verstka.planning.brief_structure import read_structure
+
+    text = ("Слайд 1. Прогноз\nПрогноз активных клиентов: первый месяц — 80, второй — 120, третий — 160, четвертый — 195.\n\n"
+            "При средней выручке 5 050 рублей на клиента месячная выручка составит соответственно 404 000, 606 000, 808 000 и 984 750 рублей.\n\n"
+            "Операционный результат составит: минус 591 200, минус 399 300, плюс 104 437,50 и плюс 224 375 рублей.\n\n"
+            "Нужны два линейных графика: рост активных клиентов и изменение месячной операционной прибыли.\n\n"
+            "Слайд 2. Итог\nПрибыль появится на третьем месяце.\n")
+    st = read_structure(text)
+    by = {s.id: s for s in st.series}
+    sp = st.specs[0]
+    rows = {by[i].name: by[i] for i in sp.series_ids}
+    assert rows["Месячная выручка"].values == [404000.0, 606000.0, 808000.0, 984750.0]
+    assert rows["Операционный результат"].values == [-591200.0, -399300.0, 104437.5, 224375.0]
+    assert rows["Операционный результат"].categories == rows["Прогноз активных клиентов"].categories
+    assert [by[c.series_ids[0]].name for c in sp.charts] == ["Прогноз активных клиентов", "Операционный результат"]
+
+
+def test_a_compared_pair_is_named_by_its_two_things():
+    """«Нужен график сравнения месячной вместимости и ожидаемого количества посещений: 2 700 и 2 000» — two different
+    things, not a change «2 700 → 2 000»: the bars are «Месячная вместимость» and «Ожидаемое количество посещений»;
+    a comparison in time («текущей и прогнозируемой прибыли») keeps its «Сейчас / Прогноз»."""
+    from verstka.planning.brief_structure import _compared_pair, read_structure
+
+    text = ("Слайд 1. Загрузка\nСтудия сможет обеспечить 2 700 посещений в месяц, ожидается 2 000.\n"
+            "Нужен график сравнения месячной вместимости и ожидаемого количества посещений: 2 700 и 2 000.\n\n"
+            "Слайд 2. Итог\nЗагрузка около 74%.\n")
+    st = read_structure(text)
+    by = {s.id: s for s in st.series}
+    pairs = [by[i].categories for i in st.specs[0].series_ids if len(by[i].values) == 2]
+    assert ["Месячная вместимость", "Ожидаемое количество посещений"] in pairs
+    assert _compared_pair("Нужен график сравнения выручки и расходов") == ["Выручка", "Расходы"]
+    assert _compared_pair("Нужен столбчатый график сравнения текущей и прогнозируемой месячной прибыли") is None

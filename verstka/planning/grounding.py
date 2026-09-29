@@ -411,6 +411,70 @@ def _word_figures(text: str) -> list[Fig]:
     return out
 
 
+def _spelled_counts(text: str) -> set[float]:
+    """The counts a label spells in words («Четыре занятия в месяц» → 4, «двадцать пять мест» → 25)."""
+    out: set[float] = set()
+    toks = list(_WORD_RE_ANY.finditer(text or ""))
+    i = 0
+    while i < len(toks):
+        w = toks[i].group(0).lower()
+        if w in _CARDINALS:
+            value, rank = _CARDINALS[w]
+            j = i + 1
+            while j < len(toks) and toks[j].group(0).lower() in _CARDINALS:
+                v2, r2 = _CARDINALS[toks[j].group(0).lower()]
+                if r2 >= rank or (rank == 1 and v2 >= 10):
+                    break
+                value, rank, j = value + v2, r2, j + 1
+            out.add(float(value))
+            i = j
+            continue
+        i += 1
+    return out
+
+
+def _same_chart_values(a, b) -> bool:
+    """Two charts that draw the same figures in the same order (whatever their titles and category words)."""
+    va = [round(float(v), 6) for x in (a.series or []) for v in x.values]
+    vb = [round(float(v), 6) for x in (b.series or []) for v in x.values]
+    return bool(va) and va == vb
+
+
+def _row_given(idx: "BriefIndex", row: list[str]) -> set[int]:
+    """Cells of a table row that the row itself gives, though the brief does not write them so: a count its label
+    spells in words («Четыре занятия в месяц» | «4»), and a value that is one of the row's figures divided by another —
+    a price per visit (3 200 ₽ / 4 = 800 ₽) — or their product, both of them the brief's."""
+    single: dict[int, Fig] = {}
+    for j, cell in enumerate(row):
+        fs = figures(cell)
+        if len(fs) == 1 and fs[0].date is None:
+            single[j] = fs[0]
+    given: set[int] = set()
+    spelled = {j: _spelled_counts(cell) for j, cell in enumerate(row)}
+    for j, f in single.items():
+        if f.unit is None and any(f.mag in spelled[k] for k in spelled if k != j):
+            given.add(j)
+    ok = {j for j in single if j in given or not idx.clean(row[j]).bad}
+    for j, f in single.items():
+        if j in ok:
+            continue
+        v = f.mag
+        tol = max(0.5, 0.005 * abs(v))
+        for a in ok:
+            for b in ok:
+                if len({a, b, j}) < 3:
+                    continue
+                fa, fb = single[a], single[b]
+                if fb.unit is not None or fa.unit != f.unit or not fb.mag:
+                    continue  # a price over a count, in the price's unit
+                if abs(fa.mag / fb.mag - v) <= tol or abs(fa.mag * fb.mag - v) <= tol:
+                    given.add(j)
+                    break
+            if j in given:
+                break
+    return given
+
+
 def figures(text: str) -> list[Fig]:
     """The figures of a text, each with the unit written right after it («47 минут», «14,5 млн ₽», «64%», «15млн»,
     «13K»), dates and figures in words. Digits of a name («Qwen3.8», «Q3») are not figures. A unit written once is the
@@ -2496,7 +2560,8 @@ def _ground_content_slide(idx: BriefIndex, s: OutlineSlide, log: _Log, series_id
             tbl.caption = _line(idx, _take(idx.clean(tbl.caption), log), lenient) or None
         rows = []
         for row in tbl.rows:
-            cells = [idx.clean(x) for x in row]
+            given = _row_given(idx, row)
+            cells = [_Clean(x) if j in given else idx.clean(x) for j, x in enumerate(row)]
             for x in cells:
                 log.take(x)
             if any(x.bad for x in cells):
@@ -2534,6 +2599,11 @@ def _ground_content_slide(idx: BriefIndex, s: OutlineSlide, log: _Log, series_id
             log.lines.append(f"grounding: slide {s.id}: the second chart takes the place of a chart without data")
         if ch is not None:
             c.chart = ch
+            if c.chart2 is not None and _same_chart_values(ch, c.chart2):
+                # two charts of one slide that draw the same numbers («рост клиентов» twice, when the second one's
+                # data was never read) say it once
+                c.chart2 = None
+                log.lines.append(f"grounding: slide {s.id}: the second chart repeats the first one's figures and goes")
         else:
             refs = [x for x in list(c.chart.series_ids) + list(s.fact_refs) if x in facts]
             nums = list(c.numbers)

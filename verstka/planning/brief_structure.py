@@ -151,6 +151,20 @@ def _clean(text: str) -> str:
     return H.cap_first(t)
 
 
+def _lead_title(text: str) -> str:
+    """The title a «Тема: …» line gives: the quoted title whole when it opens the value («Открытие фитнес-студии: от
+    идеи до первых результатов», nested quotes kept: «Кофейня «Точка кофе»»), else its first sentence."""
+    t = text.strip()
+    if t.startswith("«"):
+        depth = 0
+        for i, ch in enumerate(t):
+            depth += 1 if ch == "«" else -1 if ch == "»" else 0
+            if depth == 0:
+                return H.cap_first(_unquote(t[: i + 1]))
+    first = (H.split_sentences(t) or [t])[0]
+    return H.cap_first(_unquote(first))
+
+
 def _unquote(text: str) -> str:
     t = text.strip().rstrip(".;").strip()
     pairs = {"«": "»", '"': '"', "“": "”", "„": "“"}
@@ -236,6 +250,9 @@ _COUNT_RE = re.compile(r"(?:на|из|ровно|не более|не больш
 _TITLE_RE = re.compile(r"^\s*(?:[—–\-•*]\s*)?(?:название|заголовок|title)(?:\s+(?:презентации|колоды|deck))?\s*:\s*(?P<v>.+)$", re.I)
 _SUBTITLE_RE = re.compile(r"^\s*(?:[—–\-•*]\s*)?(?:подзаголовок|subtitle)\s*:\s*(?P<v>.+)$", re.I)
 _TOPIC_RE = re.compile(r"на\s+тему\s+«(?P<v>[^»]{4,160})»", re.I)
+# «Тема презентации: «Открытие фитнес-студии: от идеи до первых результатов». Презентация на 12 слайдов.» — the deck's
+# own topic in the text's preamble (never inside a slide's text, where «Тема:» names that slide's subject)
+_TOPIC_LINE_RE = re.compile(r"^\s*(?:[—–\-•*]\s*)?(?:тема|topic)(?:\s+(?:презентации|доклада|выступления|колоды|deck|presentation))?\s*:\s*(?P<v>.+)$", re.I)
 
 
 def _is_rule(sentence: str) -> bool:
@@ -450,6 +467,111 @@ _VERSUS_RE = re.compile(
     rf"(?P<b>{_NUM})\s?(?P<ub>{_UNIT})?",
     re.I,
 )
+
+
+_COMPARED_RE = re.compile(r"\bсравнени[яеюи]\s+(?P<a>[а-яё][а-яё\s-]{3,60}?)\s+и\s+(?P<b>[а-яё][а-яё\s-]{3,60}?)\s*$", re.I)
+_TIME_PAIR_RE = re.compile(r"\b(?:текущ|нынешн|сейчас|сегодняшн|прошл|прежн|было|стало|до\s+и\s+после|план\w*\s+и\s+факт)", re.I)
+_ADJ_GEN_RE = re.compile(r"(?:ой|ей|ого|его|ых|их)$")
+
+
+def _head_nominative(word: str) -> Optional[tuple[str, str]]:
+    """(nominative, gender) of a noun in the genitive: вместимости → вместимость (f), количества → количество (n),
+    бюджета → бюджет (m), выручки → выручка (f), расходов → расходы (plural); None when the form is not one of these."""
+    w = word.lower()
+    for gen, nom, g in (("ений", "ения", "p"), ("аний", "ания", "p"), ("ов", "ы", "p"), ("ости", "ость", "f"), ("ства", "ство", "n"), ("ения", "ение", "n"), ("ания", "ание", "n"), ("тия", "тие", "n"),
+                        ("ии", "ия", "f"), ("ки", "ка", "f"), ("ги", "га", "f"), ("хи", "ха", "f"), ("ры", "ра", "f"), ("ты", "та", "f"),
+                        ("ды", "да", "f"), ("ны", "на", "f"), ("ли", "ль", "f"), ("ви", "вь", "f"), ("ра", "р", "m"), ("та", "т", "m"),
+                        ("ка", "к", "m"), ("ла", "л", "m"), ("на", "н", "m"), ("да", "д", "m"), ("са", "с", "m"), ("ва", "в", "m")):
+        if w.endswith(gen) and len(w) > len(gen) + 2:
+            return word[: len(word) - len(gen)] + nom, g
+    return None
+
+
+def _nominative_of_genitive(phrase: str) -> Optional[str]:
+    """«месячной вместимости» → «месячная вместимость», «ожидаемого количества посещений» → «ожидаемое количество
+    посещений»: the adjectives before the first noun and that noun back in the nominative, its complement as it is."""
+    ws = phrase.split()
+    k = 0
+    while k < len(ws) and _ADJ_GEN_RE.search(ws[k].lower()) and k < 3:
+        k += 1
+    if k >= len(ws):
+        return None
+    head = _head_nominative(ws[k])
+    if head is None:
+        return None
+    noun, g = head
+    out = []
+    for a in ws[:k]:
+        low = a.lower()
+        if g == "p":
+            new = a[:-2] + ("ые" if low.endswith("ых") else "ие") if low.endswith(("ых", "их")) else None
+        elif g == "f":
+            new = a[:-2] + ("ая" if low.endswith("ой") else "яя") if low.endswith(("ой", "ей")) else None
+        elif g == "n":
+            new = a[:-3] + ("ое" if low.endswith("ого") else "ее") if low.endswith(("ого", "его")) else None
+        else:
+            new = a[:-3] + ("ий" if re.search(r"[гкхжшщч]ого$|его$", low) else "ый") if low.endswith(("ого", "его")) else None
+        if new is None:
+            return None
+        out.append(new)
+    return " ".join(out + [noun] + ws[k + 1 :])
+
+
+def _compared_pair(lead: str) -> Optional[list[str]]:
+    """«Нужен график сравнения месячной вместимости и ожидаемого количества посещений: 2 700 и 2 000» — two different
+    things side by side, not a «Сейчас → Цель» change: the bars are named by the two things."""
+    m = _COMPARED_RE.search(H.strip_end(lead or ""))
+    if m is None or _TIME_PAIR_RE.search(lead):
+        return None
+    a, b = (_nominative_of_genitive(m.group(x).strip()) for x in ("a", "b"))
+    if not a or not b or a.lower() == b.lower():
+        return None
+    return [H.cap_first(a), H.cap_first(b)]
+
+
+def _pair_labels(text: str) -> Optional[list[str]]:
+    """«имеющийся оборотный резерв — 850 000 рублей, прогнозируемая потребность до выхода на месячную прибыль —
+    1 237 388 рублей»: the two figures under the brief's own words, not «Сейчас» and «Цель»."""
+    parts = _chunks(H.strip_end(text))
+    if len(parts) != 2:
+        return None
+    labels = []
+    for p in parts:
+        m = _ITEM_LABEL_FIRST_RE.match(p.strip())
+        if not m or len(numbers_of(p)) != 1:
+            return None
+        lab = m.group("label").strip(" ,")
+        if not re.search(r"[а-яёa-z]{3,}", lab, re.I) or len(lab.split()) > 9:
+            return None
+        labels.append(H.cap_first(lab))
+    return labels if labels[0].lower() != labels[1].lower() else None
+
+
+_RESPECTIVE_ANCHOR_RE = re.compile(r"\bсоответственно\b\s*:?|\b(?:состав(?:ит|ят|ил|или|ляет|ляют)|будет|будут|получится|выйдет)\s*:", re.I)
+_SIGN_BEFORE_RE = re.compile(r"(?:\bминус|−|–|-)\s*$", re.I)
+
+
+def _respective_series(sentence: str, ref: "Series") -> Optional[Series]:
+    """Figures listed «соответственно» (or after «составит:») one per period of the series before them, «минус»
+    marking a loss: a series under the same periods («1-й месяц» … «6-й месяц»), named by the words before the verb."""
+    m = _RESPECTIVE_ANCHOR_RE.search(sentence)
+    if m is None:
+        return None
+    tail = sentence[m.end():]
+    nums = [x for x in _NUM_RE.finditer(tail) if not _TIME_RE.match(tail, x.start())]
+    if len(nums) != len(ref.values) or len(nums) < 3:
+        return None
+    units = {_unit(x.group("unit")) for x in nums if x.group("unit")}
+    if len(units) > 1:
+        return None
+    values = []
+    for x in nums:
+        v = _num(x.group("num"))
+        values.append(-v if _SIGN_BEFORE_RE.search(tail[: x.start()][-12:]) else v)
+    head = re.sub(r"\b(?:составит|составят|составил|составили|составляет|составляют|будет|будут|получится|выйдет)\b.*$", "", sentence[: m.start()], flags=re.I)
+    words = [w for w in re.findall(r"[А-Яа-яЁё-]+", head) if w.lower() not in _PREPS and w.lower() not in _CONJ]
+    name = H.cap_first(" ".join(words[-2:])) if words else ""
+    return Series(id="", name=name or ref.name, categories=list(ref.categories), values=values, unit=next(iter(units), ref.unit), source_span=sentence[:200])
 
 
 def _pairs_of(sentence: str) -> list[Series]:
@@ -753,9 +875,15 @@ def _chart_requests(sentence: str) -> list[ChartRequest]:
         what = after
     what_main, _, data = what.partition(":")
     parts = [p.strip(" .") for p in data.split(";") if p.strip(" .")] if count > 1 and data else []
+    if count > 1 and len(parts) != count and data and not re.search(r"\d", data):
+        # «Нужны два линейных графика: рост активных клиентов и изменение месячной операционной прибыли»
+        alt = [p.strip(" .") for p in re.split(r";\s+|,\s+|\s+и\s+", H.strip_end(data)) if p.strip(" .")]
+        if len(alt) == count:
+            parts = alt
     if count > 1 and len(parts) != count:
         parts = [p.strip(" .") for p in re.split(r";\s+", what_main) if p.strip(" .")]
-    whats = parts if len(parts) == count else [H.strip_end(what_main)] * count
+    main = what_main if what_main.strip() or re.search(r"\d", data) else data  # «график: рост выручки» names it after the colon
+    whats = parts if len(parts) == count else [H.strip_end(main)] * count
     if ctype is None:
         ctype = next((t for pat, t in _IMPLIED_TYPES if re.search(pat, " ".join(whats).lower())), None)
     return [ChartRequest(type=ctype, what=H.strip_end(w)) for w in whats]
@@ -784,6 +912,20 @@ def _fit(req: ChartRequest, s: Series, block_numbers: list[float]) -> int:
     return score
 
 
+_RESULT_WORDS_RE = re.compile(r"прибыл|убыт|результат|сальдо|маржинальн|окупаем", re.I)
+_TURNOVER_WORDS_RE = re.compile(r"выручк|оборот|продаж|доход", re.I)
+
+
+def _money_sense(what: str, s: Series) -> int:
+    """A request for profit («изменение месячной операционной прибыли») is the operating result — a row that goes
+    below zero or is named a result — and never the revenue beside it."""
+    if not _RESULT_WORDS_RE.search(what or ""):
+        return 0
+    if _TURNOVER_WORDS_RE.search(s.name or "") and not _RESULT_WORDS_RE.search(s.name or ""):
+        return -3
+    return 2 if any(v < 0 for v in s.values) or _RESULT_WORDS_RE.search(s.name or "") else 0
+
+
 def _link_requests(block: _Block, reg: _Registry, inline: dict[int, str], block_numbers: list[float]) -> None:
     """Gives each chart request of the slide its data: the enumeration said in the request itself, else the series of
     this slide it names («средний чек до и после» → «Средний чек»), else the one its kind fits best."""
@@ -807,7 +949,7 @@ def _link_requests(block: _Block, reg: _Registry, inline: dict[int, str], block_
             fit = _fit(req, s, block_numbers)
             if fit < 0:
                 continue
-            scored.append((3 * overlap + fit, k, sid))
+            scored.append((3 * overlap + fit + _money_sense(req.what, s), k, sid))
     for score, k, sid in sorted(scored, key=lambda x: (-x[0], x[1])):
         req = spec.charts[k]
         if req.series_ids or sid in taken or score < 2:
@@ -900,6 +1042,15 @@ def _read_block(block: _Block, reg: _Registry, all_numbers: list[float]) -> None
             if sid not in block.series:
                 block.series.append(sid)
             block.covered.extend(ser.values)
+        if ch is None:
+            # «месячная выручка составит соответственно 404 000, 606 000 … и 1 262 500 рублей», «операционный результат
+            # составит: минус 591 200, …, плюс 224 375 рублей» — a row of figures by the periods of the series before it
+            ref = next((reg.get(x) for x in reversed(block.series) if reg.get(x) is not None and len(reg.get(x).values) >= 3), None)  # type: ignore[union-attr]
+            rs = _respective_series(sent, ref) if ref is not None else None
+            if rs is not None:
+                sid = reg.add_series(rs)
+                block.series.append(sid)
+                block.covered.extend(abs(v) for v in rs.values)
         if spec is not None:
             if reqs:
                 start = _starting_point(sent)
@@ -911,7 +1062,8 @@ def _read_block(block: _Block, reg: _Registry, all_numbers: list[float]) -> None
                         same = next((sid for sid in block.series if sorted(reg.get(sid).values) == sorted(vals)), None)  # type: ignore[union-attr]
                         if same is None:
                             um = list(_NUM_RE.finditer(sent.split(":", 1)[1]))
-                            ser = Series(id="", name=_name_from_lead("диаграмма " + reqs[0].what), categories=_pair_categories(sent), values=vals, unit=_unit(um[-1].group("unit")), source_span=sent[:200])
+                            cats = _pair_labels(sent.split(":", 1)[1]) or _compared_pair(sent.split(":", 1)[0]) or _pair_categories(sent)
+                            ser = Series(id="", name=_name_from_lead("диаграмма " + reqs[0].what), categories=cats, values=vals, unit=_unit(um[-1].group("unit")), source_span=sent[:200])
                             same = reg.add_series(ser)
                             block.series.append(same)
                             block.covered.extend(vals)
@@ -1035,6 +1187,11 @@ def read_structure(text: str) -> BriefStructure:
         if h1:
             st.title = H.strip_end(h1.group(1))
     glob_text = "\n".join(glob) if has_specs else body
+    if st.title is None:
+        preamble = [ln for ln in (glob if has_specs else body.splitlines()) if ln.strip()][:3]
+        tl = next((m for m in (_TOPIC_LINE_RE.match(ln) for ln in preamble) if m), None)
+        if tl is not None:
+            st.title = _lead_title(tl.group("v")) or None
     if st.title is None and has_specs:
         first = next((ln.strip() for ln in glob if ln.strip()), "")
         sent = (H.split_sentences(first) or [first])[0] if first else ""
