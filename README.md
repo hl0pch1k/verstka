@@ -6,7 +6,7 @@
 
 Кейс № 4 VK Tech «Цифровой дизайнер презентаций», хакатон «Лидеры цифровой трансформации 2026», команда «Рекрут 2».
 
-**Для экспертов:** [видео прогона на незнакомом шаблоне](docs/video/verstka-demo.mp4) · [презентация проекта](docs/presentation/verstka-pitch.pdf) · [ссылки для сдачи](docs/SUBMISSION.md) · [запуск на Linux](#запуск)
+**Для экспертов:** [видео прогона на незнакомом шаблоне](https://cdn.jsdelivr.net/gh/hl0pch1k/verstka@13249ee/docs/video/verstka-demo.mp4) (5 мин 22 с; файл — [`docs/video/verstka-demo.mp4`](docs/video/verstka-demo.mp4)) · [презентация проекта](docs/presentation/verstka-pitch.pdf) · [ссылки для сдачи](docs/SUBMISSION.md) · [запуск на Linux](#запуск)
 
 [![Проверка на Linux: установка, генерация, веб-сервис, тесты](https://github.com/hl0pch1k/verstka/actions/workflows/linux.yml/badge.svg)](https://github.com/hl0pch1k/verstka/actions/workflows/linux.yml)
 

@@ -9,14 +9,14 @@
 | Репозиторий | https://github.com/hl0pch1k/verstka | Код сервиса, 2 033 автотеста, конфиги, скиллы и агенты отдельными файлами |
 | Документация | https://github.com/hl0pch1k/verstka/blob/main/README.md | Запуск на Linux и macOS, переменные окружения, ограничения; оттуда — [ARCHITECTURE](../ARCHITECTURE.md), [MODELS](../MODELS.md), [AUDIT](../AUDIT.md) |
 | Презентация | https://github.com/hl0pch1k/verstka/blob/main/docs/presentation/verstka-pitch.pdf | Питч на шаблоне ЛЦТ 2026: проблема, подход, архитектура пайплайна, демо-прогон, архитектура аудита, выводы. Редактируемый PPTX — [`verstka-pitch.pptx`](presentation/verstka-pitch.pptx) |
-| Прототип | https://github.com/hl0pch1k/verstka/blob/main/docs/video/verstka-demo.mp4 | Видео работы сервиса: один непрерывный прогон без монтажа и ускорения на шаблоне, которого нет в датасете |
+| Прототип | https://cdn.jsdelivr.net/gh/hl0pch1k/verstka@13249ee/docs/video/verstka-demo.mp4 | Видео работы сервиса, открывается прямо в браузере: один непрерывный прогон без монтажа и ускорения на шаблоне, которого нет в датасете. Это тот же файл, что в репозитории, — [`docs/video/verstka-demo.mp4`](video/verstka-demo.mp4) (GitHub показывает такие файлы только кнопкой «View raw», а ссылка jsDelivr отдаёт его как видео) |
 | Дополнительные материалы | https://github.com/hl0pch1k/verstka/tree/main/examples/outputs | 9 демо-презентаций (один текст, три шаблона VK, три варианта) и файлы прогона из видео |
 
 ## Прототип
 
 Сервис самостоятельный: веб-интерфейс и API в одном процессе `verstka serve`, запускается на своей машине или сервере по разделу [«Запуск»](../README.md#запуск) README. Установка, генерация без ключа, веб-сервис и модульные тесты проверяются на Ubuntu 24.04 в GitHub Actions ([`linux.yml`](../.github/workflows/linux.yml)).
 
-Видео [`verstka-demo.mp4`](video/verstka-demo.mp4) — запись экрана живого сервиса в браузере Chrome, один дубль:
+Видео [`verstka-demo.mp4`](video/verstka-demo.mp4) ([смотреть в браузере](https://cdn.jsdelivr.net/gh/hl0pch1k/verstka@13249ee/docs/video/verstka-demo.mp4), 5 мин 22 с) — запись экрана живого сервиса в браузере Chrome, один дубль:
 
 1. загрузка шаблона «Blue and Green Business Infographic» (SlidesCarnival) — его нет в датасете, сервис его никогда не видел, под него ничего не настраивалось;
 2. текст питча на 10 слайдов — [`examples/briefs/verstka_final_pitch.md`](../examples/briefs/verstka_final_pitch.md);
