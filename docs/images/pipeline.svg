@@ -1,0 +1,113 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 640" width="1200" height="640" role="img" aria-labelledby="t d">
+  <title id="t">Как устроен Verstka: разбор шаблона, план, сборка</title>
+  <desc id="d">Шаблон разбирается один раз в manifest.json. Агент (аналитик, дизайнер, критик, правка) читает бриф и манифест, компилятор сверяет каждое число с брифом и пишет outline.json. Вёрстка по дизайн-системе шаблона, проверка качества (41 + 2 проверки, автоисправление) и экспорт в PPTX, PDF и HTML.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M1 1 L9 5 L1 9 z" fill="#0077FF"/>
+    </marker>
+  </defs>
+
+  <rect x="0.5" y="0.5" width="1199" height="639" rx="24" fill="#F7F9FC" stroke="#E3E8EF"/>
+  <!-- the 12-column layout grid, the same motif as the banner -->
+  <g fill="#0077FF" fill-opacity="0.025">
+    <rect x="48" y="1" width="70" height="638"/><rect x="142" y="1" width="70" height="638"/><rect x="236" y="1" width="70" height="638"/>
+    <rect x="330" y="1" width="70" height="638"/><rect x="424" y="1" width="70" height="638"/><rect x="518" y="1" width="70" height="638"/>
+    <rect x="612" y="1" width="70" height="638"/><rect x="706" y="1" width="70" height="638"/><rect x="800" y="1" width="70" height="638"/>
+    <rect x="894" y="1" width="70" height="638"/><rect x="988" y="1" width="70" height="638"/><rect x="1082" y="1" width="70" height="638"/>
+  </g>
+
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif">
+    <!-- lane labels -->
+    <g>
+      <text x="48" y="92" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17" font-weight="600" fill="#0077FF">01</text>
+      <text x="48" y="122" font-size="24" font-weight="700" fill="#111214">Разбор</text>
+      <text x="48" y="148" font-size="16" fill="#5E6776">один раз,</text>
+      <text x="48" y="168" font-size="16" fill="#5E6776">кэш по хэшу</text>
+
+      <text x="48" y="282" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17" font-weight="600" fill="#0077FF">02</text>
+      <text x="48" y="312" font-size="24" font-weight="700" fill="#111214">План</text>
+      <text x="48" y="338" font-size="16" fill="#5E6776">агент и сверка</text>
+      <text x="48" y="358" font-size="16" fill="#5E6776">с брифом</text>
+
+      <text x="48" y="472" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17" font-weight="600" fill="#0077FF">03</text>
+      <text x="48" y="502" font-size="24" font-weight="700" fill="#111214">Сборка</text>
+      <text x="48" y="528" font-size="16" fill="#5E6776">вёрстка, проверка,</text>
+      <text x="48" y="548" font-size="16" fill="#5E6776">экспорт</text>
+    </g>
+
+    <!-- lane 1: template → analysis → manifest -->
+    <rect x="206" y="60" width="286" height="120" rx="16" fill="#FFFFFF" stroke="#E1E6ED"/>
+    <text x="226" y="100" font-size="22" font-weight="700" fill="#111214">Шаблон</text>
+    <text x="226" y="130" font-size="17" fill="#5E6776">12 форматов PowerPoint,</text>
+    <text x="226" y="154" font-size="17" fill="#5E6776">темы Office, OpenDocument</text>
+
+    <rect x="536" y="60" width="286" height="120" rx="16" fill="#FFFFFF" stroke="#E1E6ED"/>
+    <text x="556" y="100" font-size="22" font-weight="700" fill="#111214">Разбор шаблона</text>
+    <text x="556" y="130" font-size="17" fill="#5E6776">палитра, кегли, сетка, хром,</text>
+    <text x="556" y="154" font-size="17" fill="#5E6776">образцы слайдов, правила</text>
+
+    <rect x="866" y="60" width="286" height="120" rx="16" fill="#EEF5FF" stroke="#0077FF" stroke-opacity="0.35" stroke-dasharray="6 5"/>
+    <text x="886" y="100" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="20" font-weight="600" fill="#0060D0">manifest.json</text>
+    <text x="886" y="130" font-size="17" fill="#5E6776">дизайн-система шаблона:</text>
+    <text x="886" y="154" font-size="17" fill="#5E6776">токены, паттерны, ассеты</text>
+
+    <path d="M494 120 H532" stroke="#0077FF" stroke-width="2.5" fill="none" marker-end="url(#arrow)"/>
+    <path d="M824 120 H862" stroke="#0077FF" stroke-width="2.5" fill="none" marker-end="url(#arrow)"/>
+
+    <!-- manifest → agent -->
+    <path d="M1009 182 V215 H679 V246" stroke="#0077FF" stroke-width="2.5" fill="none" stroke-linejoin="round" marker-end="url(#arrow)"/>
+
+    <!-- lane 2: brief → agent → compiler -->
+    <rect x="206" y="250" width="286" height="120" rx="16" fill="#FFFFFF" stroke="#E1E6ED"/>
+    <text x="226" y="290" font-size="22" font-weight="700" fill="#111214">Бриф</text>
+    <text x="226" y="320" font-size="17" fill="#5E6776">текст, таблицы, числа</text>
+    <text x="226" y="344" font-size="17" fill="#5E6776">и просьбы к слайдам</text>
+
+    <rect x="536" y="250" width="286" height="120" rx="16" fill="#FFFFFF" stroke="#0077FF" stroke-width="2"/>
+    <text x="556" y="290" font-size="22" font-weight="700" fill="#111214">Агент</text>
+    <text x="556" y="320" font-size="17" fill="#5E6776">аналитик → дизайнер</text>
+    <text x="556" y="344" font-size="17" fill="#5E6776">→ критик → правка</text>
+
+    <rect x="866" y="250" width="286" height="120" rx="16" fill="#FFFFFF" stroke="#E1E6ED"/>
+    <text x="886" y="290" font-size="22" font-weight="700" fill="#111214">Компилятор</text>
+    <text x="886" y="320" font-size="17" fill="#5E6776">каждое число плана</text>
+    <text x="886" y="344" font-size="17" fill="#5E6776">сверено с брифом</text>
+
+    <path d="M494 310 H532" stroke="#0077FF" stroke-width="2.5" fill="none" marker-end="url(#arrow)"/>
+    <path d="M824 310 H862" stroke="#0077FF" stroke-width="2.5" fill="none" marker-end="url(#arrow)"/>
+
+    <!-- compiler → layout, carrying outline.json -->
+    <path d="M1009 372 V405 H349 V436" stroke="#0077FF" stroke-width="2.5" fill="none" stroke-linejoin="round" marker-end="url(#arrow)"/>
+    <rect x="610" y="391" width="138" height="28" rx="14" fill="#EEF5FF" stroke="#0077FF" stroke-opacity="0.35"/>
+    <text x="679" y="410" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16" font-weight="600" fill="#0060D0">outline.json</text>
+
+    <!-- lane 3: layout → audit → export -->
+    <rect x="206" y="440" width="286" height="120" rx="16" fill="#FFFFFF" stroke="#E1E6ED"/>
+    <text x="226" y="480" font-size="22" font-weight="700" fill="#111214">Вёрстка</text>
+    <text x="226" y="510" font-size="17" fill="#5E6776">макет с объяснимым баллом,</text>
+    <text x="226" y="534" font-size="17" fill="#5E6776">дизайн-система шаблона</text>
+
+    <rect x="536" y="440" width="286" height="120" rx="16" fill="#FFFFFF" stroke="#E1E6ED"/>
+    <text x="556" y="480" font-size="22" font-weight="700" fill="#111214">Проверка качества</text>
+    <text x="556" y="510" font-size="17" fill="#5E6776">41 + 2 проверки,</text>
+    <text x="556" y="534" font-size="17" fill="#5E6776">автоисправление с откатом</text>
+
+    <rect x="866" y="440" width="286" height="120" rx="16" fill="#FFFFFF" stroke="#E1E6ED"/>
+    <text x="886" y="480" font-size="22" font-weight="700" fill="#111214">Экспорт</text>
+    <text x="886" y="510" font-size="17" fill="#5E6776">PPTX с живыми объектами,</text>
+    <text x="886" y="534" font-size="17" fill="#5E6776">PDF и HTML</text>
+
+    <path d="M494 500 H532" stroke="#0077FF" stroke-width="2.5" fill="none" marker-end="url(#arrow)"/>
+    <path d="M824 500 H862" stroke="#0077FF" stroke-width="2.5" fill="none" marker-end="url(#arrow)"/>
+
+    <!-- what each step leaves on disk -->
+    <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15" font-weight="600" fill="#0060D0" text-anchor="middle">
+      <rect x="264" y="578" width="170" height="28" rx="14" fill="#EEF5FF" stroke="#0077FF" stroke-opacity="0.35"/>
+      <text x="349" y="597">layout_plan.json</text>
+      <rect x="594" y="578" width="170" height="28" rx="14" fill="#EEF5FF" stroke="#0077FF" stroke-opacity="0.35"/>
+      <text x="679" y="597">audit_report.json</text>
+      <rect x="904" y="578" width="210" height="28" rx="14" fill="#EEF5FF" stroke="#0077FF" stroke-opacity="0.35"/>
+      <text x="1009" y="597">deck.pptx · pdf · html</text>
+    </g>
+  </g>
+</svg>
