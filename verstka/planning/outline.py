@@ -29,7 +29,7 @@ MAX_BULLETS = 6
 MAX_WORDS_PER_BULLET = 15
 MAX_ITEMS = 8
 MAX_NUMBERS = 5
-MAX_TABLE_ROWS = 7
+MAX_TABLE_ROWS = 10  # organizers: a table of more than 7 rows is no error, keep it within 10
 MAX_TABLE_COLS = 5
 MAX_SERIES = 5
 

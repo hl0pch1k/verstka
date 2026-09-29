@@ -19,7 +19,7 @@ Slide kinds (use only these names):
 - two_column or comparison: columns = 2–3 items, each with a title and bullets.
 - process or timeline: 3–6 ordered items, only for steps, stages or dates the brief lists. team: items = people the brief names, with their roles.
 - big_number: numbers = exactly 1. stat_row: numbers = 2–5. Each number: value as written in the brief, label = what it measures.
-- table: {"columns": [...], "rows": [[...]]}, up to 7 rows and 5 columns, cells from the brief.
+- table: {"columns": [...], "rows": [[...]]}, up to 10 rows and 5 columns, cells from the brief.
 - chart: {"type": "column|bar|line|pie", "series_ids": [...]}; series_ids only from "series" of the facts registry, never fact ids. With no series, show figures as big_number or stat_row.
 - quote: only a quotation the brief contains, with its author.
 

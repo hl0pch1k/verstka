@@ -12,7 +12,7 @@ from verstka.schemas.common import EMU_PER_PT, Bbox
 
 TOO_MANY_BULLETS = CheckSpec(id="too_many_bullets", title="Больше 6 пунктов в одном списке", severity="warn", category="density", description="В одном текстовом блоке больше шести пунктов списка.")
 BULLET_TOO_LONG = CheckSpec(id="bullet_too_long", title="Пункт списка длиннее 15 слов", severity="warn", category="density", description="Пункт списка (абзац с маркером) содержит больше 15 слов.")
-TABLE_TOO_BIG = CheckSpec(id="table_too_big", title="Таблица больше 7 строк или 5 колонок", severity="warn", category="density", description="Нативная таблица превышает 7 строк (с шапкой) или 5 колонок.")
+TABLE_TOO_BIG = CheckSpec(id="table_too_big", title="Таблица больше 10 строк или 5 колонок", severity="warn", category="density", description="Нативная таблица длиннее 10 строк данных (не считая шапки) или шире 5 колонок. Приложение 1 называет порог в 7 строк, но организаторы разъяснили: таблица больше 7 строк — не ошибка, лучше держать её в пределах 10.")
 TOO_MANY_SERIES = CheckSpec(id="too_many_series", title="Больше 5 серий на диаграмме", severity="warn", category="density", description="Нативная диаграмма содержит больше пяти рядов данных.")
 FILL_RATIO = CheckSpec(id="fill_ratio", title="Слайд заполнен меньше чем на четверть или больше чем на 80%", severity="warn", category="density", description="Площадь объединения контентных блоков относительно безопасной области шаблона меньше 25% (меньше 20% при одном-двух блоках — сведение) или больше 80% — по тому, что действительно занято: у текста высота его строк, у диаграмм, таблиц и картинок весь блок (просторные карточки шаблона плотными не считаются). Картинка во весь слайд (фон шаблона) контентом не считается. Слайд, где кроме заголовка только один-два текстовых блока (без диаграммы, таблицы и картинки, которую просил план; картинки-оформление шаблона не в счёт) и их строки занимают меньше 15% безопасной области, — почти пустой: предупреждение, даже если рисунок шаблона заполняет остальное (кроме обложки, разделов, цитат, финального слайда и слайда с одним крупным числом).")
 
@@ -47,7 +47,7 @@ def table_too_big(ctx: AuditContext) -> list[Issue]:
             if e.type == "table" and e.table:
                 rows = len(e.table.rows)
                 cols = max((len(r) for r in e.table.rows), default=0)
-                if rows > 7 or cols > 5:
+                if rows > 11 or cols > 5:  # 10 rows of data under the header
                     if _asked_table(ctx, s):
                         # the person dictated this table row by row («Сделай сравнительную таблицу «Сейчас / Цель»: …»):
                         # its size is theirs — noted, not held against the deck

@@ -1,5 +1,5 @@
 name: outline_planner
-version: 0.2.0
+version: 0.2.1
 role: llm
 description: >
   Plans the deck: slide kinds, order, headlines as conclusions and per-slide content, respecting the strategy,
@@ -22,3 +22,4 @@ changelog:
     «section», a missing headline, kind aliases and misplaced fields are normalised instead of rejected; the JSON
     schema shown to the model is PlannedDeck's own, its kind enum narrowed to the listed kinds. The strategies'
     instructions skip the steps the brief has no content for and set no card counts."
+  - "0.2.1: tables up to 10 rows and 5 columns instead of 7 — the organizers clarified in the case chat that a table of more than 7 rows is no error and should stay within 10"

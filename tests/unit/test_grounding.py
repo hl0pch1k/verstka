@@ -472,7 +472,7 @@ def test_plan_json_repairs_the_shapes_models_write():
 def test_the_planner_prompt_has_no_example_facts_and_a_maximum_not_a_target():
     reg = SkillsRegistry.load()
     spec = reg.get("outline_planner")
-    assert spec.version == "0.2.0" and any(c.startswith("0.2.0") for c in spec.changelog)
+    assert spec.version == "0.2.1" and any(c.startswith("0.2.0") for c in spec.changelog)
     system = (spec.root / "prompts" / "system.md").read_text(encoding="utf-8")
     assert "12 тысячах" not in system and "34%" not in system and "(±1)" not in system and "Respect the target" not in system
     assert "never more than" in system and "freeform" not in system

@@ -1,5 +1,5 @@
 name: data_extractor
-version: 0.2.0
+version: 0.2.1
 role: llm
 description: Extracts the figures of one part of the brief (per slide block in Agent v2) — facts with units and short labels, numeric series for charts, tables — plus the chart each series fits. Compact answer, no source quotes.
 prompt_files:
@@ -12,3 +12,4 @@ params:
 changelog:
   - "0.1.0: initial version"
   - "0.2.0: Agent v2 — runs per block of the brief (planning/brief_structure.enrich_with_model), not on the whole brief; compact answer: no source_span per fact (a 3000-token answer of the whole brief was cut off and read as empty), at most 15 facts; chart hints per series (pie/line/column/bar); output schema BlockExtraction (FactsExtraction + charts); max_tokens 1800"
+  - "0.2.1: a comparison table of at most 10 rows × 5 columns instead of 7 × 5 — the organizers clarified in the case chat that a table of more than 7 rows is no error and should stay within 10"

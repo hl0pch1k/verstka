@@ -10,6 +10,6 @@ Rules:
 - Copy every number as the text writes it. Never compute, round, add up or invent a number. Nothing found: empty lists.
 - facts: one per distinct figure, at most 15; label: 2–6 words in the text's language; unit apart (%, ₽, чел., дней).
 - series: only values the text itself lists over categories (months, parts of a whole, before and after); values as JSON numbers, categories in the text's order, 2–12 points.
-- tables: only a comparison the text gives (at most 7 rows × 5 columns), cells as written.
+- tables: only a comparison the text gives (at most 10 rows × 5 columns), cells as written.
 - charts: one per series — "pie" for parts of a whole, "line" for values over time, "column" for a few values or before/after, "bar" for many categories.
 - Short strings. No quotes from the text, no comments.

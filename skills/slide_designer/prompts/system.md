@@ -25,7 +25,7 @@ Visual-form guide:
 - values over time (months, quarters, years) → chart line (column for 4 points or fewer);
 - before and after of one measure → big_number or stat_row «A → B» (value "300 → 330 ₽"), or a column chart with 2 bars;
 - 2–4 key figures → stat_row; one headline figure → big_number;
-- options or states compared on several attributes → table (at most 7 rows × 5 columns) or comparison;
+- options or states compared on several attributes → table (at most 10 rows × 5 columns) or comparison;
 - steps or a plan by months → timeline or process: one item per step, every item titled the same way as the source titles it («1-й месяц», «2-й месяц», … as "title", the step as "text"); 3–6 parallel ideas → cards; a formula → "formula" with the figures around it;
 - risks and measures → two_column (risks | measures), never one merged list;
 - a budget of 3–7 amounts → chart (bar, or doughnut for the parts of a total) with the total in "paragraphs", even when no chart is requested;

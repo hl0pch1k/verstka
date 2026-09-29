@@ -144,7 +144,7 @@ def test_every_series_value_is_a_number_of_the_brief(text):
 # ------------------------------------------------------------------ briefs without slide specs, other forms
 
 
-@pytest.mark.parametrize("path", [p for p in EXAMPLES if p.stem != "fitness_studio"], ids=lambda p: p.stem)  # the fitness brief dictates its slides
+@pytest.mark.parametrize("path", [p for p in EXAMPLES if p.stem not in ("fitness_studio", "verstka_final_pitch")], ids=lambda p: p.stem)  # these briefs dictate their slides
 def test_generic_briefs_do_not_break(path):
     text = path.read_text(encoding="utf-8")
     st = read_structure(text)
@@ -277,7 +277,7 @@ def test_enrich_keeps_the_rules_when_the_model_fails():
 def test_data_extractor_v2_is_compact():
     skills = SkillsRegistry.load()
     spec = skills.get("data_extractor")
-    assert spec.version == "0.2.0" and spec.output_schema.endswith("BlockExtraction")
+    assert spec.version == "0.2.1" and spec.output_schema.endswith("BlockExtraction")
     assert int(spec.params["max_tokens"]) <= 2000
     prompt = skills.render("data_extractor", {"brief": "Выручка 900 000 рублей.", "language": "ru"})
     assert "source_span" not in prompt["system"] and "charts" in prompt["system"]

@@ -1,0 +1,54 @@
+# The README's «Запуск» on a clean Ubuntu, step by step: system packages, install, the offline check, the web service,
+# the unit tests. The experts run the project on Linux — this is the same path, checked on every push.
+name: Linux
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  ubuntu:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: System packages (README → «Что нужно»)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends python3-venv libreoffice-impress poppler-utils
+          python3 --version
+          soffice --version
+          pdftoppm -v 2>&1 | head -1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install (README → «1. Установка»)
+        run: |
+          python3 -m venv .venv
+          . .venv/bin/activate
+          pip install -e ".[api,dev]"
+          (cd web && npm install && npm run build)
+
+      - name: Offline check without a key (README → «2. Проверка без ключа»)
+        run: |
+          . .venv/bin/activate
+          time verstka generate -t tests/fixtures/tpl_audit/templates/lo_focus.pptx -b examples/briefs/fitness_studio.md -o out/check --no-llm --no-vlm --export all
+          ls -la out/check/structured out/check/visual out/check/compact
+          python3 -c "import json; [print(v, json.load(open(f'out/check/{v}/audit_report.json'))['summary']['score']) for v in ('structured', 'visual', 'compact')]"
+
+      - name: Web service (README → «4. Веб-интерфейс»)
+        run: |
+          . .venv/bin/activate
+          nohup verstka serve --port 8000 > serve.log 2>&1 &
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8000/api/health && break; sleep 2; done
+          curl -fsS http://127.0.0.1:8000/ | grep -q "Verstka"
+          curl -fsS -o /dev/null -w "docs %{http_code}\n" http://127.0.0.1:8000/docs
+
+      - name: Unit tests (README → «6. Тесты»)
+        run: |
+          . .venv/bin/activate
+          pytest tests/unit -q -p no:cacheprovider
