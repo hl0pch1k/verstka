@@ -1,4 +1,5 @@
-"""Build the submission set: 3 templates × 3 strategies = 9 decks (PPTX + PDF + HTML + JSON artefacts).
+"""Build the submission set: one brief on the 3 dataset templates × 3 strategies = 9 decks (PPTX + PDF + HTML + JSON
+artefacts) — «три варианта презентации, сгенерированные на одном контенте на трех разных шаблонах».
 
 Usage:
     python scripts/make_demo_decks.py                 # with models when OPENROUTER_API_KEY is set, else offline
@@ -23,12 +24,13 @@ from verstka.planning.brief import load_brief  # noqa: E402
 from verstka.providers.registry import ProviderRegistry  # noqa: E402
 from verstka.skills_registry.registry import SkillsRegistry  # noqa: E402
 
-# name → (template file name inside the dataset, brief)
+# name → template file name inside the dataset; every template gets the same brief (--brief)
 DEMOS = {
-    "workspace": ("VK_WorkSpace_Клиентская_конференция_Шаблон_03.pptx", "examples/briefs/vk_workspace_feature.md"),
-    "education": ("Шаблон презентации VK Education.pptx", "examples/briefs/edu_program.md"),
-    "vktech": ("VK Tech шаблон.pptx", "examples/briefs/cloud_initiative.md"),
+    "vktech": "VK Tech шаблон.pptx",
+    "education": "Шаблон презентации VK Education.pptx",
+    "workspace": "VK_WorkSpace_Клиентская_конференция_Шаблон_03.pptx",
 }
+BRIEF = "examples/briefs/fitness_studio.md"
 
 
 def models_ready(path: Path) -> ProviderRegistry | None:
@@ -46,6 +48,7 @@ def main() -> int:
     ap.add_argument("--dataset", type=Path, default=ROOT.parent / "Датасет")
     ap.add_argument("--out", type=Path, default=ROOT / "examples" / "outputs")
     ap.add_argument("--models", type=Path, default=None, help="models.yaml (default: $VERSTKA_MODELS or configs/models.yaml)")
+    ap.add_argument("--brief", default=BRIEF, help="one brief for every template (default: %(default)s)")
     ap.add_argument("--only", choices=sorted(DEMOS), action="append")
     ap.add_argument("--offline", action="store_true", help="no model calls at all")
     ap.add_argument("--audit-models", action="store_true", help="also run VLM/LLM content checks")
@@ -62,7 +65,7 @@ def main() -> int:
     print(f"mode: {mode}")
     summary: dict[str, dict] = {}
     for name in args.only or list(DEMOS):
-        template_name, brief_path = DEMOS[name]
+        template_name, brief_path = DEMOS[name], args.brief
         template = args.dataset / template_name
         if not template.exists():
             print(f"skip {name}: {template} not found")

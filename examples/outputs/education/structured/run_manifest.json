@@ -1,7 +1,7 @@
 {
   "verstka_version": "0.1.0",
   "git_commit": null,
-  "created_at": "2026-09-23T02:50:16+0300",
+  "created_at": "2026-09-29T13:38:58+0300",
   "platform": "macOS-27.0-arm64-arm-64bit",
   "template": {
     "id": "9ef2323ed5f49f46",
@@ -9,65 +9,218 @@
   },
   "strategy": "structured",
   "inputs": {
-    "brief_sha256": "912bb02d64e60dd1",
-    "outline_sha256": "d03ffcea9355b14f"
+    "brief_sha256": "ceeb71cf999ba891",
+    "outline_sha256": "6c3dc68515c85d58"
   },
-  "skills": {},
+  "skills": {
+    "asset_tagger": {
+      "version": "0.1.0",
+      "sha256": "ea6d6805f646eb7b060633d251d3ac6a801825eea738dcca7cfc8c47d7440aad"
+    },
+    "data_extractor": {
+      "version": "0.2.0",
+      "sha256": "a38f03b96c429e2f7a5e0030e7d2b5d7320d1efb5923c2347daf5e04ebac62de"
+    },
+    "deck_architect": {
+      "version": "1.0.0",
+      "sha256": "94a2a60f50aa8dcc6adb0ec193f9e9c529eaddc6b78c2c00d664f1490ef6ed05"
+    },
+    "deck_coherence_audit": {
+      "version": "0.1.0",
+      "sha256": "6db91044afa3180c4d9d41c038ec10a91eb7ecedadbf0b1ee96ca6b4b70b3922"
+    },
+    "deck_writer": {
+      "version": "2.1.0",
+      "sha256": "30b5cae98f1a9b120fde350f5a91d6b680ad98bc400b4a609d1014d42f75f2d1"
+    },
+    "design_critic": {
+      "version": "1.3.1",
+      "sha256": "75f173b83758f7f28d2879d097fc1926f4ebeb60faa3fc69c90ae5c959486099"
+    },
+    "fact_checker": {
+      "version": "0.1.1",
+      "sha256": "9541107e33c971dcd4d5367ee98e8a41ed57ecc3289a0b64fcd00de7521091e7"
+    },
+    "outline_planner": {
+      "version": "0.2.0",
+      "sha256": "b5dab4433c4d799aaf43d15ddb7b195d02048d0c544a30a86dd877059d73d3c1"
+    },
+    "rule_harvester": {
+      "version": "0.1.0",
+      "sha256": "e5cfa477b642cae142498b21e405bc20e0b599316bf2c1c58776babf91d24452"
+    },
+    "slide_classifier": {
+      "version": "0.1.0",
+      "sha256": "90015a0c296a48d6fb71ae3f0d9409abb3d6216aedb3247cd00461c3dec1e2d3"
+    },
+    "slide_content_audit": {
+      "version": "0.1.1",
+      "sha256": "a1d814a73a1236efdcd8ba2468f9bd853ee8eada1c50fd8421a7cf500c894a44"
+    },
+    "slide_designer": {
+      "version": "1.3.1",
+      "sha256": "12d1cac4ff7ba2503d86682862af295109eb1e434d4f556b0bd0e10d678d7e60"
+    },
+    "slide_vision_check": {
+      "version": "0.1.0",
+      "sha256": "5cc518cd042c61ae46557b024baa439c0cc5ffe2e89a018c16cae5f88a1240b3"
+    },
+    "text_condenser": {
+      "version": "0.1.0",
+      "sha256": "33ce6f64a87e9b7b76c2e20427471e8999bad83faf4bf87111c498644432eef0"
+    },
+    "topic_reference": {
+      "version": "1.0.0",
+      "sha256": "3847d93b6eef8ef958023ccb56b543fee741e05482a9249361c2a0422d9e0836"
+    },
+    "writer_check": {
+      "version": "1.3.0",
+      "sha256": "810a570a1d849ef4b440bd9b0ea0c2f94180bb045e01dd131c568e6b45fafa7b"
+    },
+    "agent:auditor": {
+      "version": "0.1.0",
+      "sha256": "69f7e375d08f63d9ac6986613ca5419afe29abbd6eb42f95cde1e2a3c6b6bba3"
+    },
+    "agent:content_planner": {
+      "version": "0.1.0",
+      "sha256": "f2bd8d2252a2c2725ca7c6618ded4e87fb0b955083975336fb019a5ba4ee75a7"
+    },
+    "agent:deck_designer": {
+      "version": "2.2.0",
+      "sha256": "9b9712903480e654cfc71f5d32c7d9740ed12066fb1b5cd0cf51a8fc03509438"
+    },
+    "agent:template_analyst": {
+      "version": "0.1.0",
+      "sha256": "c23ae87b3ac78c1f6b2c1170828e0409ae660b998bcb70b430de8ddf8ac0cd2c"
+    }
+  },
   "providers": {
     "llm": {
-      "backend": "none"
+      "backend": "chain",
+      "model": "qwen/qwen3.8-27b",
+      "chain": [
+        {
+          "backend": "openai_compat",
+          "model": "qwen/qwen3.8-27b",
+          "label": "Qwen3.8-27B (OpenRouter)",
+          "off": false
+        },
+        {
+          "backend": "openai_compat",
+          "model": "qwen/qwen3.8-27b",
+          "label": "Qwen3.8-27B (Groq)",
+          "off": true
+        },
+        {
+          "backend": "openai_compat",
+          "model": "qwen/qwen3.8-27b:free",
+          "label": "Qwen3.8-27B (бесплатно)",
+          "off": false
+        },
+        {
+          "backend": "openai_compat",
+          "model": "Qwen/Qwen3-32B",
+          "label": "Qwen3 32B (Cloud.ru)",
+          "off": false
+        },
+        {
+          "backend": "openai_compat",
+          "model": "qwen/qwen3-vl-30b-a3b-instruct",
+          "label": "Qwen3-VL 30B (Cloud.ru)",
+          "off": false
+        },
+        {
+          "backend": "openai_compat",
+          "model": "google/gemma-4-31b-it:free",
+          "label": "Gemma 4 31B (бесплатно)",
+          "off": false
+        },
+        {
+          "backend": "openai_compat",
+          "model": "google/gemma-4-26b-a4b-it:free",
+          "label": "Gemma 4 26B A4B (бесплатно)",
+          "off": false
+        }
+      ]
     },
     "vlm": {
-      "backend": "none"
+      "backend": "chain",
+      "model": "qwen/qwen3.8-27b",
+      "chain": [
+        {
+          "backend": "openai_compat",
+          "model": "qwen/qwen3.8-27b",
+          "label": "Qwen3.8-27B (OpenRouter)",
+          "off": false
+        },
+        {
+          "backend": "openai_compat",
+          "model": "qwen/qwen3.8-27b",
+          "label": "Qwen3.8-27B (Groq)",
+          "off": true
+        },
+        {
+          "backend": "openai_compat",
+          "model": "qwen/qwen3.8-27b:free",
+          "label": "Qwen3.8-27B (бесплатно)",
+          "off": false
+        },
+        {
+          "backend": "openai_compat",
+          "model": "qwen/qwen3-vl-30b-a3b-instruct",
+          "label": "Qwen3-VL 30B (Cloud.ru)",
+          "off": false
+        },
+        {
+          "backend": "openai_compat",
+          "model": "google/gemma-4-31b-it:free",
+          "label": "Gemma 4 31B (бесплатно)",
+          "off": false
+        },
+        {
+          "backend": "openai_compat",
+          "model": "google/gemma-4-26b-a4b-it:free",
+          "label": "Gemma 4 26B A4B (бесплатно)",
+          "off": false
+        }
+      ]
     }
   },
   "timings_s": {
     "analyze": 0.02,
-    "plan": 0.0,
-    "render": 0.76,
-    "audit": 0.64,
-    "export": 4.88,
-    "total": 9.1
+    "plan": 121.85,
+    "render": 3.81,
+    "audit": 1.66,
+    "export": 4.46,
+    "total": 20.68
   },
   "usage": {},
-  "applied_fixes": [
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 4: shrunk text in 276 to 20 pt"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 5: shrunk text in 283 to 14 pt"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 6: shrunk text in 887 to 20 pt"
-    }
-  ],
+  "applied_fixes": [],
   "audit": {
     "errors": 0,
-    "warnings": 3,
-    "infos": 9,
+    "warnings": 0,
+    "infos": 12,
     "model_flags": 0,
-    "score": 91,
+    "score": 100,
     "checks_run": [
-      "out_of_bounds",
-      "text_clipped",
-      "overlap",
-      "text_overflow",
-      "margin_violation",
-      "grid_alignment",
-      "image_stretched",
-      "table_cell_wrap",
       "font_not_in_template",
       "size_not_in_scale",
       "color_not_in_palette",
       "layout_not_from_template",
       "chrome_moved",
       "contrast_low",
+      "table_contrast_low",
+      "out_of_bounds",
+      "text_clipped",
+      "overlap",
+      "text_outside_card",
+      "text_overflow",
+      "margin_violation",
+      "grid_alignment",
+      "image_stretched",
+      "table_cell_wrap",
+      "word_break",
+      "content_over_art",
       "too_many_bullets",
       "bullet_too_long",
       "table_too_big",
@@ -78,128 +231,205 @@
       "placeholder_text",
       "empty_slide",
       "content_missing",
+      "slide_missing",
       "slide_is_picture",
       "chart_missing_labels",
-      "duplicate_slides"
-    ]
+      "duplicate_slides",
+      "content_in_notes",
+      "timeline_order",
+      "figure_not_in_brief",
+      "line_fragment",
+      "figure_is_time",
+      "orphan_opener",
+      "duplicate_heading",
+      "chart_mixed_units",
+      "writer_failed"
+    ],
+    "figures": {
+      "checked": 119,
+      "derived": 15,
+      "unverified": 0
+    }
   },
   "slides": [
     {
       "index": 1,
-      "outline_id": "sl1",
-      "mode": "clone",
-      "pattern_id": "p3",
-      "composition": null,
-      "warnings": [
-        "heading kept clear of the logos"
-      ]
+      "outline_id": "sl2",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "cards",
+      "warnings": []
     },
     {
       "index": 2,
-      "outline_id": "sl2",
-      "mode": "clone",
-      "pattern_id": "p35",
-      "composition": null,
+      "outline_id": "sl3",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "chart_text",
       "warnings": []
     },
     {
       "index": 3,
-      "outline_id": "sl3",
-      "mode": "clone",
-      "pattern_id": "p35",
-      "composition": null,
+      "outline_id": "sl4",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "chart_text",
       "warnings": []
     },
     {
       "index": 4,
-      "outline_id": "sl4",
-      "mode": "clone",
-      "pattern_id": "p7",
-      "composition": null,
-      "warnings": [
-        "heading kept clear of the logos",
-        "text may overflow in title_1 (2 lines)",
-        "subtitle had no slot"
-      ]
+      "outline_id": "sl5",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "table",
+      "warnings": []
     },
     {
       "index": 5,
-      "outline_id": "sl5",
-      "mode": "clone",
-      "pattern_id": "p8",
-      "composition": null,
-      "warnings": [
-        "heading kept clear of the logos",
-        "text may overflow in title_1 (3 lines)"
-      ]
+      "outline_id": "sl6",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "chart_text",
+      "warnings": []
     },
     {
       "index": 6,
-      "outline_id": "sl6",
-      "mode": "clone",
-      "pattern_id": "p38",
-      "composition": null,
+      "outline_id": "sl7",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "stat_row",
       "warnings": [
-        "heading kept clear of the logos",
-        "text may overflow in title_1 (2 lines)"
+        "the template's own photo place kept free for the user's photo (slide 34 of the template)",
+        "figures beside the photo place stand one under the other, labels beside"
       ]
     },
     {
       "index": 7,
-      "outline_id": "sl7",
-      "mode": "clone",
-      "pattern_id": "p7",
-      "composition": null,
-      "warnings": [
-        "heading kept clear of the logos"
-      ]
+      "outline_id": "sl8",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "chart_text",
+      "warnings": []
     },
     {
       "index": 8,
-      "outline_id": "sl8",
-      "mode": "clone",
-      "pattern_id": "p26",
-      "composition": null,
-      "warnings": [
-        "heading kept clear of the logos"
-      ]
+      "outline_id": "sl9",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "table",
+      "warnings": []
     },
     {
       "index": 9,
-      "outline_id": "sl9",
-      "mode": "clone",
-      "pattern_id": "p21",
-      "composition": null,
+      "outline_id": "sl10",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "chart_text",
       "warnings": []
     },
     {
       "index": 10,
-      "outline_id": "sl10",
-      "mode": "clone",
-      "pattern_id": "p52",
-      "composition": null,
-      "warnings": [
-        "heading kept clear of the logos"
-      ]
+      "outline_id": "sl11",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "chart_text",
+      "warnings": []
+    },
+    {
+      "index": 11,
+      "outline_id": "sl12",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "chart_pair",
+      "warnings": []
+    },
+    {
+      "index": 12,
+      "outline_id": "sl13",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "chart_text",
+      "warnings": []
     }
   ],
   "warnings": [
-    "no LLM provider: deterministic outline",
-    "slide 1 (sl1): heading kept clear of the logos",
-    "slide 4 (sl4): heading kept clear of the logos",
-    "slide 4 (sl4): text may overflow in title_1 (2 lines)",
-    "slide 4 (sl4): subtitle had no slot",
-    "slide 5 (sl5): heading kept clear of the logos",
-    "slide 5 (sl5): text may overflow in title_1 (3 lines)",
-    "slide 6 (sl6): heading kept clear of the logos",
-    "slide 6 (sl6): text may overflow in title_1 (2 lines)",
-    "slide 7 (sl7): heading kept clear of the logos",
-    "slide 8 (sl8): heading kept clear of the logos",
-    "slide 10 (sl10): heading kept clear of the logos"
+    "slide u1: notes the source does not say dropped: Площадь студии — 180 м², максимальное количество участников одного занятия — 12 человек.",
+    "slide u1: the takeaway «Цель — выйти на 225 000 рублей прибыли к 6-му месяцу» repeats the slide's block, dropped",
+    "slide u2: 3 lines repeated the figures the slide shows, dropped",
+    "slide u3: 1 lines repeated the figures the slide shows, dropped",
+    "slide u3: notes the source does not say dropped: Результаты представлены в процентах от общего числа респондентов.",
+    "slide u3: lines with figures of another slide or words the brief does not use dropped: Удобное расписание — второй по популярности критерий; Квалификация тренеров и атмосфера — менее значимые факторы",
+    "slide u4: the takeaway «25% клиентов выберут 4 занятия, 50% — 8 занятий, 25% — 12 занятий» has figures not in the brief, dropped",
+    "slide u6: a free place for the user's photo kept (asked in the brief)",
+    "slide u7: headline «Бюджет команды распределён на 4 статьи» had figures not in the brief (4) → «Команда»",
+    "slide u7: lines with figures of another slide or words the brief does not use dropped: На тренеров — больше половины бюджета",
+    "slide u9: the takeaway «Ремонт и подготовка — 30% от общего бюджета» has figures not in the brief, dropped",
+    "slide u9: notes the source does not say dropped: Наибольшая доля — 900 000 рублей — направлена на ремонт и подготовку помещения.",
+    "slide u11: headline «Через 5 месяцев фитнес-студия окупится» had figures not in the brief (5 месяцев) → «Прогноз на первые шесть месяцев»",
+    "slide u11: lines with figures of another slide or words the brief does not use dropped: Рост клиентов ускоряется, но прибыль наступает позже",
+    "slide u11: the line «Переменные расходы снижают прибыль в первые месяцы» repeated nothing: a cause the brief does not state, dropped",
+    "revisions capped at 4: slides u2, u5, u7, u11 keep their first version",
+    "slide u9: the takeaway «На старте потребуется 3 000 000 рублей, из них 850 000 — на оборотный резерв» has figures not in the brief, dropped",
+    "slide u9: lines with figures of another slide or words the brief does not use dropped: Ремонт и подготовка — самая большая статья затрат",
+    "slide u10: the takeaway «Операционная прибыль составит 224 375 ₽ при 250 клиентах» repeats the headline with a condition, replaced by the source's «Общие расходы составят 1 038 125 рублей, операционная прибыл»",
+    "slide u10: the takeaway «Общие расходы составят 1 038 125 рублей, операционная прибыль — 224 375 рублей, » said the chart's figures again → «224 375 рублей, рентабельность — 17,8%»",
+    "slide u12: key figures of the brief added as lines: «Суммарный операционный убыток за первые четыре месяца состав»",
+    "variety: slide 7 chart → stat_row",
+    "compile: slide sl9: chart → table (three slides of one kind in a row)",
+    "grounding: figures and names not in the brief removed: «8», «6»",
+    "grounding: speaker notes with figures or changes not in the brief dropped: «Средняя месячная выручка на одного клиента рассчитана на основе ожидаемого расп…»",
+    "slide sl7: the free place for the user's photo put back (Фото помещения)",
+    "variants: differ on 8% of slides (forms dictated by the brief)",
+    "slide 6 (sl7): the template's own photo place kept free for the user's photo (slide 34 of the template)",
+    "slide 6 (sl7): figures beside the photo place stand one under the other, labels beside"
   ],
   "exports": {
-    "pptx": "/Users/h.u.1.l.a/Downloads/Конкурсы/VK tech/verstka/examples/outputs/education/structured/deck.pptx",
-    "pdf": "/Users/h.u.1.l.a/Downloads/Конкурсы/VK tech/verstka/examples/outputs/education/structured/deck.pdf",
-    "html": "/Users/h.u.1.l.a/Downloads/Конкурсы/VK tech/verstka/examples/outputs/education/structured/deck.html"
+    "pptx": "deck.pptx",
+    "pdf": "deck.pdf",
+    "html": "deck.html"
+  },
+  "planner": {
+    "planned_by": "agent",
+    "model": "Qwen/Qwen3-32B",
+    "agent": {
+      "name": "deck_designer",
+      "version": "2.2.0",
+      "model_calls": 19,
+      "slides_by_model": 12,
+      "slides": 13,
+      "critic_issues": 4,
+      "seconds": 121.85,
+      "calls_made": 23,
+      "requests": 28,
+      "tokens_in": 75366,
+      "tokens_out": 11399,
+      "failed_calls": 1,
+      "by_skill": {
+        "BlockExtraction": {
+          "calls": 4,
+          "requests": 8,
+          "tokens_in": 5648,
+          "tokens_out": 1801,
+          "failed": 0,
+          "seconds": 51.9
+        },
+        "SlideDesignAnswer": {
+          "calls": 16,
+          "requests": 16,
+          "tokens_in": 59192,
+          "tokens_out": 8542,
+          "failed": 0,
+          "seconds": 213.69
+        },
+        "CritiqueAnswer": {
+          "calls": 3,
+          "requests": 4,
+          "tokens_in": 10526,
+          "tokens_out": 1056,
+          "failed": 1,
+          "seconds": 121.47
+        }
+      }
+    }
   }
 }

@@ -1,7 +1,7 @@
 {
   "verstka_version": "0.1.0",
   "git_commit": null,
-  "created_at": "2026-09-23T02:50:28+0300",
+  "created_at": "2026-09-29T13:36:03+0300",
   "platform": "macOS-27.0-arm64-arm-64bit",
   "template": {
     "id": "cbbe3aa6a21d23ce",
@@ -9,181 +9,218 @@
   },
   "strategy": "compact",
   "inputs": {
-    "brief_sha256": "c232da9c9c4f7617",
-    "outline_sha256": "f44b80927e1b0ac8"
+    "brief_sha256": "ceeb71cf999ba891",
+    "outline_sha256": "890ae5fe79b276c1"
   },
-  "skills": {},
+  "skills": {
+    "asset_tagger": {
+      "version": "0.1.0",
+      "sha256": "ea6d6805f646eb7b060633d251d3ac6a801825eea738dcca7cfc8c47d7440aad"
+    },
+    "data_extractor": {
+      "version": "0.2.0",
+      "sha256": "a38f03b96c429e2f7a5e0030e7d2b5d7320d1efb5923c2347daf5e04ebac62de"
+    },
+    "deck_architect": {
+      "version": "1.0.0",
+      "sha256": "94a2a60f50aa8dcc6adb0ec193f9e9c529eaddc6b78c2c00d664f1490ef6ed05"
+    },
+    "deck_coherence_audit": {
+      "version": "0.1.0",
+      "sha256": "6db91044afa3180c4d9d41c038ec10a91eb7ecedadbf0b1ee96ca6b4b70b3922"
+    },
+    "deck_writer": {
+      "version": "2.1.0",
+      "sha256": "30b5cae98f1a9b120fde350f5a91d6b680ad98bc400b4a609d1014d42f75f2d1"
+    },
+    "design_critic": {
+      "version": "1.3.1",
+      "sha256": "75f173b83758f7f28d2879d097fc1926f4ebeb60faa3fc69c90ae5c959486099"
+    },
+    "fact_checker": {
+      "version": "0.1.1",
+      "sha256": "9541107e33c971dcd4d5367ee98e8a41ed57ecc3289a0b64fcd00de7521091e7"
+    },
+    "outline_planner": {
+      "version": "0.2.0",
+      "sha256": "b5dab4433c4d799aaf43d15ddb7b195d02048d0c544a30a86dd877059d73d3c1"
+    },
+    "rule_harvester": {
+      "version": "0.1.0",
+      "sha256": "e5cfa477b642cae142498b21e405bc20e0b599316bf2c1c58776babf91d24452"
+    },
+    "slide_classifier": {
+      "version": "0.1.0",
+      "sha256": "90015a0c296a48d6fb71ae3f0d9409abb3d6216aedb3247cd00461c3dec1e2d3"
+    },
+    "slide_content_audit": {
+      "version": "0.1.1",
+      "sha256": "a1d814a73a1236efdcd8ba2468f9bd853ee8eada1c50fd8421a7cf500c894a44"
+    },
+    "slide_designer": {
+      "version": "1.3.1",
+      "sha256": "12d1cac4ff7ba2503d86682862af295109eb1e434d4f556b0bd0e10d678d7e60"
+    },
+    "slide_vision_check": {
+      "version": "0.1.0",
+      "sha256": "5cc518cd042c61ae46557b024baa439c0cc5ffe2e89a018c16cae5f88a1240b3"
+    },
+    "text_condenser": {
+      "version": "0.1.0",
+      "sha256": "33ce6f64a87e9b7b76c2e20427471e8999bad83faf4bf87111c498644432eef0"
+    },
+    "topic_reference": {
+      "version": "1.0.0",
+      "sha256": "3847d93b6eef8ef958023ccb56b543fee741e05482a9249361c2a0422d9e0836"
+    },
+    "writer_check": {
+      "version": "1.3.0",
+      "sha256": "810a570a1d849ef4b440bd9b0ea0c2f94180bb045e01dd131c568e6b45fafa7b"
+    },
+    "agent:auditor": {
+      "version": "0.1.0",
+      "sha256": "69f7e375d08f63d9ac6986613ca5419afe29abbd6eb42f95cde1e2a3c6b6bba3"
+    },
+    "agent:content_planner": {
+      "version": "0.1.0",
+      "sha256": "f2bd8d2252a2c2725ca7c6618ded4e87fb0b955083975336fb019a5ba4ee75a7"
+    },
+    "agent:deck_designer": {
+      "version": "2.2.0",
+      "sha256": "9b9712903480e654cfc71f5d32c7d9740ed12066fb1b5cd0cf51a8fc03509438"
+    },
+    "agent:template_analyst": {
+      "version": "0.1.0",
+      "sha256": "c23ae87b3ac78c1f6b2c1170828e0409ae660b998bcb70b430de8ddf8ac0cd2c"
+    }
+  },
   "providers": {
     "llm": {
-      "backend": "none"
+      "backend": "chain",
+      "model": "qwen/qwen3.8-27b",
+      "chain": [
+        {
+          "backend": "openai_compat",
+          "model": "qwen/qwen3.8-27b",
+          "label": "Qwen3.8-27B (OpenRouter)",
+          "off": false
+        },
+        {
+          "backend": "openai_compat",
+          "model": "qwen/qwen3.8-27b",
+          "label": "Qwen3.8-27B (Groq)",
+          "off": true
+        },
+        {
+          "backend": "openai_compat",
+          "model": "qwen/qwen3.8-27b:free",
+          "label": "Qwen3.8-27B (бесплатно)",
+          "off": false
+        },
+        {
+          "backend": "openai_compat",
+          "model": "Qwen/Qwen3-32B",
+          "label": "Qwen3 32B (Cloud.ru)",
+          "off": false
+        },
+        {
+          "backend": "openai_compat",
+          "model": "qwen/qwen3-vl-30b-a3b-instruct",
+          "label": "Qwen3-VL 30B (Cloud.ru)",
+          "off": false
+        },
+        {
+          "backend": "openai_compat",
+          "model": "google/gemma-4-31b-it:free",
+          "label": "Gemma 4 31B (бесплатно)",
+          "off": false
+        },
+        {
+          "backend": "openai_compat",
+          "model": "google/gemma-4-26b-a4b-it:free",
+          "label": "Gemma 4 26B A4B (бесплатно)",
+          "off": false
+        }
+      ]
     },
     "vlm": {
-      "backend": "none"
+      "backend": "chain",
+      "model": "qwen/qwen3.8-27b",
+      "chain": [
+        {
+          "backend": "openai_compat",
+          "model": "qwen/qwen3.8-27b",
+          "label": "Qwen3.8-27B (OpenRouter)",
+          "off": false
+        },
+        {
+          "backend": "openai_compat",
+          "model": "qwen/qwen3.8-27b",
+          "label": "Qwen3.8-27B (Groq)",
+          "off": true
+        },
+        {
+          "backend": "openai_compat",
+          "model": "qwen/qwen3.8-27b:free",
+          "label": "Qwen3.8-27B (бесплатно)",
+          "off": false
+        },
+        {
+          "backend": "openai_compat",
+          "model": "qwen/qwen3-vl-30b-a3b-instruct",
+          "label": "Qwen3-VL 30B (Cloud.ru)",
+          "off": false
+        },
+        {
+          "backend": "openai_compat",
+          "model": "google/gemma-4-31b-it:free",
+          "label": "Gemma 4 31B (бесплатно)",
+          "off": false
+        },
+        {
+          "backend": "openai_compat",
+          "model": "google/gemma-4-26b-a4b-it:free",
+          "label": "Gemma 4 26B A4B (бесплатно)",
+          "off": false
+        }
+      ]
     }
   },
   "timings_s": {
-    "analyze": 0.02,
-    "plan": 0.0,
-    "render": 0.89,
-    "audit": 1.77,
-    "export": 3.67,
-    "total": 6.51
+    "analyze": 0.03,
+    "plan": 89.8,
+    "render": 3.07,
+    "audit": 1.71,
+    "export": 4.15,
+    "total": 9.29
   },
   "usage": {},
-  "applied_fixes": [
-    {
-      "iteration": 1,
-      "outline_id": "sl1",
-      "action": "rematch",
-      "result": "rematch → p3"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 2: shrunk text in 1059 to 12 pt"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 2: shrunk text in 1063 to 12 pt"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 2: shrunk text in 1067 to 12 pt"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 2: shrunk text in 1071 to 12 pt"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 2: shrunk text in 1073 to 9.92 pt"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 2: recolored 2 colour(s) in 1060 → 000000 (text)"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 2: recolored 2 colour(s) in 1064 → 000000 (text)"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 2: recolored 2 colour(s) in 1068 → 000000 (text)"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 2: recolored 2 colour(s) in 1072 → 000000 (text)"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 4: shrunk text in 2341 to 14 pt"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 4: shrunk text in 2348 to 20 pt"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 4: shrunk text in 2349 to 20 pt"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 4: shrunk text in 2350 to 20 pt"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 4: recolored 2 colour(s) in 2343 → 000000 (text)"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 4: recolored 2 colour(s) in 2345 → 000000 (text)"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 4: recolored 2 colour(s) in 2347 → 000000 (text)"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 7: shrunk text in 668 to 11 pt"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 7: shrunk text in 673 to 11 pt"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 7: shrunk text in 678 to 11 pt"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 7: recolored 2 colour(s) in 669 → 000000 (text)"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 7: recolored 2 colour(s) in 674 → 000000 (text)"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 7: recolored 2 colour(s) in 679 → 000000 (text)"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 6: recolored 2 colour(s) in 1060 → 000000 (text)"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 6: recolored 2 colour(s) in 1064 → 000000 (text)"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 6: recolored 2 colour(s) in 1068 → 000000 (text)"
-    }
-  ],
+  "applied_fixes": [],
   "audit": {
     "errors": 0,
     "warnings": 0,
-    "infos": 8,
+    "infos": 4,
     "model_flags": 0,
     "score": 100,
     "checks_run": [
-      "out_of_bounds",
-      "text_clipped",
-      "overlap",
-      "text_overflow",
-      "margin_violation",
-      "grid_alignment",
-      "image_stretched",
-      "table_cell_wrap",
       "font_not_in_template",
       "size_not_in_scale",
       "color_not_in_palette",
       "layout_not_from_template",
       "chrome_moved",
       "contrast_low",
+      "table_contrast_low",
+      "out_of_bounds",
+      "text_clipped",
+      "overlap",
+      "text_outside_card",
+      "text_overflow",
+      "margin_violation",
+      "grid_alignment",
+      "image_stretched",
+      "table_cell_wrap",
+      "word_break",
+      "content_over_art",
       "too_many_bullets",
       "bullet_too_long",
       "table_too_big",
@@ -194,119 +231,214 @@
       "placeholder_text",
       "empty_slide",
       "content_missing",
+      "slide_missing",
       "slide_is_picture",
       "chart_missing_labels",
-      "duplicate_slides"
-    ]
+      "duplicate_slides",
+      "content_in_notes",
+      "timeline_order",
+      "figure_not_in_brief",
+      "line_fragment",
+      "figure_is_time",
+      "orphan_opener",
+      "duplicate_heading",
+      "chart_mixed_units",
+      "writer_failed"
+    ],
+    "figures": {
+      "checked": 116,
+      "derived": 15,
+      "unverified": 0
+    }
   },
   "slides": [
     {
       "index": 1,
-      "outline_id": "sl1",
-      "mode": "clone",
-      "pattern_id": "p3",
-      "composition": null,
-      "warnings": [
-        "heading kept clear of the logos"
-      ]
+      "outline_id": "sl2",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "bullets",
+      "warnings": []
     },
     {
       "index": 2,
-      "outline_id": "sl2",
-      "mode": "clone",
-      "pattern_id": "p25",
-      "composition": null,
-      "warnings": [
-        "text may overflow in title_1 (4 lines)"
-      ]
+      "outline_id": "sl3",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "chart_text",
+      "warnings": []
     },
     {
       "index": 3,
-      "outline_id": "sl3",
-      "mode": "clone",
-      "pattern_id": "p24",
-      "composition": null,
-      "warnings": [
-        "heading kept clear of the logos",
-        "subtitle had no slot"
-      ]
+      "outline_id": "sl4",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "chart_text",
+      "warnings": []
     },
     {
       "index": 4,
-      "outline_id": "sl4",
-      "mode": "clone",
-      "pattern_id": "p45",
-      "composition": null,
-      "warnings": [
-        "heading kept clear of the logos",
-        "text may overflow in title_1 (3 lines)"
-      ]
+      "outline_id": "sl5",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "table",
+      "warnings": []
     },
     {
       "index": 5,
-      "outline_id": "sl5",
-      "mode": "clone",
-      "pattern_id": "p9",
-      "composition": null,
+      "outline_id": "sl6",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "chart_text",
       "warnings": [
-        "heading kept clear of the logos"
+        "lines repeating a figure of the chart dropped"
       ]
     },
     {
       "index": 6,
-      "outline_id": "sl6",
-      "mode": "clone",
-      "pattern_id": "p25",
-      "composition": null,
-      "warnings": []
+      "outline_id": "sl7",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "stat_row",
+      "warnings": [
+        "a free place for the user's photo kept beside the content"
+      ]
     },
     {
       "index": 7,
-      "outline_id": "sl7",
-      "mode": "clone",
-      "pattern_id": "p14",
-      "composition": null,
-      "warnings": [
-        "subtitle had no slot"
-      ]
+      "outline_id": "sl8",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "chart_text",
+      "warnings": []
     },
     {
       "index": 8,
-      "outline_id": "sl8",
-      "mode": "clone",
-      "pattern_id": "p9",
-      "composition": null,
-      "warnings": [
-        "heading kept clear of the logos"
-      ]
+      "outline_id": "sl9",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "chart_text",
+      "warnings": []
     },
     {
       "index": 9,
-      "outline_id": "sl9",
-      "mode": "clone",
-      "pattern_id": "p6",
-      "composition": null,
-      "warnings": [
-        "heading kept clear of the logos"
-      ]
+      "outline_id": "sl10",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "chart_text",
+      "warnings": []
+    },
+    {
+      "index": 10,
+      "outline_id": "sl11",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "chart_text",
+      "warnings": []
+    },
+    {
+      "index": 11,
+      "outline_id": "sl12",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "chart_pair",
+      "warnings": []
+    },
+    {
+      "index": 12,
+      "outline_id": "sl13",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "chart_text",
+      "warnings": []
     }
   ],
   "warnings": [
-    "no LLM provider: deterministic outline",
-    "slide 1 (sl1): text may overflow in title_1 (4 lines)",
-    "slide 2 (sl2): text may overflow in title_1 (4 lines)",
-    "slide 3 (sl3): heading kept clear of the logos",
-    "slide 3 (sl3): subtitle had no slot",
-    "slide 4 (sl4): heading kept clear of the logos",
-    "slide 4 (sl4): text may overflow in title_1 (3 lines)",
-    "slide 5 (sl5): heading kept clear of the logos",
-    "slide 7 (sl7): subtitle had no slot",
-    "slide 8 (sl8): heading kept clear of the logos",
-    "slide 9 (sl9): heading kept clear of the logos"
+    "slide u1: a comparison the slide's data contradicts dropped: Площадь — 180 м², максимальное количество участников одного занятия — 12 человек",
+    "slide u1: the takeaway «Ключевые параметры проекта и его цели» states nothing, dropped",
+    "slide u1: notes the source does not say dropped: Площадь студии составляет 180 м², максимальное количество участников одного занятия — 12 человек.",
+    "slide u2: the takeaway repeated the headline, dropped",
+    "slide u3: 1 lines repeated the figures the slide shows, dropped",
+    "slide u3: the takeaway «Близость к дому — ключевой фактор выбора для большинства клиентов» repeated a line or added nothing, replaced by the source's result",
+    "slide u3: notes the source does not say dropped: Круговая диаграмма отражает распределение ответов в процентах.",
+    "slide u3: lines with figures of another slide or words the brief does not use dropped: Удобное расписание — второй по популярности критерий",
+    "slide u4: headline «Три абонемента с разным количеством занятий» announced a list → «Средняя месячная выручка на одного клиента составит 5 050 рублей»",
+    "slide u4: the takeaway repeated the headline, dropped",
+    "slide u6: the takeaway «Основная часть площади отведена под тренировки» repeated a line or added nothing, replaced by the source's result",
+    "slide u6: a free place for the user's photo kept (asked in the brief)",
+    "slide u7: a share of another base for a part the pie shows dropped: Резерв на замены — 4,8% от общего бюджета",
+    "slide u7: headline «Бюджет команды распределён на 4 статьи» had figures not in the brief (4) → «Команда»",
+    "slide u7: the takeaway «Тренеры составляют основную статью расходов» repeated a line or added nothing, replaced by the source's result",
+    "slide u7: lines with figures of another slide or words the brief does not use dropped: На тренеров выделяется больше половины бюджета",
+    "slide u8: the takeaway «Реклама в соцсетях — основной канал затрат» repeated a line or added nothing, replaced by the source's result",
+    "slide u9: the takeaway «Оборотный резерв составляет почти треть бюджета» has figures not in the brief, dropped",
+    "slide u9: notes the source does not say dropped: Наибольшая доля — 900 000 рублей — идёт на ремонт и подготовку помещения.",
+    "slide u9: lines with figures of another slide or words the brief does not use dropped: Оборудование и инвентарь — вторая по значимости статья",
+    "slide u11: the takeaway «Прибыль перевалила в плюс на 104 438 ₽ в пятом месяце» has figures not in the brief, dropped",
+    "slide u11: notes the source does not say dropped: Прибыль становится положительной в пятом месяце и растёт в шестом.",
+    "slide u11: the requested chart «изменение месячной операционной прибыли» added from the brief's data",
+    "slide u12: notes the source does not say dropped: Для запуска проекта требуется увеличить общий бюджет до 3 387 388 рублей или сократить затраты до запуска.",
+    "revisions capped at 4: slides u1, u6, u9 keep their first version",
+    "slide u5: 2 lines repeated the figures the slide shows, dropped",
+    "slide u12: the takeaway «Для запуска проекта необходимо увеличить стартовый бюджет на 387 388 рублей или » states nothing, dropped",
+    "design_critic: one call for the same plans of structured, compact",
+    "slide u5: items of the list «Нужен график сравнения месячной вместимо» the slide left out added as lines: «2 700»; «2 000»",
+    "slide u9: key figures of the brief added as lines: «Начальный бюджет проекта — 3 000 000 рублей»",
+    "slide u12: key figures of the brief added as lines: «Суммарный операционный убыток за первые четыре месяца состав»",
+    "variety: slide 7 chart → stat_row",
+    "grounding: speaker notes with figures or changes not in the brief dropped: «Абонементы распределены так: 25% — 4 занятия, 50% — 8 занятий, 25% — 12 занятий.»; «Тренировочный зал занимает 100 м², что составляет 55,6% от общей площади.»; «Раздевалки и душевые — 35 м² (19,4%), зона ресепшена и ожидания — 25 м² (13,9%)…»; «Оборотный резерв в размере 850 000 рублей составляет 28% от общего бюджета и ис…»",
+    "slide sl7: the free place for the user's photo put back (Фото помещения)",
+    "variants: differ on 8% of slides (forms dictated by the brief)",
+    "slide 5 (sl6): lines repeating a figure of the chart dropped",
+    "slide 6 (sl7): a free place for the user's photo kept beside the content"
   ],
   "exports": {
-    "pptx": "/Users/h.u.1.l.a/Downloads/Конкурсы/VK tech/verstka/examples/outputs/vktech/compact/deck.pptx",
-    "pdf": "/Users/h.u.1.l.a/Downloads/Конкурсы/VK tech/verstka/examples/outputs/vktech/compact/deck.pdf",
-    "html": "/Users/h.u.1.l.a/Downloads/Конкурсы/VK tech/verstka/examples/outputs/vktech/compact/deck.html"
+    "pptx": "deck.pptx",
+    "pdf": "deck.pdf",
+    "html": "deck.html"
+  },
+  "planner": {
+    "planned_by": "agent",
+    "model": "Qwen/Qwen3-32B",
+    "agent": {
+      "name": "deck_designer",
+      "version": "2.2.0",
+      "model_calls": 18,
+      "slides_by_model": 12,
+      "slides": 13,
+      "critic_issues": 2,
+      "seconds": 89.8,
+      "calls_made": 22,
+      "requests": 30,
+      "tokens_in": 74862,
+      "tokens_out": 11189,
+      "failed_calls": 0,
+      "by_skill": {
+        "BlockExtraction": {
+          "calls": 4,
+          "requests": 12,
+          "tokens_in": 5648,
+          "tokens_out": 1979,
+          "failed": 0,
+          "seconds": 51.32
+        },
+        "SlideDesignAnswer": {
+          "calls": 16,
+          "requests": 16,
+          "tokens_in": 58881,
+          "tokens_out": 8143,
+          "failed": 0,
+          "seconds": 199.09
+        },
+        "CritiqueAnswer": {
+          "calls": 2,
+          "requests": 2,
+          "tokens_in": 10333,
+          "tokens_out": 1067,
+          "failed": 0,
+          "seconds": 23.13
+        }
+      }
+    }
   }
 }

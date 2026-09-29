@@ -1,32 +1,32 @@
 {
-  "deck": "/Users/h.u.1.l.a/Downloads/Конкурсы/VK tech/verstka/examples/outputs/vktech/visual/deck.pptx",
+  "deck": "deck.pptx",
   "template_id": "cbbe3aa6a21d23ce",
   "strategy": "visual",
   "issues": [
     {
-      "id": "grid_alignment-2-1",
-      "slide": 2,
+      "id": "grid_alignment-1-1",
+      "slide": 1,
       "check_id": "grid_alignment",
       "severity": "info",
       "kind": "deterministic",
-      "message": "2 блоков не выровнены по колонкам шаблона",
+      "message": "2 блока не выровнены по колонкам шаблона",
       "bboxes": [
         {
-          "x": 0.5985546806649169,
-          "y": 0.4978333819383688,
-          "w": 0.22356660104986878,
-          "h": 0.1746814425974531
+          "x": 0.5382365485564304,
+          "y": 0.3156132983377078,
+          "w": 0.4026383420822397,
+          "h": 0.10666666666666667
         },
         {
-          "x": 0.11145133420822398,
-          "y": 0.2898421308447555,
-          "w": 0.21473272090988627,
-          "h": 0.04416486828035385
+          "x": 0.5382365485564304,
+          "y": 0.432779819189268,
+          "w": 0.4026383420822397,
+          "h": 0.25014795372800624
         }
       ],
       "element_ids": [
-        "2373",
-        "2375"
+        "1224",
+        "1225"
       ],
       "suggestion": null,
       "autofix": null,
@@ -34,73 +34,117 @@
       "outline_id": "sl2"
     },
     {
-      "id": "grid_alignment-4-2",
-      "slide": 4,
+      "id": "grid_alignment-2-2",
+      "slide": 2,
       "check_id": "grid_alignment",
       "severity": "info",
       "kind": "deterministic",
-      "message": "2 блоков не выровнены по колонкам шаблона",
+      "message": "4 блока не выровнены по колонкам шаблона",
       "bboxes": [
         {
-          "x": 0.368053258967629,
-          "y": 0.3166905803441237,
-          "w": 0.2694430227471566,
-          "h": 0.36480276076601537
+          "x": 0.69980260279965,
+          "y": 0.26419033731894626,
+          "w": 0.26919739720034996,
+          "h": 0.13925925925925925
         },
         {
-          "x": 0.6840246062992126,
-          "y": 0.3166905803441237,
-          "w": 0.2694430227471566,
-          "h": 0.36480276076601537
+          "x": 0.7053026027996501,
+          "y": 0.4124494993681345,
+          "w": 0.26369739720034996,
+          "h": 0.1382716049382716
+        },
+        {
+          "x": 0.703066491688539,
+          "y": 0.5837979974725381,
+          "w": 0.26593350831146106,
+          "h": 0.13925925925925925
+        },
+        {
+          "x": 0.7053026027996501,
+          "y": 0.7320571595217265,
+          "w": 0.26369739720034996,
+          "h": 0.1382716049382716
         }
       ],
       "element_ids": [
-        "1042",
-        "1047"
+        "1211",
+        "1212",
+        "1214",
+        "1215"
       ],
       "suggestion": null,
       "autofix": null,
       "details": {},
-      "outline_id": "sl4"
+      "outline_id": "sl3"
     },
     {
-      "id": "grid_alignment-7-3",
-      "slide": 7,
+      "id": "grid_alignment-5-3",
+      "slide": 5,
       "check_id": "grid_alignment",
       "severity": "info",
       "kind": "deterministic",
-      "message": "4 блоков не выровнены по колонкам шаблона",
+      "message": "2 блока не выровнены по колонкам шаблона",
       "bboxes": [
         {
-          "x": 0.3696978346456693,
-          "y": 0.30928414503742585,
-          "w": 0.2680913167104112,
-          "h": 0.032094682609118304
+          "x": 0.7031359361329834,
+          "y": 0.25885389326334207,
+          "w": 0.2658640638670166,
+          "h": 0.16
         },
         {
-          "x": 0.3696978346456693,
-          "y": 0.3537227568776125,
-          "w": 0.2662181758530184,
-          "h": 0.08326781374550403
-        },
-        {
-          "x": 0.6856685258092738,
-          "y": 0.30928414503742585,
-          "w": 0.2680913167104112,
-          "h": 0.032094682609118304
-        },
-        {
-          "x": 0.6856685258092738,
-          "y": 0.3537227568776125,
-          "w": 0.2662181758530184,
-          "h": 0.08326781374550403
+          "x": 0.7053026027996501,
+          "y": 0.4278537960532711,
+          "w": 0.26369739720034996,
+          "h": 0.09382716049382717
         }
       ],
       "element_ids": [
-        "702",
-        "703",
-        "708",
-        "709"
+        "1211",
+        "1212"
+      ],
+      "suggestion": null,
+      "autofix": null,
+      "details": {},
+      "outline_id": "sl6"
+    },
+    {
+      "id": "grid_alignment-6-4",
+      "slide": 6,
+      "check_id": "grid_alignment",
+      "severity": "info",
+      "kind": "deterministic",
+      "message": "4 блока не выровнены по колонкам шаблона",
+      "bboxes": [
+        {
+          "x": 0.3268928258967629,
+          "y": 0.18790959463400408,
+          "w": 0.20509317585301837,
+          "h": 0.14222222222222222
+        },
+        {
+          "x": 0.3295594925634296,
+          "y": 0.34063167104111985,
+          "w": 0.20242650918635172,
+          "h": 0.09382716049382717
+        },
+        {
+          "x": 0.32722615923009624,
+          "y": 0.4878662389423544,
+          "w": 0.20475984251968504,
+          "h": 0.14222222222222222
+        },
+        {
+          "x": 0.3295594925634296,
+          "y": 0.6405883153494702,
+          "w": 0.20242650918635172,
+          "h": 0.09382716049382717
+        }
+      ],
+      "element_ids": [
+        "1213",
+        "1214",
+        "1219",
+        "1220"
       ],
       "suggestion": null,
       "autofix": null,
@@ -108,45 +152,44 @@
       "outline_id": "sl7"
     },
     {
-      "id": "grid_alignment-8-4",
-      "slide": 8,
+      "id": "grid_alignment-7-5",
+      "slide": 7,
       "check_id": "grid_alignment",
       "severity": "info",
       "kind": "deterministic",
-      "message": "6 блоков не выровнены по колонкам шаблона",
+      "message": "5 блоков не выровнены по колонкам шаблона",
       "bboxes": [
         {
-          "x": 0.44271216097987753,
-          "y": 0.09456945659570332,
-          "w": 0.501421697287839,
-          "h": 0.11433537474482357
+          "x": 0.4546576990376203,
+          "y": 0.3129746281714786,
+          "w": 0.45291141732283463,
+          "h": 0.07530864197530865
         },
         {
-          "x": 0.44271216097987753,
-          "y": 0.22090483134052688,
-          "w": 0.4998911854768154,
-          "h": 0.07651424127539613
+          "x": 0.4816576990376203,
+          "y": 0.3882832701467872,
+          "w": 0.2550130139982502,
+          "h": 0.04938271604938271
         },
         {
-          "x": 0.44271216097987753,
-          "y": 0.4019861961699232,
-          "w": 0.501421697287839,
-          "h": 0.11433518032468164
+          "x": 0.4816576990376203,
+          "y": 0.45618450471468847,
+          "w": 0.2550130139982502,
+          "h": 0.04938271604938271
         },
         {
-          "x": 0.44271216097987753,
-          "y": 0.5283213764946049,
-          "w": 0.4998911854768154,
-          "h": 0.07651424127539613
+          "x": 0.4816576990376203,
+          "y": 0.5240857392825897,
+          "w": 0.2550130139982502,
+          "h": 0.04938271604938271
         }
       ],
       "element_ids": [
-        "1059",
-        "1060",
-        "1063",
-        "1064",
-        "1067",
-        "1068"
+        "1210",
+        "1212",
+        "1215",
+        "1218",
+        "1221"
       ],
       "suggestion": null,
       "autofix": null,
@@ -154,145 +197,202 @@
       "outline_id": "sl8"
     },
     {
-      "id": "size_not_in_scale-10-5",
-      "slide": 10,
-      "check_id": "size_not_in_scale",
+      "id": "grid_alignment-8-6",
+      "slide": 8,
+      "check_id": "grid_alignment",
       "severity": "info",
       "kind": "deterministic",
-      "message": "кегль 30.6 пт не из шкалы шаблона",
-      "bboxes": [],
-      "element_ids": [
-        "447"
-      ],
-      "suggestion": null,
-      "autofix": null,
-      "details": {
-        "size": 30.6
-      },
-      "outline_id": "sl10"
-    },
-    {
-      "id": "contrast_low-9-6",
-      "slide": 9,
-      "check_id": "contrast_low",
-      "severity": "info",
-      "kind": "deterministic",
-      "message": "контраст 4.0:1 у «Утвердить бюджет миграции 12 м» (#0077FF на #FAFCFF)",
+      "message": "3 блока не выровнены по колонкам шаблона",
       "bboxes": [
         {
-          "x": 0.5071181102362204,
-          "y": 0.06574103237095363,
-          "w": 0.4223957786526684,
-          "h": 0.047839408962768545
+          "x": 0.6986359361329834,
+          "y": 0.18774278215223097,
+          "w": 0.2703640638670166,
+          "h": 0.16
+        },
+        {
+          "x": 0.7053026027996501,
+          "y": 0.35674268494216,
+          "w": 0.26369739720034996,
+          "h": 0.09382716049382717
+        },
+        {
+          "x": 0.7053026027996501,
+          "y": 0.4850696996208807,
+          "w": 0.26369739720034996,
+          "h": 0.10271604938271604
         }
       ],
       "element_ids": [
-        "504"
+        "1211",
+        "1212",
+        "1213"
       ],
       "suggestion": null,
-      "autofix": {
-        "action": "recolor",
-        "params": {
-          "element_ids": [
-            "504"
-          ],
-          "to": "000000",
-          "scope": "text"
-        },
-        "description": "заменить цвет текста на #000000"
-      },
-      "details": {
-        "contrast": 4.02,
-        "background": "FAFCFF"
-      },
+      "autofix": null,
+      "details": {},
       "outline_id": "sl9"
     },
     {
-      "id": "fill_ratio-3-7",
-      "slide": 3,
-      "check_id": "fill_ratio",
-      "severity": "warn",
-      "kind": "deterministic",
-      "message": "слайд заполнен только на 23%",
-      "bboxes": [],
-      "element_ids": [],
-      "suggestion": null,
-      "autofix": null,
-      "details": {
-        "ratio": 0.24
-      },
-      "outline_id": "sl3"
-    },
-    {
-      "id": "fill_ratio-6-8",
-      "slide": 6,
-      "check_id": "fill_ratio",
-      "severity": "warn",
-      "kind": "deterministic",
-      "message": "слайд заполнен на 82%",
-      "bboxes": [],
-      "element_ids": [],
-      "suggestion": null,
-      "autofix": null,
-      "details": {
-        "ratio": 0.83
-      },
-      "outline_id": "sl6"
-    },
-    {
-      "id": "fill_ratio-7-9",
-      "slide": 7,
-      "check_id": "fill_ratio",
-      "severity": "warn",
-      "kind": "deterministic",
-      "message": "слайд заполнен только на 23%",
-      "bboxes": [],
-      "element_ids": [],
-      "suggestion": null,
-      "autofix": null,
-      "details": {
-        "ratio": 0.24
-      },
-      "outline_id": "sl7"
-    },
-    {
-      "id": "fill_ratio-9-10",
+      "id": "grid_alignment-9-7",
       "slide": 9,
-      "check_id": "fill_ratio",
+      "check_id": "grid_alignment",
       "severity": "info",
       "kind": "deterministic",
-      "message": "слайд заполнен на 11%",
-      "bboxes": [],
-      "element_ids": [],
+      "message": "12 блоков не выровнены по колонкам шаблона",
+      "bboxes": [
+        {
+          "x": 0.2853485345581802,
+          "y": 0.19450218722659668,
+          "w": 0.3719540682414698,
+          "h": 0.0891358024691358
+        },
+        {
+          "x": 0.30514851268591425,
+          "y": 0.28363798969573245,
+          "w": 0.22682852143482066,
+          "h": 0.07012345679012345
+        },
+        {
+          "x": 0.30514851268591425,
+          "y": 0.3673416933994362,
+          "w": 0.22682852143482066,
+          "h": 0.037530864197530864
+        },
+        {
+          "x": 0.30514851268591425,
+          "y": 0.4184528045105473,
+          "w": 0.22682852143482066,
+          "h": 0.037530864197530864
+        }
+      ],
+      "element_ids": [
+        "1209",
+        "1211",
+        "1214",
+        "1217",
+        "1220",
+        "1223",
+        "1226",
+        "1229",
+        "1230",
+        "1232",
+        "1233",
+        "1234"
+      ],
       "suggestion": null,
       "autofix": null,
-      "details": {
-        "ratio": 0.11
-      },
-      "outline_id": "sl9"
+      "details": {},
+      "outline_id": "sl10"
+    },
+    {
+      "id": "grid_alignment-10-8",
+      "slide": 10,
+      "check_id": "grid_alignment",
+      "severity": "info",
+      "kind": "deterministic",
+      "message": "3 блока не выровнены по колонкам шаблона",
+      "bboxes": [
+        {
+          "x": 0.7012609361329833,
+          "y": 0.18774278215223097,
+          "w": 0.2677390638670166,
+          "h": 0.16
+        },
+        {
+          "x": 0.7053026027996501,
+          "y": 0.35674268494216,
+          "w": 0.26369739720034996,
+          "h": 0.1382716049382716
+        },
+        {
+          "x": 0.7053026027996501,
+          "y": 0.5295141440653252,
+          "w": 0.26369739720034996,
+          "h": 0.15024691358024692
+        }
+      ],
+      "element_ids": [
+        "1211",
+        "1212",
+        "1213"
+      ],
+      "suggestion": null,
+      "autofix": null,
+      "details": {},
+      "outline_id": "sl11"
+    },
+    {
+      "id": "grid_alignment-12-9",
+      "slide": 12,
+      "check_id": "grid_alignment",
+      "severity": "info",
+      "kind": "deterministic",
+      "message": "5 блоков не выровнены по колонкам шаблона",
+      "bboxes": [
+        {
+          "x": 0.7048182414698163,
+          "y": 0.20828813065033538,
+          "w": 0.2641817585301837,
+          "h": 0.08014814814814815
+        },
+        {
+          "x": 0.7053026027996501,
+          "y": 0.29743618158841256,
+          "w": 0.26369739720034996,
+          "h": 0.09382716049382717
+        },
+        {
+          "x": 0.703127624671916,
+          "y": 0.43954913969087195,
+          "w": 0.265872375328084,
+          "h": 0.08014814814814815
+        },
+        {
+          "x": 0.7053026027996501,
+          "y": 0.5286971906289492,
+          "w": 0.26369739720034996,
+          "h": 0.1382716049382716
+        }
+      ],
+      "element_ids": [
+        "1211",
+        "1212",
+        "1214",
+        "1215",
+        "1216"
+      ],
+      "suggestion": null,
+      "autofix": null,
+      "details": {},
+      "outline_id": "sl13"
     }
   ],
   "summary": {
     "errors": 0,
-    "warnings": 3,
-    "infos": 7,
+    "warnings": 0,
+    "infos": 9,
     "model_flags": 0,
-    "score": 91,
+    "score": 100,
     "checks_run": [
-      "out_of_bounds",
-      "text_clipped",
-      "overlap",
-      "text_overflow",
-      "margin_violation",
-      "grid_alignment",
-      "image_stretched",
-      "table_cell_wrap",
       "font_not_in_template",
       "size_not_in_scale",
       "color_not_in_palette",
       "layout_not_from_template",
       "chrome_moved",
       "contrast_low",
+      "table_contrast_low",
+      "out_of_bounds",
+      "text_clipped",
+      "overlap",
+      "text_outside_card",
+      "text_overflow",
+      "margin_violation",
+      "grid_alignment",
+      "image_stretched",
+      "table_cell_wrap",
+      "word_break",
+      "content_over_art",
       "too_many_bullets",
       "bullet_too_long",
       "table_too_big",
@@ -303,202 +403,70 @@
       "placeholder_text",
       "empty_slide",
       "content_missing",
+      "slide_missing",
       "slide_is_picture",
       "chart_missing_labels",
-      "duplicate_slides"
-    ]
+      "duplicate_slides",
+      "content_in_notes",
+      "timeline_order",
+      "figure_not_in_brief",
+      "line_fragment",
+      "figure_is_time",
+      "orphan_opener",
+      "duplicate_heading",
+      "chart_mixed_units",
+      "writer_failed"
+    ],
+    "figures": {
+      "checked": 120,
+      "derived": 15,
+      "unverified": 0
+    }
   },
   "per_slide": {
+    "1": [
+      "grid_alignment-1-1"
+    ],
     "2": [
-      "grid_alignment-2-1"
+      "grid_alignment-2-2"
     ],
-    "4": [
-      "grid_alignment-4-2"
-    ],
-    "7": [
-      "grid_alignment-7-3",
-      "fill_ratio-7-9"
-    ],
-    "8": [
-      "grid_alignment-8-4"
-    ],
-    "10": [
-      "size_not_in_scale-10-5"
-    ],
-    "9": [
-      "contrast_low-9-6",
-      "fill_ratio-9-10"
-    ],
-    "3": [
-      "fill_ratio-3-7"
+    "5": [
+      "grid_alignment-5-3"
     ],
     "6": [
-      "fill_ratio-6-8"
+      "grid_alignment-6-4"
+    ],
+    "7": [
+      "grid_alignment-7-5"
+    ],
+    "8": [
+      "grid_alignment-8-6"
+    ],
+    "9": [
+      "grid_alignment-9-7"
+    ],
+    "10": [
+      "grid_alignment-10-8"
+    ],
+    "12": [
+      "grid_alignment-12-9"
     ]
   },
-  "iterations": 1,
-  "applied_fixes": [
-    {
-      "iteration": 1,
-      "outline_id": "sl6",
-      "action": "rematch",
-      "result": "rematch → p49"
-    },
-    {
-      "iteration": 1,
-      "outline_id": "sl2",
-      "action": "rematch",
-      "result": "rematch → p46"
-    },
-    {
-      "iteration": 1,
-      "outline_id": "sl1",
-      "action": "rematch",
-      "result": "rematch → p3"
-    },
-    {
-      "iteration": 1,
-      "outline_id": "sl5",
-      "action": "rematch",
-      "result": "rematch → p45"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 2: shrunk text in 2372 to 14 pt"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 3: shrunk text in 696 to 11 pt"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 3: shrunk text in 702 to 11 pt"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 3: shrunk text in 708 to 11 pt"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 3: shrunk text in 714 to 11 pt"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 3: shrunk text in 717 to 14 pt"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 3: recolored 2 colour(s) in 697 → 000000 (text)"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 3: recolored 2 colour(s) in 703 → 000000 (text)"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 3: recolored 2 colour(s) in 709 → 000000 (text)"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 3: recolored 2 colour(s) in 715 → 000000 (text)"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 5: shrunk text in 2348 to 20 pt"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 5: shrunk text in 2349 to 20 pt"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 5: shrunk text in 2350 to 20 pt"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 5: recolored 2 colour(s) in 2343 → 000000 (text)"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 5: recolored 2 colour(s) in 2345 → 000000 (text)"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 5: recolored 2 colour(s) in 2347 → 000000 (text)"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 7: shrunk text in 696 to 11 pt"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 7: shrunk text in 702 to 11 pt"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 7: shrunk text in 708 to 11 pt"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 7: recolored 2 colour(s) in 697 → 000000 (text)"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 7: recolored 2 colour(s) in 703 → 000000 (text)"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 7: recolored 2 colour(s) in 709 → 000000 (text)"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 8: recolored 2 colour(s) in 1060 → 000000 (text)"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 8: recolored 2 colour(s) in 1064 → 000000 (text)"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "result": "slide 8: recolored 2 colour(s) in 1068 → 000000 (text)"
-    }
-  ],
+  "iterations": 0,
+  "applied_fixes": [],
   "slide_images": {
-    "1": "/Users/h.u.1.l.a/Downloads/Конкурсы/VK tech/verstka/examples/outputs/vktech/visual/slides/slide-001.jpg",
-    "2": "/Users/h.u.1.l.a/Downloads/Конкурсы/VK tech/verstka/examples/outputs/vktech/visual/slides/slide-002.jpg",
-    "3": "/Users/h.u.1.l.a/Downloads/Конкурсы/VK tech/verstka/examples/outputs/vktech/visual/slides/slide-003.jpg",
-    "4": "/Users/h.u.1.l.a/Downloads/Конкурсы/VK tech/verstka/examples/outputs/vktech/visual/slides/slide-004.jpg",
-    "5": "/Users/h.u.1.l.a/Downloads/Конкурсы/VK tech/verstka/examples/outputs/vktech/visual/slides/slide-005.jpg",
-    "6": "/Users/h.u.1.l.a/Downloads/Конкурсы/VK tech/verstka/examples/outputs/vktech/visual/slides/slide-006.jpg",
-    "7": "/Users/h.u.1.l.a/Downloads/Конкурсы/VK tech/verstka/examples/outputs/vktech/visual/slides/slide-007.jpg",
-    "8": "/Users/h.u.1.l.a/Downloads/Конкурсы/VK tech/verstka/examples/outputs/vktech/visual/slides/slide-008.jpg",
-    "9": "/Users/h.u.1.l.a/Downloads/Конкурсы/VK tech/verstka/examples/outputs/vktech/visual/slides/slide-009.jpg",
-    "10": "/Users/h.u.1.l.a/Downloads/Конкурсы/VK tech/verstka/examples/outputs/vktech/visual/slides/slide-010.jpg"
+    "1": "slides/slide-001.jpg",
+    "2": "slides/slide-002.jpg",
+    "3": "slides/slide-003.jpg",
+    "4": "slides/slide-004.jpg",
+    "5": "slides/slide-005.jpg",
+    "6": "slides/slide-006.jpg",
+    "7": "slides/slide-007.jpg",
+    "8": "slides/slide-008.jpg",
+    "9": "slides/slide-009.jpg",
+    "10": "slides/slide-010.jpg",
+    "11": "slides/slide-011.jpg",
+    "12": "slides/slide-012.jpg"
   },
-  "seconds": 0.12
+  "seconds": 2.14
 }

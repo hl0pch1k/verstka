@@ -3,124 +3,109 @@
   "template_id": "9ef2323ed5f49f46",
   "slides": [
     {
-      "outline_id": "sl1",
-      "mode": "clone",
-      "pattern_id": "p3",
-      "composition": null,
-      "fit": {
-        "overflow_title": 1.45,
-        "text_ratio": 1.45
-      },
-      "score": 0.884,
-      "reasons": [
-        "слайд 3 шаблона",
-        "тип title для title: 1.0",
-        "текст заметно длиннее ёмкости (×1.45), потребуется сокращение",
-        "стиль стратегии compact: +0.01",
-        "обложка: заголовок 48 пт, других текстов 1: +0.07"
-      ],
-      "alternatives": [
-        [
-          "p1",
-          0.805
-        ],
-        [
-          "p2",
-          0.805
-        ],
-        [
-          "p19",
-          0.79
-        ]
-      ]
-    },
-    {
       "outline_id": "sl2",
-      "mode": "clone",
-      "pattern_id": "p24",
-      "composition": null,
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "bullets",
       "fit": {
-        "items": "2/2",
-        "overflow_card_title": 2.0,
-        "text_ratio": 2.0
+        "overflow_title": 2.35,
+        "text_ratio": 2.35
       },
-      "score": 0.786,
+      "score": 0.668,
       "reasons": [
-        "слайд 24 шаблона",
-        "тип two_column для two_column: 1.0",
-        "ёмкость группы 2 из 2 ячеек",
-        "текст не помещается (×2.00)",
-        "вес стратегии compact для типа: ×1.30",
-        "стиль стратегии compact: +0.02"
+        "композиция bullets: сетка, шкала кеглей и карточки из дизайн-системы шаблона",
+        "ближайший образец — слайд 35 шаблона (0.67)"
       ],
       "alternatives": [
         [
-          "p45",
-          0.646
+          "p35",
+          0.668
         ],
         [
-          "p7",
-          0.617
+          "p6",
+          0.657
         ],
         [
-          "p26",
-          0.617
+          "p30",
+          0.657
         ]
       ]
     },
     {
       "outline_id": "sl3",
-      "mode": "clone",
-      "pattern_id": "p42",
-      "composition": null,
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "chart_text",
       "fit": {
-        "items": "4/7",
-        "overflow_title": 1.27,
-        "overflow_number": 1.8,
-        "text_ratio": 1.8
+        "overflow_title": 1.02,
+        "text_ratio": 1.02
       },
-      "score": 0.672,
+      "score": 0.75,
       "reasons": [
-        "слайд 42 шаблона",
-        "тип stat_row для stat_row: 1.0",
-        "7 отдельных слотов под 4 элементов",
-        "6 лишних текстовых слотов останутся пустыми",
-        "текст заметно длиннее ёмкости (×1.80), потребуется сокращение",
-        "стиль стратегии compact: +0.08"
+        "композиция chart_text: сетка, шкала кеглей и карточки из дизайн-системы шаблона",
+        "ближайший образец — слайд 34 шаблона (0.75)"
       ],
       "alternatives": [
         [
-          "p8",
-          0.637
+          "p34",
+          0.75
         ],
         [
-          "p46",
-          0.627
+          "p47",
+          0.552
         ],
         [
-          "p7",
-          0.617
+          "p17",
+          0.268
         ]
       ]
     },
     {
       "outline_id": "sl4",
-      "mode": "clone",
-      "pattern_id": "p38",
-      "composition": null,
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "chart_text",
       "fit": {
-        "text_ratio": 0.8
+        "text_ratio": 0.74
+      },
+      "score": 0.78,
+      "reasons": [
+        "композиция chart_text: сетка, шкала кеглей и карточки из дизайн-системы шаблона",
+        "ближайший образец — слайд 34 шаблона (0.78)"
+      ],
+      "alternatives": [
+        [
+          "p34",
+          0.78
+        ],
+        [
+          "p47",
+          0.745
+        ],
+        [
+          "p17",
+          0.298
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl5",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "table",
+      "fit": {
+        "text_ratio": 0.98
       },
       "score": 1.05,
       "reasons": [
-        "слайд 38 шаблона",
-        "тип table для table: 1.0",
-        "область под данные: 35% слайда",
-        "текст помещается",
-        "вес стратегии compact для типа: ×1.20",
-        "стиль стратегии compact: +0.01"
+        "композиция table: сетка, шкала кеглей и карточки из дизайн-системы шаблона",
+        "ближайший образец — слайд 38 шаблона (1.05)"
       ],
       "alternatives": [
+        [
+          "p38",
+          1.05
+        ],
         [
           "p39",
           1.04
@@ -128,143 +113,234 @@
         [
           "p40",
           1.04
-        ],
-        [
-          "p33",
-          0.596
-        ]
-      ]
-    },
-    {
-      "outline_id": "sl5",
-      "mode": "clone",
-      "pattern_id": "p8",
-      "composition": null,
-      "fit": {
-        "items": "4/6",
-        "overflow_card_title": 2.0,
-        "text_ratio": 2.0
-      },
-      "score": 0.786,
-      "reasons": [
-        "слайд 8 шаблона",
-        "тип cards для cards: 1.0",
-        "ёмкость группы 4 из 6 ячеек",
-        "текст не помещается (×2.00)",
-        "вес стратегии compact для типа: ×1.15",
-        "стиль стратегии compact: +0.06"
-      ],
-      "alternatives": [
-        [
-          "p7",
-          0.766
-        ],
-        [
-          "p21",
-          0.657
-        ],
-        [
-          "p26",
-          0.616
         ]
       ]
     },
     {
       "outline_id": "sl6",
-      "mode": "clone",
-      "pattern_id": "p7",
-      "composition": null,
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "chart_text",
       "fit": {
-        "items": "3/4",
-        "overflow_card_title": 2.0,
-        "text_ratio": 2.0
+        "overflow_title": 1.06,
+        "text_ratio": 1.06
       },
-      "score": 0.766,
+      "score": 0.75,
       "reasons": [
-        "слайд 7 шаблона",
-        "тип cards для cards: 1.0",
-        "ёмкость группы 3 из 4 ячеек",
-        "текст не помещается (×2.00)",
-        "вес стратегии compact для типа: ×1.15",
-        "стиль стратегии compact: +0.04"
+        "композиция chart_text: сетка, шкала кеглей и карточки из дизайн-системы шаблона",
+        "ближайший образец — слайд 34 шаблона (0.75)"
       ],
       "alternatives": [
         [
-          "p26",
-          0.766
+          "p34",
+          0.75
         ],
         [
-          "p27",
-          0.766
+          "p47",
+          0.552
         ],
         [
-          "p28",
-          0.766
+          "p17",
+          0.268
         ]
       ]
     },
     {
       "outline_id": "sl7",
-      "mode": "clone",
-      "pattern_id": "p21",
-      "composition": null,
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "stat_row",
       "fit": {
-        "items": "3/4",
-        "overflow_card_title": 2.0,
-        "text_ratio": 2.0
+        "items": "4/7",
+        "overflow_number": 1.2,
+        "text_ratio": 1.2
       },
-      "score": 0.705,
+      "score": 0.77,
       "reasons": [
-        "слайд 21 шаблона",
-        "тип process для process: 1.0",
-        "ёмкость группы 3 из 4 ячеек",
-        "2 лишних текстовых слотов останутся пустыми",
-        "текст не помещается (×2.00)",
-        "стиль стратегии compact: +0.08"
+        "композиция stat_row: сетка, шкала кеглей и карточки из дизайн-системы шаблона",
+        "ближайший образец — слайд 42 шаблона (0.77)"
       ],
       "alternatives": [
         [
-          "p44",
-          0.651
+          "p42",
+          0.77
         ],
         [
-          "p22",
-          0.645
+          "p8",
+          0.637
         ],
         [
-          "p26",
-          0.617
+          "p46",
+          0.627
         ]
       ]
     },
     {
       "outline_id": "sl8",
-      "mode": "clone",
-      "pattern_id": "p52",
-      "composition": null,
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "chart_text",
       "fit": {
-        "overflow_title": 1.46,
-        "text_ratio": 1.46
+        "text_ratio": 0.13
       },
-      "score": 0.928,
+      "score": 0.78,
       "reasons": [
-        "слайд 52 шаблона",
-        "тип thanks для thanks: 1.0",
-        "текст заметно длиннее ёмкости (×1.46), потребуется сокращение",
-        "обложка: заголовок 60 пт, других текстов 0: +0.12"
+        "композиция chart_text: сетка, шкала кеглей и карточки из дизайн-системы шаблона",
+        "ближайший образец — слайд 34 шаблона (0.78)"
       ],
       "alternatives": [
         [
-          "p4",
-          0.8
+          "p34",
+          0.78
         ],
         [
-          "p5",
-          0.8
+          "p47",
+          0.552
         ],
         [
-          "p16",
-          0.776
+          "p17",
+          0.298
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl9",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "table",
+      "fit": {
+        "overflow_title": 1.04,
+        "text_ratio": 1.04
+      },
+      "score": 1.02,
+      "reasons": [
+        "композиция table: сетка, шкала кеглей и карточки из дизайн-системы шаблона",
+        "ближайший образец — слайд 38 шаблона (1.02)"
+      ],
+      "alternatives": [
+        [
+          "p38",
+          1.02
+        ],
+        [
+          "p39",
+          1.01
+        ],
+        [
+          "p40",
+          1.01
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl10",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "chart_text",
+      "fit": {
+        "text_ratio": 0.65
+      },
+      "score": 0.78,
+      "reasons": [
+        "композиция chart_text: сетка, шкала кеглей и карточки из дизайн-системы шаблона",
+        "ближайший образец — слайд 34 шаблона (0.78)"
+      ],
+      "alternatives": [
+        [
+          "p34",
+          0.78
+        ],
+        [
+          "p47",
+          0.552
+        ],
+        [
+          "p17",
+          0.298
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl11",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "chart_text",
+      "fit": {
+        "text_ratio": 0.83
+      },
+      "score": 0.78,
+      "reasons": [
+        "композиция chart_text: сетка, шкала кеглей и карточки из дизайн-системы шаблона",
+        "ближайший образец — слайд 34 шаблона (0.78)"
+      ],
+      "alternatives": [
+        [
+          "p34",
+          0.78
+        ],
+        [
+          "p47",
+          0.552
+        ],
+        [
+          "p17",
+          0.298
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl12",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "chart_pair",
+      "fit": {
+        "text_ratio": 0.57
+      },
+      "score": 0.78,
+      "reasons": [
+        "композиция chart_pair: сетка, шкала кеглей и карточки из дизайн-системы шаблона",
+        "ближайший образец — слайд 34 шаблона (0.78)"
+      ],
+      "alternatives": [
+        [
+          "p34",
+          0.78
+        ],
+        [
+          "p47",
+          0.745
+        ],
+        [
+          "p17",
+          0.298
+        ]
+      ]
+    },
+    {
+      "outline_id": "sl13",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "chart_text",
+      "fit": {
+        "text_ratio": 0.74
+      },
+      "score": 0.78,
+      "reasons": [
+        "композиция chart_text: сетка, шкала кеглей и карточки из дизайн-системы шаблона",
+        "ближайший образец — слайд 34 шаблона (0.78)"
+      ],
+      "alternatives": [
+        [
+          "p34",
+          0.78
+        ],
+        [
+          "p47",
+          0.552
+        ],
+        [
+          "p17",
+          0.298
         ]
       ]
     }

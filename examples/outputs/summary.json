@@ -1,88 +1,127 @@
 {
-  "workspace": {
-    "template": "VK_WorkSpace_Клиентская_конференция_Шаблон_03.pptx",
-    "brief": "examples/briefs/vk_workspace_feature.md",
-    "mode": "offline",
-    "seconds": 9.8,
+  "vktech": {
+    "template": "VK Tech шаблон.pptx",
+    "brief": "examples/briefs/fitness_studio.md",
+    "mode": "models",
+    "model": "Qwen3-32B",
+    "seconds": 110.08,
     "variants": {
       "structured": {
-        "slides": 10,
-        "seconds": 9.6,
+        "slides": 12,
         "score": 100,
         "errors": 0,
-        "warnings": 0
+        "warnings": 0,
+        "figures": {
+          "checked": 116,
+          "derived": 15,
+          "unverified": 0
+        }
       },
       "visual": {
-        "slides": 11,
-        "seconds": 8.9,
-        "score": 94,
-        "errors": 0,
-        "warnings": 2
-      },
-      "compact": {
-        "slides": 8,
-        "seconds": 7.0,
+        "slides": 12,
         "score": 100,
         "errors": 0,
-        "warnings": 0
+        "warnings": 0,
+        "figures": {
+          "checked": 120,
+          "derived": 15,
+          "unverified": 0
+        }
+      },
+      "compact": {
+        "slides": 12,
+        "score": 100,
+        "errors": 0,
+        "warnings": 0,
+        "figures": {
+          "checked": 116,
+          "derived": 15,
+          "unverified": 0
+        }
       }
     }
   },
   "education": {
     "template": "Шаблон презентации VK Education.pptx",
-    "brief": "examples/briefs/edu_program.md",
-    "mode": "offline",
-    "seconds": 9.3,
+    "brief": "examples/briefs/fitness_studio.md",
+    "mode": "models",
+    "model": "Qwen3-32B",
+    "seconds": 142.75,
     "variants": {
       "structured": {
-        "slides": 10,
-        "seconds": 9.1,
-        "score": 91,
+        "slides": 12,
+        "score": 100,
         "errors": 0,
-        "warnings": 3
+        "warnings": 0,
+        "figures": {
+          "checked": 119,
+          "derived": 15,
+          "unverified": 0
+        }
       },
       "visual": {
-        "slides": 10,
-        "seconds": 7.8,
-        "score": 88,
+        "slides": 12,
+        "score": 100,
         "errors": 0,
-        "warnings": 4
+        "warnings": 0,
+        "figures": {
+          "checked": 123,
+          "derived": 15,
+          "unverified": 0
+        }
       },
       "compact": {
-        "slides": 8,
-        "seconds": 6.4,
-        "score": 94,
+        "slides": 12,
+        "score": 100,
         "errors": 0,
-        "warnings": 2
+        "warnings": 0,
+        "figures": {
+          "checked": 119,
+          "derived": 15,
+          "unverified": 0
+        }
       }
     }
   },
-  "vktech": {
-    "template": "VK Tech шаблон.pptx",
-    "brief": "examples/briefs/cloud_initiative.md",
-    "mode": "offline",
-    "seconds": 11.9,
+  "workspace": {
+    "template": "VK_WorkSpace_Клиентская_конференция_Шаблон_03.pptx",
+    "brief": "examples/briefs/fitness_studio.md",
+    "mode": "models",
+    "model": "Qwen3-32B",
+    "seconds": 171.31,
     "variants": {
       "structured": {
-        "slides": 10,
-        "seconds": 11.7,
+        "slides": 12,
         "score": 100,
         "errors": 0,
-        "warnings": 0
+        "warnings": 0,
+        "figures": {
+          "checked": 118,
+          "derived": 14,
+          "unverified": 0
+        }
       },
       "visual": {
-        "slides": 10,
-        "seconds": 9.0,
-        "score": 91,
-        "errors": 0,
-        "warnings": 3
-      },
-      "compact": {
-        "slides": 9,
-        "seconds": 6.5,
+        "slides": 12,
         "score": 100,
         "errors": 0,
-        "warnings": 0
+        "warnings": 0,
+        "figures": {
+          "checked": 122,
+          "derived": 14,
+          "unverified": 0
+        }
+      },
+      "compact": {
+        "slides": 12,
+        "score": 100,
+        "errors": 0,
+        "warnings": 0,
+        "figures": {
+          "checked": 118,
+          "derived": 14,
+          "unverified": 0
+        }
       }
     }
   }
