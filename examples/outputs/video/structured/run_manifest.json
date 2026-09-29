@@ -1,0 +1,221 @@
+{
+  "verstka_version": "0.1.0",
+  "git_commit": null,
+  "created_at": "2026-09-29T17:48:13+0300",
+  "platform": "macOS-27.0-arm64-arm-64bit",
+  "template": {
+    "id": "8db900eb9fbc5375",
+    "file": "Business Infographic.pptx"
+  },
+  "strategy": "structured",
+  "inputs": {
+    "brief_sha256": "ef77aa34a75658f5",
+    "outline_sha256": "35f844304240e852"
+  },
+  "skills": {},
+  "providers": {
+    "llm": {
+      "backend": "none"
+    },
+    "vlm": {
+      "backend": "none"
+    }
+  },
+  "timings_s": {
+    "analyze": 0.02,
+    "plan": 0.0,
+    "render": 1.67,
+    "audit": 1.0,
+    "export": 3.21,
+    "total": 5.88
+  },
+  "usage": {},
+  "applied_fixes": [],
+  "audit": {
+    "errors": 0,
+    "warnings": 0,
+    "infos": 67,
+    "model_flags": 0,
+    "score": 100,
+    "checks_run": [
+      "font_not_in_template",
+      "size_not_in_scale",
+      "color_not_in_palette",
+      "layout_not_from_template",
+      "chrome_moved",
+      "contrast_low",
+      "table_contrast_low",
+      "out_of_bounds",
+      "text_clipped",
+      "overlap",
+      "text_outside_card",
+      "text_overflow",
+      "margin_violation",
+      "grid_alignment",
+      "image_stretched",
+      "table_cell_wrap",
+      "word_break",
+      "content_over_art",
+      "too_many_bullets",
+      "bullet_too_long",
+      "table_too_big",
+      "too_many_series",
+      "fill_ratio",
+      "file_opens",
+      "empty_deck",
+      "placeholder_text",
+      "empty_slide",
+      "content_missing",
+      "slide_missing",
+      "slide_is_picture",
+      "chart_missing_labels",
+      "duplicate_slides",
+      "content_in_notes",
+      "timeline_order",
+      "figure_not_in_brief",
+      "line_fragment",
+      "figure_is_time",
+      "orphan_opener",
+      "duplicate_heading",
+      "chart_mixed_units",
+      "writer_failed"
+    ],
+    "figures": {
+      "checked": 36,
+      "derived": 1,
+      "unverified": 0
+    }
+  },
+  "slides": [
+    {
+      "index": 1,
+      "outline_id": "sl2",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "cards",
+      "warnings": []
+    },
+    {
+      "index": 2,
+      "outline_id": "sl3",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "bullets",
+      "warnings": []
+    },
+    {
+      "index": 3,
+      "outline_id": "sl4",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "process",
+      "warnings": []
+    },
+    {
+      "index": 4,
+      "outline_id": "sl5",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "cards",
+      "warnings": []
+    },
+    {
+      "index": 5,
+      "outline_id": "sl6",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "chart_text",
+      "warnings": []
+    },
+    {
+      "index": 6,
+      "outline_id": "sl7",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "stat_row",
+      "warnings": []
+    },
+    {
+      "index": 7,
+      "outline_id": "sl8",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "table",
+      "warnings": []
+    },
+    {
+      "index": 8,
+      "outline_id": "sl9",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "chart_text",
+      "warnings": []
+    },
+    {
+      "index": 9,
+      "outline_id": "sl10",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "cards",
+      "warnings": []
+    },
+    {
+      "index": 10,
+      "outline_id": "sl11",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "cards",
+      "warnings": []
+    }
+  ],
+  "warnings": [],
+  "exports": {
+    "pptx": "deck.pptx",
+    "pdf": "deck.pdf",
+    "html": "deck.html"
+  },
+  "planner": {
+    "planned_by": "agent",
+    "model": "Qwen/Qwen3-32B",
+    "agent": {
+      "name": "deck_designer",
+      "version": "2.2.0",
+      "model_calls": 17,
+      "slides_by_model": 10,
+      "slides": 11,
+      "critic_issues": 3,
+      "seconds": 60.05,
+      "calls_made": 21,
+      "requests": 29,
+      "tokens_in": 61143,
+      "tokens_out": 7464,
+      "failed_calls": 0,
+      "by_skill": {
+        "BlockExtraction": {
+          "calls": 4,
+          "requests": 12,
+          "tokens_in": 5158,
+          "tokens_out": 576,
+          "failed": 0,
+          "seconds": 26.51
+        },
+        "SlideDesignAnswer": {
+          "calls": 14,
+          "requests": 14,
+          "tokens_in": 47368,
+          "tokens_out": 5498,
+          "failed": 0,
+          "seconds": 133.61
+        },
+        "CritiqueAnswer": {
+          "calls": 3,
+          "requests": 3,
+          "tokens_in": 8617,
+          "tokens_out": 1390,
+          "failed": 0,
+          "seconds": 31.33
+        }
+      }
+    }
+  }
+}
