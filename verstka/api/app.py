@@ -656,7 +656,9 @@ def generation_file(gid: str, strategy: str, name: str):
     if name not in ("deck.pptx", "deck.pdf", "deck.html", "outline.json", "layout_plan.json", "audit_report.json", "run_manifest.json"):
         raise HTTPException(404, "not found")
     media = {"pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation", "pdf": "application/pdf", "html": "text/html", "json": "application/json"}[name.rsplit(".", 1)[-1]]
-    return _serve_file(vdir, name, media_type=media, filename=name)
+    # the web version opens in the browser («Веб» → a new tab); the other files are downloads
+    how = "inline" if name == "deck.html" else "attachment"
+    return _serve_file(vdir, name, media_type=media, filename=name, content_disposition_type=how)
 
 
 @app.get("/api/generations/{gid}/{strategy}/explain/{index}")

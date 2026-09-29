@@ -826,6 +826,9 @@ def _lo_label_faults(gf) -> list[str]:
     return faults
 
 
+@pytest.mark.skipif(__import__("sys").platform != "darwin" or not __import__("verstka.rendering.fonts", fromlist=["is_installed"]).is_installed("Play"),
+                    reason="the live frame was measured on macOS with Play installed; elsewhere the labels are measured in "
+                    "the face LibreOffice will draw there and may rightly be turned")
 def test_coffee_months_at_half_width_on_vk_tech_are_shortened_not_broken():
     """B3-1: the live coffee deck on VK Tech (10 × 5.63 in, Play 9 pt) set its revenue chart at half width and
     LibreOffice broke «1-й мес.» into «1-й ме / с.» (33.8 pt in a 31.3 pt slot: under the old 10 % tolerance). Every

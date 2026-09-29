@@ -449,3 +449,17 @@ def test_uploaded_template_keeps_the_users_file_name_and_gets_a_card(client, sim
     assert card["source_file"] == "Годовой отчёт.pptx"  # not «<uuid>_Годовой отчёт.pptx»
     assert card["palette"] and card["aspect"] and card["font"]
     assert card["cover_url"] is None or c.get(card["cover_url"]).status_code == 200
+
+
+def test_the_web_version_opens_in_the_browser_and_the_pptx_is_a_download(client):
+    # «Веб» opens deck.html in a new tab: served inline; PowerPoint and PDF stay downloads with their names
+    c, mod = client
+    vdir = mod.store.root / "runs" / "g2" / "structured"
+    vdir.mkdir(parents=True)
+    (vdir / "deck.html").write_text("<!doctype html><title>deck</title>", encoding="utf-8")
+    (vdir / "deck.pptx").write_bytes(b"PK-g2")
+    html = c.get("/api/generations/g2/structured/files/deck.html")
+    assert html.status_code == 200 and html.headers["content-type"].startswith("text/html")
+    assert html.headers["content-disposition"].startswith("inline")
+    pptx = c.get("/api/generations/g2/structured/files/deck.pptx")
+    assert pptx.headers["content-disposition"].startswith("attachment") and 'filename="deck.pptx"' in pptx.headers["content-disposition"]

@@ -684,7 +684,9 @@ def test_a_missing_family_renders_in_its_standin(tmp_path):
         pytest.skip("no stand-in face on this machine")
     prs = Presentation()
     tb = prs.slides.add_slide(prs.slide_layouts[6]).shapes.add_textbox(Emu(600000), Emu(600000), Emu(8000000), Emu(900000))
-    tb.text_frame.text = "Выручка 900 000 ₽ — 60 %"
+    # letters, digits and a dash every stand-in has: a sign like ₽ may be missing from the OS's stand-in (Liberation Sans
+    # on Ubuntu) and LibreOffice then takes that one glyph from another face — glyph_standin covers that case
+    tb.text_frame.text = "Выручка 900 000 рублей — 60 %"
     tb.text_frame.paragraphs[0].runs[0].font.name = "Verstka Missing Grotesk"
     path = tmp_path / "deck.pptx"
     prs.save(path)

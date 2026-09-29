@@ -351,3 +351,26 @@ def test_a_deck_the_architect_planned_gets_a_cover_and_compiled_charts():
     assert [s.kind for s in out.slides] == [K.title, K.chart]  # the invented slide nobody asked for goes, as before
     assert out.slides[0].footnote == "Все цифры условные."
     assert out.slides[1].content.chart.series_ids == ["s_a_1"]
+
+
+def test_a_chart_that_counts_items_as_one_each_is_no_data_and_the_slide_keeps_its_items():
+    # «кольцевые диаграммы» in a card's text reads as a chart request; the designer drew the three cards as a doughnut
+    # of 1, 1, 1 («одна мысль на слайд» grounds the 1): that is no data, so no chart
+    from verstka.planning.brief_structure import read_structure
+    from verstka.schemas.outline import SlideItem, TableData
+
+    text = ("Слайд 1. Три варианта вёрстки\n\nОдинаковое содержание, разная подача. Нужны три карточки: «Структурный» — "
+            "одна мысль на слайд; «Визуальный» — крупные цифры и кольцевые диаграммы; «Компактный» — вывод первой строкой.")
+    items = [SlideItem(title="Структурный", text="Одна мысль на слайд"), SlideItem(title="Визуальный", text="Крупные цифры"),
+             SlideItem(title="Компактный", text="Вывод первой строкой")]
+    ch = ChartSpec(type="doughnut", categories=["Вывод", "Текст", "Данные"], series=[InlineSeries(name="Распределение", values=[1, 1, 1])])
+    o = DeckOutline(title="Три варианта вёрстки", planned_by="agent", slides=[
+        OutlineSlide(id="t", kind=K.title, headline="Три варианта вёрстки"),
+        OutlineSlide(id="v", kind=K.chart, headline="Одинаковое содержание, разная подача", spec_ref=1,
+                     content=SlideContent(items=items, chart=ch, table=TableData(columns=["Вариант", "Подача"], rows=[[x.title, x.text] for x in items]))),
+    ])
+    out, warnings = compile_outline(o, read_structure(text), Brief(text=text))
+    v = next(s for s in out.slides if s.id == "v")
+    assert v.content.chart is None and v.kind in (K.table, K.cards)
+    assert not any(all(x == 1 for x in ser.values) for ser in out.series)
+    assert any("a count of items, not data" in w for w in warnings)

@@ -745,6 +745,7 @@ def _compile_charts(o: DeckOutline, run: _Run) -> int:
     made = 0
     for s in o.slides:
         n = 0
+        gone = False
         for which in ("chart", "chart2"):
             ch: Optional[ChartSpec] = getattr(s.content, which)
             if ch is None or not ch.series:
@@ -754,6 +755,17 @@ def _compile_charts(o: DeckOutline, run: _Run) -> int:
             if ch.type in ("pie", "doughnut") and len(sers) > 1:
                 run.warn(f"slide {s.id}: a {ch.type} chart shows one series; {len(sers) - 1} more dropped")
                 sers = sers[:1]
+            # 1 for every category is the designer counting the slide's items (three cards → 1, 1, 1), not data,
+            # unless the brief itself has such a series
+            ones = [x for x in sers if len(cats) >= 2 and _all_ones(x.values[: len(cats)])
+                    and not any(r.values and _all_ones(r.values) for r in reg.values())]
+            if ones:
+                run.warn(f"slide {s.id}: {which} series {', '.join(f'«{x.name}»' for x in ones)} is 1 for every category: a count of items, not data; dropped")
+                sers = [x for x in sers if x not in ones]
+                if not sers:
+                    setattr(s.content, which, None)
+                    gone = True
+                    continue
             ids: list[str] = []
             kept: list[InlineSeries] = []
             for ser in sers:
@@ -775,8 +787,30 @@ def _compile_charts(o: DeckOutline, run: _Run) -> int:
                 made += len(ids)
             else:
                 ch.series = []
+        if gone:
+            _unchart(s)
     o.series = list(reg.values())
     return made
+
+
+def _all_ones(values: list[float]) -> bool:
+    return bool(values) and all(float(v) == 1.0 for v in values)
+
+
+def _unchart(s: OutlineSlide) -> None:
+    """A chart slide whose charts went: the second chart takes the first's place, else the slide's own table, items or
+    lines are its form (none of them: grounding's repair fills it from the brief)."""
+    c = s.content
+    if c.chart is None and c.chart2 is not None:
+        c.chart, c.chart2 = c.chart2, None
+    if s.kind != K.chart or c.chart is not None:
+        return
+    if c.table is not None and c.table.rows:
+        s.kind = K.table
+    elif 2 <= len(c.items) <= MAX_ITEMS:
+        s.kind = K.cards
+    elif _lines(c):
+        s.kind = K.bullets
 
 
 def _cover(o: DeckOutline, structure: BriefStructure, run: _Run) -> None:
