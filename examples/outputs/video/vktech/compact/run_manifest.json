@@ -1,7 +1,7 @@
 {
   "verstka_version": "0.1.0",
   "git_commit": null,
-  "created_at": "2026-09-29T19:56:58+0300",
+  "created_at": "2026-09-29T21:26:12+0300",
   "platform": "macOS-27.0-arm64-arm-64bit",
   "template": {
     "id": "cbbe3aa6a21d23ce",
@@ -9,8 +9,8 @@
   },
   "strategy": "compact",
   "inputs": {
-    "brief_sha256": "ef77aa34a75658f5",
-    "outline_sha256": "6e46f1cf79b0dfbf"
+    "brief_sha256": "fb67a428ca1dca6f",
+    "outline_sha256": "f1389e8801c9dd21"
   },
   "skills": {
     "asset_tagger": {
@@ -188,18 +188,43 @@
   },
   "timings_s": {
     "analyze": 0.02,
-    "plan": 68.77,
-    "render": 2.5,
-    "audit": 1.14,
-    "export": 3.74,
-    "total": 7.66
+    "plan": 82.33,
+    "render": 2.58,
+    "audit": 3.5,
+    "export": 4.07,
+    "total": 10.55
   },
   "usage": {},
-  "applied_fixes": [],
+  "applied_fixes": [
+    {
+      "iteration": 1,
+      "action": "xml",
+      "slide": 1,
+      "kind": "shrink_text",
+      "element_id": "1231",
+      "result": "Шрифт уменьшен до 16 пт, чтобы текст поместился"
+    },
+    {
+      "iteration": 1,
+      "action": "xml",
+      "slide": 1,
+      "kind": "shrink_text",
+      "element_id": "1234",
+      "result": "Шрифт уменьшен до 24 пт, чтобы текст поместился"
+    },
+    {
+      "iteration": 1,
+      "action": "xml",
+      "slide": 1,
+      "kind": "shrink_text",
+      "element_id": "1235",
+      "result": "Шрифт уменьшен до 15 пт, чтобы текст поместился"
+    }
+  ],
   "audit": {
     "errors": 0,
     "warnings": 0,
-    "infos": 6,
+    "infos": 4,
     "model_flags": 0,
     "score": 100,
     "checks_run": [
@@ -246,7 +271,7 @@
       "writer_failed"
     ],
     "figures": {
-      "checked": 30,
+      "checked": 32,
       "derived": 0,
       "unverified": 0
     }
@@ -265,7 +290,7 @@
       "outline_id": "sl3",
       "mode": "synth",
       "pattern_id": null,
-      "composition": "two_column",
+      "composition": "chart_text",
       "warnings": []
     },
     {
@@ -273,7 +298,7 @@
       "outline_id": "sl4",
       "mode": "synth",
       "pattern_id": null,
-      "composition": "bullets",
+      "composition": "two_column",
       "warnings": []
     },
     {
@@ -281,7 +306,7 @@
       "outline_id": "sl5",
       "mode": "synth",
       "pattern_id": null,
-      "composition": "two_column",
+      "composition": "bullets",
       "warnings": []
     },
     {
@@ -289,7 +314,7 @@
       "outline_id": "sl6",
       "mode": "synth",
       "pattern_id": null,
-      "composition": "chart_text",
+      "composition": "two_column",
       "warnings": []
     },
     {
@@ -297,7 +322,7 @@
       "outline_id": "sl7",
       "mode": "synth",
       "pattern_id": null,
-      "composition": "table",
+      "composition": "chart_text",
       "warnings": []
     },
     {
@@ -313,7 +338,7 @@
       "outline_id": "sl9",
       "mode": "synth",
       "pattern_id": null,
-      "composition": "chart_text",
+      "composition": "bullets",
       "warnings": []
     },
     {
@@ -321,7 +346,7 @@
       "outline_id": "sl10",
       "mode": "synth",
       "pattern_id": null,
-      "composition": "two_column",
+      "composition": "chart_text",
       "warnings": []
     },
     {
@@ -329,28 +354,25 @@
       "outline_id": "sl11",
       "mode": "synth",
       "pattern_id": null,
-      "composition": "bullets",
+      "composition": "two_column",
       "warnings": []
     }
   ],
   "warnings": [
-    "slide u1: the takeaway «Подготовка презентации требует времени, но не на содержание» claims a cause the brief does not state, dropped",
-    "slide u3: the takeaway «Каждый этап выполняется специалистом» repeated a line or added nothing, replaced by the source's result",
-    "slide u3: notes the source does not say dropped: Процесс состоит из пяти этапов, каждый из которых выполняется отдельным специалистом: аналитик, дизайнер, критик, компил",
-    "slide u4: the takeaway «Каждый стиль подчёркивает разный фокус» repeated a line or added nothing, replaced by the source's result",
-    "slide u4: notes the source does not say dropped: Три варианта вёрстки помогают подать один и тот же контент по-разному, в зависимости от целевой аудитории и задачи презе",
-    "slide u5: 1 lines repeated the figures the slide shows, dropped",
-    "slide u6: figures «9 · демо-презентаций; 116 → 123 · сверенных чисел в каждой; 0 · лишних чисел» → «9 · Демо-презентаций; 116 → 123 · Сверенных чисел в каждой; 0 · Лишних чисел»",
-    "slide u6: notes the source does not say dropped: Дополнительных чисел нет.",
-    "slide u8: 3 lines repeated the figures the slide shows, dropped",
-    "slide u8: notes the source does not say dropped: Это подтверждает высокую скорость работы шаблонов.",
-    "slide u10: the takeaway «Расширение возможностей экспорта и автоматизации» states nothing, dropped",
-    "slide u10: lines with figures of another slide or words the brief does not use dropped: Экспорт в PDF и HTML",
-    "revisions capped at 4: slides u6, u9 keep their first version",
-    "slide u3: the takeaway «Каждый этап выполняется специалистом» repeated a line or added nothing, replaced by the source's result",
-    "slide u5: a line repeating the takeaway dropped",
-    "slide u10: the takeaway «В будущем ожидается расширение возможностей генерации и инференса» repeated a line or added nothing, replaced by the source's result",
-    "grounding: speaker notes with figures or changes not in the brief dropped: «В каждой из 9 демо-презентаций проверяется от 116 до 123 чисел.»"
+    "slide u1: notes the source does not say dropped: Три карточки показывают, где именно теряется время: в ручной вёрстке, в неспособности ИИ воспроизвести стиль и в том, чт",
+    "slide u3: the takeaway «Презентация в фирменном стиле без ручной вёрстки» states nothing, dropped",
+    "slide u4: the takeaway «Каждый этап проверяет результат предыдущего» repeated a line or added nothing, replaced by the source's result",
+    "slide u5: the takeaway «Один и тот же контент — три формата подачи» repeated a line or added nothing, replaced by the source's result",
+    "slide u5: notes the source does not say dropped: Источник: таблица вариантов вёрстки.",
+    "slide u6: headline «43 проверки каждого слайда в пайплайне» had figures not in the brief (43) → «Проверка качества внутри пайплайна»",
+    "slide u6: lines with figures of another slide or words the brief does not use dropped: Исправления применяются автоматически",
+    "slide u7: figures «9 · демо-презентаций; 116–123 · сверенных чисел в каждой; 0 · выдуманных чисел» → «9 · Демо-презентаций; 116–123 · Сверенных чисел в каждой; 0 · Выдуманных чисел»",
+    "slide u8: the takeaway «Проверка качества на чужих шаблонах — 99 из 100» repeats the slide's block, dropped",
+    "slide u9: 1 lines repeated the figures the slide shows, dropped",
+    "slide u9: a line repeating the takeaway dropped",
+    "slide u10: the takeaway «Пилот на сценариях VK Tech» states nothing, dropped",
+    "slide u4: headline «Агент на открытых моделях до 35 млрд параметров собирает слайды за 5 шагов» had figures not in the brief (5) → «Как работает агент»",
+    "grounding: speaker notes with figures or changes not in the brief dropped: «Дополнительно выполняется 2 проверки моделью, итого 43 проверки на слайд.»; «Лимит — 5 минут (300 секунд).»"
   ],
   "exports": {
     "pptx": "deck.pptx",
@@ -363,40 +385,40 @@
     "agent": {
       "name": "deck_designer",
       "version": "2.2.0",
-      "model_calls": 17,
+      "model_calls": 15,
       "slides_by_model": 10,
       "slides": 11,
-      "critic_issues": 4,
-      "seconds": 68.77,
-      "calls_made": 21,
-      "requests": 29,
-      "tokens_in": 60975,
-      "tokens_out": 7093,
+      "critic_issues": 2,
+      "seconds": 82.33,
+      "calls_made": 17,
+      "requests": 21,
+      "tokens_in": 51405,
+      "tokens_out": 6011,
       "failed_calls": 0,
       "by_skill": {
         "BlockExtraction": {
-          "calls": 4,
-          "requests": 12,
-          "tokens_in": 5158,
-          "tokens_out": 577,
+          "calls": 2,
+          "requests": 5,
+          "tokens_in": 2576,
+          "tokens_out": 273,
           "failed": 0,
-          "seconds": 71.43
+          "seconds": 15.61
         },
         "SlideDesignAnswer": {
-          "calls": 14,
-          "requests": 14,
-          "tokens_in": 47140,
-          "tokens_out": 5555,
+          "calls": 12,
+          "requests": 12,
+          "tokens_in": 39846,
+          "tokens_out": 5102,
           "failed": 0,
-          "seconds": 132.06
+          "seconds": 159.5
         },
         "CritiqueAnswer": {
           "calls": 3,
-          "requests": 3,
-          "tokens_in": 8677,
-          "tokens_out": 961,
+          "requests": 4,
+          "tokens_in": 8983,
+          "tokens_out": 636,
           "failed": 0,
-          "seconds": 26.65
+          "seconds": 14.58
         }
       }
     }

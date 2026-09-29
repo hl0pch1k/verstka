@@ -1,7 +1,7 @@
 {
   "verstka_version": "0.1.0",
   "git_commit": null,
-  "created_at": "2026-09-29T20:02:55+0300",
+  "created_at": "2026-09-29T21:33:14+0300",
   "platform": "macOS-27.0-arm64-arm-64bit",
   "template": {
     "id": "5c49bc6097d8c49b",
@@ -9,8 +9,8 @@
   },
   "strategy": "structured",
   "inputs": {
-    "brief_sha256": "ef77aa34a75658f5",
-    "outline_sha256": "5ca31d485e984109"
+    "brief_sha256": "fb67a428ca1dca6f",
+    "outline_sha256": "3397148fc73dd3bb"
   },
   "skills": {},
   "providers": {
@@ -22,12 +22,12 @@
     }
   },
   "timings_s": {
-    "analyze": 0.01,
+    "analyze": 0.02,
     "plan": 0.0,
-    "render": 1.11,
-    "audit": 1.91,
-    "export": 2.6,
-    "total": 5.62
+    "render": 1.42,
+    "audit": 2.13,
+    "export": 2.9,
+    "total": 6.45
   },
   "usage": {},
   "applied_fixes": [
@@ -42,7 +42,31 @@
     {
       "iteration": 1,
       "action": "xml",
+      "slide": 3,
+      "kind": "shrink_text",
+      "element_id": "42",
+      "result": "Шрифт уменьшен до 47.12 пт, чтобы текст поместился"
+    },
+    {
+      "iteration": 1,
+      "action": "xml",
       "slide": 4,
+      "kind": "shrink_text",
+      "element_id": "42",
+      "result": "Шрифт уменьшен до 27.99 пт, чтобы текст поместился"
+    },
+    {
+      "iteration": 1,
+      "action": "xml",
+      "slide": 5,
+      "kind": "shrink_text",
+      "element_id": "42",
+      "result": "Шрифт уменьшен до 47.12 пт, чтобы текст поместился"
+    },
+    {
+      "iteration": 1,
+      "action": "xml",
+      "slide": 6,
       "kind": "shrink_text",
       "element_id": "42",
       "result": "Шрифт уменьшен до 47.12 пт, чтобы текст поместился"
@@ -51,6 +75,22 @@
       "iteration": 1,
       "action": "xml",
       "slide": 7,
+      "kind": "shrink_text",
+      "element_id": "42",
+      "result": "Шрифт уменьшен до 27.99 пт, чтобы текст поместился"
+    },
+    {
+      "iteration": 1,
+      "action": "xml",
+      "slide": 8,
+      "kind": "shrink_text",
+      "element_id": "42",
+      "result": "Шрифт уменьшен до 47.12 пт, чтобы текст поместился"
+    },
+    {
+      "iteration": 1,
+      "action": "xml",
+      "slide": 10,
       "kind": "shrink_text",
       "element_id": "42",
       "result": "Шрифт уменьшен до 47.12 пт, чтобы текст поместился"
@@ -106,7 +146,7 @@
       "writer_failed"
     ],
     "figures": {
-      "checked": 30,
+      "checked": 27,
       "derived": 0,
       "unverified": 0
     }
@@ -127,7 +167,7 @@
       "outline_id": "sl3",
       "mode": "synth",
       "pattern_id": null,
-      "composition": "bullets",
+      "composition": "chart_text",
       "warnings": [
         "heading refitted to keep the upper half free"
       ]
@@ -137,32 +177,38 @@
       "outline_id": "sl4",
       "mode": "synth",
       "pattern_id": null,
-      "composition": "process",
-      "warnings": [
-        "heading refitted to keep the upper half free"
-      ]
+      "composition": "cards",
+      "warnings": []
     },
     {
       "index": 4,
       "outline_id": "sl5",
       "mode": "synth",
       "pattern_id": null,
-      "composition": "cards",
-      "warnings": []
+      "composition": "process",
+      "warnings": [
+        "heading refitted to keep the upper half free"
+      ]
     },
     {
       "index": 5,
       "outline_id": "sl6",
       "mode": "synth",
       "pattern_id": null,
-      "composition": "chart_text",
-      "warnings": [
-        "heading refitted to keep the upper half free"
-      ]
+      "composition": "table",
+      "warnings": []
     },
     {
       "index": 6,
       "outline_id": "sl7",
+      "mode": "synth",
+      "pattern_id": null,
+      "composition": "chart_text",
+      "warnings": []
+    },
+    {
+      "index": 7,
+      "outline_id": "sl8",
       "mode": "synth",
       "pattern_id": null,
       "composition": "stat_row",
@@ -171,29 +217,19 @@
       ]
     },
     {
-      "index": 7,
-      "outline_id": "sl8",
-      "mode": "synth",
-      "pattern_id": null,
-      "composition": "table",
-      "warnings": []
-    },
-    {
       "index": 8,
       "outline_id": "sl9",
       "mode": "synth",
       "pattern_id": null,
-      "composition": "chart_text",
-      "warnings": [
-        "heading refitted to keep the upper half free"
-      ]
+      "composition": "stat_row",
+      "warnings": []
     },
     {
       "index": 9,
       "outline_id": "sl10",
       "mode": "synth",
       "pattern_id": null,
-      "composition": "cards",
+      "composition": "chart_text",
       "warnings": [
         "heading refitted to keep the upper half free"
       ]
@@ -203,21 +239,16 @@
       "outline_id": "sl11",
       "mode": "synth",
       "pattern_id": null,
-      "composition": "cards",
-      "warnings": [
-        "heading refitted to keep the upper half free"
-      ]
+      "composition": "bullets",
+      "warnings": []
     }
   ],
   "warnings": [
     "slide 1 (sl2): heading refitted to keep the upper half free",
     "slide 2 (sl3): heading refitted to keep the upper half free",
-    "slide 3 (sl4): heading refitted to keep the upper half free",
-    "slide 5 (sl6): heading refitted to keep the upper half free",
-    "slide 6 (sl7): heading refitted to keep the upper half free",
-    "slide 8 (sl9): heading refitted to keep the upper half free",
-    "slide 9 (sl10): heading refitted to keep the upper half free",
-    "slide 10 (sl11): heading refitted to keep the upper half free"
+    "slide 4 (sl5): heading refitted to keep the upper half free",
+    "slide 7 (sl8): heading refitted to keep the upper half free",
+    "slide 9 (sl10): heading refitted to keep the upper half free"
   ],
   "exports": {
     "pptx": "deck.pptx",
@@ -233,37 +264,37 @@
       "model_calls": 17,
       "slides_by_model": 10,
       "slides": 11,
-      "critic_issues": 3,
-      "seconds": 53.16,
-      "calls_made": 21,
-      "requests": 25,
-      "tokens_in": 60592,
-      "tokens_out": 7460,
-      "failed_calls": 0,
+      "critic_issues": 2,
+      "seconds": 71.52,
+      "calls_made": 19,
+      "requests": 21,
+      "tokens_in": 57292,
+      "tokens_out": 7104,
+      "failed_calls": 2,
       "by_skill": {
         "BlockExtraction": {
-          "calls": 4,
-          "requests": 8,
-          "tokens_in": 5158,
-          "tokens_out": 674,
-          "failed": 0,
-          "seconds": 20.45
+          "calls": 2,
+          "requests": 4,
+          "tokens_in": 0,
+          "tokens_out": 0,
+          "failed": 2,
+          "seconds": 3.58
         },
         "SlideDesignAnswer": {
           "calls": 14,
           "requests": 14,
-          "tokens_in": 46961,
-          "tokens_out": 5354,
+          "tokens_in": 47949,
+          "tokens_out": 5706,
           "failed": 0,
-          "seconds": 126.81
+          "seconds": 212.5
         },
         "CritiqueAnswer": {
           "calls": 3,
           "requests": 3,
-          "tokens_in": 8473,
-          "tokens_out": 1432,
+          "tokens_in": 9343,
+          "tokens_out": 1398,
           "failed": 0,
-          "seconds": 31.6
+          "seconds": 31.21
         }
       }
     }
