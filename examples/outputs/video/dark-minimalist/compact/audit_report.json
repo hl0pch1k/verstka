@@ -4,8 +4,26 @@
   "strategy": "compact",
   "issues": [
     {
-      "id": "grid_alignment-1-1",
+      "id": "size_not_in_scale-1-1",
       "slide": 1,
+      "check_id": "size_not_in_scale",
+      "severity": "warn",
+      "kind": "deterministic",
+      "message": "размер шрифта 78 пт не из шкалы шаблона",
+      "bboxes": [],
+      "element_ids": [
+        "26"
+      ],
+      "suggestion": null,
+      "autofix": null,
+      "details": {
+        "size": 78.0
+      },
+      "outline_id": "sl1"
+    },
+    {
+      "id": "grid_alignment-2-2",
+      "slide": 2,
       "check_id": "grid_alignment",
       "severity": "info",
       "kind": "deterministic",
@@ -14,36 +32,36 @@
         {
           "x": 0.03385044838145232,
           "y": 0.25506172839506175,
-          "w": 0.5277709973753281,
+          "w": 0.5039283683289589,
           "h": 0.14850364537766111
         },
         {
           "x": 0.07559995625546807,
-          "y": 0.5900492855059785,
+          "y": 0.5101134441528142,
           "w": 0.24080008748906387,
-          "h": 0.04393584135316419
+          "h": 0.14208398950131235
         },
         {
           "x": 0.07559995625546807,
-          "y": 0.6529906678331875,
+          "y": 0.6712029746281715,
           "w": 0.24080008748906387,
           "h": 0.1683357635851074
         },
         {
           "x": 0.37959995625546805,
-          "y": 0.5900492855059785,
+          "y": 0.5101134441528142,
           "w": 0.24080008748906387,
-          "h": 0.04393584135316419
+          "h": 0.14208398950131235
         }
       ],
       "element_ids": [
         "42",
-        "47",
-        "48",
-        "51",
-        "52",
-        "55",
-        "56"
+        "45",
+        "46",
+        "49",
+        "50",
+        "53",
+        "54"
       ],
       "suggestion": null,
       "autofix": null,
@@ -51,8 +69,8 @@
       "outline_id": "sl2"
     },
     {
-      "id": "grid_alignment-2-2",
-      "slide": 2,
+      "id": "grid_alignment-3-3",
+      "slide": 3,
       "check_id": "grid_alignment",
       "severity": "info",
       "kind": "deterministic",
@@ -81,8 +99,8 @@
       "outline_id": "sl3"
     },
     {
-      "id": "grid_alignment-3-3",
-      "slide": 3,
+      "id": "grid_alignment-4-4",
+      "slide": 4,
       "check_id": "grid_alignment",
       "severity": "info",
       "kind": "deterministic",
@@ -128,8 +146,8 @@
       "outline_id": "sl4"
     },
     {
-      "id": "grid_alignment-4-4",
-      "slide": 4,
+      "id": "grid_alignment-5-5",
+      "slide": 5,
       "check_id": "grid_alignment",
       "severity": "info",
       "kind": "deterministic",
@@ -138,35 +156,35 @@
         {
           "x": 0.03385044838145232,
           "y": 0.25506172839506175,
-          "w": 0.5696173447069116,
+          "w": 0.6948641732283465,
           "h": 0.14850364537766111
         },
         {
           "x": 0.08710001093613298,
-          "y": 0.4535653737727229,
+          "y": 0.533501215125887,
           "w": 0.679299978127734,
           "h": 0.04393584135316419
         },
         {
           "x": 0.08710001093613298,
-          "y": 0.5493344026441139,
+          "y": 0.6085368912219306,
           "w": 0.679299978127734,
           "h": 0.04393584135316419
         },
         {
           "x": 0.08710001093613298,
-          "y": 0.645103431515505,
+          "y": 0.6835725673179741,
           "w": 0.679299978127734,
           "h": 0.04393584135316419
         }
       ],
       "element_ids": [
         "42",
-        "44",
-        "47",
-        "50",
-        "53",
-        "56"
+        "46",
+        "49",
+        "52",
+        "55",
+        "58"
       ],
       "suggestion": null,
       "autofix": null,
@@ -174,8 +192,8 @@
       "outline_id": "sl5"
     },
     {
-      "id": "grid_alignment-6-5",
-      "slide": 6,
+      "id": "grid_alignment-7-6",
+      "slide": 7,
       "check_id": "grid_alignment",
       "severity": "info",
       "kind": "deterministic",
@@ -185,11 +203,11 @@
           "x": 0.03385044838145232,
           "y": 0.25506172839506175,
           "w": 0.86,
-          "h": 0.09185185185185185
+          "h": 0.07869621852823952
         },
         {
           "x": 0.4059199475065617,
-          "y": 0.4022222222222222,
+          "y": 0.38375794692330123,
           "w": 0.5380800524934383,
           "h": 0.029135802469135802
         }
@@ -204,8 +222,8 @@
       "outline_id": "sl7"
     },
     {
-      "id": "grid_alignment-9-6",
-      "slide": 9,
+      "id": "grid_alignment-10-7",
+      "slide": 10,
       "check_id": "grid_alignment",
       "severity": "info",
       "kind": "deterministic",
@@ -234,8 +252,8 @@
       "outline_id": "sl10"
     },
     {
-      "id": "grid_alignment-10-7",
-      "slide": 10,
+      "id": "grid_alignment-11-8",
+      "slide": 11,
       "check_id": "grid_alignment",
       "severity": "info",
       "kind": "deterministic",
@@ -280,10 +298,10 @@
   ],
   "summary": {
     "errors": 0,
-    "warnings": 0,
+    "warnings": 1,
     "infos": 7,
     "model_flags": 0,
-    "score": 100,
+    "score": 97,
     "checks_run": [
       "font_not_in_template",
       "size_not_in_scale",
@@ -328,14 +346,14 @@
       "writer_failed"
     ],
     "figures": {
-      "checked": 31,
+      "checked": 32,
       "derived": 0,
       "unverified": 0
     }
   },
   "per_slide": {
     "1": [
-      "grid_alignment-1-1"
+      "size_not_in_scale-1-1"
     ],
     "2": [
       "grid_alignment-2-2"
@@ -346,14 +364,17 @@
     "4": [
       "grid_alignment-4-4"
     ],
-    "6": [
-      "grid_alignment-6-5"
+    "5": [
+      "grid_alignment-5-5"
     ],
-    "9": [
-      "grid_alignment-9-6"
+    "7": [
+      "grid_alignment-7-6"
     ],
     "10": [
       "grid_alignment-10-7"
+    ],
+    "11": [
+      "grid_alignment-11-8"
     ]
   },
   "iterations": 1,
@@ -361,18 +382,10 @@
     {
       "iteration": 1,
       "action": "xml",
-      "slide": 1,
+      "slide": 2,
       "kind": "shrink_text",
       "element_id": "42",
       "result": "Шрифт уменьшен до 27.99 пт, чтобы текст поместился"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "slide": 3,
-      "kind": "shrink_text",
-      "element_id": "42",
-      "result": "Шрифт уменьшен до 47.12 пт, чтобы текст поместился"
     },
     {
       "iteration": 1,
@@ -380,7 +393,7 @@
       "slide": 4,
       "kind": "shrink_text",
       "element_id": "42",
-      "result": "Шрифт уменьшен до 27.99 пт, чтобы текст поместился"
+      "result": "Шрифт уменьшен до 47.12 пт, чтобы текст поместился"
     },
     {
       "iteration": 1,
@@ -388,7 +401,7 @@
       "slide": 5,
       "kind": "shrink_text",
       "element_id": "42",
-      "result": "Шрифт уменьшен до 47.12 пт, чтобы текст поместился"
+      "result": "Шрифт уменьшен до 27.99 пт, чтобы текст поместился"
     },
     {
       "iteration": 1,
@@ -401,7 +414,7 @@
     {
       "iteration": 1,
       "action": "xml",
-      "slide": 7,
+      "slide": 9,
       "kind": "shrink_text",
       "element_id": "42",
       "result": "Шрифт уменьшен до 27.99 пт, чтобы текст поместился"
@@ -409,15 +422,7 @@
     {
       "iteration": 1,
       "action": "xml",
-      "slide": 8,
-      "kind": "shrink_text",
-      "element_id": "42",
-      "result": "Шрифт уменьшен до 47.12 пт, чтобы текст поместился"
-    },
-    {
-      "iteration": 1,
-      "action": "xml",
-      "slide": 10,
+      "slide": 11,
       "kind": "shrink_text",
       "element_id": "42",
       "result": "Шрифт уменьшен до 47.12 пт, чтобы текст поместился"
@@ -433,7 +438,8 @@
     "7": "slides/slide-007.jpg",
     "8": "slides/slide-008.jpg",
     "9": "slides/slide-009.jpg",
-    "10": "slides/slide-010.jpg"
+    "10": "slides/slide-010.jpg",
+    "11": "slides/slide-011.jpg"
   },
-  "seconds": 0.86
+  "seconds": 0.91
 }

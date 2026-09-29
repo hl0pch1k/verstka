@@ -3,6 +3,27 @@
   "template_id": "5c49bc6097d8c49b",
   "slides": [
     {
+      "outline_id": "sl1",
+      "mode": "clone",
+      "pattern_id": "p1",
+      "composition": null,
+      "fit": {
+        "title_fit": "78 пт, строк 3",
+        "text_ratio": 1.0
+      },
+      "score": 1.138,
+      "reasons": [
+        "слайд 1 шаблона",
+        "тип title для title: 1.0",
+        "2 лишних текстовых слотов останутся пустыми",
+        "текст помещается",
+        "стиль стратегии structured: +0.04",
+        "обложка: заголовок 78 пт, других текстов 0: +0.11",
+        "обложка шаблона: +0.10"
+      ],
+      "alternatives": []
+    },
+    {
       "outline_id": "sl2",
       "mode": "synth",
       "pattern_id": null,
@@ -99,10 +120,10 @@
       "composition": "process",
       "fit": {
         "items": "5/6",
-        "overflow_title": 2.71,
+        "overflow_title": 3.29,
         "overflow_card_title": 2.0,
-        "overflow_card_body": 1.02,
-        "text_ratio": 2.71
+        "overflow_card_body": 1.12,
+        "text_ratio": 3.29
       },
       "score": 0.417,
       "reasons": [
@@ -130,7 +151,7 @@
       "pattern_id": null,
       "composition": "table",
       "fit": {
-        "text_ratio": 0.22
+        "text_ratio": 0.18
       },
       "score": 0.357,
       "reasons": [
@@ -147,8 +168,8 @@
           0.302
         ],
         [
-          "p7",
-          0.246
+          "p17",
+          0.258
         ]
       ]
     },
@@ -173,11 +194,11 @@
           0.296
         ],
         [
-          "p17",
-          0.258
+          "p3",
+          0.246
         ],
         [
-          "p3",
+          "p7",
           0.246
         ]
       ]
@@ -189,7 +210,7 @@
       "composition": "stat_row",
       "fit": {
         "items": "3/3",
-        "text_ratio": 0.71
+        "text_ratio": 0.87
       },
       "score": 0.705,
       "reasons": [
@@ -218,7 +239,7 @@
       "composition": "stat_row",
       "fit": {
         "items": "3/3",
-        "text_ratio": 0.6
+        "text_ratio": 0.88
       },
       "score": 0.705,
       "reasons": [
@@ -274,26 +295,25 @@
       "pattern_id": null,
       "composition": "bullets",
       "fit": {
-        "overflow_title": 1.25,
-        "text_ratio": 1.25
+        "text_ratio": 0.88
       },
-      "score": 0.525,
+      "score": 0.555,
       "reasons": [
         "композиция bullets: сетка, шкала кеглей и карточки из дизайн-системы шаблона",
-        "ближайший образец — слайд 17 шаблона (0.53)"
+        "ближайший образец — слайд 17 шаблона (0.56)"
       ],
       "alternatives": [
         [
           "p17",
-          0.525
+          0.555
         ],
         [
           "p8",
-          0.465
+          0.515
         ],
         [
-          "p4",
-          0.456
+          "p14",
+          0.471
         ]
       ]
     }
