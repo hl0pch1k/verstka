@@ -404,6 +404,9 @@ def generate_variants(
                 planned[name] = (adapted, w + [f"own model plan failed: the model plan of «{donor}» adapted to «{name}»"] + aw, sec)
                 plan_models[name] = plan_models.get(donor)
     pending: list[dict] = []
+    # the variants differ in the template slides they show too: each one knows which samples the earlier ones took
+    # for the same slide (matching/matcher.py `taken`)
+    taken: dict[str, set[str]] = {}
     for i, name in enumerate(strategies):
         strategy: Strategy = all_strategies[name]
         ts = time.time()
@@ -422,7 +425,7 @@ def generate_variants(
             warnings.extend(w)
             if written:
                 v_outline = _mark_written(v_outline, writer_res)
-        plan = match_outline(v_outline, manifest, strategy)
+        plan = match_outline(v_outline, manifest, strategy, ws=ws, taken=taken)
         report(f"{name}: planned {len(v_outline.slides)} slides, rendering", base + span * 0.2)
         tr = time.time()
         render = render_deck(v_outline, plan, manifest, ws, vdir / "deck.pptx", progress=lambda s, f: report(f"{name}: {s}", base + span * (0.2 + 0.4 * f)))

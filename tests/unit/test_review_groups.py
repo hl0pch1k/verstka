@@ -355,7 +355,10 @@ def test_scorer_number_holders_gate_and_weight_only_on_kind(simple_deck, tmp_pat
     ok = score_pattern(_stat_slide(2), two, manifest, visual)
     assert ok.score >= visual.synth_threshold and not any("не поместятся" in r for r in ok.reasons)
     # ×1.3 strategy weight only scales the kind term: a pattern with failed capacity stays below 1.0
-    slots3 = [_slot("t", SlotRole.title, 45)] + [_slot(f"n{i}", SlotRole.number, 8, "g1") for i in range(3)] + [_slot(f"l{i}", SlotRole.number_label, 60, "g1") for i in range(3)]
+    # (a sample of three figures across the slide: a pattern whose boxes hold a third of the slide is penalised apart)
+    slots3 = [_slot("t", SlotRole.title, 45, bbox=BboxFrac(x=0.06, y=0.08, w=0.88, h=0.1))]
+    slots3 += [_slot(f"n{i}", SlotRole.number, 8, "g1", bbox=BboxFrac(x=0.06 + 0.31 * i, y=0.35, w=0.26, h=0.15)) for i in range(3)]
+    slots3 += [_slot(f"l{i}", SlotRole.number_label, 60, "g1", bbox=BboxFrac(x=0.06 + 0.31 * i, y=0.52, w=0.26, h=0.2)) for i in range(3)]
     g3 = RepeatGroup(id="g1", member_shape_ids=[[f"n{i}", f"l{i}"] for i in range(3)], max_n=3, axis="row", cell_bbox=BboxFrac(x=0.1, y=0.3, w=0.25, h=0.3))
     three = _pattern("p45", PatternKind.stat_row, Family.light, None, slots3, [g3])
     full = score_pattern(_stat_slide(3), three, manifest, visual)

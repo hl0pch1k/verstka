@@ -503,6 +503,7 @@ def _kinds_text(manifest: Optional[TemplateManifest]) -> str:
                 most[p.kind.value] = max(most.get(p.kind.value, 0), g.max_n)
     cards = min(6, most.get("cards") or 6)
     steps = min(6, most.get("process") or most.get("timeline") or 6)
+    ready = template_repertoire(manifest)
     lines = [
         ("chart", "a chart: column, bar, line, pie or doughnut (data inline)"),
         ("stat_row", "2–4 key figures with short labels"),
@@ -515,7 +516,62 @@ def _kinds_text(manifest: Optional[TemplateManifest]) -> str:
         ("comparison", "2–3 options side by side"),
         ("bullets", f"a short list, at most {MAX_BULLETS} lines"),
     ]
-    return "\n".join(f"- {k}: {d}" for k, d in lines)
+    out = "\n".join(f"- {k}: {d}" for k, d in lines)
+    if ready:
+        out += "\nReady slides of this template (each a designed slide; a slide of the deck looks best on one of them):\n" + "\n".join(f"  · {r}" for r in ready)
+    return out
+
+
+_PHOTO_PLACE = re.compile(r"вставить|insert|\bqr\b|фото|photo|логотип|logo", re.I)
+
+
+def template_repertoire(manifest: Optional[TemplateManifest]) -> list[str]:
+    """What the template's sample slides offer, a line per form, for the designer: «cards: 2–8 items (in a row, in a
+    column, in a grid; with the template's pictures); exactly 4 drawn into the design», «table: a designed table» — so
+    a slide takes a form, and a count of items, the template has a designed slide for (when the source allows it: its
+    items are never merged or split for that)."""
+    if manifest is None:
+        return []
+    from verstka.schemas.common import PatternKind as PK
+
+    kinds: dict[str, dict] = {}
+    for p in manifest.patterns:
+        if p.reference or p.quality < 0.5 or p.kind in (PK.title, PK.section, PK.thanks, PK.code, PK.mockup, PK.freeform, PK.team):
+            continue
+        if any(s.sample_text and _PHOTO_PLACE.search(s.sample_text) for s in p.slots):
+            continue
+        k = "table" if p.data_box is not None else p.kind.value
+        d = kinds.setdefault(k, {"lo": 99, "hi": 0, "fixed": set(), "shapes": set(), "art": False, "n": 0})
+        d["n"] += 1
+        d["art"] = d["art"] or bool(p.decor_assets or p.art_layout)
+        groups = [g for g in p.repeat_groups if len(g.member_shape_ids) >= 2]
+        g = max(groups, key=lambda g: len(g.member_shape_ids), default=None)
+        if g is None:
+            continue
+        n = len(g.member_shape_ids)
+        if g.fixed:
+            d["fixed"].add(n)
+            continue
+        d["shapes"].add({"row": "in a row", "column": "in a column", "grid": "in a grid"}.get(g.axis, ""))
+        d["lo"] = min(d["lo"], max(2, n - 1 if g.axis != "grid" else n - g.cols + 1))
+        d["hi"] = max(d["hi"], max(n, g.max_n) if g.axis != "grid" else n)
+    out = []
+    order = ["cards", "process", "timeline", "stat_row", "big_number", "two_column", "comparison", "chart", "table", "bullets", "agenda", "image_text", "quote"]
+    for k in sorted(kinds, key=lambda k: order.index(k) if k in order else len(order)):
+        d = kinds[k]
+        parts = []
+        if d["hi"]:
+            shapes = ", ".join(s for s in ("in a row", "in a column", "in a grid") if s in d["shapes"])
+            parts.append(f"{d['lo']}–{d['hi']} items" + (f" ({shapes})" if shapes else ""))
+        if d["fixed"]:
+            parts.append("exactly " + " or ".join(str(x) for x in sorted(d["fixed"])) + " drawn into the design")
+        if k in ("table", "chart") and not parts:
+            parts.append("a designed " + ("table" if k == "table" else "chart area"))
+        if d["art"]:
+            parts.append("some with the template's illustrations")
+        if parts:
+            out.append(f"{k}: " + "; ".join(parts) + f" — {d['n']} designed slide{'s' if d['n'] > 1 else ''}")
+    return out
 
 
 def value_ok(v: float, allowed: list[float]) -> bool:

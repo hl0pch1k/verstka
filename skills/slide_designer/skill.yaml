@@ -1,5 +1,5 @@
 name: slide_designer
-version: 1.3.2
+version: 1.4.0
 role: llm
 description: >
   Designs ONE slide of the deck (Agent v2): chooses its visual form by the visual-form guide and the user's explicit
@@ -67,3 +67,4 @@ changelog:
     heuristics.label_beside never returns a bare unit, polish_case (lowercase after a label's colon and in a card's
     text that continues its title), plain_change and trim_chart_restatement."
   - "1.3.2: a table of at most 10 rows × 5 columns instead of 7 × 5 — the organizers clarified in the case chat that a table of more than 7 rows is no error and should stay within 10"
+  - "1.4.0: the template's ready slides (forms and counts of items its designed slides hold, from template_repertoire in planning/agent.py) are listed with the kinds; rule 13 prefers a form and a count the template has a designed slide for — never by merging, splitting or inventing items — and a distinctive form when two suit the content equally. The renderer now builds content slides on the template's own samples (matching/matcher.py spreads a deck over as many different samples as fit)."

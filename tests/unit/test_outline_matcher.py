@@ -50,18 +50,24 @@ def test_matcher_on_simple_deck(simple_deck, tmp_path):
     assert len(plan.slides) == 12
     by_id = {s.outline_id: s for s in plan.slides}
     assert by_id["sl1"].mode == "clone" and manifest.patterns[0].kind == PatternKind.title
-    # content slides are composed from the design system; the nearest sample stays on record as an explained alternative
-    cards_plan = by_id["sl5"]
+    # a content slide stands on a template sample that holds it (the deck uses the template's own slides); one that no
+    # sample holds is composed from the design system, the nearest sample on record as an explained alternative
+    for s in plan.slides:
+        if s.mode == "clone":
+            assert s.pattern_id and s.reasons[0].startswith("слайд ")
+        else:
+            assert s.composition and any(r.startswith("композиция") for r in s.reasons)
+    assert by_id["sl4"].mode == "clone" and by_id["sl4"].pattern_id == "p2"  # three figures on the row of three cards
+    cards_plan = by_id["sl5"]  # four cards for a row of three: composed
     assert cards_plan.mode == "synth" and cards_plan.composition == "cards"
-    assert any("композиция cards" in r for r in cards_plan.reasons) and any("ближайший образец" in r for r in cards_plan.reasons)
-    assert cards_plan.alternatives and cards_plan.fit.get("items")
-    assert by_id["sl4"].mode == "synth" and by_id["sl4"].composition in ("stat_row", "big_number")
+    assert any("ближайший образец" in r for r in cards_plan.reasons) and cards_plan.alternatives and cards_plan.fit.get("items")
     assert by_id["sl7"].mode == "synth" and by_id["sl7"].composition == "table"
     assert by_id["sl6"].mode == "synth" and by_id["sl6"].composition == "chart_text"
     # a sample that fits snugly may still be cloned: the threshold is the strategy's
     loose = strategy.model_copy(update={"clone_fit": 0.0})
     plan2 = match_outline(outline, manifest, loose)
-    assert {s.mode for s in plan2.slides} == {"clone", "synth"} and plan2.for_outline("sl5").mode == "clone"
+    clones = lambda pl: sum(1 for s in pl.slides if s.mode == "clone")  # noqa: E731
+    assert {s.mode for s in plan2.slides} == {"clone", "synth"} and clones(plan2) > clones(plan)
     # score result is explainable
     cards_pattern = next(p for p in manifest.patterns if p.kind == PatternKind.cards)
     res = score_pattern(outline.slides[4], cards_pattern, manifest, strategy)

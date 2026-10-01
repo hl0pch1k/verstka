@@ -614,13 +614,16 @@ def _fake_machine(monkeypatch):
 
 def test_a_missing_family_gets_one_installed_face_of_its_class(_fake_machine):
     """«Open Sans» missing: LibreOffice would set digits in OpenSymbol and letters in Helvetica — the render names one
-    stand-in of the family's class instead; installed families, theme refs, symbol fonts, weight-named faces and the
-    families LibreOffice has a metric twin for are left alone."""
+    stand-in of the family's class instead; installed families, theme refs, symbol fonts, weight-named faces of an
+    installed family and the families LibreOffice has a metric twin for are left alone. A weight-named face of a
+    missing family («Inter Medium» without Inter) fell to LibreOffice's default serif: it takes its family's stand-in."""
     assert fonts.render_standin("Open Sans") == "Noto Sans"
     assert fonts.render_standin("Bebas Neue") == "DIN Condensed"
     assert fonts.render_standin("Playfair Display") == "PT Serif"
     assert fonts.substitute_of("Open Sans") == "Noto Sans"  # the manifest reports what previews/PDFs show
-    for fam in ("Play", "Noto Sans", "+mn-lt", "", "Wingdings", "Symbol", "Lato Light", "Open Sans SemiBold", "Montserrat-Regular", "Calibri", "Calibri Light"):
+    for fam in ("Lato Light", "Open Sans SemiBold", "Montserrat-Regular"):
+        assert fonts.render_standin(fam) == "Noto Sans", fam
+    for fam in ("Play", "Noto Sans", "+mn-lt", "", "Wingdings", "Symbol", "Noto Sans Medium", "Play Bold", "Calibri", "Calibri Light"):
         assert fonts.render_standin(fam) is None, fam
 
 

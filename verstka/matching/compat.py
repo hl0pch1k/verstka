@@ -18,7 +18,7 @@ KIND_FALLBACKS: dict[K, list[tuple[K, float]]] = {
     K.comparison: [(K.comparison, 1.0), (K.two_column, 0.8), (K.cards, 0.6), (K.table, 0.5)],
     K.timeline: [(K.timeline, 1.0), (K.process, 0.8), (K.cards, 0.5)],
     K.process: [(K.process, 1.0), (K.timeline, 0.8), (K.cards, 0.6), (K.agenda, 0.4)],
-    K.table: [(K.table, 1.0), (K.freeform, 0.5), (K.bullets, 0.3)],
+    K.table: [(K.table, 1.0), (K.chart, 0.5), (K.freeform, 0.5), (K.bullets, 0.3)],
     K.chart: [(K.chart, 1.0), (K.image_text, 0.6), (K.freeform, 0.5), (K.big_number, 0.3)],
     K.image_text: [(K.image_text, 1.0), (K.mockup, 0.6), (K.bullets, 0.4), (K.two_column, 0.4)],
     K.team: [(K.team, 1.0), (K.cards, 0.5)],

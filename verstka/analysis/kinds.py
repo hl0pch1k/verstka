@@ -30,6 +30,7 @@ def heuristic_kind(
     n_slides: int,
     slide_w: int,
     slide_h: int,
+    data_box=None,
 ) -> tuple[PatternKind, float]:
     by_id = {s.id: s for s in shapes}
     membership = group_membership(groups)
@@ -44,6 +45,8 @@ def heuristic_kind(
     frames = [s for s in shapes if s.kind == ShapeKind.graphic_frame]
     if any(f.frame_kind == "table" for f in frames):
         return PatternKind.table, 0.95
+    if data_box is not None:
+        return PatternKind.table, 0.85  # a table drawn with text boxes on plates
     if any(f.frame_kind == "chart" for f in frames):
         return PatternKind.chart, 0.95
     if any(f.frame_kind == "diagram" for f in frames):
@@ -110,23 +113,27 @@ def heuristic_kind(
     body_chars = sum(len(t.plain_text) for t in texts if title is None or t.id != title.id)
     if title is not None and n_content <= 2 and n_cards == 0 and role_counts.get(SlotRole.bullet_list, 0) == 0 and body_chars <= 120:
         return PatternKind.section, 0.7  # a divider: a heading and a line at most, never a list
-    # team: group cells with picture + name-like text
+    # team: group cells with a picture or a round avatar and name-like text
     if biggest_group is not None and n_cards >= 3:
         cells = biggest_group.member_shape_ids
-        has_pics = sum(1 for cell in cells if any(by_id.get(i) and by_id[i].kind == ShapeKind.pic for i in cell))
-        if has_pics >= len(cells) * 0.6 and (_TEAM_RE.search(all_text) or re.search(r"имя фамилия|должность|name|role", all_text, re.I)):
+        has_pics = sum(1 for cell in cells if any(by_id.get(i) and (by_id[i].kind == ShapeKind.pic or by_id[i].geometry == "ellipse") for i in cell))
+        named = sum(1 for cell in cells if any(by_id.get(i) and re.search(r"имя|фамили|должност|\bname\b|position|role", by_id[i].plain_text, re.I) for i in cell))
+        if (has_pics >= len(cells) * 0.6 or named >= len(cells) * 0.6) and (_TEAM_RE.search(all_text) or named >= len(cells) * 0.6):
             return PatternKind.team, 0.85
     # timeline: long connector/line plus ≥3 small aligned items
-    lines = [s for s in shapes if (s.kind == ShapeKind.connector or (s.kind == ShapeKind.sp and s.geometry == "line")) and s.bbox.w >= 0.4 * slide_w]
-    if lines and n_cards >= 3 and biggest_group is not None and biggest_group.axis == "row":
-        return PatternKind.timeline, 0.75
+    lines = [s for s in shapes if (s.kind == ShapeKind.connector or (s.kind == ShapeKind.sp and s.geometry == "line") or (s.kind in (ShapeKind.pic, ShapeKind.sp) and s.bbox.h <= 0.02 * slide_h and (s.kind == ShapeKind.pic or s.is_visual_shape))) and s.bbox.w >= 0.4 * slide_w]
+    if lines and n_cards >= 3 and biggest_group is not None and biggest_group.axis in ("row", "grid"):
+        # points along a line (one row, or two rows of a long timeline): a cell stands by the line
+        near = sum(1 for cell in biggest_group.member_shape_ids if any(abs(by_id[i].bbox.center[1] - ln.bbox.center[1]) <= 0.12 * slide_h for i in cell if i in by_id for ln in lines))
+        if near >= 0.6 * len(biggest_group.member_shape_ids):
+            return PatternKind.timeline, 0.75
     if _TIMELINE_RE.search(title_text) and n_cards >= 3:
         return PatternKind.timeline, 0.7
     if _COMPARE_RE.search(title_text) and 2 <= n_cards <= 3:
         return PatternKind.comparison, 0.75
     if biggest_group is not None and n_cards >= 2:
         cells = biggest_group.member_shape_ids
-        text_cells = sum(1 for cell in cells if any(by_id.get(i) and by_id[i].has_text for i in cell))
+        text_cells = sum(1 for cell in cells if any(by_id.get(i) and (by_id[i].has_text or (by_id[i].text is not None and roles.get(i) in (SlotRole.card_title, SlotRole.card_body, SlotRole.body))) for i in cell))
         if text_cells >= max(2, int(len(cells) * 0.6)):
             if n_cards == 2 and biggest_group.axis == "row" and biggest_group.cell_bbox.w >= 0.35:
                 return PatternKind.two_column, 0.7

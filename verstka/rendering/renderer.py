@@ -125,6 +125,44 @@ class _CoverRedo(RuntimeError):
     """A cloned cover that reads badly: the slide is rolled back and composed."""
 
 
+class _CloneRedo(RuntimeError):
+    """No template sample holds a content slide well: the slide is rolled back and composed."""
+
+
+_BOOKEND_VALUES = ("title", "section", "thanks")
+ALT_MAX = 3  # template samples tried for a content slide before it is composed
+
+
+def _render_content_clone(builder: DeckBuilder, ps: LayoutSlide, oslide, patterns: dict, manifest: TemplateManifest, ws: TemplateWorkspace, outline: DeckOutline, used: dict, before) -> tuple:
+    """A content slide on its template sample, checked (`clone_check.content_trouble`); a sample that loses content or
+    reads badly is rolled back and the next one of the plan's alternatives not used elsewhere in the deck is tried.
+    Raises _CloneRedo when none holds the slide."""
+    from verstka.rendering.clone_check import content_trouble
+
+    tried: list[str] = []
+    # (an alternative scored far below the slide's own choice — a tile grid whose numerals stay on empty tiles — is no
+    # better than the composed slide)
+    floor_sc = max(0.45, (ps.score or 0.0) - 0.3)
+    order = [ps.pattern_id] + [pid for pid, sc in (ps.alternatives or []) if pid != ps.pattern_id and used.get(pid, 0) == 0 and (sc or 0.0) >= floor_sc]
+    for pid in order[:ALT_MAX]:
+        p = patterns.get(pid)
+        if p is None or p.kind.value in _BOOKEND_VALUES:
+            continue
+        slide, warns = render_clone(builder, ps, oslide, p, manifest, ws, outline)
+        from verstka.rendering.clone_notes import place_lede, place_notes
+
+        place_lede(builder, slide, oslide, outline, manifest, p, warns)
+        why = place_notes(builder, slide, oslide, outline, manifest, p) or content_trouble(slide, oslide, p, manifest, warns)
+        if why is None:
+            if pid != ps.pattern_id:
+                ps.reasons = [f"слайд {p.source_slide} шаблона: первый выбранный образец не вместил содержимое"] + [r for r in ps.reasons if not r.startswith("слайд ")]
+                ps.pattern_id = pid
+            return slide, warns + [f"sample {t} read badly — next sample" for t in tried]
+        tried.append(f"{pid} ({why[:80]})")
+        _rollback(builder, before)
+    raise _CloneRedo("; ".join(tried) or "no sample")
+
+
 def _bookend_trouble(slide, oslide: DeckOutline) -> Optional[str]:
     """Why a cloned cover, divider or closing slide reads badly, or None: a word of its heading wider than the
     heading's box at the size it was set (the renderer breaks it), or two of its texts laid over each other."""
@@ -178,6 +216,7 @@ def _render_deck(outline: DeckOutline, plan: LayoutPlan, manifest: TemplateManif
     patterns = {p.id: p for p in manifest.patterns}
     result = RenderResult(pptx_path=Path(out_pptx))
     n = len(outline.slides)
+    used: dict[str, int] = {}  # template samples the deck's content slides stand on
     for i, oslide in enumerate(outline.slides, 1):
         ps = plan.for_outline(oslide.id) or LayoutSlide(outline_id=oslide.id, mode="synth", composition="bullets", reasons=["no plan entry"])
         # render-time guards (fallbacks.py): a chart without data, empty columns, a kind with no composition, template
@@ -192,7 +231,12 @@ def _render_deck(outline: DeckOutline, plan: LayoutPlan, manifest: TemplateManif
         rendered.warnings.extend(notes)
         before = _snapshot(builder)
         try:
-            if ps.mode == "clone" and ps.pattern_id in patterns:
+            kind_v = getattr(getattr(oslide, "kind", None), "value", str(getattr(oslide, "kind", "")))
+            if ps.mode == "clone" and ps.pattern_id in patterns and kind_v not in _BOOKEND_VALUES:
+                slide, warns = _render_content_clone(builder, ps, oslide, patterns, manifest, ws, outline, used, before)
+                rendered.pattern_id = ps.pattern_id
+                used[ps.pattern_id] = used.get(ps.pattern_id, 0) + 1
+            elif ps.mode == "clone" and ps.pattern_id in patterns:
                 slide, warns = render_clone(builder, ps, oslide, patterns[ps.pattern_id], manifest, ws, outline)
                 why = _bookend_trouble(slide, oslide)
                 if why and KEPT_PHOTO in warns:
@@ -211,6 +255,8 @@ def _render_deck(outline: DeckOutline, plan: LayoutPlan, manifest: TemplateManif
         except Exception as e:  # noqa: BLE001
             if isinstance(e, _CoverRedo):
                 log.info("slide %d (%s): the cloned cover %s — composed instead", i, oslide.id, e)
+            elif isinstance(e, _CloneRedo):
+                log.info("slide %d (%s): no template sample holds it (%s) — composed", i, oslide.id, e)
             else:
                 log.exception("slide %d (%s) failed in mode %s", i, oslide.id, ps.mode)
             rendered.warnings.append(f"{ps.mode} failed: {str(e)[:160]}; fell back to synth")
@@ -220,6 +266,12 @@ def _render_deck(outline: DeckOutline, plan: LayoutPlan, manifest: TemplateManif
                 fallback = LayoutSlide(outline_id=oslide.id, mode="synth", composition=fallback_composition(oslide, ps))
                 _, warns = render_synth(builder, fallback, oslide, manifest, ws, outline)
                 rendered.mode, rendered.composition = "synth", fallback.composition
+                rendered.pattern_id = None
+                if isinstance(e, _CloneRedo):
+                    # the plan says what the deck shows: the slide composed, with the samples that did not hold it
+                    fallback.fit, fallback.score, fallback.alternatives = ps.fit, ps.score, ps.alternatives
+                    fallback.reasons = [f"композиция {fallback.composition}: образцы шаблона не вместили содержимое ({str(e)[:160]})"]
+                    plan.slides = [fallback if s is ps else s for s in plan.slides]
                 rendered.warnings.extend(warns)
             except Exception as e2:  # noqa: BLE001
                 log.exception("synth fallback failed for slide %d", i)

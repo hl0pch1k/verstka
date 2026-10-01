@@ -21,6 +21,8 @@ _NUMBER_KINDS = {PatternKind.stat_row, PatternKind.big_number}
 
 
 _BOOKEND_KINDS = (PatternKind.title, PatternKind.section, PatternKind.thanks)
+# a sample's place for a photo, a QR code or a logo («Вставить фото», «QR-код», «Insert photo»)
+_PHOTO_PLACE_RE = re.compile(r"вставить|insert|\bqr\b|qr-|фото|photo|логотип|logo", re.I)
 # texts of a cover or closing sample that stand for data a deck never has (a speaker, his photo, a QR code): the
 # renderer removes them with their frames, so they neither count as clutter nor as competition for the heading
 _PLACEHOLDER_RE = re.compile(r"имя|фамили|должност|спикер|speaker|\bname\b|position|вставить|insert|\bqr\b|qr-|фото|photo|логотип|logo", re.I)
@@ -322,9 +324,15 @@ def _number_holders(pattern: Pattern, group) -> int:
 
     Numbers are never merged, so every figure beyond this count is lost.
     """
+    standalone = sum(1 for s in pattern.slots if s.role == SlotRole.number and not s.group_id)
     if group is not None:
+        in_cells = any(s.group_id == group.id and s.role == SlotRole.number for s in pattern.slots)
+        if not in_cells and standalone:
+            # display figures of their own over a row of captions (VK Tech p42: «7» and «10» at 166 pt): the figures
+            # stand in those, the captions only label them — a third figure would shrink into a caption box
+            return standalone
         return max(len(group.member_shape_ids), group.max_n)
-    return sum(1 for s in pattern.slots if s.role == SlotRole.number and not s.group_id)
+    return standalone
 
 
 def score_pattern(
@@ -336,11 +344,13 @@ def score_pattern(
     recent_ids: Optional[list[str]] = None,
     cover: Optional[Pattern] = None,
     divider: Optional[Pattern] = None,
+    pictures: Optional[list] = None,
 ) -> ScoreResult:
     """How well `pattern` suits `slide` (0…1.2) with the reasons. `cover` is the sample the deck's cover was cloned
     from: a closing slide answers it (same ground, ideally the same layout), the way a designer closes a deck, and a
     divider is set a step below it. `divider` is the sample of the deck's first section divider: every divider of a
-    deck looks the same."""
+    deck looks the same. `pictures`: the sample's pictures as `analysis.pictures` reads them (art stays with new
+    content, a photo, a screenshot or bars drawn for the sample's figures do not); None = not known."""
     recent_ids = recent_ids or []
     reasons: list[str] = []
     fit: dict = {}
@@ -350,6 +360,75 @@ def score_pattern(
     if kind <= 0:
         return ScoreResult(0.0, [f"тип {pattern.kind.value} несовместим с {slide.kind.value}"], fit)
     reasons.append(f"тип {pattern.kind.value} для {slide.kind.value}: {kind:.1f}")
+    pics = list(pictures or [])
+    art_ids = {p.shape_id for p in pics if p.kind in ("art", "panel", "line", "icon")}
+    bookend0 = slide.kind in _BOOKEND_KINDS
+    if pics and not bookend0:
+        visual0 = bool(slide.content.image_hint or slide.content.chart is not None or slide.content.table is not None)
+        story = [p for p in pics if p.kind in ("photo", "content") and p.area >= 0.03]
+        if story and not visual0:
+            # a speaker's photo, a product screenshot, a chart drawn for the sample's figures («Item 1 … Item 5»):
+            # the sample's own story stays a hole or a lie on new content — only a chart, a table or a picture of
+            # the content takes its place
+            return ScoreResult(0.0, reasons + ["фото, скриншот или диаграмма образца не относятся к содержанию"], fit)
+        bars = [p for p in pics if p.kind == "bar"]
+        if bars and slide.content.chart is None and slide.content.table is None:
+            # bars drawn as pictures show the sample's figures: under our numbers they would show wrong lengths
+            kind *= 0.2
+            reasons.append("столбики образца нарисованы под его собственные данные")
+        elif story and visual0:
+            reasons.append("иллюстрацию образца заменит диаграмма или таблица")
+    if not bookend0 and pattern.mockup_boxes and not slide.content.image_hint:
+        # a device mock-up (a tablet, a phone, a laptop) shows a screen: without the content's own screenshot its
+        # screen stays blank in the middle of the slide
+        return ScoreResult(0.0, reasons + ["макет устройства в образце останется с пустым экраном"], fit)
+    if not bookend0:
+        # a place the sample keeps for a speaker's photo, a QR code or a logo («Вставить фото»): without the user's
+        # photo it leaves with its frame and a hole stays where the sample's design had its picture
+        holes = [s for s in pattern.slots if s.sample_text and _PHOTO_PLACE_RE.search(s.sample_text) and s.bbox.area >= 0.002]
+        if holes and not slide.content.photo_slot and not slide.content.image_hint:
+            return ScoreResult(0.0, reasons + ["место под фото в образце останется пустым"], fit)
+        if slide.content.table is not None and pattern.data_box is not None:
+            n_cols = len(slide.content.table.columns)
+            if n_cols >= 3 and pattern.data_box.w < 0.6:
+                kind *= 0.75
+                reasons.append("таблица из трёх и более столбцов в узкой области образца")
+            rows_need = len(slide.content.table.rows) + 1
+            if pattern.data_rows and pattern.data_rows >= 2 * rows_need:
+                # a table of three rows in a sample drawn for nine: the plate stands two-thirds empty under it
+                kind *= 0.75
+                reasons.append(f"таблица образца рассчитана на {pattern.data_rows} строк, у слайда {rows_need}")
+        # a sample whose texts and pictures hold a small part of the slide (a coloured square with the heading at one
+        # side, the rest left for a photo the sample does not have) sets new content in a corner of an empty slide
+        boxes = [s.bbox for s in pattern.slots if s.role != SlotRole.chrome] + list(pattern.decor_boxes) + [p.box for p in pics if p.kind in ("art", "panel")]
+        if boxes and pattern.data_box is None:
+            x0, y0 = min(b.x for b in boxes), min(b.y for b in boxes)
+            x1, y1 = max(b.x2 for b in boxes), max(b.y2 for b in boxes)
+            if (x1 - x0) * (y1 - y0) < 0.45 and (x1 - x0) < 0.62:
+                kind *= 0.5
+                reasons.append(f"образец занимает {int(100 * (x1 - x0))}% ширины слайда: остальное останется пустым")
+        c0 = slide.content
+        if not (c0.paragraphs or c0.bullets or c0.quote or slide.subtitle) and slide.kind in (PatternKind.table, PatternKind.chart):
+            # the sample's text column — its own boxes or a column of cards — stays empty beside the chart or table
+            boxes_t = [s.bbox for s in pattern.slots if s.role in (SlotRole.body, SlotRole.bullet_list, SlotRole.card_title, SlotRole.card_body, SlotRole.subtitle) and (not s.group_id or not (c0.items or c0.numbers))]
+            spare = 0.0
+            if boxes_t:
+                ux0, uy0 = min(b.x for b in boxes_t), min(b.y for b in boxes_t)
+                ux1, uy1 = max(b.x2 for b in boxes_t), max(b.y2 for b in boxes_t)
+                spare = min((ux1 - ux0) * (uy1 - uy0), sum(b.area for b in boxes_t) * 1.5)
+            if spare >= 0.15:
+                kind *= 0.6
+                reasons.append("текстовая колонка образца останется пустой рядом с данными")
+            elif spare >= 0.06:
+                kind *= 0.8
+                reasons.append("текстовая колонка образца останется пустой")
+    if pattern.note_slot and not bookend0:
+        if slide.takeaway:
+            reasons.append("вывод слайда встанет в поле примечания образца")
+        else:
+            # the note band at the foot leaves with nothing to say: a hole where the sample's design had its band
+            kind *= 0.6
+            reasons.append("поле примечания образца останется пустым: у слайда нет вывода")
     has_title_slot = any(s.role == SlotRole.title for s in pattern.slots)
     if slide.headline and not has_title_slot:
         if slide.kind in (PatternKind.title, PatternKind.section, PatternKind.thanks):
@@ -367,6 +446,8 @@ def score_pattern(
         room = max((s.bbox.area for s in pattern.slots if s.role in (SlotRole.image, SlotRole.body, SlotRole.bullet_list)), default=0.0)
         if pattern.kind in (PatternKind.chart, PatternKind.table):
             room = max(room, 0.35)
+        if pattern.data_box is not None:
+            room = max(room, pattern.data_box.area)
         data_room = min(1.0, room / 0.3)
         if room < 0.12:
             kind *= 0.3
@@ -402,11 +483,23 @@ def score_pattern(
             elif n > group.max_n:
                 cap = 0.15 if n > group.max_n + 1 else 0.4
                 reasons.append(f"не хватает ячеек: нужно {n}, максимум {group.max_n}")
-            if group.axis == "grid" and group.rows * group.cols > n_cells and n < n_cells:
+            elif n < group.min_n:
+                # cells drawn into the template's art (numbered tiles, tags, a staircase): an empty one stays on the slide
+                cap = 0.1
+                reasons.append(f"ячейки нарисованы в шаблоне: нужно ровно {group.min_n}, а пунктов {n}")
+            if group.axis == "grid" and group.rows * group.cols > n_cells and n < n_cells and not group.fixed:
                 # cells set in a zigzag (LCT roadmap: three above, two below, joined by lines): with a cell left
                 # empty the figure breaks — a hole in the zigzag and connectors leading nowhere
                 cap = min(cap, 0.55)
                 reasons.append("ячейки стоят зигзагом: с пустой ячейкой макет развалится")
+            if group.axis == "grid" and not group.fixed and group.rows >= 2 and n <= (group.rows - 1) * group.cols:
+                # a grid that keeps fewer items than its rows hold leaves whole rows empty (the sample's cards grid
+                # with three items): a row of cards says it better
+                cap = min(cap, 0.25)
+                reasons.append(f"в сетке {group.rows}×{group.cols} останется пустой целый ряд")
+            if group.axis == "column" and not group.fixed and n_cells >= 4 and n <= n_cells // 2:
+                cap = min(cap, 0.45)
+                reasons.append(f"из {n_cells} строк образца останется {n}")
             if group.cell_bbox.area < 0.02 and slide_kind in (PatternKind.cards, PatternKind.process, PatternKind.comparison, PatternKind.team, PatternKind.two_column):
                 cap = min(cap, 0.2)
                 reasons.append("ячейки слишком малы для карточек")
@@ -425,6 +518,12 @@ def score_pattern(
 
     if data_room is not None and n < 2:
         cap = data_room  # no items to count: the capacity of such a slide is the room for its chart or table
+    elif n < 2 and slide.kind not in _BOOKEND_KINDS:
+        # one item (a statement, one figure) on a sample of a row or a grid of cards: every other card leaves
+        big = max((len(g.member_shape_ids) for g in pattern.repeat_groups if any(s.group_id == g.id and s.role in (SlotRole.card_title, SlotRole.card_body, SlotRole.number) for s in pattern.slots)), default=0)
+        if big >= 3:
+            cap = min(cap, 0.2)
+            reasons.append(f"одна мысль на образце из {big} карточек: остальные уйдут, останется пустота")
     # text fit
     worst = 0.0
     bookend = slide.kind in _BOOKEND_KINDS
@@ -464,6 +563,16 @@ def score_pattern(
         if ratio > 1.0:
             fit[f"overflow_{role_name}"] = round(ratio, 2)
     fit["text_ratio"] = round(worst, 2)
+    items0 = slide.content.items or slide.content.columns
+    if group is not None and items0 and n >= 2 and group.cell_bbox.area >= 0.05 and not group.fixed and group.member_shape_ids:
+        # cards made for a paragraph each, given a line each, stand three-quarters empty (LCT p24's tall white cards
+        # under three one-line theses): a sample with smaller cells says it better
+        cell0 = set(group.member_shape_ids[0])
+        cell_cap = sum(s.capacity.max_chars for s in pattern.slots if s.shape_id in cell0 and s.role in (SlotRole.card_title, SlotRole.card_body, SlotRole.body, SlotRole.bullet_list, SlotRole.number_label))
+        need_cell = max(len(i.title or "") + len(i.text or "") + sum(len(b) + 2 for b in i.bullets) for i in items0)
+        if cell_cap >= 120 and need_cell < 0.2 * cell_cap:
+            kind *= 0.85
+            reasons.append(f"ячейки образца рассчитаны на текст в {cell_cap // max(need_cell, 1)} раз длиннее")
     # hard gates: a pattern without room for the slide's content would render a headline over stale sample shapes
     content = slide.content
     needed_roles = _needed_chars(slide)
@@ -536,23 +645,30 @@ def score_pattern(
         reasons.append(f"вес стратегии {strategy.name} для типа: ×{weight:.2f}")
     # a large sample image (photo, screenshot, chart picture) that the content cannot replace would stay as stale sample content
     has_visual = bool(content.image_hint or content.chart is not None or content.table is not None)
-    stale_images = [s for s in pattern.slots if s.role == SlotRole.image and s.bbox.area >= 0.12]
+    # the template's art (renders, illustrations, plates) stays with new content: only a picture that is not art is
+    # stale when nothing replaces it
+    stale_images = [s for s in pattern.slots if s.role == SlotRole.image and s.bbox.area >= 0.12 and s.shape_id not in art_ids]
     if stale_images and not has_visual:
         kind *= 0.6
         reasons.append("крупная картинка-образец останется без замены")
+
+    def _art_box(b) -> bool:
+        return any(p.kind in ("art", "panel") and p.box.x <= b.x + b.w / 2 <= p.box.x2 and p.box.y <= b.y + b.h / 2 <= p.box.y2 for p in pics)
+
     # a decorative picture in the middle of the content area (a chart snapshot, a KPI ring) says the sample's own story
-    stale_decor = [b for b in pattern.decor_boxes if b.area >= 0.08 and 0.15 < b.y + b.h / 2 < 0.85 and 0.15 < b.x + b.w / 2 < 0.85]
+    stale_decor = [b for b in pattern.decor_boxes if b.area >= 0.08 and 0.15 < b.y + b.h / 2 < 0.85 and 0.15 < b.x + b.w / 2 < 0.85 and not _art_box(b)]
     if stale_decor and not has_visual and not bookend:  # on a cover or divider the sample's art is the point
         kind *= 0.6
         reasons.append("крупная иллюстрация образца посреди слайда не относится к содержанию")
     # strategy flavour: visual favours decorated/illustrated samples, compact favours denser samples, structured plain ones
     n_decor = len(pattern.decor_assets) + sum(1 for s in pattern.slots if s.role in (SlotRole.icon, SlotRole.image))
+    has_art = any(p.kind == "art" and p.area >= 0.02 for p in pics)
     if strategy.name == "visual":
-        style = 0.08 if n_decor >= 1 else 0.0
+        style = 0.1 if has_art else (0.05 if n_decor >= 1 else 0.0)
     elif strategy.name == "compact":
         style = 0.08 * min(len(text_slots) / 8.0, 1.0)
     else:
-        style = 0.04 if n_decor == 0 else 0.0
+        style = 0.04 if n_decor == 0 else (0.02 if has_art else 0.0)
     if style:
         reasons.append(f"стиль стратегии {strategy.name}: +{style:.2f}")
     if slide.kind in _STANDALONE_KINDS and slide.kind != PatternKind.quote:
@@ -619,4 +735,9 @@ def score_pattern(
         # losing a fact is worse than any synthesized stat row: such a pattern may stay an alternative but never wins over synth
         score = max(0.0, strategy.synth_threshold - 0.05)
         reasons.append(f"балл опущен ниже порога синтеза {strategy.synth_threshold:.2f}, чтобы не терять числа")
+    elif cap <= 0.25 and not bookend and score >= strategy.synth_threshold:
+        # the sample's cells cannot take this many items (a tile drawn with its numeral «04» left empty, a grid with a
+        # whole row gone, one thought on a row of cards): a slide composed by the design system reads better
+        score = max(0.0, strategy.synth_threshold - 0.05)
+        reasons.append("ячейки образца не подходят к числу пунктов: образец остаётся только запасным")
     return ScoreResult(round(score, 3), reasons, fit)

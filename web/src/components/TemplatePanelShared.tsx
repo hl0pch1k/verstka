@@ -8,6 +8,7 @@ import type { ProgressTone } from "./ui/Progress";
 /** «3 ячейки · ряд · до 5» */
 export function groupSummary(g: RepeatGroup): string {
   const cells = g.member_shape_ids.length;
+  if (g.fixed) return `${plural(cells, "ячейка", "ячейки", "ячеек")} · ровно ${cells}: нарисованы в дизайне слайда`;
   const axis = g.axis === "row" ? "ряд" : g.axis === "column" ? "колонка" : g.axis === "grid" ? `сетка ${g.rows}×${g.cols}` : g.axis;
   const range = g.min_n > 1 && g.min_n < g.max_n ? `от ${g.min_n} до ${g.max_n}` : `до ${g.max_n}`;
   return `${plural(cells, "ячейка", "ячейки", "ячеек")} · ${axis} · ${range}`;

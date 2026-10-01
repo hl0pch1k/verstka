@@ -78,13 +78,37 @@ def _set_bullet(pPr: etree._Element, on: bool, size_pt: Optional[float] = None) 
         bu = etree.Element(q("a:buChar"))
         bu.set("char", "•")
         insert_ordered(pPr, bu, _PPR_ORDER)
-        if not had_marker and pPr.get("indent") is None:
-            # the source paragraph was plain text: give the marker a hanging indent of about one em
+        if not had_marker and int(pPr.get("indent") or 0) >= 0:
+            # the source paragraph was plain text (an export writes indent="0" marL="0" on every line): give the
+            # marker a hanging indent of about one em, or the text runs into it («•Подбор»)
             hang = int(max(size_pt or 14.0, 8.0) * 1.1 * 12700)
             pPr.set("marL", str(int(pPr.get("marL") or 0) + hang))
             pPr.set("indent", str(-hang))
     else:
         insert_ordered(pPr, etree.Element(q("a:buNone")), _PPR_ORDER)
+
+
+def _rpr_key(rPr: Optional[etree._Element]) -> tuple:
+    """What a run looks like: its size, weight and fill."""
+    if rPr is None:
+        return ()
+    fill = rPr.find(q("a:solidFill"))
+    return (rPr.get("sz"), rPr.get("b"), etree.tostring(fill) if fill is not None else None)
+
+
+def sample_head_ratio(sp_el: etree._Element) -> Optional[float]:
+    """How much larger the sample's first line is than its second in a box that holds a heading over its text
+    (sizes written on the runs), or None."""
+    txBody = _txBody(sp_el)
+    if txBody is None:
+        return None
+    styled = [p for p in txBody.findall(q("a:p")) if p.find(q("a:r")) is not None]
+    if len(styled) < 2:
+        return None
+    a, b = _rpr_size(_first_rpr(styled[0])), _rpr_size(_first_rpr(styled[1]))
+    if not a or not b or a <= b * 1.05:
+        return None
+    return min(a / b, 1.6)
 
 
 def _rpr_size(rPr: Optional[etree._Element]) -> Optional[float]:
@@ -109,6 +133,13 @@ def fill_text(sp_el: etree._Element, paragraphs: list[ParagraphSpec], size_pt: O
         ps = [etree.SubElement(txBody, q("a:p"))]
     template_p = next((p for p in ps if p.find(q("a:r")) is not None), ps[0])
     bullet_p = next((p for p in ps if _has_bullet(p)), None)
+    # a heading and its text written into one sample box (VK WorkSpace cards: «Заголовок» in blue over «Текст» in
+    # white): the heading takes the sample's first line, the text its second — never the heading's colour for both
+    second_p = None
+    if paragraphs and paragraphs[0].bold and any(not s.bold for s in paragraphs[1:]):
+        styled = [p for p in ps if p.find(q("a:r")) is not None]
+        if len(styled) >= 2 and styled[0] is template_p and _rpr_key(_first_rpr(styled[1])) != _rpr_key(_first_rpr(styled[0])):
+            second_p = styled[1]
     template_rPr = _first_rpr(template_p)
     if template_rPr is None:
         template_rPr = etree.Element(q("a:rPr"))
@@ -131,9 +162,16 @@ def fill_text(sp_el: etree._Element, paragraphs: list[ParagraphSpec], size_pt: O
             for a in ("fontScale", "lnSpcReduction"):
                 if a in na.attrib:
                     del na.attrib[a]
-    for spec in paragraphs:
+    second_rPr = None
+    if second_p is not None:
+        second_rPr = copy.deepcopy(_first_rpr(second_p))
+        second_rPr.tag = q("a:rPr")
+        for h in second_rPr.findall(q("a:hlinkClick")) + second_rPr.findall(q("a:hlinkMouseOver")):
+            second_rPr.remove(h)
+    for k, spec in enumerate(paragraphs):
         use_bullet_template = keep_bullets and spec.bullet and bullet_p is not None
-        p = copy.deepcopy(bullet_p if use_bullet_template else template_p)
+        under = second_p is not None and k >= 1
+        p = copy.deepcopy(bullet_p if use_bullet_template else (second_p if under else template_p))
         _strip_runs(p)
         pPr = p.find(q("a:pPr"))
         if spec.bullet is not None:
@@ -144,8 +182,10 @@ def fill_text(sp_el: etree._Element, paragraphs: list[ParagraphSpec], size_pt: O
                 _set_bullet(pPr, True, spec.size_pt or size_pt or _rpr_size(template_rPr))
             elif not spec.bullet and _has_bullet(p):
                 _set_bullet(pPr, False)
-                for attr in ("marL", "indent"):  # a plain line under a bulleted list starts at the markers' edge
-                    pPr.attrib.pop(attr, None)
+                # a plain line (a card's heading over its list) starts at the markers' edge: written as 0, not left to
+                # the list style, whose hanging indent pushed the heading in under the text (Education p24)
+                pPr.set("marL", "0")
+                pPr.set("indent", "0")
             elif not spec.bullet and pPr.find(q("a:buNone")) is None:
                 # the marker may come from the layout/master list style (a body placeholder): switch it off explicitly
                 _set_bullet(pPr, False)
@@ -164,7 +204,7 @@ def fill_text(sp_el: etree._Element, paragraphs: list[ParagraphSpec], size_pt: O
             pPr.set("marL", "0")
             pPr.set("indent", "0")
         r = etree.Element(q("a:r"))
-        rPr = copy.deepcopy(template_rPr)
+        rPr = copy.deepcopy(second_rPr if under else template_rPr)
         if neutral_runs:
             neutralize_rpr(rPr)
         sz = spec.size_pt or size_pt

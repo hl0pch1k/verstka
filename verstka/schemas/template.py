@@ -168,6 +168,11 @@ class RepeatGroup(BaseModel):
     cell_bbox: BboxFrac
     rows: int = 1
     cols: int = 1
+    # the cells stand on art drawn for exactly them (a picture of the slide or of its layout: numbered tiles, tags on
+    # a string, a staircase) or in a free arrangement (a zigzag, a diagonal): their count cannot change — a cell left
+    # empty would leave its tile, and no new cell has a tile to stand on
+    fixed: bool = False
+    cell_boxes: list[BboxFrac] = Field(default_factory=list)  # every cell's box (its card and texts), in cell order
 
 
 class SignalVote(BaseModel):
@@ -205,6 +210,13 @@ class Pattern(BaseModel):
     layout_type: Optional[str] = None  # the layout's own type (title, obj, secHead, …) when it declares one
     mockup_boxes: list[BboxFrac] = Field(default_factory=list)  # device mock-ups and empty picture frames of the sample
     mockup_on_layout: bool = False  # a mock-up drawn by the layout: it stays on every slide cloned from the sample
+    # a table drawn with shapes (rows of text boxes on plates): its area takes the deck's native table
+    data_box: Optional[BboxFrac] = None
+    data_rows: Optional[int] = None  # rows of that drawn table (its header included)
+    art_layout: bool = False  # the sample's design is one picture of its layout (Google Slides exports): the slide's boxes stand over it
+    # the field at the sample's foot for a note («Примечание» over «Текст» on a band): the slide's conclusion goes there
+    note_slot: Optional[str] = None  # shape id of its text
+    note_label: Optional[str] = None  # shape id of its label («Примечание»), when it has one
 
     def slots_by_role(self, role: SlotRole) -> list[Slot]:
         return [s for s in self.slots if s.role == role]
@@ -303,7 +315,7 @@ class TemplateManifest(BaseModel):
     style_rules: list[StyleRule] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     n_slides: int = 0
-    analysis_version: str = "21"
+    analysis_version: str = "24"
     embedded_fonts: list[str] = Field(default_factory=list)
     # template families this machine does not have (not installed, not embedded) → the face previews and PDFs set them
     # in (the LibreOffice replacement table of ingest.render, fonts.render_standin; else fontconfig's substitute);

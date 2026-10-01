@@ -38,11 +38,49 @@ def cell_bbox(els: list[etree._Element]) -> Optional[Bbox]:
     return Bbox(x=x, y=y, w=x2 - x, h=y2 - y)
 
 
-def reading_order_key(cells: list[list[etree._Element]], slide_h: int):
+def staggered_axis(boxes: list[Optional[Bbox]], group: Optional[RepeatGroup] = None) -> Optional[str]:
+    """«row» for cells set in a zigzag along the slide (LCT p25: three above, two below, each in a column of its own,
+    joined to numbered steps on one line): they are read left to right, whatever row they stand in. «column» for
+    cells stepping down in two columns. None for a plain row, column or grid — and for a grid whose short last row
+    was centred under the full ones (`group`: the sample's own grid is full, it is no zigzag)."""
+    if group is not None and not (group.axis == "grid" and group.rows * group.cols > len(group.member_shape_ids)):
+        return None
+    bs = [b for b in boxes if b is not None]
+    if len(bs) < 3 or len(bs) != len(boxes):
+        return None
+
+    def bands(lo_hi: list[tuple[int, int]]) -> int:
+        out: list[tuple[int, int]] = []
+        for lo, hi in sorted(lo_hi):
+            if out and lo < out[-1][1] - 0.5 * (hi - lo):
+                out[-1] = (out[-1][0], max(out[-1][1], hi))
+            else:
+                out.append((lo, hi))
+        return len(out)
+
+    xs = [(b.x, b.x2) for b in bs]
+    ys = [(b.y, b.y2) for b in bs]
+    # every cell in a column of its own, the cells in two or more rows: a horizontal zigzag
+    if bands(xs) == len(bs) and bands(ys) >= 2:
+        return "row"
+    if bands(ys) == len(bs) and bands(xs) >= 2:
+        return "column"
+    return None
+
+
+def reading_order_key(cells: list[list[etree._Element]], slide_h: int, group: Optional[RepeatGroup] = None):
     """Reading order for cells: rows top to bottom (a row = cells whose tops differ by less than half a cell height
     or 4% of the slide), cells left to right inside a row. Rounding the top alone split rows whose cells differ by
-    a few EMU, which scrambled the item order and the companion-cell mapping."""
+    a few EMU, which scrambled the item order and the companion-cell mapping. A zigzag (`staggered_axis`) is read
+    along its line: by x, or by y."""
     boxes = {id(c): cell_bbox(c) for c in cells}
+    stag = staggered_axis(list(boxes.values()), group)
+    if stag is not None:
+        def along(c):
+            b = boxes.get(id(c))
+            return (0, 0) if b is None else ((b.x + b.w / 2, b.y) if stag == "row" else (b.y + b.h / 2, b.x))
+
+        return along
     band_of: dict[int, int] = {}
     band, band_y, band_h = -1, None, 0
     for c in sorted((c for c in cells if boxes[id(c)] is not None), key=lambda c: boxes[id(c)].y):
@@ -177,11 +215,26 @@ def _rebalance_grid(cells: list[list[etree._Element]], riders: list[list[etree._
     if rows0 < 2 or cols0 < 2 or n <= cols0 or n % cols0 == 0:
         return
     cols = -(-n // rows0)
-    if cols >= cols0:
-        return
     w0 = sorted(b.w for b in boxes_all)[len(boxes_all) // 2]
     gx = max(xs[1] - xs[0] - w0, 0)
     x0, x1 = xs[0], xs[-1] + w0
+    if cols >= cols0:
+        # the last row is short of cells (three items in a 2×2, five in a 3×2): it stands centred under the full
+        # rows, cards of one size — no hole where a card stood at its end
+        last = n % cols0
+        span = last * w0 + (last - 1) * gx
+        start = x0 + (x1 - x0 - span) / 2
+        for j, (c, r) in enumerate(zip(cells[n - last :], riders[n - last :])):
+            old = cell_bbox(c)
+            if old is None:
+                continue
+            new = Bbox(x=int(start + j * (w0 + gx)), y=old.y, w=old.w, h=old.h)
+            if new.x == old.x:
+                continue
+            for e in c + r:
+                if not is_nested(e):
+                    shift_element(e, new.x - old.x, 0)
+        return
     w_new = (x1 - x0 - (cols - 1) * gx) / cols
     for i, (c, r) in enumerate(zip(cells, riders)):
         old = cell_bbox(c)
@@ -197,7 +250,52 @@ def _rebalance_grid(cells: list[list[etree._Element]], riders: list[list[etree._
             transform_element(e, mid, new, "column")
 
 
-def adjust_group(slide: Slide, group: RepeatGroup, n_needed: int, slide_w: int, slide_h: int, next_id: int, protected_ids: Optional[set[str]] = None, origin: Optional[dict[str, str]] = None) -> tuple[list[list[etree._Element]], int]:
+def _make_tail_room(cells: list[list[etree._Element]], riders: list[list[etree._Element]], group: RepeatGroup, floor: int, tail_room: int, slide_h: int) -> None:
+    """The cells end `tail_room` above `floor` (the slide's conclusion and footnote go under them): their heights
+    shrink — rows and grids proportionally from the group's top, columns by a tighter pitch — never under 55 % of
+    what they had; pictures keep their size and their anchoring in the cell (a 3D render at a card's foot moves up
+    with the foot)."""
+    boxes = [cell_bbox(c) for c in cells]
+    if not boxes or any(b is None for b in boxes):
+        return
+    top = min(b.y for b in boxes)
+    bottom = max(b.y2 for b in boxes)
+    limit = floor - tail_room
+    if bottom <= limit:
+        return
+    k = (limit - top) / max(bottom - top, 1)
+    if k < 0.55:
+        return
+    for c, r, old in zip(cells, riders, boxes):
+        new = Bbox(x=old.x, y=int(top + (old.y - top) * k), w=old.w, h=max(int(old.h * k), 1))
+        for e in c + r:
+            if is_nested(e):
+                continue
+            transform_element(e, old, new, "column")
+
+
+def _make_head_room(cells: list[list[etree._Element]], riders: list[list[etree._Element]], top_limit: int) -> None:
+    """The cells start no higher than `top_limit` (a lede line goes under the heading): their tops move down and their
+    heights shrink so their feet stay — never under 55 % of what they had."""
+    boxes = [cell_bbox(c) for c in cells]
+    if not boxes or any(b is None for b in boxes):
+        return
+    top = min(b.y for b in boxes)
+    bottom = max(b.y2 for b in boxes)
+    if top >= top_limit:
+        return
+    k = (bottom - top_limit) / max(bottom - top, 1)
+    if k < 0.55:
+        return
+    for c, r, old in zip(cells, riders, boxes):
+        new = Bbox(x=old.x, y=int(top_limit + (old.y - top) * k), w=old.w, h=max(int(old.h * k), 1))
+        for e in c + r:
+            if is_nested(e):
+                continue
+            transform_element(e, old, new, "column")
+
+
+def adjust_group(slide: Slide, group: RepeatGroup, n_needed: int, slide_w: int, slide_h: int, next_id: int, protected_ids: Optional[set[str]] = None, origin: Optional[dict[str, str]] = None, tail_room: int = 0, floor: Optional[int] = None, head_top: Optional[int] = None) -> tuple[list[list[etree._Element]], int]:
     """Delete or duplicate cells so that exactly n cells remain, then let rows/columns reflow over the group's span.
 
     Row groups (and column groups of cards) keep their span: two cards of three grow to fill it, four narrower
@@ -215,14 +313,14 @@ def adjust_group(slide: Slide, group: RepeatGroup, n_needed: int, slide_w: int, 
     n = max(1, min(n_needed, max(group.max_n, n_orig)))
     if nested:
         # grouped cells: deleting members is safe, moving/duplicating them is not (child coordinate space)
-        cells.sort(key=reading_order_key(cells, slide_h))
+        cells.sort(key=reading_order_key(cells, slide_h, group))
         if n < n_orig:
             for c in cells[n:]:
                 for e in c:
                     remove_element(e)
             cells = cells[:n]
         return cells, next_id
-    cells.sort(key=reading_order_key(cells, slide_h))
+    cells.sort(key=reading_order_key(cells, slide_h, group))
     riders = cell_riders(slide, group, cells, protected_ids)
     linear = group.axis in ("row", "column")
     row = group.axis == "row"
@@ -261,7 +359,8 @@ def adjust_group(slide: Slide, group: RepeatGroup, n_needed: int, slide_w: int, 
                 remove_element(e)
         cells = cells[:n]
         riders = riders[:n]
-        if group.axis == "grid":
+        if group.axis == "grid" and not group.fixed:
+            # (cells drawn into the template's art — numerals baked into tiles — keep their places)
             _rebalance_grid(cells, riders, boxes_all, slide_w, slide_h)
     elif n > n_orig:
         boxes = [cell_bbox(c) for c in cells]
@@ -334,4 +433,8 @@ def adjust_group(slide: Slide, group: RepeatGroup, n_needed: int, slide_w: int, 
                 continue
             for e in c + r:
                 transform_element(e, old, new, group.axis)
+    if tail_room and floor and not nested and not group.fixed:
+        _make_tail_room(cells, riders, group, floor, tail_room, slide_h)
+    if head_top and not nested and not group.fixed:
+        _make_head_room(cells, riders, head_top)
     return cells, next_id

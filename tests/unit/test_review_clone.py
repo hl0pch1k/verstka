@@ -25,7 +25,17 @@ from verstka.rendering.clone import _merge_items, render_clone
 from verstka.rendering.deck import DeckBuilder, element_bbox, slide_shape_elements
 from verstka.rendering.fit import fit_size
 from verstka.rendering.renderer import render_deck
-from verstka.rendering.textfill import shape_text
+from verstka.rendering.textfill import shape_text as _shape_text
+
+
+def _plain(s: str) -> str:
+    """Text as read: the renderer sets it the Russian way (no-break spaces after short words and in figures, a word
+    joiner after a compound's hyphen) — the words compared here are the same."""
+    return (s or "").replace("\u00a0", " ").replace("\u2060", "")
+
+
+def shape_text(el) -> str:
+    return _plain(_shape_text(el))
 from verstka.schemas.common import Bbox, BboxFrac, Family, PatternKind, SlotRole
 from verstka.schemas.layout import LayoutPlan, LayoutSlide
 from verstka.schemas.outline import DeckOutline, NumberCallout, OutlineSlide, SlideContent, SlideItem, TableData
@@ -232,7 +242,7 @@ def test_r4b_number_label_cell_keeps_step_title(tmp_path):
     els = slide_shape_elements(slide)
     for i, (num, lab) in enumerate(cells):
         ps = _paras(els[_sid(lab)])
-        texts = ["".join(t.text or "" for t in p.iter(q("a:t"))) for p in ps]
+        texts = [_plain("".join(t.text or "" for t in p.iter(q("a:t")))) for p in ps]
         assert texts[0] == f"Неделя {i + 1}" and _is_bold(ps[0]), f"step title lost in cell {i}: {texts}"
         assert items[i].text in texts[1:]
         assert shape_text(els[_sid(num)]).strip() == str(i + 1)
@@ -489,7 +499,7 @@ def test_extra3_bullets_into_two_cells_are_lists_not_title_plus_text(tmp_path):
     seen = []
     for e in row:
         for p in _paras(e):
-            t = "".join(x.text or "" for x in p.iter(q("a:t")))
+            t = _plain("".join(x.text or "" for x in p.iter(q("a:t"))))
             if t:
                 seen.append(t)
                 assert not (_is_bold(p) and not _has_bullet(p)), f"bullet {t!r} became a card title"

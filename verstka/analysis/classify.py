@@ -123,12 +123,18 @@ def classify_slide(
     template_summary: str = "",
     weights: tuple[float, float, float] = (1.0, 1.5, 1.0),
     role_override_confidence: float = 0.7,
+    table: Optional[tuple] = None,
 ) -> tuple[ClassificationTrace, dict[str, SlotRole], list[str]]:
-    """Returns (trace, roles, warnings)."""
+    """Returns (trace, roles, warnings). `table`: (area, shape ids) of a table drawn with text boxes
+    (`groups.detect_drawn_table`): its shapes are the table's, not slots of their own."""
     warnings: list[str] = []
     w_h, w_llm, w_vlm = weights
     roles = heuristic_roles(shapes, groups, chrome_ids, typography, slide_w, slide_h, image_kinds=image_kinds)
-    h_kind, h_conf = heuristic_kind(shapes, roles, groups, slide_index, n_slides, slide_w, slide_h)
+    if table is not None:
+        for sid in table[1]:
+            if roles.get(sid) not in (SlotRole.title, SlotRole.subtitle, SlotRole.chrome):
+                roles[sid] = SlotRole.decoration
+    h_kind, h_conf = heuristic_kind(shapes, roles, groups, slide_index, n_slides, slide_w, slide_h, data_box=table[0] if table is not None else None)
     trace = ClassificationTrace(kind=h_kind, heuristic=SignalVote(kind=h_kind, confidence=h_conf))
     votes: list[tuple[PatternKind, float]] = [(h_kind, h_conf * w_h)]
 

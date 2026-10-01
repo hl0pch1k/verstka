@@ -60,7 +60,9 @@ def fit_size(
     they would be sizes the template does not use. When nothing fits, the smallest candidate is returned with
     fits=False and a finite height (a word too wide for the box is counted as the pieces it would break into and
     reported as `broken_word`)."""
-    usable_w = max((bbox.w - insets_emu[0] - insets_emu[2]) / EMU_PER_PT, 1.0)
+    # (1.5 % of the line kept free: a line measured within a hair of the box breaks one word earlier in PowerPoint
+    # and LibreOffice — «по дизайн-системе шаблона» at 198.8 pt in a 199 pt card ran a third line out of the card)
+    usable_w = max((bbox.w - insets_emu[0] - insets_emu[2]) / EMU_PER_PT * 0.985, 1.0)
     usable_h = max((bbox.h - insets_emu[1] - insets_emu[3]) / EMU_PER_PT, 1.0)
     candidates: list[float] = [size_pt]
     scale_c = sorted({round(s, 2) for s in (scale_sizes or []) if s < size_pt and s >= size_pt * min_ratio}, reverse=True)
@@ -101,7 +103,9 @@ def grow_size(
     Three short bullets at 12 pt in a box meant for a paragraph read as a mistake; a designer sets them larger,
     but only along the template's own scale and never past the cap of the role (body text stays body text).
     """
-    usable_w = max((bbox.w - insets_emu[0] - insets_emu[2]) / EMU_PER_PT, 1.0)
+    # (1.5 % of the line kept free: a line measured within a hair of the box breaks one word earlier in PowerPoint
+    # and LibreOffice — «по дизайн-системе шаблона» at 198.8 pt in a 199 pt card ran a third line out of the card)
+    usable_w = max((bbox.w - insets_emu[0] - insets_emu[2]) / EMU_PER_PT * 0.985, 1.0)
     usable_h = max((bbox.h - insets_emu[1] - insets_emu[3]) / EMU_PER_PT, 1.0)
     best = size_pt
     for s in sorted({round(x, 2) for x in scale_sizes if size_pt < x <= cap_pt}):

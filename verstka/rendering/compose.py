@@ -28,7 +28,7 @@ from verstka.rendering.tables import add_table
 from verstka.schemas.common import EMU_PER_PT, Bbox, PatternKind, contrast_ratio, relative_luminance
 from verstka.schemas.outline import DeckOutline, NumberCallout, OutlineSlide, SlideItem, TableData
 from verstka.schemas.template import TemplateManifest
-from verstka.ru import typeset
+from verstka.ru import no_orphan, typeset
 
 _A = "http://schemas.openxmlformats.org/drawingml/2006/main"
 _P = "http://schemas.openxmlformats.org/presentationml/2006/main"
@@ -2747,6 +2747,7 @@ class Composer:
         text = text[:1].upper() + text[1:] if text[:1].islower() else text
         if text.endswith(".") and not text.endswith("..") and not ABBR_END_RE.search(text):
             text = text[:-1]  # a conclusion line, like a headline, has no period («… на 10 п. п.» keeps it)
+        text = no_orphan(text)  # never a lone short word on the strip's last line
         deck = self._deck_takeaway_size(width, strip, bar_w) if sizes is None else None
         for size in (sizes if sizes is not None else [deck] if deck else dict.fromkeys((k.lead, k.body, k.small))):
             pad_x = _emu(size * 1.0) if strip else 0

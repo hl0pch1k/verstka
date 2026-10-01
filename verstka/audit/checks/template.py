@@ -432,10 +432,17 @@ def table_contrast_low(ctx: AuditContext) -> list[Issue]:
     tokens = ctx.manifest.tokens
     palette = {t.hex.upper() for t in tokens.colors} | {"FFFFFF", "000000"}
     for s in ctx.ir.slides:
-        ground = s.background_hex
+        bg_slide = s.background_hex
         for e in s.elements:
             if e.type != "table" or not e.table or not e.table.cells:
                 continue
+            # an unfilled cell shows what lies under the table: the panel it stands on (a white half of a purple
+            # slide), else the slide's ground
+            try:
+                enclosing, _ = ground_of(s, e, bg_slide or "FFFFFF")
+            except Exception:  # noqa: BLE001
+                enclosing = None
+            ground = enclosing or bg_slide
             worst = None
             for r_i, row in enumerate(e.table.cells):
                 for c_i, cell in enumerate(row):

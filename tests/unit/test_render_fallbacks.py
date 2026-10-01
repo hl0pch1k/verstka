@@ -333,7 +333,7 @@ def test_a_cloned_chart_that_fails_is_rolled_back_to_a_composed_slide(env, tmp_p
     res = render_deck(outline, plan, manifest, ws, tmp_path / "deck.pptx")
     prs = Presentation(str(res.pptx_path))
     assert len(prs.slides) == 1 and res.slides[0].mode == "synth" and res.slides[0].composition == "chart_text"
-    assert any("native chart failed" in w for w in res.slides[0].warnings)
+    assert any("native object failed" in w for w in res.slides[0].warnings)
     assert any("Время сократилось на 18 минут" in t for t in _texts(prs.slides[0]))
 
 

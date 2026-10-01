@@ -44,19 +44,70 @@ def _cover_room_ok(slide, pattern: Pattern, manifest: TemplateManifest) -> bool:
     return need <= room * 1.15
 
 
-def match_outline(outline: DeckOutline, manifest: TemplateManifest, strategy: Strategy, min_quality: float = 0.2) -> LayoutPlan:
+def headline_key(slide) -> str:
+    """The slide across variants: its kind-free heading, lower case, spaces collapsed."""
+    return " ".join((slide.headline or "").lower().split())[:120]
+
+
+# reuse of one sample in a deck: the second appearance costs this much, the third more — a template of fifty slides
+# shown through five of them loses what makes it the template
+REUSE_PENALTY = (0.0, 0.22, 0.45, 0.7)
+NEIGHBOUR_PENALTY = 0.4  # the same sample on two neighbouring slides reads as a copy
+OTHER_VARIANT_PENALTY = 0.3  # the same sample for the same slide in a variant already built: variants should differ
+
+
+def _assign_content(entries: list[dict], strategy: Strategy, taken: Optional[dict[str, set[str]]]) -> dict[int, tuple]:
+    """Template samples for the content slides of a deck: the most constrained slide chooses first; a sample already
+    used costs more each time, the same sample never stands on two neighbouring slides, a sample another variant used
+    for this very slide costs a little. Returns slide index → (adjusted score, result, pattern)."""
+    from collections import Counter
+
+    uses: Counter = Counter()
+    chosen: dict[int, tuple] = {}
+    order = sorted(entries, key=lambda e: (len(e["cands"]), e["index"]))
+    for e in order:
+        i = e["index"]
+        best = None
+        for res, p in e["cands"]:
+            adj = res.score - REUSE_PENALTY[min(uses[p.id], len(REUSE_PENALTY) - 1)]
+            if any(j in chosen and chosen[j][2].id == p.id for j in (i - 1, i + 1)):
+                adj -= NEIGHBOUR_PENALTY
+            if taken and p.id in taken.get(e["key"], set()):
+                adj -= OTHER_VARIANT_PENALTY
+            if best is None or adj > best[0] + 1e-9:
+                best = (adj, res, p)
+        if best is not None and best[0] >= strategy.clone_fit - 0.12:
+            chosen[i] = best
+            uses[best[2].id] += 1
+    return chosen
+
+
+def match_outline(outline: DeckOutline, manifest: TemplateManifest, strategy: Strategy, min_quality: float = 0.2, ws=None, taken: Optional[dict[str, set[str]]] = None) -> LayoutPlan:
+    """`ws`: the template's workspace — its sample pictures are read to tell art (kept) from a sample's own story
+    (`analysis.pictures`). `taken`: headline key → samples the variants built before used for that slide; filled in
+    with this variant's choices."""
     plan = LayoutPlan(strategy=strategy.name, template_id=manifest.template_id)
     recent: deque[str] = deque(maxlen=3)
     prev_family: Optional[Family] = None
     cover: Optional[Pattern] = None  # the sample of the cover: the closing slide answers it
     divider: Optional[Pattern] = None  # the sample of the first section divider: the others repeat it
     candidates = [p for p in manifest.patterns if p.quality >= min_quality]
+    pictures: dict = {}
+    if ws is not None:
+        try:
+            from verstka.analysis.pictures import sample_pictures
+
+            pictures = sample_pictures(ws, manifest)
+        except Exception:  # noqa: BLE001 - without them every picture counts as the sample's own
+            pictures = {}
+    clone_content = strategy.clone_fit <= 1.2
+    deferred: list[dict] = []  # content slides waiting for the deck-level choice of samples
     for slide in outline.slides:
         scored = []
         for p in candidates:
             if kind_compat(slide.kind, p.kind) <= 0:
                 continue
-            res = score_pattern(slide, p, manifest, strategy, prev_family, list(recent), cover=cover, divider=divider)
+            res = score_pattern(slide, p, manifest, strategy, prev_family, list(recent), cover=cover, divider=divider, pictures=pictures.get(p.id) if pictures else None)
             scored.append((res, p))
         scored.sort(key=lambda t: -t[0].score)
         if slide.kind == PatternKind.section and divider is not None:
@@ -95,6 +146,12 @@ def match_outline(outline: DeckOutline, manifest: TemplateManifest, strategy: St
                     scored.insert(0, scored.pop(i))
                     break
         covers = slide.kind in (PatternKind.title, PatternKind.section, PatternKind.thanks)
+        if clone_content and not covers:
+            # content slides choose their samples together, once the deck is known (`_assign_content`)
+            cands = [(r, q) for r, q in scored if r.score >= strategy.clone_fit - 0.12 and q.kind not in (PatternKind.title, PatternKind.section, PatternKind.thanks)]
+            deferred.append({"index": len(plan.slides), "key": headline_key(slide), "slide": slide, "scored": scored, "cands": cands})
+            plan.slides.append(LayoutSlide(outline_id=slide.id, mode="synth", composition=composition_for(slide)))
+            continue
         if strategy.compose_content and not covers and not (scored and scored[0][0].score >= strategy.clone_fit):
             comp = composition_for(slide)
             plan.slides.append(
@@ -143,4 +200,35 @@ def match_outline(outline: DeckOutline, manifest: TemplateManifest, strategy: St
                     alternatives=[(q.id, r.score) for r, q in scored[:3]],
                 )
             )
+    if deferred:
+        chosen = _assign_content(deferred, strategy, taken)
+        for e in deferred:
+            i, slide, scored = e["index"], e["slide"], e["scored"]
+            got = chosen.get(i)
+            if got is not None:
+                adj, res, p = got
+                note = [] if abs(adj - res.score) < 1e-6 else [f"разнообразие колоды: {res.score:.2f} → {adj:.2f} (образец уже встречался рядом, в колоде или в другом варианте)"]
+                plan.slides[i] = LayoutSlide(
+                    outline_id=slide.id,
+                    mode="clone",
+                    pattern_id=p.id,
+                    fit=res.fit,
+                    score=res.score,
+                    reasons=[f"слайд {p.source_slide} шаблона"] + res.reasons + note,
+                    alternatives=[(q.id, r.score) for r, q in scored if q.id != p.id][:3],
+                )
+                if taken is not None:
+                    taken.setdefault(e["key"], set()).add(p.id)
+            else:
+                comp = composition_for(slide)
+                plan.slides[i] = LayoutSlide(
+                    outline_id=slide.id,
+                    mode="synth",
+                    composition=comp,
+                    fit=scored[0][0].fit if scored else {},
+                    score=scored[0][0].score if scored else 0.0,
+                    reasons=[f"композиция {comp}: сетка, шкала кеглей и карточки из дизайн-системы шаблона"]
+                    + ([f"ближайший образец — слайд {scored[0][1].source_slide} шаблона ({scored[0][0].score:.2f}) не подходит по наполнению"] if scored else []),
+                    alternatives=[(q.id, r.score) for r, q in scored[:3]],
+                )
     return plan

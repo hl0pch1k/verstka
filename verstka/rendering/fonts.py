@@ -263,8 +263,22 @@ def render_standin(family: Optional[str]) -> Optional[str]:
     base = _base_name(name)
     if base != name.lower():
         # a face name with a weight («Lato Light», «Open Sans SemiBold», «Montserrat-Regular»): LibreOffice matches
-        # it by weight and sets it in one face of that weight (Helvetica Light); a stand-in family would lose the weight
-        return None
+        # it by weight and sets it in one face of that weight (Helvetica Light); a stand-in family would lose the weight.
+        # When the family itself is missing too («Inter Medium» without Inter), LibreOffice falls back to its default
+        # serif: the run takes the stand-in of its family (in the same weight when this machine has it)
+        family0 = _WEIGHT_TAIL_RE.sub("", name).strip()
+        if not family0 or family0.lower() == name.lower():
+            return None
+        f0 = _face(family0, False)
+        if f0 is None or f0[2]:
+            return None
+        sub = render_standin(family0)
+        if sub is None:
+            return None
+        tail = name[len(family0):].strip(" -_")
+        weighted = f"{sub} {tail}"
+        wf = _face(weighted, False)
+        return weighted if wf is not None and wf[2] else sub
     twin = _LO_TWINS.get(base)
     if twin:
         tf = _installed_face(twin)

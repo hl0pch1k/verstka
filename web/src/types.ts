@@ -135,7 +135,7 @@ export interface Tokens {
   backgrounds?: { family: Family; fill_kind: string; hex: string | null; slides: number[] }[];
 }
 export interface Slot { id: string; role: string; shape_id: string; bbox: BboxFrac; group_id: string | null; sample_text: string | null }
-export interface RepeatGroup { id: string; member_shape_ids: string[][]; min_n: number; max_n: number; axis: string; rows: number; cols: number }
+export interface RepeatGroup { id: string; member_shape_ids: string[][]; min_n: number; max_n: number; axis: string; rows: number; cols: number; fixed?: boolean; cell_boxes?: BboxFrac[] }
 export interface SignalVote { kind: PatternKind; confidence: number; rationale: string | null }
 export interface ClassificationTrace { kind: PatternKind; heuristic: SignalVote; llm: SignalVote | null; vlm: SignalVote | null; agreement: number; purpose: string | null }
 export interface Pattern {
@@ -151,6 +151,15 @@ export interface Pattern {
   thumbnail_url?: string;
   classification: ClassificationTrace | null;
   layout_part: string | null;
+  /** a table drawn with text boxes: its area takes the deck's native table */
+  data_box?: BboxFrac | null;
+  /** the sample's design is one picture of its own layout */
+  art_layout?: boolean;
+  /** rows of the drawn table (its header included) */
+  data_rows?: number | null;
+  /** the note field at the sample's foot («Примечание» over «Текст»): the slide's conclusion goes there */
+  note_slot?: string | null;
+  note_label?: string | null;
 }
 export interface StyleRule { text: string; source: string; confidence: number }
 export interface TemplateManifest {

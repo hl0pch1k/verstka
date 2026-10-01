@@ -2075,6 +2075,7 @@ def deck_style(builder: DeckBuilder, manifest: TemplateManifest, outline: DeckOu
     same = [p for p in pats if p.family == family]
     pilled, sizes, uppers, texted, bolds = 0, Counter(), 0, 0, 0
     title_box: Optional[Bbox] = None
+    title_layout: Optional[str] = None
     for p in same:
         try:
             src = builder.source_slide(p.source_slide)
@@ -2096,6 +2097,7 @@ def deck_style(builder: DeckBuilder, manifest: TemplateManifest, outline: DeckOu
             b = element_bbox(el)
             if b and title_box is None:
                 title_box = Bbox(x=b[0], y=b[1], w=b[2], h=b[3])
+                title_layout = p.layout_part
     pill = bool(same) and pilled >= 0.5 * len(same)
     typo = manifest.tokens.typography
     scale = sorted({s.size_pt for s in typo.scale} | {float(x) for x in (typo.sizes_used or []) if x >= 8})
@@ -2105,7 +2107,7 @@ def deck_style(builder: DeckBuilder, manifest: TemplateManifest, outline: DeckOu
     kicker = False
     if pill and heads:
         size = float(sizes.most_common(1)[0][0]) if sizes else h1
-        room = clear_width(manifest, W, H, title_box) if title_box else int(0.5 * W)
+        room = clear_width(manifest, W, H, title_box, title_layout) if title_box else int(0.5 * W)
         fails = sum(1 for h in heads if len(h.split()) > 4 or text_width_pt(h, font, size, bold) * EMU_PER_PT + int(0.06 * W) > room)
         kicker = fails > len(heads) / 3
     # one heading size for every content slide of every deck: the template's own (a long headline takes a third
@@ -2130,14 +2132,18 @@ def _place_heading(builder, slide, title_ph, canvas, oslide, manifest, ws, outli
     lede was set as the headline)."""
     from verstka.rendering.compose import Canvas, Para, Run, block_height_pt
 
+    from verstka.ru import no_orphan, typeset as _ts
+
     typo = manifest.tokens.typography
     W, H = builder.slide_w, builder.slide_h
     sx, sy, sw, sh = safe_box
+    # set the Russian way and never ending on a lone short word («…ручной / вёрстки» keeps two words on its last line)
+    head_text = no_orphan(_ts(oslide.headline or ""))
     insets = (91440, 45720, 91440, 45720)
     if title_ph is None:
         box = Bbox(x=sx, y=sy, w=sw, h=int(H * 0.16))
-        tb = _textbox(slide, box, [ParagraphSpec(oslide.headline)], size=h1, color=title_color, font=title_font, bold=title_bold, scale=scale, anchor="t")
-        res = fit_size([oslide.headline], box, title_font, h1, title_bold, scale, insets_emu=(45720, 22860, 45720, 22860), line_spacing=typo.line_height)
+        tb = _textbox(slide, box, [ParagraphSpec(head_text)], size=h1, color=title_color, font=title_font, bold=title_bold, scale=scale, anchor="t")
+        res = fit_size([head_text], box, title_font, h1, title_bold, scale, insets_emu=(45720, 22860, 45720, 22860), line_spacing=typo.line_height)
         th = int(res.height_pt * EMU_PER_PT) + 45720
         tb.height = Emu(th)
         return box.y + th, sx + 45720, False
@@ -2159,7 +2165,7 @@ def _place_heading(builder, slide, title_ph, canvas, oslide, manifest, ws, outli
             short = len(headline.split()) <= 5
             from verstka.ru import typeset
 
-            display = typeset(headline)
+            display = no_orphan(typeset(headline))
             tag = (oslide.section or "").strip() if short else _section_of(oslide, outline)
             only_label = False
             if not tag or _same_words(tag, headline):
@@ -2223,11 +2229,11 @@ def _place_heading(builder, slide, title_ph, canvas, oslide, manifest, ws, outli
             warnings.append("heading set under its label")
             return y + max(hh, one_line), bb.x, lede_used
         hctx = _SlideCtx(builder, slide, canvas, manifest, ws, outline)
-        nb = hctx._widen_on_backing(title_ph._element, (box.x, box.y, box.w, box.h), [oslide.headline], title_font, h1, title_bold, insets)
+        nb = hctx._widen_on_backing(title_ph._element, (box.x, box.y, box.w, box.h), [head_text], title_font, h1, title_bold, insets)
         box = Bbox(x=nb[0], y=nb[1], w=nb[2], h=nb[3])
         warnings.extend(hctx.warnings)
-        res = fit_size([oslide.headline], box, title_font, h1, title_bold, scale, insets_emu=insets, line_spacing=typo.line_height)
-        _fill_keep(title_ph._element, [ParagraphSpec(oslide.headline)], size_pt=res.size_pt)
+        res = fit_size([head_text], box, title_font, h1, title_bold, scale, insets_emu=insets, line_spacing=typo.line_height)
+        _fill_keep(title_ph._element, [ParagraphSpec(head_text)], size_pt=res.size_pt)
         b2 = element_bbox(back_el)
         return max(box.y2, (b2[1] + b2[3]) if b2 else box.y2), bb.x, False
     return _place_plain_heading(builder, slide, title_ph, box, oslide, manifest, pal, h1, title_color, title_bold, title_font, scale, warnings, ds, canvas)
@@ -2288,7 +2294,9 @@ def _place_plain_heading(builder, slide, title_ph, box: Bbox, oslide, manifest, 
         box = Bbox(x=box.x, y=box.y, w=w_full, h=box.h)
     # one heading size for the whole deck (never autofitted per slide unless the headline cannot fit at all)
     h1 = ds.head_size if ds is not None else max(h1, _snap_heading(0.046 * H / EMU_PER_PT, scale))
-    head_text = typeset(oslide.headline)
+    from verstka.ru import no_orphan
+
+    head_text = no_orphan(typeset(oslide.headline))
     # something the canvas keeps stands over the left part of the heading's box (a big page number «09» beside the
     # title): where the heading's letters would start under it, the heading starts after it (a centred line that
     # clears it, or an indent the template gives its heading to clear it, stays as it is)
@@ -3299,7 +3307,7 @@ def _render_cover(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: Outline
             box = Bbox(x=nb[0], y=nb[1], w=nb[2], h=nb[3])
             warnings.extend(hctx.warnings)
         else:
-            w_clear = clear_width(manifest, W, H, box)
+            w_clear = clear_width(manifest, W, H, box, canvas.layout_part if canvas is not None else None)
             if w_clear < box.w:  # never under the logos: the heading wraps instead
                 box = Bbox(x=box.x, y=box.y, w=w_clear, h=box.h)
                 _set_box(title_ph, box)

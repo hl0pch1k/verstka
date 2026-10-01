@@ -16,6 +16,14 @@ NUMERIC_RE = re.compile(r"^[\s\d.,%+×x><≈~$€₽£\-–—/]{1,10}(\s?(мл�
 _KPI_PLACEHOLDER_RE = re.compile(r"^[xхX]{1,4}\s?%?$|^[xхX]{1,3}\s?(млн|млрд|тыс|k|m)$", re.I)
 
 
+# the sample words of a heading placeholder in a card: «Заголовок», «Title», «Heading», «Название»
+_HEAD_SAMPLE_RE = re.compile(r"^\s*(заголовок|подзаголовок|название|title|heading|headline|subtitle)\b", re.I)
+
+
+def is_heading_sample(text: str) -> bool:
+    return bool(_HEAD_SAMPLE_RE.match(text or "")) and len((text or "").strip()) <= 40
+
+
 def is_numeric_text(text: str) -> bool:
     t = text.strip()
     if not t:
@@ -69,6 +77,9 @@ def is_empty_frame(s: ShapeInfo, shapes: list[ShapeInfo], slide_w: int, slide_h:
         inside = s.bbox.x <= cx <= s.bbox.x2 and s.bbox.y <= cy <= s.bbox.y2
         if inside and o.is_visual_shape and o.bbox.area >= 0.05 * s.bbox.area and o.z > s.z:
             return False  # a panel holding other cards is a background, not a slot
+        centred = abs(cx - (s.bbox.x + s.bbox.w / 2)) <= 0.25 * s.bbox.w and abs(cy - (s.bbox.y + s.bbox.h / 2)) <= 0.25 * s.bbox.h
+        if centred and o.is_visual_shape and o.bbox.area >= 0.15 * s.bbox.area and (s.fill_hex is None or s.fill_alpha < 0.5):
+            return False  # an outline drawn round an icon in its middle (LCT p24: the third icon's rounded frame) frames it
     return True
 
 
@@ -224,11 +235,16 @@ def heuristic_roles(
             if cell_texts:
                 head = cell_texts[0]
                 bold_first = next((m for m in sorted(cell_texts, key=lambda m: m.bbox.y) if m.text.bold_share > 0.5), None)
-                head = bold_first or head
+                named = next((m for m in sorted(cell_texts, key=lambda m: m.bbox.y) if is_heading_sample(m.plain_text)), None)
+                head = bold_first or named or head
+                if len(cell_texts) >= 2 and all(abs(_size(m) - _size(cell_texts[0])) < 0.5 for m in cell_texts) and not bold_first and not named:
+                    # texts of one size and weight: the first from the top heads the cell (a label over its text)
+                    head = min(cell_texts, key=lambda m: (m.bbox.y, m.bbox.x))
                 if len(cell_texts) == 1 and is_numeric_text(head.plain_text):
                     roles[head.id] = SlotRole.number
                 elif len(cell_texts) == 1:
-                    roles[head.id] = SlotRole.card_body
+                    # a lone short label written as a heading («Заголовок» on a tag, a step) is the cell's title
+                    roles[head.id] = SlotRole.card_title if is_heading_sample(head.plain_text) else SlotRole.card_body
                 else:
                     # a numeric head is a KPI (number + label), not a card title
                     roles[head.id] = SlotRole.number if is_numeric_text(head.plain_text) else SlotRole.card_title

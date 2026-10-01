@@ -157,7 +157,9 @@ def build_pattern(
         slots.append(Slot(id=slot_id, role=role, shape_id=s.id, bbox=s.bbox.to_frac(slide_w, slide_h), style=style, capacity=cap, group_id=gid, sample_text=sample, container=container))
     quality = 1.0
     if has_placeholder_text:
-        quality -= 0.15  # placeholder text means a designer-made sample: mildly penalised only for dedupe ordering
+        # placeholder text («Заголовок», «Текст») is how a designer marks a template's slots: the sample is as good,
+        # it only yields to an equal sample written with real words when two of them are deduplicated
+        quality -= 0.01
     if trace.agreement < 0.5:
         quality -= 0.3
     if trace.kind == PatternKind.freeform:
@@ -278,6 +280,54 @@ def mockup_boxes(shapes: list[ShapeInfo], slide_w: int, slide_h: int, layout_sha
 
 
 _BOOKEND_KINDS = (PatternKind.title, PatternKind.section, PatternKind.thanks, PatternKind.quote)
+
+
+_NOTE_WORDS = re.compile(r"примечан|вывод|итог|резюме|важно|главное|\bnote\b|takeaway|summary|conclusion|key point", re.I)
+_SOURCE_WORDS = re.compile(r"источник|source|сноск|footnote", re.I)
+
+
+def note_field(pattern: Pattern, body_size: float) -> tuple[Optional[str], Optional[str]]:
+    """(text, label) shape ids of the sample's note field: a text at the foot of the slide, below its cells and its
+    other texts, wide enough for a sentence and set at running size (a source line in small print is a footnote),
+    often under a short label («Примечание» on a pill over «Текст» on a band — VK WorkSpace p15). The slide's
+    conclusion goes there: dropped, the band leaves a hole at the foot of the sample."""
+    if pattern.kind in _BOOKEND_KINDS:
+        return None, None
+    texts = [s for s in pattern.slots if s.role in (SlotRole.body, SlotRole.caption, SlotRole.bullet_list) and not s.group_id]
+    content = [s for s in pattern.slots if s.role not in (SlotRole.title, SlotRole.subtitle, SlotRole.chrome, SlotRole.decoration)]
+    if not texts or len(content) < 2:
+        return None, None
+    best = None
+    for s in texts:
+        b = s.bbox
+        if b.y + b.h / 2 < 0.62 or b.w < 0.3 or (s.style.size_pt or body_size) < 0.85 * body_size:
+            continue
+        if _SOURCE_WORDS.search(s.sample_text or ""):
+            continue
+        # the lowest content of the slide: every other content box ends above its middle
+        others = [o for o in content if o.shape_id != s.shape_id]
+        if any(o.bbox.y + o.bbox.h / 2 > b.y + b.h / 2 for o in others if not (o.bbox.w < 0.3 and abs(o.bbox.y - b.y) < 0.12)):
+            continue
+        if not any(o.bbox.y2 <= b.y + 0.02 for o in others):
+            continue  # nothing above it: it is the slide's text, not a note under the content
+        best = s if best is None or b.y > best.bbox.y else best
+    if best is None:
+        return None, None
+    label = None
+    for s in texts:
+        if s.shape_id == best.shape_id:
+            continue
+        b = s.bbox
+        if len((s.sample_text or "").strip()) <= 25 and 0 <= best.bbox.y - b.y2 <= 0.12 and abs(b.x - best.bbox.x) <= 0.04 and b.w <= best.bbox.w:
+            label = s
+    hinted = bool(_NOTE_WORDS.search((label.sample_text if label else "") or "") or _NOTE_WORDS.search(best.sample_text or ""))
+    if not hinted:
+        # a text low on the slide without the word for a note is the sample's own: a speaker's name and position, an
+        # instruction of the template («Иконки можно брать из VKUI Icons»), the description of a process
+        return None, None
+    return best.shape_id, label.shape_id if label else None
+
+
 
 
 def _slot_signature(p: Pattern) -> tuple:

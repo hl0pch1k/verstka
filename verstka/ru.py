@@ -74,6 +74,20 @@ def bind_compounds(text: str) -> str:
 
 
 _ABBR2_RE = __import__("re").compile(r"(?<![А-Яа-яЁё])(п\.|т\.)\s+(п\.|е\.|д\.|к\.)")
+# a short capitalised name before a capitalised word is one brand: «VK Tech», «VK WorkSpace», «GPU Cloud» never break
+_ACRONYM_RE = __import__("re").compile(r"(?<![\w-])([A-ZА-ЯЁ]{2,4})[ ](?=[A-ZА-ЯЁ])")
+
+
+def no_orphan(text: str, last_max: int = 12) -> str:
+    """A heading or a conclusion never ends on a lone short word on its last line («…в шаблонах / VK»): its last two
+    words are joined by a no-break space (texts of three words and more, a last word of `last_max` letters at most)."""
+    if not text:
+        return text
+    t = text.rstrip()
+    i = t.rfind(" ")
+    if i <= 0 or len(t.split()) < 3 or len(t) - i - 1 > last_max:
+        return text
+    return t[:i] + NBSP + t[i + 1 :]
 
 # ---------------------------------------------------------------- figures: ranges, the minus, the percent sign (G5-16)
 
@@ -155,6 +169,7 @@ def typeset(text: str) -> str:
     t = t.replace(" ₽", NBSP + "₽")
     # «п. п.», «т. е.», «т. д.»: an abbreviation of two letters is one word on the slide («на 2 п.| п.» broke a headline)
     t = _ABBR2_RE.sub(lambda m: m.group(1) + NBSP + m.group(2), t)
+    t = _ACRONYM_RE.sub(lambda m: m.group(1) + NBSP, t)
     t = bind_compounds(t)
     words = t.split(" ")
     out = []

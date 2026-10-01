@@ -18,8 +18,8 @@ from verstka.analysis.classify import classify_slide
 from verstka.analysis.colors import ColorSample, assign_color_roles, cluster_colors, collect_color_samples, dominant_saturated_hex, has_saturated_drawn, is_drawn, is_stock_theme_color
 from verstka.analysis.components import derive_components
 from verstka.analysis.gallery import write_gallery, write_thumbnails
-from verstka.analysis.groups import detect_repeat_groups
-from verstka.analysis.patterns import build_pattern, dedupe_patterns, mockup_boxes, mockup_on_layout
+from verstka.analysis.groups import detect_drawn_table, detect_repeat_groups
+from verstka.analysis.patterns import build_pattern, dedupe_patterns, mockup_boxes, mockup_on_layout, note_field
 from verstka.analysis.rules import harvest_rules, with_fresh_derived_rules
 from verstka.analysis.ground import art_boxes, largest_free_share, painted_layers, slide_ground
 from verstka.analysis.shapes import ShapeInfo, SlideContext, extract_shapes
@@ -171,6 +171,26 @@ def text_color_on(under_hex: Optional[str], tokens: Tokens) -> Optional[str]:
         if contrast_ratio(c, under_hex) >= 4.5:
             return c
     return max(candidates, key=lambda c: contrast_ratio(c, under_hex))
+
+
+def slide_art_boxes(shapes: list[ShapeInfo], layout_shapes: Optional[list[ShapeInfo]], layout_users: int, chrome_ids: set[str], slide_w: int, slide_h: int) -> list[Bbox]:
+    """Big pictures drawn for one slide — its own, and its layout's when the layout serves at most two slides (a
+    Google Slides export draws each sample's tiles, tags or staircase as one picture of a layout of its own): the
+    cells standing on them cannot change their count."""
+    out: list[Bbox] = []
+    area = float(slide_w * slide_h)
+    for s in shapes:
+        if s.id in chrome_ids or not (s.kind == ShapeKind.pic or (s.kind == ShapeKind.sp and s.image_part)):
+            continue
+        if 0.3 * area <= s.bbox.area <= 1.05 * area:
+            out.append(s.bbox)
+    if layout_shapes and 0 < layout_users <= 2:
+        for s in layout_shapes:
+            if s.is_placeholder or not (s.kind == ShapeKind.pic or (s.kind == ShapeKind.sp and s.image_part)):
+                continue
+            if 0.3 * area <= s.bbox.area <= 1.05 * area:
+                out.append(s.bbox)
+    return out
 
 
 def analyze_template(
@@ -383,9 +403,20 @@ def analyze_template(
     # 6. spacing (preliminary) and groups
     spacing = compute_spacing(shapes_by_slide, chrome_by_slide, slide_w, slide_h, min_column_share=float(cfg.get("spacing", {}).get("min_column_share", 0.25)))
     groups_by_slide = {}
+    tables_by_slide: dict[int, tuple] = {}
+    art_by_slide: dict[int, list[Bbox]] = {}
     gaps: list[float] = []
     for i, shapes in shapes_by_slide.items():
-        groups = detect_repeat_groups(shapes, slide_w, slide_h, chrome_ids=chrome_by_slide[i], safe_area=spacing.safe_area, size_tol=float(cfg.get("groups", {}).get("size_tolerance", 0.06)))
+        lp = layout_by_slide.get(i)
+        art_by_slide[i] = slide_art_boxes(shapes, layout_shapes.get(lp) if lp else None, len(layout_users.get(lp, [])) if lp else 0, chrome_by_slide[i], slide_w, slide_h)
+        table = detect_drawn_table(shapes, slide_w, slide_h, chrome_by_slide[i])
+        if table is not None:
+            tables_by_slide[i] = table
+        groups = detect_repeat_groups(
+            shapes, slide_w, slide_h, chrome_ids=chrome_by_slide[i], safe_area=spacing.safe_area,
+            size_tol=float(cfg.get("groups", {}).get("size_tolerance", 0.06)), art_boxes=art_by_slide[i],
+            exclude_ids=table[1] if table is not None else None,
+        )
         groups_by_slide[i] = groups
         gaps.extend(g.gap for g in groups if g.axis == "row" and g.gap > 0)
     spacing = compute_spacing(shapes_by_slide, chrome_by_slide, slide_w, slide_h, gaps=gaps, min_column_share=float(cfg.get("spacing", {}).get("min_column_share", 0.25)))
@@ -425,6 +456,7 @@ def analyze_template(
             template_summary=summary,
             weights=weights,
             role_override_confidence=override,
+            table=tables_by_slide.get(i),
         )
 
     results = {}
@@ -486,6 +518,13 @@ def analyze_template(
             pat.layout_type = pkg.xml(lp).get("type") if lp else None
         except Exception as e:  # noqa: BLE001
             log.warning("mock-ups of slide %d failed: %s", pat.source_slide, e)
+    for pat in patterns:
+        tb = tables_by_slide.get(pat.source_slide)
+        if tb is not None:
+            pat.data_box = tb[0].to_frac(slide_w, slide_h)
+            pat.data_rows = tb[2] if len(tb) > 2 else None
+        pat.art_layout = any(b.area >= 0.5 * slide_w * slide_h for b in art_by_slide.get(pat.source_slide, []))
+        pat.note_slot, pat.note_label = note_field(pat, typography.size_for("body", 14.0))
     patterns = dedupe_patterns(patterns)
     # the safe area's foot, now that the samples are classified (content samples vs covers)
     body_feet: dict[int, list[float]] = {}

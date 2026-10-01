@@ -19,6 +19,7 @@ Hard rules:
    Leave the fields the form does not use empty.
 11. rationale: one sentence in {{ language }}: why this form suits this content.
 12. alternatives: exactly 2 other forms of the same content: first a more visual one (a chart or big figures, when the data allows it), then a more compact one (a table, two columns or a short list). Each: {"kind": "...", "chart_type": null, "why": "a few words"}.
+13. The template: the request lists the template's ready slides (designed slides of each form and how many items they hold). Prefer a form and a count of items the template has a ready slide for — cards rather than a plain list when the source gives 3–6 parallel ideas, steps when it gives an order — but only with the items the source gives: never merge, split or invent items to reach a count. A deck reads better when its slides do not repeat one form: when two forms suit the content equally, take the one the template draws in a more distinctive way (cards with the template's illustrations, numbered steps, big figures).
 
 Visual-form guide:
 - share of a whole (2–7 parts summing to about 100% or to a total) → chart pie or doughnut;
