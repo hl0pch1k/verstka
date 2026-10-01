@@ -81,6 +81,7 @@ class _SlideCtx:
         # whether the slide keeps the sample's content pictures (it has an image of its own); when it does not, the
         # big pictures in cards are dropped at the end and must not hold text back while it is being placed
         self.keeps_pictures = True
+        self.oslide_content = None  # the slide's content (its chart or table replaces the sample's figures)
         self.band_limited = False  # the heading being filled stands in a layout/master band (T12)
         self.tail_room = 0  # room kept free under the content for the conclusion and the footnote
         self.notes_floor: Optional[int] = None  # the line the conclusion and the footnote stand on
@@ -359,6 +360,8 @@ class _SlideCtx:
                 continue
             if etree.QName(other).localname == "sp" and not shape_text(other).strip() and not _has_fill(other):
                 continue  # an empty frame draws nothing
+            if self.replaced(other):
+                continue  # the sample's chart picture or drawn chart: the slide's own chart takes its place, under the text
             ob = Bbox(x=b[0], y=b[1], w=b[2], h=b[3])
             if ob.contains_point(bx.x + bx.w / 2, bx.y + int(0.01 * self.H)) and ob.area < 0.5 * self.W * self.H and _has_fill(other) and not shape_text(other).strip():
                 # the card the text starts in: the text keeps inside it, a padding above its foot
@@ -373,12 +376,40 @@ class _SlideCtx:
                 limit = min(limit, a.y - gap)
         return limit if limit > bx.y2 + int(0.01 * self.H) else None
 
+    def replaced(self, el: etree._Element) -> bool:
+        """The element leaves for the slide's own chart or table: a picture of the sample's figures (a chart drawn as
+        a picture) or a shape of the area the sample draws its chart or table in."""
+        c = self.oslide_content
+        if c is None or (c.chart is None and c.table is None):
+            return False
+        sid = self.id_of(el) or ""
+        if sid in (self.slide.__dict__.get("_verstka_native") or ()):
+            return False  # the slide's own chart or table, its caption and legend
+        if etree.QName(el).localname == "pic" and self.pic_kind.get(self.origin.get(sid, sid)) == "content":
+            return True
+        if sid in self.pattern.chrome_shape_ids:
+            return False
+        b = element_bbox(el)
+        if not b:
+            return False
+        db = self.pattern.data_box
+        if db is not None:
+            return db.to_emu(self.W, self.H).contains_point(b[0] + b[2] / 2, b[1] + b[3] / 2)
+        if self.pattern.kind in (PatternKind.chart, PatternKind.table) and not any(x.role == SlotRole.image and x.bbox.area >= 0.08 for x in self.pattern.slots):
+            # a chart sample drawn with pictures and shapes (WorkSpace p20: two doughnuts under «Графики»): all of it
+            # under the heading gives way to the slide's chart (`_place_native_object`)
+            keep = {x.shape_id for x in self.pattern.slots if x.role in (SlotRole.title, SlotRole.subtitle)}
+            return self.origin.get(sid, sid) not in keep and b[1] > 0.12 * self.H
+        return False
+
     def art_boxes(self) -> list[Bbox]:
         """The painted parts of the template's art kept on the slide (3D renders, illustrations)."""
         out = []
         for sid, o in self.els.items():
             tag = etree.QName(o).localname
             if o.getparent() is None or tag not in ("pic", "sp", "grpSp") or is_nested(o):
+                continue
+            if self.replaced(o):
                 continue
             if tag != "pic" and o.find(".//" + q("a:blip")) is None:
                 continue
@@ -1842,7 +1873,7 @@ def _place_native_object(ctx: _SlideCtx, oslide: OutlineSlide) -> None:
     manifest = ctx.manifest
     drawn = _drawn_table_area(ctx)
     if drawn is not None:
-        _draw_native(ctx, oslide, _reserve_notes_room(ctx, oslide, drawn))
+        _draw_native(ctx, oslide, _below_heading(ctx, _reserve_notes_room(ctx, oslide, drawn)))
         return
     # sample charts/tables/images on the slide are replaced by the native object
     candidates = ctx.slots(SlotRole.image)
@@ -1921,9 +1952,22 @@ def _place_native_object(ctx: _SlideCtx, oslide: OutlineSlide) -> None:
 
 
 def _texts_beside_chart(ctx: _SlideCtx, oslide: OutlineSlide) -> bool:
-    """The slide's lines have no text slot, but the sample is a chart drawn over the width of the slide (a data area
-    of its own): they are set beside the chart inside that area — the template's chart slide, not a composed one."""
-    return oslide.content.chart is not None and ctx.pattern.data_box is not None and ctx.pattern.data_kind == "chart" and ctx.pattern.data_box.w >= 0.6
+    """The slide's lines have no text slot, but the sample is a chart drawn over the width of the slide — a data area
+    of its own (VK Tech p41, p44, p52) or a chart picture half the slide wide and more (Education p48, p50): they are
+    set beside the chart inside that area — the template's chart slide, not a composed one."""
+    if oslide.content.chart is None:
+        return False
+    db = ctx.pattern.data_box
+    if db is not None and ctx.pattern.data_kind == "chart" and db.w >= 0.6:
+        return True
+    if ctx.pattern.kind != PatternKind.chart:
+        return False
+    boxes = [s.bbox for s in ctx.pattern.slots if s.role == SlotRole.image and s.bbox.area >= 0.05] + [b for b in ctx.pattern.decor_boxes if b.area >= 0.05]
+    if not boxes:
+        return False
+    x0, y0 = min(b.x for b in boxes), min(b.y for b in boxes)
+    x1, y1 = max(b.x2 for b in boxes), max(b.y2 for b in boxes)
+    return x1 - x0 >= 0.5 and (x1 - x0) * (y1 - y0) >= 0.3
 
 
 def _content_picture_area(ctx: _SlideCtx) -> Optional[Bbox]:
@@ -1932,7 +1976,7 @@ def _content_picture_area(ctx: _SlideCtx) -> Optional[Bbox]:
     from verstka.rendering.clone_check import ink_box
     from verstka.rendering.layers import opaque_box
 
-    best = None
+    boxes = []
     for sid, el in ctx.els.items():
         if sid in ctx.removed or el.getparent() is None or is_nested(el) or etree.QName(el).localname != "pic":
             continue
@@ -1942,9 +1986,15 @@ def _content_picture_area(ctx: _SlideCtx) -> Optional[Bbox]:
         if not b or b[2] <= 0 or b[3] <= 0:
             continue
         ob = opaque_box(ctx.slide.part, el, Bbox(x=b[0], y=b[1], w=b[2], h=b[3]))
-        if ob.area >= 0.15 * ctx.W * ctx.H and (best is None or ob.area > best.area):
-            best = ob
-    if best is None:
+        if ob.area >= 0.05 * ctx.W * ctx.H:
+            boxes.append(ob)
+    if not boxes:
+        return None
+    # two charts drawn side by side (WorkSpace p20: two doughnuts under «Графики»): the slide's one chart takes both
+    best = boxes[0]
+    for b in boxes[1:]:
+        best = best.union(b)
+    if best.area < 0.15 * ctx.W * ctx.H:
         return None
     safe = ctx.manifest.tokens.spacing.safe_area.to_emu(ctx.W, ctx.H)
     x0, x1 = max(best.x, safe.x), min(best.x2, safe.x2)
@@ -5002,6 +5052,7 @@ def render_clone(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
         ctx.tail_room, ctx.notes_floor = notes_need(builder, slide, o_notes, outline, manifest, pattern)
     c = oslide.content
     ctx.keeps_pictures = bool(c.image_hint or c.chart is not None or c.table is not None)
+    ctx.oslide_content = c
     if not _is_bookend(oslide):
         # the sample's own largest empty stretch, before anything is taken off: the gate compares the slide with it;
         # and where the sample's own words stand (a text it sets over its art is the design — as far as it goes)
@@ -5166,6 +5217,9 @@ def render_clone(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
 
     # native chart / table
     if c.chart is not None or c.table is not None:
+        # the heading takes its final size first (over two lines where the sample's chart area gives way to the slide's
+        # own): the object is then set under it, not under a heading that steps down to keep to one line
+        ctx.retry_heading()
         _place_native_object(ctx, oslide)
 
     # illustration by hint

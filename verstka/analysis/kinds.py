@@ -57,7 +57,8 @@ def heuristic_kind(
         return PatternKind.process, 0.6
     # a picture of a chart under a heading that names it (VK Education: «Пример оформления графика», «Гистограмма и
     # диаграмма с областями» — PNG charts with a legend of dots): a chart sample, the native chart takes its place
-    big_pics = [s for s in shapes if roles.get(s.id) == SlotRole.image and s.bbox.area / slide_area >= 0.08]
+    # (by role an image or the sample's decoration: the analysis reads a picture of a chart as the latter)
+    big_pics = [s for s in shapes if s.kind == ShapeKind.pic and roles.get(s.id) in (SlotRole.image, SlotRole.decoration) and s.bbox.area / slide_area >= 0.08]
     if _CHART_WORDS.search(title_text) and 1 <= len(big_pics) <= 2 and sum(s.bbox.area for s in big_pics) / slide_area >= 0.25:
         return PatternKind.chart, 0.8
 
