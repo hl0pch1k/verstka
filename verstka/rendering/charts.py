@@ -1680,8 +1680,15 @@ def _unit_shown_above(slide: Slide, bbox: Bbox, unit_full: str) -> bool:
         if not getattr(shp, "has_text_frame", False) or shp.top is None or shp.height is None:
             continue
         t = " ".join(shp.text_frame.text.replace(" ", " ").split()).lower()
-        if not t or u.replace(" ", " ") not in t:
+        if not t:
             continue
+        if u.replace("\u00a0", " ") not in t.replace("\u00a0", " "):
+            # (the caption named the series in another form of the unit's word — «Проверки» over «проверок»: the
+            # composer dropped the unit as a repeat, the chart must not print it as its title either)
+            from verstka.rendering.compose import _same_stem
+
+            if len(t.split()) > 6 or not _same_stem(unit_full, t):
+                continue  # (a caption, not a heading that happens to share the word)
         bottom = shp.top + shp.height
         overlap = min(shp.left + shp.width, bbox.x + bbox.w) - max(shp.left, bbox.x)
         if overlap > 0 and bbox.y - 0.14 * sh <= bottom <= bbox.y + 0.03 * sh:

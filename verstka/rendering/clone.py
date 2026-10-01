@@ -328,6 +328,29 @@ class _SlideCtx:
         grown = self._room_below(el, b) if b else None
         if grown is None:
             return
+        # a heading printed on a band or a tab (LibreOffice «Freshes»: teal type on a white tab over a teal slide)
+        # keeps inside it: past its foot the letters stand on the slide's ground in the band's colour
+        for o in self.els.values():
+            if o is el or o.getparent() is None or is_nested(o) or etree.QName(o).localname not in ("sp", "pic"):
+                continue
+            if etree.QName(o).localname == "sp" and (shape_text(o).strip() or not _has_fill(o)):
+                continue
+            ob = element_bbox(o)
+            if not ob or ob[2] * ob[3] >= 0.3 * self.W * self.H:
+                continue
+            if ob[0] <= b[0] + int(0.01 * self.W) < ob[0] + ob[2] and ob[1] <= b[1] + int(0.01 * self.H) < ob[1] + ob[3]:
+                grown = min(grown, ob[1] + ob[3])
+        try:
+            from verstka.rendering.layers import heading_band
+
+            band = heading_band(self.slide, Bbox(x=b[0], y=b[1], w=b[2], h=b[3]))  # a band the layout paints under it
+            band = getattr(band, "box", band)
+            if isinstance(band, Bbox) and band.y <= b[1] + int(0.01 * self.H) < band.y2:
+                grown = min(grown, band.y2)
+        except Exception:  # noqa: BLE001 - no band known
+            pass
+        if grown <= b[1] + b[3]:
+            return
         texts = [p for p in shape_text(el).split("\n")]
         family = t.style.font_family or self.typo.primary_family
         box2 = Bbox(x=b[0], y=b[1], w=b[2], h=grown - b[1])

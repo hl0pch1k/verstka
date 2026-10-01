@@ -201,12 +201,17 @@ def _canvas_among(manifest: TemplateManifest, family: Family, kinds, grid: bool)
         else:
             if p.kind in _NOT_CONTENT_CANVAS or title.bbox.y > 0.3 or title.bbox.w < 0.2:
                 continue
+            if len([ln for ln in (title.sample_text or "").splitlines() if ln.strip()]) >= 3:
+                continue  # the «title» is the agenda's list itself (Dark Minimalist p3: «1.Introduction / 2.About Us…»)
             if grid and not _on_grid(manifest, title):
                 continue
             rank = 0
         big_pictures = sum(1 for s in p.slots if s.role == SlotRole.image and s.bbox.area >= 0.05) + sum(1 for b in p.decor_boxes if b.area >= 0.05)
         clutter = len(p.slots) + sum(len(g.member_shape_ids) for g in p.repeat_groups) + len(p.decor_assets) + 5 * big_pictures
-        key = (rank, clutter, -p.quality, p.source_slide)
+        # (a content heading stands at the top: a canvas whose heading sits lower — mid-left beside its content — sets
+        # the composed slides' headings lower than the deck's other headings)
+        low = kinds is None and title.bbox.y > 0.2
+        key = (rank, low, clutter, -p.quality, p.source_slide)
         if best is None or key < best[0]:
             best = (key, p)
     return best[1] if best else None
