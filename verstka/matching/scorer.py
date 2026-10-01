@@ -589,6 +589,15 @@ def score_pattern(
         if cell_cap >= 120 and need_cell < 0.2 * cell_cap:
             kind *= 0.85
             reasons.append(f"ячейки образца рассчитаны на текст в {cell_cap // max(need_cell, 1)} раз длиннее")
+    c_list = slide.content
+    if not items0 and (c_list.bullets or c_list.paragraphs) and slide.kind not in _BOOKEND_KINDS:
+        # three short lines in a text panel drawn for a page of text (LCT p13: a white panel two thirds of the slide
+        # under «Переход на инференс…») stand in its top corner: a sample with a smaller field says them better
+        big = max((x for x in pattern.slots if x.role in (SlotRole.body, SlotRole.bullet_list) and not x.group_id), key=lambda x: x.capacity.max_chars, default=None)
+        need_list = sum(len(b) + 2 for b in c_list.bullets) + sum(len(t) + 1 for t in c_list.paragraphs)
+        if big is not None and big.bbox.area >= 0.25 and big.capacity.max_chars >= 300 and need_list < 0.2 * big.capacity.max_chars:
+            kind *= 0.8
+            reasons.append(f"поле текста образца рассчитано на текст в {big.capacity.max_chars // max(need_list, 1)} раз длиннее")
     # hard gates: a pattern without room for the slide's content would render a headline over stale sample shapes
     content = slide.content
     needed_roles = _needed_chars(slide)

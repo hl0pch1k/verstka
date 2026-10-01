@@ -1920,6 +1920,12 @@ def _place_native_object(ctx: _SlideCtx, oslide: OutlineSlide) -> None:
     _draw_native(ctx, oslide, box)
 
 
+def _texts_beside_chart(ctx: _SlideCtx, oslide: OutlineSlide) -> bool:
+    """The slide's lines have no text slot, but the sample is a chart drawn over the width of the slide (a data area
+    of its own): they are set beside the chart inside that area — the template's chart slide, not a composed one."""
+    return oslide.content.chart is not None and ctx.pattern.data_box is not None and ctx.pattern.data_kind == "chart" and ctx.pattern.data_box.w >= 0.6
+
+
 def _content_picture_area(ctx: _SlideCtx) -> Optional[Bbox]:
     """The painted part of the sample's largest content picture (a chart or a screenshot `analysis.pictures` reads as
     the sample's own story) — clipped to the safe area and set under the texts above it that stay — or None."""
@@ -2000,8 +2006,16 @@ def _draw_native(ctx: _SlideCtx, oslide: OutlineSlide, box: Bbox) -> None:
     # drawn after a rolled-back clone took the address of a shape of the old tree and passed for the sample's own)
     before_native = set(tree0)
     try:
-        comp = clone_composer(ctx, oslide, box)
-        if c.chart is not None:
+        by_chart = bool(ctx.slide.__dict__.get("_verstka_text_by_chart"))
+        # (the slide's lines with no text slot of their own go beside the chart, set by the design system the way a
+        # composed slide sets them — its conclusion stays the strip under the content, `clone_notes`)
+        comp = clone_composer(ctx, oslide.model_copy(update={"takeaway": None}) if by_chart else oslide, box)
+        if c.chart is not None and by_chart:
+            n0 = len(tree0)
+            comp.chart(box)
+            if not any(etree.QName(x).localname == "graphicFrame" for x in list(tree0)[n0:]):
+                raise RuntimeError("the chart beside its lines could not be drawn")
+        elif c.chart is not None:
             # a pie in an area the width of the slide stands in its middle with its legend, not at its left edge
             err = comp._chart_block(box, c.chart, prominent=False, center=box.w >= 0.6 * ctx.W)
             if err:
@@ -4090,10 +4104,11 @@ def _snap_up(size: float, sizes: list[float]) -> float:
 
 
 def _snap_display(size: float, sizes: list[float]) -> float:
-    """A display size of the template's own scale when one is close below (38.4 pt → 36 pt), else an even point
-    size (45.6 pt → 44 pt): no heading is set at 45.6 pt."""
+    """A display size of the template's own scale when one is close below (38.4 pt → 36 pt; a cover title that fits
+    at 78 pt takes the template's 64 pt rather than a size the template never sets), else an even point size
+    (45.6 pt → 44 pt): no heading is set at 45.6 pt."""
     on_scale = _snap_down(size, sizes)
-    if on_scale >= 0.88 * size:
+    if on_scale >= 0.8 * size:
         return on_scale
     if size >= 24:
         return float(int(size) // 2 * 2)  # 45.6 → 44, 57 → 56
@@ -5119,6 +5134,8 @@ def render_clone(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
             ctx.fill_slot(big, [ParagraphSpec(b, bullet=True) for b in c.bullets], size_hint=_running_size(big), grow_to=cap)
             if short:
                 _breathe(ctx, ctx.els.get(big.shape_id))
+        elif _texts_beside_chart(ctx, oslide):
+            ctx.slide.__dict__["_verstka_text_by_chart"] = True  # set with the chart in the sample's data area
         else:
             ctx.warnings.append("no slot for bullets")
     if c.paragraphs:
@@ -5128,6 +5145,8 @@ def render_clone(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
             lone = len(c.paragraphs) == 1 and len(c.paragraphs[0].split()) <= 25 and not c.bullets and not items
             cap = max(body_cap, ctx.typo.size_for("h1", body_cap) * 0.75) if lone else text_cap
             ctx.fill_slot(big, [ParagraphSpec(p, bullet=False) for p in c.paragraphs], size_hint=_running_size(big), grow_to=cap)
+        elif _texts_beside_chart(ctx, oslide):
+            ctx.slide.__dict__["_verstka_text_by_chart"] = True
         elif oslide.kind not in (PatternKind.chart, PatternKind.table):
             ctx.warnings.append("no slot for paragraphs")
     if c.quote:
