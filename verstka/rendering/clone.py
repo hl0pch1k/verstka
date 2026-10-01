@@ -1893,6 +1893,24 @@ def _fill_note_field(ctx: _SlideCtx, oslide: OutlineSlide) -> None:
     ctx.slide.__dict__["_verstka_takeaway_set"] = True
 
 
+def _fill_side_note(ctx: _SlideCtx, oslide: OutlineSlide) -> None:
+    """The slide's conclusion goes into the sample's text column beside its table or chart (VK Tech p34, p37: an
+    «Описание» line over the empty left half, the table in the right one) when the slide has no lede of its own for
+    it: the column says what the data shows instead of standing empty, and no strip is added under the table."""
+    take = " ".join((oslide.takeaway or "").split())
+    db = ctx.pattern.data_box
+    if not take or db is None or (oslide.subtitle or "").strip() or ctx.slide.__dict__.get("_verstka_takeaway_set"):
+        return
+    side = [x for x in ctx.slots(SlotRole.subtitle, SlotRole.body, SlotRole.caption) if not x.group_id and x.shape_id not in ctx.filled
+            and x.bbox.w >= 0.2 and (x.bbox.x2 <= db.x + 0.03 or x.bbox.x >= db.x2 - 0.03) and x.shape_id in ctx.els and ctx.els[x.shape_id].getparent() is not None]
+    if not side:
+        return
+    slot = max(side, key=lambda x: x.bbox.w * x.bbox.h)
+    lead = ctx.typo.size_for("lead", ctx.typo.size_for("body", 14.0) * 1.25)
+    ctx.fill_slot(slot, [ParagraphSpec(take[:1].upper() + take[1:], bullet=False)], min_ratio=0.8, size_hint=max(slot.style.size_pt or 0.0, lead))
+    ctx.slide.__dict__["_verstka_takeaway_set"] = True
+
+
 def _place_native_object(ctx: _SlideCtx, oslide: OutlineSlide) -> None:
     c = oslide.content
     manifest = ctx.manifest
@@ -5172,6 +5190,7 @@ def render_clone(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
             except Exception:  # noqa: BLE001
                 ctx.lede_top = None
     _fill_note_field(ctx, oslide)
+    _fill_side_note(ctx, oslide)
 
     # repeated items (cards, KPIs, steps, columns) — bullets too when the pattern is a list of cells
     items = _items_for(oslide)
