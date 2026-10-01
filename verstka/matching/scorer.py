@@ -335,6 +335,9 @@ def _number_holders(pattern: Pattern, group) -> int:
     return standalone
 
 
+_MONEY_RE = re.compile(r"[₽$€£¥]|\bруб|\brub|\busd|\beur", re.I)
+
+
 def chart_picture_room(slide: OutlineSlide, pattern: Pattern, pictures: Optional[list]) -> float:
     """The area (share of the slide) of the sample's picture that shows a chart or data — `analysis.pictures` reads it
     as the sample's content, not as art — when the slide carries a chart or a table to put in its place; 0 otherwise.
@@ -589,6 +592,14 @@ def score_pattern(
         if cell_cap >= 120 and need_cell < 0.2 * cell_cap:
             kind *= 0.85
             reasons.append(f"ячейки образца рассчитаны на текст в {cell_cap // max(need_cell, 1)} раз длиннее")
+    if slide.content.numbers:
+        # a price list (tariff cards: «259 ₽» over «279 ₽» struck through, a discount pill, a «Кнопка»): its figures are
+        # prices — the slide's months and multiples on it read as a shop window
+        prices = [x for x in pattern.slots if x.role == SlotRole.number and x.sample_text and _MONEY_RE.search(x.sample_text)]
+        money = [n for n in slide.content.numbers if _MONEY_RE.search(n.value or "")]
+        if len(prices) >= 2 and len(money) < len(slide.content.numbers):
+            kind *= 0.3
+            reasons.append("числа образца — цены, у слайда другие числа")
     c_list = slide.content
     if not items0 and (c_list.bullets or c_list.paragraphs) and slide.kind not in _BOOKEND_KINDS:
         # three short lines in a text panel drawn for a page of text (LCT p13: a white panel two thirds of the slide

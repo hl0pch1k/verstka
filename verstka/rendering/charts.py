@@ -2275,8 +2275,10 @@ def _style_bars(k: _Kit) -> None:
                 if v is None:
                     pts[j] = {"delete": True}
                 elif v == 0:
-                    # a real zero: a column simply has none; a bar row says «0» at the axis instead of looking empty
-                    pts[j] = {"fmt": "0", "color": k.muted} if horizontal else {"delete": True}
+                    # a real zero: a column simply has none; a bar row says «0» at the axis instead of looking empty —
+                    # unless another series' bar fills the row (a «0» beside «38» of the other series is noise)
+                    row_shown = multi and any((values[o][j] or 0) != 0 for o in range(len(values)) if o != i and j < len(values[o]))
+                    pts[j] = {"fmt": "0", "color": k.muted} if horizontal and not row_shown else {"delete": True}
             if not multi and hl is not None and hl not in pts:
                 pts[hl] = k.hl_label(fs_val / k.fs_value if k.fs_value else 1.0)
             elif not multi and emph is not None and emph not in pts:

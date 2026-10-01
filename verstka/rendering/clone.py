@@ -1134,7 +1134,9 @@ def _fill_cells(ctx: _SlideCtx, items: list[SlideItem], use_ordinals: bool = Tru
         if len(vals) >= 2 and vals[0] in (0, 1) and vals == list(range(vals[0], vals[0] + len(vals))):
             use_ordinals = True
     n_numeric = sum(1 for i in items if i.number)
-    per_cell = max(1, src_roles.count(SlotRole.number)) if numeric_items else 1
+    # (several figures a cell only when the figures outnumber the cells: two figures and three price cards are one
+    # figure a card, not both in the first card and the others empty — VK Tech p50)
+    per_cell = max(1, src_roles.count(SlotRole.number)) if numeric_items and n_numeric > max(len(orig), group.max_n or 0) else 1
     n_needed = -(-len(items) // per_cell)
     # titles, subtitles and companion cells are never riders: companions are mapped to their primary cell below
     protected = {sl.shape_id for sl in ctx.pattern.slots if sl.role in (SlotRole.title, SlotRole.subtitle)}
