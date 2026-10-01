@@ -16,6 +16,14 @@ NUMERIC_RE = re.compile(r"^[\s\d.,%+×x><≈~$€₽£\-–—/]{1,10}(\s?(мл�
 _KPI_PLACEHOLDER_RE = re.compile(r"^[xхX]{1,4}\s?%?$|^[xхX]{1,3}\s?(млн|млрд|тыс|k|m)$", re.I)
 
 
+# the words a template writes into a picture place it draws as a shape: «Иллюстрация», «Вставить фото», «Image»
+_PICTURE_PLACE_RE = re.compile(
+    r"^(иллюстрация|изображение|картинка|фото(графия)?|скриншот|вставить\s+(фото|изображение|картинку|иллюстрацию|скриншот)"
+    r"|место\s+(для|под)\s+(фото|изображени[ея]|иллюстрации)|image|picture|photo|illustration|screenshot"
+    r"|insert\s+(an?\s+)?(image|photo|picture|illustration))\.?$",
+    re.I,
+)
+
 # the sample words of a heading placeholder in a card: «Заголовок», «Title», «Heading», «Название»
 _HEAD_SAMPLE_RE = re.compile(r"^\s*(заголовок|подзаголовок|название|title|heading|headline|subtitle)\b", re.I)
 
@@ -31,6 +39,41 @@ def is_numeric_text(text: str) -> bool:
     if _KPI_PLACEHOLDER_RE.match(t):
         return True
     return bool(NUMERIC_RE.match(t)) and any(ch.isdigit() for ch in t)
+
+
+def figure_head(s: ShapeInfo, body_size: float = 14.0) -> Optional[float]:
+    """The size of a figure written over its own label in one text box — «ххх%» at 80 pt, a line break, «данные
+    показателя» at 16 pt (VK WorkSpace p17), «22%» over «пояснение» in a ring (VK Education p46) — or None. The first
+    line is a figure (or the template's «xx%» for one) set large; the rest of the box, under it, is set at most 0.6 of
+    that size."""
+    if s.text is None:
+        return None
+    paras = [p for p in s.text.paragraphs if p.text.strip()]
+    if not paras:
+        return None
+    p0 = paras[0]
+    lines = p0.text.split("\n")
+    first = lines[0].strip()
+    rest = "\n".join(lines[1:]).strip()
+    if not first or not is_numeric_text(first) or not (rest or len(paras) > 1):
+        return None
+    n_first = len(lines[0])
+    pos = 0
+    head: list[float] = []
+    tail: list[float] = []
+    for r in p0.runs:
+        if not r.text:
+            continue
+        (head if pos < n_first else tail).append(r.size_pt or 0.0)
+        pos += len(r.text)
+    for p in paras[1:]:
+        tail += [r.size_pt or 0.0 for r in p.runs if r.text.strip()]
+    if not head or not tail:
+        return None
+    h = max(head)
+    if h < max(body_size * 1.6, 20.0) or max(tail) > 0.6 * h:
+        return None
+    return h
 
 
 def _size(s: ShapeInfo) -> float:
@@ -166,6 +209,14 @@ def heuristic_roles(
     if title is not None:
         roles[title.id] = SlotRole.title
 
+    # a picture place the template draws as a shape — a frame with «Иллюстрация» or «Вставить фото» in it (VK
+    # WorkSpace p18: a dashed blue panel half the slide wide) — is the sample's picture slot, not a text of the slide
+    for s in texts:
+        if s.id in roles or s.kind != ShapeKind.sp or not s.is_visual_shape or s.bbox.area / slide_area < 0.04:
+            continue
+        if _PICTURE_PLACE_RE.match(" ".join(s.plain_text.split())):
+            roles[s.id] = SlotRole.image
+
     # subtitle
     for s in texts:
         if s.id in roles:
@@ -205,6 +256,8 @@ def heuristic_roles(
         if is_numeric_text(s.plain_text) and _size(s) >= max(body_size * 1.6, 20.0):
             roles[s.id] = SlotRole.number
             numbers.append(s)
+        elif figure_head(s, body_size) is not None:
+            roles[s.id] = SlotRole.number  # a figure over its label in one box: the box is the figure's, label and all
     for n in numbers:
         best = None
         best_d = 1e18

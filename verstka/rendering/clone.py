@@ -88,6 +88,8 @@ class _SlideCtx:
         self.lede_top: Optional[int] = None  # the cells start under the subtitle line set under the heading
         self.overflowed: list = []  # (warning, element, texts, family, size, bold, min_ratio) of boxes that did not fit
         self.harmonized: list[list[etree._Element]] = []  # texts set at one size across cards (`_harmonize`)
+        self.compound_ids: set[str] = set()  # boxes written as a figure over its label (`_fill_compound`)
+        self.pattern_text_ids: set[str] = {s.shape_id for s in pattern.slots if s.role in TEXT_ROLES}
         self.goal_to_place: Optional[str] = None  # a cover goal that left its place under the subtitle (C3-1)
         # what the sample's pictures are (analysis/pictures.py): its art stays with new content
         try:
@@ -202,8 +204,11 @@ class _SlideCtx:
             box = self._widen_on_backing(el, box, [p.text for p in paragraphs], family, size, bold, insets)
         if self.band_limited:
             min_ratio = min(min_ratio, 0.55)  # a heading in a band steps down rather than leaving the band
+        # a heading steps down the template's own sizes, never to a size in between (Dark Minimalist: 43.7 pt, a size
+        # the template never sets, between its 47 and 56) — when the scale has a step within reach; it grows a line first
+        ladder = bool(slot is not None and slot.role == SlotRole.title and any(0.75 * size <= x < size - 0.05 for x in self.grow_scale))
         if box and box[2] > 0 and box[3] > 0:
-            res = fit_size([p.text for p in paragraphs], Bbox(x=box[0], y=box[1], w=box[2], h=box[3]), family, size, bold, self.grow_scale, insets_emu=insets, line_spacing=self.line_height_of(el), min_ratio=min_ratio)
+            res = fit_size([p.text for p in paragraphs], Bbox(x=box[0], y=box[1], w=box[2], h=box[3]), family, size, bold, self.grow_scale, insets_emu=insets, line_spacing=self.line_height_of(el), min_ratio=min_ratio, ladder_only=ladder)
             target_size = res.size_pt
             if grow_to and res.fits and target_size >= size:
                 target_size = grow_size([p.text for p in paragraphs], Bbox(x=box[0], y=box[1], w=box[2], h=box[3]), family, target_size, bold, self.grow_scale, grow_to, insets_emu=insets, line_spacing=self.line_height_of(el))
@@ -211,7 +216,7 @@ class _SlideCtx:
                 grown = self._room_below(el, box)
                 if grown is not None:
                     box2 = (box[0], box[1], box[2], grown - box[1])
-                    res2 = fit_size([p.text for p in paragraphs], Bbox(x=box2[0], y=box2[1], w=box2[2], h=box2[3]), family, size, bold, self.grow_scale, insets_emu=insets, line_spacing=self.line_height_of(el), min_ratio=min_ratio)
+                    res2 = fit_size([p.text for p in paragraphs], Bbox(x=box2[0], y=box2[1], w=box2[2], h=box2[3]), family, size, bold, self.grow_scale, insets_emu=insets, line_spacing=self.line_height_of(el), min_ratio=min_ratio, ladder_only=ladder)
                     if res2.fits:
                         set_element_pos(el, h=box2[3])
                         bp = el.find(q("p:txBody") + "/" + q("a:bodyPr"))
@@ -386,7 +391,7 @@ class _SlideCtx:
             if self.replaced(other):
                 continue  # the sample's chart picture or drawn chart: the slide's own chart takes its place, under the text
             ob = Bbox(x=b[0], y=b[1], w=b[2], h=b[3])
-            if ob.contains_point(bx.x + bx.w / 2, bx.y + int(0.01 * self.H)) and ob.area < 0.5 * self.W * self.H and _has_fill(other) and not shape_text(other).strip():
+            if ob.contains_point(bx.x + bx.w / 2, bx.y + int(0.01 * self.H)) and ob.area < 0.5 * self.W * self.H and _has_fill(other) and (not shape_text(other).strip() or self.heads_plate(other, bx)):
                 # the card the text starts in: the text keeps inside it, a padding above its foot
                 limit = min(limit, ob.y2 - max(int(0.012 * self.H), min(bx.x - ob.x, int(0.04 * self.H))))
                 continue
@@ -481,6 +486,17 @@ class _SlideCtx:
             return (bx.x, bx.y, right - bx.x, bx.h)
         return box
 
+    def heads_plate(self, other: etree._Element, bx: Bbox) -> bool:
+        """A card that carries its heading in its own text (VK WorkSpace p6: «Заголовок» written in the grey plate, its
+        icon and text laid over the plate's lower part): it holds the texts standing under its heading's lines."""
+        from verstka.rendering.clone_check import ink_box
+
+        b = element_bbox(other)
+        if not b or b[2] * b[3] < 3 * bx.area or not _has_fill(other):
+            return False
+        ib = ink_box(other, self.typo.primary_family)
+        return ib is not None and ib.y + ib.h <= bx.y + int(0.005 * self.H)
+
     def holder_floor(self, el: etree._Element, box: tuple[int, int, int, int], skip: tuple = ()) -> Optional[int]:
         """How far down the text of a box drawn on a card may run: the card's inner edge, or the top of the next text
         or picture in the card below it (a picture by its painted part: a 3D render's transparent margin is room).
@@ -501,7 +517,7 @@ class _SlideCtx:
                 # a card drawn as one picture (VK Tech p28: a white card with its 3D render at one side)
                 if self.pic_kind.get(self.origin.get(self.id_of(other) or "", self.id_of(other) or "")) not in ("panel", "art"):
                     continue
-            elif tag != "sp" or shape_text(other).strip() or not _has_fill(other):
+            elif tag != "sp" or not _has_fill(other) or (shape_text(other).strip() and not self.heads_plate(other, bx)):
                 continue
             b = element_bbox(other)
             if not b or b[2] * b[3] > 0.5 * self.W * self.H or b[2] * b[3] < 1.5 * bx.area:
@@ -1000,6 +1016,62 @@ def _holds_line(el: etree._Element, size_pt: float) -> bool:
     return (b[3] - ins[1] - ins[3]) / EMU_PER_PT >= size_pt * 1.05
 
 
+def _compound_sizes(el: etree._Element) -> Optional[tuple[float, float]]:
+    """(figure size, label size) of a sample box that sets a figure over its own label — «ххх%» at 80 pt, a line break,
+    «данные показателя» at 16 pt (VK WorkSpace p17; `analysis.roles.figure_head`) — read before the box is written;
+    None for any other box."""
+    from verstka.analysis.roles import is_numeric_text
+
+    body = el.find(q("p:txBody")) if etree.QName(el).localname == "sp" else None
+    if body is None:
+        return None
+
+    def run_text(r: etree._Element) -> str:
+        return "".join(t.text or "" for t in r.iter(q("a:t")))
+
+    def run_size(r: etree._Element) -> Optional[float]:
+        rp = r.find(q("a:rPr"))
+        try:
+            return int(rp.get("sz")) / 100 if rp is not None and rp.get("sz") else None
+        except ValueError:
+            return None
+
+    paras = [p for p in body.findall(q("a:p")) if "".join(t.text or "" for t in p.iter(q("a:t"))).strip()]
+    if not paras:
+        return None
+    head: list[Optional[float]] = []
+    tail: list[Optional[float]] = []
+    head_text = ""
+    broke = False
+    for child in paras[0]:
+        tag = etree.QName(child).localname
+        if tag == "br":
+            broke = broke or bool(head)
+        elif tag in ("r", "fld") and run_text(child).strip():
+            if broke:
+                tail.append(run_size(child))
+            else:
+                head.append(run_size(child))
+                head_text += run_text(child)
+    for p in paras[1:]:
+        tail += [run_size(r) for r in p.iter(q("a:r")) if run_text(r).strip()]
+    if not head or not tail or None in head or None in tail or not is_numeric_text(head_text):
+        return None
+    h, t = max(head), max(tail)
+    return (h, t) if t <= 0.6 * h else None
+
+
+def _fill_compound(ctx: _SlideCtx, el: etree._Element, slot: Optional[Slot], item: SlideItem, sizes: tuple[float, float]) -> None:
+    """A figure and its label written into the one box the sample set them in: the figure at the sample's figure size
+    (cut down to one line in the box), the label under it at the label's size and style."""
+    fig, lab = sizes
+    paras = [ParagraphSpec(item.number or "", bullet=False, size_pt=fig)] + _label_paragraphs(item)
+    ctx.fill_el(el, slot, paras, size_hint=lab)
+    sid = ctx.id_of(el)
+    if sid:
+        ctx.compound_ids.add(sid)
+
+
 def _fill_one_cell(ctx: _SlideCtx, entries, chunk: list[SlideItem], cell_idx: int, *, include_number: bool, use_ordinals: bool, per_cell: int) -> None:
     """Write one item (or `per_cell` consecutive figures) into the text slots of a cell."""
     text = _reading_order([x for x in entries if x[2] in CELL_TEXT_ROLES and etree.QName(x[0]).localname == "sp"])
@@ -1051,6 +1123,10 @@ def _fill_one_cell(ctx: _SlideCtx, entries, chunk: list[SlideItem], cell_idx: in
         return
     if len(text) == 1:
         e, s, _ = text[0]
+        sizes = _compound_sizes(e) if item.number and include_number else None
+        if sizes is not None:
+            _fill_compound(ctx, e, s, item, sizes)
+            return
         paras = _item_single_paragraphs(item, include_number=include_number)
         if item.number and include_number and paras and paras[0].text == item.number:
             base = s.style.size_pt if s is not None and s.style.size_pt else ctx.typo.size_for("body", 14.0)
@@ -1254,14 +1330,18 @@ def _fill_cells(ctx: _SlideCtx, items: list[SlideItem], use_ordinals: bool = Tru
             t_e = [(e, s) for e, s, r in entries if r == SlotRole.card_title and (ctx.id_of(e) or "") in ctx.filled and etree.QName(e).localname == "sp" and e.getparent() is not None and shape_text(e).strip()]
             b_e = [(e, s) for e, s, r in entries if r in _BODY_ROLES and (ctx.id_of(e) or "") in ctx.filled and etree.QName(e).localname == "sp" and e.getparent() is not None and shape_text(e).strip()]
             if len(t_e) == 1 and b_e:
-                stacks.append((t_e[0][0], t_e[0][1], sorted(b_e, key=lambda x: (element_bbox(x[0]) or (0, 0, 0, 0))[1])))
+                # (the card's other shapes — an icon between its heading and its text — move with the text)
+                others = [e for e, _, r in entries if r not in (SlotRole.card_title,) + tuple(_BODY_ROLES) and e.getparent() is not None and not is_nested(e)]
+                stacks.append((t_e[0][0], t_e[0][1], sorted(b_e, key=lambda x: (element_bbox(x[0]) or (0, 0, 0, 0))[1]), others))
             else:
                 stacks_ok[0] = False
         else:
             stacks_ok[0] = False
         for e, slot, role in entries:
             if (ctx.id_of(e) or "") in ctx.filled and etree.QName(e).localname == "sp" and e.getparent() is not None:
-                if role == SlotRole.number:
+                if role == SlotRole.number and (ctx.id_of(e) or "") in ctx.compound_ids:
+                    cell_heads.append(e)  # a figure over its label in one box: the figures share one size, the labels keep theirs
+                elif role == SlotRole.number:
                     cell_numbers.append((e, slot))
                 elif role == SlotRole.card_title:
                     if item is not None and item.number and shape_text(e).strip() == item.number:
@@ -1384,24 +1464,39 @@ def _stack_cells(ctx: _SlideCtx, stacks: list[tuple[etree._Element, Optional[Slo
     if not stacks:
         return set()
     geo = []
-    for t_el, t_slot, bodies in stacks:
+    for stack in stacks:
+        t_el, t_slot, bodies = stack[:3]
+        others = stack[3] if len(stack) > 3 else []
         tb = element_bbox(t_el)
         bbs = [element_bbox(e) for e, _ in bodies]
         if not tb or not bodies or any(b is None for b in bbs) or is_nested(t_el) or any(is_nested(e) for e, _ in bodies):
             return set()
-        if bbs[0][1] > tb[1] and bbs[0][1] < tb[1] + tb[3]:
+        tb_full = tb
+        # the heading's box is the card itself (VK WorkSpace p6: «Заголовок» written in the grey plate, its icon and
+        # its text laid over the plate's lower part): the plate keeps its size; the stack is set inside it
+        plate = has_visible_style(t_el) and all(tb[0] - 2 <= b[0] and b[0] + b[2] <= tb[0] + tb[2] + 2 and tb[1] < b[1] and b[1] + b[3] <= tb[1] + tb[3] + 2 for b in bbs)
+        # the card's shapes between its heading and its text (an icon over the text): they move down with the text
+        riders = []
+        for o in others:
+            ob = element_bbox(o)
+            if ob and ob[2] * ob[3] < 0.03 * ctx.W * ctx.H and tb[1] < ob[1] < bbs[0][1] and ob[0] < tb[0] + tb[2] and ob[0] + ob[2] > tb[0]:
+                riders.append((o, ob))
+        top_block = min([bbs[0][1]] + [ob[1] for _, ob in riders])
+        if top_block > tb[1] and top_block < tb[1] + tb[3]:
             # a heading box as tall as its card with the text box laid over its lower part (LCT p11): the heading's
             # own place is the band above the text — its frame is cut to it
-            tb = (tb[0], tb[1], tb[2], bbs[0][1] - tb[1])
+            tb = (tb[0], tb[1], tb[2], top_block - tb[1])
         if any(b[1] < tb[1] + 0.5 * tb[3] or b[0] > tb[0] + tb[2] or b[0] + b[2] < tb[0] for b in bbs):
             return set()  # a text beside the heading, not under it: the cell is not a stack
         floor = ctx.holder_floor(bodies[-1][0], bbs[-1], skip=tuple([t_el] + [e for e, _ in bodies]))
         bottom = max(b[1] + b[3] for b in bbs)
         if floor is None:
             floor = bottom
-        geo.append((t_el, t_slot, bodies, tb, bbs, max(floor, bottom)))
-    t_style = next((s.style for _, s, _ in stacks if s is not None and s.style.size_pt), None)
-    b_style = next((s.style for _, _, bs in stacks for _, s in bs if s is not None and s.style.size_pt), None)
+        if plate:
+            floor = min(floor, tb_full[1] + tb_full[3] - _body_insets(t_el)[3])
+        geo.append((t_el, t_slot, bodies, tb, bbs, max(floor, bottom), plate, riders))
+    t_style = next((st[1].style for st in stacks if st[1] is not None and st[1].style.size_pt), None)
+    b_style = next((s.style for st in stacks for _, s in st[2] if s is not None and s.style.size_pt), None)
     ts0 = t_style.size_pt if t_style else ctx.typo.size_for("h2", 14.0)
     bs0 = b_style.size_pt if b_style else ctx.typo.size_for("body", 12.0)
     t_fam = (t_style.font_family if t_style and t_style.font_family else None) or ctx.typo.primary_family
@@ -1426,7 +1521,7 @@ def _stack_cells(ctx: _SlideCtx, stacks: list[tuple[etree._Element, Optional[Slo
 
     # figures over their labels (a stat row set in cards with a heading and a text): the figure is the card's point —
     # as large as the card's width and its room allow, up to the template's display size, not a card heading's size
-    figs = all(is_figure(shape_text(t_el)) for t_el, _, _ in stacks)
+    figs = all(is_figure(shape_text(st[0])) for st in stacks)
     fig_sizes: list[float] = []
     if figs:
         top = ctx.typo.size_for("display", ctx.typo.size_for("h1", 24.0) * 2)
@@ -1440,7 +1535,7 @@ def _stack_cells(ctx: _SlideCtx, stacks: list[tuple[etree._Element, Optional[Slo
         one_line = ts in fig_sizes
         plans = []
         ok = True
-        for t_el, t_slot, bodies, tb, bbs, floor in geo:
+        for t_el, t_slot, bodies, tb, bbs, floor, plate, riders in geo:
             ins = _body_insets(t_el)
             # (measured in the weight it is set in: a figure is set bold whatever its card title's weight)
             bold_el = t_bold or any(r.get("b") == "1" for r in t_el.iter(q("a:rPr")))
@@ -1452,6 +1547,14 @@ def _stack_cells(ctx: _SlideCtx, stacks: list[tuple[etree._Element, Optional[Slo
             t_h = max(t_h, tb[3]) if n_t == 1 else t_h
             gap0 = max(bbs[0][1] - (tb[1] + tb[3]), 0)
             y = tb[1] + t_h + max(gap0, int(0.3 * bs * EMU_PER_PT))
+            moved = []
+            if riders:
+                # the icon keeps its place over the text, the text its gap under the icon: the block moves down as one
+                # when the heading takes more room than its sample's line
+                top_r = min(ob[1] for _, ob in riders)
+                dy = max(0, tb[1] + t_h + int(0.3 * bs * EMU_PER_PT) - top_r)
+                moved = [(o, ob[1] + dy) for o, ob in riders]
+                y = max(bbs[0][1] + dy, max(ob[1] + ob[3] for _, ob in riders) + dy + int(0.2 * bs * EMU_PER_PT))
             placed = []
             for (e, s), bb in zip(bodies, bbs):
                 bi = _body_insets(e)
@@ -1465,12 +1568,19 @@ def _stack_cells(ctx: _SlideCtx, stacks: list[tuple[etree._Element, Optional[Slo
             if not ok or y - int(0.3 * bs * EMU_PER_PT) > floor:
                 ok = False
                 break
-            plans.append((t_el, tb, t_h, placed, floor))
+            plans.append((t_el, tb, t_h, placed, floor, plate, moved))
         if not ok:
             continue
         handled: set[int] = set()
-        for t_el, tb, t_h, placed, floor in plans:
-            set_element_pos(t_el, h=t_h)
+        for t_el, tb, t_h, placed, floor, plate, moved in plans:
+            if plate:
+                bp = t_el.find(q("p:txBody") + "/" + q("a:bodyPr"))
+                if bp is not None:
+                    bp.set("anchor", "t")  # the heading at the top of its plate, the plate as drawn
+            else:
+                set_element_pos(t_el, h=t_h)
+            for o, oy in moved:
+                set_element_pos(o, y=oy)
             _scale_text(t_el, ts, ctx.grow_scale)
             handled.add(id(t_el))
             for k, (e, y, h) in enumerate(placed):
@@ -1628,6 +1738,11 @@ def _fill_standalone_items(ctx: _SlideCtx, items: list[SlideItem]) -> None:
     if numbers and any(i.number for i in items):
         num_items = [i for i in items if i.number]
         for slot, item in zip(numbers, num_items):
+            el = ctx.els.get(slot.shape_id)
+            sizes = _compound_sizes(el) if el is not None and el.getparent() is not None else None
+            if sizes is not None:
+                _fill_compound(ctx, el, slot, item, sizes)  # the box holds its own label
+                continue
             ctx.fill_slot(slot, [ParagraphSpec(item.number)], min_ratio=0.35)
             lab = _nearest_label(slot, labels)
             paras = _label_paragraphs(item)
@@ -2080,6 +2195,7 @@ def _draw_native(ctx: _SlideCtx, oslide: OutlineSlide, box: Bbox) -> None:
         # renderer takes another sample or composes the slide
         raise RuntimeError(f"native object failed: no room for it on the sample ({box.area / (ctx.W * ctx.H):.0%} of the slide)")
     # pictures the object would cover (sample screenshots, chart images marked as decoration) are removed
+    gone: list[Bbox] = []
     for sid, el in list(ctx.els.items()):
         if sid in ctx.removed or etree.QName(el).localname != "pic" or is_nested(el):
             continue
@@ -2092,6 +2208,23 @@ def _draw_native(ctx: _SlideCtx, oslide: OutlineSlide, box: Bbox) -> None:
         if box.intersection(pic_box) > 0.3 * pic_box.area:
             remove_element(el)
             ctx.removed.add(sid)
+            gone.append(pic_box)
+    # the template's art that only dressed a picture the object took the place of — the bands of a window stack over
+    # a screenshot (VK Tech p38: two gradient strips on its top edge) — goes with it: over a chart they are stray bars
+    for sid, el in list(ctx.els.items()):
+        if not gone or sid in ctx.removed or etree.QName(el).localname != "pic" or is_nested(el):
+            continue
+        if ctx.pic_kind.get(ctx.origin.get(sid, sid)) != "art":
+            continue
+        b = element_bbox(el)
+        if not b or b[2] <= 0 or b[3] <= 0 or b[3] > 0.08 * ctx.H:
+            continue
+        for g in gone:
+            touches = b[1] + b[3] >= g.y - int(0.06 * ctx.H) and b[1] <= g.y + int(0.01 * ctx.H) or g.y2 - int(0.01 * ctx.H) <= b[1] <= g.y2 + int(0.06 * ctx.H)
+            if touches and b[0] >= g.x - int(0.02 * ctx.W) and b[0] + b[2] <= g.x2 + int(0.02 * ctx.W) and b[2] >= 0.5 * g.w:
+                remove_element(el)
+                ctx.removed.add(sid)
+                break
     # the chart or the table is set the way a composed slide sets it (its caption and unit, a pie with its legend,
     # a table measured for its content at the deck's one table size), in the sample's own place for it
     tree0 = ctx.slide._element.cSld.find(q("p:spTree"))
@@ -2189,6 +2322,37 @@ def _table_to_width(ctx: _SlideCtx, before: set, box: Bbox) -> None:
         set_element_pos(gf, x=box.x, w=box.w)
 
 
+def _make_photo_place(ctx: _SlideCtx, oslide: OutlineSlide) -> bool:
+    """The sample's picture place (`matching.scorer.photo_place`: a photo, a picture placeholder, a frame drawn with
+    «Вставить фото») becomes the place for the user's photo — the composer's own free place (`synth._empty_photo_place`):
+    a quiet fill of the template's, named and described for the user, a picture placeholder where the sample had one."""
+    from types import SimpleNamespace
+
+    from verstka.matching.scorer import photo_place
+    from verstka.rendering.synth import _Palette, _empty_photo_place
+
+    slot = photo_place(ctx.pattern, [SimpleNamespace(shape_id=k, kind=v) for k, v in ctx.pic_kind.items()])
+    if slot is None:
+        return False
+    el = ctx.els.get(slot.shape_id)
+    if el is None or el.getparent() is None or is_nested(el) or slot.shape_id in ctx.removed:
+        return False
+    b = element_bbox(el)
+    if not b or b[2] <= 0 or b[3] <= 0:
+        return False
+    kit = clone_composer(ctx, oslide, Bbox(x=b[0], y=b[1], w=b[2], h=b[3])).kit
+    if not _empty_photo_place(ctx.slide, {slot.shape_id}, kit, _Palette(ctx.manifest, ctx.pattern.family), oslide.content.photo_slot or ""):
+        return False
+    tree = ctx.slide._element.cSld.find(q("p:spTree"))
+    for new in tree:
+        nv = new.find(".//" + q("p:cNvPr"))
+        if nv is not None and nv.get("id") == slot.shape_id:
+            ctx.els[slot.shape_id] = new
+            break
+    ctx.filled.add(slot.shape_id)
+    return True
+
+
 def clone_composer(ctx: _SlideCtx, oslide: OutlineSlide, box: Bbox):
     """A composer working on a cloned slide: the template's design system on the ground under `box`."""
     from verstka.rendering.compose import Composer, Kit
@@ -2212,6 +2376,32 @@ def clone_composer(ctx: _SlideCtx, oslide: OutlineSlide, box: Bbox):
 
 
 # ---------------------------------------------------------------------------- cleanup helpers
+
+
+def _remove_emptied_groups(ctx: _SlideCtx) -> None:
+    """A group the sample drew around a text — a legend's swatch and its label («● DAU», «● MAU» over VK Education
+    p48's chart), a dot beside its line — leaves when its text is gone: the swatch alone is a stray dot. Only small
+    groups of shapes (1 % of the slide at most), never one with a picture, a table or a chart, nor the chrome."""
+    tree = ctx.slide._element.cSld.find(q("p:spTree"))
+    chrome = set(ctx.pattern.chrome_shape_ids)
+    area = ctx.W * ctx.H
+    for g in list(tree):
+        if etree.QName(g).localname != "grpSp":
+            continue
+        sid = ctx.id_of(g) or ""
+        if sid in chrome or any((nv.get("id") or "") in chrome for nv in g.iter(q("p:cNvPr"))):
+            continue
+        if next(g.iter(q("p:pic")), None) is not None or next(g.iter(q("p:graphicFrame")), None) is not None:
+            continue
+        sps = list(g.iter(q("p:sp")))
+        if not any(x.find(q("p:txBody")) is not None for x in sps) or any(shape_text(x).strip() for x in sps):
+            continue
+        if not any(ctx.id_of(x) in ctx.pattern_text_ids for x in sps):
+            continue  # a group that never held a text of the sample (an ornament of dots) is the template's design
+        drawn = [element_bbox(x) for x in sps if has_visible_style(x)]
+        if sum(b[2] * b[3] for b in drawn if b) <= 0.01 * area:
+            remove_element(g)
+            ctx.removed.add(sid)
 
 
 def _remove_empty_cells(ctx: _SlideCtx) -> None:
@@ -5276,6 +5466,10 @@ def render_clone(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
                 replace_picture(slide, el, path)
                 ctx.filled.add(imgs[0].shape_id)
 
+    # the user's own photo (Agent v2 `photo_slot`): the sample's picture place stays, empty and quiet, for it
+    if c.photo_slot:
+        _make_photo_place(ctx, oslide)
+
     # cleanup: cells that got nothing lose their anchors and chips, «Вставить фото / QR» boxes go with their text,
     # then unfilled text slots and stray placeholder text
     _remove_empty_cells(ctx)
@@ -5304,6 +5498,7 @@ def render_clone(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
         if txt.strip() and looks_like_placeholder(txt):
             clear_text(el)
     _remove_orphan_holders(ctx)
+    _remove_emptied_groups(ctx)
     ctx.retry_overflows()
     ctx.retry_heading()
     _true_rings(ctx)

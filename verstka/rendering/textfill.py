@@ -136,10 +136,25 @@ def fill_text(sp_el: etree._Element, paragraphs: list[ParagraphSpec], size_pt: O
     # a heading and its text written into one sample box (VK WorkSpace cards: «Заголовок» in blue over «Текст» in
     # white): the heading takes the sample's first line, the text its second — never the heading's colour for both
     second_p = None
-    if paragraphs and paragraphs[0].bold and any(not s.bold for s in paragraphs[1:]):
+    second_run = None
+    lead = bool(paragraphs) and ((bool(paragraphs[0].bold) and any(not s.bold for s in paragraphs[1:])) or (bool(paragraphs[0].size_pt) and any(not s.bold and not s.size_pt for s in paragraphs[1:])))
+    if lead:
         styled = [p for p in ps if p.find(q("a:r")) is not None]
         if len(styled) >= 2 and styled[0] is template_p and _rpr_key(_first_rpr(styled[1])) != _rpr_key(_first_rpr(styled[0])):
             second_p = styled[1]
+        else:
+            # a figure over its label written as one paragraph broken by a line break («ххх%» ↵ «данные показателя» —
+            # VK WorkSpace p17, Education p46): the label's run, the first after the break, styles the lines under it
+            broke = False
+            for child in template_p:
+                tag = etree.QName(child).localname
+                if tag == "br":
+                    broke = True
+                elif tag == "r" and broke and "".join(t.text or "" for t in child.iter(q("a:t"))).strip():
+                    rp = child.find(q("a:rPr"))
+                    if rp is not None and _rpr_key(rp) != _rpr_key(_first_rpr(template_p)):
+                        second_run = rp
+                    break
     template_rPr = _first_rpr(template_p)
     if template_rPr is None:
         template_rPr = etree.Element(q("a:rPr"))
@@ -163,15 +178,15 @@ def fill_text(sp_el: etree._Element, paragraphs: list[ParagraphSpec], size_pt: O
                 if a in na.attrib:
                     del na.attrib[a]
     second_rPr = None
-    if second_p is not None:
-        second_rPr = copy.deepcopy(_first_rpr(second_p))
+    if second_p is not None or second_run is not None:
+        second_rPr = copy.deepcopy(_first_rpr(second_p) if second_p is not None else second_run)
         second_rPr.tag = q("a:rPr")
         for h in second_rPr.findall(q("a:hlinkClick")) + second_rPr.findall(q("a:hlinkMouseOver")):
             second_rPr.remove(h)
     for k, spec in enumerate(paragraphs):
         use_bullet_template = keep_bullets and spec.bullet and bullet_p is not None
-        under = second_p is not None and k >= 1
-        p = copy.deepcopy(bullet_p if use_bullet_template else (second_p if under else template_p))
+        under = second_rPr is not None and k >= 1
+        p = copy.deepcopy(bullet_p if use_bullet_template else (second_p if under and second_p is not None else template_p))
         _strip_runs(p)
         pPr = p.find(q("a:pPr"))
         if spec.bullet is not None:

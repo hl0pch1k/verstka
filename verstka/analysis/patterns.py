@@ -128,7 +128,9 @@ def build_pattern(
         if role == SlotRole.decoration:
             if s.image_part and s.image_part in asset_ids:
                 decor.append(asset_ids[s.image_part])
-            if s.kind == ShapeKind.pic and 0.04 <= s.bbox.area / float(slide_w * slide_h) < 0.6:
+            # (up to 85 % of the slide: a chart drawn as one wide picture under the heading — VK WorkSpace p21 — is
+            # the sample's picture too; a full-bleed backdrop is its ground)
+            if s.kind == ShapeKind.pic and 0.04 <= s.bbox.area / float(slide_w * slide_h) < 0.85:
                 decor_boxes.append(s.bbox.to_frac(slide_w, slide_h))
             continue
         container = role in (SlotRole.body, SlotRole.card_body) and not s.has_text and s.is_visual_shape
@@ -137,6 +139,14 @@ def build_pattern(
         counters[role.value] += 1
         slot_id = f"{role.value}_{counters[role.value]}"
         style = slot_style(s)
+        if role == SlotRole.number:
+            from verstka.analysis.roles import figure_head
+
+            head = figure_head(s, body_size)
+            if head is not None:
+                # a figure over its label in one box: the slot is set at the figure's size and weight, not the label's
+                first = next((r for p in s.text.paragraphs for r in p.runs if r.text.strip()), None)
+                style = style.model_copy(update={"size_pt": head, "bold": bool(first.bold) if first is not None else style.bold})
         if container:
             # an empty frame: body text of the template, coloured for the frame's own fill (or the slide under an outline)
             pad = container_inset(s.bbox.w, s.bbox.h)
@@ -152,7 +162,9 @@ def build_pattern(
                 has_placeholder_text = True
         else:
             cap = Capacity(max_chars=0, max_lines=0)
-            sample = None
+            # a picture place drawn as a shape keeps its words («Иллюстрация», «Вставить фото»): the matcher reads
+            # them as a place for the user's photo
+            sample = (s.plain_text.strip()[:120] or None) if role == SlotRole.image and s.text else None
         gid = membership[s.id][0] if s.id in membership else None
         slots.append(Slot(id=slot_id, role=role, shape_id=s.id, bbox=s.bbox.to_frac(slide_w, slide_h), style=style, capacity=cap, group_id=gid, sample_text=sample, container=container))
     quality = 1.0
@@ -342,6 +354,17 @@ def _same_data_area(a: Pattern, b: Pattern, tol: float) -> bool:
     return a.data_box.close_to(b.data_box, tol) and a.data_kind == b.data_kind and ha.get("direction") == hb.get("direction")
 
 
+def _same_pictures(a: Pattern, b: Pattern, tol: float = 0.05) -> bool:
+    """Two samples dress their slots with the same pictures in the same places: as many decorative pictures, the
+    middle-sized ones standing where the other's stand. A heading over two doughnuts and the same heading over a wide
+    column chart (VK WorkSpace p20, p21) are two samples for the deck, not one."""
+    if len(a.decor_assets) != len(b.decor_assets) or len(a.decor_boxes) != len(b.decor_boxes):
+        return False
+    ka = sorted(a.decor_boxes, key=lambda x: (x.y, x.x))
+    kb = sorted(b.decor_boxes, key=lambda x: (x.y, x.x))
+    return all(x.close_to(y, tol) for x, y in zip(ka, kb))
+
+
 def dedupe_patterns(patterns: list[Pattern], bbox_tol: float = 0.02, free_tol: float = 0.10) -> list[Pattern]:
     """Drop near-identical patterns (same kind, family, role multiset, same slot geometry); keep the best quality.
 
@@ -356,6 +379,8 @@ def dedupe_patterns(patterns: list[Pattern], bbox_tol: float = 0.02, free_tol: f
                 continue
             if not _same_data_area(k, p, bbox_tol):
                 continue  # a heading over a drawn chart: columns and a Gantt are two samples, not one
+            if not _same_pictures(k, p):
+                continue
             ks = sorted(k.slots, key=lambda s: (s.role.value, s.bbox.y, s.bbox.x))
             ps = sorted(p.slots, key=lambda s: (s.role.value, s.bbox.y, s.bbox.x))
             if all(a.bbox.close_to(b.bbox, bbox_tol) for a, b in zip(ks, ps)):

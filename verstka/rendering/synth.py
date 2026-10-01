@@ -655,6 +655,8 @@ def _pick_canvas(builder: DeckBuilder, manifest: TemplateManifest, family: Famil
         ok = _layout_pictures(builder, canvas) < 0.12 and (not need_pill or _has_pill(builder, canvas)) and _bg_art(builder, canvas.source_slide) is None and _bottom_chrome(builder, canvas) >= floor and not _canvas_photo(builder, canvas)
         # a heading set turned or vertically, or a photograph of things behind the content: never a composed slide's canvas
         ok = ok and not _title_turned(builder, canvas) and _ground_structure(builder, canvas) < GROUND_STRUCTURE_MAX
+        # nor a backdrop busy behind the content band (VK WorkSpace's chart slides glow blue under their pictures)
+        ok = ok and not _canvas_rank(builder, manifest, canvas, wide)[1]
         if ok and wide:
             g = _canvas_ground(builder, canvas)
             if g is not None and g.w < 0.7 * builder.slide_w:

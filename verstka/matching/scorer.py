@@ -12,7 +12,7 @@ from verstka.planning.strategies import Strategy
 from verstka.ru import bind_compounds
 from verstka.schemas.common import Family, PatternKind, SlotRole
 from verstka.schemas.outline import OutlineSlide
-from verstka.schemas.template import Pattern, TemplateManifest
+from verstka.schemas.template import Pattern, Slot, TemplateManifest
 
 _GROUP_ROLES = {SlotRole.card_title, SlotRole.card_body, SlotRole.number, SlotRole.number_label, SlotRole.icon}
 _STANDALONE_KINDS = {PatternKind.title, PatternKind.section, PatternKind.thanks, PatternKind.quote}
@@ -338,6 +338,20 @@ def _number_holders(pattern: Pattern, group) -> int:
 _MONEY_RE = re.compile(r"[₽$€£¥]|\bруб|\brub|\busd|\beur", re.I)
 
 
+def photo_place(pattern: Pattern, pictures: Optional[list]) -> Optional[Slot]:
+    """The sample's place for the user's own photo (`SlideContent.photo_slot`): its largest picture slot — a photo, a
+    screenshot, a picture placeholder or a place drawn as a frame with «Вставить фото» — of 6 % of the slide and a
+    quarter of its height and more; never the template's art (a 3D render) or a plate. None when it has none."""
+    kinds = {getattr(x, "shape_id", None): getattr(x, "kind", None) for x in pictures or []}
+    for s in sorted(pattern.slots, key=lambda x: -x.bbox.area):
+        if s.role != SlotRole.image or s.bbox.area < 0.06 or s.bbox.h < 0.25:
+            continue
+        if kinds.get(s.shape_id) in ("art", "icon", "ground", "panel", "line", "bar"):
+            continue
+        return s
+    return None
+
+
 def chart_picture_room(slide: OutlineSlide, pattern: Pattern, pictures: Optional[list]) -> float:
     """The area (share of the slide) of the sample's picture that shows a chart or data — `analysis.pictures` reads it
     as the sample's content, not as art — when the slide carries a chart or a table to put in its place; 0 otherwise.
@@ -406,6 +420,12 @@ def score_pattern(
         holes = [s for s in pattern.slots if s.sample_text and _PHOTO_PLACE_RE.search(s.sample_text) and s.bbox.area >= 0.002]
         if holes and not slide.content.photo_slot and not slide.content.image_hint:
             return ScoreResult(0.0, reasons + ["место под фото в образце останется пустым"], fit)
+        if slide.content.photo_slot:
+            # the user's photo goes where the sample keeps its picture (`clone._make_photo_place`): a sample without
+            # one is set by the composer, which leaves the place beside the content
+            if photo_place(pattern, pics) is None:
+                return ScoreResult(0.0, reasons + ["в образце нет места под фото"], fit)
+            reasons.append("место под фото — на месте картинки образца")
         if slide.content.table is not None and pattern.data_box is not None:
             n_cols = len(slide.content.table.columns)
             if n_cols >= 3 and pattern.data_box.w < 0.6:
@@ -499,6 +519,15 @@ def score_pattern(
     text_group_roles = (SlotRole.card_title, SlotRole.card_body, SlotRole.number, SlotRole.number_label, SlotRole.bullet_list, SlotRole.body)
     groups = [g for g in pattern.repeat_groups if any(s.group_id == g.id and s.role in text_group_roles for s in pattern.slots)]
     group = max(groups, key=lambda g: len(g.member_shape_ids), default=None)
+    bl = slide.content.bullets
+    lines_in_cells = False
+    if n < 2 and group is not None and slide.kind in (PatternKind.bullets, PatternKind.agenda) and len(bl) >= 2 and not slide.content.items:
+        # a list set on a sample of rows or cards: each line takes a cell (the renderer's `_cells_can_hold_bullets`),
+        # it is no single thought on a row of cards
+        cell_chars = sum(x.capacity.max_chars for x in pattern.slots if x.group_id == group.id and x.role in text_group_roles)
+        if cell_chars >= 0.5 * sum(len(b) for b in bl) and max((x.bbox.w for x in pattern.slots if x.group_id == group.id and x.role in text_group_roles), default=0.0) >= 0.10:
+            n = len(bl)
+            lines_in_cells = True
     if n >= 2:
         if group is not None:
             n_cells = len(group.member_shape_ids)
@@ -557,7 +586,13 @@ def score_pattern(
     worst = 0.0
     bookend = slide.kind in _BOOKEND_KINDS
     title_fit = _bookend_title_fit(slide, pattern, manifest) if bookend else None
-    for role_name, need in _needed_chars(slide).items():
+    needs = _needed_chars(slide)
+    if lines_in_cells and "bullet_list" in needs:
+        # each line is a cell's text: measured against a cell, not against one list box
+        del needs["bullet_list"]
+        cell_role = "card_title" if any(x.group_id == group.id and x.role == SlotRole.card_title for x in pattern.slots) else "card_body"
+        needs[cell_role] = max(len(b) for b in bl)
+    for role_name, need in needs.items():
         role = SlotRole(role_name)
         if title_fit is not None and role == SlotRole.title:
             # the heading of a cover is measured in its box: three lines at 0.85 of the sample size are a perfect fit
@@ -580,6 +615,14 @@ def score_pattern(
         if bookend and role == SlotRole.subtitle and any(s.role == SlotRole.subtitle for s in pattern.slots):
             need = min(need, _slot_capacity(pattern, role))  # the subtitle box is re-set under the heading: it may wrap
         capacity = _slot_capacity(pattern, role)
+        if role == SlotRole.title and not bookend and capacity:
+            # a content heading takes the free width of its band and a second line before its type steps down (the
+            # renderer widens the sample's box cut for «Заголовок»; the gate turns down a heading that shrank): two
+            # lines over most of the safe width at the sample's size
+            t0 = next((x for x in pattern.slots if x.role == SlotRole.title), None)
+            size0 = (t0.style.size_pt if t0 is not None and t0.style.size_pt else None) or manifest.tokens.typography.size_for("h1", 28.0)
+            width_pt = 0.8 * manifest.tokens.spacing.safe_area.w * manifest.slide_size.w / 12700
+            capacity = max(capacity, int(2 * width_pt / (0.55 * size0)))
         if capacity == 0:
             # bullets may go into a body slot and vice versa
             alt = {SlotRole.bullet_list: SlotRole.body, SlotRole.body: SlotRole.bullet_list, SlotRole.subtitle: SlotRole.body, SlotRole.card_body: SlotRole.body}.get(role)
@@ -642,7 +685,7 @@ def score_pattern(
         # place; «5 ч» or «31% → 12%» would stand without one next to a ring — the infographic falls apart
         rings = [s for s in pattern.slots if s.role == SlotRole.number and any(
             b.x <= s.bbox.x + s.bbox.w / 2 <= b.x + b.w and b.y <= s.bbox.y + s.bbox.h / 2 <= b.y + b.h
-            and b.w * b.h >= 2 * s.bbox.w * s.bbox.h for b in pattern.decor_boxes)]
+            and 2 * s.bbox.w * s.bbox.h <= b.w * b.h < 0.6 for b in pattern.decor_boxes)]
         values = [x.value for x in content.numbers]
         if rings and values and not all(re.match(r"^\s*\d{1,3}(?:[.,]\d+)?\s*%\s*$", v or "") for v in values):
             kind *= 0.6

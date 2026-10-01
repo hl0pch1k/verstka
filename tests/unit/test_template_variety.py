@@ -416,3 +416,126 @@ def test_a_title_box_over_its_text_box_is_a_stack():
     beside = _deck_with([(0.05, 0.3, 0.2, 0.04, "9", 12), (0.3, 0.3, 0.2, 0.4, "Демо-презентаций", 9)])
     t, b = [sh._element for sh in beside.shapes]
     assert not _stands_over(t, b)
+
+
+# ---------------------------------------------------------------------------- figures over their labels, picture places
+
+
+def _figure_box(sid="710"):
+    """VK WorkSpace p17: «ххх%» at 80 pt, a line break, «данные показателя» at 16 pt in one text box."""
+    runs = [RunInfo(text="ххх%", font="Inter", size_pt=80.0, bold=True, color_hex="70C3FF"), RunInfo(text="данные показателя", font="Inter", size_pt=16.0, bold=False, color_hex="70C3FF")]
+    ti = TextInfo(paragraphs=[ParagraphInfo(text="ххх%\nданные показателя", runs=runs)])
+    return ShapeInfo(id=sid, name=sid, kind=ShapeKind.sp, bbox=_box(0.52, 0.18, 0.39, 0.28), z=5, text=ti)
+
+
+def test_a_figure_over_its_label_in_one_box_is_a_number_slot():
+    from verstka.analysis.roles import figure_head
+
+    assert figure_head(_figure_box(), 16.0) == 80.0
+    plain = _text("t", "Текст описания", 16, 0.04, 0.18, 0.3, 0.1)
+    assert figure_head(plain, 16.0) is None
+    # a figure set at the label's size is no figure over its label
+    runs = [RunInfo(text="12", font="Inter", size_pt=18.0), RunInfo(text="месяцев", font="Inter", size_pt=16.0)]
+    small = ShapeInfo(id="s", name="s", kind=ShapeKind.sp, bbox=_box(0.1, 0.1, 0.2, 0.1), z=5, text=TextInfo(paragraphs=[ParagraphInfo(text="12\nмесяцев", runs=runs)]))
+    assert figure_head(small, 16.0) is None
+
+
+def test_a_figure_and_its_label_are_written_in_the_samples_two_styles():
+    from lxml import etree
+
+    from verstka.analysis.xmlns import q
+    from verstka.rendering.clone import _compound_sizes
+    from verstka.rendering.textfill import ParagraphSpec, fill_text
+
+    P, A = "http://schemas.openxmlformats.org/presentationml/2006/main", "http://schemas.openxmlformats.org/drawingml/2006/main"
+    sp = etree.fromstring(
+        f'<p:sp xmlns:p="{P}" xmlns:a="{A}"><p:txBody><a:bodyPr/><a:p>'
+        '<a:r><a:rPr sz="8000" b="1"><a:solidFill><a:srgbClr val="70C3FF"/></a:solidFill></a:rPr><a:t>ххх%</a:t></a:r>'
+        '<a:br><a:rPr sz="6600" b="1"/></a:br>'
+        '<a:r><a:rPr sz="1600"><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill></a:rPr><a:t>данные показателя</a:t></a:r>'
+        "</a:p></p:txBody></p:sp>"
+    )
+    assert _compound_sizes(sp) == (80.0, 16.0)
+    fill_text(sp, [ParagraphSpec("87", bullet=False, size_pt=72.0), ParagraphSpec("Чужих шаблонов")], size_pt=16.0)
+    paras = sp.findall(".//" + q("a:p"))
+    fig, lab = (p.find(q("a:r") + "/" + q("a:rPr")) for p in paras)
+    assert fig.get("sz") == "7200" and fig.get("b") == "1"
+    assert lab.get("sz") == "1600" and lab.get("b") != "1" and lab.find(".//" + q("a:srgbClr")).get("val") == "FFFFFF"
+
+
+def test_a_picture_place_drawn_as_a_shape_is_the_samples_picture_slot():
+    from verstka.analysis.roles import heuristic_roles
+    from verstka.schemas.template import Typography
+
+    title = _text("t", "Заголовок", 36, 0.035, 0.06, 0.64, 0.17, is_placeholder=True, ph_type="title")
+    place = _text("p", "Иллюстрация", 18, 0.39, 0.26, 0.49, 0.55, geometry="roundRect", fill_hex="0077FF")
+    roles = heuristic_roles([title, place], [], set(), Typography(), W, H)
+    assert roles["p"] == SlotRole.image
+
+
+def test_samples_with_other_pictures_are_not_duplicates():
+    """VK WorkSpace p20 (two doughnuts under «Графики») and p21 (a wide column chart under the same heading)."""
+    from verstka.analysis.patterns import dedupe_patterns
+
+    def pat(pid, n, boxes, assets):
+        t = Slot(id="title_1", role=SlotRole.title, shape_id="1", bbox=BboxFrac(x=0.035, y=0.06, w=0.93, h=0.11), style=SlotStyle(size_pt=36.0), capacity=Capacity(max_chars=40, max_lines=2))
+        return Pattern(id=pid, source_slide=n, kind=PatternKind.chart, family=Family.dark, slots=[t], decor_boxes=boxes, decor_assets=assets)
+
+    doughnuts = pat("p20", 20, [BboxFrac(x=0.1, y=0.25, w=0.35, h=0.6), BboxFrac(x=0.55, y=0.25, w=0.35, h=0.6)], ["a1", "a2"])
+    columns = pat("p21", 21, [BboxFrac(x=0.0, y=0.21, w=1.0, h=0.67)], ["a3"])
+    twin = pat("p22", 22, [BboxFrac(x=0.1, y=0.25, w=0.35, h=0.6), BboxFrac(x=0.55, y=0.25, w=0.35, h=0.6)], ["a4", "a5"])
+    kept = [p.id for p in dedupe_patterns([doughnuts, columns, twin])]
+    assert kept == ["p20", "p21"]
+
+
+def _bare_manifest(w: int = W, h: int = H):
+    from verstka.schemas.template import SlideSize, TemplateManifest, Tokens
+
+    return TemplateManifest(template_id="t", source_file="t.pptx", slide_size=SlideSize(w=w, h=h), tokens=Tokens(), patterns=[], n_slides=1)
+
+
+def test_a_footnote_keeps_its_small_print_but_running_text_does_not():
+    """The slide's footnote is set at the composer's footnote size (about 2 % of the slide height — 8.12 pt on VK
+    Tech's 5.6-inch slide): the gate lets it stand; a running text at that size is turned down."""
+    from verstka.rendering.clone_check import content_trouble
+    from verstka.schemas.outline import OutlineSlide, SlideContent
+
+    m = _bare_manifest(9144000, 5143500)
+    pat = Pattern(id="p1", source_slide=1, kind=PatternKind.bullets, family=Family.light, slots=[])
+    o = OutlineSlide(id="s", kind=PatternKind.bullets, headline="Заголовок", content=SlideContent(bullets=["Пункт"]))
+    text = "Все цифры условные и используются для учебного бизнес-плана"
+    small = _deck_with([(0.05, 0.9, 0.8, 0.04, text, 8.12)])
+    assert "below" in (content_trouble(small, o, pat, m, []) or "")
+    small.shapes[0]._element.find(".//{http://schemas.openxmlformats.org/presentationml/2006/main}cNvPr").set("name", "Footnote 12")
+    assert content_trouble(small, o, pat, m, []) is None
+
+
+def test_a_stat_slide_with_its_figures_at_a_captions_size_is_turned_down():
+    from verstka.rendering.clone_check import content_trouble
+    from verstka.schemas.outline import NumberCallout, OutlineSlide, SlideContent
+
+    m = _bare_manifest()
+    pat = Pattern(id="p1", source_slide=1, kind=PatternKind.stat_row, family=Family.light, slots=[])
+    o = OutlineSlide(id="s", kind=PatternKind.stat_row, headline="Цифры", content=SlideContent(numbers=[NumberCallout(value="87", label="шаблонов"), NumberCallout(value="12", label="форматов")]))
+    tiny = _deck_with([(0.05, 0.3, 0.2, 0.06, "87", 14), (0.3, 0.3, 0.2, 0.06, "12", 14)])
+    assert "figures set at" in (content_trouble(tiny, o, pat, m, []) or "")
+    big = _deck_with([(0.05, 0.3, 0.2, 0.12, "87", 48), (0.3, 0.3, 0.2, 0.12, "12", 48)])
+    assert "figures set at" not in (content_trouble(big, o, pat, m, []) or "")
+
+
+def test_text_hanging_under_its_own_plate_is_turned_down():
+    from pptx.dml.color import RGBColor
+
+    from verstka.rendering.clone_check import content_trouble
+    from verstka.schemas.outline import OutlineSlide, SlideContent
+
+    m = _bare_manifest()
+    pat = Pattern(id="p1", source_slide=1, kind=PatternKind.cards, family=Family.light, slots=[])
+    o = OutlineSlide(id="s", kind=PatternKind.cards, headline="Карточки", content=SlideContent(bullets=["Пункт"]))
+    from pptx.enum.text import MSO_AUTO_SIZE
+
+    s = _deck_with([(0.05, 0.3, 0.25, 0.05, "Основные направления работы студии", 28)])
+    s.shapes[0].text_frame.auto_size = MSO_AUTO_SIZE.NONE  # a plate keeps its size: the text hangs under it
+    s.shapes[0].fill.solid()
+    s.shapes[0].fill.fore_color.rgb = RGBColor(0x21, 0x21, 0x21)
+    assert "runs out of its plate" in (content_trouble(s, o, pat, m, []) or "")

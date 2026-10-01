@@ -15,7 +15,7 @@ from lxml import etree
 from verstka.analysis.xmlns import q
 from verstka.schemas.common import EMU_PER_PT
 from verstka.schemas.outline import OutlineSlide
-from verstka.schemas.common import SlotRole
+from verstka.schemas.common import PatternKind, SlotRole
 from verstka.schemas.template import Pattern, TemplateManifest
 
 # warnings of the clone renderer that mean the slide lost a part of its content
@@ -306,8 +306,14 @@ def content_trouble(slide, oslide: OutlineSlide, pattern: Pattern, manifest: Tem
             if m in w:
                 return w
     c = oslide.content
-    if c.chart2 is not None or (c.formula or "").strip() or c.photo_slot:
-        return "a second chart, a formula or a photo place: the composer sets them"
+    if c.chart2 is not None or (c.formula or "").strip():
+        return "a second chart or a formula: the composer sets them"
+    if c.photo_slot:
+        from verstka.schemas.outline import PHOTO_PLACE_NAME
+
+        if not any((nv.get("name") or "") == PHOTO_PLACE_NAME for nv in slide._element.iter(q("p:cNvPr"))):
+            return "no place for the user's photo on the sample"
+
     if c.chart is not None and c.table is not None:
         return "a chart and a table on one slide"
     H = manifest.slide_size.h
@@ -424,6 +430,23 @@ def content_trouble(slide, oslide: OutlineSlide, pattern: Pattern, manifest: Tem
         b = _ebox(el)
         if b and b[2] > 0 and b[3] > 0 and b[2] * b[3] < 0.5 * manifest.slide_size.w * H:
             cards.append(_Bbox(x=b[0], y=b[1], w=b[2], h=b[3]))
+    # text running out of its own plate (VK WorkSpace p6: a card heading written in the grey card itself, its frame cut
+    # to one line while the heading took two — the second line hangs under the card)
+    for sp in tree.iter(q("p:sp")):
+        nv = sp.find(".//" + q("p:cNvPr"))
+        if nv is not None and (nv.get("id") in chrome or nv.get("id") in native):
+            continue
+        if not _shape_text(sp).strip() or not _paints_c(sp):
+            continue
+        bp = sp.find(q("p:txBody") + "/" + q("a:bodyPr"))
+        if bp is not None and bp.find(q("a:spAutoFit")) is not None:
+            continue  # the plate grows with its text where it is opened
+        b = _ebox(sp)
+        ib = ink_box(sp, manifest.tokens.typography.primary_family)
+        if not b or ib is None or b[3] <= 0:
+            continue
+        if ib.y + ib.h > b[1] + b[3] + 0.01 * H or ib.y < b[1] - 0.01 * H:
+            return f"text «{_shape_text(sp).strip()[:24]}» runs out of its plate"
     if cards:
         fam_c = manifest.tokens.typography.primary_family
         W = manifest.slide_size.w
@@ -470,6 +493,24 @@ def content_trouble(slide, oslide: OutlineSlide, pattern: Pattern, manifest: Tem
                 return f"a hole of {hole:.0%} of the slide where the sample had {hole0:.0%} free"
         except Exception:  # noqa: BLE001
             pass
+    # the figures of a stat slide set at a caption's size (VK Tech p20: «87» at 10 pt in a list made for «Пункт»): the
+    # slide's point is its figures — they read as figures or the slide is composed
+    if c.numbers and oslide.kind in (PatternKind.stat_row, PatternKind.big_number):
+        vals = {re.sub(r"\s+", "", (n.value or "")) for n in c.numbers if (n.value or "").strip()}
+        fig_sizes = []
+        for sp in tree.iter(q("p:sp")):
+            nv = sp.find(".//" + q("p:cNvPr"))
+            if nv is not None and (nv.get("id") in chrome or nv.get("id") in native):
+                continue
+            for para in sp.iter(q("a:p")):
+                ptxt = re.sub(r"[\s\u2060]+", "", "".join(t.text or "" for t in para.iter(q("a:t"))))
+                if ptxt and ptxt in vals:
+                    szs = [int(r.get("sz")) / 100 for r in para.iter(q("a:rPr")) if r.get("sz")]
+                    if szs:
+                        fig_sizes.append(max(szs))
+        want = max(1.6 * body, 0.7 * typo.size_for("h1", body * 2))
+        if fig_sizes and max(fig_sizes) < want - 0.05:
+            return f"figures set at {max(fig_sizes):g} pt — a figure reads at {want:.0f} pt and more"
     # two texts laid over each other: a card title that took a second line runs into the text under it (LCT p11
     # with a third card: «На входе — шаблон и текст» over «Verstka использует…») — unless the sample set them so
     clash = _texts_over_each_other(slide, tree, chrome, typo.primary_family, native=set(native))
@@ -532,6 +573,10 @@ def content_trouble(slide, oslide: OutlineSlide, pattern: Pattern, manifest: Tem
                         return f"«{chunk.replace(chr(160), ' ')[:24]}» is wider than its box and breaks mid-word"
             size = min(sizes)
             floor = run_floor if len(ptxt.strip()) >= 25 else label_floor
+            if nv is not None and re.fullmatch(r"Footnote( \d+)?", nv.get("name") or ""):
+                # the slide's footnote is small print by design, set at the composer's footnote size (about 2 % of
+                # the slide height, `Composer._footnote_size`) — the size a composed slide gives it
+                floor = min(floor, 0.019 * manifest.slide_size.h / EMU_PER_PT)
             if size < floor - 0.05:
                 return f"text «{ptxt.strip()[:24]}» set at {size:g} pt, below {floor:.1f} pt"
     return None
