@@ -539,3 +539,44 @@ def test_text_hanging_under_its_own_plate_is_turned_down():
     s.shapes[0].fill.solid()
     s.shapes[0].fill.fore_color.rgb = RGBColor(0x21, 0x21, 0x21)
     assert "runs out of its plate" in (content_trouble(s, o, pat, m, []) or "")
+
+
+def test_a_tall_card_beside_a_column_of_cards_is_the_first_card_of_a_bento():
+    """VK Tech p28: a card with its 3D render as tall as the two cards at its right — three cards, not two and a
+    stray paragraph."""
+    pics = [
+        ShapeInfo(id="big", name="big", kind=ShapeKind.pic, bbox=_box(0.03, 0.235, 0.358, 0.632), z=1, image_part="/ppt/media/a.png"),
+        ShapeInfo(id="top", name="top", kind=ShapeKind.pic, bbox=_box(0.40, 0.235, 0.569, 0.307), z=1, image_part="/ppt/media/b.png"),
+        ShapeInfo(id="bot", name="bot", kind=ShapeKind.pic, bbox=_box(0.40, 0.561, 0.569, 0.307), z=1, image_part="/ppt/media/c.png"),
+    ]
+    texts = [
+        _text("t1", "Тестирование оборудования и софта до покупки", 17, 0.055, 0.277, 0.319, 0.2),
+        _text("t2", "Логистика и сервисные услуги", 17, 0.423, 0.277, 0.53, 0.072),
+        _text("t3", "Демо на площадке заказчика", 17, 0.423, 0.602, 0.299, 0.131),
+    ]
+    groups = detect_repeat_groups(pics + texts, W, H)
+    assert len(groups) == 1
+    g = groups[0]
+    assert len(g.member_shape_ids) == 3 and g.fixed and g.max_n == 3
+    assert "big" in g.member_shape_ids[0] and "t1" in g.member_shape_ids[0]
+
+
+def test_one_text_box_in_a_cell_holds_the_items_heading_and_text():
+    """VK Tech p7/p8: a line beside an icon — the item's heading and its text go into it together: its capacity is
+    measured against both, not «no room for a heading»."""
+    from verstka.matching.scorer import score_pattern
+    from verstka.planning.strategies import get_strategy
+    from verstka.schemas.outline import OutlineSlide, SlideContent, SlideItem
+    from verstka.schemas.template import RepeatGroup
+
+    cells = [[f"b{i}", f"i{i}"] for i in range(5)]
+    slots = [Slot(id="title_1", role=SlotRole.title, shape_id="t", bbox=BboxFrac(x=0.03, y=0.05, w=0.4, h=0.1), style=SlotStyle(size_pt=24.0), capacity=Capacity(max_chars=60, max_lines=2))]
+    for i in range(5):
+        slots.append(Slot(id=f"card_body_{i}", role=SlotRole.card_body, shape_id=f"b{i}", bbox=BboxFrac(x=0.6, y=0.15 + 0.13 * i, w=0.35, h=0.08), style=SlotStyle(size_pt=12.0), capacity=Capacity(max_chars=80, max_lines=2), group_id="g1"))
+        slots.append(Slot(id=f"icon_{i}", role=SlotRole.icon, shape_id=f"i{i}", bbox=BboxFrac(x=0.5, y=0.15 + 0.13 * i, w=0.05, h=0.08), capacity=Capacity(max_chars=0, max_lines=0), group_id="g1"))
+    g = RepeatGroup(id="g1", member_shape_ids=cells, max_n=6, axis="column", cell_bbox=BboxFrac(x=0.5, y=0.15, w=0.45, h=0.1))
+    pat = Pattern(id="p8", source_slide=8, kind=PatternKind.cards, family=Family.light, slots=slots, repeat_groups=[g])
+    items = [SlideItem(title="Ручная вёрстка", text="Подбор макета и цветов"), SlideItem(title="ИИ ломает стиль", text="Нейросети не держат стиль"), SlideItem(title="Нет правил", text="Шаблон — не инструкция")]
+    slide = OutlineSlide(id="s", kind=PatternKind.cards, headline="Вёрстка занимает дни", content=SlideContent(items=items))
+    res = score_pattern(slide, pat, _bare_manifest(), get_strategy("structured"), None, [])
+    assert "текст помещается" in res.reasons

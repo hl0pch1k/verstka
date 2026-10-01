@@ -514,8 +514,43 @@ def detect_repeat_groups(
             ids = {i for c in cells for i in c.member_ids}
         used |= ids
         cells = _without_shared(cells, by_id0)
+        lead = _lead_card(cells, cand, used, by_id0, slide_w, slide_h)
+        if lead is not None:
+            # a bento: the tall card is the first card of the set, and the set keeps its three places
+            cells = [lead] + cells
+            used |= set(lead.member_ids)
         groups.append(_build_group(f"g{len(groups) + 1}", cells, slide_w, slide_h, safe, art_boxes))
     return groups
+
+
+def _lead_card(cells: list[Cell], cand: list[ShapeInfo], used: set[str], by_id: dict, slide_w: int, slide_h: int) -> Optional[Cell]:
+    """A bento: one tall card beside a column of cards, as tall as the column (VK Tech p28: a card with a 3D render
+    the height of the two cards at its right, each card a picture with its line of text) — the same kind of card
+    with its text on it, the set's first card. None when the column stands alone."""
+    if len(cells) < 2:
+        return None
+    xs = [c.bbox.center[0] for c in cells]
+    if max(xs) - min(xs) > 0.04 * slide_w:
+        return None
+    top, bottom = min(c.bbox.y for c in cells), max(c.bbox.y2 for c in cells)
+    x0, x1 = min(c.bbox.x for c in cells), max(c.bbox.x2 for c in cells)
+    kinds = {by_id[c.anchor_id].kind for c in cells if c.anchor_id and c.anchor_id in by_id}
+    taken = {i for c in cells for i in c.member_ids} | used
+    cell_w = median(c.bbox.w for c in cells)
+    for a in sorted(cand, key=lambda s: -s.bbox.area):
+        if a.id in taken or not (a.kind == ShapeKind.pic or _draws(a)) or (kinds and a.kind not in kinds):
+            continue
+        b = a.bbox
+        if abs(b.y - top) > 0.03 * slide_h or abs(b.y2 - bottom) > 0.03 * slide_h or b.w < 0.4 * cell_w:
+            continue
+        if not (0 <= x0 - b.x2 <= 0.05 * slide_w or 0 <= b.x - x1 <= 0.05 * slide_w):
+            continue
+        inner = [t for t in cand if t.id != a.id and t.id not in taken and b.contains_point(*t.bbox.center) and t.bbox.area < 0.9 * b.area]
+        if not any(t.kind == ShapeKind.sp and t.text is not None and t.has_text for t in inner):
+            continue
+        members = [a] + inner
+        return Cell(a.id, [m.id for m in members], b, _composition(members), [m.id for m in members])
+    return None
 
 
 def _without_shared(cells: list[Cell], by_id: dict) -> list[Cell]:

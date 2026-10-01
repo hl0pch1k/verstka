@@ -202,6 +202,8 @@ class _SlideCtx:
         self.band_limited = False
         if box and box[2] > 0 and box[3] > 0 and slot is not None and (widen or slot.role in (SlotRole.title, SlotRole.subtitle)):
             box = self._widen_on_backing(el, box, [p.text for p in paragraphs], family, size, bold, insets)
+        if box and box[2] > 0 and box[3] > 0 and slot is not None and slot.role == SlotRole.title and self.pattern.kind not in (PatternKind.title, PatternKind.section, PatternKind.thanks):
+            box = self._above_art(el, box)
         if self.band_limited:
             min_ratio = min(min_ratio, 0.55)  # a heading in a band steps down rather than leaving the band
         # a heading steps down the template's own sizes, never to a size in between (Dark Minimalist: 43.7 pt, a size
@@ -430,8 +432,9 @@ class _SlideCtx:
             return self.origin.get(sid, sid) not in keep and b[1] > 0.12 * self.H
         return False
 
-    def art_boxes(self) -> list[Bbox]:
-        """The painted parts of the template's art kept on the slide (3D renders, illustrations)."""
+    def art_boxes(self, with_elements: bool = False) -> list:
+        """The painted parts of the template's art kept on the slide (3D renders, illustrations); `with_elements`:
+        (box, element) pairs — the gate asks which of them stand over a text."""
         out = []
         for sid, o in self.els.items():
             tag = etree.QName(o).localname
@@ -455,8 +458,10 @@ class _SlideCtx:
                 blip = o.find(".//" + q("a:blip"))
                 rid = blip.get(q("r:embed")) if blip is not None else None
                 part = self.slide.part.related_part(rid) if rid else None
-                fr = detail_frac(part) if part is not None else None
-                if fr is not None and o.find(".//" + q("a:srcRect")) is None:
+                src = o.find(".//" + q("a:srcRect"))
+                crop = tuple(int(src.get(k) or 0) / 100000 for k in ("l", "t", "r", "b")) if src is not None else (0.0, 0.0, 0.0, 0.0)
+                fr = detail_frac(part, crop) if part is not None else None
+                if fr is not None:
                     ob = Bbox(x=int(b[0] + fr[0] * b[2]), y=int(b[1] + fr[1] * b[3]), w=int(fr[2] * b[2]), h=int(fr[3] * b[3]))
             except Exception:  # noqa: BLE001
                 ob = None
@@ -466,8 +471,24 @@ class _SlideCtx:
                 except Exception:  # noqa: BLE001
                     ob = Bbox(x=b[0], y=b[1], w=b[2], h=b[3])
             if ob.w > 0 and ob.h > 0:
-                out.append(ob)
+                out.append((ob, o) if with_elements else ob)
         return out
+
+    def _above_art(self, el: etree._Element, box: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+        """A content heading keeps above the template's art under it in its column (VK Tech p7: the 3D spiral rises to
+        a fifth of the slide under «Заголовок»): its box ends a gap above the art, and a long heading steps down the
+        sizes to keep there — never runs under the render."""
+        bx = Bbox(x=box[0], y=box[1], w=box[2], h=box[3])
+        bottom = bx.y2
+        for a in self.art_boxes():
+            if min(a.x2, bx.x2) - max(a.x, bx.x) < 0.1 * bx.w:
+                continue
+            if bx.y + int(0.04 * self.H) < a.y < bottom:
+                bottom = a.y - int(0.012 * self.H)
+        if bottom >= bx.y2 or bottom - bx.y < int(0.06 * self.H):
+            return box
+        set_element_pos(el, h=bottom - bx.y)
+        return (box[0], box[1], box[2], bottom - bx.y)
 
     def _clear_of_art(self, el: etree._Element, box: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
         """A text box running into the template's art in its card (a 3D render at the card's right) ends before it:
@@ -2235,8 +2256,25 @@ def _draw_native(ctx: _SlideCtx, oslide: OutlineSlide, box: Bbox) -> None:
         by_chart = bool(ctx.slide.__dict__.get("_verstka_text_by_chart"))
         # (the slide's lines with no text slot of their own go beside the chart, set by the design system the way a
         # composed slide sets them — its conclusion stays the strip under the content, `clone_notes`)
-        comp = clone_composer(ctx, oslide.model_copy(update={"takeaway": None}) if by_chart else oslide, box)
-        if c.chart is not None and by_chart:
+        pair = c.chart is not None and c.chart2 is not None
+        o_comp = oslide
+        if by_chart or pair:
+            o_comp = oslide.model_copy(update={"takeaway": None})
+        if pair and not by_chart:
+            # (the lines went into the sample's own text slots: the pair is drawn without them)
+            o_comp = o_comp.model_copy(update={"content": c.model_copy(update={"bullets": [], "paragraphs": []})})
+        comp = clone_composer(ctx, o_comp, box)
+        if pair:
+            # two charts side by side in the sample's data area, each under its own title, the slide's lines as a
+            # composed pair sets them — the conclusion stays the strip under the content (`clone_notes`)
+            if box.w < 0.6 * ctx.W or box.h < 0.3 * ctx.H:
+                raise RuntimeError("the pair of charts has no room side by side")
+            n0 = len(tree0)
+            comp._comp = "chart_pair"
+            comp.chart_pair(box)
+            if sum(1 for x in list(tree0)[n0:] if etree.QName(x).localname == "graphicFrame") < 2:
+                raise RuntimeError("the pair of charts could not be drawn")
+        elif c.chart is not None and by_chart:
             n0 = len(tree0)
             comp.chart(box)
             if not any(etree.QName(x).localname == "graphicFrame" for x in list(tree0)[n0:]):
@@ -5532,6 +5570,8 @@ def render_clone(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
         # for the conclusion (clone_notes) and the gate (clone_check): text must stand clear of the template's art —
         # the slide's own, and the art its layout draws (WorkSpace's 3D spiral down the left of its content layout)
         arts = ctx.art_boxes()
+        # (the art drawn over the slide's texts: a line of a heading under it loses its letters)
+        slide.__dict__["_verstka_art_front"] = [(b, el) for b, el in ctx.art_boxes(with_elements=True)]
         for c in chrome_for(manifest, pattern.layout_part):
             if c.kind == "pic" and 0.03 <= c.bbox.w * c.bbox.h < 0.85 and (c.source or "").startswith(("layout:", "master:")):
                 arts.append(c.bbox.to_emu(ctx.W, ctx.H))

@@ -147,6 +147,87 @@ def notes_need(builder, slide, oslide: OutlineSlide, outline: DeckOutline, manif
         return (int(0.13 * H) if take else 0) + (int(0.06 * H) if foot else 0), floor
 
 
+def _room_under_heading(slide, pattern: Pattern, manifest: TemplateManifest, W: int, H: int) -> Optional[tuple[int, int, int, int]]:
+    """(x, top, width, bottom) of the band between the heading's last line and the first thing drawn under it in
+    its column, or None (no heading, something right under it, a band narrower than 40 % of the slide)."""
+    from verstka.rendering.clone_check import ink_box
+
+    title = next((s for s in pattern.slots if s.role == SlotRole.title), None)
+    tree = slide._element.cSld.find(q("p:spTree"))
+    t_el = None
+    if title is not None:
+        for el in tree:
+            nv = el.find(".//" + q("p:cNvPr"))
+            if nv is not None and nv.get("id") == title.shape_id:
+                t_el = el
+                break
+    if t_el is None:
+        return None
+    ib = ink_box(t_el, manifest.tokens.typography.primary_family)
+    if ib is None:
+        return None
+    safe = manifest.tokens.spacing.safe_area
+    x = ib.x
+    width = int(safe.x2 * W) - x
+    if width < 0.4 * W:
+        return None
+    y0 = ib.y + ib.h + int(0.015 * H)
+    limit = int(safe.y2 * H)
+    chrome = set(pattern.chrome_shape_ids)
+    for el in tree:
+        if el is t_el or etree.QName(el).localname not in _DRAWN:
+            continue
+        nv = el.find(".//" + q("p:cNvPr"))
+        if nv is not None and nv.get("id") in chrome:
+            continue
+        b = element_bbox(el)
+        if not b or b[2] <= 0 or b[3] <= 0 or b[2] * b[3] >= 0.9 * W * H:
+            continue
+        if etree.QName(el).localname == "sp" and not _paints(el) and not "".join(t.text or "" for t in el.iter(q("a:t"))).strip():
+            continue
+        if b[0] < x + width and b[0] + b[2] > x and b[1] + b[3] > y0:
+            if b[1] < y0:
+                return None  # something stands right under the heading's last line
+            limit = min(limit, b[1])
+    return x, y0, width, limit
+
+
+def _conclusion_under_heading(builder, slide, oslide: OutlineSlide, outline: DeckOutline, manifest: TemplateManifest, pattern: Pattern, take: str, deck_size: float) -> bool:
+    """The conclusion of a sample whose content runs down to its foot (VK Tech p28: three cards with their 3D renders
+    to the bottom of the area) stands as the line under the heading — the accent bar and the line at the deck's
+    conclusion size, a step smaller at the least — when the band between the heading and the content holds it."""
+    W, H = builder.slide_w, builder.slide_h
+    band = _room_under_heading(slide, pattern, manifest, W, H)
+    if band is None:
+        return False
+    x, y0, width, limit = band
+    comp, kit = _composer(builder, slide, oslide, outline, manifest, pattern, Bbox(x=x, y=y0, w=width, h=max(limit - y0, 1)))
+    for size in dict.fromkeys((deck_size, kit.body, kit.small)):
+        if size < kit.small - 0.05:
+            continue
+        plan = comp._takeaway_plan(take, min(width, int(0.9 * width)), figure=False, sizes=(size,))
+        if plan.get("lines", 1) > 2 or y0 + plan["h"] + int(0.015 * H) > limit:
+            continue
+        if plan["strip"] and limit - y0 - plan["h"] < int(0.03 * H):
+            continue  # a strip squeezed against the cards reads as a fourth card: the bar alone, a step smaller
+        _draw_conclusion(comp, plan, x, y0)
+        return True
+    return False
+
+
+def _draw_conclusion(comp, plan: dict, x: int, y: int) -> None:
+    """The conclusion as a composed slide draws it: on its strip, or as the accent bar and the line beside it."""
+    from verstka.rendering.compose import _emu
+
+    if plan["strip"]:
+        comp.cv.card(Bbox(x=x, y=y, w=plan["text_w"] + 2 * plan["pad_x"] + plan["bar_w"] + plan["bar_gap"], h=plan["h"]), comp.kit.card, name="Conclusion strip")
+    bx = x + plan["pad_x"]
+    by = y + plan["pad_y"] + _emu(plan["size"] * 0.12)
+    comp.cv.rect(Bbox(x=bx, y=by, w=plan["bar_w"], h=max(plan["text_h"] - _emu(plan["size"] * 0.24), plan["bar_w"] * 3)), plan["colors"].accent, name="Conclusion bar")
+    tx = bx + plan["bar_w"] + plan["bar_gap"]
+    comp.cv.text(Bbox(x=tx, y=y + plan["pad_y"], w=plan["text_w"], h=plan["text_h"]), [plan["para"]], name="Conclusion")
+
+
 def place_notes(builder, slide, oslide: OutlineSlide, outline: DeckOutline, manifest: TemplateManifest, pattern: Pattern) -> Optional[str]:
     """Set the slide's conclusion and footnote under its content. Returns why they did not fit, or None."""
     from verstka.rendering.synth import _content_bottom_limit
@@ -208,7 +289,10 @@ def place_notes(builder, slide, oslide: OutlineSlide, outline: DeckOutline, mani
                 if p["h"] <= fh - inset and p.get("lines", 1) <= 3:
                     plan, aside = p, (fx + inset, fy + fh - p["h"], fw - 2 * inset)
         if plan is None:
-            return "no room for the conclusion under the sample's content"
+            if _conclusion_under_heading(builder, slide, oslide, outline, manifest, pattern, take, deck_size):
+                take = ""
+            else:
+                return "no room for the conclusion under the sample's content"
     if plan is not None:
         # at the foot, where a composed slide sets it: the strip stands in one place from slide to slide
         y = room_bottom - plan["h"]
@@ -220,13 +304,20 @@ def place_notes(builder, slide, oslide: OutlineSlide, outline: DeckOutline, mani
         arts = slide.__dict__.get("_verstka_art_boxes") or []
         free = _free_stretch(arts, x, x + width, y, y + plan["h"], int(0.02 * W))
         if free is not None and (free[0] > x or free[1] < x + width):
-            if free[1] - free[0] < 0.4 * W:
-                return "the template's art leaves no room for the conclusion"
-            x, width = free[0], free[1] - free[0]
-            # narrower, the strip may take another line: it rises into the room under the content, at the deck's size
-            p2 = comp._takeaway_plan(take, width, figure=False, sizes=(deck_size,))
-            if p2.get("lines", 1) > 3 or p2["h"] > room_bottom - (content_bottom + gap):
-                return "no room for the conclusion beside the template's art"
+            p2 = None
+            if free[1] - free[0] >= 0.4 * W:
+                x, width = free[0], free[1] - free[0]
+                # narrower, the strip may take another line: it rises into the room under the content, at the deck's size
+                p2 = comp._takeaway_plan(take, width, figure=False, sizes=(deck_size,))
+                if p2.get("lines", 1) > 3 or p2["h"] > room_bottom - (content_bottom + gap):
+                    p2 = None
+            if p2 is None:
+                # the art at the foot leaves the strip no room: the line under the heading, when that band holds it
+                if not _conclusion_under_heading(builder, slide, oslide, outline, manifest, pattern, take, deck_size):
+                    return "the template's art leaves no room for the conclusion"
+                if foot_draw is not None:
+                    comp.cv.text(foot_draw[0], foot_draw[1], name="Footnote")
+                return None
             y = room_bottom - p2["h"] if aside is None else min(y, room_bottom - p2["h"])
             plan = p2
         _cut_rules(slide, Bbox(x=x, y=y, w=width, h=plan["h"]), int(0.02 * H), W, H)

@@ -648,6 +648,7 @@ def _pick_canvas(builder: DeckBuilder, manifest: TemplateManifest, family: Famil
     m = manifest
     first = canvas = _canvas_for(manifest, family, comp)
     fallback = None
+    busy_ok = None  # the first canvas that passes all but the calm backdrop
     seen: list[Pattern] = []
     while canvas is not None:
         seen.append(canvas)
@@ -655,8 +656,11 @@ def _pick_canvas(builder: DeckBuilder, manifest: TemplateManifest, family: Famil
         ok = _layout_pictures(builder, canvas) < 0.12 and (not need_pill or _has_pill(builder, canvas)) and _bg_art(builder, canvas.source_slide) is None and _bottom_chrome(builder, canvas) >= floor and not _canvas_photo(builder, canvas)
         # a heading set turned or vertically, or a photograph of things behind the content: never a composed slide's canvas
         ok = ok and not _title_turned(builder, canvas) and _ground_structure(builder, canvas) < GROUND_STRUCTURE_MAX
-        # nor a backdrop busy behind the content band (VK WorkSpace's chart slides glow blue under their pictures)
-        ok = ok and not _canvas_rank(builder, manifest, canvas, wide)[1]
+        # a backdrop busy behind the content band (VK WorkSpace's chart slides glow blue under their pictures) only
+        # when no calm canvas passes (a template whose every slide stands on its photograph keeps its own)
+        if ok and _canvas_rank(builder, manifest, canvas, wide)[1]:
+            busy_ok = busy_ok or canvas
+            ok = False
         if ok and wide:
             g = _canvas_ground(builder, canvas)
             if g is not None and g.w < 0.7 * builder.slide_w:
@@ -667,6 +671,8 @@ def _pick_canvas(builder: DeckBuilder, manifest: TemplateManifest, family: Famil
         tried.add(canvas.id)
         m = m.model_copy(update={"patterns": [p for p in m.patterns if p.id not in tried]})
         canvas = _canvas_for(m, family, comp)
+    if busy_ok is not None:
+        return busy_ok
     if fallback is not None or not seen:
         return fallback or first
     # no candidate passes: the one whose content band is freest of the template's art (not the most cluttered one),

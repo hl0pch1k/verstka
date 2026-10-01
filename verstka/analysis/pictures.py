@@ -200,11 +200,14 @@ def _stats(blob: bytes) -> Optional[_Stats]:
 _DETAIL: dict[str, Optional[tuple[float, float, float, float]]] = {}
 
 
-def detail_frac(part) -> Optional[tuple[float, float, float, float]]:
-    """Where a picture shows something (x, y, w, h as fractions of the picture): its opaque pixels that differ from
-    the picture's own plain ground. A white card drawn as one picture with a 3D render at its foot shows the render;
-    a cut-out render shows itself. None when it cannot be read."""
-    key = str(getattr(part, "partname", id(part)))
+def detail_frac(part, crop: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)) -> Optional[tuple[float, float, float, float]]:
+    """Where a picture shows something (x, y, w, h as fractions of the part of the picture on the slide — `crop` is
+    its `srcRect`, l, t, r, b): its opaque pixels that differ from the picture's own plain ground. A white card drawn
+    as one picture with a 3D render at one side shows the render (VK Tech p28: the glass slab in the right half of a
+    card); a cut-out render shows itself. The card's own outline and soft shadow are not what it shows: its outermost
+    3 % and the rows and columns where under 5 % of the pixels show anything are left out. None when it cannot be
+    read."""
+    key = (str(getattr(part, "partname", id(part))), tuple(round(c, 4) for c in crop))
     if key in _DETAIL:
         return _DETAIL[key]
     out = None
@@ -213,6 +216,10 @@ def detail_frac(part) -> Optional[tuple[float, float, float, float]]:
         from PIL import Image
 
         im = Image.open(io.BytesIO(part.blob)).convert("RGBA")
+        if any(crop):
+            iw, ih = im.size
+            l, t, r, b = crop
+            im = im.crop((int(l * iw), int(t * ih), max(int((1 - r) * iw), int(l * iw) + 1), max(int((1 - b) * ih), int(t * ih) + 1)))
         im.thumbnail((200, 200))
         x = np.asarray(im).astype(np.int32)
         op = x[..., 3] > 40
@@ -226,11 +233,18 @@ def detail_frac(part) -> Optional[tuple[float, float, float, float]]:
             ground = np.array([(top >> 10) & 31, (top >> 5) & 31, top & 31]) * 8 + 4
             share = counts.max() / max(len(keys), 1)
             dist = np.abs(x[..., :3] - ground).sum(axis=2)
-            busy = op & (dist > 36) if share >= 0.3 else op
-            ys, xs = np.nonzero(busy)
-            if len(xs):
-                hh, ww = busy.shape
-                out = (xs.min() / ww, ys.min() / hh, (xs.max() + 1 - xs.min()) / ww, (ys.max() + 1 - ys.min()) / hh)
+            # a cut-out (a 3D render on transparency — VK Tech p7's glass spiral) shows itself, its pale glass too;
+            # only an opaque picture (a card drawn as one image) has a ground of its own to leave out
+            cutout = op.mean() <= 0.8
+            busy = op & (dist > 36) if share >= 0.3 and not cutout else op
+            hh, ww = busy.shape
+            m = max(1, int(0.03 * min(hh, ww)))
+            inner = np.zeros_like(busy)
+            inner[m:hh - m, m:ww - m] = busy[m:hh - m, m:ww - m]
+            cols = np.nonzero(inner.sum(axis=0) >= 0.05 * hh)[0]
+            rows = np.nonzero(inner.sum(axis=1) >= 0.05 * ww)[0]
+            if len(cols) and len(rows):
+                out = (cols.min() / ww, rows.min() / hh, (cols.max() + 1 - cols.min()) / ww, (rows.max() + 1 - rows.min()) / hh)
             else:
                 out = (0.0, 0.0, 0.0, 0.0)
     except Exception:  # noqa: BLE001

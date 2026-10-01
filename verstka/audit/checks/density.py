@@ -177,8 +177,11 @@ def fill_ratio(ctx: AuditContext) -> list[Issue]:
                 continue
         ratio = covered([e.bbox for e in els])
         if ratio > 0.8:
-            # too dense is about ink: roomy cards of the template's own grid with a line each are not a wall of text
-            ratio = max(covered([_ink(e) for e in els]), 0.25)
+            # too dense is about ink: roomy cards of the template's own grid with a line each are not a wall of text,
+            # nor are the template's pictures and plates under them (VK Tech p28: three cards, each with its 3D render,
+            # down to the foot of the area), nor a pair of charts over the area's width — what is read line by line
+            # counts: the texts and the tables
+            ratio = max(covered([_ink(e) for e in els if e.type in ("text", "table") and (e.type != "text" or e.has_text)]), 0.25)
         kind_hint = "title" if s.index == 1 else None
         if ratio < 0.2 and s.index not in (1, len(ctx.ir.slides)) and len(els) <= 2:
             out.append(ctx.new_issue(FILL_RATIO, s.index, f"слайд заполнен на {int(ratio * 100)}%", details={"ratio": round(ratio, 2)}, severity="info"))

@@ -154,7 +154,9 @@ def _render_content_clone(builder: DeckBuilder, ps: LayoutSlide, oslide, pattern
     skip = skip or set()
     # (an alternative scored far below the slide's own choice — a tile grid whose numerals stay on empty tiles — is no
     # better than the composed slide)
-    floor_sc = max(0.45, (ps.score or 0.0) - 0.3)
+    # (an alternative that holds the slide well on its own — 0.6 and more — is tried whatever the first one scored: a
+    # sample of the template's art scored 1.1 must not shut out a 0.8 one when it reads badly)
+    floor_sc = max(0.45, min((ps.score or 0.0) - 0.3, 0.6))
     order = [ps.pattern_id] + [pid for pid, sc in (ps.alternatives or []) if pid != ps.pattern_id and used.get(pid, 0) == 0 and (sc or 0.0) >= floor_sc]
     order = [pid for pid in order if (oslide.id, pid) not in skip]
     for pid in order[:ALT_MAX]:

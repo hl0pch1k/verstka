@@ -306,8 +306,8 @@ def content_trouble(slide, oslide: OutlineSlide, pattern: Pattern, manifest: Tem
             if m in w:
                 return w
     c = oslide.content
-    if c.chart2 is not None or (c.formula or "").strip():
-        return "a second chart or a formula: the composer sets them"
+    if (c.formula or "").strip():
+        return "a formula: the composer sets it"
     if c.photo_slot:
         from verstka.schemas.outline import PHOTO_PLACE_NAME
 
@@ -330,6 +330,22 @@ def content_trouble(slide, oslide: OutlineSlide, pattern: Pattern, manifest: Tem
     # text written over the template's art (a 3D render in a card): the art stays, so the text must stand clear of it
     arts = slide.__dict__.get("_verstka_art_boxes") or []
     designed = slide.__dict__.get("_verstka_designed") or {}
+    front = slide.__dict__.get("_verstka_art_front") or []
+    if front:
+        # the template's art drawn over a text (VK Tech p7: the 3D spiral in front of the heading's third line) hides
+        # its letters: no text runs under it, whatever the sample's own text did
+        fam_f = manifest.tokens.typography.primary_family
+        order = {el: i for i, el in enumerate(tree)}
+        for sp in tree.iter(q("p:sp")):
+            nv = sp.find(".//" + q("p:cNvPr"))
+            if nv is not None and nv.get("id") in chrome or sp.getparent() is not tree:
+                continue
+            ib = ink_box(sp, fam_f)
+            if ib is None or ib.area <= 0:
+                continue
+            for b, el in front:
+                if el.getparent() is tree and order.get(el, -1) > order.get(sp, 10**6) and ib.intersection(b) > 0.005 * ib.area:
+                    return f"the template's art stands over the text «{_shape_text(sp).strip()[:24]}»"
     if arts:
         fam = manifest.tokens.typography.primary_family
         for sp in tree.iter(q("p:sp")):

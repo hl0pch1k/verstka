@@ -352,6 +352,19 @@ def photo_place(pattern: Pattern, pictures: Optional[list]) -> Optional[Slot]:
     return None
 
 
+def pair_width(pattern: Pattern, pictures: Optional[list]) -> float:
+    """How wide (share of the slide) the sample's place for data is — its drawn chart or table, or, on a chart sample,
+    its chart pictures together (VK WorkSpace p20: two doughnuts side by side): a pair of charts stands there side by
+    side."""
+    widths = [pattern.data_box.w] if pattern.data_box is not None else []
+    boxes = [x.box for x in pictures or [] if getattr(x, "kind", None) == "content" and x.box.area >= 0.05]
+    if pattern.kind == PatternKind.chart:
+        boxes += [s.bbox for s in pattern.slots if s.role == SlotRole.image and s.bbox.area >= 0.05] + [b for b in pattern.decor_boxes if b.area >= 0.05]
+    if boxes:
+        widths.append(max(b.x2 for b in boxes) - min(b.x for b in boxes))
+    return max(widths, default=0.0)
+
+
 def chart_picture_room(slide: OutlineSlide, pattern: Pattern, pictures: Optional[list]) -> float:
     """The area (share of the slide) of the sample's picture that shows a chart or data — `analysis.pictures` reads it
     as the sample's content, not as art — when the slide carries a chart or a table to put in its place; 0 otherwise.
@@ -504,6 +517,13 @@ def score_pattern(
             reasons.append("нет крупной области под диаграмму или таблицу")
         else:
             reasons.append(f"область под данные: {room:.0%} слайда")
+        if slide.content.chart2 is not None and slide.content.chart is not None:
+            # a pair of charts stands side by side over most of the slide's width (`clone._draw_native`)
+            if pair_width(pattern, pics) < 0.6:
+                kind *= 0.3
+                reasons.append("пара диаграмм не встанет рядом в область образца")
+            else:
+                reasons.append("пара диаграмм встанет рядом в область данных образца")
     if slide_kind == PatternKind.quote and slide.content.quote:
         cap_q = max((s.capacity.max_chars for s in pattern.slots if s.role in (SlotRole.body, SlotRole.bullet_list, SlotRole.card_body, SlotRole.subtitle)), default=0)
         if cap_q < len(slide.content.quote) * 0.8:
@@ -587,6 +607,16 @@ def score_pattern(
     bookend = slide.kind in _BOOKEND_KINDS
     title_fit = _bookend_title_fit(slide, pattern, manifest) if bookend else None
     needs = _needed_chars(slide)
+    items_n = slide.content.items or slide.content.columns
+    if group is not None and items_n and "card_title" in needs and "card_body" in needs:
+        # a cell with one text box (VK Tech p7, p8: a line beside an icon; p24: a paragraph on a card): the item's
+        # heading and its text go into that box together, the heading bold on top (`clone._item_single_paragraphs`)
+        cell_roles = {x.role for x in pattern.slots if x.group_id == group.id and x.role in (SlotRole.card_title, SlotRole.card_body)}
+        if len(cell_roles) == 1:
+            whole = max(len(i.title or "") + len(i.text or "") + sum(len(b) + 2 for b in i.bullets) + 2 for i in items_n)
+            needs.pop("card_title", None)
+            needs.pop("card_body", None)
+            needs[next(iter(cell_roles)).value] = whole
     if lines_in_cells and "bullet_list" in needs:
         # each line is a cell's text: measured against a cell, not against one list box
         del needs["bullet_list"]
@@ -752,12 +782,15 @@ def score_pattern(
     # strategy flavour: visual favours decorated/illustrated samples, compact favours denser samples, structured plain ones
     n_decor = len(pattern.decor_assets) + sum(1 for s in pattern.slots if s.role in (SlotRole.icon, SlotRole.image))
     has_art = any(p.kind == "art" and p.area >= 0.02 for p in pics)
+    # (every variant takes the template's designed slides first — its illustrations, its drawn forms — over plain
+    # cards: a deck of the template's own slides, not the same white card eleven times; the variants differ by which
+    # of them they take, `matcher.OTHER_VARIANT_PENALTY`)
     if strategy.name == "visual":
         style = 0.1 if has_art else (0.05 if n_decor >= 1 else 0.0)
     elif strategy.name == "compact":
-        style = 0.08 * min(len(text_slots) / 8.0, 1.0)
+        style = 0.08 * min(len(text_slots) / 8.0, 1.0) + (0.03 if has_art else 0.0)
     else:
-        style = 0.04 if n_decor == 0 else (0.02 if has_art else 0.0)
+        style = 0.06 if has_art else (0.03 if n_decor >= 1 else 0.0)
     if style:
         reasons.append(f"стиль стратегии {strategy.name}: +{style:.2f}")
     if slide.kind in _STANDALONE_KINDS and slide.kind != PatternKind.quote:

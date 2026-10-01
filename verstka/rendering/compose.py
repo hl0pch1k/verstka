@@ -3931,10 +3931,14 @@ class Composer:
         if title and not named and _same_words(title, self.o.headline):
             title = ""  # the slide's heading names the chart already: never twice on one slide
         if not title:
+            from verstka.rendering.charts import glyph_unit
+
             series = resolve_series(spec, self.outline)
             name = " ".join((series[0].name or "").split()) if len(series) == 1 else ""
             generic = re.fullmatch(r"(?i)(series|ряд|серия|значени[яе]|values?)\s*\d*", name or "")
-            if name and not generic and (named or not _same_words(name, self.o.headline)):
+            # (a series named by its unit — «₽», «%» — names nothing: the unit rides on its labels)
+            unit_name = bool(name) and (glyph_unit(name) or name.lower() == (spec.unit or "").strip().lower())
+            if name and not generic and not unit_name and (named or not _same_words(name, self.o.headline)):
                 title = name[:1].upper() + name[1:]
         if title and unit and unit.lower() not in title.lower() and not _same_stem(unit, title):
             return f"{title.rstrip(' ,.:;')}, {unit}"
