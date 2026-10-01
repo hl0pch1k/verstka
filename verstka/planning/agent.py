@@ -522,7 +522,7 @@ def _kinds_text(manifest: Optional[TemplateManifest]) -> str:
     return out
 
 
-_PHOTO_PLACE = re.compile(r"вставить|insert|\bqr\b|фото|photo|логотип|logo", re.I)
+_PHOTO_PLACE = re.compile(r"вставить|insert|\bqr\b|фото|photo|логотип|logo|иллюстрац|illustration", re.I)
 
 
 def template_repertoire(manifest: Optional[TemplateManifest]) -> list[str]:

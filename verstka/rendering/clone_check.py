@@ -388,6 +388,11 @@ def content_trouble(slide, oslide: OutlineSlide, pattern: Pattern, manifest: Tem
                 return f"a hole of {hole:.0%} of the slide where the sample had {hole0:.0%} free"
         except Exception:  # noqa: BLE001
             pass
+    # the chart or the table the slide carries must be on it (drawn, and not taken off by a later step)
+    if c.chart is not None or c.table is not None:
+        frames = [el for el in tree if etree.QName(el).localname == "graphicFrame" and el.find(".//" + q("p:cNvPr")) is not None and el.find(".//" + q("p:cNvPr")).get("id") in native]
+        if not frames:
+            return "the slide's chart or table is not on the slide"
     # the design system's table or chart squeezed into a sample's small area: its type below the deck's own data size
     if native:
         data_floor = 0.85 * min(manifest.components.table_style.font_size_pt, manifest.components.chart_style.font_size_pt)

@@ -265,17 +265,18 @@ def _cover_art_ids(els: dict, title_box: Optional[tuple], W: int, H: int) -> set
     return keep
 
 
-def _slide_on_canvas(builder: DeckBuilder, canvas: Pattern, W: int, H: int, keep_extra: Optional[set[str]] = None, keep_art: bool = False):
+def _slide_on_canvas(builder: DeckBuilder, canvas: Pattern, W: int, H: int, keep_extra: Optional[set[str]] = None, keep_art: bool = False, manifest: Optional[TemplateManifest] = None):
     """Clone the canvas sample and strip it to background + chrome + the title slot (+ the art to keep; `keep_art`: a
     cover keeps its own photos and illustrations clear of the title). Returns (slide, title shape, heading ground)."""
-    from verstka.analysis.shapes import looks_like_sample_value
+    from verstka.analysis.shapes import looks_like_sample_value, template_names
 
+    names = template_names(manifest) if manifest is not None else ()
     slide = builder.clone_slide(canvas.source_slide)
     els = slide_shape_elements(slide)
     title = _top_title(canvas)
     # chrome that is the template's sample copy («DEMO SLIDE», «Title Text Demo») or a sample value of its header or
     # footer («JOHN DOE», «NEW YORK», «2023», «SLIDESCARNIVAL.COM») is not kept on a composed slide
-    chrome = {sid for sid in canvas.chrome_shape_ids if not (sid in els and looks_like_sample_value("".join(t.text or "" for t in els[sid].iter(q("a:t")))))}
+    chrome = {sid for sid in canvas.chrome_shape_ids if not (sid in els and looks_like_sample_value("".join(t.text or "" for t in els[sid].iter(q("a:t"))), names))}
     keep = chrome | ({title.shape_id} if title else set()) | set(keep_extra or ())
     # the label the heading is printed on (a pill) is part of the heading's style: its colour was chosen for it
     tb = element_bbox(els[title.shape_id]) if title and title.shape_id in els else None
@@ -1489,7 +1490,7 @@ def _render_content(builder: DeckBuilder, comp: str, oslide: OutlineSlide, manif
     canvas = art.pattern if art is not None else _pick_canvas(builder, manifest, family, comp, wide, need_pill=ds.pill)
     ground = None
     if canvas is not None:
-        slide, title_ph, ground = _slide_on_canvas(builder, canvas, builder.slide_w, builder.slide_h, keep_extra=art.keep_ids if art else None)
+        slide, title_ph, ground = _slide_on_canvas(builder, canvas, builder.slide_w, builder.slide_h, keep_extra=art.keep_ids if art else None, manifest=manifest)
         family = canvas.family
     else:
         layout, family = _layout_for(builder, manifest, family, oslide.kind)
@@ -3231,7 +3232,7 @@ def _render_cover(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: Outline
     canvas = _canvas_for(manifest, family, comp)
     ground = None
     if canvas is not None:
-        slide, title_ph, ground = _slide_on_canvas(builder, canvas, builder.slide_w, builder.slide_h, keep_art=comp in ("title", "thanks"))
+        slide, title_ph, ground = _slide_on_canvas(builder, canvas, builder.slide_w, builder.slide_h, keep_art=comp in ("title", "thanks"), manifest=manifest)
     else:
         layout, family = _layout_for(builder, manifest, family, oslide.kind)
         slide = _add_layout_slide(builder, layout)

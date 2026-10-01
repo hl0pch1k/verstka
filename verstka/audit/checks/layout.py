@@ -29,6 +29,27 @@ WORD_ROOM = 0.97  # a word wider than this share of its line is broken by the re
 _HARD_SPACE_RE = re.compile(r"[ \t\r\n]+")  # NBSP stays inside a word, as PowerPoint keeps it on one line
 
 
+def _template_bleed(f, manifest, ws=None) -> bool:
+    """A picture standing exactly where a sample of the template sets one (a 3D render cut by the slide's edge on a
+    template slide the deck stands on): the template's design, not a picture that slid off."""
+    if manifest is None:
+        return False
+    boxes = []
+    for p in manifest.patterns:
+        boxes += list(p.decor_boxes) + [s.bbox for s in p.slots if s.role.value in ("image", "icon", "decoration")]
+    if ws is not None:
+        try:
+            from verstka.analysis.pictures import sample_pictures
+
+            boxes += [pic.box for pics in sample_pictures(ws, manifest).values() for pic in pics]
+        except Exception:  # noqa: BLE001 - the manifest's boxes then
+            pass
+    for b in boxes:
+        if abs(b.x - f.x) <= 0.006 and abs(b.y - f.y) <= 0.006 and abs(b.w - f.w) <= 0.02 * max(f.w, 1e-6) + 0.004 and abs(b.h - f.h) <= 0.02 * max(f.h, 1e-6) + 0.004:
+            return True
+    return False
+
+
 @check(OUT_OF_BOUNDS)
 def out_of_bounds(ctx: AuditContext) -> list[Issue]:
     out: list[Issue] = []
@@ -43,7 +64,7 @@ def out_of_bounds(ctx: AuditContext) -> list[Issue]:
             if e.type == "picture":
                 inside_w = max(0.0, min(f.x2, 1.0) - max(f.x, 0.0))
                 inside_h = max(0.0, min(f.y2, 1.0) - max(f.y, 0.0))
-                if inside_w * inside_h < 0.75 * f.area:
+                if inside_w * inside_h < 0.75 * f.area and not _template_bleed(f, ctx.manifest, ctx.ws):
                     out.append(ctx.new_issue(OUT_OF_BOUNDS, s.index, f"картинка «{e.name}» на {100 - int(100 * inside_w * inside_h / max(f.area, 1e-9))}% за краем слайда", bboxes=[f], element_ids=[e.id], severity="warn", autofix=fix("move_inside", "сдвинуть внутрь слайда", element_id=e.id)))
                 continue
             if f.x < -0.01 or f.y < -0.01 or f.x2 > 1.01 or f.y2 > 1.01:

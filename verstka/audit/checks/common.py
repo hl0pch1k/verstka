@@ -54,6 +54,9 @@ def is_template_chrome(e: IRElement, manifest: Optional["TemplateManifest"] = No
                 continue
             if f.close_to(c.bbox, 0.015):
                 return True
+            # a running header found by its words and its height (its box sized to the words on every slide)
+            if c.signature.startswith("txtpos|") and c.text and (e.text or "").strip()[:40] == c.text.strip()[:40] and abs(f.y - c.bbox.y) <= 0.02:
+                return True
     return False
 
 

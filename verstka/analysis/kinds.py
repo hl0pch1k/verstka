@@ -59,6 +59,19 @@ def heuristic_kind(
 
     if _THANKS_RE.search(title_text) and n_content <= 8:
         return PatternKind.thanks, 0.9
+    # a quote mark set as the heading («“» over a statement and «— Include a credit»: Dark Minimalist p18) is a quote
+    if title is not None and re.fullmatch(r"\s*[«»“”„\"']{1,2}\s*", title.plain_text or ""):
+        return PatternKind.quote, 0.8
+    # a numbered list of sections in one box («1.Introduction / 2.About Us / 3.Our Projects») is the agenda
+    for s in texts:
+        lines = [ln.strip() for ln in (s.plain_text or "").splitlines() if ln.strip()]
+        if len(lines) >= 3 and sum(1 for ln in lines if re.match(r"^\d{1,2}\s*[.)]\s*\S", ln)) >= 3:
+            return PatternKind.agenda, 0.8
+    if title is not None and title.text is not None:
+        # (the numbers set by the list itself: the heading box holds three or more short numbered lines)
+        paras = [p for p in title.text.paragraphs if p.text.strip()]
+        if len(paras) >= 3 and all(p.has_bullet and len(p.text) <= 40 for p in paras):
+            return PatternKind.agenda, 0.8
     # the first slide of a template is its cover: a photo, a card under the title, the author, the date and a few
     # marks around it (Canva / Google Slides covers carry 8–12 shapes) — never a comparison or a card row
     if slide_index == 1 and n_slides >= 3 and n_numbers < 3:
@@ -87,6 +100,11 @@ def heuristic_kind(
         return PatternKind.title, 0.7  # speaker variant of the title slide (avatar + name)
     if any(_MONO_RE.search(s.text.dominant_font or "") for s in texts if s.text) and any(len(s.plain_text) > 40 for s in texts):
         return PatternKind.code, 0.85
+    # figures that are years in order (2010, 2011, 2012…) mark a timeline, not key figures (Education p42)
+    num_texts = [by_id[i].plain_text.strip() for i, r in roles.items() if r == SlotRole.number and by_id.get(i) is not None]
+    years = [int(x) for x in num_texts if re.fullmatch(r"(?:19|20)\d{2}", x)]
+    if len(years) >= 3 and len(years) >= 0.8 * len(num_texts) and len(set(years)) == len(years) and max(years) - min(years) <= 3 * len(years):
+        return PatternKind.timeline, 0.75
     if n_numbers >= 8:
         return PatternKind.chart, 0.6  # a chart or table drawn with shapes
     if n_numbers >= 3:
@@ -108,11 +126,22 @@ def heuristic_kind(
     # title-ish slides
     if slide_index == 1 and n_content <= 6:
         return PatternKind.title, 0.9
-    if title is not None and role_counts.get(SlotRole.subtitle, 0) >= 1 and n_content <= 4 and n_cards == 0:
+    # (a heading with a line under it beside a large picture — VK Tech p43's video call — or over a list and a photo
+    # place — a speaker's page, p11 — is a page of content, not a divider)
+    big_picture = any(roles.get(s.id) == SlotRole.image and s.bbox.area / slide_area >= 0.12 for s in shapes)
+    photo_place = any(re.search(r"вставить\s+фото|insert\s+(?:photo|image)|^\s*иллюстрац|^\s*illustration", s.plain_text, re.I) for s in texts)
+    divider_like = not big_picture and not photo_place and role_counts.get(SlotRole.bullet_list, 0) == 0
+    if title is not None and role_counts.get(SlotRole.subtitle, 0) >= 1 and n_content <= 4 and n_cards == 0 and (slide_index <= 2 or divider_like):
         return PatternKind.title if slide_index <= 2 else PatternKind.section, 0.7
     body_chars = sum(len(t.plain_text) for t in texts if title is None or t.id != title.id)
-    if title is not None and n_content <= 2 and n_cards == 0 and role_counts.get(SlotRole.bullet_list, 0) == 0 and body_chars <= 120:
-        return PatternKind.section, 0.7  # a divider: a heading and a line at most, never a list
+    # a long statement in the heading's place over a short attribution — a name and a position — is a quote, not a
+    # divider (Education p19: «VK активно развивается…» over «Владимир Кириенко, генеральный директор VK»)
+    if title is not None and len(title.plain_text) > 100 and n_cards == 0:
+        others = [s for s in texts if s.id != title.id and s.plain_text.strip()]
+        if others and all(len(s.plain_text) <= 90 for s in others) and any(re.match(r"^[—–-]?\s*[А-ЯЁA-Z][а-яёa-z]+\s+[А-ЯЁA-Z][а-яёa-z]+", s.plain_text.strip()) for s in others):
+            return PatternKind.quote, 0.75
+    if title is not None and n_content <= 2 and n_cards == 0 and role_counts.get(SlotRole.bullet_list, 0) == 0 and body_chars <= 120 and (slide_index <= 2 or divider_like):
+        return PatternKind.section, 0.7  # a divider: a heading and a line at most, never a list (nor a large picture)
     # team: group cells with a picture or a round avatar and name-like text
     if biggest_group is not None and n_cards >= 3:
         cells = biggest_group.member_shape_ids

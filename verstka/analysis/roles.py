@@ -250,7 +250,9 @@ def heuristic_roles(
                     roles[head.id] = SlotRole.number if is_numeric_text(head.plain_text) else SlotRole.card_title
                     for m in cell_texts:
                         if m.id not in roles:
-                            roles[m.id] = SlotRole.number if is_numeric_text(m.plain_text) and _size(m) >= body_size * 1.5 else SlotRole.card_body
+                            # a figure set large, or the ordinal of a numbered card («01» on its chip), is the cell's number
+                            ordinal = bool(re.fullmatch(r"0?\d{1,2}", m.plain_text.strip()))
+                            roles[m.id] = SlotRole.number if is_numeric_text(m.plain_text) and (_size(m) >= body_size * 1.5 or ordinal) else SlotRole.card_body
             for m in members:
                 if m.id in roles:
                     continue

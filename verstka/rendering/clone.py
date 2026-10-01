@@ -14,7 +14,7 @@ from lxml import etree
 from pptx.slide import Slide
 
 from verstka.analysis.patterns import container_inset
-from verstka.analysis.shapes import looks_like_placeholder, looks_like_sample_value
+from verstka.analysis.shapes import looks_like_placeholder, looks_like_sample_value, template_names
 from verstka.analysis.xmlns import q
 from verstka.ingest.workspace import TemplateWorkspace
 from verstka.matching.scorer import awkward_breaks, balanced_lines, bind_short_words, bookend_max_lines, cover_goal, display_fit, display_lines, is_placeholder_text, same_words, split_display_title
@@ -1994,10 +1994,16 @@ def _remove_empty_cells(ctx: _SlideCtx) -> None:
                 continue
             if any(sid in ctx.filled for sid in cell):
                 continue
+            native = ctx.slide.__dict__.get("_verstka_native") or set()
             for sid in cell:
                 el = ctx.els.get(sid)
                 for rider in riders_of.get(id(el), []) if el is not None else []:
-                    if rider.getparent() is not None and (ctx.id_of(rider) or "") not in ctx.filled:
+                    rid = ctx.id_of(rider) or ""
+                    # only the sample's own companions leave with an empty cell — never what was set on the slide
+                    # since (the chart and the legend the design system drew beside the sample's empty column)
+                    if rid not in ctx.els or rid in native:
+                        continue
+                    if rider.getparent() is not None and rid not in ctx.filled:
                         ctx.remove_el(rider)
             for sid in cell:
                 el = ctx.els.get(sid)
@@ -4874,7 +4880,7 @@ def render_clone(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
         if el is None or el.getparent() is None or etree.QName(el).localname != "sp":
             continue
         txt = shape_text(el)
-        if txt.strip() and looks_like_sample_value(txt):
+        if txt.strip() and looks_like_sample_value(txt, template_names(manifest)):
             remove_element(el)
             ctx.removed.add(sid)
     if _is_bookend(oslide) and ctx.slots(SlotRole.title):

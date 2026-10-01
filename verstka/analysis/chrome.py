@@ -103,13 +103,58 @@ def detect_chrome(shapes_per_slide: dict[int, list[ShapeInfo]], slide_w: int, sl
                     image_part=s.image_part,
                 )
             )
+    # the same short text at the same height on many slides — a header «SlidesCarnival · Dark Minimalist · 08/12/2024»
+    # whose boxes the exporter sized to their words (widths 0.08–0.12, x 0.44–0.45): its left, centre or right edge
+    # stays in place, its exact box does not
+    runs: dict[tuple[str, int], list[tuple[int, ShapeInfo]]] = defaultdict(list)
+    for idx, shapes in shapes_per_slide.items():
+        for s in shapes:
+            if s.ph_type in _CONTENT_PH or not s.has_text or s.bbox.area <= 0:
+                continue
+            txt = s.plain_text.strip()
+            if not txt or len(txt) > 40 or looks_like_placeholder(txt):
+                continue
+            f = s.bbox.to_frac(slide_w, slide_h)
+            if 0.12 < f.y < 0.85 and f.y + f.h < 0.88:
+                continue  # furniture stands in the top or the bottom band
+            runs[(_text_sig(txt), round(f.y / 0.02))].append((idx, s))
+    for (sig_t, yk), items in runs.items():
+        slides = {i for i, _ in items}
+        share = len(slides) / n
+        if len(slides) < min_slides or share < min_share:
+            continue
+        fr = [s.bbox.to_frac(slide_w, slide_h) for _, s in items]
+        spans = (max(b.x for b in fr) - min(b.x for b in fr), max(b.x + b.w / 2 for b in fr) - min(b.x + b.w / 2 for b in fr), max(b.x2 for b in fr) - min(b.x2 for b in fr))
+        if min(spans) > 0.02:
+            continue
+        idx, s = items[0]
+        out.append(
+            ChromeElement(
+                signature=f"txtpos|{yk}|{sig_t}",
+                bbox=s.bbox.to_frac(slide_w, slide_h),
+                share=round(share, 3),
+                kind="text",
+                sample_slide=idx,
+                text=s.plain_text[:40],
+                image_part=None,
+            )
+        )
     out.sort(key=lambda c: -c.share)
     return out
 
 
 def chrome_ids(shapes: list[ShapeInfo], chrome: list[ChromeElement], slide_w: int, slide_h: int) -> set[str]:
     sigs = {c.signature for c in chrome if c.source == "slide"}
-    return {s.id for s in shapes if shape_signature(s, slide_w, slide_h) in sigs}
+    out = {s.id for s in shapes if shape_signature(s, slide_w, slide_h) in sigs}
+    pos = {c.signature for c in chrome if c.source == "slide" and c.signature.startswith("txtpos|")}
+    if pos:
+        for s in shapes:
+            if s.id in out or not s.has_text or s.ph_type in _CONTENT_PH:
+                continue
+            f = s.bbox.to_frac(slide_w, slide_h)
+            if f"txtpos|{round(f.y / 0.02)}|{_text_sig(s.plain_text.strip())}" in pos:
+                out.add(s.id)
+    return out
 
 
 def inherited_chrome(part_shapes: dict[str, list[ShapeInfo]], slides_using: dict[str, list[int]], n_slides: int, slide_w: int, slide_h: int, source_kind: str) -> list[ChromeElement]:

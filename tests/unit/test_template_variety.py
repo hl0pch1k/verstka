@@ -206,3 +206,65 @@ def test_an_empty_device_mockup_and_an_unused_note_band_weigh_on_a_content_sampl
     s2 = s.model_copy(update={"takeaway": "Шаблон задаёт правила, Verstka их соблюдает"})
     with_take = score_pattern(s2, _cards_pattern(note_slot="b0"), manifest, get_strategy("structured"))
     assert any("встанет в поле примечания" in r for r in with_take.reasons)
+
+
+# ---------------------------------------------------------------------------- reading templates: more of what samples say
+
+
+def test_numbered_cards_are_not_a_drawn_table_and_keep_their_text():
+    from verstka.analysis.groups import detect_drawn_table
+
+    shapes = [_text("t", "Заголовок", 36, 0.035, 0.06, 0.64, 0.17)]
+    for r, y in enumerate((0.232, 0.537)):
+        for c, x in enumerate((0.036, 0.358, 0.681)):
+            k = r * 3 + c
+            shapes.append(_shape(f"n{k}", x, y, 0.055, 0.099, fill="212121", geometry="roundRect", z=1))
+            shapes[-1].text = TextInfo(paragraphs=[ParagraphInfo(text=f"0{k + 1}", runs=[RunInfo(text=f"0{k + 1}", font="Play", size_pt=16, bold=False, color_hex="FFFFFF")])])
+            shapes.append(_text(f"h{k}", "Заголовок", 20, x, y + 0.13, 0.282, 0.074))
+            shapes.append(_text(f"b{k}", "Основной текст", 16, x, y + 0.189, 0.282, 0.117))  # overlaps the heading's foot
+    assert detect_drawn_table(shapes, W, H) is None
+    groups = detect_repeat_groups(shapes, W, H)
+    assert len(groups) == 1 and len(groups[0].member_shape_ids) == 6
+    assert all(len(cell) == 3 for cell in groups[0].member_shape_ids)
+
+
+def test_the_accent_card_of_a_row_without_its_header_plate_stays_in_the_row():
+    shapes = [_text("t", "Заголовок", 36, 0.035, 0.06, 0.64, 0.17)]
+    for i, x in enumerate((0.035, 0.339)):
+        shapes.append(_shape(f"c{i}", x, 0.287, 0.282, 0.502, fill="000000", geometry="roundRect", line="70C3FF", z=1))
+        shapes.append(_shape(f"p{i}", x, 0.287, 0.282, 0.107, fill="00AEE8", geometry="round2SameRect", z=2))
+        shapes.append(_text(f"h{i}", "Заголовок", 20, x + 0.013, 0.318, 0.257, 0.045))
+        shapes.append(_text(f"b{i}", "Текст", 12, x + 0.013, 0.414, 0.257, 0.126))
+    shapes.append(_shape("c2", 0.642, 0.287, 0.295, 0.502, fill="00AEE8", geometry="roundRect", line="70C3FF", z=1))
+    shapes.append(_text("h2", "Заголовок", 20, 0.655, 0.32, 0.282, 0.045))
+    shapes.append(_text("b2", "Текст", 12, 0.655, 0.414, 0.257, 0.126))
+    groups = detect_repeat_groups(shapes, W, H)
+    assert len(groups) == 1 and len(groups[0].member_shape_ids) == 3
+
+
+def test_kinds_of_a_quote_an_agenda_and_a_picture_page():
+    from verstka.analysis.kinds import heuristic_kind
+
+    quote_mark = _text("q", "“", 60, 0.1, 0.2, 0.1, 0.1)
+    statement = _text("s", "Write an original statement or inspiring quote.", 28, 0.1, 0.35, 0.8, 0.2)
+    credit = _text("c", "— Include a credit, citation, or supporting message", 14, 0.1, 0.6, 0.8, 0.05)
+    roles = {"q": SlotRole.title, "s": SlotRole.body, "c": SlotRole.body}
+    assert heuristic_kind([quote_mark, statement, credit], roles, [], 18, 21, W, H)[0] == PatternKind.quote
+    title = ShapeInfo(id="a", name="a", kind=ShapeKind.sp, bbox=_box(0.1, 0.2, 0.5, 0.5), z=1, text=TextInfo(paragraphs=[ParagraphInfo(text=t, has_bullet=True, runs=[RunInfo(text=t, font="Play", size_pt=32, bold=False, color_hex="FFFFFF")]) for t in ("Introduction", "About Us", "Our Projects")]))
+    assert heuristic_kind([title], {"a": SlotRole.title}, [], 3, 21, W, H)[0] == PatternKind.agenda
+    head = _text("h", "Заголовок в две строчки", 32, 0.02, 0.1, 0.5, 0.1)
+    sub = _text("d", "Описание", 16, 0.02, 0.22, 0.4, 0.05)
+    pic = ShapeInfo(id="p", name="p", kind=ShapeKind.pic, bbox=_box(0.2, 0.3, 0.6, 0.6), z=1, image_part="/ppt/media/image1.png")
+    kind = heuristic_kind([head, sub, pic], {"h": SlotRole.title, "d": SlotRole.subtitle, "p": SlotRole.image}, [], 43, 54, W, H)[0]
+    assert kind != PatternKind.section
+
+
+def test_a_header_whose_boxes_vary_in_width_is_the_decks_furniture():
+    from verstka.analysis.chrome import chrome_ids, detect_chrome
+
+    per_slide = {}
+    for i in range(1, 9):
+        w = 0.08 + 0.01 * (i % 4)
+        per_slide[i] = [_text(f"h{i}", "Dark Minimalist", 12, 0.5 - w / 2, 0.041, w, 0.018), _text(f"t{i}", f"Заголовок {i}", 36, 0.05, 0.2, 0.6, 0.1)]
+    chrome = detect_chrome(per_slide, W, H)
+    assert all(f"h{i}" in chrome_ids(per_slide[i], chrome, W, H) for i in per_slide)

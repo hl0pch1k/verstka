@@ -746,7 +746,35 @@ SAMPLE_VALUE_RE = re.compile(
 )
 
 
-def looks_like_sample_value(text: str) -> bool:
-    """A header's or a footer's sample value of a free template (see SAMPLE_VALUE_RE) — or its sample copy."""
+_DATE_RE = re.compile(r"^\s*(?:\d{1,2}[/.\-]\d{1,2}[/.\-](?:19|20)?\d{2}|(?:19|20)\d{2}-\d{2}-\d{2})\s*$")
+
+
+def looks_like_sample_value(text: str, template_names: tuple = ()) -> bool:
+    """A header's or a footer's sample value of a free template (see SAMPLE_VALUE_RE) — or its sample copy, a date
+    («08/12/2024»: the deck's own date is never the template's), or the template's own name as its cover says it
+    («Dark Minimalist» over «Dark Minimalist Presentation.»; `template_names`: the titles of its cover samples)."""
     t = (text or "").strip()
-    return bool(t) and (bool(SAMPLE_VALUE_RE.search(t)) or looks_like_placeholder(t))
+    if not t:
+        return False
+    if SAMPLE_VALUE_RE.search(t) or looks_like_placeholder(t) or _DATE_RE.match(t):
+        return True
+    words = re.findall(r"\w+", t.lower())
+    if len(words) >= 2 and len(t) <= 40:
+        for name in template_names:
+            if " ".join(words) in " ".join(re.findall(r"\w+", (name or "").lower())):
+                return True
+    return False
+
+
+def template_names(manifest) -> tuple:
+    """The titles the template's own cover samples carry (its name as it presents itself)."""
+    out = []
+    try:
+        from verstka.schemas.common import PatternKind, SlotRole
+
+        for p in manifest.patterns:
+            if p.kind == PatternKind.title:
+                out += [s.sample_text for s in p.slots if s.role == SlotRole.title and s.sample_text]
+    except Exception:  # noqa: BLE001
+        pass
+    return tuple(out)

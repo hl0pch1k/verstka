@@ -22,7 +22,7 @@ _NUMBER_KINDS = {PatternKind.stat_row, PatternKind.big_number}
 
 _BOOKEND_KINDS = (PatternKind.title, PatternKind.section, PatternKind.thanks)
 # a sample's place for a photo, a QR code or a logo («Вставить фото», «QR-код», «Insert photo»)
-_PHOTO_PLACE_RE = re.compile(r"вставить|insert|\bqr\b|qr-|фото|photo|логотип|logo", re.I)
+_PHOTO_PLACE_RE = re.compile(r"вставить|insert|\bqr\b|qr-|фото|photo|логотип|logo|иллюстрац|illustration", re.I)
 # texts of a cover or closing sample that stand for data a deck never has (a speaker, his photo, a QR code): the
 # renderer removes them with their frames, so they neither count as clutter nor as competition for the heading
 _PLACEHOLDER_RE = re.compile(r"имя|фамили|должност|спикер|speaker|\bname\b|position|вставить|insert|\bqr\b|qr-|фото|photo|логотип|logo", re.I)

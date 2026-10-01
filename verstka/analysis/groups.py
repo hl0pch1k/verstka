@@ -15,6 +15,8 @@ or of its layout) or set in a free arrangement keep their count: the group is `f
 
 from __future__ import annotations
 
+import re
+
 from collections import Counter
 from dataclasses import dataclass, field
 from statistics import median
@@ -197,6 +199,13 @@ def detect_drawn_table(shapes: list[ShapeInfo], slide_w: int, slide_h: int, chro
     steps = [row_c[k + 1] - row_c[k] for k in range(len(row_c) - 1)]
     if steps and max(steps) > 2.5 * max(min(steps), 1):
         return None
+    # a row of ordinals «01 02 03» over a row of headings is a grid of numbered cards (WorkSpace p8), not a table
+    for ri in range(len(row_c)):
+        cells = [taken[(ri, ci)].plain_text.strip() for ci in range(len(col_c)) if (ri, ci) in taken]
+        if len(cells) >= 3 and all(re.fullmatch(r"0?\d{1,2}", c) for c in cells):
+            vals = sorted(int(c) for c in cells)
+            if vals == list(range(vals[0], vals[0] + len(vals))):
+                return None
     cell_ids = {b.id for b in taken.values()}
     area = None
     for b in taken.values():
@@ -386,7 +395,9 @@ def detect_repeat_groups(
                 for m in cand:
                     if m.id in taken_ids or m in members or m in sats or m.text is None or _draws(m) or m.kind != ShapeKind.sp:
                         continue
-                    if any(min(x.bbox.x2, m.bbox.x2) - max(x.bbox.x, m.bbox.x) >= 0.5 * min(x.bbox.w, m.bbox.w) and -0.01 * slide_h <= m.bbox.y - x.bbox.y2 <= 0.04 * slide_h for x in tail):
+                    # (a text box overlapping the one above by a line's leading — WorkSpace p8's «Основной текст» under
+                    # its «Заголовок» — is still the next line of the cell)
+                    if any(min(x.bbox.x2, m.bbox.x2) - max(x.bbox.x, m.bbox.x) >= 0.5 * min(x.bbox.w, m.bbox.w) and -0.025 * slide_h <= m.bbox.y - x.bbox.y2 <= 0.04 * slide_h and m.bbox.y > x.bbox.y for x in tail):
                         sats.append(m)
                         taken_ids.add(m.id)
             all_members = [a] + members + sats
@@ -394,12 +405,18 @@ def detect_repeat_groups(
         # keep the modal composition; a cell that differs only by a text found beside or under its card (a stray
         # label of the slide) stays as its card and what the card holds
         modal = Counter(c.composition for c in cells).most_common(1)[0][0]
+        modal_cell = next(c for c in cells if c.composition == modal)
+        modal_text = _text_composition([by_id0[i] for i in modal_cell.member_ids if i in by_id0])
         kept_cells = []
         for c in cells:
             if c.composition != modal:
                 inner = [by_id0[i] for i in c.inner if i in by_id0]
                 if inner and _composition(inner) == modal:
                     c = Cell(c.anchor_id, [m.id for m in inner], _union(inner), modal)
+                elif modal_text and _text_composition([by_id0[i] for i in c.member_ids if i in by_id0]) == modal_text:
+                    # the accent card of a row (WorkSpace p16: the third card painted blue all over, no header plate)
+                    # holds the same texts as the others: it is a card of the row
+                    c = Cell(c.anchor_id, c.member_ids, c.bbox, modal, c.inner)
             if c.composition == modal:
                 kept_cells.append(c)
         cells = kept_cells
