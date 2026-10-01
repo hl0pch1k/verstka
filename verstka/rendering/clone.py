@@ -23,7 +23,7 @@ from verstka.rendering.charts import add_chart, add_ring
 from verstka.rendering.deck import DeckBuilder, element_bbox, is_nested, materialize_xfrm, remove_element, renumber_ids, set_element_pos, shift_element, slide_shape_elements
 from verstka.rendering.fonts import text_width_pt, wrap_lines
 from verstka.rendering.fit import fit_size, grow_size
-from verstka.rendering.groups import adjust_group, cell_bbox, cell_riders, cells_elements, reading_order_key, staggered_axis, transform_element
+from verstka.rendering.groups import adjust_group, cell_bbox, cell_riders, cells_elements, plates_of, reading_order_key, staggered_axis, transform_element
 from verstka.rendering.images import replace_picture
 from verstka.rendering.layers import ground_under, heading_band, opaque_box
 from verstka.rendering.tables import add_table
@@ -920,6 +920,15 @@ def _figure_size(ctx: "_SlideCtx", base: float) -> float:
     return min(max(base * 2.4, base + 12), ctx.typo.size_for("display", base * 3))
 
 
+def _stands_over(t_el: etree._Element, b_el: etree._Element) -> bool:
+    """A card's title box stands over its text box (the text starts in its lower half or under it, within the
+    title's width): the two form a stack `_stack_cells` can set again."""
+    tb, bb = element_bbox(t_el), element_bbox(b_el)
+    if not tb or not bb or is_nested(t_el) or is_nested(b_el):
+        return False
+    return bb[1] >= tb[1] + 0.5 * min(tb[3], max(bb[1] - tb[1], 1)) and bb[0] < tb[0] + tb[2] and bb[0] + bb[2] > tb[0]
+
+
 def _holds_line(el: etree._Element, size_pt: float) -> bool:
     """Whether a text box is tall enough for one line set at `size_pt`."""
     b = element_bbox(el)
@@ -1019,7 +1028,9 @@ def _fill_one_cell(ctx: _SlideCtx, entries, chunk: list[SlideItem], cell_idx: in
             if own and hold >= 0.95 * own:
                 head.size_pt = round(min(head.size_pt or hold, hold), 1)
     if head is not None:
-        if titles and (_holds_line(titles[0][0], head.size_pt or 0) or not body_slots):
+        # (a title line over the text box it stands on: the figure takes it and the cards' stack is set again at the
+        # figure's size — `_stack_cells` moves the label down — VK Tech p14: «9» over «Демо-презентаций»)
+        if titles and (_holds_line(titles[0][0], head.size_pt or 0) or not body_slots or _stands_over(titles[0][0], body_slots[0][0])):
             write(titles, [head])
             body = ([ParagraphSpec(title, bullet=False, bold=True)] if title else []) + body_paras
         else:
@@ -1089,7 +1100,9 @@ def _fill_cells(ctx: _SlideCtx, items: list[SlideItem], use_ordinals: bool = Tru
     # titles, subtitles and companion cells are never riders: companions are mapped to their primary cell below
     protected = {sl.shape_id for sl in ctx.pattern.slots if sl.role in (SlotRole.title, SlotRole.subtitle)}
     protected |= {sid for g, _ in companions for cell in g.member_shape_ids for sid in cell}
-    cells, ctx.next_id = adjust_group(ctx.slide, group, n_needed, ctx.W, ctx.H, ctx.next_id, protected_ids=protected, origin=ctx.origin, tail_room=ctx.tail_room, floor=ctx.content_floor(), head_top=ctx.lede_top)
+    plates = {sid for sid, kind in ctx.pic_kind.items() if kind == "panel"}
+    with plates_of(plates, ctx.origin):
+        cells, ctx.next_id = adjust_group(ctx.slide, group, n_needed, ctx.W, ctx.H, ctx.next_id, protected_ids=protected, origin=ctx.origin, tail_room=ctx.tail_room, floor=ctx.content_floor(), head_top=ctx.lede_top)
     if not cells:
         return False
     cells.sort(key=_cell_sort_key(cells, ctx.H, group))  # same order as `before`: items, shifts and companions go by index
@@ -1173,7 +1186,7 @@ def _fill_cells(ctx: _SlideCtx, items: list[SlideItem], use_ordinals: bool = Tru
         for e, _, _ in entries:
             for nv in e.iter(q("p:cNvPr")):
                 ctx.cell_member_ids.add(nv.get("id"))
-        if item is not None and not item.number:
+        if item is not None:
             t_e = [(e, s) for e, s, r in entries if r == SlotRole.card_title and (ctx.id_of(e) or "") in ctx.filled and etree.QName(e).localname == "sp" and e.getparent() is not None and shape_text(e).strip()]
             b_e = [(e, s) for e, s, r in entries if r in _BODY_ROLES and (ctx.id_of(e) or "") in ctx.filled and etree.QName(e).localname == "sp" and e.getparent() is not None and shape_text(e).strip()]
             if len(t_e) == 1 and b_e:
@@ -1345,15 +1358,30 @@ def _stack_cells(ctx: _SlideCtx, stacks: list[tuple[etree._Element, Optional[Slo
             n += max(len(wrap_lines(para, family, size, bold, width_pt)), 1)
         return n
 
+    from verstka.audit.checks.template import is_figure
+
+    # figures over their labels (a stat row set in cards with a heading and a text): the figure is the card's point —
+    # as large as the card's width and its room allow, up to the template's display size, not a card heading's size
+    figs = all(is_figure(shape_text(t_el)) for t_el, _, _ in stacks)
+    fig_sizes: list[float] = []
+    if figs:
+        top = ctx.typo.size_for("display", ctx.typo.size_for("h1", 24.0) * 2)
+        pool = set(ctx.grow_scale) | {s.size_pt for s in (ctx.typo.scale or []) if s.size_pt}
+        fig_sizes = sorted({round(x, 2) for x in pool if ts0 * 1.25 <= x <= top}, reverse=True)
+    pairs = [(ts_f, bs) for ts_f in fig_sizes for bs in bodies_c]
     for bs in bodies_c:
         ts = _snap_down(bs * ratio, ctx.grow_scale) if bs > bs0 + 0.05 else ts0
-        ts = max(ts, bs * 1.1 if not t_bold else bs)
+        pairs.append((max(ts, bs * 1.1 if not t_bold else bs), bs))
+    for ts, bs in pairs:
+        one_line = ts in fig_sizes
         plans = []
         ok = True
         for t_el, t_slot, bodies, tb, bbs, floor in geo:
             ins = _body_insets(t_el)
-            n_t = lines(shape_text(t_el), t_fam, ts, t_bold, max((tb[2] - ins[0] - ins[2]) / EMU_PER_PT * 0.985, 1.0))
-            if n_t is None or n_t > 3:
+            # (measured in the weight it is set in: a figure is set bold whatever its card title's weight)
+            bold_el = t_bold or any(r.get("b") == "1" for r in t_el.iter(q("a:rPr")))
+            n_t = lines(shape_text(t_el), t_fam, ts, bold_el, max((tb[2] - ins[0] - ins[2]) / EMU_PER_PT * 0.985, 1.0))
+            if n_t is None or n_t > (1 if one_line else 3):
                 ok = False
                 break
             t_h = int(n_t * ts * ctx.line_height_of(t_el) * EMU_PER_PT) + ins[1] + ins[3]
@@ -1931,6 +1959,7 @@ def _draw_native(ctx: _SlideCtx, oslide: OutlineSlide, box: Bbox) -> None:
             before = set(ctx.slide._element.cSld.find(q("p:spTree")))
             comp.table(box, c.table)
             _table_to_width(ctx, before, box)
+            _plate_to_table(ctx, before)
         # what the design system drew (the chart, its caption and legend, the table) is set at the composed slides'
         # sizes: the gate reads its type as the composer's, not as the sample's
         native = ctx.slide.__dict__.setdefault("_verstka_native", set())
@@ -1943,6 +1972,43 @@ def _draw_native(ctx: _SlideCtx, oslide: OutlineSlide, box: Bbox) -> None:
         # the sample's chart or table area left empty is worse than a composed slide: the renderer rolls this clone
         # back and composes the slide, which shows its figures or its text instead
         raise RuntimeError(f"native object failed: {str(e)[:120]}") from e
+
+
+def _plate_to_table(ctx: _SlideCtx, before: set) -> None:
+    """The plate the sample's table stood on (a panel drawn as a picture or a filled shape) ends under the native
+    table at the margin it leaves above it: a table of three rows does not sit at the top of a plate drawn for ten
+    (VK Tech p35), the plate keeps its padding."""
+    from verstka.rendering.groups import mark_plate
+
+    tree = ctx.slide._element.cSld.find(q("p:spTree"))
+    frame = next((x for x in tree if x not in before and etree.QName(x).localname == "graphicFrame" and x.find(".//" + q("a:tbl")) is not None), None)
+    tb = element_bbox(frame) if frame is not None else None
+    if not tb:
+        return
+    rows_h = sum(int(r.get("h") or 0) for r in frame.find(".//" + q("a:tbl")).findall(q("a:tr")))
+    t_bottom = tb[1] + max(rows_h, tb[3])
+    for el in tree:
+        if el in before and el.getparent() is not None and not is_nested(el) and etree.QName(el).localname in ("pic", "sp"):
+            sid = ctx.id_of(el) or ""
+            if sid in ctx.pattern.chrome_shape_ids:
+                continue
+            if etree.QName(el).localname == "pic" and ctx.pic_kind.get(ctx.origin.get(sid, sid)) != "panel":
+                continue
+            if etree.QName(el).localname == "sp" and (shape_text(el).strip() or not _has_fill(el)):
+                continue
+            b = element_bbox(el)
+            if not b or b[2] * b[3] >= 0.9 * ctx.W * ctx.H:
+                continue
+            holds = b[0] <= tb[0] + int(0.01 * ctx.W) and b[0] + b[2] >= tb[0] + tb[2] - int(0.01 * ctx.W) and b[1] <= tb[1] <= b[1] + int(0.25 * ctx.H)
+            if not holds:
+                continue
+            pad = max(tb[1] - b[1], int(0.02 * ctx.H))
+            new_h = t_bottom + pad - b[1]
+            if new_h < b[3] - int(0.06 * ctx.H):
+                set_element_pos(el, h=new_h)
+                if etree.QName(el).localname == "pic":
+                    mark_plate(el)
+            return
 
 
 def _table_to_width(ctx: _SlideCtx, before: set, box: Bbox) -> None:

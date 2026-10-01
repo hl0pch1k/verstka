@@ -467,6 +467,32 @@ def is_measured(family: Optional[str]) -> bool:
     return bool(face and face[2])
 
 
+_FALLBACK_FAMILIES = ("DejaVu Sans", "Noto Sans", "Liberation Sans", "Arial")
+
+
+@lru_cache(maxsize=2)
+def _fallback_font(bold: bool) -> Optional[ImageFont.FreeTypeFont]:
+    """A broad face the renderer falls back to for glyphs a face lacks (an arrow «→» in Play): DejaVu Sans, Noto Sans…"""
+    for fam in _FALLBACK_FAMILIES:
+        f = _real_font(fam, bold)
+        if f is not None and _has_glyph(f, "\u2192"):
+            return f
+    return None
+
+
+def _missing_width(seg: str, bold: bool) -> float:
+    """Width (in measure pixels) of characters the measuring face lacks, set as the renderer sets them: in a fallback
+    face that has them (an arrow is 0.84 em in DejaVu Sans, not Play's narrow «.notdef» box), else 0.6 em each."""
+    fb = _fallback_font(bold)
+    w = 0.0
+    for ch in seg:
+        if fb is not None and _has_glyph(fb, ch):
+            w += fb.getlength(ch)
+        else:
+            w += 0.6 * _MEASURE_PX
+    return w * _UNKNOWN_FACTOR
+
+
 def text_width_pt(text: str, family: Optional[str], size_pt: float, bold: bool = False, *, caps: bool = False, spc_pt: float = 0.0) -> float:
     """Width of `text` set in `family` at `size_pt`. `caps`: the run is set in capitals (cap="all" inherited from the
     master), measured upper-cased; `spc_pt`: letter-spacing (spc/100) added after every character."""
@@ -484,11 +510,18 @@ def text_width_pt(text: str, family: Optional[str], size_pt: float, bold: bool =
                 w += real.getlength(seg) / _MEASURE_PX * size_pt
             else:
                 # glyphs the face lacks (Cyrillic in Futura Medium, «₽» in most Latin faces) are set by the renderer
-                # in a fallback face we cannot name: measured as an unknown family (Play × 1.08, a little wide), not
-                # with the face's «.notdef» box
-                w += _font(bold).getlength(seg) / _MEASURE_PX * size_pt * _UNKNOWN_FACTOR
+                # in a fallback face: measured as an unknown family (Play × 1.08, a little wide) where Play has them,
+                # in a broad fallback face where it does not — never with a «.notdef» box
+                play = _font(bold)
+                w += sum((play.getlength(x) * _UNKNOWN_FACTOR) if _has_glyph(play, x) else _missing_width(x, bold) for x in seg) / _MEASURE_PX * size_pt
     else:
-        w = _font(bold).getlength(t) / _MEASURE_PX * size_pt * width_factor(family)
+        play = _font(bold)
+        factor = width_factor(family)
+        w = 0.0
+        for seg, covered in _coverage_runs(play, t):
+            # (Play has no arrow «→»: «116 → 123» set at 36 pt wrapped in the render where Play's «.notdef» box said
+            # it fits on a line)
+            w += (play.getlength(seg) * factor if covered else _missing_width(seg, bold)) / _MEASURE_PX * size_pt
     if spc_pt:
         w += spc_pt * len(t)
     return w

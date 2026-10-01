@@ -9,6 +9,7 @@ from verstka.audit.checks.template import is_figure
 from verstka.audit.checks.common import CONTENT_TYPES, at_template_position, contains, fill_alpha, fix, is_chrome_like, is_template_chrome, ru_count, ru_times, text_elements, text_height_needed_pt, title_element, usable_height_pt
 from verstka.audit.registry import AuditContext, check
 from verstka.rendering.fonts import text_width_pt
+from verstka.rendering.groups import PLATE_MARK
 from verstka.schemas.audit import CheckSpec, Issue
 from verstka.schemas.common import EMU_PER_PT, Bbox
 
@@ -18,7 +19,7 @@ TEXT_OVERFLOW = CheckSpec(id="text_overflow", title="Текст не помес�
 TEXT_CLIPPED = CheckSpec(id="text_clipped", title="Текст обрезан краем слайда", severity="error", category="layout", description="Рамка с текстом частично за пределами слайда (кроме номера слайда, даты и колонтитула шаблона).")
 MARGIN_VIOLATION = CheckSpec(id="margin_violation", title="Контент заходит в поля у краёв", severity="warn", category="layout", description="Текстовый блок начинается за пределами безопасной области шаблона (допуск 3% ширины). Служебные элементы шаблона не проверяются.")
 GRID_ALIGNMENT = CheckSpec(id="grid_alignment", title="Блоки не выровнены по направляющим макета", severity="info", category="layout", description="Левый край текстового блока не совпадает ни с одной колонкой шаблона (допуск 1.5% ширины).")
-IMAGE_STRETCHED = CheckSpec(id="image_stretched", title="Картинка растянута, пропорции нарушены", severity="warn", category="layout", description="Пропорции рамки картинки отличаются от пропорций исходного изображения (с учётом кадрирования) более чем на 12%.")
+IMAGE_STRETCHED = CheckSpec(id="image_stretched", title="Картинка растянута, пропорции нарушены", severity="warn", category="layout", description="Пропорции рамки картинки отличаются от пропорций исходного изображения (с учётом кадрирования) более чем на 12%. Подложка карточки шаблона, нарисованная картинкой (ровная плашка без рисунка), растягивается вместе со своей карточкой, как нарисованная фигура, — её вёрстка помечает в имени «· подложка», и такая картинка не считается искажённой.")
 TEXT_OUTSIDE_CARD = CheckSpec(id="text_outside_card", title="Текст выходит за свою карточку", severity="error", category="layout", description="Строки текстового блока, который начинается внутри карточки (залитой или обведённой фигуры), заходят за её нижний или правый край более чем на 1,5% размера слайда (больше 3% — ошибка): текст висит под карточкой и наезжает на то, что ниже. Подложка, на которой текст тоже начинается (две перекрывающиеся панели обложки), — его фон, а не карточка, в которую он заходит.")
 TABLE_CELL_WRAP = CheckSpec(id="table_cell_wrap", title="Слово в ячейке таблицы переносится по буквам", severity="warn", category="layout", description="Самое длинное слово в ячейке нативной таблицы шире своей колонки (ширина из a:gridCol минус поля ячейки; без сетки — ширина рамки / число колонок минус 2×7.2 пт) при кегле и начертании самой ячейки — PowerPoint рвёт его посреди слова.")
 
@@ -281,6 +282,8 @@ def image_stretched(ctx: AuditContext) -> list[Issue]:
         for e in s.elements:
             if e.type != "picture" or not e.image_size or e.bbox.h <= 0:
                 continue
+            if e.name.endswith(PLATE_MARK):
+                continue  # a card's plate stretched with its card (rendering/groups.py `mark_plate`)
             iw, ih = e.image_size
             if iw <= 0 or ih <= 0:
                 continue

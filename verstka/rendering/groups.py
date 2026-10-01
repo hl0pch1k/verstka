@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import copy
 from typing import Optional
 
@@ -171,12 +173,49 @@ def _is_card_cell(cell: list[etree._Element], box: Bbox) -> bool:
     return False
 
 
+# shape ids (of the sample) of the pictures that are plates — a card drawn as a picture of a white rounded panel: they
+# stretch with their cell like a drawn card does (set by the renderer around `adjust_group`, see `plates_of`)
+_PLATES: contextvars.ContextVar[tuple[frozenset, dict]] = contextvars.ContextVar("verstka_plates", default=(frozenset(), {}))
+
+
+@contextlib.contextmanager
+def plates_of(ids, origin: Optional[dict] = None):
+    """Within the block, pictures whose (sample) shape id is in `ids` stretch with their cells (`transform_element`);
+    `origin` maps the ids of shapes copied for new cells to the sample's."""
+    token = _PLATES.set((frozenset(ids or ()), origin or {}))
+    try:
+        yield
+    finally:
+        _PLATES.reset(token)
+
+
+PLATE_MARK = " · подложка"
+
+
+def mark_plate(e: etree._Element) -> None:
+    """Name a plate picture stretched with its card (« · подложка»): the audit reads its proportions as the card's,
+    not as a distorted picture (`audit.checks.layout.image_stretched`)."""
+    nv = e.find(".//" + q("p:cNvPr"))
+    if nv is not None and not (nv.get("name") or "").endswith(PLATE_MARK):
+        nv.set("name", (nv.get("name") or "Picture") + PLATE_MARK)
+
+
+def _is_plate(e: etree._Element) -> bool:
+    ids, origin = _PLATES.get()
+    if not ids or etree.QName(e).localname != "pic":
+        return False
+    nv = e.find(".//" + q("p:cNvPr"))
+    sid = nv.get("id") if nv is not None else None
+    return bool(sid) and origin.get(sid, sid) in ids
+
+
 def transform_element(e: etree._Element, old: Bbox, new: Bbox, axis: str) -> None:
     """Map an element of a cell from the cell's old box to its new one along the group axis.
 
     Elements spanning at least half of the cell (card background, text boxes, dividers) stretch with it; small ones
     (icons, ticks, ordinals) keep their size and their anchoring — centred, left/top or right/bottom. Pictures never
-    stretch: they keep their aspect ratio and only move.
+    stretch: they keep their aspect ratio and only move — save a plate (`plates_of`): a card drawn as a picture
+    stretches with its texts, or they stand off it (VK Tech p26 with three cards instead of four).
     """
     b = element_bbox(e)
     if b is None:
@@ -186,7 +225,10 @@ def transform_element(e: etree._Element, old: Bbox, new: Bbox, axis: str) -> Non
     o_pos, o_size = (old.x, old.w) if row else (old.y, old.h)
     n_pos, n_size = (new.x, new.w) if row else (new.y, new.h)
     k = n_size / o_size if o_size else 1.0
-    stretch = size >= 0.5 * o_size and etree.QName(e).localname != "pic"
+    plate = etree.QName(e).localname == "pic" and _is_plate(e)
+    stretch = size >= 0.5 * o_size and (etree.QName(e).localname != "pic" or plate)
+    if plate and stretch and abs(k - 1.0) > 0.01:
+        mark_plate(e)
     if stretch:
         p2, s2 = n_pos + int((pos - o_pos) * k), max(int(size * k), 1)
     else:

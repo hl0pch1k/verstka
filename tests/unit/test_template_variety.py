@@ -324,3 +324,95 @@ def test_bars_back_to_back_and_a_gantt_are_charts_cards_and_stripes_are_not():
     assert detect_drawn_chart(equal, W, H) is None
     stripes = [_bar(f"x{i}", 0.6 + i * 0.05, 0.9 - h, 0.03, h) for i, h in enumerate([0.2, 0.35, 0.5, 0.3])]
     assert detect_drawn_chart(stripes, W, H) is None
+
+
+# ---------------------------------------------------------------------------- measuring, gating and re-laying clones
+
+
+def test_an_arrow_play_lacks_is_measured_in_the_face_the_renderer_falls_back_to():
+    """Play has no «→»: measured with its «.notdef» box, «116 → 123» at 36 pt «fitted» a 172 pt box and wrapped in the
+    render over the label under it."""
+    from verstka.rendering.fonts import text_width_pt
+
+    with_arrow = text_width_pt("116 → 123", "Play", 36, True)
+    without = text_width_pt("116 123", "Play", 36, True)
+    assert with_arrow - without >= 0.6 * 36  # the arrow takes most of an em, not a hairline
+    assert with_arrow > 172
+
+
+def test_live_date_and_page_fields_are_never_sample_values():
+    from lxml import etree
+
+    from verstka.analysis.shapes import has_live_field
+
+    A = "http://schemas.openxmlformats.org/drawingml/2006/main"
+    sp = etree.fromstring(f'<p:sp xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="{A}"><p:txBody><a:p><a:fld type="datetime1"><a:t>27.09.26</a:t></a:fld></a:p></p:txBody></p:sp>')
+    assert has_live_field(sp)
+    typed = etree.fromstring(f'<p:sp xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="{A}"><p:txBody><a:p><a:r><a:t>27.09.26</a:t></a:r></a:p></p:txBody></p:sp>')
+    assert not has_live_field(typed)
+
+
+def _deck_with(boxes):
+    """A one-slide python-pptx deck with text boxes [(x, y, w, h, text, size)] in fractions of a 16:9 slide."""
+    from pptx import Presentation
+    from pptx.util import Emu, Pt
+
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Emu(W), Emu(H)
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    for x, y, w, h, text, size in boxes:
+        tb = slide.shapes.add_textbox(Emu(int(x * W)), Emu(int(y * H)), Emu(int(w * W)), Emu(int(h * H)))
+        tb.text_frame.text = text
+        tb.text_frame.word_wrap = True
+        for p in tb.text_frame.paragraphs:
+            for r in p.runs:
+                r.font.size = Pt(size)
+    return slide
+
+
+def test_the_gate_sees_two_texts_laid_over_each_other():
+    """LCT p11 with a third card: a heading that took two lines ran into the text under it."""
+    from verstka.analysis.xmlns import q
+    from verstka.rendering.clone_check import _texts_over_each_other
+
+    clash = _deck_with([(0.05, 0.2, 0.25, 0.06, "На входе — шаблон и текст презентации", 20), (0.05, 0.24, 0.25, 0.3, "Verstka использует любой шаблон PowerPoint и текст", 14)])
+    assert _texts_over_each_other(clash, clash._element.cSld.find(q("p:spTree")), set(), "Play")
+    apart = _deck_with([(0.05, 0.2, 0.25, 0.06, "Ручная вёрстка", 20), (0.05, 0.3, 0.25, 0.3, "Подбор макета, подгонка цветов и блоков", 14)])
+    assert _texts_over_each_other(apart, apart._element.cSld.find(q("p:spTree")), set(), "Play") is None
+
+
+def test_a_card_drawn_as_a_picture_stretches_with_its_card_and_is_named_a_plate():
+    """VK Tech p26 with three cards instead of four: the white panels drawn as pictures widen with their texts (they
+    stood off them), the audit reads them as plates."""
+    from pptx import Presentation
+    from pptx.util import Emu
+
+    from verstka.analysis.xmlns import q
+    from verstka.rendering.deck import element_bbox
+    from verstka.rendering.groups import PLATE_MARK, plates_of, transform_element
+
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    buf = io.BytesIO()
+    Image.new("RGB", (40, 100), "white").save(buf, format="PNG")
+    buf.seek(0)
+    pic = slide.shapes.add_picture(buf, Emu(100000), Emu(100000), Emu(2000000), Emu(5000000))
+    el = pic._element
+    sid = el.find(".//" + q("p:cNvPr")).get("id")
+    old, new = Bbox(x=100000, y=100000, w=2000000, h=5000000), Bbox(x=100000, y=100000, w=2800000, h=5000000)
+    transform_element(el, old, new, "row")
+    assert element_bbox(el)[2] == 2000000  # a picture keeps its proportions
+    with plates_of({sid}):
+        transform_element(el, old, new, "row")
+    assert element_bbox(el)[2] == 2800000 and el.find(".//" + q("p:cNvPr")).get("name").endswith(PLATE_MARK)
+
+
+def test_a_title_box_over_its_text_box_is_a_stack():
+    from verstka.rendering.clone import _stands_over
+
+    s = _deck_with([(0.05, 0.3, 0.2, 0.04, "9", 12), (0.05, 0.36, 0.2, 0.4, "Демо-презентаций", 9)])
+    t, b = [sh._element for sh in s.shapes]
+    assert _stands_over(t, b)
+    beside = _deck_with([(0.05, 0.3, 0.2, 0.04, "9", 12), (0.3, 0.3, 0.2, 0.4, "Демо-презентаций", 9)])
+    t, b = [sh._element for sh in beside.shapes]
+    assert not _stands_over(t, b)
