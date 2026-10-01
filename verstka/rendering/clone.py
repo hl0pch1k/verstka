@@ -86,6 +86,7 @@ class _SlideCtx:
         self.notes_floor: Optional[int] = None  # the line the conclusion and the footnote stand on
         self.lede_top: Optional[int] = None  # the cells start under the subtitle line set under the heading
         self.overflowed: list = []  # (warning, element, texts, family, size, bold, min_ratio) of boxes that did not fit
+        self.harmonized: list[list[etree._Element]] = []  # texts set at one size across cards (`_harmonize`)
         self.goal_to_place: Optional[str] = None  # a cover goal that left its place under the subtitle (C3-1)
         # what the sample's pictures are (analysis/pictures.py): its art stays with new content
         try:
@@ -301,6 +302,13 @@ class _SlideCtx:
             if bp is not None and bp.get("anchor") in ("b", "ctr"):
                 bp.set("anchor", "t")
             self.warnings.remove(w)
+            # the cards set at one size stay at one size: a third card's text stepped down alone read as a mistake
+            # (LCT p15: two rows at 14 pt over one at 10.5)
+            for members in self.harmonized:
+                if any(m is el for m in members):
+                    for m in members:
+                        if m is not el and m.getparent() is not None and (_running_size(m) or 0) > res.size_pt + 0.05:
+                            _scale_text(m, res.size_pt, self.grow_scale)
 
     def retry_heading(self) -> None:
         """A heading that stepped down to keep to its one-line box takes the deck's heading size back over two lines
@@ -1490,6 +1498,8 @@ def _harmonize(ctx: _SlideCtx, pairs: list[tuple[etree._Element, Optional[Slot]]
         common = min(sizes)
         for e, _ in pairs:
             _scale_text(e, common, ctx.grow_scale)
+        if len(pairs) >= 2:
+            ctx.harmonized.append([e for e, _ in pairs])
 
 
 def _snap_down(size: float, scale: list[float]) -> float:

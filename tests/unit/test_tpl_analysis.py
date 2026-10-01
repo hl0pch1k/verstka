@@ -560,14 +560,16 @@ def test_a_layout_drawn_mockup_costs_a_cover_more_than_a_sample_drawn_one():
 
 def test_glyphs_a_face_lacks_are_measured_in_a_fallback_not_as_notdef_boxes(monkeypatch):
     """A real face without Cyrillic (Futura Medium on macOS) or without «₽» is set by the renderer in a fallback face:
-    those characters are measured as an unknown family, the characters the face has with the face itself."""
+    those characters are measured in a broad face that has them (an em-ish width when none has), the characters the
+    face has with the face itself — never as «.notdef» boxes (Play's arrow-less «116 → 123» wrapped in the render)."""
     play = fonts._font(False)
     assert fonts._has_glyph(play, "Ж") and fonts._has_glyph(play, " ") and not fonts._has_glyph(play, "")
     assert fonts._coverage_runs(play, "Abc") == [("Ab", True), ("", False), ("c", True)]
     monkeypatch.setattr(fonts, "_real_font", lambda family, bold: play)
     monkeypatch.setattr(fonts, "is_pinned", lambda family: False)
     own = play.getlength("Ab") / fonts._MEASURE_PX * 20
-    fallback = play.getlength("") / fonts._MEASURE_PX * 20 * fonts._UNKNOWN_FACTOR
+    fallback = fonts._missing_width("", False) / fonts._MEASURE_PX * 20
+    assert fallback > play.getlength("") / fonts._MEASURE_PX * 20 * fonts._UNKNOWN_FACTOR
     assert fonts.text_width_pt("Ab", "Some Face", 20) == pytest.approx(own + fallback)
 
 

@@ -404,8 +404,11 @@ def adjust_group(slide: Slide, group: RepeatGroup, n_needed: int, slide_w: int, 
         cards = any(_is_card_cell(c, b) for c, b in zip(cells, boxes0))
         n_fit = max(1, int((room_end - starts[0] + gap) // max(0.6 * size0 + gap, 1)))
         n = max(1, min(n_needed, max(n_fit, n_orig)))
+    closing: list[tuple[etree._Element, int]] = []
     if n < n_orig:
         boxes_all = [cell_bbox(c) for c in cells]
+        if group.axis == "column" and all(b is not None for b in boxes_all):
+            closing = _trailing_rules(cells, riders, boxes_all, n, protected_ids or set(), slide_h)
         for c, r in zip(cells[n:], riders[n:]):
             for e in c + r:
                 remove_element(e)
@@ -489,4 +492,49 @@ def adjust_group(slide: Slide, group: RepeatGroup, n_needed: int, slide_w: int, 
         _make_tail_room(cells, riders, group, floor, tail_room, slide_h)
     if head_top and not nested and not group.fixed:
         _make_head_room(cells, riders, head_top)
+    last = cell_bbox(cells[-1]) if cells else None
+    for e, offset in closing:
+        # the rule that closed the list (under its last row) closes it again under the row that is last now
+        if last is not None and e.getparent() is not None:
+            set_element_pos(e, y=last.y2 + offset)
     return cells, next_id
+
+
+def _trailing_rules(cells: list[list[etree._Element]], riders: list[list[etree._Element]], boxes: list[Bbox], n_keep: int, protected: set[str], slide_h: int) -> list[tuple[etree._Element, int]]:
+    """The thin rules of a ruled list (LCT p15: a line over every row) when its last rows go: the rules over the
+    rows that leave go with them — the first one under the rows that stay closes the list. A list closed by a rule
+    under its last row keeps that rule: returned as (element, offset of its top from the last row's foot), moved
+    under the row that is last now by the caller."""
+    order = sorted(range(len(boxes)), key=lambda i: boxes[i].y)
+    kept = [boxes[i] for i in order[:n_keep]]
+    gone = [boxes[i] for i in order[n_keep:]]
+    if not kept or not gone:
+        return []
+    new_last, old_last = max(kept, key=lambda b: b.y2), max(boxes, key=lambda b: b.y2)
+    pitch = gone[0].y - new_last.y if gone else 0
+    x0, x1 = min(b.x for b in boxes), max(b.x2 for b in boxes)
+    own = {id(e) for c in cells for e in c} | {id(e) for r in riders for e in r}
+    tree = cells[0][0].getparent() if cells and cells[0] else None
+    rules = []
+    for e in (tree if tree is not None else []):
+        if id(e) in own or etree.QName(e).localname not in ("sp", "cxnSp", "pic"):
+            continue
+        nv = e.find(".//" + q("p:cNvPr"))
+        if nv is not None and nv.get("id") in protected:
+            continue
+        b = element_bbox(e)
+        if not b or b[3] > 0.008 * slide_h or min(b[0] + b[2], x1) - max(b[0], x0) < 0.5 * (x1 - x0):
+            continue
+        if new_last.y2 - int(0.01 * slide_h) <= b[1] <= old_last.y2 + int(0.04 * slide_h):
+            rules.append((b[1], e))
+    rules.sort(key=lambda t: t[0])
+    out: list[tuple[etree._Element, int]] = []
+    closes = bool(rules) and rules[0][0] <= new_last.y2 + max(pitch // 2, int(0.02 * slide_h))
+    for k, (y, e) in enumerate(rules):
+        if k == 0 and closes:
+            continue  # the separator under the last row that stays: it closes the list now
+        if k == len(rules) - 1 and not closes and y >= old_last.y2 - int(0.01 * slide_h):
+            out.append((e, y - old_last.y2))  # the list's own closing rule: it follows the last row up
+            continue
+        remove_element(e)
+    return out
