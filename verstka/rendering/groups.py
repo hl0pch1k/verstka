@@ -302,6 +302,23 @@ def _rebalance_grid(cells: list[list[etree._Element]], riders: list[list[etree._
             transform_element(e, mid, new, "column")
 
 
+def _carry(e: etree._Element, old: Bbox, new: Bbox) -> None:
+    """A cell's shape follows the cell's new box: one standing in the cell is set again in it; a companion standing
+    wholly above or below the cell (Education p26: the icon's round plate over its thesis) only moves with the edge
+    it stands by — never squashed by the cell's new height."""
+    bb = element_bbox(e)
+    tol = int(0.005 * max(old.h, 1))
+    if bb is not None and bb[1] + bb[3] <= old.y + tol:
+        dy = new.y - old.y
+    elif bb is not None and bb[1] >= old.y2 - tol:
+        dy = new.y2 - old.y2
+    else:
+        transform_element(e, old, new, "column")
+        return
+    if dy:
+        set_element_pos(e, y=bb[1] + dy)
+
+
 def _make_tail_room(cells: list[list[etree._Element]], riders: list[list[etree._Element]], group: RepeatGroup, floor: int, tail_room: int, slide_h: int) -> None:
     """The cells end `tail_room` above `floor` (the slide's conclusion and footnote go under them): their heights
     shrink — rows and grids proportionally from the group's top, columns by a tighter pitch — never under 55 % of
@@ -320,10 +337,12 @@ def _make_tail_room(cells: list[list[etree._Element]], riders: list[list[etree._
         return
     for c, r, old in zip(cells, riders, boxes):
         new = Bbox(x=old.x, y=int(top + (old.y - top) * k), w=old.w, h=max(int(old.h * k), 1))
-        for e in c + r:
-            if is_nested(e):
-                continue
-            transform_element(e, old, new, "column")
+        for e in c:
+            if not is_nested(e):
+                transform_element(e, old, new, "column")
+        for e in r:
+            if not is_nested(e):
+                _carry(e, old, new)
 
 
 def _make_head_room(cells: list[list[etree._Element]], riders: list[list[etree._Element]], top_limit: int) -> None:
@@ -341,10 +360,12 @@ def _make_head_room(cells: list[list[etree._Element]], riders: list[list[etree._
         return
     for c, r, old in zip(cells, riders, boxes):
         new = Bbox(x=old.x, y=int(top_limit + (old.y - top) * k), w=old.w, h=max(int(old.h * k), 1))
-        for e in c + r:
-            if is_nested(e):
-                continue
-            transform_element(e, old, new, "column")
+        for e in c:
+            if not is_nested(e):
+                transform_element(e, old, new, "column")
+        for e in r:
+            if not is_nested(e):
+                _carry(e, old, new)
 
 
 def adjust_group(slide: Slide, group: RepeatGroup, n_needed: int, slide_w: int, slide_h: int, next_id: int, protected_ids: Optional[set[str]] = None, origin: Optional[dict[str, str]] = None, tail_room: int = 0, floor: Optional[int] = None, head_top: Optional[int] = None) -> tuple[list[list[etree._Element]], int]:

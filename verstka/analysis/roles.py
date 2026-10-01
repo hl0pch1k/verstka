@@ -158,6 +158,26 @@ def low_display_heading(texts: list[ShapeInfo], membership, slide_h: int) -> Opt
     return None
 
 
+def side_heading(texts: list[ShapeInfo], membership, slide_w: int, slide_h: int, body_size: float) -> Optional[ShapeInfo]:
+    """A content slide's heading set beside its content, at mid-height (Dark Minimalist p12: «Our Products» at 56 pt
+    in the left half, four projects in the right one): the largest short non-numeric text outside the cells, standing
+    in one half of the slide, at least 1.6× every other text and a heading's size (4.5 % of the slide height, 1.5×
+    the body). None when there is no such text."""
+    hpt = slide_h / 12700.0
+    cands = [
+        s for s in texts
+        if s.id not in membership and not is_numeric_text(s.plain_text) and 0 < len(s.plain_text.strip()) <= 60
+        and (s.bbox.x2 <= 0.6 * slide_w or s.bbox.x >= 0.4 * slide_w) and 0.1 * slide_h <= s.bbox.y <= 0.75 * slide_h
+    ]
+    if not cands:
+        return None
+    big = max(cands, key=lambda s: (_size(s), -s.bbox.y))
+    others = max((_size(s) for s in texts if s.id != big.id and s.plain_text.strip()), default=0.0)
+    if _size(big) >= max(0.045 * hpt, 1.5 * body_size) and _size(big) >= 1.6 * others:
+        return big
+    return None
+
+
 def heuristic_roles(
     shapes: list[ShapeInfo],
     groups: list[RepeatGroup],
@@ -206,6 +226,8 @@ def heuristic_roles(
     if title is None:
         # no placeholder and nothing big in the top 40 %: a display heading set low on a cover is still the title
         title = low_display_heading(texts, membership, slide_h)
+    if title is None:
+        title = side_heading(texts, membership, slide_w, slide_h, body_size)
     if title is not None:
         roles[title.id] = SlotRole.title
 

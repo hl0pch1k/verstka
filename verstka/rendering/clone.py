@@ -185,8 +185,12 @@ class _SlideCtx:
         style = slot.style if slot else None
         slot_size = style.size_pt if style and style.size_pt else self.typo.size_for("body")
         size = size_hint or slot_size
+        if slot is not None and slot.role in _BODY_ROLES and not size_hint:
+            size = _readable_size(self, size, sum(len(p.text) for p in paragraphs))
         bold = bool(style and style.bold) if style else False
         family = style.font_family if style and style.font_family else self.typo.primary_family
+        if _takes_deck_face(self, family):
+            family = self.typo.primary_family  # measured in the face it is set in (`_deck_face`)
         target_size = size
         container = slot is not None and slot.container and etree.QName(el).localname == "sp"
         if container and box and box[2] > 0 and box[3] > 0:
@@ -268,6 +272,7 @@ class _SlideCtx:
         # the size is always written: what the slide shows is then what the gate (clone_check) and the audit read,
         # never a size inherited from a list style they cannot see
         fill_text(el, paragraphs, size_pt=target_size)
+        _deck_face(self, el)
         if container:
             style_runs(el, family, style.color_hex if style else None)
         sid = self.id_of(el)
@@ -654,15 +659,27 @@ class _SlideCtx:
         from verstka.rendering.clone_notes import _paints
 
         limit = int(self.manifest.tokens.spacing.safe_area.x2 * self.W)
-        others = [o for o in self.els.values() if o is not el and not is_nested(o) and o.getparent() is not None]
+        # (the slide's top-level shapes as they stand — a group of texts beside a side heading, Dark Minimalist p12's
+        # four projects, is in the band too — and any text: an unpainted box with words is no free room)
+        tree = self.slide._element.cSld.find(q("p:spTree"))
+        others = [o for o in tree if o is not el and etree.QName(o).localname in ("sp", "pic", "grpSp", "graphicFrame", "cxnSp")]
         boxes = []
         for o in others:
-            if etree.QName(o).localname == "sp" and not _paints(o):
+            if etree.QName(o).localname == "sp" and not _paints(o) and not shape_text(o).strip():
                 continue
             b = element_bbox(o)
             if b:
                 boxes.append(b)
         boxes += [(lambda b: (b.x, b.y, b.w, b.h))(c.bbox.to_emu(self.W, self.H)) for c in chrome_for(self.manifest, self.pattern.layout_part)]
+        # a column of cells beside the heading is one block: its gaps between rows are no room for the heading's line
+        for g in self.pattern.repeat_groups:
+            if not g.cell_boxes:
+                continue
+            u = g.cell_boxes[0]
+            x0, y0, x1, y1 = u.x, u.y, u.x + u.w, u.y + u.h
+            for c in g.cell_boxes[1:]:
+                x0, y0, x1, y1 = min(x0, c.x), min(y0, c.y), max(x1, c.x + c.w), max(y1, c.y + c.h)
+            boxes.append((int(x0 * self.W), int(y0 * self.H), int((x1 - x0) * self.W), int((y1 - y0) * self.H)))
         for b in boxes:
             if not b or b[2] * b[3] >= 0.6 * self.W * self.H:
                 continue
@@ -1661,6 +1678,43 @@ def _text_cap(ctx: _SlideCtx) -> float:
     return max(body, min(max(body * 1.4, 16.0), h1 * 0.8))
 
 
+_SYSTEM_FACES = frozenset({"arial", "calibri", "times new roman", "helvetica", "verdana", "tahoma", "segoe ui"})
+
+
+def _takes_deck_face(ctx: "_SlideCtx", family: Optional[str]) -> bool:
+    """Whether a box set in `family` takes the template's own face instead (`_deck_face`)."""
+    typo = ctx.typo
+    primary = typo.primary_family or ""
+    if not family or not primary or primary.lower() in _SYSTEM_FACES or family.lower() not in _SYSTEM_FACES:
+        return False
+    main = next((f for f in typo.families if f.family == primary), None)
+    return main is not None and main.weight >= 0.6
+
+
+def _deck_face(ctx: "_SlideCtx", el: etree._Element) -> None:
+    """A sample box set in a system face the template uses only for its own notes (VK Education p44: the steps'
+    captions in Arial beside Play everywhere else) takes the template's own face: a slide of the deck is one face."""
+    for tag in ("a:latin", "a:ea", "a:cs", "a:sym"):
+        for f in el.iter(q(tag)):
+            if _takes_deck_face(ctx, f.get("typeface")):
+                f.set("typeface", ctx.typo.primary_family)
+
+
+def _readable_size(ctx: "_SlideCtx", size: float, chars: int) -> float:
+    """Running text (25 characters and more) the sample sets under the deck's readable size (Dark Minimalist p12: 18 pt
+    lines on a 20-inch slide) starts at the template's first size that reads — the size a composed slide gives it; the
+    box's room then decides, and the gate turns down what still has to shrink under it."""
+    if chars < 25:
+        return size
+    from verstka.rendering.clone_check import readable_floor
+
+    floor = readable_floor(ctx.manifest)
+    if size >= floor - 0.05:
+        return size
+    up = [x for x in sorted(ctx.grow_scale) if x >= floor - 0.05]
+    return up[0] if up and up[0] <= floor * 1.25 else round(floor * 2) / 2
+
+
 def _harmonize(ctx: _SlideCtx, pairs: list[tuple[etree._Element, Optional[Slot]]], cap: Optional[float], min_ratio: float = 0.6) -> None:
     if len(pairs) < 2 and cap is None:
         return
@@ -1672,6 +1726,8 @@ def _harmonize(ctx: _SlideCtx, pairs: list[tuple[etree._Element, Optional[Slot]]
             continue
         style = slot.style if slot is not None else None
         base = style.size_pt if style and style.size_pt else ctx.typo.size_for("body", 14.0)
+        if slot is not None and slot.role in _BODY_ROLES:
+            base = _readable_size(ctx, base, sum(len(t) for t in texts))
         family = style.font_family if style and style.font_family else ctx.typo.primary_family
         bold = bool(style and style.bold)
         box = Bbox(x=b[0], y=b[1], w=b[2], h=b[3])
