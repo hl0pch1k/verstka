@@ -137,10 +137,13 @@ def _aligned_ink(sp, family: Optional[str]):
     return ib
 
 
-def _texts_over_each_other(slide, tree, skip_ids: set, family: Optional[str]) -> Optional[str]:
+def _texts_over_each_other(slide, tree, skip_ids: set, family: Optional[str], native: Optional[set] = None) -> Optional[str]:
     """Two texts of the slide whose lines lie over each other (more than 30 % of the smaller), or None. Texts the
     sample itself laid over each other as much (a figure on its label) are its design; a text inside a filled or
-    outlined box that carries text of its own (a pill and its caption) is that box's."""
+    outlined box that carries text of its own (a pill and its caption) is that box's. `native`: the texts the design
+    system set with a chart or a table (its caption, its legend) — checked against the sample's texts, not against
+    each other."""
+    native = native or set()
     from verstka.rendering.deck import element_bbox, is_nested
     from verstka.rendering.textfill import has_visible_style
 
@@ -157,6 +160,8 @@ def _texts_over_each_other(slide, tree, skip_ids: set, family: Optional[str]) ->
             inks.append((sid, sp, ib))
     for i, (ida, a, ia) in enumerate(inks):
         for idb, b, ib in inks[i + 1:]:
+            if ida in native and idb in native:
+                continue
             inter = ia.intersection(ib)
             small = min(ia.area, ib.area)
             if small <= 0 or inter <= 0.3 * small:
@@ -467,7 +472,7 @@ def content_trouble(slide, oslide: OutlineSlide, pattern: Pattern, manifest: Tem
             pass
     # two texts laid over each other: a card title that took a second line runs into the text under it (LCT p11
     # with a third card: «На входе — шаблон и текст» over «Verstka использует…») — unless the sample set them so
-    clash = _texts_over_each_other(slide, tree, chrome | set(native), typo.primary_family)
+    clash = _texts_over_each_other(slide, tree, chrome, typo.primary_family, native=set(native))
     if clash:
         return clash
     # the chart or the table the slide carries must be on it (drawn, and not taken off by a later step)

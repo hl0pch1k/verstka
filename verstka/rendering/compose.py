@@ -3936,7 +3936,7 @@ class Composer:
             generic = re.fullmatch(r"(?i)(series|ряд|серия|значени[яе]|values?)\s*\d*", name or "")
             if name and not generic and (named or not _same_words(name, self.o.headline)):
                 title = name[:1].upper() + name[1:]
-        if title and unit and unit.lower() not in title.lower():
+        if title and unit and unit.lower() not in title.lower() and not _same_stem(unit, title):
             return f"{title.rstrip(' ,.:;')}, {unit}"
         return title or unit
 
@@ -4409,6 +4409,14 @@ def _after_index(spec, outline: DeckOutline) -> Optional[int]:
         return None
     a, b = (str(x) for x in series[0].categories)
     return 1 if _BEFORE_CAT_RE.search(a) and _AFTER_CAT_RE.search(b) else None
+
+
+def _same_stem(unit: str, title: str) -> bool:
+    """A word unit that only repeats a word of the title in another form («Проверки» and «проверок»): one of them is
+    enough over a chart."""
+    words = [w for w in re.findall(r"\w+", (unit or "").lower().replace("ё", "е")) if len(w) >= 5]
+    stems = {w[: max(4, len(w) - 3)] for w in re.findall(r"\w+", (title or "").lower().replace("ё", "е")) if len(w) >= 5}
+    return bool(words) and all(w[: max(4, len(w) - 3)] in stems or any(w.startswith(st) or st.startswith(w[: max(4, len(w) - 3)]) for st in stems) for w in words)
 
 
 def _same_words(a: str, b: str) -> bool:

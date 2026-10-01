@@ -335,6 +335,17 @@ def _number_holders(pattern: Pattern, group) -> int:
     return standalone
 
 
+def chart_picture_room(slide: OutlineSlide, pattern: Pattern, pictures: Optional[list]) -> float:
+    """The area (share of the slide) of the sample's picture that shows a chart or data — `analysis.pictures` reads it
+    as the sample's content, not as art — when the slide carries a chart or a table to put in its place; 0 otherwise.
+    Covers, dividers and closing slides are never such samples."""
+    if slide.content.chart is None and slide.content.table is None:
+        return 0.0
+    if pattern.kind in (PatternKind.title, PatternKind.section, PatternKind.thanks, PatternKind.quote) or not pictures:
+        return 0.0
+    return max((p.area for p in pictures if p.kind == "content" and p.area >= 0.15), default=0.0)
+
+
 def score_pattern(
     slide: OutlineSlide,
     pattern: Pattern,
@@ -357,6 +368,10 @@ def score_pattern(
     if pattern.reference:
         return ScoreResult(0.0, [f"служебный слайд шаблона: {pattern.reference}"], fit)
     kind = kind_compat(slide.kind, pattern.kind)
+    if kind <= 0 and chart_picture_room(slide, pattern, pictures) > 0:
+        # a chart drawn as a picture in the sample (Dark Minimalist p17: a line chart over «Item 1 … Item 5» beside
+        # a paragraph): whatever the sample's kind, the slide's chart or table takes the picture's place
+        kind = 0.6
     if kind <= 0:
         return ScoreResult(0.0, [f"тип {pattern.kind.value} несовместим с {slide.kind.value}"], fit)
     reasons.append(f"тип {pattern.kind.value} для {slide.kind.value}: {kind:.1f}")
@@ -448,6 +463,7 @@ def score_pattern(
             room = max(room, 0.35)
         if pattern.data_box is not None:
             room = max(room, pattern.data_box.area)
+        room = max(room, 0.85 * chart_picture_room(slide, pattern, pictures))  # a chart picture's place (less its margins)
         data_room = min(1.0, room / 0.3)
         if room < 0.12:
             kind *= 0.3

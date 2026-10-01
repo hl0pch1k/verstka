@@ -6,7 +6,7 @@ from collections import deque
 from typing import Optional
 
 from verstka.matching.compat import composition_for, kind_compat
-from verstka.matching.scorer import _bookend_title_fit, cover_goal, display_lines, score_pattern, split_display_title
+from verstka.matching.scorer import chart_picture_room, _bookend_title_fit, cover_goal, display_lines, score_pattern, split_display_title
 from verstka.planning.strategies import Strategy
 from verstka.schemas.common import Family, PatternKind, SlotRole
 from verstka.schemas.layout import LayoutPlan, LayoutSlide
@@ -107,7 +107,9 @@ def match_outline(outline: DeckOutline, manifest: TemplateManifest, strategy: St
     for slide in outline.slides:
         scored = []
         for p in candidates:
-            if kind_compat(slide.kind, p.kind) <= 0 or (slide.id, p.id) in exclude:
+            if (slide.id, p.id) in exclude:
+                continue
+            if kind_compat(slide.kind, p.kind) <= 0 and not chart_picture_room(slide, p, pictures.get(p.id) if pictures else None):
                 continue
             res = score_pattern(slide, p, manifest, strategy, prev_family, list(recent), cover=cover, divider=divider, pictures=pictures.get(p.id) if pictures else None)
             scored.append((res, p))

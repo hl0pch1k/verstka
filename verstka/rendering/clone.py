@@ -1864,6 +1864,12 @@ def _place_native_object(ctx: _SlideCtx, oslide: OutlineSlide) -> None:
                 ctx.remove_slot_shape(s)
             candidates = []
     big_candidates = [s for s in candidates if s.bbox.area >= 0.08]
+    if box is None and not big_candidates:
+        # a chart drawn as a picture that is the sample's decoration by role (Dark Minimalist p17: a line chart over
+        # «Item 1 … Item 5» laid over the lower slide): its painted part, under the texts that stay, takes the object
+        pic_box = _content_picture_area(ctx)
+        if pic_box is not None:
+            box = pic_box
     if box is None and ctx.pattern.kind in (PatternKind.chart, PatternKind.table) and not big_candidates:
         # the sample chart/table is drawn with shapes: clear everything except title/subtitle and use that area
         keep = {s.shape_id for s in ctx.pattern.slots if s.role in (SlotRole.title, SlotRole.subtitle)}
@@ -1912,6 +1918,41 @@ def _place_native_object(ctx: _SlideCtx, oslide: OutlineSlide) -> None:
     box = _reserve_notes_room(ctx, oslide, box)
     box = _below_heading(ctx, box)
     _draw_native(ctx, oslide, box)
+
+
+def _content_picture_area(ctx: _SlideCtx) -> Optional[Bbox]:
+    """The painted part of the sample's largest content picture (a chart or a screenshot `analysis.pictures` reads as
+    the sample's own story) — clipped to the safe area and set under the texts above it that stay — or None."""
+    from verstka.rendering.clone_check import ink_box
+    from verstka.rendering.layers import opaque_box
+
+    best = None
+    for sid, el in ctx.els.items():
+        if sid in ctx.removed or el.getparent() is None or is_nested(el) or etree.QName(el).localname != "pic":
+            continue
+        if ctx.pic_kind.get(ctx.origin.get(sid, sid)) != "content":
+            continue
+        b = element_bbox(el)
+        if not b or b[2] <= 0 or b[3] <= 0:
+            continue
+        ob = opaque_box(ctx.slide.part, el, Bbox(x=b[0], y=b[1], w=b[2], h=b[3]))
+        if ob.area >= 0.15 * ctx.W * ctx.H and (best is None or ob.area > best.area):
+            best = ob
+    if best is None:
+        return None
+    safe = ctx.manifest.tokens.spacing.safe_area.to_emu(ctx.W, ctx.H)
+    x0, x1 = max(best.x, safe.x), min(best.x2, safe.x2)
+    y0, y1 = max(best.y, safe.y), min(best.y2, safe.y2)
+    for sid, el in ctx.els.items():
+        if el.getparent() is None or etree.QName(el).localname != "sp" or not shape_text(el).strip() or sid in ctx.pattern.chrome_shape_ids:
+            continue
+        ib = ink_box(el, ctx.typo.primary_family)
+        if ib is None or ib.x2 <= x0 or ib.x >= x1 or ib.y >= y0 + (y1 - y0) // 2:
+            continue
+        y0 = max(y0, ib.y2 + int(0.03 * ctx.H))  # a paragraph kept above the picture: the object starts under it
+    if x1 - x0 <= 0 or y1 - y0 <= 0:
+        return None
+    return Bbox(x=x0, y=y0, w=x1 - x0, h=y1 - y0)
 
 
 def _below_heading(ctx: _SlideCtx, box: Bbox) -> Bbox:
