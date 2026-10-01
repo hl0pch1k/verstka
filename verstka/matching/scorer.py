@@ -418,11 +418,21 @@ def score_pattern(
                 reasons.append(f"таблица образца рассчитана на {pattern.data_rows} строк, у слайда {rows_need}")
         # a sample whose texts and pictures hold a small part of the slide (a coloured square with the heading at one
         # side, the rest left for a photo the sample does not have) sets new content in a corner of an empty slide
-        boxes = [s.bbox for s in pattern.slots if s.role != SlotRole.chrome] + list(pattern.decor_boxes) + [p.box for p in pics if p.kind in ("art", "panel")]
+        # (the heading spans the slide on most samples: what counts is where the content stands under it — VK Tech
+        # p20 keeps its four lines in the left third and the rest empty)
+        boxes = [s.bbox for s in pattern.slots if s.role not in (SlotRole.chrome, SlotRole.title, SlotRole.subtitle)] + list(pattern.decor_boxes) + [p.box for p in pics if p.kind in ("art", "panel")]
+        if boxes:
+            # a heading set beside the content (Dark Minimalist p6: the title in the left half, three items in the
+            # right one) is a part of the layout's spread; a heading over the content is not
+            cy0, cy1 = min(b.y for b in boxes), max(b.y2 for b in boxes)
+            for s in pattern.slots:
+                if s.role in (SlotRole.title, SlotRole.subtitle) and min(s.bbox.y2, cy1) - max(s.bbox.y, cy0) >= 0.3 * s.bbox.h:
+                    boxes.append(s.bbox)
         if boxes and pattern.data_box is None:
             x0, y0 = min(b.x for b in boxes), min(b.y for b in boxes)
             x1, y1 = max(b.x2 for b in boxes), max(b.y2 for b in boxes)
-            if (x1 - x0) * (y1 - y0) < 0.45 and (x1 - x0) < 0.62:
+            # (only where the rest is really empty: the layout's own art — WorkSpace's spiral left of p4's list — fills it)
+            if (x1 - x0) * (y1 - y0) < 0.45 and (x1 - x0) < 0.62 and (pattern.free_share is None or pattern.free_share >= 0.85):
                 kind *= 0.5
                 reasons.append(f"образец занимает {int(100 * (x1 - x0))}% ширины слайда: остальное останется пустым")
         c0 = slide.content
