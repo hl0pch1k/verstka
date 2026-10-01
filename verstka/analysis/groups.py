@@ -513,8 +513,37 @@ def detect_repeat_groups(
                 continue
             ids = {i for c in cells for i in c.member_ids}
         used |= ids
+        cells = _without_shared(cells, by_id0)
         groups.append(_build_group(f"g{len(groups) + 1}", cells, slide_w, slide_h, safe, art_boxes))
     return groups
+
+
+def _without_shared(cells: list[Cell], by_id: dict) -> list[Cell]:
+    """A shape that runs across the other cells of its row (VK Tech p48: the timeline's arrow, picked up by the
+    middle step) is the row's, not that cell's: the cell is what stands at its own place. Left in, the arrow made the
+    middle step the widest and the first in reading order — the first item went to the middle of the line."""
+    out = []
+    for c in cells:
+        others = [o.bbox for o in cells if o is not c]
+        keep = []
+        for i in c.member_ids:
+            sh = by_id.get(i)
+            if sh is not None and i != c.anchor_id and len(c.member_ids) > 1:
+                b = sh.bbox
+                crosses = sum(1 for ob in others if min(b.x2, ob.x2) - max(b.x, ob.x) >= 0.3 * ob.w and min(b.y2, ob.y2) - max(b.y, ob.y) >= 0.3 * min(ob.h, b.h))
+                if crosses >= 1 and b.area < 0.5 * sum(o.area for o in others):
+                    continue
+            keep.append(i)
+        if len(keep) == len(c.member_ids) or not keep:
+            out.append(c)
+            continue
+        box = None
+        for i in keep:
+            sh = by_id.get(i)
+            if sh is not None:
+                box = sh.bbox if box is None else box.union(sh.bbox)
+        out.append(Cell(c.anchor_id, keep, box or c.bbox, c.composition, [i for i in c.inner if i in keep]))
+    return out
 
 
 def group_membership(groups: list[RepeatGroup]) -> dict[str, tuple[str, int]]:

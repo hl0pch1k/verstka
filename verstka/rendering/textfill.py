@@ -238,7 +238,33 @@ def fill_text(sp_el: etree._Element, paragraphs: list[ParagraphSpec], size_pt: O
         else:
             p.append(r)
         txBody.append(p)
+    open_line_spacing(txBody)
     return True
+
+
+def open_line_spacing(txBody: etree._Element) -> None:
+    """Line spacing a sample squeezed for its one-line label (50 % on VK Tech's timeline captions, an exact 9 pt under
+    a 12 pt run) opens to single spacing: new text that wraps would set its lines over each other."""
+    holders = [x for x in txBody.iter(q("a:pPr"))]
+    lst = txBody.find(q("a:lstStyle"))
+    if lst is not None:
+        holders += [x for x in lst if isinstance(x.tag, str) and etree.QName(x).localname.endswith("pPr")]
+    sizes = [int(r.get("sz")) for r in txBody.iter(q("a:rPr")) if (r.get("sz") or "").isdigit()]
+    top = max(sizes) if sizes else 0
+    for ppr in holders:
+        ln = ppr.find(q("a:lnSpc"))
+        if ln is None:
+            continue
+        pct = ln.find(q("a:spcPct"))
+        pts = ln.find(q("a:spcPts"))
+        try:
+            if pct is not None and int(pct.get("val") or 100000) < 80000:
+                pct.set("val", "100000")
+            elif pts is not None and top and int(pts.get("val") or 0) < top:
+                ln.remove(pts)
+                etree.SubElement(ln, q("a:spcPct")).set("val", "100000")
+        except ValueError:
+            continue
 
 
 def neutralize_rpr(rPr: etree._Element) -> etree._Element:
