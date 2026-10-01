@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from typing import Optional
 
 from verstka.analysis.groups import group_membership
 from verstka.analysis.roles import is_numeric_text
@@ -31,6 +32,7 @@ def heuristic_kind(
     slide_w: int,
     slide_h: int,
     data_box=None,
+    data_kind: Optional[str] = None,
 ) -> tuple[PatternKind, float]:
     by_id = {s.id: s for s in shapes}
     membership = group_membership(groups)
@@ -46,7 +48,8 @@ def heuristic_kind(
     if any(f.frame_kind == "table" for f in frames):
         return PatternKind.table, 0.95
     if data_box is not None:
-        return PatternKind.table, 0.85  # a table drawn with text boxes on plates
+        # a table drawn with text boxes on plates, a chart drawn with shapes or pictures
+        return (PatternKind.chart if data_kind == "chart" else PatternKind.table), 0.85
     if any(f.frame_kind == "chart" for f in frames):
         return PatternKind.chart, 0.95
     if any(f.frame_kind == "diagram" for f in frames):

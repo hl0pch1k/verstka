@@ -58,6 +58,14 @@ function itemWord(kind: string, n: number): string {
 
 type Hover = { slot: string | null; group: string | null };
 
+/** How the sample drew its chart: «столбцы, нарисованные фигурами (11, две серии)». */
+function chartDrawn(pattern: Pattern): string {
+  const h = pattern.chart_hint ?? {};
+  const what = h.direction === "bar" ? "полосы, нарисованные фигурами" : h.direction === "gantt" ? "диаграмма Ганта, нарисованная фигурами" : "столбцы, нарисованные фигурами";
+  const series = h.series && h.series > 1 ? ` (${plural(h.series, "серия", "серии", "серий")})` : "";
+  return `${what}${series}`;
+}
+
 function SlotMap({ pattern, aspect, show, hover, onHover }: { pattern: Pattern; aspect: string; show: boolean; hover: Hover; onHover(h: Hover): void }) {
   const grouped = new Set(pattern.repeat_groups.flatMap((g) => g.member_shape_ids.flat()));
   const slotGroup = (s: Slot) => pattern.repeat_groups.find((g) => g.member_shape_ids.some((c) => c.includes(s.shape_id)))?.id ?? null;
@@ -73,7 +81,7 @@ function SlotMap({ pattern, aspect, show, hover, onHover }: { pattern: Pattern; 
           className="absolute rounded-md border-[1.5px] border-dashed"
           style={{ left: `${pattern.data_box.x * 100}%`, top: `${pattern.data_box.y * 100}%`, width: `${pattern.data_box.w * 100}%`, height: `${pattern.data_box.h * 100}%`, borderColor: "#DB2777", background: "#DB27770F" }}
         >
-          <span className="absolute -top-px left-2 -translate-y-1/2 rounded bg-[#DB2777] px-1.5 text-[10px] font-semibold leading-4 text-white">таблица</span>
+          <span className="absolute -top-px left-2 -translate-y-1/2 rounded bg-[#DB2777] px-1.5 text-[10px] font-semibold leading-4 text-white">{pattern.data_kind === "chart" ? "диаграмма" : "таблица"}</span>
         </div>
       )}
       {show &&
@@ -260,9 +268,13 @@ export function PatternModal({ pattern: current, aspect, position, onClose, onSt
                       <li className="-mx-2 rounded-lg px-2 py-2">
                         <div className="flex items-center gap-2">
                           <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: "#DB2777" }} aria-hidden />
-                          <span className="text-footnote font-semibold text-zinc-900">таблица</span>
+                          <span className="text-footnote font-semibold text-zinc-900">{pattern.data_kind === "chart" ? "диаграмма" : "таблица"}</span>
                         </div>
-                        <p className="pl-4 text-caption text-zinc-500">нарисована фигурами{pattern.data_rows ? ` (${plural(pattern.data_rows, "строка", "строки", "строк")})` : ""} — на её месте встанет настоящая таблица</p>
+                        {pattern.data_kind === "chart" ? (
+                          <p className="pl-4 text-caption text-zinc-500">{chartDrawn(pattern)} — на её месте встанет настоящая диаграмма с данными слайда</p>
+                        ) : (
+                          <p className="pl-4 text-caption text-zinc-500">нарисована фигурами{pattern.data_rows ? ` (${plural(pattern.data_rows, "строка", "строки", "строк")})` : ""} — на её месте встанет настоящая таблица</p>
+                        )}
                       </li>
                     )}
                     {pattern.repeat_groups.map((g, gi) => <GroupRow key={g.id} pattern={pattern} group={g} index={gi} on={hover.group === g.id} onHover={setHover} />)}

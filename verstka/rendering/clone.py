@@ -1312,6 +1312,10 @@ def _stack_cells(ctx: _SlideCtx, stacks: list[tuple[etree._Element, Optional[Slo
         bbs = [element_bbox(e) for e, _ in bodies]
         if not tb or not bodies or any(b is None for b in bbs) or is_nested(t_el) or any(is_nested(e) for e, _ in bodies):
             return set()
+        if bbs[0][1] > tb[1] and bbs[0][1] < tb[1] + tb[3]:
+            # a heading box as tall as its card with the text box laid over its lower part (LCT p11): the heading's
+            # own place is the band above the text — its frame is cut to it
+            tb = (tb[0], tb[1], tb[2], bbs[0][1] - tb[1])
         if any(b[1] < tb[1] + 0.5 * tb[3] or b[0] > tb[0] + tb[2] or b[0] + b[2] < tb[0] for b in bbs):
             return set()  # a text beside the heading, not under it: the cell is not a stack
         floor = ctx.holder_floor(bodies[-1][0], bbs[-1], skip=tuple([t_el] + [e for e, _ in bodies]))
@@ -1913,22 +1917,25 @@ def _draw_native(ctx: _SlideCtx, oslide: OutlineSlide, box: Bbox) -> None:
     # the chart or the table is set the way a composed slide sets it (its caption and unit, a pie with its legend,
     # a table measured for its content at the deck's one table size), in the sample's own place for it
     tree0 = ctx.slide._element.cSld.find(q("p:spTree"))
-    before_native = set(id(x) for x in tree0)
+    # (the elements themselves, held: the id() of an lxml proxy let go is handed to the next proxy made — a chart
+    # drawn after a rolled-back clone took the address of a shape of the old tree and passed for the sample's own)
+    before_native = set(tree0)
     try:
         comp = clone_composer(ctx, oslide, box)
         if c.chart is not None:
-            err = comp._chart_block(box, c.chart, prominent=False, center=False)
+            # a pie in an area the width of the slide stands in its middle with its legend, not at its left edge
+            err = comp._chart_block(box, c.chart, prominent=False, center=box.w >= 0.6 * ctx.W)
             if err:
                 raise RuntimeError(err)
         elif c.table is not None:
-            before = set(id(x) for x in ctx.slide._element.cSld.find(q("p:spTree")))
+            before = set(ctx.slide._element.cSld.find(q("p:spTree")))
             comp.table(box, c.table)
             _table_to_width(ctx, before, box)
         # what the design system drew (the chart, its caption and legend, the table) is set at the composed slides'
         # sizes: the gate reads its type as the composer's, not as the sample's
         native = ctx.slide.__dict__.setdefault("_verstka_native", set())
         for x in tree0:
-            if id(x) not in before_native:
+            if x not in before_native:
                 nv = x.find(".//" + q("p:cNvPr"))
                 if nv is not None:
                     native.add(nv.get("id"))
@@ -1938,11 +1945,11 @@ def _draw_native(ctx: _SlideCtx, oslide: OutlineSlide, box: Bbox) -> None:
         raise RuntimeError(f"native object failed: {str(e)[:120]}") from e
 
 
-def _table_to_width(ctx: _SlideCtx, before: set[int], box: Bbox) -> None:
+def _table_to_width(ctx: _SlideCtx, before: set, box: Bbox) -> None:
     """A table set in a sample's table area takes the area's width (the sample's own table did): its columns widen
-    in proportion when the measured table came out narrower."""
+    in proportion when the measured table came out narrower. `before`: the slide's elements before the table."""
     for gf in ctx.slide._element.cSld.find(q("p:spTree")):
-        if id(gf) in before or etree.QName(gf).localname != "graphicFrame":
+        if gf in before or etree.QName(gf).localname != "graphicFrame":
             continue
         tbl = gf.find(".//" + q("a:tbl"))
         b = element_bbox(gf)
@@ -1972,7 +1979,12 @@ def clone_composer(ctx: _SlideCtx, oslide: OutlineSlide, box: Bbox):
     if proto:
         kit.card.fill, kit.card.line = proto[1], proto[2]
         kit.card.colors = kit.colors_on(proto[1] or ground, inside_card=bool(proto[1]))
-    return Composer(ctx.slide, kit, oslide, ctx.outline, ctx.outline.strategy or "structured", ctx.manifest)
+    comp = Composer(ctx.slide, kit, oslide, ctx.outline, ctx.outline.strategy or "structured", ctx.manifest)
+    hint = ctx.pattern.chart_hint or {}
+    if hint.get("label_pt"):
+        # a chart the sample drew with shapes: the native one in its place reads at the size of its labels
+        comp.chart_label_pt = float(hint["label_pt"])
+    return comp
 
 
 # ---------------------------------------------------------------------------- cleanup helpers

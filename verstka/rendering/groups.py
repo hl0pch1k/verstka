@@ -99,6 +99,16 @@ def reading_order_key(cells: list[list[etree._Element]], slide_h: int, group: Op
     return key
 
 
+def is_furniture(el: etree._Element) -> bool:
+    """The deck's furniture: a slide-number, date or footer placeholder — it stays where its layout puts it, never
+    rides with a card (LCT p11: the page number under the last card travelled with it to the middle of the slide)."""
+    for path in ("p:nvSpPr/p:nvPr/p:ph", "p:nvPicPr/p:nvPr/p:ph"):
+        ph = el.find("/".join(q(t) for t in path.split("/")))
+        if ph is not None and (ph.get("type") or "") in ("sldNum", "dt", "ftr"):
+            return True
+    return False
+
+
 def cell_riders(slide: Slide, group: RepeatGroup, cells: list[list[etree._Element]], protected_ids: Optional[set[str]] = None) -> list[list[etree._Element]]:
     """Companion shapes of every cell (icon chips, avatars, markers) that are not group members.
 
@@ -122,7 +132,7 @@ def cell_riders(slide: Slide, group: RepeatGroup, cells: list[list[etree._Elemen
     for sid, el in slide_shape_elements(slide).items():
         if el.getparent() is not tree or etree.QName(el).localname not in _DRAWABLE:
             continue
-        if sid in members or sid in protected:
+        if sid in members or sid in protected or is_furniture(el):
             continue
         bb = element_bbox(el)
         if bb is None:

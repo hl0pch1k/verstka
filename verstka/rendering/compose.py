@@ -3928,6 +3928,8 @@ class Composer:
 
         unit = unit_caption(spec, self.outline)
         title = " ".join((spec.title or "").split())
+        if title and not named and _same_words(title, self.o.headline):
+            title = ""  # the slide's heading names the chart already: never twice on one slide
         if not title:
             series = resolve_series(spec, self.outline)
             name = " ".join((series[0].name or "").split()) if len(series) == 1 else ""
@@ -3953,7 +3955,8 @@ class Composer:
         else:
             legend_head = None
         if cap:
-            size = k.lead if prominent else k.small
+            # (a muted caption never smaller than the chart's own labels under it)
+            size = k.lead if prominent else max(k.small, self._chart_style().font_size_pt or 0.0)
             para = [self.P(cap, size, k.colors.heading if prominent else k.colors.muted, bold=k.bold and prominent)]
             ch = self.h(para, box.w)
             # drawn before the chart: the chart finds its word unit written above it and prints plain numbers
@@ -3985,7 +3988,7 @@ class Composer:
 
         k = self.kit
         style = self.manifest.components.chart_style
-        size = max(style.font_size_pt or 0, k.small)
+        size = max(style.font_size_pt or 0, k.small, min(getattr(self, "chart_label_pt", 0.0) or 0.0, 1.6 * max(style.font_size_pt or 0, k.small)))
         if chart_text_capped(k.manifest.tokens.typography, size, k.H):
             size = min(size, math.floor(0.026 * k.hpt * 2) / 2)  # chart text relative to the slide (≤ 2.6 % of its height)
         return style.model_copy(update={"font_size_pt": size, "font_family": k.font or style.font_family})

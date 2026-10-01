@@ -151,12 +151,16 @@ export interface Pattern {
   thumbnail_url?: string;
   classification: ClassificationTrace | null;
   layout_part: string | null;
-  /** a table drawn with text boxes: its area takes the deck's native table */
+  /** a table drawn with text boxes or a chart drawn with shapes: its area takes the deck's native table or chart */
   data_box?: BboxFrac | null;
   /** the sample's design is one picture of its own layout */
   art_layout?: boolean;
   /** rows of the drawn table (its header included) */
   data_rows?: number | null;
+  /** what the sample draws in that area: a table or a chart (columns, bars, a Gantt) */
+  data_kind?: "table" | "chart" | null;
+  /** how a drawn chart reads */
+  chart_hint?: { direction?: "col" | "bar" | "gantt"; bars?: number; series?: number; label_pt?: number | null; value_pt?: number | null } | null;
   /** the note field at the sample's foot («Примечание» over «Текст»): the slide's conclusion goes there */
   note_slot?: string | null;
   note_label?: string | null;

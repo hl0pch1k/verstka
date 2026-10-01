@@ -210,9 +210,12 @@ class Pattern(BaseModel):
     layout_type: Optional[str] = None  # the layout's own type (title, obj, secHead, …) when it declares one
     mockup_boxes: list[BboxFrac] = Field(default_factory=list)  # device mock-ups and empty picture frames of the sample
     mockup_on_layout: bool = False  # a mock-up drawn by the layout: it stays on every slide cloned from the sample
-    # a table drawn with shapes (rows of text boxes on plates): its area takes the deck's native table
+    # a table drawn with shapes (rows of text boxes on plates) or a chart drawn with shapes or pictures (columns on a
+    # baseline, bars from an edge, a Gantt): its area takes the deck's native table or chart
     data_box: Optional[BboxFrac] = None
     data_rows: Optional[int] = None  # rows of that drawn table (its header included)
+    data_kind: Optional[str] = None  # "table" | "chart": what the sample draws in that area
+    chart_hint: Optional[dict] = None  # how a drawn chart reads: direction (col | bar | gantt), bars, series, label sizes
     art_layout: bool = False  # the sample's design is one picture of its layout (Google Slides exports): the slide's boxes stand over it
     # the field at the sample's foot for a note («Примечание» over «Текст» on a band): the slide's conclusion goes there
     note_slot: Optional[str] = None  # shape id of its text
@@ -315,7 +318,7 @@ class TemplateManifest(BaseModel):
     style_rules: list[StyleRule] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     n_slides: int = 0
-    analysis_version: str = "25"
+    analysis_version: str = "26"
     embedded_fonts: list[str] = Field(default_factory=list)
     # template families this machine does not have (not installed, not embedded) → the face previews and PDFs set them
     # in (the LibreOffice replacement table of ingest.render, fonts.render_standin; else fontconfig's substitute);

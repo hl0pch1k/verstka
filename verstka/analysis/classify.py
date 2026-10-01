@@ -125,16 +125,26 @@ def classify_slide(
     role_override_confidence: float = 0.7,
     table: Optional[tuple] = None,
 ) -> tuple[ClassificationTrace, dict[str, SlotRole], list[str]]:
-    """Returns (trace, roles, warnings). `table`: (area, shape ids) of a table drawn with text boxes
-    (`groups.detect_drawn_table`): its shapes are the table's, not slots of their own."""
+    """Returns (trace, roles, warnings). `table`: (area, shape ids, …) of a table drawn with text boxes
+    (`groups.detect_drawn_table`) or of a chart drawn with shapes (`drawn_chart.detect_drawn_chart`, its fourth item
+    «chart»): its shapes are the table's or the chart's, not slots of their own — a figure over the first column of
+    a drawn chart is no subtitle, a header cell of a drawn table is none either."""
     warnings: list[str] = []
     w_h, w_llm, w_vlm = weights
     roles = heuristic_roles(shapes, groups, chrome_ids, typography, slide_w, slide_h, image_kinds=image_kinds)
+    data_kind = None
     if table is not None:
+        data_kind = table[3] if len(table) > 3 else "table"
+        area = table[0]
+        by_id = {s.id: s for s in shapes}
         for sid in table[1]:
-            if roles.get(sid) not in (SlotRole.title, SlotRole.subtitle, SlotRole.chrome):
-                roles[sid] = SlotRole.decoration
-    h_kind, h_conf = heuristic_kind(shapes, roles, groups, slide_index, n_slides, slide_w, slide_h, data_box=table[0] if table is not None else None)
+            role = roles.get(sid)
+            if role in (SlotRole.title, SlotRole.chrome):
+                continue
+            if role == SlotRole.subtitle and sid in by_id and not area.contains_point(*by_id[sid].bbox.center):
+                continue  # the lede over the table, caught by the table's margin
+            roles[sid] = SlotRole.decoration
+    h_kind, h_conf = heuristic_kind(shapes, roles, groups, slide_index, n_slides, slide_w, slide_h, data_box=table[0] if table is not None else None, data_kind=data_kind)
     trace = ClassificationTrace(kind=h_kind, heuristic=SignalVote(kind=h_kind, confidence=h_conf))
     votes: list[tuple[PatternKind, float]] = [(h_kind, h_conf * w_h)]
 

@@ -82,10 +82,12 @@ def _assign_content(entries: list[dict], strategy: Strategy, taken: Optional[dic
     return chosen
 
 
-def match_outline(outline: DeckOutline, manifest: TemplateManifest, strategy: Strategy, min_quality: float = 0.2, ws=None, taken: Optional[dict[str, set[str]]] = None) -> LayoutPlan:
+def match_outline(outline: DeckOutline, manifest: TemplateManifest, strategy: Strategy, min_quality: float = 0.2, ws=None, taken: Optional[dict[str, set[str]]] = None, exclude: Optional[set[tuple[str, str]]] = None) -> LayoutPlan:
     """`ws`: the template's workspace — its sample pictures are read to tell art (kept) from a sample's own story
     (`analysis.pictures`). `taken`: headline key → samples the variants built before used for that slide; filled in
-    with this variant's choices."""
+    with this variant's choices. `exclude`: (outline id, sample id) pairs a render of the deck found reading badly
+    (`renderer.RenderResult.failed_samples`): the deck's samples are chosen without them."""
+    exclude = exclude or set()
     plan = LayoutPlan(strategy=strategy.name, template_id=manifest.template_id)
     recent: deque[str] = deque(maxlen=3)
     prev_family: Optional[Family] = None
@@ -105,7 +107,7 @@ def match_outline(outline: DeckOutline, manifest: TemplateManifest, strategy: St
     for slide in outline.slides:
         scored = []
         for p in candidates:
-            if kind_compat(slide.kind, p.kind) <= 0:
+            if kind_compat(slide.kind, p.kind) <= 0 or (slide.id, p.id) in exclude:
                 continue
             res = score_pattern(slide, p, manifest, strategy, prev_family, list(recent), cover=cover, divider=divider, pictures=pictures.get(p.id) if pictures else None)
             scored.append((res, p))
@@ -202,12 +204,16 @@ def match_outline(outline: DeckOutline, manifest: TemplateManifest, strategy: St
             )
     if deferred:
         chosen = _assign_content(deferred, strategy, taken)
+        in_deck = {got[2].id for got in chosen.values()}
         for e in deferred:
             i, slide, scored = e["index"], e["slide"], e["scored"]
             got = chosen.get(i)
             if got is not None:
                 adj, res, p = got
                 note = [] if abs(adj - res.score) < 1e-6 else [f"разнообразие колоды: {res.score:.2f} → {adj:.2f} (образец уже встречался рядом, в колоде или в другом варианте)"]
+                # the fallbacks of a slide whose sample reads badly: samples no other slide of the deck stands on first
+                others = [(q.id, r.score) for r, q in scored if q.id != p.id]
+                alts = [a for a in others if a[0] not in in_deck] + [a for a in others if a[0] in in_deck]
                 plan.slides[i] = LayoutSlide(
                     outline_id=slide.id,
                     mode="clone",
@@ -215,7 +221,7 @@ def match_outline(outline: DeckOutline, manifest: TemplateManifest, strategy: St
                     fit=res.fit,
                     score=res.score,
                     reasons=[f"слайд {p.source_slide} шаблона"] + res.reasons + note,
-                    alternatives=[(q.id, r.score) for r, q in scored if q.id != p.id][:3],
+                    alternatives=alts[:3],
                 )
                 if taken is not None:
                     taken.setdefault(e["key"], set()).add(p.id)

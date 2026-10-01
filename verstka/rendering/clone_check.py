@@ -115,6 +115,65 @@ def ink_box(sp, default_family: Optional[str]):
     return Bbox(x=b[0] + l, y=y, w=min(int(widest * EMU_PER_PT), b[2] - l - r), h=min(h, max(b[3], h)))
 
 
+def _aligned_ink(sp, family: Optional[str]):
+    """`ink_box` set where its alignment puts it: a centred or right-aligned line stands in the middle or at the
+    right of its frame, not at its left edge."""
+    from verstka.rendering.deck import element_bbox
+    from verstka.schemas.common import Bbox
+
+    ib = ink_box(sp, family)
+    if ib is None:
+        return None
+    b = element_bbox(sp)
+    ppr = sp.find(".//" + q("a:pPr"))
+    algn = ppr.get("algn") if ppr is not None else None
+    if b and algn in ("ctr", "r"):
+        bp = sp.find(q("p:txBody") + "/" + q("a:bodyPr"))
+        l = int(bp.get("lIns")) if bp is not None and (bp.get("lIns") or "").isdigit() else 91440
+        r = int(bp.get("rIns")) if bp is not None and (bp.get("rIns") or "").isdigit() else 91440
+        inner = b[2] - l - r
+        x = b[0] + l + ((inner - ib.w) // 2 if algn == "ctr" else inner - ib.w)
+        return Bbox(x=x, y=ib.y, w=ib.w, h=ib.h)
+    return ib
+
+
+def _texts_over_each_other(slide, tree, skip_ids: set, family: Optional[str]) -> Optional[str]:
+    """Two texts of the slide whose lines lie over each other (more than 30 % of the smaller), or None. Texts the
+    sample itself laid over each other as much (a figure on its label) are its design; a text inside a filled or
+    outlined box that carries text of its own (a pill and its caption) is that box's."""
+    from verstka.rendering.deck import element_bbox, is_nested
+    from verstka.rendering.textfill import has_visible_style
+
+    designed = slide.__dict__.get("_verstka_designed_ink") or {}
+    origin = slide.__dict__.get("_verstka_origin") or {}
+    inks = []
+    for sp in tree.iter(q("p:sp")):
+        nv = sp.find(".//" + q("p:cNvPr"))
+        sid = nv.get("id") if nv is not None else None
+        if sid is None or sid in skip_ids or is_nested(sp) or not _shape_text(sp).strip():
+            continue
+        ib = _aligned_ink(sp, family)
+        if ib is not None and ib.w > 0 and ib.h > 0:
+            inks.append((sid, sp, ib))
+    for i, (ida, a, ia) in enumerate(inks):
+        for idb, b, ib in inks[i + 1:]:
+            inter = ia.intersection(ib)
+            small = min(ia.area, ib.area)
+            if small <= 0 or inter <= 0.3 * small:
+                continue
+            da, db = designed.get(origin.get(ida, ida)), designed.get(origin.get(idb, idb))
+            if da is not None and db is not None and da.intersection(db) >= 0.3 * min(da.area, db.area):
+                continue
+            ba, bb = element_bbox(a), element_bbox(b)
+            if ba and bb:
+                a_holds = has_visible_style(a) and ba[0] <= bb[0] and ba[1] <= bb[1] and ba[0] + ba[2] >= bb[0] + bb[2] and ba[1] + ba[3] >= bb[1] + bb[3]
+                b_holds = has_visible_style(b) and bb[0] <= ba[0] and bb[1] <= ba[1] and bb[0] + bb[2] >= ba[0] + ba[2] and bb[1] + bb[3] >= ba[1] + ba[3]
+                if a_holds or b_holds:
+                    continue
+            return f"texts «{_shape_text(a).strip()[:20]}» and «{_shape_text(b).strip()[:20]}» lie over each other"
+    return None
+
+
 _GRID_C, _GRID_R = 48, 27
 
 
@@ -388,6 +447,11 @@ def content_trouble(slide, oslide: OutlineSlide, pattern: Pattern, manifest: Tem
                 return f"a hole of {hole:.0%} of the slide where the sample had {hole0:.0%} free"
         except Exception:  # noqa: BLE001
             pass
+    # two texts laid over each other: a card title that took a second line runs into the text under it (LCT p11
+    # with a third card: «На входе — шаблон и текст» over «Verstka использует…») — unless the sample set them so
+    clash = _texts_over_each_other(slide, tree, chrome | set(native), typo.primary_family)
+    if clash:
+        return clash
     # the chart or the table the slide carries must be on it (drawn, and not taken off by a later step)
     if c.chart is not None or c.table is not None:
         frames = [el for el in tree if etree.QName(el).localname == "graphicFrame" and el.find(".//" + q("p:cNvPr")) is not None and el.find(".//" + q("p:cNvPr")).get("id") in native]

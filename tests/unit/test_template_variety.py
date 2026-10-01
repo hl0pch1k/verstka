@@ -268,3 +268,59 @@ def test_a_header_whose_boxes_vary_in_width_is_the_decks_furniture():
         per_slide[i] = [_text(f"h{i}", "Dark Minimalist", 12, 0.5 - w / 2, 0.041, w, 0.018), _text(f"t{i}", f"Заголовок {i}", 36, 0.05, 0.2, 0.6, 0.1)]
     chrome = detect_chrome(per_slide, W, H)
     assert all(f"h{i}" in chrome_ids(per_slide[i], chrome, W, H) for i in per_slide)
+
+
+# ---------------------------------------------------------------------------- charts drawn with shapes
+
+
+def _bar(sid, x, y, w, h, fill="0077FF") -> ShapeInfo:
+    return _shape(sid, x, y, w, h, fill=fill, geometry="rect")
+
+
+def test_columns_on_a_baseline_with_their_figures_are_one_chart_area():
+    """VK Tech p44: columns of different heights on a common baseline, a figure over each and a name under it — one
+    data area of the sample (its native chart replaces them), the figure over the first column is no subtitle."""
+    from verstka.analysis.drawn_chart import detect_drawn_chart
+
+    shapes = [_text("t", "Заголовок в две или в одну строчку", 24, 0.02, 0.05, 0.74, 0.14)]
+    for i, h in enumerate([0.58, 0.52, 0.49, 0.46, 0.40, 0.35]):
+        x = 0.05 + i * 0.15
+        shapes.append(_bar(f"b{i}", x, 0.81 - h, 0.08, h))
+        shapes.append(_text(f"v{i}", "10", 16, x - 0.04, 0.81 - h - 0.07, 0.16, 0.06))
+        shapes.append(_text(f"c{i}", "Текст", 10.5, x, 0.83, 0.08, 0.04))
+    found = detect_drawn_chart(shapes, W, H)
+    assert found is not None
+    area, ids, _, kind, hint = found
+    assert kind == "chart" and hint["direction"] == "col" and hint["label_pt"] == 10.5 and hint["value_pt"] == 16
+    assert {"b0", "v0", "c5"} <= ids and "t" not in ids
+    assert area.x >= 0 and area.y2 <= H  # label boxes hanging over the slide's edge stay out of it
+
+
+def test_bars_back_to_back_and_a_gantt_are_charts_cards_and_stripes_are_not():
+    from verstka.analysis.drawn_chart import detect_drawn_chart
+
+    # bars from a common right edge and from a common left edge, the category names between them, a pill on top
+    shapes = [_bar("hl", 0.03, 0.26, 0.33, 0.07, fill="E0F0FF"), _text("hlt", "Описание", 16, 0.12, 0.27, 0.16, 0.06)]
+    for i, (wl, wr) in enumerate([(0.32, 0.34), (0.30, 0.26), (0.28, 0.25), (0.27, 0.24), (0.24, 0.28)]):
+        y = 0.36 + i * 0.09
+        shapes += [_bar(f"l{i}", 0.36 - wl, y, wl, 0.056), _bar(f"r{i}", 0.63, y, wr, 0.056), _text(f"m{i}", "Описание", 16, 0.42, y, 0.16, 0.06)]
+    found = detect_drawn_chart(shapes, W, H)
+    assert found is not None and found[4]["direction"] == "bar" and found[4]["series"] == 2
+    assert {"hl", "hlt", "l0", "r4", "m2"} <= found[1]
+
+    # a Gantt: one bar a row, shifted, over a row of months
+    gantt = [_bar(f"g{i}", x, 0.28 + i * 0.11, w, 0.05) for i, (x, w) in enumerate([(0.6, 0.3), (0.5, 0.2), (0.3, 0.12), (0.4, 0.1)])]
+    gantt += [_text(f"n{i}", "Текст", 12, 0.03, 0.28 + i * 0.11, 0.17, 0.04) for i in range(4)]
+    gantt += [_text(f"m{i}", mon, 12, 0.19 + i * 0.13, 0.75, 0.08, 0.05) for i, mon in enumerate(["Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь"])]
+    found = detect_drawn_chart(gantt, W, H)
+    assert found is not None and found[4]["direction"] == "gantt"
+
+    # a staircase of cards with headings inside is no chart, nor are equal cards on a baseline, nor bare stripes
+    stairs = []
+    for i, h in enumerate([0.3, 0.4, 0.5, 0.6]):
+        stairs += [_bar(f"s{i}", 0.05 + i * 0.23, 0.9 - h, 0.2, h, fill="EEF4FF"), _text(f"st{i}", "Заголовок", 16, 0.06 + i * 0.23, 0.92 - h, 0.18, 0.05)]
+    assert detect_drawn_chart(stairs, W, H) is None
+    equal = [_bar(f"e{i}", 0.05 + i * 0.23, 0.4, 0.2, 0.4) for i in range(4)] + [_text(f"et{i}", "12", 16, 0.05 + i * 0.23, 0.3, 0.2, 0.06) for i in range(4)]
+    assert detect_drawn_chart(equal, W, H) is None
+    stripes = [_bar(f"x{i}", 0.6 + i * 0.05, 0.9 - h, 0.03, h) for i, h in enumerate([0.2, 0.35, 0.5, 0.3])]
+    assert detect_drawn_chart(stripes, W, H) is None

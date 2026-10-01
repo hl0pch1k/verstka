@@ -18,6 +18,7 @@ from verstka.analysis.classify import classify_slide
 from verstka.analysis.colors import ColorSample, assign_color_roles, cluster_colors, collect_color_samples, dominant_saturated_hex, has_saturated_drawn, is_drawn, is_stock_theme_color
 from verstka.analysis.components import derive_components
 from verstka.analysis.gallery import write_gallery, write_thumbnails
+from verstka.analysis.drawn_chart import detect_drawn_chart
 from verstka.analysis.groups import detect_drawn_table, detect_repeat_groups
 from verstka.analysis.patterns import build_pattern, dedupe_patterns, mockup_boxes, mockup_on_layout, note_field
 from verstka.analysis.rules import harvest_rules, with_fresh_derived_rules
@@ -409,7 +410,7 @@ def analyze_template(
     for i, shapes in shapes_by_slide.items():
         lp = layout_by_slide.get(i)
         art_by_slide[i] = slide_art_boxes(shapes, layout_shapes.get(lp) if lp else None, len(layout_users.get(lp, [])) if lp else 0, chrome_by_slide[i], slide_w, slide_h)
-        table = detect_drawn_table(shapes, slide_w, slide_h, chrome_by_slide[i])
+        table = detect_drawn_table(shapes, slide_w, slide_h, chrome_by_slide[i]) or detect_drawn_chart(shapes, slide_w, slide_h, chrome_by_slide[i])
         if table is not None:
             tables_by_slide[i] = table
         groups = detect_repeat_groups(
@@ -523,6 +524,8 @@ def analyze_template(
         if tb is not None:
             pat.data_box = tb[0].to_frac(slide_w, slide_h)
             pat.data_rows = tb[2] if len(tb) > 2 else None
+            pat.data_kind = tb[3] if len(tb) > 3 else "table"
+            pat.chart_hint = tb[4] if len(tb) > 4 else None
         pat.art_layout = any(b.area >= 0.5 * slide_w * slide_h for b in art_by_slide.get(pat.source_slide, []))
         pat.note_slot, pat.note_label = note_field(pat, typography.size_for("body", 14.0))
     patterns = dedupe_patterns(patterns)

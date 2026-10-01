@@ -334,6 +334,14 @@ def _slot_signature(p: Pattern) -> tuple:
     return tuple(sorted(s.role.value for s in p.slots))
 
 
+def _same_data_area(a: Pattern, b: Pattern, tol: float) -> bool:
+    """Two samples draw the same table or chart area: both none, or the same box with a chart read the same way."""
+    if a.data_box is None or b.data_box is None:
+        return a.data_box is None and b.data_box is None
+    ha, hb = a.chart_hint or {}, b.chart_hint or {}
+    return a.data_box.close_to(b.data_box, tol) and a.data_kind == b.data_kind and ha.get("direction") == hb.get("direction")
+
+
 def dedupe_patterns(patterns: list[Pattern], bbox_tol: float = 0.02, free_tol: float = 0.10) -> list[Pattern]:
     """Drop near-identical patterns (same kind, family, role multiset, same slot geometry); keep the best quality.
 
@@ -346,6 +354,8 @@ def dedupe_patterns(patterns: list[Pattern], bbox_tol: float = 0.02, free_tol: f
         for n, k in enumerate(kept):
             if k.kind != p.kind or k.family != p.family or _slot_signature(k) != _slot_signature(p) or len(k.slots) != len(p.slots):
                 continue
+            if not _same_data_area(k, p, bbox_tol):
+                continue  # a heading over a drawn chart: columns and a Gantt are two samples, not one
             ks = sorted(k.slots, key=lambda s: (s.role.value, s.bbox.y, s.bbox.x))
             ps = sorted(p.slots, key=lambda s: (s.role.value, s.bbox.y, s.bbox.x))
             if all(a.bbox.close_to(b.bbox, bbox_tol) for a, b in zip(ks, ps)):

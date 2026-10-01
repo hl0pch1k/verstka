@@ -225,6 +225,34 @@ def render_outputs(vdir: Path, manifest: TemplateManifest, title: Optional[str],
     return paths, imgs, warnings, render_ok
 
 
+def _rematched(outline0: DeckOutline, manifest: TemplateManifest, strategy: Strategy, ws: TemplateWorkspace, taken0: dict, render: RenderResult, vdir: Path):
+    """The deck rendered once more with its samples chosen again without those that read badly on their slides
+    (`RenderResult.failed_samples`). Returns (outline, plan, render, taken) when it stands on more template slides —
+    or as many, more of them different — than the first render, else None (the first render stays)."""
+    try:
+        v_outline = outline0.model_copy(deep=True)
+        taken = {k: set(v) for k, v in taken0.items()}
+        plan = match_outline(v_outline, manifest, strategy, ws=ws, taken=taken, exclude=set(render.failed_samples))
+        first = [s.pattern_id if s.mode == "clone" else None for s in render.slides]
+        again = [s.pattern_id if s.mode == "clone" else None for s in plan.slides]
+        if again == first:
+            return None  # the same samples on the same slides: nothing to gain
+        tmp = vdir / "deck.retry.pptx"
+        r2 = render_deck(v_outline, plan, manifest, ws, tmp, skip=set(render.failed_samples))
+        better = (len(r2.clones), len(set(r2.clones))) > (len(render.clones), len(set(render.clones)))
+        if not better:
+            tmp.unlink(missing_ok=True)
+            return None
+        tmp.replace(vdir / "deck.pptx")
+        r2.pptx_path = vdir / "deck.pptx"
+        r2.failed_samples |= render.failed_samples
+        log.info("%s: samples chosen again without the %d that read badly: %d → %d template slides", strategy.name, len(render.failed_samples), len(render.clones), len(r2.clones))
+        return v_outline, plan, r2, taken
+    except Exception:  # noqa: BLE001 - the first render stands
+        log.warning("re-matching the deck's samples failed", exc_info=True)
+        return None
+
+
 def generate_variants(
     template: Path | str,
     *,
@@ -425,10 +453,19 @@ def generate_variants(
             warnings.extend(w)
             if written:
                 v_outline = _mark_written(v_outline, writer_res)
+        taken0 = {k: set(v) for k, v in taken.items()}
+        outline0 = v_outline.model_copy(deep=True)
         plan = match_outline(v_outline, manifest, strategy, ws=ws, taken=taken)
         report(f"{name}: planned {len(v_outline.slides)} slides, rendering", base + span * 0.2)
         tr = time.time()
         render = render_deck(v_outline, plan, manifest, ws, vdir / "deck.pptx", progress=lambda s, f: report(f"{name}: {s}", base + span * (0.2 + 0.4 * f)))
+        if render.failed_samples:
+            # a sample that read badly on its slide (`clone_check.content_trouble`) kept its place in the deck-level
+            # choice: its neighbours gave it up and the slide itself fell back to its first alternatives. The samples
+            # are chosen again without it and the deck rendered again — kept when it stands on more template slides
+            retry = _rematched(outline0, manifest, strategy, ws, taken0, render, vdir)
+            if retry is not None:
+                v_outline, plan, render, taken = retry
         timings["render"] = round(time.time() - tr, 2)
         warnings.extend(render.warnings)
         audit_report: Optional[AuditReport] = None
