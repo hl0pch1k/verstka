@@ -939,6 +939,17 @@ def glyph_unit(unit: Optional[str]) -> bool:
     return u in _GLYPH_UNITS or short_unit(u) in _GLYPH_UNITS
 
 
+def bare_unit_on_labels(spec: ChartSpec, outline: DeckOutline, unit: Optional[str]) -> bool:
+    """A chart with no title of its own and a short word unit (≤ 12 characters: «посещений», «клиентов», «чел.»)
+    over a few categories (≤ 6) carries its unit on its labels — «2 700 посещений» — rather than under a caption of
+    the unit alone, which reads as a stray word over the bars."""
+    u = " ".join((unit or "").split())
+    if not u or glyph_unit(u) or len(u) > 12 or spec.type in ("pie", "doughnut", "line"):
+        return False
+    series = resolve_series(spec, outline)
+    return bool(series) and len(series) == 1 and 0 < len(series[0].values) <= 6
+
+
 def unit_caption(spec: ChartSpec, outline: DeckOutline) -> Optional[str]:
     """A word unit («тыс. обращений», «чел.») for a caption placed once above the chart, so that every label is a
     plain number of one scale (a unit on one label only reads as «12 against 58 thousand»). One-glyph units (%, ₽)
@@ -1927,6 +1938,7 @@ def add_chart(
     head = spec.title or None
     head_is_title = bool(head)
     unit_in_head = False
+    _on_labels = not head and bare_unit_on_labels(spec, outline, unit_full)
     if kind not in ("pie", "doughnut") and unit_full and not glyph:
         if head:
             low = head.lower()
@@ -1935,6 +1947,8 @@ def add_chart(
             unit_in_head = True
         elif _unit_shown_above(slide, bbox, unit_full):
             unit_in_head = True
+        elif _on_labels:
+            unit_in_head = False  # (a short word unit of a few bars rides on the labels, `bare_unit_on_labels`)
         else:
             head = unit_full  # a word unit is written once, above the chart: the labels are plain numbers
             unit_in_head = True
@@ -1949,9 +1963,9 @@ def add_chart(
     else:
         decimals = _decimals(all_vals)
         fmt_unit = label_format(unit, all_vals)
-        fmt_plain = fmt_unit if glyph else label_format(None, all_vals)
+        fmt_plain = fmt_unit if glyph or _on_labels else label_format(None, all_vals)
         fmt_emph = fmt_plain if unit_in_head else fmt_unit
-        unit_plain = unit if glyph else None
+        unit_plain = unit if glyph or _on_labels else None
         unit_emph = unit_plain if unit_in_head else unit
 
     gf = slide.shapes.add_chart(_TYPE_MAP[kind], Emu(bbox.x), Emu(bbox.y), Emu(bbox.w), Emu(bbox.h), data)

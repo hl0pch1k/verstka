@@ -3920,11 +3920,11 @@ class Composer:
 
     PAIR_TREND_MIN_H = 0.28  # a pair's other plan keeps the trend chart's plot at least this share of the slide height
 
-    def _chart_caption(self, spec, named: bool = False) -> Optional[str]:
+    def _chart_caption(self, spec, named: bool = False) -> Optional[str]:  # noqa: C901
         """What stands over a chart, once: its title with the word unit («Прогноз выручки, тыс. ₽»), else the word
         unit alone (a one-glyph unit rides on the labels, a pie shows shares). A chart without a title of its own is
         named by its one series («Средний чек»): two charts side by side must say which is which."""
-        from verstka.rendering.charts import resolve_series, unit_caption
+        from verstka.rendering.charts import bare_unit_on_labels, resolve_series, unit_caption
 
         unit = unit_caption(spec, self.outline)
         title = " ".join((spec.title or "").split())
@@ -3935,13 +3935,15 @@ class Composer:
 
             series = resolve_series(spec, self.outline)
             name = " ".join((series[0].name or "").split()) if len(series) == 1 else ""
-            generic = re.fullmatch(r"(?i)(series|ряд|серия|значени[яе]|values?)\s*\d*", name or "")
+            generic = re.fullmatch(r"(?i)(series|ряд|серия|значени[яе]|values?|сумма|итого|количество|данные|показатель|amount|total|count)\s*\d*", name or "")
             # (a series named by its unit — «₽», «%» — names nothing: the unit rides on its labels)
             unit_name = bool(name) and (glyph_unit(name) or name.lower() == (spec.unit or "").strip().lower())
             if name and not generic and not unit_name and (named or not _same_words(name, self.o.headline)):
                 title = name[:1].upper() + name[1:]
         if title and unit and unit.lower() not in title.lower() and not _same_stem(unit, title):
             return f"{title.rstrip(' ,.:;')}, {unit}"
+        if not title and unit and bare_unit_on_labels(spec, self.outline, unit):
+            return None  # a lone «посещений» over the bars names nothing: the bars say «2 700 посещений» themselves
         return title or unit
 
     def _chart_block(self, box: Bbox, spec, *, prominent: bool, center: bool) -> Optional[str]:
