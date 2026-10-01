@@ -346,6 +346,55 @@ def opaque_box(part, pic: etree._Element, box: Bbox) -> Bbox:
     return Bbox(x=int(box.x + frac[0] * box.w), y=int(box.y + frac[1] * box.h), w=int(frac[2] * box.w), h=int(frac[3] * box.h))
 
 
+_ALPHA_CACHE: dict[tuple, object] = {}
+
+
+def opaque_share(part, pic: etree._Element, box: Bbox, rect: Bbox) -> float:
+    """The share of `rect` (slide EMU) the picture `pic` drawn at `box` covers with its opaque pixels (alpha over 40),
+    crop `srcRect` respected; 1.0 when the picture cannot be read (counted as solid). A round 3D render's corner over
+    a line of text covers nothing; its body does."""
+    inter = Bbox(x=max(box.x, rect.x), y=max(box.y, rect.y), w=min(box.x2, rect.x2) - max(box.x, rect.x), h=min(box.y2, rect.y2) - max(box.y, rect.y))
+    if inter.w <= 0 or inter.h <= 0 or box.w <= 0 or box.h <= 0:
+        return 0.0
+    blip = pic.find(".//" + _A + "blip")
+    rid = blip.get(_R_EMBED) if blip is not None else None
+    if not rid or part is None:
+        return 1.0
+    try:
+        img_part = part.related_part(rid)
+        src = pic.find(".//" + _A + "srcRect")
+        crop = tuple(int(src.get(k) or 0) / 100000 for k in ("l", "t", "r", "b")) if src is not None else (0.0, 0.0, 0.0, 0.0)
+        key = (_image_key(img_part), crop)
+        a = _ALPHA_CACHE.get(key)
+        if a is None:
+            import numpy as np
+            from PIL import Image
+
+            im = Image.open(io.BytesIO(img_part.blob))
+            if im.mode in ("P", "PA", "LA", "La", "RGBa") or "transparency" in im.info:
+                im = im.convert("RGBA")
+            if "A" not in im.getbands():
+                _ALPHA_CACHE[key] = False
+                return 1.0
+            iw, ih = im.size
+            l, t, r, b = crop
+            im = im.getchannel("A").crop((int(l * iw), int(t * ih), max(int((1 - r) * iw), int(l * iw) + 1), max(int((1 - b) * ih), int(t * ih) + 1)))
+            im.thumbnail((240, 240))
+            a = np.asarray(im) > 40
+            _ALPHA_CACHE[key] = a
+        if a is False:
+            return 1.0
+        hh, ww = a.shape
+        x0 = int((inter.x - box.x) / box.w * ww)
+        x1 = max(int((inter.x2 - box.x) / box.w * ww), x0 + 1)
+        y0 = int((inter.y - box.y) / box.h * hh)
+        y1 = max(int((inter.y2 - box.y) / box.h * hh), y0 + 1)
+        cut = a[y0:y1, x0:x1]
+        return float(cut.mean()) * inter.area / max(rect.area, 1) if cut.size else 0.0
+    except Exception:  # noqa: BLE001
+        return 1.0
+
+
 # ---------------------------------------------------------------------------------------------------- layers
 
 

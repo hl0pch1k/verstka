@@ -519,7 +519,77 @@ def _kinds_text(manifest: Optional[TemplateManifest]) -> str:
     out = "\n".join(f"- {k}: {d}" for k, d in lines)
     if ready:
         out += "\nReady slides of this template (each a designed slide; a slide of the deck looks best on one of them):\n" + "\n".join(f"  · {r}" for r in ready)
+    signature = signature_slides(manifest)
+    if signature:
+        out += (
+            "\nSignature slides of this template (its most distinctive designs; when the slide's own content has this shape — "
+            "this many items — aim at one and write each item within the words given; never invent or merge items for it):\n"
+            + "\n".join(f"  · {r}" for r in signature)
+        )
     return out
+
+
+def signature_slides(manifest: Optional[TemplateManifest], limit: int = 8) -> list[str]:
+    """The template's most distinctive content slides, a line each, for the designer: the form, the number of items
+    and the words each item takes — «cards ×3, each with the template's illustration (each: up to 6 words)», «process
+    ×5 drawn into the design, numbered (each: a title of up to 2 words and a line of up to 4 words)». A slide whose
+    content has that shape is written for that design (the matcher then takes it); the plain samples are left out."""
+    if manifest is None:
+        return []
+    from verstka.schemas.common import PatternKind as PK
+    from verstka.schemas.common import SlotRole as R
+
+    forms = (PK.cards, PK.process, PK.timeline, PK.stat_row, PK.big_number, PK.comparison, PK.two_column)
+    out: list[tuple[int, str]] = []
+    seen: set[str] = set()
+    for p in manifest.patterns:
+        if p.reference or p.quality < 0.5 or p.kind not in forms:
+            continue
+        if any(s.sample_text and _PHOTO_PLACE.search(s.sample_text) for s in p.slots):
+            continue
+        groups = [g for g in p.repeat_groups if len(g.member_shape_ids) >= 2]
+        g = max(groups, key=lambda g: len(g.member_shape_ids), default=None)
+        if g is None:
+            continue
+        art = bool(p.decor_assets or p.art_layout or any(s.role == R.image and s.group_id == g.id for s in p.slots))
+        if not (art or g.fixed):
+            continue
+        cell = set(g.member_shape_ids[0])
+        in_cell = [s for s in p.slots if s.shape_id in cell]
+        head = next((s for s in in_cell if s.role in (R.card_title, R.number)), None)
+        body = next((s for s in in_cell if s.role in (R.card_body, R.number_label, R.body, R.bullet_list)), None)
+        cells = [set(c) for c in g.member_shape_ids]
+
+        def words(slot) -> int:
+            # the smallest cell's box of that role: every item has to fit its own cell (a bento's small cards)
+            if slot is None:
+                return 0
+            caps = [s.capacity.max_chars for s in p.slots if s.role == slot.role and any(s.shape_id in c for c in cells) and s.capacity.max_chars]
+            return max(1, round(min(caps) / 7.5)) if caps else 0
+
+        n = len(g.member_shape_ids)
+        count = f"×{n}" if g.fixed else f"×{max(2, n - 1)}–{min(max(n, g.max_n), 6)}"
+        what = []
+        if g.fixed:
+            what.append("drawn into the design")
+        if art:
+            what.append("with the template's illustrations")
+        if any(s.role == R.number and s.shape_id in cell for s in p.slots) or (head is not None and re.fullmatch(r"0?\d", (head.sample_text or "").strip())):
+            what.append("numbered")
+        if head is not None and body is not None and head.role != R.number:
+            budget = f"a title of up to {words(head)} words and a line of up to {words(body)} words"
+        elif head is not None and head.role == R.number:
+            budget = f"a figure and a label of up to {words(body) or 3} words"
+        else:
+            budget = f"up to {words(head or body)} words"
+        line = f"{p.kind.value} {count}, " + ", ".join(what) + f" (each: {budget})"
+        key = line
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append((0 if g.fixed else 1, line))
+    out.sort(key=lambda t: t[0])
+    return [line for _, line in out[:limit]]
 
 
 _PHOTO_PLACE = re.compile(r"вставить|insert|\bqr\b|фото|photo|логотип|logo|иллюстрац|illustration", re.I)

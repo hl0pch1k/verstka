@@ -2055,7 +2055,8 @@ def _place_native_object(ctx: _SlideCtx, oslide: OutlineSlide) -> None:
         _draw_native(ctx, oslide, _below_heading(ctx, _reserve_notes_room(ctx, oslide, drawn)))
         return
     # sample charts/tables/images on the slide are replaced by the native object
-    candidates = ctx.slots(SlotRole.image)
+    # (the template's art is no place for a chart or a table: VK Tech p7's 3D spiral stays beside the slide's data)
+    candidates = [s for s in ctx.slots(SlotRole.image) if ctx.pic_kind.get(ctx.origin.get(s.shape_id, s.shape_id)) != "art"]
     frames = [ctx.slot_of[sid] for sid, el in ctx.els.items() if etree.QName(el).localname == "graphicFrame" and sid in ctx.slot_of and sid not in ctx.removed]
     candidates = list({s.shape_id: s for s in candidates + frames}.values())
     box: Optional[Bbox] = None

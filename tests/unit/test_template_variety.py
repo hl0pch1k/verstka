@@ -580,3 +580,89 @@ def test_one_text_box_in_a_cell_holds_the_items_heading_and_text():
     slide = OutlineSlide(id="s", kind=PatternKind.cards, headline="Вёрстка занимает дни", content=SlideContent(items=items))
     res = score_pattern(slide, pat, _bare_manifest(), get_strategy("structured"), None, [])
     assert "текст помещается" in res.reasons
+
+
+def test_the_number_sign_stays_with_its_number():
+    assert "№ 4" in typeset("Команда «Рекрут 2» · задача № 4 VK Tech")
+
+
+def test_a_short_last_line_covers_only_its_own_width():
+    from verstka.rendering.clone_check import ink_lines
+
+    s = _deck_with([(0.1, 0.3, 0.3, 0.3, "Сверенных чисел\nв каждой", 20)])
+    lines = ink_lines(s.shapes[0]._element, "Play")
+    assert len(lines) == 2 and lines[1].w < 0.75 * lines[0].w and lines[1].y > lines[0].y
+
+
+def test_a_round_renders_transparent_corner_covers_no_text():
+    """VK Tech p15: the label's line beside the round 3D speaker in its card — the picture's box reaches the line, its
+    painted pixels do not."""
+    from pptx import Presentation
+    from pptx.util import Emu
+
+    from verstka.rendering.layers import opaque_share
+
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    im = Image.new("RGBA", (100, 100), (0, 0, 0, 0))
+    ImageDraw.Draw(im).ellipse([20, 20, 100, 100], fill=(200, 200, 200, 255))
+    buf = io.BytesIO()
+    im.save(buf, format="PNG")
+    buf.seek(0)
+    pic = slide.shapes.add_picture(buf, Emu(1000000), Emu(1000000), Emu(1000000), Emu(1000000))
+    box = Bbox(x=1000000, y=1000000, w=1000000, h=1000000)
+    corner = Bbox(x=1000000, y=1000000, w=150000, h=150000)
+    body = Bbox(x=1600000, y=1600000, w=200000, h=200000)
+    assert opaque_share(slide.part, pic._element, box, corner) < 0.02
+    assert opaque_share(slide.part, pic._element, box, body) > 0.9
+
+
+def test_the_designer_hears_of_the_templates_signature_slides():
+    from verstka.planning.agent import signature_slides
+    from verstka.schemas.template import RepeatGroup
+
+    def cells(n, title_cap, body_cap, fixed, art):
+        slots, members = [], []
+        for i in range(n):
+            slots.append(Slot(id=f"card_title_{i}", role=SlotRole.card_title, shape_id=f"t{i}", bbox=BboxFrac(x=0.1 + 0.2 * i, y=0.3, w=0.15, h=0.05), style=SlotStyle(size_pt=14.0), capacity=Capacity(max_chars=title_cap, max_lines=1), group_id="g1"))
+            slots.append(Slot(id=f"card_body_{i}", role=SlotRole.card_body, shape_id=f"b{i}", bbox=BboxFrac(x=0.1 + 0.2 * i, y=0.4, w=0.15, h=0.1), style=SlotStyle(size_pt=10.0), capacity=Capacity(max_chars=body_cap, max_lines=2), group_id="g1"))
+            members.append([f"t{i}", f"b{i}"])
+        g = RepeatGroup(id="g1", member_shape_ids=members, min_n=n if fixed else 1, max_n=n, axis="row", cell_bbox=BboxFrac(x=0.1, y=0.3, w=0.15, h=0.2), fixed=fixed)
+        return slots, [g], (["asset1"] if art else [])
+
+    s1, g1, a1 = cells(5, 22, 27, True, True)
+    s2, g2, a2 = cells(3, 40, 120, False, False)
+    m = _bare_manifest()
+    m.patterns = [
+        Pattern(id="p29", source_slide=29, kind=PatternKind.cards, family=Family.light, slots=s1, repeat_groups=g1, decor_assets=a1),
+        Pattern(id="p14", source_slide=14, kind=PatternKind.cards, family=Family.light, slots=s2, repeat_groups=g2, decor_assets=a2),
+    ]
+    lines = signature_slides(m)
+    assert len(lines) == 1 and lines[0].startswith("cards ×5") and "a title of up to 3 words and a line of up to 4 words" in lines[0]
+
+
+def test_filled_placeholders_of_the_layout_left_empty_are_ghost_cards():
+    """LCT p23: the layout's body placeholders carry a fill — a viewer that draws them shows four empty cards beside
+    the slide's text when the slide writes nothing in them."""
+    from lxml import etree
+    from pptx import Presentation
+
+    from verstka.analysis.xmlns import q
+    from verstka.rendering.clone_check import _layout_plates_left_empty
+    from verstka.schemas.template import SlideSize, TemplateManifest, Tokens
+
+    prs = Presentation()
+    layout = prs.slide_layouts[3]  # two contents: two body placeholders under the title
+    for sp in layout._element.cSld.find(q("p:spTree")).iter(q("p:sp")):
+        ph = sp.find(".//" + q("p:ph"))
+        if ph is not None and ph.get("idx") in ("1", "2"):
+            sppr = sp.find(q("p:spPr"))
+            fill = etree.SubElement(sppr, q("a:solidFill"))
+            etree.SubElement(fill, q("a:srgbClr")).set("val", "F4F0FF")
+    slide = prs.slides.add_slide(layout)
+    m = TemplateManifest(template_id="t", source_file="t.pptx", slide_size=SlideSize(w=prs.slide_width, h=prs.slide_height), tokens=Tokens(), patterns=[], n_slides=1)
+    assert _layout_plates_left_empty(slide, m) == 2
+    for shp in slide.placeholders:
+        if shp.placeholder_format.idx in (1, 2):
+            shp.text_frame.text = "Текст карточки"
+    assert _layout_plates_left_empty(slide, m) == 0

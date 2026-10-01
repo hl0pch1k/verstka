@@ -504,7 +504,9 @@ def score_pattern(
     data_room: Optional[float] = None
     if slide_kind in (PatternKind.chart, PatternKind.table) or slide.content.chart is not None or slide.content.table is not None:
         # the data object needs a free area: a sample chart/table (cleared by the renderer), a picture or a big text box
-        room = max((s.bbox.area for s in pattern.slots if s.role in (SlotRole.image, SlotRole.body, SlotRole.bullet_list)), default=0.0)
+        # — never the template's art (VK Tech p7's 3D spiral stays: a chart does not take its place)
+        art_pics = {p.shape_id for p in pics if p.kind == "art"}
+        room = max((s.bbox.area for s in pattern.slots if s.role in (SlotRole.image, SlotRole.body, SlotRole.bullet_list) and s.shape_id not in art_pics), default=0.0)
         if pattern.kind in (PatternKind.chart, PatternKind.table):
             room = max(room, 0.35)
         if pattern.data_box is not None:

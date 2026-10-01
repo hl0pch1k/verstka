@@ -67,6 +67,56 @@ def readable_floor(manifest: TemplateManifest) -> float:
     return max(body * 0.85, 0.024 * hpt)
 
 
+def ink_lines(sp, default_family: Optional[str]) -> list:
+    """Where each line of a box's text stands (Bboxes in EMU, by its anchor and its paragraph's alignment): a short
+    second line under a long first one covers only its own width."""
+    from verstka.rendering.deck import element_bbox
+    from verstka.rendering.fonts import text_width_pt, wrap_lines
+    from verstka.schemas.common import Bbox
+
+    b = element_bbox(sp)
+    body = sp.find(q("p:txBody"))
+    if not b or b[2] <= 0 or b[3] <= 0 or body is None:
+        return []
+    bp = body.find(q("a:bodyPr"))
+
+    def ins(name: str, default: int) -> int:
+        try:
+            return int(bp.get(name)) if bp is not None and bp.get(name) is not None else default
+        except ValueError:
+            return default
+
+    l, tp, r, bt = ins("lIns", 91440), ins("tIns", 45720), ins("rIns", 91440), ins("bIns", 45720)
+    width = max((b[2] - l - r) / EMU_PER_PT, 1.0)
+    rows = []  # (width pt, height pt, align)
+    for p in body.findall(q("a:p")):
+        text = "".join(x.text or "" for x in p.iter(q("a:t")))
+        rpr = next((x for x in p.iter(q("a:rPr")) if x.get("sz")), None)
+        size = int(rpr.get("sz")) / 100 if rpr is not None else 12.0
+        lat = rpr.find(q("a:latin")) if rpr is not None else None
+        fam = lat.get("typeface") if lat is not None and lat.get("typeface") else default_family
+        bold = bool(rpr is not None and rpr.get("b") == "1")
+        pct = p.find(q("a:pPr") + "/" + q("a:lnSpc") + "/" + q("a:spcPct"))
+        ls = 1.2 * (int(pct.get("val")) / 100000 if pct is not None and pct.get("val") else 1.0)
+        ppr = p.find(q("a:pPr"))
+        algn = ppr.get("algn") if ppr is not None and ppr.get("algn") else "l"
+        for line in (wrap_lines(text, fam, size, bold, width) if text.strip() else [""]):
+            rows.append((text_width_pt(line, fam, size, bold) if line.strip() else 0.0, size * ls, algn))
+    total = sum(h for _, h, _ in rows) * EMU_PER_PT
+    anchor = (bp.get("anchor") if bp is not None else None) or "t"
+    inner_h = b[3] - tp - bt
+    y = b[1] + tp + (max(inner_h - total, 0) // 2 if anchor == "ctr" else (max(inner_h - total, 0) if anchor == "b" else 0))
+    out = []
+    for w_pt, h_pt, algn in rows:
+        w = min(int(w_pt * EMU_PER_PT), b[2] - l - r)
+        h = int(h_pt * EMU_PER_PT)
+        if w > 0:
+            x = b[0] + l + ((b[2] - l - r - w) // 2 if algn == "ctr" else (b[2] - l - r - w if algn == "r" else 0))
+            out.append(Bbox(x=int(x), y=int(y), w=w, h=h))
+        y += h
+    return out
+
+
 def ink_box(sp, default_family: Optional[str]):
     """Where the text of a box really stands (its lines wrapped at its own size, by its anchor), in EMU; None when it
     has no text or no geometry."""
@@ -299,6 +349,45 @@ def sample_hole(slide, pattern: Pattern, manifest: TemplateManifest) -> Optional
         return None
 
 
+def _layout_plates_left_empty(slide, manifest: TemplateManifest) -> int:
+    """How many plates the slide's layout draws as filled placeholders (LCT p23's layout: four faint cards that are
+    body placeholders of the layout with a fill of their own) in the content area while the slide writes nothing in
+    them — a viewer that draws a layout's placeholders (LibreOffice, the previews and the PDF) shows them as empty
+    cards beside the slide's text. 0 when the layout has fewer than two such plates or the slide writes in them."""
+    try:
+        layout = slide.slide_layout
+    except Exception:  # noqa: BLE001
+        return 0
+    W, H = manifest.slide_size.w, manifest.slide_size.h
+    texts = {}
+    for sp in slide._element.cSld.find(q("p:spTree")).iter(q("p:sp")):
+        ph = sp.find(".//" + q("p:ph"))
+        if ph is not None and ph.get("idx"):
+            texts[ph.get("idx")] = bool(_shape_text(sp).strip())
+    plates = []
+    for sp in layout._element.cSld.find(q("p:spTree")).iter(q("p:sp")):
+        ph = sp.find(".//" + q("p:ph"))
+        if ph is None or (ph.get("type") or "body") in ("title", "ctrTitle", "dt", "ftr", "sldNum", "pic"):
+            continue
+        sppr = sp.find(q("p:spPr"))
+        if sppr is None or not any(sppr.find(q(t)) is not None for t in ("a:solidFill", "a:gradFill", "a:blipFill", "a:pattFill")):
+            continue
+        xf = sppr.find(q("a:xfrm"))
+        off = xf.find(q("a:off")) if xf is not None else None
+        ext = xf.find(q("a:ext")) if xf is not None else None
+        if off is None or ext is None:
+            continue
+        y = int(off.get("y") or 0) / H
+        area = int(ext.get("cx") or 0) * int(ext.get("cy") or 0) / float(W * H)
+        if y < 0.12 or area < 0.02:
+            continue
+        plates.append(ph.get("idx"))
+    if len(plates) < 2:
+        return 0
+    empty = [i for i in plates if not texts.get(i)]
+    return len(empty) if len(empty) >= 2 else 0
+
+
 def content_trouble(slide, oslide: OutlineSlide, pattern: Pattern, manifest: TemplateManifest, warnings: list[str]) -> Optional[str]:
     """Why a content slide set on `pattern` must not be shown, or None."""
     for w in warnings:
@@ -316,6 +405,9 @@ def content_trouble(slide, oslide: OutlineSlide, pattern: Pattern, manifest: Tem
 
     if c.chart is not None and c.table is not None:
         return "a chart and a table on one slide"
+    ghosts = _layout_plates_left_empty(slide, manifest)
+    if ghosts:
+        return f"{ghosts} plates of the layout's placeholders stay empty on the slide"
     H = manifest.slide_size.h
     hpt = H / EMU_PER_PT
     typo = manifest.tokens.typography
@@ -345,6 +437,16 @@ def content_trouble(slide, oslide: OutlineSlide, pattern: Pattern, manifest: Tem
                 continue
             for b, el in front:
                 if el.getparent() is tree and order.get(el, -1) > order.get(sp, 10**6) and ib.intersection(b) > 0.005 * ib.area:
+                    # (by its painted pixels: a round render's transparent corner over a line covers nothing)
+                    from verstka.rendering.deck import element_bbox as _eb
+                    from verstka.rendering.layers import opaque_share
+                    from verstka.schemas.common import Bbox as _BB
+
+                    eb = _eb(el)
+                    if eb:
+                        ebox = _BB(x=eb[0], y=eb[1], w=eb[2], h=eb[3])
+                        if all(opaque_share(slide.part, el, ebox, ln) <= 0.02 for ln in ink_lines(sp, fam_f)):
+                            continue
                     return f"the template's art stands over the text «{_shape_text(sp).strip()[:24]}»"
     if arts:
         fam = manifest.tokens.typography.primary_family
@@ -358,9 +460,12 @@ def content_trouble(slide, oslide: OutlineSlide, pattern: Pattern, manifest: Tem
                 continue
             own = designed.get(sid)
             own_ink = (slide.__dict__.get("_verstka_designed_ink") or {}).get(sid)
+            lines = ink_lines(sp, fam) or [ib]
+            lines_area = sum(ln.area for ln in lines) or ib.area
             for a in arts:
-                ov = ib.intersection(a)
-                if ov <= 0.03 * ib.area:
+                # (line by line: a short last line under a long first one leaves the corner beside it free)
+                ov = sum(ln.intersection(a) for ln in lines)
+                if ov <= 0.03 * lines_area:
                     continue
                 if own_ink is not None:
                     # the sample sets its own words over the art: ours may cover as much of it as they did, a little more

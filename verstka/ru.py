@@ -167,6 +167,8 @@ def typeset(text: str) -> str:
     t = _UNIT_RE.sub(NBSP, t)
     t = _NUM_NOUN_RE.sub(lambda m: m.group(1) + NBSP, t)
     t = t.replace(" ₽", NBSP + "₽")
+    # «№ 4», «§ 2»: the sign stays with its number («задача №| 4 VK Tech» broke a cover's subtitle)
+    t = __import__("re").sub(r"([№§])[ ](?=\d)", lambda m: m.group(1) + NBSP, t)
     # «п. п.», «т. е.», «т. д.»: an abbreviation of two letters is one word on the slide («на 2 п.| п.» broke a headline)
     t = _ABBR2_RE.sub(lambda m: m.group(1) + NBSP + m.group(2), t)
     t = _ACRONYM_RE.sub(lambda m: m.group(1) + NBSP, t)
