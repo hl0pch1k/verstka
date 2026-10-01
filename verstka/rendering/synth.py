@@ -268,7 +268,7 @@ def _cover_art_ids(els: dict, title_box: Optional[tuple], W: int, H: int) -> set
 def _slide_on_canvas(builder: DeckBuilder, canvas: Pattern, W: int, H: int, keep_extra: Optional[set[str]] = None, keep_art: bool = False, manifest: Optional[TemplateManifest] = None):
     """Clone the canvas sample and strip it to background + chrome + the title slot (+ the art to keep; `keep_art`: a
     cover keeps its own photos and illustrations clear of the title). Returns (slide, title shape, heading ground)."""
-    from verstka.analysis.shapes import looks_like_sample_value, template_names
+    from verstka.analysis.shapes import has_live_field, looks_like_sample_value, template_names
 
     names = template_names(manifest) if manifest is not None else ()
     slide = builder.clone_slide(canvas.source_slide)
@@ -276,7 +276,7 @@ def _slide_on_canvas(builder: DeckBuilder, canvas: Pattern, W: int, H: int, keep
     title = _top_title(canvas)
     # chrome that is the template's sample copy («DEMO SLIDE», «Title Text Demo») or a sample value of its header or
     # footer («JOHN DOE», «NEW YORK», «2023», «SLIDESCARNIVAL.COM») is not kept on a composed slide
-    chrome = {sid for sid in canvas.chrome_shape_ids if not (sid in els and looks_like_sample_value("".join(t.text or "" for t in els[sid].iter(q("a:t"))), names))}
+    chrome = {sid for sid in canvas.chrome_shape_ids if not (sid in els and not has_live_field(els[sid]) and looks_like_sample_value("".join(t.text or "" for t in els[sid].iter(q("a:t"))), names))}
     keep = chrome | ({title.shape_id} if title else set()) | set(keep_extra or ())
     # the label the heading is printed on (a pill) is part of the heading's style: its colour was chosen for it
     tb = element_bbox(els[title.shape_id]) if title and title.shape_id in els else None

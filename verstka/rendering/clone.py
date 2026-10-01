@@ -14,7 +14,7 @@ from lxml import etree
 from pptx.slide import Slide
 
 from verstka.analysis.patterns import container_inset
-from verstka.analysis.shapes import looks_like_placeholder, looks_like_sample_value, template_names
+from verstka.analysis.shapes import has_live_field, looks_like_placeholder, looks_like_sample_value, template_names
 from verstka.analysis.xmlns import q
 from verstka.ingest.workspace import TemplateWorkspace
 from verstka.matching.scorer import awkward_breaks, balanced_lines, bind_short_words, bookend_max_lines, cover_goal, display_fit, display_lines, is_placeholder_text, same_words, split_display_title
@@ -4880,7 +4880,7 @@ def render_clone(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
         if el is None or el.getparent() is None or etree.QName(el).localname != "sp":
             continue
         txt = shape_text(el)
-        if txt.strip() and looks_like_sample_value(txt, template_names(manifest)):
+        if txt.strip() and not has_live_field(el) and looks_like_sample_value(txt, template_names(manifest)):
             remove_element(el)
             ctx.removed.add(sid)
     if _is_bookend(oslide) and ctx.slots(SlotRole.title):

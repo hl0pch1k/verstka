@@ -766,6 +766,18 @@ def looks_like_sample_value(text: str, template_names: tuple = ()) -> bool:
     return False
 
 
+def has_live_field(el) -> bool:
+    """The text is a field PowerPoint fills itself — today's date (`datetime…`) or the slide number: never a sample
+    value of the template, it shows the deck's own date and page (LibreOffice Grey Elegant's cover date)."""
+    if el is None:
+        return False
+    for f in el.iter("{http://schemas.openxmlformats.org/drawingml/2006/main}fld"):
+        t = (f.get("type") or "").lower()
+        if t.startswith("datetime") or t == "slidenum":
+            return True
+    return False
+
+
 def template_names(manifest) -> tuple:
     """The titles the template's own cover samples carry (its name as it presents itself)."""
     out = []
