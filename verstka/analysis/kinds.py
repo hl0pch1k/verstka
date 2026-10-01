@@ -7,6 +7,7 @@ from collections import Counter
 from typing import Optional
 
 from verstka.analysis.groups import group_membership
+from verstka.analysis.pictures import _CHART_WORDS
 from verstka.analysis.roles import is_numeric_text
 from verstka.analysis.shapes import ShapeInfo
 from verstka.schemas.common import PatternKind, ShapeKind, SlotRole
@@ -54,10 +55,17 @@ def heuristic_kind(
         return PatternKind.chart, 0.95
     if any(f.frame_kind == "diagram" for f in frames):
         return PatternKind.process, 0.6
+    # a picture of a chart under a heading that names it (VK Education: «Пример оформления графика», «Гистограмма и
+    # диаграмма с областями» — PNG charts with a legend of dots): a chart sample, the native chart takes its place
+    big_pics = [s for s in shapes if roles.get(s.id) == SlotRole.image and s.bbox.area / slide_area >= 0.08]
+    if _CHART_WORDS.search(title_text) and 1 <= len(big_pics) <= 2 and sum(s.bbox.area for s in big_pics) / slide_area >= 0.25:
+        return PatternKind.chart, 0.8
 
     n_numbers = role_counts.get(SlotRole.number, 0)
     n_cards = max((len(g.member_shape_ids) for g in groups), default=0)
-    biggest_group = max(groups, key=lambda g: len(g.member_shape_ids), default=None)
+    # (of two groups of one size, the one with words: a column of icon chips beside its column of texts is the
+    # texts' companion — WorkSpace p3 read as free-form for its chips)
+    biggest_group = max(groups, key=lambda g: (len(g.member_shape_ids), sum(1 for cell in g.member_shape_ids if any(by_id.get(i) and by_id[i].has_text for i in cell))), default=None)
     n_content = len(content)
 
     if _THANKS_RE.search(title_text) and n_content <= 8:

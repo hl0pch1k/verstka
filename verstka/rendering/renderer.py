@@ -140,7 +140,7 @@ class _CloneRedo(RuntimeError):
 
 
 _BOOKEND_VALUES = ("title", "section", "thanks")
-ALT_MAX = 3  # template samples tried for a content slide before it is composed
+ALT_MAX = 4  # template samples tried for a content slide before it is composed
 
 
 def _render_content_clone(builder: DeckBuilder, ps: LayoutSlide, oslide, patterns: dict, manifest: TemplateManifest, ws: TemplateWorkspace, outline: DeckOutline, used: dict, before, failed: Optional[set] = None, skip: Optional[set] = None) -> tuple:

@@ -221,7 +221,7 @@ def match_outline(outline: DeckOutline, manifest: TemplateManifest, strategy: St
                     fit=res.fit,
                     score=res.score,
                     reasons=[f"слайд {p.source_slide} шаблона"] + res.reasons + note,
-                    alternatives=alts[:3],
+                    alternatives=alts[:5],
                 )
                 if taken is not None:
                     taken.setdefault(e["key"], set()).add(p.id)

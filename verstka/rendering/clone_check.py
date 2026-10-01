@@ -421,6 +421,9 @@ def content_trouble(slide, oslide: OutlineSlide, pattern: Pattern, manifest: Tem
             cards.append(_Bbox(x=b[0], y=b[1], w=b[2], h=b[3]))
     if cards:
         fam_c = manifest.tokens.typography.primary_family
+        W = manifest.slide_size.w
+        from verstka.rendering.textfill import has_visible_style as _boxed
+
         for sp in tree.iter(q("p:sp")):
             nv = sp.find(".//" + q("p:cNvPr"))
             if nv is not None and (nv.get("id") in chrome or nv.get("id") in native):
@@ -435,6 +438,21 @@ def content_trouble(slide, oslide: OutlineSlide, pattern: Pattern, manifest: Tem
                 card = min(home, key=lambda c: c.area)
                 if ib.y + ib.h > card.y2 + 0.01 * H:
                     return f"text «{_shape_text(sp).strip()[:24]}» runs out of its card"
+            # its frame running past the right edge of the label or card its first line starts on (a two-line heading
+            # set over a pill widened short of it: LCT p11) — the audit's own measure (`text_outside_card`)
+            b_sp = _ebox(sp)
+            if not b_sp or _boxed(sp):
+                continue  # a text on its own plate is its own card
+            occ = _Bbox(x=b_sp[0], y=ib.y, w=b_sp[2], h=ib.h)
+            x0, y0 = occ.x + min(occ.w // 20, int(0.01 * W)), occ.y + min(occ.h // 20, int(0.01 * H))
+            hosts = [c for c in cards if c.x <= x0 <= c.x2 and c.y <= y0 <= c.y2 and c.area > 0.3 * occ.area]
+            if hosts:
+                host = min(hosts, key=lambda c: c.area)
+                sid0 = (slide.__dict__.get("_verstka_origin") or {}).get(nv.get("id") if nv is not None else "", nv.get("id") if nv is not None else "")
+                own = next((x.bbox for x in pattern.slots if x.shape_id == sid0), None)
+                as_designed = own is not None and abs(own.x2 * W - occ.x2) <= 0.005 * W
+                if occ.x2 - host.x2 > 0.015 * W and not as_designed:
+                    return f"text «{_shape_text(sp).strip()[:24]}» runs past the right edge of its card"
     # a hole where the sample had its content: cells, a band, a card or a picture taken off and nothing in their
     # place (WorkSpace p15 without its note band, LCT p20 without its big card) — the composer sets such content better
     hole0 = slide.__dict__.get("_verstka_hole0")

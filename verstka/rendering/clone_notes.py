@@ -223,9 +223,11 @@ def place_notes(builder, slide, oslide: OutlineSlide, outline: DeckOutline, mani
             if free[1] - free[0] < 0.4 * W:
                 return "the template's art leaves no room for the conclusion"
             x, width = free[0], free[1] - free[0]
-            p2 = comp._takeaway_plan(take, width, figure=False)
-            if p2["h"] > room_bottom - y:
+            # narrower, the strip may take another line: it rises into the room under the content, at the deck's size
+            p2 = comp._takeaway_plan(take, width, figure=False, sizes=(deck_size,))
+            if p2.get("lines", 1) > 3 or p2["h"] > room_bottom - (content_bottom + gap):
                 return "no room for the conclusion beside the template's art"
+            y = room_bottom - p2["h"] if aside is None else min(y, room_bottom - p2["h"])
             plan = p2
         _cut_rules(slide, Bbox(x=x, y=y, w=width, h=plan["h"]), int(0.02 * H), W, H)
         if plan["strip"]:
