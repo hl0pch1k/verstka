@@ -72,8 +72,9 @@ function useEntrance(): { quiet: boolean; title: boolean; names: boolean } {
 
 const slideUrl = (gid: string, variant: string, n: number) => `/api/generations/${encodeURIComponent(gid)}/${encodeURIComponent(variant)}/slides/slide-${String(n).padStart(3, "0")}.jpg`;
 
-/** The variant's rendered previews, once the build has rendered them (around 86 %): the first slide is probed every 3 s
- *  until it loads, then the rest are fetched; a slide that is not there yet is tried again with the next probe. */
+/** The variant's rendered previews, once the build has rendered them (the export, from 86 %): the first slide is probed
+ *  every 3 s until it loads (a miss or two while LibreOffice works is expected), then the rest are fetched; a slide that
+ *  is not there yet is tried again with the next probe. */
 function useSlidePreviews(gid: string | null | undefined, variant: string, count: number, enabled: boolean): Record<number, string> {
   const [found, setFound] = useState<Record<string, string>>({});
   const foundRef = useRef(found);
@@ -204,7 +205,8 @@ export function BuildScreen({ job }: { job: ActiveJob }) {
   const focus = lineSlide ?? lastSketched;
   const sketch: Sketch | null = (focus ? rail[focus - 1]?.sketch : null) ?? null;
   const mode = !sketch || phase === "writer" || phase === "analyst" || phase === "architect" ? "read" : phase === "check" ? "check" : "sketch";
-  const previews = useSlidePreviews(job.generation, shown, rail.length, job.progress >= 0.86 || phase === "check" || exporting);
+  // the previews come with the export (LibreOffice renders every deck at once, from 86 %): asked for from then on only
+  const previews = useSlidePreviews(job.generation, shown, rail.length, job.progress >= 0.86 || exporting);
 
   const chips = useMemo(() => {
     const out: Record<string, ChipState> = {};
