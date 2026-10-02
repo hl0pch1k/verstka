@@ -448,10 +448,12 @@ interface Props {
   /** A new image is decoded and starts to show (the working layer over the slide can leave now). */
   onReady?(src: string): void;
   frameRef?: RefObject<HTMLDivElement>;
+  /** Extra classes of the slide's frame (its view-transition name: the build's stage turns into it). */
+  frameClassName?: string;
 }
 
 /** The well of the stage: takes every pixel the stage leaves and fits the slide into it (container query units). */
-export function VariantsSlidePreview({ src, slide, headline, aspect, onAspect, onBox, onZoom, dir = 0, mode = "turn", remarks, showRemarks, activeIds, onActive, onPick, ping, fixing, fixingIds, resolved, onReady, frameRef: frameRefProp }: Props) {
+export function VariantsSlidePreview({ src, slide, headline, aspect, onAspect, onBox, onZoom, dir = 0, mode = "turn", remarks, showRemarks, activeIds, onActive, onPick, ping, fixing, fixingIds, resolved, onReady, frameRef: frameRefProp, frameClassName }: Props) {
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
   const [shownSrc, setShownSrc] = useState<string | null>(null);
   const failed = !src || failedSrc === src;
@@ -519,6 +521,7 @@ export function VariantsSlidePreview({ src, slide, headline, aspect, onAspect, o
           "relative overflow-hidden rounded-xl bg-white shadow-[0_1px_3px_rgba(0,16,61,0.08)] ring-1 transition-[box-shadow] duration-300",
           fixing ? "ring-2 ring-accent-300" : "ring-zinc-900/[0.08]",
           !failed && "cursor-zoom-in",
+          frameClassName,
         )}
         style={{ aspectRatio: String(aspect), width: `min(100cqw, calc(100cqh * ${aspect.toFixed(4)}))` }}
       >

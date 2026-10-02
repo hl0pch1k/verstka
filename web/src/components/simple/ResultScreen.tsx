@@ -28,7 +28,7 @@ import { AgentCard } from "./AgentPanel";
 import { useRetryIn } from "./ModelStatus";
 import { RemarksPanel, useCheckTitles } from "./RemarksPanel";
 import { SlideLightbox } from "./SlideLightbox";
-import { SlideStrip } from "./SlideStrip";
+import { SlideRail } from "./SlideRail";
 import { useSlideFix, type FixRun } from "./useSlideFix";
 import { WriterTextSheet } from "./WriterText";
 
@@ -43,9 +43,9 @@ const ASIDE_STAGGER = "[&>*:not(:first-child)]:animate-rise [&>*:nth-child(2)]:[
 /** The cards that already rose in under the leaving remarks panel take its place: their rise and fades finish at once
  *  for a moment (a finished animation never replays when the override goes). */
 const CARDS_SETTLE = "[&>*]:![animation-duration:0s] [&>*]:![animation-delay:0s] [&_.animate-fade]:![animation-duration:0s]";
-/** The stage around the well: p-4 twice, the 40px header, the 72px strip and two 12px gaps. */
-const STAGE_CHROME = 168;
-/** The same inside the stage's padding (the stage's content box: the header, the strip and the two gaps). */
+/** The stage around the well: p-4 twice, the 40px header and the 12px gap. */
+const STAGE_CHROME = 84;
+/** The same inside the stage's padding (the stage's content box: the header and the gap). */
 const STAGE_INNER = STAGE_CHROME - 32;
 /** The aside column and the gap before it. */
 const ASIDE_W = 288 + 16;
@@ -276,8 +276,6 @@ function Deck({ generation }: { generation: Generation }) {
   const [showIssues, setShowIssues] = useState(() => storage.get(KEY_ISSUES) === "1");
   const [naturalAspect, setNaturalAspect] = useState<number | null>(null);
   const [zoom, setZoom] = useState(false);
-  // the slide frame and the well it sits in: the thumbnails line up with the frame, and a width-bound slide caps the stage
-  const [box, setBox] = useState({ frame: 0, well: 0 });
   const templateLoaded = !!manifest && manifest.template_id === generation.template_id;
   const aspect = naturalAspect ?? (templateLoaded && manifest ? manifest.slide_size.w / manifest.slide_size.h : 16 / 9);
 
@@ -697,16 +695,17 @@ function Deck({ generation }: { generation: Generation }) {
   // the helper or the remarks column toggles, and the slide would jump a second time in the middle of its glide. Not
   // while the helper and the remarks workspace are both open: the list gets the column's full height (it is not cut
   // while the page has room below), and the stage keeps its height through both toggles (only the slide glides)
-  const capH = empty ? undefined : `calc((100cqw - ${asideInFlow ? ASIDE_W : 0}px - 32px) / ${aspect.toFixed(4)} + ${STAGE_CHROME}px)`;
+  // (the rail on the left is the grid's `--rail` wide, index.css, plus its 16px gap)
+  const capH = empty ? undefined : `calc((100cqw - var(--rail) - 16px - ${asideInFlow ? ASIDE_W : 0}px - 32px) / ${aspect.toFixed(4)} + ${STAGE_CHROME}px)`;
   // the column that slides back under the helper keeps the height it had (the grid may take the cap in that reflow)
   const tuckH = useRef<number | null>(null);
   if (!tucking) tuckH.current = null;
   else if (tuckH.current === null) tuckH.current = aside.current?.offsetHeight || null;
 
   // the helper docks or the aside comes and goes: the page reflows once, the slide glides between its two sizes (a
-  // translate + uniform scale, 300ms) and the thumbnails re-flow under a short fade instead of jumping
+  // translate + uniform scale, 300ms) and the rail, which narrows or widens with the page, re-flows under a short fade
   const frameRef = useRef<HTMLDivElement>(null);
-  const stripRef = useRef<HTMLDivElement>(null);
+  const railRef = useRef<HTMLElement>(null);
   const layoutKey = `${agentOpen ? 1 : 0}${asideInFlow ? 1 : 0}`;
   useFlip(frameRef, layoutKey, { scale: true });
   // the header follows the slide's edges: its two ends glide with it
@@ -735,7 +734,7 @@ function Deck({ generation }: { generation: Generation }) {
       return;
     }
     if (prefersReducedMotion()) return;
-    stripRef.current?.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, delay: 100, easing: EASE.inOut, fill: "backwards" });
+    railRef.current?.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, delay: 100, easing: EASE.inOut, fill: "backwards" });
     // the stage card stops clipping while the slide and the header glide from their old boxes: a slide that shrinks
     // into a narrower card is never cropped by it (it keeps its own rounded ring). The page's scroll column too, while
     // it has nothing to scroll (the deck fits the window): the column that rides in with the docking helper is never
@@ -832,7 +831,7 @@ function Deck({ generation }: { generation: Generation }) {
               <LinkButton variant="white" size="lg" icon={FileText} href={pdf} download={`${fileBase}.pdf`}>PDF</LinkButton>
             ))}
           {pptx && (
-            <LinkButton variant="primary" size="lg" icon={Download} href={pptx} download={`${fileBase}.pptx`} title={`Вариант ${variantIdx} · ${variantName}`}>
+            <LinkButton variant="brand" size="lg" icon={Download} href={pptx} download={`${fileBase}.pptx`} title={`Вариант ${variantIdx} · ${variantName}`}>
               Скачать PowerPoint
             </LinkButton>
           )}
@@ -874,7 +873,25 @@ function Deck({ generation }: { generation: Generation }) {
         </div>
       </Collapse>
 
-      <div className={cn("relative grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)] gap-4", asideInFlow ? "grid-cols-[minmax(0,1fr)_288px]" : "grid-cols-1")} style={{ maxHeight: remarksOn && agentOpen ? undefined : capH }}>
+      <div className={cn("deck-grid relative grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)] gap-4", !asideInFlow && "no-aside")} style={{ maxHeight: remarksOn && agentOpen ? undefined : capH }}>
+        {/* vt-rail: the build's rail of sketches turns into these thumbnails */}
+        {empty ? (
+          <div aria-hidden className="vt-rail rounded-2xl bg-white shadow-card" />
+        ) : (
+          <SlideRail
+            railRef={railRef}
+            className="vt-rail animate-fade"
+            variant={variant}
+            rev={rev}
+            total={total}
+            selected={selectedSlide}
+            aspect={aspect}
+            issueMap={issueMap}
+            showRemarks={remarksOn}
+            fixingSlide={run && runBusy && run.strategy === variant.strategy ? run.slide : null}
+            onSelect={setSelectedSlide}
+          />
+        )}
         {/* overflow-hidden at rest; while the slide glides between two sizes the card lets it show in full (above) */}
         <section ref={stageRef} aria-label="Просмотр слайдов" className="flex min-h-0 min-w-0 animate-fade flex-col gap-3 overflow-hidden rounded-2xl bg-white p-4 shadow-card" style={{ containerType: "size" }}>
           <div ref={header} className="mx-auto flex h-10 w-full shrink-0 items-center gap-2" style={{ maxWidth: headerW }}>
@@ -909,7 +926,6 @@ function Deck({ generation }: { generation: Generation }) {
                 headline={headline}
                 aspect={aspect}
                 onAspect={setNaturalAspect}
-                onBox={(frame, well) => setBox((b) => (b.frame === frame && b.well === well ? b : { frame, well }))}
                 onZoom={() => setZoom(true)}
                 dir={slideDir}
                 mode={slideMode}
@@ -927,21 +943,8 @@ function Deck({ generation }: { generation: Generation }) {
                   revealIfNew();
                 }}
                 frameRef={frameRef}
+                frameClassName="vt-stage"
               />
-              <div ref={stripRef} className="flex shrink-0 flex-col">
-                <SlideStrip
-                  variant={variant}
-                  rev={rev}
-                  total={total}
-                  selected={selectedSlide}
-                  aspect={aspect}
-                  frameWidth={box.frame}
-                  issueMap={issueMap}
-                  showRemarks={remarksOn}
-                  fixingSlide={run && runBusy && run.strategy === variant.strategy ? run.slide : null}
-                  onSelect={setSelectedSlide}
-                />
-              </div>
               <SlideLightbox open={zoom} src={src} slide={selectedSlide} total={total} headline={headline} aspect={aspect} remarks={remarks} showRemarks={remarksOn} onSelect={setSelectedSlide} onClose={() => setZoom(false)} />
             </>
           )}
@@ -1019,14 +1022,16 @@ function DeckSkeleton() {
           <div className="skeleton h-12 w-56 rounded-xl" />
         </div>
       </div>
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_288px] grid-rows-[minmax(0,1fr)] gap-4">
+      <div className="deck-grid grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)] gap-4">
+        <div className="flex min-h-0 flex-col gap-3 overflow-hidden rounded-2xl bg-white p-3 shadow-card">
+          {Array.from({ length: 6 }, (_, i) => <div key={i} className="skeleton aspect-video w-full shrink-0 rounded-lg" />)}
+        </div>
         <div className="flex min-h-0 flex-col gap-3 rounded-2xl bg-white p-4 shadow-card">
           <div className="flex h-10 shrink-0 items-center justify-between">
             <div className="skeleton h-10 w-[400px] rounded-xl" />
             <div className="skeleton h-10 w-40 rounded-xl" />
           </div>
           <div className="skeleton min-h-0 flex-1 rounded-xl" />
-          <div className="skeleton h-[72px] shrink-0 rounded-lg" />
         </div>
         <div className="flex min-h-0 flex-col gap-3">
           <div className="skeleton h-[76px] shrink-0 rounded-2xl" />

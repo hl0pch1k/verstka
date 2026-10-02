@@ -86,6 +86,14 @@ h1, h2, h3 {
   box-decoration-break: clone;
 }
 
+/* the deck: the rail of thumbnails, the stage and (unless it is tucked under the helper) the aside. A narrow page (the
+   helper docked) narrows the rail, so the slide keeps its room; `--rail` also caps the workspace's height */
+.deck-grid { --rail: 152px; grid-template-columns: var(--rail) minmax(0, 1fr) 288px; }
+.deck-grid.no-aside { grid-template-columns: var(--rail) minmax(0, 1fr); }
+@container (max-width: 1099px) {
+  .deck-grid { --rail: 104px; }
+}
+
 /* the build page: three columns (rail, stage, the agent's log); a narrow page (the helper docked) drops the log, the
    stage keeps its size */
 .build-root { container: build / inline-size; }
