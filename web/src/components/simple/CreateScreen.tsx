@@ -538,8 +538,9 @@ export function CreateScreen() {
   );
 
   return (
-    <form onSubmit={(e) => void onSubmit(e)} onFocus={keepClearOfBar} noValidate className="px-8 pb-28 pt-12 [@media(max-height:760px)]:pt-7">
-      <div ref={pageRef} className="mx-auto max-w-[1120px]">
+    <form onSubmit={(e) => void onSubmit(e)} onFocus={keepClearOfBar} noValidate>
+      {/* the bottom padding lets the last row of templates scroll clear of the floating bar */}
+      <div ref={pageRef} className="mx-auto max-w-[1184px] px-8 pb-28 pt-12 [@media(max-height:760px)]:pt-7">
         <div className="mx-auto flex max-w-[880px] flex-col items-center text-center">
           <span {...rise(0)} className={cn("inline-flex h-8 items-center gap-2 rounded-full bg-white px-3 text-footnote font-semibold text-zinc-700 shadow-card", rise(0).className)}>
             <span className="h-2 w-2 rounded-full bg-brand" aria-hidden />
@@ -608,8 +609,8 @@ export function CreateScreen() {
         </section>
       </div>
 
-      {/* the bar that floats once «Создать» has scrolled away; it takes no room of its own (the page's bottom padding
-          lets the last row of templates scroll clear of it) */}
+      {/* the bar that floats once «Создать» has scrolled away: the very end of the scrolled content, of no height, stuck
+          24px above the window's edge (at the end of a short page too) */}
       <div className="pointer-events-none sticky bottom-6 z-20 h-0">
         {float.mounted && (
           <div
