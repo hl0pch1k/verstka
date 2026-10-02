@@ -7,7 +7,8 @@
     "dev": "vite --port 5173 --strictPort",
     "build": "tsc --noEmit -p tsconfig.json && vite build",
     "preview": "vite preview --port 5173",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node scripts/test.mjs"
   },
   "dependencies": {
     "lucide-react": "^0.454.0",
