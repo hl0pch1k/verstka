@@ -3775,7 +3775,8 @@ def _bookend_texts(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[str, Optional[
         deck = split_display_title(ctx.outline.title)[0]
         if deck and len(deck) <= 60 and not same_words(deck, head):
             lines = [deck]
-    sub = _cap_first(" · ".join(lines)) if lines else None
+    # (set the Russian way: «задача № 4» never breaks after its sign, a figure stays with its noun)
+    sub = typeset(_cap_first(" · ".join(lines))) if lines else None
     return head, sub, kicker, footer
 
 
