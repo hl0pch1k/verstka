@@ -1,9 +1,10 @@
-// The agent's work as a vertical list of steps: Аналитик → (Архитектор) → Дизайнер → Критик → Правка → Вёрстка →
-// Проверка. Each step shows what it said in plain words; the designer adds a line per slide with the form it chose,
-// the critic a note per slide with its fix on a line of its own. Used live on the build screen and, finished, in the
-// drawer's «Агент». Live, the lines of one poll arrive as a small cascade (40 ms apart, once), the steps below glide
-// down to make room, a finished step's connector fills downwards, the active step's title stays pinned and the page
-// follows the newest line.
+// How the agent thinks, as a vertical list of steps: Аналитик → (Архитектор) → Дизайнер → Критик → Правка → Вёрстка →
+// Проверка. Each step shows what it said, in mono, like a train of thought: the designer adds a line per slide with the
+// form it chose, the critic a note per slide with its fix on a line of its own (→). The slide a line is about sits in a
+// small mono tag beside it. Used live in the build's right column and, finished, in the drawer's «Агент». Live, the
+// lines of one poll arrive as a small cascade (40 ms apart, once), the steps below glide down to make room, a finished
+// step's connector fills downwards in the brand gradient, the active step's title stays pinned and the column follows
+// the newest line.
 import { useLayoutEffect, useRef, type CSSProperties } from "react";
 import { AlertTriangle, ArrowRight, Check, CheckCircle2, Loader2, Minus } from "lucide-react";
 import { eventParts, slideGroups, type TimelineEvent, type TimelineRow } from "../../lib/agent";
@@ -14,9 +15,9 @@ function Dot({ status, n, live }: { status: TimelineRow["status"]; n: number; li
   return (
     <span
       className={cn(
-        "relative z-[1] flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-caption font-bold transition-[background-color,color,box-shadow] duration-300",
-        status === "done" && "bg-accent-fill text-white",
-        status === "active" && "bg-white text-accent shadow-selected-inset",
+        "relative z-[1] flex h-6 w-6 shrink-0 items-center justify-center rounded-full font-mono text-caption font-semibold transition-[background-color,color,box-shadow] duration-300",
+        status === "done" && "bg-brand text-white shadow-[0_4px_10px_-4px_rgba(56,88,255,0.6)]",
+        status === "active" && "bg-white text-[#3858FF] shadow-[inset_0_0_0_1.5px_#3858FF,0_0_0_4px_rgba(56,88,255,0.12)]",
         (status === "pending" || status === "skipped") && "bg-zinc-100 text-zinc-500",
       )}
       aria-hidden
@@ -37,21 +38,25 @@ function Dot({ status, n, live }: { status: TimelineRow["status"]; n: number; li
   );
 }
 
-const TAG = "inline-flex h-5 min-w-[72px] shrink-0 items-center justify-center rounded-lg px-2 text-caption font-semibold tabular-nums";
+const TAG = "inline-flex h-5 w-8 shrink-0 items-center justify-center rounded-md font-mono text-[11px] font-semibold tabular-nums";
 
-/** The slide's badge (opens «Почему так» when `onSlide` is given), a figure-check icon, or an empty column. */
+/** The slide's mono tag «04» (opens «Почему так» when `onSlide` is given), a figure-check icon, or an empty column. */
 function Tag({ slide, onSlide, mark, className, style }: { slide: number | null; onSlide?: (n: number) => void; mark: "ok" | "warn" | null; className?: string; style?: CSSProperties }) {
   if (slide !== null) {
+    const n = String(slide).padStart(2, "0");
     return onSlide ? (
-      <button type="button" onClick={() => onSlide(slide)} title={`Почему слайд ${slide} такой`} className={cn(TAG, "tap cursor-pointer bg-accent-50 text-accent-700 hover:bg-accent-100", className)} style={style}>
-        Слайд {slide}
+      <button type="button" onClick={() => onSlide(slide)} title={`Почему слайд ${slide} такой`} aria-label={`Слайд ${slide}: почему так`} className={cn(TAG, "tap cursor-pointer bg-accent-50 text-accent-700 hover:bg-accent-100", className)} style={style}>
+        {n}
       </button>
     ) : (
-      <span className={cn(TAG, "bg-zinc-100 text-zinc-600", className)} style={style}>Слайд {slide}</span>
+      <span className={cn(TAG, "bg-zinc-100 text-zinc-600", className)} style={style} title={`Слайд ${slide}`}>
+        <span className="sr-only">Слайд </span>
+        {n}
+      </span>
     );
   }
   return (
-    <span className={cn("flex h-5 w-[72px] shrink-0 items-center justify-center", className)} style={style} aria-hidden>
+    <span className={cn("flex h-5 w-8 shrink-0 items-center justify-center", className)} style={style} aria-hidden>
       {mark === "ok" && <CheckCircle2 className="h-4 w-4 text-emerald-500" />}
       {mark === "warn" && <AlertTriangle className="h-4 w-4 text-amber-500" />}
     </span>
@@ -69,14 +74,14 @@ function Said({ e, variantTitle, className, style }: { e: TimelineEvent; variant
       <p className={warn ? "text-amber-700" : "text-zinc-700"}>
         {text}
         {e.variants && e.variants.length > 0 && variantTitle && (
-          <span className="ml-2 inline-flex h-5 items-center whitespace-nowrap rounded-lg bg-zinc-100 px-2 align-top text-caption text-zinc-600">
+          <span className="ml-2 inline-flex h-[18px] items-center whitespace-nowrap rounded-md bg-zinc-100 px-1.5 align-[1px] text-[11px] text-zinc-600">
             {e.variants.map(variantTitle).join(" · ")}
           </span>
         )}
       </p>
       {fix && (
-        <p className="mt-1 flex gap-1 text-zinc-500">
-          <ArrowRight className="mt-[3px] h-3.5 w-3.5 shrink-0 text-zinc-400" aria-hidden />
+        <p className="mt-1 flex gap-1.5 text-zinc-500">
+          <ArrowRight className="mt-[3px] h-3.5 w-3.5 shrink-0 text-emerald-600" aria-hidden />
           <span className="min-w-0">
             <span className="sr-only">Исправление: </span>
             {fix}
@@ -101,9 +106,9 @@ function Lines({ row, variantTitle, onSlide, arrival }: { row: TimelineRow; vari
   };
   // consecutive lines about one slide share its badge, the same while the agent works and after
   return (
-    <ul className={cn("mt-2", row.key === "critic" ? "space-y-3" : "space-y-2")}>
+    <ul className={cn("mt-2 font-mono text-[12px] leading-[18px] [overflow-wrap:anywhere]", row.key === "critic" ? "space-y-3" : "space-y-2")}>
       {slideGroups(row.events).map((g, gi) => (
-        <li key={g.events[0].seq ?? `${row.key}-g${gi}`} className="flex items-start gap-2 text-footnote">
+        <li key={g.events[0].seq ?? `${row.key}-g${gi}`} className="flex items-start gap-2">
           {pad && <Tag slide={g.slide} onSlide={onSlide} mark={figureMark(eventParts(g.events[0]).text)} {...enter(g.events[0])} />}
           <div className="min-w-0 flex-1 space-y-1">
             {g.events.map((e, k) => (
@@ -178,8 +183,13 @@ export function AgentTimeline({ rows, variantTitle, onSlide, follow = false, pin
     if (!follow) return;
     const box = ref.current?.closest("[data-follow]") as HTMLElement | null;
     if (!box) return;
+    // only the reader scrolling up stops the following (our own smooth scroll down passes far from the end on its way
+    // and must not); back at the end, it follows again
+    let last = box.scrollTop;
     const onScroll = () => {
-      stick.current = box.scrollHeight - box.scrollTop - box.clientHeight < 48;
+      if (box.scrollHeight - box.scrollTop - box.clientHeight < 48) stick.current = true;
+      else if (box.scrollTop < last - 1) stick.current = false;
+      last = box.scrollTop;
     };
     box.addEventListener("scroll", onScroll, { passive: true });
     return () => box.removeEventListener("scroll", onScroll);
@@ -203,7 +213,7 @@ export function AgentTimeline({ rows, variantTitle, onSlide, follow = false, pin
             {/* the connector to the next step: a quiet track that fills downwards once the step is done */}
             {!last && (
               <span className="absolute bottom-1 left-[11px] top-7 w-0.5 overflow-hidden rounded-full bg-zinc-100" aria-hidden>
-                <span className={cn("absolute inset-0 origin-top rounded-full bg-accent-200 transition-transform duration-600 ease-out", r.status === "done" ? "scale-y-100" : "scale-y-0")} />
+                <span className={cn("absolute inset-0 origin-top rounded-full bg-gradient-to-b from-[#0066F5]/45 to-[#6A4DFF]/45 transition-transform duration-600 ease-out", r.status === "done" ? "scale-y-100" : "scale-y-0")} />
               </span>
             )}
             <div className={cn("-mx-2 -my-1 flex items-center gap-3 px-2 py-1", pinned && cn("sticky bg-white", pinClassName))}>
@@ -212,7 +222,7 @@ export function AgentTimeline({ rows, variantTitle, onSlide, follow = false, pin
                 <span className={cn("text-body font-semibold transition-colors duration-150", lit ? "text-zinc-900" : "text-zinc-500")}>{r.title}</span>
                 {/* live, «что делает» → «к чему пришёл» cross-fades when the step ends (the finished log stays still) */}
                 {aside && (
-                  <span key={follow ? aside : undefined} className={cn("text-footnote", r.status === "active" ? "text-zinc-600" : "text-zinc-500", follow && "animate-fade")}>
+                  <span key={follow ? aside : undefined} className={cn("text-footnote", r.status === "active" ? "text-[#3858FF]" : "text-zinc-500", follow && "animate-fade")}>
                     {aside}
                   </span>
                 )}

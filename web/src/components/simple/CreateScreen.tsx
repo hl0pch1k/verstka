@@ -596,14 +596,14 @@ export function CreateScreen() {
           className={cn("mt-14 scroll-mt-6", shaking === "gallery" ? "animate-shake" : rise(4).className)}
           style={shaking === "gallery" ? undefined : rise(4).style}
         >
-          <div className="mb-5 flex items-end gap-4">
-            <div className="min-w-0 flex-1">
-              <h2 id="templates-title" className="text-title1 font-bold text-zinc-900">Шаблон оформления</h2>
-              <p className="mt-1 text-body text-zinc-500">Слайды собираются из макетов шаблона: его шрифты, цвета и сетка.</p>
+          <div className="mb-5">
+            <div className="flex h-10 items-center gap-4">
+              <h2 id="templates-title" className="min-w-0 flex-1 truncate text-title1 font-bold text-zinc-900">Шаблон оформления</h2>
+              <div className="-mr-4 flex shrink-0 items-center gap-2">
+                <TemplateActions />
+              </div>
             </div>
-            <div className="flex shrink-0 items-center gap-2">
-              <TemplateActions />
-            </div>
+            <p className="mt-1 text-body text-zinc-500">Слайды собираются из макетов шаблона: его шрифты, цвета и сетка.</p>
           </div>
           <TemplatePicker />
         </section>

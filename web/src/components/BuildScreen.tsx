@@ -3,7 +3,7 @@
 // turns into its counterpart of the deck (View Transitions: the title, the rail of sketches → the thumbnails, the dark
 // stage → the slide, the agent's column → the aside). On the stage the phase is set big, the agent's newest line types
 // itself and the slide it speaks of is sketched; the rail fills in slide by slide as the designer thinks them through
-// (then the real previews fade in); the right column keeps the agent's steps and its whole log; the variants' chips
+// (then the real previews fade in); the right column shows how the agent thinks, step by step; the variants' chips
 // under the stage choose whose rail is shown. A narrow page (the helper docked) drops the log column.
 // Entered through a View Transition (create → build, deck → build), the transition's page rise is the only entrance:
 // the blocks do not rise again inside the fading-in page, and they take their view-transition names only once it has
@@ -12,7 +12,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { buildTimeline, laterPhase, phaseOfStep, type PhaseKey } from "../lib/agent";
 import type { VariantProgress } from "../lib/jobText";
 import { templateTitle } from "../lib/plain";
-import { clock, logLines, railSlides, ROLE, STAGE_TITLE, type Sketch } from "../lib/stage";
+import { clock, railSlides, ROLE, STAGE_TITLE, type Sketch } from "../lib/stage";
 import { stagger } from "../lib/motion";
 import { cn, fmtWhen } from "../lib/utils";
 import { useApp, type ActiveJob } from "../store";
@@ -212,7 +212,6 @@ export function BuildScreen({ job }: { job: ActiveJob }) {
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [names, job.variants, job.agent, phase, exporting]);
-  const lines = useMemo(() => logLines(job.agent ?? []), [job.agent]);
   const timer = elapsed <= PROMISE_MS ? `${clock(elapsed / 1000)} / ${clock(PROMISE_MS / 1000)}` : clock(elapsed / 1000);
 
   return (
@@ -262,7 +261,7 @@ export function BuildScreen({ job }: { job: ActiveJob }) {
         </div>
         <AgentLog
           rows={rows}
-          lines={lines}
+          variantTitle={strategyTitle}
           running={!queued}
           className={cn("build-log", vt.names && "vt-aside", !vt.quiet && "animate-rise")}
         />

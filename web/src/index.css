@@ -97,8 +97,9 @@ h1, h2, h3 {
 /* the build page: three columns (rail, stage, the agent's log); a narrow page (the helper docked) drops the log, the
    stage keeps its size */
 .build-root { container: build / inline-size; }
-/* --side: what the columns beside the stage take (the rail, the log and two gaps): the stage's width is the rest */
-.build-grid { --side: 472px; grid-template-columns: 152px minmax(0, 1fr) 288px; }
+/* --side: what the columns beside the stage take (the rail, the agent's column and two gaps): the stage's width is the
+   rest. The agent's column is wider than the deck's aside: its lines are a train of thought, they need the room */
+.build-grid { --side: 524px; grid-template-columns: 152px minmax(0, 1fr) 340px; }
 @container build (max-width: 1099px) {
   .build-grid { --side: 168px; grid-template-columns: 152px minmax(0, 1fr); }
   .build-log { display: none; }

@@ -2,7 +2,7 @@
 // shows), what each phase is called on the stage, the rail's per-slide state and the log's lines. Pure functions, no
 // React.
 import type { AgentEvent } from "../types";
-import { eventParts, phaseOfStep, withPhases, type PhaseKey } from "./agent";
+import { eventParts, type PhaseKey } from "./agent";
 
 export type SketchKind =
   | "cover" | "bars" | "hbars" | "pie" | "line" | "table" | "numbers" | "cards" | "list" | "timeline" | "compare"
@@ -10,16 +10,17 @@ export type SketchKind =
 
 export interface Sketch { slide: number; kind: SketchKind; headline: string | null }
 
-/** The big words of the stage per phase (and for the queue, before the first event). */
+/** The big words of the stage per phase (and for the queue, before the first event). A short preposition is bound to
+ *  its word by a no-break space: a line never ends on «в» or «с». */
 export const STAGE_TITLE: Record<PhaseKey | "queued", string> = {
-  queued: "Готовлюсь к сборке",
-  writer: "Пишу текст по теме",
+  queued: "Готовлюсь к\u00a0сборке",
+  writer: "Пишу текст по\u00a0теме",
   analyst: "Читаю ваш текст",
   architect: "Выстраиваю сюжет",
   designer: "Продумываю слайды",
-  critic: "Сверяю план с текстом",
+  critic: "Сверяю план с\u00a0текстом",
   revise: "Переделываю слабые места",
-  layout: "Собираю в вашем шаблоне",
+  layout: "Собираю в\u00a0вашем шаблоне",
   check: "Проверяю каждое число",
 };
 
@@ -120,17 +121,3 @@ export const clock = (seconds: number) => {
   const s = Math.max(0, Math.floor(seconds));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 };
-
-export interface LogLine { key: string; time: string | null; phase: PhaseKey; role: string; slide: number | null; text: string }
-
-/** Every line of the agent, in order, as the log shows it. */
-export function logLines(events: AgentEvent[]): LogLine[] {
-  return withPhases(events).map((e, i) => ({
-    key: e.seq !== undefined && e.seq !== null ? `#${e.seq}` : `${i}`,
-    time: typeof e.t === "number" ? clock(e.t) : null,
-    phase: e.phase,
-    role: ROLE[phaseOfStep(e.step) ?? e.phase],
-    slide: e.slide ?? null,
-    text: eventParts(e).text,
-  }));
-}

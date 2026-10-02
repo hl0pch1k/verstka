@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { clock, logLines, quoted, railSlides, sketchKind, sketchOf, stripQuoted } from "./stage";
+import { clock, quoted, railSlides, sketchKind, sketchOf, stripQuoted } from "./stage";
 import type { AgentEvent } from "../types";
 
 const ev = (step: string, message: string, slide: number | null = null, variant: string | null = null): AgentEvent => ({ step, message, slide, variant });
@@ -62,15 +62,8 @@ test("railSlides: shared plan, own critic and revision, laid out slides", () => 
   assert.equal(railSlides(events, "structured", 3, 0, true).length, 3);
 });
 
-test("logLines: time from the start, role and text", () => {
-  const lines = logLines([
-    { step: "analyst", message: "Нашёл в тексте 12 слайдов.", slide: null, variant: null, t: 65.2 },
-    { step: "designer", message: "«Итоги» — список (3 пункта).", slide: 4, variant: null },
-  ]);
-  assert.equal(lines[0].time, "1:05");
-  assert.equal(lines[0].role, "аналитик");
-  assert.equal(lines[1].time, null);
-  assert.equal(lines[1].slide, 4);
+test("clock", () => {
   assert.equal(clock(0), "0:00");
+  assert.equal(clock(65.2), "1:05");
   assert.equal(clock(301), "5:01");
 });
