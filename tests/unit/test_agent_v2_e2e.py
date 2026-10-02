@@ -260,8 +260,9 @@ def test_forms_takeaways_and_footnotes(short_run):
         assert sum(1 for s in o.slides if s.takeaway) >= 4
         assert all(s.rationale for s in o.slides if s.spec_ref is not None)
         assert any(s.alternatives for s in o.slides if s.spec_ref is not None)
-        comps = [s.composition for s in v.render.slides]
-        assert comps.count("chart_pair") == 2, comps  # two charts side by side on slides 3 and 4
+        # two charts side by side on slides 3 and 4: composed as a pair, or set in a template sample's wide data area
+        pairs = [s for s, os_ in zip(v.render.slides, o.slides) if os_.content.chart2 is not None]
+        assert len(pairs) == 2 and all(s.composition == "chart_pair" or s.mode == "clone" for s in pairs), [(s.mode, s.composition) for s in pairs]
     # the critic flagged the visual variant's last slide: the variants of that plan got the revision
     visual = _by_spec(res.variants[1].outline)[5]
     assert visual.headline == "Операционная прибыль вырастет до 254 795 рублей"

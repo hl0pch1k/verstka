@@ -731,10 +731,21 @@ def kpi_callout(text: str) -> Optional[tuple[str, str]]:
         return None
     value = " ".join(t[s:e].split())
     words = t[:s].split()
+    after = t[e:].strip(" ,;:—–-")
+    if words and after and not re.search(r"[:—–]\s*$", t[:s]):
+        # a figure inside a clause («нужно привлечь 21% этой группы») leaves a broken sentence when it is cut out: the
+        # line stays a line; a figure after its label («Прогноз: 1 138 500 ₽ на 6-й месяц») is a callout
+        return None
+    # a hedge before the figure stays with it, as a sign: «составит около 1 237 388 ₽» → «≈ 1 237 388 ₽»
+    hedge = {"около": "≈", "примерно": "≈", "приблизительно": "≈", "порядка": "≈", "почти": "≈", "более": ">", "свыше": ">", "больше": ">", "менее": "<", "меньше": "<"}
+    if words and words[-1].lower() in hedge and not value.startswith(("≈", ">", "<")):
+        value = f"{hedge[words[-1].lower()]} {value}"
+        words.pop()
     while words and words[-1].lower().strip(":") in _LABEL_TAIL_PREP:
         words.pop()  # «рост на 34%» → «рост»: the preposition (and a dash before the figure) leaves with its figure
     before = " ".join(words).rstrip(" :—–-,")
-    after = t[e:].strip(" ,;:—–-")
+    # (the verb that led to the figure leaves with it: «убыток … составит» → «убыток …»)
+    before = _TAIL_LINK_RE.sub("", " " + before).strip(" :—–-,") if before else before
     label = " ".join(x for x in (before, after) if x)
     if not re.search(r"[A-Za-zА-Яа-яЁё]{3,}", label):
         return None
@@ -4543,6 +4554,9 @@ _MONEY_UNIT_RE = re.compile(r"\s*(?:рубл(?:ь|я|ей)|руб\.?)$", re.I)
 
 
 _TAIL_LINK_RE = re.compile(r"(?:\s+(?:до|на|в|с|—|–|-|:|→|->)|\s+(?:составит|составляет|составят|составляют|равна|равен|равно|—\s*это))+\s*$", re.I)
+# a hedge right before a figure: it stays with the figure, as a sign («около 74%» → «≈ 74%»)
+_HEDGE_TAIL_RE = re.compile(r"\s+(около|примерно|приблизительно|порядка|почти|более|свыше|больше|менее|меньше)\s*$", re.I)
+_HEDGE_SIGN = {"около": "≈", "примерно": "≈", "приблизительно": "≈", "порядка": "≈", "почти": "≈", "более": ">", "свыше": ">", "больше": ">", "менее": "<", "меньше": "<"}
 
 
 def label_without_figure(text: str, fig: Optional[str]) -> str:
@@ -4562,7 +4576,7 @@ def label_without_figure(text: str, fig: Optional[str]) -> str:
         if before.rstrip().endswith("(") and after.lstrip().startswith(")"):
             out = (before.rstrip()[:-1].rstrip() + " " + after.lstrip()[1:].lstrip()).strip()
         elif re.fullmatch(r"\s*(?:в\s+месяц|в\s+год|в\s+день)?\s*[.!]?\s*", after):
-            out = _TAIL_LINK_RE.sub("", before.rstrip()).strip(" ,;:—–-")
+            out = _TAIL_LINK_RE.sub("", _HEDGE_TAIL_RE.sub("", " " + before.rstrip())).strip(" ,;:—–-")
         elif re.match(r"\s*(?:в\s+месяц\s*)?,\s*или\s+\S", after):
             # «Операционная прибыль составляет 120 000 рублей, или 13,3% выручки» → «Операционная прибыль — 13,3% выручки»
             subject = _TAIL_LINK_RE.sub("", before.rstrip()).strip(" ,;:—–-")
@@ -4625,7 +4639,12 @@ def _aside_figure(text: str) -> Optional[str]:
     pick = (unit or big or [None])[0]
     if pick is None:
         return None
-    return typeset(_MONEY_UNIT_RE.sub(" ₽", pick).strip())
+    sign = ""
+    at = text.find(pick)
+    hm = _HEDGE_TAIL_RE.search(" " + text[:at]) if at > 0 else None
+    if hm is not None:
+        sign = _HEDGE_SIGN.get(hm.group(1).lower(), "") + "\u00a0"
+    return sign + typeset(_MONEY_UNIT_RE.sub(" ₽", pick).strip())
 
 
 def _series_takeaway(spec, outline: DeckOutline, headline: str = "") -> Optional[tuple[str, str]]:

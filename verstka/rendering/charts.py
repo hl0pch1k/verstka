@@ -940,11 +940,13 @@ def glyph_unit(unit: Optional[str]) -> bool:
 
 
 def bare_unit_on_labels(spec: ChartSpec, outline: DeckOutline, unit: Optional[str]) -> bool:
-    """A chart with no title of its own and a short word unit (≤ 12 characters: «посещений», «клиентов», «чел.»)
-    over a few categories (≤ 6) carries its unit on its labels — «2 700 посещений» — rather than under a caption of
+    """A chart with no title of its own and a short noun for a unit (5–12 letters: «посещений», «клиентов») over a
+    few categories (≤ 6) carries its unit on its labels — «2 700 посещений» — rather than under a caption of
     the unit alone, which reads as a stray word over the bars."""
     u = " ".join((unit or "").split())
-    if not u or glyph_unit(u) or len(u) > 12 or spec.type in ("pie", "doughnut", "line"):
+    # (a noun in full — «посещений», «клиентов» — reads as a stray word over the bars; an abbreviation «чел.», «тыс.»
+    # or a phrase «млн ₽ в год» is an axis unit and stays the caption above)
+    if not u or glyph_unit(u) or not re.fullmatch(r"[А-Яа-яЁёA-Za-z]{5,12}", u) or spec.type in ("pie", "doughnut", "line"):
         return False
     series = resolve_series(spec, outline)
     return bool(series) and len(series) == 1 and 0 < len(series[0].values) <= 6
