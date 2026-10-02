@@ -235,6 +235,9 @@ export function CreateScreen() {
             ? "Выберите хотя бы один вариант оформления"
             : null;
   const busy = submitting || jobRunning;
+  // «Создать» spins only for its own work (sending, a deck being built); another job (a template being analysed) only
+  // makes it unavailable for a moment
+  const creating = submitting || (jobRunning && activeJob?.kind === "generate");
   // the server being out of reach is the one problem then: the text is not marked
   const briefInvalid = showErrors && !healthError && !!templateId && briefLen < briefMin;
   // a short text is said once, by its own counter in the field (turned red); the status line keeps every other problem
@@ -464,7 +467,7 @@ export function CreateScreen() {
       <div className="ml-auto flex shrink-0 items-center gap-2">
         {stepper}
         <Button variant="ghost" shape="circle" size="md" icon={SlidersHorizontal} aria-label="Настройки" title="Настройки" aria-expanded={more} aria-controls="create-settings" onClick={() => setMore(!more)} />
-        <Button type="submit" variant="brand" shape="pill" size="lg" iconRight={ArrowRight} loading={busy}>
+        <Button type="submit" variant="brand" shape="pill" size="lg" iconRight={ArrowRight} loading={creating} disabled={busy && !creating}>
           Создать
         </Button>
       </div>
@@ -636,7 +639,7 @@ export function CreateScreen() {
               <span className="block truncate text-footnote font-semibold text-zinc-900">{chosenName ? `Шаблон «${chosenName}»` : "Шаблон не выбран"}</span>
               <span className="block text-caption text-zinc-500">{plural(count, "слайд", "слайда", "слайдов")}{byText ? " — по тексту" : ""}</span>
             </span>
-            <Button type="submit" variant="brand" shape="pill" size="lg" iconRight={ArrowRight} loading={busy} className="ml-3">
+            <Button type="submit" variant="brand" shape="pill" size="lg" iconRight={ArrowRight} loading={creating} disabled={busy && !creating} className="ml-3">
               Создать презентацию
             </Button>
           </div>
