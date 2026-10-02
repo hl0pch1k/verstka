@@ -548,7 +548,9 @@ export function CreateScreen() {
   return (
     <form onSubmit={(e) => void onSubmit(e)} onFocus={keepClearOfBar} noValidate>
       {/* the bottom padding lets the last row of templates scroll clear of the floating bar */}
-      <div ref={pageRef} className="mx-auto max-w-[1184px] px-8 pb-28 pt-12 [@media(max-height:760px)]:pt-7">
+      <div ref={pageRef} className="relative isolate mx-auto max-w-[1184px] px-8 pb-28 pt-12 [@media(max-height:760px)]:pt-7">
+        {/* a faint glow of the brand colours behind the hero: depth without a picture */}
+        <div aria-hidden className="pointer-events-none absolute inset-x-0 -top-24 -z-10 h-[620px] [background:radial-gradient(42%_46%_at_50%_38%,rgba(56,88,255,0.10),transparent_72%),radial-gradient(30%_32%_at_68%_58%,rgba(106,77,255,0.08),transparent_70%)]" />
         <div className="mx-auto flex max-w-[880px] flex-col items-center text-center">
           <span {...rise(0)} className={cn("inline-flex h-8 items-center gap-2 rounded-full bg-white px-3 text-footnote font-semibold text-zinc-700 shadow-card", rise(0).className)}>
             <span className="h-2 w-2 rounded-full bg-brand" aria-hidden />
