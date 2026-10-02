@@ -357,7 +357,6 @@ export function TemplatePicker() {
   // the order is the server's (newest first) and never changes on a click
   const list = templates;
   const analysing = !!name;
-  const folded = list.length > SHOW && !all;
   // the file being analysed lands first (it is the newest): its tile stands there and the grid keeps its length
   const room = all ? list.length : SHOW - (analysing ? 1 : 0);
   let cards = list.slice(0, room);
@@ -377,6 +376,29 @@ export function TemplatePicker() {
 
   return (
     <div>
+      <div className="mb-5">
+        <div className="flex h-10 items-center gap-2">
+          <h2 id="templates-title" className="min-w-0 flex-1 truncate text-title1 font-bold text-zinc-900">Шаблон оформления</h2>
+          {list.length > SHOW && (
+            <Button
+              variant="ghost"
+              shape="pill"
+              iconRight={<ChevronDown className={cn("transition-transform duration-300 ease-glide", all && "rotate-180")} />}
+              aria-expanded={all}
+              onClick={() => {
+                if (!all) setRevealAt(performance.now());
+                setAll(!all);
+              }}
+            >
+              {all ? "Свернуть" : `Все шаблоны · ${list.length}`}
+            </Button>
+          )}
+          <div className="-mr-4 flex shrink-0 items-center">
+            <TemplateActions />
+          </div>
+        </div>
+        <p className="mt-1 text-body text-zinc-500">Слайды собираются из макетов шаблона: его шрифты, цвета и сетка.</p>
+      </div>
       {waiting ? (
         <div className="grid grid-cols-3 gap-5" aria-busy="true" aria-label="Шаблоны загружаются">
           {Array.from({ length: COLS * 2 }, (_, i) => <div key={i} className="skeleton aspect-[16/12] rounded-[20px]" />)}
@@ -404,22 +426,6 @@ export function TemplatePicker() {
             className={cn(list.length === 0 && !analysing && "col-span-3 min-h-[200px]", introOn && "animate-fade-in")}
             style={introOn ? stagger(cards.length) : undefined}
           />
-        </div>
-      )}
-      {list.length > SHOW && (
-        <div className="mt-5 flex justify-center">
-          <Button
-            variant="white"
-            shape="pill"
-            iconRight={<ChevronDown className={cn("transition-transform duration-300 ease-glide", all && "rotate-180")} />}
-            aria-expanded={all}
-            onClick={() => {
-              if (!all) setRevealAt(performance.now());
-              setAll(!all);
-            }}
-          >
-            {all || !folded ? "Свернуть" : `Показать все шаблоны (${list.length})`}
-          </Button>
         </div>
       )}
       <TemplatePreview t={preview} onClose={() => setPreview(null)} />

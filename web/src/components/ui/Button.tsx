@@ -49,16 +49,18 @@ const VARIANTS: Record<ButtonVariant, string> = {
   danger: "bg-red-600 text-white hover:bg-red-700 active:bg-red-800",
 };
 
-const SIZES: Record<ButtonSize, { box: string; iconOnly: string; icon: string; iconOnlyIcon: string }> = {
-  sm: { box: "h-8 rounded-lg px-3 text-footnote", iconOnly: "w-8 px-0", icon: "h-4 w-4", iconOnlyIcon: "h-4 w-4" },
-  md: { box: "h-10 rounded-xl px-4 text-body", iconOnly: "w-10 px-0", icon: "h-4 w-4", iconOnlyIcon: "h-5 w-5" },
-  lg: { box: "h-12 rounded-xl px-6 text-body", iconOnly: "w-12 px-0", icon: "h-5 w-5", iconOnlyIcon: "h-5 w-5" },
+// the corner radius is the shape's: a rect takes its size's radius, a circle or a pill is fully rounded (one radius
+// class per button — two of them would leave the winner to the stylesheet's order)
+const SIZES: Record<ButtonSize, { box: string; radius: string; iconOnly: string; icon: string; iconOnlyIcon: string }> = {
+  sm: { box: "h-8 px-3 text-footnote", radius: "rounded-lg", iconOnly: "w-8 px-0", icon: "h-4 w-4", iconOnlyIcon: "h-4 w-4" },
+  md: { box: "h-10 px-4 text-body", radius: "rounded-xl", iconOnly: "w-10 px-0", icon: "h-4 w-4", iconOnlyIcon: "h-5 w-5" },
+  lg: { box: "h-12 px-6 text-body", radius: "rounded-xl", iconOnly: "w-12 px-0", icon: "h-5 w-5", iconOnlyIcon: "h-5 w-5" },
 };
 
 /** The class string of a button look — for elements that must stay something else (a <label>, a router link). */
 export function buttonClass({ variant = "secondary", size = "md", shape = "rect", block = false, iconOnly = false }: { variant?: ButtonVariant; size?: ButtonSize; shape?: ButtonShape; block?: boolean; iconOnly?: boolean } = {}): string {
   const s = SIZES[size];
-  return cn(BASE, VARIANTS[variant], s.box, iconOnly && s.iconOnly, shape !== "rect" && "rounded-full", block && "w-full");
+  return cn(BASE, VARIANTS[variant], s.box, shape === "rect" ? s.radius : "rounded-full", iconOnly && s.iconOnly, block && "w-full");
 }
 
 const isEmpty = (children: ReactNode) => children === undefined || children === null || children === false || children === "";

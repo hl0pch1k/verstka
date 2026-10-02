@@ -1,5 +1,6 @@
 // The deck's slides as a column of thumbnails on the left of the stage — the way PowerPoint, Keynote and Google Slides
-// show a deck. A white card the stage's height; a long deck scrolls inside it (wheel, the active thumb kept in view)
+// show a deck, each number left of its thumbnail (a narrow rail drops the numbers). A white card the stage's height; a
+// long deck scrolls inside it (wheel, the active thumb kept in view)
 // with a fade on the side that hides thumbs. One Tab stop: the active thumb (↑/↓ turn the slides here, ←/→ anywhere
 // on the deck, and the focus follows the selection). One selection ring glides from thumb to thumb. With the
 // «Замечания» switch on, a thumb with remarks carries their count; the slide the agent fixes shows a spinner.
@@ -86,7 +87,7 @@ export function SlideRail({ variant, rev, total, selected, aspect, issueMap, sho
   let badgeIdx = 0;
 
   return (
-    <nav ref={railRef} aria-label="Слайды" className={cn("flex min-h-0 flex-col overflow-hidden rounded-2xl bg-white shadow-card", className)}>
+    <nav ref={railRef} aria-label="Слайды" className={cn("slide-rail flex min-h-0 flex-col overflow-hidden rounded-2xl bg-white shadow-card", className)}>
       <div ref={scrollerRef} onScroll={measure} className={cn("relative min-h-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden", fade)}>
         <ol ref={listRef} onKeyDown={onKey} className="relative flex flex-col gap-3 p-3">
           <span
@@ -106,7 +107,11 @@ export function SlideRail({ variant, rev, total, selected, aspect, issueMap, sho
             const headline = variant.outline?.slides[idx]?.headline ?? "";
             const delay = count > 0 ? Math.min(badgeIdx++ * 20, 200) : 0;
             return (
-              <li key={n}>
+              <li key={n} className="flex items-start gap-1.5">
+                {/* the number left of the thumbnail (PowerPoint's way): it never covers the slide */}
+                <span className={cn("rail-num w-4 shrink-0 pt-0.5 text-right font-mono text-caption tabular-nums transition-colors duration-150", active ? "font-semibold text-accent-700" : "text-zinc-500")} aria-hidden>
+                  {n}
+                </span>
                 <button
                   ref={active ? selectedRef : undefined}
                   type="button"
@@ -116,7 +121,7 @@ export function SlideRail({ variant, rev, total, selected, aspect, issueMap, sho
                   aria-label={`Слайд ${n}${headline ? `: ${headline}` : ""}${count > 0 ? `, ${plural(count, "замечание", "замечания", "замечаний")}` : ""}`}
                   title={headline || `Слайд ${n}`}
                   className={cn(
-                    "tap-soft relative block w-full cursor-pointer overflow-hidden rounded-lg bg-white ring-1 ring-zinc-900/[0.08] focus-visible:outline-offset-[-2px]",
+                    "tap-soft relative block min-w-0 flex-1 cursor-pointer overflow-hidden rounded-lg bg-white ring-1 ring-zinc-900/[0.08] focus-visible:outline-offset-[-2px]",
                     !active && "hover:ring-2 hover:ring-accent-200",
                   )}
                   style={{ aspectRatio: String(aspect) }}
@@ -128,9 +133,6 @@ export function SlideRail({ variant, rev, total, selected, aspect, issueMap, sho
                       <span className="line-clamp-2">{headline || `Слайд ${n}`}</span>
                     </span>
                   )}
-                  <span className={cn("absolute bottom-1 left-1 rounded px-1 text-caption font-semibold leading-4 tabular-nums text-white transition-colors duration-150", active ? "bg-accent-fill" : "bg-zinc-900/60")} aria-hidden>
-                    {n}
-                  </span>
                   <ThumbBadge count={count} sev={worst} fixing={fixing} delay={delay} />
                 </button>
               </li>

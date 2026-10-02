@@ -5,7 +5,7 @@
 // same button. The draft survives reloads. Motion: the hero rises in a 40 ms cascade on first load, «Настройки» unfold
 // inside the composer, the floating bar rises in and fades out, and the whole page glides aside when the helper docks.
 import { useEffect, useRef, useState, type ChangeEvent, type FocusEvent, type FormEvent, type KeyboardEvent } from "react";
-import { ArrowRight, ChevronDown, FileText, LayoutTemplate, Minus, Paperclip, PenLine, Plus, SlidersHorizontal, Sparkles } from "lucide-react";
+import { AlertCircle, ArrowRight, ChevronDown, FileText, LayoutTemplate, Minus, Paperclip, PenLine, Plus, SlidersHorizontal, Sparkles } from "lucide-react";
 import { EASE, MOTION, prefersReducedMotion, smoothScroll, stagger, useFlip, usePresence } from "../../lib/motion";
 import { modelIndicator } from "../../lib/modelText";
 import { errText } from "../../lib/narrate";
@@ -19,7 +19,7 @@ import { Button } from "../ui/Button";
 import { Chip } from "../ui/Chip";
 import { Composer } from "./Composer";
 import { ModelStatus } from "./ModelStatus";
-import { TemplateActions, TemplatePicker, useTemplateDrop } from "./TemplatePicker";
+import { TemplatePicker, useTemplateDrop } from "./TemplatePicker";
 import { TypewriterHint } from "./Typewriter";
 
 const clampSlides = (n: number) => Math.min(SLIDES_MAX, Math.max(SLIDES_MIN, Number.isFinite(n) ? Math.round(n) : SLIDES_DEFAULT));
@@ -161,8 +161,15 @@ export function CreateScreen() {
     const t = window.setTimeout(() => setShaking(null), 420);
     return () => window.clearTimeout(t);
   }, [shaking]);
-  // the hero cascades in once, on the first load (a later return to this screen comes through the view transition)
+  // the hero cascades in once, on the first load (a later return to this screen comes through the view transition); the
+  // entrance classes go once it has played, so a later shake (its own animation) never replays the rise when it ends
   const [intro] = useState(() => performance.now() < 4000);
+  const [settled, setSettled] = useState(!intro);
+  useEffect(() => {
+    if (settled) return;
+    const t = window.setTimeout(() => setSettled(true), 900);
+    return () => window.clearTimeout(t);
+  }, [settled]);
 
   useEffect(() => {
     const t = window.setTimeout(() => storage.set(LS.brief, JSON.stringify({ brief, audience, purpose, slides } satisfies Draft)), 300);
@@ -186,13 +193,14 @@ export function CreateScreen() {
     });
   }, [composerText, takeComposerText]);
 
-  // «Создать» has scrolled away (the gallery is in view): the bar floats at the bottom
+  // «Создать» is out of view (scrolled away to the gallery, or below a long text with the settings open): the bar floats
+  // at the bottom
   const [away, setAway] = useState(false);
   useEffect(() => {
     const el = toolbarRef.current;
     const root = el?.closest("main");
     if (!el || !root) return;
-    const io = new IntersectionObserver(([e]) => setAway(!e.isIntersecting && e.boundingClientRect.bottom <= (e.rootBounds?.top ?? 0) + 1), { root, threshold: 0 });
+    const io = new IntersectionObserver(([e]) => setAway(!e.isIntersecting), { root, threshold: 0 });
     io.observe(el);
     return () => io.disconnect();
   }, []);
@@ -251,6 +259,21 @@ export function CreateScreen() {
   const writerPresence = usePresence(writerLine, MOTION.fast);
   // the examples type themselves into an empty field nobody is typing in
   const hinting = briefLen === 0 && !focused && !busy;
+  // a long text fades at the field's foot while there is more of it below (it never runs into the toolbar's edge)
+  const [moreBelow, setMoreBelow] = useState(false);
+  const measureField = () => {
+    const el = briefRef.current;
+    if (el) setMoreBelow(el.scrollHeight - el.scrollTop - el.clientHeight > 2);
+  };
+  useEffect(() => {
+    const el = briefRef.current;
+    if (!el) return;
+    measureField();
+    const ro = new ResizeObserver(measureField);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  useEffect(measureField, [brief]);
 
   const fillSample = () => {
     setBrief(SAMPLE_BRIEF);
@@ -361,7 +384,7 @@ export function CreateScreen() {
     }
   };
 
-  const rise = (i: number) => (intro ? { className: "animate-rise", style: stagger(i) } : { className: undefined, style: undefined });
+  const rise = (i: number) => (intro && !settled ? { className: "animate-rise", style: stagger(i) } : { className: undefined, style: undefined });
 
   const stepper = (
     <div className="flex shrink-0 items-center gap-2">
@@ -391,13 +414,15 @@ export function CreateScreen() {
             setSlidesDraft(null);
             setSlides((n) => clampSlides(n));
           }}
-          className="w-8 bg-transparent text-center text-body font-semibold tabular-nums text-zinc-900 outline-none [appearance:textfield] disabled:opacity-40 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+          className="w-7 bg-transparent text-right text-body font-semibold tabular-nums text-zinc-900 outline-none [appearance:textfield] disabled:opacity-40 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
         />
+        {/* the unit inside the pill, beside its number («12 слайдов»); a count the text dictates says so */}
+        <span className="w-[62px] pl-1.5 text-footnote text-zinc-600" aria-hidden>
+          {plural(count, "слайд", "слайда", "слайдов").replace(/^\d+\s/, "")}
+        </span>
         <Button variant="ghost" shape="circle" size="md" icon={Plus} aria-label="Больше слайдов" disabled={busy || byText || slides >= SLIDES_MAX} onClick={() => stepSlides(1)} />
       </div>
-      <span className="w-[66px] text-footnote text-zinc-500" aria-hidden>
-        {byText ? "по тексту" : plural(count, "слайд", "слайда", "слайдов").replace(/^\d+\s/, "")}
-      </span>
+      {byText && <span className="animate-fade text-caption text-zinc-500">по тексту</span>}
     </div>
   );
 
@@ -419,13 +444,15 @@ export function CreateScreen() {
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           placeholder={health?.writer ? PLACEHOLDER_WRITER : PLACEHOLDER}
+          onScroll={measureField}
           className={cn(
             "scroll-thin block max-h-[40vh] min-h-[104px] w-full resize-none bg-transparent pb-2 text-title3 leading-[26px] text-zinc-900 outline-none disabled:opacity-60 [field-sizing:content]",
-            hinting ? "placeholder:text-transparent" : "placeholder:text-zinc-400",
+            hinting ? "placeholder:text-transparent" : "placeholder:text-zinc-500",
+            moreBelow && "[mask-image:linear-gradient(to_bottom,#000_calc(100%-32px),transparent)]",
           )}
         />
         {/* the examples type themselves over the empty field (the real placeholder stays for screen readers) */}
-        <TypewriterHint lines={health?.writer ? TOPIC_EXAMPLES : EXAMPLES} active={hinting} className="absolute inset-x-0 top-0 text-title3 leading-[26px] text-zinc-400" />
+        <TypewriterHint lines={health?.writer ? TOPIC_EXAMPLES : EXAMPLES} active={hinting} className="absolute inset-x-0 top-0 text-title3 leading-[26px] text-zinc-500" />
         {briefLen > 0 && briefLen < briefMin && (
           <span
             id="brief-count"
@@ -450,23 +477,23 @@ export function CreateScreen() {
         onClick={toGallery}
         disabled={busy}
         title={chosenName ? `Шаблон «${chosenName}» — выбрать другой` : "Выбрать шаблон"}
-        className="tap-soft group inline-flex h-10 max-w-[260px] shrink-0 cursor-pointer items-center gap-2 rounded-full bg-zinc-100 pl-1.5 pr-3 text-footnote font-semibold text-zinc-800 hover:bg-zinc-200/70 active:bg-zinc-200 disabled:pointer-events-none disabled:opacity-40"
+        className="tap-soft group inline-flex h-10 max-w-[260px] shrink-0 cursor-pointer items-center gap-2 rounded-full bg-zinc-100 pl-1.5 pr-3 text-body font-semibold text-zinc-800 hover:bg-zinc-200/70 active:bg-zinc-200 disabled:pointer-events-none disabled:opacity-40"
       >
-        <MiniCover t={chosen} className="h-7 w-12 rounded-full" />
+        <MiniCover t={chosen} className="aspect-video h-7 rounded-[6px]" />
         <span className="min-w-0 truncate">{chosenName ?? "Выберите шаблон"}</span>
         <ChevronDown className="h-4 w-4 shrink-0 text-zinc-500 transition-transform duration-150 group-hover:translate-y-px" aria-hidden />
       </button>
-      <Button size="md" variant="ghost" icon={Paperclip} disabled={busy} onClick={() => fileRef.current?.click()} title="Текст из файла .txt или .md">
+      <Button size="md" shape="pill" variant="ghost" icon={Paperclip} disabled={busy} onClick={() => fileRef.current?.click()} title="Текст из файла .txt или .md">
         Файл
       </Button>
       {briefLen === 0 && (
-        <Button size="md" variant="ghost" icon={FileText} disabled={busy} onClick={fillSample} className="animate-fade">
+        <Button size="md" shape="pill" variant="ghost" icon={FileText} disabled={busy} onClick={fillSample} className="animate-fade">
           Пример
         </Button>
       )}
       <div className="ml-auto flex shrink-0 items-center gap-2">
         {stepper}
-        <Button variant="ghost" shape="circle" size="md" icon={SlidersHorizontal} aria-label="Настройки" title="Настройки" aria-expanded={more} aria-controls="create-settings" onClick={() => setMore(!more)} />
+        <Button variant="ghost" shape="circle" size="md" icon={SlidersHorizontal} aria-label="Настройки" title="Настройки: аудитория, тип, варианты, модели" aria-expanded={more} aria-controls="create-settings" onClick={() => setMore(!more)} />
         <Button type="submit" variant="brand" shape="pill" size="lg" iconRight={ArrowRight} loading={creating} disabled={busy && !creating}>
           Создать
         </Button>
@@ -475,12 +502,12 @@ export function CreateScreen() {
   );
 
   const settings = (
-    <div className="space-y-6">
-      <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)] gap-6">
-        <div>
-          <label htmlFor="audience" className="mb-2 block text-footnote font-semibold text-zinc-700">Аудитория</label>
-          <input id="audience" type="text" value={audience} disabled={busy} onChange={(e) => setAudience(e.target.value)} placeholder="Руководство, инвесторы, команда" className={INPUT_CLS} />
-        </div>
+    <div className="space-y-6 text-left">
+      <div>
+        <label htmlFor="audience" className="mb-2 block text-footnote font-semibold text-zinc-700">Аудитория</label>
+        <input id="audience" type="text" value={audience} disabled={busy} onChange={(e) => setAudience(e.target.value)} placeholder="Руководство, инвесторы, команда" className={INPUT_CLS} />
+      </div>
+      <div>
         <div>
           <p id="purpose-label" className="mb-2 text-footnote font-semibold text-zinc-700">Тип презентации</p>
           <div ref={purposeRef} className="flex flex-wrap gap-2" role="radiogroup" aria-labelledby="purpose-label" onKeyDown={onPurposeKey}>
@@ -569,7 +596,7 @@ export function CreateScreen() {
           </p>
         </div>
 
-        <div data-composer className="mx-auto mt-8 max-w-[880px] [@media(max-height:760px)]:mt-6">
+        <div data-composer className="mx-auto mt-8 max-w-[880px] scroll-mt-6 [@media(max-height:760px)]:mt-6">
           <Composer
             {...rise(3)}
             className={rise(3).className}
@@ -585,7 +612,10 @@ export function CreateScreen() {
           {/* the problem, the model line and the writer's line share one spot: one cross-fades into the other */}
           <div className="mt-3 grid h-6 items-center justify-items-center [&>*]:col-start-1 [&>*]:row-start-1">
             {barProblem && (
-              <p key={barProblem} role="alert" className="truncate text-footnote font-semibold text-red-600 animate-fade [animation-duration:150ms]" title={barProblem}>{barProblem}</p>
+              <p key={barProblem} role="alert" className="inline-flex min-w-0 items-center gap-1.5 text-footnote font-semibold text-red-700 animate-fade [animation-duration:150ms]" title={barProblem}>
+                <AlertCircle className="h-4 w-4 shrink-0" aria-hidden />
+                <span className="truncate">{barProblem}</span>
+              </p>
             )}
             <ModelStatus enabled={useModels && modelsConfigured} hidden={!!barProblem} className="min-w-0" />
             {writerPresence.mounted && (
@@ -609,15 +639,6 @@ export function CreateScreen() {
           className={cn("mt-14 scroll-mt-6", shaking === "gallery" ? "animate-shake" : rise(4).className)}
           style={shaking === "gallery" ? undefined : rise(4).style}
         >
-          <div className="mb-5">
-            <div className="flex h-10 items-center gap-4">
-              <h2 id="templates-title" className="min-w-0 flex-1 truncate text-title1 font-bold text-zinc-900">Шаблон оформления</h2>
-              <div className="-mr-4 flex shrink-0 items-center gap-2">
-                <TemplateActions />
-              </div>
-            </div>
-            <p className="mt-1 text-body text-zinc-500">Слайды собираются из макетов шаблона: его шрифты, цвета и сетка.</p>
-          </div>
           <TemplatePicker />
         </section>
       </div>
@@ -634,7 +655,7 @@ export function CreateScreen() {
             )}
             aria-hidden={float.leaving || undefined}
           >
-            <MiniCover t={chosen} className="h-12 w-[84px] rounded-full" />
+            <MiniCover t={chosen} className="aspect-video h-12 rounded-[12px]" />
             <span className="max-w-[260px] min-w-0">
               <span className="block truncate text-footnote font-semibold text-zinc-900">{chosenName ? `Шаблон «${chosenName}»` : "Шаблон не выбран"}</span>
               <span className="block text-caption text-zinc-500">{plural(count, "слайд", "слайда", "слайдов")}{byText ? " — по тексту" : ""}</span>

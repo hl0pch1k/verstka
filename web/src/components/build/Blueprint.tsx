@@ -24,7 +24,7 @@ function Box({ x, y, w, h, className, style, children }: { x: number; y: number;
   );
 }
 
-const delay = (i: number, step = 60, from = 120): CSSProperties => ({ animationDelay: `${from + i * step}ms` });
+const delay = (i: number, step = 60, from = 40): CSSProperties => ({ animationDelay: `${from + i * step}ms` });
 
 /** Up to three numbers of the headline («35%», «225 000 ₽»), for the sketch of a slide of big numbers. */
 function numbersOf(headline: string | null): string[] {
@@ -99,16 +99,19 @@ function Drawing({ kind, headline }: { kind: Sketch["kind"]; headline: string | 
       );
     case "line":
       return (
-        <svg viewBox="0 0 100 56" preserveAspectRatio="none" className="absolute inset-x-[8%] top-[28%] h-[60%] w-[84%] overflow-visible" aria-hidden>
+        <svg viewBox="0 0 250 100" className="absolute left-[8%] top-[30%] h-[58%] w-[84%] overflow-visible" aria-hidden>
           <defs>
             <linearGradient id="bp-area" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0" stopColor="#4D7CFF" stopOpacity="0.35" />
+              <stop offset="0" stopColor="#4D7CFF" stopOpacity="0.32" />
               <stop offset="1" stopColor="#4D7CFF" stopOpacity="0" />
             </linearGradient>
           </defs>
-          <path d="M0 46 L18 38 L36 41 L54 26 L72 30 L100 10 L100 56 L0 56 Z" fill="url(#bp-area)" className="animate-fade" style={{ animationDelay: "500ms", animationDuration: "600ms" }} />
-          <path d="M0 46 L18 38 L36 41 L54 26 L72 30 L100 10" fill="none" stroke="#7AA2FF" strokeWidth="1.6" vectorEffect="non-scaling-stroke" pathLength={100} strokeDasharray="100" className="animate-draw" style={{ ["--len" as string]: "100", animationDelay: "120ms" }} />
-          <path d="M0 52 L18 49 L36 47 L54 44 L72 42 L100 36" fill="none" stroke="rgba(255,255,255,0.35)" strokeWidth="1.2" vectorEffect="non-scaling-stroke" pathLength={100} strokeDasharray="100" className="animate-draw" style={{ ["--len" as string]: "100", animationDelay: "260ms" }} />
+          <path d="M0 100 L0 82 L45 68 L90 73 L135 46 L180 53 L250 18 L250 100 Z" fill="url(#bp-area)" className="animate-fade" style={{ animationDelay: "600ms", animationDuration: "600ms" }} />
+          <path d="M0 92 L45 87 L90 83 L135 77 L180 74 L250 63" fill="none" stroke="rgba(255,255,255,0.38)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" pathLength={100} strokeDasharray="100" className="animate-draw" style={{ ["--len" as string]: "100", animationDelay: "260ms" }} />
+          <path d="M0 82 L45 68 L90 73 L135 46 L180 53 L250 18" fill="none" stroke="#7AA2FF" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" pathLength={100} strokeDasharray="100" className="animate-draw" style={{ ["--len" as string]: "100", animationDelay: "120ms" }} />
+          {[[135, 46], [250, 18]].map(([x, y], i) => (
+            <circle key={i} cx={x} cy={y} r="5" fill="#0B0D12" stroke="#7AA2FF" strokeWidth="2.5" className="animate-pop" style={{ animationDelay: `${700 + i * 120}ms`, transformBox: "fill-box", transformOrigin: "center" }} />
+          ))}
         </svg>
       );
     case "table":
@@ -254,8 +257,8 @@ export function Blueprint({ sketch, mode, aspect, running }: { sketch: Sketch | 
       {/* the slide's number and headline on top (the sketch's own title bar) */}
       {!reading && (
         <div key={`h-${key}`} className="absolute inset-x-[8%] top-[8%] flex animate-fade-in items-baseline gap-[3%]">
-          <span className="shrink-0 font-mono font-semibold uppercase tracking-[0.12em] text-[#7AA2FF]" style={{ fontSize: "clamp(9px, 0.9cqw, 12px)" }}>{String(sketch.slide).padStart(2, "0")}</span>
-          <span className="line-clamp-2 min-w-0 font-semibold leading-[1.25] text-white/85" style={{ fontSize: "clamp(10px, 1.15cqw, 14px)" }}>{sketch.headline ?? "Слайд без заголовка"}</span>
+          <span className="shrink-0 font-mono font-semibold uppercase tracking-[0.12em] text-[#9DBBFF]" style={{ fontSize: "clamp(11px, 0.95cqw, 13px)" }}>{String(sketch.slide).padStart(2, "0")}</span>
+          <span className="line-clamp-2 min-w-0 font-semibold leading-[1.25] text-white/90" style={{ fontSize: "clamp(11px, 1.2cqw, 15px)" }}>{sketch.headline ?? "Слайд без заголовка"}</span>
         </div>
       )}
       <div key={key} className="absolute inset-0">
@@ -264,9 +267,9 @@ export function Blueprint({ sketch, mode, aspect, running }: { sketch: Sketch | 
       {mode === "check" && !reading && (
         <div className="absolute inset-0">
           {[
-            { x: 84, y: 10 },
-            { x: 44, y: 48 },
-            { x: 84, y: 78 },
+            { x: 84, y: 30 },
+            { x: 48, y: 52 },
+            { x: 84, y: 74 },
           ].map((p, i) => (
             <span key={i} className="absolute flex animate-pop items-center justify-center rounded-full bg-emerald-500 text-white shadow-[0_0_0_4px_rgba(16,185,129,0.25)]" style={{ left: `${p.x}%`, top: `${p.y}%`, width: "7%", aspectRatio: "1", ...delay(i, 220, 200) }}>
               <Check className="h-[60%] w-[60%]" strokeWidth={3} />

@@ -226,12 +226,9 @@ export function BuildScreen({ job }: { job: ActiveJob }) {
         </div>
       </div>
 
-      {/* the workspace is no taller than the stage and its chips (the slides' proportions): no bands above and below the
-          stage, the columns beside it end with it — the deck's own workspace is capped the same way */}
-      <div
-        className="build-grid grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)] gap-4"
-        style={{ maxHeight: `calc((100cqw - var(--side)) / ${aspect.toFixed(4)} + ${names.length > 1 ? CHIPS_H + 12 : 0}px)` }}
-      >
+      {/* the rail and the agent's column take the page's height (more of the agent's thinking in view); the stage with its
+          chips is as tall as its width allows in the slides' proportions and stands centred between them */}
+      <div className="build-grid grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)] gap-4">
         <StageRail
           slides={rail}
           images={previews}
@@ -239,7 +236,10 @@ export function BuildScreen({ job }: { job: ActiveJob }) {
           aspect={aspect}
           className={cn(vt.names && "vt-rail", !vt.quiet && "animate-rise")}
         />
-        <div className={cn("flex min-h-0 min-w-0 flex-col gap-3", !vt.quiet && "animate-rise")} style={vt.quiet ? undefined : stagger(1)}>
+        <div
+          className={cn("flex min-h-0 min-w-0 flex-col gap-3 self-center", !vt.quiet && "animate-rise")}
+          style={{ height: `min(100%, calc((100cqw - var(--side)) / ${aspect.toFixed(4)} + ${names.length > 1 ? CHIPS_H + 12 : 0}px))`, ...(vt.quiet ? null : stagger(1)) }}
+        >
           {/* the stage: the largest box of the slides' proportions the column leaves (a size container) */}
           <div className="grid min-h-0 flex-1 place-items-center" style={{ containerType: "size" }}>
             <BuildStage

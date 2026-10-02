@@ -12,16 +12,22 @@ import { Modal } from "../ui/Modal";
 
 const thumbUrl = (id: string, n: number) => `/api/templates/${encodeURIComponent(id)}/files/thumbs/slide-${String(n).padStart(3, "0")}.jpg`;
 
-/** The template's colours as overlapping dots (a white one keeps a hairline so it reads on white). */
-export function PaletteDots({ colors, max = 5, size = 14, className }: { colors?: string[]; max?: number; size?: number; className?: string }) {
-  const list = (colors ?? []).filter((c) => /^[0-9a-f]{6}$/i.test(c)).slice(0, max);
+const rgb = (hex: string) => [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16));
+/** Two colours a person would not tell apart in a 12px dot («FAFCFF» and «FFFFFF»). */
+const near = (a: string, b: string) => rgb(a).reduce((sum, v, i) => sum + Math.abs(v - rgb(b)[i]), 0) < 36;
+
+/** The template's colours as a row of dots, near-duplicates dropped; every dot keeps a hairline, so white reads on
+ *  white and black on a dark cover. */
+export function PaletteDots({ colors, max = 5, size = 12, className }: { colors?: string[]; max?: number; size?: number; className?: string }) {
+  const list: string[] = [];
+  for (const c of colors ?? []) if (/^[0-9a-f]{6}$/i.test(c) && !list.some((x) => near(x, c))) list.push(c);
   if (list.length === 0) return null;
   return (
-    <span className={cn("flex shrink-0 items-center", className)} aria-hidden>
-      {list.map((c, i) => (
+    <span className={cn("flex shrink-0 items-center gap-1", className)} aria-hidden>
+      {list.slice(0, max).map((c) => (
         <span
-          key={`${c}-${i}`}
-          className={cn("block rounded-full ring-2 ring-white", i > 0 && "-ml-1", isLightHex(c) && "shadow-[inset_0_0_0_1px_rgba(16,24,40,0.14)]")}
+          key={c}
+          className={cn("block rounded-full", isLightHex(c) ? "shadow-[inset_0_0_0_1px_rgba(16,24,40,0.18)]" : "shadow-[inset_0_0_0_1px_rgba(255,255,255,0.12)]")}
           style={{ width: size, height: size, background: `#${c}` }}
         />
       ))}
@@ -33,22 +39,25 @@ function Thumb({ id, n, aspect }: { id: string; n: number; aspect: number }) {
   const [broken, setBroken] = useState(false);
   const [loaded, setLoaded] = useState(false);
   return (
-    <figure className="relative overflow-hidden rounded-xl bg-zinc-100 ring-1 ring-zinc-900/[0.06]" style={{ aspectRatio: String(aspect) }}>
-      {broken ? (
-        <span className="flex h-full items-center justify-center text-zinc-400"><ImageOff className="h-5 w-5" aria-hidden /></span>
-      ) : (
-        <img
-          src={thumbUrl(id, n)}
-          alt={`Слайд ${n} шаблона`}
-          loading="lazy"
-          decoding="async"
-          draggable={false}
-          onLoad={() => setLoaded(true)}
-          onError={() => setBroken(true)}
-          className={cn("h-full w-full object-cover transition-opacity duration-300", loaded ? "opacity-100" : "opacity-0")}
-        />
-      )}
-      <figcaption className="absolute bottom-1.5 left-1.5 rounded-md bg-zinc-900/60 px-1.5 text-caption font-semibold leading-5 tabular-nums text-white">{n}</figcaption>
+    <figure>
+      <span className="relative block overflow-hidden rounded-xl bg-zinc-100 ring-1 ring-zinc-900/[0.06]" style={{ aspectRatio: String(aspect) }}>
+        {broken ? (
+          <span className="flex h-full items-center justify-center text-zinc-400"><ImageOff className="h-5 w-5" aria-hidden /></span>
+        ) : (
+          <img
+            src={thumbUrl(id, n)}
+            alt={`Слайд ${n} шаблона`}
+            loading="lazy"
+            decoding="async"
+            draggable={false}
+            onLoad={() => setLoaded(true)}
+            onError={() => setBroken(true)}
+            className={cn("h-full w-full object-cover transition-opacity duration-300", loaded ? "opacity-100" : "opacity-0")}
+          />
+        )}
+      </span>
+      {/* the number under the slide, never over its own corner (a logo, a page number) */}
+      <figcaption className="mt-1.5 font-mono text-caption tabular-nums text-zinc-500">{String(n).padStart(2, "0")}</figcaption>
     </figure>
   );
 }
@@ -100,7 +109,7 @@ export function TemplatePreview({ t, onClose }: { t: TemplateListItem | null; on
       }
     >
       {n > 0 ? (
-        <div className="grid grid-cols-4 gap-3 pt-2">
+        <div className="grid grid-cols-4 gap-x-3 gap-y-4 pt-2">
           {Array.from({ length: n }, (_, i) => <Thumb key={i} id={view.template_id} n={i + 1} aspect={aspect} />)}
         </div>
       ) : (

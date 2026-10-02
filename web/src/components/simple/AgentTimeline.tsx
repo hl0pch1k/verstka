@@ -1,14 +1,14 @@
 // How the agent thinks, as a vertical list of steps: Аналитик → (Архитектор) → Дизайнер → Критик → Правка → Вёрстка →
-// Проверка. Each step shows what it said, in mono, like a train of thought: the designer adds a line per slide with the
-// form it chose, the critic a note per slide with its fix on a line of its own (→). The slide a line is about sits in a
-// small mono tag beside it. Used live in the build's right column and, finished, in the drawer's «Агент». Live, the
-// lines of one poll arrive as a small cascade (40 ms apart, once), the steps below glide down to make room, a finished
-// step's connector fills downwards in the brand gradient, the active step's title stays pinned and the column follows
-// the newest line.
+// Проверка. Each step shows what it said, like a train of thought: the designer adds a line per slide with the form it
+// chose, the critic a note per slide with its fix on a line of its own (→). The slide a line is about sits in a small
+// mono tag beside it. Used live in the build's right column and, finished, in the drawer's «Агент». Live, the lines of
+// one poll arrive as a small cascade (40 ms apart, once) in their own room (the steps below simply move down: a glide
+// would pass over the new lines), a finished step's connector fills downwards in the brand gradient, the active step's
+// title stays pinned and the column follows the active step's newest line.
 import { useLayoutEffect, useRef, type CSSProperties } from "react";
 import { AlertTriangle, ArrowRight, Check, CheckCircle2, Loader2, Minus } from "lucide-react";
-import { eventParts, slideGroups, type TimelineEvent, type TimelineRow } from "../../lib/agent";
-import { MOTION, smoothScroll, useFlipList } from "../../lib/motion";
+import { eventParts, keepTogether, slideGroups, type TimelineEvent, type TimelineRow } from "../../lib/agent";
+import { MOTION, smoothScroll } from "../../lib/motion";
 import { cn } from "../../lib/utils";
 
 function Dot({ status, n, live }: { status: TimelineRow["status"]; n: number; live: boolean }) {
@@ -80,7 +80,7 @@ function Said({ e, variantTitle, className, style }: { e: TimelineEvent; variant
         )}
       </p>
       {fix && (
-        <p className="mt-1 flex gap-1.5 text-zinc-500">
+        <p className="mt-1 flex gap-1.5 text-zinc-800">
           <ArrowRight className="mt-[3px] h-3.5 w-3.5 shrink-0 text-emerald-600" aria-hidden />
           <span className="min-w-0">
             <span className="sr-only">Исправление: </span>
@@ -106,7 +106,7 @@ function Lines({ row, variantTitle, onSlide, arrival }: { row: TimelineRow; vari
   };
   // consecutive lines about one slide share its badge, the same while the agent works and after
   return (
-    <ul className={cn("mt-2 font-mono text-[12px] leading-[18px] [overflow-wrap:anywhere]", row.key === "critic" ? "space-y-3" : "space-y-2")}>
+    <ul className={cn("mt-2 text-footnote [overflow-wrap:anywhere]", row.key === "critic" ? "space-y-3" : "space-y-2")}>
       {slideGroups(row.events).map((g, gi) => (
         <li key={g.events[0].seq ?? `${row.key}-g${gi}`} className="flex items-start gap-2">
           {pad && <Tag slide={g.slide} onSlide={onSlide} mark={figureMark(eventParts(g.events[0]).text)} {...enter(g.events[0])} />}
@@ -176,28 +176,43 @@ export function AgentTimeline({ rows, variantTitle, onSlide, follow = false, pin
       return l && l.delay >= 0 && now - l.at < ENTER_WINDOW ? l.delay : null;
     };
   }
-  // the steps below the one that grows glide down to their new place instead of jumping (live only: a variant switch
-  // in the drawer swaps the log without motion)
-  useFlipList(ref, "[data-flip]", follow ? `${total}/${active ?? ""}` : 0);
+  // live, the column follows the active step's newest line: the scroll that puts the end of that step at the column's
+  // foot (its pinned title stays in view above its lines; the steps still to come wait below, out of the way); with no
+  // step at work, the end of the list
+  const target = (box: HTMLElement) => {
+    const li = active ? ref.current?.querySelector<HTMLElement>(`[data-step="${active}"]`) : null;
+    const end = li ? li.getBoundingClientRect().bottom - box.getBoundingClientRect().top + box.scrollTop + 16 : box.scrollHeight;
+    return Math.max(0, Math.min(box.scrollHeight - box.clientHeight, end - box.clientHeight));
+  };
+  // our own smooth scrolls are not the reader's: their scroll events are ignored for their length
+  const autoUntil = useRef(0);
   useLayoutEffect(() => {
     if (!follow) return;
     const box = ref.current?.closest("[data-follow]") as HTMLElement | null;
     if (!box) return;
-    // only the reader scrolling up stops the following (our own smooth scroll down passes far from the end on its way
-    // and must not); back at the end, it follows again
+    // only the reader scrolling up stops the following; scrolling back down to the newest line resumes it
     let last = box.scrollTop;
     const onScroll = () => {
-      if (box.scrollHeight - box.scrollTop - box.clientHeight < 48) stick.current = true;
-      else if (box.scrollTop < last - 1) stick.current = false;
-      last = box.scrollTop;
+      const top = box.scrollTop;
+      if (performance.now() >= autoUntil.current) {
+        if (top < last - 1) stick.current = false;
+        else if (top >= target(box) - 24) stick.current = true;
+      }
+      last = top;
     };
     box.addEventListener("scroll", onScroll, { passive: true });
     return () => box.removeEventListener("scroll", onScroll);
-  }, [follow]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [follow, active]);
   useLayoutEffect(() => {
     if (!follow || !stick.current) return;
     const box = ref.current?.closest("[data-follow]") as HTMLElement | null;
-    if (box && box.scrollHeight > box.clientHeight) box.scrollTo({ top: box.scrollHeight, behavior: smoothScroll() });
+    if (!box || box.scrollHeight <= box.clientHeight) return;
+    const top = target(box);
+    if (Math.abs(top - box.scrollTop) < 1) return;
+    autoUntil.current = performance.now() + 700;
+    box.scrollTo({ top, behavior: smoothScroll() });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [follow, total, active]);
 
   return (
@@ -207,9 +222,10 @@ export function AgentTimeline({ rows, variantTitle, onSlide, follow = false, pin
         const lit = r.status === "done" || r.status === "active";
         const pinned = follow && r.status === "active";
         // active: what the step does (its lines are still coming); done: what it came to
-        const aside = r.status === "active" ? r.hint : r.note ?? (r.events.length === 0 && r.status === "pending" ? r.hint : null);
+        const raw = r.status === "active" ? r.hint : r.note ?? (r.events.length === 0 && r.status === "pending" ? r.hint : null);
+        const aside = raw ? keepTogether(raw) : null;
         return (
-          <li key={r.key} data-flip={r.key} className="relative pb-6 last:pb-0">
+          <li key={r.key} data-step={r.key} className="relative pb-6 last:pb-0">
             {/* the connector to the next step: a quiet track that fills downwards once the step is done */}
             {!last && (
               <span className="absolute bottom-1 left-[11px] top-7 w-0.5 overflow-hidden rounded-full bg-zinc-100" aria-hidden>
@@ -230,7 +246,7 @@ export function AgentTimeline({ rows, variantTitle, onSlide, follow = false, pin
               {/* the lines that scroll under the pinned title fade out instead of showing their cut descenders: a 4px
                   fade that fills the gap above the first line exactly, drawn only while pinned (a hidden pseudo-element
                   at opacity 0 still paints a strip in Chrome) */}
-              {pinned && <span className="pointer-events-none absolute inset-x-0 top-full h-1 bg-gradient-to-b from-white to-transparent" aria-hidden />}
+              {pinned && <span className="pointer-events-none absolute inset-x-0 top-full h-3 bg-gradient-to-b from-white to-transparent" aria-hidden />}
             </div>
             {r.events.length > 0 && (
               <div className="pl-9">

@@ -28,17 +28,18 @@ export const Composer = forwardRef<HTMLDivElement, ComposerProps>(function Compo
       <div aria-hidden className={cn("pointer-events-none absolute -inset-[1.5px] rounded-[29.5px] bg-brand opacity-0 transition-opacity duration-200", !invalid && "group-focus-within/composer:opacity-100")} />
       <div className={cn("relative rounded-[28px] bg-white transition-shadow duration-150", invalid ? "shadow-danger" : "shadow-float")}>
         {field}
-        <div ref={toolbarRef} className="flex min-h-[64px] flex-wrap items-center gap-2 px-4 pb-4 pt-2">
-          {toolbar}
-        </div>
-        {/* the settings unfold smoothly (the rows glide open, the panel fades in just after them, and fades out first on
-            the way back); while folded they leave the tab order once the animation has played */}
+        {/* the settings unfold between the text and the toolbar, so «Создать» comes after the options it depends on (the
+            rows glide open, the panel fades in just after them, and fades out first on the way back); while folded they
+            leave the tab order once the animation has played */}
         <div className={cn("grid transition-[grid-template-rows] duration-300 ease-glide", settingsOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]")}>
           <div id={settingsId} className="min-h-0 overflow-hidden" style={{ visibility: settingsOpen ? "visible" : "hidden", transition: `visibility 0s linear ${settingsOpen ? "0s" : "300ms"}` }}>
-            <div className={cn("border-t border-zinc-900/[0.06] px-6 pb-6 pt-5 transition-opacity", settingsOpen ? "opacity-100 delay-[60ms] duration-200 ease-out" : "opacity-0 duration-150 ease-in")}>
+            <div className={cn("mx-6 mt-3 border-y border-zinc-900/[0.06] py-6 transition-opacity", settingsOpen ? "opacity-100 delay-[60ms] duration-200 ease-out" : "opacity-0 duration-150 ease-in")}>
               {settings}
             </div>
           </div>
+        </div>
+        <div ref={toolbarRef} className="flex min-h-[72px] flex-wrap items-center gap-2 px-6 pb-5 pt-3">
+          {toolbar}
         </div>
       </div>
     </div>

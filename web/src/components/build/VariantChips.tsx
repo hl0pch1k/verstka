@@ -53,8 +53,10 @@ export function VariantChips({ names, states, value, onChange, titleOf, classNam
             </span>
             {/* «продумываю слайды» → «вёрстка 4 из 12» → «готово»: each status cross-fades in */}
             <span key={st.text} className="block w-full animate-fade truncate text-caption text-zinc-500">{st.text}</span>
-            {/* staggered, so the sweeps never move in lockstep */}
-            <Progress size="xs" value={st.frac} indeterminate={st.indeterminate} delayMs={i * 200} className="absolute inset-x-4 bottom-2" />
+            {/* the bar along the chip's foot, inside its padding; staggered, so the sweeps never move in lockstep */}
+            <span className="absolute inset-x-4 bottom-2.5 block overflow-hidden rounded-full">
+              <Progress size="xs" value={st.frac} indeterminate={st.indeterminate} delayMs={i * 200} />
+            </span>
           </button>
         );
       })}

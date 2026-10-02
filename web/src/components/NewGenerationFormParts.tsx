@@ -122,7 +122,7 @@ function StrategyArt({ name, active }: { name: string; active: boolean }) {
   );
 }
 
-/** A selectable strategy card: the drawing, the name and one line of what it does (the full text on hover). */
+/** A selectable strategy card: the drawing, the name and up to two lines of what it does (the full text on hover). */
 export function StrategyOption({ strategy, checked, disabled, onChange }: {
   strategy: StrategyInfo;
   checked: boolean;
@@ -161,7 +161,7 @@ export function StrategyOption({ strategy, checked, disabled, onChange }: {
       </span>
       <span className="min-w-0">
         <span className="block text-body font-semibold text-zinc-900">{strategy.title}</span>
-        <span className="mt-0.5 block truncate text-caption text-zinc-500" title={strategy.description || hint}>{hint}</span>
+        <span className="mt-0.5 line-clamp-2 text-caption text-zinc-500" title={strategy.description || hint}>{hint}</span>
       </span>
     </label>
   );

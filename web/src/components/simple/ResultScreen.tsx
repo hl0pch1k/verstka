@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { ChevronRight, Download, FileText, FolderDown, ImageOff, LayoutTemplate, ListTree, PenLine, RotateCcw, ScrollText } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { plainWords, variantsNote } from "../../lib/agent";
+import { keepTogether, plainWords, variantsNote } from "../../lib/agent";
 import { deckNotice, skeletonDeck } from "../../lib/modelText";
 import { figuresLine } from "../../lib/narrate";
 import { fileSafe, templateTitle, variantHint } from "../../lib/plain";
@@ -325,10 +325,13 @@ function Deck({ generation }: { generation: Generation }) {
   const errors = errorsOf(variant);
   const pptx = variant.files["deck.pptx"] ?? null;
   const pdf = variant.files["deck.pdf"] ?? null;
-  const title = variant.outline?.title || "Презентация";
+  const rawTitle = variant.outline?.title || "Презентация";
+  // on screen a short word never ends the title's first line («… «Умные сводки» в / корпоративном …»); the file's name
+  // keeps plain spaces
+  const title = keepTogether(rawTitle);
   const variantName = strategyTitle(variant.strategy);
   const variantIdx = generation.variants.findIndex((v) => v.strategy === variant.strategy) + 1;
-  const fileBase = `${fileSafe(title)} — ${variantName}`;
+  const fileBase = `${fileSafe(rawTitle)} — ${variantName}`;
   const meta = [templateTitle(generation.template_file), fmtWhen(generation.created_at)].filter(Boolean).join(" · ");
 
   // the drawer gives the focus back to the card that opened it: Tab goes on from the same place in the aside

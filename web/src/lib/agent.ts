@@ -158,12 +158,12 @@ export function plainWords(text: string): string {
 }
 
 /** A line that wraps well: a dash never starts a line, a short preposition or conjunction never ends one («титул и
- *  5 слайдов»), a number stays with its word («6 категорий»), its unit («300 ₽», «25 %») and its own digit groups
- *  («780 000 рублей» and «1 138 500» never break). */
+ *  5 слайдов», «для него»), a number stays with its word («6 категорий»), its unit («300 ₽», «25 %») and its own digit
+ *  groups («780 000 рублей» and «1 138 500» never break). */
 export const keepTogether = (s: string) =>
   s
     .replace(/ ([—–]) /g, "\u00a0$1 ")
-    .replace(/(?<=^|[\s(«])(в|во|и|к|ко|с|со|у|о|об|а|на|по|до|из|от|за|не) /gi, "$1\u00a0")
+    .replace(/(?<=^|[\s(«])(в|во|и|к|ко|с|со|у|о|об|а|на|по|до|из|от|за|не|для|при|про|без|под|над) /gi, "$1\u00a0")
     .replace(/(\d) (?=\d{3}(?!\d))/g, "$1\u00a0")
     .replace(/(\d) (?=[а-яё₽%$€])/gi, "$1\u00a0");
 

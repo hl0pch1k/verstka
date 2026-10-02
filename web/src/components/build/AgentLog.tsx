@@ -25,7 +25,8 @@ export function AgentLog({ rows, variantTitle, running, className }: {
           </span>
         )}
       </div>
-      {/* data-follow: the timeline keeps this box at its newest line */}
+      {/* data-follow: the timeline keeps this box at the active step's newest line; the active step's title is pinned at
+          its top edge on white, the lines scroll away under it */}
       <div data-follow className="scroll-thin relative min-h-0 flex-1 overflow-y-auto px-5 pb-5">
         <AgentTimeline rows={rows} variantTitle={variantTitle} follow pinClassName="top-0 z-[2]" className="pt-1" />
       </div>

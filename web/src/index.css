@@ -86,6 +86,13 @@ h1, h2, h3 {
   box-decoration-break: clone;
 }
 
+/* a rail of thumbnails (the deck's, the build's): the numbers stand left of the thumbnails; a narrow rail (the helper
+   docked) drops them, the thumbnails keep the room */
+.slide-rail { container-type: inline-size; }
+@container (max-width: 120px) {
+  .rail-num { display: none; }
+}
+
 /* the deck: the rail of thumbnails, the stage and (unless it is tucked under the helper) the aside. A narrow page (the
    helper docked) narrows the rail, so the slide keeps its room; `--rail` also caps the workspace's height */
 .deck-grid { --rail: 152px; grid-template-columns: var(--rail) minmax(0, 1fr) 288px; }
@@ -98,8 +105,8 @@ h1, h2, h3 {
    stage keeps its size */
 .build-root { container: build / inline-size; }
 /* --side: what the columns beside the stage take (the rail, the agent's column and two gaps): the stage's width is the
-   rest. The agent's column is wider than the deck's aside: its lines are a train of thought, they need the room */
-.build-grid { --side: 524px; grid-template-columns: 152px minmax(0, 1fr) 340px; }
+   rest. The agent's column is wider than the deck's aside and grows with the window: its lines are a train of thought */
+.build-grid { --agent: clamp(340px, 24vw, 440px); --side: calc(184px + var(--agent)); grid-template-columns: 152px minmax(0, 1fr) var(--agent); }
 @container build (max-width: 1099px) {
   .build-grid { --side: 168px; grid-template-columns: 152px minmax(0, 1fr); }
   .build-log { display: none; }

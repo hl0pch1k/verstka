@@ -120,7 +120,8 @@ function StageProgress({ value, queued }: { value: number; queued: boolean }) {
   return (
     <div className="flex items-center gap-[2cqw]">
       <div className="relative h-[max(6px,0.55cqw)] flex-1">
-        <div className="absolute inset-0 overflow-hidden rounded-full bg-white/10">
+        {/* a dark track with a hairline: the part still to go never reads as filled over the violet glow */}
+        <div className="absolute inset-0 overflow-hidden rounded-full bg-black/40 ring-1 ring-inset ring-white/10">
           {queued ? (
             <div className="absolute inset-y-0 left-0 w-[30%] animate-sweep rounded-full bg-brand" />
           ) : (
@@ -171,9 +172,11 @@ export function BuildStage({ kicker, title, line, sketch, mode, progress, queued
       <div aria-hidden className={cn("pointer-events-none absolute -bottom-[42%] -right-[8%] -z-10 h-[95%] w-[58%] rounded-full bg-[#6A4DFF] opacity-40 blur-[100px]", running && "animate-stage-glow [animation-delay:-3.5s]")} />
       <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 [background-image:radial-gradient(rgba(255,255,255,0.075)_1px,transparent_1.2px)] [background-size:22px_22px] [mask-image:radial-gradient(ellipse_at_50%_45%,#000_25%,transparent_78%)]" />
       <div className="flex h-full flex-col px-[4.6cqw] pb-[3.8cqw] pt-[3.6cqw]">
-        <div className="flex items-center justify-between gap-4 font-mono font-medium uppercase tracking-[0.14em] [font-size:clamp(10px,1.05cqw,13px)]">
-          <span className="truncate text-[#8FB4FF]">/// {kicker}</span>
-          <span className="shrink-0 tabular-nums tracking-normal text-zinc-400">{timer}</span>
+        <div className="flex items-center justify-between gap-4 font-mono font-medium uppercase tracking-[0.14em] [font-size:clamp(11px,1.05cqw,13px)]">
+          <span className="truncate text-white/80">
+            <span className="text-[#9DBBFF]">///</span> {kicker}
+          </span>
+          <span className="shrink-0 tabular-nums tracking-normal text-white/70">{timer}</span>
         </div>
         <div className="flex min-h-0 flex-1 items-center gap-[4.5cqw]">
           <div className="min-w-0 flex-[1.12]">
