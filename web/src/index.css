@@ -76,6 +76,25 @@ h1, h2, h3 {
   letter-spacing: -0.015em;
 }
 
+/* words painted with the brand gradient (the hero's second line); a wrapped line keeps its own gradient */
+.text-brand {
+  background-image: linear-gradient(100deg, #0066F5 0%, #3858FF 55%, #6A4DFF 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+/* the build page: three columns (rail, stage, the agent's log); a narrow page (the helper docked) drops the log, the
+   stage keeps its size */
+.build-root { container: build / inline-size; }
+.build-grid { grid-template-columns: 152px minmax(0, 1fr) 288px; }
+@container build (max-width: 1099px) {
+  .build-grid { grid-template-columns: 152px minmax(0, 1fr); }
+  .build-log { display: none; }
+}
+
 /* subtle scrollbars for the panels */
 .scroll-thin::-webkit-scrollbar { width: 8px; height: 8px; }
 .scroll-thin::-webkit-scrollbar-thumb { @apply rounded-full bg-zinc-300; border: 2px solid transparent; background-clip: padding-box; }
@@ -121,15 +140,27 @@ h1, h2, h3 {
 ::view-transition-old(vt-title) { animation: 90ms var(--ease-in) both vt-out; }
 ::view-transition-new(vt-title) { animation: 220ms var(--ease-out) 100ms both vt-fade; }
 ::view-transition-old(vt-aside):only-child { animation: var(--dur-fast) var(--ease-in) both vt-out; }
+/* build → deck: the rail of sketches becomes the rail of thumbnails and the dark stage becomes the slide (the two share
+   the template's aspect, so both pictures fill the morphing box); the old leaves only once the new one covers it */
+::view-transition-old(vt-rail), ::view-transition-new(vt-rail),
+::view-transition-old(vt-stage), ::view-transition-new(vt-stage) { mix-blend-mode: normal; }
+::view-transition-old(vt-rail), ::view-transition-old(vt-stage) { animation: 140ms var(--ease-in) 160ms both vt-out; }
+::view-transition-new(vt-rail), ::view-transition-new(vt-stage) { animation: 260ms var(--ease-out) 40ms both vt-fade; }
+::view-transition-old(vt-stage), ::view-transition-new(vt-stage) { width: 100%; height: 100%; }
+::view-transition-old(vt-rail):only-child, ::view-transition-old(vt-stage):only-child { animation: var(--dur-fast) var(--ease-in) both vt-out; }
 /* two unrelated screens (create → build, a deck → its rebuild; viewTransition `through`): a fade-through. The old page
    clears in 90 ms (front-loaded), the new one fades in 200 ms and rises 8 px from 25 ms: the two never print over each
    other (at most ≈10% each at the crossover) and the dip between them lasts about one frame. The deck's aside leaves
    with its page. Separate rules for the type and for the <html data-vt> fallback: one unknown selector would drop both. */
 html:active-view-transition-type(through)::view-transition-old(root),
-html:active-view-transition-type(through)::view-transition-old(vt-aside) { animation: 90ms var(--ease-out) both vt-out; }
+html:active-view-transition-type(through)::view-transition-old(vt-aside),
+html:active-view-transition-type(through)::view-transition-old(vt-rail),
+html:active-view-transition-type(through)::view-transition-old(vt-stage) { animation: 90ms var(--ease-out) both vt-out; }
 html:active-view-transition-type(through)::view-transition-new(root) { animation: vt-fade 200ms var(--ease-out) 25ms both, vt-rise var(--dur-slow) var(--ease-out) 25ms both; }
 html[data-vt="through"]::view-transition-old(root),
-html[data-vt="through"]::view-transition-old(vt-aside) { animation: 90ms var(--ease-out) both vt-out; }
+html[data-vt="through"]::view-transition-old(vt-aside),
+html[data-vt="through"]::view-transition-old(vt-rail),
+html[data-vt="through"]::view-transition-old(vt-stage) { animation: 90ms var(--ease-out) both vt-out; }
 html[data-vt="through"]::view-transition-new(root) { animation: vt-fade 200ms var(--ease-out) 25ms both, vt-rise var(--dur-slow) var(--ease-out) 25ms both; }
 /* text never stretches while the title box morphs */
 ::view-transition-old(vt-title), ::view-transition-new(vt-title) { width: auto; height: 100%; object-fit: none; object-position: left center; }
@@ -141,6 +172,8 @@ html[data-vt="through"]::view-transition-new(root) { animation: vt-fade 200ms va
 .vt-toasts { view-transition-name: vt-toasts; }
 .vt-title { view-transition-name: vt-title; }
 .vt-aside { view-transition-name: vt-aside; }
+.vt-rail { view-transition-name: vt-rail; }
+.vt-stage { view-transition-name: vt-stage; }
 
 /* reduced motion: instant, or a ≤ 120 ms opacity cross-fade. Nothing travels, scales, bounces, loops or scrolls. */
 @media (prefers-reduced-motion: reduce) {

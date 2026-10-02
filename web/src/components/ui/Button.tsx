@@ -3,17 +3,18 @@ import { Loader2 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { renderIcon, type IconProp } from "./icon";
 
-// VK button family: primary (filled blue, one per screen), tonal (light blue), secondary (neutral grey),
-// white (on the canvas or a tinted notice), ghost (text) and danger (the confirming button of a delete dialog). Sizes 32 / 40 / 48. Callers pass layout classes only;
-// another look is another variant, never a className override. Focus uses the global 2px outline.
-export type ButtonVariant = "primary" | "tonal" | "secondary" | "white" | "ghost" | "danger";
+// VK button family: brand (the gradient call to action — one per screen: «Создать», «Скачать PowerPoint»), primary
+// (filled blue), tonal (light blue), secondary (neutral grey), white (on the canvas or a tinted notice), ghost (text) and
+// danger (the confirming button of a delete dialog). Sizes 32 / 40 / 48. Callers pass layout classes only; another look
+// is another variant, never a className override. Focus uses the global 2px outline.
+export type ButtonVariant = "brand" | "primary" | "tonal" | "secondary" | "white" | "ghost" | "danger";
 export type ButtonSize = "sm" | "md" | "lg";
-export type ButtonShape = "rect" | "circle";
+export type ButtonShape = "rect" | "circle" | "pill";
 
 export interface ButtonLook {
   variant?: ButtonVariant;
   size?: ButtonSize;
-  /** "circle" — a round button (icon-only controls: close, arrows). */
+  /** "circle" — a round button (icon-only controls: close, arrows); "pill" — fully rounded ends (the hero's calls). */
   shape?: ButtonShape;
   /** Stretch to the container width. */
   block?: boolean;
@@ -34,6 +35,10 @@ const BASE =
   "tap inline-flex shrink-0 cursor-pointer select-none items-center justify-center gap-2 whitespace-nowrap font-semibold disabled:pointer-events-none disabled:[&:not([aria-busy=true])]:opacity-40 aria-disabled:pointer-events-none aria-disabled:opacity-40";
 
 const VARIANTS: Record<ButtonVariant, string> = {
+  // the gradient stays put; hover lightens it through a white veil under the label (a gradient cannot transition) and
+  // lifts its glow, a press darkens the veil
+  brand:
+    "relative isolate bg-brand text-white shadow-brand hover:shadow-brand-hover before:absolute before:inset-0 before:-z-10 before:rounded-[inherit] before:bg-white/0 before:transition-colors before:duration-150 before:content-[''] hover:before:bg-white/[0.12] active:before:bg-zinc-950/[0.08]",
   primary: "bg-accent-fill text-white hover:bg-accent-600 active:bg-accent-700",
   // pressed (a toggle that is on): a deeper tint and darker text only — a blue ring would read as keyboard focus
   tonal: "bg-accent-50 text-accent-700 hover:bg-accent-100 active:bg-accent-200 aria-pressed:bg-accent-100 aria-pressed:text-accent-800 aria-pressed:hover:bg-accent-200",
@@ -53,7 +58,7 @@ const SIZES: Record<ButtonSize, { box: string; iconOnly: string; icon: string; i
 /** The class string of a button look — for elements that must stay something else (a <label>, a router link). */
 export function buttonClass({ variant = "secondary", size = "md", shape = "rect", block = false, iconOnly = false }: { variant?: ButtonVariant; size?: ButtonSize; shape?: ButtonShape; block?: boolean; iconOnly?: boolean } = {}): string {
   const s = SIZES[size];
-  return cn(BASE, VARIANTS[variant], s.box, iconOnly && s.iconOnly, shape === "circle" && "rounded-full", block && "w-full");
+  return cn(BASE, VARIANTS[variant], s.box, iconOnly && s.iconOnly, shape !== "rect" && "rounded-full", block && "w-full");
 }
 
 const isEmpty = (children: ReactNode) => children === undefined || children === null || children === false || children === "";

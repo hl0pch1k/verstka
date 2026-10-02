@@ -37,7 +37,15 @@ export default {
           fill: "#0070F0",
         },
         ink: { DEFAULT: "#111214" },
-        canvas: "#F2F3F5",
+        // a warm paper canvas: white cards read on it without borders (cool VK greys stay the text and line colours)
+        canvas: "#F4F3EF",
+        // the build stage: a deep night blue-black and its raised layer
+        stage: { DEFAULT: "#0B0D12", raised: "#141821" },
+      },
+      // the brand gradient (VK blue → violet): the one call to action per screen, the hero's second line, the stage's
+      // progress. White text keeps ≥ 4.9:1 on both ends
+      backgroundImage: {
+        brand: "linear-gradient(100deg, #0066F5 0%, #3858FF 55%, #6A4DFF 100%)",
       },
       fontFamily: {
         // VK Sans is VK's own typeface (TypeType, not openly licensed): used when installed on the machine, otherwise
@@ -54,7 +62,8 @@ export default {
         title3: ["17px", "24px"], // card titles
         title2: ["20px", "28px"], // step titles, drawer hero, modal title
         title1: ["28px", "36px"], // page H1 (result, build)
-        display: ["40px", "48px"], // create H1, build percent
+        display: ["40px", "48px"], // section heads that speak to the eye
+        hero: ["64px", { lineHeight: "68px", letterSpacing: "-0.035em" }], // the create screen's H1
       },
       boxShadow: {
         card: "0 0 0 1px rgba(0, 16, 61, 0.04), 0 1px 2px rgba(0, 16, 61, 0.05)",
@@ -67,6 +76,11 @@ export default {
         "selected-inset": "inset 0 0 0 1.5px #0077FF",
         danger: "0 0 0 2px #EF4444",
         knob: "0 1px 2px rgba(0, 16, 61, 0.2)",
+        // the glow under a brand button, a little stronger on hover
+        brand: "0 10px 30px -10px rgba(56, 88, 255, 0.55)",
+        "brand-hover": "0 14px 36px -10px rgba(56, 88, 255, 0.7)",
+        // the composer and the floating bar: a soft, deep shadow instead of a border
+        float: "0 0 0 1px rgba(16, 24, 40, 0.05), 0 2px 4px rgba(16, 24, 40, 0.04), 0 24px 56px -24px rgba(16, 24, 40, 0.24)",
       },
       // motion tokens (MOTION_SPEC §1): the same curves live as CSS variables in index.css and as EASE in lib/motion.ts.
       // `ease-out` / `ease-in` / `ease-in-out` are overridden on purpose: every arrival decelerates on the expressive curve.
@@ -109,6 +123,20 @@ export default {
         // a 30% segment from just off the left end to just off the right end (-30% → 100% of the track)
         sweep: { "0%": { transform: "translateX(-100%)" }, "100%": { transform: "translateX(333%)" } },
         scan: { "0%": { transform: "translateX(-100%)" }, "100%": { transform: "translateX(300%)" } },
+        // the build stage: its words rise one by one, the old ones leave upwards; a sketch draws itself; a rail tile
+        // fills in with a ring flash; the glows breathe and the reading highlight runs down while the work runs
+        "word-rise": { from: { opacity: "0", transform: "translateY(0.45em)" } },
+        "word-out": { to: { opacity: "0", transform: "translateY(-0.35em)" } },
+        "fill-in": { from: { opacity: "0", transform: "scale(0.94)" } },
+        "tile-pulse": { from: { boxShadow: "0 0 0 0 rgba(0, 119, 255, 0.55)" }, to: { boxShadow: "0 0 0 10px rgba(0, 119, 255, 0)" } },
+        "grow-y": { from: { transform: "scaleY(0)" } },
+        "grow-x": { from: { transform: "scaleX(0)" } },
+        draw: { from: { strokeDashoffset: "var(--len, 400)" } },
+        "stage-glow": { "0%, 100%": { opacity: "0.7", transform: "scale(1)" }, "50%": { opacity: "1", transform: "scale(1.08)" } },
+        "scan-down": { "0%": { transform: "translateY(-100%)" }, "100%": { transform: "translateY(520%)" } },
+        // the typewriter's caret and the floating bar's arrival
+        caret: { "0%, 100%": { opacity: "1" }, "50%": { opacity: "0" } },
+        "float-in": { from: { opacity: "0", transform: "translateY(16px) scale(0.98)" } },
       },
       // enters 200–300 on ease-out, exits 150–200 on ease-in, travel on glide, confirmations on spring (fill: enters backwards, exits forwards)
       animation: {
@@ -138,6 +166,17 @@ export default {
         shimmer: "shimmer 1.6s linear infinite",
         sweep: "sweep 1.4s var(--ease-in-out) infinite",
         scan: "scan 1.6s var(--ease-in-out) infinite",
+        "word-rise": "word-rise 420ms var(--ease-out) backwards",
+        "word-out": "word-out 160ms var(--ease-in) forwards",
+        "fill-in": "fill-in 360ms var(--ease-out) backwards",
+        "tile-pulse": "tile-pulse 700ms var(--ease-out)",
+        "grow-y": "grow-y 600ms var(--ease-out) backwards",
+        "grow-x": "grow-x 600ms var(--ease-out) backwards",
+        draw: "draw 900ms var(--ease-out) backwards",
+        "stage-glow": "stage-glow 7s var(--ease-in-out) infinite",
+        "scan-down": "scan-down 2.4s linear infinite",
+        caret: "caret 1s steps(1) infinite",
+        "float-in": "float-in 300ms var(--ease-out) backwards",
       },
     },
   },

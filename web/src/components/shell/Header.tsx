@@ -1,4 +1,4 @@
-// A light, quiet header on the page's own grid, exactly 64px (the hairline is an inset shadow, not a border): the brand
+// A quiet header on the page's own warm canvas, exactly 64px (the hairline is an inset shadow, not a border): the brand
 // (home) on the left; «Мои презентации», «Помощник» and, on a deck, «Новая презентация» on the right — all 40px. A thin
 // progress line runs along the bottom while a job works somewhere neither the build screen nor the helper shows it.
 import { forwardRef, useEffect, useRef, useState } from "react";
@@ -51,7 +51,7 @@ export function Header() {
   if (showLine) lastLine.current = { value: activeJob?.progress ?? 0, queued: activeJob?.status === "queued" };
 
   return (
-    <header className="vt-header relative z-30 shrink-0 bg-white shadow-[inset_0_-1px_0_rgba(0,16,61,0.08)]">
+    <header className="vt-header relative z-30 shrink-0 bg-canvas shadow-[inset_0_-1px_0_rgba(16,24,40,0.07)]">
       <div className="mx-auto flex h-16 w-full max-w-[1600px] items-center gap-2 px-8">
         <Logo
           onClick={() => {
