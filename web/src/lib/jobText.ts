@@ -23,8 +23,9 @@ function templateStep(s: string): string {
   return /[а-яё]/i.test(s) ? s : "работаю…";
 }
 
-/** Where one variant of a generation is: a short status for its card and the share of its work done. */
-export interface VariantProgress { text: string; done: boolean; frac: number }
+/** Where one variant of a generation is: a short status for its card and the share of its work done; `of` — the slides
+ *  its plan has, `laid` — how many of them are laid out (the build's rail marks them). */
+export interface VariantProgress { text: string; done: boolean; frac: number; laid?: number; of?: number }
 
 /** «visual: rendered slide 6/10» → the progress of that variant; null for messages about the whole job. */
 export function variantProgress(message: string): { name: string; state: VariantProgress } | null {
@@ -32,8 +33,8 @@ export function variantProgress(message: string): { name: string; state: Variant
   if (!m || m[1] === "analyze" || m[1] === "plan" || m[1] === "export") return null;
   const [, name, what] = m;
   let r: RegExpMatchArray | null;
-  if ((r = what.match(/^rendered slide (\d+)\/(\d+)$/))) return { name, state: { text: `вёрстка ${r[1]} из ${r[2]}`, done: false, frac: 0.25 + 0.45 * (Number(r[1]) / Math.max(1, Number(r[2]))) } };
-  if (/^planned \d+ slides/.test(what)) return { name, state: { text: "план готов", done: false, frac: 0.2 } };
+  if ((r = what.match(/^rendered slide (\d+)\/(\d+)$/))) return { name, state: { text: `вёрстка ${r[1]} из ${r[2]}`, done: false, frac: 0.25 + 0.45 * (Number(r[1]) / Math.max(1, Number(r[2]))), laid: Number(r[1]), of: Number(r[2]) } };
+  if ((r = what.match(/^planned (\d+) slides/))) return { name, state: { text: "план готов", done: false, frac: 0.2, laid: 0, of: Number(r[1]) } };
   if (what === "audit") return { name, state: { text: "проверка качества", done: false, frac: 0.75 } };
   if (/^autofix/.test(what)) return { name, state: { text: "исправляю замечания", done: false, frac: 0.85 } };
   if (/^done in /.test(what)) return { name, state: { text: "готово", done: true, frac: 1 } };

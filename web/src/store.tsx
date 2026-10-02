@@ -3,31 +3,24 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { api, ApiError } from "./api";
 import { pushToast } from "./components/ui/Toasts";
 import { generationFlow, uploadTemplateFlow } from "./lib/flows";
-import { addAgentEvent, laterPhase, phaseOfEvent, toAgentEvent, type PhaseKey } from "./lib/agent";
-import { humanizeJobMessage, variantProgress, type VariantProgress } from "./lib/jobText";
+import { foldJobEvent, type ActiveJob } from "./lib/jobState";
 import { trackJob } from "./lib/jobs";
 import { errText, firstLine, newestTemplate, slideCount } from "./lib/narrate";
 import { LS, storage, uid } from "./lib/utils";
 import { decodeImage, viewTransition } from "./lib/motion";
 import { variantRev, withRev } from "./components/VariantsHelpers";
 import type {
-  AgentEvent, ChatMessage, DetailKey, GenerateRequest, Generation, GenerationMeta, Health, Job, JobKind, JobStatus, ModelsStatus, Screen, StrategyInfo, TabKey, TemplateListItem, TemplateManifest, Variant,
+  ChatMessage, DetailKey, GenerateRequest, Generation, GenerationMeta, Health, Job, JobKind, ModelsStatus, Screen, StrategyInfo, TabKey, TemplateListItem, TemplateManifest, Variant,
 } from "./types";
 
-export interface ActiveJob {
-  id: string; label: string; progress: number; message: string; status: JobStatus; kind: JobKind; startedAt: number; items?: string[]; variants?: Record<string, VariantProgress>;
-  /** The planning agent's steps so far (Agent v2) and the latest phase of the timeline the job has reached. */
-  agent?: AgentEvent[]; phase?: PhaseKey | null;
-  /** The template a generation is built from (the build screen names it under its title). */
-  template?: string | null;
-  /** The slide a job works on (a slide fix): the stage and the thumbnails mark it. */
-  target?: { generation: string; strategy: string; slide: number };
-}
+export type { ActiveJob } from "./lib/jobState";
 /** `items`: what the job works on (the strategies of a generation) — the build screen shows one card per item.
+ *  `generation` / `slides`: the deck a generation builds and the slide count asked for (the build's rail).
  *  `quiet`: the caller tells the failure itself (no «Не получилось: …» toast from the store). */
 export interface RunJobOptions {
   kind?: JobKind; items?: string[]; template?: string | null; onDone?: (job: Job) => void; onFailed?: (job: Job) => void;
   target?: { generation: string; strategy: string; slide: number }; quiet?: boolean;
+  generation?: string | null; slides?: number | null;
 }
 
 export interface AppState {
@@ -77,7 +70,6 @@ export function useApp(): AppState {
 }
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, Number.isFinite(n) ? Math.round(n) : lo));
-const clamp01 = (n: number) => Math.min(1, Math.max(0, Number.isFinite(n) ? n : 0));
 const titleIn = (list: StrategyInfo[], name: string) => list.find((s) => s.name === name)?.title ?? name;
 
 export function AppProvider({ children }: { children: ReactNode }) {
@@ -276,30 +268,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       patch(p);
       window.setTimeout(() => setActiveJob((cur) => (cur && cur.id === jobId ? null : cur)), 1500);
     };
-    setActiveJob({ id: jobId, label, progress: 0, message: "В очереди…", status: "queued", kind: opts?.kind ?? "other", startedAt: Date.now(), items: opts?.items, template: opts?.template, target: opts?.target });
+    setActiveJob({ id: jobId, label, progress: 0, message: "В очереди…", status: "queued", kind: opts?.kind ?? "other", startedAt: Date.now(), items: opts?.items, template: opts?.template, target: opts?.target, generation: opts?.generation ?? null, slides: opts?.slides ?? null });
     const stop = trackJob(jobId, {
       onEvent: (ev) => {
         if (ev.status === "done" || ev.status === "failed") return; // settled below, once the full job record is fetched
-        const agent = ev.type === "agent";
-        // the agent speaks plain Russian already; the pipeline's own messages are for logs and get translated
-        const message = agent ? ev.message : ev.message ? humanizeJobMessage(ev.message, (name) => titleIn(latest.current.strategies, name)) : "";
-        // every event is folded in here (renders may coalesce several): the per-variant cards and the agent's
-        // timeline never miss a step
-        const step = !agent && ev.message ? variantProgress(ev.message) : null;
-        const phase = phaseOfEvent(ev);
-        setActiveJob((cur) =>
-          cur && cur.id === jobId
-            ? {
-                ...cur,
-                status: ev.status,
-                progress: Math.max(cur.progress, clamp01(ev.progress)),
-                message: message || cur.message,
-                variants: step ? { ...cur.variants, [step.name]: step.state } : cur.variants,
-                agent: agent ? addAgentEvent(cur.agent, toAgentEvent(ev)) : cur.agent,
-                phase: laterPhase(cur.phase, phase),
-              }
-            : cur,
-        );
+        setActiveJob((cur) => (cur && cur.id === jobId ? foldJobEvent(cur, ev, (name) => titleIn(latest.current.strategies, name)) : cur));
       },
       onDone: (job) => {
         settle({ status: "done", progress: 1, message: "Готово" });

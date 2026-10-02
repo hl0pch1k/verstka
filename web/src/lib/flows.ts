@@ -10,7 +10,7 @@ import { templateFileProblem } from "./templateFiles";
 import { plural } from "./utils";
 
 interface CommonDeps {
-  runJob(jobId: string, label: string, opts?: { kind?: JobKind; items?: string[]; template?: string | null; onDone?: (job: Job) => void; onFailed?: (job: Job) => void }): void;
+  runJob(jobId: string, label: string, opts?: { kind?: JobKind; items?: string[]; template?: string | null; generation?: string | null; slides?: number | null; onDone?: (job: Job) => void; onFailed?: (job: Job) => void }): void;
   report(e: unknown, prefix: string): void;
   pushMessage(role: "user" | "assistant", text: string): void;
   setTab(t: TabKey): void;
@@ -94,6 +94,8 @@ export function generationFlow(req: GenerateRequest, d: GenerationDeps): Promise
         kind: "generate",
         items: req.strategies,
         template: req.template_id,
+        generation: res.generation_id,
+        slides: req.slides ?? null,
         onDone: async () => {
           void d.refreshModelStatus();
           await d.refreshGenerations();
