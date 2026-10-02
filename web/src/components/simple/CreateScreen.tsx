@@ -6,7 +6,7 @@
 // inside the composer, the floating bar rises in and fades out, and the whole page glides aside when the helper docks.
 import { useEffect, useRef, useState, type ChangeEvent, type FocusEvent, type FormEvent, type KeyboardEvent } from "react";
 import { ArrowRight, ChevronDown, FileText, LayoutTemplate, Minus, Paperclip, PenLine, Plus, SlidersHorizontal, Sparkles } from "lucide-react";
-import { MOTION, smoothScroll, stagger, useFlip, usePresence } from "../../lib/motion";
+import { EASE, MOTION, prefersReducedMotion, smoothScroll, stagger, useFlip, usePresence } from "../../lib/motion";
 import { modelIndicator } from "../../lib/modelText";
 import { errText } from "../../lib/narrate";
 import { templateTitle } from "../../lib/plain";
@@ -272,7 +272,15 @@ export function CreateScreen() {
     }
   };
 
-  const toGallery = () => galleryRef.current?.scrollIntoView({ block: "start", behavior: smoothScroll() });
+  // the template chip: the gallery comes into view and the chosen card's ring sends one pulse once it has arrived
+  const toGallery = () => {
+    galleryRef.current?.scrollIntoView({ block: "start", behavior: smoothScroll() });
+    if (prefersReducedMotion()) return;
+    galleryRef.current?.querySelector<HTMLElement>('[data-tile] button[aria-pressed="true"]')?.animate(
+      [{ boxShadow: "0 0 0 2px #0077FF, 0 0 0 0 rgba(0, 119, 255, 0.45)" }, { boxShadow: "0 0 0 2px #0077FF, 0 0 0 16px rgba(0, 119, 255, 0)" }],
+      { duration: 900, delay: 380, easing: EASE.out },
+    );
+  };
 
   // a control reached with the keyboard never hides under the floating bar: the page scrolls it clear (a click needs no
   // help — the person sees what they click)
