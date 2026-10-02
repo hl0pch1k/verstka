@@ -56,6 +56,10 @@ test("railSlides: shared plan, own critic and revision, laid out slides", () => 
   assert.deepEqual(rail.map((s) => s.mark), [null, null, null, "fixed"]); // the visual variant's note is not ours
   assert.deepEqual(rail.map((s) => s.laid), [true, true, false, false]);
   assert.equal(railSlides(events, "visual", 3, 0)[1].mark, "note");
+  // the revision keeps the designer's headline
+  assert.equal(rail[3].sketch?.headline, "Итоги");
+  // once the variant's plan says how many slides it has, the rail has exactly that many
+  assert.equal(railSlides(events, "structured", 3, 0, true).length, 3);
 });
 
 test("logLines: time from the start, role and text", () => {

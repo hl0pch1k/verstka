@@ -94,9 +94,10 @@ export function sketchOf(e: AgentEvent): Sketch | null {
 export type RailMark = "note" | "fixed" | null;
 export interface RailSlide { n: number; sketch: Sketch | null; mark: RailMark; laid: boolean }
 
-/** The rail of one variant: a tile per slide (`count` at least, more when the designer planned more), its sketch,
- *  whether the critic left a note on it (and whether it was then revised), and whether it is laid out already. */
-export function railSlides(events: AgentEvent[], variant: string | null, count: number, laid: number): RailSlide[] {
+/** The rail of one variant: a tile per slide (`count` at least, more when the designer planned more — unless `exact`:
+ *  the variant's plan has said how many slides it has), its sketch (a revision keeps the slide's headline), whether the
+ *  critic left a note on it (and whether it was then revised), and whether it is laid out already. */
+export function railSlides(events: AgentEvent[], variant: string | null, count: number, laid: number, exact = false): RailSlide[] {
   const sketches = new Map<number, Sketch>();
   const marks = new Map<number, RailMark>();
   let top = count;
@@ -106,8 +107,8 @@ export function railSlides(events: AgentEvent[], variant: string | null, count: 
     if (n === null || n === undefined || n < 1) continue;
     const step = (e.step ?? "").toLowerCase();
     const sk = sketchOf(e);
-    if (sk) sketches.set(n, sk);
-    if (step === "designer") top = Math.max(top, n);
+    if (sk) sketches.set(n, { ...sk, headline: sk.headline ?? sketches.get(n)?.headline ?? null });
+    if (step === "designer" && !exact) top = Math.max(top, n);
     if (step === "critic" && marks.get(n) !== "fixed") marks.set(n, "note");
     if (step === "revise") marks.set(n, "fixed");
   }
