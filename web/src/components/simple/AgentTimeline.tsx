@@ -252,18 +252,46 @@ export function AgentTimeline({ rows, variantTitle, onSlide, follow = false, pin
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [follow, total, active]);
 
+  // which titles are stuck at the column's top now (their section has scrolled up under them): only those draw the fade
+  useLayoutEffect(() => {
+    if (!follow) return;
+    const box = ref.current?.closest("[data-follow]") as HTMLElement | null;
+    if (!box) return;
+    let raf = 0;
+    const mark = () => {
+      raf = 0;
+      const edge = box.getBoundingClientRect().top + parseFloat(getComputedStyle(box).paddingTop);
+      for (const head of ref.current?.querySelectorAll<HTMLElement>("[data-head]") ?? []) {
+        const r = head.getBoundingClientRect();
+        const section = head.parentElement?.getBoundingClientRect();
+        // at the sticking line itself (one pushed up and out by the next title is gone, not stuck) with its section
+        // already scrolled up under it
+        const stuck = !!section && Math.abs(r.top - edge) < 1 && section.top < r.top - 0.5;
+        if (stuck !== head.hasAttribute("data-stuck")) head.toggleAttribute("data-stuck", stuck);
+      }
+    };
+    const onScroll = () => {
+      if (!raf) raf = requestAnimationFrame(mark);
+    };
+    mark();
+    box.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      box.removeEventListener("scroll", onScroll);
+      cancelAnimationFrame(raf);
+    };
+  }, [follow, total, active]);
+
   return (
     <ol ref={ref} className={cn("relative [text-wrap:pretty]", className)}>
       {rows.map((r, i) => {
         const last = i === rows.length - 1;
         const lit = r.status === "done" || r.status === "active";
-        const pinned = follow && r.status === "active";
         // active: what the step does (its lines are still coming) — the layout and the check say how far they are; done:
-        // what it came to
+        // what it came to. On its own line under the title, so the title never moves when it changes or wraps
         const raw =
           r.status === "active" ? (r.key === "layout" || r.key === "check" ? r.note ?? r.hint : r.hint)
           : r.note ?? (r.events.length === 0 && r.status === "pending" ? r.hint : null);
-        const aside = raw ? keepTogether(raw) : null;
+        const aside = raw ? keepTogether(raw.charAt(0).toUpperCase() + raw.slice(1)) : null;
         return (
           <li key={r.key} data-step={r.key} className="relative pb-6 last:pb-0">
             {/* the connector to the next step: a quiet track that fills downwards once the step is done */}
@@ -272,24 +300,24 @@ export function AgentTimeline({ rows, variantTitle, onSlide, follow = false, pin
                 <span className={cn("absolute inset-0 origin-top rounded-full bg-accent-200 transition-transform duration-600 ease-out", r.status === "done" ? "scale-y-100" : "scale-y-0")} />
               </span>
             )}
-            {/* pinned, the title sticks at the scroller's content edge: a white band above it covers the scroller's top
-                padding, so no line shows above the pinned title (in the flow the band lies over the step above's own
-                bottom padding, which is empty) */}
-            <div className={cn("-mx-2 -my-1 flex items-center gap-3 px-2 py-1", pinned && cn("sticky bg-white before:pointer-events-none before:absolute before:inset-x-0 before:bottom-full before:h-5 before:bg-white before:content-['']", pinClassName))}>
+            {/* live, every step's title sticks at the scroller's content edge while its lines go by (the next title pushes
+                it up): the column's top always names the step its lines belong to. A white band above it covers the
+                scroller's top padding (in the flow it lies over the step above's own bottom padding, which is empty); the
+                fade under it shows only while it is stuck (data-stuck, set from the scroll): in place it would pale the
+                step's own first line */}
+            <div data-head className={cn("tl-head -mx-2 flex items-start gap-3 px-2", follow && cn("sticky bg-white before:pointer-events-none before:absolute before:inset-x-0 before:bottom-full before:h-5 before:bg-white before:content-['']", pinClassName))}>
               <Dot status={r.status} n={i + 1} live={follow && justDone(r.key)} />
-              <p className="flex min-w-0 flex-wrap items-baseline gap-x-2">
-                <span className={cn("text-body font-semibold transition-colors duration-150", lit ? "text-zinc-900" : "text-zinc-500")}>{r.title}</span>
-                {/* live, «что делает» → «к чему пришёл» cross-fades when the step ends (the finished log stays still; the layout's
-                    «4 из 6» → «5 из 6» simply changes) */}
+              <div className="min-w-0 flex-1 pt-0.5">
+                <p className={cn("text-body font-semibold transition-colors duration-150", lit ? "text-zinc-900" : "text-zinc-500")}>{r.title}</p>
+                {/* live, «что делает» → «к чему пришёл» cross-fades when the step ends (the finished log stays still; the
+                    layout's «4 из 6» → «5 из 6» simply changes) */}
                 {aside && (
-                  <span key={follow ? r.status : undefined} className={cn("text-footnote", r.status === "active" ? "text-zinc-600" : "text-zinc-500", follow && "animate-fade")}>
+                  <p key={follow ? r.status : undefined} className={cn("text-footnote", r.status === "active" ? "text-zinc-600" : "text-zinc-500", follow && "animate-fade")}>
                     {aside}
-                  </span>
+                  </p>
                 )}
-              </p>
-              {/* the lines that scroll under the pinned title fade out over 24px instead of showing a line cut in half,
-                  drawn only while pinned (a hidden pseudo-element at opacity 0 still paints a strip in Chrome) */}
-              {pinned && <span className="pointer-events-none absolute inset-x-0 top-full h-6 bg-gradient-to-b from-white to-transparent" aria-hidden />}
+              </div>
+              {follow && <span className="tl-fade pointer-events-none absolute inset-x-0 top-full h-6 bg-gradient-to-b from-white to-transparent" aria-hidden />}
             </div>
             {r.events.length > 0 && (
               <div className="pl-9">

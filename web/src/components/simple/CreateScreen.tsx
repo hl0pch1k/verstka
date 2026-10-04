@@ -54,8 +54,8 @@ function useHeldTrue(value: boolean, ms: number): boolean {
   return value || held;
 }
 
-/** A step of the form: a white paper with its number (a check once done; VK blue while it is the step to do now), its
- *  title and its own actions. */
+/** A step of the form: a white paper with its number and title and its own actions. The number says where the step
+ *  is: done — a blue check on a light tint; the step to do now — white on VK blue; still ahead — grey. */
 function Step({ n, title, done, current = false, actions, shake, zone, id, children }: {
   n: number;
   title: string;
@@ -78,11 +78,11 @@ function Step({ n, title, done, current = false, actions, shake, zone, id, child
         <span
           className={cn(
             "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-footnote font-semibold tabular-nums transition-colors duration-200",
-            done || current ? "bg-accent-fill text-white" : "bg-accent-50 text-accent-700",
+            done ? "bg-accent-50 text-accent-600" : current ? "bg-accent-fill text-white" : "bg-zinc-100 text-zinc-500",
           )}
         >
           <span className="sr-only">{done ? `Шаг ${n} готов` : current ? `Шаг ${n}, сейчас` : `Шаг ${n}`}</span>
-          {done ? <Check key="done" className={cn("h-4 w-4", justDone && "animate-pop")} strokeWidth={2.5} aria-hidden /> : <span aria-hidden>{n}</span>}
+          {done ? <Check key="done" className={cn("h-4 w-4", justDone && "animate-pop")} strokeWidth={2.75} aria-hidden /> : <span aria-hidden>{n}</span>}
         </span>
         <h2 id={`step-${n}`} className="text-title3 font-semibold text-zinc-900">{title}</h2>
         {actions && <div className="-mr-2 ml-auto flex min-w-0 items-center gap-1">{actions}</div>}
@@ -231,10 +231,10 @@ export function CreateScreen() {
   const variantsCount = strategies.length ? strategies.filter((s) => selected.includes(s.name)).length : selected.length;
   const purposeLabel = PURPOSES.find((p) => p.value === purpose)?.label ?? "";
   const slidesWord = plural(count, "слайд", "слайда", "слайдов");
-  // the folded parameters in one line
-  const paramsLine = [byText ? `${slidesWord} по тексту` : slidesWord, purposeLabel, plural(variantsCount, "вариант", "варианта", "вариантов"), modelsOn ? "тексты пишет модель" : "без модели"].join(", ");
+  // the folded parameters in one line, in the order the bar says them: slides, variants, then the rest
+  const paramsLine = [byText ? `${slidesWord} по тексту` : slidesWord, plural(variantsCount, "вариант", "варианта", "вариантов"), purposeLabel, modelsOn ? "тексты пишет модель" : "без модели"].join(" · ");
   // the bar's one line: what will be built
-  const summary = [plural(variantsCount, "вариант", "варианта", "вариантов"), slidesWord].join(" · ");
+  const summary = [slidesWord, plural(variantsCount, "вариант", "варианта", "вариантов")].join(" · ");
   const seen = factsLine(facts);
   // «1 551 знак»: thousands apart, as the counters elsewhere
   const chars = (n: number) => plural(n, "знак", "знака", "знаков").replace(/^\d+/, n.toLocaleString("ru-RU"));
@@ -378,10 +378,11 @@ export function CreateScreen() {
                 aria-describedby="brief-help"
                 value={brief}
                 disabled={busy}
-                rows={8}
+                rows={6}
                 onChange={(e) => setBrief(e.target.value)}
                 placeholder={health?.writer ? PLACEHOLDER_WRITER : PLACEHOLDER}
-                className="scroll-thin block max-h-[48vh] min-h-[200px] w-full resize-none rounded-lg bg-transparent px-4 py-3 text-body leading-6 text-zinc-900 outline-none placeholder:text-zinc-400 disabled:opacity-60 [field-sizing:content]"
+                // as tall as its text (the page is the one scroller); a browser without field-sizing keeps six lines
+                className="scroll-thin block min-h-[160px] w-full resize-none rounded-lg bg-transparent px-4 py-3 text-body leading-6 text-zinc-900 outline-none placeholder:text-zinc-400 disabled:opacity-60 [field-sizing:content]"
               />
             </div>
             {/* what the text holds (the agent will see the same) and its length */}
@@ -403,6 +404,7 @@ export function CreateScreen() {
             n={3}
             title="Параметры"
             done={false}
+            current={templateDone && textDone}
             shake={shaking === 3}
             actions={
               <>
@@ -418,8 +420,9 @@ export function CreateScreen() {
             <div className={cn("grid transition-[grid-template-rows] duration-250 ease-glide", more ? "grid-rows-[1fr]" : "grid-rows-[0fr]")}>
               <div id="create-settings" className="min-h-0 overflow-hidden" style={{ visibility: more ? "visible" : "hidden", transition: `visibility 0s linear ${more ? "0s" : "250ms"}` }}>
                 <div className={cn("space-y-6 pt-5 transition-opacity", more ? "opacity-100 delay-[60ms] duration-200 ease-out" : "opacity-0 duration-150 ease-in")}>
-                  {/* one grid for every row: the fields, the variants and the switches share their columns */}
-                  <div className="grid grid-cols-3 gap-4">
+                  {/* the rows share the panel's edges: the fields (the count only as wide as a count needs), the variants and the
+                    switches */}
+                  <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)_148px] gap-4">
                     <div>
                       <label htmlFor="purpose" className="mb-2 block text-footnote font-medium text-zinc-700">Тип презентации</label>
                       <div className="relative">

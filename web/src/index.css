@@ -102,6 +102,10 @@ h1, h2, h3 {
   .build-log { display: none; }
 }
 
+/* the agent's timeline, live: the fade under a step's title shows only while the title is stuck at the column's top */
+.tl-fade { opacity: 0; transition: opacity 150ms var(--ease-std); }
+.tl-head[data-stuck] > .tl-fade { opacity: 1; }
+
 /* subtle scrollbars for the panels */
 .scroll-thin::-webkit-scrollbar { width: 8px; height: 8px; }
 .scroll-thin::-webkit-scrollbar-thumb { @apply rounded-full bg-zinc-300; border: 2px solid transparent; background-clip: padding-box; }

@@ -42,8 +42,9 @@ const VARIANTS: Record<ButtonVariant, string> = {
   tonal: "bg-accent-50 text-accent-700 hover:bg-accent-100 active:bg-accent-200 aria-pressed:bg-accent-100 aria-pressed:text-accent-800 aria-pressed:hover:bg-accent-200",
   secondary: "bg-[rgba(129,140,154,0.12)] text-zinc-900 hover:bg-[rgba(129,140,154,0.18)] active:bg-[rgba(129,140,154,0.24)]",
   white: "bg-white text-zinc-900 shadow-card hover:bg-zinc-50 active:bg-zinc-100",
-  // an open popup's trigger keeps the hover grey (a disclosure that unfolds in place does not: its chevron says it)
-  ghost: "text-zinc-700 hover:bg-zinc-900/[0.06] hover:text-zinc-900 active:bg-zinc-900/10 [&[aria-haspopup][aria-expanded=true]]:bg-zinc-900/[0.06] [&[aria-haspopup][aria-expanded=true]]:text-zinc-900 aria-pressed:bg-accent-50 aria-pressed:text-accent-700 aria-pressed:hover:bg-accent-100",
+  // an open popup's trigger and a toggle that is on take the same blue tint (a disclosure that unfolds in place does
+  // not: its chevron says it)
+  ghost: "text-zinc-700 hover:bg-zinc-900/[0.06] hover:text-zinc-900 active:bg-zinc-900/10 [&[aria-haspopup][aria-expanded=true]]:bg-accent-50 [&[aria-haspopup][aria-expanded=true]]:text-accent-700 aria-pressed:bg-accent-50 aria-pressed:text-accent-700 aria-pressed:hover:bg-accent-100",
   // a destructive confirmation (delete): only inside a dialog that asked first
   danger: "bg-red-600 text-white hover:bg-red-700 active:bg-red-800",
   "danger-ghost": "text-red-600 hover:bg-red-50 hover:text-red-700 active:bg-red-100",

@@ -27,7 +27,9 @@ function useColumns(box: RefObject<HTMLElement>, n: number, aspect: number): num
       const st = getComputedStyle(el);
       const w = el.offsetWidth - parseFloat(st.paddingLeft) - parseFloat(st.paddingRight);
       const h = el.clientHeight - parseFloat(st.paddingTop) - parseFloat(st.paddingBottom);
-      let next = fitColumns(w, h, n, aspect);
+      // room for one slide more than asked for (the designer often adds a closing slide: 12 asked, 13 planned), so the
+      // grid that fits the first count still fits the plan
+      let next = fitColumns(w, h, n + 1, aspect);
       // the plan's count moves by a slide or two while the agent works (13 planned, 12 laid out): the grid keeps its
       // columns instead of reflowing every card; it takes fewer only when the board itself changes size
       const prev = last.current;

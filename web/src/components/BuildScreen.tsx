@@ -145,23 +145,20 @@ function PhaseTitle({ text: wanted }: { text: string }) {
   );
 }
 
-/** Where a variant is, after its name in the switch: «4/12» while its slides are laid out, a check when it is ready,
- *  nothing before (the label stands alone, centred in its segment). The slot has a fixed width once it shows, so «9/12»
- *  → «10/12» → ✓ never changes the switch's size; and nothing spins: the page has one place that says the work goes on —
- *  its title. */
+/** Whether a variant is ready, after its name in the switch: a check once it is, an empty slot of the same width
+ *  before (the switch never changes its size; how far the shown variant is, the storyboard's own line says). Nothing
+ *  spins: the page has one place that says the work goes on — its title. */
 function variantMeta(st: VariantState): ReactNode {
-  const laying = /^вёрстка/.test(st.text) && st.laid !== undefined && !!st.of;
-  if (!st.done && !laying) return null;
   return (
-    <span className="inline-flex w-[5ch] justify-end tabular-nums">
-      {st.done ? <Check className="h-3.5 w-3.5 text-accent-600" strokeWidth={2.75} aria-hidden /> : `${st.laid}/${st.of}`}
-      {st.done && <span className="sr-only">готово</span>}
+    <span className="inline-flex w-3.5 justify-end">
+      {st.done && <Check className="h-3.5 w-3.5 text-accent-600" strokeWidth={2.75} aria-hidden />}
+      <span className="sr-only">{st.done ? "готово" : st.text}</span>
     </span>
   );
 }
 
-/** The time since the build began against the five-minute promise («1:42 из 5:00»; past it, the time alone). Its own
- *  clock: once a second it re-renders itself, not the page. */
+/** The time since the build began beside the five-minute limit («1:42 · лимит 5:00»: not «из», which would read as
+ *  a share next to the bar; past it, the time alone). Its own clock: once a second it re-renders itself, not the page. */
 function Elapsed({ since }: { since: number }) {
   const [, tick] = useState(0);
   useEffect(() => {
@@ -172,7 +169,7 @@ function Elapsed({ since }: { since: number }) {
   return (
     <p className="shrink-0 whitespace-nowrap tabular-nums" title="Обещаем уложиться в пять минут">
       <span className="text-title2 font-semibold text-zinc-900">{clock(ms / 1000)}</span>
-      {ms <= PROMISE_MS && <span className="ml-1.5 text-body text-zinc-400">из {clock(PROMISE_MS / 1000)}</span>}
+      {ms <= PROMISE_MS && <span className="ml-1.5 text-body text-zinc-400">· лимит {clock(PROMISE_MS / 1000)}</span>}
     </p>
   );
 }

@@ -28,8 +28,9 @@ function Count({ n, one, few, many }: { n: number; one: string; few: string; man
 export function AuditSummaryCard({ audit, actions }: { audit: AuditReport; actions?: ReactNode }) {
   const { summary } = audit;
   const counts = [
-    summary.errors ? { k: "e", el: <Count n={summary.errors} one="ошибка" few="ошибки" many="ошибок" /> } : null,
-    summary.warnings ? { k: "w", el: <Count n={summary.warnings} one="предупреждение" few="предупреждения" many="предупреждений" /> } : null,
+    // in the tones the aside's quality card uses: errors red, warnings VK's warning
+    summary.errors ? { k: "e", el: <span className="font-medium text-red-600"><Count n={summary.errors} one="ошибка" few="ошибки" many="ошибок" /></span> } : null,
+    summary.warnings ? { k: "w", el: <span className="font-medium text-amber-700"><Count n={summary.warnings} one="предупреждение" few="предупреждения" many="предупреждений" /></span> } : null,
     summary.model_flags ? { k: "m", el: <Count n={summary.model_flags} one="замечание модели" few="замечания модели" many="замечаний модели" /> } : null,
   ].filter((c): c is { k: string; el: JSX.Element } => !!c);
   const figures = figuresLine(summary.figures);
@@ -49,7 +50,7 @@ export function AuditSummaryCard({ audit, actions }: { audit: AuditReport; actio
     <section className="flex items-center gap-6 rounded-2xl bg-white p-6 shadow-card">
       <ScoreRing score={summary.score} size={88} stroke={8} />
       <div className="min-w-0 flex-1">
-        <h2 key={tone} className={cn("text-title2 font-bold text-zinc-900", toneSwap)}>{VERDICT[tone]}</h2>
+        <h2 key={tone} className={cn("text-title2 font-semibold text-zinc-900", toneSwap)}>{VERDICT[tone]}</h2>
         <p key={kinds} className={cn("mt-1 text-body text-zinc-700", kindsSwap)}>
           {counts.length
             ? counts.map((c, i) => (

@@ -306,7 +306,6 @@ export function buildTimeline({ events, phase, running, notes }: TimelineInput):
   let cur = phase;
   for (const e of evs) cur = laterPhase(cur, e.phase);
   const curIdx = cur ? ORDER[cur] : 0;
-  const criticSaid = evs.some((e) => e.phase === "critic");
   const rows: TimelineRow[] = [];
   for (const def of PHASES) {
     let own = mergeVariants(
@@ -347,7 +346,8 @@ export function buildTimeline({ events, phase, running, notes }: TimelineInput):
     // the critic and the revision leave no trace when the plan came without the model, ran out of time or needed no fixes
     if ((def.key === "critic" || def.key === "revise") && !hadAny && passed) {
       status = "skipped";
-      note = def.key === "critic" ? "в этой сборке не запускался" : criticSaid ? "правки не понадобились" : "не понадобилась";
+      // under the step's own name: «Правка — не понадобилась», never «Правка правки не понадобились»
+      note = def.key === "critic" ? "в этой сборке не запускался" : "не понадобилась";
     }
     rows.push({ key: def.key, title: def.title, hint: def.hint, status, note, events: own });
   }

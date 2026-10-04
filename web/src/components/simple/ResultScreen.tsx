@@ -791,7 +791,8 @@ function Deck({ generation }: { generation: Generation }) {
           )}
         </button>
       )}
-      <div ref={live ? linksBox : undefined} className="grid shrink-0 grid-cols-3 gap-2">
+      {/* mt-auto: the links stand on the column's foot, level with the slide's bottom edge */}
+      <div ref={live ? linksBox : undefined} className="mt-auto grid shrink-0 grid-cols-3 gap-2">
         <DrawerLink icon={ListTree} label="План" onClick={() => open("plan")} />
         <DrawerLink icon={LayoutTemplate} label="Шаблон" onClick={() => open("template")} />
         <DrawerLink icon={FolderDown} label="Файлы" onClick={() => open("tech")} />
