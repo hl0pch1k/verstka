@@ -164,7 +164,7 @@ function DrawerLink({ icon: Icon, label, onClick }: { icon: LucideIcon; label: s
     <button
       type="button"
       onClick={onClick}
-      className="tap inline-flex h-10 cursor-pointer items-center justify-center gap-2 rounded-xl bg-white text-footnote font-semibold text-zinc-800 shadow-card hover:bg-zinc-50 active:bg-zinc-100"
+      className="tap inline-flex h-10 cursor-pointer items-center justify-center gap-2 rounded-xl bg-[rgba(129,140,154,0.12)] text-footnote font-semibold text-zinc-900 hover:bg-[rgba(129,140,154,0.18)] active:bg-[rgba(129,140,154,0.24)]"
     >
       <Icon className="h-4 w-4 shrink-0 text-zinc-500" aria-hidden />
       {label}
@@ -238,10 +238,11 @@ function QualityCard({ variant, score, errors, onOpen, className, skeleton = fal
         <ScoreRing score={score} size={44} stroke={4} tone={errors ? "error" : undefined} />
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-1">
-            <Verdict errors={errors} className="text-body font-semibold" />
+            <Verdict errors={errors} className="text-title3 font-semibold" />
             <CardChevron />
           </span>
-          {warned && <span className="mt-0.5 block text-footnote text-zinc-500">{warned}</span>}
+          {/* warnings in VK's warning tone: «Ошибок нет» beside a green ring must not read as nothing to look at */}
+          {warned && <span className="mt-0.5 block text-footnote font-medium text-amber-700">{warned}</span>}
           {second && (
             <span className={cn("block text-footnote", !warned && "mt-0.5", second.tone === "warn" ? "text-amber-700" : "text-zinc-500")} title={second.title}>
               {second.text}
@@ -546,7 +547,8 @@ function Deck({ generation }: { generation: Generation }) {
     const showCount = n === 0 || (countsDiffer && squeeze < 2);
     const showScore = s !== null && squeeze < 3;
     const hint = variantHint(v.strategy, strategies.find((x) => x.name === v.strategy)?.description);
-    const hintScored = s !== null && !showScore ? `${hint} · оценка ${Math.round(s)}` : hint;
+    // the number beside a variant's name is its quality score: the tooltip says so
+    const hintScored = s !== null ? `${hint} · оценка качества ${Math.round(s)} из 100` : hint;
     return {
       key: v.strategy,
       label: strategyTitle(v.strategy),
@@ -813,25 +815,25 @@ function Deck({ generation }: { generation: Generation }) {
         {/* vt-title: the build screen's «Готовлю презентацию» cross-fades in place into this title */}
         <div ref={titleBox} className="vt-title relative min-w-0 flex-1">
           <div aria-hidden className="pointer-events-none invisible absolute inset-0 overflow-hidden">
-            <span ref={probe} className="absolute left-0 top-0 whitespace-nowrap font-display text-title1 font-bold tracking-tight">{title}</span>
+            <span ref={probe} className="absolute left-0 top-0 whitespace-nowrap font-display text-title1 font-semibold">{title}</span>
           </div>
-          <h1 className={cn(TITLE_FIT[titleStep], "font-bold tracking-tight text-zinc-900")} title={titleStep === 2 ? `${title}\n${meta}` : title}>
+          <h1 className={cn(TITLE_FIT[titleStep], "font-semibold text-zinc-900")} title={titleStep === 2 ? `${title}\n${meta}` : title}>
             {title}
           </h1>
           {titleStep < 2 && <p className="truncate text-footnote text-zinc-500" title={meta}>{meta}</p>}
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {agentOpen ? (
-            <Button variant="white" size="lg" icon={PenLine} aria-label="Изменить" title="Изменить текст или шаблон" onClick={() => setScreen("create")} />
+            <Button variant="secondary" size="lg" icon={PenLine} aria-label="Изменить текст" title="Изменить текст или шаблон" onClick={() => setScreen("create")} />
           ) : (
-            <Button variant="white" size="lg" icon={PenLine} onClick={() => setScreen("create")}>Изменить</Button>
+            <Button variant="secondary" size="lg" icon={PenLine} title="Изменить текст или шаблон" onClick={() => setScreen("create")}>Изменить текст</Button>
           )}
           {/* the helper open: both secondary actions keep only their icons, the title keeps its room */}
           {pdf &&
             (agentOpen ? (
-              <LinkButton variant="white" size="lg" icon={FileText} href={pdf} download={`${fileBase}.pdf`} aria-label="Скачать PDF" title="Скачать PDF" />
+              <LinkButton variant="secondary" size="lg" icon={FileText} href={pdf} download={`${fileBase}.pdf`} aria-label="Скачать PDF" title="Скачать PDF" />
             ) : (
-              <LinkButton variant="white" size="lg" icon={FileText} href={pdf} download={`${fileBase}.pdf`}>PDF</LinkButton>
+              <LinkButton variant="secondary" size="lg" icon={FileText} href={pdf} download={`${fileBase}.pdf`}>Скачать PDF</LinkButton>
             ))}
           {pptx && (
             <LinkButton variant="primary" size="lg" icon={Download} href={pptx} download={`${fileBase}.pptx`} title={`Вариант ${variantIdx} · ${variantName}`}>

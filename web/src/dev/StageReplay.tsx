@@ -79,7 +79,7 @@ export default function StageReplay({ gid, speed }: { gid: string; speed: number
   return (
     <div className="flex h-full min-h-0 flex-col">
       <Header />
-      <main data-follow className="scroll-thin min-w-0 flex-1 overflow-y-auto">
+      <main data-follow className="scroll-thin relative min-w-0 flex-1 overflow-y-auto">
         {job ? <BuildScreen job={job} /> : <p className="p-8 text-body text-zinc-500">{error ?? "Загружаю сборку…"}</p>}
       </main>
     </div>

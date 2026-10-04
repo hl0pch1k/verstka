@@ -1,12 +1,12 @@
 // The first screen: a new presentation in three steps, top to bottom — ① the template (the covers of the latest
 // templates, every template in a window), ② the text (a large field; under it what the text holds: «В тексте:
-// 6 слайдов, 14 чисел, 1 таблица»), ③ the parameters (folded into one line until opened: type, audience, variants,
-// models). A bar stays at the bottom of the window with the chosen template, the slide count and «Создать
-// презентацию», so the action is always in reach. The draft survives reloads. Motion only where something changes: a
-// step that is missing something shakes once when «Создать» is pressed, the parameters unfold, the step's number turns
-// into a check when the step is done.
+// 6 слайдов, 14 чисел, 1 таблица»), ③ the parameters (folded into one line until opened: type, audience, slide count,
+// variants, models — one three-column grid). A bar docked to the bottom of the window says in one line what will be
+// built and holds «Создать презентацию», so the action is always in reach. The step to do now has its number in VK
+// blue. The draft survives reloads. Motion only where something changes: a step that is missing something shakes once
+// when «Создать» is pressed, the parameters unfold, a step's number turns into a check when the step gets done.
 import { useEffect, useRef, useState, type ChangeEvent, type FocusEvent, type FormEvent, type HTMLAttributes, type ReactNode } from "react";
-import { AlertCircle, ArrowRight, Check, ChevronDown, FileText, LayoutTemplate, Minus, Paperclip, PenLine, Plus } from "lucide-react";
+import { AlertCircle, ArrowRight, Check, ChevronDown, FileText, Minus, Paperclip, PenLine, Plus } from "lucide-react";
 import { MOTION, smoothScroll, useFlip, usePresence } from "../../lib/motion";
 import { modelIndicator } from "../../lib/modelText";
 import { errText } from "../../lib/narrate";
@@ -15,7 +15,6 @@ import { factsLine, textFacts } from "../../lib/textFacts";
 import { cn, LS, plural, storage } from "../../lib/utils";
 import { writerModeOf } from "../../lib/writerMode";
 import { useApp } from "../../store";
-import type { TemplateListItem } from "../../types";
 import { BRIEF_MIN, BRIEF_MIN_TOPIC, INPUT_CLS, PURPOSES, SAMPLE_AUDIENCE, SAMPLE_BRIEF, SLIDES_DEFAULT, SLIDES_MAX, SLIDES_MIN, StrategyOption, Toggle } from "../NewGenerationFormParts";
 import { Button } from "../ui/Button";
 import { ModelStatus } from "./ModelStatus";
@@ -24,8 +23,8 @@ import { TemplatePicker, TemplateUploadButton, useTemplateDrop } from "./Templat
 const clampSlides = (n: number) => Math.min(SLIDES_MAX, Math.max(SLIDES_MIN, Number.isFinite(n) ? Math.round(n) : SLIDES_DEFAULT));
 const MAX_BRIEF_BYTES = 2 * 1024 * 1024;
 // the topic line only when the server writes a text by a topic itself (writer mode); else the text is the deck
-const PLACEHOLDER_WRITER = "Тема — например, «История VK»: текст напишет агент. Или ваш текст с тезисами и цифрами — соберу строго по нему…";
-const PLACEHOLDER = "Тезисы, цифры и таблицы — соберу строго по ним. Можно по слайдам: «Слайд 3. Расходы. Нужна круговая диаграмма»…";
+const PLACEHOLDER_WRITER = "Тема — например, «История VK»: текст напишет агент. Или ваш текст с тезисами и цифрами — слайды будут строго по нему…";
+const PLACEHOLDER = "Тезисы, цифры и таблицы — слайды будут строго по ним. Можно по слайдам: «Слайд 3. Расходы. Нужна круговая диаграмма»…";
 
 interface Draft { brief: string; audience: string; purpose: string; slides: number }
 
@@ -55,28 +54,35 @@ function useHeldTrue(value: boolean, ms: number): boolean {
   return value || held;
 }
 
-/** A step of the form: a white paper with its number (a check once done), its title and its own actions. */
-function Step({ n, title, done, actions, shake, zone, id, children }: {
+/** A step of the form: a white paper with its number (a check once done; VK blue while it is the step to do now), its
+ *  title and its own actions. */
+function Step({ n, title, done, current = false, actions, shake, zone, id, children }: {
   n: number;
   title: string;
   done: boolean;
+  /** The step to do now (the first one not done): its number is filled. */
+  current?: boolean;
   actions?: ReactNode;
   shake?: boolean;
   zone?: HTMLAttributes<HTMLElement>;
   id?: string;
   children?: ReactNode;
 }) {
+  // the check springs in when the step gets done while the person watches, not when the page opens with it done
+  const was = useRef(done);
+  const justDone = done && !was.current;
+  if (!done) was.current = false;
   return (
     <section {...zone} id={id} aria-labelledby={`step-${n}`} className={cn("scroll-mt-6 rounded-2xl bg-white p-6 shadow-card", shake && "animate-shake")}>
       <div className="flex h-8 items-center gap-3">
         <span
           className={cn(
-            "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-footnote font-semibold transition-colors duration-200",
-            done ? "bg-accent-fill text-white" : "bg-accent-50 text-accent-700",
+            "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-footnote font-semibold tabular-nums transition-colors duration-200",
+            done || current ? "bg-accent-fill text-white" : "bg-accent-50 text-accent-700",
           )}
         >
-          <span className="sr-only">{done ? `Шаг ${n} готов` : `Шаг ${n}`}</span>
-          {done ? <Check key="done" className="h-4 w-4 animate-pop" strokeWidth={2.5} aria-hidden /> : <span aria-hidden>{n}</span>}
+          <span className="sr-only">{done ? `Шаг ${n} готов` : current ? `Шаг ${n}, сейчас` : `Шаг ${n}`}</span>
+          {done ? <Check key="done" className={cn("h-4 w-4", justDone && "animate-pop")} strokeWidth={2.5} aria-hidden /> : <span aria-hidden>{n}</span>}
         </span>
         <h2 id={`step-${n}`} className="text-title3 font-semibold text-zinc-900">{title}</h2>
         {actions && <div className="-mr-2 ml-auto flex min-w-0 items-center gap-1">{actions}</div>}
@@ -86,17 +92,18 @@ function Step({ n, title, done, actions, shake, zone, id, children }: {
   );
 }
 
-/** A template's cover in a small frame (the bar at the bottom). */
-function MiniCover({ t, className }: { t: TemplateListItem | undefined; className?: string }) {
-  const [broken, setBroken] = useState(false);
+/** A − / + of the slide count: square, the field's own height, inside its frame (the frame clips the hover). */
+function CountStep({ icon: Icon, label, disabled, onClick }: { icon: typeof Plus; label: string; disabled: boolean; onClick(): void }) {
   return (
-    <span className={cn("relative block shrink-0 overflow-hidden bg-zinc-100 shadow-inner-line", className)} aria-hidden>
-      {t?.cover_url && !broken ? (
-        <img src={t.cover_url} alt="" draggable={false} onError={() => setBroken(true)} className="h-full w-full object-cover" />
-      ) : (
-        <span className="flex h-full w-full items-center justify-center text-zinc-400"><LayoutTemplate className="h-4 w-4" /></span>
-      )}
-    </span>
+    <button
+      type="button"
+      aria-label={label}
+      disabled={disabled}
+      onClick={onClick}
+      className="tap flex h-full w-10 shrink-0 cursor-pointer items-center justify-center text-zinc-700 hover:bg-zinc-900/[0.06] hover:text-zinc-900 active:bg-zinc-900/10 disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      <Icon className="h-4 w-4" aria-hidden />
+    </button>
   );
 }
 
@@ -223,9 +230,15 @@ export function CreateScreen() {
   const writerPresence = usePresence(writerLine, MOTION.fast);
   const variantsCount = strategies.length ? strategies.filter((s) => selected.includes(s.name)).length : selected.length;
   const purposeLabel = PURPOSES.find((p) => p.value === purpose)?.label ?? "";
+  const slidesWord = plural(count, "слайд", "слайда", "слайдов");
   // the folded parameters in one line
-  const paramsLine = [purposeLabel, plural(variantsCount, "вариант", "варианта", "вариантов"), modelsOn ? "тексты пишет модель" : "без модели"].join(", ");
+  const paramsLine = [byText ? `${slidesWord} по тексту` : slidesWord, purposeLabel, plural(variantsCount, "вариант", "варианта", "вариантов"), modelsOn ? "тексты пишет модель" : "без модели"].join(", ");
+  // the bar's one line: what will be built
+  const summary = [plural(variantsCount, "вариант", "варианта", "вариантов"), slidesWord].join(" · ");
   const seen = factsLine(facts);
+  // «1 551 знак»: thousands apart, as the counters elsewhere
+  const chars = (n: number) => plural(n, "знак", "знака", "знаков").replace(/^\d+/, n.toLocaleString("ru-RU"));
+  const textDone = briefLen >= briefMin;
 
   const fillSample = () => {
     setBrief(SAMPLE_BRIEF);
@@ -315,14 +328,14 @@ export function CreateScreen() {
 
   return (
     <form onSubmit={(e) => void onSubmit(e)} onFocus={keepClearOfBar} noValidate className="flex min-h-full flex-col">
-      <div ref={pageRef} className="mx-auto w-full max-w-[1120px] flex-1 px-8 pb-8 pt-10 [@media(max-height:760px)]:pt-6">
+      <div ref={pageRef} className="mx-auto w-full max-w-[1120px] flex-1 px-8 pb-8 pt-6">
         <header className="mb-6">
           <h1 className="text-title1 font-semibold text-zinc-900">Новая презентация</h1>
           <p className="mt-1 text-body text-zinc-500">Шаблон задаёт оформление, текст — содержание. Агент соберёт три варианта и сверит каждое число с текстом.</p>
         </header>
 
         <div className="space-y-4">
-          <Step id="step-template" n={1} title="Шаблон" done={templateDone} actions={<TemplateUploadButton />} shake={shaking === 1} zone={drop}>
+          <Step id="step-template" n={1} title="Шаблон" done={templateDone} current={!templateDone} actions={<TemplateUploadButton />} shake={shaking === 1} zone={drop}>
             <div className="mt-5">
               <TemplatePicker />
             </div>
@@ -332,7 +345,8 @@ export function CreateScreen() {
             id="step-text"
             n={2}
             title="Текст"
-            done={briefLen >= briefMin}
+            done={textDone}
+            current={templateDone && !textDone}
             shake={shaking === 2}
             actions={
               <>
@@ -377,7 +391,7 @@ export function CreateScreen() {
               </p>
               {briefLen > 0 && (
                 <p className={cn("shrink-0 tabular-nums", briefLen < briefMin ? (shortInvalid ? "font-medium text-red-600" : "text-amber-700") : "text-zinc-500")}>
-                  {briefLen < briefMin ? `ещё ${plural(briefMin - briefLen, "знак", "знака", "знаков")}` : plural(briefLen, "знак", "знака", "знаков")}
+                  {briefLen < briefMin ? `ещё ${chars(briefMin - briefLen)}` : chars(briefLen)}
                 </p>
               )}
             </div>
@@ -401,10 +415,11 @@ export function CreateScreen() {
           >
             {/* the parameters unfold (the rows glide open, the content fades in just after them, and fades out first on
                 the way back); while folded they leave the tab order once the animation has played */}
-            <div className={cn("grid transition-[grid-template-rows] duration-300 ease-glide", more ? "grid-rows-[1fr]" : "grid-rows-[0fr]")}>
-              <div id="create-settings" className="min-h-0 overflow-hidden" style={{ visibility: more ? "visible" : "hidden", transition: `visibility 0s linear ${more ? "0s" : "300ms"}` }}>
+            <div className={cn("grid transition-[grid-template-rows] duration-250 ease-glide", more ? "grid-rows-[1fr]" : "grid-rows-[0fr]")}>
+              <div id="create-settings" className="min-h-0 overflow-hidden" style={{ visibility: more ? "visible" : "hidden", transition: `visibility 0s linear ${more ? "0s" : "250ms"}` }}>
                 <div className={cn("space-y-6 pt-5 transition-opacity", more ? "opacity-100 delay-[60ms] duration-200 ease-out" : "opacity-0 duration-150 ease-in")}>
-                  <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-4">
+                  {/* one grid for every row: the fields, the variants and the switches share their columns */}
+                  <div className="grid grid-cols-3 gap-4">
                     <div>
                       <label htmlFor="purpose" className="mb-2 block text-footnote font-medium text-zinc-700">Тип презентации</label>
                       <div className="relative">
@@ -426,11 +441,46 @@ export function CreateScreen() {
                       <label htmlFor="audience" className="mb-2 block text-footnote font-medium text-zinc-700">Аудитория</label>
                       <input id="audience" type="text" value={audience} disabled={busy} onChange={(e) => setAudience(e.target.value)} placeholder="Руководство, инвесторы, команда…" className={INPUT_CLS} />
                     </div>
+                    <div>
+                      <div className="mb-2 flex items-baseline justify-between gap-2">
+                        <label htmlFor="slides" className="text-footnote font-medium text-zinc-700">Слайдов</label>
+                        {byText && <span className="animate-fade text-caption text-zinc-500">задано в тексте</span>}
+                      </div>
+                      <div
+                        className="flex h-10 items-stretch overflow-hidden rounded-lg border border-zinc-900/[0.12] bg-white transition-[border-color,box-shadow] duration-150 hover:border-zinc-900/20 has-[input:focus]:border-accent has-[input:focus]:shadow-[0_0_0_3px_rgba(0,119,255,0.12)]"
+                        title={byText ? "Число слайдов задано в тексте" : undefined}
+                      >
+                        <CountStep icon={Minus} label="Меньше слайдов" disabled={busy || byText || slides <= SLIDES_MIN} onClick={() => stepSlides(-1)} />
+                        <input
+                          id="slides"
+                          type="number"
+                          inputMode="numeric"
+                          min={SLIDES_MIN}
+                          max={SLIDES_MAX}
+                          value={byText ? String(dictated) : (slidesDraft ?? String(slides))}
+                          readOnly={byText}
+                          disabled={busy}
+                          onChange={(e) => {
+                            if (byText) return;
+                            const raw = e.target.value;
+                            setSlidesDraft(raw);
+                            const n = Number(raw);
+                            if (raw && Number.isFinite(n)) setSlides(n);
+                          }}
+                          onBlur={() => {
+                            setSlidesDraft(null);
+                            setSlides((n) => clampSlides(n));
+                          }}
+                          className="min-w-0 flex-1 bg-transparent text-center text-body font-semibold tabular-nums text-zinc-900 outline-none [appearance:textfield] read-only:text-zinc-500 disabled:opacity-40 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                        />
+                        <CountStep icon={Plus} label="Больше слайдов" disabled={busy || byText || slides >= SLIDES_MAX} onClick={() => stepSlides(1)} />
+                      </div>
+                    </div>
                   </div>
                   {strategies.length > 0 && (
                     <div>
                       <p className="mb-2 text-footnote font-medium text-zinc-700">Варианты оформления</p>
-                      <div className="grid grid-cols-3 gap-3">
+                      <div className="grid grid-cols-3 gap-4">
                         {strategies.map((s) => (
                           <StrategyOption
                             key={s.name}
@@ -446,9 +496,9 @@ export function CreateScreen() {
                       </div>
                     </div>
                   )}
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-3 gap-4">
                     <Toggle
-                      label="Тексты пишет модель"
+                      label="Модель пишет тексты слайдов"
                       title={modelsConfigured ? undefined : "Модель не подключена"}
                       checked={useModels && modelsConfigured}
                       disabled={busy || !modelsConfigured}
@@ -459,7 +509,7 @@ export function CreateScreen() {
                     />
                     <div className="col-span-2">
                       <Toggle
-                        label="Проверка слайдов моделью зрения"
+                        label="Модель проверяет слайды по картинке"
                         title={modelsConfigured ? undefined : "Модель не подключена"}
                         checked={auditModels && modelsConfigured}
                         disabled={busy || !modelsConfigured}
@@ -477,75 +527,39 @@ export function CreateScreen() {
         </div>
       </div>
 
-      {/* the bar stays at the bottom of the window: what will be built and the one action. Its controls are always in
-          view: the page's bottom scroll padding (kept for the form above it) must not nudge the page when one of them
-          takes the focus */}
-      <div className="sticky bottom-0 z-10 [&_button]:-scroll-mb-24 [&_input]:-scroll-mb-24">
-        <div className="mx-auto w-full max-w-[1120px] px-8 pb-5">
-          <div ref={barRef} className="flex h-[72px] items-center gap-5 rounded-2xl bg-white pl-3 pr-3 shadow-pop">
-            <MiniCover t={chosen} className="aspect-video h-12 rounded-lg" />
-            <div className="min-w-0 max-w-[260px] shrink-0">
-              <p className="truncate text-body font-medium text-zinc-900" title={chosenName ?? undefined}>{chosenName ?? "Шаблон не выбран"}</p>
-              <p className="truncate text-footnote text-zinc-500">{plural(variantsCount, "вариант", "варианта", "вариантов")}</p>
-            </div>
-            <div className="h-8 w-px shrink-0 bg-zinc-200" aria-hidden />
-            <div className="flex shrink-0 items-center gap-2">
-              <label htmlFor="slides" className="text-footnote text-zinc-500">Слайдов</label>
-              <div
-                className="inline-flex h-10 items-center rounded-lg bg-zinc-100 transition-shadow duration-150 has-[input:focus]:shadow-selected"
-                title={byText ? "Число слайдов задано в тексте" : undefined}
+      {/* the bar docked to the bottom of the window, the page's width: what will be built in one line, the state of the
+          request (a problem, the model, the writer) and the one action. Solid, with a hairline on top: the page scrolls
+          under it, nothing shows through. Its controls are always in view: the page's bottom scroll padding (kept for the
+          form above it) must not nudge the page when one of them takes the focus */}
+      <div className="sticky bottom-0 z-10 bg-white shadow-[inset_0_1px_0_#E3E4E7] [&_button]:-scroll-mb-24 [&_input]:-scroll-mb-24">
+        <div ref={barRef} className="mx-auto flex h-[72px] w-full max-w-[1120px] items-center gap-4 px-8">
+          <p className="min-w-0 shrink truncate text-body text-zinc-500" title={chosenName ? `${chosenName} · ${summary}` : undefined}>
+            <span className="font-medium text-zinc-900">{chosenName ?? "Шаблон не выбран"}</span>
+            {chosenName && <span> · {summary}</span>}
+          </p>
+          {/* the problem, the model line and the writer's line share one spot: one cross-fades into the other */}
+          <div className="grid min-w-0 flex-1 items-center justify-items-end [&>*]:col-start-1 [&>*]:row-start-1">
+            {barProblem && (
+              <p key={barProblem} role="alert" className="inline-flex min-w-0 items-center gap-1.5 text-footnote font-medium text-red-600 animate-fade [animation-duration:150ms]" title={barProblem}>
+                <AlertCircle className="h-4 w-4 shrink-0" aria-hidden />
+                <span className="truncate">{barProblem}</span>
+              </p>
+            )}
+            <ModelStatus enabled={useModels && modelsConfigured} hidden={!!barProblem} className="min-w-0" />
+            {writerPresence.mounted && (
+              <span
+                className={cn("inline-flex min-w-0 items-center gap-2 text-footnote text-zinc-500", writerPresence.leaving ? "animate-fade-out" : "animate-fade", "[animation-duration:150ms]")}
+                role="status"
+                aria-hidden={writerPresence.leaving || undefined}
               >
-                <Button variant="ghost" size="md" icon={Minus} aria-label="Меньше слайдов" disabled={busy || byText || slides <= SLIDES_MIN} onClick={() => stepSlides(-1)} />
-                <input
-                  id="slides"
-                  type="number"
-                  inputMode="numeric"
-                  min={SLIDES_MIN}
-                  max={SLIDES_MAX}
-                  value={byText ? String(dictated) : (slidesDraft ?? String(slides))}
-                  readOnly={byText}
-                  disabled={busy}
-                  onChange={(e) => {
-                    if (byText) return;
-                    const raw = e.target.value;
-                    setSlidesDraft(raw);
-                    const n = Number(raw);
-                    if (raw && Number.isFinite(n)) setSlides(n);
-                  }}
-                  onBlur={() => {
-                    setSlidesDraft(null);
-                    setSlides((n) => clampSlides(n));
-                  }}
-                  className="w-9 bg-transparent text-center text-body font-semibold tabular-nums text-zinc-900 outline-none [appearance:textfield] disabled:opacity-40 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                />
-                <Button variant="ghost" size="md" icon={Plus} aria-label="Больше слайдов" disabled={busy || byText || slides >= SLIDES_MAX} onClick={() => stepSlides(1)} />
-              </div>
-              {byText && <span className="animate-fade text-footnote text-zinc-500">по тексту</span>}
-            </div>
-            {/* the problem, the model line and the writer's line share one spot: one cross-fades into the other */}
-            <div className="grid min-w-0 flex-1 items-center justify-items-end [&>*]:col-start-1 [&>*]:row-start-1">
-              {barProblem && (
-                <p key={barProblem} role="alert" className="inline-flex min-w-0 items-center gap-1.5 text-footnote font-medium text-red-600 animate-fade [animation-duration:150ms]" title={barProblem}>
-                  <AlertCircle className="h-4 w-4 shrink-0" aria-hidden />
-                  <span className="truncate">{barProblem}</span>
-                </p>
-              )}
-              <ModelStatus enabled={useModels && modelsConfigured} hidden={!!barProblem} className="min-w-0" />
-              {writerPresence.mounted && (
-                <span
-                  className={cn("inline-flex min-w-0 items-center gap-2 text-footnote text-zinc-500", writerPresence.leaving ? "animate-fade-out" : "animate-fade", "[animation-duration:150ms]")}
-                  role="status"
-                  aria-hidden={writerPresence.leaving || undefined}
-                >
-                  <PenLine className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                  <span className="truncate">Текст напишет агент</span>
-                </span>
-              )}
-            </div>
-            <Button type="submit" variant="primary" size="lg" iconRight={ArrowRight} loading={creating} disabled={busy && !creating}>
-              Создать презентацию
-            </Button>
+                <PenLine className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                <span className="truncate">Текст напишет агент</span>
+              </span>
+            )}
           </div>
+          <Button type="submit" variant="primary" size="lg" iconRight={ArrowRight} loading={creating} disabled={busy && !creating}>
+            Создать презентацию
+          </Button>
         </div>
       </div>
     </form>

@@ -1,11 +1,12 @@
 import { MOTION, useCountUp } from "../../lib/motion";
 import { cn, scoreTone } from "../../lib/utils";
 
+// VKUI paradigmTech: positive, warning icon, negative; the empty track's grey
 const STROKE: Record<ReturnType<typeof scoreTone>, string> = {
-  success: "#10B981",
-  warn: "#F59E0B",
-  error: "#EF4444",
-  neutral: "#C9CDD2",
+  success: "#0BAD41",
+  warn: "#F2821C",
+  error: "#F23741",
+  neutral: "#C9D0D9",
 };
 
 /** Audit score as a ring with the plain number inside (0–100). On mount the ring draws from 0 after `delay` (the card's

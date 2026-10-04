@@ -74,10 +74,19 @@ function TemplateName({ t }: { t: TemplateListItem }) {
   const [value, setValue] = useState(name);
   const [busy, setBusy] = useState(false);
   const field = useRef<HTMLInputElement>(null);
+  const pencil = useRef<HTMLButtonElement>(null);
+  // the field takes the focus when it opens; when it closes (saved or not) the focus goes back to the pencil, never to
+  // the page behind the window
+  const wasEditing = useRef(false);
   useLayoutEffect(() => {
-    if (!editing) return;
-    field.current?.focus();
-    field.current?.select();
+    if (editing) {
+      wasEditing.current = true;
+      field.current?.focus();
+      field.current?.select();
+    } else if (wasEditing.current) {
+      wasEditing.current = false;
+      pencil.current?.focus();
+    }
   }, [editing]);
   const save = async () => {
     if (busy) return;
@@ -125,6 +134,7 @@ function TemplateName({ t }: { t: TemplateListItem }) {
     <>
       <span className="min-w-0 truncate" title={t.title ? `Файл: ${t.source_file ?? fileName}` : undefined}>{name}</span>
       <Button
+        ref={pencil}
         variant="ghost"
         size="sm"
         shape="circle"

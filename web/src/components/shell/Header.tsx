@@ -1,5 +1,6 @@
 // A quiet white header, exactly 64px (the hairline is an inset shadow, not a border), as VK Tech's products have it: the brand
-// (home) on the left; «Мои презентации», «Помощник» and, on a deck, «Новая презентация» on the right — all 40px. A thin
+// (home) on the left; «Мои презентации», «Помощник» and, on a deck, «Новая презентация» on the right — all 40px, all the
+// same tertiary text buttons (the open helper's toggle takes the blue tint of a pressed one). A thin
 // progress line runs along the bottom while a job works somewhere neither the build screen nor the helper shows it.
 import { forwardRef, useEffect, useRef, useState } from "react";
 import { MessageCircle, Plus } from "lucide-react";
@@ -15,7 +16,7 @@ import { Logo } from "./Logo";
 const HelperToggle = forwardRef<HTMLButtonElement, { open: boolean; unread: boolean; onClick(): void }>(function HelperToggle({ open, unread, onClick }, ref) {
   return (
     <span className="relative inline-flex">
-      <Button ref={ref} id="helper-toggle" variant="tonal" size="md" icon={MessageCircle} aria-pressed={open} aria-controls="helper" onClick={onClick}>
+      <Button ref={ref} id="helper-toggle" variant="ghost" size="md" icon={MessageCircle} aria-pressed={open} aria-controls="helper" onClick={onClick}>
         Помощник
       </Button>
       {/* the dot pops in and pings twice, then stays still */}
@@ -73,7 +74,7 @@ export function Header() {
           <HelperToggle open={agentOpen} unread={unread} onClick={() => setAgentOpen(!agentOpen)} />
           {/* gone while a deck is being built; an edit or a fix only disables it, so the header never shifts under the pointer */}
           {screen === "result" && !building && (
-            <Button variant="secondary" size="md" icon={Plus} disabled={jobRunning} onClick={() => setScreen("create")}>
+            <Button variant="ghost" size="md" icon={Plus} disabled={jobRunning} onClick={() => setScreen("create")}>
               Новая презентация
             </Button>
           )}

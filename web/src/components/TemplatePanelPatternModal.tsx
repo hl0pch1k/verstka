@@ -23,9 +23,9 @@ export const slotRoleLabel = (role: string) => SLOT_ROLE_RU[role] ?? role.replac
 /** Overlay colour per slot role family — one hue for text, one for media, one for numbers. */
 function slotColor(role: string): string {
   if (role.startsWith("title") || role === "section") return "#0077FF";
-  if (/image|picture|logo|icon|chart|table|code/.test(role)) return "#DB2777";
-  if (/number/.test(role)) return "#D97706";
-  return "#059669";
+  if (/image|picture|logo|icon|chart|table|code/.test(role)) return "#E8335D";
+  if (/number/.test(role)) return "#F2821C";
+  return "#0BAD41";
 }
 
 const H4 = "mb-2 text-footnote font-semibold text-zinc-700";
@@ -33,7 +33,8 @@ const H4 = "mb-2 text-footnote font-semibold text-zinc-700";
 /** The full-size render of a sample slide (1467 px wide) beside its 480 px thumbnail: sharp at the modal's size. */
 const fullSize = (url: string | null | undefined) => (url ? url.replace("/thumbs/", "/slides/") : url);
 
-const GROUP_COLORS = ["#7C3AED", "#0891B2", "#EA580C", "#16A34A"];
+// four hues told apart at a glance, from VK's palette (no violet)
+const GROUP_COLORS = ["#0077FF", "#00A3B8", "#F2821C", "#0BAD41"];
 const groupColor = (i: number) => GROUP_COLORS[i % GROUP_COLORS.length];
 
 /** What a cell of a group holds, from the slots of its first cell: «заголовок карточки + текст карточки». */

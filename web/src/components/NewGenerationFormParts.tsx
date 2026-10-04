@@ -1,6 +1,7 @@
 // Building blocks of the create form: the text field look, the switch, the strategy option and the constants.
 import { useId, useRef } from "react";
 import { Check } from "lucide-react";
+import { keepTogether } from "../lib/agent";
 import { variantHint } from "../lib/plain";
 import { cn } from "../lib/utils";
 import type { StrategyInfo } from "../types";
@@ -61,7 +62,8 @@ export function Toggle({ label, checked, disabled, title, onChange }: {
 }) {
   const id = useId();
   return (
-    <div className={cn("flex items-center gap-3", disabled && "opacity-40")} title={title}>
+    // py-1: the 20px switch gets a 28px row to hit
+    <div className={cn("flex items-center gap-3 py-1", disabled && "opacity-40")} title={title}>
       <button
         id={id}
         type="button"
@@ -124,7 +126,7 @@ function StrategyArt({ name, active }: { name: string; active: boolean }) {
 }
 
 /** A selectable strategy: a row card — a small drawing of the variant, the name and up to two lines of what it does (the
- *  full text on hover), a VK checkbox in the corner. One frame: a hairline at rest, the 2px VK-blue ring when chosen. */
+ *  full text on hover), a VK checkbox in the corner. One frame, drawn inside: a hairline at rest, VK blue when chosen. */
 export function StrategyOption({ strategy, checked, disabled, onChange }: {
   strategy: StrategyInfo;
   checked: boolean;
@@ -143,7 +145,7 @@ export function StrategyOption({ strategy, checked, disabled, onChange }: {
         // stretch the document past the scrolling main); the ring moves in 150 ms and a press sinks the card (tap-soft)
         "tap-soft relative flex cursor-pointer items-start gap-3 rounded-xl bg-white p-3",
         "has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent",
-        checked ? "shadow-selected" : "shadow-[inset_0_0_0_1px_rgba(0,16,61,0.12)] hover:shadow-[inset_0_0_0_1px_rgba(0,16,61,0.22)]",
+        checked ? "shadow-[inset_0_0_0_1.5px_#0077FF]" : "shadow-[inset_0_0_0_1px_rgba(0,16,61,0.12)] hover:shadow-[inset_0_0_0_1px_rgba(0,16,61,0.22)]",
         disabled && "cursor-not-allowed opacity-40",
       )}
     >
@@ -154,7 +156,7 @@ export function StrategyOption({ strategy, checked, disabled, onChange }: {
       </span>
       <span className="min-w-0 flex-1 pt-0.5">
         <span className="block text-body font-semibold text-zinc-900">{strategy.title}</span>
-        <span className="mt-0.5 line-clamp-2 text-caption text-zinc-500" title={strategy.description || hint}>{hint}</span>
+        <span className="mt-0.5 line-clamp-2 text-caption text-zinc-500" title={strategy.description || hint}>{keepTogether(hint)}</span>
       </span>
       <span
         className={cn(

@@ -1,6 +1,6 @@
 // The helper's conversation: a one-line header, the feed, at most two contextual chips and the composer.
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
-import { ArrowUp, FileText, Paperclip, X } from "lucide-react";
+import { FileText, Paperclip, Send, X } from "lucide-react";
 import { api } from "../api";
 import { errText } from "../lib/narrate";
 import { smoothScroll, stagger } from "../lib/motion";
@@ -132,10 +132,10 @@ export function Chat({ onClose }: { onClose?: () => void }) {
       : !empty
         ? []
         : generation?.variants.length
-          ? [`Почему слайд ${selectedSlide} такой?`, ...(fixable ? ["Исправь всё"] : [])]
+          ? [`Почему слайд ${selectedSlide} такой?`, "Как работал агент?", ...(fixable ? ["Исправь всё"] : [])]
           : templateId
-            ? ["Что в шаблоне?"]
-            : [];
+            ? ["Что в шаблоне?", "Какие шрифты и цвета?", "Что ты умеешь?"]
+            : ["Что ты умеешь?"];
 
   // the chips row and the file row leave with a collapse: their last content stays for the exit
   const lastChips = useRef(chips);
@@ -228,7 +228,8 @@ export function Chat({ onClose }: { onClose?: () => void }) {
             <input ref={fileRef} type="file" accept=".md,.txt,.markdown,text/markdown,text/plain" className="hidden" onChange={(e) => void onFile(e)} />
             <Button size="sm" variant="ghost" shape="circle" icon={Paperclip} disabled={pending || healthError} onClick={() => fileRef.current?.click()} aria-label="Вставить текст из файла" title="Вставить текст из файла" />
             {text.length > COUNT_FROM && <span className="ml-auto text-caption tabular-nums text-zinc-500">{text.length.toLocaleString("ru-RU")}</span>}
-            <Button size="sm" variant="primary" shape="circle" icon={ArrowUp} loading={pending} disabled={!canSend} onClick={() => void send(text)} aria-label="Отправить" className={cn(text.length <= COUNT_FROM && "ml-auto")} />
+            {/* VK's send: a paper plane on an 8px-round square, not a chat app's round arrow */}
+            <Button size="sm" variant="primary" icon={Send} loading={pending} disabled={!canSend} onClick={() => void send(text)} aria-label="Отправить" title="Отправить (Enter)" className={cn(text.length <= COUNT_FROM && "ml-auto")} />
           </div>
         </div>
       </div>

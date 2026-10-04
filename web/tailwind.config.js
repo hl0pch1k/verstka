@@ -16,12 +16,58 @@ const vkGray = {
   950: "#17181B",
 };
 
+// VKUI paradigmTech semantic colours (positive #0BAD41 / text #00963E / tint #EAFFF0; warning #FEF099 / icon #F2821C / tint
+// #FEF8D1; negative #F23741), spread into the three scales the app uses for states — so every success, warning and error
+// is VK's own tone, not Tailwind's. Text shades (700+) keep 4.5:1 on white.
+const vkPositive = {
+  50: "#EAFFF0", // color_background_positive_tint
+  100: "#D2F7DE",
+  200: "#A6ECBC",
+  300: "#6CDA8F",
+  400: "#2EC463",
+  500: "#0BAD41", // color_background_positive
+  600: "#00963E", // color_text_positive
+  700: "#007A33",
+  800: "#006129",
+  900: "#004D21",
+  950: "#003316",
+};
+const vkWarning = {
+  50: "#FEF8D1", // color_background_warning_tint
+  100: "#FEF099", // color_background_warning
+  200: "#FDE06B",
+  300: "#FBC64A",
+  400: "#F7A533",
+  500: "#F2821C", // color_icon_warning
+  600: "#D96A0B",
+  700: "#A85300",
+  800: "#8A4300",
+  900: "#6B3400",
+  950: "#4A2400",
+};
+const vkNegative = {
+  50: "#FFEEEF",
+  100: "#FFDADC",
+  200: "#FFB3B7",
+  300: "#FB858C",
+  400: "#F65A62",
+  500: "#F23741", // color_background_negative
+  600: "#E0242F",
+  700: "#C01F28",
+  800: "#9C1A21",
+  900: "#7A161B",
+  950: "#4D0E11",
+};
+
 export default {
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
   theme: {
     extend: {
       colors: {
         zinc: vkGray,
+        emerald: vkPositive,
+        amber: vkWarning,
+        red: vkNegative,
         accent: {
           DEFAULT: "#0077FF", // color_background_accent
           50: "#EBF4FF",
@@ -130,7 +176,8 @@ export default {
       // enters 200–300 on ease-out, exits 150 on ease-in, travel on glide, confirmations on spring (fill: enters
       // backwards, exits forwards)
       animation: {
-        fade: "fade 200ms var(--ease-in-out) backwards",
+        // an arrival: the strong ease-out (in-out spends its first 50 ms nearly still, an entrance then feels late)
+        fade: "fade 200ms var(--ease-out) backwards",
         "fade-in": "fade-in 200ms var(--ease-out) backwards",
         rise: "rise 260ms var(--ease-out) backwards",
         "screen-in": "screen-in 260ms var(--ease-out) backwards",

@@ -4,7 +4,8 @@ import { cn } from "../../lib/utils";
 import { renderIcon, type IconProp } from "./icon";
 
 // VK button family (VKUI modes): primary (filled VK blue — the one call to action per screen), tonal (VK's «secondary»:
-// light blue), secondary (neutral grey), white (on the page or a tinted notice), ghost (VK's «tertiary»: text), danger
+// light blue), secondary (VK's neutral secondary: the grey alpha that reads on the page and on white alike), white (on a
+// tinted notice), ghost (VK's «tertiary»: text; pressed — a toggle that is on — takes the blue tint), danger
 // (the confirming button of a delete dialog) and danger-ghost (a quiet «Удалить» that leads to that dialog). Sizes 32 /
 // 40 / 48. Callers pass layout classes only; another look is another variant, never a className override. Focus uses
 // the global 2px outline.
@@ -39,9 +40,10 @@ const VARIANTS: Record<ButtonVariant, string> = {
   primary: "bg-accent-fill text-white hover:bg-accent-600 active:bg-accent-700",
   // pressed (a toggle that is on): a deeper tint and darker text only — a blue ring would read as keyboard focus
   tonal: "bg-accent-50 text-accent-700 hover:bg-accent-100 active:bg-accent-200 aria-pressed:bg-accent-100 aria-pressed:text-accent-800 aria-pressed:hover:bg-accent-200",
-  secondary: "bg-zinc-100 text-zinc-900 hover:bg-zinc-200/70 active:bg-zinc-200",
+  secondary: "bg-[rgba(129,140,154,0.12)] text-zinc-900 hover:bg-[rgba(129,140,154,0.18)] active:bg-[rgba(129,140,154,0.24)]",
   white: "bg-white text-zinc-900 shadow-card hover:bg-zinc-50 active:bg-zinc-100",
-  ghost: "text-zinc-700 hover:bg-zinc-900/[0.06] hover:text-zinc-900 active:bg-zinc-900/10 aria-expanded:bg-zinc-900/[0.06] aria-expanded:text-zinc-900",
+  // an open popup's trigger keeps the hover grey (a disclosure that unfolds in place does not: its chevron says it)
+  ghost: "text-zinc-700 hover:bg-zinc-900/[0.06] hover:text-zinc-900 active:bg-zinc-900/10 [&[aria-haspopup][aria-expanded=true]]:bg-zinc-900/[0.06] [&[aria-haspopup][aria-expanded=true]]:text-zinc-900 aria-pressed:bg-accent-50 aria-pressed:text-accent-700 aria-pressed:hover:bg-accent-100",
   // a destructive confirmation (delete): only inside a dialog that asked first
   danger: "bg-red-600 text-white hover:bg-red-700 active:bg-red-800",
   "danger-ghost": "text-red-600 hover:bg-red-50 hover:text-red-700 active:bg-red-100",

@@ -4,7 +4,7 @@
 import { Fragment, useRef, type ReactNode } from "react";
 import { AlertTriangle, CheckCircle2 } from "lucide-react";
 import { figuresLine } from "../lib/narrate";
-import { cn, fmtSeconds, plural, scoreTone } from "../lib/utils";
+import { cn, plural, scoreTone } from "../lib/utils";
 import type { AuditReport } from "../types";
 import { CountUp } from "./ui/CountUp";
 import { ScoreRing } from "./ui/ScoreRing";
@@ -33,7 +33,8 @@ export function AuditSummaryCard({ audit, actions }: { audit: AuditReport; actio
     summary.model_flags ? { k: "m", el: <Count n={summary.model_flags} one="замечание модели" few="замечания модели" many="замечаний модели" /> } : null,
   ].filter((c): c is { k: string; el: JSX.Element } => !!c);
   const figures = figuresLine(summary.figures);
-  const facts = [plural(summary.checks_run.length, "проверка", "проверки", "проверок"), audit.seconds ? fmtSeconds(audit.seconds) : null].filter(Boolean);
+  // how many checks ran (the time they took is for the run's technical tab, not for the verdict)
+  const facts = [plural(summary.checks_run.length, "проверка", "проверки", "проверок")];
   // the verdict and the counts line cross-fade when their wording changes (a fix, another variant) — not on the first
   // render, where the whole card rises
   const tone = scoreTone(summary.score);

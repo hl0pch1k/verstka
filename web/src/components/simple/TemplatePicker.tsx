@@ -96,7 +96,7 @@ export function TemplateUploadButton() {
   );
 }
 
-const meta = (t: TemplateListItem) => [t.n_slides !== null ? plural(t.n_slides, "слайд", "слайда", "слайдов") : "шаблон", t.font].filter(Boolean).join(", ");
+const meta = (t: TemplateListItem) => [t.n_slides !== null ? plural(t.n_slides, "слайд", "слайда", "слайдов") : "шаблон", t.font ? `шрифт ${t.font}` : null].filter(Boolean).join(", ");
 
 function Cover({ t, selected, onPick, onPreview, fresh }: {
   t: TemplateListItem;
@@ -110,6 +110,10 @@ function Cover({ t, selected, onPick, onPreview, fresh }: {
   const [broken, setBroken] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const name = tplLabel(t);
+  // the check springs in when the person picks this cover, not when the page opens with it chosen
+  const was = useRef(selected);
+  const picked = selected && !was.current;
+  if (!selected) was.current = false;
   return (
     // «Слайды» is a sibling of the cover's button (a button never holds another); it shows while the pointer is over the
     // card or the focus is inside it, always on touch screens
@@ -118,7 +122,8 @@ function Cover({ t, selected, onPick, onPreview, fresh }: {
         <span
           className={cn(
             "relative block aspect-video overflow-hidden rounded-xl bg-zinc-100 transition-shadow duration-150",
-            selected ? "shadow-selected" : "shadow-inner-line group-hover:shadow-selected-hover",
+            // hover lifts the cover (a blue ring there would read as a second choice)
+            !selected && "group-hover:shadow-raise",
             fresh && !loaded && !broken && "skeleton",
           )}
         >
@@ -135,8 +140,11 @@ function Cover({ t, selected, onPick, onPreview, fresh }: {
           ) : (
             <span className="flex h-full items-center justify-center text-zinc-400"><ImageOff className="h-6 w-6" aria-hidden /></span>
           )}
+          {/* the frame over the picture: a hairline, or the choice's 2px VK blue drawn inside, so the chosen cover keeps
+              its size */}
+          <span aria-hidden className={cn("pointer-events-none absolute inset-0 rounded-xl transition-shadow duration-150", selected ? "shadow-[inset_0_0_0_2px_#0077FF]" : "shadow-inner-line")} />
           {selected && (
-            <span className="absolute right-2 top-2 flex h-6 w-6 animate-pop items-center justify-center rounded-full bg-accent-fill text-white ring-2 ring-white" aria-hidden>
+            <span className={cn("absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-accent-fill text-white ring-2 ring-white", picked && "animate-pop")} aria-hidden>
               <Check className="h-3.5 w-3.5" strokeWidth={2.5} />
             </span>
           )}

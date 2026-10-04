@@ -2,7 +2,7 @@
 // be fixed automatically. Motion: a remark being fixed dims while the job runs, and a remark (or a whole slide's group)
 // that a fix removed folds away (300 ms glide) instead of vanishing, so the list below glides up.
 import { useEffect, useState } from "react";
-import { ArrowUpRight, Check } from "lucide-react";
+import { Check } from "lucide-react";
 import { MOTION, prefersReducedMotion } from "../lib/motion";
 import { cn, SEVERITY_LABEL } from "../lib/utils";
 import type { Issue, Severity } from "../types";
@@ -142,8 +142,9 @@ export function SlideIssueGroup({ group, headline, current, selected, disabled, 
           )}
         </div>
         {!deck && (
-          <Button variant="ghost" size="sm" iconRight={ArrowUpRight} onClick={onShow}>
-            На слайде
+          // the slide opens on the stage behind the drawer: an in-app jump, not a link out
+          <Button variant="ghost" size="sm" onClick={onShow}>
+            Показать
           </Button>
         )}
       </header>

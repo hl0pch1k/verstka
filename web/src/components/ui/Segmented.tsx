@@ -33,13 +33,14 @@ function textOf(node: ReactNode): string {
 }
 
 // The VK segmented control: one choice out of a few, one white thumb glides over a grey track (300 ms glide) while the
-// labels change colour in 150 ms, so the text lights up as the thumb arrives. Keyboard: ←/→/Home/End
-// move and select (the events stop here, so page-level arrow handlers — the slide keys — do not fire).
+// labels change colour in 150 ms, so the text lights up as the thumb arrives. Keyboard: the arrows, Home and End
+// move and select (the events stop here, so page-level arrow handlers — the slide keys — do not fire). Radii nest: the
+// 12px track with 4px of padding holds 8px thumbs.
 export function Segmented<K extends string>({ items, value, onChange, ariaLabel, metaLabel, className }: SegmentedProps<K>) {
   const ref = useRef<HTMLDivElement>(null);
   const thumb = useIndicator(ref, '[role="radio"][aria-checked="true"]', value);
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (!["ArrowRight", "ArrowLeft", "Home", "End"].includes(e.key)) return;
+    if (!["ArrowRight", "ArrowLeft", "ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
     e.preventDefault();
     e.stopPropagation();
     const enabled = items.filter((i) => !i.disabled);
@@ -48,12 +49,12 @@ export function Segmented<K extends string>({ items, value, onChange, ariaLabel,
     const next =
       e.key === "Home" ? enabled[0]
       : e.key === "End" ? enabled[enabled.length - 1]
-      : enabled[(idx + (e.key === "ArrowRight" ? 1 : enabled.length - 1)) % enabled.length];
+      : enabled[(idx + (e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : enabled.length - 1)) % enabled.length];
     if (next.key !== value) onChange(next.key);
     ref.current?.querySelector<HTMLButtonElement>(`[data-seg="${next.key}"]`)?.focus();
   };
   return (
-    <div ref={ref} role="radiogroup" aria-label={ariaLabel} onKeyDown={onKey} className={cn("relative inline-flex h-10 shrink-0 items-center gap-1 rounded-xl bg-zinc-100 p-1", className)}>
+    <div ref={ref} role="radiogroup" aria-label={ariaLabel} onKeyDown={onKey} className={cn("relative inline-flex h-10 shrink-0 items-center gap-1 rounded-2xl bg-zinc-100 p-1", className)}>
       <span aria-hidden className="pointer-events-none absolute left-0 top-0 rounded-lg bg-white shadow-card transition-[transform,width,height] duration-300 ease-glide" style={thumb.style} />
       {items.map((item) => {
         const active = item.key === value;

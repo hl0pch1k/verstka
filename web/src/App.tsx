@@ -57,7 +57,10 @@ export default function App() {
       <div className="relative flex min-h-0 flex-1">
         {/* scroll padding: a control focused by Tab (or the caret of a long text) stops clear of the create screen's
             sticky action bar and of the build screen's sticky title bar */}
-        <main key={shown.screen} data-follow className={cn("scroll-thin min-w-0 flex-1 overflow-y-auto scroll-pb-24", building && shown.screen === "result" && "scroll-pt-24")}>
+        {/* relative: the scroller is the containing block of every absolutely placed element inside (an sr-only label, a
+            badge): one placed against an outer box would stretch the document past the scroller — a second scrollbar and
+            the header shifting by its width */}
+        <main key={shown.screen} data-follow className={cn("scroll-thin relative min-w-0 flex-1 overflow-y-auto overscroll-contain scroll-pb-24", building && shown.screen === "result" && "scroll-pt-24")}>
           {/* without View Transitions (or with reduced motion) the new screen rises in by itself */}
           <div className={cn("h-full", (!supportsViewTransitions || reduced) && "animate-screen-in rm-fade")}>
             {shown.screen === "create" ? <CreateScreen /> : <ResultScreen />}

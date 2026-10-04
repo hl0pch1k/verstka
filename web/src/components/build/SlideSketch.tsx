@@ -125,7 +125,7 @@ function Body({ kind, headline, live }: { kind: SketchKind; headline: string; li
                 strokeDashoffset={-s.off}
                 transform="rotate(-90 50 50)"
                 className={live ? "animate-fade" : undefined}
-                style={at(live, i, 140, 110)}
+                style={at(live, i, 140, 80)}
               />
             ))}
           </svg>
@@ -168,7 +168,7 @@ function Body({ kind, headline, live }: { kind: SketchKind; headline: string; li
         <>
           <Title text={headline} live={live} />
           {[0, 1, 2].map((i) => (
-            <span key={i} className={cn("absolute flex flex-col gap-[9%]", live && "animate-fade-in")} style={{ left: `${7 + i * 30}%`, top: "44%", width: "26%", height: "42%", ...at(live, i, 140, 90) }}>
+            <span key={i} className={cn("absolute flex flex-col gap-[9%]", live && "animate-fade-in")} style={{ left: `${7 + i * 30}%`, top: "44%", width: "26%", height: "42%", ...at(live, i, 140, 80) }}>
               {figures[i] ? (
                 <span className={cn("truncate font-bold leading-none [font-size:max(9px,6.4cqw)]", i === 0 ? "text-[color:var(--sk)]" : "text-zinc-800")}>{figures[i]}</span>
               ) : (
@@ -224,7 +224,7 @@ function Body({ kind, headline, live }: { kind: SketchKind; headline: string; li
             <span key={i}>
               <span
                 className={cn("absolute rounded-full shadow-[0_0_0_2px_var(--sk-soft)]", INK, live && "animate-pop")}
-                style={{ left: `${11 + i * 24}%`, top: "60.6%", width: "3.4%", aspectRatio: "1", ...at(live, i, 240, 110) }}
+                style={{ left: `${11 + i * 24}%`, top: "60.6%", width: "3.4%", aspectRatio: "1", ...at(live, i, 240, 80) }}
               />
               <Box x={7 + i * 24} y={i % 2 ? 71 : 44} w={15} h={4.6} className="bg-zinc-300" i={i + 2} />
               <Box x={7 + i * 24} y={i % 2 ? 79 : 52} w={10} h={3.6} className={GREY} i={i + 3} />

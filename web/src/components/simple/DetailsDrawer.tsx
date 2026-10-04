@@ -254,7 +254,7 @@ export function DetailsDrawer() {
     <div ref={dialog} className={cn("fixed inset-0 z-50", leaving && "pointer-events-none")} role="dialog" aria-modal="true" aria-owns={agentOpen ? "helper" : undefined} aria-label={title}>
       {/* the scrim fades with the sheet's travel: in over 300 ms, out over 200 ms (the blur itself is static) */}
       <div
-        className={cn("absolute inset-0 bg-ink/40 backdrop-blur-[2px]", leaving ? "animate-fade-out rm-fade-out [animation-duration:200ms]" : "animate-fade rm-fade [animation-duration:300ms]")}
+        className={cn("absolute inset-0 bg-black/40", leaving ? "animate-fade-out rm-fade-out [animation-duration:200ms]" : "animate-fade rm-fade [animation-duration:300ms]")}
         onClick={() => setDetail(null)}
         aria-hidden
       />

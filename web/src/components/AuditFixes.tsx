@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { api } from "../api";
 import { errText } from "../lib/narrate";
-import { cn, plural, SEVERITY_LABEL } from "../lib/utils";
+import { cn, SEVERITY_LABEL } from "../lib/utils";
 import type { CheckSpec } from "../types";
 import { ACTION_DONE, categoryLabel, normalizeFix, SEVERITY_RANK, type FixRecord } from "./AuditHelpers";
 import { SlideTag } from "./AuditIssues";
@@ -65,7 +65,7 @@ export function AppliedFixes({ fixes, slideOf, templateSlide, onShow }: {
   }, [fixes, slideOf, templateSlide]);
   if (rows.length === 0) return null;
   return (
-    <Collapsible title="Исправлено автоматически" hint={plural(fixes.length, "правка", "правки", "правок")} defaultOpen={false} keepMounted={false}>
+    <Collapsible title="Исправлено автоматически" hint={String(fixes.length)} defaultOpen={false} keepMounted={false}>
       {/* full-bleed rows in the card's 24px body; the last row's padding is part of the card's bottom */}
       <ol className="-mx-6 -mb-3 divide-y divide-zinc-100">
         {rows.map((r, idx) => (
@@ -121,7 +121,7 @@ export function ChecksReference({ total }: { total?: number }) {
   return (
     <Collapsible
       title="Что проверяется"
-      hint={total ? plural(total, "проверка", "проверки", "проверок") : undefined}
+      hint={total ? String(total) : undefined}
       open={open}
       onOpenChange={setOpen}
       keepMounted={false}

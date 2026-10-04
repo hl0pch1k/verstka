@@ -1,6 +1,6 @@
 // While a presentation is being built. The page says what the agent is doing now in its title (the phase in plain
-// words: «Читаю ваш текст» → «Продумываю слайды» → «Сверяю план с текстом» → …), how far the build is (percent, the
-// clock against the five-minute promise, one bar), then two cards: the storyboard on the left — a card per slide that
+// words: «Читаю ваш текст» → «Продумываю слайды» → «Сверяю план с текстом» → …), the time against the five-minute
+// promise and one bar of progress, then two columns: the storyboard on the left — a card per slide that
 // fills in with the sketch of its form as the designer thinks it through, gets the critic's note and the revision's
 // answer, a check once laid out, then the real preview — and on the right how the agent thinks, step by step. The
 // variants' switch above the storyboard chooses whose slides are shown. A narrow page (the helper docked) narrows both.
@@ -9,18 +9,16 @@
 // which has nothing to morph from, the whole page rises as one piece). When the build ends, the title cross-fades into
 // the deck's and the agent's column turns into the deck's aside.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Check, Clock3, Loader2 } from "lucide-react";
+import { Check } from "lucide-react";
 import { api } from "../api";
 import { buildTimeline, laterPhase, phaseOfStep, type PhaseKey } from "../lib/agent";
 import type { VariantProgress } from "../lib/jobText";
-import { MOTION } from "../lib/motion";
 import { variantHint } from "../lib/plain";
 import { clock, railSlides, sketchInk, STAGE_TITLE } from "../lib/stage";
 import { cn, fmtWhen, plural } from "../lib/utils";
 import { useApp, type ActiveJob } from "../store";
 import { AgentLog } from "./build/AgentLog";
 import { StoryBoard } from "./build/StoryBoard";
-import { CountUp } from "./ui/CountUp";
 import { Segmented, type SegmentedItem } from "./ui/Segmented";
 
 const PROMISE_MS = 5 * 60 * 1000; // the five-minute promise
@@ -147,31 +145,35 @@ function PhaseTitle({ text: wanted }: { text: string }) {
   );
 }
 
-/** Where a variant is, after its name in the switch: a spinner while the agent or the check works on it, «4/12» while
- *  its slides are laid out, a check when it is ready (the words for screen readers). */
+/** Where a variant is, after its name in the switch: «4/12» while its slides are laid out, a check when it is ready,
+ *  nothing before (the label stands alone, centred in its segment). The slot has a fixed width once it shows, so «9/12»
+ *  → «10/12» → ✓ never changes the switch's size; and nothing spins: the page has one place that says the work goes on —
+ *  its title. */
 function variantMeta(st: VariantState): ReactNode {
-  if (st.done) {
-    return (
-      <span className="inline-flex text-accent-600">
-        <Check className="h-3.5 w-3.5" strokeWidth={2.75} aria-hidden />
-        <span className="sr-only">готово</span>
-      </span>
-    );
-  }
-  if (/^вёрстка/.test(st.text) && st.laid !== undefined && st.of) return `${st.laid}/${st.of}`;
-  if (/в очереди/.test(st.text)) {
-    return (
-      <span className="inline-flex text-zinc-400">
-        <Clock3 className="h-3.5 w-3.5" aria-hidden />
-        <span className="sr-only">{st.text}</span>
-      </span>
-    );
-  }
+  const laying = /^вёрстка/.test(st.text) && st.laid !== undefined && !!st.of;
+  if (!st.done && !laying) return null;
   return (
-    <span className="inline-flex text-zinc-400">
-      <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-      <span className="sr-only">{st.text}</span>
+    <span className="inline-flex w-[5ch] justify-end tabular-nums">
+      {st.done ? <Check className="h-3.5 w-3.5 text-accent-600" strokeWidth={2.75} aria-hidden /> : `${st.laid}/${st.of}`}
+      {st.done && <span className="sr-only">готово</span>}
     </span>
+  );
+}
+
+/** The time since the build began against the five-minute promise («1:42 из 5:00»; past it, the time alone). Its own
+ *  clock: once a second it re-renders itself, not the page. */
+function Elapsed({ since }: { since: number }) {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const t = window.setInterval(() => tick((n) => n + 1), 1000);
+    return () => window.clearInterval(t);
+  }, []);
+  const ms = Date.now() - since;
+  return (
+    <p className="shrink-0 whitespace-nowrap tabular-nums" title="Обещаем уложиться в пять минут">
+      <span className="text-title2 font-semibold text-zinc-900">{clock(ms / 1000)}</span>
+      {ms <= PROMISE_MS && <span className="ml-1.5 text-body text-zinc-400">из {clock(PROMISE_MS / 1000)}</span>}
+    </p>
   );
 }
 
@@ -188,13 +190,6 @@ export function BuildScreen({ job }: { job: ActiveJob }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  // the interval only asks for a re-render; the clock is read at render time (throttled background tabs never lag)
-  const [, tick] = useState(0);
-  useEffect(() => {
-    const t = window.setInterval(() => tick((n) => n + 1), 1000);
-    return () => window.clearInterval(t);
-  }, []);
-
   const tid = job.template ?? templateId;
   const tpl = templates.find((t) => t.template_id === tid);
   const file = tpl?.source_file ?? (manifest?.template_id === tid ? manifest?.source_file : null);
@@ -208,7 +203,6 @@ export function BuildScreen({ job }: { job: ActiveJob }) {
   const message = job.message;
   // saving the files means every variant has been laid out and checked
   const exporting = /^сохраняю файлы/i.test(message);
-  const elapsed = Date.now() - job.startedAt;
   const queued = job.status === "queued";
 
   // the variants are laid out one after another: the check of the first must not end «Вёрстка» for the others
@@ -272,7 +266,7 @@ export function BuildScreen({ job }: { job: ActiveJob }) {
     !rail.length ? "план ещё не готов"
     : laidCount > 0 ? `сверстано ${laidCount} из ${rail.length}`
     : planned > 0 ? `продумано ${planned} из ${rail.length}`
-    : plural(rail.length, "слайд", "слайда", "слайдов");
+    : String(rail.length);
 
   const segments: SegmentedItem<string>[] = names.map((name) => {
     const st = variantOf(name);
@@ -280,7 +274,6 @@ export function BuildScreen({ job }: { job: ActiveJob }) {
   });
 
   const pct = Math.round(Math.min(1, Math.max(0, job.progress)) * 100);
-  const timer = elapsed <= PROMISE_MS ? `${clock(elapsed / 1000)} из ${clock(PROMISE_MS / 1000)}` : clock(elapsed / 1000);
 
   return (
     // left edge = the header's container edge, also while the helper narrows `main` (identical to mx-auto otherwise)
@@ -290,14 +283,9 @@ export function BuildScreen({ job }: { job: ActiveJob }) {
         {/* vt-title: the phase cross-fades in place into the deck's title when the build ends */}
         <div className={cn("min-w-0 flex-1", vt.title && "vt-title")}>
           <PhaseTitle text={title} />
-          {meta && <p className="mt-1 truncate text-footnote text-zinc-500" title={meta}>{meta}</p>}
+          {meta && <p className="truncate text-footnote text-zinc-500" title={meta}>{meta}</p>}
         </div>
-        <div className="shrink-0 text-right">
-          <p className="text-title2 font-semibold text-zinc-900">
-            {queued ? <span className="text-zinc-400">—</span> : <CountUp value={pct} ms={MOTION.data} format={(n) => `${Math.round(n)}%`} />}
-          </p>
-          <p className="mt-1 text-footnote tabular-nums text-zinc-500" title="Обещаем уложиться в пять минут">{timer}</p>
-        </div>
+        <Elapsed since={job.startedAt} />
       </div>
       <div
         role="progressbar"
@@ -308,7 +296,8 @@ export function BuildScreen({ job }: { job: ActiveJob }) {
         className="relative mt-4 h-1 shrink-0 overflow-hidden rounded-full bg-zinc-200/80"
       >
         {queued ? (
-          <div className="absolute inset-y-0 left-0 w-[30%] animate-sweep rounded-full bg-accent motion-reduce:animate-none" />
+          // with less motion the queue is a faint full bar, not a still segment that would read as progress
+          <div className="absolute inset-y-0 left-0 w-[30%] animate-sweep rounded-full bg-accent motion-reduce:w-full motion-reduce:animate-none motion-reduce:opacity-30" />
         ) : (
           <div className="h-full w-full rounded-full bg-accent transition-transform duration-600 ease-out" style={{ transform: `translateX(${pct - 100}%)` }} />
         )}

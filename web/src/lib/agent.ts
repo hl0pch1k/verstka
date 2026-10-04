@@ -200,9 +200,14 @@ export function eventParts(e: AgentEvent): { text: string; fix: string | null } 
     text = text.replace(TWO_CHARTS, (_m, a: string, b: string) => (a.toLowerCase() === b.toLowerCase() ? TWO_OF[a.toLowerCase()] : `${a} и ${b}`));
     const stripped = text.replace(REDONE, "");
     if (stripped !== text && stripped) text = stripped;
+    // «собран по правилам (модель не ответила)» on every slide: the step's own line says once that the model was silent
+    text = text.replace(/\s*\(модель не ответила\)/gi, "");
   }
   // older runs: «Модель добавила 0 рядов данных и 1 таблицу» says only what was added
   if (step === "analyst") text = text.replace(/(^|\s)0\s+(?:рядов данных|таблиц)\s+и\s+/i, "$1").replace(/\s+и\s+0\s+(?:рядов данных|таблиц)(?=[.\s]*$)/i, "");
+  // the line stands under its step, which names itself: «Критик пропущен: …» reads «Пропущен: …»
+  const own = PHASES.find((p) => p.key === phaseOfStep(e.step))?.title;
+  if (own) text = text.replace(new RegExp(`^${own}\\s+(?=[а-яё])`, "u"), "");
   return { text: keepTogether(capital(plainWords(text)) || e.message), fix: fix && keepTogether(fix) };
 }
 
@@ -236,7 +241,7 @@ export interface TimelineInput {
 /** The critic's count line («3 замечания — слайды 2, 4, 5.»): the step's header says it instead. */
 const CRITIC_COUNT = /^\d+\s+замечани/;
 /** Compile lines that repeat what the rows already show. */
-const COMPILE_ECHO = /^(план готов|подготовил данные для диаграмм)/i;
+const COMPILE_ECHO = /^(план готов|подготовил данные для (?:\d+\s+)?диаграмм)/i;
 
 const agrees = (n: number, one: string, many: string) => (n % 10 === 1 && n % 100 !== 11 ? one : many);
 
@@ -331,6 +336,14 @@ export function buildTimeline({ events, phase, running, notes }: TimelineInput):
     const passed = running ? idx < curIdx : idx <= curIdx || !cur;
     let status: PhaseStatus = passed ? "done" : running && idx === curIdx ? "active" : "pending";
     let note = notes?.[def.key] ?? ownNote(def.key, own);
+    // a critic that only said it was skipped («Критик пропущен: …») is a skipped step: a grey dash and the reason beside
+    // its title, never a blue check over no work
+    const skippedSaid = def.key === "critic" && own.length > 0 && own.every((e) => (e.slide === null || e.slide === undefined) && /^(?:критик\s+)?(?:пропущен|не\s+запускал)/i.test(e.message.trim()));
+    if (skippedSaid && passed) {
+      const why = eventText(own[0]).replace(/[.\s]+$/, "");
+      rows.push({ key: def.key, title: def.title, hint: def.hint, status: "skipped", note: why.charAt(0).toLowerCase() + why.slice(1), events: [] });
+      continue;
+    }
     // the critic and the revision leave no trace when the plan came without the model, ran out of time or needed no fixes
     if ((def.key === "critic" || def.key === "revise") && !hadAny && passed) {
       status = "skipped";
@@ -377,7 +390,7 @@ export function agentSummary(v: Variant | null | undefined): AgentSummaryLine[] 
     const results = evs.filter((e) => e.phase === "analyst" && !/^(уточняю|модель добавила)(?![а-яё])/i.test(eventText(e)));
     const analyst = results.filter((e) => /^нашёл/i.test(eventText(e))).pop() ?? results.pop();
     // «Нашёл 5 слайдов, 11 рядов данных и 7 диаграмм»: the card's two lines hold the whole finding
-    const found = analyst ? noStop(eventText(analyst).replace(/^нашёл\s+в\s+тексте\s+/i, "Нашёл ").replace(/\s+заказанн\S*/gi, "")) : null;
+    const found = analyst ? noStop(eventText(analyst).replace(/^нашёл\s+в\s+тексте\s+/i, "Нашёл ").replace(/\s+(?:заказанн|указанн)\S*/gi, "")) : null;
     if (found && !wrote) lines.push({ step: "Аналитик", text: found });
     const designed = evs.filter((e) => e.phase === "designer");
     const designedSlides = uniqueSlides(designed).length || designed.length;
