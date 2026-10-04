@@ -122,7 +122,7 @@ def test_short_brief_charts_get_their_data(short_st):
     assert t4b == "pie" and v4b == [70000, 35000, 25000, 20000, 30000]
     assert [(t, v) for t, v, _ in chart_data(st, 5)] == [("column", [120000, 254795])]
     assert st.specs[1].footnote and "не включены" in st.specs[1].footnote
-    assert describe(st) == "Нашёл в брифе 5 слайдов, 11 рядов данных и 7 заказанных диаграмм"
+    assert describe(st) == "Нашёл в брифе 5 слайдов, 11 рядов данных и 7 указанных диаграмм"
 
 
 @pytest.mark.parametrize("text", [LONG, SHORT] + [p.read_text(encoding="utf-8") for p in EXAMPLES])

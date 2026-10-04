@@ -934,7 +934,7 @@ def _repair(o: DeckOutline, structure: BriefStructure, run: _Run) -> bool:
         s.footnote = s.footnote or fb.footnote
         s.rationale = fb.rationale
         run.warn(f"slide {s.id}: nothing of the designed content was the brief's; filled from the brief's text")
-        run.say(f"Слайд {_name(s)}: в нём не осталось того, что есть в брифе, — заполнил его текстом брифа.", s)
+        run.say(f"Слайд {_name(s)}: на нём не осталось ничего из брифа — заполнил его исходными формулировками.", s)
         changed = True
     if changed:
         _unique_ids(o.slides)
@@ -1010,7 +1010,7 @@ def compile_outline(
     made = _compile_charts(o, run)
     if made:
         n = sum(1 for s in o.slides for ch in (s.content.chart, s.content.chart2) if ch is not None and ch.series_ids)
-        run.say(f"Подготовил данные для диаграмм: {ru_count(n, 'диаграмма', 'диаграммы', 'диаграмм')}.")
+        run.say(f"Подготовил данные для {ru_count(n, 'диаграммы', 'диаграмм', 'диаграмм')}.")
     _cover(o, structure, run)
     _tense_guard(o, structure, idx, run)
     if not ground:

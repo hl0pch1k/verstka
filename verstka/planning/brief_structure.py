@@ -1404,7 +1404,7 @@ def enrich_with_model(
 
 def describe(structure: BriefStructure) -> str:
     """The analyst's report in one plain Russian sentence: «Нашёл в брифе 10 слайдов, 14 рядов данных, 1 таблицу и 1
-    заказанную диаграмму»."""
+    указанную диаграмму» (a chart the brief asks for by name)."""
     parts = []
     n = len(structure.specs)
     if n:
@@ -1416,7 +1416,7 @@ def describe(structure: BriefStructure) -> str:
         parts.append(f"{t} {_plural(t, 'таблицу', 'таблицы', 'таблиц')}")
     c = sum(len(s.charts) for s in structure.specs)
     if c:
-        parts.append(f"{c} {_plural(c, 'заказанную диаграмму', 'заказанные диаграммы', 'заказанных диаграмм')}")
+        parts.append(f"{c} {_plural(c, 'указанную диаграмму', 'указанные диаграммы', 'указанных диаграмм')}")
     f = sum(1 for s in structure.specs if s.formula)
     if f:
         parts.append(f"{f} {_plural(f, 'формулу', 'формулы', 'формул')}")
