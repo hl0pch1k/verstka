@@ -465,8 +465,16 @@ class _Run:
 
 
 def _name(s: OutlineSlide) -> str:
+    """The slide's headline in quotes for the agent's lines, at most 60 characters: a longer one is cut at the last whole
+    word («…на одного клиента…», never «…составит 5 050 р…»)."""
     h = " ".join((s.headline or "").split())
-    return f"«{h if len(h) <= 60 else h[:59] + '…'}»"
+    if len(h) <= 60:
+        return f"«{h}»"
+    cut = h[:59]
+    space = cut.rfind(" ")
+    if space >= 30:
+        cut = cut[:space]
+    return f"«{cut.rstrip(' ,;:—–-')}…»"
 
 
 def _registry(o: DeckOutline, structure: BriefStructure) -> None:

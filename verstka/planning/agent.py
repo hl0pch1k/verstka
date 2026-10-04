@@ -4143,7 +4143,7 @@ class _Agent:
             if trip:
                 self.broken = True
         if trip:
-            self.tracker.emit("designer", "Модель не отвечает — остальные слайды собраны по правилам, без неё.")
+            self.tracker.emit("designer", "Модель не ответила — остальные слайды собраны по правилам, без неё.")
 
     # ---------------------------------------------------------------- architect
     def architect(self, ctx: _Ctx, warnings: list[str]) -> Optional[list[_Unit]]:

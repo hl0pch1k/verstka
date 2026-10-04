@@ -326,7 +326,7 @@ def test_the_circuit_breaker_stops_asking_a_failing_model():
     assert len(designer) <= 6, designer
     assert not any(c[0] == "CritiqueAnswer" for c in p.calls)  # no slide by the model: no critic
     assert res.outlines["structured"].planned_by == "rules"
-    assert any("Модель не отвечает" in e["message"] for e in events)
+    assert any("Модель не ответила" in e["message"] for e in events)
     assert any(e["step"] == "critic" and "пропущен" in e["message"] for e in events)
 
 
