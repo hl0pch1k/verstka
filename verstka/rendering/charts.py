@@ -560,12 +560,30 @@ def _fill_color(holder, scheme: dict[str, str], part=None, region=None, size=Non
     return None
 
 
+_COVER_MEMO: dict[tuple, Optional[tuple[str, float]]] = {}
+
+
 def _picture_cover(part, rid: str, region=None) -> Optional[tuple[str, float]]:
     """(mean colour of the picture's opaque pixels, their coverage 0–1) inside `region` = (x0, y0, x1, y1) fractions."""
+    # (one picture is asked about the same region again and again — every text over a picture ground, at every render
+    # of the deck: a template's background decoded once per question cost LCT a quarter of its render)
+    try:
+        blob = part.related_part(rid).blob
+        reg = tuple(region) if region else None
+        key = (len(blob), hash(blob), reg)
+    except Exception:  # noqa: BLE001
+        return None
+    if key not in _COVER_MEMO:
+        if len(_COVER_MEMO) >= 4096:
+            _COVER_MEMO.clear()
+        _COVER_MEMO[key] = _picture_cover_of(blob, reg)
+    return _COVER_MEMO[key]
+
+
+def _picture_cover_of(blob: bytes, region=None) -> Optional[tuple[str, float]]:
     try:
         from PIL import Image
 
-        blob = part.related_part(rid).blob
         im = Image.open(io.BytesIO(blob))
         im.draft("RGB", (256, 256))
         im = im.convert("RGBA")

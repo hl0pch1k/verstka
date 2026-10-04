@@ -493,6 +493,18 @@ def _missing_width(seg: str, bold: bool) -> float:
     return w * _UNKNOWN_FACTOR
 
 
+# (one text is measured again and again — every fit tries it at several sizes, every sample and every render of a deck
+# sets it anew: the face's own measure of a run is remembered per face object and text)
+@lru_cache(maxsize=65536)
+def _length(font: ImageFont.FreeTypeFont, seg: str) -> float:
+    return font.getlength(seg)
+
+
+@lru_cache(maxsize=16384)
+def _runs_of(font: ImageFont.FreeTypeFont, text: str) -> tuple[tuple[str, bool], ...]:
+    return tuple(_coverage_runs(font, text))
+
+
 def text_width_pt(text: str, family: Optional[str], size_pt: float, bold: bool = False, *, caps: bool = False, spc_pt: float = 0.0) -> float:
     """Width of `text` set in `family` at `size_pt`. `caps`: the run is set in capitals (cap="all" inherited from the
     master), measured upper-cased; `spc_pt`: letter-spacing (spc/100) added after every character."""
@@ -505,9 +517,9 @@ def text_width_pt(text: str, family: Optional[str], size_pt: float, bold: bool =
     real = None if is_pinned(family) else _real_font(family.strip(), bold)
     if real is not None:
         w = 0.0
-        for seg, covered in _coverage_runs(real, t):
+        for seg, covered in _runs_of(real, t):
             if covered:
-                w += real.getlength(seg) / _MEASURE_PX * size_pt
+                w += _length(real, seg) / _MEASURE_PX * size_pt
             else:
                 # glyphs the face lacks (Cyrillic in Futura Medium, «₽» in most Latin faces) are set by the renderer
                 # in a fallback face: measured as an unknown family (Play × 1.08, a little wide) where Play has them,
@@ -518,10 +530,10 @@ def text_width_pt(text: str, family: Optional[str], size_pt: float, bold: bool =
         play = _font(bold)
         factor = width_factor(family)
         w = 0.0
-        for seg, covered in _coverage_runs(play, t):
+        for seg, covered in _runs_of(play, t):
             # (Play has no arrow «→»: «116 → 123» set at 36 pt wrapped in the render where Play's «.notdef» box said
             # it fits on a line)
-            w += (play.getlength(seg) * factor if covered else _missing_width(seg, bold)) / _MEASURE_PX * size_pt
+            w += (_length(play, seg) * factor if covered else _missing_width(seg, bold)) / _MEASURE_PX * size_pt
     if spc_pt:
         w += spc_pt * len(t)
     return w

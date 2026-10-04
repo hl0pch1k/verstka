@@ -175,6 +175,20 @@ def test_stand_ins_keep_the_class_and_prefer_the_templates_own(tmp_path):
     assert measured_family("DM Sans") == "DM Sans"
 
 
+def test_a_remembered_width_follows_the_stand_in_of_its_deck():
+    """Widths are remembered per the face a text is set in (`fonts._measured_width`): measured before, inside and
+    after a deck that sets the family in a stand-in, the text reads the stand-in's width there and its own outside."""
+    from verstka.rendering.cyrillic import deck_fonts
+    from verstka.rendering.fonts import text_width_pt
+
+    text = "Пилот подтвердил эффект"
+    own = text_width_pt(text, "DM Sans", 20)
+    with deck_fonts({"DM Sans": "Inter"}):
+        inside = text_width_pt(text, "DM Sans", 20)
+    assert inside == text_width_pt(text, "Inter", 20) and inside != own
+    assert text_width_pt(text, "DM Sans", 20) == own
+
+
 def test_the_finished_deck_sets_russian_text_in_the_stand_in(tmp_path):
     from verstka.rendering.cyrillic import apply_to_pptx
 
