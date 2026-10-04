@@ -345,15 +345,52 @@ def _blank_prompts(xml: bytes) -> bytes:
     return etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True) if changed else xml
 
 
+_OPAQUE_MEMO: dict[tuple[int, int], Optional[bytes]] = {}
+_OPAQUE_MIN_PX = 1_000_000  # a picture of fewer pixels costs LibreOffice nothing worth the work
+
+
+def _without_opaque_alpha(data: bytes) -> Optional[bytes]:
+    """A big PNG whose alpha channel is opaque everywhere, re-encoded without it (the same pixels); None for any other
+    picture. LibreOffice writes an alpha channel into the PDF as a soft mask however opaque it is: the four 4K
+    backgrounds of LCT took it 15 of the 20 seconds of a deck's conversion. The PNG header says the size and whether
+    there is an alpha channel at all (colour type 6 or 4) before anything is decoded."""
+    if len(data) < 26 or not data.startswith(b"\x89PNG\r\n\x1a\n") or data[12:16] != b"IHDR" or data[25] not in (4, 6):
+        return None
+    if int.from_bytes(data[16:20], "big") * int.from_bytes(data[20:24], "big") < _OPAQUE_MIN_PX:
+        return None
+    key = (len(data), hash(data))
+    if key in _OPAQUE_MEMO:
+        return _OPAQUE_MEMO[key]
+    got: Optional[bytes] = None
+    try:
+        from io import BytesIO
+
+        from PIL import Image
+
+        im = Image.open(BytesIO(data))
+        if im.mode in ("RGBA", "LA") and im.getchannel("A").getextrema()[0] == 255:
+            buf = BytesIO()
+            im.convert("RGB" if im.mode == "RGBA" else "L").save(buf, format="PNG", compress_level=1)
+            got = buf.getvalue()
+    except Exception as e:  # noqa: BLE001 — the picture goes as it is
+        log.debug("opaque alpha probe failed: %s", e)
+    if len(_OPAQUE_MEMO) >= 64:
+        _OPAQUE_MEMO.clear()
+    _OPAQUE_MEMO[key] = got
+    return got
+
+
 def render_copy(pptx: Path, out_dir: Path) -> Path:
     """A copy of the deck for LibreOffice only, named like the original (the PDF takes the stem).
 
     PowerPoint never shows layout placeholders on a slide, but LibreOffice imports the extra placeholders of a
     custom layout as plain master shapes: their prompt text shows through wherever the sample covered it with a
     card that the renderer removed. Runs of Cyrillic text in an installed face without Cyrillic are set in one
-    stand-in face, a «₽» the face lacks in a face of its class (`run_faces`). The .pptx handed to the user is not
-    touched.
+    stand-in face, a «₽» the face lacks in a face of its class (`run_faces`). A big PNG with an alpha channel opaque
+    everywhere goes without it (`_without_opaque_alpha`). The .pptx handed to the user is not touched.
     """
+    from verstka import pkgzip
+
     out_dir.mkdir(parents=True, exist_ok=True)
     dst = out_dir / pptx.name
     try:
@@ -363,12 +400,14 @@ def render_copy(pptx: Path, out_dir: Path) -> Path:
         faces = {}
     with zipfile.ZipFile(pptx) as zin, zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zout:
         for item in zin.infolist():
-            data = zin.read(item.filename)
+            data = zin.read(item)
             if item.filename in faces:
                 data = faces[item.filename]
             elif _LAYOUT_PART_RE.match(item.filename):
                 data = _blank_prompts(data)
-            zout.writestr(item, data)
+            elif item.filename.startswith("ppt/media/"):
+                data = _without_opaque_alpha(data) or data
+            zout.writestr(pkgzip.entry(item), data)
     return dst
 
 

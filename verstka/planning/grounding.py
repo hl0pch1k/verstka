@@ -481,6 +481,9 @@ def figures(text: str) -> list[Fig]:
     unit of both values of a change or a range: «с 47 до 29 минут», «8–25 секунд», «с 47 минут до 29», «12 дней → 4»,
     «было 47, стало 29 минут», «до внедрения 12 дней, после — 4», «465 000 / 508 000 рублей», and of the figures
     after a label that names it («Срок, дней: 12 → 4»)."""
+    from verstka.planning.faithful import thousands
+
+    text = thousands(text)  # «4,800 litres» of an English brief is four thousand eight hundred (the same length: spans hold)
     names = [(a, b) for a, b, _ in name_tokens(text)]
     out: list[Fig] = [f for f in _dates(text) if not any(a < f.uend and f.start < b for a, b in names)]
     spans = [(f.start, f.uend) for f in out]
@@ -2681,8 +2684,8 @@ def _ground_content_slide(idx: BriefIndex, s: OutlineSlide, log: _Log, series_id
             else:
                 gone = "a quotation the brief does not have"
     elif k in (K.bullets, K.image_text):
-        if not (lines or c.numbers or c.items or c.columns or c.table or c.chart):
-            gone = ""
+        if not (lines or c.numbers or c.items or c.columns or c.table or c.chart or (k == K.image_text and s.verbatim and c.photo_slot)):
+            gone = ""  # (a place for the author's picture, chart or table under the heading is a slide of its own)
         elif len(lines) <= 1 and (c.numbers or c.items or c.columns or c.table or c.chart):
             s.kind = K(kind_by_content(c.model_dump()))  # one line and a figure: the figure's slide, the line under it
     if gone is not None:

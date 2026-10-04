@@ -103,3 +103,16 @@ test("sketchOf reads the lines of a plan made without the model too", () => {
   assert.equal(end?.kind, "closing");
   assert.equal(plain(end?.headline ?? null), "Спасибо за внимание");
 });
+
+test("sketchKind reads the verbatim layout's forms (planning/faithful.py)", () => {
+  assert.equal(sketchKind("— код и пояснение (python 25 строк кода)."), "code");
+  assert.equal(sketchKind("— карточки с текстом."), "cards");
+  assert.equal(sketchKind("— две колонки текста."), "compare");
+  assert.equal(sketchKind("— текст и место под изображение (подпись к месту — из текста)."), "image");
+  assert.equal(sketchKind("— макет экрана под изображение (подпись к месту — из текста)."), "image");
+  assert.equal(sketchKind("— столбчатые диаграммы рядом (3) (данные — из текста)."), "bars");
+  assert.equal(sketchKind("— шаги по порядку."), "timeline");
+  assert.equal(sketchKind("— крупная цифра."), "numbers");
+  // a word that holds «код» is no code («кодекс», «штрихкод»)
+  assert.equal(sketchKind("— список: кодекс и штрихкод."), "list");
+});

@@ -52,32 +52,42 @@ export const INPUT_CLS =
   "h-10 w-full rounded-lg border border-zinc-900/[0.12] bg-white px-3 text-body text-zinc-900 placeholder:text-zinc-400 outline-none transition-[border-color,box-shadow] duration-150 hover:border-zinc-900/20 focus:border-accent focus:shadow-[0_0_0_3px_rgba(0,119,255,0.12)] disabled:cursor-not-allowed disabled:opacity-40";
 
 /** A switch with a one-line label (the VK switch of ui/Switch: the knob springs across, the track's colour follows).
- *  `title` explains a disabled row on hover. */
-export function Toggle({ label, checked, disabled, title, onChange }: {
+ *  `title` explains a disabled row on hover; `hint` says what the switch's state means, in a quiet line under the label. */
+export function Toggle({ label, checked, disabled, title, hint, onChange }: {
   label: string;
   checked: boolean;
   disabled?: boolean;
   title?: string;
+  hint?: string;
   onChange(v: boolean): void;
 }) {
   const id = useId();
+  const hintId = useId();
   return (
     // py-1: the 20px switch gets a 28px row to hit
-    <div className={cn("flex items-center gap-3 py-1", disabled && "opacity-40")} title={title}>
+    <div className={cn("flex gap-3 py-1", hint ? "items-start" : "items-center", disabled && "opacity-40")} title={title}>
       <button
         id={id}
         type="button"
         role="switch"
         aria-checked={checked}
+        aria-describedby={hint ? hintId : undefined}
         disabled={disabled}
         onClick={() => onChange(!checked)}
         className="group flex shrink-0 cursor-pointer rounded-full disabled:cursor-not-allowed"
       >
         <SwitchTrack checked={checked} size="sm" />
       </button>
-      <label htmlFor={id} className={cn("min-w-0 select-none whitespace-nowrap text-footnote font-semibold text-zinc-900", disabled ? "cursor-not-allowed" : "cursor-pointer")}>
-        {label}
-      </label>
+      <div className="min-w-0">
+        <label htmlFor={id} className={cn("block select-none whitespace-nowrap text-footnote font-semibold text-zinc-900", disabled ? "cursor-not-allowed" : "cursor-pointer")}>
+          {label}
+        </label>
+        {hint && (
+          <p id={hintId} className="mt-0.5 text-caption text-zinc-500">
+            {hint}
+          </p>
+        )}
+      </div>
     </div>
   );
 }

@@ -20,12 +20,15 @@ from verstka.schemas.common import PatternKind
 from verstka.schemas.outline import OutlineSlide, PlannedDeck
 
 KINDS = {k.value for k in PatternKind}
-# the kinds the planner may use (skills/outline_planner/prompts/system.md); the others (freeform, code, mockup) and
-# unknown names are typed by their content
+# the kinds the planner may use (skills/outline_planner/prompts/system.md); the others (freeform) and unknown names are
+# typed by their content. «code» (the user's code shown as written) and «mockup» (a screen the user will put in) come
+# from the verbatim layout of the user's own text (planning/faithful.py)
 ALLOWED_KINDS = {
     "title", "agenda", "section", "thanks", "bullets", "cards", "two_column", "comparison", "process", "timeline", "team",
-    "big_number", "stat_row", "table", "chart", "quote", "image_text",
+    "big_number", "stat_row", "table", "chart", "quote", "image_text", "code", "mockup",
 }
+# a model's plan names only the kinds its prompt offers: «code» and «mockup» without their content would be empty
+_MODEL_KINDS = ALLOWED_KINDS - {"code", "mockup"}
 FRAME_KINDS = {"title", "agenda", "section", "thanks"}
 _KIND_ALIASES = {
     "cover": "title", "title_slide": "title", "intro": "title", "opening": "title",
@@ -164,7 +167,7 @@ def _chart(value: Any) -> Optional[dict]:
 def _kind_name(value: Any) -> str:
     k = _s(value).lower().strip().replace(" ", "_").replace("-", "_")
     k = _KIND_ALIASES.get(k, k)
-    return k if k in ALLOWED_KINDS else ""
+    return k if k in _MODEL_KINDS else ""
 
 
 def kind_by_content(content: dict, position: str = "middle") -> str:
@@ -172,6 +175,8 @@ def kind_by_content(content: dict, position: str = "middle") -> str:
     else a list. `content` is a normalised content dict."""
     lines = len(content.get("bullets") or []) + len(content.get("paragraphs") or [])
     nums = len(content.get("numbers") or [])
+    if content.get("code"):
+        return "code"
     if content.get("chart"):
         return "chart"
     if content.get("table"):
@@ -192,7 +197,7 @@ def kind_by_content(content: dict, position: str = "middle") -> str:
 
 
 def has_body(content: dict) -> bool:
-    return any(content.get(k) for k in ("bullets", "paragraphs", "items", "numbers", "table", "chart", "quote", "columns"))
+    return any(content.get(k) for k in ("bullets", "paragraphs", "items", "numbers", "table", "chart", "quote", "columns", "code"))
 
 
 def _slide(raw: Any, i: int, n: int) -> Optional[dict]:

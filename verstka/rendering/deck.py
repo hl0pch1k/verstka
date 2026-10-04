@@ -309,6 +309,29 @@ def is_nested(el: etree._Element) -> bool:
     return parent is not None and etree.QName(parent).localname == "grpSp"
 
 
+def abs_bbox(el: etree._Element) -> Optional[tuple[int, int, int, int]]:
+    """A shape's box (x, y, w, h) in slide coordinates, through the transforms of the groups holding it — a grouped
+    shape's own xfrm is in its group's child space (every copied icon group of a WorkSpace grid says «x 0.215»)."""
+    b = element_bbox(el)
+    if not b:
+        return None
+    x, y, w, h = (float(v) for v in b)
+    parent = el.getparent()
+    while parent is not None and etree.QName(parent).localname == "grpSp":
+        xfrm = parent.find(q("p:grpSpPr") + "/" + q("a:xfrm"))
+        if xfrm is None:
+            break
+        off, ext, choff, chext = (xfrm.find(q(t)) for t in ("a:off", "a:ext", "a:chOff", "a:chExt"))
+        if None in (off, ext, choff, chext) or not int(chext.get("cx") or 0) or not int(chext.get("cy") or 0):
+            break
+        kx, ky = int(ext.get("cx")) / int(chext.get("cx")), int(ext.get("cy")) / int(chext.get("cy"))
+        x = int(off.get("x")) + (x - int(choff.get("x"))) * kx
+        y = int(off.get("y")) + (y - int(choff.get("y"))) * ky
+        w, h = w * kx, h * ky
+        parent = parent.getparent()
+    return int(x), int(y), int(w), int(h)
+
+
 def remove_element(el: etree._Element) -> None:
     parent = el.getparent()
     if parent is not None:

@@ -52,6 +52,12 @@ def run_audit(
         ir = DeckIR(source=str(pptx), slide_w=manifest.slide_size.w, slide_h=manifest.slide_size.h)
         opens_ok = False
         report.issues.append(__import__("verstka.schemas.audit", fromlist=["Issue"]).Issue(id="file_opens-0-0", slide=0, check_id="file_opens", severity="error", kind="deterministic", message=f"файл не открывается: {str(e)[:120]}"))
+    if outline is not None and len(ir.slides) == len(outline.slides):
+        # a finished deck carries no markers in its notes (rendering/renderer.strip_outline_marks): its slides are the
+        # outline's in order (a slide spliced in from a fresh render keeps its own marker)
+        for i, sl in enumerate(ir.slides):
+            if sl.outline_id is None:
+                sl.outline_id = outline.slides[i].id
     images: dict[int, Path] = dict(existing_images or {})
     render_ok: Optional[bool] = None
     if render and not images and find_soffice() and find_pdftoppm():

@@ -247,6 +247,20 @@ function Body({ kind, headline, live }: { kind: SketchKind; headline: string; li
           <Box x={49.7} y={40} w={0.6} h={48} className={GREY} grow="top" i={1} />
         </>
       );
+    case "code":
+      // the explanation in a column at the left, the code on a dark panel at the right (its lines indented as code)
+      return (
+        <>
+          <Title text={headline} live={live} />
+          {[34, 30, 36, 24].map((w, i) => (
+            <Box key={`t${i}`} x={7} y={42 + i * 9.4} w={w} h={4.4} className={GREY} i={i} />
+          ))}
+          <span className={cn("absolute left-[47%] top-[38%] h-[52%] w-[46%] rounded-[4%] bg-zinc-800", live && "animate-fade")} style={at(live, 0)} />
+          {[[0, 26], [4, 30], [4, 20], [8, 24], [0, 14], [4, 28]].map(([dx, w], i) => (
+            <Box key={`c${i}`} x={51 + dx} y={43 + i * 7.2} w={w} h={3} className={i % 3 === 0 ? INK : "bg-zinc-500"} i={i + 2} />
+          ))}
+        </>
+      );
     case "image":
       return (
         <>

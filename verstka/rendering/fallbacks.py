@@ -280,6 +280,7 @@ def _substitute(o: OutlineSlide, outline: DeckOutline, *, chart_facts: bool) -> 
     content.image_hint = c.image_hint
     content.formula = c.formula  # a formula is text, not data: it stays with the slide
     content.photo_slot = c.photo_slot  # the place the user keeps for their photo stays whatever form the slide takes
+    content.photo_hint, content.code = c.photo_hint, c.code
     return o.model_copy(update={"kind": kind, "content": content}), how
 
 
@@ -294,6 +295,7 @@ def _as_list(o: OutlineSlide, outline: DeckOutline) -> OutlineSlide:
         content = SlideContent(paragraphs=list(c.paragraphs), quote=c.quote, quote_author=c.quote_author)
     content.table, content.chart, content.image_hint = c.table, c.chart, c.image_hint
     content.chart2, content.formula, content.photo_slot = c.chart2, c.formula, c.photo_slot
+    content.photo_hint, content.code = c.photo_hint, c.code
     return o.model_copy(update={"kind": K.bullets, "content": content})
 
 
@@ -308,7 +310,7 @@ def _model_plan(outline: DeckOutline) -> bool:
 def _has_body(c: SlideContent, *, chart: bool = True) -> bool:
     return bool(
         c.bullets or c.paragraphs or c.items or c.columns or c.numbers or c.table is not None or c.quote or (c.formula or "").strip()
-        or (chart and (c.chart is not None or c.chart2 is not None))
+        or (chart and (c.chart is not None or c.chart2 is not None)) or c.code is not None
     )
 
 
@@ -373,7 +375,7 @@ def prepare_slide(o: OutlineSlide, ps: LayoutSlide, outline: DeckOutline) -> tup
             s = _as_list(s, outline)
             notes.append(f"kind «{o.kind.value}» has no composition of its own: set as bullets")
             replan = True
-        elif s.kind not in BOOKENDS + (K.quote,) and not _has_body(c) and not (s.kind in _PICTURE_KINDS and c.image_hint):
+        elif s.kind not in BOOKENDS + (K.quote,) and not _has_body(c) and not (s.kind in _PICTURE_KINDS and (c.image_hint or c.photo_slot)):
             why = "no content"
     if why is not None:
         s, how = _substitute(s, outline, chart_facts=chart_facts)

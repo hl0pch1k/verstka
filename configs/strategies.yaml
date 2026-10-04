@@ -35,6 +35,9 @@ visual:
     hint: "Наглядные формы: диаграммы и крупные цифры вместо текста, где есть данные; тезисы карточками."
     prefer: [chart, big_number, stat_row, timeline, process, cards, comparison, table, two_column, bullets]
     switch_from: [bullets, two_column, comparison, table, cards]
+    # the author's text laid out as written: the variant's own forms of a slide's figures, composed in the template's
+    # style when the template has no sample of them (its row of key figures holds two, the slide has five)
+    own: [chart, big_number, stat_row]
 compact:
   title: Компактный
   description: "На треть меньше слайдов, плотные композиции: две колонки, сравнения и таблицы, смежные тезисы объединены, без разделителей."
@@ -54,3 +57,4 @@ compact:
     prefer: [table, two_column, comparison, bullets, stat_row, chart, process, timeline, cards, big_number]
     switch_from: [cards, process, timeline, big_number]
     merge_thin: true
+    own: [table, two_column]

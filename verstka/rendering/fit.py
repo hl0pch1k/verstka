@@ -54,12 +54,16 @@ def fit_size(
     ladder_only: bool = False,
     caps: bool = False,
     spc_pt: float = 0.0,
+    head: Optional[tuple[float, bool]] = None,
 ) -> FitResult:
     """The largest size (the given one, then the scale's steps down to `min_ratio` of it) at which the paragraphs fit
     the box. `ladder_only`: the scale is already fine-grained (a derived ladder), no in-between ratio sizes are tried —
     they would be sizes the template does not use. When nothing fits, the smallest candidate is returned with
     fits=False and a finite height (a word too wide for the box is counted as the pieces it would break into and
-    reported as `broken_word`)."""
+    reported as `broken_word`). `head` (scale, bold): the first paragraph is a heading set over the text in the same
+    box at `scale` times its size (a WorkSpace card: «Первый этап» at 20 pt bold over its text at 18 pt) — measured as
+    it is set, or the box takes a line more than it was fitted for. `para_spacing_pt`: the space between paragraphs
+    (the sample's spcBef/spcAft), counted between every two of them."""
     # (1.5 % of the line kept free: a line measured within a hair of the box breaks one word earlier in PowerPoint
     # and LibreOffice — «по дизайн-системе шаблона» at 198.8 pt in a 199 pt card ran a third line out of the card)
     usable_w = max((bbox.w - insets_emu[0] - insets_emu[2]) / EMU_PER_PT * 0.985, 1.0)
@@ -76,8 +80,14 @@ def fit_size(
     candidates.sort(reverse=True)
     last = FitResult(size_pt, False, 0, 0.0)
     for s in candidates:
-        lines, broken = _measure(paragraphs, family, s, bold, usable_w, caps, spc_pt)
-        height = lines * s * line_spacing + max(len(paragraphs) - 1, 0) * para_spacing_pt
+        if head and len(paragraphs) >= 2:
+            l0, b0 = _measure(paragraphs[:1], family, s * head[0], head[1], usable_w, caps, spc_pt)
+            l1, b1 = _measure(paragraphs[1:], family, s, bold, usable_w, caps, spc_pt)
+            lines, broken = l0 + l1, b0 or b1
+            height = (l0 * head[0] + l1) * s * line_spacing + (len(paragraphs) - 1) * para_spacing_pt
+        else:
+            lines, broken = _measure(paragraphs, family, s, bold, usable_w, caps, spc_pt)
+            height = lines * s * line_spacing + max(len(paragraphs) - 1, 0) * para_spacing_pt
         # a single line that fits the width needs the glyph height only: line spacing adds nothing below it
         fits = not broken and (height <= usable_h or (lines == 1 and len(paragraphs) == 1 and usable_h >= s))
         last = FitResult(s, fits, lines, height, broken)
@@ -97,6 +107,9 @@ def grow_size(
     insets_emu: tuple[int, int, int, int] = (91440, 45720, 91440, 45720),
     line_spacing: float = 1.2,
     fill: float = 0.7,
+    *,
+    head: Optional[tuple[float, bool]] = None,
+    para_spacing_pt: float = 0.0,
 ) -> float:
     """The largest step of the template scale in (size_pt, cap_pt] at which the text takes at most `fill` of the box.
 
@@ -109,7 +122,11 @@ def grow_size(
     usable_h = max((bbox.h - insets_emu[1] - insets_emu[3]) / EMU_PER_PT, 1.0)
     best = size_pt
     for s in sorted({round(x, 2) for x in scale_sizes if size_pt < x <= cap_pt}):
-        height = _lines_for(paragraphs, family, s, bold, usable_w) * s * line_spacing
+        if head and len(paragraphs) >= 2:
+            height = (_lines_for(paragraphs[:1], family, s * head[0], head[1], usable_w) * head[0] + _lines_for(paragraphs[1:], family, s, bold, usable_w)) * s * line_spacing
+        else:
+            height = _lines_for(paragraphs, family, s, bold, usable_w) * s * line_spacing
+        height += max(len(paragraphs) - 1, 0) * para_spacing_pt
         if height > fill * usable_h:
             break
         best = s

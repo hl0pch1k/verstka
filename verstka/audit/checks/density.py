@@ -32,6 +32,8 @@ def too_many_bullets(ctx: AuditContext) -> list[Issue]:
 def bullet_too_long(ctx: AuditContext) -> list[Issue]:
     out: list[Issue] = []
     for s in ctx.ir.slides:
+        if ctx.verbatim(s):
+            continue  # the author's own sentences, whole by design: what does not fit goes by whole sentences (text_overflow)
         for e in text_elements(s):
             long = [p.text for p in e.paragraphs if (p.bullet or p.level > 0) and len(p.text.split()) > 15]
             if long:

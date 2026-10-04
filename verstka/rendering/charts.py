@@ -319,8 +319,23 @@ def pie_shades(values: Sequence[Optional[float]], accent: str, ground: Optional[
         floor = 1.6 if _is_dark(ground_) else MIN_FILL_CONTRAST
         if _is_dark(ground_):
             # on a dark ground the parts step toward white: a shade toward the ground sinks into it (VK WorkSpace: a
-            # navy slice on black at 1.6:1 read as a hole in the pie); each tint ≥ 2:1 off the ground
+            # navy slice on black at 1.6:1 read as a hole in the pie); each tint ≥ 2:1 off the ground — unless the
+            # accent is already pale (Классика's beige on brown): its way to white is too short for distinct parts
+            # (five slices of near-white), so they step toward the ground, each still ≥ 2:1 off it
             alt = _pole_shades(accent, ground_, DARK_SLICE_CONTRAST, m, poles=("FFFFFF",))
+            alt_way = delta_e(accent, alt[-1]) if alt else 0.0
+            if alt is not None and alt_way / m < 10.0:
+                floor = DARK_SLICE_CONTRAST
+                way, prev, share = 0.0, accent, 1.0
+                while share > 0.1:
+                    share = round(share - 0.02, 3)
+                    c = _mix(accent, ground_, share)
+                    if contrast_ratio(c, ground_) < floor:
+                        break
+                    way += delta_e(c, prev)
+                    prev = c
+                if way > 1.5 * alt_way:
+                    alt = None  # the tints toward the ground below
             if alt is not None:
                 for r, j in enumerate(order[1:]):
                     out[j] = (alt[r], 1.0)
@@ -580,13 +595,38 @@ def _picture_cover(part, rid: str, region=None) -> Optional[tuple[str, float]]:
     return _COVER_MEMO[key]
 
 
-def _picture_cover_of(blob: bytes, region=None) -> Optional[tuple[str, float]]:
+_THUMB_MEMO: dict[tuple[int, int], object] = {}
+_THUMB_SIDE = 512
+
+
+def _thumb(blob: bytes):
+    """The picture decoded once, at most `_THUMB_SIDE` px a side, RGBA (None for an unreadable one): every text over a
+    picture ground asks about its own region of the same picture — a 4K background decoded per question cost LCT ten
+    seconds a generation."""
+    key = (len(blob), hash(blob))
+    got = _THUMB_MEMO.get(key, _THUMB_MEMO)
+    if got is not _THUMB_MEMO:
+        return got
     try:
         from PIL import Image
 
         im = Image.open(io.BytesIO(blob))
-        im.draft("RGB", (256, 256))
+        im.draft("RGB", (_THUMB_SIDE, _THUMB_SIDE))
         im = im.convert("RGBA")
+        im.thumbnail((_THUMB_SIDE, _THUMB_SIDE))
+    except Exception:  # noqa: BLE001
+        im = None
+    if len(_THUMB_MEMO) >= 48:
+        _THUMB_MEMO.clear()
+    _THUMB_MEMO[key] = im
+    return im
+
+
+def _picture_cover_of(blob: bytes, region=None) -> Optional[tuple[str, float]]:
+    try:
+        im = _thumb(blob)
+        if im is None:
+            return None
         w, h = im.size
         if region:
             x0, y0, x1, y1 = (max(0.0, min(1.0, v)) for v in region)
@@ -625,10 +665,9 @@ def _picture_mean(part, rid: str, region=None) -> Optional[str]:
     try:
         from PIL import Image
 
-        blob = part.related_part(rid).blob
-        im = Image.open(io.BytesIO(blob))
-        im.draft("RGB", (256, 256))
-        im = im.convert("RGBA")
+        im = _thumb(part.related_part(rid).blob)
+        if im is None:
+            return None
         w, h = im.size
         if region:
             x0, y0, x1, y1 = (max(0.0, min(1.0, v)) for v in region)
@@ -1722,7 +1761,9 @@ def _unit_shown_above(slide: Slide, bbox: Bbox, unit_full: str) -> bool:
                 continue  # (a caption, not a heading that happens to share the word)
         bottom = shp.top + shp.height
         overlap = min(shp.left + shp.width, bbox.x + bbox.w) - max(shp.left, bbox.x)
-        if overlap > 0 and bbox.y - 0.14 * sh <= bottom <= bbox.y + 0.03 * sh:
+        # (a caption of a row of charts stands on the row's line: a caption shorter than its neighbours ends higher)
+        reach = 0.3 if (shp.name or "").startswith(("Chart title", "Unit")) else 0.14
+        if overlap > 0 and bbox.y - reach * sh <= bottom <= bbox.y + 0.03 * sh:
             return True
     return False
 
@@ -1903,6 +1944,13 @@ def add_chart(
     if kind in ("pie", "doughnut"):
         # the largest slice in the accent, the others in its tints (a remainder quiet): one whole, one hue
         shades = pie_shades(values[0], lead, ground, others, text)
+        ranked = sorted((j for j, v in enumerate(values[0]) if v and j not in others), key=lambda j: (-(values[0][j] or 0.0), j))
+        if len(ranked) >= 5:
+            # five parts and more: tints of one hue run too close to tell apart (eight tints of one pink: neighbours at
+            # 1.0–1.3:1, the legend matched no slice) — the template's own distinct colours, by size, a remainder quiet
+            distinct = chart_palette([lead], ground, len(ranked), extra=extra)
+            for r, j in enumerate(ranked):
+                shades[j] = (distinct[r % len(distinct)], 1.0)
         palette = [base if share >= 1.0 else _mix(base, ground, share) for base, share in shades]
         accent = lead
     else:
@@ -2792,6 +2840,11 @@ def _style_pie(k: _Kit) -> None:
     if outside:
         m, avail_h, side = geometry(True)
         where = decide(side, size)
+    labelled = sum(1 for v in where.values() if v not in ("outEnd", "none"))
+    if not k.outside and 0 < labelled < len(where):
+        # the caller's legend gives every part's value: figures on some slices and not on others (one of eight, the four
+        # wide enough of eight) read as highlights nobody meant — the slices carry all their figures or none
+        where = {j: "none" for j in where}
 
     pts: dict[int, dict] = {}
     for j, v in enumerate(shares):

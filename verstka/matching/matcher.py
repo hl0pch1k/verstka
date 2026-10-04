@@ -44,6 +44,58 @@ def _cover_room_ok(slide, pattern: Pattern, manifest: TemplateManifest) -> bool:
     return need <= room * 1.15
 
 
+COVER_ORDER = {"structured": 0, "visual": 1, "compact": 2}
+COVER_MARGIN = 0.22  # how far below the best cover another variant's own cover may score
+LIGHT_COVER_MARGIN = 0.45  # the compact variant's light cover (a divider of the template's light ground, say) may stand this far below
+
+
+def variant_cover(slide, scored: list, manifest: TemplateManifest, strategy: Strategy) -> Optional[int]:
+    """The index in `scored` of the cover this variant opens on: of the template's covers that hold the slide's title
+    (a title sample, or a divider's when its title fits), one of each layout and ground, within `COVER_MARGIN` of the
+    best — the structured variant the best, the visual one the next, the compact one a light cover (the next after
+    the visual's when the template has no light one). None when there is no choice."""
+    if not scored:
+        return None
+    top = scored[0][0].score
+    usable: list[int] = []
+    seen: set = set()
+    for i, (r, q) in enumerate(scored):
+        if top - r.score > COVER_MARGIN:
+            break
+        if q.kind not in (PatternKind.title, PatternKind.section) or r.score < strategy.synth_threshold:
+            continue
+        stays_empty = bool(q.mockup_boxes) and q.mockup_on_layout and not slide.content.image_hint
+        if stays_empty or (i > 0 and any(s.role == SlotRole.image for s in q.slots)) or (i > 0 and r.fit.get("text_ratio", 9.0) > 1.0):
+            continue
+        if i > 0 and not _cover_room_ok(slide, q, manifest):
+            continue
+        key = (q.layout_part, q.family)
+        if key in seen:
+            continue
+        seen.add(key)
+        usable.append(i)
+    if not usable:
+        return None
+    if strategy.name == "compact" and scored[usable[0]][1].family != Family.light:
+        # the compact variant reads like a document: a light cover (a light title sample, else a light divider whose
+        # title holds the deck's name) — further below the best cover than the others may stand
+        for i, (r, q) in enumerate(scored):
+            if top - r.score > LIGHT_COVER_MARGIN or i in usable:
+                continue
+            if q.family == Family.light and q.kind in (PatternKind.title, PatternKind.section) and r.score >= strategy.synth_threshold \
+                    and not any(s.role == SlotRole.image for s in q.slots) and r.fit.get("text_ratio", 9.0) <= 1.15 and _cover_room_ok(slide, q, manifest) \
+                    and not (bool(q.mockup_boxes) and q.mockup_on_layout and not slide.content.image_hint):
+                usable.append(i)
+                break
+        light = [i for i in usable if scored[i][1].family == Family.light]
+        if light:
+            return light[0]
+    if len(usable) < 2:
+        return None
+    k = COVER_ORDER.get(strategy.name, 0)
+    return usable[min(k, len(usable) - 1)]
+
+
 def headline_key(slide) -> str:
     """The slide across variants: its kind-free heading, lower case, spaces collapsed."""
     return " ".join((slide.headline or "").lower().split())[:120]
@@ -133,20 +185,25 @@ def match_outline(outline: DeckOutline, manifest: TemplateManifest, strategy: St
                     r.reasons.append(f"обложка: весь блок текста помещается в образец {q.id} ({r.score:.2f}), в {top[1].id} ({top[0].score:.2f}) — нет")
                     scored.insert(0, scored.pop(i))
                     break
-        if slide.kind == PatternKind.title and strategy.name == "visual" and len(scored) > 1:
-            # the visual variant opens on the template's other cover when it is nearly as good (another layout, no speaker
-            # photo to leave empty, the title fits): flipping between variants, the first slide differs too. «Nearly»
-            # is a margin of 0.15: the cover bonus of a sample whose art stands beside the heading (+0.1 over a centred
-            # one) must not decide alone that the variants open alike
+        if slide.kind == PatternKind.title and len(scored) > 1:
+            # every variant opens on a cover of its own when the template has several that hold the title (another
+            # layout or another ground, no speaker photo or mock-up to leave empty): flipping between variants, the
+            # first slide differs too — the compact variant on a light one when there is one, the visual one on the
+            # template's second cover
+            pick = variant_cover(slide, scored, manifest, strategy)
+            if pick is not None and pick != 0:
+                r, q = scored[pick]
+                r.reasons.append(f"вариант {strategy.name}: свой титульный образец ({r.score:.2f} против {scored[0][0].score:.2f}), чтобы варианты различались с первого слайда")
+                scored.insert(0, scored.pop(pick))
+        if slide.kind == PatternKind.thanks and cover is not None and len(scored) > 1 and scored[0][1].family != cover.family:
+            # the closing slide answers the cover's ground: a deck opened on a light cover closes on a light slide
             top = scored[0]
             for i, (r, q) in enumerate(scored[1:], 1):
-                if top[0].score - r.score > VISUAL_COVER_MARGIN:
+                if top[0].score - r.score > LIGHT_COVER_MARGIN:
                     break
-                # a device mock-up or an empty photo frame the layout draws stays empty on the slide: never the
-                # «other cover» (the −0.3 of the scorer is within the margin)
-                stays_empty = bool(q.mockup_boxes) and q.mockup_on_layout and not slide.content.image_hint
-                if q.layout_part != top[1].layout_part and q.kind == PatternKind.title and not any(s.role == SlotRole.image for s in q.slots) and not stays_empty and r.fit.get("text_ratio", 9.0) <= 1.0 and _cover_room_ok(slide, q, manifest):
-                    r.reasons.append(f"вариант visual: другой титульный образец ({r.score:.2f} против {top[0].score:.2f}), чтобы варианты различались с первого слайда")
+                if q.family == cover.family and q.kind in (PatternKind.thanks, PatternKind.section, PatternKind.title) and r.score >= strategy.synth_threshold \
+                        and not any(x.role == SlotRole.image for x in q.slots) and r.fit.get("text_ratio", 9.0) <= 1.15 and _cover_room_ok(slide, q, manifest):
+                    r.reasons.append(f"закрывает колоду на том же фоне, что и обложка ({cover.family.value})")
                     scored.insert(0, scored.pop(i))
                     break
         covers = slide.kind in (PatternKind.title, PatternKind.section, PatternKind.thanks)

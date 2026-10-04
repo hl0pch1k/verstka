@@ -110,7 +110,7 @@ def _occupied(e, spacing: float) -> Bbox:
 @check(OVERLAP)
 def overlap(ctx: AuditContext) -> list[Issue]:
     out: list[Issue] = []
-    spacing = ctx.manifest.tokens.typography.line_height
+    spacing = 1.2  # the IR carries the spacing each paragraph is shown with; one set nowhere is single-spaced
     for s in ctx.ir.slides:
         texts = [e for e in text_elements(s) if not is_chrome_like(e, ctx.ir, ctx.manifest)]
         seen: set[tuple[str, str]] = set()
@@ -152,7 +152,7 @@ def text_outside_card(ctx: AuditContext) -> list[Issue]:
     run past the card's bottom or right edge: the column of a two-column slide whose list hangs below its card."""
     out: list[Issue] = []
     W, H = ctx.ir.slide_w, ctx.ir.slide_h
-    spacing = ctx.manifest.tokens.typography.line_height
+    spacing = 1.2  # the IR carries the spacing each paragraph is shown with; one set nowhere is single-spaced
     for s in ctx.ir.slides:
         cards = [o for o in s.elements if o.type in ("shape", "text") and (o.fill_hex or o.line_hex) and o.bbox.area > 0 and not o.has_text]
         for e in text_elements(s):
@@ -199,7 +199,7 @@ def text_outside_card(ctx: AuditContext) -> list[Issue]:
 @check(TEXT_OVERFLOW)
 def text_overflow(ctx: AuditContext) -> list[Issue]:
     out: list[Issue] = []
-    spacing = ctx.manifest.tokens.typography.line_height
+    spacing = 1.2  # the IR carries the spacing each paragraph is shown with; one set nowhere is single-spaced
     for s in ctx.ir.slides:
         title = title_element(s)
         for e in text_elements(s):
@@ -228,6 +228,13 @@ def text_overflow(ctx: AuditContext) -> list[Issue]:
                     severity = "error" if severe else "warn"
                     msg = f"текст «{e.text[:40]}» выше рамки {ru_times(ratio)} ({ru_count(lines, 'строка', 'строки', 'строк')})"
                 rematch = severe and not grows and not shrinks
+                if ctx.verbatim(s) and not is_title and not grows and not shrinks:
+                    # the author's text set at the least size its layout allows: one whole sentence less (it stays in the
+                    # speaker notes) — never a smaller type than the template's, never a cut inside a sentence
+                    out.append(ctx.new_issue(TEXT_OVERFLOW, s.index, msg, bboxes=[e.bbox_frac], element_ids=[e.id], severity=severity,
+                                             details={"ratio": round(ratio, 2), "lines": lines, "autofit": e.autofit},
+                                             autofix=fix("condense_text", "показать на одно предложение меньше (оно останется в заметках)", outline_id=s.outline_id, element_id=e.id)))
+                    continue
                 out.append(
                     ctx.new_issue(
                         TEXT_OVERFLOW,
@@ -253,6 +260,12 @@ def margin_violation(ctx: AuditContext) -> list[Issue]:
                 continue
             f = e.bbox_frac
             if f.x < safe.x - 0.03 or f.x2 > safe.x2 + 0.03 or f.y2 > safe.y2 + 0.05:
+                if ctx.verbatim(s) and f.y2 > safe.y2 + 0.05 and f.x >= safe.x - 0.03 and f.x2 <= safe.x2 + 0.03:
+                    # the author's text ran down past the foot (more of it than its column holds): one whole sentence
+                    # less (it stays in the speaker notes) — a box moved up would cover the text above it
+                    out.append(ctx.new_issue(MARGIN_VIOLATION, s.index, f"«{e.text[:40]}» заходит в поля шаблона внизу", bboxes=[f], element_ids=[e.id],
+                                             autofix=fix("condense_text", "показать на одно предложение меньше (оно останется в заметках)", outline_id=s.outline_id, element_id=e.id)))
+                    continue
                 out.append(ctx.new_issue(MARGIN_VIOLATION, s.index, f"«{e.text[:40]}» заходит в поля шаблона", bboxes=[f], element_ids=[e.id], autofix=fix("move_inside", "сдвинуть в безопасную область", element_id=e.id, safe=True)))
     return out
 

@@ -511,6 +511,12 @@ def generate_variants(
                 if rr is not None:
                     render = rr
             timings["audit"] = round(time.time() - tau, 2)
+        try:
+            from verstka.rendering.renderer import strip_outline_marks
+
+            strip_outline_marks(vdir / "deck.pptx")  # the presenter's notes without the machine markers
+        except Exception:  # noqa: BLE001 - the markers stay rather than the deck being lost
+            log.warning("outline markers left in the notes", exc_info=True)
         pending.append({"name": name, "ts": ts, "timings": timings, "vdir": vdir, "warnings": warnings, "outline": v_outline, "plan": plan, "render": render, "audit": audit_report})
 
     # LibreOffice once per deck, all decks at once: the PDF export and the slide previews come from the same PDF

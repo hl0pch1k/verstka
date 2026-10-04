@@ -61,10 +61,12 @@ export function Table({ head, rows, empty }: { head: string[]; rows: ReactNode[]
 
 /** Who made the plan, short: the models are named on their own lines of the passport, so «агент», not «агент: слайды
  *  продумала модель Qwen3 32B» again. */
-function plannedBy(by: string | undefined, strategyTitle: (name: string) => string, planner?: PlannerInfo | null): string {
+function plannedBy(by: string | undefined, strategyTitle: (name: string) => string, planner?: PlannerInfo | null, run?: RunSwitches | null): string {
   const who = planner?.planned_by === "supplied" ? "supplied" : by ?? planner?.planned_by ?? null;
   if (who === "agent") return "агент";
   if (who === "model") return "модель";
+  // «Модель пишет тексты слайдов» off: the author's own text, laid out as written (planning/faithful.py)
+  if (who === "rules" && run?.use_models === false) return "текст автора дословно";
   return plannedByText(by, strategyTitle, planner ? { ...planner, model_label: null } : planner);
 }
 
@@ -75,8 +77,9 @@ export interface RunSwitches { use_models?: boolean; audit_models?: boolean; out
  *  vision model looks at slide images only in the model check; the text model plans (unless the plan came with the
  *  request) and joins the model check. */
 export function roleUsed(role: string, m: RunManifest, run?: RunSwitches | null): boolean | null {
+  // (the model check has a switch of its own: it may look at the slides while the text stays the author's)
+  if (role === "vlm") return run?.audit_models === undefined ? (run?.use_models === false ? false : null) : run.audit_models;
   if (run?.use_models === false) return false;
-  if (role === "vlm") return run?.audit_models === undefined ? null : run.audit_models;
   if (role === "llm") {
     const supplied = run?.outline_supplied || m.planner?.supplied;
     return supplied && run?.audit_models === false ? false : null;
@@ -95,7 +98,7 @@ export function Facts({ m, strategyTitle, plannedBy: by, planner, run }: { m: Ru
     { label: "Шаблон", value: templateTitle(m.template.file), title: m.template.file },
     { label: "Собран", value: fmtWhen(m.created_at) },
     { label: "Версия Verstka", value: m.verstka_version, title: [m.git_commit ? `коммит ${m.git_commit}` : null, m.platform].filter(Boolean).join("\n") },
-    { label: "План составил", value: plannedBy(by, strategyTitle, planner) },
+    { label: "План составил", value: plannedBy(by, strategyTitle, planner, run) },
     ...(roles.length
       ? roles.map(([role, p]) => ({
           label: ROLE_LABEL[role] ?? role,

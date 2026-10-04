@@ -5,7 +5,7 @@ import { eventParts, type PhaseKey } from "./agent";
 
 export type SketchKind =
   | "cover" | "bars" | "hbars" | "pie" | "line" | "table" | "numbers" | "cards" | "list" | "timeline" | "compare"
-  | "quote" | "image" | "agenda" | "section" | "closing" | "text";
+  | "quote" | "image" | "agenda" | "section" | "closing" | "code" | "text";
 
 export interface Sketch { slide: number; kind: SketchKind; headline: string | null }
 
@@ -27,6 +27,7 @@ export const KIND_LABEL: Record<SketchKind, string> = {
   agenda: "Содержание",
   section: "Раздел",
   closing: "Финальный слайд",
+  code: "Код",
   text: "Текст",
 };
 
@@ -71,6 +72,7 @@ export function stripQuoted(text: string): string {
 // the first match wins: «горизонтальная диаграмма» before «диаграмма», «две диаграммы: круговая и …» reads as a pie
 const KINDS: Array<[RegExp, SketchKind]> = [
   [/обложк|титул/i, "cover"],
+  [/(?<![а-яё])код(?:а|ом)?(?![а-яё])/i, "code"],
   [/горизонтальн|линейчат/i, "hbars"],
   [/кругов|кольцев/i, "pie"],
   [/линейн|график|с областями/i, "line"],

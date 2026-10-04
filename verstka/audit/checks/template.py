@@ -97,7 +97,11 @@ def font_not_in_template(ctx: AuditContext) -> list[Issue]:
                 for r in p.runs:
                     if r.font and r.text.strip():
                         used.setdefault(_theme_font(r.font, ctx), []).append(e.id)
-        bad = {f: ids for f, ids in used.items() if not f.startswith("+") and not any(same_family(f, a) for a in allowed)}
+        # a monospace face is the code's own (a code slide sets its lines in Consolas whatever the template's font): never
+        # «refonted» into the template's proportional face — the code's indents would no longer line up
+        from verstka.rendering.compose import MONO_RE
+
+        bad = {f: ids for f, ids in used.items() if not f.startswith("+") and not any(same_family(f, a) for a in allowed) and not MONO_RE.search(f)}
         for f, ids in bad.items():
             out.append(ctx.new_issue(FONT_NOT_IN_TEMPLATE, s.index, f"шрифт «{f}» отсутствует в шаблоне", element_ids=sorted(set(ids)), bboxes=[s.by_id(i).bbox_frac for i in sorted(set(ids))[:3] if s.by_id(i)], autofix=fix("refont", "заменить на основной шрифт шаблона", element_ids=sorted(set(ids)))))
         groups = _font_groups(list(used))

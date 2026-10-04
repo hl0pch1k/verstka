@@ -29,7 +29,11 @@ def cells_elements(slide: Slide, group: RepeatGroup) -> list[list[etree._Element
 
 
 def cell_bbox(els: list[etree._Element]) -> Optional[Bbox]:
-    boxes = [element_bbox(e) for e in els]
+    """The cell's box in slide coordinates (a grouped member through its group's transform: read in its group's child
+    space, a WorkSpace card's icon put every bottom-row card at the top and the months ran 1, 5, 2, 3…)."""
+    from verstka.rendering.deck import abs_bbox
+
+    boxes = [abs_bbox(e) if is_nested(e) else element_bbox(e) for e in els]
     boxes = [b for b in boxes if b is not None]
     if not boxes:
         return None

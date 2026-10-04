@@ -22,6 +22,8 @@ class ParagraphSpec:
     bold: Optional[bool] = None
     size_pt: Optional[float] = None
     color_hex: Optional[str] = None
+    raw: bool = False  # written as it is (the user's code): no typesetting of figures, dashes or quotes
+    body: bool = False  # running text (an item's text, not its title): takes the sample's text style, not its heading's
 
 
 def _txBody(sp_el: etree._Element) -> Optional[etree._Element]:
@@ -75,6 +77,14 @@ def _set_bullet(pPr: etree._Element, on: bool, size_pt: Optional[float] = None) 
         for el in pPr.findall(q(tag)):
             pPr.remove(el)
     if on:
+        # the marker's face goes with its character: «•» in an inherited Wingdings (Классика's master) is a pair of
+        # scissors «✂»
+        for tag in ("a:buFontTx", "a:buFont"):
+            for el in pPr.findall(q(tag)):
+                pPr.remove(el)
+        bf = etree.Element(q("a:buFont"))
+        bf.set("typeface", "Arial")
+        insert_ordered(pPr, bf, _PPR_ORDER)
         bu = etree.Element(q("a:buChar"))
         bu.set("char", "•")
         insert_ordered(pPr, bu, _PPR_ORDER)
@@ -94,6 +104,20 @@ def _rpr_key(rPr: Optional[etree._Element]) -> tuple:
         return ()
     fill = rPr.find(q("a:solidFill"))
     return (rPr.get("sz"), rPr.get("b"), etree.tostring(fill) if fill is not None else None)
+
+
+def _heads(first: Optional[etree._Element], second: Optional[etree._Element]) -> bool:
+    """Whether a sample's first line is a heading over the text of its second: set larger, or bold over plain, or in
+    another colour at the same size and weight over a longer line (both written on the runs)."""
+    if first is None or second is None or _rpr_key(first) == _rpr_key(second):
+        return False
+    a, b = _rpr_size(first), _rpr_size(second)
+    if a and b and a > b * 1.05:
+        return True
+    if a and b and a < b * 0.95:
+        return False
+    bold = lambda r: r.get("b") in ("1", "true")  # noqa: E731
+    return bold(first) and not bold(second)
 
 
 def sample_head_ratio(sp_el: etree._Element) -> Optional[float]:
@@ -155,6 +179,13 @@ def fill_text(sp_el: etree._Element, paragraphs: list[ParagraphSpec], size_pt: O
                     if rp is not None and _rpr_key(rp) != _rpr_key(_first_rpr(template_p)):
                         second_run = rp
                     break
+    if not lead and paragraphs and all(sp.body for sp in paragraphs):
+        # running text with no heading of its own in a box whose sample sets a heading over its text (a WorkSpace card:
+        # a blue bold heading over white text) is written in the text's style — never the whole text in the heading's
+        # colour and weight
+        styled = [p for p in ps if p.find(q("a:r")) is not None]
+        if len(styled) >= 2 and styled[0] is template_p and _heads(_first_rpr(styled[0]), _first_rpr(styled[1])):
+            template_p = styled[1]
     template_rPr = _first_rpr(template_p)
     if template_rPr is None:
         template_rPr = etree.Element(q("a:rPr"))
@@ -242,7 +273,7 @@ def fill_text(sp_el: etree._Element, paragraphs: list[ParagraphSpec], size_pt: O
             rPr.insert(insert_at, sf)
         r.append(rPr)
         t = etree.SubElement(r, q("a:t"))
-        t.text = typeset_figures(spec.text)  # ranges, a true minus, the deck's percent style (G5-16)
+        t.text = spec.text if spec.raw else typeset_figures(spec.text)  # ranges, a true minus, the deck's percent style (G5-16)
         if spec.text != spec.text.strip() or "  " in spec.text:
             t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
         end = p.find(q("a:endParaRPr"))
@@ -334,16 +365,15 @@ def _level_defrpr(holder: Optional[etree._Element], level: int = 1) -> Optional[
     return lvl.find(q("a:defRPr")) if lvl is not None else None
 
 
-def inherited_caps_spc(shape) -> tuple[bool, float]:
-    """(capitals, letter-spacing in pt) the first run of a text shape is set with: its own `a:rPr`, the shape's list
-    style, the layout's and the master's placeholder list styles, then the master's text style (title style for a
-    title placeholder, body style for other placeholders, «other» style for plain text boxes). `cap="small"` counts
-    as capitals (the glyphs are capitals)."""
+def _style_holders(shape) -> list:
+    """The places a text shape's first run takes its style from, nearest first: its own `a:rPr`, the paragraph's
+    default, the shape's list style, the layout's and the master's placeholder list styles, then the master's text
+    style (title style for a title placeholder, body style for other placeholders, «other» style for plain boxes)."""
     from verstka.rendering.deck import _ph_of, placeholder_chain
 
     shp, el = _shape_and_el(shape)
     if el is None:
-        return False, 0.0
+        return []
     holders: list[Optional[etree._Element]] = []
     txb = el.find(q("p:txBody"))
     if txb is not None:
@@ -374,10 +404,14 @@ def inherited_caps_spc(shape) -> tuple[bool, float]:
             typ = (ph.get("type") or "body") if ph is not None else None
             name = "p:titleStyle" if typ in ("title", "ctrTitle") else ("p:bodyStyle" if ph is not None else "p:otherStyle")
             holders.append(_level_defrpr(styles.find(q(name))))
+    return [h for h in holders if h is not None]
+
+
+def inherited_caps_spc(shape) -> tuple[bool, float]:
+    """(capitals, letter-spacing in pt) the first run of a text shape is set with (`_style_holders`, nearest first).
+    `cap="small"` counts as capitals (the glyphs are capitals)."""
     cap = spc = None
-    for h in holders:
-        if h is None:
-            continue
+    for h in _style_holders(shape):
         if cap is None and h.get("cap") is not None:
             cap = h.get("cap")
         if spc is None and h.get("spc") is not None:
@@ -388,6 +422,15 @@ def inherited_caps_spc(shape) -> tuple[bool, float]:
         if cap is not None and spc is not None:
             break
     return (cap in ("all", "small")), float(spc or 0.0)
+
+
+def inherited_bold(shape) -> Optional[bool]:
+    """Whether the first run of a text shape is set bold (`_style_holders`, nearest first); None when nothing on the way
+    says (a heading is then measured as its template's statistics say)."""
+    for h in _style_holders(shape):
+        if h.get("b") is not None:
+            return h.get("b") in ("1", "true")
+    return None
 
 
 def inherited_color(shape) -> Optional[str]:

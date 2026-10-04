@@ -1138,7 +1138,9 @@ def _fingerprint(s: OutlineSlide) -> str:
 
 
 _V2_SLIDE = ("takeaway", "footnote", "rationale", "spec_ref")  # Agent v2 fields: left out while at their defaults
-_V2_CONTENT = ("chart2", "formula", "photo_slot")  # photo_slot: the free place for the user's photo, None by default
+# photo_slot: the free place for the user's photo, None by default; photo_hint and code: the verbatim layout's
+# (planning/faithful.py)
+_V2_CONTENT = ("chart2", "formula", "photo_slot", "photo_hint", "code")
 
 
 def _digest(o: DeckOutline) -> str:
@@ -1150,13 +1152,18 @@ def _digest(o: DeckOutline) -> str:
                 d.pop(k, None)
         if d.get("alternatives") == []:  # Agent v2 (UI): the designer's other forms, empty by default
             d.pop("alternatives")
+        if d.get("verbatim") is False:  # the verbatim layout's mark (planning/faithful.py), off by default
+            d.pop("verbatim")
         for k in _V2_CONTENT:
             if d["content"].get(k) is None:
                 d["content"].pop(k, None)
         if d["content"].get("chart"):
-            for k, empty in (("categories", []), ("series", [])):
+            for k, empty in (("categories", []), ("series", []), ("split", False)):
                 if d["content"]["chart"].get(k) == empty:
                     d["content"]["chart"].pop(k, None)
+            for ser in d["content"]["chart"].get("series") or []:
+                if ser.get("unit") is None:
+                    ser.pop("unit", None)
         dump.append(d)
     return hashlib.sha256(json.dumps(dump, ensure_ascii=False, sort_keys=True).encode()).hexdigest()[:16]
 

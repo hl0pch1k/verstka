@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -49,6 +50,42 @@ def _mark_notes(builder: DeckBuilder, oslide) -> None:
         tf.text = (base + "\n" if base else "") + f"[verstka:{oslide.id}]"
     except Exception:  # noqa: BLE001
         pass
+
+
+_MARK_RE = re.compile(r"\s*\[verstka:[A-Za-z0-9_\-]+\]\s*")
+
+
+def strip_outline_marks(pptx: Path | str) -> int:
+    """The machine markers (`_mark_notes`) taken off the speaker notes of a finished deck (in place): the presenter
+    reads the author's notes, not «[verstka:sl3]». The audit of a deck without them maps its slides to the outline by
+    their order (audit/runner.py). Returns the number of notes pages changed."""
+    import zipfile
+
+    from lxml import etree
+
+    from verstka import pkgzip
+    from verstka.analysis.xmlns import q
+
+    changed: dict[str, bytes] = {}
+    with zipfile.ZipFile(pptx) as z:
+        for name in z.namelist():
+            if not (name.startswith("ppt/notesSlides/notesSlide") and name.endswith(".xml")):
+                continue
+            data = z.read(name)
+            if b"[verstka:" not in data:
+                continue
+            root = etree.fromstring(data)
+            for body in root.iter(q("p:txBody")):
+                paras = body.findall(q("a:p"))
+                for para in paras:
+                    ts = [t for t in para.iter(q("a:t")) if t.text and "[verstka:" in t.text]
+                    for t in ts:
+                        t.text = _MARK_RE.sub("", t.text)
+                    if ts and not "".join(t.text or "" for t in para.iter(q("a:t"))).strip() and len(body.findall(q("a:p"))) > 1:
+                        body.remove(para)  # the marker's own paragraph goes (a body keeps one paragraph)
+            changed[name] = etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
+    pkgzip.rewrite(pptx, changed)
+    return len(changed)
 
 
 def _snapshot(builder: DeckBuilder) -> tuple[int, set[str]]:
@@ -224,6 +261,40 @@ def _bookend_trouble(slide, oslide: DeckOutline) -> Optional[str]:
             small = min(a.width * a.height, b.width * b.height)
             if small > 0 and ox * oy > 0.2 * small:
                 return "lays two of its texts over each other"
+    if W and H:
+        # a hairline of the template between the lines of a text (Классика's cover: the grid's rule through the second
+        # line of the goal «… до 255 000 рублей»)
+        from lxml import etree
+
+        from verstka.analysis.xmlns import q
+        from verstka.rendering.clone_check import ink_box
+        from verstka.rendering.deck import element_bbox
+
+        rules = list(slide._element.cSld.find(q("p:spTree")))
+        try:
+            layout = slide.slide_layout
+            rules += [x for x in layout._element.cSld.find(q("p:spTree")) if x.find(".//" + q("p:ph")) is None]
+            if layout._element.get("showMasterSp") != "0":
+                rules += [x for x in layout.slide_master._element.cSld.find(q("p:spTree")) if x.find(".//" + q("p:ph")) is None]
+        except Exception:  # noqa: BLE001
+            pass
+        lines = []
+        for el in rules:
+            tag = etree.QName(el).localname
+            if tag not in ("cxnSp", "sp") or (tag == "sp" and "".join(t.text or "" for t in el.iter(q("a:t"))).strip()):
+                continue
+            lb = element_bbox(el)
+            if lb and lb[3] <= 0.006 * H and lb[2] >= 0.05 * W:
+                lines.append(lb)
+        for sh in boxes:
+            ib = ink_box(sh._element, None)
+            if ib is None or ib.h <= 0:
+                continue
+            pad = max(int(0.2 * min(ib.h, 0.05 * H)), int(0.004 * H))
+            for lb in lines:
+                ly = lb[1] + lb[3] / 2
+                if ib.y + pad < ly < ib.y2 - pad and min(ib.x2, lb[0] + lb[2]) - max(ib.x, lb[0]) > 0.2 * ib.w:
+                    return "a rule of the template runs through its text"
     return None
 
 

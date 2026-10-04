@@ -40,6 +40,7 @@ step that cannot start any more is taken deterministically. Prompts are model-ag
 
 from __future__ import annotations
 
+import functools
 import inspect
 import json
 import logging
@@ -253,7 +254,17 @@ def designer_prefs(path: Optional[Path | str] = None) -> dict[str, dict]:
     (`merge_thin`) and may use section dividers (`sections`), and a hint for the designer (`hint`)."""
     p = Path(path) if path else default_strategies_path()
     try:
-        data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+        stamp = p.stat().st_mtime_ns
+    except OSError:
+        return {}
+    return {name: dict(cfg) for name, cfg in _designer_prefs(str(p), stamp).items()}
+
+
+@functools.lru_cache(maxsize=8)
+def _designer_prefs(path: str, stamp: int) -> dict[str, dict]:
+    # (read once per version of the file: every slide of every variant asks)
+    try:
+        data = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
     except (OSError, yaml.YAMLError):
         return {}
     return {name: dict((cfg or {}).get("designer") or {}) for name, cfg in data.items() if isinstance(cfg, dict)}
@@ -348,13 +359,18 @@ def basic_compile(outline: DeckOutline, structure: BriefStructure, brief: Brief)
                     n += 1
                     sid = f"s_{s.id}_{n}"
                 taken.add(sid)
-                o.series.append(Series(id=sid, name=sr.name or ch.title or s.headline, categories=list(ch.categories), values=list(sr.values), unit=ch.unit))
+                o.series.append(Series(id=sid, name=sr.name or ch.title or s.headline, categories=list(ch.categories), values=list(sr.values), unit=sr.unit or ch.unit))
                 ids.append(sid)
             ch.series_ids = ids
     if structure.title:
         o.title = structure.title
     if structure.subtitle:
         o.subtitle = structure.subtitle
+    hard = structure.slide_count
+    if structure.specs and o.slides and o.slides[0].kind != PatternKind.title and (hard is None or len(o.slides) < hard):
+        # the brief's slides open on its own title slide (the rule of planning/compile.py: the designer's lines number
+        # the slides so)
+        o.slides.insert(0, OutlineSlide(id="cover" if all(s.id != "cover" for s in o.slides) else "cover0", kind=PatternKind.title, headline=o.title or ""))
     cover = o.slides[0] if o.slides and o.slides[0].kind == PatternKind.title else None
     if cover is not None:
         cover.headline = o.title or cover.headline
@@ -410,6 +426,8 @@ class _Ctx:
     unit_index: dict = field(default_factory=dict)  # unit key → grounding's index of that slide's own source (and the brief's frame)
     lock: Any = field(default_factory=threading.Lock)
     written: bool = False  # the brief is the writer's text (planning/writer.py): a year is never a slide's key figure
+    verbatim: bool = False  # the user's own text laid out as written: the rules never shorten a sentence (faithful.py)
+    room: Any = None  # what the template's samples hold, by kind (planning/faithful.py `Room`)
 
 
 def _dupe_series(a: Series, b: Series) -> bool:
@@ -454,8 +472,28 @@ def _build_ctx(brief: Brief, structure: BriefStructure, facts: FactsExtraction, 
         if v is not None:
             allowed.append(v)
     title = structure.title or brief.title_hint or ""
+    if not title and structure.specs:
+        # the user's first slide names the deck when it is its cover («Слайд 1. Умная теплица» over a tagline); else the
+        # first line without its «Слайд 1.»
+        from verstka.planning.faithful import read_slide
+
+        sp0 = min(structure.specs, key=lambda x: x.number)
+        r0 = read_slide(sp0.number, sp0.title, sp0.text, first=True)
+        if r0.role == "cover" and r0.title:
+            title = r0.title
     if not title:
-        first = next((ln.strip() for ln in brief.text.splitlines() if ln.strip()), "")
+        # the brief's first line without its «Слайд 1.» — a line that is nothing else gives the first slide's heading
+        # (its first short sentence when the user named none), never «Слайд 1»
+        lines = [ln.strip() for ln in brief.text.splitlines() if ln.strip()]
+        head_re = r"^\s*(?:#{1,6}\s*)?(?:\*\*)?\s*(?:слайд|slide)\s*№?\s*\d{1,2}\s*(?:\*\*)?\s*[.:)—–-]?\s*"
+        first = re.sub(head_re, "", lines[0], flags=re.I) if lines else ""
+        if not first and structure.specs:
+            from verstka.planning.faithful import read_slide
+
+            sp0 = min(structure.specs, key=lambda x: x.number)
+            first = read_slide(sp0.number, sp0.title, sp0.text, first=True).title
+        if not first:
+            first = next((x for x in (re.sub(head_re, "", ln, flags=re.I) for ln in lines) if x), "")
         title = H.strip_end((H.split_sentences(first) or [first])[0]) if first else "Презентация"
     rules = list(structure.rules)
     if structure.notes_rule and not any("заметк" in r.lower() for r in rules):
@@ -468,6 +506,12 @@ def _build_ctx(brief: Brief, structure: BriefStructure, facts: FactsExtraction, 
         count=structure.slide_count or brief.slide_count,
         takeaway_rule=takeaway_rule(structure, brief.text),
     )
+    try:
+        from verstka.planning.faithful import Room
+
+        ctx.room = Room.of(manifest)
+    except Exception:  # noqa: BLE001 - the forms are then chosen without the template's measure
+        ctx.room = None
     try:
         # grounding's index of the brief, built once here (not lazily from the designer's worker threads)
         from verstka.planning.grounding import BriefIndex
@@ -700,6 +744,7 @@ class _Unit:
     series_ids: list[str] = field(default_factory=list)
     table_ids: list[str] = field(default_factory=list)
     fact_ids: list[str] = field(default_factory=list)
+    reading: Any = None  # the slide's text read for its layout (planning/faithful.py `Reading`), when the user dictated it
 
     @property
     def frame(self) -> bool:
@@ -748,19 +793,28 @@ def _facts_in(ctx: _Ctx, text: str, limit: int = 10) -> list[str]:
 
 
 def _units_from_specs(ctx: _Ctx) -> list[_Unit]:
+    from verstka.planning.faithful import read_slide
+
     specs = sorted(ctx.structure.specs, key=lambda s: s.number)
     units: list[_Unit] = []
     for i, sp in enumerate(specs):
         sids = list(dict.fromkeys([*sp.series_ids, *(x for r in sp.charts for x in r.series_ids)]))
         tids = [ctx.table_index[j] for j in sp.table_ids if j in ctx.table_index]
-        cover = _is_cover(sp, i == 0)
+        reading = read_slide(sp.number, sp.title, sp.text, first=(i == 0), last=(i == len(specs) - 1 and len(specs) >= 2))
+        cover = _is_cover(sp, i == 0) or reading.role == "cover"
         # the slide's own text holds its figures: the facts registry (regex figures, times and all) would only add noise
         u = _Unit(
             key=f"u{sp.number}", title=ctx.title if cover else H.strip_end(sp.title or ""), text=sp.text or "", spec=sp, cover=cover,
-            series_ids=[x for x in sids if x in ctx.series], table_ids=tids,
+            closing=not cover and reading.role == "closing", series_ids=[x for x in sids if x in ctx.series], table_ids=tids,
         )
+        if cover and reading.lead and not ctx.structure.subtitle:
+            ctx.structure.subtitle = reading.lead
+        if cover and reading.footnote and not ctx.structure.disclaimer:
+            ctx.structure.disclaimer = H.strip_end(reading.footnote)
+        u.reading = reading
         if not u.title:
-            u.title = H.short((H.split_sentences(u.text) or [u.text or f"Слайд {sp.number}"])[0], 8)
+            # a slide the user gave no heading: the reading's own (its first short sentence, the clause, the list's lead)
+            u.title = reading.title or H.short((H.split_sentences(u.text) or [u.text or f"Слайд {sp.number}"])[0], 8)
         units.append(u)
     if not any(u.cover for u in units):
         units.insert(0, _Unit(key="u0", title=ctx.title, cover=True))
@@ -790,6 +844,10 @@ class _Design:
     model: Optional[str] = None
     changes: list[str] = field(default_factory=list)  # what the agent changed in the answer (for the warnings)
     failure: Optional[str] = None  # why the model did not design it
+    # what the rules built the slide on: «data» (a requested chart or table, a formula), «steps» (a plan by months,
+    # dated events), «list» (the slide's own lists), «figures» (its data series and figure lists), «prose» (its
+    # sentences alone) — the verbatim layout takes the rules' slide for every basis but prose
+    basis: str = "prose"
 
 
 _MARK_RE = re.compile(r"^\s*(?:[—–\-•*·]|\d{1,2}[.)])\s+")
@@ -1279,7 +1337,15 @@ def _cover_design(unit: _Unit, ctx: _Ctx) -> _Design:
 
 
 def _closing_design(unit: _Unit) -> _Design:
-    return _Design(unit=unit, slide=OutlineSlide(id=unit.key, kind=PatternKind.thanks, headline=unit.title or "Спасибо за внимание", rationale=_WHY["thanks"]))
+    r = unit.reading
+    sub = r.lead if r is not None else None
+    notes = ""
+    if r is not None:
+        from verstka.planning.faithful import notes_of
+
+        notes = notes_of(r)
+    return _Design(unit=unit, slide=OutlineSlide(id=unit.key, kind=PatternKind.thanks, headline=unit.title or "Спасибо за внимание", subtitle=sub, notes=notes,
+                                                 rationale=_WHY["thanks"], spec_ref=unit.spec.number if unit.spec else None))
 
 
 PHOTO_WHY = "Место под фото оставлено свободным, как просили в брифе: фото вставляется в рамку на слайде."
@@ -1310,6 +1376,9 @@ def rules_design(unit: _Unit, ctx: _Ctx) -> _Design:
     # the old word cut
     lim = 30 if len(src.sentences) <= 3 else 20  # a slide of few sentences has room for them whole
     cut = (lambda x, n: _clause_cut(x, n, lim)) if ctx.written else H.short
+    if ctx.verbatim:
+        cut = lambda x, n: H.strip_end(x)  # noqa: E731 - the author's sentences whole (planning/faithful.py)
+    basis = "prose"
     subtitle: Optional[str] = None
     shown: set[str] = set()
     charts = [ch for ch in _request_charts(unit, ctx) if ch is not None][:2]
@@ -1321,15 +1390,19 @@ def rules_design(unit: _Unit, ctx: _Ctx) -> _Design:
         kind = "chart"
         c.chart = charts[0]
         c.chart2 = charts[1] if len(charts) > 1 else None
+        basis = "data"
     elif table is not None:
         kind, c.table = "table", table
+        basis = "data"
     elif len(src.steps) >= 3:
         kind = "timeline"
         c.items = [SlideItem(title=t, text=x) for t, x in src.steps[:6]]
+        basis = "steps"
     elif (dated := _dated_items(unit, src)) is not None:
         # a dated list («— 1 сентября 1939 года — Германия нападает на Польшу;»): a timeline, never years as figures
         kind, c.items = "timeline", dated
         shown.update(x for g in src.groups if all(_dated_event(i) for i in g.items) for x in g.items)
+        basis = "steps"
     else:
         text_groups = [g for g in src.groups if not g.figure]
         text_groups.sort(key=lambda g: (not g.ask, -len(g.items)))  # the lists the user asked to show come first
@@ -1341,8 +1414,12 @@ def rules_design(unit: _Unit, ctx: _Ctx) -> _Design:
             # of day, a project number or a bound of a requirement (gate 4 G4-3)
             return [n for n in out if not _date_callout(n) and not _not_key_figure(n, lines)] if ctx.written else out
 
-        numbers = _series_figures(unit, ctx) or kpis(fig_items) or _enumeration_figures(unit, ctx) or kpis(other_items) or kpis(src.sentences)
+        numbers = _series_figures(unit, ctx) or kpis(fig_items) or _enumeration_figures(unit, ctx) or kpis(other_items)
+        if not numbers and not ctx.verbatim:
+            # (a figure taken out of a sentence of prose: never for the author's own text laid out as written)
+            numbers = kpis(src.sentences)
         if text_groups:
+            basis = "list"
             g = text_groups[0]
             pair = text_groups[1] if len(text_groups) > 1 else None
             if pair is not None and g.label and pair.label and g.ask == pair.ask and len(g.items) <= 4 and len(pair.items) <= 4:
@@ -1369,6 +1446,7 @@ def rules_design(unit: _Unit, ctx: _Ctx) -> _Design:
             kind = "stat_row" if len(nums) >= 2 else "big_number"
             c.numbers = nums
             shown.update(fig_items)
+            basis = "figures"
             if ctx.written:
                 # a writer's slide shows its other sentences under its figures (they went to the notes: gate 4 G4-2)
                 from verstka.planning.grounding import figures as g_figs
@@ -1384,6 +1462,8 @@ def rules_design(unit: _Unit, ctx: _Ctx) -> _Design:
             shown.update(src.sentences[:5])
     if spec is not None and spec.formula:
         c.formula = spec.formula
+        if basis == "prose":
+            basis = "data"
     if not (c.bullets or c.items or c.numbers or c.chart or c.table or c.columns or c.formula):
         c.bullets = [cut(sn, 14) for sn in src.sentences[:4]] or ([cut(unit.text, 14)] if unit.text.strip() else [])
         kind = "bullets"
@@ -1405,7 +1485,7 @@ def rules_design(unit: _Unit, ctx: _Ctx) -> _Design:
         notes.append("; ".join(f"{t} — {x}" for t, x in src.steps) + ".")
     headline = unit.title or H.short(unit.text, 10)
     section = unit.section
-    if spec is not None and not headline_states(headline):
+    if spec is not None and not headline_states(headline) and not ctx.verbatim:
         # the user's heading names a topic («Как увеличить средний чек»): the headline states the slide's goal with its
         # figure when the source gives one short enough, the heading stays as the slide's kicker
         stated = _fallback_headline(unit, ctx)
@@ -1425,7 +1505,7 @@ def rules_design(unit: _Unit, ctx: _Ctx) -> _Design:
     s.rationale = _why(s, requested=bool(spec and (spec.charts or spec.table)))
     if c.photo_slot:
         s.rationale = (s.rationale + " " if s.rationale else "") + PHOTO_WHY
-    d = _Design(unit=unit, slide=s)
+    d = _Design(unit=unit, slide=s, basis=basis)
     d.alternatives = auto_alternatives(s)
     return d
 
@@ -2210,6 +2290,14 @@ def _keep_photo_places(o: DeckOutline, structure: Optional[BriefStructure], warn
     photos = {sp.number: sp.photo for sp in (structure.specs if structure else []) if sp.photo}
     if not photos:
         return
+    from verstka.planning.faithful import read_parts
+
+    # what the picture shows, in the user's words («[Место под изображение: вид теплицы сверху …]»)
+    hints: dict[int, str] = {}
+    for sp in structure.specs if structure else []:
+        img = next((p for p in read_parts(sp.text or "") if p.kind == "image" and p.text), None)
+        if img is not None:
+            hints[sp.number] = H.cap_first(img.text.strip())
     done: set[int] = set()
     for sl in o.slides:
         ref = sl.spec_ref
@@ -2219,6 +2307,8 @@ def _keep_photo_places(o: DeckOutline, structure: Optional[BriefStructure], warn
         if not sl.content.photo_slot:
             sl.content.photo_slot = photos[ref]
             warns.append(f"slide {sl.id}: the free place for the user's photo put back ({photos[ref]})")
+        if ref in hints and not sl.content.photo_hint:
+            sl.content.photo_hint = hints[ref]
         if PHOTO_WHY not in (sl.rationale or ""):
             sl.rationale = (sl.rationale + " " if sl.rationale else "") + PHOTO_WHY
 
@@ -4085,6 +4175,43 @@ def _minimal_design(unit: _Unit, written: bool = False) -> _Design:
     return _Design(unit=unit, slide=s)
 
 
+def _structural(unit: _Unit) -> bool:
+    """The slide's text carries the user's code or a note with a chart's data: its form is the text's own."""
+    r = unit.reading
+    if r is None or unit.frame:
+        return False
+    if r.of("code"):
+        return True
+    from verstka.planning.faithful import charts_of
+
+    return bool(r.of("chart") and charts_of(r))
+
+
+def _faithful_design(unit: _Unit, ctx: _Ctx, profile: str = "structured") -> _Design:
+    """The slide laid out from the user's own text (planning/faithful.py): its code as code, its chart's data as the
+    chart, its sentences whole."""
+    from verstka.planning import faithful
+
+    forms = faithful.forms_of(unit.reading, ctx.room or faithful.Room(), profile)  # never empty
+    s = forms[0].slide.model_copy(deep=True)
+    s.id = unit.key
+    s.rationale = s.rationale or "Код и данные — как в тексте, предложения автора целиком."
+    return _Design(unit=unit, slide=s, basis="faithful")
+
+
+def _photo_from_reading(d: "_Design") -> None:
+    """A slide whose text keeps a place for a picture («[Место под изображение: …]») keeps it, described."""
+    r = d.unit.reading
+    if r is None or not r.of("image"):
+        return
+    img = r.of("image")[0]
+    c = d.slide.content
+    if not c.photo_slot:
+        c.photo_slot = "Изображение"
+    if not c.photo_hint and img.text:
+        c.photo_hint = H.cap_first(img.text.strip())
+
+
 def _safe_rules(unit: _Unit, ctx: _Ctx) -> _Design:
     try:
         return rules_design(unit, ctx)
@@ -4245,8 +4372,11 @@ class _Agent:
         results: dict[str, _Design] = {}
 
         def finish(d: _Design) -> None:
-            enforce_requests(d, ctx)
-            tidy_design(d, ctx)
+            if d.basis != "faithful":
+                # (the user's code and chart notes laid out as written: their own data is the request, nothing to enforce)
+                enforce_requests(d, ctx)
+                tidy_design(d, ctx)
+            _photo_from_reading(d)
             results[d.unit.key] = d
             pos = pos_of[d.unit.key]
             s = d.slide
@@ -4264,6 +4394,9 @@ class _Agent:
         def work(u: _Unit) -> _Design:
             if not self.models or u.frame:
                 return _safe_rules(u, ctx)
+            if _structural(u):
+                # the user's code and the data of their charts are shown as written — never retold by a model
+                return _faithful_design(u, ctx)
             if self.broken:
                 d = _safe_rules(u, ctx)
                 d.failure = "the model is not answering (it failed call after call), the rules designed the rest"
@@ -5165,6 +5298,178 @@ def _similar_variants_note(outlines: dict[str, DeckOutline], strategies: list[St
         tracker.relay({"type": "agent", "step": "compile", "message": text, "slide": None, "variant": nm})
 
 
+# the other forms of a list the structured variant keeps at hand (its own form comes first)
+VERBATIM_ALTERNATIVES = ("cards", "bullets", "two_column", "table")
+
+
+def verbatim_forms(unit: _Unit, ctx: _Ctx, profile: str) -> list:
+    """The forms of a dictated slide laid out as written (planning/faithful.py `forms_of`) with what the analyst read as
+    the slide's requests: the charts it asks for, drawn from the brief's own data, its table, its formula, its
+    conclusion and its footnote. A requested chart or table is the slide's form in every variant."""
+    from verstka.planning import faithful as F
+
+    r = unit.reading
+    spec = unit.spec
+    room = ctx.room or F.Room()
+    forms = F.forms_of(r, room, profile)
+    data: list = []
+    # a slide whose text gives its own code, picture or the data of its chart takes the form of it; a chart note without
+    # data of its own («[Нужна круговая диаграмма бюджета]» under the budget's list) is the rules' to draw from the list
+    own = r.of("code") or r.of("image") or ((r.of("chart") or r.of("table")) and (F.charts_of(r) or F.note_table(r) or F.note_figures(r)))
+    if spec is not None and not own:
+        # what the rules read as the slide's structure — its lists, a plan by months, dated events, a figure list,
+        # the data the user asked to chart — in the author's whole sentences (read once for the three variants)
+        cache = ctx.__dict__.setdefault("_verbatim_rules", {})
+        if unit.key not in cache:
+            prev, ctx.verbatim = ctx.verbatim, True
+            try:
+                rd = rules_design(unit, ctx)
+            except Exception:  # noqa: BLE001 - the faithful forms then
+                log.warning("rules_design failed on %s (verbatim)", unit.key, exc_info=True)
+                rd = None
+            finally:
+                ctx.verbatim = prev
+            if rd is not None and rd.basis != "prose" and rd.slide.kind.value not in FRAME_KINDS:
+                try:
+                    enforce_requests(rd, ctx)  # the user's requests on the slide (the formula with its factors named, …)
+                except Exception:  # noqa: BLE001 - the slide as the rules made it
+                    log.warning("enforce_requests failed on %s (verbatim)", unit.key, exc_info=True)
+            cache[unit.key] = rd
+        rd = cache[unit.key]
+        if rd is not None and rd.basis != "prose" and rd.slide.kind.value not in FRAME_KINDS:
+            shapes = [rd.slide]
+            own = {str(k) for k in (designer_prefs().get(profile, {}) or {}).get("own") or []}
+            if rd.basis in ("list", "figures") and not unit.locked:
+                # the variant's own forms of the same lines, each that fits in its order of preference (cards ↔ list ↔
+                # two columns, figures as a row or a table): the variant's first choice leads, the others stand by for
+                # a slide that would be the third of one form in a row. A figure is never taken out of the author's
+                # sentence: a row of key figures only of a list of figures («средний чек — 300 рублей»)
+                prefer = [str(k) for k in (designer_prefs().get(profile, {}) or {}).get("prefer") or []]
+                alts: list = []
+                for k in prefer or list(VERBATIM_ALTERNATIVES):
+                    if k == rd.slide.kind.value or any(a.kind.value == k for a in alts):
+                        continue
+                    if (k in ("timeline", "process") and not _sequential(rd.slide)) or (k in ("big_number", "stat_row") and rd.basis != "figures"):
+                        continue
+                    alt = reshape(rd.slide, k, None, ctx.brief.text)
+                    if alt is not None and alt.kind.value == k:
+                        alts.append(alt)
+                rank = {k: i for i, k in enumerate(prefer)}
+                shapes = sorted([rd.slide, *alts], key=lambda x: rank.get(x.kind.value, len(rank))) if prefer else [rd.slide, *alts]
+            for one in shapes:
+                sl = one.model_copy(deep=True)
+                try:
+                    # the slide's key figures and its lists the form left out, as the brief's own lines (never cut)
+                    complete_slide(sl, unit, ctx)
+                except Exception:  # noqa: BLE001
+                    log.warning("complete_slide failed on %s (verbatim)", unit.key, exc_info=True)
+                sl.verbatim = True
+                sl.notes = F.notes_of(r)
+                sl.headline = r.title or sl.headline
+                intro = F.list_intro(r)
+                if intro and not sl.subtitle and intro.lower() not in (sl.content.model_dump_json() + sl.headline + (sl.takeaway or "")).lower():
+                    sl.subtitle = intro  # the line that opens the list («Мы прошли три шага за месяц.»)
+                # the variant's first choice, when it is one of its own forms, stands even without a sample of it
+                data.append(F.Form(sl.kind.value, sl, F._shown(sl), structural=True, own=not data and sl.kind.value in own))
+    out = (data + [f for f in forms if f.structural]) if data else forms
+    for f in out:
+        sl = f.slide
+        if spec is not None:
+            if spec.formula and not (sl.content.formula or "").strip():
+                sl.content.formula = spec.formula
+            if spec.takeaway and not (sl.takeaway or "").strip():
+                sl.takeaway = spec.takeaway
+            if spec.footnote and not (sl.footnote or "").strip():
+                sl.footnote = F.end_sentence(spec.footnote)
+            if spec.photo and not sl.content.photo_slot and not r.of("image"):
+                sl.content.photo_slot = spec.photo
+    return out
+
+
+def _run_verbatim(brief: Brief, manifest: Optional[TemplateManifest], strategies: list[Strategy], structure: BriefStructure, ctx: _Ctx, tracker: _Tracker, common: list[str], per: dict[str, list[str]], t0: float, raw: Optional[list]) -> AgentResult:
+    """The user's dictated slides, each in the author's own sentences (planning/faithful.py): no model call, no
+    rewriting — a form per variant chosen against the template's samples, then the compiler and grounding as for any
+    plan. The designer's line per slide says the form each variant took."""
+    from verstka.planning import faithful
+    from verstka.planning.grounding import ground_outline
+    from verstka.planning.outline import polish_plan
+
+    names = [st.name for st in strategies]
+    units = {u.spec.number: u for u in _units_from_specs(ctx) if u.spec is not None}
+
+    def forms_fn(reading, profile: str) -> list:
+        u = units.get(reading.number)
+        if u is None:
+            return faithful.forms_of(reading, ctx.room or faithful.Room(), profile)
+        u.reading = reading  # the reading of the plan (its first/last flags) is the one laid out
+        return verbatim_forms(u, ctx, profile)
+
+    plan = faithful.plan_deck(structure.specs, manifest, tuple(names), title=structure.title, forms_fn=forms_fn, room=ctx.room)
+    if not structure.title and plan.title:
+        structure.title = plan.title
+    if not structure.subtitle and plan.subtitle:
+        structure.subtitle = plan.subtitle
+    n = len(plan.readings)
+    cover = next((r for r in plan.readings if r.role == "cover"), None)
+    hard = structure.slide_count
+    added = bool(plan.readings) and plan.readings[0].role != "cover" and (hard is None or n < hard)
+    tracker.emit("architect", f"Архитектор: беру слайды так, как они заданы в тексте, — {ru_count(n, 'слайд', 'слайда', 'слайдов')}"
+                 + (f", первый из них — обложка «{cover.title}»" if cover else ", перед ними — обложка с названием")
+                 + "; текст автора не переписываю: предложения целиком, что не поместилось — в заметках докладчика.")
+    if added:
+        tracker.emit("designer", f"Дизайнер: слайд 1 — обложка «{plan.title}».", slide=1)
+    # one line per slide when every variant took one form, else each variant's own line (the build page draws the
+    # variant's storyboard from its lines)
+    for i in range(n):
+        pos = i + 1 + int(added)
+        said = {nm: plan.lines[nm][i][1].replace(f"слайд {i + 1}", f"слайд {pos}", 1) for nm in names}
+        if len({faithful.form_name(plan.decks[nm][i]) for nm in names}) == 1:
+            tracker.emit("designer", said[names[0]], slide=pos)
+        else:
+            for nm in names:
+                tracker.emit("designer", said[nm], slide=pos, variant=nm)
+    compile_fn = _compiler()
+    outlines: dict[str, DeckOutline] = {}
+    for st in strategies:
+        slides = []
+        for i, s in enumerate(plan.decks[st.name], 1):
+            s = s.model_copy(deep=True)
+            s.id = f"sl{i}"
+            slides.append(s)
+        o = DeckOutline(
+            title=plan.title, subtitle=plan.subtitle, audience=brief.audience, purpose=brief.purpose, strategy=st.name, language=brief.language,
+            planned_by="rules", slides=slides, facts=list(ctx.facts.values()), series=[s.model_copy() for s in ctx.series.values()],
+            tables=[t.model_copy(deep=True) for t in ctx.tables.values()], agent_log=tracker.log_for(st.name),
+        )
+        warns = per[st.name]
+        try:
+            if compile_fn is not None:
+                o, cw = _call_compiler(compile_fn, o, structure, brief, tracker.relay)
+            else:
+                o, cw = basic_compile(o, structure, brief)
+                o, gw = ground_outline(o, brief)
+                cw = list(cw) + list(gw)
+            warns.extend(cw or [])
+        except Exception as e:  # noqa: BLE001 - the built-in step keeps the charts drawable
+            log.warning("compile_outline failed on %s (verbatim)", st.name, exc_info=True)
+            warns.append(f"compile failed, built-in compile used: {str(e)[:160]}")
+            o, cw = basic_compile(o, structure, brief)
+            warns.extend(cw)
+        o = polish_plan(o)
+        _keep_photo_places(o, structure, warns)
+        charts = sum(1 for s in o.slides for ch in (s.content.chart, s.content.chart2) if ch is not None)
+        codes = sum(1 for s in o.slides if s.content.code is not None)
+        extras = [x for x in (charts and ru_count(charts, "диаграмма", "диаграммы", "диаграмм"), codes and ru_count(codes, "слайд с кодом", "слайда с кодом", "слайдов с кодом")) if x]
+        done = f"Сборка: план готов — {ru_count(len(o.slides), 'слайд', 'слайда', 'слайдов')}" + (f", {', '.join(extras)}" if extras else "") + "."
+        tracker.emit("compile", done, variant=st.name)
+        o.agent_log = [*o.agent_log, done]
+        outlines[st.name] = o
+    return AgentResult(
+        outlines=outlines, warnings={name: common + per[name] for name in per}, structure=structure, by_model=False,
+        model_slides=0, slides=n, calls=0, seconds=round(time.time() - t0, 2), raw=raw if raw is not None else [],
+    )
+
+
 def run_agent(
     brief: Brief,
     manifest: Optional[TemplateManifest],
@@ -5180,6 +5485,7 @@ def run_agent(
     critic: bool = True,
     coverage: bool = True,
     written: bool = False,
+    verbatim: bool = False,
 ) -> Optional[AgentResult]:
     """Brief → a designed, compiled and grounded DeckOutline per strategy (planned_by "agent" when a model designed
     at least one slide, "rules" otherwise). A variant the agent cannot plan is missing from `outlines`: every one
@@ -5205,7 +5511,7 @@ def run_agent(
     if structure is None:
         # the analyst's model calls (data_extractor per block) get a share of the budget, never all of it
         a_deadline = None if clock.deadline is None else min(clock.deadline, time.monotonic() + ANALYST_MAX_S)
-        by_model = agent.models and not written
+        by_model = agent.models and not written and not verbatim
         structure, aw = analyse_brief(brief, skills if by_model else None, providers if by_model else None, a_deadline, tracker.forward)
         common.extend(aw)
     fx = _resolve_facts(facts, brief, common, structure)
@@ -5214,6 +5520,10 @@ def run_agent(
     tracker.emit("analyst", f"Аналитик: {describe_structure(structure)}.")
 
     # 2. storyline
+    if structure.specs and (verbatim or not agent.models) and not written:
+        # the user's own slides in the user's own words (the switch «Модель пишет тексты слайдов» off, or no model):
+        # laid out as written, a form per variant against the template's samples (planning/faithful.py)
+        return _run_verbatim(brief, manifest, strategies, structure, ctx, tracker, common, per, t0, raw)
     if structure.specs:
         units = _units_from_specs(ctx)
     else:
@@ -5321,7 +5631,8 @@ def run_agent(
     if flagged and healthy and not agent.broken and clock.left() >= max(REVISE_MIN_S, agent.need_s()):
         by_key = {d.unit.key: d for d in designs}
         order = [u.key for u in units]
-        keys = [k for k in order if k in flagged and k in by_key and not by_key[k].unit.frame]
+        # (a slide of the user's code or chart data stays as the text gives it: no model retells it)
+        keys = [k for k in order if k in flagged and k in by_key and not by_key[k].unit.frame and not _structural(by_key[k].unit)]
         # one wave of revisions at most (the provider's concurrency): the slides with the most notes first
         if len(keys) > agent.workers:
             weight = {k: sum(len(v) for v in flagged[k].values()) for k in keys}

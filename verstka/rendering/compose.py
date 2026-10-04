@@ -30,6 +30,9 @@ from verstka.schemas.outline import DeckOutline, NumberCallout, OutlineSlide, Sl
 from verstka.schemas.template import TemplateManifest
 from verstka.ru import no_orphan, typeset
 
+# a monospace face: the template's code style is read from the slot its code samples set in one
+MONO_RE = re.compile(r"consolas|courier|mono|menlo|monaco|fira\s*code|jetbrains|source\s*code|inconsolata|lucida\s*console|sf\s*mono", re.I)
+
 _A = "http://schemas.openxmlformats.org/drawingml/2006/main"
 _P = "http://schemas.openxmlformats.org/presentationml/2006/main"
 
@@ -69,9 +72,12 @@ class Para:
 
 
 def para_lines(p: Para, width_pt: float) -> int:
+    """Lines the paragraph takes — 1.5 % of the line kept free, as `fit.fit_size` keeps it: a line measured within a
+    hair of its box breaks a word earlier in the renderers («…линию капельного полива» at 372.7 pt in a 372.7 pt
+    column took a seventh line and ran into the list's rule)."""
     font = p.runs[0].font if p.runs else None
     indent = p.size * 1.1 if p.marker else 0.0
-    return max(len(wrap_lines(p.text, font, p.size, p.bold, max(width_pt - indent, 1.0))), 1)
+    return max(len(wrap_lines(p.text, font, p.size, p.bold, max((width_pt - indent) * 0.985, 1.0))), 1)
 
 
 def spacing_line(spacing: float) -> float:
@@ -920,6 +926,32 @@ class Composer:
         self._dense = False
         self._area = area
         self._compose_body(comp, area)
+        if self._overflows(n0, area) and getattr(self.o, "verbatim", False):
+            # the author's own text is never set smaller than the usual ladder before it shows less: one whole sentence
+            # less at a time, from its longest block (planning/faithful.drop_one_sentence — the speaker notes keep the
+            # slide's whole text), until the rest stands in the area at the template's sizes
+            from verstka.planning.faithful import drop_one_sentence
+
+            orig, cur, gone = self.o, self.o, 0
+            for _ in range(12):
+                nxt = cur.model_copy(deep=True)
+                if drop_one_sentence(nxt) == "skip":
+                    break
+                self._undo(n0)
+                self.o, self.warnings = nxt, list(w0)
+                self._restore_notes(notes0)
+                self._compose_body(comp, area)
+                cur, gone = nxt, gone + 1
+                if not self._overflows(n0, area):
+                    break
+            if gone:
+                o0 = cur  # the passes below start from the slide as it now reads
+                try:
+                    orig.content = cur.content  # the plan says what the slide shows
+                except Exception:  # noqa: BLE001
+                    pass
+                w0 = list(w0) + [f"{gone} sentence(s) of the author's text left to the speaker notes: the area holds the rest at the template's sizes"]
+                self.warnings = list(w0)
         if self._overflows(n0, area):
             # the block runs past the foot of its area at every size of the usual ladder: set again denser — sizes
             # below the small size (down to 1.7 % of the slide height), grids instead of long rows, the lines under
@@ -1290,7 +1322,9 @@ class Composer:
             area = self._intro(intro, area, formula=intro == (c.formula or "").strip())
         if getattr(self, "_take_lead", False):
             area = self._lead_line(area, " ".join((self.o.takeaway or "").split()))
-        if comp == "formula" and (c.formula or "").strip():
+        if comp == "code" and c.code is not None:
+            self.code(area, c.code, list(c.paragraphs) + list(c.bullets))
+        elif comp == "formula" and (c.formula or "").strip():
             self.formula(area, c.formula)
         elif comp == "chart_pair" and c.chart is not None and c.chart2 is not None:
             self.chart_pair(area)
@@ -1522,8 +1556,8 @@ class Composer:
         c = self.o.content
         if self.o.subtitle and self.o.kind not in (PatternKind.title, PatternKind.section, PatternKind.thanks):
             return self.o.subtitle
-        if comp == "formula":
-            return None  # the formula is the slide; its paragraphs explain it under the equation
+        if comp in ("formula", "code"):
+            return None  # the formula (the code) is the slide; its paragraphs explain it under the equation (beside the code)
         if (c.formula or "").strip():
             return c.formula.strip()  # the slide's chart, table or cards take the area: the formula is a line over them
         structured = c.items or c.columns or c.table is not None or c.chart is not None or c.numbers
@@ -2346,6 +2380,64 @@ class Composer:
                 break
         self.cv.text(Bbox(x=area.x, y=self._place_v(area, hh, fill_top=True), w=width, h=hh), paras, name="Text")
 
+    def code(self, area: Bbox, code, lines: list[str]) -> None:
+        """The user's code as written — its lines, indents and characters — on a panel in a monospace face (the
+        template's own code style when one of its samples sets code), the slide's explanation in a column at the left,
+        the code's caption («Пример записи …») over the panel. The code is never wrapped while a size of 7 pt and up
+        holds its longest line."""
+        k = self.kit
+        texts = [t for t in lines if t and t.strip()]
+        cl = code_lines(code.text)
+        font, ink, panel = code_style(k)
+        gap = int(k.gap * 1.6)
+        pad = max(int(0.028 * k.H), _emu(10))
+        cap = (code.caption or "").strip()
+        cap_paras = [self.P(cap[:1].upper() + cap[1:], k.small, k.colors.muted)] if cap else []
+
+        # (the code's sizes in proportion to the slide: 12–16 pt on a slide 540 pt high — a Marketing slide of 1080 pt
+        # set its code at 16 pt beside 30 pt text)
+        scale = max(_pt(k.H) / 540.0, 0.5)
+
+        def plan(col_share: float) -> tuple[int, float, bool]:
+            col_w = int(area.w * col_share) if texts else 0
+            pw = area.w - col_w - (gap if texts else 0)
+            cap_h = self.h(cap_paras, pw) + int(k.vgap * 0.4) if cap_paras else 0
+            size, ok = code_size(cl, font, _pt(pw - 2 * pad), _pt(area.h - cap_h - 2 * pad), min(max(k.body, 12.0 * scale), 16.0 * scale), floor=7.0 * max(scale, 1.0))
+            return col_w, size, ok
+
+        col_w, size, ok = plan(0.38)
+        if not ok and texts:
+            col_w, size, ok = plan(0.3)
+        if not ok:
+            self.warnings.append(f"code: {len(cl)} lines do not fit unwrapped at 7 pt")
+        pw = area.w - col_w - (gap if texts else 0)
+        # the compact variant mirrors the code slide of the others: the code at the left, its explanation at the right
+        mirror = self.strategy == "compact" and bool(texts)
+        px = area.x if mirror or not texts else area.x + area.w - pw
+        y = area.y
+        if cap_paras:
+            ch = self.h(cap_paras, pw)
+            self.cv.text(Bbox(x=px, y=y, w=pw, h=ch), cap_paras, name="Code caption")
+            y += ch + int(k.vgap * 0.4)
+        need = int(len(cl) * _emu(size) * CODE_LINE) + 2 * pad
+        ph = min(max(need, int(0.3 * area.h)), area.y2 - y)
+        self.cv.rect(Bbox(x=px, y=y, w=pw, h=ph), panel, radius_emu=int(min(k.card.radius_emu or 0, _emu(12))), name="Code panel")
+        paras = [Para([Run(ln, size, ink, False, font)], spacing=1.0) for ln in cl]
+        self.cv.text(Bbox(x=px + pad, y=y + pad, w=pw - 2 * pad, h=ph - 2 * pad), paras, name="Code")
+        if texts:
+            box = Bbox(x=area.x + pw + gap if mirror else area.x, y=area.y, w=col_w, h=area.h)
+            best = None
+            for sz in (k.lead, k.body, k.small):
+                tp = [self.P(t, sz, k.colors.text, space_after=sz * 0.6 if j < len(texts) - 1 else 0) for j, t in enumerate(texts)]
+                hh = self.h(tp, box.w)
+                best = (tp, hh)
+                if hh <= box.h and self.fits_width(texts, sz, False, box.w):
+                    break
+            tp, hh = best
+            if hh > box.h:
+                self.warnings.append("code: the explanation does not fit its column at the small size")
+            self.cv.text(Bbox(x=box.x, y=box.y, w=box.w, h=min(hh, box.h)), tp, name="Code note")
+
     def statement(self, area: Bbox, text: str) -> None:
         """One message — an ask, a conclusion: large type, figures in the accent colour, an accent bar or panel."""
         k = self.kit
@@ -2413,6 +2505,8 @@ class Composer:
         if n > 6:
             self.cards(area, items, badge="number")
             return
+        if self.strategy == "compact" and n >= 3 and self._steps_grid(area, items, better_than=0.0):
+            return  # the compact variant sets its steps as a grid, each numbered beside its text — not a row on an axis
         # five or six steps in a row: a narrower gutter and padding give each step the width its longest word needs
         # at a readable size («Корректировка» at the body size)
         gap = k.gap if n <= 4 else int(k.gap * 0.6)
@@ -2445,6 +2539,10 @@ class Composer:
             return
         block_h = self._grow_to(area.h, 1, 0, total) if in_cards else total
         y0 = self._place_v(area, block_h)
+        if not in_cards and not titled and block_h < 0.45 * area.h:
+            # a row of bare step names on its axis is a band, not a column of text: it stands a third of the way down
+            # its area rather than under the heading with half the slide empty below it
+            y0 = area.y + (area.h - block_h) // 3
         # the axis runs through the badges' centres, behind them
         cy = y0 + d // 2
         first_cx = area.x + (pad if in_cards else 0) + d // 2
@@ -2674,6 +2772,11 @@ class Composer:
         # ≤ 11 lines a column — a list of six two-line points is twelve lines, not a wall (G4-20, Focus long compact s8:
         # the cap sent it to 9 pt with a third of each card empty)
         max_lines = max(11, 2 * max((len(it.bullets) + (1 if it.text else 0) for it in items), default=0))
+        lens = [len(b) for it in items for b in ([it.text] if it.text else []) + list(it.bullets)]
+        if lens and sum(lens) / len(lens) >= 120:
+            # paragraphs (the author's own, whole sentences) are no list of points: their lines are what they are at
+            # any size — capped, they went down to small type in cards left half empty
+            max_lines = 99
 
         def choose(pad: int, ws: list[int]):
             # the largest pair at which the columns fit the area (a little air kept under them) in ≤ max_lines each
@@ -2784,6 +2887,10 @@ class Composer:
         best["text_h"] = text_h
         best["h"] = text_h + 2 * best["pad_y"]
         fig = _aside_figure(text) if self.strategy == "visual" and figure else None
+        if fig and getattr(self.o, "verbatim", False) and not _sole_end_figure(text, fig):
+            # the author's sentence is never cut for a figure set large: «Целевое снижение списаний — с 27 000 до 15 000
+            # рублей в месяц» read «… — с 27 000» beside «15 000 ₽». Only «label — figure» stands so, nothing lost
+            fig = None
         if fig and self._figure_on_slide(fig):
             fig = None  # the slide's tiles already show it large («80%»): the strip does not say it twice (B3)
         if fig:
@@ -3583,8 +3690,11 @@ class Composer:
                 # the slide's own conclusion reads as a statement (lead, text colour); a computed figure's label is muted
                 own = k.lead if aside else k.body
                 paras.append(self.P(label, own if size is None else min(own, size), k.colors.text if aside else k.colors.muted, space_after=k.body * 1.4))
+            # (one size for the lines of one list: a short line at the lead size over a long one at the body size read as
+            # a heading and its note, not as two points)
+            long_ = any(len(t) > 90 for t in side_texts)
             for t in side_texts:
-                ts = (k.body if len(t) > 90 else k.lead) if size is None else size
+                ts = (k.body if long_ else k.lead) if size is None else size
                 paras.append(self.P(t, ts, k.colors.text, space_after=k.body * 0.7, marker="•" if len(side_texts) > 1 else None, marker_color=k.colors.accent))
             return paras
 
@@ -3805,7 +3915,8 @@ class Composer:
                 # the largest size at which the column holds its lines above the conclusion: the lead size for short
                 # lines, then the body and the small size (Office «Ion»: three lines at 24 pt ran under the conclusion)
                 paras = []
-                for sizes in ([k.body if len(t) > 90 else k.lead for t in side_texts], [k.body] * len(side_texts), [k.small] * len(side_texts)):
+                first = k.body if any(len(t) > 90 for t in side_texts) else k.lead  # one size for the lines of one list
+                for sizes in ([first] * len(side_texts), [k.body] * len(side_texts), [k.small] * len(side_texts)):
                     paras = [self.P(t, sz, k.colors.text, space_after=k.body * 0.7, marker="•" if len(side_texts) > 1 else None, marker_color=k.colors.accent) for t, sz in zip(side_texts, sizes)]
                     if self.h(paras, text_w) <= area.h:
                         break
@@ -3957,12 +4068,14 @@ class Composer:
             return None  # a lone «посещений» over the bars names nothing: the bars say «2 700 посещений» themselves
         return title or unit
 
-    def _chart_block(self, box: Bbox, spec, *, prominent: bool, center: bool) -> Optional[str]:
+    def _chart_block(self, box: Bbox, spec, *, prominent: bool, center: bool, cap_h: Optional[int] = None, cap_size: Optional[float] = None) -> Optional[str]:
         """A chart under its caption inside `box` (a pie with a legend of its own beside it). `prominent`: the caption
         is the chart's title in the heading colour (a pair of charts), else a muted caption line. Returns an error
         message when the chart could not be drawn (the caller removes what was added)."""
         from verstka.rendering.charts import effective_chart_type
 
+        if getattr(spec, "split", False):
+            return self._split_charts(box, spec)
         k = self.kit
         y = box.y
         cap = self._chart_caption(spec, named=prominent)
@@ -3973,12 +4086,13 @@ class Composer:
             legend_head = None
         if cap:
             # (a muted caption never smaller than the chart's own labels under it)
-            size = k.lead if prominent else max(k.small, self._chart_style().font_size_pt or 0.0)
+            size = (cap_size or k.lead) if prominent else max(k.small, self._chart_style().font_size_pt or 0.0)
             para = [self.P(cap, size, k.colors.heading if prominent else k.colors.muted, bold=k.bold and prominent)]
             ch = self.h(para, box.w)
             # drawn before the chart: the chart finds its word unit written above it and prints plain numbers
             self.cv.text(Bbox(x=box.x, y=y, w=box.w, h=ch), para, name="Chart title" if prominent else "Unit")
-            y += ch + int(k.vgap * (0.6 if prominent else 0.3))
+            # (charts side by side start on one line under captions of one, two or three lines: `cap_h`)
+            y += max(ch, cap_h or 0) + int(k.vgap * (0.6 if prominent else 0.3))
         cbox = Bbox(x=box.x, y=y, w=box.w, h=max(box.y2 - y, int(0.2 * k.H)))
         plain = spec.model_copy(update={"title": None, "highlight_index": _after_index(spec, self.outline)})
         try:
@@ -3998,6 +4112,47 @@ class Composer:
                     self._trend_squeezed = True
         except Exception as e:  # noqa: BLE001
             return str(e) or type(e).__name__
+        return None
+
+    def _split_charts(self, box: Bbox, spec) -> Optional[str]:
+        """Small multiples («для каждого показателя — отдельный график со своей единицей измерения»): every series of
+        the chart is a chart of its own, side by side, under its name and unit, on one scale of type; two rows when
+        more than three of them would stand too narrow."""
+        from verstka.rendering.charts import resolve_series
+        from verstka.schemas.outline import InlineSeries
+
+        series = resolve_series(spec, self.outline)
+        if not series:
+            return "chart has no series data"
+        k = self.kit
+        n = len(series)
+        cols = n if n <= 3 or box.w / max(n, 1) >= 0.2 * k.W else (n + 1) // 2
+        rows = (n + cols - 1) // cols
+        gap = int(k.gap * 1.4)
+        vg = int(k.vgap * 1.2)
+        w = int((box.w - gap * (cols - 1)) / cols)
+        h = int((box.h - vg * (rows - 1)) / rows)
+        subs = []
+        for s_ in series:
+            subs.append(spec.model_copy(update={
+                "split": False, "series_ids": [s_.id] if s_.id and self.outline.series_by_id(s_.id) is not None else [],
+                "categories": list(s_.categories), "series": [InlineSeries(name=s_.name, values=list(s_.values), unit=s_.unit)],
+                "title": s_.name, "unit": s_.unit, "highlight_index": None,
+            }))
+        caps = [self._chart_caption(sub, named=True) for sub in subs]
+        # one size for the captions of the row: the largest at which every word of every caption stands whole in its
+        # column («температурного» at 20 pt in a third of the slide was broken, the audit then shrank that caption alone)
+        cap_size = k.lead
+        for sz in [k.lead] + [x for x in reversed(k.sizes) if k.small - 0.05 <= x < k.lead - 0.05]:
+            cap_size = sz
+            if self.fits_width([cp for cp in caps if cp], sz, k.bold, w):
+                break
+        cap_h = max((self.h([self.P(cp, cap_size, k.colors.heading, bold=k.bold)], w) for cp in caps if cp), default=0)
+        for i, sub in enumerate(subs):
+            r, c_ = divmod(i, cols)
+            err = self._chart_block(Bbox(x=box.x + c_ * (w + gap), y=box.y + r * (h + vg), w=w, h=h), sub, prominent=True, center=False, cap_h=cap_h, cap_size=cap_size)
+            if err is not None:
+                return err
         return None
 
     def _chart_style(self):
@@ -4051,7 +4206,10 @@ class Composer:
         shares_only, head_plain = list(pct), head
         if amounts:
             amt = [typeset(_amount_text(v, unit_txt)) for v in vals]
-            pct = [f"{a}  ·  {p_}" for a, p_ in zip(amt, pct)]
+            # the shares padded to one width with figure spaces: the column is set flush right, so «· 9%» under
+            # «· 19%» moved its amount and its dot right of the rows above
+            wide = max((len(p_) for p_ in pct), default=0)
+            pct = [f"{a}  ·  {chr(0x2007) * (wide - len(p_))}{p_}" for a, p_ in zip(amt, pct)]
             share_head = "сумма · доля от общей суммы"
             head = f"{head}\n{share_head}" if head else share_head[:1].upper() + share_head[1:]
         rows = [j for j in range(len(cats)) if vals[j] > 0]
@@ -4253,18 +4411,22 @@ class Composer:
         gap = k.gap
         group_w = d if below else d + gap * 2 + lg["w"]
         x0 = box.x
-        if center:
+        if center or (below and box.w > 1.3 * max(d, lg["w"])):
+            # (a circle over its legend in a box much wider than both: the pair stands in the middle of its box, not
+            # against its left edge with the box's right half empty — Классика's chart panel)
             x0 = box.x + max(0, (box.w - (max(d, lg["w"]) if below else group_w)) // 2)
         # the compact variant mirrors a lone pie as it mirrors its chart slides: the legend (the text) at the left
         mirror = bool(getattr(self, "_pie_mirror", False)) and not below
         cx = x0 + lg["w"] + gap * 2 if mirror else x0
+        if below and lg["w"] > d:
+            cx = x0 + (lg["w"] - d) // 2  # the circle over the middle of its legend
         chart_ground = self._ground_under(Bbox(x=cx, y=box.y, w=d, h=d), colors.ground)
         gf = add_chart(self.slide, Bbox(x=cx, y=box.y, w=d, h=d), spec, self.outline, self._chart_style(), k.manifest.tokens.typography, text_hex=colors.text, neutral_hex=colors.divider, ground_hex=chart_ground, legend=False, amounts=amounts)
         if amounts:
             self._doughnut_total(gf, spec, total, unit_txt)
         shades = list(getattr(gf, "verstka_shades", None) or []) or [(colors.accent, 1.0)] * len(cats)
         if below:
-            lx, ly = x0, box.y + d + k.vgap
+            lx, ly = x0 + max(0, (d - lg["w"]) // 2), box.y + d + k.vgap
         elif mirror:
             lx, ly = x0, box.y + max(0, (d - lg["h"]) // 2)
         else:
@@ -4559,6 +4721,14 @@ _HEDGE_TAIL_RE = re.compile(r"\s+(около|примерно|приблизит
 _HEDGE_SIGN = {"около": "≈", "примерно": "≈", "приблизительно": "≈", "порядка": "≈", "почти": "≈", "более": ">", "свыше": ">", "больше": ">", "менее": "<", "меньше": "<"}
 
 
+def _sole_end_figure(text: str, fig: Optional[str]) -> bool:
+    """The sentence is «label — figure»: its one figure (a year aside) closes it, and the words before it are the
+    figure's label (`label_without_figure` takes it off whole)."""
+    t = " ".join((text or "").split())
+    ms = [m for m in _FIG_RE.finditer(t) if not _is_year(m, t)]
+    return len(ms) == 1 and bool(fig) and label_without_figure(t, fig) != t
+
+
 def label_without_figure(text: str, fig: Optional[str]) -> str:
     """The words under a figure set large, without the figure said again: «Рентабельность увеличится до 22,4%» under
     «22,4%» reads «Рентабельность увеличится», «Месячная выручка составит 1 138 500 ₽» → «Месячная выручка», a figure
@@ -4696,3 +4866,78 @@ def _series_takeaway(spec, outline: DeckOutline, headline: str = "") -> Optional
         return None  # the heading already says it
     word = "прирост" if delta > 0 else "снижение"
     return f"{'+' if delta > 0 else '−'}{v}{unit}", (f"{word}: {span}" if span and not span.startswith("за период") else f"{word} {span}").strip(": ")
+
+
+
+# ------------------------------------------------------------------ the user's code
+
+
+def code_lines(text: str) -> list[str]:
+    """The code's lines as written: tabs as four spaces, the indent kept as no-break spaces (a viewer that drops
+    leading spaces would flatten the code), trailing blank lines dropped."""
+    out = []
+    for ln in (text or "").replace("\t", "    ").splitlines():
+        s = ln.rstrip()
+        pad = len(s) - len(s.lstrip(" "))
+        out.append("\u00a0" * pad + s[pad:])
+    while out and not out[-1].strip("\u00a0 "):
+        out.pop()
+    return out or [""]
+
+
+def code_width_pt(line: str, family: Optional[str], size: float) -> float:
+    """A code line's width: measured in its face, never under 0.6 em a character (a monospace face the measuring
+    tables do not know is not measured as a proportional one)."""
+    plain = line.replace("\u00a0", " ")
+    return max(text_width_pt(plain, family, size), 0.6 * size * len(plain))
+
+
+# a monospace line drawn at single spacing takes about 1.2–1.25 of its size (Consolas in LibreOffice and PowerPoint): measured
+# at 1.15, eighteen lines of code ran onto the foot of their panel
+CODE_LINE = 1.25
+
+
+def code_size(lines: list[str], family: Optional[str], width_pt: float, height_pt: float, top: float, floor: float = 7.0, spacing: float = CODE_LINE) -> tuple[float, bool]:
+    """The largest size up to `top` at which every line of the code stands on one line and all of them in the
+    height; (`floor`, False) when none does."""
+    size = top
+    while size >= floor - 1e-6:
+        widest = max((code_width_pt(ln, family, size) for ln in lines), default=0.0)
+        if widest <= width_pt and len(lines) * size * spacing <= height_pt:
+            return size, True
+        size = round(size - 0.5, 2)
+    return floor, False
+
+
+def code_style(kit) -> tuple[str, str, str]:
+    """(face, ink, panel) of the slide's code: the template's own monospace slot and its colour when a sample sets
+    code (a light ink stands on a dark panel, a dark one on the template's card or a light grey), else a dark panel
+    with light ink in Consolas."""
+    face, ink = None, None
+    for p in kit.manifest.patterns:
+        for sl in p.slots:
+            fam = sl.style.font_family or ""
+            if MONO_RE.search(fam):
+                face, ink = fam, (sl.style.color_hex or "").upper() or None
+                break
+        if face:
+            break
+    face = face or "Consolas"
+    ground = kit.colors.ground
+    dark = [c.hex for c in kit.manifest.tokens.colors if relative_luminance(c.hex) < 0.05]
+    if ink and relative_luminance(ink) < 0.3:
+        panel = (kit.card.fill or "F3F4F6") if kit.card.fill and relative_luminance(kit.card.fill) > 0.75 else "F3F4F6"
+        return face, ink, panel
+    panel = dark[0] if dark else "1B1F24"
+    if contrast_ratio(panel, ground) < 1.25:
+        # a dark template: the panel stands out of its ground — the template's card, else a step lighter than the ground
+        card = kit.card.fill
+        panel = card if card and contrast_ratio(card, ground) >= 1.2 and relative_luminance(card) < 0.25 else _lighten(ground, 0.1)
+    ink = ink if ink and contrast_ratio(ink, panel) >= 4.5 else "E6EDF3"
+    return face, ink, panel
+
+
+def _lighten(hex_: str, share: float) -> str:
+    """The colour mixed with white by `share`."""
+    r, g, b = (int(hex_[i : i + 2], 16) for i in (0, 2, 4))
+    return "".join(f"{int(round(c + (255 - c) * share)):02X}" for c in (r, g, b))

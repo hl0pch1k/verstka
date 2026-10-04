@@ -66,7 +66,10 @@ def parse_brief_text(text: str) -> Brief:
         if m2:
             fields["slide_count"] = int(m2.group(1))
     if "title_hint" not in fields:
-        h = re.search(r"^\s*#\s+(.+)$", body, re.M)
+        from verstka.planning.brief_structure import without_code
+
+        # (a «# comment» of the user's code is no markdown title)
+        h = re.search(r"^\s*#\s+(.+)$", "\n".join(without_code(body.splitlines())), re.M)
         if h:
             fields["title_hint"] = h.group(1).strip()
     return Brief(text=body.strip(), **fields)

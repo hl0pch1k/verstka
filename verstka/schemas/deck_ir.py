@@ -24,7 +24,11 @@ class IRParagraph(BaseModel):
     bullet: bool = False
     level: int = 0
     align: Optional[str] = None
-    line_spacing: Optional[float] = None  # explicit a:lnSpc/a:spcPct of the paragraph (0.9 = 90 %); None = inherited
+    # the spacing the paragraph is shown with (0.9 = 90 %): written on it or inherited from its style chain; None = set
+    # nowhere (single)
+    line_spacing: Optional[float] = None
+    space_before_pt: float = 0.0  # the space before / after it (written or inherited): the lines under it move down
+    space_after_pt: float = 0.0
 
 
 class IRPointLabel(BaseModel):
@@ -144,6 +148,8 @@ class IRElement(BaseModel):
     # the text shows in capitals whatever case it is typed in (cap="all"/"small" on its first run, its list style or
     # the layout/master placeholder it inherits from): widths are measured on the upper-cased text
     caps: bool = False
+    # the letter-spacing the text is set with (pt, `spc` of its run or what it inherits): measured with it
+    spc_pt: float = 0.0
 
     @property
     def text(self) -> str:

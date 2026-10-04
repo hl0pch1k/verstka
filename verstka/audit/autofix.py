@@ -140,6 +140,11 @@ def _condense(outline: DeckOutline, oid: str, skills: Optional[SkillsRegistry], 
     osl = next((s for s in outline.slides if s.id == oid), None)
     if osl is None:
         return "skip"
+    if osl.verbatim:
+        # the author's own sentences: one whole sentence less (it stays in the speaker notes), never a cut inside one
+        from verstka.planning.faithful import drop_one_sentence
+
+        return drop_one_sentence(osl)
     c = osl.content
     changed = 0
     new_bullets = []
@@ -517,7 +522,7 @@ def autofix_loop(
             applied: list[dict] = []
             need_render = False
             xml_actions: list[tuple[int, FixAction]] = []
-            slide_index_of = {s.outline_id: s.index for s in _ir_slides(current)}
+            slide_index_of = {s.outline_id: s.index for s in _ir_slides(current, outline)}
             for oid, actions in fixes.items():
                 for act in actions:
                     if act.action in STRUCTURAL_ACTIONS:
@@ -538,7 +543,7 @@ def autofix_loop(
                 # element ids change after a re-render: re-derive the XML fixes from a render-free audit of the new deck
                 fresh = run_audit(pptx, manifest, outline, ws, render=False, images_dir=images_dir, strategy=report.strategy, brief_text=brief_text, writer=writer)
                 fresh_ids = {i.id for i in fresh.issues if _issue_key(i) in selected_keys} if selected_keys is not None else None
-                fresh_index_of = {s.outline_id: s.index for s in _ir_slides(fresh)}
+                fresh_index_of = {s.outline_id: s.index for s in _ir_slides(fresh, outline)}
                 xml_actions = []
                 for oid, actions in plan_fixes(fresh, plan, fresh_ids, xml_only=True).items():
                     idx = fresh_index_of.get(oid)
@@ -576,10 +581,17 @@ def autofix_loop(
     return current, plan, outline, render_result
 
 
-def _ir_slides(report: AuditReport):
+def _ir_slides(report: AuditReport, outline: Optional[DeckOutline] = None):
     from verstka.audit.ir import build_deck_ir
 
     try:
-        return build_deck_ir(report.deck, with_images=False).slides
+        slides = build_deck_ir(report.deck, with_images=False).slides
     except Exception:  # noqa: BLE001
         return []
+    if outline is not None and len(slides) == len(outline.slides):
+        # a finished deck carries no markers in its notes (`renderer.strip_outline_marks`): its slides are the
+        # outline's in order, as the audit reads them — a slide's fix found no slide to apply to without it
+        for i, sl in enumerate(slides):
+            if sl.outline_id is None:
+                sl.outline_id = outline.slides[i].id
+    return slides

@@ -764,3 +764,27 @@ def test_a_bare_figure_is_not_cut_out_of_a_headline():
     unit = _unit("u2", title="Расходы и прибыль")
     # «73%» is not the brief's: cutting it would leave «составляют бюджета» — the slide's heading instead
     assert A._headline_checked("Расходы на зарплаты и продукты составляют 73% бюджета", unit, ctx, []) == "Расходы и прибыль"
+
+
+# ------------------------------------------------------------------ with a model, the user's code, charts and pictures stay
+
+
+def test_with_a_model_the_users_code_chart_data_and_picture_places_stay_as_written():
+    """The designer model writes the slides' words, but a slide whose text carries code or a chart's data is laid out
+    as written (planning/faithful.py) — the model is not asked to retell it; a «[Место под изображение: …]» note keeps
+    its described place on whatever form the model chose; the dictated cover is the deck's cover."""
+    text = (BRIEFS / "smart_greenhouse.md").read_text(encoding="utf-8")
+    script = Script()
+    res, events, _ = _run(text, script)
+    o = res.outlines["structured"]
+    assert o.title == "Умная теплица" and o.slides[0].kind == K.title and len(o.slides) == 14
+    sp = _by_spec(o)
+    assert sp[5].content.code is not None and sp[5].content.code.language == "json"
+    assert sp[7].content.code is not None and "def irrigation_decision(" in sp[7].content.code.text
+    assert sp[9].content.chart is not None and sp[9].content.chart.split
+    assert sp[4].content.photo_slot and (sp[4].content.photo_hint or "").startswith("Вид теплицы сверху")
+    assert sp[14].kind == K.thanks
+    # the model designed the prose slides only: neither the code slides nor the chart slides were sent to it
+    heads = {re.search(r"Heading of this slide: «(.+?)»", p).group(1) for p in script.prompts.get("designer", [])}
+    assert "Пример кода: решение о поливе" not in heads and "Как проводился учебный эксперимент" not in heads
+    assert "Как данные помогают выращивать растения" in heads

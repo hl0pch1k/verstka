@@ -295,7 +295,10 @@ def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job) -> dic
         outline = DeckOutline.model_validate(req.outline)
     else:
         brief = _brief_from_request(req)
+    # «Модель пишет тексты слайдов» off: the user's own text, laid out as written (planning/faithful.py) — no model
+    # plans or rewrites it; «Модель проверяет слайды по картинке» is a switch of its own
     use_models = req.use_models and models_configured()
+    audit_models = req.audit_models and models_configured()
     res = generate_variants(
         store.workspace(req.template_id).source,
         brief=brief,
@@ -303,13 +306,13 @@ def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job) -> dic
         strategies=req.strategies,
         out_dir=gdir,
         workspace_root=store.root,
-        providers=providers() if use_models else None,
-        skills=skills() if use_models else None,
+        providers=providers() if (use_models or audit_models) else None,
+        skills=skills() if (use_models or audit_models) else None,
         use_llm=use_models,
-        use_vlm=use_models,
+        use_vlm=use_models or audit_models,
         audit=True,
         autofix=req.autofix,
-        audit_models=req.audit_models and use_models,
+        audit_models=audit_models,
         exports=req.exports,
         # plain progress messages and the planning agent's step events (the live timeline of the build screen)
         progress=job_progress(job),
@@ -732,6 +735,12 @@ def apply_fixes(gid: str, strategy: str, req: FixRequest) -> dict:
             job.emit("Применяю исправления", 0.2)
             final, plan2, outline2, _ = autofix_loop(vdir / "deck.pptx", report, outline, plan, manifest, ws, max_iterations=2, only_ids=only, images_dir=vdir / "slides", brief_text=_brief_text_of_meta(gid, meta),
                                                     writer=meta.get("writer") if isinstance(meta.get("writer"), dict) else None)
+            try:
+                from verstka.rendering.renderer import strip_outline_marks
+
+                strip_outline_marks(vdir / "deck.pptx")  # a fix re-rendered slides with their markers
+            except Exception:  # noqa: BLE001
+                log.warning("outline markers left in the notes", exc_info=True)
             job.emit("Готовлю превью и файлы", 0.8)
             # previews and the exports that existed before are rebuilt from one LibreOffice run
             exports = [fmt for fmt in ("pdf", "html") if (vdir / f"deck.{fmt}").exists()]

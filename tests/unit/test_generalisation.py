@@ -240,7 +240,7 @@ def test_empty_frames_become_container_slots_and_take_text(tmp_path):
     ws = TemplateWorkspace.open(m.template_id, tmp_path / "ws")
     b = DeckBuilder(ws.source)
     slide, warnings = render_clone(b, LayoutSlide(outline_id="s1", mode="clone", pattern_id=p.id), oslide, p, m, ws, DeckOutline(title="t", slides=[oslide]))
-    texts = [shape_text(el) for el in slide.shapes._spTree.iter(q("p:sp"))]
+    texts = [shape_text(el).replace("\u00a0", " ") for el in slide.shapes._spTree.iter(q("p:sp"))]  # «Шаг 1» set with a no-break space
     assert any("Шаг 1" in t and "Описание шага 1" in t for t in texts), texts
     assert any("Шаг 2" in t for t in texts)
     cards = [sh for sh in slide.shapes if sh.shape_type == 1 and sh.width > 2000000]

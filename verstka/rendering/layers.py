@@ -669,6 +669,39 @@ def free_rect(slide, area: Bbox, skip: Iterable = (), pad: Optional[int] = None)
     return largest_free(area, obs)
 
 
+def clear_of_rules(slide, area: Bbox, skip: Iterable = ()) -> Bbox:
+    """`area` clear of the rules the template draws through it or along its edges — hairlines of the master, the
+    layout or the slide (a layout with a rule down the middle of the slide, its picture left of it and its heading and
+    text right of it): a vertical rule crossing most of the area's height leaves the area its wider side, one standing
+    on an edge pushes that edge a gutter away (a pie's legend set to the edge of its panel ran into the rule closing
+    the panel); a horizontal rule likewise with the taller side. `area` itself when no rule touches it."""
+    skip_ids = _norm_skip(skip)
+    out = area
+    for lay in drawn_layers(slide):
+        if lay.placeholder or lay.has_text or not lay.paints or lay.picture or _skipped(lay, skip_ids):
+            continue
+        W, H = lay.slide_w, lay.slide_h
+        gx, gy = int(0.02 * W), int(0.02 * H)
+        b = lay.box
+        if b.w <= 0.006 * W and b.h >= 0.3 * H and min(b.y2, out.y2) - max(b.y, out.y) >= 0.5 * out.h:
+            if out.x + gx < b.x < out.x2 - gx:
+                sides = [Bbox(x=out.x, y=out.y, w=b.x - gx - out.x, h=out.h), Bbox(x=b.x2 + gx, y=out.y, w=out.x2 - b.x2 - gx, h=out.h)]
+                out = max(sides, key=lambda c: c.w)
+            elif out.x2 - gx <= b.x <= out.x2 + gx // 2:
+                out = Bbox(x=out.x, y=out.y, w=max(b.x - gx - out.x, 0), h=out.h)
+            elif out.x - gx // 2 <= b.x2 <= out.x + gx:
+                out = Bbox(x=b.x2 + gx, y=out.y, w=max(out.x2 - b.x2 - gx, 0), h=out.h)
+        elif b.h <= 0.006 * H and b.w >= 0.3 * W and min(b.x2, out.x2) - max(b.x, out.x) >= 0.5 * out.w:
+            if out.y + gy < b.y < out.y2 - gy:
+                sides = [Bbox(x=out.x, y=out.y, w=out.w, h=b.y - gy - out.y), Bbox(x=out.x, y=b.y2 + gy, w=out.w, h=out.y2 - b.y2 - gy)]
+                out = max(sides, key=lambda c: c.h)
+            elif out.y2 - gy <= b.y <= out.y2 + gy // 2:
+                out = Bbox(x=out.x, y=out.y, w=out.w, h=max(b.y - gy - out.y, 0))
+            elif out.y - gy // 2 <= b.y2 <= out.y + gy:
+                out = Bbox(x=out.x, y=b.y2 + gy, w=out.w, h=max(out.y2 - b.y2 - gy, 0))
+    return out
+
+
 def art_share(slide, area: Bbox, skip: Iterable = ()) -> float:
     """Share of `area` covered by the slide's art (union estimated on a coarse grid)."""
     boxes = art_boxes(slide, skip)

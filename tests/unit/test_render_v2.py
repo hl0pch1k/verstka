@@ -274,10 +274,11 @@ def test_pie_with_shares_on_slices_and_a_legend_of_its_own(env):
     assert pcts[0].startswith("315 000 ₽")
     swatches = _named(slide, "Swatch")
     assert len(swatches) == 6
-    # every swatch is the accent laid over the ground at the slice's share (a colour of the template), the largest opaque
+    # five parts and more: each its own colour of the template — tints of one hue ran too close to tell the parts apart
+    # (QA 2026-10-04: eight tints of one pink at 1.0–1.3:1) — the largest in the accent, all opaque
     fills = [sw._element.find(".//" + q("a:srgbClr")) for sw in swatches]
-    assert len({f.get("val") for f in fills[:5]}) == 1
-    assert fills[0].find(q("a:alpha")) is None and fills[1].find(q("a:alpha")) is not None
+    assert len({f.get("val") for f in fills[:5]}) == 5
+    assert all(f.find(q("a:alpha")) is None for f in fills[:5])
     pts = cs.findall(f".//{C}dPt")
     assert pts[0].find(f".//{q('a:srgbClr')}").get("val") == fills[0].get("val")
     # legend rows beside the circle, the caption heads the legend

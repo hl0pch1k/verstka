@@ -16,13 +16,14 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
-import io
 import logging
 import re
 import struct
 import zipfile
 from pathlib import Path
 from typing import Iterable, Optional
+
+from verstka import pkgzip
 
 log = logging.getLogger(__name__)
 
@@ -328,44 +329,30 @@ def strip_highlights(pptx: Path | str) -> int:
     """Text highlights taken off a finished deck (in place) — slides, layouts, masters: a LibreOffice template carries
     its character background as a highlight in its text styles (white under the white subtitle of «Piano»), and the
     deck's own words written in that style disappear. Returns the number of parts changed."""
-    path = Path(pptx)
-    buf = io.BytesIO()
-    n = 0
-    with zipfile.ZipFile(path) as zin, zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zout:
-        for item in zin.infolist():
-            data = zin.read(item.filename)
-            name = item.filename
+    changed: dict[str, bytes] = {}
+    with zipfile.ZipFile(pptx) as z:
+        for name in z.namelist():
             if name.endswith(".xml") and (name.startswith("ppt/slides/slide") or name.startswith("ppt/slideLayouts/") or name.startswith("ppt/slideMasters/")):
-                got = _unhighlight_part(data)
+                got = _unhighlight_part(z.read(name))
                 if got is not None:
-                    data = got
-                    n += 1
-            zout.writestr(item, data)
-    if n:
-        path.write_bytes(buf.getvalue())
-    return n
+                    changed[name] = got
+    pkgzip.rewrite(pptx, changed)
+    return len(changed)
 
 
 def mark_russian(pptx: Path | str) -> int:
     """Russian runs of a finished deck (in place) tagged `lang="ru-RU"`: a run keeps the language of the template's
     sample it was written into («en-US» in most free templates), and PowerPoint underlines every Russian word of such
     a run as misspelled. Returns the number of parts changed."""
-    path = Path(pptx)
-    buf = io.BytesIO()
-    n = 0
-    with zipfile.ZipFile(path) as zin, zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zout:
-        for item in zin.infolist():
-            data = zin.read(item.filename)
-            name = item.filename
+    changed: dict[str, bytes] = {}
+    with zipfile.ZipFile(pptx) as z:
+        for name in z.namelist():
             if name.endswith(".xml") and (name.startswith("ppt/slides/slide") or name.startswith("ppt/notesSlides/")):
-                got = _mark_part(data)
+                got = _mark_part(z.read(name))
                 if got is not None:
-                    data = got
-                    n += 1
-            zout.writestr(item, data)
-    if n:
-        path.write_bytes(buf.getvalue())
-    return n
+                    changed[name] = got
+    pkgzip.rewrite(pptx, changed)
+    return len(changed)
 
 
 def apply_to_pptx(pptx: Path | str, subs: dict[str, str]) -> int:
@@ -373,26 +360,19 @@ def apply_to_pptx(pptx: Path | str, subs: dict[str, str]) -> int:
     if not subs:
         return 0
     low = {k.strip().lower(): v for k, v in subs.items()}
-    path = Path(pptx)
-    buf = io.BytesIO()
-    n = 0
-    with zipfile.ZipFile(path) as zin, zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zout:
-        for item in zin.infolist():
-            data = zin.read(item.filename)
-            name = item.filename
+    changed: dict[str, bytes] = {}
+    with zipfile.ZipFile(pptx) as z:
+        for name in z.namelist():
             if name.endswith(".xml") and (name.startswith("ppt/slides/slide") or name.startswith("ppt/notesSlides/")):
-                got = _fix_part(data, low, whole=False)
+                got = _fix_part(z.read(name), low, whole=False)
             elif name.endswith(".xml") and (
                 name.startswith("ppt/slideMasters/") or name.startswith("ppt/slideLayouts/") or name.startswith("ppt/theme/") or name.startswith("ppt/charts/chart")
             ):
                 # charts: every label is the deck's own (Russian) text
-                got = _fix_part(data, low, whole=True)
+                got = _fix_part(z.read(name), low, whole=True)
             else:
                 got = None
             if got is not None:
-                data = got
-                n += 1
-            zout.writestr(item, data)
-    if n:
-        path.write_bytes(buf.getvalue())
-    return n
+                changed[name] = got
+    pkgzip.rewrite(pptx, changed)
+    return len(changed)

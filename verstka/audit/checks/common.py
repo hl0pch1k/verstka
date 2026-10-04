@@ -89,13 +89,16 @@ def content_elements(slide: IRSlide, ir: DeckIR, manifest: Optional["TemplateMan
 
 
 def text_height_needed_pt(e: IRElement, line_spacing: float = 1.2) -> tuple[float, int]:
-    """(height in pt, lines) the text needs given the element width. `line_spacing` is the template's line height in
-    em; a paragraph that sets its own spacing (a:lnSpc spcPct, e.g. a display heading at 90 %) is measured with it —
-    a single-spaced line is 1.2 em, so 90 % sets lines 1.08 em apart, as the renderers size such boxes."""
+    """(height in pt, lines) the text needs given the element width. A paragraph is measured at the spacing it is
+    shown with (a:lnSpc spcPct written or inherited, e.g. a display heading at 90 %) — a single-spaced line is 1.2 em,
+    so 90 % sets lines 1.08 em apart, as the renderers size such boxes; `line_spacing` (em) is for a paragraph whose
+    spacing is set nowhere. The space between paragraphs (spcBef/spcAft) counts: a WorkSpace card's text 6 pt under
+    its heading hung under its plate while measured without it."""
     usable_w = max((e.bbox.w - e.insets_emu[0] - e.insets_emu[2]) / EMU_PER_PT, 1.0)
     height = 0.0
     lines = 0
     caps = bool(getattr(e, "caps", False))  # shown in capitals: measured as shown
+    spc = float(getattr(e, "spc_pt", 0.0) or 0.0)  # and at the letter-spacing it is set with
     for p in e.paragraphs:
         size = next((r.size_pt for r in p.runs if r.size_pt), None) or e.dominant_size or 14.0
         font = next((r.font for r in p.runs if r.font), None)
@@ -107,15 +110,17 @@ def text_height_needed_pt(e: IRElement, line_spacing: float = 1.2) -> tuple[floa
             # runs of different sizes («145 000» with a small «₽»): the line holds the sum of their widths
             from verstka.rendering.fonts import text_width_pt
 
-            total = sum(text_width_pt(r.text.upper() if caps else r.text, r.font or font, r.size_pt or size, r.bold) for r in p.runs)
+            total = sum(text_width_pt(r.text.upper() if caps else r.text, r.font or font, r.size_pt or size, r.bold) + spc * len(r.text) for r in p.runs)
             n = max(1, -(-int(total) // max(int(usable_w), 1)))
             size = max(sizes)
         elif e.wrap:
-            n = max(len(wrap_lines(p.text.upper() if caps else p.text, font, size, bold, usable_w)), 1)
+            n = max(len(wrap_lines(p.text.upper() if caps else p.text, font, size, bold, usable_w, spc_pt=spc)), 1)
         else:
             n = 1
         lines += n
         height += n * size * (1.2 * p.line_spacing if p.line_spacing else line_spacing)
+    paras = e.paragraphs
+    height += sum(p.space_before_pt for p in paras[1:]) + sum(p.space_after_pt for p in paras[:-1])
     return height, lines
 
 
@@ -220,7 +225,8 @@ def ground_of(slide: IRSlide, e: IRElement, bg_slide: Optional[str] = None) -> t
     band or panel), «picture» (a layout/master picture or picture-filled shape — its median colour), or (None, None)
     when nothing encloses e (the slide's own ground applies). Translucent fills are composited over what lies under
     them."""
-    cands = [o for o in slide.elements if o is not e and o.fill_hex and o.type in ("shape", "text") and _holds(o, e)]
+    # (a picture of the slide's own under e — a black panel the code stands on — paints the ground where it is read)
+    cands = [o for o in slide.elements if o is not e and _holds(o, e) and ((o.fill_hex and o.type in ("shape", "text")) or (o.type == "picture" and o.z < e.z and o.cells is not None))]
     # the layout and master paint under every shape of the slide: a picture or a card of the slide under e hides them
     hidden = any(o is not e and o.z < e.z and (o.type == "picture" or (o.fill_hex and o.type in ("shape", "text"))) and _holds(o, e) for o in slide.elements)
     tpl = [] if hidden else template_grounds(slide, e)
@@ -232,9 +238,11 @@ def ground_of(slide: IRSlide, e: IRElement, bg_slide: Optional[str] = None) -> t
     order = sorted(tpl, key=lambda o: (0 if o.source == "master" else 1, o.z)) + sorted(cands, key=lambda o: o.bbox.area, reverse=True)
     for o in order:
         hx, a = o.fill_hex, fill_alpha(o)
-        local = region_paint(o, e.bbox) if o.source != "slide" and o.cells is not None else None
+        local = region_paint(o, e.bbox) if (o.source != "slide" or o.type == "picture") and o.cells is not None else None
         if local is not None:
             hx, a = local[0], min(a, local[1]) if o.type != "picture" else local[1]
+        elif not hx:
+            continue  # a picture transparent where e stands: what lies under it is the ground
         if a >= 0.995 or not color:
             color = hx.upper()
         else:
@@ -242,7 +250,7 @@ def ground_of(slide: IRSlide, e: IRElement, bg_slide: Optional[str] = None) -> t
                 color = composite_hex(hx, a, color)
             except ValueError:
                 color = hx.upper()
-        if o.source != "slide":
+        if o.source != "slide" or o.type == "picture":
             if o.type == "picture" or o.busy or (o.paint_kind or "") == "image":
                 kind = "picture"
             elif (o.paint_kind or "") == "gradient":

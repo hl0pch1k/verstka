@@ -44,8 +44,10 @@ def _paints(el) -> bool:
 def _content_extent(slide, pattern: Pattern, W: int, H: int) -> Optional[tuple[int, int, int]]:
     """(left, right, bottom) of what the slide shows, its chrome, full-slide grounds and the marks at its foot aside."""
     chrome = set(pattern.chrome_shape_ids)
+    titles = {s.shape_id for s in pattern.slots if s.role == SlotRole.title and (s.style.align or "") == "ctr"}
     tree = slide._element.cSld.find(q("p:spTree"))
     left, right, bottom = None, None, None
+    h_left = h_right = None  # a centred heading's box: the content's column only when nothing else sets it
     for el in tree:
         if etree.QName(el).localname not in _DRAWN:
             continue
@@ -59,11 +61,18 @@ def _content_extent(slide, pattern: Pattern, W: int, H: int) -> Optional[tuple[i
             continue  # an empty box that draws nothing (an export's invisible frame)
         if b[1] >= 0.8 * H and b[3] <= 0.15 * H and b[2] * b[3] < 0.2 * W * H:
             continue  # a logo, a page number at the foot
+        bottom = b[1] + b[3] if bottom is None else max(bottom, b[1] + b[3])
+        if nv is not None and nv.get("id") in titles:
+            # (a centred heading's box widened about its centre spans the band: the conclusion keeps to the content's
+            # column under it, not to the heading's box)
+            h_left, h_right = b[0], b[0] + b[2]
+            continue
         left = b[0] if left is None else min(left, b[0])
         right = b[0] + b[2] if right is None else max(right, b[0] + b[2])
-        bottom = b[1] + b[3] if bottom is None else max(bottom, b[1] + b[3])
     if left is None:
-        return None
+        if h_left is None:
+            return None
+        left, right = h_left, h_right
     return left, right, bottom
 
 
@@ -259,9 +268,21 @@ def place_notes(builder, slide, oslide: OutlineSlide, outline: DeckOutline, mani
         size = comp._footnote_size()
         para = [comp.P(foot, size, kit.colors.muted)]
         fh = comp.h(para, width)
+        fx, fw = left, width
+        try:
+            from verstka.rendering.layers import clear_of_rules
+
+            # a rule of the layout through the foot (Классика: the hairline down the middle of the slide) — the small
+            # print keeps to one side of it, on two lines if it must
+            cl = clear_of_rules(slide, Bbox(x=left, y=floor - fh, w=width, h=fh))
+            if cl.w < width and cl.w >= 0.3 * W:
+                fx, fw = cl.x, cl.w
+                fh = comp.h(para, fw)
+        except Exception:  # noqa: BLE001 - the foot as measured
+            pass
         if floor - fh < content_bottom + int(kit.vgap * 0.8):
             return "no room for the footnote under the sample's content"
-        foot_draw = (Bbox(x=left, y=floor - fh, w=width, h=fh), para)
+        foot_draw = (Bbox(x=fx, y=floor - fh, w=fw, h=fh), para)
         room_bottom = floor - fh - int(kit.vgap * 0.8)
     plan = None
     if take:
@@ -284,7 +305,17 @@ def place_notes(builder, slide, oslide: OutlineSlide, outline: DeckOutline, mani
             fr = free_rect(slide, pattern, manifest, 0.4, 0.08, 0.45, room_bottom)
             if fr is not None:
                 fx, fy, fw, fh = fr
+                # the strip starts on a column of the slide's content (the left edge of a text standing over it), not
+                # wherever the free stretch happens to begin (VK Education: a box starting between two columns)
+                tree0 = slide._element.cSld.find(q("p:spTree"))
+                lefts = sorted({b[0] for b in (element_bbox(x) for x in tree0 if etree.QName(x).localname == "sp" and "".join(t.text or "" for t in x.iter(q("a:t"))).strip()) if b and b[1] + b[3] <= fy + int(0.02 * H) and fx <= b[0] < fx + fw // 2})
+                snapped = bool(lefts) and fx + fw - lefts[0] >= int(0.4 * W)
+                if snapped:
+                    fw, fx = fx + fw - lefts[0], lefts[0]
                 inset = int(0.012 * W)
+                if snapped:
+                    fx -= inset  # (the strip's own edge on the column: the inset below is taken back)
+                    fw += inset
                 p = comp._takeaway_plan(take, fw - 2 * inset, figure=False, sizes=(deck_size,))
                 if p["h"] <= fh - inset and p.get("lines", 1) <= 3:
                     plan, aside = p, (fx + inset, fy + fh - p["h"], fw - 2 * inset)
@@ -316,6 +347,7 @@ def place_notes(builder, slide, oslide: OutlineSlide, outline: DeckOutline, mani
                 if not _conclusion_under_heading(builder, slide, oslide, outline, manifest, pattern, take, deck_size):
                     return "the template's art leaves no room for the conclusion"
                 if foot_draw is not None:
+                    _cut_rules(slide, foot_draw[0], int(0.02 * H), W, H)
                     comp.cv.text(foot_draw[0], foot_draw[1], name="Footnote")
                 return None
             y = room_bottom - p2["h"] if aside is None else min(y, room_bottom - p2["h"])
@@ -339,6 +371,8 @@ def place_notes(builder, slide, oslide: OutlineSlide, outline: DeckOutline, mani
             tx = bx + plan["bar_w"] + plan["bar_gap"]
             comp.cv.text(Bbox(x=tx, y=y + plan["pad_y"], w=plan["text_w"], h=plan["text_h"]), [plan["para"]], name="Conclusion")
     if foot_draw is not None:
+        # (a vertical rule of the sample's grid running down to the foot ends above the small print, as above the strip)
+        _cut_rules(slide, foot_draw[0], int(0.02 * H), W, H)
         comp.cv.text(foot_draw[0], foot_draw[1], name="Footnote")
     return None
 

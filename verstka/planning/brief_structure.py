@@ -344,6 +344,31 @@ _LIST_LINE_RE = re.compile(
 _PAIR_CELLS_RE = re.compile(r"^(?P<label>[^:]{2,60}?)\s*:\s*(?P<cells>.+\S)\s*$")
 
 
+def instruction_kind(sentence: str) -> Optional[str]:
+    """What a sentence of a dictated slide asks of the designer — a chart («Нужна круговая диаграмма …»), a table, a
+    formula («Покажи формулу: …»), the slide's conclusion («Вывод: …»), a footnote («Укажи, что …»), a place for a photo
+    or a rule for the whole deck — or None when it is the slide's own text. The analyst reads these sentences as the
+    slide's requests (`_read_block`); laid out as written, they are never shown as text."""
+    s = (sentence or "").strip()
+    if not s:
+        return None
+    if _chart_requests(s):
+        return "chart"
+    if _TABLE_ASK_RE.search(s) and re.search(r"сделай|нуж|покажи|добавь|построй|оформи|в\s+виде|сравнительн", s, re.I) and not _NEG_ASK_RE.search(s):
+        return "table"
+    if _FORMULA_RE.search(s):
+        return "formula"
+    if _TAKEAWAY_RE.match(s):
+        return "takeaway"
+    if _FOOTNOTE_ASK_RE.match(s):
+        return "footnote"
+    if is_photo_instruction(s):
+        return "photo"
+    if _is_rule(s):
+        return "rule"
+    return None
+
+
 # ------------------------------------------------------------------ the reading state
 
 
@@ -1109,6 +1134,26 @@ def _read_block(block: _Block, reg: _Registry, all_numbers: list[float]) -> None
 # ------------------------------------------------------------------ the whole brief
 
 
+_FENCE_LINE_RE = re.compile(r"^\s*(```+|~~~+)")
+
+
+def without_code(lines: list[str]) -> list[str]:
+    """The lines without the fenced code blocks among them (the fences included)."""
+    out: list[str] = []
+    fence: Optional[str] = None
+    for ln in lines:
+        m = _FENCE_LINE_RE.match(ln)
+        if fence is None and m:
+            fence = m.group(1)[:3]
+            continue
+        if fence is not None:
+            if ln.strip().startswith(fence):
+                fence = None
+            continue
+        out.append(ln)
+    return out
+
+
 def _front_matter(text: str) -> tuple[dict, str]:
     m = _FRONT_RE.match(text)
     if not m:
@@ -1182,8 +1227,9 @@ def read_structure(text: str) -> BriefStructure:
         m = _SUBTITLE_RE.match(ln)
         if m and st.subtitle is None:
             st.subtitle = _unquote(m.group("v")) or None
+    prose = "\n".join(without_code(body.splitlines()))  # (a «# comment» of a code block is no markdown title)
     if st.title is None:
-        h1 = re.search(r"^\s*#\s+(.+)$", body, re.M)
+        h1 = re.search(r"^\s*#\s+(.+)$", prose, re.M)
         if h1:
             st.title = H.strip_end(h1.group(1))
     glob_text = "\n".join(glob) if has_specs else body
@@ -1222,7 +1268,7 @@ def read_structure(text: str) -> BriefStructure:
         st.rounding = H.strip_end(rs)
     # data, block by block (a brief without slide specs: its markdown tables first, as the facts registry reads them)
     reg = _Registry()
-    all_numbers = numbers_of(body)
+    all_numbers = numbers_of(prose)
     if not has_specs:
         _, sections = H.parse_sections(body)
         for t in (t for sec in sections for t in sec.tables):
@@ -1231,7 +1277,14 @@ def read_structure(text: str) -> BriefStructure:
             for s in ss:
                 reg.add_series(s)
     for blk in blocks:
-        _read_block(blk, reg, all_numbers)
+        # the data of a block is read from its prose: a code block's lines are code (a timestamp «2026-06-15T10:30» or
+        # «if tank_level < 15:» is no figure of the brief to chart or to show large)
+        own = blk.lines
+        blk.lines = without_code(own)
+        try:
+            _read_block(blk, reg, all_numbers)
+        finally:
+            blk.lines = own
     st.series = reg.series
     st.tables = reg.tables
     st.specs = [b.spec for b in blocks if b.spec is not None]

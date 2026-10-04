@@ -58,13 +58,23 @@ def _shape_text(el) -> str:
     return "\n".join(paras)
 
 
+def _is_code_para(p) -> bool:
+    """A paragraph of the user's code: its runs set in a monospace face."""
+    from verstka.rendering.compose import MONO_RE
+
+    faces = [lat.get("typeface") or "" for lat in p.iter(q("a:latin"))]
+    return bool(faces) and all(MONO_RE.search(f) for f in faces)
+
+
 def readable_floor(manifest: TemplateManifest) -> float:
     """The least size of running text on a slide set on a template sample: the template's body size (a step under
     it at most), never under 2.4 % of the slide height — VK Tech's 9 pt card text on a 5.6-inch slide does not read
     from the back of the room, and a deck of composed slides at 11 pt shows it beside them."""
     hpt = manifest.slide_size.h / EMU_PER_PT
     body = manifest.tokens.typography.size_for("body", 14.0)
-    return max(body * 0.85, 0.024 * hpt)
+    # (never above the template's own body size: Education sets its running text at 12 pt on a 540 pt slide — a floor
+    # of 2.4 % of the height, 13 pt, turned down every one of its text samples)
+    return max(body * 0.85, min(0.024 * hpt, body))
 
 
 def ink_lines(sp, default_family: Optional[str]) -> list:
@@ -142,16 +152,44 @@ def ink_box(sp, default_family: Optional[str]):
     width = max((b[2] - l - r) / EMU_PER_PT, 1.0)
     height = 0.0
     widest = 0.0
-    for p in body.findall(q("a:p")):
+    lst = body.find(q("a:lstStyle") + "/" + q("a:lvl1pPr"))
+
+    def space(ppr, tag: str, size: float) -> float:
+        # the space a paragraph sets before or after itself (or its box's list style sets): it pushes the lines under
+        # it down (a WorkSpace card's text 6 pt under its heading)
+        for src in (ppr, lst):
+            node = src.find(q(tag)) if src is not None else None
+            if node is None:
+                continue
+            pts, pct = node.find(q("a:spcPts")), node.find(q("a:spcPct"))
+            try:
+                if pts is not None and pts.get("val"):
+                    return max(int(pts.get("val")) / 100.0, 0.0)
+                if pct is not None and pct.get("val"):
+                    return max(int(pct.get("val")) / 100000.0 * size * 1.2, 0.0)
+            except ValueError:
+                pass
+            return 0.0
+        return 0.0
+
+    paras = body.findall(q("a:p"))
+    for k, p in enumerate(paras):
         text = "".join(x.text or "" for x in p.iter(q("a:t")))
         rpr = next((x for x in p.iter(q("a:rPr")) if x.get("sz")), None)
         size = int(rpr.get("sz")) / 100 if rpr is not None else 12.0
         lat = rpr.find(q("a:latin")) if rpr is not None else None
         fam = lat.get("typeface") if lat is not None and lat.get("typeface") else default_family
+        ppr = p.find(q("a:pPr"))
         pct = p.find(q("a:pPr") + "/" + q("a:lnSpc") + "/" + q("a:spcPct"))
         ls = 1.2 * (int(pct.get("val")) / 100000 if pct is not None and pct.get("val") else 1.0)
+        if rpr is not None and rpr.get("cap") == "all":
+            text = text.upper()  # shown in capitals: measured so
         lines = wrap_lines(text, fam, size, bool(rpr is not None and rpr.get("b") == "1"), width) if text.strip() else [""]
         height += max(len(lines), 1) * size * ls
+        if k:
+            height += space(ppr, "a:spcBef", size)
+        if k < len(paras) - 1:
+            height += space(ppr, "a:spcAft", size)
         if text.strip():
             from verstka.rendering.fonts import text_width_pt
 
@@ -455,6 +493,8 @@ def content_trouble(slide, oslide: OutlineSlide, pattern: Pattern, manifest: Tem
             sid = nv.get("id") if nv is not None else None
             if sid in chrome:
                 continue
+            if nv is not None and (nv.get("name") or "").startswith("Photo caption"):
+                continue  # the user's picture place says what goes there — inside the place, on a screen of the art too
             ib = ink_box(sp, fam)
             if ib is None or ib.area <= 0:
                 continue
@@ -538,6 +578,74 @@ def content_trouble(slide, oslide: OutlineSlide, pattern: Pattern, manifest: Tem
                             continue
                 if ob.y > tib.y and tib.intersection(ob) > 0.04 * tib.area:
                     return f"the heading runs into «{_shape_text(el).strip()[:20] or etree.QName(el).localname}» under it"
+            # a rule of the sample's grid between the heading's lines (Классика p11: a two-line heading in a band made for
+            # one, the band's rule through its second line; the grid drawn on the layout) — a hairline has no area to
+            # overlap, so it is crossed or not
+            Wd = manifest.slide_size.w
+            pad = max(int(0.12 * tib.h), int(0.006 * H))
+            lines = list(tree)
+            try:
+                for holder in (slide.slide_layout, slide.slide_layout.slide_master):
+                    lines += [x for x in holder._element.cSld.find(q("p:spTree")) if x.find(".//" + q("p:ph")) is None]
+            except Exception:  # noqa: BLE001 - the slide's own rules then
+                pass
+            for el in lines:
+                tag = etree.QName(el).localname
+                if tag not in ("cxnSp", "sp") or el is t_el:
+                    continue
+                if tag == "sp" and _shape_text(el).strip():
+                    continue
+                b = element_bbox(el)
+                if not b:
+                    continue
+                x, y, w, h = b
+                if h <= 0.006 * H and w >= 0.05 * Wd and tib.y + pad < y + h / 2 < tib.y2 - pad and min(tib.x2, x + w) - max(tib.x, x) > 0.2 * tib.w:
+                    return "the heading's lines cross a rule of the sample"
+                if w <= 0.006 * Wd and h >= 0.05 * H and tib.x + pad < x + w / 2 < tib.x2 - pad and min(tib.y2, y + h) - max(tib.y, y) > 0.5 * tib.h:
+                    return "a rule of the sample runs through the heading"
+    # two of the slide's own texts over each other (Классика p11: three stages in a column made for two, the first
+    # stage's heading over its own text)
+    fam_o = manifest.tokens.typography.primary_family
+
+    def ours_text(t: str) -> bool:
+        n = _norm(t)[:30]
+        return bool(n) and any(o.startswith(n) or n.startswith(o[:30]) for o in ours if o)
+
+    placed = []
+    for sp in tree.iter(q("p:sp")):
+        nv = sp.find(".//" + q("p:cNvPr"))
+        if sp.getparent() is not tree or (nv is not None and nv.get("id") in chrome):
+            continue
+        t = _shape_text(sp).strip()
+        if not t or not ours_text(t):
+            continue
+        ib = ink_box(sp, fam_o)
+        if ib is not None and ib.area > 0:
+            placed.append((t, ib))
+    for i, (ta, a) in enumerate(placed):
+        for tb_, b in placed[i + 1 :]:
+            if a.intersection(b) > 0.15 * min(a.area, b.area):
+                return f"text «{ta[:20]}» runs into «{tb_[:20]}»"
+    # a hairline of the sample's rows through one of our texts (LCT: rows of a list set at their own rhythm, the
+    # sample's rules left where its own rows were — «Разместить десерты рядом с кассой» struck through)
+    from verstka.rendering.deck import element_bbox as _eb
+
+    Wd2 = manifest.slide_size.w
+    for el in tree:
+        tag = etree.QName(el).localname
+        if tag not in ("cxnSp", "sp") or (tag == "sp" and _shape_text(el).strip()):
+            continue
+        nv = el.find(".//" + q("p:cNvPr"))
+        if nv is not None and nv.get("id") in chrome:
+            continue
+        lb = _eb(el)
+        if not lb or lb[3] > 0.006 * H or lb[2] < 0.05 * Wd2:
+            continue
+        ly = lb[1] + lb[3] / 2
+        for t, ib in placed:
+            pad = max(int(0.2 * min(ib.h, 0.05 * H)), int(0.004 * H))
+            if ib.y + pad < ly < ib.y2 - pad and min(ib.x2, lb[0] + lb[2]) - max(ib.x, lb[0]) > 0.3 * ib.w:
+                return f"a rule of the sample runs through «{t[:20]}»"
     # text running out of the card it starts in (a third line of a card's text under the card's foot)
     native = slide.__dict__.get("_verstka_native") or set()
     cards = []
@@ -566,7 +674,8 @@ def content_trouble(slide, oslide: OutlineSlide, pattern: Pattern, manifest: Tem
         ib = ink_box(sp, manifest.tokens.typography.primary_family)
         if not b or ib is None or b[3] <= 0:
             continue
-        if ib.y + ib.h > b[1] + b[3] + 0.01 * H or ib.y < b[1] - 0.01 * H:
+        # (its last line's leading under the letters is no ink: half a percent of the slide is let through)
+        if ib.y + ib.h > b[1] + b[3] + 0.005 * H or ib.y < b[1] - 0.01 * H:
             return f"text «{_shape_text(sp).strip()[:24]}» runs out of its plate"
     if cards:
         fam_c = manifest.tokens.typography.primary_family
@@ -604,6 +713,8 @@ def content_trouble(slide, oslide: OutlineSlide, pattern: Pattern, manifest: Tem
                     return f"text «{_shape_text(sp).strip()[:24]}» runs past the right edge of its card"
     # a hole where the sample had its content: cells, a band, a card or a picture taken off and nothing in their
     # place (WorkSpace p15 without its note band, LCT p20 without its big card) — the composer sets such content better
+    if slide.__dict__.get("_verstka_rows_off_rules"):
+        return "the rows moved off the sample's rules: two rows between two rules"
     hole0 = slide.__dict__.get("_verstka_hole0")
     if hole0 is not None:
         try:
@@ -683,6 +794,8 @@ def content_trouble(slide, oslide: OutlineSlide, pattern: Pattern, manifest: Tem
             sizes = [int(r.get("sz")) / 100 for r in p.iter(q("a:rPr")) if r.get("sz")]
             if not sizes:
                 continue
+            if _is_code_para(p):
+                continue  # the user's code: set unbroken at the size its longest line allows, never typeset as prose
             if usable > 0 and wrap_on and nv is not None and nv.get("id") not in native:
                 # a word (or words bound by no-break spaces) wider than its box is broken across lines by the renderer
                 rpr = next((r for r in p.iter(q("a:rPr")) if r.get("sz")), None)

@@ -887,6 +887,12 @@ def fix_slide(
         except Exception:  # noqa: BLE001 - the verification below tells the truth about the other slides
             log.warning("slide fix: splice failed, the scratch deck is used as it is", exc_info=True)
             shutil.copy2(work, final)
+        try:
+            from verstka.rendering.renderer import strip_outline_marks
+
+            strip_outline_marks(final)  # the spliced slide came with its machine marker
+        except Exception:  # noqa: BLE001
+            log.warning("outline markers left in the notes", exc_info=True)
         final_outline = _with_slide(outline0, outline, n)
         final_plan = _with_entry(plan0, plan.for_outline(oid), oid)
         # the audit numbers its remarks through the deck: the ids of the remarks that stayed (on every slide) are carried

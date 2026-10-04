@@ -89,7 +89,9 @@ _INSTRUCTION_RE = re.compile(
     r"|название\s*:|подзаголовок\s*:|финальный\s+вывод\s*:|вывод\s*:)",
     re.I,
 )
-_COVER_RE = re.compile(r"титул|обложк|cover|title", re.I)
+# a slide the brief names its cover: «Титульный», «Обложка», «Заглавный слайд», «Title slide» — never a word that only
+# holds the letters («Discovery», «Subtitle»)
+_COVER_RE = re.compile(r"титул|обложк|заглавн\w*\s+слайд|\bcover\b|\btitle(?:\s+(?:slide|page))?\s*[.!]?\s*$", re.I)
 
 
 # ------------------------------------------------------------------ helpers
@@ -530,7 +532,7 @@ def _order(o: DeckOutline, structure: BriefStructure, run: _Run, count: Optional
             s = fallback_slide(specs[n], structure)
             missing.append(s)
             run.warn(f"the brief's slide {n} had no designed slide: built from the brief's text")
-        elif _is_cover(specs[n]) and s.kind != K.title:
+        elif _is_cover(specs[n]) and s.kind != K.title and not s.verbatim:
             s.kind = K.title
         slides.append(s)
     # the brief's own «на 10 слайдов» is a hard count: no cover beyond it. The request's count (the form always sends
@@ -672,8 +674,8 @@ def _tense_guard(o: DeckOutline, structure: BriefStructure, idx: BriefIndex, run
     specs = {sp.number: sp for sp in structure.specs}
     changed: list[str] = []
     for s in o.slides:
-        if s.kind in _FRAMES:
-            continue
+        if s.kind in _FRAMES or s.verbatim:
+            continue  # (the author's own sentences are said as the author said them)
         spec = specs.get(s.spec_ref) if s.spec_ref is not None else None
         src = (spec.text if spec else "") or ""
         plan_only = bool(re.search(r"цел[ьи]|прогноз|план|к\s+\S+\s+месяцу|планир|составит|вырастет|достигнет", f"{spec.title if spec else ''} {src}", re.I)) and not re.search(
@@ -725,7 +727,7 @@ def _variety(o: DeckOutline, structure: BriefStructure, run: _Run, written: bool
     slides = o.slides
     for i in range(2, len(slides)):
         k = slides[i].kind
-        if k in _FRAMES or not (slides[i - 1].kind == k and slides[i - 2].kind == k):
+        if k in _FRAMES or not (slides[i - 1].kind == k and slides[i - 2].kind == k) or slides[i].verbatim:
             continue
         for j in (i, i - 1):
             s = slides[j]
@@ -785,9 +787,9 @@ def _compile_charts(o: DeckOutline, run: _Run) -> int:
                     run.warn(f"slide {s.id}: {which} series «{ser.name}» has {len(ser.values)} values for {len(cats)} categories; cut to {m}")
                 n += 1
                 sid = f"s_{s.id}_{n}"
-                reg[sid] = Series(id=sid, name=(ser.name or ch.title or s.headline or "").strip(), categories=cats[:m], values=list(ser.values[:m]), unit=ch.unit)
+                reg[sid] = Series(id=sid, name=(ser.name or ch.title or s.headline or "").strip(), categories=cats[:m], values=list(ser.values[:m]), unit=ser.unit or ch.unit)
                 ids.append(sid)
-                kept.append(InlineSeries(name=ser.name, values=list(ser.values[:m])))
+                kept.append(InlineSeries(name=ser.name, values=list(ser.values[:m]), unit=ser.unit))
             if ids:
                 ch.series_ids = ids
                 ch.categories = reg[ids[0]].categories
@@ -934,8 +936,10 @@ def _repair(o: DeckOutline, structure: BriefStructure, run: _Run) -> bool:
         if s.kind in _FRAMES:
             continue
         c = s.content
-        if has_body(c.model_dump()) or (c.formula or "").strip() or c.chart2 is not None:
+        if has_body(c.model_dump()) or (c.formula or "").strip() or c.chart2 is not None or c.code is not None:
             continue
+        if s.verbatim and (c.photo_slot or (s.subtitle or "").strip()):
+            continue  # the author's screen or picture under its line: the slide is what the author laid out
         fb = fallback_slide(specs[n], structure, s.id)
         s.kind, s.content = fb.kind, fb.content
         s.takeaway = s.takeaway or fb.takeaway
@@ -1012,7 +1016,8 @@ def compile_outline(
         from verstka.planning.agent import polish_case
 
         for s in o.slides:
-            polish_case(s, brief.text)  # the lines another form made («Партнёрства: с пятью ближайшими офисами»)
+            if not s.verbatim:
+                polish_case(s, brief.text)  # the lines another form made («Партнёрства: с пятью ближайшими офисами»)
     except Exception:  # noqa: BLE001 - capitals are cosmetics: the deck stands without them
         pass
     made = _compile_charts(o, run)

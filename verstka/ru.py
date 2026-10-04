@@ -56,7 +56,9 @@ def ru_times(ratio: float) -> str:
 
 NBSP = "\u00a0"
 _BIND_AFTER = frozenset("в во на за с со к ко по о об от до из у и а но не ни же ли бы".split())
-_UNIT_RE = __import__("re").compile(r"(?<=\d)[ ](?=(?:%|₽|руб|тыс|млн|млрд|ч\b|мин|сек|дн|мес|лет|год|раз|шт|ГБ|ТБ|МБ|×))")
+_UNIT_RE = __import__("re").compile(r"(?<=\d)[ ](?=(?:%|₽|руб|тыс|млн|млрд|ч\b|мин|сек|дн|мес|лет|год|раз|шт|ГБ|ТБ|МБ|×|°|℃|м²|м³|см|мм|кг|г\b|л\b|мл|кВт|Вт|В\b|А\b))")
+# a label and its number («Зона 2:», «Этап 3», «Слайд 4»): the number never starts the next line alone
+_LABEL_NUM_RE = __import__("re").compile(r"(?<![\w])([А-ЯЁA-Z][а-яёa-z]{2,})[ ](?=\d{1,2}(?:[:.,;)»]|$|[ \u00a0](?![а-яёa-z])))")
 _THOUSANDS_RE = __import__("re").compile(r"(?<=\d)[ ](?=\d{3}\b)")
 _NUM_NOUN_RE = __import__("re").compile(r"(?<![\w.,])(\d+(?:[.,]\d+)?)[ ](?=[A-Za-zА-Яа-яЁё])")  # «4 GPU-сервера», «за 2 секунды»
 
@@ -166,6 +168,7 @@ def typeset(text: str) -> str:
     t = _THOUSANDS_RE.sub(NBSP, t)
     t = _UNIT_RE.sub(NBSP, t)
     t = _NUM_NOUN_RE.sub(lambda m: m.group(1) + NBSP, t)
+    t = _LABEL_NUM_RE.sub(lambda m: m.group(1) + NBSP, t)
     t = t.replace(" ₽", NBSP + "₽")
     # «№ 4», «§ 2»: the sign stays with its number («задача №| 4 VK Tech» broke a cover's subtitle)
     t = __import__("re").sub(r"([№§])[ ](?=\d)", lambda m: m.group(1) + NBSP, t)

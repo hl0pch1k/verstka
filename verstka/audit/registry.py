@@ -30,6 +30,14 @@ class AuditContext:
     writer: Optional[Any] = None
     _issue_counter: int = 0
 
+    def verbatim(self, slide) -> bool:
+        """The slide shows the author's own sentences (planning/faithful.py): whole, never shortened by words."""
+        if self.outline is None:
+            return False
+        oid = getattr(slide, "outline_id", None)
+        osl = next((x for x in self.outline.slides if x.id == oid), None) if oid else None
+        return bool(osl is not None and getattr(osl, "verbatim", False))
+
     def new_issue(self, spec: CheckSpec, slide: int, message: str, **kw) -> Issue:
         self._issue_counter += 1
         outline_id = None

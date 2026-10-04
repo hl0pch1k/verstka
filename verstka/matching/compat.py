@@ -81,6 +81,8 @@ def composition_for(slide: OutlineSlide) -> str:
     c = slide.content
     k = slide.kind
     if k not in _BOOKEND_KINDS:
+        if c.code is not None:
+            return "code"  # the user's code as written, its explanation beside it
         if c.chart is not None and c.chart2 is not None:
             return "chart_pair"
         if (c.formula or "").strip() and c.chart is None and c.chart2 is None and c.table is None and not (c.items or c.columns):

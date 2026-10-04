@@ -35,6 +35,11 @@ class ParagraphInfo:
     runs: list[RunInfo] = field(default_factory=list)
     line_spacing: Optional[float] = None
     space_after_pt: Optional[float] = None
+    # as shown: the spacing written on the paragraph or inherited from its style chain (None: set nowhere — single),
+    # and the space before / after it in pt (written or inherited), which the lines under it are pushed down by
+    shown_line_spacing: Optional[float] = None
+    gap_before_pt: float = 0.0
+    gap_after_pt: float = 0.0
 
     @property
     def size_pt(self) -> Optional[float]:
@@ -257,10 +262,13 @@ def _match_placeholder(phs: list[tuple[str, Optional[str], etree._Element]], ph_
 class _StyleChain:
     """Ordered list of lstStyle-like elements to search for level properties."""
 
-    def __init__(self, resolver: ThemeResolver, sources: list[etree._Element], is_title: bool) -> None:
+    def __init__(self, resolver: ThemeResolver, sources: list[etree._Element], is_title: bool, defaults: Optional[list[etree._Element]] = None) -> None:
         self.resolver = resolver
         self.sources = [s for s in sources if s is not None]
         self.is_title = is_title
+        # the presentation's default text style (its first level): the last place a paragraph's spacing comes from —
+        # read for spacing only, the run defaults keep their own resolution
+        self.defaults = [d for d in (defaults or []) if d is not None]
 
     def level_props(self, level: int) -> list[etree._Element]:
         out = []
@@ -375,8 +383,34 @@ def _parse_text(txBody: etree._Element, chain: _StyleChain, resolver: ThemeResol
         line_spacing = (attr_int(ln, "val", 100000) or 100000) / 100000.0 if ln is not None else None
         sa = find(ppr, "a:spcAft/a:spcPts")
         space_after = (attr_int(sa, "val", 0) or 0) / 100.0 if sa is not None else None
-        info.paragraphs.append(ParagraphInfo(text="".join(texts), level=level, has_bullet=bullet, align=align, runs=runs, line_spacing=line_spacing, space_after_pt=space_after))
+        shown = line_spacing
+        if shown is None:
+            for l in lvl_props + chain.defaults:
+                ln2 = find(l, "a:lnSpc/a:spcPct")
+                if ln2 is not None:
+                    shown = (attr_int(ln2, "val", 100000) or 100000) / 100000.0
+                    break
+        size = max((r.size_pt for r in runs if r.size_pt), default=18.0)
+        info.paragraphs.append(ParagraphInfo(text="".join(texts), level=level, has_bullet=bullet, align=align, runs=runs, line_spacing=line_spacing, space_after_pt=space_after,
+                                             shown_line_spacing=shown, gap_before_pt=_gap(ppr, lvl_props + chain.defaults, "a:spcBef", size),
+                                             gap_after_pt=_gap(ppr, lvl_props + chain.defaults, "a:spcAft", size)))
     return info
+
+
+def _gap(ppr: Optional[etree._Element], levels: list[etree._Element], tag: str, size: float) -> float:
+    """The space before or after a paragraph in pt: written on it, else the first level of its style chain that sets
+    it (points, or a share of its line)."""
+    for src in ([ppr] if ppr is not None else []) + levels:
+        node = find(src, tag)
+        if node is None:
+            continue
+        pts, pct = find(node, "a:spcPts"), find(node, "a:spcPct")
+        if pts is not None:
+            return max((attr_int(pts, "val", 0) or 0) / 100.0, 0.0)
+        if pct is not None:
+            return max((attr_int(pct, "val", 0) or 0) / 100000.0 * size * 1.2, 0.0)
+        return 0.0
+    return 0.0
 
 
 # ---------------------------------------------------------------------------- extraction
@@ -398,6 +432,21 @@ class SlideContext:
         self.layout_phs = _placeholders(self.layout) if self.layout is not None else []
         self.master_phs = _placeholders(self.master)
         self.tx_styles = find(self.master, "p:txStyles")
+        self._default_levels: Optional[list[etree._Element]] = None
+
+    @property
+    def default_levels(self) -> list[etree._Element]:
+        """The presentation's default text style, first level (read once per slide)."""
+        if self._default_levels is None:
+            self._default_levels = []
+            try:
+                pres = self.package.xml("ppt/presentation.xml")
+                lvl = find(pres, "p:defaultTextStyle/a:lvl1pPr") if pres is not None else None
+                if lvl is not None:
+                    self._default_levels = [lvl]
+            except Exception:  # noqa: BLE001 - no default style then
+                pass
+        return self._default_levels
 
     def master_style_for(self, ph_type: Optional[str], is_placeholder: bool) -> Optional[etree._Element]:
         if self.tx_styles is None:
@@ -574,7 +623,7 @@ def _extract_one(el: etree._Element, ctx: SlideContext, xform: _Xform, z: int, g
         if mas_ph is not None:
             sources.append(find(mas_ph, "p:txBody/a:lstStyle"))
         sources.append(ctx.master_style_for(ph_type, is_ph))
-        chain = _StyleChain(resolver, sources, is_title)
+        chain = _StyleChain(resolver, sources, is_title, ctx.default_levels)
         info.text = _parse_text(txBody, chain, resolver, is_title)
     return info
 
@@ -712,6 +761,8 @@ PLACEHOLDER_RE = re.compile(
     # that a real heading may contain («Demo Day» stays content)
     r"\bdemo\s+(slide|text|title|page|content|copy)\b|\b(title|text|sample|slide|subtitle)\s+(text\s+)?demo\b|^demo$|"
     r"\b(sample|dummy|placeholder)\s+text\b|\btitle\s+text\b|\bclick\s+to\s+(edit|add)\b|\bslide\s+title\b|\bgoes\s+here\b|"
+    # a footer's or a header's own sample copy («SAMPLE FOOTER TEXT», «Footer text», «Нижний колонтитул»)
+    r"\b(sample\s+)?(footer|header)\s+text\b|^\s*(нижний|верхний)\s+колонтитул\s*$|^\s*колонтитул\s*$|"
     r"\byour\s+(awesome\s+)?(text|title|logo|word|headline|subtitle|content|company)\b|"
     r"\b(insert|add)\s+(your\s+|an?\s+)?(picture|image|photo|logo)\b|\bcompany\s+name\b|\bspeaker\s+name\b|"
     r"^(image|picture|photo|logo|info text|text style|text here)$",
@@ -732,6 +783,9 @@ def looks_like_placeholder(text: str) -> bool:
 SAMPLE_VALUE_RE = re.compile(
     r"^\s*(?:john|jane)\s+(?:doe|smith)\s*$|^\s*(?:name\s+surname|your\s+name|first\s+name|last\s+name|name\s+lastname|presenter\s+name|author\s+name)\s*$|"
     r"^\s*(?:new\s+york|any\s*city|anytown|your\s+city)\s*$|^\s*(?:19|20)\d{2}\s*$|"
+    # a year's mask («20ГГ», «20XX», «ГГГГ») and the deck's own title as a footer's sample («заголовок презентации»)
+    r"^\s*(?:(?:19|20)(?:гг|xx|yy)|гггг|yyyy|xxxx)\s*(?:г\.?)?\s*$|^\s*(?:заголовок|название|тема)\s+(?:презентации|доклада|проекта)\s*$|"
+    r"^\s*(?:presentation|deck|project)\s+(?:title|name)\s*$|"
     r"^\s*(?:brand\s+name|your\s+brand|company\s+logo|logo\s+here|your\s+logo|business\s+name)\s*$|"
     r"^\s*(?:slides\s?carnival|slidesgo|freepik)\s*$|"
     r"^\s*(?:back\s+to\s+(?:the\s+)?(?:overview|agenda|contents?|menu|start|home|index)(?:\s+page)?|go\s+to\s+(?:the\s+)?(?:overview|agenda|contents?|menu)|click\s+here(?:\s+to\s+\w+)?|home|menu|next|previous|назад\s+к\s+(?:содержанию|оглавлению|меню))\s*[.!]?\s*$|"

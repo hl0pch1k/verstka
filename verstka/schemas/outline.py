@@ -56,6 +56,8 @@ class InlineSeries(BaseModel):
 
     name: str = ""
     values: list[float] = Field(default_factory=list)
+    # the series' own unit when the chart's series measure different things (a split chart: litres, minutes, hours)
+    unit: Optional[str] = None
 
 
 class ChartSpec(BaseModel):
@@ -68,6 +70,19 @@ class ChartSpec(BaseModel):
     # (planning/compile.py) turns it into registry Series and fills series_ids; grounding checks every value.
     categories: list[str] = Field(default_factory=list)
     series: list[InlineSeries] = Field(default_factory=list)
+    # every series is a chart of its own, side by side under its name and unit («для каждого показателя — отдельный
+    # график со своей единицей измерения»): small multiples of one comparison
+    split: bool = False
+
+
+class CodeBlock(BaseModel):
+    """A block of code the user wrote in the brief (a fenced block): shown as written — its lines, indents and
+    characters, never typeset as prose — in the template's code style (its code sample's panel and monospace face)."""
+
+    text: str
+    language: str = ""
+    # the line that introduced the block in the brief («Пример записи, которую контроллер отправляет в журнал»)
+    caption: Optional[str] = None
 
 
 class SlideItem(BaseModel):
@@ -103,10 +118,15 @@ class SlideContent(BaseModel):
     # the template's own picture placeholder when a sample of the template has one, else a quiet frame — and never fills
     # it with text, a chart or a picture of ours. The value names the photo («Фото помещения»).
     photo_slot: Optional[str] = None
+    # what that picture shows, in the user's words («вид теплицы сверху или схема в перспективе …»): written quietly
+    # inside the free place, so the place reads as the picture's, not as a gap
+    photo_hint: Optional[str] = None
+    # the user's code, as written (verbatim mode: a fenced block of the brief)
+    code: Optional[CodeBlock] = None
 
     @property
     def is_empty(self) -> bool:
-        return not (self.bullets or self.paragraphs or self.items or self.numbers or self.table or self.chart or self.quote or self.columns)
+        return not (self.bullets or self.paragraphs or self.items or self.numbers or self.table or self.chart or self.quote or self.columns or self.code)
 
 
 class SlideAlternative(BaseModel):
@@ -138,6 +158,9 @@ class OutlineSlide(BaseModel):
     spec_ref: Optional[int] = None
     # Agent v2 (UI): the other forms the designer proposed for this slide (shown in «Почему слайд такой»)
     alternatives: list[SlideAlternative] = Field(default_factory=list)
+    # the slide shows the author's own sentences, whole (verbatim mode, planning/faithful.py): no later step rewrites,
+    # shortens or reshapes them — the tense guard, the variety pass, case polish and the editors leave them as written
+    verbatim: bool = False
 
 
 class DeckOutline(BaseModel):

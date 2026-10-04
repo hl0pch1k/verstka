@@ -2,6 +2,8 @@
 
 __version__ = "0.1.0"
 
+from verstka import pkgzip as _pkgzip
 from verstka.env import load_env as _load_env
 
 _load_env()
+_pkgzip.install()  # decks are saved with their pictures stored, not deflated again

@@ -232,7 +232,9 @@ def _ir_element(s, W: int, H: int) -> IRElement:
     paragraphs = []
     if s.text is not None:
         for p in s.text.paragraphs:
-            paragraphs.append(IRParagraph(text=p.text, bullet=p.has_bullet, level=p.level, align=p.align, line_spacing=p.line_spacing, runs=[IRRun(text=r.text, font=r.font, size_pt=r.size_pt, bold=r.bold, italic=r.italic, color_hex=r.color_hex) for r in p.runs]))
+            paragraphs.append(IRParagraph(text=p.text, bullet=p.has_bullet, level=p.level, align=p.align, line_spacing=p.shown_line_spacing,
+                                          space_before_pt=p.gap_before_pt, space_after_pt=p.gap_after_pt,
+                                          runs=[IRRun(text=r.text, font=r.font, size_pt=r.size_pt, bold=r.bold, italic=r.italic, color_hex=r.color_hex) for r in p.runs]))
     return IRElement(
         id=s.id,
         type=etype,
@@ -627,10 +629,17 @@ def shows_caps(s, ctx: SlideContext) -> bool:
     own list style, then — for a placeholder — of the layout's and master's placeholder and the master's title/body
     style. The master's «other» style is not followed for plain text boxes (LibreOffice, which renders the audit's
     pictures, does not apply it to them)."""
+    return shows_look(s, ctx)[0]
+
+
+def shows_look(s, ctx: SlideContext) -> tuple[bool, float]:
+    """(capitals, letter-spacing in pt) a slide text shape is shown with, each from the first place that sets it, in
+    the order of `shows_caps` — a heading the template sets 1.4 pt tighter (Кофейня) takes one line where its letters
+    at the normal spacing would take two: the audit measures it as the renderer sets it."""
     el = getattr(s, "element", None)
     txBody = el.find(q("p:txBody")) if el is not None else None
     if txBody is None:
-        return False
+        return False, 0.0
     lvl, rpr = 0, None
     for para in txBody.findall(q("a:p")):
         run = next((r for r in para.findall(q("a:r")) if (r.findtext(q("a:t")) or "").strip()), None)
@@ -642,8 +651,22 @@ def shows_caps(s, ctx: SlideContext) -> bool:
             except ValueError:
                 lvl = 0
             break
-    if rpr is not None and rpr.get("cap") is not None:
-        return rpr.get("cap") in ("all", "small")
+    caps: Optional[bool] = None
+    spc: Optional[float] = None
+
+    def take(node) -> None:
+        nonlocal caps, spc
+        if node is None:
+            return
+        if caps is None and node.get("cap") is not None:
+            caps = node.get("cap") in ("all", "small")
+        if spc is None and node.get("spc") is not None:
+            try:
+                spc = int(node.get("spc")) / 100.0
+            except ValueError:
+                pass
+
+    take(rpr)
     sources = [txBody.find(q("a:lstStyle"))]
     if s.is_placeholder:
         try:
@@ -655,13 +678,11 @@ def shows_caps(s, ctx: SlideContext) -> bool:
                 sources.append(ph.find(q("p:txBody") + "/" + q("a:lstStyle")))
         sources.append(ctx.master_style_for(s.ph_type, True))
     for src in sources:
-        if src is None:
+        if src is None or (caps is not None and spc is not None):
             continue
         for lv in src.findall(q(f"a:lvl{lvl + 1}pPr")):
-            d = lv.find(q("a:defRPr"))
-            if d is not None and d.get("cap") is not None:
-                return d.get("cap") in ("all", "small")
-    return False
+            take(lv.find(q("a:defRPr")))
+    return bool(caps), float(spc or 0.0)
 
 
 def build_deck_ir(pptx: Path | str, with_images: bool = True) -> DeckIR:
@@ -719,9 +740,9 @@ def build_deck_ir(pptx: Path | str, with_images: bool = True) -> DeckIR:
             etype = el.type
             if etype == "text":
                 try:
-                    el.caps = shows_caps(s, ctx)
+                    el.caps, el.spc_pt = shows_look(s, ctx)
                 except Exception:  # noqa: BLE001 - measured as typed
-                    el.caps = False
+                    el.caps, el.spc_pt = False, 0.0
             if etype == "picture" and with_images:
                 if s.image_part not in img_cache:
                     img_cache[s.image_part] = _image_size(pkg, s.image_part)
@@ -731,6 +752,13 @@ def build_deck_ir(pptx: Path | str, with_images: bool = True) -> DeckIR:
                     # running from its calm part onto its busy part is seen (content_over_art, round 4.1)
                     try:
                         el.cells = _photo_cells(pkg, s.image_part, s.crop, s.element)
+                    except Exception:  # noqa: BLE001
+                        el.cells = None
+                elif s.image_part and el.bbox_frac.w * el.bbox_frac.h >= 0.04:
+                    # a panel or a ground of the slide's own that its text may stand on (VK Tech p32: the code on a black
+                    # picture): its paint, so the audit reads the text's ground as the renderer does (`ground_of`)
+                    try:
+                        el.cells = _picture_cells(pkg, s.image_part, s.crop, s.element)
                     except Exception:  # noqa: BLE001
                         el.cells = None
             if etype == "chart" and s.element is not None:

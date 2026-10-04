@@ -503,6 +503,7 @@ export function CreateScreen() {
                     <Toggle
                       label="Модель пишет тексты слайдов"
                       title={modelsConfigured ? undefined : "Модель не подключена"}
+                      hint={useModels && modelsConfigured ? "Сокращает и переформулирует текст под слайды" : "Ваш текст дословно: только раскладка по слайдам шаблона"}
                       checked={useModels && modelsConfigured}
                       disabled={busy || !modelsConfigured}
                       onChange={(v) => {

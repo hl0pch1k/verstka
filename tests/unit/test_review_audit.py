@@ -288,7 +288,7 @@ def test_xml_fixes_are_rederived_after_a_rerender(tmp_path, monkeypatch):
 
     monkeypatch.setattr(af, "render_deck", lambda outline, plan, manifest, ws, out, **kw: (Path(out).write_bytes(b"NEW"), RenderResult(pptx_path=Path(out)))[1])
     monkeypatch.setattr(af, "run_audit", fake_audit)
-    monkeypatch.setattr(af, "_ir_slides", lambda report: [SimpleNamespace(outline_id="s1", index=1), SimpleNamespace(outline_id="s2", index=2)])
+    monkeypatch.setattr(af, "_ir_slides", lambda report, outline=None: [SimpleNamespace(outline_id="s1", index=1), SimpleNamespace(outline_id="s2", index=2)])
     monkeypatch.setattr(af, "_xml_fixes", lambda p, actions, manifest, w, h: calls.append(list(actions)) or [{"slide": i, "kind": a.action, "element_id": a.params["element_ids"][0], "result": "Шрифт заменён"} for i, a in actions])
     final, *_ = af.autofix_loop(pptx, report0, outline, plan, _manifest(), None, max_iterations=2)
     assert calls == [[(2, fresh_refont)]], calls

@@ -405,12 +405,29 @@ def score_pattern(
     if kind <= 0:
         return ScoreResult(0.0, [f"тип {pattern.kind.value} несовместим с {slide.kind.value}"], fit)
     reasons.append(f"тип {pattern.kind.value} для {slide.kind.value}: {kind:.1f}")
+    if slide.content.code is not None:
+        # the user's code needs the sample's monospace box; the slide's lines another text box beside it
+        from verstka.rendering.compose import MONO_RE
+
+        text_roles = (SlotRole.body, SlotRole.bullet_list, SlotRole.card_body, SlotRole.caption)
+        mono = [x for x in pattern.slots if x.role in text_roles and MONO_RE.search(x.style.font_family or "")]
+        if not mono:
+            return ScoreResult(0.0, reasons + ["в образце нет поля для кода"], fit)
+        lines = [t for t in (*slide.content.paragraphs, *slide.content.bullets) if t.strip()]
+        if lines and not [x for x in pattern.slots if x.role in text_roles and x not in mono and x.capacity.max_chars >= 120]:
+            return ScoreResult(0.0, reasons + ["в образце с кодом нет места для пояснения"], fit)
     pics = list(pictures or [])
     art_ids = {p.shape_id for p in pics if p.kind in ("art", "panel", "line", "icon")}
     bookend0 = slide.kind in _BOOKEND_KINDS
     if pics and not bookend0:
         visual0 = bool(slide.content.image_hint or slide.content.chart is not None or slide.content.table is not None)
         story = [p for p in pics if p.kind in ("photo", "content") and p.area >= 0.03]
+        if slide.content.photo_slot and photo_place(pattern, pics) is not None:
+            # the user's own picture takes the sample's photo or screenshot place (`clone._make_photo_place`): the
+            # sample's story goes with it; any other picture of the sample's story would stay
+            place = photo_place(pattern, pics)
+            story = [p for p in story if p.shape_id != place.shape_id]
+            visual0 = visual0 or not story
         if story and not visual0:
             # a speaker's photo, a product screenshot, a chart drawn for the sample's figures («Item 1 … Item 5»):
             # the sample's own story stays a hole or a lie on new content — only a chart, a table or a picture of
@@ -423,7 +440,7 @@ def score_pattern(
             reasons.append("столбики образца нарисованы под его собственные данные")
         elif story and visual0:
             reasons.append("иллюстрацию образца заменит диаграмма или таблица")
-    if not bookend0 and pattern.mockup_boxes and not slide.content.image_hint:
+    if not bookend0 and pattern.mockup_boxes and not slide.content.image_hint and not slide.content.photo_slot:
         # a device mock-up (a tablet, a phone, a laptop) shows a screen: without the content's own screenshot its
         # screen stays blank in the middle of the slide
         return ScoreResult(0.0, reasons + ["макет устройства в образце останется с пустым экраном"], fit)
@@ -596,6 +613,21 @@ def score_pattern(
                 reasons.append(f"нет повторяющейся группы под {n} элементов")
             fit["items"] = f"{n}/{role_slots}"
 
+    untitled = slide.content.items or slide.content.columns
+    if group is not None and untitled and all(not (i.title or "").strip() for i in untitled) and any((i.text or "").strip() or i.bullets for i in untitled):
+        # paragraphs without headings (the author's text laid out as written) on cells with a heading box of their own
+        # (Классика p12: a heading column beside the text): every heading cell would stand empty
+        heads = {s.shape_id for s in pattern.slots if s.group_id == group.id and s.role == SlotRole.card_title}
+        texts = {s.shape_id for s in pattern.slots if s.group_id == group.id and s.role in (SlotRole.card_body, SlotRole.body, SlotRole.bullet_list)}
+        # (or a parallel column of cells of their own — Классика p12: the headings column beside the texts column)
+        def words_column(og) -> bool:
+            cells = [s for s in pattern.slots if s.group_id == og.id]
+            return bool(cells) and all(s.role in (SlotRole.card_title, SlotRole.card_body, SlotRole.body, SlotRole.bullet_list) for s in cells) and not all(re.fullmatch(r"\W*\d{1,2}\W*", (s.sample_text or "").strip()) for s in cells)
+
+        twin = any(og is not group and len(og.member_shape_ids) >= 2 and words_column(og) for og in groups)
+        if (heads and texts and not heads & texts) or twin:
+            cap = min(cap, 0.25)
+            reasons.append("у пунктов нет заголовков: поля заголовков в ячейках образца остались бы пустыми")
     if data_room is not None and n < 2:
         cap = data_room  # no items to count: the capacity of such a slide is the room for its chart or table
     elif n < 2 and slide.kind not in _BOOKEND_KINDS:
@@ -675,7 +707,12 @@ def score_pattern(
         cell_cap = sum(s.capacity.max_chars for s in pattern.slots if s.shape_id in cell0 and s.role in (SlotRole.card_title, SlotRole.card_body, SlotRole.body, SlotRole.bullet_list, SlotRole.number_label))
         need_cell = max(len(i.title or "") + len(i.text or "") + sum(len(b) + 2 for b in i.bullets) for i in items0)
         if cell_cap >= 120 and need_cell < 0.2 * cell_cap:
-            kind *= 0.85
+            # steps of a word or two («Датчики», «Проверка показаний») in cards made for paragraphs read as empty
+            # slabs, not as a sequence: the sample of steps (or a composed one) says it better
+            steps_in_cards = slide.kind in (PatternKind.process, PatternKind.timeline) and pattern.kind == PatternKind.cards and need_cell < 0.2 * cell_cap
+            if steps_in_cards:
+                fit["steps_in_cards"] = True
+            kind *= 0.5 if steps_in_cards else 0.85
             reasons.append(f"ячейки образца рассчитаны на текст в {cell_cap // max(need_cell, 1)} раз длиннее")
     if slide.content.numbers:
         # a price list (tariff cards: «259 ₽» over «279 ₽» struck through, a discount pill, a «Кнопка»): its figures are
@@ -729,6 +766,10 @@ def score_pattern(
     needed_slots = sum(1 for r in needed_roles if r not in ("title", "subtitle")) + max(n_items - 1, 0) * sum(1 for r in ("card_title", "card_body", "number", "number_label") if r in needed_roles)
     extra = max(len(text_slots) - max(needed_slots, 1), 0)
     clutter = min(0.3, 0.03 * extra)
+    if slide.kind == PatternKind.thanks and extra >= 2:
+        # a closing slide's contact rows (name, mail, site) left empty stand as empty ruled rows under «Спасибо»
+        # (Классика: the layout draws the rules, they cannot leave) — the template's cover closes the deck better
+        clutter = min(0.3, 0.06 * extra)
     if clutter:
         reasons.append(f"{extra} лишних текстовых слотов останутся пустыми")
     if worst <= 1.0:
@@ -748,6 +789,13 @@ def score_pattern(
         kind *= 0.6
     elif worst > 1.3:
         kind *= 0.85
+    if slide.verbatim and worst >= 2.0 - 1e-6 and not bookend:
+        # the author's own text is cut by whole sentences only: twice the sample's room is no fit (Классика p11 took
+        # three stages in its two cells, the first stage's heading over its text) — another sample or a composed slide;
+        # neither is a sample with no place at all for a part of it (×2.0: the cards' headings of the Office
+        # template's two-column sample ran into one column, the other left empty)
+        cap = min(cap, 0.2)
+        reasons.append("текст автора вдвое больше места образца")
 
     # family continuity
     fam = 1.0
@@ -787,14 +835,18 @@ def score_pattern(
     # (every variant takes the template's designed slides first — its illustrations, its drawn forms — over plain
     # cards: a deck of the template's own slides, not the same white card eleven times; the variants differ by which
     # of them they take, `matcher.OTHER_VARIANT_PENALTY`)
+    # the variants look different: the visual one reaches for the template's art and its dark ground (a content
+    # slide on the brand colour), the compact one for plain samples that hold the most text, the structured one between
     if strategy.name == "visual":
-        style = 0.1 if has_art else (0.05 if n_decor >= 1 else 0.0)
+        style = 0.14 if has_art else (0.06 if n_decor >= 1 else 0.0)
+        if pattern.family == Family.dark and not bookend:
+            style += 0.06
     elif strategy.name == "compact":
-        style = 0.08 * min(len(text_slots) / 8.0, 1.0) + (0.03 if has_art else 0.0)
+        style = 0.08 * min(len(text_slots) / 8.0, 1.0) - (0.04 if has_art and not bookend else 0.0)
     else:
-        style = 0.06 if has_art else (0.03 if n_decor >= 1 else 0.0)
+        style = 0.05 if has_art else (0.03 if n_decor >= 1 else 0.0)
     if style:
-        reasons.append(f"стиль стратегии {strategy.name}: +{style:.2f}")
+        reasons.append(f"стиль стратегии {strategy.name}: {style:+.2f}")
     if slide.kind in _STANDALONE_KINDS and slide.kind != PatternKind.quote:
         # a cover: the heading is the design — the bigger it is set (relative to the template's own scale) and the
         # fewer content boxes stand around it, the more the sample is a cover rather than a content page
@@ -827,6 +879,11 @@ def score_pattern(
             # keeps its place against a divider sample borrowed as a cover (MyBrand: a longer title that needs a
             # smaller size on the real cover must not hand the cover to a section slide)
             pen = 0.3 if pattern.mockup_on_layout else 0.03
+            if slide.kind == PatternKind.thanks and max((b.w * b.h for b in pattern.mockup_boxes), default=0.0) >= 0.15:
+                # a closing slide whose sample's frame takes a sixth of the slide and more: taken off, it leaves that
+                # much of the slide blank beside «Спасибо» (Marketing's contact slide without its map) — the
+                # template's other bookends close the deck better
+                pen = max(pen, 0.15)
             style -= pen
             reasons.append(f"макет устройства или пустая рамка под фото останутся пустыми: −{pen:.2f}")
         photos = [x for x in pattern.slots if x.role == SlotRole.image and x.bbox.area >= 0.015]
@@ -859,6 +916,9 @@ def score_pattern(
         # losing a fact is worse than any synthesized stat row: such a pattern may stay an alternative but never wins over synth
         score = max(0.0, strategy.synth_threshold - 0.05)
         reasons.append(f"балл опущен ниже порога синтеза {strategy.synth_threshold:.2f}, чтобы не терять числа")
+    elif fit.get("steps_in_cards") and score >= strategy.synth_threshold:
+        score = max(0.0, strategy.synth_threshold - 0.05)
+        reasons.append("шаги из пары слов в карточках для абзацев выглядят пустыми: образец остаётся только запасным")
     elif cap <= 0.25 and not bookend and score >= strategy.synth_threshold:
         # the sample's cells cannot take this many items (a tile drawn with its numeral «04» left empty, a grid with a
         # whole row gone, one thought on a row of cards): a slide composed by the design system reads better

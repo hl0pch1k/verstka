@@ -91,13 +91,19 @@ def test_the_photo_place_is_a_quiet_neutral_that_reads_on_its_ground(ground, car
 
 
 def _boxes(slide, W: int, H: int):
-    place, texts = None, []
+    place, texts, captions = None, [], []
     for sh in slide.shapes:
         box = (sh.left / W, sh.top / H, (sh.left + sh.width) / W, (sh.top + sh.height) / H)
         if sh.name == PHOTO_PLACE_NAME:
             place = box
+        elif sh.name.startswith("Photo caption"):
+            captions.append((sh.text_frame.text, box))  # the place's own quiet line («Место под изображение»)
         elif sh.has_text_frame and sh.text_frame.text.strip():
             texts.append((sh.text_frame.text, box))
+    if place is not None:
+        # the caption stands inside its place, never outside it
+        assert all(not _apart(place, b) and b[0] >= place[0] - 0.005 and b[2] <= place[2] + 0.005 for _, b in captions)
+        assert all(t.startswith("Место под изображение") for t, _ in captions)
     return place, texts
 
 
