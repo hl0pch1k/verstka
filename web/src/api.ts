@@ -65,6 +65,8 @@ export const api = {
   createGeneration: (req: GenerateRequest) => request<GenerateResponse>("/api/generations", json(req)),
   deleteGeneration: (gid: string) => request<{ deleted: boolean }>(`/api/generations/${encodeURIComponent(gid)}`, { method: "DELETE" }),
   deleteTemplate: (id: string) => request<{ deleted: boolean }>(`/api/templates/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  /** The slide previews a variant has so far («slide-001.jpg»…): the build asks for these while the export renders them. */
+  slideList: (gid: string, strategy: string) => request<{ slides: string[] }>(`/api/generations/${encodeURIComponent(gid)}/${encodeURIComponent(strategy)}/slides`),
   /** An empty title brings back the file's name. */
   renameTemplate: (id: string, title: string) => request<TemplateListItem>(`/api/templates/${encodeURIComponent(id)}`, json({ title }, "PATCH")),
   explain: (gid: string, strategy: string, index: number) =>

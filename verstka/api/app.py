@@ -657,6 +657,14 @@ def writer_text_file(gid: str):
     return _serve_file(gdir, "writer.md", media_type="text/markdown; charset=utf-8", filename="text.md")
 
 
+@app.get("/api/generations/{gid}/{strategy}/slides")
+def slide_list(gid: str, strategy: str) -> dict:
+    """The slide previews a variant has so far, by name: the build screen asks for these while the export renders them
+    (an image that is not there yet would be a failed request on the page)."""
+    d = _variant_dir(gid, strategy) / "slides"
+    return {"slides": sorted(p.name for p in d.glob("slide-*.jpg")) if d.is_dir() else []}
+
+
 @app.get("/api/generations/{gid}/{strategy}/slides/{name}")
 def slide_image(gid: str, strategy: str, name: str):
     vdir = _variant_dir(gid, strategy)

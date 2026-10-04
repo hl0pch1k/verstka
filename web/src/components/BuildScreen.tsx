@@ -10,6 +10,7 @@
 // the deck's and the agent's column turns into the deck's aside.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Check, Clock3, Loader2 } from "lucide-react";
+import { api } from "../api";
 import { buildTimeline, laterPhase, phaseOfStep, type PhaseKey } from "../lib/agent";
 import type { VariantProgress } from "../lib/jobText";
 import { MOTION } from "../lib/motion";
@@ -74,9 +75,9 @@ function useEntrance(): { quiet: boolean; title: boolean; names: boolean } {
 
 const slideUrl = (gid: string, variant: string, n: number) => `/api/generations/${encodeURIComponent(gid)}/${encodeURIComponent(variant)}/slides/slide-${String(n).padStart(3, "0")}.jpg`;
 
-/** The variant's rendered previews, once the build has rendered them (the export, from 86 %): the first slide is probed
- *  every 3 s until it loads (a miss or two while LibreOffice works is expected), then the rest are fetched; a slide that
- *  is not there yet is tried again with the next probe. */
+/** The variant's rendered previews, once the build has rendered them (the export, from 86 %): the server's list of the
+ *  previews written so far is asked for every 1.5 s, and only the listed images are loaded — never a request for an
+ *  image that is not there yet; a listed one that fails to load is tried again with the next round. */
 function useSlidePreviews(gid: string | null | undefined, variant: string, count: number, enabled: boolean): Record<number, string> {
   const [found, setFound] = useState<Record<string, string>>({});
   const foundRef = useRef(found);
@@ -85,23 +86,30 @@ function useSlidePreviews(gid: string | null | undefined, variant: string, count
     if (!gid || !enabled || count <= 0) return;
     let alive = true;
     let timer = 0;
-    const load = (n: number) =>
-      new Promise<boolean>((resolve) => {
+    const load = (name: string) =>
+      new Promise<void>((resolve) => {
+        const n = Number(name.match(/(\d+)/)?.[1] ?? NaN);
         const key = `${variant}/${n}`;
-        if (foundRef.current[key]) return resolve(true);
+        if (!Number.isFinite(n) || foundRef.current[key]) return resolve();
         const url = slideUrl(gid, variant, n);
         const img = new Image();
         img.onload = () => {
           if (alive) setFound((m) => (m[key] ? m : { ...m, [key]: url }));
-          resolve(true);
+          resolve();
         };
-        img.onerror = () => resolve(false);
+        img.onerror = () => resolve();
         img.src = url;
       });
     const round = async () => {
-      if (!(await load(1)) || !alive) return void (timer = window.setTimeout(round, 3000));
-      const got = await Promise.all(Array.from({ length: count - 1 }, (_, i) => load(i + 2)));
-      if (alive && got.some((ok) => !ok)) timer = window.setTimeout(round, 3000);
+      let names: string[] = [];
+      try {
+        names = (await api.slideList(gid, variant)).slides;
+      } catch {
+        /* the server is busy with the export: the next round asks again */
+      }
+      if (!alive) return;
+      await Promise.all(names.map(load));
+      if (alive && Object.keys(foundRef.current).filter((k) => k.startsWith(`${variant}/`)).length < count) timer = window.setTimeout(round, 1500);
     };
     void round();
     return () => {
