@@ -666,3 +666,37 @@ def test_vk_templates_render_demo_outline_without_lost_content(tmp_path):
                     assert sh.width >= 0.35 * W_ and sh.left >= 0, f"{name}: table squeezed to {sh.width / W_:.2f}"
                 if sh.has_text_frame and "Вставить" in sh.text_frame.text:
                     raise AssertionError(f"{name}: placeholder text survived")
+
+
+def test_a_card_title_holding_a_figure_keeps_it_inside_its_box(tmp_path):
+    """A stat item written into a card's title box sets its figure over its label there («10,3 млрд» at 15 pt over a
+    9 pt label in a 29 pt box). Bringing the titles up to the card text's size (`_keep_title_above_body`) measures the
+    figure at its own size: the label stays at 9 pt rather than 12 pt under a figure that keeps 15 pt — the writer's
+    «История VK» showed that text 1.1× its frame."""
+    from verstka.rendering.clone import _SlideCtx, _keep_title_above_body
+    from verstka.rendering.fonts import wrap_lines
+
+    prs, blank = _new_prs()
+    s = prs.slides.add_slide(blank)
+    t = _tb(s, 0.05, 0.60, 0.30, 29 * 12700 / H, "10,3 млрд\nМиллиардов записей", size=9)
+    fig = t.text_frame.paragraphs[0].runs[0]
+    fig.font.size, fig.font.bold = Pt(15), True
+    b = _tb(s, 0.40, 0.60, 0.30, 0.15, "Миллиардов сообщений в день", size=14)
+    pptx = tmp_path / "card.pptx"
+    prs.save(pptx)
+    ts, bs = _slot(t, SlotRole.card_title, size=9), _slot(b, SlotRole.card_body, size=9)
+    pattern = _pattern("p1", 1, PatternKind.cards, [ts, bs])
+    builder = DeckBuilder(pptx)
+    slide = builder.clone_slide(1)
+    ctx = _SlideCtx(builder, slide, pattern, _manifest([pattern]), TemplateWorkspace.create(pptx, tmp_path / "ws"), DeckOutline(title="T", slides=[]))
+    te, be = ctx.els[ts.shape_id], ctx.els[bs.shape_id]
+    _keep_title_above_body(ctx, [(te, ts)], [(be, bs)])
+    width_pt = element_bbox(te)[2] / 12700
+    need = 0.0
+    for p in _paras(te):
+        text = "".join(x.text or "" for x in p.iter(q("a:t")))
+        size = max(int(r.get("sz")) / 100 for r in p.iter(q("a:rPr")) if r.get("sz"))
+        bold = any(r.get("b") == "1" for r in p.iter(q("a:rPr")))
+        need += len(wrap_lines(text, "Play", size, bold, width_pt)) * size * ctx.line_height_of(te)
+    # every line at its size and line height, as the audit reads it: no more than 1.08× the frame (`text_overflow`)
+    assert need <= 1.08 * element_bbox(te)[3] / 12700, (need, [r.get("sz") for r in te.iter(q("a:rPr"))])

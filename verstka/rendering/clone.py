@@ -1460,6 +1460,30 @@ def _running_size(e: etree._Element) -> Optional[float]:
     return chars.most_common(1)[0][0] if chars else None
 
 
+def _running_room(ctx: _SlideCtx, e: etree._Element, family: Optional[str], box: Bbox) -> tuple[list[str], Bbox]:
+    """The paragraphs of a box set at its running size and the room they have: a paragraph set larger (a figure over
+    its label in one box) keeps its size when the text is set again (`_scale_text`), so its lines come off the box's
+    height before the rest is fitted. A box without one: its paragraphs and the box itself."""
+    run = _running_size(e)
+    tx = e.find(q("p:txBody"))
+    paras = tx.findall(q("a:p")) if tx is not None else []
+    ins = _body_insets(e)
+    width_pt = max((box.w - ins[0] - ins[2]) / EMU_PER_PT * 0.985, 1.0)  # (as `fit_size` measures a line)
+    rest: list[str] = []
+    taken = 0.0
+    for p in paras:
+        text = "".join(t.text or "" for t in p.iter(q("a:t")))
+        sizes = [int(r.get("sz")) / 100 for r in p.iter(q("a:rPr")) if r.get("sz")]
+        if run and sizes and max(sizes) > run + 0.05 and text.strip():
+            bold = any(r.get("b") == "1" for r in p.iter(q("a:rPr")))
+            taken += max(len(wrap_lines(text, family, max(sizes), bold, width_pt)), 1) * max(sizes) * ctx.line_height_of(e)
+        else:
+            rest.append(text)
+    if not taken or not any(t.strip() for t in rest):
+        return shape_text(e).split("\n"), box
+    return rest, Bbox(x=box.x, y=box.y, w=box.w, h=max(box.h - int(taken * EMU_PER_PT), 1))
+
+
 def _keep_title_above_body(ctx: _SlideCtx, titles: list[tuple[etree._Element, Optional[Slot]]], bodies: list[tuple[etree._Element, Optional[Slot]]]) -> None:
     """Card text that grew into its card must not outgrow the card's heading («Неделя 1» at 11 pt over a 16 pt
     text): the headings follow at the template's own ratio of heading to text, as far as their boxes allow."""
@@ -1483,8 +1507,8 @@ def _keep_title_above_body(ctx: _SlideCtx, titles: list[tuple[etree._Element, Op
             return
         style = slot.style if slot is not None else None
         family = style.font_family if style and style.font_family else ctx.typo.primary_family
-        texts = shape_text(e).split("\n")
-        res = fit_size(texts, Bbox(x=box[0], y=box[1], w=box[2], h=box[3]), family, want, bool(style and style.bold), ctx.grow_scale, insets_emu=_body_insets(e), line_spacing=ctx.line_height_of(e), min_ratio=t / want)
+        texts, room = _running_room(ctx, e, family, Bbox(x=box[0], y=box[1], w=box[2], h=box[3]))
+        res = fit_size(texts, room, family, want, bool(style and style.bold), ctx.grow_scale, insets_emu=_body_insets(e), line_spacing=ctx.line_height_of(e), min_ratio=t / want)
         fitted.append(res.size_pt if res.fits else t)
     common = min(fitted)
     if common > t:
@@ -1730,12 +1754,13 @@ def _harmonize(ctx: _SlideCtx, pairs: list[tuple[etree._Element, Optional[Slot]]
             base = _readable_size(ctx, base, sum(len(t) for t in texts))
         family = style.font_family if style and style.font_family else ctx.typo.primary_family
         bold = bool(style and style.bold)
-        box = Bbox(x=b[0], y=b[1], w=b[2], h=b[3])
+        # (a figure set over its label keeps its size: the label is fitted in the room under it)
+        running, room = _running_room(ctx, e, family, Bbox(x=b[0], y=b[1], w=b[2], h=b[3]))
         ins = _body_insets(e)
-        res = fit_size(texts, box, family, base, bold, ctx.grow_scale, insets_emu=ins, line_spacing=ctx.line_height_of(e), min_ratio=min_ratio)
+        res = fit_size(running, room, family, base, bold, ctx.grow_scale, insets_emu=ins, line_spacing=ctx.line_height_of(e), min_ratio=min_ratio)
         size = res.size_pt
         if cap is not None and res.fits:
-            size = grow_size(texts, box, family, size, bold, ctx.grow_scale, cap, insets_emu=ins, line_spacing=ctx.line_height_of(e))
+            size = grow_size(running, room, family, size, bold, ctx.grow_scale, cap, insets_emu=ins, line_spacing=ctx.line_height_of(e))
         sizes.append(size)
     if sizes:
         common = min(sizes)
