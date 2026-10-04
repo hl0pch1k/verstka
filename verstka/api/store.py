@@ -33,6 +33,19 @@ def _card_of(tdir: Path, m: dict) -> dict:
     }
 
 
+TITLE_FILE = "title.txt"
+TITLE_MAX = 80
+
+
+def _title_of(tdir: Path) -> Optional[str]:
+    """The name a person gave the template in the UI (`title.txt` beside the manifest), if any."""
+    try:
+        t = (tdir / TITLE_FILE).read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return t or None
+
+
 def _write_json_atomic(path: Path, data: dict) -> None:
     """Readers (the UI polls generation.json while the job thread rewrites it) see the old file or the new one,
     never a truncated one: write aside, then rename over."""
@@ -82,11 +95,30 @@ class Store:
             if mp.exists():
                 try:
                     m = json.loads(mp.read_text(encoding="utf-8"))
-                    out.append({"template_id": m["template_id"], "source_file": m.get("source_file"), "n_slides": m.get("n_slides"), "n_patterns": len(m.get("patterns", [])), "analyzed_at": mp.stat().st_mtime, **_card_of(d, m)})
+                    out.append({"template_id": m["template_id"], "source_file": m.get("source_file"), "title": _title_of(d), "n_slides": m.get("n_slides"), "n_patterns": len(m.get("patterns", [])), "analyzed_at": mp.stat().st_mtime, **_card_of(d, m)})
                 except Exception:  # noqa: BLE001
                     continue
         out.sort(key=lambda t: -t["analyzed_at"])
         return out
+
+    def template_title(self, template_id: str) -> Optional[str]:
+        d = _safe(self.root / "templates", template_id)
+        return _title_of(d) if d is not None else None
+
+    def set_template_title(self, template_id: str, title: str) -> Optional[dict]:
+        """Rename a template for people: `title.txt` beside the manifest, the file and its analysis stay as they are (the
+        manifest's time orders the list, so it is not touched). Spaces are collapsed, the name is cut at TITLE_MAX; an
+        empty one brings back the file's name. The template's list entry, or None when there is no such template."""
+        d = _safe(self.root / "templates", template_id)
+        if d is None or not (d / "manifest.json").exists():
+            return None
+        clean = " ".join(str(title).split())[:TITLE_MAX].strip()
+        path = d / TITLE_FILE
+        if clean:
+            path.write_text(clean + "\n", encoding="utf-8")
+        else:
+            path.unlink(missing_ok=True)
+        return next((t for t in self.list_templates() if t["template_id"] == template_id), None)
 
     def manifest(self, template_id: str) -> Optional[TemplateManifest]:
         try:

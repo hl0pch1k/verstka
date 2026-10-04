@@ -29,7 +29,7 @@ from verstka.providers.registry import ProviderRegistry
 from verstka.rendering.renderer import RenderResult, render_deck
 from verstka.schemas.audit import AuditReport, Issue
 from verstka.schemas.layout import LayoutPlan
-from verstka.schemas.outline import Brief, DeckOutline, FactsExtraction
+from verstka.schemas.outline import Brief, DeckOutline, FactsExtraction, OutlineSlide
 from verstka.schemas.template import TemplateManifest
 from verstka.skills_registry.registry import SkillsRegistry
 
@@ -178,6 +178,10 @@ def _event_sink(progress: Optional[ProgressFn]) -> Callable[[dict], None]:
         if step == "designer":
             state["designed"] += 1
             share = min(0.32, 0.2 + 0.01 * state["designed"])
+        if "share" in ev:
+            # a line said after the plan (the pipeline's own planner, _say_designs) keeps the bar where the plan left it
+            ev = dict(ev)
+            share = float(ev.pop("share"))
         try:
             if takes_event:
                 progress(ev["message"], share, event=ev)
@@ -187,6 +191,33 @@ def _event_sink(progress: Optional[ProgressFn]) -> Callable[[dict], None]:
             log.debug("progress listener failed on an agent event", exc_info=True)
 
     return sink
+
+
+def _design_line(pos: int, s: OutlineSlide, by: str) -> str:
+    """The designer's line for a slide of a plan the pipeline made itself — what the agent says of the slides it plans
+    (planning/agent.py design_all): the build's storyboard draws each slide from it, the agent's timeline lists it."""
+    from verstka.planning.agent import form_ru
+
+    k = s.kind.value
+    if k == "title":
+        return f"Дизайнер: слайд {pos} — обложка «{s.headline}»."
+    if k == "thanks":
+        return f"Дизайнер: слайд {pos} — финальный слайд «{s.headline}»."
+    how = "" if by in MODEL_PLANNED or by.startswith("shared:") else " собран по правилам"
+    return f"Дизайнер: слайд {pos} «{s.headline}»{how} — {form_ru(s)}."
+
+
+def _say_designs(progress: Optional[ProgressFn], outlines: dict[str, DeckOutline], share: float) -> None:
+    """Every slide of the variants planned here (the agent did not plan them: no model, no time, a failed agent), one
+    designer line each, as the agent says them — so the build shows the deck taking shape without a model too. At the
+    plan's own share of the bar: the layout starts from there."""
+    from verstka.planning.agent import event_message
+
+    sink = _event_sink(progress)
+    for name, o in outlines.items():
+        for pos, s in enumerate(o.slides, 1):
+            # the event does not name its step and slide (the timeline shows it under its step, with the slide's badge)
+            sink({"type": "agent", "step": "designer", "message": event_message(_design_line(pos, s, o.planned_by), pos), "slide": pos, "variant": name, "share": share})
 
 
 def render_outputs(vdir: Path, manifest: TemplateManifest, title: Optional[str], exports: list[str], *, images: bool = True, dpi: int = 110) -> tuple[dict[str, Path], list[Path], list[str], Optional[bool]]:
@@ -431,6 +462,7 @@ def generate_variants(
                 adapted = adapt_outline(planned[donor][0], st, manifest, target_slide_count(brief, st), hard_limit=bool(brief.slide_count), brief=brief, warnings=aw)
                 planned[name] = (adapted, w + [f"own model plan failed: the model plan of «{donor}» adapted to «{name}»"] + aw, sec)
                 plan_models[name] = plan_models.get(donor)
+        _say_designs(progress, {name: planned[name][0] for name in todo}, plan_end)
     pending: list[dict] = []
     # the variants differ in the template slides they show too: each one knows which samples the earlier ones took
     # for the same slide (matching/matcher.py `taken`)

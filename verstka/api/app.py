@@ -502,6 +502,20 @@ def delete_template(template_id: str) -> dict:
     return {"deleted": True}
 
 
+class TemplateRename(BaseModel):
+    title: str = ""
+
+
+@app.patch("/api/templates/{template_id}")
+def rename_template(template_id: str, body: TemplateRename) -> dict:
+    """Rename a template for people (the pencil next to its name in the template's preview): the cards, the build and
+    the deck show the new name; the file and its analysis stay as they are. An empty name brings back the file's."""
+    item = store.set_template_title(template_id, body.title)
+    if item is None:
+        raise HTTPException(404, "Шаблон не найден")
+    return item
+
+
 @app.get("/api/templates/{template_id}")
 def get_template(template_id: str) -> dict:
     m = store.manifest(template_id)
@@ -512,6 +526,7 @@ def get_template(template_id: str) -> dict:
         if p.get("thumbnail"):
             p["thumbnail_url"] = f"/api/templates/{template_id}/files/{p['thumbnail']}"
     data["gallery_url"] = f"/api/templates/{template_id}/files/gallery.html"
+    data["title"] = store.template_title(template_id)
     data["narration"] = describe_template(m)
     return data
 
