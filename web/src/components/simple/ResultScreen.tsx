@@ -686,7 +686,9 @@ function Deck({ generation }: { generation: Generation }) {
       const kids = ([...el.children] as HTMLElement[]).filter((k) => k.offsetHeight > 0 || k.hasAttribute("data-why"));
       const used = kids.filter((k) => !k.hasAttribute("data-why")).reduce((sum, k) => sum + k.offsetHeight, 0) + 12 * (kids.length - 1);
       const free = room.clientHeight - used - 68; // the why card without its text: p-4 twice, the 24px title, mt-3
-      setWhyLines(Math.max(1, Math.min(12, Math.floor(free / 20))));
+      // no room for a single line (1280×720): the card stays as its title, a link to the whole story — the column
+      // never scrolls
+      setWhyLines(Math.max(0, Math.min(12, Math.floor(free / 20))));
     };
     run();
     const ro = new ResizeObserver(run);
@@ -782,9 +784,11 @@ function Deck({ generation }: { generation: Generation }) {
             <CardChevron />
           </span>
           {/* the reasoning cross-fades per slide and variant; the card itself stays */}
-          <span key={`${variant.strategy}/${selectedSlide}/${rev}`} className="mt-3 line-clamp-4 animate-fade text-footnote text-zinc-700 [text-wrap:pretty]" style={{ WebkitLineClamp: whyLines }} title={why}>
-            {why}
-          </span>
+          {whyLines > 0 && (
+            <span key={`${variant.strategy}/${selectedSlide}/${rev}`} className="mt-3 line-clamp-4 animate-fade text-footnote text-zinc-700 [text-wrap:pretty]" style={{ WebkitLineClamp: whyLines }} title={why}>
+              {why}
+            </span>
+          )}
         </button>
       )}
       <div ref={live ? linksBox : undefined} className="grid shrink-0 grid-cols-3 gap-2">
