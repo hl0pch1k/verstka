@@ -457,6 +457,17 @@ def detect_repeat_groups(
         if any(a.bbox.intersection(b.bbox) > 0 for i, a in enumerate(cl) for b in cl[i + 1:]):
             continue
         heads = cl
+        # a heading and its text set at one size and told apart by colour (VK Tech p23: a black «Заголовок» over a grey
+        # «Текст» in each panel) are one cell, not two rows of cells — when every such pair of the cluster repeats it:
+        # a column of lines with one of them in the accent stays a column
+        pairs = [(h, t) for h in cl for t in cl if t is not h and below(h, t, 0.05)]
+        ups, downs = {h.id for h, _ in pairs}, {t.id for _, t in pairs}
+        up_colors = {h.text.dominant_color for h, _ in pairs}
+        down_colors = {t.text.dominant_color for _, t in pairs}
+        if len(pairs) >= 2 and not ups & downs and len(up_colors) == 1 and len(down_colors) == 1 and up_colors != down_colors:
+            heads = [h for h in cl if h.id not in downs]
+            if len(heads) < 2:
+                continue
         head_ids = {h.id for h in heads}
         owner: dict[str, ShapeInfo] = {}
         pool = [t for t in texts if t.id not in head_ids]

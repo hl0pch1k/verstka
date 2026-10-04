@@ -11,8 +11,8 @@ from verstka.schemas.template import TypeStep, Typography
 W, H = 12192000, 6858000
 
 
-def _t(sid, text, size, x, y, w, h, bold=False):
-    ti = TextInfo(paragraphs=[ParagraphInfo(text=text, runs=[RunInfo(text=text, font="Play", size_pt=size, bold=bold, color_hex="000000")])])
+def _t(sid, text, size, x, y, w, h, bold=False, color="000000"):
+    ti = TextInfo(paragraphs=[ParagraphInfo(text=text, runs=[RunInfo(text=text, font="Play", size_pt=size, bold=bold, color_hex=color)])])
     return ShapeInfo(id=sid, name=sid, kind=ShapeKind.sp, bbox=Bbox(x=int(x * W), y=int(y * H), w=int(w * W), h=int(h * H)), z=0, text=ti)
 
 
@@ -68,3 +68,25 @@ def test_stat_row_and_numbers():
 def test_numeric_regex():
     assert is_numeric_text("91%") and is_numeric_text("1 200 млн") and is_numeric_text(">50*".replace("*", ""))
     assert not is_numeric_text("Выручка") and not is_numeric_text("2 шага к успеху")
+
+
+def test_a_heading_over_its_text_told_apart_by_colour_is_one_cell():
+    """VK Tech p23: each of two panels writes a black «Заголовок» over a grey «Текст» at one size — two cells of a
+    heading and its text, not a row of four single-line cells (the stat row of the writer's «История VK» landed as a
+    figure in one panel's text and the next figure moved halfway into the other panel)."""
+    shapes = [_t("t0", "Заголовок", 24, 0.02, 0.06, 0.74, 0.14)]
+    for k, x in enumerate((0.050, 0.528)):
+        shapes.append(_t(f"h{k}", "Заголовок", 9, x, 0.654, 0.177, 0.029))
+        shapes.append(_t(f"b{k}", "Текст", 9, x, 0.687, 0.177, 0.039, color="8F8F8F"))
+    groups = [g for g in detect_repeat_groups(shapes, W, H) if any("h0" in c for c in g.member_shape_ids)]
+    assert len(groups) == 1, [(g.axis, g.member_shape_ids) for g in detect_repeat_groups(shapes, W, H)]
+    assert groups[0].axis == "row" and sorted(map(sorted, groups[0].member_shape_ids)) == [["b0", "h0"], ["b1", "h1"]]
+
+
+def test_a_column_of_lines_stays_a_column_of_cells():
+    """The rule above needs every pair of the cluster to repeat it: a column of one-line items (one of them painted in
+    the accent) keeps a cell per line."""
+    for accent in (None, 1):
+        shapes = [_t(f"i{k}", f"Пункт {k + 1}", 14, 0.1, 0.30 + k * 0.07, 0.4, 0.05, color="0077FF" if k == accent else "000000") for k in range(4)]
+        groups = detect_repeat_groups(shapes, W, H)
+        assert len(groups) == 1 and groups[0].axis == "column" and len(groups[0].member_shape_ids) == 4, (accent, [(g.axis, g.member_shape_ids) for g in groups])
