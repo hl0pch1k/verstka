@@ -337,6 +337,31 @@ def test_a_cloned_chart_that_fails_is_rolled_back_to_a_composed_slide(env, tmp_p
     assert any("Время сократилось на 18 минут" in t for t in _texts(prs.slides[0]))
 
 
+def test_a_slide_no_sample_holds_is_composed_not_failed(env, tmp_path, monkeypatch):
+    """Every sample tried reads badly on the slide (`clone_check.content_trouble`): the slide is composed by design —
+    the warning names the samples and why, never «failed», the word kept for a renderer that broke (the integration
+    contract reads it). The same for a cloned cover that reads badly."""
+    from verstka.rendering import clone_check
+    from verstka.rendering import renderer as renderer_mod
+
+    manifest, ws = env
+    pattern = next(p for p in manifest.patterns if p.kind not in (K.title, K.section, K.thanks))
+    cover = next(p for p in manifest.patterns if p.kind == K.title)
+    s = OutlineSlide(id="b", kind=K.bullets, headline="Итоги пилота", content=SlideContent(bullets=["Время сократилось на 18 минут", "NPS вырос до 64"]))
+    title = OutlineSlide(id="t", kind=K.title, headline="Итоги пилота «Умные сводки»")
+    monkeypatch.setattr(clone_check, "content_trouble", lambda *a, **k: "a hole of 30% of the slide where the sample had 5% free")
+    monkeypatch.setattr(renderer_mod, "_bookend_trouble", lambda slide, oslide: "lays two of its texts over each other")
+    outline = _deck(title, s)
+    plan = LayoutPlan(strategy="structured", template_id=manifest.template_id, slides=[LayoutSlide(outline_id="t", mode="clone", pattern_id=cover.id), LayoutSlide(outline_id="b", mode="clone", pattern_id=pattern.id, score=0.9)])
+    res = render_deck(outline, plan, manifest, ws, tmp_path / "deck.pptx")
+    assert [r.mode for r in res.slides] == ["synth", "synth"] and ("b", pattern.id) in res.failed_samples
+    assert not any("failed" in w for w in res.warnings), res.warnings
+    assert any(pattern.id in w and "a hole of 30%" in w for w in res.slides[1].warnings), res.warnings
+    assert any("lays two of its texts over each other" in w for w in res.slides[0].warnings), res.warnings
+    assert plan.for_outline("b").mode == "synth" and "не вместили" in plan.for_outline("b").reasons[0]
+    assert any("Время сократилось на 18 минут" in t for t in _texts(Presentation(str(res.pptx_path)).slides[1]))
+
+
 def test_add_chart_still_refuses_a_chart_without_data():
     # the renderer guards against it; the chart module itself stays strict
     s = _chart_slide(["f1"])

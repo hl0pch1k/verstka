@@ -270,13 +270,17 @@ def _render_deck(outline: DeckOutline, plan: LayoutPlan, manifest: TemplateManif
                 _, warns = render_synth(builder, ps, oslide, manifest, ws, outline)
             rendered.warnings.extend(warns)
         except Exception as e:  # noqa: BLE001
+            # (a sample that reads badly is the gate's verdict and the slide is composed by design: «failed» is kept
+            # for a renderer that broke — the warnings the integration contract reads)
             if isinstance(e, _CoverRedo):
                 log.info("slide %d (%s): the cloned cover %s — composed instead", i, oslide.id, e)
+                rendered.warnings.append(f"the cloned cover {str(e)[:160]} — composed")
             elif isinstance(e, _CloneRedo):
                 log.info("slide %d (%s): no template sample holds it (%s) — composed", i, oslide.id, e)
+                rendered.warnings.append(f"no template sample holds it: {str(e)[:160]} — composed")
             else:
                 log.exception("slide %d (%s) failed in mode %s", i, oslide.id, ps.mode)
-            rendered.warnings.append(f"{ps.mode} failed: {str(e)[:160]}; fell back to synth")
+                rendered.warnings.append(f"{ps.mode} failed: {str(e)[:160]}; fell back to synth")
             # a half-filled clone must not stay in the deck next to its synth replacement
             _rollback(builder, before)
             try:
