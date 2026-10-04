@@ -3,11 +3,12 @@ import { Loader2 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { renderIcon, type IconProp } from "./icon";
 
-// VK button family: brand (the gradient call to action — one per screen: «Создать», «Скачать PowerPoint»), primary
-// (filled blue), tonal (light blue), secondary (neutral grey), white (on the canvas or a tinted notice), ghost (text) and
-// danger (the confirming button of a delete dialog). Sizes 32 / 40 / 48. Callers pass layout classes only; another look
-// is another variant, never a className override. Focus uses the global 2px outline.
-export type ButtonVariant = "brand" | "primary" | "tonal" | "secondary" | "white" | "ghost" | "danger";
+// VK button family (VKUI modes): primary (filled VK blue — the one call to action per screen), tonal (VK's «secondary»:
+// light blue), secondary (neutral grey), white (on the page or a tinted notice), ghost (VK's «tertiary»: text), danger
+// (the confirming button of a delete dialog) and danger-ghost (a quiet «Удалить» that leads to that dialog). Sizes 32 /
+// 40 / 48. Callers pass layout classes only; another look is another variant, never a className override. Focus uses
+// the global 2px outline.
+export type ButtonVariant = "primary" | "tonal" | "secondary" | "white" | "ghost" | "danger" | "danger-ghost";
 export type ButtonSize = "sm" | "md" | "lg";
 export type ButtonShape = "rect" | "circle" | "pill";
 
@@ -35,10 +36,6 @@ const BASE =
   "tap inline-flex shrink-0 cursor-pointer select-none items-center justify-center gap-2 whitespace-nowrap font-semibold disabled:pointer-events-none disabled:[&:not([aria-busy=true])]:opacity-40 aria-disabled:pointer-events-none aria-disabled:opacity-40";
 
 const VARIANTS: Record<ButtonVariant, string> = {
-  // the gradient stays put; hover lightens it through a white veil under the label (a gradient cannot transition) and
-  // lifts its glow, a press darkens the veil
-  brand:
-    "relative isolate bg-brand text-white shadow-brand hover:shadow-brand-hover before:absolute before:inset-0 before:-z-10 before:rounded-[inherit] before:bg-white/0 before:transition-colors before:duration-150 before:content-[''] hover:before:bg-white/[0.12] active:before:bg-zinc-950/[0.08]",
   primary: "bg-accent-fill text-white hover:bg-accent-600 active:bg-accent-700",
   // pressed (a toggle that is on): a deeper tint and darker text only — a blue ring would read as keyboard focus
   tonal: "bg-accent-50 text-accent-700 hover:bg-accent-100 active:bg-accent-200 aria-pressed:bg-accent-100 aria-pressed:text-accent-800 aria-pressed:hover:bg-accent-200",
@@ -47,6 +44,7 @@ const VARIANTS: Record<ButtonVariant, string> = {
   ghost: "text-zinc-700 hover:bg-zinc-900/[0.06] hover:text-zinc-900 active:bg-zinc-900/10 aria-expanded:bg-zinc-900/[0.06] aria-expanded:text-zinc-900",
   // a destructive confirmation (delete): only inside a dialog that asked first
   danger: "bg-red-600 text-white hover:bg-red-700 active:bg-red-800",
+  "danger-ghost": "text-red-600 hover:bg-red-50 hover:text-red-700 active:bg-red-100",
 };
 
 // the corner radius is the shape's: a rect takes its size's radius, a circle or a pill is fully rounded (one radius

@@ -9,7 +9,7 @@ import type { LucideIcon } from "lucide-react";
 import { keepTogether, plainWords, variantsNote } from "../../lib/agent";
 import { deckNotice, skeletonDeck } from "../../lib/modelText";
 import { figuresLine } from "../../lib/narrate";
-import { fileSafe, templateTitle, variantHint } from "../../lib/plain";
+import { fileSafe, variantHint } from "../../lib/plain";
 import { decodeImage, EASE, MOTION, prefersReducedMotion, useCountUp, useFlip, usePresence, viewTransition } from "../../lib/motion";
 import { cn, fmtWhen, plural, storage } from "../../lib/utils";
 import { useApp } from "../../store";
@@ -266,7 +266,7 @@ const inViewTransition = () => {
 };
 
 function Deck({ generation }: { generation: Generation }) {
-  const { activeVariant, setActiveStrategy, selectedSlide, setSelectedSlide, strategyTitle, strategies, manifest, setScreen, detail, setDetail, health, modelStatus, refreshModelStatus, startGeneration, activeJob, generations, agentOpen } = useApp();
+  const { activeVariant, setActiveStrategy, selectedSlide, setSelectedSlide, strategyTitle, strategies, manifest, setScreen, detail, setDetail, health, modelStatus, refreshModelStatus, startGeneration, activeJob, generations, agentOpen, templateLabel } = useApp();
   const variant = activeVariant ?? generation.variants[0];
   const total = slidesOf(variant);
   const empty = total === 0;
@@ -332,7 +332,7 @@ function Deck({ generation }: { generation: Generation }) {
   const variantName = strategyTitle(variant.strategy);
   const variantIdx = generation.variants.findIndex((v) => v.strategy === variant.strategy) + 1;
   const fileBase = `${fileSafe(rawTitle)} — ${variantName}`;
-  const meta = [templateTitle(generation.template_file), fmtWhen(generation.created_at)].filter(Boolean).join(" · ");
+  const meta = [templateLabel(generation.template_id, generation.template_file), fmtWhen(generation.created_at)].filter(Boolean).join(" · ");
 
   // the drawer gives the focus back to the card that opened it: Tab goes on from the same place in the aside
   const opener = useRef<HTMLElement | null>(null);
@@ -834,7 +834,7 @@ function Deck({ generation }: { generation: Generation }) {
               <LinkButton variant="white" size="lg" icon={FileText} href={pdf} download={`${fileBase}.pdf`}>PDF</LinkButton>
             ))}
           {pptx && (
-            <LinkButton variant="brand" size="lg" icon={Download} href={pptx} download={`${fileBase}.pptx`} title={`Вариант ${variantIdx} · ${variantName}`}>
+            <LinkButton variant="primary" size="lg" icon={Download} href={pptx} download={`${fileBase}.pptx`} title={`Вариант ${variantIdx} · ${variantName}`}>
               Скачать PowerPoint
             </LinkButton>
           )}

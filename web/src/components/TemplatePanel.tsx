@@ -2,7 +2,7 @@
 // facts, the main font and the palette — then 6 of the layouts, up to 5 rules, and the folded «Шрифты и поля».
 import { FileWarning } from "lucide-react";
 import { fontStack, useTemplateFont } from "../lib/fonts";
-import { templateTitle } from "../lib/plain";
+import { tplLabel } from "../lib/plain";
 import { cn, plural } from "../lib/utils";
 import type { TemplateManifest } from "../types";
 import { PatternGallery } from "./TemplatePanelPatterns";
@@ -23,11 +23,11 @@ function Overview({ manifest }: { manifest: TemplateManifest }) {
     [String(manifest.n_slides), plural(manifest.n_slides, "слайд", "слайда", "слайдов").replace(/^\d+\s/, "")],
     [String(kinds), `${plural(kinds, "тип", "типа", "типов").replace(/^\d+\s/, "")} слайдов`],
   ];
-  const name = templateTitle(manifest.source_file, manifest.template_id);
+  const name = tplLabel(manifest);
 
   return (
     <section className="rounded-2xl bg-white p-6 shadow-card">
-      <h3 className="truncate text-title2 font-bold text-zinc-900" title={manifest.source_file}>{name}</h3>
+      <h3 className="truncate text-title2 font-semibold text-zinc-900" title={manifest.source_file}>{name}</h3>
       <dl className="mt-4 grid grid-cols-3 gap-3">
         {facts.map(([value, label]) => (
           <div key={label} className={cn(TILE, "flex flex-col-reverse")}>

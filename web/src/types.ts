@@ -106,6 +106,8 @@ export interface CheckSpec { id: string; title: string; severity: Severity; kind
 export interface TemplateListItem {
   template_id: string;
   source_file: string | null;
+  /** The name a person gave the template (PATCH /api/templates/{id}); null: the file's name stands. */
+  title?: string | null;
   n_slides: number | null;
   n_patterns: number;
   analyzed_at: number;
@@ -169,6 +171,7 @@ export interface StyleRule { text: string; source: string; confidence: number }
 export interface TemplateManifest {
   template_id: string;
   source_file: string;
+  title?: string | null;
   slide_size: { w: number; h: number };
   tokens: Tokens;
   patterns: Pattern[];

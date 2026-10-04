@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { AlertCircle, History, Layers, Loader2 } from "lucide-react";
 import { MOTION, usePresence } from "../lib/motion";
-import { templateTitle } from "../lib/plain";
+import { useApp } from "../store";
 import { cn, fmtDay, fmtTime, plural, scoreTone, TONE_TEXT } from "../lib/utils";
 import type { GenerationMeta } from "../types";
 import { Badge } from "./ui/Badge";
@@ -86,6 +86,7 @@ interface Props {
 }
 
 export function TopBarGenerations({ generations, currentId, onSelect }: Props) {
+  const { templateLabel } = useApp();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const busyRef = useRef<string | null>(null);
@@ -234,7 +235,7 @@ export function TopBarGenerations({ generations, currentId, onSelect }: Props) {
                       const running = g.status === "running" || g.status === "queued";
                       const failed = g.status === "failed";
                       const title = titleOf(g);
-                      const meta = [fmtTime(g.created_at), g.template_file ? templateTitle(g.template_file) : null, slidesText(g)].filter(Boolean).join(" · ");
+                      const meta = [fmtTime(g.created_at), g.template_file || g.template_id ? templateLabel(g.template_id, g.template_file) : null, slidesText(g)].filter(Boolean).join(" · ");
                       return (
                         <li key={g.id}>
                           <button

@@ -1,77 +1,31 @@
-// The first screen, a product page in one column: a badge, the big title with the brand gradient and one line on what
-// the agent does; the composer (the field, examples that type themselves into it while it is empty, the toolbar with
-// the template, a file, the sample, the slide count, «Настройки» and «Создать»); the line on the model; and the gallery
-// of templates below. Once «Создать» has scrolled away a bar floats at the bottom with the template, the count and the
-// same button. The draft survives reloads. Motion: the hero rises in a 40 ms cascade on first load, «Настройки» unfold
-// inside the composer, the floating bar rises in and fades out, and the whole page glides aside when the helper docks.
-import { useEffect, useRef, useState, type ChangeEvent, type FocusEvent, type FormEvent, type KeyboardEvent } from "react";
-import { AlertCircle, ArrowRight, ChevronDown, FileText, LayoutTemplate, Minus, Paperclip, PenLine, Plus, SlidersHorizontal, Sparkles } from "lucide-react";
-import { EASE, MOTION, prefersReducedMotion, smoothScroll, stagger, useFlip, usePresence } from "../../lib/motion";
+// The first screen: a new presentation in three steps, top to bottom — ① the template (the covers of the latest
+// templates, every template in a window), ② the text (a large field; under it what the text holds: «В тексте:
+// 6 слайдов, 14 чисел, 1 таблица»), ③ the parameters (folded into one line until opened: type, audience, variants,
+// models). A bar stays at the bottom of the window with the chosen template, the slide count and «Создать
+// презентацию», so the action is always in reach. The draft survives reloads. Motion only where something changes: a
+// step that is missing something shakes once when «Создать» is pressed, the parameters unfold, the step's number turns
+// into a check when the step is done.
+import { useEffect, useRef, useState, type ChangeEvent, type FocusEvent, type FormEvent, type HTMLAttributes, type ReactNode } from "react";
+import { AlertCircle, ArrowRight, Check, ChevronDown, FileText, LayoutTemplate, Minus, Paperclip, PenLine, Plus } from "lucide-react";
+import { MOTION, smoothScroll, useFlip, usePresence } from "../../lib/motion";
 import { modelIndicator } from "../../lib/modelText";
 import { errText } from "../../lib/narrate";
-import { templateTitle } from "../../lib/plain";
+import { tplLabel } from "../../lib/plain";
+import { factsLine, textFacts } from "../../lib/textFacts";
 import { cn, LS, plural, storage } from "../../lib/utils";
 import { writerModeOf } from "../../lib/writerMode";
 import { useApp } from "../../store";
 import type { TemplateListItem } from "../../types";
 import { BRIEF_MIN, BRIEF_MIN_TOPIC, INPUT_CLS, PURPOSES, SAMPLE_AUDIENCE, SAMPLE_BRIEF, SLIDES_DEFAULT, SLIDES_MAX, SLIDES_MIN, StrategyOption, Toggle } from "../NewGenerationFormParts";
 import { Button } from "../ui/Button";
-import { Chip } from "../ui/Chip";
-import { Composer } from "./Composer";
 import { ModelStatus } from "./ModelStatus";
-import { TemplatePicker, useTemplateDrop } from "./TemplatePicker";
-import { TypewriterHint } from "./Typewriter";
+import { TemplatePicker, TemplateUploadButton, useTemplateDrop } from "./TemplatePicker";
 
 const clampSlides = (n: number) => Math.min(SLIDES_MAX, Math.max(SLIDES_MIN, Number.isFinite(n) ? Math.round(n) : SLIDES_DEFAULT));
 const MAX_BRIEF_BYTES = 2 * 1024 * 1024;
 // the topic line only when the server writes a text by a topic itself (writer mode); else the text is the deck
-const PLACEHOLDER_WRITER = "Тема — например, «История VK»: текст напишет агент.\nИли ваш текст с тезисами и цифрами — соберу строго по нему.";
-const PLACEHOLDER = "Ваш текст: о чём презентация, тезисы и цифры — соберу строго по нему.\nМожно по слайдам: «Слайд 3. Расходы. Нужна круговая диаграмма».";
-
-// A text that dictates its slides, by the backend's rules (planning/brief_structure.py, compile.py `_order`, agent.py
-// `_is_cover`): «Слайд 1 … Слайд 5» headings in ascending order (or «1. … 3.» headings with lines under each, in a text
-// that speaks of slides) give a slide each, plus a cover unless the first one is a cover or the text's own «на N
-// слайдов» leaves no room for it; without headings «на 8 слайдов», «10 слайдов» give N.
-const SPEC_HEAD = /^\s*(?:#{1,6}\s*)?(?:\*\*)?\s*(?:слайд|slide)\s*№?\s*(\d{1,2})\s*(?:\*\*)?\s*(?:[.:)—–-]\s*|\s+|$)(.*?)\s*(?:\*\*)?\s*$/i;
-const NUM_HEAD = /^\s*(?:#{1,6}\s*)?(\d{1,2})[.)]\s+(\S.{0,90})$/;
-const COUNT = /(?:на|из|ровно|не более|не больше|максимум|до|в)\s+(\d{1,2})\s+слайд|(\d{1,2})\s+слайд(?:ов|а)(?![а-яё])|(\d{1,2})\s+slides?\b/i;
-const COVER = /титул|обложк|заглавн|cover|title/i;
-const TITLE_LINE = /^\s*(?:[—–\-•*]\s*)?(?:название|подзаголовок|заголовок|title|subtitle)\s*[:—–]/im;
-const TABLE_LINE = /^\s*\|.*\|\s*$/m;
-
-const words = (s: string) => s.split(/\s+/).filter(Boolean).length;
-
-interface Head { at: number; n: number; title: string }
-
-function specHeads(lines: string[], text: string): Head[] {
-  const heads: Head[] = [];
-  lines.forEach((line, at) => {
-    const m = SPEC_HEAD.exec(line);
-    if (m && words(m[2]) <= 14) heads.push({ at, n: Number(m[1]), title: m[2] });
-  });
-  if (heads.length >= 2 && heads.every((h, i) => i === 0 || h.n > heads[i - 1].n)) return heads;
-  if (!/слайд|slide/i.test(text)) return [];
-  const nums: Head[] = [];
-  lines.forEach((line, at) => {
-    const m = NUM_HEAD.exec(line);
-    if (m && words(m[2]) <= 10 && !/[;,]\s*$/.test(m[2])) nums.push({ at, n: Number(m[1]), title: m[2] });
-  });
-  if (nums.length < 3 || nums.some((h, i) => h.n !== i + 1)) return [];
-  const ends = [...nums.slice(1).map((h) => h.at), lines.length];
-  return nums.every((h, i) => lines.slice(h.at + 1, ends[i]).some((l) => l.trim())) ? nums : [];
-}
-
-function dictatedSlides(text: string): number | null {
-  const lines = text.split("\n");
-  const c = COUNT.exec(text);
-  const hard = c ? Number(c[1] ?? c[2] ?? c[3]) || null : null;
-  const heads = specHeads(lines, text);
-  if (heads.length === 0) return hard;
-  // the first head is the cover when its title says so, or when it describes a title and a subtitle (not a table)
-  const first = lines.slice(heads[0].at + 1, heads.length > 1 ? heads[1].at : lines.length).join("\n");
-  const cover = COVER.test(heads[0].title) || (TITLE_LINE.test(first) && !TABLE_LINE.test(first));
-  return heads.length + (!cover && (hard === null || heads.length < hard) ? 1 : 0);
-}
+const PLACEHOLDER_WRITER = "Тема — например, «История VK»: текст напишет агент. Или ваш текст с тезисами и цифрами — соберу строго по нему…";
+const PLACEHOLDER = "Тезисы, цифры и таблицы — соберу строго по ним. Можно по слайдам: «Слайд 3. Расходы. Нужна круговая диаграмма»…";
 
 interface Draft { brief: string; audience: string; purpose: string; slides: number }
 
@@ -89,32 +43,65 @@ function loadDraft(): Draft {
   }
 }
 
-// what a text for a deck looks like: the examples type themselves into the empty field (module constants: the
-// typewriter restarts on a new array)
-const EXAMPLES = [
-  "Итоги квартала: выручка 1,2 млрд ₽ (+18 %), три ключевых проекта и планы на IV квартал",
-  "Запуск продукта: проблема клиентов, решение, рынок 40 млрд ₽ и план на год",
-  "Слайд 1. Титул. Слайд 2. Цели на 2027 год. Слайд 3. Бюджет — круговая диаграмма",
-  "Стратегия продаж: воронка, конверсия 12 % → 18 %, найм пяти менеджеров",
-];
-const TOPIC_EXAMPLES = ["История VK — от социальной сети до экосистемы", ...EXAMPLES];
+/** `true` at once, `false` only once it has held for `ms`: switching templates reloads the template's analysis for a
+ *  moment, and the step's check must not blink off and pop back in for that. */
+function useHeldTrue(value: boolean, ms: number): boolean {
+  const [held, setHeld] = useState(value);
+  useEffect(() => {
+    if (value) return void setHeld(true);
+    const t = window.setTimeout(() => setHeld(false), ms);
+    return () => window.clearTimeout(t);
+  }, [value, ms]);
+  return value || held;
+}
 
-/** A template's cover in a small frame (the composer's chip, the floating bar). */
+/** A step of the form: a white paper with its number (a check once done), its title and its own actions. */
+function Step({ n, title, done, actions, shake, zone, id, children }: {
+  n: number;
+  title: string;
+  done: boolean;
+  actions?: ReactNode;
+  shake?: boolean;
+  zone?: HTMLAttributes<HTMLElement>;
+  id?: string;
+  children?: ReactNode;
+}) {
+  return (
+    <section {...zone} id={id} aria-labelledby={`step-${n}`} className={cn("scroll-mt-6 rounded-2xl bg-white p-6 shadow-card", shake && "animate-shake")}>
+      <div className="flex h-8 items-center gap-3">
+        <span
+          className={cn(
+            "flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-footnote font-semibold transition-colors duration-200",
+            done ? "bg-accent-fill text-white" : "bg-accent-50 text-accent-700",
+          )}
+        >
+          <span className="sr-only">{done ? `Шаг ${n} готов` : `Шаг ${n}`}</span>
+          {done ? <Check key="done" className="h-4 w-4 animate-pop" strokeWidth={2.5} aria-hidden /> : <span aria-hidden>{n}</span>}
+        </span>
+        <h2 id={`step-${n}`} className="text-title3 font-semibold text-zinc-900">{title}</h2>
+        {actions && <div className="-mr-2 ml-auto flex min-w-0 items-center gap-1">{actions}</div>}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+/** A template's cover in a small frame (the bar at the bottom). */
 function MiniCover({ t, className }: { t: TemplateListItem | undefined; className?: string }) {
   const [broken, setBroken] = useState(false);
   return (
-    <span className={cn("relative block shrink-0 overflow-hidden bg-zinc-100 ring-1 ring-inset ring-zinc-900/[0.06]", className)} aria-hidden>
+    <span className={cn("relative block shrink-0 overflow-hidden bg-zinc-100 shadow-inner-line", className)} aria-hidden>
       {t?.cover_url && !broken ? (
         <img src={t.cover_url} alt="" draggable={false} onError={() => setBroken(true)} className="h-full w-full object-cover" />
       ) : (
-        <span className="flex h-full w-full items-center justify-center text-zinc-400"><LayoutTemplate className="h-3.5 w-3.5" /></span>
+        <span className="flex h-full w-full items-center justify-center text-zinc-400"><LayoutTemplate className="h-4 w-4" /></span>
       )}
     </span>
   );
 }
 
 export function CreateScreen() {
-  const { health, healthError, modelStatus, strategies, templates, templateId, activeJob, startGeneration, toast, agentOpen, composerText, takeComposerText } = useApp();
+  const { health, healthError, modelStatus, strategies, templates, templateId, manifestLoading, activeJob, startGeneration, toast, agentOpen, composerText, takeComposerText } = useApp();
   // a server with a model in its config whose every link is off builds without one: the switches say so too
   const modelsConfigured = (health?.models_configured ?? false) && modelStatus?.state !== "off";
   const drop = useTemplateDrop();
@@ -132,13 +119,11 @@ export function CreateScreen() {
   const [more, setMore] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [showErrors, setShowErrors] = useState(false);
-  const [focused, setFocused] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const briefRef = useRef<HTMLTextAreaElement>(null);
-  const toolbarRef = useRef<HTMLDivElement>(null);
-  const floatRef = useRef<HTMLDivElement>(null);
-  const galleryRef = useRef<HTMLElement>(null);
-  const purposeRef = useRef<HTMLDivElement>(null);
+  const barRef = useRef<HTMLDivElement>(null);
+  // a template chosen and read; a switch to another template keeps the check unless its analysis takes a while
+  const templateDone = useHeldTrue(!!templateId && !manifestLoading, 400) && !!templateId;
   // the helper docks (or leaves) in one reflow: the centred page glides the 180px instead of jumping
   const pageRef = useRef<HTMLDivElement>(null);
   useFlip(pageRef, agentOpen);
@@ -154,22 +139,13 @@ export function CreateScreen() {
       window.removeEventListener("keydown", key, true);
     };
   }, []);
-  // what is missing shakes once when «Создать» is pressed: the gallery (no template) or the composer (the text)
-  const [shaking, setShaking] = useState<"gallery" | "composer" | null>(null);
+  // the step that is missing something shakes once when «Создать» is pressed
+  const [shaking, setShaking] = useState<1 | 2 | 3 | null>(null);
   useEffect(() => {
     if (!shaking) return;
     const t = window.setTimeout(() => setShaking(null), 420);
     return () => window.clearTimeout(t);
   }, [shaking]);
-  // the hero cascades in once, on the first load (a later return to this screen comes through the view transition); the
-  // entrance classes go once it has played, so a later shake (its own animation) never replays the rise when it ends
-  const [intro] = useState(() => performance.now() < 4000);
-  const [settled, setSettled] = useState(!intro);
-  useEffect(() => {
-    if (settled) return;
-    const t = window.setTimeout(() => setSettled(true), 900);
-    return () => window.clearTimeout(t);
-  }, [settled]);
 
   useEffect(() => {
     const t = window.setTimeout(() => storage.set(LS.brief, JSON.stringify({ brief, audience, purpose, slides } satisfies Draft)), 300);
@@ -193,22 +169,10 @@ export function CreateScreen() {
     });
   }, [composerText, takeComposerText]);
 
-  // «Создать» is out of view (scrolled away to the gallery, or below a long text with the settings open): the bar floats
-  // at the bottom
-  const [away, setAway] = useState(false);
-  useEffect(() => {
-    const el = toolbarRef.current;
-    const root = el?.closest("main");
-    if (!el || !root) return;
-    const io = new IntersectionObserver(([e]) => setAway(!e.isIntersecting), { root, threshold: 0 });
-    io.observe(el);
-    return () => io.disconnect();
-  }, []);
-  const float = usePresence(away, MOTION.fast);
-
-  // a text that dictates its slides fixes the count: the stepper shows it, locked, and the request sends that number
-  // (the backend builds the text's slides whatever the count, and the count keeps a closing slide out)
-  const dictated = dictatedSlides(brief);
+  // what the text holds: a text that dictates its slides fixes the count (the stepper shows it, locked, and the request
+  // sends that number — the backend builds the text's slides whatever the count, and the count keeps a closing slide out)
+  const facts = textFacts(brief);
+  const dictated = facts.slides;
   const byText = dictated !== null;
   const stepSlides = (delta: number) => {
     setSlidesDraft(null);
@@ -226,7 +190,7 @@ export function CreateScreen() {
   }, [modelsConfigured]);
 
   const chosen = templates.find((t) => t.template_id === templateId);
-  const chosenName = chosen ? templateTitle(chosen.source_file, chosen.template_id) : null;
+  const chosenName = chosen ? tplLabel(chosen) : null;
   const briefLen = brief.trim().length;
   // a topic-only text is enough only when the server writes the text itself (writer mode); otherwise the text is the deck
   const briefMin = health?.writer ? BRIEF_MIN_TOPIC : BRIEF_MIN;
@@ -248,7 +212,7 @@ export function CreateScreen() {
   const creating = submitting || (jobRunning && activeJob?.kind === "generate");
   // the server being out of reach is the one problem then: the text is not marked
   const briefInvalid = showErrors && !healthError && !!templateId && briefLen < briefMin;
-  // a short text is said once, by its own counter in the field (turned red); the status line keeps every other problem
+  // a short text is said once, by its own counter under the field (turned red); the bar keeps every other problem
   const shortInvalid = briefInvalid && briefLen > 0;
   const barProblem = showErrors && !shortInvalid ? problem : null;
   // a topic without material: the agent writes the text first (the server decides; this only says it). Not for a text
@@ -257,23 +221,11 @@ export function CreateScreen() {
   const modelsOn = useModels && modelsConfigured;
   const writerLine = !!health?.writer && !!writer.mode && !writer.privateHint && briefLen >= briefMin && modelsOn && !modelIndicator(modelStatus, modelsOn) && !healthError && !barProblem;
   const writerPresence = usePresence(writerLine, MOTION.fast);
-  // the examples type themselves into an empty field nobody is typing in
-  const hinting = briefLen === 0 && !focused && !busy;
-  // a long text fades at the field's foot while there is more of it below (it never runs into the toolbar's edge)
-  const [moreBelow, setMoreBelow] = useState(false);
-  const measureField = () => {
-    const el = briefRef.current;
-    if (el) setMoreBelow(el.scrollHeight - el.scrollTop - el.clientHeight > 2);
-  };
-  useEffect(() => {
-    const el = briefRef.current;
-    if (!el) return;
-    measureField();
-    const ro = new ResizeObserver(measureField);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-  useEffect(measureField, [brief]);
+  const variantsCount = strategies.length ? strategies.filter((s) => selected.includes(s.name)).length : selected.length;
+  const purposeLabel = PURPOSES.find((p) => p.value === purpose)?.label ?? "";
+  // the folded parameters in one line
+  const paramsLine = [purposeLabel, plural(variantsCount, "вариант", "варианта", "вариантов"), modelsOn ? "тексты пишет модель" : "без модели"].join(", ");
+  const seen = factsLine(facts);
 
   const fillSample = () => {
     setBrief(SAMPLE_BRIEF);
@@ -298,48 +250,27 @@ export function CreateScreen() {
     }
   };
 
-  // the template chip: the gallery comes into view and the chosen card's ring sends one pulse once it has arrived
-  const toGallery = () => {
-    galleryRef.current?.scrollIntoView({ block: "start", behavior: smoothScroll() });
-    if (prefersReducedMotion()) return;
-    galleryRef.current?.querySelector<HTMLElement>('[data-tile] button[aria-pressed="true"]')?.animate(
-      [{ boxShadow: "0 0 0 2px #0077FF, 0 0 0 0 rgba(0, 119, 255, 0.45)" }, { boxShadow: "0 0 0 2px #0077FF, 0 0 0 16px rgba(0, 119, 255, 0)" }],
-      { duration: 900, delay: 380, easing: EASE.out },
-    );
-  };
-
-  // a control reached with the keyboard never hides under the floating bar: the page scrolls it clear (a click needs no
-  // help — the person sees what they click)
+  // a control reached with the keyboard never hides under the bar: the page scrolls it clear (a click needs no help —
+  // the person sees what they click)
   const keepClearOfBar = (e: FocusEvent<HTMLFormElement>) => {
     const el = e.target as HTMLElement;
-    if (floatRef.current?.contains(el) || byPointer.current) return;
+    if (barRef.current?.contains(el) || byPointer.current) return;
     scrollClearOfBar(el);
   };
   const scrollClearOfBar = (el: HTMLElement) => {
     const main = el.closest("main");
     if (!main) return;
     // a hidden checkbox inside a card (a strategy option): the card is what the person sees focused
-    const seen = el instanceof HTMLInputElement && (el.type === "checkbox" || el.type === "radio") ? (el.closest("label") ?? el) : el;
+    const target = el instanceof HTMLInputElement && (el.type === "checkbox" || el.type === "radio") ? (el.closest("label") ?? el) : el;
     requestAnimationFrame(() => {
-      const bar = floatRef.current;
+      const bar = barRef.current;
       if (!bar || document.activeElement !== el) return;
-      const t = seen.getBoundingClientRect();
+      const t = target.getBoundingClientRect();
       const b = bar.getBoundingClientRect();
       // never past the element's own top (a tall text field stays readable from its first line)
       const by = Math.min(t.bottom - b.top + 16, t.top - main.getBoundingClientRect().top - 16);
       if (t.bottom > b.top - 8 && by > 0) main.scrollBy({ top: by, behavior: smoothScroll() });
     });
-  };
-
-  // «Тип презентации» is one radio group: one Tab stop, the arrows move and choose
-  const onPurposeKey = (e: KeyboardEvent<HTMLDivElement>) => {
-    const n = PURPOSES.length;
-    const i = Math.max(0, PURPOSES.findIndex((p) => p.value === purpose));
-    const next = { ArrowRight: (i + 1) % n, ArrowDown: (i + 1) % n, ArrowLeft: (i - 1 + n) % n, ArrowUp: (i - 1 + n) % n, Home: 0, End: n - 1 }[e.key];
-    if (next === undefined) return;
-    e.preventDefault();
-    setPurpose(PURPOSES[next].value);
-    purposeRef.current?.querySelectorAll<HTMLButtonElement>('[role="radio"]')[next]?.focus();
   };
 
   const onSubmit = async (e: FormEvent) => {
@@ -348,20 +279,18 @@ export function CreateScreen() {
     if (problem || busy || !templateId) {
       if (busy || healthError) return;
       if (!templateId) {
-        setShaking("gallery");
-        toGallery();
-      } else {
-        if (briefLen < briefMin) {
-          setShaking("composer");
-          const el = briefRef.current;
-          if (el) {
-            el.focus({ preventScroll: true });
-            el.closest("[data-composer]")?.scrollIntoView({ block: "nearest", behavior: smoothScroll() });
-          }
-        } else if (selected.length === 0) {
-          setShaking("composer");
-          setMore(true);
+        setShaking(1);
+        document.getElementById("step-template")?.scrollIntoView({ block: "nearest", behavior: smoothScroll() });
+      } else if (briefLen < briefMin) {
+        setShaking(2);
+        const el = briefRef.current;
+        if (el) {
+          el.focus({ preventScroll: true });
+          document.getElementById("step-text")?.scrollIntoView({ block: "nearest", behavior: smoothScroll() });
         }
+      } else if (selected.length === 0) {
+        setShaking(3);
+        setMore(true);
       }
       return;
     }
@@ -384,287 +313,240 @@ export function CreateScreen() {
     }
   };
 
-  const rise = (i: number) => (intro && !settled ? { className: "animate-rise", style: stagger(i) } : { className: undefined, style: undefined });
-
-  const stepper = (
-    <div className="flex shrink-0 items-center gap-2">
-      <div
-        className="inline-flex h-10 items-center rounded-full bg-zinc-100 transition-shadow duration-150 has-[input:focus]:shadow-selected"
-        title={byText ? "Число слайдов задано в тексте" : undefined}
-      >
-        <Button variant="ghost" shape="circle" size="md" icon={Minus} aria-label="Меньше слайдов" disabled={busy || byText || slides <= SLIDES_MIN} onClick={() => stepSlides(-1)} />
-        <input
-          id="slides"
-          type="number"
-          inputMode="numeric"
-          aria-label="Число слайдов"
-          min={SLIDES_MIN}
-          max={SLIDES_MAX}
-          value={byText ? String(dictated) : (slidesDraft ?? String(slides))}
-          readOnly={byText}
-          disabled={busy}
-          onChange={(e) => {
-            if (byText) return;
-            const raw = e.target.value;
-            setSlidesDraft(raw);
-            const n = Number(raw);
-            if (raw && Number.isFinite(n)) setSlides(n);
-          }}
-          onBlur={() => {
-            setSlidesDraft(null);
-            setSlides((n) => clampSlides(n));
-          }}
-          className="w-7 bg-transparent text-right text-body font-semibold tabular-nums text-zinc-900 outline-none [appearance:textfield] disabled:opacity-40 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-        />
-        {/* the unit inside the pill, beside its number («12 слайдов»); a count the text dictates says so */}
-        <span className="w-[62px] pl-1.5 text-footnote text-zinc-600" aria-hidden>
-          {plural(count, "слайд", "слайда", "слайдов").replace(/^\d+\s/, "")}
-        </span>
-        <Button variant="ghost" shape="circle" size="md" icon={Plus} aria-label="Больше слайдов" disabled={busy || byText || slides >= SLIDES_MAX} onClick={() => stepSlides(1)} />
-      </div>
-      {byText && <span className="animate-fade text-caption text-zinc-500">по тексту</span>}
-    </div>
-  );
-
-  const field = (
-    <div className="flex gap-3 px-6 pt-6">
-      <Sparkles className="mt-[3px] h-5 w-5 shrink-0 text-[#3858FF]" aria-hidden />
-      <div className="relative min-w-0 flex-1">
-        <input ref={fileRef} type="file" accept=".md,.txt,.markdown,text/markdown,text/plain" className="hidden" onChange={(e) => void onFile(e)} />
-        <textarea
-          ref={briefRef}
-          id="brief"
-          aria-label="О чём презентация"
-          aria-invalid={briefInvalid || undefined}
-          aria-describedby={briefLen > 0 && briefLen < briefMin ? "brief-count" : undefined}
-          value={brief}
-          disabled={busy}
-          rows={4}
-          onChange={(e) => setBrief(e.target.value)}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
-          placeholder={health?.writer ? PLACEHOLDER_WRITER : PLACEHOLDER}
-          onScroll={measureField}
-          className={cn(
-            "scroll-thin block max-h-[40vh] min-h-[104px] w-full resize-none bg-transparent pb-2 text-title3 leading-[26px] text-zinc-900 outline-none disabled:opacity-60 [field-sizing:content]",
-            hinting ? "placeholder:text-transparent" : "placeholder:text-zinc-500",
-            moreBelow && "[mask-image:linear-gradient(to_bottom,#000_calc(100%-32px),transparent)]",
-          )}
-        />
-        {/* the examples type themselves over the empty field (the real placeholder stays for screen readers) */}
-        <TypewriterHint lines={health?.writer ? TOPIC_EXAMPLES : EXAMPLES} active={hinting} className="absolute inset-x-0 top-0 text-title3 leading-[26px] text-zinc-500" />
-        {briefLen > 0 && briefLen < briefMin && (
-          <span
-            id="brief-count"
-            className={cn(
-              "pointer-events-none absolute bottom-0 right-0 text-caption font-semibold tabular-nums transition-colors duration-150 animate-fade",
-              shortInvalid ? "text-red-600" : "text-amber-700",
-            )}
-          >
-            ещё {briefMin - briefLen}
-          </span>
-        )}
-        {/* read out once when «Создать» finds the text short (the counter itself changes with every key) */}
-        {shortInvalid && <span role="alert" className="sr-only">Текст слишком короткий</span>}
-      </div>
-    </div>
-  );
-
-  const toolbar = (
-    <>
-      <button
-        type="button"
-        onClick={toGallery}
-        disabled={busy}
-        title={chosenName ? `Шаблон «${chosenName}» — выбрать другой` : "Выбрать шаблон"}
-        className="tap-soft group inline-flex h-10 max-w-[260px] shrink-0 cursor-pointer items-center gap-2 rounded-full bg-zinc-100 pl-1.5 pr-3 text-body font-semibold text-zinc-800 hover:bg-zinc-200/70 active:bg-zinc-200 disabled:pointer-events-none disabled:opacity-40"
-      >
-        <MiniCover t={chosen} className="aspect-video h-7 rounded-[6px]" />
-        <span className="min-w-0 truncate">{chosenName ?? "Выберите шаблон"}</span>
-        <ChevronDown className="h-4 w-4 shrink-0 text-zinc-500 transition-transform duration-150 group-hover:translate-y-px" aria-hidden />
-      </button>
-      <Button size="md" shape="pill" variant="ghost" icon={Paperclip} disabled={busy} onClick={() => fileRef.current?.click()} title="Текст из файла .txt или .md">
-        Файл
-      </Button>
-      {briefLen === 0 && (
-        <Button size="md" shape="pill" variant="ghost" icon={FileText} disabled={busy} onClick={fillSample} className="animate-fade">
-          Пример
-        </Button>
-      )}
-      <div className="ml-auto flex shrink-0 items-center gap-2">
-        {stepper}
-        <Button variant="ghost" shape="circle" size="md" icon={SlidersHorizontal} aria-label="Настройки" title="Настройки: аудитория, тип, варианты, модели" aria-expanded={more} aria-controls="create-settings" onClick={() => setMore(!more)} />
-        <Button type="submit" variant="brand" shape="pill" size="lg" iconRight={ArrowRight} loading={creating} disabled={busy && !creating}>
-          Создать
-        </Button>
-      </div>
-    </>
-  );
-
-  const settings = (
-    <div className="space-y-6 text-left">
-      <div>
-        <label htmlFor="audience" className="mb-2 block text-footnote font-semibold text-zinc-700">Аудитория</label>
-        <input id="audience" type="text" value={audience} disabled={busy} onChange={(e) => setAudience(e.target.value)} placeholder="Руководство, инвесторы, команда" className={INPUT_CLS} />
-      </div>
-      <div>
-        <div>
-          <p id="purpose-label" className="mb-2 text-footnote font-semibold text-zinc-700">Тип презентации</p>
-          <div ref={purposeRef} className="flex flex-wrap gap-2" role="radiogroup" aria-labelledby="purpose-label" onKeyDown={onPurposeKey}>
-            {PURPOSES.map((p) => (
-              <Chip
-                key={p.value}
-                surface="tinted"
-                role="radio"
-                aria-checked={purpose === p.value}
-                tabIndex={purpose === p.value ? 0 : -1}
-                selected={purpose === p.value}
-                disabled={busy}
-                onClick={() => setPurpose(p.value)}
-              >
-                {p.label}
-              </Chip>
-            ))}
-          </div>
-        </div>
-      </div>
-      {strategies.length > 0 && (
-        <div>
-          <p className="mb-2 text-footnote font-semibold text-zinc-700">Варианты оформления</p>
-          <div className="grid grid-cols-3 gap-3">
-            {strategies.map((s) => (
-              <StrategyOption
-                key={s.name}
-                strategy={s}
-                checked={selected.includes(s.name)}
-                disabled={busy}
-                onChange={(on) => {
-                  strategiesTouched.current = true;
-                  setSelected((cur) => (on ? Array.from(new Set([...cur, s.name])) : cur.filter((x) => x !== s.name)));
-                }}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-      {/* the first switch lines up with the first strategy card; the second takes the rest of the row */}
-      <div className="grid grid-cols-3 gap-3">
-        <Toggle
-          label="Тексты пишет модель"
-          title={modelsConfigured ? undefined : "Модель не подключена"}
-          checked={useModels && modelsConfigured}
-          disabled={busy || !modelsConfigured}
-          onChange={(v) => {
-            modelsTouched.current = true;
-            setUseModels(v);
-          }}
-        />
-        <div className="col-span-2">
-          <Toggle
-            label="Проверка слайдов моделью зрения"
-            title={modelsConfigured ? undefined : "Модель не подключена"}
-            checked={auditModels && modelsConfigured}
-            disabled={busy || !modelsConfigured}
-            onChange={(v) => {
-              modelsTouched.current = true;
-              setAuditModels(v);
-            }}
-          />
-        </div>
-      </div>
-    </div>
-  );
-
   return (
-    <form onSubmit={(e) => void onSubmit(e)} onFocus={keepClearOfBar} noValidate>
-      {/* the bottom padding lets the last row of templates scroll clear of the floating bar */}
-      <div ref={pageRef} className="relative isolate mx-auto max-w-[1184px] px-8 pb-28 pt-12 [@media(max-height:760px)]:pt-7">
-        {/* a faint glow of the brand colours behind the hero: depth without a picture */}
-        <div aria-hidden className="pointer-events-none absolute inset-x-0 -top-24 -z-10 h-[620px] [background:radial-gradient(42%_46%_at_50%_38%,rgba(56,88,255,0.10),transparent_72%),radial-gradient(30%_32%_at_68%_58%,rgba(106,77,255,0.08),transparent_70%)]" />
-        <div className="mx-auto flex max-w-[880px] flex-col items-center text-center">
-          <span {...rise(0)} className={cn("inline-flex h-8 items-center gap-2 rounded-full bg-white px-3 text-footnote font-semibold text-zinc-700 shadow-card", rise(0).className)}>
-            <span className="h-2 w-2 rounded-full bg-brand" aria-hidden />
-            Открытые модели · строго по вашему шаблону
-          </span>
-          <h1 {...rise(1)} className={cn("mt-5 text-hero font-bold text-zinc-900 [@media(max-height:760px)]:text-[52px] [@media(max-height:760px)]:leading-[56px]", rise(1).className)}>
-            Презентация в стиле
-            <br />
-            <span className="text-brand">вашего шаблона</span>
-          </h1>
-          <p {...rise(2)} className={cn("mt-4 max-w-[640px] text-title3 leading-[26px] text-zinc-500 [text-wrap:balance]", rise(2).className)}>
-            {health?.writer ? "Вставьте текст или просто тему" : "Вставьте текст с тезисами и цифрами"} — агент продумает слайды, соберёт их из макетов вашего шаблона и сверит каждое число. Три варианта в PowerPoint за 5 минут.
-          </p>
-        </div>
+    <form onSubmit={(e) => void onSubmit(e)} onFocus={keepClearOfBar} noValidate className="flex min-h-full flex-col">
+      <div ref={pageRef} className="mx-auto w-full max-w-[1120px] flex-1 px-8 pb-8 pt-10 [@media(max-height:760px)]:pt-6">
+        <header className="mb-6">
+          <h1 className="text-title1 font-semibold text-zinc-900">Новая презентация</h1>
+          <p className="mt-1 text-body text-zinc-500">Шаблон задаёт оформление, текст — содержание. Агент соберёт три варианта и сверит каждое число с текстом.</p>
+        </header>
 
-        <div data-composer className="mx-auto mt-8 max-w-[880px] scroll-mt-6 [@media(max-height:760px)]:mt-6">
-          <Composer
-            {...rise(3)}
-            className={rise(3).className}
-            field={field}
-            toolbar={toolbar}
-            toolbarRef={toolbarRef}
-            settings={settings}
-            settingsOpen={more}
-            settingsId="create-settings"
-            invalid={briefInvalid}
-            shake={shaking === "composer"}
-          />
-          {/* the problem, the model line and the writer's line share one spot: one cross-fades into the other */}
-          <div className="mt-3 grid h-6 items-center justify-items-center [&>*]:col-start-1 [&>*]:row-start-1">
-            {barProblem && (
-              <p key={barProblem} role="alert" className="inline-flex min-w-0 items-center gap-1.5 text-footnote font-semibold text-red-700 animate-fade [animation-duration:150ms]" title={barProblem}>
-                <AlertCircle className="h-4 w-4 shrink-0" aria-hidden />
-                <span className="truncate">{barProblem}</span>
+        <div className="space-y-4">
+          <Step id="step-template" n={1} title="Шаблон" done={templateDone} actions={<TemplateUploadButton />} shake={shaking === 1} zone={drop}>
+            <div className="mt-5">
+              <TemplatePicker />
+            </div>
+          </Step>
+
+          <Step
+            id="step-text"
+            n={2}
+            title="Текст"
+            done={briefLen >= briefMin}
+            shake={shaking === 2}
+            actions={
+              <>
+                <Button size="sm" variant="ghost" icon={Paperclip} disabled={busy} onClick={() => fileRef.current?.click()} title="Текст из файла .txt или .md">
+                  Из файла
+                </Button>
+                {briefLen === 0 && (
+                  <Button size="sm" variant="ghost" icon={FileText} disabled={busy} onClick={fillSample} className="animate-fade">
+                    Пример
+                  </Button>
+                )}
+              </>
+            }
+          >
+            <input ref={fileRef} type="file" accept=".md,.txt,.markdown,text/markdown,text/plain" className="hidden" onChange={(e) => void onFile(e)} />
+            <div
+              className={cn(
+                "mt-5 rounded-lg border bg-white transition-[border-color,box-shadow] duration-150",
+                briefInvalid
+                  ? "border-red-500 shadow-[0_0_0_3px_rgba(242,55,65,0.12)]"
+                  : "border-zinc-900/[0.12] hover:border-zinc-900/20 has-[textarea:focus]:border-accent has-[textarea:focus]:shadow-[0_0_0_3px_rgba(0,119,255,0.12)]",
+              )}
+            >
+              <textarea
+                ref={briefRef}
+                id="brief"
+                aria-label="Текст презентации"
+                aria-invalid={briefInvalid || undefined}
+                aria-describedby="brief-help"
+                value={brief}
+                disabled={busy}
+                rows={8}
+                onChange={(e) => setBrief(e.target.value)}
+                placeholder={health?.writer ? PLACEHOLDER_WRITER : PLACEHOLDER}
+                className="scroll-thin block max-h-[48vh] min-h-[200px] w-full resize-none rounded-lg bg-transparent px-4 py-3 text-body leading-6 text-zinc-900 outline-none placeholder:text-zinc-400 disabled:opacity-60 [field-sizing:content]"
+              />
+            </div>
+            {/* what the text holds (the agent will see the same) and its length */}
+            <div id="brief-help" className="mt-2 flex min-h-5 items-start gap-4 text-footnote">
+              <p className="min-w-0 flex-1 text-zinc-500">
+                {briefLen === 0 ? "Вставьте готовый текст или загрузите .txt и .md" : seen ? `В тексте: ${seen}` : "Цифр и таблиц в тексте нет — слайды будут из формулировок"}
               </p>
-            )}
-            <ModelStatus enabled={useModels && modelsConfigured} hidden={!!barProblem} className="min-w-0" />
-            {writerPresence.mounted && (
-              <span
-                className={cn("inline-flex min-w-0 items-center gap-2 text-footnote text-zinc-500", writerPresence.leaving ? "animate-fade-out" : "animate-fade", "[animation-duration:150ms]")}
-                role="status"
-                aria-hidden={writerPresence.leaving || undefined}
-              >
-                <PenLine className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                <span className="truncate">Текст напишет агент</span>
-              </span>
-            )}
-          </div>
-        </div>
+              {briefLen > 0 && (
+                <p className={cn("shrink-0 tabular-nums", briefLen < briefMin ? (shortInvalid ? "font-medium text-red-600" : "text-amber-700") : "text-zinc-500")}>
+                  {briefLen < briefMin ? `ещё ${plural(briefMin - briefLen, "знак", "знака", "знаков")}` : plural(briefLen, "знак", "знака", "знаков")}
+                </p>
+              )}
+            </div>
+            {/* read out once when «Создать» finds the text short (the counter itself changes with every key) */}
+            {shortInvalid && <span role="alert" className="sr-only">Текст слишком короткий</span>}
+          </Step>
 
-        <section
-          ref={galleryRef}
-          id="templates"
-          {...drop}
-          aria-labelledby="templates-title"
-          className={cn("mt-14 scroll-mt-6", shaking === "gallery" ? "animate-shake" : rise(4).className)}
-          style={shaking === "gallery" ? undefined : rise(4).style}
-        >
-          <TemplatePicker />
-        </section>
+          <Step
+            n={3}
+            title="Параметры"
+            done={false}
+            shake={shaking === 3}
+            actions={
+              <>
+                {!more && <span className="mr-1 min-w-0 truncate text-footnote text-zinc-500">{paramsLine}</span>}
+                <Button size="sm" variant="ghost" iconRight={<ChevronDown className={cn("transition-transform duration-200 ease-out", more && "rotate-180")} />} aria-expanded={more} aria-controls="create-settings" onClick={() => setMore(!more)}>
+                  {more ? "Свернуть" : "Изменить"}
+                </Button>
+              </>
+            }
+          >
+            {/* the parameters unfold (the rows glide open, the content fades in just after them, and fades out first on
+                the way back); while folded they leave the tab order once the animation has played */}
+            <div className={cn("grid transition-[grid-template-rows] duration-300 ease-glide", more ? "grid-rows-[1fr]" : "grid-rows-[0fr]")}>
+              <div id="create-settings" className="min-h-0 overflow-hidden" style={{ visibility: more ? "visible" : "hidden", transition: `visibility 0s linear ${more ? "0s" : "300ms"}` }}>
+                <div className={cn("space-y-6 pt-5 transition-opacity", more ? "opacity-100 delay-[60ms] duration-200 ease-out" : "opacity-0 duration-150 ease-in")}>
+                  <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-4">
+                    <div>
+                      <label htmlFor="purpose" className="mb-2 block text-footnote font-medium text-zinc-700">Тип презентации</label>
+                      <div className="relative">
+                        <select
+                          id="purpose"
+                          value={purpose}
+                          disabled={busy}
+                          onChange={(e) => setPurpose(e.target.value)}
+                          className={cn(INPUT_CLS, "cursor-pointer appearance-none pr-10")}
+                        >
+                          {PURPOSES.map((p) => (
+                            <option key={p.value} value={p.value}>{p.label}</option>
+                          ))}
+                        </select>
+                        <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" aria-hidden />
+                      </div>
+                    </div>
+                    <div>
+                      <label htmlFor="audience" className="mb-2 block text-footnote font-medium text-zinc-700">Аудитория</label>
+                      <input id="audience" type="text" value={audience} disabled={busy} onChange={(e) => setAudience(e.target.value)} placeholder="Руководство, инвесторы, команда…" className={INPUT_CLS} />
+                    </div>
+                  </div>
+                  {strategies.length > 0 && (
+                    <div>
+                      <p className="mb-2 text-footnote font-medium text-zinc-700">Варианты оформления</p>
+                      <div className="grid grid-cols-3 gap-3">
+                        {strategies.map((s) => (
+                          <StrategyOption
+                            key={s.name}
+                            strategy={s}
+                            checked={selected.includes(s.name)}
+                            disabled={busy}
+                            onChange={(on) => {
+                              strategiesTouched.current = true;
+                              setSelected((cur) => (on ? Array.from(new Set([...cur, s.name])) : cur.filter((x) => x !== s.name)));
+                            }}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <div className="grid grid-cols-3 gap-3">
+                    <Toggle
+                      label="Тексты пишет модель"
+                      title={modelsConfigured ? undefined : "Модель не подключена"}
+                      checked={useModels && modelsConfigured}
+                      disabled={busy || !modelsConfigured}
+                      onChange={(v) => {
+                        modelsTouched.current = true;
+                        setUseModels(v);
+                      }}
+                    />
+                    <div className="col-span-2">
+                      <Toggle
+                        label="Проверка слайдов моделью зрения"
+                        title={modelsConfigured ? undefined : "Модель не подключена"}
+                        checked={auditModels && modelsConfigured}
+                        disabled={busy || !modelsConfigured}
+                        onChange={(v) => {
+                          modelsTouched.current = true;
+                          setAuditModels(v);
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </Step>
+        </div>
       </div>
 
-      {/* the bar that floats once «Создать» has scrolled away: the very end of the scrolled content, of no height, stuck
-          24px above the window's edge (at the end of a short page too) */}
-      <div className="pointer-events-none sticky bottom-6 z-20 h-0">
-        {float.mounted && (
-          <div
-            ref={floatRef}
-            className={cn(
-              "pointer-events-auto absolute bottom-0 left-1/2 flex h-16 -translate-x-1/2 items-center gap-3 rounded-full bg-white/90 py-2 pl-2 pr-2 shadow-float backdrop-blur-xl",
-              float.leaving ? "animate-fade-out" : "animate-float-in",
-            )}
-            aria-hidden={float.leaving || undefined}
-          >
-            <MiniCover t={chosen} className="aspect-video h-12 rounded-[12px]" />
-            <span className="max-w-[260px] min-w-0">
-              <span className="block truncate text-footnote font-semibold text-zinc-900">{chosenName ? `Шаблон «${chosenName}»` : "Шаблон не выбран"}</span>
-              <span className="block text-caption text-zinc-500">{plural(count, "слайд", "слайда", "слайдов")}{byText ? " — по тексту" : ""}</span>
-            </span>
-            <Button type="submit" variant="brand" shape="pill" size="lg" iconRight={ArrowRight} loading={creating} disabled={busy && !creating} className="ml-3">
+      {/* the bar stays at the bottom of the window: what will be built and the one action. Its controls are always in
+          view: the page's bottom scroll padding (kept for the form above it) must not nudge the page when one of them
+          takes the focus */}
+      <div className="sticky bottom-0 z-10 [&_button]:-scroll-mb-24 [&_input]:-scroll-mb-24">
+        <div className="mx-auto w-full max-w-[1120px] px-8 pb-5">
+          <div ref={barRef} className="flex h-[72px] items-center gap-5 rounded-2xl bg-white pl-3 pr-3 shadow-pop">
+            <MiniCover t={chosen} className="aspect-video h-12 rounded-lg" />
+            <div className="min-w-0 max-w-[260px] shrink-0">
+              <p className="truncate text-body font-medium text-zinc-900" title={chosenName ?? undefined}>{chosenName ?? "Шаблон не выбран"}</p>
+              <p className="truncate text-footnote text-zinc-500">{plural(variantsCount, "вариант", "варианта", "вариантов")}</p>
+            </div>
+            <div className="h-8 w-px shrink-0 bg-zinc-200" aria-hidden />
+            <div className="flex shrink-0 items-center gap-2">
+              <label htmlFor="slides" className="text-footnote text-zinc-500">Слайдов</label>
+              <div
+                className="inline-flex h-10 items-center rounded-lg bg-zinc-100 transition-shadow duration-150 has-[input:focus]:shadow-selected"
+                title={byText ? "Число слайдов задано в тексте" : undefined}
+              >
+                <Button variant="ghost" size="md" icon={Minus} aria-label="Меньше слайдов" disabled={busy || byText || slides <= SLIDES_MIN} onClick={() => stepSlides(-1)} />
+                <input
+                  id="slides"
+                  type="number"
+                  inputMode="numeric"
+                  min={SLIDES_MIN}
+                  max={SLIDES_MAX}
+                  value={byText ? String(dictated) : (slidesDraft ?? String(slides))}
+                  readOnly={byText}
+                  disabled={busy}
+                  onChange={(e) => {
+                    if (byText) return;
+                    const raw = e.target.value;
+                    setSlidesDraft(raw);
+                    const n = Number(raw);
+                    if (raw && Number.isFinite(n)) setSlides(n);
+                  }}
+                  onBlur={() => {
+                    setSlidesDraft(null);
+                    setSlides((n) => clampSlides(n));
+                  }}
+                  className="w-9 bg-transparent text-center text-body font-semibold tabular-nums text-zinc-900 outline-none [appearance:textfield] disabled:opacity-40 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                />
+                <Button variant="ghost" size="md" icon={Plus} aria-label="Больше слайдов" disabled={busy || byText || slides >= SLIDES_MAX} onClick={() => stepSlides(1)} />
+              </div>
+              {byText && <span className="animate-fade text-footnote text-zinc-500">по тексту</span>}
+            </div>
+            {/* the problem, the model line and the writer's line share one spot: one cross-fades into the other */}
+            <div className="grid min-w-0 flex-1 items-center justify-items-end [&>*]:col-start-1 [&>*]:row-start-1">
+              {barProblem && (
+                <p key={barProblem} role="alert" className="inline-flex min-w-0 items-center gap-1.5 text-footnote font-medium text-red-600 animate-fade [animation-duration:150ms]" title={barProblem}>
+                  <AlertCircle className="h-4 w-4 shrink-0" aria-hidden />
+                  <span className="truncate">{barProblem}</span>
+                </p>
+              )}
+              <ModelStatus enabled={useModels && modelsConfigured} hidden={!!barProblem} className="min-w-0" />
+              {writerPresence.mounted && (
+                <span
+                  className={cn("inline-flex min-w-0 items-center gap-2 text-footnote text-zinc-500", writerPresence.leaving ? "animate-fade-out" : "animate-fade", "[animation-duration:150ms]")}
+                  role="status"
+                  aria-hidden={writerPresence.leaving || undefined}
+                >
+                  <PenLine className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                  <span className="truncate">Текст напишет агент</span>
+                </span>
+              )}
+            </div>
+            <Button type="submit" variant="primary" size="lg" iconRight={ArrowRight} loading={creating} disabled={busy && !creating}>
               Создать презентацию
             </Button>
           </div>
-        )}
+        </div>
       </div>
     </form>
   );

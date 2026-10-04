@@ -1,17 +1,37 @@
-// The planning agent's words for the build stage: which form a slide gets (a sketch the stage draws and the rail
-// shows), what each phase is called on the stage, the rail's per-slide state and the log's lines. Pure functions, no
-// React.
+// The planning agent's words for the build page: which form a slide gets (the sketch its storyboard card draws), what
+// each phase is called in the page's title, the storyboard's per-slide state. Pure functions, no React.
 import type { AgentEvent } from "../types";
 import { eventParts, type PhaseKey } from "./agent";
 
 export type SketchKind =
   | "cover" | "bars" | "hbars" | "pie" | "line" | "table" | "numbers" | "cards" | "list" | "timeline" | "compare"
-  | "quote" | "image" | "agenda" | "section" | "text";
+  | "quote" | "image" | "agenda" | "section" | "closing" | "text";
 
 export interface Sketch { slide: number; kind: SketchKind; headline: string | null }
 
-/** The big words of the stage per phase (and for the queue, before the first event). A short preposition is bound to
- *  its word by a no-break space: a line never ends on «в» or «с». */
+/** The form under a storyboard card («3  Столбчатая диаграмма»). */
+export const KIND_LABEL: Record<SketchKind, string> = {
+  cover: "Обложка",
+  bars: "Столбчатая диаграмма",
+  hbars: "Линейчатая диаграмма",
+  pie: "Круговая диаграмма",
+  line: "График",
+  table: "Таблица",
+  numbers: "Крупные числа",
+  cards: "Карточки",
+  list: "Список",
+  timeline: "Этапы",
+  compare: "Сравнение",
+  quote: "Цитата",
+  image: "Картинка и текст",
+  agenda: "Содержание",
+  section: "Раздел",
+  closing: "Финальный слайд",
+  text: "Текст",
+};
+
+/** The page's title per phase (and for the queue, before the first event). A short preposition is bound to its word
+ *  by a no-break space: a line never ends on «в» or «с». */
 export const STAGE_TITLE: Record<PhaseKey | "queued", string> = {
   queued: "Готовлюсь к\u00a0сборке",
   writer: "Пишу текст по\u00a0теме",
@@ -22,12 +42,6 @@ export const STAGE_TITLE: Record<PhaseKey | "queued", string> = {
   revise: "Переделываю слабые места",
   layout: "Собираю в\u00a0вашем шаблоне",
   check: "Проверяю каждое число",
-};
-
-/** Who speaks in the log («ДИЗАЙНЕР»). */
-export const ROLE: Record<PhaseKey, string> = {
-  writer: "автор", analyst: "аналитик", architect: "архитектор", designer: "дизайнер",
-  critic: "критик", revise: "правка", layout: "вёрстка", check: "проверка",
 };
 
 /** The first «…» of a text, nested quotes kept («Компания «Ромашка» растёт»); null without a closed one. */
@@ -71,6 +85,7 @@ const KINDS: Array<[RegExp, SketchKind]> = [
   [/картинк|фото|иллюстрац|изображен/i, "image"],
   [/повестк|содержани/i, "agenda"],
   [/раздел/i, "section"],
+  [/финальн/i, "closing"],
 ];
 
 export function sketchKind(text: string): SketchKind {
@@ -95,7 +110,7 @@ export function sketchOf(e: AgentEvent): Sketch | null {
 export type RailMark = "note" | "fixed" | null;
 export interface RailSlide { n: number; sketch: Sketch | null; mark: RailMark; laid: boolean }
 
-/** The rail of one variant: a tile per slide (`count` at least, more when the designer planned more — unless `exact`:
+/** The storyboard of one variant: a card per slide (`count` at least, more when the designer planned more — unless `exact`:
  *  the variant's plan has said how many slides it has), its sketch (a revision keeps the slide's headline), whether the
  *  critic left a note on it (and whether it was then revised), and whether it is laid out already. */
 export function railSlides(events: AgentEvent[], variant: string | null, count: number, laid: number, exact = false): RailSlide[] {
@@ -114,6 +129,55 @@ export function railSlides(events: AgentEvent[], variant: string | null, count: 
     if (step === "revise") marks.set(n, "fixed");
   }
   return Array.from({ length: Math.max(0, top) }, (_, i) => ({ n: i + 1, sketch: sketches.get(i + 1) ?? null, mark: marks.get(i + 1) ?? null, laid: i + 1 <= laid }));
+}
+
+/** The storyboard's grid: the gap between cards (both ways), the caption under a card (its 8px gap and a 16px line),
+ *  the card's narrowest and widest sizes, and the width a card stays readable at. */
+export const BOARD_GAP = 16;
+const CAPTION = 24;
+const MIN_W = 150;
+const MAX_W = 340;
+const READABLE_W = 184;
+
+/** The storyboard's columns: every slide in view at the largest size the box allows (no wider than MAX_W); when even
+ *  MIN_W cannot show them all, the most columns that keep the cards readable (the list then scrolls). */
+export function fitColumns(width: number, height: number, n: number, aspect: number): number {
+  if (width <= 0 || n <= 0 || !(aspect > 0)) return 4;
+  const cardW = (c: number) => (width - (c - 1) * BOARD_GAP) / c;
+  const heightOf = (c: number) => {
+    const rows = Math.ceil(n / c);
+    return rows * (cardW(c) / aspect + CAPTION) + (rows - 1) * BOARD_GAP;
+  };
+  for (let c = 1; c <= 8; c++) {
+    if (cardW(c) > MAX_W) continue;
+    if (cardW(c) < MIN_W) break;
+    if (heightOf(c) <= height) return c;
+  }
+  let c = 1;
+  while (c < 8 && cardW(c + 1) >= READABLE_W) c++;
+  return c;
+}
+
+/** VK blue and its soft tone (accent-200): the sketches' colours when the template has no strong colour of its own. */
+const VK_INK = { ink: "#0077FF", soft: "#ADD3FF" };
+
+/** The colours a storyboard draws its sketches in: the template's first strong colour (saturated, neither near-white
+ *  nor near-black — its accent), so the sketches already look like the deck; `soft` is that colour at 32% on white
+ *  (VK blue gives exactly VK's #ADD3FF). VK blue when the template has only whites, greys and blacks. */
+export function sketchInk(palette: string[] | null | undefined): { ink: string; soft: string } {
+  for (const raw of palette ?? []) {
+    const hex = raw.replace(/^#/, "").toUpperCase();
+    if (!/^[0-9A-F]{6}$/.test(hex)) continue;
+    const [r, g, b] = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16));
+    const max = Math.max(r, g, b) / 255;
+    const min = Math.min(r, g, b) / 255;
+    const l = (max + min) / 2;
+    const s = max === min ? 0 : (max - min) / (1 - Math.abs(2 * l - 1));
+    if (s < 0.35 || l < 0.18 || l > 0.68) continue;
+    const soft = [r, g, b].map((c) => Math.round(255 * 0.68 + c * 0.32).toString(16).padStart(2, "0")).join("").toUpperCase();
+    return { ink: `#${hex}`, soft: `#${soft}` };
+  }
+  return VK_INK;
 }
 
 /** «1:05» */

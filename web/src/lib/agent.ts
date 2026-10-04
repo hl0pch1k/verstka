@@ -394,8 +394,9 @@ export function agentSummary(v: Variant | null | undefined): AgentSummaryLine[] 
     const fixed = uniqueSlides(evs.filter((e) => e.phase === "revise" && mine(e))).length;
     if (critic.length || fixed) {
       const skipped = !said && critic.find((e) => /пропущен|не ответил|не запускал/i.test(e.message));
+      // the card names the step already: «Критик пропущен: …» reads «Пропущен: …» under it
       const text = skipped
-        ? noStop(eventText(skipped))
+        ? noStop(eventText(skipped)).replace(/^критик\s+/i, "")
         : said || fixed
           ? [said ? plural(said, "замечание", "замечания", "замечаний") : null, fixed ? `${agrees(fixed, "исправлен", "исправлено")} ${plural(fixed, "слайд", "слайда", "слайдов")}` : null].filter(Boolean).join(", ")
           : "Замечаний нет";

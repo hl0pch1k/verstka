@@ -6,6 +6,7 @@ import { generationFlow, uploadTemplateFlow } from "./lib/flows";
 import { foldJobEvent, type ActiveJob } from "./lib/jobState";
 import { trackJob } from "./lib/jobs";
 import { errText, firstLine, newestTemplate, slideCount } from "./lib/narrate";
+import { templateTitle, tplLabel } from "./lib/plain";
 import { LS, storage, uid } from "./lib/utils";
 import { decodeImage, viewTransition } from "./lib/motion";
 import { variantRev, withRev } from "./components/VariantsHelpers";
@@ -32,6 +33,11 @@ export interface AppState {
   templates: TemplateListItem[]; refreshTemplates(): Promise<void>;
   /** Removes a template from the library; the selection moves to the newest one left. Throws with the server's text. */
   deleteTemplate(id: string): Promise<void>;
+  /** Gives a template a name of its own (an empty one brings back the file's). */
+  renameTemplate(id: string, title: string): Promise<void>;
+  /** A template's name for people by its id (the name it was given, else its file's); `file` for a template that is
+   *  gone from the library (an old deck's). */
+  templateLabel(id: string | null | undefined, file?: string | null): string;
   /** Drops an already deleted template from the list (the picker plays the tile's exit first). */
   forgetTemplate(id: string): void;
   templateId: string | null; selectTemplate(id: string | null): void;
@@ -161,6 +167,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await api.deleteTemplate(id);
     forgetTemplate(id);
   }, [forgetTemplate]);
+
+  const renameTemplate = useCallback(async (id: string, title: string) => {
+    const item = await api.renameTemplate(id, title);
+    setTemplates((list) => list.map((t) => (t.template_id === id ? { ...t, ...item } : t)));
+    setManifest((m) => (m && m.template_id === id ? { ...m, title: item.title ?? null } : m));
+  }, []);
+
+  const templateLabel = useCallback((id: string | null | undefined, file?: string | null) => {
+    const t = id ? templates.find((x) => x.template_id === id) : undefined;
+    return t ? tplLabel(t) : templateTitle(file, id ?? undefined);
+  }, [templates]);
 
   const refreshTemplates = useCallback(async () => {
     try {
@@ -389,12 +406,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const activeVariant = useMemo(() => generation?.variants.find((v) => v.strategy === activeStrategy) ?? null, [generation, activeStrategy]);
 
   const value = useMemo<AppState>(() => ({
-    health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, templateId, selectTemplate, manifest, manifestLoading,
+    health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, activeStrategy, setActiveStrategy, activeVariant,
     selectedSlide, setSelectedSlide, setTab, screen, setScreen, detail, setDetail, agentOpen, setAgentOpen, activeJob, runJob, messages, pushMessage, toast, uploadTemplate, startGeneration,
     composerText, editText, takeComposerText,
   }), [
-    health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, templateId, selectTemplate, manifest, manifestLoading,
+    health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, activeStrategy, setActiveStrategy, activeVariant,
     selectedSlide, setSelectedSlide, setTab, screen, detail, agentOpen, setAgentOpen, activeJob, runJob, messages, pushMessage, toast, uploadTemplate, startGeneration,
     composerText, editText, takeComposerText,

@@ -46,8 +46,9 @@ export const SAMPLE_BRIEF = `Запуск функции «Умные сводк
 
 Просим одобрить бюджет 14,5 млн ₽ на второе полугодие и выделить 2 дополнительные GPU-ноды.`;
 
+// a VK field: white, a quiet border that darkens under the pointer and turns VK blue with a soft halo in focus
 export const INPUT_CLS =
-  "h-10 w-full rounded-xl bg-zinc-100 px-4 text-body text-zinc-900 placeholder:text-zinc-500 outline-none transition-[background-color,box-shadow] duration-150 focus:bg-white focus:shadow-selected disabled:cursor-not-allowed disabled:opacity-40";
+  "h-10 w-full rounded-lg border border-zinc-900/[0.12] bg-white px-3 text-body text-zinc-900 placeholder:text-zinc-400 outline-none transition-[border-color,box-shadow] duration-150 hover:border-zinc-900/20 focus:border-accent focus:shadow-[0_0_0_3px_rgba(0,119,255,0.12)] disabled:cursor-not-allowed disabled:opacity-40";
 
 /** A switch with a one-line label (the VK switch of ui/Switch: the knob springs across, the track's colour follows).
  *  `title` explains a disabled row on hover. */
@@ -122,7 +123,8 @@ function StrategyArt({ name, active }: { name: string; active: boolean }) {
   );
 }
 
-/** A selectable strategy card: the drawing, the name and up to two lines of what it does (the full text on hover). */
+/** A selectable strategy: a row card — a small drawing of the variant, the name and up to two lines of what it does (the
+ *  full text on hover), a VK checkbox in the corner. One frame: a hairline at rest, the 2px VK-blue ring when chosen. */
 export function StrategyOption({ strategy, checked, disabled, onChange }: {
   strategy: StrategyInfo;
   checked: boolean;
@@ -139,29 +141,29 @@ export function StrategyOption({ strategy, checked, disabled, onChange }: {
       className={cn(
         // relative: the sr-only checkbox stays inside the card (an absolute box without a positioned parent would
         // stretch the document past the scrolling main); the ring moves in 150 ms and a press sinks the card (tap-soft)
-        "tap-soft relative flex cursor-pointer flex-col gap-3 rounded-xl bg-white p-4",
+        "tap-soft relative flex cursor-pointer items-start gap-3 rounded-xl bg-white p-3",
         "has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-accent",
-        checked ? "shadow-selected" : "shadow-card hover:shadow-raise",
+        checked ? "shadow-selected" : "shadow-[inset_0_0_0_1px_rgba(0,16,61,0.12)] hover:shadow-[inset_0_0_0_1px_rgba(0,16,61,0.22)]",
         disabled && "cursor-not-allowed opacity-40",
       )}
     >
       <input type="checkbox" className="sr-only" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
       {/* the hairline is drawn over the drawing (a white slide on a white card keeps its edge on all four sides) */}
-      <span className="relative block aspect-video overflow-hidden rounded-lg after:pointer-events-none after:absolute after:inset-0 after:rounded-lg after:shadow-inner-line after:content-['']">
+      <span className="relative block h-[54px] w-24 shrink-0 overflow-hidden rounded-md after:pointer-events-none after:absolute after:inset-0 after:rounded-md after:shadow-inner-line after:content-['']">
         <StrategyArt name={strategy.name} active={checked} />
-        <span
-          className={cn(
-            "absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full transition-[background-color,color,box-shadow] duration-150",
-            checked ? "bg-accent-fill text-white" : "bg-white text-transparent shadow-inner-line",
-          )}
-          aria-hidden
-        >
-          <Check key={checked ? "on" : "off"} className={cn("h-3.5 w-3.5", turnedOn && "animate-pop")} strokeWidth={2.5} />
-        </span>
       </span>
-      <span className="min-w-0">
+      <span className="min-w-0 flex-1 pt-0.5">
         <span className="block text-body font-semibold text-zinc-900">{strategy.title}</span>
         <span className="mt-0.5 line-clamp-2 text-caption text-zinc-500" title={strategy.description || hint}>{hint}</span>
+      </span>
+      <span
+        className={cn(
+          "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md transition-[background-color,color,box-shadow] duration-150",
+          checked ? "bg-accent-fill text-white" : "bg-white text-transparent shadow-[inset_0_0_0_1.5px_#C9D0D9]",
+        )}
+        aria-hidden
+      >
+        <Check key={checked ? "on" : "off"} className={cn("h-3.5 w-3.5", turnedOn && "animate-pop")} strokeWidth={3} />
       </span>
     </label>
   );

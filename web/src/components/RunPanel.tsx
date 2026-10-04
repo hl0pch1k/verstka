@@ -5,7 +5,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, FileJson, GitCompare } from "lucide-react";
 import { api } from "../api";
 import { errText } from "../lib/narrate";
-import { templateTitle } from "../lib/plain";
 import { cn, fmtWhen, plural, shortSha } from "../lib/utils";
 import { useApp } from "../store";
 import type { DiffResponse } from "../types";
@@ -64,7 +63,7 @@ function DiffView({ d, strategyTitle }: { d: DiffResponse; strategyTitle(name: s
 }
 
 function Compare() {
-  const { generationId, activeStrategy, generations, strategyTitle } = useApp();
+  const { generationId, activeStrategy, generations, strategyTitle, templateLabel } = useApp();
   const [otherGid, setOtherGid] = useState<string>("");
   const [otherStrategy, setOtherStrategy] = useState<string>("");
   const [result, setResult] = useState<DiffResponse | null>(null);
@@ -103,7 +102,7 @@ function Compare() {
           <option value="">Выберите запуск…</option>
           {done.map((g) => (
             <option key={g.id} value={g.id}>
-              {fmtWhen(g.created_at)} · {g.title || templateTitle(g.template_file, g.template_id)}{g.id === generationId ? " · этот" : ""}
+              {fmtWhen(g.created_at)} · {g.title || templateLabel(g.template_id, g.template_file)}{g.id === generationId ? " · этот" : ""}
             </option>
           ))}
         </select>

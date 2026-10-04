@@ -1,16 +1,16 @@
-// The gallery of templates on the create screen: a large card per analysed template (its cover, name, slide count and
-// font, palette dots), the one chosen ringed and checked; «Слайды» on a card opens every slide of it (TemplatePreview);
-// the last tile takes a template file (a click or a file dropped anywhere on the section, useTemplateDrop: .pptx,
-// .potx, .ppt, .odp …). While a file is being analysed a tile with its progress stands first, where the new template
-// will appear. Five templates show (the chosen one always among them), «Показать все» opens the rest. Motion: skeletons
-// until the list arrives, then the cards fade up in a 40 ms cascade (once); revealed cards cascade too; a new
-// template's cover fades in over its skeleton; a deleted card shrinks away and the others glide into its place.
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type DragEvent } from "react";
-import { Check, ChevronDown, ChevronRight, Eye, ImageOff, Trash2, Upload } from "lucide-react";
+// Step 1 of the create screen, the template: the four latest analysed templates as covers in a row (the chosen one
+// ringed and checked, always among them) and a tile that opens every template in a window; «Слайды» on a cover shows
+// every slide of that template (TemplatePreview: there it can be chosen, read in detail or deleted). A template file is
+// taken by «Загрузить свой» or dropped anywhere on the step (useTemplateDrop: .pptx, .potx, .ppt, .odp …); while it is
+// analysed, a card with its progress stands first, where the new template will appear. Motion is kept to what
+// explains a change: the ring moves to the chosen cover, a new template's picture fades in over its skeleton, a
+// deleted card leaves and the others close the gap.
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type DragEvent } from "react";
+import { Check, Eye, ImageOff, LayoutGrid, Trash2, Upload } from "lucide-react";
 import { api } from "../../api";
 import { errText } from "../../lib/narrate";
-import { EASE, MOTION, prefersReducedMotion, stagger } from "../../lib/motion";
-import { templateTitle } from "../../lib/plain";
+import { EASE, MOTION, prefersReducedMotion } from "../../lib/motion";
+import { templateTitle, tplLabel } from "../../lib/plain";
 import { isTemplateFile, TEMPLATE_ACCEPT } from "../../lib/templateFiles";
 import { cn, plural } from "../../lib/utils";
 import { useApp } from "../../store";
@@ -18,10 +18,10 @@ import type { TemplateListItem } from "../../types";
 import { Button } from "../ui/Button";
 import { Modal } from "../ui/Modal";
 import { Progress } from "../ui/Progress";
-import { PaletteDots, TemplatePreview } from "./TemplatePreview";
+import { TemplatePreview } from "./TemplatePreview";
 
-const COLS = 3;
-const SHOW = 5; // two rows of three: five templates and the upload tile
+/** Covers in the step's row (a fifth place holds «Все шаблоны»). */
+const ROW = 4;
 
 // ---- the upload shared by the header button, the drop zone and the grid (a tiny module store: no store fields)
 
@@ -86,73 +86,42 @@ export function useTemplateDrop() {
   };
 }
 
-/** The gallery header's right side: «Разбор шаблона ›» (with a loaded template). When the drawer it opened closes, the
- *  focus comes back to it (the drawer itself does not know who opened it). */
-export function TemplateActions() {
-  const { templates, templateId, detail, setDetail } = useApp();
-  const known = !!templateId && templates.some((t) => t.template_id === templateId);
-  const opener = useRef<HTMLButtonElement>(null);
-  const opened = useRef(false);
-  useEffect(() => {
-    if (detail || !opened.current) return;
-    opened.current = false;
-    requestAnimationFrame(() => {
-      const el = opener.current;
-      if (el?.isConnected && (!document.activeElement || document.activeElement === document.body)) el.focus();
-    });
-  }, [detail]);
-  if (!known) return null;
+/** The step's header action: a template file from the disk. */
+export function TemplateUploadButton() {
+  const { pick, blocked } = useTemplateUpload();
   return (
-    <Button
-      ref={opener}
-      size="md"
-      variant="ghost"
-      iconRight={ChevronRight}
-      onClick={() => {
-        opened.current = true;
-        setDetail("template");
-      }}
-    >
-      Разбор шаблона
+    <Button size="sm" variant="ghost" icon={Upload} disabled={blocked} onClick={pick}>
+      Загрузить свой
     </Button>
   );
 }
 
-// ---- tiles
+const meta = (t: TemplateListItem) => [t.n_slides !== null ? plural(t.n_slides, "слайд", "слайда", "слайдов") : "шаблон", t.font].filter(Boolean).join(", ");
 
-const CARD = "relative flex w-full flex-col rounded-[20px] bg-white p-2 text-left";
-
-function Card({ t, selected, onPick, onPreview, onDelete, fresh, leaving, className, style }: {
+function Cover({ t, selected, onPick, onPreview, fresh }: {
   t: TemplateListItem;
   selected: boolean;
   onPick(): void;
   /** «Слайды»: every slide of the template in a window. */
   onPreview(): void;
-  /** The trash button: asks first (the picker's dialog). */
-  onDelete(): void;
-  /** A template that arrived after the gallery was shown (a file just analysed): its picture fades in over a skeleton. */
+  /** A template that arrived after the step was shown (a file just analysed): its picture fades in over a skeleton. */
   fresh?: boolean;
-  /** Deleted: the card shrinks away before it leaves the grid (the others then glide into its place). */
-  leaving?: boolean;
-  className?: string;
-  style?: CSSProperties;
 }) {
   const [broken, setBroken] = useState(false);
   const [loaded, setLoaded] = useState(false);
-  const name = templateTitle(t.source_file, t.template_id);
-  const meta = [t.n_slides !== null ? plural(t.n_slides, "слайд", "слайда", "слайдов") : "шаблон", t.font].filter(Boolean).join(" · ");
+  const name = tplLabel(t);
   return (
-    // the preview and the trash are siblings of the card's button (a button never holds another): they show on hover
-    // and on keyboard focus inside the card, always on touch screens
-    <div data-tile={t.template_id} className={cn("group relative", leaving && "pointer-events-none animate-pop-out rm-fade-out", className)} style={style}>
-      <button
-        type="button"
-        onClick={onPick}
-        aria-pressed={selected}
-        // the ring moves between cards in 150 ms (box-shadow through tap-soft); a press sinks the card a touch
-        className={cn(CARD, "tap-soft cursor-pointer", selected ? "shadow-selected" : "shadow-card hover:shadow-raise")}
-      >
-        <span className={cn("relative block aspect-video w-full overflow-hidden rounded-[14px]", fresh && !loaded && !broken ? "skeleton rounded-[14px]" : "bg-zinc-100")}>
+    // «Слайды» is a sibling of the cover's button (a button never holds another); it shows while the pointer is over the
+    // card or the focus is inside it, always on touch screens
+    <div data-tile={t.template_id} className="group relative min-w-0">
+      <button type="button" onClick={onPick} aria-pressed={selected} className="tap-soft block w-full cursor-pointer text-left">
+        <span
+          className={cn(
+            "relative block aspect-video overflow-hidden rounded-xl bg-zinc-100 transition-shadow duration-150",
+            selected ? "shadow-selected" : "shadow-inner-line group-hover:shadow-selected-hover",
+            fresh && !loaded && !broken && "skeleton",
+          )}
+        >
           {t.cover_url && !broken ? (
             <img
               src={t.cover_url}
@@ -161,48 +130,63 @@ function Card({ t, selected, onPick, onPreview, onDelete, fresh, leaving, classN
               draggable={false}
               onLoad={() => setLoaded(true)}
               onError={() => setBroken(true)}
-              className={cn("h-full w-full object-cover transition-transform duration-600 ease-out group-hover:scale-[1.03]", fresh && (loaded ? "animate-fade" : "opacity-0"))}
+              className={cn("h-full w-full object-cover", fresh && (loaded ? "animate-fade" : "opacity-0"))}
             />
           ) : (
             <span className="flex h-full items-center justify-center text-zinc-400"><ImageOff className="h-6 w-6" aria-hidden /></span>
           )}
-          {/* a hairline over the picture's edge: a white cover still has a shape */}
-          <span className="pointer-events-none absolute inset-0 rounded-[14px] ring-1 ring-inset ring-zinc-900/[0.06]" aria-hidden />
           {selected && (
-            <span className="absolute right-2.5 top-2.5 flex h-7 w-7 animate-pop items-center justify-center rounded-full bg-accent-fill text-white shadow-raise ring-2 ring-white" aria-hidden>
-              <Check className="h-4 w-4" strokeWidth={2.5} />
+            <span className="absolute right-2 top-2 flex h-6 w-6 animate-pop items-center justify-center rounded-full bg-accent-fill text-white ring-2 ring-white" aria-hidden>
+              <Check className="h-3.5 w-3.5" strokeWidth={2.5} />
             </span>
           )}
         </span>
-        <span className="flex items-center gap-3 px-2 pb-1.5 pt-3">
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-title3 font-semibold text-zinc-900" title={name}>{name}</span>
-            <span className="mt-0.5 block truncate text-footnote text-zinc-500">{meta}</span>
-          </span>
-          <PaletteDots colors={t.palette} />
-        </span>
+        <span className="mt-2.5 block truncate text-body font-medium text-zinc-900" title={name}>{name}</span>
+        <span className="mt-0.5 block truncate text-footnote text-zinc-500">{meta(t)}</span>
       </button>
-      {/* over the cover (the card's p-2 and the cover's 16:9): «Слайды» at its foot, the trash in its corner */}
-      <div className="pointer-events-none absolute inset-x-2 top-2 aspect-video">
+      {/* a layer of the cover's own box over it: «Слайды» sits in the cover's corner */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 aspect-video">
         <button
           type="button"
           onClick={onPreview}
           aria-label={`Слайды шаблона «${name}»`}
-          className="tap pointer-events-auto absolute bottom-2.5 right-2.5 inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full bg-white/90 px-3 text-footnote font-semibold text-zinc-900 opacity-0 shadow-raise backdrop-blur hover:bg-white focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100"
+          className="tap pointer-events-auto absolute bottom-2 right-2 inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-lg bg-white px-2 text-footnote font-medium text-zinc-900 opacity-0 shadow-raise hover:bg-zinc-50 focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100"
         >
-          <Eye className="h-4 w-4" aria-hidden />
+          <Eye className="h-3.5 w-3.5" aria-hidden />
           Слайды
         </button>
-        <button
-          type="button"
-          onClick={onDelete}
-          aria-label={`Удалить шаблон «${name}»`}
-          title="Удалить шаблон"
-          className="tap pointer-events-auto absolute left-2.5 top-2.5 flex h-8 w-8 cursor-pointer items-center justify-center rounded-full bg-white/90 text-zinc-600 opacity-0 shadow-raise backdrop-blur hover:bg-red-50 hover:text-red-600 focus-visible:opacity-100 active:bg-red-100 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100"
-        >
-          <Trash2 className="h-4 w-4" aria-hidden />
-        </button>
       </div>
+    </div>
+  );
+}
+
+function Analysing({ name, value }: { name: string; value: number | null }) {
+  return (
+    <div className="min-w-0 animate-fade" aria-busy="true" aria-label={`Разбираю шаблон «${templateTitle(name)}»`}>
+      <span className="skeleton block aspect-video w-full rounded-xl" aria-hidden />
+      <span className="mt-2.5 block truncate text-body font-medium text-zinc-900" title={name}>{templateTitle(name)}</span>
+      <span className="mt-1.5 flex h-4 items-center gap-2">
+        <Progress size="sm" value={value ?? 0} indeterminate={value === null} className="flex-1" />
+        <span className="shrink-0 text-footnote text-zinc-500">разбираю…</span>
+      </span>
+    </div>
+  );
+}
+
+/** A template file by a click (in the row when there are few templates, first in the window). */
+function UploadTile({ onPick, blocked, className }: { onPick(): void; blocked: boolean; className?: string }) {
+  return (
+    <div className={cn("min-w-0", className)}>
+      <button
+        type="button"
+        onClick={onPick}
+        disabled={blocked}
+        className="tap-soft flex aspect-video w-full cursor-pointer flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-zinc-300 bg-white/60 text-center hover:border-accent-300 hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        <Upload className="h-5 w-5 text-accent" aria-hidden />
+        <span className="text-footnote font-medium text-zinc-900">Загрузить свой</span>
+      </button>
+      <span className="mt-2.5 block text-footnote text-zinc-500">.pptx, .potx, .ppt или .odp</span>
     </div>
   );
 }
@@ -222,7 +206,7 @@ function DeleteTemplateDialog({ t, onCancel, onDeleted }: { t: TemplateListItem 
     }
   }, [t]);
   if (!view) return null;
-  const name = templateTitle(view.source_file, view.template_id);
+  const name = tplLabel(view);
   const confirm = async () => {
     setBusy(true);
     setError(null);
@@ -263,73 +247,24 @@ function DeleteTemplateDialog({ t, onCancel, onDeleted }: { t: TemplateListItem 
   );
 }
 
-function Analysing({ name, value }: { name: string; value: number | null }) {
-  return (
-    <div className={cn(CARD, "shadow-card animate-fade")} aria-busy="true" aria-label={`Разбираю шаблон «${templateTitle(name)}»`}>
-      <span className="skeleton block aspect-video w-full rounded-[14px]" aria-hidden />
-      <span className="block min-w-0 px-2 pb-1.5 pt-3">
-        <span className="block truncate text-title3 font-semibold text-zinc-900" title={name}>{templateTitle(name)}</span>
-        <span className="mt-1.5 flex h-5 items-center gap-3">
-          <Progress size="sm" value={value ?? 0} indeterminate={value === null} className="flex-1" />
-          <span className="shrink-0 text-footnote text-zinc-500">разбираю</span>
-        </span>
-      </span>
-    </div>
-  );
-}
-
-/** The last tile: a template file by a click, or dropped anywhere on the section (the tile lights up while it is over). */
-function UploadTile({ onPick, blocked, over, className, style }: { onPick(): void; blocked: boolean; over: boolean; className?: string; style?: CSSProperties }) {
-  return (
-    <button
-      type="button"
-      onClick={onPick}
-      disabled={blocked}
-      className={cn(
-        "tap-soft group flex min-h-[240px] w-full cursor-pointer flex-col items-center justify-center gap-3 rounded-[20px] border-2 border-dashed px-6 text-center transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-40",
-        over ? "border-accent bg-accent-50" : "border-zinc-300 hover:border-accent-300 hover:bg-white/70",
-        className,
-      )}
-      style={style}
-    >
-      <span className="flex h-12 w-12 items-center justify-center rounded-full bg-brand text-white shadow-brand transition-transform duration-300 ease-spring group-hover:scale-105" aria-hidden>
-        <Upload className="h-5 w-5" />
-      </span>
-      <span className="text-title3 font-semibold text-zinc-900">Свой шаблон</span>
-      <span className="text-footnote text-zinc-500">
-        .pptx, .potx, .ppt или .odp —
-        <br />
-        или перетащите файл сюда
-      </span>
-    </button>
-  );
-}
-
-/** How long the first cards keep their entrance class: past the longest cascade (6 × 40 + 200 ms). */
-const INTRO_MS = 800;
 
 export function TemplatePicker() {
   const { templates, templateId, selectTemplate, forgetTemplate, healthError, strategies } = useApp();
   const { pick, blocked, job, name, over } = useTemplateUpload();
-  const [all, setAll] = useState(false);
+  const [gallery, setGallery] = useState(false);
   const [preview, setPreview] = useState<TemplateListItem | null>(null);
-  // deleting: the dialog's template, then the card that shrinks away before it leaves the grid
+  // deleting: the dialog's template, then the list closes up (the others glide into the gap)
   const [asking, setAsking] = useState<TemplateListItem | null>(null);
-  const [leaving, setLeaving] = useState<string | null>(null);
   const grid = useRef<HTMLDivElement>(null);
   const flipFrom = useRef<Map<string, DOMRect> | null>(null);
   const removed = (id: string) => {
     setAsking(null);
+    setPreview(null);
     if (prefersReducedMotion()) return forgetTemplate(id);
-    setLeaving(id);
-    window.setTimeout(() => {
-      // FLIP: the other cards' places before the grid closes up, so they glide into the gap
-      const rects = new Map<string, DOMRect>();
-      grid.current?.querySelectorAll<HTMLElement>("[data-tile]").forEach((el) => rects.set(el.dataset.tile as string, el.getBoundingClientRect()));
-      flipFrom.current = rects;
-      setLeaving(null);
-      forgetTemplate(id);
-    }, MOTION.fast + 20);
+    const rects = new Map<string, DOMRect>();
+    grid.current?.querySelectorAll<HTMLElement>("[data-tile]").forEach((el) => rects.set(el.dataset.tile as string, el.getBoundingClientRect()));
+    flipFrom.current = rects;
+    forgetTemplate(id);
   };
   useLayoutEffect(() => {
     const was = flipFrom.current;
@@ -346,89 +281,101 @@ export function TemplatePicker() {
     });
   }, [templates]);
 
-  // the cards of the first list cascade in once (40 ms apart); the ids seen then, so a template added later (a file
-  // just analysed) fades its own picture in instead
-  const intro = useRef<{ at: number; ids: Set<string> } | null>(null);
-  if (!intro.current && templates.length > 0) intro.current = { at: performance.now(), ids: new Set(templates.map((t) => t.template_id)) };
-  const introOn = !!intro.current && performance.now() - intro.current.at < INTRO_MS;
-  // «Показать все» opens: the cards it reveals cascade in (not on the first render, not on the way back)
-  const [revealAt, setRevealAt] = useState(0);
+  // the ids of the first list: a template added later (a file just analysed) fades its own picture in
+  const intro = useRef<Set<string> | null>(null);
+  if (!intro.current && templates.length > 0) intro.current = new Set(templates.map((t) => t.template_id));
+  useEffect(() => {
+    if (!preview) return;
+    // the window follows the list (a deleted template closes it)
+    if (!templates.some((t) => t.template_id === preview.template_id)) setPreview(null);
+  }, [templates, preview]);
 
-  // the order is the server's (newest first) and never changes on a click
+  // the order is the server's (newest first) and never changes on a click; the chosen template keeps a place in the row
   const list = templates;
   const analysing = !!name;
-  // the file being analysed lands first (it is the newest): its tile stands there and the grid keeps its length
-  const room = all ? list.length : SHOW - (analysing ? 1 : 0);
-  let cards = list.slice(0, room);
-  // a folded gallery still shows the chosen template: it takes the last visible place
+  const room = ROW - (analysing ? 1 : 0);
+  let row = list.slice(0, room);
   const chosen = list.find((t) => t.template_id === templateId);
-  if (chosen && room > 0 && !cards.includes(chosen)) cards = [...cards.slice(0, room - 1), chosen];
-
-  // the list has not arrived yet (templates and strategies come in one request) or cannot (no server): the grid waits
-  // for it as skeletons — the upload prompt shows only when the server really has no templates
+  if (chosen && room > 0 && !row.includes(chosen)) row = [...row.slice(0, room - 1), chosen];
+  const more = list.length - row.length;
+  // the list has not arrived yet (templates and strategies come in one request) or cannot (no server)
   const waiting = list.length === 0 && !analysing && (!!healthError || strategies.length === 0);
-  const revealing = all && performance.now() - revealAt < INTRO_MS;
-  const tileMotion = (t: TemplateListItem, i: number): { className?: string; style?: CSSProperties } => {
-    if (introOn && intro.current?.ids.has(t.template_id)) return { className: "animate-fade-in", style: stagger(i) };
-    if (revealing && i >= SHOW) return { className: "animate-fade-in", style: stagger(i - SHOW) };
-    return {};
-  };
+  const fresh = (t: TemplateListItem) => !!intro.current && !intro.current.has(t.template_id);
 
   return (
-    <div>
-      <div className="mb-5">
-        <div className="flex h-10 items-center gap-2">
-          <h2 id="templates-title" className="min-w-0 flex-1 truncate text-title1 font-bold text-zinc-900">Шаблон оформления</h2>
-          {list.length > SHOW && (
-            <Button
-              variant="ghost"
-              shape="pill"
-              iconRight={<ChevronDown className={cn("transition-transform duration-300 ease-glide", all && "rotate-180")} />}
-              aria-expanded={all}
-              onClick={() => {
-                if (!all) setRevealAt(performance.now());
-                setAll(!all);
-              }}
-            >
-              {all ? "Свернуть" : `Все шаблоны · ${list.length}`}
-            </Button>
-          )}
-          <div className="-mr-4 flex shrink-0 items-center">
-            <TemplateActions />
-          </div>
-        </div>
-        <p className="mt-1 text-body text-zinc-500">Слайды собираются из макетов шаблона: его шрифты, цвета и сетка.</p>
-      </div>
+    <div className={cn("relative rounded-xl transition-[outline-color] duration-150", over ? "outline-dashed outline-2 outline-offset-8 outline-accent" : "outline-none")}>
       {waiting ? (
-        <div className="grid grid-cols-3 gap-5" aria-busy="true" aria-label="Шаблоны загружаются">
-          {Array.from({ length: COLS * 2 }, (_, i) => <div key={i} className="skeleton aspect-[16/12] rounded-[20px]" />)}
+        <div className="grid grid-cols-5 gap-5" aria-busy="true" aria-label="Шаблоны загружаются">
+          {Array.from({ length: ROW + 1 }, (_, i) => (
+            <div key={i}>
+              <div className="skeleton aspect-video rounded-xl" />
+              <div className="skeleton mt-3 h-4 w-3/4 rounded" />
+              <div className="skeleton mt-2 h-3 w-1/2 rounded" />
+            </div>
+          ))}
         </div>
       ) : (
-        <div ref={grid} className="grid grid-cols-3 gap-5">
+        <div ref={grid} className="grid grid-cols-5 gap-5">
           {analysing && <Analysing name={name} value={job ? job.progress : null} />}
-          {cards.map((t, i) => (
-            <Card
+          {row.map((t) => (
+            <Cover key={t.template_id} t={t} selected={t.template_id === templateId} onPick={() => selectTemplate(t.template_id)} onPreview={() => setPreview(t)} fresh={fresh(t)} />
+          ))}
+          {more > 0 ? (
+            <div className="min-w-0">
+              <button
+                type="button"
+                onClick={() => setGallery(true)}
+                className="tap-soft flex aspect-video w-full cursor-pointer flex-col items-center justify-center gap-1.5 rounded-xl bg-zinc-100 text-center hover:bg-zinc-200/70"
+              >
+                <LayoutGrid className="h-5 w-5 text-zinc-500" aria-hidden />
+                <span className="text-footnote font-medium text-zinc-900">Все шаблоны</span>
+              </button>
+              <span className="mt-2.5 block text-footnote text-zinc-500">ещё {plural(more, "шаблон", "шаблона", "шаблонов")}</span>
+            </div>
+          ) : (
+            Array.from({ length: Math.max(1, ROW + 1 - row.length - (analysing ? 1 : 0)) }, (_, i) => (i === 0 ? <UploadTile key="up" onPick={pick} blocked={!!blocked} /> : <span key={i} aria-hidden />))
+          )}
+        </div>
+      )}
+      {/* a file over the step: where it will go */}
+      {over && (
+        <div className="pointer-events-none absolute inset-0 flex animate-fade items-center justify-center rounded-xl bg-accent-50/90" aria-hidden>
+          <span className="inline-flex items-center gap-2 text-body font-medium text-accent-700">
+            <Upload className="h-5 w-5" />
+            Отпустите файл — разберу шаблон
+          </span>
+        </div>
+      )}
+      <Modal
+        open={gallery}
+        onClose={() => setGallery(false)}
+        size="xl"
+        title="Шаблоны"
+        description={`${plural(list.length, "шаблон", "шаблона", "шаблонов")}. Выберите оформление или загрузите своё.`}
+      >
+        <div className="grid grid-cols-4 gap-x-5 gap-y-6 pb-2 pt-2">
+          <UploadTile
+            onPick={() => {
+              setGallery(false);
+              pick();
+            }}
+            blocked={!!blocked}
+          />
+          {list.map((t) => (
+            <Cover
               key={t.template_id}
               t={t}
               selected={t.template_id === templateId}
-              onPick={() => selectTemplate(t.template_id)}
+              onPick={() => {
+                selectTemplate(t.template_id);
+                setGallery(false);
+              }}
               onPreview={() => setPreview(t)}
-              onDelete={() => setAsking(t)}
-              leaving={leaving === t.template_id}
-              fresh={!!intro.current && !intro.current.ids.has(t.template_id)}
-              {...tileMotion(t, i)}
             />
           ))}
-          <UploadTile
-            onPick={pick}
-            blocked={!!blocked}
-            over={over}
-            className={cn(list.length === 0 && !analysing && "col-span-3 min-h-[200px]", introOn && "animate-fade-in")}
-            style={introOn ? stagger(cards.length) : undefined}
-          />
         </div>
-      )}
-      <TemplatePreview t={preview} onClose={() => setPreview(null)} />
+      </Modal>
+      <TemplatePreview t={preview} onClose={() => setPreview(null)} onDelete={(t) => setAsking(t)} />
       <DeleteTemplateDialog t={asking} onCancel={() => setAsking(null)} onDeleted={removed} />
     </div>
   );

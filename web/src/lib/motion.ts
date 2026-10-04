@@ -11,9 +11,9 @@ export const MOTION = { instant: 100, fast: 150, base: 200, slow: 300, data: 600
 
 export const EASE = {
   std: "cubic-bezier(0.2, 0, 0, 1)",
-  out: "cubic-bezier(0.16, 1, 0.3, 1)",
+  out: "cubic-bezier(0.23, 1, 0.32, 1)",
   in: "cubic-bezier(0.4, 0, 1, 1)",
-  inOut: "cubic-bezier(0.65, 0, 0.35, 1)",
+  inOut: "cubic-bezier(0.77, 0, 0.175, 1)",
   glide: "cubic-bezier(0.32, 0.72, 0, 1)",
   spring: "cubic-bezier(0.34, 1.56, 0.64, 1)",
 } as const;

@@ -41,6 +41,9 @@ export function templateTitle(file: string | null | undefined, fallback?: string
   return t || templateName(file, fallback);
 }
 
+/** A template's name for people: the one it was given in the interface, else its file's (templateTitle). */
+export const tplLabel = (t: { title?: string | null; source_file: string | null; template_id: string }) => t.title?.trim() || templateTitle(t.source_file, t.template_id);
+
 // English layout words the model sometimes leaves in its reasoning → the words the interface uses (field names, then
 // the slide kinds; `_` counts as a letter, so «image_text» is one word)
 const W = (word: string) => new RegExp(`(?<![A-Za-z_])${word}(?![A-Za-z_])`, "gi");

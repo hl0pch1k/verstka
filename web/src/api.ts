@@ -65,6 +65,8 @@ export const api = {
   createGeneration: (req: GenerateRequest) => request<GenerateResponse>("/api/generations", json(req)),
   deleteGeneration: (gid: string) => request<{ deleted: boolean }>(`/api/generations/${encodeURIComponent(gid)}`, { method: "DELETE" }),
   deleteTemplate: (id: string) => request<{ deleted: boolean }>(`/api/templates/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  /** An empty title brings back the file's name. */
+  renameTemplate: (id: string, title: string) => request<TemplateListItem>(`/api/templates/${encodeURIComponent(id)}`, json({ title }, "PATCH")),
   explain: (gid: string, strategy: string, index: number) =>
     request<ExplainResponse>(`/api/generations/${encodeURIComponent(gid)}/${encodeURIComponent(strategy)}/explain/${index}`),
   fixes: (gid: string, strategy: string, body: FixRequest) =>

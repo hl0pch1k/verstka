@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { clock, quoted, railSlides, sketchKind, sketchOf, stripQuoted } from "./stage";
+import { clock, fitColumns, quoted, railSlides, sketchInk, sketchKind, sketchOf, stripQuoted } from "./stage";
 import type { AgentEvent } from "../types";
 
 const ev = (step: string, message: string, slide: number | null = null, variant: string | null = null): AgentEvent => ({ step, message, slide, variant });
@@ -66,4 +66,40 @@ test("clock", () => {
   assert.equal(clock(0), "0:00");
   assert.equal(clock(65.2), "1:05");
   assert.equal(clock(301), "5:01");
+});
+
+test("sketchInk: the template's first strong colour, VK blue when it has none", () => {
+  // VK Education: white and a pale blue come first, the accent is #0077FF; its soft tone is VK's accent-200
+  assert.deepEqual(sketchInk(["FFFFFF", "EBF3F9", "0077FF", "000000"]), { ink: "#0077FF", soft: "#ADD3FF" });
+  // a coffee template: the brown, not the cream
+  assert.equal(sketchInk(["FFFFFF", "F3F2EE", "6D2F29", "151513"]).ink, "#6D2F29");
+  // greys and near-black only: VK blue
+  assert.deepEqual(sketchInk(["FEFCFF", "454754", "879AA3", "000000"]), { ink: "#0077FF", soft: "#ADD3FF" });
+  assert.equal(sketchInk(undefined).ink, "#0077FF");
+  assert.equal(sketchInk(["#2A74FF"]).ink, "#2A74FF");
+});
+
+test("fitColumns: every slide in view at the largest size, readable columns when they cannot all fit", () => {
+  const wide = 16 / 9;
+  // 1440×900: a 912×604 board shows 12 slides in 4 columns (3 columns would need 4 rows of 165px cards)
+  assert.equal(fitColumns(912, 604, 12, wide), 4);
+  // 1280×720: 812×436 still takes 4 columns of 191px
+  assert.equal(fitColumns(812, 436, 12, wide), 4);
+  // a few slides on a wide board: cards stop growing at 340px
+  assert.equal(fitColumns(1116, 784, 4, wide), 4);
+  // 30 slides never fit: as many columns as keep a card 184px wide or more
+  assert.equal(fitColumns(912, 400, 30, wide), 4);
+  assert.equal(fitColumns(0, 400, 12, wide), 4);
+});
+
+test("sketchOf reads the lines of a plan made without the model too", () => {
+  const table = sketchOf(ev("designer", "«Итоги пилота» собран по правилам — таблица 2×3.", 3, "structured"));
+  assert.equal(table?.kind, "table");
+  assert.equal(plain(table?.headline ?? null), "Итоги пилота");
+  const cover = sketchOf(ev("designer", "Обложка «Умные сводки».", 1, "structured"));
+  assert.equal(cover?.kind, "cover");
+  assert.equal(plain(cover?.headline ?? null), "Умные сводки");
+  const end = sketchOf(ev("designer", "Финальный слайд «Спасибо за внимание».", 10, "structured"));
+  assert.equal(end?.kind, "closing");
+  assert.equal(plain(end?.headline ?? null), "Спасибо за внимание");
 });
