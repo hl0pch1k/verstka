@@ -103,7 +103,10 @@ def _unsay(outline: DeckOutline) -> int:
     return removed
 
 
-def _rematch(plan: LayoutPlan, outline: DeckOutline, oid: str, manifest: Optional[TemplateManifest] = None) -> str:
+def _rematch(plan: LayoutPlan, outline: DeckOutline, oid: str, manifest: Optional[TemplateManifest] = None, taken: Optional[set] = None) -> str:
+    """The slide's next rung: its next untried sample (one no other slide of the deck shows first — three slides moved
+    to one sample in one pass made the pass worse and it was rolled back whole), else the composer. `taken`: the
+    samples this pass already gave other slides."""
     ps = plan.for_outline(oid)
     osl = next((s for s in outline.slides if s.id == oid), None)
     if ps is None or osl is None:
@@ -115,15 +118,23 @@ def _rematch(plan: LayoutPlan, outline: DeckOutline, oid: str, manifest: Optiona
         tried.add(ps.pattern_id)
     bookend = getattr(osl.kind, "value", osl.kind) in ("title", "section", "thanks")
     patterns = {p.id: p for p in manifest.patterns} if manifest is not None else {}
-    for pid, score in ps.alternatives:
-        if bookend and _empty_frame(patterns.get(pid), osl):
-            continue  # a cover never trades its heading for an empty photo frame or a phone mock-up
-        if pid not in tried and score >= 0.3:
-            ps.mode = "clone"
-            ps.pattern_id = pid
-            ps.fit["tried"] = sorted(tried)
-            ps.reasons.append(f"автофикс: перевыбран паттерн {pid} ({score:.2f})")
-            return f"rematch → {pid}"
+    shown = {x.pattern_id for x in plan.slides if x.pattern_id and x.outline_id != oid} | set(taken or ())
+    for free_only in (True, False):
+        for pid, score in ps.alternatives:
+            if bookend and _empty_frame(patterns.get(pid), osl):
+                continue  # a cover never trades its heading for an empty photo frame or a phone mock-up
+            if free_only and pid in shown:
+                continue
+            if pid not in tried and score >= 0.3:
+                ps.mode = "clone"
+                ps.pattern_id = pid
+                ps.fit["tried"] = sorted(tried)
+                ps.reasons.append(f"автофикс: перевыбран паттерн {pid} ({score:.2f})")
+                if taken is not None:
+                    taken.add(pid)
+                return f"rematch → {pid}"
+    if ps.fit.get("synth_failed"):
+        return "skip"  # the composer was tried and did not make the slide better
     if ps.mode != "synth":
         ps.mode = "synth"
         ps.pattern_id = None
@@ -134,17 +145,18 @@ def _rematch(plan: LayoutPlan, outline: DeckOutline, oid: str, manifest: Optiona
     return "skip"
 
 
-def _condense(outline: DeckOutline, oid: str, skills: Optional[SkillsRegistry], providers: Optional[ProviderRegistry]) -> str:
+def _condense(outline: DeckOutline, oid: str, skills: Optional[SkillsRegistry], providers: Optional[ProviderRegistry], target: Optional[str] = None) -> str:
     from verstka.planning.condense import condense_text
 
     osl = next((s for s in outline.slides if s.id == oid), None)
     if osl is None:
         return "skip"
     if osl.verbatim:
-        # the author's own sentences: one whole sentence less (it stays in the speaker notes), never a cut inside one
+        # the author's own sentences: one whole sentence less (it stays in the speaker notes), never a cut inside one —
+        # and only from the block that overflows (`target`: the flagged text), never from a block that fits
         from verstka.planning.faithful import drop_one_sentence
 
-        return drop_one_sentence(osl)
+        return drop_one_sentence(osl, target=target)
     c = osl.content
     changed = 0
     new_bullets = []
@@ -474,6 +486,12 @@ class _Snapshot:
             pass
 
 
+def _slide_weight(report: AuditReport, oid: str) -> tuple[int, int]:
+    """(errors, warnings) of one slide of the deck."""
+    own = [i for i in report.issues if (i.outline_id or "") == oid and i.kind != "model"]
+    return sum(1 for i in own if i.severity == "error"), sum(1 for i in own if i.severity == "warn")
+
+
 def _better(new: AuditReport, old: AuditReport) -> bool:
     """Fewer errors, then fewer warnings, then a higher score."""
     return (new.summary.errors, new.summary.warnings, -new.summary.score) < (old.summary.errors, old.summary.warnings, -old.summary.score)
@@ -522,15 +540,22 @@ def autofix_loop(
             applied: list[dict] = []
             need_render = False
             xml_actions: list[tuple[int, FixAction]] = []
-            slide_index_of = {s.outline_id: s.index for s in _ir_slides(current, outline)}
+            ir_slides = _ir_slides(current, outline)
+            slide_index_of = {s.outline_id: s.index for s in ir_slides}
+            texts = {(s.outline_id, e.id): e.text for s in ir_slides for e in getattr(s, "elements", None) or [] if getattr(e, "text", None)}
+            taken: set = set()
+            moved: dict[str, str] = {}  # outline id → what its structural fix did («rematch → p7», «synth → cards»)
             for oid, actions in fixes.items():
                 for act in actions:
                     if act.action in STRUCTURAL_ACTIONS:
-                        res = _rematch(plan, outline, oid, manifest)
+                        res = _rematch(plan, outline, oid, manifest, taken)
                         applied.append({"iteration": it, "outline_id": oid, "action": act.action, "result": res})
                         need_render = need_render or res != "skip"
+                        if res != "skip":
+                            moved[oid] = res
                     elif act.action == "condense_text":
-                        res = _condense(outline, oid, skills if use_models else None, providers if use_models else None)
+                        target = texts.get((oid, act.params.get("element_id"))) if act.params.get("element_id") else None
+                        res = _condense(outline, oid, skills if use_models else None, providers if use_models else None, target=target)
                         applied.append({"iteration": it, "outline_id": oid, "action": act.action, "result": res})
                         need_render = need_render or res != "skip"
                     else:
@@ -560,8 +585,33 @@ def autofix_loop(
             if _better(new_report, current):
                 current = new_report
                 continue
-            # the iteration made things worse: ship the previous deck, re-audit it so slide images match
+            # not better as a whole: the slides whose own errors went keep their change, the others go back — a slide that
+            # got better is never lost to a neighbour that got worse
+            better = {oid for oid in moved if _slide_weight(new_report, oid) < _slide_weight(current, oid)}
+            if better and better != set(moved):
+                for oid in set(moved) - better:
+                    _restore_slide(plan, outline, snapshot, oid)
+                _unsay(outline)
+                render_result = render_deck(outline, plan, manifest, ws, pptx)
+                partial = run_audit(pptx, manifest, outline, ws, **audit_kw)
+                if _better(partial, current):
+                    kept_fixes = [f if not isinstance(f, dict) or f.get("outline_id") not in (set(moved) - better) or f.get("action") not in STRUCTURAL_ACTIONS
+                                  else {**f, "rolled_back": True} for f in applied]
+                    partial.applied_fixes = current.applied_fixes + kept_fixes
+                    partial.iterations = it
+                    current = partial
+                    continue
+            # the iteration made things worse: ship the previous deck, re-audit it so slide images match; the next pass
+            # moves each of its slides a rung on (the sample tried here, or the composer, is not tried again)
             plan, outline, render_result = snapshot.restore(pptx)
+            for oid, res in moved.items():
+                ps = plan.for_outline(oid)
+                if ps is None:
+                    continue
+                if res.startswith("rematch → "):
+                    ps.fit["tried"] = sorted(set(ps.fit.get("tried", [])) | {res.split("→", 1)[1].strip()})
+                elif res.startswith("synth"):
+                    ps.fit["synth_failed"] = True
             restored = run_audit(pptx, manifest, outline, ws, **audit_kw)
             old_s, new_s = current.summary, new_report.summary
             why = (
@@ -572,13 +622,33 @@ def autofix_loop(
             )
             rollback = {"iteration": it, "action": "rollback", "result": f"{why} — возвращена предыдущая версия"}
             log.info("autofix iteration %d rolled back: %s", it, rollback["result"])
-            restored.applied_fixes = current.applied_fixes + applied + [rollback]
+            # the iteration's fixes are kept in the record — marked undone, so no list shows them as done
+            restored.applied_fixes = current.applied_fixes + [{**f, "rolled_back": True} if isinstance(f, dict) else f for f in applied] + [rollback]
             restored.iterations = it
             current = restored
-            break
+            if not moved:
+                break  # nothing structural to move on from: another pass would do the same
         finally:
             snapshot.discard()
     return current, plan, outline, render_result
+
+
+def _restore_slide(plan: LayoutPlan, outline: DeckOutline, snapshot: "_Snapshot", oid: str) -> None:
+    """One slide's plan entry and outline slide back as they were before the pass (the sample tried noted)."""
+    old_ps = snapshot.plan.for_outline(oid)
+    new_ps = plan.for_outline(oid)
+    if old_ps is not None and new_ps is not None:
+        tried = sorted(set(old_ps.fit.get("tried", [])) | ({new_ps.pattern_id} if new_ps.pattern_id else set()))
+        idx = next((k for k, x in enumerate(plan.slides) if x is new_ps), None)
+        if idx is not None:
+            plan.slides[idx] = copy.deepcopy(old_ps)
+            plan.slides[idx].fit["tried"] = tried
+            if new_ps.mode == "synth":
+                plan.slides[idx].fit["synth_failed"] = True
+    old_s = next((x for x in snapshot.outline.slides if x.id == oid), None)
+    k = next((j for j, x in enumerate(outline.slides) if x.id == oid), None)
+    if old_s is not None and k is not None:
+        outline.slides[k] = copy.deepcopy(old_s)
 
 
 def _ir_slides(report: AuditReport, outline: Optional[DeckOutline] = None):

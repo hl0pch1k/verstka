@@ -1348,7 +1348,9 @@ def _bullets(r: Reading, paras: list[list[str]], room: Room, prof: dict) -> Opti
     per = 260 if prof["density"] != "dense" else 340
     got = _sentences_for(paras, prof["density"], per, total)
     labels = _labels(r, paras)
-    lines = [_labelled(lbl, _join(ss)) for lbl, ss in zip(labels, got) if ss][:6]
+    lines = [_labelled(lbl, _join(ss)) for lbl, ss in zip(labels, got) if ss]
+    # (short lines — a step, an item — are a list: up to eight, as a list is shown; longer ones six)
+    lines = lines[: 8 if lines and all(words(x) <= 12 for x in lines) else 6]
     if len(paras) == 1 and len(paras[0]) >= 3 and prof["density"] != "lead":
         lines = fit_sentences(paras[0], total)[:6]
         if lines and labels[0]:
@@ -2096,12 +2098,40 @@ def _line(pos: int, s) -> str:
 # ------------------------------------------------------------------ fitting after the render
 
 
-def drop_one_sentence(slide) -> str:
+def _same_block(block: str, target: str) -> bool:
+    """The flagged element shows this block: one text starts the other (the slide may show it typeset, cut short)."""
+    a, b = " ".join(block.replace("\u00a0", " ").split()).lower(), " ".join(target.replace("\u00a0", " ").split()).lower()
+    k = min(len(a), len(b), 40)
+    return k >= 8 and (a[:k] == b[:k] or a[:k] in b or b[:k] in a)
+
+
+def drop_one_sentence(slide, target: Optional[str] = None) -> str:
     """A slide of the author's text that overflows its place shows one whole sentence less: the last sentence of its
     longest block (a card, a column's paragraph, a line of the list); a block of one sentence goes whole, the slide's
-    last such block first, while two blocks stay. The speaker notes keep the slide's whole text. Returns what changed
-    («skip» when nothing can go without losing the slide's point)."""
+    last such block first, while two blocks stay. The speaker notes keep the slide's whole text. `target`: the text of
+    the element that overflows — only its own block may give a sentence, and only one of two or more (a one-line title
+    or label that runs over is no reason to cut another card's text). Returns what changed («skip» when nothing can
+    go without losing the slide's point)."""
     c = slide.content
+    if target is not None:
+        holders = [(c.bullets, i) for i in range(len(c.bullets))] + [(c.paragraphs, i) for i in range(len(c.paragraphs))]
+        for it in [*c.items, *c.columns]:
+            if it.text:
+                holders.append((it, -1))
+            holders += [(it.bullets, i) for i in range(len(it.bullets))]
+        for holder, i in holders:
+            text = holder.text if i == -1 else holder[i]
+            if not _same_block(text, target):
+                continue
+            ss = sentences(text)
+            if len(ss) < 2:
+                return "skip"
+            if i == -1:
+                holder.text = " ".join(ss[:-1])
+            else:
+                holder[i] = " ".join(ss[:-1])
+            return f"one sentence less: «{ss[-1][:60]}» (it stays in the notes)"
+        return "skip"
     blocks: list[tuple[int, str, object, int]] = []  # (length, where, holder, index)
     for i, b in enumerate(c.bullets):
         blocks.append((len(b), "bullets", c.bullets, i))

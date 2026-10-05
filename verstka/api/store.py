@@ -77,7 +77,9 @@ class Store:
 
     # ---- templates ----------------------------------------------------------------
     def upload_path(self, filename: str) -> Path:
-        safe = "".join(ch for ch in Path(filename).name if ch.isalnum() or ch in "._- ()") or "upload.pptx"
+        safe = "".join(ch for ch in Path(filename).name if ch.isalnum() or ch in "._- ()").lstrip(". ")
+        if not safe or not safe.strip("."):
+            safe = "upload.pptx"  # «..», «.», dots only: never a path of its own
         # a folder per upload keeps the user's file name intact (it becomes the template's source_file)
         d = self.uploads / uuid.uuid4().hex[:8]
         d.mkdir(parents=True, exist_ok=True)
@@ -184,6 +186,21 @@ class Store:
             for k, v in data.items():
                 if not only_missing or k not in meta:
                     meta[k] = v
+            _write_json_atomic(p, meta)
+        return meta
+
+    def merge_variant_summary(self, gid: str, strategy: str, fields: dict) -> Optional[dict]:
+        """One variant's line of the generation's summary (its score, errors, slide count) updated under the lock, read
+        afresh: two jobs on two variants never write back a summary one of them read before the other's change."""
+        d = self.generation_dir(gid)
+        if d is None:
+            return None
+        p = d / "generation.json"
+        with _META_LOCK:
+            meta = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {"id": gid}
+            summary = meta.get("summary") if isinstance(meta.get("summary"), dict) else {}
+            summary[strategy] = {**(summary.get(strategy) or {}), **fields}
+            meta["summary"] = summary
             _write_json_atomic(p, meta)
         return meta
 

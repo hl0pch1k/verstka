@@ -50,7 +50,8 @@ export function AppliedFixes({ fixes, slideOf, templateSlide, onShow }: {
   const rows = useMemo(() => {
     const out: Array<{ slide: number | null; title: string; extra: string | null; n: number }> = [];
     const seen = new Map<string, (typeof out)[number]>();
-    for (const r of fixes.map(normalizeFix)) {
+    // (a fix the check undid — its iteration made the deck worse — is not done: only the rollback row tells of it)
+    for (const r of fixes.filter((f) => f.rolled_back !== true).map(normalizeFix)) {
       const d = describeFix(r, slideOf, templateSlide);
       const key = `${d.slide ?? ""}|${d.title}|${d.extra ?? ""}`;
       const had = seen.get(key);
@@ -65,7 +66,7 @@ export function AppliedFixes({ fixes, slideOf, templateSlide, onShow }: {
   }, [fixes, slideOf, templateSlide]);
   if (rows.length === 0) return null;
   return (
-    <Collapsible title="Исправлено автоматически" hint={String(fixes.length)} defaultOpen={false} keepMounted={false}>
+    <Collapsible title="Исправлено автоматически" hint={String(rows.reduce((k, r) => k + r.n, 0))} defaultOpen={false} keepMounted={false}>
       {/* full-bleed rows in the card's 24px body; the last row's padding is part of the card's bottom */}
       <ol className="-mx-6 -mb-3 divide-y divide-zinc-100">
         {rows.map((r, idx) => (

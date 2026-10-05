@@ -73,13 +73,16 @@ def sniff(path: Path) -> str:
         return "unknown"
     try:
         with zipfile.ZipFile(path) as z:
+            if _bomb(z):
+                return "bomb"
             names = set(z.namelist())
             if "ppt/presentation.xml" in names:
                 return "pptx"
             if "theme/presentation.xml" in names or "theme/theme/themeManager.xml" in names:
                 return "thmx"
             if "mimetype" in names:
-                mt = z.read("mimetype").decode("ascii", "ignore").strip()
+                with z.open("mimetype") as f:
+                    mt = f.read(200).decode("ascii", "ignore").strip()  # (never the whole member: a few bytes say the type)
                 if mt.startswith("application/vnd.oasis.opendocument.presentation"):
                     return "odp"
                 return "word" if "text" in mt else "excel" if "spreadsheet" in mt else "unknown"
@@ -94,7 +97,30 @@ def sniff(path: Path) -> str:
     return "zip"
 
 
+# a zip that unpacks into far more than any presentation holds (a «zip bomb»: 600 KB that inflate to 600 MB): refused
+# before anything reads it — the analysis and LibreOffice would take the server's memory
+MAX_UNPACKED = 2 << 30  # all members
+MAX_MEMBER = 512 << 20  # one member
+MAX_MEMBERS = 5000
+MAX_RATIO = 200  # unpacked / packed, for members over 10 MB
+
+
+def _bomb(z: zipfile.ZipFile) -> bool:
+    infos = z.infolist()
+    if len(infos) > MAX_MEMBERS:
+        return True
+    total = 0
+    for i in infos:
+        total += i.file_size
+        if i.file_size > MAX_MEMBER or total > MAX_UNPACKED:
+            return True
+        if i.file_size > (10 << 20) and i.file_size > MAX_RATIO * max(i.compress_size, 1):
+            return True
+    return False
+
+
 _WHY = {
+    "bomb": "Файл распаковывается в слишком большой объём — это не похоже на шаблон презентации. Сохраните шаблон заново в PowerPoint и загрузите снова.",
     "pdf": "Это PDF — из него не достать макеты и стили. Нужен файл PowerPoint: .pptx или .potx.",
     "encrypted": "Файл защищён паролем. Снимите пароль в PowerPoint (Файл → Сведения → Защита презентации) и загрузите шаблон снова.",
     "keynote": "Это файл Keynote. Экспортируйте его в PowerPoint (Файл → Экспортировать в → PowerPoint) и загрузите .pptx.",

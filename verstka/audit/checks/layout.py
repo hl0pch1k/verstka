@@ -6,7 +6,7 @@ import re
 from typing import Optional
 
 from verstka.audit.checks.template import is_figure
-from verstka.audit.checks.common import CONTENT_TYPES, at_template_position, contains, fill_alpha, fix, is_chrome_like, is_template_chrome, ru_count, ru_times, text_elements, text_height_needed_pt, title_element, usable_height_pt
+from verstka.audit.checks.common import CONTENT_TYPES, at_template_position, contains, fill_alpha, fix, ground_of, is_chrome_like, is_template_chrome, ru_count, ru_times, text_elements, text_height_needed_pt, title_element, usable_height_pt
 from verstka.audit.registry import AuditContext, check
 from verstka.rendering.fonts import text_width_pt
 from verstka.rendering.groups import PLATE_MARK
@@ -146,6 +146,26 @@ def overlap(ctx: AuditContext) -> list[Issue]:
     return out
 
 
+
+
+def _visible_card(slide, o) -> bool:
+    """A shape a reader sees as a card: an outline of its own, or a fill that stands out from the ground under it (a
+    background-coloured ellipse of the template — a soft glow — is no card a text could run out of), not nearly clear."""
+    from verstka.schemas.common import contrast_ratio
+
+    if o.line_hex:
+        return True
+    if fill_alpha(o) < 0.3:
+        return False
+    ground = ground_of(slide, o)[0] or slide.background_hex
+    if not ground or not o.fill_hex:
+        return True
+    try:
+        return contrast_ratio(o.fill_hex, ground) >= 1.1
+    except (ValueError, TypeError):
+        return True
+
+
 @check(TEXT_OUTSIDE_CARD)
 def text_outside_card(ctx: AuditContext) -> list[Issue]:
     """A text that starts inside a card (the smallest filled or outlined shape holding its first line) and whose lines
@@ -154,7 +174,7 @@ def text_outside_card(ctx: AuditContext) -> list[Issue]:
     W, H = ctx.ir.slide_w, ctx.ir.slide_h
     spacing = 1.2  # the IR carries the spacing each paragraph is shown with; one set nowhere is single-spaced
     for s in ctx.ir.slides:
-        cards = [o for o in s.elements if o.type in ("shape", "text") and (o.fill_hex or o.line_hex) and o.bbox.area > 0 and not o.has_text]
+        cards = [o for o in s.elements if o.type in ("shape", "text") and (o.fill_hex or o.line_hex) and o.bbox.area > 0 and not o.has_text and _visible_card(s, o)]
         for e in text_elements(s):
             if is_chrome_like(e, ctx.ir, ctx.manifest) or e.fill_hex or e.line_hex:
                 continue

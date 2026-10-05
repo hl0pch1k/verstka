@@ -462,3 +462,11 @@ def test_opening_hours_are_no_change_but_a_change_in_hours_is():
     assert _pairs_of("Приём с 9 до 18.") == []
     got = _pairs_of("Время ответа сократилось с 8 до 2 часов.")
     assert got and got[0].values == [8.0, 2.0]
+
+
+def test_eight_short_steps_are_all_on_the_slide():
+    steps = ["Найти помещение.", "Подписать договор аренды.", "Сделать ремонт.", "Купить мебель.", "Перевезти технику.",
+             "Подключить интернет.", "Настроить пропуска.", "Провести открытие для команды."]
+    r = F.read_slide(2, "Восемь шагов переезда", "\n\n".join(steps))
+    f = F._bullets(r, r.paras(), F.Room(), F.PROFILES["structured"])
+    assert len(f.slide.content.bullets) == 8 and f.slide.content.bullets[-1] == "Провести открытие для команды."

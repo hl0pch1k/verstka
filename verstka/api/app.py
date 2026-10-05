@@ -527,8 +527,9 @@ async def upload_template(file: UploadFile = File(...), use_models: bool = Form(
         if not path.suffix.lower() in ACCEPTED_EXTS and sniff(path) not in ("pptx", "thmx", "legacy", "odp"):
             raise HTTPException(400, reason("unknown"))
     except BaseException:
-        path.unlink(missing_ok=True)
-        if path.parent != store.uploads and not any(path.parent.iterdir()):
+        if path.is_file():
+            path.unlink(missing_ok=True)
+        if path.parent != store.uploads and path.parent.is_dir() and not any(path.parent.iterdir()):
             path.parent.rmdir()
         raise
     use = use_models and models_configured()
@@ -548,6 +549,10 @@ async def upload_template(file: UploadFile = File(...), use_models: bool = Form(
                 _discard_failed_upload(pptx)
             _discard_failed_upload(path)
             raise
+        # the workspace keeps its own copy (templates/<id>/source.pptx): the upload and its converted copy go
+        if pptx != path:
+            _discard_failed_upload(pptx)
+        _discard_failed_upload(path)
         return {"template_id": m.template_id, "n_slides": m.n_slides, "n_patterns": len(m.patterns)}
 
     job = runner.submit("analyze", run)
@@ -705,6 +710,8 @@ def create_generation(req: GenerateRequest) -> dict:
     bad = [s for s in req.strategies if s not in STRATEGY_NAMES]
     if bad:
         raise HTTPException(400, f"Неизвестные варианты: {bad}")
+    if not req.strategies:
+        req.strategies = list(STRATEGY_NAMES)  # (none chosen: all three — the pipeline builds them, the page shows them)
     if req.outline is not None:
         try:
             DeckOutline.model_validate(req.outline)
@@ -806,40 +813,62 @@ def apply_fixes(gid: str, strategy: str, req: FixRequest) -> dict:
         from verstka.audit.autofix import autofix_loop
         from verstka.pipeline.generate import render_outputs
 
+        from verstka.pipeline import revise as R
+
+        scratch = vdir.parent / f".{strategy}.fixall"
         try:
             ws = store.workspace(meta["template_id"])
             outline = DeckOutline.model_validate_json((vdir / "outline.json").read_text(encoding="utf-8"))
             plan = LayoutPlan.model_validate_json((vdir / "layout_plan.json").read_text(encoding="utf-8"))
             report = AuditReport.model_validate_json((vdir / "audit_report.json").read_text(encoding="utf-8"))
             only = None if req.all_deterministic else set(req.issue_ids)
+            # the loop works on a copy: nothing of the variant changes before the fixes are done and the previews made,
+            # and the version before them is kept («верни как было» restores it, like any edit)
+            shutil.rmtree(scratch, ignore_errors=True)
+            scratch.mkdir(parents=True)
+            shutil.copy2(vdir / "deck.pptx", scratch / "deck.pptx")
             job.emit("Применяю исправления", 0.2)
-            final, plan2, outline2, _ = autofix_loop(vdir / "deck.pptx", report, outline, plan, manifest, ws, max_iterations=2, only_ids=only, images_dir=vdir / "slides", brief_text=_brief_text_of_meta(gid, meta),
+            final, plan2, outline2, _ = autofix_loop(scratch / "deck.pptx", report, outline, plan, manifest, ws, max_iterations=2, only_ids=only, images_dir=scratch / "slides", brief_text=_brief_text_of_meta(gid, meta),
                                                     writer=meta.get("writer") if isinstance(meta.get("writer"), dict) else None)
             try:
                 from verstka.rendering.renderer import strip_outline_marks
 
-                strip_outline_marks(vdir / "deck.pptx")  # a fix re-rendered slides with their markers
+                strip_outline_marks(scratch / "deck.pptx")  # a fix re-rendered slides with their markers
             except Exception:  # noqa: BLE001
                 log.warning("outline markers left in the notes", exc_info=True)
             job.emit("Готовлю превью и файлы", 0.8)
             # previews and the exports that existed before are rebuilt from one LibreOffice run
             exports = [fmt for fmt in ("pdf", "html") if (vdir / f"deck.{fmt}").exists()]
-            _, images, warns, _ = render_outputs(vdir, manifest, outline2.title, exports, images=True)
+            out = scratch / "out"
+            out.mkdir()
+            shutil.copy2(scratch / "deck.pptx", out / "deck.pptx")
+            _, images, warns, _ = render_outputs(out, manifest, outline2.title, exports, images=True)
             for w in warns:
                 log.warning("re-export: %s", w)
-            if images:
-                final.slide_images = {k: str(p) for k, p in enumerate(images, 1)}
+            before = report.summary.score
+            version = R.snapshot(vdir)
+            (out / "deck.pptx").replace(vdir / "deck.pptx")
+            for fmt in ("pdf", "html"):
+                if (out / f"deck.{fmt}").exists():
+                    (out / f"deck.{fmt}").replace(vdir / f"deck.{fmt}")
+            if images and (out / "slides").is_dir():
+                shutil.rmtree(vdir / "slides", ignore_errors=True)
+                (out / "slides").replace(vdir / "slides")
+                final.slide_images = {k: str(vdir / "slides" / Path(p).name) for k, p in enumerate(images, 1)}
+            final.deck = str(vdir / "deck.pptx")
             # the remarks that stayed keep the ids the person saw (the audit numbers them through the deck)
             carry_report_ids(report, final)
             (vdir / "audit_report.json").write_text(final.model_dump_json(indent=2), encoding="utf-8")
             (vdir / "outline.json").write_text(outline2.model_dump_json(indent=2), encoding="utf-8")
             (vdir / "layout_plan.json").write_text(plan2.model_dump_json(indent=2), encoding="utf-8")
-            summary = meta.get("summary", {})
-            summary[strategy] = {**summary.get(strategy, {}), "score": final.summary.score, "errors": final.summary.errors, "warnings": final.summary.warnings}
-            meta["summary"] = summary
-            store.write_generation_meta(gid, meta)
-            return {"score": final.summary.score, "errors": final.summary.errors, "warnings": final.summary.warnings, "applied": final.applied_fixes}
+            _sync_run_manifest(vdir, final, outline2)
+            fixed = [f.get("issue_id") for f in final.applied_fixes if isinstance(f, dict) and f.get("issue_id")]
+            R.log_edit(vdir, {"version": version, "undo_of": None, "kind": "fix_all", "slides": sorted({int(f["slide"]) for f in final.applied_fixes if isinstance(f, dict) and isinstance(f.get("slide"), int)}),
+                              "request": "Исправить все замечания" if only is None else "Исправить выбранные замечания", "reply": "", "score_before": before, "score_after": final.summary.score, "fixed": fixed})
+            store.merge_variant_summary(gid, strategy, {"score": final.summary.score, "errors": final.summary.errors, "warnings": final.summary.warnings})
+            return {"score": final.summary.score, "errors": final.summary.errors, "warnings": final.summary.warnings, "applied": final.applied_fixes, "version": version}
         finally:
+            shutil.rmtree(scratch, ignore_errors=True)
             with _fix_lock:
                 _fix_active.discard(key)
 
@@ -850,6 +879,21 @@ def apply_fixes(gid: str, strategy: str, req: FixRequest) -> dict:
             _fix_active.discard(key)
         raise
     return {"job_id": job.id}
+
+
+def _sync_run_manifest(vdir: Path, report: AuditReport, outline: DeckOutline) -> None:
+    """The run manifest says what the variant is now: its audit, the fixes applied, the plan's hash."""
+    import hashlib
+
+    p = vdir / "run_manifest.json"
+    try:
+        rm = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    rm["audit"] = report.summary.model_dump()
+    rm["applied_fixes"] = report.applied_fixes
+    rm.setdefault("inputs", {})["outline_sha256"] = hashlib.sha256(outline.model_dump_json().encode("utf-8")).hexdigest()[:16]
+    p.write_text(json.dumps(rm, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def _written_text(gid: Optional[str], meta: dict) -> Optional[str]:
@@ -987,10 +1031,8 @@ def _edit_job(gid: str, strategy: str, body: EditRequestBody) -> Callable[[Job],
             audit, n_slides = v.audit, len(v.outline.slides)
         after = audit.summary.score if audit else None
         R.log_edit(vdir, {"version": version, "undo_of": undone, "request": body.message, "kind": req.kind, "slides": req.slides, "reply": reply, "score_before": before, "score_after": after})
-        summary = meta.get("summary", {})
         if audit is not None:
-            summary[strategy] = {**summary.get(strategy, {}), "n_slides": n_slides, "score": audit.summary.score, "errors": audit.summary.errors, "warnings": audit.summary.warnings}
-            store.merge_generation_meta(gid, {"summary": summary})
+            store.merge_variant_summary(gid, strategy, {"n_slides": n_slides, "score": audit.summary.score, "errors": audit.summary.errors, "warnings": audit.summary.warnings})
         if before is not None and after is not None and round(after) != round(before):
             reply += f" Проверка качества: {before:g} → {after:g}."
         elif after is not None:
@@ -1050,9 +1092,7 @@ def _slide_fix_job(gid: str, strategy: str, n: int, requested: list, wishes: Opt
         )
         s = res.report.summary
         if res.applied:
-            summary = meta.get("summary", {})
-            summary[strategy] = {**summary.get(strategy, {}), "n_slides": res.n_slides, "score": s.score, "errors": s.errors, "warnings": s.warnings}
-            store.merge_generation_meta(gid, {"summary": summary})
+            store.merge_variant_summary(gid, strategy, {"n_slides": res.n_slides, "score": s.score, "errors": s.errors, "warnings": s.warnings})
         return {
             "reply": res.reply, "changed": res.applied, "applied": res.applied, "kind": "fix", "strategy": strategy, "slide": n,
             "requested": [i.id for i in res.requested], "fixed": res.fixed, "remaining": res.remaining,
@@ -1173,11 +1213,8 @@ def change_slide_picture(gid: str, strategy: str, n: int, body: PictureBody) -> 
                     return {"reply": "Не получилось: модель изображений не ответила — слайд остался как был. Попробуйте ещё раз чуть позже.", "changed": False, "applied": False, "kind": "picture", "action": body.action, "strategy": strategy, "slide": n}
                 raise
             if res.score_after is not None:
-                summary = meta.get("summary", {})
-                if isinstance(summary, dict):
-                    audit = AuditReport.model_validate_json((vdir / "audit_report.json").read_text(encoding="utf-8"))
-                    summary[strategy] = {**summary.get(strategy, {}), "score": audit.summary.score, "errors": audit.summary.errors, "warnings": audit.summary.warnings}
-                    store.merge_generation_meta(gid, {"summary": summary})
+                audit = AuditReport.model_validate_json((vdir / "audit_report.json").read_text(encoding="utf-8"))
+                store.merge_variant_summary(gid, strategy, {"score": audit.summary.score, "errors": audit.summary.errors, "warnings": audit.summary.warnings})
             return res.result(strategy)
         finally:
             with _fix_lock:
