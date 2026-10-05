@@ -624,9 +624,10 @@ def score_pattern(
                     reasons.append(f"группа из {n_cells} ячеек заметно больше нужных {n}")
             elif n > group.max_n:
                 cap = 0.15 if n > group.max_n + 1 else 0.4
-                if group.fixed or n > max(group.max_n, n_cells):
+                if group.fixed:
                     # cells drawn in the template cannot grow by one: the render merges two items into a cell and
-                    # the gate turns the sample down — a fallback at most (VK Tech p28, four reasons on three tiles)
+                    # the gate turns the sample down — a fallback at most (VK Tech p28, four reasons on three tiles).
+                    # A free row of cards takes one more (WorkSpace p15: four offers on its three cards' row)
                     cap = min(cap, 0.2)
                 reasons.append(f"не хватает ячеек: нужно {n}, максимум {group.max_n}")
             elif n < group.min_n:

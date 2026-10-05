@@ -25,6 +25,8 @@ AUTOFIX = {
     "placeholder_text": "удаление заглушки",
     "empty_slide": "перевыбор макета",
     "content_missing": "перевыбор макета",
+    "author_item_missing": "перевыбор макета",
+    "content_in_notes": "перевыбор макета",
     "table_cell_wrap": "перевыбор макета",
     "content_over_art": "перевыбор макета",
 }

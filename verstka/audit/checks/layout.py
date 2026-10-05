@@ -15,7 +15,7 @@ from verstka.schemas.common import EMU_PER_PT, Bbox
 
 OUT_OF_BOUNDS = CheckSpec(id="out_of_bounds", title="Элемент вышел за границы слайда", severity="error", category="layout", description="Текст, таблица или диаграмма выходит за край слайда более чем на 1%; картинка — более чем на 25% своей площади. Служебные элементы шаблона (номер слайда, дата, колонтитул) стоят там, где их поставил шаблон, и не проверяются.")
 OVERLAP = CheckSpec(id="overlap", title="Два блока наложились друг на друга", severity="error", category="layout", description="Два текстовых блока пересекаются более чем на 30% меньшего из них (вложенность в карточку не считается). У рамки без заливки и обводки считается полоса, которую занимают её строки (по привязке к верху, центру или низу): пустая часть рамки ничего не закрывает.")
-TEXT_OVERFLOW = CheckSpec(id="text_overflow", title="Текст не поместился в свою рамку", severity="error", category="layout", description="Оценка высоты текста по метрикам шрифта превышает высоту рамки более чем на 8% (сильное переполнение — ошибка, лёгкое — предупреждение). Текст, который шаблон набирает прописными (cap=all в стиле текста или плейсхолдера макета), меряется прописными. Поля номера слайда и даты шаблона не проверяются.")
+TEXT_OVERFLOW = CheckSpec(id="text_overflow", title="Текст не поместился в свою рамку", severity="error", category="layout", description="Оценка высоты текста по метрикам шрифта превышает высоту рамки более чем на 8% (сильное переполнение — ошибка, лёгкое — предупреждение). Текст, который шаблон набирает прописными (cap=all в стиле текста или плейсхолдера макета), меряется прописными. Поля номера слайда и даты шаблона не проверяются. Одна строка в рамке, подогнанной шаблоном под её буквы (выше рамки не больше чем в 1,2 раза, привязка к верху), — не переполнение: под рамку уходит только межстрочный просвет.")
 TEXT_CLIPPED = CheckSpec(id="text_clipped", title="Текст обрезан краем слайда", severity="error", category="layout", description="Рамка с текстом частично за пределами слайда (кроме номера слайда, даты и колонтитула шаблона).")
 MARGIN_VIOLATION = CheckSpec(id="margin_violation", title="Контент заходит в поля у краёв", severity="warn", category="layout", description="Текстовый блок начинается за пределами безопасной области шаблона (допуск 3% ширины). Служебные элементы шаблона не проверяются.")
 GRID_ALIGNMENT = CheckSpec(id="grid_alignment", title="Блоки не выровнены по направляющим макета", severity="info", category="layout", description="Левый край текстового блока не совпадает ни с одной колонкой шаблона (допуск 1.5% ширины).")
@@ -232,6 +232,11 @@ def text_overflow(ctx: AuditContext) -> list[Issue]:
             if have <= 0:
                 continue
             ratio = need / have
+            if lines == 1 and ratio <= 1.2 and (e.anchor or "t") == "t":
+                # one line in a box the template sized to its letters (Google Slides measures a line at about 1.1 em,
+                # the check at 1.2): only the line's leading hangs under the box, its letters stand inside — what
+                # stands right under it is the overlap check's (VK Tech's card titles: «1,1 times their box», fine)
+                continue
             if ratio > 1.08:
                 grows = e.autofit == "sp"  # PowerPoint enlarges such a box downwards
                 shrinks = e.autofit == "norm" and ratio <= 2.5  # PowerPoint shrinks the text itself; nothing to fix

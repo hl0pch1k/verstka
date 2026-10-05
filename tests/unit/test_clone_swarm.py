@@ -480,3 +480,39 @@ def test_an_author_list_item_the_plan_lost_is_reported():
     assert len(got) == 1 and got[0].details["missing"] == ["Настроить пропуска"] and got[0].autofix is not None
     # a figure set large over its label is the line «100 покупок в день»
     assert _item_present("100 покупок в день", "100|покупоквдень") and not _item_present("3 000 покупок в месяц", "100|покупоквдень")
+
+
+def test_one_line_in_a_box_sized_to_its_letters_is_no_overflow():
+    """VK Tech's card titles: 13.2 pt lines in 14.5 pt boxes (Google Slides measures a line at about 1.1 em) were
+    «1,1 times their box» — five warnings a slide for type that stands inside its card."""
+    from test_tpl_clone_audit import _ctx, _ir_slide
+
+    from verstka.audit.checks.layout import text_overflow
+
+    h = 14.5 * 12700 / 6858000
+    tight = _ir_slide(1, [("Заголовок слайда", (0.05, 0.05, 0.9, 0.1), 32), ("Контроль порций", (0.1, 0.4, 0.3, h), 13.22)])
+    for e in tight.elements:
+        e.insets_emu = (0, 0, 0, 0)
+    assert not [i for i in text_overflow(_ctx([tight])) if "Контроль" in i.message]
+    two = _ir_slide(1, [("Заголовок слайда", (0.05, 0.05, 0.9, 0.1), 32), ("Контроль порций и пересмотр закупочных цен каждую неделю по итогам продаж", (0.1, 0.4, 0.1, h), 13.22)])
+    for e in two.elements:
+        e.insets_emu = (0, 0, 0, 0)
+    assert [i for i in text_overflow(_ctx([two])) if "Контроль" in i.message]  # two lines in a one-line box still are
+
+
+def test_a_free_row_of_cards_takes_one_more_item():
+    """WorkSpace p15: four offers on its row of three cards — the render adds a card; only cells drawn in the template
+    are fixed (the sample was demoted and the slide composed)."""
+    from verstka.matching.scorer import score_pattern
+    from verstka.planning.strategies import load_strategies
+    from verstka.schemas.common import BboxFrac, PatternKind, SlotRole
+    from verstka.schemas.outline import OutlineSlide, SlideContent, SlideItem
+    from verstka.schemas.template import Capacity, RepeatGroup, Slot, SlotStyle
+
+    st = load_strategies()["structured"]
+    title = Slot(id="t", role=SlotRole.title, shape_id="1", bbox=BboxFrac(x=0.05, y=0.05, w=0.9, h=0.12), style=SlotStyle(size_pt=32), capacity=Capacity(max_chars=60, max_lines=2))
+    cells = [Slot(id=f"c{k}", role=SlotRole.card_title, shape_id=str(10 + k), bbox=BboxFrac(x=0.05 + 0.31 * k, y=0.3, w=0.28, h=0.3), style=SlotStyle(size_pt=18), capacity=Capacity(max_chars=60, max_lines=3), group_id="g") for k in range(3)]
+    g = RepeatGroup(id="g", member_shape_ids=[[c.shape_id] for c in cells], min_n=1, max_n=3, axis="row", cell_bbox=BboxFrac(x=0.05, y=0.3, w=0.28, h=0.3))
+    row = _bare(PatternKind.cards, [title, *cells], [g])
+    four = OutlineSlide(id="s", kind=PatternKind.cards, headline="Как привлечь больше гостей", content=SlideContent(items=[SlideItem(title=t) for t in ("Партнерства с офисами", "Программа лояльности", "Продвижение в сообществах", "Дневные предложения")]))
+    assert score_pattern(four, row, _manifest_of([row]), st).score >= st.synth_threshold
