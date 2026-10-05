@@ -19,7 +19,7 @@ CONTENT_CHECKS = frozenset({
     "text_overflow", "text_outside_card", "overlap", "word_break", "table_cell_wrap", "too_many_bullets",
     "bullet_too_long", "table_too_big", "too_many_series", "fill_ratio", "empty_slide", "content_missing",
     "placeholder_text", "duplicate_slides", "figure_not_in_brief", "chart_missing_labels", "slide_content",
-    "deck_coherence", "content_in_notes", "timeline_order", "slide_is_picture",
+    "deck_coherence", "content_in_notes", "timeline_order", "slide_is_picture", "author_item_missing",
     # the words of a written deck (audit/checks/writing.py): the designer rewrites the line from the slide's text
     "line_fragment", "figure_is_time", "chart_mixed_units", "duplicate_heading", "orphan_opener",
 })
@@ -57,6 +57,7 @@ FIX_HINT: dict[str, str] = {
     "fill_ratio": "слайд слишком пустой или слишком плотный — добавь содержание из текста или сократи",
     "empty_slide": "добавь содержание из текста этого слайда",
     "content_missing": "верни пропавшие тексты: форма слайда должна вместить их все",
+    "author_item_missing": "верни пропавшие пункты списка автора: форма слайда должна вместить весь список",
     "placeholder_text": "убери текст-заглушку",
     "figure_not_in_brief": "оставь только числа из исходного текста",
     "chart_missing_labels": "подпиши значения или оси диаграммы",
@@ -194,7 +195,7 @@ def _message_of(issue: Issue) -> str:
     line that left the slide (the messages cut them)."""
     msg = " ".join((issue.message or "").split())
     details = issue.details or {}
-    missing = details.get("missing") if issue.check_id == "content_missing" else None
+    missing = details.get("missing") if issue.check_id in ("content_missing", "author_item_missing") else None
     if isinstance(missing, list) and missing:
         names = [str(m).strip() for m in missing if str(m).strip()]
         head = msg.split(":", 1)[0] if ":" in msg else msg

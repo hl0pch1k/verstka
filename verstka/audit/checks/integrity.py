@@ -87,8 +87,12 @@ def empty_slide(ctx: AuditContext) -> list[Issue]:
     return out
 
 
+_RUB_RE = re.compile(r"\s*(?:рубл(?:ей|я|ь)|руб\.?)(?![а-яё])", re.I)
+
+
 def _norm_text(t: str) -> str:
-    return _WS_RE.sub("", t).lower().replace("ё", "е")
+    # (a sum is the same written «300 рублей» in the plan and «300 ₽» on the slide: the typesetting's own choice)
+    return _WS_RE.sub("", _RUB_RE.sub("₽", t or "")).lower().replace("ё", "е")
 
 
 def wanted_strings(osl: OutlineSlide, outline=None) -> list[str]:
@@ -160,6 +164,71 @@ def content_missing(ctx: AuditContext) -> list[Issue]:
         severity = "error" if len(missing) * 3 >= len(wanted) else "warn"
         shown = ", ".join(f"«{m[:40]}»" for m in missing[:3]) + ("…" if len(missing) > 3 else "")
         out.append(ctx.new_issue(CONTENT_MISSING, s.index, f"{len(missing)} из {len(wanted)} {'текста' if len(wanted) % 10 == 1 and len(wanted) % 100 != 11 else 'текстов'} плана нет на слайде: {shown}", severity=severity, details={"missing": missing, "wanted": len(wanted)}, autofix=fix("rematch", "перевыбрать макет, чтобы весь контент поместился", outline_id=s.outline_id)))
+    return out
+
+
+AUTHOR_ITEM_MISSING = CheckSpec(id="author_item_missing", title="Пункт списка автора не попал на слайды", severity="warn", category="integrity", description="Для слайдов, собранных из текста автора как написан: пункты списков из раздела «Слайд N» брифа ищутся на слайдах этого раздела (и его продолжениях) — по началу строки или по её числу и большей части слов (цифра крупно и подпись под ней тоже считается). Пункт, которого нет ни на одном из них, — потеря текста автора.")
+
+_ITEM_MARK_RE = re.compile(r"^\s*(?:[—–\-•*·]|\d{1,2}[.)])\s+(?P<t>\S.*)$")
+
+
+def _author_items(brief: str, ref: int) -> list[str]:
+    """The list items of the brief's section «Слайд N» (one per marked line, its marker and trailing «;» off)."""
+    m = re.search(rf"(?:^|\n)\s*(?:слайд|slide)\s*{ref}\b[^\n]*\n(.*?)(?=\n\s*(?:слайд|slide)\s*\d+\b|\Z)", brief, re.I | re.S)
+    if not m:
+        return []
+    out = []
+    for ln in m.group(1).splitlines():
+        g = _ITEM_MARK_RE.match(ln)
+        if g:
+            t = g.group("t").strip().rstrip(";.,").strip()
+            if 2 <= len(t) <= 160 and len(t.split()) <= 20:
+                out.append(t)
+    return out
+
+
+def _item_present(item: str, have: str) -> bool:
+    """An author's list item is on the slide: by its first characters, or by its figures and most of its words (a
+    figure set large over its label, a term of a formula)."""
+    if _norm_text(item)[:CONTENT_KEY_CHARS] in have:
+        return True
+    digits = re.findall(r"\d+", re.sub(r"(?<=\d)[\s\u00a0\u202f](?=\d{3}\b)", "", item))
+    flat = have.replace("|", "")
+    if any(d not in flat for d in digits):
+        return False
+    words = [w for w in re.findall(r"[а-яёa-z]{3,}", _RUB_RE.sub("₽", item).lower().replace("ё", "е"))]
+    return bool(words or digits) and sum(1 for w in words if w[:6] in flat) >= 0.6 * len(words)
+
+
+@check(AUTHOR_ITEM_MISSING)
+def author_item_missing(ctx: AuditContext) -> list[Issue]:
+    """B4 of the swarm review: content_missing compares a slide with its plan — a list item the plan itself lost (eight
+    steps planned as six) is caught here, against the brief."""
+    out: list[Issue] = []
+    if not ctx.brief_text or ctx.outline is None:
+        return out
+    groups: dict[int, list] = {}
+    for s in ctx.ir.slides:
+        osl = _outline_slide(ctx, s)
+        if osl is not None and osl.verbatim and getattr(osl, "spec_ref", None):
+            groups.setdefault(osl.spec_ref, []).append((s, osl))
+    for ref, members in groups.items():
+        items = _author_items(ctx.brief_text, ref)
+        if not items:
+            continue
+        # (with the data of the slides' charts: a list of sums drawn as a pie is on the slide as its slices)
+        charts = []
+        for s, _ in members:
+            for e in s.elements:
+                if e.type == "chart" and e.chart:
+                    charts += list(e.chart.categories) + [f"{v:,.2f}".replace(",", "").rstrip("0").rstrip(".") for sr in e.chart.series for v in sr.values]
+        have = "|".join([slide_text_norm(s) for s, _ in members] + [_norm_text(t) for t in charts])
+        missing = [t for t in items if not _item_present(t, have)]
+        if not missing:
+            continue
+        s0, osl0 = members[0]
+        shown = ", ".join(f"«{m[:40]}»" for m in missing[:3]) + ("…" if len(missing) > 3 else "")
+        out.append(ctx.new_issue(AUTHOR_ITEM_MISSING, s0.index, f"{len(missing)} из {len(items)} пунктов списка автора нет на слайде: {shown}", details={"missing": missing, "items": len(items), "spec_ref": ref}, autofix=fix("rematch", "перевыбрать макет, чтобы весь список поместился", outline_id=s0.outline_id)))
     return out
 
 
@@ -333,7 +402,10 @@ def content_in_notes(ctx: AuditContext) -> list[Issue]:
             key = _alnum(text)[:NOTE_KEY_CHARS]
             said = bool(key) and key in notes
             where = "есть только в заметках докладчика: на слайде не нашлось места" if said else "нет ни на слайде, ни в заметках"
-            out.append(ctx.new_issue(CONTENT_IN_NOTES, s.index, f"{_KIND_RU[kind]} «{text[:50]}{'…' if len(text) > 50 else ''}» {where}", details={"line": kind, "text": text, "in_notes": said}))
+            # another sample of the template (or the slide composed) may hold it: the autofix ladder tries them, the
+            # change kept only when the slide gets better (Классика's cover lost its goal and its footnote to the notes;
+            # its other cover holds both)
+            out.append(ctx.new_issue(CONTENT_IN_NOTES, s.index, f"{_KIND_RU[kind]} «{text[:50]}{'…' if len(text) > 50 else ''}» {where}", details={"line": kind, "text": text, "in_notes": said}, autofix=fix("rematch", "перевыбрать макет, чтобы строка встала на слайд", outline_id=s.outline_id)))
     return out
 
 

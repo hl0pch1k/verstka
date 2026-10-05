@@ -376,6 +376,47 @@ def chart_picture_room(slide: OutlineSlide, pattern: Pattern, pictures: Optional
     return max((p.area for p in pictures if p.kind == "content" and p.area >= 0.15), default=0.0)
 
 
+def _gate_room(slide: OutlineSlide, pattern: Pattern, manifest: TemplateManifest) -> list[str]:
+    """What the render's gate will find without room, read off the sample's own boxes (a soft estimate — the render
+    squeezes the content for the conclusion): a content slide's subtitle on a sample without a subtitle box goes in
+    the band between the heading's lines and the content (`clone_notes.place_lede`), its conclusion and footnote
+    without a note box at the foot of the content or under the heading (`place_notes`). Office's samples took three
+    slides with a subtitle «Цель — …» each and the gate turned all three down. Returns the reasons of the misses."""
+    out: list[str] = []
+    typo = manifest.tokens.typography
+    fam = typo.primary_family
+    safe = manifest.tokens.spacing.safe_area
+    h_pt, w_pt = manifest.slide_size.h / 12700, manifest.slide_size.w / 12700
+    title = next((x for x in pattern.slots if x.role == SlotRole.title), None)
+    boxes = [x.bbox for x in pattern.slots if x.role in _CONTENT_ROLES or x.role == SlotRole.image]
+    body = typo.size_for("body", 14.0)
+    band = None
+    if title is not None:
+        size_t = title.style.size_pt or typo.size_for("h1", 28.0)
+        n_t = len(display_lines(slide.headline or "", fam, size_t, True, max(title.bbox.w * w_pt - 14.4, 40.0))) or 1
+        t_bottom = title.bbox.y + min(title.bbox.h, n_t * size_t * 1.2 / h_pt)
+        under = [b for b in boxes if b.y >= title.bbox.y + 0.5 * title.bbox.h and b.x < title.bbox.x + title.bbox.w and b.x + b.w > title.bbox.x]
+        band = min((b.y for b in under), default=safe.y + safe.h) - t_bottom
+    sub = " ".join((slide.subtitle or "").split())
+    if sub and band is not None and not any(x.role == SlotRole.subtitle for x in pattern.slots):
+        size = typo.size_for("lead", body * 1.15) if len(sub) <= 120 else body
+        need = len(display_lines(sub, fam, size, False, 0.78 * safe.w * w_pt)) * size * 1.2 / h_pt + 0.035
+        if band < need:
+            out.append("подзаголовку нет места между заголовком и содержимым образца")
+    take, foot = " ".join((slide.takeaway or "").split()), " ".join((slide.footnote or "").split())
+    if (take or foot) and not pattern.note_slot:
+        width = 0.85 * safe.w * w_pt
+        need = 0.0
+        if take:
+            need += len(display_lines(take, fam, body, True, width)) * body * 1.25 / h_pt + 0.04
+        if foot:
+            need += len(display_lines(foot, fam, 0.75 * body, False, width)) * 0.75 * body * 1.2 / h_pt + 0.02
+        foot_room = safe.y + safe.h - max((b.y + b.h for b in boxes), default=safe.y)
+        if foot_room < need and (band is None or band < need):
+            out.append("выводу слайда нет места ни под содержимым образца, ни под заголовком")
+    return out
+
+
 def score_pattern(
     slide: OutlineSlide,
     pattern: Pattern,
@@ -507,6 +548,10 @@ def score_pattern(
             # the note band at the foot leaves with nothing to say: a hole where the sample's design had its band
             kind *= 0.6
             reasons.append("поле примечания образца останется пустым: у слайда нет вывода")
+    if not bookend0:
+        for why in _gate_room(slide, pattern, manifest):
+            kind *= 0.85
+            reasons.append(why)
     has_title_slot = any(s.role == SlotRole.title for s in pattern.slots)
     if slide.headline and not has_title_slot:
         if slide.kind in (PatternKind.title, PatternKind.section, PatternKind.thanks):
@@ -579,6 +624,10 @@ def score_pattern(
                     reasons.append(f"группа из {n_cells} ячеек заметно больше нужных {n}")
             elif n > group.max_n:
                 cap = 0.15 if n > group.max_n + 1 else 0.4
+                if group.fixed or n > max(group.max_n, n_cells):
+                    # cells drawn in the template cannot grow by one: the render merges two items into a cell and
+                    # the gate turns the sample down — a fallback at most (VK Tech p28, four reasons on three tiles)
+                    cap = min(cap, 0.2)
                 reasons.append(f"не хватает ячеек: нужно {n}, максимум {group.max_n}")
             elif n < group.min_n:
                 # cells drawn into the template's art (numbered tiles, tags, a staircase): an empty one stays on the slide
@@ -763,7 +812,10 @@ def score_pattern(
     text_slots = [s for s in pattern.slots if s.role in (SlotRole.body, SlotRole.bullet_list, SlotRole.card_title, SlotRole.card_body, SlotRole.number, SlotRole.number_label, SlotRole.caption)]
     if bookend:
         text_slots = [s for s in text_slots if not is_placeholder_text(s.sample_text)]  # speaker/QR blocks leave with their frames
-    needed_slots = sum(1 for r in needed_roles if r not in ("title", "subtitle")) + max(n_items - 1, 0) * sum(1 for r in ("card_title", "card_body", "number", "number_label") if r in needed_roles)
+    # (only the roles the slide fills: items of a title each take one box a card, not a title and an empty text box —
+    # five such items on WorkSpace p12 counted ten boxes, and its second row of «Текст» cells, emptied, cost nothing)
+    active = {r for r, v in needed_roles.items() if v > 0}
+    needed_slots = sum(1 for r in active if r not in ("title", "subtitle")) + max(n_items - 1, 0) * sum(1 for r in ("card_title", "card_body", "number", "number_label") if r in active)
     extra = max(len(text_slots) - max(needed_slots, 1), 0)
     clutter = min(0.3, 0.03 * extra)
     if slide.kind == PatternKind.thanks and extra >= 2:
@@ -918,10 +970,10 @@ def score_pattern(
         reasons.append(f"балл опущен ниже порога синтеза {strategy.synth_threshold:.2f}, чтобы не терять числа")
     elif fit.get("steps_in_cards") and score >= strategy.synth_threshold:
         score = max(0.0, strategy.synth_threshold - 0.05)
-        reasons.append("шаги из пары слов в карточках для абзацев выглядят пустыми: образец остаётся только запасным")
+        reasons.append("шаги из пары слов в карточках для абзацев выглядят пустыми: слайд лучше собрать из дизайн-системы шаблона")
     elif cap <= 0.25 and not bookend and score >= strategy.synth_threshold:
         # the sample's cells cannot take this many items (a tile drawn with its numeral «04» left empty, a grid with a
         # whole row gone, one thought on a row of cards): a slide composed by the design system reads better
         score = max(0.0, strategy.synth_threshold - 0.05)
-        reasons.append("ячейки образца не подходят к числу пунктов: образец остаётся только запасным")
+        reasons.append("ячейки образца не подходят к числу пунктов: слайд лучше собрать из дизайн-системы шаблона")
     return ScoreResult(round(score, 3), reasons, fit)

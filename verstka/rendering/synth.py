@@ -1702,6 +1702,7 @@ def _render_content(builder: DeckBuilder, comp: str, oslide: OutlineSlide, manif
         # colours of the copied card as the analysis sees them (scheme colours resolved)
         kit.card.fill, kit.card.line = proto[1], proto[2]
         kit.card.colors = kit.colors_on(proto[1] or pal.bg, prefer=None if proto[1] else title_color, inside_card=bool(proto[1]))
+    caption_beside = False
     if photo:
         try:
             if place is not None:
@@ -1719,9 +1720,7 @@ def _render_content(builder: DeckBuilder, comp: str, oslide: OutlineSlide, manif
             else:
                 area = _photo_frame_beside(slide, area, kit, pal, photo, W, H, left=(outline.strategy == "compact"))
                 warnings.append("a free place for the user's photo kept beside the content")
-                fb = slide.__dict__.get("_photo_frame_box")
-                if fb is not None:
-                    photo_caption(slide, fb, kit, oslide.content.photo_hint, head_text=place_head(oslide.content.photo_slot))
+                caption_beside = True  # written once the frame has its final height (`_align_photo_frame` below)
         except Exception as e:  # noqa: BLE001 - the slide's content is never lost over its photo place
             log.warning("photo place not made on slide %s: %s", oslide.id, e, exc_info=True)
             warnings.append(f"the free place for the user's photo was not made: {str(e)[:120]}")
@@ -1738,6 +1737,17 @@ def _render_content(builder: DeckBuilder, comp: str, oslide: OutlineSlide, manif
         composer.compose(comp, area)
     if slide.__dict__.get("_photo_frame") is not None:
         _align_photo_frame(slide.__dict__["_photo_frame"], composer.cv.added, H)
+    if caption_beside:
+        # the caption centred in the frame as it ends up — the frame shortened to the content beside it left the
+        # description hanging below its foot
+        fe = slide.__dict__.get("_photo_frame")
+        b = element_bbox(fe) if fe is not None else None
+        fb = Bbox(x=b[0], y=b[1], w=b[2], h=b[3]) if b else slide.__dict__.get("_photo_frame_box")
+        if fb is not None:
+            try:
+                photo_caption(slide, fb, kit, oslide.content.photo_hint, head_text=place_head(oslide.content.photo_slot))
+            except Exception as e:  # noqa: BLE001 - the slide stands without its caption
+                log.warning("photo caption not written on slide %s: %s", oslide.id, e)
     _ink_pass(slide, composer.cv.added, pal, manifest, warnings)
     warnings.extend(composer.warnings)
     return slide, warnings
@@ -2213,6 +2223,7 @@ class DeckStyle:
     head_bold: bool = False  # headlines set under a label are bold when the template's labels are
     head_cap_reason: str = ""  # why the heading size is not the template's own content heading size (for the log)
     caps: bool = False  # plain headings in capitals: the template's own content headings are all typed so
+    headlines: tuple = ()  # the deck's content headlines: a size decided for all of them (a rule under the heading)
 
 
 def _is_sparse(manifest: TemplateManifest) -> bool:
@@ -2319,7 +2330,7 @@ def deck_style(builder: DeckBuilder, manifest: TemplateManifest, outline: DeckOu
     typed = [(_top_title(p).sample_text or "").strip() for p in same if _top_title(p) is not None]
     typed = [t for t in typed if any(ch.isalpha() for ch in t)]
     caps = not pill and len(typed) >= 3 and sum(1 for t in typed if t.isupper()) >= 0.8 * len(typed)
-    ds = DeckStyle(family=family, pill=pill, kicker=kicker, head_size=head, upper=pill and texted > 0 and uppers >= 0.6 * texted, head_bold=pill and bolds > 0, head_cap_reason=reason, caps=caps)
+    ds = DeckStyle(family=family, pill=pill, kicker=kicker, head_size=head, upper=pill and texted > 0 and uppers >= 0.6 * texted, head_bold=pill and bolds > 0, head_cap_reason=reason, caps=caps, headlines=tuple(heads))
     cache[id(outline)] = ds
     return ds
 
@@ -2441,6 +2452,46 @@ def _place_heading(builder, slide, title_ph, canvas, oslide, manifest, ws, outli
     return _place_plain_heading(builder, slide, title_ph, box, oslide, manifest, pal, h1, title_color, title_bold, title_font, scale, warnings, ds, canvas)
 
 
+def _title_line_height(title_ph, fallback: float) -> float:
+    """The line height (in em) a heading is set at: its own line spacing — its paragraph's, its list style's, its
+    layout's, its master's title style — × 1.2 (one single-spaced line). VK Education sets its headings at 90 % and
+    its text at 110 %: a heading measured at the text's 1.32 em took a box 30 pt taller than its three lines and
+    pushed the content down. `fallback` when nothing on the chain says."""
+
+    def spacing(node) -> Optional[float]:
+        pct = node.find(q("a:lnSpc") + "/" + q("a:spcPct")) if node is not None else None
+        try:
+            return int(pct.get("val")) / 100000 if pct is not None and pct.get("val") else None
+        except ValueError:
+            return None
+
+    nodes = []
+    el = title_ph._element
+    p0 = el.find(q("p:txBody") + "/" + q("a:p"))
+    if p0 is not None:
+        nodes.append(p0.find(q("a:pPr")))
+    nodes.append(el.find(q("p:txBody") + "/" + q("a:lstStyle") + "/" + q("a:lvl1pPr")))
+    base = title_ph
+    for _ in range(2):
+        try:
+            base = base._base_placeholder
+        except Exception:  # noqa: BLE001
+            base = None
+        if base is None:
+            break
+        nodes.append(base._element.find(q("p:txBody") + "/" + q("a:lstStyle") + "/" + q("a:lvl1pPr")))
+    try:
+        master = title_ph.part.slide.slide_layout.slide_master._element
+        nodes.append(master.find(q("p:txStyles") + "/" + q("p:titleStyle") + "/" + q("a:lvl1pPr")))
+    except Exception:  # noqa: BLE001
+        pass
+    for n in nodes:
+        v = spacing(n)
+        if v:
+            return round(1.2 * v, 3)
+    return fallback
+
+
 def _place_plain_heading(builder, slide, title_ph, box: Bbox, oslide, manifest, pal, h1, title_color, title_bold, title_font, scale, warnings, ds, canvas) -> tuple[int, Optional[int], bool]:
     """A heading written into the canvas's title shape (no label under it). It takes the free width of its band (up
     to the logos and the right margin), not the sample's box; a centred heading widens about its centre; a heading
@@ -2456,7 +2507,7 @@ def _place_plain_heading(builder, slide, title_ph, box: Bbox, oslide, manifest, 
     safe = manifest.tokens.spacing.safe_area
     sparse = _is_sparse(manifest)
     insets = _heading_insets(title_ph)
-    lh = typo.line_height
+    lh = _title_line_height(title_ph, typo.line_height)
     try:
         from verstka.rendering.textfill import inherited_bold
 
@@ -2578,21 +2629,40 @@ def _place_plain_heading(builder, slide, title_ph, box: Bbox, oslide, manifest, 
     if box.h < need:
         box = Bbox(x=box.x, y=box.y, w=box.w, h=need)
     min_ratio = 0.6 if rule is not None else 0.8
-    res = fit_size([head_text], box, title_font, h1, title_bold, scale, insets_emu=insets, line_spacing=lh, min_ratio=min_ratio, ladder_only=sparse)
+    h_fit = h1
+    if rule is not None and ds is not None and ds.headlines:
+        # one size for the deck's headings over the rule: the largest at which four in five of its headlines keep
+        # above it — not each heading its own (Классика: 24 pt on slides 2–4, 40 pt on the next ones)
+        key = (box.w, box.h)
+        sizes_ = ds.__dict__.setdefault("_rule_sizes", {})
+        if key not in sizes_:
+            room_pt = (box.h - insets[1] - insets[3]) / EMU_PER_PT
+            pick = h1
+            for s_ in sorted({x for x in scale if 0.6 * h1 - 0.05 <= x <= h1 + 0.05} | {h1}, reverse=True):
+                pick = s_
+                ok = sum(1 for t in ds.headlines if len(wrap_lines(typeset(t), title_font, s_, title_bold, inner(box.w))) * s_ * lh <= room_pt + 0.5)
+                if ok >= 0.8 * len(ds.headlines):
+                    break
+            sizes_[key] = pick
+        h_fit = sizes_[key]
+        min_ratio = max(0.6 * h1 / h_fit, 0.5)
+    res = fit_size([head_text], box, title_font, h_fit, title_bold, scale, insets_emu=insets, line_spacing=lh, min_ratio=min_ratio, ladder_only=sparse)
+    if rule is not None and res.size_pt < h_fit - 0.05:
+        warnings.append(f"heading set at {res.size_pt:g} pt, under the deck's {h_fit:g} pt: it keeps above the template's rule")
     if res.broken_word and head_text != typeset(oslide.headline):
         # the last two words bound against an orphan («экспериментальная теплица») are wider than a narrow column: they
         # may part — a lone last word reads better than a word broken in two
         plain = typeset(oslide.headline)
-        res2 = fit_size([plain], box, title_font, h1, title_bold, scale, insets_emu=insets, line_spacing=lh, min_ratio=min_ratio, ladder_only=sparse)
+        res2 = fit_size([plain], box, title_font, h_fit, title_bold, scale, insets_emu=insets, line_spacing=lh, min_ratio=min_ratio, ladder_only=sparse)
         if not res2.broken_word:
             head_text, res = plain, res2
     if res.broken_word:
         # a word wider than the box: the box takes the whole free width first, then the size may give way to 55 %
         if not centred and w_full > box.w:
             box = Bbox(x=box.x, y=box.y, w=w_full, h=box.h)
-            res = fit_size([head_text], box, title_font, h1, title_bold, scale, insets_emu=insets, line_spacing=lh, min_ratio=min_ratio, ladder_only=sparse)
+            res = fit_size([head_text], box, title_font, h_fit, title_bold, scale, insets_emu=insets, line_spacing=lh, min_ratio=min_ratio, ladder_only=sparse)
         if res.broken_word:
-            res = fit_size([head_text], box, title_font, h1, title_bold, scale, insets_emu=insets, line_spacing=lh, min_ratio=0.55, ladder_only=sparse)
+            res = fit_size([head_text], box, title_font, h_fit, title_bold, scale, insets_emu=insets, line_spacing=lh, min_ratio=0.55 * h1 / h_fit, ladder_only=sparse)
         if res.broken_word:
             warnings.append("heading word broken")
     limit = int(0.42 * H)

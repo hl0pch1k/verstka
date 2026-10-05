@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Optional
 
@@ -27,7 +28,9 @@ def _measure(paragraphs: list[str], family: Optional[str], size_pt: float, bold:
     kw = {"caps": caps, "spc_pt": spc_pt} if (caps or spc_pt) else {}
     total, broken = 0, False
     for p in paragraphs:
-        if not broken and any(text_width_pt(w, family, size_pt, bold, **kw) > width_pt for w in p.split()):
+        # split as `wrap_lines` breaks: at ordinary spaces only — words bound by no-break spaces («до автоматизации»)
+        # are one piece, and a piece wider than the box is broken by letters
+        if not broken and any(text_width_pt(w, family, size_pt, bold, **kw) > width_pt for w in re.split(r"[ \t\r\n]+", p) if w):
             broken = True
         total += max(len(wrap_lines(p, family, size_pt, bold, width_pt, **kw)), 1)
     return total, broken

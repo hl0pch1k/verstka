@@ -104,7 +104,8 @@ def font_not_in_template(ctx: AuditContext) -> list[Issue]:
         bad = {f: ids for f, ids in used.items() if not f.startswith("+") and not any(same_family(f, a) for a in allowed) and not MONO_RE.search(f)}
         for f, ids in bad.items():
             out.append(ctx.new_issue(FONT_NOT_IN_TEMPLATE, s.index, f"шрифт «{f}» отсутствует в шаблоне", element_ids=sorted(set(ids)), bboxes=[s.by_id(i).bbox_frac for i in sorted(set(ids))[:3] if s.by_id(i)], autofix=fix("refont", "заменить на основной шрифт шаблона", element_ids=sorted(set(ids)))))
-        groups = _font_groups(list(used))
+        # (the code's monospace face is no third face of the slide's design: heading, text and the code — as designed)
+        groups = _font_groups([f for f in used if not MONO_RE.search(f)])
         if len(groups) > 2:
             out.append(ctx.new_issue(FONT_NOT_IN_TEMPLATE, s.index, f"на слайде {ru_count(len(groups), 'шрифт', 'шрифта', 'шрифтов')}: {', '.join(sorted(g[0] for g in groups))}", severity="warn"))
     return out

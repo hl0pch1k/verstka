@@ -256,6 +256,19 @@ def render_outputs(vdir: Path, manifest: TemplateManifest, title: Optional[str],
     return paths, imgs, warnings, render_ok
 
 
+def _shown_samples(taken0: dict, outline: DeckOutline, render: RenderResult) -> dict:
+    """`taken` for the next variants: what the earlier ones showed, and the samples this deck shows on its slides."""
+    from verstka.matching.matcher import headline_key
+
+    taken = {k: set(v) for k, v in taken0.items()}
+    by_id = {s.id: s for s in outline.slides}
+    for rs in render.slides:
+        o = by_id.get(rs.outline_id)
+        if o is not None and rs.mode == "clone" and rs.pattern_id:
+            taken.setdefault(headline_key(o), set()).add(rs.pattern_id)
+    return taken
+
+
 def _rematched(outline0: DeckOutline, manifest: TemplateManifest, strategy: Strategy, ws: TemplateWorkspace, taken0: dict, render: RenderResult, vdir: Path):
     """The deck rendered once more with its samples chosen again without those that read badly on their slides
     (`RenderResult.failed_samples`). Returns (outline, plan, render, taken) when it stands on more template slides —
@@ -269,7 +282,7 @@ def _rematched(outline0: DeckOutline, manifest: TemplateManifest, strategy: Stra
         if again == first:
             return None  # the same samples on the same slides: nothing to gain
         tmp = vdir / "deck.retry.pptx"
-        r2 = render_deck(v_outline, plan, manifest, ws, tmp, skip=set(render.failed_samples))
+        r2 = render_deck(v_outline, plan, manifest, ws, tmp, skip=set(render.failed_samples), shown=taken0)
         better = (len(r2.clones), len(set(r2.clones))) > (len(render.clones), len(set(render.clones)))
         if not better:
             tmp.unlink(missing_ok=True)
@@ -502,7 +515,7 @@ def generate_variants(
         plan = match_outline(v_outline, manifest, strategy, ws=ws, taken=taken)
         report(f"{name}: planned {len(v_outline.slides)} slides, rendering", base + span * 0.2)
         tr = time.time()
-        render = render_deck(v_outline, plan, manifest, ws, vdir / "deck.pptx", progress=lambda s, f: report(f"{name}: {s}", base + span * (0.2 + 0.4 * f)))
+        render = render_deck(v_outline, plan, manifest, ws, vdir / "deck.pptx", progress=lambda s, f: report(f"{name}: {s}", base + span * (0.2 + 0.4 * f)), shown=taken0)
         if render.failed_samples:
             # a sample that read badly on its slide (`clone_check.content_trouble`) kept its place in the deck-level
             # choice: its neighbours gave it up and the slide itself fell back to its first alternatives. The samples
@@ -519,10 +532,13 @@ def generate_variants(
             audit_report = run_audit(vdir / "deck.pptx", manifest, v_outline, ws, providers=providers if audit_models else None, skills=skills if audit_models else None, use_vlm=audit_models and use_vlm, use_llm=audit_models and use_llm, render=audit_render, images_dir=vdir / "slides", strategy=name, brief_text=brief.text if brief else None, writer=writer_audit)
             if autofix and audit_report.summary.errors + audit_report.summary.warnings > 0:
                 report(f"{name}: autofix ({audit_report.summary.errors} errors)", base + span * 0.8)
-                audit_report, plan, v_outline, rr = autofix_loop(vdir / "deck.pptx", audit_report, v_outline, plan, manifest, ws, providers=providers, skills=skills, use_models=audit_models, images_dir=vdir / "slides", render=audit_render, brief_text=brief.text if brief else None, writer=writer_audit)
+                audit_report, plan, v_outline, rr = autofix_loop(vdir / "deck.pptx", audit_report, v_outline, plan, manifest, ws, providers=providers, skills=skills, use_models=audit_models, images_dir=vdir / "slides", render=audit_render, brief_text=brief.text if brief else None, writer=writer_audit, others=taken0)
                 if rr is not None:
                     render = rr
             timings["audit"] = round(time.time() - tau, 2)
+        # the variants after this one know what it SHOWS on each slide — the sample a fallback or the autofix put
+        # there, nothing for a slide composed — not what it planned (three variants converged on one sample)
+        taken = _shown_samples(taken0, v_outline, render)
         try:
             from verstka.rendering.renderer import strip_outline_marks
 

@@ -74,6 +74,20 @@ class DeckBuilder:
                 v = el.get(attr)
                 if v is not None and v in rid_map:
                     el.set(attr, rid_map[v])
+        # the sample's own say over its master and layout: graphics it hides (showMasterSp="0": a master's logo, a
+        # layout's full-slide picture) stay hidden on its clones, and its colour map override keeps its colours
+        for attr in ("showMasterSp", "show", "showMasterPhAnim"):
+            v = src._element.get(attr)
+            if v is not None:
+                new._element.set(attr, v)
+        src_map = src._element.find(q("p:clrMapOvr"))
+        if src_map is not None:
+            old_map = new._element.find(q("p:clrMapOvr"))
+            if old_map is not None:
+                new._element.replace(old_map, copy.deepcopy(src_map))
+            else:
+                cs = new._element.find(q("p:cSld"))
+                cs.addnext(copy.deepcopy(src_map))
         # timing/transitions from the source (optional, harmless)
         # placeholders that inherit their geometry from the layout get it written explicitly: every later partial
         # write (a lone `.width =`) and every bbox reader then sees the real box, not x=0 / None
@@ -230,13 +244,41 @@ def materialize_xfrm(shape) -> bool:
     return True
 
 
+def materialize_anchor(shape) -> bool:
+    """Write the vertical anchor a placeholder inherits (its layout's, its master's) on its own bodyPr: every reader
+    of the slide — the gate's ink boxes, the free room a conclusion takes — then sees where its text really stands
+    (Office's heading box anchored at its foot by the layout read as text at its top: the conclusion was drawn over
+    it). False when the shape sets its own or nothing is inherited."""
+    el = getattr(shape, "_element", None)
+    if el is None or etree.QName(el).localname != "sp":
+        return False
+    bp = el.find(q("p:txBody") + "/" + q("a:bodyPr"))
+    if bp is None or bp.get("anchor"):
+        return False
+    base = shape
+    for _ in range(2):
+        try:
+            base = base._base_placeholder
+        except Exception:  # noqa: BLE001
+            base = None
+        if base is None:
+            return False
+        bbp = base._element.find(".//" + q("a:bodyPr"))
+        if bbp is not None and bbp.get("anchor"):
+            bp.set("anchor", bbp.get("anchor"))
+            return True
+    return False
+
+
 def materialize_placeholders(slide: Slide) -> int:
-    """`materialize_xfrm` on every top-level placeholder of the slide; returns how many were written."""
+    """`materialize_xfrm` (and `materialize_anchor`) on every top-level placeholder of the slide; returns how many
+    geometries were written."""
     n = 0
     for shp in slide.shapes:
         if getattr(shp, "is_placeholder", False):
             try:
                 n += bool(materialize_xfrm(shp))
+                materialize_anchor(shp)
             except Exception:  # noqa: BLE001 - never break a render over bookkeeping
                 log.debug("materialize_xfrm failed on %s", getattr(shp, "shape_id", "?"), exc_info=True)
     return n

@@ -103,10 +103,12 @@ def _unsay(outline: DeckOutline) -> int:
     return removed
 
 
-def _rematch(plan: LayoutPlan, outline: DeckOutline, oid: str, manifest: Optional[TemplateManifest] = None, taken: Optional[set] = None) -> str:
+def _rematch(plan: LayoutPlan, outline: DeckOutline, oid: str, manifest: Optional[TemplateManifest] = None, taken: Optional[set] = None, others: Optional[dict] = None) -> str:
     """The slide's next rung: its next untried sample (one no other slide of the deck shows first — three slides moved
     to one sample in one pass made the pass worse and it was rolled back whole), else the composer. `taken`: the
-    samples this pass already gave other slides."""
+    samples this pass already gave other slides; `others`: headline key → the samples the other variants show on
+    that slide (a cover rematched to the next one in its list took the visual variant's cover: three variants opened
+    on one slide) — taken only when nothing else is left."""
     ps = plan.for_outline(oid)
     osl = next((s for s in outline.slides if s.id == oid), None)
     if ps is None or osl is None:
@@ -119,17 +121,26 @@ def _rematch(plan: LayoutPlan, outline: DeckOutline, oid: str, manifest: Optiona
     bookend = getattr(osl.kind, "value", osl.kind) in ("title", "section", "thanks")
     patterns = {p.id: p for p in manifest.patterns} if manifest is not None else {}
     shown = {x.pattern_id for x in plan.slides if x.pattern_id and x.outline_id != oid} | set(taken or ())
+    if others:
+        from verstka.matching.matcher import headline_key
+
+        elsewhere = set(others.get(headline_key(osl), ()))
+    else:
+        elsewhere = set()
     for free_only in (True, False):
         for pid, score in ps.alternatives:
             if bookend and _empty_frame(patterns.get(pid), osl):
                 continue  # a cover never trades its heading for an empty photo frame or a phone mock-up
-            if free_only and pid in shown:
+            if free_only and (pid in shown or pid in elsewhere):
                 continue
             if pid not in tried and score >= 0.3:
+                was = ps.pattern_id
                 ps.mode = "clone"
                 ps.pattern_id = pid
-                ps.fit["tried"] = sorted(tried)
-                ps.reasons.append(f"автофикс: перевыбран паттерн {pid} ({score:.2f})")
+                ps.fit = {"tried": sorted(tried), **({"synth_failed": True} if ps.fit.get("synth_failed") else {})}
+                ps.score = score  # the plan describes the sample shown, not the one left
+                ps.reasons = [f"автофикс: перевыбран паттерн {pid} ({score:.2f})" + (f" вместо {was}" if was else "")]
+                ps.alternatives = [(a, sc) for a, sc in ps.alternatives if a != pid]
                 if taken is not None:
                     taken.add(pid)
                 return f"rematch → {pid}"
@@ -518,6 +529,7 @@ def autofix_loop(
     render: Optional[bool] = None,
     brief_text: Optional[str] = None,
     writer: Optional[Any] = None,
+    others: Optional[dict] = None,
 ) -> tuple[AuditReport, LayoutPlan, DeckOutline, RenderResult | None]:
     """Apply fixes while the audit improves; an iteration that makes it worse is rolled back (deck, plan, outline).
 
@@ -548,7 +560,7 @@ def autofix_loop(
             for oid, actions in fixes.items():
                 for act in actions:
                     if act.action in STRUCTURAL_ACTIONS:
-                        res = _rematch(plan, outline, oid, manifest, taken)
+                        res = _rematch(plan, outline, oid, manifest, taken, others=others)
                         applied.append({"iteration": it, "outline_id": oid, "action": act.action, "result": res})
                         need_render = need_render or res != "skip"
                         if res != "skip":

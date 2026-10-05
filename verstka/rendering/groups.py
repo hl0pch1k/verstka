@@ -120,8 +120,9 @@ def cell_riders(slide: Slide, group: RepeatGroup, cells: list[list[etree._Elemen
 
     A rider is a top-level spTree element whose centre along the group axis lies inside exactly one cell's band,
     whose size along the axis is at most 1.2× the cell and which sits next to the cell across the axis
-    (within one cell height for a row, one cell width for a column). Chrome, titles etc. are excluded via
-    `protected_ids`. Grid groups have no riders.
+    (within one cell height for a row, one cell width for a column) — or a small one beside a cell along the axis,
+    in its band across it (a chip left of its line). Chrome, titles etc. are excluded via `protected_ids`. Grid
+    groups have no riders.
     """
     out: list[list[etree._Element]] = [[] for _ in cells]
     if group.axis not in ("row", "column") or not cells:
@@ -145,6 +146,7 @@ def cell_riders(slide: Slide, group: RepeatGroup, cells: list[list[etree._Elemen
             continue
         cx, cy = bb[0] + bb[2] / 2, bb[1] + bb[3] / 2
         hits = []
+        beside: list[tuple[float, int]] = []
         for i, b in enumerate(boxes):
             if row:
                 inside = b.x <= cx <= b.x2 and bb[2] <= 1.2 * b.w
@@ -154,8 +156,20 @@ def cell_riders(slide: Slide, group: RepeatGroup, cells: list[list[etree._Elemen
                 near = bb[0] + bb[2] >= b.x - b.w and bb[0] <= b.x2 + b.w
             if inside and near:
                 hits.append(i)
+            # a chip standing beside its cell along the axis (VK WorkSpace p12: the arrow chip left of each line of
+            # its row): small, in the cell's band across the axis, close to its edge — the leading side first
+            lo, hi, size = (b.x, b.x2, b.w) if row else (b.y, b.y2, b.h)
+            a0, a1 = (bb[0], bb[0] + bb[2]) if row else (bb[1], bb[1] + bb[3])
+            band = (b.y <= cy <= b.y2) if row else (b.x <= cx <= b.x2)
+            if band and (a1 - a0) <= 0.5 * size:
+                if 0 <= lo - a1 <= 0.25 * size:
+                    beside.append((lo - a1, i))
+                elif 0 <= a0 - hi <= 0.25 * size:
+                    beside.append((1.5 * (a0 - hi), i))
         if len(hits) == 1:
             out[hits[0]].append(el)
+        elif not hits and beside:
+            out[min(beside)[1]].append(el)
     return out
 
 
@@ -292,12 +306,18 @@ def _rebalance_grid(cells: list[list[etree._Element]], riders: list[list[etree._
                     shift_element(e, new.x - old.x, 0)
         return
     w_new = (x1 - x0 - (cols - 1) * gx) / cols
+    # the last row short of cells (five items in rows of three) stands centred under the full ones, as above
+    n_rows = -(-n // cols)
+    last = n - cols * (n_rows - 1)
     for i, (c, r) in enumerate(zip(cells, riders)):
         old = cell_bbox(c)
         row_i, col_i = divmod(i, cols)
         if old is None or row_i >= rows0:
             continue
-        new = Bbox(x=int(x0 + col_i * (w_new + gx)), y=ys[row_i], w=int(w_new), h=old.h)
+        start = x0
+        if row_i == n_rows - 1 and last < cols:
+            start = x0 + (x1 - x0 - (last * w_new + (last - 1) * gx)) / 2
+        new = Bbox(x=int(start + col_i * (w_new + gx)), y=ys[row_i], w=int(w_new), h=old.h)
         mid = Bbox(x=new.x, y=old.y, w=new.w, h=old.h)
         for e in c + r:
             if is_nested(e):

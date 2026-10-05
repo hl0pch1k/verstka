@@ -95,7 +95,8 @@ def block_height_pt(paras: list[Para], width_pt: float, line: float) -> float:
 
 
 def widest_word_pt(text: str, font: Optional[str], size: float, bold: bool) -> float:
-    return max((text_width_pt(w, font, size, bold) for w in text.split()), default=0.0)
+    """The widest piece of the text a line never breaks: words, and words bound by no-break spaces («в день»)."""
+    return max((text_width_pt(w, font, size, bold) for w in re.split(r"[ \t\r\n]+", text) if w), default=0.0)
 
 
 # ---------------------------------------------------------------------------------------------- kit
@@ -822,6 +823,12 @@ class Composer:
     def h(self, paras: list[Para], width_emu: int) -> int:
         return _emu(block_height_pt(paras, _pt(width_emu), self.kit.line)) + _emu(2)
 
+    def accent_for(self, colors: "Colors", size: float, bold: bool) -> str:
+        """The accent for a numeral or a mark at `size`: the accent itself from the large-text size up (18 pt, 14 pt
+        bold — 3:1 is enough there), its text tone under it (4.5:1): VK Blue on a light card is 3.7:1, an «01» at
+        16 pt in it reads faint."""
+        return colors.accent if size >= (14.0 if bold else 18.0) else colors.accent_text
+
     def P(self, text: str, size: float, color: str, bold: bool = False, align: str = "l", space_after: float = 0.0, marker: Optional[str] = None, marker_color: Optional[str] = None, spacing: Optional[float] = None) -> Para:
         # the run names the template font: measuring and rendering see the same face (Montserrat is 20% wider than Play)
         return Para([Run(typeset(text), size, color, bold, self.kit.font)], align=align, space_after=space_after, marker=marker, marker_color=marker_color, spacing=spacing)
@@ -1350,7 +1357,7 @@ class Composer:
                 self.bullets(area, self._running())
         elif comp == "agenda" or kind == PatternKind.agenda:
             self.agenda(area, self._items() or [SlideItem(title=b) for b in c.bullets])
-        elif comp in ("comparison", "two_column") or kind in (PatternKind.comparison, PatternKind.two_column):
+        elif comp in ("comparison", "two_column") or (kind in (PatternKind.comparison, PatternKind.two_column) and comp not in ("cards",)):
             items = self._items()
             if len(items) >= 2:
                 with self._lines_under(area, list(c.bullets) if (c.items or c.columns) else []) as main:
@@ -1626,6 +1633,7 @@ class Composer:
                 badge = None
             if all(i.number for i in items):
                 badge = "figure"
+        self._grid_figures = [i.number for i in items if i.number] if badge == "figure" else None
         gap = k.gap
         colors = st.colors
         title_color = colors.heading
@@ -1967,6 +1975,13 @@ class Composer:
         return h
 
     def _figure_size(self, value: str, width: int) -> float:
+        """A card's figure size: the largest at which it — and every other figure of its grid (`_grid_figures`) —
+        fits its card. One size for the row: «100», «300 ₽», «30» at 54 pt beside «900 000 ₽» at 24 pt read as three
+        figures and a caption."""
+        vals = getattr(self, "_grid_figures", None) or [value]
+        return min(self._one_figure_size(v, width) for v in vals)
+
+    def _one_figure_size(self, value: str, width: int) -> float:
         k = self.kit
         for s in k.figure_sizes(k.figure_cap(4, True, self.strategy), k.h3):
             if self.figure_para(value, s, "000000", "000000")[1] <= _pt(width) * 0.88:
@@ -1987,7 +2002,7 @@ class Composer:
             idx = f"{i + 1:02d}"
             isz = self._index_size(self._index_ref(it, ts, bs, badge), small=badge == "index_s")
             hh = _emu(isz * k.line)
-            self.cv.text(Bbox(x=box.x, y=y, w=box.w, h=hh), [self.P(idx, isz, colors.accent, bold=k.bold)], name="Index")
+            self.cv.text(Bbox(x=box.x, y=y, w=box.w, h=hh), [self.P(idx, isz, self.accent_for(colors, isz, k.bold), bold=k.bold)], name="Index")
             y += hh + int(k.vgap * 0.35)
         elif badge == "figure" and it.number:
             fs = self._figure_size(it.number, box.w)
@@ -1999,7 +2014,7 @@ class Composer:
             # the numeral hangs beside the first line, at its size (one baseline); the title beside it, the words under
             ref = paras[0].size
             nw, parts = self._hung(it, paras, box.w, ts, bs)
-            self.cv.text(Bbox(x=box.x, y=y, w=nw, h=_emu(ref * k.line) + _emu(2)), [self.P(f"{i + 1:02d}", ref, colors.accent, bold=k.bold)], name="Index")
+            self.cv.text(Bbox(x=box.x, y=y, w=nw, h=_emu(ref * k.line) + _emu(2)), [self.P(f"{i + 1:02d}", ref, self.accent_for(colors, ref, k.bold), bold=k.bold)], name="Index")
             for j, (dx, dy, ps, hh) in enumerate(parts):
                 last = j == len(parts) - 1
                 self.cv.text(Bbox(x=box.x + dx, y=y + dy, w=box.w - dx, h=max(hh, box.y2 - y - dy) if last else hh), ps, name="Card text")
@@ -2740,7 +2755,7 @@ class Composer:
             chunk = list(range(c * per, min((c + 1) * per, n)))
             for j, i in enumerate(chunk):
                 hh = heights[i]
-                self.cv.text(Bbox(x=x, y=y, w=idx_w, h=hh), [self.P(f"{i + 1:02d}", ts, k.colors.accent, bold=k.bold)], name="Index")
+                self.cv.text(Bbox(x=x, y=y, w=idx_w, h=hh), [self.P(f"{i + 1:02d}", ts, self.accent_for(k.colors, ts, k.bold), bold=k.bold)], name="Index")
                 self.cv.text(Bbox(x=x + idx_w, y=y, w=col_w - idx_w, h=hh), [self.P(items[i].title, ts, k.colors.text)], name="Agenda item")
                 y += hh
                 if j < len(chunk) - 1:
@@ -2748,10 +2763,14 @@ class Composer:
                     y += 2 * row_gap
 
     def columns(self, area: Bbox, items: list[SlideItem]) -> None:
-        """Two or three columns side by side (options, before/after, pros/cons): the first column carries the accent."""
+        """Two or three columns side by side (options, before/after, pros/cons): the first column carries the accent.
+        More than three: a grid of cards — a column is never dropped."""
+        if len(items) > 3:
+            self.warnings.append(f"{len(items)} options set as cards: three columns at most side by side")
+            self.cards(area, items)
+            return
         k = self.kit
-        n = min(len(items), 3)
-        items = items[:n]
+        n = len(items)
         gap = k.gap
         cw = int((area.w - gap * (n - 1)) / n)
         st = k.card
@@ -3235,20 +3254,31 @@ class Composer:
         else:
             words_line = None
         c = self.o.content
-        # a term without words of its own takes the label of the slide's figure it repeats («100» → «покупок в день»)
+        # a slide figure the equation shows is shown: never once more as a card under it («100 покупок в день» in
+        # the equation and «100 — Покупок в день» under it); a term without words of its own takes the figure's label
+        # («100» → «покупок в день»)
         used: set[int] = set()
         labeled: list[tuple[Optional[str], str]] = []
         for fig, lab in terms:
-            if fig and not lab:
-                d = re.sub(r"\D", "", fig)
-                hit = next((i for i, n in enumerate(c.numbers) if i not in used and re.sub(r"\D", "", n.value) == d and n.label.strip()), None)
+            d = re.sub(r"\D", "", fig or "")
+            if d:
+                hit = next((i for i, n in enumerate(c.numbers) if i not in used and re.sub(r"\D", "", n.value) == d and (lab or n.label.strip())), None)
                 if hit is not None:
                     used.add(hit)
-                    lab = c.numbers[hit].label.strip()
-                    value = " ".join(c.numbers[hit].value.split())
-                    if re.search(r"[^\d\s.,]", value) and not re.search(r"[^\d\s.,]", fig):
-                        fig = value  # «300» of the formula is the slide's «300 ₽»: the figure keeps its unit
+                    full = c.numbers[hit].label.strip()
+                    if not lab:
+                        lab = full
+                        value = " ".join(c.numbers[hit].value.split())
+                        if re.search(r"[^\d\s.,]", value) and not re.search(r"[^\d\s.,]", fig):
+                            fig = value  # «300» of the formula is the slide's «300 ₽»: the figure keeps its unit
+                    elif full and len(full) > len(lab) and " ".join(lab.lower().split()) in " ".join(full.lower().split()):
+                        # the author's fuller words under the figure: «рабочих дней» of the equation is the slide's
+                        # «рабочих дней в расчетном месяце» — nothing of it is lost under the formula
+                        lab = full
             labeled.append((fig, lab))
+        # the words under the figures read as one row of captions: one case for all («Покупок в день» beside «Средний чек»)
+        if any(lab[:1].isupper() for fig, lab in labeled if fig and lab):
+            labeled = [(fig, lab[:1].upper() + lab[1:] if fig and lab else lab) for fig, lab in labeled]
         terms = labeled
         res = next((i + 1 for i in range(len(ops) - 1, -1, -1) if ops[i] in ("=", "≈")), None)
         colors = k.colors
@@ -3609,9 +3639,11 @@ class Composer:
         side_texts = [t for t in (list(c.bullets) + list(c.paragraphs)) if t.strip()]
         kind = effective_chart_type(spec, self.outline)
         pie = kind in ("pie", "doughnut")
-        # the figure a reader takes from a series (its growth) — never for the parts of a whole, and not when the
-        # slide states its own conclusion under the chart
-        takeaway = None if (pie or (self.o.takeaway or "").strip()) else _series_takeaway(spec, self.outline, self.o.headline)
+        # the figure a reader takes from a series (its growth) — never for the parts of a whole, not when the slide
+        # states its own conclusion under the chart, and never on a slide of the author's own words: a computed «×1,6»
+        # beside the author's «выросла на 55%» is a second, differently rounded claim the brief never made
+        said = " ".join([self.o.headline or "", self.o.subtitle or ""] + side_texts)
+        takeaway = None if (pie or (self.o.takeaway or "").strip() or self.o.verbatim) else _series_takeaway(spec, self.outline, said)
         aside = self._takeaway_aside()
         take = " ".join((self.o.takeaway or "").split())
         take = take[:1].upper() + take[1:]
@@ -4209,7 +4241,11 @@ class Composer:
             # the shares padded to one width with figure spaces: the column is set flush right, so «· 9%» under
             # «· 19%» moved its amount and its dot right of the rows above
             wide = max((len(p_) for p_ in pct), default=0)
+            # (only beside the names: the stacked form sets the line under its name flush left, where the padding
+            # would only widen the gap after the dot — «25 000 ₽  ·   3%»)
+            pct_plain = [f"{a}  ·  {p_}" for a, p_ in zip(amt, pct)]
             pct = [f"{a}  ·  {chr(0x2007) * (wide - len(p_))}{p_}" for a, p_ in zip(amt, pct)]
+            pct_side = list(pct)
             share_head = "сумма · доля от общей суммы"
             head = f"{head}\n{share_head}" if head else share_head[:1].upper() + share_head[1:]
         rows = [j for j in range(len(cats)) if vals[j] > 0]
@@ -4227,7 +4263,9 @@ class Composer:
             name_nat = _emu(max(text_width_pt(cats[j], k.font, size, False) for j in rows) + size * 0.6)
             if stack:
                 name_nat = max(name_nat, pct_nat)
-            name_w = max(min(name_nat, name_cap), _emu(size * 5), pct_nat if stack else 0)
+            # never narrower than its longest word: a name broken inside a word («Рекомендац / ии») reads as two
+            word_w = _emu(max(widest_word_pt(self.P(cats[j], size, colors.text).text, k.font, size, False) for j in rows) * 1.02 / 0.985 + size * 0.2)
+            name_w = max(min(name_nat, name_cap), _emu(size * 5), pct_nat if stack else 0, word_w)
             row_gap = _emu(size * 0.5)
             col_gap = _emu(size * 1.6)
             hs = [self.h([self.P(cats[j], size, colors.text, spacing=ls)] + ([self.P(pct[j], size, colors.text, bold=k.figure_bold, spacing=ls)] if stack else []), name_w) for j in rows]
@@ -4246,6 +4284,8 @@ class Composer:
             # the amounts beside their names; a narrower legend with each amount on the line under its name; the
             # shares only
             stack = legend_mode == "stacked"
+            if amounts and legend_mode in ("amounts", "stacked"):
+                pct = pct_plain if stack else pct_side
             if legend_mode == "shares" and amounts:
                 # a narrow box: the amounts stay on the slices, the legend gives the shares only, headed as such
                 pct = shares_only
@@ -4482,7 +4522,9 @@ class Composer:
         the measured lines, and a renderer's face a little narrower than the estimate (Open Sans set in Noto Sans) no
         longer joins them into one line under a blank one (B3-4)."""
         para = self.P(text, size, color, spacing=spacing)
-        lines = wrap_lines(para.text, self.kit.font, size, False, max(_pt(width), 1.0))
+        # (wrapped as the row was measured — `para_lines` keeps 1.5 % of the line free: a name set one line shorter
+        # than its row left a blank line under it)
+        lines = wrap_lines(para.text, self.kit.font, size, False, max(_pt(width) * 0.985, 1.0))
         if len(lines) <= 1:
             return [para]
         return [Para([Run(line_, size, color, False, self.kit.font)], align=para.align, spacing=spacing) for line_ in lines]
@@ -4818,9 +4860,9 @@ def _aside_figure(text: str) -> Optional[str]:
 
 
 def _series_takeaway(spec, outline: DeckOutline, headline: str = "") -> Optional[tuple[str, str]]:
-    """The figure a reader takes from a series: its growth (last/first) or its last value. Computed, never invented.
-    When the heading already names the multiple («рост в 5 раз»), the panel gives the last value instead of a
-    second, differently rounded multiple."""
+    """The figure a reader takes from a series: its growth (last/first) or its change in the series' unit. Computed,
+    never invented. `headline`: the slide's own words (its heading and the lines beside the chart) — when they name
+    the change («рост в 5 раз», «на 55%») no second, differently rounded measure of it is computed."""
     from verstka.rendering.charts import resolve_series
 
     try:
@@ -4834,10 +4876,12 @@ def _series_takeaway(spec, outline: DeckOutline, headline: str = "") -> Optional
     if len(vals) < 2 or any(v is None for v in vals):
         return None
     first, last = vals[0], vals[-1]
-    # the heading already states the change («вырастет на 112,3%», «в 2 раза»): a second, differently computed
-    # measure of it beside the chart («×2,1») says nothing new and is not the brief's figure
+    # the slide already states the change («вырастет на 112,3%», «в 2 раза»): a second, differently computed measure
+    # of it beside the chart («×2,1») says nothing new and is not the brief's figure
     if re.search(r"\d\s?%|\bв\s+\d+([.,]\d+)?\s*раз|[×x]\s?\d|вдвое|втрое", headline or "", re.I):
         return None
+    if first <= 0 or last <= 0:
+        return None  # from a loss to a profit («−2,1 → 10,5»): no growth reads across the sign
     periods = all(re.search(r"(?i)месяц|квартал|год|недел|янв|фев|мар|апр|ма[йя]|июн|июл|авг|сен|окт|ноя|дек|\b\d{4}\b", c or "") for c in s.categories[1:]) if s.categories else False
     # a change is read only along an order: periods, or a before/after pair («Сейчас → Цель», «До → После»). Parts of a
     # set (countries, products, regions) have no first and last: «−89%: СССР → Япония» would be a made-up measure
@@ -4855,11 +4899,13 @@ def _series_takeaway(spec, outline: DeckOutline, headline: str = "") -> Optional
         if ratio <= 0.67:
             pct = int(round((1 - ratio) * 100))
             return f"−{pct}%", f"снижение: {span}".strip(": ") if span and not span.startswith("за период") else f"снижение {span}".strip()
-    # the change in the series' own unit — never the last value, which the highlighted bar already shows
+    # the change in the series' own unit — never the last value, which the highlighted bar already shows; without a
+    # unit a bare «+12,6» measures nothing
     delta = last - first
-    if not delta:
+    u0 = s.unit or getattr(spec, "unit", None)
+    if not delta or not u0:
         return None
-    unit = f" {s.unit}" if s.unit and s.unit not in ("%",) else (s.unit or "")
+    unit = f" {u0}" if u0 not in ("%",) else u0
     mag = abs(delta)
     v = f"{mag:,.0f}".replace(",", " ") if mag >= 100 else f"{mag:g}".replace(".", ",")
     if re.sub(r"\s", "", v) in re.sub(r"\s", "", headline or ""):

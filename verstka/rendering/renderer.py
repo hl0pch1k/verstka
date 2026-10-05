@@ -142,8 +142,11 @@ def render_deck(
     out_pptx: Path | str,
     progress: Optional[Callable[[str, float], None]] = None,
     skip: Optional[set] = None,
+    shown: Optional[dict] = None,
 ) -> RenderResult:
-    """`skip`: (outline id, sample id) pairs an earlier render of this deck found reading badly — not tried again."""
+    """`skip`: (outline id, sample id) pairs an earlier render of this deck found reading badly — not tried again.
+    `shown`: headline key → the samples the variants built before show on that slide: a fallback tries the others
+    first (the variants differ in their template slides)."""
     # one percent style for the whole deck — the style of its own words (G5-16: never «42 %» and «42%» on one slide);
     # Russian text in a template family without Cyrillic is measured and set in a stand-in (cyrillic.py)
     from verstka.rendering.cyrillic import apply_to_pptx, cyrillic_substitutes, deck_fonts, mark_russian, strip_highlights
@@ -153,7 +156,7 @@ def render_deck(
     except Exception:  # noqa: BLE001 - the template's own families then
         subs = {}
     with deck_typography([outline.model_dump_json()]), deck_fonts(subs):
-        result = _render_deck(outline, plan, manifest, ws, out_pptx, progress, skip=skip)
+        result = _render_deck(outline, plan, manifest, ws, out_pptx, progress, skip=skip, shown=shown)
     if subs:
         try:
             if apply_to_pptx(out_pptx, subs):
@@ -180,7 +183,7 @@ _BOOKEND_VALUES = ("title", "section", "thanks")
 ALT_MAX = 4  # template samples tried for a content slide before it is composed
 
 
-def _render_content_clone(builder: DeckBuilder, ps: LayoutSlide, oslide, patterns: dict, manifest: TemplateManifest, ws: TemplateWorkspace, outline: DeckOutline, used: dict, before, failed: Optional[set] = None, skip: Optional[set] = None) -> tuple:
+def _render_content_clone(builder: DeckBuilder, ps: LayoutSlide, oslide, patterns: dict, manifest: TemplateManifest, ws: TemplateWorkspace, outline: DeckOutline, used: dict, before, failed: Optional[set] = None, skip: Optional[set] = None, others: Optional[set] = None) -> tuple:
     """A content slide on its template sample, checked (`clone_check.content_trouble`); a sample that loses content or
     reads badly is rolled back and the next one of the plan's alternatives not used elsewhere in the deck is tried.
     `failed` collects (outline id, sample id) of the samples that read badly; `skip`: pairs known to read badly from
@@ -196,18 +199,35 @@ def _render_content_clone(builder: DeckBuilder, ps: LayoutSlide, oslide, pattern
     floor_sc = max(0.45, min((ps.score or 0.0) - 0.3, 0.6))
     order = [ps.pattern_id] + [pid for pid, sc in (ps.alternatives or []) if pid != ps.pattern_id and used.get(pid, 0) == 0 and (sc or 0.0) >= floor_sc]
     order = [pid for pid in order if (oslide.id, pid) not in skip]
+    if others:
+        # (the samples another variant shows on this very slide come last among the fallbacks: the variants differ)
+        order = order[:1] + [pid for pid in order[1:] if pid not in others] + [pid for pid in order[1:] if pid in others]
     for pid in order[:ALT_MAX]:
         p = patterns.get(pid)
         if p is None or p.kind.value in _BOOKEND_VALUES:
             continue
-        slide, warns = render_clone(builder, ps, oslide, p, manifest, ws, outline)
         from verstka.rendering.clone_notes import place_lede, place_notes
 
-        place_lede(builder, slide, oslide, outline, manifest, p, warns)
-        why = place_notes(builder, slide, oslide, outline, manifest, p) or content_trouble(slide, oslide, p, manifest, warns)
+        try:
+            slide, warns = render_clone(builder, ps, oslide, p, manifest, ws, outline)
+            place_lede(builder, slide, oslide, outline, manifest, p, warns)
+            why = place_notes(builder, slide, oslide, outline, manifest, p) or content_trouble(slide, oslide, p, manifest, warns)
+        except _CloneRedo:
+            raise
+        except Exception as e:  # noqa: BLE001 - a sample that cannot take the slide (no room for its chart) is one more
+            # that read badly: the next alternative is tried, the pair is remembered — never the whole slide given up
+            log.info("slide %s on sample %s failed: %s", oslide.id, pid, e)
+            why = f"failed: {str(e)[:120]}"
         if why is None:
             if pid != ps.pattern_id:
-                ps.reasons = [f"слайд {p.source_slide} шаблона: первый выбранный образец не вместил содержимое"] + [r for r in ps.reasons if not r.startswith("слайд ")]
+                # the plan describes the sample shown: its own score, not the first one's fit and reasons («совпадение
+                # 67%» and «не хватает ячеек» of a sample the slide does not stand on)
+                first = patterns.get(ps.pattern_id)
+                was = f" (слайд {first.source_slide})" if first is not None else ""
+                ps.reasons = [f"слайд {p.source_slide} шаблона: первый выбранный образец{was} не вместил содержимое"]
+                ps.score = next((sc for a, sc in (ps.alternatives or []) if a == pid), ps.score)
+                ps.fit = {}
+                ps.alternatives = [(a, sc) for a, sc in (ps.alternatives or []) if a != pid]
                 ps.pattern_id = pid
             return slide, warns + [f"sample {t} read badly — next sample" for t in tried]
         tried.append(f"{pid} ({why[:80]})")
@@ -298,7 +318,7 @@ def _bookend_trouble(slide, oslide: DeckOutline) -> Optional[str]:
     return None
 
 
-def _render_deck(outline: DeckOutline, plan: LayoutPlan, manifest: TemplateManifest, ws: TemplateWorkspace, out_pptx: Path | str, progress: Optional[Callable[[str, float], None]], skip: Optional[set] = None) -> RenderResult:
+def _render_deck(outline: DeckOutline, plan: LayoutPlan, manifest: TemplateManifest, ws: TemplateWorkspace, out_pptx: Path | str, progress: Optional[Callable[[str, float], None]], skip: Optional[set] = None, shown: Optional[dict] = None) -> RenderResult:
     t0 = time.time()
     builder = DeckBuilder(ws.source)
     patterns = {p.id: p for p in manifest.patterns}
@@ -321,7 +341,9 @@ def _render_deck(outline: DeckOutline, plan: LayoutPlan, manifest: TemplateManif
         try:
             kind_v = getattr(getattr(oslide, "kind", None), "value", str(getattr(oslide, "kind", "")))
             if ps.mode == "clone" and ps.pattern_id in patterns and kind_v not in _BOOKEND_VALUES:
-                slide, warns = _render_content_clone(builder, ps, oslide, patterns, manifest, ws, outline, used, before, failed=result.failed_samples, skip=skip)
+                from verstka.matching.matcher import headline_key
+
+                slide, warns = _render_content_clone(builder, ps, oslide, patterns, manifest, ws, outline, used, before, failed=result.failed_samples, skip=skip, others=(shown or {}).get(headline_key(oslide)))
                 rendered.pattern_id = ps.pattern_id
                 used[ps.pattern_id] = used.get(ps.pattern_id, 0) + 1
             elif ps.mode == "clone" and ps.pattern_id in patterns:
@@ -359,10 +381,16 @@ def _render_deck(outline: DeckOutline, plan: LayoutPlan, manifest: TemplateManif
                 _, warns = render_synth(builder, fallback, oslide, manifest, ws, outline)
                 rendered.mode, rendered.composition = "synth", fallback.composition
                 rendered.pattern_id = None
-                if isinstance(e, _CloneRedo):
+                if ps.mode == "clone":
                     # the plan says what the deck shows: the slide composed, with the samples that did not hold it
+                    # (layout_plan.json and «почему слайд такой» never call a composed slide a clone)
                     fallback.fit, fallback.score, fallback.alternatives = ps.fit, ps.score, ps.alternatives
-                    fallback.reasons = [f"композиция {fallback.composition}: образцы шаблона не вместили содержимое ({str(e)[:160]})"]
+                    if isinstance(e, _CloneRedo):
+                        fallback.reasons = [f"композиция {fallback.composition}: образцы шаблона не вместили содержимое ({str(e)[:160]})"]
+                    elif isinstance(e, _CoverRedo):
+                        fallback.reasons = [f"композиция {fallback.composition}: на образце {ps.pattern_id} титул читался плохо ({str(e)[:160]})"]
+                    else:
+                        fallback.reasons = [f"композиция {fallback.composition}: образец {ps.pattern_id} не отрисовался ({str(e)[:160]})"]
                     plan.slides = [fallback if s is ps else s for s in plan.slides]
                 rendered.warnings.extend(warns)
             except Exception as e2:  # noqa: BLE001

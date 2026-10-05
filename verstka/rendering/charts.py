@@ -1084,6 +1084,16 @@ def _tick_format(unit: Optional[str], decimals: int) -> str:
     return num
 
 
+def tick_decimals(step: Optional[float], decimals: int) -> int:
+    """The decimals a value axis prints: as many as its step has, not the data's — steps of 10 over 41,2…63,9 read
+    «40 · 50 · 60», never «40,0 · 50,0 · 60,0» (the data's decimals stay on the data labels). Without a step (the
+    renderer picks the ticks): the data's."""
+    if not step:
+        return decimals
+    frac = f"{abs(step):.6f}".rstrip("0").split(".")[1]
+    return min(len(frac), 3)
+
+
 def _tick_text(v: Optional[float], unit: Optional[str], decimals: int) -> str:
     """What a value-axis tick prints (`_tick_format`): «1 200 000 ₽»."""
     s = f"{abs(v or 0.0):,.{decimals}f}".replace(",", " ").replace(".", ",")
@@ -2168,7 +2178,7 @@ def _value_axis(k: _Kit, show: bool, fs: float, lo: Optional[float], hi: Optiona
     va.major_tick_mark = XL_TICK_MARK.NONE
     va.minor_tick_mark = XL_TICK_MARK.NONE
     va.format.line.fill.background()
-    va.tick_labels.number_format = _tick_format(k.unit, k.decimals)
+    va.tick_labels.number_format = _tick_format(k.unit, tick_decimals(step, k.decimals))
     va.tick_labels.number_format_is_linked = False
     _axis_txpr(va, fs, k.muted, k.family)
 
@@ -2241,9 +2251,12 @@ def _style_bars(k: _Kit) -> None:
     # stepped down when the wrapped lines would not fit their row
     cat_fs = fs
     cat_w = 0.0
+    # never under the chart's own floor (2 % of the slide's height): a label that does not fit at it wraps or turns
+    # (below) — Ateliers' 7.5 pt labels under 12 pt values read as footnotes
+    floor = max(8.0, 0.02 * k.sh / EMU_PER_PT)
     if horizontal:
         row = max(H - k.title_h - k.legend_h - fs, H * 0.3) / n
-        for size in (fs, _snap(fs * 0.9), max(8.0, _snap(fs * 0.82))):
+        for size in sorted({fs, max(floor, _snap(fs * 0.9)), max(floor, _snap(fs * 0.82))}, reverse=True):
             cat_fs = size
             cat_w = min(max((text_width_pt(c, family, size) for c in cats), default=20.0), W * 0.42)
             lines = max((len(wrap_lines(c, family, size, False, cat_w + 0.5)) for c in cats), default=1)
@@ -2254,7 +2267,7 @@ def _style_bars(k: _Kit) -> None:
         pitch = W / n
         longest = max((max((text_width_pt(w, family, fs) for w in c.split()), default=0.0) for c in cats), default=0.0)
         if longest > pitch * 0.75:
-            cat_fs = max(_snap(fs * 0.85), _snap(fs * pitch * 0.75 / max(longest, 1)))
+            cat_fs = min(fs, max(_snap(fs * 0.85), _snap(fs * pitch * 0.75 / max(longest, 1)), floor))
 
     turned_below = 0.0  # the room turned column labels take under the axis (B3-1: a word never broken inside)
 

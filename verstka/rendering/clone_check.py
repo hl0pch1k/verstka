@@ -77,6 +77,31 @@ def readable_floor(manifest: TemplateManifest) -> float:
     return max(body * 0.85, min(0.024 * hpt, body))
 
 
+def para_indent(p, body=None) -> int:
+    """Where a paragraph's lines start inside its box, in EMU: its left margin (and a first line indented further),
+    read from the paragraph or the box's list style for its level. The lines wrap that much narrower than the box
+    (VK Education's cards indent their text 14 pt: measured at the full width, 6 lines read as 5)."""
+    ppr = p.find(q("a:pPr"))
+    marl = indent = None
+    if ppr is not None:
+        marl, indent = ppr.get("marL"), ppr.get("indent")
+    lst = body.find(q("a:lstStyle")) if body is not None else None
+    if lst is not None and (marl is None or indent is None):
+        try:
+            lvl = int(ppr.get("lvl") or 0) if ppr is not None else 0
+        except ValueError:
+            lvl = 0
+        node = lst.find(q(f"a:lvl{lvl + 1}pPr"))
+        if node is not None:
+            marl = marl if marl is not None else node.get("marL")
+            indent = indent if indent is not None else node.get("indent")
+    try:
+        m, i = int(marl or 0), int(indent or 0)
+    except ValueError:
+        return 0
+    return max(0, m + max(i, 0))
+
+
 def ink_lines(sp, default_family: Optional[str]) -> list:
     """Where each line of a box's text stands (Bboxes in EMU, by its anchor and its paragraph's alignment): a short
     second line under a long first one covers only its own width."""
@@ -110,18 +135,20 @@ def ink_lines(sp, default_family: Optional[str]) -> list:
         ls = 1.2 * (int(pct.get("val")) / 100000 if pct is not None and pct.get("val") else 1.0)
         ppr = p.find(q("a:pPr"))
         algn = ppr.get("algn") if ppr is not None and ppr.get("algn") else "l"
-        for line in (wrap_lines(text, fam, size, bold, width) if text.strip() else [""]):
-            rows.append((text_width_pt(line, fam, size, bold) if line.strip() else 0.0, size * ls, algn))
-    total = sum(h for _, h, _ in rows) * EMU_PER_PT
+        ind = para_indent(p, body)
+        w_para = max(width - ind / EMU_PER_PT, 1.0)
+        for line in (wrap_lines(text, fam, size, bold, w_para) if text.strip() else [""]):
+            rows.append((text_width_pt(line, fam, size, bold) if line.strip() else 0.0, size * ls, algn, ind))
+    total = sum(r[1] for r in rows) * EMU_PER_PT
     anchor = (bp.get("anchor") if bp is not None else None) or "t"
     inner_h = b[3] - tp - bt
     y = b[1] + tp + (max(inner_h - total, 0) // 2 if anchor == "ctr" else (max(inner_h - total, 0) if anchor == "b" else 0))
     out = []
-    for w_pt, h_pt, algn in rows:
-        w = min(int(w_pt * EMU_PER_PT), b[2] - l - r)
+    for w_pt, h_pt, algn, ind in rows:
+        w = min(int(w_pt * EMU_PER_PT), max(b[2] - l - r - ind, 1))
         h = int(h_pt * EMU_PER_PT)
         if w > 0:
-            x = b[0] + l + ((b[2] - l - r - w) // 2 if algn == "ctr" else (b[2] - l - r - w if algn == "r" else 0))
+            x = b[0] + l + ind + ((b[2] - l - r - ind - w) // 2 if algn == "ctr" else (b[2] - l - r - ind - w if algn == "r" else 0))
             out.append(Bbox(x=int(x), y=int(y), w=w, h=h))
         y += h
     return out
@@ -184,7 +211,7 @@ def ink_box(sp, default_family: Optional[str]):
         ls = 1.2 * (int(pct.get("val")) / 100000 if pct is not None and pct.get("val") else 1.0)
         if rpr is not None and rpr.get("cap") == "all":
             text = text.upper()  # shown in capitals: measured so
-        lines = wrap_lines(text, fam, size, bool(rpr is not None and rpr.get("b") == "1"), width) if text.strip() else [""]
+        lines = wrap_lines(text, fam, size, bool(rpr is not None and rpr.get("b") == "1"), max(width - para_indent(p, body) / EMU_PER_PT, 1.0)) if text.strip() else [""]
         height += max(len(lines), 1) * size * ls
         if k:
             height += space(ppr, "a:spcBef", size)
@@ -765,18 +792,22 @@ def content_trouble(slide, oslide: OutlineSlide, pattern: Pattern, manifest: Tem
                 return f"the table or chart set at {min(sizes):g} pt, below the deck's {data_floor / 0.85:g} pt for data"
     for sp in tree.iter(q("p:sp")):
         nv = sp.find(".//" + q("p:cNvPr"))
-        if nv is not None and (nv.get("id") in chrome or nv.get("id") in native):
+        if nv is not None and nv.get("id") in chrome:
             continue
+        # the design system's own texts drawn with a chart or a table (its side text, its legend) set their own sizes
+        # (the data floor above), but a word of theirs broken across lines reads as badly as any («рентабельно / сть»)
+        drawn = nv is not None and nv.get("id") in native
         text = _shape_text(sp)
         if not text.strip():
             continue
         n = _norm(text)
-        if n in samples and n not in ours and not any(n in o for o in ours):
+        if not drawn and n in samples and n not in ours and not any(n in o for o in ours):
             return f"sample text «{text.strip()[:30]}» left on the slide"
-        from verstka.rendering.deck import element_bbox
+        from verstka.rendering.deck import abs_bbox, element_bbox, is_nested
         from verstka.rendering.fonts import text_width_pt
 
-        b_sp = element_bbox(sp)
+        # (in slide units: a text in a scaled group keeps its size while its box scales with the group)
+        b_sp = abs_bbox(sp) if is_nested(sp) else element_bbox(sp)
         bp_sp = sp.find(q("p:txBody") + "/" + q("a:bodyPr"))
 
         def _ins(name: str, default: int) -> int:
@@ -796,15 +827,20 @@ def content_trouble(slide, oslide: OutlineSlide, pattern: Pattern, manifest: Tem
                 continue
             if _is_code_para(p):
                 continue  # the user's code: set unbroken at the size its longest line allows, never typeset as prose
-            if usable > 0 and wrap_on and nv is not None and nv.get("id") not in native:
+            if usable > 0 and wrap_on and nv is not None:
                 # a word (or words bound by no-break spaces) wider than its box is broken across lines by the renderer
                 rpr = next((r for r in p.iter(q("a:rPr")) if r.get("sz")), None)
                 lat = rpr.find(q("a:latin")) if rpr is not None else None
                 fam_p = lat.get("typeface") if lat is not None and lat.get("typeface") else typo.primary_family
                 bold_p = bool(rpr is not None and rpr.get("b") == "1")
-                for chunk in ptxt.split():
-                    if len(chunk) >= 4 and text_width_pt(chunk, fam_p, max(sizes), bold_p) > usable * 1.01:
+                # split as the renderer breaks lines: at ordinary spaces only (`wrap_lines`), at the width the
+                # paragraph's lines really have (its left margin off)
+                room = usable - para_indent(p, sp.find(q("p:txBody"))) / EMU_PER_PT
+                for chunk in re.split(r"[ \t\r\n]+", ptxt):
+                    if len(chunk) >= 4 and text_width_pt(chunk, fam_p, max(sizes), bold_p) > room * 1.01:
                         return f"«{chunk.replace(chr(160), ' ')[:24]}» is wider than its box and breaks mid-word"
+            if drawn:
+                continue
             size = min(sizes)
             floor = run_floor if len(ptxt.strip()) >= 25 else label_floor
             if nv is not None and re.fullmatch(r"Footnote( \d+)?", nv.get("name") or ""):

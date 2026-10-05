@@ -20,7 +20,7 @@ from verstka.ingest.workspace import TemplateWorkspace
 from verstka.matching.scorer import awkward_breaks, balanced_lines, bind_short_words, bookend_max_lines, cover_goal, display_fit, display_lines, is_placeholder_text, same_words, split_display_title
 from verstka.rendering.assets_pick import pick_asset, pick_icon
 from verstka.rendering.charts import add_chart, add_ring
-from verstka.rendering.deck import DeckBuilder, element_bbox, is_nested, materialize_xfrm, remove_element, renumber_ids, set_element_pos, shift_element, slide_shape_elements
+from verstka.rendering.deck import DeckBuilder, abs_bbox, element_bbox, is_nested, materialize_xfrm, remove_element, renumber_ids, set_element_pos, shift_element, slide_shape_elements
 from verstka.rendering.fonts import text_width_pt, wrap_lines
 from verstka.rendering.fit import fit_size, grow_size
 from verstka.rendering.groups import adjust_group, cell_bbox, cell_riders, cells_elements, plates_of, reading_order_key, staggered_axis, transform_element
@@ -172,7 +172,7 @@ class _SlideCtx:
 
         b0 = element_bbox(el)
         ins0 = _body_insets(el)
-        usable0 = max(((b0[2] - ins0[0] - ins0[2]) / EMU_PER_PT) if b0 else 0.0, 1.0)
+        usable0 = max(((_text_frame(el, b0).w - ins0[0] - ins0[2]) / EMU_PER_PT) if b0 else 0.0, 1.0)
         size0 = size_hint or (slot.style.size_pt if slot and slot.style and slot.style.size_pt else self.typo.size_for("body"))
         fam0 = slot.style.font_family if slot and slot.style and slot.style.font_family else self.typo.primary_family
 
@@ -210,7 +210,8 @@ class _SlideCtx:
             ensure_txbody(el, (pad, pad, pad, pad))
         insets = _body_insets(el)
         if box and box[2] > 0 and box[3] > 0:
-            _wrap_inside(el, [p.text for p in paragraphs], family, size, bold, box, insets)
+            f0 = _text_frame(el, box)
+            _wrap_inside(el, [p.text for p in paragraphs], family, size, bold, (f0.x, f0.y, f0.w, f0.h), insets)
         if box and box[2] > 0 and box[3] > 0 and slot is not None and slot.role in _GROWABLE and not container:
             box = self._room_in_holder(el, box)
         if box and box[2] > 0 and box[3] > 0 and slot is not None and slot.role not in (SlotRole.title,) and not container:
@@ -235,10 +236,10 @@ class _SlideCtx:
         # written into a sample is set so too, and measured as set — wider than its lowercase letters
         caps = bool(slot is not None and slot.role == SlotRole.title and self.title_caps)
         if box and box[2] > 0 and box[3] > 0:
-            res = fit_size([p.text for p in paragraphs], Bbox(x=box[0], y=box[1], w=box[2], h=box[3]), family, size, bold, self.grow_scale, insets_emu=insets, line_spacing=self.line_height_of(el), para_spacing_pt=gap, min_ratio=min_ratio, ladder_only=ladder, head=head, caps=caps)
+            res = fit_size([p.text for p in paragraphs], _text_frame(el, box), family, size, bold, self.grow_scale, insets_emu=insets, line_spacing=self.line_height_of(el), para_spacing_pt=gap, min_ratio=min_ratio, ladder_only=ladder, head=head, caps=caps)
             target_size = res.size_pt
             if grow_to and res.fits and target_size >= size:
-                target_size = grow_size([p.text for p in paragraphs], Bbox(x=box[0], y=box[1], w=box[2], h=box[3]), family, target_size, bold, self.grow_scale, grow_to, insets_emu=insets, line_spacing=self.line_height_of(el), head=head, para_spacing_pt=gap)
+                target_size = grow_size([p.text for p in paragraphs], _text_frame(el, box), family, target_size, bold, self.grow_scale, grow_to, insets_emu=insets, line_spacing=self.line_height_of(el), head=head, para_spacing_pt=gap)
             if not res.fits and slot is not None and slot.role != SlotRole.number and not is_nested(el):
                 grown = self._room_below(el, box)
                 if grown is not None:
@@ -258,7 +259,7 @@ class _SlideCtx:
                         set_element_pos(el, w=need_w)
                         self.warnings.append(f"widened number slot {slot.id}")
                     elif need_w > box[2]:
-                        shrink = fit_size([p.text for p in paragraphs], Bbox(x=box[0], y=box[1], w=box[2], h=box[3]), family, size, bold, self.grow_scale, insets_emu=insets, line_spacing=self.line_height_of(el), min_ratio=0.2)
+                        shrink = fit_size([p.text for p in paragraphs], _text_frame(el, box), family, size, bold, self.grow_scale, insets_emu=insets, line_spacing=self.line_height_of(el), min_ratio=0.2)
                         target_size = shrink.size_pt
                 else:
                     w = f"text may overflow in {slot.id if slot else 'shape'} ({res.lines} lines)"
@@ -272,8 +273,9 @@ class _SlideCtx:
         if box and box[2] > 0 and box[3] > 0 and any(p.size_pt for p in paragraphs):
             # an emphasised line (a figure) may be larger than the rest only as far as the box height allows
             ls = self.line_height_of(el)
-            usable_w = max((box[2] - insets[0] - insets[2]) / EMU_PER_PT, 1.0)
-            usable_h = max((box[3] - insets[1] - insets[3]) / EMU_PER_PT, 1.0)
+            fr = _text_frame(el, box)
+            usable_w = max((fr.w - insets[0] - insets[2]) / EMU_PER_PT, 1.0)
+            usable_h = max((fr.h - insets[1] - insets[3]) / EMU_PER_PT, 1.0)
             rest = sum(max(len(wrap_lines(p.text, family, target_size, bold, usable_w)), 1) for p in paragraphs if not p.size_pt) * target_size * ls
             paragraphs = [_respec(p) for p in paragraphs]
             for p in paragraphs:
@@ -833,6 +835,18 @@ def _wrap_inside(el: etree._Element, texts: list[str], family: Optional[str], si
     widest = max((text_width_pt(t, family, size, bold) for t in texts), default=0.0) * EMU_PER_PT
     if widest > box[2] - insets[0] - insets[2]:
         bodyPr.set("wrap", "square")
+
+
+def _text_frame(el: etree._Element, b: tuple[int, int, int, int]) -> Bbox:
+    """The box a text is measured in, its size in slide units: a text in a scaled group keeps its type size while its
+    box scales with the group (VK Tech's team cells are drawn at 0.38 of their size — a role box 148 pt wide in the
+    group is 56 pt on the slide, and a text fitted to the 148 pt broke as «Руковод/итель»)."""
+    w, h = b[2], b[3]
+    if is_nested(el):
+        a = abs_bbox(el)
+        if a and a[2] > 0 and a[3] > 0:
+            w, h = a[2], a[3]
+    return Bbox(x=b[0], y=b[1], w=w, h=h)
 
 
 def _has_fill(el: etree._Element) -> bool:
@@ -1467,7 +1481,7 @@ def _fill_cells(ctx: _SlideCtx, items: list[SlideItem], use_ordinals: bool = Tru
             elif role == SlotRole.icon and item is not None and not item.icon_hint and ctx.verbatim and e.getparent() is not None:
                 # the sample's own pictogram (a wallet, a «$» on a monitor) says what the sample said, not what the
                 # author's card says: on a slide of the author's text it goes (a card without an icon reads right)
-                ctx.remove_el(e)
+                _drop_icon(ctx, e)
         for e, _, _ in entries:
             for nv in e.iter(q("p:cNvPr")):
                 ctx.cell_member_ids.add(nv.get("id"))
@@ -1485,7 +1499,7 @@ def _fill_cells(ctx: _SlideCtx, items: list[SlideItem], use_ordinals: bool = Tru
         for e, slot, role in entries:
             if (ctx.id_of(e) or "") in ctx.filled and etree.QName(e).localname == "sp" and e.getparent() is not None:
                 if role == SlotRole.number and (ctx.id_of(e) or "") in ctx.compound_ids:
-                    cell_heads.append(e)  # a figure over its label in one box: the figures share one size, the labels keep theirs
+                    cell_heads.append(e)  # a figure over its label in one box: the figures share one size, the labels another
                 elif role == SlotRole.number:
                     cell_numbers.append((e, slot))
                 elif role == SlotRole.card_title:
@@ -1510,6 +1524,7 @@ def _fill_cells(ctx: _SlideCtx, items: list[SlideItem], use_ordinals: bool = Tru
     _keep_title_above_body(ctx, cell_titles, cell_bodies)
     _harmonize(ctx, cell_numbers, cap=None, min_ratio=0.35)
     _harmonize_first_lines(cell_heads)
+    _harmonize_compound_labels([e for e in cell_heads if (ctx.id_of(e) or "") in ctx.compound_ids])
     _top_align_rows(ctx, [e for e, _ in cell_titles + cell_bodies])
     if numeric_items and not include_number:
         # figures live outside the group (big_number patterns): the largest standalone slot takes the first one
@@ -1523,7 +1538,7 @@ def _fill_cells(ctx: _SlideCtx, items: list[SlideItem], use_ordinals: bool = Tru
 def _top_align_rows(ctx: _SlideCtx, els: list[etree._Element]) -> None:
     """Card texts of one row set centred (or at the foot) of boxes taller than they are start at their top: centred,
     a heading over two lines of text and a heading over four stand at different heights across the row (Education
-    p7, p8). Boxes of one row: their tops within 2 % of the slide."""
+    p7, p8). Boxes of one row: their tops within 2 % of the slide; the other rows of boxes of that height follow."""
     from verstka.rendering.clone_check import ink_box
 
     fam = ctx.typo.primary_family
@@ -1541,6 +1556,9 @@ def _top_align_rows(ctx: _SlideCtx, els: list[etree._Element]) -> None:
                 break
         else:
             rows.append([(e, b)])
+    # the decision is the grid's, not a row's: rows of boxes of one height (the cards' texts of a 3 + 2 grid) are set
+    # alike — the top row started at the card tops while the row under it stayed centred (Education p8, 5 items)
+    found = []  # (box height, loose boxes, switch)
     for row in rows:
         if len(row) < 2:
             continue
@@ -1550,7 +1568,11 @@ def _top_align_rows(ctx: _SlideCtx, els: list[etree._Element]) -> None:
             ib = ink_box(e, fam)
             if (bp.get("anchor") or "t") in ("ctr", "b") and ib is not None and b[3] > 1.25 * ib.h:
                 loose.append((e, ib.h))
-        if len(loose) >= 2 and max(h for _, h in loose) > 1.15 * min(h for _, h in loose):
+        hs = sorted(b[3] for _, b in row)
+        found.append((hs[len(hs) // 2], loose, len(loose) >= 2 and max(h for _, h in loose) > 1.15 * min(h for _, h in loose)))
+    for h0, loose, switch in found:
+        alike = switch or any(sw and abs(h1 - h0) <= 0.05 * max(h0, h1) for h1, _, sw in found)
+        if alike:
             for e, _ in loose:
                 e.find(q("p:txBody") + "/" + q("a:bodyPr")).set("anchor", "t")
 
@@ -1614,7 +1636,7 @@ def _keep_title_above_body(ctx: _SlideCtx, titles: list[tuple[etree._Element, Op
             return
         style = slot.style if slot is not None else None
         family = style.font_family if style and style.font_family else ctx.typo.primary_family
-        texts, room = _running_room(ctx, e, family, Bbox(x=box[0], y=box[1], w=box[2], h=box[3]))
+        texts, room = _running_room(ctx, e, family, _text_frame(e, box))
         res = fit_size(texts, room, family, want, bool(style and style.bold), ctx.grow_scale, insets_emu=_body_insets(e), line_spacing=ctx.line_height_of(e), min_ratio=t / want)
         fitted.append(res.size_pt if res.fits else t)
     common = min(fitted)
@@ -1740,6 +1762,33 @@ def _stack_cells(ctx: _SlideCtx, stacks: list[tuple[etree._Element, Optional[Slo
             plans.append((t_el, tb, t_h, placed, floor, plate, moved))
         if not ok:
             continue
+        # the cards of one row start their texts at one height: a card whose heading took fewer lines keeps the band
+        # its sample gave the heading, its neighbours' texts come down to it (VK WorkSpace p6: «Датчики» under a
+        # one-line heading started 46 pt under the texts of its two-line neighbours)
+        rows: list[list[int]] = []
+        for k, pl in enumerate(plans):
+            row = next((r for r in rows if abs(plans[r[0]][1][1] - pl[1][1]) <= int(0.02 * ctx.H)), None)
+            if row is None:
+                rows.append([k])
+            else:
+                row.append(k)
+        for r in rows:
+            top = max(plans[k][3][0][1] for k in r)
+            for k in r:
+                t_el, tb, t_h, placed, floor, plate, moved = plans[k]
+                dy = top - placed[0][1]
+                if dy <= 0:
+                    continue
+                placed = [(e, y + dy, h) for e, y, h in placed]
+                moved = [(o, oy + dy) for o, oy in moved]
+                if placed[-1][1] + placed[-1][2] > floor:
+                    ok = False
+                    break
+                plans[k] = (t_el, tb, t_h, placed, floor, plate, moved)
+            if not ok:
+                break
+        if not ok:
+            continue
         handled: set[int] = set()
         for t_el, tb, t_h, placed, floor, plate, moved in plans:
             if plate:
@@ -1862,7 +1911,7 @@ def _harmonize(ctx: _SlideCtx, pairs: list[tuple[etree._Element, Optional[Slot]]
         family = style.font_family if style and style.font_family else ctx.typo.primary_family
         bold = bool(style and style.bold)
         # (a figure set over its label keeps its size: the label is fitted in the room under it)
-        running, room = _running_room(ctx, e, family, Bbox(x=b[0], y=b[1], w=b[2], h=b[3]))
+        running, room = _running_room(ctx, e, family, _text_frame(e, b))
         ins = _body_insets(e)
         res = fit_size(running, room, family, base, bold, ctx.grow_scale, insets_emu=ins, line_spacing=ctx.line_height_of(e), min_ratio=min_ratio)
         size = res.size_pt
@@ -1977,6 +2026,25 @@ def _harmonize_first_lines(els: list[etree._Element]) -> None:
     for p0, _ in firsts:
         for r in list(p0.iter(q("a:rPr"))) + list(p0.iter(q("a:endParaRPr"))):
             r.set("sz", str(common))
+
+
+def _harmonize_compound_labels(els: list[etree._Element]) -> None:
+    """The labels under the figures of compound boxes (a figure over its label in one box) share one size too: the
+    smallest one that fitted (MyBrand p12: labels at 30, 33, 29 and 33 pt under four 54 pt figures)."""
+    rest = []
+    for e in els:
+        paras = e.findall(q("p:txBody") + "/" + q("a:p"))
+        sizes = [int(r.get("sz")) for p in paras[1:] for r in p.iter(q("a:rPr")) if r.get("sz")]
+        if sizes:
+            rest.append((paras[1:], min(sizes)))
+    if len(rest) < 2:
+        return
+    common = min(sz for _, sz in rest)
+    for paras, _ in rest:
+        for p in paras:
+            for r in list(p.iter(q("a:rPr"))) + list(p.iter(q("a:endParaRPr"))):
+                if r.get("sz"):
+                    r.set("sz", str(common))
 
 
 def _nearest_label(slot: Slot, labels: list[Slot]) -> Optional[Slot]:
@@ -2611,22 +2679,33 @@ def _plate_to_table(ctx: _SlideCtx, before: set) -> None:
 
 def _table_to_width(ctx: _SlideCtx, before: set, box: Bbox) -> None:
     """A table set in a sample's table area takes the area's width (the sample's own table did): its columns widen
-    in proportion when the measured table came out narrower. `before`: the slide's elements before the table."""
-    for gf in ctx.slide._element.cSld.find(q("p:spTree")):
-        if gf in before or etree.QName(gf).localname != "graphicFrame":
+    in proportion when the measured table came out narrower. `before`: the slide's elements before the table. What
+    the composer set beside the table (the visual variant's change column and its rule) keeps its place: the table
+    widens up to it, never under it («+6%» drawn over the cells, the rule through «План, млн ₽»)."""
+    added = [el for el in ctx.slide._element.cSld.find(q("p:spTree")) if el not in before]
+    for gf in added:
+        if etree.QName(gf).localname != "graphicFrame":
             continue
         tbl = gf.find(".//" + q("a:tbl"))
         b = element_bbox(gf)
-        if tbl is None or not b or b[2] >= 0.9 * box.w:
+        if tbl is None or not b:
+            continue
+        right = box.x + box.w
+        for el in added:
+            eb = element_bbox(el) if el is not gf else None
+            if eb and eb[0] >= b[0] + b[2] - int(0.005 * ctx.W):
+                right = min(right, eb[0] - int(0.02 * ctx.W))
+        target = right - box.x
+        if b[2] >= 0.9 * target:
             continue
         cols = tbl.findall(q("a:tblGrid") + "/" + q("a:gridCol"))
         total = sum(int(c.get("w") or 0) for c in cols)
         if not total:
             continue
-        k = box.w / total
+        k = target / total
         for c in cols:
             c.set("w", str(int(int(c.get("w") or 0) * k)))
-        set_element_pos(gf, x=box.x, w=box.w)
+        set_element_pos(gf, x=box.x, w=target)
 
 
 def _code_slot(ctx: _SlideCtx) -> Optional[Slot]:
@@ -2753,6 +2832,30 @@ def clone_composer(ctx: _SlideCtx, oslide: OutlineSlide, box: Bbox):
 
 
 # ---------------------------------------------------------------------------- cleanup helpers
+
+
+def _drop_icon(ctx: _SlideCtx, icon: etree._Element) -> None:
+    """The sample's pictogram taken off with the shapes that only framed it — a chip, a ring, a rounded tile around
+    it: no text, the icon's centre inside, at most four times its area (VK WorkSpace p4: four black tiles with a blue
+    outline stayed empty beside the author's texts once their icons went)."""
+    ib = _abs_bbox(icon)
+    parent = icon.getparent()
+    frames = []
+    if ib is not None and ib.w > 0 and ib.h > 0 and parent is not None:
+        cx, cy = ib.x + ib.w / 2, ib.y + ib.h / 2
+        chrome = set(ctx.pattern.chrome_shape_ids)
+        for el in parent:
+            if el is icon or etree.QName(el).localname != "sp" or shape_text(el).strip() or not has_visible_style(el):
+                continue
+            sid = ctx.id_of(el) or ""
+            if sid in ctx.filled or sid in chrome:
+                continue
+            b = _abs_bbox(el)
+            if b is not None and b.x <= cx <= b.x + b.w and b.y <= cy <= b.y + b.h and b.w * b.h <= 4 * ib.w * ib.h:
+                frames.append(el)
+    ctx.remove_el(icon)
+    for el in frames:
+        ctx.remove_el(el)
 
 
 def _remove_emptied_groups(ctx: _SlideCtx) -> None:
@@ -5544,7 +5647,10 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
         for ob in obstacles:
             if ob.y2 > int(0.7 * H) and ob.x > n_x + int(0.1 * W):
                 n_room = min(n_room, ob.x - int(0.02 * W))
-        n_art = _art_edge(ctx, (int(0.8 * H), int(safe.y2 * H)), n_x + int(0.05 * W), hidden)
+        # (the template's rules are measured as shapes already: their lines in the render — blurred over a tenth of
+        # the band — are no art; Классика's hairline across the foot sent every cover's footnote to the notes)
+        rules = [Bbox(x=ob.x - int(0.05 * W), y=ob.y - int(0.05 * H), w=ob.w + int(0.1 * W), h=ob.h + int(0.1 * H)) for ob in obstacles if min(ob.w / W, ob.h / H) < 0.012]
+        n_art = _art_edge(ctx, (int(0.8 * H), int(safe.y2 * H)), n_x + int(0.05 * W), hidden + rules)
         if n_art is not None:
             n_room = min(n_room, n_art - int(0.02 * W))
         n_width = max(min(w_max, n_room - n_x), int(0.2 * W))
@@ -5937,6 +6043,17 @@ def render_clone(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
             ctx.slide.__dict__["_verstka_text_by_chart"] = True  # set with the chart in the sample's data area
         else:
             ctx.warnings.append("no slot for bullets")
+    elif c.bullets and not bullets_as_items:
+        # an item slide's own lines beside its items (a budget under a timeline, the risks beside the cards): a text
+        # area of the sample the items left free takes them — else the sample cannot show them, the gate turns it down
+        # and the next one (or the composer, which shows them) is tried. They were dropped without a word before.
+        free = [sl for sl in ctx.slots(SlotRole.bullet_list, SlotRole.body)
+                if not sl.group_id and sl.shape_id not in ctx.filled and sl.shape_id not in ctx.removed and sl.shape_id not in ctx.cell_member_ids]
+        if free:
+            big = ctx.largest(free)
+            ctx.fill_slot(big, [ParagraphSpec(b, bullet=True) for b in c.bullets], size_hint=_running_size(big), grow_to=text_cap)
+        else:
+            ctx.warnings.append("no slot for bullets")
     if c.paragraphs and code_side:
         pass  # (set beside the code by `_fill_code`: the sample has no text box of its own for them)
     elif c.paragraphs:
@@ -6047,12 +6164,13 @@ def render_clone(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
             ctx.removed.add(slot.shape_id)
     if ctx.verbatim and not drop_icons:
         # the sample's pictograms over its texts (a bulb, a book, a calendar) said the sample's words: a slide of the
-        # author's text keeps their tiles, not pictures that would claim a meaning the text does not have
+        # author's text keeps neither them nor the tiles that only framed them — no picture claims a meaning the text
+        # does not have, no empty frame waits for one
         for sid, el in list(ctx.els.items()):
             if sid in ctx.removed or sid in ctx.filled or el.getparent() is None or etree.QName(el).localname != "pic":
                 continue
             if ctx.pic_kind.get(ctx.origin.get(sid, sid)) == "icon" and not _logo_mark(ctx, el):
-                ctx.remove_el(el)
+                _drop_icon(ctx, el)
     _remove_qr_codes(ctx)
     try:
         # for the conclusion (clone_notes) and the gate (clone_check): text must stand clear of the template's art —

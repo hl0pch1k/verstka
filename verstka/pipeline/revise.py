@@ -897,7 +897,10 @@ def fix_slide(
                 except Exception:  # noqa: BLE001 - the loop still runs on the work deck as it is
                     log.warning("slide fix: no baseline for the structural pass", exc_info=True)
             if ids:
-                rep, outline, plan = loop(rep, outline, plan, ids, 2)
+                # the autofix ladder on this slide (audit/autofix.py): the next sample, the one after it, then the slide
+                # composed — a rung that made the slide worse rolled back, the next one tried (two rungs stopped at the
+                # second sample, and a slide whose texts no sample holds was never composed)
+                rep, outline, plan = loop(rep, outline, plan, ids, 3)
         if not what:
             what = _what_of(kept)
 
