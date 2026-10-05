@@ -2113,6 +2113,7 @@ def plan_deck(specs, manifest=None, variants: tuple = ("structured", "visual", "
             room = Room()
     decks: dict = {}
     lines: dict = {}
+    taken: dict[int, set] = {}  # slide position → the forms the variants before showed it in
     for v in variants:
         slides = []
         said = []
@@ -2125,7 +2126,8 @@ def plan_deck(specs, manifest=None, variants: tuple = ("structured", "visual", "
                 said.append((pos, _line(pos, b)))
                 continue
             forms = (forms_fn(r, v) if forms_fn is not None else forms_of(r, room, v)) or forms_of(r, room, v)
-            pick = _choose(forms, room, kinds)
+            pick = _choose(forms, room, kinds, avoid=taken.get(pos, set()))
+            taken.setdefault(pos, set()).add(pick.kind)
             s = pick.slide
             slides.append(s)
             kinds.append(s.kind.value)
@@ -2142,10 +2144,12 @@ def _items_n(s) -> int:
     return len(c.items) or len(c.columns) or len(c.numbers) or None
 
 
-def _choose(forms: list[Form], room: Room, kinds: list[str]) -> Form:
+def _choose(forms: list[Form], room: Room, kinds: list[str], avoid: Optional[set] = None) -> Form:
     """The form the slide takes: of the text's own forms (its code, data, steps, stages) when it has any, else of all —
     the first the template holds that is not the third slide of one form in a row; else the first it holds; else the
-    first that breaks the row; else the first (it is composed)."""
+    first that breaks the row; else the first (it is composed). `avoid`: the forms the variants before showed the slide
+    in — another of the variant's forms is taken when it shows as much of the text (four fifths of the first one's at
+    least): three variants of one form on most slides were one deck three times."""
     def held(f: Form) -> bool:
         if f.own or f.kind in ("chart", "table", "code"):
             return True  # a chart stands on a chart sample or on any sample with room for it; code is composed when it has none
@@ -2156,9 +2160,13 @@ def _choose(forms: list[Form], room: Room, kinds: list[str]) -> Form:
 
     pool = [f for f in forms if f.structural] or forms
     for ok in (lambda f: held(f) and not third(f), held, lambda f: not third(f)):
-        got = next((f for f in pool if ok(f)), None)
-        if got is not None:
-            return got
+        cands = [f for f in pool if ok(f)]
+        if cands:
+            if avoid and cands[0].kind in avoid:
+                other = next((f for f in cands[1:] if f.kind not in avoid and f.shown >= 0.8 * cands[0].shown), None)
+                if other is not None:
+                    return other
+            return cands[0]
     return pool[0]
 
 
