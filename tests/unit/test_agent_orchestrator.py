@@ -183,8 +183,12 @@ def test_without_a_model_the_long_coffee_brief_keeps_the_users_slides_and_reques
     assert spec[9].kind == K.table and spec[9].content.table is not None and spec[9].takeaway.startswith("Выручка увеличивается")
     assert spec[8].kind == K.timeline and len(spec[8].content.items) == 6
     assert spec[10].takeaway.startswith("Рост прибыли зависит")
-    # the three directions the user asked to single out are on slide 4, not buried in the notes
-    assert [it.title for it in spec[4].content.items] == ["Увеличение среднего чека", "Привлечение гостей в свободные часы", "Снижение потерь"]
+    # the three directions the user asked to single out are on slide 4, not buried in the notes: its conclusion, over the
+    # four weeks' facts the slide shows (never the same list as cards and once more in the conclusion)
+    s4 = spec[4]
+    shown4 = " ".join([*(it.title for it in s4.content.items), s4.takeaway or ""])
+    assert all(x in shown4 for x in ("среднего чека", "свободные часы", "потерь")), shown4
+    assert len(s4.content.bullets) == 5 and s4.content.bullets[0].startswith("65%")
     # a time («с 15:00») is never a figure
     assert not any(n.value.startswith("15") and ":" in (n.label or "") for s in o.slides for n in s.content.numbers)
 

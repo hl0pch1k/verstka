@@ -287,6 +287,16 @@ def chart_palette(base: Sequence[str], ground: Optional[str], n: int, extra: Ite
                 return out
             if h not in out and far_from_all(h, de, strict):
                 out.append(h)
+    # a narrow palette (Классика's beiges and browns: four colours for eight slices, cycling — the legend matched two
+    # slices per swatch): every taken colour stepped toward the ground and toward the far end in finer steps, each
+    # still a visible step (ΔE ≥ 8) from all taken, before any colour repeats
+    for de in (MIN_SERIES_DE * 0.45, 8.0):
+        cands_fine = [_mix(c, tgt, t) for c in list(out) for tgt in (far, ground_) for t in (0.18, 0.32, 0.46, 0.6, 0.74)]
+        for h in cands_fine:
+            if len(out) >= n:
+                return out
+            if h not in out and contrast_ratio(h, ground_) >= MIN_FILL_CONTRAST and far_from_all(h, de, False):
+                out.append(h)
     i = 0
     while len(out) < n:  # a very long series list: repeat, never fail
         out.append(out[i % len(out)])
@@ -1330,6 +1340,17 @@ def _cat_room(family: Optional[str]) -> float:
     return LO_LABEL_ROOM * (0.995 if is_measured(family) else 0.92)
 
 
+# a long single word must keep a margin inside its room: it cannot wrap, it breaks inside («Автоматически» measured
+# 0.4 pt inside a 63 pt slot still broke as «Автоматическ / и» in the render; «Сейчас» at 94 % of its slot did not —
+# the renderer's own measure drifts with the word's length)
+WORD_SAFETY = 0.965
+LONG_WORD = 9
+
+
+def _word_room(word: str, lim: float) -> float:
+    return lim * WORD_SAFETY if len(word) >= LONG_WORD else lim
+
+
 def fit_categories(cats: Sequence[str], family: Optional[str], sizes: Sequence[float], slot: float, below_max: float, *, turn_first: bool = True) -> CatFit:
     """Category labels measured one by one at the axis font against their slot (`slot` = the plot's width over the
     categories, pt; `below_max` = the most room under the axis the labels may take). In order, at each size of
@@ -1359,7 +1380,7 @@ def fit_categories(cats: Sequence[str], family: Optional[str], sizes: Sequence[f
     def wrapped(size: float) -> Optional[CatFit]:
         lim = slot * room
         for lv, labs in enumerate(levels):
-            if any(width(w, size) > lim for t in labs for w in t.split()):
+            if any(width(w, size) > _word_room(w, lim) for t in labs for w in t.split()):
                 continue  # a word wider than its slot would be broken inside
             lines = max((len(wrap_lines(t, family, size, False, lim)) for t in labs if t), default=1)
             below = lines * size * CAT_LINE + size * 0.6
@@ -1371,7 +1392,8 @@ def fit_categories(cats: Sequence[str], family: Optional[str], sizes: Sequence[f
         lim = slot * room
         for lv, labs in enumerate(levels):
             longest = max((width(t, size) for t in labs), default=0.0)
-            if longest <= lim:
+            # (a long single word keeps a margin: it cannot wrap, a renderer breaks it inside — `_word_room`)
+            if all(width(t, size) <= (_word_room(t, lim) if len(t.split()) == 1 else lim) for t in labs if t):
                 return CatFit(list(labs), "flat", size, 1, 1, size * CAT_LINE + size * 0.6, longest, lv)
         for step in ((turned, wrapped) if turn_first else (wrapped, turned)):
             got = step(size)
@@ -2323,10 +2345,11 @@ def _style_bars(k: _Kit) -> None:
         # the axis font against the real slot: a size down (never under the floor), else the labels turn by 45°
         lim = pw / n * _cat_room(family)
         floor = max(8.0, 0.02 * k.sh / EMU_PER_PT)
-        widest = lambda size: max((text_width_pt(w, family, size) for c in cats for w in c.split()), default=0.0)  # noqa: E731
-        if widest(cat_fs) > lim:
+        # (each word against its own room: a long word keeps a margin, `_word_room`)
+        over = lambda size: any(text_width_pt(w, family, size) > _word_room(w, lim) for c in cats for w in c.split())  # noqa: E731
+        if over(cat_fs):
             for size in [x for x in (_snap(cat_fs * 0.9), _snap(cat_fs * 0.82)) if x >= min(floor, cat_fs) - 0.05]:
-                if widest(size) <= lim:
+                if not over(size):
                     cat_fs = size
                     break
             else:

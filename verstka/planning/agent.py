@@ -1441,6 +1441,22 @@ def rules_design(unit: _Unit, ctx: _Ctx) -> _Design:
         text_groups = [g for g in src.groups if not g.figure]
         text_groups.sort(key=lambda g: (not g.ask, -len(g.items)))  # the lists the user asked to show come first
         fig_items = [x for g in src.groups if g.figure for x in g.items]
+        asked = [g for g in text_groups if g.ask and g.label and 2 <= len(g.items) <= 4]
+        evidence = next((g for g in src.groups if not g.ask and len(g.items) >= 3 and g not in asked), None)
+        facts_first = False
+        if ctx.takeaway_rule and evidence is not None and len(asked) == 1 and len(src.groups) == 2:
+            # the author's facts and the short list they asked to single out («Выдели три направления роста: …»), on a
+            # deck whose every slide ends on a conclusion: the facts are the slide, the singled-out list its
+            # conclusion (`_asked_list`) — never the list as cards and once more, word for word, in the conclusion
+            lines = [H.cap_first(cut(x, 14)) for x in evidence.items]
+            if all(len(x.split()) <= 20 for x in lines):
+                kind, c.bullets = "bullets", lines
+                shown.update(evidence.items)
+                if evidence.label:
+                    subtitle = H.cap_first(H.strip_end(evidence.label))
+                text_groups, fig_items = [], []
+                facts_first = True
+                basis = "list"
         other_items = [x for g in text_groups[1:] for x in g.items]
         def kpis(lines: list[str]) -> list[NumberCallout]:
             out = verbatim_kpis(lines) if ctx.verbatim else _kpis(lines)
@@ -1448,8 +1464,10 @@ def rules_design(unit: _Unit, ctx: _Ctx) -> _Design:
             # of day, a project number or a bound of a requirement (gate 4 G4-3)
             return [n for n in out if not _date_callout(n) and not _not_key_figure(n, lines)] if ctx.written else out
 
-        numbers = _series_figures(unit, ctx) or kpis(fig_items) or _enumeration_figures(unit, ctx) or kpis(other_items)
-        if not numbers and not ctx.verbatim:
+        numbers = [] if facts_first else (_series_figures(unit, ctx) or kpis(fig_items) or _enumeration_figures(unit, ctx) or kpis(other_items))
+        if facts_first:
+            pass  # the slide's facts as its lines (above); the singled-out list is its conclusion
+        elif not numbers and not ctx.verbatim:
             # (a figure taken out of a sentence of prose: never for the author's own text laid out as written)
             numbers = kpis(src.sentences)
         if text_groups:
@@ -1495,7 +1513,7 @@ def rules_design(unit: _Unit, ctx: _Ctx) -> _Design:
                 rest = [sn for sn in src.sentences if sn not in own and not _ASK_RE.match(sn)][:3]
                 c.bullets = [cut(sn, 14) for sn in rest]
                 shown.update(own + rest)
-        else:
+        elif not facts_first:
             lines = [cut(sn, 14) for sn in src.sentences if not _ASK_RE.match(sn)][:5]
             c.bullets = lines
             shown.update(src.sentences[:5])
@@ -5211,9 +5229,12 @@ def _asked_list(src: "_Source", s: OutlineSlide, text: str = "") -> Optional[str
     """The list the user asked the slide to single out («Выдели три направления роста: увеличение среднего чека,
     привлечение гостей в свободные часы и снижение потерь») as its conclusion, in the user's words: «Три направления
     роста: увеличение среднего чека, привлечение гостей в свободные часы и снижение потерь»."""
+    shown = _Shown(_visible_text(s.model_copy(update={"takeaway": None})))
     for g in src.groups:
         if not g.ask or not g.label or not 2 <= len(g.items) <= 4:
             continue
+        if s.verbatim and sum(1 for it in g.items if shown.line(it)) * 2 >= len(g.items):
+            continue  # the author's slide shows the list itself (its cards): the conclusion would say it a second time
         items = [_low_first(x, text, only_if_next_lower=True) for x in (H.strip_end(i) for i in g.items)]
         line = f"{H.strip_end(g.label)}: {', '.join(items[:-1])} и {items[-1]}"
         if len(line.split()) <= TAKEAWAY_MAX_WORDS and not adds_nothing(line, s.headline):
@@ -5257,6 +5278,29 @@ def _rescue_lists(s: OutlineSlide, unit: _Unit, ctx: _Ctx) -> list[str]:
         c = s.content
         room = _LINE_ROOM.get(s.kind.value, 0) - len(c.bullets)
         lines = [H.strip_end(x) for x in missing]
+        whole = len(missing) == len(g.items)
+        if s.verbatim and whole and g.label and s.kind.value in ("two_column", "comparison") and c.columns and len(c.columns) < 3:
+            # the author's third list beside the two the slide shows: a column of its own under its own heading
+            # («Пять основных показателей», «Основные риски», «Меры»)
+            c.columns.append(SlideItem(title=H.cap_first(H.strip_end(g.label)), bullets=lines))
+            said.append(f"the list «{g.label[:40]}» the slide left out shown as a third column")
+            continue
+        block = bool(c.items or c.numbers or c.chart is not None or c.table is not None or c.columns)
+        joined = ""
+        if g.label:
+            # the author's own words after the list's heading («…: тестировать акции небольшими запусками, сравнивать
+            # поставщиков и корректировать графики смен»), else its items joined
+            m = re.search(rf"{re.escape(g.label)}\s*:\s*(?P<rest>[^\n]+)", unit.text or "", re.I)
+            tail = H.strip_end(m.group("rest")) if m and "\u2014" not in m.group("rest")[:2] else ""
+            own = tail if tail and all(x.lower()[:12] in tail.lower() for x in lines) else ", ".join(_low_first(x, unit.text) for x in lines)
+            joined = f"{H.cap_first(H.strip_end(g.label))}: {own}"
+        if s.verbatim and whole and joined and block and room >= 1 and len(joined.split()) <= 30:
+            # under the slide's block the author's list keeps its heading, on one line: «Основные риски: слабый отклик
+            # на предложения, рост закупочных цен, перегрузка сотрудников» — unlabelled lines read as more of the block,
+            # and a third list («Предложи меры: …») found no room as separate lines and was lost
+            c.bullets.append(joined)
+            said.append(f"the list «{g.label[:40]}» the slide left out added as one line under its heading")
+            continue
         if len(lines) <= room:
             c.bullets.extend(lines)
             said.append(f"items of the list «{(g.label or '')[:40]}» the slide left out added as lines: " + "; ".join(f"«{x[:40]}»" for x in lines))
@@ -5456,6 +5500,11 @@ def verbatim_forms(unit: _Unit, ctx: _Ctx, profile: str) -> list:
                 intro = F.list_intro(r)
                 if intro and not sl.subtitle and intro.lower() not in (sl.content.model_dump_json() + sl.headline + (sl.takeaway or "")).lower():
                     sl.subtitle = intro  # the line that opens the list («Мы прошли три шага за месяц.»)
+                lead = F.lead_paragraph(r)
+                if lead and not sl.content.paragraphs and not _shows(sl, lead) and not _shows(sl, F.sentences(lead)[0]):
+                    # the paragraph over the slide's figures (the shop's area, seats and hours) stands on the slide as
+                    # its lead, not only in the notes
+                    sl.content.paragraphs = [lead]
                 # the variant's first choice, when it is one of its own forms, stands even without a sample of it
                 data.append(F.Form(sl.kind.value, sl, F._shown(sl), structural=True, own=not data and sl.kind.value in own))
     out = (data + [f for f in forms if f.structural]) if data else forms

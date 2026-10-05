@@ -2836,8 +2836,9 @@ def clone_composer(ctx: _SlideCtx, oslide: OutlineSlide, box: Bbox):
 
 def _drop_icon(ctx: _SlideCtx, icon: etree._Element) -> None:
     """The sample's pictogram taken off with the shapes that only framed it — a chip, a ring, a rounded tile around
-    it: no text, the icon's centre inside, at most four times its area (VK WorkSpace p4: four black tiles with a blue
-    outline stayed empty beside the author's texts once their icons went)."""
+    it: no text, the icon's centre inside, at most nine times its area (a 53 pt tile around a 24 pt arrow), an outline
+    and no colour of its own (`_bare_frame`; VK WorkSpace p4: four black tiles with a blue outline stayed empty beside
+    the author's texts once their icons went)."""
     ib = _abs_bbox(icon)
     parent = icon.getparent()
     frames = []
@@ -2851,11 +2852,31 @@ def _drop_icon(ctx: _SlideCtx, icon: etree._Element) -> None:
             if sid in ctx.filled or sid in chrome:
                 continue
             b = _abs_bbox(el)
-            if b is not None and b.x <= cx <= b.x + b.w and b.y <= cy <= b.y + b.h and b.w * b.h <= 4 * ib.w * ib.h:
+            if b is not None and b.x <= cx <= b.x + b.w and b.y <= cy <= b.y + b.h and b.w * b.h <= 9 * ib.w * ib.h and _bare_frame(ctx, el, b):
                 frames.append(el)
     ctx.remove_el(icon)
     for el in frames:
         ctx.remove_el(el)
+
+
+def _bare_frame(ctx: _SlideCtx, el: etree._Element, box: Bbox) -> bool:
+    """A frame that only draws a line around its icon: no fill of its own (or one of its ground's colour) and a visible
+    outline — empty without the icon it reads as a placeholder (WorkSpace's black tiles with a blue outline). A shape
+    of its own colour (VK Education's coloured disc behind a pictogram) is the template's design and stays."""
+    from verstka.rendering.charts import delta_e
+
+    spPr = el.find(q("p:spPr"))
+    if spPr is None:
+        return False
+    ln = spPr.find(q("a:ln"))
+    outlined = ln is not None and ln.find(q("a:noFill")) is None and ln.find(q("a:solidFill")) is not None
+    if not outlined:
+        return False
+    if spPr.find(q("a:noFill")) is not None:
+        return True
+    fill = _fill_hex(el)
+    ground = _ground_hex(ctx, box)
+    return bool(fill and ground and delta_e(fill, ground) < 12)
 
 
 def _remove_emptied_groups(ctx: _SlideCtx) -> None:

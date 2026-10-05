@@ -282,9 +282,12 @@ def _bookend_title_fit(slide: OutlineSlide, pattern: Pattern, manifest: Template
 
 def cover_goal(slide: OutlineSlide) -> Optional[str]:
     """The cover's own line under its subtitle (Agent v2: the goal of the plan, «Цель: увеличить прибыль со 120 000 до
-    255 000 рублей»): the first paragraph of a title slide's content. None on other slides or without one."""
-    if slide.kind != PatternKind.title or not slide.content.paragraphs:
+    255 000 рублей»): the first paragraph of a title slide's content — or of a closing slide's (the author's last
+    words under «Спасибо»). None on other slides or without one."""
+    if slide.kind not in (PatternKind.title, PatternKind.thanks) or not slide.content.paragraphs:
         return None
+    if slide.kind == PatternKind.thanks and not (slide.subtitle or "").strip():
+        return None  # a farewell's lines without a subtitle are its subtitle (a contact line «Команда · почта»)
     first = " ".join((slide.content.paragraphs[0] or "").split())
     return first or None
 

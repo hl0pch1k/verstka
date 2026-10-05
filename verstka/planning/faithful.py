@@ -232,10 +232,15 @@ def _block_parts(lines: list[str]) -> list[Part]:
         return [Part(kind="table", text="\n".join(raw), label="")]
     marked = [_LIST_RE.match(ln) for ln in raw]
     if sum(1 for x in marked if x) >= 2:
-        lead = raw[0].strip() if not marked[0] else ""
+        # the line right over the list introduces it (its label: «Исходные показатели:»); the lines before that one are
+        # a paragraph of their own — never the label (the shop's area, seats and hours read as the list's heading, and
+        # «Исходные показатели:» went into the next instruction)
+        first = next(i for i, x in enumerate(marked) if x)
+        before = [ln.strip() for ln in raw[:first]]
+        lead = before[-1] if before else ""
         found: list[str] = []
         rest: list[str] = []
-        for ln, x in zip(raw[1 if lead else 0 :], marked[1 if lead else 0 :]):
+        for ln, x in zip(raw[first:], marked[first:]):
             if x:
                 found.append(x.group("x").strip())
                 continue
@@ -245,7 +250,8 @@ def _block_parts(lines: list[str]) -> list[Part]:
                 found[-1] = f"{found[-1]} {t}"
             else:
                 rest.append(t)
-        out = [Part(kind="list", items=[H.strip_end(x) for x in found], label=H.strip_end(lead))]
+        out = _block_parts(before[:-1]) if len(before) > 1 else []
+        out.append(Part(kind="list", items=[H.strip_end(x) for x in found], label=H.strip_end(lead)))
         if rest:
             out.append(Part(kind="para", text=" ".join(rest)))
         return out
@@ -1032,17 +1038,69 @@ def _drawn_whole(r: "Reading", note: "Part") -> bool:
     return bool(items) and note_covered(note.text, items)
 
 
+# a sentence that speaks to the designer, not to the audience: an imperative at its head («Покажи структуру расходов
+# на диаграмме», «Не рассчитывай срок окупаемости…») or one inside it («Разовые вложения показывай отдельно…»)
+_TO_DESIGNER_RE = re.compile(
+    r"^(?:не\s+)?(?:покажи|покажите|сделай|сделайте|укажи|укажите|добавь|добавьте|предложи|предложите|выдели|выделите|"
+    r"используй|используйте|отметь|отметьте|подчеркни|перечисли|приведи|оформи|вынеси|раздели|сравни|рассчитай|рассчитывай|"
+    r"складывай|прибавляй|представляй|перегружай|округляй|сохрани|поставь|размести|нарисуй|добавляй|покажи)\b",
+    re.I,
+)
+_TO_DESIGNER_INSIDE_RE = re.compile(r"\b(?:показывай|выноси|располагай|оформляй|округляй)\b", re.I)
+_THAT_RE = re.compile(r"^(?:укажи|укажите|отметь|отметьте|подчеркни|напомни),?\s+что\s+(?P<rest>.+)$", re.I)
+
+
+def _nominative_tail(head: str) -> str:
+    """«формулу» → «формула»: the heading the instruction named, as a heading (its last word out of the accusative)."""
+    words_ = head.split()
+    if words_ and re.fullmatch(r"[а-яё]{3,}[ую]", words_[-1], re.I):
+        words_[-1] = words_[-1][:-1] + ("а" if words_[-1].endswith("у") else "я")
+    return " ".join(words_)
+
+
+def speaker_line(sentence: str) -> Optional[str]:
+    """The sentence as the speaker's notes keep it: the author's content as written; an instruction to the designer
+    as what it names («Добавь основные риски: слабый отклик…» → «Основные риски: слабый отклик…», «Укажи, что налоги не
+    учитываются» → «Налоги не учитываются»); a pure instruction («Покажи структуру расходов на диаграмме») — None."""
+    t = (sentence or "").strip()
+    if not t or not (_TO_DESIGNER_RE.match(t) or (_TO_DESIGNER_INSIDE_RE.search(t) and not re.search(r"\d", t))):
+        return t or None
+    m = _THAT_RE.match(t)
+    if m:
+        rest = m.group("rest").strip()
+        return rest[:1].upper() + rest[1:]
+    m = re.match(r"^(?P<head>[^:«»]{2,80}):\s*(?P<rest>\S.*)$", t)
+    if m:
+        head = _TO_DESIGNER_RE.sub("", m.group("head")).strip()
+        head = _nominative_tail(head)
+        rest = m.group("rest").strip()
+        return f"{head[:1].upper() + head[1:]}: {rest}" if head else rest[:1].upper() + rest[1:]
+    return None
+
+
+def _speaker_label(label: str) -> str:
+    """A list's heading as the notes keep it: «Покажи пять основных показателей» → «Пять основных показателей»."""
+    head = _TO_DESIGNER_RE.sub("", label or "").strip()
+    head = _nominative_tail(head) if head != (label or "").strip() else head
+    return head[:1].upper() + head[1:] if head else ""
+
+
 def notes_of(r: Reading) -> str:
     """The slide's whole text for the speaker, paragraph by paragraph: the code aside (it is on the slide), a note for
-    the designer as written when the slide cannot show its data (a chart note without figures, «[Здесь будет видео]»)."""
+    the designer as written when the slide cannot show its data (a chart note without figures, «[Здесь будет видео]»).
+    Instructions to the designer are not the speaker's: an instruction that names content keeps the content under its
+    heading, a pure one is left out (`speaker_line`)."""
     out = []
     for p in r.parts:
         if p.kind == "para":
-            out.append((f"{p.label}. " if p.label else "") + p.text)
+            said = [x for x in (speaker_line(x) for x in (sentences(p.text) or [p.text])) if x]
+            if said:
+                out.append((f"{p.label}. " if p.label else "") + " ".join(said))
         elif p.kind == "flow":
             out.append((f"{p.label}: " if p.label else "") + " → ".join(p.items) + ".")
         elif p.kind == "list":
-            out.append((f"{p.label}:\n" if p.label else "") + "\n".join(f"— {x}" for x in p.items))
+            lb = _speaker_label(p.label)
+            out.append((f"{lb}:\n" if lb else "") + "\n".join(f"— {x}" for x in p.items))
         elif p.kind == "image":
             out.append(f"[{p.label or 'Изображение'}: {p.text}]")
         elif p.kind in ("chart", "table", "note"):
@@ -1147,7 +1205,7 @@ PROFILES: dict = {
         "stages": ("timeline", "process", "cards"),
         "list": ("cards", "bullets"),
         "density": "lead",
-        "budget": 520,
+        "budget": 600,
     },
     "compact": {
         "prose": ("two_column", "bullets", "cards"),
@@ -1279,6 +1337,17 @@ def _sentences_for(paras: list[list[str]], density: str, per: int, total: int) -
         out.append(got)
         spent += size
     left = total - spent
+    if lead_only:
+        # the lead sentence, and the paragraph's figure when the lead does not state it («Затраты времени уменьшились на
+        # 55,6%…» after «Снижение расхода воды составило 31,25%»): a visual slide shows less text, never fewer facts
+        for ss, got in zip(paras, out):
+            if len(got) >= len(ss) or len(got) >= 2:
+                continue
+            lead_figs = set(re.findall(r"\d+(?:[.,]\d+)?", " ".join(got)))
+            nxt = next((x for x in ss[len(got):] if re.search(r"\d", x) and not set(re.findall(r"\d+(?:[.,]\d+)?", x)) <= lead_figs), None)
+            if nxt is not None and len(nxt) + 1 <= left and len(nxt) <= per:
+                got.append(nxt)
+                left -= len(nxt) + 1
     if not lead_only:
         for ss, got in zip(paras, out):
             used = sum(len(x) + 1 for x in got)
@@ -1485,7 +1554,7 @@ def _code(r: Reading, room: Room, prof: dict) -> Form:
     from verstka.schemas.outline import CodeBlock
 
     code = r.of("code")[0]
-    total = {"lead": 300, "full": 520, "dense": 700}[prof["density"]]
+    total = {"lead": 380, "full": 520, "dense": 700}[prof["density"]]
     total = min(total, max(int(room.body("code", 600) * 0.9), 260))
     sub = r.lead or _list_lead(r)
     got = _sentences_for(_side_blocks(r, skip_label=sub is not None and r.lead is None), "full" if prof["density"] != "lead" else "lead", total, total)
@@ -1831,15 +1900,25 @@ def _numbers(r: Reading, prof: dict) -> Optional[Form]:
     return Form(kind, s, _shown(s))
 
 
-def _process(r: Reading, paras: list[list[str]], kind: str) -> Optional[Form]:
+def _process(r: Reading, paras: list[list[str]], kind: str, prof: Optional[dict] = None) -> Optional[Form]:
+    """The author's sequence («датчики → проверка показаний → …») as steps, headed by its own label («Последовательность
+    работы») — never under a sentence that counts something else («состоит из четырех этапов» over five steps) —; the
+    opening sentence of each paragraph of the slide under the steps, as many as the variant shows («28 °C … 25 °C»
+    stayed only in the notes of a half-empty slide)."""
     flow = r.of("flow")
     if not flow:
         return None
     steps = flow[0].items[:8]
+    label = H.strip_end(flow[0].label or "")
     sub = None
-    if paras and paras[0] and words(paras[0][0]) <= 30:
+    leads = [p[0] for p in paras if p and words(p[0]) <= 32]
+    if label and words(label) <= 8:
+        sub = label
+    elif paras and paras[0] and words(paras[0][0]) <= 30:
         sub = H.strip_end(paras[0][0])
-    s = _slide(r, kind, content=_content(items=[_item(title=x) for x in steps]), subtitle=sub or r.lead, footnote=r.footnote, takeaway=r.takeaway)
+        leads = leads[1:]
+    keep = {"lead": 2, "full": 3, "dense": 4}.get((prof or {}).get("density", "full"), 3)
+    s = _slide(r, kind, content=_content(items=[_item(title=x) for x in steps], bullets=leads[:keep]), subtitle=sub or r.lead, footnote=r.footnote, takeaway=r.takeaway)
     return Form(kind, s, _shown(s))
 
 
@@ -1865,6 +1944,18 @@ def list_intro(r: Reading) -> Optional[str]:
         ss = [x for x in r.parts[0].sentences if x not in r.used]
         if 1 <= len(ss) <= 2 and sum(words(x) for x in ss) <= 30:
             return H.strip_end(" ".join(ss))
+    return None
+
+
+def lead_paragraph(r: Reading) -> Optional[str]:
+    """The paragraph that opens the slide before its list or its data (the coffee shop's area, seats and hours over its
+    figure list): its sentences not used elsewhere, when it is short enough to stand as the slide's lead (three
+    sentences, fifty words at most). None when the slide opens with its list or data."""
+    if len(r.parts) < 2 or r.parts[0].kind != "para" or r.parts[1].kind not in ("list", "chart", "table", "flow"):
+        return None
+    ss = [x for x in r.parts[0].sentences if x not in r.used]
+    if 1 <= len(ss) <= 3 and sum(words(x) for x in ss) <= 50:
+        return " ".join(end_sentence(x) for x in ss)
     return None
 
 
@@ -1914,7 +2005,7 @@ def forms_of(r: Reading, room: Room, profile: str) -> list[Form]:
         return [f for f in (_image(r, room, prof, k) for k in kinds) if f is not None]
     structural: list[Optional[Form]] = []
     if r.of("flow"):
-        structural += [_process(r, paras, "process"), _process(r, paras, "timeline")]
+        structural += [_process(r, paras, "process", prof), _process(r, paras, "timeline", prof)]
     if r.stages():
         structural += [_stages(r, room, prof, k) for k in prof["stages"]]
     for f in structural:
@@ -1954,7 +2045,14 @@ def _bookend(r: Reading):
         s = _slide(r, "title", subtitle=r.lead, footnote=r.footnote)
         return s
     if r.role == "closing":
-        return _slide(r, "thanks", subtitle=r.lead)
+        # the author's closing lines under the farewell's subtitle, not only in the notes («Датчики помогают видеть
+        # изменения… Вопросы и обсуждение.»): one line under it, the way a cover shows its goal
+        lead = H.strip_end(r.lead or "")
+        rest = [x for p in r.paras() for x in p if H.strip_end(x) != lead]
+        s = _slide(r, "thanks", subtitle=r.lead)
+        if rest and sum(words(x) for x in rest) <= 35:
+            s.content.paragraphs = [" ".join(rest)]
+        return s
     if r.role == "agenda":
         lst = r.of("list")
         lines = lst[0].items if lst else [H.strip_end(ss[0]) for ss in r.paras()]

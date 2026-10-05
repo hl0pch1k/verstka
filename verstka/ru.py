@@ -60,7 +60,13 @@ _UNIT_RE = __import__("re").compile(r"(?<=\d)[ ](?=(?:%|₽|руб|тыс|млн
 # a label and its number («Зона 2:», «Этап 3», «Слайд 4»): the number never starts the next line alone
 _LABEL_NUM_RE = __import__("re").compile(r"(?<![\w])([А-ЯЁA-Z][а-яёa-z]{2,})[ ](?=\d{1,2}(?:[:.,;)»]|$|[ \u00a0](?![а-яёa-z])))")
 _THOUSANDS_RE = __import__("re").compile(r"(?<=\d)[ ](?=\d{3}\b)")
-_NUM_NOUN_RE = __import__("re").compile(r"(?<![\w.,])(\d+(?:[.,]\d+)?)[ ](?=[A-Za-zА-Яа-яЁё])")  # «4 GPU-сервера», «за 2 секунды»
+# «4 GPU-сервера», «за 2 секунды» — never a preposition or a conjunction after the figure: it opens the next phrase
+# («с 300 до / 330 рублей» broke with «до» glued to the 300)
+_NUM_NOUN_RE = __import__("re").compile(
+    r"(?<![\w.,])(\d+(?:[.,]\d+)?)[ ](?=[A-Za-zА-Яа-яЁё])"
+    r"(?!(?:до|и|или|а|но|да|по|в|во|на|с|со|к|ко|от|за|из|у|о|об|при|для|без|под|над|между|через|что|как|либо|то|же|ли)(?![А-Яа-яЁёA-Za-z]))",
+    __import__("re").I,
+)
 
 
 WJ = "\u2060"  # word joiner: invisible, no glyph needed (Play has no no-break hyphen)

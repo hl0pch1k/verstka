@@ -851,6 +851,12 @@ def _cover(o: DeckOutline, structure: BriefStructure, run: _Run) -> None:
         # «Главная цель: увеличить …» of the cover's description: a line under the subtitle, in the brief's words
         cover.content.paragraphs = [goal, *cover.content.paragraphs]
         run.say(f"На титульный слайд под подзаголовком добавил цель из брифа: «{goal}».", cover)
+    elif cover is not None and not goal and not cover.content.paragraphs:
+        desc = cover_description(structure, cover.spec_ref, cover.subtitle)
+        if desc:
+            # a cover without a goal shows the first line of its description under the subtitle (it went to the notes)
+            cover.content.paragraphs = [desc]
+            run.say(f"На титульный слайд под подзаголовком добавил описание из брифа: «{desc}».", cover)
     d = " ".join((structure.disclaimer or "").split()).strip()
     target = cover or (o.slides[0] if o.slides else None)
     if d and target is not None:
@@ -861,7 +867,7 @@ def _cover(o: DeckOutline, structure: BriefStructure, run: _Run) -> None:
 
 
 _GOAL_LINE_RE = re.compile(
-    r"^\s*(?:[—–\-•*]\s*)?(?:главная|основная|ключевая)?\s*(?:цель|задача)(?!\s+(?:презентаци|доклад|выступлени|слайд))\s*[:—–]\s*(?P<g>\S.+?)\s*[.;]?\s*$",
+    r"^\s*(?:[—–\-•*]\s*)?(?P<lab>(?:(?:главная|основная|ключевая)\s+)?(?:цель|задача))(?!\s+(?:презентаци|доклад|выступлени|слайд))\s*[:—–]\s*(?P<g>\S.+?)\s*[.;]?\s*$",
     re.I,
 )
 
@@ -876,7 +882,27 @@ def cover_goal(structure: BriefStructure, spec_ref: Optional[int] = None) -> Opt
             m = _GOAL_LINE_RE.match(line)
             if m:
                 g = m.group("g").strip().rstrip(".;")
-                return f"Цель: {g[:1].lower() + g[1:] if g[1:2].islower() else g}" if len(g.split()) >= 2 else None
+                lab = " ".join(m.group("lab").split())
+                lab = lab[:1].upper() + lab[1:]  # the author's own word for it («Главная цель»), never shortened
+                return f"{lab}: {g[:1].lower() + g[1:] if g[1:2].islower() else g}" if len(g.split()) >= 2 else None
+    return None
+
+
+def cover_description(structure: BriefStructure, spec_ref: Optional[int], subtitle: Optional[str]) -> Optional[str]:
+    """The line of the cover's description under its subtitle when it states no goal («Учебный проект о том, как
+    датчики, программирование и анализ данных помогают…»): its first paragraph past the title and the subtitle, in
+    the brief's words, short enough for the cover (25 words). None without one."""
+    specs = [sp for sp in structure.specs if (spec_ref is not None and sp.number == spec_ref) or (spec_ref is None and _is_cover(sp))]
+    sub = " ".join((subtitle or "").split()).lower().rstrip(".")
+    for sp in specs[:1]:
+        paras = [" ".join(x.split()) for x in re.split(r"\n\s*\n", sp.text or "") if x.strip()]
+        for para in paras:
+            plain = para.rstrip(".").lower()
+            if not plain or plain == sub or (sp.title and plain == " ".join(sp.title.split()).lower().rstrip(".")):
+                continue
+            if 4 <= len(para.split()) <= 25 and not re.match(r"(?i)^(?:все|данные|цифры)\b.*(?:условн|допущен)", para):
+                return para if para.endswith((".", "!", "?")) else para + "."
+            return None
     return None
 
 

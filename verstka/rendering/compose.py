@@ -3277,11 +3277,26 @@ class Composer:
         # the equation and «100 — Покупок в день» under it); a term without words of its own takes the figure's label
         # («100» → «покупок в день»)
         used: set[int] = set()
+        # the slide's lines that state one figure of the equation («100 покупок в день», «Средний чек — 300 рублей»)
+        # are its terms' captions, never a list repeating the equation's figures under it
+        line_figs = [(j, kpi_callout(b)) for j, b in enumerate(c.bullets)]
+        line_figs = [(j, got) for j, got in line_figs if got is not None]
+        used_lines: set[int] = set()
         labeled: list[tuple[Optional[str], str]] = []
         for fig, lab in terms:
             d = re.sub(r"\D", "", fig or "")
             if d:
                 hit = next((i for i, n in enumerate(c.numbers) if i not in used and re.sub(r"\D", "", n.value) == d and (lab or n.label.strip())), None)
+                hit_line = None if hit is not None else next((j for j, (v, lb) in line_figs if j not in used_lines and re.sub(r"\D", "", v) == d and lb.strip()), None)
+                if hit_line is not None:
+                    used_lines.add(hit_line)
+                    v_line, full = next(got for j, got in line_figs if j == hit_line)
+                    if not lab:
+                        lab = full.strip()
+                        if re.search(r"[^\d\s.,]", v_line) and not re.search(r"[^\d\s.,]", fig):
+                            fig = " ".join(v_line.split())
+                    elif len(full) > len(lab) and " ".join(lab.lower().split()) in " ".join(full.lower().split()):
+                        lab = full.strip()
                 if hit is not None:
                     used.add(hit)
                     full = c.numbers[hit].label.strip()
@@ -3334,7 +3349,7 @@ class Composer:
             if lay["total"] <= area.w:
                 chosen, rows = lay, [list(range(len(terms)))]
                 break
-        rest_texts = [t for t in list(c.bullets) + list(c.paragraphs) if t.strip()]
+        rest_texts = [t for t in list(c.paragraphs) + [b for j, b in enumerate(c.bullets) if j not in used_lines] if t.strip()]
         if chosen is not None and res is not None and len(rows[0]) >= 3 and not rest_texts and self.strategy != "compact":
             # the equation is the slide, and one line leaves most of the area empty under it: the operands on one line
             # and «= result» under them set much larger (the compact variant keeps its one dense line)
@@ -3376,8 +3391,16 @@ class Composer:
         lab_gap = int(k.vgap * 0.15)
         row_h = fig_h + (pad if res is not None else 0) + (lab_gap + lab_h if lab_h else 0)
         block_h = len(rows) * row_h + (len(rows) - 1) * int(k.vgap * 1.4) + (pad if res is not None else 0)
-        rest = [t for t in list(c.bullets) + list(c.paragraphs) if t.strip()]
-        rest += [f"{n.value} — {n.label}" for i, n in enumerate(c.numbers) if i not in used and n.label.strip()]
+        rest = [t for t in list(c.paragraphs) + [b for j, b in enumerate(c.bullets) if j not in used_lines] if t.strip()]
+
+        def as_line(n) -> str:
+            # a count reads figure first («3 000 покупок в месяц»), a measure label first («Месячная выручка — 900 000 ₽»)
+            first = (n.label.split() or [""])[0].lower()
+            if re.search(r"(?:ок|ов|ей|ев|ий)$", first) and not re.search(r"[^\d\s.,]", n.value):
+                return f"{n.value} {n.label[:1].lower() + n.label[1:]}"
+            return f"{n.label} — {n.value}"
+
+        rest += [as_line(n) for i, n in enumerate(c.numbers) if i not in used and n.label.strip()]
         y = area.y + (pad if res is not None else 0)
         if not rest:
             # the equation is the slide: it stands in the upper middle of the free area (with the conclusion that
@@ -4255,7 +4278,14 @@ class Composer:
         # выручки» read as a contradiction when unlabelled)
         amounts = not is_pct
         shares_only, head_plain = list(pct), head
-        if amounts:
+        # the author's own pie (the text laid out as written) shows the author's amounts alone: a share computed over the
+        # parts is a second figure the brief never gave («Продукты · 40%» of the costs beside the author's «35%
+        # выручки» on the same line — a contradiction the reader cannot resolve)
+        own_only = amounts and bool(getattr(self.o, "verbatim", False))
+        if amounts and own_only:
+            amt = [typeset(_amount_text(v, unit_txt)) for v in vals]
+            pct = pct_plain = pct_side = shares_only = list(amt)
+        elif amounts:
             amt = [typeset(_amount_text(v, unit_txt)) for v in vals]
             # the shares padded to one width with figure spaces: the column is set flush right, so «· 9%» under
             # «· 19%» moved its amount and its dot right of the rows above
@@ -4305,7 +4335,7 @@ class Composer:
             stack = legend_mode == "stacked"
             if amounts and legend_mode in ("amounts", "stacked"):
                 pct = pct_plain if stack else pct_side
-            if legend_mode == "shares" and amounts:
+            if legend_mode == "shares" and amounts and not own_only:
                 # a narrow box: the amounts stay on the slices, the legend gives the shares only, headed as such
                 pct = shares_only
                 head = f"{head_plain}\nдоля от общей суммы" if head_plain else "Доля от общей суммы"

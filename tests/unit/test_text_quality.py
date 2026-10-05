@@ -180,7 +180,8 @@ def test_the_cover_shows_the_briefs_goal_and_the_formula_names_its_factors(long_
     for o in long_run[0].outlines.values():
         cover = o.slides[0]
         assert cover.kind == K.title
-        assert cover.content.paragraphs[:1] == ["Цель: увеличить ежемесячную операционную прибыль со 120 000 до 255 000 рублей"]
+        # (the author's own word for it: «Главная цель», never shortened to «Цель»)
+        assert cover.content.paragraphs[:1] == ["Главная цель: увеличить ежемесячную операционную прибыль со 120 000 до 255 000 рублей"]
         f = _spec(o, 2).content.formula
         assert f == "100 покупок в день × 300 ₽ × 30 рабочих дней = 900 000 ₽", f
 
@@ -309,7 +310,7 @@ def test_the_cover_lines_are_grounded():
 
 def test_the_cover_goal_comes_from_the_cover_the_brief_describes():
     st = read_structure(LONG)
-    assert cover_goal(st, 1) == "Цель: увеличить ежемесячную операционную прибыль со 120 000 до 255 000 рублей"
+    assert cover_goal(st, 1) == "Главная цель: увеличить ежемесячную операционную прибыль со 120 000 до 255 000 рублей"
     assert cover_goal(read_structure(SHORT)) is None  # no cover described: no goal line
     brief = parse_brief_text(LONG)
     o = DeckOutline(title="t", slides=[OutlineSlide(id="c", kind=K.title, headline="x", spec_ref=1)] + [
@@ -318,7 +319,7 @@ def test_the_cover_goal_comes_from_the_cover_the_brief_describes():
     ])
     out, _ = compile_outline(o, st, brief)
     cover = out.slides[0]
-    assert cover.content.paragraphs == ["Цель: увеличить ежемесячную операционную прибыль со 120 000 до 255 000 рублей"]
+    assert cover.content.paragraphs == ["Главная цель: увеличить ежемесячную операционную прибыль со 120 000 до 255 000 рублей"]
     assert any("цель из брифа" in m for m in out.agent_log)
 
 

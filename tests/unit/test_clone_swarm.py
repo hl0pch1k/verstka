@@ -223,8 +223,11 @@ def test_the_labels_under_compound_figures_share_one_size():
 
 def test_an_icon_goes_with_the_tile_that_framed_it(tmp_path):
     """VK WorkSpace p4 on a slide of the author's text: the sample's pictograms went, their black tiles with a blue
-    outline stayed as four empty frames beside the texts. The card holding the text stays."""
+    outline stayed as four empty frames beside the texts. A disc of its own colour behind a pictogram (VK Education
+    p26) is the template's design: it stays. The card holding the text stays."""
     from PIL import Image
+    from pptx.dml.color import RGBColor
+    from pptx.util import Emu, Pt
     from test_review_clone import _manifest, _new_prs, _pattern, _slot, _tb
 
     from verstka.ingest.workspace import TemplateWorkspace
@@ -235,13 +238,16 @@ def test_an_icon_goes_with_the_tile_that_framed_it(tmp_path):
 
     prs, blank = _new_prs()
     s = prs.slides.add_slide(blank)
-    card = _tb(s, 0.05, 0.30, 0.40, 0.25, "", fill="F2F2F2")
+    s.background.fill.solid()
+    s.background.fill.fore_color.rgb = RGBColor(0, 0, 0)
     tile = _tb(s, 0.07, 0.33, 0.06, 0.1, "", fill="000000")
+    tile.line.color.rgb = RGBColor(0x00, 0x77, 0xFF)
+    tile.line.width = Pt(1.5)
+    disc = _tb(s, 0.57, 0.33, 0.06, 0.1, "", fill="FF3985")
     png = tmp_path / "i.png"
     Image.new("RGBA", (64, 64), (0, 119, 255, 255)).save(png)
-    from pptx.util import Emu
-
     icon = s.shapes.add_picture(str(png), Emu(int(0.08 * 12192000)), Emu(int(0.345 * 6858000)), Emu(int(0.04 * 12192000)), Emu(int(0.07 * 6858000)))
+    icon2 = s.shapes.add_picture(str(png), Emu(int(0.58 * 12192000)), Emu(int(0.345 * 6858000)), Emu(int(0.04 * 12192000)), Emu(int(0.07 * 6858000)))
     text = _tb(s, 0.15, 0.33, 0.28, 0.2, "Резервное питание датчиков", size=16)
     pptx = tmp_path / "icon.pptx"
     prs.save(pptx)
@@ -249,11 +255,12 @@ def test_an_icon_goes_with_the_tile_that_framed_it(tmp_path):
     builder = DeckBuilder(pptx)
     slide = builder.clone_slide(1)
     ctx = _SlideCtx(builder, slide, pattern, _manifest([pattern]), TemplateWorkspace.create(pptx, tmp_path / "ws"), DeckOutline(title="T", slides=[]))
-    ids = {n: str(sh.shape_id) for n, sh in (("card", card), ("tile", tile), ("icon", icon), ("text", text))}
+    ids = {n: str(sh.shape_id) for n, sh in (("tile", tile), ("disc", disc), ("icon", icon), ("icon2", icon2), ("text", text))}
     _drop_icon(ctx, ctx.els[ids["icon"]])
+    _drop_icon(ctx, ctx.els[ids["icon2"]])
     left = {str(sh.shape_id) for sh in slide.shapes}
-    assert ids["icon"] not in left and ids["tile"] not in left
-    assert ids["card"] in left and ids["text"] in left
+    assert ids["icon"] not in left and ids["tile"] not in left and ids["icon2"] not in left
+    assert ids["disc"] in left and ids["text"] in left
 
 
 def test_a_chip_beside_its_line_rides_with_that_line():

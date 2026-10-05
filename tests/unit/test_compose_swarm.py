@@ -232,3 +232,18 @@ def test_the_authors_lines_are_set_denser_before_any_goes_to_the_notes(env):  # 
     shown = [ln for ln in lines if ln.split(" — ")[0] in text]
     dropped = [w for w in warnings if "left to the speaker notes" in w]
     assert len(shown) == len(lines) or dropped == [], (shown, warnings)
+
+
+def test_a_formulas_own_lines_caption_its_terms(env):  # noqa: F811
+    """Coffee, structured slide 2: the equation 100 × 300 ₽ × 30 = 900 000 ₽ was followed by the author's five lines
+    repeating its figures. The lines that state a term's figure are its captions; the one the equation does not show
+    («3 000 покупок в месяц») and the shop's paragraph stay under it."""
+    lines = ["100 покупок в день", "Средний чек — 300 рублей", "30 рабочих дней в расчетном месяце", "3 000 покупок в месяц", "Месячная выручка — 900 000 рублей"]
+    lead = "Кофейня площадью 45 м² рядом с офисами и жилыми домами. Внутри 18 посадочных мест."
+    o = OutlineSlide(id="f", kind=PatternKind.bullets, headline="Как работает кофейня сейчас", verbatim=True, content=SlideContent(formula="100 покупок в день × 300 × 30 рабочих дней = 900 000 ₽", bullets=lines, paragraphs=[lead]))
+    slide, _ = _render(env, o, "formula")
+    caps = [sh.text_frame.text.replace(" ", " ") for sh in slide.shapes if sh.has_text_frame and sh.name.startswith("Term label")]
+    assert any("Средний чек" in t for t in caps) and any("Месячная выручка" in t for t in caps) and any("в расчетном месяце" in t for t in caps), caps
+    text = _texts(slide).replace(" ", " ")
+    assert "Средний чек — 300" not in text and "Месячная выручка — 900" not in text  # not repeated as lines
+    assert "3 000 покупок в месяц" in text and "Кофейня площадью 45 м²" in text
