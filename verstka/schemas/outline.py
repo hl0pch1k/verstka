@@ -160,6 +160,9 @@ class OutlineSlide(BaseModel):
     footnote: Optional[str] = None
     rationale: Optional[str] = None
     spec_ref: Optional[int] = None
+    # the id of the slide this one goes on from: a table longer than a slide shows, split over continuation slides
+    # (planning/faithful.split_long_tables) — the same slide of the brief, kept right after its first part
+    continues: Optional[str] = None
     # Agent v2 (UI): the other forms the designer proposed for this slide (shown in «Почему слайд такой»)
     alternatives: list[SlideAlternative] = Field(default_factory=list)
     # the slide shows the author's own sentences, whole (verbatim mode, planning/faithful.py): no later step rewrites,

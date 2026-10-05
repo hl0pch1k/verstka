@@ -800,7 +800,7 @@ def _units_from_specs(ctx: _Ctx) -> list[_Unit]:
     for i, sp in enumerate(specs):
         sids = list(dict.fromkeys([*sp.series_ids, *(x for r in sp.charts for x in r.series_ids)]))
         tids = [ctx.table_index[j] for j in sp.table_ids if j in ctx.table_index]
-        reading = read_slide(sp.number, sp.title, sp.text, first=(i == 0), last=(i == len(specs) - 1 and len(specs) >= 2))
+        reading = read_slide(sp.number, sp.title, sp.text, first=(i == 0), last=(i == len(specs) - 1 and len(specs) >= 2), deck=ctx.structure.title)
         cover = _is_cover(sp, i == 0) or reading.role == "cover"
         # the slide's own text holds its figures: the facts registry (regex figures, times and all) would only add noise
         u = _Unit(
@@ -1101,6 +1101,26 @@ def _enumeration_figures(unit: _Unit, ctx: _Ctx) -> list[NumberCallout]:
             continue
         return [NumberCallout(value=_fmt_ru(v, s.unit), label=H.cap_first(c.strip())) for c, v in zip(s.categories, s.values)]
     return []
+
+
+# «Выручка — 4,8 млрд ₽», «Средняя температура: минус 18 °C»: a line of a figure list split at its own separator
+_KPI_LINE_RE = re.compile(r"^(?P<label>[^—–:]{2,80}?)\s*(?:\s[—–-]\s|:\s)\s*(?P<value>(?:минус|плюс|около|до|более|менее|свыше|≈|~|[+\-−])?\s*\d.{0,40})$", re.I)
+
+
+def verbatim_kpis(lines: list[str]) -> list[NumberCallout]:
+    """The key figures of an author's figure list laid out as written: each line split at its own separator, the label
+    the words before it, the value the words after it as written — «минус 18 °C», «96 000 м²», «1,3 млн» keep their
+    sign and unit (H.kpis_of reads a figure out of a sentence and loses both). All or nothing: a line that is no «label
+    — figure» («Адрес: Москва, ул. Складская, д. 1», «Работаем с 8 до 20 часов») makes the lines no list of key figures —
+    they are the author's sentences, shown as written, never a figure taken out of one («8 → 20»)."""
+    out: list[NumberCallout] = []
+    for ln in lines:
+        t = H.strip_end(" ".join(str(ln).split()))
+        m = _KPI_LINE_RE.match(t)
+        if not (m and re.search(r"\d", m.group("value"))):
+            return []
+        out.append(NumberCallout(value=m.group("value").strip().rstrip("."), label=H.cap_first(m.group("label").strip())))
+    return out
 
 
 def _kpis(lines: list[str]) -> list[NumberCallout]:
@@ -1409,7 +1429,7 @@ def rules_design(unit: _Unit, ctx: _Ctx) -> _Design:
         fig_items = [x for g in src.groups if g.figure for x in g.items]
         other_items = [x for g in text_groups[1:] for x in g.items]
         def kpis(lines: list[str]) -> list[NumberCallout]:
-            out = _kpis(lines)
+            out = verbatim_kpis(lines) if ctx.verbatim else _kpis(lines)
             # the writer's text (a topic): a year or a day of a month is a date, never a slide's key figure; nor a time
             # of day, a project number or a bound of a requirement (gate 4 G4-3)
             return [n for n in out if not _date_callout(n) and not _not_key_figure(n, lines)] if ctx.written else out
@@ -1442,9 +1462,14 @@ def rules_design(unit: _Unit, ctx: _Ctx) -> _Design:
                 subtitle = H.strip_end(goal)
                 shown.add(goal)
         elif numbers:
-            nums = numbers if len(numbers) <= 4 else numbers[:3] + numbers[-1:]
+            # (the author's own figures are all shown: a row of up to six, a table of more — the rules' own plan keeps four)
+            nums = numbers if ctx.verbatim or len(numbers) <= 4 else numbers[:3] + numbers[-1:]
             kind = "stat_row" if len(nums) >= 2 else "big_number"
             c.numbers = nums
+            if ctx.verbatim and len(nums) > 6:
+                kind = "table"
+                c.numbers = []
+                c.table = TableData(columns=["", "Значение"], rows=[[n.label, n.value] for n in nums])
             shown.update(fig_items)
             basis = "figures"
             if ctx.written:
@@ -5310,6 +5335,16 @@ def _similar_variants_note(outlines: dict[str, DeckOutline], strategies: list[St
 VERBATIM_ALTERNATIVES = ("cards", "bullets", "two_column", "table")
 
 
+def _shows(sl: OutlineSlide, sentence: str) -> bool:
+    """The slide's own text already says the sentence (the footnote's caveat kept in its body)."""
+    key = " ".join(H.strip_end(sentence).lower().split())
+    if not key:
+        return False
+    c = sl.content
+    texts = [*c.bullets, *c.paragraphs, *(x for it in [*c.items, *c.columns] for x in (it.title, it.text, *it.bullets)), sl.subtitle or "", c.quote or ""]
+    return any(key in " ".join(t.lower().split()) for t in texts if t)
+
+
 def verbatim_forms(unit: _Unit, ctx: _Ctx, profile: str) -> list:
     """The forms of a dictated slide laid out as written (planning/faithful.py `forms_of`) with what the analyst read as
     the slide's requests: the charts it asks for, drawn from the brief's own data, its table, its formula, its
@@ -5387,7 +5422,8 @@ def verbatim_forms(unit: _Unit, ctx: _Ctx, profile: str) -> list:
                 sl.content.formula = spec.formula
             if spec.takeaway and not (sl.takeaway or "").strip():
                 sl.takeaway = spec.takeaway
-            if spec.footnote and not (sl.footnote or "").strip():
+            if spec.footnote and not (sl.footnote or "").strip() and not _shows(sl, spec.footnote):
+                # (a caveat the slide already shows as its text — it states a figure — is not repeated as its small print)
                 sl.footnote = F.end_sentence(spec.footnote)
             if spec.photo and not sl.content.photo_slot and not r.of("image"):
                 sl.content.photo_slot = spec.photo
@@ -5428,23 +5464,54 @@ def _run_verbatim(brief: Brief, manifest: Optional[TemplateManifest], strategies
                  + "; текст автора не переписываю: предложения целиком, что не поместилось — в заметках докладчика.")
     if added:
         tracker.emit("designer", f"Дизайнер: слайд 1 — обложка «{plan.title}».", slide=1)
+    # a table longer than a slide shows goes on over continuation slides (faithful.split_long_tables): every row of the
+    # author stays on the slides
+    expanded = {nm: faithful.expand_slides(plan.decks[nm], plan.readings, profile=nm) for nm in names}
+
+    def lines_of(nm: str) -> list[tuple[int, str]]:
+        out, shown = [], {}
+        for k, (s, i, j) in enumerate(expanded[nm]):
+            pos = k + 1 + int(added)
+            rows = len(s.content.table.rows) if s.content.table is not None else 0
+            if j == 0:
+                out.append((pos, plan.lines[nm][i][1].replace(f"слайд {i + 1}", f"слайд {pos}", 1)))
+            elif s.content.table is not None and expanded[nm][k - 1][0].content.table is not None and expanded[nm][k - 1][0].content.table.columns == s.content.table.columns:
+                a0 = shown.get(i, 0) + 1
+                out.append((pos, f"Дизайнер: слайд {pos} — продолжение таблицы, строки {a0}–{a0 + rows - 1}: на слайде не больше "
+                                 f"{faithful.MAX_TABLE_ROWS} строк, ни одна строка не теряется."))
+            else:
+                out.append((pos, f"Дизайнер: слайд {pos} — {faithful.form_name(s)}: ещё один блок данных того же слайда текста, на своём слайде."))
+            shown[i] = shown.get(i, 0) + rows if j == 0 or s.content.table is not None else shown.get(i, 0)
+        return out
+
+    said = {nm: lines_of(nm) for nm in names}
+    same = len({tuple((i, j) for _, i, j in expanded[nm]) for nm in names}) == 1
     # one line per slide when every variant took one form, else each variant's own line (the build page draws the
     # variant's storyboard from its lines)
-    for i in range(n):
-        pos = i + 1 + int(added)
-        said = {nm: plan.lines[nm][i][1].replace(f"слайд {i + 1}", f"слайд {pos}", 1) for nm in names}
-        if len({faithful.form_name(plan.decks[nm][i]) for nm in names}) == 1:
-            tracker.emit("designer", said[names[0]], slide=pos)
-        else:
-            for nm in names:
-                tracker.emit("designer", said[nm], slide=pos, variant=nm)
+    if same:
+        for k, (s, i, j) in enumerate(expanded[names[0]]):
+            pos = said[names[0]][k][0]
+            if len({said[nm][k][1] for nm in names}) == 1 or (j == 0 and len({faithful.form_name(plan.decks[nm][i]) for nm in names}) == 1):
+                tracker.emit("designer", said[names[0]][k][1], slide=pos)
+            else:
+                for nm in names:
+                    tracker.emit("designer", said[nm][k][1], slide=pos, variant=nm)
+    else:
+        for nm in names:
+            for pos, line in said[nm]:
+                tracker.emit("designer", line, slide=pos, variant=nm)
     compile_fn = _compiler()
     outlines: dict[str, DeckOutline] = {}
     for st in strategies:
         slides = []
-        for i, s in enumerate(plan.decks[st.name], 1):
+        first_of: dict[int, str] = {}
+        for k, (s, i, j) in enumerate(expanded[st.name], 1):
             s = s.model_copy(deep=True)
-            s.id = f"sl{i}"
+            s.id = f"sl{k}"
+            if j == 0:
+                first_of[i] = s.id
+            else:
+                s.continues = first_of.get(i)
             slides.append(s)
         o = DeckOutline(
             title=plan.title, subtitle=plan.subtitle, audience=brief.audience, purpose=brief.purpose, strategy=st.name, language=brief.language,
@@ -5524,6 +5591,19 @@ def run_agent(
         by_model = agent.models and not written and not verbatim
         structure, aw = analyse_brief(brief, skills if by_model else None, providers if by_model else None, a_deadline, tracker.forward)
         common.extend(aw)
+        if not structure.specs and (verbatim or not agent.models) and not written:
+            # laid out as written, a text without «Слайд N» headings has its markdown headings as its slides («## Проблема»,
+            # «## Решение»): every sentence of the author stays under its own heading, nothing is re-cut by the planner
+            from verstka.planning.brief_structure import read_structure
+
+            try:
+                md = read_structure(brief.text, md_slides=True)
+            except Exception:  # noqa: BLE001 - the structure as it was
+                log.warning("markdown headings not read as slides", exc_info=True)
+                md = None
+            if md is not None and len(md.specs) >= 2:
+                structure = md
+                common.append(f"the brief's markdown headings read as its {len(md.specs)} slides (laid out as written)")
     fx = _resolve_facts(facts, brief, common, structure)
     ctx = _build_ctx(brief, structure, fx, manifest)
     ctx.written = written

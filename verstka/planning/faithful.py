@@ -28,6 +28,20 @@ _ABBR_BEFORE_RE = re.compile(
     re.I,
 )
 _INITIAL_RE = re.compile(r"(?:^|[\s(«\"])[A-ZА-ЯЁ]\.$")
+# abbreviations that stand before a name or a figure and never end a sentence («ул. Тверская», «д. 7», «проф. Иванов»,
+# «т. е. Москву», «Dr. Smith», «e.g. Walmart»): no split after them, whatever letter comes next
+_NO_END_RE = re.compile(
+    r"(?:^|[\s(«\"])(?:ул|пр|просп|пер|наб|пл|б-р|ш|д|корп|стр|оф|им|проф|акад|доц|т\.\s?е|т\.\s?к|т\.\s?н|напр|"
+    r"dr|mr|mrs|ms|prof|st|e\.\s?g|i\.\s?e|vs|cf)\.$",
+    re.I,
+)
+# «г.» with no figure before it is a city («в г. Москва»); after a year («в 2024 г.») it may end the sentence
+_CITY_RE = re.compile(r"(?:^|[\s(«\"])г\.$")
+_YEAR_ABBR_RE = re.compile(r"\d\s?гг?\.$")
+# «и т. д.», «и т. п.», «и др.», «etc.» end a sentence like any other word
+_ETC_RE = re.compile(r"т\.\s?[дп]\.$|(?:^|\s)др\.$|(?:^|\s)etc\.$", re.I)
+# a dotted acronym («U.S.», «С.Ш.А.»)
+_ACRONYM_RE = re.compile(r"(?:^|[\s(«\"])(?:[A-Za-zА-Яа-яЁё]\.){2,}$")
 _OPEN = {"«": "»", "(": ")", "“": "”", "„": "“"}
 
 
@@ -61,7 +75,11 @@ def sentences(text: str) -> list[str]:
                 # (an initial or an abbreviation is the sentence's last few characters: a paragraph without a split point
                 # never makes the check read the whole sentence again at every period)
                 head = t[max(start, i - 11) : i + 1]
-                if nxt and (nxt.isupper() or nxt.isdigit() or nxt in "«\"(“[") and not _INITIAL_RE.search(head) and not (ch == "." and _ABBR_BEFORE_RE.search(head) and not nxt.isupper()):
+                kept = ch == "." and (
+                    (not _ETC_RE.search(head) and (_NO_END_RE.search(head) or _ACRONYM_RE.search(head) or (_CITY_RE.search(head) and not _YEAR_ABBR_RE.search(head))))
+                    or (_ABBR_BEFORE_RE.search(head) and not nxt.isupper())
+                )
+                if nxt and (nxt.isupper() or nxt.isdigit() or nxt in "«\"(“[") and not _INITIAL_RE.search(head) and not kept:
                     out.append(t[start:j].strip())
                     start = k
                     i = k
@@ -180,6 +198,27 @@ def _ends_statement(line: str) -> bool:
     return line.rstrip().endswith((".", "!", "?", "…", ";", ":", "»", "\""))
 
 
+# a line that breaks inside a sentence ends on a word that cannot end one («… офис в» / «Москве в 2024 году»)
+_OPEN_END_RE = re.compile(
+    r"(?:^|\s)(?:в|во|на|с|со|к|ко|по|о|об|обо|у|за|из|от|до|для|при|про|без|под|над|и|а|но|или|либо|что|как|чтобы|если|"
+    r"когда|где|не|ни|же|the|a|an|of|to|and|or|in|on|at|for|with|by|from)$",
+    re.I,
+)
+
+
+def _short_unit(line: str, nxt: Optional[str]) -> bool:
+    """A short line without a final mark before a line that starts anew (a capital, a figure, a quote): a unit of its
+    own — the label of the paragraph under it («Подготовка» / «Мы описали процессы…») or an item of a list written
+    without markers («Прозрачность» / «Скорость») — not the first half of a sentence the line broke."""
+    t = line.strip()
+    if _ends_statement(t) or words(t) > 8 or t.endswith((",", "—", "–", "-", "(")) or _OPEN_END_RE.search(t):
+        return False
+    if nxt is None:
+        return True
+    n = nxt.strip()
+    return bool(n) and (n[0].isupper() or n[0].isdigit() or n[0] in "«\"(“")
+
+
 def _block_parts(lines: list[str]) -> list[Part]:
     """The parts of one block of lines (between blank lines)."""
     raw = [ln.rstrip() for ln in lines if ln.strip()]
@@ -194,26 +233,63 @@ def _block_parts(lines: list[str]) -> list[Part]:
     marked = [_LIST_RE.match(ln) for ln in raw]
     if sum(1 for x in marked if x) >= 2:
         lead = raw[0].strip() if not marked[0] else ""
-        items = [H.strip_end(x.group("x").strip()) for x in marked if x]
-        rest = [ln.strip() for ln, x in zip(raw[1 if lead else 0 :], marked[1 if lead else 0 :]) if not x]
-        out = [Part(kind="list", items=items, label=H.strip_end(lead))]
+        found: list[str] = []
+        rest: list[str] = []
+        for ln, x in zip(raw[1 if lead else 0 :], marked[1 if lead else 0 :]):
+            if x:
+                found.append(x.group("x").strip())
+                continue
+            t = ln.strip()
+            # a wrapped item goes on: an indented line, or one after an item its line broke inside a sentence
+            if found and not rest and (ln[:1] in (" ", "\t") or not _ends_statement(found[-1]) or t[:1].islower()):
+                found[-1] = f"{found[-1]} {t}"
+            else:
+                rest.append(t)
+        out = [Part(kind="list", items=[H.strip_end(x) for x in found], label=H.strip_end(lead))]
         if rest:
             out.append(Part(kind="para", text=" ".join(rest)))
         return out
     # lines that each end a statement are paragraphs of their own («Цель: …» / «Метрика: …»); a line broken inside a
-    # sentence joins the next one
-    paras: list[str] = []
+    # sentence joins the next one; a short line without a final mark before a line that starts anew is a unit of its
+    # own (_short_unit): two or more in a row are a list written without markers, one over a paragraph is its label
+    units: list[tuple[str, bool]] = []
     cur = ""
-    for ln in raw:
-        s = ln.strip()
-        cur = f"{cur} {s}".strip() if cur else s
-        if _ends_statement(s):
-            paras.append(cur)
+    for k, ln in enumerate(raw):
+        t = ln.strip()
+        nxt = raw[k + 1] if k + 1 < len(raw) else None
+        if not cur and len(raw) >= 2 and _short_unit(t, nxt):
+            units.append((t, True))
+            continue
+        cur = f"{cur} {t}".strip() if cur else t
+        if _ends_statement(t):
+            units.append((cur, False))
             cur = ""
     if cur:
-        paras.append(cur)
+        units.append((cur, False))
+    paras: list[tuple[str, str]] = []  # (the paragraph, its label)
+    k = 0
+    while k < len(units):
+        text, short = units[k]
+        if short:
+            run = [text]
+            while k + 1 < len(units) and units[k + 1][1]:
+                k += 1
+                run.append(units[k][0])
+            if len(run) >= 2:
+                paras.append(("\x00list", "\x00".join(run)))
+            elif k + 1 < len(units):
+                k += 1
+                paras.append((units[k][0], H.strip_end(run[0])))
+            else:
+                paras.append((run[0], ""))
+        else:
+            paras.append((text, ""))
+        k += 1
     out: list[Part] = []
-    for p in paras:
+    for p, label in paras:
+        if p == "\x00list":
+            out.append(Part(kind="list", items=[H.strip_end(x) for x in label.split("\x00")]))
+            continue
         notes = list(_INLINE_NOTE_RE.finditer(p))
         text = p
         for nm in notes:
@@ -224,24 +300,93 @@ def _block_parts(lines: list[str]) -> list[Part]:
         text = " ".join(text.split())
         if not text:
             continue
-        out.extend(_flow_split(text))
+        got = _flow_split(text)
+        if label and got and got[0].kind == "para":
+            got[0].label = label
+        out.extend(got)
     return out
+
+
+# markdown the author pasted with the text: read, never shown («**жирный**», «[текст](адрес)», «> цитата», «### Подзаголовок»)
+_MD_EMPH_RE = re.compile(r"\*\*(?=\S)(.+?)(?<=\S)\*\*|__(?=\S)(.+?)(?<=\S)__|(?<![\w*])\*(?=[^\s*])([^*\n]+?)(?<=[^\s*])\*(?![\w*])")
+_MD_LINK_RE = re.compile(r"\[([^\[\]\n]{1,200})\]\(\s*(\S+?)\s*\)")
+_MD_SUBHEAD_RE = re.compile(r"^\s*#{1,6}\s+(?P<t>.+?)\s*#*\s*$")
+_MD_QUOTE_RE = re.compile(r"^\s*(?:>\s?)+(?P<x>.*)$")
+_MD_RULE_ROW_RE = re.compile(r"^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$")
+
+
+def _md_inline(line: str) -> str:
+    """A line without markdown's inline marks: emphasis dropped, a link written as «текст (адрес)»."""
+
+    def link(m: re.Match) -> str:
+        label, url = m.group(1).strip(), m.group(2).strip()
+        bare = re.sub(r"^https?://(?:www\.)?", "", url).rstrip("/")
+        return label if label in (url, bare) else f"{label} ({url})"
+
+    line = _MD_LINK_RE.sub(link, line)
+    return _MD_EMPH_RE.sub(lambda m: m.group(1) or m.group(2) or m.group(3), line)
+
+
+def _md_quotes(lines: list[str]) -> list[str]:
+    """«> …» lines as one quoted line, the «— Имя» line after them as its attribution."""
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        m = _MD_QUOTE_RE.match(lines[i])
+        if not m or not lines[i].lstrip().startswith(">"):
+            out.append(lines[i])
+            i += 1
+            continue
+        said: list[str] = []
+        while i < len(lines) and lines[i].lstrip().startswith(">"):
+            said.append(_MD_QUOTE_RE.match(lines[i]).group("x").strip())
+            i += 1
+        said = [x for x in said if x]
+        by = None
+        if said and re.match(r"^[—–-]\s*\S", said[-1]):
+            by = re.sub(r"^[—–-]\s*", "", said.pop())
+        if said:
+            q = " ".join(said).strip().strip("«»\"“”")
+            out.append(f"«{q}»" + (f" — {by}" if by else ""))
+    return out
+
+
+def _md_table_rows(lines: list[str]) -> list[str]:
+    """A GFM table without its outer pipes («Курс | Цена» / «--- | ---» / …) written with them."""
+    if len(lines) >= 2 and sum(1 for ln in lines if _MD_RULE_ROW_RE.match(ln)) == 1 and all("|" in ln for ln in lines if ln.strip()):
+        return ["| " + ln.strip().strip("|").strip() + " |" for ln in lines if ln.strip()]
+    return lines
 
 
 def read_parts(text: str) -> list[Part]:
     """A slide's text as its parts, in order: code fences first (their lines are code, never sentences), then blocks
-    between blank lines — notes in brackets, tables, lists, sequences with arrows, paragraphs."""
+    between blank lines — notes in brackets, tables, lists, sequences with arrows, paragraphs. Markdown is read: a
+    «### Подзаголовок» heads the paragraph or list under it (its `label`), «> цитата» is a quote, emphasis and link
+    marks are dropped."""
     lines = (text or "").splitlines()
     parts: list[Part] = []
     block: list[str] = []
+    pending: list[str] = []  # a subheading waiting for the paragraph or list it heads
 
     def flush() -> None:
         if block:
-            parts.extend(_block_parts(block))
+            rows = _md_table_rows(_md_quotes([_md_inline(x) for x in block]))
+            got = _block_parts(rows)
+            if pending and got and got[0].kind in ("para", "list") and not got[0].label:
+                got[0].label = pending.pop()
+            parts.extend(got)
             block.clear()
 
     i = 0
     while i < len(lines):
+        sub = _MD_SUBHEAD_RE.match(lines[i])
+        if sub and not _FENCE_RE.match(lines[i]):
+            flush()
+            if pending:  # two subheadings in a row: the first one stands alone
+                parts.append(Part(kind="para", text=H.strip_end(pending.pop())))
+            pending.append(_md_inline(sub.group("t")).strip(" *"))
+            i += 1
+            continue
         m = _FENCE_RE.match(lines[i])
         if m:
             flush()
@@ -268,6 +413,8 @@ def read_parts(text: str) -> list[Part]:
             block.append(lines[i])
         i += 1
     flush()
+    if pending:
+        parts.append(Part(kind="para", text=H.strip_end(pending.pop())))
     return parts
 
 
@@ -284,7 +431,17 @@ _NUM_SRC = r"[+\-−]?\d{1,3}(?:[   ]\d{3})+(?:[.,]\d+)?|[+\-−]?\d+(?:[.,]\
 _VALUE_RE = re.compile(rf"(?<![\w.,])(?P<num>{_NUM_SRC})(?![\d])")
 _ITEM_SEP_RE = re.compile(r"\s*;\s*|\n+")
 # «контроллер — 8 000 рублей, датчики — 14 000 рублей»: a comma before the next «label — figure» parts two items
-_COMMA_ITEM_RE = re.compile(r",\s+(?=[^,;:—–\d]{2,60}?\s[—–-]\s+[+\-−]?\d)")
+_COMMA_ITEM_RE = re.compile(
+    r",\s+(?=[^,;:—–\d]{2,60}?\s[—–-]\s+[+\-−]?\d)"
+    # «2021 — 10%, 2022 — 15%»: a comma before the next period's figure parts two items too
+    r"|,\s+(?=(?:(?:19|20)\d{2}|q[1-4]|[1-4]\s*кв\.?)\S*\s*(?:[—–-]|:)\s*[+\-−]?\d)",
+    re.I,
+)
+# «доля каналов — онлайн 60%, офлайн 40%»: an item written as its label and its figure, no separator between them
+_BARE_ITEM_RE = re.compile(r"^(?P<label>[^\d,;:—–]{2,40}?)\s+(?P<rest>[+\-−]?\d.*)$")
+# «выручка, млн ₽ — 2022: 1,2; 2023: 2,5», «fuel per day before and after — Driver A: 42 and 29 litres; …»: the words
+# before the note's first dash name what it measures (and its unit after a comma); its items follow
+_SUBJECT_RE = re.compile(r"^(?P<subj>[^—–:;\d]{2,90}?)\s+[—–]\s+(?P<rest>\S.*)$")
 _LABEL_SEP_RE = re.compile(r"\s+[—–-]\s+|\s*:\s+")
 _CHART_TYPES = (
     (re.compile(r"кругов|секторн|\bpie\b", re.I), "pie"),
@@ -337,7 +494,8 @@ _PAIR_WORDS = (
     (re.compile(r"вручную|ручн\w+|\bmanual\w*", re.I), re.compile(r"автоматическ\w*|автоматич\w*|автоматизац\w*|\bautomat\w*", re.I), ("Вручную", "Автоматически")),
     (re.compile(r"\bплан\w*|\bplan(?:ned)?\b", re.I), re.compile(r"\bфакт\w*|\bactual\b", re.I), ("План", "Факт")),
     (re.compile(r"\bсейчас\b|\bтекущ\w+", re.I), re.compile(r"\bцел[ьи]\b|\bцелев\w+", re.I), ("Сейчас", "Цель")),
-    (re.compile(r"\bдо\b", re.I), re.compile(r"\bпосле\b", re.I), ("До", "После")),
+    # «до и после», «до/после», «до внедрения … после внедрения» — never «выросла до 150» (a preposition)
+    (re.compile(r"\bдо\s*(?:и|/)\s*после\b|\bдо\s+(?:внедрени|запуск|автоматизац|начал|ремонт|реформ|открыти|переход|изменени|установк|обучени|оптимизац)", re.I), re.compile(r"\bпосле\b", re.I), ("До", "После")),
     (re.compile(r"\bbefore\b", re.I), re.compile(r"\bafter\b", re.I), ("Before", "After")),
 )
 # a slide that says its figures changed («сократился», «снизился», «стало», «с … до …»): two figures of one thing are
@@ -408,21 +566,31 @@ def chart_items(body: str) -> list[ChartItem]:
     """«расход воды — 4 800 и 3 300 литров; ручная работа — 45 и 20 минут в день» → items with their figures and units;
     an item without a unit takes the first one written («контроллер — 8 000 рублей; датчики — 14 000»). A label may be a
     period («2023 — 1,2 млн рублей»); «40–60 рублей» is a range (`span`), never two figures."""
-    data = thousands(body)
-    sents = sentences(data)
-    if len(sents) > 1:
-        # the sentences after the data are the note's instructions («Для каждого показателя — отдельный график …»)
-        keep = [s for s in sents if _VALUE_RE.search(s)]
-        data = " ".join(keep) if keep else data
+    data = _note_data(body)
+    head_unit: Optional[tuple] = None
+    sm = _SUBJECT_RE.match(data)
+    if sm is not None and _items_follow(sm.group("rest")):
+        subj = sm.group("subj").strip()
+        if "," in subj:
+            unit, unit_words = unit_of(subj.rsplit(",", 1)[1].strip())
+            if unit:
+                head_unit = (unit, unit_words)
+        data = sm.group("rest")
     out: list[ChartItem] = []
     chunks = [c for part in _ITEM_SEP_RE.split(H.strip_end(data)) for c in _COMMA_ITEM_RE.split(part)]
+    if len(chunks) == 1 and "," in chunks[0] and all(_BARE_ITEM_RE.match(c.strip(" .")) for c in chunks[0].split(",")):
+        chunks = chunks[0].split(",")
     for chunk in chunks:
         chunk = chunk.strip(" .")
         if not chunk:
             continue
         m = _LABEL_SEP_RE.search(chunk)
         if m is None:
-            continue
+            bare = _BARE_ITEM_RE.match(chunk)
+            if bare is None:
+                continue
+            chunk = f"{bare.group('label').strip()} — {bare.group('rest').strip()}"
+            m = _LABEL_SEP_RE.search(chunk)
         label, rest = chunk[: m.start()].strip(), chunk[m.end() :].strip()
         if not label or words(label) > 8 or (_VALUE_RE.search(label) and not _PERIOD_LABEL_RE.match(label)):
             continue
@@ -447,23 +615,103 @@ def chart_items(body: str) -> list[ChartItem]:
             last_end = n.end()
         unit, unit_words = unit_of(rest[last_end:])
         out.append(ChartItem(label=H.cap_first(label), values=values, unit=unit, unit_words=unit_words if unit else "", raw=raw, span=span, text=rest))
-    first_unit = next((it.unit for it in out if it.unit), None)
+    first_unit = next((it.unit for it in out if it.unit), None) or (head_unit[0] if head_unit else None)
     for it in out:
         if it.unit is None and first_unit and len({len(x.values) for x in out}) == 1:
             it.unit = first_unit
+            if head_unit and not it.unit_words and first_unit == head_unit[0]:
+                it.unit_words = head_unit[1] or ""
     return out
 
 
-def pair_names(text: str, n: int) -> list[str]:
-    """The names of a pair of figures from the slide's words («вручную» … «автоматически», «план» … «факт», «сейчас» …
-    «цель»), «Было» / «Стало» where the slide says its figures changed; else (and for three and more) their order."""
+def _note_data(body: str) -> str:
+    """The figures' part of a note: the sentences after the data are its instructions («Для каждого показателя —
+    отдельный график …»)."""
+    data = thousands(body)
+    sents = sentences(data)
+    if len(sents) > 1:
+        keep = [s for s in sents if _VALUE_RE.search(s)]
+        data = " ".join(keep) if keep else data
+    return data
+
+
+def _items_follow(rest: str) -> bool:
+    """The words after a note's first dash are its items: two or more «label: figure» / «label — figure» / «label
+    figure» parts."""
+    chunks = [c.strip(" .") for part in _ITEM_SEP_RE.split(rest) for c in _COMMA_ITEM_RE.split(part)]
+    if len(chunks) == 1 and "," in chunks[0]:
+        chunks = [c.strip(" .") for c in chunks[0].split(",")]
+    def item(c: str) -> bool:
+        if not c or not _VALUE_RE.search(c):
+            return False
+        m = _LABEL_SEP_RE.search(c)
+        if m is not None:
+            label = c[: m.start()].strip()
+            return bool(label) and (not re.match(r"^[+\-−]?\d", label) or bool(_PERIOD_LABEL_RE.match(label)))
+        return bool(_BARE_ITEM_RE.match(c))
+
+    # (the first part after the dash is an item with its own label: «расход воды — 4 800 и 3 300 литров; …» is an item
+    # whose dash parts its label from its figures, not a subject over the items)
+    return bool(chunks) and item(chunks[0]) and sum(1 for c in chunks if item(c)) >= 2
+
+
+def note_covered(body: str, items: list) -> bool:
+    """Every figure of the note is in its items (as a value or a period label): a chart drawn from them shows the note
+    whole. «Пекарня на Ленина: 420 и 380 кг» read as no item would leave a chart without it — the note is then shown as
+    written instead."""
+    data = _note_data(body)
+    sm = _SUBJECT_RE.match(data)
+    if sm is not None and _items_follow(sm.group("rest")):
+        data = sm.group("rest")
+    have = [number_value(m.group("num")) for m in _VALUE_RE.finditer(data)]
+    used = [v for it in items for v in it.values] + [number_value(x) for it in items for x in re.findall(r"(?:19|20)\d{2}", it.label or "")]
+    for v in have:
+        if v is None:
+            continue
+        hit = next((k for k, u in enumerate(used) if u is not None and abs(u - v) <= 1e-9 * max(1.0, abs(v))), None)
+        if hit is None:
+            return False
+        used.pop(hit)
+    return True
+
+
+def pair_names(text: str, n: int, whole: Optional[str] = None) -> list[str]:
+    """The names of the figures of each item, from the words of the note and the sentences that state its figures
+    (`text`): a contrast («вручную» … «автоматически», «план» … «факт», «сейчас» … «цель», «до и после»), else the
+    periods the slide names (`whole`: «Данные за 2024 и 2025 годы» — as many years as figures), else «Было» / «Стало»
+    where the note's words say the figures changed; else their order («1», «2» — unnamed: no chart draws them, the note
+    is shown as written)."""
     if n == 2:
         for a, b, names in _PAIR_WORDS:
             if a.search(text or "") and b.search(text or ""):
                 return list(names)
-        if _CHANGE_RE.search(text or ""):
-            return ["Before", "After"] if latin(text) else ["Было", "Стало"]
+    years = list(dict.fromkeys(re.findall(r"(?<!\d)(?:19|20)\d{2}(?!\d)", whole if whole is not None else text or "")))
+    if len(years) == n:
+        return years
+    if n == 2 and _CHANGE_RE.search(text or ""):
+        return ["Before", "After"] if latin(text) else ["Было", "Стало"]
     return [str(i + 1) for i in range(n)]
+
+
+def unnamed(names: list[str]) -> bool:
+    """The names are only the figures' order («1», «2»): nothing in the text names them."""
+    return names == [str(i + 1) for i in range(len(names))]
+
+
+def _pair_context(r: "Reading", note: "Part", items: list) -> str:
+    """The words that may name a note's figures: the note itself and the slide's sentences about them — a sentence that
+    states one of its figures or names one of its items («Water use dropped» over «water — 4,800 and 3,300 litres»);
+    never a sentence about something else («Цены были пересмотрены в марте» over the prices of two tariffs)."""
+    vals = {v for it in items for v in it.values}
+    stems = {w.lower()[:5] for it in items for w in re.findall(r"[a-zа-яё]{4,}", it.label or "", re.I)}
+
+    def about(sent: str) -> bool:
+        if any(number_value(m.group("num")) in vals for m in _VALUE_RE.finditer(thousands(sent))):
+            return True
+        return any(w.lower()[:5] in stems for w in re.findall(r"[a-zа-яё]{4,}", sent, re.I))
+
+    own = [x for p in r.of("para") for x in p.sentences if about(x)]
+    return " ".join([note.label or "", note.text or "", *own])
 
 
 def latin(text: str) -> bool:
@@ -497,7 +745,9 @@ _STAGE_RE = re.compile(
     r"(?:этап|шаг|фаза|уровень|волна|спринт|стадия|stage|step|phase)\s+\d{1,2})\s*(?:[—–:]|\s-)\s*(?P<x>\S.+)$",
     re.I,
 )
-_QUOTE_RE = re.compile(r"«(?P<q>[^«»]{24,400})»")
+_QUOTE_RE = re.compile(r"«(?P<q>[^«»]{24,400})»|“(?P<q2>[^“”]{24,400})”|\"(?P<q3>[^\"]{24,400})\"")
+# the quote's author after it: «…» — Ольга Смирнова, директор по логистике
+_QUOTE_BY_RE = re.compile(r"^\s*[—–-]\s*(?P<by>[^!?\n]{3,160}?)[.!]?\s*$")
 _COVER_WORDS_RE = re.compile(r"титул|обложк|заглавн|\bcover\b|title\s+slide", re.I)
 # the usual headings of a deck's parts: a first slide named so is the deck's first content slide, not its cover, even
 # when a short line opens it («Слайд 1. Проблема / Клиенты ждут ответа два дня»)
@@ -544,6 +794,9 @@ class Reading:
     # the sentences that ask the designer for something («Нужна круговая диаграмма …», «Покажи формулу: …»): the
     # analyst reads them as the slide's requests, the slide never shows them as text
     asks: dict = field(default_factory=dict)
+    # the slide's data blocks its form does not show (code with a chart under it, a chart and a table, a third chart):
+    # each a reading of its own, shown on a continuation slide (expand_slides) — never dropped
+    extra: list = field(default_factory=list)
 
     def of(self, kind: str) -> list[Part]:
         return [p for p in self.parts if p.kind == kind]
@@ -555,6 +808,15 @@ class Reading:
             ss = [s for s in p.sentences if s not in self.used]
             if ss:
                 out.append(ss)
+        return out
+
+    def para_labels(self) -> list[str]:
+        """The subheading over each of paras()' paragraphs («### Практика» in the author's markdown), "" where there is
+        none — in the same order as paras()."""
+        out = []
+        for p in self.of("para"):
+            if any(s not in self.used for s in p.sentences):
+                out.append(p.label or "")
         return out
 
     def stages(self) -> list[tuple[str, list[str]]]:
@@ -571,12 +833,21 @@ class Reading:
     def quote(self) -> Optional[tuple[str, str]]:
         """A message or a saying quoted in the text («Зона 2: данные датчика не обновлялись 8 минут. …»): (the quote,
         the sentence that introduces it)."""
+        got = self.quote_by()
+        return (got[0], got[1]) if got else None
+
+    def quote_by(self) -> Optional[tuple[str, str, Optional[str]]]:
+        """The quote, the sentence that introduces it, and who said it («…» — Ольга Смирнова, директор), when the text
+        names them right after the quote (in its sentence or the next one)."""
         for ss in self.paras():
-            for s in ss:
+            for k, s in enumerate(ss):
                 m = _QUOTE_RE.search(s)
-                if m and words(m.group("q")) >= 5:
+                q = (m.group("q") or m.group("q2") or m.group("q3")) if m else None
+                if q and words(q) >= 5:
                     intro = H.strip_end(s[: m.start()].strip().rstrip(":").strip())
-                    return m.group("q").strip(), intro
+                    tail = s[m.end() :]
+                    by = _QUOTE_BY_RE.match(tail) or (_QUOTE_BY_RE.match(ss[k + 1]) if not tail.strip() and k + 1 < len(ss) else None)
+                    return q.strip(), intro, (H.strip_end(by.group("by").strip()) if by else None)
         return None
 
 
@@ -585,9 +856,14 @@ def clean_title(title: str) -> str:
 
 
 def closing_title(title: str) -> bool:
-    """The heading says thanks, asks for questions or gives the contacts — all of it («Спасибо! Вопросы?»)."""
+    """The heading opens with thanks, a call for questions or the contacts («Спасибо! Вопросы?», «Спасибо за внимание!
+    Контакты команды»): a closing — never a heading that merely starts so in one piece («Вопросы безопасности»)."""
     pieces = [x.strip() for x in re.split(r"[!?.…;,]+", title or "") if x.strip()]
-    return bool(pieces) and all(_CLOSING_PIECE_RE.match(x) for x in pieces)
+    return bool(pieces) and bool(_CLOSING_PIECE_RE.match(pieces[0]))
+
+
+def _norm_title(t: str) -> str:
+    return " ".join(re.sub(r"[«»\"“”„.,!?…:;—–-]", " ", (t or "").lower().replace("ё", "е")).split())
 
 
 def end_sentence(text: str) -> str:
@@ -596,29 +872,15 @@ def end_sentence(text: str) -> str:
     return t if not t or t.endswith(("!", "?", "…", ".")) else t + "."
 
 
-# the designer is told, not the audience: an imperative to the designer («Используй …», «Не перегружай …», «Покажи …»)
-# or a sentence about the slides, their design or the speaker's notes
-_DESIGNER_VERB_RE = re.compile(
-    r"^(?:не\s+)?(?:перегружай|используй|покажи|добавь|вынеси|отметь|укажи|выдели|пиши|напиши|оформи|избегай|сохрани|"
-    r"округляй|представляй|рассчитывай|складывай|ставь|размести|включи|подчеркни|сократи|придерживайся|следи|давай|делай|"
-    r"помести|сделай|расположи|вставь|убери|замени|подбери|нарисуй|изобрази|визуализируй|построй)(?:те)?\b",
-    re.I,
-)
-_DESIGN_TALK_RE = re.compile(
-    r"слайд|презентаци|заметк\w*\s+(?:для\s+)?докладчик|speaker\s+notes|шрифт|оформлени|дизайн|округл|\bфон\b|минималист|"
-    r"палитр|цветов\w*\s+(?:гамм|схем)|^(?:на\s+всех|везде)\b|\bslides?\b|\bfonts?\b|\bdesign",
-    re.I,
-)
-
-
 def designer_ask(sentence: str) -> Optional[str]:
     """What a dictated sentence asks of the designer (brief_structure.instruction_kind) — a rule only when it is said to
     the designer: «Линии подачи воды должны быть доступны для проверки», «Цвета листьев меняются», «Обязательно
-    проверяйте датчики» are the author's own text and stay on the slide."""
-    from verstka.planning.brief_structure import instruction_kind
+    проверяйте датчики», «Используй разные пароли», «Сохрани подозрительное письмо» are the author's own text and stay
+    on the slide (brief_structure.speaks_of_the_deck)."""
+    from verstka.planning.brief_structure import instruction_kind, speaks_of_the_deck
 
     kind = instruction_kind(sentence)
-    if kind == "rule" and not (_DESIGNER_VERB_RE.match(sentence.strip()) or _DESIGN_TALK_RE.search(sentence)):
+    if kind == "rule" and not speaks_of_the_deck(sentence):
         return None
     return kind
 
@@ -658,7 +920,9 @@ def _heading_of(r: "Reading") -> str:
     return ""
 
 
-def read_slide(number: int, title: str, text: str, *, first: bool = False, last: bool = False) -> Reading:
+def read_slide(number: int, title: str, text: str, *, first: bool = False, last: bool = False, deck: Optional[str] = None) -> Reading:
+    """`deck`: the deck's own title when the text gives one («Тема презентации: …»): a first slide named the same that
+    says one or two short lines is the cover — a cover of its own before it would show the same title twice."""
     parts = read_parts(text)
     r = Reading(number=number, title=clean_title(title), parts=parts, text=text or "")
     for p in r.of("para"):
@@ -707,13 +971,23 @@ def read_slide(number: int, title: str, text: str, *, first: bool = False, last:
     if fields.get("sub"):
         r.lead = fields["sub"]
     rest = [x for p in paras for x in p.sentences if x not in r.used]
-    # the role: the first slide is the cover when it says so, names its fields, or opens on a tagline (a line without a
-    # final period under the heading) and carries no code, data or picture of its own
-    if first and (_COVER_WORDS_RE.search(r.title) or fields or not parts or (tagline and r.lead and not rich and len(paras) <= 5 and not SECTION_WORDS_RE.match(r.title))):
+    # a first slide of one or two short lines, nothing else (no data, code, picture or list): what a cover says
+    short = (not rich and not r.of("list") and len(rest) <= 2 and sum(words(x) for x in rest) <= 24
+             and all(not _VALUE_RE.search(x) or _YEAR_ONLY_RE.fullmatch(H.strip_end(x)) for x in rest))
+    named = deck is None or _norm_title(deck) == _norm_title(r.title)
+    # the role: the first slide is the cover when it says so, names its fields, opens on a tagline (a line without a
+    # final period under the heading) and carries no code, data or picture of its own — or says one or two short lines
+    # under a heading that is the deck's title (or names no part of a deck: «Проблема» over a line is the first content)
+    if first and (_COVER_WORDS_RE.search(r.title) or fields or not parts or (tagline and r.lead and not rich and len(paras) <= 5 and not SECTION_WORDS_RE.match(r.title))
+                  or (short and rest and not derived and ((deck is not None and named) or not _part_name(r.title)))):
         r.role = "cover"
         if fields.get("title"):
             r.title = fields["title"]
-    elif last and closing_title(r.title) and not rich and sum(words(x) for x in rest) <= 30 and not any(p.kind == "list" and len(p.items) > 4 for p in parts):
+        if r.lead is None and rest:
+            r.lead = H.strip_end(" ".join(rest))
+            r.used.update(rest)
+    elif last and closing_title(r.title) and not rich and sum(words(x) for x in rest if not _CONTACT_RE.search(x)) <= 30 and not any(
+            p.kind == "list" and len(p.items) > 4 and not all(_CONTACT_RE.search(x) for x in p.items) for p in parts):
         r.role = "closing"
         # under the heading: its first short line and the contacts (a list, a line with an address or a phone); the
         # other lines are the speaker's
@@ -726,8 +1000,9 @@ def read_slide(number: int, title: str, text: str, *, first: bool = False, last:
             r.used.update(contacts)
     elif _AGENDA_RE.match(r.title) and (r.of("list") or len(paras) >= 2) and not rich:
         r.role = "agenda"
-    elif not first and not derived and (not parts or (len(parts) == 1 and paras and len(rest) == 1 and words(rest[0]) <= 14)):
-        # a title over one short line (or none): a divider of the deck's parts
+    elif not first and not derived and (not parts or (len(parts) == 1 and paras and len(rest) == 1 and words(rest[0]) <= 14 and not _VALUE_RE.search(rest[0]))):
+        # a title over one short line (or none): a divider of the deck's parts — never a line that states a figure («За
+        # год волонтёры собрали 48 тонн мусора» is the slide's point, shown as its content)
         r.role = "section"
     elif not r.title:
         r.title = fields.get("title") or _heading_of(r)
@@ -749,14 +1024,21 @@ def read_slide(number: int, title: str, text: str, *, first: bool = False, last:
     return r
 
 
+def _drawn_whole(r: "Reading", note: "Part") -> bool:
+    """A chart or table note the deck draws whole: a «|» table, or a note whose items hold every figure it gives."""
+    if note.kind == "table" and any(ln.strip().startswith("|") for ln in (note.text or "").splitlines()):
+        return True
+    items = chart_items(note.text)
+    return bool(items) and note_covered(note.text, items)
+
+
 def notes_of(r: Reading) -> str:
     """The slide's whole text for the speaker, paragraph by paragraph: the code aside (it is on the slide), a note for
     the designer as written when the slide cannot show its data (a chart note without figures, «[Здесь будет видео]»)."""
     out = []
-    shown = None
     for p in r.parts:
         if p.kind == "para":
-            out.append(p.text)
+            out.append((f"{p.label}. " if p.label else "") + p.text)
         elif p.kind == "flow":
             out.append((f"{p.label}: " if p.label else "") + " → ".join(p.items) + ".")
         elif p.kind == "list":
@@ -764,9 +1046,9 @@ def notes_of(r: Reading) -> str:
         elif p.kind == "image":
             out.append(f"[{p.label or 'Изображение'}: {p.text}]")
         elif p.kind in ("chart", "table", "note"):
-            if shown is None:
-                shown = bool(charts_of(r) or note_table(r) or note_figures(r))
-            if p.kind == "note" or not shown:
+            # (decided per note: a note the slide or its continuation draws whole is not repeated; one read in part
+            # or not at all stays here as written)
+            if p.kind == "note" or not _drawn_whole(r, p):
                 out.append("[" + ": ".join(x for x in (p.label, p.text) if x) + "]")
     return "\n\n".join(x for x in out if x.strip())
 
@@ -951,7 +1233,8 @@ def _slide(r: Reading, kind: str, **kw):
     from verstka.schemas.common import PatternKind
     from verstka.schemas.outline import OutlineSlide
 
-    head = r.title or ((r.of("code")[0].label or "Пример кода") if r.of("code") else "") or f"Слайд {r.number}"
+    en = latin(r.text)
+    head = r.title or ((r.of("code")[0].label or ("Code example" if en else "Пример кода")) if r.of("code") else "") or (f"Slide {r.number}" if en else f"Слайд {r.number}")
     s = OutlineSlide(id=f"u{r.number}", kind=PatternKind(kind), headline=head, spec_ref=r.number, verbatim=True, **kw)
     s.notes = notes_of(r)
     return s
@@ -1023,9 +1306,20 @@ def _cards(r: Reading, paras: list[list[str]], room: Room, prof: dict) -> Option
     got = _sentences_for(paras, prof["density"], per, prof["budget"])
     if len(got) < n:
         return None
-    items = [_item(text=_join(ss)) for ss in got]
+    labels = _labels(r, paras)
+    items = [_item(title=lbl, text=_join(ss)) for lbl, ss in zip(labels, got)]
     s = _slide(r, "cards", content=_content(items=items), footnote=r.footnote, takeaway=r.takeaway, subtitle=r.lead)
     return Form("cards", s, _shown(s))
+
+
+def _labels(r: Reading, paras: list[list[str]]) -> list[str]:
+    """The paragraphs' subheadings (para_labels) when `paras` are the slide's own paragraphs, else none."""
+    got = r.para_labels()
+    return got if len(got) == len(paras) else [""] * len(paras)
+
+
+def _labelled(label: str, line: str) -> str:
+    return f"{label}: {line}" if label else line
 
 
 def _columns(r: Reading, paras: list[list[str]], room: Room, prof: dict) -> Optional[Form]:
@@ -1037,10 +1331,12 @@ def _columns(r: Reading, paras: list[list[str]], room: Room, prof: dict) -> Opti
     total = min(prof["budget"], 2 * per_col)
     got = _sentences_for(paras, "full" if prof["density"] != "lead" else "lead", max(per_col // max(1, (n + 1) // 2), 160), total)
     half = (len(got) + 1) // 2
-    cols = [got[:half], got[half:]]
+    labels = _labels(r, paras)
+    lines = [_labelled(lbl, _join(ss)) for lbl, ss in zip(labels, got)]
+    cols = [lines[:half], lines[half:]]
     if not cols[1]:
         return None
-    items = [_item(bullets=[_join(ss) for ss in col]) for col in cols]
+    items = [_item(bullets=col) for col in cols]
     s = _slide(r, "two_column", content=_content(columns=items), footnote=r.footnote, takeaway=r.takeaway, subtitle=r.lead)
     return Form("two_column", s, _shown(s))
 
@@ -1051,9 +1347,12 @@ def _bullets(r: Reading, paras: list[list[str]], room: Room, prof: dict) -> Opti
     total = min(prof["budget"], max(int(room.body("bullets", 700) * 0.9), 420))
     per = 260 if prof["density"] != "dense" else 340
     got = _sentences_for(paras, prof["density"], per, total)
-    lines = [_join(ss) for ss in got if ss][:6]
+    labels = _labels(r, paras)
+    lines = [_labelled(lbl, _join(ss)) for lbl, ss in zip(labels, got) if ss][:6]
     if len(paras) == 1 and len(paras[0]) >= 3 and prof["density"] != "lead":
         lines = fit_sentences(paras[0], total)[:6]
+        if lines and labels[0]:
+            lines[0] = _labelled(labels[0], lines[0])
     s = _slide(r, "bullets", content=_content(bullets=lines), footnote=r.footnote, takeaway=r.takeaway, subtitle=r.lead)
     return Form("bullets", s, _shown(s))
 
@@ -1061,12 +1360,12 @@ def _bullets(r: Reading, paras: list[list[str]], room: Room, prof: dict) -> Opti
 def _quote(r: Reading, paras: list[list[str]]) -> Optional[Form]:
     """The slide's quoted message large — only on a slide that says little besides it (two paragraphs at most): a
     quote standing for five paragraphs would leave the slide's point in the notes."""
-    q = r.quote()
+    q = r.quote_by()
     if q is None or len(paras) > 2:
         return None
-    text, intro = q
+    text, intro, by = q
     sub = intro if intro and words(intro) <= 20 else None
-    s = _slide(r, "quote", content=_content(quote=text), subtitle=sub, footnote=r.footnote, takeaway=r.takeaway)
+    s = _slide(r, "quote", content=_content(quote=text, quote_author=by), subtitle=sub, footnote=r.footnote, takeaway=r.takeaway)
     return Form("quote", s, _shown(s))
 
 
@@ -1123,20 +1422,21 @@ def _list_lead(r: Reading) -> Optional[str]:
 _PLACE_ASK_RE = re.compile(r"^(?:(?:здесь|тут|ниже)\s+(?:будет|нужн\w*|появится)|нужн\w*|добав\w*|встав\w*|место\s+(?:под|для))\s+", re.I)
 
 
-def _place_of(part: Part) -> tuple[str, str]:
+def _place_of(part: Part, en: bool = False) -> tuple[str, str]:
     """(the place's caption head, what goes there in the author's words) for a picture, or for a chart, a table or
-    another thing the note asks for without the data to draw it («[Здесь будет круговая диаграмма бюджета]»)."""
+    another thing the note asks for without the data to draw it («[Здесь будет круговая диаграмма бюджета]»). `en`:
+    the text is English — so are the heads."""
     if part.kind == "image":
-        return "Изображение", H.cap_first(part.text.strip()) if part.text else ""
+        return ("Image" if en else "Изображение"), H.cap_first(part.text.strip()) if part.text else ""
     said = " ".join(": ".join(x for x in (part.label, part.text) if x).split())
     hint = H.cap_first(_PLACE_ASK_RE.sub("", said).strip())
     if part.kind == "chart":
-        return "Место под диаграмму", hint
+        return ("Place for a chart" if en else "Место под диаграмму"), hint
     if part.kind == "table":
-        return "Место под таблицу", hint
+        return ("Place for a table" if en else "Место под таблицу"), hint
     if re.search(r"видео|video|ролик", said, re.I):
-        return "Место под видео", hint
-    return "Место под изображение", hint
+        return ("Place for a video" if en else "Место под видео"), hint
+    return ("Place for an image" if en else "Место под изображение"), hint
 
 
 # «не заполняй это место сгенерированным изображением», «без сгенерированных картинок», «не генерируй картинку»
@@ -1157,7 +1457,7 @@ def _image(r: Reading, room: Room, prof: dict, kind: str, part: Optional[Part] =
     """The slide's text beside the place for its picture (or for the chart, the table, the video its note asks for
     without its data), the place captioned with what goes there."""
     part = part or r.of("image")[0]
-    label, hint = _place_of(part)
+    label, hint = _place_of(part, latin(r.text))
     if part.kind == "image" and part.label and not re.match(r"мест\w*\s+(?:под|для)", part.label, re.I):
         label = H.cap_first(part.label)
     sub = r.lead or _list_lead(r)
@@ -1254,8 +1554,8 @@ def charts_of(r: Reading):
     out = []
     for note in r.of("chart"):
         items = chart_items(note.text)
-        if not items or any(it.span for it in items):
-            continue
+        if not items or any(it.span for it in items) or not note_covered(note.text, items):
+            continue  # (a note read in part is shown as written: never a chart without some of its figures)
         sizes = {len(it.values) for it in items}
         if len(sizes) != 1:
             continue
@@ -1269,7 +1569,9 @@ def charts_of(r: Reading):
             unit = next(iter(units))
             out.append(ChartSpec(type=kind, title=title, unit=unit, categories=[it.label for it in items], series=[InlineSeries(name=title or "", values=[it.values[0] for it in items])]))
             continue
-        names = pair_names(r.text, k)
+        names = pair_names(_pair_context(r, note, items), k, whole=r.text)
+        if unnamed(names):
+            continue  # figures the text does not name: no legend «1» / «2» — the note's rows as written (note_table)
         split = bool(_EACH_RE.search(note.text)) or len(units) > 1
         if split:
             series = [InlineSeries(name=it.label, values=list(it.values), unit=unit_label(it.unit, it.unit_words)) for it in items]
@@ -1294,27 +1596,96 @@ def note_table(r: Reading):
         rows = [ln.strip().strip("|").split("|") for ln in note.text.splitlines() if ln.strip().startswith("|")]
         rows = [[c.strip() for c in row] for row in rows if not all(re.fullmatch(r"\s*:?-{2,}:?\s*", c) for c in row)]
         if len(rows) >= 2 and len({len(x) for x in rows}) == 1:
-            return TableData(columns=rows[0], rows=rows[1:11])
+            return TableData(columns=rows[0], rows=rows[1:])  # every row: a long table goes on over a second slide
     for note in [*r.of("table"), *r.of("chart")]:
         items = chart_items(note.text)
+        if items and not note_covered(note.text, items):
+            rows = _rows_as_written(note.text)
+            if len(rows) >= 2:
+                head = chart_title(note.label) or ("Value" if latin(r.text) else "Значение")
+                return TableData(columns=["", head], rows=rows, caption=chart_title(note.label))
+            continue
         if len(items) < 2:
             continue
         k = max(len(it.values) for it in items)
         if any(it.span for it in items):
             cols = ["", chart_title(note.label) or ("Value" if latin(r.text) else "Значение")]
             rows = [[it.label, _span_cell(it)] for it in items]
-            return TableData(columns=cols, rows=rows[:10], caption=chart_title(note.label))
+            return TableData(columns=cols, rows=rows, caption=chart_title(note.label))
         if len({len(it.values) for it in items}) != 1:
             continue
-        names = pair_names(r.text, k) if k >= 2 else []
-        if names and not names[0].isdigit():
+        names = pair_names(_pair_context(r, note, items), k, whole=r.text) if k >= 2 else []
+        if names and not unnamed(names):
             rows = [[it.label, *[_cell(x, it.unit) for x in it.raw]] for it in items]
-            return TableData(columns=["", *names], rows=rows[:10], caption=chart_title(note.label))
+            return TableData(columns=["", *names], rows=rows, caption=chart_title(note.label))
         # figures the text does not name (two of each, nothing said of which is which): each row as the note writes it
         head = chart_title(note.label) or ("Value" if latin(r.text) else "Значение")
         rows = [[it.label, H.strip_end(it.text)] for it in items]
-        return TableData(columns=["", head], rows=rows[:10], caption=chart_title(note.label))
+        return TableData(columns=["", head], rows=rows, caption=chart_title(note.label))
     return None
+
+
+# the organisers' rule: a table shows ten rows at most; a longer one goes on over continuation slides
+MAX_TABLE_ROWS = 10
+_TOTAL_ROW_RE = re.compile(r"^(?:итого|всего|итог|сумма|среднее|в\s+среднем|total|sum|average|mean)\b", re.I)
+
+
+def split_long_tables(slides: list) -> list[tuple]:
+    """The deck's slides with every table of more than MAX_TABLE_ROWS rows split over continuation slides — «Продажи
+    по месяцам (продолжение)», the header repeated, the parts as even as they can be, the totals rows («Итого»,
+    «Среднее») with the last part, the slide's lines and subtitle with the first part and its conclusion and footnote
+    with the last. No row of the author is lost or left to the notes. Returns (slide, the slide's index in `slides`,
+    the part: 0 for the slide itself, 1… for its continuations)."""
+    import math
+
+    out: list[tuple] = []
+    for i, s in enumerate(slides):
+        t = s.content.table
+        if t is None or len(t.rows) <= MAX_TABLE_ROWS:
+            out.append((s, i, 0))
+            continue
+        rows = [list(r) for r in t.rows]
+        tail: list = []
+        while rows and len(tail) < 3 and _TOTAL_ROW_RE.match(str(rows[-1][0] if rows[-1] else "").strip()):
+            tail.insert(0, rows.pop())
+        k = max(2, math.ceil((len(rows) + len(tail)) / MAX_TABLE_ROWS))
+        size = math.ceil(len(rows) / k)
+        chunks = [rows[j : j + size] for j in range(0, len(rows), size)]
+        if len(chunks[-1]) + len(tail) <= MAX_TABLE_ROWS:
+            chunks[-1] = chunks[-1] + tail
+        else:
+            chunks.append(tail)
+        more = "(continued)" if latin(s.headline) else "(продолжение)"
+        for j, chunk in enumerate(chunks):
+            c = s.model_copy(deep=True)
+            c.content.table = t.model_copy(update={"rows": chunk})
+            if j > 0:
+                c.headline = f"{H.strip_end(s.headline)} {more}"
+                c.subtitle = None
+                c.content.bullets = []
+                c.content.paragraphs = []
+                c.notes = ""
+            if j < len(chunks) - 1:
+                c.takeaway = None
+                c.footnote = None
+            out.append((c, i, j))
+    return out
+
+
+def _rows_as_written(body: str) -> list[list[str]]:
+    """A note's items as it writes them, a row each («Пекарня на Ленина» | «420 и 380 кг»): what no chart could read whole
+    is still shown, never dropped."""
+    data = _note_data(body)
+    sm = _SUBJECT_RE.match(data)
+    if sm is not None and _items_follow(sm.group("rest")):
+        data = sm.group("rest")
+    rows = []
+    for chunk in (c.strip(" .") for part in _ITEM_SEP_RE.split(H.strip_end(data)) for c in _COMMA_ITEM_RE.split(part)):
+        if not chunk:
+            continue
+        m = _LABEL_SEP_RE.search(chunk)
+        rows.append([H.cap_first(chunk[: m.start()].strip()), chunk[m.end() :].strip()] if m else ["", chunk])
+    return rows
 
 
 def _span_cell(it: ChartItem) -> str:
@@ -1330,7 +1701,7 @@ def note_figures(r: Reading):
 
     for note in r.of("chart"):
         items = chart_items(note.text)
-        if not items or len(items) > 4 or any(len(it.values) != 1 or it.span for it in items):
+        if not items or len(items) > 4 or any(len(it.values) != 1 or it.span for it in items) or not note_covered(note.text, items):
             continue
         if len(items) >= 2 and len({it.unit for it in items}) == 1:
             continue  # one measure: a chart
@@ -1362,6 +1733,74 @@ def _beside(r: Reading, prof: dict) -> list[str]:
             break
         picks.extend(([p.label + ":"] if p.label else []) + p.items)
     return picks
+
+
+def _block(r: "Reading", note: "Part") -> "Reading":
+    """One data note of a slide as a reading of its own (with the slide's sentences, which may name its figures)."""
+    return Reading(number=r.number, title=r.title, parts=[note, *r.of("para")], text=r.text)
+
+
+def _drawable(b: "Reading") -> bool:
+    return bool(charts_of(b) or note_table(b) or note_figures(b))
+
+
+def _left_over(r: "Reading", f: "Form") -> list:
+    """The data notes of a slide its form does not show: the chart form shows the first two charts, the table form the
+    first table, the figures form the first figures — the others are each a block of a continuation slide."""
+    notes = r.of("chart") + r.of("table")
+    if len(notes) < 2:
+        return []
+    blocks = [(n, _block(r, n)) for n in notes]
+    if f.kind == "chart":
+        drawn = [n for n, b in blocks if charts_of(b)][:2]
+    elif f.kind == "table":
+        drawn = [n for n, b in blocks if note_table(b)][:1]
+    elif f.kind in ("stat_row", "big_number"):
+        drawn = [n for n, b in blocks if note_figures(b)][:1]
+    else:
+        drawn = notes[:1]
+    return [b for n, b in blocks if n not in drawn and _drawable(b)]
+
+
+def _block_form(b: "Reading", profile: str) -> Optional["Form"]:
+    prof = PROFILES.get(profile, PROFILES["structured"])
+    return _chart(b, prof) or _table(b, prof) or _numbers(b, prof)
+
+
+def expand_slides(slides: list, readings: Optional[list] = None, profile: str = "structured") -> list[tuple]:
+    """The deck's slides with their continuations: a slide's other data blocks (`Reading.extra`) each on a slide «…
+    (продолжение)» right after it, and every table longer than a slide shows split (split_long_tables). The slide's
+    lines and subtitle stay with its first part, its conclusion and footnote go with its last. Returns (slide, the
+    slide's index in `slides`, the part: 0 for the slide itself, 1… for its continuations)."""
+    grouped: list[list] = []
+    for i, s in enumerate(slides):
+        group = [s.model_copy(deep=True)]
+        r = readings[i] if readings is not None and i < len(readings) else None
+        for b in (r.extra if r is not None else []):
+            f = _block_form(b, profile)
+            if f is None:
+                continue
+            c = f.slide.model_copy(deep=True)
+            c.spec_ref, c.verbatim = s.spec_ref, True
+            group.append(c)
+        grouped.append(group)
+    out: list[tuple] = []
+    for i, group in enumerate(grouped):
+        take, foot = group[0].takeaway, group[0].footnote
+        parts = [x for g in group for x, _, _ in split_long_tables([g])]
+        more = "(continued)" if latin(group[0].headline) else "(продолжение)"
+        last = parts[-1]
+        for j, c in enumerate(parts):
+            if j > 0:
+                c.headline = f"{H.strip_end(group[0].headline)} {more}"
+                c.subtitle = None
+                c.content.bullets = []
+                c.content.paragraphs = []
+                c.notes = ""
+            c.takeaway = (take or c.takeaway) if c is last else None
+            c.footnote = (foot or c.footnote) if c is last else None
+            out.append((c, i, j))
+    return out
 
 
 def _chart(r: Reading, prof: dict) -> Optional[Form]:
@@ -1456,13 +1895,16 @@ def forms_of(r: Reading, room: Room, profile: str) -> list[Form]:
     paras = r.paras()
     out: list[Optional[Form]] = []
     if r.of("code"):
+        r.extra = [b for b in (_block(r, n) for n in r.of("chart") + r.of("table")) if _drawable(b)]
         return [_code(r, room, prof)]
     notes = r.of("chart") + r.of("table")
     if notes:
         # the chart the note's data draws; else its table (a range, items of different counts), its figures (litres
-        # beside minutes), or — no data at all — the place for the chart the author will add
+        # beside minutes), or — no data at all — the place for the chart the author will add. The notes the form does
+        # not show go on over continuation slides (a chart beside a table, a third chart)
         f = _chart(r, prof) or _table(r, prof) or _numbers(r, prof) or _image(r, room, prof, "image_text", part=notes[0])
         f.structural = True
+        r.extra = _left_over(r, f)
         return [f]
     if r.of("image"):
         hint = r.of("image")[0].text + " " + r.of("image")[0].label
@@ -1533,6 +1975,16 @@ class Plan:
     lines: dict  # variant → [(position, message)]
 
 
+def _part_name(title: str) -> bool:
+    """The heading names a part of a deck («Проблема», «Наша команда»), not the deck itself («Итоги 2025 года»,
+    «Рынок электромобилей в России»): a usual part's word, two or three words at most, no figure."""
+    t = H.strip_end(title or "")
+    return bool(SECTION_WORDS_RE.match(t)) and words(t) <= 3 and not re.search(r"\d", t)
+
+
+_YEAR_ONLY_RE = re.compile(r"(?:.*\s)?(?:19|20)\d{2}(?:\s*(?:год\w*|г\.?))?")
+
+
 def deck_title(readings: list[Reading], given: Optional[str]) -> str:
     cover = next((r for r in readings if r.role == "cover"), None)
     if given:
@@ -1553,7 +2005,7 @@ def plan_deck(specs, manifest=None, variants: tuple = ("structured", "visual", "
     form of the slide has a sample. `room`: the template's measure when the caller has read it (`Room.of`)."""
     specs = sorted(specs, key=lambda sp: sp.number)
     n = len(specs)
-    readings = [read_slide(sp.number, sp.title, sp.text, first=(i == 0), last=(i == n - 1 and n >= 2)) for i, sp in enumerate(specs)]
+    readings = [read_slide(sp.number, sp.title, sp.text, first=(i == 0), last=(i == n - 1 and n >= 2), deck=title) for i, sp in enumerate(specs)]
     if room is None:
         try:
             room = Room.of(manifest)

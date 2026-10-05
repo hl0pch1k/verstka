@@ -1510,7 +1510,10 @@ def place_head(photo_slot: Optional[str]) -> str:
     """The caption's first line: «Место под изображение», or what the place is for when the plan says so («Место под
     диаграмму» — a chart the author will add, its data not in the text)."""
     t = (photo_slot or "").strip()
-    return t if re.match(r"^мест[оа]\s+(?:под|для)\s+\S", t, re.I) else "Место под изображение"
+    if re.match(r"^(?:мест[оа]\s+(?:под|для)|place\s+for)\s+\S", t, re.I):
+        return t
+    # an English deck's place (its label in Latin letters) says so in English
+    return "Place for an image" if len(re.findall(r"[a-z]", t, re.I)) > len(re.findall(r"[а-яё]", t, re.I)) else "Место под изображение"
 
 
 def photo_caption(slide: Slide, box: Bbox, kit, hint: Optional[str], fill: Optional[str] = None, head_text: Optional[str] = None) -> None:

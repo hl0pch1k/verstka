@@ -2521,12 +2521,40 @@ def _ground_side(idx: BriefIndex, text: Optional[str], log: _Log) -> Optional[st
     return _model_line(idx, c) or None
 
 
+class _AuthorsWords:
+    """The index for a slide laid out as written (`OutlineSlide.verbatim`): a line the brief has word for word is the
+    author's and passes as it is — the figure checks read its «д. 1» or «1 из 10» as a misread figure of another
+    subject and took the line off («Адрес: Москва, ул. Складская, д. 1»). Every other line is checked as usual."""
+
+    def __init__(self, idx: BriefIndex) -> None:
+        self._idx = idx
+        self._said = _flat(idx.lower)
+
+    def said(self, text: str) -> bool:
+        t = _flat((text or "").lower())
+        return len(t) >= 3 and t in self._said
+
+    def clean(self, text: str) -> _Clean:
+        return _Clean(text) if self.said(text) else self._idx.clean(text)
+
+    def __getattr__(self, name: str):
+        return getattr(self._idx, name)
+
+
+def _flat(text: str) -> str:
+    """Text compared word for word: one space between words (no-break spaces included), the same dashes and quotes."""
+    t = (text or "").replace("\u00a0", " ").replace("\u202f", " ").replace("–", "—").replace("“", "«").replace("”", "»").replace("„", "«")
+    return " ".join(t.split()).rstrip(" .")
+
+
 def _ground_content_slide(idx: BriefIndex, s: OutlineSlide, log: _Log, series_ids: set[str], facts: dict[str, Fact], from_chart: set[int], thinned: set[int], step: Optional[float] = None, fallback: Optional[str] = None) -> Optional[OutlineSlide]:
     """A content slide with only what the brief says. A slide the user asked for (`spec_ref`) is `lenient`: its lines
     are the model's wording and stay unless an invented figure took their substance; it is never dropped — whatever
     is left of it keeps a kind its content supports (`fallback`: the heading the user gave it)."""
     c = s.content
     lenient = s.spec_ref is not None
+    if s.verbatim and not isinstance(idx, _AuthorsWords):
+        idx = _AuthorsWords(idx)  # type: ignore[assignment]  (the author's own lines pass as written)
     # subtitle
     if s.subtitle:
         sc = idx.clean(s.subtitle)
@@ -2824,7 +2852,8 @@ def ground_outline(outline: DeckOutline, brief: Union[Brief, str], index: Option
     from_chart: set[int] = set()
     thinned: set[int] = set()
     for i, s in enumerate(o.slides):
-        s.notes = _notes(idx, s.notes, log)
+        if not s.verbatim:
+            s.notes = _notes(idx, s.notes, log)  # (a slide laid out as written keeps its notes: the author's text, as written)
         position = "first" if i == 0 else "last" if i == n - 1 else "middle"
         if s.kind.value not in ALLOWED_KINDS or ((s.kind == K.section or (s.kind == K.title and i > 0)) and has_body(s.content.model_dump())):
             new = kind_by_content(s.content.model_dump(), position)

@@ -203,18 +203,65 @@ _NUM_HEAD_RE = re.compile(r"^\s*(?:#{1,6}\s*)?(?P<n>\d{1,2})[.)]\s+(?P<title>\S.
 _FRONT_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.S)
 
 
-def _spec_heads(lines: list[str], text: str) -> list[tuple[int, int, str]]:
+_MD_HEAD_RE = re.compile(r"^\s*(#{1,6})\s+(.+?)\s*#*\s*$")
+
+
+def _md_heads(lines: list[str]) -> list[tuple[int, int, str]]:
+    """Markdown headings as the slides of a text without «Слайд N»: the level used most (two or more headings), and a
+    lone leading heading of a higher level as the cover («# Название» over «## Проблема», «## Решение» …)."""
+    from collections import Counter
+
+    marks = [(i, len(m.group(1)), m.group(2).strip()) for i, ln in enumerate(lines) if (m := _MD_HEAD_RE.match(ln))]
+    if len(marks) < 2:
+        return []
+    levels = Counter(lv for _, lv, _ in marks)
+    level = max(levels, key=lambda lv: (levels[lv], -lv))
+    heads = [(i, t) for i, lv, t in marks if lv == level]
+    first = marks[0]
+    if first[1] < level and levels[first[1]] == 1 and first[0] < heads[0][0]:
+        heads.insert(0, (first[0], first[2]))
+    if len(heads) < 2:
+        return []
+    return [(i, k, _clean(_SLIDE_MARK_RE.sub("", t).strip(" *"))) for k, (i, t) in enumerate(heads, 1)]
+
+
+_SLIDE_MARK_RE = re.compile(r"^\s*(?:\*\*)?\s*(?:слайд|slide)\s*№?\s*\d{1,2}\s*(?:\*\*)?\s*[.:)—–-]?\s*", re.I)
+
+
+def _head_like(title: str) -> bool:
+    """The rest of a «Слайд N» line reads as a heading: none, or one that starts like a title (a capital, a quote, a
+    figure) — «Слайд 3 показывает детали расчёта» inside a paragraph is a sentence about a slide."""
+    t = (title or "").strip(" *")
+    return not t or not t[0].isalpha() or t[0].isupper()
+
+
+def _spec_heads(lines: list[str], text: str, md: bool = False) -> list[tuple[int, int, str]]:
     """(line index, slide number, title) of each heading of a slide the user describes; [] when the brief does not
-    describe slides. «Слайд N» headings count when there are two or more in ascending order; bare «N.» headings only
-    when the brief speaks of slides, runs 1, 2, 3 … and every heading has lines of its own under it (a numbered list
-    has none)."""
+    describe slides. «Слайд N» headings count when there are two or more: in the author's order, renumbered 1…N when
+    the numbers repeat or skip back (a typo in the numbering never loses the author's slides); a title may be long.
+    A heading in lower case («Слайд 3 показывает …») counts only at the start of its own block. Bare «N.» headings
+    only when the brief speaks of slides, runs 1, 2, 3 … and every heading has lines of its own under it (a numbered
+    list has none). `md`: without either, markdown headings are the slides (the text laid out as written)."""
     heads = []
     for i, ln in enumerate(lines):
         m = _SPEC_HEAD_RE.match(ln)
-        if m and len(m.group("title").split()) <= 14:
-            heads.append((i, int(m.group("n")), _clean(m.group("title")) if m.group("title") else ""))
-    if len(heads) >= 2 and all(b[1] > a[1] for a, b in zip(heads, heads[1:])):
-        return heads
+        if not m:
+            continue
+        title = m.group("title") or ""
+        n_words = len(title.split())
+        block_start = i == 0 or not lines[i - 1].strip()
+        if n_words > 40 or not (_head_like(title) or (block_start and n_words <= 14)):
+            continue
+        heads.append((i, int(m.group("n")), _clean(title) if title else ""))
+    if len(heads) >= 2:
+        if all(b[1] > a[1] for a, b in zip(heads, heads[1:])):
+            return heads
+        log.info("slide numbering of the brief repeats or goes back (%s): the slides are taken in the author's order", [h[1] for h in heads])
+        return [(i, k, t) for k, (i, _, t) in enumerate(heads, 1)]
+    if md:
+        got = _md_heads(lines)
+        if got:
+            return got
     if not re.search(r"слайд|slide", text, re.I):
         return []
     heads = []
@@ -253,6 +300,51 @@ _TOPIC_RE = re.compile(r"на\s+тему\s+«(?P<v>[^»]{4,160})»", re.I)
 # «Тема презентации: «Открытие фитнес-студии: от идеи до первых результатов». Презентация на 12 слайдов.» — the deck's
 # own topic in the text's preamble (never inside a slide's text, where «Тема:» names that slide's subject)
 _TOPIC_LINE_RE = re.compile(r"^\s*(?:[—–\-•*]\s*)?(?:тема|topic)(?:\s+(?:презентации|доклада|выступления|колоды|deck|presentation))?\s*:\s*(?P<v>.+)$", re.I)
+
+
+# the designer is told, not the audience: a sentence about the slides, their design or the speaker's notes; a verb only
+# a designer is told («Выдели …», «Не перегружай …»); any other imperative only with the thing it is about on a slide
+# («Покажи расходы диаграммой»). «Используй разные пароли», «Сохрани письмо», «Делай резервные копии» are the author's
+# own text (a security memo, a checklist)
+_DESIGN_TALK_RE = re.compile(
+    r"слайд|презентаци|заметк\w*\s+(?:для\s+)?докладчик|speaker\s+notes|шрифт|оформлени|дизайн|округл|\bфон\b|минималист|"
+    r"палитр|цветов\w*\s+(?:гамм|схем)|^(?:на\s+всех|везде)\b|\bslides?\b|\bfonts?\b|\bdesign",
+    re.I,
+)
+_DESIGN_VERB_RE = re.compile(
+    r"^(?:не\s+)?(?:перегружай|вынеси|выдели|подчеркни|размести|расположи|помести|оформи|визуализируй|изобрази|округляй)(?:те)?\b",
+    re.I,
+)
+_ANY_VERB_RE = re.compile(
+    r"^(?:не\s+)?(?:используй|покажи|добавь|отметь|укажи|пиши|напиши|избегай|сохрани|представляй|рассчитывай|складывай|ставь|"
+    r"включи|сократи|придерживайся|следи|давай|делай|сделай|вставь|убери|замени|подбери|нарисуй|построй)(?:те)?\b",
+    re.I,
+)
+_DESIGN_OBJECT_RE = re.compile(
+    r"диаграмм|график|гистограмм|таблиц|инфографик|иконк|пиктограмм|картинк|изображени|фото|иллюстрац|кегл|крупн|жирн|курсив|"
+    r"подзаголов|заголов|цвет|акцент|колонк|столбц|выделени|маркер|буллет|bullet",
+    re.I,
+)
+
+
+# a rule of the deck's voice or form said as a statement: «Тон нейтральный», «Заголовки — факты из текста», «Выводы —
+# отдельной строкой» (never «Выводы исследования показывают рост»: the author's own text)
+_STYLE_RULE_RE = re.compile(
+    r"^(?:тон|стиль|заголовки|выводы|оформление|шрифты?|подробности|пояснения)\s*[—–:-]"
+    r"|^(?:тон|стиль)\s+(?:нейтральн|строг|делов|официальн|дружелюбн|спокойн|энциклопедическ|разговорн|научн)",
+    re.I,
+)
+
+
+def speaks_of_the_deck(sentence: str) -> bool:
+    """The sentence is said to the designer: about the slides, their design or the notes («Не перегружай слайды»,
+    «Покажи расходы диаграммой», «Подробности вынеси в заметки докладчика»), not the author's own text in the
+    imperative («Используй разные пароли для рабочих и личных сервисов»)."""
+    s = (sentence or "").strip()
+    return bool(
+        _DESIGN_TALK_RE.search(s) or _DESIGN_VERB_RE.match(s) or (_ANY_VERB_RE.match(s) and _DESIGN_OBJECT_RE.search(s))
+        or _STYLE_RULE_RE.match(s) or _NOTES_RE.search(s) or _ROUND_RE.search(s)
+    )
 
 
 def _is_rule(sentence: str) -> bool:
@@ -604,11 +696,31 @@ def _respective_series(sentence: str, ref: "Series") -> Optional[Series]:
     return Series(id="", name=name or ref.name, categories=list(ref.categories), values=values, unit=next(iter(units), ref.unit), source_span=sentence[:200])
 
 
+_CHANGE_VERB_RE = re.compile(r"сократ|снизи|снижа|уменьш|вырос|выраст|увелич|подня|повыс|упал|умень|сокращ|рост|паден|измен|стал[аио]?\b", re.I)
+_SCHEDULE_RE = re.compile(r"работа|открыт|при[её]м|принима|звон|график|ежедневно|по\s+будням|по\s+выходным|режим|смен[аы]", re.I)
+
+
+def _schedule(m: re.Match, sentence: str) -> bool:
+    """«Работаем с 8 до 20 часов», «приём с 9 до 18»: hours of the day, not a change — unless the sentence says
+    something changed («время ответа сократилось с 8 до 2 часов»)."""
+    try:
+        a, b = _num(m.group("a")), _num(m.group("b"))
+    except Exception:  # noqa: BLE001
+        return False
+    unit = (m.group("ub") or m.group("ua") or "").lower()
+    head = sentence[: m.start()]
+    if not (0 <= a <= 24 and 0 <= b <= 24) or _CHANGE_VERB_RE.search(head):
+        return False
+    return unit.startswith(("час", "ч")) or bool(_SCHEDULE_RE.search(head))
+
+
 def _pairs_of(sentence: str) -> list[Series]:
     """«поднять средний чек с 300 до 330 рублей» → Средний чек: Сейчас 300, Цель 330; «прибыль достигнет 254 795
     рублей против нынешних 120 000» → Сейчас 120 000, Прогноз 254 795."""
     out: list[Series] = []
     for m in _FROM_TO_RE.finditer(sentence):
+        if _schedule(m, sentence):
+            continue
         name, acc = _subject(sentence[: m.start()])
         if not name:
             continue
@@ -1174,10 +1286,22 @@ def _front_matter(text: str) -> tuple[dict, str]:
     return meta, text[m.end() :]
 
 
-def _blocks(text: str) -> tuple[list[_Block], list[str]]:
-    """The slide blocks (or, without slide specs, the sections) and the global lines (outside any slide)."""
+def _split_long_title(title: str) -> tuple[str, Optional[str]]:
+    """A long «Слайд N» title that goes on into a sentence of the slide («Слайд 3. Итоги года. Мы выросли вдвое …»):
+    the first sentence is the title, the rest the slide's first line."""
+    if len(title.split()) <= 14:
+        return title, None
+    ss = sentences_of(title)
+    if len(ss) < 2:
+        return title, None
+    return H.strip_end(ss[0]), " ".join(ss[1:])
+
+
+def _blocks(text: str, md: bool = False) -> tuple[list[_Block], list[str]]:
+    """The slide blocks (or, without slide specs, the sections) and the global lines (outside any slide). `md`:
+    markdown headings are the slides of a text without «Слайд N» (_spec_heads)."""
     lines = text.splitlines()
-    heads = _spec_heads(lines, text)
+    heads = _spec_heads(lines, text, md=md)
     if not heads:
         blocks: list[_Block] = []
         cur: list[str] = []
@@ -1207,24 +1331,39 @@ def _blocks(text: str) -> tuple[list[_Block], list[str]]:
                     break
                 tail = body[gaps[-1] + 1 :]
                 sents = sentences_of("\n".join(tail))
-                # «На этом слайде оставь место под фотографию помещения» speaks of the last slide, not of the deck
-                if sents and all(_is_rule(s) for s in sents) and not any(_THIS_SLIDE_RE.search(s) or is_photo_instruction(s) for s in sents):
+                # «На этом слайде оставь место под фотографию помещения» speaks of the last slide, not of the deck; the last
+                # slide's own imperatives («Сохрани письмо», «Система должна быть доступна…») are its text
+                if sents and all(_is_rule(s) and speaks_of_the_deck(s) for s in sents) and not any(_THIS_SLIDE_RE.search(s) or is_photo_instruction(s) for s in sents):
                     glob = glob + [""] + tail
                     body = body[: gaps[-1]]
                     while body and not body[-1].strip():
                         body.pop()
                 else:
                     break
+        title, first_line = _split_long_title(title)
+        if first_line:
+            body = [first_line, *body]
+        if not title:
+            # a bare «Слайд 2» line: the short line under it without a final mark is the slide's heading («Слайд 2» /
+            # «Проблема» / «Студенты бросают…»)
+            j = next((x for x, ln in enumerate(body) if ln.strip()), None)
+            if j is not None:
+                cand = body[j].strip()
+                more = any(ln.strip() for ln in body[j + 1 :])
+                if more and len(cand.split()) <= 10 and not cand.endswith((".", "!", "?", "…", ":", ";", ",")) and not re.match(r"^\s*(?:[—–\-•*]|\d{1,2}[.)])\s", cand) and not cand.startswith(("[", "|", "```", "#")):
+                    title = _clean(cand)
+                    body = body[j + 1 :]
         blk = _Block(number=n, title=title, lines=body)
         blk.spec = SlideSpec(number=n, title=title, text="\n".join(body).strip())
         blocks.append(blk)
     return blocks, glob
 
 
-def read_structure(text: str) -> BriefStructure:
-    """The brief read by rules alone (no model): slide specs, requests, rules and data. Always succeeds."""
+def read_structure(text: str, md_slides: bool = False) -> BriefStructure:
+    """The brief read by rules alone (no model): slide specs, requests, rules and data. Always succeeds. `md_slides`:
+    a text without «Слайд N» headings gets its markdown headings as its slides (laid out as written)."""
     meta, body = _front_matter(text or "")
-    blocks, glob = _blocks(body)
+    blocks, glob = _blocks(body, md=md_slides)
     has_specs = any(b.spec is not None for b in blocks)
     st = BriefStructure()
     # title and subtitle: «Название: «…»» wins, then a markdown title, then the first line when it names the deck,
@@ -1240,7 +1379,8 @@ def read_structure(text: str) -> BriefStructure:
     if st.title is None:
         h1 = re.search(r"^\s*#\s+(.+)$", prose, re.M)
         if h1:
-            st.title = H.strip_end(h1.group(1))
+            # («# Слайд 1. Городской велопрокат» names the deck by its first slide: the marker is no part of the title)
+            st.title = H.strip_end(_SLIDE_MARK_RE.sub("", h1.group(1)).strip(" *")) or None
     glob_text = "\n".join(glob) if has_specs else body
     if st.title is None:
         preamble = [ln for ln in (glob if has_specs else body.splitlines()) if ln.strip()][:3]

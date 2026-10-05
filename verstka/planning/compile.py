@@ -512,9 +512,13 @@ def _order(o: DeckOutline, structure: BriefStructure, run: _Run, count: Optional
     cover: Optional[OutlineSlide] = None
     closing: Optional[OutlineSlide] = None
     extra: list[OutlineSlide] = []
+    goes_on: dict[int, list[OutlineSlide]] = {}  # the continuations of a slide (a long table split over two)
     for s in o.slides:
         if s.spec_ref in specs:
             if s.spec_ref in by_spec:
+                if s.continues and s.continues == by_spec[s.spec_ref].id:
+                    goes_on.setdefault(s.spec_ref, []).append(s)
+                    continue
                 run.warn(f"slide {s.id}: a second slide for the brief's slide {s.spec_ref} dropped")
                 continue
             by_spec[s.spec_ref] = s
@@ -535,6 +539,7 @@ def _order(o: DeckOutline, structure: BriefStructure, run: _Run, count: Optional
         elif _is_cover(specs[n]) and s.kind != K.title and not s.verbatim:
             s.kind = K.title
         slides.append(s)
+        slides.extend(goes_on.get(n, []))
     # the brief's own «на 10 слайдов» is a hard count: no cover beyond it. The request's count (the form always sends
     # one, 5 at least) only keeps a closing slide out: a brief that describes five slides and none of them a cover
     # gets its title slide, a brief of ten slides with its own cover gets no «Спасибо» as an eleventh
