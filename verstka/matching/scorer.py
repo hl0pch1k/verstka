@@ -575,10 +575,20 @@ def score_pattern(
             room = max(room, pattern.data_box.area)
         room = max(room, 0.85 * chart_picture_room(slide, pattern, pictures))  # a chart picture's place (less its margins)
         data_room = min(1.0, room / 0.3)
+        # the render's own limits (`clone._draw_native`): the box a chart or a table is drawn in, less the strip its
+        # conclusion and footnote keep at the foot when the sample has no note box, is at least 18 % of the slide and
+        # 30 % of its width — else the sample is turned down at render (a wasted render, a composed slide)
+        notes_h = ((0.13 if slide.takeaway else 0.0) + (0.06 if slide.footnote else 0.0)) if not pattern.note_slot else 0.0
+        narrow = pattern.data_box is not None and pattern.data_box.w < 0.3
+        squeezed = pattern.data_box is not None and pattern.data_box.area - notes_h * pattern.data_box.w < 0.18
         if room < 0.12:
             kind *= 0.3
             data_room = 0.2
             reasons.append("нет крупной области под диаграмму или таблицу")
+        elif narrow or squeezed:
+            kind *= 0.6
+            data_room = min(data_room, 0.5)
+            reasons.append("область данных образца уже, чем нужно диаграмме" if narrow else "под выводом слайда области данных образца не хватит на диаграмму")
         else:
             reasons.append(f"область под данные: {room:.0%} слайда")
         if slide.content.chart2 is not None and slide.content.chart is not None:

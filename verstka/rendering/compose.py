@@ -933,7 +933,26 @@ class Composer:
         self._dense = False
         self._area = area
         self._compose_body(comp, area)
+        kept_dense = False
         if self._overflows(n0, area) and getattr(self.o, "verbatim", False):
+            # the author's lines stay on the slide when a denser setting holds them at the template's own small size
+            # or larger (the lines under a block in two columns, a grid instead of a long row): three budget lines went
+            # to the notes under a six-month timeline that two columns would have held
+            self._undo(n0)
+            self.o, self.warnings = o0, list(w0)
+            self._restore_notes(notes0)
+            self._dense = True
+            self._compose_body(comp, area)
+            if not self._overflows(n0, area) and self._least_text(n0) >= self.kit.small - 0.05:
+                kept_dense = True
+                self.warnings.append("the author's text set denser (two columns, the template's small size) to keep it all on the slide")
+            else:
+                self._undo(n0)
+                self.o, self.warnings = o0, list(w0)
+                self._restore_notes(notes0)
+                self._dense = False
+                self._compose_body(comp, area)
+        if not kept_dense and self._overflows(n0, area) and getattr(self.o, "verbatim", False):
             # the author's own text is never set smaller than the usual ladder before it shows less: one whole sentence
             # less at a time, from its longest block (planning/faithful.drop_one_sentence — the speaker notes keep the
             # slide's whole text), until the rest stands in the area at the template's sizes

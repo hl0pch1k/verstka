@@ -219,3 +219,16 @@ def test_small_numerals_take_the_accents_text_tone():
     pick = Composer.accent_for
     assert pick(None, c, 16.0, False) == "005BC4" and pick(None, c, 13.0, True) == "005BC4"
     assert pick(None, c, 18.0, False) == "0077FF" and pick(None, c, 14.0, True) == "0077FF"
+
+
+def test_the_authors_lines_are_set_denser_before_any_goes_to_the_notes(env):  # noqa: F811
+    """Marketing, visual slide 8: a six-month timeline and five budget lines — three lines went to the speaker notes,
+    where two columns at the template's small size held them all."""
+    items = [SlideItem(title=f"{k}-й месяц", text=t) for k, t in enumerate(["Учет показателей и обновление меню", "Запуск комбо и обучение сотрудников", "Запуск программы лояльности и партнерств с офисами", "Продвижение дневных предложений и настройка закупок", "Корректировка предложений по результатам продаж", "Оценка результатов и закрепление удачных решений"], 1)]
+    lines = ["Витрина для десертов — 70 000 рублей", "Настройка программы лояльности и учета — 35 000 рублей", "Обновление меню, фотографии и оформление — 25 000 рублей", "Обучение сотрудников — 20 000 рублей", "Резерв — 30 000 рублей"]
+    o = OutlineSlide(id="p", kind=PatternKind.timeline, headline="План внедрения и разовые вложения", verbatim=True, content=SlideContent(items=items, bullets=lines))
+    slide, warnings = _render(env, o, "process", strategy="visual")
+    text = _texts(slide).replace(" ", " ")
+    shown = [ln for ln in lines if ln.split(" — ")[0] in text]
+    dropped = [w for w in warnings if "left to the speaker notes" in w]
+    assert len(shown) == len(lines) or dropped == [], (shown, warnings)
