@@ -368,6 +368,8 @@ export interface GenerationMeta {
   seconds?: number;
   created_at?: number;
   status?: string;
+  /** Why the build failed (status «failed»): its reason's first lines, or that the server restarted under it. */
+  error?: string | null;
   summary?: Record<string, VariantSummary>;
   /** Did a model plan the decks; if none did — why (older servers do not send it). */
   planner?: PlannerInfo | null;

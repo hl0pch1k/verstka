@@ -126,7 +126,7 @@ function TemplateName({ t }: { t: TemplateListItem }) {
         }}
         // as wide as the name (a field across the whole title bar reads as a form), 36px tall on the title's 28px line
         style={{ width: `${Math.min(36, Math.max(12, value.length + 3))}ch` }}
-        className="-my-1 -ml-2.5 h-9 min-w-0 max-w-full rounded-lg border border-accent bg-white px-2 text-title2 font-semibold text-zinc-900 shadow-[0_0_0_3px_rgba(0,119,255,0.12)] outline-none placeholder:font-normal placeholder:text-zinc-400 disabled:opacity-60"
+        className="-my-1 -ml-2.5 h-9 min-w-0 max-w-full rounded-lg border border-accent bg-white px-2 text-title2 font-semibold text-zinc-900 shadow-[0_0_0_3px_rgba(0,119,255,0.12)] outline-none placeholder:font-normal placeholder:text-zinc-500 disabled:opacity-60"
       />
     );
   }

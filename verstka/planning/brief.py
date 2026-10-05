@@ -12,6 +12,19 @@ import yaml
 from verstka.schemas.outline import Brief
 
 _FRONT_MATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.S)
+# the deck's own size said in its text — only a phrase about the whole deck: «не более 10 слайдов», «на 8 слайдов»,
+# «Сделай 12 слайдов», «at most 10 slides»; never «в 2 слайдах», «Первые 2 слайда», «3 слайда про рынок» (a part of the
+# deck, not its size). The web client reads the text with the same rule (web/src/lib/textFacts.ts COUNT).
+SLIDE_COUNT_RE = re.compile(
+    r"(?:не\s+более|не\s+больше|максимум|до|ровно)\s+(\d{1,2})\s+слайд"
+    r"|(?<![а-яё])на\s+(\d{1,2})\s+слайд(?:ов|а)?(?![а-яё])"
+    r"|(?:сделай(?:те)?|подготовь(?:те)?|собери(?:те)?|нуж(?:ен|н[оаы]?)|хочу)[^.\n]{0,30}?\s(\d{1,2})\s+слайд(?:ов|а)?(?![а-яё])"
+    r"|(?:not\s+more\s+than|no\s+more\s+than|up\s+to|max(?:imum)?|at\s+most|exactly)\s+(\d{1,2})\s+slides?\b"
+    r"|(\d{1,2})-slide\s+(?:deck|presentation)"
+    r"|(?:make|create|prepare|build)[^.\n]{0,30}?\s(\d{1,2})\s+slides?\b",
+    re.I,
+)
+
 _KEY_ALIASES = {
     "slides": "slide_count",
     "slide_count": "slide_count",
@@ -62,9 +75,9 @@ def parse_brief_text(text: str) -> Brief:
             fields.pop("slide_count")
     # "не более N слайдов" written inside the text also counts as an instruction
     if "slide_count" not in fields:
-        m2 = re.search(r"(?:не более|максимум|до|ровно|not more than|up to|max)\s+(\d{1,2})\s+слайд", body, re.I)
+        m2 = SLIDE_COUNT_RE.search(body)
         if m2:
-            fields["slide_count"] = int(m2.group(1))
+            fields["slide_count"] = int(next(g for g in m2.groups() if g))
     if "title_hint" not in fields:
         from verstka.planning.brief_structure import without_code
 

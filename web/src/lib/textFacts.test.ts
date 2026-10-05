@@ -1,12 +1,19 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { dictatedSlides, factsLine, textFacts } from "./textFacts";
+import { briefBody, dictatedSlides, factsLine, textFacts } from "./textFacts";
 
 test("slides dictated by headings get a cover in front", () => {
   const text = "Слайд 1. Проблема\nтекст\nСлайд 2. Решение\nтекст\nСлайд 3. Рынок\nтекст";
   assert.equal(dictatedSlides(text), 4);
   assert.equal(dictatedSlides("Расскажи про продукт на 8 слайдов"), 8);
   assert.equal(dictatedSlides("Просто текст без слайдов"), null);
+  // a part of the deck is not its size (the server reads the text with the same rule: planning/brief.py)
+  assert.equal(dictatedSlides("Итоги покажите в 2 слайдах, без лишнего."), null);
+  assert.equal(dictatedSlides("Первые 2 слайда — о проблеме, остальные — о решении."), null);
+  assert.equal(dictatedSlides("Из прошлых докладов 3 слайда про рынок."), null);
+  assert.equal(dictatedSlides("Сделай, пожалуйста, 12 слайдов про кофейню"), 12);
+  assert.equal(dictatedSlides("Не более 10 слайдов."), 10);
+  assert.equal(dictatedSlides("Make a 9-slide deck"), 9);
 });
 
 test("figures: groups and decimals count once, slide headings and list markers do not", () => {
@@ -43,4 +50,10 @@ test("a first slide named «Discovery» is content; a first slide that is a head
   assert.equal(dictatedSlides(en), 4); // a cover in front of «Discovery»
   const bare = "Слайд 1. Умная теплица\n\nСлайд 2. Устройство\nТекст о датчиках.\n\nСлайд 3. Итоги\nТекст об итогах.";
   assert.equal(dictatedSlides(bare), 3);
+});
+
+test("front matter is not material: the text's length counts the body", () => {
+  assert.equal(briefBody("---\nslides: 5\n---\n").trim(), "");
+  assert.equal(briefBody("---\nаудитория: инвесторы\n---\nТекст презентации").trim(), "Текст презентации");
+  assert.equal(briefBody("Просто текст\n---\nещё"), "Просто текст\n---\nещё");
 });

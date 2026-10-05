@@ -83,3 +83,18 @@ def test_api_flow(client, simple_deck):
     assert r["intent"] == "fix_all" and r["actions"] and r["actions"][0]["type"] == "jobs"
     for j in r["actions"][0]["jobs"]:
         assert _wait(c, j["job_id"], timeout=300)["status"] == "done"
+
+
+def test_a_build_interrupted_by_a_restart_ends_as_failed(client):
+    """A build whose job this server does not run (started before a restart) is no longer «running»: the list and the
+    deck page say it failed and why, and its template can be deleted; a build a few ms old (no job id yet) is kept."""
+    c, mod = client
+    gid, _ = mod.store.new_generation_dir()
+    mod.store.write_generation_meta(gid, {"id": gid, "template_id": "t", "strategies": ["structured"], "status": "running", "job_id": "gone0000", "created_at": time.time() - 600})
+    fresh, _ = mod.store.new_generation_dir()
+    mod.store.write_generation_meta(fresh, {"id": fresh, "template_id": "t", "strategies": ["structured"], "status": "running", "created_at": time.time()})
+    listed = {g["id"]: g for g in c.get("/api/generations").json()}
+    assert listed[gid]["status"] == "failed" and "перезапускался" in listed[gid]["error"]
+    assert listed[fresh]["status"] == "running"
+    assert mod.store.read_generation_meta(gid)["status"] == "failed"  # kept, not only shown
+    assert c.get(f"/api/generations/{gid}").json()["status"] == "failed"

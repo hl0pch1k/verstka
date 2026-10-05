@@ -46,6 +46,8 @@ function IssueGroups({ groups, render }: { groups: SlideGroup[]; render(g: Slide
 
 export function AuditPanel() {
   const { generation, generationLoading, generationId, activeStrategy, activeVariant, selectedSlide, setSelectedSlide, setDetail, activeJob, runJob, loadGeneration, toast, manifest } = useApp();
+  const shownGid = useRef(generationId);
+  shownGid.current = generationId;
 
   const audit = activeVariant?.audit ?? null;
   const scopeKey = `${generationId ?? ""}/${activeStrategy ?? ""}/${auditRev(audit)}`;
@@ -105,7 +107,8 @@ export function AuditPanel() {
       runJob(job_id, "Исправляю замечания", {
         kind: "fix",
         onDone: async (job) => {
-          await loadGeneration(gid);
+          // (a deck opened meanwhile stays on screen: the fixed one is reloaded only while it is the one shown)
+          if (shownGid.current === gid) await loadGeneration(gid);
           const r = (job.result ?? null) as Partial<FixResult> | null;
           const score = typeof r?.score === "number" && Number.isFinite(r.score) ? Math.round(r.score) : null;
           toast("success", score !== null ? `Готово: оценка качества ${score} из 100` : "Готово: замечания исправлены");

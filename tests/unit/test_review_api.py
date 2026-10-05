@@ -170,6 +170,42 @@ def test_chat_brief_starts_generation(client, monkeypatch):
     assert seen and seen[0].brief == text and seen[0].template_id == "tpl"
 
 
+def test_chat_builds_only_from_a_text_or_a_topic(client, monkeypatch):
+    """«сделай презентацию короче» with a deck open speaks about that deck, a bare «сделай презентацию» has nothing to
+    build from, a topic needs a model to write it, and no second build starts while one runs."""
+    c, mod = client
+    seen: list = []
+    monkeypatch.setattr(mod, "create_generation", lambda req: seen.append(req) or {"job_id": "job1", "generation_id": "gen1"})
+    monkeypatch.setattr(mod, "models_configured", lambda: False)
+    say = lambda sid, msg, **kw: c.post("/api/chat", json={"session_id": sid, "message": msg, "template_id": "tpl", **kw}).json()  # noqa: E731
+    r = say("s1", "сделай презентацию короче", generation_id="g-open")
+    assert r["intent"] == "generate" and not r["actions"] and "изменить по слайдам" in r["reply"]
+    r = say("s2", "сделай презентацию")
+    assert not r["actions"] and "Пришлите текст" in r["reply"]
+    r = say("s3", "сделай презентацию про историю VK")
+    assert not r["actions"] and "Без подключённой модели" in r["reply"]
+    assert not seen
+    monkeypatch.setattr(mod, "models_configured", lambda: True)
+    r = say("s4", "сделай презентацию про историю VK")
+    assert r["actions"] and seen[-1].brief == "сделай презентацию про историю VK"
+    # a build in progress: the chat says so instead of starting another
+    monkeypatch.setattr(mod, "_live_builds", lambda: [object()])
+    r = say("s5", BRIEFS[0].read_text(encoding="utf-8"))
+    assert not r["actions"] and "собирается другая презентация" in r["reply"]
+    assert len(seen) == 1
+
+
+def test_chat_answers_how_the_build_is_going(client, monkeypatch):
+    c, mod = client
+    job = mod.Job(id="j1", kind="generate", status="running", progress=0.42)
+    monkeypatch.setitem(mod.runner.jobs, "j1", job)
+    r = c.post("/api/chat", json={"session_id": "st", "message": "как там?"}).json()
+    assert r["intent"] == "status" and "42%" in r["reply"] and not r["actions"]
+    job.status = "done"
+    r = c.post("/api/chat", json={"session_id": "st", "message": "готово?", "generation_id": "g1"}).json()
+    assert "презентация на экране" in r["reply"]
+
+
 # ---------------------------------------------------------------------------- F7: generation status
 
 

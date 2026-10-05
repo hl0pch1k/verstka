@@ -38,13 +38,20 @@ class TemplateWorkspace:
         """`display_name`: the name the person gave the file (a converted «Бренд.potx» is analysed as «Бренд.pptx»)."""
         pptx = Path(pptx)
         root = Path(root) if root else default_workspace_root()
+        templates = root / "templates"
+        # a generation analyses the template by its workspace copy: that copy stays its own workspace — its sha drifts
+        # once a bare .potx gets sample slides, and its name is the one the person's file came with, not «source.pptx»
+        if pptx.name == "source.pptx" and SAFE_ID_RE.fullmatch(pptx.parent.name) and pptx.parent.parent.resolve() == templates.resolve():
+            return cls(template_id=pptx.parent.name, dir=pptx.parent, source=pptx)
         template_id = file_sha256(pptx)[:16]
-        d = root / "templates" / template_id
+        d = templates / template_id
         d.mkdir(parents=True, exist_ok=True)
         src = d / "source.pptx"
         if not src.exists():
             shutil.copyfile(pptx, src)
-        (d / "meta.txt").write_text(f"{display_name or pptx.name}\n", encoding="utf-8")
+        meta = d / "meta.txt"
+        if display_name or not meta.exists():
+            meta.write_text(f"{display_name or pptx.name}\n", encoding="utf-8")
         return cls(template_id=template_id, dir=d, source=src)
 
     @classmethod

@@ -54,7 +54,12 @@ function Overview({ manifest }: { manifest: TemplateManifest }) {
 }
 
 export function TemplateDetails() {
-  const { manifest, manifestLoading, templateId, healthError } = useApp();
+  const { manifest, manifestLoading, templateId, healthError, generation, screen, templates } = useApp();
+  // beside a deck the tab is about that deck's template: one deleted from the library is not swapped for another
+  // (a template still in the library is selected as the deck opens)
+  if (screen === "result" && generation?.template_id && templates.length > 0 && !templates.some((t) => t.template_id === generation.template_id)) {
+    return <EmptyState icon={FileWarning} title="Шаблона этой презентации больше нет в библиотеке" hint="Презентация открывается и скачивается как прежде; чтобы пересобрать её, загрузите шаблон снова" />;
+  }
   if (!templateId) return <EmptyState icon={FileWarning} title="Шаблон не выбран" hint="Выберите шаблон на первом экране" />;
   if (manifestLoading || (!manifest && !healthError)) {
     return (

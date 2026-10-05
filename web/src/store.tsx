@@ -45,7 +45,8 @@ export interface AppState {
   generations: GenerationMeta[]; refreshGenerations(): Promise<void>;
   generationId: string | null; generation: Generation | null; generationLoading: boolean;
   /** `hold`: keep the open deck on screen until the new one is ready, then swap inside a view transition (history). */
-  loadGeneration(gid: string, opts?: { hold?: boolean }): Promise<void>;
+  /** Open a deck; resolves to it (null when it did not load — the failure is already reported). */
+  loadGeneration(gid: string, opts?: { hold?: boolean }): Promise<Generation | null>;
   activeStrategy: string | null; setActiveStrategy(s: string): void; activeVariant: Variant | null;
   selectedSlide: number; setSelectedSlide(n: number): void; // 1-based
   /** Old view names (the agent and flows speak them) → screen + drawer. */
@@ -58,13 +59,25 @@ export interface AppState {
   messages: ChatMessage[]; pushMessage(role: "user" | "assistant", text: string): void; // ts = unix seconds (fmtDate-compatible)
   toast(kind: "error" | "success" | "info", text: string): void;
   uploadTemplate(file: File, useModels: boolean): Promise<void>;
-  startGeneration(req: GenerateRequest): Promise<void>;
+  startGeneration(req: GenerateRequest, expectedSlides?: number | null): Promise<void>;
   /** A text handed to the create screen's field once (the agent's written text, «Изменить»); null when none waits. */
   composerText: string | null;
-  /** Opens the create screen with `text` in the field (it replaces the saved draft once). */
-  editText(text: string): void;
+  /** The parameters handed with it (a deck's own: «Изменить текст» on a deck restores how it was built). */
+  composerPreset: ComposerPreset | null;
+  /** Opens the create screen with `text` in the field (it replaces the saved draft once), and the deck's parameters. */
+  editText(text: string, preset?: ComposerPreset): void;
   /** The create screen took the handed text. */
   takeComposerText(): void;
+}
+
+/** A deck's own parameters for the create screen (GenerationMeta): what «Изменить текст» restores with its text. */
+export interface ComposerPreset {
+  audience?: string | null;
+  purpose?: string | null;
+  slides?: number | null;
+  useModels?: boolean;
+  auditModels?: boolean;
+  strategies?: string[];
 }
 
 const Ctx = createContext<AppState | null>(null);
@@ -112,13 +125,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
   const [agentOpen, setAgentOpen] = useState(false); // the helper starts closed: the page itself must be self-explanatory
   const [composerText, setComposerText] = useState<string | null>(null);
-  const editText = useCallback((text: string) => {
+  const [composerPreset, setComposerPreset] = useState<ComposerPreset | null>(null);
+  const editText = useCallback((text: string, preset?: ComposerPreset) => {
     setComposerText(text);
+    setComposerPreset(preset ?? null);
     setDetail(null);
     setScreen("create");
   }, []);
-  const takeComposerText = useCallback(() => setComposerText(null), []);
+  const takeComposerText = useCallback(() => {
+    setComposerText(null);
+    setComposerPreset(null);
+  }, []);
   const [activeJob, setActiveJob] = useState<ActiveJob | null>(null);
+  const liveJobs = useRef(new Map<string, ActiveJob>()); // every job still running, the newest last
   const [messages, setMessages] = useState<ChatMessage[]>([]);
 
   // Latest values for callbacks that must stay referentially stable.
@@ -262,7 +281,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [report, selectTemplate, clearGeneration]);
 
-  const loadGeneration = useCallback(async (gid: string, opts?: { hold?: boolean }) => void (await fetchGeneration(gid, false, !!opts?.hold)), [fetchGeneration]);
+  const loadGeneration = useCallback(async (gid: string, opts?: { hold?: boolean }) => await fetchGeneration(gid, false, !!opts?.hold), [fetchGeneration]);
 
   const setActiveStrategy = useCallback((s: string) => {
     const variant = latest.current.generation?.variants.find((v) => v.strategy === s);
@@ -279,17 +298,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const runJob = useCallback((jobId: string, label: string, opts?: RunJobOptions) => {
     jobSubs.current.get(jobId)?.();
-    const patch = (p: Partial<ActiveJob>) => setActiveJob((cur) => (cur && cur.id === jobId ? { ...cur, ...p } : cur));
+    // the slot shows the newest job; jobs run side by side (the fixes of every variant) keep it busy until the last
+    // one ends — the screen never unblocks while a job still runs (its actions would hit «already running»)
     const settle = (p: Partial<ActiveJob>) => {
       jobSubs.current.delete(jobId);
-      patch(p);
+      liveJobs.current.delete(jobId);
+      const other = [...liveJobs.current.values()].pop() ?? null;
+      if (other) return void setActiveJob((cur) => (cur && cur.id === jobId ? other : cur));
+      setActiveJob((cur) => (cur && cur.id === jobId ? { ...cur, ...p } : cur));
       window.setTimeout(() => setActiveJob((cur) => (cur && cur.id === jobId ? null : cur)), 1500);
     };
-    setActiveJob({ id: jobId, label, progress: 0, message: "В очереди…", status: "queued", kind: opts?.kind ?? "other", startedAt: Date.now(), items: opts?.items, template: opts?.template, target: opts?.target, generation: opts?.generation ?? null, slides: opts?.slides ?? null });
+    const first: ActiveJob = { id: jobId, label, progress: 0, message: "В очереди…", status: "queued", kind: opts?.kind ?? "other", startedAt: Date.now(), items: opts?.items, template: opts?.template, target: opts?.target, generation: opts?.generation ?? null, slides: opts?.slides ?? null };
+    liveJobs.current.set(jobId, first);
+    setActiveJob(first);
     const stop = trackJob(jobId, {
       onEvent: (ev) => {
         if (ev.status === "done" || ev.status === "failed") return; // settled below, once the full job record is fetched
-        setActiveJob((cur) => (cur && cur.id === jobId ? foldJobEvent(cur, ev, (name) => titleIn(latest.current.strategies, name)) : cur));
+        const cur = liveJobs.current.get(jobId);
+        if (!cur) return;
+        const next = foldJobEvent(cur, ev, (name) => titleIn(latest.current.strategies, name));
+        liveJobs.current.set(jobId, next);
+        setActiveJob((shown) => (shown && shown.id === jobId ? next : shown));
       },
       onDone: (job) => {
         settle({ status: "done", progress: 1, message: "Готово" });
@@ -317,8 +346,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const startGeneration = useCallback(
-    (req: GenerateRequest) =>
-      generationFlow(req, { runJob, report, pushMessage, setTab, refreshGenerations, fetchGeneration, refreshModelStatus, titleOf: (name) => titleIn(latest.current.strategies, name), setAgentOpen, currentScreen: () => latest.current.screen }),
+    (req: GenerateRequest, expectedSlides?: number | null) =>
+      generationFlow(req, { runJob, report, pushMessage, setTab, refreshGenerations, fetchGeneration, refreshModelStatus, titleOf: (name) => titleIn(latest.current.strategies, name), setAgentOpen, currentScreen: () => latest.current.screen }, expectedSlides ?? null),
     [runJob, report, pushMessage, refreshGenerations, fetchGeneration, refreshModelStatus],
   );
 
@@ -409,12 +438,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, activeStrategy, setActiveStrategy, activeVariant,
     selectedSlide, setSelectedSlide, setTab, screen, setScreen, detail, setDetail, agentOpen, setAgentOpen, activeJob, runJob, messages, pushMessage, toast, uploadTemplate, startGeneration,
-    composerText, editText, takeComposerText,
+    composerText, composerPreset, editText, takeComposerText,
   }), [
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, activeStrategy, setActiveStrategy, activeVariant,
     selectedSlide, setSelectedSlide, setTab, screen, detail, agentOpen, setAgentOpen, activeJob, runJob, messages, pushMessage, toast, uploadTemplate, startGeneration,
-    composerText, editText, takeComposerText,
+    composerText, composerPreset, editText, takeComposerText,
   ]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

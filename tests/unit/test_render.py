@@ -23,3 +23,17 @@ def test_workspace_is_keyed_by_hash(simple_deck, tmp_path):
     again = TemplateWorkspace.create(simple_deck, tmp_path / "ws")
     assert again.dir == ws.dir
     assert TemplateWorkspace.open(ws.template_id, tmp_path / "ws").original_name == "simple.pptx"
+
+
+def test_the_workspace_copy_keeps_its_workspace_and_name(simple_deck, tmp_path):
+    """A generation analyses the template by its workspace copy: the same workspace, the person's file name kept
+    (it was «source.pptx» in every narrator line and template card), even after the copy changed (sample slides)."""
+    ws = TemplateWorkspace.create(simple_deck, tmp_path / "ws", display_name="Бренд.potx")
+    with open(ws.source, "ab") as f:
+        f.write(b"\0")  # the copy's bytes no longer hash to the id (a bare .potx given sample slides)
+    again = TemplateWorkspace.create(ws.source, tmp_path / "ws")
+    assert again.dir == ws.dir and again.template_id == ws.template_id
+    assert again.original_name == "Бренд.potx"
+    assert len(list((tmp_path / "ws" / "templates").iterdir())) == 1
+    # a later upload of the same file without a name keeps the name the template came with
+    assert TemplateWorkspace.create(simple_deck, tmp_path / "ws").original_name == "Бренд.potx"

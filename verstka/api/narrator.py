@@ -26,7 +26,8 @@ def kind_ru(kind: str) -> str:
     return _KIND_RU.get(kind, kind)
 
 
-def describe_template(m: TemplateManifest) -> str:
+def describe_template(m: TemplateManifest, title: str | None = None) -> str:
+    """`title`: the name the person gave the template in the UI, if any (said instead of its file name)."""
     t = m.tokens
     kinds = Counter(p.kind.value for p in m.patterns)
     top = ", ".join(f"{kind_ru(k)} ×{v}" for k, v in kinds.most_common(6))
@@ -41,7 +42,7 @@ def describe_template(m: TemplateManifest) -> str:
     if accents:
         look += f", акцентные цвета {accents}"
     usable = "все подходят" if len(m.patterns) >= m.n_slides else f"из них {ru_count(len(m.patterns), 'подходит', 'подходят', 'подходят')}"
-    lines = [f"Разобрал шаблон «{m.source_file}»: {ru_count(m.n_slides, 'слайд', 'слайда', 'слайдов')}, {usable} как образцы для новых слайдов.", look + "."]
+    lines = [f"Разобрал шаблон «{title or m.source_file}»: {ru_count(m.n_slides, 'слайд', 'слайда', 'слайдов')}, {usable} как образцы для новых слайдов.", look + "."]
     if scale:
         lines.append(f"Размеры шрифтов: {scale}.")
     if top:

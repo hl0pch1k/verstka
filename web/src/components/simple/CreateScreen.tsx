@@ -11,7 +11,7 @@ import { MOTION, smoothScroll, useFlip, usePresence } from "../../lib/motion";
 import { modelIndicator } from "../../lib/modelText";
 import { errText } from "../../lib/narrate";
 import { tplLabel } from "../../lib/plain";
-import { factsLine, textFacts } from "../../lib/textFacts";
+import { briefBody, dictatedByHeadings, factsLine, textFacts } from "../../lib/textFacts";
 import { cn, LS, plural, storage } from "../../lib/utils";
 import { writerModeOf } from "../../lib/writerMode";
 import { useApp } from "../../store";
@@ -26,7 +26,9 @@ const MAX_BRIEF_BYTES = 2 * 1024 * 1024;
 const PLACEHOLDER_WRITER = "Тема — например, «История VK»: текст напишет агент. Или ваш текст с тезисами и цифрами — слайды будут строго по нему…";
 const PLACEHOLDER = "Тезисы, цифры и таблицы — слайды будут строго по ним. Можно по слайдам: «Слайд 3. Расходы. Нужна круговая диаграмма»…";
 
-interface Draft { brief: string; audience: string; purpose: string; slides: number }
+// the switches and the variants are the draft's too: a screen opened again (after a build, «Изменить текст») keeps
+// the person's own choice — a switch silently back on let the model rewrite a text meant to stay verbatim
+interface Draft { brief: string; audience: string; purpose: string; slides: number; useModels: boolean | null; auditModels: boolean; selected: string[] | null }
 
 function loadDraft(): Draft {
   try {
@@ -36,9 +38,12 @@ function loadDraft(): Draft {
       audience: typeof d?.audience === "string" ? d.audience : "",
       purpose: PURPOSES.some((p) => p.value === d?.purpose) ? (d?.purpose as string) : "product",
       slides: clampSlides(Number(d?.slides ?? SLIDES_DEFAULT)),
+      useModels: typeof d?.useModels === "boolean" ? d.useModels : null,
+      auditModels: d?.auditModels === true,
+      selected: Array.isArray(d?.selected) && d.selected.every((x) => typeof x === "string") && d.selected.length ? d.selected : null,
     };
   } catch {
-    return { brief: "", audience: "", purpose: "product", slides: SLIDES_DEFAULT };
+    return { brief: "", audience: "", purpose: "product", slides: SLIDES_DEFAULT, useModels: null, auditModels: false, selected: null };
   }
 }
 
@@ -108,7 +113,7 @@ function CountStep({ icon: Icon, label, disabled, onClick }: { icon: typeof Plus
 }
 
 export function CreateScreen() {
-  const { health, healthError, modelStatus, strategies, templates, templateId, manifestLoading, activeJob, startGeneration, toast, agentOpen, composerText, takeComposerText } = useApp();
+  const { health, healthError, modelStatus, strategies, templates, templateId, manifestLoading, activeJob, startGeneration, toast, agentOpen, composerText, composerPreset, takeComposerText } = useApp();
   // a server with a model in its config whose every link is off builds without one: the switches say so too
   const modelsConfigured = (health?.models_configured ?? false) && modelStatus?.state !== "off";
   const drop = useTemplateDrop();
@@ -120,9 +125,9 @@ export function CreateScreen() {
   const [slides, setSlides] = useState(draft.slides);
   // what the person is typing into the count (an empty field stays empty until they leave it)
   const [slidesDraft, setSlidesDraft] = useState<string | null>(null);
-  const [selected, setSelected] = useState<string[]>([]);
-  const [useModels, setUseModels] = useState(modelsConfigured);
-  const [auditModels, setAuditModels] = useState(false);
+  const [selected, setSelected] = useState<string[]>(draft.selected ?? []);
+  const [useModels, setUseModels] = useState(draft.useModels ?? modelsConfigured);
+  const [auditModels, setAuditModels] = useState(draft.auditModels);
   const [more, setMore] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [showErrors, setShowErrors] = useState(false);
@@ -154,16 +159,39 @@ export function CreateScreen() {
     return () => window.clearTimeout(t);
   }, [shaking]);
 
+  const strategiesTouched = useRef(draft.selected !== null);
+  const modelsTouched = useRef(draft.useModels !== null);
   useEffect(() => {
-    const t = window.setTimeout(() => storage.set(LS.brief, JSON.stringify({ brief, audience, purpose, slides } satisfies Draft)), 300);
+    const kept: Draft = {
+      brief, audience, purpose, slides,
+      useModels: modelsTouched.current ? useModels : null,
+      auditModels,
+      selected: strategiesTouched.current ? selected : null,
+    };
+    const t = window.setTimeout(() => storage.set(LS.brief, JSON.stringify(kept)), 300);
     return () => window.clearTimeout(t);
-  }, [brief, audience, purpose, slides]);
+  }, [brief, audience, purpose, slides, useModels, auditModels, selected]);
 
   // «Изменить» on the agent's text (the result's sheet, the plan): the text replaces the draft once, the field takes the
   // focus and comes into view
   useEffect(() => {
     if (composerText === null) return;
     setBrief(composerText);
+    if (composerPreset) {
+      // a deck's own parameters come with its text: the deck is built again the way it was
+      setAudience(composerPreset.audience ?? "");
+      if (composerPreset.purpose && PURPOSES.some((p) => p.value === composerPreset.purpose)) setPurpose(composerPreset.purpose);
+      if (composerPreset.slides) setSlides(clampSlides(composerPreset.slides));
+      if (typeof composerPreset.useModels === "boolean") {
+        modelsTouched.current = true;
+        setUseModels(composerPreset.useModels);
+      }
+      if (typeof composerPreset.auditModels === "boolean") setAuditModels(composerPreset.auditModels);
+      if (composerPreset.strategies?.length) {
+        strategiesTouched.current = true;
+        setSelected(composerPreset.strategies);
+      }
+    }
     setShowErrors(false);
     takeComposerText();
     requestAnimationFrame(() => {
@@ -174,7 +202,7 @@ export function CreateScreen() {
       el.scrollTop = 0;
       el.scrollIntoView({ block: "center", behavior: smoothScroll() });
     });
-  }, [composerText, takeComposerText]);
+  }, [composerText, composerPreset, takeComposerText]);
 
   // what the text holds: a text that dictates its slides fixes the count (the stepper shows it, locked, and the request
   // sends that number — the backend builds the text's slides whatever the count, and the count keeps a closing slide out)
@@ -187,10 +215,10 @@ export function CreateScreen() {
   };
   const count = dictated ?? clampSlides(slides);
 
-  const strategiesTouched = useRef(false);
-  const modelsTouched = useRef(false);
   useEffect(() => {
     if (!strategiesTouched.current) setSelected(strategies.map((s) => s.name));
+    // (a kept choice keeps only the variants the server still has)
+    else if (strategies.length) setSelected((cur) => (cur.some((n) => !strategies.some((s) => s.name === n)) ? cur.filter((n) => strategies.some((s) => s.name === n)) : cur));
   }, [strategies]);
   useEffect(() => {
     if (!modelsTouched.current) setUseModels(modelsConfigured);
@@ -198,7 +226,7 @@ export function CreateScreen() {
 
   const chosen = templates.find((t) => t.template_id === templateId);
   const chosenName = chosen ? tplLabel(chosen) : null;
-  const briefLen = brief.trim().length;
+  const briefLen = briefBody(brief).trim().length; // settings in front matter are not material
   // a topic-only text is enough only when the server writes the text itself (writer mode); otherwise the text is the deck
   const briefMin = health?.writer ? BRIEF_MIN_TOPIC : BRIEF_MIN;
   const jobRunning = !!activeJob && (activeJob.status === "queued" || activeJob.status === "running");
@@ -314,13 +342,16 @@ export function CreateScreen() {
         brief: brief.trim(),
         audience: audience.trim() || null,
         purpose,
-        slides: count,
+        // the slides a text dictates by its headings are sent (the count keeps a closing slide out); a size said in a
+        // phrase («не более 10 слайдов») is the server's to read with the same rule (planning/brief.py) — sent, a
+        // misread phrase overrode the server's own reading
+        slides: byText && !dictatedByHeadings(brief) ? null : count,
         strategies: strategies.length ? strategies.map((s) => s.name).filter((n) => selected.includes(n)) : selected,
         use_models: useModels && modelsConfigured,
         audit_models: auditModels && modelsConfigured,
         autofix: true,
         exports: ["pdf", "html"],
-      });
+      }, count);
     } finally {
       setSubmitting(false);
     }
@@ -382,7 +413,7 @@ export function CreateScreen() {
                 onChange={(e) => setBrief(e.target.value)}
                 placeholder={health?.writer ? PLACEHOLDER_WRITER : PLACEHOLDER}
                 // as tall as its text (the page is the one scroller); a browser without field-sizing keeps six lines
-                className="scroll-thin block min-h-[160px] w-full resize-none rounded-lg bg-transparent px-4 py-3 text-body leading-6 text-zinc-900 outline-none placeholder:text-zinc-400 disabled:opacity-60 [field-sizing:content]"
+                className="scroll-thin block min-h-[160px] w-full resize-none rounded-lg bg-transparent px-4 py-3 text-body leading-6 text-zinc-900 outline-none placeholder:text-zinc-500 disabled:opacity-60 [field-sizing:content]"
               />
             </div>
             {/* what the text holds (the agent will see the same) and its length */}

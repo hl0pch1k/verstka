@@ -11,7 +11,20 @@ import { plural } from "./utils";
 // without headings «на 8 слайдов», «10 слайдов» give N.
 const SPEC_HEAD = /^\s*(?:#{1,6}\s*)?(?:\*\*)?\s*(?:слайд|slide)\s*№?\s*(\d{1,2})\s*(?:\*\*)?\s*(?:[.:)—–-]\s*|\s+|$)(.*?)\s*(?:\*\*)?\s*$/i;
 const NUM_HEAD = /^\s*(?:#{1,6}\s*)?(\d{1,2})[.)]\s+(\S.{0,90})$/;
-const COUNT = /(?:на|из|ровно|не более|не больше|максимум|до|в)\s+(\d{1,2})\s+слайд|(\d{1,2})\s+слайд(?:ов|а)(?![а-яё])|(\d{1,2})\s+slides?\b/i;
+// the deck's own size said in its text, by the server's rule (planning/brief.py SLIDE_COUNT_RE): a phrase about the
+// whole deck («не более 10 слайдов», «на 8 слайдов», «Сделай 12 слайдов»), never a part of it («в 2 слайдах»,
+// «Первые 2 слайда», «3 слайда про рынок»)
+const COUNT = new RegExp(
+  [
+    "(?:не\\s+более|не\\s+больше|максимум|до|ровно)\\s+(\\d{1,2})\\s+слайд",
+    "(?<![а-яё])на\\s+(\\d{1,2})\\s+слайд(?:ов|а)?(?![а-яё])",
+    "(?:сделай(?:те)?|подготовь(?:те)?|собери(?:те)?|нуж(?:ен|н[оаы]?)|хочу)[^.\\n]{0,30}?\\s(\\d{1,2})\\s+слайд(?:ов|а)?(?![а-яё])",
+    "(?:not\\s+more\\s+than|no\\s+more\\s+than|up\\s+to|max(?:imum)?|at\\s+most|exactly)\\s+(\\d{1,2})\\s+slides?\\b",
+    "(\\d{1,2})-slide\\s+(?:deck|presentation)",
+    "(?:make|create|prepare|build)[^.\\n]{0,30}?\\s(\\d{1,2})\\s+slides?\\b",
+  ].join("|"),
+  "i",
+);
 // (faithful.py _COVER_WORDS_RE: «Discovery» holds the letters of «cover» and is no cover)
 const COVER = /титул|обложк|заглавн|\bcover\b|title\s+slide/i;
 const TITLE_LINE = /^\s*(?:[—–\-•*]\s*)?(?:название|подзаголовок|заголовок|title|subtitle)\s*[:—–]/im;
@@ -43,10 +56,21 @@ function specHeads(lines: string[], text: string): Head[] {
   return nums.every((h, i) => lines.slice(h.at + 1, ends[i]).some((l) => l.trim())) ? nums : [];
 }
 
+/** Whether the text dictates its slides by headings («Слайд 1 … Слайд 5»), not only by a phrase about its size. */
+/** The text without its front matter (a «---» block of settings at the top, as the server reads it): what is left is
+ *  the deck's material — a text of settings alone is empty for the server. */
+export function briefBody(text: string): string {
+  return text.replace(/^---[ \t]*\n[\s\S]*?\n---[ \t]*(?:\n|$)/, "");
+}
+
+export function dictatedByHeadings(text: string): boolean {
+  return specHeads(text.split("\n"), text).length > 0;
+}
+
 export function dictatedSlides(text: string): number | null {
   const lines = text.split("\n");
   const c = COUNT.exec(text);
-  const hard = c ? Number(c[1] ?? c[2] ?? c[3]) || null : null;
+  const hard = c ? Number(c.slice(1).find((g) => g !== undefined)) || null : null;
   const heads = specHeads(lines, text);
   if (heads.length === 0) return hard;
   // the first head is the cover when its title says so, or when it describes a title and a subtitle (not a table)

@@ -13,6 +13,13 @@ export function firstLine(text: string | null | undefined, fallback = "неиз�
   return line ? line.replace(/^failed:\s*/i, "") : fallback;
 }
 
+/** A failed build's reason for people: the server's own words when they are Russian (a known failure says what to
+ *  do), otherwise a plain hint — a Python message («list index out of range») means nothing to them. */
+export function failReason(error: string | null | undefined): string {
+  const reason = error ? firstLine(error, "").replace(/[.\s]+$/, "") : "";
+  return /[а-яё]/i.test(reason) ? `${reason}.` : "Измените текст и соберите заново";
+}
+
 export function slideCount(v: Variant | null | undefined): number {
   if (!v) return 1;
   return v.slides.length || v.outline?.slides.length || v.plan?.slides.length || 1;

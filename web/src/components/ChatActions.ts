@@ -1,10 +1,9 @@
 // Side effects of the agent's replies: tracks the jobs the agent has started and narrates their results back into the chat.
 import { useCallback, useRef, useSyncExternalStore } from "react";
-import { api } from "../api";
-import { describeGeneration, errText, firstLine } from "../lib/narrate";
+import { describeGeneration, firstLine } from "../lib/narrate";
 import { plural } from "../lib/utils";
 import { useApp, type AppState } from "../store";
-import type { ChatResponse, EditResult, FixResult, Generation, TabKey } from "../types";
+import type { ChatResponse, EditResult, FixResult, TabKey } from "../types";
 
 const TABS: readonly TabKey[] = ["template", "brief", "plan", "variants", "why", "audit", "export", "run", "agent"];
 const asTab = (name: string): TabKey | null => TABS.find((t) => t === name) ?? null;
@@ -66,15 +65,9 @@ function trackGeneration(app: () => AppState, jobId: string, gid: string) {
     kind: "generate",
     template: app().templateId, // the chat builds from the template on screen
     onDone: async () => {
-      let g: Generation;
-      try {
-        g = await api.generation(gid);
-      } catch (e) {
-        app().toast("error", `Презентация собрана, но не открылась: ${errText(e)}`);
-        return;
-      }
       await app().refreshGenerations();
-      await app().loadGeneration(gid);
+      const g = await app().loadGeneration(gid); // (a failure to open it is reported there)
+      if (!g) return;
       app().setTab("variants");
       app().pushMessage("assistant", describeGeneration(g, app().strategyTitle));
       if (app().screen !== "result") app().toast("success", "Презентация готова");
@@ -98,8 +91,11 @@ function trackFixes(app: () => AppState, jobs: { strategy: string; job_id: strin
     if (left > 0) return;
     if (gid && outcomes.some((o) => o.done)) {
       await app().refreshGenerations();
-      await app().loadGeneration(gid);
-      app().setTab("audit");
+      // (a deck opened meanwhile stays on screen: the fixed one is reloaded only while it is the one shown)
+      if (app().generationId === gid) {
+        await app().loadGeneration(gid);
+        app().setTab("audit");
+      } else app().toast("success", "Исправления готовы в другой презентации — она в «Мои презентации»");
     }
     app().pushMessage("assistant", describeFixes(outcomes, app().strategyTitle));
   };
@@ -136,9 +132,11 @@ function trackEdit(app: () => AppState, jobId: string, gid: string, strategy: st
       if (res?.changed) {
         setEdited(res.kind !== "undo"); // after «верни как было» the chip does not offer itself again
         await app().refreshGenerations();
-        await app().loadGeneration(gid);
-        if (app().activeStrategy !== strategy) app().setActiveStrategy(strategy);
-        if (res.slide) app().setSelectedSlide(res.slide);
+        if (app().generationId === gid) {
+          await app().loadGeneration(gid);
+          if (app().activeStrategy !== strategy) app().setActiveStrategy(strategy);
+          if (res.slide) app().setSelectedSlide(res.slide);
+        } else app().toast("success", "Изменения готовы в другой презентации — она в «Мои презентации»");
       }
       app().pushMessage("assistant", res?.reply ?? "Готово.");
     },

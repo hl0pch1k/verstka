@@ -1,7 +1,7 @@
 // The helper's conversation: a one-line header, the feed, at most two contextual chips and the composer.
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type KeyboardEvent } from "react";
 import { FileText, Paperclip, Send, X } from "lucide-react";
-import { api } from "../api";
+import { ApiError, api } from "../api";
 import { errText } from "../lib/narrate";
 import { smoothScroll, stagger } from "../lib/motion";
 import { cn, sessionId } from "../lib/utils";
@@ -82,7 +82,9 @@ export function Chat({ onClose }: { onClose?: () => void }) {
         handleActions(res);
       } catch (e) {
         const reason = errText(e);
-        pushMessage("assistant", `Не получилось ответить: ${reason}. Повторите, когда сервер снова на связи.`);
+        // (only a request that never reached the server is about the connection; any other failure says its reason)
+        const offline = e instanceof ApiError && e.status === 0;
+        pushMessage("assistant", offline ? `Не получилось ответить: ${reason}. Повторите, когда сервер снова на связи.` : `Не получилось ответить: ${reason}.`);
       } finally {
         if (alive.current) setPending(false);
         areaRef.current?.focus();

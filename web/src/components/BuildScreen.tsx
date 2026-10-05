@@ -169,7 +169,7 @@ function Elapsed({ since }: { since: number }) {
   return (
     <p className="shrink-0 whitespace-nowrap tabular-nums" title="Обещаем уложиться в пять минут">
       <span className="text-title2 font-semibold text-zinc-900">{clock(ms / 1000)}</span>
-      {ms <= PROMISE_MS && <span className="ml-1.5 text-body text-zinc-400">· лимит {clock(PROMISE_MS / 1000)}</span>}
+      {ms <= PROMISE_MS && <span className="ml-1.5 text-body text-zinc-500">· лимит {clock(PROMISE_MS / 1000)}</span>}
     </p>
   );
 }

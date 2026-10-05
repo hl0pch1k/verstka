@@ -168,14 +168,14 @@ def _serve_file(base: Path, rel: str, **kwargs) -> FileResponse:
     base = base.resolve()
     target = (base / rel).resolve()
     if not target.is_relative_to(base) or not target.is_file():
-        raise HTTPException(404, "file not found")
+        raise HTTPException(404, "Файл не найден")
     return FileResponse(target, **kwargs)
 
 
 def _variant_dir(gid: str, strategy: str) -> Path:
     gdir = store.generation_dir(gid)
     if gdir is None or strategy not in STRATEGY_NAMES:
-        raise HTTPException(404, "not found")
+        raise HTTPException(404, "Не найдено")
     return gdir / strategy
 
 
@@ -267,11 +267,30 @@ def _current_agent(outline: Optional[dict], events: list[dict], strategy: str, e
     return agent
 
 
+INTERRUPTED = "Сервер перезапускался — сборка прервана. Соберите презентацию ещё раз"
+
+
+def _settle_orphan(meta: dict) -> dict:
+    """A build whose job this server does not run (started before a restart) is not being built any more: it ends as
+    failed, so the list and the deck page stop showing it as in progress and its template can be deleted again. A
+    build that has no job id yet is a few milliseconds old (create_generation writes the meta, then submits)."""
+    if meta.get("status") != "running":
+        return meta
+    jid = meta.get("job_id")
+    if jid and runner.get(str(jid)) is not None:
+        return meta
+    if not jid and time.time() - float(meta.get("created_at") or 0) < 60:
+        return meta
+    gid = str(meta.get("id") or "")
+    done = {"status": "failed", "error": INTERRUPTED}
+    return (store.merge_generation_meta(gid, done) if SAFE_ID_RE.fullmatch(gid) else None) or {**meta, **done}
+
+
 def _generation_payload(gid: str) -> dict:
     gdir = store.generation_dir(gid)
     if gdir is None:
-        raise HTTPException(404, "generation not found")
-    meta = store.read_generation_meta(gid) or {"id": gid}
+        raise HTTPException(404, "Презентация не найдена")
+    meta = _settle_orphan(store.read_generation_meta(gid) or {"id": gid})
     use_models = meta.get("use_models")
     supplied = bool(meta.get("outline_supplied"))
     ctx = _chain_ctx()
@@ -498,7 +517,7 @@ def delete_template(template_id: str) -> dict:
         store.workspace(template_id)
     except FileNotFoundError:
         raise HTTPException(404, "Шаблон не найден")
-    if any(g.get("template_id") == template_id and g.get("status") == "running" for g in store.list_generations()):
+    if any(g.get("template_id") == template_id and _settle_orphan(g).get("status") == "running" for g in store.list_generations()):
         raise HTTPException(409, "На этом шаблоне сейчас собирается презентация — удалите его, когда она будет готова")
     if not store.delete_template(template_id):
         raise HTTPException(500, "Не удалось удалить шаблон — попробуйте ещё раз")
@@ -523,14 +542,14 @@ def rename_template(template_id: str, body: TemplateRename) -> dict:
 def get_template(template_id: str) -> dict:
     m = store.manifest(template_id)
     if m is None:
-        raise HTTPException(404, "template not found or not analyzed")
+        raise HTTPException(404, "Шаблон не найден или ещё не разобран")
     data = m.model_dump()
     for p in data["patterns"]:
         if p.get("thumbnail"):
             p["thumbnail_url"] = f"/api/templates/{template_id}/files/{p['thumbnail']}"
     data["gallery_url"] = f"/api/templates/{template_id}/files/gallery.html"
     data["title"] = store.template_title(template_id)
-    data["narration"] = describe_template(m)
+    data["narration"] = describe_template(m, data["title"])
     return data
 
 
@@ -539,7 +558,7 @@ def template_file(template_id: str, path: str):
     try:
         ws = store.workspace(template_id)
     except FileNotFoundError:
-        raise HTTPException(404, "template not found")
+        raise HTTPException(404, "Шаблон не найден")
     return _serve_file(ws.dir, path)
 
 
@@ -550,7 +569,7 @@ def template_file(template_id: str, path: str):
 def get_job(job_id: str) -> dict:
     job = runner.get(job_id)
     if job is None:
-        raise HTTPException(404, "job not found")
+        raise HTTPException(404, "Задание не найдено — возможно, сервер перезапускался")
     return job.to_dict()
 
 
@@ -558,7 +577,7 @@ def get_job(job_id: str) -> dict:
 def job_events(job_id: str):
     job = runner.get(job_id)
     if job is None:
-        raise HTTPException(404, "job not found")
+        raise HTTPException(404, "Задание не найдено — возможно, сервер перезапускался")
 
     def gen():
         q = job.subscribe()
@@ -604,9 +623,25 @@ def _outline_title(gid: str, strategy: str) -> Optional[str]:
     return title
 
 
+LIST_BRIEF = 400  # the list shows a deck's first line; its whole text comes with the deck (GET /api/generations/{gid})
+
+
+def _list_entry(meta: dict) -> dict:
+    """A deck in «Мои презентации»: its meta without the bulk — the brief cut to its start, the writer's text left out
+    (the list is fetched after every job; 76 decks shipped 583 KB, the briefs most of it)."""
+    out = dict(meta)
+    brief = out.get("brief")
+    if isinstance(brief, str) and len(brief) > LIST_BRIEF:
+        out["brief"] = brief[:LIST_BRIEF]
+    if isinstance(out.get("writer"), dict):
+        out["writer"] = {"status": out["writer"].get("status")}
+    out.pop("extra_instructions", None)
+    return out
+
+
 @app.get("/api/generations")
 def list_generations() -> list[dict]:
-    out = store.list_generations()
+    out = [_list_entry(_settle_orphan(m)) for m in store.list_generations()]
     for meta in out:
         if meta.get("title") or meta.get("status") != "done" or not meta.get("strategies"):
             continue
@@ -619,19 +654,19 @@ def list_generations() -> list[dict]:
 @app.post("/api/generations")
 def create_generation(req: GenerateRequest) -> dict:
     if store.manifest(req.template_id) is None:
-        raise HTTPException(404, "template not found or not analyzed")
+        raise HTTPException(404, "Шаблон не найден или ещё не разобран")
     if req.brief is None and req.outline is None:
-        raise HTTPException(400, "brief or outline is required")
+        raise HTTPException(400, "Нужен текст презентации")
     bad = [s for s in req.strategies if s not in STRATEGY_NAMES]
     if bad:
-        raise HTTPException(400, f"unknown strategies: {bad}")
+        raise HTTPException(400, f"Неизвестные варианты: {bad}")
     if req.outline is not None:
         try:
             DeckOutline.model_validate(req.outline)
         except ValidationError as e:
-            raise HTTPException(422, "invalid outline: " + _validation_message(e))
+            raise HTTPException(422, "План слайдов не прочитан: " + _validation_message(e))
     elif not _brief_from_request(req).text.strip():
-        raise HTTPException(422, "brief is empty")
+        raise HTTPException(422, "Текст презентации пуст")
     gid, gdir = store.new_generation_dir()
     store.write_generation_meta(gid, {"id": gid, "template_id": req.template_id, "strategies": req.strategies, "brief": req.brief, "audience": req.audience, "purpose": req.purpose, "slides": req.slides, **_request_options(req), "status": "running", "created_at": time.time()})
     job = runner.submit("generate", _generation_job(gid, gdir, req))
@@ -647,7 +682,7 @@ def get_generation(gid: str) -> dict:
 @app.delete("/api/generations/{gid}")
 def delete_generation(gid: str) -> dict:
     if not SAFE_ID_RE.fullmatch(gid):
-        raise HTTPException(404, "not found")
+        raise HTTPException(404, "Не найдено")
     return {"deleted": store.delete_generation(gid)}
 
 
@@ -656,7 +691,7 @@ def writer_text_file(gid: str):
     """The text the agent wrote from the topic (writer mode) as it built the deck from it: «Скачать текст»."""
     gdir = store.generation_dir(gid)
     if gdir is None:
-        raise HTTPException(404, "not found")
+        raise HTTPException(404, "Не найдено")
     return _serve_file(gdir, "writer.md", media_type="text/markdown; charset=utf-8", filename="text.md")
 
 
@@ -672,7 +707,7 @@ def slide_list(gid: str, strategy: str) -> dict:
 def slide_image(gid: str, strategy: str, name: str):
     vdir = _variant_dir(gid, strategy)
     if not re.fullmatch(r"slide-\d{3}\.jpg", name):
-        raise HTTPException(404, "not found")
+        raise HTTPException(404, "Не найдено")
     return _serve_file(vdir / "slides", name, media_type="image/jpeg")
 
 
@@ -680,7 +715,7 @@ def slide_image(gid: str, strategy: str, name: str):
 def generation_file(gid: str, strategy: str, name: str):
     vdir = _variant_dir(gid, strategy)
     if name not in ("deck.pptx", "deck.pdf", "deck.html", "outline.json", "layout_plan.json", "audit_report.json", "run_manifest.json"):
-        raise HTTPException(404, "not found")
+        raise HTTPException(404, "Не найдено")
     media = {"pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation", "pdf": "application/pdf", "html": "text/html", "json": "application/json"}[name.rsplit(".", 1)[-1]]
     # the web version opens in the browser («Веб» → a new tab); the other files are downloads
     how = "inline" if name == "deck.html" else "attachment"
@@ -693,7 +728,7 @@ def explain_slide(gid: str, strategy: str, index: int) -> dict:
     meta = store.read_generation_meta(gid) or {}
     manifest = store.manifest(meta.get("template_id", ""))
     if manifest is None or not (vdir / "outline.json").exists():
-        raise HTTPException(404, "variant not found")
+        raise HTTPException(404, "Вариант не найден")
     raw = json.loads((vdir / "outline.json").read_text(encoding="utf-8"))
     outline = DeckOutline.model_validate(raw)
     plan = LayoutPlan.model_validate_json((vdir / "layout_plan.json").read_text(encoding="utf-8"))
@@ -1045,7 +1080,7 @@ def diff_runs(gid: str, strategy: str, other_gid: str, other_strategy: str) -> d
     pa = _variant_dir(gid, strategy) / "run_manifest.json"
     pb = _variant_dir(other_gid, other_strategy) / "run_manifest.json"
     if not pa.exists() or not pb.exists():
-        raise HTTPException(404, "run manifest not found")
+        raise HTTPException(404, "Паспорт сборки не найден")
     ma = json.loads(pa.read_text(encoding="utf-8"))
     mb = json.loads(pb.read_text(encoding="utf-8"))
     return {"a": {"generation": gid, "strategy": strategy, "score": ma.get("audit", {}).get("score")}, "b": {"generation": other_gid, "strategy": other_strategy, "score": mb.get("audit", {}).get("score")}, "diff": diff_manifests(ma, mb)}
@@ -1054,8 +1089,13 @@ def diff_runs(gid: str, strategy: str, other_gid: str, other_strategy: str) -> d
 # ---------------------------------------------------------------------------- routes: chat agent
 
 # "generate" is decided first: a brief pasted into the chat mentions audiences, plans, templates and audits all at once.
-_GEN_RX = re.compile(r"сгенерируй|(сделай|собери|создай|подготовь)\s+(презентац|слайд|дек|колод)|\bgenerate\b", re.I)
+_GEN_RX = re.compile(r"сгенерируй|(сделай|собери|создай|подготовь)(?:те)?\s+(?:(?:мне|нам)\s+)?(?:(?:нов|друг)\w*\s+|(?:ещё|еще)\s+одн\w*\s+)?(презентац|слайд|дек|колод)|\bgenerate\b", re.I)
+# the object of the command, left after «сгенерируй» / the rest of the noun «презентац|ию»
+_GEN_OBJECT_RX = re.compile(r"^[а-яё]*\s*(?:(?:мне|нам)\s+)?(?:(?:нов|друг)\w*\s+|(?:ещё|еще)\s+одн\w*\s+)?(?:(?:презентац|слайд|дек|колод)[а-яё]*)?"
+                            r"\s*(?:(?:me\s+)?(?:an?|the)\s+)?(?:(?:new|another)\s+)?(?:presentation|deck|slides?)?", re.I)
 _INTENT_RULES = [
+    # «как там?», «готово?», «сколько ещё?» — about the build in progress (short messages only reach these rules)
+    ("status", re.compile(r"^(?!.*слайд\w*\s*\d)\W*(?:ну\s+)?(?:что\s+там|как\s+там|как\s+(?:идёт|идет|продвигается)|долго\s+(?:ещё|еще)|сколько\s+(?:ещё|еще|осталось)|скоро\b|(?:уже\s+)?готово\b|статус|прогресс)", re.I)),
     ("explain_slide", re.compile(r"(почему|объясни|как выбран|why).*слайд\w*\s*(\d+)|слайд\w*\s*(\d+).*(почему|объясни|why)", re.I)),
     ("agent", re.compile(r"как\s+(ты\s+|агент\s+)?(работал|действовал|думал|рассуждал)|что\s+(ты\s+|агент\s+)?(сделал|делал)|журнал|ход\s+работы|шаги\s+агента|работ\w*\s+агента|критик", re.I)),
     ("fix_all", re.compile(r"(исправь|почини|поправь)\s+(вс|ошибк|замечан)|fix all|автофикс", re.I)),
@@ -1091,6 +1131,39 @@ def _edit_ack(req) -> str:
 
 def _looks_like_brief(text: str) -> bool:
     return len(text) > 200 or text.count("\n") >= 3
+
+
+# what follows «сделай презентацию»: a topic the writer can write about («про историю VK», «на тему…»)
+_TOPIC_RX = re.compile(r"^\s*(?:,\s*)?(?:про|о|об|обо|на\s+тему|по\s+теме|about|on)\s+\S", re.I)
+
+
+def _build_from(message: str) -> Optional[str]:
+    """What a «generate» message builds from: «brief» — a text of its own (a pasted brief), «topic» — a topic the writer
+    can write about («сделай презентацию про историю VK»); None when it only asks for a deck — «сделай презентацию
+    короче», «собери заново» speak about the deck on screen, a bare «сделай презентацию» has nothing to build from."""
+    if _looks_like_brief(message):
+        return "brief"
+    m = _GEN_RX.search(message)
+    rest = message[m.end():] if m else message
+    rest = _GEN_OBJECT_RX.sub("", rest, count=1)
+    return "topic" if _TOPIC_RX.match(rest) else None
+
+
+def _live_builds() -> list[Job]:
+    return [j for j in list(runner.jobs.values()) if j.kind == "generate" and j.status in ("queued", "running")]
+
+
+def _build_status(gen_id: Optional[str]) -> str:
+    """«Как там?» in the chat: the build in progress (its share done), a change being made, or what is ready."""
+    live = _live_builds()
+    if live:
+        pct = round(max(live, key=lambda j: j.created_at).progress * 100)
+        return f"Собираю презентацию — готово примерно на {pct}%. Покажу её, как только закончу." if pct else "Начинаю собирать презентацию — покажу её, как только закончу."
+    if any(j.status in ("queued", "running") for j in list(runner.jobs.values())):
+        return "Вношу изменения — ещё немного."
+    if gen_id:
+        return "Всё готово: презентация на экране. Могу объяснить или изменить любой слайд."
+    return "Сейчас ничего не собирается. Выберите шаблон и пришлите текст — соберу три варианта."
 
 
 def _intent(message: str) -> tuple[str, dict]:
@@ -1217,9 +1290,19 @@ def chat(req: ChatRequest) -> dict:
             jobs.append({"strategy": vv["strategy"], "job_id": r["job_id"]})
         reply = "Запустил автоматические исправления для всех вариантов — расскажу, что изменилось." if jobs else "Исправления уже выполняются — дождитесь результата."
         actions.append({"type": "jobs", "jobs": jobs})
+    elif intent == "status":
+        reply = _build_status(gen_id)
     elif intent == "generate":
+        source = _build_from(req.message)
         if not template_id:
             reply = "Сначала выберите шаблон, затем пришлите текст — соберу три варианта."
+        elif _live_builds():
+            reply = "Сейчас собирается другая презентация — пришлите текст, когда она будет готова."
+        elif source is None:
+            reply = ("Эту презентацию могу изменить по слайдам — например: «на слайде 3 покажи расходы таблицей». Чтобы собрать новую, пришлите её текст."
+                     if gen_id else "Пришлите текст презентации — соберу три варианта.")
+        elif source == "topic" and not models_configured():
+            reply = "Без подключённой модели я не пишу текст сам — пришлите текст презентации, и я разложу его по слайдам шаблона."
         else:
             brief_text = req.message
             r = create_generation(GenerateRequest(template_id=template_id, brief=brief_text, use_models=models_configured()))

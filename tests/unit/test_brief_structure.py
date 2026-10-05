@@ -372,3 +372,14 @@ def test_a_compared_pair_is_named_by_its_two_things():
     assert ["Месячная вместимость", "Ожидаемое количество посещений"] in pairs
     assert _compared_pair("Нужен график сравнения выручки и расходов") == ["Выручка", "Расходы"]
     assert _compared_pair("Нужен столбчатый график сравнения текущей и прогнозируемой месячной прибыли") is None
+
+
+def test_a_slide_count_is_read_only_where_the_author_sets_it():
+    """«в 2 слайдах», «Первые 2 слайда», «На 2 слайде» speak about some slides, not the deck's total (the create screen
+    locked its stepper below the minimum and the server cut the deck to them); a request for N slides is the total."""
+    from verstka.planning.brief import parse_brief_text
+
+    for text in ("Расскажи о рынке в 2 слайдах, остальное — про продукт.", "Первые 2 слайда — про компанию.", "3 слайда про рынок, дальше продукт.", "На 2 слайде покажи таблицу."):
+        assert parse_brief_text(text).slide_count is None, text
+    for text, n in (("Презентация на 8 слайдов о продукте.", 8), ("Сделай, пожалуйста, 12 слайдов о компании.", 12), ("Make a 9-slide deck about the company.", 9), ("Не более 6 слайдов.", 6)):
+        assert parse_brief_text(text).slide_count == n, text

@@ -49,7 +49,7 @@ export const SAMPLE_BRIEF = `Запуск функции «Умные сводк
 
 // a VK field: white, a quiet border that darkens under the pointer and turns VK blue with a soft halo in focus
 export const INPUT_CLS =
-  "h-10 w-full rounded-lg border border-zinc-900/[0.12] bg-white px-3 text-body text-zinc-900 placeholder:text-zinc-400 outline-none transition-[border-color,box-shadow] duration-150 hover:border-zinc-900/20 focus:border-accent focus:shadow-[0_0_0_3px_rgba(0,119,255,0.12)] disabled:cursor-not-allowed disabled:opacity-40";
+  "h-10 w-full rounded-lg border border-zinc-900/[0.12] bg-white px-3 text-body text-zinc-900 placeholder:text-zinc-500 outline-none transition-[border-color,box-shadow] duration-150 hover:border-zinc-900/20 focus:border-accent focus:shadow-[0_0_0_3px_rgba(0,119,255,0.12)] disabled:cursor-not-allowed disabled:opacity-40";
 
 /** A switch with a one-line label (the VK switch of ui/Switch: the knob springs across, the track's colour follows).
  *  `title` explains a disabled row on hover; `hint` says what the switch's state means, in a quiet line under the label. */

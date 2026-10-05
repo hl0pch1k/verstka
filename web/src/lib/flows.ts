@@ -78,7 +78,8 @@ export interface GenerationDeps extends CommonDeps {
   currentScreen?(): string;
 }
 
-export function generationFlow(req: GenerateRequest, d: GenerationDeps): Promise<void> {
+/** `expected`: the slide count the screen read in the text (the build screen's placeholders), never sent. */
+export function generationFlow(req: GenerateRequest, d: GenerationDeps, expected: number | null = null): Promise<void> {
   return new Promise<void>((resolve) => {
     void (async () => {
       let res: GenerateResponse;
@@ -95,7 +96,7 @@ export function generationFlow(req: GenerateRequest, d: GenerationDeps): Promise
         items: req.strategies,
         template: req.template_id,
         generation: res.generation_id,
-        slides: req.slides ?? null,
+        slides: req.slides ?? expected,
         onDone: async () => {
           void d.refreshModelStatus();
           await d.refreshGenerations();

@@ -8,12 +8,12 @@ import { ChevronRight, Download, FileText, FolderDown, ImageOff, LayoutTemplate,
 import type { LucideIcon } from "lucide-react";
 import { keepTogether, plainWords, variantsNote } from "../../lib/agent";
 import { deckNotice, skeletonDeck } from "../../lib/modelText";
-import { figuresLine } from "../../lib/narrate";
+import { failReason, figuresLine } from "../../lib/narrate";
 import { fileSafe, variantHint } from "../../lib/plain";
 import { decodeImage, EASE, MOTION, prefersReducedMotion, useCountUp, useFlip, usePresence, viewTransition } from "../../lib/motion";
 import { cn, fmtWhen, plural, storage } from "../../lib/utils";
-import { useApp } from "../../store";
-import type { DetailKey, Generation, Issue, Variant } from "../../types";
+import { type ComposerPreset, useApp } from "../../store";
+import type { DetailKey, Generation, GenerationMeta, Issue, Variant } from "../../types";
 import { isMinor } from "../AuditHelpers";
 import { BuildScreen } from "../BuildScreen";
 import { Button, LinkButton } from "../ui/Button";
@@ -266,8 +266,23 @@ const inViewTransition = () => {
   }
 };
 
+/** «Изменить текст» on a deck: the create screen with that deck's own text and parameters (its audience, purpose,
+ *  count, switches and variants) — never the last draft typed for another deck, next to this deck's template. */
+function editDeckText(generation: GenerationMeta, editText: (text: string, preset?: ComposerPreset) => void, setScreen: (s: "create" | "result") => void) {
+  if (!generation.brief) return setScreen("create");
+  editText(generation.brief, {
+    audience: generation.audience ?? null,
+    purpose: generation.purpose ?? null,
+    slides: generation.slides ?? null,
+    useModels: generation.use_models,
+    auditModels: generation.audit_models,
+    strategies: generation.strategies,
+  });
+}
+
 function Deck({ generation }: { generation: Generation }) {
-  const { activeVariant, setActiveStrategy, selectedSlide, setSelectedSlide, strategyTitle, strategies, manifest, setScreen, detail, setDetail, health, modelStatus, refreshModelStatus, startGeneration, activeJob, generations, agentOpen, templateLabel } = useApp();
+  const { activeVariant, setActiveStrategy, selectedSlide, setSelectedSlide, strategyTitle, strategies, manifest, setScreen, detail, setDetail, health, modelStatus, refreshModelStatus, startGeneration, activeJob, generations, agentOpen, templateLabel, editText } = useApp();
+  const editOwnText = () => editDeckText(generation, editText, setScreen);
   const variant = activeVariant ?? generation.variants[0];
   const total = slidesOf(variant);
   const empty = total === 0;
@@ -595,7 +610,7 @@ function Deck({ generation }: { generation: Generation }) {
   const [submitting, setSubmitting] = useState(false);
   const rebuild = async () => {
     if (inFlight.current) return;
-    if (!generation.brief || !health?.models_configured) return setScreen("create");
+    if (!generation.brief || !health?.models_configured) return editOwnText();
     inFlight.current = true;
     setSubmitting(true);
     try {
@@ -829,9 +844,9 @@ function Deck({ generation }: { generation: Generation }) {
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {agentOpen ? (
-            <Button variant="secondary" size="lg" icon={PenLine} aria-label="Изменить текст" title="Изменить текст или шаблон" onClick={() => setScreen("create")} />
+            <Button variant="secondary" size="lg" icon={PenLine} aria-label="Изменить текст" title="Изменить текст или шаблон" onClick={editOwnText} />
           ) : (
-            <Button variant="secondary" size="lg" icon={PenLine} title="Изменить текст или шаблон" onClick={() => setScreen("create")}>Изменить текст</Button>
+            <Button variant="secondary" size="lg" icon={PenLine} title="Изменить текст или шаблон" onClick={editOwnText}>Изменить текст</Button>
           )}
           {/* the helper open: both secondary actions keep only their icons, the title keeps its room */}
           {pdf &&
@@ -869,7 +884,7 @@ function Deck({ generation }: { generation: Generation }) {
                         </Button>
                       </span>
                     )}
-                    {shownNotice.rewrite && <Button size="sm" variant="white" icon={PenLine} onClick={() => setScreen("create")}>Дописать текст</Button>}
+                    {shownNotice.rewrite && <Button size="sm" variant="white" icon={PenLine} onClick={editOwnText}>Дописать текст</Button>}
                   </>
                 ) : null
               }
@@ -1059,7 +1074,7 @@ function DeckSkeleton() {
 const HANDOFF_WAIT = 4000;
 
 export function ResultScreen() {
-  const { generation, generationLoading, activeJob, activeVariant, setScreen } = useApp();
+  const { generation, generationLoading, activeJob, activeVariant, setScreen, editText } = useApp();
   const building = !!activeJob && activeJob.kind === "generate" && (activeJob.status === "queued" || activeJob.status === "running");
   // build → result inside a View Transition: the build screen stays until the new deck is loaded and its first slide
   // decoded, so the transition goes from the build straight to the finished deck — never through an empty screen, a
@@ -1119,14 +1134,21 @@ export function ResultScreen() {
   if (generation && generation.variants.length > 0) {
     // one Deck per generation: its measured widths and the natural aspect of the slides start afresh with another deck
     body = <Deck key={generation.id} generation={generation} />;
+  } else if (generation && (generation.status === "running" || generation.status === "queued")) {
+    // a deck still being built (opened from another tab's build): it appears in «Мои презентации» once ready
+    body = (
+      <div className="flex h-full items-center justify-center px-8 py-6">
+        <EmptyState icon={FileText} title="Презентация ещё собирается" hint="Она появится в «Мои презентации», когда будет готова" />
+      </div>
+    );
   } else if (generation) {
     body = (
       <div className="flex h-full items-center justify-center px-8 py-6">
         <EmptyState
           icon={FileText}
           title="Не получилось собрать презентацию"
-          hint="Измените текст и соберите заново"
-          action={<Button variant="primary" size="lg" onClick={() => setScreen("create")}>Вернуться к тексту</Button>}
+          hint={failReason(generation.error)}
+          action={<Button variant="primary" size="lg" onClick={() => editDeckText(generation, editText, setScreen)}>Вернуться к тексту</Button>}
         />
       </div>
     );
