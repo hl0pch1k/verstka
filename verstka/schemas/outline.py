@@ -121,6 +121,10 @@ class SlideContent(BaseModel):
     # what that picture shows, in the user's words («вид теплицы сверху или схема в перспективе …»): written quietly
     # inside the free place, so the place reads as the picture's, not as a gap
     photo_hint: Optional[str] = None
+    # the place is for the author's own photo («оставь место под фотографию помещения», «Фото я добавлю
+    # самостоятельно», «не заполняй его сгенерированным изображением»): the image generator never fills it by itself
+    # (verstka/images) — a place the author only described («[Место под изображение: экран панели]») gets a picture
+    photo_own: bool = False
     # the user's code, as written (verbatim mode: a fenced block of the brief)
     code: Optional[CodeBlock] = None
 

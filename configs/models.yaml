@@ -122,6 +122,24 @@ roles:
     temperature: 0.1
     # the same links without Cloud.ru's Qwen3-32B, which reads no images
     chain: [*paid_qwen, *groq_qwen, *free_qwen, *cloudru_vl, *gemma_31b, *gemma_26b]
+  # Pictures inside slides (the organisers' star task): open weights, Apache 2.0 / MIT, at most 20B parameters.
+  # OpenRouter's image endpoint (POST /api/v1/images → data[].b64_json), the same OPENROUTER_API_KEY as the text roles;
+  # without the key both links are off and the slides keep their free places. What is asked and how: configs/images.yaml
+  #   1. FLUX.2 [klein] 4B — Black Forest Labs, Apache 2.0, 4B; paid (≈ $0.003–0.02 a picture), fast
+  #   2. Ming-Image-0.1-Design — inclusionAI, MIT, 6B, made for graphic design; free on OpenRouter
+  # Other hosts: backend openai_images (POST /images/generations: Together, Nebius, DeepInfra, a local server, VK
+  # inference) or hf_inference (Hugging Face: Tongyi-MAI/Z-Image-Turbo 6B, Qwen/Qwen-Image-2512 20B) — see MODELS.md.
+  t2i:
+    backend: openrouter_images
+    base_url: https://openrouter.ai/api/v1
+    api_key: ${OPENROUTER_API_KEY}
+    resolution: "1K"
+    timeout_s: 90
+    chain:
+      - model: black-forest-labs/flux.2-klein-4b
+        label: FLUX.2 [klein] 4B (OpenRouter)
+      - model: inclusionai/ming-image-0.1-design
+        label: Ming-Image 0.1 Design (OpenRouter, бесплатно)
 limits:
   max_concurrency: 4  # model calls side by side per step (Cloud.ru's per-minute cap is shared by everyone on the key)
   requests_per_minute: 18  # OpenRouter's free models: 20 requests/min per account; the free links share this bucket

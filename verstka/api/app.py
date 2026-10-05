@@ -11,7 +11,7 @@ import shutil
 import threading
 import time
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Literal, Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -124,6 +124,16 @@ class GenerateRequest(BaseModel):
     audit_models: bool = False
     autofix: bool = True
     exports: list[str] = Field(default_factory=lambda: ["pdf", "html"])
+    # «Генерировать изображения»: the places the author described get pictures (verstka/images); None — the config
+    # (on when a text-to-image model has a key), False — the places stay free
+    pictures: Optional[bool] = None
+
+
+class PictureBody(BaseModel):
+    """«Заменить изображение» on slide n: a new picture (on the person's `wish`) or the free place back («remove»)."""
+
+    wish: Optional[str] = Field(default=None, max_length=600)
+    action: Literal["generate", "remove"] = "generate"
 
 
 class FixRequest(BaseModel):
@@ -236,8 +246,16 @@ def _variant_payload(gdir: Path, strategy: str, use_models: Optional[bool] = Non
         "design": slide_design(outline),
         # the chat agent's edits of this variant (pipeline/revise.py): what was asked and answered, oldest first; the
         # count versions the slide previews (their names stay slide-001.jpg…)
-        "edits": [{k: e.get(k) for k in ("at", "request", "reply", "kind", "slides", "score_before", "score_after", "fixed", "how", "version", "undo_of")} for e in edits],
+        "edits": [{k: e.get(k) for k in ("at", "request", "reply", "kind", "slides", "score_before", "score_after", "fixed", "how", "version", "undo_of", "wish", "action")} for e in edits],
+        # the pictures inside the slides and the places kept for them (verstka/images): what each shows, by which model
+        "pictures": _pictures_of(vdir),
     }
+
+
+def _pictures_of(vdir: Path) -> list[dict]:
+    from verstka.images.fill import public_records, read_records
+
+    return public_records(read_records(vdir))
 
 
 def _edits_of(vdir: Path) -> list[dict]:
@@ -335,6 +353,8 @@ def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job) -> dic
         exports=req.exports,
         # plain progress messages and the planning agent's step events (the live timeline of the build screen)
         progress=job_progress(job),
+        pictures=req.pictures,
+        image_provider=image_provider() if req.pictures is not False else None,
     )
     write_agent_file(gdir, job.agent_events())
     planners = {}
@@ -381,7 +401,7 @@ def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job) -> dic
 
 def _request_options(req: GenerateRequest) -> dict:
     """The request's switches, kept in generation.json: «Собрать ещё раз» repeats the deck with the same inputs."""
-    return {"audit_models": req.audit_models, "autofix": req.autofix, "exports": list(req.exports), "language": req.language, "extra_instructions": req.extra_instructions, "outline_supplied": req.outline is not None}
+    return {"audit_models": req.audit_models, "autofix": req.autofix, "exports": list(req.exports), "language": req.language, "extra_instructions": req.extra_instructions, "outline_supplied": req.outline is not None, "pictures": req.pictures}
 
 
 def _generation_job(gid: str, gdir: Path, req: GenerateRequest) -> Callable[[Job], dict]:
@@ -404,7 +424,32 @@ def _generation_job(gid: str, gdir: Path, req: GenerateRequest) -> Callable[[Job
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"ok": True, "version": __version__, "models_configured": models_configured(), "workspace": str(store.root), "writer": _writer_enabled()}
+    return {"ok": True, "version": __version__, "models_configured": models_configured(), "workspace": str(store.root), "writer": _writer_enabled(), "images": images_status()}
+
+
+def image_provider():
+    """The `t2i` role's chain (verstka/images/providers.py), None when the models config has none."""
+    from verstka.images.providers import load_image_provider
+
+    try:
+        return load_image_provider()
+    except Exception:  # noqa: BLE001 - a broken config: no pictures
+        log.warning("t2i role unavailable", exc_info=True)
+        return None
+
+
+def images_configured() -> bool:
+    p = image_provider()
+    return p is not None and not getattr(p, "off", True)
+
+
+def images_status() -> dict:
+    """Pictures inside slides: on (a text-to-image model has a key), the models in order, the config's default."""
+    from verstka.images.prompt import load_config
+
+    p = image_provider()
+    links = p.describe() if p is not None else []
+    return {"configured": images_configured(), "enabled": bool(load_config().get("enabled", True)), "models": [{"label": d["label"], "state": d["state"]} for d in links]}
 
 
 def _writer_enabled() -> bool:
@@ -938,7 +983,7 @@ def _edit_job(gid: str, strategy: str, body: EditRequestBody) -> Callable[[Job],
         else:
             job.emit("Перерисовываю вариант", 0.55)
             version = R.snapshot(vdir)
-            v = R.rerender_variant(vdir, strategy, new, store.workspace(meta["template_id"]).source, store.root, brief=brief, exports=list(meta.get("exports") or []))
+            v = R.rerender_variant(vdir, strategy, new, store.workspace(meta["template_id"]).source, store.root, brief=brief, exports=list(meta.get("exports") or []), pictures=meta.get("pictures"))
             audit, n_slides = v.audit, len(v.outline.slides)
         after = audit.summary.score if audit else None
         R.log_edit(vdir, {"version": version, "undo_of": undone, "request": body.message, "kind": req.kind, "slides": req.slides, "reply": reply, "score_before": before, "score_after": after})
@@ -1073,6 +1118,80 @@ def fix_slide(gid: str, strategy: str, n: int, body: SlideFixBody) -> dict:
     return {"job_id": job.id}
 
 
+@app.post("/api/generations/{gid}/{strategy}/slides/{n}/image")
+def change_slide_picture(gid: str, strategy: str, n: int, body: PictureBody) -> dict:
+    """«Заменить изображение»: a new picture for slide n's place on the person's wish, or the free place back (a job;
+    «верни как было» undoes it like any edit)."""
+    from verstka.images.replace import has_place
+
+    try:
+        vdir = _variant_dir(gid, strategy)
+    except HTTPException:
+        raise HTTPException(404, "Вариант не найден")
+    meta = store.read_generation_meta(gid) or {}
+    if store.manifest(meta.get("template_id", "")) is None or not all((vdir / f).exists() for f in ("deck.pptx", "outline.json", "audit_report.json")):
+        raise HTTPException(404, "Вариант не найден")
+    try:
+        total = len(DeckOutline.model_validate_json((vdir / "outline.json").read_text(encoding="utf-8")).slides)
+    except (OSError, ValueError):
+        raise HTTPException(404, "Вариант не найден")
+    if not 1 <= n <= total:
+        raise HTTPException(422, f"В этом варианте {ru_count(total, 'слайд', 'слайда', 'слайдов')} — слайда {n} нет")
+    if body.action == "generate" and not images_configured():
+        raise HTTPException(503, "Модель изображений не подключена: впишите ключ OPENROUTER_API_KEY в файл .env и перезапустите сервер")
+    if not has_place(vdir, n):
+        raise HTTPException(422, f"На слайде {n} нет изображения и места под него")
+    key = (gid, strategy)
+    with _fix_lock:
+        if key in _fix_active:
+            raise HTTPException(409, _VARIANT_BUSY)
+        _fix_active.add(key)
+
+    def run(job: Job) -> dict:
+        from verstka.images.replace import change_picture
+
+        try:
+            manifest = store.manifest(meta.get("template_id", ""))
+            if manifest is None:
+                raise ValueError("Шаблон этой презентации больше не в библиотеке")
+            use_models = bool(meta.get("use_models", True)) and models_configured()
+            brief = _brief_of_meta(meta)
+            try:
+                res = change_picture(
+                    vdir, strategy, n, manifest=manifest, ws=store.workspace(meta["template_id"]), provider=image_provider(), action=body.action,
+                    wish=body.wish, skills=skills() if use_models else None, providers=providers() if use_models else None,
+                    exports=list(meta.get("exports") or []), brief_text=brief.text if brief is not None else None, progress=job_progress(job),
+                )
+            except ValueError as e:
+                msg = str(e)
+                return {"reply": f"Не получилось: {msg[:1].lower() + msg[1:]}.", "changed": False, "applied": False, "kind": "picture", "action": body.action, "strategy": strategy, "slide": n}
+            except Exception as e:  # noqa: BLE001 - the model failed: the slide stays as it was
+                from verstka.providers.base import ProviderError
+
+                if isinstance(e, ProviderError):
+                    log.warning("picture change: %s", e)
+                    return {"reply": "Не получилось: модель изображений не ответила — слайд остался как был. Попробуйте ещё раз чуть позже.", "changed": False, "applied": False, "kind": "picture", "action": body.action, "strategy": strategy, "slide": n}
+                raise
+            if res.score_after is not None:
+                summary = meta.get("summary", {})
+                if isinstance(summary, dict):
+                    audit = AuditReport.model_validate_json((vdir / "audit_report.json").read_text(encoding="utf-8"))
+                    summary[strategy] = {**summary.get(strategy, {}), "score": audit.summary.score, "errors": audit.summary.errors, "warnings": audit.summary.warnings}
+                    store.merge_generation_meta(gid, {"summary": summary})
+            return res.result(strategy)
+        finally:
+            with _fix_lock:
+                _fix_active.discard(key)
+
+    try:
+        job = runner.submit("picture", run)
+    except BaseException:
+        with _fix_lock:
+            _fix_active.discard(key)
+        raise
+    return {"job_id": job.id}
+
+
 @app.get("/api/generations/{gid}/{strategy}/diff/{other_gid}/{other_strategy}")
 def diff_runs(gid: str, strategy: str, other_gid: str, other_strategy: str) -> dict:
     from verstka.pipeline.run_manifest import diff_manifests
@@ -1104,6 +1223,29 @@ _INTENT_RULES = [
     ("template", re.compile(r"\bшаблон|template|дизайн-систем|палитр|шрифт", re.I)),
     ("plan", re.compile(r"\bплан\w*|структур|какие слайды|outline|макет", re.I)),
 ]
+
+
+# «замени картинку на слайде 2 на вид сверху», «нарисуй другое изображение», «убери картинку со слайда 3»: the picture
+# of a slide of the deck on screen (verstka/images/replace.py) — never «оставь место под фото» (an edit of the slide)
+_PICTURE_RX = re.compile(
+    r"\b(?:замени|поменяй|смени|перерисуй|сгенерируй|нарисуй|обнови|переделай)(?:те)?\s+(?:\S+\s+){0,2}?(?:картинк|изображени|иллюстрац|рисун)\w*"
+    r"|\b(?:друг|нов)\w+\s+(?:картинк|изображени|иллюстрац)\w*"
+    r"|\b(?:убери|удали)(?:те)?\s+(?:\S+\s+){0,2}?(?:картинк|изображени|иллюстрац)\w*",
+    re.I,
+)
+_PICTURE_REMOVE_RX = re.compile(r"\b(?:убери|удали)(?:те)?\b", re.I)
+_SLIDE_NO_RX = re.compile(r"(?:(?:на|со?|для)\s+)?слайд\w*\s*№?\s*(\d{1,2})", re.I)
+
+
+def _picture_ask(message: str) -> tuple[Optional[int], Optional[str], str]:
+    """(the slide named, the wish — what the new picture should show —, the action) of a picture request in the chat."""
+    m = _SLIDE_NO_RX.search(message)
+    n = int(m.group(1)) if m else None
+    action = "remove" if _PICTURE_REMOVE_RX.search(message) else "generate"
+    t = _PICTURE_RX.sub(" ", message, count=1)
+    t = _SLIDE_NO_RX.sub(" ", t)
+    t = re.sub(r"^[\s,.:;—–-]*(?:(?:на|где|с|со)\s+)?", "", " ".join(t.split()), flags=re.I).strip(" .,:;—–-")
+    return n, (t if action == "generate" and len(t) >= 3 else None), action
 
 
 def _is_edit(message: str, intent: str) -> bool:
@@ -1203,9 +1345,35 @@ def chat(req: ChatRequest) -> dict:
     gen_id = session.get("generation_id")
     reply: str
     actions: list[dict] = []
-    if gen_id and _is_edit(req.message, intent):
+    if gen_id and _PICTURE_RX.search(req.message) and not _looks_like_brief(req.message):
+        intent = "picture"
+    elif gen_id and _is_edit(req.message, intent):
         intent = "edit"
-    if intent == "edit":
+    if intent == "picture":
+        if req.strategy:
+            session["strategy"] = req.strategy
+        payload = _generation_payload(gen_id)
+        variants = payload.get("variants", [])
+        v = next((vv for vv in variants if vv["strategy"] == session.get("strategy")), variants[0] if variants else None)
+        n, wish, action = _picture_ask(req.message)
+        n = n or req.slide
+        if v is None:
+            reply = "Презентация ещё собирается — подождите немного, потом поменяю изображение."
+        elif n is None:
+            reply = "На каком слайде заменить изображение? Например: «замени картинку на слайде 2 на вид сверху»."
+        else:
+            try:
+                r = change_slide_picture(gen_id, v["strategy"], n, PictureBody(wish=wish, action=action))
+            except HTTPException as e:
+                r = None
+                reply = (e.detail if isinstance(e.detail, str) else "Не получилось") + ("." if isinstance(e.detail, str) and not e.detail.endswith(".") else "")
+            if r is not None:
+                reply = (f"Убираю изображение со слайда {n} — место останется под ваше фото…" if action == "remove"
+                         else f"Рисую новое изображение для слайда {n}" + (f": «{wish}»" if wish else "") + "…")
+                actions.append({"type": "edit", "job_id": r["job_id"], "strategy": v["strategy"], "generation_id": gen_id, "slide": n})
+    if intent == "picture":
+        pass  # answered above
+    elif intent == "edit":
         from verstka.api.edits import parse_edit
 
         if req.strategy:

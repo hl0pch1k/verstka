@@ -35,10 +35,21 @@ def test_unknown_and_malformed_ids(client):
     assert c.delete("/api/templates/..%2F..%2Fetc").status_code in (404, 405)
 
 
-def test_not_while_a_deck_is_built_on_it(client):
+def test_not_while_a_deck_is_built_on_it(client, monkeypatch):
     c, store, root = client
     gid, gdir = store.new_generation_dir()
-    store.write_generation_meta(gid, {"id": gid, "template_id": TID, "status": "running"})
+    job = A.Job(id="live0001", kind="generate", status="running")
+    monkeypatch.setitem(A.runner.jobs, job.id, job)  # the build's job runs in this server
+    store.write_generation_meta(gid, {"id": gid, "template_id": TID, "status": "running", "job_id": job.id})
     r = c.delete(f"/api/templates/{TID}")
     assert r.status_code == 409 and "собирается" in r.json()["detail"]
     assert (root / "templates" / TID).exists()
+
+
+def test_a_build_interrupted_by_a_restart_does_not_hold_its_template(client):
+    """«running» in generation.json with no job of this server is a build the restart cut short: the template can go."""
+    c, store, root = client
+    gid, gdir = store.new_generation_dir()
+    store.write_generation_meta(gid, {"id": gid, "template_id": TID, "status": "running", "job_id": "gone0000"})
+    assert c.delete(f"/api/templates/{TID}").json() == {"deleted": True}
+    assert store.read_generation_meta(gid)["status"] == "failed"

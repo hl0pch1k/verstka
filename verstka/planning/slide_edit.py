@@ -283,6 +283,10 @@ def redesign_slide(
     new.id = old.id
     new.spec_ref = old.spec_ref
     new.content.photo_slot = photo or (None if drop_photo else old.content.photo_slot)
+    # «оставь место под фото» asks for the person's own photo; a kept place keeps what it was for
+    new.content.photo_own = bool(photo) or (False if drop_photo else old.content.photo_own)
+    if new.content.photo_slot is None:
+        new.content.photo_hint = None if drop_photo else new.content.photo_hint
     why = (new.rationale or "").strip()
     lead = rationale if rationale is not None else f"По вашей просьбе «{request.strip()}»"
     lead = lead.strip()

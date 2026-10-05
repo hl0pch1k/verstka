@@ -32,12 +32,12 @@ from verstka.schemas.outline import Brief, DeckOutline
 log = logging.getLogger(__name__)
 
 # what a version of a variant is: enough to show it again without re-rendering (the deck) and to rebuild it (the plan)
-VERSION_FILES = ("outline.json", "layout_plan.json", "audit_report.json", "run_manifest.json", "deck.pptx")
+VERSION_FILES = ("outline.json", "layout_plan.json", "audit_report.json", "run_manifest.json", "deck.pptx", "images.json")
 # kept with a version too, so «верни как было» shows exactly the old previews and files without LibreOffice (older
 # versions lack them: their previews and exports are rendered again from the kept deck)
 VERSION_EXTRA = ("deck.pdf", "deck.html")
 # what a re-render replaces in the variant's folder (planner_raw.json, the model's own answer, stays)
-RENDER_OUTPUTS = ("outline.json", "layout_plan.json", "audit_report.json", "run_manifest.json", "deck.pptx", "deck.pdf", "deck.html")
+RENDER_OUTPUTS = ("outline.json", "layout_plan.json", "audit_report.json", "run_manifest.json", "deck.pptx", "deck.pdf", "deck.html", "images.json")
 
 
 def versions_dir(vdir: Path) -> Path:
@@ -127,10 +127,15 @@ def rerender_variant(
     *,
     brief: Optional[Brief] = None,
     exports: Optional[list[str]] = None,
+    pictures: Optional[bool] = None,
 ):
     """Render the edited plan of one variant into a scratch folder, then put its files in place of the variant's (the
-    slide previews too). No model is asked anything here: the plan is final; the audit and its autofix run as for a new
-    deck, against the brief. Returns the pipeline's VariantResult."""
+    slide previews too). No text model is asked anything here: the plan is final; the audit and its autofix run as for
+    a new deck, against the brief. The pictures of the variant stay (its records: the same place keeps its picture, a
+    picture taken out stays out); a new place the author described gets one when `pictures` allows (None: the config).
+    Returns the pipeline's VariantResult."""
+    from verstka.images.fill import read_records
+
     from verstka.pipeline.generate import generate_variants
 
     scratch = vdir.parent / f".{strategy}.revise"
@@ -142,6 +147,7 @@ def rerender_variant(
         res = generate_variants(
             template_source, brief=brief, outline=outline, strategies=[strategy], out_dir=scratch, workspace_root=workspace_root,
             providers=None, skills=None, use_llm=False, use_vlm=False, audit=True, autofix=True, exports=list(exports or []),
+            pictures=pictures, picture_dir=vdir.parent / "images", picture_reuse={strategy: read_records(vdir)},
         )
         v = res.variants[0]
         made = scratch / strategy
@@ -151,6 +157,8 @@ def rerender_variant(
                 src.replace(vdir / name)
             elif name in ("deck.pdf", "deck.html") and (vdir / name).exists() and name.split(".")[-1] not in (exports or []):
                 (vdir / name).unlink()  # an export the variant no longer has would show the old deck
+            elif name == "images.json" and (vdir / name).exists():
+                (vdir / name).unlink()  # the edited plan has no picture places left
         if (made / "slides").is_dir():
             shutil.rmtree(vdir / "slides", ignore_errors=True)
             (made / "slides").replace(vdir / "slides")
@@ -633,6 +641,26 @@ def _frame_name(kind: str) -> tuple[str, str]:
     return "обложку", "Обложку агент собирает из названия и разделов текста — исправлено только оформление"
 
 
+def _keep_slide_picture(vdir: Path, deck: Path, outline: DeckOutline, n: int) -> Optional[list[dict]]:
+    """Slide `n` built again comes with its free picture place: the picture it had goes back in (refitted to the new
+    place, no model call). The variant's records with slide n's renewed, or None when nothing changed."""
+    try:
+        from verstka.images.fill import apply_pictures, merged, plan_pictures, read_records
+
+        old = read_records(vdir)
+        mine = [r for r in old if r.get("slide") == n]
+        if not mine:
+            return None
+        pend = plan_pictures(deck, outline, None, enabled=False, reuse=mine, folder=vdir.parent / "images", slides={n})
+        if not pend:
+            return None  # fixed in place: the picture never left
+        got = apply_pictures(deck, pend, wait_s=0)
+        return merged(old, got.records, {n})
+    except Exception:  # noqa: BLE001 - the slide keeps its free place rather than the fix being lost
+        log.warning("slide fix: the slide's picture was not put back", exc_info=True)
+        return None
+
+
 def fix_label(n: int, wishes: Optional[str]) -> str:
     """The history line of a fix («Ваши правки»)."""
     wishes = (wishes or "").strip()
@@ -895,6 +923,7 @@ def fix_slide(
             log.warning("outline markers left in the notes", exc_info=True)
         final_outline = _with_slide(outline0, outline, n)
         final_plan = _with_entry(plan0, plan.for_outline(oid), oid)
+        pic_records = _keep_slide_picture(vdir, final, final_outline, n)
         # the audit numbers its remarks through the deck: the ids of the remarks that stayed (on every slide) are carried
         # over, so the person's remark keeps its id through the fix and a fixed remark's id never comes back
         report = RM.carry_report_ids(report0, run_audit(final, manifest, final_outline, ws, **audit_kw))
@@ -967,6 +996,10 @@ def fix_slide(
             shutil.copy2(src, merged / f"slide-{k:03d}.jpg")
         version = snapshot(vdir)
         (out / "deck.pptx").replace(deck0)
+        if pic_records is not None:
+            from verstka.images.fill import write_records
+
+            write_records(vdir, pic_records)
         for fmt in ("pdf", "html"):
             made = out / f"deck.{fmt}"
             if made.exists():

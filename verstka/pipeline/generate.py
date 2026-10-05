@@ -305,11 +305,20 @@ def generate_variants(
     progress: Optional[ProgressFn] = None,
     agent: Optional[bool] = None,
     writer: Optional[bool] = None,
+    pictures: Optional[bool] = None,
+    image_provider: Any = None,
+    picture_dir: Optional[Path] = None,
+    picture_reuse: Optional[dict[str, list[dict]]] = None,
 ) -> GenerateResult:
     """`writer`: writer mode (planning/writer.py) — a brief that is only a topic («История VK», «презентация про
     вторую мировую войну») gets its text written by the agent before planning (the model's text, checked against the
     topic's Wikipedia article when it is on), and the deck is built from that text as from a user's brief; None = as
     configs/writer.yaml says (on), False = never. A brief with material of its own is never touched (faithful mode).
+    `pictures`: generate the pictures of the places the author described («[Место под изображение: …]», verstka/images)
+    with the `t2i` role (configs/models.yaml; `image_provider` replaces it, tests); None = as configs/images.yaml says
+    (on when a text-to-image model has a key), False = the places stay free. The author's own photo place never gets one.
+    `picture_dir`: where the generation keeps its pictures (default out_dir/images); `picture_reuse`: strategy → the
+    variant's records before this render (an edit re-renders the plan) — a place keeps its picture, no new call.
     `agent`: plan with the planning agent (planning/agent.py: analyst → designer per slide → critic → compiler);
     None = for every brief: with models the designer writes each slide, without them (or past the budget) the
     deterministic designer builds the slides the brief describes («Слайд 1…N») with their charts, tables, formulas and
@@ -463,7 +472,10 @@ def generate_variants(
                 planned[name] = (adapted, w + [f"own model plan failed: the model plan of «{donor}» adapted to «{name}»"] + aw, sec)
                 plan_models[name] = plan_models.get(donor)
         _say_designs(progress, {name: planned[name][0] for name in todo}, plan_end)
+    pic_dir = Path(picture_dir) if picture_dir is not None else out_dir / "images"
+    maker, icfg = _picture_maker(pictures, image_provider, manifest, pic_dir, t_start, skills if models_on else None, providers if models_on else None, brief, outline, planned)
     pending: list[dict] = []
+    said_pictures: set = set()  # the timeline tells each place once, not once per variant
     # the variants differ in the template slides they show too: each one knows which samples the earlier ones took
     # for the same slide (matching/matcher.py `taken`)
     taken: dict[str, set[str]] = {}
@@ -517,14 +529,57 @@ def generate_variants(
             strip_outline_marks(vdir / "deck.pptx")  # the presenter's notes without the machine markers
         except Exception:  # noqa: BLE001 - the markers stay rather than the deck being lost
             log.warning("outline markers left in the notes", exc_info=True)
-        pending.append({"name": name, "ts": ts, "timings": timings, "vdir": vdir, "warnings": warnings, "outline": v_outline, "plan": plan, "render": render, "audit": audit_report})
+        pics: list = []
+        try:
+            from verstka.images.fill import plan_pictures
+
+            pics = plan_pictures(vdir / "deck.pptx", v_outline, maker, enabled=maker is not None, reuse=(picture_reuse or {}).get(name), folder=pic_dir)
+            if any(p.future is not None for p in pics):
+                report(f"{name}: pictures for {sum(1 for p in pics if p.future is not None)} slides", base + span * 0.95)
+            _say_pictures(progress, name, pics, said_pictures, base + span * 0.95, maker)
+        except Exception as e:  # noqa: BLE001 - the deck stays as rendered, its places free
+            log.warning("picture places not read", exc_info=True)
+            warnings.append(f"pictures: the places were not read ({str(e)[:120]})")
+        pending.append({"name": name, "ts": ts, "timings": timings, "vdir": vdir, "warnings": warnings, "outline": v_outline, "plan": plan, "render": render, "audit": audit_report, "pictures": pics})
+
+    # the pictures in their places (each waited for at most until the generation's picture budget ends), the decks
+    # that got one audited again (the deterministic checks: the picture stands where its place stood)
+    if any(v["pictures"] for v in pending):
+        report("pictures: putting them in", 0.855)
+    for v in pending:
+        if not v["pictures"]:
+            continue
+        tp = time.time()
+        try:
+            from verstka.images.fill import apply_pictures, write_records
+
+            left = (maker.deadline - time.monotonic()) if maker is not None and maker.deadline is not None else 0.0
+            applied = apply_pictures(v["vdir"] / "deck.pptx", v["pictures"], wait_s=max(0.0, min(float(icfg.get("wait_s", 75)), left)), cfg=icfg)
+            write_records(v["vdir"], applied.records)
+        except Exception as e:  # noqa: BLE001
+            log.warning("pictures not put in", exc_info=True)
+            v["warnings"].append(f"pictures: not put in ({str(e)[:120]})")
+            continue
+        v["warnings"].extend(applied.warnings)
+        v["picture_records"] = applied.records
+        _say_pictures_made(progress, v["name"], applied.records, said_pictures)
+        if applied.changed:
+            v["pictures_changed"] = True
+            if v["audit"] is not None:
+                try:
+                    v["audit"] = _audit_with_pictures(v, manifest, ws, brief, writer_audit)
+                except Exception:  # noqa: BLE001 - the report before the pictures stays
+                    log.warning("audit after the pictures failed", exc_info=True)
+        v["timings"]["pictures"] = round(time.time() - tp, 2)
+    if maker is not None:
+        maker.close()
 
     # LibreOffice once per deck, all decks at once: the PDF export and the slide previews come from the same PDF
     report("export: pdf, html, slide previews", 0.86)
 
     def _finish(v: dict) -> dict:
         te = time.time()
-        want_images = (render_images or audit) and not (v["audit"] is not None and v["audit"].slide_images)
+        want_images = (render_images or audit) and (v.get("pictures_changed") or not (v["audit"] is not None and v["audit"].slide_images))
         v["exports"], v["images"], w, v["render_ok"] = render_outputs(v["vdir"], manifest, v["outline"].title, exports, images=want_images)
         v["warnings"].extend(w)
         if not want_images and v["audit"] is not None:
@@ -579,7 +634,7 @@ def generate_variants(
             applied_fixes=audit_report.applied_fixes if audit_report else [],
             audit_summary=audit_report.summary.model_dump() if audit_report else {},
             slides=slides_info,
-            extra={"warnings": v["warnings"], "exports": {k: str(p) for k, p in export_paths.items()}, "planner": vr.planner},
+            extra={"warnings": v["warnings"], "exports": {k: str(p) for k, p in export_paths.items()}, "planner": vr.planner, **_pictures_extra(v)},
         )
         write_run_manifest(vdir / "run_manifest.json", rm)
         result.variants.append(vr)
@@ -592,6 +647,89 @@ def generate_variants(
             log.debug("writer.json not written", exc_info=True)
     result.seconds = round(time.time() - t0, 2)
     return result
+
+
+def _picture_maker(pictures: Optional[bool], image_provider, manifest: TemplateManifest, folder: Path, t_start: float, skills, providers, brief: Optional[Brief], outline: Optional[DeckOutline], planned: dict):
+    """The generation's ImageMaker (verstka/images), or None: pictures off, no t2i model, every link without a key."""
+    from verstka.images.prompt import load_config
+
+    icfg = load_config()
+    if pictures is False or (pictures is None and not icfg.get("enabled", True)):
+        return None, icfg
+    chain = image_provider
+    if chain is None:
+        from verstka.images.providers import load_image_provider
+
+        chain = load_image_provider()
+    if chain is None or getattr(chain, "off", False):
+        return None, icfg
+    from verstka.images.service import ImageMaker
+
+    title = (outline.title if outline is not None else None) or next((o.title for o, _, _ in planned.values() if o.title), None) or (brief.title_hint if brief else None) or ""
+    deadline = t_start + float(icfg.get("budget_s", 240))
+    return ImageMaker(chain, manifest, folder, cfg=icfg, skills=skills, providers=providers, deadline=deadline, deck_title=title), icfg
+
+
+def _short(text: str, n: int = 90) -> str:
+    t = " ".join(str(text or "").split())
+    return t if len(t) <= n else t[: n - 1].rsplit(" ", 1)[0] + "…"
+
+
+def _say_pictures(progress: Optional[ProgressFn], name: str, pics: list, said: set, share: float, maker) -> None:
+    """The layout step's lines about the picture places (once per place, whatever the variant): a picture asked by its
+    description, the author's own photo place left free."""
+    sink = _event_sink(progress)
+    model = getattr(getattr(maker, "provider", None), "label", None) if maker is not None else None
+    for p in pics:
+        k = ("ask", p.place.hint or p.place.label, p.place.slide)
+        if k in said:
+            continue
+        said.add(k)
+        if p.future is not None:
+            text = f"Вёрстка: слайд {p.place.slide} — рисую изображение по описанию автора «{_short(p.place.hint or p.place.label)}»" + (f", модель {model}." if model else ".")
+        elif p.place.own:
+            text = f"Вёрстка: слайд {p.place.slide} — место под ваше фото оставлено свободным, как просили в тексте."
+        else:
+            continue
+        sink({"type": "agent", "step": "compile", "message": text, "slide": p.place.slide, "variant": name, "share": share})
+
+
+def _say_pictures_made(progress: Optional[ProgressFn], name: str, records: list[dict], said: set) -> None:
+    sink = _event_sink(progress)
+    for r in records:
+        if r.get("status") == "generated":
+            k = ("made", r.get("hint") or r.get("label"), r.get("slide"))
+            text = f"Вёрстка: слайд {r.get('slide')} — изображение на месте, в палитре шаблона" + (f" ({round(float(r['palette_match']) * 100)}% цветов)." if r.get("palette_match") is not None else ".")
+        elif r.get("error") or (r.get("why") and r.get("why") not in ("место под ваше фото — вставьте его в PowerPoint", "генерация изображений выключена")):
+            k = ("free", r.get("hint") or r.get("label"), r.get("slide"))
+            text = f"Вёрстка: слайд {r.get('slide')} — место под изображение осталось свободным: {r.get('why')}."
+        else:
+            continue
+        if k in said:
+            continue
+        said.add(k)
+        sink({"type": "agent", "step": "compile", "message": text, "slide": r.get("slide"), "variant": name, "share": 0.855})
+
+
+def _audit_with_pictures(v: dict, manifest: TemplateManifest, ws: TemplateWorkspace, brief: Optional[Brief], writer_audit) -> AuditReport:
+    """The deck with its pictures audited again by the deterministic checks; the fixes applied and the model's own
+    remarks (made on the deck before the pictures) carry over."""
+    old: AuditReport = v["audit"]
+    new = run_audit(v["vdir"] / "deck.pptx", manifest, v["outline"], ws, providers=None, skills=None, use_vlm=False, use_llm=False, render=False, strategy=v["name"], brief_text=brief.text if brief else None, writer=writer_audit)
+    new.issues.extend(i for i in old.issues if i.kind == "model")
+    new.applied_fixes = list(old.applied_fixes)
+    new.iterations = old.iterations
+    new.recompute()
+    return new
+
+
+def _pictures_extra(v: dict) -> dict:
+    recs = v.get("picture_records")
+    if not recs:
+        return {}
+    from verstka.images.fill import summary
+
+    return {"pictures": summary(recs)}
 
 
 def _write_text(brief: Brief, skills, providers, budget_end: Optional[float], progress: Optional[ProgressFn], raw: list, workspace_root, *, force: bool = False):

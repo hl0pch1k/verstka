@@ -1157,6 +1157,8 @@ def _digest(o: DeckOutline) -> str:
         for k in _V2_CONTENT:
             if d["content"].get(k) is None:
                 d["content"].pop(k, None)
+        if d["content"].get("photo_own") is False:  # the author's own photo place (verstka/images), off by default
+            d["content"].pop("photo_own")
         if d["content"].get("chart"):
             for k, empty in (("categories", []), ("series", []), ("split", False)):
                 if d["content"]["chart"].get(k) == empty:

@@ -58,6 +58,8 @@ class ProviderRegistry:
         )
         roles: dict[str, Provider] = {}
         for role, spec in (cfg.get("roles") or {}).items():
+            if role == "t2i":
+                continue  # pictures are not chat completions: verstka/images/providers.py builds this role
             roles[role] = build_provider(spec, limits)
         return cls(roles=roles, limits=limits, config=cfg)
 

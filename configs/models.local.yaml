@@ -51,6 +51,16 @@ roles:
     json_mode: true
     requests_per_minute: 0
     temperature: 0.1
+  # Pictures from a local OpenAI-compatible image server (POST /images/generations — e.g. LocalAI or a diffusers
+  # server with Tongyi-MAI/Z-Image-Turbo 6B, Apache 2.0); a server that is not running leaves the places free.
+  # Drop this role to build without pictures.
+  t2i:
+    backend: openai_images
+    model: z-image-turbo  # ← the model name your server serves
+    label: Z-Image-Turbo (локально)
+    base_url: http://localhost:8080/v1
+    api_key: local  # the client needs a non-empty one
+    timeout_s: 180
 limits:
   max_concurrency: 1  # Ollama answers one request at a time by default
   timeout_s: 150

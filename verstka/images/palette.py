@@ -1,0 +1,183 @@
+"""A generated picture in the template's palette (the organisers: «even generated images use the template palette»):
+
+* the prompt names the palette's colours (`color_name`: «deep navy blue», «bright orange»);
+* the picture is then graded toward the palette: a gradient map by lightness — the template's darkest colour for the
+  shadows, its accent for the mid-tones, its lightest colour for the lights — blended in at `strength`, so the picture
+  keeps its subject and reads in the deck's colours whatever the model made of the prompt;
+* `palette_match` — the share of the picture's pixels near the palette or its tints (ΔE76 < 25), kept with the picture;
+* `fit_to` — the picture cropped to the place's exact proportions (centred, never stretched) and scaled down."""
+
+from __future__ import annotations
+
+import colorsys
+import io
+from dataclasses import dataclass, field
+from typing import Optional
+
+import numpy as np
+from PIL import Image
+
+
+def _rgb(hex_: str) -> tuple[int, int, int]:
+    h = hex_.strip().lstrip("#")
+    return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+
+def luminance(hex_: str) -> float:
+    r, g, b = (v / 255.0 for v in _rgb(hex_))
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def saturation(hex_: str) -> float:
+    r, g, b = (v / 255.0 for v in _rgb(hex_))
+    return colorsys.rgb_to_hsv(r, g, b)[1]
+
+
+@dataclass
+class Palette:
+    dark: str = "1F2937"
+    light: str = "F8FAFC"
+    accents: list[str] = field(default_factory=list)
+
+    @property
+    def colors(self) -> list[str]:
+        return list(dict.fromkeys([self.dark, *self.accents, self.light]))
+
+    def stops(self) -> list[tuple[float, tuple[int, int, int]]]:
+        """The gradient map's stops: the dark colour at 0, the strongest accent at its own lightness, the light at 1."""
+        out = [(0.0, _rgb(self.dark))]
+        if self.accents:
+            acc = self.accents[0]
+            y = min(0.85, max(0.15, luminance(acc)))
+            out.append((y, _rgb(acc)))
+        out.append((1.0, _rgb(self.light)))
+        return out
+
+
+def palette_of(manifest) -> Palette:
+    """The template's palette for pictures: its darkest and lightest colours (backgrounds, text) and its accents, the
+    most saturated first. A template without colours gets a neutral grey ramp."""
+    tokens = getattr(manifest, "tokens", None)
+    colors = [c for c in (getattr(tokens, "colors", None) or []) if getattr(c, "hex", None)]
+    if not colors:
+        return Palette()
+    hexes = [c.hex.upper().lstrip("#") for c in colors]
+    by_l = sorted(hexes, key=luminance)
+    dark = next((c.hex for c in colors if c.has_role("background.dark")), None) or next((c.hex for c in colors if c.has_role("text.primary")), None) or by_l[0]
+    light = next((c.hex for c in colors if c.has_role("background.light")), None) or next((c.hex for c in colors if c.has_role("surface")), None) or by_l[-1]
+    if luminance(dark) > luminance(light):
+        dark, light = light, dark
+    accents = [h for h in (tokens.accents() if hasattr(tokens, "accents") else []) if h]
+    if not accents:
+        accents = [h for h in hexes if h not in (dark, light) and saturation(h) > 0.25]
+    accents = sorted(dict.fromkeys(a.upper().lstrip("#") for a in accents), key=lambda h: -saturation(h))[:3]
+    return Palette(dark=dark.upper().lstrip("#"), light=light.upper().lstrip("#"), accents=accents)
+
+
+_NAMES = ((15, "red"), (40, "orange"), (65, "yellow"), (90, "lime green"), (160, "green"), (190, "teal"), (215, "sky blue"),
+          (250, "blue"), (280, "violet"), (320, "magenta"), (345, "pink"), (360, "red"))
+
+
+def color_name(hex_: str) -> str:
+    """A colour in words a text-to-image model understands («deep navy blue», «bright orange», «light grey»)."""
+    r, g, b = (v / 255.0 for v in _rgb(hex_))
+    h, s, v = colorsys.rgb_to_hsv(r, g, b)
+    if s < 0.12 or v < 0.08:
+        if v < 0.15:
+            return "near-black"
+        if v > 0.93:
+            return "white"
+        return "light grey" if v > 0.7 else ("grey" if v > 0.4 else "dark grey")
+    deg = h * 360
+    base = next(name for edge, name in _NAMES if deg <= edge)
+    if base == "blue" and v < 0.45:
+        base = "navy blue"
+    tone = "deep" if v < 0.4 else ("pale" if s < 0.35 and v > 0.8 else ("bright" if s > 0.7 and v > 0.75 else ""))
+    return f"{tone} {base}".strip()
+
+
+def palette_words(pal: Palette) -> str:
+    names = [f"{color_name(h)} #{h}" for h in pal.colors]
+    return ", ".join(dict.fromkeys(names))
+
+
+def _gradient_map(y: np.ndarray, stops: list[tuple[float, tuple[int, int, int]]]) -> np.ndarray:
+    xs = np.array([s[0] for s in stops], dtype=np.float32)
+    out = np.empty(y.shape + (3,), dtype=np.float32)
+    for ch in range(3):
+        out[..., ch] = np.interp(y, xs, np.array([s[1][ch] for s in stops], dtype=np.float32))
+    return out
+
+
+def grade(img: Image.Image, pal: Palette, strength: float = 0.3) -> Image.Image:
+    """The picture graded toward the palette: a gradient map of its lightness blended in at `strength` (0 — as it is)."""
+    strength = max(0.0, min(1.0, float(strength)))
+    rgb = img.convert("RGB")
+    if strength <= 0:
+        return rgb
+    a = np.asarray(rgb, dtype=np.float32)
+    y = (0.2126 * a[..., 0] + 0.7152 * a[..., 1] + 0.0722 * a[..., 2]) / 255.0
+    mapped = _gradient_map(y, pal.stops())
+    out = a * (1.0 - strength) + mapped * strength
+    return Image.fromarray(np.clip(out + 0.5, 0, 255).astype(np.uint8), "RGB")
+
+
+def _lab(rgb: np.ndarray) -> np.ndarray:
+    """sRGB (0–255, …×3) → CIE Lab (D65)."""
+    c = rgb.astype(np.float32) / 255.0
+    c = np.where(c > 0.04045, ((c + 0.055) / 1.055) ** 2.4, c / 12.92)
+    m = np.array([[0.4124, 0.3576, 0.1805], [0.2126, 0.7152, 0.0722], [0.0193, 0.1192, 0.9505]], dtype=np.float32)
+    xyz = c @ m.T / np.array([0.95047, 1.0, 1.08883], dtype=np.float32)
+    f = np.where(xyz > 0.008856, np.cbrt(xyz), 7.787 * xyz + 16.0 / 116.0)
+    return np.stack([116.0 * f[..., 1] - 16.0, 500.0 * (f[..., 0] - f[..., 1]), 200.0 * (f[..., 1] - f[..., 2])], axis=-1)
+
+
+def palette_match(img: Image.Image, pal: Palette, delta: float = 25.0) -> float:
+    """The share of the picture's pixels within ΔE76 `delta` of a palette colour or one of its tints and shades."""
+    small = np.asarray(img.convert("RGB").resize((64, 64)), dtype=np.float32).reshape(-1, 3)
+    refs = []
+    for h in pal.colors:
+        c = np.array(_rgb(h), dtype=np.float32)
+        for t in (0.0, 0.25, 0.5, 0.75):
+            refs.append(c + (255.0 - c) * t)  # tints
+            refs.append(c * (1.0 - t))  # shades
+    lab_px = _lab(small)
+    lab_ref = _lab(np.array(refs, dtype=np.float32))
+    d = np.sqrt(((lab_px[:, None, :] - lab_ref[None, :, :]) ** 2).sum(-1)).min(1)
+    return round(float((d < delta).mean()), 3)
+
+
+def fit_to(img: Image.Image, w: float, h: float, max_side: int = 1600) -> Image.Image:
+    """The picture cropped to w:h around its centre (never stretched), then scaled down to at most `max_side` px."""
+    img = img.convert("RGB")
+    iw, ih = img.size
+    target = w / h if h > 0 else 1.0
+    if iw / ih > target:
+        cw = max(1, int(round(ih * target)))
+        x0 = (iw - cw) // 2
+        img = img.crop((x0, 0, x0 + cw, ih))
+    else:
+        ch = max(1, int(round(iw / target)))
+        y0 = (ih - ch) // 2
+        img = img.crop((0, y0, iw, y0 + ch))
+    iw, ih = img.size
+    k = min(1.0, max_side / max(iw, ih))
+    if k < 1.0:
+        img = img.resize((max(1, int(iw * k)), max(1, int(ih * k))), Image.LANCZOS)
+    return img
+
+
+def encode(img: Image.Image, quality: int = 88) -> bytes:
+    buf = io.BytesIO()
+    img.convert("RGB").save(buf, "JPEG", quality=int(quality), optimize=True, progressive=True)
+    return buf.getvalue()
+
+
+def open_image(data: bytes) -> Image.Image:
+    img = Image.open(io.BytesIO(data))
+    img.load()
+    return img
+
+
+def describe(pal: Optional[Palette]) -> dict:
+    return {"dark": pal.dark, "light": pal.light, "accents": pal.accents} if pal else {}

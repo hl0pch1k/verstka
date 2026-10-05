@@ -1139,6 +1139,20 @@ def _place_of(part: Part) -> tuple[str, str]:
     return "Место под изображение", hint
 
 
+# «не заполняй это место сгенерированным изображением», «без сгенерированных картинок», «не генерируй картинку»
+_NO_GEN_RE = re.compile(r"не\s+(?:\S+\s+){0,4}?сгенерированн|без\s+(?:\S+\s+){0,1}?сгенерированн|не\s+генерируй", re.I)
+
+
+def own_photo(text: str) -> bool:
+    """The slide's text keeps its picture place for the author's own photo («Фото я добавлю самостоятельно», «оставь
+    место под фотографию помещения», «не заполняй его сгенерированным изображением»): the image generator leaves it
+    free. The bracketed notes that only describe the picture («[Место под изображение: …]») do not count."""
+    from verstka.planning.brief_structure import is_photo_instruction
+
+    plain = _INLINE_NOTE_RE.sub(" ", text or "")
+    return bool(_NO_GEN_RE.search(plain)) or any(is_photo_instruction(x) for x in sentences(plain))
+
+
 def _image(r: Reading, room: Room, prof: dict, kind: str, part: Optional[Part] = None) -> Optional[Form]:
     """The slide's text beside the place for its picture (or for the chart, the table, the video its note asks for
     without its data), the place captioned with what goes there."""
@@ -1160,7 +1174,8 @@ def _image(r: Reading, room: Room, prof: dict, kind: str, part: Optional[Part] =
         if sub is None and got and got[0]:
             sub = got[0][0]
         lines = []
-    s = _slide(r, kind, content=_content(bullets=lines, photo_slot=label, photo_hint=hint or None), footnote=r.footnote, takeaway=r.takeaway, subtitle=sub)
+    own = part.kind != "image" or own_photo(r.text)  # a chart, a table, a video the author adds — or their own photo
+    s = _slide(r, kind, content=_content(bullets=lines, photo_slot=label, photo_hint=hint or None, photo_own=own), footnote=r.footnote, takeaway=r.takeaway, subtitle=sub)
     return Form(kind, s, _shown(s))
 
 

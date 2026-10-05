@@ -1497,6 +1497,7 @@ def rules_design(unit: _Unit, ctx: _Ctx) -> _Design:
                 takeaway = None
     if spec is not None and spec.photo:
         c.photo_slot = spec.photo  # the user adds their own photo: the slide leaves it a free place
+        c.photo_own = bool(spec.photo_own)
     s = OutlineSlide(
         id=unit.key, kind=PatternKind(kind), section=section, headline=headline, subtitle=subtitle, content=c,
         notes=" ".join(notes[:5]), takeaway=takeaway, footnote=spec.footnote if spec else None,
@@ -2288,6 +2289,7 @@ def _keep_photo_places(o: DeckOutline, structure: Optional[BriefStructure], warn
     """The brief's «оставь место под фото» holds on the final slide of its spec whatever the later passes did with the
     slide (reshaped, merged, compiled): the first content slide of the spec keeps the place free."""
     photos = {sp.number: sp.photo for sp in (structure.specs if structure else []) if sp.photo}
+    owns = {sp.number: sp.photo_own for sp in (structure.specs if structure else []) if sp.photo}
     if not photos:
         return
     from verstka.planning.faithful import read_parts
@@ -2307,6 +2309,8 @@ def _keep_photo_places(o: DeckOutline, structure: Optional[BriefStructure], warn
         if not sl.content.photo_slot:
             sl.content.photo_slot = photos[ref]
             warns.append(f"slide {sl.id}: the free place for the user's photo put back ({photos[ref]})")
+        if owns.get(ref):
+            sl.content.photo_own = True
         if ref in hints and not sl.content.photo_hint:
             sl.content.photo_hint = hints[ref]
         if PHOTO_WHY not in (sl.rationale or ""):
@@ -2392,6 +2396,7 @@ def enforce_requests(d: _Design, ctx: _Ctx) -> None:
         if not c.photo_slot:
             d.changes.append(f"slide {d.unit.key}: a free place for the user's photo kept (asked in the brief)")
         c.photo_slot = spec.photo
+        c.photo_own = c.photo_own or bool(spec.photo_own)
         if PHOTO_WHY not in (s.rationale or ""):
             s.rationale = (s.rationale + " " if s.rationale else "") + PHOTO_WHY
         # the place is left free, not described: a line about it («Здесь будет фото помещения») leaves the slide
@@ -4201,6 +4206,8 @@ def _faithful_design(unit: _Unit, ctx: _Ctx, profile: str = "structured") -> _De
 
 def _photo_from_reading(d: "_Design") -> None:
     """A slide whose text keeps a place for a picture («[Место под изображение: …]») keeps it, described."""
+    from verstka.planning import faithful
+
     r = d.unit.reading
     if r is None or not r.of("image"):
         return
@@ -4208,6 +4215,7 @@ def _photo_from_reading(d: "_Design") -> None:
     c = d.slide.content
     if not c.photo_slot:
         c.photo_slot = "Изображение"
+        c.photo_own = faithful.own_photo(r.text)  # described by the author: a picture may be generated for it
     if not c.photo_hint and img.text:
         c.photo_hint = H.cap_first(img.text.strip())
 
@@ -5383,6 +5391,8 @@ def verbatim_forms(unit: _Unit, ctx: _Ctx, profile: str) -> list:
                 sl.footnote = F.end_sentence(spec.footnote)
             if spec.photo and not sl.content.photo_slot and not r.of("image"):
                 sl.content.photo_slot = spec.photo
+            if spec.photo_own:
+                sl.content.photo_own = True
     return out
 
 

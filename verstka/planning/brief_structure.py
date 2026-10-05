@@ -279,6 +279,11 @@ _PHOTO_KEEP_RE = re.compile(r"\b(?:эт[оуой]|этом)\s+мест\w*|\bне
 _PHOTO_WHAT_RE = re.compile(r"\b(?:фотографи[юяи]|фото|снимок|снимка|снимки|изображение)\s+(?P<what>(?!я\b|сам|потом|позже)[а-яё][а-яё-]{2,}(?:\s+(?!я\b|сам|потом|позже)[а-яё][а-яё-]{2,}){0,2})", re.I)
 
 
+# a bracketed note for the designer («[Место под изображение: …]»), and words about «this slide» («На этом слайде …»)
+_BRACKET_RE = re.compile(r"^\[[^\[\]]{3,}\]\s*[.;]?$")
+_THIS_SLIDE_RE = re.compile(r"\bэт(?:ом|от|ого|им)\s+слайд|\bthis\s+slide\b", re.I)
+
+
 def is_photo_instruction(sentence: str) -> bool:
     """A sentence about the place for the user's own photo: the request itself or what must not fill that place."""
     s = sentence or ""
@@ -1111,6 +1116,9 @@ def _read_block(block: _Block, reg: _Registry, all_numbers: list[float]) -> None
             ph = photo_request(sent)
             if ph and (not spec.photo or spec.photo == "Фото"):
                 spec.photo = ph
+            # a request in the author's own words is their photo; a bracketed note only describes the picture
+            if not _BRACKET_RE.match(sent.strip()) and (ph or is_photo_instruction(sent)):
+                spec.photo_own = True
         prev = sent
         k += 1
     if spec is not None:
@@ -1199,7 +1207,8 @@ def _blocks(text: str) -> tuple[list[_Block], list[str]]:
                     break
                 tail = body[gaps[-1] + 1 :]
                 sents = sentences_of("\n".join(tail))
-                if sents and all(_is_rule(s) for s in sents):
+                # «На этом слайде оставь место под фотографию помещения» speaks of the last slide, not of the deck
+                if sents and all(_is_rule(s) for s in sents) and not any(_THIS_SLIDE_RE.search(s) or is_photo_instruction(s) for s in sents):
                     glob = glob + [""] + tail
                     body = body[: gaps[-1]]
                     while body and not body[-1].strip():

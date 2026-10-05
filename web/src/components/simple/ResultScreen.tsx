@@ -30,6 +30,8 @@ import { RemarksPanel, useCheckTitles } from "./RemarksPanel";
 import { SlideLightbox } from "./SlideLightbox";
 import { SlideRail } from "./SlideRail";
 import { useSlideFix, type FixRun } from "./useSlideFix";
+import { PictureCard } from "./PictureCard";
+import { usePictureChange } from "./usePictureChange";
 import { WriterTextSheet } from "./WriterText";
 
 const NO_ISSUES: Issue[] = [];
@@ -276,6 +278,7 @@ function editDeckText(generation: GenerationMeta, editText: (text: string, prese
     slides: generation.slides ?? null,
     useModels: generation.use_models,
     auditModels: generation.audit_models,
+    pictures: generation.pictures ?? null,
     strategies: generation.strategies,
   });
 }
@@ -434,12 +437,23 @@ function Deck({ generation }: { generation: Generation }) {
   const fix = useSlideFix(generation.id, (r: FixRun) => view.current.remarksOn && view.current.detail === null && r.strategy === view.current.strategy && r.slide === view.current.slide);
   const run = fix.run;
   const runHere = !!run && run.strategy === variant.strategy && run.slide === selectedSlide;
+  // «Заменить изображение»: one run per deck too; the card beside the slide tells its story
+  const picture = usePictureChange(generation.id);
+  const picRun = picture.run;
+  const picHere = !!picRun && picRun.strategy === variant.strategy && picRun.slide === selectedSlide;
+  const picWorking = !!picRun && (picRun.phase === "submitting" || picRun.phase === "running" || picRun.phase === "undoing" || (picRun.phase === "done" && !picRun.synced));
+  const slidePicture = useMemo(() => {
+    const mine = (variant.pictures ?? []).filter((p) => p.slide === selectedSlide);
+    return mine.find((p) => p.status === "generated") ?? mine[0] ?? null;
+  }, [variant.pictures, selectedSlide]);
   const runWorking = !!run && (run.phase === "submitting" || run.phase === "running" || run.phase === "undoing");
   // the thumb keeps its spinner until the reloaded deck is in: it then pops straight out (never back to the count of
   // the remark just fixed)
   const runBusy = runWorking || (!!run && run.phase === "done" && !!run.result?.applied && !run.synced);
   const fixingLabel = !runHere
-    ? null
+    ? picHere && picWorking
+      ? picRun.phase === "undoing" ? "Возвращаю как было" : picRun.action === "remove" ? "Убираю изображение" : "Рисую новое изображение"
+      : null
     : run.phase === "submitting" || run.phase === "running" || (run.phase === "done" && !run.revealed)
       ? "Агент исправляет слайд"
       : run.phase === "undoing" || (run.phase === "undone" && !run.revealed)
@@ -628,6 +642,7 @@ function Deck({ generation }: { generation: Generation }) {
         audit_models: generation.audit_models ?? false,
         autofix: generation.autofix ?? true,
         exports: generation.exports ?? ["pdf", "html"],
+        pictures: generation.pictures ?? null,
       });
     } finally {
       inFlight.current = false;
@@ -806,6 +821,20 @@ function Deck({ generation }: { generation: Generation }) {
           )}
         </button>
       )}
+      {slidePicture && (
+        <PictureCard
+          key={`${variant.strategy}/${slidePicture.id}`}
+          pic={slidePicture}
+          run={picHere ? picRun : null}
+          progress={picture.progress}
+          message={picture.message}
+          busy={jobRunning && !picWorking}
+          configured={!!health?.images?.configured}
+          onStart={(action, wish) => picture.start(variant.strategy, selectedSlide, action, wish)}
+          onUndo={() => void picture.undo()}
+          onDismiss={picture.dismiss}
+        />
+      )}
       {/* mt-auto: the links stand on the column's foot, level with the slide's bottom edge */}
       <div ref={live ? linksBox : undefined} className="mt-auto grid shrink-0 grid-cols-3 gap-2">
         <DrawerLink icon={ListTree} label="План" onClick={() => open("plan")} />
@@ -913,7 +942,7 @@ function Deck({ generation }: { generation: Generation }) {
             aspect={aspect}
             issueMap={issueMap}
             showRemarks={remarksOn}
-            fixingSlide={run && runBusy && run.strategy === variant.strategy ? run.slide : null}
+            fixingSlide={run && runBusy && run.strategy === variant.strategy ? run.slide : picRun && picWorking && picRun.strategy === variant.strategy ? picRun.slide : null}
             onSelect={setSelectedSlide}
           />
         )}

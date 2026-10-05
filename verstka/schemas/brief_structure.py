@@ -34,6 +34,10 @@ class SlideSpec(BaseModel):
     footnote: Optional[str] = None  # «Укажи, что налоги … не учитываются»
     takeaway: Optional[str] = None  # «Вывод: …», «Финальный вывод: «…»»
     photo: Optional[str] = None  # «Оставь свободное место под фотографию помещения»: the photo the user will add («Фото помещения»)
+    # the request is the author's own photo («оставь место под фотографию», «Фото я добавлю самостоятельно», «не заполняй
+    # его сгенерированным изображением») — not a bracketed note that only describes the picture («[Место под
+    # изображение: экран панели]»): the image generator never fills it by itself
+    photo_own: bool = False
     series_ids: list[str] = Field(default_factory=list)  # data of this slide (registry ids)
     table_ids: list[int] = Field(default_factory=list)  # indexes into BriefStructure.tables
     # the slide's lists that are not data («1-й месяц — учет показателей и обновление меню», «— контроль порций;»):

@@ -28,7 +28,7 @@ const PLACEHOLDER = "Тезисы, цифры и таблицы — слайды
 
 // the switches and the variants are the draft's too: a screen opened again (after a build, «Изменить текст») keeps
 // the person's own choice — a switch silently back on let the model rewrite a text meant to stay verbatim
-interface Draft { brief: string; audience: string; purpose: string; slides: number; useModels: boolean | null; auditModels: boolean; selected: string[] | null }
+interface Draft { brief: string; audience: string; purpose: string; slides: number; useModels: boolean | null; auditModels: boolean; pictures: boolean | null; selected: string[] | null }
 
 function loadDraft(): Draft {
   try {
@@ -40,10 +40,11 @@ function loadDraft(): Draft {
       slides: clampSlides(Number(d?.slides ?? SLIDES_DEFAULT)),
       useModels: typeof d?.useModels === "boolean" ? d.useModels : null,
       auditModels: d?.auditModels === true,
+      pictures: typeof d?.pictures === "boolean" ? d.pictures : null,
       selected: Array.isArray(d?.selected) && d.selected.every((x) => typeof x === "string") && d.selected.length ? d.selected : null,
     };
   } catch {
-    return { brief: "", audience: "", purpose: "product", slides: SLIDES_DEFAULT, useModels: null, auditModels: false, selected: null };
+    return { brief: "", audience: "", purpose: "product", slides: SLIDES_DEFAULT, useModels: null, auditModels: false, pictures: null, selected: null };
   }
 }
 
@@ -128,6 +129,10 @@ export function CreateScreen() {
   const [selected, setSelected] = useState<string[]>(draft.selected ?? []);
   const [useModels, setUseModels] = useState(draft.useModels ?? modelsConfigured);
   const [auditModels, setAuditModels] = useState(draft.auditModels);
+  // «Генерировать изображения»: on by default when a text-to-image model has a key (null: not touched — the default)
+  const [pictures, setPictures] = useState<boolean | null>(draft.pictures);
+  const imagesConfigured = !!health?.images?.configured;
+  const picturesOn = imagesConfigured && (pictures ?? !!health?.images?.enabled);
   const [more, setMore] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [showErrors, setShowErrors] = useState(false);
@@ -166,11 +171,12 @@ export function CreateScreen() {
       brief, audience, purpose, slides,
       useModels: modelsTouched.current ? useModels : null,
       auditModels,
+      pictures,
       selected: strategiesTouched.current ? selected : null,
     };
     const t = window.setTimeout(() => storage.set(LS.brief, JSON.stringify(kept)), 300);
     return () => window.clearTimeout(t);
-  }, [brief, audience, purpose, slides, useModels, auditModels, selected]);
+  }, [brief, audience, purpose, slides, useModels, auditModels, pictures, selected]);
 
   // «Изменить» on the agent's text (the result's sheet, the plan): the text replaces the draft once, the field takes the
   // focus and comes into view
@@ -187,6 +193,7 @@ export function CreateScreen() {
         setUseModels(composerPreset.useModels);
       }
       if (typeof composerPreset.auditModels === "boolean") setAuditModels(composerPreset.auditModels);
+      if (composerPreset.pictures !== undefined) setPictures(composerPreset.pictures);
       if (composerPreset.strategies?.length) {
         strategiesTouched.current = true;
         setSelected(composerPreset.strategies);
@@ -260,7 +267,7 @@ export function CreateScreen() {
   const purposeLabel = PURPOSES.find((p) => p.value === purpose)?.label ?? "";
   const slidesWord = plural(count, "слайд", "слайда", "слайдов");
   // the folded parameters in one line, in the order the bar says them: slides, variants, then the rest
-  const paramsLine = [byText ? `${slidesWord} по тексту` : slidesWord, plural(variantsCount, "вариант", "варианта", "вариантов"), purposeLabel, modelsOn ? "тексты пишет модель" : "без модели"].join(" · ");
+  const paramsLine = [byText ? `${slidesWord} по тексту` : slidesWord, plural(variantsCount, "вариант", "варианта", "вариантов"), purposeLabel, modelsOn ? "тексты пишет модель" : "без модели", picturesOn ? "с изображениями" : null].filter(Boolean).join(" · ");
   // the bar's one line: what will be built
   const summary = [slidesWord, plural(variantsCount, "вариант", "варианта", "вариантов")].join(" · ");
   const seen = factsLine(facts);
@@ -351,6 +358,7 @@ export function CreateScreen() {
         audit_models: auditModels && modelsConfigured,
         autofix: true,
         exports: ["pdf", "html"],
+        pictures: imagesConfigured ? picturesOn : null,
       }, count);
     } finally {
       setSubmitting(false);
@@ -542,18 +550,24 @@ export function CreateScreen() {
                         setUseModels(v);
                       }}
                     />
-                    <div className="col-span-2">
-                      <Toggle
-                        label="Модель проверяет слайды по картинке"
-                        title={modelsConfigured ? undefined : "Модель не подключена"}
-                        checked={auditModels && modelsConfigured}
-                        disabled={busy || !modelsConfigured}
-                        onChange={(v) => {
-                          modelsTouched.current = true;
-                          setAuditModels(v);
-                        }}
-                      />
-                    </div>
+                    <Toggle
+                      label="Модель проверяет слайды по картинке"
+                      title={modelsConfigured ? undefined : "Модель не подключена"}
+                      checked={auditModels && modelsConfigured}
+                      disabled={busy || !modelsConfigured}
+                      onChange={(v) => {
+                        modelsTouched.current = true;
+                        setAuditModels(v);
+                      }}
+                    />
+                    <Toggle
+                      label="Генерировать изображения"
+                      title={imagesConfigured ? undefined : "Модель изображений не подключена: ключ — в файле .env"}
+                      hint={!imagesConfigured ? "Места под изображения останутся свободными" : picturesOn ? "По описаниям в тексте, в палитре шаблона" : "Места под изображения останутся свободными"}
+                      checked={picturesOn}
+                      disabled={busy || !imagesConfigured}
+                      onChange={(v) => setPictures(v)}
+                    />
                   </div>
                 </div>
               </div>

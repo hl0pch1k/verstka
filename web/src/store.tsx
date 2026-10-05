@@ -77,6 +77,8 @@ export interface ComposerPreset {
   slides?: number | null;
   useModels?: boolean;
   auditModels?: boolean;
+  /** «Генерировать изображения» as the deck was built (null: the server's default). */
+  pictures?: boolean | null;
   strategies?: string[];
 }
 
