@@ -470,3 +470,17 @@ def test_eight_short_steps_are_all_on_the_slide():
     r = F.read_slide(2, "Восемь шагов переезда", "\n\n".join(steps))
     f = F._bullets(r, r.paras(), F.Room(), F.PROFILES["structured"])
     assert len(f.slide.content.bullets) == 8 and f.slide.content.bullets[-1] == "Провести открытие для команды."
+
+
+def test_a_figure_list_led_by_its_figures_is_a_list_of_key_figures():
+    """Coffee, slide 2: «— 100 покупок в день; — средний чек — 300 рублей; …» — three lines lead with their figure. The
+    all-or-nothing reading took them for sentences: the five figures left the slide (the formula kept four of them,
+    «3 000 покупок в месяц» was lost) and the three variants showed one and the same list."""
+    from verstka.planning.agent import _author_line, verbatim_kpis
+
+    lines = ["100 покупок в день", "средний чек — 300 рублей", "30 рабочих дней в расчетном месяце", "3 000 покупок в месяц", "месячная выручка — 900 000 рублей"]
+    got = verbatim_kpis(lines)
+    assert [(n.value, n.label) for n in got] == [("100", "Покупок в день"), ("300 рублей", "Средний чек"), ("30", "Рабочих дней в расчетном месяце"), ("3 000", "Покупок в месяц"), ("900 000 рублей", "Месячная выручка")]
+    assert verbatim_kpis(["Работаем с 8 до 20 часов", "3 кофемашины"]) == []  # a sentence is no key figure
+    text = "Исходные показатели:\n— 100 покупок в день;\n— средний чек — 300 рублей;"
+    assert _author_line(got[0], text) == "100 покупок в день" and _author_line(got[1], text) == "Средний чек — 300 рублей"

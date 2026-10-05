@@ -1105,21 +1105,35 @@ def _enumeration_figures(unit: _Unit, ctx: _Ctx) -> list[NumberCallout]:
 
 # «Выручка — 4,8 млрд ₽», «Средняя температура: минус 18 °C»: a line of a figure list split at its own separator
 _KPI_LINE_RE = re.compile(r"^(?P<label>[^—–:]{2,80}?)\s*(?:\s[—–-]\s|:\s)\s*(?P<value>(?:минус|плюс|около|до|более|менее|свыше|≈|~|[+\-−])?\s*\d.{0,40})$", re.I)
+# the figure first, its words after it: «100 покупок в день», «3 000 покупок в месяц», «45 м² торгового зала»
+_KPI_FIRST_RE = re.compile(
+    r"^(?P<value>(?:минус|плюс|около|более|менее|свыше|≈|~|[+\-−])?\s*\d{1,3}(?:[\s\u00a0\u202f]\d{3})*(?:[.,]\d+)?"
+    r"(?:\s?(?:%|₽|\$|€|°C|°|м²|м2|км|кг|т|л|мл|ч|мин|сек|руб\.?|рублей|рубля|рубль|тыс\.?|млн|млрд)(?![а-яёa-z]))?)"
+    r"\s+(?P<label>[а-яёa-z«(][^.!?]{1,80})$",
+    re.I,
+)
 
 
 def verbatim_kpis(lines: list[str]) -> list[NumberCallout]:
     """The key figures of an author's figure list laid out as written: each line split at its own separator, the label
     the words before it, the value the words after it as written — «минус 18 °C», «96 000 м²», «1,3 млн» keep their
-    sign and unit (H.kpis_of reads a figure out of a sentence and loses both). All or nothing: a line that is no «label
-    — figure» («Адрес: Москва, ул. Складская, д. 1», «Работаем с 8 до 20 часов») makes the lines no list of key figures —
-    they are the author's sentences, shown as written, never a figure taken out of one («8 → 20»)."""
+    sign and unit (H.kpis_of reads a figure out of a sentence and loses both); a line led by its figure («100 покупок в
+    день») is the figure and its words. All or nothing: a line that is neither («Адрес: Москва, ул. Складская, д. 1»,
+    «Работаем с 8 до 20 часов») makes the lines no list of key figures — they are the author's sentences, shown as
+    written, never a figure taken out of one («8 → 20»)."""
     out: list[NumberCallout] = []
     for ln in lines:
         t = H.strip_end(" ".join(str(ln).split()))
         m = _KPI_LINE_RE.match(t)
-        if not (m and re.search(r"\d", m.group("value"))):
-            return []
-        out.append(NumberCallout(value=m.group("value").strip().rstrip("."), label=H.cap_first(m.group("label").strip())))
+        if m and re.search(r"\d", m.group("value")):
+            out.append(NumberCallout(value=m.group("value").strip().rstrip("."), label=H.cap_first(m.group("label").strip())))
+            continue
+        # «100 покупок в день»: the figure leads, its words follow — a short label, never a sentence
+        f = _KPI_FIRST_RE.match(t)
+        if f and len(f.group("label").split()) <= 7:
+            out.append(NumberCallout(value=f.group("value").strip(), label=H.cap_first(f.group("label").strip())))
+            continue
+        return []
     return out
 
 
@@ -3611,6 +3625,24 @@ def _amount_lines(lines: list[str]) -> Optional[tuple[list[str], list[float], st
     return (labels, values, units.pop()) if len(units) == 1 else None
 
 
+_LIST_MARK_RE = re.compile(r"^\s*(?:[—–\-•*·]|\d{1,2}[.)])\s*")
+
+
+def _author_line(n: NumberCallout, text: str) -> Optional[str]:
+    """The author's own line a key figure was read from («— 100 покупок в день;» → «100 покупок в день»): the line of
+    `text` holding both its value and its label; None when there is none."""
+    lab = " ".join(H.strip_end(n.label or "").lower().split())
+    val = " ".join((n.value or "").replace("\u00a0", " ").lower().split())
+    if not lab or not val:
+        return None
+    for raw in (text or "").splitlines():
+        t = H.strip_end(_LIST_MARK_RE.sub("", raw)).strip()
+        tl = " ".join(t.replace("\u00a0", " ").lower().split())
+        if lab in tl and val in tl and len(t) <= 140:
+            return H.cap_first(t)
+    return None
+
+
 def _reshape_columns(s: OutlineSlide, kind: str, chart_type: Optional[str]) -> Optional[SlideContent]:
     """A two-column slide in another form, each column where it fits: a column of «N-й месяц — …» lines becomes a
     timeline and the other column lines under it; a column of «label — amount» lines becomes a bar chart (a doughnut
@@ -3667,18 +3699,19 @@ def _step_item(line: str) -> Optional[SlideItem]:
     return SlideItem(title=H.strip_end(m.group("t")), text=H.cap_first(H.strip_end(m.group("x"))))
 
 
-def reshape(s: OutlineSlide, kind: str, chart_type: Optional[str] = None, case_text: str = "") -> Optional[OutlineSlide]:
+def reshape(s: OutlineSlide, kind: str, chart_type: Optional[str] = None, case_text: str = "", own_lines: bool = False) -> Optional[OutlineSlide]:
     """The slide's content in another form, without a model, or None when the content does not fit it (a chart needs
     figures of one unit, cards need short lines, …). Headline, takeaway, footnote, notes and the formula stay. A pie or
     a doughnut only of the parts of one whole (never «Сейчас / Цель», never a row of unrelated figures). Never a row of
     years as key figures («1998 г», «2021 г», «2023 г» — a timeline's dates). `case_text`: the brief (a name keeps its
-    capital in a card joined into one line)."""
+    capital in a card joined into one line). `own_lines`: the author's own slide — its figures as lines are the lines
+    it was read from («100 покупок в день»), never «Покупок в день: 100»."""
     if kind == "chart" and s.content.chart is None and s.content.numbers and case_text:
         from verstka.planning.writer import is_written_text
 
         if is_written_text(case_text) and not _one_measure(s.content.numbers):
             return None  # a written deck: only the writer's data rows are a chart, never unrelated figures (G4-4)
-    r = _reshape(s, kind, chart_type, case_text)
+    r = _reshape(s, kind, chart_type, case_text, own_lines=own_lines)
     if r is not None and r.kind.value in ("stat_row", "big_number") and _years_only(r.content.numbers):
         return None
     if r is not None and r.kind == PatternKind.timeline and case_text:
@@ -3710,7 +3743,7 @@ def _one_measure(numbers: list[NumberCallout]) -> bool:
     return len(units) == 1 and len(heads) == 1
 
 
-def _reshape(s: OutlineSlide, kind: str, chart_type: Optional[str] = None, case_text: str = "") -> Optional[OutlineSlide]:
+def _reshape(s: OutlineSlide, kind: str, chart_type: Optional[str] = None, case_text: str = "", own_lines: bool = False) -> Optional[OutlineSlide]:
     c = s.content
     if kind == s.kind.value and (kind != "chart" or not chart_type or (c.chart is not None and c.chart.type == chart_type)):
         return s.model_copy(deep=True)
@@ -3805,8 +3838,13 @@ def _reshape(s: OutlineSlide, kind: str, chart_type: Optional[str] = None, case_
         new.columns = cols
         new.numbers = [n.model_copy() for n in c.numbers]
     elif kind == "bullets":
-        # a list shows its figures as lines («Покупок в день: 100 → 115»), never as a row of figures under another name
-        lines = [f"{H.strip_end(n.label)}: {n.value}" if n.label else n.value for n in c.numbers] + _lines_of(s, case_text)
+        # a list shows its figures as lines («Покупок в день: 100 → 115»), never as a row of figures under another name;
+        # the author's own figure list keeps its lines as written («100 покупок в день», «средний чек — 300 рублей»)
+        def line_of(n) -> str:
+            own = _author_line(n, case_text) if (own_lines or s.verbatim) else None
+            return own or (f"{H.strip_end(n.label)}: {n.value}" if n.label else n.value)
+
+        lines = [line_of(n) for n in c.numbers] + _lines_of(s, case_text)
         if not lines or len(lines) > MAX_BULLETS or any(len(x.split()) > 18 for x in lines):
             return None
         new.bullets = lines
@@ -5144,7 +5182,8 @@ def _restore_lists(s: OutlineSlide, unit: _Unit) -> list[str]:
         return []
     lost = lost[:3]
     names = titles if len(titles) == len(lost) else [H.strip_end(re.split(r"\s+[—–]\s+", lb or "")[0]) or t for (lb, _), t in zip(lost, titles + [""] * len(lost))]
-    cols = [SlideItem(title=H.cap_first(n or ""), bullets=[H.short(H.strip_end(x), 9) for x in items[:6]]) for n, (_, items) in zip(names, lost)]
+    cut = (lambda t: H.strip_end(t)) if s.verbatim else (lambda t: H.short(H.strip_end(t), 9))  # noqa: E731
+    cols = [SlideItem(title=H.cap_first(n or ""), bullets=[cut(x) for x in items[:6]]) for n, (_, items) in zip(names, lost)]
     if len(cols) >= 2:
         s.kind, s.content = PatternKind.two_column, SlideContent(columns=cols, numbers=list(c.numbers), formula=c.formula)
     else:
@@ -5210,7 +5249,10 @@ def _rescue_lists(s: OutlineSlide, unit: _Unit, ctx: _Ctx) -> list[str]:
         # «Крупнейшая статья — витрина: 70 000 рублей» — shows no budget); a list of words by anything the slide says
         shown = _Shown(_visible_text(s.model_copy(update={"headline": "", "takeaway": None, "subtitle": None}) if g.figure else s))
         missing = [it for it in g.items if not shown.line(it)]
-        if not missing or any(len(x.split()) > 12 for x in missing) or (g.figure and len(missing) < len(g.items)):
+        # (the author's own slide shows its list whole: an observation of fourteen words is still one of its lines —
+        # «Используй условные результаты четырех недель наблюдений: …» lost all five for one long line)
+        longest = 20 if s.verbatim else 12
+        if not missing or any(len(x.split()) > longest for x in missing) or (g.figure and len(missing) < len(g.items)):
             continue  # a list of figures counts when it is left out whole (its figures may be on a chart)
         c = s.content
         room = _LINE_ROOM.get(s.kind.value, 0) - len(c.bullets)
@@ -5224,7 +5266,9 @@ def _rescue_lists(s: OutlineSlide, unit: _Unit, ctx: _Ctx) -> list[str]:
             # the slide shows one list of its source and leaves out the other (the plan by months, not the budget): the
             # two lists side by side, in the source's order
             first, second = (g, other) if _source_pos(unit.text, g.items[0]) <= _source_pos(unit.text, other.items[0]) else (other, g)
-            cols = [SlideItem(title=H.strip_end(re.split(r"\s+[—–]\s+", x.label or "")[0]), bullets=[H.short(H.strip_end(i), 9) for i in x.items[:6]]) for x in (first, second)]
+            # (the author's own lines whole: «…с 08:00 до 11:00» never cut to nine words)
+            cut = (lambda t: H.strip_end(t)) if s.verbatim else (lambda t: H.short(H.strip_end(t), 9))  # noqa: E731
+            cols = [SlideItem(title=H.strip_end(re.split(r"\s+[—–]\s+", x.label or "")[0]), bullets=[cut(i) for i in x.items[:6]]) for x in (first, second)]
             s.kind, s.content = PatternKind.two_column, SlideContent(columns=cols, numbers=list(c.numbers))
             s.rationale = "Два списка из брифа — рядом, в две колонки."
             said.append(f"the list «{(g.label or '')[:40]}» the slide left out shown next to the one it shows")
@@ -5394,19 +5438,19 @@ def verbatim_forms(unit: _Unit, ctx: _Ctx, profile: str) -> list:
                         continue
                     if (k in ("timeline", "process") and not _sequential(rd.slide)) or (k in ("big_number", "stat_row") and rd.basis != "figures"):
                         continue
-                    alt = reshape(rd.slide, k, None, ctx.brief.text)
+                    alt = reshape(rd.slide, k, None, ctx.brief.text, own_lines=True)
                     if alt is not None and alt.kind.value == k:
                         alts.append(alt)
                 rank = {k: i for i, k in enumerate(prefer)}
                 shapes = sorted([rd.slide, *alts], key=lambda x: rank.get(x.kind.value, len(rank))) if prefer else [rd.slide, *alts]
             for one in shapes:
                 sl = one.model_copy(deep=True)
+                sl.verbatim = True  # (before the completion: the author's lists come back whole, long lines too)
                 try:
                     # the slide's key figures and its lists the form left out, as the brief's own lines (never cut)
                     complete_slide(sl, unit, ctx)
                 except Exception:  # noqa: BLE001
                     log.warning("complete_slide failed on %s (verbatim)", unit.key, exc_info=True)
-                sl.verbatim = True
                 sl.notes = F.notes_of(r)
                 sl.headline = r.title or sl.headline
                 intro = F.list_intro(r)
