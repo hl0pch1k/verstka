@@ -57,6 +57,7 @@ import yaml
 
 from verstka.planning import heuristics as H
 from verstka.planning.brief_structure import is_photo_instruction
+from verstka.planning.pictures import numbered_sentences, picture_notes, place_pictures  # noqa: F401 (re-exported)
 from verstka.planning.plan_json import kind_by_content
 from verstka.planning.strategies import Strategy, default_strategies_path
 from verstka.ru import ru_count
@@ -745,6 +746,10 @@ class _Unit:
     table_ids: list[str] = field(default_factory=list)
     fact_ids: list[str] = field(default_factory=list)
     reading: Any = None  # the slide's text read for its layout (planning/faithful.py `Reading`), when the user dictated it
+    # a picture the author described beside the slide's sentences («[Место под изображение: …]» in a brief the architect
+    # split into slides): what it shows, and whether the author keeps the place for their own photo
+    photo_hint: Optional[str] = None
+    photo_own: bool = False
 
     @property
     def frame(self) -> bool:
@@ -819,17 +824,6 @@ def _units_from_specs(ctx: _Ctx) -> list[_Unit]:
     if not any(u.cover for u in units):
         units.insert(0, _Unit(key="u0", title=ctx.title, cover=True))
     return units
-
-
-def numbered_sentences(text: str) -> list[str]:
-    """The brief's sentences in order (a list line is a sentence of its own), for the architect's numbers."""
-    out = []
-    for line in (text or "").splitlines():
-        line = line.strip()
-        if not line or re.match(r"^\|?\s*:?-{2,}", line):
-            continue
-        out.extend(H.split_sentences(line) or [line])
-    return out
 
 
 # ------------------------------------------------------------------ designs
@@ -2340,6 +2334,35 @@ def photo_requirement(photo: str) -> str:
     """What the slide designer is told when the slide keeps a free place for the user's own photo."""
     return (f"a free place for the user's own photo ({photo}): the slide's content takes about half of the slide — "
             "at most 4 figures or 4 short bullets, no chart unless asked; never describe or fill the photo place")
+
+
+def picture_requirement(hint: str) -> str:
+    """What the slide designer is told when the slide keeps a place for a picture the author described."""
+    return (f"a free place for a picture the author described ({hint}; it is drawn into the place later): the slide's "
+            "content takes about half of the slide — at most 4 figures or 4 short bullets, no chart unless asked; never "
+            "put the picture's description into the slide's text")
+
+
+def _unit_requests(unit: "_Unit", ctx: "_Ctx") -> list[str]:
+    out = _requests_of(unit.spec, ctx) if unit.spec else []
+    if unit.photo_hint and not (unit.spec and unit.spec.photo) and not unit.frame:
+        out.append(photo_requirement(unit.photo_hint) if unit.photo_own else picture_requirement(unit.photo_hint))
+    return out
+
+
+def _keep_pictures(o: DeckOutline, pictured: dict[str, "_Unit"], warns: list[str]) -> None:
+    """The picture a slide of the architect carries holds on its compiled slide whatever the later passes did."""
+    for sl in o.slides:
+        u = pictured.get(sl.id)
+        if u is None or sl.continues or sl.kind.value in FRAME_KINDS:
+            continue
+        c = sl.content
+        if not c.photo_slot:
+            c.photo_slot = "Изображение"
+            c.photo_own = u.photo_own
+            warns.append(f"slide {sl.id}: the place for the described picture put back ({(u.photo_hint or '')[:40]})")
+        if not c.photo_hint:
+            c.photo_hint = u.photo_hint
 
 
 def _keep_photo_places(o: DeckOutline, structure: Optional[BriefStructure], warns: list[str]) -> None:
@@ -4286,9 +4309,19 @@ def _faithful_design(unit: _Unit, ctx: _Ctx, profile: str = "structured") -> _De
 
 
 def _photo_from_reading(d: "_Design") -> None:
-    """A slide whose text keeps a place for a picture («[Место под изображение: …]») keeps it, described."""
+    """A slide whose text keeps a place for a picture («[Место под изображение: …]») keeps it, described — the note in
+    the slide's own text (a slide the user dictated) or beside its sentences (a slide the architect made)."""
     from verstka.planning import faithful
 
+    u = d.unit
+    if u.photo_hint and not u.frame:
+        c = d.slide.content
+        if not c.photo_slot:
+            c.photo_slot = "Изображение"
+            c.photo_own = u.photo_own
+        if not c.photo_hint:
+            c.photo_hint = u.photo_hint
+        return
     r = d.unit.reading
     if r is None or not r.of("image"):
         return
@@ -4363,7 +4396,8 @@ class _Agent:
 
     # ---------------------------------------------------------------- architect
     def architect(self, ctx: _Ctx, warnings: list[str]) -> Optional[list[_Unit]]:
-        sentences = numbered_sentences(self.brief.text)
+        text, notes = picture_notes(self.brief.text)
+        sentences = numbered_sentences(text)
         if not sentences:
             return None
         left = self.clock.left()
@@ -4398,9 +4432,11 @@ class _Agent:
             return None
         units: list[_Unit] = []
         used: set[int] = set()
+        spans: dict[str, set[int]] = {}
         for i, ss in enumerate(ans.slides, 1):
             idx = [n for n in ss.sentences if 1 <= n <= len(sentences) and n not in used]
             used.update(idx)
+            spans[f"u{i}"] = set(idx)
             text = "\n".join(sentences[n - 1] for n in idx)
             sids = [x for x in ss.data if x in ctx.series]
             tids = [x for x in ss.data if x in ctx.tables]
@@ -4413,6 +4449,7 @@ class _Agent:
             self.tracker.emit("architect", "Архитектор: сюжет модели не опирается на бриф — план составит встроенный планировщик.")
             return None
         units = units[:n_content]
+        place_pictures(units, spans, notes, warnings)
         taken = {x for u in units for x in u.series_ids}
         for sid, s in ctx.series.items():
             if sid in taken or not s.source_span:
@@ -4437,7 +4474,7 @@ class _Agent:
             "deck_title": ctx.title, "audience": self.brief.audience or "не указана", "purpose": self.brief.purpose or "не указана",
             "language": self.brief.language, "position": pos, "total": len(units), "prev_title": prev, "next_title": nxt,
             "rules": ctx.rules, "slide_title": unit.title, "slide_text": unit.text.strip() or unit.title,
-            "requests": "\n".join(f"- {r}" for r in (_requests_of(unit.spec, ctx) if unit.spec else [])) or ("" if not unit.form else f"- suggested form: {unit.form}"),
+            "requests": "\n".join(f"- {r}" for r in _unit_requests(unit, ctx)) or ("" if not unit.form else f"- suggested form: {unit.form}"),
             "data": _data_lines(ctx, unit.series_ids, unit.table_ids, unit.fact_ids), "kinds": ctx.kinds,
             "issues": issues, "previous": previous,
         }
@@ -5836,6 +5873,7 @@ def run_agent(
                 nd = agent.model_design(d.unit, pos_of_unit[key], units, ctx, r_deadline, issues="\n".join(f"- {t}" for t in texts), previous=_previous_json(d.slide))
                 enforce_requests(nd, ctx)
                 tidy_design(nd, ctx)
+                _photo_from_reading(nd)
             except Exception as e:  # noqa: BLE001
                 agent.failed(e)
                 return key, None, str(e) or type(e).__name__
@@ -5918,8 +5956,11 @@ def run_agent(
     from verstka.planning.outline import polish_plan
 
     cover = next((d.slide for d in designs if d.unit.cover), None)
+    unit_by_key = {u.key: u for u in units}
     for st in strategies:
         own = {d.unit.key: overrides.get(st.name, {}).get(d.unit.key, d) for d in designs}
+        # the slides that carry a picture the author described (by their id in this variant, set just below)
+        pictured = {f"sl{i}": u for i, p in enumerate(placed[st.name], 1) if (u := next((unit_by_key[k] for k in p.units if k in unit_by_key and unit_by_key[k].photo_hint), None))}
         alt_of = {k: d.alternatives for k, d in own.items()}
         primary_of = {k: d.slide for k, d in own.items()}
         slides = []
@@ -5993,6 +6034,7 @@ def run_agent(
             if fixed_at:
                 tracker.emit("compile", f"Сборка: сверил слайды {', '.join(map(str, fixed_at))} с текстом — {_written_ru(all_done)}.", variant=st.name)
         _keep_photo_places(o, structure, warns)
+        _keep_pictures(o, pictured, warns)
         n_content = sum(1 for s in o.slides if s.kind.value not in FRAME_KINDS)
         if n_content == 0:
             warns.append("agent plan rejected: no content slide left after grounding")

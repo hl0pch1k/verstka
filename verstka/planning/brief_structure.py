@@ -373,6 +373,14 @@ _PHOTO_WHAT_RE = re.compile(r"\b(?:фотографи[юяи]|фото|сним�
 
 # a bracketed note for the designer («[Место под изображение: …]»), and words about «this slide» («На этом слайде …»)
 _BRACKET_RE = re.compile(r"^\[[^\[\]]{3,}\]\s*[.;]?$")
+_NOTE_SPAN_RE = re.compile(r"\[(?P<body>[^\[\]]{3,})\]")
+
+
+def _without_picture_notes(text: str) -> str:
+    """The text without its bracketed notes about a picture («[Место под изображение: …]»)."""
+    from verstka.planning.faithful import _note_part
+
+    return _NOTE_SPAN_RE.sub(lambda m: " " if _note_part(m.group("body")).kind == "image" else m.group(0), text or "")
 _THIS_SLIDE_RE = re.compile(r"\bэт(?:ом|от|ого|им)\s+слайд|\bthis\s+slide\b", re.I)
 
 
@@ -1413,8 +1421,9 @@ def read_structure(text: str, md_slides: bool = False) -> BriefStructure:
         cm = _COUNT_RE.search(body)
         if cm:
             st.slide_count = int(next(g for g in cm.groups() if g))
-    # global rules, disclaimer, notes, rounding
-    gsents = sentences_of(glob_text)
+    # global rules, disclaimer, notes, rounding (a bracketed note about a picture is its place's, never a rule of the
+    # whole deck: «[Место под изображение: экран панели …]» reached every slide's designer as one)
+    gsents = sentences_of(_without_picture_notes(glob_text))
     st.rules = [H.strip_end(s) + "." if not s.rstrip().endswith(("!", "?")) else s.strip() for s in gsents if _is_rule(s)]
     disc = [H.strip_end(s) for s in gsents if _DISCLAIMER_RE.search(s) and not _is_rule(s) and len(s.split()) <= 25]
     if disc:

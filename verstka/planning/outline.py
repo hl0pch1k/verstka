@@ -856,6 +856,20 @@ def _keep_priority(ask_ids: set[str]):
 
 
 def basic_outline(brief: Brief, facts: FactsExtraction, strategy: Strategy, target: int) -> DeckOutline:
+    """The rules planner (below). A bracketed note about a picture («[Место под изображение: экран панели …]») is never
+    the deck's text: it is read out first, and its free place goes on the slide that says what the author wrote next
+    to it (planning/pictures.py)."""
+    from verstka.planning.pictures import picture_notes, place_pictures_by_text
+
+    text, notes = picture_notes(brief.text)
+    if not notes:
+        return _basic_outline(brief, facts, strategy, target)
+    o = _basic_outline(brief.model_copy(update={"text": text}), facts, strategy, target)
+    place_pictures_by_text(o, text, notes, [])
+    return o
+
+
+def _basic_outline(brief: Brief, facts: FactsExtraction, strategy: Strategy, target: int) -> DeckOutline:
     """Deterministic planner: read the brief's sections into typed slides (steps → process, «X: …» → cards,
     figures → KPI row, tables → chart or table, the rest → theses headed by a conclusion), then assemble them the
     way the strategy asks — structured (agenda, one idea per slide), visual (key figure first, cards, charts),

@@ -344,6 +344,46 @@ def test_a_brief_without_slide_specs_gets_a_storyline_from_the_architect():
     assert any(e["step"] == "architect" and "сюжет из 3 слайдов" in e["message"].lower() for e in events)
 
 
+PICTURED = """Умная теплица на Arduino.
+
+Датчики влажности грунта стоят в трёх грядках. Насос поливает их из бака на 50 литров.
+
+[Место под изображение: экран панели управления теплицей с карточками температуры и влажности]
+
+Расход воды снизился на 31%, ручного труда стало меньше на 75%."""
+
+
+def test_a_picture_note_of_a_plain_brief_is_a_place_on_its_slide_never_its_text():
+    # the live run of 2026-10-07: the designer made «Панель показывает три ключевых параметра» (cards) out of the note,
+    # and the deck had no picture
+    script = Script(architect={"title": "Умная теплица", "slides": [
+        {"title": "Как устроена теплица", "sentences": [2, 3]},
+        {"title": "Результаты", "sentences": [4]},
+    ]})
+    res, _, _ = _run(PICTURED, script)
+    assert "Место под изображение" not in script.prompts["architect"][0] and "экран панели" not in script.prompts["architect"][0]
+    designer = next(p for p in script.prompts["designer"] if "Heading of this slide: «Как устроена теплица»" in p)
+    assert "a free place for a picture the author described (Экран панели управления теплицей" in designer
+    assert all("free place" not in p for p in script.prompts["designer"] if "Heading of this slide: «Результаты»" in p)
+    for o in res.outlines.values():
+        pictured = [s for s in o.slides if s.content.photo_slot]
+        assert len(pictured) == 1 and pictured[0].content.photo_hint.startswith("Экран панели управления теплицей")
+        assert not pictured[0].content.photo_own  # described by the author: the picture is drawn into it
+
+
+def test_picture_notes_leave_the_brief_and_go_to_the_slide_of_their_neighbours():
+    text, notes = A.picture_notes("Первое.\n\n[Место под изображение: вид теплицы сверху. На изображении — три грядки]\n\nВторое.\n[Сравнительная диаграмма: расходы]\n")
+    assert "Место под изображение" not in text and "[Сравнительная диаграмма: расходы]" in text  # only pictures leave
+    assert notes == [(1, "Вид теплицы сверху. На изображении — три грядки", "вид теплицы сверху. На изображении — три грядки")]
+    units = [A._Unit(key="u0", title="Обложка", cover=True), A._Unit(key="u1", title="А", text="Второе."), A._Unit(key="u2", title="Б", text="Третье.")]
+    warns: list = []
+    A.place_pictures(units, {"u1": {2}, "u2": {3}}, [(1, "Офис", "фото офиса я добавлю сам"), (1, "Склад", "склад сверху")], warns)
+    # sentence 1 is on no slide: the next sentence's slide; one picture per slide, the second goes on
+    assert (units[1].photo_hint, units[1].photo_own) == ("Офис", True) and (units[2].photo_hint, units[2].photo_own) == ("Склад", False)
+    A.place_pictures(units, {"u1": {2}, "u2": {3}}, [(3, "Лишнее", "")], warns)
+    assert warns and units[0].photo_hint is None  # never on the cover
+
+
 def test_without_a_storyline_the_agent_hands_the_deck_to_the_planner():
     res, events, _ = _run(PLAIN, Script(architect=ProviderError("all model links failed: congested")))
     assert res.outlines == {} and any(e["step"] == "architect" for e in events)
