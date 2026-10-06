@@ -98,3 +98,26 @@ def test_a_build_interrupted_by_a_restart_ends_as_failed(client):
     assert listed[fresh]["status"] == "running"
     assert mod.store.read_generation_meta(gid)["status"] == "failed"  # kept, not only shown
     assert c.get(f"/api/generations/{gid}").json()["status"] == "failed"
+
+
+def test_an_old_deck_uploaded_to_improve_comes_back_as_its_text_and_its_audit(client, simple_deck):
+    """«Улучшить готовую презентацию»: the deck is analysed as the template, read back as the author's «Слайд N» text,
+    and audited as it is (the «было» of «было → стало»); a generation keeps where it came from."""
+    c, mod = client
+    with open(simple_deck, "rb") as f:
+        r = c.post("/api/templates", files={"file": ("old.pptx", f, "application/octet-stream")}, data={"use_models": "false", "improve": "true"})
+    assert r.status_code == 200
+    job = _wait(c, r.json()["job_id"])
+    assert job["status"] == "done", job["error"]
+    src = job["result"]["improve"]
+    assert src["name"] == "old.pptx" and src["slides"] >= 3 and src["brief"].startswith("Слайд 1.")
+    assert set(src["audit"]) == {"score", "errors", "warnings"} and src["problems"] == []  # no vision model in the tests
+    tid = job["result"]["template_id"]
+    assert src["template_id"] == tid  # its pictures follow the deck into any template
+    r = c.post("/api/generations", json={"template_id": tid, "brief": src["brief"], "strategies": ["structured"], "use_models": False, "exports": [],
+                                         "eyes": True, "improved_from": {"name": src["name"], "slides": src["slides"], "audit": src["audit"]}})
+    assert r.status_code == 200
+    job = _wait(c, r.json()["job_id"], timeout=300)
+    assert job["status"] == "done", job["error"]
+    g = c.get(f"/api/generations/{r.json()['generation_id']}").json()
+    assert g["improved_from"]["name"] == "old.pptx" and g["eyes"] is True

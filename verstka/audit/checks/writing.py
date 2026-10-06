@@ -705,21 +705,36 @@ def _num_forms(v: float) -> set[str]:
     return {_num_key(x) for x in out}
 
 
-def _chart_rows(osl: OutlineSlide, ctx: AuditContext) -> list[list[tuple[str, float]]]:
-    """(category, value) rows of each series the slide's chart shows."""
-    out: list[list[tuple[str, float]]] = []
+_SCALE_OF = ((re.compile(r"^(?:тыс\.?|тысяч\w*)$", re.I), 1e3), (re.compile(r"^(?:млн\.?|миллион\w*)$", re.I), 1e6), (re.compile(r"^(?:млрд\.?|миллиард\w*)$", re.I), 1e9), (re.compile(r"^(?:трлн\.?|триллион\w*)$", re.I), 1e12))
+
+
+def _unit_scale(unit: Optional[str]) -> float:
+    """The scale a chart's unit writes its values in: «тыс. ₽» → 1000 (70 is 70 000 ₽), «млн» → 10⁶, else 1."""
+    first = (unit or "").strip().split(" ")[0] if (unit or "").strip() else ""
+    for rx, k in _SCALE_OF:
+        if rx.match(first) or rx.match(first.rstrip(".")):
+            return k
+    return 1.0
+
+
+def _chart_rows(osl: OutlineSlide, ctx: AuditContext) -> list[list[tuple[str, float, float]]]:
+    """(category, value, scale) rows of each series the slide's chart shows — the scale of its unit («тыс. ₽»): the
+    source writes 35 of a chart in thousands as «35 000»."""
+    out: list[list[tuple[str, float, float]]] = []
     for spec in (osl.content.chart, osl.content.chart2):
         if spec is None:
             continue
         cats = list(spec.categories or [])
         for ser in spec.series or []:
             if cats and ser.values:
-                out.append(list(zip(cats, ser.values)))
+                k = _unit_scale(ser.unit or spec.unit)
+                out.append([(c, v, k) for c, v in zip(cats, ser.values)])
         if ctx.outline is not None:
             for sid in spec.series_ids or []:
                 ser = ctx.outline.series_by_id(sid)
                 if ser is not None and ser.categories and ser.values:
-                    out.append(list(zip(ser.categories, ser.values)))
+                    k = _unit_scale(ser.unit or spec.unit)
+                    out.append([(c, v, k) for c, v in zip(ser.categories, ser.values)])
     return out
 
 
@@ -727,9 +742,11 @@ def _content_stems(text: str) -> set[str]:
     return {w[:5] for w, _, _ in tokens(text) if len(w) >= 4 and not w.isdigit()}
 
 
-def value_unit(category: str, value: float, sents: list[str]) -> Optional[tuple[str, str]]:
-    """(unit, phrase) of the value as the source writes it, in the sentence that shares most words with its category."""
-    forms = _num_forms(value)
+def value_unit(category: str, value: float, sents: list[str], scale: float = 1.0) -> Optional[tuple[str, str]]:
+    """(unit, phrase) of the value as the source writes it, in the sentence that shares most words with its category
+    (a sentence that shares none is another figure that happens to have the same number: «30 рабочих дней» is not the
+    reserve of 30 thousand rubles). `scale`: the chart's unit writes its values in thousands or millions."""
+    forms = _num_forms(value) | (_num_forms(value * scale) if scale != 1.0 else set())
     cat = _content_stems(category)
     best: Optional[tuple[int, str, str]] = None
     for s in sents:
@@ -737,6 +754,8 @@ def value_unit(category: str, value: float, sents: list[str]) -> Optional[tuple[
             if _num_key(n.group(0)) not in forms:
                 continue
             score = len(cat & _content_stems(s))
+            if cat and score == 0:
+                continue
             u = unit_after(s[n.end() :])
             phrase = _clean(s[n.start() : n.end() + 30])
             if best is None or score > best[0]:
@@ -759,7 +778,7 @@ def chart_mixed_units(ctx: AuditContext) -> list[Issue]:
         for rows in _chart_rows(osl, ctx):
             if len(rows) < 2:
                 continue
-            got = [(c, value_unit(c, v, sents)) for c, v in rows]
+            got = [(c, value_unit(c, v, sents, k)) for c, v, k in rows]
             units = [(c, u) for c, u in got if u is not None]
             kinds = {u[0] for _, u in units}
             if len(units) < 2 or len(kinds) < 2:

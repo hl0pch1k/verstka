@@ -189,6 +189,24 @@ export interface TemplateManifest {
   narration: string;
 }
 export interface UploadResponse { job_id: string; filename: string; use_models: boolean }
+/** «Улучшить готовую презентацию» (Verstka 3.0): the uploaded deck read back as the author's text («Слайд N. …»), what
+ *  it holds, and its own audit — the «было» of «было → стало» (verstka/ingest/deck_text.py). */
+export interface ImproveSource {
+  brief: string;
+  name: string;
+  /** The uploaded deck as a template (its pictures go to the new deck in any template). */
+  template_id?: string;
+  title?: string;
+  slides: number;
+  tables: number;
+  charts: number;
+  pictures: number;
+  audit?: { score: number; errors: number; warnings: number } | null;
+  /** What «Взгляд дизайнера» saw wrong on the original (its serious problems), when a vision model is connected. */
+  problems?: { slide: number; code: string; text: string; where?: string }[];
+}
+/** What a generation was made from in «Улучшить» (generation.json `improved_from`). */
+export interface ImprovedFrom { name: string; slides?: number; template_id?: string; audit?: { score: number; errors: number; warnings: number } | null }
 
 // ---- jobs ---------------------------------------------------------------------
 export interface Job {
@@ -389,6 +407,10 @@ export interface GenerationMeta {
   outline_supplied?: boolean;
   /** Writer mode (newer servers): the text was a topic, and the agent wrote the deck's text from it first. */
   writer?: WriterInfo | null;
+  /** «Взгляд дизайнера» as the request asked. */
+  eyes?: boolean | null;
+  /** «Улучшить готовую презентацию»: the original deck (its name, slides and audit). */
+  improved_from?: ImprovedFrom | null;
 }
 /** What the agent wrote from a topic (generation.json `writer`, planning/writer.py `WriterResult.meta`). */
 export interface WriterInfo {
@@ -478,6 +500,10 @@ export interface GenerateRequest {
   exports: string[];
   /** «Генерировать изображения»: null — the server's default (on when a text-to-image model has a key). */
   pictures?: boolean | null;
+  /** «Взгляд дизайнера»: null — with the text model; true — on its own too (an improved deck keeps its text). */
+  eyes?: boolean | null;
+  /** «Улучшить готовую презентацию»: the original deck, for «было → стало». */
+  improved_from?: ImprovedFrom | null;
 }
 export interface GenerateResponse { job_id: string; generation_id: string }
 export interface FixRequest { issue_ids?: string[]; all_deterministic?: boolean }

@@ -1,12 +1,12 @@
 // The planning agent's work (Agent v2) as a timeline of plain steps: Автор (writer mode: a topic without material —
-// the agent writes the text first) → Аналитик → Архитектор (when the text did not describe the slides) → Дизайнер (a line per slide with its form) → Критик → Правка → Вёрстка → Проверка.
+// the agent writes the text first) → Аналитик → Архитектор (when the text did not describe the slides) → Дизайнер (a line per slide with its form) → Критик → Правка → Вёрстка → Проверка → Взгляд дизайнера (the vision model looks at the rendered slides).
 // The agent's own steps come as events {step, message, slide, variant, fix}; «Вёрстка» and «Проверка» follow the
 // pipeline's plain progress messages («visual: rendered slide 3/10», «export: …»). Pure functions, no React.
 import type { AgentEvent, DeckOutline, JobEvent, Variant } from "../types";
 import { plainTerms } from "./plain";
 import { plural } from "./utils";
 
-export type PhaseKey = "writer" | "analyst" | "architect" | "designer" | "critic" | "revise" | "layout" | "check";
+export type PhaseKey = "writer" | "analyst" | "architect" | "designer" | "critic" | "revise" | "layout" | "check" | "eyes";
 export type PhaseStatus = "done" | "active" | "pending" | "skipped";
 
 export interface PhaseDef { key: PhaseKey; title: string; hint: string; optional?: boolean }
@@ -20,6 +20,7 @@ export const PHASES: PhaseDef[] = [
   { key: "revise", title: "Правка", hint: "переделывает слайды с замечаниями" },
   { key: "layout", title: "Вёрстка", hint: "раскладывает слайды по макетам шаблона" },
   { key: "check", title: "Проверка", hint: "шрифты, цвета, отступы — и исправления" },
+  { key: "eyes", title: "Взгляд дизайнера", hint: "смотрит на готовые слайды, как арт-директор, и пересобирает неудачные", optional: true },
 ];
 
 const ORDER: Record<PhaseKey, number> = Object.fromEntries(PHASES.map((p, i) => [p.key, i])) as Record<PhaseKey, number>;
@@ -37,6 +38,7 @@ export function phaseOfStep(step: string | null | undefined): PhaseKey | null {
     case "critic": return "critic";
     case "revise": return "revise";
     case "compile": return "layout";
+    case "eyes": return "eyes";
     default: return null;
   }
 }
@@ -51,6 +53,7 @@ export function phaseOfMessage(message: string): PhaseKey | null {
   const what = r[2];
   if (/^planned \d+ slides/.test(what) || /^rendered slide/.test(what)) return "layout";
   if (what === "audit" || /^autofix/.test(what) || /^done in /.test(what)) return "check";
+  if (what === "design review") return "eyes";
   return null;
 }
 
@@ -297,6 +300,17 @@ function ownNote(key: PhaseKey, events: TimelineEvent[]): string | null {
     return notes.length ? `${plural(notes.length, "замечание", "замечания", "замечаний")} · ${slideList(slides)}` : null;
   }
   if (key === "revise" && slides.length) return `${plural(slides.length, "слайд", "слайда", "слайдов")} ${agrees(slides.length, "переделан", "переделаны")}`;
+  if (key === "eyes") {
+    // «Взгляд дизайнера»: the slides it laid out again (an event with a slide and a «Собрал заново» fix), or none
+    const onSlide = events.filter((e) => e.slide !== null && e.slide !== undefined);
+    const redone = uniqueSlides(onSlide.filter((e) => /^собрал заново/i.test(e.fix ?? "")));
+    const left = uniqueSlides(onSlide.filter((e) => !/^собрал заново/i.test(e.fix ?? ""))).filter((n) => !redone.includes(n));
+    const parts = [
+      redone.length ? `${plural(redone.length, "слайд", "слайда", "слайдов")} ${agrees(redone.length, "пересобран", "пересобраны")}` : null,
+      left.length ? `${plural(left.length, "замечание", "замечания", "замечаний")} · ${slideList(left)}` : null,
+    ].filter(Boolean);
+    return parts.length ? parts.join(", ") : events.length ? "замечаний нет" : null;
+  }
   return null;
 }
 
@@ -414,6 +428,14 @@ export function agentSummary(v: Variant | null | undefined): AgentSummaryLine[] 
           ? [said ? plural(said, "замечание", "замечания", "замечаний") : null, fixed ? `${agrees(fixed, "исправлен", "исправлено")} ${plural(fixed, "слайд", "слайда", "слайдов")}` : null].filter(Boolean).join(", ")
           : "Замечаний нет";
       lines.push({ step: "Критик", text: capital(text) });
+    }
+    // «Взгляд дизайнера»: how many finished slides the vision model looked at, how many it laid out again
+    const eyes = evs.filter((e) => e.phase === "eyes" && mine(e));
+    if (eyes.length) {
+      const looked = Number(eyes.map((e) => e.message.match(/посмотрел на (\d+)/i)?.[1]).find(Boolean) ?? NaN);
+      const redone = uniqueSlides(eyes.filter((e) => /^собрал заново/i.test(e.fix ?? ""))).length;
+      const seen = Number.isFinite(looked) ? `Посмотрел на ${plural(looked, "слайд", "слайда", "слайдов")}` : "Посмотрел на слайды";
+      lines.push({ step: "Взгляд дизайнера", text: redone ? `${seen}, ${agrees(redone, "пересобрал", "пересобрал")} ${plural(redone, "слайд", "слайда", "слайдов")}` : `${seen} — замечаний нет` });
     }
     return lines.map((l) => ({ ...l, text: keepTogether(l.text) }));
   }

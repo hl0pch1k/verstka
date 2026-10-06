@@ -371,6 +371,14 @@ def prepare_slide(o: OutlineSlide, ps: LayoutSlide, outline: DeckOutline) -> tup
             why = "every card is a bare title"
         elif s.kind in _FIGURE_KINDS and not c.numbers and not (c.formula or "").strip() and c.chart is None:
             why = "figure slide without figures"
+        elif s.kind not in _FIGURE_KINDS and cols and c.numbers and c.chart is None and c.table is None:
+            # key figures beside items: no item form draws a row of figures (cards, steps, columns show their items
+            # only) — each figure its card was not given becomes a line under the block, never left off the slide
+            inside = " ".join([_item_line(it) for it in cols] + list(c.bullets) + list(c.paragraphs))
+            lines = [_number_line(n, outline) for n in c.numbers if n.value.strip() and n.value.strip() not in inside]
+            if lines:
+                s = s.model_copy(update={"content": c.model_copy(update={"numbers": [], "bullets": list(c.bullets) + lines})})
+                notes.append(f"{len(lines)} key figure(s) beside the {s.kind.value} items set as lines under them")
         elif s.kind in _FREE_KINDS:
             s = _as_list(s, outline)
             notes.append(f"kind «{o.kind.value}» has no composition of its own: set as bullets")

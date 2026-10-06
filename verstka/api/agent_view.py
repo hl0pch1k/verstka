@@ -22,8 +22,8 @@ from verstka.ru import ru_count
 log = logging.getLogger(__name__)
 
 # «writer»: writer mode (planning/writer.py) — the agent writes the deck's text from a topic before the analyst reads it
-AGENT_STEPS = ("writer", "analyst", "architect", "designer", "critic", "revise", "compile")
-STEP_RU = {"writer": "Автор", "analyst": "Аналитик", "architect": "Архитектор", "designer": "Дизайнер", "critic": "Критик", "revise": "Правка", "compile": "Сборка плана"}
+AGENT_STEPS = ("writer", "analyst", "architect", "designer", "critic", "revise", "compile", "eyes")
+STEP_RU = {"writer": "Автор", "analyst": "Аналитик", "architect": "Архитектор", "designer": "Дизайнер", "critic": "Критик", "revise": "Правка", "compile": "Сборка плана", "eyes": "Взгляд дизайнера"}
 AGENT_FILE = "agent.json"
 _MAX_MESSAGE = 400
 _MAX_EVENTS = 1000

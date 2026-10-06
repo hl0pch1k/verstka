@@ -11,7 +11,7 @@ import { LS, storage, uid } from "./lib/utils";
 import { decodeImage, viewTransition } from "./lib/motion";
 import { variantRev, withRev } from "./components/VariantsHelpers";
 import type {
-  ChatMessage, DetailKey, GenerateRequest, Generation, GenerationMeta, Health, Job, JobKind, ModelsStatus, Screen, StrategyInfo, TabKey, TemplateListItem, TemplateManifest, Variant,
+  ChatMessage, DetailKey, GenerateRequest, Generation, GenerationMeta, Health, ImproveSource, Job, JobKind, ModelsStatus, Screen, StrategyInfo, TabKey, TemplateListItem, TemplateManifest, Variant,
 } from "./types";
 
 export type { ActiveJob } from "./lib/jobState";
@@ -58,7 +58,7 @@ export interface AppState {
   runJob(jobId: string, label: string, opts?: RunJobOptions): void;
   messages: ChatMessage[]; pushMessage(role: "user" | "assistant", text: string): void; // ts = unix seconds (fmtDate-compatible)
   toast(kind: "error" | "success" | "info", text: string): void;
-  uploadTemplate(file: File, useModels: boolean): Promise<void>;
+  uploadTemplate(file: File, useModels: boolean, improve?: boolean): Promise<void>;
   startGeneration(req: GenerateRequest, expectedSlides?: number | null): Promise<void>;
   /** A text handed to the create screen's field once (the agent's written text, «Изменить»); null when none waits. */
   composerText: string | null;
@@ -68,6 +68,9 @@ export interface AppState {
   editText(text: string, preset?: ComposerPreset): void;
   /** The create screen took the handed text. */
   takeComposerText(): void;
+  /** «Улучшить готовую презентацию»: the deck read back, handed to the create screen once (null when none waits). */
+  improveSource: ImproveSource | null;
+  takeImproveSource(): void;
 }
 
 /** A deck's own parameters for the create screen (GenerationMeta): what «Изменить текст» restores with its text. */
@@ -138,6 +141,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setComposerText(null);
     setComposerPreset(null);
   }, []);
+  const [improveSource, setImproveSource] = useState<ImproveSource | null>(null);
+  const takeImproveSource = useCallback(() => setImproveSource(null), []);
   const [activeJob, setActiveJob] = useState<ActiveJob | null>(null);
   const liveJobs = useRef(new Map<string, ActiveJob>()); // every job still running, the newest last
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -343,7 +348,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [selectTemplate]);
 
   const uploadTemplate = useCallback(
-    (file: File, useModels: boolean) => uploadTemplateFlow(file, useModels, { runJob, report, pushMessage, setTab, setTemplates, adoptManifest }),
+    (file: File, useModels: boolean, improve?: boolean) =>
+      uploadTemplateFlow(file, useModels, { runJob, report, pushMessage, setTab, setTemplates, adoptManifest }, improve ? (src) => { setImproveSource(src); setScreen("create"); } : undefined),
     [runJob, report, pushMessage, adoptManifest],
   );
 
@@ -440,12 +446,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, activeStrategy, setActiveStrategy, activeVariant,
     selectedSlide, setSelectedSlide, setTab, screen, setScreen, detail, setDetail, agentOpen, setAgentOpen, activeJob, runJob, messages, pushMessage, toast, uploadTemplate, startGeneration,
-    composerText, composerPreset, editText, takeComposerText,
+    composerText, composerPreset, editText, takeComposerText, improveSource, takeImproveSource,
   }), [
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, activeStrategy, setActiveStrategy, activeVariant,
     selectedSlide, setSelectedSlide, setTab, screen, detail, agentOpen, setAgentOpen, activeJob, runJob, messages, pushMessage, toast, uploadTemplate, startGeneration,
-    composerText, composerPreset, editText, takeComposerText,
+    composerText, composerPreset, editText, takeComposerText, improveSource, takeImproveSource,
   ]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

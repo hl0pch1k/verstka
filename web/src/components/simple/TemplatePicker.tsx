@@ -6,7 +6,7 @@
 // explains a change: the ring moves to the chosen cover, a new template's picture fades in over its skeleton, a
 // deleted card leaves and the others close the gap.
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type DragEvent } from "react";
-import { Check, Eye, ImageOff, LayoutGrid, Trash2, Upload } from "lucide-react";
+import { Check, Eye, ImageOff, LayoutGrid, Trash2, Upload, Wand2 } from "lucide-react";
 import { api } from "../../api";
 import { errText } from "../../lib/narrate";
 import { EASE, MOTION, prefersReducedMotion } from "../../lib/motion";
@@ -44,21 +44,22 @@ function useTemplateUpload() {
   const running = !!activeJob && (activeJob.status === "queued" || activeJob.status === "running");
   const job = running && activeJob.kind === "analyze" ? activeJob : null;
   const blocked = !!state.name || running || !!healthError;
-  const take = async (file: File | undefined) => {
+  const take = async (file: File | undefined, improve = false) => {
     if (!file || blocked) return;
-    if (!isTemplateFile(file.name)) return void uploadTemplate(file, false); // the flow says what is wrong, no skeleton
+    if (!isTemplateFile(file.name)) return void uploadTemplate(file, false, improve); // the flow says what is wrong, no skeleton
     setUpload({ name: file.name });
     try {
-      await uploadTemplate(file, false); // resolves once the analysis is over (or failed)
+      await uploadTemplate(file, false, improve); // resolves once the analysis is over (or failed)
     } finally {
       setUpload({ name: null });
     }
   };
-  const pick = () => {
+  /** `improve`: «Улучшить готовую» — the deck is the template and, read back, the text of the new deck. */
+  const pick = (improve = false) => {
     const input = document.createElement("input");
     input.type = "file";
     input.accept = TEMPLATE_ACCEPT;
-    input.onchange = () => void take(input.files?.[0]);
+    input.onchange = () => void take(input.files?.[0], improve);
     input.click();
   };
   return { take, pick, blocked, job, name: state.name, over: state.over };
@@ -90,8 +91,20 @@ export function useTemplateDrop() {
 export function TemplateUploadButton() {
   const { pick, blocked } = useTemplateUpload();
   return (
-    <Button size="sm" variant="ghost" icon={Upload} disabled={blocked} onClick={pick}>
+    <Button size="sm" variant="ghost" icon={Upload} disabled={blocked} onClick={() => pick(false)}>
       Загрузить свой
+    </Button>
+  );
+}
+
+/** «Улучшить готовую презентацию» (Verstka 3.0): an old deck becomes the template and, read back, the text — the
+ *  slides are laid out anew in its own style, and the model looks at every one of them. */
+export function ImproveDeckButton() {
+  const { pick, blocked } = useTemplateUpload();
+  return (
+    <Button size="sm" variant="ghost" icon={Wand2} disabled={blocked} onClick={() => pick(true)}
+      title="Загрузите старую презентацию: её оформление и текст останутся, а вёрстку Verstka соберёт заново — в трёх вариантах">
+      Улучшить готовую
     </Button>
   );
 }

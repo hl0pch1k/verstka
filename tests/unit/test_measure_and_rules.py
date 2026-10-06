@@ -155,6 +155,11 @@ def test_a_cover_of_the_authors_text_gets_no_invented_date():
         ctx = SimpleNamespace(outline=DeckOutline(title="Умная теплица", slides=[cover], language="ru"))
         footer = _bookend_texts(ctx, cover)[3]
         assert footer == (None if verbatim else _deck_date("ru"))
+    # a cover whose own lines date it (an improved deck's «Октябрь 2026») is never dated twice
+    for line in ("Октябрь 2026", "Отчёт за окт. 2026", "10.2026", "October 2026"):
+        dated = OutlineSlide(id="sl1", kind=PatternKind.title, headline="Умная теплица", subtitle=line)
+        ctx = SimpleNamespace(outline=DeckOutline(title="Умная теплица", slides=[dated], language="ru"))
+        assert _bookend_texts(ctx, dated)[3] is None, line
 
 
 def test_the_fixes_of_a_finished_deck_find_their_slides_by_order(tmp_path):

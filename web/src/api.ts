@@ -50,10 +50,12 @@ export const api = {
 
   templates: () => request<TemplateListItem[]>("/api/templates"),
   template: (id: string) => request<TemplateManifest>(`/api/templates/${encodeURIComponent(id)}`),
-  uploadTemplate: (file: File, useModels = true) => {
+  uploadTemplate: (file: File, useModels = true, improve = false) => {
     const fd = new FormData();
     fd.append("file", file, file.name);
     fd.append("use_models", useModels ? "true" : "false");
+    // «Улучшить готовую»: the deck is analysed as the template and read back as the author's text
+    if (improve) fd.append("improve", "true");
     return request<UploadResponse>("/api/templates", { method: "POST", body: fd });
   },
 

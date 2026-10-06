@@ -2104,10 +2104,27 @@ def _fill_standalone_items(ctx: _SlideCtx, items: list[SlideItem]) -> None:
                 if item.text or item.bullets:
                     ctx.warnings.append(f"text of «{item.title}» had no slot")
         items = items2[n:]
+    if len(items) >= 2:
+        from verstka.matching.scorer import column_stacks
+
+        free = [s for s in ctx.slots(SlotRole.body, SlotRole.bullet_list, SlotRole.card_body, SlotRole.card_title) if s.shape_id not in ctx.cell_member_ids]
+        stacks = column_stacks(free)
+        if len(stacks) >= len(items):
+            # the sample's own columns (a heading over a list, side by side): one item a column, in reading order
+            for (head, body), item in zip(stacks, items):
+                if head is not None and (item.title or item.number):
+                    ctx.fill_slot(head, [ParagraphSpec(item.title or item.number or "", bullet=False)])
+                    ctx.fill_slot(body, _item_body_paragraphs(item) or [ParagraphSpec(item.title, bullet=False)])
+                else:
+                    ctx.fill_slot(body, _item_single_paragraphs(item))
+            items = []
     if items:
         target = ctx.slots(SlotRole.bullet_list, SlotRole.body)
         if target:
             big = ctx.largest(target)
+            if sum(1 for i in items if i.bullets) >= 2:
+                # blocks with lists of their own run together in one box: the sample cannot show them side by side
+                ctx.warnings.append(f"items merged: {len(items)} blocks with their own lists into one text box")
             paras: list[ParagraphSpec] = []
             for i in items:
                 head = i.number or i.title
@@ -4225,6 +4242,11 @@ def _deck_date(language: Optional[str]) -> str:
 
 
 _SECTION_NO_RE = re.compile(r"(?i)(раздел|часть|глава|блок|этап|section|part|chapter)\s*(№\s*)?[0-9IVX]{1,4}\.?")
+# a month and a year («Октябрь 2026», «окт. 2026», «10.2026», «October 2026»): a line that dates the deck itself
+_DATED_RE = re.compile(
+    r"(?i)(?<![а-яёa-z])(?:янв|фев|мар|апр|ма[йя]|июн|июл|авг|сен|окт|ноя|дек|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[а-яёa-z]*\.?\s+(?:19|20)\d{2}"
+    r"|\b(?:0?[1-9]|1[0-2])[./](?:19|20)\d{2}\b"
+)
 
 
 def _bookend_texts(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[str, Optional[str], Optional[str], Optional[str]]:
@@ -4243,8 +4265,10 @@ def _bookend_texts(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[str, Optional[
                 kicker = _cap_first(lines.pop(0))
             lines.insert(0, tail)
         # the month the deck was made, under a cover the model wrote; a cover of the author's own text says only what
-        # the author wrote (no date the brief never gave)
-        footer = None if oslide.verbatim else _deck_date(ctx.outline.language)
+        # the author wrote (no date the brief never gave) — and a cover whose lines carry a date already says it once
+        # (an improved deck's «Октябрь 2026» was set twice: its own line and the footer)
+        dated = any(_DATED_RE.search(t) for t in [head, *lines])
+        footer = None if oslide.verbatim or dated else _deck_date(ctx.outline.language)
     elif oslide.kind == PatternKind.section:
         secs = [s.id for s in ctx.outline.slides if s.kind == PatternKind.section]
         if len(secs) >= 2 and oslide.id in secs:
@@ -5690,6 +5714,16 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
         crosses_block = art_low is not None and n_x < x + w_used and n_x + n_w > x and ny < block_bottom + int(0.01 * H)
         if (ny - block_bottom < max(int(0.05 * H), int(1.2 * n_size * EMU_PER_PT)) and art_low is None) or crosses_block:
             ny = block_bottom + max(int(0.04 * H), int(1.2 * n_size * EMU_PER_PT))  # no foot room: under the subtitle
+            u_room = int(safe.x2 * W)
+            for ob in obstacles:
+                if ob.y < ny + int(1.45 * n_size * EMU_PER_PT) and ob.y2 > ny and ob.x > n_x + int(0.1 * W):
+                    u_room = min(u_room, ob.x - int(0.02 * W))
+            u_width = max(min(w_max, u_room - n_x), int(0.2 * W))
+            if u_width > n_width:
+                n_width = u_width
+                n_lines = display_lines(bind_short_words(note), family, n_size, n_bold, n_width / EMU_PER_PT * 0.92) or [note]
+                n_w = int(max(text_width_pt(t, family, n_size, n_bold) for t in n_lines) * 1.1 * EMU_PER_PT)
+                n_h = int((1.2 * len(n_lines) + 0.25) * n_size * EMU_PER_PT) + l_ins[1] + l_ins[3]
             # the small print under the block must not fall off the foot of the slide nor onto what stands under the
             # column (a logo): the whole stack rises for it as far as the room above the heading allows
             floor_n = int(safe.y2 * H)

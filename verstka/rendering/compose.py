@@ -1086,7 +1086,7 @@ class Composer:
                     break
         boost_used = self._boost
         self._boost = 0
-        if comp != "table" and self._notes and self._notes[1] is not None and self._conclusion_spot(n0) is None:
+        if self._notes and self._notes[1] is not None and self._conclusion_spot(n0) is None:
             self._rehouse_conclusion(comp, area, n0, (o0, w0, notes0), boost_used)
         self._draw_notes(n0)
         self.warnings.extend(self.cv.clamp_warnings())
@@ -1101,6 +1101,7 @@ class Composer:
         counts when the block stays above the content's real floor and the conclusion finds its spot. None: the first
         setting stays and `_draw_notes` says the conclusion aloud (its smallest form tried first)."""
         o0, w0, notes0 = state
+        notes_first = getattr(self.o, "notes", None)
         foot_box, plan, full = self._notes
         floor0, area0, dense0 = self._floor_y, self._area, self._dense
         w_first = list(self.warnings)  # the first setting's own warnings (its dense pass), kept when it stays
@@ -1122,7 +1123,7 @@ class Composer:
                 self._floor_y = floor0
             # the tighter floor only steers the sizes: the block may not pass the content's real floor, and the
             # conclusion must find its room under it (`_conclusion_spot`)
-            return not self._overflows(n0, body_area)
+            return not self._overflows(n0, body_area) and (getattr(self.o, "notes", None) or "") in ((notes0 or ""), (notes_first or ""))
 
         # the block kept above the conclusion's room: a step down the ladder, cards in two rows
         shorter = area.y2 < floor0 - int(0.01 * self.kit.H)
@@ -2079,7 +2080,8 @@ class Composer:
             # lines (a list of measures under two figures), so the figures keep their size
             ecols = 2 if len(extra) > 3 else 1
             per = math.ceil(len(extra) / ecols)
-            ew = int((area.w - k.gap) / 2) if ecols == 2 else int(area.w * 0.8)
+            denser_ = getattr(self, "_dense", False) or getattr(self, "_rehousing", False)
+            ew = int((area.w - k.gap) / 2) if ecols == 2 else int(area.w * (1.0 if denser_ else 0.8))
             groups = [extra[i * per:(i + 1) * per] for i in range(ecols)]
             esize = k.lead if getattr(self, "_boost", 0) >= 1 and self.fits_width(extra, k.lead, False, ew - _emu(k.lead * 1.1)) else k.body
             steps = [esize]
@@ -2116,6 +2118,8 @@ class Composer:
             # tiles in two rows keep a slimmer top and bottom padding: 0.05 of the slide's height over and under each
             # figure took 45 % of a 2×2 tile and left the figures at 18 pt under 20 pt labels (B3); so does a row whose
             # figures the full padding sets under the heading's size (G4-20: «300 → 330 ₽» at 23.5 pt under 33.5)
+            if getattr(self, "_dense", False) or getattr(self, "_rehousing", False):
+                return min(pad, int(0.02 * k.H))
             return min(pad, int(0.03 * k.H)) if (math.ceil(n / cols) > 1 or slim[0]) else pad
 
         def layout(cols: int, stacked: bool = False):
@@ -2229,6 +2233,14 @@ class Composer:
                 units = unit_paras(fs, label_size)
                 unit_h = max((self.h([u], inner) - _emu(2) for u in units if u is not None), default=0)
             content_h = rule + (int(k.vgap * 0.6) if rule else 0) + fig_h + unit_h - tg + int(k.vgap * 0.35) + lab_h
+        if (getattr(self, "_dense", False) or getattr(self, "_rehousing", False)) and content_h + 2 * pad_y > max_tile:
+            floor_ls = self._dense_floor() if getattr(self, "_dense", False) else k.small
+            for ls in [x for x in reversed(k.sizes) if floor_ls - 0.05 <= x < label_size - 0.05]:
+                label_size = ls
+                lab_h = max(self.h([self.P(distinct_label(x.value, x.label, self.o.headline), label_size, colors.muted)], inner) for x in numbers)
+                content_h = rule + (int(k.vgap * 0.6) if rule else 0) + fig_h + unit_h - tg + int(k.vgap * 0.35) + lab_h
+                if content_h + 2 * pad_y <= max_tile:
+                    break
         # the tile holds its figure and label, never shorter than them (a label hanging below its card)
         tile_h = self._grow_to(avail.h, rows, k.vgap, content_h + 2 * pad_y) if use_cards else content_h + 2 * pad_y
         block_h = rows * tile_h + (rows - 1) * k.vgap + ((extra_block[1] + k.vgap * 1.4) if extra_block else 0)
@@ -3460,7 +3472,9 @@ class Composer:
         deltas = table_deltas(table) if self.strategy == "visual" and area.w * 0.36 >= 0.3 * k.W and not (self.o.takeaway or "").strip() else []
         if deltas:
             width = int(area.w * 0.64)  # the table and, beside it, what changed most
-        floor = 0.022 * k.hpt
+        floor = min(0.022 * k.hpt, k.small)
+        if getattr(self, "_dense", False):
+            floor = min(floor, self._dense_floor())
         # a table reads at body size; dense tables step down to the small size. A small one (a few rows, a few
         # columns) set at body size is a thin strip over an empty slide: it may take the lead size when nothing wraps
         header_bold = template_bold(k.manifest.tokens.typography)
@@ -3471,7 +3485,8 @@ class Composer:
             small_table = len(t.rows) + 1 <= 5 and len(t.columns) <= 4
             lead = [k.lead] if (small_table or boost >= 1) and k.lead > k.body and (not k.head_size or k.lead <= 0.7 * k.head_size) else []
             mids = [x for x in k.sizes if k.body + 0.05 < x < k.lead - 0.05] if boost >= 1 else []
-            return [s for s in sorted({*lead, *mids, k.body, k.small}, reverse=True) if s >= floor] or [k.small]
+            steps = [x for x in k.sizes if floor - 0.05 <= x < k.body - 0.05]
+            return [s for s in sorted({*lead, *mids, k.body, *steps, k.small}, reverse=True) if s >= floor - 0.05] or [k.small]
 
         tight = getattr(self, "_tight", 0)
 

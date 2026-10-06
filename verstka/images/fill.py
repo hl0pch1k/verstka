@@ -52,6 +52,8 @@ def ask_of(place: Place, deck_title: str, wish: Optional[str] = None) -> ImageAs
 def descr_of(record: dict) -> str:
     """The picture's alternative text: what it shows and that a model made it."""
     what = record.get("wish") or record.get("hint") or record.get("label") or record.get("headline") or "иллюстрация"
+    if record.get("model") == "original":
+        return f"{what} — изображение из исходной презентации"
     return f"{what} — изображение сгенерировано моделью {record.get('model_label') or record.get('model') or 'text-to-image'}"
 
 

@@ -87,12 +87,13 @@ def empty_slide(ctx: AuditContext) -> list[Issue]:
     return out
 
 
+_DASHES = str.maketrans({c: "-" for c in "\u2212\u2010\u2011\u2012\u2013\u2014"})
 _RUB_RE = re.compile(r"\s*(?:рубл(?:ей|я|ь)|руб\.?)(?![а-яё])", re.I)
 
 
 def _norm_text(t: str) -> str:
     # (a sum is the same written «300 рублей» in the plan and «300 ₽» on the slide: the typesetting's own choice)
-    return _WS_RE.sub("", _RUB_RE.sub("₽", t or "")).lower().replace("ё", "е")
+    return _WS_RE.sub("", _RUB_RE.sub("₽", t or "")).lower().replace("ё", "е").translate(_DASHES)
 
 
 def wanted_strings(osl: OutlineSlide, outline=None) -> list[str]:

@@ -330,6 +330,8 @@ def generate_variants(
     image_provider: Any = None,
     picture_dir: Optional[Path] = None,
     picture_reuse: Optional[dict[str, list[dict]]] = None,
+    eyes: Optional[bool] = None,
+    source_pictures: Optional[Path] = None,
 ) -> GenerateResult:
     """`writer`: writer mode (planning/writer.py) — a brief that is only a topic («История VK», «презентация про
     вторую мировую войну») gets its text written by the agent before planning (the model's text, checked against the
@@ -497,12 +499,70 @@ def generate_variants(
                 plan_models[name] = plan_models.get(donor)
         _say_designs(progress, {name: planned[name][0] for name in todo}, plan_end)
     pic_dir = Path(picture_dir) if picture_dir is not None else out_dir / "images"
+    # «Улучшить презентацию»: the pictures of the original deck go back to their places (ingest/deck_text.py)
+    from verstka.ingest.deck_text import source_records
+
+    # (`source_pictures`: the original deck's workspace when it is laid out in another template)
+    src_pictures = source_records(Path(source_pictures) if source_pictures else ws.dir, pic_dir)
+    if src_pictures:
+        picture_reuse = {name: [*(picture_reuse or {}).get(name, []), *src_pictures] for name in strategies}
     maker, icfg = _picture_maker(pictures, image_provider, manifest, pic_dir, t_start, skills if models_on else None, providers if models_on else None, brief, outline, planned)
     pending: list[dict] = []
     said_pictures: set = set()  # the timeline tells each place once, not once per variant
+    from verstka.audit.eyes import load_config as eyes_config, look as look_at_slides
+
+    eyes_cfg = eyes_config()
+    eyes_on = bool(audit and eyes is not False and eyes_cfg.get("enabled", True) and use_vlm and providers is not None and skills is not None and providers.has("vlm"))
+    eyes_seen: dict[str, dict] = {}
     # the variants differ in the template slides they show too: each one knows which samples the earlier ones took
     # for the same slide (matching/matcher.py `taken`)
     taken: dict[str, set[str]] = {}
+
+    def _close_variant(v: dict, look: bool) -> dict:
+        """The variant's last steps before its pictures are put in: «Взгляд дизайнера» (audit/eyes.py) when `look`, the
+        machine markers off the notes, the picture places read and their pictures asked for."""
+        name, vdir = v["name"], v["vdir"]
+        if look:
+            tey = time.time()
+            report(f"{name}: design review", v["share"])
+            sink = _event_sink(progress)
+            from verstka.planning.agent import event_message
+
+            def say(message: str, slide: Optional[int] = None, fix: Optional[str] = None) -> None:
+                sink({"type": "agent", "step": "eyes", "message": event_message(message, slide), "slide": slide, "variant": name, "share": v["share"], **({"fix": fix} if fix else {})})
+
+            try:
+                v["audit"], v["plan"], v["outline"], rr, looked = look_at_slides(
+                    vdir, v["audit"], v["outline"], v["plan"], manifest, ws, providers=providers, skills=skills, deadline=budget_end, others=v["others"],
+                    brief_text=brief.text if brief else None, writer=writer_audit, emit=say, cfg=eyes_cfg,
+                )
+                if rr is not None:
+                    v["render"] = rr
+                eyes_seen[name] = looked.summary()
+            except Exception as e:  # noqa: BLE001 - the deck stays as the deterministic steps made it
+                log.warning("design review failed on %s", name, exc_info=True)
+                v["warnings"].append(f"design review failed: {str(e)[:160]}")
+            v["timings"]["eyes"] = round(time.time() - tey, 2)
+        try:
+            from verstka.rendering.renderer import strip_outline_marks
+
+            strip_outline_marks(vdir / "deck.pptx")  # the presenter's notes without the machine markers
+        except Exception:  # noqa: BLE001 - the markers stay rather than the deck being lost
+            log.warning("outline markers left in the notes", exc_info=True)
+        try:
+            from verstka.images.fill import plan_pictures
+
+            v["pictures"] = plan_pictures(vdir / "deck.pptx", v["outline"], maker, enabled=maker is not None, reuse=(picture_reuse or {}).get(name), folder=pic_dir)
+            if any(p.future is not None for p in v["pictures"]):
+                report(f"{name}: pictures for {sum(1 for p in v['pictures'] if p.future is not None)} slides", v["pic_share"])
+            _say_pictures(progress, name, v["pictures"], said_pictures, v["pic_share"], maker)
+        except Exception as e:  # noqa: BLE001 - the deck stays as rendered, its places free
+            log.warning("picture places not read", exc_info=True)
+            v["warnings"].append(f"pictures: the places were not read ({str(e)[:120]})")
+        return v
+
+    eyes_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="eyes") if eyes_on else None
+    eyes_jobs: list = []
     for i, name in enumerate(strategies):
         strategy: Strategy = all_strategies[name]
         ts = time.time()
@@ -550,25 +610,20 @@ def generate_variants(
         # the variants after this one know what it SHOWS on each slide — the sample a fallback or the autofix put
         # there, nothing for a slide composed — not what it planned (three variants converged on one sample)
         taken = _shown_samples(taken0, v_outline, render)
-        try:
-            from verstka.rendering.renderer import strip_outline_marks
+        v = {"name": name, "ts": ts, "timings": timings, "vdir": vdir, "warnings": warnings, "outline": v_outline, "plan": plan, "render": render, "audit": audit_report, "pictures": [],
+             "share": base + span * 0.85, "pic_share": base + span * 0.95, "others": taken0}
+        if eyes_on and audit_report is not None:
+            # «Взгляд дизайнера» looks at this variant while the next one is laid out: its model calls and LibreOffice
+            # wait on the network and a subprocess, the next variant's render on the CPU
+            eyes_jobs.append(eyes_pool.submit(_close_variant, v, True))
+        else:
+            _close_variant(v, False)
+        pending.append(v)
 
-            strip_outline_marks(vdir / "deck.pptx")  # the presenter's notes without the machine markers
-        except Exception:  # noqa: BLE001 - the markers stay rather than the deck being lost
-            log.warning("outline markers left in the notes", exc_info=True)
-        pics: list = []
-        try:
-            from verstka.images.fill import plan_pictures
-
-            pics = plan_pictures(vdir / "deck.pptx", v_outline, maker, enabled=maker is not None, reuse=(picture_reuse or {}).get(name), folder=pic_dir)
-            if any(p.future is not None for p in pics):
-                report(f"{name}: pictures for {sum(1 for p in pics if p.future is not None)} slides", base + span * 0.95)
-            _say_pictures(progress, name, pics, said_pictures, base + span * 0.95, maker)
-        except Exception as e:  # noqa: BLE001 - the deck stays as rendered, its places free
-            log.warning("picture places not read", exc_info=True)
-            warnings.append(f"pictures: the places were not read ({str(e)[:120]})")
-        pending.append({"name": name, "ts": ts, "timings": timings, "vdir": vdir, "warnings": warnings, "outline": v_outline, "plan": plan, "render": render, "audit": audit_report, "pictures": pics})
-
+    for job in eyes_jobs:
+        job.result()  # (each one catches its own failure: the variant keeps its deck as laid out)
+    if eyes_pool is not None:
+        eyes_pool.shutdown(wait=True)
     # the pictures in their places (each waited for at most until the generation's picture budget ends), the decks
     # that got one audited again (the deterministic checks: the picture stands where its place stood)
     if any(v["pictures"] for v in pending):
@@ -662,7 +717,7 @@ def generate_variants(
             audit_summary=audit_report.summary.model_dump() if audit_report else {},
             slides=slides_info,
             usage=_usage_of(gen_stats),
-            extra={"warnings": v["warnings"], "exports": {k: str(p) for k, p in export_paths.items()}, "planner": vr.planner, **_pictures_extra(v)},
+            extra={"warnings": v["warnings"], "exports": {k: str(p) for k, p in export_paths.items()}, "planner": vr.planner, **_pictures_extra(v), **({"eyes": eyes_seen[name]} if name in eyes_seen else {})},
         )
         write_run_manifest(vdir / "run_manifest.json", rm)
         result.variants.append(vr)
@@ -725,7 +780,10 @@ def _say_pictures(progress: Optional[ProgressFn], name: str, pics: list, said: s
 def _say_pictures_made(progress: Optional[ProgressFn], name: str, records: list[dict], said: set) -> None:
     sink = _event_sink(progress)
     for r in records:
-        if r.get("status") == "generated":
+        if r.get("status") == "generated" and r.get("model") == "original":
+            k = ("made", r.get("hint") or r.get("label"), r.get("slide"))
+            text = f"Вёрстка: слайд {r.get('slide')} — изображение из исходной презентации на месте."
+        elif r.get("status") == "generated":
             k = ("made", r.get("hint") or r.get("label"), r.get("slide"))
             text = f"Вёрстка: слайд {r.get('slide')} — изображение на месте, в палитре шаблона" + (f" ({round(float(r['palette_match']) * 100)}% цветов)." if r.get("palette_match") is not None else ".")
         elif r.get("error") or (r.get("why") and r.get("why") not in ("место под ваше фото — вставьте его в PowerPoint", "генерация изображений выключена")):

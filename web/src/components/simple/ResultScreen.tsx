@@ -224,7 +224,7 @@ function Verdict({ errors, className }: { errors: number | null; className?: str
 
 /** The quality card: the ring, one verdict and the figures checked against the text. Warnings get their own meta
  *  line: «1 предупреждение» (the word the remark tags and the drawer use) does not fit beside the verdict in 180px. */
-function QualityCard({ variant, score, errors, onOpen, className, skeleton = false }: { variant: Variant; score: number | null; errors: number | null; onOpen(): void; className?: string; /** A topic's skeleton: no text was written. */ skeleton?: boolean }) {
+function QualityCard({ variant, score, errors, onOpen, className, skeleton = false, before = null }: { variant: Variant; score: number | null; errors: number | null; onOpen(): void; className?: string; /** A topic's skeleton: no text was written. */ skeleton?: boolean; /** «Улучшить готовую»: the original deck's own audit — «было → стало». */ before?: { score: number; errors: number; warnings: number } | null }) {
   const warnings = variant.audit?.summary.warnings ?? 0;
   const figs = figuresLine(variant.audit?.summary.figures);
   const verdict = errors === null ? "Не проверено" : errors > 0 ? plural(errors, "ошибка", "ошибки", "ошибок") : "Ошибок нет";
@@ -248,6 +248,11 @@ function QualityCard({ variant, score, errors, onOpen, className, skeleton = fal
           {second && (
             <span className={cn("block text-footnote", !warned && "mt-0.5", second.tone === "warn" ? "text-amber-700" : "text-zinc-500")} title={second.title}>
               {second.text}
+            </span>
+          )}
+          {before && score !== null && (
+            <span className="block text-footnote text-zinc-500" title={`Исходная презентация: оценка ${before.score}, ${plural(before.errors, "ошибка", "ошибки", "ошибок")}, ${plural(before.warnings, "предупреждение", "предупреждения", "предупреждений")}`}>
+              Было <span className="tabular-nums">{before.score}</span> → стало <span className={cn("tabular-nums font-medium", score > before.score ? "text-emerald-700" : "text-zinc-700")}>{score}</span>
             </span>
           )}
         </span>
@@ -1014,7 +1019,7 @@ function Deck({ generation }: { generation: Generation }) {
           {/* the cards that change per slide come last, so turning the slides never moves the others; the list scrolls
               only in a window too short for it (the p-1 keeps the focus rings and shadows unclipped) */}
           <div ref={list} className={cn("scroll-thin -m-1 flex min-h-0 flex-col gap-3 p-1", withPanel ? "flex-1 overflow-hidden" : cn("overflow-y-auto", ASIDE_STAGGER, cardsSettle && CARDS_SETTLE))}>
-            <QualityCard variant={variant} score={score} errors={errors} skeleton={skeletonDeck(generation, variant)} onOpen={() => open("quality")} className={asideEnter === "rise" ? "animate-rise" : undefined} />
+            <QualityCard variant={variant} score={score} errors={errors} skeleton={skeletonDeck(generation, variant)} before={generation.improved_from?.audit ?? null} onOpen={() => open("quality")} className={asideEnter === "rise" ? "animate-rise" : undefined} />
             {withPanel ? (
               <div className="relative flex min-h-0 flex-1 flex-col">
                 {cardsLeaving && (

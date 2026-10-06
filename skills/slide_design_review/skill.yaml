@@ -1,0 +1,16 @@
+name: slide_design_review
+version: 1.0.0
+role: vlm
+description: >
+  «Взгляд дизайнера» (Verstka 3.0): looks at one rendered slide like an art director checking a proof before it goes to
+  the client — text cut off, a word broken mid-word, overlaps, cramped or tiny text, poor contrast, an unbalanced
+  slide, a leftover frame, an illegible chart. A slide with a major problem is laid out again (verstka/audit/eyes.py).
+prompt_files:
+  system: prompts/system.md
+  user: prompts/user.md
+output_schema: verstka.audit.eyes.DesignReview
+params:
+  temperature: 0.0
+  max_tokens: 500
+changelog:
+  - "1.0.0: Verstka 3.0. Checked live on Qwen3.8-27B (2026-10-07): it found the four words broken mid-word in the narrow cards of Marketing Report slide 8, the empty row of a ruled grid under a callout on Классика slide 3, and passed a clean VK Tech slide"

@@ -127,6 +127,12 @@ class GenerateRequest(BaseModel):
     # «Генерировать изображения»: the places the author described get pictures (verstka/images); None — the config
     # (on when a text-to-image model has a key), False — the places stay free
     pictures: Optional[bool] = None
+    # «Взгляд дизайнера» (verstka/audit/eyes.py): the vision model looks at the finished slides and the slides it sends
+    # back are laid out again. None — with the text model (use_models); True — on its own too (an improved deck keeps
+    # its author's text as written, the model still looks at the slides)
+    eyes: Optional[bool] = None
+    # «Улучшить презентацию»: what the original deck was (its name, slides and audit), for «было → стало»
+    improved_from: Optional[dict] = None
 
 
 class PictureBody(BaseModel):
@@ -336,6 +342,15 @@ def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job) -> dic
     # plans or rewrites it; «Модель проверяет слайды по картинке» is a switch of its own
     use_models = req.use_models and models_configured()
     audit_models = req.audit_models and models_configured()
+    eyes = bool(req.use_models if req.eyes is None else req.eyes) and models_configured()
+    # «Улучшить готовую» laid out in another template: the original deck's pictures come from its own workspace
+    source_pictures = None
+    src_tid = (req.improved_from or {}).get("template_id")
+    if src_tid and src_tid != req.template_id:
+        try:
+            source_pictures = store.workspace(str(src_tid)).dir
+        except FileNotFoundError:
+            source_pictures = None
     res = generate_variants(
         store.workspace(req.template_id).source,
         brief=brief,
@@ -343,10 +358,12 @@ def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job) -> dic
         strategies=req.strategies,
         out_dir=gdir,
         workspace_root=store.root,
-        providers=providers() if (use_models or audit_models) else None,
-        skills=skills() if (use_models or audit_models) else None,
+        providers=providers() if (use_models or audit_models or eyes) else None,
+        skills=skills() if (use_models or audit_models or eyes) else None,
         use_llm=use_models,
-        use_vlm=use_models or audit_models,
+        use_vlm=use_models or audit_models or eyes,
+        eyes=eyes,
+        source_pictures=source_pictures,
         audit=True,
         autofix=req.autofix,
         audit_models=audit_models,
@@ -401,7 +418,7 @@ def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job) -> dic
 
 def _request_options(req: GenerateRequest) -> dict:
     """The request's switches, kept in generation.json: «Собрать ещё раз» repeats the deck with the same inputs."""
-    return {"audit_models": req.audit_models, "autofix": req.autofix, "exports": list(req.exports), "language": req.language, "extra_instructions": req.extra_instructions, "outline_supplied": req.outline is not None, "pictures": req.pictures}
+    return {"audit_models": req.audit_models, "autofix": req.autofix, "exports": list(req.exports), "language": req.language, "extra_instructions": req.extra_instructions, "outline_supplied": req.outline is not None, "pictures": req.pictures, "eyes": req.eyes, "improved_from": req.improved_from}
 
 
 def _generation_job(gid: str, gdir: Path, req: GenerateRequest) -> Callable[[Job], dict]:
@@ -509,10 +526,10 @@ def list_skills() -> dict:
 
 @app.get("/api/checks")
 def list_checks() -> list[dict]:
-    from verstka.audit.model_checks import DECK_COHERENCE, SLIDE_CONTENT
+    from verstka.audit.model_checks import model_check_specs
     from verstka.audit.registry import all_checks
 
-    specs = [spec for spec, _ in all_checks()] + [SLIDE_CONTENT, DECK_COHERENCE]
+    specs = [spec for spec, _ in all_checks()] + list(model_check_specs())
     return [s.model_dump() for s in specs]
 
 
@@ -525,7 +542,7 @@ def list_templates() -> list[dict]:
 
 
 @app.post("/api/templates")
-async def upload_template(file: UploadFile = File(...), use_models: bool = Form(True)) -> dict:
+async def upload_template(file: UploadFile = File(...), use_models: bool = Form(True), improve: bool = Form(False)) -> dict:
     """A template in any presentation format (verstka/ingest/convert.py: .pptx, .potx, .pptm, .ppsx, .thmx, .ppt,
     .odp …): the file is checked by its bytes, converted to .pptx in the job, then analysed. Errors are said in Russian —
     the UI shows them as they are."""
@@ -579,10 +596,52 @@ async def upload_template(file: UploadFile = File(...), use_models: bool = Form(
         if pptx != path:
             _discard_failed_upload(pptx)
         _discard_failed_upload(path)
-        return {"template_id": m.template_id, "n_slides": m.n_slides, "n_patterns": len(m.patterns)}
+        result: dict = {"template_id": m.template_id, "n_slides": m.n_slides, "n_patterns": len(m.patterns)}
+        if improve:
+            # «Улучшить презентацию»: the deck is the template and, read back, the author's text
+            job.emit("Читаю текст, таблицы, диаграммы и картинки презентации", 0.97)
+            result["improve"] = _improve_source(m, path.name)
+        return result
 
     job = runner.submit("analyze", run)
     return {"job_id": job.id, "filename": file.filename, "use_models": use}
+
+
+def _improve_source(m: TemplateManifest, name: str) -> dict:
+    """«Улучшить презентацию»: the analysed deck read back as the author's text (ingest/deck_text.py), its pictures kept
+    for the improved deck, and its own deterministic audit — the «было» of «было → стало»."""
+    from verstka.audit.runner import run_audit
+    from verstka.ingest.deck_text import deck_text, keep_pictures
+
+    ws = store.workspace(m.template_id)
+    dt = deck_text(ws.source)
+    keep_pictures(dt, ws.dir / "source_images")
+    audit = None
+    problems: list[dict] = []
+    try:
+        rep = run_audit(ws.source, m, None, ws, render=False)
+        if models_configured():
+            # «Взгляд дизайнера» on the original: what is wrong with it, said before anything is rebuilt — and counted
+            # in its score as in the new decks' (audit/eyes.py)
+            from verstka.audit.eyes import CODES, look_only, problem_issues
+
+            titles = {i: dt_title for i, dt_title in _slide_titles(dt.brief).items()}
+            seen = look_only(ws.source, ws.dir / "eyes", providers=providers().with_deadline(time.monotonic() + 90), skills=skills(), titles=titles)
+            rep.issues.extend(problem_issues(seen))
+            rep.recompute()
+            problems = [{"slide": i, "code": p.code, "text": CODES[p.code], "where": p.where} for i, ps in sorted(seen.items()) for p in ps if p.severity == "major"]
+        audit = {"score": rep.summary.score, "errors": rep.summary.errors, "warnings": rep.summary.warnings}
+    except Exception:  # noqa: BLE001 - the improved deck is built all the same
+        log.warning("audit of the original deck failed", exc_info=True)
+    return {"brief": dt.brief, "name": name, "template_id": m.template_id, **dt.summary(), "audit": audit, "problems": problems}
+
+
+def _slide_titles(brief: str) -> dict[int, str]:
+    """«Слайд N. Заголовок» lines of a read-back deck: slide number → its title."""
+    out = {}
+    for m in re.finditer(r"^Слайд (\d+)\.\s*(.*)$", brief or "", re.M):
+        out[int(m.group(1))] = m.group(2).strip()
+    return out
 
 
 @app.delete("/api/templates/{template_id}")

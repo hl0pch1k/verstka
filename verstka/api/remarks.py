@@ -22,6 +22,8 @@ CONTENT_CHECKS = frozenset({
     "deck_coherence", "content_in_notes", "timeline_order", "slide_is_picture", "author_item_missing",
     # the words of a written deck (audit/checks/writing.py): the designer rewrites the line from the slide's text
     "line_fragment", "figure_is_time", "chart_mixed_units", "duplicate_heading", "orphan_opener",
+    # «Взгляд дизайнера» (audit/eyes.py): what the model saw on the finished slide — the slide laid out anew cures it
+    "design_review",
 })
 # fixed in place first (an element moved back inside, a smaller size); they reach the designer only when they survive
 INPLACE_FIRST = frozenset({"text_clipped", "out_of_bounds", "margin_violation"})
@@ -57,6 +59,7 @@ FIX_HINT: dict[str, str] = {
     "fill_ratio": "слайд слишком пустой или слишком плотный — добавь содержание из текста или сократи",
     "empty_slide": "добавь содержание из текста этого слайда",
     "content_missing": "верни пропавшие тексты: форма слайда должна вместить их все",
+    "design_review": "переложи слайд так, чтобы ушло то, что увидела модель: другая форма, шире блоки, меньше элементов в ряд",
     "author_item_missing": "верни пропавшие пункты списка автора: форма слайда должна вместить весь список",
     "placeholder_text": "убери текст-заглушку",
     "figure_not_in_brief": "оставь только числа из исходного текста",
@@ -92,10 +95,10 @@ def _clean_title(title: str) -> str:
 @lru_cache(maxsize=1)
 def check_titles() -> dict[str, str]:
     """check_id → its title in plain Russian (the list of /api/checks, «(VLM)» and «(LLM)» dropped, the UI's words)."""
-    from verstka.audit.model_checks import DECK_COHERENCE, SLIDE_CONTENT
+    from verstka.audit.model_checks import model_check_specs
     from verstka.audit.registry import all_checks
 
-    specs = [spec for spec, _ in all_checks()] + [SLIDE_CONTENT, DECK_COHERENCE]
+    specs = [spec for spec, _ in all_checks()] + list(model_check_specs())
     out = {s.id: _clean_title(s.title) for s in specs}
     out.update(UI_TITLES)
     return out

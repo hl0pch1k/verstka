@@ -22,6 +22,8 @@ export function Logo({ onClick }: { onClick?: () => void }) {
         <LogoMark size={32} />
       </span>
       <span className="font-display text-[26px] font-bold leading-none tracking-[-0.03em] text-zinc-900">Verstka</span>
+      {/* the release: Verstka 3.0 — the model looks at every finished slide, an old deck can be improved */}
+      <span className="self-start rounded-md bg-accent-50 px-1.5 py-0.5 text-[11px] font-semibold leading-none text-accent-700">3.0</span>
     </button>
   );
 }

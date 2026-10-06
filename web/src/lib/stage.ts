@@ -43,6 +43,7 @@ export const STAGE_TITLE: Record<PhaseKey | "queued", string> = {
   revise: "Переделываю слабые места",
   layout: "Собираю в\u00a0вашем шаблоне",
   check: "Проверяю каждое число",
+  eyes: "Смотрю на\u00a0слайды глазами дизайнера",
 };
 
 /** The first «…» of a text, nested quotes kept («Компания «Ромашка» растёт»); null without a closed one. */

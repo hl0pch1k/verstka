@@ -62,3 +62,39 @@ test("eventParts: older runs' «заказанные диаграммы» and «
   const charts = eventParts({ step: "compile", message: "Подготовил данные для диаграмм: 9 диаграмм.", slide: null, variant: null });
   assert.equal(charts.text.replace(/\u00a0/g, " "), "Подготовил данные для диаграмм (9).");
 });
+
+test("buildTimeline: «Взгляд дизайнера» says which slides it laid out again and which kept their remark", () => {
+  const events = [
+    { step: "analyst", message: "Нашёл в тексте 10 слайдов.", slide: null, variant: null },
+    { step: "eyes", message: "Посмотрел на 13 слайдов — замечания на слайдах 2, 6.", slide: null, variant: "structured" },
+    { step: "eyes", message: "Слова разорваны посередине (карточки).", slide: 2, variant: "structured", fix: "Собрал заново на другом макете шаблона: без разрывов слов." },
+    { step: "eyes", message: "Диаграмма или таблица не читается.", slide: 6, variant: "structured", fix: "Новая вёрстка не лучше — оставил прежнюю (прежняя аккуратнее)." },
+  ];
+  const rows = buildTimeline({ events, phase: null, running: false });
+  const eyes = rows.find((r) => r.key === "eyes");
+  assert.ok(eyes, "the step shows once the model looked");
+  assert.equal(eyes?.title, "Взгляд дизайнера");
+  assert.equal(eyes?.note?.replace(/ /g, " "), "1 слайд пересобран, 1 замечание · слайд 6");
+  const clean = buildTimeline({ events: [events[0], { step: "eyes", message: "Посмотрел на 13 слайдов — замечаний нет.", slide: null, variant: null }], phase: null, running: false });
+  assert.equal(clean.find((r) => r.key === "eyes")?.note, "замечаний нет");
+  // a build without the vision model has no such step at all
+  assert.ok(!buildTimeline({ events: [events[0]], phase: null, running: false }).some((r) => r.key === "eyes"));
+});
+
+test("agentSummary: «Взгляд дизайнера» says how many slides it looked at and laid out again for this variant", () => {
+  const v = {
+    strategy: "structured",
+    agent: {
+      events: [
+        { step: "designer", message: "«Итоги» — таблица.", slide: 2, variant: null },
+        { step: "eyes", message: "Посмотрел на 13 слайдов — замечания на слайдах 2, 6.", slide: null, variant: "structured" },
+        { step: "eyes", message: "Слова разорваны посередине.", slide: 2, variant: "structured", fix: "Собрал заново на другом макете шаблона." },
+        { step: "eyes", message: "Посмотрел на 13 слайдов — замечаний нет.", slide: null, variant: "visual" },
+      ],
+    },
+  } as unknown as Variant;
+  const eyes = agentSummary(v).find((l) => l.step === "Взгляд дизайнера");
+  assert.equal(eyes?.text.replace(/ /g, " "), "Посмотрел на 13 слайдов, пересобрал 1 слайд");
+  const visual = agentSummary({ ...v, strategy: "visual" } as Variant).find((l) => l.step === "Взгляд дизайнера");
+  assert.equal(visual?.text.replace(/ /g, " "), "Посмотрел на 13 слайдов — замечаний нет");
+});

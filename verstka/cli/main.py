@@ -109,6 +109,7 @@ def generate(
     no_audit: bool = typer.Option(False, "--no-audit"),
     no_autofix: bool = typer.Option(False, "--no-autofix"),
     audit_models: bool = typer.Option(False, "--audit-models", help="Run VLM/LLM content checks in the audit"),
+    no_eyes: bool = typer.Option(False, "--no-eyes", help="Skip «Взгляд дизайнера»: the vision model's look at the finished slides"),
     export: str = typer.Option("pptx", "--export", help="pptx | pdf | html | all (comma separated)"),
     render: bool = typer.Option(False, "--render", help="Render slide images even without audit"),
 ) -> None:
@@ -130,6 +131,7 @@ def generate(
     no_audit = no_audit or bool(cfg.get("no_audit", False))
     no_autofix = no_autofix or bool(cfg.get("no_autofix", False))
     audit_models = audit_models or bool(cfg.get("audit_models", False))
+    no_eyes = no_eyes or bool(cfg.get("no_eyes", False))
     if template is None or (brief is None and outline is None):
         raise typer.BadParameter("--template and (--brief or --outline) are required (or a --config run.yaml)")
     strategies = None if strategy in ("all", None) else [s.strip() for s in str(strategy).split(",")]
@@ -159,6 +161,7 @@ def generate(
             audit=not no_audit,
             autofix=not no_autofix,
             audit_models=audit_models,
+            eyes=False if no_eyes else None,
             exports=exports,
             # «without models» means no model at all: the pictures are off too; --models drives the pictures as well
             pictures=False if (no_llm and no_vlm) else None,
@@ -258,7 +261,7 @@ def skills() -> None:
 @app.command(name="checks")
 def list_checks() -> None:
     """List audit checks (deterministic and model)."""
-    from verstka.audit.model_checks import DECK_COHERENCE, SLIDE_CONTENT
+    from verstka.audit.model_checks import model_check_specs
     from verstka.audit.registry import all_checks
 
     tbl = Table(title="Audit checks")
@@ -269,7 +272,7 @@ def list_checks() -> None:
     tbl.add_column("title")
     for spec, _ in all_checks():
         tbl.add_row(spec.id, spec.kind, spec.severity, spec.category, spec.title)
-    for spec in (SLIDE_CONTENT, DECK_COHERENCE):
+    for spec in model_check_specs():
         tbl.add_row(spec.id, spec.kind, spec.severity, spec.category, spec.title)
     console.print(tbl)
 

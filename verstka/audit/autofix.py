@@ -171,17 +171,18 @@ def _condense(outline: DeckOutline, oid: str, skills: Optional[SkillsRegistry], 
     c = osl.content
     changed = 0
     new_bullets = []
-    for b in c.bullets[:6]:
+    for b in c.bullets:  # every line stays: a list too long for one block is a layout matter, not a text cut
         nb = condense_text(b, 15, skills, providers, outline.language)
         changed += nb != b
         new_bullets.append(nb)
-    changed += len(c.bullets) > 6
     c.bullets = new_bullets
     for it in c.items + c.columns:
         if it.text and len(it.text.split()) > 24:
             it.text = condense_text(it.text, 24, skills, providers, outline.language)
             changed += 1
-        it.bullets = [condense_text(b, 15, skills, providers, outline.language) for b in it.bullets[:6]]
+        nbs = [condense_text(b, 15, skills, providers, outline.language) for b in it.bullets]
+        changed += nbs != it.bullets
+        it.bullets = nbs
     for p_i, p in enumerate(c.paragraphs):
         if len(p.split()) > 60:
             c.paragraphs[p_i] = trim_words(p, 60)

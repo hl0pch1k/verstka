@@ -33,6 +33,28 @@ _DIGIT_GROUP_RE = re.compile(r"(?<=\d) (?=\d{3}(?!\d))")
 _FIGURE_UNIT_RE = re.compile(r"(?<=\d) (?=(?:%|‰|₽|\$|€|руб|тыс|млн|млрд|трлн)(?![A-Za-z]))")
 
 
+def column_stacks(slots: list[Slot]) -> list[tuple[Optional[Slot], Slot]]:
+    """The sample's text columns standing side by side, left to right: (head, body) — a block that holds lines (a list,
+    a body of three lines and more) with the short text right above it in the same column as its heading («ВАРИАНТ Б»
+    over its list), or None. Two and more such columns of about one width, starting at about one height; else []."""
+    texts = [s for s in slots if not s.group_id and s.role in (SlotRole.body, SlotRole.bullet_list, SlotRole.card_body, SlotRole.card_title)]
+    bodies = sorted((s for s in texts if s.role != SlotRole.card_title and (s.capacity.max_lines or 0) >= 3), key=lambda s: s.bbox.x)
+    if len(bodies) < 2:
+        return []
+    if min(b.bbox.w for b in bodies) < 0.75 * max(b.bbox.w for b in bodies):
+        return []
+    if max(b.bbox.y for b in bodies) - min(b.bbox.y for b in bodies) > 0.1:
+        return []
+    if any(a.bbox.x2 > b.bbox.x + 0.005 for a, b in zip(bodies, bodies[1:])):
+        return []
+    out: list[tuple[Optional[Slot], Slot]] = []
+    for b in bodies:
+        heads = [h for h in texts if h not in bodies and min(h.bbox.x2, b.bbox.x2) - max(h.bbox.x, b.bbox.x) >= 0.6 * min(h.bbox.w, b.bbox.w)
+                 and h.bbox.y2 <= b.bbox.y + 0.02 and b.bbox.y - h.bbox.y2 <= 0.08]
+        out.append((max(heads, key=lambda h: h.bbox.y) if heads else None, b))
+    return out
+
+
 @dataclass
 class ScoreResult:
     score: float
@@ -665,6 +687,9 @@ def score_pattern(
                 reasons.append("ячейки слишком малы для карточек")
         else:
             role_slots = sum(1 for s in pattern.slots if s.role in (SlotRole.card_title, SlotRole.number, SlotRole.bullet_list, SlotRole.body))
+            if sum(1 for it in (slide.content.items or slide.content.columns) if it.bullets) >= 2:
+                # blocks with lists of their own (columns): one per text column of the sample, never two lists in one box
+                role_slots = len(column_stacks(pattern.slots)) or 1
             if slide.kind in (PatternKind.bullets, PatternKind.agenda) and any(s.role == SlotRole.bullet_list for s in pattern.slots):
                 cap = 1.0
                 reasons.append("список помещается в один слот")

@@ -132,10 +132,10 @@ FIX_RU = {
 
 
 def _check_titles() -> dict[str, str]:
-    from verstka.audit.model_checks import DECK_COHERENCE, SLIDE_CONTENT
+    from verstka.audit.model_checks import model_check_specs
     from verstka.audit.registry import all_checks
 
-    return {spec.id: spec.title for spec in [s for s, _ in all_checks()] + [SLIDE_CONTENT, DECK_COHERENCE]}
+    return {spec.id: spec.title for spec in [s for s, _ in all_checks()] + list(model_check_specs())}
 
 
 def describe_audit(report: AuditReport, check_titles: Optional[dict[str, str]] = None) -> str:

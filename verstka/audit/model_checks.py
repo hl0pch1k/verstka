@@ -37,6 +37,13 @@ SLIDE_CONTENT = CheckSpec(id="slide_content", title="Валидация конт
 DECK_COHERENCE = CheckSpec(id="deck_coherence", title="Связность колоды (LLM)", severity="warn", kind="model", category="content", description="Логика переходов между соседними слайдами и единый язык колоды.")
 
 
+def model_check_specs() -> tuple[CheckSpec, ...]:
+    """Every model check the audit can report: the content audit, the deck's coherence and «Взгляд дизайнера»."""
+    from verstka.audit.eyes import DESIGN_REVIEW
+
+    return (SLIDE_CONTENT, DECK_COHERENCE, DESIGN_REVIEW)
+
+
 class ContentAnswer(BaseModel):
     question: int
     ok: bool

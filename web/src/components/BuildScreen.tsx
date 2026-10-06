@@ -38,6 +38,7 @@ const AGENT_STATUS: Partial<Record<PhaseKey, string>> = {
   designer: "продумываю слайды",
   critic: "проверяет критик",
   revise: "правка",
+  eyes: "смотрю на слайды",
 };
 
 /** A View Transition is running (the page is being captured or animated). */

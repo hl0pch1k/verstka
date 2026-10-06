@@ -164,9 +164,9 @@ class _Clock:
         return None if self.deadline is None else self.deadline - seconds_before_end
 
 
-STEP_RU = {"writer": "Автор", "analyst": "Аналитик", "architect": "Архитектор", "designer": "Дизайнер", "critic": "Критик", "revise": "Правка", "compile": "Сборка"}
+STEP_RU = {"writer": "Автор", "analyst": "Аналитик", "architect": "Архитектор", "designer": "Дизайнер", "critic": "Критик", "revise": "Правка", "compile": "Сборка", "eyes": "Взгляд дизайнера"}
 # «Дизайнер: …», «Критик («Структурный»): …» — the step's name in front of a message
-_STEP_PREFIX_RE = re.compile(r"^(?:Автор|Аналитик|Архитектор|Дизайнер|Критик|Правка|Сборка|Вёрстка)(?:\s*\([^)]*\))?\s*:\s*")
+_STEP_PREFIX_RE = re.compile(r"^(?:Автор|Аналитик|Архитектор|Дизайнер|Критик|Правка|Сборка|Вёрстка|Взгляд дизайнера)(?:\s*\([^)]*\))?\s*:\s*")
 # «слайд 3 «…» — …», «Слайд 3: …» — the slide's number in front of an event that carries it as `slide`
 _SLIDE_LEAD_RE = re.compile(r"^слайд\s*\d+\s*(?:[—–:.\-]\s*)?", re.I)
 
@@ -3425,6 +3425,7 @@ def _split_merged_lists(d: _Design) -> None:
     risks = next((g for g in src.groups if g.label and _RISK_RE.search(g.label)), None)
     measures = next((g for g in src.groups if g.label and _MEASURE_RE.search(g.label) and not _RISK_RE.search(g.label)), None)
     if risks is None or measures is None:
+        _split_by_source_lists(d, src)
         return
     for field_ in ("columns", "items"):
         blocks = getattr(c, field_)
@@ -3436,6 +3437,44 @@ def _split_merged_lists(d: _Design) -> None:
                 setattr(c, field_, (blocks[:i] + new + blocks[i + 1:])[: 3 if field_ == "columns" else MAX_ITEMS])
                 d.changes.append(f"slide {d.unit.key}: the block «{t}» merged two lists of the brief: split into «{new[0].title}» and «{new[1].title}»")
                 return
+    _split_by_source_lists(d, src)
+
+
+def _split_by_source_lists(d: _Design, src: "_Source") -> None:
+    """A block whose lines come from two or more lists of the source, whatever its title says («Показатели и риски»: the
+    five measures, then the three risks): one block per list, titled with the list's own lead, the block's lines kept
+    as written and in their order — while the slide keeps at most three columns."""
+    c = d.slide.content
+    groups = [g for g in src.groups if g.label and len(g.items) >= 2]
+    if len(groups) < 2:
+        return
+
+    def owner(line: str) -> Optional[int]:
+        hits = [k for k, g in enumerate(groups) if any(_Shown(line).line(x) and _Shown(x).line(line) for x in g.items)]
+        return hits[0] if len(hits) == 1 else None
+
+    for field_, cap in (("columns", 3), ("items", MAX_ITEMS)):
+        blocks = getattr(c, field_)
+        for i, blk in enumerate(blocks):
+            if len(blk.bullets) < 4:
+                continue
+            own = [owner(b) for b in blk.bullets]
+            parts: list[tuple[int, list[str]]] = []
+            for b, k in zip(blk.bullets, own):
+                if k is not None and (not parts or parts[-1][0] != k):
+                    parts.append((k, [b]))
+                elif parts:
+                    parts[-1][1].append(b)
+                else:
+                    parts.append((-1, [b]))
+            if len(parts) < 2 or any(k < 0 or len(ls) < 2 for k, ls in parts) or len({k for k, _ in parts}) != len(parts):
+                continue
+            if len(blocks) - 1 + len(parts) > cap:
+                continue
+            new = [SlideItem(title=_label(groups[k].label or ""), bullets=ls) for k, ls in parts]
+            setattr(c, field_, blocks[:i] + new + blocks[i + 1:])
+            d.changes.append(f"slide {d.unit.key}: the block «{blk.title}» ran {len(parts)} lists of the brief together: split into " + ", ".join(f"«{x.title}»" for x in new))
+            return
 
 
 # ------------------------------------------------------------------ one slide's content in another form

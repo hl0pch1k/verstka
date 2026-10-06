@@ -3,7 +3,7 @@
 // resolve: failures are reported through toasts / assistant messages, never thrown at the caller.
 import { api } from "../api";
 import { pushToast } from "../components/ui/Toasts";
-import type { GenerateRequest, GenerateResponse, Generation, Job, JobKind, TabKey, TemplateListItem, TemplateManifest, UploadResponse } from "../types";
+import type { GenerateRequest, GenerateResponse, Generation, ImproveSource, Job, JobKind, TabKey, TemplateListItem, TemplateManifest, UploadResponse } from "../types";
 import { describeGeneration, firstLine, newestTemplate } from "./narrate";
 import { templateTitle } from "./plain";
 import { templateFileProblem } from "./templateFiles";
@@ -22,7 +22,7 @@ export interface UploadDeps extends CommonDeps {
   adoptManifest(m: TemplateManifest): void;
 }
 
-export function uploadTemplateFlow(file: File, useModels: boolean, d: UploadDeps): Promise<void> {
+export function uploadTemplateFlow(file: File, useModels: boolean, d: UploadDeps, improve?: (src: ImproveSource) => void): Promise<void> {
   return new Promise<void>((resolve) => {
     void (async () => {
       const problem = templateFileProblem(file.name);
@@ -32,13 +32,13 @@ export function uploadTemplateFlow(file: File, useModels: boolean, d: UploadDeps
       }
       let res: UploadResponse;
       try {
-        res = await api.uploadTemplate(file, useModels);
+        res = await api.uploadTemplate(file, useModels, !!improve);
       } catch (e) {
         d.report(e, "Не удалось загрузить шаблон");
         return resolve();
       }
       if (useModels && !res.use_models) pushToast("info", "Модель не подключена — разберу шаблон по правилам");
-      d.runJob(res.job_id, `Разбираю шаблон «${templateTitle(file.name)}»`, {
+      d.runJob(res.job_id, improve ? `Читаю презентацию «${templateTitle(file.name)}»` : `Разбираю шаблон «${templateTitle(file.name)}»`, {
         kind: "analyze",
         onDone: async (job) => {
           try {
@@ -49,9 +49,16 @@ export function uploadTemplateFlow(file: File, useModels: boolean, d: UploadDeps
             if (!tid) throw new Error("сервер не вернул идентификатор шаблона");
             const m = await api.template(tid);
             d.adoptManifest(m);
-            const fallback = `Шаблон «${templateTitle(m.source_file)}» разобран: ${plural(m.patterns.length, "макет", "макета", "макетов")} из ${plural(m.n_slides, "слайда", "слайдов", "слайдов")}.`;
-            d.pushMessage("assistant", m.narration || fallback);
-            pushToast("success", "Шаблон разобран");
+            const src = (job.result as { improve?: ImproveSource } | null)?.improve;
+            if (improve && src) {
+              improve(src);
+              d.pushMessage("assistant", improveMessage(src));
+              pushToast("success", "Презентация прочитана");
+            } else {
+              const fallback = `Шаблон «${templateTitle(m.source_file)}» разобран: ${plural(m.patterns.length, "макет", "макета", "макетов")} из ${plural(m.n_slides, "слайда", "слайдов", "слайдов")}.`;
+              d.pushMessage("assistant", m.narration || fallback);
+              pushToast("success", "Шаблон разобран");
+            }
           } catch (e) {
             d.report(e, "Шаблон разобран, но не загрузился");
           }
@@ -64,6 +71,24 @@ export function uploadTemplateFlow(file: File, useModels: boolean, d: UploadDeps
       });
     })();
   });
+}
+
+/** The helper's line after «Улучшить готовую»: what the deck holds and what its own audit found. */
+export function improveMessage(src: ImproveSource): string {
+  const held = [
+    plural(src.slides, "слайд", "слайда", "слайдов"),
+    src.tables ? plural(src.tables, "таблица", "таблицы", "таблиц") : null,
+    src.charts ? plural(src.charts, "диаграмма", "диаграммы", "диаграмм") : null,
+    src.pictures ? plural(src.pictures, "картинка", "картинки", "картинок") : null,
+  ].filter(Boolean).join(", ");
+  const audit = src.audit
+    ? ` Проверка исходника: оценка ${src.audit.score}${src.audit.errors || src.audit.warnings ? ` — ${[src.audit.errors ? plural(src.audit.errors, "ошибка", "ошибки", "ошибок") : null, src.audit.warnings ? plural(src.audit.warnings, "предупреждение", "предупреждения", "предупреждений") : null].filter(Boolean).join(", ")}` : ", замечаний нет"}.`
+    : "";
+  const probs = src.problems ?? [];
+  const wrong = probs.length
+    ? ` Что не так в исходнике, на взгляд дизайнера: ${probs.slice(0, 4).map((p) => `слайд ${p.slide} — ${p.text}`).join("; ")}${probs.length > 4 ? ` и ещё ${plural(probs.length - 4, "замечание", "замечания", "замечаний")}` : ""}.`
+    : "";
+  return `Прочитал «${templateTitle(src.name)}»: ${held}.${audit}${wrong} Текст — в поле «Текст», оформление — её же: соберу вёрстку заново в трёх вариантах, а модель посмотрит на каждый новый слайд.`;
 }
 
 export interface GenerationDeps extends CommonDeps {

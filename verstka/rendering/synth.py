@@ -995,6 +995,11 @@ def _backing_of(slide: Slide, title_el, W: int, H: int):
 
 def render_synth(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineSlide, manifest: TemplateManifest, ws: TemplateWorkspace, outline: DeckOutline) -> tuple[Slide, list[str]]:
     comp = plan_slide.composition or "bullets"
+    style = (plan_slide.fit or {}).get("style")
+    if style and style != outline.strategy:
+        # the slide composed in another variant's style (audit/eyes.py: the compact variant sets a row of figures beside
+        # the picture where the structured one squeezed it under the heading and broke its words)
+        outline = outline.model_copy(update={"strategy": style})
     if comp in _COVER_COMPS:
         return _render_cover(builder, plan_slide, oslide, manifest, ws, outline)
     return _render_content(builder, comp, oslide, manifest, ws, outline)

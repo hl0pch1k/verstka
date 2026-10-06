@@ -231,7 +231,10 @@ def label_formula(formula: Optional[str], source: str) -> Optional[str]:
 
 def _item_of(line: str) -> SlideItem:
     """«Витрина для десертов — 70 000 рублей» → a card «Витрина для десертов» with «70 000 рублей»."""
-    m = re.match(r"^(?P<t>[^:—–]{2,60}?)\s*(?::|\s[—–]\s)\s*(?P<x>.+)$", line)
+    parts = H.label_split(line)  # a label's colon, never one inside a figure («с 15:00 до 18:00», «1:3»)
+    if parts is not None and 2 <= len(parts[0].strip()) <= 60 and parts[1].strip():
+        return SlideItem(title=parts[0].strip(), text=parts[1].strip())
+    m = re.match(r"^(?P<t>[^—–]{2,60}?)\s[—–]\s(?P<x>.+)$", line)
     if m:
         return SlideItem(title=m.group("t").strip(), text=m.group("x").strip())
     return SlideItem(title=line.strip())
@@ -258,7 +261,7 @@ def _convert(c: SlideContent, old: K, new: K) -> Optional[SlideContent]:
         if old in _COLUMN_KINDS and len(c.columns) >= 2:
             c.items, c.columns = c.columns, []
             return c
-        if 2 <= len(lines) <= MAX_ITEMS:
+        if 2 <= len(lines) <= MAX_ITEMS and not c.numbers:  # (an item form shows no row of figures: they would be lost)
             c.items, c.bullets, c.paragraphs = [_item_of(x) for x in lines], [], []
             if old == K.chart:
                 c.chart = c.chart2 = None

@@ -6,7 +6,7 @@
 // blue. The draft survives reloads. Motion only where something changes: a step that is missing something shakes once
 // when «Создать» is pressed, the parameters unfold, a step's number turns into a check when the step gets done.
 import { useEffect, useRef, useState, type ChangeEvent, type FocusEvent, type FormEvent, type HTMLAttributes, type ReactNode } from "react";
-import { AlertCircle, ArrowRight, Check, ChevronDown, FileText, Minus, Paperclip, PenLine, Plus } from "lucide-react";
+import { AlertCircle, ArrowRight, Check, ChevronDown, FileText, Minus, Paperclip, PenLine, Plus, Wand2 } from "lucide-react";
 import { MOTION, smoothScroll, useFlip, usePresence } from "../../lib/motion";
 import { modelIndicator } from "../../lib/modelText";
 import { errText } from "../../lib/narrate";
@@ -18,7 +18,8 @@ import { useApp } from "../../store";
 import { BRIEF_MIN, BRIEF_MIN_TOPIC, INPUT_CLS, PURPOSES, SAMPLE_AUDIENCE, SAMPLE_BRIEF, SLIDES_DEFAULT, SLIDES_MAX, SLIDES_MIN, StrategyOption, Toggle } from "../NewGenerationFormParts";
 import { Button } from "../ui/Button";
 import { ModelStatus } from "./ModelStatus";
-import { TemplatePicker, TemplateUploadButton, useTemplateDrop } from "./TemplatePicker";
+import { ImproveDeckButton, TemplatePicker, TemplateUploadButton, useTemplateDrop } from "./TemplatePicker";
+import type { ImproveSource } from "../../types";
 
 const clampSlides = (n: number) => Math.min(SLIDES_MAX, Math.max(SLIDES_MIN, Number.isFinite(n) ? Math.round(n) : SLIDES_DEFAULT));
 const MAX_BRIEF_BYTES = 2 * 1024 * 1024;
@@ -113,8 +114,16 @@ function CountStep({ icon: Icon, label, disabled, onClick }: { icon: typeof Plus
   );
 }
 
+/** The line under the text field after «Улучшить готовую»: what came from the deck, what its own audit found. */
+function improveLine(src: ImproveSource): string {
+  const held = [src.tables ? plural(src.tables, "таблица", "таблицы", "таблиц") : null, src.charts ? plural(src.charts, "диаграмма", "диаграммы", "диаграмм") : null, src.pictures ? plural(src.pictures, "картинка", "картинки", "картинок") : null].filter(Boolean);
+  const audit = src.audit ? ` Оценка исходника — ${src.audit.score}.` : "";
+  const probs = src.problems?.length ? ` Модель нашла в нём ${plural(src.problems.length, "проблему", "проблемы", "проблем")} вёрстки.` : "";
+  return `Текст и оформление — из «${src.name}»: ${plural(src.slides, "слайд", "слайда", "слайдов")}${held.length ? `, ${held.join(", ")}` : ""}.${audit}${probs} Слайды останутся те же, вёрстка соберётся заново, модель посмотрит на каждый новый слайд.`;
+}
+
 export function CreateScreen() {
-  const { health, healthError, modelStatus, strategies, templates, templateId, manifestLoading, activeJob, startGeneration, toast, agentOpen, composerText, composerPreset, takeComposerText } = useApp();
+  const { health, healthError, modelStatus, strategies, templates, templateId, manifestLoading, activeJob, startGeneration, toast, agentOpen, composerText, composerPreset, takeComposerText, improveSource, takeImproveSource } = useApp();
   // a server with a model in its config whose every link is off builds without one: the switches say so too
   const modelsConfigured = (health?.models_configured ?? false) && modelStatus?.state !== "off";
   const drop = useTemplateDrop();
@@ -134,6 +143,14 @@ export function CreateScreen() {
   const imagesConfigured = !!health?.images?.configured;
   const picturesOn = imagesConfigured && (pictures ?? !!health?.images?.enabled);
   const [more, setMore] = useState(false);
+  // «Улучшить готовую»: the old deck read back (its text in the field, its look the template) — sent with the deck
+  const [improved, setImproved] = useState<ImproveSource | null>(null);
+  useEffect(() => {
+    if (!improveSource) return;
+    setBrief(improveSource.brief); // the deck's own slides («Слайд N»): the designer keeps their text and finds them better forms
+    setImproved(improveSource);
+    takeImproveSource();
+  }, [improveSource, takeImproveSource]);
   const [submitting, setSubmitting] = useState(false);
   const [showErrors, setShowErrors] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -277,6 +294,7 @@ export function CreateScreen() {
 
   const fillSample = () => {
     setBrief(SAMPLE_BRIEF);
+    setImproved(null);
     if (!audience.trim()) setAudience(SAMPLE_AUDIENCE);
     setPurpose("feature");
     setShowErrors(false);
@@ -293,6 +311,7 @@ export function CreateScreen() {
       const text = (await file.text()).replace(/\r\n/g, "\n").trim();
       if (!text) return toast("error", `Файл «${file.name}» пустой`);
       setBrief(text);
+      setImproved(null);
     } catch (err) {
       toast("error", `Не удалось прочитать «${file.name}»: ${errText(err)}`);
     }
@@ -359,6 +378,8 @@ export function CreateScreen() {
         autofix: true,
         exports: ["pdf", "html"],
         pictures: imagesConfigured ? picturesOn : null,
+        eyes: improved && modelsConfigured ? true : null,
+        improved_from: improved ? { name: improved.name, slides: improved.slides, template_id: improved.template_id, audit: improved.audit ?? null } : null,
       }, count);
     } finally {
       setSubmitting(false);
@@ -374,7 +395,7 @@ export function CreateScreen() {
         </header>
 
         <div className="space-y-4">
-          <Step id="step-template" n={1} title="Шаблон" done={templateDone} current={!templateDone} actions={<TemplateUploadButton />} shake={shaking === 1} zone={drop}>
+          <Step id="step-template" n={1} title="Шаблон" done={templateDone} current={!templateDone} actions={<><ImproveDeckButton /><TemplateUploadButton /></>} shake={shaking === 1} zone={drop}>
             <div className="mt-5">
               <TemplatePicker />
             </div>
@@ -435,6 +456,12 @@ export function CreateScreen() {
                 </p>
               )}
             </div>
+            {improved && (
+              <p className="mt-2 flex items-start gap-2 rounded-lg bg-accent-50 px-3 py-2 text-footnote text-accent-800 animate-fade">
+                <Wand2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+                <span>{improveLine(improved)}</span>
+              </p>
+            )}
             {/* read out once when «Создать» finds the text short (the counter itself changes with every key) */}
             {shortInvalid && <span role="alert" className="sr-only">Текст слишком короткий</span>}
           </Step>

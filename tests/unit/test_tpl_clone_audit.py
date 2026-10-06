@@ -1035,7 +1035,9 @@ def test_fix_slide_sends_the_new_content_checks_to_the_designer():
     assert RM.FIX_HINT.get("content_over_art")
     load_builtin_checks()
     known = {spec.id for spec, _ in all_checks()}
-    assert RM.CONTENT_CHECKS - {"slide_content", "deck_coherence"} <= known  # no stale id
+    from verstka.audit.model_checks import model_check_specs
+
+    assert RM.CONTENT_CHECKS - {s.id for s in model_check_specs()} <= known  # no stale id (the model checks are listed apart)
     long = "За 30 дней выручка составляет 900 000 рублей при среднем чеке 300 рублей и 100 покупках в день"
     i = Issue(id="content_in_notes-2-6", slide=2, check_id="content_in_notes", severity="warn", kind="deterministic",
               message=f"Вывод «{long[:50]}…» есть только в заметках докладчика: на слайде не нашлось места",
