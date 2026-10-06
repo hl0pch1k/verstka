@@ -8,6 +8,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import time
 
 import pytest
 from lxml import etree
@@ -43,66 +44,309 @@ class _Resp:
         return self._obj
 
 
-def test_openrouter_images_reads_b64_and_sends_aspect(monkeypatch):
+def _polza(monkeypatch, *, create, statuses=(), picture=None, gets=None):
+    """Polza's Media API faked: POST /media answers `create`, each GET /media/{id} the next of `statuses`, a GET of the
+    picture's CDN link answers `picture`."""
     import httpx
 
-    seen = {}
+    seen = {"posts": [], "gets": [] if gets is None else gets}
+    pending = list(statuses)
 
     def fake_post(url, json=None, headers=None, timeout=None):
-        seen.update(url=url, body=json, auth=headers.get("Authorization"))
-        return _Resp(obj={"data": [{"b64_json": base64.b64encode(_png()).decode(), "media_type": "image/png"}], "usage": {"cost": 0.014}})
+        seen["posts"].append({"url": url, "body": json, "auth": headers.get("Authorization")})
+        return create if isinstance(create, _Resp) else _Resp(obj=create)
+
+    def fake_get(url, headers=None, timeout=None, follow_redirects=None):
+        seen["gets"].append(url)
+        if "/media/" in url:
+            nxt = pending.pop(0)
+            return nxt if isinstance(nxt, _Resp) else _Resp(obj=nxt)
+        r = _Resp(content=picture or _png())
+        r.raise_for_status = lambda: None
+        return r
 
     monkeypatch.setattr(httpx, "post", fake_post)
-    p = IP.OpenRouterImages("black-forest-labs/flux.2-klein-4b", "https://openrouter.ai/api/v1", "sk-test", label="FLUX.2 klein")
+    monkeypatch.setattr(httpx, "get", fake_get)
+    return seen
+
+
+def test_polza_media_sends_the_prompt_and_aspect_and_reads_a_finished_picture(monkeypatch):
+    done = {"id": "gen_1", "status": "completed", "data": [{"url": "https://s3.polza.ai/f/1.png"}], "usage": {"output_units": 1, "cost_rub": 1.4, "cost": 1.4}}
+    seen = _polza(monkeypatch, create=done)
+    p = IP.PolzaMedia("tongyi-mai/z-image", "https://polza.ai/api/v1", "pza_test", label="Z-Image")
     r = p.generate("a greenhouse", aspect="16:9", seed=7)
-    assert seen["url"] == "https://openrouter.ai/api/v1/images"
-    assert seen["body"]["aspect_ratio"] == "16:9" and seen["body"]["seed"] == 7 and seen["body"]["model"] == "black-forest-labs/flux.2-klein-4b"
-    assert seen["auth"] == "Bearer sk-test"
-    assert r.data[:8] == b"\x89PNG\r\n\x1a\n" and r.cost_usd == 0.014 and r.label == "FLUX.2 klein"
+    post = seen["posts"][0]
+    assert post["url"] == "https://polza.ai/api/v1/media" and post["auth"] == "Bearer pza_test"
+    # Z-Image takes no seed: the input is the prompt and one of Polza's aspect ratios
+    assert post["body"] == {"model": "tongyi-mai/z-image", "input": {"prompt": "a greenhouse", "aspect_ratio": "16:9"}}
+    assert seen["gets"] == ["https://s3.polza.ai/f/1.png"]  # no polling: the answer was ready
+    assert r.data[:8] == b"\x89PNG\r\n\x1a\n" and r.cost_rub == 1.4 and r.label == "Z-Image" and r.seed == 7
+
+
+def test_polza_media_polls_a_pending_task_until_the_picture_is_ready(monkeypatch):
+    import time as _time
+
+    monkeypatch.setattr(_time, "sleep", lambda s: None)
+    seen = _polza(monkeypatch, create={"id": "gen_2", "status": "pending"}, statuses=[
+        {"id": "gen_2", "status": "processing"},
+        {"id": "gen_2", "status": "completed", "data": {"url": "https://s3.polza.ai/f/2.png"}, "usage": {"cost_rub": 1.4}},
+    ])
+    r = IP.PolzaMedia("tongyi-mai/z-image", "https://polza.ai/api/v1", "pza_test").generate("x", aspect="4:3")
+    assert seen["gets"] == ["https://polza.ai/api/v1/media/gen_2", "https://polza.ai/api/v1/media/gen_2", "https://s3.polza.ai/f/2.png"]
+    assert r.cost_rub == 1.4  # the status's data may be one object as well as a list
+    # another endpoint's usage.cost is in its own money: only cost_rub counts there
+    from verstka.images.providers import _usage_rub
+    assert _usage_rub({"usage": {"cost": 0.04}}) == 0.04 and _usage_rub({"usage": {"cost": 0.04}}, polza=False) is None
+
+
+def test_polza_media_reports_a_failed_task_and_a_task_that_never_ends(monkeypatch):
+    import time as _time
+
+    monkeypatch.setattr(_time, "sleep", lambda s: None)
+    _polza(monkeypatch, create={"id": "g", "status": "pending"}, statuses=[{"id": "g", "status": "failed", "error": {"message": "NSFW"}}])
+    with pytest.raises(IP.ImageError, match="failed .NSFW"):
+        IP.PolzaMedia("tongyi-mai/z-image", "https://polza.ai/api/v1", "k").generate("x")
+    _polza(monkeypatch, create={"id": "g", "status": "pending"}, statuses=[{"id": "g", "status": "processing"}] * 50)
+    clock = iter(range(0, 10_000, 30))
+    monkeypatch.setattr(_time, "monotonic", lambda: float(next(clock)))
+    with pytest.raises(IP.ImageError, match="not ready in time"):
+        IP.PolzaMedia("tongyi-mai/z-image", "https://polza.ai/api/v1", "k", timeout_s=90).generate("x")
+
+
+def test_polza_media_never_polls_past_the_generations_deadline(monkeypatch):
+    import time as _time
+
+    now, slept = [1000.0], []
+    monkeypatch.setattr(_time, "monotonic", lambda: now[0])
+
+    def nap(s):
+        slept.append(s)
+        now[0] += s
+
+    monkeypatch.setattr(_time, "sleep", nap)
+    _polza(monkeypatch, create={"id": "g", "status": "pending"}, statuses=[{"id": "g", "status": "processing"}] * 50)
+    with pytest.raises(IP.ImageError, match="not ready in time|no time left"):
+        IP.PolzaMedia("tongyi-mai/z-image", "https://polza.ai/api/v1", "k", timeout_s=90).generate("x", deadline=1010.0)
+    assert slept and now[0] <= 1010.0  # the link's 90 s would allow more; the generation's deadline does not
+
+
+def test_the_pictures_download_fits_the_generations_deadline(monkeypatch):
+    import time as _time
+
+    import httpx
+
+    monkeypatch.setattr(_time, "monotonic", lambda: 1000.0)
+    done = {"id": "g", "status": "completed", "data": [{"url": "https://s3.polza.ai/f/1.png"}], "usage": {"cost_rub": 1.4}}
+    monkeypatch.setattr(httpx, "post", lambda url, json=None, headers=None, timeout=None: _Resp(obj=done))
+    timeouts: list = []
+
+    def cdn(url, headers=None, timeout=None, follow_redirects=None):
+        timeouts.append(timeout)
+        r = _Resp(content=_png())
+        r.raise_for_status = lambda: None
+        return r
+
+    monkeypatch.setattr(httpx, "get", cdn)
+    r = IP.PolzaMedia("tongyi-mai/z-image", "https://polza.ai/api/v1", "k", timeout_s=90).generate("x", deadline=1012.0)
+    assert r.cost_rub == 1.4 and timeouts == [12.0]  # the CDN's own 30 s would run past the deadline
+
+
+def test_polza_media_keeps_the_prompt_within_polzas_limit_and_takes_the_nearest_aspect(monkeypatch):
+    done = {"id": "g", "status": "completed", "data": [{"url": "https://s3.polza.ai/f/3.png"}]}
+    seen = _polza(monkeypatch, create=done)
+    IP.PolzaMedia("tongyi-mai/z-image", "https://polza.ai/api/v1", "k").generate("y" * 1500, aspect="21:9")
+    body = seen["posts"][0]["body"]["input"]
+    assert len(body["prompt"]) == IP.PROMPT_MAX_CHARS and body["aspect_ratio"] == "16:9"
 
 
 def test_picture_of_reads_urls_and_chat_answers():
     data = _png()
     url = "data:image/png;base64," + base64.b64encode(data).decode()
     assert IP.picture_of({"data": [{"url": url}]}) == data
+    assert IP.picture_of({"data": {"url": url}}) == data  # Polza's media status documents one object
     assert IP.picture_of({"choices": [{"message": {"images": [{"type": "image_url", "image_url": {"url": url}}]}}]}) == data
     assert IP.picture_of({"data": [{"url": "https://x/y.png"}]}, fetch=lambda u: data) == data
     assert IP.picture_of({"data": []}) is None
 
 
-def test_a_chain_skips_links_without_a_key_and_holds_a_link_without_credits(monkeypatch):
+def test_a_chain_skips_links_without_a_key_and_holds_a_link_without_money(monkeypatch):
     import httpx
 
     calls = []
 
     def fake_post(url, json=None, headers=None, timeout=None):
         calls.append(json["model"])
-        if json["model"] == "paid":
-            return _Resp(status=402, obj={"error": {"message": "Insufficient credits"}})
-        return _Resp(obj={"data": [{"b64_json": base64.b64encode(_png()).decode()}]})
+        if json["model"] == "broke":
+            return _Resp(status=402, obj={"error": {"code": "INSUFFICIENT_BALANCE", "message": "Недостаточно средств на балансе"}})
+        return _Resp(obj={"id": "g", "status": "completed", "data": [{"url": "data:image/png;base64," + base64.b64encode(_png()).decode()}]})
 
     monkeypatch.setattr(httpx, "post", fake_post)
-    chain = IP.build_image_provider({"backend": "openrouter_images", "chain": [
-        {"model": "nokey", "api_key": ""}, {"model": "paid", "api_key": "k"}, {"model": "free", "api_key": "k"}]})
+    chain = IP.build_image_provider({"backend": "polza_media", "chain": [
+        {"model": "nokey", "api_key": ""}, {"model": "broke", "api_key": "k"}, {"model": "ok", "api_key": "k"}]})
     assert [d["state"] for d in chain.describe()] == ["off", "ready", "ready"]
     r = chain.generate("x", aspect="1:1")
-    assert r.model == "free" and calls == ["paid", "free"]
+    assert r.model == "ok" and calls == ["broke", "ok"]
     chain.generate("y", aspect="1:1")
-    assert calls == ["paid", "free", "free"]  # the link without credits is skipped for a while
+    assert calls == ["broke", "ok", "ok"]  # the link without money is skipped for a while
     assert chain.describe()[1]["state"] == "no_credits"
 
 
+def _seq_post(monkeypatch, answers):
+    """POST /media answers the next of `answers` each time (a _Resp, or a media object); returns the bodies sent."""
+    import httpx
+
+    sent, queue = [], list(answers)
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        sent.append(json)
+        nxt = queue.pop(0) if len(queue) > 1 else queue[0]
+        return nxt if isinstance(nxt, _Resp) else _Resp(obj=nxt)
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    return sent
+
+
+_DONE = {"id": "g", "status": "completed", "data": [{"url": "data:image/png;base64," + base64.b64encode(_png()).decode()}], "usage": {"cost_rub": 1.4}}
+_MINUTE = _Resp(status=429, obj={"error": {"code": "TOO_MANY_REQUESTS", "message": "Достигнут минутный лимит запросов к модели. Повторите позже."}}, headers={"retry-after": "40"})
+_DAY = _Resp(status=429, obj={"error": {"code": "TOO_MANY_REQUESTS", "message": "Достигнут дневной лимит запросов к модели. Повторите позже."}}, headers={"retry-after": "7200"})
+_HOSTS = _Resp(status=429, obj={"error": {"code": "TOO_MANY_REQUESTS", "message": "Провайдер модели ограничил частоту запросов."}})
+_RESERVE = _Resp(status=402, obj={"error": {"code": "INSUFFICIENT_BALANCE", "message": "Недостаточно средств: на балансе 1.20 ₽, зарезервировано 4.20 ₽"}})
+
+
+@pytest.fixture
+def naps(monkeypatch):
+    """time.sleep of the picture chain recorded instead of slept."""
+    import time as _time
+
+    slept: list[float] = []
+    monkeypatch.setattr(_time, "sleep", lambda s: slept.append(round(s, 1)))
+    return slept
+
+
+def _one(model="tongyi-mai/z-image"):
+    return IP.build_image_provider({"backend": "polza_media", "model": model, "api_key": "k"})
+
+
+def test_the_only_picture_model_rides_out_polzas_minute_cap(monkeypatch, naps):
+    sent = _seq_post(monkeypatch, [_MINUTE, _DONE])
+    chain = _one()
+    assert chain.generate("x").cost_rub == 1.4 and len(sent) == 2
+    assert naps == [40.0] and chain.describe()[0]["state"] == "ready"  # waited the window out, never held
+
+
+def test_the_hosts_429_gets_a_pause_and_two_in_a_row_hold_the_model(monkeypatch, naps):
+    sent = _seq_post(monkeypatch, [_HOSTS, _DONE])
+    chain = _one()
+    chain.generate("x")
+    assert len(sent) == 2 and naps == [2.0] and chain.describe()[0]["state"] == "ready"
+    _seq_post(monkeypatch, [_HOSTS])
+    with pytest.raises(IP.ImageError):
+        chain.generate("y")
+    assert chain.describe()[0]["state"] == "congested"  # two in a row: a short hold
+
+
+def test_a_reserve_402_waits_for_the_parallel_pictures_and_never_holds(monkeypatch, naps):
+    sent = _seq_post(monkeypatch, [_RESERVE, _RESERVE, _DONE])
+    chain = _one()
+    assert chain.generate("x").cost_rub == 1.4 and len(sent) == 3
+    assert naps == [8.0, 8.0] and chain.describe()[0]["state"] == "ready"
+
+
+def test_polzas_daily_cap_holds_the_picture_model_until_its_reset(monkeypatch, naps):
+    _seq_post(monkeypatch, [_DAY])
+    chain = _one()
+    with pytest.raises(IP.ImageError):
+        chain.generate("x")
+    assert chain.describe()[0]["state"] == "quota" and naps == []
+    assert 7190 < chain.holds[0].until - time.time() <= 7200  # its Retry-After: the cap resets then
+    with pytest.raises(IP.ImageError, match="skipped"):
+        chain.generate("y")  # no request until the cap resets
+
+
+def test_a_wait_never_runs_past_the_generations_deadline(monkeypatch, naps):
+    import time as _time
+
+    sent = _seq_post(monkeypatch, [_MINUTE, _DONE])
+    chain = _one()
+    with pytest.raises(IP.ImageError):
+        chain.generate("x", deadline=_time.monotonic() + 30)  # 40 s window + a picture's time do not fit
+    assert len(sent) == 1 and naps == [] and chain.describe()[0]["state"] == "rate"
+
+
+def test_a_short_hold_of_the_only_link_is_waited_out_by_the_next_picture(monkeypatch, naps):
+    import time as _time
+
+    chain = _one()
+    chain._hold(0, "rate", 20.0, "a minute window")
+    sent = _seq_post(monkeypatch, [_DONE])
+    assert chain.generate("x").cost_rub == 1.4 and len(sent) == 1
+    assert len(naps) == 1 and 15 < naps[0] <= 20
+    chain._hold(0, "rate", 20.0, "a minute window")
+    with pytest.raises(IP.ImageError, match="skipped"):
+        chain.generate("y", deadline=_time.monotonic() + 25)  # no room to wait: skipped
+
+
+def test_status_polling_survives_a_404_race_and_a_5xx(monkeypatch, naps):
+    statuses = [_Resp(status=404, obj={"error": {"code": "NOT_FOUND", "message": "Not found"}}), _Resp(status=502, obj={"error": {"code": "BAD_GATEWAY", "message": "x"}}),
+                {"id": "g9", "status": "completed", "data": [{"url": "https://s3.polza.ai/f/9.png"}], "usage": {"cost_rub": 1.4}}]
+    seen = _polza(monkeypatch, create={"id": "g9", "status": "pending"}, statuses=statuses)
+    chain = _one()
+    assert chain.generate("x").cost_rub == 1.4
+    assert len(seen["posts"]) == 1  # one task, paid once: a failed status request is asked again, not a new task
+    assert chain.describe()[0]["state"] == "ready"
+
+
+def test_a_failed_task_of_the_hosts_passing_trouble_is_asked_again(monkeypatch, naps):
+    sent = _seq_post(monkeypatch, [{"id": "a", "status": "failed", "error": {"code": "BAD_GATEWAY", "message": "upstream"}}, _DONE])
+    assert _one().generate("x").cost_rub == 1.4 and len(sent) == 2
+
+
+def test_a_picture_the_cdn_does_not_give_is_an_image_error_without_a_hold(monkeypatch, naps):
+    import httpx
+
+    seen = _polza(monkeypatch, create={"id": "g", "status": "completed", "data": [{"url": "https://s3.polza.ai/f/x.png"}]})
+
+    def fake_get(url, headers=None, timeout=None, follow_redirects=None):
+        seen["gets"].append(url)
+        return httpx.Response(404, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+    chain = _one()
+    with pytest.raises(IP.ImageError, match="could not be downloaded"):
+        chain.generate("x")
+    assert chain.describe()[0]["state"] == "ready"  # this picture is lost, the next one is asked as usual
+
+
 def test_a_chain_without_any_key_is_off():
-    chain = IP.build_image_provider({"backend": "openrouter_images", "chain": [{"model": "a", "api_key": ""}]})
+    chain = IP.build_image_provider({"backend": "polza_media", "chain": [{"model": "a", "api_key": ""}]})
     assert chain.off
     with pytest.raises(IP.ImageError):
         chain.generate("x")
+
+
+def test_the_default_config_draws_with_z_image_on_polza(monkeypatch):
+    from pathlib import Path
+
+    monkeypatch.setenv("POLZA_API_KEY", "pza_test")
+    IP.reset_cache()
+    try:
+        chain = IP.load_image_provider(Path(__file__).resolve().parents[2] / "configs" / "models.yaml")
+        assert [(lk.name, lk.model, lk.label, lk.off) for lk in chain.links] == [("polza_media", "tongyi-mai/z-image", "Z-Image", False)]
+        assert chain.links[0].base_url == "https://polza.ai/api/v1"
+    finally:
+        IP.reset_cache()
+    monkeypatch.delenv("POLZA_API_KEY")
+    try:
+        assert IP.load_image_provider(Path(__file__).resolve().parents[2] / "configs" / "models.yaml").off
+    finally:
+        IP.reset_cache()
 
 
 def test_nearest_aspect():
     assert IP.nearest_aspect(1600, 900) == "16:9"
     assert IP.nearest_aspect(900, 1200) == "3:4"
     assert IP.nearest_aspect(1000, 1000) == "1:1"
+    assert IP.nearest_aspect(2100, 900) == "16:9"  # Polza's Z-Image has no 21:9: the widest it takes
 
 
 def test_grading_brings_a_picture_to_the_palette_and_fit_keeps_proportions():
@@ -126,8 +370,9 @@ def test_the_prompt_carries_subject_style_palette_and_no_text():
     pal = P.Palette(dark="0B1F44", light="F4F6FA", accents=["FF6A00"])
     prompt, style = build_prompt(ImageAsk(hint="Экран панели управления теплицей", headline="Панель наблюдения", deck="Умная теплица"), pal)
     assert style == "screen"
-    assert "Экран панели управления теплицей" in prompt and "Панель наблюдения" in prompt
-    assert "#FF6A00" in prompt and "No text" in prompt
+    assert "Экран панели управления теплицей" in prompt and "orange" in prompt and "no text of any kind" in prompt
+    # Z-Image draws what it is given as text: no headline, no deck title, no quotes, no colour codes in the prompt
+    assert "Панель наблюдения" not in prompt and "Умная теплица" not in prompt and "«" not in prompt and "#" not in prompt
     p2, _ = build_prompt(ImageAsk(hint="Вид теплицы сверху", headline="Теплица", deck="Т", wish="больше зелени, утро"), pal)
     assert p2.startswith("больше зелени, утро") and "Вид теплицы сверху" in p2
     assert style_of("схема полива", {"styles": [{"match": "схем", "style": "illustration"}], "default_style": "photo"}) == "illustration"
@@ -303,3 +548,23 @@ def test_a_caption_hanging_out_of_its_trimmed_place_goes_with_it(tmp_path):
     outline = DeckOutline(title="T", slides=[OutlineSlide(id="a", kind="image_text", headline="H", content=SlideContent(photo_slot="Изображение", photo_hint="экран"))])
     (place,) = places_in(prs, outline)
     assert place.caption_ids == [str(cap.shape_id)]
+
+
+def test_a_bracketed_note_of_several_sentences_describes_a_picture_not_the_authors_photo():
+    """«[Место под изображение: вид сверху. На изображении — три грядки. Подписи показывают датчики.]» is cut into
+    sentences; none of them is the author's request for their own photo — the place gets a generated picture (the
+    live run of 2026-10-06 left both described places of the greenhouse brief free). The author's own words still
+    keep a place for their photo."""
+    from verstka.planning.brief_structure import read_structure
+
+    brief = (
+        "Слайд 1. Проект «Теплица»\n\nПлан на год\n\n"
+        "Слайд 2. Наша команда\n\nКоманда из пяти человек работает над проектом второй год. Фото команды я добавлю "
+        "самостоятельно, не заполняй это место сгенерированным изображением.\n\n"
+        "Слайд 3. Схема\n\nСистема состоит из датчиков и контроллера.\n\n"
+        "[Место под изображение: вид теплицы сверху. На изображении — три грядки, бак и насос. Подписи показывают "
+        "датчики.]\n\n"
+        "Слайд 4. Спасибо!\n"
+    )
+    specs = read_structure(brief).specs
+    assert [(s.photo is not None, s.photo_own) for s in specs] == [(False, False), (True, True), (True, False), (False, False)]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from dataclasses import dataclass, field
@@ -14,6 +15,8 @@ from verstka.providers.base import Provider, ProviderError
 from verstka.providers.chain import ChainProvider
 from verstka.providers.mock import MockProvider
 from verstka.providers.openai_compat import OpenAICompatProvider
+
+log = logging.getLogger(__name__)
 
 _ENV_RE = re.compile(r"\$\{([A-Z0-9_]+)\}")
 
@@ -91,9 +94,13 @@ class ProviderRegistry:
         out: dict[str, dict] = {}
         for role, p in self.roles.items():
             d: dict[str, Any] = {"backend": p.name, "model": p.model}
-            inner = p.inner if isinstance(p, _Deadlined) else p
+            inner, seen = p, 0
+            while not isinstance(inner, ChainProvider) and getattr(inner, "inner", None) is not None and seen < 5:
+                inner, seen = inner.inner, seen + 1  # a deadline, the generation's recorder
             if isinstance(inner, ChainProvider):
                 d["chain"] = inner.describe()
+            elif getattr(inner, "label", None):
+                d["label"] = inner.label  # a single model's own name («Qwen3.8-27B (VK)»)
             out[role] = d
         return out
 
@@ -115,13 +122,25 @@ class _Deadlined:
         return getattr(self.inner, item)
 
 
+POLZA_BASE_URL = "https://polza.ai/api/v1"
+
+# what a model link reads; anything else (the old hosts' pools, max_tokens_cap, min_interval_s, prices) does nothing
+_LINK_OPTIONS = frozenset({
+    "backend", "model", "base_url", "api_key", "timeout_s", "max_attempts", "extra_body", "json_mode", "requests_per_minute",
+    "label", "system_suffix", "exclude_quantizations", "responses",
+})
+_WARNED: set = set()
+
+
 def build_provider(spec: dict, limits: ProviderLimits) -> Provider:
     """One role's backend. `{chain: [spec, spec, ...]}` is a fallback chain (keys next to `chain` are defaults of
-    every link, a link's own keys win); a single spec is one provider, exactly as before. A link whose `api_key`
-    expands to an empty string (its variable is not set) is built "off": the chain skips it silently.
-    `max_tokens_cap` (a link option) caps max_tokens of every request of that link; `system_suffix` is added to the
-    system message of every request of that link (e.g. Qwen3's "/no_think" on a host without a thinking switch);
-    `min_interval_s` spaces the request starts on the link's account (calls made side by side go out one by one)."""
+    every link, a link's own keys win); a single spec is one provider. A link whose `api_key` expands to an empty
+    string (its variable is not set) is built "off": the chain skips it silently.
+
+    Backends: `polza` — Polza.ai (base_url defaults to https://polza.ai/api/v1; `exclude_quantizations` leaves hosts
+    with such weights out of the routing, see openai_compat.excluded_hosts); `openai_compat` — any OpenAI-compatible
+    endpoint (the final's VK inference; `system_suffix` is added to the system message of every request, e.g. Qwen's
+    "/no_think"); `mock` — canned answers for tests."""
     if isinstance(spec, dict) and "chain" in spec:
         shared = {k: v for k, v in spec.items() if k != "chain"}
         link_specs = spec.get("chain") or []
@@ -136,36 +155,37 @@ def build_provider(spec: dict, limits: ProviderLimits) -> Provider:
             links.append(build_provider({**shared, **ls}, limits))
         # one link is a single provider: it keeps the single-provider waits
         return links[0] if len(links) == 1 else ChainProvider(links)
-    backend = (spec.get("backend") or "openai_compat").lower()
+    backend = (spec.get("backend") or "polza").lower()
+    unused = tuple(sorted(k for k in spec if k not in _LINK_OPTIONS))
+    if unused and (spec.get("model"), unused) not in _WARNED:
+        _WARNED.add((spec.get("model"), unused))
+        log.warning("model %s: config options %s do nothing and are ignored (left from older hosts?)", spec.get("model"), ", ".join(unused))
     if backend == "mock":
         return MockProvider(spec.get("responses") or {}, model=spec.get("model", "mock-model"))
-    if backend in ("openai_compat", "openrouter", "vk", "vllm", "ollama"):
-        base_url = spec.get("base_url") or "https://openrouter.ai/api/v1"
-        headers = {}
-        if "openrouter.ai" in base_url:
-            headers = {"HTTP-Referer": "https://github.com/verstka", "X-Title": "Verstka"}
+    if backend in ("polza", "openai_compat", "vk"):
+        polza = backend == "polza"
+        base_url = spec.get("base_url") or (POLZA_BASE_URL if polza else "")
+        # no endpoint (VK_INFERENCE_BASE_URL unset): the link is off like one without a key — never called
+        api_key = (spec.get("api_key") or "") if base_url else ""
         return OpenAICompatProvider(
             model=spec["model"],
             base_url=base_url,
-            api_key=spec.get("api_key") or "",
-            price_in_per_m=spec.get("price_in_per_m"),
-            price_out_per_m=spec.get("price_out_per_m"),
+            api_key=api_key,
             timeout_s=float(spec.get("timeout_s", limits.timeout_s)),
             max_attempts=int(spec.get("max_attempts", limits.max_attempts)),
             extra_body=spec.get("extra_body"),
             json_mode=bool(spec.get("json_mode", True)),
-            headers=headers,
             requests_per_minute=_rpm(spec, limits),
             label=spec.get("label"),
-            max_tokens_cap=spec.get("max_tokens_cap"),
             system_suffix=spec.get("system_suffix"),
-            min_interval_s=spec.get("min_interval_s"),
+            exclude_quantizations=spec.get("exclude_quantizations") if polza else None,
+            name="polza" if polza else "openai_compat",
         )
-    raise ProviderError(f"unknown provider backend {backend!r}")
+    raise ProviderError(f"unknown provider backend {backend!r} (polza, openai_compat or mock)")
 
 
 def _rpm(spec: dict, limits: ProviderLimits) -> Optional[int]:
-    """A link's per-minute cap: its own `requests_per_minute` (0 or null: none, e.g. a local server), else the limits'."""
+    """A link's per-minute cap: its own `requests_per_minute` (0 or null: none), else the limits'."""
     if "requests_per_minute" in spec:
         return int(spec["requests_per_minute"]) if spec["requests_per_minute"] else None
     return limits.requests_per_minute

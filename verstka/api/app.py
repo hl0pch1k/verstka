@@ -94,7 +94,7 @@ def models_configured() -> bool:
 
 
 def _chain_ctx() -> ChainContext:
-    """The active model chain (the advice under a deck depends on it: is there a paid link to top up for?)."""
+    """The active model chain (the advice under a deck depends on it)."""
     from verstka.providers.registry import default_models_path
 
     return active_chain_context(providers(), config=config_label(default_models_path(), _REPO_ROOT))
@@ -436,6 +436,32 @@ def image_provider():
     except Exception:  # noqa: BLE001 - a broken config: no pictures
         log.warning("t2i role unavailable", exc_info=True)
         return None
+
+
+def _t2i_hint() -> str:
+    """Which variables the active t2i role needs (for the log): Polza's key, or the VK profile's endpoint and model."""
+    p = image_provider()
+    names = {getattr(lk, "name", "") for lk in (getattr(p, "links", None) or [])}
+    if "openai_images" in names:
+        return "VK_INFERENCE_BASE_URL, VK_INFERENCE_API_KEY and VK_T2I_MODEL in .env"
+    return "POLZA_API_KEY in .env"
+
+
+def _picture_failure_reply(error: str, states: Optional[list] = None) -> str:
+    """The reply to a picture change the model could not make: when building again helps, and when it does not.
+    `states`: the picture models' states after the failure (ImageChain.describe()) — a hold the chain recorded (Polza's
+    daily cap told by its Retry-After, no money, a refused key) says more than the error's wording."""
+    from verstka.api.model_status import classify
+
+    held = [s for s in (states or []) if s in ("quota", "no_credits", "auth", "missing")]
+    code = held[0] if held else classify(f"provider: {error}")
+    if code in ("no_credits", "auth", "missing"):
+        return "Не получилось: модель изображений недоступна — слайд остался как был."
+    if code == "quota":
+        return "Не получилось: дневной лимит модели изображений исчерпан — слайд остался как был. Попробуйте после полуночи по московскому времени."
+    if code == "error":
+        return "Не получилось: модель изображений отказалась рисовать по этому описанию — слайд остался как был. Попробуйте описать картинку иначе."
+    return "Не получилось: модель изображений не ответила — слайд остался как был. Попробуйте ещё раз чуть позже."
 
 
 def images_configured() -> bool:
@@ -1178,7 +1204,9 @@ def change_slide_picture(gid: str, strategy: str, n: int, body: PictureBody) -> 
     if not 1 <= n <= total:
         raise HTTPException(422, f"В этом варианте {ru_count(total, 'слайд', 'слайда', 'слайдов')} — слайда {n} нет")
     if body.action == "generate" and not images_configured():
-        raise HTTPException(503, "Модель изображений не подключена: впишите ключ OPENROUTER_API_KEY в файл .env и перезапустите сервер")
+        # what the owner has to set goes to the log: a person reads only that pictures are off
+        log.warning("picture change refused: the t2i role has no model with a key (%s)", _t2i_hint())
+        raise HTTPException(503, "Модель изображений не подключена")
     if not has_place(vdir, n):
         raise HTTPException(422, f"На слайде {n} нет изображения и места под него")
     key = (gid, strategy)
@@ -1210,7 +1238,11 @@ def change_slide_picture(gid: str, strategy: str, n: int, body: PictureBody) -> 
 
                 if isinstance(e, ProviderError):
                     log.warning("picture change: %s", e)
-                    return {"reply": "Не получилось: модель изображений не ответила — слайд остался как был. Попробуйте ещё раз чуть позже.", "changed": False, "applied": False, "kind": "picture", "action": body.action, "strategy": strategy, "slide": n}
+                    try:
+                        states = [d.get("state") for d in image_provider().describe()]
+                    except Exception:  # noqa: BLE001 - no picture model left to describe
+                        states = []
+                    return {"reply": _picture_failure_reply(str(e), states), "changed": False, "applied": False, "kind": "picture", "action": body.action, "strategy": strategy, "slide": n}
                 raise
             if res.score_after is not None:
                 audit = AuditReport.model_validate_json((vdir / "audit_report.json").read_text(encoding="utf-8"))

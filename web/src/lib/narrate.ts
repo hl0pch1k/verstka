@@ -1,6 +1,6 @@
 // Pure helpers used by the app store: assistant-side chat texts and small derivations over API payloads.
 import type { Generation, TemplateListItem, Variant } from "../types";
-import { silentNote as modelSilentNote } from "./modelText";
+import { retryWords, silentNote as modelSilentNote } from "./modelText";
 import { fmtSeconds, plural } from "./utils";
 
 export function errText(e: unknown): string {
@@ -49,10 +49,13 @@ export function describeGeneration(g: Generation, strategyTitle: (name: string) 
   if (g.variants.every((v) => v.outline?.planned_by === "skeleton")) {
     // a topic whose text the model did not write: said plainly, no score (gate 4 G4-21)
     const unwritten = g.writer?.status === "failed" || g.writer?.status === "skipped";
+    // a topic whose text was not written: the reason once, the way out by the reason (a wait passes by itself; no
+    // money, a refused key or a refusal does not — the theses do)
+    const again = unwritten ? retryWords(g.planner) : null;
     const what = unwritten
-      ? "Модель недоступна — текст по теме не написан, поэтому это каркас: титул, повестка и разделы с подсказками в заметках. Соберите ещё раз позже или допишите тезисы и цифры."
+      ? `Текст по теме не написан, поэтому это каркас: титул, повестка и разделы с подсказками в заметках. ${again ? `${again.replace(/[.!…]+$/, "")} или допишите тезисы и цифры.` : "Допишите тезисы и цифры — Verstka соберёт содержательные слайды."}`
       : "В тексте была только тема, поэтому это каркас: титул, повестка и разделы с подсказками в заметках. Допишите тезисы и цифры — Verstka соберёт содержательные слайды.";
-    return [head.replace(/^Готово: .*$/, unwritten ? "Текст не написан." : head), silentNote, what].filter(Boolean).join("\n");
+    return [unwritten ? "Текст не написан." : head, unwritten ? null : silentNote, what].filter(Boolean).join("\n");
   }
   // the best variant is named only when the scores differ; no tutorial tail (the page shows where things are)
   const scored = rows.filter((r) => r.score !== null);

@@ -1,17 +1,17 @@
 """Text-to-image backends of the `t2i` role (configs/models.yaml). Open weights only: Apache 2.0 or MIT, at most 20B
-parameters (the organisers' star task) — FLUX.2 [klein] 4B and Ming-Image-0.1-Design on OpenRouter by default.
+parameters (the organisers' star task) — Z-Image (Tongyi-MAI, ≈ 10B with its text encoder) on Polza by default.
 
 Backends:
-* `openrouter_images` — OpenRouter's POST {base}/images: {model, prompt, aspect_ratio, resolution, seed} → data[].b64_json;
+* `polza_media` — Polza's Media API: POST {base}/media {model, input: {prompt, aspect_ratio}} → the picture's link at
+  once, or {id, status: pending | processing} → GET {base}/media/{id} until completed (data: [{url}]) or failed; the
+  picture is fetched from Polza's CDN;
 * `openai_images` — the OpenAI-compatible POST {base}/images/generations: {model, prompt, size, response_format:
-  b64_json, seed} → data[].b64_json or data[].url (Together, Nebius, DeepInfra, a local server, VK inference);
-* `hf_inference` — Hugging Face Inference: POST {base}/models/{model} {inputs, parameters} → the image itself
-  (Z-Image-Turbo 6B, Qwen-Image-2512 20B);
+  b64_json, seed} → data[].b64_json or data[].url (the final's VK inference, if it serves an open text-to-image model);
 * `mock` — a picture drawn from the prompt (tests and offline demos; never in the default configs).
 
 A role may list several models — a chain, like the text roles: the links are tried in order, a link without a key is
-off (skipped silently, no request), a link that cannot answer (no credits, no such model, a refused key, a congested
-host) is skipped for a while. Every failure is an ImageError: the slide keeps its free place then."""
+off (skipped silently, no request), a link that cannot answer (no money, no such model, a refused key, congested
+hosts) is skipped for a while. Every failure is an ImageError: the slide keeps its free place then."""
 
 from __future__ import annotations
 
@@ -29,18 +29,19 @@ from verstka.providers.base import ProviderError
 
 log = logging.getLogger(__name__)
 
-# the aspect ratios the hosts take (OpenRouter's list); a place takes the nearest one and the picture is cropped to it
-ASPECTS = ("1:1", "4:3", "3:4", "3:2", "2:3", "16:9", "9:16", "5:4", "4:5", "21:9")
-# the ratios a place asks for: coarse, so the three variants' places of one description (4:3 here, 5:4 there) share one
+# the aspect ratios Polza's Z-Image takes; a place takes the nearest one and the picture is cropped to the place's
+# exact proportions. Coarse on purpose: the three variants' places of one description (4:3 here, 5:4 there) share one
 # picture — a crop of a few per cent is invisible, three different pictures of one place are not
-PLACE_ASPECTS = ("1:1", "4:3", "3:4", "16:9", "9:16", "21:9")
+PLACE_ASPECTS = ("1:1", "4:3", "3:4", "16:9", "9:16")
 # OpenAI-compatible hosts take a size: about a megapixel, sides divisible by 64
-SIZES = {
-    "1:1": (1024, 1024), "4:3": (1152, 896), "3:4": (896, 1152), "3:2": (1216, 832), "2:3": (832, 1216),
-    "16:9": (1344, 768), "9:16": (768, 1344), "5:4": (1088, 896), "4:5": (896, 1088), "21:9": (1536, 640),
-}
+SIZES = {"1:1": (1024, 1024), "4:3": (1152, 896), "3:4": (896, 1152), "16:9": (1344, 768), "9:16": (768, 1344)}
+# Polza's limit on a picture's prompt (its catalog: parameters.prompt.max_length)
+PROMPT_MAX_CHARS = 1000
 # how long a link is skipped after a failure of its kind (s)
-HOLDS = {"no_credits": 600.0, "auth": 1800.0, "missing": 1800.0, "rate": 120.0, "congested": 60.0, "error": 60.0}
+HOLDS = {"no_credits": 600.0, "auth": 1800.0, "missing": 1800.0, "rate": 120.0, "quota": 3600.0, "congested": 60.0, "error": 60.0}
+_PICTURE_S = 15.0  # a picture's time: a wait must leave it before the generation's deadline
+_WAIT_MAX_S = 65.0  # the longest pause of the last link that is waited out (a minute window, a congestion hold)
+_RESERVE_WAIT_S = 8.0  # a 402 while parallel requests hold the balance: about one picture's time frees a reserve
 
 
 class ImageError(ProviderError):
@@ -53,7 +54,7 @@ class ImageResult:
     model: str
     label: str
     seed: Optional[int] = None
-    cost_usd: Optional[float] = None
+    cost_rub: Optional[float] = None  # Polza's usage.cost_rub of the picture
     seconds: float = 0.0
 
 
@@ -81,11 +82,31 @@ def nearest_aspect(w: float, h: float, aspects: tuple[str, ...] = PLACE_ASPECTS)
     return min(aspects, key=dist)
 
 
+def _known_aspect(aspect: str) -> str:
+    """One of PLACE_ASPECTS: an older record's ratio («21:9», «3:2») becomes the nearest one, never a 4:3 by default."""
+    if aspect in PLACE_ASPECTS:
+        return aspect
+    try:
+        w, h = (float(v) for v in str(aspect).split(":"))
+    except ValueError:
+        return "4:3"
+    return nearest_aspect(w, h)
+
+
 class _HTTPError(Exception):
-    """An HTTP answer that is not a picture: `status_code` and the host's own words (for classify_error)."""
+    """An HTTP answer that is not a picture: `status_code` and the host's own words (for classify_error). A JSON body
+    is read as JSON first, so words the host escaped («\\u041d…») are read as words — the way the openai SDK shows a
+    chat error ({'error': {'code': …, 'message': …}})."""
 
     def __init__(self, status_code: int, text: str, headers: Optional[dict] = None) -> None:
-        super().__init__(f"Error code: {status_code} - {text[:300]}")
+        import json as _json
+
+        try:
+            body = _json.loads(text)
+            words = _json.dumps(body.get("error", body) if isinstance(body, dict) else body, ensure_ascii=False)
+        except (ValueError, TypeError):
+            words = text
+        super().__init__(f"Error code: {status_code} - {words[:400]}")
         self.status_code = status_code
         self.response = type("R", (), {"headers": headers or {}})()
 
@@ -101,8 +122,8 @@ def _looks_like_image(data: bytes) -> bool:
 
 
 def picture_of(obj: Any, fetch=None) -> Optional[bytes]:
-    """The picture in a host's JSON answer: data[].b64_json, data[].url (a data URL, or fetched with `fetch`), a chat
-    answer's choices[0].message.images[].image_url.url, or images[].url (Hugging Face / SiliconFlow). None when none."""
+    """The picture in a host's JSON answer: data[].b64_json, data[].url or data.url (a data URL, or fetched with
+    `fetch`), a chat answer's choices[0].message.images[].image_url.url, or images[].url. None when none."""
     if not isinstance(obj, dict):
         return None
     items: list = []
@@ -110,6 +131,8 @@ def picture_of(obj: Any, fetch=None) -> Optional[bytes]:
         v = obj.get(key)
         if isinstance(v, list):
             items.extend(v)
+        elif isinstance(v, dict):  # Polza's media status documents data as one object
+            items.append(v)
     try:
         msg = obj["choices"][0]["message"]
         items.extend(msg.get("images") or [])
@@ -145,7 +168,7 @@ class _HTTPImages:
     name = "http"
 
     def __init__(self, model: str, base_url: str, api_key: str = "", *, label: Optional[str] = None, timeout_s: float = 90.0,
-                 extra_body: Optional[dict] = None, headers: Optional[dict] = None, price_per_image: Optional[float] = None) -> None:
+                 extra_body: Optional[dict] = None, headers: Optional[dict] = None) -> None:
         self.model = model
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key or ""
@@ -153,7 +176,6 @@ class _HTTPImages:
         self.timeout_s = float(timeout_s)
         self.extra_body = dict(extra_body or {})
         self.headers = dict(headers or {})
-        self.price = price_per_image
         # no key or no model (an empty variable: VK_T2I_MODEL unset) — the link is off: skipped, never asked
         self.off = not self.api_key or not self.model
 
@@ -183,74 +205,144 @@ class _HTTPImages:
             raise classify_error(_HTTPError(r.status_code, r.text, dict(r.headers)), self.model, self.api_key)
         return r
 
-    def _fetch(self, url: str) -> bytes:
+    def _fetch(self, url: str, deadline: Optional[float] = None) -> bytes:
+        """The finished picture from the host's link (Polza's CDN — no key): within the deadline, one more try on a
+        dropped connection or a 5xx; any failure is an ImageError (the picture is paid for, the place stays free)."""
         import httpx
 
-        r = httpx.get(url, timeout=self.timeout_s, follow_redirects=True)
-        r.raise_for_status()
-        return r.content
+        last: Optional[Exception] = None
+        for attempt in range(2):
+            try:
+                r = httpx.get(url, timeout=min(30.0, self._timeout(deadline)), follow_redirects=True)
+                if r.status_code >= 500 and attempt == 0:
+                    last = RuntimeError(f"HTTP {r.status_code}")
+                    time.sleep(1.0)
+                    continue
+                r.raise_for_status()
+                return r.content
+            except ImageError:
+                raise
+            except Exception as e:  # noqa: BLE001 - a timeout, a dropped connection, a 4xx of the CDN
+                last = e
+                if attempt == 0 and not isinstance(e, httpx.HTTPStatusError):
+                    time.sleep(1.0)
+                    continue
+                break
+        raise ImageError(f"{self.model}: the picture could not be downloaded ({str(last)[:160]})")
+
+    def _json(self, r) -> Any:
+        try:
+            return r.json()
+        except Exception as e:  # noqa: BLE001 - a 200 that is not JSON
+            raise ImageError(f"{self.model}: the host's answer is not JSON ({str(e)[:120]})") from None
 
     def _result(self, data: Optional[bytes], seed: Optional[int], t0: float, cost: Optional[float] = None) -> ImageResult:
         if not data or not _looks_like_image(data):
             raise ImageError(f"{self.model}: the answer holds no picture")
-        return ImageResult(data=data, model=self.model, label=self.label, seed=seed, cost_usd=cost if cost is not None else self.price, seconds=round(time.monotonic() - t0, 2))
+        return ImageResult(data=data, model=self.model, label=self.label, seed=seed, cost_rub=cost, seconds=round(time.monotonic() - t0, 2))
 
 
-class OpenRouterImages(_HTTPImages):
-    """OpenRouter's image endpoint: POST {base}/images (docs: openrouter.ai/docs/features/multimodal/image-generation)."""
+def _usage_rub(obj: Any, polza: bool = True) -> Optional[float]:
+    """What the picture cost in rubles: Polza's usage.cost_rub (or its alias usage.cost); another endpoint's usage.cost
+    is in its own money, so only cost_rub counts there."""
+    usage = obj.get("usage") if isinstance(obj, dict) else None
+    if not isinstance(usage, dict):
+        return None
+    for name in ("cost_rub", "cost") if polza else ("cost_rub",):
+        try:
+            if usage.get(name) is not None:
+                return float(usage[name])
+        except (TypeError, ValueError):
+            continue
+    return None
 
-    name = "openrouter_images"
 
-    def __init__(self, *args, resolution: str = "1K", **kw) -> None:
+# a failed task whose error is the host's passing trouble: worth asking again (a failed task costs nothing)
+_TRANSIENT_CODES = {"BAD_GATEWAY", "REQUEST_TIMEOUT", "SERVICE_UNAVAILABLE", "INTERNAL_ERROR", "TOO_MANY_REQUESTS"}
+
+
+class PolzaMedia(_HTTPImages):
+    """Polza's Media API (docs: polza.ai/docs/api-reference/media/create). The answer is the finished picture's link,
+    or a task to poll: GET {base}/media/{id} every `poll_s` until completed, failed or cancelled, within the
+    generation's deadline and the link's timeout. A status request that fails (a 404 race, a 5xx, a timeout, a 429) is
+    asked again at the next poll — the task keeps running and is paid once; only a refused key ends the wait. Z-Image
+    takes no seed: the same prompt asked again draws a new picture (checked live: two identical requests, two
+    different pictures)."""
+
+    name = "polza_media"
+
+    def __init__(self, *args, poll_s: float = 3.0, **kw) -> None:
         super().__init__(*args, **kw)
-        self.resolution = resolution
-        self.headers.setdefault("HTTP-Referer", "https://github.com/verstka")
-        self.headers.setdefault("X-Title", "Verstka")
+        self.poll_s = max(0.5, float(poll_s))
+
+    def _status(self, url: str, deadline: Optional[float]) -> Optional[dict]:
+        """The task's status, or None when this status request failed in a way the next poll may get past."""
+        import httpx
+
+        from verstka.providers.openai_compat import LinkUnavailable, classify_error
+
+        try:
+            r = httpx.get(url, headers={"Authorization": f"Bearer {self.api_key}", **self.headers}, timeout=min(20.0, self._timeout(deadline)))
+        except ImageError:
+            raise
+        except Exception as e:  # noqa: BLE001 - a timeout or a dropped connection: poll again
+            log.info("%s: status request failed (%s), polling again", self.model, str(e)[:120])
+            return None
+        if r.status_code in (401, 403):
+            err = classify_error(_HTTPError(r.status_code, r.text, dict(r.headers)), self.model, self.api_key)
+            if isinstance(err, LinkUnavailable):
+                raise err
+        if r.status_code >= 400:
+            log.info("%s: status request answered %s, polling again", self.model, r.status_code)
+            return None
+        try:
+            obj = r.json()
+        except Exception:  # noqa: BLE001
+            return None
+        return obj if isinstance(obj, dict) else None
 
     def generate(self, prompt: str, *, aspect: str = "4:3", seed: Optional[int] = None, deadline: Optional[float] = None) -> ImageResult:
+        from verstka.providers.openai_compat import TransientError
+
         t0 = time.monotonic()
-        body: dict[str, Any] = {"model": self.model, "prompt": prompt, "n": 1, "aspect_ratio": aspect, "resolution": self.resolution, **self.extra_body}
-        if seed is not None:
-            body["seed"] = int(seed)
-        r = self._post(f"{self.base_url}/images", body, deadline)
-        obj = r.json()
-        cost = None
-        try:
-            cost = float(obj.get("usage", {}).get("cost")) if obj.get("usage", {}).get("cost") is not None else None
-        except (TypeError, ValueError, AttributeError):
-            cost = None
-        return self._result(picture_of(obj, self._fetch), seed, t0, cost)
+        ratio = _known_aspect(aspect)
+        body: dict[str, Any] = {"model": self.model, "input": {"prompt": prompt[:PROMPT_MAX_CHARS], "aspect_ratio": ratio}, **self.extra_body}
+        obj = self._json(self._post(f"{self.base_url}/media", body, deadline))
+        ends = t0 + self.timeout_s
+        task = obj.get("id") if isinstance(obj, dict) else None
+        while isinstance(obj, dict) and obj.get("status") in ("pending", "processing", "queued", "in_progress"):
+            if not task:
+                raise ImageError(f"{self.model}: the task has no id to poll")
+            if time.monotonic() + self.poll_s > min(ends, deadline if deadline is not None else ends):
+                raise ImageError(f"{self.model}: the picture was not ready in time (status {obj.get('status')})")
+            time.sleep(self.poll_s)
+            got = self._status(f"{self.base_url}/media/{task}", deadline)
+            if got is not None:
+                obj = got
+        if isinstance(obj, dict) and obj.get("status") in ("failed", "cancelled"):
+            err = obj.get("error")
+            code = err.get("code") if isinstance(err, dict) else None
+            what = (err.get("message") if isinstance(err, dict) else err) or obj.get("status")
+            msg = f"{self.model}: the picture failed ({code + ': ' if code else ''}{str(what)[:200]})"
+            if code in _TRANSIENT_CODES:
+                raise TransientError(msg)  # the host's passing trouble: the chain asks again
+            raise ImageError(msg)
+        return self._result(picture_of(obj, lambda u: self._fetch(u, deadline)), seed, t0, _usage_rub(obj))
 
 
 class OpenAIImages(_HTTPImages):
-    """The OpenAI-compatible image endpoint: POST {base}/images/generations."""
+    """The OpenAI-compatible image endpoint: POST {base}/images/generations (the final's VK inference)."""
 
     name = "openai_images"
 
     def generate(self, prompt: str, *, aspect: str = "4:3", seed: Optional[int] = None, deadline: Optional[float] = None) -> ImageResult:
         t0 = time.monotonic()
-        w, h = SIZES.get(aspect, SIZES["4:3"])
+        w, h = SIZES[_known_aspect(aspect)]
         body: dict[str, Any] = {"model": self.model, "prompt": prompt, "n": 1, "size": f"{w}x{h}", "response_format": "b64_json", **self.extra_body}
         if seed is not None:
             body["seed"] = int(seed)
-        r = self._post(f"{self.base_url}/images/generations", body, deadline)
-        return self._result(picture_of(r.json(), self._fetch), seed, t0)
-
-
-class HFInference(_HTTPImages):
-    """Hugging Face Inference: POST {base}/models/{model} → the picture itself (or JSON with it)."""
-
-    name = "hf_inference"
-
-    def generate(self, prompt: str, *, aspect: str = "4:3", seed: Optional[int] = None, deadline: Optional[float] = None) -> ImageResult:
-        t0 = time.monotonic()
-        w, h = SIZES.get(aspect, SIZES["4:3"])
-        params: dict[str, Any] = {"width": w, "height": h, **self.extra_body}
-        if seed is not None:
-            params["seed"] = int(seed)
-        r = self._post(f"{self.base_url}/models/{self.model}", {"inputs": prompt, "parameters": params}, deadline)
-        data = r.content if _looks_like_image(r.content) else picture_of(r.json(), self._fetch)
-        return self._result(data, seed, t0)
+        obj = self._json(self._post(f"{self.base_url}/images/generations", body, deadline))
+        return self._result(picture_of(obj, lambda u: self._fetch(u, deadline)), seed, t0, _usage_rub(obj, polza=False))
 
 
 class MockImages:
@@ -277,7 +369,7 @@ class MockImages:
             time.sleep(self.delay_s)
         if self.fail:
             raise ImageError(f"{self.model}: failed on purpose")
-        w, h = SIZES.get(aspect, SIZES["4:3"])
+        w, h = SIZES[_known_aspect(aspect)]
         w, h = w // 4, h // 4
         d = hashlib.sha256(f"{prompt}|{seed}".encode("utf-8")).digest()
         img = Image.new("RGB", (w, h), (d[0], d[1], d[2]))
@@ -289,7 +381,7 @@ class MockImages:
             draw.ellipse((x - r, y - r, x + r, y + r), fill=c)
         buf = io.BytesIO()
         img.save(buf, "PNG")
-        return ImageResult(data=buf.getvalue(), model=self.model, label=self.label, seed=seed, cost_usd=0.0)
+        return ImageResult(data=buf.getvalue(), model=self.model, label=self.label, seed=seed, cost_rub=0.0)
 
 
 @dataclass
@@ -301,10 +393,18 @@ class _Hold:
 
 @dataclass
 class ImageChain:
-    """The links of the `t2i` role in order: the first picture wins."""
+    """The links of the `t2i` role in order: the first picture wins. Every link but the last hands a failure over to
+    the next one at once. The last link — on Polza the only one, Z-Image — rides a passing trouble out instead of
+    switching the pictures off for the rest of the generation: Polza's per-minute cap is waited out, the hosts' own
+    429 gets a growing pause (held only after two in a row), a 402 while parallel requests hold the balance waits for
+    their reserve, a 5xx gets its pause (a 503 its Retry-After) — each while the generation's deadline still leaves a
+    picture's time. A short hold of the last link (a minute window, a pause after congestion) is waited out the same
+    way. Polza's daily cap holds the model until midnight by Moscow time; no money, a refused key or a missing model
+    hold it for 10 or 30 minutes."""
 
     links: list
     holds: dict[int, _Hold] = field(default_factory=dict)
+    strikes: dict[int, int] = field(default_factory=dict)  # failures in a row per link (a success resets them)
     name: str = "chain"
 
     def __post_init__(self) -> None:
@@ -333,39 +433,78 @@ class ImageChain:
             out.append({"model": lk.model, "label": lk.label, "backend": lk.name, "state": state})
         return out
 
+    def _strike(self, i: int) -> int:
+        with self._lock:
+            self.strikes[i] = self.strikes.get(i, 0) + 1
+            return self.strikes[i]
+
     def generate(self, prompt: str, *, aspect: str = "4:3", seed: Optional[int] = None, deadline: Optional[float] = None) -> ImageResult:
-        from verstka.providers.openai_compat import LinkUnavailable, RateLimited, TransientError
+        from verstka.providers.openai_compat import LinkUnavailable, RateLimited, TransientError, _quota_hold
 
         errors: list[str] = []
         live = [(i, lk) for i, lk in enumerate(self.links) if not lk.off]
         if not live:
             raise ImageError("no image model has an API key (t2i role)")
+
+        def room(wait: float) -> bool:
+            # after the wait the generation's deadline still leaves time for a picture
+            return deadline is None or deadline - time.monotonic() > wait + _PICTURE_S
+
         for pos, (i, lk) in enumerate(live):
+            last = pos == len(live) - 1
             with self._lock:
                 h = self.holds.get(i)
-                if h is not None and h.until > time.time():
-                    errors.append(f"{lk.label}: skipped ({h.state}: {h.reason[:80]})")
+                left = (h.until - time.time()) if h is not None else 0.0
+            if left > 0:
+                if last and h is not None and h.state in ("rate", "congested") and left <= _WAIT_MAX_S and room(left):
+                    log.info("t2i link %s: waiting %.0f s for its pause to end", lk.label, left)
+                    time.sleep(left)
+                else:
+                    errors.append(f"{lk.label}: skipped ({h.state if h else 'hold'}: {(h.reason if h else '')[:80]})")
                     continue
-            last = pos == len(live) - 1
-            for attempt in range(2 if last else 1):
+            attempts = 3 if last else 1
+            for attempt in range(attempts):
+                more = last and attempt < attempts - 1
                 try:
-                    return lk.generate(prompt, aspect=aspect, seed=seed, deadline=deadline)
-                except LinkUnavailable as e:
+                    res = lk.generate(prompt, aspect=aspect, seed=seed, deadline=deadline)
+                    with self._lock:
+                        self.strikes.pop(i, None)
+                    return res
+                except LinkUnavailable as e:  # no money, a refused key, no such model: a long hold
                     self._hold(i, e.state or "error", HOLDS.get(e.state or "error", 60.0), str(e))
                     errors.append(f"{lk.label}: {e}")
                     break
                 except RateLimited as e:
-                    self._hold(i, "rate", min(float(e.retry_after or HOLDS["rate"]), 900.0), str(e))
                     errors.append(f"{lk.label}: {e}")
-                    break
-                except TransientError as e:
-                    errors.append(f"{lk.label}: {e}")
-                    if attempt == 0 and last and (deadline is None or deadline - time.monotonic() > 20):
-                        time.sleep(2.0)
+                    if e.daily:  # Polza's daily cap of the model: until its Retry-After or midnight by Moscow time
+                        self._hold(i, "quota", _quota_hold(e), str(e))
+                        break
+                    if e.upstream:  # the hosts' own limit: a growing pause, a hold only after two in a row
+                        n = self._strike(i)
+                        wait = min(2.0 ** (attempt + 1), 8.0)
+                        if n < 2 and more and room(wait):
+                            time.sleep(wait)
+                            continue
+                        if n >= 2:
+                            self._hold(i, "congested", HOLDS["congested"], str(e))
+                        break
+                    wait = min(float(e.retry_after or 20.0), 65.0)  # Polza's per-minute cap: its window ends soon
+                    if more and room(wait):
+                        time.sleep(wait)
                         continue
-                    self._hold(i, "congested", HOLDS["congested"], str(e))
+                    self._hold(i, "rate", wait, str(e))
                     break
-                except ProviderError as e:
+                except TransientError as e:  # a 5xx, a timeout, a failed task, the balance held by parallel requests
+                    errors.append(f"{lk.label}: {e}")
+                    reserve = bool(getattr(e, "reserve", False))
+                    wait = min(max(2.0 ** (attempt + 1), float(getattr(e, "retry_after", None) or 0.0), _RESERVE_WAIT_S if reserve else 0.0), 15.0)
+                    if more and room(wait):
+                        time.sleep(wait)
+                        continue
+                    if not reserve and self._strike(i) >= 2:
+                        self._hold(i, "congested", HOLDS["congested"], str(e))
+                    break
+                except ProviderError as e:  # this picture failed (moderation, no picture in the answer): no hold
                     errors.append(f"{lk.label}: {e}")
                     break
         raise ImageError("; ".join(errors)[:600] or "no picture")
@@ -377,18 +516,17 @@ class ImageChain:
 
 
 def build_image_link(spec: dict, timeout_s: float = 90.0) -> Any:
-    backend = (spec.get("backend") or "openrouter_images").lower()
+    backend = (spec.get("backend") or "polza_media").lower()
     if backend == "mock":
         return MockImages(model=spec.get("model", "mock-t2i"), label=spec.get("label"), delay_s=float(spec.get("delay_s", 0) or 0), fail=bool(spec.get("fail")))
-    kw = dict(label=spec.get("label"), timeout_s=float(spec.get("timeout_s", timeout_s)), extra_body=spec.get("extra_body"), headers=spec.get("headers"),
-              price_per_image=spec.get("price_per_image"))
-    if backend == "openrouter_images":
-        return OpenRouterImages(spec.get("model") or "", spec.get("base_url") or "https://openrouter.ai/api/v1", spec.get("api_key") or "", resolution=str(spec.get("resolution", "1K")), **kw)
+    kw = dict(label=spec.get("label"), timeout_s=float(spec.get("timeout_s", timeout_s)), extra_body=spec.get("extra_body"), headers=spec.get("headers"))
+    if backend == "polza_media":
+        return PolzaMedia(spec.get("model") or "", spec.get("base_url") or "https://polza.ai/api/v1", spec.get("api_key") or "", poll_s=float(spec.get("poll_s", 3.0) or 3.0), **kw)
     if backend == "openai_images":
-        return OpenAIImages(spec.get("model") or "", spec.get("base_url") or "https://api.openai.com/v1", spec.get("api_key") or "", **kw)
-    if backend == "hf_inference":
-        return HFInference(spec.get("model") or "", spec.get("base_url") or "https://router.huggingface.co/hf-inference", spec.get("api_key") or "", **kw)
-    raise ImageError(f"unknown t2i backend {backend!r}")
+        # no endpoint (VK_INFERENCE_BASE_URL unset): the link is off like one without a key
+        base = spec.get("base_url") or ""
+        return OpenAIImages(spec.get("model") or "", base, (spec.get("api_key") or "") if base else "", **kw)
+    raise ImageError(f"unknown t2i backend {backend!r} (polza_media, openai_images or mock)")
 
 
 def build_image_provider(spec: Optional[dict], timeout_s: float = 90.0) -> Optional[ImageChain]:

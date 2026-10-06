@@ -114,10 +114,11 @@ def test_cut_off_answer_is_asked_again_shorter_with_more_room(finish):
     assert p.json_mode and second.get("response_format") == {"type": "json_object"}
 
 
-def test_room_is_capped_by_the_link():
-    p, client = provider([answer(CUT, "length"), answer(GOOD)], max_tokens_cap=2000)
-    p.complete(MSGS, schema=FactsExtraction, max_tokens=1800)
-    assert [c["max_tokens"] for c in client.calls] == [1800, 2000]
+def test_the_room_of_the_second_request_is_capped():
+    # twice the room, but never more than the ceiling of a retried cut-off answer
+    p, client = provider([answer(CUT, "length"), answer(GOOD)])
+    p.complete(MSGS, schema=FactsExtraction, max_tokens=6000)
+    assert [c["max_tokens"] for c in client.calls] == [6000, 8192]
 
 
 def test_always_cut_off_fails_instead_of_returning_an_empty_answer():

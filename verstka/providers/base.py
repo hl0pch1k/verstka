@@ -23,12 +23,13 @@ class ChatMessage:
 class Usage:
     prompt_tokens: int = 0
     completion_tokens: int = 0
-    cost_usd: Optional[float] = None
+    # what the call cost in rubles: Polza puts it in every answer (usage.cost_rub); None when the host does not say
+    cost_rub: Optional[float] = None
 
     def add(self, other: "Usage") -> "Usage":
         cost = None
-        if self.cost_usd is not None or other.cost_usd is not None:
-            cost = (self.cost_usd or 0.0) + (other.cost_usd or 0.0)
+        if self.cost_rub is not None or other.cost_rub is not None:
+            cost = (self.cost_rub or 0.0) + (other.cost_rub or 0.0)
         return Usage(self.prompt_tokens + other.prompt_tokens, self.completion_tokens + other.completion_tokens, cost)
 
 
@@ -40,7 +41,7 @@ class CompletionResult:
     model: str
     attempts: int = 1
     raw_json: Any = None
-    # human name of the link that answered («Qwen3.8-27B (Groq)»): two hosts may serve the same model id
+    # human name of the link that answered («Qwen3.6-27B» when the backup did)
     label: Optional[str] = None
 
 

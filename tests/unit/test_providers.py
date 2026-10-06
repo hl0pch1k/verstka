@@ -50,30 +50,34 @@ def test_registry_loads_mock_backend(tmp_path):
         reg.get("t2i")
 
 
-def test_registry_builds_openai_compat_without_network(monkeypatch):
+def test_registry_builds_a_polza_link_and_an_openai_compat_endpoint_without_network(monkeypatch):
     monkeypatch.setenv("TEST_KEY", "sk-test")
-    cfg = {"roles": {"llm": {"backend": "openai_compat", "model": "qwen/qwen3.8-27b", "api_key": "${TEST_KEY}"}}}
+    cfg = {"roles": {"llm": {"backend": "polza", "model": "qwen/qwen3.8-27b", "api_key": "${TEST_KEY}"}}}
     assert expand_env(cfg)["roles"]["llm"]["api_key"] == "sk-test"
     reg = ProviderRegistry.from_config(cfg)
     p = reg.get("llm")
-    assert p.name == "openai_compat" and p.model == "qwen/qwen3.8-27b" and p.api_key == "sk-test"
+    assert p.name == "polza" and p.model == "qwen/qwen3.8-27b" and p.api_key == "sk-test" and p.base_url == "https://polza.ai/api/v1"
+    # an OpenAI-compatible endpoint without its address (VK_INFERENCE_BASE_URL unset) is off, never a call to nowhere
+    vk = ProviderRegistry.from_config({"roles": {"llm": {"backend": "openai_compat", "model": "qwen3.8-27b", "base_url": "", "api_key": "k"}}}).get("llm")
+    assert vk.name == "openai_compat" and vk.off
 
 
 def test_rate_limits_wait_per_minute_and_fail_fast_when_the_day_is_spent(monkeypatch):
-    """Free model tiers (OpenRouter: 20 req/min, 50 req/day): a per-minute 429 is waited out without spending an
-    attempt; a spent daily quota fails fast for every later call so the pipeline drops to its deterministic steps."""
+    """Polza's own caps on a model (a minute, a day — 429 with Retry-After): a per-minute 429 is waited out without
+    spending an attempt; a spent daily cap fails fast for every later call so the pipeline drops to its deterministic
+    steps."""
     from verstka.providers import openai_compat as oc
     from verstka.providers.base import ChatMessage, ProviderError
 
     sleeps: list[float] = []
     monkeypatch.setattr(oc.time, "sleep", lambda s: sleeps.append(s))
-    p = oc.OpenAICompatProvider(model="qwen/qwen3.8-27b:free", base_url="https://example.invalid/v1", api_key="sk-test-123456789", max_attempts=2)
+    p = oc.OpenAICompatProvider(model="qwen/qwen3.8-27b", base_url="https://example.invalid/v1", api_key="sk-test-123456789", max_attempts=2)
     calls = {"n": 0}
 
     def minute_then_ok(messages, temperature, max_tokens, want_json, deadline=None):
         calls["n"] += 1
         if calls["n"] <= 3:
-            raise oc.RateLimited("429 rate limit exceeded: free-models-per-min", retry_after=30)
+            raise oc.RateLimited("429 Достигнут минутный лимит запросов к модели. Повторите позже.", retry_after=30)
         return "ok", oc.Usage(1, 1)
 
     monkeypatch.setattr(p, "_call", minute_then_ok)
@@ -81,28 +85,28 @@ def test_rate_limits_wait_per_minute_and_fail_fast_when_the_day_is_spent(monkeyp
     assert sleeps == [30, 30, 30] and calls["n"] == 4  # three waits, the two real attempts untouched
 
     def daily(messages, temperature, max_tokens, want_json, deadline=None):
-        raise oc.RateLimited("429 Rate limit exceeded: free-models-per-day", daily=True)
+        raise oc.RateLimited("429 Достигнут дневной лимит запросов к модели. Повторите позже.", retry_after=9000, daily=True)
 
     monkeypatch.setattr(p, "_call", daily)
     import pytest
 
     with pytest.raises(ProviderError):
         p.complete([ChatMessage(role="user", content="hi")])
-    # the quota of the account's free models is spent (per pool since the fallback chain, not per account)
+    # the model's daily cap is spent: this model is held (Polza's caps are per model)
     assert oc.status.blocked(p.health)[0] == "quota"
     oc.status.reset()
-    assert oc._rate_limit_info(RuntimeError("Error code: 429 - free-models-per-day")).daily
-    assert not oc._rate_limit_info(RuntimeError("Error code: 429 - too many requests per minute")).daily
+    assert oc._rate_limit_info(RuntimeError("Error code: 429 - Достигнут дневной лимит запросов к модели")).daily
+    assert not oc._rate_limit_info(RuntimeError("Error code: 429 - Достигнут минутный лимит запросов к модели")).daily
     assert oc._rate_limit_info(RuntimeError("Error code: 500")) is None
 
 
 def test_json_mode_is_dropped_when_the_backend_garbles_it(monkeypatch):
-    """Some hosts break structured output under response_format=json_object (OpenRouter free Qwen: values start with
-    ': ', keys come back empty) while the same model answers clean JSON without it. The first invalid answer in JSON
-    mode switches the provider to plain mode for the rest of the run; the schema is in the prompt anyway."""
+    """Some hosts break structured output under response_format=json_object (values start with ': ', keys come back
+    empty) while the same model answers clean JSON without it. The first invalid answer in JSON mode switches the
+    provider to plain mode for the rest of the run; the schema is in the prompt anyway."""
     from verstka.providers import openai_compat as oc
 
-    p = oc.OpenAICompatProvider(model="qwen/qwen3.8-27b:free", base_url="https://example.invalid/v1", api_key="sk-test-json")
+    p = oc.OpenAICompatProvider(model="qwen/qwen3.8-27b", base_url="https://example.invalid/v1", api_key="sk-test-json")
     seen: list[bool] = []
 
     def garbled_in_json_mode(messages, temperature, max_tokens, want_json, deadline=None):
@@ -136,7 +140,7 @@ def test_a_generation_deadline_bounds_waits_and_requests(monkeypatch):
 
     def congested(messages, temperature, max_tokens, want_json, deadline=None):
         got["deadline"] = deadline
-        raise oc.RateLimited("429 temporarily rate-limited upstream", retry_after=30)
+        raise oc.RateLimited("429 Достигнут минутный лимит запросов к модели", retry_after=30)
 
     monkeypatch.setattr(inner, "_call", congested)
     bound = reg.with_deadline(_time.monotonic() + 10)
@@ -155,20 +159,21 @@ def test_a_generation_deadline_bounds_waits_and_requests(monkeypatch):
 
 
 def test_upstream_congestion_fails_fast_instead_of_waiting_out_the_budget(monkeypatch):
-    """OpenRouter's free Qwen «temporarily rate-limited upstream» is congestion on the host, not our per-minute cap:
-    waiting 20 s six times per call spent two minutes of every deck and still got nothing. Two such answers in a
-    row mark the endpoint congested for a while — every call fails at once and the deterministic steps take over."""
+    """The hosts' own 429 passed on by Polza («Провайдер модели ограничил частоту запросов», no Retry-After) is
+    congestion, not our per-minute cap: waiting it out spent minutes of every deck and still got nothing. Two such
+    answers in a row mark the model congested for a while — every call fails at once and the deterministic steps take
+    over."""
     from verstka.providers import openai_compat as oc
     from verstka.providers.base import ChatMessage, ProviderError
 
     sleeps: list[float] = []
     monkeypatch.setattr(oc.time, "sleep", lambda s: sleeps.append(s))
-    p = oc.OpenAICompatProvider(model="qwen/qwen3.8-27b:free", base_url="https://example.invalid/v1", api_key="sk-congested-1", max_attempts=3)
+    p = oc.OpenAICompatProvider(model="qwen/qwen3.8-27b", base_url="https://example.invalid/v1", api_key="sk-congested-1", max_attempts=3)
     calls = {"n": 0}
 
     def congested(messages, temperature, max_tokens, want_json, deadline=None):
         calls["n"] += 1
-        raise oc.RateLimited("Error code: 429 - qwen/qwen3.8-27b:free is temporarily rate-limited upstream", retry_after=None)
+        raise oc.RateLimited("Error code: 429 - Провайдер модели ограничил частоту запросов. Повторите через несколько секунд.", retry_after=None)
 
     monkeypatch.setattr(p, "_call", congested)
     with pytest.raises(ProviderError, match="congested"):
@@ -177,7 +182,7 @@ def test_upstream_congestion_fails_fast_instead_of_waiting_out_the_budget(monkey
     with pytest.raises(ProviderError, match="congested"):
         p.complete([ChatMessage(role="user", content="again")])
     assert calls["n"] == 2  # the next call does not even knock
-    assert oc._rate_limit_info(RuntimeError("Error code: 429 - temporarily rate-limited upstream")).upstream
-    assert not oc._rate_limit_info(RuntimeError("Error code: 429 - rate limit exceeded: free-models-per-min")).upstream
+    assert oc._rate_limit_info(RuntimeError("Error code: 429 - Провайдер модели ограничил частоту запросов")).upstream
+    assert not oc._rate_limit_info(RuntimeError("Error code: 429 - Достигнут минутный лимит запросов к модели")).upstream
     assert oc.status.blocked(p.health)[0] == "congested"  # the breaker is per (account, model) now
     oc.status.reset()

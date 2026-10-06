@@ -60,7 +60,7 @@ export function PictureCard({ pic, run, progress, message, busy, configured, onS
     : own
       ? "Вставьте фото в PowerPoint: щёлкните по месту → «Рисунок»"
       : pic.why ? pic.why.charAt(0).toUpperCase() + pic.why.slice(1) : null;
-  const blockedTitle = busy && !working ? "Агент занят — дождитесь конца" : !configured ? "Модель изображений не подключена: ключ — в файле .env" : undefined;
+  const blockedTitle = busy && !working ? "Агент занят — дождитесь конца" : !configured ? "Модель изображений не подключена" : undefined;
   const canGenerate = configured && !busy && !working;
 
   return (
@@ -154,7 +154,7 @@ export function PictureCard({ pic, run, progress, message, busy, configured, onS
           </div>
         )
       )}
-      {!configured && !generated && !own && <p className="mt-2 text-caption text-zinc-500">Чтобы генерировать изображения, впишите ключ в файл .env и перезапустите сервер.</p>}
+      {!configured && !generated && !own && <p className="mt-2 text-caption text-zinc-500">Модель изображений не подключена — место оставлено под ваше фото.</p>}
     </section>
   );
 }

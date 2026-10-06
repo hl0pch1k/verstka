@@ -1,7 +1,7 @@
 // The model's state in words: the one grey line on the Create screen (only when no model can answer) and the notice
 // above a deck built without the model. The advice comes from the server (verstka/api/model_status.py);
 // whatever an older server still sends about money, keys, config files or providers never reaches the screen.
-import type { Generation, ModelLinkState, ModelsStatus, PlannerInfo, Variant } from "../types";
+import type { Generation, ModelsStatus, PlannerInfo, Variant } from "../types";
 import { plural } from "./utils";
 
 export type Tone = "ok" | "neutral" | "retry" | "warn" | "off";
@@ -11,59 +11,13 @@ export interface Indicator { text: string; tone: Tone; hint: string | null; retr
 /** «$5–10», «1–5 ₽»: a number range never breaks across lines (word joiners around the dash). */
 const keepRanges = (s: string) => s.replace(/(\d)–(\d)/g, "$1\u2060–\u2060$2");
 
-const hhmm = (d: Date) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-
-const MIN = 60_000;
-const HOUR = 3_600_000;
-const DAY = 86_400_000;
-const MSK = 3 * HOUR; // Moscow is UTC+3 all year
-
-/** When a paused model is tried again, as the reader should see it: rounded up to the next whole minute, so the time
- * shown is never already past while the button still waits. The one exception is OpenRouter's daily reset: the
- * seconds are rounded twice on the way (the server and the countdown), so a quota reset a moment before or after
- * 00:00 UTC is 00:00 UTC — never «после 02:59» for the reset at 03:00 in Moscow. */
-export function resetAt(seconds: number, now: number, state?: ModelLinkState | null): number {
-  const at = now + Math.max(0, seconds) * 1000;
-  if (state === "quota") {
-    const midnight = Math.round(at / DAY) * DAY; // the nearest 00:00 UTC
-    if (Math.abs(at - midnight) <= 2 * MIN) return midnight;
-  }
-  return Math.ceil(at / MIN) * MIN;
-}
-
-function dayWord(at: number, now: number, dayOf: (t: number) => number, timeZone?: string): string {
-  const d = dayOf(at) - dayOf(now);
-  if (d <= 0) return "сегодня";
-  if (d === 1) return "завтра";
-  return new Date(at).toLocaleDateString("ru-RU", { day: "numeric", month: "long", ...(timeZone ? { timeZone } : {}) });
-}
-
-const localDay = (t: number) => Math.floor((t - new Date(t).getTimezoneOffset() * MIN) / DAY);
-const moscowDay = (t: number) => Math.floor((t + MSK) / DAY);
-
-/** «через 2 мин», «через 3 ч», «завтра после 03:00» (OpenRouter's daily quota resets at 00:00 UTC = 03:00 in Moscow:
- * the same words as the server's advice, whatever the browser's time zone). */
-export function waitText(seconds: number, state?: ModelLinkState | null, now: number = Date.now()): string {
-  const s = Math.max(0, seconds);
-  if (state === "quota" || s >= 6 * 3600) {
-    const at = resetAt(s, now, state);
-    if (state === "quota" && at % DAY === 0) return `${dayWord(at, now, moscowDay, "Europe/Moscow")} после 03:00`;
-    return `${dayWord(at, now, localDay)} после ${hhmm(new Date(at))}`;
-  }
-  const mins = Math.max(1, Math.ceil(s / 60));
-  if (mins < 60) return `через ${mins} мин`; // 3541–3599 s is «через 1 ч», never «через 60 мин»
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-  return m >= 5 ? `через ${h} ч ${m} мин` : `через ${h} ч`;
-}
-
 /** The line on the Create screen, or null: nothing is said while any model can answer (ok, unknown, retry, fallback)
  * or when the person switched the model off. `enabled`: the person left the model switched on. */
 export function modelIndicator(st: ModelsStatus | null, enabled: boolean, _retryIn?: number): Indicator | null {
   if (!st) return null;
   if (!st.configured || st.state === "off") return { text: "Без модели · быстрая сборка", tone: "off", hint: null, retry: null };
   if (!enabled) return null;
-  // the owner's fix (an account, a key, a project) is the line's tooltip: the line itself stays plain
+  // the owner's fix (the balance, the key, a model id) is the line's tooltip: the line itself stays plain
   if (st.state === "down") return { text: "Модель недоступна · соберу без неё", tone: "off", hint: st.owner ?? null, retry: null };
   return null;
 }
@@ -75,7 +29,7 @@ export function skeletonDeck(g: Generation, v: Variant): boolean {
 }
 
 /** Words a person never reads about the model: money, balances, keys, `.env`, config files, provider names. */
-const TECH = /\$|₽|пополн|(?<![а-яё])сч[её]т|средств|баланс|(?<![а-яё])ключ|\.env|groq|openrouter|cloud\.ru|configs\/|\.ya?ml|файл\S* настроек/i;
+const TECH = /\$|₽|пополн|(?<![а-яё])сч[её]т|средств|баланс|(?<![а-яё])ключ|\.env|polza|openrouter|groq|cloud\.ru|бесплатн|configs\/|\.ya?ml|файл\S* настроек/i;
 const RETRY_LATER = "Модель временно недоступна — соберите позже";
 const UNAVAILABLE = "Модель недоступна";
 /** The server's own «Модель недоступна.» is the same words. */
@@ -95,9 +49,8 @@ const TIMER = /пауз|через\s+\d/i;
 const untimed = (x: string) =>
   cap(x.replace(/^пауза[^—–-]*[—–-]\s*/i, "").replace(/\s+через\s+\d+(?:[.,]\d+)?\s*(?:мин|ч|сек|с)[а-яё]*(?:\s+\d+\s*мин[а-яё]*)?/gi, ""));
 
-/** The advice without its technical sentences (an older server's «… или пополните OpenRouter на $5–10», «Проверьте
- * ключ …», «Пауза после сбоя закончилась…»): the clause about money goes, the rest of the sentence stays. Null when
- * nothing plain is left. */
+/** The advice without its technical sentences («… или пополните баланс», «Проверьте ключ …», «Пауза после сбоя
+ * закончилась…»): the clause about money goes, the rest of the sentence stays. Null when nothing plain is left. */
 export function plainAdvice(text: string | null | undefined): string | null {
   if (!text) return null;
   const t = text.replace(/[,;]?\s+или\s+(?:пополните|включите|проверьте|выберите)[\s\S]*?(?=[.!?…](?:\s|$))/gi, "");
@@ -126,7 +79,7 @@ function modelFailed(g: Generation): boolean {
 const cap = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 
 /** Why the model did not plan, as a plain clause for any screen («сервер модели перегружен»), or null. The server's
- * `reason` names providers and money («на счёте OpenRouter нет средств»): it is shown only when it has none of that. */
+ * `reason` may name providers and money («на балансе Polza нет средств»): it is shown only when it has none of that. */
 export function reasonWords(p: PlannerInfo | null | undefined): string | null {
   const code = p?.reason_code ?? "";
   if (!code || code === "off") return null;
@@ -176,7 +129,7 @@ export interface DeckNotice {
   tone: "warn" | "info";
   /** Offer «Показать текст»: the text the agent wrote from the topic. */
   showText: boolean;
-  /** What the server's owner has to fix (a key, an account, a Cloud.ru project), as the notice's tooltip, or null. */
+  /** What the server's owner has to fix (the Polza balance, the key, a model id), as the notice's tooltip, or null. */
   owner?: string | null;
 }
 
@@ -184,10 +137,10 @@ export interface DeckNotice {
  * (the server sends `retryable`; this is for older payloads). */
 const RETRYABLE = new Set(["congested", "rate", "quota", "timeout", "unreachable", "rejected"]);
 
-/** The live advice already offers the deck's own fix (an older server's word about a top-up): saying it twice adds nothing. */
+/** The live advice already offers the deck's own fix (a word about a top-up): saying it twice adds nothing. */
 function sameFix(liveAdvice: string, deckAdvice: string): boolean {
   if (liveAdvice === deckAdvice) return true;
-  const topUp = /пополните (?:счёт )?OpenRouter/i;
+  const topUp = /пополните (?:баланс|счёт)/i;
   return topUp.test(deckAdvice) && topUp.test(liveAdvice);
 }
 
@@ -225,7 +178,7 @@ function offerOf(p: PlannerInfo | null | undefined, live?: LiveModel | null): { 
     // rebuild the notice does not offer, so the deck's own fix is the whole help
     if (!retry && st.retryable !== false) return { retry, wait, help: p?.advice ?? null };
     // the live advice says when to build again (or what the paused links need); the deck's own fix stays after it
-    const fix = !reasonFits && p?.advice && !sameFix(st.advice, p.advice) ? p.advice : null;
+    const fix = !reasonFits && p?.advice && !isUnavailable(p.advice) && !sameFix(st.advice, p.advice) ? p.advice : null;
     return { retry, wait, help: fix ? `${st.advice} ${fix}` : st.advice };
   }
   // while a model answers, the deck's word about the paid model stays after the live advice
@@ -307,5 +260,15 @@ export function deckNotice(g: Generation, v: Variant, total: number, live?: Live
 /** One line for the chat after a deck whose plan no model wrote because the model failed. */
 export function silentNote(g: Generation): string {
   if (!modelFailed(g)) return "";
-  return sentences([whyNoModel(g.planner), "Собрал по вашему тексту без модели", plainAdvice(g.planner?.advice)], true);
+  // «Модель сейчас недоступна. … Модель недоступна.»: the title already says it
+  const help = plainAdvice(g.planner?.advice);
+  return sentences([whyNoModel(g.planner), "Собрал по вашему тексту без модели", isUnavailable(help) ? null : help], true);
+}
+
+/** When building the same deck again helps, the server's plain advice («Соберите ещё раз через минуту.»), else null
+ * (a reason that needs a fix: no money, a refused key, a missing model; a refusal the same text gets again). */
+export function retryWords(p: PlannerInfo | null | undefined): string | null {
+  if (!(p?.retryable ?? RETRYABLE.has(p?.reason_code ?? ""))) return null;
+  const help = plainAdvice(p?.advice);
+  return help && !isUnavailable(help) ? help : null;
 }

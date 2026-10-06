@@ -97,7 +97,8 @@ def color_name(hex_: str) -> str:
 
 
 def palette_words(pal: Palette) -> str:
-    names = [f"{color_name(h)} #{h}" for h in pal.colors]
+    """The palette in words only («deep navy blue, bright teal, white»): a colour code in the prompt is drawn as text."""
+    names = [color_name(h) for h in pal.colors]
     return ", ".join(dict.fromkeys(names))
 
 

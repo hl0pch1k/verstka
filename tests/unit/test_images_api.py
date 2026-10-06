@@ -111,7 +111,8 @@ def test_errors_say_why(built, monkeypatch):
             mod._fix_active.discard((gid, "structured"))
     monkeypatch.setattr(mod, "image_provider", lambda: None)
     r = c.post(f"/api/generations/{gid}/structured/slides/{n}/image", json={})
-    assert r.status_code == 503 and ".env" in r.json()["detail"]
+    # a person reads only that pictures are off; what to set is in the server's log
+    assert r.status_code == 503 and r.json()["detail"] == "Модель изображений не подключена"
 
 
 def test_the_helper_chat_changes_a_picture_on_request(built):
@@ -125,3 +126,21 @@ def test_the_helper_chat_changes_a_picture_on_request(built):
     # a slide without a picture or a place: the chat says so instead of starting a job
     r = c.post("/api/chat", json={"session_id": "pic", "message": "нарисуй другое изображение на слайде 1", "generation_id": gid, "strategy": "structured"}).json()
     assert not r["actions"] and "нет изображения" in r["reply"]
+
+
+@pytest.mark.parametrize(
+    "error, states, words",
+    [
+        ("Z-Image: no credits (402) on the balance (Недостаточно средств)", ["no_credits"], "модель изображений недоступна"),
+        ("Z-Image: access refused (401/403): HTTP 401, check the key", [], "модель изображений недоступна"),
+        # Polza's wording names both windows; the chain told the daily cap by its Retry-After and holds the model
+        ("Z-Image: Достигнут минутный (дневной) лимит запросов к модели", ["quota"], "после полуночи по московскому времени"),
+        ("Z-Image: the request was refused by moderation (403)", ["ready"], "отказалась рисовать"),
+        ("Z-Image: 502 server error, congested upstream", ["ready"], "чуть позже"),
+    ],
+)
+def test_a_failed_picture_change_says_when_trying_again_helps(error, states, words):
+    from verstka.api.app import _picture_failure_reply
+
+    reply = _picture_failure_reply(error, states)
+    assert words in reply and reply.startswith("Не получилось") and "слайд остался как был" in reply

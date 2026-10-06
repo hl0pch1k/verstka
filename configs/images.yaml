@@ -1,4 +1,4 @@
-# Pictures inside slides — the `t2i` role of configs/models.yaml (open weights, Apache 2.0 / MIT, ≤ 20B).
+# Pictures inside slides — the `t2i` role of configs/models.yaml: Z-Image on Polza (open weights, Apache 2.0, ≈ 10B ≤ 20B).
 # What is generated: the places the author described in the text («[Место под изображение: экран панели управления]»).
 # Never by itself: a place the author keeps for their own photo («Фото я добавлю самостоятельно», «не заполняй это
 # место сгенерированным изображением») and a place for a chart, a table or a video without its data — only the
@@ -8,7 +8,6 @@ max_per_generation: 8    # different pictures per generation; the variants share
 concurrency: 3           # pictures asked side by side
 timeout_s: 90            # one picture; the generation's 5 minutes bound it too
 wait_s: 75               # how long the export waits for the pictures still being made (the places stay free past it)
-resolution: "1K"         # OpenRouter's size tier: about a megapixel
 max_side_px: 1600        # the picture in the deck, its longer side (cropped to the place's exact proportions first)
 jpeg_quality: 88
 
@@ -29,13 +28,18 @@ default_style: photo
 
 prompt:
   # {subject} — what the picture shows (the author's words, or the model's English for them), {context} — the slide,
-  # {style} — the style line below, {colors} — the palette in words, {rules} — what a slide picture never has
+  # {style} — the style line below, {colors} — the palette in words, {rules} — what a slide picture never has.
+  # Z-Image draws text well — and draws every quoted title, value or colour code it is given: the prompt carries no
+  # headline, no deck title and no HEX codes, only words for what to draw (the live run of 2026-10-06 put the slide's
+  # headline and «#00D3E6» into the pictures)
   template: "{subject}. {context}. {style}. Colour palette: {colors}. {rules}."
-  context: "An image for a presentation slide «{headline}» in a deck about «{deck}»"
-  rules: "No text, no letters, no numbers, no captions, no logos, no watermarks"
+  max_chars: 1000          # Polza's limit on a picture's prompt: the context goes first, then the end of the subject
+  context: "An image for a business presentation slide"
+  rules: "The picture contains no text of any kind: no words, no letters, no numbers, no labels, no captions, no logos, no watermarks, no colour codes"
   styles:
     photo: "Professional editorial photograph, natural soft light, clean uncluttered composition, realistic detail"
     illustration: "Clean modern flat vector illustration, simple geometric shapes, soft gradients, generous negative space"
-    screen: "A clean modern software interface on a laptop or tablet screen, simple blocks and charts instead of readable text, soft studio light"
+    # a screen invites pseudo-text and digits: pictograms and progress bars stand for every value, a chart is one curve
+    screen: "Clean modern flat vector illustration of a software interface on a laptop screen: pictograms and progress bars instead of any text, every chart is a single smooth curve without axes, ticks, numbers or gridlines; minimalist, soft shadows, generous negative space"
   # the person's wish on «Заменить изображение»: without a text model it leads the subject
   wish: "{wish}. Subject: {subject}"

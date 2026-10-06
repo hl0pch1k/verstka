@@ -34,7 +34,7 @@ def test_no_dotenv_switch_skips_implicit_files_only(tmp_path, monkeypatch):
     assert load_env(force=True) == []  # the suite's own guard (tests/conftest.py)
     assert load_env([env]) == [env] and os.environ["VERSTKA_TEST_EXPLICIT"] == "yes"
     monkeypatch.delenv("VERSTKA_TEST_EXPLICIT", raising=False)
-    assert "OPENROUTER_API_KEY" not in os.environ  # the repo's .env never leaks into tests
+    assert "POLZA_API_KEY" not in os.environ  # the repo's .env never leaks into tests
 
 
 def test_linux_previews_see_the_bundled_play_font(tmp_path, monkeypatch):

@@ -5,10 +5,44 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-# hermetic: importing verstka loads .env, and a real OPENROUTER_API_KEY there must not turn tests into network calls
+# hermetic: importing verstka loads .env, and a real POLZA_API_KEY there must not turn tests into network calls; Polza's
+# public catalog of hosts is not read either (openai_compat.excluded_hosts)
 os.environ["VERSTKA_NO_DOTENV"] = "1"
-os.environ.pop("OPENROUTER_API_KEY", None)
-os.environ.pop("VERSTKA_MODELS", None)
+os.environ["VERSTKA_NO_CATALOG"] = "1"
+for _var in ("POLZA_API_KEY", "VERSTKA_MODELS", "VK_INFERENCE_BASE_URL", "VK_INFERENCE_API_KEY", "VK_T2I_MODEL"):
+    os.environ.pop(_var, None)
+
+import ipaddress  # noqa: E402
+import socket  # noqa: E402
+
+_REAL_CONNECT, _REAL_CONNECT_EX = socket.socket.connect, socket.socket.connect_ex
+
+
+def _offline(address) -> None:
+    """Tests never reach the network: a forgotten fake (a keyed client cached by another test, a catalog read) fails
+    loudly here instead of sending a request to polza.ai. Local sockets (loopback, unix) stay open."""
+    if not isinstance(address, tuple):
+        return  # a unix socket
+    host = str(address[0])
+    try:
+        local = ipaddress.ip_address(host.split("%")[0]).is_loopback
+    except ValueError:
+        local = host == "localhost"
+    if not local:
+        raise ConnectionRefusedError(f"tests run offline: a connection to {host} was blocked (tests/conftest.py)")
+
+
+def _connect(self, address):
+    _offline(address)
+    return _REAL_CONNECT(self, address)
+
+
+def _connect_ex(self, address):
+    _offline(address)
+    return _REAL_CONNECT_EX(self, address)
+
+
+socket.socket.connect, socket.socket.connect_ex = _connect, _connect_ex
 
 import pytest
 from PIL import Image

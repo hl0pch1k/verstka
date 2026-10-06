@@ -654,7 +654,7 @@ function Deck({ generation }: { generation: Generation }) {
   const noticeHelp = notice?.help ? plainNotice(cap(notice.help), modelLabels) : "";
   const noticeBasis = notice ? plainNotice(notice.basis, modelLabels) : "";
   const noticeBody = noticeHelp || noticeBasis;
-  // the owner's fix (a key, an account, a Cloud.ru project) is in the notice's tooltip
+  // the owner's fix (the Polza balance, the key, a model id) is in the notice's tooltip
   const noticeFull = [noticeBasis, noticeHelp, notice?.owner ?? ""].filter(Boolean).join(" ");
   const retryWaits = !!notice && notice.retryWait > 0;
   // writer mode: the text the agent wrote from the topic, in a sheet («Показать текст»)
@@ -907,7 +907,7 @@ function Deck({ generation }: { generation: Generation }) {
                     {shownNotice.showText && <Button size="sm" variant="white" icon={ScrollText} onClick={() => setTextOpen(true)}>Показать текст</Button>}
                     {shownNotice.retry && (
                       // a disabled button shows no tooltip: the wrapper carries it while the model is overloaded
-                      <span title={retryWaits ? "Модель перегружена — попробуйте через минуту" : undefined}>
+                      <span title={retryWaits ? retryWaitTitle(modelStatus?.retry_state) : undefined}>
                         <Button size="sm" variant="white" icon={RotateCcw} loading={submitting} disabled={jobRunning || retryWaits} onClick={() => void rebuild()} title={retryWaits ? undefined : "Собрать ту же презентацию заново"}>
                           Собрать ещё раз
                         </Button>
@@ -1101,6 +1101,14 @@ function DeckSkeleton() {
 /** How long the finished build screen may wait for its deck (the list, the deck, the first slide) before it hands over
  *  anyway (the skeleton then covers the rest). */
 const HANDOFF_WAIT = 4000;
+
+/** Why the rebuild button waits, by the paused model's state (a disabled button shows its wrapper's tooltip). */
+const retryWaitTitle = (state?: string | null) =>
+  state === "quota"
+    ? "Дневной лимит запросов исчерпан — соберите после полуночи по московскому времени"
+    : state === "rate"
+      ? "Слишком много запросов — попробуйте через минуту"
+      : "Модель перегружена — попробуйте через несколько минут";
 
 export function ResultScreen() {
   const { generation, generationLoading, activeJob, activeVariant, setScreen, editText } = useApp();

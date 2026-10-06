@@ -562,7 +562,7 @@ export function CreateScreen() {
                     />
                     <Toggle
                       label="Генерировать изображения"
-                      title={imagesConfigured ? undefined : "Модель изображений не подключена: ключ — в файле .env"}
+                      title={imagesConfigured ? undefined : "Модель изображений не подключена"}
                       hint={!imagesConfigured ? "Места под изображения останутся свободными" : picturesOn ? "По описаниям в тексте, в палитре шаблона" : "Места под изображения останутся свободными"}
                       checked={picturesOn}
                       disabled={busy || !imagesConfigured}

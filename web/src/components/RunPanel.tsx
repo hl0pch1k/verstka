@@ -35,7 +35,10 @@ function DiffView({ d, strategyTitle }: { d: DiffResponse; strategyTitle(name: s
   const rows: Array<{ label: string; from: string; to: string }> = [];
   if (d.diff.strategy) rows.push({ label: "Вариант", from: strategyTitle(d.diff.strategy.from), to: strategyTitle(d.diff.strategy.to) });
   if (d.diff.audit_score) rows.push({ label: "Оценка качества", from: d.diff.audit_score.from === null ? "—" : String(d.diff.audit_score.from), to: d.diff.audit_score.to === null ? "—" : String(d.diff.audit_score.to) });
-  for (const [role, ch] of providers) rows.push({ label: `Модель · ${role}`, from: ch.from ? ch.from.model ?? "—" : "без модели", to: ch.to ? ch.to.model ?? "—" : "без модели" });
+  // a chain is told by its links («Qwen3.8-27B → Qwen3.6-27B»): two runs of the same main model may differ in the rest
+  const named = (x: { model?: string | null; label?: string; chain?: Array<{ label?: string; model?: string; off?: boolean }> } | null) =>
+    x ? (x.chain?.filter((l) => !l.off).map((l) => l.label ?? l.model).join(" → ") || x.label || x.model || "—") : "без модели";
+  for (const [role, ch] of providers) rows.push({ label: `Модель · ${role}`, from: named(ch.from as Parameters<typeof named>[0]), to: named(ch.to as Parameters<typeof named>[0]) });
   for (const [name, ch] of skills) rows.push({ label: `Навык · ${name}`, from: ch.from ? `v${ch.from.version} · ${shortSha(ch.from.sha256)}` : "не участвовал", to: ch.to ? `v${ch.to.version} · ${shortSha(ch.to.sha256)}` : "не участвовал" });
   if (rows.length === 0) return <Notice tone="success" title="Отличий нет" />;
   return (

@@ -22,6 +22,13 @@ console = Console()
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
+def _image_provider(models: Path):
+    """The t2i role of the models config given with --models (the same config as the text models)."""
+    from verstka.images.providers import load_image_provider
+
+    return load_image_provider(models)
+
+
 def _providers(models: Optional[Path], need: bool) -> Optional[ProviderRegistry]:
     if not need:
         return None
@@ -153,6 +160,9 @@ def generate(
             autofix=not no_autofix,
             audit_models=audit_models,
             exports=exports,
+            # «without models» means no model at all: the pictures are off too; --models drives the pictures as well
+            pictures=False if (no_llm and no_vlm) else None,
+            image_provider=_image_provider(models) if models and not (no_llm and no_vlm) else None,
             progress=lambda stage, frac: status.update(f"[{frac:4.0%}] {stage}"),
         )
     console.print(f"[bold]{res.manifest.source_file}[/bold] · template {res.template_id} · {res.seconds}s total")

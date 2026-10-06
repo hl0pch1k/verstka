@@ -68,7 +68,8 @@ def made_from_record(rec: dict, folder: Optional[Path]):
         key=str(rec.get("key") or ""), aspect=str(rec.get("aspect") or "4:3"), path=str(path), prompt=str(rec.get("prompt") or ""),
         style=str(rec.get("style") or ""), subject_by=str(rec.get("subject_by") or "author"), model=str(rec.get("model") or ""),
         model_label=str(rec.get("model_label") or rec.get("model") or ""), seed=int(rec.get("seed") or 0),
-        palette_match=float(rec.get("palette_match") or 0.0), seconds=0.0, cost_usd=None,
+        palette_match=float(rec.get("palette_match") or 0.0), seconds=0.0,
+        cost_rub=float(rec["cost_rub"]) if rec.get("cost_rub") is not None else None,  # paid once, kept through edits
     )
 
 
@@ -139,7 +140,7 @@ def _base_record(p: Pending) -> dict:
 def made_fields(made) -> dict:
     return {
         "key": made.key, "prompt": made.prompt, "style": made.style, "subject_by": made.subject_by, "model": made.model, "model_label": made.model_label,
-        "seed": made.seed, "palette_match": made.palette_match, "seconds": made.seconds, "cost_usd": made.cost_usd, "file": Path(made.path).name,
+        "seed": made.seed, "palette_match": made.palette_match, "seconds": made.seconds, "cost_rub": made.cost_rub, "file": Path(made.path).name,
     }
 
 
@@ -221,10 +222,18 @@ def public_records(records: list[dict]) -> list[dict]:
     return [{k: r.get(k) for k in keep if k in r} for r in records]
 
 
+def _paid(made: list[dict]) -> Optional[float]:
+    """What the pictures cost in rubles, each file once (the variants share them); None when no picture said."""
+    costs = [float(r["cost_rub"]) for r in {r.get("file"): r for r in made}.values() if r.get("cost_rub") is not None]
+    return round(sum(costs), 2) if costs else None
+
+
 def summary(records: list[dict]) -> dict[str, Any]:
     made = [r for r in records if r.get("status") == "generated"]
     return {
         "places": len(records), "generated": len(made), "own": sum(1 for r in records if r.get("own")),
         "models": sorted({r.get("model_label") or r.get("model") for r in made if r.get("model")}),
         "palette_match": round(sum(float(r.get("palette_match") or 0) for r in made) / len(made), 3) if made else None,
+        # the pictures of this variant (the variants share them: the same place, the same picture, paid once)
+        "cost_rub": _paid(made),
     }

@@ -14,4 +14,4 @@
 
 Правка в чате во второй части: «На слайде 9: покажи 87 шаблонов, 99 из 100 и 12 форматов крупными цифрами» — 16 с, переделан только слайд 9 структурного варианта ([`dark-minimalist/structured/edits.json`](dark-minimalist/structured/edits.json)).
 
-В каждой папке — три варианта (`structured`, `visual`, `compact`): `deck.pptx`, `deck.pdf`, `deck.html`, отчёт проверки `audit_report.json`, паспорт запуска `run_manifest.json`, план агента `outline.json` и `planner_raw.json`, подбор макетов `layout_plan.json`; рядом — ход работы агента `agent.json` и параметры генерации `generation.json`. Настройки модели — в [MODELS.md](../../../MODELS.md#сервис-api-модель-и-настройки-демо-прогонов).
+В каждой папке — три варианта (`structured`, `visual`, `compact`): `deck.pptx`, `deck.pdf`, `deck.html`, отчёт проверки `audit_report.json`, паспорт запуска `run_manifest.json`, план агента `outline.json` и `planner_raw.json`, подбор макетов `layout_plan.json`; рядом — ход работы агента `agent.json` и параметры генерации `generation.json`. Настройки модели — в [MODELS.md](../../../MODELS.md#демо-прогоны-в-репозитории-до-перехода-на-polza).

@@ -4,8 +4,8 @@ model is reachable right now (GET /api/models/status). No network probing: only 
 The link states come from `verstka.providers.status.snapshot()` (the fallback chain's own records):
 ok · unknown · congested · rate · quota · no_credits · auth · missing · error · off.
 A reason is read from the contract wording of the chain's errors first (status.PHRASES), then from bare status codes;
-its words are about the link that failed (a free or the paid OpenRouter model, Groq, Cloud.ru): the chain names each
-failed link by its label («[Qwen3.8-27B (Groq)] qwen/qwen3.8-27b: …»), looked up in the active chain.
+its words are about the link that failed (the main model or the backup on Polza): the chain names each failed link
+by its label («[Qwen3.8-27B] qwen/qwen3.8-27b: …»), looked up in the active chain.
 
 The strings a person reads (`summary`, `hint`, `advice`) say only what to do: build again now, later or without the
 model. They never mention money, balances, keys, `.env`, config paths or provider plans — those stay in the machine
@@ -33,19 +33,13 @@ _LEGACY_CODES = {"no_key": "auth", "gone": "missing"}  # reason codes of the fir
 
 
 def model_label(model: Optional[str]) -> Optional[str]:
-    """«qwen/qwen3.8-27b:free» → «Qwen3.8-27B», «google/gemma-4-31b-it:free» → «Gemma 4 31B»."""
+    """«qwen/qwen3.8-27b» → «Qwen3.8-27B», «qwen/qwen3.6-27b» → «Qwen3.6-27B»."""
     if not model:
         return None
     name = model.split("/")[-1].split(":")[0]
     name = re.sub(r"-(instruct|it|chat|fp8|fp4|awq|gguf|\d{4})$", "", name, flags=re.I)
     name = re.sub(r"-(instruct|it|chat)(?=-|$)", "", name, flags=re.I)
     low = name.lower()
-    if low.startswith("gemma"):
-        parts = [p for p in re.split(r"[-_]", name) if p]
-        head = "Gemma" + (f" {parts[1]}" if len(parts) > 1 and parts[1].isdigit() else "")
-        rest = parts[2:] if len(parts) > 1 and parts[1].isdigit() else parts[1:]
-        size = "-".join(p.upper() for p in rest)
-        return f"{head} {size}".strip()
     if low.startswith("qwen"):
         name = "Qwen" + re.sub(r"-vl(?=-|$)", "-VL", name[4:], flags=re.I)
         return re.sub(r"(?<=[-_])(a?\d+(?:\.\d+)?)b\b", lambda m: m.group(1).upper() + "B", name, flags=re.I)
@@ -53,14 +47,10 @@ def model_label(model: Optional[str]) -> Optional[str]:
 
 
 def short_label(label: Optional[str]) -> Optional[str]:
-    """«Qwen3.8-27B (бесплатно)» → «Qwen3.8-27B»: the indicator line stays short."""
+    """«Qwen3.8-27B (VK)» → «Qwen3.8-27B»: the indicator line stays short."""
     if not label:
         return label
     return re.sub(r"\s*\([^()]*\)\s*$", "", label).strip() or label
-
-
-def is_free(model: Optional[str]) -> bool:
-    return bool(model) and model.endswith(":free")
 
 
 def hostname(base_url: Optional[str]) -> Optional[str]:
@@ -74,30 +64,23 @@ def hostname(base_url: Optional[str]) -> Optional[str]:
         return None
 
 
-def _is_openrouter(host: Optional[str]) -> bool:
-    return service(host) == "OpenRouter"
-
-
-_SERVICES = (("openrouter.ai", "OpenRouter"), ("groq.com", "Groq"), ("cloud.ru", "Cloud.ru"))
+_SERVICES = (("polza.ai", "Polza"),)
 
 
 def service(host: Optional[str]) -> Optional[str]:
-    """«openrouter.ai» → «OpenRouter», «api.groq.com» → «Groq»; None for another host (VK, a local server)."""
+    """«polza.ai» → «Polza»; None for another host (the final's VK inference)."""
     h = (host or "").lower()
     return next((name for domain, name in _SERVICES if h == domain or h.endswith("." + domain)), None)
 
 
 @dataclasses.dataclass(frozen=True)
 class FailedLink:
-    """The link a reason is about: the words depend on it (a free OpenRouter model, a paid one, Groq, Cloud.ru)."""
+    """The link a reason is about: its model and the service it runs on (Polza, or None for another host). `stale`:
+    a link of an older config (a deck built before Polza) — no fix is asked of today's owner for it."""
 
     model: Optional[str] = None
-    service: Optional[str] = None  # OpenRouter | Groq | Cloud.ru | None (another or unknown host)
-    free: bool = False
-
-    @property
-    def openrouter_free(self) -> bool:
-        return self.service == "OpenRouter" and self.free
+    service: Optional[str] = None
+    stale: bool = False
 
 
 # ---------------------------------------------------------------------------- reasons from warnings
@@ -120,13 +103,16 @@ _HOLD_NUMBERS = re.compile(r"skipped for \d+(?:\.\d+)? s(?: more)?|retry in \d+(
 # wording (older messages, raw provider errors), checked in this order after the hold times are cut out
 _RULES: list[tuple[str, re.Pattern]] = [
     ("off", re.compile(r"not configured \(no api key\)|no api key configured", re.I)),
-    ("quota", re.compile(r"daily request quota|free-models-per-day|per-day|per day|daily quota|requests per day", re.I)),
-    ("rate", re.compile(r"per-minute|per minute|free-models-per-min|requests per minute", re.I)),
-    ("no_credits", re.compile(r"no credits|\b402\b|insufficient credits|more credits|payment required|insufficient_quota|credit balance|key limit exceeded|spending limit", re.I)),
-    ("auth", re.compile(r"access refused|\b401\b|\b403\b|check the key|invalid api key|no auth credentials|unauthori[sz]ed|forbidden", re.I)),
-    ("missing", re.compile(r"model not available|no such model|model not found|not a valid model|does not exist|no endpoints? (found|serves)|\b404\b", re.I)),
-    # congestion is a real upstream 429 or a 5xx: «Provider returned error» alone wraps any upstream error (a 400 too)
-    ("congested", re.compile(r"congested|temporarily rate-limited|rate-limited upstream|overloaded|service unavailable|bad gateway|server error|error code:?\s*5\d\d\b|\b5\d\d\s+(internal|bad gateway|service|gateway)", re.I)),
+    # Polza's 403 also refuses one request by moderation: the key is fine, the same request gets the same answer
+    ("error", re.compile(r"refused by moderation|модерац|moderat|content (?:policy|filter)|flagged", re.I)),
+    # Polza's own caps on a model: «Достигнут дневной (минутный) лимит запросов к модели»
+    ("quota", re.compile(r"daily request quota|дневн\w* лимит|per-day|per day|daily quota|requests per day", re.I)),
+    ("rate", re.compile(r"per-minute|per minute|минутн\w* лимит|requests per minute", re.I)),
+    ("no_credits", re.compile(r"no credits|\b402\b|insufficient_balance|недостаточно средств|payment required|лимит расходов|spending limit", re.I)),
+    ("auth", re.compile(r"access refused|\b401\b|\b403\b|check the key|invalid api key|api_key_revoked|unauthori[sz]ed|forbidden", re.I)),
+    ("missing", re.compile(r"model not available|no such model|model not found|not a valid model|does not exist|\b404\b", re.I)),
+    # congestion: the hosts' own 429 («Провайдер модели ограничил частоту запросов»), no host for the model, a 5xx
+    ("congested", re.compile(r"congested|провайдер\w* модели ограничил|нет доступных провайдеров|noprovidersformodel|overloaded|service unavailable|bad gateway|server error|error code:?\s*5\d\d\b|\b5\d\d\s+(internal|bad gateway|service|gateway)", re.I)),
     ("timeout", re.compile(r"time budget|timed out|timeout|deadline|\b408\b", re.I)),
     ("unreachable", re.compile(r"connection error|connecterror|connection refused|name or service|nodename|network is unreachable|ssl|could not connect", re.I)),
     ("error", re.compile(r"error code:?\s*4(?!29|08)\d\d\b|bad request", re.I)),  # a 400: retrying does not help
@@ -136,6 +122,9 @@ _RULES: list[tuple[str, re.Pattern]] = [
 _PRIORITY = ["auth", "no_credits", "quota", "missing", "congested", "rate", "timeout", "unreachable", "rejected", "error", "off"]
 # warnings that come from a model step (the rest are layout notes: «заголовок набран 36 пт»)
 _MODEL_STEP = re.compile(r"^(outline_planner|data_extractor|fact_checker|repair pass|own model plan failed|no LLM provider|slide_designer|deck_architect|design_critic|revision of slide|analyst: data_extractor)|provider|model", re.I)
+# a step's warning that carries a model's own failure (one model without a chain — the final's VK inference — fails
+# with its message alone: «deck_writer failed: qwen3.8-27b: no valid completion … access refused (401/403) …»)
+_MODEL_FAILURE = re.compile("|".join(re.escape(p) for p in CONTRACT_PHRASES.values()) + r"|no valid completion|error code:?\s*\d{3}|time budget of the generation", re.I)
 # the planner's own step: its failure (or a rejected answer) is why a deck was planned by the rules
 # (the planning agent's: no slide designed by a model, the storyline failed or was skipped; writer mode: the text of a
 # topic was not written — the deck is the topic's skeleton)
@@ -143,14 +132,15 @@ _PLANNER_STEP = re.compile(r"^(outline_planner (failed|answer rejected)|no LLM p
 # these steps run only on a plan the model wrote (a failed repair pass keeps it): an older deck with one of them and
 # without a planner failure was planned by the model
 _MODEL_PLANNED = re.compile(r"^(fact_checker|repair pass)", re.I)
-_SKIPPED_FOR = re.compile(r"skipped for (\d+(?:\.\d+)?) s", re.I)
-# the label the chain puts before each failed link's message: «[Qwen3.8-27B (Groq)] qwen/qwen3.8-27b: …» («again: »
-# before it on the second pass)
+# the label the chain puts before each failed link's message: «[Qwen3.8-27B] qwen/qwen3.8-27b: …» («again: » before
+# it on the second pass)
 _LINK_LABEL = re.compile(r"^\s*(?:again:\s*)?\[([^\[\]]{1,80})\]\s*")
 # a reason the same deck built again can get past: congestion, a per-minute cap, a daily quota once it resets, the
 # time budget, the connection, an answer that did not pass the check. A key, a missing model, an empty account or a
 # 400 need a fix first — the notice says what to fix instead of offering a rebuild
 RETRYABLE_REASONS = frozenset({"congested", "rate", "quota", "timeout", "unreachable", "rejected"})
+# the passing reasons in the order they clear: a minute, a few minutes, …, the day
+_CLEARS_FIRST = ["rate", "congested", "timeout", "unreachable", "rejected", "quota"]
 
 
 def _segment_code(text: str) -> str:
@@ -160,13 +150,16 @@ def _segment_code(text: str) -> str:
     if hits:
         return min(hits)[1]
     if "request quota of the account" in low and not re.search(r"per-minute|per minute|per-day|per day|daily", low):
-        # an older wording of both caps: a pause under 5 minutes is the per-minute cap, a longer one the daily quota
-        m = _SKIPPED_FOR.search(text)
+        # an older wording of both caps (decks built before Polza): a pause under 5 minutes is the per-minute cap,
+        # a longer one the daily quota
+        m = re.search(r"skipped for (\d+(?:\.\d+)?) s", text, re.I)
         return "rate" if m and float(m.group(1)) < 300 else "quota"
     bare = _HOLD_NUMBERS.sub(" ", text)
     low = bare.lower()
-    if re.search(r"\b429\b", bare) and re.search(r"upstream|provider returned error|temporarily", low) and not re.search(r"per-minute|per minute|per-day|per day|free-models-per", low):
-        return "congested"  # a 429 passed on from the host behind OpenRouter
+    if re.search(r"\b429\b", bare) and re.search(r"провайдер\w* модели|upstream|provider", low) and not re.search(r"минутн|дневн|per-minute|per minute|per-day|per day", low):
+        return "congested"  # the hosts' own 429, passed on by Polza
+    if "rate-limited upstream" in low:
+        return "congested"  # the same, in OpenRouter's words (decks built before Polza)
     for code, rx in _RULES:
         if rx.search(bare):
             return code
@@ -185,7 +178,7 @@ def _best(codes: Iterable[Optional[str]]) -> Optional[str]:
 
 def _classified(text: str) -> list[tuple[str, str]]:
     """(reason code, the part of the text it comes from) per failed link of one warning; [] when not about the model."""
-    if not isinstance(text, str) or not text or text.startswith("grounding:") or not _MODEL_STEP.search(text):
+    if not isinstance(text, str) or not text or text.startswith("grounding:") or not (_MODEL_STEP.search(text) or _MODEL_FAILURE.search(text)):
         return []  # (grounding: what the plan lost for not being in the brief — quoted slide text, not a failure)
     low = text.lower()
     if low.startswith("no llm provider"):
@@ -223,12 +216,8 @@ def reason_code(warnings: Iterable[str]) -> Optional[str]:
     return _reason(warnings)[0]
 
 
-# a model id in front of its error: «qwen/qwen3.8-27b:free: congested upstream», «qwen3.5:9b: …»
+# a model id in front of its error: «qwen/qwen3.8-27b: per-minute request cap …»
 _MODEL_ID = re.compile(r"(?:^|(?<=[\s;:,(]))([A-Za-z0-9_.\-]+(?:/[A-Za-z0-9_.\-]+)?(?::[A-Za-z0-9_.\-]+)?):\s")
-_GROQ_TEXT = re.compile(r"groq|\((?:tpd|rpd|tpm|rpm)\)|service tier|on_demand", re.I)
-# the service a label's tag names: «Qwen3.8-27B (Groq)», «Qwen3 32B (Cloud.ru)», «Gemma 4 31B (бесплатно)»
-_LABEL_TAGS = (("groq", "Groq"), ("cloud.ru", "Cloud.ru"), ("openrouter", "OpenRouter"), ("бесплатно", "OpenRouter"))
-_OPENROUTER_TEXT = re.compile(r"openrouter|provider returned error|free-models-per", re.I)
 
 
 def _model_in(text: str) -> Optional[str]:
@@ -246,13 +235,9 @@ def _model_in(text: str) -> Optional[str]:
 class ChainContext:
     """What the active config offers — the advice depends on it."""
 
-    openrouter: bool = True  # the chain goes through OpenRouter
-    free: bool = True  # the first link the chain asks is a free model (when the failed link is not known)
-    paid_label: Optional[str] = None  # a paid OpenRouter link of the active config («Qwen3.8-27B»), None if there is none
-    groq_label: Optional[str] = None  # a Groq link waiting for its key (state off)
     primary_label: Optional[str] = None
     config: Optional[str] = None
-    # model, label, host, free and state of every link: which of them a failure is about
+    # model, label, host and state of every link: which of them a failure is about
     links: list = dataclasses.field(default_factory=list)
 
     @property
@@ -261,84 +246,59 @@ class ChainContext:
         active = [link for link in self.links if link.get("state") != "off"] or self.links
         if active:
             return link_of(active[0])
-        return FailedLink(service="OpenRouter" if self.openrouter else None, free=self.free)
+        return FailedLink(service="Polza")
 
 
 def link_of(link: dict) -> FailedLink:
-    return FailedLink(model=link.get("model"), service=service(link.get("host")), free=bool(link.get("free")))
+    return FailedLink(model=link.get("model"), service=service(link.get("host")))
 
 
 def chain_context(links: list[dict], config: Optional[str] = None) -> ChainContext:
-    active = [link for link in links if link.get("state") != "off"]
     if not links:
         return ChainContext(config=config)
+    active = [link for link in links if link.get("state") != "off"]
     pool = active or links
-    paid = next((link for link in active if not link.get("free") and _is_openrouter(link.get("host"))), None)
-    groq = next((link for link in links if link.get("state") == "off" and service(link.get("host")) == "Groq"), None)
     return ChainContext(
-        openrouter=any(_is_openrouter(link.get("host")) for link in pool),
-        free=bool(pool[0].get("free")),
-        paid_label=short_label(paid.get("label")) if paid else None,
-        groq_label=short_label(groq.get("label")) if groq else None,
         primary_label=short_label(pool[0].get("label")),
         config=config,
-        links=[{k: link.get(k) for k in ("model", "label", "host", "free", "state")} for link in links],
+        links=[{k: link.get(k) for k in ("model", "label", "host", "state")} for link in links],
     )
 
 
-def _labelled(text: str, model: Optional[str], ctx: ChainContext) -> Optional[FailedLink]:
-    """The link the chain named by its label: looked up in the active chain, else (a label of an older config) the
-    service its tag names."""
-    m = _LINK_LABEL.match(text)
-    if not m:
-        return None
-    label = m.group(1).strip()
-    hit = next((link for link in ctx.links if link.get("label") == label), None)
-    if hit is not None:
-        return link_of(hit)
-    tag = re.search(r"\(([^()]*)\)\s*$", label)
-    where = next((name for word, name in _LABEL_TAGS if tag and word in tag.group(1).lower()), None)
-    if where is None:
-        return None
-    free = is_free(model) or (tag is not None and tag.group(1).strip().lower() == "бесплатно")
-    return FailedLink(model=model, service=where, free=free)
+# a failure of a service Verstka no longer uses (a deck built before Polza, its warning without a link's label)
+_OLD_SERVICE_RE = re.compile(r"openrouter|groq|cloud\.ru|foundation-models|free-models-per-day|:free\b|huggingface", re.I)
 
 
 def failed_link(text: Optional[str], ctx: Optional[ChainContext] = None) -> FailedLink:
-    """The link a failure's text is about: the link the chain named by its label; for older texts without one, its
-    model id looked up in the active chain (the same id may run on OpenRouter and on Groq: Groq's own wording tells
-    them apart), else what the text itself says."""
+    """The link a failure's text is about: the link the chain named by its label, else its model id looked up in the
+    active chain, else the first link the chain asks."""
     ctx = ctx or ChainContext()
     if not text:
         return ctx.primary
+    if _OLD_SERVICE_RE.search(text):
+        # about no service of today (the same model id may be on Polza now): no fix is asked of the owner for it
+        return FailedLink(model=_model_in(text), stale=True)
+    m = _LINK_LABEL.match(text)
+    if m:
+        label = m.group(1).strip()
+        hit = next((link for link in ctx.links if link.get("label") == label), None)
+        if hit is not None:
+            return link_of(hit)
+        tag = re.search(r"\(([^()]*)\)\s*$", label)
+        if ctx.links and tag and tag.group(1).strip().lower() not in ("polza", ""):
+            # a link of an older config (a deck built before Polza: «[Qwen3.8-27B (Groq)] …», «(бесплатно)»): about
+            # no service of today, so no fix is asked of the owner for it
+            return FailedLink(model=_model_in(text[m.end():]) or _model_in(text), stale=True)
     model = _model_in(text)
-    named = _labelled(text, model, ctx)
-    if named is not None:
-        return named
-    groq = bool(_GROQ_TEXT.search(text))
     same = [link for link in ctx.links if model and link.get("model") == model]
     same = [link for link in same if link.get("state") != "off"] or same  # a link without a key never failed
-    if len(same) > 1:
-        same = [link for link in same if (service(link.get("host")) == "Groq") == groq] or same
     if same:
         return link_of(same[0])
-    if groq:
-        where: Optional[str] = "Groq"
-    elif "cloud.ru" in text.lower():
-        where = "Cloud.ru"
-    elif is_free(model) or _OPENROUTER_TEXT.search(text):
-        where = "OpenRouter"
-    elif model is None:
+    if model is None:
         return ctx.primary  # «time budget of the generation is spent»: about the chain, not one link
-    else:
-        where = ctx.primary.service  # a model of an older config: most likely on the same service
-    return FailedLink(model=model, service=where, free=is_free(model) if model else ctx.primary.free)
-
-
-def _quota_reset_words(now: Optional[float] = None) -> str:
-    """OpenRouter's free quota resets at 00:00 UTC = 03:00 by Moscow time."""
-    utc_hour = time.gmtime(time.time() if now is None else now).tm_hour
-    return "сегодня после 03:00" if utc_hour >= 21 else "завтра после 03:00"
+    if ctx.links:
+        return FailedLink(model=model)  # not a model of the active chain: an older config's, its service is not today's
+    return FailedLink(model=model, service=ctx.primary.service)  # no chain known: the service of today
 
 
 # what kept the model from planning, for anyone who reads the API (`planner.reason`): the same words as the UI's own
@@ -367,33 +327,19 @@ def reason_text(code: Optional[str], ctx: Optional[ChainContext] = None, who: Op
 
 def reason_detail(code: Optional[str], ctx: Optional[ChainContext] = None, who: Optional[FailedLink] = None) -> Optional[str]:
     """The technical clause for the server log: what kept the model from planning — about the link that failed (`who`),
-    naming its service («ключ доступа к Groq не подходит»). Never sent to the API or the screen."""
+    naming its service («на балансе Polza нет средств»). Never sent to the API or the screen."""
     ctx = ctx or ChainContext()
     who = who or ctx.primary
     where = who.service
     if code is None:
         return None
-    if code == "congested":
-        if who.openrouter_free:
-            return "бесплатные модели OpenRouter сейчас перегружены"
-        if where == "OpenRouter":
-            return "платная модель на OpenRouter сейчас перегружена"
-        return f"сервер {where} сейчас перегружен" if where else "сервер модели сейчас перегружен"
-    if code == "rate":
-        if who.openrouter_free:
-            return "превышен лимит бесплатных запросов OpenRouter в минуту"
-        return f"превышен лимит запросов {where} в минуту" if where else "превышен лимит запросов к модели в минуту"
-    if code == "quota":
-        if who.openrouter_free:
-            return "исчерпан дневной лимит бесплатных запросов OpenRouter"
-        return f"исчерпан дневной лимит запросов {where}" if where else "исчерпан дневной лимит запросов к модели"
-    if code == "no_credits":
-        if where == "OpenRouter":
-            return "на счёте OpenRouter нет средств для платной модели"
-        return f"на счёте {where} нет средств" if where else "на счёте сервиса модели нет средств"
     texts = {
+        "congested": f"хосты модели на {where} сейчас перегружены" if where else "сервер модели сейчас перегружен",
+        "rate": f"исчерпан минутный лимит запросов {where} к модели" if where else "превышен лимит запросов к модели в минуту",
+        "quota": f"исчерпан дневной лимит запросов {where} к модели (обновится в полночь по Москве)" if where else "исчерпан дневной лимит запросов к модели",
+        "no_credits": f"на балансе {where} нет средств или исчерпан лимит расходов ключа" if where else "на счёте сервиса модели нет средств",
         "auth": f"ключ доступа к {where} не подходит" if where else "ключ доступа к модели не подходит",
-        "missing": f"эта модель сейчас недоступна на {where}" if where else "эта модель сейчас недоступна на сервере",
+        "missing": f"этой модели сейчас нет на {where}" if where else "эта модель сейчас недоступна на сервере",
         "timeout": "время на модель вышло — она отвечала слишком долго",
         "unreachable": f"не удалось связаться с сервером {where}" if where else "не удалось связаться с сервером модели",
         "rejected": "модель ответила, но её план не прошёл проверку",
@@ -402,32 +348,25 @@ def reason_detail(code: Optional[str], ctx: Optional[ChainContext] = None, who: 
     return texts.get(code, "модель вернула ошибку")
 
 
-# Cloud.ru answers 403 «Project not found» when the key's project is gone, suspended or out of money (gate 4: the key
-# still authenticates, every chat completion is refused)
-_PROJECT_GONE_RE = re.compile(r"project\s+not\s+found|project\s+(?:is\s+)?(?:blocked|suspended|disabled|inactive|archived)|проект\s+не\s+найден", re.I)
-
-
 def owner_reason(code: Optional[str], who: Optional[FailedLink] = None, text: Optional[str] = None) -> Optional[str]:
-    """What the server's owner has to fix, in one plain sentence — only for a reason no rebuild gets past (an account,
-    a key, a project, a model id); None otherwise. The one place a service is named: the owner runs it (gate 4 G4-21:
-    Cloud.ru's 403 «Project not found» read as a generic «Модель недоступна»)."""
+    """What the server's owner has to fix, in one plain sentence — only for a reason no rebuild gets past (the balance,
+    the key, a model id); None otherwise. The one place the service is named: the owner runs it."""
     if code not in ("no_credits", "auth", "missing"):
         return None
-    where = (who.service if who else None) or ("Cloud.ru" if text and "cloud.ru" in text.lower() else None)
-    if where == "Cloud.ru" and text and _PROJECT_GONE_RE.search(text):
-        return "Cloud.ru не находит проект модели (403 «Project not found»): проверьте в личном кабинете Cloud.ru, что проект существует, не заблокирован и на его балансе есть средства."
+    where = (who.service if who else None) or ("Polza" if text and "polza" in text.lower() else None)
     if code == "no_credits":
+        if where == "Polza":
+            return "На балансе Polza нет средств или исчерпан лимит расходов ключа: пополните баланс или поднимите лимит ключа в консоли Polza."
         return f"На счёте {where} нет средств для модели: пополните баланс." if where else "На счёте сервиса модели нет средств: пополните баланс."
     if code == "auth":
-        if where == "Cloud.ru":
-            return "Cloud.ru отказал в доступе (401/403): проверьте ключ API и проект в личном кабинете Cloud.ru."
-        return f"{where} отказал в доступе (401/403): проверьте ключ API." if where else "Сервис модели отказал в доступе (401/403): проверьте ключ API."
+        if where == "Polza":
+            return "Polza отказала в доступе (401/403): проверьте ключ POLZA_API_KEY в .env — его могли отозвать."
+        return f"{where} отказала в доступе (401/403): проверьте ключ API." if where else "Сервис модели отказал в доступе (401/403): проверьте ключ API."
     return f"Модели нет на {where} (404): проверьте её название в настройках." if where else "Модели нет на сервере (404): проверьте её название в настройках."
 
 
 def owner_reasons(pairs: Iterable[tuple[Optional[str], Optional[FailedLink], Optional[str]]]) -> Optional[str]:
-    """Every link's fix for the owner, each once (a paid account without money and a Cloud.ru project not found are
-    two things to fix): «На счёте OpenRouter нет средств… Cloud.ru не находит проект модели…»."""
+    """Every link's fix for the owner, each once (no money on the balance and a model gone are two things to fix)."""
     out: list[str] = []
     for code, who, text in pairs:
         r = owner_reason(code, who, text)
@@ -440,20 +379,21 @@ def owner_reasons(pairs: Iterable[tuple[Optional[str], Optional[FailedLink], Opt
 UNAVAILABLE = "Модель недоступна."
 
 
-def advice(code: Optional[str], ctx: Optional[ChainContext] = None, who: Optional[FailedLink] = None) -> Optional[str]:
+_MODERATION_RE = re.compile(r"refused by moderation|модерац|moderat|content (?:policy|filter)|flagged", re.I)
+
+
+def advice(code: Optional[str], ctx: Optional[ChainContext] = None, who: Optional[FailedLink] = None, text: Optional[str] = None) -> Optional[str]:
     """What helps, in one sentence (None when nothing needs doing). Used in the notice above a deck: short, no extras.
     It says when to build again; a reason that needs the server's owner (money, a key, a model id) is «Модель
-    недоступна.» — the details stay in `reason_code` and the log."""
-    ctx = ctx or ChainContext()
-    who = who or ctx.primary
+    недоступна.» — the details stay in `reason_code` and the log. `text`: the failure itself (a refusal of moderation
+    is told apart from a request the model cannot take)."""
     if code in ("congested", "timeout"):
         return "Соберите ещё раз через несколько минут."
     if code == "rate":
         return "Соберите ещё раз через минуту."
     if code == "quota":
-        if who.openrouter_free:
-            return f"Соберите ещё раз {_quota_reset_words()}."
-        return "Соберите ещё раз, когда обновится дневной лимит запросов."
+        # Polza's daily caps reset at midnight by Moscow time
+        return "Соберите ещё раз после полуночи по московскому времени."
     if code in ("no_credits", "auth", "missing"):
         return UNAVAILABLE
     if code == "unreachable":
@@ -461,6 +401,8 @@ def advice(code: Optional[str], ctx: Optional[ChainContext] = None, who: Optiona
     if code == "rejected":
         return "Соберите ещё раз — модель отвечает по-разному."
     if code == "error":
+        if text and _MODERATION_RE.search(text):
+            return "Та же сборка получит тот же отказ: перефразируйте текст."
         # a 400 (a text too long for the model, a parameter it does not take): the same inputs get the same answer
         return "Та же сборка получит ту же ошибку: сократите текст."
     return None
@@ -504,21 +446,30 @@ def planner_info(outline: Optional[dict], run_manifest: Optional[dict], *, use_m
             return {**base, "planned_by": None, "by_model": None}
     else:
         code, failed_text = _reason(warnings)
-    ctx = ctx or ChainContext(free=is_free(tried))
+    ctx = ctx or ChainContext()
     who = failed_link(failed_text, ctx) if failed_text else ctx.primary
+    found = [(c, t) for w in warnings if isinstance(w, str) for c, t in _classified(w)]
+    # Polza's caps are per model: when the main model's day is spent but the backup only had to wait, building again
+    # helps soon — the advice (and the button) follow the failure that clears first; the title keeps the most telling
+    when, when_text = code, failed_text
+    passing = [(c, t) for c, t in found if c in _CLEARS_FIRST]
+    if code in _CLEARS_FIRST and passing:
+        when, when_text = min(passing, key=lambda ct: _CLEARS_FIRST.index(ct[0]))
     if code not in (None, "off"):
         detail = reason_detail(code, ctx, who)
         log.info("model did not plan (%s): %s", code, detail, extra={"reason_detail": detail})
+    today = [(c, failed_link(t, ctx), t) for c, t in found]
+    today = [(c, w, t) for c, w, t in today if not w.stale]
     return {
         **base,
         "planned_by": planned_by or "rules",
         "by_model": False,
         "reason_code": code,
         "reason": reason_text(code, ctx, who),
-        "advice": advice(code, ctx, who) if code not in (None, "off") else None,
-        "retryable": code in RETRYABLE_REASONS,
+        "advice": advice(when, ctx, who, when_text) if code not in (None, "off") else None,
+        "retryable": when in RETRYABLE_REASONS,
         "steady": None,
-        "owner": owner_reasons([(code, who, failed_text)] + [(c, failed_link(t, ctx), t) for w in warnings if isinstance(w, str) for c, t in _classified(w)]) if code not in (None, "off") else None,
+        "owner": owner_reasons(([] if who.stale else [(code, who, failed_text)]) + today) if code not in (None, "off") else None,
     }
 
 
@@ -557,7 +508,7 @@ def _as_dict(item: Any) -> dict:
     return {k: getattr(item, k) for k in ("model", "label", "host", "state", "available", "last_ok", "last_error", "until", "roles") if hasattr(item, k)}
 
 
-_SECRET_RE = re.compile(r"(sk-[A-Za-z0-9_\-]{3})[A-Za-z0-9_\-*]{6,}|(Bearer\s+)\S+|(gsk_[A-Za-z0-9]{0,3})[A-Za-z0-9]{6,}")
+_SECRET_RE = re.compile(r"(sk-[A-Za-z0-9_\-]{3})[A-Za-z0-9_\-*]{6,}|(Bearer\s+)\S+|(pza_[A-Za-z0-9]{0,3})[A-Za-z0-9_\-]{6,}")
 
 
 def _redact(text: Any) -> Optional[str]:
@@ -602,13 +553,12 @@ def _norm_link(raw: dict, hosts: Optional[dict] = None) -> dict:
         "short_label": short_label(label),
         "host": hostname(host),
         "state": state,
-        # False while the link's breaker (or its account's quota block) is open: the chain skips it until `until`
+        # False while the link's hold is on: the chain skips it until `until`
         "available": bool(available),
         "last_ok": raw.get("last_ok"),
         "last_error": last_error,
         "last_error_at": raw.get("last_error_at"),
         "until": round(until) if until and state != "off" else None,
-        "free": bool(raw["free"]) if isinstance(raw.get("free"), bool) else is_free(model),
         "roles": [str(r) for r in roles] if isinstance(roles, (list, tuple)) else [],
     }
 
@@ -748,7 +698,7 @@ def _hint(primary: dict, ctx: ChainContext, *, backup: bool) -> Optional[str]:
 
 
 def summarize(links: list[dict], *, configured: bool, ctx: Optional[ChainContext] = None) -> dict:
-    """Overall state + one short line («Qwen3.8-27B · доступна», «Qwen3.8-27B · недоступна», «Gemma 4 31B · запасная
+    """Overall state + one short line («Qwen3.8-27B · доступна», «Qwen3.8-27B · недоступна», «Qwen3.6-27B · запасная
     модель») + the hint. The failed link's reason stays in `links[].state` / `last_error`: never in these words.
 
     `advice` is what the notice above a failed deck says now (the live button's words agree with it); `retryable`:
@@ -791,7 +741,8 @@ def summarize(links: list[dict], *, configured: bool, ctx: Optional[ChainContext
         **none,
         "state": "down",
         "summary": f"{pname} · недоступна",
-        "hint": _hint(primary, ctx, backup=False),
+        # the line under the indicator says what the advice says: about the link whose pause ends first
+        "hint": advice(_link_code(blocking), ctx, link_of(blocking), blocking.get("last_error")),
         "retry_in": soonest["until"] if soonest else None,
         "retry_state": soonest["state"] if soonest else None,
         "advice": advice(_link_code(blocking), ctx, link_of(blocking)),
@@ -823,8 +774,7 @@ def active_chain_context(registry: Any, *, config: Optional[str]) -> ChainContex
     """The ChainContext of the running server's config (for the advice in the notice above a deck)."""
     links, _ = collect_links(registry)
     if not links:
-        host = hostname(llm_config(registry).get("base_url"))
-        return ChainContext(openrouter=_is_openrouter(host) if host else True, config=config)
+        return ChainContext(config=config)
     return chain_context(links, config)
 
 

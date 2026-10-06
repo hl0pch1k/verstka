@@ -1,23 +1,24 @@
-"""Fallback chain: one role served by several open models, tried in order.
+"""Fallback chain: one role served by several open models, tried in order — on Polza the main model (Qwen3.8-27B)
+and the backup (Qwen3.6-27B).
 
-Free hosts of open models get congested for hours («temporarily rate-limited upstream»), a paid model answers 402
-until the account is topped up, a model id disappears. The chain asks its links in turn and returns the first valid
-answer. Every link but the last is asked with `fail_fast`: whatever goes wrong, the next link answers at once; the last
-link keeps the short pause on congestion and the backoff of a single provider. A link on hold (status.py) is skipped
-without a request, a link without an API key ("off") is skipped silently; a chain with exactly one link that has a
-key calls it as a single provider (its own attempts and waits, no long holds). When at least one link failed only
-because of congestion, 5xx / timeouts or a per-minute cap, every other failed link is on hold anyway (402, 404,
-401/403, spent quota) and at least 30 s of the generation's budget remain, the chain makes one more pass after a
-3-5 s pause; a failure that opens no hold (invalid JSON, a plain 4xx) would only repeat, so it rules the pass out.
-When every link is still on hold after that pause, but the earliest hold ends within 30 s (a per-minute cap — Cloud.ru's
-429 ModelArts.81114, a Retry-After, a congestion hold about to end) and the budget leaves that hold plus 30 s, the chain
-waits the hold out instead of giving up; at most three passes in all. Only then does the caller get a ProviderError,
-and the pipeline takes its deterministic steps as before; its `retry_in` (seconds, or None) says when the earliest hold
-ends, so a caller with a short deadline of its own (the writer's titles call) can wait and ask once more.
+Polza moves a request between the hosts of one model by itself, so the chain is for what that does not cover: Polza's
+per-model caps (a minute or a day), every host of a model failing at once, a model that is gone, an answer that does
+not pass the check. The chain asks its links in turn and returns the first valid answer. Every link but the last is
+asked with `fail_fast`: whatever goes wrong, the next link answers at once; the last link keeps the short pause on
+congestion and the backoff of a single provider. A link on hold (status.py) is skipped without a request, a link
+without an API key ("off") is skipped silently; a chain with exactly one link that has a key calls it as a single
+provider (its own attempts and waits, no long holds). When at least one link failed only because of congestion,
+5xx / timeouts or a per-minute cap, every other failed link is on hold anyway (402, 404, 401/403, spent quota) and at
+least 30 s of the generation's budget remain, the chain makes one more pass after a 3-5 s pause; a failure that opens
+no hold (invalid JSON, a plain 4xx) would only repeat, so it rules the pass out. When every link is still on hold after
+that pause, but the earliest hold ends within 30 s (Polza's per-minute cap — its Retry-After —, a congestion hold
+about to end) and the budget leaves that hold plus 30 s, the chain waits the hold out instead of giving up; at most
+three passes in all. Only then does the caller get a ProviderError, and the pipeline takes its deterministic steps as
+before; its `retry_in` (seconds, or None) says when the earliest hold ends, so a caller with a short deadline of its
+own (the writer's titles call) can wait and ask once more.
 
 That error names every link that failed by its label, in brackets before its own message: «all model links failed:
-[Qwen3.8-27B (OpenRouter)] qwen/qwen3.8-27b: no credits (402) …; [Qwen3.8-27B (Groq)] qwen/qwen3.8-27b: access refused
-(401/403) …» — two links may run the same model id, the label (the one status.snapshot() shows) tells them apart.
+[Qwen3.8-27B] qwen/qwen3.8-27b: per-minute request cap …; [Qwen3.6-27B] qwen/qwen3.6-27b: no credits (402) …».
 """
 
 from __future__ import annotations
@@ -104,7 +105,7 @@ class ChainProvider:
         ]
 
     def _on_hold(self, i: int) -> bool:
-        """The link (or its pool) is on hold now: a second pass would skip it without a request."""
+        """The link is on hold now: a second pass would skip it without a request."""
         h = getattr(self.links[i], "health", None)
         return h is not None and status.blocked(h) is not None
 
@@ -113,7 +114,7 @@ class ChainProvider:
         return self._hold_left(i) <= pause
 
     def _hold_left(self, i: int) -> float:
-        """Seconds until the link (or its pool) may be asked again: 0 without a hold."""
+        """Seconds until the link may be asked again: 0 without a hold."""
         h = getattr(self.links[i], "health", None)
         if h is None:
             return 0.0
@@ -193,7 +194,7 @@ class ChainProvider:
             if not any(self._free_after(i, pause) for i in live):
                 # every link is still on hold after the pause: a pass now would only skip them. A hold that ends soon
                 # (a per-minute window of the only working link) is waited out while the budget leaves room for the
-                # answer after it — a short cap of Cloud.ru must not turn the deck into a skeleton
+                # answer after it — a short cap must not turn the deck into a skeleton
                 soonest = self._soonest(live)
                 if soonest > _WAIT_MAX_S or (left is not None and left < soonest + _SECOND_PASS_MIN_S):
                     break

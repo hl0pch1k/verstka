@@ -36,7 +36,7 @@ class Made:
     seed: int
     palette_match: float
     seconds: float
-    cost_usd: Optional[float] = None
+    cost_rub: Optional[float] = None  # what the picture cost (Polza's usage.cost_rub)
 
     def public(self) -> dict:
         return asdict(self)
@@ -121,7 +121,7 @@ class ImageMaker:
         path.write_bytes(P.encode(graded, int(self.cfg.get("jpeg_quality", 88))))
         made = Made(
             key=ask.key(), aspect=aspect, path=str(path), prompt=prompt, style=style, subject_by="model" if subject else "author",
-            model=res.model, model_label=res.label, seed=int(seed), palette_match=match, seconds=round(time.monotonic() - t0, 2), cost_usd=res.cost_usd,
+            model=res.model, model_label=res.label, seed=int(seed), palette_match=match, seconds=round(time.monotonic() - t0, 2), cost_rub=res.cost_rub,
         )
         try:
             (self.folder / f"{name}.json").write_text(json.dumps({**made.public(), "hint": ask.hint, "headline": ask.headline, "wish": ask.wish, "palette": P.describe(self.palette)}, ensure_ascii=False, indent=2), encoding="utf-8")

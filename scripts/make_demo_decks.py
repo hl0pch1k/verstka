@@ -2,7 +2,7 @@
 artefacts) — «три варианта презентации, сгенерированные на одном контенте на трех разных шаблонах».
 
 Usage:
-    python scripts/make_demo_decks.py                 # with models when OPENROUTER_API_KEY is set, else offline
+    python scripts/make_demo_decks.py                 # with models when POLZA_API_KEY is set, else offline
     python scripts/make_demo_decks.py --offline       # force the deterministic mode
     python scripts/make_demo_decks.py --dataset DIR --out examples/outputs --only workspace
 """

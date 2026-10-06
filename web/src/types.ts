@@ -27,18 +27,18 @@ export interface Health {
 }
 
 // ---- models (GET /api/models/status) ------------------------------------------------
-/** A link of the model chain: the primary model first, then the backups.
- * ok — answered last time; unknown — not tried since the server started; congested — the host is overloaded (429
- * upstream / 5xx); rate — the account's per-minute cap (under 90 s); quota — the free daily quota of OpenRouter (until
- * 00:00 UTC); no_credits — 402; auth — the key is refused; missing — no such model; error — anything else; off — its
- * key is not set: skipped, never a failure. */
+/** A link of the model chain: the main model first (Qwen3.8-27B on Polza), then the backup (Qwen3.6-27B).
+ * ok — answered last time; unknown — not tried since the server started; congested — the model's hosts are overloaded
+ * (their 429 / a 5xx); rate — Polza's per-minute cap on the model (under 90 s); quota — Polza's daily cap on the model
+ * (until midnight by Moscow time); no_credits — 402: no money on the balance or the key's limit is spent; auth — the
+ * key is refused; missing — no such model; error — anything else; off — its key is not set: skipped, never a failure. */
 export type ModelLinkState = "ok" | "unknown" | "congested" | "rate" | "quota" | "no_credits" | "auth" | "missing" | "error" | "off";
 export interface ModelLink {
   model: string | null;
   label: string;
-  /** The label without «(бесплатно)» / «(OpenRouter)». */
+  /** The label without a host tag («Qwen3.8-27B (VK)» → «Qwen3.8-27B»). */
   short_label?: string;
-  /** Host name only («openrouter.ai»). */
+  /** Host name only («polza.ai»). */
   host?: string | null;
   state: ModelLinkState;
   /** False while the link pauses after a failure (see `until`). */
@@ -48,7 +48,6 @@ export interface ModelLink {
   last_error_at?: number | null;
   /** Seconds until a congested / exhausted link is tried again. */
   until: number | null;
-  free: boolean;
   roles?: string[];
 }
 /** ok — the primary answers; unknown — not called yet; retry — failed lately, will be tried again; fallback — a
@@ -68,14 +67,14 @@ export interface ModelsStatus {
   /** What helps when the model is not available (the detailed hint) or null. */
   hint: string | null;
   working_label: string | null;
-  /** Seconds until a paused link is tried again, and that link's state (quota: after 00:00 UTC). */
+  /** Seconds until a paused link is tried again, and that link's state (quota: after midnight by Moscow time). */
   retry_in: number | null;
   retry_state?: ModelLinkState | null;
   /** What the notice above a failed deck advises now («Соберите ещё раз через минуту.»), or null. */
   advice?: string | null;
   /** Building again can work now or once `retry_in` is over (false: a key, an account or a model id needs a fix). */
   retryable?: boolean;
-  /** What the server's owner has to fix for the failed model (a key, an account, a Cloud.ru project), or null. */
+  /** What the server's owner has to fix for the failed model (the Polza balance, the key, a model id), or null. */
   owner?: string | null;
 }
 /** Who wrote the plan of a variant (or of the whole generation) and, when the built-in planner did, why. */
@@ -90,15 +89,15 @@ export interface PlannerInfo {
   tried_label?: string | null;
   /** congested | rate | quota | no_credits | auth | missing | timeout | unreachable | rejected | error | off */
   reason_code: string | null;
-  /** Plain Russian clause: «бесплатные модели OpenRouter сейчас перегружены». */
+  /** Plain Russian clause: «сервер модели перегружен». */
   reason: string | null;
   /** What helps, one sentence. */
   advice: string | null;
   /** The same deck built again can get past the reason (congestion, a cap, the time budget…); false: fix first. */
   retryable?: boolean;
-  /** «Чтобы не зависеть от очереди бесплатных, пополните OpenRouter…» when a free model failed; added to the live advice. */
+  /** Always null (kept for older payloads). */
   steady?: string | null;
-  /** What the server's owner has to fix (an account, a key, a project — «Cloud.ru не находит проект модели…»), or null. */
+  /** What the server's owner has to fix (the balance, the key — «На балансе Polza нет средств…»), or null. */
   owner?: string | null;
 }
 export interface StrategyInfo { name: string; title: string; description: string }

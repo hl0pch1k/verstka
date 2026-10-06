@@ -1,10 +1,23 @@
-"""OpenAI-compatible chat provider (OpenRouter, Groq, Cloud.ru, VK inference, vLLM, Ollama...)."""
+"""OpenAI-compatible chat provider: Polza.ai (https://polza.ai — the models of the qualifying stage, paid in rubles)
+and VK inference (the final's Qwen3.8-27B, configs/models.vk.yaml).
+
+Polza's answers that matter here (docs: polza.ai/docs/api-reference/introduction):
+* 402 INSUFFICIENT_BALANCE — no money on the balance, or the key's / member's spending limit is spent (the text says
+  «лимит»), or — under parallel load — the balance is reserved by the requests in flight (the text names the reserved
+  sum): a short pause and one more try;
+* 429 of two kinds — Polza's own per-model cap of the organisation (with Retry-After: seconds to the next minute or to
+  midnight by Moscow time) and the model host's own rate limit (no Retry-After; metadata.provider_name);
+* 408 / 502 / 503 — worth another try (503 not before its Retry-After); 400 / 401 / 403 / 404 / 413 — not: a 403 may
+  also be the moderation refusing one request, which says nothing about the key;
+* every answer's usage carries cost_rub — what the call cost; a failed request costs nothing.
+"""
 
 from __future__ import annotations
 
 import base64
 import json
 import logging
+import os
 import re
 import threading
 import time
@@ -21,26 +34,36 @@ log = logging.getLogger(__name__)
 _FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.S)
 _CODE_RE = re.compile(r"error code:\s*(\d{3})", re.I)
 _THINK_RE = re.compile(r"^\s*<think>.*?</think>\s*", re.S | re.I)
-# OpenRouter answers 403 «Key limit exceeded» when the key's own spending limit is reached: that is money, not a bad
-# key. Only the key / spending / credit wording counts: a 403 «Rate limit exceeded» is not an empty account
-_KEY_LIMIT_RE = re.compile(r"\bkey limit|spending limit|credits? limit|insufficient (?:credits|balance|funds)", re.I)
-# Groq answers 413 «Request too large for model … on tokens per minute (TPM)» when one request is bigger than the
-# plan's per-minute token budget: a per-minute cap of the host, not a broken request
-_TPM_RE = re.compile(r"per[- ]minute|\btpm\b", re.I)
-# the account's own caps, named in the text (OpenRouter «free-models-per-min» / «-per-day», Groq «per minute (RPM)»)
-_ACCOUNT_CAP_RE = re.compile(r"per[- ]minute|per[- ]day|free-models-per", re.I)
+# Polza's 402 when the spending limit of the key or of the member is spent: the text speaks of exceeding a limit
+_SPEND_LIMIT_RE = re.compile(r"лимит|limit", re.I)
+# Polza's 402 under parallel load: the text names the sum the requests in flight hold («зарезервировано 25.00 ₽»,
+# «25.00 ₽ зарезервировано», «reserved: 3.5», «3.5 RUB reserved»)
+_RESERVED_RE = re.compile(
+    r"(?:зарезервирован\w*|reserved)\D{0,24}?(\d+(?:[.,]\d+)?)|(\d+(?:[.,]\d+)?)\s*(?:₽|руб\w*\.?|rub)?\s*(?:уже\s+)?(?:зарезервирован\w*|reserved)",
+    re.I,
+)
+# a 403 that refuses one request (Polza's moderation, a host's content filter), not the key
+_MODERATION_RE = re.compile(r"модерац|moderat|content (?:policy|filter)|flagged", re.I)
+# Polza's own 429 names the window («Достигнут минутный (дневной) лимит запросов к модели»)
+_DAILY_RE = re.compile(r"дневн|суточн|per[- ]day|daily", re.I)
+_MINUTE_RE = re.compile(r"минутн|per[- ]minute", re.I)
+# the host's own 429 passed on by Polza («Провайдер модели ограничил частоту запросов…»; the host is named in
+# metadata.provider_name — Polza's own caps name none)
+_HOST_LIMIT_RE = re.compile(r"провайдер\w* модели ограничил|upstream|provider returned|temporarily rate-limited|provider_name|\(provider: ", re.I)
+# the sums a 402 names: what the request needs, what is available, what the requests in flight hold
+_NEEDED_RE = re.compile(r"(?:требуется|необходимо|нужно|required|needed)\D{0,16}?(\d+(?:[.,]\d+)?)", re.I)
+_AVAILABLE_RE = re.compile(r"(?:доступно|available|на балансе)\D{0,16}?(\d+(?:[.,]\d+)?)", re.I)
 
 
 class RateLimited(ProviderError):
-    """429 from the provider: `daily` when the day's quota is spent (retrying today is pointless)."""
+    """429 from the provider: `daily` when the day's quota is spent (retrying today is pointless); `upstream` when it
+    is the model host's own rate limit rather than a cap of our account."""
 
     def __init__(self, message: str, retry_after: Optional[float] = None, daily: bool = False, upstream: bool = False) -> None:
         super().__init__(message)
         self.retry_after = retry_after
         self.daily = daily
-        # congestion on the model host («temporarily rate-limited upstream»), not a cap of our account
-        low = message.lower()
-        self.upstream = upstream or "upstream" in low or "temporarily rate-limited" in low
+        self.upstream = upstream or bool(_HOST_LIMIT_RE.search(message))
 
 
 class LinkUnavailable(ProviderError):
@@ -68,7 +91,7 @@ class BudgetSpent(ProviderError):
 
 
 class _BodyError(RuntimeError):
-    """An error the host returned inside an HTTP 200 body (OpenRouter does so when the upstream fails mid-way)."""
+    """An error the host returned inside an HTTP 200 body (a stream that failed mid-way: finish_reason "error")."""
 
     def __init__(self, message: str, status_code: Optional[int]) -> None:
         super().__init__(message)
@@ -76,8 +99,8 @@ class _BodyError(RuntimeError):
 
 
 class _MinuteLimiter:
-    """At most `rpm` requests in any 60 s window, shared by every provider on the same account (llm and vlm roles
-    both count against e.g. OpenRouter's 20 requests/min for free models)."""
+    """At most `rpm` requests in any 60 s window, shared by every provider on the same account and model (the llm and
+    vlm roles both count against the cap of one model) — only when a config sets requests_per_minute."""
 
     def __init__(self, rpm: int) -> None:
         self.rpm = max(1, rpm)
@@ -106,30 +129,6 @@ class _MinuteLimiter:
             time.sleep(delay)
 
 
-class _Pacer:
-    """Request starts on one account at least `gap` seconds apart: calls made side by side (three variants' designer
-    calls, the writer's check batches) go out one after another instead of in one burst that trips a per-minute cap
-    shared by everyone on the key (Cloud.ru's 429 ModelArts.81114). Each caller books the next free start time."""
-
-    def __init__(self, gap: float) -> None:
-        self.gap = max(0.0, float(gap))
-        self.lock = threading.Lock()
-        self.next_at = 0.0
-
-    def book(self) -> float:
-        """Book the next start and return the seconds to wait for it (0 when the account was idle long enough)."""
-        with self.lock:
-            now = time.monotonic()
-            at = max(now, self.next_at)
-            self.next_at = at + self.gap
-            return at - now
-
-    def release(self, delay: float) -> None:
-        """Give back a booked start that is not used (the budget does not allow the wait)."""
-        with self.lock:
-            self.next_at = max(time.monotonic(), self.next_at - self.gap)
-
-
 _MIN_REQUEST_S = 5.0  # less time than this left in the generation's budget: do not start a request
 _TLS = threading.local()
 
@@ -141,19 +140,17 @@ def requests_sent() -> int:
 
 
 _LIMITERS: dict[str, _MinuteLimiter] = {}
-_PACERS: dict[str, _Pacer] = {}
 _GUARD = threading.Lock()
 # how long a link is skipped (status.py keeps the holds per account + model)
-_CONGESTION_S = 120.0  # two upstream 429s in a row — a single provider as before the chain, and a chain link
+_CONGESTION_S = 120.0  # two 429s of the model's hosts in a row — a single provider as well as a chain link
 # inside a fallback chain only:
-_NO_CREDITS_S = 600.0  # 402: retried after 10 minutes, so a top-up of the account is picked up soon
-_GONE_S = 1800.0  # 404 / 401 / 403: no such model, no endpoint, rejected key
+_NO_CREDITS_S = 600.0  # 402: retried after 10 minutes, so a top-up of the balance (or a higher key limit) is picked up soon
+_GONE_S = 1800.0  # 404 / 401 / 403: no such model, a rejected or revoked key
 _TRANSIENT_S = 60.0  # two 5xx / timeouts / connection errors in a row, or a timeout of a link that is not the last
-_TOO_LARGE_S = 30.0  # 413 «request too large … tokens per minute»: a short "rate" hold (the next steps are smaller)
 # a single provider (the final's VK inference): a 402 / 401 / 403 / 404 is reported after its attempts, then at most
 # this short hold, so a hiccup of the only model never costs more than a minute
 _SINGLE_HOLD_S = 60.0
-# a JSON answer cut off at max_tokens is asked again once with twice the room, up to this many tokens (or the link's cap)
+# a JSON answer cut off at max_tokens is asked again once with twice the room, up to this many tokens
 _CUT_MAX_TOKENS = 8192
 _CUT_RETRY = (
     "Your previous answer was cut off at the length limit and is lost. Answer again from the start with a much shorter "
@@ -169,80 +166,120 @@ def _status_of(e: Exception) -> Optional[int]:
     return int(m.group(1)) if m else None
 
 
-def _rate_limit_info(e: Exception, text: Optional[str] = None) -> Optional[RateLimited]:
+def _retry_after(e: Exception) -> Optional[float]:
+    """The answer's Retry-After header, in seconds (Polza sends it with its own 429 and with a 503)."""
+    headers = getattr(getattr(e, "response", None), "headers", None) or {}
+    try:
+        value = headers.get("retry-after") if hasattr(headers, "get") else None
+        if value in (None, ""):
+            value = headers.get("Retry-After") if hasattr(headers, "get") else None
+        return max(0.0, float(value)) if value not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _rate_limit_info(e: Exception, text: Optional[str] = None, polza: bool = True) -> Optional[RateLimited]:
+    """A 429 → RateLimited. On Polza its own cap of the organisation on the model comes with Retry-After — the seconds
+    to the next minute or to midnight by Moscow time, the one signal that tells the two windows apart (the documented
+    wording «Достигнут минутный (дневной) лимит…» may name both) —, the model hosts' own limit without it. Another
+    endpoint (the final's VK inference) reads a bare 429 as a per-minute cap, as before the migration."""
     status_code = getattr(e, "status_code", None)
     text = str(e) if text is None else text
     low = text.lower()
-    if status_code != 429 and "429" not in text and "rate limit" not in low and "rate-limit" not in low:
+    if status_code != 429 and "429" not in text and "too_many_requests" not in low and "rate limit" not in low:
         return None
-    retry_after: Optional[float] = None
-    headers = getattr(getattr(e, "response", None), "headers", None) or {}
+    retry_after = _retry_after(e)
+    host = bool(_HOST_LIMIT_RE.search(text))
+    if polza:
+        own = not host and (retry_after is not None or bool(_MINUTE_RE.search(text) or _DAILY_RE.search(text)))
+    else:
+        own = not host
+    if retry_after is not None:
+        # the per-minute window ends within a minute (a few seconds more for the clocks); anything longer is the day's
+        # cap, minutes before midnight by Moscow time included
+        daily = own and retry_after > 90
+    else:
+        daily = own and bool(_DAILY_RE.search(text)) and not _MINUTE_RE.search(text)
+    return RateLimited(text[:300], retry_after=retry_after, daily=daily, upstream=not own)
+
+
+def _amount(s: str) -> float:
     try:
-        if headers.get("retry-after"):
-            retry_after = float(headers.get("retry-after"))
-        elif headers.get("x-ratelimit-reset"):
-            retry_after = max(0.0, float(headers.get("x-ratelimit-reset")) / 1000.0 - time.time())
-    except (TypeError, ValueError):
-        retry_after = None
-    # congestion of the model's host: OpenRouter's «temporarily rate-limited upstream», or any 429 it passes on as
-    # «Provider returned error» (the host's own limit) — unless the text names a cap of our account
-    upstream = "upstream" in low or "temporarily rate-limited" in low or ("provider returned error" in low and not _ACCOUNT_CAP_RE.search(low))
-    # the daily quota is named in the text (OpenRouter «free-models-per-day», Groq «tokens per day (TPD)»); a long
-    # reset alone means it only when the host is not congested — a congested host may ask for 10 minutes too
-    daily = "per-day" in low or "per day" in low or (not upstream and retry_after is not None and retry_after > 300)
-    return RateLimited(text[:300], retry_after=retry_after, daily=daily, upstream=upstream)
+        return float(s.replace(",", "."))
+    except ValueError:
+        return 0.0
 
 
-def classify_error(e: Exception, model: str, secret: str = "") -> ProviderError:
+def classify_error(e: Exception, model: str, secret: str = "", polza: bool = True) -> ProviderError:
     """An SDK / HTTP error → the ProviderError subclass that tells the caller (and a fallback chain) what to do.
-    The message carries the state's wording (status.PHRASES); `secret` (the link's key) never appears in it."""
+    The message carries the state's wording (status.PHRASES); `secret` (the link's key) never appears in it.
+    `polza`: Polza's rules for a 429 (see _rate_limit_info); False for another endpoint."""
     if isinstance(e, ProviderError):
         return e
     code = _status_of(e)
-    text = status.mask(" ".join(str(e).split())[:300], secret)
+    text = status.mask(" ".join(str(e).split())[:400], secret)
     low = text.lower()
     if code is None or code == 429:
-        rl = _rate_limit_info(e, text)
+        rl = _rate_limit_info(e, text, polza=polza)
         if rl is not None:
             return rl
-    if code == 402 or "insufficient credits" in low or "payment required" in low or "requires more credits" in low:
-        return LinkUnavailable(f"{model}: no credits (402) on the account ({text})", state="no_credits", hold_s=_NO_CREDITS_S)
-    if code == 403 and _KEY_LIMIT_RE.search(low):
-        return LinkUnavailable(f"{model}: no credits (402): the spending limit of the key is reached, HTTP 403 ({text})", state="no_credits", hold_s=_NO_CREDITS_S)
-    if code in (401, 403):
-        return LinkUnavailable(f"{model}: access refused (401/403): HTTP {code}, check the key ({text})", state="auth", hold_s=_GONE_S)
-    if code == 404 or (code in (None, 400) and any(s in low for s in ("no endpoints found", "model not found", "not a valid model", "does not exist"))):
-        return LinkUnavailable(f"{model}: model not available (404): no such model or no endpoint serves it ({text})", state="missing", hold_s=_GONE_S)
-    if code == 413 and _TPM_RE.search(low):
-        return _too_large(model, text)
+    if code == 402 or "insufficient_balance" in low or "payment required" in low:
+        held = _RESERVED_RE.search(text)
+        reserved = _amount(held.group(1) or held.group(2) or "0") if held else 0.0
+        needed, available = _NEEDED_RE.search(text), _AVAILABLE_RE.search(text)
+        # the reserve is the cause when its return would cover the request (or the text does not say what it needs);
+        # a spent limit or balance that the reserve would not cover is no passing trouble
+        covered = needed is None or available is None or _amount(available.group(1)) + reserved >= _amount(needed.group(1))
+        if reserved > 0 and covered:
+            # the requests in flight hold the balance: one of them ends in seconds and frees its reserve
+            err = TransientError(f"{model}: {status.PHRASES['congested']}: the balance is held by the requests in flight (402) ({text})")
+            err.reserve = True  # type: ignore[attr-defined]
+            return err
+        if _SPEND_LIMIT_RE.search(text):
+            return LinkUnavailable(f"{model}: no credits (402): the spending limit of the key is spent ({text})", state="no_credits", hold_s=_NO_CREDITS_S)
+        return LinkUnavailable(f"{model}: no credits (402) on the balance ({text})", state="no_credits", hold_s=_NO_CREDITS_S)
+    if code == 401 or "api_key_revoked" in low:
+        return LinkUnavailable(f"{model}: access refused (401/403): HTTP {code or 401}, check the key ({text})", state="auth", hold_s=_GONE_S)
+    if code == 403:
+        if _MODERATION_RE.search(text):
+            # moderation refused this request: another request (or the other model) may pass, the key is fine
+            return _plain(f"{model}: the request was refused by moderation (403) ({text})", 403)
+        return LinkUnavailable(f"{model}: access refused (401/403): HTTP 403, check the key ({text})", state="auth", hold_s=_GONE_S)
+    if code == 404 or (code in (None, 400) and any(s in low for s in ("model not found", "not a valid model", "no such model", "does not exist"))):
+        return LinkUnavailable(f"{model}: model not available (404): no such model or no host serves it ({text})", state="missing", hold_s=_GONE_S)
+    if code == 413:
+        return _plain(f"{model}: the request is too large for the model (413) ({text})", 413)
     kind = type(e).__name__.lower()
     if "timeout" in kind or "timed out" in low or code == 408:
-        return TransientError(f"{model}: request timed out, congested upstream", timeout=True)
-    if code is not None and (code >= 500 or code == 498):  # 498: Groq's «capacity exceeded, try again later»
-        return TransientError(f"{model}: {code} server error, congested upstream ({text})")
+        return TransientError(f"{model}: request timed out ({code or 'no answer in time'}), congested upstream", timeout=True)
+    if code is not None and code >= 500:
+        err = TransientError(f"{model}: {code} server error, congested upstream ({text})")
+        err.retry_after = _retry_after(e)  # type: ignore[attr-defined]  # a 503 «no hosts for the model»: not before it
+        return err
     if "connection" in kind or "connection error" in low or isinstance(e, ConnectionError):
         return TransientError(f"{model}: connection error ({text})", state="error")
-    return ProviderError(f"{model}: {text}" if code is None or str(code) in text else f"{model}: {code} {text}")
+    return _plain(f"{model}: {text}" if code is None or str(code) in text else f"{model}: {code} {text}", code)
 
 
-def _too_large(model: str, text: str, held: bool = False) -> LinkUnavailable:
-    """Groq's 413 «request too large … tokens per minute». Its short hold opens only inside a chain (alone a per-minute
-    state opens none), so only a chain link's error (`held`) says «skipped for 30 s»."""
-    hold = f", skipped for {_TOO_LARGE_S:.0f} s" if held else ""
-    err = LinkUnavailable(
-        f"{model}: {status.PHRASES['rate']} of the host: the request is larger than its tokens-per-minute limit (413){hold} ({text})",
-        state="rate",
-        hold_s=_TOO_LARGE_S,
-    )
-    err.too_large = text  # type: ignore[attr-defined]
+def _plain(message: str, code: Optional[int]) -> ProviderError:
+    """An error the same request would get again (a 400, a 413, a refusal of moderation): `no_retry` — the attempts
+    stop at once (a chain asks its next link); `status_code` lets the caller drop an option the host rejects (a 400)."""
+    err = ProviderError(message)
+    err.status_code = code  # type: ignore[attr-defined]
+    err.no_retry = code is not None and 400 <= code < 500  # type: ignore[attr-defined]
     return err
 
 
+_MSK_MIDNIGHT_UTC_H = 21  # 00:00 in Moscow (UTC+3 all year)
+
+
 def _quota_hold(e: RateLimited) -> float:
-    """How long a spent daily quota blocks its pool: the provider's reset time, else the next 00:00 UTC."""
+    """How long Polza's spent daily cap of a model blocks it: its Retry-After, else until midnight by Moscow time."""
     if e.retry_after is not None and e.retry_after > 60:
         return min(e.retry_after, 86400.0)
-    return 86400.0 - (time.time() % 86400.0) + 5.0
+    now = time.time()
+    since = (now - _MSK_MIDNIGHT_UTC_H * 3600.0) % 86400.0
+    return 86400.0 - since + 5.0
 
 
 def _unavailable(model: str, state: str, reason: str, left: float) -> LinkUnavailable:
@@ -253,16 +290,12 @@ def _unavailable(model: str, state: str, reason: str, left: float) -> LinkUnavai
     return err
 
 
-_KNOWN_LABELS = {"qwen3.8-27b": "Qwen3.8-27B", "gemma-4-31b-it": "Gemma 4 31B", "gemma-4-26b-a4b-it": "Gemma 4 26B A4B"}
-_HOST_LABELS = (("openrouter.ai", "OpenRouter"), ("groq.com", "Groq"), ("cloud.ru", "Cloud.ru"), ("localhost", "локально"), ("127.0.0.1", "локально"))
+_KNOWN_LABELS = {"qwen3.8-27b": "Qwen3.8-27B", "qwen3.6-27b": "Qwen3.6-27B"}
 
 
-def default_label(model: str, base_url: str) -> str:
-    """A human name for the UI: «Qwen3.8-27B (OpenRouter)», «Gemma 4 31B (бесплатно)», «Qwen3.5 9B (локально)»."""
+def default_label(model: str, base_url: str = "") -> str:
+    """A human name for the UI: «qwen/qwen3.8-27b» → «Qwen3.8-27B» (a config may set its own `label`)."""
     base = model.split("/")[-1]
-    free = base.endswith(":free")
-    if free:
-        base = base[: -len(":free")]
     name = _KNOWN_LABELS.get(base.lower())
     if name is None:
         tokens = [t for t in re.split(r"[-_: ]+", base) if t and t.lower() not in ("it", "instruct", "chat", "latest")]
@@ -270,9 +303,74 @@ def default_label(model: str, base_url: str) -> str:
         if tokens:
             tokens[0] = tokens[0][:1].upper() + tokens[0][1:]
         name = " ".join(tokens) or model
-    host = (base_url or "").lower()
-    suffix = "бесплатно" if free else next((v for k, v in _HOST_LABELS if k in host), "")
-    return f"{name} ({suffix})" if suffix else name
+    return name
+
+
+# Polza's public catalog of a model's hosts (no key needed): hosts whose weights are quantized below the floor are
+# left out of the routing (Qwen garbled JSON on 4-bit hosts). Read per model and process, again after `_CATALOG_TTL_S`;
+# a failed or empty read retries after `_CATALOG_RETRY_S` and meanwhile Polza routes freely.
+_CATALOG_URL = "https://api.polza.ai/v1/models/{model}"
+_CATALOG_RETRY_S = 600.0
+_CATALOG_TTL_S = 6 * 3600.0  # hosts come and go: the list is read again after this long
+_EXCLUDED: dict[tuple[str, tuple[str, ...]], tuple[float, list[str]]] = {}
+_READING: dict[tuple[str, tuple[str, ...]], threading.Lock] = {}  # one read per model at a time
+_CATALOG_TIMEOUT_S = 8.0
+
+
+def _fetch_hosts(model: str, timeout: float = 8.0) -> list[str]:
+    """The names of a model's hosts in Polza's catalog («deepinfra/bf16», «morph/fp4», «phala»...)."""
+    import httpx
+
+    r = httpx.get(_CATALOG_URL.format(model=model), timeout=timeout, follow_redirects=True)
+    r.raise_for_status()
+    data = r.json()
+    data = data.get("data", data) if isinstance(data, dict) else {}
+    return [str(p.get("name")) for p in (data.get("providers") or []) if isinstance(p, dict) and p.get("name")]
+
+
+def excluded_hosts(model: str, quantizations: tuple[str, ...], deadline: Optional[float] = None) -> list[str]:
+    """Hosts of `model` whose name ends in one of `quantizations` («/fp4»): the `provider.ignore` list of its requests.
+    VERSTKA_NO_CATALOG=1 (tests, an offline run) skips the catalog: nothing is left out. The calls side by side wait
+    for one read instead of reading too; none waits or reads past the time its request needs (`deadline`) — it goes
+    unfiltered then, and the read is left to a later call."""
+    if not quantizations or os.environ.get("VERSTKA_NO_CATALOG", "").strip().lower() not in ("", "0", "false", "no"):
+        return []
+    key = (model, tuple(sorted(q.lower() for q in quantizations)))
+    with _GUARD:
+        hit = _EXCLUDED.get(key)
+        if hit is not None and hit[0] > time.monotonic():
+            return list(hit[1])
+        reading = _READING.setdefault(key, threading.Lock())
+    spare = _CATALOG_TIMEOUT_S if deadline is None else min(_CATALOG_TIMEOUT_S, deadline - time.monotonic() - _MIN_REQUEST_S)
+    if spare < 1.0 or not reading.acquire(timeout=spare):
+        return []
+    try:
+        with _GUARD:
+            hit = _EXCLUDED.get(key)
+            if hit is not None and hit[0] > time.monotonic():
+                return list(hit[1])  # read by the call this one waited for
+        return _read_catalog(model, quantizations, key, spare)
+    finally:
+        reading.release()
+
+
+def _read_catalog(model: str, quantizations: tuple[str, ...], key: tuple, timeout: float) -> list[str]:
+    now = time.monotonic()
+    try:
+        hosts = _fetch_hosts(model, timeout=timeout)
+        names = [n for n in hosts if any(n.lower().endswith("/" + q.lower()) for q in quantizations)]
+        until = now + _CATALOG_TTL_S
+        if not hosts:
+            log.warning("%s: Polza's catalog lists no hosts for the model; hosts are not filtered for %.0f s", model, _CATALOG_RETRY_S)
+            until = now + _CATALOG_RETRY_S
+    except Exception as e:  # noqa: BLE001 - the catalog is a nicety: Polza still routes the request
+        log.warning("%s: Polza's catalog of hosts is unavailable (%s); hosts are not filtered for %.0f s", model, str(e)[:160], _CATALOG_RETRY_S)
+        names, until = [], now + _CATALOG_RETRY_S
+    with _GUARD:
+        _EXCLUDED[key] = (until, names)
+    if names:
+        log.info("%s: hosts left out of the routing (%s weights): %s", model, "/".join(quantizations), ", ".join(names))
+    return list(names)
 
 
 class TruncatedJSON(ValueError):
@@ -439,16 +537,29 @@ def _body_error(obj: Any) -> Optional[_BodyError]:
         message = str(getattr(err, "message", None) or err)
         meta = getattr(err, "metadata", None)
     if isinstance(meta, dict):
-        # OpenRouter wraps the host's own error as «Provider returned error»; what it was is in metadata.raw
-        # («… is temporarily rate-limited upstream …») and metadata.provider_name
+        # Polza says why (metadata.reason: a refusal of moderation among them), names the host that failed
+        # (metadata.provider_name) and quotes the host's own words (metadata.raw)
+        if meta.get("reason"):
+            message = f"{message} (reason: {' '.join(str(meta['reason']).split())[:160]})"
         raw = meta.get("raw")
         if raw:
             raw_text = raw if isinstance(raw, str) else json.dumps(raw, ensure_ascii=False)
             message = f"{message}: {' '.join(raw_text.split())[:240]}"
         if meta.get("provider_name"):
             message = f"{message} (provider: {meta['provider_name']})"
+    if isinstance(code, str) and not code.isdigit():
+        message = f"{code}: {message}"
+        code = _POLZA_CODES.get(code.upper())
     code = code if isinstance(code, int) else (int(code) if isinstance(code, str) and code.isdigit() else None)
     return _BodyError(f"Error code: {code} - {message}" if code else message, code)
+
+
+# Polza's machine error codes (error.code) → the HTTP status they stand for
+_POLZA_CODES = {
+    "BAD_REQUEST": 400, "UNAUTHORIZED": 401, "API_KEY_REVOKED": 401, "INSUFFICIENT_BALANCE": 402, "FORBIDDEN": 403,
+    "NOT_FOUND": 404, "REQUEST_TIMEOUT": 408, "CONFLICT": 409, "PAYLOAD_TOO_LARGE": 413, "TOO_MANY_REQUESTS": 429,
+    "INTERNAL_ERROR": 500, "BAD_GATEWAY": 502, "SERVICE_UNAVAILABLE": 503,
+}
 
 
 def _kept_hold(h: status.LinkHealth, model: str, state: str) -> Optional[LinkUnavailable]:
@@ -466,6 +577,24 @@ def _fail(err: ProviderError, usage: Usage) -> ProviderError:
     return err
 
 
+def _cost_rub(u: Any, polza: bool = True) -> Optional[float]:
+    """What the call cost in rubles: Polza's usage.cost_rub (or its alias usage.cost); None when the host does not say.
+    Another endpoint's usage.cost is in its own money (OpenRouter's: dollars), so only cost_rub counts there."""
+    if u is None:
+        return None
+    extra = getattr(u, "model_extra", None) or {}
+    for name in ("cost_rub", "cost") if polza else ("cost_rub",):
+        value = getattr(u, name, None)
+        if value is None and isinstance(extra, dict):
+            value = extra.get(name)
+        if value is not None:
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
 class OpenAICompatProvider:
     name = "openai_compat"
 
@@ -475,8 +604,6 @@ class OpenAICompatProvider:
         base_url: str,
         api_key: str,
         *,
-        price_in_per_m: Optional[float] = None,
-        price_out_per_m: Optional[float] = None,
         timeout_s: float = 120.0,
         max_attempts: int = 3,
         extra_body: Optional[dict] = None,
@@ -484,47 +611,36 @@ class OpenAICompatProvider:
         headers: Optional[dict] = None,
         requests_per_minute: Optional[int] = None,
         label: Optional[str] = None,
-        max_tokens_cap: Optional[int] = None,
         system_suffix: Optional[str] = None,
-        min_interval_s: Optional[float] = None,
+        exclude_quantizations: Optional[list] = None,
+        name: Optional[str] = None,
     ) -> None:
         self.model = model
         self.base_url = base_url
         self.api_key = api_key or ""
-        self.price_in = price_in_per_m
-        self.price_out = price_out_per_m
+        if name:
+            self.name = name
         self.timeout_s = timeout_s
         self.max_attempts = max_attempts
-        self.extra_body = extra_body or {}
+        self.extra_body = dict(extra_body or {})
         self.json_mode = json_mode
         self.headers = headers or {}
         self.label = label or default_label(model, base_url)
-        # a host with a small tokens-per-minute budget (Groq's free plan: 8K) rejects a request whose max_tokens
-        # alone would spend it: every request of this link asks for at most this many
-        self.max_tokens_cap = int(max_tokens_cap) if max_tokens_cap else None
         # text added to the system message of every request of this link: Qwen3's documented soft switch
-        # "/no_think" turns thinking off on a host that has no parameter for it (Cloud.ru)
+        # "/no_think" turns thinking off on a host that has no parameter for it (the final's VK inference, if needed)
         self.system_suffix = (system_suffix or "").strip() or None
+        # hosts whose weights are quantized this low are left out of Polza's routing («fp4»: see excluded_hosts)
+        self.exclude_quantizations = tuple(str(q).strip().lstrip("/") for q in (exclude_quantizations or []) if str(q).strip())
         # no key (its variable is empty): the link is off — a chain skips it silently, it is never an error
         self.off = not self.api_key
         self._client = None
         self._account = f"{base_url}|{self.api_key[-8:]}"
-        # holds are per (account, model); the free models' quotas of the account are a pool of their own, so a
-        # spent free quota does not block a paid model on the same key
-        pool = f"{self._account}|{'free' if model.endswith(':free') else 'paid'}"
-        free = model.endswith(":free") or (price_in_per_m == 0 and price_out_per_m == 0)
-        self.health = status.link(
-            f"{self._account}|{model}", model, self.label, pool, explicit=label is not None, host=status.hostname(base_url), free=free, off=self.off
-        )
+        # holds are per (account, model): Polza's caps are per model, so a capped main model leaves the backup free
+        self.health = status.link(f"{self._account}|{model}", model, self.label, explicit=label is not None, host=status.hostname(base_url), off=self.off)
         self._limiter: Optional[_MinuteLimiter] = None
         if requests_per_minute:
             with _GUARD:
-                self._limiter = _LIMITERS.setdefault(f"{self._account}|{requests_per_minute}", _MinuteLimiter(requests_per_minute))
-        # request starts on the account at least this far apart (every link and role on the key shares the pacer)
-        self._pacer: Optional[_Pacer] = None
-        if min_interval_s and float(min_interval_s) > 0:
-            with _GUARD:
-                self._pacer = _PACERS.setdefault(f"{self._account}|{float(min_interval_s):g}", _Pacer(float(min_interval_s)))
+                self._limiter = _LIMITERS.setdefault(f"{self._account}|{model}|{requests_per_minute}", _MinuteLimiter(requests_per_minute))
 
     # lazy client so tests can construct the provider without the SDK doing network setup
     def _get_client(self):
@@ -534,39 +650,47 @@ class OpenAICompatProvider:
             from openai import OpenAI
 
             # retries are ours (complete(): attempts, per-minute waits, daily fail-fast); the SDK's own sub-second
-            # retries of a 429 only spend the free quota
+            # retries of a 429 would only hit the same cap again
             self._client = OpenAI(base_url=self.base_url, api_key=self.api_key, timeout=self.timeout_s, default_headers=self.headers or None, max_retries=0)
         return self._client
 
     hidden_reasoning = False  # set once an answer's completion tokens far exceed its text (thinking left on)
 
     def _check_hidden_reasoning(self, text: str, usage: Usage) -> None:
-        """A host that serves a Qwen3 model with its thinking on bills the reasoning as completion tokens and returns
-        only the answer (or nothing): warn once, so the config gets its switch (extra_body chat_template_kwargs
-        enable_thinking=false, or system_suffix "/no_think"). About 3 characters of Russian or JSON per token."""
+        """A host that serves a Qwen model with its thinking on bills the reasoning as completion tokens and returns
+        only the answer (or nothing): warn once, so the config gets its switch (Polza: extra_body reasoning.effort
+        none; VK: chat_template_kwargs enable_thinking false or system_suffix "/no_think"). About 3 characters of
+        Russian or JSON per token."""
         out = int(getattr(usage, "completion_tokens", 0) or 0)
         est = max(1.0, len(text or "") / 3.0)
         if out >= 300 and out > 3 * est and not self.hidden_reasoning:
             self.hidden_reasoning = True
             log.warning(
                 "%s: %d completion tokens for an answer of about %d — the host seems to run the model with thinking on; "
-                "turn it off in the model config (extra_body.chat_template_kwargs.enable_thinking: false or system_suffix: /no_think)",
+                "turn it off in the model config (extra_body.reasoning.effort: none on Polza)",
                 self.model, out, int(est),
             )
 
-    def _cost(self, usage: Usage) -> Optional[float]:
-        if self.price_in is None or self.price_out is None:
-            return None
-        return usage.prompt_tokens / 1e6 * self.price_in + usage.completion_tokens / 1e6 * self.price_out
+    def _body(self, deadline: Optional[float] = None) -> dict:
+        """The link's extra_body with the hosts to leave out of Polza's routing (provider.ignore)."""
+        body = dict(self.extra_body)
+        hosts = excluded_hosts(self.model, self.exclude_quantizations, deadline) if self.exclude_quantizations else []
+        if hosts:
+            routing = dict(body.get("provider") or {})
+            ignore = list(routing.get("ignore") or [])
+            routing["ignore"] = ignore + [h for h in hosts if h not in ignore]
+            body["provider"] = routing
+        return body
 
     def _create(self, client: Any, kwargs: dict, capped: bool) -> Any:
         _TLS.sent = getattr(_TLS, "sent", 0) + 1  # every request sent, answered or not (requests_sent)
         try:
             return client.chat.completions.create(**kwargs)
         except Exception as e:
-            err = classify_error(e, self.model, self.api_key)
-            if capped and isinstance(err, TransientError) and err.timeout:
-                # the request ran out of the generation's budget, not of its own timeout: not the host's fault
+            err = classify_error(e, self.model, self.api_key, polza=self.name == "polza")
+            if capped and isinstance(err, TransientError) and err.timeout and _status_of(e) is None:
+                # our own client timeout, cut to the generation's budget: the request ran out of the budget, not of its
+                # own timeout — not the host's fault (a 408 the host sent is the host's, and is retried)
                 raise BudgetSpent(f"{self.model}: time budget of the generation is spent (the request did not finish in it)") from e
             raise err from e
 
@@ -576,8 +700,9 @@ class OpenAICompatProvider:
         """(answer text, usage, finish_reason): "length" means the answer hit max_tokens and is cut off."""
         client = self._get_client()
         kwargs: dict[str, Any] = dict(model=self.model, messages=messages, temperature=temperature, max_tokens=max_tokens)
-        if self.extra_body:
-            kwargs["extra_body"] = self.extra_body
+        body = self._body(deadline)
+        if body:
+            kwargs["extra_body"] = body
         if want_json and self.json_mode:
             kwargs["response_format"] = {"type": "json_object"}
         if self._limiter is not None:
@@ -590,14 +715,6 @@ class OpenAICompatProvider:
                     )
             else:
                 self._limiter.wait(deadline)
-        if self._pacer is not None:
-            # calls made side by side go out one after another (always waited: the gap is a second or two per call)
-            delay = self._pacer.book()
-            if delay > 0:
-                if deadline is not None and time.monotonic() + delay > deadline - _MIN_REQUEST_S:
-                    self._pacer.release(delay)
-                    raise BudgetSpent(f"{self.model}: time budget of the generation is spent while waiting for its turn on the account")
-                time.sleep(delay)
         capped = False
         if deadline is not None:
             # a request never outlives the generation's budget (the limiter may have waited)
@@ -611,9 +728,9 @@ class OpenAICompatProvider:
         except BudgetSpent:
             raise
         except ProviderError as err:
-            # a host may reject response_format: one more try without it (only for a plain 4xx, not for a 402/429/5xx);
-            # then the same for the link's extra_body (a thinking switch the host does not know), for the rest of the run
-            if type(err) is not ProviderError:
+            # a host may reject response_format: one more try without it (only for a 400, not for a 402/429/5xx or a
+            # moderation 403); then the same for the link's extra_body (a switch the host does not know), for the run
+            if type(err) is not ProviderError or getattr(err, "status_code", None) != 400:
                 raise
             resp = None
             if want_json and self.json_mode and "response_format" in kwargs:
@@ -622,28 +739,34 @@ class OpenAICompatProvider:
                 try:
                     resp = self._create(client, kwargs, capped)
                 except ProviderError as err2:
-                    if type(err2) is not ProviderError or "extra_body" not in kwargs:
+                    if type(err2) is not ProviderError or getattr(err2, "status_code", None) != 400 or "extra_body" not in kwargs:
                         raise
                     err = err2
             if resp is None:
-                if "extra_body" not in kwargs:
+                # Polza documents `reasoning` and `provider` (a host that lacks a parameter drops it without an error):
+                # its 400 is about the request itself — dropping them would only turn the model's thinking back on
+                if "extra_body" not in kwargs or self.name == "polza":
                     raise
-                log.warning("%s: the host rejected the link's extra_body %s (%s); retrying without it for this run", self.model, list(self.extra_body), str(err)[:200])
-                kwargs.pop("extra_body")
-                self.extra_body = {}
+                kept = {k: v for k, v in kwargs["extra_body"].items() if k == "provider"}
+                log.warning("%s: the host rejected the link's extra_body %s (%s); retrying without it", self.model, sorted(set(kwargs["extra_body"]) - set(kept)), str(err)[:200])
+                if kept:
+                    kwargs["extra_body"] = kept
+                else:
+                    kwargs.pop("extra_body")
                 resp = self._create(client, kwargs, capped)
+                # the retry without them worked: they stay off for the rest of the run
+                self.extra_body = {k: v for k, v in self.extra_body.items() if k == "provider"}
         choices = getattr(resp, "choices", None)
         if not choices:
-            raise classify_error(_body_error(resp) or _BodyError("empty answer: no choices", None), self.model, self.api_key)
+            raise classify_error(_body_error(resp) or _BodyError("empty answer: no choices", None), self.model, self.api_key, polza=self.name == "polza")
         choice = choices[0]
         if getattr(choice, "finish_reason", None) == "error":
-            raise classify_error(_body_error(choice) or _BodyError("the host reported an error mid-answer", None), self.model, self.api_key)
+            raise classify_error(_body_error(choice) or _BodyError("the host reported an error mid-answer", None), self.model, self.api_key, polza=self.name == "polza")
         text = (getattr(choice, "message", None) and choice.message.content) or ""
         # a host that cannot switch a Qwen3 model's thinking off returns it inline: the answer is what follows
         text = _THINK_RE.sub("", text, count=1)
         u = getattr(resp, "usage", None)
-        usage = Usage(getattr(u, "prompt_tokens", 0) or 0, getattr(u, "completion_tokens", 0) or 0)
-        usage.cost_usd = self._cost(usage)
+        usage = Usage(getattr(u, "prompt_tokens", 0) or 0, getattr(u, "completion_tokens", 0) or 0, _cost_rub(u, polza=self.name == "polza"))
         return text, usage, getattr(choice, "finish_reason", None)
 
     def complete(
@@ -658,14 +781,14 @@ class OpenAICompatProvider:
         in_chain: bool = False,
     ) -> CompletionResult:
         """Alone (`in_chain` False — e.g. the final's VK inference) the provider behaves as before the fallback
-        chain: up to `max_attempts` tries with backoff; an upstream 429 gets one short pause and one more try, two in
-        a row skip the model for 2 minutes; per-minute caps are waited out; a 402 / 401 / 403 / 404 is reported after
-        the attempts, then skipped for at most a minute (a 413 «too large for the tokens per minute» gets its attempts
-        on every call, never a hold).
+        chain: up to `max_attempts` tries with backoff; a 429 of the model's hosts gets one short pause and one more
+        try, two in a row skip the model for 2 minutes; per-minute caps are waited out; a 402 / 401 / 403 / 404 is
+        reported after the attempts, then skipped for at most a minute; a 400 / 413 / refusal of moderation is
+        reported at once (the same request would get the same answer).
 
         `in_chain`: a link of a fallback chain. A link on hold is skipped without a request, a 402 / 401 / 403 / 404
         / spent quota fails at once with its hold, and nobody waits for a per-minute slot. `fail_fast` (every link but
-        the last): an upstream 429, a 5xx or any other error also fails at once, so the next link answers; the last
+        the last): a 429 of the hosts, a 5xx or any other error also fails at once, so the next link answers; the last
         link keeps the short pause and the backoff."""
         in_chain = in_chain or fail_fast
         h = self.health
@@ -679,8 +802,6 @@ class OpenAICompatProvider:
             )
         if self.system_suffix:
             oai_messages = _with_system_suffix(oai_messages, self.system_suffix)
-        if self.max_tokens_cap:
-            max_tokens = min(max_tokens, self.max_tokens_cap)
         call_kw = {"nonblocking": True} if in_chain else {}  # a chain link never waits for a per-minute slot
         keys = schema_keys(schema) if schema is not None else None
         base_messages = list(oai_messages)
@@ -707,11 +828,11 @@ class OpenAICompatProvider:
             except RateLimited as e:
                 last_err = e
                 if e.daily:
-                    # the day's quota of the pool (e.g. every free model of the key) is spent: no request until it resets
+                    # Polza's daily cap of this model is spent: no request to it until midnight by Moscow time (the
+                    # other model of the chain has a cap of its own)
                     hold = _quota_hold(e)
                     msg = f"{self.model}: {status.PHRASES['quota']} of the account is spent, skipped for {hold:.0f} s ({e})"
-                    status.block_pool(h.pool, "quota", msg, hold)
-                    status.fail(h, "quota", msg)
+                    status.fail(h, "quota", msg, hold_s=hold)
                     log.warning("%s: daily request quota spent, skipped until it resets (%s)", self.model, e)
                     raise _fail(LinkUnavailable(msg, "quota", hold), total) from e
                 if e.upstream:
@@ -743,9 +864,8 @@ class OpenAICompatProvider:
                 wait = min(max(e.retry_after or 20.0, 1.0), 65.0)
                 msg = f"{self.model}: {status.PHRASES['rate']} of the account, retry in {wait:.0f} s ({e})"
                 if in_chain:
-                    # every link of the pool (all free models of the key) is skipped till the window ends; not the paid one
-                    status.block_pool(h.pool, "rate", msg, wait)
-                    status.fail(h, "rate", msg)
+                    # the model is skipped till its minute window ends; the other model of the chain answers meanwhile
+                    status.fail(h, "rate", msg, hold_s=wait)
                     raise _fail(LinkUnavailable(msg, "rate", wait), total) from e
                 status.fail(h, "rate", msg)
                 if deadline is not None and deadline - time.monotonic() < wait + _MIN_REQUEST_S:
@@ -763,38 +883,56 @@ class OpenAICompatProvider:
                 last_err = e
                 if in_chain:
                     # 402 / 404 / 401 / 403 / no free slot: retrying now is pointless, the next link answers
-                    if getattr(e, "too_large", None) is not None:
-                        e = last_err = _too_large(self.model, e.too_large, held=True)  # the hold opens here: say so
                     status.fail(h, e.state, str(e), hold_s=e.hold_s)
                     log.warning("%s unavailable: %s", self.model, str(e)[:200])
                     raise _fail(_kept_hold(h, self.model, e.state) or e, total)
-                # alone: tried again with backoff as before the chain; the short hold comes after the last attempt
+                # alone: the short hold comes after the last attempt. Polza says a 402 (not its reserve), 401, 403 and
+                # 404 are not asked again — the same request gets the same answer; another endpoint (the final's VK
+                # inference) is tried again with backoff as before the chain
                 status.fail(h, e.state, str(e))
-                if attempt >= self.max_attempts:
+                if attempt >= self.max_attempts or self.name == "polza":
                     break
                 log.warning("provider call failed (attempt %d/%d): %s", attempt, self.max_attempts, e)
                 time.sleep(min(2**attempt, 8))
                 continue
             except TransientError as e:
                 last_err = e
+                reserve = bool(getattr(e, "reserve", False))
+                retry_after = float(getattr(e, "retry_after", None) or 0.0)
                 if in_chain:
-                    # a timed-out link would eat the next call's budget too: a link that is not the last is skipped
-                    # after one timeout, otherwise after two failures in a row
-                    threshold = 1 if (e.timeout and fail_fast) else 2
-                    _, hold = status.fail(h, e.state, str(e), counter="transient", threshold=threshold, hold_s=_TRANSIENT_S, started=started)
-                    if fail_fast or hold:
-                        raise _fail(_kept_hold(h, self.model, e.state) or e, total)
+                    if reserve:
+                        # the balance is held by the requests in flight — the whole account's, not this model's
+                        # trouble: no hold; the other link or the second pass asks again in a few seconds
+                        status.fail(h, e.state, str(e))
+                        if fail_fast:
+                            raise _fail(e, total)
+                    else:
+                        # a timed-out link would eat the next call's budget too: a link that is not the last is
+                        # skipped after one timeout, otherwise after two failures in a row; a 503 with a long
+                        # Retry-After is held for exactly that long
+                        threshold = 1 if (e.timeout and fail_fast) or retry_after > 15 else 2
+                        hold_s = max(_TRANSIENT_S, retry_after) if retry_after > 15 else _TRANSIENT_S
+                        _, hold = status.fail(h, e.state, str(e), counter="transient", threshold=threshold, hold_s=hold_s, started=started)
+                        if fail_fast or hold:
+                            raise _fail(_kept_hold(h, self.model, e.state) or e, total)
                 else:
                     status.fail(h, e.state, str(e))  # alone: no hold, the next call tries again
                 if attempt >= self.max_attempts:
                     break
+                # a 503 «no hosts for the model» is asked again not before its Retry-After; no pause runs past the
+                # generation's budget (the step takes its deterministic path instead)
+                wait = max(2.0**attempt, retry_after)
+                if wait > 15.0 or (deadline is not None and deadline - time.monotonic() < wait + _MIN_REQUEST_S):
+                    break
                 log.warning("provider call failed (attempt %d/%d): %s", attempt, self.max_attempts, e)
-                time.sleep(min(2**attempt, 8))
+                time.sleep(wait)
                 continue
             except ProviderError as e:
                 last_err = e
                 status.fail(h, "error", str(e))
-                if fail_fast:
+                if fail_fast or getattr(e, "no_retry", False):
+                    # a 400 / 413 / refusal of moderation: the same request gets the same answer — a chain asks its
+                    # next link, a single provider reports it at once
                     raise _fail(e, total)
                 if attempt >= self.max_attempts:
                     break
@@ -823,7 +961,7 @@ class OpenAICompatProvider:
                         raise _fail(ProviderError(f"{self.model}: no valid completion, the answer was cut off twice: {last_err}"), total)
                     cut_retried = True
                     attempt -= 1
-                    max_tokens = max(max_tokens, min(max_tokens * 2, self.max_tokens_cap or _CUT_MAX_TOKENS))
+                    max_tokens = max(max_tokens, min(max_tokens * 2, _CUT_MAX_TOKENS))
                     oai_messages = base_messages + [{"role": "user", "content": _CUT_RETRY}]
                     continue
                 log.warning("invalid JSON from model (attempt %d/%d): %s", attempt, self.max_attempts, str(e)[:300])
@@ -838,7 +976,11 @@ class OpenAICompatProvider:
                 )
         if isinstance(last_err, LinkUnavailable) and not in_chain and last_err.hold_s and last_err.state != "rate":
             # alone: a 402 / 401 / 403 / 404 on every attempt — the next calls of this minute skip the model. A
-            # per-minute state (Groq's 413 «request too large … tokens per minute») opens no hold: alone, those are
-            # never skipped (the pre-call check ignores them), so a hold would only show a pause that does not happen
+            # per-minute state opens no hold: alone, those are waited out (the pre-call check ignores them), so a hold
+            # would only show a pause that does not happen
             status.fail(h, last_err.state, str(last_err), hold_s=min(last_err.hold_s, _SINGLE_HOLD_S))
-        raise _fail(ProviderError(f"{self.model}: no valid completion after {self.max_attempts} attempts: {last_err}"), total)
+        if in_chain and isinstance(last_err, (TransientError, RateLimited)) and not getattr(last_err, "daily", False):
+            # the last link ran out of attempts on a passing trouble (congestion, a 5xx, the balance held by the
+            # requests in flight): said as such, so the chain may make its second pass
+            raise _fail(last_err, total)
+        raise _fail(ProviderError(f"{self.model}: no valid completion after {attempt} attempt{'' if attempt == 1 else 's'}: {last_err}"), total)

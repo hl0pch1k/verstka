@@ -98,17 +98,19 @@ class _Recorder:
 
         schema = kwargs.get("schema")
         label = kwargs.pop("skill", None)
+        if label and getattr(self.inner, "labels_calls", False):
+            kwargs["skill"] = label  # a recorder inside this one (the agent's in the generation's) names the call too
         rec = {"skill": label or getattr(schema, "__name__", None) or "text", "ok": False}
         t, sent = time.monotonic(), requests_sent()
         try:
             res = self.inner.complete(messages, **kwargs)
         except Exception as e:
             u = getattr(e, "usage", None)
-            rec.update(tokens_in=getattr(u, "prompt_tokens", 0) or 0, tokens_out=getattr(u, "completion_tokens", 0) or 0, error=str(e)[:120])
+            rec.update(tokens_in=getattr(u, "prompt_tokens", 0) or 0, tokens_out=getattr(u, "completion_tokens", 0) or 0, cost_rub=getattr(u, "cost_rub", None), error=str(e)[:120])
             raise
         else:
             u = getattr(res, "usage", None)
-            rec.update(ok=True, tokens_in=getattr(u, "prompt_tokens", 0) or 0, tokens_out=getattr(u, "completion_tokens", 0) or 0, attempts=getattr(res, "attempts", 1))
+            rec.update(ok=True, tokens_in=getattr(u, "prompt_tokens", 0) or 0, tokens_out=getattr(u, "completion_tokens", 0) or 0, cost_rub=getattr(u, "cost_rub", None), attempts=getattr(res, "attempts", 1))
             self.sink.append(getattr(res, "model", None) or self.model)
             return res
         finally:
@@ -136,17 +138,23 @@ def _recording(providers: Optional[ProviderRegistry], stats: Optional[list] = No
 
 
 def call_totals(stats: list) -> dict:
-    """What the model calls of a step cost: calls, HTTP requests, tokens in and out, failed calls, by skill."""
+    """What the model calls of a step cost: calls, HTTP requests, tokens in and out, failed calls, rubles (Polza's
+    usage.cost_rub; failed requests cost nothing; None when no call said what it cost — the final's VK inference),
+    by skill."""
     by: dict[str, dict] = {}
     for r in stats:
-        b = by.setdefault(r.get("skill") or "text", {"calls": 0, "requests": 0, "tokens_in": 0, "tokens_out": 0, "failed": 0, "seconds": 0.0})
+        b = by.setdefault(r.get("skill") or "text", {"calls": 0, "requests": 0, "tokens_in": 0, "tokens_out": 0, "failed": 0, "seconds": 0.0, "cost_rub": None})
         b["calls"] += 1
         b["requests"] += int(r.get("requests") or 0)
         b["tokens_in"] += int(r.get("tokens_in") or 0)
         b["tokens_out"] += int(r.get("tokens_out") or 0)
         b["failed"] += 0 if r.get("ok") else 1
         b["seconds"] = round(b["seconds"] + float(r.get("seconds") or 0.0), 2)
+        if r.get("cost_rub") is not None:
+            b["cost_rub"] = round((b["cost_rub"] or 0.0) + float(r["cost_rub"]), 4)
     tot = {k: sum(b[k] for b in by.values()) for k in ("calls", "requests", "tokens_in", "tokens_out", "failed")}
+    known = [b["cost_rub"] for b in by.values() if b["cost_rub"] is not None]
+    tot["cost_rub"] = round(sum(known), 4) if known else None
     return {**tot, "by_skill": by}
 
 
@@ -156,7 +164,7 @@ def _cost_of(stats: list) -> dict:
     if not stats:
         return {}
     t = call_totals(stats)
-    return {"calls_made": t["calls"], "requests": t["requests"], "tokens_in": t["tokens_in"], "tokens_out": t["tokens_out"], "failed_calls": t["failed"], "by_skill": t["by_skill"]}
+    return {"calls_made": t["calls"], "requests": t["requests"], "tokens_in": t["tokens_in"], "tokens_out": t["tokens_out"], "failed_calls": t["failed"], "cost_rub": t["cost_rub"], "by_skill": t["by_skill"]}
 
 
 def _event_sink(progress: Optional[ProgressFn]) -> Callable[[dict], None]:
@@ -342,6 +350,7 @@ def generate_variants(
         raise ValueError("either brief or outline is required")
     t0 = time.time()
     t_start = time.monotonic()  # the model budget counts from here: template analysis is part of the 5 minutes
+    gen_stats: list = []  # what every model call of this generation cost (run_manifest.usage)
     out_dir = Path(out_dir)
     strategies = strategies or list(STRATEGY_NAMES)
     all_strategies = load_strategies()
@@ -366,6 +375,8 @@ def generate_variants(
         if budget >= 2 * _MIN_MODEL_BUDGET_S:
             budget_end = max(budget_end, time.monotonic() + _MIN_MODEL_BUDGET_S)
         providers = providers.with_deadline(budget_end)
+        # every model call of this generation (the agent's, the planner's, the checks'): what it cost goes to usage
+        providers, _ = _recording(providers, gen_stats)
     ws = TemplateWorkspace.open(manifest.template_id, workspace_root)
     result = GenerateResult(template_id=manifest.template_id, manifest=manifest)
     facts: Optional[FactsExtraction] = None
@@ -650,6 +661,7 @@ def generate_variants(
             applied_fixes=audit_report.applied_fixes if audit_report else [],
             audit_summary=audit_report.summary.model_dump() if audit_report else {},
             slides=slides_info,
+            usage=_usage_of(gen_stats),
             extra={"warnings": v["warnings"], "exports": {k: str(p) for k, p in export_paths.items()}, "planner": vr.planner, **_pictures_extra(v)},
         )
         write_run_manifest(vdir / "run_manifest.json", rm)
@@ -737,6 +749,15 @@ def _audit_with_pictures(v: dict, manifest: TemplateManifest, ws: TemplateWorksp
     new.iterations = old.iterations
     new.recompute()
     return new
+
+
+def _usage_of(stats: list) -> dict:
+    """The generation's model calls so far (all variants share them: the plan, the checks): calls, HTTP requests,
+    tokens, failed calls, rubles (Polza's usage.cost_rub), by skill. Pictures cost in `pictures.cost_rub`."""
+    if not stats:
+        return {}
+    t = call_totals(list(stats))
+    return {"scope": "generation", **t}
 
 
 def _pictures_extra(v: dict) -> dict:

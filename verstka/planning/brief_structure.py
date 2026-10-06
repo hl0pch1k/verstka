@@ -1149,9 +1149,17 @@ def _read_block(block: _Block, reg: _Registry, all_numbers: list[float]) -> None
     inline: dict[int, str] = {}
     starts: list[tuple[int, tuple[str, float]]] = []  # «начиная с текущих 900 000»: (request index, first point)
     prev: Optional[str] = None
+    in_note = False  # inside a bracketed note of several sentences («[Место под изображение: … . На изображении — ….]»)
     k = 0
     while k < len(sentences):
         sent = sentences[k]
+        bare = sent.strip()
+        opened = bare.startswith("[") and bare.count("[") > bare.count("]")
+        note = in_note or opened or bool(_BRACKET_RE.match(bare))  # a sentence of the designer's note, not the author's request
+        if in_note and bare.count("]") > bare.count("["):
+            in_note = False  # the note closes in this sentence
+        elif opened:
+            in_note = True
         reqs = _chart_requests(sent) if spec is not None else []
         ch = _chain(sent, min_items=2 if reqs else 3)
         if ch is not None:
@@ -1228,8 +1236,9 @@ def _read_block(block: _Block, reg: _Registry, all_numbers: list[float]) -> None
             ph = photo_request(sent)
             if ph and (not spec.photo or spec.photo == "Фото"):
                 spec.photo = ph
-            # a request in the author's own words is their photo; a bracketed note only describes the picture
-            if not _BRACKET_RE.match(sent.strip()) and (ph or is_photo_instruction(sent)):
+            # a request in the author's own words is their photo; a bracketed note — of one sentence or several — only
+            # describes the picture
+            if not note and (ph or is_photo_instruction(sent)):
                 spec.photo_own = True
         prev = sent
         k += 1

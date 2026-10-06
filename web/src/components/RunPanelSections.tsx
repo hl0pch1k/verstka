@@ -22,7 +22,8 @@ const STAGE_TITLE: Record<string, string> = { other: "Очередь за дру
 export const stageLabel = (k: string) => STAGE_LABEL[k] ?? k;
 
 const ROLE_LABEL: Record<string, string> = { llm: "Тексты и план", vlm: "Проверка по картинке", embed: "Поиск похожего", audit: "Проверка" };
-const BACKEND_NAME: Record<string, string> = { openrouter: "OpenRouter", groq: "Groq", cloudru: "Cloud.ru", ollama: "Ollama", vllm: "vLLM" };
+// the service of a backend that names one (older runs' «openai_compat» served several hosts: no name for it)
+const BACKEND_NAME: Record<string, string> = { polza: "Polza" };
 
 export function Section({ title, count, actions, children, className }: { title: string; count?: ReactNode; actions?: ReactNode; children: ReactNode; className?: string }) {
   return (
@@ -120,7 +121,7 @@ export function Facts({ m, strategyTitle, plannedBy: by, planner, run }: { m: Ru
 
 type Link = { backend?: string; model?: string; label?: string; off?: boolean };
 
-/** «Qwen3.8-27B (OpenRouter)» → «Qwen3.8-27B · OpenRouter». */
+/** «Qwen3.8-27B (VK)» → «Qwen3.8-27B · VK». */
 const tidyLabel = (label: string) => label.replace(/\s*\(([^)]+)\)\s*$/, " · $1");
 
 /** The model of a role in words: the one that answered when the run knows it, else the first link of the chain. */
@@ -129,6 +130,8 @@ function modelName(p: RunManifest["providers"][string], answered?: string | null
   const chain = ((p as { chain?: Link[] }).chain ?? []).filter((l) => !l.off);
   const hit = (answered && chain.find((l) => l.model === answered)) || chain[0];
   if (hit) return tidyLabel(hit.label ?? hit.model ?? "модель");
+  const label = (p as { label?: string }).label;
+  if (label) return tidyLabel(label);  // a single model with its own name («Qwen3.8-27B (VK)» → «Qwen3.8-27B · VK»)
   const where = BACKEND_NAME[p.backend];
   return [p.model, where].filter(Boolean).join(" · ") || "модель";
 }

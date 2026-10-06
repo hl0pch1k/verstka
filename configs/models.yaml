@@ -1,148 +1,62 @@
-# Model roles → backends. Only open-weight models (Apache 2.0 / MIT, ≤35B per model).
-# Qualifying stage: a fallback chain of open models. Final: Qwen3.8-27B alone on VK inference
-# (configs/models.vk.yaml — one model, no chain; the code is the same).
+# Model roles → Polza.ai (https://polza.ai): one key (POLZA_API_KEY in .env), one ruble balance.
+# Only open weights with Apache 2.0 / MIT licences: text and vision ≤ 35B, pictures ≤ 20B (ТЗ: «Генеративные модели»,
+# star task 3.1). The organisers count the limit per model, not for the sum.
 #
-# The links are tried in order; the first valid answer wins. Every link but the last hands over at once when it
-# cannot answer; the last one keeps a short pause and one more try. A link is skipped for a while after
-#   402 (no credits) or 403 «key limit exceeded»        10 min
-#   404 / 401 / 403                                     30 min
-#   two upstream 429s in a row                           2 min
-#   two 5xx / connection errors in a row, or a timeout   1 min
-#   the free models' daily quota                         until 00:00 UTC (every free link of the key, not the paid one)
-#   the per-minute cap                                   till the minute window ends (every link of the pool)
-#   413 «request too large … tokens per minute» (Groq)   30 s
-# Holds are kept per account + model (verstka/providers/status.py): a congested free Qwen does not block Gemma.
-# If some link failed only for congestion / 5xx / a per-minute cap, every other failed link is on hold anyway and
-# ≥ 30 s of the budget are left, the chain makes one more pass after a 3-5 s pause (links on hold are skipped).
-# When every link is still on hold then, but the first hold ends within 30 s (a per-minute window), the chain waits it
-# out (at most three passes in all). Only then do the steps fall back to their deterministic twins. When only one link has a key, it works as a single
-# model (its own 3 attempts and waits, no long holds).
+#   main      qwen/qwen3.8-27b    Qwen3.8-27B   Apache 2.0, 27.8B, reads images — the model of the VK final
+#   backup    qwen/qwen3.6-27b    Qwen3.6-27B   Apache 2.0, 27.8B, reads images — answers when the main one cannot
+#   pictures  tongyi-mai/z-image  Z-Image       Apache 2.0, 6.15B + its Qwen3-4B text encoder ≈ 10B
 #
-# Links whose API key variable is empty are "off": skipped silently, no request, no error. So Groq and Cloud.ru
-# below cost nothing until GROQ_API_KEY / CLOUDRU_API_KEY is set in .env.
+# Polza sends each request to one of the model's hosts and moves to another host by itself when one fails. Hosts with
+# 4-bit weights (…/fp4) are left out (exclude_quantizations): Qwen garbled JSON on them. The list comes from Polza's
+# public catalog (read again every 6 hours); while the catalog is unavailable Polza routes freely.
 #
-#   1. qwen/qwen3.8-27b @ OpenRouter   paid, bf16/fp8 hosts only; needs credits, answers 402 until then
-#   2. qwen/qwen3.8-27b @ Groq          free plan (GROQ_API_KEY): 30 req/min, 8K tokens/min, 200K tokens/day
-#   3. qwen/qwen3.8-27b:free            the same model free on OpenRouter, one host (ModelRun) — often congested
-#   4. Qwen/Qwen3-32B @ Cloud.ru         paid in rubles (CLOUDRU_API_KEY), ≈ 3 ₽ per generation, text only — not in vlm
-#   5. Qwen3-VL-30B-A3B-Instruct @ Cloud.ru   the same key, reads images (the Cloud.ru link of the vlm chain)
-#   6. google/gemma-4-31b-it:free       Gemma 4 31B, Apache 2.0, multimodal, free (Google AI Studio host)
-#   7. google/gemma-4-26b-a4b-it:free   Gemma 4 26B-A4B (MoE, 4B active), Apache 2.0, multimodal, free
+# The chain asks the main model first. The backup answers when the main one cannot: Polza's per-minute or daily cap
+# of a model, every host of a model failing, an answer that does not pass the check. A link is skipped for a while
+# after
+#   402 (no money on the balance, or the spending limit of the key)   10 min
+#   404 / 401 / 403 (no such model, a refused key)                    30 min
+#   Polza's per-minute cap (429 with Retry-After)                      till the minute ends
+#   Polza's daily cap (429 with Retry-After till midnight, Moscow)     till midnight by Moscow time
+#   a 503 with a Retry-After over 15 s                                 that long
+#   a timeout of the main model                                        1 min at once
+#   two 429s of the hosts, or two 5xx / timeouts in a row             2 min / 1 min
+# A 402 while the balance is held by parallel requests (their reserve would cover this one) is never a hold: asked
+# again in seconds. A 400, a 413 or a refusal of moderation is not asked again and holds nothing. Failed requests cost
+# nothing.
 #
-# A local model can be the last link (works without internet and without quotas) — see configs/models.local.yaml.
-# Append to both chains below:
-#       - model: qwen3.5:9b            # exactly the tag you pulled: `ollama list`
-#         label: Qwen3.5 9B (локально)
-#         base_url: http://localhost:11434/v1
-#         api_key: ollama
-#         requests_per_minute: 0       # no per-minute cap for a local server
-#         timeout_s: 150
-#         extra_body: {}
+# Thinking is off (reasoning.effort none): the answers are JSON, and reasoning would be billed as output. The schema of
+# every answer is in the prompt (json_mode false); a cut-off or invalid answer is asked again (see openai_compat). The
+# temperature is each skill's own (skills/<name>/skill.yaml params).
+#
+# The final (top-10): the same Qwen3.8-27B on VK inference — configs/models.vk.yaml (VERSTKA_MODELS in .env).
 roles:
   llm: &llm
-    backend: openai_compat
-    base_url: https://openrouter.ai/api/v1
-    api_key: ${OPENROUTER_API_KEY}
-    json_mode: false  # the hosts garble response_format=json_object; the schema is in the prompt
-    temperature: 0.2
+    backend: polza
+    base_url: https://polza.ai/api/v1
+    api_key: ${POLZA_API_KEY}
+    json_mode: false
+    exclude_quantizations: [fp4]
+    extra_body:
+      reasoning: { effort: none }
     chain:
-      - &paid_qwen
-        model: qwen/qwen3.8-27b
-        label: Qwen3.8-27B (OpenRouter)
-        price_in_per_m: 0.42  # list price; the 8 bf16/fp8 hosts charge 0.15-0.45 in / 1.875-3.20 out per 1M tokens
-        price_out_per_m: 3.00
-        requests_per_minute: 60  # paid models are not under the free 20/min cap: a limiter bucket of their own
-        extra_body:
-          reasoning: { enabled: false }
-          # OpenRouter provider routing (a top-level request field next to `reasoning`): only hosts that serve the
-          # model in bf16 or fp8 (fp4 and hosts that do not disclose their precision are left out: the fp4 host
-          # garbled JSON); any of them may answer when another one is down
-          provider: { allow_fallbacks: true, quantizations: [bf16, fp8] }
-      - &groq_qwen
-        model: qwen/qwen3.8-27b
-        label: Qwen3.8-27B (Groq)
-        base_url: https://api.groq.com/openai/v1
-        api_key: ${GROQ_API_KEY}  # console.groq.com, free plan without a card; empty → this link is off
-        price_in_per_m: 0.0  # free plan (the Developer plan would be $0.80 / $4.00 per 1M)
-        price_out_per_m: 0.0
-        requests_per_minute: 20  # the free plan allows 30/min; 8K tokens/min is the tighter limit
-        max_tokens_cap: 3000  # a request's prompt + max_tokens must fit the 8K tokens per minute
-        json_mode: false
-        extra_body:
-          reasoning_effort: "none"  # Groq docs: "none" switches Qwen3.8-27B's thinking off
-      - &free_qwen
-        model: qwen/qwen3.8-27b:free
-        label: Qwen3.8-27B (бесплатно)
-        price_in_per_m: 0.0
-        price_out_per_m: 0.0
-        extra_body:
-          reasoning: { enabled: false }
-      - &cloudru_qwen
-        # First of Cloud.ru for text: in live checks (25.09.2026) it kept closest to the brief — the VL model wrote
-        # livelier headlines and was faster, but added claims the brief does not make («растёт экспоненциально»)
-        model: Qwen/Qwen3-32B
-        label: Qwen3 32B (Cloud.ru)
-        base_url: https://foundation-models.api.cloud.ru/v1
-        api_key: ${CLOUDRU_API_KEY}  # cloud.ru Foundation Models, Russian card; empty → this link is off
-        # 37.08 ₽ in / 148.29 ₽ out per 1M tokens (≈ 3 ₽ per generation); the cost in rubles is not in the USD manifest
-        # Cloud.ru answers 429 ModelArts.81114 («Too many requests») well below its documented 20 requests/s, and the
-        # cap is shared by every generation on the key: at most 40 a minute from this server, request starts ≥ 0.5 s
-        # apart (the variants' parallel calls go out one by one), and the chain waits a held minute window out
-        requests_per_minute: 40
-        min_interval_s: 0.5
-        extra_body: {}  # Cloud.ru documents no parameter to switch Qwen3's thinking off
-        # Qwen3's own soft switch (Qwen3-32B model card): "/no_think" in the system message turns thinking off for
-        # this link only; the empty <think></think> block the model still starts with is dropped from the answer
-        system_suffix: "/no_think"
-      - &cloudru_vl
-        # Cloud.ru's best model inside the rules (catalog of 2026-09-25): Qwen3-VL-30B-A3B-Instruct — Apache 2.0,
-        # 31.07B parameters, answers without a thinking phase, reads images (so it serves the vlm role too), 131K context.
-        # Qwen3.6-35B-A3B (Cloud.ru's own host) is newer but has 35.95B parameters — over the ≤35B rule, left out.
-        model: qwen/qwen3-vl-30b-a3b-instruct
-        label: Qwen3-VL 30B (Cloud.ru)
-        base_url: https://foundation-models.api.cloud.ru/v1
-        api_key: ${CLOUDRU_API_KEY}  # cloud.ru Foundation Models, Russian card; empty → this link is off
-        # 34.16 ₽ in / 136.64 ₽ out per 1M tokens (≈ 3 ₽ per generation); the cost in rubles is not in the USD manifest
-        requests_per_minute: 40  # the same key and the same cap as Qwen3-32B above (one limiter and one pacer)
-        min_interval_s: 0.5
-        extra_body: {}
-      # Gemma 4 thinks only when asked to (no `reasoning` sent); json_mode stays off like for the other links
-      - &gemma_31b
-        model: google/gemma-4-31b-it:free
-        label: Gemma 4 31B (бесплатно)
-        price_in_per_m: 0.0
-        price_out_per_m: 0.0
-      - &gemma_26b
-        model: google/gemma-4-26b-a4b-it:free
-        label: Gemma 4 26B A4B (бесплатно)
-        price_in_per_m: 0.0
-        price_out_per_m: 0.0
-  vlm:
-    <<: *llm
-    temperature: 0.1
-    # the same links without Cloud.ru's Qwen3-32B, which reads no images
-    chain: [*paid_qwen, *groq_qwen, *free_qwen, *cloudru_vl, *gemma_31b, *gemma_26b]
-  # Pictures inside slides (the organisers' star task): open weights, Apache 2.0 / MIT, at most 20B parameters.
-  # OpenRouter's image endpoint (POST /api/v1/images → data[].b64_json), the same OPENROUTER_API_KEY as the text roles;
-  # without the key both links are off and the slides keep their free places. What is asked and how: configs/images.yaml
-  #   1. FLUX.2 [klein] 4B — Black Forest Labs, Apache 2.0, 4B; paid (≈ $0.003–0.02 a picture), fast
-  #   2. Ming-Image-0.1-Design — inclusionAI, MIT, 6B, made for graphic design; free on OpenRouter
-  # Other hosts: backend openai_images (POST /images/generations: Together, Nebius, DeepInfra, a local server, VK
-  # inference) or hf_inference (Hugging Face: Tongyi-MAI/Z-Image-Turbo 6B, Qwen/Qwen-Image-2512 20B) — see MODELS.md.
+      - model: qwen/qwen3.8-27b
+        label: Qwen3.8-27B
+      - model: qwen/qwen3.6-27b
+        label: Qwen3.6-27B
+  vlm: *llm  # the same two models: both read images
+  # Pictures inside slides (the star task): the places the author described («[Место под изображение: …]»), graded to
+  # the template's palette. Polza's Media API: POST /media {model, input: {prompt, aspect_ratio}} → the picture's
+  # link (at once, or after polling GET /media/{id}); 1.40 ₽ a picture. Without the key the slides keep their free
+  # places. What is asked and how: configs/images.yaml.
   t2i:
-    backend: openrouter_images
-    base_url: https://openrouter.ai/api/v1
-    api_key: ${OPENROUTER_API_KEY}
-    resolution: "1K"
+    backend: polza_media
+    base_url: https://polza.ai/api/v1
+    api_key: ${POLZA_API_KEY}
+    model: tongyi-mai/z-image
+    label: Z-Image
     timeout_s: 90
-    chain:
-      - model: black-forest-labs/flux.2-klein-4b
-        label: FLUX.2 [klein] 4B (OpenRouter)
-      - model: inclusionai/ming-image-0.1-design
-        label: Ming-Image 0.1 Design (OpenRouter, бесплатно)
 limits:
-  max_concurrency: 4  # model calls side by side per step (Cloud.ru's per-minute cap is shared by everyone on the key)
-  requests_per_minute: 18  # OpenRouter's free models: 20 requests/min per account; the free links share this bucket
+  max_concurrency: 4  # model calls side by side per step
   timeout_s: 120
   max_attempts: 3
   time_budget_s: 210  # model time per generation; past it the deterministic steps take over (render, checks and export fit the rest of the 5 minutes)

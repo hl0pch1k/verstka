@@ -106,10 +106,23 @@ def build_prompt(ask: ImageAsk, pal: Optional[Palette], cfg: Optional[dict] = No
     context = str(pcfg.get("context", "")).format(headline=_clean(ask.headline, 120) or "—", deck=_clean(ask.deck, 120) or "—")
     style_line = str((pcfg.get("styles") or {}).get(style, ""))
     colors = palette_words(pal) if pal is not None else ""
-    text = str(pcfg.get("template", "{subject}. {context}. {style}. Colour palette: {colors}. {rules}.")).format(
-        subject=subject, context=context, style=style_line, colors=colors or "neutral", rules=str(pcfg.get("rules", "No text")),
-    )
-    text = re.sub(r"\.\s*\.", ".", re.sub(r"\s+", " ", text)).strip()
+    template = str(pcfg.get("template", "{subject}. {context}. {style}. Colour palette: {colors}. {rules}."))
+    rules = str(pcfg.get("rules", "No text"))
+
+    def compose(subj: str, ctx: str) -> str:
+        text = template.format(subject=subj, context=ctx, style=style_line, colors=colors or "neutral", rules=rules)
+        return re.sub(r"\.\s*\.", ".", re.sub(r"\s+", " ", text)).strip()
+
+    text = compose(subject, context)
+    # the host's limit on a prompt (Polza: 1000 characters): the slide's context goes first, then the end of the
+    # subject — the style, the palette and the rules (no text in the picture) always stay
+    limit = int(pcfg.get("max_chars", 1000) or 0)
+    if limit and len(text) > limit:
+        text = compose(subject, "")
+        if len(text) > limit:
+            keep = max(40, len(subject) - (len(text) - limit) - 1)
+            subject = subject[:keep].rsplit(" ", 1)[0].rstrip(" ,.;:—-") or subject[:keep]
+            text = compose(subject, "")
     return text, style
 
 
