@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from verstka.analysis.xmlns import local_name, q
+from verstka.planning.brief_structure import strip_end_period
 
 log = logging.getLogger(__name__)
 
@@ -1379,7 +1380,7 @@ def _read_slide(n: int, s: Any, W: float, H: float, repeats: _Repeats, vectors: 
         body = [p.text for p in subtitle] + [p.text for p in rest]
         if not title and not body:
             return ""
-        section = "\n\n".join([f"Слайд {n}. {title}".rstrip(". ").rstrip() if title else f"Слайд {n}.", *body])
+        section = "\n\n".join([strip_end_period(f"Слайд {n}. {title}") if title else f"Слайд {n}.", *body])
     said = _new_notes(notes, section)
     if said:
         section += f"\n\n[{SPEAKER_NOTES}: {said}]"

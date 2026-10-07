@@ -2209,16 +2209,21 @@ class Composer:
             if grid[3] > fs + 0.05:
                 cols = 2
                 cw, pad, inner, fs, one_line = grid
-        if n == 4 and cols == 4 and avail.h > 0.45 * area.h:
+        if n == 4 and cols == 4:
             # four tiles in a narrow column (beside a photo) break their labels inside a word («Трениро / вочный»): the
-            # figures read as a 2×2 block, each label on whole words
+            # figures read as a 2×2 block, each label on whole words. A label word no size of the template sets whole
+            # in a tile of the row (Классика: «Температура» in 68 pt tiles) takes the block even when the column is
+            # short — whole words before large figures
             labels = [distinct_label(x.value, x.label, self.o.headline) for x in numbers]
             if not self.fits_width(labels, k.body, False, inner):
-                grid = layout(2)
-                ginner = grid[2]
-                if self.fits_width(labels, k.body, False, ginner):
-                    cols = 2
-                    cw, pad, inner, fs, one_line = grid
+                readable = [x for x in k.sizes if x >= k.small - 0.05]
+                never_whole = not any(self.fits_width(labels, x, False, inner) for x in readable)
+                if avail.h > 0.45 * area.h or never_whole:
+                    grid = layout(2)
+                    ginner = grid[2]
+                    if self.fits_width(labels, k.body, False, ginner) or (never_whole and any(self.fits_width(labels, x, False, ginner) for x in readable)):
+                        cols = 2
+                        cw, pad, inner, fs, one_line = grid
         stacked = False
         if any(splits) and fs < 1.6 * k.h2:
             # a row of figures set at a text size (smaller than their labels) reads as captions: stack the words

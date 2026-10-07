@@ -374,3 +374,25 @@ def test_a_chart_that_counts_items_as_one_each_is_no_data_and_the_slide_keeps_it
     assert v.content.chart is None and v.kind in (K.table, K.cards)
     assert not any(all(x == 1 for x in ser.values) for ser in out.series)
     assert any("a count of items, not data" in w for w in warnings)
+
+
+def test_the_cover_fields_of_a_read_back_deck_never_show_as_its_text():
+    """«Улучшить готовую» writes the old cover in the brief's own form («Слайд 1. Титульный / Название: «…». /
+    Подзаголовок: …»): the fields are the title and the subtitle — never a line under them, whoever kept them."""
+    from verstka.planning.brief_structure import read_structure
+    from verstka.planning.compile import _cover, _Run, cover_description
+
+    text = (
+        "Слайд 1. Титульный\nНазвание: «Отчёт отдела продаж за III квартал 2026».\nПодзаголовок: ООО «Северный ветер» · подготовил отдел продаж.\n\n"
+        "Слайд 2. Итоги квартала\n\n- Выручка за квартал — 48,6 млн рублей\n- Клиентов стало 1 610\n"
+    )
+    st = read_structure(text)
+    assert cover_description(st, 1, "ООО «Северный ветер» · подготовил отдел продаж") is None
+    o = DeckOutline(title="T", slides=[
+        OutlineSlide(id="sl1", kind=K.title, headline="Отчёт", spec_ref=1, content=SlideContent(paragraphs=["Название: «Отчёт отдела продаж за III квартал 2026». Подзаголовок: ООО «Северный ветер» · подготовил отдел продаж."])),
+        OutlineSlide(id="sl2", kind=K.bullets, headline="Итоги квартала", spec_ref=2, content=SlideContent(bullets=["Выручка за квартал — 48,6 млн рублей"])),
+    ])
+    _cover(o, st, _Run(o, None))
+    cover = o.slides[0]
+    assert cover.headline == "Отчёт отдела продаж за III квартал 2026" and not cover.content.paragraphs
+    assert (cover.subtitle or "").startswith("ООО «Северный ветер»")

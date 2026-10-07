@@ -841,6 +841,8 @@ def _cover(o: DeckOutline, structure: BriefStructure, run: _Run) -> None:
         o.subtitle = sub
     cover = o.slides[0] if o.slides and o.slides[0].kind == K.title else None
     if cover is not None:
+        # a field line the designer kept as the cover's text («Название: «…». Подзаголовок: …») is its heading again
+        cover.content.paragraphs = [x for x in cover.content.paragraphs if not _COVER_FIELD_RE.match(x or "")]
         if title:
             cover.headline = title
         if sub:
@@ -891,6 +893,9 @@ def cover_goal(structure: BriefStructure, spec_ref: Optional[int] = None) -> Opt
     return None
 
 
+_COVER_FIELD_RE = re.compile(r"(?im)^[ \t]*(?:название|подзаголовок|заголовок|тема|title|subtitle)[ \t]*:.*$")
+
+
 def cover_description(structure: BriefStructure, spec_ref: Optional[int], subtitle: Optional[str]) -> Optional[str]:
     """The line of the cover's description under its subtitle when it states no goal («Учебный проект о том, как
     датчики, программирование и анализ данных помогают…»): its first paragraph past the title and the subtitle, in
@@ -898,7 +903,9 @@ def cover_description(structure: BriefStructure, spec_ref: Optional[int], subtit
     specs = [sp for sp in structure.specs if (spec_ref is not None and sp.number == spec_ref) or (spec_ref is None and _is_cover(sp))]
     sub = " ".join((subtitle or "").split()).lower().rstrip(".")
     for sp in specs[:1]:
-        paras = [" ".join(x.split()) for x in re.split(r"\n\s*\n", sp.text or "") if x.strip()]
+        # the cover's fields («Название: …», «Подзаголовок: …») are its title and subtitle, never a line under them
+        text = _COVER_FIELD_RE.sub("", sp.text or "")
+        paras = [" ".join(x.split()) for x in re.split(r"\n\s*\n", text) if x.strip()]
         for para in paras:
             plain = para.rstrip(".").lower()
             if not plain or plain == sub or (sp.title and plain == " ".join(sp.title.split()).lower().rstrip(".")):

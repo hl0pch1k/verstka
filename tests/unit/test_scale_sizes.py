@@ -135,3 +135,30 @@ def test_code_size_takes_the_templates_step_before_a_half_point():
     # nothing of the scale fits: half points under its smallest step, as before
     size, ok = code_size(lines, "Consolas", 400.0, 10 * 9.1 * 1.25, 16.0, scale=[12.0, 14.0, 16.0])
     assert ok and size == 9.0
+
+
+def test_four_tiles_with_words_no_size_keeps_whole_take_a_two_by_two_block(big_env):
+    """Классика s8 (live): four tiles in a short column beside a photo were 68 pt wide — «Температура» stood whole at no
+    size of the template, and the autofix shrank the labels one by one to four sizes. The tiles take a 2×2 block: one
+    label size, every word whole."""
+    deck, manifest, _ = big_env
+    nums = [NumberCallout(value=v, label=l) for v, l in [("25,4 °C", "Температура воздуха"), ("67%", "Влажность воздуха"), ("72%", "Заполнение бака"), ("40 с", "Обновление данных")]]
+    extra = ["Графики за сутки рядом с текущими значениями", "Предупреждения объясняют причину и требуемое действие"]
+    o = OutlineSlide(id="k", kind=PatternKind.stat_row, headline="Панель показывает текущие показания", content=SlideContent(numbers=nums, bullets=extra, photo_slot="Фото"))
+    slide = DeckBuilder(deck).add_blank_slide(6)
+    kit = Kit(manifest, BIG_W, BIG_H, "FFFFFF")
+    comp = Composer(slide, kit, o, DeckOutline(title="T", slides=[o], strategy="structured"), "structured", manifest)
+    area = Bbox(x=int(1000 * EMU_PER_PT), y=int(400 * EMU_PER_PT), w=int(420 * EMU_PER_PT), h=int(330 * EMU_PER_PT))
+    n0 = len(comp.cv.tree)
+    comp.kpis(area, nums, extra)
+    labels = [el for el in list(comp.cv.tree)[n0:] if (el.find(".//" + q("p:cNvPr")).get("name") or "").startswith("Label")]
+    assert len(labels) == 4
+    assert len({element_bbox(el)[0] for el in labels}) == 2  # two columns
+    sizes = {int(r.get("sz")) / 100 for el in labels for r in el.iter(q("a:rPr")) if r.get("sz")}
+    assert len(sizes) == 1
+    size = sizes.pop()
+    for el in labels:
+        x, y, w, h = element_bbox(el)
+        for r in el.iter(q("a:t")):
+            for word in (r.text or "").split(" "):
+                assert text_width_pt(word, kit.font, size, False) <= w / EMU_PER_PT * 0.97, (word, size)

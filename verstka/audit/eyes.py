@@ -491,11 +491,17 @@ def look(
                             said = [v for v, _ in votes]
                             if said == ["new", "new"]:
                                 verdicts.append((oid, "new", next((why for v, why in votes if why), "")))
-                            elif "new" in said and "old" in said:
+                            elif "new" in said:
+                                # chosen when shown in one order only: the position of the picture chose, not the model
                                 verdicts.append((oid, "same", "модель выбрала новую вёрстку только в одном порядке сравнения"))
+                            elif said == ["old", "old"]:
+                                why = next((why for v, why in votes if why), "")
+                                verdicts.append((oid, "same", f"модель сочла её лучше — {_lower(why)}" if why else "модель сочла её лучше"))
+                            elif None in said:
+                                verdicts.append((oid, "same", next((why for v, why in votes if v is None and why), "сравнение не удалось")))
                             else:
-                                why = next((why for v, why in votes if v in ("old", "same") and why), None) or next((why for v, why in votes if why), "")
-                                verdicts.append((oid, "same", why or "модель не выбрала новую вёрстку"))
+                                # «same» in at least one order (its words may even praise the new layout): no clear gain
+                                verdicts.append((oid, "same", "модель не увидела, что новая вёрстка лучше"))
                     back = [(oid, why) for oid, v, why in verdicts if v != "new"]
                     for oid, why in back:
                         i, res = moved.pop(oid)

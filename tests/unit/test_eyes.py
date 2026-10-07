@@ -151,13 +151,13 @@ def test_the_old_layout_stays_when_the_model_does_not_prefer_the_new_one_and_its
     k = _target(v, manifest, ws, tmp_path)
     before = v.plan.slides[k - 1].model_copy(deep=True)
     report, plan, outline, rr, seen, events = _look(v, manifest, ws, _model(k, False, []))
-    assert not seen.fixed and [x["slide"] for x in seen.kept] == [k] and seen.kept[0]["why"] == "прежняя аккуратнее"
+    assert not seen.fixed and [x["slide"] for x in seen.kept] == [k] and seen.kept[0]["why"] == "модель сочла её лучше — прежняя аккуратнее"
     after = plan.slides[k - 1]
     assert (after.pattern_id, after.mode, after.composition) == (before.pattern_id, before.mode, before.composition)
     remark = [i for i in report.issues if i.check_id == "design_review"]
     assert len(remark) == 1 and remark[0].slide == k and remark[0].kind == "model" and remark[0].severity == "warn"
     assert "Слова разорваны посередине (карточки)" in remark[0].message
-    assert any(s == k and m.endswith("| Оставил прежнюю вёрстку: прежняя аккуратнее.") for s, m in events)
+    assert any(s == k and m.endswith("| Оставил прежнюю вёрстку: модель сочла её лучше — прежняя аккуратнее.") for s, m in events)
 
 
 def test_a_clean_deck_is_left_as_it_is(variant, tmp_path):

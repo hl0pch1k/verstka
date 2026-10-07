@@ -145,7 +145,7 @@ def _stems(text: str) -> set[str]:
 def _clean(text: str) -> str:
     """A label as a slide shows it: no list marker, no end punctuation, no wrapping quotes, first letter up."""
     t = re.sub(r"^\s*(?:[—–\-•*]|\d+[.)])\s+", "", text.strip())
-    t = t.strip().rstrip(".;:,").strip()
+    t = strip_end_period(t.strip().rstrip(";:,").strip())
     if len(t) >= 2 and t[0] in "«\"“" and t[-1] in "»\"”" and t.count("«") <= 1:
         t = t[1:-1].strip()
     return H.cap_first(t)
@@ -165,15 +165,24 @@ def _lead_title(text: str) -> str:
     return H.cap_first(_unquote(first))
 
 
+def strip_end_period(text: str) -> str:
+    """The text without its final full stop(s) — unless the point closes an abbreviation (`heuristics.ABBR_END_RE`:
+    «Выручка по месяцам, млн руб.», «Итоги за 2025 г.»)."""
+    t = (text or "").rstrip()
+    while t.endswith(".") and not H.ABBR_END_RE.search(t):
+        t = t[:-1].rstrip()
+    return t
+
+
 def _unquote(text: str) -> str:
-    t = text.strip().rstrip(".;").strip()
+    t = strip_end_period(text.strip().rstrip(";").strip())
     pairs = {"«": "»", '"': '"', "“": "”", "„": "“"}
     if len(t) >= 2 and t[0] in pairs and t.endswith(pairs[t[0]]):
         inner = t[1:-1]
         # «А» и «Б» is two quotes, not one wrapped text
         if not (t[0] == "«" and "»" in inner and inner.index("»") < inner.rfind("«") if "«" in inner else False):
             t = inner.strip()
-    return t.rstrip(".").strip()
+    return strip_end_period(t).strip()
 
 
 def _plural(n: int, one: str, few: str, many: str) -> str:

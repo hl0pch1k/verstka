@@ -383,3 +383,12 @@ def test_a_slide_count_is_read_only_where_the_author_sets_it():
         assert parse_brief_text(text).slide_count is None, text
     for text, n in (("Презентация на 8 слайдов о продукте.", 8), ("Сделай, пожалуйста, 12 слайдов о компании.", 12), ("Make a 9-slide deck about the company.", 9), ("Не более 6 слайдов.", 6)):
         assert parse_brief_text(text).slide_count == n, text
+
+
+def test_a_slide_title_keeps_the_point_of_its_closing_abbreviation():
+    """«Выручка по месяцам, млн руб.» keeps its point (a deck read back writes titles as they stood); a plain title
+    loses its full stop as before."""
+    from verstka.planning.brief_structure import read_structure
+
+    st = read_structure("Слайд 1. Выручка по месяцам, млн руб.\n\nТекст слайда.\n\nСлайд 2. Итоги квартала.\n\nТекст.\n\nСлайд 3. Итоги за 2025 г.\n\nТекст.")
+    assert [sp.title for sp in st.specs] == ["Выручка по месяцам, млн руб.", "Итоги квартала", "Итоги за 2025 г."]
