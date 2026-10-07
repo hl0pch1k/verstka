@@ -660,8 +660,15 @@ def _improve_source(m: TemplateManifest, name: str) -> dict:
     from verstka.ingest.deck_text import deck_text, keep_pictures
 
     ws = store.workspace(m.template_id)
-    dt = deck_text(ws.source)
-    keep_pictures(dt, ws.dir / "source_images")
+    try:
+        dt = deck_text(ws.source)
+    except Exception as e:  # noqa: BLE001 - the interface says it in Russian; the deck stays in the library as a template
+        log.warning("deck text not read: %s", ws.source, exc_info=True)
+        raise ValueError("Не удалось прочитать текст презентации — она добавлена как шаблон") from e
+    try:
+        keep_pictures(dt, ws.dir / "source_images")
+    except Exception:  # noqa: BLE001 - the text stands; the places of its pictures stay free
+        log.warning("pictures of the deck not kept", exc_info=True)
     audit = None
     problems: list[dict] = []
     try:
@@ -683,10 +690,15 @@ def _improve_source(m: TemplateManifest, name: str) -> dict:
 
 
 def _slide_titles(brief: str) -> dict[int, str]:
-    """«Слайд N. Заголовок» lines of a read-back deck: slide number → its title."""
+    """«Слайд N. Заголовок» lines of a read-back deck: slide number → its title (a cover written as «Слайд 1.
+    Титульный» / «Название: «…».» by its name). A heading line ends where its line ends."""
     out = {}
-    for m in re.finditer(r"^Слайд (\d+)\.\s*(.*)$", brief or "", re.M):
-        out[int(m.group(1))] = m.group(2).strip()
+    for m in re.finditer(r"^Слайд[ \t]+(\d+)\.[ \t]*(.*)$", brief or "", re.M):
+        title = m.group(2).strip()
+        named = re.match(r"\n[ \t]*Название:[ \t]*(.+)$", (brief or "")[m.end() :], re.M)
+        if named and (not title or title == "Титульный"):
+            title = named.group(1).strip().rstrip(".").strip().strip("«»").strip()
+        out[int(m.group(1))] = title
     return out
 
 

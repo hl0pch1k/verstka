@@ -121,3 +121,24 @@ def test_an_old_deck_uploaded_to_improve_comes_back_as_its_text_and_its_audit(cl
     assert job["status"] == "done", job["error"]
     g = c.get(f"/api/generations/{r.json()['generation_id']}").json()
     assert g["improved_from"]["name"] == "old.pptx" and g["eyes"] is True
+
+
+def test_an_old_deck_whose_text_cannot_be_read_says_so_in_russian_and_the_titles_of_its_text(client, monkeypatch, tmp_path):
+    """«Улучшить готовую»: a deck whose text cannot be read stays a template, and the interface says why in Russian
+    (never an English exception); the titles of a read-back text end with their line («Слайд 3.» over a paragraph)."""
+    import types
+
+    import verstka.ingest.deck_text as D
+
+    c, mod = client
+
+    def broken(path):
+        raise KeyError("no relationship with key 'rId777'")
+
+    monkeypatch.setattr(D, "deck_text", broken)
+    monkeypatch.setattr(mod.store, "workspace", lambda tid: types.SimpleNamespace(source=tmp_path / "source.pptx", dir=tmp_path))
+    with pytest.raises(ValueError) as e:
+        mod._improve_source(types.SimpleNamespace(template_id="t1"), "old.pptx")
+    assert str(e.value) == "Не удалось прочитать текст презентации — она добавлена как шаблон"
+    brief = "Слайд 1. Титульный\nНазвание: «Итоги квартала».\n\nСлайд 2.\n\nВыручка выросла на 34%.\n\nСлайд 3. Планы\n\nТекст.\n"
+    assert mod._slide_titles(brief) == {1: "Итоги квартала", 2: "", 3: "Планы"}

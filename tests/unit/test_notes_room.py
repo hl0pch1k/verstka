@@ -102,3 +102,100 @@ def test_the_audit_reads_the_typesetters_minus_and_ranges():
 
     for line in ("Эксперимент: -31,25% воды, -12,5 ч ручной работы в месяц", "Рост 5-6 тыс. гостей в месяц", "-5 °C ночью"):
         assert _present(line, _norm_text(typeset(line))), (line, typeset(line))
+
+
+# ---------------------------------------------------------------------------------------------- the review of 3.0 (R4)
+
+ROWS10 = [["Покупки в день", "100", "115", "+15%"], ["Средний чек", "300 рублей", "330 рублей", "+10%"], ["Доля чеков с едой", "20%", "30%", "+10 п. п."],
+          ["Месячная выручка", "900 000 рублей", "1 138 500 рублей", "+26,5%"], ["Переменные расходы", "315 000 рублей", "375 705 рублей", "+19,3%"],
+          ["Постоянные расходы", "465 000 рублей", "508 000 рублей", "+9,2%"], ["Списания продуктов", "27 000 рублей", "18 000 рублей", "−33%"],
+          ["Операционная прибыль", "120 000 рублей", "254 795 рублей", "+112%"], ["Операционная рентабельность", "13,3%", "22,4%", "+9,1 п. п."],
+          ["Возвращающиеся гости", "25%", "35%", "+10 п. п."]]
+
+
+def _two_tables():
+    big = OutlineSlide(id="big", kind=PatternKind.table, headline="Десять показателей кофейни: сейчас и через полгода",
+                       takeaway="Прибыль растёт быстрее выручки: постоянные расходы растут медленнее, чем продажи",
+                       content=SlideContent(table=TableData(columns=["Показатель", "Сейчас", "Цель", "Изменение"], rows=ROWS10),
+                                            bullets=["Расчёт на 30 дней в месяце", "Цены поставщиков без изменений", "Налоги и кредиты не учтены"]))
+    small = OutlineSlide(id="sm", kind=PatternKind.table, headline="Три сценария запуска", content=SlideContent(table=TableData(
+        columns=["Сценарий", "Покупки в день", "Прибыль в месяц"], rows=[["Осторожный", "105", "160 000 рублей"], ["Базовый", "115", "254 795 рублей"], ["Смелый", "125", "330 000 рублей"]])))
+    return big, small
+
+
+def _render_in(env, deck_slides: list[OutlineSlide], o: OutlineSlide, strategy: str):
+    deck, manifest, ws = env
+    outline = DeckOutline(title="T", strategy=strategy, slides=deck_slides)
+    return render_synth(DeckBuilder(deck), LayoutSlide(outline_id=o.id, mode="synth", composition="table"), o, manifest, ws, outline)
+
+
+@pytest.mark.parametrize("strategy", ["structured", "compact", "visual"])
+def test_a_table_of_the_deck_is_never_set_at_another_tables_dense_size(env, strategy):
+    """MyBrand compact s3: a three-row table on an almost empty slide stepped from 22.5 to 17.5 pt — the deck's one table
+    size was measured with the steps under the body size a ten-row table of another slide took. The deck's size is
+    measured on the regular ladder (the small size only from 2.2 % of the slide height); the steps are that slide's."""
+    deck, manifest, ws = env
+    _small_under_floor(manifest, manifest.slide_size.h / EMU_PER_PT)
+    from verstka.rendering.compose import Kit
+
+    kit = Kit(manifest, manifest.slide_size.w, manifest.slide_size.h, "FFFFFF")
+    big, small = _two_tables()
+    slide, _ = _render_in(env, [big, small], small.model_copy(deep=True), strategy)
+    assert _table_size(slide) >= kit.body - 0.05, (_table_size(slide), kit.body)
+
+
+@pytest.mark.parametrize("strategy", ["structured", "compact", "visual"])
+def test_the_lines_under_a_table_are_never_larger_than_the_table(env, strategy):
+    """MyBrand s9: the table stepped from 22.5 to 17.5 pt to keep its conclusion, the lines under it stayed at 22.5 pt —
+    the hierarchy inverted. The lines under a table are never set larger than the table; a dense setting stays only
+    where it brings the lines onto the slide (VK Tech compact s2: a ten-row table at 8 pt for lines that left anyway)."""
+    deck, manifest, ws = env
+    _small_under_floor(manifest, manifest.slide_size.h / EMU_PER_PT)
+    from verstka.rendering.compose import Kit
+
+    kit = Kit(manifest, manifest.slide_size.w, manifest.slide_size.h, "FFFFFF")
+    big, small = _two_tables()
+    o = big.model_copy(deep=True)
+    slide, warnings = _render_in(env, [big, small], o, strategy)
+    size = _table_size(slide)
+    lines = [sh for sh in slide.shapes if sh.has_text_frame and sh.name.startswith("Note")]
+    sizes = {r.font.size.pt for sh in lines for p in sh.text_frame.paragraphs for r in p.runs if r.font.size is not None and r.text.strip()}
+    assert not sizes or max(sizes) <= size + 0.05, (sizes, size, warnings)
+    aloud = "• " in (o.notes or "")
+    assert not aloud or size >= kit.small - 0.05, (size, warnings)  # said aloud anyway: the table keeps its size
+
+
+def test_a_table_on_a_sample_never_lies_over_the_slides_lines(tmp_path):
+    """Кофейня s2: a list sample (one text box under the heading) took the slide's three lines and its conclusion, and
+    the ten-row table was drawn over them — the gate reads text over text, not a table over text. A native object that
+    would lie over the slide's own text fails on such a sample: the renderer takes another one or composes the slide."""
+    from pptx import Presentation as _P
+    from pptx.util import Emu as _E, Pt as _Pt
+
+    from verstka.analysis.manifest import analyze_template
+    from verstka.ingest.workspace import TemplateWorkspace
+    from verstka.rendering.clone import render_clone
+
+    W, H = 12192000, 6858000
+    prs = _P()
+    prs.slide_width, prs.slide_height = _E(W), _E(H)
+    s1 = prs.slides.add_slide(prs.slide_layouts[0])
+    s1.shapes.title.text = "Название"
+    s1.placeholders[1].text = "Подзаголовок"
+    s2 = prs.slides.add_slide(prs.slide_layouts[5])
+    s2.shapes.title.text = "Заголовок слайда"
+    box = s2.shapes.add_textbox(_E(int(W * 0.05)), _E(int(H * 0.25)), _E(int(W * 0.9)), _E(int(H * 0.65)))
+    box.text_frame.word_wrap = True
+    box.text_frame.text = "Первый тезис списка"
+    for t in ("Второй тезис списка", "Третий тезис списка"):
+        box.text_frame.add_paragraph().text = t
+    for p in box.text_frame.paragraphs:
+        p.runs[0].font.size = _Pt(18)
+    prs.save(tmp_path / "list.pptx")
+    manifest = analyze_template(tmp_path / "list.pptx", workspace_root=tmp_path / "ws", use_llm=False, use_vlm=False, render=False)
+    ws = TemplateWorkspace.open(manifest.template_id, tmp_path / "ws")
+    pattern = next(p for p in manifest.patterns if p.source_slide == 2)
+    big, _ = _two_tables()
+    o = big.model_copy(update={"takeaway": None})
+    with pytest.raises(RuntimeError, match="lie over the slide's text"):
+        render_clone(DeckBuilder(tmp_path / "list.pptx"), LayoutSlide(outline_id="big", mode="clone", pattern_id=pattern.id), o, pattern, manifest, ws, DeckOutline(title="T", slides=[o]))

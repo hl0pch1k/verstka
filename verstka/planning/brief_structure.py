@@ -196,7 +196,7 @@ def sentences_of(text: str) -> list[str]:
 # ------------------------------------------------------------------ slide specs
 
 _SPEC_HEAD_RE = re.compile(
-    r"^\s*(?:#{1,6}\s*)?(?:\*\*)?\s*(?:слайд|slide)\s*№?\s*(?P<n>\d{1,2})\s*(?:\*\*)?\s*(?:[.:)—–-]\s*|\s+|$)(?P<title>.*?)\s*(?:\*\*)?\s*$",
+    r"^\s*(?:#{1,6}\s*)?(?:\*\*)?\s*(?:слайд|slide)\s*№?\s*(?P<n>\d{1,3})\s*(?:\*\*)?\s*(?:[.:)—–-]\s*|\s+|$)(?P<title>.*?)\s*(?:\*\*)?\s*$",
     re.I,
 )
 _NUM_HEAD_RE = re.compile(r"^\s*(?:#{1,6}\s*)?(?P<n>\d{1,2})[.)]\s+(?P<title>\S.{0,90})$")
@@ -225,7 +225,7 @@ def _md_heads(lines: list[str]) -> list[tuple[int, int, str]]:
     return [(i, k, _clean(_SLIDE_MARK_RE.sub("", t).strip(" *"))) for k, (i, t) in enumerate(heads, 1)]
 
 
-_SLIDE_MARK_RE = re.compile(r"^\s*(?:\*\*)?\s*(?:слайд|slide)\s*№?\s*\d{1,2}\s*(?:\*\*)?\s*[.:)—–-]?\s*", re.I)
+_SLIDE_MARK_RE = re.compile(r"^\s*(?:\*\*)?\s*(?:слайд|slide)\s*№?\s*\d{1,3}\s*(?:\*\*)?\s*[.:)—–-]?\s*", re.I)
 
 
 def _head_like(title: str) -> bool:
@@ -258,6 +258,14 @@ def _spec_heads(lines: list[str], text: str, md: bool = False) -> list[tuple[int
             return heads
         log.info("slide numbering of the brief repeats or goes back (%s): the slides are taken in the author's order", [h[1] for h in heads])
         return [(i, k, t) for k, (i, _, t) in enumerate(heads, 1)]
+    if len(heads) == 1 and heads[0][2] and _head_like(heads[0][2]):
+        # one dictated slide (a deck of one slide read back): the text opens with its «Слайд N. Заголовок» and goes on
+        # under it, and asks for no more slides
+        i = heads[0][0]
+        cm = _COUNT_RE.search(text)
+        more = cm is not None and int(next(g for g in cm.groups() if g)) > 1
+        if not any(ln.strip() for ln in lines[:i]) and any(ln.strip() for ln in lines[i + 1 :]) and not more:
+            return heads
     if md:
         got = _md_heads(lines)
         if got:
@@ -1303,6 +1311,31 @@ def _front_matter(text: str) -> tuple[dict, str]:
     return meta, text[m.end() :]
 
 
+# a slide's speaker notes in the brief («[Заметки докладчика: …]», a deck read back by ingest/deck_text.py): the slide's
+# notes (faithful.read_slide `notes`), never its text — no figure, request or rule of the slide is read from them
+_SPEAKER_LINE_RE = re.compile(r"^\s*\[\s*(?:заметки\s+(?:для\s+)?докладчика|speaker\s+notes)\s*:\s*(?P<t>[^\[\]]*?)\s*\]\s*$", re.I)
+
+
+class NotedSpec(SlideSpec):
+    """A slide spec with the speaker notes the brief gives the slide (kept out of its text)."""
+
+    notes: str = ""
+
+
+def speaker_split(lines: list[str]) -> tuple[list[str], list[str]]:
+    """(the lines without the speaker notes' lines, the notes)."""
+    kept: list[str] = []
+    notes: list[str] = []
+    for ln in lines:
+        m = _SPEAKER_LINE_RE.match(ln)
+        if m:
+            if m.group("t").strip():
+                notes.append(m.group("t").strip())
+        else:
+            kept.append(ln)
+    return kept, notes
+
+
 def _split_long_title(title: str) -> tuple[str, Optional[str]]:
     """A long «Слайд N» title that goes on into a sentence of the slide («Слайд 3. Итоги года. Мы выросли вдвое …»):
     the first sentence is the title, the rest the slide's first line."""
@@ -1337,7 +1370,7 @@ def _blocks(text: str, md: bool = False) -> tuple[list[_Block], list[str]]:
     blocks = []
     bounds = [h[0] for h in heads] + [len(lines)]
     for k, (i, n, title) in enumerate(heads):
-        body = lines[i + 1 : bounds[k + 1]]
+        body, said = speaker_split(lines[i + 1 : bounds[k + 1]])
         while body and not body[-1].strip():
             body.pop()
         if k == len(heads) - 1:
@@ -1371,7 +1404,8 @@ def _blocks(text: str, md: bool = False) -> tuple[list[_Block], list[str]]:
                     title = _clean(cand)
                     body = body[j + 1 :]
         blk = _Block(number=n, title=title, lines=body)
-        blk.spec = SlideSpec(number=n, title=title, text="\n".join(body).strip())
+        text = "\n".join(body).strip()
+        blk.spec = NotedSpec(number=n, title=title, text=text, notes="\n\n".join(said)) if said else SlideSpec(number=n, title=title, text=text)
         blocks.append(blk)
     return blocks, glob
 
@@ -1392,7 +1426,7 @@ def read_structure(text: str, md_slides: bool = False) -> BriefStructure:
         m = _SUBTITLE_RE.match(ln)
         if m and st.subtitle is None:
             st.subtitle = _unquote(m.group("v")) or None
-    prose = "\n".join(without_code(body.splitlines()))  # (a «# comment» of a code block is no markdown title)
+    prose = "\n".join(speaker_split(without_code(body.splitlines()))[0])  # (a «# comment» of a code block is no markdown title)
     if st.title is None:
         h1 = re.search(r"^\s*#\s+(.+)$", prose, re.M)
         if h1:
@@ -1428,7 +1462,7 @@ def read_structure(text: str, md_slides: bool = False) -> BriefStructure:
     disc = [H.strip_end(s) for s in gsents if _DISCLAIMER_RE.search(s) and not _is_rule(s) and len(s.split()) <= 25]
     if disc:
         st.disclaimer = ". ".join(disc)
-    all_sents = sentences_of(body)
+    all_sents = sentences_of("\n".join(speaker_split(body.splitlines())[0]))
     st.notes_rule = any(_NOTES_RE.search(s) for s in all_sents)
     rs = next((s for s in all_sents if _ROUND_RE.search(s)), None)
     if rs:

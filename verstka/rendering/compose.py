@@ -808,6 +808,9 @@ def _emu(pt: float) -> int:
 # ---------------------------------------------------------------------------------------------- composer
 
 
+ALOUD = "строки ушли в заметки: нет места на слайде"  # the warning of lines said aloud (`Composer._lines_to_notes`)
+
+
 class Composer:
     def __init__(self, slide: Slide, kit: Kit, oslide: OutlineSlide, outline: DeckOutline, strategy: str, manifest: TemplateManifest) -> None:
         self.slide = slide
@@ -931,6 +934,7 @@ class Composer:
         notes0 = getattr(self.o, "notes", None)  # a pass may say lines aloud (speaker notes): undone with the pass
         self._boost = 0
         self._dense = False
+        self._lines_aloud = False  # the lines under the block go to the speaker notes from the start (the dense pass)
         self._area = area
         self._compose_body(comp, area)
         kept_dense = False
@@ -982,64 +986,93 @@ class Composer:
             # the block runs past the foot of its area at every size of the usual ladder: set again denser — sizes
             # below the small size (down to 1.7 % of the slide height), grids instead of long rows, the lines under
             # the block in two columns or in the speaker notes — never drawn past the area
-            self._undo(n0)
-            self.o, self.warnings = o0, list(w0)
-            self._restore_notes(notes0)
-            self._dense = True
-            lead = bool(getattr(self, "_take_lead", False))
-            self._compose_body(comp, area)
-            if lead and self._least_text(n0) < self._dense_floor_2pct() - 0.05:
-                # B3-5: the compact variant's conclusion line over a block set dense below 2 % of the slide height
-                # (8 pt on a 6.2″ slide): the block at ≥ 2 % under the line; else the conclusion as the strip at the
-                # foot (its size, then the body and the small size); else said aloud with the block at ≥ 2 %; the dense
-                # setting under the line only when none of these fits
-                notes_saved = self._notes
-                k = self.kit
+            notes_at_dense, lead_at_dense = self._notes, bool(getattr(self, "_take_lead", False))
 
-                def reset() -> None:
-                    self._undo(n0)
-                    self.o, self.warnings = o0, list(w0)
-                    self._restore_notes(notes0)
-                    self._notes = notes_saved
-                    self._take_lead = lead
+            def dense_pass() -> None:
+                self._notes, self._take_lead = notes_at_dense, lead_at_dense
+                self._undo(n0)
+                self.o, self.warnings = o0, list(w0)
+                self._restore_notes(notes0)
+                self._dense = True
+                lead = bool(getattr(self, "_take_lead", False))
+                self._compose_body(comp, area)
+                if lead and self._least_text(n0) < self._dense_floor_2pct() - 0.05:
+                    # B3-5: the compact variant's conclusion line over a block set dense below 2 % of the slide height
+                    # (8 pt on a 6.2″ slide): the block at ≥ 2 % under the line; else the conclusion as the strip at the
+                    # foot (its size, then the body and the small size); else said aloud with the block at ≥ 2 %; the dense
+                    # setting under the line only when none of these fits
+                    notes_saved = self._notes
+                    k = self.kit
 
-                done = None
-                self._floor_2pct = True
-                try:
-                    reset()
-                    self._compose_body(comp, area)
-                    if not self._overflows(n0, area):
-                        done = "the block set at 2 % under the conclusion line"
-                    for size in ((None,) + tuple(dict.fromkeys((k.body, k.small)))) if done is None else ():
+                    def reset() -> None:
+                        self._undo(n0)
+                        self.o, self.warnings = o0, list(w0)
+                        self._restore_notes(notes0)
+                        self._notes = notes_saved
+                        self._take_lead = lead
+
+                    done = None
+                    # (a setting that says aloud the lines the dense one kept on the slide brings nothing: it is no option)
+                    kept_lines = ALOUD not in self.warnings
+
+                    def lost_lines() -> bool:
+                        return kept_lines and ALOUD in self.warnings and ALOUD not in w0
+
+                    self._floor_2pct = True
+                    try:
                         reset()
-                        self._take_lead = False
-                        strip_area = self._takeaway_to_strip(area, size)
-                        self._compose_body(comp, strip_area)
-                        if not self._overflows(n0, strip_area) and self._conclusion_spot(n0) is not None:
-                            done = "the conclusion set as the strip under the block: no room over it"
-                            break
+                        self._compose_body(comp, area)
+                        if not self._overflows(n0, area) and not lost_lines():
+                            done = "the block set at 2 % under the conclusion line"
+                        for size in ((None,) + tuple(dict.fromkeys((k.body, k.small)))) if done is None else ():
+                            reset()
+                            self._take_lead = False
+                            strip_area = self._takeaway_to_strip(area, size)
+                            self._compose_body(comp, strip_area)
+                            if not self._overflows(n0, strip_area) and self._conclusion_spot(n0) is not None and not lost_lines():
+                                done = "the conclusion set as the strip under the block: no room over it"
+                                break
+                        if done is None:
+                            reset()
+                            self._take_lead = False
+                            self._compose_body(comp, area)
+                            if not self._overflows(n0, area) and not lost_lines():
+                                said = self._said()
+                                try:
+                                    if said and said not in (self.o.notes or ""):
+                                        self.o.notes = (f"{said} " + (self.o.notes or "")).strip()
+                                except Exception:  # noqa: BLE001
+                                    pass
+                                done = "the conclusion moved to the speaker notes: no room under the content"
+                    finally:
+                        self._floor_2pct = False
                     if done is None:
                         reset()
-                        self._take_lead = False
                         self._compose_body(comp, area)
-                        if not self._overflows(n0, area):
-                            said = self._said()
-                            try:
-                                if said and said not in (self.o.notes or ""):
-                                    self.o.notes = (f"{said} " + (self.o.notes or "")).strip()
-                            except Exception:  # noqa: BLE001
-                                pass
-                            done = "the conclusion moved to the speaker notes: no room under the content"
-                finally:
-                    self._floor_2pct = False
-                if done is None:
-                    reset()
-                    self._compose_body(comp, area)
-                elif not done.startswith("the block set"):
-                    self.warnings.append(done)
-            if comp == "process" or self.o.kind in (PatternKind.process, PatternKind.timeline):
-                self._dense_steps_beside(comp, area, n0, (o0, w0, notes0))
-            self.warnings.append("dense content set smaller to stay inside its area")
+                    elif not done.startswith("the block set"):
+                        self.warnings.append(done)
+                if comp == "process" or self.o.kind in (PatternKind.process, PatternKind.timeline):
+                    self._dense_steps_beside(comp, area, n0, (o0, w0, notes0))
+            dense_pass()
+            c_now = self.o.content
+            if ALOUD in self.warnings and ALOUD not in w0 and c_now.chart is None and c_now.chart2 is None:
+                # the dense setting said the lines under the block aloud all the same: it brought nothing onto the
+                # slide, so it keeps nothing of it — the block at its usual sizes in the whole area, the lines in the
+                # speaker notes (VK Tech compact: a ten-row table stepped to 8 pt for lines that left anyway); the
+                # dense setting stays only where the block alone needs it
+                self._undo(n0)
+                self.o, self.warnings = o0, list(w0)
+                self._restore_notes(notes0)
+                self._notes, self._take_lead = notes_at_dense, lead_at_dense
+                self._dense, self._lines_aloud = False, True
+                self._compose_body(comp, area)
+                if self._overflows(n0, area) or (self._notes and self._notes[1] is not None and self._conclusion_spot(n0) is None):
+                    self._lines_aloud = False
+                    dense_pass()
+            if self._dense:
+                self.warnings.append("dense content set smaller to stay inside its area")
+            else:
+                self.warnings.append("the lines under the block said aloud: it keeps its usual sizes")
             if self._overflows(n0, area):
                 self.warnings.append("content runs past its area")
         growable = comp in self._GROWABLE and not (comp == "stat_row" and len(self.o.content.numbers) <= 1) and not self._dense
@@ -1426,6 +1459,7 @@ class Composer:
             return
         plan = self._under_plan(area, lines)
         n0 = len(self.cv.tree)
+        self._under_cap = None  # the block sets it when its lines may not be larger than its type (a table)
         yield plan["main"]
         self._under_draw(plan, n0)
 
@@ -1438,6 +1472,10 @@ class Composer:
         cols = (n if n <= 3 else (2 if n == 4 else 3)) if spread else (2 if n > 3 else 1)
         size = k.body
         dense = getattr(self, "_dense", False)
+        if getattr(self, "_lines_aloud", False) and not spread:
+            # the dense setting could not keep them on the slide either (`compose`): said aloud, the block takes the area
+            self._lines_to_notes(lines)
+            return dict(main=area, paras=[], eh=0, cw=area.w, gap=k.gap * 2, x=area.x, y2=area.y2, lines=lines)
         if dense and not spread and n >= 2:
             cols, size = 2, k.small  # the dense pass: the lines in two columns at the small size
 
@@ -1520,7 +1558,7 @@ class Composer:
                 self.o.notes = ((self.o.notes or "").strip() + "\n" + text).strip()
         except Exception:  # noqa: BLE001
             pass
-        self.warnings.append("строки ушли в заметки: нет места на слайде")
+        self.warnings.append(ALOUD)
 
     def _under_draw(self, plan: dict, n0: int) -> None:
         """The lines of `_under_plan`, right under what the block drew (a block that grew past its share pushes the
@@ -1528,6 +1566,18 @@ class Composer:
         k = self.kit
         if not plan["paras"]:
             return
+        cap = getattr(self, "_under_cap", None)
+        size = max((r.size for col in plan["paras"] for p in col for r in p.runs), default=0.0)
+        if cap and size > cap + 0.05:
+            # the lines under a table read after it, never louder than it: a table stepped down to keep its conclusion
+            # (MyBrand: 17.5 pt) takes its lines down with it (they stood at 22.5 pt under it) — the room only shrinks
+            lines = plan.get("lines") or []
+            groups, i = [], 0
+            for col in plan["paras"]:
+                groups.append(lines[i:i + len(col)])
+                i += len(col)
+            paras = [[self.P(t, cap, k.colors.text, space_after=cap * 0.5, marker="•", marker_color=k.colors.accent) for t in g] for g in groups if g]
+            plan = dict(plan, paras=paras, eh=max(self.h(p, plan["cw"]) for p in paras))
         bottom = self._content_bottom(n0)
         y = plan["main"].y2 + int(k.vgap * 1.4) if bottom is None else bottom + int(k.vgap * 1.4)
         limit = min(self._floor(plan.get("y2") or k.H), k.H)
@@ -1554,6 +1604,9 @@ class Composer:
         w = plan["main"].w
         floor = self._dense_floor()
         sizes = list(dict.fromkeys([k.body, k.small] + [x for x in reversed(k.sizes) if floor - 0.05 <= x < k.small - 0.05]))
+        cap = getattr(self, "_under_cap", None)
+        if cap:
+            sizes = [x for x in sizes if x <= cap + 0.05] or [cap]  # never louder than the table over them
         for size in sizes:
             for cols in ((1, 2) if len(lines) >= 2 else (1,)):
                 per = math.ceil(len(lines) / cols)
@@ -3482,21 +3535,38 @@ class Composer:
         deltas = table_deltas(table) if self.strategy == "visual" and area.w * 0.36 >= 0.3 * k.W and not (self.o.takeaway or "").strip() else []
         if deltas:
             width = int(area.w * 0.64)  # the table and, beside it, what changed most
-        floor = min(0.022 * k.hpt, k.small)
-        if getattr(self, "_dense", False):
-            floor = min(floor, self._dense_floor())
         # a table reads at body size; dense tables step down to the small size. A small one (a few rows, a few
         # columns) set at body size is a thin strip over an empty slide: it may take the lead size when nothing wraps
         header_bold = template_bold(k.manifest.tokens.typography)
 
         boost = getattr(self, "_boost", 0)
+        reg_floor = 0.022 * k.hpt  # the deck's ladder: the small size from 2.2 % of the slide height (`regular`)
+        # the slide's own table set again — denser, or above the room of its conclusion (`_rehouse_conclusion`) — may
+        # take the template's steps under the body size, down to the floor of that setting (the dense pass's, else the
+        # small size or 2.2 %, whichever is less), snapped up to a size the template sets: never a size between two of
+        # its steps (VK Tech: 8.1 pt is no size of the template)
+        resetting = bool(getattr(self, "_dense", False) or getattr(self, "_rehousing", False) or getattr(self, "_floor_2pct", False))
+        floor = min(reg_floor, k.small)
+        if getattr(self, "_dense", False):
+            floor = min(floor, self._dense_floor())
+        floor = min((x for x in k.sizes if x >= floor - 0.05), default=floor)
 
-        def sizes_for(t: TableData) -> list[float]:
+        def regular(t: TableData, deck: bool = False) -> list[float]:
+            """The usual ladder: the lead size for a small table (or on the fill pass, with the sizes between), the
+            body, the small size. `deck`: the ladder every table of the deck is measured on for its one table size —
+            the small size only from 2.2 % of the slide height: a template's small step under it (MyBrand: 17.5 pt on
+            an 810 pt slide) is the densest table's own, it never sets the others' size (a three-row table on an empty
+            slide at 17.5 pt instead of 22.5)."""
             small_table = len(t.rows) + 1 <= 5 and len(t.columns) <= 4
             lead = [k.lead] if (small_table or boost >= 1) and k.lead > k.body and (not k.head_size or k.lead <= 0.7 * k.head_size) else []
             mids = [x for x in k.sizes if k.body + 0.05 < x < k.lead - 0.05] if boost >= 1 else []
+            low = reg_floor if deck else min(reg_floor, k.small)
+            return [s for s in sorted({*lead, *mids, k.body, k.small}, reverse=True) if s >= low - 0.05] or [k.small]
+
+        def steps_for(t: TableData) -> list[float]:
+            """The regular ladder with the template's steps under the body size, down to the setting's floor."""
             steps = [x for x in k.sizes if floor - 0.05 <= x < k.body - 0.05]
-            return [s for s in sorted({*lead, *mids, k.body, *steps, k.small}, reverse=True) if s >= floor - 0.05] or [k.small]
+            return sorted({*regular(t), *steps, *([k.small] if k.small >= floor - 0.05 else [])}, reverse=True)
 
         tight = getattr(self, "_tight", 0)
 
@@ -3510,16 +3580,29 @@ class Composer:
             )
 
         # one table size for the deck: every table is set at the size the densest one allows (two tables of one deck
-        # at 15 and 11 pt read as two designers)
+        # at 15 and 11 pt read as two designers) — measured on the regular ladder only: the steps a slide re-set for
+        # its conclusion takes are that slide's, never the deck's (MyBrand: a ten-row table's 17.5 pt set a three-row
+        # table on an empty slide at 17.5 pt instead of 22.5)
         cache = self.slide.part.package.__dict__.setdefault("_verstka_table_size", {})  # one deck, one build
         key = (width, area.h, boost)
         if key not in cache:
             tables = [s.content.table for s in self.outline.slides if s.content.table is not None and s.content.table.columns]
-            cache[key] = min((measure(t, sizes_for(t))[0] for t in tables), default=None)
+            cache[key] = min((measure(t, regular(t, deck=True))[0] for t in tables), default=None)
         cap = cache[key]
-        sizes = sizes_for(table)
-        if cap:
-            sizes = [s for s in sizes if s <= cap + 0.05] or [min(sizes)]
+
+        def capped(sizes: list[float]) -> list[float]:
+            return ([s for s in sizes if s <= cap + 0.05] or [min(sizes)]) if cap else sizes
+
+        sizes = capped(regular(table))
+        if resetting and measure(table, sizes).overflow:
+            # the steps under the body size only where the regular ladder does not hold the table in its area, one at a
+            # time down to the first that does: a table that fits at a step keeps it (VK Tech compact: 9 pt, not 8.1 pt
+            # for a less ragged look; a ten-row table at the small size, not two steps under it)
+            ladder = steps_for(table)
+            for low in [x for x in ladder if x < min(sizes) - 0.05]:
+                sizes = capped([x for x in ladder if x >= low - 0.05])
+                if not measure(table, sizes).overflow:
+                    break
         if tight >= 2:
             # as wide as the columns need at the size the full width sets, with air — never under 60 % of the area;
             # the type keeps that size (a narrower table is not a smaller one) — one step smaller only as the last
@@ -3527,15 +3610,18 @@ class Composer:
             probe = measure(table, sizes)
             sizes = [probe[0]]
             if tight >= 3:
-                sizes = [x for x in sizes_for(table) if x < probe[0] - 0.05][:1] or sizes
+                sizes = [x for x in (steps_for(table) if resetting else regular(table)) if x < probe[0] - 0.05][:1] or sizes
                 probe = measure(table, sizes)
             width = min(width, max(int(probe.content_w * 1.12), int(0.6 * area.w)))
         size, widths, heights = measure(table, sizes)
+        self._under_cap = size  # the lines under the table are never set larger than the table (`_under_draw`)
         spec = table_style_for_ground(style, ground_hex=k.colors.ground, text_hex=k.colors.text, accent_hex=k.colors.accent, divider_hex=k.colors.divider)
         total_h = sum(heights)
         add_table(
             self.slide, Bbox(x=area.x, y=area.y, w=sum(widths), h=total_h), table, spec, k.manifest.tokens.typography,
-            font_family=k.font, col_widths=widths, row_heights=heights, size_pt=size,
+            # (a hair over the size: a cell's run is written through python-pptx's Pt, which truncates — 8.12 pt came
+            # out as 8.11, a size the template does not set)
+            font_family=k.font, col_widths=widths, row_heights=heights, size_pt=size + 1e-4,
             accent_hex=k.colors.accent, muted_hex=k.colors.muted, ground_hex=k.colors.ground, header_bold=header_bold,
             accent_text_hex=k.colors.accent_text, highlight_col=emphasis_column(table),
         )

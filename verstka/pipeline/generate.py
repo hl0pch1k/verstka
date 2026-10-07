@@ -7,6 +7,7 @@ import hashlib
 import inspect
 import json
 import logging
+import re
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -500,11 +501,14 @@ def generate_variants(
                 plan_models[name] = plan_models.get(donor)
         _say_designs(progress, {name: planned[name][0] for name in todo}, plan_end)
     pic_dir = Path(picture_dir) if picture_dir is not None else out_dir / "images"
-    # «Улучшить презентацию»: the pictures of the original deck go back to their places (ingest/deck_text.py)
-    from verstka.ingest.deck_text import source_records
+    # «Улучшить презентацию»: the pictures of the original deck go back to their places (ingest/deck_text.py) — only
+    # when the text names them (a deck built on that template from another text gets none of them copied)
+    from verstka.ingest.deck_text import is_source_hint, source_records
 
+    hints = [m.group(1) for m in re.finditer(r"\[Место под изображение:\s*([^\]]+)\]", (brief.text if brief is not None else "") or "")]
+    hints += [s_.content.photo_hint for s_ in (outline.slides if outline is not None else []) if s_.content is not None and s_.content.photo_hint]
     # (`source_pictures`: the original deck's workspace when it is laid out in another template)
-    src_pictures = source_records(Path(source_pictures) if source_pictures else ws.dir, pic_dir)
+    src_pictures = source_records(Path(source_pictures) if source_pictures else ws.dir, pic_dir) if any(is_source_hint(h) for h in hints) else []
     if src_pictures:
         picture_reuse = {name: [*(picture_reuse or {}).get(name, []), *src_pictures] for name in strategies}
     maker, icfg = _picture_maker(pictures, image_provider, manifest, pic_dir, t_start, skills if models_on else None, providers if models_on else None, brief, outline, planned)

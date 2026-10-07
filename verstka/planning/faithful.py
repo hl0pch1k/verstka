@@ -803,6 +803,9 @@ class Reading:
     # the slide's data blocks its form does not show (code with a chart under it, a chart and a table, a third chart):
     # each a reading of its own, shown on a continuation slide (expand_slides) — never dropped
     extra: list = field(default_factory=list)
+    # the speaker notes the brief gives the slide («[Заметки докладчика: …]», a deck read back by ingest/deck_text.py):
+    # the slide's notes keep them, its text never shows them
+    speaker: str = ""
 
     def of(self, kind: str) -> list[Part]:
         return [p for p in self.parts if p.kind == kind]
@@ -926,11 +929,26 @@ def _heading_of(r: "Reading") -> str:
     return ""
 
 
-def read_slide(number: int, title: str, text: str, *, first: bool = False, last: bool = False, deck: Optional[str] = None) -> Reading:
+def _field_value(raw: str) -> str:
+    """The value of a «Название: «…».» line: its wrapping quotes off, nested quotes kept («Задача «Цифровой дизайнер»»)."""
+    from verstka.planning.brief_structure import _unquote
+
+    return H.strip_end(_unquote(raw.strip())).strip()
+
+
+# a note of a slide that carries its speaker notes («[Заметки докладчика: …]»)
+_SPEAKER_RE = re.compile(r"^(?:заметки\s+(?:для\s+)?докладчика|speaker\s+notes)$", re.I)
+
+
+def read_slide(number: int, title: str, text: str, *, first: bool = False, last: bool = False, deck: Optional[str] = None, notes: str = "") -> Reading:
     """`deck`: the deck's own title when the text gives one («Тема презентации: …»): a first slide named the same that
-    says one or two short lines is the cover — a cover of its own before it would show the same title twice."""
+    says one or two short lines is the cover — a cover of its own before it would show the same title twice. `notes`:
+    the speaker notes the brief gives the slide (brief_structure takes «[Заметки докладчика: …]» out of its text) —
+    the slide's notes keep them, never its text."""
     parts = read_parts(text)
-    r = Reading(number=number, title=clean_title(title), parts=parts, text=text or "")
+    said = [p.text for p in parts if p.kind == "note" and _SPEAKER_RE.match(p.label or "")]
+    parts = [p for p in parts if not (p.kind == "note" and _SPEAKER_RE.match(p.label or ""))]
+    r = Reading(number=number, title=clean_title(title), parts=parts, text=text or "", speaker="\n\n".join(x for x in [(notes or "").strip(), *said] if x))
     for p in r.of("para"):
         for sent in p.sentences:
             kind = designer_ask(sent)
@@ -946,7 +964,7 @@ def read_slide(number: int, title: str, text: str, *, first: bool = False, last:
             m = _TITLE_LINE_RE.match(p.text)
             if m:
                 key = "sub" if re.match(r"\s*(?:[—–\-•*]\s*)?(?:подзаголовок|subtitle)", p.text, re.I) else "title"
-                fields.setdefault(key, H.strip_end(m.group("v").strip(" «»\"")))
+                fields.setdefault(key, _field_value(m.group("v")))
                 r.used.update(p.sentences)
         elif p.kind == "list":
             keep = []
@@ -954,7 +972,7 @@ def read_slide(number: int, title: str, text: str, *, first: bool = False, last:
                 m = _TITLE_LINE_RE.match(it)
                 if m:
                     key = "sub" if re.match(r"\s*(?:подзаголовок|subtitle)", it, re.I) else "title"
-                    fields.setdefault(key, H.strip_end(m.group("v").strip(" «»\"")))
+                    fields.setdefault(key, _field_value(m.group("v")))
                 else:
                     keep.append(it)
             p.items = keep
@@ -1035,6 +1053,9 @@ def _drawn_whole(r: "Reading", note: "Part") -> bool:
     if note.kind == "table" and any(ln.strip().startswith("|") for ln in (note.text or "").splitlines()):
         return True
     items = chart_items(note.text)
+    if not items and note.kind == "chart":
+        src = source_table(r, note)
+        return src is not None and table_chart(note, src) is not None
     return bool(items) and note_covered(note.text, items)
 
 
@@ -1108,6 +1129,8 @@ def notes_of(r: Reading) -> str:
             # or not at all stays here as written)
             if p.kind == "note" or not _drawn_whole(r, p):
                 out.append("[" + ": ".join(x for x in (p.label, p.text) if x) + "]")
+    if r.speaker:
+        out.append(r.speaker)  # the deck's own speaker notes, as they were
     return "\n\n".join(x for x in out if x.strip())
 
 
@@ -1625,7 +1648,14 @@ def charts_of(r: Reading):
     out = []
     for note in r.of("chart"):
         items = chart_items(note.text)
-        if not items or any(it.span for it in items) or not note_covered(note.text, items):
+        if not items:
+            # «[Столбчатая диаграмма: выручка по городам]» over a «|» table: the chart of every column of the table
+            src = source_table(r, note)
+            got = table_chart(note, src) if src is not None else None
+            if got is not None:
+                out.append(got)
+            continue
+        if any(it.span for it in items) or not note_covered(note.text, items):
             continue  # (a note read in part is shown as written: never a chart without some of its figures)
         sizes = {len(it.values) for it in items}
         if len(sizes) != 1:
@@ -1651,6 +1681,88 @@ def charts_of(r: Reading):
             series = [InlineSeries(name=nm, values=[it.values[j] for it in items]) for j, nm in enumerate(names)]
             out.append(ChartSpec(type=kind if kind not in ("pie", "doughnut") else "column", title=title, unit=next(iter(units)) if units else None, categories=[it.label for it in items], series=series))
     return out
+
+
+def _table_rows(part: "Part") -> list[list[str]]:
+    """The rows of a «|» table part (its header first), [] when it is not one of two rows or more of equal width."""
+    rows = [ln.strip().strip("|").split("|") for ln in (part.text or "").splitlines() if ln.strip().startswith("|")]
+    rows = [[c.strip() for c in row] for row in rows if not all(re.fullmatch(r"\s*:?-{2,}:?\s*", c) for c in row)]
+    return rows if len(rows) >= 2 and len({len(x) for x in rows}) == 1 else []
+
+
+def source_table(r: "Reading", note: "Part") -> Optional["Part"]:
+    """The «|» table a chart note without figures of its own is drawn from: the table right after it (or right before
+    it) — «[Столбчатая диаграмма: выручка по городам]» over the table of the cities' figures, «[Диаграмма по данным
+    таблицы]» under it."""
+    if note.kind != "chart" or chart_items(note.text):
+        return None
+    k = next((i for i, p in enumerate(r.parts) if p is note), None)
+    if k is None:
+        return None
+    for j in (k + 1, k - 1):
+        if 0 <= j < len(r.parts) and r.parts[j].kind == "table" and _table_rows(r.parts[j]):
+            return r.parts[j]
+    return None
+
+
+_CELL_RE = re.compile(rf"^(?P<num>{_NUM_SRC})\s?(?P<rest>.*)$")
+
+
+def table_chart(note: "Part", table: "Part"):
+    """The chart of a table a chart note asks for: the rows' first cells as its categories, every other column a series
+    (its header the series' name) — every cell a figure (with one unit per column), else None (the table is shown as
+    it is). Several series are never a pie; columns of different units are a split chart."""
+    from verstka.schemas.outline import ChartSpec, InlineSeries
+
+    rows = _table_rows(table)
+    if len(rows) < 3 or len(rows[0]) < 2:
+        return None
+    head, body = rows[0], rows[1:]
+    cats = [H.strip_end(row[0]) for row in body]
+    if not all(cats) or len(set(cats)) != len(cats):
+        return None
+    cols = []
+    for j in range(1, len(head)):
+        vals, units = [], set()
+        for row in body:
+            m = _CELL_RE.match(thousands(row[j]).strip())
+            if m is None:
+                return None
+            unit, after = unit_of(m.group("rest"))
+            if after and not unit:
+                return None  # words after the figure: a cell of text, not a value
+            vals.append(number_value(m.group("num")))
+            units.add(unit)
+        if len(units) > 1:
+            return None
+        cols.append((head[j] or f"Ряд {j}", vals, next(iter(units))))
+    label = note.label or note.text or ""
+    kind = chart_type_of(label, [])
+    if len(cols) > 1 and kind in ("pie", "doughnut"):
+        kind = "column"
+    title = (chart_title(note.label) or H.cap_first(H.strip_end(note.text or "")) or None) if note.label else chart_title(note.text or "")
+    units = {u for _, _, u in cols}
+    if len(units) > 1:
+        series = [InlineSeries(name=nm, values=vals, unit=u) for nm, vals, u in cols]
+        return ChartSpec(type="column" if kind in ("pie", "doughnut", "line", "area") else kind, title=title, categories=cats, series=series, split=True)
+    series = [InlineSeries(name=nm, values=vals) for nm, vals, _ in cols]
+    return ChartSpec(type=kind, title=title, unit=next(iter(units)), categories=cats, series=series)
+
+
+def _drawn_tables(r: "Reading") -> set:
+    """The tables (ids of their parts) the slide's chart notes are drawn from: shown as the chart, never again as a
+    table of their own."""
+    out = set()
+    for note in r.of("chart"):
+        src = source_table(r, note)
+        if src is not None and table_chart(note, src) is not None:
+            out.add(id(src))
+    return out
+
+
+def _data_notes(r: "Reading") -> list:
+    drawn = _drawn_tables(r)
+    return [n for n in r.of("chart") + r.of("table") if id(n) not in drawn]
 
 
 def _cell(raw: str, unit: Optional[str], span_text: str = "") -> str:
@@ -1807,18 +1919,46 @@ def _beside(r: Reading, prof: dict) -> list[str]:
 
 
 def _block(r: "Reading", note: "Part") -> "Reading":
-    """One data note of a slide as a reading of its own (with the slide's sentences, which may name its figures)."""
-    return Reading(number=r.number, title=r.title, parts=[note, *r.of("para")], text=r.text)
+    """One data note of a slide as a reading of its own (with the slide's sentences, which may name its figures, and
+    the table a chart note is drawn from)."""
+    src = source_table(r, note)
+    return Reading(number=r.number, title=r.title, parts=[note, *([src] if src is not None else []), *r.of("para")], text=r.text)
 
 
 def _drawable(b: "Reading") -> bool:
-    return bool(charts_of(b) or note_table(b) or note_figures(b))
+    return bool(charts_of(b) or note_table(b) or note_figures(b)) or bool(b.parts and b.parts[0].kind == "image")
+
+
+# the pictures of one slide that get a place of their own: the first beside the slide's text, the second on a
+# continuation slide (a pair — before and after, two views — is the usual case); a gallery's further pictures stay
+# described in the speaker notes (more continuations of one heading would repeat each other: the audit's
+# duplicate_heading / duplicate_slides)
+MAX_PICTURES = 2
+
+
+def _picture_blocks(r: "Reading", skip: int = 1) -> list:
+    """The slide's pictures its form does not show, each a reading of its own (a continuation slide's place)."""
+    return [_block(r, p) for p in r.of("image")[skip:MAX_PICTURES]]
+
+
+def _with_picture(r: "Reading", f: "Form") -> int:
+    """The slide's first picture in its place beside the form's code or data, when the form keeps no place of its own
+    (the place for a chart the author will add): how many of the slide's pictures the slide now shows."""
+    imgs = r.of("image")
+    c = f.slide.content
+    if not imgs or c.photo_slot:
+        return 0
+    label, hint = _place_of(imgs[0], latin(r.text))
+    if imgs[0].label and not re.match(r"мест\w*\s+(?:под|для)", imgs[0].label, re.I):
+        label = H.cap_first(imgs[0].label)
+    c.photo_slot, c.photo_hint, c.photo_own = label, hint or None, own_photo(r.text)
+    return 1
 
 
 def _left_over(r: "Reading", f: "Form") -> list:
     """The data notes of a slide its form does not show: the chart form shows the first two charts, the table form the
     first table, the figures form the first figures — the others are each a block of a continuation slide."""
-    notes = r.of("chart") + r.of("table")
+    notes = _data_notes(r)
     if len(notes) < 2:
         return []
     blocks = [(n, _block(r, n)) for n in notes]
@@ -1835,6 +1975,8 @@ def _left_over(r: "Reading", f: "Form") -> list:
 
 def _block_form(b: "Reading", profile: str) -> Optional["Form"]:
     prof = PROFILES.get(profile, PROFILES["structured"])
+    if b.parts and b.parts[0].kind == "image":
+        return _image(b, Room(), prof, "image_text", part=b.parts[0])
     return _chart(b, prof) or _table(b, prof) or _numbers(b, prof)
 
 
@@ -1988,20 +2130,22 @@ def forms_of(r: Reading, room: Room, profile: str) -> list[Form]:
     paras = r.paras()
     out: list[Optional[Form]] = []
     if r.of("code"):
-        r.extra = [b for b in (_block(r, n) for n in r.of("chart") + r.of("table")) if _drawable(b)]
-        return [_code(r, room, prof)]
-    notes = r.of("chart") + r.of("table")
+        f = _code(r, room, prof)
+        r.extra = [b for b in (_block(r, n) for n in _data_notes(r)) if _drawable(b)] + _picture_blocks(r, _with_picture(r, f))
+        return [f]
+    notes = _data_notes(r)
     if notes:
         # the chart the note's data draws; else its table (a range, items of different counts), its figures (litres
         # beside minutes), or — no data at all — the place for the chart the author will add. The notes the form does
         # not show go on over continuation slides (a chart beside a table, a third chart)
         f = _chart(r, prof) or _table(r, prof) or _numbers(r, prof) or _image(r, room, prof, "image_text", part=notes[0])
         f.structural = True
-        r.extra = _left_over(r, f)
+        r.extra = _left_over(r, f) + _picture_blocks(r, _with_picture(r, f))
         return [f]
     if r.of("image"):
         hint = r.of("image")[0].text + " " + r.of("image")[0].label
         kinds = list(prof["image"]) if _SCREEN_RE.search(hint) else ["image_text"]
+        r.extra = _picture_blocks(r)  # not only the first picture of the slide: the next on a continuation slide
         return [f for f in (_image(r, room, prof, k) for k in kinds) if f is not None]
     structural: list[Optional[Form]] = []
     if r.of("flow"):
@@ -2105,7 +2249,8 @@ def plan_deck(specs, manifest=None, variants: tuple = ("structured", "visual", "
     form of the slide has a sample. `room`: the template's measure when the caller has read it (`Room.of`)."""
     specs = sorted(specs, key=lambda sp: sp.number)
     n = len(specs)
-    readings = [read_slide(sp.number, sp.title, sp.text, first=(i == 0), last=(i == n - 1 and n >= 2), deck=title) for i, sp in enumerate(specs)]
+    readings = [read_slide(sp.number, sp.title, sp.text, first=(i == 0), last=(i == n - 1 and n >= 2), deck=title, notes=getattr(sp, "notes", "") or "")
+                for i, sp in enumerate(specs)]
     if room is None:
         try:
             room = Room.of(manifest)

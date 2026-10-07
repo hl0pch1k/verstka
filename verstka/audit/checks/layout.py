@@ -658,11 +658,40 @@ def _rule_through(o, box: Bbox, H: int) -> bool:
     f = o.bbox_frac
     if not (f.h <= 0.02 and (o.line_hex or o.fill_hex)):
         return False
-    y = o.bbox.y + o.bbox.h / 2
+    return _line_through(o.bbox, box)
+
+
+def _line_through(rule: Bbox, box: Bbox) -> bool:
+    y = rule.y + rule.h / 2
     margin = 0.15 * box.h
     if not (box.y + margin < y < box.y2 - margin):
         return False
-    return min(o.bbox.x2, box.x2) - max(o.bbox.x, box.x) >= 0.5 * box.w
+    return min(rule.x2, box.x2) - max(rule.x, box.x) >= 0.5 * box.w
+
+
+def _hairlines(source: str, W: int, H: int) -> dict[int, list[Bbox]]:
+    """The horizontal hairlines the slides' layouts and masters draw, by slide number: a connector or a line has no area,
+    so the template layers of the IR leave them out (Классика: the rules of its comparison grid, drawn by the layout,
+    struck the seventh line of a column through and no check saw it). Read from the deck itself; {} when it cannot be."""
+    out: dict[int, list[Bbox]] = {}
+    try:
+        from pptx import Presentation
+
+        from verstka.rendering.layers import drawn_layers
+
+        prs = Presentation(source)
+    except Exception:  # noqa: BLE001 - no deck to read (an IR built in memory): no hairlines known
+        return out
+    for i, slide in enumerate(prs.slides, 1):
+        try:
+            layers = drawn_layers(slide)
+        except Exception:  # noqa: BLE001
+            continue
+        for lay in layers:
+            b = lay.box
+            if lay.source in ("layout", "master") and not lay.placeholder and not lay.has_text and lay.paints and not lay.picture and b.h <= 0.006 * H and b.w >= 0.05 * W:
+                out.setdefault(i, []).append(b)
+    return out
 
 
 @check(CONTENT_OVER_ART)
@@ -672,9 +701,10 @@ def content_over_art(ctx: AuditContext) -> list[Issue]:
     out: list[Issue] = []
     W, H = ctx.ir.slide_w, ctx.ir.slide_h
     cache: dict = {}
+    hairlines = _hairlines(ctx.ir.source, W, H)
     for s in ctx.ir.slides:
         tpl = list(getattr(s, "template_elements", []) or [])
-        if not tpl and not any(o.type == "picture" and o.cells is not None for o in s.elements):
+        if not tpl and not hairlines.get(s.index) and not any(o.type == "picture" and o.cells is not None for o in s.elements):
             continue
         ground = s.background_hex
         art = [o for o in tpl if _is_art(o, W, H, ground) and not _template_writes_on(o, s, ctx.manifest, W, H, ground, cache)]
@@ -729,6 +759,26 @@ def content_over_art(ctx: AuditContext) -> list[Issue]:
                 r = next((o for o in rules if _rule_through(o, box, H)), None)
                 if r is not None:
                     out.append(ctx.new_issue(CONTENT_OVER_ART, s.index, f"линия шаблона проходит через текст «{e.text[:40]}»", bboxes=[e.bbox_frac, r.bbox_frac], element_ids=[e.id], details={"art": r.id, "rule": True}, autofix=fix("rematch", "перевыбрать макет", outline_id=s.outline_id)))
+                else:
+                    # (line by line: a hairline through a block's last line lies in the block's lower margin)
+                    from verstka.audit.checks.common import line_boxes
+
+                    try:
+                        rows = [b for b, _ in line_boxes(e)] or [box]
+                    except Exception:  # noqa: BLE001
+                        rows = [box]
+                    # (a plate of the slide itself under the text — the conclusion's strip, a card — hides the layout's
+                    # hairline: the slide's shapes are drawn over its layout)
+                    plates = [o.bbox for o in s.elements if o.type in ("shape", "text") and o.fill_hex and fill_alpha(o) >= 0.9 and o.bbox.area > 0]
+
+                    def shows(rule: Bbox, row: Bbox) -> bool:
+                        x0, x1 = max(rule.x, row.x), min(rule.x2, row.x2)
+                        y = rule.y + rule.h // 2
+                        return not any(pl.x <= x0 and pl.x2 >= x1 and pl.y <= y <= pl.y2 for pl in plates)
+
+                    hl = next((b for b in hairlines.get(s.index, []) for row in rows if _line_through(b, row) and shows(b, row)), None)
+                    if hl is not None:
+                        out.append(ctx.new_issue(CONTENT_OVER_ART, s.index, f"линия шаблона проходит через текст «{e.text[:40]}»", bboxes=[e.bbox_frac, hl.to_frac(W, H)], element_ids=[e.id], details={"rule": True, "hairline": True}, autofix=fix("rematch", "перевыбрать макет", outline_id=s.outline_id)))
             if e.type != "text" or len(out) > n_before:
                 continue
             # line by line (round 4.1): one line of a block may run onto the art or the photo although the block does not

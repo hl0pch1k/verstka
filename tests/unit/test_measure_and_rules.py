@@ -207,3 +207,164 @@ def test_the_audit_reads_inherited_spacing_and_paragraph_gaps(tmp_path):
     assert all(abs((p.line_spacing or 0) - 1.5) < 1e-6 for p in e.paragraphs)
     need, lines = text_height_needed_pt(e)
     assert lines == 2 and abs(need - (2 * 20 * 1.2 * 1.5 + 10)) < 0.01
+
+
+def test_a_cover_is_dated_by_a_month_and_a_year_only():
+    """The month stems of 3.0 dated «Маркетинг 2026», «Маркетплейсов 2026», «Декларация 2025» and «Версия 1.2025»: those
+    covers lost their date. A month is one of its word forms or a dotted abbreviation, a numeric month has two digits
+    and is no version number — and a dated line the two-phrase heading moved over the title (the kicker) dates it too."""
+    from types import SimpleNamespace
+
+    from verstka.rendering.clone import _bookend_texts, _dated, _deck_date
+    from verstka.schemas.common import PatternKind
+    from verstka.schemas.outline import DeckOutline, OutlineSlide
+
+    dated = ["Октябрь 2026", "октября 2026", "в октябре 2026", "Отчёт за окт. 2026", "Сент. 2026", "май 2026", "Мая 2026", "марта 2026",
+             "10.2026", "03/2026", "01.10.2026", "October 2026", "Oct 2026", "15 января 2026"]
+    undated = ["Маркетинг 2026", "Отчёт для маркетплейсов 2026", "Декларация 2025", "Версия 1.2025", "Версия 10.2025", "v10.2025", "Маяк 2026",
+               "Майские праздники 2026", "Августовский отчёт 2026", "1.2025", "Стратегия 2026", "2025/2026", "Decision 2025"]
+    assert [t for t in dated if not _dated(t)] == []
+    assert [t for t in undated if _dated(t)] == []
+
+    def cover(headline: str, subtitle: str):
+        o = OutlineSlide(id="sl1", kind=PatternKind.title, headline=headline, subtitle=subtitle)
+        return _bookend_texts(SimpleNamespace(outline=DeckOutline(title=headline, slides=[o], language="ru")), o)
+
+    for line in ("Маркетинг 2026", "Отчёт для маркетплейсов 2026", "Декларация 2025", "Версия 1.2025"):
+        assert cover("Умная теплица", line)[3] == _deck_date("ru"), line
+    head, sub, kicker, footer = cover("Умная теплица: итоги пилота", "Октябрь 2026")
+    assert (head, kicker, footer) == ("Умная теплица", "Октябрь 2026", None), (head, sub, kicker, footer)
+
+
+def test_running_text_is_set_on_the_templates_scale_or_not_in_the_sample():
+    """VK Education s10: two columns at 9.9 pt under the template's smallest 12 pt (the audit's size_not_in_scale): a box
+    whose text fits only that far under the scale is no room for it — the gate takes a roomier sample or the composer.
+    Within the audit's tolerance (a size reads as the template's) and for headings nothing changes."""
+    from types import SimpleNamespace
+
+    from verstka.rendering.clone import SCALE_TOL, _SlideCtx
+    from verstka.schemas.common import BboxFrac, SlotRole
+    from verstka.schemas.template import Capacity, Slot, SlotStyle
+
+    ctx = SimpleNamespace(grow_scale=[12.0, 14.0, 16.0, 20.0])
+
+    def slot(role):
+        return Slot(id="s", role=role, shape_id="s", bbox=BboxFrac(x=0.1, y=0.1, w=0.3, h=0.2), style=SlotStyle(size_pt=16.0), capacity=Capacity(max_chars=100, max_lines=4))
+
+    assert _SlideCtx.off_scale(ctx, slot(SlotRole.card_body), 9.9)
+    assert _SlideCtx.off_scale(ctx, slot(SlotRole.bullet_list), 12.0 - SCALE_TOL - 0.1)
+    assert not _SlideCtx.off_scale(ctx, slot(SlotRole.body), 12.0 - SCALE_TOL + 0.05)
+    assert not _SlideCtx.off_scale(ctx, slot(SlotRole.title), 9.9)
+    assert not _SlideCtx.off_scale(ctx, None, 9.9)
+
+
+def _ruled_template(out):
+    """A grid sample as Классика draws it: three rows, a heading column (24 pt) beside a text column (18 pt), the rules
+    between the rows drawn by the slide's layout (the gate reads the rules of the slide itself only)."""
+    from pptx.enum.shapes import MSO_CONNECTOR
+
+    W, H = 12192000, 6858000
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Emu(W), Emu(H)
+    s1 = prs.slides.add_slide(prs.slide_layouts[0])
+    s1.shapes.title.text = "Название"
+    s1.placeholders[1].text = "Подзаголовок"
+    layout = prs.slide_layouts[5]
+    s2 = prs.slides.add_slide(layout)
+    s2.shapes.title.text = "Заголовок слайда"
+    rows = (0.19, 0.45, 0.72)
+    for y, label in zip(rows, ("Первая строка", "Вторая строка", "Третья строка")):
+        head = s2.shapes.add_textbox(Emu(int(W * 0.055)), Emu(int(H * y)), Emu(int(W * 0.238)), Emu(int(H * 0.175)))
+        head.text_frame.word_wrap = True
+        head.text_frame.text = label
+        head.text_frame.paragraphs[0].runs[0].font.size = Pt(24)
+        body = s2.shapes.add_textbox(Emu(int(W * 0.338)), Emu(int(H * y)), Emu(int(W * 0.623)), Emu(int(H * 0.175)))
+        body.text_frame.word_wrap = True
+        body.text_frame.text = "Текст строки сетки на две строки"
+        body.text_frame.add_paragraph().text = "Вторая строка текста"
+        for p in body.text_frame.paragraphs:
+            p.runs[0].font.size = Pt(18)
+    s3 = prs.slides.add_slide(prs.slide_layouts[1])  # (the template's small steps: a note, a caption, a body)
+    s3.shapes.title.text = "Текст"
+    for i, size in enumerate((12, 14, 16)):
+        tb = s3.shapes.add_textbox(Emu(int(W * 0.1)), Emu(int(H * (0.3 + 0.15 * i))), Emu(int(W * 0.6)), Emu(int(H * 0.1)))
+        tb.text_frame.text = "Пояснение к слайду"
+        tb.text_frame.paragraphs[0].runs[0].font.size = Pt(size)
+    tree = layout.shapes._spTree
+    for y in (0.40, 0.67):
+        ln = s2.shapes.add_connector(MSO_CONNECTOR.STRAIGHT, Emu(int(W * 0.03)), Emu(int(H * y)), Emu(int(W * 0.97)), Emu(int(H * y)))
+        ln.line.width = Pt(1)
+        tree.append(ln._element)  # (moved to the layout: drawn under every slide of it)
+    prs.save(out)
+    return out
+
+
+def test_a_text_never_grows_past_a_rule_of_the_templates_grid(tmp_path):
+    """Классика s10: the bodies of a ruled grid grew from 94 to 129 and 168 pt over the hairline under their row — the
+    seventh line struck through by it (a rule has no area: the room under a box never stopped at it, and the gate reads
+    the slide's own rules only). A box grows down to the rule under it, never past it: the text steps down the scale
+    inside, or the box says it overflows and the gate turns the sample down."""
+    from verstka.analysis.manifest import analyze_template
+    from verstka.ingest.workspace import TemplateWorkspace
+    from verstka.rendering.clone import render_clone
+    from verstka.rendering.deck import DeckBuilder
+    from verstka.schemas.common import PatternKind as K
+    from verstka.schemas.layout import LayoutSlide
+    from verstka.schemas.outline import DeckOutline, OutlineSlide, SlideContent, SlideItem
+
+    tpl = _ruled_template(tmp_path / "ruled.pptx")
+    manifest = analyze_template(tpl, workspace_root=tmp_path / "ws", use_llm=False, use_vlm=False, render=False)
+    ws = TemplateWorkspace.open(manifest.template_id, tmp_path / "ws")
+    pattern = next(p for p in manifest.patterns if p.source_slide == 2)
+    now = ["100 покупок в день", "Средний чек 300 рублей", "20% чеков с едой", "Простой после 15:00", "Списания 27 000 рублей", "25% гостей возвращаются", "Прибыль 120 000 рублей"]
+    later = ["115 покупок в день", "Средний чек 330 рублей", "30% чеков с едой", "Дневные предложения", "Списания 18 000 рублей", "35% гостей возвращаются", "Прибыль 254 795 рублей"]
+    s = OutlineSlide(id="s2", kind=K.comparison, headline="Сейчас и через полгода", content=SlideContent(columns=[SlideItem(title="Сейчас", bullets=now), SlideItem(title="Через полгода", bullets=later)]))
+    outline = DeckOutline(title="Т", slides=[s])
+    slide, warnings = render_clone(DeckBuilder(tpl), LayoutSlide(outline_id="s2", mode="clone", pattern_id=pattern.id), s, pattern, manifest, ws, outline)
+    rules = sorted(sh.top for sh in slide.slide_layout.shapes if sh.height is not None and sh.height <= 0.006 * 6858000 and sh.width >= 0.3 * 12192000)
+    assert len(rules) == 2
+    grown = []
+    for sh in slide.shapes:
+        if not sh.has_text_frame or not any(t in sh.text_frame.text.replace("\u00a0", " ") for t in now + later):
+            continue
+        under = [y for y in rules if y > sh.top + 0.01 * 6858000]
+        if under:
+            grown.append(sh.top + sh.height)
+            assert sh.top + sh.height <= under[0], (sh.text_frame.text[:30], sh.top / 12700, sh.height / 12700, under[0] / 12700)
+    assert grown, [sh.text_frame.text[:30] for sh in slide.shapes if sh.has_text_frame]
+
+
+def test_the_audit_sees_a_hairline_of_the_layout_through_a_text(tmp_path):
+    """A connector or a line of the layout has no area: the template layers of the audit's IR left it out, and Классика's
+    seventh line struck through by its grid passed every check. The audit reads the layout's hairlines from the deck and
+    flags the text they cross, line by line (a rule through a block's last line lies in the block's lower margin)."""
+    from verstka.audit.ir import build_deck_ir
+    from verstka.audit.registry import AuditContext, load_builtin_checks, run_checks
+    from verstka.schemas.template import SlideSize, TemplateManifest, Tokens
+
+    W, H = 12192000, 6858000
+    tpl = _ruled_template(tmp_path / "ruled.pptx")
+    prs = Presentation(str(tpl))
+    slide = prs.slides[1]
+    boxes = [sh for sh in slide.shapes if sh.has_text_frame and "Текст строки" in sh.text_frame.text]
+    first = min(boxes, key=lambda sh: sh.top)
+    # grown over the hairline under its row (at 40 % of the height), a line of it right across the hairline
+    first.top, first.height = Emu(int(first.top) + int(11 * 12700)), Emu(int(H * 0.30))
+    tf = first.text_frame
+    for i in range(5):
+        tf.add_paragraph().text = f"Ещё одна строка текста номер {i + 1}"
+    for p in tf.paragraphs:
+        for r in p.runs:
+            r.font.size = Pt(18)
+    for sh in boxes:
+        if sh is not first:
+            sh.text_frame.text = "Короткий текст"
+    prs.save(str(tmp_path / "deck.pptx"))
+    load_builtin_checks()
+    ir = build_deck_ir(tmp_path / "deck.pptx", with_images=False)
+    man = TemplateManifest(template_id="t", source_file="t.pptx", slide_size=SlideSize(w=W, h=H), tokens=Tokens(), patterns=[], n_slides=3)
+    got, _ = run_checks(AuditContext(ir=ir, manifest=man), only={"content_over_art"})
+    hits = [i for i in got if i.slide == 2 and (i.details or {}).get("hairline")]
+    assert len(hits) == 1 and "Текст строки" in hits[0].message and hits[0].severity == "warn", [(i.slide, i.message, i.details) for i in got]
+    # the rows that keep inside their cells are not flagged
+    assert not [i for i in got if "Короткий текст" in i.message]

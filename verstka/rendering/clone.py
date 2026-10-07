@@ -39,6 +39,9 @@ log = logging.getLogger(__name__)
 TEXT_ROLES = {SlotRole.title, SlotRole.subtitle, SlotRole.body, SlotRole.bullet_list, SlotRole.card_title, SlotRole.card_body, SlotRole.number, SlotRole.number_label, SlotRole.caption}
 CELL_TEXT_ROLES = {SlotRole.card_title, SlotRole.card_body, SlotRole.number, SlotRole.number_label, SlotRole.bullet_list, SlotRole.body}
 _BODY_ROLES = (SlotRole.card_body, SlotRole.bullet_list, SlotRole.body)
+# the audit's tolerance around the template's sizes (`audit/checks/template.py`, size_not_in_scale): a size within
+# it of one the template sets reads as the template's
+SCALE_TOL = 0.75
 _ITEM_KINDS = {PatternKind.cards, PatternKind.process, PatternKind.timeline, PatternKind.team, PatternKind.comparison, PatternKind.agenda, PatternKind.two_column}
 _DEFAULT_INSETS = (91440, 45720, 91440, 45720)
 _ICON_MAX_W = 0.06  # pictures narrower than this share of the slide are icons: part of the card design
@@ -89,6 +92,14 @@ class _SlideCtx:
         self.lede_top: Optional[int] = None  # the cells start under the subtitle line set under the heading
         self.overflowed: list = []  # (warning, element, texts, family, size, bold, min_ratio) of boxes that did not fit
         self.harmonized: list[list[etree._Element]] = []  # texts set at one size across cards (`_harmonize`)
+        # (each such group with its slots, cap and least ratio — set again as one when a member gets its room later —
+        # and the cards' headings over their texts, kept a step over them: `retry_overflows`)
+        self.harmony: list[tuple[list, Optional[float], float]] = []
+        self.heads_over: list[tuple[list, list]] = []
+        # the places the sample gives the slide's items (its columns, its card boxes) and the texts set for them: the
+        # lines beside the items never take those places, nor a size over the items' (`render_clone`)
+        self.item_slot_ids: set[str] = set()
+        self.item_text_els: list[etree._Element] = []
         self.title_caps = False  # the deck's headings are set in capitals (`DeckStyle.caps`)
         self.compound_ids: set[str] = set()  # boxes written as a figure over its label (`_fill_compound`)
         self.pattern_text_ids: set[str] = {s.shape_id for s in pattern.slots if s.role in TEXT_ROLES}
@@ -100,6 +111,21 @@ class _SlideCtx:
             self.pic_kind: dict[str, str] = {x.shape_id: x.kind for x in pattern_pictures(ws, manifest, pattern)}
         except Exception:  # noqa: BLE001 - unknown pictures are treated as the sample's own
             self.pic_kind = {}
+
+    def off_scale(self, slot: Optional[Slot], size: float) -> bool:
+        """Running text (a body, a list, a card's text) that fits its box only under the template's smallest size, past
+        the audit's tolerance around its sizes (`size_not_in_scale`: VK Education's two columns at 9.9 pt under its
+        12 pt): no size of the template holds it there — the box is no room for the text, and the gate takes a roomier
+        sample or the composer rather than a size the template never sets."""
+        if slot is None or slot.role not in _BODY_ROLES or not self.grow_scale:
+            return False
+        return size < min(self.grow_scale) - SCALE_TOL - 1e-6
+
+    def items_text_size(self) -> Optional[float]:
+        """The size the slide's items read at: the smallest running size of the texts set for them (their texts under
+        their headings), or None when no item was set in a text box."""
+        sizes = [x for x in (_running_size(e) for e in self.item_text_els if e.getparent() is not None) if x]
+        return min(sizes) if sizes else None
 
     def line_height_of(self, el: etree._Element) -> float:
         """The height of a line of this text box in em: its own paragraph spacing (VK Tech's card texts are set at
@@ -237,6 +263,8 @@ class _SlideCtx:
         caps = bool(slot is not None and slot.role == SlotRole.title and self.title_caps)
         if box and box[2] > 0 and box[3] > 0:
             res = fit_size([p.text for p in paragraphs], _text_frame(el, box), family, size, bold, self.grow_scale, insets_emu=insets, line_spacing=self.line_height_of(el), para_spacing_pt=gap, min_ratio=min_ratio, ladder_only=ladder, head=head, caps=caps)
+            if res.fits and self.off_scale(slot, res.size_pt):
+                res = _respec(res, fits=False)  # (the room under the box is tried next, then the gate decides)
             target_size = res.size_pt
             if grow_to and res.fits and target_size >= size:
                 target_size = grow_size([p.text for p in paragraphs], _text_frame(el, box), family, target_size, bold, self.grow_scale, grow_to, insets_emu=insets, line_spacing=self.line_height_of(el), head=head, para_spacing_pt=gap)
@@ -245,7 +273,7 @@ class _SlideCtx:
                 if grown is not None:
                     box2 = (box[0], box[1], box[2], grown - box[1])
                     res2 = fit_size([p.text for p in paragraphs], Bbox(x=box2[0], y=box2[1], w=box2[2], h=box2[3]), family, size, bold, self.grow_scale, insets_emu=insets, line_spacing=self.line_height_of(el), para_spacing_pt=gap, min_ratio=min_ratio, ladder_only=ladder, head=head, caps=caps)
-                    if res2.fits:
+                    if res2.fits and not self.off_scale(slot, res2.size_pt):
                         set_element_pos(el, h=box2[3])
                         bp = el.find(q("p:txBody") + "/" + q("a:bodyPr"))
                         if bp is not None and bp.get("anchor") in ("b", "ctr"):
@@ -333,7 +361,8 @@ class _SlideCtx:
                 continue
             box2 = Bbox(x=b[0], y=b[1], w=b[2], h=grown - b[1])
             res = fit_size(texts, box2, family, size, bold, self.grow_scale, insets_emu=_body_insets(el), line_spacing=self.line_height_of(el), min_ratio=min_ratio)
-            if not res.fits:
+            sid = self.id_of(el) or ""
+            if not res.fits or self.off_scale(self.slot_of.get(self.origin.get(sid, sid)), res.size_pt):
                 continue
             set_element_pos(el, h=box2.h)
             set_text_size(el, res.size_pt)
@@ -342,12 +371,17 @@ class _SlideCtx:
                 bp.set("anchor", "t")
             self.warnings.remove(w)
             # the cards set at one size stay at one size: a third card's text stepped down alone read as a mistake
-            # (LCT p15: two rows at 14 pt over one at 10.5)
-            for members in self.harmonized:
-                if any(m is el for m in members):
-                    for m in members:
-                        if m is not el and m.getparent() is not None and (_running_size(m) or 0) > res.size_pt + 0.05:
-                            _scale_text(m, res.size_pt, self.grow_scale)
+            # (LCT p15: two rows at 14 pt over one at 10.5) — nor does one of them grow alone into the room it got
+            # (VK Education: one column at 14 pt beside the other at 9.9): the group is set again as one, each member
+            # fitted in its own room, the smallest size for all; the cards' headings keep their step over the texts
+            for pairs, cap, mr in self.harmony:
+                if any(m is el for m, _ in pairs):
+                    live = [(m, sl) for m, sl in pairs if m.getparent() is not None]
+                    _harmonize(self, live, cap, mr, record=False)
+                    for titles, bodies in self.heads_over:
+                        if any(m is el for m, _ in bodies):
+                            _keep_title_above_body(self, [(t, sl) for t, sl in titles if t.getparent() is not None], [(b, sl) for b, sl in bodies if b.getparent() is not None])
+                    break
 
     def retry_heading(self) -> None:
         """A heading that stepped down to keep to its one-line box takes the deck's heading size back over two lines
@@ -447,7 +481,37 @@ class _SlideCtx:
         for a in self.art_boxes():
             if a.x < bx.x2 and a.x2 > bx.x and a.y >= bx.y2 - int(0.005 * self.H):
                 limit = min(limit, a.y - gap)
+        sid = self.id_of(el) or ""
+        slot = self.slot_of.get(self.origin.get(sid, sid))
+        rule = self.rule_under(bx) if slot is None or slot.role not in (SlotRole.title, SlotRole.subtitle) else None
+        if rule is not None:
+            # (the text of the slide: a heading has its own band and its own rule check — `retry_heading`, the gate)
+            limit = min(limit, rule - int(0.012 * self.H))
         return limit if limit > bx.y2 + int(0.01 * self.H) else None
+
+    def rule_under(self, bx: Bbox) -> Optional[int]:
+        """The top of the first rule of the template's grid at or under the foot of a box, across its text (a hairline
+        drawn on the slide, its layout or its master — a rule has no area, so the obstacles above never stop at it):
+        a box grows down to it, never past it. Классика's comparison grid: seven lines grown over the rule between two
+        rows were struck through by it."""
+        try:
+            from verstka.rendering.layers import drawn_layers
+
+            layers = drawn_layers(self.slide)
+        except Exception:  # noqa: BLE001 - no rules known
+            return None
+        tops = []
+        for lay in layers:
+            lb = lay.box
+            if lay.placeholder or lay.has_text or not lay.paints or lay.picture:
+                continue
+            if lb.h > 0.006 * self.H or lb.w < 0.05 * self.W or lb.y < bx.y2 - int(0.005 * self.H):
+                continue
+            if lay.source == "slide" and lay.el.getparent() is None:
+                continue
+            if min(lb.x2, bx.x2) - max(lb.x, bx.x) >= 0.3 * bx.w:
+                tops.append(lb.y)
+        return min(tops) if tops else None
 
     def replaced(self, el: etree._Element) -> bool:
         """The element leaves for the slide's own chart or table: a picture of the sample's figures (a chart drawn as
@@ -1522,6 +1586,9 @@ def _fill_cells(ctx: _SlideCtx, items: list[SlideItem], use_ordinals: bool = Tru
     # thesis cards (a heading and nothing under it) are read like running text: they may grow the same way
     _harmonize(ctx, cell_titles, cap=None if cell_bodies else _text_cap(ctx))
     _keep_title_above_body(ctx, cell_titles, cell_bodies)
+    if cell_titles and cell_bodies:
+        ctx.heads_over.append((list(cell_titles), list(cell_bodies)))
+    ctx.item_text_els.extend(e for e, _ in cell_titles + cell_bodies)
     _harmonize(ctx, cell_numbers, cap=None, min_ratio=0.35)
     _harmonize_first_lines(cell_heads)
     _harmonize_compound_labels([e for e in cell_heads if (ctx.id_of(e) or "") in ctx.compound_ids])
@@ -1895,7 +1962,7 @@ def _readable_size(ctx: "_SlideCtx", size: float, chars: int) -> float:
     return up[0] if up and up[0] <= floor * 1.25 else round(floor * 2) / 2
 
 
-def _harmonize(ctx: _SlideCtx, pairs: list[tuple[etree._Element, Optional[Slot]]], cap: Optional[float], min_ratio: float = 0.6) -> None:
+def _harmonize(ctx: _SlideCtx, pairs: list[tuple[etree._Element, Optional[Slot]]], cap: Optional[float], min_ratio: float = 0.6, record: bool = True) -> None:
     if len(pairs) < 2 and cap is None:
         return
     sizes: list[float] = []
@@ -1933,8 +2000,9 @@ def _harmonize(ctx: _SlideCtx, pairs: list[tuple[etree._Element, Optional[Slot]]
                     p0 = _first_text_para(e)
                     for r in list(p0.iter(q("a:rPr"))) + list(p0.iter(q("a:endParaRPr"))):
                         r.set("sz", str(lead))
-        if len(pairs) >= 2:
+        if len(pairs) >= 2 and record:
             ctx.harmonized.append([e for e, _ in pairs])
+            ctx.harmony.append((list(pairs), cap, min_ratio))
 
 
 def _first_text_para(e: etree._Element) -> Optional[etree._Element]:
@@ -2090,15 +2158,22 @@ def _fill_standalone_items(ctx: _SlideCtx, items: list[SlideItem]) -> None:
     titles = ctx.slots(SlotRole.card_title)
     bodies = ctx.slots(SlotRole.card_body)
     n = max(len(titles), len(bodies))
+    if items:
+        ctx.item_slot_ids.update(sl.shape_id for sl in titles + bodies)
     if n and items:
         items2 = _merge_items(items, n)
+        set_titles, set_bodies = [], []
         for slot, item in zip(titles, items2):
             ctx.fill_slot(slot, [ParagraphSpec(item.title or item.number or "")] if (item.title or item.number) else [])
+            set_titles.append(slot)
         for k, (slot, item) in enumerate(zip(bodies, items2)):
             if k < len(titles):
                 ctx.fill_slot(slot, _item_body_paragraphs(item) or ([ParagraphSpec(item.title)] if item.title else []))
             else:
                 ctx.fill_slot(slot, _item_single_paragraphs(item))  # no title slot for this body: the title goes bold on top
+            set_bodies.append(slot)
+        _harmonize_siblings(ctx, set_titles, set_bodies)
+        ctx.item_text_els.extend(ctx.els[x.shape_id] for x in set_titles + set_bodies if x.shape_id in ctx.els)
         if len(titles) > len(bodies):
             for item in items2[len(bodies) : len(titles)]:
                 if item.text or item.bullets:
@@ -2109,14 +2184,23 @@ def _fill_standalone_items(ctx: _SlideCtx, items: list[SlideItem]) -> None:
 
         free = [s for s in ctx.slots(SlotRole.body, SlotRole.bullet_list, SlotRole.card_body, SlotRole.card_title) if s.shape_id not in ctx.cell_member_ids]
         stacks = column_stacks(free)
+        # (the sample's columns are the items' places even when the items outnumber them and run together in one of
+        # them: the lines beside the items never take another — Кофейня p4: three figure lines in the main column at
+        # 21.5 pt, the four cards squeezed into a 14 pt list beside them)
+        ctx.item_slot_ids.update(x.shape_id for st_ in stacks for x in st_ if x is not None)
         if len(stacks) >= len(items):
             # the sample's own columns (a heading over a list, side by side): one item a column, in reading order
+            set_heads, set_bodies = [], []
             for (head, body), item in zip(stacks, items):
                 if head is not None and (item.title or item.number):
                     ctx.fill_slot(head, [ParagraphSpec(item.title or item.number or "", bullet=False)])
                     ctx.fill_slot(body, _item_body_paragraphs(item) or [ParagraphSpec(item.title, bullet=False)])
+                    set_heads.append(head)
                 else:
                     ctx.fill_slot(body, _item_single_paragraphs(item))
+                set_bodies.append(body)
+            _harmonize_siblings(ctx, set_heads, set_bodies)
+            ctx.item_text_els.extend(ctx.els[x.shape_id] for x in set_heads + set_bodies if x.shape_id in ctx.els)
             items = []
     if items:
         target = ctx.slots(SlotRole.bullet_list, SlotRole.body)
@@ -2137,11 +2221,39 @@ def _fill_standalone_items(ctx: _SlideCtx, items: list[SlideItem]) -> None:
                 else:
                     paras.append(ParagraphSpec(f"{head}: {i.text}" if i.text and head else (i.text or head), bullet=True))
             ctx.fill_slot(big, paras)
+            ctx.item_slot_ids.add(big.shape_id)
+            if big.shape_id in ctx.els:
+                ctx.item_text_els.append(ctx.els[big.shape_id])
         else:
             ctx.warnings.append(f"{len(items)} items had no slot: {', '.join((i.number or i.title)[:30] for i in items)}")
 
 
 # ---------------------------------------------------------------------------- native objects
+
+
+def _harmonize_siblings(ctx: _SlideCtx, heads: list[Slot], bodies: list[Slot]) -> None:
+    """Items set in standalone boxes side by side (a sample's columns: a heading over a list each) read as one block,
+    as the cells of a group do (`_fill_cells`): their texts share one size — the smallest that fits every box, grown
+    along the scale when all have room (seven short lines at 13 pt in columns made for a page of text read as empty
+    columns) — their headings another, a step over the texts (two columns of one comparison at 14 and 9.9 pt read as
+    two designers)."""
+
+    def filled(slots: list[Slot]) -> list[tuple[etree._Element, Optional[Slot]]]:
+        out = []
+        for sl in slots:
+            el = ctx.els.get(sl.shape_id)
+            if el is not None and el.getparent() is not None and sl.shape_id in ctx.filled and shape_text(el).strip():
+                out.append((el, sl))
+        return out
+
+    head_pairs, body_pairs = filled(heads), filled(bodies)
+    if len(body_pairs) >= 2:
+        _harmonize(ctx, body_pairs, cap=_text_cap(ctx))
+    if len(head_pairs) >= 2:
+        _harmonize(ctx, head_pairs, cap=None)
+    if head_pairs and body_pairs:
+        _keep_title_above_body(ctx, head_pairs, body_pairs)
+        ctx.heads_over.append((head_pairs, body_pairs))
 
 
 def _clamp_to_safe(box: Bbox, ctx: _SlideCtx) -> Bbox:
@@ -2651,10 +2763,39 @@ def _draw_native(ctx: _SlideCtx, oslide: OutlineSlide, box: Bbox) -> None:
                 nv = x.find(".//" + q("p:cNvPr"))
                 if nv is not None:
                     native.add(nv.get("id"))
+        # the object never lies over the slide's own text: a sample with no room for it beside the texts it set
+        # (Кофейня p3, p6: a ten-row table drawn over the lines and the conclusion) leaves the slide to another
+        # sample or to the composer
+        hidden = _text_under(ctx, [x for x in tree0 if x not in before_native and etree.QName(x).localname == "graphicFrame"])
+        if hidden:
+            raise RuntimeError(f"it would lie over the slide's text «{hidden[:24]}»")
     except Exception as e:  # noqa: BLE001
         # the sample's chart or table area left empty is worse than a composed slide: the renderer rolls this clone
         # back and composes the slide, which shows its figures or its text instead
         raise RuntimeError(f"native object failed: {str(e)[:120]}") from e
+
+
+def _text_under(ctx: _SlideCtx, frames: list[etree._Element]) -> Optional[str]:
+    """The first text of the slide's own (a slot it filled, its heading aside) that one of `frames` — the native chart
+    or table just drawn — lies over by a tenth of its letters and more; None when they keep clear of each other."""
+    from verstka.rendering.clone_check import ink_box
+
+    boxes = [Bbox(x=b[0], y=b[1], w=b[2], h=b[3]) for b in (element_bbox(f) for f in frames) if b and b[2] > 0 and b[3] > 0]
+    if not boxes:
+        return None
+    for sid, el in ctx.els.items():
+        if sid not in ctx.filled or sid in ctx.removed or el.getparent() is None or etree.QName(el).localname != "sp" or is_nested(el):
+            continue
+        slot = ctx.slot_of.get(ctx.origin.get(sid, sid))
+        if slot is not None and slot.role in (SlotRole.title, SlotRole.subtitle):
+            continue
+        text = shape_text(el).strip()
+        ib = ink_box(el, ctx.typo.primary_family) if text else None
+        if ib is None or ib.area <= 0:
+            continue
+        if any(b.intersection(ib) > 0.1 * ib.area for b in boxes):
+            return text
+    return None
 
 
 def _plate_to_table(ctx: _SlideCtx, before: set) -> None:
@@ -4242,11 +4383,30 @@ def _deck_date(language: Optional[str]) -> str:
 
 
 _SECTION_NO_RE = re.compile(r"(?i)(раздел|часть|глава|блок|этап|section|part|chapter)\s*(№\s*)?[0-9IVX]{1,4}\.?")
-# a month and a year («Октябрь 2026», «окт. 2026», «10.2026», «October 2026»): a line that dates the deck itself
+# a month and a year («Октябрь 2026», «октября 2026», «окт. 2026», «10.2026», «01.10.2026», «October 2026»): a line
+# that dates the deck itself. A month is one of its own word forms or a dotted abbreviation — never the first letters
+# of another word («Маркетинг 2026», «Маркетплейсов 2026», «Декларация 2025» are no dates); a numeric month is written
+# with two digits («10.2026», «03/2026», never «1.2025») and is no version number («Версия 10.2025», «v10.2025»)
 _DATED_RE = re.compile(
-    r"(?i)(?<![а-яёa-z])(?:янв|фев|мар|апр|ма[йя]|июн|июл|авг|сен|окт|ноя|дек|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[а-яёa-z]*\.?\s+(?:19|20)\d{2}"
-    r"|\b(?:0?[1-9]|1[0-2])[./](?:19|20)\d{2}\b"
+    r"(?i)(?<![а-яёa-z])(?:"
+    r"январ[ьяеюё]|феврал[ьяеюё]|март[аеу]?|апрел[ьяеюё]|ма[йяею]|июн[ьяеюё]|июл[ьяеюё]|август[аеу]?|сентябр[ьяеюё]|"
+    r"октябр[ьяеюё]|ноябр[ьяеюё]|декабр[ьяеюё]|(?:янв|фев|февр|мар|апр|июн|июл|авг|сен|сент|окт|ноя|нояб|дек)\.|"
+    r"january|february|march|april|may|june|july|august|september|october|november|december|"
+    r"(?:jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\.?"
+    r")(?![а-яёa-z]),?\s*(?:19|20)\d{2}(?!\d)"
+    r"|(?<![\w.,/])(?:\d{1,2}[./])?(?:0[1-9]|1[0-2])[./](?:19|20)\d{2}(?![\d.,]\d)"
 )
+# what a numeric «10.2025» after it is: a version, a release, a build — not the month the deck was made
+_VERSION_WORD_RE = re.compile(r"(?i)(?:верси[яиюей]|верс\.|ред\.|редакци[яиюей]|релиз\w*|сборк[аиуе]|выпуск|version|ver\.?|release|build|rev\.?|v)\s*$")
+
+
+def _dated(text: Optional[str]) -> bool:
+    """Whether a line of a cover names a month of a year (`_DATED_RE`): the deck is dated by it already."""
+    for m in _DATED_RE.finditer(text or ""):
+        if m.group(0)[:1].isdigit() and _VERSION_WORD_RE.search(text[: m.start()]):
+            continue  # «Версия 10.2025»: a version number, no date
+        return True
+    return False
 
 
 def _bookend_texts(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[str, Optional[str], Optional[str], Optional[str]]:
@@ -4266,8 +4426,9 @@ def _bookend_texts(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[str, Optional[
             lines.insert(0, tail)
         # the month the deck was made, under a cover the model wrote; a cover of the author's own text says only what
         # the author wrote (no date the brief never gave) — and a cover whose lines carry a date already says it once
-        # (an improved deck's «Октябрь 2026» was set twice: its own line and the footer)
-        dated = any(_DATED_RE.search(t) for t in [head, *lines])
+        # (an improved deck's «Октябрь 2026» was set twice: its own line and the footer), the kicker over the title
+        # among them (the audience line a two-phrase heading moves there)
+        dated = any(_dated(t) for t in [head, kicker, *lines])
         footer = None if oslide.verbatim or dated else _deck_date(ctx.outline.language)
     elif oslide.kind == PatternKind.section:
         secs = [s.id for s in ctx.outline.slides if s.kind == PatternKind.section]
@@ -6115,11 +6276,20 @@ def render_clone(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
         # an item slide's own lines beside its items (a budget under a timeline, the risks beside the cards): a text
         # area of the sample the items left free takes them — else the sample cannot show them, the gate turns it down
         # and the next one (or the composer, which shows them) is tried. They were dropped without a word before.
+        # They are secondary to the items (a figure the cards were not given, «180 000 ₽ — Все вложения»): never in a
+        # place the sample gives the items (its columns, its card boxes — `_fill_standalone_items`), never set larger
+        # than the items' own text.
         free = [sl for sl in ctx.slots(SlotRole.bullet_list, SlotRole.body)
-                if not sl.group_id and sl.shape_id not in ctx.filled and sl.shape_id not in ctx.removed and sl.shape_id not in ctx.cell_member_ids]
+                if not sl.group_id and sl.shape_id not in ctx.filled and sl.shape_id not in ctx.removed and sl.shape_id not in ctx.cell_member_ids
+                and sl.shape_id not in ctx.item_slot_ids]
         if free:
             big = ctx.largest(free)
-            ctx.fill_slot(big, [ParagraphSpec(b, bullet=True) for b in c.bullets], size_hint=_running_size(big), grow_to=text_cap)
+            hint, grow = _running_size(big), text_cap
+            under = ctx.items_text_size()
+            if under:
+                hint = min(hint or big.style.size_pt or under, under)
+                grow = min(text_cap, under)
+            ctx.fill_slot(big, [ParagraphSpec(b, bullet=True) for b in c.bullets], size_hint=hint, grow_to=grow)
         else:
             ctx.warnings.append("no slot for bullets")
     if c.paragraphs and code_side:

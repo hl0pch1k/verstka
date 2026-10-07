@@ -55,6 +55,31 @@ def column_stacks(slots: list[Slot]) -> list[tuple[Optional[Slot], Slot]]:
     return out
 
 
+# the item forms whose own lines stand beside their items (`clone._ITEM_KINDS`): the lines take a box the items leave
+_LINES_BESIDE = {PatternKind.cards, PatternKind.process, PatternKind.timeline, PatternKind.team, PatternKind.comparison, PatternKind.agenda, PatternKind.two_column}
+
+
+def lines_beside_items(slide: OutlineSlide) -> bool:
+    """An item form with lines of its own beside its items (a budget under a timeline, the risks beside the cards)."""
+    c = slide.content
+    return slide.kind in _LINES_BESIDE and bool(c.items or c.columns) and any(b.strip() for b in c.bullets)
+
+
+def room_for_lines(pattern: Pattern, group) -> bool:
+    """Whether a sample keeps a text box for the lines beside the items, as the clone places them: a list or body box
+    outside the items' places — the cells of its group, else its card boxes, else its columns (a heading over a list),
+    else the largest box, which the items take together."""
+    texts = [s for s in pattern.slots if s.role in (SlotRole.body, SlotRole.bullet_list) and not s.group_id]
+    if group is not None or any(s.role in (SlotRole.card_title, SlotRole.card_body) and not s.group_id for s in pattern.slots):
+        return bool(texts)
+    stacks = column_stacks(pattern.slots)
+    taken = {x.shape_id for st in stacks for x in st if x is not None}
+    left = [s for s in texts if s.shape_id not in taken]
+    if not stacks and left:
+        left.remove(max(left, key=lambda s: s.bbox.area))
+    return bool(left)
+
+
 @dataclass
 class ScoreResult:
     score: float
@@ -463,6 +488,11 @@ def score_pattern(
     fit: dict = {}
     if pattern.reference:
         return ScoreResult(0.0, [f"служебный слайд шаблона: {pattern.reference}"], fit)
+    # scored on what the slide will show: the key figures beside an item form's items are set as lines under them
+    # (`fallbacks.figures_beside_items`, the renderer's guard) — never as figures a sample would need number boxes for
+    from verstka.rendering.fallbacks import figures_beside_items
+
+    slide = figures_beside_items(slide, None)[0]
     kind = kind_compat(slide.kind, pattern.kind)
     if kind <= 0 and chart_picture_room(slide, pattern, pictures) > 0:
         # a chart drawn as a picture in the sample (Dark Minimalist p17: a line chart over «Item 1 … Item 5» beside
@@ -744,6 +774,7 @@ def score_pattern(
         del needs["bullet_list"]
         cell_role = "card_title" if any(x.group_id == group.id and x.role == SlotRole.card_title for x in pattern.slots) else "card_body"
         needs[cell_role] = max(len(b) for b in bl)
+    running_worst = 0.0  # the same for the running text alone: lists, bodies, the cards' texts
     for role_name, need in needs.items():
         role = SlotRole(role_name)
         if title_fit is not None and role == SlotRole.title:
@@ -784,6 +815,8 @@ def score_pattern(
         else:
             ratio = need / capacity
         worst = max(worst, ratio)
+        if role in (SlotRole.bullet_list, SlotRole.body, SlotRole.card_body) and capacity:
+            running_worst = max(running_worst, ratio)
         if ratio > 1.0:
             fit[f"overflow_{role_name}"] = round(ratio, 2)
     fit["text_ratio"] = round(worst, 2)
@@ -863,6 +896,12 @@ def score_pattern(
         clutter = min(0.3, 0.06 * extra)
     if clutter:
         reasons.append(f"{extra} лишних текстовых слотов останутся пустыми")
+    if not bookend and lines_beside_items(slide) and not room_for_lines(pattern, group):
+        # the lines beside the items (a budget under the steps, the figures the cards were not given) take a text box
+        # the items leave free — never one of the items' places (`clone.render_clone`): without one the sample loses
+        # them and the gate turns it down
+        cap = min(cap, 0.2)
+        reasons.append("строкам рядом с пунктами нет места в образце")
     if worst <= 1.0:
         text = 1.0
         reasons.append("текст помещается")
@@ -871,7 +910,7 @@ def score_pattern(
         reasons.append(f"текст чуть длиннее ёмкости (×{worst:.2f}), нужен меньший кегль")
     elif worst <= 1.8:
         text = 0.4
-        reasons.append(f"текст заметно длиннее ёмкости (×{worst:.2f}), потребуется сокращение")
+        reasons.append(f"текст заметно длиннее ёмкости (×{worst:.2f}), нужен заметно меньший кегль")
     else:
         text = 0.15
         reasons.append(f"текст не помещается (×{worst:.2f})")
@@ -880,6 +919,13 @@ def score_pattern(
         kind *= 0.6
     elif worst > 1.3:
         kind *= 0.85
+    if 1.3 < running_worst <= 1.8:
+        # lists and the cards' texts are no longer cut to fit (the autofix keeps every line of the author's): past ×1.3
+        # they are set that much smaller in the sample's boxes (VK Tech: 15 pt lists at 9.92 pt in cards made for a
+        # paragraph each) — a roomier sample or a composed slide says them better
+        text = min(text, 0.2)
+        kind *= 0.82
+        reasons.append("списки и тексты карточек не сокращаются: в образце они встанут заметно мельче")
     if slide.verbatim and worst >= 2.0 - 1e-6 and not bookend:
         # the author's own text is cut by whole sentences only: twice the sample's room is no fit (Классика p11 took
         # three stages in its two cells, the first stage's heading over its text) — another sample or a composed slide;

@@ -238,8 +238,8 @@ def _item_line(it: SlideItem) -> str:
     return f"{head} — {body}" if head and body else (head or body)
 
 
-def _number_line(n: NumberCallout, outline: DeckOutline) -> str:
-    fact = outline.fact_by_id(n.fact_id) if n.fact_id else None
+def _number_line(n: NumberCallout, outline: Optional[DeckOutline]) -> str:
+    fact = outline.fact_by_id(n.fact_id) if n.fact_id and outline is not None else None
     label = n.label.strip()
     value = n.value.strip()
     if fact is not None and fact.unit and fact.unit.strip().lower() not in (value + " " + label).lower():
@@ -284,10 +284,97 @@ def _substitute(o: OutlineSlide, outline: DeckOutline, *, chart_facts: bool) -> 
     return o.model_copy(update={"kind": kind, "content": content}), how
 
 
+# a quantity as the deck writes it either way: its digits (thousands bound by a space or a no-break space, a decimal
+# comma or point), a multiplier word and its unit — «70 000 ₽» is «70 000 рублей», «1,2 млн ₽» is «1 200 000 руб.»,
+# «35%» is «35 процентов»; a sign is the wording's («+112%» is «рост на 112%», «−33%» is «на 33% меньше»)
+_QTY_RE = re.compile(
+    r"(?<![\d.,])(\d{1,3}(?:[    ]\d{3}(?!\d))+|\d+)(?:[.,](\d+))?"
+    r"(?:\s*(тыс[а-яё]*\.?|млн\.?|миллион[а-яё]*|млрд\.?|миллиард[а-яё]*))?"
+    r"(?:\s*(%|процент[а-яё]*|п\.\s?п\.?|₽|руб(?:л[а-яё]*|\.|(?![а-яё]))|\$|долл[а-яё]*\.?|€|евро(?![а-яё])))?",
+    re.I,
+)
+_MULT = (("тыс", 1e3), ("млн", 1e6), ("миллион", 1e6), ("млрд", 1e9), ("миллиард", 1e9))
+_WORD_RE = re.compile(r"[а-яёa-z]{3,}", re.I)
+_LABEL_STOP = frozenset("для при над под без или как что это все всех его как так уже ещё еще".split())
+
+
+def _quantities(text: str) -> list[tuple[float, Optional[str]]]:
+    """The quantities a text names, each as (value, unit): «70 000 ₽» and «70 000 рублей» are (70000, «₽»), «1,2 млн
+    ₽» is (1200000, «₽»), «35 процентов» is (35, «%»)."""
+    out: list[tuple[float, Optional[str]]] = []
+    for m in _QTY_RE.finditer(text or ""):
+        whole, frac, mult, unit = m.group(1), m.group(2), (m.group(3) or "").lower(), (m.group(4) or "").lower()
+        try:
+            value = float(re.sub(r"\D", "", whole) + ("." + frac if frac else ""))
+        except ValueError:
+            continue
+        value *= next((f for stem, f in _MULT if mult.startswith(stem)), 1.0)
+        if unit.startswith(("%", "процент")):
+            unit_n: Optional[str] = "%"
+        elif unit.startswith("п"):
+            unit_n = "п. п."
+        elif unit.startswith(("₽", "руб")):
+            unit_n = "₽"
+        elif unit.startswith(("$", "долл")):
+            unit_n = "$"
+        elif unit.startswith(("€", "евро")):
+            unit_n = "€"
+        else:
+            unit_n = None
+        out.append((value, unit_n))
+    return out
+
+
+def _stems(text: str) -> set[str]:
+    return {w[:5] for w in (x.lower().replace("ё", "е") for x in _WORD_RE.findall(text or "")) if w not in _LABEL_STOP}
+
+
+def figure_given(n: NumberCallout, lines: list[str]) -> bool:
+    """The figure is already on the slide in one of `lines` (an item's line, a bullet, a paragraph): the line names its
+    quantities — compared as quantities, not as characters («70 000 ₽» is «70 000 рублей») — and at least half of the
+    words of its label («Витрина для десертов — 70 000 рублей» gives «70 000 ₽ — Витрина»). Another fact that happens
+    to have the same number («30 000 ₽ — Резерв» beside «Обучение — 30 000 рублей») is no repeat: its label stays."""
+    want = _quantities(n.value)
+    if not want:
+        raw = " ".join((n.value or "").split()).lower()
+        return bool(raw) and any(raw in " ".join(t.split()).lower() for t in lines)
+    label = _stems(n.label)
+    for t in lines:
+        have = _quantities(t)
+        if not all(any(abs(v - hv) <= 1e-9 * max(1.0, abs(v)) and (u == hu or u is None or hu is None) for hv, hu in have) for v, u in want):
+            continue
+        if not label or len(label & _stems(t)) * 2 >= len(label):
+            return True
+    return False
+
+
+def figure_lines(numbers: list[NumberCallout], lines: list[str], outline: Optional[DeckOutline]) -> list[str]:
+    """The slide's figures as lines of text («70 000 ₽ — Витрина»), each one its `lines` do not give already."""
+    return [_number_line(n, outline) for n in numbers if (n.value or "").strip() and not figure_given(n, lines)]
+
+
+def figures_beside_items(s: OutlineSlide, outline: Optional[DeckOutline]) -> tuple[OutlineSlide, list[str]]:
+    """Key figures beside the items of an item form (cards, steps, columns — never a figure form, never a freeform slide,
+    which is set as one list): no item form draws a row of figures, so each figure its items, lines and paragraphs do not
+    give already becomes a line under the block — secondary to the items (`clone.py` never gives such lines an item's
+    place nor a size over the items'); a figure a card gives is not said twice. Returns the slide as it is set (no
+    figures left beside the items: what the slide shows) and the new lines; the slide itself when the rule does not
+    apply. The scorer reads a slide so too (`matching/scorer.py`): its samples are scored on what the slide will show
+    (without the outline the lines only lack the units of the facts they name — a few characters of a measure)."""
+    c = s.content
+    cols = list(c.items or c.columns)
+    if s.kind in _FIGURE_KINDS + _FREE_KINDS or not cols or not c.numbers or c.chart is not None or c.table is not None:
+        return s, []
+    lines = figure_lines(list(c.numbers), [_item_line(it) for it in cols] + list(c.bullets) + list(c.paragraphs), outline)
+    return s.model_copy(update={"content": c.model_copy(update={"numbers": [], "bullets": list(c.bullets) + lines})}), lines
+
+
 def _as_list(o: OutlineSlide, outline: DeckOutline) -> OutlineSlide:
-    """A freeform slide as bullets: its figures and items become lines of the list (a lone paragraph stays one)."""
+    """A freeform slide as bullets: its figures and items become lines of the list (a lone paragraph stays one) — a
+    figure an item's line already gives («Витрина — 70 000 ₽ разовых вложений») is not said twice."""
     c = o.content
-    extra = [_number_line(n, outline) for n in c.numbers] + [_item_line(it) for it in list(c.items) + list(c.columns)]
+    item_lines = [_item_line(it) for it in list(c.items) + list(c.columns)]
+    extra = figure_lines(list(c.numbers), item_lines + list(c.bullets) + list(c.paragraphs), outline) + item_lines
     extra = [t for t in extra if t.strip()]
     if extra or c.bullets:
         content = SlideContent(bullets=[p for p in c.paragraphs if p.strip()] + [b for b in c.bullets if b.strip()] + extra)
@@ -371,13 +458,13 @@ def prepare_slide(o: OutlineSlide, ps: LayoutSlide, outline: DeckOutline) -> tup
             why = "every card is a bare title"
         elif s.kind in _FIGURE_KINDS and not c.numbers and not (c.formula or "").strip() and c.chart is None:
             why = "figure slide without figures"
-        elif s.kind not in _FIGURE_KINDS and cols and c.numbers and c.chart is None and c.table is None:
+        elif s.kind not in _FIGURE_KINDS + _FREE_KINDS and cols and c.numbers and c.chart is None and c.table is None:
             # key figures beside items: no item form draws a row of figures (cards, steps, columns show their items
-            # only) — each figure its card was not given becomes a line under the block, never left off the slide
-            inside = " ".join([_item_line(it) for it in cols] + list(c.bullets) + list(c.paragraphs))
-            lines = [_number_line(n, outline) for n in c.numbers if n.value.strip() and n.value.strip() not in inside]
+            # only) — each figure its card was not given becomes a line under the block, never left off the slide.
+            # (a freeform slide is no item form: it is set as one list below, its items and its figures its lines —
+            # taken here, its items were left off the slide)
+            s, lines = figures_beside_items(s, outline)
             if lines:
-                s = s.model_copy(update={"content": c.model_copy(update={"numbers": [], "bullets": list(c.bullets) + lines})})
                 notes.append(f"{len(lines)} key figure(s) beside the {s.kind.value} items set as lines under them")
         elif s.kind in _FREE_KINDS:
             s = _as_list(s, outline)

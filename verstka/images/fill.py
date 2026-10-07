@@ -18,6 +18,7 @@ from verstka.images import palette as P
 from verstka.images.places import Place, places_in, put_picture
 from verstka.images.prompt import ImageAsk
 from verstka.images.providers import nearest_aspect
+from verstka.ingest.deck_text import is_source_hint
 
 log = logging.getLogger(__name__)
 
@@ -26,6 +27,7 @@ RECORD_FILE = "images.json"
 WHY_OWN = "место под ваше фото — вставьте его в PowerPoint"
 WHY_OFF = "генерация изображений выключена"
 WHY_REMOVED = "изображение убрано — место оставлено под ваше фото"
+WHY_SOURCE = "изображения из исходной презентации нет — место оставлено под ваше фото"
 
 
 @dataclass
@@ -118,6 +120,11 @@ def plan_pictures(deck: Path, outline, maker, *, enabled: bool = True, reuse: Op
         made = made_from_record(old, folder) if old is not None else None
         if made is not None:
             out.append(Pending(place, ask_of(place, title, old.get("wish")), made.aspect, _done(made), wish=old.get("wish")))
+            continue
+        if is_source_hint(place.hint):
+            # the place of a picture of an improved deck: its own picture or none — a model never draws «Изображение со
+            # слайда 3 исходной презентации» (the deck's pictures are not here: another deck, the improve lost on reload)
+            out.append(Pending(place, None, aspect, None, why=WHY_SOURCE))
             continue
         if place.own:
             out.append(Pending(place, None, aspect, None, why=WHY_OWN))
