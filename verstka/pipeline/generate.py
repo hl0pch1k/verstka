@@ -7,6 +7,7 @@ import hashlib
 import inspect
 import json
 import logging
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -513,10 +514,39 @@ def generate_variants(
 
     eyes_cfg = eyes_config()
     eyes_on = bool(audit and eyes is not False and eyes_cfg.get("enabled", True) and use_vlm and providers is not None and skills is not None and providers.has("vlm"))
+    if eyes_on:
+        # two variants are looked at side by side: each one keeps to half the model's concurrency
+        eyes_cfg = {**eyes_cfg, "workers": max(1, min(int(eyes_cfg.get("workers", 4)), int(providers.limits.max_concurrency) // 2))}
     eyes_seen: dict[str, dict] = {}
-    # the variants differ in the template slides they show too: each one knows which samples the earlier ones took
-    # for the same slide (matching/matcher.py `taken`)
-    taken: dict[str, set[str]] = {}
+    # the variants differ in the template slides they show too: each one knows which samples the other ones show on
+    # the same slide (matching/matcher.py `taken`) — those laid out before it, and the slides «Взгляд дизайнера» moves
+    # while it is laid out (it looks at a variant in a thread of its own)
+    shown_lock = threading.Lock()
+    shown_by: dict[str, dict[str, set[str]]] = {}  # variant → headline key → the samples it shows on that slide
+
+    def shown_except(name: str) -> dict[str, set[str]]:
+        with shown_lock:
+            merged: dict[str, set[str]] = {}
+            for vn, d in shown_by.items():
+                if vn != name:
+                    for k, ids in d.items():
+                        merged.setdefault(k, set()).update(ids)
+            return merged
+
+    def shows(name: str, outline_: DeckOutline, render_: RenderResult) -> None:
+        own = _shown_samples({}, outline_, render_)
+        with shown_lock:
+            shown_by[name] = own
+
+    def picks_for(name: str) -> Callable[[Any, str], None]:
+        from verstka.matching.matcher import headline_key
+
+        def on_pick(osl: Any, pid: str) -> None:
+            if osl is not None:
+                with shown_lock:
+                    shown_by.setdefault(name, {}).setdefault(headline_key(osl), set()).add(pid)
+
+        return on_pick
 
     def _close_variant(v: dict, look: bool) -> dict:
         """The variant's last steps before its pictures are put in: «Взгляд дизайнера» (audit/eyes.py) when `look`, the
@@ -535,9 +565,11 @@ def generate_variants(
                 v["audit"], v["plan"], v["outline"], rr, looked = look_at_slides(
                     vdir, v["audit"], v["outline"], v["plan"], manifest, ws, providers=providers, skills=skills, deadline=budget_end, others=v["others"],
                     brief_text=brief.text if brief else None, writer=writer_audit, emit=say, cfg=eyes_cfg,
+                    others_live=lambda: shown_except(name), on_pick=picks_for(name),
                 )
                 if rr is not None:
                     v["render"] = rr
+                shows(name, v["outline"], v["render"])  # what the variant shows now (a sample moved, or put back)
                 eyes_seen[name] = looked.summary()
             except Exception as e:  # noqa: BLE001 - the deck stays as the deterministic steps made it
                 log.warning("design review failed on %s", name, exc_info=True)
@@ -563,67 +595,71 @@ def generate_variants(
 
     eyes_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="eyes") if eyes_on else None
     eyes_jobs: list = []
-    for i, name in enumerate(strategies):
-        strategy: Strategy = all_strategies[name]
-        ts = time.time()
-        timings: dict[str, float] = {"analyze": analyze_s}
-        vdir = out_dir / name
-        vdir.mkdir(parents=True, exist_ok=True)
-        warnings = list(fact_warnings)
-        base = plan_end + (0.85 - plan_end) * i / n
-        span = (0.85 - plan_end) / n
-        if outline is not None:
-            v_outline = outline.model_copy(deep=True)
-            v_outline.strategy = name
-            timings["plan"] = 0.0
-        else:
-            v_outline, w, timings["plan"] = planned[name]
-            warnings.extend(w)
-            if written:
-                v_outline = _mark_written(v_outline, writer_res)
-        taken0 = {k: set(v) for k, v in taken.items()}
-        outline0 = v_outline.model_copy(deep=True)
-        plan = match_outline(v_outline, manifest, strategy, ws=ws, taken=taken)
-        report(f"{name}: planned {len(v_outline.slides)} slides, rendering", base + span * 0.2)
-        tr = time.time()
-        render = render_deck(v_outline, plan, manifest, ws, vdir / "deck.pptx", progress=lambda s, f: report(f"{name}: {s}", base + span * (0.2 + 0.4 * f)), shown=taken0)
-        if render.failed_samples:
-            # a sample that read badly on its slide (`clone_check.content_trouble`) kept its place in the deck-level
-            # choice: its neighbours gave it up and the slide itself fell back to its first alternatives. The samples
-            # are chosen again without it and the deck rendered again — kept when it stands on more template slides
-            retry = _rematched(outline0, manifest, strategy, ws, taken0, render, vdir)
-            if retry is not None:
-                v_outline, plan, render, taken = retry
-        timings["render"] = round(time.time() - tr, 2)
-        warnings.extend(render.warnings)
-        audit_report: Optional[AuditReport] = None
-        if audit:
-            tau = time.time()
-            report(f"{name}: audit", base + span * 0.65)
-            audit_report = run_audit(vdir / "deck.pptx", manifest, v_outline, ws, providers=providers if audit_models else None, skills=skills if audit_models else None, use_vlm=audit_models and use_vlm, use_llm=audit_models and use_llm, render=audit_render, images_dir=vdir / "slides", strategy=name, brief_text=brief.text if brief else None, writer=writer_audit)
-            if autofix and audit_report.summary.errors + audit_report.summary.warnings > 0:
-                report(f"{name}: autofix ({audit_report.summary.errors} errors)", base + span * 0.8)
-                audit_report, plan, v_outline, rr = autofix_loop(vdir / "deck.pptx", audit_report, v_outline, plan, manifest, ws, providers=providers, skills=skills, use_models=audit_models, images_dir=vdir / "slides", render=audit_render, brief_text=brief.text if brief else None, writer=writer_audit, others=taken0)
-                if rr is not None:
-                    render = rr
-            timings["audit"] = round(time.time() - tau, 2)
-        # the variants after this one know what it SHOWS on each slide — the sample a fallback or the autofix put
-        # there, nothing for a slide composed — not what it planned (three variants converged on one sample)
-        taken = _shown_samples(taken0, v_outline, render)
-        v = {"name": name, "ts": ts, "timings": timings, "vdir": vdir, "warnings": warnings, "outline": v_outline, "plan": plan, "render": render, "audit": audit_report, "pictures": [],
-             "share": base + span * 0.85, "pic_share": base + span * 0.95, "others": taken0}
-        if eyes_on and audit_report is not None:
-            # «Взгляд дизайнера» looks at this variant while the next one is laid out: its model calls and LibreOffice
-            # wait on the network and a subprocess, the next variant's render on the CPU
-            eyes_jobs.append(eyes_pool.submit(_close_variant, v, True))
-        else:
-            _close_variant(v, False)
-        pending.append(v)
+    try:
+        for i, name in enumerate(strategies):
+            strategy: Strategy = all_strategies[name]
+            ts = time.time()
+            timings: dict[str, float] = {"analyze": analyze_s}
+            vdir = out_dir / name
+            vdir.mkdir(parents=True, exist_ok=True)
+            warnings = list(fact_warnings)
+            base = plan_end + (0.85 - plan_end) * i / n
+            span = (0.85 - plan_end) / n
+            if outline is not None:
+                v_outline = outline.model_copy(deep=True)
+                v_outline.strategy = name
+                timings["plan"] = 0.0
+            else:
+                v_outline, w, timings["plan"] = planned[name]
+                warnings.extend(w)
+                if written:
+                    v_outline = _mark_written(v_outline, writer_res)
+            taken = shown_except(name)  # what the other variants show: those laid out before, the slides their look moved
+            taken0 = {k: set(v) for k, v in taken.items()}
+            outline0 = v_outline.model_copy(deep=True)
+            plan = match_outline(v_outline, manifest, strategy, ws=ws, taken=taken)
+            report(f"{name}: planned {len(v_outline.slides)} slides, rendering", base + span * 0.2)
+            tr = time.time()
+            render = render_deck(v_outline, plan, manifest, ws, vdir / "deck.pptx", progress=lambda s, f: report(f"{name}: {s}", base + span * (0.2 + 0.4 * f)), shown=taken0)
+            if render.failed_samples:
+                # a sample that read badly on its slide (`clone_check.content_trouble`) kept its place in the deck-level
+                # choice: its neighbours gave it up and the slide itself fell back to its first alternatives. The samples
+                # are chosen again without it and the deck rendered again — kept when it stands on more template slides
+                retry = _rematched(outline0, manifest, strategy, ws, taken0, render, vdir)
+                if retry is not None:
+                    v_outline, plan, render, taken = retry
+            timings["render"] = round(time.time() - tr, 2)
+            warnings.extend(render.warnings)
+            audit_report: Optional[AuditReport] = None
+            if audit:
+                tau = time.time()
+                report(f"{name}: audit", base + span * 0.65)
+                audit_report = run_audit(vdir / "deck.pptx", manifest, v_outline, ws, providers=providers if audit_models else None, skills=skills if audit_models else None, use_vlm=audit_models and use_vlm, use_llm=audit_models and use_llm, render=audit_render, images_dir=vdir / "slides", strategy=name, brief_text=brief.text if brief else None, writer=writer_audit)
+                if autofix and audit_report.summary.errors + audit_report.summary.warnings > 0:
+                    report(f"{name}: autofix ({audit_report.summary.errors} errors)", base + span * 0.8)
+                    audit_report, plan, v_outline, rr = autofix_loop(vdir / "deck.pptx", audit_report, v_outline, plan, manifest, ws, providers=providers, skills=skills, use_models=audit_models, images_dir=vdir / "slides", render=audit_render, brief_text=brief.text if brief else None, writer=writer_audit, others=taken0)
+                    if rr is not None:
+                        render = rr
+                timings["audit"] = round(time.time() - tau, 2)
+            # the variants after this one know what it SHOWS on each slide — the sample a fallback or the autofix put
+            # there, nothing for a slide composed — not what it planned (three variants converged on one sample)
+            shows(name, v_outline, render)
+            v = {"name": name, "ts": ts, "timings": timings, "vdir": vdir, "warnings": warnings, "outline": v_outline, "plan": plan, "render": render, "audit": audit_report, "pictures": [],
+                 "share": base + span * 0.85, "pic_share": base + span * 0.95, "others": taken0}
+            if eyes_on and audit_report is not None:
+                # «Взгляд дизайнера» looks at this variant while the next one is laid out: its model calls and LibreOffice
+                # wait on the network and a subprocess, the next variant's render on the CPU
+                eyes_jobs.append(eyes_pool.submit(_close_variant, v, True))
+            else:
+                _close_variant(v, False)
+            pending.append(v)
 
-    for job in eyes_jobs:
-        job.result()  # (each one catches its own failure: the variant keeps its deck as laid out)
-    if eyes_pool is not None:
-        eyes_pool.shutdown(wait=True)
+        for job in eyes_jobs:
+            job.result()  # (each one catches its own failure: the variant keeps its deck as laid out)
+    finally:
+        if eyes_pool is not None:
+            # a failure above never leaves looks running on (paid calls into a failed generation's folder)
+            eyes_pool.shutdown(wait=True, cancel_futures=True)
     # the pictures in their places (each waited for at most until the generation's picture budget ends), the decks
     # that got one audited again (the deterministic checks: the picture stands where its place stood)
     if any(v["pictures"] for v in pending):
@@ -768,6 +804,9 @@ def _say_pictures(progress: Optional[ProgressFn], name: str, pics: list, said: s
         if k in said:
             continue
         said.add(k)
+        f = p.future
+        if f is not None and f.done() and f.exception() is None and getattr(f.result(), "model", None) == "original":
+            continue  # the original deck's own picture back on its place: _say_pictures_made tells it, nothing is drawn
         if p.future is not None:
             text = f"Вёрстка: слайд {p.place.slide} — рисую изображение по описанию автора «{_short(p.place.hint or p.place.label)}»" + (f", модель {model}." if model else ".")
         elif p.place.own:

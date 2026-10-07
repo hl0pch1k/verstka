@@ -32,6 +32,7 @@ from verstka.ru import ru_count
 from verstka.providers.registry import ProviderRegistry
 from verstka.schemas.audit import AuditReport
 from verstka.schemas.layout import LayoutPlan
+from verstka.schemas.template import TemplateManifest
 from verstka.schemas.outline import Brief, DeckOutline
 from verstka.skills_registry.registry import SkillsRegistry
 
@@ -255,7 +256,52 @@ def _variant_payload(gdir: Path, strategy: str, use_models: Optional[bool] = Non
         "edits": [{k: e.get(k) for k in ("at", "request", "reply", "kind", "slides", "score_before", "score_after", "fixed", "how", "version", "undo_of", "wish", "action")} for e in edits],
         # the pictures inside the slides and the places kept for them (verstka/images): what each shows, by which model
         "pictures": _pictures_of(vdir),
+        # «Взгляд дизайнера» (audit/eyes.py): what the vision model saw on which slide, the slides it laid out again —
+        # the slide before and after — and the ones that kept their layout; None when the review did not run
+        "eyes": _eyes_of(vdir, run_manifest, outline, gid, strategy, edits),
     }
+
+
+def _eyes_of(vdir: Path, run_manifest: Optional[dict], outline: Optional[dict], gid: str, strategy: str, edits: list[dict]) -> Optional[dict]:
+    """The review of the variant for the result screen, by the slides' current numbers (an edit may have added or taken
+    slides away since the build). The pictures of a slide redesigned since the build are not its pictures any more."""
+    from verstka.audit.eyes import CODES
+
+    eyes = (run_manifest or {}).get("eyes")
+    if not isinstance(eyes, dict):
+        return None
+    order = {s.get("id"): k for k, s in enumerate((outline or {}).get("slides") or [], 1)}
+    redone = _redone_slides(edits)
+    fixed = {f.get("outline_id"): f for f in eyes.get("fixed") or [] if isinstance(f, dict)}
+    kept = {k.get("outline_id"): k for k in eyes.get("kept") or [] if isinstance(k, dict)}
+
+    def picture(stage: str, n: Any) -> Optional[str]:
+        name = f"slide-{int(n):03d}.jpg" if isinstance(n, int) else ""
+        return f"/api/generations/{gid}/{strategy}/eyes/{stage}/{name}" if name and (vdir / "eyes" / stage / name).is_file() else None
+
+    slides = []
+    for f in eyes.get("flagged") or []:
+        if not isinstance(f, dict):
+            continue
+        oid, then = f.get("outline_id"), f.get("slide")
+        now = order.get(oid)
+        if now is None:
+            continue  # the slide is gone
+        problems = [
+            {"code": p.get("code"), "label": CODES.get(p.get("code"), p.get("code")), "severity": p.get("severity"), "where": p.get("where") or "", "evidence": p.get("evidence") or ""}
+            for p in f.get("problems") or [] if isinstance(p, dict)
+        ]
+        status = "fixed" if oid in fixed else "kept" if oid in kept else "seen"
+        fresh = now not in redone
+        slides.append({
+            "outline_id": oid, "slide": now, "status": status, "problems": problems,
+            "reason": (fixed.get(oid) or {}).get("reason") or (kept.get(oid) or {}).get("why") or "",
+            "before": picture("before", then) if fresh and status == "fixed" else None,
+            "after": picture("after", then) if fresh and status == "fixed" else None,
+            "redone": not fresh,
+        })
+    slides.sort(key=lambda x: x["slide"])
+    return {"looked": eyes.get("looked") or 0, "seconds": eyes.get("seconds"), "skipped": eyes.get("skipped"), "slides": slides}
 
 
 def _pictures_of(vdir: Path) -> list[dict]:
@@ -846,6 +892,15 @@ def slide_image(gid: str, strategy: str, name: str):
     if not re.fullmatch(r"slide-\d{3}\.jpg", name):
         raise HTTPException(404, "Не найдено")
     return _serve_file(vdir / "slides", name, media_type="image/jpeg")
+
+
+@app.get("/api/generations/{gid}/{strategy}/eyes/{stage}/{name}")
+def eyes_image(gid: str, strategy: str, stage: str, name: str):
+    """«Взгляд дизайнера»: a slide as the vision model saw it before it was laid out again, and after."""
+    vdir = _variant_dir(gid, strategy)
+    if stage not in ("before", "after") or not re.fullmatch(r"slide-\d{3}\.jpg", name):
+        raise HTTPException(404, "Не найдено")
+    return _serve_file(vdir / "eyes" / stage, name, media_type="image/jpeg")
 
 
 @app.get("/api/generations/{gid}/{strategy}/files/{name}")

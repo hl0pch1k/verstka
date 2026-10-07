@@ -22,7 +22,12 @@ const STEP_ICON: Record<string, LucideIcon> = { Автор: PenLine, Анали�
 /** The card on the result screen: a mini timeline of three steps; nothing for a deck made before the agent kept a
  *  journal. The whole card opens the drawer's «Агент». */
 export function AgentCard({ variant, onOpen }: { variant: Variant; onOpen(): void }) {
-  const lines = useMemo(() => agentSummary(variant).slice(0, 3), [variant]);
+  // three lines at most: «Взгляд дизайнера», when the model looked, is always one of them (the newest step of the agent)
+  const lines = useMemo(() => {
+    const all = agentSummary(variant);
+    const k = all.findIndex((l) => l.step === "Взгляд дизайнера");
+    return k > 2 ? [...all.slice(0, 2), all[k]] : all.slice(0, 3);
+  }, [variant]);
   // the lines cross-fade when the variant changes — also back to the first one (not when the card first appears: it
   // rises with the aside then)
   const firstVariant = useRef(variant.strategy);

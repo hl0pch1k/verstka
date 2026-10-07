@@ -114,12 +114,14 @@ function CountStep({ icon: Icon, label, disabled, onClick }: { icon: typeof Plus
   );
 }
 
-/** The line under the text field after «Улучшить готовую»: what came from the deck, what its own audit found. */
-function improveLine(src: ImproveSource): string {
-  const held = [src.tables ? plural(src.tables, "таблица", "таблицы", "таблиц") : null, src.charts ? plural(src.charts, "диаграмма", "диаграммы", "диаграмм") : null, src.pictures ? plural(src.pictures, "картинка", "картинки", "картинок") : null].filter(Boolean);
-  const audit = src.audit ? ` Оценка исходника — ${src.audit.score}.` : "";
-  const probs = src.problems?.length ? ` Модель нашла в нём ${plural(src.problems.length, "проблему", "проблемы", "проблем")} вёрстки.` : "";
-  return `Текст и оформление — из «${src.name}»: ${plural(src.slides, "слайд", "слайда", "слайдов")}${held.length ? `, ${held.join(", ")}` : ""}.${audit}${probs} Слайды останутся те же, вёрстка соберётся заново, модель посмотрит на каждый новый слайд.`;
+/** The line under the text field after «Улучшить готовую»: what came from the deck, what its own audit found, and
+ *  what happens next — the model's look only when a model is connected. */
+export function improveLine(src: ImproveSource, modelOn: boolean): string {
+  const held = [src.tables ? plural(src.tables, "таблица", "таблицы", "таблиц") : null, src.charts ? plural(src.charts, "диаграмма", "диаграммы", "диаграмм") : null, src.pictures ? plural(src.pictures, "изображение", "изображения", "изображений") : null].filter(Boolean);
+  const name = src.title?.trim() || src.name.replace(/\.[^./\\]+$/, "");
+  const audit = src.audit ? ` Оценка исходной презентации — ${src.audit.score} из 100.` : "";
+  const probs = src.problems?.length ? ` Модель нашла в ней ${plural(src.problems.length, "проблему", "проблемы", "проблем")} вёрстки.` : "";
+  return `Текст и оформление — из презентации «${name}»: ${plural(src.slides, "слайд", "слайда", "слайдов")}${held.length ? `, ${held.join(", ")}` : ""}.${audit}${probs} Слайды останутся те же, вёрстка соберётся заново${modelOn ? ", а модель посмотрит на каждый новый слайд" : ""}.`;
 }
 
 export function CreateScreen() {
@@ -151,6 +153,10 @@ export function CreateScreen() {
     setImproved(improveSource);
     takeImproveSource();
   }, [improveSource, takeImproveSource]);
+  // an emptied field is a new text: the old deck is not what is being built any more
+  useEffect(() => {
+    if (!brief.trim()) setImproved(null);
+  }, [brief]);
   const [submitting, setSubmitting] = useState(false);
   const [showErrors, setShowErrors] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -200,6 +206,9 @@ export function CreateScreen() {
   useEffect(() => {
     if (composerText === null) return;
     setBrief(composerText);
+    // the text of an improved deck keeps its origin (the deck's own audit for «было → стало»); any other text does not
+    const from = composerPreset?.improvedFrom ?? null;
+    setImproved(from ? { brief: composerText, name: from.name, template_id: from.template_id, slides: from.slides ?? 0, tables: 0, charts: 0, pictures: 0, audit: from.audit ?? null } : null);
     if (composerPreset) {
       // a deck's own parameters come with its text: the deck is built again the way it was
       setAudience(composerPreset.audience ?? "");
@@ -284,7 +293,7 @@ export function CreateScreen() {
   const purposeLabel = PURPOSES.find((p) => p.value === purpose)?.label ?? "";
   const slidesWord = plural(count, "слайд", "слайда", "слайдов");
   // the folded parameters in one line, in the order the bar says them: slides, variants, then the rest
-  const paramsLine = [byText ? `${slidesWord} по тексту` : slidesWord, plural(variantsCount, "вариант", "варианта", "вариантов"), purposeLabel, modelsOn ? "тексты пишет модель" : "без модели", picturesOn ? "с изображениями" : null].filter(Boolean).join(" · ");
+  const paramsLine = [byText ? `${slidesWord} по тексту` : slidesWord, plural(variantsCount, "вариант", "варианта", "вариантов"), purposeLabel, modelsOn ? "тексты пишет модель" : improved && modelsConfigured ? "тексты как написаны, модель смотрит на слайды" : "без модели", picturesOn ? "с изображениями" : null].filter(Boolean).join(" · ");
   // the bar's one line: what will be built
   const summary = [slidesWord, plural(variantsCount, "вариант", "варианта", "вариантов")].join(" · ");
   const seen = factsLine(facts);
@@ -459,7 +468,7 @@ export function CreateScreen() {
             {improved && (
               <p className="mt-2 flex items-start gap-2 rounded-lg bg-accent-50 px-3 py-2 text-footnote text-accent-800 animate-fade">
                 <Wand2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-                <span>{improveLine(improved)}</span>
+                <span>{improveLine(improved, modelsConfigured)}</span>
               </p>
             )}
             {/* read out once when «Создать» finds the text short (the counter itself changes with every key) */}

@@ -52,7 +52,7 @@ export function uploadTemplateFlow(file: File, useModels: boolean, d: UploadDeps
             const src = (job.result as { improve?: ImproveSource } | null)?.improve;
             if (improve && src) {
               improve(src);
-              d.pushMessage("assistant", improveMessage(src));
+              d.pushMessage("assistant", improveMessage(src, res.use_models));
               pushToast("success", "Презентация прочитана");
             } else {
               const fallback = `Шаблон «${templateTitle(m.source_file)}» разобран: ${plural(m.patterns.length, "макет", "макета", "макетов")} из ${plural(m.n_slides, "слайда", "слайдов", "слайдов")}.`;
@@ -73,22 +73,23 @@ export function uploadTemplateFlow(file: File, useModels: boolean, d: UploadDeps
   });
 }
 
-/** The helper's line after «Улучшить готовую»: what the deck holds and what its own audit found. */
-export function improveMessage(src: ImproveSource): string {
+/** The helper's line after «Улучшить готовую»: what the deck holds and what its own audit found; the model's look at
+ *  the new slides is promised only when a model is connected. */
+export function improveMessage(src: ImproveSource, modelOn = true): string {
   const held = [
     plural(src.slides, "слайд", "слайда", "слайдов"),
     src.tables ? plural(src.tables, "таблица", "таблицы", "таблиц") : null,
     src.charts ? plural(src.charts, "диаграмма", "диаграммы", "диаграмм") : null,
-    src.pictures ? plural(src.pictures, "картинка", "картинки", "картинок") : null,
+    src.pictures ? plural(src.pictures, "изображение", "изображения", "изображений") : null,
   ].filter(Boolean).join(", ");
   const audit = src.audit
-    ? ` Проверка исходника: оценка ${src.audit.score}${src.audit.errors || src.audit.warnings ? ` — ${[src.audit.errors ? plural(src.audit.errors, "ошибка", "ошибки", "ошибок") : null, src.audit.warnings ? plural(src.audit.warnings, "предупреждение", "предупреждения", "предупреждений") : null].filter(Boolean).join(", ")}` : ", замечаний нет"}.`
+    ? ` Проверка исходной презентации: оценка ${src.audit.score}${src.audit.errors || src.audit.warnings ? ` — ${[src.audit.errors ? plural(src.audit.errors, "ошибка", "ошибки", "ошибок") : null, src.audit.warnings ? plural(src.audit.warnings, "предупреждение", "предупреждения", "предупреждений") : null].filter(Boolean).join(", ")}` : ", замечаний нет"}.`
     : "";
   const probs = src.problems ?? [];
   const wrong = probs.length
-    ? ` Что не так в исходнике, на взгляд дизайнера: ${probs.slice(0, 4).map((p) => `слайд ${p.slide} — ${p.text}`).join("; ")}${probs.length > 4 ? ` и ещё ${plural(probs.length - 4, "замечание", "замечания", "замечаний")}` : ""}.`
+    ? ` Что не так в ней, на взгляд дизайнера: ${probs.slice(0, 4).map((p) => `слайд ${p.slide} — ${p.text}`).join("; ")}${probs.length > 4 ? ` и ещё ${plural(probs.length - 4, "замечание", "замечания", "замечаний")}` : ""}.`
     : "";
-  return `Прочитал «${templateTitle(src.name)}»: ${held}.${audit}${wrong} Текст — в поле «Текст», оформление — её же: соберу вёрстку заново в трёх вариантах, а модель посмотрит на каждый новый слайд.`;
+  return `Прочитал «${templateTitle(src.name)}»: ${held}.${audit}${wrong} Текст — в поле «Текст», оформление — из самой презентации: соберу вёрстку заново${modelOn ? ", а модель посмотрит на каждый новый слайд" : ""}.`;
 }
 
 export interface GenerationDeps extends CommonDeps {

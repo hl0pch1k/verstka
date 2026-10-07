@@ -130,6 +130,7 @@ def size_not_in_scale(ctx: AuditContext) -> list[Issue]:
     sizes = sorted(set(sizes) | {sl.style.size_pt for p in ctx.manifest.patterns for sl in p.slots if sl.style.size_pt})
     body = ctx.manifest.tokens.typography.size_for("body", 14.0)
     display_from = min(max(sizes), 2 * body)
+    from verstka.rendering.compose import MONO_RE
     for s in ctx.ir.slides:
         bad: dict[float, list[str]] = {}
         for e in text_elements(s):
@@ -139,6 +140,8 @@ def size_not_in_scale(ctx: AuditContext) -> list[Issue]:
                 for r in p.runs:
                     if r.size_pt and r.size_pt >= display_from and is_figure(r.text):
                         continue  # the display step of the scale: figures may be set larger than any text
+                    if r.font and MONO_RE.search(r.font):
+                        continue  # the user's code: sized by its longest line, as its monospace face is its own
                     if r.size_pt and r.text.strip() and all(abs(r.size_pt - t) > 0.75 for t in sizes):
                         bad.setdefault(r.size_pt, []).append(e.id)
         for sz, ids in bad.items():

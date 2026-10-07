@@ -186,7 +186,7 @@ def where(bboxes: Sequence) -> str:
 
 def hint_of(issue: Issue) -> Optional[str]:
     if issue.kind == "model":
-        return (issue.suggestion or "").strip() or None
+        return (issue.suggestion or "").strip() or FIX_HINT.get(issue.check_id)
     return FIX_HINT.get(issue.check_id)
 
 

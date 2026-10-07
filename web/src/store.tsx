@@ -11,7 +11,7 @@ import { LS, storage, uid } from "./lib/utils";
 import { decodeImage, viewTransition } from "./lib/motion";
 import { variantRev, withRev } from "./components/VariantsHelpers";
 import type {
-  ChatMessage, DetailKey, GenerateRequest, Generation, GenerationMeta, Health, ImproveSource, Job, JobKind, ModelsStatus, Screen, StrategyInfo, TabKey, TemplateListItem, TemplateManifest, Variant,
+  ChatMessage, DetailKey, GenerateRequest, Generation, GenerationMeta, Health, ImprovedFrom, ImproveSource, Job, JobKind, ModelsStatus, Screen, StrategyInfo, TabKey, TemplateListItem, TemplateManifest, Variant,
 } from "./types";
 
 export type { ActiveJob } from "./lib/jobState";
@@ -83,6 +83,8 @@ export interface ComposerPreset {
   /** «Генерировать изображения» as the deck was built (null: the server's default). */
   pictures?: boolean | null;
   strategies?: string[];
+  /** «Улучшить готовую»: the deck this text was read from (its audit stays the «было» of the next build). */
+  improvedFrom?: ImprovedFrom | null;
 }
 
 const Ctx = createContext<AppState | null>(null);

@@ -14,5 +14,5 @@ Problem codes:
 Severity: "major" — a client would send the slide back; "minor" — a designer would polish it, the slide is usable.
 Never a problem: a free frame captioned «Место под изображение» or «Место под фото» (the picture comes later), the template's own decoration (logos, page numbers, rules, background art), the wording of the text.
 
-Return JSON only, evidence short and in Russian:
+Return JSON only; "where" names the element in Russian («заголовок», «левая карточка», «правая половина слайда»), "evidence" is short and in Russian:
 {"ok": true|false, "problems": [{"code": "...", "severity": "major"|"minor", "where": "...", "evidence": "..."}], "verdict": "..."}

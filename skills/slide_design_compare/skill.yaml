@@ -1,16 +1,18 @@
 name: slide_design_compare
-version: 1.0.0
+version: 1.1.0
 role: vlm
 description: >
   «Взгляд дизайнера» (Verstka 3.0): two layouts of the same slide content in the same template, side by side — which one
   goes to the client. A slide laid out again for a problem the review saw keeps its new layout only when this check
-  prefers it (verstka/audit/eyes.py); the images come in either order, so a side is never favoured.
+  prefers it in BOTH orders of the pair (verstka/audit/eyes.py): a choice made by the position of the image, or
+  by mistaking one image for the other, never passes.
 prompt_files:
   system: prompts/system.md
   user: prompts/user.md
 output_schema: verstka.audit.eyes.DesignCompare
 params:
   temperature: 0.0
-  max_tokens: 200
+  max_tokens: 350
 changelog:
+  - "1.1.0: the model first says what stands on each layout, then chooses; the reason speaks of «новая» / «прежняя вёрстка», never A/B. Asked in both orders: on the VK Tech run of 07.10 one answer chose a layout that only added a stray rule and described the images the other way round"
   - "1.0.0: Verstka 3.0. Checked live on Qwen3.8-27B (2026-10-07): it chose the layout without words broken mid-word in both orders of the pair"

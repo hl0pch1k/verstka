@@ -1,15 +1,17 @@
 """«Взгляд дизайнера» (verstka/audit/eyes.py): the vision model looks at every rendered slide; a slide it sends back
-is laid out again, and the new layout stays only when the deterministic audit is not worse and the model, shown both
-layouts side by side, prefers it. The model is a script here and the slide images are drawn without LibreOffice."""
+is laid out again, and the new layout stays only when the deterministic audit is not worse, the slide really changed and
+the model, shown both layouts side by side in both orders, prefers it both times. The model is a script here and the
+slide images are drawn without LibreOffice."""
 
 from __future__ import annotations
 
+import hashlib
 import io
 import time
 from pathlib import Path
 
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw
 from pptx import Presentation
 
 from verstka.audit import eyes as E
@@ -18,6 +20,7 @@ from verstka.pipeline.generate import generate_variants
 from verstka.planning.brief import parse_brief_text
 from verstka.providers.mock import MockProvider
 from verstka.providers.registry import ProviderRegistry
+from verstka.rendering.renderer import render_deck
 from verstka.skills_registry.registry import SkillsRegistry
 
 BRIEF = """# Умные напоминания
@@ -34,15 +37,35 @@ SKILLS = SkillsRegistry.load()
 
 
 def _shots(pptx: Path, out: Path, dpi: int) -> dict[int, Path]:
-    """The slide images without LibreOffice: one plain picture per slide of the deck as it is now."""
+    """The slide images without LibreOffice: one plain picture per slide of the deck as it is now, its colour drawn
+    from the slide's XML — a slide laid out again looks different, an untouched one the same."""
+    from lxml import etree
+
     out.mkdir(parents=True, exist_ok=True)
-    n = len(Presentation(str(pptx)).slides)
     got = {}
-    for i in range(1, n + 1):
+    for i, slide in enumerate(Presentation(str(pptx)).slides, 1):
+        h = hashlib.sha1(etree.tostring(slide._element)).digest()
+        im = Image.new("RGB", (64, 36), "white")
+        d = ImageDraw.Draw(im)
+        for cell in range(16):  # a 4 × 4 grid of black and white cells, one bit of the hash each
+            if h[cell // 8] >> (cell % 8) & 1:
+                x, y = cell % 4 * 16, cell // 4 * 9
+                d.rectangle([x, y, x + 15, y + 8], fill="black")
         p = out / f"slide-{i:03d}.jpg"
         buf = io.BytesIO()
-        Image.new("RGB", (64, 36), (10 * i % 255, 80, 120)).save(buf, "JPEG")
+        im.save(buf, "JPEG")
         p.write_bytes(buf.getvalue())
+        got[i] = p
+    return got
+
+
+def _same_shots(pptx: Path, out: Path, dpi: int) -> dict[int, Path]:
+    """Images that never change: a new layout that moved nothing visible."""
+    out.mkdir(parents=True, exist_ok=True)
+    got = {}
+    for i in range(1, len(Presentation(str(pptx)).slides) + 1):
+        p = out / f"slide-{i:03d}.jpg"
+        Image.new("RGB", (64, 36), (40, 80, 120)).save(p, "JPEG")
         got[i] = p
     return got
 
@@ -56,25 +79,39 @@ def variant(simple_deck, tmp_path):
     return v, res.manifest, ws
 
 
-def _target(v) -> int:
-    """A content slide the ladder can move: on a sample with an untried alternative, or composed."""
+def _target(v, manifest, ws, tmp_path) -> int:
+    """A content slide the ladder really moves: its next layout (another sample, the composer, another variant's style)
+    renders differently from the one it has."""
     for k, ps in enumerate(v.plan.slides, 1):
         osl = next(s for s in v.outline.slides if s.id == ps.outline_id)
         if osl.kind.value in ("title", "thanks", "agenda", "section"):
             continue
-        if ps.mode == "synth" or any(score >= 0.3 for _, score in ps.alternatives):
-            return k
+        if not (ps.mode == "synth" or any(score >= 0.3 for _, score in ps.alternatives)):
+            continue
+        plan, outline = v.plan.model_copy(deep=True), v.outline.model_copy(deep=True)
+        trial = tmp_path / f"trial-{k}.pptx"
+        was = E.slide_hashes(v.out_dir / "deck.pptx")
+        for _ in range(3):
+            if E.relayout(plan, outline, ps.outline_id, manifest, set()) == "skip":
+                break
+            render_deck(outline, plan, manifest, ws, trial)
+            if E.slide_hashes(trial).get(k) != was.get(k):
+                return k
     pytest.skip("no slide of the synthetic deck has another layout to try")
 
 
-def _model(flag: int, prefer_new: bool, calls: list):
+def _model(flag: int, prefer_new: bool | str, calls: list):
+    """`prefer_new`: True / False — the model's choice; "first" — a model that always picks the image shown first."""
+
     def answer(messages):
         user = messages[-1].content
         calls.append((user, len(messages[-1].images)))
         if "Prefer the new attempt" in user:
+            if prefer_new == "first":
+                return {"a": "карточки", "b": "карточки", "better": "A", "reason": "новая вёрстка ровнее"}
             original = "A" if "Layout A is the current one" in user else "B"
             new = "B" if original == "A" else "A"
-            return {"better": new if prefer_new else original, "reason": "без разрывов слов" if prefer_new else "прежняя аккуратнее"}
+            return {"a": "заголовок и карточки", "b": "заголовок и карточки", "better": new if prefer_new else original, "reason": "без разрывов слов" if prefer_new else "прежняя аккуратнее"}
         if f"Slide {flag} of the deck" in user:
             return {"ok": False, "problems": [{"code": "word_broken", "severity": "major", "where": "карточки", "evidence": "«Температ|ура»"}], "verdict": "Разрывы слов."}
         return {"ok": True, "problems": [], "verdict": "Аккуратно."}
@@ -90,9 +127,9 @@ def _look(v, manifest, ws, providers, **kw):
     return (*out, events)
 
 
-def test_a_slide_the_model_sends_back_is_laid_out_again_and_kept_when_the_model_prefers_it(variant):
+def test_a_slide_the_model_sends_back_is_laid_out_again_and_kept_when_the_model_prefers_it(variant, tmp_path):
     v, manifest, ws = variant
-    k = _target(v)
+    k = _target(v, manifest, ws, tmp_path)
     before = v.plan.slides[k - 1].model_copy(deep=True)
     calls: list = []
     report, plan, outline, rr, seen, events = _look(v, manifest, ws, _model(k, True, calls))
@@ -103,14 +140,15 @@ def test_a_slide_the_model_sends_back_is_laid_out_again_and_kept_when_the_model_
     assert any(f.get("iteration") == "eyes" and f.get("outline_id") == after.outline_id and not f.get("rolled_back") for f in report.applied_fixes)
     assert not any(i.check_id == "design_review" for i in report.issues)  # cured: no remark left
     compare = [c for c in calls if "Prefer the new attempt" in c[0]]
-    assert len(compare) == 1 and compare[0][1] == 2  # both layouts in one look
+    assert len(compare) == 2 and all(n == 2 for _, n in compare)  # both layouts in one look, the pair asked in both orders
+    assert {("Layout A is the current one" in c) for c, _ in compare} == {True, False}
     assert any(s == k and "Взгляд дизайнера: слайд" in m and "слова разорваны посередине (карточки)." in m and "| Собрал заново" in m for s, m in events)
     assert rr is not None and Path(v.out_dir / "deck.pptx").exists()
 
 
-def test_the_old_layout_stays_when_the_model_does_not_prefer_the_new_one_and_its_remark_stays(variant):
+def test_the_old_layout_stays_when_the_model_does_not_prefer_the_new_one_and_its_remark_stays(variant, tmp_path):
     v, manifest, ws = variant
-    k = _target(v)
+    k = _target(v, manifest, ws, tmp_path)
     before = v.plan.slides[k - 1].model_copy(deep=True)
     report, plan, outline, rr, seen, events = _look(v, manifest, ws, _model(k, False, []))
     assert not seen.fixed and [x["slide"] for x in seen.kept] == [k] and seen.kept[0]["why"] == "прежняя аккуратнее"
@@ -119,10 +157,10 @@ def test_the_old_layout_stays_when_the_model_does_not_prefer_the_new_one_and_its
     remark = [i for i in report.issues if i.check_id == "design_review"]
     assert len(remark) == 1 and remark[0].slide == k and remark[0].kind == "model" and remark[0].severity == "warn"
     assert "Слова разорваны посередине (карточки)" in remark[0].message
-    assert any("оставил прежнюю" in m for _, m in events)
+    assert any(s == k and m.endswith("| Оставил прежнюю вёрстку: прежняя аккуратнее.") for s, m in events)
 
 
-def test_a_clean_deck_is_left_as_it_is(variant):
+def test_a_clean_deck_is_left_as_it_is(variant, tmp_path):
     v, manifest, ws = variant
     plan0 = v.plan.model_dump()
     report, plan, outline, rr, seen, events = _look(v, manifest, ws, _model(-1, True, []))
@@ -130,7 +168,7 @@ def test_a_clean_deck_is_left_as_it_is(variant):
     assert plan.model_dump() == plan0 and events == [(None, f"Взгляд дизайнера: посмотрел на {E.ru_slides(seen.looked)} — замечаний нет.")]
 
 
-def test_the_review_needs_time_a_vision_model_and_slide_images(variant):
+def test_the_review_needs_time_a_vision_model_and_slide_images(variant, tmp_path):
     v, manifest, ws = variant
     providers = _model(1, True, [])
     short = E.look(v.out_dir, v.audit, v.outline, v.plan, manifest, ws, providers=providers, skills=SKILLS, deadline=time.monotonic() + 10, images=_shots)
@@ -147,6 +185,120 @@ def test_the_review_needs_time_a_vision_model_and_slide_images(variant):
     assert off[4].skipped == "off in configs/eyes.yaml"
 
 
+def test_a_model_that_does_not_answer_leaves_the_slides_and_says_so(variant, tmp_path):
+    v, manifest, ws = variant
+
+    def silent(messages):
+        raise TimeoutError("the model did not answer in time")
+
+    p = MockProvider(silent, model="qwen/qwen3.8-27b")
+    report, plan, outline, rr, seen, events = _look(v, manifest, ws, ProviderRegistry(roles={"llm": p, "vlm": p}))
+    assert seen.skipped == "the model did not answer" and seen.looked == 0 and not seen.flagged and rr is None
+    assert events == [(None, "Взгляд дизайнера: модель не ответила — слайды остались как были.")]
+    assert report is v.audit
+
+
+def test_a_rejected_new_layout_leaves_the_deck_byte_for_byte(variant, tmp_path):
+    """Nothing kept: the deck is the one the audit and the autofix left — its fixes made in the XML included."""
+    v, manifest, ws = variant
+    k = _target(v, manifest, ws, tmp_path)
+    deck = v.out_dir / "deck.pptx"
+    before = hashlib.sha1(deck.read_bytes()).hexdigest()
+    report, plan, outline, rr, seen, events = _look(v, manifest, ws, _model(k, False, []))
+    assert [x["slide"] for x in seen.kept] == [k] and rr is None
+    assert hashlib.sha1(deck.read_bytes()).hexdigest() == before
+
+
+def test_the_report_describes_the_deck_on_disk_after_a_new_layout(variant, tmp_path):
+    """A slide laid out again: the report is the deck's own audit — no fix it lists is lost from the file, no issue of
+    the file missing from the report."""
+    from verstka.audit.runner import run_audit
+
+    v, manifest, ws = variant
+    k = _target(v, manifest, ws, tmp_path)
+    report, plan, outline, rr, seen, events = _look(v, manifest, ws, _model(k, True, []))
+    assert [f["slide"] for f in seen.fixed] == [k]
+    fresh = run_audit(v.out_dir / "deck.pptx", manifest, outline, ws, render=False, strategy=report.strategy)
+    key = lambda r: sorted((i.check_id, i.slide, i.severity) for i in r.issues if i.kind != "model")  # noqa: E731
+    assert key(report) == key(fresh)
+
+
+def test_a_failure_while_laying_out_again_puts_the_deck_back(variant, tmp_path):
+    """LibreOffice fails on the new layout's picture: the deck, the plan and the report stay as they were, the model's
+    remark stays, nothing unseen is shipped."""
+    v, manifest, ws = variant
+    k = _target(v, manifest, ws, tmp_path)
+    deck = v.out_dir / "deck.pptx"
+    before = hashlib.sha1(deck.read_bytes()).hexdigest()
+    plan0 = v.plan.slides[k - 1].model_copy(deep=True)
+    shots = {"n": 0}
+
+    def flaky(pptx, out, dpi):
+        shots["n"] += 1
+        if shots["n"] > 1:
+            raise RuntimeError("soffice crashed")
+        return _shots(pptx, out, dpi)
+
+    report, plan, outline, rr, seen = E.look(v.out_dir, v.audit, v.outline, v.plan, manifest, ws, providers=_model(k, True, []), skills=SKILLS,
+                                             deadline=time.monotonic() + 120, images=flaky)
+    assert not seen.fixed and [x["why"] for x in seen.kept] == ["пересобрать слайд не удалось"] and rr is None
+    assert hashlib.sha1(deck.read_bytes()).hexdigest() == before
+    after = plan.slides[k - 1]
+    assert (after.pattern_id, after.mode, after.fit.get("style")) == (plan0.pattern_id, plan0.mode, plan0.fit.get("style"))
+    assert any(i.check_id == "design_review" and i.slide == k for i in report.issues)
+
+
+def test_a_slide_takes_no_sample_another_variant_shows_there(variant, tmp_path):
+    """The look sees the samples the OTHER variants show on the same slide at the moment it moves one — also those laid
+    out while it looks — and tells the sample it takes."""
+    v, manifest, ws = variant
+    calls: list = []
+    picks: list = []
+    k = _target(v, manifest, ws, tmp_path)
+    E.look(v.out_dir, v.audit, v.outline, v.plan, manifest, ws, providers=_model(k, True, []), skills=SKILLS, deadline=time.monotonic() + 120,
+           images=_shots, others_live=lambda: calls.append(1) or {}, on_pick=lambda osl, pid: picks.append((osl.id if osl else None, pid)))
+    ps = v.plan.slides[k - 1]
+    moved_by_rematch = ps.mode == "clone"
+    if moved_by_rematch:
+        assert calls and picks and picks[0][1] == ps.pattern_id
+    else:
+        assert calls  # a composed slide asks too (the ladder may go to a sample)
+
+
+def test_the_review_of_an_old_deck_follows_the_config_and_skips_its_closing(tmp_path, monkeypatch):
+    """«Улучшить готовую»: the original is looked at as a new deck is — not its closing or contents slide; with the
+    review off in configs/eyes.yaml no model is asked; the slide pictures go to a folder of their own, removed after."""
+    asked: list = []
+
+    def answer(messages):
+        asked.append(messages[-1].content)
+        return {"ok": False, "problems": [{"code": "unbalanced", "severity": "major", "where": "правая половина", "evidence": "пусто"}], "verdict": ""}
+
+    p = MockProvider(answer, model="qwen/qwen3.8-27b")
+    providers = ProviderRegistry(roles={"llm": p, "vlm": p})
+
+    def shots(pptx, out, dpi):
+        out.mkdir(parents=True, exist_ok=True)
+        got = {}
+        for i in (1, 2, 3):
+            f = out / f"slide-{i:03d}.jpg"
+            Image.new("RGB", (32, 18), "white").save(f, "JPEG")
+            got[i] = f
+        return got
+
+    titles = {1: "Итоги квартала", 2: "Продажи", 3: "Спасибо за внимание!"}
+    seen = E.look_only(tmp_path / "old.pptx", tmp_path / "eyes", providers=providers, skills=SKILLS, titles=titles, deadline=time.monotonic() + 60, images=shots)
+    assert sorted(seen) == [1, 2] and len(asked) == 2
+    assert not any((tmp_path / "eyes").iterdir())  # the pictures are gone with their folder
+    asked.clear()
+    assert E.look_only(tmp_path / "old.pptx", tmp_path / "eyes", providers=providers, skills=SKILLS, titles=titles, cfg={"enabled": False}, images=shots) == {}
+    assert not asked
+    issues = E.problem_issues(seen, {1: "s1", 2: "s2"})
+    from verstka.api.remarks import hint_of
+
+    assert issues and hint_of(issues[0]) == E.FIX_HINTS["unbalanced"]
+
+
 def test_the_models_answers_are_read_leniently():
     r = E.DesignReview.model_validate({"ok": "false", "problems": [
         {"code": "Word-Break", "severity": "Major", "where": "карточки", "evidence": "  «Температ|ура»  "},
@@ -158,16 +310,72 @@ def test_the_models_answers_are_read_leniently():
     assert r.known()[0].evidence == "«Температ|ура»"
     assert E.DesignCompare.model_validate({"better": "Б"}).better == "B" and E.DesignCompare.model_validate({"better": "both"}).better == "same"
     assert E.DesignCompare.model_validate({"better": " a. "}).better == "A"
+    assert E.DesignCompare.model_validate({"a": "  карточки\n и заголовок ", "better": "B"}).a == "карточки и заголовок"
 
 
-def test_the_new_layout_comes_first_on_every_other_slide(variant):
-    """Shown in either order, the model favours no side: the original is «A» on even slides and «B» on odd ones."""
+def test_a_model_that_answers_by_the_position_of_the_image_never_changes_a_slide(variant, tmp_path):
+    """Asked in both orders, a model that picks whichever image comes first chooses the new layout once and the old one
+    once: the slide stays as it was, and the remark stays."""
     v, manifest, ws = variant
-    k = _target(v)
+    k = _target(v, manifest, ws, tmp_path)
+    before = v.plan.slides[k - 1].model_copy(deep=True)
+    report, plan, outline, rr, seen, events = _look(v, manifest, ws, _model(k, "first", []))
+    assert not seen.fixed and [x["why"] for x in seen.kept] == ["модель выбрала новую вёрстку только в одном порядке сравнения"]
+    after = plan.slides[k - 1]
+    assert (after.pattern_id, after.mode, after.composition) == (before.pattern_id, before.mode, before.composition)
+    assert any(i.check_id == "design_review" and i.slide == k for i in report.issues)
+
+
+def test_a_new_layout_that_changes_nothing_visible_is_not_compared(variant, tmp_path):
+    """A relayout that moved a hairline (or nothing) is no new layout: the slide stays without asking the model."""
+    v, manifest, ws = variant
+    k = _target(v, manifest, ws, tmp_path)
     calls: list = []
-    _look(v, manifest, ws, _model(k, True, calls))
-    prompt = next(c[0] for c in calls if "Prefer the new attempt" in c[0])
-    assert (f"Layout {'B' if k % 2 else 'A'} is the current one") in prompt
+    events: list = []
+    out = E.look(v.out_dir, v.audit, v.outline, v.plan, manifest, ws, providers=_model(k, True, calls), skills=SKILLS, deadline=time.monotonic() + 120,
+                 emit=lambda message, slide=None, fix=None: events.append(message), images=_same_shots)
+    seen = out[4]
+    assert not seen.fixed and [x["why"] for x in seen.kept] == ["новая вёрстка почти не отличается от прежней"]
+    assert not any("Prefer the new attempt" in c for c, _ in calls)
+
+
+def test_a_slide_no_rung_of_the_ladder_can_change_goes_back_without_a_look(variant, tmp_path, monkeypatch):
+    """Every next layout the ladder offers renders the slide exactly as it was (a style the composer draws alike): the
+    slide goes back at once, and no model is asked to compare two equal pictures."""
+    v, manifest, ws = variant
+    k = _target(v, manifest, ws, tmp_path)
+    tries: list = []
+
+    def same_again(plan, outline, oid, manifest, taken=None, others=None):
+        tries.append(oid)
+        return "restyle → compact" if len(tries) <= 3 else "skip"
+
+    monkeypatch.setattr(E, "relayout", same_again)
+    calls: list = []
+    report, plan, outline, rr, seen, events = _look(v, manifest, ws, _model(k, True, calls))
+    assert len(tries) == 3  # the first rung and two more
+    assert not seen.fixed and [x["why"] for x in seen.kept] == ["другой вёрстки для этого слайда не нашлось"]
+    assert not any("Prefer the new attempt" in c for c, _ in calls)
+    assert any(i.check_id == "design_review" and i.slide == k for i in report.issues)
+
+
+def test_the_share_of_the_slide_a_new_layout_changed(tmp_path):
+    def draw(name: str, box=None, line=None) -> Path:
+        im = Image.new("RGB", (1000, 562), "white")
+        d = ImageDraw.Draw(im)
+        d.rectangle([60, 60, 600, 140], fill=(20, 20, 20))  # the heading
+        if box:
+            d.rectangle(box, fill=(30, 90, 200))
+        if line:
+            d.line(line, fill=(120, 120, 120), width=1)
+        p = tmp_path / name
+        im.save(p, "JPEG", quality=90)
+        return p
+
+    a = draw("a.jpg", box=[60, 200, 400, 480])
+    assert E.changed_share(a, a) == 0.0
+    assert E.changed_share(a, draw("hairline.jpg", box=[60, 200, 400, 480], line=[700, 150, 700, 480])) < E.DEFAULTS["min_change"]
+    assert E.changed_share(a, draw("moved.jpg", box=[560, 200, 900, 480])) > 0.1
 
 
 def test_the_config_file_is_read_with_defaults_for_what_it_leaves_out(tmp_path):

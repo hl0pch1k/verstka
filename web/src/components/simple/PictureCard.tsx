@@ -54,8 +54,12 @@ export function PictureCard({ pic, run, progress, message, busy, configured, onS
     } else if (e.key === "Escape") setOpen(false);
   };
   const what = about(pic);
+  // «Улучшить готовую»: the original deck's own picture back on its place — nothing was drawn
+  const original = generated && pic.model === "original";
   const title = generated ? "Изображение" : own ? "Место под ваше фото" : "Место под изображение";
-  const sub = generated
+  const sub = original
+    ? null
+    : generated
     ? [pic.model_label || pic.model, typeof pic.palette_match === "number" ? `в палитре шаблона ${Math.round(pic.palette_match * 100)}%` : null].filter(Boolean).join(" · ")
     : own
       ? "Вставьте фото в PowerPoint: щёлкните по месту → «Рисунок»"
@@ -67,7 +71,7 @@ export function PictureCard({ pic, run, progress, message, busy, configured, onS
     <section aria-label={title} className={cn("shrink-0 rounded-2xl bg-white p-4 shadow-card", className)}>
       <div className="flex items-center gap-2">
         <h3 className="text-title3 font-semibold text-zinc-900">{title}</h3>
-        {generated && !working && <span className="ml-auto rounded-full bg-zinc-100 px-2 py-0.5 text-caption text-zinc-600">сгенерировано</span>}
+        {generated && !working && <span className="ml-auto rounded-full bg-zinc-100 px-2 py-0.5 text-caption text-zinc-600">{original ? "из исходной презентации" : "сгенерировано"}</span>}
       </div>
       {what && (
         <p className="mt-2 line-clamp-2 text-footnote text-zinc-700 [text-wrap:pretty]" title={what}>

@@ -454,8 +454,27 @@ export interface Variant {
   design?: SlideDesign[];
   /** The pictures inside the slides and the places kept for them (newer servers). */
   pictures?: SlidePicture[];
+  /** «Взгляд дизайнера» (Verstka 3.0): what the vision model saw and what it laid out again; null when it did not run. */
+  eyes?: DesignEye | null;
 }
 export interface Generation extends GenerationMeta { variants: Variant[] }
+
+/** A problem the vision model named on a slide (closed list of codes; `label` is its Russian name). */
+export interface DesignProblem { code: string; label: string; severity: "major" | "minor" | string; where: string; evidence: string }
+/** One slide the model had something to say about: laid out again (`fixed`, with the slide before and after), tried
+ *  again but kept (`kept`, with why) or only noted (`seen`, minor polish). Numbers are the slides' current ones. */
+export interface DesignEyeSlide {
+  outline_id: string;
+  slide: number;
+  status: "fixed" | "kept" | "seen";
+  problems: DesignProblem[];
+  reason: string;
+  before: string | null;
+  after: string | null;
+  /** Redesigned since the build: the pictures of the review are not this slide's any more. */
+  redone?: boolean;
+}
+export interface DesignEye { looked: number; seconds?: number | null; skipped?: string | null; slides: DesignEyeSlide[] }
 
 /** A picture inside a slide, or the place kept for one: generated — a text-to-image model made it; free — the place
  *  waits (why: the author's own photo, generation off, the model did not answer); removed — the person took it out. */

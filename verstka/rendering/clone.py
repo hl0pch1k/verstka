@@ -2757,11 +2757,11 @@ def _fill_code(ctx: _SlideCtx, oslide: OutlineSlide) -> bool:
     top = slot.style.size_pt or 14.0
     spacing = ctx.line_height_of(el) / 1.2 * CODE_LINE
     w_pt = (box[2] - ins[0] - ins[2]) / EMU_PER_PT
-    size, ok = code_size(lines, family, w_pt, (box[3] - ins[1] - ins[3]) / EMU_PER_PT, top, spacing=spacing)
+    size, ok = code_size(lines, family, w_pt, (box[3] - ins[1] - ins[3]) / EMU_PER_PT, top, spacing=spacing, scale=ctx.grow_scale)
     if not ok and not is_nested(el):
         grown = ctx._room_below(el, box)
         if grown is not None and grown > box[1] + box[3]:
-            size2, ok2 = code_size(lines, family, w_pt, (grown - box[1] - ins[1] - ins[3]) / EMU_PER_PT, top, spacing=spacing)
+            size2, ok2 = code_size(lines, family, w_pt, (grown - box[1] - ins[1] - ins[3]) / EMU_PER_PT, top, spacing=spacing, scale=ctx.grow_scale)
             if ok2:
                 set_element_pos(el, h=grown - box[1])
                 size, ok = size2, ok2
@@ -5134,7 +5134,9 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
     # ---- the size this heading aims at, decided for the deck
     display_sizes = sorted({s.style.size_pt for p in ctx.manifest.patterns if p.kind in _BOOKENDS for s in p.slots
                             if s.role == SlotRole.title and s.style.size_pt and (not h1 or s.style.size_pt <= 2.5 * h1)})
-    snap_sizes = sorted(set(ctx.grow_scale) | {float(x) for x in (typo.sizes_used or [])} | set(display_sizes))
+    # every size the template's samples set counts, as the audit counts them (LCT's cover keeps its 44 pt)
+    slot_sizes = {float(s.style.size_pt) for p in ctx.manifest.patterns for s in p.slots if s.style.size_pt and s.style.size_pt >= 8}
+    snap_sizes = sorted(set(ctx.grow_scale) | {float(x) for x in (typo.sizes_used or [])} | set(display_sizes) | slot_sizes)
     target = size0
     if kind == PatternKind.section and st.cover_size and h1 and size0 <= 1.3 * h1:
         # a divider sample set barely above the slide headings (29 pt against 24) on an empty page reads unfinished:
@@ -5420,6 +5422,7 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
     y = tb.y
     h_title = h_sub = gap = h_k = gap_k = h_goal = gap_goal = 0
     sub_size = g_size = 0.0
+    sub_cap: Optional[float] = None  # the subtitle stepped down so the heading keeps a size of the template's own
     split: list[str] = []
     for _ in range(14):
         n = len(display_lines(measured, family, size, bold, inner(w_used), spc_pt=t_spc))
@@ -5430,6 +5433,8 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
         h_title = int((lines * 1.2 * ls + 0.15) * size * EMU_PER_PT) + t_ins[1] + t_ins[3]
         if sub_text:
             sub_size = legible(max(min(s_size, _snap_down(size * 0.6, ctx.grow_scale)), min(s_size, typo.size_for("caption", 10.0))), sub_color)
+            if sub_cap is not None:
+                sub_size = legible(min(sub_size, sub_cap), sub_color)
             s_lines = max(1, len(display_lines(bind_short_words(sub_text), family, sub_size, False, inner(w_max) * 0.92)))
             h_sub = int((s_lines * 1.2 + 0.25) * sub_size * EMU_PER_PT) + s_ins[1] + s_ins[3]
             want = sample_gap if sample_gap is not None and carrier is not None and not is_placeholder_text(carrier.sample_text) else 0.45 * size
@@ -5477,6 +5482,14 @@ def _render_bookend(ctx: _SlideCtx, oslide: OutlineSlide) -> tuple[float, int]:
         if size <= 0.5 * size0:
             break
         smaller = [s for s in snap_sizes if 0.85 * size <= s < size - 0.05]
+        if not smaller and sub_text and sub_cap is None:
+            # the template has no size close under the heading's (Классика: nothing between 24 and 40): the subtitle
+            # gives way first, one step of the scale, never under half the heading — the heading keeps its own size
+            # rather than an even size the template never sets (36 pt)
+            lower = [s for s in ctx.grow_scale if 0.5 * size - 0.05 <= s < sub_size - 0.05]
+            if lower and legible(max(lower), sub_color) < sub_size - 0.05:
+                sub_cap = max(lower)
+                continue
         size = max(smaller) if smaller else _snap_display(size * 0.92, snap_sizes)
     if kind == PatternKind.title:
         st.cover_size, st.cover_bold = size, bold

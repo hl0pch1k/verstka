@@ -3,12 +3,13 @@
 # overlaps, cramped or tiny text, poor contrast, an unbalanced slide, a leftover frame, an illegible chart. A slide with
 # a major problem is laid out again (its next template sample, the composer, or the composition in another variant's
 # style); the new layout stays only when the deterministic audit of the slide is not worse and the model, shown both
-# layouts side by side (in either order), prefers it. Skills: skills/slide_design_review, skills/slide_design_compare.
+# layouts side by side in both orders, prefers it both times. Skills: skills/slide_design_review, skills/slide_design_compare.
 enabled: true
 max_fixes: 4            # slides laid out again per variant (the most serious problems first)
 min_seconds_left: 40    # the generation's model budget left to start looking (configs/models.yaml limits.time_budget_s)
 fix_seconds_left: 20    # ... to lay the slides out again and compare
-compare: true           # the side-by-side check of the new layout (false: the deterministic audit decides alone)
+compare: true           # the side-by-side check of the new layout, in both orders (false: the deterministic audit decides alone)
+min_change: 0.02        # the share of the slide a new layout must change to be compared at all (a moved hairline is no new layout)
 dpi: 100                # the slide images the model sees (LibreOffice → PDF → JPEG; ≈ 1000 px wide, resized to 1024 at most)
 skip_kinds: [thanks, agenda]
 workers: 4              # looks side by side (within limits.max_concurrency)

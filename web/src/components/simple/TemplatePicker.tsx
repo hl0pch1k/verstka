@@ -103,7 +103,7 @@ export function ImproveDeckButton() {
   const { pick, blocked } = useTemplateUpload();
   return (
     <Button size="sm" variant="ghost" icon={Wand2} disabled={blocked} onClick={() => pick(true)}
-      title="Загрузите старую презентацию: её оформление и текст останутся, а вёрстку Verstka соберёт заново — в трёх вариантах">
+      title="Загрузите старую презентацию: её оформление и текст останутся, а вёрстку Verstka соберёт заново">
       Улучшить готовую
     </Button>
   );
@@ -181,14 +181,14 @@ function Cover({ t, selected, onPick, onPreview, fresh }: {
   );
 }
 
-function Analysing({ name, value }: { name: string; value: number | null }) {
+function Analysing({ name, value, reading = false }: { name: string; value: number | null; /** «Улучшить готовую»: a deck read back, not a template. */ reading?: boolean }) {
   return (
-    <div className="min-w-0 animate-fade" aria-busy="true" aria-label={`Разбираю шаблон «${templateTitle(name)}»`}>
+    <div className="min-w-0 animate-fade" aria-busy="true" aria-label={`${reading ? "Читаю презентацию" : "Разбираю шаблон"} «${templateTitle(name)}»`}>
       <span className="skeleton block aspect-video w-full rounded-xl" aria-hidden />
       <span className="mt-2.5 block truncate text-body font-medium text-zinc-900" title={name}>{templateTitle(name)}</span>
       <span className="mt-1.5 flex h-4 items-center gap-2">
         <Progress size="sm" value={value ?? 0} indeterminate={value === null} className="flex-1" />
-        <span className="shrink-0 text-footnote text-zinc-500">разбираю…</span>
+        <span className="shrink-0 text-footnote text-zinc-500">{reading ? "читаю…" : "разбираю…"}</span>
       </span>
     </div>
   );
@@ -337,7 +337,7 @@ export function TemplatePicker() {
         </div>
       ) : (
         <div ref={grid} className="grid grid-cols-5 gap-5">
-          {analysing && <Analysing name={name} value={job ? job.progress : null} />}
+          {analysing && <Analysing name={name} value={job ? job.progress : null} reading={!!job && /^Читаю презентацию/.test(job.label)} />}
           {row.map((t) => (
             <Cover key={t.template_id} t={t} selected={t.template_id === templateId} onPick={() => selectTemplate(t.template_id)} onPreview={() => setPreview(t)} fresh={fresh(t)} />
           ))}

@@ -72,13 +72,24 @@ def fit_size(
     usable_w = max((bbox.w - insets_emu[0] - insets_emu[2]) / EMU_PER_PT * 0.985, 1.0)
     usable_h = max((bbox.h - insets_emu[1] - insets_emu[3]) / EMU_PER_PT, 1.0)
     candidates: list[float] = [size_pt]
-    scale_c = sorted({round(s, 2) for s in (scale_sizes or []) if s < size_pt and s >= size_pt * min_ratio}, reverse=True)
+    scale_all = sorted({round(s, 2) for s in (scale_sizes or []) if s > 0})
+    scale_c = sorted({s for s in scale_all if size_pt * min_ratio <= s < size_pt}, reverse=True)
     candidates.extend(scale_c)
     floor = min(scale_c) if scale_c else size_pt
+    lowest = scale_all[0] if scale_all else None
     if not (ladder_only and scale_c):
         for ratio in (0.92, 0.85, 0.78, 0.7, 0.62, 0.55, 0.5):
             s = round(size_pt * ratio, 1)
-            if s >= size_pt * min_ratio and s < floor and all(abs(s - c) > 0.4 for c in candidates):
+            if s < size_pt * min_ratio or s >= floor:
+                continue
+            if lowest is not None and s >= lowest - 0.05:
+                # never a size between two steps of the template's scale (Классика 40 → 24: not 36.8 / 31.2 pt): the
+                # step at or under it, the next size the template sets (not under half the size); in-between sizes
+                # only under the scale's smallest step, where the template has none
+                s = max(x for x in scale_all if x <= s + 0.05)
+                if s < 0.5 * size_pt - 0.05:
+                    continue
+            if all(abs(s - c) > 0.4 for c in candidates):
                 candidates.append(s)
     candidates.sort(reverse=True)
     last = FitResult(size_pt, False, 0, 0.0)

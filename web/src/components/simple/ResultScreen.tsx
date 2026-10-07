@@ -16,6 +16,7 @@ import { type ComposerPreset, useApp } from "../../store";
 import type { DetailKey, Generation, GenerationMeta, Issue, Variant } from "../../types";
 import { isMinor } from "../AuditHelpers";
 import { BuildScreen } from "../BuildScreen";
+import { DesignEyeCard } from "../DesignEye";
 import { Button, LinkButton } from "../ui/Button";
 import { Collapse } from "../ui/Collapse";
 import { EmptyState } from "../ui/EmptyState";
@@ -285,6 +286,7 @@ function editDeckText(generation: GenerationMeta, editText: (text: string, prese
     auditModels: generation.audit_models,
     pictures: generation.pictures ?? null,
     strategies: generation.strategies,
+    improvedFrom: generation.improved_from ?? null,
   });
 }
 
@@ -451,6 +453,8 @@ function Deck({ generation }: { generation: Generation }) {
     const mine = (variant.pictures ?? []).filter((p) => p.slide === selectedSlide);
     return mine.find((p) => p.status === "generated") ?? mine[0] ?? null;
   }, [variant.pictures, selectedSlide]);
+  // «Взгляд дизайнера»: the shown slide was laid out again by the review (its pictures are still this slide's)
+  const slideEye = useMemo(() => (variant.eyes?.slides ?? []).find((s) => s.slide === selectedSlide && s.status === "fixed" && !s.redone) ?? null, [variant.eyes, selectedSlide]);
   const runWorking = !!run && (run.phase === "submitting" || run.phase === "running" || run.phase === "undoing");
   // the thumb keeps its spinner until the reloaded deck is in: it then pops straight out (never back to the count of
   // the remark just fixed)
@@ -648,6 +652,9 @@ function Deck({ generation }: { generation: Generation }) {
         autofix: generation.autofix ?? true,
         exports: generation.exports ?? ["pdf", "html"],
         pictures: generation.pictures ?? null,
+        // «Улучшить готовую»: the model's look at the slides and the original's audit («было → стало») come along
+        eyes: generation.eyes ?? null,
+        improved_from: generation.improved_from ?? null,
       });
     } finally {
       inFlight.current = false;
@@ -730,7 +737,8 @@ function Deck({ generation }: { generation: Generation }) {
     ro.observe(room);
     for (const k of el.children) if (!k.hasAttribute("data-why")) ro.observe(k);
     return () => ro.disconnect();
-  }, [agentOpen, variant, !!why, withPanel, asideShown]);
+    // (the slide's own cards — its picture, the designer's look — come and go with the slide: measured again)
+  }, [agentOpen, variant, !!why, withPanel, asideShown, !!slideEye, !!slidePicture]);
 
   // a width-bound slide (a wide window, the helper open) caps the workspace at the slide's height: no bands above and
   // below the slide. In CSS from the deck's own width (a container): a measured width would be one commit late after
@@ -826,6 +834,7 @@ function Deck({ generation }: { generation: Generation }) {
           )}
         </button>
       )}
+      {slideEye && <DesignEyeCard key={`${variant.strategy}/${slideEye.outline_id}`} item={slideEye} onOpen={() => open("quality")} className="animate-fade" />}
       {slidePicture && (
         <PictureCard
           key={`${variant.strategy}/${slidePicture.id}`}

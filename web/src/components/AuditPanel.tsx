@@ -12,6 +12,7 @@ import { AppliedFixes, ChecksReference } from "./AuditFixes";
 import { auditRev, groupBySlide, isFixable, isMinor, type SlideGroup } from "./AuditHelpers";
 import { MinorNotes, SlideIssueGroup, useLeaving } from "./AuditIssues";
 import { AuditSummaryCard } from "./AuditSummary";
+import { DesignEyeSection } from "./DesignEye";
 import { Button } from "./ui/Button";
 import { Chip } from "./ui/Chip";
 import { Collapse } from "./ui/Collapse";
@@ -213,6 +214,8 @@ export function AuditPanel() {
           />
         </div>
       </div>
+
+      <DesignEyeSection eye={activeVariant?.eyes} onShow={show} />
 
       {minor.length > 0 && (
         <Collapsible

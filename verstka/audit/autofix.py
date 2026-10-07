@@ -103,12 +103,13 @@ def _unsay(outline: DeckOutline) -> int:
     return removed
 
 
-def _rematch(plan: LayoutPlan, outline: DeckOutline, oid: str, manifest: Optional[TemplateManifest] = None, taken: Optional[set] = None, others: Optional[dict] = None) -> str:
+def _rematch(plan: LayoutPlan, outline: DeckOutline, oid: str, manifest: Optional[TemplateManifest] = None, taken: Optional[set] = None, others: Optional[dict] = None,
+             strict: bool = False) -> str:
     """The slide's next rung: its next untried sample (one no other slide of the deck shows first — three slides moved
     to one sample in one pass made the pass worse and it was rolled back whole), else the composer. `taken`: the
     samples this pass already gave other slides; `others`: headline key → the samples the other variants show on
     that slide (a cover rematched to the next one in its list took the visual variant's cover: three variants opened
-    on one slide) — taken only when nothing else is left."""
+    on one slide) — taken only when nothing else is left; never when `strict` (the slide goes to the composer then)."""
     ps = plan.for_outline(oid)
     osl = next((s for s in outline.slides if s.id == oid), None)
     if ps is None or osl is None:
@@ -131,7 +132,7 @@ def _rematch(plan: LayoutPlan, outline: DeckOutline, oid: str, manifest: Optiona
         for pid, score in ps.alternatives:
             if bookend and _empty_frame(patterns.get(pid), osl):
                 continue  # a cover never trades its heading for an empty photo frame or a phone mock-up
-            if free_only and (pid in shown or pid in elsewhere):
+            if (free_only and (pid in shown or pid in elsewhere)) or (strict and pid in elsewhere):
                 continue
             if pid not in tried and score >= 0.3:
                 was = ps.pattern_id

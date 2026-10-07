@@ -290,6 +290,22 @@ export function slideGroups<T extends AgentEvent>(events: T[]): Array<{ slide: n
 
 const slideList = (slides: number[]) => (slides.length === 1 ? `слайд ${slides[0]}` : `слайды ${slides.join(", ")}`);
 const uniqueSlides = (events: AgentEvent[]) => [...new Set(events.map((e) => e.slide).filter((n): n is number => typeof n === "number"))].sort((a, b) => a - b);
+// «Взгляд дизайнера»: the slides its summary line names («… — замечания на слайдах 3, 7.») — those it did not lay out
+// again say nothing slide by slide (minor polish, more than it lays out, no time left)
+const flaggedSlides = (events: AgentEvent[]) =>
+  [...new Set(events.flatMap((e) => (e.message.match(/замечания на слайд(?:е|ах)\s+([\d,\s]+)/i)?.[1] ?? "").split(/[,\s]+/).filter(Boolean).map(Number)))]
+    .filter((n) => Number.isFinite(n))
+    .sort((a, b) => a - b);
+// … and a review the model did not answer (no slide seen)
+const unseen = (events: AgentEvent[]) => events.some((e) => /посмотрел на 0(?:\s|\u00a0)|модель не ответила/i.test(e.message));
+
+/** The card's line of «Взгляд дизайнера»: what it looked at, laid out again, and what stayed a remark. */
+function eyesLine(looked: number | null, redone: number, left: number): string {
+  if (looked === 0) return "Модель не ответила — слайды остались как были";
+  const seen = looked ? `Посмотрел на ${plural(looked, "слайд", "слайда", "слайдов")}` : "Посмотрел на слайды";
+  if (!redone && !left) return `${seen} — замечаний нет`;
+  return [seen, redone ? `пересобрал ${plural(redone, "слайд", "слайда", "слайдов")}` : null, left ? `осталось ${plural(left, "замечание", "замечания", "замечаний")}` : null].filter(Boolean).join(", ");
+}
 
 /** What a step came to, in a few words next to its title. */
 function ownNote(key: PhaseKey, events: TimelineEvent[]): string | null {
@@ -304,12 +320,12 @@ function ownNote(key: PhaseKey, events: TimelineEvent[]): string | null {
     // «Взгляд дизайнера»: the slides it laid out again (an event with a slide and a «Собрал заново» fix), or none
     const onSlide = events.filter((e) => e.slide !== null && e.slide !== undefined);
     const redone = uniqueSlides(onSlide.filter((e) => /^собрал заново/i.test(e.fix ?? "")));
-    const left = uniqueSlides(onSlide.filter((e) => !/^собрал заново/i.test(e.fix ?? ""))).filter((n) => !redone.includes(n));
+    const left = [...new Set([...uniqueSlides(onSlide), ...flaggedSlides(events)])].filter((n) => !redone.includes(n)).sort((a, b) => a - b);
     const parts = [
       redone.length ? `${plural(redone.length, "слайд", "слайда", "слайдов")} ${agrees(redone.length, "пересобран", "пересобраны")}` : null,
       left.length ? `${plural(left.length, "замечание", "замечания", "замечаний")} · ${slideList(left)}` : null,
     ].filter(Boolean);
-    return parts.length ? parts.join(", ") : events.length ? "замечаний нет" : null;
+    return parts.length ? parts.join(", ") : unseen(events) ? "модель не ответила" : events.length ? "замечаний нет" : null;
   }
   return null;
 }
@@ -318,7 +334,9 @@ export function buildTimeline({ events, phase, running, notes }: TimelineInput):
   const evs = withPhases(events);
   const allVariants = [...new Set(evs.map((e) => e.variant).filter((v): v is string => !!v))];
   let cur = phase;
-  for (const e of evs) cur = laterPhase(cur, e.phase);
+  // «Взгляд дизайнера» looks at the first variant while the next ones are still laid out: its lines never end
+  // «Вёрстка» during a live build
+  for (const e of evs) if (!(running && phase === "layout" && e.phase === "eyes")) cur = laterPhase(cur, e.phase);
   const curIdx = cur ? ORDER[cur] : 0;
   const rows: TimelineRow[] = [];
   for (const def of PHASES) {
@@ -429,13 +447,19 @@ export function agentSummary(v: Variant | null | undefined): AgentSummaryLine[] 
           : "Замечаний нет";
       lines.push({ step: "Критик", text: capital(text) });
     }
-    // «Взгляд дизайнера»: how many finished slides the vision model looked at, how many it laid out again
+    // «Взгляд дизайнера»: how many finished slides the vision model looked at, how many it laid out again and how many
+    // serious remarks stayed — from the review's own record when the server sends it, else from the timeline
     const eyes = evs.filter((e) => e.phase === "eyes" && mine(e));
-    if (eyes.length) {
-      const looked = Number(eyes.map((e) => e.message.match(/посмотрел на (\d+)/i)?.[1]).find(Boolean) ?? NaN);
-      const redone = uniqueSlides(eyes.filter((e) => /^собрал заново/i.test(e.fix ?? ""))).length;
-      const seen = Number.isFinite(looked) ? `Посмотрел на ${plural(looked, "слайд", "слайда", "слайдов")}` : "Посмотрел на слайды";
-      lines.push({ step: "Взгляд дизайнера", text: redone ? `${seen}, ${agrees(redone, "пересобрал", "пересобрал")} ${plural(redone, "слайд", "слайда", "слайдов")}` : `${seen} — замечаний нет` });
+    const record = v?.eyes;
+    if (record && !record.skipped) {
+      const redone = record.slides.filter((s) => s.status === "fixed").length;
+      const left = record.slides.filter((s) => s.status !== "fixed" && s.problems.some((p) => p.severity === "major")).length;
+      lines.push({ step: "Взгляд дизайнера", text: eyesLine(record.looked, redone, left) });
+    } else if (eyes.length) {
+      const said = eyes.map((e) => e.message.match(/посмотрел на (\d+)/i)?.[1]).find((x) => x !== undefined);
+      const redoneSlides = uniqueSlides(eyes.filter((e) => /^собрал заново/i.test(e.fix ?? "")));
+      const left = [...new Set([...uniqueSlides(eyes), ...flaggedSlides(eyes)])].filter((n) => !redoneSlides.includes(n)).length;
+      lines.push({ step: "Взгляд дизайнера", text: eyesLine(unseen(eyes) ? 0 : said !== undefined ? Number(said) : null, redoneSlides.length, left) });
     }
     return lines.map((l) => ({ ...l, text: keepTogether(l.text) }));
   }

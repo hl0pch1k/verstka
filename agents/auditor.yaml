@@ -1,5 +1,5 @@
 name: auditor
-version: 0.1.0
+version: 0.2.0
 description: Аудит сгенерированной колоды и автофикс (verstka.audit.runner.run_audit, verstka.audit.autofix.autofix_loop).
 steps:
   - skill: slide_content_audit
@@ -7,6 +7,12 @@ steps:
     optional: true
   - skill: deck_coherence_audit
     description: связность соседних слайдов и единый язык
+    optional: true
+  - skill: slide_design_review
+    description: «Взгляд дизайнера» — проблемы вёрстки готового слайда по его картинке (verstka/audit/eyes.py)
+    optional: true
+  - skill: slide_design_compare
+    description: «Взгляд дизайнера» — старая и новая вёрстка слайда рядом, в обоих порядках; новая остаётся, только если выбрана оба раза
     optional: true
   - skill: text_condenser
     description: сокращение текста при автофиксе плотности

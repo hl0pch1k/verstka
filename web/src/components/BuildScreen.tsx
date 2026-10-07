@@ -203,9 +203,10 @@ export function BuildScreen({ job }: { job: ActiveJob }) {
   const exporting = /^сохраняю файлы/i.test(message);
   const queued = job.status === "queued";
 
-  // the variants are laid out one after another: the check of the first must not end «Вёрстка» for the others
+  // the variants are laid out one after another: the check of the first (and «Взгляд дизайнера» on it, which runs
+  // beside the next variant's layout) must not end «Вёрстка» for the others
   const laying = !exporting && names.some((n) => (job.variants?.[n]?.frac ?? 0) < 0.75);
-  const phase: PhaseKey | null = job.phase === "check" && laying ? "layout" : job.phase ?? null;
+  const phase: PhaseKey | null = (job.phase === "check" || job.phase === "eyes") && laying ? "layout" : job.phase ?? null;
 
   const variantOf = (name: string): VariantState => {
     if (exporting) return { ...job.variants?.[name], text: "готово", done: true, frac: 1 };
@@ -215,7 +216,7 @@ export function BuildScreen({ job }: { job: ActiveJob }) {
     // a variant waiting behind another at the critic is with the critic too
     let own: PhaseKey | null = null;
     for (const e of job.agent ?? []) if (e.variant == null || e.variant === name) own = laterPhase(own, phaseOfStep(e.step));
-    const jobAt = phase && (phase === "critic" || phase === "revise" || phase === "layout" || phase === "check") ? "critic" : phase;
+    const jobAt = phase && (phase === "critic" || phase === "revise" || phase === "layout" || phase === "check" || phase === "eyes") ? "critic" : phase;
     const at = laterPhase(own, jobAt);
     if (st || at === "layout" || at === "check") return { ...st, text: "в очереди на вёрстку", done: false, frac: 0 };
     return { text: AGENT_STATUS[at ?? "analyst"] ?? "работаю…", done: false, frac: 0, indeterminate: true };

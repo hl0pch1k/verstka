@@ -37,6 +37,7 @@ export function variantProgress(message: string): { name: string; state: Variant
   if ((r = what.match(/^planned (\d+) slides/))) return { name, state: { text: "план готов", done: false, frac: 0.2, laid: 0, of: Number(r[1]) } };
   if (what === "audit") return { name, state: { text: "проверка качества", done: false, frac: 0.75 } };
   if (/^autofix/.test(what)) return { name, state: { text: "исправляю замечания", done: false, frac: 0.85 } };
+  if (what === "design review") return { name, state: { text: "взгляд дизайнера", done: false, frac: 0.9 } };
   if (/^done in /.test(what)) return { name, state: { text: "готово", done: true, frac: 1 } };
   return null;
 }
@@ -57,6 +58,7 @@ export function humanizeJobMessage(message: string, titleOf: (strategy: string) 
     r = what.match(/^rendered slide (\d+)\/(\d+)$/);
     if (r) return `${who}: свёрстан слайд ${r[1]} из ${r[2]}`;
     if (what === "audit") return `${who}: проверка качества`;
+    if (what === "design review") return `${who}: взгляд дизайнера`;
     r = what.match(/^autofix \((\d+) errors?\)$/);
     if (r) return `${who}: исправляю замечания${Number(r[1]) ? ` (${plural(Number(r[1]), "ошибка", "ошибки", "ошибок")})` : ""}`;
     r = what.match(/^done in ([\d.]+)s$/);

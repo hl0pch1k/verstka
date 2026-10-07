@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from verstka.audit.model_checks import DECK_COHERENCE, SLIDE_CONTENT
+from verstka.audit.model_checks import model_check_specs
 from verstka.audit.registry import all_checks
 
 SEV = {"error": "ошибка", "warn": "предупреждение", "info": "сведение"}
@@ -39,7 +39,7 @@ def main() -> None:
     for spec, _ in all_checks():
         det.append(f"| `{spec.id}` | {CAT[spec.category]} | {SEV[spec.severity]} | {spec.description} | {AUTOFIX.get(spec.id, '—')} |")
     model = ["| id | Уровень | Что проверяет |", "|---|---|---|"]
-    for spec in (SLIDE_CONTENT, DECK_COHERENCE):
+    for spec in model_check_specs():
         model.append(f"| `{spec.id}` | {SEV[spec.severity]} | {spec.description} |")
     text = re.sub(r"(## Детерминированные проверки\n\n)(\|.*?\n)+", lambda m: m.group(1) + "\n".join(det) + "\n", text, flags=re.S)
     text = re.sub(r"(## Модельные проверки\n\n)(\|.*?\n)+", lambda m: m.group(1) + "\n".join(model) + "\n", text, flags=re.S)

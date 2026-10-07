@@ -94,7 +94,31 @@ test("agentSummary: «Взгляд дизайнера» says how many slides it 
     },
   } as unknown as Variant;
   const eyes = agentSummary(v).find((l) => l.step === "Взгляд дизайнера");
-  assert.equal(eyes?.text.replace(/ /g, " "), "Посмотрел на 13 слайдов, пересобрал 1 слайд");
+  assert.equal(eyes?.text.replace(/ /g, " "), "Посмотрел на 13 слайдов, пересобрал 1 слайд, осталось 1 замечание");
   const visual = agentSummary({ ...v, strategy: "visual" } as Variant).find((l) => l.step === "Взгляд дизайнера");
   assert.equal(visual?.text.replace(/ /g, " "), "Посмотрел на 13 слайдов — замечаний нет");
+});
+
+test("«Взгляд дизайнера» never says «замечаний нет» over remarks it only listed, nor over a model that did not answer", () => {
+  const listed = [{ step: "eyes", message: "Посмотрел на 13 слайдов — замечания на слайдах 3, 7.", slide: null, variant: "structured" }];
+  const row = buildTimeline({ events: listed, phase: null, running: false }).find((r) => r.key === "eyes");
+  assert.equal(row?.note?.replace(/ /g, " "), "2 замечания · слайды 3, 7");
+  const v = { strategy: "structured", agent: { events: listed } } as unknown as Variant;
+  assert.equal(agentSummary(v).find((l) => l.step === "Взгляд дизайнера")?.text.replace(/ /g, " "), "Посмотрел на 13 слайдов, осталось 2 замечания");
+  const silent = [{ step: "eyes", message: "Взгляд дизайнера: модель не ответила — слайды остались как были.", slide: null, variant: "structured" }];
+  assert.equal(buildTimeline({ events: silent, phase: null, running: false }).find((r) => r.key === "eyes")?.note, "модель не ответила");
+  assert.equal(agentSummary({ strategy: "structured", agent: { events: silent } } as unknown as Variant).find((l) => l.step === "Взгляд дизайнера")?.text.replace(/ /g, " "), "Модель не ответила — слайды остались как были");
+  // the review's own record (newer servers) decides the card's line
+  const record = {
+    strategy: "structured",
+    agent: { events: listed },
+    eyes: {
+      looked: 9,
+      slides: [
+        { outline_id: "a", slide: 3, status: "fixed", problems: [{ code: "unbalanced", label: "", severity: "major", where: "", evidence: "" }], reason: "", before: null, after: null },
+        { outline_id: "b", slide: 7, status: "seen", problems: [{ code: "cramped", label: "", severity: "minor", where: "", evidence: "" }], reason: "", before: null, after: null },
+      ],
+    },
+  } as unknown as Variant;
+  assert.equal(agentSummary(record).find((l) => l.step === "Взгляд дизайнера")?.text.replace(/ /g, " "), "Посмотрел на 9 слайдов, пересобрал 1 слайд");
 });

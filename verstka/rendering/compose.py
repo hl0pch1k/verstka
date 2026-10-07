@@ -2215,6 +2215,16 @@ class Composer:
                 continue  # a figure never set under its own label's size (B3: 18 pt figures under 20 pt labels)
             if max(para_lines(self.P(x.label, ls, colors.muted), _pt(inner)) for x in numbers) <= 3:
                 break
+        # a label word wider than its tile breaks in the middle («Температ / ура», Marketing s8): the row's labels step
+        # down the template's own sizes, one size for all, until every word stands whole (as `cards` measures its
+        # words) — the tile only gets shorter, nothing can overflow
+        shown = [distinct_label(x.value, x.label, self.o.headline) for x in numbers]
+        if not self.fits_width(shown, label_size, False, inner):
+            whole = next((s for s in reversed(k.sizes) if s < label_size - 0.05 and self.fits_width(shown, s, False, inner)), None)
+            if whole is not None:
+                label_size = whole
+            else:
+                self.warnings.append("a tile label's word is wider than its tile at every size of the template")
         fig_h = _emu(fs * max(1.15, k.line))
         rule = 0 if use_cards else _emu(3)
         lab_h = max(self.h([self.P(distinct_label(x.value, x.label, self.o.headline), label_size, colors.muted)], inner) for x in numbers)
@@ -2448,7 +2458,7 @@ class Composer:
             col_w = int(area.w * col_share) if texts else 0
             pw = area.w - col_w - (gap if texts else 0)
             cap_h = self.h(cap_paras, pw) + int(k.vgap * 0.4) if cap_paras else 0
-            size, ok = code_size(cl, font, _pt(pw - 2 * pad), _pt(area.h - cap_h - 2 * pad), min(max(k.body, 12.0 * scale), 16.0 * scale), floor=7.0 * max(scale, 1.0))
+            size, ok = code_size(cl, font, _pt(pw - 2 * pad), _pt(area.h - cap_h - 2 * pad), min(max(k.body, 12.0 * scale), 16.0 * scale), floor=7.0 * max(scale, 1.0), scale=k.sizes)
             return col_w, size, ok
 
         col_w, size, ok = plan(0.38)
@@ -5007,13 +5017,21 @@ def code_width_pt(line: str, family: Optional[str], size: float) -> float:
 CODE_LINE = 1.25
 
 
-def code_size(lines: list[str], family: Optional[str], width_pt: float, height_pt: float, top: float, floor: float = 7.0, spacing: float = CODE_LINE) -> tuple[float, bool]:
+def code_size(lines: list[str], family: Optional[str], width_pt: float, height_pt: float, top: float, floor: float = 7.0, spacing: float = CODE_LINE, scale: Optional[list[float]] = None) -> tuple[float, bool]:
     """The largest size up to `top` at which every line of the code stands on one line and all of them in the
     height; (`floor`, False) when none does."""
-    size = top
-    while size >= floor - 1e-6:
+    def fits(size: float) -> bool:
         widest = max((code_width_pt(ln, family, size) for ln in lines), default=0.0)
-        if widest <= width_pt and len(lines) * size * spacing <= height_pt:
+        return widest <= width_pt and len(lines) * size * spacing <= height_pt
+
+    # the template's own sizes first (13 pt → its 12 pt); half points only under its smallest step
+    steps = sorted({float(s) for s in (scale or []) if floor - 1e-6 <= s < top - 1e-6}, reverse=True)
+    for size in [top] + steps:
+        if fits(size):
+            return size, True
+    size = round((steps[-1] if steps else top) - 0.5, 2)
+    while size >= floor - 1e-6:
+        if fits(size):
             return size, True
         size = round(size - 0.5, 2)
     return floor, False
