@@ -190,6 +190,36 @@ def test_a_samples_own_chart_keeps_it_off_text_but_not_off_a_chart(simple_deck, 
     assert score_pattern(chart, p, manifest, get_strategy("structured"), pictures=pics).score > 0
 
 
+def test_the_text_box_a_slides_lines_take_is_no_room_for_its_chart(simple_deck, tmp_path):
+    """A picture-and-text sample (hand-drawn p6): its picture is the template's art and stays, its one text box takes
+    the slide's paragraph — no room is left for the chart, which the renderer would draw over the paragraph. Without
+    lines of its own the chart takes the empty text box; a photo of the sample's story gives its place to the chart."""
+    from verstka.analysis.manifest import analyze_template
+    from verstka.analysis.pictures import SamplePicture
+    from verstka.matching.scorer import score_pattern
+    from verstka.planning.strategies import get_strategy
+    from verstka.schemas.outline import ChartSpec, OutlineSlide, SlideContent
+
+    manifest = analyze_template(simple_deck, workspace_root=tmp_path / "ws", use_llm=False, use_vlm=False, render=False)
+    slots = [
+        Slot(id="t", role=SlotRole.title, shape_id="t", bbox=BboxFrac(x=0.05, y=0.09, w=0.9, h=0.13), capacity=Capacity(max_chars=60, max_lines=2)),
+        Slot(id="i", role=SlotRole.image, shape_id="i", bbox=BboxFrac(x=0.05, y=0.27, w=0.44, h=0.58), capacity=Capacity(max_chars=0, max_lines=0)),
+        Slot(id="b", role=SlotRole.body, shape_id="b", bbox=BboxFrac(x=0.53, y=0.27, w=0.42, h=0.58), capacity=Capacity(max_chars=400, max_lines=10)),
+    ]
+    p = Pattern(id="p6", source_slide=6, kind=PatternKind.image_text, family=Family.dark, slots=slots)
+    art = [SamplePicture(shape_id="i", x=0.05, y=0.27, w=0.44, h=0.58, kind="art")]
+    chart = ChartSpec(series_ids=["s1"])
+    lined = OutlineSlide(id="c", kind=PatternKind.chart, headline="Аудитория росла", content=SlideContent(chart=chart, paragraphs=["Органический рост без промо"]))
+    res = score_pattern(lined, p, manifest, get_strategy("structured"), pictures=art)
+    assert any("нет крупной области" in r for r in res.reasons), res.reasons
+    bare = OutlineSlide(id="c", kind=PatternKind.chart, headline="Аудитория росла", content=SlideContent(chart=chart))
+    res = score_pattern(bare, p, manifest, get_strategy("structured"), pictures=art)
+    assert any("область под данные" in r for r in res.reasons), res.reasons
+    photo = [SamplePicture(shape_id="i", x=0.05, y=0.27, w=0.44, h=0.58, kind="photo")]
+    res = score_pattern(lined, p, manifest, get_strategy("structured"), pictures=photo)
+    assert any("область под данные" in r for r in res.reasons), res.reasons
+
+
 def test_an_empty_device_mockup_and_an_unused_note_band_weigh_on_a_content_sample(simple_deck, tmp_path):
     from verstka.analysis.manifest import analyze_template
     from verstka.matching.scorer import score_pattern

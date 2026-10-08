@@ -623,7 +623,14 @@ def score_pattern(
         # the data object needs a free area: a sample chart/table (cleared by the renderer), a picture or a big text box
         # — never the template's art (VK Tech p7's 3D spiral stays: a chart does not take its place)
         art_pics = {p.shape_id for p in pics if p.kind == "art"}
-        room = max((s.bbox.area for s in pattern.slots if s.role in (SlotRole.image, SlotRole.body, SlotRole.bullet_list) and s.shape_id not in art_pics), default=0.0)
+        # — nor the text box the slide's own lines take: its paragraphs, and its list unless the sample's cells hold
+        # it, go into the sample's largest body or list boxes before the object is placed (`clone.render_clone`) —
+        # a picture-and-text sample with art for its picture has no room left beside them (hand-drawn p6: the chart
+        # was drawn over the paragraph)
+        c_d = slide.content
+        texts = sorted((s for s in pattern.slots if s.role in (SlotRole.body, SlotRole.bullet_list)), key=lambda s: -s.bbox.area)
+        taken = {s.shape_id for s in texts[:bool(c_d.paragraphs) + bool(c_d.bullets and not pattern.repeat_groups)]}
+        room = max((s.bbox.area for s in pattern.slots if s.role in (SlotRole.image, SlotRole.body, SlotRole.bullet_list) and s.shape_id not in art_pics | taken), default=0.0)
         if pattern.kind in (PatternKind.chart, PatternKind.table):
             room = max(room, 0.35)
         if pattern.data_box is not None:
