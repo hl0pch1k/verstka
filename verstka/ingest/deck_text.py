@@ -139,7 +139,9 @@ def _members(shapes: Any) -> list[Any]:
         name = local_name(el) if isinstance(el.tag, str) else ""
         if name == "AlternateContent":
             fb = el.find(q("mc:Fallback"))
-            els.extend(c for c in (fb if fb is not None else []) if isinstance(c.tag, str) and local_name(c) in _SHAPE_TAGS)
+            kids = [c for c in (fb if fb is not None else []) if isinstance(c.tag, str) and local_name(c) in _SHAPE_TAGS]
+            formula = _formula_shape(el, kids)
+            els.extend([formula] if formula is not None else kids)
         elif name in _SHAPE_TAGS:
             els.append(el)
     out = []
@@ -149,6 +151,33 @@ def _members(shapes: Any) -> list[Any]:
         except Exception:  # noqa: BLE001 - a shape python-pptx cannot make is left out
             log.debug("shape not read: %s", local_name(el), exc_info=True)
     return out
+
+
+def _formula_shape(ac: Any, kids: list) -> Any:
+    """An equation (Office Math, ours or PowerPoint's) read as the line «Формула: …»: its picture's shape with the
+    formula's text in it, so a deck read again («Улучшить готовую») keeps its formulas."""
+    from verstka.rendering.equation import equation_text, is_equation
+
+    if not kids or not is_equation(ac):
+        return None
+    text = equation_text(ac)
+    if not text.strip():
+        return None
+    import copy
+
+    from lxml import etree
+
+    sp = copy.deepcopy(kids[0])
+    body = sp.find(q("p:txBody"))
+    if body is None:
+        return None
+    for p_ in body.findall(q("a:p")):
+        body.remove(p_)
+    p_ = etree.SubElement(body, q("a:p"))
+    r_ = etree.SubElement(p_, q("a:r"))
+    etree.SubElement(r_, q("a:rPr")).set("lang", "ru-RU")
+    etree.SubElement(r_, q("a:t")).text = "Формула: " + text
+    return sp
 
 
 def _tag(sh: Any) -> str:

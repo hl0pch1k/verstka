@@ -26,8 +26,9 @@ REF = json.loads((F / "answers_ref.json").read_text(encoding="utf-8"))
 
 @pytest.fixture(autouse=True)
 def _writer_on(monkeypatch):
-    """Writer mode is off by default for the submission (configs/writer.yaml): these tests switch it on."""
+    """Writer mode on, and the one-call writer v1 these tests record (the v2 writer: tests/unit/test_topic_writer.py)."""
     monkeypatch.setenv("VERSTKA_WRITER", "1")
+    monkeypatch.setenv("VERSTKA_WRITER_ENGINE", "v1")
 
 
 class Scripted:
@@ -76,7 +77,8 @@ def written_run(vk_tech, tmp_path_factory):
 
     mp = pytest.MonkeyPatch()
     mp.setenv("VERSTKA_WIKI", "0")
-    mp.setenv("VERSTKA_WRITER", "1")  # off by default for the submission
+    mp.setenv("VERSTKA_WRITER", "1")
+    mp.setenv("VERSTKA_WRITER_ENGINE", "v1")  # the one-call writer these answers were recorded for
     try:
         fake = Scripted(json.loads(REF["vk"]["raw"]))
         model = MockProvider(fake, model="Qwen/Qwen3-32B")

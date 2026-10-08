@@ -134,6 +134,9 @@ class IRElement(BaseModel):
     geometry: Optional[str] = None
     corner_radius: Optional[float] = None
     rotation: float = 0.0
+    # a formula (Office Math, drawn as its picture where it is not read): what it says as a line of Unicode — content
+    # of the slide, never the template's decoration
+    formula: Optional[str] = None
     # template layers (IRSlide.template_elements) only: where the shape comes from, whether a picture is a photo
     # (luminance stdev > 40) and whether its paint hides what lies under it; `fill_hex` of such a picture is its
     # median colour

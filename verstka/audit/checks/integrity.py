@@ -74,7 +74,7 @@ def empty_slide(ctx: AuditContext) -> list[Issue]:
         els = content_elements(s, ctx.ir, ctx.manifest)
         title = title_element(s)
         others = [e for e in els if e is not title]
-        text_others = [e for e in others if e.has_text or e.type in ("chart", "table")]
+        text_others = [e for e in others if e.has_text or e.type in ("chart", "table") or e.formula]
         osl = _outline_slide(ctx, s)
         # a picture is content only when the plan asked for one; otherwise it is template decoration next to a lone title
         picture_planned = osl is None or bool(osl.content.image_hint) or osl.kind.value == "image_text"
@@ -162,9 +162,20 @@ def content_missing(ctx: AuditContext) -> list[Issue]:
         missing = [w for w in wanted if not _present(w, have)]
         if not missing:
             continue
-        severity = "error" if len(missing) * 3 >= len(wanted) else "warn"
-        shown = ", ".join(f"«{m[:40]}»" for m in missing[:3]) + ("…" if len(missing) > 3 else "")
-        out.append(ctx.new_issue(CONTENT_MISSING, s.index, f"{len(missing)} из {len(wanted)} {'текста' if len(wanted) % 10 == 1 and len(wanted) % 100 != 11 else 'текстов'} плана нет на слайде: {shown}", severity=severity, details={"missing": missing, "wanted": len(wanted)}, autofix=fix("rematch", "перевыбрать макет, чтобы весь контент поместился", outline_id=s.outline_id)))
+        # a line said aloud (the slide had no room: the composer put it into the speaker notes) is not lost — a
+        # warning, as a conclusion in the notes is (content_in_notes); lost is what is neither on the slide nor there
+        notes = _alnum(s.notes)
+        aloud = [w for w in missing if (key := _alnum(w)[:NOTE_KEY_CHARS]) and key in notes]
+        lost = [w for w in missing if w not in aloud]
+        severity = "error" if lost and len(lost) * 3 >= len(wanted) else "warn"
+        word = "текста" if len(wanted) % 10 == 1 and len(wanted) % 100 != 11 else "текстов"
+        if lost:
+            shown = ", ".join(f"«{m[:40]}»" for m in lost[:3]) + ("…" if len(lost) > 3 else "")
+            msg = f"{len(lost)} из {len(wanted)} {word} плана нет на слайде: {shown}" + (f" (ещё {len(aloud)} — в заметках докладчика)" if aloud else "")
+        else:
+            shown = ", ".join(f"«{m[:40]}»" for m in aloud[:3]) + ("…" if len(aloud) > 3 else "")
+            msg = f"{len(aloud)} из {len(wanted)} {word} плана — только в заметках докладчика, на слайде не нашлось места: {shown}"
+        out.append(ctx.new_issue(CONTENT_MISSING, s.index, msg, severity=severity, details={"missing": missing, "wanted": len(wanted), "in_notes": aloud}, autofix=fix("rematch", "перевыбрать макет, чтобы весь контент поместился", outline_id=s.outline_id)))
     return out
 
 

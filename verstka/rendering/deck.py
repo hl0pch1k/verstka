@@ -292,12 +292,37 @@ def slide_shape_elements(slide: Slide) -> dict[str, etree._Element]:
         sid = nv.get("id")
         drawable = nv.getparent().getparent()  # nvXxPr → sp/pic/...
         if sid and drawable is not None and drawable is not tree and etree.QName(drawable).localname != "spTree":
-            out[sid] = drawable
+            wrap = _alternate_of(drawable)
+            out[sid] = wrap if wrap is not None else drawable  # a formula moves and goes as one: both its branches
+    return out
+
+
+def _alternate_of(el: etree._Element) -> Optional[etree._Element]:
+    """The mc:AlternateContent a shape is a branch of (a formula: its equation and its picture), or None."""
+    parent = el.getparent()
+    if parent is not None and etree.QName(parent).localname in ("Choice", "Fallback"):
+        ac = parent.getparent()
+        if ac is not None and etree.QName(ac).localname == "AlternateContent":
+            return ac
+    return None
+
+
+def _branches(el: etree._Element) -> list[etree._Element]:
+    """The shapes of an mc:AlternateContent (Fallback first: what LibreOffice draws), or the element itself."""
+    if etree.QName(el).localname != "AlternateContent":
+        return [el]
+    out = []
+    for tag in ("mc:Fallback", "mc:Choice"):
+        br = el.find(q(tag))
+        if br is not None:
+            out += [c for c in br if isinstance(c.tag, str)]
     return out
 
 
 def element_bbox(el: etree._Element) -> Optional[tuple[int, int, int, int]]:
     tag = etree.QName(el).localname
+    if tag == "AlternateContent":  # a formula: the box of its branches (one box)
+        return next((b for b in (element_bbox(c) for c in _branches(el)) if b), None)
     if tag == "graphicFrame":
         xfrm = el.find(q("p:xfrm"))
     elif tag == "grpSp":
@@ -316,6 +341,10 @@ def element_bbox(el: etree._Element) -> Optional[tuple[int, int, int, int]]:
 
 def set_element_pos(el: etree._Element, x: Optional[int] = None, y: Optional[int] = None, w: Optional[int] = None, h: Optional[int] = None) -> None:
     tag = etree.QName(el).localname
+    if tag == "AlternateContent":
+        for c in _branches(el):
+            set_element_pos(c, x, y, w, h)
+        return
     if tag == "graphicFrame":
         xfrm = el.find(q("p:xfrm"))
     elif tag == "grpSp":
@@ -358,7 +387,8 @@ def abs_bbox(el: etree._Element) -> Optional[tuple[int, int, int, int]]:
     if not b:
         return None
     x, y, w, h = (float(v) for v in b)
-    parent = el.getparent()
+    wrap = _alternate_of(el)
+    parent = (wrap if wrap is not None else el).getparent()
     while parent is not None and etree.QName(parent).localname == "grpSp":
         xfrm = parent.find(q("p:grpSpPr") + "/" + q("a:xfrm"))
         if xfrm is None:

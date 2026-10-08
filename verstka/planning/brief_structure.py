@@ -1018,10 +1018,15 @@ def _markdown_tables(block_text: str) -> list[TableData]:
 # ------------------------------------------------------------------ chart requests
 
 
+_FUNCTION_GRAPH_RE = re.compile(r"график\w*\s+(?:\S+\s+){0,2}?функци|график\w*\s+(?:y|f|g)\s*[=(]|график\w*\s+(?:параболы|гиперболы|синуса|косинуса|экспоненты|прямой)", re.I)
+
+
 def _chart_requests(sentence: str) -> list[ChartRequest]:
     m = _CHART_NOUN_RE.search(sentence)
     if not m:
         return []
+    if _FUNCTION_GRAPH_RE.search(sentence) and not _CHART_ASK_RE.search(sentence[: m.start()]):
+        return []  # «ограниченной графиком функции f(x)»: the graph of a function in a sentence of mathematics, no chart
     low = sentence.lower()
     ctype: Optional[ChartKind] = next((t for pat, t in _TYPE_WORDS if re.search(pat, low)), None)
     if ctype is None and not _CHART_ASK_RE.search(sentence):
@@ -1252,6 +1257,14 @@ def _read_block(block: _Block, reg: _Registry, all_numbers: list[float]) -> None
             if fm and not spec.formula:
                 spec.formula = H.strip_end(fm.group("f"))
                 block.covered.extend(numbers_of(spec.formula))
+            elif fm and spec.formula:
+                # a second formula of mathematics on the slide (a deck read again: one line per equation) joins the
+                # first — the slide shows them all; a second business equation stays a line of its own as before
+                from verstka.rendering.equation import formulas_of
+
+                more = H.strip_end(fm.group("f"))
+                if formulas_of(spec.formula) and formulas_of(more):
+                    spec.formula = f"{spec.formula}; {more}"
             tm = _TAKEAWAY_RE.match(sent)
             if tm and not spec.takeaway:
                 spec.takeaway = H.cap_first(_unquote(tm.group("t")))

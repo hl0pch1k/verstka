@@ -131,6 +131,8 @@ def _element_html(e: IRElement, slide: IRSlide, ir: DeckIR, pkg: PptxPackage, ca
         cls = _image_class(pkg, e.image_part, cache)
         if not cls:
             return ""
+        if e.formula:  # a formula: its picture as drawn (its box is the picture's own), read aloud as its text
+            return f'<div class="el pic {cls}" role="img" aria-label="{html.escape(e.formula, quote=True)}" style="{style};background-size:100% 100%"></div>'
         return f'<div class="el pic {cls}" style="{style}"></div>'
     if e.type == "chart" and e.chart:
         colors = manifest.components.chart_style.series_colors or manifest.tokens.accents()

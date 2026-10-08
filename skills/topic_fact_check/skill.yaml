@@ -1,0 +1,17 @@
+name: topic_fact_check
+version: 1.1.0
+role: llm
+description: >
+  Writer mode, step 3 (verstka/planning/topic_writer.py): a subject expert reads every statement of the written deck
+  and reports the factual errors it is sure of — a wrong date, name, figure, attribution or formula, a mathematical
+  mistake, an anachronism — each with its corrected statement (or nothing, to drop it).
+prompt_files:
+  system: prompts/system.md
+  user: prompts/user.md
+output_schema: verstka.planning.topic_writer.FactIssues
+params:
+  temperature: 0.0
+  max_tokens: 2500
+changelog:
+  - "1.0.0: writer mode v2 (2026-10-08): the v1 deck on integrals said the first publication was in 1675 (Leibniz published in 1684)"
+  - "1.1.0: formulas as typeset LaTeX, each with its explanation in words; math and technical topics are decks of formulas, worked examples and their explanation (2026-10-08)"

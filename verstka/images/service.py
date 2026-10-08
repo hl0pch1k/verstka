@@ -17,6 +17,7 @@ from typing import Any, Optional
 from verstka.images import palette as P
 from verstka.images.prompt import ImageAsk, build_prompt, english_subjects, load_config
 from verstka.images.providers import ImageError
+from verstka.images.text_check import PictureHasText, check_text
 
 log = logging.getLogger(__name__)
 
@@ -36,7 +37,9 @@ class Made:
     seed: int
     palette_match: float
     seconds: float
-    cost_rub: Optional[float] = None  # what the picture cost (Polza's usage.cost_rub)
+    cost_rub: Optional[float] = None  # what the picture cost (Polza's usage.cost_rub), every attempt counted
+    attempts: int = 1  # pictures drawn for it: the ones before had writing on them (text_check)
+    text_checked: bool = False  # the vision model looked at it and saw no writing
 
     def public(self) -> dict:
         return asdict(self)
@@ -107,25 +110,54 @@ class ImageMaker:
         subject = self._subject(ask)
         # one deck title for every variant's picture (the key leaves it out: the variants share the picture)
         ask2 = ImageAsk(**{**asdict(ask), "subject_en": subject, "deck": self.deck_title or ask.deck})
-        prompt, style = build_prompt(ask2, self.palette, self.cfg)
         seed = seed if seed is not None else seed_of(ask.key(), aspect)
-        t0 = time.monotonic()
-        res = self.provider.generate(prompt, aspect=aspect, seed=seed, deadline=self.deadline)
-        img = P.open_image(res.data)
+        tc = self.cfg.get("text_check") or {}
+        attempts = max(1, int(tc.get("attempts", 3))) if tc.get("enabled", True) else 1
         strength = float((self.cfg.get("palette") or {}).get("strength", 0.3))
-        graded = P.grade(img, self.palette, strength)
-        match = P.palette_match(graded, self.palette)
         self.folder.mkdir(parents=True, exist_ok=True)
-        name = f"{ask.key()}-{aspect.replace(':', 'x')}-{seed}"
-        path = self.folder / f"{name}.jpg"
-        path.write_bytes(P.encode(graded, int(self.cfg.get("jpeg_quality", 88))))
+        t0 = time.monotonic()
+        cost: Optional[float] = None
+        seen: list[dict] = []
+        for k in range(attempts):
+            # a picture with writing on it is drawn again from a stricter prompt (the host takes no seed: the same
+            # prompt draws a new picture too)
+            prompt, style = build_prompt(ask2, self.palette, self.cfg, strict=k)
+            res = self.provider.generate(prompt, aspect=aspect, seed=seed + k, deadline=self.deadline)
+            if res.cost_rub is not None:
+                cost = (cost or 0.0) + float(res.cost_rub)
+            graded = P.grade(P.open_image(res.data), self.palette, strength)
+            match = P.palette_match(graded, self.palette)
+            name = f"{ask.key()}-{aspect.replace(':', 'x')}-{seed}" + (f"-{k + 1}" if k else "")
+            path = self.folder / f"{name}.jpg"
+            path.write_bytes(P.encode(graded, int(self.cfg.get("jpeg_quality", 88))))
+            verdict = check_text(path, self.skills, self.providers) if attempts > 1 else None
+            seen.append({"attempt": k + 1, "prompt": prompt, "text": None if verdict is None else verdict.text, "what": None if verdict is None else verdict.what})
+            if verdict is None or verdict.clean:
+                break
+            log.info("picture %s has writing (%s): drawn again", name, verdict.what or "text")
+            path.unlink(missing_ok=True)
+            if k + 1 < attempts and self.deadline is not None and self.deadline - time.monotonic() < 25:
+                break  # no time for another picture
+        else:
+            verdict = None
+        if seen and seen[-1]["text"] not in (None, "none"):
+            self._log_attempts(ask, aspect, seed, seen)
+            raise PictureHasText(f"writing on every picture ({seen[-1]['what'] or 'text'}), {len(seen)} attempts")
         made = Made(
             key=ask.key(), aspect=aspect, path=str(path), prompt=prompt, style=style, subject_by="model" if subject else "author",
-            model=res.model, model_label=res.label, seed=int(seed), palette_match=match, seconds=round(time.monotonic() - t0, 2), cost_rub=res.cost_rub,
+            model=res.model, model_label=res.label, seed=int(seed), palette_match=match, seconds=round(time.monotonic() - t0, 2), cost_rub=cost,
+            attempts=len(seen), text_checked=bool(seen) and seen[-1]["text"] == "none",
         )
         try:
-            (self.folder / f"{name}.json").write_text(json.dumps({**made.public(), "hint": ask.hint, "headline": ask.headline, "wish": ask.wish, "palette": P.describe(self.palette)}, ensure_ascii=False, indent=2), encoding="utf-8")
+            (self.folder / f"{name}.json").write_text(json.dumps({**made.public(), "hint": ask.hint, "headline": ask.headline, "wish": ask.wish, "palette": P.describe(self.palette), "checks": seen}, ensure_ascii=False, indent=2), encoding="utf-8")
         except OSError:
             pass
-        log.info("picture %s (%s) by %s in %.1fs, palette match %.2f", name, style, res.label, made.seconds, match)
+        log.info("picture %s (%s) by %s in %.1fs, palette match %.2f, %d attempt(s)", name, style, res.label, made.seconds, match, len(seen))
         return made
+
+    def _log_attempts(self, ask: ImageAsk, aspect: str, seed: int, seen: list[dict]) -> None:
+        try:
+            name = f"{ask.key()}-{aspect.replace(':', 'x')}-{seed}-rejected"
+            (self.folder / f"{name}.json").write_text(json.dumps({"hint": ask.hint, "headline": ask.headline, "checks": seen}, ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError:
+            pass

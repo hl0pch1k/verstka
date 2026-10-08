@@ -885,6 +885,15 @@ def _write_text(brief: Brief, skills, providers, budget_end: Optional[float], pr
         if mode.kind == "off":
             return None
         root = Path(workspace_root) if workspace_root else default_workspace_root()
+        if str(cfg.get("engine", "v2")) == "v2":
+            # v2 (planning/topic_writer.py): the must-know facts planned first, every slide written on its own, the
+            # coverage and the facts checked
+            from verstka.planning.topic_writer import write_topic_deck
+
+            return write_topic_deck(
+                brief, mode, skills, providers, budget_end=budget_end, progress=_event_sink(progress), raw=raw,
+                cache_dir=root / "cache" / "reference", config=cfg,
+            )
         return write_deck(
             brief, mode, skills, providers, budget_end=budget_end, progress=_event_sink(progress), raw=raw,
             cache_dir=root / "cache" / "reference", config=cfg,

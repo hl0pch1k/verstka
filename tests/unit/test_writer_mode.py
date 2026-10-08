@@ -475,9 +475,12 @@ def test_the_config_switches(monkeypatch):
     monkeypatch.delenv("VERSTKA_WIKI")
     monkeypatch.delenv("VERSTKA_WRITER")
     cfg = W.load_config()
-    assert cfg["enabled"] is False and cfg["reference"]["contact"]  # off for the submission (configs/writer.yaml)
-    monkeypatch.setenv("VERSTKA_WRITER", "1")
-    assert W.load_config()["enabled"] is True
+    # on: a short request («Сделай презентацию про интегралы») is written into a deck by the v2 writer
+    assert cfg["enabled"] is True and cfg["engine"] == "v2" and cfg["reference"]["contact"]
+    monkeypatch.setenv("VERSTKA_WRITER", "0")
+    assert W.load_config()["enabled"] is False
+    monkeypatch.setenv("VERSTKA_WRITER_ENGINE", "v1")
+    assert W.load_config()["engine"] == "v1"
 
 
 # ------------------------------------------------------------------ T12 / T13: the written text without a designer

@@ -43,3 +43,19 @@ prompt:
     screen: "Clean modern flat vector illustration of a software interface on a laptop screen: pictograms and progress bars instead of any text, every chart is a single smooth curve without axes, ticks, numbers or gridlines; minimalist, soft shadows, generous negative space"
   # the person's wish on «Заменить изображение»: without a text model it leads the subject
   wish: "{wish}. Subject: {subject}"
+  # the next attempt after the vision model saw writing in a picture (text_check): the wordless lead and stricter
+  # rules; the third attempt draws the subject as a flat illustration (no screen, no page, no sign to write on)
+  strict:
+    lead: "A wordless image without a single letter or digit."
+    rules: "Every surface is blank or carries only simple pictograms: screens show coloured shapes and icons only, papers, boards, signs, labels and packaging are empty, charts are bare curves with no axes, there is no writing, no numbers, no letters, no symbols that read as text anywhere"
+    styles:
+      screen: "Clean flat vector illustration of a device whose screen shows only soft coloured rounded shapes and simple pictograms, nothing written anywhere; minimalist, generous negative space"
+      illustration: "Clean modern flat vector illustration made of simple geometric shapes and pictograms only, soft gradients, generous negative space, nothing written anywhere"
+      photo: "Professional editorial photograph, natural soft light, clean uncluttered composition, plain unmarked surfaces"
+
+# every picture is looked at by the vision model before it goes on a slide (images/text_check.py, skill
+# image_text_check): writing on it → drawn again from the strict prompt; still writing after the last attempt → the
+# place stays free and says why (the model draws letters and digits badly)
+text_check:
+  enabled: true
+  attempts: 3              # the first picture and two stricter ones

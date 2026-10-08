@@ -1,0 +1,18 @@
+name: topic_slide_writer
+version: 1.1.0
+role: llm
+description: >
+  Writer mode, step 2 (verstka/planning/topic_writer.py): writes one content slide of a deck planned by
+  topic_planner — its lead, its points and the content of its form (dated events, key figures, a formula and what its
+  symbols mean, a table, steps, a chart's data) — with every must-know fact the plan gave it. The slides are written
+  side by side; each one sees the whole plan, so they never repeat each other.
+prompt_files:
+  system: prompts/system.md
+  user: prompts/user.md
+output_schema: verstka.planning.topic_writer.TopicSlide
+params:
+  temperature: 0.2
+  max_tokens: 2400
+changelog:
+  - "1.0.0: writer mode v2 (2026-10-08)"
+  - "1.1.0: formulas as typeset LaTeX, each with its explanation in words; math and technical topics are decks of formulas, worked examples and their explanation (2026-10-08)"

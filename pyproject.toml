@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "verstka"
-version = "3.0.0"
+version = "3.1.0"
 description = "Verstka — reads any PPTX template as a set of rules and generates new decks in its style"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -21,6 +21,10 @@ dependencies = [
     "PyYAML>=6.0",
     "Jinja2>=3.1",
     "numpy>=1.26",
+    # formulas typeset as real mathematics (verstka/rendering/equation.py): LaTeX → MathML → Office Math, and the
+    # formula's picture for LibreOffice (TeX layout, the STIX Two Math font) — pure Python, MIT
+    "latex2mathml>=3.77",
+    "ziamath>=0.13",
 ]
 
 [project.optional-dependencies]

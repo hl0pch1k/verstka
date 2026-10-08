@@ -82,9 +82,10 @@ def _env_flag(name: str) -> Optional[bool]:
 
 
 def load_config(path: Optional[Path | str] = None) -> dict:
-    """configs/writer.yaml over the defaults; env VERSTKA_WRITER=0 switches writer mode off, VERSTKA_WIKI=0 the
-    Wikipedia reference (the writer then writes from the model's knowledge), VERSTKA_WIKI_CONTACT sets the contact of
-    the User-Agent."""
+    """configs/writer.yaml over the defaults; env VERSTKA_WRITER=0 switches writer mode off, VERSTKA_WRITER_ENGINE
+    picks the writer (v2: plan → slides → fact check, planning/topic_writer.py; v1: one call, this module),
+    VERSTKA_WIKI=0 the Wikipedia reference (the writer then writes from the model's knowledge), VERSTKA_WIKI_CONTACT
+    sets the contact of the User-Agent."""
     cfg = copy.deepcopy(DEFAULT_CONFIG)
     p = Path(path) if path else default_config_path()
     try:
@@ -95,6 +96,9 @@ def load_config(path: Optional[Path | str] = None) -> dict:
     on = _env_flag("VERSTKA_WRITER")
     if on is not None:
         cfg["enabled"] = on
+    engine = (os.environ.get("VERSTKA_WRITER_ENGINE") or "").strip().lower()
+    if engine in ("v1", "v2"):
+        cfg["engine"] = engine
     wiki = _env_flag("VERSTKA_WIKI")
     if wiki is not None:
         cfg["reference"]["enabled"] = wiki
@@ -5062,7 +5066,7 @@ class WriterResult:
     removed: list[dict] = field(default_factory=list)
     edits: list[dict] = field(default_factory=list)  # a year the article does not give, cut out of its sentence
     overruled: list[dict] = field(default_factory=list)  # what the check reported that the full article states (kept)
-    check_state: Optional[str] = None  # clean | applied | degenerate (the answer flagged too much: none of it applied)
+    check_state: Optional[str] = None  # clean | applied | degenerate (the answer flagged too much: none of it applied) | failed (no answer)
     check_stats: list[dict] = field(default_factory=list)  # per check call: statements, flagged, ignored, degenerate
     refill: dict = field(default_factory=dict)  # {"asked", "added", "topped", "parts"} of the refill call
     short_by: int = 0  # content slides fewer than asked after the checks and the refill

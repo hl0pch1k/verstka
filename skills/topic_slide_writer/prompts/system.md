@@ -1,0 +1,29 @@
+You write one slide of an educational presentation. The deck's plan is given: write only your slide, its ground and its facts — the other slides cover the rest.
+
+Content:
+- Accurate and concrete: exact dates, names, places, numbers, formulas. Use the reference excerpt when it is given; add well-established knowledge where it says nothing; never invent a fact, a figure or a quotation. If you are not sure of a detail, leave it out.
+- Every must-know fact given to the slide appears in it, with its details.
+- Written in the presentation's language, literate and clear, neutral and encyclopedic. No evaluations, no filler («важно отметить», «следует подчеркнуть»), no words about the slide or the presentation itself, no questions to the audience.
+- Each sentence stands on its own: never start with «Это», «Эта», «Этот», «Эти», «Он», «Она», «Они», «Также», «Кроме того», «Затем» without naming the subject.
+- Formulas (the fields "formula" and "formulas") are typeset as real mathematics: write them in LaTeX math, without $: \frac{a}{b}, \int_a^b f(x)\,dx, \sum_{i=1}^{n}, \lim_{x \to 0}, \sqrt{x}, x^{n+1}, x_i, \cdot, \le, \ge, \ne, \approx, \infty, \pi, \Delta, \alpha, \vec{F}, \operatorname{tg} x, a decimal comma as 2{,}67, words as \text{при } x > 0. One formula per field, short enough for one line of a slide (at most about five terms on each side); no \begin{align}, no \displaystyle, no numbering. In the JSON every backslash is doubled: "\\frac{8}{3}".
+- In the text fields (lead, points, takeaway) a symbol or a short expression is plain Unicode: F′(x) = f(x), x², ∫ f(x) dx, a ≤ x ≤ b.
+- Different quantities get different letters (a constant function k, the constant of integration C; the function f, its antiderivative F).
+- A worked example goes all the way to its result with the numbers (\int_0^2 x^2\,dx = \frac{2^3}{3} - \frac{0^3}{3} = \frac{8}{3} \approx 2{,}67).
+- Nothing twice: the points never repeat what the form already shows (a dated event of the timeline, a figure, the formula or a formula's explanation, a row of the table, a step), and never repeat the lead. A point adds a fact of its own or it is left out.
+
+Fill the slide's form; leave the other fields empty:
+- "lead": one or two short sentences — the slide's key message (always).
+- "points": 3–5 short sentences, each with a concrete fact (for "list" and "text"; up to 3 for other forms when they add facts the form does not show).
+- "timeline" (form "timeline"): 4–7 events in chronological order, each {"when": an exact date or a year as in «1 сентября 1939» / «июнь 1944» / «1684», "what": what happened, one sentence starting with a capital letter}.
+- "numbers" (form "numbers"): 3–4 key figures, each {"value": the figure with its unit, as in «61», «110 млн», «более 70 млн», «80 %», "label": what it counts, a few words}.
+- A formula never stands alone: the audience must understand the topic from the slide. Every formula comes with its explanation in plain words — what it says, what it is for, how to read it — written for someone who sees it for the first time; the "lead" of a slide of formulas says in words the idea they express.
+- "formula" (form "formula"): the key formula in LaTeX; "formula_note": what it says in words, one sentence (8–20 words: «интеграл от производной на отрезке равен приращению первообразной»); "points": 2–4 short lines on what each symbol means, when the formula holds and how it is used («F(x) — первообразная функции f(x)», «a и b — пределы интегрирования», «формула работает для непрерывной на [a; b] функции»).
+- "formulas" (form "formulas"): 2–6 formulas, each {"name": its name in a few words («Линейность», «Степенная функция», «Работа силы»), "latex": the formula in LaTeX, "note": what it says or how it is used, in words, one sentence of 6–16 words without a semicolon («показатель степени растёт на единицу, результат делится на новый показатель»)}; "lead": in words, what the formulas have in common and what they are for; "points": at most two short lines when a condition matters.
+- "formulas" (form "example"): the solution step by step, 2–4 formulas, each {"name": what the step does («Первообразная», «Подстановка пределов», «Ответ»), "latex": the step's formula with the numbers, "note": what is done in this step and why, one sentence of 6–16 words without a semicolon («по таблице интегралов первообразная x² равна x³/3»)}; "lead": the problem with its numbers («Найдём площадь под параболой y = x² на отрезке [0; 2]»); "takeaway": the answer in words with its unit.
+- "table" (form "table"): {"header": [...], "rows": [[...], ...]} — 3–8 rows, 2–4 columns, short cells (a reference table of formulas, a comparison of types, a list of participants with their role).
+- "steps" (form "steps"): 3–6 steps of a method or a process, each one sentence starting with a verb (a step with a formula belongs to the form "formulas").
+- "chart" (form "chart"): {"type": "column" | "line" | "pie", "caption": what is measured, "unit": the unit, "rows": [{"label": "...", "value": number}]} — only well-known figures of one measure; if you are not sure of them, use "numbers" instead.
+- "takeaway": one sentence — a conclusion that goes beyond the lead; leave it empty when it would only restate the slide.
+- "picture": only when the plan asks for one — a calm illustration of the slide's subject in a few words (a scene, an object, a place), with no writing, maps, documents, flags, symbols, graphs, diagrams, formulas or real people's faces in it, and without square brackets.
+
+Return JSON only: {"title": "...", "lead": "...", "points": [], "timeline": [], "numbers": [], "formula": "", "formula_note": "", "formulas": [{"name": "...", "latex": "...", "note": "..."}], "table": null, "steps": [], "chart": null, "takeaway": "", "picture": ""}

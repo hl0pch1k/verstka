@@ -95,19 +95,29 @@ def _clean(text: str, limit: int = 300) -> str:
     return t[:limit].rstrip(" .,;:")
 
 
-def build_prompt(ask: ImageAsk, pal: Optional[Palette], cfg: Optional[dict] = None) -> tuple[str, str]:
-    """(the prompt, the style). Deterministic: the same ask and palette give the same prompt."""
+def build_prompt(ask: ImageAsk, pal: Optional[Palette], cfg: Optional[dict] = None, strict: int = 0) -> tuple[str, str]:
+    """(the prompt, the style). Deterministic: the same ask and palette give the same prompt. `strict` — the attempt
+    after a picture came out with writing on it (images/text_check.py): 1 — the wordless lead and the strict rules,
+    a screen shown as shapes only; 2 — and the subject as a flat illustration, never a screen, a page or a sign."""
     cfg = cfg if cfg is not None else load_config()
     pcfg = cfg.get("prompt") or {}
     style = style_of(" ".join([ask.hint or "", ask.label or "", ask.wish or ""]), cfg)
+    scfg = pcfg.get("strict") or {}
+    if strict >= 2:
+        style = "illustration"
     subject = _clean(ask.subject_en or ask.what)
     if ask.wish and not ask.subject_en and (ask.hint or "").strip():
         subject = str(pcfg.get("wish", "{wish}. Subject: {subject}")).format(wish=_clean(ask.wish), subject=_clean(ask.hint))
     context = str(pcfg.get("context", "")).format(headline=_clean(ask.headline, 120) or "—", deck=_clean(ask.deck, 120) or "—")
     style_line = str((pcfg.get("styles") or {}).get(style, ""))
+    if strict >= 1 and (scfg.get("styles") or {}).get(style):
+        style_line = str(scfg["styles"][style])
     colors = palette_words(pal) if pal is not None else ""
     template = str(pcfg.get("template", "{subject}. {context}. {style}. Colour palette: {colors}. {rules}."))
     rules = str(pcfg.get("rules", "No text"))
+    if strict >= 1:
+        template = str(scfg.get("lead", "Wordless picture.")) + " " + template
+        rules = str(scfg.get("rules", rules))
 
     def compose(subj: str, ctx: str) -> str:
         text = template.format(subject=subj, context=ctx, style=style_line, colors=colors or "neutral", rules=rules)

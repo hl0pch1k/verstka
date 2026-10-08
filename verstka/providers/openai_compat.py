@@ -429,6 +429,20 @@ def schema_keys(schema: type[BaseModel]) -> set[str]:
     return keys
 
 
+_BAD_ESCAPE_RE = re.compile(r'\\(?!["\\/bfnrtu])|\\u(?![0-9a-fA-F]{4})')
+
+
+def _loads(text: str) -> Any:
+    """json.loads, and on an invalid escape once more with that backslash taken literally: a formula's LaTeX written
+    with single backslashes («\\int», «\\sqrt», «\\,») is an answer, not broken JSON."""
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as e:
+        if "escape" not in str(e).lower():
+            raise
+        return json.loads(_BAD_ESCAPE_RE.sub(lambda m: "\\\\" + m.group(0)[1:], text))
+
+
 def extract_json(text: str, keys: Optional[set[str]] = None) -> Any:
     """Pull the JSON answer out of model output (fenced or inline).
 
@@ -439,14 +453,14 @@ def extract_json(text: str, keys: Optional[set[str]] = None) -> Any:
     for m in _FENCE_RE.finditer(text):
         candidate = m.group(1).strip()
         try:
-            data = json.loads(candidate)
-        except json.JSONDecodeError:
+            data = _loads(candidate)
+        except ValueError:
             continue
         if _fits(data, keys, whole=True):
             return data
     try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
+        data = _loads(text)
+    except ValueError:
         pass
     else:
         if _fits(data, keys, whole=True):
@@ -474,8 +488,8 @@ def extract_json(text: str, keys: Optional[set[str]] = None) -> Any:
             end = _balanced(text, start)
             if end is not None:
                 try:
-                    data = json.loads(text[start:end])
-                except json.JSONDecodeError:
+                    data = _loads(text[start:end])
+                except ValueError:
                     data = None
                 else:
                     found_any = True

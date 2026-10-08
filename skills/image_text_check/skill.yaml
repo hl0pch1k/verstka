@@ -1,0 +1,16 @@
+name: image_text_check
+version: 1.0.0
+role: vlm
+description: >
+  Looks at one picture the text-to-image model made for a slide and says whether it carries any writing — words,
+  letters, digits, numbers, labels, captions, pseudo-text or scribbles that read as text. A picture with writing is
+  drawn again from a stricter prompt and never goes on a slide with it (verstka/images/text_check.py).
+prompt_files:
+  system: prompts/system.md
+  user: prompts/user.md
+output_schema: verstka.images.text_check.TextCheck
+params:
+  temperature: 0.0
+  max_tokens: 120
+changelog:
+  - "1.0.0: the owner (2026-10-08): «модель рисует текст и числа на картинках очень криво» — every picture is checked before it goes on a slide"

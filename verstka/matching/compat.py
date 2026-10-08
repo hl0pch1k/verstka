@@ -75,6 +75,12 @@ def needed_chars(slide: OutlineSlide) -> dict[str, int]:
 _BOOKEND_KINDS = (K.title, K.section, K.thanks)
 
 
+def _several_formulas(text: str) -> bool:
+    from verstka.rendering.equation import formulas_of
+
+    return len(formulas_of(text)) >= 2
+
+
 def composition_for(slide: OutlineSlide) -> str:
     """The synth composition of a slide. Agent v2 content decides before the kind: two charts stand side by side
     («chart_pair»), a formula without a chart or a table is set as a large equation («formula»)."""
@@ -85,8 +91,8 @@ def composition_for(slide: OutlineSlide) -> str:
             return "code"  # the user's code as written, its explanation beside it
         if c.chart is not None and c.chart2 is not None:
             return "chart_pair"
-        if (c.formula or "").strip() and c.chart is None and c.chart2 is None and c.table is None and not (c.items or c.columns):
-            return "formula"  # (with a chart, a table or cards the formula is a line over them)
+        if (c.formula or "").strip() and c.chart is None and c.chart2 is None and c.table is None and (not (c.items or c.columns) or _several_formulas(c.formula)):
+            return "formula"  # (with a chart, a table or cards one formula is a line over them; several are the slide)
         if c.chart is None and c.chart2 is not None and k in (K.chart, K.bullets, K.big_number, K.stat_row):
             return "chart_text"  # the second chart alone: the renderer draws it as the slide's chart
     if k in (K.title, K.section, K.thanks, K.bullets, K.cards, K.stat_row, K.big_number, K.two_column, K.table, K.process, K.quote, K.agenda, K.comparison):

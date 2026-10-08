@@ -139,7 +139,7 @@ def _sparse_text(ctx: AuditContext, s, els: list, covered) -> Optional[float]:
     planned_pic = osl is None or bool(osl.content.image_hint)
     title = title_element(s)
     body = [e for e in els if e is not title and e.type == "text" and e.has_text]
-    if not body or len(body) > 2 or any(e.type in ("chart", "table") or (e.type == "picture" and planned_pic) for e in els):
+    if not body or len(body) > 2 or any(e.type in ("chart", "table") or (e.type == "picture" and (planned_pic or e.formula)) for e in els):
         return None
     if any(is_figure(e.text) for e in body):
         return None  # a figure with its label: a hero number, set large on purpose

@@ -23,6 +23,7 @@ from pptx.slide import Slide
 from verstka.analysis.xmlns import q
 from verstka.planning.heuristics import ABBR_END_RE, label_beside
 from verstka.rendering.charts import add_chart
+from verstka.rendering.equation import formulas_of, is_math, is_sentence, measure, plain_math
 from verstka.rendering.fonts import figure_metrics_em, left_bearing_em, text_width_pt, wrap_lines
 from verstka.rendering.tables import add_table
 from verstka.schemas.common import EMU_PER_PT, Bbox, PatternKind, contrast_ratio, relative_luminance
@@ -612,6 +613,23 @@ class Canvas:
         sf = etree.SubElement(ln, q("a:solidFill"))
         etree.SubElement(sf, q("a:srgbClr")).set("val", color.upper())
         return self._append(cx)
+
+    # ---- formulas ----------------------------------------------------------------------------------------------
+    def equation(self, box: Bbox, formula, size: float, color: str, align: str = "l", name: str = "Formula") -> etree._Element:
+        """A formula typeset (verstka/rendering/equation.py) in `box`: its own size at `size` points, placed by `align`
+        (left, centre, right) and centred on the box's height — the native equation PowerPoint edits and, in the same
+        shape, its picture for LibreOffice and the other programs that do not read Office Math."""
+        import io
+
+        from verstka.rendering.equation import equation_element, picture
+
+        png, wp, hp = picture(formula.latex, size, color)
+        w, h = _emu(wp), _emu(hp)
+        x = box.x if align == "l" else (box.x + box.w - w if align == "r" else box.x + (box.w - w) // 2)
+        b = self._clamp(Bbox(x=int(x), y=int(box.y + (box.h - h) // 2), w=w, h=h), name)
+        _part, rid = self.slide.part.get_or_add_image_part(io.BytesIO(png))
+        sid = self._id()
+        return self._append(equation_element(sid, f"{name} {sid}", (b.x, b.y, b.w, b.h), formula, size, color, rid, align=align))
 
 
 def _slide_size(slide: Slide) -> tuple[int, int]:
@@ -1655,6 +1673,8 @@ class Composer:
     # ---- blocks ------------------------------------------------------------------------------------------------
     def _intro(self, text: str, area: Bbox, formula: bool = False) -> Bbox:
         k = self.kit
+        if formula and is_math_formula(text):
+            return self._math_intro(text, area)
         width = min(area.w, int(area.w * 0.78))
         size = k.lead if len(text) <= 120 else k.body
         para = [self.P(text, size, k.colors.muted if k.colors.muted != k.colors.text else k.colors.text)]
@@ -1663,6 +1683,46 @@ class Composer:
         hh = self.h(para, width)
         self.cv.text(Bbox(x=area.x, y=area.y, w=width, h=hh), para, name="Intro")
         dy = hh + int(k.vgap * 1.1)
+        return Bbox(x=area.x, y=area.y + dy, w=area.w, h=max(area.h - dy, int(area.h * 0.4)))
+
+    def _math_intro(self, text: str, area: Bbox) -> Bbox:
+        """A formula of mathematics over the slide's cards, table or chart: typeset at a size between the lead and the
+        subheading, on an accent bar — the slide's key, never a grey caption."""
+        k = self.kit
+        forms = formulas_of(text)
+        if forms:
+            f = forms[0]
+            bar = _emu(max(k.hpt * 0.011, 4))
+            gap = int(k.gap * 1.2)
+            room_w = _pt(area.w - bar - gap) * 0.9
+            size = k.body
+            for fs in sorted({k.h2, k.h3, k.lead, k.body}, reverse=True):
+                size = fs
+                w, h = measure(f.latex, fs)
+                if w <= room_w and _emu(h) <= area.h * 0.3:
+                    break
+            label_paras = [self.P(f.label, k.body, k.colors.muted if k.colors.muted != k.colors.text else k.colors.text)] if f.label else []
+            lh = self.h(label_paras, area.w - bar - gap) if label_paras else 0
+            _w, h = measure(f.latex, size)
+            eh = _emu(h)
+            self.cv.rect(Bbox(x=area.x, y=area.y, w=bar, h=lh + eh), k.colors.accent, name="Accent bar")
+            if label_paras:
+                self.cv.text(Bbox(x=area.x + bar + gap, y=area.y, w=area.w - bar - gap, h=lh), label_paras, name="Formula label")
+            self.cv.equation(Bbox(x=area.x + bar + gap, y=area.y + lh, w=area.w - bar - gap, h=eh), f, size, k.colors.heading, align="l")
+            dy = lh + eh + int(k.vgap * 1.4)
+            return Bbox(x=area.x, y=area.y + dy, w=area.w, h=max(area.h - dy, int(area.h * 0.4)))
+        line = " ".join(text.split())
+        size = k.lead
+        for fs in sorted({k.h2, k.h3, k.lead}, reverse=True):
+            size = fs
+            if text_width_pt(line, k.font, fs, False) * 1.06 <= _pt(area.w) * 0.85:
+                break
+        bar = _emu(max(k.hpt * 0.011, 4))
+        para = [self.P(line, size, k.colors.heading)]
+        hh = self.h(para, area.w - bar - int(k.gap * 1.2))
+        self.cv.rect(Bbox(x=area.x, y=area.y + _emu(size * 0.12), w=bar, h=max(hh - _emu(size * 0.24), bar)), k.colors.accent, name="Accent bar")
+        self.cv.text(Bbox(x=area.x + bar + int(k.gap * 1.2), y=area.y, w=area.w - bar - int(k.gap * 1.2), h=hh), para, name="Formula")
+        dy = hh + int(k.vgap * 1.4)
         return Bbox(x=area.x, y=area.y + dy, w=area.w, h=max(area.h - dy, int(area.h * 0.4)))
 
     def _place_v(self, area: Bbox, block_h: int, fill_top: bool = False) -> int:
@@ -3295,15 +3355,22 @@ class Composer:
         """Remove what was added to the slide after the first `n0` elements (a chart that failed half-way: its part
         relationship goes too)."""
         tree = self.cv.tree
+        r_ns = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
         for el in list(tree)[n0:]:
             for ref in el.iter("{http://schemas.openxmlformats.org/drawingml/2006/chart}chart"):
-                rid = ref.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id")
+                rid = ref.get(r_ns + "id")
                 if rid:
                     try:
                         self.slide.part.drop_rel(rid)
                     except KeyError:
                         pass
+            # a formula's picture (its Fallback) goes with it — unless another formula shows the same picture
+            pics = [b.get(r_ns + "embed") for b in el.iter(q("a:blip"))] if etree.QName(el).localname == "AlternateContent" else []
             tree.remove(el)
+            for rid in pics:
+                if rid and not any(v == rid and k in (r_ns + "embed", r_ns + "id", r_ns + "link") for e in self.slide._element.iter() for k, v in e.attrib.items()):
+                    if rid in self.slide.part.rels:
+                        self.slide.part.rels.pop(rid)
             if el in self.cv.added:
                 self.cv.added.remove(el)
 
@@ -3323,12 +3390,299 @@ class Composer:
             if c and c.upper() != text.upper() and sat(c) < 0.25 and contrast_ratio(c, g) >= 3.0 and contrast_ratio(c, text) >= 1.6:
                 return c
         return k.colors.muted
+    def math_formula(self, area: Bbox, text: str) -> None:
+        """A formula of mathematics or physics («∫ f(x) dx = F(x) + C», «E = mc²»), typeset as a real formula — a
+        native equation with its picture (verstka/rendering/equation.py): one formula large on the template's card (a
+        formula box), several («Линейность: $…$; Аддитивность: $…$») each with its name, in rows or a grid of two.
+        The problem or the definition they follow (the slide's first paragraph) is a line over them; what explains
+        them — the other paragraphs and lines, its cards as lines — follows under them. Never the business equation's
+        figure blocks: its symbols are no figures with labels."""
+        k = self.kit
+        c = self.o.content
+        forms = formulas_of(text)
+        paras = [plain_math(t) for t in c.paragraphs if t and t.strip()]
+        lines = [plain_math(t) for t in c.bullets if t and t.strip()]
+        lines += [plain_math(f"{it.title} — {it.text}" if it.text else it.title) for it in (c.items or c.columns) if (it.title or "").strip()]
+        if forms:
+            if paras and len(paras[0]) <= 260 and is_sentence(paras[0]):
+                area = self._intro(paras[0], area)
+                paras = paras[1:]
+            rest = paras + lines
+            if len(forms) == 1:
+                self._one_formula(area, forms[0], rest)
+            else:
+                with self._lines_under(area, rest) as main:
+                    self._formula_grid(main, forms)
+            return
+        rest = paras + lines
+        with self._lines_under(area, rest) as main:
+            line = " ".join(text.split())
+            pad_x, pad_y = int(0.04 * k.W), int(0.03 * k.H)
+            cap = k.figure_cap(2, False, self.strategy)
+            size = k.h3
+            for fs in k.figure_sizes(cap, k.h3):
+                size = fs
+                if text_width_pt(line, k.font, fs, False) * 1.06 + 2 * _pt(pad_x) <= _pt(main.w) * 0.92 and _emu(fs * 1.5) + 2 * pad_y <= main.h * 0.7:
+                    break
+            box_h = _emu(size * 1.5) + 2 * pad_y
+            box_w = min(main.w, _emu(text_width_pt(line, k.font, size, False) * 1.06) + 2 * pad_x + int(0.08 * main.w))
+            y0 = main.y if rest else self._place_v(main, box_h)
+            box = Bbox(x=main.x, y=y0, w=box_w if rest else main.w, h=box_h)
+            if k.card.fill or k.card.proto is not None:
+                self.cv.card(box, k.card)
+                color = k.card.colors.heading
+            else:
+                bar = _emu(max(k.hpt * 0.011, 4))
+                self.cv.rect(Bbox(x=box.x, y=box.y, w=bar, h=box.h), k.colors.accent, name="Accent bar")
+                color = k.colors.heading
+            self.cv.text(Bbox(x=box.x + pad_x, y=box.y + pad_y, w=box.w - 2 * pad_x, h=box.h - 2 * pad_y), [self.P(line, size, color, align="ctr" if not rest else "l")], name="Formula", anchor="ctr")
+
+    def _formula_box(self) -> tuple[bool, str, str]:
+        """(on cards, the formula's colour, its name's colour): the template's card when it has a style of cards, else
+        an accent bar on the slide's ground."""
+        k = self.kit
+        if (k.card.fill or k.card.proto is not None) and self.strategy != "compact":
+            cc = k.card.colors
+            return True, cc.heading, (cc.muted if cc.muted != cc.text else cc.text)
+        return False, k.colors.heading, (k.colors.muted if k.colors.muted != k.colors.text else k.colors.text)
+
+    def _formula_size(self, latex: str, sizes: list[float], max_w: int, max_h: int) -> float:
+        """The largest of `sizes` at which the formula fits `max_w` × `max_h`; past the smallest, a size that fits the
+        width (a long formula is set smaller rather than past its box)."""
+        for fs in sizes:
+            w, h = measure(latex, fs)
+            if _emu(w) <= max_w and _emu(h) <= max_h:
+                return fs
+        fs = sizes[-1] if sizes else self.kit.body
+        w, h = measure(latex, fs)
+        return max(self.kit.small * 0.8, fs * min(1.0, max_w / max(_emu(w), 1), max_h / max(_emu(h), 1)))
+
+    def _one_formula(self, area: Bbox, f, rest: list[str]) -> None:
+        """One formula, the slide's key. Alone: large (up to the template's display size) and centred on its card,
+        which takes about half of the area. With lines that explain it: on a card across the area's width, then the
+        lines as a list under it. Its explanation in words (`note`) stands under it on the card: a formula is never
+        shown without what it says. Never under the template's body size: when the area is short, the explanation
+        and the card's padding step down first, then the lines are said aloud (speaker notes)."""
+        k = self.kit
+        carded, color, lab_color = self._formula_box()
+        note_color = k.card.colors.text if carded else k.colors.text
+        bar = 0 if carded else _emu(max(k.hpt * 0.011, 4))
+        pad_x = int(0.035 * k.W)
+        inner_w = area.w - 2 * pad_x - bar
+        al = "ctr" if (not rest or self.strategy == "visual") else "l"
+        gap = int(k.vgap * 1.2)
+        body_h = _emu(measure(f.latex, k.body)[1])
+
+        def lines_h(size: float) -> int:
+            text_w = int(area.w * 0.8) - _emu(size * 1.6)
+            return sum(self.h([self.P(t, size, k.colors.text)], text_w) for t in rest) + (len(rest) - 1) * 2 * _emu(max(size * 0.45, 6))
+
+        def parts(text_size: float, pad_k: float):
+            label = [self.P(f.label, text_size, lab_color, align=al)] if f.label else []
+            note = [self.P(f.note, text_size, note_color, align=al)] if f.note else []
+            lh = self.h(label, inner_w) + int(k.vgap * 0.4) if label else 0
+            nh = self.h(note, inner_w) + int(k.vgap * 0.5) if note else 0
+            return label, note, lh, nh, int(pad_k * k.H)
+
+        # the settings, roomiest first: (text size, padding, lines at size or said aloud)
+        settings = []
+        if rest:
+            settings += [(k.body, 0.028, k.body), (k.body, 0.028, k.small), (k.small, 0.016, k.small)]
+        settings += [(k.lead if not rest else k.body, 0.04, None), (k.small, 0.016, None)]
+        chosen = None
+        for text_size, pad_k, line_size in settings:
+            label, note, lh, nh, pad_y = parts(text_size, pad_k)
+            below = (lines_h(line_size) + gap) if line_size is not None else 0
+            room_h = (area.h - below if line_size is not None else int(area.h * (0.7 if not rest else 0.9))) - lh - nh - 2 * pad_y
+            if room_h >= body_h or (text_size, pad_k, line_size) == settings[-1]:
+                chosen = (label, note, lh, nh, pad_y, room_h, line_size)
+                break
+        label, note, lh, nh, pad_y, room_h, line_size = chosen
+        if line_size is None and rest:
+            self._lines_to_notes(rest)
+            rest = []
+        top = k.display if not rest else k.statement
+        sizes = [x for x in k.steps_down(top, k.body)] or [k.body]
+        size = self._formula_size(f.latex, sizes, inner_w, max(room_h, body_h))
+        w, h = measure(f.latex, size)
+        eh = _emu(h)
+        box_h = eh + lh + nh + 2 * pad_y
+        if not rest:
+            box_h = max(box_h, int(area.h * 0.5))
+        box = Bbox(x=area.x, y=area.y, w=area.w, h=min(box_h, area.h))
+        if carded:
+            self.cv.card(box, k.card)
+        else:
+            self.cv.rect(Bbox(x=box.x, y=box.y, w=bar, h=box.h), k.colors.accent, name="Accent bar")
+        x0 = box.x + bar + pad_x
+        block = lh + eh + nh
+        y0 = box.y + max((box.h - block) // 2, 0)
+        if label:
+            self.cv.text(Bbox(x=x0, y=y0, w=inner_w, h=lh), label, name="Formula label")
+        self.cv.equation(Bbox(x=x0, y=y0 + lh, w=inner_w, h=eh), f, size, color, align=al)
+        if note:
+            self.cv.text(Bbox(x=x0, y=y0 + lh + eh + int(k.vgap * 0.5), w=inner_w, h=nh - int(k.vgap * 0.5)), note, name="Formula note")
+        if rest:
+            below = Bbox(x=area.x, y=box.y + box.h + gap, w=area.w, h=max(area.y2 - (box.y + box.h + gap), 1))
+            self.bullets(below, rest, as_list=True)
+
+    def _formula_grid(self, main: Bbox, forms: list) -> None:
+        """Several formulas, each with its name and what it says in words, at one size — the largest of three
+        settings: rows with the name and the explanation on the left and the formula on the right; rows and tiles with
+        the name over the formula and the explanation under it."""
+        k = self.kit
+        carded, color, lab_color = self._formula_box()
+        name_color = color
+        note_color = k.card.colors.text if carded else k.colors.text
+        n = len(forms)
+        gap_x, gap_y = k.gap, int(k.vgap * (0.5 if carded else 0.7))
+        pad_x = int(0.018 * k.W) if carded else 0
+        pad_y = int(0.016 * k.H) if carded else int(0.004 * k.H)
+        bar = 0 if carded else _emu(max(k.hpt * 0.008, 3))
+        bar_gap = int(k.gap * 0.8) if bar else 0
+        notes = any(f.note for f in forms)
+        # the names and explanations step down to the template's small size before a formula does; a formula never
+        # goes under the body size while the layout has another setting
+        text_sizes = [(k.body, k.body), (k.body, k.small), (k.small, k.small)] if n <= 3 else ([(k.body, k.small), (k.small, k.small)] if n == 4 else [(k.small, k.small)])
+        text_sizes = list(dict.fromkeys(text_sizes))
+        sizes = [x for x in k.steps_down(k.statement, k.body)] or [k.body]
+        has_labels = any(f.label or f.note for f in forms)
+        lab_size, note_size = text_sizes[0]
+
+        def side(f, w: int, al: str = "l") -> tuple[list, list, int, int]:
+            """The name's and the explanation's paragraphs and heights in a column `w` wide."""
+            name = [self.P(f.label, lab_size, name_color if notes else lab_color, bold=bool(notes) and k.bold, align=al)] if f.label else []
+            note = [self.P(f.note, note_size, note_color, align=al)] if f.note else []
+            return name, note, (self.h(name, w) if name else 0), (self.h(note, w) if note else 0)
+
+        def plan(cols: int, beside: bool):
+            rows = math.ceil(n / cols)
+            cell_w = (main.w - gap_x * (cols - 1)) // cols
+            inner = cell_w - 2 * pad_x - bar - bar_gap
+            lab_w = 0
+            tile = self.strategy == "visual" and carded and not beside
+            if beside:
+                widest = max((text_width_pt(f.label, k.font, lab_size, False) for f in forms if f.label), default=0)
+                lab_w = int(inner * 0.4) if notes else min(_emu(widest * 1.08) + 2, int(inner * 0.34))
+                inner_f = inner - lab_w - k.gap
+                parts = [side(f, lab_w) for f in forms]
+                heads = [nh + (int(k.vgap * 0.15) if nh and th else 0) + th for _, _, nh, th in parts]
+                tails = [0] * n
+            else:
+                inner_f = inner
+                parts = [side(f, inner, "ctr" if tile else "l") for f in forms]
+                heads = [nh + (int(k.vgap * 0.2) if nh else 0) for _, _, nh, _ in parts]
+                tails = [(th + int(k.vgap * 0.3)) if th else 0 for _, _, _, th in parts]
+            for fs in sizes:
+                dims = [measure(f.latex, fs) for f in forms]
+                if any(_emu(w) > inner_f for w, _ in dims):
+                    continue
+                row_h = []
+                for r in range(rows):
+                    idx = range(r * cols, min(n, (r + 1) * cols))
+                    row_h.append(max((max(heads[i], _emu(dims[i][1])) if beside else heads[i] + _emu(dims[i][1]) + tails[i]) for i in idx) + 2 * pad_y)
+                if sum(row_h) + gap_y * (rows - 1) <= main.h:
+                    return dict(fs=fs, cols=cols, beside=beside, cell_w=cell_w, inner=inner, lab_w=lab_w, parts=parts, heads=heads, tails=tails, row_h=row_h, tile=tile, text=(lab_size, note_size))
+            return None
+
+        options: list = []
+        for lab_size, note_size in text_sizes:
+            options = [plan(1, True) if has_labels else None, plan(1, False)]
+            if n >= (3 if self.strategy == "visual" else 4):
+                options.append(plan(2, False))
+            if self.strategy == "visual" and n in (3, 5, 6):
+                options.append(plan(3, False))
+            options = [o for o in options if o is not None]
+            if options:
+                break
+        if options:
+            # the variants differ: the visual one sets tiles (a grid, the names over the formulas) when a grid keeps
+            # 85 % of the size, its rows full (three tiles in a row of three, four in two rows of two); the others set
+            # rows — the structured one with the names and explanations on the left
+            if self.strategy == "visual":
+                top_fs = max(x["fs"] for x in options)
+                pref = lambda o: (o["fs"] >= 0.85 * top_fs, o["cols"] > 1, n % o["cols"] == 0, not o["beside"], o["fs"])  # noqa: E731
+            else:
+                pref = lambda o: (o["fs"] >= 0.8 * max(x["fs"] for x in options), o["cols"] == 1, o["beside"], o["fs"])  # noqa: E731
+            best = max(options, key=pref)
+        else:
+            # nothing fits at the template's sizes (a tall template's body is 30 pt): the formulas step under the body
+            # size down to the small one and a little under it; then their explanations are said aloud (speaker
+            # notes); the grid never runs past its area — a formula cut by the slide's edge is no formula
+            from dataclasses import replace as _replace
+
+            lab_size, note_size = k.small, k.small
+            sizes = list(dict.fromkeys([x for x in k.steps_down(k.body, k.small)] + [round(k.small * f, 2) for f in (0.85, 0.72, 0.6)]))
+            best = None
+            for say_notes in (False, True):
+                if say_notes:
+                    if not notes:
+                        break
+                    self._lines_to_notes([f"{f.label}: {f.note}" if f.label else f.note for f in forms if f.note])
+                    forms = [_replace(f, note="") for f in forms]
+                    notes = False
+                got = [o for o in ([plan(1, True)] if has_labels else []) + [plan(1, False)] + ([plan(2, False)] if n >= 4 else []) if o is not None]
+                if got:
+                    best = max(got, key=lambda o: (o["fs"], o["cols"] == 1, o["beside"]))
+                    break
+            if best is None:
+                # still too tall: one column, its rows shared out evenly, every formula as large as its row allows
+                cell_w, inner = main.w, main.w - 2 * pad_x - bar - bar_gap
+                parts = [side(f, inner) for f in forms]
+                heads = [nh + (int(k.vgap * 0.2) if nh else 0) for _, _, nh, _ in parts]
+                tails = [0] * n
+                room = (main.h - gap_y * (n - 1)) / n - 2 * pad_y
+                fs = min(self._formula_size(f.latex, sizes, inner, int(max(room - heads[i], 1))) for i, f in enumerate(forms))
+                row_h = [heads[i] + _emu(measure(forms[i].latex, fs)[1]) + 2 * pad_y for i in range(n)]
+                best = dict(fs=fs, cols=1, beside=False, cell_w=cell_w, inner=inner, lab_w=0, parts=parts, heads=heads, tails=tails, row_h=row_h, tile=False)
+            self.warnings.append("formulas and their explanations set at the smallest sizes: the slide holds a lot")
+        fs, cols, beside, tile = best["fs"], best["cols"], best["beside"], best["tile"]
+        cell_w, inner, lab_w, parts, heads, tails, row_h = (best[x] for x in ("cell_w", "inner", "lab_w", "parts", "heads", "tails", "row_h"))
+        y = main.y
+        for r, rh in enumerate(row_h):
+            for cidx in range(cols):
+                i = r * cols + cidx
+                if i >= n:
+                    break
+                f = forms[i]
+                name, note, nh, th = parts[i]
+                x = main.x + cidx * (cell_w + gap_x)
+                if carded:
+                    self.cv.card(Bbox(x=x, y=y, w=cell_w, h=rh), k.card)
+                eh = _emu(measure(f.latex, fs)[1])
+                x0 = x + pad_x + bar + bar_gap
+                if beside:
+                    body_h = max(heads[i], eh)
+                    top = y + (rh - body_h) // 2
+                    if bar:
+                        self.cv.rect(Bbox(x=x, y=top, w=bar, h=body_h), k.colors.accent, name="Accent bar")
+                    ty = top + (body_h - heads[i]) // 2
+                    if name:
+                        self.cv.text(Bbox(x=x0, y=ty, w=lab_w, h=nh), name, name="Formula label")
+                    if note:
+                        self.cv.text(Bbox(x=x0, y=ty + heads[i] - th, w=lab_w, h=th), note, name="Formula note")
+                    self.cv.equation(Bbox(x=x0 + lab_w + k.gap, y=top + (body_h - eh) // 2, w=inner - lab_w - k.gap, h=eh), f, fs, color, align="l")
+                else:
+                    block = heads[i] + eh + tails[i]
+                    top = y + (rh - block) // 2 if tile else y + pad_y
+                    if bar:
+                        self.cv.rect(Bbox(x=x, y=top, w=bar, h=block), k.colors.accent, name="Accent bar")
+                    if name:
+                        self.cv.text(Bbox(x=x0, y=top, w=inner, h=nh), name, name="Formula label")
+                    self.cv.equation(Bbox(x=x0, y=top + heads[i], w=inner, h=eh), f, fs, color, align="ctr" if tile else "l")
+                    if note:
+                        self.cv.text(Bbox(x=x0, y=top + heads[i] + eh + int(k.vgap * 0.3), w=inner, h=th), note, name="Formula note")
+            y += rh + gap_y
+
     def formula(self, area: Bbox, text: str) -> None:
         """An equation set large: every figure in the accent at one display size (its unit smaller on the baseline),
         the operators muted and smaller, the result on an accent panel; the words of a term («покупок», «дней») under
         its figure. Too wide for one line at a display size, the result moves to a second line. The slide's other
         text follows under the equation."""
         k = self.kit
+        if is_math_formula(text):
+            self.math_formula(area, text)
+            return
         terms, ops = parse_formula(text)
         if len(terms) < 2 or not any(fig for fig, _ in terms):
             self.statement(area, text)
@@ -4810,6 +5164,15 @@ def _same_words(a: str, b: str) -> bool:
     wa = set(re.findall(r"\w+", (a or "").lower().replace("ё", "е")))
     wb = set(re.findall(r"\w+", (b or "").lower().replace("ё", "е")))
     return bool(wa) and wa <= wb
+
+
+_MATH_RE = re.compile(r"[∫∑∏√∞∂∇πθλμσφΔΣΩ′²³⁴ⁿ⁺⁻ₐ₀₁₂]|\b[a-zA-Z]\s*\(\s*[a-zA-Z]\s*\)|\bd[xytr]\b|\b(?:sin|cos|tg|tan|ctg|ln|log|lim|arctg|arcsin|exp)\b|\b[a-zA-Z]\s*=\s*[a-zA-Z]")
+
+
+def is_math_formula(text: str) -> bool:
+    """A formula of symbols (mathematics, physics) rather than a business equation of figures with their words:
+    LaTeX («$…$»), integrals, sums, roots, functions of x, Greek letters, exponents, «E = mc²»."""
+    return bool(_MATH_RE.search(text or "")) or is_math(text or "")
 
 
 def parse_formula(text: str) -> tuple[list[tuple[Optional[str], str]], list[str]]:

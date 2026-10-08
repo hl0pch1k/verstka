@@ -400,6 +400,11 @@ def opaque_share(part, pic: etree._Element, box: Bbox, rect: Bbox) -> float:
 
 def _layer_of(el: etree._Element, source: str, part, paint: _Paint, W: int, H: int, owner=None) -> Optional[Layer]:
     tag = etree.QName(el).localname
+    if tag == "AlternateContent":  # a formula (or another alternate shape): the shape LibreOffice draws
+        from verstka.rendering.equation import shape_of
+
+        inner = shape_of(el)
+        return _layer_of(inner, source, part, paint, W, H, owner) if inner is not None else None
     if tag not in _DRAWN:
         return None
     box = _xfrm_box(el)

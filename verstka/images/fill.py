@@ -181,7 +181,7 @@ def apply_pictures(deck: Path, pending: list[Pending], *, wait_s: float = 75.0, 
                 out.warnings.append(f"slide {p.place.slide}: the picture was not ready in time, the place stays free")
                 made = None
             except Exception as e:  # noqa: BLE001 - the place stays free, the reason is kept
-                rec["why"] = "модель изображений не ответила"
+                rec["why"] = getattr(e, "why", None) or "модель изображений не ответила"
                 rec["error"] = str(e)[:300]
                 out.warnings.append(f"slide {p.place.slide}: no picture ({str(e)[:160]})")
                 made = None

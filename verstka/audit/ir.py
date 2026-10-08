@@ -219,8 +219,8 @@ def _image_size(pkg: PptxPackage, part: Optional[str]) -> Optional[tuple[int, in
 
 def _ir_element(s, W: int, H: int) -> IRElement:
     """One IRElement from an extracted shape (geometry, text, paint; charts/tables/images are filled by the caller)."""
-    if s.kind == ShapeKind.pic:
-        etype = "picture"
+    if s.kind == ShapeKind.pic or getattr(s, "formula", None):
+        etype = "picture"  # a formula is drawn as its picture where Office Math is not read: content of the slide
     elif s.kind == ShapeKind.graphic_frame:
         etype = "chart" if s.frame_kind == "chart" else ("table" if s.frame_kind == "table" else "other")
     elif s.kind == ShapeKind.connector:
@@ -259,6 +259,7 @@ def _ir_element(s, W: int, H: int) -> IRElement:
         geometry=s.geometry,
         corner_radius=s.corner_radius,
         rotation=s.rotation,
+        formula=getattr(s, "formula", None),
     )
 
 

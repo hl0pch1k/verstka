@@ -345,7 +345,7 @@ def _move_block(el: etree._Element, slide, safe: Bbox, slide_w: int, slide_h: in
     if is_nested(el):
         return None
     tree = slide._element.cSld.find(q("p:spTree"))
-    top = [o for o in tree if isinstance(o.tag, str) and etree.QName(o).localname in ("sp", "pic", "graphicFrame", "grpSp", "cxnSp")]
+    top = [o for o in tree if isinstance(o.tag, str) and etree.QName(o).localname in ("sp", "pic", "graphicFrame", "grpSp", "cxnSp", "AlternateContent")]
     members = _block_of(el, top, slide_w, slide_h) if el in top else [el]
     if len(members) == 1:
         moved = _move_inside(el, safe, slide_w, slide_h, into_safe)

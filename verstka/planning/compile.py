@@ -336,7 +336,13 @@ def _fits(s: OutlineSlide) -> bool:
 
 
 def _pinned(spec: Optional[SlideSpec]) -> bool:
-    """A slide whose chart or table the user asked for keeps its form."""
+    """A slide whose chart or table the user asked for keeps its form; so does a slide of formulas (`_math_slide`:
+    the formulas are the slide — three of them in a row are three different layouts, never cards in place of them)."""
+    if spec is not None and spec.formula and not (spec.charts or spec.table):
+        from verstka.rendering.equation import formulas_of
+
+        if formulas_of(spec.formula):
+            return True
     return spec is not None and bool(spec.charts or spec.table)
 
 
@@ -586,6 +592,92 @@ def _match(charts: list[ChartSpec], reqs: list[ChartRequest]) -> tuple[list[tupl
     return pairs, left
 
 
+_LIST_MARK_RE = re.compile(r"^\s*(?:[-–—•*]\s+|\d+[.)]\s+)")
+
+
+def _math_slide(s: OutlineSlide, spec: SlideSpec, run: _Run) -> None:
+    """A slide of formulas of mathematics or physics (the writer's «Формула: $…$», «Формулы: Линейность: $…$; …», a
+    user's LaTeX): the formulas exactly as written — typeset, never re-told —, the line they follow (the definition,
+    the problem of a worked example) over them, the source's own explanations under them; never a formula once more
+    as a line of text, never cards or figures the formula slide does not show."""
+    from verstka.planning.brief_structure import instruction_kind
+    from verstka.rendering.equation import formulas_of, has_latex, latex_text
+
+    forms = formulas_of(spec.formula)
+    if not forms:
+        return  # a business equation of figures: the composer's figure blocks
+    c = s.content
+    c.formula = spec.formula.strip()
+    lead, points = None, []
+    for line in (spec.text or "").splitlines():
+        t = " ".join(line.split())
+        if not t or t.startswith("[") or t.startswith("|") or instruction_kind(t) is not None or re.match(r"^(?:Хронология|Ключевые цифры|Формул\w*)\s*:", t, re.I):
+            continue
+        if _LIST_MARK_RE.match(t):
+            points.append(_LIST_MARK_RE.sub("", t).strip())
+        elif lead is None and not points:
+            lead = t
+    said = {re.sub(r"\W+", "", f.text).lower() for f in forms} | {re.sub(r"\W+", "", f.note).lower() for f in forms if f.note}
+
+    def repeats(line: str) -> bool:
+        if has_latex(line):
+            return True
+        flat = re.sub(r"\W+", "", line).lower()
+        return any(x and (x in flat or flat in x) for x in said)
+
+    def same(a: str, b: str) -> bool:
+        fa, fb = re.sub(r"\W+", "", a).lower(), re.sub(r"\W+", "", b).lower()
+        return bool(fa) and (fa == fb or (min(len(fa), len(fb)) >= 24 and (fa in fb or fb in fa)))
+
+    designer = [b for b in c.bullets if not repeats(b) and not (lead and same(b, lead))]
+    lines = [p for p in points if not repeats(p)] or designer
+    # the formulas and what explains them are the slide: the more formulas with their explanations, the fewer lines
+    # beside them (one formula: three lines of about 330 characters in all, two: two of 200, three explained: none,
+    # more: none — measured live on VK Tech's 405-pt slide); the rest is said aloud (speaker notes), never set below
+    # the template's sizes or lost from the slide's plan
+    explained = sum(1 for f in forms if f.note)
+    cap, budget = {1: (3, 330), 2: (2, 200), 3: (0, 0) if explained >= 3 else (1, 120)}.get(len(forms), (0, 0))
+    kept: list[str] = []
+    for x in lines:
+        if len(kept) < cap and sum(len(y) for y in kept) + len(x) <= budget:
+            kept.append(x)
+    aloud = [x for x in lines if x not in kept]
+    c.bullets = kept
+    if aloud:
+        said_ = " ".join("• " + H.strip_end(x) + "." for x in aloud)
+        s.notes = ((s.notes or "").strip() + "\n" + said_).strip()
+    c.paragraphs = [lead] if lead and not repeats(lead) else []
+    if s.subtitle and (lead or repeats(s.subtitle) or re.match(r"^\s*Формул\w*\s*:", s.subtitle) or any(same(s.subtitle, x) for x in points + list(c.bullets))):
+        s.subtitle = None  # the slide's line over the formulas is its lead, said once; a formula is never a line of text
+    c.items, c.columns, c.numbers = [], [], []
+    c.table = c.chart = c.chart2 = None
+    if s.kind not in _FRAMES:
+        s.kind = K.bullets
+    n = len(forms)
+    what = "формула набрана" if n == 1 else f"{n} {'формулы' if n < 5 else 'формул'} набраны"
+    run.say(f"Слайд {_name(s)}: {what} как математические — {latex_text(forms[0].latex)[:60]}.", s)
+
+
+def _no_raw_latex(o: DeckOutline) -> None:
+    """No LaTeX on a slide as text: a formula a designer wrote into a heading, a line or a card («$\\iint_D …$») reads
+    as Unicode («∬_D f(x, y) dx dy»); the slide's formula field — typeset as a formula — stays LaTeX."""
+    from verstka.rendering.equation import plain_math
+
+    def fix(t: Optional[str]) -> Optional[str]:
+        return plain_math(t) if t and ("$" in t or "\\(" in t) else t
+
+    for s in o.slides:
+        s.headline, s.subtitle, s.takeaway, s.footnote = fix(s.headline), fix(s.subtitle), fix(s.takeaway), fix(s.footnote)
+        c = s.content
+        c.bullets = [fix(x) for x in c.bullets]
+        c.paragraphs = [fix(x) for x in c.paragraphs]
+        for it in list(c.items) + list(c.columns):
+            it.title, it.text = fix(it.title), fix(it.text)
+            it.bullets = [fix(x) for x in it.bullets]
+        for n in c.numbers:
+            n.label = fix(n.label)
+
+
 def _requests(o: DeckOutline, structure: BriefStructure, idx: BriefIndex, run: _Run) -> None:
     """What the user asked for on a slide and the designer left out: formula, footnote, takeaway, the charts (their
     type and the brief's data — also instead of data the designer wrote that is not the brief's) and the table."""
@@ -594,8 +686,8 @@ def _requests(o: DeckOutline, structure: BriefStructure, idx: BriefIndex, run: _
     step = rounding_step(structure.rounding)
     for s in o.slides:
         spec = specs.get(s.spec_ref) if s.spec_ref is not None else None
-        if spec is None or s.kind in _FRAMES:
-            continue
+        if spec is None or (s.kind in _FRAMES and not (s.kind == K.section and spec.formula)):
+            continue  # (a slide of formulas the designer took for a divider is a slide of formulas)
         c = s.content
         if spec.formula and not same_formula(c.formula, spec.formula):
             # the user's calculation; its factors named as the slide's text names them (the words may differ, the
@@ -603,6 +695,8 @@ def _requests(o: DeckOutline, structure: BriefStructure, idx: BriefIndex, run: _
             had = bool((c.formula or "").strip())
             c.formula = (label_formula(spec.formula, spec.text) or spec.formula).strip().rstrip(".")
             run.say(f"Слайд {_name(s)}: " + ("формула — как в брифе." if had else "добавил формулу из брифа."), s)
+        if spec.formula and not spec.table and not spec.table_ids and (not spec.charts or not spec.series_ids):
+            _math_slide(s, spec, run)  # (a chart asked for with no data of the brief would be drawn of invented figures)
         if spec.footnote and not (s.footnote or "").strip():
             s.footnote = spec.footnote.strip()
         if spec.takeaway and not (s.takeaway or "").strip():
@@ -1053,6 +1147,7 @@ def compile_outline(
     except Exception:  # noqa: BLE001 - the writer's check or none
         written = False
     _variety(o, structure, run, written)
+    _no_raw_latex(o)
     try:
         from verstka.planning.agent import polish_case
 

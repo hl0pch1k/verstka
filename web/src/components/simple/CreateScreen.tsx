@@ -457,7 +457,7 @@ export function CreateScreen() {
             {/* what the text holds (the agent will see the same) and its length */}
             <div id="brief-help" className="mt-2 flex min-h-5 items-start gap-4 text-footnote">
               <p className="min-w-0 flex-1 text-zinc-500">
-                {briefLen === 0 ? "Вставьте готовый текст или загрузите .txt и .md" : seen ? `В тексте: ${seen}` : "Цифр и таблиц в тексте нет — слайды будут из формулировок"}
+                {briefLen === 0 ? "Вставьте готовый текст или загрузите .txt и .md" : writerLine ? "Это тема — агент напишет полный текст: ключевые факты, даты, формулы с пояснениями" : seen ? `В тексте: ${seen}` : "Цифр и таблиц в тексте нет — слайды будут из формулировок"}
               </p>
               {briefLen > 0 && (
                 <p className={cn("shrink-0 tabular-nums", briefLen < briefMin ? (shortInvalid ? "font-medium text-red-600" : "text-amber-700") : "text-zinc-500")}>

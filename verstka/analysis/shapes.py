@@ -143,6 +143,9 @@ class ShapeInfo:
     image_ext: Optional[str] = None
     crop: Optional[tuple[float, float, float, float]] = None
     text: Optional[TextInfo] = None
+    # a formula (Office Math in an mc:AlternateContent, ours or PowerPoint's): what it says as a line of Unicode; the
+    # shape is its picture (the Fallback LibreOffice draws)
+    formula: Optional[str] = None
     frame_kind: Optional[Literal["table", "chart", "diagram", "ole", "other"]] = None
     table_dims: Optional[tuple[int, int]] = None
     element: Optional[etree._Element] = field(default=None, repr=False, compare=False)
@@ -648,6 +651,8 @@ def extract_shapes(package: PptxPackage, slide_part: str, ctx: Optional[SlideCon
     out: list[ShapeInfo] = []
     counter = [0]
 
+    from verstka.rendering.equation import equation_text, is_equation
+
     def walk(container: etree._Element, xform: _Xform, group_path: list[str]) -> None:
         for child in _iter_children(container):
             tag = local_name(child)
@@ -659,6 +664,9 @@ def extract_shapes(package: PptxPackage, slide_part: str, ctx: Optional[SlideCon
                 counter[0] += 1
                 info = _extract_one(child, ctx, xform, counter[0], group_path)
                 if info is not None:
+                    ac = child.getparent().getparent() if child.getparent() is not None and local_name(child.getparent()) in ("Fallback", "Choice") else None
+                    if ac is not None and is_equation(ac):
+                        info.formula = equation_text(ac) or "формула"
                     out.append(info)
 
     if tree is not None:
