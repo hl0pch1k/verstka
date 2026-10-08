@@ -2586,6 +2586,36 @@ def _texts_beside_chart(ctx: _SlideCtx, oslide: OutlineSlide) -> bool:
     return x1 - x0 >= 0.5 and (x1 - x0) * (y1 - y0) >= 0.3
 
 
+def _clear_of_data_place(ctx: _SlideCtx, oslide: OutlineSlide, slots: list[Slot]) -> list[Slot]:
+    """`slots` less the text boxes standing inside the place the slide's chart or table takes (`_place_native_object`):
+    the sample's data area, its own figure — a picture of a chart, a screenshot, a photo (`analysis.pictures`; never
+    the template's art, a plate or the ground, which text boxes stand on by design) — or its chart or table frame. A
+    box there is a label of the sample's figure (VK Education p45: «Диаграмма про Петербург» printed inside each of its
+    two charts): the object is drawn over it, and the slide's own lines set in it would lie under the object. All of
+    `slots` when the slide has no chart or table."""
+    c = oslide.content
+    if (c.chart is None and c.table is None) or not slots:
+        return slots
+    W, H = ctx.W, ctx.H
+    places = [ctx.pattern.data_box.to_emu(W, H)] if ctx.pattern.data_box is not None else []
+    for sid, el in ctx.els.items():
+        if sid in ctx.removed or el.getparent() is None or is_nested(el):
+            continue
+        tag = etree.QName(el).localname
+        if tag == "graphicFrame" or (tag == "pic" and ctx.pic_kind.get(ctx.origin.get(sid, sid)) in ("content", "photo")):
+            b = element_bbox(el)
+            if b and b[2] * b[3] >= 0.08 * W * H:
+                places.append(Bbox(x=b[0], y=b[1], w=b[2], h=b[3]))
+    if not places:
+        return slots
+    out = []
+    for s in slots:
+        sb = s.bbox.to_emu(W, H)
+        if not any(p.intersection(sb) >= 0.8 * sb.area for p in places):
+            out.append(s)
+    return out
+
+
 def _content_picture_area(ctx: _SlideCtx) -> Optional[Bbox]:
     """The painted part of the sample's largest content picture (a chart or a screenshot `analysis.pictures` reads as
     the sample's own story) — clipped to the safe area and set under the texts above it that stay — or None."""
@@ -2618,6 +2648,8 @@ def _content_picture_area(ctx: _SlideCtx) -> Optional[Bbox]:
     for sid, el in ctx.els.items():
         if el.getparent() is None or etree.QName(el).localname != "sp" or not shape_text(el).strip() or sid in ctx.pattern.chrome_shape_ids:
             continue
+        if ctx.origin.get(sid, sid) in ctx.pattern_text_ids and sid not in ctx.filled:
+            continue  # a text box the slide left empty (a label of the sample's chart) leaves with the cleanup
         ib = ink_box(el, ctx.typo.primary_family)
         if ib is None or ib.x2 <= x0 or ib.x >= x1 or ib.y >= y0 + (y1 - y0) // 2:
             continue
@@ -6257,8 +6289,9 @@ def render_clone(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
 
     if c.bullets and not bullets_as_items and oslide.kind not in _ITEM_KINDS:
         # the biggest text area of the slide, whatever the sample called it (VK Tech p9 has a one-line «body» next to
-        # a panel-sized «bullet list»: the role order alone would put the text into the one-liner)
-        target = ctx.slots(SlotRole.bullet_list, SlotRole.body) or ctx.slots(SlotRole.card_body)
+        # a panel-sized «bullet list»: the role order alone would put the text into the one-liner) — never a label inside
+        # the place of the slide's chart or table (`_clear_of_data_place`)
+        target = _clear_of_data_place(ctx, oslide, ctx.slots(SlotRole.bullet_list, SlotRole.body)) or _clear_of_data_place(ctx, oslide, ctx.slots(SlotRole.card_body))
         if target:
             big = ctx.largest(target)
             short = len(c.bullets) <= 5 and sum(len(b) for b in c.bullets) <= 320 and big.bbox.area >= 0.12
@@ -6295,7 +6328,9 @@ def render_clone(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
     if c.paragraphs and code_side:
         pass  # (set beside the code by `_fill_code`: the sample has no text box of its own for them)
     elif c.paragraphs:
-        target = ctx.slots(SlotRole.body, SlotRole.bullet_list) or ctx.slots(SlotRole.card_body) or ctx.slots(SlotRole.caption)
+        # (never a label inside the place of the slide's chart or table: `_clear_of_data_place`)
+        tiers = [ctx.slots(SlotRole.body, SlotRole.bullet_list), ctx.slots(SlotRole.card_body), ctx.slots(SlotRole.caption)]
+        target = next((t for t in (_clear_of_data_place(ctx, oslide, x) for x in tiers) if t), [])
         if target:
             big = ctx.largest(target)
             lone = len(c.paragraphs) == 1 and len(c.paragraphs[0].split()) <= 25 and not c.bullets and not items
@@ -6303,7 +6338,9 @@ def render_clone(builder: DeckBuilder, plan_slide: LayoutSlide, oslide: OutlineS
             ctx.fill_slot(big, [ParagraphSpec(p, bullet=False) for p in c.paragraphs], size_hint=_running_size(big), grow_to=cap)
         elif _texts_beside_chart(ctx, oslide):
             ctx.slide.__dict__["_verstka_text_by_chart"] = True
-        elif oslide.kind not in (PatternKind.chart, PatternKind.table):
+        elif oslide.kind not in (PatternKind.chart, PatternKind.table) or any(tiers):
+            # (its only text box a label inside the place of its chart or table: the sample cannot show the lines —
+            # the gate turns it down rather than lose them)
             ctx.warnings.append("no slot for paragraphs")
     if c.quote:
         target = ctx.slots(SlotRole.body, SlotRole.bullet_list, SlotRole.card_body, SlotRole.subtitle)

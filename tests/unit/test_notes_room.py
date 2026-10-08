@@ -199,3 +199,57 @@ def test_a_table_on_a_sample_never_lies_over_the_slides_lines(tmp_path):
     o = big.model_copy(update={"takeaway": None})
     with pytest.raises(RuntimeError, match="lie over the slide's text"):
         render_clone(DeckBuilder(tmp_path / "list.pptx"), LayoutSlide(outline_id="big", mode="clone", pattern_id=pattern.id), o, pattern, manifest, ws, DeckOutline(title="T", slides=[o]))
+
+
+def test_the_slides_lines_never_take_a_label_inside_the_samples_chart(tmp_path):
+    """VK Education p45: the sample's chart is a picture with a caption printed inside it («Диаграмма про Петербург»).
+    The slide's line went into that caption and the native chart, drawn in the picture's place, covered it — the
+    sample was turned down («would lie over the slide's text»). The caption is the sample chart's own: the line is
+    set beside the chart, clear of it."""
+    from PIL import Image, ImageDraw
+    from pptx import Presentation as _P
+    from pptx.util import Emu as _E, Pt as _Pt
+
+    from verstka.rendering.clone import render_clone
+    from verstka.rendering.clone_check import ink_box
+    from verstka.rendering.deck import element_bbox
+    from verstka.schemas.common import Bbox
+    from verstka.schemas.outline import ChartSpec, Series
+
+    W, H = 12192000, 6858000
+    img = Image.new("RGB", (900, 700), (245, 245, 250))
+    d = ImageDraw.Draw(img)
+    for i, h in enumerate((180, 260, 340, 420, 520)):
+        d.rectangle((80 + i * 160, 620 - h, 180 + i * 160, 620), fill=(40 + 40 * i, 90, 220 - 30 * i))
+        d.text((95 + i * 160, 640), f"Item {i + 1}", fill=(60, 60, 60))
+    for j, y in enumerate(range(100, 620, 104)):
+        d.text((20, y), str(50 - 10 * j), fill=(60, 60, 60))
+    img.save(tmp_path / "chart.png")
+    prs = _P()
+    prs.slide_width, prs.slide_height = _E(W), _E(H)
+    s1 = prs.slides.add_slide(prs.slide_layouts[0])
+    s1.shapes.title.text = "Название"
+    s1.placeholders[1].text = "Подзаголовок"
+    s2 = prs.slides.add_slide(prs.slide_layouts[5])
+    s2.shapes.title.text = "Диаграмма продаж по месяцам"
+    s2.shapes.add_picture(str(tmp_path / "chart.png"), _E(int(W * 0.05)), _E(int(H * 0.26)), _E(int(W * 0.60)), _E(int(H * 0.64)))
+    cap = s2.shapes.add_textbox(_E(int(W * 0.20)), _E(int(H * 0.45)), _E(int(W * 0.16)), _E(int(H * 0.15)))
+    cap.text_frame.word_wrap = True
+    cap.text_frame.text = "Подпись внутри диаграммы"
+    cap.text_frame.paragraphs[0].runs[0].font.size = _Pt(14)
+    prs.save(tmp_path / "labelled.pptx")
+    manifest = analyze_template(tmp_path / "labelled.pptx", workspace_root=tmp_path / "ws", use_llm=False, use_vlm=False, render=False)
+    ws = TemplateWorkspace.open(manifest.template_id, tmp_path / "ws")
+    pattern = next(p for p in manifest.patterns if p.source_slide == 2)
+    line = "Органический рост без промо: сотрудники подключали коллег сами"
+    o = OutlineSlide(id="c", kind=PatternKind.chart, headline="Аудитория росла в 10 раз за пять месяцев",
+                     content=SlideContent(chart=ChartSpec(series_ids=["s1"]), paragraphs=[line]))
+    outline = DeckOutline(title="T", slides=[o], series=[Series(id="s1", name="Пользователи", categories=["Май", "Июнь", "Июль"], values=[1200, 3400, 6100])])
+    slide, warns = render_clone(DeckBuilder(tmp_path / "labelled.pptx"), LayoutSlide(outline_id="c", mode="clone", pattern_id=pattern.id), o, pattern, manifest, ws, outline)
+    assert "Органический рост" in _texts(slide), warns
+    frames = [Bbox(x=b[0], y=b[1], w=b[2], h=b[3]) for b in (element_bbox(f) for f in slide._element.iter("{http://schemas.openxmlformats.org/presentationml/2006/main}graphicFrame")) if b]
+    assert frames
+    fam = manifest.tokens.typography.primary_family
+    held = [sh for sh in slide.shapes if sh.has_text_frame and "Органический" in sh.text_frame.text]
+    under = [sh.name for sh in held for f in frames if (ib := ink_box(sh._element, fam)) is not None and f.intersection(ib) > 0.1 * ib.area]
+    assert not under, (under, warns)
