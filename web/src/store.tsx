@@ -131,7 +131,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const editText = useCallback((text: string, preset?: ComposerPreset) => {
     setComposerText(text);
     setComposerPreset(preset ?? null);
+    // an improved deck's «Изменить текст» returns into the improve mode; any other text leaves it
     dispatch({ type: "go", screen: "create" });
+    dispatch({ type: "set", patch: { improve: !!preset?.improvedFrom } });
   }, []);
   const takeComposerText = useCallback(() => {
     setComposerText(null);
@@ -216,10 +218,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const refreshTemplates = useCallback(async () => {
     try {
       setTemplates(await api.templates());
+      clearNotice("template");
     } catch (e) {
       report(e, "Не удалось обновить список шаблонов", "template");
     }
-  }, [report]);
+  }, [report, clearNotice]);
 
   const clearGeneration = useCallback(() => {
     genSeq.current += 1;
@@ -284,6 +287,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       };
       if (holding) viewTransition(apply);
       else apply();
+      clearNotice("result"); // the deck opened: an earlier «Не удалось открыть презентацию» is stale
       const { templateId: tid, templates: list } = latest.current;
       if (g.template_id && g.template_id !== tid && list.some((t) => t.template_id === g.template_id)) selectTemplate(g.template_id);
       return g;
@@ -295,7 +299,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } finally {
       if (seq === genSeq.current) setGenerationLoading(false);
     }
-  }, [report, selectTemplate, clearGeneration]);
+  }, [report, clearNotice, selectTemplate, clearGeneration]);
 
   const loadGeneration = useCallback(async (gid: string, opts?: { hold?: boolean }) => await fetchGeneration(gid, false, !!opts?.hold), [fetchGeneration]);
 

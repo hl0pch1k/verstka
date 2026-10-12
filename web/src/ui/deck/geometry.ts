@@ -46,7 +46,9 @@ export function deckGeometry(ui: UiState): Geometry {
   const create = ui.screen === "create";
   const folded = !create || ui.more;
   let y: Geometry["y"] = folded ? [0, 40, 80, 0] : ui.open === "tpl" ? [0, 524, 668, 0] : [0, 144, 556, 0];
-  if (create && !folded && ui.improve) y = [y[0], 40, y[2], 0];
+  // «Улучшить готовую» двигает плиту 02, только пока открыт шаг «Текст» (V2: `txImpOn = txOpen && …`,
+  // `txOpen = create && textOpen && !more`); `folded` уже отсекает «Все параметры» и другие экраны
+  if (create && !folded && ui.open === "text" && ui.improve) y = [y[0], 40, y[2], 0];
   y[3] = ui.screen === "result" ? 120 : create ? 812 : 80;
   const s4 = ui.screen === "result" ? (ui.rise ? "up" : "on") : ui.down ? "down" : "off";
   return { y, s4, heads: create && !ui.more, strips: !create || ui.more };
@@ -57,8 +59,8 @@ export type UiAction =
   | { type: "sect"; sect: UiState["sect"] } | { type: "sheet"; tab: SheetTab | null } | { type: "pattern"; n: number | null }
   | { type: "set"; patch: Partial<UiState> };
 
-/** `rise` и `down` ставит вызывающий код (открытие из «Мои презентации», возврат по логотипу) и сам снимает их
- *  таймером 560 мс — `go` их не трогает. */
+/** `go` сбрасывает `rise` и `down`, как V2 `go()`; кому они нужны (открытие из «Мои презентации», возврат по
+ *  логотипу), тот ставит их сразу после `go` и сам снимает таймером 560 мс. */
 export function uiReducer(s: UiState, a: UiAction): UiState {
   switch (a.type) {
     case "go":
@@ -66,11 +68,12 @@ export function uiReducer(s: UiState, a: UiAction): UiState {
       return {
         ...s, screen: a.screen, open: a.screen === "create" ? "text" : s.open,
         sheet: null, sect: null, pattern: null, textLayer: false, lightbox: false, remarks: false, more: false,
-        tplPreview: null, tplDelete: null,
+        tplPreview: null, tplDelete: null, rise: false, down: false,
       };
     case "open":
-      // шапка шага или полоса свёрнутой плиты: шаг раскрывается, «Все параметры» сворачиваются
-      return { ...s, open: a.step, more: false };
+      // шапка шага или полоса свёрнутой плиты: шаг раскрывается, «Все параметры» сворачиваются; шаг «Шаблон»
+      // выводит из «Улучшить готовую» (V2 `txBack()`: `txImp: false, open: 'tpl'`), текст остаётся
+      return { ...s, open: a.step, more: false, improve: a.step === "tpl" ? false : s.improve };
     case "more":
       // «Все параметры» переключаются; когда они закроются, раскрыт текст (V2)
       return { ...s, more: a.on ?? !s.more, open: "text" };

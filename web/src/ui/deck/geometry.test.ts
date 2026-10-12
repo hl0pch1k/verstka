@@ -75,3 +75,21 @@ test("лист открывается на вкладке и запоминае�
   const t = uiReducer(UI0, { type: "set", patch: { helper: true, rise: true } });
   assert.deepEqual([t.helper, t.rise, t.screen], [true, true, "create"]);
 });
+
+// Раунд правок 1: «Улучшить готовую» живёт только на открытом шаге «Текст» (V2: `txImpOn = txOpen && …`).
+test("улучшить готовую при открытом шаге «Шаблон» не двигает плиту 02", () => {
+  assert.deepEqual(deckGeometry({ ...UI0, improve: true, open: "tpl" }).y, [0, 524, 668, 812]);
+});
+test("улучшить готовую при открытых «Все параметры» не двигает колоду", () => {
+  assert.deepEqual(deckGeometry({ ...UI0, improve: true, more: true }).y, [0, 40, 80, 812]);
+});
+test("шаг «Шаблон» гасит «Улучшить готовую» (V2 txBack); шаг «Текст» его не трогает", () => {
+  assert.equal(uiReducer({ ...UI0, improve: true }, { type: "open", step: "tpl" }).improve, false);
+  assert.equal(uiReducer({ ...UI0, improve: true, open: "tpl" }, { type: "open", step: "text" }).improve, true);
+});
+test("go сбрасывает rise и down (V2 go())", () => {
+  const s = uiReducer({ ...UI0, rise: true, down: true }, { type: "go", screen: "result" });
+  assert.deepEqual([s.rise, s.down], [false, false]);
+  const c = uiReducer({ ...UI0, screen: "result", rise: true, down: true }, { type: "go", screen: "create" });
+  assert.deepEqual([c.rise, c.down], [false, false]);
+});
