@@ -111,7 +111,7 @@ TWO_LINE_ASKS = [
     ("Нужен бюджет 14,5 млн ₽ на масштабирование.", "Что просим"),  # a need said with money
 ]
 
-# the create screen's sample (web/src/components/NewGenerationFormParts.tsx, SAMPLE_BRIEF) — a long plain brief
+# the create screen's sample (web/src/lib/createForm.ts, SAMPLE_BRIEF) — a long plain brief
 WEB_SAMPLE = """Запуск функции «Умные сводки» в корпоративном мессенджере VK WorkSpace: итоги пилота за Q2 2026 и план масштабирования.
 
 Проблема: сотрудники тратят в среднем 47 минут в день на чтение рабочих чатов, а 38% сообщений в командных каналах остаются непрочитанными. По опросу 1 240 пользователей 71% хотят получать краткое содержание пропущенных обсуждений.

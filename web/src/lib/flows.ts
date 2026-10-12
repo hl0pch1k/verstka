@@ -1,8 +1,7 @@
 // Multi-step user flows of the app store (upload → analyse → adopt, generate → load → narrate).
 // Kept outside store.tsx so the store stays a readable list of state and actions. Both promises always
-// resolve: failures are reported through toasts / assistant messages, never thrown at the caller.
+// resolve: failures are reported through the store's notice / assistant messages, never thrown at the caller.
 import { api } from "../api";
-import { pushToast } from "../components/ui/Toasts";
 import type { GenerateRequest, GenerateResponse, Generation, ImproveSource, Job, JobKind, TabKey, TemplateListItem, TemplateManifest, UploadResponse } from "../types";
 import { describeGeneration, firstLine, newestTemplate } from "./narrate";
 import { templateTitle } from "./plain";
@@ -12,6 +11,8 @@ import { plural } from "./utils";
 interface CommonDeps {
   runJob(jobId: string, label: string, opts?: { kind?: JobKind; items?: string[]; template?: string | null; generation?: string | null; slides?: number | null; onDone?: (job: Job) => void; onFailed?: (job: Job) => void }): void;
   report(e: unknown, prefix: string): void;
+  /** The store's notice line (no pop-up toasts): a failure, a success or a remark about the action. */
+  toast(kind: "error" | "success" | "info", text: string): void;
   pushMessage(role: "user" | "assistant", text: string): void;
   setTab(t: TabKey): void;
 }
@@ -27,7 +28,7 @@ export function uploadTemplateFlow(file: File, useModels: boolean, d: UploadDeps
     void (async () => {
       const problem = templateFileProblem(file.name);
       if (problem) {
-        pushToast("error", problem);
+        d.toast("error", problem);
         return resolve();
       }
       let res: UploadResponse;
@@ -37,7 +38,7 @@ export function uploadTemplateFlow(file: File, useModels: boolean, d: UploadDeps
         d.report(e, "Не удалось загрузить шаблон");
         return resolve();
       }
-      if (useModels && !res.use_models) pushToast("info", "Модель не подключена — разберу шаблон по правилам");
+      if (useModels && !res.use_models) d.toast("info", "Модель не подключена — разберу шаблон по правилам");
       d.runJob(res.job_id, improve ? `Читаю презентацию «${templateTitle(file.name)}»` : `Разбираю шаблон «${templateTitle(file.name)}»`, {
         kind: "analyze",
         onDone: async (job) => {
@@ -53,11 +54,11 @@ export function uploadTemplateFlow(file: File, useModels: boolean, d: UploadDeps
             if (improve && src) {
               improve(src);
               d.pushMessage("assistant", improveMessage(src, res.use_models));
-              pushToast("success", "Презентация прочитана");
+              d.toast("success", "Презентация прочитана");
             } else {
               const fallback = `Шаблон «${templateTitle(m.source_file)}» разобран: ${plural(m.patterns.length, "макет", "макета", "макетов")} из ${plural(m.n_slides, "слайда", "слайдов", "слайдов")}.`;
               d.pushMessage("assistant", m.narration || fallback);
-              pushToast("success", "Шаблон разобран");
+              d.toast("success", "Шаблон разобран");
             }
           } catch (e) {
             d.report(e, "Шаблон разобран, но не загрузился");
@@ -100,7 +101,7 @@ export interface GenerationDeps extends CommonDeps {
   titleOf(strategy: string): string;
   /** The helper steps aside when a build starts: the build screen needs the whole width. */
   setAgentOpen?(open: boolean): void;
-  /** «Презентация готова» is only worth a toast when the person is not looking at the result already. */
+  /** «Презентация готова» is only worth a notice when the person is not looking at the result already. */
   currentScreen?(): string;
 }
 
@@ -130,7 +131,7 @@ export function generationFlow(req: GenerateRequest, d: GenerationDeps, expected
           if (g) {
             d.setTab("variants");
             d.pushMessage("assistant", describeGeneration(g, d.titleOf));
-            if (d.currentScreen?.() !== "result") pushToast("success", "Презентация готова");
+            if (d.currentScreen?.() !== "result") d.toast("success", "Презентация готова");
           }
           resolve();
         },

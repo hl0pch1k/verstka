@@ -1,7 +1,6 @@
 // Application state: one React context, consumed by every panel through useApp().
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api, ApiError } from "./api";
-import { pushToast } from "./components/ui/Toasts";
 import { generationFlow, uploadTemplateFlow } from "./lib/flows";
 import { foldJobEvent, type ActiveJob } from "./lib/jobState";
 import { trackJob } from "./lib/jobs";
@@ -9,12 +8,14 @@ import { errText, firstLine, newestTemplate, slideCount } from "./lib/narrate";
 import { templateTitle, tplLabel } from "./lib/plain";
 import { LS, storage, uid } from "./lib/utils";
 import { decodeImage, viewTransition } from "./lib/motion";
-import { variantRev, withRev } from "./components/VariantsHelpers";
+import { variantRev, withRev } from "./lib/rev";
 import type {
   ChatMessage, DetailKey, GenerateRequest, Generation, GenerationMeta, Health, ImprovedFrom, ImproveSource, Job, JobKind, ModelsStatus, Screen, StrategyInfo, TabKey, TemplateListItem, TemplateManifest, Variant,
 } from "./types";
 
 export type { ActiveJob } from "./lib/jobState";
+/** Сообщение о ходе действия (ошибка, готово, сведение) и время, когда оно пришло (мс). */
+export interface Notice { kind: "error" | "success" | "info"; text: string; at: number }
 /** `items`: what the job works on (the strategies of a generation) — the build screen shows one card per item.
  *  `generation` / `slides`: the deck a generation builds and the slide count asked for (the build's rail).
  *  `quiet`: the caller tells the failure itself (no «Не получилось: …» toast from the store). */
@@ -57,7 +58,10 @@ export interface AppState {
   activeJob: ActiveJob | null;
   runJob(jobId: string, label: string, opts?: RunJobOptions): void;
   messages: ChatMessage[]; pushMessage(role: "user" | "assistant", text: string): void; // ts = unix seconds (fmtDate-compatible)
-  toast(kind: "error" | "success" | "info", text: string): void;
+  /** Записывает сообщение в `notice` (всплывающих уведомлений в «Слоях» нет; Task 2 заменит это строками статуса). */
+  toast(kind: Notice["kind"], text: string): void;
+  /** Последнее сообщение `toast()`; null — сообщений не было. */
+  notice: Notice | null;
   uploadTemplate(file: File, useModels: boolean, improve?: boolean): Promise<void>;
   startGeneration(req: GenerateRequest, expectedSlides?: number | null): Promise<void>;
   /** A text handed to the create screen's field once (the agent's written text, «Изменить»); null when none waits. */
@@ -155,13 +159,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const genSeq = useRef(0);
   const jobSubs = useRef(new Map<string, () => void>());
 
-  const toast = useCallback((kind: "error" | "success" | "info", text: string) => void pushToast(kind, text), []);
-  /** Network failures flip the red «API недоступен» banner; `quietOffline` skips the toast for background loads. */
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const toast = useCallback((kind: Notice["kind"], text: string) => setNotice({ kind, text, at: Date.now() }), []);
+  /** Network failures flip the red «API недоступен» banner; `quietOffline` skips the notice for background loads. */
   const report = useCallback((e: unknown, prefix: string, quietOffline = false) => {
     const offline = e instanceof ApiError && e.status === 0;
     if (offline) setHealthError(true);
-    if (!(offline && quietOffline)) pushToast("error", `${prefix}: ${errText(e)}`);
-  }, []);
+    if (!(offline && quietOffline)) toast("error", `${prefix}: ${errText(e)}`);
+  }, [toast]);
 
   const pushMessage = useCallback((role: "user" | "assistant", text: string) => {
     setMessages((list) => [...list, { id: uid("m"), role, text, ts: Date.now() / 1000 }]);
@@ -337,12 +342,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const reason = firstLine(job.error ?? job.message);
         settle({ status: "failed", message: reason });
         // one notice per failure: with the helper open, its own message tells the story
-        if (!opts?.quiet && (!opts?.onFailed || !latest.current.agentOpen)) pushToast("error", `Не получилось: ${reason}`);
+        if (!opts?.quiet && (!opts?.onFailed || !latest.current.agentOpen)) toast("error", `Не получилось: ${reason}`);
         opts?.onFailed?.(job);
       },
     });
     jobSubs.current.set(jobId, stop);
-  }, []);
+  }, [toast]);
 
   const adoptManifest = useCallback((m: TemplateManifest) => {
     setManifest(m); // same batch as the id: the manifest effect sees a match and skips the refetch
@@ -351,14 +356,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const uploadTemplate = useCallback(
     (file: File, useModels: boolean, improve?: boolean) =>
-      uploadTemplateFlow(file, useModels, { runJob, report, pushMessage, setTab, setTemplates, adoptManifest }, improve ? (src) => { setImproveSource(src); setScreen("create"); } : undefined),
-    [runJob, report, pushMessage, adoptManifest],
+      uploadTemplateFlow(file, useModels, { runJob, report, toast, pushMessage, setTab, setTemplates, adoptManifest }, improve ? (src) => { setImproveSource(src); setScreen("create"); } : undefined),
+    [runJob, report, toast, pushMessage, adoptManifest],
   );
 
   const startGeneration = useCallback(
     (req: GenerateRequest, expectedSlides?: number | null) =>
-      generationFlow(req, { runJob, report, pushMessage, setTab, refreshGenerations, fetchGeneration, refreshModelStatus, titleOf: (name) => titleIn(latest.current.strategies, name), setAgentOpen, currentScreen: () => latest.current.screen }, expectedSlides ?? null),
-    [runJob, report, pushMessage, refreshGenerations, fetchGeneration, refreshModelStatus],
+      generationFlow(req, { runJob, report, toast, pushMessage, setTab, refreshGenerations, fetchGeneration, refreshModelStatus, titleOf: (name) => titleIn(latest.current.strategies, name), setAgentOpen, currentScreen: () => latest.current.screen }, expectedSlides ?? null),
+    [runJob, report, toast, pushMessage, refreshGenerations, fetchGeneration, refreshModelStatus],
   );
 
   // Health loop: first success boots the data (lists + restore from localStorage); afterwards keeps the banner truthful.
@@ -447,12 +452,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AppState>(() => ({
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, activeStrategy, setActiveStrategy, activeVariant,
-    selectedSlide, setSelectedSlide, setTab, screen, setScreen, detail, setDetail, agentOpen, setAgentOpen, activeJob, runJob, messages, pushMessage, toast, uploadTemplate, startGeneration,
+    selectedSlide, setSelectedSlide, setTab, screen, setScreen, detail, setDetail, agentOpen, setAgentOpen, activeJob, runJob, messages, pushMessage, toast, notice, uploadTemplate, startGeneration,
     composerText, composerPreset, editText, takeComposerText, improveSource, takeImproveSource,
   }), [
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, activeStrategy, setActiveStrategy, activeVariant,
-    selectedSlide, setSelectedSlide, setTab, screen, detail, agentOpen, setAgentOpen, activeJob, runJob, messages, pushMessage, toast, uploadTemplate, startGeneration,
+    selectedSlide, setSelectedSlide, setTab, screen, detail, agentOpen, setAgentOpen, activeJob, runJob, messages, pushMessage, toast, notice, uploadTemplate, startGeneration,
     composerText, composerPreset, editText, takeComposerText, improveSource, takeImproveSource,
   ]);
 

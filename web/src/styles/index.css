@@ -1,0 +1,4 @@
+/* Стили интерфейса «Слои» в порядке подключения: токены, основа; стили областей (create, build, result, details,
+ * layers, helper, offline) добавляются ниже своими задачами. */
+@import "./tokens.css";
+@import "./base.css";

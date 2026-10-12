@@ -81,7 +81,7 @@ def test_a_topic_with_statements_keeps_them_word_for_word():
 
 
 def _sample_brief() -> str:
-    src = (ROOT / "web/src/components/NewGenerationFormParts.tsx").read_text(encoding="utf-8")
+    src = (ROOT / "web/src/lib/createForm.ts").read_text(encoding="utf-8")
     return re.search(r"export const SAMPLE_BRIEF = `(.*?)`", src, re.S).group(1)
 
 
