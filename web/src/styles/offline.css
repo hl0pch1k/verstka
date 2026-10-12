@@ -1,0 +1,60 @@
+/* Нет связи с сервером. Дословно с досок: блок boards/G-toasts.dc.html от комментария «нет связи» до «цифры в кружках»
+ * (бег красных полосок логотипа), затем правила модуля offline из boards/V2.dc.html (of-*: раскладка поезда в покое,
+ * возврат связи of-land / of-home 360 мс). Классы не переименованы. */
+/* нет связи: три красные полоски бегут под словом Verstka вправо-влево с постоянной скоростью — без
+   торможения перед краем. Ведущая врезается в край и сжимается, остальные едут дальше и тормозят только
+   собственным сжатием — по очереди; отскок — зеркальный разгон обратно до той же скорости. Скорость
+   везде непрерывна, без остановок. Цикл 3000 мс, только transform */
+.p2-offline{align-items:stretch !important}
+.p2-offline .p2-bars{position:relative;height:4px;margin-left:0}
+.p2-lmove{position:absolute;top:0;left:0;right:66px;height:4px;animation:p2-off-run 3000ms linear infinite both}
+.p2-ltrain{display:flex;gap:3px;width:66px;height:4px}
+.p2-lb{display:block;flex:none;height:4px}
+.p2-lbr{display:block;height:4px;transform-origin:right center}
+.p2-ltrain .p2-lbar{display:block;transform-origin:left center;transition:none}
+.p2-offline .p2-lbar1{background:#FCA5A5}
+.p2-offline .p2-lbar2{background:#EF4444}
+.p2-offline .p2-lbar3{background:#B91C1C}
+@keyframes p2-off-run{0%{transform:translateX(0px);animation-timing-function:linear}26.07%{transform:translateX(100%)}46.378%{transform:translateX(100%);animation-timing-function:linear}72.448%{transform:translateX(0px)}100%{transform:translateX(0px)}}
+.p2-lb1{animation:p2-op1 3000ms linear infinite both}
+.p2-lb1 .p2-lbr{animation:p2-or1 3000ms linear infinite both}
+.p2-lb1 .p2-lbar{animation:p2-ol1 3000ms linear infinite both}
+@keyframes p2-op1{0%{transform:translateX(0px)}26.07%{transform:translateX(0px);animation-timing-function:cubic-bezier(.5,1,.89,1)}36.224%{transform:translateX(7.40px);animation-timing-function:cubic-bezier(.11,0,.5,0)}46.378%{transform:translateX(0px)}72.448%{transform:translateX(0px);animation-timing-function:cubic-bezier(.5,1,.89,1)}79.363%{transform:translateX(0.00px)}93.085%{transform:translateX(0.00px);animation-timing-function:cubic-bezier(.11,0,.5,0)}100%{transform:translateX(0px)}}
+@keyframes p2-or1{0%{transform:scaleX(1)}26.07%{transform:scaleX(1);animation-timing-function:cubic-bezier(.5,1,.89,1)}36.224%{transform:scaleX(0.97);animation-timing-function:cubic-bezier(.11,0,.5,0)}46.378%{transform:scaleX(1)}100%{transform:scaleX(1)}}
+@keyframes p2-ol1{0%{transform:scaleX(1)}72.448%{transform:scaleX(1);animation-timing-function:cubic-bezier(.5,1,.89,1)}79.363%{transform:scaleX(0.82)}93.085%{transform:scaleX(0.82);animation-timing-function:cubic-bezier(.11,0,.5,0)}100%{transform:scaleX(1)}}
+.p2-lb2{animation:p2-op2 3000ms linear infinite both}
+.p2-lb2 .p2-lbr{animation:p2-or2 3000ms linear infinite both}
+.p2-lb2 .p2-lbar{animation:p2-ol2 3000ms linear infinite both}
+@keyframes p2-op2{0%{transform:translateX(0px)}26.07%{transform:translateX(0px);animation-timing-function:cubic-bezier(.5,1,.89,1)}31.422%{transform:translateX(3.90px)}41.026%{transform:translateX(3.90px);animation-timing-function:cubic-bezier(.11,0,.5,0)}46.378%{transform:translateX(0px)}72.448%{transform:translateX(0px);animation-timing-function:cubic-bezier(.5,1,.89,1)}81.422%{transform:translateX(-6.54px)}91.026%{transform:translateX(-6.54px);animation-timing-function:cubic-bezier(.11,0,.5,0)}100%{transform:translateX(0px)}}
+@keyframes p2-or2{0%{transform:scaleX(1)}26.07%{transform:scaleX(1);animation-timing-function:cubic-bezier(.5,1,.89,1)}31.422%{transform:scaleX(0.9)}41.026%{transform:scaleX(0.9);animation-timing-function:cubic-bezier(.11,0,.5,0)}46.378%{transform:scaleX(1)}100%{transform:scaleX(1)}}
+@keyframes p2-ol2{0%{transform:scaleX(1)}72.448%{transform:scaleX(1);animation-timing-function:cubic-bezier(.5,1,.89,1)}81.422%{transform:scaleX(0.9)}91.026%{transform:scaleX(0.9);animation-timing-function:cubic-bezier(.11,0,.5,0)}100%{transform:scaleX(1)}}
+.p2-lb3{animation:p2-op3 3000ms linear infinite both}
+.p2-lb3 .p2-lbr{animation:p2-or3 3000ms linear infinite both}
+.p2-lb3 .p2-lbar{animation:p2-ol3 3000ms linear infinite both}
+@keyframes p2-op3{0%{transform:translateX(0px)}26.07%{transform:translateX(0px);animation-timing-function:cubic-bezier(.5,1,.89,1)}29.363%{transform:translateX(0.00px)}43.085%{transform:translateX(0.00px);animation-timing-function:cubic-bezier(.11,0,.5,0)}46.378%{transform:translateX(0px)}72.448%{transform:translateX(0px);animation-timing-function:cubic-bezier(.5,1,.89,1)}86.224%{transform:translateX(-10.04px);animation-timing-function:cubic-bezier(.11,0,.5,0)}100%{transform:translateX(0px)}}
+@keyframes p2-or3{0%{transform:scaleX(1)}26.07%{transform:scaleX(1);animation-timing-function:cubic-bezier(.5,1,.89,1)}29.363%{transform:scaleX(0.8)}43.085%{transform:scaleX(0.8);animation-timing-function:cubic-bezier(.11,0,.5,0)}46.378%{transform:scaleX(1)}100%{transform:scaleX(1)}}
+@keyframes p2-ol3{0%{transform:scaleX(1)}72.448%{transform:scaleX(1);animation-timing-function:cubic-bezier(.5,1,.89,1)}86.224%{transform:scaleX(0.97);animation-timing-function:cubic-bezier(.11,0,.5,0)}100%{transform:scaleX(1)}}
+/* нет связи (модуль offline). Раскладка поезда G-toasts стоит и в покое; сдвиг дорожки на 1 px (в V2 это
+   margin-left:1px) сделан transform'ом, поэтому при переходе он уходит за 360 мс, а не прыжком. Цвет полосок —
+   360 мс. Возврат связи (of-land): бег на паузе там, где был, of-home без from-кадра ведёт из этой позы в покой */
+.of-wrap{position:relative}
+.of-brand{align-items:stretch !important}
+.of-brand .p2-bars{position:relative;height:4px;margin-left:0;transform:translateX(1px);transition:transform 360ms var(--ease)}
+.of-brand.p2-offline .p2-bars{transform:none}
+.of-mv{position:absolute;top:0;left:0;right:66px;height:4px}
+.of-tr{display:flex;gap:3px;width:66px;height:4px}
+.of-brand .p2-lbar{transition:transform 240ms var(--ease),background-color 360ms var(--ease)}
+.of-brand .p2-ltrain .p2-lbar{transition:background-color 360ms var(--ease)}
+.of-gone{position:absolute;left:calc(100% + 16px);top:50%;margin-top:-10px}
+@media (max-width: 900px){.of-wrap{min-width:0}.of-wrap>[role=status]{min-width:0;white-space:normal !important}}
+@keyframes of-home{to{transform:none}}
+.of-land .p2-lmove{animation:p2-off-run 3000ms linear infinite both paused,of-home 360ms var(--ease) forwards}
+.of-land .p2-lb1{animation:p2-op1 3000ms linear infinite both paused,of-home 360ms var(--ease) forwards}
+.of-land .p2-lb1 .p2-lbr{animation:p2-or1 3000ms linear infinite both paused,of-home 360ms var(--ease) forwards}
+.of-land .p2-lb1 .p2-lbar{animation:p2-ol1 3000ms linear infinite both paused,of-home 360ms var(--ease) forwards}
+.of-land .p2-lb2{animation:p2-op2 3000ms linear infinite both paused,of-home 360ms var(--ease) forwards}
+.of-land .p2-lb2 .p2-lbr{animation:p2-or2 3000ms linear infinite both paused,of-home 360ms var(--ease) forwards}
+.of-land .p2-lb2 .p2-lbar{animation:p2-ol2 3000ms linear infinite both paused,of-home 360ms var(--ease) forwards}
+.of-land .p2-lb3{animation:p2-op3 3000ms linear infinite both paused,of-home 360ms var(--ease) forwards}
+.of-land .p2-lb3 .p2-lbr{animation:p2-or3 3000ms linear infinite both paused,of-home 360ms var(--ease) forwards}
+.of-land .p2-lb3 .p2-lbar{animation:p2-ol3 3000ms linear infinite both paused,of-home 360ms var(--ease) forwards}

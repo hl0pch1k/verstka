@@ -1,4 +1,6 @@
-/* Стили интерфейса «Слои» в порядке подключения: токены, основа; стили областей (create, build, result, details,
- * layers, helper, offline) добавляются ниже своими задачами. */
+/* Стили интерфейса «Слои» в порядке подключения: токены, основа, оболочка и колода; стили областей (create, build,
+ * result, details, layers, helper) добавляются между ними и offline своими задачами. */
 @import "./tokens.css";
 @import "./base.css";
+@import "./shell.css";
+@import "./offline.css";

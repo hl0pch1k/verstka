@@ -1,4 +1,6 @@
-// Интерфейс «Слои». Пока основа: корень страницы без содержимого — оболочку (шапку и колоду плит) строит Task 3.
+// Интерфейс «Слои»: вся страница — оболочка с шапкой и колодой плит (ui/shell/AppShell.tsx).
+import { AppShell } from "./ui/shell/AppShell";
+
 export default function App() {
-  return <div className="p2-root" />;
+  return <AppShell />;
 }
