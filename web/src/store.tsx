@@ -1,5 +1,5 @@
 // Application state: one React context, consumed by every panel through useApp().
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import { api, ApiError } from "./api";
 import { generationFlow, uploadTemplateFlow } from "./lib/flows";
 import { foldJobEvent, type ActiveJob } from "./lib/jobState";
@@ -9,21 +9,27 @@ import { templateTitle, tplLabel } from "./lib/plain";
 import { LS, storage, uid } from "./lib/utils";
 import { decodeImage, viewTransition } from "./lib/motion";
 import { variantRev, withRev } from "./lib/rev";
+import { uiReducer, UI0, type UiAction, type UiState } from "./ui/deck/geometry";
 import type {
-  ChatMessage, DetailKey, GenerateRequest, Generation, GenerationMeta, Health, ImprovedFrom, ImproveSource, Job, JobKind, ModelsStatus, Screen, StrategyInfo, TabKey, TemplateListItem, TemplateManifest, Variant,
+  ChatMessage, GenerateRequest, Generation, GenerationMeta, Health, ImprovedFrom, ImproveSource, Job, JobKind, ModelsStatus, Notice, NoticeArea, StrategyInfo, TemplateListItem, TemplateManifest, Variant,
 } from "./types";
 
 export type { ActiveJob } from "./lib/jobState";
-/** Сообщение о ходе действия (ошибка, готово, сведение) и время, когда оно пришло (мс). */
-export interface Notice { kind: "error" | "success" | "info"; text: string; at: number }
+export type { Notice, NoticeArea } from "./types";
 /** `items`: what the job works on (the strategies of a generation) — the build screen shows one card per item.
  *  `generation` / `slides`: the deck a generation builds and the slide count asked for (the build's rail).
- *  `quiet`: the caller tells the failure itself (no «Не получилось: …» toast from the store). */
+ *  `area`: where a failure is told («Не получилось: …»); by default — by the job's kind (`jobArea`).
+ *  `quiet`: the caller tells the failure itself (no «Не получилось: …» line from the store). */
 export interface RunJobOptions {
   kind?: JobKind; items?: string[]; template?: string | null; onDone?: (job: Job) => void; onFailed?: (job: Job) => void;
-  target?: { generation: string; strategy: string; slide: number }; quiet?: boolean;
+  target?: { generation: string; strategy: string; slide: number }; quiet?: boolean; area?: NoticeArea;
   generation?: string | null; slides?: number | null;
 }
+
+/** Where a job's failure stands by default: template analysis at the template step, a build on the build screen, the
+ *  work on a built deck (fixes, edits, pictures) on the result. */
+const jobArea = (kind: JobKind): NoticeArea =>
+  kind === "analyze" ? "template" : kind === "generate" ? "build" : kind === "other" ? "global" : "result";
 
 export interface AppState {
   health: Health | null; healthError: boolean;
@@ -50,18 +56,17 @@ export interface AppState {
   loadGeneration(gid: string, opts?: { hold?: boolean }): Promise<Generation | null>;
   activeStrategy: string | null; setActiveStrategy(s: string): void; activeVariant: Variant | null;
   selectedSlide: number; setSelectedSlide(n: number): void; // 1-based
-  /** Old view names (the agent and flows speak them) → screen + drawer. */
-  setTab(t: TabKey): void;
-  screen: Screen; setScreen(s: Screen): void;
-  detail: DetailKey | null; setDetail(d: DetailKey | null): void;
-  agentOpen: boolean; setAgentOpen(v: boolean): void;
+  /** Экран, раскрытые шаги, слои и листы «Слоёв» (`ui/deck/geometry.ts`); меняется только через `dispatch`. */
+  ui: UiState; dispatch(a: UiAction): void;
   activeJob: ActiveJob | null;
   runJob(jobId: string, label: string, opts?: RunJobOptions): void;
   messages: ChatMessage[]; pushMessage(role: "user" | "assistant", text: string): void; // ts = unix seconds (fmtDate-compatible)
-  /** Записывает сообщение в `notice` (всплывающих уведомлений в «Слоях» нет; Task 2 заменит это строками статуса). */
-  toast(kind: Notice["kind"], text: string): void;
-  /** Последнее сообщение `toast()`; null — сообщений не было. */
-  notice: Notice | null;
+  /** Строки статуса по областям — показываются рядом с местом действия (всплывающих уведомлений в «Слоях» нет). */
+  notices: Partial<Record<NoticeArea, Notice>>;
+  /** Ставит строку статуса области (новая заменяет прежнюю). */
+  notify(area: NoticeArea, kind: Notice["kind"], text: string): void;
+  /** Убирает строку статуса области. */
+  clearNotice(area: NoticeArea): void;
   uploadTemplate(file: File, useModels: boolean, improve?: boolean): Promise<void>;
   startGeneration(req: GenerateRequest, expectedSlides?: number | null): Promise<void>;
   /** A text handed to the create screen's field once (the agent's written text, «Изменить»); null when none waits. */
@@ -118,30 +123,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [activeStrategy, setActiveStrategyState] = useState<string | null>(null);
   const [selectedSlide, setSelectedSlideState] = useState(1);
   // a reload on a deck opens on the result screen at once (its skeleton covers the load and cross-fades into the deck),
-  // never on the create screen first; boot goes back to «Создать» when the stored deck does not load
-  const [screen, setScreen] = useState<Screen>(() => (storage.get(LS.generation) ? "result" : "create"));
-  const [detail, setDetail] = useState<DetailKey | null>(null);
-  const setTab = useCallback((t: TabKey) => {
-    if (t === "template") return setDetail("template");
-    if (t === "agent") {
-      setScreen("result");
-      return setDetail("agent");
-    }
-    if (t === "brief") {
-      setScreen("create");
-      return setDetail(null);
-    }
-    setScreen("result");
-    setDetail(t === "plan" ? "plan" : t === "why" ? "why" : t === "audit" ? "quality" : t === "export" || t === "run" ? "tech" : null);
-  }, []);
-  const [agentOpen, setAgentOpen] = useState(false); // the helper starts closed: the page itself must be self-explanatory
+  // never on the create screen first; boot goes back to «Создать» when the stored deck does not load. The helper
+  // starts closed (UI0): the page itself must be self-explanatory.
+  const [ui, dispatch] = useReducer(uiReducer, UI0, (s0): UiState => (storage.get(LS.generation) ? { ...s0, screen: "result" } : s0));
   const [composerText, setComposerText] = useState<string | null>(null);
   const [composerPreset, setComposerPreset] = useState<ComposerPreset | null>(null);
   const editText = useCallback((text: string, preset?: ComposerPreset) => {
     setComposerText(text);
     setComposerPreset(preset ?? null);
-    setDetail(null);
-    setScreen("create");
+    dispatch({ type: "go", screen: "create" });
   }, []);
   const takeComposerText = useCallback(() => {
     setComposerText(null);
@@ -154,19 +144,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
 
   // Latest values for callbacks that must stay referentially stable.
-  const latest = useRef({ templateId, templates, manifest, generationId, generation, activeStrategy, strategies, screen, agentOpen });
-  latest.current = { templateId, templates, manifest, generationId, generation, activeStrategy, strategies, screen, agentOpen };
+  const latest = useRef({ templateId, templates, manifest, generationId, generation, activeStrategy, strategies, ui });
+  latest.current = { templateId, templates, manifest, generationId, generation, activeStrategy, strategies, ui };
   const genSeq = useRef(0);
   const jobSubs = useRef(new Map<string, () => void>());
 
-  const [notice, setNotice] = useState<Notice | null>(null);
-  const toast = useCallback((kind: Notice["kind"], text: string) => setNotice({ kind, text, at: Date.now() }), []);
-  /** Network failures flip the red «API недоступен» banner; `quietOffline` skips the notice for background loads. */
-  const report = useCallback((e: unknown, prefix: string, quietOffline = false) => {
+  const [notices, setNotices] = useState<Partial<Record<NoticeArea, Notice>>>({});
+  const notify = useCallback((area: NoticeArea, kind: Notice["kind"], text: string) => {
+    setNotices((n) => ({ ...n, [area]: { kind, text, at: Date.now() } }));
+  }, []);
+  const clearNotice = useCallback((area: NoticeArea) => {
+    setNotices((n) => {
+      if (!n[area]) return n;
+      const next = { ...n };
+      delete next[area];
+      return next;
+    });
+  }, []);
+  /** A failure as the area's status line. Network failures flip the header's «нет связи»; `quietOffline` skips the
+   *  line for background loads. */
+  const report = useCallback((e: unknown, prefix: string, area: NoticeArea, quietOffline = false) => {
     const offline = e instanceof ApiError && e.status === 0;
     if (offline) setHealthError(true);
-    if (!(offline && quietOffline)) toast("error", `${prefix}: ${errText(e)}`);
-  }, [toast]);
+    if (!(offline && quietOffline)) notify(area, "error", `${prefix}: ${errText(e)}`);
+  }, [notify]);
 
   const pushMessage = useCallback((role: "user" | "assistant", text: string) => {
     setMessages((list) => [...list, { id: uid("m"), role, text, ts: Date.now() / 1000 }]);
@@ -216,7 +217,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try {
       setTemplates(await api.templates());
     } catch (e) {
-      report(e, "Не удалось обновить список шаблонов");
+      report(e, "Не удалось обновить список шаблонов", "template");
     }
   }, [report]);
 
@@ -237,15 +238,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const current = latest.current.generation?.id; // a loaded generation that was deleted meanwhile
       if (current && !list.some((g) => g.id === current)) clearGeneration();
     } catch (e) {
-      report(e, "Не удалось обновить список презентаций");
+      report(e, "Не удалось обновить список презентаций", "global");
     }
   }, [report, clearGeneration]);
 
   /** Loads a generation. A reload of the already open one keeps the chosen variant and slide (clamped). `hold` (another
    *  deck picked over an open one, from the history): the open deck stays on screen while the new one loads and its
    *  first slide decodes, then the new deck replaces it inside a view transition — never a skeleton in between (the
-   *  history row shows the wait); a failed load leaves the open deck as it was. */
-  const fetchGeneration = useCallback(async (gid: string, quiet = false, hold = false): Promise<Generation | null> => {
+   *  history row shows the wait); a failed load leaves the open deck as it was. `area`: where a failure is told (the
+   *  result; the build screen for a deck that has just been built). */
+  const fetchGeneration = useCallback(async (gid: string, quiet = false, hold = false, area: NoticeArea = "result"): Promise<Generation | null> => {
     const seq = ++genSeq.current;
     const sameAsOpen = latest.current.generation?.id === gid;
     const holding = hold && !sameAsOpen && !!latest.current.generation;
@@ -288,7 +290,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } catch (e) {
       if (seq !== genSeq.current) return null;
       if (e instanceof ApiError && e.status === 404 && !holding) clearGeneration();
-      if (!quiet) report(e, "Не удалось открыть презентацию");
+      if (!quiet) report(e, "Не удалось открыть презентацию", area);
       return null;
     } finally {
       if (seq === genSeq.current) setGenerationLoading(false);
@@ -341,29 +343,37 @@ export function AppProvider({ children }: { children: ReactNode }) {
       onFailed: (job) => {
         const reason = firstLine(job.error ?? job.message);
         settle({ status: "failed", message: reason });
-        // one notice per failure: with the helper open, its own message tells the story
-        if (!opts?.quiet && (!opts?.onFailed || !latest.current.agentOpen)) toast("error", `Не получилось: ${reason}`);
+        // the line stays where the action was after the job slot clears (a failed build keeps its screen); with the
+        // helper open it stays too — the line is part of the screen, not a pop-up repeating the helper's message
+        if (!opts?.quiet) notify(opts?.area ?? jobArea(opts?.kind ?? "other"), "error", `Не получилось: ${reason}`);
         opts?.onFailed?.(job);
       },
     });
     jobSubs.current.set(jobId, stop);
-  }, [toast]);
+  }, [notify]);
 
   const adoptManifest = useCallback((m: TemplateManifest) => {
     setManifest(m); // same batch as the id: the manifest effect sees a match and skips the refetch
     selectTemplate(m.template_id);
   }, [selectTemplate]);
 
+  // «Улучшить готовую»: the deck read back opens «Создать» with its text, plate 02 under the folded plate 01
+  const improveReady = useCallback((src: ImproveSource) => {
+    setImproveSource(src);
+    dispatch({ type: "go", screen: "create" });
+    dispatch({ type: "set", patch: { improve: true } });
+  }, []);
+
   const uploadTemplate = useCallback(
     (file: File, useModels: boolean, improve?: boolean) =>
-      uploadTemplateFlow(file, useModels, { runJob, report, toast, pushMessage, setTab, setTemplates, adoptManifest }, improve ? (src) => { setImproveSource(src); setScreen("create"); } : undefined),
-    [runJob, report, toast, pushMessage, adoptManifest],
+      uploadTemplateFlow(file, useModels, { runJob, report, notify, clearNotice, pushMessage, dispatch, setTemplates, adoptManifest }, improve ? improveReady : undefined),
+    [runJob, report, notify, clearNotice, pushMessage, adoptManifest, improveReady],
   );
 
   const startGeneration = useCallback(
     (req: GenerateRequest, expectedSlides?: number | null) =>
-      generationFlow(req, { runJob, report, toast, pushMessage, setTab, refreshGenerations, fetchGeneration, refreshModelStatus, titleOf: (name) => titleIn(latest.current.strategies, name), setAgentOpen, currentScreen: () => latest.current.screen }, expectedSlides ?? null),
-    [runJob, report, toast, pushMessage, refreshGenerations, fetchGeneration, refreshModelStatus],
+      generationFlow(req, { runJob, report, notify, clearNotice, pushMessage, dispatch, refreshGenerations, fetchGeneration: (gid) => fetchGeneration(gid, false, false, "build"), refreshModelStatus, titleOf: (name) => titleIn(latest.current.strategies, name) }, expectedSlides ?? null),
+    [runJob, report, notify, clearNotice, pushMessage, refreshGenerations, fetchGeneration, refreshModelStatus],
   );
 
   // Health loop: first success boots the data (lists + restore from localStorage); afterwards keeps the banner truthful.
@@ -377,19 +387,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (st.status === "fulfilled") setStrategies(st.value);
       if (gn.status === "fulfilled") setGenerations(gn.value);
       const failed = [st, tp, gn].find((r): r is PromiseRejectedResult => r.status === "rejected");
-      if (failed) report(failed.reason, "Не удалось загрузить данные", true);
+      if (failed) report(failed.reason, "Не удалось загрузить данные", "global", true);
       if (tp.status === "fulfilled") {
         setTemplates(tp.value);
         const stored = latest.current.templateId; // drop a stale id, fall back to the newest template
         if (!stored || !tp.value.some((t) => t.template_id === stored)) selectTemplate(newestTemplate(tp.value)?.template_id ?? null);
       }
       const storedGen = storage.get(LS.generation);
-      if (storedGen && (await fetchGeneration(storedGen, true)) && alive) setTab("variants");
-      else if (alive) {
+      // a stored deck that loads needs no move: the screen started on the result (the reducer's initial state), and a
+      // place the person went to meanwhile (a layer, «Создать») stays as it is
+      if (storedGen && (await fetchGeneration(storedGen, true))) return;
+      if (alive) {
         setGenerationLoading(false);
         // the stored deck is gone (404 cleared it) or did not load, and no other deck was opened meanwhile
         const now = storage.get(LS.generation);
-        if (storedGen && (now === null || now === storedGen) && latest.current.screen === "result") setScreen("create");
+        if (storedGen && (now === null || now === storedGen) && latest.current.ui.screen === "result") dispatch({ type: "go", screen: "create" });
       }
     };
     const tick = async () => {
@@ -434,7 +446,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       (e) => {
         if (!alive) return;
         if (e instanceof ApiError && e.status === 404) selectTemplate(null);
-        else report(e, "Не удалось загрузить шаблон", true);
+        else report(e, "Не удалось загрузить шаблон", "template", true);
       },
     ).finally(() => alive && setManifestLoading(false));
     return () => {
@@ -452,12 +464,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AppState>(() => ({
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, activeStrategy, setActiveStrategy, activeVariant,
-    selectedSlide, setSelectedSlide, setTab, screen, setScreen, detail, setDetail, agentOpen, setAgentOpen, activeJob, runJob, messages, pushMessage, toast, notice, uploadTemplate, startGeneration,
+    selectedSlide, setSelectedSlide, ui, dispatch, activeJob, runJob, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
     composerText, composerPreset, editText, takeComposerText, improveSource, takeImproveSource,
   }), [
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, activeStrategy, setActiveStrategy, activeVariant,
-    selectedSlide, setSelectedSlide, setTab, screen, detail, agentOpen, setAgentOpen, activeJob, runJob, messages, pushMessage, toast, notice, uploadTemplate, startGeneration,
+    selectedSlide, setSelectedSlide, ui, activeJob, runJob, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
     composerText, composerPreset, editText, takeComposerText, improveSource, takeImproveSource,
   ]);
 
