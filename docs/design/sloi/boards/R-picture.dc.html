@@ -1,0 +1,506 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Verstka — Слои: Результат, изображение на слайде</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700&amp;family=Unbounded:wght@600;700&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#0A0F1F}a:hover{color:#1E40AF}
+.p2-root{--ease:cubic-bezier(0.2, 0, 0, 1);-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+.p2-root *,.p2-root *::before,.p2-root *::after{box-sizing:border-box}
+:where(.p2-root) button{font-family:inherit;color:inherit;-webkit-tap-highlight-color:transparent}
+.p2-root :focus-visible{outline:2px solid #2563EB;outline-offset:2px}
+.p2-dark :focus-visible{outline-color:#38BDF8}
+.p2-sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.p2-none{display:none}
+
+/* движение: только transform и opacity */
+@keyframes p2-rise{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:translateY(0)}}
+@keyframes p2-in{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+@keyframes p2-pop{from{opacity:0;transform:scale(.98)}to{opacity:1;transform:scale(1)}}
+@keyframes p2-work{0%{transform:scaleX(0);opacity:1}72%{transform:scaleX(1);opacity:1}100%{transform:scaleX(1);opacity:0}}
+.p2-rise{animation:p2-rise 520ms var(--ease) backwards}
+.p2-in{animation:p2-in 360ms var(--ease) backwards}
+.p2-pop{animation:p2-pop 360ms var(--ease) backwards}
+
+/* колода плит */
+.p2-slot{transition:transform 520ms var(--ease)}
+.p2-s4-on{opacity:1;visibility:visible;transition:transform 520ms var(--ease),opacity 520ms var(--ease)}
+.p2-s4-off{opacity:0;visibility:hidden;pointer-events:none;transition:transform 340ms var(--ease),opacity 340ms var(--ease),visibility 0s linear 340ms}
+.p2-on{opacity:1;visibility:visible;transition:opacity 360ms var(--ease) 120ms}
+.p2-off{opacity:0;visibility:hidden;pointer-events:none;transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
+.p2-stag{transition:opacity 360ms var(--ease),transform 360ms var(--ease)}
+.p2-off .p2-stag{opacity:0;transform:translateY(12px);transition-duration:240ms}
+
+/* заголовок плиты */
+.p2-head{display:flex;align-items:center;gap:32px;height:64px;padding:0;border:0;background:none;cursor:pointer;text-align:left;border-radius:16px;transition:transform 160ms var(--ease)}
+.p2-head:active{transform:scale(.98)}
+.p2-num{display:block;width:160px;flex:none;height:64px;font-family:'Unbounded','Manrope',sans-serif;font-weight:700;font-size:88px;line-height:64px;letter-spacing:-0.04em;opacity:.14;transition:opacity 160ms var(--ease);pointer-events:none}
+.p2-head:hover .p2-num{opacity:.3}
+.p2-p2 .p2-num{opacity:.3}
+.p2-p2 .p2-head:hover .p2-num{opacity:.46}
+.p2-num3{opacity:.22}
+.p2-p3:has(.p2-head:hover) .p2-num3{opacity:.4}
+.p2-ttl{font-family:'Unbounded','Manrope',sans-serif;font-weight:600;font-size:32px;line-height:40px;letter-spacing:-0.03em;white-space:nowrap}
+
+/* кнопки */
+.p2-cta{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:12px;height:56px;padding:0 32px;border:0;border-radius:999px;background:linear-gradient(112deg,#1D4ED8 0%,#2563EB 45%,#38BDF8 140%);color:#FFFFFF;font-family:'Unbounded','Manrope',sans-serif;font-size:15px;font-weight:600;line-height:24px;letter-spacing:-0.01em;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-cta::after{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:0 12px 40px 0 rgba(11,18,32,.18);opacity:0;transition:opacity 160ms var(--ease);pointer-events:none}
+.p2-cta:hover{transform:translateY(-2px)}
+.p2-cta:hover::after{opacity:1}
+.p2-cta:active{transform:scale(.98)}
+.p2-ob{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:48px;padding:0 24px;border:0;border-radius:999px;background:#FFFFFF;box-shadow:inset 0 0 0 1px rgba(11,18,32,.14);color:#0B1220;font-size:15px;font-weight:700;line-height:24px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-ob:hover{transform:translateY(-2px)}
+.p2-ob:active{transform:scale(.98)}
+.p2-gb{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 16px;border:0;border-radius:999px;background:transparent;color:#2563EB;font-size:15px;font-weight:700;line-height:24px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-gb:hover{background:#F3F4F1;transform:translateY(-2px)}
+.p2-gb:active{transform:scale(.98)}
+.p2-pill{display:inline-flex;align-items:center;height:40px;padding:0 16px;border:0;border-radius:999px;background:#FFFFFF;box-shadow:inset 0 0 0 1px rgba(37,99,235,.14);color:#0B1220;font-size:14px;font-weight:600;line-height:20px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-pill:hover{transform:translateY(-2px);box-shadow:inset 0 0 0 1px rgba(37,99,235,.4)}
+.p2-pill:active{transform:scale(.98)}
+.p2-nav{display:inline-flex;align-items:center;height:40px;padding:0 16px;border-radius:999px;font-family:'Unbounded','Manrope',sans-serif;font-size:14px;font-weight:600;line-height:24px;letter-spacing:-0.01em;color:#5A6272;text-decoration:none;transition:transform 160ms var(--ease)}
+.p2-nav:hover{color:#0B1220;background:#FFFFFF}
+.p2-nav:active{transform:scale(.98)}
+
+/* шаблоны */
+.p2-card{display:block;width:100%;padding:0;border:0;background:none;text-align:left;cursor:pointer;border-radius:16px;transition:transform 160ms var(--ease)}
+.p2-card:hover{transform:translateY(-2px)}
+.p2-card:active{transform:scale(.98)}
+.p2-cover{position:relative;display:block;height:142px;border-radius:16px}
+.p2-cover::after{content:"";position:absolute;inset:0;border-radius:16px;box-shadow:0 12px 32px 0 rgba(11,18,32,.14);opacity:0;transition:opacity 160ms var(--ease);pointer-events:none}
+.p2-card:hover .p2-cover::after{opacity:1}
+.p2-sel{box-shadow:0 0 0 2px #FFFFFF,0 0 0 4px #2563EB}
+.p2-chk{position:absolute;top:8px;right:8px;width:24px;height:24px;border-radius:999px;background:#2563EB;color:#FFFFFF;display:flex;align-items:center;justify-content:center;transition:opacity 240ms var(--ease),transform 240ms var(--ease)}
+.p2-chk-off{opacity:0;transform:scale(.98)}
+
+/* текст */
+.p2-field{transition:box-shadow 0s}
+.p2-field:has(.p2-ta:focus){box-shadow:0 0 0 2px #2563EB}
+.p2-ta::placeholder,.p2-inp::placeholder{color:#5A6272;opacity:1}
+.p2-ta:focus{outline:none}
+.p2-muted{color:#5A6272}
+
+/* параметры (тёмная плита) */
+.p2-box{border-radius:24px;background:rgba(255,255,255,.06);box-shadow:inset 0 0 0 1px rgba(255,255,255,.1)}
+.p2-rb{width:40px;height:40px;flex:none;padding:0;border:0;border-radius:999px;background:rgba(255,255,255,.1);color:#FFFFFF;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:transform 160ms var(--ease),opacity 160ms var(--ease)}
+.p2-rb:hover{transform:translateY(-2px)}
+.p2-rb:active{transform:scale(.98)}
+.p2-rb:disabled{opacity:.32;cursor:default;transform:none}
+.p2-vc{width:100%;height:88px;padding:16px;border:0;border-radius:24px;background:rgba(255,255,255,.06);box-shadow:inset 0 0 0 1px rgba(255,255,255,.1);display:flex;flex-direction:column;justify-content:space-between;text-align:left;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-vc:hover{transform:translateY(-2px)}
+.p2-vc:active{transform:scale(.98)}
+.p2-vc-on{background:rgba(37,99,235,.24);box-shadow:inset 0 0 0 1px #38BDF8}
+.p2-vbox{width:20px;height:20px;flex:none;border-radius:999px;box-shadow:inset 0 0 0 2px rgba(255,255,255,.4);display:flex;align-items:center;justify-content:center;color:#FFFFFF}
+.p2-vbox svg{opacity:0;transition:opacity 240ms var(--ease)}
+.p2-vc-on .p2-vbox{background:#2563EB;box-shadow:none}
+.p2-vc-on .p2-vbox svg{opacity:1}
+.p2-sw{position:relative;width:44px;height:24px;flex:none;padding:0;border:0;border-radius:999px;background:rgba(255,255,255,.16);cursor:pointer}
+.p2-sw-fill{position:absolute;inset:0;border-radius:999px;background:#2563EB;opacity:0;transition:opacity 240ms var(--ease)}
+.p2-sw-knob{position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:999px;background:#FFFFFF;transition:transform 240ms var(--ease)}
+.p2-sw-on .p2-sw-fill{opacity:1}
+.p2-sw-on .p2-sw-knob{transform:translateX(20px)}
+
+/* сборка */
+.p2-seg{height:32px;padding:0 16px;border:0;border-radius:999px;background:transparent;color:rgba(255,255,255,.72);font-size:14px;font-weight:600;line-height:20px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-seg:hover{color:#FFFFFF}
+.p2-seg:active{transform:scale(.98)}
+.p2-seg-on,.p2-seg-on:hover{background:#FFFFFF;color:#0B1220}
+.p2-ph{position:absolute;left:0;top:0;white-space:nowrap;transition:opacity 360ms var(--ease),transform 360ms var(--ease)}
+.p2-ph-on{opacity:1;transform:translateY(0)}
+.p2-ph-past{opacity:0;transform:translateY(-12px);transition-duration:240ms}
+.p2-ph-next{opacity:0;transform:translateY(12px);transition-duration:240ms}
+.p2-bar{transition:transform 520ms var(--ease)}
+.p2-sbf{position:relative;aspect-ratio:16 / 9;border-radius:16px;overflow:hidden;background:rgba(255,255,255,.04);box-shadow:inset 0 0 0 1px rgba(255,255,255,.08)}
+.p2-sb-cur .p2-sbf{box-shadow:inset 0 0 0 1px #38BDF8}
+.p2-sbn{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:'Unbounded','Manrope',sans-serif;font-weight:600;font-size:20px;color:rgba(255,255,255,.24);transition:opacity 240ms var(--ease)}
+.p2-sb-done .p2-sbn{opacity:0}
+.p2-sbok{position:absolute;top:8px;right:8px;width:20px;height:20px;border-radius:999px;background:#2563EB;color:#FFFFFF;display:flex;align-items:center;justify-content:center}
+.p2-work{position:absolute;left:0;right:0;bottom:0;height:2px;background:#38BDF8;transform-origin:left center;animation:p2-work 1100ms var(--ease) infinite}
+.p2-role{position:relative;display:grid;grid-template-columns:28px minmax(0,1fr);column-gap:16px}
+.p2-role::before{content:"";position:absolute;left:13px;top:36px;bottom:-4px;width:2px;border-radius:999px;background:rgba(255,255,255,.12)}
+.p2-role-last::before{display:none}
+.p2-dot{width:28px;height:28px;border-radius:999px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.06);color:rgba(255,255,255,.48)}
+.p2-role-done .p2-dot{background:#2563EB;color:#FFFFFF}
+.p2-role-act .p2-dot{background:transparent;color:#38BDF8;box-shadow:inset 0 0 0 2px #38BDF8}
+.p2-rname{font-size:15px;font-weight:700;line-height:20px;color:#FFFFFF}
+.p2-role-pend .p2-rname{color:rgba(255,255,255,.48)}
+.p2-rst{font-size:13px;font-weight:600;line-height:20px;color:rgba(255,255,255,.56)}
+.p2-role-act .p2-rst{color:#38BDF8}
+.p2-arrow{color:#38BDF8;font-weight:700;margin:0 8px}
+
+/* результат */
+.p2-rbl{width:40px;height:40px;padding:0;border:0;border-radius:999px;background:#F3F4F1;color:#0B1220;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:transform 160ms var(--ease),opacity 160ms var(--ease)}
+.p2-rbl:hover{transform:translateY(-2px)}
+.p2-rbl:active{transform:scale(.98)}
+.p2-rbl:disabled{opacity:.32;cursor:default;transform:none}
+.p2-film{display:flex;gap:8px;overflow-x:auto;padding:8px 4px;scrollbar-width:none}
+.p2-film::-webkit-scrollbar{display:none}
+.p2-th{flex:none;width:112px;height:63px;padding:0;border:0;border-radius:12px;background:#F3F4F1;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-th:hover{transform:translateY(-2px)}
+.p2-th:active{transform:scale(.98)}
+.p2-th-on{box-shadow:0 0 0 2px #FFFFFF,0 0 0 4px #2563EB}
+.p2-rseg{display:flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 8px;border:0;border-radius:999px;background:transparent;color:#5A6272;font-size:14px;font-weight:600;line-height:20px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-rseg:hover{color:#0B1220}
+.p2-rseg:active{transform:scale(.98)}
+.p2-rseg-on{background:#FFFFFF;color:#0B1220;box-shadow:0 1px 2px rgba(11,18,32,.06),0 4px 16px 0 rgba(11,18,32,.08)}
+.p2-rsc{font-family:'Unbounded','Manrope',sans-serif;font-size:12px;font-weight:600;color:#2563EB}
+
+@media (prefers-reduced-motion: reduce){
+  .p2-root *,.p2-root *::before,.p2-root *::after{animation:none !important;transition:none !important}
+}
+@media (max-width: 900px){
+  .p2-root{padding:0 16px 16px !important}
+  .p2-hdr{padding:0 8px !important}
+  .p2-navs{display:none !important}
+  .p2-deck{height:auto !important;overflow:visible !important;border-radius:0 !important}
+  .p2-slot{position:relative !important;height:auto !important;transform:none !important;margin-top:-40px}
+  .p2-slot:first-child{margin-top:0}
+  .p2-plate{height:auto !important;padding:24px 24px 64px !important}
+  .p2-off,.p2-s4-off,.p2-num3,.p2-spc,.p2-hide-s{display:none !important}
+  .p2-body{margin-left:0 !important}
+  .p2-hrow{flex-wrap:wrap !important;height:auto !important;row-gap:16px}
+  .p2-head{gap:16px}
+  .p2-num{width:auto !important;height:48px !important;font-size:48px !important;line-height:48px !important}
+  .p2-ttl{font-size:24px !important;line-height:32px !important;white-space:normal}
+  .p2-g4{grid-template-columns:repeat(2,minmax(0,1fr)) !important}
+  .p2-params,.p2-two{grid-template-columns:minmax(0,1fr) !important;height:auto !important}
+  .p2-field{height:auto !important}
+  .p2-ta{min-height:120px !important}
+  .p2-wrap{flex-wrap:wrap !important;height:auto !important;row-gap:16px}
+  .p2-phs{height:auto !important}
+  .p2-ph{position:static !important;white-space:normal;font-size:24px !important;line-height:32px !important}
+  .p2-ph-past,.p2-ph-next{display:none}
+}
+/* R-picture: изображение на слайде — колонка прокручена к карточке «Изображение», карточка раскрыта в форму */
+.p2-sw.rp-sw{background:#E9EEF3}
+.rp-sw .p2-sw-knob{box-shadow:0 1px 2px rgba(11,18,32,.06),0 4px 16px 0 rgba(11,18,32,.08)}
+.rp-cnt{display:inline-flex;align-items:center;justify-content:center;min-width:24px;height:24px;padding:0 8px;border-radius:999px;font-size:12px;font-weight:700;line-height:16px}
+.rp-cnt-warn{background:#FFFBEB;color:#B45309}
+.rp-stage{position:relative;border-radius:24px;overflow:hidden;background:#F3F4F1;box-shadow:0 0 0 1px rgba(11,18,32,.08),0 16px 48px 0 rgba(11,18,32,.12)}
+.rp-frame{position:absolute;left:48.75%;top:6.67%;width:48.75%;height:85.19%;border:2px solid #38BDF8;border-radius:8px;pointer-events:none}
+.rp-col{scrollbar-width:none}
+.rp-col::-webkit-scrollbar{display:none}
+.rp-in>*{flex:none}
+.rp-card{position:relative;display:block;padding:16px 24px;border-radius:24px;background:#F3F4F1;color:#0B1220;text-decoration:none;transition:transform 160ms var(--ease)}
+.rp-card:hover{color:#0B1220;transform:translateY(-2px)}
+.rp-card:active{transform:scale(.98)}
+.rp-ch{display:flex;align-items:center;justify-content:space-between;gap:8px;height:24px}
+.rp-ct{font-family:'Unbounded','Manrope',sans-serif;font-size:14px;font-weight:600;line-height:24px;letter-spacing:-0.02em;color:#0B1220;white-space:nowrap}
+.rp-cm{font-size:13px;font-weight:600;line-height:20px;color:#5A6272;white-space:nowrap}
+.rp-go{flex:none;color:#5A6272;transition:transform 160ms var(--ease)}
+.rp-card:hover .rp-go{transform:translateX(2px)}
+.rp-ri{display:flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:999px;background:#FFFFFF;color:#2563EB}
+.rp-tag{display:inline-flex;align-items:center;height:24px;padding:0 8px;border-radius:999px;background:#E9F1FF;color:#2563EB;font-size:12px;font-weight:700;line-height:16px;white-space:nowrap}
+.rp-on{box-shadow:inset 0 0 0 2px #2563EB}
+/* колонка стоит в конце прокрутки (column-reverse), а направление scroll-timeline у таких контейнеров в браузерах
+   разное — поэтому края мягкие постоянно: 24 сверху и снизу, поля 24 внутри = зоны растворения, контент в покое на месте */
+.p2-fade.rp-col{animation:none;--p2-ft:24px;--p2-fb:24px}
+.rp-vg{display:inline-flex;align-items:baseline;gap:6px}
+/* мягкий край прокрутки: контент сверху и снизу растворяется, а не обрезается; верхний край — только после начала прокрутки */
+@property --p2-ft{syntax:'<length>';inherits:false;initial-value:0px}
+@property --p2-fb{syntax:'<length>';inherits:false;initial-value:24px}
+.p2-fade,.p2-fade-top{-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 var(--p2-ft),#000 calc(100% - var(--p2-fb)),transparent 100%);mask-image:linear-gradient(to bottom,transparent 0,#000 var(--p2-ft),#000 calc(100% - var(--p2-fb)),transparent 100%)}
+.p2-fade-top{--p2-fb:0px}
+@supports (animation-timeline: scroll()){
+.p2-fade{animation:p2-fade linear both;animation-timeline:scroll(self)}
+.p2-fade-top{animation:p2-fade-top linear both;animation-timeline:scroll(self)}
+}
+@keyframes p2-fade{0%{--p2-ft:0px;--p2-fb:24px}8%{--p2-ft:24px}92%{--p2-fb:24px}100%{--p2-ft:24px;--p2-fb:0px}}
+@keyframes p2-fade-top{0%{--p2-ft:0px}8%{--p2-ft:24px}100%{--p2-ft:24px}}
+/* логотип Verstka: слово и три слоя под ним — светлый, синий, тёмный; при наведении слои расходятся */
+.p2-bars{display:flex;gap:3px;margin-left:1px;margin-top:-1px}
+.p2-lbar{display:block;height:4px;border-radius:999px;transition:transform 240ms var(--ease)}
+.p2-lbar1{width:28px;background:#BFD6FF}
+.p2-lbar2{width:20px;background:#2563EB}
+.p2-lbar3{width:12px;background:#0B1220}
+.p2-brand:hover .p2-lbar2{transform:translateX(2px)}
+.p2-brand:hover .p2-lbar3{transform:translateX(4px)}
+/* цифры в кружках — Unbounded */
+.rp-cnt{font-family:'Unbounded','Manrope',sans-serif;font-weight:600;letter-spacing:0;font-variant-numeric:tabular-nums}
+</style>
+</helmet>
+<div class="p2-root" style="width:100%; min-height:900px; box-sizing:border-box; padding:0 24px 24px; background:#F3F4F1; color:#0B1220; font-family:'Manrope', system-ui, -apple-system, 'Segoe UI', sans-serif; font-size:15px; line-height:24px;">
+<div style="width:100%; max-width:1392px; margin:0 auto;">
+
+<header class="p2-hdr" style="display:flex; align-items:center; justify-content:space-between; height:64px; padding:0 48px;">
+<a href="#" class="p2-brand" aria-label="Verstka — на главную" style="display:inline-flex; flex-direction:column; align-items:flex-start; gap:0; text-decoration:none; color:#0B1220;">
+<span style="font-family:'Unbounded','Manrope',sans-serif; font-weight:700; font-size:20px; line-height:24px; letter-spacing:-0.03em;">Verstka</span>
+<span class="p2-bars" aria-hidden="true"><span class="p2-lbar p2-lbar1"></span><span class="p2-lbar p2-lbar2"></span><span class="p2-lbar p2-lbar3"></span></span>
+</a>
+<nav class="p2-navs" aria-label="Разделы" style="display:flex; align-items:center; gap:8px; margin-right:-16px;">
+<a class="p2-nav" href="#">Мои презентации</a>
+<a class="p2-nav" href="#">Шаблоны</a>
+<a class="p2-nav" href="#">Помощник</a>
+</nav>
+</header>
+
+<main class="p2-deck" style="position:relative; height:812px; border-radius:40px; overflow:hidden;">
+
+<!-- ПЛИТА 01 · Шаблон (свёрнута в полосу) -->
+<div class="p2-slot" style="position:absolute; left:0; right:0; top:0; height:812px; z-index:1; transform:translateY(0px);">
+<section class="p2-plate p2-rise" aria-label="Шаг 1 — шаблон" style="position:relative; height:100%; padding:40px 48px; border-radius:40px; background:#FFFFFF; color:#0B1220; animation-delay:0ms;">
+<div style="position:absolute; left:48px; right:48px; top:0; height:40px; display:flex; align-items:center; gap:12px; white-space:nowrap;">
+<span style="font-family:'Unbounded','Manrope',sans-serif; font-weight:700; font-size:13px; line-height:20px; color:#5A6272;">01</span>
+<span style="font-size:14px; font-weight:700; line-height:20px; color:#0B1220;">VK Tech</span>
+<span style="font-size:13px; font-weight:500; line-height:20px; color:#5A6272;">54 слайда · Play</span>
+</div>
+</section>
+</div>
+
+<!-- ПЛИТА 02 · Текст (свёрнута в полосу) -->
+<div class="p2-slot" style="position:absolute; left:0; right:0; top:0; height:812px; z-index:2; transform:translateY(40px);">
+<section class="p2-plate p2-p2 p2-rise" aria-label="Шаг 2 — текст" style="position:relative; height:100%; padding:40px 48px; border-radius:40px; background:#E9F1FF; color:#0B1220; box-shadow:0 -24px 48px -24px rgba(11,18,32,.16); animation-delay:40ms;">
+<div style="position:absolute; left:48px; right:48px; top:0; height:40px; display:flex; align-items:center; gap:12px; white-space:nowrap;">
+<span style="font-family:'Unbounded','Manrope',sans-serif; font-weight:700; font-size:13px; line-height:20px; color:#5A6272;">02</span>
+<span style="font-size:14px; font-weight:700; line-height:20px; color:#0B1220;">Интеграл</span>
+<span style="font-size:13px; font-weight:500; line-height:20px; color:#5A6272;">тема · текст пишет агент</span>
+</div>
+</section>
+</div>
+
+<!-- ПЛИТА 03 · Сборка (свёрнута в полосу) -->
+<div class="p2-slot" style="position:absolute; left:0; right:0; top:0; height:812px; z-index:3; transform:translateY(80px);">
+<section class="p2-plate p2-p3 p2-dark p2-rise" aria-label="Шаг 3 — сборка" style="position:relative; height:100%; padding:40px 48px; border-radius:40px; background:#0B1220; color:#FFFFFF; box-shadow:0 -24px 48px -24px rgba(11,18,32,.28); animation-delay:80ms;">
+<div style="position:absolute; left:48px; right:48px; top:0; height:40px; display:flex; align-items:center; gap:12px; white-space:nowrap;">
+<span style="font-family:'Unbounded','Manrope',sans-serif; font-weight:700; font-size:13px; line-height:20px; color:rgba(255,255,255,.56);">03</span>
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#38BDF8" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M8.5 12.25l2.4 2.4 4.6-4.9"></path></svg>
+<span style="font-size:14px; font-weight:700; line-height:20px; color:#FFFFFF;">Сборка завершена за 2:31</span>
+<span style="font-size:13px; font-weight:500; line-height:20px; color:rgba(255,255,255,.64);">3 варианта · 12 слайдов</span>
+</div>
+</section>
+</div>
+
+<!-- ПЛИТА 04 · Результат, вариант «Визуальный», слайд 1 с изображением -->
+<div class="p2-slot" style="position:absolute; left:0; right:0; top:0; height:812px; z-index:4; transform:translateY(120px);">
+<section class="p2-plate p2-rise" aria-label="Результат" style="position:relative; height:100%; padding:40px 48px; border-radius:40px; background:#FFFFFF; color:#0B1220; box-shadow:0 -24px 48px -24px rgba(11,18,32,.4); animation-delay:120ms;">
+<div class="p2-two" style="display:grid; grid-template-columns:minmax(0, 1fr) 416px; gap:48px; height:612px;">
+
+<div style="display:flex; flex-direction:column; min-width:0;">
+<div class="p2-in" style="display:flex; align-items:center; justify-content:space-between; gap:16px; height:40px; animation-delay:160ms;">
+<p style="min-width:0; margin:0; font-size:15px; font-weight:700; line-height:24px; color:#0B1220; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Слайд 1 из 12 <span style="font-weight:500; color:#5A6272;">· Интеграл</span></p>
+<div style="display:flex; align-items:center; gap:24px; flex:none;">
+<div style="display:flex; align-items:center; gap:8px;">
+<span id="rp-swl" style="font-size:14px; font-weight:600; line-height:20px; color:#0B1220;">Замечания</span>
+<span id="rp-swc" class="rp-cnt rp-cnt-warn">5<span class="p2-sr"> замечаний на слайдах, ошибок нет</span></span>
+<button type="button" role="switch" aria-checked="false" aria-labelledby="rp-swl" aria-describedby="rp-swc" class="p2-sw rp-sw" onClick="{{ noop }}" style="margin-left:4px;"><span class="p2-sw-fill"></span><span class="p2-sw-knob"></span></button>
+</div>
+<div style="display:flex; align-items:center; gap:8px;">
+<button type="button" class="p2-rbl" onClick="{{ noop }}" disabled="{{ yes }}" aria-label="Предыдущий слайд" title="Предыдущий слайд (←)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 6.5L8.5 12l5.5 5.5"></path></svg></button>
+<button type="button" class="p2-rbl" onClick="{{ noop }}" aria-label="Следующий слайд" title="Следующий слайд (→)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 6.5l5.5 5.5-5.5 5.5"></path></svg></button>
+<button type="button" class="p2-rbl" onClick="{{ noop }}" aria-label="На весь экран" title="На весь экран" style="margin-left:8px;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 4.5h5v5 M9.5 19.5h-5v-5 M19.5 4.5l-5.5 5.5 M4.5 19.5l5.5-5.5"></path></svg></button>
+</div>
+</div>
+</div>
+
+<div class="p2-in" style="margin-top:16px; animation-delay:200ms;">
+<div class="rp-stage">
+<img src="/_blob/3a65dd36fb256725b6220c8e2348b214" alt="Слайд 1: Интеграл — титул с изображением стеклянного куба" style="display:block; width:100%; aspect-ratio:16 / 9; object-fit:cover;">
+<span class="rp-frame p2-pop {{ frameCls }}" aria-hidden="true" style="animation-delay:280ms;"></span>
+</div>
+</div>
+
+<div class="p2-film p2-in" style="margin:8px -4px 0; animation-delay:240ms;">
+<sc-for list="{{ thumbs }}" as="th" hint-placeholder-count="12">
+<button type="button" class="p2-th {{ th.cls }}" aria-pressed="{{ th.pressed }}" onClick="{{ th.pick }}"><img src="{{ th.img }}" alt="{{ th.label }}" style="display:block; width:112px; height:63px; aspect-ratio:16 / 9; object-fit:cover; border-radius:12px; box-shadow:0 0 0 1px rgba(11,18,32,.08);"></button>
+</sc-for>
+</div>
+</div>
+
+<!-- колонка прокручивается внутри; открыта у карточки «Изображение» (column-reverse = старт снизу), выше — заголовок, оценка, скачивание и карточки.
+     Появление (p2-in) — на обёртке; прокрутка с мягкими краями (p2-fade) — внутри: коробка на 24 px выше обёртки и
+     заходит в нижнее поле плиты, поле 24 снизу — зона растворения, так что низ колонки в покое там же, где был -->
+<aside class="p2-in" aria-label="Презентация «Интеграл»" style="min-width:0; height:612px; margin:0 -4px; animation-delay:200ms;">
+<div class="rp-col p2-fade" style="display:flex; flex-direction:column-reverse; height:636px; padding:24px 4px; overflow-y:auto;">
+<div class="rp-in" style="display:flex; flex-direction:column; flex:none;">
+
+<h1 style="margin:0; font-family:'Unbounded','Manrope',sans-serif; font-weight:600; font-size:40px; line-height:48px; letter-spacing:-0.03em; color:#0B1220;">Интеграл</h1>
+<p style="margin:8px 0 0; font-size:15px; font-weight:500; line-height:24px; color:#5A6272;">VK Tech · 12 слайдов · сегодня, 17:38</p>
+<div style="display:flex; align-items:flex-end; gap:16px; height:72px; margin-top:32px;">
+<span style="font-family:'Unbounded','Manrope',sans-serif; font-weight:700; font-size:88px; line-height:72px; letter-spacing:-0.04em; color:#0B1220;">84</span>
+<span style="display:flex; flex-direction:column; padding-bottom:4px;">
+<span style="font-size:15px; font-weight:700; line-height:24px; color:#0B1220;">из 100</span>
+<span style="font-size:14px; font-weight:500; line-height:20px; color:#5A6272;">оценка качества</span>
+</span>
+</div>
+<div role="group" aria-label="Вариант оформления" style="display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:4px; height:48px; margin-top:24px; padding:4px; border-radius:999px; background:#F3F4F1;">
+<sc-for list="{{ rvars }}" as="rv" hint-placeholder-count="3">
+<button type="button" class="p2-rseg {{ rv.cls }}" aria-pressed="{{ rv.pressed }}" onClick="{{ rv.pick }}"><span class="rp-vg"><span>{{ rv.label }}</span><span class="p2-rsc">{{ rv.score }}</span></span></button>
+</sc-for>
+</div>
+<button type="button" class="p2-cta" onClick="{{ noop }}" title="Вариант 2 · Визуальный" style="width:100%; margin-top:24px;">
+<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v10.5 M7.5 10L12 14.5l4.5-4.5 M4.5 16.5v1A2.5 2.5 0 0 0 7 20h10a2.5 2.5 0 0 0 2.5-2.5v-1"></path></svg>
+<span>Скачать PowerPoint</span>
+</button>
+<div style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:16px; margin-top:16px;">
+<button type="button" class="p2-ob" onClick="{{ noop }}">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.5 3.5h-6a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8.5z M13.5 3.5v3a2 2 0 0 0 2 2h3"></path></svg>
+<span>PDF</span>
+</button>
+<button type="button" class="p2-ob" onClick="{{ noop }}" title="Изменить текст или шаблон">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15.5 5l3.5 3.5L9 18.5l-4.5 1 1-4.5z M13 7.5l3.5 3.5"></path></svg>
+<span>Изменить текст</span>
+</button>
+</div>
+
+<div style="display:flex; flex-direction:column; gap:8px; margin-top:24px;">
+<a class="rp-card" href="#" title="Оценка качества 84 из 100 · 100 − 10 за ошибку − 3 за предупреждение">
+<span style="display:flex; align-items:center; gap:16px;">
+<span style="position:relative; width:44px; height:44px; flex:none;">
+<svg width="44" height="44" viewBox="0 0 44 44" aria-hidden="true"><circle cx="22" cy="22" r="19" fill="none" stroke="#FFFFFF" stroke-width="4"></circle><circle cx="22" cy="22" r="19" fill="none" stroke="#2563EB" stroke-width="4" stroke-linecap="round" stroke-dasharray="100.28 119.38" transform="rotate(-90 22 22)"></circle></svg>
+<span style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-family:'Unbounded','Manrope',sans-serif; font-size:13px; font-weight:600; line-height:20px; color:#0B1220;"><span class="p2-sr">Оценка </span>84</span>
+</span>
+<span style="display:flex; flex-direction:column; justify-content:center; flex:1; min-width:0;">
+<span class="p2-sr">Качество: </span>
+<span style="display:flex; align-items:center; gap:8px; font-size:14px; font-weight:700; line-height:20px; color:#0B1220; white-space:nowrap;">
+<span>Ошибок нет</span>
+<span style="font-weight:500; color:#5A6272;" aria-hidden="true">·</span>
+<span style="display:inline-flex; align-items:center; gap:4px; color:#B45309;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.27 4.75a2 2 0 0 1 3.46 0l7.02 12.25A2 2 0 0 1 19.02 20H4.98a2 2 0 0 1-1.73-3z M12 9.5v4 M12 16.8h.01"></path></svg>5 предупреждений</span>
+</span>
+<span style="font-size:13px; font-weight:500; line-height:20px; color:#5A6272;">9 чисел сверены с текстом</span>
+</span>
+</span>
+</a>
+<a class="rp-card" href="#">
+<span class="rp-ch"><span class="rp-ct">Как работал агент</span><svg class="rp-go" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 6.5l5.5 5.5-5.5 5.5"></path></svg></span>
+<ul style="display:flex; flex-direction:column; gap:8px; margin:8px 0 0; padding:0; list-style:none;">
+<sc-for list="{{ agent }}" as="ag" hint-placeholder-count="3">
+<li style="display:grid; grid-template-columns:24px minmax(0, 1fr); column-gap:12px; align-items:start;">
+<span class="rp-ri" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{ ag.p1 }}"></path><path d="{{ ag.p2 }}"></path><path d="{{ ag.p3 }}"></path></svg></span>
+<span style="padding-top:2px; font-size:14px; font-weight:500; line-height:20px; color:#5A6272;"><b style="font-weight:700; color:#0B1220;">{{ ag.name }}</b> {{ ag.text }}</span>
+</li>
+</sc-for>
+</ul>
+</a>
+</div>
+
+<div style="display:flex; flex-direction:column; justify-content:flex-end; gap:8px; min-height:612px; padding-top:8px;">
+
+<a class="rp-card" href="#">
+<span class="rp-ch"><span class="rp-ct">Почему так</span><span style="display:flex; align-items:center; gap:8px;"><span class="rp-cm">Слайд 1</span><svg class="rp-go" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 6.5l5.5 5.5-5.5 5.5"></path></svg></span></span>
+<span style="display:-webkit-box; margin-top:8px; font-size:14px; font-weight:500; line-height:20px; color:#0B1220; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden;">Титул собран по образцу шаблона: название крупно слева, подзаголовок и дата ниже. Справа — изображение в палитре шаблона, чтобы обложка не пустовала.</span>
+</a>
+
+<section class="p2-in" aria-labelledby="rp-pt" style="padding:24px; border-radius:24px; background:#F3F4F1; animation-delay:280ms;">
+<div style="display:flex; align-items:center; justify-content:space-between; gap:8px; height:24px;">
+<h3 id="rp-pt" style="margin:0; font-family:'Unbounded','Manrope',sans-serif; font-size:14px; font-weight:600; line-height:24px; letter-spacing:-0.02em; color:#0B1220;">Изображение</h3>
+<span class="rp-tag">сгенерировано</span>
+</div>
+<p style="margin:8px 0 0; font-size:14px; font-weight:500; line-height:20px; color:#0B1220;">Стеклянный куб в синем свете — образ объёма, который вычисляют интегралом</p>
+<div style="display:flex; align-items:center; gap:8px; margin-top:16px;">
+<button type="button" class="p2-ob {{ replaceCls }}" onClick="{{ toggleForm }}" aria-expanded="{{ openStr }}" aria-controls="rp-form" style="height:40px;">Заменить</button>
+<button type="button" class="p2-ob" onClick="{{ noop }}" style="height:40px;">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4.5h8.5a2 2 0 0 1 2 2V15 M19 19a2 2 0 0 1-1.5.5h-11a2 2 0 0 1-2-2v-11A2 2 0 0 1 5 5 M4.5 16l4.5-4.5 4 4 M4 4l16 16"></path></svg>
+<span>Убрать</span>
+</button>
+</div>
+<sc-if value="{{ open }}" hint-placeholder-val="{{ true }}">
+<div id="rp-form" class="p2-in" style="margin-top:16px; animation-delay:320ms;">
+<label class="p2-field" style="display:block; padding:16px 24px; border-radius:24px; background:#FFFFFF;">
+<span class="p2-sr">Ваши правки к изображению</span>
+<textarea class="p2-ta" rows="2" maxlength="500" value="{{ desc }}" onInput="{{ onDesc }}" placeholder="Ваши правки, например: вид сверху, больше зелени" style="display:block; width:100%; height:48px; margin:0; padding:0; border:0; resize:none; background:transparent; font-family:inherit; font-size:15px; font-weight:500; line-height:24px; color:#0B1220;"></textarea>
+</label>
+<div style="display:flex; align-items:center; gap:8px; margin-top:16px;">
+<button type="button" class="p2-ob" onClick="{{ noop }}">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.25 7.75l2 2-9.4 9.4a1.41 1.41 0 0 1-2-2z M12.5 9.5l2 2 M18.5 3v3.5 M16.75 4.75h3.5 M19.5 12.5v2.5 M18.25 13.75h2.5 M9.5 3.5v2 M8.5 4.5h2"></path></svg>
+<span>Сгенерировать</span>
+</button>
+<button type="button" class="p2-gb" onClick="{{ closeForm }}">Отмена</button>
+</div>
+</div>
+</sc-if>
+</section>
+
+<div style="margin-top:8px;">
+<div style="height:1px; background:rgba(11,18,32,.08);"></div>
+<div style="display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:8px; margin-top:8px;">
+<button type="button" class="p2-gb" onClick="{{ noop }}">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 5.5h3 M11 5.5h8.5 M11 12h8.5 M11 18.5h8.5 M6 5.5v11a2 2 0 0 0 2 2h0.5 M6 12h2.5"></path></svg>
+<span>План</span>
+</button>
+<button type="button" class="p2-gb" onClick="{{ noop }}">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4h12a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z M6 13.5h4a2 2 0 0 1 2 2v2.5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2.5a2 2 0 0 1 2-2z M16 13.5h2a2 2 0 0 1 2 2v2.5a2 2 0 0 1-2 2h-2a2 2 0 0 1-2-2v-2.5a2 2 0 0 1 2-2z"></path></svg>
+<span>Шаблон</span>
+</button>
+<button type="button" class="p2-gb" onClick="{{ noop }}">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 17.5v-11a2 2 0 0 1 2-2h3.6l2 2.5H18a2 2 0 0 1 2 2v8.5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z M12 10.5v5.5 M9.5 13.5L12 16l2.5-2.5"></path></svg>
+<span>Файлы</span>
+</button>
+</div>
+</div>
+
+</div>
+</div>
+</div>
+</aside>
+
+</div>
+</section>
+</div>
+
+</main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { open: true, desc: '' };
+    this.D = {
+      S: [
+        '/_blob/0d6e85834c67424ae54a52bafe5d8181', '/_blob/d331ce5caad9824e7e1b348e424378f3',
+        '/_blob/d467e38cc12111ad26a428ff8e19ff4f', '/_blob/a42230ee9ee0732d731d992e8f213a12',
+        '/_blob/6c09a69a8e2638087c2368085b443d0b', '/_blob/9d3bcdec98f61bbf1f44527b585a6d6b',
+        '/_blob/9d0f9548be072420b3dbc97d359c5bd0', '/_blob/18db92cfee0ef754b120d6e4356e1466',
+        '/_blob/600406289118a423fc5df75a99ffc237', '/_blob/7881adf9929cebbcc11c820411d96c4e',
+        '/_blob/a4709492f9d6643420ae86dcf42c92ee', '/_blob/c70b746e3433f21d6e6fbe47d95693b7'
+      ],
+      // вариант «Визуальный»: свои картинки у слайдов 1, 4, 9
+      V: { 0: '/_blob/3a65dd36fb256725b6220c8e2348b214', 3: '/_blob/bb6e83990419cf1d61392e723e53bc08', 8: '/_blob/5254188d67a8bd743a5ca31ad8a4aca7' },
+      T: ['Интеграл', 'История создания', 'Неопределённый интеграл', 'Площадь криволинейной трапеции',
+        'Формула Ньютона — Лейбница', 'Линейность и аддитивность', 'Интегрирование по частям', 'Замена переменной',
+        'Пример вычисления', 'Двойной интеграл', 'Путь, работа, потенциал', 'Где применяют интеграл'],
+      VARS: [['Структурный', 89, false], ['Визуальный', 84, true], ['Компактный', 89, false]],
+      AG: [
+        { name: 'Автор', text: 'Написал текст на 12 слайдов', p: ['M15.5 5l3.5 3.5L9 18.5l-4.5 1 1-4.5z M13 7.5l3.5 3.5', '', ''] },
+        { name: 'Дизайнер', text: 'Продумал титул и 11 слайдов: 8 формул, 1 таблица', p: ['M7 4.5h10a2.5 2.5 0 0 1 2.5 2.5v10a2.5 2.5 0 0 1-2.5 2.5H7A2.5 2.5 0 0 1 4.5 17V7A2.5 2.5 0 0 1 7 4.5z M4.5 9.5h15 M10 9.5v10', '', ''] },
+        { name: 'Критик', text: '1 замечание, исправлен 1 слайд', p: ['M6.5 4.5h11a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H12l-4.5 4v-4h-1a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z M9 10l2 2 4-4', '', ''] }
+      ]
+    };
+  }
+
+  renderVals() {
+    const D = this.D;
+    const st = this.state;
+    const noop = () => {};
+    return {
+      noop,
+      yes: true,
+      thumbs: D.T.map((t, i) => ({
+        img: D.V[i] || D.S[i], label: 'Слайд ' + (i + 1) + ': ' + t,
+        pressed: String(i === 0), cls: i === 0 ? 'p2-th-on' : '', pick: noop
+      })),
+      rvars: D.VARS.map((v) => ({
+        label: v[0], score: v[1], pressed: String(v[2]), cls: v[2] ? 'p2-rseg-on' : '', pick: noop
+      })),
+      agent: D.AG.map((a) => ({ name: a.name, text: a.text, p1: a.p[0], p2: a.p[1], p3: a.p[2] })),
+      open: st.open,
+      openStr: String(st.open),
+      replaceCls: st.open ? 'rp-on' : '',
+      frameCls: st.open ? '' : 'p2-none',
+      toggleForm: () => this.setState({ open: !this.state.open }),
+      closeForm: () => this.setState({ open: false, desc: '' }),
+      desc: st.desc,
+      onDesc: (e) => this.setState({ desc: e.target.value })
+    };
+  }
+}
+</script>
+</body>
+</html>

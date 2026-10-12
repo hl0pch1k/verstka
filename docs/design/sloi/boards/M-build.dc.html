@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Verstka — Слои: Телефон · Сборка</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700&amp;family=Unbounded:wght@600;700&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#0A0F1F}a:hover{color:#1E40AF}
+.p2-root{--ease:cubic-bezier(0.2, 0, 0, 1);-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+.p2-root *,.p2-root *::before,.p2-root *::after{box-sizing:border-box}
+.p2-root button{font-family:inherit;color:inherit;-webkit-tap-highlight-color:transparent}
+.p2-root :focus-visible{outline:2px solid #2563EB;outline-offset:2px}
+.p2-dark :focus-visible{outline-color:#38BDF8}
+.p2-sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.p2-none{display:none}
+
+/* движение: только transform и opacity */
+@keyframes p2-rise{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:translateY(0)}}
+@keyframes p2-in{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+@keyframes p2-pop{from{opacity:0;transform:scale(.98)}to{opacity:1;transform:scale(1)}}
+@keyframes p2-work{0%{transform:scaleX(0);opacity:1}72%{transform:scaleX(1);opacity:1}100%{transform:scaleX(1);opacity:0}}
+.p2-rise{animation:p2-rise 520ms var(--ease) backwards}
+.p2-in{animation:p2-in 360ms var(--ease) backwards}
+.p2-pop{animation:p2-pop 360ms var(--ease) backwards}
+
+/* колода плит */
+.p2-slot{transition:transform 520ms var(--ease)}
+.p2-s4-on{opacity:1;visibility:visible;transition:transform 520ms var(--ease),opacity 520ms var(--ease)}
+.p2-s4-off{opacity:0;visibility:hidden;pointer-events:none;transition:transform 340ms var(--ease),opacity 340ms var(--ease),visibility 0s linear 340ms}
+.p2-on{opacity:1;visibility:visible;transition:opacity 360ms var(--ease) 120ms}
+.p2-off{opacity:0;visibility:hidden;pointer-events:none;transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
+.p2-stag{transition:opacity 360ms var(--ease),transform 360ms var(--ease)}
+.p2-off .p2-stag{opacity:0;transform:translateY(12px);transition-duration:240ms}
+
+/* заголовок плиты */
+.p2-head{display:flex;align-items:center;gap:32px;height:64px;padding:0;border:0;background:none;cursor:pointer;text-align:left;border-radius:16px;transition:transform 160ms var(--ease)}
+.p2-head:active{transform:scale(.98)}
+.p2-num{display:block;width:160px;flex:none;height:64px;font-family:'Unbounded','Manrope',sans-serif;font-weight:700;font-size:88px;line-height:64px;letter-spacing:-0.04em;opacity:.14;transition:opacity 160ms var(--ease);pointer-events:none}
+.p2-head:hover .p2-num{opacity:.3}
+.p2-p2 .p2-num{opacity:.3}
+.p2-p2 .p2-head:hover .p2-num{opacity:.46}
+.p2-num3{opacity:.22}
+.p2-p3:has(.p2-head:hover) .p2-num3{opacity:.4}
+.p2-ttl{font-family:'Unbounded','Manrope',sans-serif;font-weight:600;font-size:32px;line-height:40px;letter-spacing:-0.03em;white-space:nowrap}
+
+/* кнопки */
+.p2-cta{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:12px;height:56px;padding:0 32px;border:0;border-radius:999px;background:linear-gradient(112deg,#1D4ED8 0%,#2563EB 45%,#38BDF8 140%);color:#FFFFFF;font-size:16px;font-weight:700;line-height:24px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-cta::after{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:0 16px 32px -16px rgba(11,18,32,.4);opacity:0;transition:opacity 160ms var(--ease);pointer-events:none}
+.p2-cta:hover{transform:translateY(-2px)}
+.p2-cta:hover::after{opacity:1}
+.p2-cta:active{transform:scale(.98)}
+.p2-ob{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:48px;padding:0 24px;border:0;border-radius:999px;background:#FFFFFF;box-shadow:inset 0 0 0 1px rgba(11,18,32,.14);color:#0B1220;font-size:15px;font-weight:700;line-height:24px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-ob:hover{transform:translateY(-2px)}
+.p2-ob:active{transform:scale(.98)}
+.p2-gb{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 16px;border:0;border-radius:999px;background:transparent;color:#2563EB;font-size:15px;font-weight:700;line-height:24px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-gb:hover{background:#F3F4F1;transform:translateY(-2px)}
+.p2-gb:active{transform:scale(.98)}
+.p2-pill{display:inline-flex;align-items:center;height:40px;padding:0 16px;border:0;border-radius:999px;background:#FFFFFF;box-shadow:inset 0 0 0 1px rgba(37,99,235,.14);color:#0B1220;font-size:14px;font-weight:600;line-height:20px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-pill:hover{transform:translateY(-2px);box-shadow:inset 0 0 0 1px rgba(37,99,235,.4)}
+.p2-pill:active{transform:scale(.98)}
+.p2-nav{display:inline-flex;align-items:center;height:40px;padding:0 16px;border-radius:999px;font-size:15px;font-weight:600;line-height:24px;color:#5A6272;text-decoration:none;transition:transform 160ms var(--ease)}
+.p2-nav:hover{color:#0B1220;background:#FFFFFF}
+.p2-nav:active{transform:scale(.98)}
+
+/* шаблоны */
+.p2-card{display:block;width:100%;padding:0;border:0;background:none;text-align:left;cursor:pointer;border-radius:16px;transition:transform 160ms var(--ease)}
+.p2-card:hover{transform:translateY(-2px)}
+.p2-card:active{transform:scale(.98)}
+.p2-cover{position:relative;display:block;height:142px;border-radius:16px}
+.p2-cover::after{content:"";position:absolute;inset:0;border-radius:16px;box-shadow:0 16px 32px -16px rgba(11,18,32,.36);opacity:0;transition:opacity 160ms var(--ease);pointer-events:none}
+.p2-card:hover .p2-cover::after{opacity:1}
+.p2-sel{box-shadow:0 0 0 2px #FFFFFF,0 0 0 4px #2563EB}
+.p2-chk{position:absolute;top:8px;right:8px;width:24px;height:24px;border-radius:999px;background:#2563EB;color:#FFFFFF;display:flex;align-items:center;justify-content:center;transition:opacity 240ms var(--ease),transform 240ms var(--ease)}
+.p2-chk-off{opacity:0;transform:scale(.98)}
+
+/* текст */
+.p2-field{transition:box-shadow 0s}
+.p2-field:has(.p2-ta:focus){box-shadow:0 0 0 2px #2563EB}
+.p2-ta::placeholder,.p2-inp::placeholder{color:#5A6272;opacity:1}
+.p2-ta:focus{outline:none}
+.p2-muted{color:#5A6272}
+
+/* параметры (тёмная плита) */
+.p2-box{border-radius:24px;background:rgba(255,255,255,.06);box-shadow:inset 0 0 0 1px rgba(255,255,255,.1)}
+.p2-rb{width:40px;height:40px;flex:none;padding:0;border:0;border-radius:999px;background:rgba(255,255,255,.1);color:#FFFFFF;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:transform 160ms var(--ease),opacity 160ms var(--ease)}
+.p2-rb:hover{transform:translateY(-2px)}
+.p2-rb:active{transform:scale(.98)}
+.p2-rb:disabled{opacity:.32;cursor:default;transform:none}
+.p2-vc{width:100%;height:88px;padding:16px;border:0;border-radius:24px;background:rgba(255,255,255,.06);box-shadow:inset 0 0 0 1px rgba(255,255,255,.1);display:flex;flex-direction:column;justify-content:space-between;text-align:left;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-vc:hover{transform:translateY(-2px)}
+.p2-vc:active{transform:scale(.98)}
+.p2-vc-on{background:rgba(37,99,235,.24);box-shadow:inset 0 0 0 1px #38BDF8}
+.p2-vbox{width:20px;height:20px;flex:none;border-radius:999px;box-shadow:inset 0 0 0 2px rgba(255,255,255,.4);display:flex;align-items:center;justify-content:center;color:#FFFFFF}
+.p2-vbox svg{opacity:0;transition:opacity 240ms var(--ease)}
+.p2-vc-on .p2-vbox{background:#2563EB;box-shadow:none}
+.p2-vc-on .p2-vbox svg{opacity:1}
+.p2-sw{position:relative;width:44px;height:24px;flex:none;padding:0;border:0;border-radius:999px;background:rgba(255,255,255,.16);cursor:pointer}
+.p2-sw-fill{position:absolute;inset:0;border-radius:999px;background:#2563EB;opacity:0;transition:opacity 240ms var(--ease)}
+.p2-sw-knob{position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:999px;background:#FFFFFF;transition:transform 240ms var(--ease)}
+.p2-sw-on .p2-sw-fill{opacity:1}
+.p2-sw-on .p2-sw-knob{transform:translateX(20px)}
+
+/* сборка */
+.p2-seg{height:32px;padding:0 16px;border:0;border-radius:999px;background:transparent;color:rgba(255,255,255,.72);font-size:14px;font-weight:600;line-height:20px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-seg:hover{color:#FFFFFF}
+.p2-seg:active{transform:scale(.98)}
+.p2-seg-on,.p2-seg-on:hover{background:#FFFFFF;color:#0B1220}
+.p2-ph{position:absolute;left:0;top:0;white-space:nowrap;transition:opacity 360ms var(--ease),transform 360ms var(--ease)}
+.p2-ph-on{opacity:1;transform:translateY(0)}
+.p2-ph-past{opacity:0;transform:translateY(-12px);transition-duration:240ms}
+.p2-ph-next{opacity:0;transform:translateY(12px);transition-duration:240ms}
+.p2-bar{transition:transform 520ms var(--ease)}
+.p2-sbf{position:relative;aspect-ratio:16 / 9;border-radius:16px;overflow:hidden;background:rgba(255,255,255,.04);box-shadow:inset 0 0 0 1px rgba(255,255,255,.08)}
+.p2-sb-cur .p2-sbf{box-shadow:inset 0 0 0 1px #38BDF8}
+.p2-sbn{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:'Unbounded','Manrope',sans-serif;font-weight:600;font-size:20px;color:rgba(255,255,255,.24);transition:opacity 240ms var(--ease)}
+.p2-sb-done .p2-sbn{opacity:0}
+.p2-sbok{position:absolute;top:8px;right:8px;width:20px;height:20px;border-radius:999px;background:#2563EB;color:#FFFFFF;display:flex;align-items:center;justify-content:center}
+.p2-work{position:absolute;left:0;right:0;bottom:0;height:2px;background:#38BDF8;transform-origin:left center;animation:p2-work 1100ms var(--ease) infinite}
+.p2-role{position:relative;display:grid;grid-template-columns:28px minmax(0,1fr);column-gap:16px}
+.p2-role::before{content:"";position:absolute;left:13px;top:36px;bottom:-4px;width:2px;border-radius:999px;background:rgba(255,255,255,.12)}
+.p2-role-last::before{display:none}
+.p2-dot{width:28px;height:28px;border-radius:999px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.06);color:rgba(255,255,255,.48)}
+.p2-role-done .p2-dot{background:#2563EB;color:#FFFFFF}
+.p2-role-act .p2-dot{background:transparent;color:#38BDF8;box-shadow:inset 0 0 0 2px #38BDF8}
+.p2-rname{font-size:15px;font-weight:700;line-height:20px;color:#FFFFFF}
+.p2-role-pend .p2-rname{color:rgba(255,255,255,.48)}
+.p2-rst{font-size:13px;font-weight:600;line-height:20px;color:rgba(255,255,255,.56)}
+.p2-role-act .p2-rst{color:#38BDF8}
+.p2-arrow{color:#38BDF8;font-weight:700;margin:0 8px}
+
+/* результат */
+.p2-rbl{width:40px;height:40px;padding:0;border:0;border-radius:999px;background:#F3F4F1;color:#0B1220;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:transform 160ms var(--ease),opacity 160ms var(--ease)}
+.p2-rbl:hover{transform:translateY(-2px)}
+.p2-rbl:active{transform:scale(.98)}
+.p2-rbl:disabled{opacity:.32;cursor:default;transform:none}
+.p2-film{display:flex;gap:8px;overflow-x:auto;padding:8px 4px;scrollbar-width:none}
+.p2-film::-webkit-scrollbar{display:none}
+.p2-th{flex:none;width:112px;height:63px;padding:0;border:0;border-radius:12px;background:#F3F4F1;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-th:hover{transform:translateY(-2px)}
+.p2-th:active{transform:scale(.98)}
+.p2-th-on{box-shadow:0 0 0 2px #FFFFFF,0 0 0 4px #2563EB}
+.p2-rseg{display:flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 8px;border:0;border-radius:999px;background:transparent;color:#5A6272;font-size:14px;font-weight:600;line-height:20px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-rseg:hover{color:#0B1220}
+.p2-rseg:active{transform:scale(.98)}
+.p2-rseg-on{background:#FFFFFF;color:#0B1220;box-shadow:0 1px 2px rgba(11,18,32,.08),0 8px 16px -8px rgba(11,18,32,.16)}
+.p2-rsc{font-family:'Unbounded','Manrope',sans-serif;font-size:12px;font-weight:600;color:#2563EB}
+
+@media (prefers-reduced-motion: reduce){
+  .p2-root *,.p2-root *::before,.p2-root *::after{animation:none !important;transition:none !important}
+}
+@media (max-width: 900px){
+  .p2-root{padding:0 16px 16px !important}
+  .p2-hdr{padding:0 8px !important}
+  .p2-navs{display:none !important}
+  .p2-deck{height:auto !important;overflow:visible !important;border-radius:0 !important}
+  .p2-slot{position:relative !important;height:auto !important;transform:none !important;margin-top:-40px}
+  .p2-slot:first-child{margin-top:0}
+  .p2-plate{height:auto !important;padding:24px 24px 64px !important}
+  .p2-off,.p2-s4-off,.p2-num3,.p2-spc,.p2-hide-s{display:none !important}
+  .p2-body{margin-left:0 !important}
+  .p2-hrow{flex-wrap:wrap !important;height:auto !important;row-gap:16px}
+  .p2-head{gap:16px}
+  .p2-num{width:auto !important;height:48px !important;font-size:48px !important;line-height:48px !important}
+  .p2-ttl{font-size:24px !important;line-height:32px !important;white-space:normal}
+  .p2-g4{grid-template-columns:repeat(2,minmax(0,1fr)) !important}
+  .p2-params,.p2-two{grid-template-columns:minmax(0,1fr) !important;height:auto !important}
+  .p2-field{height:auto !important}
+  .p2-ta{min-height:120px !important}
+  .p2-wrap{flex-wrap:wrap !important;height:auto !important;row-gap:16px}
+  .p2-phs{height:auto !important}
+  .p2-ph{position:static !important;white-space:normal;font-size:24px !important;line-height:32px !important}
+  .p2-ph-past,.p2-ph-next{display:none}
+}
+
+/* ——— Телефон 390×844 · общий каркас (mp-). Классы эталона, которые трогает медиазапрос выше, здесь не используются ——— */
+.p2-root.mp-root{padding:0 !important}
+.mp-sb{display:flex;align-items:center;justify-content:space-between;height:44px;padding:0 32px;color:#0B1220}
+.mp-time{font-size:15px;font-weight:700;line-height:20px;letter-spacing:-0.01em}
+.mp-sbi{display:flex;align-items:center;gap:8px}
+.mp-hdr{display:flex;align-items:center;justify-content:space-between;height:56px;padding:0 16px}
+.mp-logo{display:inline-flex;align-items:center;gap:8px;height:44px;text-decoration:none;color:#0B1220}
+.mp-rw{width:44px;height:44px;flex:none;padding:0;border:0;border-radius:999px;background:#FFFFFF;box-shadow:inset 0 0 0 1px rgba(11,18,32,.08);color:#0B1220;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:transform 160ms var(--ease)}
+.mp-rw:hover{transform:translateY(-2px)}
+.mp-rw:active{transform:scale(.98)}
+.mp-rw[aria-expanded="true"]{background:#0B1220;color:#FFFFFF;box-shadow:none}
+.mp-pop{position:absolute;z-index:40;width:256px;padding:8px;border-radius:24px;background:#FFFFFF;box-shadow:0 0 0 1px rgba(11,18,32,.08),0 24px 48px -24px rgba(11,18,32,.28)}
+.mp-mi{display:flex;align-items:center;gap:12px;width:100%;height:48px;padding:0 16px;border:0;border-radius:999px;background:transparent;color:#0B1220;font-size:15px;font-weight:600;line-height:24px;text-align:left;text-decoration:none;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.mp-mi:hover{background:#F3F4F1;color:#0B1220}
+.mp-mi:active{transform:scale(.98)}
+.mp-mi svg{flex:none;color:#5A6272}
+.mp-deck{position:relative;height:744px;border-radius:40px 40px 0 0;overflow:hidden}
+.mp-slot{position:absolute;left:0;right:0;top:0;height:744px}
+.mp-plate{position:relative;height:100%;border-radius:40px 40px 0 0}
+.mp-strip{display:flex;align-items:center;gap:12px;height:48px;padding:0 16px;white-space:nowrap}
+.mp-snum{flex:none;font-family:'Unbounded','Manrope',sans-serif;font-weight:700;font-size:13px;line-height:20px;color:#5A6272}
+.mp-sname{flex:none;font-size:15px;font-weight:700;line-height:20px;color:#0B1220}
+.mp-smeta{min-width:0;font-size:13px;font-weight:500;line-height:20px;color:#5A6272;overflow:hidden;text-overflow:ellipsis}
+.mp-lane{display:flex;align-items:center;gap:8px;overflow-x:auto;scrollbar-width:none}
+.mp-lane::-webkit-scrollbar{display:none}
+.mp-home{position:absolute;left:50%;bottom:8px;z-index:50;width:134px;height:5px;margin-left:-67px;border-radius:999px;pointer-events:none}
+
+/* ——— M-build (mb-) ——— */
+.mb-scroll{overflow-y:auto;overscroll-behavior:contain;scrollbar-width:none}
+.mb-scroll::-webkit-scrollbar{display:none}
+</style>
+</helmet>
+<div class="p2-root mp-root" style="position:relative; width:100%; min-height:844px; height:844px; overflow:hidden; background:#F3F4F1; color:#0B1220; font-family:'Manrope', system-ui, -apple-system, 'Segoe UI', sans-serif; font-size:15px; line-height:24px;">
+
+<!-- статус-бар устройства (часть макета) -->
+<div class="mp-sb" aria-hidden="true">
+<span class="mp-time">9:41</span>
+<span class="mp-sbi">
+<svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor" aria-hidden="true"><rect x="0" y="8" width="3" height="4" rx="1"></rect><rect x="5" y="5.5" width="3" height="6.5" rx="1"></rect><rect x="10" y="3" width="3" height="9" rx="1"></rect><rect x="15" y="0" width="3" height="12" rx="1"></rect></svg>
+<svg width="16" height="12" viewBox="0 0 16 12" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="M1.5 4.5a9.2 9.2 0 0 1 13 0"></path><path d="M4.2 7.3a5.4 5.4 0 0 1 7.6 0"></path><path d="M7 10.1a1.4 1.4 0 0 1 2 0"></path></svg>
+<svg width="27" height="12" viewBox="0 0 27 12" fill="none" aria-hidden="true"><rect x="0.875" y="0.875" width="22.25" height="10.25" rx="3" stroke="currentColor" stroke-width="1.75" opacity=".4"></rect><rect x="3" y="3" width="15" height="6" rx="1.5" fill="currentColor"></rect><path d="M25.5 4.5v3" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" opacity=".4"></path></svg>
+</span>
+</div>
+
+<header class="mp-hdr">
+<a class="mp-logo" href="#" aria-label="Verstka 3.1 — на главную">
+<span style="font-family:'Unbounded','Manrope',sans-serif; font-weight:700; font-size:20px; line-height:24px; letter-spacing:-0.03em;">Verstka</span>
+<span style="display:inline-flex; align-items:center; height:24px; padding:0 8px; border-radius:999px; background:#0B1220; color:#FFFFFF; font-size:12px; font-weight:700; line-height:16px;">3.1</span>
+</a>
+<button type="button" class="mp-rw" onClick="{{ toggleMenu }}" aria-label="Меню" aria-expanded="{{ menuStr }}" aria-controls="mb-menu">
+<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 9h14"></path><path d="M5 15h14"></path></svg>
+</button>
+</header>
+
+<sc-if value="{{ menuOpen }}" hint-placeholder-val="{{ false }}">
+<nav id="mb-menu" class="mp-pop p2-pop" aria-label="Разделы" style="top:100px; right:16px; transform-origin:top right;">
+<a class="mp-mi" href="#"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 12a8.5 8.5 0 1 0 2.5-6"></path><path d="M3.5 4v4h4"></path><path d="M12 8v4.5l3 2"></path></svg><span>Мои презентации</span></a>
+<a class="mp-mi" href="#"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4h10a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3z"></path><path d="M4 10h16"></path><path d="M10 10v10"></path></svg><span>Шаблоны</span></a>
+<a class="mp-mi" href="#"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11.5a8 8 0 0 1-11.6 7.1L4 20l1.4-4.4A8 8 0 1 1 20 11.5z"></path></svg><span>Помощник</span></a>
+</nav>
+</sc-if>
+
+<main class="mp-deck">
+
+<!-- ПЛИТА 01 · свернута полосой -->
+<div class="mp-slot" style="z-index:1; transform:translateY(0px);">
+<section class="mp-plate p2-rise" aria-label="Шаг 1 — шаблон" style="background:#FFFFFF; animation-delay:0ms;">
+<div class="mp-strip">
+<span class="mp-snum">01</span>
+<span class="mp-sname">VK Tech</span>
+<span class="mp-smeta">54 слайда · Play</span>
+</div>
+</section>
+</div>
+
+<!-- ПЛИТА 02 · свернута полосой -->
+<div class="mp-slot" style="z-index:2; transform:translateY(48px);">
+<section class="mp-plate p2-rise" aria-label="Шаг 2 — текст" style="background:#E9F1FF; box-shadow:0 -24px 48px -24px rgba(11,18,32,.16); animation-delay:40ms;">
+<div class="mp-strip">
+<span class="mp-snum">02</span>
+<span class="mp-sname">Интеграл</span>
+<span class="mp-smeta">тема · текст пишет агент</span>
+</div>
+</section>
+</div>
+
+<!-- ПЛИТА 03 · Сборка — на весь экран -->
+<div class="mp-slot" style="z-index:3; transform:translateY(96px);">
+<section class="mp-plate p2-dark p2-rise" aria-label="Шаг 3 — сборка" style="padding:24px 16px 0; background:#0B1220; color:#FFFFFF; box-shadow:0 -24px 48px -24px rgba(11,18,32,.28); animation-delay:80ms;">
+<div style="display:flex; flex-direction:column; height:590px;">
+
+<h1 class="p2-in" style="flex:none; min-height:64px; margin:0; font-family:'Unbounded','Manrope',sans-serif; font-weight:600; font-size:24px; line-height:32px; letter-spacing:-0.03em; color:#FFFFFF; animation-delay:120ms;">Дизайнер продумывает слайды</h1>
+
+<div class="p2-in" style="flex:none; display:flex; align-items:center; gap:16px; height:24px; margin-top:8px; animation-delay:160ms;">
+<p style="margin:0; font-size:15px; font-weight:500; line-height:24px; color:rgba(255,255,255,.64); white-space:nowrap;"><b style="font-weight:700; color:#FFFFFF;">1:12</b> из 5:00</p>
+<div role="progressbar" aria-label="Ход сборки" aria-valuemin="0" aria-valuemax="100" aria-valuenow="40" style="position:relative; flex:1; height:4px; border-radius:999px; background:rgba(255,255,255,.12); overflow:hidden;">
+<span class="p2-bar" style="position:absolute; inset:0; border-radius:999px; background:#38BDF8; transform-origin:left center; transform:scaleX(.4);"></span>
+</div>
+<span style="font-size:13px; font-weight:600; line-height:20px; color:rgba(255,255,255,.64); white-space:nowrap;">шаг 3 из 6</span>
+</div>
+
+<div role="tablist" aria-label="Что показать" class="p2-in" style="flex:none; display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:4px; height:52px; margin-top:16px; padding:4px; border-radius:999px; background:rgba(255,255,255,.06); animation-delay:200ms;">
+<button type="button" role="tab" id="mb-t-board" aria-selected="{{ boardSel }}" aria-controls="mb-p-board" class="p2-seg {{ boardCls }}" onClick="{{ showBoard }}" style="height:44px; font-size:15px;">Раскадровка</button>
+<button type="button" role="tab" id="mb-t-agent" aria-selected="{{ agentSel }}" aria-controls="mb-p-agent" class="p2-seg {{ agentCls }}" onClick="{{ showAgent }}" style="height:44px; font-size:15px;">Как думает агент</button>
+</div>
+
+<!-- Как думает агент: роли, статусы, строки по слайдам, правки критика -->
+<sc-if value="{{ isAgent }}" hint-placeholder-val="{{ true }}">
+<div id="mb-p-agent" role="tabpanel" aria-labelledby="mb-t-agent" class="mb-scroll" style="flex:1; min-height:0; margin-top:16px;">
+<ol style="display:flex; flex-direction:column; gap:8px; margin:0; padding:0; list-style:none;">
+<sc-for list="{{ roles }}" as="r" hint-placeholder-count="6">
+<li class="p2-role p2-in {{ r.cls }}" style="animation-delay: {{ r.delay }};">
+<span class="p2-dot" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{ r.p1 }}"></path><path d="{{ r.p2 }}"></path><path d="{{ r.p3 }}"></path></svg></span>
+<div style="min-width:0;">
+<div style="display:flex; align-items:center; gap:8px; height:28px; white-space:nowrap;">
+<span class="p2-rname">{{ r.name }}</span>
+<span class="p2-rst" style="min-width:0; overflow:hidden; text-overflow:ellipsis;">{{ r.status }}</span>
+</div>
+<sc-for list="{{ r.lines }}" as="l" hint-placeholder-count="2">
+<p style="margin:4px 0 0; font-size:14px; font-weight:500; line-height:20px; color:rgba(255,255,255,.72);">{{ l.a }}<b style="font-weight:700; color:#FFFFFF;">{{ l.b }}</b>{{ l.c }}<span class="{{ l.arrCls }}">→</span><b style="font-weight:700; color:#FFFFFF;">{{ l.d }}</b></p>
+</sc-for>
+</div>
+</li>
+</sc-for>
+</ol>
+</div>
+</sc-if>
+
+<!-- Раскадровка: карточки слайдов (вкладка) -->
+<sc-if value="{{ isBoard }}" hint-placeholder-val="{{ false }}">
+<div id="mb-p-board" role="tabpanel" aria-labelledby="mb-t-board" style="display:flex; flex-direction:column; flex:1; min-height:0; margin-top:16px;">
+<p style="flex:none; height:24px; margin:0; font-size:15px; font-weight:500; line-height:24px; color:rgba(255,255,255,.64);"><b style="font-weight:700; color:#FFFFFF;">5 из 12</b> готово</p>
+<div role="group" aria-label="Какую раскадровку показать" style="flex:none; display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:4px; height:52px; margin-top:12px; padding:4px; border-radius:999px; background:rgba(255,255,255,.06);">
+<sc-for list="{{ bvars }}" as="bv" hint-placeholder-count="3">
+<button type="button" class="p2-seg {{ bv.cls }}" aria-pressed="{{ bv.pressed }}" onClick="{{ bv.pick }}" style="height:44px; padding:0 8px;">{{ bv.label }}</button>
+</sc-for>
+</div>
+<div class="mb-scroll" style="flex:1; min-height:0; margin-top:16px;">
+<div style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:16px;">
+<sc-for list="{{ board }}" as="s" hint-placeholder-count="12">
+<div class="p2-in {{ s.cls }}" style="animation-delay: {{ s.delay }};">
+<div class="p2-sbf">
+<span class="p2-sbn" aria-hidden="true">{{ s.n }}</span>
+<sc-if value="{{ s.done }}" hint-placeholder-val="{{ true }}">
+<img class="p2-pop" src="{{ s.img }}" alt="Слайд {{ s.n }}: {{ s.title }}" style="position:absolute; inset:0; display:block; width:100%; height:100%; aspect-ratio:16 / 9; object-fit:cover;">
+<span class="p2-sbok" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></span>
+</sc-if>
+<sc-if value="{{ s.cur }}" hint-placeholder-val="{{ false }}">
+<span class="p2-work" aria-hidden="true"></span>
+</sc-if>
+</div>
+<div style="display:flex; align-items:baseline; gap:8px; height:20px; margin-top:8px;">
+<span style="flex:none; font-family:'Unbounded','Manrope',sans-serif; font-weight:600; font-size:12px; line-height:20px; color:rgba(255,255,255,.48);">{{ s.n }}</span>
+<span style="min-width:0; font-size:13px; font-weight:600; line-height:20px; color:rgba(255,255,255,.8); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ s.title }}</span>
+</div>
+</div>
+</sc-for>
+</div>
+</div>
+</div>
+</sc-if>
+
+</div>
+</section>
+</div>
+
+</main>
+
+<!-- полоса жестов (часть макета), под ней 34 px безопасной зоны -->
+<span class="mp-home" aria-hidden="true" style="background:#FFFFFF;"></span>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { tab: 'agent', bvar: 's', menu: false };
+    this.D = {
+      S: [
+        '/_blob/0d6e85834c67424ae54a52bafe5d8181', '/_blob/d331ce5caad9824e7e1b348e424378f3',
+        '/_blob/d467e38cc12111ad26a428ff8e19ff4f', '/_blob/a42230ee9ee0732d731d992e8f213a12',
+        '/_blob/6c09a69a8e2638087c2368085b443d0b', '/_blob/9d3bcdec98f61bbf1f44527b585a6d6b',
+        '/_blob/9d0f9548be072420b3dbc97d359c5bd0', '/_blob/18db92cfee0ef754b120d6e4356e1466',
+        '/_blob/600406289118a423fc5df75a99ffc237', '/_blob/7881adf9929cebbcc11c820411d96c4e',
+        '/_blob/a4709492f9d6643420ae86dcf42c92ee', '/_blob/c70b746e3433f21d6e6fbe47d95693b7'
+      ],
+      ALT: {
+        v: { 0: '/_blob/3a65dd36fb256725b6220c8e2348b214', 3: '/_blob/bb6e83990419cf1d61392e723e53bc08', 8: '/_blob/5254188d67a8bd743a5ca31ad8a4aca7' },
+        c: { 0: '/_blob/3b92d2f49ff4c421015045369ec75374', 3: '/_blob/79d18dbbe116fd6672a8e0db0b051c68', 8: '/_blob/a6711f28fa01480a29f24df59e7d7986' }
+      },
+      T: ['Интеграл', 'История создания', 'Неопределённый интеграл', 'Площадь криволинейной трапеции',
+        'Формула Ньютона — Лейбница', 'Линейность и аддитивность', 'Интегрирование по частям', 'Замена переменной',
+        'Пример вычисления', 'Двойной интеграл', 'Путь, работа, потенциал', 'Где применяют интеграл'],
+      ROLES: [
+        { name: 'Автор', st: 'done', status: 'готово', p: ['M4 20h4L19 9l-4-4L4 16v4z', 'M13.5 6.5l4 4', ''], lines: [
+          { a: 'Нашёл статью «Интеграл» в Википедии' },
+          { a: 'План — ', b: '12 слайдов и 15 фактов' }
+        ] },
+        { name: 'Аналитик', st: 'done', status: 'готово', p: ['M17 11a6 6 0 1 1-12 0a6 6 0 1 1 12 0z', 'M20 20l-4.5-4.5', ''], lines: [
+          { a: 'Нашёл ', b: '12 слайдов и 8 формул' }
+        ] },
+        { name: 'Дизайнер', st: 'act', status: 'сейчас', p: ['M7 4h10a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3z', 'M4 10h16', 'M10 10v10'], lines: [
+          { b: 'Слайд 3', c: ' — формула с пояснением' },
+          { b: 'Слайд 6', c: ' — две формулы свойств' },
+          { b: 'Слайд 9', c: ' — пример с ответом 8/3' }
+        ] },
+        { name: 'Критик', st: 'act', status: 'сверяет по ходу', p: ['M5 5h14v10H10l-5 4V5z', 'M9 10l2 2 4-4', ''], lines: [
+          { b: 'Слайд 6:', c: ' формулы без пояснений', d: 'пояснение к каждой' }
+        ] },
+        { name: 'Вёрстка', st: 'pend', status: 'по макетам шаблона', p: ['M12 4l8 4-8 4-8-4 8-4z', 'M4 12l8 4 8-4', 'M4 16l8 4 8-4'], lines: [] },
+        { name: 'Проверка', st: 'pend', status: 'шрифты, цвета, отступы', p: ['M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z', 'M15 12a3 3 0 1 1-6 0a3 3 0 1 1 6 0z', ''], lines: [] }
+      ]
+    };
+  }
+
+  img(v, i) {
+    const alt = this.D.ALT[v];
+    return (alt && alt[i]) || this.D.S[i];
+  }
+
+  renderVals() {
+    const D = this.D;
+    const st = this.state;
+    const isAgent = st.tab === 'agent';
+    const VN = { s: 'Структурный', v: 'Визуальный', c: 'Компактный' };
+    const DONE = 5;
+
+    const roles = D.ROLES.map((r, ri) => ({
+      name: r.name, status: r.status,
+      p1: r.p[0], p2: r.p[1], p3: r.p[2],
+      cls: 'p2-role-' + r.st + (ri === D.ROLES.length - 1 ? ' p2-role-last' : ''),
+      delay: (240 + ri * 40) + 'ms',
+      lines: r.lines.map((l) => ({
+        a: l.a || '', b: l.b || '', c: l.c || '', d: l.d || '',
+        arrCls: l.d ? 'p2-arrow' : 'p2-none'
+      }))
+    }));
+
+    const board = D.T.map((title, i) => {
+      const done = i < DONE;
+      const cur = i === DONE;
+      return {
+        n: i + 1, title, img: this.img(st.bvar, i), done, cur,
+        cls: done ? 'p2-sb-done' : (cur ? 'p2-sb-cur' : ''),
+        delay: (i * 40) + 'ms'
+      };
+    });
+
+    const bvars = ['s', 'v', 'c'].map((k) => ({
+      label: VN[k],
+      pressed: String(k === st.bvar),
+      cls: k === st.bvar ? 'p2-seg-on' : '',
+      pick: () => this.setState({ bvar: k })
+    }));
+
+    return {
+      isAgent, isBoard: !isAgent,
+      agentSel: String(isAgent), boardSel: String(!isAgent),
+      agentCls: isAgent ? 'p2-seg-on' : '',
+      boardCls: isAgent ? '' : 'p2-seg-on',
+      showAgent: () => this.setState({ tab: 'agent' }),
+      showBoard: () => this.setState({ tab: 'board' }),
+      roles, board, bvars,
+      menuOpen: st.menu,
+      menuStr: String(st.menu),
+      toggleMenu: () => this.setState({ menu: !this.state.menu })
+    };
+  }
+}
+</script>
+</body>
+</html>

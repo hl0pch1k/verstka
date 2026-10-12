@@ -1,0 +1,865 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Verstka — Слои: Помощник открывается</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700&amp;family=Unbounded:wght@600;700&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#0A0F1F}a:hover{color:#1E40AF}
+.p2-root{--ease:cubic-bezier(0.2, 0, 0, 1);-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+.p2-root *,.p2-root *::before,.p2-root *::after{box-sizing:border-box}
+:where(.p2-root) button{font-family:inherit;color:inherit;-webkit-tap-highlight-color:transparent}
+.p2-root :focus-visible{outline:2px solid #2563EB;outline-offset:2px}
+.p2-dark :focus-visible{outline-color:#38BDF8}
+.p2-sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.p2-none{display:none}
+
+/* движение: только transform и opacity */
+@keyframes p2-rise{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:translateY(0)}}
+@keyframes p2-in{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+@keyframes p2-pop{from{opacity:0;transform:scale(.98)}to{opacity:1;transform:scale(1)}}
+@keyframes p2-work{0%{transform:scaleX(0);opacity:1}72%{transform:scaleX(1);opacity:1}100%{transform:scaleX(1);opacity:0}}
+.p2-rise{animation:p2-rise 520ms var(--ease) backwards}
+.p2-in{animation:p2-in 360ms var(--ease) backwards}
+.p2-pop{animation:p2-pop 360ms var(--ease) backwards}
+
+/* колода плит */
+.p2-slot{transition:transform 520ms var(--ease)}
+.p2-s4-on{opacity:1;visibility:visible;transition:transform 520ms var(--ease),opacity 520ms var(--ease)}
+.p2-s4-off{opacity:0;visibility:hidden;pointer-events:none;transition:transform 340ms var(--ease),opacity 340ms var(--ease),visibility 0s linear 340ms}
+.p2-on{opacity:1;visibility:visible;transition:opacity 360ms var(--ease) 120ms}
+.p2-off{opacity:0;visibility:hidden;pointer-events:none;transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
+.p2-stag{transition:opacity 360ms var(--ease),transform 360ms var(--ease)}
+.p2-off .p2-stag{opacity:0;transform:translateY(12px);transition-duration:240ms}
+
+/* заголовок плиты */
+.p2-head{display:flex;align-items:center;gap:32px;height:64px;padding:0;border:0;background:none;cursor:pointer;text-align:left;border-radius:16px;transition:transform 160ms var(--ease)}
+.p2-head:active{transform:scale(.98)}
+.p2-num{display:block;width:160px;flex:none;height:64px;font-family:'Unbounded','Manrope',sans-serif;font-weight:700;font-size:88px;line-height:64px;letter-spacing:-0.04em;opacity:.14;transition:opacity 160ms var(--ease);pointer-events:none}
+.p2-head:hover .p2-num{opacity:.3}
+.p2-p2 .p2-num{opacity:.3}
+.p2-p2 .p2-head:hover .p2-num{opacity:.46}
+.p2-num3{opacity:.22}
+.p2-p3:has(.p2-head:hover) .p2-num3{opacity:.4}
+.p2-ttl{font-family:'Unbounded','Manrope',sans-serif;font-weight:600;font-size:32px;line-height:40px;letter-spacing:-0.03em;white-space:nowrap}
+
+/* кнопки */
+.p2-cta{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:12px;height:56px;padding:0 32px;border:0;border-radius:999px;background:linear-gradient(112deg,#1D4ED8 0%,#2563EB 45%,#38BDF8 140%);color:#FFFFFF;font-family:'Unbounded','Manrope',sans-serif;font-size:15px;font-weight:600;line-height:24px;letter-spacing:-0.01em;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-cta::after{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:0 12px 40px 0 rgba(11,18,32,.18);opacity:0;transition:opacity 160ms var(--ease);pointer-events:none}
+.p2-cta:hover{transform:translateY(-2px)}
+.p2-cta:hover::after{opacity:1}
+.p2-cta:active{transform:scale(.98)}
+.p2-ob{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:48px;padding:0 24px;border:0;border-radius:999px;background:#FFFFFF;box-shadow:inset 0 0 0 1px rgba(11,18,32,.14);color:#0B1220;font-size:15px;font-weight:700;line-height:24px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-ob:hover{transform:translateY(-2px)}
+.p2-ob:active{transform:scale(.98)}
+.p2-gb{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 16px;border:0;border-radius:999px;background:transparent;color:#2563EB;font-size:15px;font-weight:700;line-height:24px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-gb:hover{background:#F3F4F1;transform:translateY(-2px)}
+.p2-gb:active{transform:scale(.98)}
+.p2-pill{display:inline-flex;align-items:center;height:40px;padding:0 16px;border:0;border-radius:999px;background:#FFFFFF;box-shadow:inset 0 0 0 1px rgba(37,99,235,.14);color:#0B1220;font-size:14px;font-weight:600;line-height:20px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-pill:hover{transform:translateY(-2px);box-shadow:inset 0 0 0 1px rgba(37,99,235,.4)}
+.p2-pill:active{transform:scale(.98)}
+.p2-nav{display:inline-flex;align-items:center;height:40px;padding:0 16px;border-radius:999px;font-family:'Unbounded','Manrope',sans-serif;font-size:14px;font-weight:600;line-height:24px;letter-spacing:-0.01em;color:#5A6272;text-decoration:none;transition:transform 160ms var(--ease)}
+.p2-nav:hover{color:#0B1220;background:#FFFFFF}
+.p2-nav:active{transform:scale(.98)}
+
+/* шаблоны */
+.p2-card{display:block;width:100%;padding:0;border:0;background:none;text-align:left;cursor:pointer;border-radius:16px;transition:transform 160ms var(--ease)}
+.p2-card:hover{transform:translateY(-2px)}
+.p2-card:active{transform:scale(.98)}
+.p2-cover{position:relative;display:block;height:142px;border-radius:16px}
+.p2-cover::after{content:"";position:absolute;inset:0;border-radius:16px;box-shadow:0 12px 32px 0 rgba(11,18,32,.14);opacity:0;transition:opacity 160ms var(--ease);pointer-events:none}
+.p2-card:hover .p2-cover::after{opacity:1}
+.p2-sel{box-shadow:0 0 0 2px #FFFFFF,0 0 0 4px #2563EB}
+.p2-chk{position:absolute;top:8px;right:8px;width:24px;height:24px;border-radius:999px;background:#2563EB;color:#FFFFFF;display:flex;align-items:center;justify-content:center;transition:opacity 240ms var(--ease),transform 240ms var(--ease)}
+.p2-chk-off{opacity:0;transform:scale(.98)}
+
+/* текст */
+.p2-field{transition:box-shadow 0s}
+.p2-field:has(.p2-ta:focus){box-shadow:0 0 0 2px #2563EB}
+.p2-ta::placeholder,.p2-inp::placeholder{color:#5A6272;opacity:1}
+.p2-ta:focus{outline:none}
+.p2-muted{color:#5A6272}
+
+/* параметры (тёмная плита) */
+.p2-box{border-radius:24px;background:rgba(255,255,255,.06);box-shadow:inset 0 0 0 1px rgba(255,255,255,.1)}
+.p2-rb{width:40px;height:40px;flex:none;padding:0;border:0;border-radius:999px;background:rgba(255,255,255,.1);color:#FFFFFF;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:transform 160ms var(--ease),opacity 160ms var(--ease)}
+.p2-rb:hover{transform:translateY(-2px)}
+.p2-rb:active{transform:scale(.98)}
+.p2-rb:disabled{opacity:.32;cursor:default;transform:none}
+.p2-vc{width:100%;height:88px;padding:16px;border:0;border-radius:24px;background:rgba(255,255,255,.06);box-shadow:inset 0 0 0 1px rgba(255,255,255,.1);display:flex;flex-direction:column;justify-content:space-between;text-align:left;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-vc:hover{transform:translateY(-2px)}
+.p2-vc:active{transform:scale(.98)}
+.p2-vc-on{background:rgba(37,99,235,.24);box-shadow:inset 0 0 0 1px #38BDF8}
+.p2-vbox{width:20px;height:20px;flex:none;border-radius:999px;box-shadow:inset 0 0 0 2px rgba(255,255,255,.4);display:flex;align-items:center;justify-content:center;color:#FFFFFF}
+.p2-vbox svg{opacity:0;transition:opacity 240ms var(--ease)}
+.p2-vc-on .p2-vbox{background:#2563EB;box-shadow:none}
+.p2-vc-on .p2-vbox svg{opacity:1}
+.p2-sw{position:relative;width:44px;height:24px;flex:none;padding:0;border:0;border-radius:999px;background:rgba(255,255,255,.16);cursor:pointer}
+.p2-sw-fill{position:absolute;inset:0;border-radius:999px;background:#2563EB;opacity:0;transition:opacity 240ms var(--ease)}
+.p2-sw-knob{position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:999px;background:#FFFFFF;transition:transform 240ms var(--ease)}
+.p2-sw-on .p2-sw-fill{opacity:1}
+.p2-sw-on .p2-sw-knob{transform:translateX(20px)}
+
+/* сборка */
+.p2-seg{height:32px;padding:0 16px;border:0;border-radius:999px;background:transparent;color:rgba(255,255,255,.72);font-size:14px;font-weight:600;line-height:20px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-seg:hover{color:#FFFFFF}
+.p2-seg:active{transform:scale(.98)}
+.p2-seg-on,.p2-seg-on:hover{background:#FFFFFF;color:#0B1220}
+.p2-ph{position:absolute;left:0;top:0;white-space:nowrap;transition:opacity 360ms var(--ease),transform 360ms var(--ease)}
+.p2-ph-on{opacity:1;transform:translateY(0)}
+.p2-ph-past{opacity:0;transform:translateY(-12px);transition-duration:240ms}
+.p2-ph-next{opacity:0;transform:translateY(12px);transition-duration:240ms}
+.p2-bar{transition:transform 520ms var(--ease)}
+.p2-sbf{position:relative;aspect-ratio:16 / 9;border-radius:16px;overflow:hidden;background:rgba(255,255,255,.04);box-shadow:inset 0 0 0 1px rgba(255,255,255,.08)}
+.p2-sb-cur .p2-sbf{box-shadow:inset 0 0 0 1px #38BDF8}
+.p2-sbn{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:'Unbounded','Manrope',sans-serif;font-weight:600;font-size:20px;color:rgba(255,255,255,.24);transition:opacity 240ms var(--ease)}
+.p2-sb-done .p2-sbn{opacity:0}
+.p2-sbok{position:absolute;top:8px;right:8px;width:20px;height:20px;border-radius:999px;background:#2563EB;color:#FFFFFF;display:flex;align-items:center;justify-content:center}
+.p2-work{position:absolute;left:0;right:0;bottom:0;height:2px;background:#38BDF8;transform-origin:left center;animation:p2-work 1100ms var(--ease) infinite}
+.p2-role{position:relative;display:grid;grid-template-columns:28px minmax(0,1fr);column-gap:16px}
+.p2-role::before{content:"";position:absolute;left:13px;top:36px;bottom:-4px;width:2px;border-radius:999px;background:rgba(255,255,255,.12)}
+.p2-role-last::before{display:none}
+.p2-dot{width:28px;height:28px;border-radius:999px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.06);color:rgba(255,255,255,.48)}
+.p2-role-done .p2-dot{background:#2563EB;color:#FFFFFF}
+.p2-role-act .p2-dot{background:transparent;color:#38BDF8;box-shadow:inset 0 0 0 2px #38BDF8}
+.p2-rname{font-size:15px;font-weight:700;line-height:20px;color:#FFFFFF}
+.p2-role-pend .p2-rname{color:rgba(255,255,255,.48)}
+.p2-rst{font-size:13px;font-weight:600;line-height:20px;color:rgba(255,255,255,.56)}
+.p2-role-act .p2-rst{color:#38BDF8}
+.p2-arrow{color:#38BDF8;font-weight:700;margin:0 8px}
+
+/* результат */
+.p2-rbl{width:40px;height:40px;padding:0;border:0;border-radius:999px;background:#F3F4F1;color:#0B1220;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:transform 160ms var(--ease),opacity 160ms var(--ease)}
+.p2-rbl:hover{transform:translateY(-2px)}
+.p2-rbl:active{transform:scale(.98)}
+.p2-rbl:disabled{opacity:.32;cursor:default;transform:none}
+.p2-film{display:flex;gap:8px;overflow-x:auto;padding:8px 4px;scrollbar-width:none}
+.p2-film::-webkit-scrollbar{display:none}
+.p2-th{flex:none;width:112px;height:63px;padding:0;border:0;border-radius:12px;background:#F3F4F1;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-th:hover{transform:translateY(-2px)}
+.p2-th:active{transform:scale(.98)}
+.p2-th-on{box-shadow:0 0 0 2px #FFFFFF,0 0 0 4px #2563EB}
+.p2-rseg{display:flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 8px;border:0;border-radius:999px;background:transparent;color:#5A6272;font-size:14px;font-weight:600;line-height:20px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-rseg:hover{color:#0B1220}
+.p2-rseg:active{transform:scale(.98)}
+.p2-rseg-on{background:#FFFFFF;color:#0B1220;box-shadow:0 1px 2px rgba(11,18,32,.06),0 4px 16px 0 rgba(11,18,32,.08)}
+.p2-rsc{font-family:'Unbounded','Manrope',sans-serif;font-size:12px;font-weight:600;color:#2563EB}
+
+@media (prefers-reduced-motion: reduce){
+  .p2-root *,.p2-root *::before,.p2-root *::after{animation:none !important;transition:none !important}
+}
+@media (max-width: 900px){
+  .p2-root{padding:0 16px 16px !important}
+  .p2-hdr{padding:0 8px !important}
+  .p2-navs{display:none !important}
+  .p2-deck{height:auto !important;overflow:visible !important;border-radius:0 !important}
+  .p2-slot{position:relative !important;height:auto !important;transform:none !important;margin-top:-40px}
+  .p2-slot:first-child{margin-top:0}
+  .p2-plate{height:auto !important;padding:24px 24px 64px !important}
+  .p2-off,.p2-s4-off,.p2-num3,.p2-spc,.p2-hide-s{display:none !important}
+  .p2-body{margin-left:0 !important}
+  .p2-hrow{flex-wrap:wrap !important;height:auto !important;row-gap:16px}
+  .p2-head{gap:16px}
+  .p2-num{width:auto !important;height:48px !important;font-size:48px !important;line-height:48px !important}
+  .p2-ttl{font-size:24px !important;line-height:32px !important;white-space:normal}
+  .p2-g4{grid-template-columns:repeat(2,minmax(0,1fr)) !important}
+  .p2-params,.p2-two{grid-template-columns:minmax(0,1fr) !important;height:auto !important}
+  .p2-field{height:auto !important}
+  .p2-ta{min-height:120px !important}
+  .p2-wrap{flex-wrap:wrap !important;height:auto !important;row-gap:16px}
+  .p2-phs{height:auto !important}
+  .p2-ph{position:static !important;white-space:normal;font-size:24px !important;line-height:32px !important}
+  .p2-ph-past,.p2-ph-next{display:none}
+}
+
+/* ——— G-helper: «Результат» с открытым Помощником ——— */
+.gh-x{background:#FFFFFF}
+/* лента */
+.gh-item{max-width:304px}
+.gh-l{align-self:flex-start}
+.gh-r{align-self:flex-end}
+.gh-bot{padding:12px 16px;border-radius:24px;background:#FFFFFF;color:#0B1220;font-size:14px;font-weight:500;line-height:20px}
+.gh-user{padding:12px 16px;border-radius:24px;background:#2563EB;color:#FFFFFF;font-size:14px;font-weight:600;line-height:20px;white-space:pre-wrap;overflow-wrap:anywhere}
+.gh-ul{margin:4px 0 0;padding:0;list-style:none}
+.gh-ul li{position:relative;margin-top:4px;padding-left:16px}
+.gh-ul li::before{content:"";position:absolute;left:4px;top:8px;width:4px;height:4px;border-radius:999px;background:#2563EB}
+.gh-job{width:304px;padding:16px;border-radius:24px;background:#FFFFFF;color:#0B1220}
+/* поле ввода */
+.gh-comp{transition:box-shadow 0s}
+.gh-comp:has(.gh-ta:focus){box-shadow:0 0 0 2px #2563EB}
+.gh-ta::placeholder{color:#5A6272;opacity:1}
+.gh-ta:focus{outline:none}
+.gh-send{width:40px;height:40px;flex:none;padding:0;border:0;border-radius:999px;background:#2563EB;color:#FFFFFF;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:transform 160ms var(--ease),opacity 160ms var(--ease)}
+.gh-send:hover{transform:translateY(-2px)}
+.gh-send:active{transform:scale(.98)}
+.gh-send:disabled{opacity:.32;cursor:default;transform:none}
+@media (max-width: 900px){
+  .gh-wrap{flex-direction:column !important;height:auto !important}
+  .gh-help{width:100% !important;height:640px !important}
+  .gh-top{flex-wrap:wrap !important;height:auto !important;row-gap:16px}
+}
+/* мягкий край прокрутки: контент сверху и снизу растворяется, а не обрезается; верхний край — только после начала прокрутки */
+@property --p2-ft{syntax:'<length>';inherits:false;initial-value:0px}
+@property --p2-fb{syntax:'<length>';inherits:false;initial-value:24px}
+.p2-fade,.p2-fade-top{-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 var(--p2-ft),#000 calc(100% - var(--p2-fb)),transparent 100%);mask-image:linear-gradient(to bottom,transparent 0,#000 var(--p2-ft),#000 calc(100% - var(--p2-fb)),transparent 100%)}
+.p2-fade-top{--p2-fb:0px}
+@supports (animation-timeline: scroll()){
+.p2-fade{animation:p2-fade linear both;animation-timeline:scroll(self)}
+.p2-fade-top{animation:p2-fade-top linear both;animation-timeline:scroll(self)}
+}
+@keyframes p2-fade{0%{--p2-ft:0px;--p2-fb:24px}8%{--p2-ft:24px}92%{--p2-fb:24px}100%{--p2-ft:24px;--p2-fb:0px}}
+@keyframes p2-fade-top{0%{--p2-ft:0px}8%{--p2-ft:24px}100%{--p2-ft:24px}}
+/* логотип Verstka: слово и три слоя под ним — светлый, синий, тёмный; при наведении слои расходятся */
+.p2-bars{display:flex;gap:3px;margin-left:1px;margin-top:-1px}
+.p2-lbar{display:block;height:4px;border-radius:999px;transition:transform 240ms var(--ease)}
+.p2-lbar1{width:28px;background:#BFD6FF}
+.p2-lbar2{width:20px;background:#2563EB}
+.p2-lbar3{width:12px;background:#0B1220}
+.p2-brand:hover .p2-lbar2{transform:translateX(2px)}
+.p2-brand:hover .p2-lbar3{transform:translateX(4px)}
+
+/* ——— из R-aside (как есть): уведомление над рабочей областью, слайд не шире 720 и вся правая колонка (прокручивается внутри) ——— */
+/* уведомление: в покое — таблетка «иконка + заголовок + ›»; по клику голубая подложка раскрывается вправо
+   (clip-path, 360 мс), затем по одному проявляются основание и кнопки (opacity + translateX −8→0, каскад 40 мс);
+   сворачивание — сначала гаснут кнопки (120 мс), затем подложка уезжает влево (240 мс) */
+.ra-note{position:relative;display:flex;align-items:center;height:48px;transform-origin:left center;transition:transform 160ms var(--ease)}
+.ra-note:not(.ra-note-on):has(.ra-ntg:hover){transform:translateY(-2px)}
+.ra-note:not(.ra-note-on):has(.ra-ntg:active){transform:scale(.98)}
+.ra-ntg{position:relative;z-index:1;display:inline-flex;align-items:center;gap:12px;flex:none;height:48px;padding:0 16px;border:0;border-radius:999px;background:#E9F1FF;color:#0B1220;font-size:15px;font-weight:700;line-height:24px;white-space:nowrap;cursor:pointer}
+.ra-chev{display:flex;align-items:center;justify-content:center;width:20px;height:20px;flex:none;color:#5A6272;transform:rotate(0deg) translateX(0);transition:transform 240ms var(--ease)}
+.ra-ntg:hover .ra-chev{transform:rotate(0deg) translateX(2px)}
+.ra-note-on .ra-chev{transform:rotate(180deg) translateX(0)}
+.ra-note-on .ra-ntg:hover .ra-chev{transform:rotate(180deg) translateX(2px)}
+.ra-nd{position:relative;display:flex;align-items:center;gap:4px;flex:1;min-width:0;height:48px;margin-left:-24px;padding:4px 4px 4px 32px}
+.ra-nbg{position:absolute;inset:0;border-radius:0 24px 24px 0;background:#E9F1FF;clip-path:inset(0 100% 0 0 round 0 24px 24px 0);transition:clip-path 240ms var(--ease) 60ms}
+.ra-note-on .ra-nbg{clip-path:inset(0 0 0 0 round 0 24px 24px 0);transition:clip-path 360ms var(--ease)}
+.ra-ni{position:relative;display:inline-flex;align-items:center;flex:none;opacity:0;transform:translateX(-8px);visibility:hidden;transition:opacity 120ms var(--ease),transform 120ms var(--ease),visibility 0s linear 120ms}
+.ra-note-on .ra-ni{opacity:1;transform:translateX(0);visibility:visible;transition:opacity 240ms var(--ease) 160ms,transform 240ms var(--ease) 160ms,visibility 0s}
+.ra-note-on .ra-ni2{transition-delay:200ms,200ms,0s}
+.ra-note-on .ra-ni3{transition-delay:240ms,240ms,0s}
+.ra-note-on .ra-ni4{transition-delay:280ms,280ms,0s}
+.ra-note-on .ra-ni5{transition-delay:320ms,320ms,0s}
+.ra-nsp{flex:1;min-width:16px}
+.ra-ni1{flex:0 1 auto;min-width:0}
+.ra-src{min-width:0;font-size:14px;font-weight:500;line-height:20px;color:#5A6272;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ra-nb{height:40px;padding:0 16px;box-shadow:none}
+.ra-nx{background:#FFFFFF}
+/* варианты оформления: название и оценка — одна группа по центру сегмента */
+.ra-vg{display:inline-flex;align-items:baseline;gap:6px}
+.ra-stage{position:relative;width:100%;max-width:720px;border-radius:24px;overflow:hidden;background:#F3F4F1;box-shadow:0 0 0 1px rgba(11,18,32,.08),0 16px 48px 0 rgba(11,18,32,.12)}
+.ra-col{scrollbar-width:none}
+.ra-col::-webkit-scrollbar{display:none}
+.ra-col>*{flex:none}
+.ra-card{position:relative;display:block;padding:16px 24px;border-radius:24px;background:#F3F4F1;color:#0B1220;text-decoration:none;transition:transform 160ms var(--ease)}
+.ra-card:hover{color:#0B1220;transform:translateY(-2px)}
+.ra-card:active{transform:scale(.98)}
+.ra-ch{display:flex;align-items:center;justify-content:space-between;gap:8px;height:24px}
+.ra-ct{font-family:'Unbounded','Manrope',sans-serif;font-size:14px;font-weight:600;line-height:24px;letter-spacing:-0.02em;color:#0B1220;white-space:nowrap}
+.ra-cm{font-size:13px;font-weight:600;line-height:20px;color:#5A6272;white-space:nowrap}
+.ra-go{flex:none;color:#5A6272;transition:transform 160ms var(--ease)}
+.ra-card:hover .ra-go{transform:translateX(2px)}
+.ra-tag{display:inline-flex;align-items:center;height:24px;padding:0 8px;border-radius:999px;background:#E9F1FF;color:#2563EB;font-size:12px;font-weight:700;line-height:16px;white-space:nowrap}
+.ra-ri{display:flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:999px;background:#FFFFFF;color:#2563EB}
+
+/* ——— G-helper-open: как открывается и закрывается Помощник ———
+   Открытие (вход):  0 мс    колода сужается: колонка 0 → 400 px, зазор 0 → 16 — 520 мс (исключение: анимируется сетка, не transform)
+                     0 мс    полный вид «Результата» (уведомление над слайдом и правая колонка) гаснет — 240 мс
+                     0 мс    «Помощник» в шапке — белая таблетка проявляется (opacity, scale .98 → 1) — 240 мс
+                     120 мс  плита помощника: translateX(32px) → 0 и opacity — 360 мс
+                     120 мс  компактный вид (шапка с действиями и узкая колонка) проявляется — 240 мс
+                     160 мс… шапка помощника, 6 сообщений, подсказки, поле ввода — каскад 40 мс, как p2-in (12 px, 360 мс)
+   Закрытие (выход = 2/3 входа): сетка 340 мс; плита уходит вправо на 32 px и гаснет за 240 мс; компактный вид гаснет за 160 мс,
+                     полный проявляется за 160 мс с задержкой 80 мс; таблетка гаснет за 160 мс; содержимое помощника
+                     сбрасывается невидимо, когда плита уже погасла (240 мс), — чтобы каскад повторился при следующем открытии.
+   prefers-reduced-motion — всё сразу (правило базового блока снимает transition и animation). */
+
+/* пункт шапки «Помощник» — кнопка-переключатель; таблетка — отдельный слой под текстом */
+.gho-nav{position:relative;isolation:isolate;margin:0;border:0;background:transparent;cursor:pointer}
+.gho-nav::before{content:"";position:absolute;inset:0;z-index:-1;border-radius:inherit;background:#FFFFFF;opacity:0;transform:scale(.98);transition:opacity 160ms var(--ease),transform 160ms var(--ease);pointer-events:none}
+.gho-open .gho-nav{color:#0B1220}
+.gho-open .gho-nav::before{opacity:1;transform:scale(1);transition-duration:240ms}
+
+/* колода и место под помощника: сетка из двух колонок, вторая растёт 0 → 400 px */
+.gho-wrap{display:grid;grid-template-columns:minmax(0,1fr) 0px;column-gap:0px;height:812px;transition:grid-template-columns 340ms var(--ease),column-gap 340ms var(--ease)}
+.gho-open .gho-wrap{grid-template-columns:minmax(0,1fr) 400px;column-gap:16px;transition-duration:520ms}
+.gho-hcell{position:relative;z-index:1;min-width:0;height:812px}
+
+/* плита помощника стоит на своём месте у правого края и въезжает на последние 32 px */
+.gho-help{position:absolute;top:0;right:0;width:400px;height:812px;opacity:0;visibility:hidden;pointer-events:none;transform:translateX(32px);transition:opacity 240ms var(--ease),transform 240ms var(--ease),visibility 0s linear 240ms}
+.gho-open .gho-help{opacity:1;visibility:visible;pointer-events:auto;transform:translateX(0);transition:opacity 360ms var(--ease) 120ms,transform 360ms var(--ease) 120ms,visibility 0s linear 0s}
+
+/* содержимое помощника: тот же ход, что p2-in, но переходом — повторяется при каждом открытии; задержки каскада — инлайн */
+.gho-st{opacity:0;transform:translateY(12px);transition:opacity 0s linear,transform 0s linear}
+.gho-open .gho-st{opacity:1;transform:translateY(0);transition:opacity 360ms var(--ease),transform 360ms var(--ease)}
+
+/* плита «Результат»: сетка сама перестраивается вместе с колодой — верхняя строка 48 → 64 (уведомление → шапка с действиями),
+   зазор под ней 16 → 24, колонка 416 → 184, зазор колонок 48 → 24. Закрыт — раскладка R-aside: уведомление 48, отступ 16, ряд 548 */
+.gho-in{display:grid;grid-template-columns:minmax(0,1fr) 416px;grid-template-rows:48px minmax(0,1fr);row-gap:16px;column-gap:48px;height:612px;transition:grid-template-columns 340ms var(--ease),grid-template-rows 340ms var(--ease),row-gap 340ms var(--ease),column-gap 340ms var(--ease)}
+.gho-open .gho-in{grid-template-columns:minmax(0,1fr) 184px;grid-template-rows:64px minmax(0,1fr);row-gap:24px;column-gap:24px;transition-duration:520ms}
+.gho-note{grid-column:1 / -1;grid-row:1;align-self:start;min-width:0}
+.gho-top{grid-column:1 / -1;grid-row:1;align-self:start;min-width:0}
+.gho-left{grid-column:1;grid-row:2;display:flex;flex-direction:column;min-width:0;min-height:0;container-type:size}
+/* правая колонка стоит на месте по вертикали (сверху 64 = уведомление 48 + отступ 16), пока строка шапки растёт; по горизонтали едет с колонкой */
+.gho-full{grid-column:2;grid-row:1 / span 2;align-self:start;justify-self:start;display:flex;flex-direction:column;width:416px;min-width:0;margin-top:64px}
+.gho-comp{grid-column:2;grid-row:2;justify-self:start;display:flex;flex-direction:column;width:184px;min-width:0}
+/* слайд: закрыт — не шире 720, как в R-aside (ровно 548 = 40 + 16 + 405 + лента 87); пока ряд под уведомлением сжимается
+   548 → 524, слайд ещё и не выше свободного места (143 = листание 40 + отступ 16 + лента 87) — лента не вылезает ниже плиты */
+.gho-left .ra-stage{max-width:min(720px, calc((100cqh - 143px) * 16 / 9))}
+/* раскрытое уведомление держит действия видимыми (visibility:visible пробивает скрытый слой) — пока помощник открыт,
+   прячем их вместе со слоем, чтобы кнопки не ловили Tab; само состояние уведомления не сбрасываем */
+.gho-open .gho-note .ra-ni{visibility:hidden;transition:visibility 0s linear 240ms}
+
+/* два слоя друг над другом — перекрёстное затухание: полный (уведомление + правая колонка R-aside) и компактный (шапка с действиями + узкая колонка) */
+.gho-xf-full{opacity:1;visibility:visible;transition:opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
+.gho-open .gho-xf-full{opacity:0;visibility:hidden;pointer-events:none;transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
+.gho-xf-comp{opacity:0;visibility:hidden;pointer-events:none;transition:opacity 160ms var(--ease),visibility 0s linear 160ms}
+.gho-open .gho-xf-comp{opacity:1;visibility:visible;pointer-events:auto;transition:opacity 240ms var(--ease) 120ms,visibility 0s linear 0s}
+
+@media (max-width: 900px){
+  .gho-wrap{display:flex !important;flex-direction:column;height:auto !important;gap:16px}
+  .gho-hcell{height:auto !important}
+  .gho-closed .gho-hcell{display:none}
+  .gho-help{position:relative !important;transform:none !important}
+  .gho-in{display:flex !important;flex-direction:column;height:auto !important;gap:24px}
+  .gho-left{container-type:normal}
+  .gho-left .ra-stage{max-width:720px}
+  .gho-full,.gho-comp{width:auto !important;order:2}
+  .gho-full{margin-top:0 !important}
+  .gho-closed .gho-top,.gho-closed .gho-comp,.gho-open .gho-full,.gho-open .gho-note{display:none}
+}
+</style>
+</helmet>
+<div class="p2-root {{ rootCls }}" style="width:100%; min-height:900px; box-sizing:border-box; padding:0 24px 24px; background:#F3F4F1; color:#0B1220; font-family:'Manrope', system-ui, -apple-system, 'Segoe UI', sans-serif; font-size:15px; line-height:24px;">
+<div style="width:100%; max-width:1392px; margin:0 auto;">
+
+<header class="p2-hdr" style="display:flex; align-items:center; justify-content:space-between; height:64px; padding:0 48px;">
+<a href="#" class="p2-brand" aria-label="Verstka — на главную" style="display:inline-flex; flex-direction:column; align-items:flex-start; gap:0; text-decoration:none; color:#0B1220;">
+<span style="font-family:'Unbounded','Manrope',sans-serif; font-weight:700; font-size:20px; line-height:24px; letter-spacing:-0.03em;">Verstka</span>
+<span class="p2-bars" aria-hidden="true"><span class="p2-lbar p2-lbar1"></span><span class="p2-lbar p2-lbar2"></span><span class="p2-lbar p2-lbar3"></span></span>
+</a>
+<nav class="p2-navs" aria-label="Разделы" style="display:flex; align-items:center; gap:8px; margin-right:-16px;">
+<a class="p2-nav" href="#">Мои презентации</a>
+<a class="p2-nav" href="#">Шаблоны</a>
+<button type="button" class="p2-nav gho-nav" onClick="{{ toggle }}" aria-expanded="{{ openStr }}" aria-controls="gho-help" title="{{ navTip }}">Помощник</button>
+</nav>
+</header>
+
+<!-- Колода и место под помощника: закрыт — колода во всю ширину; открыт — колода сужена, справа плита 400 px, зазор 16 -->
+<div class="gho-wrap">
+
+<main class="p2-deck" style="position:relative; z-index:0; min-width:0; height:812px; border-radius:40px; overflow:hidden;">
+
+<!-- ПЛИТА 01 · Шаблон (свернута в полосу) -->
+<div class="p2-slot" style="position:absolute; left:0; right:0; top:0; height:812px; z-index:1; transform:translateY(0px);">
+<section class="p2-plate p2-rise" aria-label="Шаг 1 — шаблон" style="position:relative; height:100%; padding:40px 48px; border-radius:40px; background:#FFFFFF; color:#0B1220; animation-delay:0ms;">
+<div style="position:absolute; left:48px; right:48px; top:0; height:40px; display:flex; align-items:center; gap:12px; white-space:nowrap;">
+<span style="font-family:'Unbounded','Manrope',sans-serif; font-weight:700; font-size:13px; line-height:20px; color:#5A6272;">01</span>
+<span style="font-size:14px; font-weight:700; line-height:20px; color:#0B1220;">VK Tech</span>
+<span style="font-size:13px; font-weight:500; line-height:20px; color:#5A6272;">54 слайда · Play</span>
+</div>
+</section>
+</div>
+
+<!-- ПЛИТА 02 · Текст (свернута в полосу) -->
+<div class="p2-slot" style="position:absolute; left:0; right:0; top:0; height:812px; z-index:2; transform:translateY(40px);">
+<section class="p2-plate p2-p2 p2-rise" aria-label="Шаг 2 — текст" style="position:relative; height:100%; padding:40px 48px; border-radius:40px; background:#E9F1FF; color:#0B1220; box-shadow:0 -24px 48px -24px rgba(11,18,32,.16); animation-delay:40ms;">
+<div style="position:absolute; left:48px; right:48px; top:0; height:40px; display:flex; align-items:center; gap:12px; white-space:nowrap;">
+<span style="font-family:'Unbounded','Manrope',sans-serif; font-weight:700; font-size:13px; line-height:20px; color:#5A6272;">02</span>
+<span style="font-size:14px; font-weight:700; line-height:20px; color:#0B1220;">Интеграл</span>
+<span style="font-size:13px; font-weight:500; line-height:20px; color:#5A6272;">тема · текст пишет агент</span>
+</div>
+</section>
+</div>
+
+<!-- ПЛИТА 03 · Сборка (свернута в полосу) -->
+<div class="p2-slot" style="position:absolute; left:0; right:0; top:0; height:812px; z-index:3; transform:translateY(80px);">
+<section class="p2-plate p2-p3 p2-dark p2-rise" aria-label="Сборка" style="position:relative; height:100%; padding:40px 48px; border-radius:40px; background:#0B1220; color:#FFFFFF; box-shadow:0 -24px 48px -24px rgba(11,18,32,.28); animation-delay:80ms;">
+<div style="position:absolute; left:48px; right:48px; top:0; height:40px; display:flex; align-items:center; gap:12px; white-space:nowrap;">
+<span style="font-family:'Unbounded','Manrope',sans-serif; font-weight:700; font-size:13px; line-height:20px; color:rgba(255,255,255,.56);">03</span>
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#38BDF8" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M8.5 12.25l2.4 2.4 4.6-4.9"></path></svg>
+<span style="font-size:14px; font-weight:700; line-height:20px; color:#FFFFFF;">Сборка завершена за 2:31</span>
+<span style="font-size:13px; font-weight:500; line-height:20px; color:rgba(255,255,255,.64);">3 варианта · 12 слайдов</span>
+</div>
+</section>
+</div>
+
+<!-- ПЛИТА 04 · Результат: слайд — общий для обоих видов; остальное — два слоя: полный (уведомление + правая колонка, как R-aside)
+     и компактный (шапка с действиями + узкая колонка, как G-helper) -->
+<div class="p2-slot" style="position:absolute; left:0; right:0; top:0; height:812px; z-index:4; transform:translateY(120px);">
+<section class="p2-plate p2-rise" aria-label="Результат" style="position:relative; height:100%; padding:40px 48px; border-radius:40px; background:#FFFFFF; color:#0B1220; box-shadow:0 -24px 48px -24px rgba(11,18,32,.4); animation-delay:120ms;">
+<div class="gho-in">
+
+<!-- слой «полный вид», часть 1 (как R-aside): уведомление над рабочей областью — верхняя строка сетки 48 px во всю ширину плиты;
+     по умолчанию свёрнуто в таблетку, клик раскрывает подложку вправо и проявляет действия; при открытии помощника гаснет вместе с колонкой -->
+<div class="gho-note gho-xf-full">
+<div class="ra-note p2-in {{ noteCls }}" role="note" aria-label="Уведомление о тексте презентации" style="animation-delay:160ms;">
+<button type="button" class="ra-ntg" onClick="{{ toggleNote }}" aria-expanded="{{ noteStr }}" aria-controls="ra-nd" title="{{ noteTip }}">
+<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2563EB" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M12 11v5 M12 7.8h.01"></path></svg>
+<span>Текст написал агент — проверьте факты</span>
+<span class="ra-chev" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 6.5l5.5 5.5-5.5 5.5"></path></svg></span>
+</button>
+<div id="ra-nd" class="ra-nd">
+<span class="ra-nbg" aria-hidden="true"></span>
+<span class="ra-ni ra-ni1"><span class="ra-src">По статье Википедии «Интеграл».</span></span>
+<span class="ra-nsp" aria-hidden="true"></span>
+<span class="ra-ni ra-ni2">
+<button type="button" class="p2-ob ra-nb" onClick="{{ noop }}">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.5 3.5h-6a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8.5z M13.5 3.5v3a2 2 0 0 0 2 2h3 M9 13h6 M9 16.5h4"></path></svg>
+<span>Показать текст</span>
+</button>
+</span>
+<span class="ra-ni ra-ni3">
+<button type="button" class="p2-ob ra-nb" onClick="{{ noop }}" title="Собрать ту же презентацию заново">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3L4.5 9 M4.5 4.5V9H9"></path></svg>
+<span>Собрать ещё раз</span>
+</button>
+</span>
+<span class="ra-ni ra-ni4">
+<button type="button" class="p2-ob ra-nb" onClick="{{ noop }}">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15.5 5l3.5 3.5L9 18.5l-4.5 1 1-4.5z M13 7.5l3.5 3.5"></path></svg>
+<span>Дописать текст</span>
+</button>
+</span>
+<span class="ra-ni ra-ni5">
+<button type="button" class="p2-rbl ra-nx" onClick="{{ closeNote }}" aria-label="Свернуть уведомление" title="Свернуть"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 6.5l11 11 M17.5 6.5l-11 11"></path></svg></button>
+</span>
+</div>
+</div>
+</div>
+
+<!-- слой «полный вид», часть 2 (как R-aside · «Правая колонка целиком»): колонка 416 × 548 под уведомлением, привязана к левому краю
+     колонки сетки и уезжает вместе с ней. Появление (p2-in) — на обёртке, прокрутка с мягким краем (p2-fade) — внутри; поле 24 снизу — зона растворения -->
+<div class="gho-full gho-xf-full">
+<aside class="p2-in" aria-label="Презентация «Интеграл»" style="min-width:0; height:548px; margin:0 -4px; animation-delay:240ms;">
+<div class="ra-col p2-fade" style="display:flex; flex-direction:column; height:100%; padding:0 4px 24px; overflow-y:auto;">
+<h1 style="margin:0; font-family:'Unbounded','Manrope',sans-serif; font-weight:600; font-size:40px; line-height:48px; letter-spacing:-0.03em; color:#0B1220;">Интеграл</h1>
+<p style="margin:8px 0 0; font-size:15px; font-weight:500; line-height:24px; color:#5A6272;">VK Tech · 12 слайдов · сегодня, 17:38</p>
+<div style="display:flex; align-items:flex-end; gap:16px; height:72px; margin-top:32px;">
+<span style="font-family:'Unbounded','Manrope',sans-serif; font-weight:700; font-size:88px; line-height:72px; letter-spacing:-0.04em; color:#0B1220;">{{ score }}</span>
+<span style="display:flex; flex-direction:column; padding-bottom:4px;">
+<span style="font-size:15px; font-weight:700; line-height:24px; color:#0B1220;">из 100</span>
+<span style="font-size:14px; font-weight:500; line-height:20px; color:#5A6272;">оценка качества</span>
+</span>
+</div>
+<div role="group" aria-label="Вариант оформления" style="display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:4px; height:48px; margin-top:24px; padding:4px; border-radius:999px; background:#F3F4F1;">
+<sc-for list="{{ rvars }}" as="rv" hint-placeholder-count="3">
+<button type="button" class="p2-rseg {{ rv.cls }}" aria-pressed="{{ rv.pressed }}" onClick="{{ rv.pick }}" title="{{ rv.tip }}"><span class="ra-vg"><span>{{ rv.label }}</span><span class="p2-rsc">{{ rv.score }}</span></span></button>
+</sc-for>
+</div>
+<button type="button" class="p2-cta" onClick="{{ noop }}" title="Вариант {{ vIdx }} · {{ vName }}" style="width:100%; margin-top:24px;">
+<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v10.5 M7.5 10L12 14.5l4.5-4.5 M4.5 16.5v1A2.5 2.5 0 0 0 7 20h10a2.5 2.5 0 0 0 2.5-2.5v-1"></path></svg>
+<span>Скачать PowerPoint</span>
+</button>
+<div style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:16px; margin-top:16px;">
+<button type="button" class="p2-ob" onClick="{{ noop }}">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.5 3.5h-6a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8.5z M13.5 3.5v3a2 2 0 0 0 2 2h3"></path></svg>
+<span>PDF</span>
+</button>
+<button type="button" class="p2-ob" onClick="{{ noop }}" title="Изменить текст или шаблон">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15.5 5l3.5 3.5L9 18.5l-4.5 1 1-4.5z M13 7.5l3.5 3.5"></path></svg>
+<span>Изменить текст</span>
+</button>
+</div>
+
+<div style="display:flex; flex-direction:column; gap:8px; margin-top:24px;">
+
+<a class="ra-card" href="#" title="Оценка качества {{ score }} из 100 · 100 − 10 за ошибку − 3 за предупреждение">
+<span style="display:flex; align-items:center; gap:16px;">
+<span style="position:relative; width:44px; height:44px; flex:none;">
+<svg width="44" height="44" viewBox="0 0 44 44" aria-hidden="true"><circle cx="22" cy="22" r="19" fill="none" stroke="#FFFFFF" stroke-width="4"></circle><circle cx="22" cy="22" r="19" fill="none" stroke="#2563EB" stroke-width="4" stroke-linecap="round" stroke-dasharray="{{ ringDash }}" transform="rotate(-90 22 22)"></circle></svg>
+<span style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-family:'Unbounded','Manrope',sans-serif; font-size:13px; font-weight:600; line-height:20px; color:#0B1220;"><span class="p2-sr">Оценка </span>{{ score }}</span>
+</span>
+<span style="display:flex; flex-direction:column; justify-content:center; flex:1; min-width:0;">
+<span class="p2-sr">Качество: </span>
+<span style="display:flex; align-items:center; gap:8px; font-size:14px; font-weight:700; line-height:20px; color:#0B1220; white-space:nowrap;">
+<span>Ошибок нет</span>
+<span style="font-weight:500; color:#5A6272;" aria-hidden="true">·</span>
+<span style="display:inline-flex; align-items:center; gap:4px; color:#B45309;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.27 4.75a2 2 0 0 1 3.46 0l7.02 12.25A2 2 0 0 1 19.02 20H4.98a2 2 0 0 1-1.73-3z M12 9.5v4 M12 16.8h.01"></path></svg>3 предупреждения</span>
+</span>
+<span style="font-size:13px; font-weight:500; line-height:20px; color:#5A6272;">9 чисел сверены с текстом</span>
+</span>
+</span>
+</a>
+
+<a class="ra-card" href="#">
+<span class="ra-ch"><span class="ra-ct">Как работал агент</span><svg class="ra-go" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 6.5l5.5 5.5-5.5 5.5"></path></svg></span>
+<ul style="display:flex; flex-direction:column; gap:8px; margin:8px 0 0; padding:0; list-style:none;">
+<sc-for list="{{ agent }}" as="ag" hint-placeholder-count="3">
+<li style="display:grid; grid-template-columns:24px minmax(0, 1fr); column-gap:12px; align-items:start;">
+<span class="ra-ri" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{ ag.p1 }}"></path><path d="{{ ag.p2 }}"></path><path d="{{ ag.p3 }}"></path></svg></span>
+<span style="padding-top:2px; font-size:14px; font-weight:500; line-height:20px; color:#5A6272;"><b style="font-weight:700; color:#0B1220;">{{ ag.name }}</b> {{ ag.text }}</span>
+</li>
+</sc-for>
+</ul>
+</a>
+
+<a class="ra-card" href="#">
+<span class="ra-ch"><span class="ra-ct">Почему так</span><span style="display:flex; align-items:center; gap:8px;"><span class="ra-cm">Слайд 3</span><svg class="ra-go" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 6.5l5.5 5.5-5.5 5.5"></path></svg></span></span>
+<span style="display:-webkit-box; margin-top:8px; font-size:14px; font-weight:500; line-height:20px; color:#0B1220; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden;">Главное здесь — определение, поэтому формула стоит крупно в отдельной плашке, а смысл C вынесен в подпись. Почему C любая, объясняет абзац ниже.</span>
+</a>
+
+<a class="ra-card" href="#" title="Увидел: формула прижата к абзацу над ней. Собрал слайд заново">
+<span class="ra-ch"><span style="display:flex; align-items:center; gap:8px; min-width:0;"><span class="ra-ct">Взгляд дизайнера</span><span class="ra-tag">пересобрал</span></span><svg class="ra-go" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 6.5l5.5 5.5-5.5 5.5"></path></svg></span>
+<span style="display:flex; align-items:flex-start; gap:16px; margin-top:8px;">
+<span style="display:flex; align-items:flex-start; gap:8px; flex:none;">
+<span style="display:flex; flex-direction:column; gap:4px;">
+<img src="/_blob/d467e38cc12111ad26a428ff8e19ff4f" alt="Слайд 3 до пересборки" style="display:block; width:80px; height:45px; aspect-ratio:16 / 9; object-fit:cover; border-radius:12px; box-shadow:0 0 0 1px rgba(11,18,32,.08); opacity:.64;">
+<span style="font-size:12px; font-weight:600; line-height:16px; color:#5A6272;">было</span>
+</span>
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5A6272" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none; margin-top:14px;"><path d="M5 12h14 M13.5 6.5L19 12l-5.5 5.5"></path></svg>
+<span style="display:flex; flex-direction:column; gap:4px;">
+<img src="/_blob/d467e38cc12111ad26a428ff8e19ff4f" alt="Слайд 3 после пересборки" style="display:block; width:80px; height:45px; aspect-ratio:16 / 9; object-fit:cover; border-radius:12px; box-shadow:0 0 0 1px rgba(11,18,32,.08);">
+<span style="font-size:12px; font-weight:600; line-height:16px; color:#0B1220;">стало</span>
+</span>
+</span>
+<span style="min-width:0; font-size:13px; font-weight:500; line-height:20px; color:#5A6272;">Увидел: формула прижата к абзацу над ней</span>
+</span>
+</a>
+
+</div>
+
+<div style="height:1px; margin-top:16px; background:rgba(11,18,32,.08);"></div>
+<div style="display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:8px; margin-top:8px;">
+<button type="button" class="p2-gb" onClick="{{ noop }}">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 5.5h3 M11 5.5h8.5 M11 12h8.5 M11 18.5h8.5 M6 5.5v11a2 2 0 0 0 2 2h0.5 M6 12h2.5"></path></svg>
+<span>План</span>
+</button>
+<button type="button" class="p2-gb" onClick="{{ noop }}">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4h12a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z M6 13.5h4a2 2 0 0 1 2 2v2.5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2.5a2 2 0 0 1 2-2z M16 13.5h2a2 2 0 0 1 2 2v2.5a2 2 0 0 1-2 2h-2a2 2 0 0 1-2-2v-2.5a2 2 0 0 1 2-2z"></path></svg>
+<span>Шаблон</span>
+</button>
+<button type="button" class="p2-gb" onClick="{{ noop }}">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 17.5v-11a2 2 0 0 1 2-2h3.6l2 2.5H18a2 2 0 0 1 2 2v8.5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z M12 10.5v5.5 M9.5 13.5L12 16l2.5-2.5"></path></svg>
+<span>Файлы</span>
+</button>
+</div>
+</div>
+</aside>
+</div>
+
+<!-- слой «компактный вид», часть 1 (как G-helper): шапка с названием и действиями-иконками — встаёт в верхнюю строку вместо уведомления, строка растёт 48 → 64 -->
+<div class="gho-top gho-xf-comp">
+<div class="gh-top" style="display:flex; align-items:center; justify-content:space-between; gap:24px; height:64px;">
+<div style="min-width:0;">
+<h1 style="margin:0; font-family:'Unbounded','Manrope',sans-serif; font-weight:600; font-size:32px; line-height:40px; letter-spacing:-0.03em; color:#0B1220; white-space:nowrap;">Интеграл</h1>
+<p style="margin:4px 0 0; font-size:13px; font-weight:500; line-height:20px; color:#5A6272; white-space:nowrap;">VK Tech · 12 слайдов · сегодня, 17:38</p>
+</div>
+<div style="display:flex; align-items:center; gap:8px; flex:none;">
+<button type="button" class="p2-rbl" onClick="{{ noop }}" aria-label="Скачать PDF" title="Скачать PDF"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.5 3.5h-6a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8.5z M13.5 3.5v3a2 2 0 0 0 2 2h3"></path></svg></button>
+<button type="button" class="p2-rbl" onClick="{{ noop }}" aria-label="Изменить текст" title="Изменить текст или шаблон"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15.5 5l3.5 3.5L9 18.5l-4.5 1 1-4.5z M13 7.5l3.5 3.5"></path></svg></button>
+<button type="button" class="p2-rbl" onClick="{{ noop }}" aria-label="Показать текст" title="Показать текст презентации"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 6.5h14 M5 12h14 M5 17.5h9"></path></svg></button>
+<button type="button" class="p2-rbl" onClick="{{ noop }}" aria-label="Новая презентация" title="Новая презентация"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5.5v13 M5.5 12h13"></path></svg></button>
+<button type="button" class="p2-cta" onClick="{{ noop }}" title="Вариант {{ vIdx }} · {{ vName }}" style="margin-left:8px;">
+<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v10.5 M7.5 10L12 14.5l4.5-4.5 M4.5 16.5v1A2.5 2.5 0 0 0 7 20h10a2.5 2.5 0 0 0 2.5-2.5v-1"></path></svg>
+<span>Скачать PowerPoint</span>
+</button>
+</div>
+</div>
+</div>
+
+<!-- слайд, листание и лента миниатюр — общие для обоих видов: ширина и место меняются вместе с сеткой, без затухания;
+     слайд — в рамке R-aside (ra-stage, не шире 720, по центру), каскад появления — как в R-aside (200 / 240 / 280) -->
+<div class="gho-left">
+<div class="p2-in" style="display:flex; align-items:center; justify-content:space-between; gap:16px; height:40px; animation-delay:200ms;">
+<p style="min-width:0; margin:0; font-size:15px; font-weight:700; line-height:24px; color:#0B1220; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Слайд {{ bigN }} из 12 <span style="font-weight:500; color:#5A6272;">· {{ bigTitle }}</span></p>
+<div style="display:flex; gap:8px; flex:none;">
+<button type="button" class="p2-rbl" onClick="{{ prev }}" disabled="{{ prevDis }}" aria-label="Предыдущий слайд" title="Предыдущий слайд (←)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 6.5L8.5 12l5.5 5.5"></path></svg></button>
+<button type="button" class="p2-rbl" onClick="{{ next }}" disabled="{{ nextDis }}" aria-label="Следующий слайд" title="Следующий слайд (→)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 6.5l5.5 5.5-5.5 5.5"></path></svg></button>
+</div>
+</div>
+<div class="p2-in" style="display:flex; justify-content:center; margin-top:16px; animation-delay:240ms;">
+<div class="ra-stage">
+<img src="{{ bigImg }}" alt="Слайд {{ bigN }}: {{ bigTitle }}" style="display:block; width:100%; aspect-ratio:16 / 9; object-fit:cover;">
+</div>
+</div>
+<div class="p2-film p2-in" style="margin:8px -4px 0; animation-delay:280ms;">
+<sc-for list="{{ thumbs }}" as="th" hint-placeholder-count="12">
+<button type="button" class="p2-th {{ th.cls }}" aria-pressed="{{ th.pressed }}" onClick="{{ th.pick }}"><img src="{{ th.img }}" alt="{{ th.label }}" style="display:block; width:112px; height:63px; aspect-ratio:16 / 9; object-fit:cover; border-radius:12px; box-shadow:0 0 0 1px rgba(11,18,32,.08);"></button>
+</sc-for>
+</div>
+</div>
+
+<!-- слой «компактный вид», часть 2 (как G-helper): узкая колонка 184 px — варианты столбиком, оценка, итоги проверки -->
+<div class="gho-comp gho-xf-comp">
+<div role="group" aria-label="Вариант оформления" style="display:flex; flex-direction:column; gap:4px; padding:4px; border-radius:24px; background:#F3F4F1;">
+<sc-for list="{{ rvars }}" as="rv" hint-placeholder-count="3">
+<button type="button" class="p2-rseg {{ rv.cls }}" aria-pressed="{{ rv.pressed }}" onClick="{{ rv.pick }}" title="{{ rv.tip }}" style="justify-content:space-between; width:100%; padding:0 16px;"><span>{{ rv.label }}</span><span class="p2-rsc">{{ rv.score }}</span></button>
+</sc-for>
+</div>
+<div style="display:flex; flex-direction:column; margin-top:24px;">
+<span style="font-family:'Unbounded','Manrope',sans-serif; font-weight:700; font-size:88px; line-height:72px; letter-spacing:-0.04em; color:#0B1220;">{{ score }}</span>
+<span style="margin-top:8px; font-size:15px; font-weight:700; line-height:24px; color:#0B1220;">из 100</span>
+<span style="font-size:14px; font-weight:500; line-height:20px; color:#5A6272;">оценка качества</span>
+</div>
+<div style="height:1px; margin-top:24px; background:rgba(11,18,32,.08);"></div>
+<ul style="display:flex; flex-direction:column; gap:12px; margin:24px 0 0; padding:0; list-style:none;">
+<li style="display:flex; align-items:flex-start; gap:12px; font-size:14px; font-weight:500; line-height:20px; color:#0B1220;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2563EB" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M8.5 12.25l2.4 2.4 4.6-4.9"></path></svg><span><b style="font-weight:700;">Ошибок нет</b> · 3 замечания</span></li>
+<li style="display:flex; align-items:flex-start; gap:12px; font-size:14px; font-weight:500; line-height:20px; color:#0B1220;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2563EB" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;"><path d="M5 9h14 M5 15h14 M10.5 4.5l-2 15 M15.5 4.5l-2 15"></path></svg><span><b style="font-weight:700;">9 чисел</b> сверены с текстом</span></li>
+<li style="display:flex; align-items:flex-start; gap:12px; font-size:14px; font-weight:500; line-height:20px; color:#0B1220;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2563EB" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;"><path d="M5.5 19V6a2.5 2.5 0 0 1 2.5-2.5h10.5v13H8A2.5 2.5 0 0 0 5.5 19z M5.5 19A1.5 1.5 0 0 0 7 20.5h11.5v-4"></path></svg><span>Текст написал агент — по статье «Интеграл» в Википедии</span></li>
+</ul>
+</div>
+
+</div>
+</section>
+</div>
+
+</main>
+
+<!-- ПОМОЩНИК · ячейка второй колонки (0 → 400 px); плита 400 px, #E9F1FF, прижата к правому краю -->
+<div class="gho-hcell">
+<aside id="gho-help" class="gh-help gho-help" aria-labelledby="gh-title" style="display:flex; flex-direction:column; padding:24px; border-radius:40px; background:#E9F1FF; color:#0B1220;">
+
+<!-- шапка: заголовок и крестик на одной оси (центр строки 48) -->
+<div class="gho-st" style="display:flex; align-items:center; justify-content:space-between; gap:16px; height:48px; flex:none; transition-delay: {{ dHead }};">
+<h2 id="gh-title" style="min-width:0; margin:0; font-family:'Unbounded','Manrope',sans-serif; font-weight:600; font-size:20px; line-height:28px; letter-spacing:-0.02em; color:#0B1220;">Помощник</h2>
+<button type="button" class="p2-rbl gh-x" onClick="{{ close }}" aria-label="Закрыть помощника" title="Закрыть (Esc)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 6.5l11 11 M17.5 6.5l-11 11"></path></svg></button>
+</div>
+
+<!-- лента: мягкий край (p2-fade); поле 24 снизу — зона растворения, поэтому у поля ввода отступ сверху 0 (от последнего сообщения — 24) -->
+<div role="log" class="p2-fade" aria-label="Переписка с помощником" style="flex:1; min-height:0; overflow-y:auto; margin:16px -4px 0; padding:4px 4px 24px;">
+<div style="display:flex; flex-direction:column; justify-content:flex-end; gap:12px; min-height:100%;">
+<sc-for list="{{ msgs }}" as="m" hint-placeholder-count="6">
+<div class="gh-item {{ m.side }} gho-st {{ m.anim }}" style="transition-delay: {{ m.delay }};">
+<sc-if value="{{ m.isText }}" hint-placeholder-val="{{ true }}">
+<div class="{{ m.bubble }}">{{ m.a }}<b style="font-weight:700;">{{ m.b }}</b>{{ m.c }}</div>
+</sc-if>
+<sc-if value="{{ m.isList }}" hint-placeholder-val="{{ false }}">
+<div class="gh-bot">
+<p style="margin:0;">{{ m.a }}</p>
+<ul class="gh-ul">
+<sc-for list="{{ m.items }}" as="li" hint-placeholder-count="3">
+<li>{{ li.t }}</li>
+</sc-for>
+</ul>
+</div>
+</sc-if>
+<sc-if value="{{ m.isJob }}" hint-placeholder-val="{{ false }}">
+<div class="gh-job">
+<div style="display:flex; align-items:center; gap:8px; height:20px;">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2563EB" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;"><path d="M12 4l8 4-8 4-8-4z M4 12l8 4 8-4 M4 16l8 4 8-4"></path></svg>
+<span style="flex:1; min-width:0; font-size:14px; font-weight:700; line-height:20px; color:#0B1220;">{{ m.a }}</span>
+<span style="flex:none; font-family:'Unbounded','Manrope',sans-serif; font-size:14px; font-weight:600; line-height:20px; letter-spacing:-0.02em; color:#2563EB; font-variant-numeric:tabular-nums;">{{ m.pct }}</span>
+</div>
+<div role="progressbar" aria-label="{{ m.a }}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ m.val }}" style="position:relative; height:4px; margin-top:12px; border-radius:999px; background:#F3F4F1; overflow:hidden;">
+<span style="position:absolute; inset:0; border-radius:999px; background:#2563EB; transform-origin:left center; transform:scaleX({{ m.scale }});"></span>
+</div>
+</div>
+</sc-if>
+</div>
+</sc-for>
+<sc-if value="{{ hasChips }}" hint-placeholder-val="{{ true }}">
+<div class="gho-st" style="display:flex; flex-wrap:wrap; gap:8px; transition-delay: {{ dChips }};">
+<sc-for list="{{ chips }}" as="c" hint-placeholder-count="2">
+<button type="button" class="p2-pill" onClick="{{ c.pick }}">{{ c.label }}</button>
+</sc-for>
+</div>
+</sc-if>
+</div>
+</div>
+
+<sc-if value="{{ longText }}" hint-placeholder-val="{{ false }}">
+<p aria-live="polite" style="margin:-8px 16px 16px 0; flex:none; font-size:12px; font-weight:600; line-height:16px; color:#5A6272; text-align:right; font-variant-numeric:tabular-nums;">{{ charsText }}</p>
+</sc-if>
+<div class="gho-st" style="flex:none; transition-delay: {{ dComp }};">
+<div class="gh-comp" style="display:flex; align-items:flex-end; gap:8px; margin-top:0; padding:8px; border-radius:24px; background:#FFFFFF;">
+<button type="button" class="p2-rbl" onClick="{{ noop }}" aria-label="Вставить текст из файла" title="Вставить текст из файла (.txt, .md — до 2 МБ)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19.5 11.5l-7.6 7.6a4.6 4.6 0 0 1-6.5-6.5l8.1-8.1a3.1 3.1 0 0 1 4.4 4.4l-8 8a1.55 1.55 0 0 1-2.2-2.2l7.3-7.3"></path></svg></button>
+<label style="display:flex; flex:1; min-width:0;">
+<span class="p2-sr">Сообщение помощнику</span>
+<textarea class="gh-ta {{ taFade }}" rows="1" value="{{ text }}" onInput="{{ onText }}" placeholder="{{ ph }}" style="display:block; width:100%; height:{{ taH }}; padding:8px 4px; border:0; resize:none; background:transparent; font-family:inherit; font-size:15px; font-weight:500; line-height:24px; color:#0B1220; overflow-y:auto;"></textarea>
+</label>
+<button type="button" class="gh-send" onClick="{{ send }}" disabled="{{ sendDis }}" aria-label="Отправить" title="Отправить (Enter)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5 M6.5 10.5L12 5l5.5 5.5"></path></svg></button>
+</div>
+</div>
+
+</aside>
+</div>
+</div>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    // open — помощник открыт; при открытии доски он закрыт и через 900 мс открывается сам
+    // note — уведомление «Текст написал агент» раскрыто (часть полного вида, как в R-aside)
+    this.state = { open: false, note: false, slide: 2, vr: 's', text: '', sent: [] };
+    this.auto = null;
+    this.D = {
+      S: [
+        '/_blob/0d6e85834c67424ae54a52bafe5d8181', '/_blob/d331ce5caad9824e7e1b348e424378f3',
+        '/_blob/d467e38cc12111ad26a428ff8e19ff4f', '/_blob/a42230ee9ee0732d731d992e8f213a12',
+        '/_blob/6c09a69a8e2638087c2368085b443d0b', '/_blob/9d3bcdec98f61bbf1f44527b585a6d6b',
+        '/_blob/9d0f9548be072420b3dbc97d359c5bd0', '/_blob/18db92cfee0ef754b120d6e4356e1466',
+        '/_blob/600406289118a423fc5df75a99ffc237', '/_blob/7881adf9929cebbcc11c820411d96c4e',
+        '/_blob/a4709492f9d6643420ae86dcf42c92ee', '/_blob/c70b746e3433f21d6e6fbe47d95693b7'
+      ],
+      ALT: {
+        v: { 0: '/_blob/3a65dd36fb256725b6220c8e2348b214', 3: '/_blob/bb6e83990419cf1d61392e723e53bc08', 8: '/_blob/5254188d67a8bd743a5ca31ad8a4aca7' },
+        c: { 0: '/_blob/3b92d2f49ff4c421015045369ec75374', 3: '/_blob/79d18dbbe116fd6672a8e0db0b051c68', 8: '/_blob/a6711f28fa01480a29f24df59e7d7986' }
+      },
+      T: ['Интеграл', 'История создания', 'Неопределённый интеграл', 'Площадь криволинейной трапеции',
+        'Формула Ньютона — Лейбница', 'Линейность и аддитивность', 'Интегрирование по частям', 'Замена переменной',
+        'Пример вычисления', 'Двойной интеграл', 'Путь, работа, потенциал', 'Где применяют интеграл'],
+      // карточка «Как работал агент» в полной правой колонке — как в R-aside
+      AG: [
+        { name: 'Автор', text: 'Написал текст на 12 слайдов', p: ['M15.5 5l3.5 3.5L9 18.5l-4.5 1 1-4.5z M13 7.5l3.5 3.5', '', ''] },
+        { name: 'Дизайнер', text: 'Продумал титул и 11 слайдов: 8 формул, 1 таблица', p: ['M7 4.5h10a2.5 2.5 0 0 1 2.5 2.5v10a2.5 2.5 0 0 1-2.5 2.5H7A2.5 2.5 0 0 1 4.5 17V7A2.5 2.5 0 0 1 7 4.5z M4.5 9.5h15 M10 9.5v10', '', ''] },
+        { name: 'Критик', text: '1 замечание, исправлен 1 слайд', p: ['M6.5 4.5h11a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H12l-4.5 4v-4h-1a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z M9 10l2 2 4-4', '', ''] }
+      ]
+    };
+  }
+
+  // Анимацию видно сразу: доска открывается «Результатом» во всю ширину (плиты поднимаются за 640 мс),
+  // через 900 мс помощник открывается сам
+  componentDidMount() {
+    this.auto = setTimeout(() => {
+      this.auto = null;
+      this.setState({ open: true });
+    }, 900);
+  }
+
+  componentWillUnmount() {
+    this.stopAuto();
+  }
+
+  stopAuto() {
+    if (this.auto) { clearTimeout(this.auto); this.auto = null; }
+  }
+
+  // любое нажатие отменяет самооткрытие: дальше помощником управляет только пользователь
+  setOpen(v) {
+    this.stopAuto();
+    if (!!this.state.open !== v) this.setState({ open: v });
+  }
+
+  img(v, i) {
+    const alt = this.D.ALT[v];
+    return (alt && alt[i]) || this.D.S[i];
+  }
+
+  renderVals() {
+    const D = this.D;
+    const st = this.state;
+    const open = !!st.open;
+    const noop = () => {};
+    const nb = ' ';
+    const VN = { s: 'Структурный', v: 'Визуальный', c: 'Компактный' };
+    const SC = { s: 89, v: 84, c: 89 };
+    const keys = ['s', 'v', 'c'];
+    const rv = keys.indexOf(st.vr) >= 0 ? st.vr : 's';
+    const rs = Math.max(0, Math.min(11, st.slide || 0));
+
+    // Каскад содержимого помощника при открытии: шапка 160 мс, сообщения 200…400, подсказки 440, поле ввода 480 (шаг 40).
+    // При закрытии — без каскада: всё гаснет вместе с плитой, а через 240 мс (плита уже не видна) сбрасывается в исходное.
+    const dl = (ms) => (open ? ms : 240) + 'ms';
+
+    // Отправка: сообщение пользователя добавляется в ленту, подсказки прячутся (как «пока ждём ответ»)
+    const post = (t) => {
+      const v = String(t || '').trim();
+      if (!v) return;
+      this.setState({ sent: this.state.sent.concat([v]), text: '' });
+    };
+
+    const base = [
+      { kind: 'bot', a: 'Спросите про любой слайд или попросите его изменить.' },
+      { kind: 'user', a: 'Почему слайд 3 такой?' },
+      { kind: 'list', a: 'Слайд 3 — определение и одна главная формула, поэтому:', items: [
+        'форма — «формула с пояснением»;',
+        'образец — слайд 17 шаблона VK Tech, сходство 82' + nb + '%;',
+        'под формулой подписано, что значат ∫, f(x), dx и C.'
+      ] },
+      { kind: 'user', a: 'Сделай слайд 6 этапами' },
+      { kind: 'job', a: 'Меняю презентацию', val: 100 },
+      { kind: 'bot', a: 'Готово: слайд 6 теперь этапами — 3' + nb + 'шага. Если не понравится — скажите «Верни как было».' }
+    ];
+    const nBase = base.length;
+    const all = base.concat(st.sent.map((t) => ({ kind: 'user', a: t })));
+    const msgs = all.map((m, i) => ({
+      side: m.kind === 'user' ? 'gh-r' : 'gh-l',
+      bubble: m.kind === 'user' ? 'gh-user' : 'gh-bot',
+      isText: m.kind === 'bot' || m.kind === 'user',
+      isList: m.kind === 'list',
+      isJob: m.kind === 'job',
+      // новое сообщение в открытой ленте всплывает само (p2-in), остальные — в каскаде открытия
+      anim: i >= nBase ? 'p2-in' : '',
+      a: m.a || '', b: m.b || '', c: m.c || '',
+      items: (m.items || []).map((t) => ({ t })),
+      val: m.val || 0,
+      pct: (m.val || 0) + nb + '%',
+      scale: ((m.val || 0) / 100).toFixed(2),
+      delay: dl(200 + Math.min(i, 5) * 40)
+    }));
+    const chips = st.sent.length ? [] : ['Верни как было', 'Почему слайд 6 такой?'].map((label) => ({
+      label, pick: () => post(label)
+    }));
+
+    const rvars = keys.map((k) => ({
+      label: VN[k], score: SC[k],
+      tip: VN[k] + ' · оценка качества ' + SC[k] + ' из 100',
+      pressed: String(k === rv),
+      cls: k === rv ? 'p2-rseg-on' : '',
+      pick: () => this.setState({ vr: k })
+    }));
+    const thumbs = D.T.map((title, i) => ({
+      img: this.img(rv, i),
+      label: 'Слайд ' + (i + 1) + ': ' + title,
+      pressed: String(i === rs),
+      cls: i === rs ? 'p2-th-on' : '',
+      pick: () => this.setState({ slide: i })
+    }));
+
+    const lines = String(st.text || '').split('\n').length;
+    const rows = Math.min(8, Math.max(1, lines));
+
+    return {
+      noop,
+      // состояние экрана: класс на корне переключает сетку колоды, плиту помощника, слои правой колонки и таблетку в шапке
+      rootCls: open ? 'gho-open' : 'gho-closed',
+      openStr: String(open),
+      navTip: open ? 'Закрыть помощника' : 'Открыть помощника',
+      toggle: () => this.setOpen(!this.state.open),
+      close: () => this.setOpen(false),
+      dHead: dl(160), dChips: dl(440), dComp: dl(480),
+
+      msgs, chips, hasChips: chips.length > 0,
+      rvars, thumbs,
+      vIdx: keys.indexOf(rv) + 1, vName: VN[rv], score: SC[rv],
+      // полная правая колонка (R-aside): кольцо оценки — дуга score % от окружности r = 19 (2π·19 ≈ 119.38)
+      ringDash: (SC[rv] * 119.38 / 100).toFixed(2) + ' 119.38',
+      agent: D.AG.map((a) => ({ name: a.name, text: a.text, p1: a.p[0], p2: a.p[1], p3: a.p[2] })),
+      // уведомление над слайдом: false — таблетка, true — раскрыто с основанием и кнопками;
+      // нажатие на него отменяет самооткрытие помощника (иначе уведомление погаснет под рукой)
+      noteStr: String(!!st.note),
+      noteCls: st.note ? 'ra-note-on' : '',
+      noteTip: st.note ? 'Свернуть' : 'Показать действия',
+      toggleNote: () => { this.stopAuto(); this.setState({ note: !this.state.note }); },
+      closeNote: () => this.setState({ note: false }),
+      bigImg: this.img(rv, rs), bigN: rs + 1, bigTitle: D.T[rs],
+      prev: () => this.setState({ slide: Math.max(0, (this.state.slide || 0) - 1) }),
+      next: () => this.setState({ slide: Math.min(11, (this.state.slide || 0) + 1) }),
+      prevDis: rs <= 0, nextDis: rs >= 11,
+      ph: 'Что поменять на слайде ' + (rs + 1) + '?',
+      text: st.text,
+      onText: (e) => this.setState({ text: e.target.value }),
+      taH: (rows * 24 + 16) + 'px',
+      // мягкий край у поля — только когда текст длиннее 8 строк и поле прокручивается; только сверху:
+      // снизу — строка, которую сейчас печатают, её не приглушаем
+      taFade: lines > 8 ? 'p2-fade-top' : '',
+      longText: String(st.text || '').length > 1000,
+      charsText: String(st.text || '').length.toLocaleString('ru-RU') + ' знаков',
+      sendDis: !String(st.text || '').trim(),
+      send: () => post(this.state.text)
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,556 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Verstka — Слои: Подробнее · Почему так</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700&amp;family=Unbounded:wght@600;700&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#0A0F1F}a:hover{color:#1E40AF}
+.p2-root{--ease:cubic-bezier(0.2, 0, 0, 1);-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+.p2-root *,.p2-root *::before,.p2-root *::after{box-sizing:border-box}
+:where(.p2-root) button{font-family:inherit;color:inherit;-webkit-tap-highlight-color:transparent}
+.p2-root :focus-visible{outline:2px solid #2563EB;outline-offset:2px}
+.p2-dark :focus-visible{outline-color:#38BDF8}
+.p2-sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.p2-none{display:none}
+
+/* движение: только transform и opacity */
+@keyframes p2-rise{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:translateY(0)}}
+@keyframes p2-in{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+@keyframes p2-pop{from{opacity:0;transform:scale(.98)}to{opacity:1;transform:scale(1)}}
+@keyframes p2-work{0%{transform:scaleX(0);opacity:1}72%{transform:scaleX(1);opacity:1}100%{transform:scaleX(1);opacity:0}}
+.p2-rise{animation:p2-rise 520ms var(--ease) backwards}
+.p2-in{animation:p2-in 360ms var(--ease) backwards}
+.p2-pop{animation:p2-pop 360ms var(--ease) backwards}
+
+/* колода плит */
+.p2-slot{transition:transform 520ms var(--ease)}
+.p2-s4-on{opacity:1;visibility:visible;transition:transform 520ms var(--ease),opacity 520ms var(--ease)}
+.p2-s4-off{opacity:0;visibility:hidden;pointer-events:none;transition:transform 340ms var(--ease),opacity 340ms var(--ease),visibility 0s linear 340ms}
+.p2-on{opacity:1;visibility:visible;transition:opacity 360ms var(--ease) 120ms}
+.p2-off{opacity:0;visibility:hidden;pointer-events:none;transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
+.p2-stag{transition:opacity 360ms var(--ease),transform 360ms var(--ease)}
+.p2-off .p2-stag{opacity:0;transform:translateY(12px);transition-duration:240ms}
+
+/* заголовок плиты */
+.p2-head{display:flex;align-items:center;gap:32px;height:64px;padding:0;border:0;background:none;cursor:pointer;text-align:left;border-radius:16px;transition:transform 160ms var(--ease)}
+.p2-head:active{transform:scale(.98)}
+.p2-num{display:block;width:160px;flex:none;height:64px;font-family:'Unbounded','Manrope',sans-serif;font-weight:700;font-size:88px;line-height:64px;letter-spacing:-0.04em;opacity:.14;transition:opacity 160ms var(--ease);pointer-events:none}
+.p2-head:hover .p2-num{opacity:.3}
+.p2-p2 .p2-num{opacity:.3}
+.p2-p2 .p2-head:hover .p2-num{opacity:.46}
+.p2-num3{opacity:.22}
+.p2-p3:has(.p2-head:hover) .p2-num3{opacity:.4}
+.p2-ttl{font-family:'Unbounded','Manrope',sans-serif;font-weight:600;font-size:32px;line-height:40px;letter-spacing:-0.03em;white-space:nowrap}
+
+/* кнопки */
+.p2-cta{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:12px;height:56px;padding:0 32px;border:0;border-radius:999px;background:linear-gradient(112deg,#1D4ED8 0%,#2563EB 45%,#38BDF8 140%);color:#FFFFFF;font-family:'Unbounded','Manrope',sans-serif;font-size:15px;font-weight:600;line-height:24px;letter-spacing:-0.01em;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-cta::after{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:0 12px 40px 0 rgba(11,18,32,.18);opacity:0;transition:opacity 160ms var(--ease);pointer-events:none}
+.p2-cta:hover{transform:translateY(-2px)}
+.p2-cta:hover::after{opacity:1}
+.p2-cta:active{transform:scale(.98)}
+.p2-ob{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:48px;padding:0 24px;border:0;border-radius:999px;background:#FFFFFF;box-shadow:inset 0 0 0 1px rgba(11,18,32,.14);color:#0B1220;font-size:15px;font-weight:700;line-height:24px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-ob:hover{transform:translateY(-2px)}
+.p2-ob:active{transform:scale(.98)}
+.p2-gb{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 16px;border:0;border-radius:999px;background:transparent;color:#2563EB;font-size:15px;font-weight:700;line-height:24px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-gb:hover{background:#F3F4F1;transform:translateY(-2px)}
+.p2-gb:active{transform:scale(.98)}
+.p2-pill{display:inline-flex;align-items:center;height:40px;padding:0 16px;border:0;border-radius:999px;background:#FFFFFF;box-shadow:inset 0 0 0 1px rgba(37,99,235,.14);color:#0B1220;font-size:14px;font-weight:600;line-height:20px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-pill:hover{transform:translateY(-2px);box-shadow:inset 0 0 0 1px rgba(37,99,235,.4)}
+.p2-pill:active{transform:scale(.98)}
+.p2-nav{display:inline-flex;align-items:center;height:40px;padding:0 16px;border-radius:999px;font-family:'Unbounded','Manrope',sans-serif;font-size:14px;font-weight:600;line-height:24px;letter-spacing:-0.01em;color:#5A6272;text-decoration:none;transition:transform 160ms var(--ease)}
+.p2-nav:hover{color:#0B1220;background:#FFFFFF}
+.p2-nav:active{transform:scale(.98)}
+
+/* шаблоны */
+.p2-card{display:block;width:100%;padding:0;border:0;background:none;text-align:left;cursor:pointer;border-radius:16px;transition:transform 160ms var(--ease)}
+.p2-card:hover{transform:translateY(-2px)}
+.p2-card:active{transform:scale(.98)}
+.p2-cover{position:relative;display:block;height:142px;border-radius:16px}
+.p2-cover::after{content:"";position:absolute;inset:0;border-radius:16px;box-shadow:0 12px 32px 0 rgba(11,18,32,.14);opacity:0;transition:opacity 160ms var(--ease);pointer-events:none}
+.p2-card:hover .p2-cover::after{opacity:1}
+.p2-sel{box-shadow:0 0 0 2px #FFFFFF,0 0 0 4px #2563EB}
+.p2-chk{position:absolute;top:8px;right:8px;width:24px;height:24px;border-radius:999px;background:#2563EB;color:#FFFFFF;display:flex;align-items:center;justify-content:center;transition:opacity 240ms var(--ease),transform 240ms var(--ease)}
+.p2-chk-off{opacity:0;transform:scale(.98)}
+
+/* текст */
+.p2-field{transition:box-shadow 0s}
+.p2-field:has(.p2-ta:focus){box-shadow:0 0 0 2px #2563EB}
+.p2-ta::placeholder,.p2-inp::placeholder{color:#5A6272;opacity:1}
+.p2-ta:focus{outline:none}
+.p2-muted{color:#5A6272}
+
+/* параметры (тёмная плита) */
+.p2-box{border-radius:24px;background:rgba(255,255,255,.06);box-shadow:inset 0 0 0 1px rgba(255,255,255,.1)}
+.p2-rb{width:40px;height:40px;flex:none;padding:0;border:0;border-radius:999px;background:rgba(255,255,255,.1);color:#FFFFFF;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:transform 160ms var(--ease),opacity 160ms var(--ease)}
+.p2-rb:hover{transform:translateY(-2px)}
+.p2-rb:active{transform:scale(.98)}
+.p2-rb:disabled{opacity:.32;cursor:default;transform:none}
+.p2-vc{width:100%;height:88px;padding:16px;border:0;border-radius:24px;background:rgba(255,255,255,.06);box-shadow:inset 0 0 0 1px rgba(255,255,255,.1);display:flex;flex-direction:column;justify-content:space-between;text-align:left;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-vc:hover{transform:translateY(-2px)}
+.p2-vc:active{transform:scale(.98)}
+.p2-vc-on{background:rgba(37,99,235,.24);box-shadow:inset 0 0 0 1px #38BDF8}
+.p2-vbox{width:20px;height:20px;flex:none;border-radius:999px;box-shadow:inset 0 0 0 2px rgba(255,255,255,.4);display:flex;align-items:center;justify-content:center;color:#FFFFFF}
+.p2-vbox svg{opacity:0;transition:opacity 240ms var(--ease)}
+.p2-vc-on .p2-vbox{background:#2563EB;box-shadow:none}
+.p2-vc-on .p2-vbox svg{opacity:1}
+.p2-sw{position:relative;width:44px;height:24px;flex:none;padding:0;border:0;border-radius:999px;background:rgba(255,255,255,.16);cursor:pointer}
+.p2-sw-fill{position:absolute;inset:0;border-radius:999px;background:#2563EB;opacity:0;transition:opacity 240ms var(--ease)}
+.p2-sw-knob{position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:999px;background:#FFFFFF;transition:transform 240ms var(--ease)}
+.p2-sw-on .p2-sw-fill{opacity:1}
+.p2-sw-on .p2-sw-knob{transform:translateX(20px)}
+
+/* сборка */
+.p2-seg{height:32px;padding:0 16px;border:0;border-radius:999px;background:transparent;color:rgba(255,255,255,.72);font-size:14px;font-weight:600;line-height:20px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-seg:hover{color:#FFFFFF}
+.p2-seg:active{transform:scale(.98)}
+.p2-seg-on,.p2-seg-on:hover{background:#FFFFFF;color:#0B1220}
+.p2-ph{position:absolute;left:0;top:0;white-space:nowrap;transition:opacity 360ms var(--ease),transform 360ms var(--ease)}
+.p2-ph-on{opacity:1;transform:translateY(0)}
+.p2-ph-past{opacity:0;transform:translateY(-12px);transition-duration:240ms}
+.p2-ph-next{opacity:0;transform:translateY(12px);transition-duration:240ms}
+.p2-bar{transition:transform 520ms var(--ease)}
+.p2-sbf{position:relative;aspect-ratio:16 / 9;border-radius:16px;overflow:hidden;background:rgba(255,255,255,.04);box-shadow:inset 0 0 0 1px rgba(255,255,255,.08)}
+.p2-sb-cur .p2-sbf{box-shadow:inset 0 0 0 1px #38BDF8}
+.p2-sbn{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:'Unbounded','Manrope',sans-serif;font-weight:600;font-size:20px;color:rgba(255,255,255,.24);transition:opacity 240ms var(--ease)}
+.p2-sb-done .p2-sbn{opacity:0}
+.p2-sbok{position:absolute;top:8px;right:8px;width:20px;height:20px;border-radius:999px;background:#2563EB;color:#FFFFFF;display:flex;align-items:center;justify-content:center}
+.p2-work{position:absolute;left:0;right:0;bottom:0;height:2px;background:#38BDF8;transform-origin:left center;animation:p2-work 1100ms var(--ease) infinite}
+.p2-role{position:relative;display:grid;grid-template-columns:28px minmax(0,1fr);column-gap:16px}
+.p2-role::before{content:"";position:absolute;left:13px;top:36px;bottom:-4px;width:2px;border-radius:999px;background:rgba(255,255,255,.12)}
+.p2-role-last::before{display:none}
+.p2-dot{width:28px;height:28px;border-radius:999px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.06);color:rgba(255,255,255,.48)}
+.p2-role-done .p2-dot{background:#2563EB;color:#FFFFFF}
+.p2-role-act .p2-dot{background:transparent;color:#38BDF8;box-shadow:inset 0 0 0 2px #38BDF8}
+.p2-rname{font-size:15px;font-weight:700;line-height:20px;color:#FFFFFF}
+.p2-role-pend .p2-rname{color:rgba(255,255,255,.48)}
+.p2-rst{font-size:13px;font-weight:600;line-height:20px;color:rgba(255,255,255,.56)}
+.p2-role-act .p2-rst{color:#38BDF8}
+.p2-arrow{color:#38BDF8;font-weight:700;margin:0 8px}
+
+/* результат */
+.p2-rbl{width:40px;height:40px;padding:0;border:0;border-radius:999px;background:#F3F4F1;color:#0B1220;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:transform 160ms var(--ease),opacity 160ms var(--ease)}
+.p2-rbl:hover{transform:translateY(-2px)}
+.p2-rbl:active{transform:scale(.98)}
+.p2-rbl:disabled{opacity:.32;cursor:default;transform:none}
+.p2-film{display:flex;gap:8px;overflow-x:auto;padding:8px 4px;scrollbar-width:none}
+.p2-film::-webkit-scrollbar{display:none}
+.p2-th{flex:none;width:112px;height:63px;padding:0;border:0;border-radius:12px;background:#F3F4F1;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-th:hover{transform:translateY(-2px)}
+.p2-th:active{transform:scale(.98)}
+.p2-th-on{box-shadow:0 0 0 2px #FFFFFF,0 0 0 4px #2563EB}
+.p2-rseg{display:flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 8px;border:0;border-radius:999px;background:transparent;color:#5A6272;font-size:14px;font-weight:600;line-height:20px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-rseg:hover{color:#0B1220}
+.p2-rseg:active{transform:scale(.98)}
+.p2-rseg-on{background:#FFFFFF;color:#0B1220;box-shadow:0 1px 2px rgba(11,18,32,.06),0 4px 16px 0 rgba(11,18,32,.08)}
+.p2-rsc{font-family:'Unbounded','Manrope',sans-serif;font-size:12px;font-weight:600;color:#2563EB}
+
+@media (prefers-reduced-motion: reduce){
+  .p2-root *,.p2-root *::before,.p2-root *::after{animation:none !important;transition:none !important}
+}
+@media (max-width: 900px){
+  .p2-root{padding:0 16px 16px !important}
+  .p2-hdr{padding:0 8px !important}
+  .p2-navs{display:none !important}
+  .p2-deck{height:auto !important;overflow:visible !important;border-radius:0 !important}
+  .p2-slot{position:relative !important;height:auto !important;transform:none !important;margin-top:-40px}
+  .p2-slot:first-child{margin-top:0}
+  .p2-plate{height:auto !important;padding:24px 24px 64px !important}
+  .p2-off,.p2-s4-off,.p2-num3,.p2-spc,.p2-hide-s{display:none !important}
+  .p2-body{margin-left:0 !important}
+  .p2-hrow{flex-wrap:wrap !important;height:auto !important;row-gap:16px}
+  .p2-head{gap:16px}
+  .p2-num{width:auto !important;height:48px !important;font-size:48px !important;line-height:48px !important}
+  .p2-ttl{font-size:24px !important;line-height:32px !important;white-space:normal}
+  .p2-g4{grid-template-columns:repeat(2,minmax(0,1fr)) !important}
+  .p2-params,.p2-two{grid-template-columns:minmax(0,1fr) !important;height:auto !important}
+  .p2-field{height:auto !important}
+  .p2-ta{min-height:120px !important}
+  .p2-wrap{flex-wrap:wrap !important;height:auto !important;row-gap:16px}
+  .p2-phs{height:auto !important}
+  .p2-ph{position:static !important;white-space:normal;font-size:24px !important;line-height:32px !important}
+  .p2-ph-past,.p2-ph-next{display:none}
+}
+
+/* ===== «Подробнее»: слой поверх результата (общие классы досок D-, префикс dd-) ===== */
+@keyframes dd-up{from{opacity:0;transform:translateY(160px)}to{opacity:1;transform:translateY(0)}}
+.dd-up{animation:dd-up 520ms var(--ease) backwards}
+.dd-back{position:absolute;left:48px;right:48px;top:0;height:40px;display:flex;align-items:center;gap:12px;padding:0;border:0;border-radius:16px;background:transparent;color:#0B1220;text-align:left;white-space:nowrap;cursor:pointer}
+.dd-back-hint{display:inline-flex;align-items:center;gap:4px;margin-left:auto;font-size:13px;font-weight:700;line-height:20px;color:#2563EB;opacity:0;transition:opacity 160ms var(--ease)}
+.dd-back:hover .dd-back-hint,.dd-back:focus-visible .dd-back-hint{opacity:1}
+.dd-sheet{position:relative;height:100%;padding:40px 48px;border-radius:40px;background:#E9F1FF;color:#0B1220;box-shadow:0 -24px 48px -24px rgba(11,18,32,.4)}
+.dd-top{display:flex;align-items:center;gap:16px;height:64px}
+.dd-tabs{display:flex;align-items:center;gap:4px;height:48px;padding:4px;border-radius:999px;background:#FFFFFF}
+.dd-tabs .p2-rseg{padding:0 16px}
+.dd-tabs .p2-rseg-on,.dd-tabs .p2-rseg-on:hover{background:#0B1220;color:#FFFFFF;box-shadow:none}
+/* прокрутка с мягким краем (p2-fade): поле 24 сверху — зона растворения; коробка поднята на 16 px в пустой зазор под вкладками,
+   поэтому содержимое в покое стоит там же, где раньше (верх контента = 40 + 64 + 16), а низ — по краю колоды */
+.dd-scroll{height:556px;margin:-8px -48px 0;padding:24px 48px 40px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:none}
+.dd-scroll::-webkit-scrollbar{display:none}
+.dd-scroll:focus-visible{outline-offset:-2px}
+.dd-g{display:grid;grid-template-columns:minmax(0,1fr) 526px;gap:24px;align-items:start}
+.dd-box{border-radius:24px;background:#FFFFFF;padding:24px}
+.dd-h{margin:0;font-family:'Unbounded','Manrope',sans-serif;font-weight:600;font-size:20px;line-height:28px;letter-spacing:-0.02em;color:#0B1220}
+.dd-cap{font-size:13px;font-weight:600;line-height:20px;color:#5A6272}
+.dd-tag{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 8px;border-radius:999px;font-size:12px;font-weight:700;line-height:16px;white-space:nowrap;vertical-align:middle}
+.dd-tag-n{background:#F3F4F1;color:#5A6272}
+.dd-tag-w{background:#FFFBEB;color:#B45309}
+.dd-tag-b{background:#E9F1FF;color:#2563EB}
+.dd-ico{width:40px;height:40px;flex:none;border-radius:999px;background:#F3F4F1;color:#2563EB;display:flex;align-items:center;justify-content:center}
+
+/* ===== Почему так (dw-) ===== */
+.dw-g{grid-template-columns:526px minmax(0,1fr);align-items:stretch}
+.dw-navw{position:sticky;top:-24px;z-index:2;margin-top:-24px;padding:24px 0 16px;background:#E9F1FF}
+/* мягкий край под липкой навигацией: она стоит на месте (0…112 px прокрутки, сама навигация 24…96), а текст,
+   уходя под неё, растворяется на 24 px ниже её края — вместо резкого среза по нижней кромке подложки */
+.p2-fade.dw-fade{-webkit-mask-image:linear-gradient(to bottom,#000 0,#000 104px,transparent 104px,transparent 112px,#000 calc(112px + var(--p2-ft)),#000 calc(100% - var(--p2-fb)),transparent 100%);mask-image:linear-gradient(to bottom,#000 0,#000 104px,transparent 104px,transparent 112px,#000 calc(112px + var(--p2-ft)),#000 calc(100% - var(--p2-fb)),transparent 100%)}
+.dw-wf{position:relative;display:block;width:100%;aspect-ratio:16 / 9;border-radius:12px;background:#F3F4F1;box-shadow:inset 0 0 0 1px rgba(11,18,32,.08);overflow:hidden}
+.dw-b{position:absolute;display:block;border-radius:999px;background:rgba(11,18,32,.14)}
+.dw-pn{border-radius:12px;background:#FFFFFF}
+.dw-dk{background:rgba(11,18,32,.4)}
+.dw-ac{background:#2563EB}
+.dw-sub{margin:0;font-size:13px;font-weight:700;line-height:20px;color:#5A6272}
+.dw-row{display:flex;align-items:center;gap:16px;padding:12px 0;border-top:1px solid rgba(11,18,32,.08)}
+.dw-cr{display:grid;grid-template-columns:72px minmax(0,1fr);column-gap:12px;align-items:start;font-size:14px;font-weight:500;line-height:20px;color:#0B1220}
+.dw-cr .dd-tag{justify-content:center;margin-top:-2px}
+.dw-ok{display:flex;align-items:flex-start;gap:12px;font-size:14px;font-weight:500;line-height:20px;color:#0B1220}
+.dw-chk{display:flex;align-items:center;gap:16px;width:100%;height:72px;padding:0 24px;border:0;border-radius:24px;background:#FFFFFF;color:#0B1220;text-align:left;cursor:pointer;transition:transform 160ms var(--ease)}
+.dw-chk:hover{transform:translateY(-2px)}
+.dw-chk:active{transform:scale(.98)}
+/* мягкий край прокрутки: контент сверху и снизу растворяется, а не обрезается; верхний край — только после начала прокрутки */
+@property --p2-ft{syntax:'<length>';inherits:false;initial-value:0px}
+@property --p2-fb{syntax:'<length>';inherits:false;initial-value:24px}
+.p2-fade,.p2-fade-top{-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 var(--p2-ft),#000 calc(100% - var(--p2-fb)),transparent 100%);mask-image:linear-gradient(to bottom,transparent 0,#000 var(--p2-ft),#000 calc(100% - var(--p2-fb)),transparent 100%)}
+.p2-fade-top{--p2-fb:0px}
+@supports (animation-timeline: scroll()){
+.p2-fade{animation:p2-fade linear both;animation-timeline:scroll(self)}
+.p2-fade-top{animation:p2-fade-top linear both;animation-timeline:scroll(self)}
+}
+@keyframes p2-fade{0%{--p2-ft:0px;--p2-fb:24px}8%{--p2-ft:24px}92%{--p2-fb:24px}100%{--p2-ft:24px;--p2-fb:0px}}
+@keyframes p2-fade-top{0%{--p2-ft:0px}8%{--p2-ft:24px}100%{--p2-ft:24px}}
+/* логотип Verstka: слово и три слоя под ним — светлый, синий, тёмный; при наведении слои расходятся */
+.p2-bars{display:flex;gap:3px;margin-left:1px;margin-top:-1px}
+.p2-lbar{display:block;height:4px;border-radius:999px;transition:transform 240ms var(--ease)}
+.p2-lbar1{width:28px;background:#BFD6FF}
+.p2-lbar2{width:20px;background:#2563EB}
+.p2-lbar3{width:12px;background:#0B1220}
+.p2-brand:hover .p2-lbar2{transform:translateX(2px)}
+.p2-brand:hover .p2-lbar3{transform:translateX(4px)}
+</style>
+</helmet>
+<div class="p2-root" style="width:100%; min-height:900px; box-sizing:border-box; padding:0 24px 24px; background:#F3F4F1; color:#0B1220; font-family:'Manrope', system-ui, -apple-system, 'Segoe UI', sans-serif; font-size:15px; line-height:24px;">
+<div style="width:100%; max-width:1392px; margin:0 auto;">
+
+<header class="p2-hdr" style="display:flex; align-items:center; justify-content:space-between; height:64px; padding:0 48px;">
+<a href="#" class="p2-brand" aria-label="Verstka — на главную" style="display:inline-flex; flex-direction:column; align-items:flex-start; gap:0; text-decoration:none; color:#0B1220;">
+<span style="font-family:'Unbounded','Manrope',sans-serif; font-weight:700; font-size:20px; line-height:24px; letter-spacing:-0.03em;">Verstka</span>
+<span class="p2-bars" aria-hidden="true"><span class="p2-lbar p2-lbar1"></span><span class="p2-lbar p2-lbar2"></span><span class="p2-lbar p2-lbar3"></span></span>
+</a>
+<nav class="p2-navs" aria-label="Разделы" style="display:flex; align-items:center; gap:8px; margin-right:-16px;">
+<a class="p2-nav" href="#">Мои презентации</a>
+<a class="p2-nav" href="#">Шаблоны</a>
+<a class="p2-nav" href="#">Помощник</a>
+</nav>
+</header>
+
+<main class="p2-deck" style="position:relative; height:812px; border-radius:40px; overflow:hidden;">
+
+<!-- ПЛИТА 01 · Шаблон (свёрнута в полосу) -->
+<div class="p2-slot" style="position:absolute; left:0; right:0; top:0; height:812px; z-index:1; transform:translateY(0px);">
+<section class="p2-plate p2-rise" aria-label="Шаг 1 — шаблон" style="position:relative; height:100%; padding:40px 48px; border-radius:40px; background:#FFFFFF; color:#0B1220; animation-delay:0ms;">
+<div style="position:absolute; left:48px; right:48px; top:0; height:40px; display:flex; align-items:center; gap:12px; white-space:nowrap;">
+<span style="font-family:'Unbounded','Manrope',sans-serif; font-weight:700; font-size:13px; line-height:20px; color:#5A6272;">01</span>
+<span style="font-size:14px; font-weight:700; line-height:20px; color:#0B1220;">VK Tech</span>
+<span style="font-size:13px; font-weight:500; line-height:20px; color:#5A6272;">54 слайда · Play</span>
+</div>
+</section>
+</div>
+
+<!-- ПЛИТА 02 · Текст (свёрнута в полосу) -->
+<div class="p2-slot" style="position:absolute; left:0; right:0; top:0; height:812px; z-index:2; transform:translateY(40px);">
+<section class="p2-plate p2-p2 p2-rise" aria-label="Шаг 2 — текст" style="position:relative; height:100%; padding:40px 48px; border-radius:40px; background:#E9F1FF; color:#0B1220; box-shadow:0 -24px 48px -24px rgba(11,18,32,.16); animation-delay:40ms;">
+<div style="position:absolute; left:48px; right:48px; top:0; height:40px; display:flex; align-items:center; gap:12px; white-space:nowrap;">
+<span style="font-family:'Unbounded','Manrope',sans-serif; font-weight:700; font-size:13px; line-height:20px; color:#5A6272;">02</span>
+<span style="font-size:14px; font-weight:700; line-height:20px; color:#0B1220;">Интеграл</span>
+<span style="font-size:13px; font-weight:500; line-height:20px; color:#5A6272;">тема · текст пишет агент</span>
+</div>
+</section>
+</div>
+
+<!-- ПЛИТА 03 · Сборка (свёрнута в полосу) -->
+<div class="p2-slot" style="position:absolute; left:0; right:0; top:0; height:812px; z-index:3; transform:translateY(80px);">
+<section class="p2-plate p2-p3 p2-dark p2-rise" aria-label="Шаг 3 — сборка" style="position:relative; height:100%; padding:40px 48px; border-radius:40px; background:#0B1220; color:#FFFFFF; box-shadow:0 -24px 48px -24px rgba(11,18,32,.28); animation-delay:80ms;">
+<div style="position:absolute; left:48px; right:48px; top:0; height:40px; display:flex; align-items:center; gap:12px; white-space:nowrap;">
+<span style="font-family:'Unbounded','Manrope',sans-serif; font-weight:700; font-size:13px; line-height:20px; color:rgba(255,255,255,.56);">03</span>
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#38BDF8" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M8.5 12.25l2.4 2.4 4.6-4.9"></path></svg>
+<span style="font-size:14px; font-weight:700; line-height:20px; color:#FFFFFF;">Сборка завершена за 2:31</span>
+<span style="font-size:13px; font-weight:500; line-height:20px; color:rgba(255,255,255,.64);">3 варианта · 12 слайдов</span>
+</div>
+</section>
+</div>
+
+<!-- ПЛИТА 04 · Результат (под слоем видна только полоса — по ней можно вернуться) -->
+<div class="p2-slot" style="position:absolute; left:0; right:0; top:0; height:812px; z-index:4; transform:translateY(120px);">
+<section class="p2-plate p2-rise" aria-label="Результат" style="position:relative; height:100%; padding:40px 48px; border-radius:40px; background:#FFFFFF; color:#0B1220; box-shadow:0 -24px 48px -24px rgba(11,18,32,.4); animation-delay:120ms;">
+<button type="button" class="dd-back" onClick="{{ noop }}" aria-label="Вернуться к результату: Интеграл, вариант Структурный, оценка 89">
+<span style="font-family:'Unbounded','Manrope',sans-serif; font-weight:700; font-size:13px; line-height:20px; color:#5A6272;">04</span>
+<span style="font-size:14px; font-weight:700; line-height:20px; color:#0B1220;">Интеграл</span>
+<span style="font-size:13px; font-weight:500; line-height:20px; color:#5A6272;">Структурный <span class="p2-rsc">89</span></span>
+<span class="dd-back-hint" aria-hidden="true">Вернуться к результату<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 9.5L12 15l5.5-5.5"></path></svg></span>
+</button>
+</section>
+</div>
+
+<!-- СЛОЙ 05 · Подробнее → Почему так -->
+<div class="p2-slot" style="position:absolute; left:0; right:0; top:0; height:812px; z-index:5; transform:translateY(160px);">
+<section class="dd-sheet dd-up" role="dialog" aria-modal="true" aria-labelledby="dd-title" style="animation-delay:160ms;">
+<h2 id="dd-title" class="p2-sr">Подробнее о презентации «Интеграл»</h2>
+
+<div class="dd-top">
+<div class="dd-tabs" role="tablist" aria-label="Разделы подробностей">
+<sc-for list="{{ tabs }}" as="tb" hint-placeholder-count="6">
+<button type="button" role="tab" id="dd-tab-{{ tb.key }}" class="p2-rseg {{ tb.cls }}" aria-selected="{{ tb.sel }}" aria-controls="dd-panel" tabindex="{{ tb.tabi }}" onClick="{{ tb.pick }}">{{ tb.label }}</button>
+</sc-for>
+</div>
+<span style="flex:1; min-width:0;"></span>
+<button type="button" class="p2-ob" aria-haspopup="menu" aria-expanded="false" aria-label="Вариант оформления: Структурный, оценка 89" onClick="{{ noop }}" style="height:40px;">
+<span>Структурный</span><span class="p2-rsc">89</span>
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 9.5L12 15l5.5-5.5"></path></svg>
+</button>
+<button type="button" class="p2-rbl" aria-label="Закрыть" title="Закрыть (Esc)" onClick="{{ noop }}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 6.5l11 11 M17.5 6.5l-11 11"></path></svg></button>
+</div>
+
+<div id="dd-panel" class="dd-scroll p2-fade dw-fade" role="tabpanel" aria-labelledby="dd-tab-why" tabindex="0">
+
+<!-- Липкая навигация по слайдам -->
+<div class="dw-navw">
+<nav class="dd-box p2-in" aria-label="Слайды презентации" style="display:flex; align-items:center; gap:16px; height:72px; padding:12px 16px; animation-delay:240ms;">
+<button type="button" class="p2-rbl" aria-label="Предыдущий слайд" title="Предыдущий слайд (←)" onClick="{{ noop }}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 6.5L8.5 12l5.5 5.5"></path></svg></button>
+<div style="display:flex; flex-direction:column; align-items:center; flex:1; min-width:0; text-align:center;">
+<span class="dd-cap">Слайд 3 / 12 · Формула</span>
+<h3 class="dd-h" style="max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Неопределённый интеграл</h3>
+</div>
+<button type="button" class="p2-rbl" aria-label="Следующий слайд" title="Следующий слайд (→)" onClick="{{ noop }}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 6.5l5.5 5.5-5.5 5.5"></path></svg></button>
+</nav>
+</div>
+
+<div class="dd-g dw-g">
+
+<!-- Левая колонка: почему такая форма -->
+<section class="dd-box p2-in" aria-labelledby="dw-h-form" style="display:flex; flex-direction:column; min-width:0; animation-delay:280ms;">
+<h3 id="dw-h-form" class="dd-h">Почему такая форма</h3>
+<p style="display:flex; align-items:center; gap:8px; margin:4px 0 0; font-size:13px; font-weight:600; line-height:20px; color:#5A6272;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.5 3.5h-6a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8.5z M13.5 3.5v3a2 2 0 0 0 2 2h3 M9 13h6 M9 16.5h4"></path></svg>В вашем тексте — слайд 3</p>
+<p style="margin:16px 0 0; font-size:15px; font-weight:500; line-height:24px; color:#0B1220;">Здесь одно определение и одна формула. Определение идёт первым абзацем, формула стоит крупно в плашке с подписью, а пункт ниже объясняет, откуда в ней постоянная C.</p>
+<dl style="display:grid; grid-template-columns:72px minmax(0, 1fr); gap:8px 12px; margin:16px 0 0; padding-top:16px; border-top:1px solid rgba(11,18,32,.08);">
+<dt class="dw-sub">Вывод</dt>
+<dd style="margin:0; font-size:14px; font-weight:500; line-height:20px; color:#0B1220;">Неопределённый интеграл решает задачу о восстановлении функции по её производной</dd>
+<dt class="dw-sub">Сноска</dt>
+<dd style="margin:0; font-size:14px; font-weight:500; line-height:20px; color:#0B1220;">Первообразная F(x) плюс произвольная постоянная C</dd>
+</dl>
+
+<h4 class="dw-sub" style="margin-top:24px;">Другие формы</h4>
+<ul style="margin:8px 0 0; padding:0; list-style:none;">
+<sc-for list="{{ forms }}" as="f" hint-placeholder-count="2">
+<li class="dw-row">
+<p style="flex:1; min-width:0; margin:0; font-size:14px; font-weight:500; line-height:20px; color:#0B1220;"><b style="font-weight:700;">{{ f.name }}</b> — {{ f.text }}</p>
+<span style="flex:none;">
+<sc-if value="{{ f.hasVar }}" hint-placeholder-val="{{ true }}">
+<button type="button" class="p2-ob" title="Переключиться на этот вариант" aria-label="Переключиться на вариант {{ f.varName }}" onClick="{{ f.pick }}" style="height:40px; padding:0 16px; font-size:14px;"><span>{{ f.varName }}</span><span class="p2-rsc">{{ f.varScore }}</span></button>
+</sc-if>
+</span>
+</li>
+</sc-for>
+</ul>
+
+<div style="margin-top:auto; padding-top:24px;">
+<h4 class="dw-sub">Критик и правка</h4>
+<ol style="display:flex; flex-direction:column; gap:12px; margin:12px 0 0; padding:16px; border-radius:16px; background:#F3F4F1; list-style:none;">
+<li class="dw-cr"><span class="dd-tag" style="background:#FFFFFF; color:#0B1220;">Критик</span><span>Пункт под формулой повторял определение из первого абзаца</span></li>
+<li class="dw-cr"><span class="dd-tag" style="background:#FFFFFF; color:#2563EB;">Правка</span><span><b style="font-weight:700; color:#2563EB;">→</b> Пункт переписан: теперь он объясняет, откуда в формуле постоянная C</span></li>
+</ol>
+</div>
+</section>
+
+<!-- Правая колонка: как собран слайд и другие макеты -->
+<div style="min-width:0;">
+<section class="dd-box p2-in" aria-labelledby="dw-h-build" style="animation-delay:320ms;">
+<h3 id="dw-h-build" class="dd-h">Как собран слайд</h3>
+<div style="display:grid; grid-template-columns:minmax(0, 1fr) 40px minmax(0, 1fr); align-items:center; row-gap:8px; margin-top:16px;">
+<span class="dw-wf" role="img" aria-label="Образец — слайд 14 шаблона: заголовок в две строки, абзац, плашка с формулой и подписью, пункт">
+<span class="dw-b" style="left:5%; top:9%; width:46%; height:5%;"></span>
+<span class="dw-b" style="left:5%; top:16.5%; width:36%; height:5%;"></span>
+<span class="dw-b" style="left:5%; top:28%; width:66%; height:2.5%;"></span>
+<span class="dw-b" style="left:5%; top:32.5%; width:46%; height:2.5%;"></span>
+<span class="dw-b dw-pn" style="left:3%; top:39%; width:94%; height:26%;"></span>
+<span class="dw-b dw-dk" style="left:7%; top:44%; width:36%; height:8%;"></span>
+<span class="dw-b" style="left:7%; top:57%; width:38%; height:2.5%;"></span>
+<span class="dw-b dw-ac" style="left:3.5%; top:71%; width:1.4%; height:2.5%;"></span>
+<span class="dw-b" style="left:6%; top:71%; width:72%; height:2.5%;"></span>
+<span class="dw-b" style="left:6%; top:75.5%; width:70%; height:2.5%;"></span>
+<span class="dw-b" style="left:6%; top:80%; width:52%; height:2.5%;"></span>
+<span class="dw-b dw-ac" style="left:3%; top:90%; width:8%; height:3.5%;"></span>
+</span>
+<span aria-hidden="true" style="display:flex; align-items:center; justify-content:center; color:#2563EB;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14 M13.5 6.5L19 12l-5.5 5.5"></path></svg></span>
+<img src="/_blob/d467e38cc12111ad26a428ff8e19ff4f" alt="Ваш слайд 3: Неопределённый интеграл" style="display:block; width:100%; aspect-ratio:16 / 9; object-fit:cover; border-radius:12px; box-shadow:0 0 0 1px rgba(11,18,32,.08);">
+<span class="dd-cap">Образец: слайд 14 шаблона</span>
+<span></span>
+<span class="dd-cap" style="color:#0B1220;">Ваш слайд</span>
+</div>
+
+<div style="margin-top:24px; padding-top:16px; border-top:1px solid rgba(11,18,32,.08);">
+<div style="display:flex; align-items:center; justify-content:space-between; gap:16px; height:28px;">
+<span id="dw-sim" style="font-size:14px; font-weight:700; line-height:20px; color:#0B1220;">Сходство с образцом</span>
+<span style="font-family:'Unbounded','Manrope',sans-serif; font-weight:600; font-size:20px; line-height:28px; letter-spacing:-0.02em; color:#2563EB;">82%</span>
+</div>
+<div role="meter" aria-labelledby="dw-sim" aria-valuemin="0" aria-valuemax="100" aria-valuenow="82" aria-valuetext="82%" style="position:relative; height:4px; margin-top:8px; border-radius:999px; background:#F3F4F1; overflow:hidden;">
+<span style="position:absolute; inset:0; border-radius:999px; background:#2563EB; transform-origin:left center; transform:scaleX(.82);"></span>
+</div>
+<p style="margin:8px 0 0; font-size:14px; font-weight:500; line-height:20px; color:#5A6272;">Лучший из рассмотренных: у остальных сходство 74% и ниже</p>
+</div>
+
+<ul style="display:flex; flex-direction:column; gap:12px; margin:16px 0 0; padding:16px 0 0; border-top:1px solid rgba(11,18,32,.08); list-style:none;">
+<sc-for list="{{ reasons }}" as="rs" hint-placeholder-count="3">
+<li class="dw-ok"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2563EB" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M8.5 12.25l2.4 2.4 4.6-4.9"></path></svg><span>{{ rs.text }}</span></li>
+</sc-for>
+</ul>
+</section>
+
+<section class="dd-box p2-in" aria-labelledby="dw-h-alt" style="margin-top:24px; animation-delay:360ms;">
+<h3 id="dw-h-alt" class="dd-h">Другие подходящие макеты</h3>
+<ul style="display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:16px; margin:16px 0 0; padding:0; list-style:none;">
+<li>
+<span class="dw-wf" role="img" aria-label="Слайд 22 шаблона: формула слева, пункты справа">
+<span class="dw-b" style="left:5%; top:13%; width:68%; height:5%;"></span>
+<span class="dw-b dw-ac" style="left:3%; top:25%; width:0.8%; height:17%;"></span>
+<span class="dw-b dw-dk" style="left:6%; top:27%; width:34%; height:12%;"></span>
+<span class="dw-b" style="left:3%; top:47%; width:22%; height:2.5%;"></span>
+<span class="dw-b dw-ac" style="left:12%; top:69%; width:36%; height:1.6%;"></span>
+<span class="dw-b dw-ac" style="left:66%; top:47%; width:1.4%; height:2.5%;"></span>
+<span class="dw-b" style="left:69%; top:47%; width:22%; height:2.5%;"></span>
+<span class="dw-b dw-ac" style="left:66%; top:55%; width:1.4%; height:2.5%;"></span>
+<span class="dw-b" style="left:69%; top:55%; width:24%; height:2.5%;"></span>
+<span class="dw-b dw-ac" style="left:66%; top:63%; width:1.4%; height:2.5%;"></span>
+<span class="dw-b" style="left:69%; top:63%; width:20%; height:2.5%;"></span>
+<span class="dw-b dw-ac" style="left:3%; top:78%; width:0.8%; height:8%;"></span>
+<span class="dw-b" style="left:5.5%; top:79%; width:62%; height:2.5%;"></span>
+<span class="dw-b" style="left:5.5%; top:83.5%; width:20%; height:2.5%;"></span>
+<span class="dw-b dw-ac" style="left:3%; top:91%; width:8%; height:3.5%;"></span>
+</span>
+<p style="margin:8px 0 0; font-size:13px; font-weight:700; line-height:20px; color:#0B1220;">Слайд 22 · Формула</p>
+<p class="dd-cap" style="margin:0;">сходство 74%</p>
+</li>
+<li>
+<span class="dw-wf" role="img" aria-label="Слайд 17 шаблона: заголовок и сплошной текст">
+<span class="dw-b" style="left:5%; top:12%; width:56%; height:5%;"></span>
+<span class="dw-b" style="left:5%; top:19.5%; width:38%; height:5%;"></span>
+<span class="dw-b" style="left:5%; top:33%; width:84%; height:2.5%;"></span>
+<span class="dw-b" style="left:5%; top:38%; width:80%; height:2.5%;"></span>
+<span class="dw-b" style="left:5%; top:43%; width:58%; height:2.5%;"></span>
+<span class="dw-b" style="left:5%; top:53%; width:82%; height:2.5%;"></span>
+<span class="dw-b" style="left:5%; top:58%; width:76%; height:2.5%;"></span>
+<span class="dw-b" style="left:5%; top:63%; width:44%; height:2.5%;"></span>
+<span class="dw-b dw-ac" style="left:3%; top:91%; width:8%; height:3.5%;"></span>
+</span>
+<p style="margin:8px 0 0; font-size:13px; font-weight:700; line-height:20px; color:#0B1220;">Слайд 17 · Текст</p>
+<p class="dd-cap" style="margin:0;">сходство 69%</p>
+</li>
+<li>
+<span class="dw-wf" role="img" aria-label="Слайд 31 шаблона: четыре карточки">
+<span class="dw-b" style="left:5%; top:7%; width:72%; height:5%;"></span>
+<span class="dw-b dw-ac" style="left:3%; top:15%; width:0.8%; height:7%;"></span>
+<span class="dw-b" style="left:5%; top:15.5%; width:60%; height:2.5%;"></span>
+<span class="dw-b" style="left:5%; top:19.5%; width:36%; height:2.5%;"></span>
+<span class="dw-b dw-pn" style="left:3%; top:27%; width:36.5%; height:29%;"></span>
+<span class="dw-b dw-pn" style="left:40.5%; top:27%; width:36.5%; height:29%;"></span>
+<span class="dw-b dw-pn" style="left:3%; top:59%; width:36.5%; height:29%;"></span>
+<span class="dw-b dw-pn" style="left:40.5%; top:59%; width:36.5%; height:29%;"></span>
+<span class="dw-b dw-ac" style="left:5%; top:31%; width:1.4%; height:2.5%;"></span>
+<span class="dw-b dw-ac" style="left:42.5%; top:31%; width:1.4%; height:2.5%;"></span>
+<span class="dw-b dw-ac" style="left:5%; top:63%; width:1.4%; height:2.5%;"></span>
+<span class="dw-b dw-ac" style="left:42.5%; top:63%; width:1.4%; height:2.5%;"></span>
+<span class="dw-b dw-dk" style="left:5%; top:38%; width:14%; height:4%;"></span>
+<span class="dw-b dw-dk" style="left:42.5%; top:38%; width:14%; height:4%;"></span>
+<span class="dw-b dw-dk" style="left:5%; top:70%; width:14%; height:4%;"></span>
+<span class="dw-b dw-dk" style="left:42.5%; top:70%; width:14%; height:4%;"></span>
+<span class="dw-b" style="left:5%; top:47%; width:26%; height:2.5%;"></span>
+<span class="dw-b" style="left:42.5%; top:47%; width:28%; height:2.5%;"></span>
+<span class="dw-b" style="left:5%; top:79%; width:24%; height:2.5%;"></span>
+<span class="dw-b" style="left:42.5%; top:79%; width:30%; height:2.5%;"></span>
+<span class="dw-b dw-ac" style="left:3%; top:92%; width:8%; height:3.5%;"></span>
+</span>
+<p style="margin:8px 0 0; font-size:13px; font-weight:700; line-height:20px; color:#0B1220;">Слайд 31 · Карточки</p>
+<p class="dd-cap" style="margin:0;">сходство 61%</p>
+</li>
+</ul>
+</section>
+</div>
+
+<!-- Нижняя строка: проверка слайда -->
+<button type="button" class="dw-chk p2-in" onClick="{{ noop }}" aria-label="Проверка слайда: 1 замечание — открыть вкладку «Качество»" style="grid-column:1 / -1; animation-delay:400ms;">
+<span class="dd-ico" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7.5l2 2 3.5-3.5 M4 15.5l2 2 3.5-3.5 M13 8h7 M13 16h7"></path></svg></span>
+<span style="font-family:'Unbounded','Manrope',sans-serif; font-size:14px; font-weight:600; line-height:24px; letter-spacing:-0.02em;">Проверка слайда <span style="font-family:'Manrope',system-ui,sans-serif; font-size:15px; font-weight:500; letter-spacing:0; color:#5A6272;">· 1 замечание</span></span>
+<span class="dd-tag dd-tag-w"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.27 4.75a2 2 0 0 1 3.46 0l7.02 12.25A2 2 0 0 1 19.02 20H4.98a2 2 0 0 1-1.73-3z M12 9.5v4 M12 16.8h.01"></path></svg>Предупреждение</span>
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-left:auto; flex:none; color:#5A6272;"><path d="M10 6.5l5.5 5.5-5.5 5.5"></path></svg>
+</button>
+
+</div>
+</div>
+
+</section>
+</div>
+
+</main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = {};
+    this.D = {
+      TABS: [
+        { key: 'quality', label: 'Качество' }, { key: 'why', label: 'Почему так' }, { key: 'agent', label: 'Агент' },
+        { key: 'plan', label: 'План' }, { key: 'template', label: 'Шаблон' }, { key: 'files', label: 'Файлы' }
+      ],
+      FORMS: [
+        { name: 'Таблица', text: 'позволит выписать рядом f(x) и F(x) для нескольких функций.', varName: 'Компактный', varScore: 89 },
+        { name: 'Карточки', text: 'разделят определение, формулу и смысл постоянной C на три равных блока.' }
+      ],
+      REASONS: [
+        'Весь текст помещается без сокращений',
+        'Формула с подписью встала в широкую плашку — как главный блок образца',
+        'Подходит стилю варианта «Структурный»'
+      ]
+    };
+  }
+
+  renderVals() {
+    const D = this.D;
+    const noop = () => {};
+    const SEL = 1;
+    return {
+      noop,
+      tabs: D.TABS.map((t, i) => ({
+        key: t.key, label: t.label,
+        sel: String(i === SEL), cls: i === SEL ? 'p2-rseg-on' : '', tabi: i === SEL ? '0' : '-1',
+        pick: noop
+      })),
+      forms: D.FORMS.map((f) => ({
+        name: f.name, text: f.text,
+        hasVar: !!f.varName, varName: f.varName || '', varScore: f.varScore || '',
+        pick: noop
+      })),
+      reasons: D.REASONS.map((text) => ({ text }))
+    };
+  }
+}
+</script>
+</body>
+</html>

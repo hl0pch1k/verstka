@@ -1,0 +1,478 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Verstka — Слои: Подробнее · Шаблон</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700&amp;family=Unbounded:wght@600;700&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#0A0F1F}a:hover{color:#1E40AF}
+.p2-root{--ease:cubic-bezier(0.2, 0, 0, 1);-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+.p2-root *,.p2-root *::before,.p2-root *::after{box-sizing:border-box}
+:where(.p2-root) button{font-family:inherit;color:inherit;-webkit-tap-highlight-color:transparent}
+.p2-root :focus-visible{outline:2px solid #2563EB;outline-offset:2px}
+.p2-dark :focus-visible{outline-color:#38BDF8}
+.p2-sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.p2-none{display:none}
+
+/* движение: только transform и opacity */
+@keyframes p2-rise{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:translateY(0)}}
+@keyframes p2-in{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+@keyframes p2-pop{from{opacity:0;transform:scale(.98)}to{opacity:1;transform:scale(1)}}
+@keyframes p2-work{0%{transform:scaleX(0);opacity:1}72%{transform:scaleX(1);opacity:1}100%{transform:scaleX(1);opacity:0}}
+.p2-rise{animation:p2-rise 520ms var(--ease) backwards}
+.p2-in{animation:p2-in 360ms var(--ease) backwards}
+.p2-pop{animation:p2-pop 360ms var(--ease) backwards}
+
+/* колода плит */
+.p2-slot{transition:transform 520ms var(--ease)}
+.p2-s4-on{opacity:1;visibility:visible;transition:transform 520ms var(--ease),opacity 520ms var(--ease)}
+.p2-s4-off{opacity:0;visibility:hidden;pointer-events:none;transition:transform 340ms var(--ease),opacity 340ms var(--ease),visibility 0s linear 340ms}
+.p2-on{opacity:1;visibility:visible;transition:opacity 360ms var(--ease) 120ms}
+.p2-off{opacity:0;visibility:hidden;pointer-events:none;transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
+.p2-stag{transition:opacity 360ms var(--ease),transform 360ms var(--ease)}
+.p2-off .p2-stag{opacity:0;transform:translateY(12px);transition-duration:240ms}
+
+/* заголовок плиты */
+.p2-head{display:flex;align-items:center;gap:32px;height:64px;padding:0;border:0;background:none;cursor:pointer;text-align:left;border-radius:16px;transition:transform 160ms var(--ease)}
+.p2-head:active{transform:scale(.98)}
+.p2-num{display:block;width:160px;flex:none;height:64px;font-family:'Unbounded','Manrope',sans-serif;font-weight:700;font-size:88px;line-height:64px;letter-spacing:-0.04em;opacity:.14;transition:opacity 160ms var(--ease);pointer-events:none}
+.p2-head:hover .p2-num{opacity:.3}
+.p2-p2 .p2-num{opacity:.3}
+.p2-p2 .p2-head:hover .p2-num{opacity:.46}
+.p2-num3{opacity:.22}
+.p2-p3:has(.p2-head:hover) .p2-num3{opacity:.4}
+.p2-ttl{font-family:'Unbounded','Manrope',sans-serif;font-weight:600;font-size:32px;line-height:40px;letter-spacing:-0.03em;white-space:nowrap}
+
+/* кнопки */
+.p2-cta{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:12px;height:56px;padding:0 32px;border:0;border-radius:999px;background:linear-gradient(112deg,#1D4ED8 0%,#2563EB 45%,#38BDF8 140%);color:#FFFFFF;font-family:'Unbounded','Manrope',sans-serif;font-size:15px;font-weight:600;line-height:24px;letter-spacing:-0.01em;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-cta::after{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:0 12px 40px 0 rgba(11,18,32,.18);opacity:0;transition:opacity 160ms var(--ease);pointer-events:none}
+.p2-cta:hover{transform:translateY(-2px)}
+.p2-cta:hover::after{opacity:1}
+.p2-cta:active{transform:scale(.98)}
+.p2-ob{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:48px;padding:0 24px;border:0;border-radius:999px;background:#FFFFFF;box-shadow:inset 0 0 0 1px rgba(11,18,32,.14);color:#0B1220;font-size:15px;font-weight:700;line-height:24px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-ob:hover{transform:translateY(-2px)}
+.p2-ob:active{transform:scale(.98)}
+.p2-gb{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 16px;border:0;border-radius:999px;background:transparent;color:#2563EB;font-size:15px;font-weight:700;line-height:24px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-gb:hover{background:#F3F4F1;transform:translateY(-2px)}
+.p2-gb:active{transform:scale(.98)}
+.p2-pill{display:inline-flex;align-items:center;height:40px;padding:0 16px;border:0;border-radius:999px;background:#FFFFFF;box-shadow:inset 0 0 0 1px rgba(37,99,235,.14);color:#0B1220;font-size:14px;font-weight:600;line-height:20px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-pill:hover{transform:translateY(-2px);box-shadow:inset 0 0 0 1px rgba(37,99,235,.4)}
+.p2-pill:active{transform:scale(.98)}
+.p2-nav{display:inline-flex;align-items:center;height:40px;padding:0 16px;border-radius:999px;font-family:'Unbounded','Manrope',sans-serif;font-size:14px;font-weight:600;line-height:24px;letter-spacing:-0.01em;color:#5A6272;text-decoration:none;transition:transform 160ms var(--ease)}
+.p2-nav:hover{color:#0B1220;background:#FFFFFF}
+.p2-nav:active{transform:scale(.98)}
+
+/* шаблоны */
+.p2-card{display:block;width:100%;padding:0;border:0;background:none;text-align:left;cursor:pointer;border-radius:16px;transition:transform 160ms var(--ease)}
+.p2-card:hover{transform:translateY(-2px)}
+.p2-card:active{transform:scale(.98)}
+.p2-cover{position:relative;display:block;height:142px;border-radius:16px}
+.p2-cover::after{content:"";position:absolute;inset:0;border-radius:16px;box-shadow:0 12px 32px 0 rgba(11,18,32,.14);opacity:0;transition:opacity 160ms var(--ease);pointer-events:none}
+.p2-card:hover .p2-cover::after{opacity:1}
+.p2-sel{box-shadow:0 0 0 2px #FFFFFF,0 0 0 4px #2563EB}
+.p2-chk{position:absolute;top:8px;right:8px;width:24px;height:24px;border-radius:999px;background:#2563EB;color:#FFFFFF;display:flex;align-items:center;justify-content:center;transition:opacity 240ms var(--ease),transform 240ms var(--ease)}
+.p2-chk-off{opacity:0;transform:scale(.98)}
+
+/* текст */
+.p2-field{transition:box-shadow 0s}
+.p2-field:has(.p2-ta:focus){box-shadow:0 0 0 2px #2563EB}
+.p2-ta::placeholder,.p2-inp::placeholder{color:#5A6272;opacity:1}
+.p2-ta:focus{outline:none}
+.p2-muted{color:#5A6272}
+
+/* параметры (тёмная плита) */
+.p2-box{border-radius:24px;background:rgba(255,255,255,.06);box-shadow:inset 0 0 0 1px rgba(255,255,255,.1)}
+.p2-rb{width:40px;height:40px;flex:none;padding:0;border:0;border-radius:999px;background:rgba(255,255,255,.1);color:#FFFFFF;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:transform 160ms var(--ease),opacity 160ms var(--ease)}
+.p2-rb:hover{transform:translateY(-2px)}
+.p2-rb:active{transform:scale(.98)}
+.p2-rb:disabled{opacity:.32;cursor:default;transform:none}
+.p2-vc{width:100%;height:88px;padding:16px;border:0;border-radius:24px;background:rgba(255,255,255,.06);box-shadow:inset 0 0 0 1px rgba(255,255,255,.1);display:flex;flex-direction:column;justify-content:space-between;text-align:left;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-vc:hover{transform:translateY(-2px)}
+.p2-vc:active{transform:scale(.98)}
+.p2-vc-on{background:rgba(37,99,235,.24);box-shadow:inset 0 0 0 1px #38BDF8}
+.p2-vbox{width:20px;height:20px;flex:none;border-radius:999px;box-shadow:inset 0 0 0 2px rgba(255,255,255,.4);display:flex;align-items:center;justify-content:center;color:#FFFFFF}
+.p2-vbox svg{opacity:0;transition:opacity 240ms var(--ease)}
+.p2-vc-on .p2-vbox{background:#2563EB;box-shadow:none}
+.p2-vc-on .p2-vbox svg{opacity:1}
+.p2-sw{position:relative;width:44px;height:24px;flex:none;padding:0;border:0;border-radius:999px;background:rgba(255,255,255,.16);cursor:pointer}
+.p2-sw-fill{position:absolute;inset:0;border-radius:999px;background:#2563EB;opacity:0;transition:opacity 240ms var(--ease)}
+.p2-sw-knob{position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:999px;background:#FFFFFF;transition:transform 240ms var(--ease)}
+.p2-sw-on .p2-sw-fill{opacity:1}
+.p2-sw-on .p2-sw-knob{transform:translateX(20px)}
+
+/* сборка */
+.p2-seg{height:32px;padding:0 16px;border:0;border-radius:999px;background:transparent;color:rgba(255,255,255,.72);font-size:14px;font-weight:600;line-height:20px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-seg:hover{color:#FFFFFF}
+.p2-seg:active{transform:scale(.98)}
+.p2-seg-on,.p2-seg-on:hover{background:#FFFFFF;color:#0B1220}
+.p2-ph{position:absolute;left:0;top:0;white-space:nowrap;transition:opacity 360ms var(--ease),transform 360ms var(--ease)}
+.p2-ph-on{opacity:1;transform:translateY(0)}
+.p2-ph-past{opacity:0;transform:translateY(-12px);transition-duration:240ms}
+.p2-ph-next{opacity:0;transform:translateY(12px);transition-duration:240ms}
+.p2-bar{transition:transform 520ms var(--ease)}
+.p2-sbf{position:relative;aspect-ratio:16 / 9;border-radius:16px;overflow:hidden;background:rgba(255,255,255,.04);box-shadow:inset 0 0 0 1px rgba(255,255,255,.08)}
+.p2-sb-cur .p2-sbf{box-shadow:inset 0 0 0 1px #38BDF8}
+.p2-sbn{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:'Unbounded','Manrope',sans-serif;font-weight:600;font-size:20px;color:rgba(255,255,255,.24);transition:opacity 240ms var(--ease)}
+.p2-sb-done .p2-sbn{opacity:0}
+.p2-sbok{position:absolute;top:8px;right:8px;width:20px;height:20px;border-radius:999px;background:#2563EB;color:#FFFFFF;display:flex;align-items:center;justify-content:center}
+.p2-work{position:absolute;left:0;right:0;bottom:0;height:2px;background:#38BDF8;transform-origin:left center;animation:p2-work 1100ms var(--ease) infinite}
+.p2-role{position:relative;display:grid;grid-template-columns:28px minmax(0,1fr);column-gap:16px}
+.p2-role::before{content:"";position:absolute;left:13px;top:36px;bottom:-4px;width:2px;border-radius:999px;background:rgba(255,255,255,.12)}
+.p2-role-last::before{display:none}
+.p2-dot{width:28px;height:28px;border-radius:999px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.06);color:rgba(255,255,255,.48)}
+.p2-role-done .p2-dot{background:#2563EB;color:#FFFFFF}
+.p2-role-act .p2-dot{background:transparent;color:#38BDF8;box-shadow:inset 0 0 0 2px #38BDF8}
+.p2-rname{font-size:15px;font-weight:700;line-height:20px;color:#FFFFFF}
+.p2-role-pend .p2-rname{color:rgba(255,255,255,.48)}
+.p2-rst{font-size:13px;font-weight:600;line-height:20px;color:rgba(255,255,255,.56)}
+.p2-role-act .p2-rst{color:#38BDF8}
+.p2-arrow{color:#38BDF8;font-weight:700;margin:0 8px}
+
+/* результат */
+.p2-rbl{width:40px;height:40px;padding:0;border:0;border-radius:999px;background:#F3F4F1;color:#0B1220;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:transform 160ms var(--ease),opacity 160ms var(--ease)}
+.p2-rbl:hover{transform:translateY(-2px)}
+.p2-rbl:active{transform:scale(.98)}
+.p2-rbl:disabled{opacity:.32;cursor:default;transform:none}
+.p2-film{display:flex;gap:8px;overflow-x:auto;padding:8px 4px;scrollbar-width:none}
+.p2-film::-webkit-scrollbar{display:none}
+.p2-th{flex:none;width:112px;height:63px;padding:0;border:0;border-radius:12px;background:#F3F4F1;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-th:hover{transform:translateY(-2px)}
+.p2-th:active{transform:scale(.98)}
+.p2-th-on{box-shadow:0 0 0 2px #FFFFFF,0 0 0 4px #2563EB}
+.p2-rseg{display:flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 8px;border:0;border-radius:999px;background:transparent;color:#5A6272;font-size:14px;font-weight:600;line-height:20px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-rseg:hover{color:#0B1220}
+.p2-rseg:active{transform:scale(.98)}
+.p2-rseg-on{background:#FFFFFF;color:#0B1220;box-shadow:0 1px 2px rgba(11,18,32,.06),0 4px 16px 0 rgba(11,18,32,.08)}
+.p2-rsc{font-family:'Unbounded','Manrope',sans-serif;font-size:12px;font-weight:600;color:#2563EB}
+
+@media (prefers-reduced-motion: reduce){
+  .p2-root *,.p2-root *::before,.p2-root *::after{animation:none !important;transition:none !important}
+}
+@media (max-width: 900px){
+  .p2-root{padding:0 16px 16px !important}
+  .p2-hdr{padding:0 8px !important}
+  .p2-navs{display:none !important}
+  .p2-deck{height:auto !important;overflow:visible !important;border-radius:0 !important}
+  .p2-slot{position:relative !important;height:auto !important;transform:none !important;margin-top:-40px}
+  .p2-slot:first-child{margin-top:0}
+  .p2-plate{height:auto !important;padding:24px 24px 64px !important}
+  .p2-off,.p2-s4-off,.p2-num3,.p2-spc,.p2-hide-s{display:none !important}
+  .p2-body{margin-left:0 !important}
+  .p2-hrow{flex-wrap:wrap !important;height:auto !important;row-gap:16px}
+  .p2-head{gap:16px}
+  .p2-num{width:auto !important;height:48px !important;font-size:48px !important;line-height:48px !important}
+  .p2-ttl{font-size:24px !important;line-height:32px !important;white-space:normal}
+  .p2-g4{grid-template-columns:repeat(2,minmax(0,1fr)) !important}
+  .p2-params,.p2-two{grid-template-columns:minmax(0,1fr) !important;height:auto !important}
+  .p2-field{height:auto !important}
+  .p2-ta{min-height:120px !important}
+  .p2-wrap{flex-wrap:wrap !important;height:auto !important;row-gap:16px}
+  .p2-phs{height:auto !important}
+  .p2-ph{position:static !important;white-space:normal;font-size:24px !important;line-height:32px !important}
+  .p2-ph-past,.p2-ph-next{display:none}
+}
+
+/* ── D-template · слой «Подробнее», вкладка «Шаблон» ── */
+
+/* полосы свёрнутых плит под слоем */
+.dtp-strip{position:absolute;left:48px;right:48px;top:0;height:40px;display:flex;align-items:center;gap:12px;white-space:nowrap}
+.dtp-sn{font-family:'Unbounded','Manrope',sans-serif;font-weight:700;font-size:13px;line-height:20px;color:#5A6272}
+.dtp-sname{font-size:14px;font-weight:700;line-height:20px;color:#0B1220}
+.dtp-smeta{font-size:13px;font-weight:500;line-height:20px;color:#5A6272}
+.dtp-back{width:calc(100% - 96px);padding:0;border:0;background:none;text-align:left;cursor:pointer;border-radius:16px}
+.dtp-ret{display:inline-flex;align-items:center;gap:4px;margin-left:auto;font-size:13px;font-weight:600;line-height:20px;color:#5A6272;transition:transform 160ms var(--ease)}
+.dtp-back:hover .dtp-ret{color:#0B1220;transform:translateY(-2px)}
+.dtp-back:active .dtp-ret{transform:scale(.98)}
+
+/* слой и его шапка */
+.dtp-sheet{position:relative;height:100%;padding:40px 48px;border-radius:40px;background:#E9F1FF;color:#0B1220;box-shadow:0 -24px 48px -24px rgba(11,18,32,.4)}
+.dtp-tabs{display:flex;align-items:center;gap:4px;height:48px;padding:4px;border-radius:999px;background:#FFFFFF}
+.dtp-tab{padding:0 16px}
+.dtp-tab.p2-rseg-on,.dtp-tab.p2-rseg-on:hover{background:#0B1220;color:#FFFFFF;box-shadow:none}
+.dtp-x{background:#FFFFFF}
+/* прокрутка с мягким краем (p2-fade): поля 24 сверху и снизу — зоны растворения; коробка занимает бывший зазор 24 под вкладками,
+   поэтому содержимое в покое стоит там же, где раньше */
+.dtp-scroll{height:508px;padding:24px 0;overflow-y:auto;overscroll-behavior:contain;border-radius:24px;scrollbar-width:thin;scrollbar-color:rgba(11,18,32,.14) transparent}
+.dtp-box{padding:24px;border-radius:24px;background:#FFFFFF}
+.dtp-h2{margin:0;font-family:'Unbounded','Manrope',sans-serif;font-weight:600;font-size:20px;line-height:28px;letter-spacing:-0.02em;color:#0B1220}
+
+/* обзор: имя, три факта, шрифт, палитра */
+.dtp-band{display:grid;grid-template-columns:minmax(0,1fr) 112px 112px 144px 208px 320px;gap:16px;align-items:center}
+.dtp-name{margin:0;font-family:'Unbounded','Manrope',sans-serif;font-weight:600;font-size:32px;line-height:40px;letter-spacing:-0.03em;color:#0B1220;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dtp-tile{display:flex;height:72px;padding:0 16px;border-radius:16px;background:#F3F4F1;min-width:0}
+.dtp-fact{flex-direction:column-reverse;justify-content:center}
+.dtp-fact dt{margin:0;font-size:13px;font-weight:500;line-height:20px;color:#5A6272;white-space:nowrap}
+.dtp-fact dd{margin:0;font-family:'Unbounded','Manrope',sans-serif;font-weight:600;font-size:20px;line-height:28px;letter-spacing:-0.02em;color:#0B1220}
+.dtp-font{align-items:center;gap:16px}
+.dtp-aa{font-family:'Play','Manrope',sans-serif;font-weight:700;font-size:32px;line-height:40px;color:#0B1220}
+.dtp-fn{display:block;font-size:15px;font-weight:700;line-height:24px;color:#0B1220}
+.dtp-fl{display:block;font-size:13px;font-weight:500;line-height:20px;color:#5A6272}
+.dtp-pal{flex-direction:column;justify-content:center;gap:8px}
+.dtp-palh{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+.dtp-pall{font-size:13px;font-weight:600;line-height:20px;color:#0B1220}
+.dtp-palhint{font-size:12px;font-weight:500;line-height:20px;color:#5A6272;white-space:nowrap}
+.dtp-rib{position:relative;display:flex;height:24px}
+.dtp-rib::after{content:"";position:absolute;inset:0;border-radius:999px;box-shadow:inset 0 0 0 1px rgba(11,18,32,.08);pointer-events:none}
+.dtp-sw{flex:1;min-width:0;height:24px;padding:0;border:0;border-radius:0;cursor:copy;transition:transform 160ms var(--ease)}
+.dtp-sw:first-child{border-radius:999px 0 0 999px}
+.dtp-sw:last-child{border-radius:0 999px 999px 0}
+.dtp-sw:hover{transform:translateY(-2px)}
+.dtp-sw:active{transform:scale(.98)}
+
+/* макеты */
+.dtp-lays{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px 16px;margin-top:16px}
+
+/* правила и свёрнутый раздел */
+.dtp-rules{display:flex;flex-direction:column;gap:8px;margin:16px 0 0;padding:0;list-style:none}
+.dtp-rule{display:flex;align-items:flex-start;gap:12px;font-size:14px;font-weight:500;line-height:20px;color:#0B1220}
+.dtp-rule::before{content:"";flex:none;width:8px;height:8px;margin-top:6px;border-radius:999px;background:#2563EB}
+.dtp-col{display:flex;align-items:center;gap:16px;height:80px;padding:0 24px 0 16px;border-radius:24px;background:#FFFFFF}
+.dtp-colbtn{display:flex;align-items:center;gap:16px;flex:1;min-width:0;height:64px;padding:0 8px;border:0;border-radius:16px;background:none;color:#0B1220;text-align:left;cursor:pointer;transition:transform 160ms var(--ease)}
+.dtp-colbtn:active{transform:scale(.98)}
+.dtp-chev{display:flex;align-items:center;justify-content:center;width:40px;height:40px;flex:none;border-radius:999px;background:#F3F4F1;color:#0B1220;transition:transform 160ms var(--ease)}
+.dtp-colbtn:hover .dtp-chev{transform:translateY(-2px)}
+.dtp-ctx{display:flex;flex-direction:column;min-width:0}
+.dtp-ct{font-family:'Unbounded','Manrope',sans-serif;font-size:14px;font-weight:600;line-height:24px;letter-spacing:-0.02em;color:#0B1220}
+.dtp-ch{font-size:13px;font-weight:500;line-height:20px;color:#5A6272}
+/* мягкий край прокрутки: контент сверху и снизу растворяется, а не обрезается; верхний край — только после начала прокрутки */
+@property --p2-ft{syntax:'<length>';inherits:false;initial-value:0px}
+@property --p2-fb{syntax:'<length>';inherits:false;initial-value:24px}
+.p2-fade,.p2-fade-top{-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 var(--p2-ft),#000 calc(100% - var(--p2-fb)),transparent 100%);mask-image:linear-gradient(to bottom,transparent 0,#000 var(--p2-ft),#000 calc(100% - var(--p2-fb)),transparent 100%)}
+.p2-fade-top{--p2-fb:0px}
+@supports (animation-timeline: scroll()){
+.p2-fade{animation:p2-fade linear both;animation-timeline:scroll(self)}
+.p2-fade-top{animation:p2-fade-top linear both;animation-timeline:scroll(self)}
+}
+@keyframes p2-fade{0%{--p2-ft:0px;--p2-fb:24px}8%{--p2-ft:24px}92%{--p2-fb:24px}100%{--p2-ft:24px;--p2-fb:0px}}
+@keyframes p2-fade-top{0%{--p2-ft:0px}8%{--p2-ft:24px}100%{--p2-ft:24px}}
+/* логотип Verstka: слово и три слоя под ним — светлый, синий, тёмный; при наведении слои расходятся */
+.p2-bars{display:flex;gap:3px;margin-left:1px;margin-top:-1px}
+.p2-lbar{display:block;height:4px;border-radius:999px;transition:transform 240ms var(--ease)}
+.p2-lbar1{width:28px;background:#BFD6FF}
+.p2-lbar2{width:20px;background:#2563EB}
+.p2-lbar3{width:12px;background:#0B1220}
+.p2-brand:hover .p2-lbar2{transform:translateX(2px)}
+.p2-brand:hover .p2-lbar3{transform:translateX(4px)}
+</style>
+</helmet>
+<div class="p2-root" style="width:100%; min-height:900px; box-sizing:border-box; padding:0 24px 24px; background:#F3F4F1; color:#0B1220; font-family:'Manrope', system-ui, -apple-system, 'Segoe UI', sans-serif; font-size:15px; line-height:24px;">
+<div style="width:100%; max-width:1392px; margin:0 auto;">
+
+<header class="p2-hdr" style="display:flex; align-items:center; justify-content:space-between; height:64px; padding:0 48px;">
+<a href="#" class="p2-brand" aria-label="Verstka — на главную" style="display:inline-flex; flex-direction:column; align-items:flex-start; gap:0; text-decoration:none; color:#0B1220;">
+<span style="font-family:'Unbounded','Manrope',sans-serif; font-weight:700; font-size:20px; line-height:24px; letter-spacing:-0.03em;">Verstka</span>
+<span class="p2-bars" aria-hidden="true"><span class="p2-lbar p2-lbar1"></span><span class="p2-lbar p2-lbar2"></span><span class="p2-lbar p2-lbar3"></span></span>
+</a>
+<nav class="p2-navs" aria-label="Разделы" style="display:flex; align-items:center; gap:8px; margin-right:-16px;">
+<a class="p2-nav" href="#">Мои презентации</a>
+<a class="p2-nav" href="#">Шаблоны</a>
+<a class="p2-nav" href="#">Помощник</a>
+</nav>
+</header>
+
+<main class="p2-deck" style="position:relative; height:812px; border-radius:40px; overflow:hidden;">
+
+<!-- ПЛИТА 01 · Шаблон (свёрнута в полосу) -->
+<div class="p2-slot" style="position:absolute; left:0; right:0; top:0; height:812px; z-index:1; transform:translateY(0px);">
+<section class="p2-plate" aria-label="Шаг 1 — шаблон" style="position:relative; height:100%; padding:40px 48px; border-radius:40px; background:#FFFFFF; color:#0B1220;">
+<div class="dtp-strip">
+<span class="dtp-sn">01</span>
+<span class="dtp-sname">VK Tech</span>
+<span class="dtp-smeta">54 слайда · Play</span>
+</div>
+</section>
+</div>
+
+<!-- ПЛИТА 02 · Текст (свёрнута в полосу) -->
+<div class="p2-slot" style="position:absolute; left:0; right:0; top:0; height:812px; z-index:2; transform:translateY(40px);">
+<section class="p2-plate p2-p2" aria-label="Шаг 2 — текст" style="position:relative; height:100%; padding:40px 48px; border-radius:40px; background:#E9F1FF; color:#0B1220; box-shadow:0 -24px 48px -24px rgba(11,18,32,.16);">
+<div class="dtp-strip">
+<span class="dtp-sn">02</span>
+<span class="dtp-sname">Интеграл</span>
+<span class="dtp-smeta">тема · текст пишет агент</span>
+</div>
+</section>
+</div>
+
+<!-- ПЛИТА 03 · Сборка (свёрнута в полосу) -->
+<div class="p2-slot" style="position:absolute; left:0; right:0; top:0; height:812px; z-index:3; transform:translateY(80px);">
+<section class="p2-plate p2-p3 p2-dark" aria-label="Шаг 3 — сборка" style="position:relative; height:100%; padding:40px 48px; border-radius:40px; background:#0B1220; color:#FFFFFF; box-shadow:0 -24px 48px -24px rgba(11,18,32,.28);">
+<div class="dtp-strip">
+<span class="dtp-sn" style="color:rgba(255,255,255,.56);">03</span>
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#38BDF8" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M8.5 12.25l2.4 2.4 4.6-4.9"></path></svg>
+<span class="dtp-sname" style="color:#FFFFFF;">Сборка завершена за 2:31</span>
+<span class="dtp-smeta" style="color:rgba(255,255,255,.64);">3 варианта · 12 слайдов</span>
+</div>
+</section>
+</div>
+
+<!-- ПЛИТА 04 · Результат (под слоем видна полоса; клик — вернуться) -->
+<div class="p2-slot" style="position:absolute; left:0; right:0; top:0; height:812px; z-index:4; transform:translateY(120px);">
+<section class="p2-plate" aria-label="Результат" style="position:relative; height:100%; padding:40px 48px; border-radius:40px; background:#FFFFFF; color:#0B1220; box-shadow:0 -24px 48px -24px rgba(11,18,32,.4);">
+<button type="button" class="dtp-strip dtp-back" onClick="{{ noop }}" aria-label="Вернуться к результату: Интеграл, вариант Структурный, 89 из 100">
+<span class="dtp-sn">04</span>
+<span class="dtp-sname">Интеграл</span>
+<span class="dtp-smeta">Структурный</span>
+<span class="p2-rsc" style="margin-left:-8px;">89</span>
+<span class="dtp-ret">к результату<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 14.5L12 9l5.5 5.5"></path></svg></span>
+</button>
+</section>
+</div>
+
+<!-- СЛОЙ «Подробнее» · вкладка «Шаблон» (голубой над белой плитой 04) -->
+<div class="p2-slot" style="position:absolute; left:0; right:0; top:0; height:812px; z-index:5; transform:translateY(160px);">
+<section class="dtp-sheet p2-rise" role="dialog" aria-modal="true" aria-label="Подробнее о презентации">
+<div style="display:flex; flex-direction:column; height:572px;">
+
+<div style="display:flex; align-items:center; gap:16px; height:64px; flex:none;">
+<div class="dtp-tabs p2-in" role="tablist" aria-label="Разделы подробностей" style="animation-delay:120ms;">
+<sc-for list="{{ tabs }}" as="t" hint-placeholder-count="6">
+<button type="button" role="tab" id="{{ t.id }}" aria-selected="{{ t.sel }}" aria-controls="dtp-panel" class="p2-rseg dtp-tab {{ t.cls }}" onClick="{{ t.pick }}">{{ t.label }}</button>
+</sc-for>
+</div>
+<span style="flex:1; min-width:0;"></span>
+<button type="button" class="p2-rbl dtp-x p2-in" onClick="{{ noop }}" aria-label="Закрыть" style="animation-delay:160ms;">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6.5 6.5l11 11 M17.5 6.5l-11 11"></path></svg>
+</button>
+</div>
+
+<div id="dtp-panel" class="dtp-scroll p2-fade" role="tabpanel" aria-labelledby="dtp-tab-tpl">
+
+<section class="dtp-box dtp-band p2-in" aria-label="Обзор шаблона" style="animation-delay:120ms;">
+<h2 class="dtp-name">VK Tech</h2>
+<dl style="display:contents;">
+<div class="dtp-tile dtp-fact"><dt>формат</dt><dd>16:9</dd></div>
+<div class="dtp-tile dtp-fact"><dt>слайда</dt><dd>54</dd></div>
+<div class="dtp-tile dtp-fact"><dt>типов слайдов</dt><dd>12</dd></div>
+</dl>
+<div class="dtp-tile dtp-font">
+<span class="dtp-aa" aria-hidden="true">Аа</span>
+<span style="min-width:0;"><span class="dtp-fn">Play</span><span class="dtp-fl">основной шрифт</span></span>
+</div>
+<div class="dtp-tile dtp-pal">
+<div class="dtp-palh"><span class="dtp-pall" id="dtp-pal-l">Палитра</span><span class="dtp-palhint" aria-live="polite">{{ copyHint }}</span></div>
+<div class="dtp-rib" role="group" aria-labelledby="dtp-pal-l">
+<sc-for list="{{ pal }}" as="c" hint-placeholder-count="6"><button type="button" class="dtp-sw" style="background: {{ c.hex }};" title="{{ c.tip }}" aria-label="{{ c.tip }}" onClick="{{ c.copy }}"></button></sc-for>
+</div>
+</div>
+</section>
+
+<div style="display:grid; grid-template-columns:minmax(0, 1fr) 416px; gap:24px; align-items:start; margin-top:16px;">
+
+<section class="dtp-box p2-in" aria-labelledby="dtp-lay" style="animation-delay:160ms;">
+<div style="display:flex; align-items:center; justify-content:space-between; gap:16px; height:40px;">
+<h2 id="dtp-lay" class="dtp-h2">Макеты <span style="color:#5A6272;">54</span></h2>
+<button type="button" class="p2-gb" onClick="{{ noop }}" aria-expanded="false" style="margin-right:-16px;">
+<span>Все 54</span>
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 9.5L12 15l5.5-5.5"></path></svg>
+</button>
+</div>
+<div class="dtp-lays">
+<sc-for list="{{ lays }}" as="l" hint-placeholder-count="6">
+<div class="p2-in" style="animation-delay: {{ l.delay }};">
+<button type="button" class="p2-card" onClick="{{ l.open }}" aria-label="Слайд {{ l.n }} шаблона: {{ l.kind }}">
+<span class="p2-cover" style="height:auto;"><img src="{{ l.img }}" alt="" style="display:block; width:100%; aspect-ratio:16 / 9; object-fit:cover; border-radius:16px; box-shadow:0 0 0 1px rgba(11,18,32,.08);"></span>
+<span style="display:flex; align-items:baseline; justify-content:space-between; gap:8px; height:20px; margin-top:8px;">
+<span style="font-size:14px; font-weight:700; line-height:20px; color:#0B1220; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ l.kind }}</span>
+<span style="flex:none; font-size:12px; font-weight:600; line-height:20px; color:#5A6272; white-space:nowrap;">слайд {{ l.n }}</span>
+</span>
+</button>
+</div>
+</sc-for>
+</div>
+</section>
+
+<div style="display:flex; flex-direction:column; gap:16px; min-width:0;">
+<section class="dtp-box p2-in" aria-labelledby="dtp-rules" style="animation-delay:200ms;">
+<h2 id="dtp-rules" class="dtp-h2">Правила оформления</h2>
+<ul class="dtp-rules">
+<sc-for list="{{ rules }}" as="r" hint-placeholder-count="5">
+<li class="dtp-rule">{{ r.s }}</li>
+</sc-for>
+</ul>
+</section>
+
+<section class="dtp-col p2-in" aria-label="Шрифты и поля" style="animation-delay:240ms;">
+<button type="button" class="dtp-colbtn" aria-expanded="false" onClick="{{ noop }}">
+<span class="dtp-chev" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 9.5L12 15l5.5-5.5"></path></svg></span>
+<span class="dtp-ctx"><span class="dtp-ct">Шрифты и поля</span><span class="dtp-ch">для дизайнера</span></span>
+</button>
+</section>
+</div>
+
+</div>
+</div>
+
+</div>
+</section>
+</div>
+
+</main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { copied: '' };
+  }
+
+  renderVals() {
+    const st = this.state;
+
+    const tabs = ['Качество', 'Почему так', 'Агент', 'План', 'Шаблон', 'Файлы'].map((label, i) => {
+      const sel = label === 'Шаблон';
+      return {
+        label, id: sel ? 'dtp-tab-tpl' : 'dtp-tab-' + i,
+        sel: String(sel), cls: sel ? 'p2-rseg-on' : '',
+        pick: () => {}
+      };
+    });
+
+    const pal = [
+      ['#0077FF', 'фирменный'], ['#FF3885', 'акцент'], ['#202020', 'основной текст'],
+      ['#D6ECFF', 'подложка'], ['#FAFCFF', 'фон'], ['#000000', 'тёмный']
+    ].map((c) => ({
+      hex: c[0],
+      tip: c[0] + ' · ' + c[1] + ' · нажмите, чтобы скопировать',
+      copy: () => this.setState({ copied: c[0] })
+    }));
+
+    const lays = [
+      ['/_blob/0d6e85834c67424ae54a52bafe5d8181', 'Титул'],
+      ['/_blob/d331ce5caad9824e7e1b348e424378f3', 'Хронология'],
+      ['/_blob/d467e38cc12111ad26a428ff8e19ff4f', 'Список'],
+      ['/_blob/a42230ee9ee0732d731d992e8f213a12', 'Диаграмма'],
+      ['/_blob/6c09a69a8e2638087c2368085b443d0b', 'Список'],
+      ['/_blob/9d3bcdec98f61bbf1f44527b585a6d6b', 'Карточки']
+    ].map((l, i) => ({
+      img: l[0], kind: l[1], n: i + 1,
+      delay: (200 + i * 40) + 'ms',
+      open: () => {}
+    }));
+
+    const rules = [
+      'Заголовок — слева сверху, до двух строк.',
+      'Весь текст набран одним шрифтом — Play.',
+      'Один акцент на слайд — фирменный синий.',
+      'Поля по бокам — 3 % ширины слайда.',
+      'Логотип VK Tech — в левом нижнем углу.'
+    ].map((s) => ({ s }));
+
+    return {
+      tabs, pal, lays, rules,
+      copyHint: st.copied ? 'Цвет ' + st.copied + ' скопирован' : 'нажмите, чтобы скопировать',
+      noop: () => {}
+    };
+  }
+}
+</script>
+</body>
+</html>

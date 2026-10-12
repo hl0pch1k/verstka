@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Verstka — Слои: набор иконок</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700&amp;family=Unbounded:wght@600;700&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#0A0F1F}a:hover{color:#1E40AF}
+.p2-root{--ease:cubic-bezier(0.2, 0, 0, 1);-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+.p2-root *,.p2-root *::before,.p2-root *::after{box-sizing:border-box}
+:where(.p2-root) button{font-family:inherit;color:inherit;-webkit-tap-highlight-color:transparent}
+.p2-root :focus-visible{outline:2px solid #2563EB;outline-offset:2px}
+.p2-dark :focus-visible{outline-color:#38BDF8}
+.p2-sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.p2-none{display:none}
+
+/* движение: только transform и opacity */
+@keyframes p2-rise{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:translateY(0)}}
+@keyframes p2-in{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+@keyframes p2-pop{from{opacity:0;transform:scale(.98)}to{opacity:1;transform:scale(1)}}
+@keyframes p2-work{0%{transform:scaleX(0);opacity:1}72%{transform:scaleX(1);opacity:1}100%{transform:scaleX(1);opacity:0}}
+.p2-rise{animation:p2-rise 520ms var(--ease) backwards}
+.p2-in{animation:p2-in 360ms var(--ease) backwards}
+.p2-pop{animation:p2-pop 360ms var(--ease) backwards}
+
+/* колода плит */
+.p2-slot{transition:transform 520ms var(--ease)}
+.p2-s4-on{opacity:1;visibility:visible;transition:transform 520ms var(--ease),opacity 520ms var(--ease)}
+.p2-s4-off{opacity:0;visibility:hidden;pointer-events:none;transition:transform 340ms var(--ease),opacity 340ms var(--ease),visibility 0s linear 340ms}
+.p2-on{opacity:1;visibility:visible;transition:opacity 360ms var(--ease) 120ms}
+.p2-off{opacity:0;visibility:hidden;pointer-events:none;transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
+.p2-stag{transition:opacity 360ms var(--ease),transform 360ms var(--ease)}
+.p2-off .p2-stag{opacity:0;transform:translateY(12px);transition-duration:240ms}
+
+/* заголовок плиты */
+.p2-head{display:flex;align-items:center;gap:32px;height:64px;padding:0;border:0;background:none;cursor:pointer;text-align:left;border-radius:16px;transition:transform 160ms var(--ease)}
+.p2-head:active{transform:scale(.98)}
+.p2-num{display:block;width:160px;flex:none;height:64px;font-family:'Unbounded','Manrope',sans-serif;font-weight:700;font-size:88px;line-height:64px;letter-spacing:-0.04em;opacity:.14;transition:opacity 160ms var(--ease);pointer-events:none}
+.p2-head:hover .p2-num{opacity:.3}
+.p2-p2 .p2-num{opacity:.3}
+.p2-p2 .p2-head:hover .p2-num{opacity:.46}
+.p2-num3{opacity:.22}
+.p2-p3:has(.p2-head:hover) .p2-num3{opacity:.4}
+.p2-ttl{font-family:'Unbounded','Manrope',sans-serif;font-weight:600;font-size:32px;line-height:40px;letter-spacing:-0.03em;white-space:nowrap}
+
+/* кнопки */
+.p2-cta{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:12px;height:56px;padding:0 32px;border:0;border-radius:999px;background:linear-gradient(112deg,#1D4ED8 0%,#2563EB 45%,#38BDF8 140%);color:#FFFFFF;font-family:'Unbounded','Manrope',sans-serif;font-size:15px;font-weight:600;line-height:24px;letter-spacing:-0.01em;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-cta::after{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:0 12px 40px 0 rgba(11,18,32,.18);opacity:0;transition:opacity 160ms var(--ease);pointer-events:none}
+.p2-cta:hover{transform:translateY(-2px)}
+.p2-cta:hover::after{opacity:1}
+.p2-cta:active{transform:scale(.98)}
+.p2-ob{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:48px;padding:0 24px;border:0;border-radius:999px;background:#FFFFFF;box-shadow:inset 0 0 0 1px rgba(11,18,32,.14);color:#0B1220;font-size:15px;font-weight:700;line-height:24px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-ob:hover{transform:translateY(-2px)}
+.p2-ob:active{transform:scale(.98)}
+.p2-gb{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 16px;border:0;border-radius:999px;background:transparent;color:#2563EB;font-size:15px;font-weight:700;line-height:24px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-gb:hover{background:#F3F4F1;transform:translateY(-2px)}
+.p2-gb:active{transform:scale(.98)}
+.p2-pill{display:inline-flex;align-items:center;height:40px;padding:0 16px;border:0;border-radius:999px;background:#FFFFFF;box-shadow:inset 0 0 0 1px rgba(37,99,235,.14);color:#0B1220;font-size:14px;font-weight:600;line-height:20px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-pill:hover{transform:translateY(-2px);box-shadow:inset 0 0 0 1px rgba(37,99,235,.4)}
+.p2-pill:active{transform:scale(.98)}
+.p2-nav{display:inline-flex;align-items:center;height:40px;padding:0 16px;border-radius:999px;font-family:'Unbounded','Manrope',sans-serif;font-size:14px;font-weight:600;line-height:24px;letter-spacing:-0.01em;color:#5A6272;text-decoration:none;transition:transform 160ms var(--ease)}
+.p2-nav:hover{color:#0B1220;background:#FFFFFF}
+.p2-nav:active{transform:scale(.98)}
+
+/* шаблоны */
+.p2-card{display:block;width:100%;padding:0;border:0;background:none;text-align:left;cursor:pointer;border-radius:16px;transition:transform 160ms var(--ease)}
+.p2-card:hover{transform:translateY(-2px)}
+.p2-card:active{transform:scale(.98)}
+.p2-cover{position:relative;display:block;height:142px;border-radius:16px}
+.p2-cover::after{content:"";position:absolute;inset:0;border-radius:16px;box-shadow:0 12px 32px 0 rgba(11,18,32,.14);opacity:0;transition:opacity 160ms var(--ease);pointer-events:none}
+.p2-card:hover .p2-cover::after{opacity:1}
+.p2-sel{box-shadow:0 0 0 2px #FFFFFF,0 0 0 4px #2563EB}
+.p2-chk{position:absolute;top:8px;right:8px;width:24px;height:24px;border-radius:999px;background:#2563EB;color:#FFFFFF;display:flex;align-items:center;justify-content:center;transition:opacity 240ms var(--ease),transform 240ms var(--ease)}
+.p2-chk-off{opacity:0;transform:scale(.98)}
+
+/* текст */
+.p2-field{transition:box-shadow 0s}
+.p2-field:has(.p2-ta:focus){box-shadow:0 0 0 2px #2563EB}
+.p2-ta::placeholder,.p2-inp::placeholder{color:#5A6272;opacity:1}
+.p2-ta:focus{outline:none}
+.p2-muted{color:#5A6272}
+
+/* параметры (тёмная плита) */
+.p2-box{border-radius:24px;background:rgba(255,255,255,.06);box-shadow:inset 0 0 0 1px rgba(255,255,255,.1)}
+.p2-rb{width:40px;height:40px;flex:none;padding:0;border:0;border-radius:999px;background:rgba(255,255,255,.1);color:#FFFFFF;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:transform 160ms var(--ease),opacity 160ms var(--ease)}
+.p2-rb:hover{transform:translateY(-2px)}
+.p2-rb:active{transform:scale(.98)}
+.p2-rb:disabled{opacity:.32;cursor:default;transform:none}
+.p2-vc{width:100%;height:88px;padding:16px;border:0;border-radius:24px;background:rgba(255,255,255,.06);box-shadow:inset 0 0 0 1px rgba(255,255,255,.1);display:flex;flex-direction:column;justify-content:space-between;text-align:left;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-vc:hover{transform:translateY(-2px)}
+.p2-vc:active{transform:scale(.98)}
+.p2-vc-on{background:rgba(37,99,235,.24);box-shadow:inset 0 0 0 1px #38BDF8}
+.p2-vbox{width:20px;height:20px;flex:none;border-radius:999px;box-shadow:inset 0 0 0 2px rgba(255,255,255,.4);display:flex;align-items:center;justify-content:center;color:#FFFFFF}
+.p2-vbox svg{opacity:0;transition:opacity 240ms var(--ease)}
+.p2-vc-on .p2-vbox{background:#2563EB;box-shadow:none}
+.p2-vc-on .p2-vbox svg{opacity:1}
+.p2-sw{position:relative;width:44px;height:24px;flex:none;padding:0;border:0;border-radius:999px;background:rgba(255,255,255,.16);cursor:pointer}
+.p2-sw-fill{position:absolute;inset:0;border-radius:999px;background:#2563EB;opacity:0;transition:opacity 240ms var(--ease)}
+.p2-sw-knob{position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:999px;background:#FFFFFF;transition:transform 240ms var(--ease)}
+.p2-sw-on .p2-sw-fill{opacity:1}
+.p2-sw-on .p2-sw-knob{transform:translateX(20px)}
+
+/* сборка */
+.p2-seg{height:32px;padding:0 16px;border:0;border-radius:999px;background:transparent;color:rgba(255,255,255,.72);font-size:14px;font-weight:600;line-height:20px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-seg:hover{color:#FFFFFF}
+.p2-seg:active{transform:scale(.98)}
+.p2-seg-on,.p2-seg-on:hover{background:#FFFFFF;color:#0B1220}
+.p2-ph{position:absolute;left:0;top:0;white-space:nowrap;transition:opacity 360ms var(--ease),transform 360ms var(--ease)}
+.p2-ph-on{opacity:1;transform:translateY(0)}
+.p2-ph-past{opacity:0;transform:translateY(-12px);transition-duration:240ms}
+.p2-ph-next{opacity:0;transform:translateY(12px);transition-duration:240ms}
+.p2-bar{transition:transform 520ms var(--ease)}
+.p2-sbf{position:relative;aspect-ratio:16 / 9;border-radius:16px;overflow:hidden;background:rgba(255,255,255,.04);box-shadow:inset 0 0 0 1px rgba(255,255,255,.08)}
+.p2-sb-cur .p2-sbf{box-shadow:inset 0 0 0 1px #38BDF8}
+.p2-sbn{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:'Unbounded','Manrope',sans-serif;font-weight:600;font-size:20px;color:rgba(255,255,255,.24);transition:opacity 240ms var(--ease)}
+.p2-sb-done .p2-sbn{opacity:0}
+.p2-sbok{position:absolute;top:8px;right:8px;width:20px;height:20px;border-radius:999px;background:#2563EB;color:#FFFFFF;display:flex;align-items:center;justify-content:center}
+.p2-work{position:absolute;left:0;right:0;bottom:0;height:2px;background:#38BDF8;transform-origin:left center;animation:p2-work 1100ms var(--ease) infinite}
+.p2-role{position:relative;display:grid;grid-template-columns:28px minmax(0,1fr);column-gap:16px}
+.p2-role::before{content:"";position:absolute;left:13px;top:36px;bottom:-4px;width:2px;border-radius:999px;background:rgba(255,255,255,.12)}
+.p2-role-last::before{display:none}
+.p2-dot{width:28px;height:28px;border-radius:999px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.06);color:rgba(255,255,255,.48)}
+.p2-role-done .p2-dot{background:#2563EB;color:#FFFFFF}
+.p2-role-act .p2-dot{background:transparent;color:#38BDF8;box-shadow:inset 0 0 0 2px #38BDF8}
+.p2-rname{font-size:15px;font-weight:700;line-height:20px;color:#FFFFFF}
+.p2-role-pend .p2-rname{color:rgba(255,255,255,.48)}
+.p2-rst{font-size:13px;font-weight:600;line-height:20px;color:rgba(255,255,255,.56)}
+.p2-role-act .p2-rst{color:#38BDF8}
+.p2-arrow{color:#38BDF8;font-weight:700;margin:0 8px}
+
+/* результат */
+.p2-rbl{width:40px;height:40px;padding:0;border:0;border-radius:999px;background:#F3F4F1;color:#0B1220;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:transform 160ms var(--ease),opacity 160ms var(--ease)}
+.p2-rbl:hover{transform:translateY(-2px)}
+.p2-rbl:active{transform:scale(.98)}
+.p2-rbl:disabled{opacity:.32;cursor:default;transform:none}
+.p2-film{display:flex;gap:8px;overflow-x:auto;padding:8px 4px;scrollbar-width:none}
+.p2-film::-webkit-scrollbar{display:none}
+.p2-th{flex:none;width:112px;height:63px;padding:0;border:0;border-radius:12px;background:#F3F4F1;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-th:hover{transform:translateY(-2px)}
+.p2-th:active{transform:scale(.98)}
+.p2-th-on{box-shadow:0 0 0 2px #FFFFFF,0 0 0 4px #2563EB}
+.p2-rseg{display:flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 8px;border:0;border-radius:999px;background:transparent;color:#5A6272;font-size:14px;font-weight:600;line-height:20px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-rseg:hover{color:#0B1220}
+.p2-rseg:active{transform:scale(.98)}
+.p2-rseg-on{background:#FFFFFF;color:#0B1220;box-shadow:0 1px 2px rgba(11,18,32,.06),0 4px 16px 0 rgba(11,18,32,.08)}
+.p2-rsc{font-family:'Unbounded','Manrope',sans-serif;font-size:12px;font-weight:600;color:#2563EB}
+
+@media (prefers-reduced-motion: reduce){
+  .p2-root *,.p2-root *::before,.p2-root *::after{animation:none !important;transition:none !important}
+}
+@media (max-width: 900px){
+  .p2-root{padding:0 16px 16px !important}
+  .p2-hdr{padding:0 8px !important}
+  .p2-navs{display:none !important}
+  .p2-deck{height:auto !important;overflow:visible !important;border-radius:0 !important}
+  .p2-slot{position:relative !important;height:auto !important;transform:none !important;margin-top:-40px}
+  .p2-slot:first-child{margin-top:0}
+  .p2-plate{height:auto !important;padding:24px 24px 64px !important}
+  .p2-off,.p2-s4-off,.p2-num3,.p2-spc,.p2-hide-s{display:none !important}
+  .p2-body{margin-left:0 !important}
+  .p2-hrow{flex-wrap:wrap !important;height:auto !important;row-gap:16px}
+  .p2-head{gap:16px}
+  .p2-num{width:auto !important;height:48px !important;font-size:48px !important;line-height:48px !important}
+  .p2-ttl{font-size:24px !important;line-height:32px !important;white-space:normal}
+  .p2-g4{grid-template-columns:repeat(2,minmax(0,1fr)) !important}
+  .p2-params,.p2-two{grid-template-columns:minmax(0,1fr) !important;height:auto !important}
+  .p2-field{height:auto !important}
+  .p2-ta{min-height:120px !important}
+  .p2-wrap{flex-wrap:wrap !important;height:auto !important;row-gap:16px}
+  .p2-phs{height:auto !important}
+  .p2-ph{position:static !important;white-space:normal;font-size:24px !important;line-height:32px !important}
+  .p2-ph-past,.p2-ph-next{display:none}
+}
+/* иконка-слои: маленькая колода плит; при наведении на карточку задняя плита приподнимается */
+.p2-lic{position:relative;display:block;flex:none;width:56px;height:56px}
+.p2-lic-b{display:none}
+.p2-lic-f{position:absolute;left:4px;right:4px;top:4px;bottom:4px;display:flex;align-items:center;justify-content:center;border-radius:16px;background:#FFFFFF;box-shadow:0 1px 2px rgba(11,18,32,.06);color:#2563EB;transition:transform 240ms var(--ease),box-shadow 240ms var(--ease)}
+.p2-card:hover .p2-lic-b,.p2-card:focus-visible .p2-lic-b{transform:translateY(-4px)}
+
+.ic-grid{display:grid;grid-template-columns:repeat(9,minmax(0,1fr));gap:12px}
+.ic-card{display:flex;flex-direction:column;align-items:center;gap:8px;height:120px;padding:16px 8px 12px;border-radius:24px;background:#F3F4F1;color:#2563EB}
+.ic-big{display:flex;align-items:center;justify-content:center;width:40px;height:40px}
+.ic-row{display:flex;gap:8px}
+.ic-sm{display:flex;align-items:center;justify-content:center;width:32px;height:28px;border-radius:999px;background:#FFFFFF;color:#0B1220}
+.ic-dk{background:#0B1220;color:#FFFFFF}
+.ic-name{max-width:100%;font-size:12px;font-weight:600;line-height:16px;color:#5A6272;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* значок — одна плита, как карточки: при наведении поднимается и получает мягкую тень */
+.p2-card:hover .p2-lic-f,.p2-card:focus-visible .p2-lic-f,.p2-lic-host:hover .p2-lic-f,.p2-lic-up .p2-lic-f{transform:translateY(-2px);box-shadow:0 12px 32px 0 rgba(11,18,32,.14)}
+</style>
+</helmet>
+<div class="p2-root" style="width:100%; min-height:900px; box-sizing:border-box; padding:24px; background:#F3F4F1; color:#0B1220; font-family:'Manrope', system-ui, -apple-system, 'Segoe UI', sans-serif; font-size:15px; line-height:24px;">
+<section style="max-width:1392px; margin:0 auto; padding:40px 48px; border-radius:40px; background:#FFFFFF;">
+<div style="display:flex; align-items:flex-end; justify-content:space-between; gap:32px;">
+<div>
+<h1 style="margin:0; font-family:'Unbounded','Manrope',sans-serif; font-weight:600; font-size:32px; line-height:40px; letter-spacing:-0.03em;">Иконки «Слоёв»</h1>
+<p style="margin:8px 0 0; max-width:760px; font-size:15px; line-height:24px; color:#5A6272;">Сетка 24, только линии: круглые концы и стыки, мягкие радиусы, одна оптическая толщина ≈1,5 px на любом размере — от 12 до 32 px.</p>
+</div>
+<p style="margin:0; font-size:13px; font-weight:600; line-height:20px; color:#5A6272; white-space:nowrap;">54 иконок · 32 и 20 px</p>
+</div>
+<div class="ic-grid" style="margin-top:24px;">
+<div class="ic-card p2-in" style="animation-delay:0ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M8.5 12.25l2.4 2.4 4.6-4.9"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M8.5 12.25l2.4 2.4 4.6-4.9"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M8.5 12.25l2.4 2.4 4.6-4.9"></path></svg></span></span>
+<span class="ic-name">Готово</span>
+</div><div class="ic-card p2-in" style="animation-delay:20ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M12 11v5 M12 7.8h.01"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M12 11v5 M12 7.8h.01"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M12 11v5 M12 7.8h.01"></path></svg></span></span>
+<span class="ic-name">Сведения</span>
+</div><div class="ic-card p2-in" style="animation-delay:40ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M12 7.5v5 M12 16.2h.01"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M12 7.5v5 M12 16.2h.01"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M12 7.5v5 M12 16.2h.01"></path></svg></span></span>
+<span class="ic-name">Ошибка</span>
+</div><div class="ic-card p2-in" style="animation-delay:60ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M12 7.5V12l3 2"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M12 7.5V12l3 2"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M12 7.5V12l3 2"></path></svg></span></span>
+<span class="ic-name">Время</span>
+</div><div class="ic-card p2-in" style="animation-delay:80ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.27 4.75a2 2 0 0 1 3.46 0l7.02 12.25A2 2 0 0 1 19.02 20H4.98a2 2 0 0 1-1.73-3z M12 9.5v4 M12 16.8h.01"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.27 4.75a2 2 0 0 1 3.46 0l7.02 12.25A2 2 0 0 1 19.02 20H4.98a2 2 0 0 1-1.73-3z M12 9.5v4 M12 16.8h.01"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.27 4.75a2 2 0 0 1 3.46 0l7.02 12.25A2 2 0 0 1 19.02 20H4.98a2 2 0 0 1-1.73-3z M12 9.5v4 M12 16.8h.01"></path></svg></span></span>
+<span class="ic-name">Предупреждение</span>
+</div><div class="ic-card p2-in" style="animation-delay:100ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 6.5v7 M12 17.5h.01"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 6.5v7 M12 17.5h.01"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 6.5v7 M12 17.5h.01"></path></svg></span></span>
+<span class="ic-name">Знак «!»</span>
+</div><div class="ic-card p2-in" style="animation-delay:120ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 12.5l4.25 4.25L18.5 8"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 12.5l4.25 4.25L18.5 8"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 12.5l4.25 4.25L18.5 8"></path></svg></span></span>
+<span class="ic-name">Галочка</span>
+</div><div class="ic-card p2-in" style="animation-delay:140ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 6.5l11 11 M17.5 6.5l-11 11"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 6.5l11 11 M17.5 6.5l-11 11"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 6.5l11 11 M17.5 6.5l-11 11"></path></svg></span></span>
+<span class="ic-name">Закрыть</span>
+</div><div class="ic-card p2-in" style="animation-delay:160ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5.5v13 M5.5 12h13"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5.5v13 M5.5 12h13"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5.5v13 M5.5 12h13"></path></svg></span></span>
+<span class="ic-name">Добавить</span>
+</div><div class="ic-card p2-in" style="animation-delay:180ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 12h13"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 12h13"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 12h13"></path></svg></span></span>
+<span class="ic-name">Убавить</span>
+</div><div class="ic-card p2-in" style="animation-delay:200ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.5 12h9"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.5 12h9"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.5 12h9"></path></svg></span></span>
+<span class="ic-name">Пропущено</span>
+</div><div class="ic-card p2-in" style="animation-delay:220ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14 M13.5 6.5L19 12l-5.5 5.5"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14 M13.5 6.5L19 12l-5.5 5.5"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14 M13.5 6.5L19 12l-5.5 5.5"></path></svg></span></span>
+<span class="ic-name">Дальше</span>
+</div><div class="ic-card p2-in" style="animation-delay:240ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5 M10.5 6.5L5 12l5.5 5.5"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5 M10.5 6.5L5 12l5.5 5.5"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5 M10.5 6.5L5 12l5.5 5.5"></path></svg></span></span>
+<span class="ic-name">Назад</span>
+</div><div class="ic-card p2-in" style="animation-delay:260ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5 M6.5 10.5L12 5l5.5 5.5"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5 M6.5 10.5L12 5l5.5 5.5"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5 M6.5 10.5L12 5l5.5 5.5"></path></svg></span></span>
+<span class="ic-name">Отправить</span>
+</div><div class="ic-card p2-in" style="animation-delay:280ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 16l8-8 M9.5 8H16v6.5"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 16l8-8 M9.5 8H16v6.5"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 16l8-8 M9.5 8H16v6.5"></path></svg></span></span>
+<span class="ic-name">Открыть в новой вкладке</span>
+</div><div class="ic-card p2-in" style="animation-delay:300ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 6.5l5.5 5.5-5.5 5.5"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 6.5l5.5 5.5-5.5 5.5"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 6.5l5.5 5.5-5.5 5.5"></path></svg></span></span>
+<span class="ic-name">Вправо</span>
+</div><div class="ic-card p2-in" style="animation-delay:320ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 6.5L8.5 12l5.5 5.5"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 6.5L8.5 12l5.5 5.5"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 6.5L8.5 12l5.5 5.5"></path></svg></span></span>
+<span class="ic-name">Влево</span>
+</div><div class="ic-card p2-in" style="animation-delay:340ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 9.5L12 15l5.5-5.5"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 9.5L12 15l5.5-5.5"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 9.5L12 15l5.5-5.5"></path></svg></span></span>
+<span class="ic-name">Раскрыть</span>
+</div><div class="ic-card p2-in" style="animation-delay:360ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 14.5L12 9l5.5 5.5"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 14.5L12 9l5.5 5.5"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 14.5L12 9l5.5 5.5"></path></svg></span></span>
+<span class="ic-name">Свернуть</span>
+</div><div class="ic-card p2-in" style="animation-delay:380ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 4.5h5v5 M9.5 19.5h-5v-5 M19.5 4.5l-5.5 5.5 M4.5 19.5l5.5-5.5"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 4.5h5v5 M9.5 19.5h-5v-5 M19.5 4.5l-5.5 5.5 M4.5 19.5l5.5-5.5"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 4.5h5v5 M9.5 19.5h-5v-5 M19.5 4.5l-5.5 5.5 M4.5 19.5l5.5-5.5"></path></svg></span></span>
+<span class="ic-name">На весь экран</span>
+</div><div class="ic-card p2-in" style="animation-delay:400ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v10.5 M7.5 10L12 14.5l4.5-4.5 M4.5 16.5v1A2.5 2.5 0 0 0 7 20h10a2.5 2.5 0 0 0 2.5-2.5v-1"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v10.5 M7.5 10L12 14.5l4.5-4.5 M4.5 16.5v1A2.5 2.5 0 0 0 7 20h10a2.5 2.5 0 0 0 2.5-2.5v-1"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v10.5 M7.5 10L12 14.5l4.5-4.5 M4.5 16.5v1A2.5 2.5 0 0 0 7 20h10a2.5 2.5 0 0 0 2.5-2.5v-1"></path></svg></span></span>
+<span class="ic-name">Скачать</span>
+</div><div class="ic-card p2-in" style="animation-delay:400ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 14.5V4 M7.5 8.5L12 4l4.5 4.5 M4.5 15.5v2A2.5 2.5 0 0 0 7 20h10a2.5 2.5 0 0 0 2.5-2.5v-2"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 14.5V4 M7.5 8.5L12 4l4.5 4.5 M4.5 15.5v2A2.5 2.5 0 0 0 7 20h10a2.5 2.5 0 0 0 2.5-2.5v-2"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 14.5V4 M7.5 8.5L12 4l4.5 4.5 M4.5 15.5v2A2.5 2.5 0 0 0 7 20h10a2.5 2.5 0 0 0 2.5-2.5v-2"></path></svg></span></span>
+<span class="ic-name">Загрузить</span>
+</div><div class="ic-card p2-in" style="animation-delay:400ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12a7.5 7.5 0 0 1 12.95-5.15L19.5 9 M19.5 4.5V9H15 M19.5 12a7.5 7.5 0 0 1-12.95 5.15L4.5 15 M4.5 19.5V15H9"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12a7.5 7.5 0 0 1 12.95-5.15L19.5 9 M19.5 4.5V9H15 M19.5 12a7.5 7.5 0 0 1-12.95 5.15L4.5 15 M4.5 19.5V15H9"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12a7.5 7.5 0 0 1 12.95-5.15L19.5 9 M19.5 4.5V9H15 M19.5 12a7.5 7.5 0 0 1-12.95 5.15L4.5 15 M4.5 19.5V15H9"></path></svg></span></span>
+<span class="ic-name">Правка</span>
+</div><div class="ic-card p2-in" style="animation-delay:400ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3L4.5 9 M4.5 4.5V9H9"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3L4.5 9 M4.5 4.5V9H9"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3L4.5 9 M4.5 4.5V9H9"></path></svg></span></span>
+<span class="ic-name">Собрать ещё раз</span>
+</div><div class="ic-card p2-in" style="animation-delay:400ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14.5L4.5 10 9 5.5 M4.5 10h10a5 5 0 0 1 0 10H11"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14.5L4.5 10 9 5.5 M4.5 10h10a5 5 0 0 1 0 10H11"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14.5L4.5 10 9 5.5 M4.5 10h10a5 5 0 0 1 0 10H11"></path></svg></span></span>
+<span class="ic-name">Вернуть как было</span>
+</div><div class="ic-card p2-in" style="animation-delay:400ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 7.5h15 M9.5 7.5V6a2 2 0 0 1 2-2h1a2 2 0 0 1 2 2v1.5 M6.5 7.5l.75 10.6A2 2 0 0 0 9.24 20h5.52a2 2 0 0 0 2-1.9l.74-10.6 M10 11v5.5 M14 11v5.5"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 7.5h15 M9.5 7.5V6a2 2 0 0 1 2-2h1a2 2 0 0 1 2 2v1.5 M6.5 7.5l.75 10.6A2 2 0 0 0 9.24 20h5.52a2 2 0 0 0 2-1.9l.74-10.6 M10 11v5.5 M14 11v5.5"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 7.5h15 M9.5 7.5V6a2 2 0 0 1 2-2h1a2 2 0 0 1 2 2v1.5 M6.5 7.5l.75 10.6A2 2 0 0 0 9.24 20h5.52a2 2 0 0 0 2-1.9l.74-10.6 M10 11v5.5 M14 11v5.5"></path></svg></span></span>
+<span class="ic-name">Удалить</span>
+</div><div class="ic-card p2-in" style="animation-delay:400ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15.5 5l3.5 3.5L9 18.5l-4.5 1 1-4.5z M13 7.5l3.5 3.5"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15.5 5l3.5 3.5L9 18.5l-4.5 1 1-4.5z M13 7.5l3.5 3.5"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15.5 5l3.5 3.5L9 18.5l-4.5 1 1-4.5z M13 7.5l3.5 3.5"></path></svg></span></span>
+<span class="ic-name">Изменить · Автор</span>
+</div><div class="ic-card p2-in" style="animation-delay:400ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.25 7.75l2 2-9.4 9.4a1.41 1.41 0 0 1-2-2z M12.5 9.5l2 2 M18.5 3v3.5 M16.75 4.75h3.5 M19.5 12.5v2.5 M18.25 13.75h2.5 M9.5 3.5v2 M8.5 4.5h2"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.25 7.75l2 2-9.4 9.4a1.41 1.41 0 0 1-2-2z M12.5 9.5l2 2 M18.5 3v3.5 M16.75 4.75h3.5 M19.5 12.5v2.5 M18.25 13.75h2.5 M9.5 3.5v2 M8.5 4.5h2"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.25 7.75l2 2-9.4 9.4a1.41 1.41 0 0 1-2-2z M12.5 9.5l2 2 M18.5 3v3.5 M16.75 4.75h3.5 M19.5 12.5v2.5 M18.25 13.75h2.5 M9.5 3.5v2 M8.5 4.5h2"></path></svg></span></span>
+<span class="ic-name">Исправить</span>
+</div><div class="ic-card p2-in" style="animation-delay:400ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16.5 10.5a6 6 0 1 1-12 0a6 6 0 0 1 12 0z M15 15l4.5 4.5"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16.5 10.5a6 6 0 1 1-12 0a6 6 0 0 1 12 0z M15 15l4.5 4.5"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16.5 10.5a6 6 0 1 1-12 0a6 6 0 0 1 12 0z M15 15l4.5 4.5"></path></svg></span></span>
+<span class="ic-name">Поиск · Аналитик</span>
+</div><div class="ic-card p2-in" style="animation-delay:400ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.75 12S6.25 5.75 12 5.75 21.25 12 21.25 12 17.75 18.25 12 18.25 2.75 12 2.75 12z M15 12a3 3 0 1 1-6 0a3 3 0 0 1 6 0z"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.75 12S6.25 5.75 12 5.75 21.25 12 21.25 12 17.75 18.25 12 18.25 2.75 12 2.75 12z M15 12a3 3 0 1 1-6 0a3 3 0 0 1 6 0z"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.75 12S6.25 5.75 12 5.75 21.25 12 21.25 12 17.75 18.25 12 18.25 2.75 12 2.75 12z M15 12a3 3 0 1 1-6 0a3 3 0 0 1 6 0z"></path></svg></span></span>
+<span class="ic-name">Смотреть · Взгляд дизайнера</span>
+</div><div class="ic-card p2-in" style="animation-delay:400ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.2 6a8.6 8.6 0 0 1 1.8-.25C17.75 5.75 21.25 12 21.25 12a16 16 0 0 1-2.4 3.1 M6.6 7.1C4 8.9 2.75 12 2.75 12S6.25 18.25 12 18.25a8.7 8.7 0 0 0 4.4-1.15 M9.9 9.9a3 3 0 0 0 4.2 4.2 M4 4l16 16"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.2 6a8.6 8.6 0 0 1 1.8-.25C17.75 5.75 21.25 12 21.25 12a16 16 0 0 1-2.4 3.1 M6.6 7.1C4 8.9 2.75 12 2.75 12S6.25 18.25 12 18.25a8.7 8.7 0 0 0 4.4-1.15 M9.9 9.9a3 3 0 0 0 4.2 4.2 M4 4l16 16"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.2 6a8.6 8.6 0 0 1 1.8-.25C17.75 5.75 21.25 12 21.25 12a16 16 0 0 1-2.4 3.1 M6.6 7.1C4 8.9 2.75 12 2.75 12S6.25 18.25 12 18.25a8.7 8.7 0 0 0 4.4-1.15 M9.9 9.9a3 3 0 0 0 4.2 4.2 M4 4l16 16"></path></svg></span></span>
+<span class="ic-name">Скрыть</span>
+</div><div class="ic-card p2-in" style="animation-delay:400ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.5 3.5h-6a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8.5z M13.5 3.5v3a2 2 0 0 0 2 2h3"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.5 3.5h-6a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8.5z M13.5 3.5v3a2 2 0 0 0 2 2h3"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.5 3.5h-6a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8.5z M13.5 3.5v3a2 2 0 0 0 2 2h3"></path></svg></span></span>
+<span class="ic-name">PDF</span>
+</div><div class="ic-card p2-in" style="animation-delay:400ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.5 3.5h-6a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8.5z M13.5 3.5v3a2 2 0 0 0 2 2h3 M9 13h6 M9 16.5h4"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.5 3.5h-6a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8.5z M13.5 3.5v3a2 2 0 0 0 2 2h3 M9 13h6 M9 16.5h4"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.5 3.5h-6a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8.5z M13.5 3.5v3a2 2 0 0 0 2 2h3 M9 13h6 M9 16.5h4"></path></svg></span></span>
+<span class="ic-name">Текст</span>
+</div><div class="ic-card p2-in" style="animation-delay:400ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 19V6a2.5 2.5 0 0 1 2.5-2.5h10.5v13H8A2.5 2.5 0 0 0 5.5 19z M5.5 19A1.5 1.5 0 0 0 7 20.5h11.5v-4"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 19V6a2.5 2.5 0 0 1 2.5-2.5h10.5v13H8A2.5 2.5 0 0 0 5.5 19z M5.5 19A1.5 1.5 0 0 0 7 20.5h11.5v-4"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 19V6a2.5 2.5 0 0 1 2.5-2.5h10.5v13H8A2.5 2.5 0 0 0 5.5 19z M5.5 19A1.5 1.5 0 0 0 7 20.5h11.5v-4"></path></svg></span></span>
+<span class="ic-name">Источник</span>
+</div><div class="ic-card p2-in" style="animation-delay:400ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 4.5h11a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2z M4.5 16l4.5-4.5 4 4 2.5-2.5 4 4 M15.5 8.5h.01"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 4.5h11a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2z M4.5 16l4.5-4.5 4 4 2.5-2.5 4 4 M15.5 8.5h.01"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 4.5h11a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2z M4.5 16l4.5-4.5 4 4 2.5-2.5 4 4 M15.5 8.5h.01"></path></svg></span></span>
+<span class="ic-name">Изображение</span>
+</div><div class="ic-card p2-in" style="animation-delay:400ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4.5h8.5a2 2 0 0 1 2 2V15 M19 19a2 2 0 0 1-1.5.5h-11a2 2 0 0 1-2-2v-11A2 2 0 0 1 5 5 M4.5 16l4.5-4.5 4 4 M4 4l16 16"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4.5h8.5a2 2 0 0 1 2 2V15 M19 19a2 2 0 0 1-1.5.5h-11a2 2 0 0 1-2-2v-11A2 2 0 0 1 5 5 M4.5 16l4.5-4.5 4 4 M4 4l16 16"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4.5h8.5a2 2 0 0 1 2 2V15 M19 19a2 2 0 0 1-1.5.5h-11a2 2 0 0 1-2-2v-11A2 2 0 0 1 5 5 M4.5 16l4.5-4.5 4 4 M4 4l16 16"></path></svg></span></span>
+<span class="ic-name">Убрать изображение</span>
+</div><div class="ic-card p2-in" style="animation-delay:400ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 4.5v13a2 2 0 0 0 2 2h13 M8 15l3.5-3.5 3 3 5-5.5"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 4.5v13a2 2 0 0 0 2 2h13 M8 15l3.5-3.5 3 3 5-5.5"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 4.5v13a2 2 0 0 0 2 2h13 M8 15l3.5-3.5 3 3 5-5.5"></path></svg></span></span>
+<span class="ic-name">Диаграмма</span>
+</div><div class="ic-card p2-in" style="animation-delay:400ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4h2.5a2 2 0 0 1 2 2v2.5a2 2 0 0 1 -2 2h-2.5a2 2 0 0 1 -2 -2v-2.5a2 2 0 0 1 2 -2z M15.5 4h2.5a2 2 0 0 1 2 2v2.5a2 2 0 0 1 -2 2h-2.5a2 2 0 0 1 -2 -2v-2.5a2 2 0 0 1 2 -2z M6 13.5h2.5a2 2 0 0 1 2 2v2.5a2 2 0 0 1 -2 2h-2.5a2 2 0 0 1 -2 -2v-2.5a2 2 0 0 1 2 -2z M15.5 13.5h2.5a2 2 0 0 1 2 2v2.5a2 2 0 0 1 -2 2h-2.5a2 2 0 0 1 -2 -2v-2.5a2 2 0 0 1 2 -2z"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4h2.5a2 2 0 0 1 2 2v2.5a2 2 0 0 1 -2 2h-2.5a2 2 0 0 1 -2 -2v-2.5a2 2 0 0 1 2 -2z M15.5 4h2.5a2 2 0 0 1 2 2v2.5a2 2 0 0 1 -2 2h-2.5a2 2 0 0 1 -2 -2v-2.5a2 2 0 0 1 2 -2z M6 13.5h2.5a2 2 0 0 1 2 2v2.5a2 2 0 0 1 -2 2h-2.5a2 2 0 0 1 -2 -2v-2.5a2 2 0 0 1 2 -2z M15.5 13.5h2.5a2 2 0 0 1 2 2v2.5a2 2 0 0 1 -2 2h-2.5a2 2 0 0 1 -2 -2v-2.5a2 2 0 0 1 2 -2z"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4h2.5a2 2 0 0 1 2 2v2.5a2 2 0 0 1 -2 2h-2.5a2 2 0 0 1 -2 -2v-2.5a2 2 0 0 1 2 -2z M15.5 4h2.5a2 2 0 0 1 2 2v2.5a2 2 0 0 1 -2 2h-2.5a2 2 0 0 1 -2 -2v-2.5a2 2 0 0 1 2 -2z M6 13.5h2.5a2 2 0 0 1 2 2v2.5a2 2 0 0 1 -2 2h-2.5a2 2 0 0 1 -2 -2v-2.5a2 2 0 0 1 2 -2z M15.5 13.5h2.5a2 2 0 0 1 2 2v2.5a2 2 0 0 1 -2 2h-2.5a2 2 0 0 1 -2 -2v-2.5a2 2 0 0 1 2 -2z"></path></svg></span></span>
+<span class="ic-name">Все шаблоны</span>
+</div><div class="ic-card p2-in" style="animation-delay:400ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l8 4-8 4-8-4z M4 12l8 4 8-4 M4 16l8 4 8-4"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l8 4-8 4-8-4z M4 12l8 4 8-4 M4 16l8 4 8-4"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l8 4-8 4-8-4z M4 12l8 4 8-4 M4 16l8 4 8-4"></path></svg></span></span>
+<span class="ic-name">Вёрстка</span>
+</div><div class="ic-card p2-in" style="animation-delay:400ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4.5h10a2.5 2.5 0 0 1 2.5 2.5v10a2.5 2.5 0 0 1-2.5 2.5H7A2.5 2.5 0 0 1 4.5 17V7A2.5 2.5 0 0 1 7 4.5z M4.5 9.5h15 M10 9.5v10"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4.5h10a2.5 2.5 0 0 1 2.5 2.5v10a2.5 2.5 0 0 1-2.5 2.5H7A2.5 2.5 0 0 1 4.5 17V7A2.5 2.5 0 0 1 7 4.5z M4.5 9.5h15 M10 9.5v10"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4.5h10a2.5 2.5 0 0 1 2.5 2.5v10a2.5 2.5 0 0 1-2.5 2.5H7A2.5 2.5 0 0 1 4.5 17V7A2.5 2.5 0 0 1 7 4.5z M4.5 9.5h15 M10 9.5v10"></path></svg></span></span>
+<span class="ic-name">Дизайнер</span>
+</div><div class="ic-card p2-in" style="animation-delay:400ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4h12a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z M6 13.5h4a2 2 0 0 1 2 2v2.5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2.5a2 2 0 0 1 2-2z M16 13.5h2a2 2 0 0 1 2 2v2.5a2 2 0 0 1-2 2h-2a2 2 0 0 1-2-2v-2.5a2 2 0 0 1 2-2z"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4h12a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z M6 13.5h4a2 2 0 0 1 2 2v2.5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2.5a2 2 0 0 1 2-2z M16 13.5h2a2 2 0 0 1 2 2v2.5a2 2 0 0 1-2 2h-2a2 2 0 0 1-2-2v-2.5a2 2 0 0 1 2-2z"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4h12a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z M6 13.5h4a2 2 0 0 1 2 2v2.5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2.5a2 2 0 0 1 2-2z M16 13.5h2a2 2 0 0 1 2 2v2.5a2 2 0 0 1-2 2h-2a2 2 0 0 1-2-2v-2.5a2 2 0 0 1 2-2z"></path></svg></span></span>
+<span class="ic-name">Шаблон</span>
+</div><div class="ic-card p2-in" style="animation-delay:400ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 17.5v-11a2 2 0 0 1 2-2h3.6l2 2.5H18a2 2 0 0 1 2 2v8.5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z M12 10.5v5.5 M9.5 13.5L12 16l2.5-2.5"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 17.5v-11a2 2 0 0 1 2-2h3.6l2 2.5H18a2 2 0 0 1 2 2v8.5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z M12 10.5v5.5 M9.5 13.5L12 16l2.5-2.5"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 17.5v-11a2 2 0 0 1 2-2h3.6l2 2.5H18a2 2 0 0 1 2 2v8.5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z M12 10.5v5.5 M9.5 13.5L12 16l2.5-2.5"></path></svg></span></span>
+<span class="ic-name">Файлы</span>
+</div><div class="ic-card p2-in" style="animation-delay:400ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 8.5h8a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5h-8A1.5 1.5 0 0 1 8.5 18v-8A1.5 1.5 0 0 1 10 8.5z M15.5 8.5V6A1.5 1.5 0 0 0 14 4.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 8.5h8a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5h-8A1.5 1.5 0 0 1 8.5 18v-8A1.5 1.5 0 0 1 10 8.5z M15.5 8.5V6A1.5 1.5 0 0 0 14 4.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 8.5h8a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5h-8A1.5 1.5 0 0 1 8.5 18v-8A1.5 1.5 0 0 1 10 8.5z M15.5 8.5V6A1.5 1.5 0 0 0 14 4.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"></path></svg></span></span>
+<span class="ic-name">Скопировать</span>
+</div><div class="ic-card p2-in" style="animation-delay:400ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 11h10a2 2 0 0 1 2 2v5.5a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V13a2 2 0 0 1 2-2z M8.5 11V7.5a3.5 3.5 0 0 1 7 0V11"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 11h10a2 2 0 0 1 2 2v5.5a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V13a2 2 0 0 1 2-2z M8.5 11V7.5a3.5 3.5 0 0 1 7 0V11"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 11h10a2 2 0 0 1 2 2v5.5a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V13a2 2 0 0 1 2-2z M8.5 11V7.5a3.5 3.5 0 0 1 7 0V11"></path></svg></span></span>
+<span class="ic-name">Задано в тексте</span>
+</div><div class="ic-card p2-in" style="animation-delay:400ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19.5 11.5l-7.6 7.6a4.6 4.6 0 0 1-6.5-6.5l8.1-8.1a3.1 3.1 0 0 1 4.4 4.4l-8 8a1.55 1.55 0 0 1-2.2-2.2l7.3-7.3"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19.5 11.5l-7.6 7.6a4.6 4.6 0 0 1-6.5-6.5l8.1-8.1a3.1 3.1 0 0 1 4.4 4.4l-8 8a1.55 1.55 0 0 1-2.2-2.2l7.3-7.3"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19.5 11.5l-7.6 7.6a4.6 4.6 0 0 1-6.5-6.5l8.1-8.1a3.1 3.1 0 0 1 4.4 4.4l-8 8a1.55 1.55 0 0 1-2.2-2.2l7.3-7.3"></path></svg></span></span>
+<span class="ic-name">Из файла</span>
+</div><div class="ic-card p2-in" style="animation-delay:400ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 9h14 M5 15h14 M10.5 4.5l-2 15 M15.5 4.5l-2 15"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 9h14 M5 15h14 M10.5 4.5l-2 15 M15.5 4.5l-2 15"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 9h14 M5 15h14 M10.5 4.5l-2 15 M15.5 4.5l-2 15"></path></svg></span></span>
+<span class="ic-name">Числа</span>
+</div><div class="ic-card p2-in" style="animation-delay:400ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 6.5h14 M5 12h14 M5 17.5h9"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 6.5h14 M5 12h14 M5 17.5h9"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 6.5h14 M5 12h14 M5 17.5h9"></path></svg></span></span>
+<span class="ic-name">Список</span>
+</div><div class="ic-card p2-in" style="animation-delay:400ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7.5l2 2 3.5-3.5 M4 15.5l2 2 3.5-3.5 M13 8h7 M13 16h7"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7.5l2 2 3.5-3.5 M4 15.5l2 2 3.5-3.5 M13 8h7 M13 16h7"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7.5l2 2 3.5-3.5 M4 15.5l2 2 3.5-3.5 M13 8h7 M13 16h7"></path></svg></span></span>
+<span class="ic-name">Проверки</span>
+</div><div class="ic-card p2-in" style="animation-delay:400ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 5.5h3 M11 5.5h8.5 M11 12h8.5 M11 18.5h8.5 M6 5.5v11a2 2 0 0 0 2 2h0.5 M6 12h2.5"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 5.5h3 M11 5.5h8.5 M11 12h8.5 M11 18.5h8.5 M6 5.5v11a2 2 0 0 0 2 2h0.5 M6 12h2.5"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 5.5h3 M11 5.5h8.5 M11 12h8.5 M11 18.5h8.5 M6 5.5v11a2 2 0 0 0 2 2h0.5 M6 12h2.5"></path></svg></span></span>
+<span class="ic-name">План</span>
+</div><div class="ic-card p2-in" style="animation-delay:400ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19.5h.01 M8.5 16a5 5 0 0 1 7 0 M5 12.5a10 10 0 0 1 4.6-2.4 M19 12.5a10 10 0 0 0-2-1.5 M2 9a15 15 0 0 1 4.2-2.6 M22 9a15 15 0 0 0-11.3-3.8 M3 3l18 18"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19.5h.01 M8.5 16a5 5 0 0 1 7 0 M5 12.5a10 10 0 0 1 4.6-2.4 M19 12.5a10 10 0 0 0-2-1.5 M2 9a15 15 0 0 1 4.2-2.6 M22 9a15 15 0 0 0-11.3-3.8 M3 3l18 18"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19.5h.01 M8.5 16a5 5 0 0 1 7 0 M5 12.5a10 10 0 0 1 4.6-2.4 M19 12.5a10 10 0 0 0-2-1.5 M2 9a15 15 0 0 1 4.2-2.6 M22 9a15 15 0 0 0-11.3-3.8 M3 3l18 18"></path></svg></span></span>
+<span class="ic-name">Нет связи</span>
+</div><div class="ic-card p2-in" style="animation-delay:400ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 4.5h11a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H12l-4.5 4v-4h-1a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z M9 10l2 2 4-4"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 4.5h11a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H12l-4.5 4v-4h-1a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z M9 10l2 2 4-4"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 4.5h11a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H12l-4.5 4v-4h-1a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z M9 10l2 2 4-4"></path></svg></span></span>
+<span class="ic-name">Критик</span>
+</div><div class="ic-card p2-in" style="animation-delay:400ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 4.5h11a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H12l-4.5 4v-4h-1a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z M9 10h6"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 4.5h11a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H12l-4.5 4v-4h-1a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z M9 10h6"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 4.5h11a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H12l-4.5 4v-4h-1a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2z M9 10h6"></path></svg></span></span>
+<span class="ic-name">Замечание модели</span>
+</div><div class="ic-card p2-in" style="animation-delay:400ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4.5h10a2 2 0 0 1 2 2v8l-5 5H7a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2z M14 19.5V16a1.5 1.5 0 0 1 1.5-1.5H19 M9 9h6"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4.5h10a2 2 0 0 1 2 2v8l-5 5H7a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2z M14 19.5V16a1.5 1.5 0 0 1 1.5-1.5H19 M9 9h6"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4.5h10a2 2 0 0 1 2 2v8l-5 5H7a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2z M14 19.5V16a1.5 1.5 0 0 1 1.5-1.5H19 M9 9h6"></path></svg></span></span>
+<span class="ic-name">Заметка</span>
+</div><div class="ic-card p2-in" style="animation-delay:400ms;">
+<span class="ic-big"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.3-3.3a5.5 5.5 0 0 1-7.4 7.4l-6.4 6.4a2 2 0 0 1-2.8-2.8l6.4-6.4a5.5 5.5 0 0 1 7.4-7.4z"></path></svg></span>
+<span class="ic-row"><span class="ic-sm"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.3-3.3a5.5 5.5 0 0 1-7.4 7.4l-6.4 6.4a2 2 0 0 1-2.8-2.8l6.4-6.4a5.5 5.5 0 0 1 7.4-7.4z"></path></svg></span><span class="ic-sm ic-dk"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.3-3.3a5.5 5.5 0 0 1-7.4 7.4l-6.4 6.4a2 2 0 0 1-2.8-2.8l6.4-6.4a5.5 5.5 0 0 1 7.4-7.4z"></path></svg></span></span>
+<span class="ic-name">Автоисправление</span>
+</div>
+</div>
+</section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,682 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Verstka — Слои: Подробнее · Качество</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700&amp;family=Unbounded:wght@600;700&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#0A0F1F}a:hover{color:#1E40AF}
+.p2-root{--ease:cubic-bezier(0.2, 0, 0, 1);-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+.p2-root *,.p2-root *::before,.p2-root *::after{box-sizing:border-box}
+:where(.p2-root) button{font-family:inherit;color:inherit;-webkit-tap-highlight-color:transparent}
+.p2-root :focus-visible{outline:2px solid #2563EB;outline-offset:2px}
+.p2-dark :focus-visible{outline-color:#38BDF8}
+.p2-sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.p2-none{display:none}
+
+/* движение: только transform и opacity */
+@keyframes p2-rise{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:translateY(0)}}
+@keyframes p2-in{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+@keyframes p2-pop{from{opacity:0;transform:scale(.98)}to{opacity:1;transform:scale(1)}}
+@keyframes p2-work{0%{transform:scaleX(0);opacity:1}72%{transform:scaleX(1);opacity:1}100%{transform:scaleX(1);opacity:0}}
+.p2-rise{animation:p2-rise 520ms var(--ease) backwards}
+.p2-in{animation:p2-in 360ms var(--ease) backwards}
+.p2-pop{animation:p2-pop 360ms var(--ease) backwards}
+
+/* колода плит */
+.p2-slot{transition:transform 520ms var(--ease)}
+.p2-s4-on{opacity:1;visibility:visible;transition:transform 520ms var(--ease),opacity 520ms var(--ease)}
+.p2-s4-off{opacity:0;visibility:hidden;pointer-events:none;transition:transform 340ms var(--ease),opacity 340ms var(--ease),visibility 0s linear 340ms}
+.p2-on{opacity:1;visibility:visible;transition:opacity 360ms var(--ease) 120ms}
+.p2-off{opacity:0;visibility:hidden;pointer-events:none;transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
+.p2-stag{transition:opacity 360ms var(--ease),transform 360ms var(--ease)}
+.p2-off .p2-stag{opacity:0;transform:translateY(12px);transition-duration:240ms}
+
+/* заголовок плиты */
+.p2-head{display:flex;align-items:center;gap:32px;height:64px;padding:0;border:0;background:none;cursor:pointer;text-align:left;border-radius:16px;transition:transform 160ms var(--ease)}
+.p2-head:active{transform:scale(.98)}
+.p2-num{display:block;width:160px;flex:none;height:64px;font-family:'Unbounded','Manrope',sans-serif;font-weight:700;font-size:88px;line-height:64px;letter-spacing:-0.04em;opacity:.14;transition:opacity 160ms var(--ease);pointer-events:none}
+.p2-head:hover .p2-num{opacity:.3}
+.p2-p2 .p2-num{opacity:.3}
+.p2-p2 .p2-head:hover .p2-num{opacity:.46}
+.p2-num3{opacity:.22}
+.p2-p3:has(.p2-head:hover) .p2-num3{opacity:.4}
+.p2-ttl{font-family:'Unbounded','Manrope',sans-serif;font-weight:600;font-size:32px;line-height:40px;letter-spacing:-0.03em;white-space:nowrap}
+
+/* кнопки */
+.p2-cta{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:12px;height:56px;padding:0 32px;border:0;border-radius:999px;background:linear-gradient(112deg,#1D4ED8 0%,#2563EB 45%,#38BDF8 140%);color:#FFFFFF;font-family:'Unbounded','Manrope',sans-serif;font-size:15px;font-weight:600;line-height:24px;letter-spacing:-0.01em;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-cta::after{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:0 12px 40px 0 rgba(11,18,32,.18);opacity:0;transition:opacity 160ms var(--ease);pointer-events:none}
+.p2-cta:hover{transform:translateY(-2px)}
+.p2-cta:hover::after{opacity:1}
+.p2-cta:active{transform:scale(.98)}
+.p2-ob{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:48px;padding:0 24px;border:0;border-radius:999px;background:#FFFFFF;box-shadow:inset 0 0 0 1px rgba(11,18,32,.14);color:#0B1220;font-size:15px;font-weight:700;line-height:24px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-ob:hover{transform:translateY(-2px)}
+.p2-ob:active{transform:scale(.98)}
+.p2-gb{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 16px;border:0;border-radius:999px;background:transparent;color:#2563EB;font-size:15px;font-weight:700;line-height:24px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-gb:hover{background:#F3F4F1;transform:translateY(-2px)}
+.p2-gb:active{transform:scale(.98)}
+.p2-pill{display:inline-flex;align-items:center;height:40px;padding:0 16px;border:0;border-radius:999px;background:#FFFFFF;box-shadow:inset 0 0 0 1px rgba(37,99,235,.14);color:#0B1220;font-size:14px;font-weight:600;line-height:20px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-pill:hover{transform:translateY(-2px);box-shadow:inset 0 0 0 1px rgba(37,99,235,.4)}
+.p2-pill:active{transform:scale(.98)}
+.p2-nav{display:inline-flex;align-items:center;height:40px;padding:0 16px;border-radius:999px;font-family:'Unbounded','Manrope',sans-serif;font-size:14px;font-weight:600;line-height:24px;letter-spacing:-0.01em;color:#5A6272;text-decoration:none;transition:transform 160ms var(--ease)}
+.p2-nav:hover{color:#0B1220;background:#FFFFFF}
+.p2-nav:active{transform:scale(.98)}
+
+/* шаблоны */
+.p2-card{display:block;width:100%;padding:0;border:0;background:none;text-align:left;cursor:pointer;border-radius:16px;transition:transform 160ms var(--ease)}
+.p2-card:hover{transform:translateY(-2px)}
+.p2-card:active{transform:scale(.98)}
+.p2-cover{position:relative;display:block;height:142px;border-radius:16px}
+.p2-cover::after{content:"";position:absolute;inset:0;border-radius:16px;box-shadow:0 12px 32px 0 rgba(11,18,32,.14);opacity:0;transition:opacity 160ms var(--ease);pointer-events:none}
+.p2-card:hover .p2-cover::after{opacity:1}
+.p2-sel{box-shadow:0 0 0 2px #FFFFFF,0 0 0 4px #2563EB}
+.p2-chk{position:absolute;top:8px;right:8px;width:24px;height:24px;border-radius:999px;background:#2563EB;color:#FFFFFF;display:flex;align-items:center;justify-content:center;transition:opacity 240ms var(--ease),transform 240ms var(--ease)}
+.p2-chk-off{opacity:0;transform:scale(.98)}
+
+/* текст */
+.p2-field{transition:box-shadow 0s}
+.p2-field:has(.p2-ta:focus){box-shadow:0 0 0 2px #2563EB}
+.p2-ta::placeholder,.p2-inp::placeholder{color:#5A6272;opacity:1}
+.p2-ta:focus{outline:none}
+.p2-muted{color:#5A6272}
+
+/* параметры (тёмная плита) */
+.p2-box{border-radius:24px;background:rgba(255,255,255,.06);box-shadow:inset 0 0 0 1px rgba(255,255,255,.1)}
+.p2-rb{width:40px;height:40px;flex:none;padding:0;border:0;border-radius:999px;background:rgba(255,255,255,.1);color:#FFFFFF;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:transform 160ms var(--ease),opacity 160ms var(--ease)}
+.p2-rb:hover{transform:translateY(-2px)}
+.p2-rb:active{transform:scale(.98)}
+.p2-rb:disabled{opacity:.32;cursor:default;transform:none}
+.p2-vc{width:100%;height:88px;padding:16px;border:0;border-radius:24px;background:rgba(255,255,255,.06);box-shadow:inset 0 0 0 1px rgba(255,255,255,.1);display:flex;flex-direction:column;justify-content:space-between;text-align:left;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-vc:hover{transform:translateY(-2px)}
+.p2-vc:active{transform:scale(.98)}
+.p2-vc-on{background:rgba(37,99,235,.24);box-shadow:inset 0 0 0 1px #38BDF8}
+.p2-vbox{width:20px;height:20px;flex:none;border-radius:999px;box-shadow:inset 0 0 0 2px rgba(255,255,255,.4);display:flex;align-items:center;justify-content:center;color:#FFFFFF}
+.p2-vbox svg{opacity:0;transition:opacity 240ms var(--ease)}
+.p2-vc-on .p2-vbox{background:#2563EB;box-shadow:none}
+.p2-vc-on .p2-vbox svg{opacity:1}
+.p2-sw{position:relative;width:44px;height:24px;flex:none;padding:0;border:0;border-radius:999px;background:rgba(255,255,255,.16);cursor:pointer}
+.p2-sw-fill{position:absolute;inset:0;border-radius:999px;background:#2563EB;opacity:0;transition:opacity 240ms var(--ease)}
+.p2-sw-knob{position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:999px;background:#FFFFFF;transition:transform 240ms var(--ease)}
+.p2-sw-on .p2-sw-fill{opacity:1}
+.p2-sw-on .p2-sw-knob{transform:translateX(20px)}
+
+/* сборка */
+.p2-seg{height:32px;padding:0 16px;border:0;border-radius:999px;background:transparent;color:rgba(255,255,255,.72);font-size:14px;font-weight:600;line-height:20px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-seg:hover{color:#FFFFFF}
+.p2-seg:active{transform:scale(.98)}
+.p2-seg-on,.p2-seg-on:hover{background:#FFFFFF;color:#0B1220}
+.p2-ph{position:absolute;left:0;top:0;white-space:nowrap;transition:opacity 360ms var(--ease),transform 360ms var(--ease)}
+.p2-ph-on{opacity:1;transform:translateY(0)}
+.p2-ph-past{opacity:0;transform:translateY(-12px);transition-duration:240ms}
+.p2-ph-next{opacity:0;transform:translateY(12px);transition-duration:240ms}
+.p2-bar{transition:transform 520ms var(--ease)}
+.p2-sbf{position:relative;aspect-ratio:16 / 9;border-radius:16px;overflow:hidden;background:rgba(255,255,255,.04);box-shadow:inset 0 0 0 1px rgba(255,255,255,.08)}
+.p2-sb-cur .p2-sbf{box-shadow:inset 0 0 0 1px #38BDF8}
+.p2-sbn{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:'Unbounded','Manrope',sans-serif;font-weight:600;font-size:20px;color:rgba(255,255,255,.24);transition:opacity 240ms var(--ease)}
+.p2-sb-done .p2-sbn{opacity:0}
+.p2-sbok{position:absolute;top:8px;right:8px;width:20px;height:20px;border-radius:999px;background:#2563EB;color:#FFFFFF;display:flex;align-items:center;justify-content:center}
+.p2-work{position:absolute;left:0;right:0;bottom:0;height:2px;background:#38BDF8;transform-origin:left center;animation:p2-work 1100ms var(--ease) infinite}
+.p2-role{position:relative;display:grid;grid-template-columns:28px minmax(0,1fr);column-gap:16px}
+.p2-role::before{content:"";position:absolute;left:13px;top:36px;bottom:-4px;width:2px;border-radius:999px;background:rgba(255,255,255,.12)}
+.p2-role-last::before{display:none}
+.p2-dot{width:28px;height:28px;border-radius:999px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.06);color:rgba(255,255,255,.48)}
+.p2-role-done .p2-dot{background:#2563EB;color:#FFFFFF}
+.p2-role-act .p2-dot{background:transparent;color:#38BDF8;box-shadow:inset 0 0 0 2px #38BDF8}
+.p2-rname{font-size:15px;font-weight:700;line-height:20px;color:#FFFFFF}
+.p2-role-pend .p2-rname{color:rgba(255,255,255,.48)}
+.p2-rst{font-size:13px;font-weight:600;line-height:20px;color:rgba(255,255,255,.56)}
+.p2-role-act .p2-rst{color:#38BDF8}
+.p2-arrow{color:#38BDF8;font-weight:700;margin:0 8px}
+
+/* результат */
+.p2-rbl{width:40px;height:40px;padding:0;border:0;border-radius:999px;background:#F3F4F1;color:#0B1220;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:transform 160ms var(--ease),opacity 160ms var(--ease)}
+.p2-rbl:hover{transform:translateY(-2px)}
+.p2-rbl:active{transform:scale(.98)}
+.p2-rbl:disabled{opacity:.32;cursor:default;transform:none}
+.p2-film{display:flex;gap:8px;overflow-x:auto;padding:8px 4px;scrollbar-width:none}
+.p2-film::-webkit-scrollbar{display:none}
+.p2-th{flex:none;width:112px;height:63px;padding:0;border:0;border-radius:12px;background:#F3F4F1;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-th:hover{transform:translateY(-2px)}
+.p2-th:active{transform:scale(.98)}
+.p2-th-on{box-shadow:0 0 0 2px #FFFFFF,0 0 0 4px #2563EB}
+.p2-rseg{display:flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 8px;border:0;border-radius:999px;background:transparent;color:#5A6272;font-size:14px;font-weight:600;line-height:20px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-rseg:hover{color:#0B1220}
+.p2-rseg:active{transform:scale(.98)}
+.p2-rseg-on{background:#FFFFFF;color:#0B1220;box-shadow:0 1px 2px rgba(11,18,32,.06),0 4px 16px 0 rgba(11,18,32,.08)}
+.p2-rsc{font-family:'Unbounded','Manrope',sans-serif;font-size:12px;font-weight:600;color:#2563EB}
+
+@media (prefers-reduced-motion: reduce){
+  .p2-root *,.p2-root *::before,.p2-root *::after{animation:none !important;transition:none !important}
+}
+@media (max-width: 900px){
+  .p2-root{padding:0 16px 16px !important}
+  .p2-hdr{padding:0 8px !important}
+  .p2-navs{display:none !important}
+  .p2-deck{height:auto !important;overflow:visible !important;border-radius:0 !important}
+  .p2-slot{position:relative !important;height:auto !important;transform:none !important;margin-top:-40px}
+  .p2-slot:first-child{margin-top:0}
+  .p2-plate{height:auto !important;padding:24px 24px 64px !important}
+  .p2-off,.p2-s4-off,.p2-num3,.p2-spc,.p2-hide-s{display:none !important}
+  .p2-body{margin-left:0 !important}
+  .p2-hrow{flex-wrap:wrap !important;height:auto !important;row-gap:16px}
+  .p2-head{gap:16px}
+  .p2-num{width:auto !important;height:48px !important;font-size:48px !important;line-height:48px !important}
+  .p2-ttl{font-size:24px !important;line-height:32px !important;white-space:normal}
+  .p2-g4{grid-template-columns:repeat(2,minmax(0,1fr)) !important}
+  .p2-params,.p2-two{grid-template-columns:minmax(0,1fr) !important;height:auto !important}
+  .p2-field{height:auto !important}
+  .p2-ta{min-height:120px !important}
+  .p2-wrap{flex-wrap:wrap !important;height:auto !important;row-gap:16px}
+  .p2-phs{height:auto !important}
+  .p2-ph{position:static !important;white-space:normal;font-size:24px !important;line-height:32px !important}
+  .p2-ph-past,.p2-ph-next{display:none}
+}
+
+/* ===== «Подробнее»: слой поверх результата (общие классы досок D-, префикс dd-) ===== */
+@keyframes dd-up{from{opacity:0;transform:translateY(160px)}to{opacity:1;transform:translateY(0)}}
+.dd-up{animation:dd-up 520ms var(--ease) backwards}
+.dd-back{position:absolute;left:48px;right:48px;top:0;height:40px;display:flex;align-items:center;gap:12px;padding:0;border:0;border-radius:16px;background:transparent;color:#0B1220;text-align:left;white-space:nowrap;cursor:pointer}
+.dd-back-hint{display:inline-flex;align-items:center;gap:4px;margin-left:auto;font-size:13px;font-weight:700;line-height:20px;color:#2563EB;opacity:0;transition:opacity 160ms var(--ease)}
+.dd-back:hover .dd-back-hint,.dd-back:focus-visible .dd-back-hint{opacity:1}
+.dd-sheet{position:relative;height:100%;padding:40px 48px;border-radius:40px;background:#E9F1FF;color:#0B1220;box-shadow:0 -24px 48px -24px rgba(11,18,32,.4)}
+.dd-top{display:flex;align-items:center;gap:16px;height:64px}
+.dd-tabs{display:flex;align-items:center;gap:4px;height:48px;padding:4px;border-radius:999px;background:#FFFFFF}
+.dd-tabs .p2-rseg{padding:0 16px}
+.dd-tabs .p2-rseg-on,.dd-tabs .p2-rseg-on:hover{background:#0B1220;color:#FFFFFF;box-shadow:none}
+/* прокрутка с мягким краем (p2-fade): поле 24 сверху — зона растворения; коробка поднята на 16 px в пустой зазор под вкладками,
+   поэтому содержимое в покое стоит там же, где раньше (верх контента = 40 + 64 + 16), а низ — по краю колоды */
+.dd-scroll{height:556px;margin:-8px -48px 0;padding:24px 48px 40px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:none}
+.dd-scroll::-webkit-scrollbar{display:none}
+.dd-scroll:focus-visible{outline-offset:-2px}
+.dd-g{display:grid;grid-template-columns:minmax(0,1fr) 526px;gap:24px;align-items:start}
+.dd-box{border-radius:24px;background:#FFFFFF;padding:24px}
+.dd-h{margin:0;font-family:'Unbounded','Manrope',sans-serif;font-weight:600;font-size:20px;line-height:28px;letter-spacing:-0.02em;color:#0B1220}
+.dd-cap{font-size:13px;font-weight:600;line-height:20px;color:#5A6272}
+.dd-tag{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 8px;border-radius:999px;font-size:12px;font-weight:700;line-height:16px;white-space:nowrap;vertical-align:middle}
+.dd-tag-n{background:#F3F4F1;color:#5A6272}
+.dd-tag-w{background:#FFFBEB;color:#B45309}
+.dd-tag-b{background:#E9F1FF;color:#2563EB}
+.dd-ico{width:40px;height:40px;flex:none;border-radius:999px;background:#F3F4F1;color:#2563EB;display:flex;align-items:center;justify-content:center}
+
+/* ===== Качество (dq-) ===== */
+.dq-ring{position:relative;width:88px;height:88px;flex:none}
+.dq-ring svg{display:block;transform:rotate(-90deg)}
+.dq-ring-v{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.dq-cta:disabled{opacity:.32;cursor:default;transform:none}
+.dq-chip{gap:8px}
+.dq-chip-on,.dq-chip-on:hover{box-shadow:inset 0 0 0 2px #2563EB}
+.dq-cnt{font-family:'Unbounded','Manrope',sans-serif;font-size:12px;font-weight:600;line-height:16px;color:#2563EB}
+.dq-cnt0{color:#5A6272}
+.dq-grp-on{box-shadow:inset 0 0 0 2px #2563EB}
+.dq-iss{display:grid;grid-template-columns:24px minmax(0,1fr);column-gap:16px;margin-top:16px;padding-top:16px;border-top:1px solid rgba(11,18,32,.08)}
+.dq-cb{width:24px;height:24px;padding:0;border:0;border-radius:999px;background:transparent;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:transform 160ms var(--ease)}
+.dq-cb:hover{transform:translateY(-2px)}
+.dq-cb:active{transform:scale(.98)}
+.dq-cbx{width:20px;height:20px;border-radius:999px;box-shadow:inset 0 0 0 2px rgba(11,18,32,.4);color:#FFFFFF;display:flex;align-items:center;justify-content:center}
+.dq-cbx svg{opacity:0;transition:opacity 240ms var(--ease)}
+.dq-cb-on .dq-cbx{background:#2563EB;box-shadow:none}
+.dq-cb-on .dq-cbx svg{opacity:1}
+.dq-dot{display:flex;align-items:center;justify-content:center;width:24px;height:24px}
+.dq-dot::before{content:"";width:8px;height:8px;border-radius:999px;background:currentColor}
+.dq-acc{display:flex;align-items:center;gap:16px;width:100%;height:64px;padding:0;border:0;border-radius:16px;background:transparent;color:#0B1220;text-align:left;cursor:pointer;transition:transform 160ms var(--ease)}
+.dq-acc:active{transform:scale(.98)}
+.dq-chev{margin-left:auto;flex:none;color:#5A6272;transition:transform 240ms var(--ease)}
+.dq-acc-on .dq-chev{transform:rotate(180deg)}
+.dq-accb{border-top:1px solid rgba(11,18,32,.08)}
+.dq-rows{display:flex;flex-direction:column;gap:12px;margin:0;padding:0 0 24px 56px;list-style:none}
+.dq-row{display:flex;align-items:flex-start;gap:12px;font-size:14px;font-weight:500;line-height:20px;color:#0B1220}
+.dq-row .dd-tag{flex:none;width:72px;justify-content:center;margin-top:-2px}
+/* мягкий край прокрутки: контент сверху и снизу растворяется, а не обрезается; верхний край — только после начала прокрутки */
+@property --p2-ft{syntax:'<length>';inherits:false;initial-value:0px}
+@property --p2-fb{syntax:'<length>';inherits:false;initial-value:24px}
+.p2-fade,.p2-fade-top{-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 var(--p2-ft),#000 calc(100% - var(--p2-fb)),transparent 100%);mask-image:linear-gradient(to bottom,transparent 0,#000 var(--p2-ft),#000 calc(100% - var(--p2-fb)),transparent 100%)}
+.p2-fade-top{--p2-fb:0px}
+@supports (animation-timeline: scroll()){
+.p2-fade{animation:p2-fade linear both;animation-timeline:scroll(self)}
+.p2-fade-top{animation:p2-fade-top linear both;animation-timeline:scroll(self)}
+}
+@keyframes p2-fade{0%{--p2-ft:0px;--p2-fb:24px}8%{--p2-ft:24px}92%{--p2-fb:24px}100%{--p2-ft:24px;--p2-fb:0px}}
+@keyframes p2-fade-top{0%{--p2-ft:0px}8%{--p2-ft:24px}100%{--p2-ft:24px}}
+/* логотип Verstka: слово и три слоя под ним — светлый, синий, тёмный; при наведении слои расходятся */
+.p2-bars{display:flex;gap:3px;margin-left:1px;margin-top:-1px}
+.p2-lbar{display:block;height:4px;border-radius:999px;transition:transform 240ms var(--ease)}
+.p2-lbar1{width:28px;background:#BFD6FF}
+.p2-lbar2{width:20px;background:#2563EB}
+.p2-lbar3{width:12px;background:#0B1220}
+.p2-brand:hover .p2-lbar2{transform:translateX(2px)}
+.p2-brand:hover .p2-lbar3{transform:translateX(4px)}
+</style>
+</helmet>
+<div class="p2-root" style="width:100%; min-height:900px; box-sizing:border-box; padding:0 24px 24px; background:#F3F4F1; color:#0B1220; font-family:'Manrope', system-ui, -apple-system, 'Segoe UI', sans-serif; font-size:15px; line-height:24px;">
+<div style="width:100%; max-width:1392px; margin:0 auto;">
+
+<header class="p2-hdr" style="display:flex; align-items:center; justify-content:space-between; height:64px; padding:0 48px;">
+<a href="#" class="p2-brand" aria-label="Verstka — на главную" style="display:inline-flex; flex-direction:column; align-items:flex-start; gap:0; text-decoration:none; color:#0B1220;">
+<span style="font-family:'Unbounded','Manrope',sans-serif; font-weight:700; font-size:20px; line-height:24px; letter-spacing:-0.03em;">Verstka</span>
+<span class="p2-bars" aria-hidden="true"><span class="p2-lbar p2-lbar1"></span><span class="p2-lbar p2-lbar2"></span><span class="p2-lbar p2-lbar3"></span></span>
+</a>
+<nav class="p2-navs" aria-label="Разделы" style="display:flex; align-items:center; gap:8px; margin-right:-16px;">
+<a class="p2-nav" href="#">Мои презентации</a>
+<a class="p2-nav" href="#">Шаблоны</a>
+<a class="p2-nav" href="#">Помощник</a>
+</nav>
+</header>
+
+<main class="p2-deck" style="position:relative; height:812px; border-radius:40px; overflow:hidden;">
+
+<!-- ПЛИТА 01 · Шаблон (свёрнута в полосу) -->
+<div class="p2-slot" style="position:absolute; left:0; right:0; top:0; height:812px; z-index:1; transform:translateY(0px);">
+<section class="p2-plate p2-rise" aria-label="Шаг 1 — шаблон" style="position:relative; height:100%; padding:40px 48px; border-radius:40px; background:#FFFFFF; color:#0B1220; animation-delay:0ms;">
+<div style="position:absolute; left:48px; right:48px; top:0; height:40px; display:flex; align-items:center; gap:12px; white-space:nowrap;">
+<span style="font-family:'Unbounded','Manrope',sans-serif; font-weight:700; font-size:13px; line-height:20px; color:#5A6272;">01</span>
+<span style="font-size:14px; font-weight:700; line-height:20px; color:#0B1220;">VK Tech</span>
+<span style="font-size:13px; font-weight:500; line-height:20px; color:#5A6272;">54 слайда · Play</span>
+</div>
+</section>
+</div>
+
+<!-- ПЛИТА 02 · Текст (свёрнута в полосу) -->
+<div class="p2-slot" style="position:absolute; left:0; right:0; top:0; height:812px; z-index:2; transform:translateY(40px);">
+<section class="p2-plate p2-p2 p2-rise" aria-label="Шаг 2 — текст" style="position:relative; height:100%; padding:40px 48px; border-radius:40px; background:#E9F1FF; color:#0B1220; box-shadow:0 -24px 48px -24px rgba(11,18,32,.16); animation-delay:40ms;">
+<div style="position:absolute; left:48px; right:48px; top:0; height:40px; display:flex; align-items:center; gap:12px; white-space:nowrap;">
+<span style="font-family:'Unbounded','Manrope',sans-serif; font-weight:700; font-size:13px; line-height:20px; color:#5A6272;">02</span>
+<span style="font-size:14px; font-weight:700; line-height:20px; color:#0B1220;">Интеграл</span>
+<span style="font-size:13px; font-weight:500; line-height:20px; color:#5A6272;">тема · текст пишет агент</span>
+</div>
+</section>
+</div>
+
+<!-- ПЛИТА 03 · Сборка (свёрнута в полосу) -->
+<div class="p2-slot" style="position:absolute; left:0; right:0; top:0; height:812px; z-index:3; transform:translateY(80px);">
+<section class="p2-plate p2-p3 p2-dark p2-rise" aria-label="Шаг 3 — сборка" style="position:relative; height:100%; padding:40px 48px; border-radius:40px; background:#0B1220; color:#FFFFFF; box-shadow:0 -24px 48px -24px rgba(11,18,32,.28); animation-delay:80ms;">
+<div style="position:absolute; left:48px; right:48px; top:0; height:40px; display:flex; align-items:center; gap:12px; white-space:nowrap;">
+<span style="font-family:'Unbounded','Manrope',sans-serif; font-weight:700; font-size:13px; line-height:20px; color:rgba(255,255,255,.56);">03</span>
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#38BDF8" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M8.5 12.25l2.4 2.4 4.6-4.9"></path></svg>
+<span style="font-size:14px; font-weight:700; line-height:20px; color:#FFFFFF;">Сборка завершена за 2:31</span>
+<span style="font-size:13px; font-weight:500; line-height:20px; color:rgba(255,255,255,.64);">3 варианта · 12 слайдов</span>
+</div>
+</section>
+</div>
+
+<!-- ПЛИТА 04 · Результат (под слоем видна только полоса — по ней можно вернуться) -->
+<div class="p2-slot" style="position:absolute; left:0; right:0; top:0; height:812px; z-index:4; transform:translateY(120px);">
+<section class="p2-plate p2-rise" aria-label="Результат" style="position:relative; height:100%; padding:40px 48px; border-radius:40px; background:#FFFFFF; color:#0B1220; box-shadow:0 -24px 48px -24px rgba(11,18,32,.4); animation-delay:120ms;">
+<button type="button" class="dd-back" onClick="{{ noop }}" aria-label="Вернуться к результату: Интеграл, вариант Структурный, оценка 89">
+<span style="font-family:'Unbounded','Manrope',sans-serif; font-weight:700; font-size:13px; line-height:20px; color:#5A6272;">04</span>
+<span style="font-size:14px; font-weight:700; line-height:20px; color:#0B1220;">Интеграл</span>
+<span style="font-size:13px; font-weight:500; line-height:20px; color:#5A6272;">Структурный <span class="p2-rsc">89</span></span>
+<span class="dd-back-hint" aria-hidden="true">Вернуться к результату<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 9.5L12 15l5.5-5.5"></path></svg></span>
+</button>
+</section>
+</div>
+
+<!-- СЛОЙ 05 · Подробнее → Качество -->
+<div class="p2-slot" style="position:absolute; left:0; right:0; top:0; height:812px; z-index:5; transform:translateY(160px);">
+<section class="dd-sheet dd-up" role="dialog" aria-modal="true" aria-labelledby="dd-title" style="animation-delay:160ms;">
+<h2 id="dd-title" class="p2-sr">Подробнее о презентации «Интеграл»</h2>
+
+<div class="dd-top">
+<div class="dd-tabs" role="tablist" aria-label="Разделы подробностей">
+<sc-for list="{{ tabs }}" as="tb" hint-placeholder-count="6">
+<button type="button" role="tab" id="dd-tab-{{ tb.key }}" class="p2-rseg {{ tb.cls }}" aria-selected="{{ tb.sel }}" aria-controls="dd-panel" tabindex="{{ tb.tabi }}" onClick="{{ tb.pick }}">{{ tb.label }}</button>
+</sc-for>
+</div>
+<span style="flex:1; min-width:0;"></span>
+<button type="button" class="p2-ob" aria-haspopup="menu" aria-expanded="false" aria-label="Вариант оформления: Структурный, оценка 89" onClick="{{ noop }}" style="height:40px;">
+<span>Структурный</span><span class="p2-rsc">89</span>
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 9.5L12 15l5.5-5.5"></path></svg>
+</button>
+<button type="button" class="p2-rbl" aria-label="Закрыть" title="Закрыть (Esc)" onClick="{{ noop }}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 6.5l11 11 M17.5 6.5l-11 11"></path></svg></button>
+</div>
+
+<div id="dd-panel" class="dd-scroll p2-fade" role="tabpanel" aria-labelledby="dd-tab-quality" tabindex="0">
+
+<!-- Сводка -->
+<section class="dd-box p2-in" aria-label="Сводка проверки" style="display:flex; align-items:center; gap:24px; animation-delay:240ms;">
+<div class="dq-ring" role="img" aria-label="Оценка качества 89 из 100">
+<svg width="88" height="88" viewBox="0 0 88 88" aria-hidden="true"><circle cx="44" cy="44" r="40" fill="none" stroke="#F3F4F1" stroke-width="8"></circle><circle cx="44" cy="44" r="40" fill="none" stroke="#2563EB" stroke-width="8" stroke-linecap="round" stroke-dasharray="223.7 251.3"></circle></svg>
+<span class="dq-ring-v" aria-hidden="true">
+<span style="font-family:'Unbounded','Manrope',sans-serif; font-weight:700; font-size:28px; line-height:32px; letter-spacing:-0.04em; color:#0B1220;">89</span>
+<span style="font-size:12px; font-weight:600; line-height:16px; color:#5A6272;">из 100</span>
+</span>
+</div>
+<div style="flex:1; min-width:0;">
+<h3 class="dd-h">Есть что поправить</h3>
+<p style="display:flex; align-items:center; gap:8px; margin:4px 0 0; font-size:15px; font-weight:500; line-height:24px; color:#0B1220; white-space:nowrap;">
+<span>0 ошибок</span>
+<span aria-hidden="true" style="color:#5A6272;">·</span>
+<span style="display:inline-flex; align-items:center; gap:4px; font-weight:700; color:#B45309;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.27 4.75a2 2 0 0 1 3.46 0l7.02 12.25A2 2 0 0 1 19.02 20H4.98a2 2 0 0 1-1.73-3z M12 9.5v4 M12 16.8h.01"></path></svg>3 предупреждения</span>
+<span aria-hidden="true" style="color:#5A6272;">·</span>
+<span>2 замечания модели</span>
+</p>
+</div>
+<div style="display:flex; align-items:center; gap:16px; flex:none;">
+<button type="button" class="p2-ob" onClick="{{ noop }}">Исправить всё автоматически</button>
+<button type="button" class="p2-cta dq-cta" onClick="{{ noop }}" disabled="{{ fixDis }}">
+<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.25 7.75l2 2-9.4 9.4a1.41 1.41 0 0 1-2-2z M12.5 9.5l2 2 M18.5 3v3.5 M16.75 4.75h3.5 M19.5 12.5v2.5 M18.25 13.75h2.5 M9.5 3.5v2 M8.5 4.5h2"></path></svg>
+<span>{{ fixLabel }}</span>
+</button>
+</div>
+</section>
+
+<div class="dd-g" style="margin-top:24px;">
+
+<!-- Левая колонка: замечания по слайдам -->
+<div style="min-width:0;">
+<div class="p2-in" role="radiogroup" aria-label="Какие замечания показать" style="display:flex; align-items:center; gap:8px; height:40px; animation-delay:280ms;">
+<sc-for list="{{ chips }}" as="ch" hint-placeholder-count="4">
+<button type="button" role="radio" aria-checked="{{ ch.checked }}" class="p2-pill dq-chip {{ ch.cls }}" onClick="{{ ch.pick }}"><span>{{ ch.label }}</span><span class="dq-cnt {{ ch.cntCls }}">{{ ch.n }}</span></button>
+</sc-for>
+</div>
+
+<sc-for list="{{ groups }}" as="g" hint-placeholder-count="3">
+<section class="dd-box p2-in {{ g.cls }}" aria-label="{{ g.aria }}" aria-current="{{ g.cur }}" style="margin-top:16px; animation-delay: {{ g.delay }};">
+<div style="display:flex; align-items:center; gap:16px; height:48px;">
+<span style="display:block; width:80px; height:45px; flex:none;">
+<sc-if value="{{ g.isSlide }}" hint-placeholder-val="{{ true }}">
+<img src="{{ g.img }}" alt="" style="display:block; width:80px; height:45px; aspect-ratio:16 / 9; object-fit:cover; border-radius:12px; box-shadow:0 0 0 1px rgba(11,18,32,.08);">
+</sc-if>
+<sc-if value="{{ g.isDeck }}" hint-placeholder-val="{{ false }}">
+<span aria-hidden="true" style="display:flex; align-items:center; justify-content:center; width:80px; height:45px; border-radius:12px; background:#F3F4F1; color:#2563EB;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l8 4-8 4-8-4z M4 12l8 4 8-4 M4 16l8 4 8-4"></path></svg></span>
+</sc-if>
+</span>
+<h3 style="min-width:0; margin:0; font-family:'Unbounded','Manrope',sans-serif; font-size:14px; font-weight:600; line-height:24px; letter-spacing:-0.02em; color:#0B1220; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ g.label }}<span style="font-family:'Manrope',system-ui,sans-serif; font-size:15px; font-weight:500; letter-spacing:0; color:#5A6272;">{{ g.sub }}</span></h3>
+<span style="margin-left:auto; flex:none; font-size:13px; font-weight:600; line-height:20px; color:#5A6272;">{{ g.count }}</span>
+<sc-if value="{{ g.isSlide }}" hint-placeholder-val="{{ true }}">
+<button type="button" class="p2-gb" onClick="{{ g.show }}" aria-label="Показать слайд {{ g.n }}" style="flex:none; margin-right:-16px;">Показать<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14 M13.5 6.5L19 12l-5.5 5.5"></path></svg></button>
+</sc-if>
+</div>
+<ul style="margin:0; padding:0; list-style:none;">
+<sc-for list="{{ g.items }}" as="i" hint-placeholder-count="2">
+<li class="dq-iss">
+<div style="width:24px;">
+<sc-if value="{{ i.fixable }}" hint-placeholder-val="{{ true }}">
+<button type="button" role="checkbox" aria-checked="{{ i.checked }}" aria-label="Отметить для исправления" class="dq-cb {{ i.cbCls }}" onClick="{{ i.toggle }}"><span class="dq-cbx"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 12.5l4.25 4.25L18.5 8"></path></svg></span></button>
+</sc-if>
+<sc-if value="{{ i.dot }}" hint-placeholder-val="{{ false }}">
+<span class="dq-dot" aria-hidden="true" style="color: {{ i.dotColor }};"></span>
+</sc-if>
+</div>
+<div style="min-width:0;">
+<span class="dd-tag {{ i.tagCls }}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{ i.p1 }}"></path><path d="{{ i.p2 }}"></path><path d="{{ i.p3 }}"></path></svg>{{ i.sev }}</span>
+<p style="margin:8px 0 0; font-size:15px; font-weight:600; line-height:24px; color:#0B1220;">{{ i.msg }}</p>
+</div>
+</li>
+</sc-for>
+</ul>
+</section>
+</sc-for>
+
+<sc-if value="{{ noIssues }}" hint-placeholder-val="{{ false }}">
+<section class="dd-box p2-pop" style="display:flex; flex-direction:column; align-items:center; margin-top:16px; padding:40px 24px; text-align:center;">
+<span aria-hidden="true" style="display:flex; align-items:center; justify-content:center; width:48px; height:48px; border-radius:999px; background:#E9F1FF; color:#2563EB;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 12.5l4.25 4.25L18.5 8"></path></svg></span>
+<h3 class="dd-h" style="margin-top:16px;">Ошибок нет</h3>
+<p style="max-width:440px; margin:8px 0 0; font-size:15px; font-weight:500; line-height:24px; color:#5A6272;">В этом варианте ни одной ошибки — только предупреждения и замечания модели.</p>
+<button type="button" class="p2-ob" onClick="{{ showAll }}" style="margin-top:24px;">Показать все замечания</button>
+</section>
+</sc-if>
+</div>
+
+<!-- Правая колонка: взгляд дизайнера и свёрнутые разделы -->
+<div style="min-width:0;">
+<section class="dd-box p2-in" aria-labelledby="dq-eye-h" style="animation-delay:320ms;">
+<div style="display:flex; align-items:center; gap:16px;">
+<span class="dd-ico" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.75 12S6.25 5.75 12 5.75 21.25 12 21.25 12 17.75 18.25 12 18.25 2.75 12 2.75 12z M15 12a3 3 0 1 1-6 0a3 3 0 0 1 6 0z"></path></svg></span>
+<div style="min-width:0;">
+<h3 id="dq-eye-h" class="dd-h">Взгляд дизайнера</h3>
+<p style="margin:0; font-size:14px; font-weight:500; line-height:20px; color:#5A6272;">посмотрел на 12 слайдов · пересобрал 1</p>
+</div>
+</div>
+<p style="margin:16px 0 0; font-size:14px; font-weight:500; line-height:20px; color:#5A6272;">Модель с компьютерным зрением посмотрела на каждый готовый слайд, как арт-директор перед отправкой клиенту. Где вёрстка мешала читать — собрала слайд заново и оставила новую версию, только если она лучше прежней.</p>
+
+<article aria-label="Слайд 9 пересобран" style="margin-top:16px; padding:16px; border-radius:16px; background:#F3F4F1;">
+<div style="display:flex; align-items:center; gap:8px; height:24px;">
+<span class="dd-tag" style="background:#FFFFFF; color:#0B1220;">Слайд 9</span>
+<span style="min-width:0; font-size:14px; font-weight:700; line-height:20px; color:#0B1220; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Пример вычисления</span>
+<span class="dd-tag dd-tag-b" style="margin-left:auto; flex:none;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12a7.5 7.5 0 0 1 12.95-5.15L19.5 9 M19.5 4.5V9H15 M19.5 12a7.5 7.5 0 0 1-12.95 5.15L4.5 15 M4.5 19.5V15H9"></path></svg>пересобрал</span>
+</div>
+<p style="margin:12px 0 0; font-size:14px; font-weight:500; line-height:20px; color:#0B1220;">Вывод стоял последней строкой под тремя плашками и терялся — собрал заново.</p>
+<div style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:16px; margin-top:16px;">
+<figure style="margin:0;">
+<figcaption class="dd-cap" style="margin-bottom:8px;">Было</figcaption>
+<img src="/_blob/600406289118a423fc5df75a99ffc237" alt="Слайд 9 до пересборки: вывод внизу, шаги в трёх плашках" style="display:block; width:100%; aspect-ratio:16 / 9; object-fit:cover; border-radius:12px; box-shadow:0 0 0 1px rgba(11,18,32,.08);">
+</figure>
+<figure style="margin:0;">
+<figcaption class="dd-cap" style="margin-bottom:8px; color:#2563EB;">Стало</figcaption>
+<img src="/_blob/a6711f28fa01480a29f24df59e7d7986" alt="Слайд 9 после пересборки: вывод под заголовком, шаги строками" style="display:block; width:100%; aspect-ratio:16 / 9; object-fit:cover; border-radius:12px; box-shadow:0 0 0 1px rgba(11,18,32,.08);">
+</figure>
+</div>
+<p style="margin:16px 0 0; font-size:14px; font-weight:500; line-height:20px; color:#0B1220;"><b style="font-weight:700;">Почему новая:</b> вывод поднят под заголовок и выделен, шаги решения идут строками без плашек — формулам больше места.</p>
+</article>
+
+<p style="display:flex; align-items:flex-start; gap:12px; margin:16px 0 0; font-size:14px; font-weight:500; line-height:20px; color:#0B1220;">
+<span class="dd-tag dd-tag-n" style="flex:none; margin-top:-2px;">Слайд 2</span>
+<span>Пробовал другую вёрстку, оставил прежнюю: шесть дат читаются одной линией слева направо.</span>
+</p>
+
+<div style="margin-top:8px;">
+<h4 style="margin:0;">
+<button type="button" class="dq-acc {{ eye.onCls }}" aria-expanded="{{ eye.exp }}" aria-controls="dq-eye-rows" onClick="{{ eye.toggle }}" style="height:48px;">
+<span style="font-size:14px; font-weight:700; line-height:20px;">Мелкие замечания модели</span>
+<span class="dq-cnt dq-cnt0">1</span>
+<svg class="dq-chev" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 9.5L12 15l5.5-5.5"></path></svg>
+</button>
+</h4>
+<sc-if value="{{ eye.open }}" hint-placeholder-val="{{ false }}">
+<ul id="dq-eye-rows" class="dq-rows p2-in" style="padding:0 0 8px;">
+<li class="dq-row"><span class="dd-tag dd-tag-n">Слайд 4</span><span>Поле графика под формулой почти пустое: на нём только отрезок от a до b.</span></li>
+</ul>
+</sc-if>
+</div>
+</section>
+
+<section class="dd-box p2-in" aria-label="Подробности проверки" style="margin-top:24px; padding:0 24px; animation-delay:360ms;">
+<sc-for list="{{ accs }}" as="ac" hint-placeholder-count="3">
+<div class="{{ ac.cls }}">
+<h3 style="margin:0;">
+<button type="button" class="dq-acc {{ ac.onCls }}" aria-expanded="{{ ac.exp }}" aria-controls="dq-acc-{{ ac.key }}" onClick="{{ ac.toggle }}">
+<span class="dd-ico" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{ ac.p1 }}"></path><path d="{{ ac.p2 }}"></path><path d="{{ ac.p3 }}"></path></svg></span>
+<span style="font-size:15px; font-weight:700; line-height:24px;">{{ ac.title }}</span>
+<span class="dq-cnt dq-cnt0">{{ ac.n }}</span>
+<svg class="dq-chev" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 9.5L12 15l5.5-5.5"></path></svg>
+</button>
+</h3>
+<sc-if value="{{ ac.open }}" hint-placeholder-val="{{ false }}">
+<ul id="dq-acc-{{ ac.key }}" class="dq-rows p2-in">
+<sc-for list="{{ ac.rows }}" as="rw" hint-placeholder-count="4">
+<li class="dq-row">
+<sc-if value="{{ rw.hasTag }}" hint-placeholder-val="{{ true }}">
+<span class="dd-tag dd-tag-n">{{ rw.tag }}</span>
+</sc-if>
+<span><b style="font-weight:700;">{{ rw.b }}</b>{{ rw.c }}</span>
+</li>
+</sc-for>
+</ul>
+</sc-if>
+</div>
+</sc-for>
+</section>
+</div>
+
+</div>
+</div>
+
+</section>
+</div>
+
+</main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = {
+      filter: 'all',
+      marked: { a: true, b: true },
+      open: { eye: false, notes: false, fixed: false, checks: false }
+    };
+    this.D = {
+      TABS: [
+        { key: 'quality', label: 'Качество' }, { key: 'why', label: 'Почему так' }, { key: 'agent', label: 'Агент' },
+        { key: 'plan', label: 'План' }, { key: 'template', label: 'Шаблон' }, { key: 'files', label: 'Файлы' }
+      ],
+      SEV: {
+        warn: { label: 'Предупреждение', cls: 'dd-tag-w', color: '#B45309', p: ['M10.27 4.75a2 2 0 0 1 3.46 0l7.02 12.25A2 2 0 0 1 19.02 20H4.98a2 2 0 0 1-1.73-3z M12 9.5v4 M12 16.8h.01', '', ''] },
+        model: { label: 'Замечание модели', cls: 'dd-tag-n', color: '#5A6272', p: ['M2.75 12S6.25 5.75 12 5.75 21.25 12 21.25 12 17.75 18.25 12 18.25 2.75 12 2.75 12z M15 12a3 3 0 1 1-6 0a3 3 0 0 1 6 0z', '', ''] }
+      },
+      GR: [
+        { id: 's3', n: 3, title: 'Неопределённый интеграл', img: '/_blob/d467e38cc12111ad26a428ff8e19ff4f', cur: true },
+        { id: 's6', n: 6, title: 'Линейность и аддитивность', img: '/_blob/9d3bcdec98f61bbf1f44527b585a6d6b' },
+        { id: 'all', n: 0, title: '' }
+      ],
+      ISS: [
+        { id: 'a', g: 's3', sev: 'warn', fix: 'поправить оформление',
+          msg: 'Подпись под формулой набрана мельче, чем на соседних слайдах с формулами: 11 пт вместо 14.' },
+        { id: 'b', g: 's6', sev: 'warn', fix: 'сократить текст',
+          msg: 'Пять текстовых блоков на одном слайде: абзац, две подписи, пункт и вывод — плотнее, чем позволяет шаблон.' },
+        { id: 'c', g: 's6', sev: 'model',
+          msg: 'Подписи к свойствам набраны мелко и стоят узкой колонкой слева — с последних рядов их не прочитать.' },
+        { id: 'd', g: 'all', sev: 'warn',
+          msg: 'Выводы на слайдах 5, 6 и 11 построены одинаково — «… превращает …»: к концу это звучит как шаблон.' },
+        { id: 'e', g: 'all', sev: 'model',
+          msg: 'Слайды 3, 5, 7, 8 и 10 собраны по одной схеме — абзац, плашка с формулой, пункты: к середине ритм однообразный.' }
+      ],
+      CHIPS: [
+        { k: 'all', label: 'Все', n: 5 }, { k: 'err', label: 'Ошибки', n: 0 },
+        { k: 'warn', label: 'Предупреждения', n: 3 }, { k: 'fix', label: 'Исправимые', n: 2 }
+      ],
+      ACC: [
+        { key: 'notes', title: 'Мелкие заметки', n: 2,
+          p: ['M7 4.5h10a2 2 0 0 1 2 2v8l-5 5H7a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2z M14 19.5V16a1.5 1.5 0 0 1 1.5-1.5H19 M9 9h6', '', ''],
+          rows: [
+            { tag: 'Слайд 8', c: 'Пункт о пределах переносится одной буквой: «и b.» уходит на вторую строку.' },
+            { tag: 'Слайд 10', c: 'Формула в абзаце разорвана переносом: «z» в конце строки, «= f(x, y)» — в начале следующей.' }
+          ] },
+        { key: 'fixed', title: 'Исправлено автоматически', n: 4,
+          p: ['M14.25 7.75l2 2-9.4 9.4a1.41 1.41 0 0 1-2-2z M12.5 9.5l2 2 M18.5 3v3.5 M16.75 4.75h3.5 M19.5 12.5v2.5 M18.25 13.75h2.5 M9.5 3.5v2 M8.5 4.5h2', '', ''],
+          rows: [
+            { tag: 'Слайд 7', b: 'Сокращён текст' },
+            { tag: 'Слайд 10', b: 'Подобран другой макет', c: ': теперь по образцу слайда 22 шаблона' },
+            { tag: 'Все', b: 'Заменён шрифт', c: ' ×2' },
+            { tag: 'Слайд 11', b: 'Поправлено оформление' }
+          ] },
+        { key: 'checks', title: 'Что проверяется', n: 41,
+          p: ['M4 7.5l2 2 3.5-3.5 M4 15.5l2 2 3.5-3.5 M13 8h7 M13 16h7', '', ''],
+          rows: [
+            { b: 'Компоновка', c: ' · 11 — поля, сетка, наложения, выход за кадр' },
+            { b: 'Соответствие шаблону', c: ' · 9 — шрифты, цвета, логотип и колонтитулы' },
+            { b: 'Плотность', c: ' · 6 — сколько текста и элементов на слайде' },
+            { b: 'Целостность', c: ' · 8 — числа и формулы совпадают с текстом' },
+            { b: 'Содержание', c: ' · 7 — выводы и связки между слайдами · моделью' }
+          ] }
+      ]
+    };
+  }
+
+  pl(n, one, few, many) {
+    const a = n % 10, b = n % 100;
+    if (a === 1 && b !== 11) return one;
+    if (a >= 2 && a <= 4 && (b < 12 || b > 14)) return few;
+    return many;
+  }
+
+  toggleOpen(k) {
+    const o = Object.assign({}, this.state.open);
+    o[k] = !o[k];
+    this.setState({ open: o });
+  }
+
+  renderVals() {
+    const D = this.D;
+    const st = this.state;
+    const noop = () => {};
+
+    const tabs = D.TABS.map((t, i) => ({
+      key: t.key, label: t.label,
+      sel: String(i === 0), cls: i === 0 ? 'p2-rseg-on' : '', tabi: i === 0 ? '0' : '-1',
+      pick: noop
+    }));
+
+    const F = st.filter;
+    const keep = (x) => F === 'all' || (F === 'warn' && x.sev === 'warn') || (F === 'fix' && !!x.fix) || (F === 'err' && x.sev === 'err');
+    const groups = D.GR
+      .map((g) => ({ g, list: D.ISS.filter((x) => x.g === g.id && keep(x)) }))
+      .filter((x) => x.list.length > 0)
+      .map((x, gi) => {
+        const g = x.g;
+        const items = x.list.map((it) => {
+          const s = D.SEV[it.sev];
+          const on = !!st.marked[it.id];
+          return {
+            fixable: !!it.fix, dot: !it.fix,
+            checked: String(on), cbCls: on ? 'dq-cb-on' : '',
+            toggle: () => {
+              const m = Object.assign({}, this.state.marked);
+              m[it.id] = !m[it.id];
+              this.setState({ marked: m });
+            },
+            dotColor: s.color, sev: s.label, tagCls: s.cls,
+            p1: s.p[0], p2: s.p[1], p3: s.p[2],
+            msg: it.msg
+          };
+        });
+        const n = items.length;
+        const label = g.n ? 'Слайд ' + g.n : 'Вся презентация';
+        return {
+          n: g.n, label, sub: g.n ? ' · ' + g.title : '',
+          isSlide: !!g.n, isDeck: !g.n, img: g.img || '',
+          cls: g.cur ? 'dq-grp-on' : '', cur: g.cur ? 'true' : 'false',
+          aria: label + (g.n ? ': ' + g.title : '') + (g.cur ? ' — открыт сейчас' : ''),
+          count: n + ' ' + this.pl(n, 'замечание', 'замечания', 'замечаний'),
+          show: noop, items,
+          delay: (320 + gi * 40) + 'ms'
+        };
+      });
+
+    const chips = D.CHIPS.map((c) => ({
+      label: c.label, n: c.n,
+      checked: String(c.k === F), cls: c.k === F ? 'dq-chip-on' : '',
+      cntCls: c.n === 0 ? 'dq-cnt0' : '',
+      pick: () => this.setState({ filter: c.k })
+    }));
+
+    const nMarked = D.ISS.filter((x) => x.fix && st.marked[x.id]).length;
+
+    const accs = D.ACC.map((a, i) => {
+      const open = !!st.open[a.key];
+      return {
+        key: a.key, title: a.title, n: a.n,
+        p1: a.p[0], p2: a.p[1], p3: a.p[2],
+        cls: i ? 'dq-accb' : '',
+        open, exp: String(open), onCls: open ? 'dq-acc-on' : '',
+        toggle: () => this.toggleOpen(a.key),
+        rows: a.rows.map((r) => ({ hasTag: !!r.tag, tag: r.tag || '', b: r.b || '', c: r.c || '' }))
+      };
+    });
+
+    const eyeOpen = !!st.open.eye;
+
+    return {
+      noop, tabs, chips, groups, accs,
+      noIssues: groups.length === 0,
+      showAll: () => this.setState({ filter: 'all' }),
+      fixLabel: 'Исправить отмеченные (' + nMarked + ')',
+      fixDis: nMarked === 0,
+      eye: {
+        open: eyeOpen, exp: String(eyeOpen), onCls: eyeOpen ? 'dq-acc-on' : '',
+        toggle: () => this.toggleOpen('eye')
+      }
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,483 @@
+{
+  "v": 3,
+  "attachments": {},
+  "boards": {
+    "B-failed.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "radius": 16,
+      "title": "Не получилось",
+      "w": 1440,
+      "x": 3040,
+      "y": 4200
+    },
+    "B-sketch.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "radius": 16,
+      "title": "Эскизы и критик",
+      "w": 1440,
+      "x": 1520,
+      "y": 4200
+    },
+    "B-start.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "radius": 16,
+      "title": "Подготовка",
+      "w": 1440,
+      "x": 0,
+      "y": 4200
+    },
+    "C-analyzing.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "radius": 16,
+      "title": "Разбор шаблона",
+      "w": 1440,
+      "x": 3040,
+      "y": 1600
+    },
+    "C-errors.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "radius": 16,
+      "title": "Ошибки при запуске",
+      "w": 1440,
+      "x": 4560,
+      "y": 2900
+    },
+    "C-gallery.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "radius": 16,
+      "title": "Все шаблоны",
+      "w": 1440,
+      "x": 4560,
+      "y": 1600
+    },
+    "C-improve.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "radius": 16,
+      "title": "Улучшить готовую",
+      "w": 1440,
+      "x": 3040,
+      "y": 2900
+    },
+    "C-params.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "radius": 16,
+      "title": "Все параметры",
+      "w": 1440,
+      "x": 1520,
+      "y": 2900
+    },
+    "C-templates.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "radius": 16,
+      "title": "Шаблон — лента раскрыта",
+      "w": 1440,
+      "x": 0,
+      "y": 1600
+    },
+    "C-text.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "radius": 16,
+      "title": "Свой текст с разбором",
+      "w": 1440,
+      "x": 0,
+      "y": 2900
+    },
+    "C-tpldelete.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "radius": 16,
+      "title": "Удалить шаблон?",
+      "w": 1440,
+      "x": 7600,
+      "y": 1600
+    },
+    "C-tplpreview.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "is_interactive": true,
+      "radius": 16,
+      "title": "Слайды шаблона",
+      "w": 1440,
+      "x": 6080,
+      "y": 1600
+    },
+    "C-upload.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "radius": 16,
+      "title": "Перетаскивание своего шаблона",
+      "w": 1440,
+      "x": 1520,
+      "y": 1600
+    },
+    "D-agent.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "radius": 16,
+      "title": "Агент",
+      "w": 1440,
+      "x": 3040,
+      "y": 6800
+    },
+    "D-files.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "radius": 16,
+      "title": "Файлы",
+      "w": 1440,
+      "x": 9120,
+      "y": 6800
+    },
+    "D-pattern.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "radius": 16,
+      "title": "Слайд шаблона",
+      "w": 1440,
+      "x": 7600,
+      "y": 6800
+    },
+    "D-plan.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "radius": 16,
+      "title": "План",
+      "w": 1440,
+      "x": 4560,
+      "y": 6800
+    },
+    "D-quality.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "radius": 16,
+      "title": "Качество",
+      "w": 1440,
+      "x": 0,
+      "y": 6800
+    },
+    "D-template.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "radius": 16,
+      "title": "Шаблон",
+      "w": 1440,
+      "x": 6080,
+      "y": 6800
+    },
+    "D-why.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "radius": 16,
+      "title": "Почему так",
+      "w": 1440,
+      "x": 1520,
+      "y": 6800
+    },
+    "G-helper.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "radius": 16,
+      "title": "Помощник",
+      "w": 1440,
+      "x": 1520,
+      "y": 8100
+    },
+    "G-history.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "radius": 16,
+      "title": "Мои презентации",
+      "w": 1440,
+      "x": 0,
+      "y": 8100
+    },
+    "G-toasts.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "radius": 16,
+      "title": "Нет связи с сервером",
+      "w": 1440,
+      "x": 3040,
+      "y": 8100
+    },
+    "M-build.dc.html": {
+      "expand": "fill",
+      "h": 844,
+      "radius": 16,
+      "title": "Сборка",
+      "w": 390,
+      "x": 470,
+      "y": 9400
+    },
+    "M-create.dc.html": {
+      "expand": "fill",
+      "h": 844,
+      "radius": 16,
+      "title": "Создать",
+      "w": 390,
+      "x": 0,
+      "y": 9400
+    },
+    "M-result.dc.html": {
+      "expand": "fill",
+      "h": 844,
+      "radius": 16,
+      "title": "Результат",
+      "w": 390,
+      "x": 940,
+      "y": 9400
+    },
+    "R-aside.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "radius": 16,
+      "title": "Правая колонка целиком",
+      "w": 1440,
+      "x": 0,
+      "y": 5500
+    },
+    "R-fixed.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "radius": 16,
+      "title": "Исправлено",
+      "w": 1440,
+      "x": 4560,
+      "y": 5500
+    },
+    "R-fixing.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "radius": 16,
+      "title": "Агент исправляет слайд",
+      "w": 1440,
+      "x": 3040,
+      "y": 5500
+    },
+    "R-lightbox.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "is_interactive": true,
+      "radius": 16,
+      "title": "На весь экран",
+      "w": 1440,
+      "x": 7600,
+      "y": 5500
+    },
+    "R-picture.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "radius": 16,
+      "title": "Изображение на слайде",
+      "w": 1440,
+      "x": 6080,
+      "y": 5500
+    },
+    "R-remarks.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "radius": 16,
+      "title": "Режим «Замечания»",
+      "w": 1440,
+      "x": 1520,
+      "y": 5500
+    },
+    "R-text.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "radius": 16,
+      "title": "Текст презентации",
+      "w": 1440,
+      "x": 9120,
+      "y": 5500
+    },
+    "S-icons.dc.html": {
+      "expand": "fill",
+      "h": 1080,
+      "radius": 16,
+      "title": "Набор иконок «Слоёв»",
+      "w": 1440,
+      "x": 4720,
+      "y": 300
+    },
+    "S-logo.dc.html": {
+      "expand": "fill",
+      "h": 2240,
+      "radius": 16,
+      "title": "Логотип — 25 вариантов",
+      "w": 1440,
+      "x": 6400,
+      "y": -676
+    },
+    "V2-build.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "radius": 16,
+      "title": "Сборка",
+      "w": 1440,
+      "x": 1520,
+      "y": 300
+    },
+    "V2-result.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "radius": 16,
+      "title": "Результат",
+      "w": 1440,
+      "x": 3040,
+      "y": 300
+    },
+    "V2.dc.html": {
+      "expand": "fill",
+      "h": 900,
+      "is_interactive": true,
+      "radius": 16,
+      "title": "Создать (Play: весь путь)",
+      "w": 1440,
+      "x": 0,
+      "y": 300
+    },
+    "G-helper-open.dc.html": {
+      "x": 1520,
+      "y": 9400,
+      "w": 1440,
+      "h": 900,
+      "title": "Помощник — анимация открытия (живая)",
+      "expand": "fill",
+      "radius": 16,
+      "is_interactive": true
+    }
+  },
+  "createdOnFiles": {
+    "at": "2026-10-10T12:00:00Z",
+    "v": 1
+  },
+  "designSystems": [],
+  "launch": {
+    "view": "canvas"
+  },
+  "notes": {
+    "row1": {
+      "kind": "title1",
+      "maxW": 8000,
+      "text": "Главные экраны — «Создать» живой: Play проводит по всему пути",
+      "w": 240,
+      "x": 0,
+      "y": 20
+    },
+    "row2": {
+      "kind": "title1",
+      "maxW": 8000,
+      "text": "Создать — шаблоны",
+      "w": 240,
+      "x": 0,
+      "y": 1320
+    },
+    "row3": {
+      "kind": "title1",
+      "maxW": 8000,
+      "text": "Создать — текст, параметры, ошибки",
+      "w": 240,
+      "x": 0,
+      "y": 2620
+    },
+    "row4": {
+      "kind": "title1",
+      "maxW": 8000,
+      "text": "Сборка — состояния",
+      "w": 240,
+      "x": 0,
+      "y": 3920
+    },
+    "row5": {
+      "kind": "title1",
+      "maxW": 8000,
+      "text": "Результат — работа со слайдами",
+      "w": 240,
+      "x": 0,
+      "y": 5220
+    },
+    "row6": {
+      "kind": "title1",
+      "maxW": 8000,
+      "text": "Подробнее — слой поверх результата",
+      "w": 240,
+      "x": 0,
+      "y": 6520
+    },
+    "row7": {
+      "kind": "title1",
+      "maxW": 8000,
+      "text": "Разделы и общее",
+      "w": 240,
+      "x": 0,
+      "y": 7820
+    },
+    "row8": {
+      "kind": "title1",
+      "maxW": 8000,
+      "text": "Телефон",
+      "w": 240,
+      "x": 0,
+      "y": 9120
+    }
+  },
+  "order": [
+    "V2.dc.html",
+    "V2-build.dc.html",
+    "V2-result.dc.html",
+    "S-icons.dc.html",
+    "S-logo.dc.html",
+    "C-templates.dc.html",
+    "C-upload.dc.html",
+    "C-analyzing.dc.html",
+    "C-gallery.dc.html",
+    "C-tplpreview.dc.html",
+    "C-tpldelete.dc.html",
+    "C-text.dc.html",
+    "C-params.dc.html",
+    "C-improve.dc.html",
+    "C-errors.dc.html",
+    "B-start.dc.html",
+    "B-sketch.dc.html",
+    "B-failed.dc.html",
+    "R-aside.dc.html",
+    "R-remarks.dc.html",
+    "R-fixing.dc.html",
+    "R-fixed.dc.html",
+    "R-picture.dc.html",
+    "R-lightbox.dc.html",
+    "R-text.dc.html",
+    "D-quality.dc.html",
+    "D-why.dc.html",
+    "D-agent.dc.html",
+    "D-plan.dc.html",
+    "D-template.dc.html",
+    "D-pattern.dc.html",
+    "D-files.dc.html",
+    "G-history.dc.html",
+    "G-helper.dc.html",
+    "G-helper-open.dc.html",
+    "G-toasts.dc.html",
+    "M-create.dc.html",
+    "M-build.dc.html",
+    "M-result.dc.html"
+  ],
+  "pages": [
+    {
+      "id": "page-1",
+      "name": "Page 1"
+    }
+  ],
+  "title": "Verstka — интерфейс «Слои»"
+}

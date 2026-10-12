@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Verstka — Слои: Мои презентации</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700&amp;family=Unbounded:wght@600;700&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#0A0F1F}a:hover{color:#1E40AF}
+.p2-root{--ease:cubic-bezier(0.2, 0, 0, 1);-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+.p2-root *,.p2-root *::before,.p2-root *::after{box-sizing:border-box}
+:where(.p2-root) button{font-family:inherit;color:inherit;-webkit-tap-highlight-color:transparent}
+.p2-root :focus-visible{outline:2px solid #2563EB;outline-offset:2px}
+.p2-dark :focus-visible{outline-color:#38BDF8}
+.p2-sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.p2-none{display:none}
+
+/* движение: только transform и opacity */
+@keyframes p2-rise{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:translateY(0)}}
+@keyframes p2-in{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+@keyframes p2-pop{from{opacity:0;transform:scale(.98)}to{opacity:1;transform:scale(1)}}
+@keyframes p2-work{0%{transform:scaleX(0);opacity:1}72%{transform:scaleX(1);opacity:1}100%{transform:scaleX(1);opacity:0}}
+.p2-rise{animation:p2-rise 520ms var(--ease) backwards}
+.p2-in{animation:p2-in 360ms var(--ease) backwards}
+.p2-pop{animation:p2-pop 360ms var(--ease) backwards}
+
+/* колода плит */
+.p2-slot{transition:transform 520ms var(--ease)}
+.p2-s4-on{opacity:1;visibility:visible;transition:transform 520ms var(--ease),opacity 520ms var(--ease)}
+.p2-s4-off{opacity:0;visibility:hidden;pointer-events:none;transition:transform 340ms var(--ease),opacity 340ms var(--ease),visibility 0s linear 340ms}
+.p2-on{opacity:1;visibility:visible;transition:opacity 360ms var(--ease) 120ms}
+.p2-off{opacity:0;visibility:hidden;pointer-events:none;transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
+.p2-stag{transition:opacity 360ms var(--ease),transform 360ms var(--ease)}
+.p2-off .p2-stag{opacity:0;transform:translateY(12px);transition-duration:240ms}
+
+/* заголовок плиты */
+.p2-head{display:flex;align-items:center;gap:32px;height:64px;padding:0;border:0;background:none;cursor:pointer;text-align:left;border-radius:16px;transition:transform 160ms var(--ease)}
+.p2-head:active{transform:scale(.98)}
+.p2-num{display:block;width:160px;flex:none;height:64px;font-family:'Unbounded','Manrope',sans-serif;font-weight:700;font-size:88px;line-height:64px;letter-spacing:-0.04em;opacity:.14;transition:opacity 160ms var(--ease);pointer-events:none}
+.p2-head:hover .p2-num{opacity:.3}
+.p2-p2 .p2-num{opacity:.3}
+.p2-p2 .p2-head:hover .p2-num{opacity:.46}
+.p2-num3{opacity:.22}
+.p2-p3:has(.p2-head:hover) .p2-num3{opacity:.4}
+.p2-ttl{font-family:'Unbounded','Manrope',sans-serif;font-weight:600;font-size:32px;line-height:40px;letter-spacing:-0.03em;white-space:nowrap}
+
+/* кнопки */
+.p2-cta{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:12px;height:56px;padding:0 32px;border:0;border-radius:999px;background:linear-gradient(112deg,#1D4ED8 0%,#2563EB 45%,#38BDF8 140%);color:#FFFFFF;font-family:'Unbounded','Manrope',sans-serif;font-size:15px;font-weight:600;line-height:24px;letter-spacing:-0.01em;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-cta::after{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:0 12px 40px 0 rgba(11,18,32,.18);opacity:0;transition:opacity 160ms var(--ease);pointer-events:none}
+.p2-cta:hover{transform:translateY(-2px)}
+.p2-cta:hover::after{opacity:1}
+.p2-cta:active{transform:scale(.98)}
+.p2-ob{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:48px;padding:0 24px;border:0;border-radius:999px;background:#FFFFFF;box-shadow:inset 0 0 0 1px rgba(11,18,32,.14);color:#0B1220;font-size:15px;font-weight:700;line-height:24px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-ob:hover{transform:translateY(-2px)}
+.p2-ob:active{transform:scale(.98)}
+.p2-gb{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 16px;border:0;border-radius:999px;background:transparent;color:#2563EB;font-size:15px;font-weight:700;line-height:24px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-gb:hover{background:#F3F4F1;transform:translateY(-2px)}
+.p2-gb:active{transform:scale(.98)}
+.p2-pill{display:inline-flex;align-items:center;height:40px;padding:0 16px;border:0;border-radius:999px;background:#FFFFFF;box-shadow:inset 0 0 0 1px rgba(37,99,235,.14);color:#0B1220;font-size:14px;font-weight:600;line-height:20px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-pill:hover{transform:translateY(-2px);box-shadow:inset 0 0 0 1px rgba(37,99,235,.4)}
+.p2-pill:active{transform:scale(.98)}
+.p2-nav{display:inline-flex;align-items:center;height:40px;padding:0 16px;border-radius:999px;font-family:'Unbounded','Manrope',sans-serif;font-size:14px;font-weight:600;line-height:24px;letter-spacing:-0.01em;color:#5A6272;text-decoration:none;transition:transform 160ms var(--ease)}
+.p2-nav:hover{color:#0B1220;background:#FFFFFF}
+.p2-nav:active{transform:scale(.98)}
+
+/* шаблоны */
+.p2-card{display:block;width:100%;padding:0;border:0;background:none;text-align:left;cursor:pointer;border-radius:16px;transition:transform 160ms var(--ease)}
+.p2-card:hover{transform:translateY(-2px)}
+.p2-card:active{transform:scale(.98)}
+.p2-cover{position:relative;display:block;height:142px;border-radius:16px}
+.p2-cover::after{content:"";position:absolute;inset:0;border-radius:16px;box-shadow:0 12px 32px 0 rgba(11,18,32,.14);opacity:0;transition:opacity 160ms var(--ease);pointer-events:none}
+.p2-card:hover .p2-cover::after{opacity:1}
+.p2-sel{box-shadow:0 0 0 2px #FFFFFF,0 0 0 4px #2563EB}
+.p2-chk{position:absolute;top:8px;right:8px;width:24px;height:24px;border-radius:999px;background:#2563EB;color:#FFFFFF;display:flex;align-items:center;justify-content:center;transition:opacity 240ms var(--ease),transform 240ms var(--ease)}
+.p2-chk-off{opacity:0;transform:scale(.98)}
+
+/* текст */
+.p2-field{transition:box-shadow 0s}
+.p2-field:has(.p2-ta:focus){box-shadow:0 0 0 2px #2563EB}
+.p2-ta::placeholder,.p2-inp::placeholder{color:#5A6272;opacity:1}
+.p2-ta:focus{outline:none}
+.p2-muted{color:#5A6272}
+
+/* параметры (тёмная плита) */
+.p2-box{border-radius:24px;background:rgba(255,255,255,.06);box-shadow:inset 0 0 0 1px rgba(255,255,255,.1)}
+.p2-rb{width:40px;height:40px;flex:none;padding:0;border:0;border-radius:999px;background:rgba(255,255,255,.1);color:#FFFFFF;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:transform 160ms var(--ease),opacity 160ms var(--ease)}
+.p2-rb:hover{transform:translateY(-2px)}
+.p2-rb:active{transform:scale(.98)}
+.p2-rb:disabled{opacity:.32;cursor:default;transform:none}
+.p2-vc{width:100%;height:88px;padding:16px;border:0;border-radius:24px;background:rgba(255,255,255,.06);box-shadow:inset 0 0 0 1px rgba(255,255,255,.1);display:flex;flex-direction:column;justify-content:space-between;text-align:left;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-vc:hover{transform:translateY(-2px)}
+.p2-vc:active{transform:scale(.98)}
+.p2-vc-on{background:rgba(37,99,235,.24);box-shadow:inset 0 0 0 1px #38BDF8}
+.p2-vbox{width:20px;height:20px;flex:none;border-radius:999px;box-shadow:inset 0 0 0 2px rgba(255,255,255,.4);display:flex;align-items:center;justify-content:center;color:#FFFFFF}
+.p2-vbox svg{opacity:0;transition:opacity 240ms var(--ease)}
+.p2-vc-on .p2-vbox{background:#2563EB;box-shadow:none}
+.p2-vc-on .p2-vbox svg{opacity:1}
+.p2-sw{position:relative;width:44px;height:24px;flex:none;padding:0;border:0;border-radius:999px;background:rgba(255,255,255,.16);cursor:pointer}
+.p2-sw-fill{position:absolute;inset:0;border-radius:999px;background:#2563EB;opacity:0;transition:opacity 240ms var(--ease)}
+.p2-sw-knob{position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:999px;background:#FFFFFF;transition:transform 240ms var(--ease)}
+.p2-sw-on .p2-sw-fill{opacity:1}
+.p2-sw-on .p2-sw-knob{transform:translateX(20px)}
+
+/* сборка */
+.p2-seg{height:32px;padding:0 16px;border:0;border-radius:999px;background:transparent;color:rgba(255,255,255,.72);font-size:14px;font-weight:600;line-height:20px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-seg:hover{color:#FFFFFF}
+.p2-seg:active{transform:scale(.98)}
+.p2-seg-on,.p2-seg-on:hover{background:#FFFFFF;color:#0B1220}
+.p2-ph{position:absolute;left:0;top:0;white-space:nowrap;transition:opacity 360ms var(--ease),transform 360ms var(--ease)}
+.p2-ph-on{opacity:1;transform:translateY(0)}
+.p2-ph-past{opacity:0;transform:translateY(-12px);transition-duration:240ms}
+.p2-ph-next{opacity:0;transform:translateY(12px);transition-duration:240ms}
+.p2-bar{transition:transform 520ms var(--ease)}
+.p2-sbf{position:relative;aspect-ratio:16 / 9;border-radius:16px;overflow:hidden;background:rgba(255,255,255,.04);box-shadow:inset 0 0 0 1px rgba(255,255,255,.08)}
+.p2-sb-cur .p2-sbf{box-shadow:inset 0 0 0 1px #38BDF8}
+.p2-sbn{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:'Unbounded','Manrope',sans-serif;font-weight:600;font-size:20px;color:rgba(255,255,255,.24);transition:opacity 240ms var(--ease)}
+.p2-sb-done .p2-sbn{opacity:0}
+.p2-sbok{position:absolute;top:8px;right:8px;width:20px;height:20px;border-radius:999px;background:#2563EB;color:#FFFFFF;display:flex;align-items:center;justify-content:center}
+.p2-work{position:absolute;left:0;right:0;bottom:0;height:2px;background:#38BDF8;transform-origin:left center;animation:p2-work 1100ms var(--ease) infinite}
+.p2-role{position:relative;display:grid;grid-template-columns:28px minmax(0,1fr);column-gap:16px}
+.p2-role::before{content:"";position:absolute;left:13px;top:36px;bottom:-4px;width:2px;border-radius:999px;background:rgba(255,255,255,.12)}
+.p2-role-last::before{display:none}
+.p2-dot{width:28px;height:28px;border-radius:999px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.06);color:rgba(255,255,255,.48)}
+.p2-role-done .p2-dot{background:#2563EB;color:#FFFFFF}
+.p2-role-act .p2-dot{background:transparent;color:#38BDF8;box-shadow:inset 0 0 0 2px #38BDF8}
+.p2-rname{font-size:15px;font-weight:700;line-height:20px;color:#FFFFFF}
+.p2-role-pend .p2-rname{color:rgba(255,255,255,.48)}
+.p2-rst{font-size:13px;font-weight:600;line-height:20px;color:rgba(255,255,255,.56)}
+.p2-role-act .p2-rst{color:#38BDF8}
+.p2-arrow{color:#38BDF8;font-weight:700;margin:0 8px}
+
+/* результат */
+.p2-rbl{width:40px;height:40px;padding:0;border:0;border-radius:999px;background:#F3F4F1;color:#0B1220;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:transform 160ms var(--ease),opacity 160ms var(--ease)}
+.p2-rbl:hover{transform:translateY(-2px)}
+.p2-rbl:active{transform:scale(.98)}
+.p2-rbl:disabled{opacity:.32;cursor:default;transform:none}
+.p2-film{display:flex;gap:8px;overflow-x:auto;padding:8px 4px;scrollbar-width:none}
+.p2-film::-webkit-scrollbar{display:none}
+.p2-th{flex:none;width:112px;height:63px;padding:0;border:0;border-radius:12px;background:#F3F4F1;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-th:hover{transform:translateY(-2px)}
+.p2-th:active{transform:scale(.98)}
+.p2-th-on{box-shadow:0 0 0 2px #FFFFFF,0 0 0 4px #2563EB}
+.p2-rseg{display:flex;align-items:center;justify-content:center;gap:8px;height:40px;padding:0 8px;border:0;border-radius:999px;background:transparent;color:#5A6272;font-size:14px;font-weight:600;line-height:20px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.p2-rseg:hover{color:#0B1220}
+.p2-rseg:active{transform:scale(.98)}
+.p2-rseg-on{background:#FFFFFF;color:#0B1220;box-shadow:0 1px 2px rgba(11,18,32,.06),0 4px 16px 0 rgba(11,18,32,.08)}
+.p2-rsc{font-family:'Unbounded','Manrope',sans-serif;font-size:12px;font-weight:600;color:#2563EB}
+
+@media (prefers-reduced-motion: reduce){
+  .p2-root *,.p2-root *::before,.p2-root *::after{animation:none !important;transition:none !important}
+}
+@media (max-width: 900px){
+  .p2-root{padding:0 16px 16px !important}
+  .p2-hdr{padding:0 8px !important}
+  .p2-navs{display:none !important}
+  .p2-deck{height:auto !important;overflow:visible !important;border-radius:0 !important}
+  .p2-slot{position:relative !important;height:auto !important;transform:none !important;margin-top:-40px}
+  .p2-slot:first-child{margin-top:0}
+  .p2-plate{height:auto !important;padding:24px 24px 64px !important}
+  .p2-off,.p2-s4-off,.p2-num3,.p2-spc,.p2-hide-s{display:none !important}
+  .p2-body{margin-left:0 !important}
+  .p2-hrow{flex-wrap:wrap !important;height:auto !important;row-gap:16px}
+  .p2-head{gap:16px}
+  .p2-num{width:auto !important;height:48px !important;font-size:48px !important;line-height:48px !important}
+  .p2-ttl{font-size:24px !important;line-height:32px !important;white-space:normal}
+  .p2-g4{grid-template-columns:repeat(2,minmax(0,1fr)) !important}
+  .p2-params,.p2-two{grid-template-columns:minmax(0,1fr) !important;height:auto !important}
+  .p2-field{height:auto !important}
+  .p2-ta{min-height:120px !important}
+  .p2-wrap{flex-wrap:wrap !important;height:auto !important;row-gap:16px}
+  .p2-phs{height:auto !important}
+  .p2-ph{position:static !important;white-space:normal;font-size:24px !important;line-height:32px !important}
+  .p2-ph-past,.p2-ph-next{display:none}
+}
+
+/* ===== G-history: «Мои презентации» — слой поверх «Создать» ===== */
+.gh-nav-on,.gh-nav-on:hover{background:#FFFFFF;color:#0B1220}
+/* список прокручивается внутри слоя; отрицательные поля — чтобы кольцо выбора не обрезалось */
+.gh-list{flex:1;min-height:0;margin:24px -8px 0;padding:0 8px 8px;overflow:auto;scrollbar-width:thin;scrollbar-color:rgba(11,18,32,.14) transparent}
+.gh-group + .gh-group{margin-top:24px}
+/* липкий заголовок дня */
+.gh-day{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:8px;height:40px;margin:0 -8px;padding:0 8px;background:#E9F1FF;font-family:'Unbounded','Manrope',sans-serif;font-size:14px;font-weight:600;line-height:24px;letter-spacing:-0.02em;color:#0B1220}
+.gh-dayn{font-family:'Manrope',sans-serif;font-size:13px;font-weight:500;line-height:20px;letter-spacing:0;color:#5A6272}
+.gh-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:24px 16px;margin:8px 0 0;padding:0;list-style:none}
+/* карточка презентации: обложка 16:9 радиус 16 + название до 2 строк + мета */
+.gh-cover{height:auto;aspect-ratio:16 / 9}
+.gh-img{position:absolute;inset:0;display:block;width:100%;height:100%;aspect-ratio:16 / 9;object-fit:cover;border-radius:16px;box-shadow:0 0 0 1px rgba(11,18,32,.08)}
+.gh-ph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;border-radius:16px;background:#FFFFFF}
+.gh-ic{width:48px;height:48px;border-radius:999px;display:flex;align-items:center;justify-content:center}
+.gh-ic-run{background:#E9F1FF;color:#2563EB}
+.gh-ic-fail{background:#FEF2F2;color:#DC2626}
+@keyframes gh-spin{to{transform:rotate(360deg)}}
+.gh-spin{display:block;animation:gh-spin 1000ms linear infinite}
+.gh-row{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-top:12px}
+.gh-title{min-width:0;font-size:15px;font-weight:700;line-height:24px;color:#0B1220;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.gh-score{flex:none;font-family:'Unbounded','Manrope',sans-serif;font-weight:600;font-size:15px;line-height:24px;letter-spacing:-0.02em;color:#2563EB}
+.gh-badge{flex:none;display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 8px;border-radius:999px;font-size:12px;font-weight:700;line-height:16px;white-space:nowrap}
+.gh-badge-run{background:#FFFFFF;color:#2563EB}
+.gh-badge-fail{background:#FEF2F2;color:#DC2626}
+.gh-bdot{width:8px;height:8px;border-radius:999px;background:#2563EB}
+.gh-meta{display:block;margin-top:4px;font-size:13px;font-weight:500;line-height:20px;color:#5A6272;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* собирается — карточку открыть нельзя */
+.gh-card:disabled{cursor:default}
+.gh-card:disabled:hover,.gh-card:disabled:active{transform:none}
+.gh-card:disabled .p2-cover::after{opacity:0}
+/* мягкий край прокрутки: контент сверху и снизу растворяется, а не обрезается; верхний край — только после начала прокрутки */
+@property --p2-ft{syntax:'<length>';inherits:false;initial-value:0px}
+@property --p2-fb{syntax:'<length>';inherits:false;initial-value:24px}
+.p2-fade,.p2-fade-top{-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 var(--p2-ft),#000 calc(100% - var(--p2-fb)),transparent 100%);mask-image:linear-gradient(to bottom,transparent 0,#000 var(--p2-ft),#000 calc(100% - var(--p2-fb)),transparent 100%)}
+.p2-fade-top{--p2-fb:0px}
+@supports (animation-timeline: scroll()){
+.p2-fade{animation:p2-fade linear both;animation-timeline:scroll(self)}
+.p2-fade-top{animation:p2-fade-top linear both;animation-timeline:scroll(self)}
+}
+@keyframes p2-fade{0%{--p2-ft:0px;--p2-fb:24px}8%{--p2-ft:24px}92%{--p2-fb:24px}100%{--p2-ft:24px;--p2-fb:0px}}
+@keyframes p2-fade-top{0%{--p2-ft:0px}8%{--p2-ft:24px}100%{--p2-ft:24px}}
+/* логотип Verstka: слово и три слоя под ним — светлый, синий, тёмный; при наведении слои расходятся */
+.p2-bars{display:flex;gap:3px;margin-left:1px;margin-top:-1px}
+.p2-lbar{display:block;height:4px;border-radius:999px;transition:transform 240ms var(--ease)}
+.p2-lbar1{width:28px;background:#BFD6FF}
+.p2-lbar2{width:20px;background:#2563EB}
+.p2-lbar3{width:12px;background:#0B1220}
+.p2-brand:hover .p2-lbar2{transform:translateX(2px)}
+.p2-brand:hover .p2-lbar3{transform:translateX(4px)}
+</style>
+</helmet>
+<div class="p2-root" style="width:100%; min-height:900px; box-sizing:border-box; padding:0 24px 24px; background:#F3F4F1; color:#0B1220; font-family:'Manrope', system-ui, -apple-system, 'Segoe UI', sans-serif; font-size:15px; line-height:24px;">
+<div style="width:100%; max-width:1392px; margin:0 auto;">
+
+<header class="p2-hdr" style="display:flex; align-items:center; justify-content:space-between; height:64px; padding:0 48px;">
+<a href="#" class="p2-brand" aria-label="Verstka — на главную" style="display:inline-flex; flex-direction:column; align-items:flex-start; gap:0; text-decoration:none; color:#0B1220;">
+<span style="font-family:'Unbounded','Manrope',sans-serif; font-weight:700; font-size:20px; line-height:24px; letter-spacing:-0.03em;">Verstka</span>
+<span class="p2-bars" aria-hidden="true"><span class="p2-lbar p2-lbar1"></span><span class="p2-lbar p2-lbar2"></span><span class="p2-lbar p2-lbar3"></span></span>
+</a>
+<nav class="p2-navs" aria-label="Разделы" style="display:flex; align-items:center; gap:8px; margin-right:-16px;">
+<a class="p2-nav gh-nav-on" href="#" aria-current="page">Мои презентации</a>
+<a class="p2-nav" href="#">Шаблоны</a>
+<a class="p2-nav" href="#">Помощник</a>
+</nav>
+</header>
+
+<main class="p2-deck" style="position:relative; height:812px; border-radius:40px; overflow:hidden;">
+
+<!-- ПОД СЛОЕМ: «Создать», шаг «Текст» открыт (плиты 01/02/03 на 0/144/556).
+     Видна только шапка плиты 01 — клик по ней закрывает слой («вернуться»). -->
+<div class="p2-slot" style="position:absolute; left:0; right:0; top:0; height:812px; z-index:1; transform:translateY(0px);">
+<section class="p2-plate p2-rise" aria-label="Шаг 1 — шаблон" style="position:relative; height:100%; padding:40px 48px; border-radius:40px; background:#FFFFFF; color:#0B1220; animation-delay:0ms;">
+<div class="p2-hrow" style="display:flex; align-items:center; gap:24px; height:64px;">
+<button type="button" class="p2-head" onClick="{{ close }}" aria-label="Закрыть «Мои презентации» и вернуться к шагу «Шаблон»">
+<span class="p2-num" aria-hidden="true" style="color:#0B1220;">01</span>
+<span class="p2-ttl" style="color:#0B1220;">Шаблон</span>
+</button>
+<span style="flex:1; min-width:0;"></span>
+<div style="display:flex; align-items:center; gap:24px;">
+<div style="display:flex; align-items:center; gap:16px;">
+<img src="/_blob/8fad1e28cda9ce8a515a803326acdc37" alt="Обложка шаблона VK Tech" style="display:block; width:80px; height:45px; aspect-ratio:16 / 9; object-fit:cover; border-radius:12px; box-shadow:0 0 0 1px rgba(11,18,32,.08);">
+<div style="display:flex; flex-direction:column;">
+<span style="font-size:15px; font-weight:700; line-height:24px; color:#0B1220;">VK Tech</span>
+<span style="font-size:13px; font-weight:500; line-height:20px; color:#5A6272;">54 слайда · Play</span>
+</div>
+</div>
+<button type="button" class="p2-ob" onClick="{{ close }}" style="height:40px;">Сменить</button>
+</div>
+</div>
+</section>
+</div>
+
+<!-- под слоем: плиты 02 и 03 «Создать» (содержимое закрыто слоем, видны только углы) -->
+<div class="p2-slot" aria-hidden="true" style="position:absolute; left:0; right:0; top:0; height:812px; z-index:2; transform:translateY(144px);">
+<section class="p2-plate p2-p2 p2-rise" style="position:relative; height:100%; padding:40px 48px; border-radius:40px; background:#E9F1FF; color:#0B1220; box-shadow:0 -24px 48px -24px rgba(11,18,32,.16); animation-delay:40ms;"></section>
+</div>
+<div class="p2-slot" aria-hidden="true" style="position:absolute; left:0; right:0; top:0; height:812px; z-index:3; transform:translateY(556px);">
+<section class="p2-plate p2-dark p2-rise" style="position:relative; height:100%; padding:40px 48px; border-radius:40px; background:#0B1220; color:#FFFFFF; box-shadow:0 -24px 48px -24px rgba(11,18,32,.28); animation-delay:80ms;"></section>
+</div>
+
+<!-- СЛОЙ ПОВЕРХ · «Мои презентации»: над белой плитой → #E9F1FF, стоит на translateY(120) -->
+<div class="p2-slot" style="position:absolute; left:0; right:0; top:0; height:692px; z-index:4; transform:translateY(120px);">
+<section class="p2-plate p2-rise" role="dialog" aria-modal="true" aria-labelledby="gh-title" style="position:relative; display:flex; flex-direction:column; height:100%; padding:40px 48px; border-radius:40px; background:#E9F1FF; color:#0B1220; box-shadow:0 -24px 48px -24px rgba(11,18,32,.4); animation-delay:120ms;">
+
+<div style="display:flex; align-items:center; gap:24px; height:64px; flex:none;">
+<h2 id="gh-title" class="p2-ttl" style="margin:0; color:#0B1220;">Мои презентации</h2>
+<span style="flex:1; min-width:0;"></span>
+<span style="font-size:15px; font-weight:500; line-height:24px; color:#5A6272; white-space:nowrap;">{{ total }}</span>
+<button type="button" class="p2-rbl" onClick="{{ close }}" aria-label="Закрыть">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 6.5l11 11 M17.5 6.5l-11 11"></path></svg>
+</button>
+</div>
+
+<div class="gh-list">
+<sc-for list="{{ groups }}" as="g" hint-placeholder-count="4">
+<section class="gh-group" aria-label="{{ g.day }}">
+<h3 class="gh-day">{{ g.day }}<span class="gh-dayn">{{ g.count }}</span></h3>
+<ul class="gh-grid">
+<sc-for list="{{ g.items }}" as="d" hint-placeholder-count="3">
+<li class="p2-in" style="animation-delay: {{ d.delay }};">
+<button type="button" class="p2-card gh-card" onClick="{{ d.pick }}" disabled="{{ d.busy }}" aria-current="{{ d.current }}" aria-label="{{ d.aria }}">
+<span class="p2-cover gh-cover {{ d.selCls }}">
+<sc-if value="{{ d.hasImg }}" hint-placeholder-val="{{ true }}"><img class="gh-img" src="{{ d.img }}" alt="{{ d.alt }}"></sc-if>
+<sc-if value="{{ d.isRun }}" hint-placeholder-val="{{ false }}"><span class="gh-ph"><span class="gh-ic gh-ic-run"><svg class="gh-spin" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 3a9 9 0 1 1-9 9"></path></svg></span></span></sc-if>
+<sc-if value="{{ d.isFail }}" hint-placeholder-val="{{ false }}"><span class="gh-ph"><span class="gh-ic gh-ic-fail"><svg style="display:block;" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M12 7.5v5 M12 16.2h.01"></path></svg></span></span></sc-if>
+</span>
+<span class="gh-row">
+<span class="gh-title">{{ d.title }}</span>
+<sc-if value="{{ d.hasScore }}" hint-placeholder-val="{{ true }}"><span class="gh-score" title="Лучшая оценка качества среди вариантов">{{ d.score }}</span></sc-if>
+<sc-if value="{{ d.isRun }}" hint-placeholder-val="{{ false }}"><span class="gh-badge gh-badge-run"><span class="gh-bdot" aria-hidden="true"></span><span>собирается</span></span></sc-if>
+<sc-if value="{{ d.isFail }}" hint-placeholder-val="{{ false }}"><span class="gh-badge gh-badge-fail"><svg style="display:block;" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M12 7.5v5 M12 16.2h.01"></path></svg><span>не удалось</span></span></sc-if>
+</span>
+<span class="gh-meta">{{ d.meta }}</span>
+</button>
+</li>
+</sc-for>
+</ul>
+</section>
+</sc-for>
+</div>
+
+</section>
+</div>
+
+</main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { open: 'int' };
+    this.D = {
+      // до 50 последних презентаций, по дням; обложка — первый слайд
+      GROUPS: [
+        { day: 'Сегодня', items: [
+          { id: 'ws', title: 'Умные сводки в VK WorkSpace', meta: '18:14 · VK WorkSpace · 8–10 слайдов', st: 'run' },
+          { id: 'int', title: 'Интеграл', meta: '17:38 · VK Tech · 12 слайдов', score: 89, img: '/_blob/0d6e85834c67424ae54a52bafe5d8181' },
+          { id: 'q', title: 'Итоги квартала', meta: '16:05 · Marketing Report · 10 слайдов', st: 'fail' }
+        ] },
+        { day: 'Вчера', items: [
+          { id: 'ww2', title: 'Вторая мировая война', meta: '20:41 · Классика · 14 слайдов', score: 87, img: '/_blob/a2941a07e7d538c66c90a1673382aba4' },
+          { id: 'newton', title: 'Законы Ньютона', meta: '11:02 · VK Education · 10 слайдов', score: 92, img: '/_blob/807a4699eb3cb3c48ad856f37c547035' }
+        ] },
+        { day: '24 сент.', items: [
+          { id: 'pitch', title: 'Питч стартапа', meta: '15:30 · MyBrand Pitch Deck · 12 слайдов', score: 84, img: '/_blob/440fd7bac0c461795841fadc4c854440' }
+        ] },
+        { day: 'Раньше', items: [
+          { id: 'coffee', title: 'Кофейня на Петроградской', meta: '12 сент. · Кофейня · 6 слайдов', score: 88, img: '/_blob/55dc095b1e619531e47ed4893002f79d' }
+        ] }
+      ]
+    };
+  }
+
+  pl(n, one, few, many) {
+    const a = n % 10, b = n % 100;
+    if (a === 1 && b !== 11) return one;
+    if (a >= 2 && a <= 4 && (b < 12 || b > 14)) return few;
+    return many;
+  }
+
+  renderVals() {
+    const st = this.state;
+    let k = 0;
+    let total = 0;
+    const groups = this.D.GROUPS.map((g) => {
+      total += g.items.length;
+      return {
+        day: g.day,
+        count: g.items.length + ' ' + this.pl(g.items.length, 'презентация', 'презентации', 'презентаций'),
+        items: g.items.map((d) => {
+          const run = d.st === 'run';
+          const fail = d.st === 'fail';
+          const open = d.id === st.open;
+          const state = run ? 'собирается' : (fail ? 'не удалось собрать' : 'оценка ' + d.score + ' из 100');
+          const delay = (k * 40) + 'ms';
+          k += 1;
+          return {
+            title: d.title, meta: d.meta,
+            img: d.img || '', alt: 'Обложка презентации «' + d.title + '»',
+            score: d.score || '',
+            hasImg: !!d.img, isRun: run, isFail: fail,
+            hasScore: !run && !fail && !!d.score,
+            busy: run,
+            current: String(open),
+            selCls: open ? 'p2-sel' : '',
+            chkCls: open ? '' : 'p2-chk-off',
+            aria: d.title + ', ' + d.meta + ', ' + state + (open ? ', открыта сейчас' : ''),
+            delay,
+            pick: () => { if (!run) this.setState({ open: d.id }); }
+          };
+        })
+      };
+    });
+    return {
+      groups,
+      total: total + ' ' + this.pl(total, 'презентация', 'презентации', 'презентаций'),
+      close: () => {},
+      noop: () => {}
+    };
+  }
+}
+</script>
+</body>
+</html>
