@@ -153,6 +153,14 @@ export function endedToShow<J extends { id: string }>(shown: J | null | undefine
   return kept(end.job) ?? null;
 }
 
+/** «Вернуться к сборке» while a build runs: the build screen must show a running build — the newest one followed (`live`)
+ *  when the screen shows an ended one (a failure looked at through «Посмотреть»); null — the shown one runs (or none does). */
+export function liveBuildToShow<J extends { kind: string; status: string }>(shown: J | null | undefined, live: readonly J[]): J | null {
+  const running = (j: J) => j.kind === "generate" && (j.status === "queued" || j.status === "running");
+  if (shown && running(shown)) return null;
+  return [...live].reverse().find(running) ?? null;
+}
+
 /** «Улучшить готовую»: the deck read back opens «Создать» only when the person is there; elsewhere the mode waits
  *  (`wait`) and opens when they come back — background work never takes the screen over. */
 export const improveArrives = (screen: string): "open" | "wait" => (screen === "create" ? "open" : "wait");

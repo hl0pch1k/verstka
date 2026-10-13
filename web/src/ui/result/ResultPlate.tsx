@@ -15,7 +15,7 @@
 // одна: в колонке того вида, что на месте (при смене вида — в компактную встаёт через 120 мс, из полной уходит ещё через
 // 120 мс, когда та погасла). Панель замечаний меняет ширину колонки (416 ↔ 320) вместе с помощником перекрёстным
 // затуханием своего содержимого (RemarksPanel).
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { humanError } from "../../lib/errors";
 import { decodeImage, isDecoded } from "../../lib/motion";
 import { variantHint } from "../../lib/plain";
@@ -56,6 +56,8 @@ import { useOpenSheet } from "./useOpenSheet";
 import { usePictureSelect } from "./usePictureSelect";
 import { useRemarksMode } from "./useRemarksMode";
 import { useSlideJob, type SlideRun } from "./useSlideJob";
+import { failInRow, placeShown, staleInRow, type ResultAt, type SlideFail } from "./slideJob";
+import { StaleLine } from "../shell/StaleLine";
 import { WorkHead } from "./WorkHead";
 
 /** Сколько смена варианта ждёт декодирования его картинок, прежде чем смениться как есть. */
@@ -124,7 +126,7 @@ function NoDeck({ g }: { g: Generation }) {
 function ResultBody({ g }: { g: Generation }) {
   const {
     activeVariant, setActiveStrategy, selectedSlide, setSelectedSlide, strategyTitle, strategies, templateLabel, templates, ui, dispatch,
-    editText, retryBuild, building, health, modelStatus, refreshModelStatus, generations, notices,
+    editText, retryBuild, building, health, modelStatus, refreshModelStatus, generations, notices, slideFail,
   } = useApp();
   const openSheet = useOpenSheet();
   const goHome = useGoHome();
@@ -191,7 +193,6 @@ function ResultBody({ g }: { g: Generation }) {
   };
   const resultErr = notices.result?.kind === "error" ? humanError(notices.result.text) : null;
   const errText = refused ?? resultErr;
-  const line = errText ? <ErrorLine text={errText} lines={1} style={note ? { marginLeft: 16, flex: "0 1 auto" } : undefined} /> : null;
 
   // «На весь экран» и «Показать текст» — слои колоды (Lightbox, TextLayer); текста нет — кнопка приглушена (V2 rt-nb-off)
   const onOpenLightbox = () => dispatch({ type: "set", patch: { lightbox: true } });
@@ -215,12 +216,50 @@ function ResultBody({ g }: { g: Generation }) {
   // другой слайд или вариант: строка неудачи или «слайд остался прежним» уходит вместе со слайдом (итог применённой
   // работы остаётся — у него «Вернуть»)
   const clearJob = job.clear;
-  useEffect(() => clearJob(), [v.strategy, n, clearJob]);
+  useEffect(() => clearJob(n), [v.strategy, n, clearJob]);
   const rm = useRemarksMode({ v, n, src, job, now, titleOf });
   // поверх результата открыт слой или лист: клавиши (←/→, Home/End, Esc) — его
   const layered = !!(ui.sheet || ui.textLayer || ui.lightbox || ui.sect || ui.tplPreview || ui.tplDelete);
   const pic = usePictureSelect({ v, n, job, now, blocked: ui.remarks || rm.mounted, layered });
-  look.current = (r) => ui.screen === "result" && !layered && r.strategy === v.strategy && r.slide === n && (r.kind === "fix" ? ui.remarks : !!pic.column?.shown);
+  // где человек: место работы над слайдом — панель замечаний или карточка «Изображение» на её слайде, ничего поверх
+  const at: ResultAt = { result: ui.screen === "result", layered, strategy: v.strategy, slide: n, remarks: ui.remarks, picture: !!pic.column?.shown };
+  look.current = (r) => placeShown(r, at);
+
+  // строка ряда уведомления (одна): неудача запуска или открытия; неудача работы над слайдом, чьё место человек не видел
+  // (`slideFail`, с «Показать» — к месту, где строка встанет у работы; пока место на экране, строки здесь нет — одна
+  // строка на неудачу); запасная строка «не обновилась» с «Обновить», когда презентация несвежая, а её не говорит ни
+  // одна работа экрана. Смена строки — перекрёстным затуханием
+  const fail = failInRow(slideFail, g.id, at);
+  const staleRow = !errText && !fail && job.refresh && staleInRow(true, job.staleRuns, at) ? job.refresh : null;
+  const showFail = (f: SlideFail) => {
+    if (f.strategy !== v.strategy) setActiveStrategy(f.strategy);
+    setSelectedSlide(f.slide);
+    dispatch({ type: "set", patch: { remarks: f.kind === "fix" } });
+    // изображение: его карточка (на том же варианте; режим «Замечания» был выключен — выбор не заблокирован)
+    if (f.kind === "picture" && f.strategy === v.strategy) pic.reveal(f.slide);
+  };
+  const lineStyle = note ? { marginLeft: 16, flex: "0 1 auto" } : undefined;
+  const lineKey = errText ? `e:${errText}` : fail ? `f:${fail.jobId}` : staleRow ? "s" : "";
+  const lineNow = errText ? <ErrorLine text={errText} lines={1} />
+    : fail ? (
+      <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+        <ErrorLine text={fail.text} lines={1} />
+        <button type="button" className="p2-gb" onClick={() => showFail(fail)} title={fail.kind === "fix" ? `Слайд ${fail.slide} в режиме «Замечания»` : `Слайд ${fail.slide}`}
+          style={{ flex: "none", height: 32, margin: "-6px -12px -6px 0", padding: "0 12px", fontSize: 14, lineHeight: "20px" }}>
+          Показать
+        </button>
+      </div>
+    )
+    : staleRow ? <StaleLine r={staleRow} lines={1} /> : null;
+  // уходящая строка гаснет со своим содержимым: последнее содержимое каждой строки, пока она на экране
+  const lines = useRef(new Map<string, ReactNode>());
+  if (lineKey) lines.current.set(lineKey, lineNow);
+  const lineSwap = useSwap(lineKey, ui.screen === "result");
+  const lineShown = lineSwap.shown === lineKey ? lineNow : lines.current.get(lineSwap.shown) ?? null;
+  for (const k of [...lines.current.keys()]) if (k !== lineKey && k !== lineSwap.shown) lines.current.delete(k);
+  // уходящая строка в ряду уведомления гаснет, а не пропадает; раскладка рабочей области — по строке, которая есть сейчас
+  const line = lineKey || lineSwap.shown ? <span className={lineSwap.cls} style={{ display: "flex", minWidth: 0, ...lineStyle }}>{lineShown}</span> : null;
+  const lineText = errText ?? fail?.text ?? staleRow?.text ?? null;
   // работа над слайдом (своя, подхваченная, чужая над вариантом) — дуга на миниатюре её слайда и без режима «Замечания»
   const spinOnly = job.spin;
   const filmMarks = useMemo(() => rm.film ?? (spinOnly !== null ? { badges: NO_BADGES, out: false, spin: spinOnly } : null), [rm.film, spinOnly]);
@@ -292,7 +331,7 @@ function ResultBody({ g }: { g: Generation }) {
   // компактный вид (помощник открыт): те же данные, итоги проверки — узкой колонкой; колонка шире, пока на её месте
   // панель замечаний или карточка «Изображение»
   const compact: CompactData = {
-    title, line: aside.line, error: errText, score: aside.score, variants: aside.variants, variant: v.strategy, pptx: aside.pptx, pdf: aside.pdf,
+    title, line: aside.line, error: lineText, score: aside.score, variants: aside.variants, variant: v.strategy, pptx: aside.pptx, pdf: aside.pdf,
     fileBase: aside.fileBase, pptxTitle: aside.pptxTitle, checks: compactChecks(g, v, note), hasText,
   };
   const wide = rm.shown || !!pic.column?.shown;
@@ -322,7 +361,7 @@ function ResultBody({ g }: { g: Generation }) {
   // Уведомление появилось или ушло на той же презентации — рабочая область вместе с рядом гаснет, раскладка подменяется
   // невидимой и проявляется (useSwap на обёртке `.ra-work`), без хода высоты и ширины; уходящий ряд гаснет со своим
   // содержимым (`useHeld`)
-  const geo = useSwap(workGeo(note, line), ui.screen === "result");
+  const geo = useSwap(workGeo(note, lineKey || null), ui.screen === "result");
   const g2 = WORK_GEO[geo.shown];
   const noteRow = note ? <NotePill note={note} open={ui.note} line={line} actions={noteActions} /> : line ? <NoteRow>{line}</NoteRow> : null;
   const heldRow = useHeld(noteRow);

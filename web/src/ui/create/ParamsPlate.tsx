@@ -64,7 +64,7 @@ export interface ParamsPlate {
 export function useParamsPlate(): ParamsPlate {
   const {
     params, setParams, brief, strategies, health, templates, templateId, checkText, textIssue, startGeneration, ui, dispatch, notices,
-    improveSource, composerPreset, takeComposerPreset, building, buildEnd, loadGeneration, clearNotice, showEnded,
+    improveSource, composerPreset, takeComposerPreset, building, buildEnd, loadGeneration, clearNotice, showEnded, goBuild,
   } = useApp();
   const rise = useRise();
   const modelOn = useModelOn();
@@ -177,7 +177,8 @@ export function useParamsPlate(): ParamsPlate {
     togglePictures: () => setParams((p) => nextPictures(p, images)),
     writesHint: writesHint(writes.on), imagesHint: imagesHint(pictures.on),
     summary, line, starting, start,
-    goBuild: () => dispatch({ type: "go", screen: "build" }),
+    // экран «Сборка» с идущей сборкой (если он показывал законченную — store `goBuild` возвращает к идущей)
+    goBuild,
     openEnded, opening,
   };
 }

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { api } from "../api";
-import { endedToShow, endSeen, failMessage, followBuild, improveArrives, uploadTemplateFlow, watchingBuild, type GenerationDeps, type UploadDeps } from "./flows";
+import { endedToShow, endSeen, failMessage, followBuild, liveBuildToShow, improveArrives, uploadTemplateFlow, watchingBuild, type GenerationDeps, type UploadDeps } from "./flows";
 import type { Generation, Job } from "../types";
 
 test("сообщение помощника о неудаче задачи: причина по-русски, без технического хвоста", () => {
@@ -173,4 +173,14 @@ test("загрузка шаблона и чтение презентации: з
   } finally {
     api.uploadTemplate = real;
   }
+});
+
+test("«Вернуться к сборке» после «Посмотреть» у упавшей сборки A, пока идёт B (S3): экран возвращается к B", () => {
+  const a = { id: "ja", kind: "generate", status: "failed" };
+  const b = { id: "jb", kind: "generate", status: "running" };
+  const fix = { id: "jf", kind: "slide_fix", status: "running" };
+  assert.equal(liveBuildToShow(a, [b, fix]), b);
+  assert.equal(liveBuildToShow(b, [b]), null); // уже показана идущая
+  assert.equal(liveBuildToShow(null, [{ id: "j1", kind: "generate", status: "queued" }, b]), b); // самая новая
+  assert.equal(liveBuildToShow(a, [fix]), null); // идущих сборок нет
 });

@@ -20,6 +20,9 @@ export interface PictureSelect {
   spots: { pics: Pic[]; sel: string | null; frame: boolean; onPick(id: string): void } | null;
   /** Колонка «Изображение» в DOM: стоит (`shown`) или уезжает, с карточкой. */
   column: { shown: boolean; card: ComponentProps<typeof PictureCard> } | null;
+  /** «Показать» у строки неудачи изображения: колонка «Изображение» картинки слайда `slide` этого варианта (вместе со
+   *  сменой слайда — тем же нажатием); картинок на слайде нет или выбор заблокирован — ничего. */
+  reveal(slide: number): void;
 }
 
 export function usePictureSelect({ v, n, job, now, blocked, layered }: {
@@ -83,6 +86,7 @@ export function usePictureSelect({ v, n, job, now, blocked, layered }: {
     canUndo: !!picRun?.picture?.applied && lastEditIs(v, picRun.picture.version, "picture") && !unread,
     error: unread ? null : picRun ? picRun.undoError ?? picRun.error : null,
     refresh: unread ? job.refresh : null,
+    undoOff: job.undoOff,
   };
   const start = (action: "generate" | "remove") => {
     if (job.busy || job.elsewhere) return;
@@ -93,7 +97,13 @@ export function usePictureSelect({ v, n, job, now, blocked, layered }: {
     });
   };
 
+  const reveal = (slide: number) => {
+    const first = blocked ? null : slidePictures(v, slide)[0];
+    if (first) setSel({ k: `${v.strategy}:${slide}`, id: first.id, form: false, d: 320 });
+  };
+
   return {
+    reveal,
     spots: pics.length > 0 && !blocked ? { pics, sel: picked?.id ?? null, frame: !!picked && !!sel?.form, onPick } : null,
     column: pcol.mounted && shown ? {
       shown: pcol.shown,

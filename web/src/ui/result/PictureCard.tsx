@@ -55,6 +55,8 @@ export interface PictureRunView {
   error: string | null;
   /** Замена или её возврат сохранены, а презентация на экране не перечиталась: строка с «Обновить» вместо `error`. */
   refresh?: Refresh | null;
+  /** Почему «Вернуть» сейчас не нажимается (презентация несвежая); null — нажимается. */
+  undoOff?: string | null;
 }
 
 export function PictureCard({ view, form, formDelay, wish, onWish, onToggleForm, onCancel, onGenerate, onRemove, onUndo, run, off, idp = "rp" }: {
@@ -136,7 +138,7 @@ export function PictureCard({ view, form, formDelay, wish, onWish, onToggleForm,
             )}
             {/* последнюю замену или «Убрать» можно отменить, пока после неё вариант не менялся */}
             {run.done && run.canUndo && (
-              <button type="button" className="p2-gb p2-in" onClick={onUndo} disabled={!!off} title={blocked ?? "Вернуть изображение, каким оно было"}>
+              <button type="button" className="p2-gb p2-in" onClick={onUndo} disabled={!!(off ?? run.undoOff)} title={blocked ?? run.undoOff ?? "Вернуть изображение, каким оно было"}>
                 <Icon name="undo" size={18} />
                 <span>Вернуть</span>
               </button>

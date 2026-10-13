@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import type { SlideFixResult } from "../../types";
 import type { ActiveJob } from "../../lib/jobState";
 import { VARIANT_BUSY } from "../details/variantWork";
-import { adoptPlan, awayFailText, busyWhy, JOB0, liveWork, runOf, slideBusy, slideJobNext, staleOf, variantLiveJob, type SlideJobAction, type SlideJobState } from "./slideJob";
+import { adoptPlan, awayFailText, busyWhy, failInRow, JOB0, liveWork, placeShown, runOf, slideFailAfter, staleInRow, STALE_FIRST, undoOffOf, slideBusy, slideJobNext, staleOf, variantLiveJob, type SlideJobAction, type SlideJobState } from "./slideJob";
 import type { PictureChangeResult } from "../../types";
 import type { Remark } from "./marks";
 
@@ -66,8 +66,8 @@ test("«Вернуть как было» после перезагрузки: з
   assert.deepEqual(picture.runs.structured && [picture.seq, picture.runs.structured.kind, picture.runs.structured.undo, picture.runs.structured.error], [2, "fix", "work", null]);
 });
 
-test("смена слайда убирает строку неудачи и «слайд остался прежним», но не итог, который можно вернуть", () => {
-  const failed = run(JOB0, fix(), { type: "settled", seq: 1, at: 900, error: "нет" });
+test("смена слайда убирает увиденную строку неудачи и «слайд остался прежним», но не итог, который можно вернуть", () => {
+  const failed = run(JOB0, fix(), { type: "settled", seq: 1, at: 900, error: "нет" }, { type: "seen", strategy: "structured" });
   assert.equal(slideJobNext(failed, { type: "clear", strategy: "structured" }).runs.structured, undefined);
   const kept = run(JOB0, fix(), { type: "settled", seq: 1, at: 900, fix: { applied: false } as SlideFixResult });
   assert.equal(slideJobNext(kept, { type: "clear", strategy: "structured" }).runs.structured, undefined);
@@ -207,4 +207,87 @@ test("неудача работы, чьё место человек не вид�
 
 test("liveWork: возврат как было — его причина у выключенных кнопок", () => {
   assert.deepEqual(liveWork(live("u", "undo", 3)), { why: "Возвращаю как было — дождитесь конца", slide: 3 });
+});
+
+// ── S1/S2: неудача встаёт у своего места и ждёт там, пока её не увидят
+test("неудача, которую ещё не видели у её места, не уходит со сменой слайда; увидели — уходит, как прежде (S1)", () => {
+  const failed = run(JOB0, fix(5), { type: "accepted", seq: 1, jobId: "j", at: 1 }, { type: "settled", seq: 1, at: 900, error: "Модель не ответила" });
+  assert.equal(failed.runs.structured!.unseen, true);
+  assert.equal(slideJobNext(failed, { type: "clear", strategy: "structured" }), failed);
+  const seen = slideJobNext(failed, { type: "seen", strategy: "structured" });
+  assert.equal(seen.runs.structured!.unseen, false);
+  assert.equal(slideJobNext(seen, { type: "seen", strategy: "structured" }), seen);
+  assert.equal(slideJobNext(seen, { type: "clear", strategy: "structured" }).runs.structured, undefined);
+  // вернулись на её слайд (и тут же увидели строку) — смена слайда её не снимает; ушли снова — снимает
+  assert.equal(slideJobNext(seen, { type: "clear", strategy: "structured", slide: 5 }), seen);
+  assert.equal(slideJobNext(seen, { type: "clear", strategy: "structured", slide: 6 }).runs.structured, undefined);
+  // удачный итог — не «неувиденная неудача»
+  assert.equal(run(JOB0, fix(), { type: "settled", seq: 1, at: 900, fix: RES }).runs.structured!.unseen, false);
+});
+
+test("неудача работы, чей экран закрылся, — новый экран заводит её кончившейся работой со строкой у места (S2)", () => {
+  const a = slideJobNext(JOB0, { type: "failedAway", strategy: "structured", slide: 5, kind: "fix", action: null, jobId: "j", error: "Модель не ответила", at: 7 });
+  const r = a.runs.structured!;
+  assert.deepEqual([r.phase, r.slide, r.kind, r.jobId, r.error, r.unseen, slideBusy(r)], ["done", 5, "fix", "j", "Модель не ответила", true, false]);
+  // та же задача уже здесь или на варианте идёт работа — без перемен
+  assert.equal(slideJobNext(a, { type: "failedAway", strategy: "structured", slide: 5, kind: "fix", action: null, jobId: "j", error: "x", at: 8 }), a);
+  const busy = slideJobNext(JOB0, fix());
+  assert.equal(slideJobNext(busy, { type: "failedAway", strategy: "structured", slide: 5, kind: "fix", action: null, jobId: "k", error: "x", at: 8 }), busy);
+});
+
+test("место работы на экране: исправление — режим «Замечания» на её слайде, изображение — карточка на её слайде, ничего поверх", () => {
+  const at = { result: true, layered: false, strategy: "structured", slide: 5, remarks: true, picture: false };
+  const fixAt = { strategy: "structured", slide: 5, kind: "fix" as const };
+  assert.equal(placeShown(fixAt, at), true);
+  assert.equal(placeShown(fixAt, { ...at, slide: 6 }), false);
+  assert.equal(placeShown(fixAt, { ...at, remarks: false }), false);
+  assert.equal(placeShown(fixAt, { ...at, layered: true }), false);
+  assert.equal(placeShown(fixAt, { ...at, result: false }), false);
+  assert.equal(placeShown(fixAt, { ...at, strategy: "visual" }), false);
+  const picAt = { strategy: "structured", slide: 5, kind: "picture" as const };
+  assert.equal(placeShown(picAt, at), false);
+  assert.equal(placeShown(picAt, { ...at, remarks: false, picture: true }), true);
+});
+
+test("строка результата о неудаче — по роду работы: исправление, изображение, правка помощника (S2)", () => {
+  const job = { error: "Модель не ответила", message: "" };
+  assert.equal(awayFailText("fix", null, 5, job), "Не получилось исправить слайд 5: модель не ответила.");
+  assert.equal(awayFailText("picture", "generate", 2, job), "Не получилось заменить изображение на слайде 2: модель не ответила.");
+  assert.equal(awayFailText("fix", null, 5, job, true), "Не получилось поменять слайд 5: модель не ответила.");
+});
+
+test("«Вернуть как было» на несвежей презентации выключено с причиной: на экране нет изменения, которое вернётся (S4)", () => {
+  assert.equal(undoOffOf(true), STALE_FIRST);
+  assert.equal(STALE_FIRST, "Сначала обновите презентацию");
+  assert.equal(undoOffOf(false), null);
+});
+
+const AT = { result: true, layered: false, strategy: "structured", slide: 3, remarks: false, picture: false };
+const FAIL = { jobId: "j", gid: "g", strategy: "structured", slide: 5, kind: "fix" as const, action: null, text: "Не получилось исправить слайд 5: x.", error: "x" };
+
+test("строка результата о неудаче — пока её место не на экране; на месте строка стоит у работы, здесь её нет (S1, S2)", () => {
+  assert.equal(failInRow(FAIL, "g", AT), FAIL);
+  assert.equal(failInRow(FAIL, "g", { ...AT, slide: 5, remarks: true }), null);
+  assert.equal(failInRow(FAIL, "other", AT), null); // другая презентация
+  assert.equal(failInRow(null, "g", AT), null);
+  // над разделом или листом место не видно — строка в ряду
+  assert.equal(failInRow(FAIL, "g", { ...AT, slide: 5, remarks: true, layered: true }), FAIL);
+});
+
+test("строка больше не нужна: её работу увидели у места или над вариантом началась новая; другая неудача остаётся (S2, S7)", () => {
+  assert.equal(slideFailAfter(FAIL, { jobId: "j" }), null);
+  assert.equal(slideFailAfter(FAIL, { jobId: "k" }), FAIL);
+  assert.equal(slideFailAfter(FAIL, { gid: "g", strategy: "structured" }), null);
+  assert.equal(slideFailAfter(FAIL, { gid: "g", strategy: "visual" }), FAIL);
+  assert.equal(slideFailAfter(FAIL, { gid: "h" }), FAIL);
+  assert.equal(slideFailAfter(FAIL, { jobId: null }), FAIL); // неудача запуска без задачи ничего не снимает
+  assert.equal(slideFailAfter(null, { jobId: "j" }), null);
+});
+
+test("запасная строка «не обновилась» — когда её не говорит ни одна работа экрана у своего места на экране (S6)", () => {
+  const st = run(JOB0, fix(5), { type: "accepted", seq: 1, jobId: "j", at: 1 }, { type: "settled", seq: 1, at: 2, fix: RES, stale: true }).runs.structured!;
+  assert.equal(staleInRow(true, [], AT), true); // владелец ушёл (помощник, закрытый экран)
+  assert.equal(staleInRow(true, [st], AT), true); // работа есть, но её место не на экране
+  assert.equal(staleInRow(true, [st], { ...AT, slide: 5, remarks: true }), false); // строка у работы
+  assert.equal(staleInRow(false, [st], AT), false); // презентация свежая
 });

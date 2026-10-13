@@ -13,6 +13,8 @@ import { useSwap } from "../kit/useSwap";
 
 export interface Refresh { text: string; busy: boolean; onRefresh(): void }
 
+export { STALE_FIRST } from "../result/slideJob";
+
 /** Несвежая ли презентация `gid` (store `stale`): строка и «Обновить»; null — свежая. */
 export function useStale(gid: string): Refresh | null {
   const { stale, refreshing, refreshDeck } = useApp();

@@ -9,18 +9,20 @@ import { cls } from "../../kit/cls";
 import { ErrorLine } from "../../kit/ErrorLine";
 import { Icon } from "../../kit/Icon";
 import { StaleLine, useStale } from "../../shell/StaleLine";
+import { undoOffOf } from "../../result/slideJob";
 import { agentCap, agentRoles, editRows, legacyLines } from "../agentTab";
 import { undoView, workKey } from "../variantWork";
 
-/** «Вернуть как было» последней правки варианта; ход — дуга в кнопке, неудача — строка под шапкой; вернулось, а
- *  презентация на экране не перечиталась — строка с «Обновить». Кнопка выключена, пока над вариантом идёт любая работа
- *  (сервер держит одну задачу на вариант). */
+/** «Вернуть как было» последней правки варианта; ход — дуга в кнопке, неудача — строка под шапкой. Презентация
+ *  несвежая (изменение сохранено здесь или в другом месте, а перечитать не вышло) — строка с «Обновить», а кнопка
+ *  выключена: список правок на экране прежний, возврат отменил бы правку, которой здесь не видно. Кнопка выключена и
+ *  пока над вариантом идёт любая работа (сервер держит одну задачу на вариант). */
 function useUndoEdit(gid: string, strategy: string) {
   const { work, busyVariants, revertVariant } = useApp();
   const key = workKey(gid, strategy);
   const refresh = useStale(gid);
   const view = undoView(work, key, busyVariants.includes(key), !!refresh);
-  return { ...view, refresh: view.stale ? refresh : null, undo: () => void revertVariant(gid, strategy, { by: "agent" }) };
+  return { ...view, refresh, off: undoOffOf(!!refresh), undo: () => void revertVariant(gid, strategy, { by: "agent" }) };
 }
 
 export function AgentTab({ g, v }: { g: Generation; v: Variant }) {
@@ -91,7 +93,8 @@ export function AgentTab({ g, v }: { g: Generation; v: Variant }) {
           <div style={{ display: "flex", alignItems: "center", gap: 8, height: 40 }}>
             <h3 id="da-h-ed" className="dd-h">Ваши правки</h3>
             <span className="da-cnt">{ed.active}</span>
-            <button type="button" className="p2-ob dla-ob" onClick={un.undo} disabled={!ed.canUndo || un.busy} aria-busy={un.arc || undefined} style={{ height: 40, marginLeft: "auto" }}>
+            <button type="button" className="p2-ob dla-ob" onClick={un.undo} disabled={!ed.canUndo || un.busy || !!un.off} aria-busy={un.arc || undefined}
+              title={un.off ?? undefined} style={{ height: 40, marginLeft: "auto" }}>
               {un.arc ? <Arc size={18} /> : <Icon name="undo" size={18} />}
               <span>Вернуть как было</span>
             </button>

@@ -147,7 +147,8 @@ export function QualityTab({ g, v, deck }: { g: Generation; v: Variant; deck: De
           {fix.undo && (
             <>
               <p className="dlq-st p2-in" role="status"><Icon name="check-circle" size={20} />{fix.status}</p>
-              <button type="button" className="p2-ob dlq-ob p2-in" onClick={fix.revert} disabled={busy} title={lock.why ?? undefined} aria-busy={fix.working === "undo" || undefined} style={{ animationDelay: "40ms" }}>
+              <button type="button" className="p2-ob dlq-ob p2-in" onClick={fix.revert} disabled={busy || (!!fix.undoOff && fix.working !== "undo")}
+                title={lock.why ?? fix.undoOff ?? undefined} aria-busy={fix.working === "undo" || undefined} style={{ animationDelay: "40ms" }}>
                 {fix.working === "undo" ? <Arc size={18} /> : <Icon name="undo" size={18} />}
                 <span>Вернуть как было</span>
               </button>

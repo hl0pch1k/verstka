@@ -52,7 +52,7 @@ export interface RemarksPanelProps {
   fixOff: string | null;
   /** «Вернуть как было» без итога на странице: последнее изменение варианта — исправление этого слайда. `refresh` —
    *  вернулось, а презентация на экране не перечиталась (строка с «Обновить» вместо `error`). */
-  revert: { onRevert(): void; busy: boolean; error: string | null; refresh?: Refresh | null } | null;
+  revert: { onRevert(): void; busy: boolean; error: string | null; refresh?: Refresh | null; off?: string | null } | null;
   /** Строка у кнопки: неудача или почему слайд остался прежним. */
   line: PanelLine | null;
   /** На других слайдах замечания есть (вид «Замечаний нет» говорит про числа на миниатюрах). */
@@ -66,6 +66,8 @@ export interface RemarksPanelProps {
     canUndo: boolean;
     undoBusy: boolean;
     undoError: string | null;
+    /** Почему «Вернуть как было» сейчас не нажимается (презентация несвежая); null — нажимается. */
+    undoOff?: string | null;
     /** Вернули как было, а презентация на экране не перечиталась: строка с «Обновить» на месте кнопки. */
     refresh?: Refresh | null;
   } | null;
@@ -116,6 +118,7 @@ function Body(p: RemarksPanelProps) {
             </span>
           </div>
         </div>
+        {p.line && <Line line={p.line} />}
         {p.revert && <Revert p={p} ride={ride} />}
       </>
     );
@@ -180,7 +183,7 @@ function Remarks({ p, d, ride }: { p: RemarksPanelProps; d(ms: number): string; 
 /** «Вернуть как было» исправления, сделанного раньше (итога на странице нет): тот же «верни как было», что в итоге. */
 function Revert({ p, ride }: { p: RemarksPanelProps; ride?: string }) {
   const r = p.revert!;
-  const off = r.busy ? null : p.fixOff;
+  const off = r.busy ? null : r.off ?? p.fixOff;
   return (
     <>
       <button type="button" className={cls("p2-ob", ride)} onClick={r.onRevert} disabled={!!off} aria-busy={r.busy || undefined} aria-disabled={r.busy || undefined}
@@ -325,7 +328,8 @@ function Done({ p, d }: { p: RemarksPanelProps; d(ms: number): string }) {
         </div>
         {x.canUndo && (
           <button type="button" className="p2-ob p2-in" onClick={x.onUndo} aria-busy={x.undoBusy || undefined} aria-disabled={x.undoBusy || undefined}
-            title={x.undoBusy ? "Возвращаю слайд, каким он был до исправления…" : "Вернуть слайд, каким он был до исправления"}
+            disabled={!x.undoBusy && !!x.undoOff}
+            title={x.undoBusy ? "Возвращаю слайд, каким он был до исправления…" : x.undoOff ?? "Вернуть слайд, каким он был до исправления"}
             style={{ width: "100%", marginTop: 8, animationDelay: d(240), cursor: x.undoBusy ? "progress" : undefined }}>
             {x.undoBusy ? <Arc size={18} /> : <Icon name="undo" size={18} />}
             <span>Вернуть как было</span>

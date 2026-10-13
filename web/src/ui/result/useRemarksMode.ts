@@ -119,7 +119,7 @@ export function useRemarksMode({ v, n, src, job, now, titleOf }: {
   const back = here?.kind === "fix" ? here : null;
   const backStale = staleOf(back, !!job.refresh) === "undo" ? job.refresh : null;
   const revert = (view === "rem" || view === "none") && fixToRevert(v, n)
-    ? { onRevert: () => job.revert(v.strategy, n), busy: back?.undo === "work", error: back?.undo === "error" ? back.undoError : null, refresh: backStale }
+    ? { onRevert: () => job.revert(v.strategy, n), busy: back?.undo === "work", error: back?.undo === "error" ? back.undoError : null, refresh: backStale, off: job.undoOff }
     : null;
 
   return {
@@ -136,7 +136,7 @@ export function useRemarksMode({ v, n, src, job, now, titleOf }: {
     panel: {
       shown: rm.shown, since, n, view, rows, sel, onSel: (i) => setSelAt({ k: viewKey, i }),
       wish, onWish: (t) => setWishAt({ k: slideKey, t }), onFix, fixBusy, fixOff: busyWhy(run) ?? other?.why ?? null, revert,
-      line: view === "rem" ? line : null,
+      line: view === "rem" || view === "none" ? line : null,
       elsewhere: badges.size > 0,
       progress: view === "fix" && fixRun && steps ? {
         clock: clock((fixRun.endedAt ?? now) - fixRun.startedAt), value: fixRun.phase === "work" ? job.live.progress : 1,
@@ -145,7 +145,7 @@ export function useRemarksMode({ v, n, src, job, now, titleOf }: {
       done: summary && fixRun ? {
         summary, onShow: () => summary.show !== null && setSelectedSlide(summary.show), onUndo: job.undo,
         // вернули, а экран ещё прежний: вместо «Вернуть как было» — строка с «Обновить»
-        canUndo: lastEditIs(v, fixRun.fix!.version, "fix") && stale !== "undo", undoBusy: fixRun.undo === "work", undoError: fixRun.undoError,
+        canUndo: lastEditIs(v, fixRun.fix!.version, "fix") && stale !== "undo", undoBusy: fixRun.undo === "work", undoError: fixRun.undoError, undoOff: job.undoOff,
         refresh: stale === "undo" ? job.refresh : null,
       } : null,
     },

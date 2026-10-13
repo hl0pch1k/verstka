@@ -1,7 +1,7 @@
 // Application state: one React context, consumed by every panel through useApp().
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import { api, ApiError } from "./api";
-import { endedToShow, endSeen, followBuild, generationFlow, improveArrives, uploadTemplateFlow, watchingBuild, type GenerationDeps } from "./lib/flows";
+import { endedToShow, endSeen, followBuild, generationFlow, improveArrives, liveBuildToShow, uploadTemplateFlow, watchingBuild, type GenerationDeps } from "./lib/flows";
 import { foldJobEvent, type ActiveJob } from "./lib/jobState";
 import { trackJob } from "./lib/jobs";
 import { errText, firstLine, newestTemplate, slideCount } from "./lib/narrate";
@@ -17,6 +17,7 @@ import { buildRunning, draftParams, type Params } from "./ui/create/params";
 import { askFor, completeAsk, failedBuildJob, parsePendingBuild, pendingFor, requestOf, resumeBuild, type PendingBuild } from "./ui/build/resume";
 import { openStrategy } from "./ui/result/resultView";
 import { useVariantWork, type VariantWorkApi } from "./ui/details/useVariantWork";
+import { slideFailAfter, type SlideFail } from "./ui/result/slideJob";
 import { busyKeys } from "./ui/details/variantWork";
 import type {
   ChatMessage, GenerateRequest, Generation, GenerationMeta, Health, ImprovedFrom, ImproveSource, Job, JobKind, ModelsStatus, Notice, NoticeArea, StrategyInfo, TemplateListItem, TemplateManifest, Variant,
@@ -106,9 +107,17 @@ export interface AppState {
    *  его после того, как запустивший отработал своё (перечитал презентацию); `stale` — презентация задачи после этого
    *  несвежая. Возвращает отписку; null — задача уже не идёт (её конца не будет: подхватывать нечего). */
   watchJob(jobId: string, cb: (job: Job, ok: boolean, stale: boolean) => void): (() => void) | null;
-  /** Работа над слайдом не удалась, а её места никто не показывает (экран, который её запустил, закрыт, и никто её не
-   *  подхватил): строка результата для открытой презентации `gid` — экран не молчит, когда человек вернётся. */
-  tellAway(jobId: string, gid: string, text: string): void;
+  /** Неудача работы над слайдом, которую человек не видел у её места (был на другом слайде, без режима «Замечания»,
+   *  вне экрана результата): строка результата этой презентации с «Показать» — пока он не дошёл до места (там строка
+   *  стоит у работы) или не начал новую работу над вариантом. Своя строка, не `notices.result` (её читает «Мои
+   *  презентации» как неудачу открытия). Одна — самая новая. */
+  slideFail: SlideFail | null;
+  /** Работа не удалась без человека у её места: `slideFail` — если её конец не слышит экран, подхвативший её (он скажет
+   *  сам). */
+  failAway(f: SlideFail): void;
+  /** Строка `slideFail` больше не нужна: её работу увидели у места (`jobId`) или над вариантом началась новая работа
+   *  (`gid` + `strategy`). */
+  dropSlideFail(match: { jobId?: string | null; gid?: string; strategy?: string }): void;
   /** «Мои презентации»: идущая сборка (мета с `job_id`) — экран «Сборка» с её задачей; задачу уже ведут — экран просто
    *  возвращается к ней (и показывает её, даже если с тех пор подключились к другой). false — вести нечего (у меты нет
    *  задачи). Мета — полная (`GET /api/generations/{gid}`): «Собрать ещё раз» повторит её запрос. */
@@ -144,6 +153,9 @@ export interface AppState {
   /** «Посмотреть» у неудачной сборки, кончившейся в другом месте (и её карточка в «Мои презентации»): экран «Сборка»
    *  показывает именно её — с её причиной и запросом, даже если с тех пор экран вёл другую сборку. */
   showEnded(end: BuildEnd): void;
+  /** «Вернуться к сборке»: экран «Сборка» с идущей сборкой — самой новой из тех, что ведёт страница, если экран показывает
+   *  законченную (неудачу, на которую смотрели через «Посмотреть»). */
+  goBuild(): void;
   /** «Собрать ещё раз»: тот же запрос сборки повторно. Обещание — как у startGeneration: решается, когда повторная сборка
    *  кончилась или не началась (её начало видно по `buildJob`, отказ — по строке области «Сборка»); false — повторять
    *  нечего (запрос неизвестен). `deck` — открытая презентация (результат): повторяется её запрос — свой запрос
@@ -692,10 +704,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (cur && !cur.size) watchers.current.delete(jobId);
     };
   }, []);
-  const tellAway = useCallback((jobId: string, gid: string, text: string) => {
-    if (watchers.current.get(jobId)?.size || latest.current.generation?.id !== gid) return;
-    notify("result", "error", text);
-  }, [notify]);
+  const [slideFail, setSlideFail] = useState<SlideFail | null>(null);
+  const failAway = useCallback((f: SlideFail) => {
+    if (watchers.current.get(f.jobId)?.size) return;
+    setSlideFail(f);
+  }, []);
+  const dropSlideFail = useCallback((m: { jobId?: string | null; gid?: string; strategy?: string }) => {
+    setSlideFail((cur) => slideFailAfter(cur, m));
+  }, []);
 
   // работа над вариантами: идёт ли задача над вариантом — по идущим задачам, ревизия — открытой презентации
   const variantLive = useCallback((key: string) => busyKeys(liveJobs.current.values()).includes(key), []);
@@ -772,6 +788,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (back) {
       setBuildJob(back);
       const ask = asks.current.get(end.gid);
+      if (ask) keepBuild(ask);
+    }
+    dispatch({ type: "go", screen: "build" });
+  }, [keepBuild]);
+
+  const goBuild = useCallback(() => {
+    const next = liveBuildToShow(latest.current.buildJob, [...liveJobs.current.values()]);
+    if (next) {
+      setBuildJob(next);
+      const ask = next.generation ? asks.current.get(next.generation) : undefined;
       if (ask) keepBuild(ask);
     }
     dispatch({ type: "go", screen: "build" });
@@ -985,13 +1011,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AppState>(() => ({
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, cancelLoad, reloadIfOpen, stale, refreshDeck, refreshing, activeStrategy, setActiveStrategy, activeVariant,
-    selectedSlide, setSelectedSlide, ui, dispatch, activeJob, liveJobs: liveList, runJob, watchJob, tellAway, followDeck, adoptBuildMeta, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, ownBuild, building, buildEnd, showEnded, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, analyzing, startGeneration,
+    selectedSlide, setSelectedSlide, ui, dispatch, activeJob, liveJobs: liveList, runJob, watchJob, slideFail, failAway, dropSlideFail, followDeck, adoptBuildMeta, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, ownBuild, building, buildEnd, showEnded, goBuild, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, analyzing, startGeneration,
     brief, setBrief, textIssue, setTextIssue, checkText, params, setParams,
     composerText, composerPreset, editText, takeComposerText, takeComposerPreset, improveSource, takeImproveSource,
   }), [
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, cancelLoad, reloadIfOpen, stale, refreshDeck, refreshing, activeStrategy, setActiveStrategy, activeVariant,
-    selectedSlide, setSelectedSlide, ui, activeJob, liveList, runJob, watchJob, tellAway, followDeck, adoptBuildMeta, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, ownBuild, building, buildEnd, showEnded, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, analyzing, startGeneration,
+    selectedSlide, setSelectedSlide, ui, activeJob, liveList, runJob, watchJob, slideFail, failAway, dropSlideFail, followDeck, adoptBuildMeta, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, ownBuild, building, buildEnd, showEnded, goBuild, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, analyzing, startGeneration,
     brief, setBrief, textIssue, checkText, params, setParams,
     composerText, composerPreset, editText, takeComposerText, takeComposerPreset, improveSource, takeImproveSource,
   ]);
