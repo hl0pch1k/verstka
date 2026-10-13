@@ -211,12 +211,14 @@ export const RESOLVED = "Изменения сохранены.";
 /** Что показывает строка ленты о неперечитанной презентации. Живая (`live`: хранилище помнит, что о текущей несвежести
  *  сказала именно эта строка, — store `feedRefresh`) — пока презентация несвежая и открыта: последняя причина и
  *  «Обновить»; открыта другая — как записана, без «Обновить». Её несвежесть кончилась (презентация прочиталась) или о
- *  ней сказала строка новее — строка больше не живая и не «оживает» от чужой несвежести: самая новая строка о
- *  презентации — «Презентация на экране обновлена.», прежние — «Изменения сохранены.». В ленте одна живая строка. */
-export function noteView(note: FeedNote, o: { stale: { gid: string; text: string } | null; live: boolean; latest: boolean }): { text: string; refresh: boolean } {
+ *  ней сказала строка новее — строка больше не живая и не «оживает» от чужой несвежести: «Презентация на экране
+ *  обновлена.» — только у самой новой и только пока эта презентация открыта и свежая (не рядом с «Не обновилась» в
+ *  шапке и не про другую на экране); иначе — «Изменения сохранены.». В ленте одна живая строка. */
+export function noteView(note: FeedNote, o: { stale: { gid: string; text: string } | null; live: boolean; latest: boolean; open: string | null }): { text: string; refresh: boolean } {
   if (!note.refresh) return { text: note.text, refresh: false };
   if (o.live) return o.stale && o.stale.gid === note.refresh ? { text: o.stale.text, refresh: true } : { text: note.text, refresh: false };
-  return { text: o.latest ? REFRESHED : RESOLVED, refresh: false };
+  const fresh = o.open === note.refresh && !(o.stale && o.stale.gid === note.refresh);
+  return { text: o.latest && fresh ? REFRESHED : RESOLVED, refresh: false };
 }
 
 export type FeedItem = { kind: "msg"; msg: ChatMessage } | { kind: "job"; job: FeedJob } | { kind: "note"; note: FeedNote };

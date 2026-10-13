@@ -195,10 +195,13 @@ export function slideSketch(v: Variant | null | undefined, n: number, events: Ag
   return { kind: planSketch(s), formula: !!s.content?.formula };
 }
 
-/** Вид «Замечаний нет» панели: одно место для строки, последним (ничего под ним не сдвигается). Строка «Вернуть как
+/** Место строки панели замечаний — одно на вид: в «Замечаниях» сразу под списком (место отдаёт список — поле, «Исправить
+ *  слайд» и «Вернуть как было» не сдвигаются), в «Замечаний нет» последним (под ним ничего нет). Строка «Вернуть как
  *  было» (не вернулось или не обновилась после возврата) — итог последнего действия здесь, она стоит на этом месте;
- *  иначе — строка работы слайда; null — строки нет. */
-export function noneSlot(revert: { refresh?: unknown; error?: string | null } | null, line: unknown): "revert" | "line" | null {
+ *  иначе — строка работы слайда; пока возврат идёт — пусто (прежняя строка не мигает между двумя попытками); null —
+ *  строки нет. */
+export function panelSlot(revert: { refresh?: unknown; error?: string | null; busy?: boolean } | null, line: unknown): "revert" | "line" | null {
+  if (revert?.busy) return null;
   if (revert && (revert.refresh || revert.error)) return "revert";
   return line ? "line" : null;
 }

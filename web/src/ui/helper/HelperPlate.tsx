@@ -67,10 +67,10 @@ function JobCard({ job }: { job: FeedJob }) {
  *  (store `feedRefresh`; дуга, пока читается); перечиталась — «Презентация на экране обновлена» (смена текста —
  *  перекрёстным затуханием), и чужая несвежесть позже её не «оживляет». */
 function NoteLine({ note, latest }: { note: FeedNote; latest: boolean }) {
-  const { feedRefresh } = useApp();
+  const { feedRefresh, generation } = useApp();
   const r = useStale(note.refresh ?? "");
   const live = !!note.refresh && feedRefresh[note.refresh] === note.id;
-  const view = noteView(note, { stale: r && note.refresh ? { gid: note.refresh, text: r.text } : null, live, latest });
+  const view = noteView(note, { stale: r && note.refresh ? { gid: note.refresh, text: r.text } : null, live, latest, open: generation?.id ?? null });
   // текст и «Обновить» сменяются вместе (затухание 120 мс, проявление 240 мс): уходящая кнопка гаснет со строкой
   const t = useSwap(view.refresh ? `1${view.text}` : `0${view.text}`);
   const held = useRef(r);

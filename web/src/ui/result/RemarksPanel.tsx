@@ -21,7 +21,7 @@ import { Spinner } from "../kit/Spinner";
 import { cls } from "../kit/cls";
 import { useSwap } from "../kit/useSwap";
 import { StaleLine, type Refresh } from "../shell/StaleLine";
-import { noneSlot, type FixStep, type FixSummary, type StepState } from "./fix";
+import { panelSlot, type FixStep, type FixSummary, type StepState } from "./fix";
 import { panelFit } from "./compact";
 import { countText, type Remark } from "./marks";
 
@@ -118,14 +118,21 @@ function Body(p: RemarksPanelProps) {
             </span>
           </div>
         </div>
-        {p.revert && <Revert p={p} ride={ride} withLine={false} />}
+        {p.revert && <Revert p={p} ride={ride} />}
         {/* одна строка, последней, проявляется: строка «Вернуть как было» (итог последнего действия здесь) или строка
             работы слайда — ничего под ней не сдвигается и две строки не стоят друг под другом */}
-        {noneSlot(p.revert, p.line) === "revert" ? <RevertLine r={p.revert!} /> : p.line && <Line line={p.line} />}
+        <Slot p={p} />
       </>
     );
   }
   return <Remarks p={p} d={d} ride={ride} />;
+}
+
+/** Единственное место строки вида (`panelSlot`): строка «Вернуть как было» или строка работы слайда, проявляется. */
+function Slot({ p }: { p: RemarksPanelProps }) {
+  const slot = panelSlot(p.revert, p.line);
+  if (slot === "revert") return <RevertLine r={p.revert!} />;
+  return slot === "line" && p.line ? <Line line={p.line} /> : null;
 }
 
 /** Строка у кнопки: проявляется (p2-in), а не появляется рывком. */
@@ -161,7 +168,8 @@ function Remarks({ p, d, ride }: { p: RemarksPanelProps; d(ms: number): string; 
           );
         })}
       </ol>
-      {p.line && <Line line={p.line} />}
+      {/* строка — сразу под списком: место отдаёт список, поле и кнопки ниже не сдвигаются */}
+      <Slot p={p} />
       <label className={ride} style={{ display: "block", marginTop: 16, flex: "none" }}>
         <span className="p2-sr">Ваши правки к слайду {p.n}</span>
         <input type="text" className="p2-inp rk-inp" maxLength={500} value={p.wish} placeholder="Ваши правки, например: покажи этапами"
@@ -183,21 +191,19 @@ function Remarks({ p, d, ride }: { p: RemarksPanelProps; d(ms: number): string; 
   );
 }
 
-/** «Вернуть как было» исправления, сделанного раньше (итога на странице нет): тот же «верни как было», что в итоге. */
-/** Строка «Вернуть как было»: не обновилась после возврата (с «Обновить») или не вернулось; null — строки нет. */
-const revertLine = (r: NonNullable<RemarksPanelProps["revert"]>) => (r.refresh ? "stale" : r.error ? "error" : null);
-
-/** Строка «Вернуть как было» — проявляется (p2-in), а не появляется рывком. */
+/** Строка «Вернуть как было» (не обновилась после возврата — с «Обновить», или не вернулось): стоит в месте строки вида
+ *  (`Slot`), а не под кнопкой — кнопки не сдвигаются; проявляется (p2-in), а не появляется рывком. */
 function RevertLine({ r }: { r: NonNullable<RemarksPanelProps["revert"]> }) {
   return (
-    <div className="p2-in" style={{ marginTop: 8, flex: "none" }}>
+    <div className="p2-in" style={{ marginTop: 16, flex: "none" }}>
       {r.refresh ? <StaleLine r={r.refresh} /> : r.error && <ErrorLine text={r.error} lines={2} />}
     </div>
   );
 }
 
-/** `withLine` — строка возврата под кнопкой; без неё (вид «Замечаний нет») строку ставит вид — в общем месте строки. */
-function Revert({ p, ride, withLine = true }: { p: RemarksPanelProps; ride?: string; withLine?: boolean }) {
+/** «Вернуть как было» исправления, сделанного раньше (итога на странице нет): тот же «верни как было», что в итоге. Его
+ *  строка — в месте строки вида (`Slot`). */
+function Revert({ p, ride }: { p: RemarksPanelProps; ride?: string }) {
   const r = p.revert!;
   const off = r.busy ? null : r.off ?? p.fixOff;
   return (
@@ -208,7 +214,6 @@ function Revert({ p, ride, withLine = true }: { p: RemarksPanelProps; ride?: str
         {r.busy ? <Arc size={18} /> : <Icon name="undo" size={18} />}
         <span>Вернуть как было</span>
       </button>
-      {withLine && revertLine(r) && <RevertLine r={r} />}
     </>
   );
 }

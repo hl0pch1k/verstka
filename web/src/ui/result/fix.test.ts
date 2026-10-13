@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { OutlineSlide, SlideFixResult } from "../../types";
-import { asSlideFixResult, clock, fixedRows, fixSteps, fixSummary, fixToRevert, lastEditIs, noneSlot, slideEditKind, slideSketch, undoneIn } from "./fix";
+import { asSlideFixResult, clock, fixedRows, fixSteps, fixSummary, fixToRevert, lastEditIs, panelSlot, slideEditKind, slideSketch, undoneIn } from "./fix";
 import { slideRemarks } from "./marks";
 import { CONTRAST, DENSE, MODEL, edit, ev, issue, titleOf, variant } from "./remarks.fixtures";
 
@@ -132,10 +132,13 @@ test("slideEditKind: что вернёт «Вернуть как было» сл
   assert.equal(slideEditKind(variant([], {}), 1), "fix");
 });
 
-test("вид «Замечаний нет»: одна строка последней — строка «Вернуть как было» сильнее строки работы слайда (U4)", () => {
-  assert.equal(noneSlot({ error: "Возвращать нечего" }, { tone: "info", text: "Переставил абзац." }), "revert");
-  assert.equal(noneSlot({ refresh: {}, error: null }, null), "revert");
-  assert.equal(noneSlot({ error: null }, { tone: "info", text: "Переставил абзац." }), "line");
-  assert.equal(noneSlot(null, { tone: "error", text: "x" }), "line");
-  assert.equal(noneSlot(null, null), null);
+test("одно место строки панели: строка «Вернуть как было» сильнее строки работы слайда; пока возврат идёт — пусто (U4, V1, V4)", () => {
+  assert.equal(panelSlot({ error: "Возвращать нечего" }, { tone: "info", text: "Переставил абзац." }), "revert");
+  assert.equal(panelSlot({ refresh: {}, error: null }, null), "revert");
+  assert.equal(panelSlot({ error: null }, { tone: "info", text: "Переставил абзац." }), "line");
+  assert.equal(panelSlot(null, { tone: "error", text: "x" }), "line");
+  assert.equal(panelSlot(null, null), null);
+  // повторный возврат идёт: ни прежней строки возврата, ни прежней строки работы — без мигания
+  assert.equal(panelSlot({ error: "Возвращать нечего", busy: true }, { tone: "info", text: "Переставил абзац." }), null);
+  assert.equal(panelSlot({ error: null, busy: true }, { tone: "info", text: "x" }), null);
 });
