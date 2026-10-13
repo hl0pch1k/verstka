@@ -216,6 +216,8 @@ export function useSlideJob(gid: string, strategy: string, ctx?: SlideJobCtx): S
       subs.current.delete(jobId);
       if (seq >= 0) settleAdopted(seq, plan, job, ok, stale);
     });
+    // задача кончилась между отрисовкой и этим шагом: её конца уже не будет — подхватывать нечего
+    if (!stop) return;
     const now = send({
       type: "adopt", kind: plan.kind, strategy, slide: plan.slide, jobId, startedAt: other.startedAt, undo: plan.undo,
       requested: plan.kind === "fix" && !plan.undo ? ctxRef.current?.remarksOf(plan.slide) ?? [] : [],

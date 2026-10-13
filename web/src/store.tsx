@@ -104,8 +104,8 @@ export interface AppState {
   runJob(jobId: string, label: string, opts?: RunJobOptions): void;
   /** Конец идущей задачи для того, кто её не запускал (экран результата подхватил чужую работу над слайдом): `cb` слышит
    *  его после того, как запустивший отработал своё (перечитал презентацию); `stale` — презентация задачи после этого
-   *  несвежая. Задача не идёт — ничего. Возвращает отписку. */
-  watchJob(jobId: string, cb: (job: Job, ok: boolean, stale: boolean) => void): () => void;
+   *  несвежая. Возвращает отписку; null — задача уже не идёт (её конца не будет: подхватывать нечего). */
+  watchJob(jobId: string, cb: (job: Job, ok: boolean, stale: boolean) => void): (() => void) | null;
   /** Работа над слайдом не удалась, а её места никто не показывает (экран, который её запустил, закрыт, и никто её не
    *  подхватил): строка результата для открытой презентации `gid` — экран не молчит, когда человек вернётся. */
   tellAway(jobId: string, gid: string, text: string): void;
@@ -682,7 +682,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [notify, syncBusyVariants, syncLive]);
 
   const watchJob = useCallback((jobId: string, cb: (job: Job, ok: boolean, stale: boolean) => void) => {
-    if (!liveJobs.current.has(jobId)) return () => {};
+    if (!liveJobs.current.has(jobId)) return null;
     let set = watchers.current.get(jobId);
     if (!set) watchers.current.set(jobId, (set = new Set()));
     set.add(cb);
