@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { AuditReport, AuditSummary, Generation, Issue, Variant } from "../../types";
-import { compactChecks, ctaShort, sourceText } from "./compact";
+import { compactChecks, ctaShort, headTight, sourceText } from "./compact";
 
 const audit = (summary: Partial<AuditSummary> = {}, issues: Partial<Issue>[] = []): AuditReport => ({
   deck: "d", template_id: "t1", strategy: "structured", per_slide: {}, iterations: 1, applied_fixes: [], seconds: 1,
@@ -66,4 +66,13 @@ test("ctaShort: при 1280 (колода 816) — всегда «PowerPoint»",
 });
 test("ctaShort: ширина ещё не измерена — полная подпись", () => {
   assert.equal(ctaShort(0, 6), false);
+});
+
+// шапка рабочей области при 1280 с помощником и колонкой 320 (замечания, изображение): подпись «Замечания» уходит —
+// по раскладке (тесная колода и широкая колонка), и смена — перекрёстным затуханием шапки
+test("headTight: только тесная колода и широкая колонка", () => {
+  assert.equal(headTight("tight", true), true);
+  assert.equal(headTight("tight", false), false);
+  assert.equal(headTight("narrow", true), false);
+  assert.equal(headTight("wide", true), false);
 });

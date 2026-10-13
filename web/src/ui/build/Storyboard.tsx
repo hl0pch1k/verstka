@@ -4,8 +4,9 @@
 // о котором говорит агент или который верстается (с бегущей полоской), галочка сверстанного и настоящее превью — по три
 // за такт. Колонок столько, чтобы все слайды были видны (columns.ts), не меньше четырёх, пока карточка не уже 150 px
 // (в колоде, суженной помощником при 1280, — 112); не помещаются — список прокручивается сам к слайду в работе (если
-// человек не листает его сам). Колонки считаются от ширины, которую список получит в конце хода сетки помощника, —
-// посреди хода они стоят; сменились — сетка меняется перекрёстным затуханием (useSwap).
+// человек не листает его сам). Содержимое плиты стоит в ширине колоды на конец хода сетки помощника (BuildPlate), поэтому
+// посреди хода колонки стоят; сменились — сетка меняется перекрёстным затуханием (useSwap), а в подмене раскладки всей
+// плиты (`swapping`, она уже невидима) — сразу.
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { BOARD_GAP } from "../../lib/stage";
 import { smoothScroll } from "../../lib/motion";
@@ -13,7 +14,7 @@ import { cls } from "../kit/cls";
 import { Icon } from "../kit/Icon";
 import { useSwap } from "../kit/useSwap";
 import type { BuildView, CardView } from "./buildView";
-import { boardColumns, MIN_CARD, targetBoxWidth, TIGHT_CARD } from "./columns";
+import { boardColumns, MIN_CARD, TIGHT_CARD } from "./columns";
 import { SlideSketch } from "./SlideSketch";
 import { segStatus } from "../deck/fit";
 import { useDeckFit, useDeckWidth } from "../deck/useDeckFit";
@@ -25,17 +26,18 @@ const HOLD_MS = 5000;
 
 export interface VariantSeg { name: string; label: string; desc: string }
 
-/** Колонки списка `box`: от ширины, которую он получит, когда колода доедет до целевой ширины `deck` (columns.ts). */
+/** Колонки списка `box` по его ширине (columns.ts); он стоит в ширине колоды на конец хода — посреди хода не меняется.
+ *  `deck` — ширина показанной раскладки плиты: сменилась (подмена, содержимое невидимо) — колонки считаются в том же
+ *  кадре, до отрисовки, а не кадром позже по ResizeObserver. */
 function useColumns(box: RefObject<HTMLElement>, n: number, aspect: number, minCard: number, deck: number): number {
   const [cols, setCols] = useState(4);
   useLayoutEffect(() => {
     const el = box.current;
     if (!el) return;
-    const deckEl = el.closest<HTMLElement>(".p2-deck");
     const fit = () => {
       const w = el.clientWidth;
       if (w <= 0) return;
-      setCols(boardColumns(targetBoxWidth(w, deckEl?.clientWidth ?? 0, deck), el.clientHeight, n, aspect, minCard));
+      setCols(boardColumns(w, el.clientHeight, n, aspect, minCard));
     };
     fit();
     const ro = new ResizeObserver(fit);
@@ -93,18 +95,21 @@ function Card({ c, i, planned, aspect }: { c: CardView; i: number; planned: bool
   );
 }
 
-export function Storyboard({ view, segs, onPick, aspect }: {
+export function Storyboard({ view, segs, onPick, aspect, swapping = false }: {
   view: BuildView;
   /** Сегменты вариантов: имя, название и подпись (V2 `VN`, `VD`). */
   segs: VariantSeg[];
   onPick(name: string): void;
   /** Пропорции слайдов шаблона (ширина / высота). */
   aspect: number;
+  /** Плита меняет раскладку (BuildPlate, usePlateFit): содержимое невидимо — колонки меняются сразу, без своего затухания. */
+  swapping?: boolean;
 }) {
   const box = useRef<HTMLDivElement>(null);
-  // колода, суженная помощником при 1280: три колонки карточек поуже (как миниатюры ленты результата), а не две
+  // колода, суженная помощником при 1280: три колонки карточек поуже (как миниатюры ленты результата), а не две;
+  // раскладка — показанная раскладка плиты (вложенный DeckFitContext)
   const deck = useDeckWidth();
-  const cols = useSwap(useColumns(box, view.cards.length, aspect, useDeckFit() === "tight" ? TIGHT_CARD : MIN_CARD, deck));
+  const cols = useSwap(useColumns(box, view.cards.length, aspect, useDeckFit() === "tight" ? TIGHT_CARD : MIN_CARD, deck), !swapping);
   // человек листает раскадровку (колесо, касание, клавиши, полоса прокрутки) — она стоит, где он её оставил
   const heldUntil = useRef(0);
   useEffect(() => {

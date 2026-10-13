@@ -23,7 +23,7 @@ import { usePresence } from "../kit/usePresence";
 import { deckPreset, openStrategy, slideSrc } from "../result/resultView";
 import { useGoDown, useRise } from "../result/useGoDown";
 import { coverStrategy, historyView, openPlan, type HistItem, type OpenPlan } from "./history";
-import { Layer, LAYER_MS, lsDelay, useLayerFit } from "./Layer";
+import { Layer, LAYER_MS, lsDelay, useLayer } from "./Layer";
 
 /** Сколько открытие ждёт декодирования первого слайда, прежде чем ехать как есть. */
 const DECODE_WAIT = 800;
@@ -88,7 +88,8 @@ export function HistoryLayer() {
   );
   const byId = useMemo(() => new Map(generations.map((g) => [g.id, g])), [generations]);
   // помощник сужает колоду: четыре колонки → три и заголовок 24/32 — перекрёстным затуханием всего содержимого слоя
-  const fit = useLayerFit(open);
+  const layer = useLayer(open);
+  const fit = layer.fit;
 
   /** Ход начат: дуга на обложке, строка прежней неудачи уходит. Возвращает номер хода — он устарел, если начат новый. */
   const begin = (id: string) => {
@@ -188,7 +189,7 @@ export function HistoryLayer() {
   };
 
   return (
-    <Layer id="p2-lay-h" open={open} top={120} z={open ? 7 : 6} height={692} label="Мои презентации" onClose={close}
+    <Layer id="p2-lay-h" presence={layer.presence} open={open} top={120} z={open ? 7 : 6} height={692} label="Мои презентации" onClose={close}
       plateStyle={{ display: "flex", flexDirection: "column" }}>
       <div className={cls("gh-body", fit.cls)} data-fit={fit.shown}>
       <div style={{ display: "flex", alignItems: "center", gap: 24, height: 64, flex: "none" }}>

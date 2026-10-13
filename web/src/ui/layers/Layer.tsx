@@ -8,6 +8,7 @@ import { useEffect, useRef, type CSSProperties, type KeyboardEvent, type ReactNo
 import { useDeckFit } from "../deck/useDeckFit";
 import type { DeckFit } from "../deck/fit";
 import { cls } from "../kit/cls";
+import type { Presence } from "../kit/presence";
 import { usePresence } from "../kit/usePresence";
 import { useSwap } from "../kit/useSwap";
 
@@ -44,10 +45,21 @@ export interface LayerProps {
   bare?: boolean;
   /** Дополнение к стилю плиты (например, flex-колонка). */
   plateStyle?: CSSProperties;
+  /** Присутствие слоя, уже заведённое снаружи (`useLayer`: по нему же идёт раскладка содержимого) — своё слой тогда не
+   *  заводит. */
+  presence?: Presence;
 }
 
-export function Layer({ open, top, z, height = 812, label, children, onClose, id, role = "region", tone = "light", bare, plateStyle }: LayerProps) {
-  const p = usePresence(open, LAYER_MS);
+export function Layer(props: LayerProps) {
+  return props.presence ? <LayerSlot {...props} p={props.presence} /> : <OwnLayer {...props} />;
+}
+
+/** Слой со своим присутствием (уход держит содержимое LAYER_MS). */
+function OwnLayer(props: LayerProps) {
+  return <LayerSlot {...props} p={usePresence(props.open, LAYER_MS)} />;
+}
+
+function LayerSlot({ open, top, z, height = 812, label, children, onClose, id, role = "region", tone = "light", bare, plateStyle, p }: LayerProps & { p: Presence }) {
   const plate = useRef<HTMLElement>(null);
   const slot = useRef<HTMLDivElement>(null);
   // фокус — в слой, когда он открылся; при закрытии — туда, откуда его открыли (если фокус был в слое)
@@ -89,12 +101,14 @@ export function Layer({ open, top, z, height = 812, label, children, onClose, id
 /** Задержка лесенки `p2-ls` (CSS-переменная `--d`). */
 export const lsDelay = (ms: number) => ({ "--d": `${ms}ms` }) as CSSProperties;
 
-/** Раскладка содержимого слоя по колоде, которую сужает помощник (сетки «Мои презентации», «Шаблоны», «Слайды
- *  шаблона» 4 → 3 колонки, лист «Подробнее» 2 → 1, шапка «Текста презентации»): `shown` — для `data-fit` обёртки
- *  содержимого (правила слоя — по нему, а не по `data-fit` колоды), `cls` — её класс затухания. Смена — перекрёстным
- *  затуханием (useSwap: гаснет 120 мс, подменяется невидимой, проявляется 240 мс), пока слой на экране — открыт или ещё
- *  уезжает; закрытый меняется сразу. */
-export function useLayerFit(open: boolean): { shown: DeckFit; cls: string | undefined } {
-  const fit = useSwap(useDeckFit(), usePresence(open, LAYER_MS).mounted);
-  return { shown: fit.shown, cls: fit.cls };
+/** Слой и раскладка его содержимого по колоде, которую сужает помощник (сетки «Мои презентации», «Шаблоны», «Слайды
+ *  шаблона» 4 → 3 колонки, лист «Подробнее» 2 → 1, шапка «Текста презентации», «Слайд N шаблона»). `presence` отдают
+ *  слою (`<Layer presence>` — одно присутствие на слой и его раскладку); `fit.shown` — для `data-fit` обёртки содержимого
+ *  (правила слоя — по нему, а не по `data-fit` колоды), `fit.cls` — её класс затухания. Смена — перекрёстным затуханием
+ *  (useSwap: гаснет 120 мс, подменяется невидимой, проявляется 240 мс), пока слой на экране — открыт или ещё уезжает;
+ *  закрытый меняется сразу, и только что открытый встаёт в нынешней раскладке непрозрачным (своё затухание, не чужое). */
+export function useLayer(open: boolean): { presence: Presence; fit: { shown: DeckFit; cls: string | undefined } } {
+  const presence = usePresence(open, LAYER_MS);
+  const fit = useSwap(useDeckFit(), presence.mounted);
+  return { presence, fit: { shown: fit.shown, cls: fit.cls } };
 }

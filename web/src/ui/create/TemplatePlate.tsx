@@ -15,7 +15,6 @@ import { analysisError, analysisFacts, analysisSteps, ANALYSIS_STEPS, orderTempl
 import { FileInput, UploadZone, useFileDrop } from "./UploadZone";
 import { ribbonLayout } from "../deck/fit";
 import { useDeckFit } from "../deck/useDeckFit";
-import { useSwap } from "../kit/useSwap";
 
 /** idle — лента; run — файл уходит на сервер и разбирается; settle — разбор закончился, решается итог; done — все
  *  галочки держатся 560 мс; out — разбор гаснет 240 мс; fail — строка ошибки в коробке разбора. */
@@ -216,10 +215,10 @@ export function TemplateHead({ upload }: { upload: TemplateUpload }) {
 export function TemplateBody({ upload }: { upload: TemplateUpload }) {
   const { ui, dispatch, templates, notices } = useApp();
   const on = ui.screen === "create" && ui.open === "tpl" && !ui.more;
-  // помощник сужает колоду: лента — четыре обложки в три колонки (ribbonLayout), и тот же разбор. Число обложек
-  // меняется — лента меняется перекрёстным затуханием (useSwap): старая гаснет, подменяется невидимой, новая проявляется
-  const ribbon = useSwap(useDeckFit() === "wide" ? "wide" : "narrow", on);
-  const { cols, covers } = ribbonLayout(ribbon.shown);
+  // помощник сужает колоду: лента — четыре обложки в три колонки (ribbonLayout), и тот же разбор. Раскладка — показанная
+  // раскладка шага (Deck, usePlateFit): число обложек меняется в подмене перекрёстного затухания всего содержимого шага
+  const fit = useDeckFit();
+  const { cols, covers } = ribbonLayout(fit);
   const body = useRef<HTMLDivElement>(null);
   const over = useFileDrop(body, on && !upload.busy, upload.start);
   const peek = (id: string) => dispatch({ type: "set", patch: { tplPreview: id, tplDelete: null } });
@@ -227,8 +226,7 @@ export function TemplateBody({ upload }: { upload: TemplateUpload }) {
   const fileName = upload.file?.name ?? "";
   const info = notices.template?.kind === "info" ? notices.template.text : null;
   return (
-    <div className={ribbon.cls}>
-    <div id="p2-b1" ref={body} className={cls("p2-body p2-g4", on ? "p2-on" : "p2-off")} data-ribbon={ribbon.shown}
+    <div id="p2-b1" ref={body} className={cls("p2-body p2-g4", on ? "p2-on" : "p2-off")} data-ribbon={fit === "wide" ? "wide" : "narrow"}
       style={{ position: "relative", display: "grid", gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: 16, margin: "24px 0 0 192px" }}>
       {upload.phase === "idle" ? (
         <Ribbon covers={covers} fresh={upload.fresh} onPeek={peek} onGallery={gallery} onUpload={upload.pick} />
@@ -240,7 +238,6 @@ export function TemplateBody({ upload }: { upload: TemplateUpload }) {
       )}
       <UploadZone on={over} />
       <FileInput inputRef={upload.inputRef} onFile={upload.start} />
-    </div>
     </div>
   );
 }

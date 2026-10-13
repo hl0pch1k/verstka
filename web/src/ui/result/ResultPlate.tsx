@@ -26,11 +26,12 @@ import { ErrorLine } from "../kit/ErrorLine";
 import { Icon } from "../kit/Icon";
 import { cls } from "../kit/cls";
 import { useSwap } from "../kit/useSwap";
+import { useDeckFit } from "../deck/useDeckFit";
 import { BackStrip } from "../details/BackStrip";
 import { useGoHome } from "../shell/useGoHome";
 import { textStripMeta, writtenText } from "../layers/writerText";
 import { Aside, type AsideData } from "./Aside";
-import { compactChecks } from "./compact";
+import { compactChecks, headTight } from "./compact";
 import { CompactResult, type CompactData } from "./CompactResult";
 import { Film, loadedThumbs } from "./Film";
 import { FixSketch } from "./FixSketch";
@@ -285,6 +286,9 @@ function ResultBody({ g, goDown }: { g: Generation; goDown(): void }) {
   const swap = useSwap(wide, ui.helper);
   // карточка «Изображение» — одна, в колонке того вида, что сейчас на месте
   const compactCard = useSwap(ui.helper).shown;
+  // шапка рабочей области в тесной колоде рядом с колонкой 320 — без подписи «Замечания» (helper.css `.ra-whx`): смена —
+  // перекрёстным затуханием шапки, пока результат на экране; в подмене сетки (`swap`, слайд уже невидим) — сразу
+  const head = useSwap(headTight(useDeckFit(), swap.shown) ? "tight" : "wide", ui.screen === "result" && swap.phase === null);
   const noteActions: NoteActions = {
     onToggle: () => dispatch({ type: "set", patch: { note: !ui.note } }),
     onClose: () => dispatch({ type: "set", patch: { note: false } }),
@@ -317,8 +321,10 @@ function ResultBody({ g, goDown }: { g: Generation; goDown(): void }) {
         card={pic.column ? { shown: pic.column.shown, node: compactCard ? <PictureCard {...pic.column.card} idp="hp-p" /> : null } : null} />
       <div className={cls("p2-two", swap.shown && "hp-wide", swap.cls)} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 416px", gap: 48, height: 548, marginTop: 16 }}>
         <div style={{ display: "flex", flexDirection: "column", minWidth: 0, gridArea: "1 / 1" }}>
-          <WorkHead n={n} total={total} title={h} remarks={remarkCount(v)} remarksOn={ui.remarks} remarksOff={rm.off}
-            onPrev={() => setSelectedSlide(n - 1)} onNext={() => setSelectedSlide(n + 1)} onToggleRemarks={rm.toggle} onOpenLightbox={onOpenLightbox} />
+          <div className={cls("ra-whx", head.cls)} data-fit={head.shown}>
+            <WorkHead n={n} total={total} title={h} remarks={remarkCount(v)} remarksOn={ui.remarks} remarksOff={rm.off}
+              onPrev={() => setSelectedSlide(n - 1)} onNext={() => setSelectedSlide(n + 1)} onToggleRemarks={rm.toggle} onOpenLightbox={onOpenLightbox} />
+          </div>
           <Stage src={src} alt={h ? `Слайд ${n}: ${h}` : `Слайд ${n}`} aspect={aspect}>
             {pic.spots && <PictureSpots {...pic.spots} />}
             {rm.stage && <StageMarks {...rm.stage} />}

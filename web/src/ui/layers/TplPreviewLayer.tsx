@@ -14,7 +14,7 @@ import { ErrorLine } from "../kit/ErrorLine";
 import { Icon } from "../kit/Icon";
 import { Cover, hexOf, inkOf, usePickTemplate } from "../create/TemplateRibbon";
 import { useRise } from "../result/useGoDown";
-import { Layer, lsDelay, useLayerFit } from "./Layer";
+import { Layer, lsDelay, useLayer } from "./Layer";
 import { Scrim } from "./Scrim";
 
 const thumb = (id: string, n: number) => `/api/templates/${encodeURIComponent(id)}/files/thumbs/slide-${String(n).padStart(3, "0")}.jpg`;
@@ -55,8 +55,9 @@ export function TplPreviewLayer() {
     }
   }, [id, ctx, dispatch]);
   const open = !!id && ctx;
-  // помощник сужает колоду: сетка миниатюр 4 → 3 колонки перекрёстным затуханием (useLayerFit)
-  const fit = useLayerFit(open);
+  // помощник сужает колоду: сетка миниатюр 4 → 3 колонки перекрёстным затуханием (useLayer)
+  const layer = useLayer(open);
+  const fit = layer.fit;
 
   // последний показанный шаблон держится, пока слой уезжает (и если его только что удалили)
   const found = id ? templates.find((t) => t.template_id === id) : undefined;
@@ -132,7 +133,7 @@ export function TplPreviewLayer() {
   return (
     <>
       <Scrim open={open} onClose={close} label="Закрыть «Слайды шаблона»" z={8} />
-      <Layer id="tp-lay-p" open={open} top={120} z={open || !dead ? 8 : 6} label={`Слайды шаблона «${name}»`} role="dialog" onClose={close}>
+      <Layer id="tp-lay-p" presence={layer.presence} open={open} top={120} z={open || !dead ? 8 : 6} label={`Слайды шаблона «${name}»`} role="dialog" onClose={close}>
         {t && (
           <>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 24, height: 64 }}>

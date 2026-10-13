@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CLOSE_HOLD_MS, deckFit, deckLayout, errBelow, HELPER_CLOSE_MS, hintTail, ribbonLayout, rowMode, segStatus } from "./fit";
+import { CLOSE_HOLD_MS, deckFit, deckLayout, errBelow, HELPER_CLOSE_MS, hintTail, layoutKey, plateWidth, ribbonLayout, rowMode, segStatus } from "./fit";
 
 // ширины колоды: 1440 — 1392 (закрыт) и 976 (помощник); 1280 — 1232 и 816
 test("deckFit: закрытый помощник — широкая колода при 1280 и 1440", () => {
@@ -78,4 +78,32 @@ test("hintTail: «Это тема…» с перечнем — пока коло
   assert.equal(hintTail(1232), false);
   assert.equal(hintTail(976), false);
   assert.equal(hintTail(0), true);
+});
+
+// Fix round 3: содержимое плит «Создать» и «Сборки» меняет раскладку перекрёстным затуханием (usePlateFit) — по ключу всех
+// решений по ширине: затухание — только когда меняется хоть одно, а не на каждом пикселе ширины
+test("layoutKey: одна раскладка — один ключ (ширина внутри одних порогов)", () => {
+  assert.equal(layoutKey(976), layoutKey(1000));
+  assert.equal(layoutKey(816), layoutKey(900));
+  assert.equal(layoutKey(1392), layoutKey(1400));
+  assert.equal(layoutKey(1232), layoutKey(1240));
+});
+test("layoutKey: помощник открылся или закрылся — ключ другой при 1440 и 1280", () => {
+  assert.ok(layoutKey(1392) !== layoutKey(976));
+  assert.ok(layoutKey(1232) !== layoutKey(816));
+  // 1440 и 1280 без помощника — разные ряды параметров, подсказка «Это тема…», сегменты, строка ошибки
+  assert.ok(layoutKey(1392) !== layoutKey(1232));
+});
+test("layoutKey: меняется на каждом пороге — узкая/тесная колода, ряд, строка ошибки, подсказка, сегменты", () => {
+  for (const [a, b] of [[1101, 1100], [901, 900], [1351, 1350], [1386, 1385], [1301, 1300], [1360, 1359]]) {
+    assert.ok(layoutKey(a) !== layoutKey(b), `${a} / ${b}`);
+  }
+});
+test("layoutKey: не измерена — как широкая колода доски", () => {
+  assert.equal(layoutKey(0), layoutKey(1392));
+});
+test("plateWidth: содержимое плиты стоит в ширине колоды на конец хода (без полей 48 + 48); не измерена — нет", () => {
+  assert.equal(plateWidth(976), 880);
+  assert.equal(plateWidth(1392), 1296);
+  assert.equal(plateWidth(0), null);
 });

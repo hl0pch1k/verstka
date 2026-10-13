@@ -17,7 +17,6 @@ import { useHeld, useModelOn } from "./ImproveNote";
 import { ParamsAll } from "./ParamsAll";
 import { errBelow, rowMode } from "../deck/fit";
 import { useDeckWidth } from "../deck/useDeckFit";
-import { useSwap } from "../kit/useSwap";
 import {
   buildRequest, eyesOn, imagesHint, picturesOn, presetParams, SLIDES_LOCKED, slidesView, slideWord, startFailure, stepSlides,
   summaryLine, toggleEyes as nextEyes, togglePictures as nextPictures, toggleStrategy, variantCards, writesHint,
@@ -161,6 +160,7 @@ export function ParamsHead({ pp }: { pp: ParamsPlate }) {
   // уходящая строка гаснет со своим текстом
   const shown = useHeld(pp.line);
   // плита 03 уже доски (окно около 1280, помощник): строке ошибки тесно рядом со сводкой — она встаёт под ряд заголовка
+  // (ширина — показанной раскладки шага: меняется в подмене перекрёстного затухания, Deck `usePlateFit`)
   const low = errBelow(useDeckWidth());
   return (
     <>
@@ -210,7 +210,6 @@ function ShortSlides({ pp }: { pp: ParamsPlate }) {
 const SW_ROW = { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, height: 32 } as const;
 const SW_NAME = { fontSize: 14, fontWeight: 600, lineHeight: "20px", color: "#FFFFFF" } as const;
 
-/** Тело плиты 03 (слот `p3`): короткий ряд `#p2-b3`, «Все параметры» `#p2-b3m` и стрелка под «03». */
 /** Варианты в тесной колоде (помощник при 1280): одна коробка рядом со степпером, варианты — строками с галочкой. */
 function VariantList({ pp }: { pp: ParamsPlate }) {
   return (
@@ -225,21 +224,20 @@ function VariantList({ pp }: { pp: ParamsPlate }) {
   );
 }
 
+/** Тело плиты 03 (слот `p3`): короткий ряд `#p2-b3` и «Все параметры» `#p2-b3m`; стрелка под «03» — ParamsMore. */
 export function ParamsBody({ pp }: { pp: ParamsPlate }) {
-  const { ui, dispatch } = useApp();
+  const { ui } = useApp();
   const create = ui.screen === "create";
   const more = create && ui.more;
   const on = create && ui.open === "text" && !ui.more;
   // короткий ряд по ширине колоды (fit.ts `rowMode`): полный (доска), без переключателей, узкий, тесный — варианты
-  // карточками рядом со степпером не помещаются, одна коробка-список. Ряд меняется перекрёстным затуханием (useSwap):
-  // старый гаснет, подменяется невидимым — и разметка, и правила `.pp-row[data-row=…]` сразу, — новый проявляется
-  const width = useDeckWidth();
-  const row = useSwap(rowMode(width), on);
-  const tight = row.shown === "tight";
+  // карточками рядом со степпером не помещаются, одна коробка-список. Ширина — показанной раскладки шага: ряд (разметка
+  // и правила `.pp-row[data-row=…]`) меняется в подмене перекрёстного затухания всего содержимого шага (Deck `usePlateFit`)
+  const row = rowMode(useDeckWidth());
+  const tight = row === "tight";
   return (
     <>
-      <div className={row.cls}>
-      <div id="p2-b3" className={cls("p2-body p2-params pp-row", show(on))} data-row={row.shown} style={{ "--pp-n": pp.cards.length } as CSSProperties}>
+      <div id="p2-b3" className={cls("p2-body p2-params pp-row", show(on))} data-row={row} style={{ "--pp-n": pp.cards.length } as CSSProperties}>
         <ShortSlides pp={pp} />
         {tight ? <VariantList pp={pp} /> : pp.cards.map((v, i) => (
           <div key={v.name} className="p2-stag" style={{ transitionDelay: `${40 + i * 40}ms` }}>
@@ -253,7 +251,7 @@ export function ParamsBody({ pp }: { pp: ParamsPlate }) {
           </div>
         ))}
         {/* переключатели — только в полном ряду (варианту нужно 173 px); уже — они в «Все параметры» */}
-        {row.shown === "full" && (
+        {row === "full" && (
           <div className="p2-box p2-stag pp-sws" style={{ display: "flex", flexDirection: "column", justifyContent: "center", gap: 8, height: 88, padding: "8px 16px", transitionDelay: "160ms" }}>
             <div style={SW_ROW}>
               <span id="p2-sw1" style={SW_NAME}>Модель пишет тексты</span>
@@ -266,17 +264,25 @@ export function ParamsBody({ pp }: { pp: ParamsPlate }) {
           </div>
         )}
       </div>
-      </div>
-      <ParamsAll pp={pp} on={more} short={rowMode(width) !== "full"} />
-      <button type="button" className={cls("p2-more", more && "p2-more-up")} onClick={() => dispatch({ type: "more" })}
-        aria-expanded={more} aria-controls="p2-b3m" aria-label={more ? "Свернуть параметры" : "Открыть все параметры"} title={more ? "Свернуть" : "Все параметры"}
-        style={{ position: "absolute", left: 48, top: 140, zIndex: 1 }}>
-        <span className="p2-more-w" aria-hidden="true">03</span>
-        {/* как в V2: 64 px, толщина 2.25 — цифра «03» рядом той же прозрачности */}
-        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M6.5 9.5L12 15l5.5-5.5" />
-        </svg>
-      </button>
+      <ParamsAll pp={pp} on={more} short={row !== "full"} />
     </>
+  );
+}
+
+/** Стрелка «Все параметры» под «03» (слот `m3` колоды): стоит рядом с цифрой и не гаснет, когда содержимое шага меняет
+ *  раскладку. */
+export function ParamsMore() {
+  const { ui, dispatch } = useApp();
+  const more = ui.screen === "create" && ui.more;
+  return (
+    <button type="button" className={cls("p2-more", more && "p2-more-up")} onClick={() => dispatch({ type: "more" })}
+      aria-expanded={more} aria-controls="p2-b3m" aria-label={more ? "Свернуть параметры" : "Открыть все параметры"} title={more ? "Свернуть" : "Все параметры"}
+      style={{ position: "absolute", left: 48, top: 140, zIndex: 1 }}>
+      <span className="p2-more-w" aria-hidden="true">03</span>
+      {/* как в V2: 64 px, толщина 2.25 — цифра «03» рядом той же прозрачности */}
+      <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M6.5 9.5L12 15l5.5-5.5" />
+      </svg>
+    </button>
   );
 }

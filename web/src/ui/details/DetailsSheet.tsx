@@ -4,14 +4,14 @@
 // перекрёстным затуханием (p2-on 360 мс через 120 / p2-off 240 мс) и все стоят, пока лист открыт: их раскрытия и выбор
 // переживают переключение. Закрытый лист уезжает вниз непрозрачным со своей вкладкой (`sheetLast`); слой «Слайд N
 // шаблона» и меню варианта сбрасываются, когда лист уехал. Esc закрывает меню, слой шаблона или лист — что сверху.
-// Помощник сужает колоду — содержимое листа перестраивается перекрёстным затуханием (useLayerFit, `data-fit` листа).
+// Помощник сужает колоду — содержимое листа перестраивается перекрёстным затуханием (useLayer, `data-fit` листа).
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useApp } from "../../store";
 import type { Generation, Variant } from "../../types";
 import { cls } from "../kit/cls";
 import { Icon } from "../kit/Icon";
 import { Menu } from "../kit/Menu";
-import { Layer, LAYER_MS, lsDelay, useLayerFit } from "../layers/Layer";
+import { Layer, LAYER_MS, lsDelay, useLayer } from "../layers/Layer";
 import { Panel } from "./parts";
 import { PatternLayer } from "./PatternLayer";
 import { headerLayerOpen, menuItems, SHEET_TABS, tabStep } from "./sheetView";
@@ -47,8 +47,9 @@ export function DetailsSheet() {
   const deck = useDeckManifest(keep?.g.template_id ?? null, attempt);
   const [menu, setMenu] = useState(false);
   // помощник сужает колоду: колонки вкладок 2 → 1, шапка плотнее — перекрёстным затуханием содержимого листа (плита
-  // стоит); правила листа — по его `data-fit` (details.css), слой «Слайд N шаблона» гаснет и проявляется вместе с ним
-  const fit = useLayerFit(open);
+  // стоит); правила листа — по его `data-fit` (details.css); у слоя «Слайд N шаблона» — своя раскладка (PatternLayer)
+  const layer = useLayer(open);
+  const fit = layer.fit;
 
   const pattern = ui.pattern;
   useEffect(() => {
@@ -86,7 +87,7 @@ export function DetailsSheet() {
   const v = keep?.v;
   const score = g && v ? scoreOf(g, v) : null;
   return (
-    <Layer id="p2-lay-d" open={open} top={160} z={5} bare label="Подробнее" onClose={close}>
+    <Layer id="p2-lay-d" presence={layer.presence} open={open} top={160} z={5} bare label="Подробнее" onClose={close}>
       {g && v && (
         <section className="dd-sheet" data-fit={fit.shown} role="region" aria-label={`Подробнее о презентации «${docTitle(g, v)}»`} tabIndex={-1} style={{ outline: "none" }}>
           <div className={fit.cls}>
@@ -130,7 +131,7 @@ export function DetailsSheet() {
             </div>
           </div>
           </div>
-          <PatternLayer deck={deck} fx={fit.cls} />
+          <PatternLayer deck={deck} />
         </section>
       )}
     </Layer>

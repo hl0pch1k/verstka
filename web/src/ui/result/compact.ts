@@ -3,7 +3,7 @@
 // (qualityCard), чего в данных нет — того пункта нет.
 import { templateTitle } from "../../lib/plain";
 import type { Generation, Variant } from "../../types";
-import { PLATE_PAD } from "../deck/fit";
+import { PLATE_PAD, type DeckFit } from "../deck/fit";
 import type { SheetTab } from "../deck/geometry";
 import type { IconName } from "../kit/icons";
 import { qualityCard } from "./resultView";
@@ -70,3 +70,8 @@ export function ctaShort(deck: number, icons: number): boolean {
   const right = icons * (ICON + ICON_GAP) + ICON_GAP + CTA_FULL;
   return deck - PLATE_PAD - right - HEAD_GAP < TITLE_MIN;
 }
+
+/** Шапка рабочей области в тесной колоде (помощник при 1280) рядом с широкой колонкой (замечания, изображение): 376 px —
+ *  подпись «Замечания» у переключателя уходит (остаётся для чтения с экрана), ряд плотнее. Смена — перекрёстным
+ *  затуханием шапки (ResultPlate), а не мгновенно. */
+export const headTight = (fit: DeckFit, wide: boolean): boolean => fit === "tight" && wide;

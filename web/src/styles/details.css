@@ -292,7 +292,11 @@
   .dtp-g{grid-template-columns:minmax(0,1fr) !important}
   /* «Файлы»: карточки — одна колонка */
   .df-grid{grid-template-columns:minmax(0,1fr) !important}
-  /* «Слайд N шаблона»: образец и сведения о нём — рядом, места для содержания — под ними; всё прокручивается */
+}
+/* «Слайд N шаблона»: образец и сведения о нём — рядом, места для содержания — под ними; всё прокручивается. По `data-fit`
+   своей обёртки (`.dpt-fx`, PatternLayer `useLayer`): слой открыли посреди затухания листа — он встаёт в нынешней
+   раскладке, а не в той, что лист ещё показывает */
+:where(.dpt-fx[data-fit=narrow], .dpt-fx[data-fit=tight]){
   .dpt-g{grid-template-columns:minmax(0,1fr) 296px !important;align-content:start;overflow-y:auto;scrollbar-width:none}
   .dpt-g > section:last-child{grid-column:1 / -1;min-height:auto}
   .dpt-title{min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:24px;line-height:32px}

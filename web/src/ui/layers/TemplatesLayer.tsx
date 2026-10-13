@@ -8,7 +8,7 @@ import { cls } from "../kit/cls";
 import { Icon } from "../kit/Icon";
 import { Cover, inkOf, usePickTemplate } from "../create/TemplateRibbon";
 import { orderTemplates, tplMeta, UPLOAD_BUSY_TITLE } from "../create/ribbon";
-import { Layer, lsDelay, useLayerFit } from "./Layer";
+import { Layer, lsDelay, useLayer } from "./Layer";
 
 export function TemplatesLayer({ fresh, onUpload, busy }: {
   /** Только что загруженный шаблон — первым, как в ленте. */
@@ -23,10 +23,11 @@ export function TemplatesLayer({ fresh, onUpload, busy }: {
   const open = ui.sect === "tpls";
   const list = orderTemplates(templates, fresh);
   const close = () => dispatch({ type: "sect", sect: null });
-  // помощник сужает колоду: сетка 4 → 3 колонки перекрёстным затуханием (useLayerFit)
-  const fit = useLayerFit(open);
+  // помощник сужает колоду: сетка 4 → 3 колонки перекрёстным затуханием (useLayer)
+  const layer = useLayer(open);
+  const fit = layer.fit;
   return (
-    <Layer id="p2-lay-t" open={open} top={120} z={open ? 7 : 6} height={692} label="Шаблоны" onClose={close}>
+    <Layer id="p2-lay-t" presence={layer.presence} open={open} top={120} z={open ? 7 : 6} height={692} label="Шаблоны" onClose={close}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 24, height: 64 }}>
         <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
           <h2 id="ga-ttl" style={{ margin: 0, fontFamily: "'Unbounded','Manrope',sans-serif", fontWeight: 600, fontSize: 32, lineHeight: "40px", letterSpacing: "-0.03em", color: "#0B1220", whiteSpace: "nowrap" }}>Шаблоны</h2>

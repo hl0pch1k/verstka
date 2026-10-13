@@ -5,12 +5,17 @@
 // (bd-out): со «Сборки» на «Создать» или под поднимающуюся плиту результата. «Собрать ещё раз»: содержимое гаснет,
 // уходит тот же запрос, и плита собирается заново лесенкой, когда сервер ответил (новая сборка или новая строка
 // неудачи).
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+// Помощник сужает колоду: содержимое стоит в ширине колоды на конец хода (fit.ts `plateWidth`) и меняет раскладку
+// (колонка агента 416 → 320/288 под строкой фазы, кегль фазы, колонки раскадровки, переносы) перекрёстным затуханием
+// своей обёртки (usePlateFit, `.p2-fx[data-fit]` — build.css); плита и «03» не гаснут.
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { ActiveJob } from "../../lib/jobState";
 import { useApp } from "../../store";
 import { variantCards } from "../create/params";
 import { cls } from "../kit/cls";
 import { usePresence } from "../kit/usePresence";
+import { plateWidth } from "../deck/fit";
+import { DeckFitContext, useDeckLayoutNow, usePlateFit } from "../deck/useDeckFit";
 import { buildView } from "./buildView";
 import { Failed } from "./Failed";
 import { Phases } from "./Phases";
@@ -111,8 +116,16 @@ function BuildContent({ job, leaving }: { job: ActiveJob | null; leaving: boolea
   const vt = failed ? `остановилась на шаге ${view.step.replace(/^ошибка на шаге /, "")}` : queued ? "в очереди" : view.phase === "done" ? "готово"
     : `${view.step}${nowRole ? ` — ${nowRole.title.toLowerCase()}` : ""}`;
   const prog = view.progress ?? 0;
+  // раскладка плиты: смена — перекрёстным затуханием, пока содержимое на месте (смонтировано — на виду или уходит);
+  // внутри — показанная раскладка (вложенный DeckFitContext: колонки раскадровки, сегменты), `--deck-w` — её ширина
+  // (кегль фазы), ширина содержимого — колода на конец хода
+  const pf = usePlateFit(useDeckLayoutNow(), true);
+  const w = plateWidth(pf.layout.width);
+  const box = (w === null ? undefined : { width: w, "--deck-w": `${pf.layout.width}px` }) as CSSProperties | undefined;
 
   return (
+    <DeckFitContext.Provider value={pf.layout}>
+    <div className={cls("p2-fx bd-fxw", pf.cls)} data-fit={pf.layout.fit} style={box}>
     <div key={epoch} className={cls("p2-two bd-two", (leaving || retry) && "bd-out")}
       style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 416px", gridTemplateRows: "64px minmax(0, 1fr)", columnGap: 48, height: 652 }}>
       <Phases phase={view.phase} />
@@ -132,7 +145,7 @@ function BuildContent({ job, leaving }: { job: ActiveJob | null; leaving: boolea
         </div>
         <div style={{ position: "relative", display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
           <div className={failed ? "p2-off" : "p2-on"} style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
-            <Storyboard view={view} segs={segs} onPick={setPicked} aspect={aspect} />
+            <Storyboard view={view} segs={segs} onPick={setPicked} aspect={aspect} swapping={pf.phase !== null} />
           </div>
           {failed && (
             <Failed text={failed.text} onRetry={onRetry} onBack={() => dispatch({ type: "go", screen: "create" })} />
@@ -141,5 +154,7 @@ function BuildContent({ job, leaving }: { job: ActiveJob | null; leaving: boolea
       </div>
       <Roles view={view} />
     </div>
+    </div>
+    </DeckFitContext.Provider>
   );
 }

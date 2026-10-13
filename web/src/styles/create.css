@@ -188,7 +188,8 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 .pp-vt{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* Плита 03 уже доски (окно около 1280, помощник). Пороги — ui/deck/fit.ts (`rowMode`, `errBelow`), от целевой ширины
    колоды: ход сетки помощника их не пересекает (раньше — `@container p3`, срабатывал посреди хода).
-   - Короткий ряд (`.pp-row[data-row]`, ставит ParamsBody после перекрёстного затухания): `full` — доска; `short` — пять
+   - Короткий ряд (`.pp-row[data-row]`, ставит ParamsBody по показанной раскладке шага — меняется в подмене перекрёстного
+     затухания): `full` — доска; `short` — пять
      колонок не помещаются (варианту нужно 173 px), переключатели остаются в «Все параметры», варианты шире; `narrow` —
      степпер 200, у вариантов название в строку, галочка на месте описания; `tight` — варианты строками с галочкой в одной
      коробке рядом со степпером.
@@ -212,19 +213,35 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 .pp-vli-on .p2-vbox{background:#2563EB;box-shadow:none}
 .pp-vli-on .p2-vbox svg{opacity:1}
 
-/* ── Колода, суженная помощником (задача 13): `.p2-deck[data-fit=narrow|tight]` — решение по целевой ширине колоды
-   (ui/deck/fit.ts: узкая ≤ 1100 px — 976 при 1440, тесная ≤ 900 px — 816 при 1280). Открытие — с первого кадра хода
-   (раскладки резиновые), закрытие — когда сетка доехала: посреди хода ничего не перестраивается. Ничего не наезжает:
-   что не помещается, сжимается многоточием или уходит. Сколько обложек в ленте и колонок у неё, какой короткий ряд —
-   решает JS; лента и ряд меняются перекрёстным затуханием, их правила — по своим data- (`data-ribbon`, `data-row`). */
+/* ── Колода, суженная помощником (задача 13). Решение — по целевой ширине колоды (ui/deck/fit.ts: узкая ≤ 1100 px — 976
+   при 1440, тесная ≤ 900 px — 816 при 1280). Содержимое шага (`.p2-fxbox`, Deck `StepBox`) — место плиты целиком
+   шириной колоды на конец хода: колода сужается или расширяется, край плиты подъезжает к содержимому, а оно не
+   перестраивается и не переносится. Раскладку оно меняет перекрёстным затуханием (Deck `usePlateFit`): ряд заголовка
+   справа от названия (`.p2-hx`) и тело шага гаснут 120 мс, подменяются невидимыми — правила ниже по `data-fit` этих
+   обёрток (`.p2-fx`), а не колоды, — и проявляются 240 мс. Плита, номер и название шага не гаснут: название сжимается до
+   24 px transform'ом вместе с колодой (по `data-fit` колоды: с первого кадра открытия, при закрытии — когда сетка
+   доехала), место в ряду держит невидимая мерка — она меняется в подмене, пока соседи справа невидимы. Ничего не
+   наезжает: что не помещается, сжимается многоточием или уходит. Сколько обложек в ленте и колонок у неё, какой
+   короткий ряд — решает JS по показанной раскладке шага (вложенный DeckFitContext). */
+.p2-fxbox{position:absolute;left:0;top:0;right:0;bottom:0;box-sizing:border-box;padding:40px 48px}
+.p2-hx{display:flex;align-items:center;gap:24px;flex:1 1 0%;min-width:0;height:64px}
+.p2-ttl-box{position:relative;display:block;height:40px}
+.p2-ttl-sz{display:block;visibility:hidden}
+.p2-ttl-nar .p2-ttl-sz{font-size:24px}
+.p2-ttl-v{position:absolute;left:0;top:0;transform-origin:left center;transition:transform 520ms var(--ease)}
+:where(.p2-deck[data-fit=narrow], .p2-deck[data-fit=tight]) .p2-ttl-v{transform:scale(.75)}
+@media (max-width: 900px){
+  .p2-fxbox{position:static;width:auto !important;padding:0}
+  .p2-hx{flex-wrap:wrap;height:auto;row-gap:16px}
+  .p2-ttl-box{height:auto}
+  .p2-ttl-sz{display:none}
+  .p2-ttl-v{position:static;transform:none !important}
+}
 .tx-top-t{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .tx-top-m,.tx-top-s,.pp-cta-s{display:none}
 /* обложки ленты в узкой колоде уже своих картинок — видна левая часть (там начинается заголовок слайда) */
 :where([data-ribbon=narrow]) :is(.tt-tile,.an-tile) .p2-cover img{object-position:0 50%}
-:where(.p2-deck[data-fit=narrow], .p2-deck[data-fit=tight]){
-  /* названия шагов — 24/32, как в V2 на узком экране: номер шага и кнопки шапки встают рядом (у слоёв — по своему
-     data-fit, layers.css `.gh-body`, result.css `.rt-hd`) */
-  .p2-ttl{font-size:24px;line-height:32px}
+:where(.p2-fx[data-fit=narrow], .p2-fx[data-fit=tight]){
   /* «Это готовый текст…» — в ряду шапки и короче */
   .tx-top{position:static;height:auto;flex:0 1 auto}
   .tx-top-l{display:none}
@@ -240,12 +257,12 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
      под рядом — `.pp-low`), кнопка — у правого края */
   .pp-sumt{display:none}
   .pp-sum{display:contents}
-  .p2-hrow > span:has(+ .pp-sum){display:none}
+  & > span:has(+ .pp-sum){display:none}
   .pp-cta{margin-left:auto}
   /* «Все параметры»: миниатюры вариантов уступают место названию и подсказке */
   .cp-vc .pp-th{display:none}
 }
-:where(.p2-deck[data-fit=tight]){
+:where(.p2-fx[data-fit=tight]){
   .tx-top-m{display:none}
   .tx-top-s{display:inline}
   .pp-cta-l{display:none}
