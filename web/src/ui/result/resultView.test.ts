@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ringDash } from "../kit/ring";
-import type { AgentEvent, AuditReport, AuditSummary, DeckOutline, DesignEye, Generation, Issue, OutlineSlide, Variant } from "../../types";
+import type { AgentEvent, AuditReport, AuditSummary, DeckOutline, DesignEye, Generation, Issue, ModelsStatus, OutlineSlide, Variant } from "../../types";
 import {
-  agentLines, deckPreset, deckStrip, docLine, docTitle, eyesCard, fileBase, latestWithModel, noteView, qualityCard, remarkCount, rewriteText,
-  scoreOf, slidesOf, variantSegs, whyText,
+  agentLines, deckPreset, deckStrip, docLine, docTitle, eyesCard, fileBase, latestWithModel, noteView, openDeck, qualityCard, recheckIn, remarkCount,
+  retryLeft, retryTick, rewriteText, scoreOf, slideForKey, slideSrc, slidesOf, switchShots, variantSegs, whyText,
 } from "./resultView";
 
 // Данные — как у сохранённой генерации «Интеграл» (workspace/runs/20261008-173516-113d20), сокращённо
@@ -148,6 +148,13 @@ test("«Почему так»: довод дизайнера о текущем �
   assert.equal(whyText(v, 2), "Пункты — по порядку");
   assert.equal(whyText(v, 3), null);
   assert.equal(whyText(variant(), 1), null);
+  // пустой довод дизайнера — как его нет: говорит план
+  const blank = variant({
+    outline: outline("t", [slide("1", { rationale: "bullets — по порядку" })]),
+    design: [{ index: 1, rationale: "  ", alternatives: [], takeaway: null, footnote: null, spec_ref: 1 }],
+  });
+  assert.equal(whyText(blank, 1), "Пункты — по порядку");
+  assert.equal(whyText({ ...blank, design: [{ ...blank.design![0], rationale: "" }] }, 1), "Пункты — по порядку");
 });
 
 test("«Взгляд дизайнера»: что модель увидела на текущем слайде, иначе итог по презентации; не смотрела — карточки нет", () => {
@@ -182,6 +189,8 @@ test("уведомление: текст написал агент — исто�
   assert.equal(n.title, "Текст написал агент — проверьте факты");
   assert.equal(n.body, "По статье Википедии «Интеграл».");
   assert.deepEqual([n.showText, n.retry, n.rewrite, n.retryWait], [true, true, true, 0]);
+  assert.equal(n.label, "Уведомление о тексте, который написал агент");
+  assert.equal("tone" in n, false);
   // сказать нечего — таблетки нет
   assert.equal(noteView(gen({ slides: 12 }), v, 12, null), null);
   // каркас о частной теме: только «Дописать текст»
@@ -189,6 +198,10 @@ test("уведомление: текст написал агент — исто�
   assert.equal(sk?.title, "Это каркас: о вашей теме знаете только вы");
   assert.deepEqual([sk?.showText, sk?.retry, sk?.rewrite], [false, false, true]);
   assert.equal(sk?.body, "Допишите тезисы и цифры — слайды станут содержательнее.");
+  assert.equal(sk?.label, "Уведомление о каркасе презентации");
+  // слайдов вышло меньше, чем просили
+  const short = noteView(gen({ slides: 12 }), variant({ slides: Array(8).fill("s") }), 8, null);
+  assert.equal(short?.label, "Уведомление о числе слайдов");
 });
 
 test("уведомление: модель не ответила — имя модели не звучит", () => {
@@ -199,7 +212,83 @@ test("уведомление: модель не ответила — имя мо
   const n = noteView(g, variant({ slides: ["s"] }), 1, null);
   assert.equal(n?.title, "Модель не ответила: сервер модели перегружен");
   assert.equal(n?.retry, true);
+  assert.equal(n?.label, "Уведомление о сборке без модели");
   assert.ok(!/Qwen/.test(`${n?.title} ${n?.body} ${n?.full}`));
+});
+
+test("пауза модели: обратный отсчёт до повтора и перепроверка состояния", () => {
+  // 50 с паузы, получено в момент 1000: через 14,2 с осталось 36 с (с округлением вверх), к концу — 0
+  assert.equal(retryLeft(50, 1000, 1000), 50);
+  assert.equal(retryLeft(50, 1000, 15200), 36);
+  assert.equal(retryLeft(50, 1000, 51000), 0);
+  assert.equal(retryLeft(50, 1000, 90000), 0);
+  assert.equal(retryLeft(0, 1000, 1000), 0);
+  // часы назад не идут: «сейчас» раньше получения — пауза целиком
+  assert.equal(retryLeft(50, 1000, 500), 50);
+  // следующий пересчёт — через 15 с, а последний — ровно к концу паузы; пауза кончилась — пересчитывать нечего
+  assert.equal(retryTick(50, 1000, 1000), 15000);
+  assert.equal(retryTick(50, 1000, 46000), 5000);
+  assert.equal(retryTick(50, 1000, 51000), null);
+  assert.equal(retryTick(0, 1000, 1000), null);
+  // состояние модели перепроверяется через 2 с после конца паузы (не позже чем через 10 минут), только пока она на паузе
+  const st = (patch: Partial<ModelsStatus>) => ({ configured: true, state: "down", retry_in: 60, links: [], ...patch }) as unknown as ModelsStatus;
+  assert.equal(recheckIn(st({})), 62);
+  assert.equal(recheckIn(st({ retry_in: 3600 })), 600);
+  assert.equal(recheckIn(st({ state: "ok" })), 0);
+  assert.equal(recheckIn(st({ retry_in: null })), 0);
+  assert.equal(recheckIn(null), 0);
+});
+
+test("«Собрать ещё раз» оживает, когда пауза модели кончилась", () => {
+  const g = gen({
+    use_models: true, brief: "текст",
+    planner: { by_model: false, model: "qwen", model_label: "Qwen3.8-27B", reason_code: "congested", reason: "перегружен", advice: "Соберите ещё раз через минуту.", retryable: true },
+  });
+  const st = { configured: true, state: "down", retry_in: 50, retryable: true, advice: "Соберите ещё раз через минуту.", links: [] } as unknown as ModelsStatus;
+  const v = variant({ slides: ["s"] });
+  assert.equal(noteView(g, v, 1, { status: st, latest: true, retryIn: retryLeft(50, 0, 10000) })?.retryWait, 40);
+  assert.equal(noteView(g, v, 1, { status: st, latest: true, retryIn: retryLeft(50, 0, 50000) })?.retryWait, 0);
+});
+
+test("клавиши сцены: ←/→ — соседний слайд, Home/End — первый и последний", () => {
+  assert.equal(slideForKey("ArrowRight", 3, 12), 4);
+  assert.equal(slideForKey("ArrowLeft", 3, 12), 2);
+  assert.equal(slideForKey("Home", 7, 12), 1);
+  assert.equal(slideForKey("End", 7, 12), 12);
+  // на краю слайд тот же; чужие клавиши — не наши
+  assert.equal(slideForKey("ArrowRight", 12, 12), 12);
+  assert.equal(slideForKey("ArrowLeft", 1, 12), 1);
+  assert.equal(slideForKey("PageDown", 3, 12), null);
+  assert.equal(slideForKey("a", 3, 12), null);
+});
+
+test("превью слайда варианта: с ревизией, слайд — в пределах варианта", () => {
+  const v = variant({ slides: ["/s1.jpg", "/s2.jpg?x=1"] });
+  assert.equal(slideSrc(v, 1), "/s1.jpg?v=0");
+  assert.equal(slideSrc(v, 2), "/s2.jpg?x=1&v=0");
+  // у варианта короче слайд обрезается до последнего
+  assert.equal(slideSrc(v, 9), "/s2.jpg?x=1&v=0");
+  assert.equal(slideSrc(variant(), 1), null);
+});
+
+test("смена варианта: декодируется его текущий слайд и уже показанные миниатюры", () => {
+  const t = variant({ strategy: "compact", slides: ["/c1.jpg", "/c2.jpg", "/c3.jpg"] });
+  assert.deepEqual(switchShots(t, 2, [1, 2, 3]), ["/c2.jpg?v=0", "/c1.jpg?v=0", "/c3.jpg?v=0"]);
+  // миниатюры за пределами варианта — нет; слайд дальше конца — последний
+  assert.deepEqual(switchShots(t, 7, [4, 5]), ["/c3.jpg?v=0"]);
+  assert.deepEqual(switchShots(variant(), 1, [1]), []);
+});
+
+test("полоса 01 при перезагрузке: шаблон открытой презентации, как только он известен", () => {
+  const g = gen({ id: "g1", template_id: "vk" });
+  const list = [{ id: "g1", template_id: "vk-list", strategies: [] }, { id: "g2", template_id: "other", strategies: [] }];
+  // загружена — она сама
+  assert.equal(openDeck(g, list, "g1")?.template_id, "vk");
+  // грузится — её мета из списка
+  assert.equal(openDeck(null, list, "g1")?.template_id, "vk-list");
+  // ещё ничего не известно — ничего (не выбранный прежде шаблон)
+  assert.equal(openDeck(null, [], "g1"), null);
+  assert.equal(openDeck(null, list, null), null);
 });
 
 test("«Изменить текст»: параметры презентации — как она была собрана", () => {

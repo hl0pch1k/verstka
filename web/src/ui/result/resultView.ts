@@ -3,12 +3,13 @@
 // того нет и на экране: функция карточки отвечает null или пустым списком, и карточка не рисуется.
 import { agentSummary, hasAgentWork, plainWords } from "../../lib/agent";
 import { designEyeLine, problemsText } from "../../lib/designEye";
-import { deckNotice, skeletonDeck, type LiveModel } from "../../lib/modelText";
+import { deckNotice, modelFailed, skeletonDeck, type LiveModel } from "../../lib/modelText";
 import { figuresLine } from "../../lib/narrate";
 import { fileSafe } from "../../lib/plain";
+import { variantRev, withRev } from "../../lib/rev";
 import { plural } from "../../lib/utils";
 import type { ComposerPreset } from "../../store";
-import type { Generation, GenerationMeta, Variant } from "../../types";
+import type { Generation, GenerationMeta, ModelsStatus, Variant } from "../../types";
 import type { IconName } from "../kit/icons";
 
 const cap = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
@@ -19,6 +20,28 @@ export const slidesOf = (v: Variant | null | undefined): number => (v ? v.slides
 
 /** Заголовок слайда `n` (1-based) по плану варианта; нет — пусто. */
 export const slideHeadline = (v: Variant | null | undefined, n: number): string => v?.outline?.slides[n - 1]?.headline?.trim() ?? "";
+
+/** Превью слайда `n` (1-based) варианта с ревизией файлов (`withRev`); у варианта короче — его последний слайд; нет
+ *  картинок — null. Одно и то же для сцены, ленты и заблаговременного декодирования. */
+export function slideSrc(v: Variant | null | undefined, n: number): string | null {
+  if (!v?.slides.length) return null;
+  const raw = v.slides[Math.min(Math.max(1, n), v.slides.length) - 1];
+  return raw ? withRev(raw, variantRev(v)) : null;
+}
+
+/** Что декодировать до смены варианта на `target`, чтобы слайд, оценка и лента сменились вместе и без серых провалов:
+ *  его превью слайда `n` и картинки миниатюр, которые в ленте уже показаны (`thumbs`, с 1); без повторов. */
+export function switchShots(target: Variant, n: number, thumbs: number[]): string[] {
+  const all = [slideSrc(target, n), ...thumbs.filter((k) => k >= 1 && k <= target.slides.length).map((k) => slideSrc(target, k))];
+  return [...new Set(all.filter((u): u is string => !!u))];
+}
+
+/** Клавиши сцены: ←/→ — соседний слайд, Home/End — первый и последний (в пределах 1…total); чужая клавиша — null. */
+export function slideForKey(key: string, n: number, total: number): number | null {
+  const last = Math.max(1, total);
+  const to = key === "ArrowRight" ? n + 1 : key === "ArrowLeft" ? n - 1 : key === "Home" ? 1 : key === "End" ? last : null;
+  return to === null ? null : Math.min(Math.max(1, to), last);
+}
 
 /** Название презентации (V2 `docTitle`): заголовок плана варианта, иначе генерации, иначе «Презентация». */
 export function docTitle(g: Generation, v: Variant | null | undefined): string {
@@ -103,7 +126,8 @@ export function agentLines(v: Variant | null | undefined): { step: string; text:
 
 /** «Почему так»: довод дизайнера о слайде `n` словами интерфейса (`plainWords`); довода нет — null, карточки нет. */
 export function whyText(v: Variant | null | undefined, n: number): string | null {
-  const raw = v?.design?.find((d) => d.index === n)?.rationale ?? v?.outline?.slides[n - 1]?.rationale ?? null;
+  // пустой довод дизайнера — как его нет: говорит план
+  const raw = v?.design?.find((d) => d.index === n)?.rationale?.trim() || v?.outline?.slides[n - 1]?.rationale || null;
   const t = raw?.trim() ? plainWords(raw).trim() : "";
   return t ? cap(t) : null;
 }
@@ -138,12 +162,13 @@ export function eyesCard(v: Variant | null | undefined, n: number): EyesView | n
 
 /** Таблетка уведомления над рабочей областью (R-aside `ra-note`): заголовок, строка-основание (одна строка; целиком —
  *  в подсказке `full`) и действия. Текст и наличие — `deckNotice`. Когда текст написал агент, таблетка предлагает
- *  всё, что на доске: «Показать текст», «Собрать ещё раз» (тот же запрос) и «Дописать текст». Сказать нечего — null. */
+ *  всё, что на доске: «Показать текст», «Собрать ещё раз» (тот же запрос) и «Дописать текст». Сказать нечего — null.
+ *  `label` — о чём уведомление (имя области для чтения с экрана). */
 export interface NoteView {
   title: string;
   body: string;
   full: string;
-  tone: "warn" | "info";
+  label: string;
   showText: boolean;
   retry: boolean;
   /** Секунд до повтора, который имеет смысл (кнопка ждёт, выключенная); 0 — сейчас. */
@@ -163,16 +188,39 @@ export function noteView(g: Generation, v: Variant, total: number, live: LiveMod
   const basis = plainNotice(n.basis, labels);
   const help = n.help ? plainNotice(cap(n.help), labels) : "";
   const written = n.showText;
+  const label = written ? "Уведомление о тексте, который написал агент"
+    : modelFailed(g) ? "Уведомление о сборке без модели"
+      : v.outline?.planned_by === "skeleton" ? "Уведомление о каркасе презентации" : "Уведомление о числе слайдов";
   return {
     title: plainNotice(n.title, labels).replace(/\.\s*$/, ""),
     body: help || basis,
     full: [basis, help, n.owner ?? ""].filter(Boolean).join(" "),
-    tone: n.tone,
+    label,
     showText: n.showText,
     retry: n.retry || written,
     retryWait: n.retryWait,
     rewrite: n.rewrite || written,
   };
+}
+
+/** Секунд до конца паузы модели: `s` секунд паузы, полученных в момент `at`, к моменту `now` (мс), с округлением вверх;
+ *  пауза кончилась или её нет — 0. Часы назад не идут. */
+export function retryLeft(s: number, at: number, now: number): number {
+  if (!(s > 0)) return 0;
+  return Math.max(0, Math.ceil(s - Math.max(0, now - at) / 1000));
+}
+
+/** Через сколько миллисекунд пересчитать паузу: раз в 15 с (как старый экран), а последний раз — ровно к её концу, чтобы
+ *  «Собрать ещё раз» ожил вовремя; пауза кончилась — null. */
+export function retryTick(s: number, at: number, now: number): number | null {
+  if (!retryLeft(s, at, now)) return null;
+  return Math.min(15000, Math.max(0, s * 1000 - Math.max(0, now - at)));
+}
+
+/** Через сколько секунд перепросить состояние модели, пока она на паузе: через 2 с после конца паузы, но не позже чем
+ *  через 10 минут; не на паузе — 0 (не перепрашивать). */
+export function recheckIn(st: ModelsStatus | null | undefined): number {
+  return st?.state === "down" && st.retry_in ? Math.min(st.retry_in + 2, 600) : 0;
 }
 
 /** Почему «Собрать ещё раз» ждёт (подсказка выключенной кнопки) — по состоянию модели на паузе. */
@@ -186,6 +234,13 @@ export function latestWithModel(list: GenerationMeta[], g: GenerationMeta): bool
   if (!list.some((x) => x.id === g.id)) return false;
   const t = g.created_at ?? 0;
   return !list.some((x) => x.id !== g.id && x.use_models && x.status === "done" && (x.created_at ?? 0) > t);
+}
+
+/** Открытая презентация для полосы 01: загруженная, а пока она грузится (перезагрузка страницы) — её мета из списка;
+ *  ничего не известно — null (полоса не говорит о шаблоне, выбранном раньше). */
+export function openDeck(g: Generation | null, list: GenerationMeta[], id: string | null): GenerationMeta | null {
+  if (g) return g;
+  return id ? list.find((x) => x.id === id) ?? null : null;
 }
 
 /** «Изменить текст» / «Дописать текст»: параметры презентации — как её собрали (аудитория, тип, число слайдов,

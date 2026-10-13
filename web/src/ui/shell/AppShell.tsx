@@ -22,7 +22,7 @@ import { TemplatesLayer } from "../layers/TemplatesLayer";
 import { TplDeleteDialog } from "../layers/TplDeleteDialog";
 import { TplPreviewLayer } from "../layers/TplPreviewLayer";
 import { ResultPlate } from "../result/ResultPlate";
-import { deckStrip } from "../result/resultView";
+import { deckStrip, openDeck } from "../result/resultView";
 import { Header } from "./Header";
 
 const ROOT: CSSProperties = {
@@ -51,12 +51,15 @@ function buildStrip(g: Generation | null, v: Variant | null): StripData | undefi
 }
 
 export function AppShell() {
-  const { templates, templateId, templateLabel, ui, dispatch, brief, improveSource, generation, activeVariant } = useApp();
-  // полоса 01 на результате — шаблон открытой презентации (шаблона нет в библиотеке — его имя), иначе выбранный
-  const deck = ui.screen === "result" ? generation : null;
-  const s1 = deck
-    ? templateStrip(templates.find((t) => t.template_id === deck.template_id)) ?? { title: templateLabel(deck.template_id, deck.template_file) }
+  const { templates, templateId, templateLabel, ui, dispatch, brief, improveSource, generation, generationId, generations, activeVariant } = useApp();
+  // полоса 01 на результате — шаблон открытой презентации (шаблона нет в библиотеке — его имя); пока она грузится после
+  // перезагрузки — по её мете из списка, а пока ничего не известно — пусто, не выбранный раньше шаблон. Иначе — выбранный
+  const result = ui.screen === "result";
+  const open = result ? openDeck(generation, generations, generationId) : null;
+  const s1 = result
+    ? open ? templateStrip(templates.find((t) => t.template_id === open.template_id)) ?? { title: templateLabel(open.template_id, open.template_file) } : undefined
     : templateStrip(templates.find((t) => t.template_id === templateId));
+  const deck = result ? generation : null;
   const s3 = buildStrip(generation, activeVariant);
   // шаг «Текст» — одно состояние на заголовок и тело плиты 02; разбор текста в нём считается один раз на правку
   const text = useTextPlate();

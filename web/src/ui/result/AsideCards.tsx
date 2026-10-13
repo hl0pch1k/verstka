@@ -1,19 +1,11 @@
 // Карточки колонки результата (R-aside `ra-card`): «Качество», «Как работал агент», «Почему так», «Взгляд дизайнера».
 // Каждая открывает лист «Подробнее» на своей вкладке. Данные — resultView: карточки без данных нет, пустых карточек не
 // бывает. Сменились вариант или слайд — меняющийся текст проявляется заново (ra-xf 240 мс), сама карточка стоит.
-import { useRef } from "react";
 import type { SheetTab } from "../deck/geometry";
 import { Icon, type IconName } from "../kit/Icon";
 import { ScoreRing } from "../kit/ScoreRing";
+import { useChanged } from "../kit/useChanged";
 import type { EyesView, QualityView } from "./resultView";
-
-/** Ключ сменился хотя бы раз: текст уже не первый — он проявляется (ra-xf), а не входит вместе с колонкой. */
-export function useChanged(key: string): boolean {
-  const first = useRef(key);
-  const changed = useRef(false);
-  if (key !== first.current) changed.current = true;
-  return changed.current;
-}
 
 const Go = () => <Icon name="chevron-right" size={16} className="ra-go" />;
 
@@ -105,7 +97,7 @@ function WhyCard({ text, slide, k, onOpen }: { text: string; slide: number; k: s
   );
 }
 
-const SHOT = { display: "block", width: 80, height: 45, aspectRatio: "16 / 9", objectFit: "cover", borderRadius: 12, boxShadow: "0 0 0 1px rgba(11,18,32,.08)" } as const;
+const SHOT = { display: "block", width: 80, height: 45, aspectRatio: "16 / 9", objectFit: "contain", borderRadius: 12, background: "#FFFFFF", boxShadow: "0 0 0 1px rgba(11,18,32,.08)" } as const;
 const SHOT_CAP = { fontSize: 12, fontWeight: 600, lineHeight: "16px" } as const;
 
 function EyesCard({ e, slide, k, onOpen }: { e: EyesView; slide: number; k: string; onOpen(): void }) {

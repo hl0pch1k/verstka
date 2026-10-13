@@ -6,6 +6,7 @@
 import type { ReactNode } from "react";
 import { cls } from "../kit/cls";
 import { Icon } from "../kit/Icon";
+import { Spinner } from "../kit/Spinner";
 import type { NoteView } from "./resultView";
 
 export interface NoteActions {
@@ -17,6 +18,8 @@ export interface NoteActions {
   onRewrite(): void;
   /** «Собрать ещё раз» сейчас не начнётся (идёт другая сборка, модель на паузе) — кнопка приглушена, причина в подсказке. */
   rebuildOff: string | null;
+  /** «Собрать ещё раз» нажата, сервер ещё не ответил: дуга загрузки вместо значка, кнопка занята. */
+  rebuildBusy?: boolean;
 }
 
 /** Ряд уведомления без таблетки: сказать о презентации нечего — на его месте только строка неудачи (если есть). */
@@ -36,8 +39,9 @@ export function NotePill({ note, open, actions, line }: {
   line?: ReactNode;
 }) {
   const off = actions.rebuildOff;
+  const busy = !!actions.rebuildBusy;
   return (
-    <div className={cls("ra-note p2-in", open && "ra-note-on")} role="note" aria-label="Уведомление о тексте презентации" style={{ animationDelay: "160ms" }}>
+    <div className={cls("ra-note p2-in", open && "ra-note-on")} role="note" aria-label={note.label} style={{ animationDelay: "160ms" }}>
       <button type="button" className="ra-ntg" onClick={actions.onToggle} aria-expanded={open} aria-controls="ra-nd" title={open ? "Свернуть" : "Показать действия"}>
         <span style={{ display: "flex", flex: "none", color: "#2563EB" }}><Icon name="info" size={20} /></span>
         <span>{note.title}</span>
@@ -57,9 +61,9 @@ export function NotePill({ note, open, actions, line }: {
         )}
         {note.retry && (
           <span className="ra-ni ra-ni3">
-            <button type="button" className={cls("p2-ob ra-nb", off && "rt-nb-off")} onClick={actions.onRebuild} aria-disabled={off ? true : undefined}
-              title={off ?? "Собрать ту же презентацию заново"}>
-              <Icon name="retry" size={18} />
+            <button type="button" className={cls("p2-ob ra-nb", off && "rt-nb-off")} onClick={actions.onRebuild} aria-disabled={off || busy ? true : undefined}
+              aria-busy={busy || undefined} title={off ?? (busy ? "Отправляю запрос на сборку…" : "Собрать ту же презентацию заново")}>
+              {busy ? <span style={{ display: "flex", color: "#2563EB" }}><Spinner size={18} /></span> : <Icon name="retry" size={18} />}
               <span>Собрать ещё раз</span>
             </button>
           </span>

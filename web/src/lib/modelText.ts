@@ -71,7 +71,7 @@ const WHY: Record<string, string> = {
 };
 
 /** The built-in planner took over because a model failed — and the server knows why (a notice is worth showing). */
-function modelFailed(g: Generation): boolean {
+export function modelFailed(g: Generation): boolean {
   const p = g.planner;
   return !!g.use_models && !!p && p.by_model === false && p.planned_by !== "supplied" && !!p.reason_code && p.reason_code !== "off";
 }

@@ -4,7 +4,8 @@
 import type { SheetTab } from "../deck/geometry";
 import { Icon, type IconName } from "../kit/Icon";
 import { Segmented } from "../kit/Segmented";
-import { AsideCards, useChanged, type AsideCardsData } from "./AsideCards";
+import { useChanged } from "../kit/useChanged";
+import { AsideCards, type AsideCardsData } from "./AsideCards";
 
 const UNB = "'Unbounded','Manrope',sans-serif";
 
@@ -53,7 +54,11 @@ export function Aside({ d, onVariant, onEditText, open }: {
   return (
     <aside className="p2-in" aria-label={`Презентация «${d.title}»`} style={{ minWidth: 0, height: 548, margin: "0 -4px", animationDelay: "240ms" }}>
       <div className="ra-col p2-fade" style={{ display: "flex", flexDirection: "column", height: "100%", padding: "0 4px 24px", overflowY: "auto" }}>
-        <h1 style={{ margin: 0, fontFamily: UNB, fontWeight: 600, fontSize: 40, lineHeight: "48px", letterSpacing: "-0.03em", color: "#0B1220" }}>{d.title}</h1>
+        {/* длинное название — две строки и многоточие, целиком — в подсказке */}
+        <h1 title={d.title} style={{
+          margin: 0, fontFamily: UNB, fontWeight: 600, fontSize: 40, lineHeight: "48px", letterSpacing: "-0.03em", color: "#0B1220",
+          display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", overflowWrap: "anywhere",
+        }}>{d.title}</h1>
         <p style={{ margin: "8px 0 0", fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#5A6272" }}>{d.line}</p>
         {d.score !== null && (
           <div style={{ display: "flex", alignItems: "flex-end", gap: 16, height: 72, marginTop: 32 }}>
@@ -65,17 +70,20 @@ export function Aside({ d, onVariant, onEditText, open }: {
             </span>
           </div>
         )}
-        <Segmented label="Вариант оформления" value={d.variant} onPick={onVariant} style={{ marginTop: 24 }}
-          items={d.variants.map((v) => ({
-            key: v.key,
-            title: v.title,
-            label: (
-              <span className="ra-vg">
-                <span>{v.label}</span>
-                {v.score !== null && <span className="p2-rsc">{v.score}</span>}
-              </span>
-            ),
-          }))} />
+        {/* один вариант — выбирать не из чего */}
+        {d.variants.length > 1 && (
+          <Segmented label="Вариант оформления" value={d.variant} onPick={onVariant} style={{ marginTop: 24 }}
+            items={d.variants.map((v) => ({
+              key: v.key,
+              title: v.title,
+              label: (
+                <span className="ra-vg">
+                  <span>{v.label}</span>
+                  {v.score !== null && <span className="p2-rsc">{v.score}</span>}
+                </span>
+              ),
+            }))} />
+        )}
         {d.pptx && (
           <a className="p2-cta" href={d.pptx} download={`${d.fileBase}.pptx`} title={d.pptxTitle} style={{ width: "100%", marginTop: 24 }}>
             <Icon name="download" size={20} />

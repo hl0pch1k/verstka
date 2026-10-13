@@ -1,8 +1,8 @@
 /* Плита 04 «Результат» (ui/result). Блок «Результат — как «Правая колонка целиком»» — дословно из boards/V2.dc.html
  * (<helmet><style>, он же — стили доски R-aside): уведомление-таблетка ra-note, сцена ra-stage, колонка ra-col, карточки
  * ra-card. Общие правила результата (p2-rbl, p2-film, p2-th, p2-rseg, p2-rsc, p2-fade) — в base.css; помощник сужает
- * результат правилами hp- своей задачи (helper.css). После блока — правила V2 для приглушённой карточки и кнопки
- * (ra-card-static, rt-nb-off) и свои дополнения. */
+ * результат правилами hp- своей задачи (helper.css). После блока — правило V2 для приглушённой кнопки (rt-nb-off) и
+ * свои дополнения. */
 /* Результат — как «Правая колонка целиком» (R-aside): уведомление-таблетка, рабочая область, полная колонка */
 .ra-note{position:relative;display:flex;align-items:center;height:48px;transform-origin:left center;transition:transform 160ms var(--ease)}
 .ra-note:not(.ra-note-on):has(.ra-ntg:hover){transform:translateY(-2px)}
@@ -46,7 +46,6 @@
 .ra-tag{display:inline-flex;align-items:center;height:24px;padding:0 8px;border-radius:999px;background:#E9F1FF;color:#2563EB;font-size:12px;font-weight:700;line-height:16px;white-space:nowrap}
 .ra-ri{display:flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:999px;background:#FFFFFF;color:#2563EB}
 .ra-cnt{font-family:'Unbounded','Manrope',sans-serif;font-weight:600;letter-spacing:0;font-variant-numeric:tabular-nums}
-.ra-card-static{pointer-events:none}
 /* «Показать текст» у презентаций только с обложкой: текста нет — кнопка приглушена и не открывает слой */
 .rt-nb-off{opacity:.32;cursor:default}
 .p2-ob.rt-nb-off:hover,.p2-ob.rt-nb-off:active{transform:none}
@@ -58,7 +57,12 @@ button.ra-card{width:100%;border:0;font:inherit;text-align:left;cursor:pointer}
 a.p2-cta,a.p2-ob{text-decoration:none}
 a.p2-cta:hover{color:#FFFFFF}
 a.p2-ob:hover{color:#0B1220}
-/* сцена: прежний слайд лежит под новым, новый проявляется поверх (перекрёстное затухание 240 мс); пропорции — шаблона */
-.ra-shot{position:absolute;inset:0;display:block;width:100%;height:100%;object-fit:cover}
+/* сцена: каждое превью — свой слой (stageLayers). Новый лежит сверху невидимым (ra-wait), пока его картинка не
+ * загрузится и не декодируется, затем проявляется поверх прежнего (перекрёстное затухание 240 мс). Рамка — пропорций
+ * шаблона; картинка вписана целиком (contain), ничего не обрезается, пока пропорции не известны */
+.ra-shot{position:absolute;inset:0;display:block;width:100%;height:100%;object-fit:contain}
+.ra-wait{opacity:0}
 @keyframes ra-xf{from{opacity:0}to{opacity:1}}
 .ra-xf{animation:ra-xf 240ms var(--ease) backwards}
+/* «Собрать ещё раз» ждёт ответа сервера: кнопка занята, указатель — ожидание */
+.ra-nb[aria-busy="true"]{cursor:progress}
