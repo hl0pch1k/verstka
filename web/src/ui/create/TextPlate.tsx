@@ -391,9 +391,11 @@ export function TextBody({ tp }: { tp: TextPlate }) {
                   <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{infoBusy && deck ? `Читаю презентацию «${templateStem(deck)}»… ${note ?? ""}` : note}</span>
                 </p>
               </div>
-              {/* ошибка файла длинная — правая часть (счётчик, подсказка) уходит из ряда, и строка ошибки получает всю ширину */}
-              <span className={cls("tx-sw tx-swr", issue?.kind === "file" && "p2-none")}>
-                <span aria-live="polite" className={show(!issue)} style={{ ...NOTE_LINE, fontWeight: 600 }}>{charsLabel(brief.length)}</span>
+              {/* у ошибки файла правая часть (счётчик, подсказка) гаснет, но держит своё место: ничего не выскакивает, а ширина
+                  строки ошибки не прыгает (длинная — многоточием, целиком — в подсказке). Счётчик без aria-live: он не
+                  перебивает чтение с экрана на каждом знаке */}
+              <span className={cls("tx-sw tx-swr", show(issue?.kind !== "file"))}>
+                <span className={show(!issue)} style={{ ...NOTE_LINE, fontWeight: 600 }}>{charsLabel(brief.length)}</span>
                 <span className={show(!!issue)} style={{ ...NOTE_LINE, fontWeight: 500 }}>{FIX}</span>
               </span>
             </div>

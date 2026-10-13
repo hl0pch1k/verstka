@@ -82,7 +82,9 @@ export function uiReducer(s: UiState, a: UiAction): UiState {
     case "sect":
       return { ...s, sect: a.sect };
     case "sheet":
-      return { ...s, sheet: a.tab, sheetLast: a.tab ?? s.sheetLast };
+      // другая вкладка (и не «Шаблон», откуда он открыт) закрывает слой «Слайд N шаблона»; закрытый лист снимает его сам,
+      // когда уехал (DetailsSheet)
+      return { ...s, sheet: a.tab, sheetLast: a.tab ?? s.sheetLast, pattern: a.tab && a.tab !== s.sheet && a.tab !== "template" ? null : s.pattern };
     case "pattern":
       return { ...s, pattern: a.n };
     case "set":

@@ -100,3 +100,11 @@ test("go сбрасывает rise; down — только уход с резул
   // на сборку с результата — флага нет
   assert.equal(uiReducer({ ...UI0, screen: "result" }, { type: "go", screen: "build" }).down, false);
 });
+
+test("другая вкладка листа закрывает слой «Слайд N шаблона» (D-2); та же вкладка и закрытие листа — нет", () => {
+  const open = { ...UI0, screen: "result" as const, sheet: "template" as const, pattern: 4 };
+  assert.equal(uiReducer(open, { type: "sheet", tab: "why" }).pattern, null);
+  assert.equal(uiReducer(open, { type: "sheet", tab: "template" }).pattern, 4);
+  // лист закрывается — слой уезжает вместе с ним, снимает его сам лист
+  assert.equal(uiReducer(open, { type: "sheet", tab: null }).pattern, 4);
+});

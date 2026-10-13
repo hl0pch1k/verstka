@@ -13,7 +13,8 @@ export interface MenuItem<T> {
 
 /** Меню выбора, как `df-menu` в D-files («Вариант оформления»): белая плита 256 px под кнопкой у правого края,
  *  появляется ходом `p2-pop`; пункты-радио с номером, названием, оценкой и галочкой у выбранного. Клик мимо меню
- *  (прозрачная подложка на весь экран, как в V2) и Esc закрывают его, стрелки ходят по пунктам.
+ *  (прозрачная подложка, как в V2, и нажатие где угодно на странице вне обёртки с кнопкой — подложка внутри слоя со
+ *  сдвигом transform покрывает только слой) и Esc закрывают его, стрелки ходят по пунктам.
  *  Обёртку `position:relative` и кнопку (`p2-ob` со стрелкой `df-chev` / `df-chev-up`) даёт вызывающий. */
 export function Menu<T extends string | number>({ label, items, value, onPick, onClose, className }: {
   label: string;
@@ -24,6 +25,18 @@ export function Menu<T extends string | number>({ label, items, value, onPick, o
   className?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  // нажатие вне обёртки (кнопка меню и само меню) — где угодно на странице: шапка, помощник, другой слой
+  useEffect(() => {
+    const host = ref.current?.parentElement ?? null;
+    const onDown = (e: PointerEvent) => {
+      if (host && e.target instanceof Node && host.contains(e.target)) return;
+      closeRef.current();
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    return () => document.removeEventListener("pointerdown", onDown, true);
+  }, []);
   const buttons = () => Array.from(ref.current?.querySelectorAll<HTMLButtonElement>(".df-mi") ?? []);
   // фокус — на выбранный пункт при открытии; при закрытии возвращается туда, откуда меню открыли
   useEffect(() => {
