@@ -83,6 +83,15 @@ export interface AppState {
    *  re-read is quiet: the open deck stays as it was, no «Не удалось открыть презентацию» on the result — the place of
    *  the action tells the failure itself, once. */
   reloadIfOpen(gid: string, onError?: (e: unknown) => void): Promise<Generation | null>;
+  /** Открытая презентация, которую изменили (слайд, изображение, «Исправить всё», «Вернуть как было», правка помощника),
+   *  а перечитать не вышло (`reloadIfOpen` не прочитал её): на экране она прежняя. Места действия говорят это строкой с
+   *  «Обновить», «Мои презентации» перечитывают её. Уходит, когда открытая презентация прочиталась (любым путём) или
+   *  открыли другую. */
+  stale: StaleDeck | null;
+  /** «Обновить»: несвежая презентация `gid` читается ещё раз (тихо: не прочиталась — `stale` с новой причиной);
+   *  resolves true, когда прочиталась. Пока читается — `refreshing`. */
+  refreshDeck(gid: string): Promise<boolean>;
+  refreshing: string | null;
   activeStrategy: string | null; setActiveStrategy(s: string): void; activeVariant: Variant | null;
   selectedSlide: number; setSelectedSlide(n: number): void; // 1-based
   /** Экран, раскрытые шаги, слои и листы «Слоёв» (`ui/deck/geometry.ts`); меняется только через `dispatch`. */
@@ -174,6 +183,9 @@ export interface AppState {
   improveSource: ImproveSource | null;
   takeImproveSource(): void;
 }
+
+/** Несвежая открытая презентация: её id, почему не перечиталась (`reloadFailText`) и когда. */
+export interface StaleDeck { gid: string; error: unknown; at: number }
 
 /** Сборка, кончившаяся без человека на её экране: её презентация, её задача и чем кончилась. */
 export interface BuildEnd { gid: string; job: string; ok: boolean }
@@ -302,6 +314,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // (cancelLoad) or fails — the open deck stays and must show the change (reloadSkipped)
   const skippedReload = useRef<string | null>(null);
   const replayRef = useRef<(openId: string | null) => void>(() => {});
+  const [stale, setStale] = useState<StaleDeck | null>(null);
+  const [refreshing, setRefreshing] = useState<string | null>(null);
   const jobSubs = useRef(new Map<string, () => void>());
 
   const [notices, setNotices] = useState<Partial<Record<NoticeArea, Notice>>>({});
@@ -412,6 +426,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const clearGeneration = useCallback(() => {
     genSeq.current += 1;
     askedGen.current = null;
+    setStale(null);
     setGenerationId(null);
     setGeneration(null);
     setGenerationLoading(false);
@@ -476,8 +491,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setGenerationId(gid);
           storage.set(LS.generation, gid);
         }
-        // the open deck is read anew, or another deck took its place: a waiting re-read has nothing left to show
+        // the open deck is read anew, or another deck took its place: a waiting re-read has nothing left to show, and
+        // the screen is fresh (no «не обновилась» line)
         skippedReload.current = null;
+        setStale(null);
         setGeneration(g);
         setActiveStrategyState(nextStrategy);
         setSelectedSlideState((cur) => (sameAsOpen ? clamp(cur, 1, max) : 1));
@@ -501,6 +518,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (hold) void refreshGenerations();
       }
       if (!quiet) report(e, "Не удалось открыть презентацию", area);
+      // a quiet re-read of the open deck after a change: the change is saved, the screen shows the deck as it was — the
+      // places of action say it with «Обновить» (a deck that is gone has closed)
+      else if (sameAsOpen && !(e instanceof ApiError && e.status === 404)) setStale({ gid, error: e, at: Date.now() });
       onError?.(e);
       return null;
     } finally {
@@ -538,6 +558,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // quiet: a failed re-read leaves the open deck as it was, the place of the action tells it (onError)
     return fetchGeneration(gid, true, false, "result", null, onError);
   }, [fetchGeneration]);
+  const refreshDeck = useCallback(async (gid: string) => {
+    setRefreshing(gid);
+    const g = await reloadIfOpen(gid);
+    setRefreshing((cur) => (cur === gid ? null : cur));
+    return !!g;
+  }, [reloadIfOpen]);
   replayRef.current = (openId) => {
     if (!replayWanted(skippedReload.current, openId)) return;
     skippedReload.current = null;
@@ -628,7 +654,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const v = g && g.id === gid ? g.variants.find((x) => x.strategy === strategy) : null;
     return v ? variantRev(v) : null;
   }, []);
-  const { work, fixIssues, revertVariant } = useVariantWork({ runJob, reloadIfOpen, live: variantLive, rev: variantRevOf });
+  const { work, fixIssues, revertVariant } = useVariantWork({ runJob, reloadIfOpen, live: variantLive, rev: variantRevOf, deck: generation, staleGid: stale?.gid ?? null });
 
   const adoptManifest = useCallback((m: TemplateManifest) => {
     setManifest(m); // same batch as the id: the manifest effect sees a match and skips the refetch
@@ -881,13 +907,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<AppState>(() => ({
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
-    generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, cancelLoad, reloadIfOpen, activeStrategy, setActiveStrategy, activeVariant,
+    generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, cancelLoad, reloadIfOpen, stale, refreshDeck, refreshing, activeStrategy, setActiveStrategy, activeVariant,
     selectedSlide, setSelectedSlide, ui, dispatch, activeJob, liveJobs: liveList, runJob, followDeck, adoptBuildMeta, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, ownBuild, building, buildEnd, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, analyzing, startGeneration,
     brief, setBrief, textIssue, setTextIssue, checkText, params, setParams,
     composerText, composerPreset, editText, takeComposerText, takeComposerPreset, improveSource, takeImproveSource,
   }), [
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
-    generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, cancelLoad, reloadIfOpen, activeStrategy, setActiveStrategy, activeVariant,
+    generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, cancelLoad, reloadIfOpen, stale, refreshDeck, refreshing, activeStrategy, setActiveStrategy, activeVariant,
     selectedSlide, setSelectedSlide, ui, activeJob, liveList, runJob, followDeck, adoptBuildMeta, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, ownBuild, building, buildEnd, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, analyzing, startGeneration,
     brief, setBrief, textIssue, checkText, params, setParams,
     composerText, composerPreset, editText, takeComposerText, takeComposerPreset, improveSource, takeImproveSource,

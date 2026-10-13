@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import type { SlideFixResult } from "../../types";
 import type { ActiveJob } from "../../lib/jobState";
 import { VARIANT_BUSY } from "../details/variantWork";
-import { busyWhy, JOB0, liveWork, runOf, slideBusy, slideJobNext, variantLiveJob, type SlideJobAction, type SlideJobState } from "./slideJob";
+import { busyWhy, JOB0, liveWork, runOf, slideBusy, slideJobNext, staleOf, variantLiveJob, type SlideJobAction, type SlideJobState } from "./slideJob";
 
 const run = (s: SlideJobState, ...as: SlideJobAction[]) => as.reduce(slideJobNext, s);
 const fix = (slide = 3): SlideJobAction => ({ type: "start", kind: "fix", strategy: "structured", slide, wish: "  покажи этапами ", action: null, requested: [], at: 100 });
@@ -113,4 +113,34 @@ test("чужая задача над вариантом: самая новая �
   assert.deepEqual(liveWork(live[2]), { why: "Агент меняет изображение на слайде 6", slide: 6 });
   assert.deepEqual(liveWork(live[1]), { why: VARIANT_BUSY, slide: 2 });
   assert.deepEqual(liveWork(live[3]), { why: VARIANT_BUSY, slide: null });
+});
+
+// ── R1: изменение сохранено, а презентация на экране не перечиталась
+test("итог применён, а экран не перечитан: работа кончилась с итогом и меткой `change`; строка — пока презентация несвежая", () => {
+  const a = run(JOB0, fix(), { type: "accepted", seq: 1, jobId: "j1", at: 250 }, { type: "settled", seq: 1, at: 900, fix: RES, stale: true });
+  const r = a.runs.structured!;
+  assert.deepEqual([r.phase, r.fix, r.error, r.stale], ["done", RES, null, "change"]);
+  assert.equal(staleOf(r, true), "change");
+  // перечиталась (любым путём) — вид снова по презентации: итог встаёт сам
+  assert.equal(staleOf(r, false), null);
+  // другой слайд строку не снимает: изменение сохранено, экран его ещё не показал
+  assert.equal(slideJobNext(a, { type: "clear", strategy: "structured" }), a);
+  // перечитанный итог — без метки
+  const b = run(JOB0, fix(), { type: "accepted", seq: 1, jobId: "j1", at: 250 }, { type: "settled", seq: 1, at: 900, fix: RES });
+  assert.equal(b.runs.structured!.stale, null);
+});
+
+test("вернулось как было, а экран не перечитан: итог остаётся на экране с меткой `undo`; новый возврат её снимает", () => {
+  const done = run(JOB0, fix(), { type: "accepted", seq: 1, jobId: "j1", at: 250 }, { type: "settled", seq: 1, at: 900, fix: RES });
+  const going = slideJobNext(done, { type: "undo", kind: "fix", strategy: "structured", slide: 3, at: 1000 });
+  const st = slideJobNext(going, { type: "undoStale", seq: 1 });
+  assert.deepEqual([st.runs.structured!.undo, st.runs.structured!.undoError, st.runs.structured!.stale, st.runs.structured!.fix], [null, null, "undo", RES]);
+  assert.equal(slideBusy(st.runs.structured), false);
+  assert.equal(staleOf(st.runs.structured, true), "undo");
+  // прежний запуск метку не ставит
+  assert.equal(slideJobNext(going, { type: "undoStale", seq: 7 }), going);
+  // возврат без итога на странице (перезагрузка) — тоже с меткой
+  const back = run(JOB0, { type: "undo", kind: "fix", strategy: "structured", slide: 2, at: 5 }, { type: "undoStale", seq: 1 });
+  assert.equal(back.runs.structured!.stale, "undo");
+  assert.equal(slideJobNext(back, { type: "clear", strategy: "structured" }), back);
 });

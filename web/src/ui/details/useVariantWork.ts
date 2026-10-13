@@ -4,16 +4,16 @@
 // слайда на экране результата (useSlideJob). На вариант — одна работа за раз: пока над ним идёт задача хранилища или
 // запуск ждёт ответа сервера, второй запуск не уходит на сервер (он ответил бы 409), а возвращает отказ строкой.
 // Задачи идут тихо (`quiet`: ход и неудачу показывает место действия) с целью `target` — по ней хранилище знает,
-// какие варианты заняты (`busyVariants`). По готовности презентация перечитывается (`reloadIfOpen`). Шаги — чистый
-// workNext (variantWork.ts).
-import { useCallback, useRef, useState } from "react";
+// какие варианты заняты (`busyVariants`). По готовности презентация перечитывается (`reloadIfOpen`); не перечиталась —
+// итог ждёт: у места действия строка с «Обновить», а когда открытая презентация перечиталась (любым путём), итог
+// встаёт по ней (`fresh`). Шаги — чистый workNext (variantWork.ts).
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../../api";
 import { humanError } from "../../lib/errors";
 import { variantRev } from "../../lib/rev";
 import type { Generation, Job, JobKind } from "../../types";
-import { reloadFailText } from "../helper/chat";
 import { fixedCount } from "./quality";
-import { fixedFromJob, undoRefusal, VARIANT_BUSY, WORK0, workKey, workNext, type UndoBy, type WorkAction, type WorkState } from "./variantWork";
+import { fixedFromJob, staleKeys, undoRefusal, VARIANT_BUSY, WORK0, workKey, workNext, type UndoBy, type WorkAction, type WorkState } from "./variantWork";
 
 const startError = (e: unknown, what: string) => humanError(e instanceof ApiError || e instanceof Error ? e.message : String(e), `Не получилось ${what}. Попробуйте ещё раз.`);
 const jobError = (job: Job, what: string) => humanError(job.error ?? job.message, `Не получилось ${what}. Попробуйте ещё раз.`);
@@ -30,7 +30,14 @@ export interface VariantWorkDeps {
   live(key: string): boolean;
   /** Ревизия варианта открытой презентации (`variantRev`); не открыта — null. */
   rev(gid: string, strategy: string): string | null;
+  /** Открытая презентация (несвежие итоги встают по ней, когда она перечиталась) и несвежая ли она (store `stale`). */
+  deck: Generation | null;
+  staleGid: string | null;
 }
+
+/** Чем кончился «Вернуть как было»: `why` — почему не вернулось (null — вернулось); `stale` — вернулось, а презентация на
+ *  экране не перечиталась. */
+export interface Reverted { why: string | null; stale: boolean }
 
 export interface VariantWorkApi {
   /** Состояние по `workKey(gid, strategy)`. */
@@ -38,9 +45,9 @@ export interface VariantWorkApi {
   /** «Исправить отмеченные» (`ids`) / «Исправить всё автоматически» («all»); `count` — какие замечания считать. */
   fixIssues(gid: string, strategy: string, ids: string[] | "all", count: string[]): void;
   /** «Вернуть как было» последнего изменения варианта (`slide` — на каком слайде его вернуть). `by` — вкладка, у которой
-   *  ход и неудача (их состояние в `work`); без него место действия держит своё. Обещание: null — вернулось, иначе — почему
-   *  нет (над вариантом уже идёт работа, отказ сервера, неудача задачи). */
-  revertVariant(gid: string, strategy: string, opts?: { slide?: number | null; by?: UndoBy }): Promise<string | null>;
+   *  ход и неудача (их состояние в `work`); без него место действия держит своё. Обещание: `why` null — вернулось, иначе —
+   *  почему нет (над вариантом уже идёт работа, отказ сервера, неудача задачи); `stale` — вернулось, а экран прежний. */
+  revertVariant(gid: string, strategy: string, opts?: { slide?: number | null; by?: UndoBy }): Promise<Reverted>;
 }
 
 export function useVariantWork(deps: VariantWorkDeps): VariantWorkApi {
@@ -88,9 +95,9 @@ export function useVariantWork(deps: VariantWorkDeps): VariantWorkApi {
           const open = await d.current.reloadIfOpen(gid, (e) => {
             lost = { e };
           });
-          // открытая не перечиталась: изменение сохранено, а экран прежний — так и сказано у «Исправить» (один раз)
-          const failed = lost as { e: unknown } | null;
-          if (failed) return void fail(reloadFailText(failed.e));
+          // открытая не перечиталась: изменение сохранено, а экран прежний — итог ждёт перечитывания, у «Исправить»
+          // строка с «Обновить» (один раз)
+          if (lost) return void send({ type: "fixStale", key, seq, fixed: fixedFromJob(job.result, count), count });
           const g = open ?? (await api.generation(gid).catch(() => null));
           const v = g?.variants.find((x) => x.strategy === strategy) ?? null;
           if (!v) return void send({ type: "fixLost", key, seq });
@@ -103,18 +110,20 @@ export function useVariantWork(deps: VariantWorkDeps): VariantWorkApi {
     })();
   }, [send]);
 
-  const revertVariant = useCallback(async (gid: string, strategy: string, opts: { slide?: number | null; by?: UndoBy } = {}): Promise<string | null> => {
+  const revertVariant = useCallback(async (gid: string, strategy: string, opts: { slide?: number | null; by?: UndoBy } = {}): Promise<Reverted> => {
     const key = workKey(gid, strategy);
-    if (taken(key)) return VARIANT_BUSY;
+    const busy: Reverted = { why: VARIANT_BUSY, stale: false };
+    if (taken(key)) return busy;
     let seq: number | null = null;
     if (opts.by) {
       const before = box.current;
       const now = send({ type: "undo", key, by: opts.by });
-      if (now === before) return VARIANT_BUSY;
+      if (now === before) return busy;
       seq = now[key]!.undo!.seq;
-    } else if (box.current[key]?.fix?.phase === "fix" || box.current[key]?.undo?.busy) return VARIANT_BUSY;
+    } else if (box.current[key]?.fix?.phase === "fix" || box.current[key]?.undo?.busy) return busy;
     const slide = opts.slide ?? null;
     asking.current.add(key);
+    let stale = false;
     const why = await new Promise<string | null>((resolve) => {
       api.editVariant(gid, strategy, slide ? { message: "верни как было", slide } : { message: "верни как было" }).then((r) => {
         d.current.runJob(r.job_id, "Возвращаю как было", {
@@ -126,8 +135,9 @@ export function useVariantWork(deps: VariantWorkDeps): VariantWorkApi {
             await d.current.reloadIfOpen(gid, (e) => {
               lost = { e };
             });
-            const failed = lost as { e: unknown } | null;
-            resolve(failed ? reloadFailText(failed.e) : null);
+            // вернулось, а экран прежний: строка с «Обновить» у места действия
+            stale = !!lost;
+            resolve(null);
           },
           onFailed: (job) => resolve(jobError(job, "вернуть как было")),
         });
@@ -137,10 +147,24 @@ export function useVariantWork(deps: VariantWorkDeps): VariantWorkApi {
         resolve(startError(e, "вернуть как было"));
       });
     });
-    if (why === null) send({ type: "undone", key, seq });
+    if (why === null) send({ type: stale ? "undoStale" : "undone", key, seq });
     else if (seq !== null) send({ type: "undoFailed", key, seq, error: why });
-    return why;
+    return { why, stale };
   }, [send]);
+
+  // открытая презентация перечиталась (свежая — хранилище больше не держит её несвежей): итоги, что ждали перечитывания,
+  // встают по ней — «Исправлено N» по новому отчёту и с ревизией перечитанного варианта, строка у «Вернуть» уходит
+  const { deck, staleGid } = deps;
+  useEffect(() => {
+    if (!deck || deck.id === staleGid) return;
+    for (const key of staleKeys(box.current, deck.id)) {
+      const w = box.current[key];
+      const v = deck.variants.find((x) => workKey(deck.id, x.strategy) === key) ?? null;
+      const wait = w?.fix?.phase === "stale" ? w.fix.wait : undefined;
+      const fixed = wait ? wait.fixed ?? (v?.audit ? fixedCount(wait.count, v.audit) : wait.count.length) : 0;
+      send({ type: "fresh", key, fixed, rev: v ? variantRev(v) : "" });
+    }
+  }, [deck, staleGid, send]);
 
   return { work, fixIssues, revertVariant };
 }

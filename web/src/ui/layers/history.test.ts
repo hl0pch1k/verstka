@@ -156,3 +156,11 @@ test("неудачная сборка, которую держит страни�
   assert.deepEqual(openPlan(g, { screen: "result", openId: "int", buildId: "ws" }), { kind: "ended" });
   assert.deepEqual(openPlan(g, { screen: "build", openId: null, buildId: "ws" }), { kind: "stay" });
 });
+
+test("открытая, но несвежая (изменение сохранено, а перечитать не вышло) — перечитать, а не только закрыть раздел", () => {
+  const g = meta("int");
+  assert.deepEqual(openPlan(g, { screen: "result", openId: "int", buildId: null, stale: "int" }), { kind: "result", load: true, rise: false });
+  assert.deepEqual(openPlan(g, { screen: "create", openId: "int", buildId: null, stale: "int" }), { kind: "result", load: true, rise: true });
+  // несвежая другая — эта открыта как есть
+  assert.deepEqual(openPlan(g, { screen: "result", openId: "int", buildId: null, stale: "ww2" }), { kind: "stay" });
+});

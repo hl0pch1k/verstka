@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   asEditResult, asFixResult, bubbleBlocks, chatFailText, chatTarget, chipsFor, describeFixes, editFailText, feedDelay, feedItems, feedProgress, introFor,
-  openTabSteps, placeholderFor, planActions, reloadFailText, typeset, OTHER_DECK, type FeedJob,
+  noteView, openTabSteps, placeholderFor, planActions, reloadFailText, typeset, OTHER_DECK, REFRESHED, type FeedJob,
 } from "./chat";
 import type { ChatAction, ChatResponse } from "../../types";
 import { ApiError } from "../../api";
@@ -240,4 +240,18 @@ test("вопрос помощнику — о презентации на экр�
   assert.deepEqual(chatTarget({ ...ctx, screen: "build" }), { generation_id: "B", strategy: null, slide: null });
   assert.deepEqual(chatTarget({ ...ctx, screen: "create" }), { generation_id: null, strategy: null, slide: null });
   assert.deepEqual(chatTarget({ ...ctx, screen: "build", building: null }), { generation_id: null, strategy: null, slide: null });
+});
+
+test("reloadFailText не обещает того, чего нет: путь — «Обновить» рядом со строкой, без отсылок", () => {
+  const t = reloadFailText(new ApiError(0, "Failed to fetch"));
+  assert.equal(t, "Изменения сохранены, но презентация на экране не обновилась: нет связи с сервером.");
+});
+
+test("noteView: строка о несвежей презентации — с «Обновить», пока она несвежая; перечиталась — «обновлена»; открыта другая — как записана", () => {
+  const n = { id: "n", text: "старая причина", ts: 1, refresh: "g1" };
+  assert.deepEqual(noteView(n, { stale: { gid: "g1", text: "новая причина" }, open: "g1" }), { text: "новая причина", refresh: true });
+  assert.deepEqual(noteView(n, { stale: null, open: "g1" }), { text: REFRESHED, refresh: false });
+  assert.deepEqual(noteView(n, { stale: null, open: "g2" }), { text: "старая причина", refresh: false });
+  assert.deepEqual(noteView(n, { stale: { gid: "g2", text: "x" }, open: "g2" }), { text: "старая причина", refresh: false });
+  assert.deepEqual(noteView({ id: "o", text: OTHER_DECK, ts: 1 }, { stale: { gid: "g1", text: "x" }, open: "g1" }), { text: OTHER_DECK, refresh: false });
 });

@@ -38,6 +38,10 @@ export interface SlideRun {
   /** «Вернуть как было»: идёт или не получилось (строка `undoError`). */
   undo: "work" | "error" | null;
   undoError: string | null;
+  /** Изменение сохранено, а презентация на экране не перечиталась: `change` — после работы (на экране прежний слайд,
+   *  итога нет), `undo` — после «Вернуть как было» (на экране ещё исправленный). У места действия — строка с
+   *  «Обновить», пока хранилище держит презентацию несвежей (`staleOf`); перечиталась — вид снова по презентации. */
+  stale: "change" | "undo" | null;
 }
 
 /** Работа каждого варианта (ключ — вариант); номер последнего запуска — один на все. */
@@ -51,12 +55,15 @@ export type SlideJobAction =
   | { type: "start"; kind: SlideJobKind; strategy: string; slide: number; wish: string; action: "generate" | "remove" | null; requested: Remark[]; at: number }
   /** Сервер принял запуск `seq`: его задача, часы — с этого момента. */
   | { type: "accepted"; seq: number; jobId: string; at: number }
-  /** Работа `seq` кончилась: итог, отказ при запуске или неудача задачи. */
-  | { type: "settled"; seq: number; at: number; fix?: SlideFixResult; picture?: PictureChangeResult; error?: string | null }
+  /** Работа `seq` кончилась: итог, отказ при запуске или неудача задачи. `stale` — итог применён, а презентация не
+   *  перечиталась. */
+  | { type: "settled"; seq: number; at: number; fix?: SlideFixResult; picture?: PictureChangeResult; error?: string | null; stale?: boolean }
   /** «Вернуть как было» на слайде: у кончившейся работы того же рода на этом слайде — её; иначе (перезагрузка: итога
    *  на странице нет) — свой запуск, сразу кончившийся, с идущим возвратом. */
   | { type: "undo"; kind: SlideJobKind; strategy: string; slide: number; at: number }
   | { type: "undoFailed"; seq: number; error: string }
+  /** Вернулось как было, а презентация не перечиталась: на экране ещё прежний итог — строка с «Обновить». */
+  | { type: "undoStale"; seq: number }
   /** Вернулось как было: итога больше нет — слайд снова со своими замечаниями. */
   | { type: "undone"; seq: number }
   /** Другой слайд: строка неудачи или «слайд остался прежним» уходит; итог, который можно вернуть, остаётся. */
@@ -84,7 +91,7 @@ export function slideJobNext(s: SlideJobState, a: SlideJobAction): SlideJobState
       const seq = s.seq + 1;
       return put(s, a.strategy, {
         seq, kind: a.kind, strategy: a.strategy, slide: a.slide, phase: "work", jobId: null, startedAt: a.at, endedAt: null, wish: a.wish.trim(),
-        action: a.action, requested: a.requested, fix: null, picture: null, error: null, undo: null, undoError: null,
+        action: a.action, requested: a.requested, fix: null, picture: null, error: null, undo: null, undoError: null, stale: null,
       }, seq);
     }
     case "accepted": {
@@ -96,21 +103,25 @@ export function slideJobNext(s: SlideJobState, a: SlideJobAction): SlideJobState
       const k = ownerOf(s, a.seq);
       if (k === null) return s;
       const r = s.runs[k]!;
-      return put(s, k, { ...r, phase: "done", endedAt: a.at, fix: a.fix ?? r.fix, picture: a.picture ?? r.picture, error: a.error ?? null });
+      return put(s, k, { ...r, phase: "done", endedAt: a.at, fix: a.fix ?? r.fix, picture: a.picture ?? r.picture, error: a.error ?? null, stale: a.stale ? "change" : null });
     }
     case "undo": {
       const r = runOf(s, a.strategy);
       if (slideBusy(r)) return s;
-      if (r && r.phase === "done" && r.kind === a.kind && r.slide === a.slide) return put(s, a.strategy, { ...r, undo: "work", undoError: null });
+      if (r && r.phase === "done" && r.kind === a.kind && r.slide === a.slide) return put(s, a.strategy, { ...r, undo: "work", undoError: null, stale: null });
       const seq = s.seq + 1;
       return put(s, a.strategy, {
         seq, kind: a.kind, strategy: a.strategy, slide: a.slide, phase: "done", jobId: null, startedAt: a.at, endedAt: a.at, wish: "", action: null,
-        requested: [], fix: null, picture: null, error: null, undo: "work", undoError: null,
+        requested: [], fix: null, picture: null, error: null, undo: "work", undoError: null, stale: null,
       }, seq);
     }
     case "undoFailed": {
       const k = ownerOf(s, a.seq);
       return k === null ? s : put(s, k, { ...s.runs[k]!, undo: "error", undoError: a.error });
+    }
+    case "undoStale": {
+      const k = ownerOf(s, a.seq);
+      return k === null ? s : put(s, k, { ...s.runs[k]!, undo: null, undoError: null, stale: "undo" });
     }
     case "undone": {
       const k = ownerOf(s, a.seq);
@@ -118,7 +129,8 @@ export function slideJobNext(s: SlideJobState, a: SlideJobAction): SlideJobState
     }
     case "clear": {
       const r = runOf(s, a.strategy);
-      const changedNothing = !!r && r.phase === "done" && r.undo !== "work" && !r.fix?.applied && !r.picture?.applied;
+      // строка «не обновилась» с «Обновить» остаётся: изменение сохранено, экран его ещё не показал
+      const changedNothing = !!r && r.phase === "done" && r.undo !== "work" && !r.fix?.applied && !r.picture?.applied && !r.stale;
       return changedNothing ? put(s, a.strategy, null) : s;
     }
   }
@@ -141,6 +153,10 @@ export function liveWork(j: ActiveJob): { why: string; slide: number | null } {
   if (j.kind === "picture" && slide) return { why: `Агент меняет изображение на слайде ${slide}`, slide };
   return { why: VARIANT_BUSY, slide };
 }
+
+/** Несвежесть работы, которую показывает экран: строка с «Обновить» — пока хранилище держит презентацию несвежей
+ *  (`staleNow`); перечиталась — null, и вид снова по презентации (итог, возврат). */
+export const staleOf = (run: SlideRun | null | undefined, staleNow: boolean): SlideRun["stale"] => (run?.stale && staleNow ? run.stale : null);
 
 /** Почему новая работа над вариантом сейчас не начнётся (подсказка выключенной кнопки); null — начнётся. */
 export function busyWhy(run: SlideRun | null | undefined): string | null {

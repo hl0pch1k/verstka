@@ -15,6 +15,7 @@ import { cls } from "../../kit/cls";
 import { ErrorLine } from "../../kit/ErrorLine";
 import { Icon } from "../../kit/Icon";
 import { scoreOf } from "../../result/resultView";
+import { StaleLine } from "../../shell/StaleLine";
 import { appliedRows, patternSlideOf } from "../fixes";
 import type { DeckManifest } from "../useDeckManifest";
 import { Acc, Empty, Row, Shot } from "../parts";
@@ -132,7 +133,11 @@ export function QualityTab({ g, v, deck }: { g: Generation; v: Variant; deck: De
             <span>{sum.nModel}</span>
           </p>
           {/* строка неудачи — под счётчиками, не сдвигая их (сводка выровнена по центру) */}
-          {fix.error && (
+          {fix.refresh ? (
+            <div className="p2-in" style={{ position: "absolute", left: 0, right: 0, top: "100%", marginTop: 2 }}>
+              <StaleLine r={fix.refresh} lines={1} />
+            </div>
+          ) : fix.error && (
             <div className="p2-in" style={{ position: "absolute", left: 0, right: 0, top: "100%", marginTop: 2 }}>
               <ErrorLine text={fix.error} lines={1} style={{ maxWidth: "100%" }} />
             </div>

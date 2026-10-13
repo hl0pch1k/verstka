@@ -136,11 +136,15 @@ export function editFailText(raw: string | null | undefined): string {
 }
 
 /** Правка или исправления готовы, а презентация не перечиталась (связь, сервер): причина по-русски; «это другая
- *  презентация» здесь не годится — она открыта. */
+ *  презентация» здесь не годится — она открыта. Рядом со строкой — «Обновить» (перечитать её ещё раз); «Мои
+ *  презентации» тоже перечитывают такую презентацию (history `openPlan`). */
 export function reloadFailText(e: unknown): string {
   const why = e instanceof ApiError && e.status === 0 ? "нет связи с сервером" : reasonOf(e instanceof Error ? e.message : String(e ?? "")).replace(/[.\s]+$/, "");
-  return `Изменения сохранены, но презентация на экране не обновилась${why ? `: ${why}` : ""}. Откройте её снова из «Мои презентации».`;
+  return `Изменения сохранены, но презентация на экране не обновилась${why ? `: ${why}` : ""}.`;
 }
+
+/** Строка ленты после «Обновить»: презентация перечиталась, изменения на экране. */
+export const REFRESHED = "Презентация на экране обновлена.";
 
 /** Правка или исправления сделаны в презентации, которая сейчас не открыта: тихая строка в ленте. */
 export const OTHER_DECK = "Это другая презентация — откройте её из «Мои презентации».";
@@ -190,8 +194,17 @@ export function typeset(text: string): string {
 // ── лента
 /** Задача, начатая из чата (правка, изображение, исправления): полоса в ленте («Меняю презентацию 100 %»). */
 export interface FeedJob { id: string; label: string; ts: number; progress: number; status: "run" | "done" | "failed" }
-/** Тихая строка ленты (не ответ помощника): «Это другая презентация — откройте её из «Мои презентации»». */
-export interface FeedNote { id: string; text: string; ts: number }
+/** Тихая строка ленты (не ответ помощника): «Это другая презентация — откройте её из «Мои презентации»». `refresh` —
+ *  презентация, которую изменили, а она не перечиталась: у строки «Обновить» (noteView). */
+export interface FeedNote { id: string; text: string; ts: number; refresh?: string }
+
+/** Что показывает строка ленты: у строки о неперечитанной презентации — пока хранилище держит её несвежей, причина
+ *  (последняя) и «Обновить»; перечиталась и открыта — «обновлена»; открыта другая — как была записана. */
+export function noteView(note: FeedNote, o: { stale: { gid: string; text: string } | null; open: string | null }): { text: string; refresh: boolean } {
+  if (!note.refresh) return { text: note.text, refresh: false };
+  if (o.stale && o.stale.gid === note.refresh) return { text: o.stale.text, refresh: true };
+  return { text: o.open === note.refresh ? REFRESHED : note.text, refresh: false };
+}
 export type FeedItem = { kind: "msg"; msg: ChatMessage } | { kind: "job"; job: FeedJob } | { kind: "note"; note: FeedNote };
 
 /** Ход полос по идущим задачам хранилища (`liveJobs`): у каждой задачи своя полоса, и растёт она по своей задаче

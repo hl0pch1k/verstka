@@ -10,7 +10,7 @@ import { clock, lastEditIs, undoneIn } from "./fix";
 import { pickedPicture, pictureView, slidePictures } from "./picture";
 import type { PictureCard, PictureRunView } from "./PictureCard";
 import { ownsKeys } from "./resultView";
-import { busyWhy } from "./slideJob";
+import { busyWhy, staleOf } from "./slideJob";
 import type { SlideJob } from "./useSlideJob";
 
 type Pic = SlidePicture & { bbox: BboxFrac };
@@ -70,6 +70,8 @@ export function usePictureSelect({ v, n, job, now, blocked, layered }: {
   };
   const run = job.run;
   const picRun = run?.kind === "picture" && run.strategy === v.strategy && run.slide === n ? run : null;
+  // замена (или её возврат) сохранена, а презентация на экране не перечиталась: строка с «Обновить» вместо итога
+  const unread = staleOf(picRun, !!job.refresh);
   const runView: PictureRunView = {
     work: picRun?.phase === "work" ? "change" : picRun?.undo === "work" ? "undo" : null,
     action: picRun?.action ?? null,
@@ -77,9 +79,10 @@ export function usePictureSelect({ v, n, job, now, blocked, layered }: {
     message: job.live.message,
     clock: picRun ? clock((picRun.phase === "work" ? now : picRun.endedAt ?? now) - picRun.startedAt) : "0:00",
     // изображение вернули как было в другом месте (лист «Подробнее», помощник) — итога больше нет
-    done: picRun?.phase === "done" && picRun.picture?.applied && picRun.undo !== "work" && !undoneIn(v, picRun.picture.version) ? picRun.action : null,
-    canUndo: !!picRun?.picture?.applied && lastEditIs(v, picRun.picture.version, "picture"),
-    error: picRun ? picRun.undoError ?? picRun.error : null,
+    done: picRun?.phase === "done" && picRun.picture?.applied && picRun.undo !== "work" && !undoneIn(v, picRun.picture.version) && !unread ? picRun.action : null,
+    canUndo: !!picRun?.picture?.applied && lastEditIs(v, picRun.picture.version, "picture") && !unread,
+    error: unread ? null : picRun ? picRun.undoError ?? picRun.error : null,
+    refresh: unread ? job.refresh : null,
   };
   const start = (action: "generate" | "remove") => {
     if (job.busy || job.elsewhere) return;

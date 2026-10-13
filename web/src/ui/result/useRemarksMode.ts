@@ -12,7 +12,7 @@ import { useFixStage, type FxPhase } from "./FixSketch";
 import { clock, fixedRows, fixSteps, fixSummary, fixToRevert, lastEditIs, slideSketch, undoneIn } from "./fix";
 import { firstRemarkSlide, slideBadges, slideRemarks, stageMarks, type Frame, type OkPin, type Pin } from "./marks";
 import type { PanelLine, PanelRow, PanelView, RemarksPanelProps } from "./RemarksPanel";
-import { busyWhy } from "./slideJob";
+import { busyWhy, staleOf } from "./slideJob";
 import type { SlideJob } from "./useSlideJob";
 
 export interface RemarksMode {
@@ -60,8 +60,11 @@ export function useRemarksMode({ v, n, src, job, now, titleOf }: {
   const fixBusy = !!fixRun && fixRun.phase === "work" && !fixRun.jobId;
   const fx = useFixStage(fixRun?.jobId && rm.mounted ? fixRun.seq : null, fixRun?.phase === "done", src);
   const fixing = !!fixRun && ((fixRun.phase === "work" && !!fixRun.jobId) || fx !== null);
-  // итог держится, пока исправление не вернули как было — здесь или в другом месте (лист «Подробнее», помощник)
-  const fixDone = !!fixRun && !fixing && fixRun.phase === "done" && !!fixRun.fix?.applied && !undoneIn(v, fixRun.fix.version);
+  // исправление (или его возврат) сохранено, а презентация на экране не перечиталась: строка с «Обновить» на месте итога
+  const stale = staleOf(fixRun, !!job.refresh);
+  // итог держится, пока исправление не вернули как было — здесь или в другом месте (лист «Подробнее», помощник); пока
+  // исправленный слайд не перечитан, итога нет (на экране прежний слайд)
+  const fixDone = !!fixRun && !fixing && fixRun.phase === "done" && !!fixRun.fix?.applied && !undoneIn(v, fixRun.fix.version) && stale !== "change";
   const view: PanelView = fixing ? "fix" : fixDone ? "done" : open.length ? "rem" : "none";
   const rows: PanelRow[] = useMemo(
     () => (view === "fix" ? fixRun!.requested : view === "done" ? fixedRows(fixRun!.requested, fixRun!.fix!, open) : open),
@@ -101,15 +104,17 @@ export function useRemarksMode({ v, n, src, job, now, titleOf }: {
   if (!rm.mounted) return { mounted: false, shown: false, off, toggle, stage: null, sketch: null, film: null, panel: null };
 
   const line: PanelLine | null = fixRun && fixRun.phase === "done" && !fixing
-    ? fixRun.error ? { tone: "error", text: fixRun.error }
+    ? stale === "change" && job.refresh ? { tone: "error", text: job.refresh.text, refresh: job.refresh }
+      : fixRun.error ? { tone: "error", text: fixRun.error }
       : fixRun.fix && !fixRun.fix.applied ? { tone: "info", text: `Слайд остался прежним: ${lower((fixRun.fix.why ?? "замечания остались").replace(/\.\s*$/, ""))}` } : null
     : null;
   const steps = fixRun ? fixSteps(job.live.events, fixRun.phase === "done") : null;
   const summary = fixDone ? fixSummary(fixRun!.fix!) : null;
   // «Вернуть как было» без итога на странице (перезагрузка): последнее изменение варианта — исправление этого слайда
   const back = here?.kind === "fix" ? here : null;
+  const backStale = staleOf(back, !!job.refresh) === "undo" ? job.refresh : null;
   const revert = (view === "rem" || view === "none") && fixToRevert(v, n)
-    ? { onRevert: () => job.revert(v.strategy, n), busy: back?.undo === "work", error: back?.undo === "error" ? back.undoError : null }
+    ? { onRevert: () => job.revert(v.strategy, n), busy: back?.undo === "work", error: back?.undo === "error" ? back.undoError : null, refresh: backStale }
     : null;
 
   return {
@@ -134,7 +139,9 @@ export function useRemarksMode({ v, n, src, job, now, titleOf }: {
       } : null,
       done: summary && fixRun ? {
         summary, onShow: () => summary.show !== null && setSelectedSlide(summary.show), onUndo: job.undo,
-        canUndo: lastEditIs(v, fixRun.fix!.version, "fix"), undoBusy: fixRun.undo === "work", undoError: fixRun.undoError,
+        // вернули, а экран ещё прежний: вместо «Вернуть как было» — строка с «Обновить»
+        canUndo: lastEditIs(v, fixRun.fix!.version, "fix") && stale !== "undo", undoBusy: fixRun.undo === "work", undoError: fixRun.undoError,
+        refresh: stale === "undo" ? job.refresh : null,
       } : null,
     },
   };

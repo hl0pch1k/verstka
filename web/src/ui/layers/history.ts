@@ -151,7 +151,9 @@ export function historyView(list: GenerationMeta[], opts: { now: Date; label(g: 
  *  - неудачная → «Создать» с той же темой и шаблоном (с результата плита уходит вниз — это делает сам переход);
  *  - неудачная сборка, которую держит страница (`buildId` — её законченная сборка, кончилась, пока человек был в
  *    другом месте) → её экран «Сборка» с причиной, «Вернуться к тексту» и «Собрать ещё раз» (`ended`);
- *  - она уже на экране → только закрыть раздел. */
+ *  - она уже на экране → только закрыть раздел;
+ *  - открытая, но несвежая (`stale`: изменение сохранено, а перечитать её не вышло) → перечитать (`load`), а не
+ *    оставить прежнюю. */
 export type OpenPlan =
   | { kind: "result"; load: boolean; rise: boolean }
   | { kind: "build" }
@@ -159,11 +161,12 @@ export type OpenPlan =
   | { kind: "create" }
   | { kind: "stay" };
 
-export function openPlan(g: GenerationMeta, at: { screen: Screen; openId: string | null; buildId: string | null }): OpenPlan {
+export function openPlan(g: GenerationMeta, at: { screen: Screen; openId: string | null; buildId: string | null; stale?: string | null }): OpenPlan {
   const state = deckState(g);
   if (state === "run") return at.screen === "build" && at.buildId === g.id ? { kind: "stay" } : { kind: "build" };
   if (state === "fail" && at.buildId === g.id) return at.screen === "build" ? { kind: "stay" } : { kind: "ended" };
   if (state === "fail") return { kind: "create" };
-  if (at.screen === "result" && at.openId === g.id) return { kind: "stay" };
-  return { kind: "result", load: at.openId !== g.id, rise: at.screen === "create" };
+  const stale = at.openId === g.id && at.stale === g.id;
+  if (at.screen === "result" && at.openId === g.id && !stale) return { kind: "stay" };
+  return { kind: "result", load: at.openId !== g.id || stale, rise: at.screen === "create" };
 }

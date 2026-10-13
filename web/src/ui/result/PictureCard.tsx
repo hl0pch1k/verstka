@@ -11,6 +11,7 @@ import { Arc } from "../kit/Arc";
 import { ErrorLine } from "../kit/ErrorLine";
 import { Icon } from "../kit/Icon";
 import { cls } from "../kit/cls";
+import { StaleLine, type Refresh } from "../shell/StaleLine";
 import type { PictureView } from "./picture";
 
 const pct = (n: number) => `${+(n * 100).toFixed(2)}%`;
@@ -52,6 +53,8 @@ export interface PictureRunView {
   done: "generate" | "remove" | null;
   canUndo: boolean;
   error: string | null;
+  /** Замена или её возврат сохранены, а презентация на экране не перечиталась: строка с «Обновить» вместо `error`. */
+  refresh?: Refresh | null;
 }
 
 export function PictureCard({ view, form, formDelay, wish, onWish, onToggleForm, onCancel, onGenerate, onRemove, onUndo, run, off, idp = "rp" }: {
@@ -119,7 +122,8 @@ export function PictureCard({ view, form, formDelay, wish, onWish, onToggleForm,
               <span>Новое изображение на слайде</span>
             </p>
           )}
-          {run.error && <ErrorLine text={run.error} lines={2} style={{ marginTop: 16 }} />}
+          {run.refresh ? <StaleLine r={run.refresh} style={{ marginTop: 16 }} />
+            : run.error && <ErrorLine text={run.error} lines={2} style={{ marginTop: 16 }} />}
           <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginTop: 16 }}>
             <button type="button" className={cls("p2-ob", form && "rp-on")} onClick={onToggleForm} aria-expanded={form} aria-controls={`${idp}-form`} style={{ height: 40 }}>
               {view.action}

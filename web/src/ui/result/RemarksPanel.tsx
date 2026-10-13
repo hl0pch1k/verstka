@@ -20,6 +20,7 @@ import { Icon } from "../kit/Icon";
 import { Spinner } from "../kit/Spinner";
 import { cls } from "../kit/cls";
 import { useSwap } from "../kit/useSwap";
+import { StaleLine, type Refresh } from "../shell/StaleLine";
 import type { FixStep, FixSummary, StepState } from "./fix";
 import { panelFit } from "./compact";
 import { countText, type Remark } from "./marks";
@@ -27,7 +28,8 @@ import { countText, type Remark } from "./marks";
 export type PanelView = "rem" | "fix" | "done" | "none";
 export type PanelRow = Remark & { done?: boolean };
 
-export interface PanelLine { tone: "error" | "info"; text: string }
+/** Строка у кнопки. `refresh` — исправление сохранено, а презентация на экране не перечиталась: строка с «Обновить». */
+export interface PanelLine { tone: "error" | "info"; text: string; refresh?: Refresh | null }
 
 export interface RemarksPanelProps {
   /** Режим включён (панель видна) или гаснет. */
@@ -48,8 +50,9 @@ export interface RemarksPanelProps {
   fixBusy: boolean;
   /** Почему «Исправить слайд» и «Вернуть как было» сейчас не начнутся (идёт работа над вариантом); null — начнутся. */
   fixOff: string | null;
-  /** «Вернуть как было» без итога на странице: последнее изменение варианта — исправление этого слайда. */
-  revert: { onRevert(): void; busy: boolean; error: string | null } | null;
+  /** «Вернуть как было» без итога на странице: последнее изменение варианта — исправление этого слайда. `refresh` —
+   *  вернулось, а презентация на экране не перечиталась (строка с «Обновить» вместо `error`). */
+  revert: { onRevert(): void; busy: boolean; error: string | null; refresh?: Refresh | null } | null;
   /** Строка у кнопки: неудача или почему слайд остался прежним. */
   line: PanelLine | null;
   /** На других слайдах замечания есть (вид «Замечаний нет» говорит про числа на миниатюрах). */
@@ -63,6 +66,8 @@ export interface RemarksPanelProps {
     canUndo: boolean;
     undoBusy: boolean;
     undoError: string | null;
+    /** Вернули как было, а презентация на экране не перечиталась: строка с «Обновить» на месте кнопки. */
+    refresh?: Refresh | null;
   } | null;
 }
 
@@ -119,6 +124,7 @@ function Body(p: RemarksPanelProps) {
 }
 
 function Line({ line }: { line: PanelLine }) {
+  if (line.refresh) return <StaleLine r={line.refresh} style={{ marginTop: 16, flex: "none" }} />;
   if (line.tone === "error") return <ErrorLine text={line.text} lines={2} style={{ marginTop: 16, flex: "none" }} />;
   return (
     <p role="status" title={line.text}
@@ -183,7 +189,8 @@ function Revert({ p, ride }: { p: RemarksPanelProps; ride?: string }) {
         {r.busy ? <Arc size={18} /> : <Icon name="undo" size={18} />}
         <span>Вернуть как было</span>
       </button>
-      {r.error && <ErrorLine text={r.error} lines={2} style={{ marginTop: 8, flex: "none" }} />}
+      {r.refresh ? <StaleLine r={r.refresh} style={{ marginTop: 8, flex: "none" }} />
+        : r.error && <ErrorLine text={r.error} lines={2} style={{ marginTop: 8, flex: "none" }} />}
     </>
   );
 }
@@ -324,7 +331,8 @@ function Done({ p, d }: { p: RemarksPanelProps; d(ms: number): string }) {
             <span>Вернуть как было</span>
           </button>
         )}
-        {x.undoError && <ErrorLine text={x.undoError} lines={2} style={{ marginTop: 8 }} />}
+        {x.refresh ? <StaleLine r={x.refresh} style={{ marginTop: 16 }} />
+          : x.undoError && <ErrorLine text={x.undoError} lines={2} style={{ marginTop: 8 }} />}
       </section>
     </>
   );

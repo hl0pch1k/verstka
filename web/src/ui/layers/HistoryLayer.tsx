@@ -5,7 +5,8 @@
 // готовая открывается в «Результате» на варианте своей обложки — когда она загрузилась и первый слайд декодирован, слой
 // уезжает вниз, колода складывается, а из «Создать» плита результата поднимается снизу одним движением с плитами 02/03
 // (`rise`, `p2-s4-up`, 520 мс); идущая — экран «Сборка» с её задачей; неудачная — «Создать» с той же темой и шаблоном,
-// а неудачная сборка этой страницы, кончившаяся, пока человек был в другом месте, — её экран «Сборка».
+// а неудачная сборка этой страницы, кончившаяся, пока человек был в другом месте, — её экран «Сборка»; открытая, но
+// несвежая (изменение сохранено, а перечитать её не вышло) — перечитывается.
 // Пока презентация грузится, на её обложке — дуга загрузки; неудача — красной строкой в шапке слоя; слой закрыли —
 // начатое открытие отменяется.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -33,7 +34,7 @@ const LIST_FAILED = "Не удалось обновить список през�
 export function HistoryLayer() {
   const {
     ui, dispatch, generations, refreshGenerations, generation, generationId, loadGeneration, cancelLoad, templateLabel, templates, selectTemplate,
-    editText, buildJob, followDeck, notices, clearNotice, activeStrategy, setActiveStrategy, setSelectedSlide,
+    editText, buildJob, followDeck, notices, clearNotice, activeStrategy, setActiveStrategy, setSelectedSlide, stale,
   } = useApp();
   const rise = useRise();
   const open = ui.sect === "hist";
@@ -175,7 +176,7 @@ export function HistoryLayer() {
   const pick = async (g: GenerationMeta) => {
     if (wait?.on) return; // одна презентация за раз
     const at = ui.screen;
-    const plan = openPlan(g, { screen: at, openId: generation?.id ?? null, buildId: buildJob?.generation ?? null });
+    const plan = openPlan(g, { screen: at, openId: generation?.id ?? null, buildId: buildJob?.generation ?? null, stale: stale?.gid ?? null });
     if (plan.kind === "stay") return close();
     // неудачная сборка, которую держит страница: её экран «Сборка» (причина, «Вернуться к тексту», «Собрать ещё раз»)
     if (plan.kind === "ended") return dispatch({ type: "go", screen: "build" });
@@ -186,7 +187,7 @@ export function HistoryLayer() {
     const d = await fetchFull(g, n);
     if (!d || !live(n, at)) return;
     // статус — по свежей мете: сборка могла кончиться, пока список стоял
-    const now = openPlan(d, { screen: at, openId: generation?.id ?? null, buildId: buildJob?.generation ?? null });
+    const now = openPlan(d, { screen: at, openId: generation?.id ?? null, buildId: buildJob?.generation ?? null, stale: stale?.gid ?? null });
     if (now.kind === "stay") return close();
     if (now.kind === "ended") return dispatch({ type: "go", screen: "build" });
     if (now.kind === "result") return toResult(d, now, at);

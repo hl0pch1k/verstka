@@ -8,7 +8,7 @@
 //  · edit (правка слайда, изображение) и jobs («Исправь всё») — задачи хранилища (`runJob`) с целью-вариантом: кнопки
 //    работы над ним выключены, пока задача идёт; ход каждой — своя полоса в ленте (`liveJobs`); готово — презентация
 //    перечитывается, если она открыта (`reloadIfOpen`; сцена сменяет слайд перекрёстным затуханием), открыта другая —
-//    тихая строка «Это другая презентация…», не перечиталась — причина по-русски;
+//    тихая строка «Это другая презентация…», не перечиталась — тихая строка с причиной и «Обновить» (noteView);
 //  · open_tab — лист «Подробнее» на нужной вкладке (openTabSteps), если открыта та презентация, о которой ответ.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../../api";
@@ -59,8 +59,8 @@ export function useHelperChat(): HelperChat {
   const settleJob = useCallback((id: string, status: "done" | "failed") => {
     setJobs((js) => js.map((j) => (j.id === id ? { ...j, status, progress: status === "done" ? 1 : j.progress } : j)));
   }, []);
-  const addNote = useCallback((text: string) => {
-    setNotes((ns) => [...ns, { id: `n${Date.now()}-${ns.length}`, text, ts: now() }]);
+  const addNote = useCallback((text: string, refresh?: string) => {
+    setNotes((ns) => [...ns, { id: `n${Date.now()}-${ns.length}`, text, ts: now(), refresh }]);
   }, []);
   // ход задач — по идущим задачам хранилища: у каждой полосы своя задача («Исправь всё» — по задаче на вариант)
   const live = app.liveJobs;
@@ -81,10 +81,11 @@ export function useHelperChat(): HelperChat {
     if (g) return { kind: "open", g };
     return failed ? { kind: "failed", error } : { kind: "other" };
   }, []);
-  /** Что сказать в ленте после перечитывания: открыта другая — тихая строка; не перечиталась — причина. */
-  const tellReload = useCallback((r: Reload | null) => {
+  /** Что сказать в ленте после перечитывания: открыта другая — тихая строка; не перечиталась — тихая строка с причиной
+   *  и «Обновить» (пока презентация несвежая). */
+  const tellReload = useCallback((r: Reload | null, gid: string | null) => {
     if (r?.kind === "other") addNote(OTHER_DECK);
-    else if (r?.kind === "failed") latest.current.pushMessage("assistant", reloadFailText(r.error));
+    else if (r?.kind === "failed") addNote(reloadFailText(r.error), gid ?? undefined);
   }, [addNote]);
 
   const followEdit = useCallback((a: EditAction) => {
@@ -109,7 +110,7 @@ export function useHelperChat(): HelperChat {
           }
         }
         latest.current.pushMessage("assistant", r?.reply ?? "Готово.");
-        tellReload(after);
+        tellReload(after, gid);
       },
       onFailed: (job: Job) => {
         settleJob(a.job_id, "failed");
@@ -134,7 +135,7 @@ export function useHelperChat(): HelperChat {
         after = await reloadDeck(gid);
       }
       latest.current.pushMessage("assistant", describeFixes(outcomes, latest.current.strategyTitle));
-      tellReload(after);
+      tellReload(after, gid);
     };
     list.forEach((j, i) => {
       const label = `Исправляю: ${s.strategyTitle(j.strategy)}`;

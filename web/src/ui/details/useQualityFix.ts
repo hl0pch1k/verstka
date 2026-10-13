@@ -4,11 +4,14 @@
 // «Исправлено N» с «Вернуть как было» держится, пока вариант не изменится снова. Кнопки выключены и тогда, когда над
 // вариантом идёт чужая задача (исправление слайда, изображение, возврат из «Агента»).
 import { useApp } from "../../store";
+import { useStale, type Refresh } from "../shell/StaleLine";
 import type { Variant } from "../../types";
 import { variantRev } from "../../lib/rev";
 import { fixView, workKey, type FixView } from "./variantWork";
 
 export interface QualityFix extends FixView {
+  /** Исправление или его возврат сохранены, а презентация на экране не перечиталась: строка с «Обновить». */
+  refresh: Refresh | null;
   /** `ids` — что исправить («all» — всё автоматически), `count` — какие замечания считать исправленными. */
   start(ids: string[] | "all", count: string[]): void;
   /** «Вернуть как было» итога исправления. */
@@ -18,8 +21,11 @@ export interface QualityFix extends FixView {
 export function useQualityFix(gid: string, v: Variant): QualityFix {
   const { work, busyVariants, fixIssues, revertVariant } = useApp();
   const key = workKey(gid, v.strategy);
+  const refresh = useStale(gid);
+  const view = fixView(work, key, variantRev(v), busyVariants.includes(key), !!refresh);
   return {
-    ...fixView(work, key, variantRev(v), busyVariants.includes(key)),
+    ...view,
+    refresh: view.stale ? refresh : null,
     start: (ids, count) => fixIssues(gid, v.strategy, ids, count),
     revert: () => void revertVariant(gid, v.strategy, { by: "quality" }),
   };

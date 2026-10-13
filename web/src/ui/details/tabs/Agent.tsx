@@ -8,15 +8,19 @@ import { Arc } from "../../kit/Arc";
 import { cls } from "../../kit/cls";
 import { ErrorLine } from "../../kit/ErrorLine";
 import { Icon } from "../../kit/Icon";
+import { StaleLine, useStale } from "../../shell/StaleLine";
 import { agentCap, agentRoles, editRows, legacyLines } from "../agentTab";
 import { undoView, workKey } from "../variantWork";
 
-/** «Вернуть как было» последней правки варианта; ход — дуга в кнопке, неудача — строка под шапкой. Кнопка выключена,
- *  пока над вариантом идёт любая работа (сервер держит одну задачу на вариант). */
+/** «Вернуть как было» последней правки варианта; ход — дуга в кнопке, неудача — строка под шапкой; вернулось, а
+ *  презентация на экране не перечиталась — строка с «Обновить». Кнопка выключена, пока над вариантом идёт любая работа
+ *  (сервер держит одну задачу на вариант). */
 function useUndoEdit(gid: string, strategy: string) {
   const { work, busyVariants, revertVariant } = useApp();
   const key = workKey(gid, strategy);
-  return { ...undoView(work, key, busyVariants.includes(key)), undo: () => void revertVariant(gid, strategy, { by: "agent" }) };
+  const refresh = useStale(gid);
+  const view = undoView(work, key, busyVariants.includes(key), !!refresh);
+  return { ...view, refresh: view.stale ? refresh : null, undo: () => void revertVariant(gid, strategy, { by: "agent" }) };
 }
 
 export function AgentTab({ g, v }: { g: Generation; v: Variant }) {
@@ -92,7 +96,8 @@ export function AgentTab({ g, v }: { g: Generation; v: Variant }) {
               <span>Вернуть как было</span>
             </button>
           </div>
-          {un.error ? <ErrorLine text={un.error} style={{ marginTop: 8 }} />
+          {un.refresh ? <StaleLine r={un.refresh} lines={0} style={{ marginTop: 8 }} />
+            : un.error ? <ErrorLine text={un.error} style={{ marginTop: 8 }} />
             : <p style={{ margin: "8px 0 0", fontSize: 14, fontWeight: 500, lineHeight: "20px", color: "#5A6272" }}>{ed.hint}</p>}
           {ed.rows.length > 0 && (
             <ol style={{ margin: "16px 0 0", padding: 0, listStyle: "none" }}>

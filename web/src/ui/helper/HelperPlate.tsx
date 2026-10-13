@@ -10,10 +10,13 @@ import { humanError } from "../../lib/errors";
 import { smoothScroll } from "../../lib/motion";
 import { useApp } from "../../store";
 import { charsLabel, fileTextIssue, MAX_TEXT_BYTES, TEXT_ACCEPT, TEXT_EXTS } from "../create/textRules";
+import { Arc } from "../kit/Arc";
 import { cls } from "../kit/cls";
 import { ErrorLine } from "../kit/ErrorLine";
 import { Icon } from "../kit/Icon";
-import { bubbleBlocks, chipsFor, feedDelay, feedItems, introFor, placeholderFor, typeset, type FeedJob } from "./chat";
+import { useSwap } from "../kit/useSwap";
+import { useStale } from "../shell/StaleLine";
+import { bubbleBlocks, chipsFor, feedDelay, feedItems, introFor, noteView, placeholderFor, typeset, type FeedJob, type FeedNote } from "./chat";
 import { useHelperChat } from "./useHelperChat";
 
 const LINE = 24;
@@ -59,12 +62,34 @@ function JobCard({ job }: { job: FeedJob }) {
   );
 }
 
-/** Тихая строка ленты (не ответ помощника): «Это другая презентация — откройте её из «Мои презентации»». */
-function NoteLine({ text }: { text: string }) {
+/** Тихая строка ленты (не ответ помощника): «Это другая презентация — откройте её из «Мои презентации»». Строка о
+ *  презентации, которую изменили, а она не перечиталась, — с «Обновить», пока она несвежая (дуга, пока читается);
+ *  перечиталась — «Презентация на экране обновлена» (смена текста — перекрёстным затуханием). */
+function NoteLine({ note }: { note: FeedNote }) {
+  const { generation } = useApp();
+  const r = useStale(note.refresh ?? "");
+  const view = noteView(note, { stale: r && note.refresh ? { gid: note.refresh, text: r.text } : null, open: generation?.id ?? null });
+  // текст и «Обновить» сменяются вместе (затухание 120 мс, проявление 240 мс): уходящая кнопка гаснет со строкой
+  const t = useSwap(view.refresh ? `1${view.text}` : `0${view.text}`);
+  const held = useRef(r);
+  if (r) held.current = r;
+  const act = t.shown[0] === "1" ? held.current : null;
   return (
     <p role="status" className="gh-note">
       <span style={{ display: "flex", flex: "none", marginTop: 2, color: "#2563EB" }}><Icon name="info" size={16} /></span>
-      <span>{typeset(text)}</span>
+      <span className={t.cls}>
+        {typeset(t.shown.slice(1))}
+        {act && (
+          <>
+            {" "}
+            <button type="button" className="gh-act" onClick={act.onRefresh} aria-busy={act.busy || undefined}
+              title={act.busy ? "Перечитываю презентацию…" : "Перечитать презентацию"}>
+              {act.busy && <Arc size={14} />}
+              Обновить
+            </button>
+          </>
+        )}
+      </span>
     </p>
   );
 }
@@ -228,7 +253,7 @@ export function HelperPlate() {
               return (
                 <div key={id} className={cls("gh-item hp-st", user ? "gh-r" : "gh-l", fresh(ts) && "p2-in")} style={st(feedDelay(i + 1, n, open))}>
                   {it.kind === "job" ? <JobCard job={it.job} />
-                    : it.kind === "note" ? <NoteLine text={it.note.text} />
+                    : it.kind === "note" ? <NoteLine note={it.note} />
                     : user ? <div className="gh-user">{it.msg.text}</div> : <BotText text={it.msg.text} />}
                 </div>
               );

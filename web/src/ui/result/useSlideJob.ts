@@ -16,7 +16,7 @@ import { humanError } from "../../lib/errors";
 import { asPictureResult } from "../../lib/pictures";
 import { useApp, type ActiveJob } from "../../store";
 import type { AgentEvent, Job, PictureChangeRequest, PictureChangeResult, SlideFixRequest, SlideFixResult } from "../../types";
-import { reloadFailText } from "../helper/chat";
+import { useStale, type Refresh } from "../shell/StaleLine";
 import { asSlideFixResult } from "./fix";
 import type { Remark } from "./marks";
 import { JOB0, liveWork, runOf, slideBusy, slideJobNext, variantLiveJob, type SlideJobAction, type SlideJobKind, type SlideJobState, type SlideRun } from "./slideJob";
@@ -37,6 +37,9 @@ export interface SlideJob {
   elsewhere: { why: string; slide: number | null } | null;
   /** Ход задачи этого запуска: шаги агента, доля, последняя строка (после конца — последние увиденные). */
   live: SlideLive;
+  /** Презентация несвежая (изменение сохранено, а перечитать не вышло): строка и «Обновить» для места действия, чья
+   *  работа это изменение (`run.stale`); null — свежая. */
+  refresh: Refresh | null;
   start(kind: "fix", n: number, body: SlideFixRequest, requested: Remark[]): Promise<boolean>;
   start(kind: "picture", n: number, body: PictureChangeRequest): Promise<boolean>;
   /** «Вернуть как было» для итога этой работы. */
@@ -114,28 +117,26 @@ export function useSlideJob(gid: string, strategy: string): SlideJob {
       quiet: true,
       onDone: async (job) => {
         // применённое изменение — новая версия презентации: сначала она (и без экрана результата), потом итог — сцена
-        // разворачивается в новый слайд. Не перечиталась — итога («Исправлено», «Новое изображение») нет: на экране
-        // прежний слайд; строка у места действия говорит, что изменение сохранено, а экран не обновился (одна строка —
-        // store её больше нигде не пишет)
-        let lost: { e: unknown } | null = null;
+        // разворачивается в новый слайд. Не перечиталась — итог ждёт (`stale`): на экране прежний слайд, у места
+        // действия строка «изменения сохранены, а экран не обновился» с «Обновить» (одна строка — store её больше нигде
+        // не пишет); перечиталась — итог встаёт сам
+        let lost = false;
         const reread = async () => {
-          await reloadIfOpen(gid, (e) => {
-            lost = { e };
+          await reloadIfOpen(gid, () => {
+            lost = true;
           });
-          return lost as { e: unknown } | null;
+          return lost;
         };
         if (kind === "fix") {
           const res = asSlideFixResult(job.result);
           if (!res) return void send({ type: "settled", seq: s, at: Date.now(), error: "Сервер не смог исправить слайд. Попробуйте ещё раз." });
-          const failed = res.applied ? await reread() : null;
-          if (failed) return void send({ type: "settled", seq: s, at: Date.now(), error: reloadFailText(failed.e) });
-          send({ type: "settled", seq: s, at: Date.now(), fix: res });
+          const stale = res.applied ? await reread() : false;
+          send({ type: "settled", seq: s, at: Date.now(), fix: res, stale });
         } else {
           const res = asPictureResult(job.result);
           if (!res) return void send({ type: "settled", seq: s, at: Date.now(), error: "Сервер не смог поменять изображение. Попробуйте ещё раз." });
-          const failed = res.applied ? await reread() : null;
-          if (failed) return void send({ type: "settled", seq: s, at: Date.now(), error: reloadFailText(failed.e) });
-          send({ type: "settled", seq: s, at: Date.now(), picture: res, error: res.applied ? null : humanError(res.reply, "Изображение не поменялось. Попробуйте ещё раз.") });
+          const stale = res.applied ? await reread() : false;
+          send({ type: "settled", seq: s, at: Date.now(), picture: res, stale, error: res.applied ? null : humanError(res.reply, "Изображение не поменялось. Попробуйте ещё раз.") });
         }
       },
       onFailed: (job) => void send({ type: "settled", seq: s, at: Date.now(), error: jobError(job, what) }),
@@ -151,10 +152,11 @@ export function useSlideJob(gid: string, strategy: string): SlideJob {
     const mineNow = runOf(now, to);
     if (now === before || !mineNow) return; // идёт другая работа
     const s = mineNow.seq;
-    void revertVariant(gid, to, { slide }).then((why) => {
-      // вернулось как было — итога больше нет: слайд снова со своими замечаниями
-      if (why === null) send({ type: "undone", seq: s });
-      else send({ type: "undoFailed", seq: s, error: why });
+    void revertVariant(gid, to, { slide }).then(({ why, stale }) => {
+      // вернулось как было — итога больше нет: слайд снова со своими замечаниями; экран не перечитался — строка с
+      // «Обновить» на месте итога
+      if (why !== null) send({ type: "undoFailed", seq: s, error: why });
+      else send(stale ? { type: "undoStale", seq: s } : { type: "undone", seq: s });
     });
   }, [gid, revertVariant, send]);
 
@@ -169,6 +171,7 @@ export function useSlideJob(gid: string, strategy: string): SlideJob {
   // задача над этим вариантом, которую экран не запускал (своя — у `run`)
   const other = variantLiveJob(liveJobs, gid, strategy, run?.jobId ?? null);
   const elsewhere = useMemo(() => (other ? liveWork(other) : null), [other]);
+  const refresh = useStale(gid);
 
   return {
     run,
@@ -177,6 +180,7 @@ export function useSlideJob(gid: string, strategy: string): SlideJob {
     busy: slideBusy(run),
     elsewhere,
     live,
+    refresh,
     start,
     undo,
     revert,

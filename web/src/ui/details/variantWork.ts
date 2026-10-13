@@ -47,7 +47,8 @@ export function fixedFromJob(result: unknown, requested: string[]): number | nul
 
 export interface FixRun {
   seq: number;
-  phase: "fix" | "done" | "idle";
+  /** `stale` — исправления применены, а презентация на экране не перечиталась: итог ждёт её перечитывания (`fresh`). */
+  phase: "fix" | "done" | "idle" | "stale";
   /** Что исправляется: отмеченные замечания или всё («all»). */
   ids: string[] | "all";
   /** Сколько исправлено (после итога). */
@@ -55,10 +56,14 @@ export interface FixRun {
   /** Ревизия варианта, к которой относится итог или неудача; null — неизвестна (презентацию не перечитали). */
   rev: string | null;
   error: string | null;
+  /** Несвежий итог (`stale`): сколько исправлено по итогу задачи (null — не сказано, считают по новому отчёту) и какие
+   *  замечания просили. */
+  wait?: { fixed: number | null; count: string[] };
 }
 /** Чья кнопка «Вернуть как было» запустила возврат: ход (дуга) и неудача показываются у неё. */
 export type UndoBy = "quality" | "agent";
-export interface UndoRun { seq: number; by: UndoBy; busy: boolean; error: string | null }
+/** `stale` — вернулось, а презентация на экране не перечиталась (строка с «Обновить» у той же кнопки). */
+export interface UndoRun { seq: number; by: UndoBy; busy: boolean; error: string | null; stale?: boolean }
 export interface VariantWork { fix?: FixRun; undo?: UndoRun }
 export type WorkState = Record<string, VariantWork | undefined>;
 export const WORK0: WorkState = {};
@@ -73,7 +78,14 @@ export type WorkAction =
   | { type: "undo"; key: string; by: UndoBy }
   /** «Верни как было» варианта удалось — своё (`seq` возврата) или с экрана результата (null): итога исправления нет. */
   | { type: "undone"; key: string; seq: number | null }
-  | { type: "undoFailed"; key: string; seq: number; error: string };
+  | { type: "undoFailed"; key: string; seq: number; error: string }
+  /** Исправления применены, а презентация не перечиталась: итог ждёт перечитывания. */
+  | { type: "fixStale"; key: string; seq: number; fixed: number | null; count: string[] }
+  /** Вернулось, а презентация не перечиталась (`seq` — возврат этого места; null — с экрана результата). */
+  | { type: "undoStale"; key: string; seq: number | null }
+  /** Презентация перечиталась: несвежий итог исправления становится итогом (`fixed` по новому отчёту, `rev` — ревизия
+   *  перечитанного варианта), строка у «Вернуть как было» уходит. */
+  | { type: "fresh"; key: string; fixed: number; rev: string };
 
 let counter = 0;
 
@@ -88,7 +100,7 @@ export function workNext(s: WorkState, a: WorkAction): WorkState {
     case "fix":
       if (working(w)) return s;
       // новое действие — прежние строки неудачи уходят
-      return put({ fix: { seq: ++counter, phase: "fix", ids: a.ids, fixed: 0, rev: null, error: null }, undo: undo && { ...undo, error: null } });
+      return put({ fix: { seq: ++counter, phase: "fix", ids: a.ids, fixed: 0, rev: null, error: null }, undo: undo && { ...undo, error: null, stale: false } });
     case "fixed":
       if (!fix || fix.seq !== a.seq || fix.phase !== "fix") return s;
       return put({
@@ -104,7 +116,7 @@ export function workNext(s: WorkState, a: WorkAction): WorkState {
       return put({ ...w, fix: { ...fix, phase: "idle", fixed: 0, rev: null, error: null } });
     case "undo":
       if (working(w)) return s;
-      return put({ fix: fix && { ...fix, error: null }, undo: { seq: ++counter, by: a.by, busy: true, error: null } });
+      return put({ fix: fix && { ...fix, error: null }, undo: { seq: ++counter, by: a.by, busy: true, error: null, stale: false } });
     case "undone": {
       const mine = !!undo && a.seq !== null && undo.seq === a.seq && undo.busy;
       const gone = fix?.phase === "done";
@@ -117,7 +129,34 @@ export function workNext(s: WorkState, a: WorkAction): WorkState {
     case "undoFailed":
       if (!undo || undo.seq !== a.seq || !undo.busy) return s;
       return put({ ...w, undo: { ...undo, busy: false, error: a.error } });
+    case "fixStale":
+      if (!fix || fix.seq !== a.seq || fix.phase !== "fix") return s;
+      return put({ ...w, fix: { ...fix, phase: "stale", fixed: 0, rev: null, error: null, wait: { fixed: a.fixed, count: a.count } } });
+    case "undoStale": {
+      // как «undone» (итога исправления больше нет), но экран ещё прежний: строка с «Обновить» у кнопки этого места
+      const mine = !!undo && a.seq !== null && undo.seq === a.seq && undo.busy;
+      const gone = fix?.phase === "done";
+      if (!mine && !gone) return s;
+      return put({
+        fix: gone ? { ...fix!, phase: "idle", fixed: 0, error: null } : fix,
+        undo: mine ? { ...undo!, busy: false, error: null, stale: true } : undo,
+      });
+    }
+    case "fresh": {
+      const wasFix = fix?.phase === "stale";
+      if (!wasFix && !undo?.stale) return s;
+      return put({
+        fix: wasFix ? (a.fixed > 0 ? { ...fix!, phase: "done", fixed: a.fixed, rev: a.rev, error: null, wait: undefined }
+          : { ...fix!, phase: "idle", fixed: 0, rev: a.rev, error: "Исправить не получилось — замечания остались.", wait: undefined }) : fix,
+        undo: undo?.stale ? { ...undo, stale: false } : undo,
+      });
+    }
   }
+}
+
+/** Места, которые ждут перечитывания презентации `gid` (несвежий итог исправления или возврата): ключи `workKey`. */
+export function staleKeys(s: WorkState, gid: string): string[] {
+  return Object.keys(s).filter((k) => k.startsWith(`${gid}|`) && (s[k]?.fix?.phase === "stale" || !!s[k]?.undo?.stale));
 }
 
 // ---- что видно -------------------------------------------------------------------------------------------------------
@@ -132,12 +171,15 @@ export interface FixView {
   /** «Вернуть как было» на месте «Исправить всё автоматически». */
   undo: boolean;
   error: string | null;
+  /** Исправление или его возврат сохранены, а презентация на экране не перечиталась: строка с «Обновить» вместо `error`. */
+  stale: boolean;
   /** Над вариантом идёт работа (своя или чужая задача): кнопки и флажки выключены. */
   locked: boolean;
 }
 
-/** Вкладка «Качество»: `rev` — ревизия варианта на экране, `live` — над вариантом идёт задача хранилища. */
-export function fixView(s: WorkState, key: string, rev: string, live: boolean): FixView {
+/** Вкладка «Качество»: `rev` — ревизия варианта на экране, `live` — над вариантом идёт задача хранилища, `staleNow` —
+ *  хранилище держит открытую презентацию несвежей. */
+export function fixView(s: WorkState, key: string, rev: string, live: boolean, staleNow = false): FixView {
   const w = s[key];
   const fix = w?.fix;
   const undo = w?.undo;
@@ -149,6 +191,7 @@ export function fixView(s: WorkState, key: string, rev: string, live: boolean): 
     status: shown ? fixedText(fix.fixed) : null,
     undo: shown,
     error: (fresh ? fix.error : null) ?? (undo?.by === "quality" ? undo.error : null),
+    stale: staleNow && (fix?.phase === "stale" || (undo?.by === "quality" && !!undo.stale)),
     locked: live || working(w),
   };
 }
@@ -159,11 +202,16 @@ export interface UndoView {
   /** Дуга в кнопке: возврат запустила она. */
   arc: boolean;
   error: string | null;
+  /** Вернулось, а презентация на экране не перечиталась: строка с «Обновить» вместо `error`. */
+  stale: boolean;
 }
 
 /** «Ваши правки» вкладки «Агент». */
-export function undoView(s: WorkState, key: string, live: boolean): UndoView {
+export function undoView(s: WorkState, key: string, live: boolean, staleNow = false): UndoView {
   const w = s[key];
   const undo = w?.undo;
-  return { busy: live || working(w), arc: !!undo?.busy && undo.by === "agent", error: undo?.by === "agent" ? undo.error : null };
+  return {
+    busy: live || working(w), arc: !!undo?.busy && undo.by === "agent", error: undo?.by === "agent" ? undo.error : null,
+    stale: staleNow && undo?.by === "agent" && !!undo.stale,
+  };
 }

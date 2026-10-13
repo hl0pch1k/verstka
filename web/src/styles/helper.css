@@ -115,6 +115,12 @@ a.p2-rbl:hover{color:#0B1220}
 .hp-np .df-mi.rt-nb-off:active{transform:none}
 /* тихая строка ленты: «Это другая презентация — откройте её из «Мои презентации»» */
 .gh-note{display:flex;align-items:flex-start;gap:8px;margin:0;padding:0 16px;font-size:13px;font-weight:500;line-height:20px;color:#5A6272}
+/* «Обновить» в тихой строке ленты: ссылка в строке, дуга — пока презентация перечитывается */
+.gh-act{display:inline-flex;align-items:center;gap:4px;padding:0;border:0;border-radius:4px;background:none;color:#2563EB;font:inherit;font-weight:700;vertical-align:bottom;cursor:pointer;transition:transform 160ms var(--ease)}
+.gh-act:hover{transform:translateY(-2px)}
+.gh-act:active{transform:scale(.98)}
+.gh-act[aria-busy="true"]{cursor:progress;transform:none}
+.gh-act:focus-visible{outline:2px solid #2563EB;outline-offset:2px}
 /* слой компактного вида, который сейчас не на месте (колонка занята замечаниями или изображением): гаснет за 120 мс —
    к подмене сетки его уже не видно */
 .hp-nar .hp-xf.hp-xf-off{opacity:0;visibility:hidden;pointer-events:none;transition:opacity 120ms var(--ease),visibility 0s linear 120ms}

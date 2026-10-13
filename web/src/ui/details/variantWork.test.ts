@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { ActiveJob } from "../../lib/jobState";
-import { busyKeys, fixedFromJob, fixView, undoRefusal, undoView, WORK0, workKey, workNext } from "./variantWork";
+import { busyKeys, fixedFromJob, fixView, staleKeys, undoRefusal, undoView, WORK0, workKey, workNext } from "./variantWork";
 
 const K = workKey("g1", "s");
 const L = workKey("g1", "v");
@@ -20,10 +20,10 @@ test("занятые варианты — по целям идущих зада�
 
 test("исправление: старт → ход (отмеченные заняты, кнопки выключены) → итог «Исправлено N» с «Вернуть как было»", () => {
   let s = workNext(WORK0, { type: "fix", key: K, ids: ["a", "b"] });
-  assert.deepEqual(fixView(s, K, "r1", false), { busy: ["a", "b"], working: "fix", status: null, undo: false, error: null, locked: true });
+  assert.deepEqual(fixView(s, K, "r1", false), { busy: ["a", "b"], working: "fix", status: null, undo: false, error: null, stale: false, locked: true });
   const seq = s[K]!.fix!.seq;
   s = workNext(s, { type: "fixed", key: K, seq, fixed: 2, rev: "r2" });
-  assert.deepEqual(fixView(s, K, "r2", false), { busy: null, working: null, status: "Исправлено 2 замечания", undo: true, error: null, locked: false });
+  assert.deepEqual(fixView(s, K, "r2", false), { busy: null, working: null, status: "Исправлено 2 замечания", undo: true, error: null, stale: false, locked: false });
 });
 
 test("итог исправления держится, пока вариант не изменился снова (новая ревизия — итога нет)", () => {
@@ -31,7 +31,7 @@ test("итог исправления держится, пока вариант 
   s = workNext(s, { type: "fixed", key: K, seq: s[K]!.fix!.seq, fixed: 1, rev: "r2" });
   assert.equal(fixView(s, K, "r2", false).status, "Исправлено 1 замечание");
   // слайд исправили, изображение сменили, правку вернули из «Агента» — ревизия другая
-  assert.deepEqual(fixView(s, K, "r3", false), { busy: null, working: null, status: null, undo: false, error: null, locked: false });
+  assert.deepEqual(fixView(s, K, "r3", false), { busy: null, working: null, status: null, undo: false, error: null, stale: false, locked: false });
   // ревизия после исправления неизвестна (презентацию не перечитали) — итог виден
   let t = workNext(WORK0, { type: "fix", key: K, ids: "all" });
   t = workNext(t, { type: "fixed", key: K, seq: t[K]!.fix!.seq, fixed: 1, rev: null });
@@ -56,13 +56,13 @@ test("второй запуск, пока идёт первый, отклоня�
 test("ничего не исправилось — строка неудачи, «Вернуть» не предлагается", () => {
   let s = workNext(WORK0, { type: "fix", key: K, ids: ["a"] });
   s = workNext(s, { type: "fixed", key: K, seq: s[K]!.fix!.seq, fixed: 0, rev: "r1" });
-  assert.deepEqual(fixView(s, K, "r1", false), { busy: null, working: null, status: null, undo: false, error: "Исправить не получилось — замечания остались.", locked: false });
+  assert.deepEqual(fixView(s, K, "r1", false), { busy: null, working: null, status: null, undo: false, error: "Исправить не получилось — замечания остались.", stale: false, locked: false });
 });
 
 test("неудача запуска или задачи — строка ошибки у места действия, пока вариант тот же", () => {
   let s = workNext(WORK0, { type: "fix", key: K, ids: ["a"] });
   s = workNext(s, { type: "fixFailed", key: K, seq: s[K]!.fix!.seq, error: "Вариант уже меняется", rev: "r1" });
-  assert.deepEqual(fixView(s, K, "r1", false), { busy: null, working: null, status: null, undo: false, error: "Вариант уже меняется", locked: false });
+  assert.deepEqual(fixView(s, K, "r1", false), { busy: null, working: null, status: null, undo: false, error: "Вариант уже меняется", stale: false, locked: false });
   assert.equal(fixView(s, K, "r2", false).error, null);
 });
 
@@ -71,12 +71,12 @@ test("«Вернуть как было» итога: ход в своей кно
   s = workNext(s, { type: "fixed", key: K, seq: s[K]!.fix!.seq, fixed: 1, rev: "r2" });
   const done = s;
   s = workNext(s, { type: "undo", key: K, by: "quality" });
-  assert.deepEqual(fixView(s, K, "r2", false), { busy: null, working: "undo", status: "Исправлено 1 замечание", undo: true, error: null, locked: true });
+  assert.deepEqual(fixView(s, K, "r2", false), { busy: null, working: "undo", status: "Исправлено 1 замечание", undo: true, error: null, stale: false, locked: true });
   // вкладка «Агент» видит, что вариант занят, но дуга — не у неё
-  assert.deepEqual(undoView(s, K, false), { busy: true, arc: false, error: null });
+  assert.deepEqual(undoView(s, K, false), { busy: true, arc: false, error: null, stale: false });
   const useq = s[K]!.undo!.seq;
   const back = workNext(s, { type: "undone", key: K, seq: useq });
-  assert.deepEqual(fixView(back, K, "r2", false), { busy: null, working: null, status: null, undo: false, error: null, locked: false });
+  assert.deepEqual(fixView(back, K, "r2", false), { busy: null, working: null, status: null, undo: false, error: null, stale: false, locked: false });
   const bad = workNext(s, { type: "undoFailed", key: K, seq: useq, error: "Не получилось" });
   assert.deepEqual(fixView(bad, K, "r2", false), { ...fixView(done, K, "r2", false), error: "Не получилось" });
   assert.equal(undoView(bad, K, false).error, null);
@@ -84,11 +84,11 @@ test("«Вернуть как было» итога: ход в своей кно
 
 test("«Вернуть как было» вкладки «Агент»: ход и неудача — у неё; переживает закрытие листа (состояние в хранилище)", () => {
   let s = workNext(WORK0, { type: "undo", key: K, by: "agent" });
-  assert.deepEqual(undoView(s, K, false), { busy: true, arc: true, error: null });
+  assert.deepEqual(undoView(s, K, false), { busy: true, arc: true, error: null, stale: false });
   assert.equal(fixView(s, K, "r1", false).locked, true);
   const seq = s[K]!.undo!.seq;
   s = workNext(s, { type: "undoFailed", key: K, seq, error: "Возвращать нечего" });
-  assert.deepEqual(undoView(s, K, false), { busy: false, arc: false, error: "Возвращать нечего" });
+  assert.deepEqual(undoView(s, K, false), { busy: false, arc: false, error: "Возвращать нечего", stale: false });
   // новое действие снимает прежнюю строку
   s = workNext(s, { type: "fix", key: K, ids: ["a"] });
   assert.equal(undoView(s, K, false).error, null);
@@ -131,9 +131,51 @@ test("исправление кончилось, а вариант не проч
   let s = workNext(WORK0, { type: "fix", key: K, ids: "all" });
   const seq = s[K]!.fix!.seq;
   s = workNext(s, { type: "fixLost", key: K, seq });
-  assert.deepEqual(fixView(s, K, "r1", false), { busy: null, working: null, status: null, undo: false, error: null, locked: false });
+  assert.deepEqual(fixView(s, K, "r1", false), { busy: null, working: null, status: null, undo: false, error: null, stale: false, locked: false });
   // снова можно исправлять; опоздавший «потерян» прежнего запуска новый не трогает
   const again = workNext(s, { type: "fix", key: K, ids: ["a"] });
   assert.equal(again[K]!.fix!.phase, "fix");
   assert.equal(workNext(again, { type: "fixLost", key: K, seq }), again);
+});
+
+// ── R1: исправления или возврат сохранены, а презентация на экране не перечиталась
+test("несвежий итог исправления: строка с «Обновить», пока презентация несвежая; перечиталась — «Исправлено N» по новому отчёту", () => {
+  let s = workNext(WORK0, { type: "fix", key: K, ids: "all" });
+  const seq = s[K]!.fix!.seq;
+  s = workNext(s, { type: "fixStale", key: K, seq, fixed: null, count: ["a", "b", "c"] });
+  assert.deepEqual(fixView(s, K, "r1", false, true), { busy: null, working: null, status: null, undo: false, error: null, stale: true, locked: false });
+  // перечиталась, а итог ещё не встал (тот же кадр) — ни строки, ни итога
+  assert.equal(fixView(s, K, "r1", false, false).stale, false);
+  assert.deepEqual(staleKeys(s, "g1"), [K]);
+  assert.deepEqual(staleKeys(s, "g2"), []);
+  // поздний ответ прежнего запуска несвежим не делает
+  assert.equal(workNext(s, { type: "fixStale", key: K, seq: seq - 1, fixed: 1, count: [] }), s);
+  const fresh = workNext(s, { type: "fresh", key: K, fixed: 2, rev: "r2" });
+  assert.deepEqual(fixView(fresh, K, "r2", false, false), { busy: null, working: null, status: "Исправлено 2 замечания", undo: true, error: null, stale: false, locked: false });
+  assert.deepEqual(staleKeys(fresh, "g1"), []);
+  // ничего не исправилось — строка неудачи, как у свежего итога
+  const none = workNext(s, { type: "fresh", key: K, fixed: 0, rev: "r2" });
+  assert.equal(fixView(none, K, "r2", false, false).error, "Исправить не получилось — замечания остались.");
+  // нечего ставить — то же состояние
+  assert.equal(workNext(fresh, { type: "fresh", key: K, fixed: 2, rev: "r3" }), fresh);
+});
+
+test("вернулось, а экран не перечитан: итога исправления нет, у кнопки этого места — строка с «Обновить» до перечитывания", () => {
+  let s = workNext(WORK0, { type: "fix", key: K, ids: ["a"] });
+  s = workNext(s, { type: "fixed", key: K, seq: s[K]!.fix!.seq, fixed: 1, rev: "r2" });
+  s = workNext(s, { type: "undo", key: K, by: "agent" });
+  const useq = s[K]!.undo!.seq;
+  s = workNext(s, { type: "undoStale", key: K, seq: useq });
+  assert.deepEqual(undoView(s, K, false, true), { busy: false, arc: false, error: null, stale: true });
+  assert.equal(fixView(s, K, "r2", false, true).status, null);
+  // строка — у вкладки, чья кнопка вернула («Качество» её не показывает)
+  assert.equal(fixView(s, K, "r2", false, true).stale, false);
+  assert.deepEqual(staleKeys(s, "g1"), [K]);
+  const fresh = workNext(s, { type: "fresh", key: K, fixed: 0, rev: "r3" });
+  assert.deepEqual(undoView(fresh, K, false, false), { busy: false, arc: false, error: null, stale: false });
+  // с экрана результата (seq null): итога «Качества» нет, строки у вкладок нет
+  let r = workNext(WORK0, { type: "fix", key: K, ids: ["a"] });
+  r = workNext(r, { type: "fixed", key: K, seq: r[K]!.fix!.seq, fixed: 1, rev: "r2" });
+  r = workNext(r, { type: "undoStale", key: K, seq: null });
+  assert.deepEqual([r[K]!.fix!.phase, r[K]!.undo], ["idle", undefined]);
 });
