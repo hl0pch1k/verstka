@@ -1,5 +1,6 @@
 // Плита 04 «Результат» (слот `p4` колоды; boards/R-aside — утверждённая «Правая колонка целиком», V2 плита 04): над
-// рабочей областью — таблетка уведомления, слева — шапка «Слайд N из M», сцена и лента миниатюр, справа — колонка с
+// рабочей областью — таблетка уведомления (сказать нечего — ряда нет, рабочая область выше и сцена шире, как на R-remarks:
+// resultView `workGeo`), слева — шапка «Слайд N из M», сцена и лента миниатюр, справа — колонка с
 // названием, оценкой, вариантами, скачиванием, карточками и ссылками. Содержимое стоит, пока открыт результат, и
 // уезжает вниз вместе с плитой (`ui.down`); у каждой презентации — своё (ключ — id), и входит оно лесенкой p2-in
 // (160/200/240/280 мс). Данные — resultView. Режим «Замечания» (R-remarks/R-fixing/R-fixed: разметка на сцене, бейджи
@@ -22,6 +23,7 @@ import { variantHint } from "../../lib/plain";
 import { fmtWhen } from "../../lib/utils";
 import { useApp } from "../../store";
 import type { Generation, ModelsStatus } from "../../types";
+import { useHeld } from "../create/ImproveNote";
 import { startFailure } from "../create/params";
 import { BUILD_RUNNING } from "../create/ParamsPlate";
 import { ErrorLine } from "../kit/ErrorLine";
@@ -44,6 +46,7 @@ import { RemarksPanel } from "./RemarksPanel";
 import {
   agentLines, deckPreset, docLine, docTitle, eyesCard, fileBase, latestWithModel, noteView, ownsKeys, qualityCard, recheckIn, remarkCount,
   retryLeft, retryTick, retryWaitTitle, rewriteText, scoreOf, slideForKey, slideHeadline, slideSrc, slidesOf, switchShots, variantSegs, whyText,
+  WORK_GEO, workGeo,
 } from "./resultView";
 import { Stage } from "./Stage";
 import { StageMarks } from "./StageMarks";
@@ -305,6 +308,15 @@ function ResultBody({ g, goDown }: { g: Generation; goDown(): void }) {
     rebuildOff,
     rebuildBusy: asking,
   };
+  // раскладка рабочей области (resultView `workGeo`): есть уведомление или строка неудачи — ряд 48 над ней и p2-two 548
+  // (R-aside); нет — p2-two 612 с самого верха и сцена до 832 (R-remarks, R-fixing, R-fixed, R-text, R-picture).
+  // Уведомление появилось или ушло на той же презентации — рабочая область вместе с рядом гаснет, раскладка подменяется
+  // невидимой и проявляется (useSwap на обёртке `.ra-work`), без хода высоты и ширины; уходящий ряд гаснет со своим
+  // содержимым (`useHeld`)
+  const geo = useSwap(workGeo(note, line), ui.screen === "result");
+  const g2 = WORK_GEO[geo.shown];
+  const noteRow = note ? <NotePill note={note} open={ui.note} line={line} actions={noteActions} /> : line ? <NoteRow>{line}</NoteRow> : null;
+  const heldRow = useHeld(noteRow);
 
   return (
     <>
@@ -321,31 +333,34 @@ function ResultBody({ g, goDown }: { g: Generation; goDown(): void }) {
       </div>
       {/* полоса «04 …» под листом «Подробнее»: клик закрывает лист */}
       <BackStrip g={g} v={v} />
-      {note ? <NotePill note={note} open={ui.note} line={line} actions={noteActions} /> : <NoteRow>{line}</NoteRow>}
       <CompactResult d={compact} live={ui.helper} wide={wide} snap={{ wide: swap.shown, now: swap.phase === "in" }} note={note} noteActions={noteActions}
         onVariant={pickVariant} onEditText={() => editDeck(g.brief ?? null)} onShowText={onShowText} onDetails={openSheet} onNew={goHome}
         card={pic.column ? { shown: pic.column.shown, node: compactCard ? <PictureCard {...pic.column.card} idp="hp-p" /> : null } : null} />
-      <div className={cls("p2-two", swap.shown && "hp-wide", swap.cls)} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 416px", gap: 48, height: 548, marginTop: 16 }}>
-        <div style={{ display: "flex", flexDirection: "column", minWidth: 0, gridArea: "1 / 1" }}>
-          <div className={cls("ra-whx", head.cls)} data-fit={head.shown}>
-            <WorkHead n={n} total={total} title={h} remarks={remarkCount(v)} remarksOn={ui.remarks} remarksOff={rm.off}
-              onPrev={() => setSelectedSlide(n - 1)} onNext={() => setSelectedSlide(n + 1)} onToggleRemarks={rm.toggle} onOpenLightbox={onOpenLightbox} />
+      <div className={cls("ra-work", geo.cls)}>
+        {geo.shown === "note" && (noteRow ?? heldRow)}
+        <div className={cls("p2-two ra-two", geo.shown === "top" && "ra-top", swap.shown && "hp-wide", swap.cls)}
+          style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 416px", gap: 48, height: g2.height, marginTop: g2.marginTop }}>
+          <div style={{ display: "flex", flexDirection: "column", minWidth: 0, gridArea: "1 / 1" }}>
+            <div className={cls("ra-whx", head.cls)} data-fit={head.shown}>
+              <WorkHead n={n} total={total} title={h} remarks={remarkCount(v)} remarksOn={ui.remarks} remarksOff={rm.off}
+                onPrev={() => setSelectedSlide(n - 1)} onNext={() => setSelectedSlide(n + 1)} onToggleRemarks={rm.toggle} onOpenLightbox={onOpenLightbox} />
+            </div>
+            <Stage src={src} alt={h ? `Слайд ${n}: ${h}` : `Слайд ${n}`} aspect={aspect}>
+              {pic.spots && <PictureSpots {...pic.spots} />}
+              {rm.stage && <StageMarks {...rm.stage} />}
+              {rm.sketch && <FixSketch {...rm.sketch} />}
+            </Stage>
+            <Film film={film} variant={v} n={n} headline={headline} onPick={setSelectedSlide} marks={rm.film} />
           </div>
-          <Stage src={src} alt={h ? `Слайд ${n}: ${h}` : `Слайд ${n}`} aspect={aspect}>
-            {pic.spots && <PictureSpots {...pic.spots} />}
-            {rm.stage && <StageMarks {...rm.stage} />}
-            {rm.sketch && <FixSketch {...rm.sketch} />}
-          </Stage>
-          <Film film={film} variant={v} n={n} headline={headline} onPick={setSelectedSlide} marks={rm.film} />
+          <Aside d={aside} onVariant={pickVariant} onEditText={() => editDeck(g.brief ?? null)} open={openSheet} className="ra-main"
+            hidden={rm.shown || !!pic.column?.shown} style={{ height: g2.height }} />
+          {pic.column && (
+            <Aside d={aside} onVariant={pickVariant} onEditText={() => editDeck(g.brief ?? null)} open={openSheet} id="rt-pcol" enter={false} bottom
+              className={cls("rt-pcw", pic.column.shown ? "p2-on" : "p2-off")} style={{ position: "relative", zIndex: 1, height: g2.height }}
+              extra={fullCard ? <PictureCard {...pic.column.card} /> : undefined} />
+          )}
+          {rm.panel && <RemarksPanel {...rm.panel} helper={ui.helper} />}
         </div>
-        <Aside d={aside} onVariant={pickVariant} onEditText={() => editDeck(g.brief ?? null)} open={openSheet} className="ra-main"
-          hidden={rm.shown || !!pic.column?.shown} />
-        {pic.column && (
-          <Aside d={aside} onVariant={pickVariant} onEditText={() => editDeck(g.brief ?? null)} open={openSheet} id="rt-pcol" enter={false} bottom
-            className={cls("rt-pcw", pic.column.shown ? "p2-on" : "p2-off")} style={{ position: "relative", zIndex: 1 }}
-            extra={fullCard ? <PictureCard {...pic.column.card} /> : undefined} />
-        )}
-        {rm.panel && <RemarksPanel {...rm.panel} helper={ui.helper} />}
       </div>
     </>
   );

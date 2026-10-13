@@ -66,6 +66,11 @@ a.p2-ob:hover{color:#0B1220}
 .ra-xf{animation:ra-xf 240ms var(--ease) backwards}
 /* «Собрать ещё раз» ждёт ответа сервера: кнопка занята, указатель — ожидание */
 .ra-nb[aria-busy="true"]{cursor:progress}
+/* презентация без уведомления (`ra-top`; доски R-remarks, R-fixing, R-fixed, R-text, R-picture): ряда 48 + 16 нет —
+ * рабочая область 612 с самого верха (ResultPlate, resultView `workGeo`), сцена шире: до 832 (вся левая колонка при 1440)
+ * и не выше 468 (612 − 143: листание, отступ и лента), панель замечаний — во всю высоту */
+.ra-top .ra-stage{max-width:min(832px, calc(468px * var(--ra-ar, 1.7778)))}
+.ra-top > .rm-col{height:612px}
 
 /* Режим «Замечания», исправление слайда и изображение на слайде (задача 9). Блоки ниже — дословно из boards/V2.dc.html
  * (модули `rm` и `rt`, классы rm- rk- rf- rd- rp- rt-), с поправками интерфейса: колонка результата — `.ra-main` (на

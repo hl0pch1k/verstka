@@ -4,7 +4,7 @@ import { ringDash } from "../kit/ring";
 import type { AgentEvent, AuditReport, AuditSummary, DeckOutline, DesignEye, Generation, Issue, ModelsStatus, OutlineSlide, Variant } from "../../types";
 import {
   agentLines, deckPreset, deckStrip, docLine, docTitle, eyesCard, fileBase, latestWithModel, noteView, openDeck, openStrategy, qualityCard, recheckIn, remarkCount,
-  retryLeft, retryTick, rewriteText, scoreOf, slideForKey, slideSrc, slidesOf, switchShots, variantSegs, whyText,
+  retryLeft, retryTick, rewriteText, scoreOf, slideForKey, slideSrc, slidesOf, switchShots, variantSegs, whyText, WORK_GEO, workGeo,
 } from "./resultView";
 
 // Данные — как у сохранённой генерации «Интеграл» (workspace/runs/20261008-173516-113d20), сокращённо
@@ -351,4 +351,17 @@ test("вариант, на котором открывается презент�
   assert.equal(openStrategy(names, "gone", "gone"), "structured");
   assert.equal(openStrategy(names, null, null), "structured");
   assert.equal(openStrategy([], null, "visual"), null);
+});
+
+test("раскладка рабочей области: уведомления нет — с самого верха (R-remarks), есть таблетка или строка неудачи — под рядом (R-aside)", () => {
+  const note = noteView(gen({ writer: WRITER, slides: 12 }), variant({ slides: ["a.jpg"] }), 12, null);
+  assert.ok(note);
+  assert.equal(workGeo(null, null), "top");
+  assert.equal(workGeo(note, null), "note");
+  // строка «Не удалось открыть презентацию» или отказ «Собрать ещё раз» — тоже уведомление: ряд остаётся её местом
+  assert.equal(workGeo(null, "Не удалось открыть презентацию"), "note");
+  assert.deepEqual(WORK_GEO.top, { height: 612, marginTop: 0 });
+  assert.deepEqual(WORK_GEO.note, { height: 548, marginTop: 16 });
+  // нижний край рабочей области — один и тот же: ряд уведомления 48 + отступ + 548 = 612
+  assert.equal(48 + WORK_GEO.note.marginTop + WORK_GEO.note.height, WORK_GEO.top.marginTop + WORK_GEO.top.height);
 });

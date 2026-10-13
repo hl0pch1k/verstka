@@ -177,6 +177,18 @@ export function eyesCard(v: Variant | null | undefined, n: number): EyesView | n
   };
 }
 
+/** Раскладка рабочей области результата. `note` — над ней ряд уведомления: таблетка (R-aside) или строка неудачи («Не
+ *  удалось открыть презентацию», отказ «Собрать ещё раз») — сама рабочая область (`p2-two`) 548 px с отступом 16 под
+ *  рядом 48, сцена до 720. `top` — сказать над ней нечего (доски R-remarks, R-fixing, R-fixed, R-text, R-picture): ряда
+ *  нет, `p2-two` 612 px с самого верха, сцена шире — до 832 (вся левая колонка при 1440: 1296 − 416 − 48). Высота
+ *  колонок — высота `p2-two`. */
+export type WorkGeo = "note" | "top";
+export const WORK_GEO: Record<WorkGeo, { height: number; marginTop: number }> = {
+  note: { height: 548, marginTop: 16 },
+  top: { height: 612, marginTop: 0 },
+};
+export const workGeo = (note: NoteView | null, line: unknown): WorkGeo => (note || line ? "note" : "top");
+
 /** Таблетка уведомления над рабочей областью (R-aside `ra-note`): заголовок, строка-основание (одна строка; целиком —
  *  в подсказке `full`) и действия. Текст и наличие — `deckNotice`. Когда текст написал агент, таблетка предлагает
  *  всё, что на доске: «Показать текст», «Собрать ещё раз» (тот же запрос) и «Дописать текст». Сказать нечего — null.
