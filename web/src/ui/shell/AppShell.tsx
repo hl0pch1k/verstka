@@ -8,7 +8,7 @@ import type { TemplateListItem } from "../../types";
 import { ImproveStrip } from "../create/ImproveNote";
 import { tplMeta } from "../create/ribbon";
 import { TemplateBody, TemplateHead, useTemplateUpload } from "../create/TemplatePlate";
-import { TextBody, TextHead, useTextPlate, useWriting } from "../create/TextPlate";
+import { TextBody, TextHead, useTextPlate } from "../create/TextPlate";
 import { textStrip } from "../create/textRules";
 import { useStrayFileDrop } from "../create/UploadZone";
 import { Deck } from "../deck/Deck";
@@ -33,13 +33,12 @@ function templateStrip(t: TemplateListItem | undefined): StripData | undefined {
 export function AppShell() {
   const { templates, templateId, ui, dispatch, brief, improveSource } = useApp();
   const s1 = templateStrip(templates.find((t) => t.template_id === templateId));
+  // шаг «Текст» — одно состояние на заголовок и тело плиты 02; разбор текста в нём считается один раз на правку
+  const text = useTextPlate();
   // полоса 02 на «Создать» и сборке — текст поля; на результате её подпишет результат (название презентации)
-  const { writer } = useWriting();
-  const s2 = ui.screen === "result" ? undefined : textStrip(brief, { writer, improve: ui.improve ? improveSource : null });
+  const s2 = ui.screen === "result" ? undefined : textStrip(brief, { line: text.line, improve: ui.improve ? improveSource : null });
   // загрузка своего шаблона — одна на плиту 01 и раздел «Шаблоны»
   const upload = useTemplateUpload();
-  // шаг «Текст» — одно состояние на заголовок и тело плиты 02
-  const text = useTextPlate();
   // файл, отпущенный мимо включённой зоны, браузер не открывает
   useStrayFileDrop();
   // «Загрузить свой» в разделе: раздел уезжает, раскрывается шаг 01 и над ним — выбор файла (V2 `tpGalUp`)

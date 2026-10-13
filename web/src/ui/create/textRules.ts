@@ -53,6 +53,18 @@ export function textError(text: string, file?: { name: string } | null): null | 
   return null;
 }
 
+/** Файл .txt/.md прочитан как UTF-8: на байтах другой кодировки (windows-1251, KOI8-R) браузер подставляет знак замены
+ *  U+FFFD — такой текст в поле не кладём. */
+export const NOT_UTF8 = "Файл не в кодировке UTF-8 — сохраните его в UTF-8 и загрузите снова";
+
+/** Что поле скажет о прочитанном тексте файла: не UTF-8 (знак замены в тексте) или пустой; null — текст годится.
+ *  `raw` — как вернул `File.text()`, `name` — имя файла для строки. */
+export function fileTextIssue(raw: string, name: string): TextIssue | null {
+  if (raw.includes("\uFFFD")) return { kind: "file", text: NOT_UTF8 };
+  if (!raw.trim()) return { kind: "file", text: `Файл «${name}» пустой` };
+  return null;
+}
+
 // ── печатающаяся подсказка (V2 `TW`, `twTick`)
 /** Фразы после «Например: » — по кругу. */
 export const TW = [
@@ -145,15 +157,20 @@ export function textPreview(text: string): { text: string; empty: boolean } {
 /** Имя презентации для людей: её заголовок или имя файла без расширения. */
 export const deckName = (src: Pick<ImproveSource, "name" | "title">) => src.title?.trim() || templateStem(src.name);
 
+/** «14 слайдов» или null, когда число слайдов неизвестно (презентация открыта из сборки без него): «0 слайдов» не пишем. */
+const slidesLabel = (n: number | null | undefined) => (n && n > 0 ? plural(n, "слайд", "слайда", "слайдов") : null);
+const joinDot = (parts: (string | null)[]) => parts.filter(Boolean).join(" · ");
+
 /** Полоса 02 (сборка, «Все параметры»): тема и «тема · текст пишет агент» (V2 `docTitle`, `docSub`), готовый текст и
- *  его разбор, презентация «Улучшить готовую». */
-export function textStrip(text: string, o: { writer: boolean; improve?: ImproveSource | null }): { title: string; meta?: string } {
-  if (o.improve) return { title: deckName(o.improve), meta: `текст из презентации · ${plural(o.improve.slides, "слайд", "слайда", "слайдов")}` };
-  const line = firstLine(text);
-  if (!line) return { title: "Тема ещё не задана" };
-  const l = textLine(text, o.writer);
-  if (l.kind === "topic") return { title: clipLine(line, 60), meta: "тема · текст пишет агент" };
-  return { title: clipLine(line, 60), meta: l.facts ? `готовый текст · ${l.facts}` : "готовый текст" };
+ *  его разбор, презентация «Улучшить готовую». `line` — уже разобранная строка текста (`textLine`): полоса её не
+ *  считает, разбор текста делается один раз на изменение. */
+export function textStrip(text: string, o: { line: TextLine; improve?: ImproveSource | null }): { title: string; meta?: string } {
+  if (o.improve) return { title: deckName(o.improve), meta: joinDot(["текст из презентации", slidesLabel(o.improve.slides)]) };
+  const first = firstLine(text);
+  if (!first) return { title: "Тема ещё не задана" };
+  const l = o.line;
+  if (l.kind === "topic") return { title: clipLine(first, 60), meta: "тема · текст пишет агент" };
+  return { title: clipLine(first, 60), meta: l.facts ? `готовый текст · ${l.facts}` : "готовый текст" };
 }
 
 // ── «Улучшить готовую»
@@ -162,12 +179,12 @@ export interface NotePart { t: string; b?: boolean }
  *  имя, оценка и число проблем. «А модель посмотрит на каждый новый слайд» — только когда модель подключена. */
 export function improveNoteParts(src: ImproveSource, modelOn: boolean): NotePart[] {
   const held = [
-    plural(src.slides, "слайд", "слайда", "слайдов"),
+    slidesLabel(src.slides),
     src.tables ? plural(src.tables, "таблица", "таблицы", "таблиц") : null,
     src.charts ? plural(src.charts, "диаграмма", "диаграммы", "диаграмм") : null,
     src.pictures ? plural(src.pictures, "изображение", "изображения", "изображений") : null,
   ].filter(Boolean).join(", ");
-  const parts: NotePart[] = [{ t: "Текст и оформление — из презентации " }, { t: `«${deckName(src)}»`, b: true }, { t: `: ${held}.` }];
+  const parts: NotePart[] = [{ t: "Текст и оформление — из презентации " }, { t: `«${deckName(src)}»`, b: true }, { t: held ? `: ${held}.` : "." }];
   if (src.audit) parts.push({ t: " Оценка исходной презентации — " }, { t: `${src.audit.score} из 100`, b: true }, { t: "." });
   const probs = src.problems?.length ?? 0;
   if (probs) parts.push({ t: " Модель нашла в ней " }, { t: `${plural(probs, "проблему", "проблемы", "проблем")} вёрстки`, b: true }, { t: "." });
@@ -175,8 +192,25 @@ export function improveNoteParts(src: ImproveSource, modelOn: boolean): NotePart
   return parts;
 }
 
-/** Подпись полосы 01 в «Улучшить готовую»: «14 слайдов · оформление из презентации». */
-export const improveStripMeta = (src: Pick<ImproveSource, "slides">) => `${plural(src.slides, "слайд", "слайда", "слайдов")} · оформление из презентации`;
+/** Подпись полосы 01 в «Улучшить готовую»: «14 слайдов · оформление из презентации» (число слайдов неизвестно — без него). */
+export const improveStripMeta = (src: Pick<ImproveSource, "name" | "slides">) => joinDot([slidesLabel(src.slides), "оформление из презентации"]);
+
+/** Число слайдов для читающего с экрана («14 слайдов») или null — полоса 01 называет его в `aria-label`. */
+export const improveSlides = (src: Pick<ImproveSource, "name" | "slides">) => slidesLabel(src.slides);
+
+// ── жизнь режима «Улучшить готовую»
+/** Где режим сейчас: `tpl` — шаблон исходной презентации (null — шаблон не выбран), `hadText` — в поле уже был текст. */
+export interface ImproveLive { tpl: string | null; hadText: boolean }
+export const improveLive = (tpl: string | null): ImproveLive => ({ tpl, hadText: false });
+
+/** Кончается ли режим «Улучшить готовую» (V2 `txText`, `txImpOn`): другой шаблон выбран или поле очищено. Ввод в поле
+ *  режим держит. У презентации без текста поле пусто с самого начала: это не очистка, режим кончится, когда текст
+ *  появится и его сотрут (иначе он кончался бы на первом же проходе). Возвращает следующее состояние и итог. */
+export function improveStep(live: ImproveLive, brief: string, templateId: string | null): { live: ImproveLive; ends: boolean } {
+  const has = !!brief.trim();
+  const hadText = live.hadText || has;
+  return { live: hadText === live.hadText ? live : { ...live, hadText }, ends: templateId !== live.tpl || (hadText && !has) };
+}
 
 /** Сдвиг поля под заметку: на доске заметка в две строки (72 px) — поле уходит вниз на 88 px и вырастает вниз на 16
  *  (`.tx-fw-imp`). Заметка выше (при 1280 px или с помощником) — поле уходит на её высоту + 16, а растёт меньше, чтобы

@@ -4,7 +4,7 @@
 // презентации) и счётчиком знаков, над полем в «Улучшить готовую» — заметка об исходной презентации. Разметка —
 // boards/V2.dc.html, плита 02 и модуль tx. Строки под полем сменяются перекрёстным затуханием (p2-on / p2-off: уход
 // 240 мс, вход 360 мс через 120 мс) и, пока гаснут, держат своё содержимое.
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type MutableRefObject, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MutableRefObject, type RefObject } from "react";
 import { useApp } from "../../store";
 import { SAMPLE_BRIEF } from "../../lib/createForm";
 import { humanError } from "../../lib/errors";
@@ -17,8 +17,8 @@ import { Spinner } from "../kit/Spinner";
 import { FileMenu, type FilePick } from "./FileMenu";
 import { ImproveNote, useHeld, useImproveOn, useModelOn } from "./ImproveNote";
 import {
-  charsLabel, DECK_ACCEPT, deckError, fileKind, improveShift, MAX_TEXT_BYTES, TEXT_ACCEPT, textError, textLine, textPreview, TW, TW0, TW_FIRST_MS,
-  TW_WAKE_MS, twBlink, twStep, twText, type TextIssue, type Tw,
+  charsLabel, DECK_ACCEPT, deckError, fileKind, fileTextIssue, improveLive, improveShift, improveStep, MAX_TEXT_BYTES, TEXT_ACCEPT, textError,
+  textLine, textPreview, TW, TW0, TW_FIRST_MS, TW_WAKE_MS, twBlink, twStep, twText, type ImproveLive, type TextIssue, type TextLine, type Tw,
 } from "./textRules";
 
 const show = (on: boolean) => (on ? "p2-on" : "p2-off");
@@ -37,7 +37,7 @@ export function useWriting(): { writer: boolean; writes: boolean } {
 }
 
 /** Состояние шага на обе части плиты (заголовок и тело): меню, выбор файла, чтение презентации, ошибка у поля,
- *  печатающаяся подсказка. Одно на приложение — его создаёт AppShell. */
+ *  печатающаяся подсказка, разбор текста. Одно на приложение — его создаёт AppShell. */
 export interface TextPlate {
   menu: boolean;
   setMenu(on: boolean): void;
@@ -49,6 +49,13 @@ export interface TextPlate {
   onFile(f: File): void;
   /** Имя презентации, которую сервер сейчас читает («Улучшить готовую»); null — не читает. */
   reading: string | null;
+  /** Что поле говорит о тексте (подсказка агента или разбор). Считается один раз на изменение текста и отдаётся
+   *  заголовку, телу и полосе 02: разбор большого текста не повторяется на каждую часть плиты. */
+  line: TextLine;
+  /** Модель пишет тексты слайдов (подпись «Это готовый текст…» в заголовке). */
+  writes: boolean;
+  /** Тихая строка о ходе чтения («Модель не подключена — прочитаю презентацию по правилам»); null — её нет. */
+  info: string | null;
   /** Ошибка у поля: своя (`textIssue` — правила, файл) или неудача чтения презентации (строка области «Текст»). */
   issue: TextIssue | null;
   /** Номер ошибки: новая ошибка — новая строка (её `role=alert` читается заново). */
@@ -69,6 +76,12 @@ export function useTextPlate(): TextPlate {
   const [menu, setMenu] = useState(false);
   const [reading, setReading] = useState<string | null>(null);
   const lastDeck = useRef("");
+  // чтение презентации одно за раз: номер последнего чтения и занято ли (как `useTemplateUpload.start`)
+  const readSeq = useRef(0);
+  const readBusy = useRef(false);
+  const { writer, writes } = useWriting();
+  // разбор текста — один раз на изменение текста, для заголовка, тела и полосы 02
+  const line = useMemo(() => textLine(brief, writer), [brief, writer]);
   const btnRef = useRef<HTMLButtonElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -94,11 +107,11 @@ export function useTextPlate(): TextPlate {
   // шаблон этой презентации (V2 `txText`, `txImpOn`: `tpl === txTpl`); ввод в поле его не снимает. Режим кончился —
   // исходная презентация уходит из store: сборка её больше не отправляет.
   const applied = useRef<ImproveSource | null>(null);
-  const live = useRef<{ tpl: string | null } | null>(null);
+  const live = useRef<ImproveLive | null>(null);
   useEffect(() => {
     if (improveSource && improveSource !== applied.current) {
       applied.current = improveSource;
-      live.current = { tpl: improveSource.template_id ?? templateId };
+      live.current = improveLive(improveSource.template_id ?? templateId);
       setBrief(improveSource.brief);
       return;
     }
@@ -107,8 +120,10 @@ export function useTextPlate(): TextPlate {
       if (improveSource) takeImproveSource();
       return;
     }
-    const l = live.current;
-    if (l && (!brief.trim() || templateId !== l.tpl)) dispatch({ type: "set", patch: { improve: false } });
+    if (!live.current) return;
+    const r = improveStep(live.current, brief, templateId);
+    live.current = r.live;
+    if (r.ends) dispatch({ type: "set", patch: { improve: false } });
   }, [improveSource, ui.improve, brief, templateId, setBrief, takeImproveSource, dispatch]);
 
   // шаг свернулся или ушёл с экрана — меню закрывается
@@ -118,11 +133,18 @@ export function useTextPlate(): TextPlate {
   }, [txOpen]);
 
   const readDeck = useCallback((f: File) => {
+    if (readBusy.current) return; // сервер уже читает презентацию: вторую рядом не начинаем (пункт меню тоже закрыт)
+    const n = ++readSeq.current;
+    readBusy.current = true;
     lastDeck.current = f.name;
     setReading(f.name);
     setTextIssue(null);
     clearNotice("text");
-    void uploadTemplate(f, true, true).finally(() => setReading(null));
+    void uploadTemplate(f, true, true).finally(() => {
+      if (readSeq.current !== n) return; // строка принадлежит более новому чтению
+      readBusy.current = false;
+      setReading(null);
+    });
   }, [uploadTemplate, setTextIssue, clearNotice]);
 
   const onFile = useCallback(async (f: File) => {
@@ -132,9 +154,11 @@ export function useTextPlate(): TextPlate {
     if (fileKind(f.name) === "deck") return readDeck(f);
     if (f.size > MAX_TEXT_BYTES) return setTextIssue({ kind: "file", text: `Файл «${f.name}» больше 2 МБ` });
     try {
-      const t = (await f.text()).replace(/\r\n/g, "\n").trim();
-      if (!t) return setTextIssue({ kind: "file", text: `Файл «${f.name}» пустой` });
-      replace(t);
+      const raw = await f.text();
+      // не UTF-8 (знак замены) и пустой файл — строкой у поля, в поле ничего не кладём
+      const problem = fileTextIssue(raw, f.name);
+      if (problem) return setTextIssue(problem);
+      replace(raw.replace(/\r\n/g, "\n").trim());
     } catch (e) {
       setTextIssue({ kind: "file", text: humanError(e instanceof Error ? e.message : "", `Не удалось прочитать «${f.name}»`) });
     }
@@ -167,12 +191,13 @@ export function useTextPlate(): TextPlate {
   }, [textIssue]);
 
   const notice = notices.text?.kind === "error" ? notices.text.text : null;
+  const info = notices.text?.kind === "info" ? notices.text.text : null;
   const issue: TextIssue | null = textIssue ?? (notice ? { kind: "file", text: deckError(notice, lastDeck.current) } : null);
   const seq = useRef({ key: null as string | null, n: 0 });
   const key = issue ? `${issue.kind}:${issue.text}` : null;
   if (key !== seq.current.key) seq.current = { key, n: key ? seq.current.n + 1 : seq.current.n };
 
-  return { menu, setMenu, btnRef, inputRef, taRef, pick, onFile, reading, issue, issueSeq: seq.current.n, tw, type, take };
+  return { menu, setMenu, btnRef, inputRef, taRef, pick, onFile, reading, line, writes, info, issue, issueSeq: seq.current.n, tw, type, take };
 }
 
 const reducedMotion = () => typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
@@ -206,13 +231,13 @@ function TypingHint({ live, tw }: { live: boolean; tw: MutableRefObject<{ s: Tw;
 /** Заголовок плиты 02 справа (слот `h2`). */
 export function TextHead({ tp }: { tp: TextPlate }) {
   const { ui, dispatch, brief } = useApp();
-  const { writer, writes } = useWriting();
+  const writes = tp.writes;
   const impOn = useImproveOn();
   const create = ui.screen === "create";
   const txOpen = create && ui.open === "text" && !ui.more;
   const closed = create && ui.open === "tpl";
   // готовый текст: агент разложит его по слайдам (V2 `txHintTop`) — не в «Улучшить готовую», не при ошибке
-  const top = txOpen && textLine(brief, writer).kind === "facts" && !impOn && !tp.issue && !tp.reading;
+  const top = txOpen && tp.line.kind === "facts" && !impOn && !tp.issue && !tp.reading;
   const pv = textPreview(brief);
   return (
     <>
@@ -269,20 +294,23 @@ const NOTE_LINE: CSSProperties = { flex: "none", fontSize: 13, lineHeight: "20px
 /** Тело шага 02 (слот `p2`, `#p2-b2`). */
 export function TextBody({ tp }: { tp: TextPlate }) {
   const { ui, brief } = useApp();
-  const { writer } = useWriting();
   const on = ui.screen === "create" && ui.open === "text" && !ui.more;
   const impOn = useImproveOn();
   const [noteH, setNoteH] = useState(0);
   const { shift, grow } = improveShift(noteH);
-  const line = textLine(brief, writer);
+  const line = tp.line;
   const issue = tp.issue;
   const busy = !!tp.reading;
-  const hintOn = !issue && !busy && line.kind === "topic";
-  const factsOn = !issue && !busy && line.kind === "facts";
-  // гаснущая строка держит своё: разбор, ошибку, имя презентации
+  // строка о ходе чтения («Модель не подключена…») встаёт на место подсказки и «Читаю…»; ошибка сильнее неё
+  const infoOn = !issue && !!tp.info;
+  const hintOn = !issue && !busy && !infoOn && line.kind === "topic";
+  const factsOn = !issue && !busy && !infoOn && line.kind === "facts";
+  const busyOn = busy && !infoOn && !issue;
+  // гаснущая строка держит своё: разбор, ошибку, имя презентации, строку о ходе
   const facts = useHeld(line.kind === "facts" ? line : null);
   const shown = useHeld(issue);
   const deck = useHeld(tp.reading);
+  const note = useHeld(tp.info);
   return (
     <div id="p2-b2" className={cls("p2-body", show(on))} style={{ margin: "24px 0 0 192px" }}>
       <div className="tx-b2" style={{ "--tx-sh": `${shift}px`, "--tx-gr": `${grow}px` } as CSSProperties}>
@@ -317,9 +345,13 @@ export function TextBody({ tp }: { tp: TextPlate }) {
                     Взять пример
                   </button>
                 </div>
-                <p className={show(busy)} role="status" style={{ ...LINE, whiteSpace: "nowrap" }}>
+                <p className={show(busyOn)} role="status" style={{ ...LINE, whiteSpace: "nowrap" }}>
                   <span style={{ display: "flex", flex: "none", color: "#2563EB" }}><Spinner size={16} /></span>
                   <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{deck ? `Читаю презентацию «${templateStem(deck)}»…` : ""}</span>
+                </p>
+                <p className={show(infoOn)} role="status" title={infoOn && note ? note : undefined} style={{ ...LINE, whiteSpace: "nowrap" }}>
+                  <span style={{ display: "flex", flex: "none", color: busy ? "#2563EB" : undefined }}>{busy ? <Spinner size={16} /> : <Icon name="info" size={16} />}</span>
+                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{busy && deck ? `Читаю презентацию «${templateStem(deck)}»… ${note ?? ""}` : note}</span>
                 </p>
               </div>
               <span className="tx-sw tx-swr">

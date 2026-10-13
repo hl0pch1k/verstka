@@ -7,7 +7,7 @@ import { useApp } from "../../store";
 import type { ImproveSource } from "../../types";
 import { cls } from "../kit/cls";
 import { Icon } from "../kit/Icon";
-import { improveNoteParts, improveStripMeta } from "./textRules";
+import { improveNoteParts, improveSlides, improveStripMeta } from "./textRules";
 
 /** Последнее непустое значение: уходящее содержимое гаснет со своими данными. */
 export function useHeld<T>(value: T | null): T | null {
@@ -35,12 +35,13 @@ export function ImproveStrip() {
   const on = useImproveOn();
   const src = useHeld(improveSource);
   const meta = src ? improveStripMeta(src) : "";
+  const count = src ? improveSlides(src) : null;
   return (
     <div className={cls("tx-strip", on ? "p2-on" : "p2-off")}
       style={{ position: "absolute", left: 0, right: 0, top: 0, height: 40, zIndex: 1, borderRadius: "40px 40px 0 0", background: "#FFFFFF" }}>
       {src && (
         <button type="button" className="ci-strip" onClick={() => dispatch({ type: "open", step: "tpl" })} tabIndex={on ? 0 : -1}
-          aria-label={`Вернуться к шагу «Шаблон»: оформление из презентации «${src.name}», ${meta.split(" · ")[0]}`}>
+          aria-label={`Вернуться к шагу «Шаблон»: оформление из презентации «${src.name}»${count ? `, ${count}` : ""}`}>
           <span style={{ fontFamily: "'Unbounded','Manrope',sans-serif", fontWeight: 700, fontSize: 13, lineHeight: "20px", color: "#5A6272" }}>01</span>
           <span className="ci-sname">{src.name}</span>
           <span style={{ fontSize: 13, fontWeight: 500, lineHeight: "20px", color: "#5A6272" }}>{meta}</span>

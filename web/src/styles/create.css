@@ -109,12 +109,8 @@
 .tx-ring>.p2-wrap{position:relative;transition:transform 520ms var(--ease)}
 .tx-ring::after{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:0 0 0 2px #DC2626;opacity:0;pointer-events:none;transition:opacity 240ms var(--ease)}
 .tx-ring.ce-bad::after{opacity:1}
-/* «Улучшить готовую»: поле уходит под заметку (88 px) и вырастает вниз на 16 px — низ поля и строка под текстом
-   встают туда же, где на доске C-improve; всё едет transform'ом вместе с плитой. Рамка фокуса — по всему полю */
+/* «Улучшить готовую»: рамка фокуса — по всему полю, вместе с ростом вниз (сдвиг и рост поля — ниже, по высоте заметки) */
 @media (min-width: 901px){
-.tx-fw-imp{transform:translateY(88px)}
-.tx-fw-imp .tx-ring::before,.tx-fw-imp .tx-ring>.p2-wrap{transform:translateY(16px)}
-.tx-fw-imp .tx-ring::after{bottom:-16px}
 .tx-fw-imp .p2-field.tx-ring:has(.p2-ta:focus){box-shadow:none}
 .tx-fw-imp .tx-ring:has(.p2-ta:focus)::after{opacity:1;box-shadow:0 0 0 2px #2563EB;transition:none}
 .tx-fw-imp .tx-ring.ce-bad:has(.p2-ta:focus)::after{box-shadow:0 0 0 2px #DC2626}
@@ -127,8 +123,10 @@
 .tx-take:active{transform:scale(.98)}
 .tx-take.p2-none{display:none}
 @media (max-width: 900px){.tx-strip,.tx-scrim{display:none !important}.tx-note{position:static;margin-bottom:16px}.tx-err{flex-wrap:wrap;white-space:normal !important}}
-/* Заметка «Улучшить готовую» бывает выше двух строк (при 1280 px, с помощником): поле уходит под неё на её высоту + 16
-   и растёт вниз меньше (TextBody ставит --tx-sh и --tx-gr по высоте заметки). Без переменных — числа доски: 88 и 16 */
+/* «Улучшить готовую»: поле уходит под заметку и вырастает вниз — низ поля и строка под текстом встают туда же, где на
+   доске C-improve; всё едет transform'ом вместе с плитой. Заметка бывает выше двух строк (при 1280 px, с помощником):
+   поле уходит под неё на её высоту + 16 и растёт вниз меньше (TextBody ставит --tx-sh и --tx-gr по высоте заметки).
+   Без переменных — числа доски: 88 и 16 */
 @media (min-width: 901px){
 .tx-fw-imp{transform:translateY(var(--tx-sh,88px))}
 .tx-fw-imp .tx-ring::before,.tx-fw-imp .tx-ring>.p2-wrap{transform:translateY(var(--tx-gr,16px))}

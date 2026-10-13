@@ -151,7 +151,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // an improved deck's «Изменить текст» returns into the improve mode, with the deck it was read from (the note over
     // the field and the strip 01 tell it); any other text leaves it
     const from = preset?.improvedFrom ?? null;
-    setImproveSource(from ? { brief: text, name: from.name, template_id: from.template_id, slides: from.slides ?? 0, tables: 0, charts: 0, pictures: 0, audit: from.audit ?? null } : null);
+    setImproveSource(from ? { brief: text, name: from.name, template_id: from.template_id, slides: from.slides, tables: 0, charts: 0, pictures: 0, audit: from.audit ?? null } : null);
     dispatch({ type: "go", screen: "create" });
     dispatch({ type: "set", patch: { improve: !!from } });
   }, []);

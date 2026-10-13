@@ -47,7 +47,7 @@ export function uploadTemplateFlow(file: File, useModels: boolean, d: UploadDeps
         d.report(e, "Не удалось загрузить шаблон", area);
         return resolve();
       }
-      if (useModels && !res.use_models) d.notify(area, "info", "Модель не подключена — разберу шаблон по правилам");
+      if (useModels && !res.use_models) d.notify(area, "info", improve ? "Модель не подключена — прочитаю презентацию по правилам" : "Модель не подключена — разберу шаблон по правилам");
       d.runJob(res.job_id, improve ? `Читаю презентацию «${templateTitle(file.name)}»` : `Разбираю шаблон «${templateTitle(file.name)}»`, {
         kind: "analyze",
         area,
@@ -87,7 +87,7 @@ export function uploadTemplateFlow(file: File, useModels: boolean, d: UploadDeps
  *  the new slides is promised only when a model is connected. */
 export function improveMessage(src: ImproveSource, modelOn = true): string {
   const held = [
-    plural(src.slides, "слайд", "слайда", "слайдов"),
+    src.slides ? plural(src.slides, "слайд", "слайда", "слайдов") : null,
     src.tables ? plural(src.tables, "таблица", "таблицы", "таблиц") : null,
     src.charts ? plural(src.charts, "диаграмма", "диаграммы", "диаграмм") : null,
     src.pictures ? plural(src.pictures, "изображение", "изображения", "изображений") : null,
@@ -99,7 +99,7 @@ export function improveMessage(src: ImproveSource, modelOn = true): string {
   const wrong = probs.length
     ? ` Что не так в ней, на взгляд дизайнера: ${probs.slice(0, 4).map((p) => `слайд ${p.slide} — ${p.text}`).join("; ")}${probs.length > 4 ? ` и ещё ${plural(probs.length - 4, "замечание", "замечания", "замечаний")}` : ""}.`
     : "";
-  return `Прочитал «${templateTitle(src.name)}»: ${held}.${audit}${wrong} Текст — в поле «Текст», оформление — из самой презентации: соберу вёрстку заново${modelOn ? ", а модель посмотрит на каждый новый слайд" : ""}.`;
+  return `Прочитал «${templateTitle(src.name)}»${held ? `: ${held}` : ""}.${audit}${wrong} Текст — в поле «Текст», оформление — из самой презентации: соберу вёрстку заново${modelOn ? ", а модель посмотрит на каждый новый слайд" : ""}.`;
 }
 
 export interface GenerationDeps extends CommonDeps {

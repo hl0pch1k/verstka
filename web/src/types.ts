@@ -197,7 +197,8 @@ export interface ImproveSource {
   /** The uploaded deck as a template (its pictures go to the new deck in any template). */
   template_id?: string;
   title?: string;
-  slides: number;
+  /** Absent when the deck was reopened from a build that did not keep the count («Изменить текст»). */
+  slides?: number;
   tables: number;
   charts: number;
   pictures: number;

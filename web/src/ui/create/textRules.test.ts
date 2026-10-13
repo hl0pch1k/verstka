@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { BRIEF_MIN_TOPIC } from "../../lib/createForm";
-import { charsLabel, clipLine, deckError, fileKind, improveNoteParts, improveShift, improveStripMeta, textError, textLine, textPreview, textStrip, TW, TW0, twBlink, twStep, twText, type Tw } from "./textRules";
+import { charsLabel, clipLine, deckError, fileKind, fileTextIssue, improveLive, improveNoteParts, improveShift, improveStep, improveStripMeta, NOT_UTF8, textError, textLine, textPreview, textStrip, TW, TW0, twBlink, twStep, twText, type Tw } from "./textRules";
 
 // ── бриф задачи: textError
 test("пустое поле и одни пробелы — empty", () => {
@@ -119,12 +119,18 @@ test("обрезка строки по слову", () => {
   assert.equal(clipLine("раз два три четыре", 12), "раз два три…");
 });
 test("полоса 02: тема — «тема · текст пишет агент», готовый текст — его разбор, «Улучшить готовую» — презентация", () => {
-  assert.deepEqual(textStrip("", { writer: true }), { title: "Тема ещё не задана" });
-  assert.deepEqual(textStrip("Интеграл", { writer: true }), { title: "Интеграл", meta: "тема · текст пишет агент" });
-  assert.deepEqual(textStrip("Слайд 1. Итоги\nВыручка 18 %\nСлайд 2. Клиенты\nтекст", { writer: true }), { title: "Слайд 1. Итоги", meta: "готовый текст · 3 слайда, 1 число" });
-  assert.deepEqual(textStrip("Наш продукт", { writer: true }), { title: "Наш продукт", meta: "готовый текст" });
+  const strip = (text: string, improve?: Parameters<typeof textStrip>[1]["improve"]) => textStrip(text, { line: textLine(text, true), improve });
+  assert.deepEqual(strip(""), { title: "Тема ещё не задана" });
+  assert.deepEqual(strip("Интеграл"), { title: "Интеграл", meta: "тема · текст пишет агент" });
+  assert.deepEqual(strip("Слайд 1. Итоги\nВыручка 18 %\nСлайд 2. Клиенты\nтекст"), { title: "Слайд 1. Итоги", meta: "готовый текст · 3 слайда, 1 число" });
+  assert.deepEqual(strip("Наш продукт"), { title: "Наш продукт", meta: "готовый текст" });
   const src = { brief: "Слайд 1. Итоги", name: "Итоги квартала.pptx", slides: 14, tables: 3, charts: 4, pictures: 6 };
-  assert.deepEqual(textStrip("Слайд 1. Итоги", { writer: true, improve: src }), { title: "Итоги квартала", meta: "текст из презентации · 14 слайдов" });
+  assert.deepEqual(strip("Слайд 1. Итоги", src), { title: "Итоги квартала", meta: "текст из презентации · 14 слайдов" });
+});
+test("полоса 02 берёт готовую строку разбора, сама текст не разбирает", () => {
+  const line = { kind: "facts" as const, facts: "9 слайдов" };
+  assert.deepEqual(textStrip("Слайд 1. Итоги", { line }), { title: "Слайд 1. Итоги", meta: "готовый текст · 9 слайдов" });
+  assert.deepEqual(textStrip("Интеграл", { line: { kind: "topic" } }), { title: "Интеграл", meta: "тема · текст пишет агент" });
 });
 
 // ── «Улучшить готовую»
@@ -162,4 +168,66 @@ test("презентацию не прочитали: одна целая фра
   assert.equal(deckError("Не получилось: Couldn't find end of Start Tag", n), "Не удалось прочитать презентацию «Итоги квартала»");
   assert.equal(deckError("Шаблон разобран, но не загрузился: Сеть недоступна", n), "Презентация прочитана, но не загрузилась — попробуйте ещё раз");
   assert.equal(deckError("Не получилось: OSError", ""), "Не удалось прочитать презентацию");
+});
+
+// ── число слайдов неизвестно («Изменить текст» на презентации без числа): строки без «0 слайдов»
+test("число слайдов неизвестно: в заметке, полосе 01 и полосе 02 числа нет, точки и разделители целы", () => {
+  const blank = { brief: "", name: "Итоги квартала.pptx", tables: 0, charts: 0, pictures: 0 };
+  assert.equal(plain(improveNoteParts(blank, false)), "Текст и оформление — из презентации «Итоги квартала». Слайды останутся те же, вёрстка соберётся заново.");
+  assert.equal(plain(improveNoteParts({ ...blank, charts: 2 }, false)), "Текст и оформление — из презентации «Итоги квартала»: 2 диаграммы. Слайды останутся те же, вёрстка соберётся заново.");
+  assert.equal(improveStripMeta(blank), "оформление из презентации");
+  assert.equal(improveStripMeta({ ...blank, slides: 0 }), "оформление из презентации");
+  assert.deepEqual(textStrip("Слайд 1. Итоги", { line: textLine("Слайд 1. Итоги", true), improve: blank }), { title: "Итоги квартала", meta: "текст из презентации" });
+});
+
+// ── файл .txt/.md: что поле скажет о прочитанном тексте
+test("файл не в UTF-8 (знак замены U+FFFD) — строка у поля, а не кракозябры в поле", () => {
+  assert.deepEqual(fileTextIssue("Привет \uFFFD\uFFFD\uFFFD", "Старый.txt"), { kind: "file", text: NOT_UTF8 });
+  assert.equal(NOT_UTF8, "Файл не в кодировке UTF-8 — сохраните его в UTF-8 и загрузите снова");
+  // знак замены сильнее пустоты: файл из одних битых байтов — тоже не UTF-8
+  assert.equal(fileTextIssue("\uFFFD", "a.md")?.text, NOT_UTF8);
+});
+test("файл: пустой — строка «Файл «X» пустой», нормальный — без замечаний", () => {
+  assert.deepEqual(fileTextIssue("", "пустой.txt"), { kind: "file", text: "Файл «пустой.txt» пустой" });
+  assert.equal(fileTextIssue("   \n\t", "пробелы.md")?.text, "Файл «пробелы.md» пустой");
+  assert.equal(fileTextIssue("Умные сводки\nСлайд 1", "Умные сводки.md"), null);
+});
+
+// ── «Улучшить готовую»: когда режим кончается
+test("режим: ввод в поле его держит", () => {
+  let live = improveLive("t1");
+  let r = improveStep(live, "Слайд 1. Итоги", "t1");
+  assert.equal(r.ends, false);
+  live = r.live;
+  for (const typed of ["Слайд 1. Итоги\n", "Слайд 1. Итоги\nВыручка", "Выручка"]) {
+    r = improveStep(live, typed, "t1");
+    assert.equal(r.ends, false, typed);
+    live = r.live;
+  }
+});
+test("режим: очистка поля (и одни пробелы) его кончает", () => {
+  const live = improveStep(improveLive("t1"), "Слайд 1. Итоги", "t1").live;
+  assert.equal(improveStep(live, "", "t1").ends, true);
+  assert.equal(improveStep(live, " \n\t", "t1").ends, true);
+});
+test("режим: другой шаблон его кончает, тот же — нет", () => {
+  const live = improveStep(improveLive("t1"), "Слайд 1. Итоги", "t1").live;
+  assert.equal(improveStep(live, "Слайд 1. Итоги", "t2").ends, true);
+  assert.equal(improveStep(live, "Слайд 1. Итоги", null).ends, true);
+  assert.equal(improveStep(live, "Слайд 1. Итоги", "t1").ends, false);
+  // презентация без шаблона (null): режим держится, пока шаблон не выбран другой
+  const bare = improveStep(improveLive(null), "Слайд 1. Итоги", null).live;
+  assert.equal(improveStep(bare, "Слайд 1. Итоги", null).ends, false);
+  assert.equal(improveStep(bare, "Слайд 1. Итоги", "t3").ends, true);
+});
+test("режим: презентация без текста не кончается с первого прохода — только когда текст появился и его стёрли", () => {
+  let r = improveStep(improveLive("t1"), "", "t1");
+  assert.equal(r.ends, false);
+  r = improveStep(r.live, "  ", "t1");
+  assert.equal(r.ends, false);
+  r = improveStep(r.live, "Тема", "t1");
+  assert.equal(r.ends, false);
+  assert.equal(improveStep(r.live, "", "t1").ends, true);
+  // другой шаблон кончает и пустую
+  assert.equal(improveStep(improveLive("t1"), "", "t2").ends, true);
 });
