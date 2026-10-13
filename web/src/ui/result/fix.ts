@@ -194,3 +194,11 @@ export function slideSketch(v: Variant | null | undefined, n: number, events: Ag
   if (!s) return { kind: "text", formula: false };
   return { kind: planSketch(s), formula: !!s.content?.formula };
 }
+
+/** Вид «Замечаний нет» панели: одно место для строки, последним (ничего под ним не сдвигается). Строка «Вернуть как
+ *  было» (не вернулось или не обновилась после возврата) — итог последнего действия здесь, она стоит на этом месте;
+ *  иначе — строка работы слайда; null — строки нет. */
+export function noneSlot(revert: { refresh?: unknown; error?: string | null } | null, line: unknown): "revert" | "line" | null {
+  if (revert && (revert.refresh || revert.error)) return "revert";
+  return line ? "line" : null;
+}

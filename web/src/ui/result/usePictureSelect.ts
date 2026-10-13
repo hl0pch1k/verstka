@@ -25,13 +25,15 @@ export interface PictureSelect {
   reveal(strategy: string, slide: number): void;
 }
 
-export function usePictureSelect({ v, n, job, now, blocked, layered }: {
+export function usePictureSelect({ v, n, job, now, blocked, remarks, layered }: {
   v: Variant;
   n: number;
   job: SlideJob;
   now: number;
   /** Режим «Замечания» включён или его панель ещё в DOM: картинки не выбираются. */
   blocked: boolean;
+  /** Режим «Замечания» включён (а не только его панель ещё гаснет). */
+  remarks: boolean;
   /** Поверх результата открыт слой или лист: Esc — его. */
   layered: boolean;
 }): PictureSelect {
@@ -100,7 +102,7 @@ export function usePictureSelect({ v, n, job, now, blocked, layered }: {
   // «Показать» ждёт, пока карточку можно открыть: вариант сменился, режим «Замечания» погас (его панель ещё 520 мс на
   // экране — картинки не выбираются)
   const [pending, setPending] = useState<{ strategy: string; slide: number } | null>(null);
-  const step = revealStep(pending, { strategy: v.strategy, slide: n, blocked });
+  const step = revealStep(pending, { strategy: v.strategy, slide: n, remarks, fading: blocked && !remarks });
   useEffect(() => {
     if (!step || step === "wait") return;
     setPending(null);

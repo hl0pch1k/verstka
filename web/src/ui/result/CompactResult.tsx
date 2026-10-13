@@ -31,7 +31,7 @@ export interface CompactData {
   /** Строка ряда результата (на месте строки под названием: уведомления и ряда в компактном виде нет) — с тем же
    *  действием, что в ряду: «Показать» у неудачи работы над слайдом, «Обновить» у несвежей презентации (дуга, пока она
    *  читается); целиком — в подсказке. null — строки нет. */
-  error: { text: string; act: { label: string; title: string; busy?: boolean; icon?: "refresh"; onClick(): void } | null } | null;
+  error: { text: string; title: string; act: { label: string; title: string; busy?: boolean; icon?: "refresh"; onClick(): void } | null } | null;
   score: number | null;
   variants: { key: string; label: string; score: number | null; title?: string }[];
   variant: string;
@@ -129,7 +129,7 @@ function HeadLine({ d }: { d: CompactData }) {
     <div className={sw.cls} style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, marginTop: 4 }}>
       {e ? (
         <>
-          <ErrorLine text={e.text} lines={1} quiet style={{ display: "flex", flex: "0 1 auto" }} />
+          <ErrorLine text={e.text} title={e.title} lines={1} quiet style={{ display: "flex", flex: "0 1 auto" }} />
           {a && (
             <button type="button" className="gh-act hp-act" onClick={a.onClick} aria-busy={a.busy || undefined} title={a.busy ? "Перечитываю презентацию…" : a.title}>
               {a.icon && (a.busy ? <Arc size={16} /> : <Icon name="refresh" size={16} />)}

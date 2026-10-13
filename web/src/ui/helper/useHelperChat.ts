@@ -59,8 +59,11 @@ export function useHelperChat(): HelperChat {
   const settleJob = useCallback((id: string, status: "done" | "failed") => {
     setJobs((js) => js.map((j) => (j.id === id ? { ...j, status, progress: status === "done" ? 1 : j.progress } : j)));
   }, []);
+  const noteSeq = useRef(0);
   const addNote = useCallback((text: string, refresh?: string) => {
-    setNotes((ns) => [...ns, { id: `n${Date.now()}-${ns.length}`, text, ts: now(), refresh }]);
+    const id = `n${Date.now()}-${++noteSeq.current}`;
+    setNotes((ns) => [...ns, { id, text, ts: now(), refresh }]);
+    return id;
   }, []);
   // ход задач — по идущим задачам хранилища: у каждой полосы своя задача («Исправь всё» — по задаче на вариант)
   const live = app.liveJobs;
@@ -86,9 +89,10 @@ export function useHelperChat(): HelperChat {
   const tellReload = useCallback((r: Reload | null, gid: string | null) => {
     if (r?.kind === "other") addNote(OTHER_DECK);
     else if (r?.kind === "failed") {
-      addNote(reloadFailText(r.error), gid ?? undefined);
-      // строка «не обновилась» с «Обновить» теперь в ленте: компактный вид результата её не повторяет
-      if (gid) latest.current.noteFeedRefresh(gid);
+      const id = addNote(reloadFailText(r.error), gid ?? undefined);
+      // строка «не обновилась» с «Обновить» теперь в ленте — живая, пока длится эта несвежесть; компактный вид
+      // результата её не повторяет
+      if (gid) latest.current.noteFeedRefresh(gid, id);
     }
   }, [addNote]);
 

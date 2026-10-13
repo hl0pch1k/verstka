@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import type { SlideFixResult } from "../../types";
 import type { ActiveJob } from "../../lib/jobState";
 import { VARIANT_BUSY } from "../details/variantWork";
-import { adoptPlan, awayFailText, busyWhy, compactRow, failInRow, JOB0, revealStep, liveWork, placeShown, runOf, slideFailAfter, staleInRow, STALE_FIRST, undoOffOf, slideBusy, slideJobNext, staleOf, variantLiveJob, type SlideJobAction, type SlideJobState } from "./slideJob";
+import { adoptPlan, awayFailText, busyWhy, compactRow, HEAD_STALE, headFail, failInRow, JOB0, revealStep, liveWork, placeShown, runOf, slideFailAfter, staleInRow, STALE_FIRST, undoOffOf, slideBusy, slideJobNext, staleOf, variantLiveJob, type SlideJobAction, type SlideJobState } from "./slideJob";
 import type { PictureChangeResult } from "../../types";
 import type { Remark } from "./marks";
 
@@ -295,19 +295,24 @@ test("запасная строка «не обновилась» — когда
 });
 
 // ── Round 4
-test("«Показать» у неудачи изображения ждёт, пока режим «Замечания» погаснет и вариант сменится; ушли — не ждёт (T3)", () => {
+test("«Показать» у неудачи изображения ждёт, пока панель «Замечаний» погаснет и вариант сменится; ушли или снова включили «Замечания» — не ждёт (T3, U3)", () => {
   const p = { strategy: "visual", slide: 4 };
-  assert.equal(revealStep(null, { strategy: "visual", slide: 4, blocked: false }), null);
-  assert.equal(revealStep(p, { strategy: "visual", slide: 4, blocked: true }), "wait"); // панель замечаний ещё на экране
-  assert.equal(revealStep(p, { strategy: "visual", slide: 4, blocked: false }), "open");
-  assert.equal(revealStep(p, { strategy: "visual", slide: 5, blocked: false }), "drop"); // ушёл на другой слайд
-  assert.equal(revealStep(p, { strategy: "structured", slide: 4, blocked: false }), "drop");
+  const at = { strategy: "visual", slide: 4, remarks: false, fading: false };
+  assert.equal(revealStep(null, at), null);
+  assert.equal(revealStep(p, { ...at, fading: true }), "wait"); // панель замечаний ещё гаснет
+  assert.equal(revealStep(p, at), "open");
+  assert.equal(revealStep(p, { ...at, slide: 5 }), "drop"); // ушёл на другой слайд
+  assert.equal(revealStep(p, { ...at, strategy: "structured" }), "drop");
+  // снова включил «Замечания», пока панель гасла: карточка потом сама не выскочит
+  assert.equal(revealStep(p, { ...at, remarks: true, fading: false }), "drop");
 });
 
-test("строка компактного вида — та же строка ряда с тем же действием; «Обновить» не повторяет живую строку ленты (T1)", () => {
-  assert.deepEqual(compactRow({ err: "Не удалось открыть", fail: FAIL, stale: "не обновилась", feedSays: false }), { text: "Не удалось открыть", act: null });
-  assert.deepEqual(compactRow({ err: null, fail: FAIL, stale: "не обновилась", feedSays: true }), { text: FAIL.text, act: "show" });
-  assert.deepEqual(compactRow({ err: null, fail: null, stale: "не обновилась", feedSays: false }), { text: "не обновилась", act: "refresh" });
+test("строка компактного вида — та же строка ряда с тем же действием, короткими словами (полная фраза — в подсказке); «Обновить» не повторяет живую строку ленты (T1, U1)", () => {
+  assert.deepEqual(compactRow({ err: "Не удалось открыть", fail: FAIL, stale: "не обновилась", feedSays: false }), { text: "Не удалось открыть", title: "Не удалось открыть", act: null });
+  assert.deepEqual(compactRow({ err: null, fail: FAIL, stale: "не обновилась", feedSays: true }), { text: "Слайд 5: не вышло", title: FAIL.text, act: "show" });
+  assert.deepEqual(compactRow({ err: null, fail: null, stale: "Изменения сохранены, но…", feedSays: false }), { text: "Не обновилась", title: "Изменения сохранены, но…", act: "refresh" });
   assert.equal(compactRow({ err: null, fail: null, stale: "не обновилась", feedSays: true }), null);
   assert.equal(compactRow({ err: null, fail: null, stale: null, feedSays: false }), null);
+  // короткие слова не длиннее 18 знаков: при 1280 с помощником колонка шапки — 246 px вместе с действием
+  assert.ok(HEAD_STALE.length <= 18 && headFail(29).length <= 18);
 });

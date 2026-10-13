@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { OutlineSlide, SlideFixResult } from "../../types";
-import { asSlideFixResult, clock, fixedRows, fixSteps, fixSummary, fixToRevert, lastEditIs, slideEditKind, slideSketch, undoneIn } from "./fix";
+import { asSlideFixResult, clock, fixedRows, fixSteps, fixSummary, fixToRevert, lastEditIs, noneSlot, slideEditKind, slideSketch, undoneIn } from "./fix";
 import { slideRemarks } from "./marks";
 import { CONTRAST, DENSE, MODEL, edit, ev, issue, titleOf, variant } from "./remarks.fixtures";
 
@@ -130,4 +130,12 @@ test("slideEditKind: что вернёт «Вернуть как было» сл
   assert.equal(slideEditKind(variant([], { edits: [edit({ kind: "picture", slides: [4], version: 3 })] }), 3), "fix");
   assert.equal(slideEditKind(variant([], { edits: [edit({ kind: "picture", slides: [4], version: 3 }), edit({ undo_of: 3, version: 4 })] }), 4), "picture");
   assert.equal(slideEditKind(variant([], {}), 1), "fix");
+});
+
+test("вид «Замечаний нет»: одна строка последней — строка «Вернуть как было» сильнее строки работы слайда (U4)", () => {
+  assert.equal(noneSlot({ error: "Возвращать нечего" }, { tone: "info", text: "Переставил абзац." }), "revert");
+  assert.equal(noneSlot({ refresh: {}, error: null }, null), "revert");
+  assert.equal(noneSlot({ error: null }, { tone: "info", text: "Переставил абзац." }), "line");
+  assert.equal(noneSlot(null, { tone: "error", text: "x" }), "line");
+  assert.equal(noneSlot(null, null), null);
 });

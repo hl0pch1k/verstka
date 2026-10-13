@@ -94,10 +94,12 @@ export interface AppState {
    *  resolves true, когда прочиталась. Пока читается — `refreshing`. */
   refreshDeck(gid: string): Promise<boolean>;
   refreshing: string | null;
-  /** Презентации, о которых лента помощника сказала «не обновилась» строкой с «Обновить» (самая новая из них живая, пока
-   *  презентация несвежая): компактный вид результата при открытом помощнике не повторяет её своей строкой. */
-  feedRefresh: string[];
-  noteFeedRefresh(gid: string): void;
+  /** Несвежие презентации, о которых сказала лента помощника, — и какой её строкой (`gid` → id строки): эта строка живая
+   *  («Обновить»), пока длится несвежесть, о которой она сказала; презентация прочиталась — запись уходит, и следующую
+   *  несвежесть (не от помощника) говорит уже место действия или строка результата. Компактный вид результата при открытом
+   *  помощнике не повторяет живую строку ленты. */
+  feedRefresh: Record<string, string>;
+  noteFeedRefresh(gid: string, noteId: string): void;
   activeStrategy: string | null; setActiveStrategy(s: string): void; activeVariant: Variant | null;
   selectedSlide: number; setSelectedSlide(n: number): void; // 1-based
   /** Экран, раскрытые шаги, слои и листы «Слоёв» (`ui/deck/geometry.ts`); меняется только через `dispatch`. */
@@ -210,6 +212,12 @@ export interface AppState {
   improveSource: ImproveSource | null;
   takeImproveSource(): void;
 }
+
+const feedRefreshWithout = (cur: Record<string, string>, gid: string): Record<string, string> => {
+  const next = { ...cur };
+  delete next[gid];
+  return next;
+};
 
 /** Несвежая открытая презентация: её id, почему не перечиталась (`reloadFailText`) и когда. */
 export interface StaleDeck { gid: string; error: unknown; at: number }
@@ -352,8 +360,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setStaleState(v);
   }, []);
   const [refreshing, setRefreshing] = useState<string | null>(null);
-  const [feedRefresh, setFeedRefresh] = useState<string[]>([]);
-  const noteFeedRefresh = useCallback((gid: string) => setFeedRefresh((cur) => (cur.includes(gid) ? cur : [...cur, gid])), []);
+  const [feedRefresh, setFeedRefresh] = useState<Record<string, string>>({});
+  const noteFeedRefresh = useCallback((gid: string, noteId: string) => setFeedRefresh((cur) => (cur[gid] === noteId ? cur : { ...cur, [gid]: noteId })), []);
   const jobSubs = useRef(new Map<string, () => void>());
 
   const [notices, setNotices] = useState<Partial<Record<NoticeArea, Notice>>>({});
@@ -534,6 +542,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // the screen is fresh (no «не обновилась» line)
         skippedReload.current = null;
         setStale(null);
+        // эта презентация прочиталась: несвежесть, о которой сказала лента помощника, кончилась
+        setFeedRefresh((cur) => (gid in cur ? feedRefreshWithout(cur, gid) : cur));
         setGeneration(g);
         setActiveStrategyState(nextStrategy);
         setSelectedSlideState((cur) => (sameAsOpen ? clamp(cur, 1, max) : 1));

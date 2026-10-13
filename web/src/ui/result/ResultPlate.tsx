@@ -223,7 +223,7 @@ function ResultBody({ g }: { g: Generation }) {
   const rm = useRemarksMode({ v, n, src, job, now, titleOf });
   // поверх результата открыт слой или лист: клавиши (←/→, Home/End, Esc) — его
   const layered = !!(ui.sheet || ui.textLayer || ui.lightbox || ui.sect || ui.tplPreview || ui.tplDelete);
-  const pic = usePictureSelect({ v, n, job, now, blocked: ui.remarks || rm.mounted, layered });
+  const pic = usePictureSelect({ v, n, job, now, blocked: ui.remarks || rm.mounted, remarks: ui.remarks, layered });
   // где человек: место работы над слайдом — панель замечаний или карточка «Изображение» на её слайде, ничего поверх
   const at: ResultAt = { result: ui.screen === "result", layered, strategy: v.strategy, slide: n, remarks: ui.remarks, picture: !!pic.column?.shown };
   look.current = (r) => placeShown(r, at);
@@ -264,9 +264,10 @@ function ResultBody({ g }: { g: Generation }) {
   const line = lineKey || lineSwap.shown ? <span className={lineSwap.cls} style={{ display: "flex", minWidth: 0, ...lineStyle }}>{lineShown}</span> : null;
   // компактный вид (помощник открыт): та же строка с тем же действием; «не обновилась» — только если лента помощника не
   // говорит этого живой строкой
-  const row = compactRow({ err: errText, fail, stale: staleRow?.text ?? null, feedSays: feedRefresh.includes(g.id) });
+  const row = compactRow({ err: errText, fail, stale: staleRow?.text ?? null, feedSays: g.id in feedRefresh });
   const compactErr: CompactData["error"] = row && {
     text: row.text,
+    title: row.title,
     act: row.act === "show" && fail ? { label: "Показать", title: fail.kind === "fix" ? `Слайд ${fail.slide} в режиме «Замечания»` : `Слайд ${fail.slide}`, onClick: () => showFail(fail) }
       : row.act === "refresh" && staleRow ? { label: "Обновить", title: "Перечитать презентацию", busy: staleRow.busy, icon: "refresh", onClick: staleRow.onRefresh }
       : null,

@@ -208,16 +208,17 @@ export function latestRefreshNote(notes: FeedNote[], gid: string | null | undefi
 /** Прежняя строка ленты о неперечитанной презентации, когда она перечиталась: без причины и без «Обновить». */
 export const RESOLVED = "Изменения сохранены.";
 
-/** Что показывает строка ленты. Живая — только самая новая строка о неперечитанной презентации (`latest`): пока
- *  хранилище держит её несвежей — последняя причина и «Обновить»; перечиталась и открыта — «обновлена»; открыта другая —
- *  как была записана. Прежние строки о ней — без «Обновить»: пока она несвежая — как записаны; перечиталась и открыта —
- *  «Изменения сохранены.» (не «не обновилась» рядом с обновлённой). В ленте одна живая строка. */
-export function noteView(note: FeedNote, o: { stale: { gid: string; text: string } | null; open: string | null; latest: boolean }): { text: string; refresh: boolean } {
+/** Что показывает строка ленты о неперечитанной презентации. Живая (`live`: хранилище помнит, что о текущей несвежести
+ *  сказала именно эта строка, — store `feedRefresh`) — пока презентация несвежая и открыта: последняя причина и
+ *  «Обновить»; открыта другая — как записана, без «Обновить». Её несвежесть кончилась (презентация прочиталась) или о
+ *  ней сказала строка новее — строка больше не живая и не «оживает» от чужой несвежести: самая новая строка о
+ *  презентации — «Презентация на экране обновлена.», прежние — «Изменения сохранены.». В ленте одна живая строка. */
+export function noteView(note: FeedNote, o: { stale: { gid: string; text: string } | null; live: boolean; latest: boolean }): { text: string; refresh: boolean } {
   if (!note.refresh) return { text: note.text, refresh: false };
-  if (!o.latest) return { text: !o.stale && o.open === note.refresh ? RESOLVED : note.text, refresh: false };
-  if (o.stale && o.stale.gid === note.refresh) return { text: o.stale.text, refresh: true };
-  return { text: o.open === note.refresh ? REFRESHED : note.text, refresh: false };
+  if (o.live) return o.stale && o.stale.gid === note.refresh ? { text: o.stale.text, refresh: true } : { text: note.text, refresh: false };
+  return { text: o.latest ? REFRESHED : RESOLVED, refresh: false };
 }
+
 export type FeedItem = { kind: "msg"; msg: ChatMessage } | { kind: "job"; job: FeedJob } | { kind: "note"; note: FeedNote };
 
 /** Ход полос по идущим задачам хранилища (`liveJobs`): у каждой задачи своя полоса, и растёт она по своей задаче

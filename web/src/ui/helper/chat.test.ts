@@ -247,17 +247,17 @@ test("reloadFailText не обещает того, чего нет: путь —
   assert.equal(t, "Изменения сохранены, но презентация на экране не обновилась: нет связи с сервером.");
 });
 
-test("noteView: строка о несвежей презентации — с «Обновить», пока она несвежая; перечиталась — «обновлена»; открыта другая — как записана", () => {
+test("noteView: живая строка — пока длится несвежесть, о которой она сказала: причина и «Обновить»; другая презентация — как записана", () => {
   const n = { id: "n", text: "старая причина", ts: 1, refresh: "g1" };
-  const L = { latest: true };
-  assert.deepEqual(noteView(n, { stale: { gid: "g1", text: "новая причина" }, open: "g1", ...L }), { text: "новая причина", refresh: true });
-  assert.deepEqual(noteView(n, { stale: null, open: "g1", ...L }), { text: REFRESHED, refresh: false });
-  assert.deepEqual(noteView(n, { stale: null, open: "g2", ...L }), { text: "старая причина", refresh: false });
-  assert.deepEqual(noteView(n, { stale: { gid: "g2", text: "x" }, open: "g2", ...L }), { text: "старая причина", refresh: false });
-  assert.deepEqual(noteView({ id: "o", text: OTHER_DECK, ts: 1 }, { stale: { gid: "g1", text: "x" }, open: "g1", ...L }), { text: OTHER_DECK, refresh: false });
+  const stale = { gid: "g1", text: "новая причина" };
+  assert.deepEqual(noteView(n, { stale, live: true, latest: true }), { text: "новая причина", refresh: true });
+  // открыта другая (несвежесть этой ещё не кончилась) — как записана, без «Обновить»
+  assert.deepEqual(noteView(n, { stale: null, live: true, latest: true }), { text: "старая причина", refresh: false });
+  assert.deepEqual(noteView(n, { stale: { gid: "g2", text: "x" }, live: true, latest: true }), { text: "старая причина", refresh: false });
+  assert.deepEqual(noteView({ id: "o", text: OTHER_DECK, ts: 1 }, { stale, live: false, latest: true }), { text: OTHER_DECK, refresh: false });
 });
 
-test("в ленте живая только самая новая строка о несвежей презентации — прежние остаются как записаны (S5)", () => {
+test("в ленте живая только строка текущей несвежести; кончилась — «обновлена» у самой новой, «Изменения сохранены.» у прежних (S5, T5)", () => {
   const notes = [
     { id: "a", text: "причина 1", ts: 1, refresh: "g1" },
     { id: "o", text: OTHER_DECK, ts: 2 },
@@ -268,10 +268,16 @@ test("в ленте живая только самая новая строка �
   assert.equal(latestRefreshNote(notes, "g2"), "c");
   assert.equal(latestRefreshNote(notes, undefined), null);
   const stale = { gid: "g1", text: "новая причина" };
-  assert.deepEqual(noteView(notes[0], { stale, open: "g1", latest: false }), { text: "причина 1", refresh: false });
-  assert.deepEqual(noteView(notes[2], { stale, open: "g1", latest: true }), { text: "новая причина", refresh: true });
-  // перечиталась — «обновлена» говорит новая, прежние — «Изменения сохранены.» без причины (T5); открыта другая — как были
-  assert.deepEqual(noteView(notes[0], { stale: null, open: "g1", latest: false }), { text: RESOLVED, refresh: false });
-  assert.deepEqual(noteView(notes[2], { stale: null, open: "g1", latest: true }), { text: REFRESHED, refresh: false });
-  assert.deepEqual(noteView(notes[0], { stale: null, open: "g2", latest: false }), { text: "причина 1", refresh: false });
+  // о текущей несвежести сказала «b»: она живая, «a» — нет
+  assert.deepEqual(noteView(notes[2], { stale, live: true, latest: true }), { text: "новая причина", refresh: true });
+  assert.deepEqual(noteView(notes[0], { stale, live: false, latest: false }), { text: RESOLVED, refresh: false });
+  // презентация прочиталась (запись ушла): «b» — «обновлена», «a» — «Изменения сохранены.»
+  assert.deepEqual(noteView(notes[2], { stale: null, live: false, latest: true }), { text: REFRESHED, refresh: false });
+  assert.deepEqual(noteView(notes[0], { stale: null, live: false, latest: false }), { text: RESOLVED, refresh: false });
+});
+
+test("U2: несвежесть не от помощника не «оживляет» строку ленты, чья несвежесть кончилась", () => {
+  const b = { id: "b", text: "причина 2", ts: 3, refresh: "g1" };
+  // после «Обновить» запись ленты ушла; потом своё исправление не перечиталось — презентация снова несвежая
+  assert.deepEqual(noteView(b, { stale: { gid: "g1", text: "нет связи" }, live: false, latest: true }), { text: REFRESHED, refresh: false });
 });

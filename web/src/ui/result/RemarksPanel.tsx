@@ -21,7 +21,7 @@ import { Spinner } from "../kit/Spinner";
 import { cls } from "../kit/cls";
 import { useSwap } from "../kit/useSwap";
 import { StaleLine, type Refresh } from "../shell/StaleLine";
-import type { FixStep, FixSummary, StepState } from "./fix";
+import { noneSlot, type FixStep, type FixSummary, type StepState } from "./fix";
 import { panelFit } from "./compact";
 import { countText, type Remark } from "./marks";
 
@@ -118,9 +118,10 @@ function Body(p: RemarksPanelProps) {
             </span>
           </div>
         </div>
-        {p.revert && <Revert p={p} ride={ride} />}
-        {/* строка встаёт последней и проявляется: ничего под ней не сдвигается */}
-        {p.line && <Line line={p.line} />}
+        {p.revert && <Revert p={p} ride={ride} withLine={false} />}
+        {/* одна строка, последней, проявляется: строка «Вернуть как было» (итог последнего действия здесь) или строка
+            работы слайда — ничего под ней не сдвигается и две строки не стоят друг под другом */}
+        {noneSlot(p.revert, p.line) === "revert" ? <RevertLine r={p.revert!} /> : p.line && <Line line={p.line} />}
       </>
     );
   }
@@ -183,7 +184,20 @@ function Remarks({ p, d, ride }: { p: RemarksPanelProps; d(ms: number): string; 
 }
 
 /** «Вернуть как было» исправления, сделанного раньше (итога на странице нет): тот же «верни как было», что в итоге. */
-function Revert({ p, ride }: { p: RemarksPanelProps; ride?: string }) {
+/** Строка «Вернуть как было»: не обновилась после возврата (с «Обновить») или не вернулось; null — строки нет. */
+const revertLine = (r: NonNullable<RemarksPanelProps["revert"]>) => (r.refresh ? "stale" : r.error ? "error" : null);
+
+/** Строка «Вернуть как было» — проявляется (p2-in), а не появляется рывком. */
+function RevertLine({ r }: { r: NonNullable<RemarksPanelProps["revert"]> }) {
+  return (
+    <div className="p2-in" style={{ marginTop: 8, flex: "none" }}>
+      {r.refresh ? <StaleLine r={r.refresh} /> : r.error && <ErrorLine text={r.error} lines={2} />}
+    </div>
+  );
+}
+
+/** `withLine` — строка возврата под кнопкой; без неё (вид «Замечаний нет») строку ставит вид — в общем месте строки. */
+function Revert({ p, ride, withLine = true }: { p: RemarksPanelProps; ride?: string; withLine?: boolean }) {
   const r = p.revert!;
   const off = r.busy ? null : r.off ?? p.fixOff;
   return (
@@ -194,8 +208,7 @@ function Revert({ p, ride }: { p: RemarksPanelProps; ride?: string }) {
         {r.busy ? <Arc size={18} /> : <Icon name="undo" size={18} />}
         <span>Вернуть как было</span>
       </button>
-      {r.refresh ? <StaleLine r={r.refresh} style={{ marginTop: 8, flex: "none" }} />
-        : r.error && <ErrorLine text={r.error} lines={2} style={{ marginTop: 8, flex: "none" }} />}
+      {withLine && revertLine(r) && <RevertLine r={r} />}
     </>
   );
 }

@@ -284,21 +284,29 @@ export function slideFailAfter(cur: SlideFail | null, m: { jobId?: string | null
   return hit ? null : cur;
 }
 
-/** «Показать» у строки неудачи изображения ждёт, пока карточку можно открыть: вариант сменился, слайд тот, режим
- *  «Замечания» погас (пока его панель на экране, картинки не выбираются). `open` — открыть карточку картинки слайда;
- *  `wait` — ещё рано; `drop` — человек ушёл на другой слайд или вариант: ждать нечего. */
-export function revealStep(pending: { strategy: string; slide: number } | null, at: { strategy: string; slide: number; blocked: boolean }): "open" | "wait" | "drop" | null {
+/** «Показать» у строки неудачи изображения ждёт, пока карточку можно открыть: вариант сменился, слайд тот, панель
+ *  режима «Замечания» ушла с экрана (`fading` — она ещё гаснет; пока она на экране, картинки не выбираются). `open` —
+ *  открыть карточку картинки слайда; `wait` — ещё рано; `drop` — человек ушёл на другой слайд или вариант или снова
+ *  включил «Замечания» (U3): ждать нечего, карточка потом не выскочит сама. */
+export function revealStep(pending: { strategy: string; slide: number } | null, at: { strategy: string; slide: number; remarks: boolean; fading: boolean }): "open" | "wait" | "drop" | null {
   if (!pending) return null;
-  if (at.strategy !== pending.strategy || at.slide !== pending.slide) return "drop";
-  return at.blocked ? "wait" : "open";
+  if (at.remarks || at.strategy !== pending.strategy || at.slide !== pending.slide) return "drop";
+  return at.fading ? "wait" : "open";
 }
 
-/** Строка под названием компактного вида (помощник открыт) — та же строка ряда результата, с тем же действием:
- *  неудача запуска или открытия — без действия; неудача работы, чьё место не на экране, — «Показать»; несвежая
- *  презентация — «Обновить», если лента помощника уже не говорит этого живой строкой (`feedSays`): одна строка на одно. */
-export function compactRow(o: { err: string | null; fail: SlideFail | null; stale: string | null; feedSays: boolean }): { text: string; act: "show" | "refresh" | null } | null {
-  if (o.err) return { text: o.err, act: null };
-  if (o.fail) return { text: o.fail.text, act: "show" };
-  if (o.stale && !o.feedSays) return { text: o.stale, act: "refresh" };
+/** Короткие слова строки под названием компактного вида: колонке шапки при открытом помощнике мало места (246 px при
+ *  1280) — длинная фраза обрезалась бы до «Изменения сохр…» (читается как успех) или теряла бы номер слайда. Полная фраза
+ *  — в подсказке. */
+export const HEAD_STALE = "Не обновилась";
+export const headFail = (slide: number) => `Слайд ${slide}: не вышло`;
+
+/** Строка под названием компактного вида (помощник открыт) — та же строка ряда результата, с тем же действием, короткими
+ *  словами (`text`; полная фраза — `title`): неудача запуска или открытия — как есть, без действия; неудача работы, чьё
+ *  место не на экране, — «Слайд N: не вышло» и «Показать»; несвежая презентация — «Не обновилась» и «Обновить», если
+ *  лента помощника уже не говорит этого живой строкой (`feedSays`): одна строка на одно. */
+export function compactRow(o: { err: string | null; fail: SlideFail | null; stale: string | null; feedSays: boolean }): { text: string; title: string; act: "show" | "refresh" | null } | null {
+  if (o.err) return { text: o.err, title: o.err, act: null };
+  if (o.fail) return { text: headFail(o.fail.slide), title: o.fail.text, act: "show" };
+  if (o.stale && !o.feedSays) return { text: HEAD_STALE, title: o.stale, act: "refresh" };
   return null;
 }
