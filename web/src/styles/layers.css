@@ -72,10 +72,10 @@
 .gh-bdot{width:8px;height:8px;border-radius:999px;background:#2563EB}
 .gh-meta{display:block;margin-top:4px;font-size:13px;font-weight:500;line-height:20px;color:#5A6272;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* Сверх доски (настоящие данные): обложка проявляется, когда слайд загрузился (240 мс), до того — белая рамка; слайда
-   нет — тихая заглушка; открываемая карточка — белая вуаль с дугой, проявляется через 120 мс (быстрая загрузка не мигает) */
+   нет — тихая заглушка (только значок, без подложки); открываемая карточка — белая вуаль с дугой, проявляется через 120 мс (быстрая загрузка не мигает) */
 .gh-img{transition:opacity 240ms var(--ease)}
 .gh-img-wait{opacity:0}
-.gh-ic-none{background:#F3F4F1;color:#5A6272}
+.gh-ic-none{color:#5A6272}
 .gh-wait{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;border-radius:16px;background:rgba(255,255,255,.72);color:#2563EB;opacity:0;transition:opacity 240ms var(--ease)}
 @keyframes gh-wait{from{opacity:0}to{opacity:1}}
 .gh-wait-on{opacity:1;animation:gh-wait 240ms var(--ease) 120ms backwards}

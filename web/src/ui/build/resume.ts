@@ -4,7 +4,7 @@
 // страницы не было (её задачу уже никто не ведёт — store собирает её вид здесь).
 import { foldJobEvent, type ActiveJob } from "../../lib/jobState";
 import { firstLine } from "../../lib/narrate";
-import type { GenerateRequest, GenerationMeta, Job } from "../../types";
+import type { GenerateRequest, GenerationMeta, ImprovedFrom, Job } from "../../types";
 
 /** Запрос сборки и её генерация: «Собрать ещё раз» повторяет именно его. `expected` — число слайдов, которое экран
  *  прочёл в тексте (заглушки раскадровки), на сервер не уходит. Так же лежит в localStorage (LS.build). */
@@ -36,6 +36,30 @@ export function requestOf(g: GenerationMeta): GenerateRequest {
     language: g.language, extra_instructions: g.extra_instructions ?? null, strategies: g.strategies,
     use_models: g.use_models ?? true, audit_models: !!g.audit_models, autofix: g.autofix ?? true, exports: g.exports ?? ["pdf", "html"],
     pictures: g.pictures ?? null, eyes: g.eyes ?? null, improved_from: g.improved_from ?? null,
+  };
+}
+
+/** О чём говорят полосы 01/02 экрана «Сборка»: шаблон (`template`, `templateFile` — имя файла шаблона, которого нет в
+ *  библиотеке) и тема (`brief`) самой сборки, «Улучшить готовую» (`improved`), пишет ли текст агент (`useModels`). */
+export interface BuildTopic { template: string | null; templateFile: string | null; brief: string | null; useModels: boolean; improved: ImprovedFrom | null }
+
+/** Тема и шаблон сборки на экране «Сборка» (`job`): её запрос (`ask` — свой запрос страницы или собранный из меты
+ *  при подключении), только если он этой сборки; иначе — мета её презентации (`decks`: открытая и список), шаблон — из
+ *  задачи. До того, как задача найдена (перезагрузка во время сборки), — запрос из LS.build. Черновик поля «Создать»
+ *  сюда не попадает: подключились к чужой сборке — полосы о ней. Ни запроса, ни меты — тема неизвестна (null), а не
+ *  «Тема ещё не задана». null — говорить не о чем. */
+export function buildTopic(
+  job: { generation?: string | null; template?: string | null } | null, ask: PendingBuild | null, decks: (GenerationMeta | null)[],
+): BuildTopic | null {
+  const gid = job ? job.generation ?? null : ask?.gid ?? null;
+  const own = ask && gid && ask.gid === gid ? ask.request : null;
+  const deck = gid ? decks.find((g) => g?.id === gid) ?? null : null;
+  const req = own ?? (deck ? requestOf(deck) : null);
+  const template = job?.template ?? req?.template_id ?? null;
+  if (!req && !template) return null;
+  return {
+    template, templateFile: deck?.template_file ?? null, brief: req ? req.brief : null, useModels: req?.use_models ?? true,
+    improved: req?.improved_from ?? null,
   };
 }
 

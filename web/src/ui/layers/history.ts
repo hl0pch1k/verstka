@@ -6,9 +6,8 @@ import { templateTitle } from "../../lib/plain";
 import { plural } from "../../lib/utils";
 import type { Screen } from "../deck/geometry";
 
-/** Сколько последних презентаций в разделе (G-history: «до 50 последних презентаций, по дням»). */
-export const HISTORY_LIMIT = 50;
-/** Лесенка карточек (V2 `200 + hk * 40`): дальше девятой задержка не растёт — открытие не ждёт хвост списка. */
+/** Лесенка карточек (V2 `200 + hk * 40`): дальше девятой задержка не растёт — открытие не ждёт хвост списка, и длинный
+ *  список (в разделе все презентации) входит так же быстро, как короткий. */
 const STAG0 = 200;
 const STAG = 40;
 const STAG_MAX = 8;
@@ -116,10 +115,10 @@ export interface HistGroup { key: string; day: string; count: string; items: His
 
 const decks = (n: number) => plural(n, "презентация", "презентации", "презентаций");
 
-/** Раздел целиком: новые первыми (до HISTORY_LIMIT), группы по дням с числом, подпись «7 презентаций». `label` — имя
- *  шаблона для людей, `current` — открытая сейчас. */
+/** Раздел целиком: все презентации, новые первыми, группы по дням с числом, подпись «7 презентаций» — их настоящее
+ *  число. `label` — имя шаблона для людей, `current` — открытая сейчас. */
 export function historyView(list: GenerationMeta[], opts: { now: Date; label(g: GenerationMeta): string; current: string | null }): { groups: HistGroup[]; total: string } {
-  const sorted = [...list].sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0)).slice(0, HISTORY_LIMIT);
+  const sorted = [...list].sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0));
   const groups: HistGroup[] = [];
   sorted.forEach((g, k) => {
     const day = dayBucket(g.created_at, opts.now);

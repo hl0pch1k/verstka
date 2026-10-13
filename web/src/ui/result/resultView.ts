@@ -260,6 +260,15 @@ export function openDeck(g: Generation | null, list: GenerationMeta[], id: strin
   return id ? list.find((x) => x.id === id) ?? null : null;
 }
 
+/** Вариант, на котором открывается презентация (`names` — её варианты): перечитанная та же — прежний (`keep`), иначе
+ *  тот, что просили (`want`: «Мои презентации» — вариант обложки карточки, чтобы обложка и открытый слайд были одним
+ *  слайдом), иначе первый. Варианта нет — следующий по списку правил. */
+export function openStrategy(names: string[], keep: string | null, want: string | null): string | null {
+  if (keep && names.includes(keep)) return keep;
+  if (want && names.includes(want)) return want;
+  return names[0] ?? null;
+}
+
 /** «Изменить текст» / «Дописать текст»: параметры презентации — как её собрали (аудитория, тип, число слайдов,
  *  переключатели, варианты, «Улучшить готовую»). Взгляд дизайнера — `eyes` как есть (null — как модель); старые
  *  презентации без `eyes` — `audit_models` (переключатель тогда значил его). */

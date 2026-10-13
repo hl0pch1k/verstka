@@ -14,6 +14,7 @@ import { uiReducer, UI0, type UiAction, type UiState } from "./ui/deck/geometry"
 import { textError, type TextIssue } from "./ui/create/textRules";
 import { buildRunning, draftParams, type Params } from "./ui/create/params";
 import { failedBuildJob, parsePendingBuild, pendingFor, requestOf, resumeBuild, type PendingBuild } from "./ui/build/resume";
+import { openStrategy } from "./ui/result/resultView";
 import { useVariantWork, type VariantWorkApi } from "./ui/details/useVariantWork";
 import { busyKeys } from "./ui/details/variantWork";
 import type {
@@ -67,8 +68,12 @@ export interface AppState {
   generationId: string | null; generation: Generation | null; generationLoading: boolean;
   /** Open a deck; resolves to it (null when it did not load — the failure is already reported). `hold` («Мои
    *  презентации»): the open deck stays until the new one is ready and its first slide decoded, then the new one takes
-   *  its place at once — the history layer covers the plate meanwhile and moves the deck itself. */
-  loadGeneration(gid: string, opts?: { hold?: boolean }): Promise<Generation | null>;
+   *  its place at once — the history layer covers the plate meanwhile and moves the deck itself; a deck that is gone
+   *  (404) leaves the list. `strategy`: the variant it opens on (the history card's cover), else the first. */
+  loadGeneration(gid: string, opts?: { hold?: boolean; strategy?: string | null }): Promise<Generation | null>;
+  /** «Мои презентации» closed while deck `gid` was being opened: its load is dropped — the open deck stays as it was
+   *  (`hold`), or, when none was open, none opens. A load already applied stays. */
+  cancelLoad(gid: string): void;
   /** Re-reads deck `gid` after a change made to it (a slide fix, a picture, «верни как было») — only while it is still
    *  the open deck and no other deck is being opened; the screen, the variant and the slide stay. A job that ends
    *  after the person left the result screen still lands: the deck shows the change on the way back. Resolves to the
@@ -81,8 +86,8 @@ export interface AppState {
   activeJob: ActiveJob | null;
   runJob(jobId: string, label: string, opts?: RunJobOptions): void;
   /** «Мои презентации»: идущая сборка (мета с `job_id`) — экран «Сборка» с её задачей; задачу уже ведут — экран просто
-   *  возвращается к ней. false — вести нечего (у меты нет задачи). Мета — полная (`GET /api/generations/{gid}`): «Собрать
-   *  ещё раз» повторит её запрос. */
+   *  возвращается к ней (и показывает её, даже если с тех пор подключились к другой). false — вести нечего (у меты нет
+   *  задачи). Мета — полная (`GET /api/generations/{gid}`): «Собрать ещё раз» повторит её запрос. */
   followDeck(g: GenerationMeta): boolean;
   /** Варианты, над которыми идёт задача (`workKey(gid, strategy)` по цели задачи): сервер держит одну задачу на вариант,
    *  и кнопки работы над ним выключены, где бы её ни начали. */
@@ -95,6 +100,10 @@ export interface AppState {
   /** Сборка, которую показывает экран «Сборка»: самая новая задача `generate` — идущая или законченная (неудача
    *  остаётся на экране, пока с него не ушли: слот `activeJob` пустеет через 1,5 с после конца задачи). */
   buildJob: ActiveJob | null;
+  /** Запрос сборки, которую показывает (или вот-вот покажет) экран «Сборка», с её генерацией (`gid`): свой запрос
+   *  страницы или собранный из меты чужой сборки, к которой подключились; до подключения после перезагрузки — из
+   *  LS.build. Полосы 01/02 экрана «Сборка» говорят о нём (ui/build/resume `buildTopic`), а не о черновике поля. */
+  buildAsk: PendingBuild | null;
   /** Идёт хотя бы одна сборка (задача `generate` в очереди или в работе): вторая поверх не начинается. */
   building: boolean;
   /** «Собрать ещё раз»: тот же запрос сборки повторно. Обещание — как у startGeneration: решается, когда повторная сборка
@@ -225,6 +234,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // the newest build and its request (startGeneration once the server took it, or a build found again after a reload):
   // «Собрать ещё раз» repeats it; LS.build is written only for the deck this request belongs to
   const lastBuild = useRef<PendingBuild | null>(null);
+  // the same request for the screen (the build screen's strips 01/02): a ref does not re-render
+  const [buildAsk, setBuildAsk] = useState<PendingBuild | null>(readPendingBuild);
+  const keepBuild = useCallback((p: PendingBuild) => {
+    lastBuild.current = p;
+    setBuildAsk(p);
+  }, []);
   // attachBuild needs the generation flow's deps, defined further down: loadGeneration and boot reach it through this
   const attachRef = useRef<(g: GenerationMeta, pending?: PendingBuild | null) => void>(() => {});
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -374,8 +389,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
    *  first slide decodes, then the new deck replaces it at once — never a skeleton in between (the history card shows
    *  the wait, the history layer covers the plate and closes in the same moment; a view transition would cross-fade a
    *  snapshot of the layer over its own slide down); a failed load leaves the open deck as it was. `area`: where a
-   *  failure is told (the result; the build screen for a deck that has just been built). */
-  const fetchGeneration = useCallback(async (gid: string, quiet = false, hold = false, area: NoticeArea = "result"): Promise<Generation | null> => {
+   *  failure is told (the result; the build screen for a deck that has just been built). `want`: the variant a newly
+   *  opened deck shows (a reload of the open one keeps its own). */
+  const fetchGeneration = useCallback(async (gid: string, quiet = false, hold = false, area: NoticeArea = "result", want: string | null = null): Promise<Generation | null> => {
     const seq = ++genSeq.current;
     askedGen.current = gid;
     const sameAsOpen = latest.current.generation?.id === gid;
@@ -392,8 +408,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const g = await api.generation(gid);
       if (seq !== genSeq.current) return g; // a newer load has started — do not touch the state
       const names = g.variants.map((v) => v.strategy);
-      const keep = sameAsOpen ? latest.current.activeStrategy : null;
-      const nextStrategy = keep && names.includes(keep) ? keep : names[0] ?? null;
+      const nextStrategy = openStrategy(names, sameAsOpen ? latest.current.activeStrategy : null, want);
       const next = g.variants.find((v) => v.strategy === nextStrategy);
       const max = slideCount(next);
       if (holding) {
@@ -420,22 +435,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (seq !== genSeq.current) return null;
       // the open deck stayed: a change made to it reloads it again (reloadIfOpen asks for the deck asked for last)
       if (holding) askedGen.current = latest.current.generation?.id ?? null;
-      if (e instanceof ApiError && e.status === 404 && !holding) clearGeneration();
+      if (e instanceof ApiError && e.status === 404) {
+        if (!holding) clearGeneration();
+        // picked from «Мои презентации» and gone meanwhile: the list drops it (offline — the list stays as it is)
+        if (hold) void refreshGenerations();
+      }
       if (!quiet) report(e, "Не удалось открыть презентацию", area);
       return null;
     } finally {
       if (seq === genSeq.current) setGenerationLoading(false);
     }
-  }, [report, clearNotice, selectTemplate, clearGeneration]);
+  }, [report, clearNotice, selectTemplate, clearGeneration, refreshGenerations]);
 
-  const loadGeneration = useCallback(async (gid: string, opts?: { hold?: boolean }) => {
-    const load = fetchGeneration(gid, false, !!opts?.hold);
+  const loadGeneration = useCallback(async (gid: string, opts?: { hold?: boolean; strategy?: string | null }) => {
+    const load = fetchGeneration(gid, false, !!opts?.hold, "result", opts?.strategy ?? null);
     const seq = genSeq.current; // fetchGeneration takes its number before its first await
     const g = await load;
     // a deck still being built opens on its build — unless another deck was asked for meanwhile (or this one was dropped)
     if (seq === genSeq.current && g?.status === "running" && g.job_id) attachRef.current(g);
     return g;
   }, [fetchGeneration]);
+
+  const cancelLoad = useCallback((gid: string) => {
+    // nothing pending for it: another deck was asked for since, or it has already opened
+    if (askedGen.current !== gid || latest.current.generation?.id === gid) return;
+    const open = latest.current.generation;
+    if (!open) return clearGeneration(); // nothing was open: the half-opened deck goes (its id, its skeleton)
+    genSeq.current += 1; // the held deck stays: the load in flight lands nowhere
+    askedGen.current = open.id;
+  }, [clearGeneration]);
 
   const reloadIfOpen = useCallback(async (gid: string) => {
     if (latest.current.generation?.id !== gid || askedGen.current !== gid) return null;
@@ -550,9 +578,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const expected = expectedSlides ?? null;
     // the request belongs to the deck the server answers with; a refused start leaves the shown build's request as it was
     return generationFlow(req, generationDeps, expected, (gid) => {
-      lastBuild.current = { gid, request: req, expected };
+      keepBuild({ gid, request: req, expected });
     });
-  }, [generationDeps]);
+  }, [generationDeps, keepBuild]);
 
   const retryBuild = useCallback(async (deck?: GenerationMeta | null) => {
     const last = deck ? askOf(deck, lastBuild.current) : lastBuild.current;
@@ -565,19 +593,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
    *  screen shows it from where it is (the job's record brings the agent's whole timeline). */
   const attachBuild = useCallback((g: GenerationMeta, pending?: PendingBuild | null) => {
     if (!g.job_id || liveJobs.current.has(g.job_id)) return;
-    lastBuild.current = askOf(g, pending ?? readPendingBuild());
+    const ask = askOf(g, pending ?? readPendingBuild());
+    keepBuild(ask);
     followBuild({
-      jobId: g.job_id, generation: g.id, strategies: g.strategies, template: g.template_id, slides: g.slides ?? lastBuild.current.expected,
+      jobId: g.job_id, generation: g.id, strategies: g.strategies, template: g.template_id, slides: g.slides ?? ask.expected,
       startedAt: g.created_at ? g.created_at * 1000 : undefined,
     }, generationDeps);
     dispatch({ type: "go", screen: "build" });
-  }, [generationDeps]);
+  }, [generationDeps, keepBuild]);
   attachRef.current = attachBuild;
 
   const followDeck = useCallback((g: GenerationMeta) => {
     if (!g.job_id) return false;
-    if (liveJobs.current.has(g.job_id)) dispatch({ type: "go", screen: "build" });
-    else attachBuild(g);
+    const live = liveJobs.current.get(g.job_id);
+    if (!live) {
+      attachBuild(g);
+      return true;
+    }
+    // the page already follows it: the build screen shows this build (another one followed since may be on it)
+    if (live.kind === "generate") setBuildJob((cur) => (cur && cur.id === live.id ? cur : live));
+    dispatch({ type: "go", screen: "build" });
     return true;
   }, [attachBuild]);
 
@@ -585,10 +620,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
    *  failure (B-failed) from the deck's meta (the reason) and, while the server remembers it, its job's record (the
    *  agent's timeline, where it stopped); «Собрать ещё раз» repeats its request. */
   const showFailedBuild = useCallback((g: GenerationMeta, rec: Job | null, pending: PendingBuild | null) => {
-    lastBuild.current = askOf(g, pending);
+    keepBuild(askOf(g, pending));
     setBuildJob(failedBuildJob(g, rec, (name) => titleIn(latest.current.strategies, name)));
     dispatch({ type: "go", screen: "build" });
-  }, []);
+  }, [keepBuild]);
 
   // Health loop: first success boots the data (lists + restore from localStorage); afterwards keeps the banner truthful.
   useEffect(() => {
@@ -728,14 +763,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<AppState>(() => ({
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
-    generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, reloadIfOpen, activeStrategy, setActiveStrategy, activeVariant,
-    selectedSlide, setSelectedSlide, ui, dispatch, activeJob, runJob, followDeck, busyVariants, work, fixIssues, revertVariant, buildJob, building, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
+    generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, cancelLoad, reloadIfOpen, activeStrategy, setActiveStrategy, activeVariant,
+    selectedSlide, setSelectedSlide, ui, dispatch, activeJob, runJob, followDeck, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, building, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
     brief, setBrief, textIssue, setTextIssue, checkText, params, setParams,
     composerText, composerPreset, editText, takeComposerText, takeComposerPreset, improveSource, takeImproveSource,
   }), [
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
-    generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, reloadIfOpen, activeStrategy, setActiveStrategy, activeVariant,
-    selectedSlide, setSelectedSlide, ui, activeJob, runJob, followDeck, busyVariants, work, fixIssues, revertVariant, buildJob, building, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
+    generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, cancelLoad, reloadIfOpen, activeStrategy, setActiveStrategy, activeVariant,
+    selectedSlide, setSelectedSlide, ui, activeJob, runJob, followDeck, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, building, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
     brief, setBrief, textIssue, checkText, params, setParams,
     composerText, composerPreset, editText, takeComposerText, takeComposerPreset, improveSource, takeImproveSource,
   ]);

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { ringDash } from "../kit/ring";
 import type { AgentEvent, AuditReport, AuditSummary, DeckOutline, DesignEye, Generation, Issue, ModelsStatus, OutlineSlide, Variant } from "../../types";
 import {
-  agentLines, deckPreset, deckStrip, docLine, docTitle, eyesCard, fileBase, latestWithModel, noteView, openDeck, qualityCard, recheckIn, remarkCount,
+  agentLines, deckPreset, deckStrip, docLine, docTitle, eyesCard, fileBase, latestWithModel, noteView, openDeck, openStrategy, qualityCard, recheckIn, remarkCount,
   retryLeft, retryTick, rewriteText, scoreOf, slideForKey, slideSrc, slidesOf, switchShots, variantSegs, whyText,
 } from "./resultView";
 
@@ -337,4 +337,16 @@ test("самая новая презентация с моделью: живое
   assert.equal(latestWithModel([a, b, c], b), true);
   assert.equal(latestWithModel([a, b, c], a), false);
   assert.equal(latestWithModel([a], b), false);
+});
+
+test("вариант, на котором открывается презентация: прежний при перечитывании, иначе тот, что просили (обложка карточки), иначе первый", () => {
+  const names = ["structured", "visual", "compact"];
+  // та же презентация перечитана — выбранный вариант остаётся
+  assert.equal(openStrategy(names, "compact", "visual"), "compact");
+  // «Мои презентации»: вариант обложки — обложка и открытый слайд одни
+  assert.equal(openStrategy(names, null, "visual"), "visual");
+  // такого варианта нет — первый
+  assert.equal(openStrategy(names, "gone", "gone"), "structured");
+  assert.equal(openStrategy(names, null, null), "structured");
+  assert.equal(openStrategy([], null, "visual"), null);
 });

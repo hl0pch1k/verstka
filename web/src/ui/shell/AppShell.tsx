@@ -1,18 +1,19 @@
 // Оболочка «Слоёв»: страница (#F3F4F1, поля 24, ширина до 1392), шапка и колода в обёртке `hp-wrap` — сетке из двух
 // колонок, где вторая (место помощника) 0 → 400 px. Разметка — boards/V2.dc.html, `.p2-root`. Задачи областей
 // подключают сюда содержимое плит и слоёв через слоты `Deck`.
-import type { CSSProperties } from "react";
+import { useMemo, type CSSProperties } from "react";
 import { useApp } from "../../store";
 import { tplLabel } from "../../lib/plain";
 import type { Generation, TemplateListItem, Variant } from "../../types";
 import { BuildPlate } from "../build/BuildPlate";
 import { buildStripText } from "../build/buildView";
-import { ImproveStrip } from "../create/ImproveNote";
+import { buildTopic } from "../build/resume";
+import { ImproveStrip, useModelOn } from "../create/ImproveNote";
 import { ParamsBody, ParamsHead, useParamsPlate } from "../create/ParamsPlate";
 import { tplMeta } from "../create/ribbon";
 import { TemplateBody, TemplateHead, useTemplateUpload } from "../create/TemplatePlate";
 import { TextBody, TextHead, useTextPlate } from "../create/TextPlate";
-import { textStrip } from "../create/textRules";
+import { textLine, textStrip } from "../create/textRules";
 import { useStrayFileDrop } from "../create/UploadZone";
 import { Deck } from "../deck/Deck";
 // лист «Подробнее» — в основном куске сборки: первое открытие въезжает, как любое (кусок, догружаемый по клику, мог бы
@@ -57,13 +58,24 @@ function buildStrip(g: Generation | null, v: Variant | null): StripData | undefi
 }
 
 export function AppShell() {
-  const { templates, templateId, templateLabel, ui, dispatch, brief, improveSource, generation, generationId, generations, activeVariant } = useApp();
-  // полоса 01 на результате — шаблон открытой презентации (шаблона нет в библиотеке — его имя); пока она грузится после
-  // перезагрузки — по её мете из списка, а пока ничего не известно — пусто, не выбранный раньше шаблон. Иначе — выбранный
+  const {
+    templates, templateId, templateLabel, ui, dispatch, brief, improveSource, generation, generationId, generations, activeVariant, buildJob, buildAsk,
+    health,
+  } = useApp();
+  const modelOn = useModelOn();
+  /** Полоса 01 о шаблоне презентации или сборки: шаблон по id; его нет в библиотеке — имя по файлу; id нет — пусто. */
+  const tplStrip = (id: string | null | undefined, file?: string | null): StripData | undefined =>
+    templateStrip(templates.find((t) => t.template_id === id)) ?? (id ? { title: templateLabel(id, file) } : undefined);
+  // полоса 01 на результате — шаблон открытой презентации; пока она грузится после перезагрузки — по её мете из
+  // списка, а пока ничего не известно — пусто, не выбранный раньше шаблон. На «Создать» — выбранный
   const result = ui.screen === "result";
   const open = result ? openDeck(generation, generations, generationId) : null;
-  const s1 = result
-    ? open ? templateStrip(templates.find((t) => t.template_id === open.template_id)) ?? { title: templateLabel(open.template_id, open.template_file) } : undefined
+  // полосы 01/02 на сборке — шаблон и тема самой сборки (её запрос или мета её презентации), не черновик поля:
+  // подключились к чужой сборке из «Мои презентации» — полосы о ней, а текст в поле «Создать» остаётся своим
+  const build = ui.screen === "build";
+  const topic = useMemo(() => (build ? buildTopic(buildJob, buildAsk, [generation, ...generations]) : null), [build, buildJob, buildAsk, generation, generations]);
+  const s1 = result ? (open ? tplStrip(open.template_id, open.template_file) : undefined)
+    : build ? (topic ? tplStrip(topic.template, topic.templateFile) : undefined)
     : templateStrip(templates.find((t) => t.template_id === templateId));
   const deck = result ? generation : null;
   const s3 = buildStrip(generation, activeVariant);
@@ -71,8 +83,18 @@ export function AppShell() {
   const text = useTextPlate();
   // шаг «Параметры и запуск» — одно состояние на заголовок плиты 03 (сводка, запуск) и её тело
   const params = useParamsPlate();
-  // полоса 02 на «Создать» и сборке — текст поля; на результате — открытая презентация: название и откуда текст
-  const s2 = ui.screen === "result" ? (deck ? deckStrip(deck, activeVariant) : undefined)
+  // полоса 02 на «Создать» — текст поля; на сборке — тема сборки (пишет ли текст агент — по её запросу; «Улучшить
+  // готовую» — имя исходной презентации, своё название у неё есть, если это та, что в поле); на результате — открытая
+  // презентация: название и откуда текст
+  const writer = !!health?.writer && modelOn;
+  const buildText = useMemo(() => {
+    if (!topic || topic.brief === null) return undefined;
+    const from = topic.improved;
+    const improve = from ? { ...from, title: improveSource?.name === from.name ? improveSource.title : undefined } : null;
+    return textStrip(topic.brief, { line: textLine(topic.brief, writer && topic.useModels), improve });
+  }, [topic, writer, improveSource]);
+  const s2 = result ? (deck ? deckStrip(deck, activeVariant) : undefined)
+    : build ? buildText
     : textStrip(brief, { line: text.line, improve: ui.improve ? improveSource : null });
   // загрузка своего шаблона — одна на плиту 01 и раздел «Шаблоны»
   const upload = useTemplateUpload();

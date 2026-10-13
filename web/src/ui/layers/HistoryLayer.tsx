@@ -2,14 +2,15 @@
 // полоса колоды, она закрывает раздел (Scrim в AppShell). Презентации по дням («Сегодня», «Вчера», дата, «Раньше»),
 // четыре колонки: обложка — первый слайд лучшего варианта, название, оценка или бейдж «собирается» / «не удалось»,
 // время, шаблон и слайды. Открытая сейчас — только обводка обложки, значка выделения нет. Клик (history.ts `openPlan`):
-// готовая открывается в «Результате» — когда она загрузилась и первый слайд декодирован, слой уезжает вниз, колода
-// складывается, а из «Создать» плита результата поднимается снизу одним движением с плитами 02/03 (`rise`,
-// `p2-s4-up`, 520 мс); идущая — экран «Сборка» с её задачей; неудачная — «Создать» с той же темой и шаблоном. Пока
-// презентация грузится, на её обложке — дуга загрузки; неудача — красной строкой в шапке слоя.
+// готовая открывается в «Результате» на варианте своей обложки — когда она загрузилась и первый слайд декодирован, слой
+// уезжает вниз, колода складывается, а из «Создать» плита результата поднимается снизу одним движением с плитами 02/03
+// (`rise`, `p2-s4-up`, 520 мс); идущая — экран «Сборка» с её задачей; неудачная — «Создать» с той же темой и шаблоном.
+// Пока презентация грузится, на её обложке — дуга загрузки; неудача — красной строкой в шапке слоя; слой закрыли —
+// начатое открытие отменяется.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError } from "../../api";
 import { humanError } from "../../lib/errors";
-import { decodeImage } from "../../lib/motion";
+import { decodeImage, isDecoded } from "../../lib/motion";
 import { errText } from "../../lib/narrate";
 import { useApp } from "../../store";
 import type { Generation, GenerationMeta } from "../../types";
@@ -19,23 +20,22 @@ import { ErrorLine } from "../kit/ErrorLine";
 import { Icon } from "../kit/Icon";
 import { Spinner } from "../kit/Spinner";
 import { usePresence } from "../kit/usePresence";
-import { deckPreset, slideSrc } from "../result/resultView";
-import { useGoDown } from "../result/useGoDown";
-import { historyView, openPlan, type HistItem, type OpenPlan } from "./history";
+import { deckPreset, openStrategy, slideSrc } from "../result/resultView";
+import { useGoDown, useRise } from "../result/useGoDown";
+import { coverStrategy, historyView, openPlan, type HistItem, type OpenPlan } from "./history";
 import { Layer, LAYER_MS, lsDelay } from "./Layer";
 
-/** Плита результата поднимается 520 мс; `rise` снимается, когда плиты встали (V2 `openDoc`: 560 мс). */
-const RISE_MS = 560;
 /** Сколько открытие ждёт декодирования первого слайда, прежде чем ехать как есть. */
 const DECODE_WAIT = 800;
 const OPEN_FAILED = "Не удалось открыть презентацию";
 
 export function HistoryLayer() {
   const {
-    ui, dispatch, generations, refreshGenerations, generation, generationId, loadGeneration, templateLabel, templates, selectTemplate,
-    editText, buildJob, followDeck, notices, clearNotice,
+    ui, dispatch, generations, refreshGenerations, generation, generationId, loadGeneration, cancelLoad, templateLabel, templates, selectTemplate,
+    editText, buildJob, followDeck, notices, clearNotice, activeStrategy, setActiveStrategy, setSelectedSlide,
   } = useApp();
   const goDown = useGoDown();
+  const rise = useRise();
   const open = ui.sect === "hist";
   const close = () => dispatch({ type: "sect", sect: null });
 
@@ -46,8 +46,8 @@ export function HistoryLayer() {
   const askAt = useRef<number | null>(null);
   const screen = useRef(ui.screen);
   screen.current = ui.screen;
-  const riseTimer = useRef(0);
-  useEffect(() => () => window.clearTimeout(riseTimer.current), []);
+  // презентация, которую ход сейчас грузит (store `loadGeneration`): закрытый слой её загрузку отменяет
+  const loading = useRef<string | null>(null);
 
   // слой открылся: список свежий (статусы сборок могли смениться), прежняя дуга и строка ушли вместе со слоем
   useEffect(() => {
@@ -58,6 +58,16 @@ export function HistoryLayer() {
     askAt.current = null;
     void refreshGenerations();
   }, [open, refreshGenerations]);
+
+  // слой закрыли (Esc, ✕, полоса колоды, логотип, переход) — начатый ход больше не в силе: он не уводит с экрана, а
+  // загрузка презентации отменяется (открытая остаётся прежней). Дуга и строка уезжают вместе со слоем.
+  useEffect(() => {
+    if (open) return;
+    seq.current++;
+    const gid = loading.current;
+    loading.current = null;
+    if (gid) cancelLoad(gid);
+  }, [open, cancelLoad]);
 
   // неудачу загрузки store пишет строкой области «Результат»: её показывает слой (рядом с местом действия), а под
   // слоем она не остаётся — открытая презентация осталась прежней
@@ -70,11 +80,11 @@ export function HistoryLayer() {
   }, [failed, clearNotice]);
 
   // список считается, только пока слой на экране (и доигрывает уход), — колода перерисовывается часто, раздел закрыт
-  const shown = usePresence(open, LAYER_MS).mounted;
+  const mounted = usePresence(open, LAYER_MS).mounted;
   const current = ui.screen === "result" ? generationId : ui.screen === "build" ? buildJob?.generation ?? null : null;
   const view = useMemo(
-    () => (shown ? historyView(generations, { now: new Date(), label: (g) => templateLabel(g.template_id, g.template_file), current }) : null),
-    [shown, generations, templateLabel, current],
+    () => (mounted ? historyView(generations, { now: new Date(), label: (g) => templateLabel(g.template_id, g.template_file), current }) : null),
+    [mounted, generations, templateLabel, current],
   );
   const byId = useMemo(() => new Map(generations.map((g) => [g.id, g])), [generations]);
 
@@ -93,32 +103,48 @@ export function HistoryLayer() {
   /** Ход ещё в силе: не начат новый и экран тот же, что при клике (иначе человек уже ушёл сам). */
   const live = (n: number, at: string) => n === seq.current && screen.current === at;
 
+  /** Первый слайд, на котором откроется презентация, декодирован (не дольше DECODE_WAIT): плита едет уже со слайдом. */
+  const decoded = (src: string | null) =>
+    src ? Promise.race([decodeImage(src).catch(() => {}), new Promise((r) => window.setTimeout(r, DECODE_WAIT))]) : Promise.resolve();
+
   const toResult = async (g: GenerationMeta, plan: Extract<OpenPlan, { kind: "result" }>, at: string) => {
+    // вариант обложки карточки: презентация открывается на нём, обложка и открытый слайд — один слайд
+    const want = coverStrategy(g);
     if (plan.load) {
       const n = begin(g.id);
       askAt.current = Date.now();
-      const d = await loadGeneration(g.id, { hold: true });
+      loading.current = g.id;
+      const d = await loadGeneration(g.id, { hold: true, strategy: want });
+      if (loading.current === g.id) loading.current = null;
       if (n !== seq.current) return;
-      if (!d) {
-        setWait((w) => (w ? { ...w, on: false } : w));
-        void refreshGenerations(); // удалённая — уходит из списка
+      if (!d) return void setWait((w) => (w ? { ...w, on: false } : w)); // строку неудачи слой забирает у store
+      askAt.current = null;
+      // список отстал: сборка ещё идёт — экран её сборки (store подключился сам; задачу уже ведут — переводит followDeck)
+      if (d.status === "running" || d.status === "queued") {
+        if (!followDeck(d)) {
+          setWait(null);
+          void refreshGenerations();
+        }
         return;
       }
-      askAt.current = null;
-      // список отстал: сборка ещё идёт — store уже перевёл на её экран
-      if (d.status === "running" || d.status === "queued") return;
-      // первый слайд декодирован до движения: плита едет уже со слайдом
-      const first = slideSrc(d.variants[0], 1);
-      if (first) await Promise.race([decodeImage(first).catch(() => {}), new Promise((r) => window.setTimeout(r, DECODE_WAIT))]);
+      const v = d.variants.find((x) => x.strategy === openStrategy(d.variants.map((y) => y.strategy), null, want));
+      await decoded(slideSrc(v, 1));
       if (!live(n, at)) return;
+    } else {
+      // та же презентация уже загружена: вариант обложки и её первый слайд (другой вариант — слайд декодируется до движения)
+      const v = generation?.variants.find((x) => x.strategy === want);
+      const first = v && want !== activeStrategy ? slideSrc(v, 1) : null;
+      if (first && !isDecoded(first)) {
+        const n = begin(g.id);
+        await decoded(first);
+        if (!live(n, at)) return;
+      }
+      if (v) setActiveStrategy(v.strategy);
+      setSelectedSlide(1);
     }
     dispatch({ type: "go", screen: "result" });
-    if (plan.rise) {
-      // `go` сбрасывает `rise`, поэтому он ставится после; снимается, когда плиты встали
-      dispatch({ type: "set", patch: { rise: true } });
-      window.clearTimeout(riseTimer.current);
-      riseTimer.current = window.setTimeout(() => dispatch({ type: "set", patch: { rise: false } }), RISE_MS);
-    }
+    // `go` сбрасывает `rise`, поэтому он ставится после; снимается, когда плиты встали
+    if (plan.rise) rise();
   };
 
   const toCreate = (d: GenerationMeta, plan: Extract<OpenPlan, { kind: "create" }>) => {

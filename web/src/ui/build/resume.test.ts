@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { GenerateRequest, GenerationMeta, Job, JobEvent } from "../../types";
 import { buildView } from "./buildView";
-import { failedBuildJob, parsePendingBuild, pendingFor, requestOf, resumeBuild, type PendingBuild } from "./resume";
+import { buildTopic, failedBuildJob, parsePendingBuild, pendingFor, requestOf, resumeBuild, type PendingBuild } from "./resume";
 
 const REQ: GenerateRequest = {
   template_id: "t1", brief: "Итоги квартала", audience: null, purpose: null, slides: 5, language: "ru", extra_instructions: null,
@@ -148,4 +148,32 @@ test("сборка, упавшая без страницы, когда серв�
   const alien = failedBuildJob(g, { ...rec, id: "j7" }, titleOf);
   assert.equal(alien.agent, undefined);
   assert.equal(alien.endedAt, null);
+});
+
+test("полосы 01/02 экрана «Сборка»: свой запрос этой сборки — её тема и шаблон, черновик поля в них не попадает", () => {
+  const job = { generation: "g1", template: "t1" };
+  const own: PendingBuild = { gid: "g1", request: { ...REQ, brief: "Итоги квартала", use_models: false }, expected: 5 };
+  assert.deepEqual(buildTopic(job, own, []), { template: "t1", templateFile: null, brief: "Итоги квартала", useModels: false, improved: null });
+  // «Улучшить готовую»: исходная презентация — из запроса
+  const imp: PendingBuild = { gid: "g1", request: { ...REQ, improved_from: { name: "Отчёт.pptx", slides: 14 } }, expected: null };
+  assert.deepEqual(buildTopic(job, imp, [])?.improved, { name: "Отчёт.pptx", slides: 14 });
+});
+
+test("полосы 01/02 чужой сборки: запрос другой генерации не пристаёт — тема из меты её презентации, шаблон — задачи", () => {
+  const job = { generation: "g2", template: "t9" };
+  const other: PendingBuild = { gid: "g1", request: { ...REQ, brief: "Своя тема" }, expected: 5 };
+  const list = [meta("g1", { brief: "Своя тема" }), meta("g2", { brief: "История СССР", template_id: "t9", template_file: "Классика.pptx", use_models: undefined })];
+  // мета идущей сборки ещё без use_models: модель включена (requestOf)
+  assert.deepEqual(buildTopic(job, other, list), { template: "t9", templateFile: "Классика.pptx", brief: "История СССР", useModels: true, improved: null });
+  // открытая презентация тоже годится (null в списке пропускается)
+  assert.equal(buildTopic(job, null, [null, meta("g2", { brief: "Из открытой" })])?.brief, "Из открытой");
+  // ни запроса, ни меты: шаблон известен из задачи, темы нет (а не «Тема ещё не задана» и не черновик)
+  assert.deepEqual(buildTopic(job, other, []), { template: "t9", templateFile: null, brief: null, useModels: true, improved: null });
+});
+
+test("полосы 01/02 до того, как задача найдена (перезагрузка во время сборки): запрос из LS.build; говорить не о чем — null", () => {
+  const pending: PendingBuild = { gid: "g1", request: { ...REQ, brief: "Итоги квартала", template_id: "t3" }, expected: 5 };
+  assert.deepEqual(buildTopic(null, pending, []), { template: "t3", templateFile: null, brief: "Итоги квартала", useModels: false, improved: null });
+  assert.equal(buildTopic(null, null, [meta("g1")]), null);
+  assert.equal(buildTopic({ generation: null, template: null }, null, []), null);
 });

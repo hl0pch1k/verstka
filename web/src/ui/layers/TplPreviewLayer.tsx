@@ -12,14 +12,13 @@ import type { TemplateListItem } from "../../types";
 import { ErrorLine } from "../kit/ErrorLine";
 import { Icon } from "../kit/Icon";
 import { Cover, hexOf, inkOf, usePickTemplate } from "../create/TemplateRibbon";
+import { useRise } from "../result/useGoDown";
 import { Layer, lsDelay } from "./Layer";
 import { Scrim } from "./Scrim";
 
 const thumb = (id: string, n: number) => `/api/templates/${encodeURIComponent(id)}/files/thumbs/slide-${String(n).padStart(3, "0")}.jpg`;
 /** V2 `tpPvSlides`: задержка лесенки 160 + 40·i, не дольше восьмой миниатюры. */
 const slideDelay = (i: number) => 160 + Math.min(i, 7) * 40;
-/** «Подробный разбор» открывает результат: плита поднимается снизу одним движением с плитами (V2 `openDoc`). */
-const RISE_MS = 560;
 
 /** Презентация на этом шаблоне, у которой можно открыть вкладку «Шаблон»: открытая, иначе самая новая готовая. */
 function deckOf(id: string, open: { id: string; template_id?: string | null } | null, list: { id: string; template_id: string; status?: string; created_at?: number }[]): string | null {
@@ -32,6 +31,7 @@ function deckOf(id: string, open: { id: string; template_id?: string | null } | 
 export function TplPreviewLayer() {
   const { ui, dispatch, templates, templateId, renameTemplate, generation, generations, loadGeneration } = useApp();
   const pick = usePickTemplate();
+  const rise = useRise();
   const id = ui.tplPreview;
 
   // откуда открыт: из раздела «Шаблоны» или из ленты шага 01 (V2 `tpPvFrom`)
@@ -71,9 +71,6 @@ export function TplPreviewLayer() {
     setEdit(false);
     setErr(null);
   }, [id]);
-
-  const riseTimer = useRef(0);
-  useEffect(() => () => window.clearTimeout(riseTimer.current), []);
 
   const close = () => {
     setDead(false);
@@ -123,11 +120,8 @@ export function TplPreviewLayer() {
     const fromCreate = ui.screen === "create";
     if (generation?.id !== deck) void loadGeneration(deck);
     dispatch({ type: "go", screen: "result" });
-    if (fromCreate) {
-      dispatch({ type: "set", patch: { rise: true } });
-      window.clearTimeout(riseTimer.current);
-      riseTimer.current = window.setTimeout(() => dispatch({ type: "set", patch: { rise: false } }), RISE_MS);
-    }
+    // из «Создать» плита результата поднимается снизу одним движением с плитами (V2 `openDoc`)
+    if (fromCreate) rise();
     dispatch({ type: "sheet", tab: "template" });
   };
 

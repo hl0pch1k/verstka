@@ -107,16 +107,18 @@ test("список: новые первыми, группы по дням с ч�
   assert.deepEqual(v.groups.flatMap((g) => g.items).map((d) => d.delay), [200, 240, 280, 320, 360, 400]);
 });
 
-test("лесенка ограничена, список — 50 последних", () => {
-  const many = Array.from({ length: 60 }, (_, i) => meta(`g${i}`, { created_at: at(13, 11, 0) - i * 60 }));
+test("лесенка ограничена, список — все презентации, число в шапке — их настоящее число", () => {
+  const many = Array.from({ length: 120 }, (_, i) => meta(`g${i}`, { created_at: at(13, 11, 0) - i * 60 }));
   const v = historyView(many, { now: NOW, label, current: null });
   const items = v.groups.flatMap((g) => g.items);
-  assert.equal(items.length, 50);
-  assert.equal(v.total, "50 презентаций");
+  assert.equal(items.length, 120);
+  assert.equal(v.total, "120 презентаций");
   assert.equal(items[0].id, "g0");
+  assert.equal(items[119].id, "g119");
   assert.equal(items[8].delay, 520);
-  assert.equal(items[30].delay, 520);
+  assert.equal(items[119].delay, 520);
   assert.equal(historyView([], { now: NOW, label, current: null }).groups.length, 0);
+  assert.equal(historyView([], { now: NOW, label, current: null }).total, "0 презентаций");
 });
 
 test("открытие готовой из «Создать»: загрузить, затем плита результата поднимается одним движением с плитами", () => {
