@@ -12,7 +12,7 @@ import { plural } from "./utils";
 
 interface CommonDeps {
   /** `area`: where the job's failure is told (by default — by its kind). */
-  runJob(jobId: string, label: string, opts?: { kind?: JobKind; items?: string[]; template?: string | null; generation?: string | null; slides?: number | null; area?: NoticeArea; onDone?: (job: Job) => void; onFailed?: (job: Job) => void }): void;
+  runJob(jobId: string, label: string, opts?: { kind?: JobKind; items?: string[]; template?: string | null; generation?: string | null; slides?: number | null; startedAt?: number; area?: NoticeArea; onDone?: (job: Job) => void; onFailed?: (job: Job) => void }): void;
   report(e: unknown, prefix: string, area: NoticeArea): void;
   /** The status line of an area, next to the action (no pop-ups): a failure or a remark about it. */
   notify(area: NoticeArea, kind: Notice["kind"], text: string): void;
@@ -111,9 +111,43 @@ export interface GenerationDeps extends CommonDeps {
   titleOf(strategy: string): string;
 }
 
+/** A build to follow: its job, the deck it builds, the variants and the slide count asked for (the storyboard's
+ *  first cards), and when it began (a build found again after a reload keeps its own clock). */
+export interface BuildTarget { jobId: string; generation: string; strategies: string[]; template: string | null; slides: number | null; startedAt?: number }
+
+/** Follows a build job to its end: a finished build opens on the result, a failed one stays on the build screen (its
+ *  «Не получилось» reads the build's status line). `ended` is called once the job has ended either way. */
+export function followBuild(t: BuildTarget, d: GenerationDeps, ended?: () => void): void {
+  d.runJob(t.jobId, "Собираю презентацию", {
+    kind: "generate",
+    area: "build",
+    items: t.strategies,
+    template: t.template,
+    generation: t.generation,
+    slides: t.slides,
+    startedAt: t.startedAt,
+    onDone: async () => {
+      void d.refreshModelStatus();
+      await d.refreshGenerations();
+      const g = await d.fetchGeneration(t.generation);
+      // no «Презентация готова» line: the result opens by itself
+      if (g) {
+        d.dispatch({ type: "go", screen: "result" });
+        d.pushMessage("assistant", describeGeneration(g, d.titleOf));
+      }
+      ended?.();
+    },
+    onFailed: (job) => {
+      d.pushMessage("assistant", `Не получилось собрать презентацию: ${firstLine(job.error ?? job.message)}`);
+      void d.refreshGenerations();
+      void d.refreshModelStatus();
+      ended?.();
+    },
+  });
+}
+
 /** `expected`: the slide count the screen read in the text (the build screen's placeholders), never sent.
- *  The build screen stands while the job runs; a finished build opens on the result, a failed one stays on the build
- *  screen (its «Не получилось» reads the build's status line). The helper stays as it is: it narrows every screen. */
+ *  The build screen stands while the job runs (followBuild). The helper stays as it is: it narrows every screen. */
 export function generationFlow(req: GenerateRequest, d: GenerationDeps, expected: number | null = null): Promise<void> {
   return new Promise<void>((resolve) => {
     void (async () => {
@@ -126,31 +160,7 @@ export function generationFlow(req: GenerateRequest, d: GenerationDeps, expected
         return resolve();
       }
       d.dispatch({ type: "go", screen: "build" });
-      d.runJob(res.job_id, "Собираю презентацию", {
-        kind: "generate",
-        area: "build",
-        items: req.strategies,
-        template: req.template_id,
-        generation: res.generation_id,
-        slides: req.slides ?? expected,
-        onDone: async () => {
-          void d.refreshModelStatus();
-          await d.refreshGenerations();
-          const g = await d.fetchGeneration(res.generation_id);
-          // no «Презентация готова» line: the result opens by itself
-          if (g) {
-            d.dispatch({ type: "go", screen: "result" });
-            d.pushMessage("assistant", describeGeneration(g, d.titleOf));
-          }
-          resolve();
-        },
-        onFailed: (job) => {
-          d.pushMessage("assistant", `Не получилось собрать презентацию: ${firstLine(job.error ?? job.message)}`);
-          void d.refreshGenerations();
-          void d.refreshModelStatus();
-          resolve();
-        },
-      });
+      followBuild({ jobId: res.job_id, generation: res.generation_id, strategies: req.strategies, template: req.template_id, slides: req.slides ?? expected }, d, resolve);
     })();
   });
 }

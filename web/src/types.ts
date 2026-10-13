@@ -393,6 +393,8 @@ export interface GenerationMeta {
   status?: string;
   /** Why the build failed (status «failed»): its reason's first lines, or that the server restarted under it. */
   error?: string | null;
+  /** The job that builds (built) the deck: a page reloaded mid-build follows it again (status «running»). */
+  job_id?: string;
   summary?: Record<string, VariantSummary>;
   /** Did a model plan the decks; if none did — why (older servers do not send it). */
   planner?: PlannerInfo | null;

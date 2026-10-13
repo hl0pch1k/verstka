@@ -16,7 +16,7 @@ import { Switch } from "../kit/Switch";
 import { useHeld, useModelOn } from "./ImproveNote";
 import { ParamsAll } from "./ParamsAll";
 import {
-  buildRequest, buildRunning, eyesOn, imagesHint, picturesOn, presetParams, SLIDES_LOCKED, slidesView, slideWord, startFailure, stepSlides,
+  buildRequest, eyesOn, imagesHint, picturesOn, presetParams, SLIDES_LOCKED, slidesView, slideWord, startFailure, stepSlides,
   summaryLine, toggleEyes as nextEyes, togglePictures as nextPictures, toggleStrategy, variantCards, writesHint,
   type ImagesInfo, type SlidesView, type SwitchView, type VariantCard,
 } from "./params";
@@ -52,7 +52,7 @@ export interface ParamsPlate {
 export function useParamsPlate(): ParamsPlate {
   const {
     params, setParams, brief, strategies, health, templates, templateId, checkText, textIssue, startGeneration, ui, dispatch, notices,
-    improveSource, composerPreset, takeComposerPreset, activeJob,
+    improveSource, composerPreset, takeComposerPreset, building,
   } = useApp();
   const modelOn = useModelOn();
   const images: ImagesInfo = { configured: !!health?.images?.configured, enabled: !!health?.images?.enabled };
@@ -85,8 +85,8 @@ export function useParamsPlate(): ParamsPlate {
   // упавшей прежней сборки); ушли с «Создать» — нажатие забыто
   const [attempt, setAttempt] = useState<number | null>(null);
   const [noTpl, setNoTpl] = useState(false);
-  // сборка уже идёт: вторая поверх не начинается, нажатие ставит тихую строку; сборка кончилась — строка уходит
-  const building = buildRunning(activeJob);
+  // сборка уже идёт (любая задача generate, не только самая новая задача в слоте): вторая поверх не начинается, нажатие
+  // ставит тихую строку; сборка кончилась — строка уходит
   const [busyAsk, setBusyAsk] = useState(false);
   useEffect(() => {
     if (ui.screen !== "create") {

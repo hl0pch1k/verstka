@@ -31,19 +31,22 @@ export const KIND_LABEL: Record<SketchKind, string> = {
   text: "Текст",
 };
 
-/** The page's title per phase (and for the queue, before the first event). A short preposition is bound to its word
- *  by a no-break space: a line never ends on «в» or «с». */
-export const STAGE_TITLE: Record<PhaseKey | "queued", string> = {
+/** The build's title per phase, as on the boards (V2 `bdData().PH`): the queue before the first event, the nine roles,
+ *  then «готова» or «остановилась». A short preposition is bound to its word by a no-break space: a line never ends on
+ *  «к», «по» or «с». */
+export const STAGE_TITLE: Record<PhaseKey | "queued" | "done" | "failed", string> = {
   queued: "Готовлюсь к\u00a0сборке",
   writer: "Пишу текст по\u00a0теме",
-  analyst: "Читаю ваш текст",
+  analyst: "Читаю текст",
   architect: "Выстраиваю сюжет",
   designer: "Продумываю слайды",
   critic: "Сверяю план с\u00a0текстом",
-  revise: "Переделываю слабые места",
-  layout: "Собираю в\u00a0вашем шаблоне",
-  check: "Проверяю каждое число",
-  eyes: "Смотрю на\u00a0слайды глазами дизайнера",
+  revise: "Переделываю слайды",
+  layout: "Раскладываю по\u00a0макетам",
+  check: "Проверяю шрифты и\u00a0цвета",
+  eyes: "Смотрю на\u00a0слайды целиком",
+  done: "Презентация готова",
+  failed: "Сборка остановилась",
 };
 
 /** The first «…» of a text, nested quotes kept («Компания «Ромашка» растёт»); null without a closed one. */

@@ -1,7 +1,7 @@
 // Application state: one React context, consumed by every panel through useApp().
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import { api, ApiError } from "./api";
-import { generationFlow, uploadTemplateFlow } from "./lib/flows";
+import { followBuild, generationFlow, uploadTemplateFlow, type GenerationDeps } from "./lib/flows";
 import { foldJobEvent, type ActiveJob } from "./lib/jobState";
 import { trackJob } from "./lib/jobs";
 import { errText, firstLine, newestTemplate, slideCount } from "./lib/narrate";
@@ -12,7 +12,7 @@ import { draftBrief, writeDraft } from "./lib/draft";
 import { variantRev, withRev } from "./lib/rev";
 import { uiReducer, UI0, type UiAction, type UiState } from "./ui/deck/geometry";
 import { textError, type TextIssue } from "./ui/create/textRules";
-import { draftParams, type Params } from "./ui/create/params";
+import { buildRunning, draftParams, type Params } from "./ui/create/params";
 import type {
   ChatMessage, GenerateRequest, Generation, GenerationMeta, Health, ImprovedFrom, ImproveSource, Job, JobKind, ModelsStatus, Notice, NoticeArea, StrategyInfo, TemplateListItem, TemplateManifest, Variant,
 } from "./types";
@@ -29,6 +29,31 @@ export interface RunJobOptions {
   kind?: JobKind; items?: string[]; template?: string | null; onDone?: (job: Job) => void; onFailed?: (job: Job) => void;
   target?: { generation: string; strategy: string; slide: number }; quiet?: boolean; area?: NoticeArea;
   generation?: string | null; slides?: number | null;
+  /** When the job began (ms): a build found again after a reload keeps its own clock. */
+  startedAt?: number;
+}
+
+/** The request of the build in progress, kept in localStorage (LS.build): a page opened again follows the build and
+ *  can repeat it («Собрать ещё раз») with the same inputs. */
+interface PendingBuild { gid: string; request: GenerateRequest; expected: number | null }
+function readPendingBuild(): PendingBuild | null {
+  try {
+    const v = JSON.parse(storage.get(LS.build) ?? "null") as PendingBuild | null;
+    return v && typeof v.gid === "string" && v.request && typeof v.request.template_id === "string" ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A deck's request again, from its meta (a build started elsewhere, found after a reload without its request). */
+function requestOf(g: GenerationMeta): GenerateRequest {
+  return {
+    template_id: g.template_id, brief: g.brief ?? "", audience: g.audience ?? null, purpose: g.purpose ?? null, slides: g.slides ?? null,
+    language: g.language, extra_instructions: g.extra_instructions ?? null, strategies: g.strategies,
+    // a running deck's meta has no `use_models` yet: the server turns it off by itself when no model is configured
+    use_models: g.use_models ?? true, audit_models: !!g.audit_models, autofix: g.autofix ?? true, exports: g.exports ?? ["pdf", "html"],
+    pictures: g.pictures ?? null, eyes: g.eyes ?? null, improved_from: g.improved_from ?? null,
+  };
 }
 
 /** Where a job's failure stands by default: template analysis at the template step, a build on the build screen, the
@@ -65,6 +90,15 @@ export interface AppState {
   ui: UiState; dispatch(a: UiAction): void;
   activeJob: ActiveJob | null;
   runJob(jobId: string, label: string, opts?: RunJobOptions): void;
+  /** Сборка, которую показывает экран «Сборка»: самая новая задача `generate` — идущая или законченная (неудача
+   *  остаётся на экране, пока с него не ушли: слот `activeJob` пустеет через 1,5 с после конца задачи). */
+  buildJob: ActiveJob | null;
+  /** Идёт хотя бы одна сборка (задача `generate` в очереди или в работе): вторая поверх не начинается. */
+  building: boolean;
+  /** «Собрать ещё раз»: тот же запрос сборки повторно. Обещание — как у startGeneration: решается, когда повторная сборка
+   *  кончилась или не началась (её начало видно по `buildJob`, отказ — по строке области «Сборка»); false — повторять
+   *  нечего (запрос неизвестен). */
+  retryBuild(): Promise<boolean>;
   messages: ChatMessage[]; pushMessage(role: "user" | "assistant", text: string): void; // ts = unix seconds (fmtDate-compatible)
   /** Строки статуса по областям — показываются рядом с местом действия (всплывающих уведомлений в «Слоях» нет). */
   notices: Partial<Record<NoticeArea, Notice>>;
@@ -153,7 +187,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // a reload on a deck opens on the result screen at once (its skeleton covers the load and cross-fades into the deck),
   // never on the create screen first; boot goes back to «Создать» when the stored deck does not load. The helper
   // starts closed (UI0): the page itself must be self-explanatory.
-  const [ui, dispatch] = useReducer(uiReducer, UI0, (s0): UiState => (storage.get(LS.generation) ? { ...s0, screen: "result" } : s0));
+  // a reload during a build opens on the build screen: boot follows the build again (LS.build)
+  const [ui, dispatch] = useReducer(uiReducer, UI0, (s0): UiState =>
+    (readPendingBuild() ? { ...s0, screen: "build" } : storage.get(LS.generation) ? { ...s0, screen: "result" } : s0));
   const [composerText, setComposerText] = useState<string | null>(null);
   const [composerPreset, setComposerPreset] = useState<ComposerPreset | null>(null);
   const [improveSource, setImproveSource] = useState<ImproveSource | null>(null);
@@ -172,6 +208,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const takeImproveSource = useCallback(() => setImproveSource(null), []);
   const [activeJob, setActiveJob] = useState<ActiveJob | null>(null);
   const liveJobs = useRef(new Map<string, ActiveJob>()); // every job still running, the newest last
+  const [buildJob, setBuildJob] = useState<ActiveJob | null>(null);
+  const [building, setBuilding] = useState(false);
+  // the request of the newest build (startGeneration, or the one found again after a reload): «Собрать ещё раз»
+  const lastBuild = useRef<{ request: GenerateRequest; expected: number | null } | null>(null);
+  // attachBuild needs the generation flow's deps, defined further down: loadGeneration and boot reach it through this
+  const attachRef = useRef<(g: GenerationMeta, pending?: PendingBuild | null) => void>(() => {});
   const [messages, setMessages] = useState<ChatMessage[]>([]);
 
   const [brief, setBriefState] = useState(draftBrief);
@@ -367,7 +409,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [report, clearNotice, selectTemplate, clearGeneration]);
 
-  const loadGeneration = useCallback(async (gid: string, opts?: { hold?: boolean }) => await fetchGeneration(gid, false, !!opts?.hold), [fetchGeneration]);
+  const loadGeneration = useCallback(async (gid: string, opts?: { hold?: boolean }) => {
+    const g = await fetchGeneration(gid, false, !!opts?.hold);
+    // a deck still being built opens on its build
+    if (g?.status === "running" && g.job_id) attachRef.current(g);
+    return g;
+  }, [fetchGeneration]);
 
   const setActiveStrategy = useCallback((s: string) => {
     const variant = latest.current.generation?.variants.find((v) => v.strategy === s);
@@ -384,19 +431,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const runJob = useCallback((jobId: string, label: string, opts?: RunJobOptions) => {
     jobSubs.current.get(jobId)?.();
+    const build = opts?.kind === "generate";
+    const gid = opts?.generation ?? null;
+    const syncBuilding = () => setBuilding([...liveJobs.current.values()].some(buildRunning));
     // the slot shows the newest job; jobs run side by side (the fixes of every variant) keep it busy until the last
     // one ends — the screen never unblocks while a job still runs (its actions would hit «already running»)
     const settle = (p: Partial<ActiveJob>) => {
       jobSubs.current.delete(jobId);
       liveJobs.current.delete(jobId);
+      if (build) {
+        // the build screen keeps the ended build (a failure stays on it), with the clock stopped
+        setBuildJob((cur) => (cur && cur.id === jobId ? { ...cur, ...p, endedAt: Date.now() } : cur));
+        syncBuilding();
+        if (gid && readPendingBuild()?.gid === gid) storage.set(LS.build, null);
+      }
       const other = [...liveJobs.current.values()].pop() ?? null;
       if (other) return void setActiveJob((cur) => (cur && cur.id === jobId ? other : cur));
       setActiveJob((cur) => (cur && cur.id === jobId ? { ...cur, ...p } : cur));
       window.setTimeout(() => setActiveJob((cur) => (cur && cur.id === jobId ? null : cur)), 1500);
     };
-    const first: ActiveJob = { id: jobId, label, progress: 0, message: "В очереди…", status: "queued", kind: opts?.kind ?? "other", startedAt: Date.now(), items: opts?.items, template: opts?.template, target: opts?.target, generation: opts?.generation ?? null, slides: opts?.slides ?? null };
+    const first: ActiveJob = { id: jobId, label, progress: 0, message: "В очереди…", status: "queued", kind: opts?.kind ?? "other", startedAt: opts?.startedAt ?? Date.now(), items: opts?.items, template: opts?.template, target: opts?.target, generation: gid, slides: opts?.slides ?? null };
     liveJobs.current.set(jobId, first);
     setActiveJob(first);
+    if (build) {
+      setBuildJob(first);
+      syncBuilding();
+      // a reload finds this build again and can repeat it
+      const last = lastBuild.current;
+      if (gid && last) storage.set(LS.build, JSON.stringify({ gid, request: last.request, expected: last.expected } satisfies PendingBuild));
+    }
     const stop = trackJob(jobId, {
       onEvent: (ev) => {
         if (ev.status === "done" || ev.status === "failed") return; // settled below, once the full job record is fetched
@@ -405,6 +468,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const next = foldJobEvent(cur, ev, (name) => titleIn(latest.current.strategies, name));
         liveJobs.current.set(jobId, next);
         setActiveJob((shown) => (shown && shown.id === jobId ? next : shown));
+        if (build) setBuildJob((shown) => (shown && shown.id === jobId ? next : shown));
       },
       onDone: (job) => {
         settle({ status: "done", progress: 1, message: "Готово" });
@@ -440,11 +504,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [runJob, report, notify, clearNotice, pushMessage, adoptManifest, improveReady],
   );
 
-  const startGeneration = useCallback(
-    (req: GenerateRequest, expectedSlides?: number | null) =>
-      generationFlow(req, { runJob, report, notify, clearNotice, pushMessage, dispatch, refreshGenerations, fetchGeneration: (gid) => fetchGeneration(gid, false, false, "build"), refreshModelStatus, titleOf: (name) => titleIn(latest.current.strategies, name) }, expectedSlides ?? null),
-    [runJob, report, notify, clearNotice, pushMessage, refreshGenerations, fetchGeneration, refreshModelStatus],
-  );
+  const generationDeps = useMemo<GenerationDeps>(() => ({
+    runJob, report, notify, clearNotice, pushMessage, dispatch, refreshGenerations, fetchGeneration: (gid) => fetchGeneration(gid, false, false, "build"), refreshModelStatus,
+    titleOf: (name) => titleIn(latest.current.strategies, name),
+  }), [runJob, report, notify, clearNotice, pushMessage, refreshGenerations, fetchGeneration, refreshModelStatus]);
+
+  const startGeneration = useCallback((req: GenerateRequest, expectedSlides?: number | null) => {
+    lastBuild.current = { request: req, expected: expectedSlides ?? null };
+    return generationFlow(req, generationDeps, expectedSlides ?? null);
+  }, [generationDeps]);
+
+  const retryBuild = useCallback(async () => {
+    const last = lastBuild.current;
+    if (!last) return false;
+    await startGeneration(last.request, last.expected);
+    return true;
+  }, [startGeneration]);
+
+  /** A deck still being built (a reload, a running deck opened from the list): its job is followed again — the build
+   *  screen shows it from where it is (the job's record brings the agent's whole timeline). */
+  const attachBuild = useCallback((g: GenerationMeta, pending?: PendingBuild | null) => {
+    if (!g.job_id || liveJobs.current.has(g.job_id)) return;
+    lastBuild.current = pending && pending.gid === g.id ? { request: pending.request, expected: pending.expected } : { request: requestOf(g), expected: g.slides ?? null };
+    followBuild({
+      jobId: g.job_id, generation: g.id, strategies: g.strategies, template: g.template_id, slides: g.slides ?? lastBuild.current.expected,
+      startedAt: g.created_at ? g.created_at * 1000 : undefined,
+    }, generationDeps);
+    dispatch({ type: "go", screen: "build" });
+  }, [generationDeps]);
+  attachRef.current = attachBuild;
 
   // Health loop: first success boots the data (lists + restore from localStorage); afterwards keeps the banner truthful.
   useEffect(() => {
@@ -462,6 +550,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setTemplates(tp.value);
         const stored = latest.current.templateId; // drop a stale id, fall back to the newest template
         if (!stored || !tp.value.some((t) => t.template_id === stored)) selectTemplate(newestTemplate(tp.value)?.template_id ?? null);
+      }
+      // a build that ran when the page was left: followed again while its job runs; one that ended meanwhile opens on its
+      // deck (done) or gives way to the stored deck or «Создать» (failed, gone)
+      const pending = readPendingBuild();
+      if (pending) {
+        let g: Generation | null = null;
+        try {
+          g = await api.generation(pending.gid);
+        } catch {
+          g = null;
+        }
+        if (!alive) return;
+        if (g?.status === "running" && g.job_id) attachRef.current(g, pending);
+        else {
+          storage.set(LS.build, null);
+          if (g?.status === "done" && (await fetchGeneration(pending.gid, true))) {
+            if (alive) dispatch({ type: "go", screen: "result" });
+            return;
+          }
+          if (alive && latest.current.ui.screen === "build") dispatch({ type: "go", screen: storage.get(LS.generation) ? "result" : "create" });
+        }
       }
       const storedGen = storage.get(LS.generation);
       // a stored deck that loads needs no move: the screen started on the result (the reducer's initial state), and a
@@ -534,13 +643,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AppState>(() => ({
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, activeStrategy, setActiveStrategy, activeVariant,
-    selectedSlide, setSelectedSlide, ui, dispatch, activeJob, runJob, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
+    selectedSlide, setSelectedSlide, ui, dispatch, activeJob, runJob, buildJob, building, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
     brief, setBrief, textIssue, setTextIssue, checkText, params, setParams,
     composerText, composerPreset, editText, takeComposerText, takeComposerPreset, improveSource, takeImproveSource,
   }), [
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, activeStrategy, setActiveStrategy, activeVariant,
-    selectedSlide, setSelectedSlide, ui, activeJob, runJob, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
+    selectedSlide, setSelectedSlide, ui, activeJob, runJob, buildJob, building, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
     brief, setBrief, textIssue, checkText, params, setParams,
     composerText, composerPreset, editText, takeComposerText, takeComposerPreset, improveSource, takeImproveSource,
   ]);

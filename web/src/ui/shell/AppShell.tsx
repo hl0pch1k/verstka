@@ -3,8 +3,12 @@
 // подключают сюда содержимое плит и слоёв через слоты `Deck`.
 import type { CSSProperties } from "react";
 import { useApp } from "../../store";
+import { slideCount } from "../../lib/narrate";
 import { tplLabel } from "../../lib/plain";
-import type { TemplateListItem } from "../../types";
+import { clock } from "../../lib/stage";
+import { plural } from "../../lib/utils";
+import type { Generation, TemplateListItem, Variant } from "../../types";
+import { BuildPlate } from "../build/BuildPlate";
 import { ImproveStrip } from "../create/ImproveNote";
 import { ParamsBody, ParamsHead, useParamsPlate } from "../create/ParamsPlate";
 import { tplMeta } from "../create/ribbon";
@@ -13,6 +17,7 @@ import { TextBody, TextHead, useTextPlate } from "../create/TextPlate";
 import { textStrip } from "../create/textRules";
 import { useStrayFileDrop } from "../create/UploadZone";
 import { Deck } from "../deck/Deck";
+import { Icon } from "../kit/Icon";
 import type { StripData } from "../deck/Strip";
 import { Scrim } from "../layers/Scrim";
 import { TemplatesLayer } from "../layers/TemplatesLayer";
@@ -31,9 +36,21 @@ function templateStrip(t: TemplateListItem | undefined): StripData | undefined {
   return { title: tplLabel(t), meta: tplMeta(t) || undefined };
 }
 
+/** Полоса 03 на результате: «Сборка завершена за 2:31 · 3 варианта · 12 слайдов» (V2 `strip3`, `resultMeta`). */
+function buildStrip(g: Generation | null, v: Variant | null): StripData | undefined {
+  if (!g) return undefined;
+  const n = g.variants.length;
+  return {
+    icon: <span style={{ display: "inline-flex", flex: "none", color: "#38BDF8" }}><Icon name="check-circle" size={16} /></span>,
+    title: g.seconds ? `Сборка завершена за ${clock(g.seconds)}` : "Сборка завершена",
+    meta: [n ? plural(n, "вариант", "варианта", "вариантов") : null, n ? plural(slideCount(v ?? g.variants[0]), "слайд", "слайда", "слайдов") : null].filter(Boolean).join(" · ") || undefined,
+  };
+}
+
 export function AppShell() {
-  const { templates, templateId, ui, dispatch, brief, improveSource } = useApp();
+  const { templates, templateId, ui, dispatch, brief, improveSource, generation, activeVariant } = useApp();
   const s1 = templateStrip(templates.find((t) => t.template_id === templateId));
+  const s3 = buildStrip(generation, activeVariant);
   // шаг «Текст» — одно состояние на заголовок и тело плиты 02; разбор текста в нём считается один раз на правку
   const text = useTextPlate();
   // шаг «Параметры и запуск» — одно состояние на заголовок плиты 03 (сводка, запуск) и её тело
@@ -72,7 +89,7 @@ export function AppShell() {
         <div className="hp-wrap hp-closed">
           <Deck s1={s1} h1={<TemplateHead upload={upload} />} p1={<TemplateBody upload={upload} />}
             s2={s2} h2={<TextHead tp={text} />} p2={<TextBody tp={text} />}
-            h3={<ParamsHead pp={params} />} p3={<ParamsBody pp={params} />} layers={layers} />
+            h3={<ParamsHead pp={params} />} p3={<ParamsBody pp={params} />} b3={<BuildPlate />} s3={s3} layers={layers} />
           <div className="hp-hcell" />
         </div>
       </div>

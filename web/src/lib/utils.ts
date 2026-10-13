@@ -32,6 +32,8 @@ export const LS = {
   template: "verstka.template_id",
   generation: "verstka.generation_id",
   brief: "verstka.brief_draft",
+  /** Идущая сборка ({ gid, request, expected }): страница, открытая заново, находит её и снова следит за ней. */
+  build: "verstka.build",
 };
 
 export function sessionId(): string {

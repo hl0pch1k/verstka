@@ -8,17 +8,18 @@ const el = document.getElementById("root");
 if (!el) throw new Error("#root element is missing in index.html");
 const root = createRoot(el);
 
-// dev only: /?replay=<generation id>[&speed=3] plays a finished build again on the build screen (dropped from the
-// production bundle: import.meta.env.DEV is false there)
+// dev only: /?replay=<generation id>[&speed=3][&fail=critic][&pause=5000] plays a finished build again on the build screen (dropped
+// from the production bundle: import.meta.env.DEV is false there)
 const params = new URLSearchParams(window.location.search);
 const replay = import.meta.env.DEV ? params.get("replay") : null;
 if (replay) {
   const speed = Number(params.get("speed")) || 3;
+  const fail = (params.get("fail") || null) as import("./lib/agent").PhaseKey | null;
   void import("./dev/StageReplay").then(({ default: StageReplay }) =>
     root.render(
       <StrictMode>
         <AppProvider>
-          <StageReplay gid={replay} speed={speed} />
+          <StageReplay gid={replay} speed={speed} fail={fail} pause={Number(params.get("pause")) || 0} />
         </AppProvider>
       </StrictMode>,
     ),

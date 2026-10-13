@@ -1,0 +1,85 @@
+/* Плита 03 «Сборка» (ui/build). Блок «Сборка (модуль bd)» — дословно из boards/V2.dc.html (<helmet><style>): классы
+ * досок B-start (bs-), B-sketch (bk-), B-failed (bf-), иконка-слои ошибки (p2-lic-d, p2-lic-err) и живой ход bd-.
+ * Общие правила сборки (p2-seg, p2-ph, p2-bar, p2-sbf, p2-sbok, p2-work, p2-role, p2-dot) — в base.css.
+ * Свои дополнения — после блока: типографика фазы (на доске она в style), прокрутка раскадровки, две строки мысли
+ * агента и узкая колода (1280 px, помощник). */
+/* Сборка (модуль bd): «Подготовка» B-start, «Эскизы и критик» B-sketch, «Не получилось» B-failed — классы досок как есть */
+.bs-seg{position:absolute;top:0;bottom:0;left:0;width:20%;border-radius:999px;background:#38BDF8;transform:translateX(60%)}
+@keyframes bs-sweep{from{transform:translateX(-100%)}to{transform:translateX(500%)}}
+.bs-seg-run{animation:bs-sweep 1400ms var(--ease) infinite}
+@keyframes bs-pulse{from{opacity:1}to{opacity:.6}}
+.bs-pulse{animation:bs-pulse 1200ms var(--ease) infinite alternate}
+.bs-gh{position:absolute;left:16px;top:16px;height:8px;border-radius:999px;background:rgba(255,255,255,.06)}
+.bs-cap{display:block;height:8px;border-radius:999px;background:rgba(255,255,255,.06)}
+.bs-log{scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.16) transparent}
+.bs-log > li{flex:none}
+.bs-n{font-size:12px;font-weight:700;line-height:16px}
+.bs-hint{margin:0;font-size:13px;font-weight:500;line-height:20px;color:rgba(255,255,255,.48)}
+.bs-n{font-family:'Unbounded','Manrope',sans-serif;font-weight:600;letter-spacing:0;font-variant-numeric:tabular-nums}
+.bk-seg{display:inline-flex;align-items:center;gap:8px}
+.bk-vst{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:600;line-height:16px;color:rgba(255,255,255,.56)}
+.bk-vst svg{color:#38BDF8}
+.p2-seg-on .bk-vst{color:#5A6272}
+.p2-seg-on .bk-vst svg{color:#2563EB}
+.bk-sk{position:absolute;inset:0;display:block;width:100%;height:100%}
+.bk-badge{position:absolute;top:8px;right:8px;display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 8px;border-radius:999px;font-size:12px;font-weight:700;line-height:16px;white-space:nowrap}
+.bk-badge-warn{background:#FFFBEB;color:#B45309}
+.bk-badge-ok{background:#E9F1FF;color:#2563EB}
+@keyframes bk-pulse{from{opacity:1}to{opacity:.6}}
+.bk-pulse{animation:bk-pulse 1200ms var(--ease) infinite alternate}
+.bk-gh{position:absolute;left:16px;top:16px;width:56%;height:8px;border-radius:999px;background:rgba(255,255,255,.06)}
+.bk-capgh{display:block;width:88px;height:8px;border-radius:999px;background:rgba(255,255,255,.06)}
+.bk-cn{flex:none;font-family:'Unbounded','Manrope',sans-serif;font-weight:600;font-size:12px;line-height:20px;color:rgba(255,255,255,.48)}
+.bk-cf{min-width:0;font-size:13px;font-weight:600;line-height:20px;color:rgba(255,255,255,.8);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bk-log{scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.16) transparent}
+.bk-log > li{flex:none}
+.bk-rrow{display:flex;align-items:center;gap:8px;height:28px;min-width:0}
+.bk-rrow .p2-rname,.bk-rrow .p2-rst{flex:none;white-space:nowrap}
+.bk-note{min-width:0;font-size:13px;font-weight:500;line-height:20px;color:rgba(255,255,255,.56);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.p2-role-pend .bk-note{color:rgba(255,255,255,.48)}
+.bk-n{font-size:12px;font-weight:700;line-height:16px}
+.bk-n{font-family:'Unbounded','Manrope',sans-serif;font-weight:600;letter-spacing:0;font-variant-numeric:tabular-nums}
+.bf-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:40px 48px}
+.bf-ttl{margin:24px 0 0;font-family:'Unbounded','Manrope',sans-serif;font-weight:600;font-size:20px;line-height:28px;letter-spacing:-0.02em;color:#FFFFFF}
+.bf-obd{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:48px;padding:0 24px;border:0;border-radius:999px;background:rgba(255,255,255,.1);color:#FFFFFF;font-size:15px;font-weight:700;line-height:24px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.bf-obd:hover{transform:translateY(-2px)}
+.bf-obd:active{transform:scale(.98)}
+.bf-note{min-width:0;font-size:13px;font-weight:500;line-height:20px;color:rgba(255,255,255,.56);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bf-role-err .p2-dot{background:transparent;color:#F87171;box-shadow:inset 0 0 0 2px #F87171}
+.bf-role-err .p2-rst{color:#F87171}
+.bf-err{display:flex;align-items:flex-start;gap:8px;margin:4px 0 0;font-size:14px;font-weight:600;line-height:20px;color:#F87171}
+.bf-err svg{flex:none;margin-top:2px}
+.bf-role-skip .p2-dot{background:transparent;box-shadow:inset 0 0 0 1px rgba(255,255,255,.1)}
+.bf-role-skip .p2-rname,.bf-role-skip .bf-note{color:rgba(255,255,255,.48)}
+.p2-lic-d .p2-lic-b{background:rgba(56,189,248,.16)}
+.p2-lic-err .p2-lic-b{background:rgba(248,113,113,.18)}
+.p2-lic-d .p2-lic-f{background:rgba(255,255,255,.06);box-shadow:inset 0 0 0 1px rgba(255,255,255,.12);color:#38BDF8}
+.p2-lic-err .p2-lic-f{color:#F87171}
+/* bd: живой ход сборки — состояния сменяются только прозрачностью и сдвигом, той же кривой */
+.bd-fx{transition:opacity 240ms var(--ease)}
+.bd-bar{transition:transform 520ms var(--ease),opacity 240ms var(--ease)}
+.bd-hide{opacity:0}
+.bd-ring{position:absolute;inset:0;border-radius:inherit;box-shadow:inset 0 0 0 2px #38BDF8;opacity:0;pointer-events:none;transition:opacity 240ms var(--ease)}
+.bd-ring-on{opacity:1}
+.bd-li{transition:transform 520ms var(--ease)}
+.p2-fade.bd-roll{-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 24px,#000 calc(100% - 24px),transparent 100%);mask-image:linear-gradient(to bottom,transparent 0,#000 24px,#000 calc(100% - 24px),transparent 100%)}
+.bd-out{opacity:0;transition:opacity 240ms var(--ease)}
+@media (max-width: 900px){.bd-errbox{position:relative !important;inset:auto !important;margin-top:24px}}
+
+/* ── дополнения «Слоёв» */
+/* фаза в заголовке: типографика .p2-ph доски (у неё — в style), не шире своей клетки */
+.bd-ph{max-width:100%;overflow:hidden;text-overflow:ellipsis;font-family:'Unbounded','Manrope',sans-serif;font-weight:600;font-size:36px;line-height:48px;letter-spacing:-0.03em;color:#FFFFFF}
+/* раскадровка больше двенадцати слайдов прокручивается внутри (как лента агента) */
+.bd-board{scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.16) transparent}
+/* мысль агента — не длиннее двух строк, целиком — в подсказке */
+.bd-line{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+.bd-segs .bk-vst svg{display:block}
+/* Колода уже доски (1280 px; помощник). Плита 03 — контейнер p3 (create.css).
+   - Фаза мельчает ровно настолько, чтобы самая длинная («Смотрю на слайды целиком», 633 px при 36 px) встала в свою
+     клетку: ширина плиты − колонка агента 416 − зазор 48 − место «03» 192 = 100cqw − 656 px; при 1440 это 36 px.
+   - Сегментам вариантов со словами («Структурный ✓ продумано») тесно рядом с «Раскадровкой»: остаются галочки,
+     слова — в подсказке сегмента и в строке под «Раскадровкой». */
+.bd-ph{font-size:clamp(24px, calc((100cqw - 656px) / 17.8), 36px)}
+@container p3 (max-width: 1263px){
+  .bd-segs .bk-vst > span{display:none}
+}
