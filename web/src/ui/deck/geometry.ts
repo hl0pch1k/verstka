@@ -59,8 +59,10 @@ export type UiAction =
   | { type: "sect"; sect: UiState["sect"] } | { type: "sheet"; tab: SheetTab | null } | { type: "pattern"; n: number | null }
   | { type: "set"; patch: Partial<UiState> };
 
-/** `go` сбрасывает `rise` и `down`, как V2 `go()`; кому они нужны (открытие из «Мои презентации», возврат по
- *  логотипу), тот ставит их сразу после `go` и сам снимает таймером 560 мс. */
+/** `go` сбрасывает `rise`, как V2 `go()`: кому он нужен (открытие из «Создать»), тот ставит его сразу после `go` и
+ *  снимает таймером 560 мс. `down` ставит сам `go`, как V2 `go('create')` (`keep4`, `down`): с результата на «Создать»
+ *  — любым путём — плита 04 уходит вниз непрозрачной со своим содержимым; повторный переход на «Создать», пока она ещё
+ *  уезжает, флаг держит. Снимает его один таймер колоды (Deck, 560 мс). */
 export function uiReducer(s: UiState, a: UiAction): UiState {
   switch (a.type) {
     case "go":
@@ -68,7 +70,7 @@ export function uiReducer(s: UiState, a: UiAction): UiState {
       return {
         ...s, screen: a.screen, open: a.screen === "create" ? "text" : s.open,
         sheet: null, sect: null, pattern: null, textLayer: false, lightbox: false, remarks: false, more: false,
-        tplPreview: null, tplDelete: null, rise: false, down: false,
+        tplPreview: null, tplDelete: null, rise: false, down: a.screen === "create" && (s.screen === "result" || s.down),
       };
     case "open":
       // шапка шага или полоса свёрнутой плиты: шаг раскрывается, «Все параметры» сворачиваются; шаг «Шаблон»

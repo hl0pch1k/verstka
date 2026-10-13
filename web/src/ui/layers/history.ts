@@ -148,18 +148,22 @@ export function historyView(list: GenerationMeta[], opts: { now: Date; label(g: 
  *  - готовая → результат: загрузить (если открыта другая), из «Создать» плита результата поднимается снизу одним
  *    движением с плитами 02/03 (`rise`);
  *  - идущая → экран сборки с её задачей;
- *  - неудачная → «Создать» с той же темой и шаблоном; с результата плита уходит вниз (`down`);
+ *  - неудачная → «Создать» с той же темой и шаблоном (с результата плита уходит вниз — это делает сам переход);
+ *  - неудачная сборка, которую держит страница (`buildId` — её законченная сборка, кончилась, пока человек был в
+ *    другом месте) → её экран «Сборка» с причиной, «Вернуться к тексту» и «Собрать ещё раз» (`ended`);
  *  - она уже на экране → только закрыть раздел. */
 export type OpenPlan =
   | { kind: "result"; load: boolean; rise: boolean }
   | { kind: "build" }
-  | { kind: "create"; down: boolean }
+  | { kind: "ended" }
+  | { kind: "create" }
   | { kind: "stay" };
 
 export function openPlan(g: GenerationMeta, at: { screen: Screen; openId: string | null; buildId: string | null }): OpenPlan {
   const state = deckState(g);
   if (state === "run") return at.screen === "build" && at.buildId === g.id ? { kind: "stay" } : { kind: "build" };
-  if (state === "fail") return { kind: "create", down: at.screen === "result" };
+  if (state === "fail" && at.buildId === g.id) return at.screen === "build" ? { kind: "stay" } : { kind: "ended" };
+  if (state === "fail") return { kind: "create" };
   if (at.screen === "result" && at.openId === g.id) return { kind: "stay" };
   return { kind: "result", load: at.openId !== g.id, rise: at.screen === "create" };
 }

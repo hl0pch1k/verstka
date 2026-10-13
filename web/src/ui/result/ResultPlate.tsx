@@ -51,7 +51,6 @@ import {
 import { Stage } from "./Stage";
 import { StageMarks } from "./StageMarks";
 import { useCheckTitles } from "./useCheckTitles";
-import { useGoDown } from "./useGoDown";
 import { useOpenSheet } from "./useOpenSheet";
 import { usePictureSelect } from "./usePictureSelect";
 import { useRemarksMode } from "./useRemarksMode";
@@ -89,27 +88,25 @@ function useTick(on: boolean): number {
 
 export function ResultPlate() {
   const { ui, generation, notices } = useApp();
+  // с результата на «Создать» (логотип, «Изменить текст», «Дописать текст», помощник) плита уходит вниз непрозрачной
+  // вместе со своей презентацией: `go` ставит `down`
   const on = ui.screen === "result" || ui.down;
-  // «Изменить текст», «Дописать текст»: плита уходит вниз непрозрачной вместе со своей презентацией, как с логотипа
-  // (`go` сбрасывает `down`, поэтому он ставится после)
-  const goDown = useGoDown();
   if (!on) return null;
   if (!generation) {
     // презентация не открылась: строка неудачи на месте уведомления; пока грузится — плита пустая
     const err = notices.result?.kind === "error" ? humanError(notices.result.text) : null;
     return err ? <NoteRow><ErrorLine text={err} lines={1} /></NoteRow> : null;
   }
-  if (!generation.variants.length) return <NoDeck key={generation.id} g={generation} goDown={goDown} />;
-  return <ResultBody key={generation.id} g={generation} goDown={goDown} />;
+  if (!generation.variants.length) return <NoDeck key={generation.id} g={generation} />;
+  return <ResultBody key={generation.id} g={generation} />;
 }
 
 /** Презентация без вариантов (сборка не удалась): причина и путь к тексту. */
-function NoDeck({ g, goDown }: { g: Generation; goDown(): void }) {
+function NoDeck({ g }: { g: Generation }) {
   const { editText, dispatch } = useApp();
   const back = () => {
     if (g.brief) editText(g.brief, deckPreset(g));
     else dispatch({ type: "go", screen: "create" });
-    goDown();
   };
   return (
     <NoteRow>
@@ -122,7 +119,7 @@ function NoDeck({ g, goDown }: { g: Generation; goDown(): void }) {
   );
 }
 
-function ResultBody({ g, goDown }: { g: Generation; goDown(): void }) {
+function ResultBody({ g }: { g: Generation }) {
   const {
     activeVariant, setActiveStrategy, selectedSlide, setSelectedSlide, strategyTitle, strategies, templateLabel, templates, ui, dispatch,
     editText, retryBuild, building, health, modelStatus, refreshModelStatus, generations, notices,
@@ -174,7 +171,6 @@ function ResultBody({ g, goDown }: { g: Generation; goDown(): void }) {
   const editDeck = (text: string | null) => {
     if (text) editText(text, deckPreset(g));
     else dispatch({ type: "go", screen: "create" });
-    goDown();
   };
   // «Собрать ещё раз»: тот же запрос этой презентации; ответ сервера — экран «Сборка» или строка отказа в ряду уведомления.
   // Между кликом и ответом кнопка занята (дуга загрузки, aria-busy), второй клик сборку не повторяет

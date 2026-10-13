@@ -143,9 +143,16 @@ test("идущая — экран сборки с её задачей; уже н
   assert.deepEqual(openPlan(meta("q2", { status: "queued" }), { screen: "build", openId: null, buildId: "ws" }), { kind: "build" });
 });
 
-test("неудачная — «Создать» с той же темой и шаблоном; с результата плита уходит вниз", () => {
+test("неудачная — «Создать» с той же темой и шаблоном", () => {
   const g = meta("q", { status: "failed" });
-  assert.deepEqual(openPlan(g, { screen: "create", openId: null, buildId: null }), { kind: "create", down: false });
-  assert.deepEqual(openPlan(g, { screen: "result", openId: "int", buildId: null }), { kind: "create", down: true });
-  assert.deepEqual(openPlan(g, { screen: "build", openId: null, buildId: "ws" }), { kind: "create", down: false });
+  assert.deepEqual(openPlan(g, { screen: "create", openId: null, buildId: null }), { kind: "create" });
+  assert.deepEqual(openPlan(g, { screen: "result", openId: "int", buildId: null }), { kind: "create" });
+  assert.deepEqual(openPlan(g, { screen: "build", openId: null, buildId: "ws" }), { kind: "create" });
+});
+
+test("неудачная сборка, которую держит страница (кончилась, пока человек был в другом месте), — её экран «Сборка»", () => {
+  const g = meta("ws", { status: "failed", job_id: "j1" });
+  assert.deepEqual(openPlan(g, { screen: "create", openId: null, buildId: "ws" }), { kind: "ended" });
+  assert.deepEqual(openPlan(g, { screen: "result", openId: "int", buildId: "ws" }), { kind: "ended" });
+  assert.deepEqual(openPlan(g, { screen: "build", openId: null, buildId: "ws" }), { kind: "stay" });
 });

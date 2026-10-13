@@ -1,7 +1,7 @@
 // Application state: one React context, consumed by every panel through useApp().
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import { api, ApiError } from "./api";
-import { followBuild, generationFlow, uploadTemplateFlow, type GenerationDeps } from "./lib/flows";
+import { endSeen, followBuild, generationFlow, improveArrives, uploadTemplateFlow, watchingBuild, type GenerationDeps } from "./lib/flows";
 import { foldJobEvent, type ActiveJob } from "./lib/jobState";
 import { trackJob } from "./lib/jobs";
 import { errText, firstLine, newestTemplate, slideCount } from "./lib/narrate";
@@ -113,6 +113,10 @@ export interface AppState {
   buildAsk: PendingBuild | null;
   /** Идёт хотя бы одна сборка (задача `generate` в очереди или в работе): вторая поверх не начинается. */
   building: boolean;
+  /** Сборка, которая кончилась, пока человек был в другом месте (не на её экране «Сборка»): экран она не уводит —
+   *  «Создать» говорит о ней строкой («Сборка готова · Открыть», «Сборка не удалась · Посмотреть»). Уходит, когда
+   *  человек её увидел (её экран «Сборка» или её презентация на результате) и когда началась новая сборка. */
+  buildEnd: BuildEnd | null;
   /** «Собрать ещё раз»: тот же запрос сборки повторно. Обещание — как у startGeneration: решается, когда повторная сборка
    *  кончилась или не началась (её начало видно по `buildJob`, отказ — по строке области «Сборка»); false — повторять
    *  нечего (запрос неизвестен). `deck` — открытая презентация (результат): повторяется её запрос — свой запрос
@@ -158,6 +162,9 @@ export interface AppState {
   improveSource: ImproveSource | null;
   takeImproveSource(): void;
 }
+
+/** Сборка, кончившаяся без человека на её экране: её презентация, её задача и чем кончилась. */
+export interface BuildEnd { gid: string; job: string; ok: boolean }
 
 /** A deck's own parameters for the create screen (GenerationMeta): what «Изменить текст» restores with its text. */
 export interface ComposerPreset {
@@ -216,7 +223,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [composerText, setComposerText] = useState<string | null>(null);
   const [composerPreset, setComposerPreset] = useState<ComposerPreset | null>(null);
   const [improveSource, setImproveSource] = useState<ImproveSource | null>(null);
+  // «Улучшить готовую»: презентация прочитана, пока человек был не на «Создать» — режим ждёт его возвращения
+  const [improveWait, setImproveWait] = useState<ImproveSource | null>(null);
   const editText = useCallback((text: string, preset?: ComposerPreset) => {
+    // «Изменить текст» — свой текст поверх прочитанной в фоне презентации: ждущий режим уходит
+    setImproveWait(null);
     setComposerText(text);
     setComposerPreset(preset ?? null);
     // an improved deck's «Изменить текст» returns into the improve mode, with the deck it was read from (the note over
@@ -240,6 +251,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
   const [buildJob, setBuildJob] = useState<ActiveJob | null>(null);
   const [building, setBuilding] = useState(false);
+  const [buildEnd, setBuildEnd] = useState<BuildEnd | null>(null);
   // the newest build and its request (startGeneration once the server took it, or a build found again after a reload):
   // «Собрать ещё раз» repeats it; LS.build is written only for the deck this request belongs to
   const lastBuild = useRef<PendingBuild | null>(null);
@@ -261,8 +273,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // Latest values for callbacks that must stay referentially stable.
-  const latest = useRef({ templateId, templates, manifest, generationId, generation, activeStrategy, strategies, ui, brief, params, health });
-  latest.current = { templateId, templates, manifest, generationId, generation, activeStrategy, strategies, ui, brief, params, health };
+  const latest = useRef({ templateId, templates, manifest, generationId, generation, activeStrategy, strategies, ui, brief, params, health, buildJob });
+  latest.current = { templateId, templates, manifest, generationId, generation, activeStrategy, strategies, ui, brief, params, health, buildJob };
   const genSeq = useRef(0);
   // the deck asked for last (fetchGeneration): a reload after a change never races a deck being opened over it
   const askedGen = useRef<string | null>(null);
@@ -437,8 +449,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       };
       apply();
       clearNotice("result"); // the deck opened: an earlier «Не удалось открыть презентацию» is stale
-      const { templateId: tid, templates: list } = latest.current;
-      if (g.template_id && g.template_id !== tid && list.some((t) => t.template_id === g.template_id)) selectTemplate(g.template_id);
+      // the template and the text of «Создать» stay as they are: opening a deck is not a new draft (a build the person
+      // watched to its end selects its template itself — flows `selectBuilt`)
       return g;
     } catch (e) {
       if (seq !== genSeq.current) return null;
@@ -455,7 +467,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } finally {
       if (seq === genSeq.current) setGenerationLoading(false);
     }
-  }, [report, clearNotice, selectTemplate, clearGeneration, refreshGenerations]);
+  }, [report, clearNotice, clearGeneration, refreshGenerations]);
 
   const loadGeneration = useCallback(async (gid: string, opts?: { hold?: boolean; strategy?: string | null }) => {
     const load = fetchGeneration(gid, false, !!opts?.hold, "result", opts?.strategy ?? null);
@@ -523,6 +535,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setActiveJob(first);
     if (build) {
       setBuildJob(first);
+      setBuildEnd(null); // a new build: the line about the previous one is stale
       syncBuilding();
       // a reload finds this build again and can repeat it — with its own request (never another deck's)
       const pending = pendingFor(lastBuild.current, gid);
@@ -569,12 +582,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
     selectTemplate(m.template_id);
   }, [selectTemplate]);
 
-  // «Улучшить готовую»: the deck read back opens «Создать» with its text, plate 02 under the folded plate 01
+  // «Улучшить готовую»: the deck read back opens «Создать» with its text, plate 02 under the folded plate 01 — when the
+  // person is on «Создать». Elsewhere (a deck, a build) the screen stays: the mode waits and opens when they come back
   const improveReady = useCallback((src: ImproveSource) => {
+    if (improveArrives(latest.current.ui.screen) === "wait") return void setImproveWait(src);
+    setImproveWait(null);
     setImproveSource(src);
     dispatch({ type: "go", screen: "create" });
     dispatch({ type: "set", patch: { improve: true } });
   }, []);
+  useEffect(() => {
+    if (!improveWait || ui.screen !== "create") return;
+    setImproveWait(null);
+    setImproveSource(improveWait);
+    dispatch({ type: "set", patch: { improve: true, open: "text", more: false } });
+  }, [improveWait, ui.screen]);
+
+  // the build that ended away is seen: its build screen, or its deck on the result
+  useEffect(() => {
+    if (buildEnd && endSeen(buildEnd, ui.screen, buildJob?.id, generationId)) setBuildEnd(null);
+  }, [buildEnd, ui.screen, buildJob, generationId]);
 
   const uploadTemplate = useCallback(
     (file: File, useModels: boolean, improve?: boolean) =>
@@ -585,7 +612,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const generationDeps = useMemo<GenerationDeps>(() => ({
     runJob, report, notify, clearNotice, pushMessage, dispatch, refreshGenerations, fetchGeneration: (gid) => fetchGeneration(gid, false, false, "build"), refreshModelStatus,
     titleOf: (name) => titleIn(latest.current.strategies, name),
-  }), [runJob, report, notify, clearNotice, pushMessage, refreshGenerations, fetchGeneration, refreshModelStatus]);
+    watching: (jobId) => watchingBuild(latest.current.ui.screen, latest.current.buildJob?.id, jobId),
+    endedAway: (gid, job, ok) => setBuildEnd({ gid, job, ok }),
+    selectBuilt: (id) => {
+      const { templateId: tid, templates: list } = latest.current;
+      if (id && id !== tid && list.some((t) => t.template_id === id)) selectTemplate(id);
+    },
+  }), [runJob, report, notify, clearNotice, pushMessage, refreshGenerations, fetchGeneration, refreshModelStatus, selectTemplate]);
 
   const startGeneration = useCallback((req: GenerateRequest, expectedSlides?: number | null) => {
     const expected = expectedSlides ?? null;
@@ -782,13 +815,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AppState>(() => ({
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, cancelLoad, reloadIfOpen, activeStrategy, setActiveStrategy, activeVariant,
-    selectedSlide, setSelectedSlide, ui, dispatch, activeJob, liveJobs: liveList, runJob, followDeck, adoptBuildMeta, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, building, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
+    selectedSlide, setSelectedSlide, ui, dispatch, activeJob, liveJobs: liveList, runJob, followDeck, adoptBuildMeta, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, building, buildEnd, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
     brief, setBrief, textIssue, setTextIssue, checkText, params, setParams,
     composerText, composerPreset, editText, takeComposerText, takeComposerPreset, improveSource, takeImproveSource,
   }), [
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, cancelLoad, reloadIfOpen, activeStrategy, setActiveStrategy, activeVariant,
-    selectedSlide, setSelectedSlide, ui, activeJob, liveList, runJob, followDeck, adoptBuildMeta, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, building, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
+    selectedSlide, setSelectedSlide, ui, activeJob, liveList, runJob, followDeck, adoptBuildMeta, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, building, buildEnd, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
     brief, setBrief, textIssue, checkText, params, setParams,
     composerText, composerPreset, editText, takeComposerText, takeComposerPreset, improveSource, takeImproveSource,
   ]);

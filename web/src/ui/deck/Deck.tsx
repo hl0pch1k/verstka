@@ -42,6 +42,8 @@ const show = (on: boolean) => (on ? "p2-on" : "p2-off");
 const ENTER_MS = 34;
 /** Содержимое «Создать» гаснет 240 мс, когда с экрана ушли (`p2-off`): пока гаснет — оно ещё на виду. */
 const LEAVE_MS = 240;
+/** Плита результата уходит вниз 520 мс; флаг `down` снимается, когда она ушла за край (V2 `go('create')`: 560 мс). */
+const DOWN_MS = 560;
 
 /** Название шага: место в ряду заголовка держит невидимая мерка (32 px в широкой раскладке, 24 — в узкой; меняется в
  *  подмене, пока соседи справа невидимы), видимое название поверх неё сжимается до 24 px transform'ом (scale .75 от
@@ -92,6 +94,13 @@ export function Deck({ h1, h2, h3, p1, p2, p3, m3, b3, p4, s1, s2, s3, layers }:
     const t = window.setTimeout(() => setEnter3(false), ENTER_MS);
     return () => window.clearTimeout(t);
   }, [enter3]);
+  // с результата на «Создать» (любым путём) `go` ставит `down`: плита 04 уходит вниз непрозрачной со своим содержимым;
+  // один таймер снимает флаг, когда она ушла за край
+  useEffect(() => {
+    if (!ui.down) return;
+    const t = window.setTimeout(() => dispatch({ type: "set", patch: { down: false } }), DOWN_MS);
+    return () => window.clearTimeout(t);
+  }, [ui.down, dispatch]);
   // содержимое «Создать» в плите 03 стоит, пока открыт «Создать», и доигрывает уход, пока плита результата
   // поднимается из «Создать» (`rise`; в V2 `keep3` ставится и снимается вместе с `rise`)
   const c3 = create || ui.rise;

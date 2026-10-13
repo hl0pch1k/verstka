@@ -13,7 +13,7 @@ import { cls } from "../kit/cls";
 import { ErrorLine } from "../kit/ErrorLine";
 import { Icon } from "../kit/Icon";
 import { Cover, hexOf, inkOf, usePickTemplate } from "../create/TemplateRibbon";
-import { useRise } from "../result/useGoDown";
+import { useRise } from "../result/useRise";
 import { Layer, lsDelay, useLayer } from "./Layer";
 import { Scrim } from "./Scrim";
 

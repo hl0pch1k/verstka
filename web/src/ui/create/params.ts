@@ -221,3 +221,17 @@ export function startFailure(note: Notice | null | undefined, since: number | nu
   if (since === null || !note || note.kind !== "error" || note.at < since || !START_PREFIX.test(note.text)) return null;
   return humanError(note.text.replace(START_PREFIX, ""), START_FAILED);
 }
+
+/** Строка под сводкой: ошибка (поле пусто или коротко, нет шаблона, сервер не начал сборку; `echo` — она повторяет
+ *  ошибку у поля «Текст», её читает та строка), тихая «Сборка уже идёт» со ссылкой «Вернуться к сборке» или тихий итог
+ *  сборки, кончившейся без человека на её экране: «Сборка готова · Открыть», «Сборка не удалась · Посмотреть». */
+export type HeadLine = { kind: "error"; text: string; echo: boolean } | { kind: "busy" } | { kind: "ended"; ok: boolean; failed: boolean };
+
+/** Какая строка стоит под сводкой: «Сборка уже идёт» (нажали «Создать», пока идёт сборка) сильнее ошибки, ошибка —
+ *  итога сборки, кончившейся в другом месте; итог — тихий, он ждёт, пока его увидят (`failed` — её презентация не
+ *  открылась: «Не удалось открыть презентацию · Открыть ещё раз»). */
+export function headLine(o: { busy: boolean; bad: string | null; echo: boolean; ended: { ok: boolean } | null; openFailed?: boolean }): HeadLine | null {
+  if (o.busy) return { kind: "busy" };
+  if (o.bad !== null) return { kind: "error", text: o.bad, echo: o.echo };
+  return o.ended ? { kind: "ended", ok: o.ended.ok, failed: o.ended.ok && !!o.openFailed } : null;
+}

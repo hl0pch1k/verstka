@@ -87,9 +87,16 @@ test("шаг «Шаблон» гасит «Улучшить готовую» (V2
   assert.equal(uiReducer({ ...UI0, improve: true }, { type: "open", step: "tpl" }).improve, false);
   assert.equal(uiReducer({ ...UI0, improve: true, open: "tpl" }, { type: "open", step: "text" }).improve, true);
 });
-test("go сбрасывает rise и down (V2 go())", () => {
+test("go сбрасывает rise; down — только уход с результата на «Создать» (V2 go(): keep4, down)", () => {
   const s = uiReducer({ ...UI0, rise: true, down: true }, { type: "go", screen: "result" });
   assert.deepEqual([s.rise, s.down], [false, false]);
-  const c = uiReducer({ ...UI0, screen: "result", rise: true, down: true }, { type: "go", screen: "create" });
-  assert.deepEqual([c.rise, c.down], [false, false]);
+  const c = uiReducer({ ...UI0, screen: "result", rise: true }, { type: "go", screen: "create" });
+  assert.deepEqual([c.rise, c.down], [false, true]);
+  // со сборки и с «Создать» плите 04 уезжать нечего
+  assert.equal(uiReducer({ ...UI0, screen: "build" }, { type: "go", screen: "create" }).down, false);
+  assert.equal(uiReducer(UI0, { type: "go", screen: "create" }).down, false);
+  // на «Создать» ещё раз, пока плита уезжает: флаг держится (содержимое не пропадает посреди хода)
+  assert.equal(uiReducer({ ...UI0, down: true }, { type: "go", screen: "create" }).down, true);
+  // на сборку с результата — флага нет
+  assert.equal(uiReducer({ ...UI0, screen: "result" }, { type: "go", screen: "build" }).down, false);
 });

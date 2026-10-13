@@ -15,7 +15,6 @@ import { Icon } from "../kit/Icon";
 import { cls } from "../kit/cls";
 import { usePresence } from "../kit/usePresence";
 import { deckPreset } from "../result/resultView";
-import { useGoDown } from "../result/useGoDown";
 import { Layer, lsDelay, useLayer } from "./Layer";
 import { firstSource, sourceLine, writerByline, writerSlides, writtenText, type TextPiece, type WriterSource } from "./writerText";
 
@@ -25,7 +24,6 @@ const NO_SOURCES: WriterSource[] = [];
 
 export function TextLayer() {
   const { ui, dispatch, generation, editText } = useApp();
-  const goDown = useGoDown();
   const text = ui.screen === "result" ? writtenText(generation?.writer) : null;
   const open = ui.textLayer && !!text;
   const layer = useLayer(open);
@@ -68,11 +66,10 @@ export function TextLayer() {
       copyTimer.current = window.setTimeout(() => setCopy(null), COPIED_MS);
     }, fail);
   };
-  // «Изменить»: «Создать» с этим текстом и параметрами презентации (`go` закрывает слой), плита результата — вниз
+  // «Изменить»: «Создать» с этим текстом и параметрами презентации (`go` закрывает слой, плита результата уходит вниз)
   const onEdit = () => {
     if (!g || !w?.text) return;
     editText(w.text, deckPreset(g));
-    goDown();
   };
 
   return (

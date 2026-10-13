@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  buildRequest, buildRunning, chosenStrategies, eyesOn, OWN, PARAMS0, picturesOn, presetParams, readParams, slidesView, slideWord,
+  buildRequest, buildRunning, chosenStrategies, eyesOn, headLine, OWN, PARAMS0, picturesOn, presetParams, readParams, slidesView, slideWord,
   START_FAILED, startFailure, stepSlides, summaryLine, toggleEyes, togglePictures, toggleStrategy, variantCards, type Params,
 } from "./params";
 import type { ActiveJob } from "../../lib/jobState";
@@ -225,4 +225,16 @@ test("параметры презентации: взгляд — `eyes`, у с�
 test("параметры презентации: взгляд null без `auditModels` — «как модель» (null), а не прежний выбор", () => {
   assert.equal(presetParams(P({ eyes: false }), { eyes: null }).eyes, null);
   assert.equal(presetParams(P({ eyes: false }), {}).eyes, false);
+});
+
+test("строка под сводкой: «Сборка уже идёт» сильнее ошибки, ошибка — итога сборки, кончившейся в другом месте", () => {
+  assert.deepEqual(headLine({ busy: true, bad: "x", echo: false, ended: { ok: true } }), { kind: "busy" });
+  assert.deepEqual(headLine({ busy: false, bad: "Напишите, о чём презентация", echo: true, ended: { ok: true } }),
+    { kind: "error", text: "Напишите, о чём презентация", echo: true });
+  assert.deepEqual(headLine({ busy: false, bad: null, echo: false, ended: { ok: true } }), { kind: "ended", ok: true, failed: false });
+  assert.deepEqual(headLine({ busy: false, bad: null, echo: false, ended: { ok: false } }), { kind: "ended", ok: false, failed: false });
+  // презентация готовой сборки не открылась — «Открыть ещё раз»; у неудачной сборки открывать нечего
+  assert.deepEqual(headLine({ busy: false, bad: null, echo: false, ended: { ok: true }, openFailed: true }), { kind: "ended", ok: true, failed: true });
+  assert.deepEqual(headLine({ busy: false, bad: null, echo: false, ended: { ok: false }, openFailed: true }), { kind: "ended", ok: false, failed: false });
+  assert.equal(headLine({ busy: false, bad: null, echo: false, ended: null }), null);
 });

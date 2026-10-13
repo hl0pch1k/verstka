@@ -4,7 +4,8 @@
 // время, шаблон и слайды. Открытая сейчас — только обводка обложки, значка выделения нет. Клик (history.ts `openPlan`):
 // готовая открывается в «Результате» на варианте своей обложки — когда она загрузилась и первый слайд декодирован, слой
 // уезжает вниз, колода складывается, а из «Создать» плита результата поднимается снизу одним движением с плитами 02/03
-// (`rise`, `p2-s4-up`, 520 мс); идущая — экран «Сборка» с её задачей; неудачная — «Создать» с той же темой и шаблоном.
+// (`rise`, `p2-s4-up`, 520 мс); идущая — экран «Сборка» с её задачей; неудачная — «Создать» с той же темой и шаблоном,
+// а неудачная сборка этой страницы, кончившаяся, пока человек был в другом месте, — её экран «Сборка».
 // Пока презентация грузится, на её обложке — дуга загрузки; неудача — красной строкой в шапке слоя; слой закрыли —
 // начатое открытие отменяется.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -21,7 +22,7 @@ import { Icon } from "../kit/Icon";
 import { Spinner } from "../kit/Spinner";
 import { usePresence } from "../kit/usePresence";
 import { deckPreset, openStrategy, slideSrc } from "../result/resultView";
-import { useGoDown, useRise } from "../result/useGoDown";
+import { useRise } from "../result/useRise";
 import { coverStrategy, historyView, openPlan, type HistItem, type OpenPlan } from "./history";
 import { Layer, LAYER_MS, lsDelay, useLayer } from "./Layer";
 
@@ -34,7 +35,6 @@ export function HistoryLayer() {
     ui, dispatch, generations, refreshGenerations, generation, generationId, loadGeneration, cancelLoad, templateLabel, templates, selectTemplate,
     editText, buildJob, followDeck, notices, clearNotice, activeStrategy, setActiveStrategy, setSelectedSlide,
   } = useApp();
-  const goDown = useGoDown();
   const rise = useRise();
   const open = ui.sect === "hist";
   const close = () => dispatch({ type: "sect", sect: null });
@@ -150,12 +150,11 @@ export function HistoryLayer() {
     if (plan.rise) rise();
   };
 
-  const toCreate = (d: GenerationMeta, plan: Extract<OpenPlan, { kind: "create" }>) => {
+  // с результата плита уходит вниз непрозрачной со своей презентацией, как с логотипа (`down` ставит `go`)
+  const toCreate = (d: GenerationMeta) => {
     if (templates.some((t) => t.template_id === d.template_id)) selectTemplate(d.template_id);
     if (d.brief) editText(d.brief, deckPreset(d));
     else dispatch({ type: "go", screen: "create" });
-    // с результата плита уходит вниз непрозрачной со своей презентацией, как с логотипа (`go` сбрасывает `down`)
-    if (plan.down) goDown();
   };
 
   /** Полная мета (у списка текст обрезан): тема для «Создать» и запрос для «Собрать ещё раз». */
@@ -174,6 +173,8 @@ export function HistoryLayer() {
     const at = ui.screen;
     const plan = openPlan(g, { screen: at, openId: generation?.id ?? null, buildId: buildJob?.generation ?? null });
     if (plan.kind === "stay") return close();
+    // неудачная сборка, которую держит страница: её экран «Сборка» (причина, «Вернуться к тексту», «Собрать ещё раз»)
+    if (plan.kind === "ended") return dispatch({ type: "go", screen: "build" });
     if (plan.kind === "result") return toResult(g, plan, at);
     // идущая, которую страница уже ведёт, — сразу к её сборке
     if (plan.kind === "build" && buildRunning(buildJob) && buildJob?.generation === g.id && followDeck(g)) return;
@@ -183,8 +184,9 @@ export function HistoryLayer() {
     // статус — по свежей мете: сборка могла кончиться, пока список стоял
     const now = openPlan(d, { screen: at, openId: generation?.id ?? null, buildId: buildJob?.generation ?? null });
     if (now.kind === "stay") return close();
+    if (now.kind === "ended") return dispatch({ type: "go", screen: "build" });
     if (now.kind === "result") return toResult(d, now, at);
-    if (now.kind === "create") return toCreate(d, now);
+    if (now.kind === "create") return toCreate(d);
     if (!followDeck(d)) fail(n, `${OPEN_FAILED}: сборка не найдена`);
   };
 

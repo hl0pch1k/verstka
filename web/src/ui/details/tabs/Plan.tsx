@@ -10,13 +10,11 @@ import { cls } from "../../kit/cls";
 import { Icon } from "../../kit/Icon";
 import { writtenText } from "../../layers/writerText";
 import { deckPreset } from "../../result/resultView";
-import { useGoDown } from "../../result/useGoDown";
 import { Col, Empty, Shot } from "../parts";
 import { chartData, deckHead, factChips, planRows, writerHead, writerTexts } from "../plan";
 
 export function PlanTab({ g, v, active }: { g: Generation; v: Variant; active: boolean }) {
   const { selectedSlide, setSelectedSlide, editText } = useApp();
-  const goDown = useGoDown();
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const toggle = (k: string) => setOpen((o) => ({ ...o, [k]: !o[k] }));
   const list = useRef<HTMLDivElement>(null);
@@ -48,7 +46,6 @@ export function PlanTab({ g, v, active }: { g: Generation; v: Variant; active: b
   const edit = () => {
     if (!text) return;
     editText(text, deckPreset(g));
-    goDown();
   };
 
   return (

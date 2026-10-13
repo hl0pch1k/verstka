@@ -117,14 +117,37 @@ export interface GenerationDeps extends CommonDeps {
   /** The model indicator follows every generation: it may have found the host congested or back. */
   refreshModelStatus(): Promise<void>;
   titleOf(strategy: string): string;
+  /** The person is on this build's screen now (`watchingBuild`): only then does its end move the screen. */
+  watching(jobId: string): boolean;
+  /** The build ended while the person was elsewhere: nothing moves — «Создать» tells it with a line («Сборка готова ·
+   *  Открыть», «Сборка не удалась · Посмотреть»), the history card leads to it. */
+  endedAway(gid: string, jobId: string, ok: boolean): void;
+  /** The finished build's template becomes the one of «Создать» (a followed build — another tab's, the helper's). */
+  selectBuilt(templateId: string | null | undefined): void;
 }
+
+/** Is the person watching build `jobId`: on the build screen, and the screen shows this build (not another one followed
+ *  since). A build's end moves the screen only then — elsewhere work in the background never takes the screen over. */
+export const watchingBuild = (screen: string, shownJob: string | null | undefined, jobId: string): boolean =>
+  screen === "build" && shownJob === jobId;
+
+/** The build that ended away (`endedAway`) is seen: the person is on its build screen, or its deck is open on the
+ *  result. Then «Создать» no longer tells it. */
+export const endSeen = (end: { gid: string; job: string }, screen: string, shownJob: string | null | undefined, openDeck: string | null): boolean =>
+  (screen === "build" && shownJob === end.job) || (screen === "result" && openDeck === end.gid);
+
+/** «Улучшить готовую»: the deck read back opens «Создать» only when the person is there; elsewhere the mode waits
+ *  (`wait`) and opens when they come back — background work never takes the screen over. */
+export const improveArrives = (screen: string): "open" | "wait" => (screen === "create" ? "open" : "wait");
 
 /** A build to follow: its job, the deck it builds, the variants and the slide count asked for (the storyboard's
  *  first cards), and when it began (a build found again after a reload keeps its own clock). */
 export interface BuildTarget { jobId: string; generation: string; strategies: string[]; template: string | null; slides: number | null; startedAt?: number }
 
-/** Follows a build job to its end: a finished build opens on the result, a failed one stays on the build screen (its
- *  «Не получилось» reads the build's status line). `ended` is called once the job has ended either way. */
+/** Follows a build job to its end. On its build screen a finished build opens on the result (its template becomes the
+ *  one of «Создать»), a failed one stays on the build screen (its «Не получилось» reads the build's status line). Ended
+ *  while the person was elsewhere (another screen, another deck, another build), it moves nothing: the list is refreshed
+ *  and «Создать» tells the outcome (`endedAway`). `ended` is called once the job has ended either way. */
 export function followBuild(t: BuildTarget, d: GenerationDeps, ended?: () => void): void {
   d.runJob(t.jobId, "Собираю презентацию", {
     kind: "generate",
@@ -136,16 +159,22 @@ export function followBuild(t: BuildTarget, d: GenerationDeps, ended?: () => voi
     startedAt: t.startedAt,
     onDone: async () => {
       void d.refreshModelStatus();
+      const here = d.watching(t.jobId);
+      if (!here) d.endedAway(t.generation, t.jobId, true);
       await d.refreshGenerations();
+      if (!here) return ended?.();
       const g = await d.fetchGeneration(t.generation);
-      // no «Презентация готова» line: the result opens by itself
-      if (g) {
+      // no «Презентация готова» line: the result opens by itself — if the person is still on the build's screen (left it
+      // while the deck loaded — «Создать» tells it is ready)
+      if (g && d.watching(t.jobId)) {
         d.dispatch({ type: "go", screen: "result" });
+        d.selectBuilt(g.template_id);
         d.pushMessage("assistant", describeGeneration(g, d.titleOf));
-      }
+      } else if (g) d.endedAway(t.generation, t.jobId, true);
       ended?.();
     },
     onFailed: (job) => {
+      if (!d.watching(t.jobId)) d.endedAway(t.generation, t.jobId, false);
       d.pushMessage("assistant", failMessage("Не получилось собрать презентацию", job));
       void d.refreshGenerations();
       void d.refreshModelStatus();
