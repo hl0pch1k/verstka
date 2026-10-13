@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   asEditResult, asFixResult, bubbleBlocks, chatFailText, chatTarget, chipsFor, describeFixes, editFailText, feedDelay, feedItems, feedProgress, introFor,
-  latestRefreshNote, noteView, openTabSteps, placeholderFor, planActions, reloadFailText, typeset, OTHER_DECK, REFRESHED, type FeedJob,
+  latestRefreshNote, noteView, openTabSteps, RESOLVED, placeholderFor, planActions, reloadFailText, typeset, OTHER_DECK, REFRESHED, type FeedJob,
 } from "./chat";
 import type { ChatAction, ChatResponse } from "../../types";
 import { ApiError } from "../../api";
@@ -270,6 +270,8 @@ test("в ленте живая только самая новая строка �
   const stale = { gid: "g1", text: "новая причина" };
   assert.deepEqual(noteView(notes[0], { stale, open: "g1", latest: false }), { text: "причина 1", refresh: false });
   assert.deepEqual(noteView(notes[2], { stale, open: "g1", latest: true }), { text: "новая причина", refresh: true });
-  // перечиталась — «обновлена» говорит только новая, прежняя — как была
-  assert.deepEqual(noteView(notes[0], { stale: null, open: "g1", latest: false }), { text: "причина 1", refresh: false });
+  // перечиталась — «обновлена» говорит новая, прежние — «Изменения сохранены.» без причины (T5); открыта другая — как были
+  assert.deepEqual(noteView(notes[0], { stale: null, open: "g1", latest: false }), { text: RESOLVED, refresh: false });
+  assert.deepEqual(noteView(notes[2], { stale: null, open: "g1", latest: true }), { text: REFRESHED, refresh: false });
+  assert.deepEqual(noteView(notes[0], { stale: null, open: "g2", latest: false }), { text: "причина 1", refresh: false });
 });

@@ -205,12 +205,16 @@ export function latestRefreshNote(notes: FeedNote[], gid: string | null | undefi
   return null;
 }
 
+/** Прежняя строка ленты о неперечитанной презентации, когда она перечиталась: без причины и без «Обновить». */
+export const RESOLVED = "Изменения сохранены.";
+
 /** Что показывает строка ленты. Живая — только самая новая строка о неперечитанной презентации (`latest`): пока
  *  хранилище держит её несвежей — последняя причина и «Обновить»; перечиталась и открыта — «обновлена»; открыта другая —
- *  как была записана. Прежние строки о ней остаются такими, какими были записаны (без «Обновить»): в ленте одна живая
- *  строка, а не несколько одинаковых. */
+ *  как была записана. Прежние строки о ней — без «Обновить»: пока она несвежая — как записаны; перечиталась и открыта —
+ *  «Изменения сохранены.» (не «не обновилась» рядом с обновлённой). В ленте одна живая строка. */
 export function noteView(note: FeedNote, o: { stale: { gid: string; text: string } | null; open: string | null; latest: boolean }): { text: string; refresh: boolean } {
-  if (!note.refresh || !o.latest) return { text: note.text, refresh: false };
+  if (!note.refresh) return { text: note.text, refresh: false };
+  if (!o.latest) return { text: !o.stale && o.open === note.refresh ? RESOLVED : note.text, refresh: false };
   if (o.stale && o.stale.gid === note.refresh) return { text: o.stale.text, refresh: true };
   return { text: o.open === note.refresh ? REFRESHED : note.text, refresh: false };
 }
