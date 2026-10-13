@@ -430,6 +430,11 @@ export interface WriterInfo {
   asked?: number;
   /** The encyclopedia article the text was written from; null: from the model's own knowledge. */
   source?: { title: string; url: string } | null;
+  /** All the articles the text was written from (newer servers; `source` is the first). */
+  pages?: { title: string; url: string }[];
+  /** Every statement's source (source-anchored writing): the statement as the text shows it, the article and its
+   *  sentence. Empty when the text was not anchored. */
+  sources?: { text: string; page: string; url: string; sentence: string }[];
   removed?: number;
   checked?: "reference" | "model" | null;
   model_label?: string | null;

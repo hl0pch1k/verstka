@@ -234,3 +234,41 @@ a.p2-ob:hover{color:#0B1220}
 .rm-col .p2-ob:disabled{opacity:.32;cursor:default;transform:none}
 .rm-cta[aria-busy="true"]{cursor:progress}
 .rm-cta[aria-busy="true"]:hover,.rm-cta[aria-busy="true"]:active{transform:none}
+
+/* «Текст презентации» (R-text) и «На весь экран» (R-lightbox), задача 10. Блок — дословно из boards/V2.dc.html (модуль
+ * `rt`, классы rt- и lb-): полоса результата над слоем текста, ссылка на статью, предложения с источником, кнопки
+ * просмотра; кадр просмотра проявляется как p2-pop (scale .98 → 1), но обратимо (rt-lsp). Кадр показывает стопку
+ * превью сцены (ra-shot), поэтому lb-img доски не нужен. */
+/* полоса нижележащего слоя «Результат» — кликабельна («вернуться») */
+.rt-strip{position:absolute;left:48px;right:48px;top:0;height:40px;display:flex;align-items:center;gap:12px;padding:0;border:0;border-radius:16px;background:none;color:#0B1220;font-family:inherit;text-align:left;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.rt-strip:active{transform:scale(.98)}
+.rt-strip:hover .rt-strip-t{color:#2563EB}
+.rt-x{background:#FFFFFF}
+.rt-a{color:#2563EB;font-weight:600;text-decoration:underline;text-decoration-color:rgba(37,99,235,.4);text-decoration-thickness:1.5px;text-underline-offset:4px}
+/* прокрутка текста: мягкий край только сверху (p2-fade-top) — снизу текст упирается в строку «Источник» */
+.rt-scroll:focus-visible{outline-offset:-2px;border-radius:24px}
+/* предложение с источником: пунктир — есть источник; наведение или выбор — подсветка */
+.rt-s{border-radius:999px;cursor:pointer;-webkit-box-decoration-break:clone;box-decoration-break:clone;text-decoration-line:underline;text-decoration-style:dotted;text-decoration-color:rgba(37,99,235,.4);text-decoration-thickness:1.5px;text-underline-offset:4px}
+.rt-s:hover,.rt-s-on{background:#E9F1FF;box-shadow:0 0 0 2px #E9F1FF;text-decoration-color:transparent}
+@media (max-width: 900px){
+  .rt-grid{grid-template-columns:minmax(0,1fr) !important}
+  .rt-sub{white-space:normal !important}
+}
+/* resulttools · «На весь экран» (R-lightbox) */
+.lb-arrow{position:absolute;top:calc(50% - 24px);width:48px;height:48px;z-index:1}
+.lb-hide{opacity:0;visibility:hidden;pointer-events:none}
+.lb-k{display:inline-flex;align-items:center;justify-content:center;min-width:24px;height:24px;padding:0 8px;border-radius:999px;background:rgba(255,255,255,.06);box-shadow:inset 0 0 0 1px rgba(255,255,255,.1);font-family:inherit;font-size:12px;font-weight:700;line-height:16px;color:rgba(255,255,255,.64)}
+@media (max-width: 900px){
+  .lb-frame{width:100% !important;height:auto !important;aspect-ratio:16 / 9}
+  .lb-arrow{display:none}
+}
+/* кадр просмотра проявляется как p2-pop (scale .98 → 1), но обратимо: при закрытии слой уезжает с кадром, сброс — после выезда */
+.p2-lay .rt-lsp{opacity:1;transform:none;transition:opacity 360ms var(--ease) var(--d,0ms),transform 360ms var(--ease) var(--d,0ms)}
+.p2-lay-off .rt-lsp{opacity:0;transform:scale(.98);transition:opacity 0s linear 520ms,transform 0s linear 520ms}
+
+/* Свои дополнения. Строка «Скопировано» рядом с кнопкой — как строка итога V2 (dlq-st): проявляется 360 мс, гаснет 240.
+ * Стрелка просмотра на краю гаснет 160 мс, а не пропадает рывком. */
+.rt-st{display:inline-flex;align-items:center;gap:8px;margin:0;font-size:15px;font-weight:700;line-height:24px;color:#2563EB;white-space:nowrap;opacity:0;transition:opacity 240ms var(--ease)}
+.rt-st-on{opacity:1;transition-duration:360ms}
+.lb-arrow{transition:transform 160ms var(--ease),opacity 160ms var(--ease),visibility 0s}
+.lb-arrow.lb-hide{transition:opacity 160ms var(--ease),visibility 0s linear 160ms}

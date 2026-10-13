@@ -12,8 +12,10 @@ import type { NoteView } from "./resultView";
 export interface NoteActions {
   onToggle(): void;
   onClose(): void;
-  /** «Показать текст» — слой «Текст презентации» (задача 10). */
+  /** «Показать текст» — слой «Текст презентации» (TextLayer). */
   onShowText(): void;
+  /** Текста у презентации нет — «Показать текст» приглушена и не открывает слой, причина в подсказке (V2 rt-nb-off). */
+  textOff?: string | null;
   onRebuild(): void;
   onRewrite(): void;
   /** «Собрать ещё раз» сейчас не начнётся (идёт другая сборка, модель на паузе) — кнопка приглушена, причина в подсказке. */
@@ -53,7 +55,8 @@ export function NotePill({ note, open, actions, line }: {
         <span className="ra-nsp" aria-hidden="true" />
         {note.showText && (
           <span className="ra-ni ra-ni2">
-            <button type="button" className="p2-ob ra-nb" onClick={actions.onShowText} aria-haspopup="dialog">
+            <button type="button" className={cls("p2-ob ra-nb", actions.textOff && "rt-nb-off")} onClick={actions.onShowText} aria-haspopup="dialog"
+              aria-disabled={actions.textOff ? true : undefined} title={actions.textOff ?? undefined}>
               <Icon name="file-text" size={18} />
               <span>Показать текст</span>
             </button>

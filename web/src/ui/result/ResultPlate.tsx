@@ -5,8 +5,9 @@
 // (160/200/240/280 мс). Данные — resultView. Режим «Замечания» (R-remarks/R-fixing/R-fixed: разметка на сцене, бейджи
 // ленты, панель на месте колонки, исправление слайда с эскизом и «Вернуть как было») — useRemarksMode; изображение на
 // слайде (R-picture: зона на сцене, колонка с карточкой «Изображение») — usePictureSelect; работа над слайдом —
-// useSlideJob. Слой текста и просмотр на весь экран (задача 10) и лист «Подробнее» (задача 11, `useOpenSheet`)
-// подключаются своими задачами.
+// useSlideJob. «Показать текст» и «На весь экран» открывают слои колоды (ui/layers TextLayer, Lightbox); пока открыт
+// слой текста, над ним видна полоса «04 Результат» этой плиты (R-text), клик по ней закрывает слой. Лист «Подробнее»
+// (задача 11, `useOpenSheet`) подключается своей задачей.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { humanError } from "../../lib/errors";
 import { decodeImage, isDecoded } from "../../lib/motion";
@@ -20,6 +21,7 @@ import { BUILD_RUNNING } from "../create/ParamsPlate";
 import { ErrorLine } from "../kit/ErrorLine";
 import { Icon } from "../kit/Icon";
 import { cls } from "../kit/cls";
+import { textStripMeta, writtenText } from "../layers/writerText";
 import { Aside, type AsideData } from "./Aside";
 import { Film, loadedThumbs } from "./Film";
 import { FixSketch } from "./FixSketch";
@@ -33,14 +35,13 @@ import {
 import { Stage } from "./Stage";
 import { StageMarks } from "./StageMarks";
 import { useCheckTitles } from "./useCheckTitles";
+import { useGoDown } from "./useGoDown";
 import { useOpenSheet } from "./useOpenSheet";
 import { usePictureSelect } from "./usePictureSelect";
 import { useRemarksMode } from "./useRemarksMode";
 import { useSlideJob } from "./useSlideJob";
 import { WorkHead } from "./WorkHead";
 
-/** Плита результата уходит вниз 520 мс; `down` снимается, когда она ушла за край (V2 `go('create')`: 560 мс). */
-const DOWN_MS = 560;
 /** Сколько смена варианта ждёт декодирования его картинок, прежде чем смениться как есть. */
 const SWITCH_WAIT = 800;
 
@@ -71,17 +72,11 @@ function useTick(on: boolean): number {
 }
 
 export function ResultPlate() {
-  const { ui, dispatch, generation, notices } = useApp();
+  const { ui, generation, notices } = useApp();
   const on = ui.screen === "result" || ui.down;
   // «Изменить текст», «Дописать текст»: плита уходит вниз непрозрачной вместе со своей презентацией, как с логотипа
   // (`go` сбрасывает `down`, поэтому он ставится после)
-  const downTimer = useRef(0);
-  useEffect(() => () => window.clearTimeout(downTimer.current), []);
-  const goDown = useCallback(() => {
-    dispatch({ type: "set", patch: { down: true } });
-    window.clearTimeout(downTimer.current);
-    downTimer.current = window.setTimeout(() => dispatch({ type: "set", patch: { down: false } }), DOWN_MS);
-  }, [dispatch]);
+  const goDown = useGoDown();
   if (!on) return null;
   if (!generation) {
     // презентация не открылась: строка неудачи на месте уведомления; пока грузится — плита пустая
@@ -183,9 +178,13 @@ function ResultBody({ g, goDown }: { g: Generation; goDown(): void }) {
   const errText = refused ?? resultErr;
   const line = errText ? <ErrorLine text={errText} lines={1} style={note ? { marginLeft: 16, flex: "0 1 auto" } : undefined} /> : null;
 
-  // Задача 10 заменит эти обработчики: «На весь экран», слой «Текст презентации»
-  const onOpenLightbox = () => {};
-  const onShowText = () => {};
+  // «На весь экран» и «Показать текст» — слои колоды (Lightbox, TextLayer); текста нет — кнопка приглушена (V2 rt-nb-off)
+  const onOpenLightbox = () => dispatch({ type: "set", patch: { lightbox: true } });
+  const hasText = !!writtenText(g.writer);
+  const onShowText = () => {
+    if (hasText) dispatch({ type: "set", patch: { textLayer: true } });
+  };
+  const closeText = () => dispatch({ type: "set", patch: { textLayer: false } });
 
   // ── работа над слайдом: исправление, изображение, «Вернуть как было» (одна задача на вариант за раз)
   const titleOf = useCheckTitles();
@@ -267,11 +266,23 @@ function ResultBody({ g, goDown }: { g: Generation; goDown(): void }) {
 
   return (
     <>
+      {/* полоса результата под слоем «Текст презентации» (R-text): кликабельна — «Вернуться к результату». Полоса гаснет
+          вместе со слоем: фокус с неё снимается, и слой возвращает его туда, откуда его открыли */}
+      <div className={ui.textLayer ? "p2-on" : "p2-off"}>
+        <button type="button" className="rt-strip" onClick={(e) => { e.currentTarget.blur(); closeText(); }} aria-label="Вернуться к результату">
+          <span style={{ fontFamily: "'Unbounded','Manrope',sans-serif", fontWeight: 700, fontSize: 13, lineHeight: "20px", color: "#5A6272" }}>04</span>
+          <span className="rt-strip-t" style={{ fontSize: 14, fontWeight: 700, lineHeight: "20px", color: "#0B1220" }}>Результат</span>
+          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", fontSize: 13, fontWeight: 500, lineHeight: "20px", color: "#5A6272" }}>
+            {textStripMeta(name, score, n, total)}
+          </span>
+        </button>
+      </div>
       {note ? (
         <NotePill note={note} open={ui.note} line={line} actions={{
           onToggle: () => dispatch({ type: "set", patch: { note: !ui.note } }),
           onClose: () => dispatch({ type: "set", patch: { note: false } }),
           onShowText,
+          textOff: hasText ? null : "Для этой презентации текст недоступен",
           onRebuild: rebuild,
           onRewrite: () => editDeck(rewriteText(g) || null),
           rebuildOff,

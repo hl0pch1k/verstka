@@ -17,8 +17,10 @@ import { useStrayFileDrop } from "../create/UploadZone";
 import { Deck } from "../deck/Deck";
 import { Icon } from "../kit/Icon";
 import type { StripData } from "../deck/Strip";
+import { Lightbox } from "../layers/Lightbox";
 import { Scrim } from "../layers/Scrim";
 import { TemplatesLayer } from "../layers/TemplatesLayer";
+import { TextLayer } from "../layers/TextLayer";
 import { TplDeleteDialog } from "../layers/TplDeleteDialog";
 import { TplPreviewLayer } from "../layers/TplPreviewLayer";
 import { ResultPlate } from "../result/ResultPlate";
@@ -84,6 +86,9 @@ export function AppShell() {
     <>
       {/* «Улучшить готовую»: полоса «01 Итоги квартала.pptx» над плитой 02 */}
       <ImproveStrip />
+      {/* слои результата: «Текст презентации» (до 160 px) и «На весь экран» (вся колода), z 5 */}
+      <TextLayer />
+      <Lightbox />
       {/* пока раздел открыт, видимая полоса колоды над слоем закрывает его */}
       <Scrim open={!!ui.sect} onClose={() => dispatch({ type: "sect", sect: null })}
         label={ui.sect === "hist" ? "Закрыть «Мои презентации»" : "Закрыть «Шаблоны»"} />

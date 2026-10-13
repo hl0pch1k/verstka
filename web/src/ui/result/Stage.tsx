@@ -11,6 +11,21 @@ import { cls } from "../kit/cls";
 import { pushShot, shotDone, shotReady, type Shot } from "./stageLayers";
 
 export function Stage({ src, alt, aspect, children }: { src: string | null; alt: string; aspect: number; children?: ReactNode }) {
+  const ar = aspect > 0 ? aspect : 16 / 9;
+  return (
+    <div className="p2-in" style={{ display: "flex", justifyContent: "center", marginTop: 16, animationDelay: "240ms" }}>
+      {/* выше 16:9 (например, 4:3) — уже: высота сцены та же, что у 16:9 шириной 720 */}
+      <div className="ra-stage" style={{ aspectRatio: String(ar), maxWidth: ar < 16 / 9 - 0.01 ? `${Math.round(405 * ar)}px` : undefined }}>
+        <Shots src={src} alt={alt} />
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/** Стопка превью сцены (stageLayers): новое ложится сверху невидимым, проявляется, когда декодировано, и снимает слои
+ *  под собой. Её же показывает просмотр на весь экран. Рамка — у того, кто её ставит (`position: relative`). */
+export function Shots({ src, alt }: { src: string | null; alt: string }) {
   const seq = useRef(0);
   const [layers, setLayers] = useState<Shot[]>(() => pushShot([], src, alt, ++seq.current));
   useEffect(() => {
@@ -19,23 +34,13 @@ export function Stage({ src, alt, aspect, children }: { src: string | null; alt:
   }, [src, alt]);
   const ready = useCallback((id: number, instant: boolean) => setLayers((ls) => shotReady(ls, id, instant, prefersReducedMotion())), []);
   const done = useCallback((id: number) => setLayers((ls) => shotDone(ls, id)), []);
-
-  const ar = aspect > 0 ? aspect : 16 / 9;
   const top = layers.length - 1;
-  return (
-    <div className="p2-in" style={{ display: "flex", justifyContent: "center", marginTop: 16, animationDelay: "240ms" }}>
-      {/* выше 16:9 (например, 4:3) — уже: высота сцены та же, что у 16:9 шириной 720 */}
-      <div className="ra-stage" style={{ aspectRatio: String(ar), maxWidth: ar < 16 / 9 - 0.01 ? `${Math.round(405 * ar)}px` : undefined }}>
-        {layers.map((l, i) => <Layer key={l.id} shot={l} top={i === top} onReady={ready} onDone={done} />)}
-        {children}
-      </div>
-    </div>
-  );
+  return <>{layers.map((l, i) => <ShotImg key={l.id} shot={l} top={i === top} onReady={ready} onDone={done} />)}</>;
 }
 
 /** Слой сцены. Пока картинка не готова — невидим (`ra-wait`); готова — проявляется (`ra-xf`); проявился — просто стоит.
  *  Подпись — только у верхнего слоя, нижние скрыты от чтения с экрана. */
-function Layer({ shot, top, onReady, onDone }: {
+function ShotImg({ shot, top, onReady, onDone }: {
   shot: Shot;
   top: boolean;
   onReady(id: number, instant: boolean): void;
