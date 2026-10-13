@@ -10,8 +10,6 @@ import type { TemplateListItem } from "../../types";
 import { cls } from "../kit/cls";
 import { Icon, type IconName } from "../kit/Icon";
 import { ribbonItems, tplMeta, tplShort } from "./ribbon";
-import { ribbonLayout } from "../deck/fit";
-import { useDeckFit } from "../deck/useDeckFit";
 
 /** Как стоит обложка: плитка ленты (142 px), раздел «Шаблоны» (16:9), миниатюра слайда (16:9, r12), шапка шага
  *  (80×45), диалог удаления (112, 16:9). */
@@ -114,7 +112,10 @@ export function ActTile({ icon, note, name, delay, out, onClick, label, title, k
 /** «ещё 2 шаблона». */
 export const moreText = (n: number) => `ещё ${plural(n, "шаблон", "шаблона", "шаблонов")}`;
 
-export function Ribbon({ fresh, onPeek, onGallery, onUpload }: {
+export function Ribbon({ covers, fresh, onPeek, onGallery, onUpload }: {
+  /** Сколько обложек: в широкой колоде шесть, в суженной помощником — четыре (с «Все шаблоны» и «Загрузить свой» — те же
+   *  два ряда; fit.ts `ribbonLayout`). */
+  covers: number;
   /** Только что загруженный шаблон — первым. */
   fresh: string | null;
   onPeek(id: string): void;
@@ -123,8 +124,6 @@ export function Ribbon({ fresh, onPeek, onGallery, onUpload }: {
 }) {
   const { templates, templateId } = useApp();
   const pick = usePickTemplate();
-  // широкая колода — шесть обложек, суженная помощником — четыре (с «Все шаблоны» и «Загрузить свой» — те же два ряда)
-  const { covers } = ribbonLayout(useDeckFit());
   const { shown, rest } = ribbonItems(templates, templateId, covers, fresh);
   const hidden = templates.filter((x) => !shown.includes(x));
   return (

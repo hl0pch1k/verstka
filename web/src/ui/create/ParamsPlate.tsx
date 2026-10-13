@@ -15,7 +15,9 @@ import { Icon } from "../kit/Icon";
 import { Switch } from "../kit/Switch";
 import { useHeld, useModelOn } from "./ImproveNote";
 import { ParamsAll } from "./ParamsAll";
-import { useDeckFit } from "../deck/useDeckFit";
+import { errBelow, rowMode } from "../deck/fit";
+import { useDeckWidth } from "../deck/useDeckFit";
+import { useSwap } from "../kit/useSwap";
 import {
   buildRequest, eyesOn, imagesHint, picturesOn, presetParams, SLIDES_LOCKED, slidesView, slideWord, startFailure, stepSlides,
   summaryLine, toggleEyes as nextEyes, togglePictures as nextPictures, toggleStrategy, variantCards, writesHint,
@@ -158,10 +160,12 @@ export function ParamsHead({ pp }: { pp: ParamsPlate }) {
   const on = pp.line !== null;
   // уходящая строка гаснет со своим текстом
   const shown = useHeld(pp.line);
+  // плита 03 уже доски (окно около 1280, помощник): строке ошибки тесно рядом со сводкой — она встаёт под ряд заголовка
+  const low = errBelow(useDeckWidth());
   return (
     <>
       <span style={{ flex: 1, minWidth: 0 }} />
-      <div className={cls("pp-sum", on && "pp-bad")}>
+      <div className={cls("pp-sum", on && "pp-bad", low && "pp-low")}>
         <span className="p2-hide-s pp-sumt" title={pp.summary}>{pp.summary}</span>
         <div id="pp-err" className={cls("pp-err", show(on))}>
           {shown?.kind === "busy"
@@ -226,11 +230,16 @@ export function ParamsBody({ pp }: { pp: ParamsPlate }) {
   const create = ui.screen === "create";
   const more = create && ui.more;
   const on = create && ui.open === "text" && !ui.more;
-  // колода, суженная помощником при 1280: варианты карточками рядом со степпером не помещаются — одна коробка-список
-  const tight = useDeckFit() === "tight";
+  // короткий ряд по ширине колоды (fit.ts `rowMode`): полный (доска), без переключателей, узкий, тесный — варианты
+  // карточками рядом со степпером не помещаются, одна коробка-список. Ряд меняется перекрёстным затуханием (useSwap):
+  // старый гаснет, подменяется невидимым — и разметка, и правила `.pp-row[data-row=…]` сразу, — новый проявляется
+  const width = useDeckWidth();
+  const row = useSwap(rowMode(width), on);
+  const tight = row.shown === "tight";
   return (
     <>
-      <div id="p2-b3" className={cls("p2-body p2-params pp-row", tight && "pp-row-t", show(on))} style={{ "--pp-n": pp.cards.length } as CSSProperties}>
+      <div className={row.cls}>
+      <div id="p2-b3" className={cls("p2-body p2-params pp-row", show(on))} data-row={row.shown} style={{ "--pp-n": pp.cards.length } as CSSProperties}>
         <ShortSlides pp={pp} />
         {tight ? <VariantList pp={pp} /> : pp.cards.map((v, i) => (
           <div key={v.name} className="p2-stag" style={{ transitionDelay: `${40 + i * 40}ms` }}>
@@ -243,18 +252,22 @@ export function ParamsBody({ pp }: { pp: ParamsPlate }) {
             </button>
           </div>
         ))}
-        <div className="p2-box p2-stag pp-sws" style={{ display: "flex", flexDirection: "column", justifyContent: "center", gap: 8, height: 88, padding: "8px 16px", transitionDelay: "160ms" }}>
-          <div style={SW_ROW}>
-            <span id="p2-sw1" style={SW_NAME}>Модель пишет тексты</span>
-            <Switch on={pp.writes.on} disabled={pp.writes.disabled} title={pp.writes.title} labelledBy="p2-sw1" onToggle={pp.toggleWrites} />
+        {/* переключатели — только в полном ряду (варианту нужно 173 px); уже — они в «Все параметры» */}
+        {row.shown === "full" && (
+          <div className="p2-box p2-stag pp-sws" style={{ display: "flex", flexDirection: "column", justifyContent: "center", gap: 8, height: 88, padding: "8px 16px", transitionDelay: "160ms" }}>
+            <div style={SW_ROW}>
+              <span id="p2-sw1" style={SW_NAME}>Модель пишет тексты</span>
+              <Switch on={pp.writes.on} disabled={pp.writes.disabled} title={pp.writes.title} labelledBy="p2-sw1" onToggle={pp.toggleWrites} />
+            </div>
+            <div style={SW_ROW}>
+              <span id="p2-sw2" style={SW_NAME}>С изображениями</span>
+              <Switch on={pp.pictures.on} disabled={pp.pictures.disabled} title={pp.pictures.title} labelledBy="p2-sw2" onToggle={pp.togglePictures} />
+            </div>
           </div>
-          <div style={SW_ROW}>
-            <span id="p2-sw2" style={SW_NAME}>С изображениями</span>
-            <Switch on={pp.pictures.on} disabled={pp.pictures.disabled} title={pp.pictures.title} labelledBy="p2-sw2" onToggle={pp.togglePictures} />
-          </div>
-        </div>
+        )}
       </div>
-      <ParamsAll pp={pp} on={more} />
+      </div>
+      <ParamsAll pp={pp} on={more} short={rowMode(width) !== "full"} />
       <button type="button" className={cls("p2-more", more && "p2-more-up")} onClick={() => dispatch({ type: "more" })}
         aria-expanded={more} aria-controls="p2-b3m" aria-label={more ? "Свернуть параметры" : "Открыть все параметры"} title={more ? "Свернуть" : "Все параметры"}
         style={{ position: "absolute", left: 48, top: 140, zIndex: 1 }}>

@@ -186,29 +186,24 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 .pp-go:focus-visible{outline:2px solid rgba(255,255,255,.64);outline-offset:2px}
 /* короткий ряд при узкой колоде: названия и подписи вариантов не вылезают из карточек */
 .pp-vt{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-/* Колода уже доски (1280 px; помощник): плита 03 — контейнер, ряд и меню подстраиваются под её ширину.
-   - Ряд не вмещает пять колонок (варианту нужно 173 px): переключатели остаются в «Все параметры», варианты шире.
-   - В меню миниатюры вариантов меньше, а название и подсказка — целиком.
-   - Сводке тесно для строки ошибки: строка встаёт под ряд заголовка, вправо к «Создать презентацию», сводка на месте. */
-.p2-p3{container:p3 / inline-size}
-@container p3 (max-width: 1254px){
-  .pp-row{grid-template-columns:216px repeat(var(--pp-n,3),minmax(0,1fr))}
-  .pp-row>.pp-sws{display:none !important} /* у коробки инлайновый display:flex — правило должно его перебить */
-  .pp-th{width:112px;height:63px}
-}
-@container p3 (max-width: 1289px){
-  .pp-bad .pp-sumt{transform:none}
-  .pp-err{position:absolute;left:240px;right:48px;top:106px;transform:none}
-}
-
-/* ── Колода, суженная помощником (задача 13): `@container deck`, пороги ui/deck/fit.ts — узкая ≤ 1100 px (976 при 1440),
-   тесная ≤ 900 px (816 при 1280). Ничего не наезжает: что не помещается, сжимается многоточием или уходит.
-   Сколько обложек в ленте и колонок у неё, варианты коробкой-списком в тесной колоде — решает JS (useDeckFit). */
-.tx-top-t{min-width:0;overflow:hidden;text-overflow:ellipsis}
-.tx-top-m,.tx-top-s,.pp-cta-s{display:none}
-/* варианты тесной колоды: строки с галочкой в одной коробке рядом со степпером (класс ряда ставит тот же JS, что
-   подменяет карточки коробкой, — сетка и содержимое меняются в одном кадре) */
-.pp-row.pp-row-t{grid-template-columns:216px minmax(0,1fr)}
+/* Плита 03 уже доски (окно около 1280, помощник). Пороги — ui/deck/fit.ts (`rowMode`, `errBelow`), от целевой ширины
+   колоды: ход сетки помощника их не пересекает (раньше — `@container p3`, срабатывал посреди хода).
+   - Короткий ряд (`.pp-row[data-row]`, ставит ParamsBody после перекрёстного затухания): `full` — доска; `short` — пять
+     колонок не помещаются (варианту нужно 173 px), переключатели остаются в «Все параметры», варианты шире; `narrow` —
+     степпер 200, у вариантов название в строку, галочка на месте описания; `tight` — варианты строками с галочкой в одной
+     коробке рядом со степпером.
+   - В меню миниатюры вариантов меньше, а название и подсказка — целиком (`.pp-short` у «Все параметры»).
+   - Сводке тесно для строки ошибки: строка встаёт под ряд заголовка, вправо к «Создать презентацию», сводка на месте
+     (`.pp-low`). */
+.pp-row:where([data-row=short]){grid-template-columns:216px repeat(var(--pp-n,3),minmax(0,1fr))}
+.pp-row:where([data-row=narrow]){grid-template-columns:200px repeat(var(--pp-n,3),minmax(0,1fr))}
+.pp-row:where([data-row=tight]){grid-template-columns:216px minmax(0,1fr)}
+:where(.pp-row[data-row=narrow]) .pp-vc{position:relative}
+:where(.pp-row[data-row=narrow]) .pp-vc .p2-vbox{position:absolute;left:16px;bottom:16px}
+:where(.pp-row[data-row=narrow]) .pp-vd{display:none}
+:where(.pp-short) .pp-th{width:112px;height:63px}
+:where(.pp-low).pp-bad .pp-sumt{transform:none}
+:where(.pp-low) .pp-err{position:absolute;left:240px;right:48px;top:106px;transform:none}
 .pp-vlist{display:flex;flex-direction:column;justify-content:center;gap:2px;height:88px;padding:8px 12px;min-width:0}
 .pp-vli{display:flex;align-items:center;gap:8px;width:100%;height:24px;padding:0 4px;border:0;border-radius:999px;background:none;color:#FFFFFF;font-size:14px;font-weight:600;line-height:20px;text-align:left;cursor:pointer;transition:transform 160ms var(--ease)}
 .pp-vli:hover{transform:translateY(-2px)}
@@ -216,42 +211,40 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 .pp-vli .p2-vbox{width:18px;height:18px}
 .pp-vli-on .p2-vbox{background:#2563EB;box-shadow:none}
 .pp-vli-on .p2-vbox svg{opacity:1}
-/* «Это тема…» при 1280 (колода 1232) уже не помещается целиком — без перечня (целиком — в подсказке) */
-@container deck (max-width: 1300px){.tx-hint-tail{display:none}}
+
+/* ── Колода, суженная помощником (задача 13): `.p2-deck[data-fit=narrow|tight]` — решение по целевой ширине колоды
+   (ui/deck/fit.ts: узкая ≤ 1100 px — 976 при 1440, тесная ≤ 900 px — 816 при 1280). Открытие — с первого кадра хода
+   (раскладки резиновые), закрытие — когда сетка доехала: посреди хода ничего не перестраивается. Ничего не наезжает:
+   что не помещается, сжимается многоточием или уходит. Сколько обложек в ленте и колонок у неё, какой короткий ряд —
+   решает JS; лента и ряд меняются перекрёстным затуханием, их правила — по своим data- (`data-ribbon`, `data-row`). */
+.tx-top-t{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.tx-top-m,.tx-top-s,.pp-cta-s{display:none}
 /* обложки ленты в узкой колоде уже своих картинок — видна левая часть (там начинается заголовок слайда) */
-@container deck (max-width: 1100px){
-  .tt-tile .p2-cover img,.an-tile .p2-cover img{object-position:0 50%}
-}
-@container deck (max-width: 1100px){
+:where([data-ribbon=narrow]) :is(.tt-tile,.an-tile) .p2-cover img{object-position:0 50%}
+:where(.p2-deck[data-fit=narrow], .p2-deck[data-fit=tight]){
   /* названия шагов (и слоёв) — 24/32, как в V2 на узком экране: номер шага и кнопки шапки встают рядом */
   .p2-ttl{font-size:24px;line-height:32px}
-  /* «Это готовый текст…» — в ряду шапки и короче; «Это тема…» — без перечня (целиком — в подсказке) */
+  /* «Это готовый текст…» — в ряду шапки и короче */
   .tx-top{position:static;height:auto;flex:0 1 auto}
   .tx-top-l{display:none}
   .tx-top-m{display:inline}
   /* «.txt или .md» рядом с «Из файла» уходит (он в подсказке кнопки) — подсказке о готовом тексте нужно место */
   #ct-fmt{display:none}
-  .tx-hint-tail{display:none}
   /* шаг «Текст» свёрнут: тема и «Изменить» встают у правого края поверх погасших «Из файла» и подсказки (те держат
      место в ряду), не левее названия шага (номер 160 + 32 + «Текст» + 24) */
   .tx-closed{position:absolute;top:40px;right:48px;height:64px;max-width:calc(100% - 96px - 300px)}
   /* «Вставьте готовый текст…» справа под полем уходит (держала место и скрытой): строке ошибки — вся ширина */
   .tx-swr > :last-child{display:none}
   /* сводка параметров уступает место «Создать презентацию»: ни сводки, ни её распорки в ряду (строка ошибки и так стоит
-     под рядом — правило p3 ≤ 1289), кнопка — у правого края */
+     под рядом — `.pp-low`), кнопка — у правого края */
   .pp-sumt{display:none}
   .pp-sum{display:contents}
   .p2-hrow > span:has(+ .pp-sum){display:none}
   .pp-cta{margin-left:auto}
-  /* короткий ряд: степпер 200, у вариантов — название в строку, галочка на месте описания */
-  .pp-row{grid-template-columns:200px repeat(var(--pp-n,3),minmax(0,1fr))}
-  .pp-vc{position:relative}
-  .pp-vc .p2-vbox{position:absolute;left:16px;bottom:16px}
-  .pp-vd{display:none}
   /* «Все параметры»: миниатюры вариантов уступают место названию и подсказке */
   .cp-vc .pp-th{display:none}
 }
-@container deck (max-width: 900px){
+:where(.p2-deck[data-fit=tight]){
   .tx-top-m{display:none}
   .tx-top-s{display:inline}
   .pp-cta-l{display:none}

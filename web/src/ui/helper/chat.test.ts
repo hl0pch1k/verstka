@@ -1,9 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  asEditResult, asFixResult, bubbleBlocks, chatFailText, chipsFor, describeFixes, editFailText, feedDelay, feedItems, introFor, openTabSteps,
-  placeholderFor, typeset, type FeedJob,
+  asEditResult, asFixResult, bubbleBlocks, chatFailText, chipsFor, describeFixes, editFailText, feedDelay, feedItems, feedProgress, introFor,
+  openTabSteps, placeholderFor, planActions, reloadFailText, typeset, OTHER_DECK, type FeedJob,
 } from "./chat";
+import type { ChatAction, ChatResponse } from "../../types";
 import { ApiError } from "../../api";
 
 // ── open_tab: старые имена вкладок сервера → шаги экрана (бывший store.setTab)
@@ -116,11 +117,72 @@ const m = (id: string, ts: number, role: "user" | "assistant" = "user") => ({ id
 test("feedItems: задачи встают между сообщениями по времени", () => {
   const jobs: FeedJob[] = [{ id: "j1", label: "Меняю презентацию", ts: 15, progress: 0.4, status: "run" }];
   const f = feedItems([m("a", 10), m("b", 20, "assistant")], jobs);
-  assert.deepEqual(f.map((x) => (x.kind === "job" ? x.job.id : x.msg.id)), ["a", "j1", "b"]);
+  assert.deepEqual(f.map((x) => (x.kind === "job" ? x.job.id : x.kind === "msg" ? x.msg.id : x.note.id)), ["a", "j1", "b"]);
 });
 test("feedItems: при равном времени сообщение раньше задачи (ответ «Меняю…» перед полосой)", () => {
   const f = feedItems([m("a", 10, "assistant")], [{ id: "j", label: "x", ts: 10, progress: 0, status: "run" }]);
   assert.deepEqual(f.map((x) => x.kind), ["msg", "job"]);
+});
+test("feedItems: строка «Это другая презентация…» — после ответа, к которому она относится", () => {
+  const f = feedItems([m("a", 10, "assistant")], [{ id: "j", label: "x", ts: 5, progress: 1, status: "done" }], [{ id: "n", text: OTHER_DECK, ts: 10 }]);
+  assert.deepEqual(f.map((x) => x.kind), ["job", "msg", "note"]);
+});
+
+// ── ход задач из чата: у каждой своя полоса («Исправь всё» — по задаче на вариант, идут рядом)
+test("feedProgress: полосы растут по идущим задачам хранилища — каждая по своей", () => {
+  const jobs: FeedJob[] = [
+    { id: "a", label: "Исправляю: Структурный", ts: 1, progress: 0.1, status: "run" },
+    { id: "b", label: "Исправляю: Визуальный", ts: 1, progress: 0, status: "run" },
+    { id: "c", label: "Меняю презентацию", ts: 0, progress: 1, status: "done" },
+  ];
+  const next = feedProgress(jobs, [{ id: "a", progress: 0.5 }, { id: "b", progress: 0.3 }, { id: "c", progress: 0.2 }]);
+  assert.deepEqual(next.map((j) => j.progress), [0.5, 0.3, 1]);
+});
+test("feedProgress: полоса не идёт назад; нового нет — тот же список (без лишней перерисовки)", () => {
+  const jobs: FeedJob[] = [{ id: "a", label: "x", ts: 1, progress: 0.6, status: "run" }];
+  assert.equal(feedProgress(jobs, [{ id: "a", progress: 0.4 }]), jobs);
+  assert.equal(feedProgress(jobs, []), jobs);
+});
+
+// ── действия ответа: только для презентации, о которой ответ (её прислал сервер или о ней спросили)
+const reply = (actions: ChatAction[], gid: string | null = null): ChatResponse => ({ reply: "", intent: "", actions, template_id: null, generation_id: gid });
+const at = (open: string | null, sent: string | null = open, screen: "create" | "build" | "result" = "result") => ({ sent, open, screen, hasDeck: !!open });
+test("planActions: open_tab — открытая презентация та, о которой ответ: лист и слайд", () => {
+  assert.deepEqual(planActions(reply([{ type: "open_tab", tab: "why", slide: 3 }], "A"), at("A")),
+    [{ kind: "open", steps: [{ type: "sheet", tab: "why" }], slide: 3 }]);
+});
+test("planActions: open_tab — пока ждали ответ, открыли другую презентацию: ничего не открывается", () => {
+  assert.deepEqual(planActions(reply([{ type: "open_tab", tab: "audit", slide: 2 }], "A"), at("B", "A")), []);
+  // сервер не назвал презентацию — о ней спрашивали (sent)
+  assert.deepEqual(planActions(reply([{ type: "open_tab", tab: "audit" }]), at("B", "A")), []);
+});
+test("planActions: open_tab без презентации ответа — по месту (шаг «Шаблон» на «Создать»)", () => {
+  assert.deepEqual(planActions(reply([{ type: "open_tab", tab: "template" }]), at(null, null, "create")),
+    [{ kind: "open", steps: [{ type: "open", step: "tpl" }], slide: null }]);
+});
+test("planActions: правка — со своей презентацией, исправления — с презентацией ответа, сборка — с задачей", () => {
+  const edit = { type: "edit" as const, job_id: "e1", strategy: "visual", generation_id: "A", slide: 6 };
+  const fixes = { type: "jobs" as const, jobs: [{ strategy: "visual", job_id: "f1" }] };
+  const build = { type: "generation_started" as const, job_id: "g1", generation_id: "N" };
+  assert.deepEqual(planActions(reply([edit, fixes, build], "A"), at("B", "A")), [
+    { kind: "edit", action: edit },
+    { kind: "fixes", jobs: fixes.jobs, gid: "A" },
+    { kind: "build", gid: "N", job: "g1" },
+  ]);
+});
+test("planActions: исправления — сервер не назвал презентацию: та, о которой спросили (не открытая сейчас)", () => {
+  const fixes = { type: "jobs" as const, jobs: [{ strategy: "s", job_id: "f" }] };
+  assert.deepEqual(planActions(reply([fixes]), at("B", "A")), [{ kind: "fixes", jobs: fixes.jobs, gid: "A" }]);
+  assert.deepEqual(planActions(reply([{ type: "jobs", jobs: [] }]), at("A")), []);
+});
+
+test("reloadFailText: нет связи — так и сказано; иначе причина по-русски", () => {
+  const offline = reloadFailText(new ApiError(0, "Failed to fetch"));
+  assert.ok(/не обновилась: нет связи с сервером/.test(offline), offline);
+  const busy = reloadFailText(new Error("Сервер занят: try later"));
+  assert.ok(/не обновилась: сервер занят\./.test(busy), busy);
+  assert.ok(!/Internal/.test(reloadFailText(new Error("Internal Server Error"))));
+  assert.ok(!/другая презентация/.test(reloadFailText(new Error("x"))));
 });
 
 // ── каскад появления при открытии (G-helper-open): 200…400 по 40; закрыт — 240 у всех

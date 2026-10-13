@@ -2,46 +2,46 @@
 // вариантов и карточка на каждый слайд выбранного варианта. До плана — безымянные заглушки (пульс), потом номера,
 // эскизы формы (pop 360 мс, по 60 мс друг за другом), метки критика «Замечание» и «Переделан», рамка 2 px на слайде,
 // о котором говорит агент или который верстается (с бегущей полоской), галочка сверстанного и настоящее превью — по три
-// за такт. Колонок столько, чтобы все слайды были видны (lib/stage fitColumns), не меньше четырёх, пока карточка не
-// уже 150 px (в колоде, суженной помощником при 1280, — 112); не помещаются — список прокручивается сам к слайду в
-// работе (если человек не листает его сам).
+// за такт. Колонок столько, чтобы все слайды были видны (columns.ts), не меньше четырёх, пока карточка не уже 150 px
+// (в колоде, суженной помощником при 1280, — 112); не помещаются — список прокручивается сам к слайду в работе (если
+// человек не листает его сам). Колонки считаются от ширины, которую список получит в конце хода сетки помощника, —
+// посреди хода они стоят; сменились — сетка меняется перекрёстным затуханием (useSwap).
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
-import { fitColumns, BOARD_GAP } from "../../lib/stage";
+import { BOARD_GAP } from "../../lib/stage";
 import { smoothScroll } from "../../lib/motion";
 import { cls } from "../kit/cls";
 import { Icon } from "../kit/Icon";
+import { useSwap } from "../kit/useSwap";
 import type { BuildView, CardView } from "./buildView";
+import { boardColumns, MIN_CARD, targetBoxWidth, TIGHT_CARD } from "./columns";
 import { SlideSketch } from "./SlideSketch";
-import { useDeckFit } from "../deck/useDeckFit";
+import { segStatus } from "../deck/fit";
+import { useDeckFit, useDeckWidth } from "../deck/useDeckFit";
 
 /** Ширины пульсирующих строк заглушки: [заголовок в карточке, подпись под ней], % (V2 `GHOST`). */
 const GHOST: Array<[number, number]> = [[56, 64], [44, 52], [64, 72], [52, 48], [60, 68], [48, 56], [58, 60], [42, 50], [62, 66], [50, 58], [54, 62], [46, 54]];
-const MIN_CARD = 150;
-/** Самая узкая карточка в тесной колоде (помощник при 1280). */
-const TIGHT_CARD = 112;
 /** Человек листает раскадровку сам — она не прокручивается к слайду в работе столько времени. */
 const HOLD_MS = 5000;
 
 export interface VariantSeg { name: string; label: string; desc: string }
 
-function useColumns(box: RefObject<HTMLElement>, n: number, aspect: number, minCard = MIN_CARD): number {
+/** Колонки списка `box`: от ширины, которую он получит, когда колода доедет до целевой ширины `deck` (columns.ts). */
+function useColumns(box: RefObject<HTMLElement>, n: number, aspect: number, minCard: number, deck: number): number {
   const [cols, setCols] = useState(4);
   useLayoutEffect(() => {
     const el = box.current;
     if (!el) return;
+    const deckEl = el.closest<HTMLElement>(".p2-deck");
     const fit = () => {
       const w = el.clientWidth;
-      const h = el.clientHeight;
       if (w <= 0) return;
-      // четыре колонки доски, пока карточка не уже MIN_CARD; больше — когда иначе все слайды не видны
-      const base = [4, 3, 2].find((c) => (w - (c - 1) * BOARD_GAP) / c >= minCard) ?? 1;
-      setCols(Math.max(base, fitColumns(w, h - 8, n, aspect)));
+      setCols(boardColumns(targetBoxWidth(w, deckEl?.clientWidth ?? 0, deck), el.clientHeight, n, aspect, minCard));
     };
     fit();
     const ro = new ResizeObserver(fit);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [box, n, aspect, minCard]);
+  }, [box, n, aspect, minCard, deck]);
   return cols;
 }
 
@@ -103,7 +103,8 @@ export function Storyboard({ view, segs, onPick, aspect }: {
 }) {
   const box = useRef<HTMLDivElement>(null);
   // колода, суженная помощником при 1280: три колонки карточек поуже (как миниатюры ленты результата), а не две
-  const cols = useColumns(box, view.cards.length, aspect, useDeckFit() === "tight" ? TIGHT_CARD : MIN_CARD);
+  const deck = useDeckWidth();
+  const cols = useSwap(useColumns(box, view.cards.length, aspect, useDeckFit() === "tight" ? TIGHT_CARD : MIN_CARD, deck));
   // человек листает раскадровку (колесо, касание, клавиши, полоса прокрутки) — она стоит, где он её оставил
   const heldUntil = useRef(0);
   useEffect(() => {
@@ -142,7 +143,7 @@ export function Storyboard({ view, segs, onPick, aspect }: {
           <span aria-live="polite" style={{ fontSize: 13, fontWeight: 500, lineHeight: "20px", color: "rgba(255,255,255,.64)" }}>{view.board}</span>
         </p>
         {segs.length > 0 && (
-          <div role="group" aria-label="Какую раскадровку показать" className="bd-segs"
+          <div role="group" aria-label="Какую раскадровку показать" className={cls("bd-segs", !segStatus(deck) && "bd-segs-s")}
             style={{ display: "flex", gap: 4, padding: 4, borderRadius: 999, background: "rgba(255,255,255,.06)" }}>
             {segs.map((s) => {
               const v = view.variants.find((x) => x.name === s.name);
@@ -164,8 +165,8 @@ export function Storyboard({ view, segs, onPick, aspect }: {
         )}
       </div>
       <div ref={box} className="bd-board" style={{ position: "relative", flex: 1, minHeight: 0, marginTop: 16, overflowY: "auto" }}>
-        <div className="p2-g4" aria-label={`Раскадровка: ${view.board}`}
-          style={{ display: "grid", gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: BOARD_GAP }}>
+        <div className={cls("p2-g4", cols.cls)} aria-label={`Раскадровка: ${view.board}`}
+          style={{ display: "grid", gridTemplateColumns: `repeat(${cols.shown}, minmax(0, 1fr))`, gap: BOARD_GAP }}>
           {view.cards.map((c, i) => <Card key={c.n} c={c} i={i} planned={view.planned} aspect={aspect} />)}
         </div>
       </div>

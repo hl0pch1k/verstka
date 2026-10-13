@@ -77,13 +77,17 @@ export interface AppState {
   /** Re-reads deck `gid` after a change made to it (a slide fix, a picture, «верни как было») — only while it is still
    *  the open deck and no other deck is being opened; the screen, the variant and the slide stay. A job that ends
    *  after the person left the result screen still lands: the deck shows the change on the way back. Resolves to the
-   *  deck read, or null when it was not reloaded (another deck is open) or did not load. */
-  reloadIfOpen(gid: string): Promise<Generation | null>;
+   *  deck read, or null when it was not reloaded (another deck is open) or did not load — then `onError` hears why
+   *  (the failure is also told on the result, as any). */
+  reloadIfOpen(gid: string, onError?: (e: unknown) => void): Promise<Generation | null>;
   activeStrategy: string | null; setActiveStrategy(s: string): void; activeVariant: Variant | null;
   selectedSlide: number; setSelectedSlide(n: number): void; // 1-based
   /** Экран, раскрытые шаги, слои и листы «Слоёв» (`ui/deck/geometry.ts`); меняется только через `dispatch`. */
   ui: UiState; dispatch(a: UiAction): void;
   activeJob: ActiveJob | null;
+  /** Every job still running, the newest last, with its live progress (jobs run side by side — «Исправь всё» starts one
+   *  per variant; `activeJob` shows only the newest). */
+  liveJobs: ActiveJob[];
   runJob(jobId: string, label: string, opts?: RunJobOptions): void;
   /** «Мои презентации»: идущая сборка (мета с `job_id`) — экран «Сборка» с её задачей; задачу уже ведут — экран просто
    *  возвращается к ней (и показывает её, даже если с тех пор подключились к другой). false — вести нечего (у меты нет
@@ -224,6 +228,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const takeImproveSource = useCallback(() => setImproveSource(null), []);
   const [activeJob, setActiveJob] = useState<ActiveJob | null>(null);
   const liveJobs = useRef(new Map<string, ActiveJob>()); // every job still running, the newest last
+  const [liveList, setLiveList] = useState<ActiveJob[]>([]);
+  const syncLive = useCallback(() => setLiveList([...liveJobs.current.values()]), []);
   const [busyVariants, setBusyVariants] = useState<string[]>([]);
   const syncBusyVariants = useCallback(() => {
     const next = busyKeys(liveJobs.current.values());
@@ -391,7 +397,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
    *  snapshot of the layer over its own slide down); a failed load leaves the open deck as it was. `area`: where a
    *  failure is told (the result; the build screen for a deck that has just been built). `want`: the variant a newly
    *  opened deck shows (a reload of the open one keeps its own). */
-  const fetchGeneration = useCallback(async (gid: string, quiet = false, hold = false, area: NoticeArea = "result", want: string | null = null): Promise<Generation | null> => {
+  const fetchGeneration = useCallback(async (gid: string, quiet = false, hold = false, area: NoticeArea = "result", want: string | null = null, onError?: (e: unknown) => void): Promise<Generation | null> => {
     const seq = ++genSeq.current;
     askedGen.current = gid;
     const sameAsOpen = latest.current.generation?.id === gid;
@@ -441,6 +447,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (hold) void refreshGenerations();
       }
       if (!quiet) report(e, "Не удалось открыть презентацию", area);
+      onError?.(e);
       return null;
     } finally {
       if (seq === genSeq.current) setGenerationLoading(false);
@@ -465,9 +472,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     askedGen.current = open.id;
   }, [clearGeneration]);
 
-  const reloadIfOpen = useCallback(async (gid: string) => {
+  const reloadIfOpen = useCallback(async (gid: string, onError?: (e: unknown) => void) => {
     if (latest.current.generation?.id !== gid || askedGen.current !== gid) return null;
-    return fetchGeneration(gid);
+    return fetchGeneration(gid, false, false, "result", null, onError);
   }, [fetchGeneration]);
 
   const setActiveStrategy = useCallback((s: string) => {
@@ -493,6 +500,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const settle = (p: Partial<ActiveJob>) => {
       jobSubs.current.delete(jobId);
       liveJobs.current.delete(jobId);
+      syncLive();
       syncBusyVariants();
       if (build) {
         // the build screen keeps the ended build (a failure stays on it), with the clock stopped
@@ -507,6 +515,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
     const first: ActiveJob = { id: jobId, label, progress: 0, message: "В очереди…", status: "queued", kind: opts?.kind ?? "other", startedAt: opts?.startedAt ?? Date.now(), items: opts?.items, template: opts?.template, target: opts?.target, generation: gid, slides: opts?.slides ?? null };
     liveJobs.current.set(jobId, first);
+    syncLive();
     syncBusyVariants();
     setActiveJob(first);
     if (build) {
@@ -523,6 +532,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (!cur) return;
         const next = foldJobEvent(cur, ev, (name) => titleIn(latest.current.strategies, name));
         liveJobs.current.set(jobId, next);
+        syncLive();
         setActiveJob((shown) => (shown && shown.id === jobId ? next : shown));
         if (build) setBuildJob((shown) => (shown && shown.id === jobId ? next : shown));
       },
@@ -540,7 +550,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       },
     });
     jobSubs.current.set(jobId, stop);
-  }, [notify, syncBusyVariants]);
+  }, [notify, syncBusyVariants, syncLive]);
 
   // работа над вариантами: идёт ли задача над вариантом — по идущим задачам, ревизия — открытой презентации
   const variantLive = useCallback((key: string) => busyKeys(liveJobs.current.values()).includes(key), []);
@@ -764,13 +774,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AppState>(() => ({
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, cancelLoad, reloadIfOpen, activeStrategy, setActiveStrategy, activeVariant,
-    selectedSlide, setSelectedSlide, ui, dispatch, activeJob, runJob, followDeck, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, building, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
+    selectedSlide, setSelectedSlide, ui, dispatch, activeJob, liveJobs: liveList, runJob, followDeck, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, building, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
     brief, setBrief, textIssue, setTextIssue, checkText, params, setParams,
     composerText, composerPreset, editText, takeComposerText, takeComposerPreset, improveSource, takeImproveSource,
   }), [
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, cancelLoad, reloadIfOpen, activeStrategy, setActiveStrategy, activeVariant,
-    selectedSlide, setSelectedSlide, ui, activeJob, runJob, followDeck, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, building, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
+    selectedSlide, setSelectedSlide, ui, activeJob, liveList, runJob, followDeck, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, building, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
     brief, setBrief, textIssue, checkText, params, setParams,
     composerText, composerPreset, editText, takeComposerText, takeComposerPreset, improveSource, takeImproveSource,
   ]);

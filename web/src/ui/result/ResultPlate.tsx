@@ -9,7 +9,9 @@
 // слой текста, над ним видна полоса «04 Результат» этой плиты (R-text), клик по ней закрывает слой. Карточки и ссылки
 // колонки открывают лист «Подробнее» (`useOpenSheet`, ui/details); пока он открыт, над ним видна полоса «04 …» (BackStrip).
 // Помощник сужает колоду — результат переходит в компактный вид (CompactResult, helper.css): шапка с действиями-иконками
-// вместо уведомления, узкая колонка вместо полной; в режиме «Замечания» и с выбранным изображением колонка шире.
+// вместо уведомления (его действия — за значком «i»), узкая колонка вместо полной; в режиме «Замечания» и с выбранным
+// изображением колонка шире — смена ширины перекрёстным затуханием (useSwap), а не ходом сетки. Карточка «Изображение»
+// одна: в колонке того вида, что на месте (при смене вида — через 120 мс, когда уходящая колонка почти погасла).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { humanError } from "../../lib/errors";
 import { decodeImage, isDecoded } from "../../lib/motion";
@@ -23,6 +25,7 @@ import { BUILD_RUNNING } from "../create/ParamsPlate";
 import { ErrorLine } from "../kit/ErrorLine";
 import { Icon } from "../kit/Icon";
 import { cls } from "../kit/cls";
+import { useSwap } from "../kit/useSwap";
 import { BackStrip } from "../details/BackStrip";
 import { useGoHome } from "../shell/useGoHome";
 import { textStripMeta, writtenText } from "../layers/writerText";
@@ -31,7 +34,7 @@ import { compactChecks } from "./compact";
 import { CompactResult, type CompactData } from "./CompactResult";
 import { Film, loadedThumbs } from "./Film";
 import { FixSketch } from "./FixSketch";
-import { NotePill, NoteRow } from "./NotePill";
+import { NotePill, NoteRow, type NoteActions } from "./NotePill";
 import { PictureCard, PictureSpots } from "./PictureCard";
 import { RemarksPanel } from "./RemarksPanel";
 import {
@@ -277,6 +280,21 @@ function ResultBody({ g, goDown }: { g: Generation; goDown(): void }) {
     fileBase: aside.fileBase, pptxTitle: aside.pptxTitle, checks: compactChecks(g, v, note), hasText,
   };
   const wide = rm.shown || !!pic.column?.shown;
+  // колонка компактного вида 184 ↔ 320: слайд и колонка гаснут, сетка подменяется невидимой, новое проявляется (без хода
+  // ширины); при закрытом помощнике ширина колонки не меняется — сразу
+  const swap = useSwap(wide, ui.helper);
+  // карточка «Изображение» — одна, в колонке того вида, что сейчас на месте
+  const compactCard = useSwap(ui.helper).shown;
+  const noteActions: NoteActions = {
+    onToggle: () => dispatch({ type: "set", patch: { note: !ui.note } }),
+    onClose: () => dispatch({ type: "set", patch: { note: false } }),
+    onShowText,
+    textOff: hasText ? null : "Для этой презентации текст недоступен",
+    onRebuild: rebuild,
+    onRewrite: () => editDeck(rewriteText(g) || null),
+    rebuildOff,
+    rebuildBusy: asking,
+  };
 
   return (
     <>
@@ -293,23 +311,11 @@ function ResultBody({ g, goDown }: { g: Generation; goDown(): void }) {
       </div>
       {/* полоса «04 …» под листом «Подробнее»: клик закрывает лист */}
       <BackStrip g={g} v={v} />
-      {note ? (
-        <NotePill note={note} open={ui.note} line={line} actions={{
-          onToggle: () => dispatch({ type: "set", patch: { note: !ui.note } }),
-          onClose: () => dispatch({ type: "set", patch: { note: false } }),
-          onShowText,
-          textOff: hasText ? null : "Для этой презентации текст недоступен",
-          onRebuild: rebuild,
-          onRewrite: () => editDeck(rewriteText(g) || null),
-          rebuildOff,
-          rebuildBusy: asking,
-        }} />
-      ) : (
-        <NoteRow>{line}</NoteRow>
-      )}
-      <CompactResult d={compact} wide={wide} onVariant={pickVariant} onEditText={() => editDeck(g.brief ?? null)} onShowText={onShowText} onNew={goHome}
-        card={pic.column ? { shown: pic.column.shown, node: <PictureCard {...pic.column.card} idp="hp-p" /> } : null} />
-      <div className={cls("p2-two", wide && "hp-wide")} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 416px", gap: 48, height: 548, marginTop: 16 }}>
+      {note ? <NotePill note={note} open={ui.note} line={line} actions={noteActions} /> : <NoteRow>{line}</NoteRow>}
+      <CompactResult d={compact} live={ui.helper} wide={wide} snap={{ wide: swap.shown, now: swap.phase === "in" }} note={note} noteActions={noteActions}
+        onVariant={pickVariant} onEditText={() => editDeck(g.brief ?? null)} onShowText={onShowText} onDetails={openSheet} onNew={goHome}
+        card={pic.column ? { shown: pic.column.shown, node: compactCard ? <PictureCard {...pic.column.card} idp="hp-p" /> : null } : null} />
+      <div className={cls("p2-two", swap.shown && "hp-wide", swap.cls)} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 416px", gap: 48, height: 548, marginTop: 16 }}>
         <div style={{ display: "flex", flexDirection: "column", minWidth: 0, gridArea: "1 / 1" }}>
           <WorkHead n={n} total={total} title={h} remarks={remarkCount(v)} remarksOn={ui.remarks} remarksOff={rm.off}
             onPrev={() => setSelectedSlide(n - 1)} onNext={() => setSelectedSlide(n + 1)} onToggleRemarks={rm.toggle} onOpenLightbox={onOpenLightbox} />
@@ -325,7 +331,7 @@ function ResultBody({ g, goDown }: { g: Generation; goDown(): void }) {
         {pic.column && (
           <Aside d={aside} onVariant={pickVariant} onEditText={() => editDeck(g.brief ?? null)} open={openSheet} id="rt-pcol" enter={false} bottom
             className={cls("rt-pcw", pic.column.shown ? "p2-on" : "p2-off")} style={{ position: "relative", zIndex: 1 }}
-            extra={<PictureCard {...pic.column.card} />} />
+            extra={compactCard ? undefined : <PictureCard {...pic.column.card} />} />
         )}
         {rm.panel && <RemarksPanel {...rm.panel} />}
       </div>

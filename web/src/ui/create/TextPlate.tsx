@@ -14,6 +14,8 @@ import { cls } from "../kit/cls";
 import { ErrorLine } from "../kit/ErrorLine";
 import { Icon } from "../kit/Icon";
 import { Spinner } from "../kit/Spinner";
+import { hintTail } from "../deck/fit";
+import { useDeckWidth } from "../deck/useDeckFit";
 import { FileMenu, type FilePick } from "./FileMenu";
 import { ImproveNote, useHeld, useImproveOn, useModelOn } from "./ImproveNote";
 import {
@@ -336,6 +338,8 @@ export function TextBody({ tp }: { tp: TextPlate }) {
   // строка о ходе, пока гаснет, остаётся такой, какой была: со спиннером и «Читаю…» — чтение кончается на кадр раньше,
   // чем строка уходит, и живое `busy` подменило бы значок и текст прямо в уходе
   const infoBusy = useBusyHeld(busy);
+  // «Это тема…» с перечнем — пока колода шире 1300 (fit.ts `hintTail`: при 1280 и с помощником — без перечня, он в подсказке)
+  const tail = hintTail(useDeckWidth());
   return (
     <div id="p2-b2" className={cls("p2-body", show(on))} style={{ margin: "24px 0 0 192px" }}>
       <div className="tx-b2" style={{ "--tx-sh": `${shift}px`, "--tx-gr": `${grow}px` } as CSSProperties}>
@@ -356,7 +360,7 @@ export function TextBody({ tp }: { tp: TextPlate }) {
               <div className="tx-sw">
                 <p className={show(hintOn)} style={LINE} title={HINT_TOPIC + HINT_TOPIC_TAIL}>
                   <span style={{ display: "flex", flex: "none" }}><Icon name="info" size={16} /></span>
-                  <span style={ONE}>{HINT_TOPIC}<span className="tx-hint-tail">{HINT_TOPIC_TAIL}</span></span>
+                  <span style={ONE}>{HINT_TOPIC}{tail && HINT_TOPIC_TAIL}</span>
                 </p>
                 <p id="ct-facts" className={show(factsOn)} style={LINE} title={facts?.kind === "facts" && facts.facts ? `В тексте: ${facts.facts}` : NO_FACTS}>
                   <span style={{ display: "flex", flex: "none", color: "#2563EB" }}><Icon name="numbers" size={16} /></span>

@@ -4,7 +4,7 @@
 import { ApiError } from "../../api";
 import { hasCyrillic, humanError } from "../../lib/errors";
 import { plural } from "../../lib/utils";
-import type { ChatMessage, EditResult, FixResult } from "../../types";
+import type { ChatAction, ChatMessage, ChatResponse, EditResult, FixResult } from "../../types";
 import type { Screen, SheetTab, UiAction } from "../deck/geometry";
 
 // ── open_tab: имена вкладок сервера (старый интерфейс) → шаги экрана «Слоёв»
@@ -25,6 +25,49 @@ export function openTabSteps(tab: string, ctx: { screen: Screen; hasDeck: boolea
   if (tab === "variants") return ctx.screen === "result" ? [{ type: "sheet", tab: null }] : toResult;
   const sheet = SHEET_OF[tab];
   return sheet ? [...toResult, { type: "sheet", tab: sheet }] : [];
+}
+
+// ── действия ответа: только для презентации, о которой ответ
+export type EditAction = Extract<ChatAction, { type: "edit" }>;
+/** Что делает ответ: `build` — экран «Сборка» ведёт новую сборку; `edit` — задача правки над своей презентацией;
+ *  `fixes` — задачи «Исправь всё» над презентацией ответа; `open` — шаги экрана (лист «Подробнее» и слайд). */
+export type Plan =
+  | { kind: "build"; gid: string; job: string }
+  | { kind: "edit"; action: EditAction }
+  | { kind: "fixes"; jobs: { strategy: string; job_id: string }[]; gid: string | null }
+  | { kind: "open"; steps: UiAction[]; slide: number | null };
+
+export interface PlanCtx {
+  /** Презентация, о которой спросили (открытая в момент вопроса). */
+  sent: string | null;
+  /** Презентация, открытая сейчас (ответ мог прийти, когда уже открыли другую). */
+  open: string | null;
+  screen: Screen;
+  /** У открытой презентации есть варианты. */
+  hasDeck: boolean;
+}
+
+/** Действия ответа по шагам. Ответ — о презентации, которую назвал сервер, а если не назвал — о той, про которую
+ *  спросили. Пока ждали ответ, открыли другую — лист и слайд не открываются (они были бы о чужой); правка идёт над
+ *  своей презентацией (её id — в действии), исправления — над презентацией ответа: о том, что она не открыта, скажет
+ *  лента, когда задача кончится. */
+export function planActions(res: ChatResponse, ctx: PlanCtx): Plan[] {
+  const gid = res.generation_id ?? ctx.sent;
+  const same = !gid || gid === ctx.open;
+  const out: Plan[] = [];
+  for (const a of res.actions ?? []) {
+    if (a.type === "generation_started") out.push({ kind: "build", gid: a.generation_id, job: a.job_id });
+    else if (a.type === "edit") out.push({ kind: "edit", action: a });
+    else if (a.type === "jobs") {
+      if (a.jobs?.length) out.push({ kind: "fixes", jobs: a.jobs, gid });
+    } else if (a.type === "open_tab" && same) {
+      const hasDeck = ctx.hasDeck;
+      const steps = openTabSteps(a.tab, { screen: ctx.screen, hasDeck });
+      const slide = a.slide && hasDeck ? a.slide : null;
+      if (steps.length || slide) out.push({ kind: "open", steps, slide });
+    }
+  }
+  return out;
 }
 
 // ── результаты задач, начатых из чата
@@ -81,6 +124,16 @@ export function editFailText(raw: string | null | undefined): string {
   return `Не получилось поменять${why ? `: ${why}` : ""}. Попробуйте сказать иначе или повторите позже.`;
 }
 
+/** Правка или исправления готовы, а презентация не перечиталась (связь, сервер): причина по-русски; «это другая
+ *  презентация» здесь не годится — она открыта. */
+export function reloadFailText(e: unknown): string {
+  const why = e instanceof ApiError && e.status === 0 ? "нет связи с сервером" : reasonOf(e instanceof Error ? e.message : String(e ?? "")).replace(/[.\s]+$/, "");
+  return `Изменения сохранены, но презентация на экране не обновилась${why ? `: ${why}` : ""}. Откройте её снова из «Мои презентации».`;
+}
+
+/** Правка или исправления сделаны в презентации, которая сейчас не открыта: тихая строка в ленте. */
+export const OTHER_DECK = "Это другая презентация — откройте её из «Мои презентации».";
+
 /** Ответ не пришёл: нет связи — просьба повторить; иначе причина по-русски (английская — общая фраза). */
 export function chatFailText(e: unknown): string {
   if (e instanceof ApiError && e.status === 0) return "Не получилось ответить: нет связи с сервером. Повторите, когда связь вернётся.";
@@ -126,13 +179,30 @@ export function typeset(text: string): string {
 // ── лента
 /** Задача, начатая из чата (правка, изображение, исправления): полоса в ленте («Меняю презентацию 100 %»). */
 export interface FeedJob { id: string; label: string; ts: number; progress: number; status: "run" | "done" | "failed" }
-export type FeedItem = { kind: "msg"; msg: ChatMessage } | { kind: "job"; job: FeedJob };
+/** Тихая строка ленты (не ответ помощника): «Это другая презентация — откройте её из «Мои презентации»». */
+export interface FeedNote { id: string; text: string; ts: number }
+export type FeedItem = { kind: "msg"; msg: ChatMessage } | { kind: "job"; job: FeedJob } | { kind: "note"; note: FeedNote };
 
-/** Сообщения и задачи по времени; при равном — сообщение раньше («Меняю…» стоит перед своей полосой). */
-export function feedItems(messages: ChatMessage[], jobs: FeedJob[]): FeedItem[] {
+/** Ход полос по идущим задачам хранилища (`liveJobs`): у каждой задачи своя полоса, и растёт она по своей задаче
+ *  («Исправь всё» — по задаче на вариант, они идут рядом), не назад. Нечего менять — тот же список. */
+export function feedProgress(jobs: FeedJob[], live: { id: string; progress: number }[]): FeedJob[] {
+  let changed = false;
+  const next = jobs.map((j) => {
+    const l = j.status === "run" ? live.find((x) => x.id === j.id) : undefined;
+    if (!l || !(l.progress > j.progress)) return j;
+    changed = true;
+    return { ...j, progress: l.progress };
+  });
+  return changed ? next : jobs;
+}
+
+/** Сообщения, задачи и тихие строки по времени; при равном — сообщение раньше («Меняю…» стоит перед своей полосой,
+ *  ответ — перед строкой о нём). */
+export function feedItems(messages: ChatMessage[], jobs: FeedJob[], notes: FeedNote[] = []): FeedItem[] {
   const all: Array<FeedItem & { at: number; o: number }> = [
     ...messages.map((msg, i) => ({ kind: "msg" as const, msg, at: msg.ts, o: i })),
     ...jobs.map((job, i) => ({ kind: "job" as const, job, at: job.ts, o: messages.length + i })),
+    ...notes.map((note, i) => ({ kind: "note" as const, note, at: note.ts, o: messages.length + jobs.length + i })),
   ];
   all.sort((a, b) => a.at - b.at || a.o - b.o);
   return all.map(({ at: _a, o: _o, ...item }) => item as FeedItem);

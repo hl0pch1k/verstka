@@ -18,7 +18,7 @@ const plain = (s: string) => s.replace(/ /g, " ");
 test("итоги проверки: «Ошибок нет · 2 предупреждения» и сверенные числа (G-helper)", () => {
   const v = variant({ audit: audit({ score: 89, figures: { checked: 9 } } as Partial<AuditSummary>, [{ severity: "warn" }, { severity: "warn" }]) });
   const [q, f] = compactChecks(gen(), v, null);
-  assert.deepEqual({ ...q, lead: plain(q.lead), rest: plain(q.rest) }, { icon: "check-circle", tone: "ok", lead: "Ошибок нет", rest: " · 2 предупреждения", title: q.title });
+  assert.deepEqual({ ...q, lead: plain(q.lead), rest: plain(q.rest) }, { icon: "check-circle", tone: "ok", lead: "Ошибок нет", rest: " · 2 предупреждения", title: q.title, sheet: "quality" });
   assert.ok(/^Оценка качества 89 из 100/.test(q.title), q.title);
   assert.deepEqual({ icon: f.icon, tone: f.tone, lead: plain(f.lead), rest: f.rest }, { icon: "numbers", tone: "ok", lead: "9 чисел", rest: " сверены с текстом" });
 });
@@ -30,6 +30,10 @@ test("итоги проверки: ошибка — красный значок;
   assert.equal(plain(q.lead), "1 ошибка");
   assert.equal(f.tone, "warn");
   assert.equal(plain(f.lead + f.rest), "2 числа не найдены в тексте");
+});
+test("итоги проверки: пункты о качестве открывают «Подробнее» на «Качестве», источник текста — нет", () => {
+  const v = variant({ audit: audit({ score: 89, figures: { checked: 9 } } as Partial<AuditSummary>) });
+  assert.deepEqual(compactChecks(gen(), v, null).map((x) => [x.icon, x.sheet ?? null]), [["check-circle", "quality"], ["numbers", "quality"], ["book", null]]);
 });
 test("итоги проверки: без оценки — ни качества, ни чисел; источник остаётся", () => {
   const items = compactChecks(gen(), variant(), null);

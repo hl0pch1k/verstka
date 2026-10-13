@@ -15,6 +15,7 @@ import { analysisError, analysisFacts, analysisSteps, ANALYSIS_STEPS, orderTempl
 import { FileInput, UploadZone, useFileDrop } from "./UploadZone";
 import { ribbonLayout } from "../deck/fit";
 import { useDeckFit } from "../deck/useDeckFit";
+import { useSwap } from "../kit/useSwap";
 
 /** idle — лента; run — файл уходит на сервер и разбирается; settle — разбор закончился, решается итог; done — все
  *  галочки держатся 560 мс; out — разбор гаснет 240 мс; fail — строка ошибки в коробке разбора. */
@@ -214,9 +215,11 @@ export function TemplateHead({ upload }: { upload: TemplateUpload }) {
 /** Тело шага 01 (слот `p1`, `#p2-b1`): лента или разбор и зона «Отпустите файл». */
 export function TemplateBody({ upload }: { upload: TemplateUpload }) {
   const { ui, dispatch, templates, notices } = useApp();
-  // помощник сужает колоду: лента — четыре обложки в три колонки (ribbonLayout), и тот же разбор
-  const { cols } = ribbonLayout(useDeckFit());
   const on = ui.screen === "create" && ui.open === "tpl" && !ui.more;
+  // помощник сужает колоду: лента — четыре обложки в три колонки (ribbonLayout), и тот же разбор. Число обложек
+  // меняется — лента меняется перекрёстным затуханием (useSwap): старая гаснет, подменяется невидимой, новая проявляется
+  const ribbon = useSwap(useDeckFit() === "wide" ? "wide" : "narrow", on);
+  const { cols, covers } = ribbonLayout(ribbon.shown);
   const body = useRef<HTMLDivElement>(null);
   const over = useFileDrop(body, on && !upload.busy, upload.start);
   const peek = (id: string) => dispatch({ type: "set", patch: { tplPreview: id, tplDelete: null } });
@@ -224,10 +227,11 @@ export function TemplateBody({ upload }: { upload: TemplateUpload }) {
   const fileName = upload.file?.name ?? "";
   const info = notices.template?.kind === "info" ? notices.template.text : null;
   return (
-    <div id="p2-b1" ref={body} className={cls("p2-body p2-g4", on ? "p2-on" : "p2-off")}
+    <div className={ribbon.cls}>
+    <div id="p2-b1" ref={body} className={cls("p2-body p2-g4", on ? "p2-on" : "p2-off")} data-ribbon={ribbon.shown}
       style={{ position: "relative", display: "grid", gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: 16, margin: "24px 0 0 192px" }}>
       {upload.phase === "idle" ? (
-        <Ribbon fresh={upload.fresh} onPeek={peek} onGallery={gallery} onUpload={upload.pick} />
+        <Ribbon covers={covers} fresh={upload.fresh} onPeek={peek} onGallery={gallery} onUpload={upload.pick} />
       ) : (
         <Analysis list={orderTemplates(templates, upload.fresh)} cols={cols} name={templateTitle(fileName)} fileName={fileName}
           steps={upload.steps} facts={upload.facts} out={upload.phase === "out"} error={upload.failure?.text ?? null} canRetry={upload.failure?.retry ?? true}
@@ -236,6 +240,7 @@ export function TemplateBody({ upload }: { upload: TemplateUpload }) {
       )}
       <UploadZone on={over} />
       <FileInput inputRef={upload.inputRef} onFile={upload.start} />
+    </div>
     </div>
   );
 }

@@ -1,31 +1,40 @@
 // Переписка с помощником: отправка вопроса (`api.chat` с открытой презентацией, вариантом и слайдом), ответ в ленту и
 // действия ответа — их ведёт эта же плита, она смонтирована всегда (закрытая лишь скрыта), поэтому продолжения задач
-// доходят до ленты и тогда, когда помощник закрыт. Логика действий — старый ChatActions.ts, переписанный под «Слои»:
-//  · generation_started — экран «Сборка» с этой сборкой (followDeck по её мете, как из «Мои презентации»);
+// доходят до ленты и тогда, когда помощник закрыт. Логика действий — старый ChatActions.ts, переписанный под «Слои»;
+// что делает ответ — чистая planActions (chat.ts): действия — только для презентации, о которой ответ.
+//  · generation_started — экран «Сборка» с этой сборкой (followDeck по её мете, как из «Мои презентации»; мета не
+//    прочиталась — по задаче из ответа: идущую сборку не открываем как готовую);
 //  · edit (правка слайда, изображение) и jobs («Исправь всё») — задачи хранилища (`runJob`) с целью-вариантом: кнопки
-//    работы над ним выключены, пока задача идёт; готово — открытая презентация перечитывается (`reloadIfOpen`), сцена
-//    сменяет слайд перекрёстным затуханием; ход — полоса в ленте, итог и неудача — сообщением помощника;
-//  · open_tab — лист «Подробнее» на нужной вкладке (openTabSteps).
+//    работы над ним выключены, пока задача идёт; ход каждой — своя полоса в ленте (`liveJobs`); готово — презентация
+//    перечитывается, если она открыта (`reloadIfOpen`; сцена сменяет слайд перекрёстным затуханием), открыта другая —
+//    тихая строка «Это другая презентация…», не перечиталась — причина по-русски;
+//  · open_tab — лист «Подробнее» на нужной вкладке (openTabSteps), если открыта та презентация, о которой ответ.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../../api";
 import { sessionId } from "../../lib/utils";
 import { useApp } from "../../store";
-import type { ChatAction, ChatResponse, Job } from "../../types";
+import type { ChatResponse, Generation, Job } from "../../types";
 import {
-  asEditResult, asFixResult, chatFailText, describeFixes, editFailText, openTabSteps, type FeedJob, type FixOutcome,
+  asEditResult, asFixResult, chatFailText, describeFixes, editFailText, feedProgress, planActions, reloadFailText, OTHER_DECK,
+  type EditAction, type FeedJob, type FeedNote, type FixOutcome,
 } from "./chat";
 
 export interface HelperChat {
   jobs: FeedJob[];
+  /** Тихие строки ленты («Это другая презентация…»). */
+  notes: FeedNote[];
   /** Ответ ещё не пришёл. */
   pending: boolean;
-  /** Последняя правка изменила презентацию (подсказка «Верни как было»); null — нет. */
+  /** Последняя правка изменила открытую презентацию (подсказка «Верни как было»); null — нет. */
   edited: { slide: number | null } | null;
   /** Идёт задача, начатая из чата. */
   working: boolean;
   /** Отправить вопрос; false — не ушёл (пусто или ответ ещё не пришёл). */
   send(text: string): boolean;
 }
+
+/** Чем кончилось перечитывание после правки: презентация на экране обновилась; открыта другая; не перечиталась. */
+type Reload = { kind: "open"; g: Generation } | { kind: "other" } | { kind: "failed"; error: unknown };
 
 const now = () => Date.now() / 1000;
 
@@ -37,6 +46,7 @@ export function useHelperChat(): HelperChat {
   const [pending, setPending] = useState(false);
   const busy = useRef(false);
   const [jobs, setJobs] = useState<FeedJob[]>([]);
+  const [notes, setNotes] = useState<FeedNote[]>([]);
   const [edited, setEdited] = useState<{ slide: number | null } | null>(null);
 
   const addJob = useCallback((id: string, label: string) => {
@@ -45,15 +55,35 @@ export function useHelperChat(): HelperChat {
   const settleJob = useCallback((id: string, status: "done" | "failed") => {
     setJobs((js) => js.map((j) => (j.id === id ? { ...j, status, progress: status === "done" ? 1 : j.progress } : j)));
   }, []);
-  // ход задачи — по слоту хранилища (самая новая идущая задача): полоса в ленте растёт вместе с ней
-  const live = app.activeJob;
+  const addNote = useCallback((text: string) => {
+    setNotes((ns) => [...ns, { id: `n${Date.now()}-${ns.length}`, text, ts: now() }]);
+  }, []);
+  // ход задач — по идущим задачам хранилища: у каждой полосы своя задача («Исправь всё» — по задаче на вариант)
+  const live = app.liveJobs;
   useEffect(() => {
-    if (!live) return;
-    setJobs((js) => (js.some((j) => j.id === live.id && j.status === "run" && j.progress !== live.progress)
-      ? js.map((j) => (j.id === live.id ? { ...j, progress: Math.max(j.progress, live.progress) } : j)) : js));
+    setJobs((js) => feedProgress(js, live));
   }, [live]);
 
-  const followEdit = useCallback((a: Extract<ChatAction, { type: "edit" }>) => {
+  /** Перечитать презентацию `gid` после изменения: она открыта — обновляется на экране; открыта другая — сказать об этом;
+   *  не перечиталась (связь, сервер) — причина, а не «другая презентация». */
+  const reloadDeck = useCallback(async (gid: string): Promise<Reload> => {
+    if (latest.current.generation?.id !== gid) return { kind: "other" };
+    let failed = false;
+    let error: unknown = null;
+    const g = await latest.current.reloadIfOpen(gid, (e) => {
+      failed = true;
+      error = e;
+    });
+    if (g) return { kind: "open", g };
+    return failed ? { kind: "failed", error } : { kind: "other" };
+  }, []);
+  /** Что сказать в ленте после перечитывания: открыта другая — тихая строка; не перечиталась — причина. */
+  const tellReload = useCallback((r: Reload | null) => {
+    if (r?.kind === "other") addNote(OTHER_DECK);
+    else if (r?.kind === "failed") latest.current.pushMessage("assistant", reloadFailText(r.error));
+  }, [addNote]);
+
+  const followEdit = useCallback((a: EditAction) => {
     const s = latest.current;
     const gid = a.generation_id;
     addJob(a.job_id, "Меняю презентацию");
@@ -62,25 +92,27 @@ export function useHelperChat(): HelperChat {
       onDone: async (job: Job) => {
         const r = asEditResult(job.result);
         settleJob(a.job_id, "done");
+        let after: Reload | null = null;
         if (r?.changed) {
-          // после «верни как было» подсказка себя не предлагает
-          setEdited(r.kind === "undo" ? null : { slide: r.slide ?? a.slide ?? null });
           void latest.current.refreshGenerations();
-          const g = await latest.current.reloadIfOpen(gid);
-          if (g) {
+          after = await reloadDeck(gid);
+          // «Верни как было» и вопрос о слайде — только когда на экране та презентация, которую изменили
+          if (after.kind === "open") {
+            setEdited(r.kind === "undo" ? null : { slide: r.slide ?? a.slide ?? null });
             const strategy = r.strategy ?? a.strategy;
             if (strategy && latest.current.activeStrategy !== strategy) latest.current.setActiveStrategy(strategy);
             if (r.slide) latest.current.setSelectedSlide(r.slide);
           }
         }
         latest.current.pushMessage("assistant", r?.reply ?? "Готово.");
+        tellReload(after);
       },
       onFailed: (job: Job) => {
         settleJob(a.job_id, "failed");
         latest.current.pushMessage("assistant", editFailText(job.error ?? job.message));
       },
     });
-  }, [addJob, settleJob]);
+  }, [addJob, settleJob, reloadDeck, tellReload]);
 
   const followFixes = useCallback((list: { strategy: string; job_id: string }[], gid: string | null) => {
     if (!list.length) return;
@@ -92,13 +124,13 @@ export function useHelperChat(): HelperChat {
     const settle = async () => {
       left -= 1;
       if (left > 0) return;
-      let elsewhere = false;
+      let after: Reload | null = null;
       if (gid && outcomes.some((o) => o.done)) {
         void latest.current.refreshGenerations();
-        elsewhere = !(await latest.current.reloadIfOpen(gid));
+        after = await reloadDeck(gid);
       }
-      const text = describeFixes(outcomes, latest.current.strategyTitle);
-      latest.current.pushMessage("assistant", elsewhere ? `${text}\nЭто другая презентация — она в «Мои презентации».` : text);
+      latest.current.pushMessage("assistant", describeFixes(outcomes, latest.current.strategyTitle));
+      tellReload(after);
     };
     list.forEach((j, i) => {
       const label = `Исправляю: ${s.strategyTitle(j.strategy)}`;
@@ -118,27 +150,29 @@ export function useHelperChat(): HelperChat {
         },
       });
     });
-  }, [addJob, settleJob]);
+  }, [addJob, settleJob, reloadDeck, tellReload]);
 
-  const followNewBuild = useCallback(async (gid: string) => {
+  const followNewBuild = useCallback(async (gid: string, job: string, template: string | null) => {
     // мета новой сборки уже есть (сервер пишет её до старта задачи): экран «Сборка» ведёт её, как из «Мои презентации»
     const meta = await api.generation(gid).catch(() => null);
     const s = latest.current;
     void s.refreshGenerations();
-    if (meta?.status === "running" && meta.job_id) s.followDeck(meta);
-    else void s.loadGeneration(gid); // кончилась мгновенно или мета не прочиталась: открытие само скажет, что вышло
+    // кончилась мгновенно — открытие само скажет, что вышло
+    if (meta && meta.status !== "running") return void s.loadGeneration(gid);
+    // идёт — или мета не прочиталась (связь): сборку ведёт её задача из ответа; идущую не открываем как готовую
+    s.followDeck(meta ? { ...meta, job_id: meta.job_id ?? job } : { id: gid, template_id: template ?? s.templateId ?? "", strategies: [], status: "running", job_id: job });
   }, []);
 
-  const perform = useCallback((res: ChatResponse) => {
-    for (const a of res.actions ?? []) {
-      if (a.type === "generation_started") void followNewBuild(a.generation_id);
-      else if (a.type === "edit") followEdit(a);
-      else if (a.type === "jobs") followFixes(a.jobs ?? [], res.generation_id ?? latest.current.generationId);
-      else if (a.type === "open_tab") {
-        const s = latest.current;
-        const hasDeck = !!s.generation?.variants.length;
-        if (a.slide && hasDeck) s.setSelectedSlide(a.slide);
-        for (const step of openTabSteps(a.tab, { screen: s.ui.screen, hasDeck })) s.dispatch(step);
+  const perform = useCallback((res: ChatResponse, sent: string | null) => {
+    const s = latest.current;
+    const plan = planActions(res, { sent, open: s.generation?.id ?? null, screen: s.ui.screen, hasDeck: !!s.generation?.variants.length });
+    for (const p of plan) {
+      if (p.kind === "build") void followNewBuild(p.gid, p.job, res.template_id);
+      else if (p.kind === "edit") followEdit(p.action);
+      else if (p.kind === "fixes") followFixes(p.jobs, p.gid);
+      else {
+        if (p.slide) latest.current.setSelectedSlide(p.slide);
+        for (const step of p.steps) latest.current.dispatch(step);
       }
     }
   }, [followNewBuild, followEdit, followFixes]);
@@ -151,13 +185,15 @@ export function useHelperChat(): HelperChat {
     setEdited(null);
     const s = latest.current;
     s.pushMessage("user", message);
-    // вопрос — о том, что на экране: открытая презентация, её вариант и слайд («почему слайд 3 такой» — про него)
+    // вопрос — о том, что на экране: открытая презентация, её вариант и слайд («почему слайд 3 такой» — про него);
+    // ответ действует только на неё (planActions), даже если пока ждали, открыли другую
+    const sent = s.generationId;
     void api.chat({
-      session_id: sessionId(), message, template_id: s.templateId, generation_id: s.generationId, strategy: s.activeStrategy,
+      session_id: sessionId(), message, template_id: s.templateId, generation_id: sent, strategy: s.activeStrategy,
       slide: s.generation ? s.selectedSlide : null,
     }).then((res) => {
       latest.current.pushMessage("assistant", res.reply);
-      perform(res);
+      perform(res, res.generation_id ?? sent);
     }, (e: unknown) => {
       latest.current.pushMessage("assistant", chatFailText(e));
     }).finally(() => {
@@ -168,5 +204,5 @@ export function useHelperChat(): HelperChat {
   }, [perform]);
 
   const working = jobs.some((j) => j.status === "run");
-  return { jobs, pending, edited, working, send };
+  return { jobs, notes, pending, edited, working, send };
 }

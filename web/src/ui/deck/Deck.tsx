@@ -2,12 +2,12 @@
 // и слои поверх. Где стоит каждая плита и что видно — `deckGeometry(ui)`; плиты ездят 520 мс (`.p2-slot`).
 // Разметка — boards/V2.dc.html, `<main class="p2-deck">`. Содержимое плит и слоёв приносят задачи своих областей
 // через пропсы-слоты; сама колода рисует места плит, полосы, большие номера и заголовки шагов.
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useApp } from "../../store";
 import { deckGeometry, type Geometry } from "./geometry";
 import { Plate } from "./Plate";
 import { Strip, type StripData } from "./Strip";
-import { DeckFitContext, useMeasureDeck } from "./useDeckFit";
+import { DeckFitContext, useDeckLayout } from "./useDeckFit";
 
 export interface DeckProps {
   /** Ряд заголовка плиты после кнопки «номер + название»: всё, что справа (кнопки, обложка, сводка, CTA).
@@ -36,9 +36,10 @@ const ENTER_MS = 34;
 export function Deck({ h1, h2, h3, p1, p2, p3, b3, p4, s1, s2, s3, layers }: DeckProps) {
   const { ui, dispatch } = useApp();
   const g = deckGeometry(ui);
-  // помощник сужает колоду: какая она сейчас (широкая, узкая, тесная) — плитам, которые решают раскладку в JS
+  // помощник сужает колоду: какая она (широкая, узкая, тесная) и её ширина — по цели хода, а не по кадру (useDeckLayout):
+  // плитам, которые решают раскладку в JS, и правилам `.p2-deck[data-fit=…]`; `--deck-w` — целевая ширина для CSS
   const deckRef = useRef<HTMLElement>(null);
-  const fit = useMeasureDeck(deckRef);
+  const layout = useDeckLayout(deckRef, ui.helper);
   const create = ui.screen === "create";
   const more = create && ui.more;
   const tplOpen = create && ui.open === "tpl";
@@ -64,11 +65,11 @@ export function Deck({ h1, h2, h3, p1, p2, p3, b3, p4, s1, s2, s3, layers }: Dec
   const heads = g.heads && !enter3;
 
   // overflow: clip, а не hidden, как на доске: вид тот же, но колода не становится прокручиваемой — scrollIntoView или
-  // фокус на элементе плиты ниже края не сдвигают все плиты вверх. Колода — контейнер `deck` (shell.css): плиты и слои
-  // перестраиваются по её ширине
+  // фокус на элементе плиты ниже края не сдвигают все плиты вверх. Плиты и слои перестраиваются по `data-fit`
+  const style = { position: "relative", zIndex: 0, minWidth: 0, height: 812, borderRadius: 40, overflow: "clip", ...(layout.width > 0 && { "--deck-w": `${layout.width}px` }) } as CSSProperties;
   return (
-    <DeckFitContext.Provider value={fit}>
-    <main ref={deckRef} className="p2-deck" data-fit={fit} style={{ position: "relative", zIndex: 0, minWidth: 0, height: 812, borderRadius: 40, overflow: "clip" }}>
+    <DeckFitContext.Provider value={layout}>
+    <main ref={deckRef} className="p2-deck" data-fit={layout.fit} style={style}>
       <Plate z={1} y={g.y[0]} className="p2-rise" label="Шаг 1 — шаблон" style={{ background: "#FFFFFF", color: "#0B1220", animationDelay: "0ms" }}>
         <Strip n="01" {...s1} on={g.strips} onClick={more ? () => dispatch({ type: "open", step: "tpl" }) : undefined} label="Вернуться к шагу «Шаблон»" />
         <div className={show(heads)}>

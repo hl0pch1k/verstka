@@ -1,13 +1,15 @@
 // Компактный вид «Результата» без React (boards/G-helper, G-helper-open; V2 `hp-ncol`): итоги проверки в узкой колонке
-// 184 px — качество, сверенные числа и откуда текст. Числа — те же, что у карточки «Качество» полного вида
+// 184 px — качество, сверенные числа (оба открывают «Подробнее» на «Качестве») и откуда текст. Числа — те же, что у карточки «Качество» полного вида
 // (qualityCard), чего в данных нет — того пункта нет.
 import { templateTitle } from "../../lib/plain";
 import type { Generation, Variant } from "../../types";
+import type { SheetTab } from "../deck/geometry";
 import type { IconName } from "../kit/icons";
 import { qualityCard } from "./resultView";
 
-/** Пункт итогов: значок, жирное начало и остальное; `title` — подсказка целиком. */
-export interface CheckItem { icon: IconName; tone: "ok" | "warn" | "error"; lead: string; rest: string; title: string }
+/** Пункт итогов: значок, жирное начало и остальное; `title` — подсказка целиком; `sheet` — вкладка «Подробнее», которую
+ *  пункт открывает (качество и числа — «Качество»; источник текста — ничего). */
+export interface CheckItem { icon: IconName; tone: "ok" | "warn" | "error"; lead: string; rest: string; title: string; sheet?: SheetTab }
 
 const pages = (g: Generation) => {
   const w = g.writer;
@@ -41,9 +43,9 @@ export function compactChecks(g: Generation, v: Variant, note: { title: string }
   if (q) {
     out.push({
       icon: q.errors ? "alert" : "check-circle", tone: q.errors ? "error" : "ok",
-      lead: q.verdict ?? `Оценка ${q.score}`, rest: q.warnings ? ` · ${q.warnings}` : "", title: q.title,
+      lead: q.verdict ?? `Оценка ${q.score}`, rest: q.warnings ? ` · ${q.warnings}` : "", title: q.title, sheet: "quality",
     });
-    if (q.figures) out.push({ icon: "numbers", tone: q.figures.tone, ...splitCount(q.figures.text), title: q.figures.title ?? q.figures.text });
+    if (q.figures) out.push({ icon: "numbers", tone: q.figures.tone, ...splitCount(q.figures.text), title: q.figures.title ?? q.figures.text, sheet: "quality" });
   }
   const src = sourceText(g, note);
   out.push({ icon: "book", tone: "ok", lead: "", rest: src, title: src });

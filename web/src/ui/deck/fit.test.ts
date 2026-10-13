@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { deckFit, ribbonLayout } from "./fit";
+import { deckFit, deckLayout, errBelow, hintTail, ribbonLayout, rowMode, segStatus } from "./fit";
 
 // ширины колоды: 1440 — 1392 (закрыт) и 976 (помощник); 1280 — 1232 и 816
 test("deckFit: закрытый помощник — широкая колода при 1280 и 1440", () => {
@@ -18,4 +18,60 @@ test("ribbonLayout: широкая — шесть обложек в четыре
   assert.deepEqual(ribbonLayout("wide"), { covers: 6, cols: 4 });
   assert.deepEqual(ribbonLayout("narrow"), { covers: 4, cols: 3 });
   assert.deepEqual(ribbonLayout("tight"), { covers: 4, cols: 3 });
+});
+
+// решение — по целевой ширине: обёртка колоды (`hp-wrap`) не анимируется, колода = обёртка − место помощника 416
+test("deckLayout: цель — обёртка без места помощника (плита 400 + зазор 16)", () => {
+  assert.deepEqual(deckLayout(1392, false), { width: 1392, fit: "wide" });
+  assert.deepEqual(deckLayout(1232, false), { width: 1232, fit: "wide" });
+  assert.deepEqual(deckLayout(1392, true), { width: 976, fit: "narrow" });
+  assert.deepEqual(deckLayout(1232, true), { width: 816, fit: "tight" });
+});
+test("deckLayout: открытие — узкая раскладка сразу, хотя колода ещё широкая (ширина кадра в решение не входит)", () => {
+  // первый кадр хода: помощник уже открыт, колода ещё 1388 — раскладка та, что будет в конце
+  assert.equal(deckLayout(1392, true).fit, "narrow");
+});
+test("deckLayout: закрытие — узкая раскладка держится, пока сетка не доехала", () => {
+  assert.deepEqual(deckLayout(1392, false, true), { width: 976, fit: "narrow" });
+  assert.deepEqual(deckLayout(1232, false, true), { width: 816, fit: "tight" });
+  // доехала — широкая
+  assert.deepEqual(deckLayout(1392, false, false), { width: 1392, fit: "wide" });
+});
+test("deckLayout: обёртка ещё не измерена — широкая, без ширины", () => {
+  assert.deepEqual(deckLayout(0, true), { width: 0, fit: "wide" });
+});
+
+// плита 03 (бывшие @container p3): содержимое плиты — колода без полей 96
+test("rowMode: короткий ряд — полный (доска), без переключателей (1280), узкий, тесный", () => {
+  assert.equal(rowMode(1392), "full");
+  assert.equal(rowMode(1232), "short");
+  assert.equal(rowMode(976), "narrow");
+  assert.equal(rowMode(816), "tight");
+  assert.equal(rowMode(0), "full");
+});
+test("rowMode: переключатели уходят, когда плите 03 не больше 1254 px (колода 1350)", () => {
+  assert.equal(rowMode(1351), "full");
+  assert.equal(rowMode(1350), "short");
+});
+test("errBelow: строка ошибки встаёт под ряд заголовка, когда плите 03 не больше 1289 px", () => {
+  assert.equal(errBelow(1392), false);
+  assert.equal(errBelow(1386), false);
+  assert.equal(errBelow(1385), true);
+  assert.equal(errBelow(976), true);
+  assert.equal(errBelow(0), false);
+});
+test("segStatus: подписи хода в сегментах раскадровки — пока плите 03 больше 1263 px", () => {
+  assert.equal(segStatus(1392), true);
+  assert.equal(segStatus(1360), true);
+  assert.equal(segStatus(1359), false);
+  assert.equal(segStatus(976), false);
+  assert.equal(segStatus(0), true);
+});
+test("hintTail: «Это тема…» с перечнем — пока колода шире 1300", () => {
+  assert.equal(hintTail(1392), true);
+  assert.equal(hintTail(1301), true);
+  assert.equal(hintTail(1300), false);
+  assert.equal(hintTail(1232), false);
+  assert.equal(hintTail(976), false);
+  assert.equal(hintTail(0), true);
 });

@@ -71,7 +71,8 @@ function SwitchBox({ id, name, hint, sw, onToggle }: { id: string; name: string;
   );
 }
 
-export function ParamsAll({ pp, on }: { pp: ParamsPlate; on: boolean }) {
+/** `short` — плита 03 уже доски (окно около 1280, помощник; fit.ts `rowMode`): миниатюры вариантов меньше. */
+export function ParamsAll({ pp, on, short }: { pp: ParamsPlate; on: boolean; short: boolean }) {
   const { params, setParams } = useApp();
   const own = params.purpose === OWN;
   // «Вернуться к списку» ставит тип, который был выбран в списке до «Свой вариант…» (V2: `own: false`)
@@ -88,7 +89,7 @@ export function ParamsAll({ pp, on }: { pp: ParamsPlate; on: boolean }) {
   }, [focusTo, own]);
   const s = pp.slides;
   return (
-    <div id="p2-b3m" className={cls("p2-body p2-more-body", show(on))} style={{ position: "absolute", left: 240, right: 48, top: 128, display: "flex", flexDirection: "column" }}>
+    <div id="p2-b3m" className={cls("p2-body p2-more-body", short && "pp-short", show(on))} style={{ position: "absolute", left: 240, right: 48, top: 128, display: "flex", flexDirection: "column" }}>
       {/* ряд 1: тип · аудитория · слайдов */}
       <div className="p2-params p2-stag" style={{ ...GRID3, transitionDelay: "40ms" }}>
         {own ? (

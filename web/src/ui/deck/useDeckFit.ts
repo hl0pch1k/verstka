@@ -1,27 +1,59 @@
-// Ширина колоды для того, что решает JS (сколько обложек в ленте, сколько колонок у раскадровки). Колода меряет себя
-// сама (ResizeObserver) и раздаёт, какая она: широкая, узкая или тесная (fit.ts); CSS смотрит на ту же ширину через
-// `@container deck`, с теми же порогами.
-import { createContext, useContext, useLayoutEffect, useState, type RefObject } from "react";
-import { deckFit, type DeckFit } from "./fit";
+// Раскладка колоды для того, что решает JS и CSS (обложки ленты, колонки раскадровки, короткий ряд, правила
+// `.p2-deck[data-fit=…]`). Решение — по целевой ширине (fit.ts `deckLayout`): обёртка колоды (`hp-wrap`) не
+// анимируется, колода = обёртка − место помощника. Открытие — узкая раскладка с первого кадра; закрытие — узкая
+// держится, пока сетка обёртки не доехала (`transitionend` на grid-template-columns, запасной таймер 340 мс). Посреди
+// хода раскладка не меняется.
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useState, type RefObject } from "react";
+import { prefersReducedMotion } from "../../lib/motion";
+import { deckLayout, type DeckFit, type DeckLayout } from "./fit";
 
-export const DeckFitContext = createContext<DeckFit>("wide");
+export const DeckFitContext = createContext<DeckLayout>({ width: 0, fit: "wide" });
 
-/** Какая сейчас колода (внутри `Deck`). */
+/** Какая сейчас колода (внутри `Deck`): широкая, узкая или тесная. */
 export function useDeckFit(): DeckFit {
-  return useContext(DeckFitContext);
+  return useContext(DeckFitContext).fit;
 }
 
-/** Меряет колоду: меняется, только когда она переходит порог (кадры хода сетки не перерисовывают плиты). */
-export function useMeasureDeck(ref: RefObject<HTMLElement>): DeckFit {
-  const [fit, setFit] = useState<DeckFit>("wide");
+/** Целевая ширина колоды (0 — ещё не измерена). */
+export function useDeckWidth(): number {
+  return useContext(DeckFitContext).width;
+}
+
+/** Закрытие помощника: сетка обёртки 340 мс (shell.css `.hp-wrap`). */
+const CLOSE_MS = 340;
+
+/** Раскладка колоды `ref` по ширине её обёртки и помощнику (`helper` открыт). */
+export function useDeckLayout(ref: RefObject<HTMLElement>, helper: boolean): DeckLayout {
+  const [wrap, setWrap] = useState(0);
   useLayoutEffect(() => {
-    const el = ref.current;
+    const el = ref.current?.parentElement;
     if (!el) return;
-    const measure = () => setFit(deckFit(el.getBoundingClientRect().width));
+    const measure = () => setWrap(Math.round(el.getBoundingClientRect().width));
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
   }, [ref]);
-  return fit;
+  // помощник закрылся — узкая раскладка держится до конца хода сетки (в том же кадре, что и смена класса обёртки)
+  const [held, setHeld] = useState(false);
+  const [was, setWas] = useState(helper);
+  if (was !== helper) {
+    setWas(helper);
+    setHeld(!helper && !prefersReducedMotion());
+  }
+  useEffect(() => {
+    if (!held) return;
+    const el = ref.current?.parentElement;
+    const end = () => setHeld(false);
+    const onEnd = (e: TransitionEvent) => {
+      if (e.target === el && e.propertyName === "grid-template-columns") end();
+    };
+    el?.addEventListener("transitionend", onEnd);
+    const t = window.setTimeout(end, CLOSE_MS);
+    return () => {
+      el?.removeEventListener("transitionend", onEnd);
+      window.clearTimeout(t);
+    };
+  }, [held, ref]);
+  return useMemo(() => deckLayout(wrap, helper, held), [wrap, helper, held]);
 }

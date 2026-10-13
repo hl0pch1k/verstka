@@ -74,29 +74,30 @@
 /* мысль агента — не длиннее двух строк, целиком — в подсказке */
 .bd-line{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
 .bd-segs .bk-vst svg{display:block}
-/* Колода уже доски (1280 px; помощник). Плита 03 — контейнер p3 (create.css).
+/* Колода уже доски (1280 px; помощник). Пороги — ui/deck/fit.ts, от целевой ширины колоды (`--deck-w`, Deck): ход сетки
+   помощника не меняет ни размер фазы, ни сегменты посреди хода.
    - Фаза мельчает ровно настолько, чтобы самая длинная («Смотрю на слайды целиком», 633 px при 36 px) встала в свою
-     клетку: ширина плиты − колонка агента 416 − зазор 48 − место «03» 192 = 100cqw − 656 px; при 1440 это 36 px.
-   - Сегментам вариантов со словами («Структурный ✓ продумано») тесно рядом с «Раскадровкой»: остаются галочки,
-     слова — в подсказке сегмента и в строке под «Раскадровкой». */
-.bd-ph{font-size:clamp(24px, calc((100cqw - 656px) / 17.8), 36px)}
-@container p3 (max-width: 1263px){
-  .bd-segs .bk-vst > span{display:none}
-}
+     клетку: колода − поля 96 − колонка агента 416 − зазор 48 − место «03» 192 = колода − 752 px; при 1440 это 36 px.
+   - Сегментам вариантов со словами («Структурный ✓ продумано») тесно рядом с «Раскадровкой» (`.bd-segs-s`, fit.ts
+     `segStatus`): остаются галочки, слова — в подсказке сегмента и в строке под «Раскадровкой». */
+.bd-ph{font-size:clamp(24px, calc((var(--deck-w, 1392px) - 752px) / 17.8), 36px)}
+.bd-segs-s .bk-vst > span{display:none}
 
-/* ── Колода, суженная помощником (задача 13; пороги ui/deck/fit.ts: узкая ≤ 1100 — 976 при 1440, тесная ≤ 900 — 816
-   при 1280). Сетка сборки: фаза — первой строкой, слева под ней — часы, полоса и раскадровка, справа на обе строки —
-   «Как думает агент» (как на доске). В узкой колоде фаза встаёт во всю ширину плиты (рядом с ней колонке агента нет
-   места), колонка агента — 320 px под ней (в тесной — 288, зазор 32), раскадровка — в три колонки (Storyboard). */
+/* ── Колода, суженная помощником (задача 13; `.p2-deck[data-fit=narrow|tight]` — по целевой ширине, ui/deck/fit.ts:
+   узкая ≤ 1100 — 976 при 1440, тесная ≤ 900 — 816 при 1280). Сетка сборки: фаза — первой строкой, слева под ней — часы,
+   полоса и раскадровка, справа на обе строки — «Как думает агент» (как на доске). В узкой колоде фаза встаёт во всю
+   ширину плиты (рядом с ней колонке агента нет места), колонка агента — 320 px под ней (в тесной — 288, зазор 32),
+   раскадровка — в три колонки (Storyboard, колонки — от целевой ширины). */
 .bd-two > .p2-hrow{grid-area:1 / 1}
 .bd-two > .bd-body{grid-area:2 / 1}
 .bd-two > aside{grid-area:1 / 2 / 3 / 3}
-@container deck (max-width: 1100px){
+:where(.p2-deck[data-fit=narrow], .p2-deck[data-fit=tight]){
   .bd-two{grid-template-columns:minmax(0,1fr) 320px !important}
   .bd-two > .p2-hrow{grid-area:1 / 1 / 2 / 3}
   .bd-two > aside{grid-area:2 / 2;height:auto !important;min-height:0}
-  /* фаза — по ширине плиты без места «03» (192): 36 px при 976, меньше — ровно настолько, чтобы самая длинная встала */
-  .bd-ph{font-size:clamp(24px, calc((100cqw - 192px) / 17.8), 36px)}
+  /* фаза — по ширине плиты без места «03» (поля 96 + 192): 36 px при 976, меньше — ровно настолько, чтобы самая длинная
+     встала */
+  .bd-ph{font-size:clamp(24px, calc((var(--deck-w, 976px) - 288px) / 17.8), 36px)}
   /* «Раскадровка» и сегменты вариантов — в две строки, если в одну не встают */
   .bd-sbh{flex-wrap:wrap;height:auto !important;row-gap:12px}
   /* «Не получилось»: кнопки — в столбик, если в ряд не встают */
@@ -105,7 +106,7 @@
   .bd-two > aside > div:first-child{flex-direction:column;align-items:flex-start !important;justify-content:center !important;gap:0 !important}
   .bd-two > aside > div:first-child > span{max-width:100%;overflow:hidden;text-overflow:ellipsis}
 }
-@container deck (max-width: 900px){
+:where(.p2-deck[data-fit=tight]){
   .bd-two{grid-template-columns:minmax(0,1fr) 288px !important;column-gap:32px !important}
   .bd-two > aside h2{font-size:18px !important;line-height:24px !important}
 }

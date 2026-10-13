@@ -28,6 +28,10 @@ a{color:#0A0F1F}a:hover{color:#1E40AF}
 .p2-off{opacity:0;visibility:hidden;pointer-events:none;transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
 .p2-stag{transition:opacity 360ms var(--ease),transform 360ms var(--ease)}
 .p2-off .p2-stag{opacity:0;transform:translateY(12px);transition-duration:240ms}
+/* смена раскладки, где меняется число элементов (ui/kit/useSwap): старое гаснет 120 мс, подменяется невидимым, новое
+   проявляется 240 мс */
+.fx-out{opacity:0;transition:opacity 120ms var(--ease)}
+.fx-in{opacity:1;transition:opacity 240ms var(--ease)}
 
 /* заголовок плиты */
 .p2-head{display:flex;align-items:center;gap:32px;height:64px;padding:0;border:0;background:none;cursor:pointer;text-align:left;border-radius:16px;transition:transform 160ms var(--ease)}

@@ -59,6 +59,16 @@ function JobCard({ job }: { job: FeedJob }) {
   );
 }
 
+/** Тихая строка ленты (не ответ помощника): «Это другая презентация — откройте её из «Мои презентации»». */
+function NoteLine({ text }: { text: string }) {
+  return (
+    <p role="status" className="gh-note">
+      <span style={{ display: "flex", flex: "none", marginTop: 2, color: "#2563EB" }}><Icon name="info" size={16} /></span>
+      <span>{typeset(text)}</span>
+    </p>
+  );
+}
+
 /** Подсказки под лентой. Новые, появившиеся в открытой ленте после ответа, всплывают сами (p2-in); решение принимается
  *  один раз при появлении — класс не добавляется к уже стоящим (иначе анимация спорила бы с каскадом открытия). */
 function Chips({ chips, enter, off, onPick, style }: { chips: string[]; enter: boolean; off: boolean; onPick(c: string): void; style: CSSProperties }) {
@@ -84,7 +94,7 @@ export function HelperPlate() {
 
   // где человек: результат с презентацией, сборка, «Создать»
   const deck = ui.screen === "result" && !!generation?.variants.length;
-  const items = feedItems(messages, chat.jobs);
+  const items = feedItems(messages, chat.jobs, chat.notes);
   const intro = introFor({ building: ui.screen === "build" && building, deck });
   const fixable = !!activeVariant?.audit?.issues.some((i) => i.autofix && i.autofix.action !== "none");
   const chips = chipsFor({
@@ -212,12 +222,13 @@ export function HelperPlate() {
               <BotText text={intro} />
             </div>
             {items.map((it, i) => {
-              const id = it.kind === "msg" ? it.msg.id : it.job.id;
-              const ts = it.kind === "msg" ? it.msg.ts : it.job.ts;
+              const { id, ts } = it.kind === "msg" ? it.msg : it.kind === "job" ? it.job : it.note;
               const user = it.kind === "msg" && it.msg.role === "user";
               return (
                 <div key={id} className={cls("gh-item hp-st", user ? "gh-r" : "gh-l", fresh(ts) && "p2-in")} style={st(feedDelay(i + 1, n, open))}>
-                  {it.kind === "job" ? <JobCard job={it.job} /> : user ? <div className="gh-user">{it.msg.text}</div> : <BotText text={it.msg.text} />}
+                  {it.kind === "job" ? <JobCard job={it.job} />
+                    : it.kind === "note" ? <NoteLine text={it.note.text} />
+                    : user ? <div className="gh-user">{it.msg.text}</div> : <BotText text={it.msg.text} />}
                 </div>
               );
             })}
