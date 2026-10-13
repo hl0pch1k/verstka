@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { analysisFacts, analysisRows, analysisSteps, ribbonItems, tplMeta, tplShort } from "./ribbon";
+import { analysisError, analysisFacts, analysisRows, analysisSteps, FILE_BROKEN, ribbonItems, tplMeta, tplShort } from "./ribbon";
 import { humanizeJobMessage } from "../../lib/jobText";
 
 const t = (id: string, at: string) => ({ template_id: id, analyzed_at: at } as any);
@@ -88,4 +88,49 @@ test("подписи шаблона: «54 слайда» и «54 слайда ·
   assert.equal(tplShort(x), "54 слайда");
   assert.equal(tplMeta(x), "54 слайда · Play");
   assert.equal(tplMeta({ template_id: "w", n_slides: null, font: null } as any), "");
+});
+
+// Неудача разбора — только по-русски (analysisError): сырые сообщения сервера и библиотек пользователю не показываются.
+test("ошибка по-русски остаётся как есть, повтор возможен", () => {
+  const r = analysisError("Шаблон не открылся: в файле нет слайдов", "Отчёт.pptx");
+  assert.deepEqual(r, { text: "Шаблон не открылся: в файле нет слайдов", retry: true });
+});
+test("английское сообщение lxml заменяется русской строкой, повтор возможен", () => {
+  const r = analysisError("Couldn't find end of Start Tag p line 1, line 1, column 2 (<string>, line 1)", "Отчёт.pptx");
+  assert.equal(r.text, FILE_BROKEN);
+  assert.equal(r.text, "Не удалось разобрать файл: он повреждён или сохранён в неподдерживаемом формате.");
+  assert.equal(r.retry, true);
+});
+test("пустая причина и без файла: русская строка, повтор возможен", () => {
+  assert.deepEqual(analysisError(null), { text: FILE_BROKEN, retry: true });
+  assert.deepEqual(analysisError("  \n "), { text: FILE_BROKEN, retry: true });
+});
+test("после причины сервер дописывает трассировку: берётся первая строка", () => {
+  const r = analysisError("KeyError: 'ppt/presentation.xml'\nTraceback (most recent call last):\n  File \"x.py\"", "a.pptx");
+  assert.equal(r.text, FILE_BROKEN);
+  const ru = analysisError("Файл повреждён\nTraceback (most recent call last): ZeroDivisionError", "a.pptx");
+  assert.equal(ru.text, "Файл повреждён");
+});
+test("«Не получилось: » в начале снимается", () => {
+  assert.equal(analysisError("Не получилось: файл пуст", "a.pptx").text, "файл пуст");
+  assert.equal(analysisError("Не получилось: bad zip file", "a.pptx").text, FILE_BROKEN);
+});
+test("отказ по типу файла (.pdf, .key): текст сервера-слоя по-русски, повтор бессмыслен — тот же файл", () => {
+  const pdf = analysisError("PDF не подойдёт — нужен файл PowerPoint: .pptx или .potx", "Отчёт.pdf");
+  assert.deepEqual(pdf, { text: "PDF не подойдёт — нужен файл PowerPoint: .pptx или .potx", retry: false });
+  assert.equal(analysisError("Нужен шаблон презентации: .pptx, .potx, .ppt или .odp", "заметки.txt").retry, false);
+  assert.equal(analysisError("Это файл Keynote. Экспортируйте его в PowerPoint…", "Доклад.KEY").retry, false);
+});
+test("файл разрешённого типа повторять можно, даже если он битый", () => {
+  assert.equal(analysisError("bad zip file", "Отчёт.PPTX").retry, true);
+  assert.equal(analysisError("bad zip file", "старый.ppt").retry, true);
+});
+test("сбой отправки файла: сырой хвост («Failed to fetch», тело ответа) не показывается", () => {
+  const net = analysisError("Не удалось загрузить шаблон: Сеть недоступна: Failed to fetch", "a.pptx");
+  assert.equal(net.text, "Не удалось загрузить файл: нет связи с сервером. Проверьте соединение.");
+  assert.equal(net.retry, true);
+  const srv = analysisError("Не удалось загрузить шаблон: Internal Server Error", "a.pptx");
+  assert.equal(srv.text, "Не удалось загрузить файл на сервер. Попробуйте ещё раз.");
+  // русский ответ сервера остаётся
+  assert.equal(analysisError("Не удалось загрузить шаблон: Файл слишком большой", "a.pptx").text, "Не удалось загрузить шаблон: Файл слишком большой");
 });

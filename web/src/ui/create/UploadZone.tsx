@@ -38,6 +38,30 @@ export function FileInput({ inputRef, onFile }: { inputRef: RefObject<HTMLInputE
 
 const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes("Files");
 
+/** Файл, отпущенный мимо включённой зоны — на другой плите, в шапке, на свёрнутом шаге, во время разбора, — не должен
+ *  открыться или скачаться в самой вкладке (так браузер поступает с файлом, который никто не принял). Один слушатель
+ *  на окно, ставит оболочка: гасит событие и показывает «нельзя», если ни плита 01, ни другая зона файл не приняли
+ *  (их слушатели стоят ниже по дереву и срабатывают раньше). Ничего не загружает. */
+export function useStrayFileDrop(): void {
+  useEffect(() => {
+    const over = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      const taken = e.defaultPrevented;
+      e.preventDefault();
+      if (!taken && e.dataTransfer) e.dataTransfer.dropEffect = "none";
+    };
+    const drop = (e: DragEvent) => {
+      if (hasFiles(e)) e.preventDefault();
+    };
+    window.addEventListener("dragover", over);
+    window.addEventListener("drop", drop);
+    return () => {
+      window.removeEventListener("dragover", over);
+      window.removeEventListener("drop", drop);
+    };
+  }, []);
+}
+
 /** Перетаскивание файла на плиту, внутри которой стоит `anchor`: пока файл над плитой — `true` (зона видна); отпущенный
  *  файл уходит в `onFile`. Считает входы и выходы (dragenter/dragleave приходят и от вложенных элементов). */
 export function useFileDrop(anchor: RefObject<HTMLElement>, enabled: boolean, onFile: (f: File) => void): boolean {

@@ -9,7 +9,7 @@ import { plural } from "../../lib/utils";
 import type { TemplateListItem } from "../../types";
 import { cls } from "../kit/cls";
 import { Icon, type IconName } from "../kit/Icon";
-import { ribbonItems, tplMeta, tplShort } from "./ribbon";
+import { ribbonItems, tplMeta, tplShort, UPLOAD_BUSY_TITLE } from "./ribbon";
 
 /** Как стоит обложка: плитка ленты (142 px), раздел «Шаблоны» (16:9), миниатюра слайда (16:9, r12), шапка шага
  *  (80×45), диалог удаления (112, 16:9). */
@@ -91,12 +91,15 @@ export function TemplateTile({ t, selected, delay, out, onPick, onPeek, kind = "
 }
 
 /** Служебная плитка: значок-слои и подпись в две строки (высота 40 у обеих — знаки на одной линии). */
-export function ActTile({ icon, note, name, delay, out, onClick, label, title, kind = "tt" }: {
+export function ActTile({ icon, note, name, delay, out, onClick, label, title, kind = "tt", busy }: {
   icon: IconName; note: string[]; name: string; delay: number; out?: boolean; onClick(): void; label?: string; title?: string; kind?: "tt" | "an";
+  /** Плитка занята: нажатие ничего не делает, подсказка — почему (`aria-disabled`, а не `disabled`: подсказка и фокус остаются). */
+  busy?: boolean;
 }) {
   return (
     <div className={cls("p2-stag p2-in", out && "tp-out")} style={{ animationDelay: `${delay}ms`, transitionDelay: `${delay}ms` }}>
-      <button type="button" className="p2-card" onClick={onClick} aria-label={label} title={title}>
+      <button type="button" className="p2-card" onClick={busy ? undefined : onClick} aria-label={label} aria-disabled={busy || undefined}
+        title={busy ? UPLOAD_BUSY_TITLE : title}>
         <span className={`p2-cover ${kind}-act`}>
           <span className="p2-lic" aria-hidden="true"><span className="p2-lic-b" /><span className="p2-lic-f"><Icon name={icon} size={22} /></span></span>
           <span className={`${kind}-note`}>{note.map((s) => <span key={s}>{s}</span>)}</span>
@@ -112,12 +115,14 @@ export function ActTile({ icon, note, name, delay, out, onClick, label, title, k
 /** «ещё 2 шаблона». */
 export const moreText = (n: number) => `ещё ${plural(n, "шаблон", "шаблона", "шаблонов")}`;
 
-export function Ribbon({ fresh, onPeek, onGallery, onUpload }: {
+export function Ribbon({ fresh, onPeek, onGallery, onUpload, busy }: {
   /** Только что загруженный шаблон — первым. */
   fresh: string | null;
   onPeek(id: string): void;
   onGallery(): void;
   onUpload(): void;
+  /** Файл уже разбирается: «Загрузить свой» не нажимается. */
+  busy?: boolean;
 }) {
   const { templates, templateId } = useApp();
   const pick = usePickTemplate();
@@ -133,7 +138,7 @@ export function Ribbon({ fresh, onPeek, onGallery, onUpload }: {
         <ActTile icon="grid" note={[moreText(rest)]} name="Все шаблоны" delay={240} onClick={onGallery}
           label={`Все шаблоны, ${moreText(rest)}`} title={hidden.map(tplLabel).join(", ")} />
       )}
-      <ActTile icon="upload" note={[".pptx, .potx, .ppt или .odp", "до 200 МБ"]} name="Загрузить свой" delay={280} onClick={onUpload} />
+      <ActTile icon="upload" note={[".pptx, .potx, .ppt или .odp", "до 200 МБ"]} name="Загрузить свой" delay={280} onClick={onUpload} busy={busy} />
     </>
   );
 }

@@ -7,14 +7,16 @@ import { plural } from "../../lib/utils";
 import { cls } from "../kit/cls";
 import { Icon } from "../kit/Icon";
 import { Cover, inkOf, usePickTemplate } from "../create/TemplateRibbon";
-import { orderTemplates, tplMeta } from "../create/ribbon";
+import { orderTemplates, tplMeta, UPLOAD_BUSY_TITLE } from "../create/ribbon";
 import { Layer, lsDelay } from "./Layer";
 
-export function TemplatesLayer({ fresh, onUpload }: {
+export function TemplatesLayer({ fresh, onUpload, busy }: {
   /** Только что загруженный шаблон — первым, как в ленте. */
   fresh: string | null;
   /** «Загрузить свой»: раздел уезжает, раскрывается шаг 01 и над ним — выбор файла. */
   onUpload(): void;
+  /** Файл уже разбирается: «Загрузить свой» не нажимается. */
+  busy: boolean;
 }) {
   const { ui, dispatch, templates, templateId } = useApp();
   const pick = usePickTemplate();
@@ -37,7 +39,8 @@ export function TemplatesLayer({ fresh, onUpload }: {
         <div className="ga-scroll p2-fade">
           <div className="ga-grid">
             <div className="p2-ls" style={lsDelay(160)}>
-              <button type="button" className="p2-card" onClick={onUpload}>
+              <button type="button" className="p2-card" onClick={busy ? undefined : onUpload} aria-disabled={busy || undefined}
+                title={busy ? UPLOAD_BUSY_TITLE : undefined}>
                 <span className="p2-cover ga-act" style={{ height: "auto", aspectRatio: "16 / 9" }}>
                   <span className="p2-lic" aria-hidden="true"><span className="p2-lic-b" /><span className="p2-lic-f"><Icon name="upload" size={22} /></span></span>
                 </span>

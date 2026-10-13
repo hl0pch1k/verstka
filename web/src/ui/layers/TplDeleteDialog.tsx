@@ -9,6 +9,7 @@ import { tplLabel } from "../../lib/plain";
 import { plural } from "../../lib/utils";
 import type { TemplateListItem } from "../../types";
 import { cls } from "../kit/cls";
+import { ErrorLine } from "../kit/ErrorLine";
 import { Icon } from "../kit/Icon";
 import { Spinner } from "../kit/Spinner";
 import { usePresence } from "../kit/usePresence";
@@ -97,12 +98,7 @@ export function TplDeleteDialog() {
             </div>
           </div>
           <p id="dl-desc" style={{ margin: "16px 0 0", fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#5A6272" }}>Уже собранные презентации останутся.</p>
-          {err && (
-            <p role="alert" style={{ display: "flex", alignItems: "flex-start", gap: 8, margin: "16px 0 0", fontSize: 14, fontWeight: 600, lineHeight: "20px", color: "#DC2626" }}>
-              <span style={{ display: "flex", flex: "none", paddingTop: 2 }}><Icon name="alert" size={16} /></span>
-              <span>{err}</span>
-            </p>
-          )}
+          {err && <ErrorLine text={err} style={{ marginTop: 16 }} />}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 16, marginTop: 24 }}>
             <button ref={cancel} type="button" className="p2-ob" onClick={no} disabled={busy}>Отмена</button>
             <button type="button" className="p2-cta" onClick={() => void yes()} disabled={busy} aria-busy={busy} style={{ height: 48, padding: "0 24px", fontSize: 15 }}>

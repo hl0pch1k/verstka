@@ -2,14 +2,15 @@
 // `#p2-b1` — лента обложек (C-templates), файл над шагом (C-upload) и разбор загруженного файла (C-analyzing).
 // Разметка — boards/V2.dc.html, плита 01 и модуль tp. Загрузка живёт в `useTemplateUpload` (AppShell): её начинают
 // и плитка ленты, и перетаскивание на плиту, и «Загрузить свой» в разделе «Шаблоны».
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useApp } from "../../store";
 import { templateTitle, tplLabel } from "../../lib/plain";
 import { cls } from "../kit/cls";
-import { Icon } from "../kit/Icon";
+import { ErrorLine } from "../kit/ErrorLine";
+import { Spinner } from "../kit/Spinner";
 import { Analysis } from "./Analysis";
 import { Cover, inkOf, Ribbon } from "./TemplateRibbon";
-import { analysisFacts, analysisSteps, ANALYSIS_STEPS, orderTemplates, tplMeta, type AnalysisFacts, type StepState } from "./ribbon";
+import { analysisError, analysisFacts, analysisSteps, ANALYSIS_STEPS, orderTemplates, tplMeta, type AnalysisFacts, type StepState } from "./ribbon";
 import { FileInput, UploadZone, useFileDrop } from "./UploadZone";
 
 /** idle — лента; run — файл уходит на сервер и разбирается; settle — разбор закончился, решается итог; done — все
@@ -25,8 +26,12 @@ export interface TemplateUpload {
   file: File | null;
   /** Только что загруженный шаблон: первым в ленте и в разделе. */
   fresh: string | null;
-  /** Текст неудачи (fail). */
+  /** Текст неудачи (fail) как пришёл: сырой, для показа не годится — см. `failure`. */
   error: string | null;
+  /** Идёт загрузка или разбор (run, settle, done, out): новый файл не принимается. */
+  busy: boolean;
+  /** Неудача (fail) для показа: причина по-русски и можно ли повторить с тем же файлом (`analysisError`). */
+  failure: { text: string; retry: boolean } | null;
   steps: StepState[];
   facts: AnalysisFacts;
   inputRef: RefObject<HTMLInputElement>;
@@ -104,7 +109,10 @@ export function useTemplateUpload(): TemplateUpload {
   if (phase === "done" || phase === "out") steps = ALL_DONE;
   else if (live && job) steps = lastSteps.current = analysisSteps(job.message, job.progress);
 
-  const pick = useCallback(() => inputRef.current?.click(), []);
+  // пока файл разбирается, второй не выбирают: окно выбора не открывается, выбранное молча пропало бы (start занят)
+  const pick = useCallback(() => {
+    if (!BUSY.includes(phaseNow.current)) inputRef.current?.click();
+  }, []);
   const retry = useCallback(() => {
     if (file) start(file);
   }, [file, start]);
@@ -113,16 +121,25 @@ export function useTemplateUpload(): TemplateUpload {
     setError(null);
     clearNotice("template");
   }, [clearNotice]);
-  return { phase, file, fresh, error, steps, facts, inputRef, start, pick, retry, dismiss };
+  const busy = BUSY.includes(phase);
+  const failure = useMemo(() => (phase === "fail" ? analysisError(error, file?.name) : null), [phase, error, file]);
+  return { phase, file, fresh, error, busy, failure, steps, facts, inputRef, start, pick, retry, dismiss };
 }
 
-const NOTE: CSSProperties = {
-  display: "inline-flex", alignItems: "center", gap: 8, minWidth: 0, maxWidth: 480, fontSize: 14, fontWeight: 600, lineHeight: "20px",
-  color: "#DC2626", whiteSpace: "nowrap",
-};
+/** Строка в свёрнутой шапке, пока файл разбирается. */
+function RunningLine({ name }: { name: string }) {
+  return (
+    <span role="status" title={name || undefined} style={{ display: "inline-flex", alignItems: "center", gap: 8, minWidth: 0, fontSize: 14, fontWeight: 600, lineHeight: "20px", color: "#5A6272", whiteSpace: "nowrap" }}>
+      <span style={{ display: "flex", flex: "none", color: "#2563EB" }}><Spinner size={16} /></span>
+      <span>Разбираю шаблон…</span>
+    </span>
+  );
+}
 
 /** Заголовок плиты 01 справа (слот `h1`): выбранный шаблон и «Сменить», на раскрытом шаге — «Готово». Строка ошибки
- *  области «Шаблон», которая пришла не от разбора (список, манифест), стоит перед ними. */
+ *  области «Шаблон», которая пришла не от разбора (список, манифест), стоит перед ними. Пока шаг свёрнут, а файл
+ *  разбирается, вместо шаблона стоит строка «Разбираю шаблон…»; если разбор не удался — красная строка с причиной
+ *  (полная коробка с «Попробовать ещё раз» — на раскрытом шаге, «Сменить» и заголовок его раскрывают). */
 export function TemplateHead({ upload }: { upload: TemplateUpload }) {
   const { ui, dispatch, templates, templateId, notices } = useApp();
   const open = ui.screen === "create" && ui.open === "tpl";
@@ -131,19 +148,18 @@ export function TemplateHead({ upload }: { upload: TemplateUpload }) {
   return (
     <>
       <span style={{ flex: 1, minWidth: 0 }} />
-      {note && (
-        <span role="alert" style={NOTE} title={note}>
-          <Icon name="alert" size={16} />
-          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{note}</span>
-        </span>
-      )}
+      {note && <ErrorLine text={note} lines={1} style={{ maxWidth: 480 }} />}
       {open ? (
         <div key="open" className="p2-in" style={{ display: "flex", alignItems: "center", gap: 24 }}>
           <button type="button" className="p2-ob" onClick={() => dispatch({ type: "open", step: "text" })} style={{ height: 40 }}>Готово</button>
         </div>
       ) : (
         <div key="closed" className="p2-in" style={{ display: "flex", alignItems: "center", gap: 24 }}>
-          {t && (
+          {upload.phase === "run" || upload.phase === "settle" ? (
+            <RunningLine name={upload.file?.name ?? ""} />
+          ) : upload.failure ? (
+            <ErrorLine text={upload.failure.text} lines={1} style={{ maxWidth: 720 }} />
+          ) : t && (
             <div style={{ display: "flex", alignItems: "center", gap: 16, minWidth: 0 }}>
               <Cover src={t.cover_url} kind="m" ink={inkOf(t)} label={`Обложка шаблона ${tplLabel(t)}`} />
               <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
@@ -166,8 +182,7 @@ export function TemplateBody({ upload }: { upload: TemplateUpload }) {
   const { ui, dispatch, templates, notices } = useApp();
   const on = ui.screen === "create" && ui.open === "tpl" && !ui.more;
   const body = useRef<HTMLDivElement>(null);
-  const busy = BUSY.includes(upload.phase);
-  const over = useFileDrop(body, on && !busy, upload.start);
+  const over = useFileDrop(body, on && !upload.busy, upload.start);
   const peek = (id: string) => dispatch({ type: "set", patch: { tplPreview: id, tplDelete: null } });
   const gallery = () => dispatch({ type: "sect", sect: "tpls" });
   const fileName = upload.file?.name ?? "";
@@ -176,10 +191,10 @@ export function TemplateBody({ upload }: { upload: TemplateUpload }) {
     <div id="p2-b1" ref={body} className={cls("p2-body p2-g4", on ? "p2-on" : "p2-off")}
       style={{ position: "relative", display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 16, margin: "24px 0 0 192px" }}>
       {upload.phase === "idle" ? (
-        <Ribbon fresh={upload.fresh} onPeek={peek} onGallery={gallery} onUpload={upload.pick} />
+        <Ribbon fresh={upload.fresh} onPeek={peek} onGallery={gallery} onUpload={upload.pick} busy={upload.busy} />
       ) : (
         <Analysis list={orderTemplates(templates, upload.fresh)} name={templateTitle(fileName)} fileName={fileName}
-          steps={upload.steps} facts={upload.facts} out={upload.phase === "out"} error={upload.phase === "fail" ? upload.error : null}
+          steps={upload.steps} facts={upload.facts} out={upload.phase === "out"} error={upload.failure?.text ?? null} canRetry={upload.failure?.retry ?? true}
           info={upload.phase === "fail" ? null : info} onPeek={peek} onGallery={gallery}
           onRetry={upload.retry} onOther={upload.pick} onClose={upload.dismiss} />
       )}

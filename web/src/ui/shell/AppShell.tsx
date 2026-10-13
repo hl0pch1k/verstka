@@ -7,6 +7,7 @@ import { tplLabel } from "../../lib/plain";
 import type { TemplateListItem } from "../../types";
 import { tplMeta } from "../create/ribbon";
 import { TemplateBody, TemplateHead, useTemplateUpload } from "../create/TemplatePlate";
+import { useStrayFileDrop } from "../create/UploadZone";
 import { Deck } from "../deck/Deck";
 import type { StripData } from "../deck/Strip";
 import { Scrim } from "../layers/Scrim";
@@ -31,8 +32,11 @@ export function AppShell() {
   const s1 = templateStrip(templates.find((t) => t.template_id === templateId));
   // загрузка своего шаблона — одна на плиту 01 и раздел «Шаблоны»
   const upload = useTemplateUpload();
+  // файл, отпущенный мимо включённой зоны, браузер не открывает
+  useStrayFileDrop();
   // «Загрузить свой» в разделе: раздел уезжает, раскрывается шаг 01 и над ним — выбор файла (V2 `tpGalUp`)
   const uploadFromGallery = () => {
+    if (upload.busy) return; // плитка в разделе занята (aria-disabled), сюда не дойти; на случай прямого вызова
     if (ui.screen !== "create") dispatch({ type: "go", screen: "create" });
     dispatch({ type: "sect", sect: null });
     dispatch({ type: "open", step: "tpl" });
@@ -43,7 +47,7 @@ export function AppShell() {
       {/* пока раздел открыт, видимая полоса колоды над слоем закрывает его */}
       <Scrim open={!!ui.sect} onClose={() => dispatch({ type: "sect", sect: null })}
         label={ui.sect === "hist" ? "Закрыть «Мои презентации»" : "Закрыть «Шаблоны»"} />
-      <TemplatesLayer fresh={upload.fresh} onUpload={uploadFromGallery} />
+      <TemplatesLayer fresh={upload.fresh} onUpload={uploadFromGallery} busy={upload.busy} />
       <TplPreviewLayer />
       <TplDeleteDialog />
     </>

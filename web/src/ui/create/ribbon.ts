@@ -1,6 +1,7 @@
 // Шаг 01 «Шаблон»: порядок ленты, подписи шаблона и ход разбора загруженного файла — чистые функции (V2, модуль tp:
 // `tpAll`, `tpRibL`, `tpSteps`). React здесь не нужен: всё покрыто ribbon.test.ts.
 import { humanizeJobMessage } from "../../lib/jobText";
+import { templateFileProblem } from "../../lib/templateFiles";
 import { plural } from "../../lib/utils";
 import type { TemplateListItem } from "../../types";
 
@@ -102,4 +103,29 @@ export function analysisRows(states: StepState[], f: AnalysisFacts): AnalysisRow
     { a: "правила оформления собраны" },
   ];
   return rows.map((r, i) => ({ ...r, state: states[i] ?? "pend" }));
+}
+
+/** Подсказка плиток «Загрузить свой», пока файл уже разбирается: второй файл в очередь не ставится. */
+export const UPLOAD_BUSY_TITLE = "Идёт разбор шаблона";
+
+// ── Неудача разбора: только по-русски
+/** Что сказать, когда причина пришла не по-русски (сообщение lxml, zipfile, Python): файл не прочитался. */
+export const FILE_BROKEN = "Не удалось разобрать файл: он повреждён или сохранён в неподдерживаемом формате.";
+const CYRILLIC = /[а-яё]/i;
+
+/** Причина неудачи для человека и можно ли повторить. Русский текст остаётся как есть (отказ по типу файла, ответ
+ *  сервера с известной причиной); английские сообщения библиотек («Couldn't find end of Start Tag…») и хвосты сети
+ *  («Failed to fetch») не показываются никогда. Отказ по типу файла (`.pdf`, `.key`) повторять бессмысленно:
+ *  «Попробовать ещё раз» отправил бы тот же файл, и ответ был бы тот же — тогда нужен другой файл. */
+export function analysisError(err: string | null, file?: string): { text: string; retry: boolean } {
+  const retry = !(file && templateFileProblem(file));
+  // сервер дописывает трассировку после первой строки
+  const first = (err ?? "").split("\n").map((l) => l.trim()).find(Boolean) ?? "";
+  const text = first.replace(/^Не получилось:\s*/, "");
+  const sent = text.match(/^Не удалось загрузить шаблон:\s*(.*)$/); // сбой отправки файла: store.report(…, «Не удалось загрузить шаблон»)
+  if (sent) {
+    if (/^Сеть недоступна/.test(sent[1])) return { text: "Не удалось загрузить файл: нет связи с сервером. Проверьте соединение.", retry };
+    if (!CYRILLIC.test(sent[1])) return { text: "Не удалось загрузить файл на сервер. Попробуйте ещё раз.", retry };
+  }
+  return { text: CYRILLIC.test(text) ? text : FILE_BROKEN, retry };
 }

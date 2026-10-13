@@ -8,6 +8,7 @@ import { errText } from "../../lib/narrate";
 import { templateTitle, tplLabel } from "../../lib/plain";
 import { plural } from "../../lib/utils";
 import type { TemplateListItem } from "../../types";
+import { ErrorLine } from "../kit/ErrorLine";
 import { Icon } from "../kit/Icon";
 import { Cover, hexOf, inkOf, usePickTemplate } from "../create/TemplateRibbon";
 import { Layer, lsDelay } from "./Layer";
@@ -162,10 +163,7 @@ export function TplPreviewLayer() {
                 )}
                 <div style={{ display: "flex", alignItems: "center", gap: 16, height: 24 }}>
                   {err ? (
-                    <span role="alert" style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 14, fontWeight: 600, lineHeight: "20px", color: "#DC2626", whiteSpace: "nowrap" }}>
-                      <Icon name="alert" size={16} />
-                      <span>{err}</span>
-                    </span>
+                    <ErrorLine text={err} lines={1} />
                   ) : (
                     <>
                       {!!t.palette?.length && (

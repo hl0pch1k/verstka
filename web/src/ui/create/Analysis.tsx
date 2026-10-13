@@ -1,11 +1,13 @@
 // Разбор загруженного шаблона (C-analyzing): слева 2×2 — разбираемый файл (скелетон с полосой хода), две первые обложки
 // ленты и «Все шаблоны», справа на две колонки — восемь шагов разбора. Разметка — boards/V2.dc.html, `tpRunOn`.
 // Шаги идут по сообщениям задачи `analyze` (ribbon.ts `analysisSteps`); по окончании разбор гаснет за 240 мс (`tp-out`).
-// Неудача — строка в той же коробке: текст ошибки и «Попробовать ещё раз».
+// Неудача — строка в той же коробке: причина по-русски (ribbon.ts `analysisError`) и «Попробовать ещё раз»; если файл
+// не принят по типу — повторять нечего, вместо него «Выбрать другой файл».
 import type { CSSProperties } from "react";
 import { useApp } from "../../store";
 import type { TemplateListItem } from "../../types";
 import { cls } from "../kit/cls";
+import { ErrorLine } from "../kit/ErrorLine";
 import { Icon } from "../kit/Icon";
 import { ActTile, moreText, TemplateTile, usePickTemplate } from "./TemplateRibbon";
 import { analysisRows, ANALYSIS_STEPS, type AnalysisFacts, type StepState } from "./ribbon";
@@ -16,7 +18,7 @@ const H2: CSSProperties = {
   color: "#0B1220", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
 };
 
-export function Analysis({ list, name, fileName, steps, facts, out, error, info, onPeek, onGallery, onRetry, onOther, onClose }: {
+export function Analysis({ list, name, fileName, steps, facts, out, error, canRetry, info, onPeek, onGallery, onRetry, onOther, onClose }: {
   /** Шаблоны в порядке ленты (первые два стоят рядом с разбором). */
   list: TemplateListItem[];
   /** Имя шаблона («Northwind Q3») и файла («Northwind Q3.pptx»). */
@@ -24,8 +26,10 @@ export function Analysis({ list, name, fileName, steps, facts, out, error, info,
   steps: StepState[]; facts: AnalysisFacts;
   /** Разбор гаснет (240 мс), затем проявляется лента. */
   out: boolean;
-  /** Неудача разбора — текст строки; null, пока разбор идёт. */
+  /** Неудача разбора — текст строки (уже по-русски); null, пока разбор идёт. */
   error: string | null;
+  /** С тем же файлом можно ещё раз; нет — файл не принят по типу, нужен другой. */
+  canRetry: boolean;
   /** Строка о ходе («Модель не подключена — разберу шаблон по правилам»). */
   info: string | null;
   onPeek(id: string): void; onGallery(): void; onRetry(): void; onOther(): void; onClose(): void;
@@ -80,17 +84,23 @@ export function Analysis({ list, name, fileName, steps, facts, out, error, info,
                   <Icon name="x" size={18} />
                 </button>
               </div>
-              <p role="alert" style={{ display: "flex", alignItems: "flex-start", gap: 8, minWidth: 0, margin: 0, fontSize: 14, fontWeight: 600, lineHeight: "20px", color: "#DC2626" }}>
-                <span style={{ display: "flex", flex: "none", paddingTop: 2 }}><Icon name="alert" size={16} /></span>
-                <span style={{ minWidth: 0, display: "-webkit-box", WebkitLineClamp: 6, WebkitBoxOrient: "vertical", overflow: "hidden" }} title={error}>{error}</span>
-              </p>
+              <ErrorLine text={error} lines={6} />
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <button type="button" className="p2-ob" onClick={onRetry} style={{ height: 40, padding: "0 16px" }}>
-                <Icon name="refresh" size={16} />
-                <span>Попробовать ещё раз</span>
-              </button>
-              <button type="button" className="p2-gb" onClick={onOther}>Другой файл</button>
+              {canRetry ? (
+                <>
+                  <button type="button" className="p2-ob" onClick={onRetry} style={{ height: 40, padding: "0 16px" }}>
+                    <Icon name="refresh" size={16} />
+                    <span>Попробовать ещё раз</span>
+                  </button>
+                  <button type="button" className="p2-gb" onClick={onOther}>Другой файл</button>
+                </>
+              ) : (
+                <button type="button" className="p2-ob" onClick={onOther} style={{ height: 40, padding: "0 16px" }}>
+                  <Icon name="upload" size={16} />
+                  <span>Выбрать другой файл</span>
+                </button>
+              )}
             </div>
           </>
         ) : (

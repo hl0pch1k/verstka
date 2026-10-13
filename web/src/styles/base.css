@@ -63,6 +63,11 @@ a{color:#0A0F1F}a:hover{color:#1E40AF}
 .p2-card{display:block;width:100%;padding:0;border:0;background:none;text-align:left;cursor:pointer;border-radius:16px;transition:transform 160ms var(--ease)}
 .p2-card:hover{transform:translateY(-2px)}
 .p2-card:active{transform:scale(.98)}
+/* плитка занята (aria-disabled): бледная, не приподнимается и не светится при наведении; подсказка title остаётся */
+.p2-card[aria-disabled="true"]{opacity:.32;cursor:default}
+.p2-card[aria-disabled="true"]:hover,.p2-card[aria-disabled="true"]:active{transform:none}
+.p2-card[aria-disabled="true"]:hover .p2-cover::after{opacity:0}
+.p2-card[aria-disabled="true"]:hover .p2-lic-f,.p2-card[aria-disabled="true"]:focus-visible .p2-lic-f{transform:none;box-shadow:0 1px 2px rgba(11,18,32,.06)}
 .p2-cover{position:relative;display:block;height:142px;border-radius:16px}
 .p2-cover::after{content:"";position:absolute;inset:0;border-radius:16px;box-shadow:0 12px 32px 0 rgba(11,18,32,.14);opacity:0;transition:opacity 160ms var(--ease);pointer-events:none}
 .p2-card:hover .p2-cover::after{opacity:1}
