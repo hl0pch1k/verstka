@@ -11,7 +11,10 @@ import { ErrorLine } from "../kit/ErrorLine";
 import { Spinner } from "../kit/Spinner";
 import { Analysis } from "./Analysis";
 import { Cover, inkOf, Ribbon } from "./TemplateRibbon";
-import { analysisError, analysisFacts, analysisSteps, ANALYSIS_STEPS, orderTemplates, READING_DECK, tplMeta, UPLOAD_BUSY_TITLE, uploadFailed, type AnalysisFacts, type StepState } from "./ribbon";
+import { analysisError, analysisFacts, analysisSteps, ANALYSIS_STEPS, fileRefusal, orderTemplates, READING_DECK, tplMeta, UPLOAD_BUSY_TITLE, uploadFailed, type AnalysisFacts, type StepState } from "./ribbon";
+import { Icon } from "../kit/Icon";
+import { usePresence } from "../kit/usePresence";
+import { useHeld } from "./ImproveNote";
 import { FileInput, UploadZone, useFileDrop } from "./UploadZone";
 import { ribbonLayout } from "../deck/fit";
 import { useDeckFit } from "../deck/useDeckFit";
@@ -36,6 +39,11 @@ export interface TemplateUpload {
   busy: boolean;
   /** Почему файл сейчас не принимается (подсказка занятой плитки «Загрузить свой»); null — принимается. */
   busyWhy: string | null;
+  /** Файл выбрали или навели на плиту, пока читается презентация «Улучшить готовую»: строка в шапке шага, почему он не
+   *  принят («Сначала дождитесь чтения презентации»); уходит, когда чтение кончилось. null — строки нет. */
+  refused: string | null;
+  /** Файл навели на занятую плиту: строка `refused`. */
+  refuse(): void;
   /** Неудача (fail) для показа: причина по-русски и можно ли повторить с тем же файлом (`analysisError`). */
   failure: { text: string; retry: boolean } | null;
   steps: StepState[];
@@ -71,9 +79,19 @@ export function useTemplateUpload(): TemplateUpload {
   const phaseNow = useRef(phase);
   phaseNow.current = phase;
 
+  // файл, который не принят, пока читается презентация: почему — строкой в шапке шага (не молча)
+  const [refused, setRefused] = useState<string | null>(null);
+  useEffect(() => {
+    if (!reading) setRefused(null);
+  }, [reading]);
+  const refuse = useCallback(() => setRefused(fileRefusal(readingNow.current ? "deck" : null, "template")), []);
+
   const start = useCallback((f: File) => {
-    // разбор уже идёт или читается презентация «Улучшить готовую» (обе выбирают свой шаблон): второй файл не принимается
-    if (BUSY.includes(phaseNow.current) || readingNow.current) return;
+    // читается презентация «Улучшить готовую» (обе выбирают свой шаблон): файл не принимается, строка говорит почему;
+    // свой разбор уже идёт — его коробка на виду, второй файл не принимается
+    if (readingNow.current) return refuse();
+    if (BUSY.includes(phaseNow.current)) return;
+    setRefused(null);
     const n = ++seq.current;
     since.current = Date.now();
     lastSteps.current = analysisSteps("", 0);
@@ -88,7 +106,7 @@ export function useTemplateUpload(): TemplateUpload {
     }).then(() => {
       if (seq.current === n) setPhase((p) => (p === "run" ? "settle" : p));
     });
-  }, [uploadTemplate, clearNotice]);
+  }, [uploadTemplate, clearNotice, refuse]);
 
   // итог: строка ошибки области «Шаблон», пришедшая после начала этой загрузки, — неудача; иначе шаблон уже выбран
   // (adoptManifest) — он и есть новый
@@ -142,7 +160,21 @@ export function useTemplateUpload(): TemplateUpload {
   const busy = own || reading;
   const busyWhy = own ? UPLOAD_BUSY_TITLE : reading ? READING_DECK : null;
   const failure = useMemo(() => (phase === "fail" ? analysisError(error, file?.name) : null), [phase, error, file]);
-  return { phase, file, fresh, error, busy, busyWhy, failure, steps, facts, inputRef, start, pick, retry, dismiss };
+  return { phase, file, fresh, error, busy, busyWhy, refused, refuse, failure, steps, facts, inputRef, start, pick, retry, dismiss };
+}
+
+/** Тихая строка в шапке шага: файл не принят, пока читается презентация. Проявляется и гаснет со своим текстом. */
+function RefusedLine({ text }: { text: string | null }) {
+  const p = usePresence(text !== null, 240);
+  const shown = useHeld(text);
+  if (!p.mounted || !shown) return null;
+  return (
+    <span role="status" className={p.shown ? "p2-on" : "p2-off"}
+      style={{ display: "inline-flex", alignItems: "center", gap: 8, minWidth: 0, fontSize: 14, fontWeight: 600, lineHeight: "20px", color: "#5A6272", whiteSpace: "nowrap" }}>
+      <span style={{ display: "flex", flex: "none", color: "#2563EB" }}><Icon name="info" size={16} /></span>
+      <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{shown}</span>
+    </span>
+  );
 }
 
 /** Строка в свёрнутой шапке, пока файл разбирается. */
@@ -197,6 +229,7 @@ export function TemplateHead({ upload }: { upload: TemplateUpload }) {
           <ErrorLine text={note} lines={1} style={{ maxWidth: 480 }} />
         </span>
       )}
+      <RefusedLine text={upload.refused} />
       {open ? (
         <div key="open" className="p2-in" style={{ display: "flex", alignItems: "center", gap: 24 }}>
           <button type="button" className="p2-ob" onClick={() => dispatch({ type: "open", step: "text" })} style={{ height: 40 }}>Готово</button>
@@ -236,7 +269,8 @@ export function TemplateBody({ upload }: { upload: TemplateUpload }) {
   const fit = useDeckFit();
   const { cols, covers } = ribbonLayout(fit);
   const body = useRef<HTMLDivElement>(null);
-  const over = useFileDrop(body, on && !upload.busy, upload.start);
+  // пока читается презентация «Улучшить готовую», файл на плиту не принимается — шапка шага говорит почему
+  const over = useFileDrop(body, on && !upload.busy, upload.start, on && upload.busyWhy === READING_DECK ? upload.refuse : undefined);
   const peek = (id: string) => dispatch({ type: "set", patch: { tplPreview: id, tplDelete: null } });
   const gallery = () => dispatch({ type: "sect", sect: "tpls" });
   const fileName = upload.file?.name ?? "";

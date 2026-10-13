@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { BRIEF_MIN, BRIEF_MIN_TOPIC, SAMPLE_BRIEF } from "../../lib/createForm";
-import { charsLabel, clipLine, deckError, fileKind, fileTextIssue, improveLive, improveNoteParts, improveDeckStrip, improveShift, improveStep, improveStripMeta, modelOnOf, NOT_UTF8, sampleText, SHORT_NO_WRITER, textError, textLine, textPreview, textStrip, TW, TW0, twBlink, twStep, twText, writerOn, type Tw } from "./textRules";
+import { charsLabel, clipLine, hintText, READY_HINT, deckError, fileKind, fileTextIssue, improveLive, improveNoteParts, improveDeckStrip, improveShift, improveStep, improveStripMeta, modelOnOf, NOT_UTF8, sampleText, SHORT_NO_WRITER, textError, textLine, textPreview, textStrip, TW, TW0, twBlink, twStep, twText, writerOn, type Tw } from "./textRules";
 
 /** Сервер пишет текст по теме (`health.writer`) — и без него. */
 const W = { writer: true };
@@ -308,4 +308,16 @@ test("полоса 01 на «Создать» в «Улучшить готову
   assert.deepEqual(improveDeckStrip(src, "t9"), { title: "Итоги квартала.pptx", meta: "14 слайдов · оформление из презентации" });
   // выбрали другой шаблон — полоса о нём
   assert.equal(improveDeckStrip(src, "t1"), null);
+});
+
+test("подсказка пустого поля без агента-писателя — начало готового текста-примера, без печати темы (R5)", () => {
+  assert.equal(hintText(TW0, true), twText(TW0));
+  assert.ok(READY_HINT.startsWith("Например: "));
+  assert.ok(SAMPLE_BRIEF.startsWith(READY_HINT.slice("Например: ".length)));
+  // печать не идёт: место печати подсказку не меняет
+  const mid = twStep(twStep(TW0).s).s;
+  assert.equal(hintText(mid, false), READY_HINT);
+  assert.equal(hintText(TW0, false), READY_HINT);
+  // «Взять пример» без писателя даёт тот же текст, с которого начинается подсказка
+  assert.equal(sampleText(false, TW[0]), SAMPLE_BRIEF);
 });

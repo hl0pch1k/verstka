@@ -135,6 +135,11 @@ export function twStep(s: Tw, list: string[] = TW): { s: Tw; ms: number } {
   return { s: { i: (s.i + 1) % list.length, n: 1, mode: "type", k: 0 }, ms: 45 };
 }
 export const twText = (s: Tw, list: string[] = TW) => `Например: ${list[s.i].slice(0, s.n)}`;
+/** Подсказка пустого поля, когда агент текст не пишет (`writerOn` — нет): начало готового текста-примера (его же даёт
+ *  «Взять пример»), без печати — тема здесь не годится, и подсказка её не предлагает. */
+export const READY_HINT = `Например: ${SAMPLE_BRIEF.split("\n")[0]}`;
+/** Текст подсказки пустого поля: агент пишет текст — печатающаяся тема (`twText`); не пишет — готовый текст (`READY_HINT`). */
+export const hintText = (s: Tw, writer: boolean, list: string[] = TW) => (writer ? twText(s, list) : READY_HINT);
 /** Курсор мигает, пока фраза стоит (держим) и в паузе; пока печатает и стирает — горит. */
 export const twBlink = (s: Tw) => s.mode === "hold" || s.mode === "pause";
 

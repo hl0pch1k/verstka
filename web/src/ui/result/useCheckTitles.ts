@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "../../api";
 
 // Названия проверок (GET /api/checks) — заголовки рядов замечаний. Список один на всё приложение: его просят один раз
-// за сессию; не ответил — ряды говорят своими словами (remarks.ts `remarkTitle`), следующий экран попросит снова.
+// за сессию; не ответил — ряды говорят своими словами (marks.ts `remarkTitle`), следующий экран попросит снова.
 let titles: Record<string, string> | null = null;
 let asking: Promise<Record<string, string> | null> | null = null;
 

@@ -63,17 +63,30 @@ export function useStrayFileDrop(): void {
 }
 
 /** Перетаскивание файла на плиту, внутри которой стоит `anchor`: пока файл над плитой — `true` (зона видна); отпущенный
- *  файл уходит в `onFile`. Считает входы и выходы (dragenter/dragleave приходят и от вложенных элементов). */
-export function useFileDrop(anchor: RefObject<HTMLElement>, enabled: boolean, onFile: (f: File) => void): boolean {
+ *  файл уходит в `onFile`. Считает входы и выходы (dragenter/dragleave приходят и от вложенных элементов). Плита занята
+ *  (`enabled` — нет), а `onRefused` есть: файл, наведённый на плиту, не принимается (зоны нет, курсор «нельзя») — и
+ *  `onRefused` ставит строку, почему. */
+export function useFileDrop(anchor: RefObject<HTMLElement>, enabled: boolean, onFile: (f: File) => void, onRefused?: () => void): boolean {
   const [over, setOver] = useState(false);
   const depth = useRef(0);
   const take = useRef(onFile);
   take.current = onFile;
+  const refuse = useRef(onRefused);
+  refuse.current = onRefused;
+  const refusing = !enabled && !!onRefused;
   useEffect(() => {
     const plate = anchor.current?.closest("section");
     depth.current = 0;
     setOver(false);
-    if (!plate || !enabled) return;
+    if (!plate) return;
+    if (!enabled) {
+      if (!refusing) return;
+      const no = (e: DragEvent) => {
+        if (hasFiles(e)) refuse.current?.();
+      };
+      plate.addEventListener("dragenter", no);
+      return () => plate.removeEventListener("dragenter", no);
+    }
     const enter = (e: DragEvent) => {
       if (!hasFiles(e)) return;
       e.preventDefault();
@@ -108,6 +121,6 @@ export function useFileDrop(anchor: RefObject<HTMLElement>, enabled: boolean, on
       plate.removeEventListener("dragleave", leave);
       plate.removeEventListener("drop", drop);
     };
-  }, [anchor, enabled]);
+  }, [anchor, enabled, refusing]);
   return over;
 }

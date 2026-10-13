@@ -70,11 +70,11 @@ export function chipsOf(main: Issue[], filter: QFilter): QChip[] {
 export interface QItem { id: string; tone: QTone; label: string; cls: string; color: string; icon: IconName; msg: string; fixable: boolean; checked: boolean; busy: boolean }
 export interface QGroup { slide: number; label: string; sub: string; img: string | null; count: string; current: boolean; aria: string; items: QItem[] }
 
-/** Текст замечания: что не так и, если проверка подсказала, как исправить — словами человека. */
 /** Заметка о проверке, которая упала (отчёты до того, как сервер стал писать её по-русски без исключения):
  *  «проверка contrast упала: KeyError …» — без технического хвоста. */
 const CRASHED = /^проверка\s+\S+\s+упала(?:[:\s]|$)/i;
 
+/** Текст замечания: что не так и, если проверка подсказала, как исправить — словами человека. */
 export function issueText(i: Issue): string {
   if (CRASHED.test(i.message)) return "Проверка не выполнилась — её замечаний в отчёте нет.";
   const msg = plainMessage(i.message);

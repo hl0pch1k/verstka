@@ -14,14 +14,15 @@ import { cls } from "../kit/cls";
 import { ErrorLine } from "../kit/ErrorLine";
 import { Icon } from "../kit/Icon";
 import { Spinner } from "../kit/Spinner";
+import { useSwap } from "../kit/useSwap";
 import { hintTail } from "../deck/fit";
 import { useDeckWidth } from "../deck/useDeckFit";
 import { FileMenu, type FilePick } from "./FileMenu";
-import { TEMPLATE_BUSY } from "./ribbon";
+import { fileRefusal, TEMPLATE_BUSY } from "./ribbon";
 import { ImproveNote, useHeld, useImproveOn, useModelOn } from "./ImproveNote";
 import {
   charsLabel, DECK_ACCEPT, deckError, fileKind, fileTextIssue, improveLive, improveShift, improveStep, MAX_TEXT_BYTES, sampleText, TEXT_ACCEPT, textError, writerOn,
-  textLine, textPreview, TW, TW0, TW_FIRST_MS, TW_WAKE_MS, twBlink, twStep, twText, type ImproveLive, type TextIssue, type TextLine, type Tw,
+  textLine, textPreview, TW, TW0, TW_FIRST_MS, TW_WAKE_MS, twBlink, twStep, hintText, type ImproveLive, type TextIssue, type TextLine, type Tw,
 } from "./textRules";
 
 const show = (on: boolean) => (on ? "p2-on" : "p2-off");
@@ -63,7 +64,8 @@ export interface TextPlate {
   line: TextLine;
   /** Модель пишет тексты слайдов (подпись «Это готовый текст…» в заголовке). */
   writes: boolean;
-  /** Тихая строка о ходе чтения («Модель не подключена — прочитаю презентацию по правилам»); null — её нет. */
+  /** Тихая строка о ходе чтения («Модель не подключена — прочитаю презентацию по правилам») или о презентации, которую
+   *  выбрали, пока разбирается свой шаблон («Сначала дождитесь разбора шаблона»); null — её нет. */
   info: string | null;
   /** Ошибка у поля: своя (`textIssue` — правила, файл) или неудача чтения презентации (строка области «Текст»). */
   issue: TextIssue | null;
@@ -145,9 +147,19 @@ export function useTextPlate(): TextPlate {
     if (!txOpen) setMenu(false);
   }, [txOpen]);
 
+  // презентация выбрана, пока разбирается свой шаблон: она не принята — строка под полем говорит почему (уходит, когда
+  // разбор кончился, или с новым текстом)
+  const [refused, setRefused] = useState<string | null>(null);
+  useEffect(() => {
+    if (!tplBusy) setRefused(null);
+  }, [tplBusy]);
+
   const readDeck = useCallback((f: File) => {
-    // сервер уже читает презентацию или разбирает свой шаблон: рядом не начинаем (пункт меню тоже закрыт)
-    if (readBusy.current || tplBusyNow.current) return;
+    // сервер разбирает свой шаблон: рядом не начинаем, и сказано почему (пункт меню тоже закрыт); уже читает
+    // презентацию — её строка хода на виду
+    if (tplBusyNow.current) return setRefused(fileRefusal("template", "deck"));
+    if (readBusy.current) return;
+    setRefused(null);
     const n = ++readSeq.current;
     readBusy.current = true;
     lastDeck.current = f.name;
@@ -193,6 +205,7 @@ export function useTextPlate(): TextPlate {
   const type = useCallback((v: string) => {
     setBrief(v);
     setMenu(false);
+    setRefused(null);
   }, [setBrief]);
 
   const take = useCallback(() => {
@@ -206,7 +219,7 @@ export function useTextPlate(): TextPlate {
   }, [textIssue]);
 
   const notice = notices.text?.kind === "error" ? notices.text.text : null;
-  const info = notices.text?.kind === "info" ? notices.text.text : null;
+  const info = refused ?? (notices.text?.kind === "info" ? notices.text.text : null);
   const issue: TextIssue | null = textIssue ?? (notice ? { kind: "file", text: deckError(notice, lastDeck.current) } : null);
   const seq = useRef({ key: null as string | null, n: 0 });
   const key = issue ? `${issue.kind}:${issue.text}` : null;
@@ -220,11 +233,13 @@ const reducedMotion = () => typeof window !== "undefined" && !!window.matchMedia
 
 /** Печатающаяся подсказка поверх пустого поля (`p2-tph`) с курсором `p2-caret` — ритм V2 `twTick` (`twStep`). Идёт,
  *  пока поле пустое и открыт «Создать»; поле очистили — продолжает через 400 мс с того же места (V2 `twWake`). При
- *  «уменьшить движение» стоит первая фраза. */
-function TypingHint({ live, tw }: { live: boolean; tw: MutableRefObject<{ s: Tw; started: boolean }> }) {
+ *  «уменьшить движение» стоит первая фраза. Агент текст не пишет (`writer` — нет: строка под полем просит готовый
+ *  текст) — тему подсказка не печатает: стоит начало готового текста-примера; смена — перекрёстным затуханием. */
+function TypingHint({ live, tw, writer }: { live: boolean; tw: MutableRefObject<{ s: Tw; started: boolean }>; writer: boolean }) {
   const [s, setS] = useState(tw.current.s);
+  const mode = useSwap(writer);
   useEffect(() => {
-    if (!live || reducedMotion()) return;
+    if (!live || !writer || reducedMotion()) return;
     let t = 0;
     const tick = () => {
       const r = twStep(tw.current.s);
@@ -235,11 +250,11 @@ function TypingHint({ live, tw }: { live: boolean; tw: MutableRefObject<{ s: Tw;
     t = window.setTimeout(tick, tw.current.started ? TW_WAKE_MS : TW_FIRST_MS);
     tw.current.started = true;
     return () => window.clearTimeout(t);
-  }, [live, tw]);
+  }, [live, writer, tw]);
   return (
-    <span className="p2-tph" aria-hidden="true">
-      {twText(s)}
-      <span className={cls("p2-caret", twBlink(s) && "p2-caret-blink")} />
+    <span className={cls("p2-tph", mode.cls)} aria-hidden="true">
+      {hintText(s, mode.shown)}
+      <span className={cls("p2-caret", (!mode.shown || twBlink(s)) && "p2-caret-blink")} />
     </span>
   );
 }
@@ -330,6 +345,7 @@ const NOTE_LINE: CSSProperties = { flex: "none", fontSize: 13, lineHeight: "20px
 /** Тело шага 02 (слот `p2`, `#p2-b2`). */
 export function TextBody({ tp }: { tp: TextPlate }) {
   const { ui, brief } = useApp();
+  const { writer } = useWriting();
   const on = ui.screen === "create" && ui.open === "text" && !ui.more;
   const impOn = useImproveOn();
   const [noteH, setNoteH] = useState(0);
@@ -366,7 +382,7 @@ export function TextBody({ tp }: { tp: TextPlate }) {
                 <textarea ref={tp.taRef} className="p2-ta ct-ta p2-fade" value={brief} onChange={(e) => tp.type(e.target.value)}
                   aria-invalid={!!issue} aria-describedby={issue ? "ce-err" : factsOn ? "ct-facts" : undefined}
                   style={{ flex: 1, minHeight: 0, width: "100%", padding: "0 0 24px", border: 0, resize: "none", background: "transparent", fontFamily: "inherit", fontSize: 16, fontWeight: 500, lineHeight: "24px", color: "#0B1220" }} />
-                {brief === "" && <TypingHint live={ui.screen === "create"} tw={tp.tw} />}
+                {brief === "" && <TypingHint live={ui.screen === "create"} tw={tp.tw} writer={writer} />}
               </span>
             </label>
             <div className="p2-wrap" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 24, height: 20, marginTop: 16 }}>

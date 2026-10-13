@@ -168,8 +168,6 @@ export function explainWhy(text: string | null | undefined): string | null {
   return lines.slice(1).join(" ") || null;
 }
 
-/** Объяснение сервера не получено — почему, по-человечески. 404 у открытой презентации — разбора шаблона больше нет
- *  (сервер объясняет слайд по нему). */
 /** Что делать с объяснением сервера для слайда: не нужно (у слайда свой довод); уже спрошено — взять сохранённое (и
  *  тогда, когда шаблона больше нет: ответ получен раньше); шаблона нет — не спрашивать, сказать почему; иначе — спросить. */
 export function explainPlan(need: boolean, cached: boolean, gone: boolean): "none" | "cached" | "gone" | "ask" {
@@ -178,6 +176,8 @@ export function explainPlan(need: boolean, cached: boolean, gone: boolean): "non
   return gone ? "gone" : "ask";
 }
 
+/** Объяснение сервера не получено — почему, по-человечески. 404 у открытой презентации — разбора шаблона больше нет
+ *  (сервер объясняет слайд по нему). */
 export function explainError(status: number, message: string): string {
   if (status === 404) return "Шаблона больше нет — объяснение недоступно";
   if (status === 0) return "Не удалось получить объяснение: нет связи с сервером";

@@ -69,14 +69,14 @@ const UI_TITLES: Record<string, string> = {
   fill_ratio: "Слайд слишком пустой или слишком плотный",
   chrome_moved: "Логотип или колонтитул не на месте",
 };
-const SEV_TITLE: Record<Severity, string> = { error: "Ошибка", warn: "Предупреждение", info: "Замечание" };
-
-/** Название ряда: слова интерфейса, иначе название проверки (без «(VLM)», с десятичной запятой), иначе важность. */
-export function remarkTitle(checkId: string, specTitle: string | null | undefined, severity: Severity): string {
+/** Название ряда: слова интерфейса, иначе название проверки (без «(VLM)», с десятичной запятой), иначе — по тону, то же
+ *  слово, что у метки ряда (`SEV`): пока реестр проверок не ответил, замечание модели с важностью «предупреждение» —
+ *  «Замечание модели», а не «Предупреждение» над серой меткой. */
+export function remarkTitle(checkId: string, specTitle: string | null | undefined, tone: Tone): string {
   const own = UI_TITLES[checkId];
   if (own) return own;
   const spec = (specTitle ?? "").replace(/\s*\((?:VLM|LLM)\)\s*/g, " ").replace(/(\d)\.(\d)/g, "$1,$2").trim();
-  return spec || SEV_TITLE[severity] || "Замечание";
+  return spec || SEV[tone]?.label || "Замечание";
 }
 
 /** Текст замечания для человека: коды цветов в скобках уходят (остаётся контраст), десятичная точка — запятая. */
@@ -116,7 +116,7 @@ function asRemark(i: Issue, n: number, titleOf: (checkId: string) => string | nu
   const boxes = boxesOf(i);
   const whole = boxes.length === 0;
   return {
-    id: i.id, n, tone, title: remarkTitle(i.check_id, titleOf(i.check_id), i.severity), text: remarkText(i),
+    id: i.id, n, tone, title: remarkTitle(i.check_id, titleOf(i.check_id), tone), text: remarkText(i),
     label: SEV[tone].label + (whole ? " · Весь слайд" : ""), icon: SEV[tone].icon, boxes, whole,
   };
 }

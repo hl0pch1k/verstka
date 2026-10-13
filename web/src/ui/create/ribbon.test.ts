@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { analysisError, analysisFacts, analysisRows, analysisSteps, FILE_BROKEN, ribbonItems, tplMeta, tplShort, uploadFailed } from "./ribbon";
+import { analysisError, analysisFacts, analysisRows, analysisSteps, FILE_BROKEN, fileRefusal, ribbonItems, tplMeta, tplShort, uploadFailed, WAIT_DECK, WAIT_TEMPLATE } from "./ribbon";
 import { humanizeJobMessage } from "../../lib/jobText";
 
 const t = (id: string, at: string) => ({ template_id: id, analyzed_at: at } as any);
@@ -147,4 +147,16 @@ test("неудача загрузки шаблона — только строк
   assert.equal(uploadFailed({ kind: "error", at: 900 }, 1000), false); // прежняя строка (список, манифест, давняя загрузка)
   assert.equal(uploadFailed({ kind: "info", at: 1200 }, 1000), false);
   assert.equal(uploadFailed(null, 1000), false);
+});
+
+test("файл, выбранный или перенесённый, пока идёт другой разбор: не принят — и сказано почему (R6)", () => {
+  // шаблон на шаг 01, пока читается презентация «Улучшить готовую»
+  assert.equal(fileRefusal("deck", "template"), WAIT_DECK);
+  assert.equal(WAIT_DECK, "Сначала дождитесь чтения презентации");
+  // презентация «Из файла», пока разбирается свой шаблон
+  assert.equal(fileRefusal("template", "deck"), WAIT_TEMPLATE);
+  assert.equal(WAIT_TEMPLATE, "Сначала дождитесь разбора шаблона");
+  // ничего не идёт или идёт своё (о нём говорит его строка хода)
+  assert.equal(fileRefusal(null, "template"), null);
+  assert.equal(fileRefusal("template", "template"), null);
 });

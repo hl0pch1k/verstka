@@ -26,7 +26,8 @@ test("название замечания — слова интерфейса, �
   assert.equal(remarkTitle("contrast_low", "Контраст текста к фону ниже 4.5:1", "warn"), "Контраст текста к фону ниже 4,5:1");
   assert.equal(remarkTitle("design_review", "Взгляд дизайнера (VLM)", "warn"), "Взгляд дизайнера");
   assert.equal(remarkTitle("fill_ratio", null, "warn"), "Слайд слишком пустой или слишком плотный");
-  assert.equal(remarkTitle("new_check", null, "error"), "Ошибка");
+  assert.equal(remarkTitle("new_check", null, "err"), "Ошибка");
+  assert.equal(remarkTitle("new_check", null, "warn"), "Предупреждение");
   assert.equal(plainMessage("подпись (#9CA3AF на #FFFFFF, 3.1:1) бледная"), "Подпись (3,1:1) бледная");
 });
 
@@ -115,4 +116,14 @@ test("разметка сцены: номера на одном месте ра�
   assert.deepEqual(done.oks.map((k) => [k.n, k.left, k.label]), [[1, "clamp(14px, 30%, calc(100% - 14px))", "Замечание 1 исправлено"]]);
   assert.deepEqual(done.pins.map((p) => p.n), [3]);
   assert.equal(done.frames.length, 0);
+});
+
+test("реестр проверок ещё не ответил: замечание модели с важностью «предупреждение» — «Замечание модели», как его метка (R8)", () => {
+  const [r] = slideRemarks(variant([MODEL]), 3, () => null);
+  assert.equal(r.tone, "note");
+  assert.equal(r.title, "Замечание модели");
+  assert.ok(r.label.startsWith("Замечание модели"));
+  assert.equal(remarkTitle("design_review", null, "note"), "Замечание модели");
+  // ответил — название проверки
+  assert.equal(slideRemarks(variant([MODEL]), 3, () => "Взгляд дизайнера (VLM)")[0].title, "Взгляд дизайнера");
 });
