@@ -183,6 +183,10 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 .pp-go:hover{transform:translateY(-2px)}
 .pp-go:active{transform:scale(.98)}
 .pp-go:focus-visible{outline:2px solid rgba(255,255,255,.64);outline-offset:2px}
+/* занятое действие строки: слово гаснет, на его месте проявляется дуга — ширина не меняется (GoLink) */
+.pp-gol{transition:opacity 160ms var(--ease)}
+.pp-gos{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;transition:opacity 160ms var(--ease)}
+.pp-go[aria-busy="true"]:hover,.pp-go[aria-busy="true"]:active{transform:none}
 /* короткий ряд при узкой колоде: названия и подписи вариантов не вылезают из карточек */
 .pp-vt{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* Плита 03 уже доски (окно около 1280, помощник). Пороги — ui/deck/fit.ts (`rowMode`, `errBelow`), от целевой ширины

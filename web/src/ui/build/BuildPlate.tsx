@@ -19,6 +19,9 @@ import { plateWidth } from "../deck/fit";
 import { DeckFitContext, useDeckLayoutNow, usePlateFit } from "../deck/useDeckFit";
 import { humanError } from "../../lib/errors";
 import { ErrorLine } from "../kit/ErrorLine";
+import { useSwap } from "../kit/useSwap";
+import { useHeld } from "../create/ImproveNote";
+import { GoLink } from "../create/ParamsPlate";
 import { buildView } from "./buildView";
 import { backToText } from "./resume";
 import { Failed } from "./Failed";
@@ -123,6 +126,8 @@ function BuildContent({ job, leaving }: { job: ActiveJob | null; leaving: boolea
   const ended = j.endedAt ?? null;
   const openErr = j.status === "done" && !replay && note && note.kind === "error" && ended !== null && note.at >= ended
     ? humanError(note.text, "Не удалось открыть презентацию") : null;
+  // «Открыть ещё раз»: строка стоит с дугой у кнопки, пока презентация грузится; не открылась — новая причина сменяет
+  // прежнюю затуханием; открылась — строка уходит вместе с плитой (держит своё, пока плита гаснет)
   const [opening, setOpening] = useState(false);
   const screen = useRef(ui.screen);
   screen.current = ui.screen;
@@ -130,14 +135,19 @@ function BuildContent({ job, leaving }: { job: ActiveJob | null; leaving: boolea
     const gid = j.generation;
     if (!gid || opening) return;
     setOpening(true);
-    clearNotice("build");
     void loadGeneration(gid, { area: "build" }).then((g) => {
       setOpening(false);
-      if (!g || screen.current !== "build") return;
-      dispatch({ type: "go", screen: "result" });
-      if (g.template_id && templates.some((t) => t.template_id === g.template_id)) selectTemplate(g.template_id);
+      if (!g) return;
+      if (screen.current === "build") {
+        dispatch({ type: "go", screen: "result" });
+        if (g.template_id && templates.some((t) => t.template_id === g.template_id)) selectTemplate(g.template_id);
+      }
+      clearNotice("build");
     });
   };
+  const heldErr = useHeld(openErr);
+  const lineErr = openErr ?? (leaving ? heldErr : null);
+  const errSwap = useSwap(lineErr ?? "");
   // «Вернуться к тексту»: своя сборка — к черновику поля; чужая (другая вкладка, помощник) — к её тексту и параметрам
   const back = () => {
     const own = replay ? null : backToText(buildAsk, ownBuild, j.generation);
@@ -174,10 +184,12 @@ function BuildContent({ job, leaving }: { job: ActiveJob | null; leaving: boolea
             <span className={cls("p2-bar bd-bar", !failed && "bd-hide")} aria-hidden="true"
               style={{ position: "absolute", inset: 0, borderRadius: 999, background: "rgba(255,255,255,.24)", transformOrigin: "left center", transform: `scaleX(${prog})` }} />
           </div>
-          {openErr && (
+          {lineErr && (
             <div className="p2-in pp-busy" style={{ flex: "0 1 auto", animationDelay: "0ms" }}>
-              <ErrorLine text={openErr} lines={1} style={{ color: "#F87171" }} />
-              <button type="button" className="pp-go" onClick={openAgain} aria-busy={opening || undefined}>Открыть ещё раз</button>
+              <span className={errSwap.cls} style={{ display: "flex", minWidth: 0 }}>
+                <ErrorLine text={errSwap.shown || lineErr} lines={1} style={{ color: "#F87171" }} />
+              </span>
+              <GoLink label="Открыть ещё раз" busy={opening} onClick={openAgain} />
             </div>
           )}
         </div>

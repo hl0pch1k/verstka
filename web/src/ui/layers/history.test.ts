@@ -164,3 +164,11 @@ test("открытая, но несвежая (изменение сохране
   // несвежая другая — эта открыта как есть
   assert.deepEqual(openPlan(g, { screen: "result", openId: "int", buildId: null, stale: "ww2" }), { kind: "stay" });
 });
+
+test("неудачная сборка, кончившаяся в другом месте, пока экран вёл другую (R3), — её экран «Сборка», а не «Создать»", () => {
+  const g = meta("wa", { status: "failed", job_id: "ja" });
+  assert.deepEqual(openPlan(g, { screen: "create", openId: null, buildId: "wb", endedId: "wa" }), { kind: "ended" });
+  assert.deepEqual(openPlan(g, { screen: "build", openId: null, buildId: "wb", endedId: "wa" }), { kind: "ended" });
+  // другая неудачная — как прежде, «Создать» с её темой
+  assert.deepEqual(openPlan(meta("q", { status: "failed" }), { screen: "create", openId: null, buildId: "wb", endedId: "wa" }), { kind: "create" });
+});

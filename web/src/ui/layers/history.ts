@@ -153,7 +153,9 @@ export function historyView(list: GenerationMeta[], opts: { now: Date; label(g: 
  *    другом месте) → её экран «Сборка» с причиной, «Вернуться к тексту» и «Собрать ещё раз» (`ended`);
  *  - она уже на экране → только закрыть раздел;
  *  - открытая, но несвежая (`stale`: изменение сохранено, а перечитать её не вышло) → перечитать (`load`), а не
- *    оставить прежнюю. */
+ *    оставить прежнюю.
+ *  `endedId` — неудачная сборка, кончившаяся в другом месте (`buildEnd`), которую страница тоже держит, хотя экран «Сборка»
+ *  с тех пор вёл другую: её карточка ведёт на её экран «Сборка» (`ended`), как у показанной. */
 export type OpenPlan =
   | { kind: "result"; load: boolean; rise: boolean }
   | { kind: "build" }
@@ -161,10 +163,11 @@ export type OpenPlan =
   | { kind: "create" }
   | { kind: "stay" };
 
-export function openPlan(g: GenerationMeta, at: { screen: Screen; openId: string | null; buildId: string | null; stale?: string | null }): OpenPlan {
+export function openPlan(g: GenerationMeta, at: { screen: Screen; openId: string | null; buildId: string | null; stale?: string | null; endedId?: string | null }): OpenPlan {
   const state = deckState(g);
   if (state === "run") return at.screen === "build" && at.buildId === g.id ? { kind: "stay" } : { kind: "build" };
   if (state === "fail" && at.buildId === g.id) return at.screen === "build" ? { kind: "stay" } : { kind: "ended" };
+  if (state === "fail" && at.endedId === g.id) return { kind: "ended" };
   if (state === "fail") return { kind: "create" };
   const stale = at.openId === g.id && at.stale === g.id;
   if (at.screen === "result" && at.openId === g.id && !stale) return { kind: "stay" };

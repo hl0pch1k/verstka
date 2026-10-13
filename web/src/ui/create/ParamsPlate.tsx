@@ -14,7 +14,9 @@ import { dictatedSlides } from "../../lib/textFacts";
 import { cls } from "../kit/cls";
 import { ErrorLine } from "../kit/ErrorLine";
 import { Icon } from "../kit/Icon";
+import { Spinner } from "../kit/Spinner";
 import { Switch } from "../kit/Switch";
+import { useSwap } from "../kit/useSwap";
 import { useHeld, useModelOn } from "./ImproveNote";
 import { ParamsAll } from "./ParamsAll";
 import { errBelow, rowMode } from "../deck/fit";
@@ -62,7 +64,7 @@ export interface ParamsPlate {
 export function useParamsPlate(): ParamsPlate {
   const {
     params, setParams, brief, strategies, health, templates, templateId, checkText, textIssue, startGeneration, ui, dispatch, notices,
-    improveSource, composerPreset, takeComposerPreset, building, buildEnd, loadGeneration, clearNotice,
+    improveSource, composerPreset, takeComposerPreset, building, buildEnd, loadGeneration, clearNotice, showEnded,
   } = useApp();
   const rise = useRise();
   const modelOn = useModelOn();
@@ -129,7 +131,9 @@ export function useParamsPlate(): ParamsPlate {
   };
 
   // сборка кончилась, пока человек был в другом месте: «Открыть» — её презентация (как из «Мои презентации»: открытая
-  // остаётся, пока новая не загрузилась; плита результата поднимается снизу), «Посмотреть» — её экран «Сборка»
+  // остаётся, пока новая не загрузилась; плита результата поднимается снизу), «Посмотреть» — её экран «Сборка» (именно
+  // её, даже если экран с тех пор вёл другую сборку — store `showEnded`). Пока презентация грузится, строка стоит с
+  // дугой у «Открыть»; не открылась — та же строка говорит это и «Открыть ещё раз»
   const [opening, setOpening] = useState(false);
   const [openFail, setOpenFail] = useState(false);
   useEffect(() => setOpenFail(false), [buildEnd]);
@@ -137,9 +141,8 @@ export function useParamsPlate(): ParamsPlate {
   screenNow.current = ui.screen;
   const openEnded = () => {
     if (!buildEnd || opening) return;
-    if (!buildEnd.ok) return dispatch({ type: "go", screen: "build" });
+    if (!buildEnd.ok) return showEnded(buildEnd);
     setOpening(true);
-    setOpenFail(false);
     void loadGeneration(buildEnd.gid, { hold: true }).then((g) => {
       setOpening(false);
       // не открылась: строка здесь, у действия (строку области «Результат» store забирает — открытая осталась прежней)
@@ -147,6 +150,7 @@ export function useParamsPlate(): ParamsPlate {
         clearNotice("result");
         return setOpenFail(true);
       }
+      setOpenFail(false);
       if (screenNow.current !== "create") return; // ушли с «Создать», пока грузилась
       dispatch({ type: "go", screen: "result" });
       rise();
@@ -178,6 +182,18 @@ export function useParamsPlate(): ParamsPlate {
   };
 }
 
+/** Действие тихой строки на тёмной плите («Открыть», «Посмотреть», «Открыть ещё раз»): пока оно идёт — слово гаснет и на
+ *  его месте проявляется дуга (ширина кнопки и строки не меняется), кнопка занята. */
+export function GoLink({ label, busy, onClick }: { label: string; busy: boolean; onClick(): void }) {
+  return (
+    <button type="button" className="pp-go" onClick={onClick} aria-busy={busy || undefined} title={busy ? "Открываю…" : undefined}
+      style={{ position: "relative", cursor: busy ? "progress" : undefined }}>
+      <span className="pp-gol" style={{ opacity: busy ? 0 : 1 }}>{label}</span>
+      <span className="pp-gos" aria-hidden="true" style={{ opacity: busy ? 1 : 0 }}><Spinner size={14} /></span>
+    </button>
+  );
+}
+
 /** Тихая строка (не ошибка): сборка уже идёт, вторая поверх не начинается; «Вернуться к сборке» — её экран. */
 function BusyLine({ onBack }: { onBack(): void }) {
   return (
@@ -189,14 +205,16 @@ function BusyLine({ onBack }: { onBack(): void }) {
 }
 
 /** Та же тихая строка об итоге сборки, кончившейся в другом месте: «Сборка готова · Открыть» или «Сборка не удалась ·
- *  Посмотреть»; презентация не открылась — «Не удалось открыть презентацию · Открыть ещё раз». */
+ *  Посмотреть»; презентация не открылась — «Не удалось открыть презентацию · Открыть ещё раз». Смена текста —
+ *  перекрёстным затуханием строки (useSwap). */
 function EndedLine({ line, busy, onOpen }: { line: Extract<HeadLine, { kind: "ended" }>; busy: boolean; onOpen(): void }) {
-  const text = line.failed ? OPEN_FAILED : line.ok ? BUILD_READY : BUILD_STOPPED;
-  const act = line.failed ? "Открыть ещё раз" : line.ok ? "Открыть" : "Посмотреть";
+  const t = useSwap(line.failed ? "failed" : line.ok ? "ok" : "stopped");
+  const text = t.shown === "failed" ? OPEN_FAILED : t.shown === "ok" ? BUILD_READY : BUILD_STOPPED;
+  const act = t.shown === "failed" ? "Открыть ещё раз" : t.shown === "ok" ? "Открыть" : "Посмотреть";
   return (
-    <p role="status" className="pp-busy">
+    <p role="status" className={cls("pp-busy", t.cls)}>
       <span>{text}</span>
-      <button type="button" className="pp-go" onClick={onOpen} aria-busy={busy || undefined}>{act}</button>
+      <GoLink label={act} busy={busy} onClick={onOpen} />
     </p>
   );
 }

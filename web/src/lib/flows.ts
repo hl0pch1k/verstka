@@ -133,15 +133,25 @@ export interface GenerationDeps extends CommonDeps {
   selectBuilt(templateId: string | null | undefined): void;
 }
 
-/** Is the person watching build `jobId`: on the build screen, and the screen shows this build (not another one followed
- *  since). A build's end moves the screen only then — elsewhere work in the background never takes the screen over. */
-export const watchingBuild = (screen: string, shownJob: string | null | undefined, jobId: string): boolean =>
-  screen === "build" && shownJob === jobId;
+/** Is the person watching build `jobId`: on the build screen, nothing over it (`sect` — «Мои презентации» or «Шаблоны»
+ *  covers the screen: the person is busy there), and the screen shows this build (not another one followed since). A
+ *  build's end moves the screen only then — elsewhere work in the background never takes the screen over, and a
+ *  finished build never closes a layer under the cursor. */
+export const watchingBuild = (screen: string, shownJob: string | null | undefined, jobId: string, sect: string | null = null): boolean =>
+  screen === "build" && !sect && shownJob === jobId;
 
 /** The build that ended away (`endedAway`) is seen: the person is on its build screen, or its deck is open on the
- *  result. Then «Создать» no longer tells it. */
-export const endSeen = (end: { gid: string; job: string }, screen: string, shownJob: string | null | undefined, openDeck: string | null): boolean =>
-  (screen === "build" && shownJob === end.job) || (screen === "result" && openDeck === end.gid);
+ *  result — with no section over it. Then «Создать» no longer tells it; a finished build seen on its build screen opens
+ *  as it would have at its end (store). */
+export const endSeen = (end: { gid: string; job: string }, screen: string, shownJob: string | null | undefined, openDeck: string | null, sect: string | null = null): boolean =>
+  !sect && ((screen === "build" && shownJob === end.job) || (screen === "result" && openDeck === end.gid));
+
+/** «Посмотреть» of a build that ended away: the build the build screen must show — the ended one, kept aside when the
+ *  screen has followed another build since (`kept`); null — the screen already shows it (or it is not kept). */
+export function endedToShow<J extends { id: string }>(shown: J | null | undefined, end: { job: string }, kept: (jobId: string) => J | undefined): J | null {
+  if (shown?.id === end.job) return null;
+  return kept(end.job) ?? null;
+}
 
 /** «Улучшить готовую»: the deck read back opens «Создать» only when the person is there; elsewhere the mode waits
  *  (`wait`) and opens when they come back — background work never takes the screen over. */
@@ -153,8 +163,10 @@ export interface BuildTarget { jobId: string; generation: string; strategies: st
 
 /** Follows a build job to its end. On its build screen a finished build opens on the result (its template becomes the
  *  one of «Создать»), a failed one stays on the build screen (its «Не получилось» reads the build's status line). Ended
- *  while the person was elsewhere (another screen, another deck, another build), it moves nothing: the list is refreshed
- *  and «Создать» tells the outcome (`endedAway`). `ended` is called once the job has ended either way. */
+ *  while the person was elsewhere (another screen, another deck, another build, a section over the build screen), it
+ *  moves nothing: the list is refreshed and «Создать» tells the outcome (`endedAway`; back on its build screen, the store
+ *  opens it). Whether the person watches is asked again after every wait — they may have left meanwhile. `ended` is
+ *  called once the job has ended either way. */
 export function followBuild(t: BuildTarget, d: GenerationDeps, ended?: () => void): void {
   d.runJob(t.jobId, "Собираю презентацию", {
     kind: "generate",
@@ -166,10 +178,20 @@ export function followBuild(t: BuildTarget, d: GenerationDeps, ended?: () => voi
     startedAt: t.startedAt,
     onDone: async () => {
       void d.refreshModelStatus();
-      const here = d.watching(t.jobId);
-      if (!here) d.endedAway(t.generation, t.jobId, true);
+      const away = () => {
+        d.endedAway(t.generation, t.jobId, true);
+        ended?.();
+      };
+      if (!d.watching(t.jobId)) {
+        // «Создать» tells the outcome at once, the list follows
+        d.endedAway(t.generation, t.jobId, true);
+        await d.refreshGenerations();
+        return ended?.();
+      }
       await d.refreshGenerations();
-      if (!here) return ended?.();
+      // left while the list was read (another screen, «Мои презентации» over the build): nothing is loaded — the open
+      // deck and a deck being opened stay as they are
+      if (!d.watching(t.jobId)) return away();
       const g = await d.fetchGeneration(t.generation);
       // no «Презентация готова» line: the result opens by itself — if the person is still on the build's screen (left it
       // while the deck loaded — «Создать» tells it is ready). The deck did not load: on the build screen its line and

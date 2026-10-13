@@ -1,7 +1,7 @@
 // Application state: one React context, consumed by every panel through useApp().
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import { api, ApiError } from "./api";
-import { endSeen, followBuild, generationFlow, improveArrives, uploadTemplateFlow, watchingBuild, type GenerationDeps } from "./lib/flows";
+import { endedToShow, endSeen, followBuild, generationFlow, improveArrives, uploadTemplateFlow, watchingBuild, type GenerationDeps } from "./lib/flows";
 import { foldJobEvent, type ActiveJob } from "./lib/jobState";
 import { trackJob } from "./lib/jobs";
 import { errText, firstLine, newestTemplate, slideCount } from "./lib/narrate";
@@ -133,6 +133,9 @@ export interface AppState {
    *  «Создать» говорит о ней строкой («Сборка готова · Открыть», «Сборка не удалась · Посмотреть»). Уходит, когда
    *  человек её увидел (её экран «Сборка» или её презентация на результате) и когда началась новая сборка. */
   buildEnd: BuildEnd | null;
+  /** «Посмотреть» у неудачной сборки, кончившейся в другом месте (и её карточка в «Мои презентации»): экран «Сборка»
+   *  показывает именно её — с её причиной и запросом, даже если с тех пор экран вёл другую сборку. */
+  showEnded(end: BuildEnd): void;
   /** «Собрать ещё раз»: тот же запрос сборки повторно. Обещание — как у startGeneration: решается, когда повторная сборка
    *  кончилась или не началась (её начало видно по `buildJob`, отказ — по строке области «Сборка»); false — повторять
    *  нечего (запрос неизвестен). `deck` — открытая презентация (результат): повторяется её запрос — свой запрос
@@ -276,6 +279,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [buildJob, setBuildJob] = useState<ActiveJob | null>(null);
   const [building, setBuilding] = useState(false);
   const [buildEnd, setBuildEnd] = useState<BuildEnd | null>(null);
+  // каждая законченная сборка, как её видел экран «Сборка» в конце (задача с причиной и часами): «Посмотреть» у сборки,
+  // кончившейся в другом месте, возвращает на экран именно её, а не сборку, которую экран вёл с тех пор
+  const endedBuilds = useRef(new Map<string, ActiveJob>());
   // the newest build and its request (startGeneration once the server took it, or a build found again after a reload):
   // «Собрать ещё раз» repeats it; LS.build is written only for the deck this request belongs to
   const lastBuild = useRef<PendingBuild | null>(null);
@@ -592,12 +598,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // one ends — the screen never unblocks while a job still runs (its actions would hit «already running»)
     const settle = (p: Partial<ActiveJob>) => {
       jobSubs.current.delete(jobId);
+      const last = liveJobs.current.get(jobId);
       liveJobs.current.delete(jobId);
       syncLive();
       syncBusyVariants();
       if (build) {
-        // the build screen keeps the ended build (a failure stays on it), with the clock stopped
-        setBuildJob((cur) => (cur && cur.id === jobId ? { ...cur, ...p, endedAt: Date.now() } : cur));
+        // the build screen keeps the ended build (a failure stays on it), with the clock stopped; a build the screen no
+        // longer shows is kept aside — «Посмотреть» brings it back (showEnded)
+        const endedAt = Date.now();
+        if (last) endedBuilds.current.set(jobId, { ...last, ...p, endedAt });
+        setBuildJob((cur) => (cur && cur.id === jobId ? { ...cur, ...p, endedAt } : cur));
         syncBuilding();
         if (gid && readPendingBuild()?.gid === gid) storage.set(LS.build, null);
       }
@@ -677,10 +687,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     dispatch({ type: "set", patch: { improve: true, open: "text", more: false } });
   }, [improveWait, ui.screen]);
 
-  // the build that ended away is seen: its build screen, or its deck on the result
+  // the build that ended away is seen: its build screen, or its deck on the result (no section over them). A finished
+  // build whose end the person did not see (they were in «Мои презентации» over its build screen, or came back while
+  // the list was read) opens now, as it would have at its end — the build screen never stays on a finished build with no
+  // way on; left again while it loads — the line on «Создать» comes back
+  const openBuiltRef = useRef<(end: BuildEnd) => void>(() => {});
   useEffect(() => {
-    if (buildEnd && endSeen(buildEnd, ui.screen, buildJob?.id, generationId)) setBuildEnd(null);
-  }, [buildEnd, ui.screen, buildJob, generationId]);
+    if (!buildEnd || !endSeen(buildEnd, ui.screen, buildJob?.id, generationId, ui.sect)) return;
+    setBuildEnd(null);
+    if (buildEnd.ok && ui.screen === "build") openBuiltRef.current(buildEnd);
+  }, [buildEnd, ui.screen, ui.sect, buildJob, generationId]);
 
   const [analyzing, setAnalyzing] = useState<"template" | "deck" | null>(null);
   const uploadTemplate = useCallback((file: File, useModels: boolean, improve?: boolean, onJob?: (jobId: string) => void) => {
@@ -692,13 +708,34 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const generationDeps = useMemo<GenerationDeps>(() => ({
     runJob, report, notify, clearNotice, pushMessage, dispatch, refreshGenerations, fetchGeneration: (gid) => fetchGeneration(gid, false, false, "build"), refreshModelStatus,
     titleOf: (name) => titleIn(latest.current.strategies, name),
-    watching: (jobId) => watchingBuild(latest.current.ui.screen, latest.current.buildJob?.id, jobId),
+    watching: (jobId) => watchingBuild(latest.current.ui.screen, latest.current.buildJob?.id, jobId, latest.current.ui.sect),
     endedAway: (gid, job, ok) => setBuildEnd({ gid, job, ok }),
     selectBuilt: (id) => {
       const { templateId: tid, templates: list } = latest.current;
       if (id && id !== tid && list.some((t) => t.template_id === id)) selectTemplate(id);
     },
   }), [runJob, report, notify, clearNotice, pushMessage, refreshGenerations, fetchGeneration, refreshModelStatus, selectTemplate]);
+
+  openBuiltRef.current = (end) => {
+    void fetchGeneration(end.gid, false, false, "build").then((g) => {
+      const { ui: u, buildJob: shown } = latest.current;
+      if (!watchingBuild(u.screen, shown?.id, end.job, u.sect)) return void setBuildEnd(end);
+      // the deck did not load: the build-area line and «Открыть ещё раз» (BuildPlate)
+      if (!g) return;
+      dispatch({ type: "go", screen: "result" });
+      generationDeps.selectBuilt(g.template_id);
+    });
+  };
+
+  const showEnded = useCallback((end: BuildEnd) => {
+    const back = endedToShow(latest.current.buildJob, end, (id) => endedBuilds.current.get(id));
+    if (back) {
+      setBuildJob(back);
+      const ask = asks.current.get(end.gid);
+      if (ask) keepBuild(ask);
+    }
+    dispatch({ type: "go", screen: "build" });
+  }, [keepBuild]);
 
   const startGeneration = useCallback((req: GenerateRequest, expectedSlides?: number | null) => {
     const expected = expectedSlides ?? null;
@@ -908,13 +945,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AppState>(() => ({
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, cancelLoad, reloadIfOpen, stale, refreshDeck, refreshing, activeStrategy, setActiveStrategy, activeVariant,
-    selectedSlide, setSelectedSlide, ui, dispatch, activeJob, liveJobs: liveList, runJob, followDeck, adoptBuildMeta, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, ownBuild, building, buildEnd, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, analyzing, startGeneration,
+    selectedSlide, setSelectedSlide, ui, dispatch, activeJob, liveJobs: liveList, runJob, followDeck, adoptBuildMeta, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, ownBuild, building, buildEnd, showEnded, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, analyzing, startGeneration,
     brief, setBrief, textIssue, setTextIssue, checkText, params, setParams,
     composerText, composerPreset, editText, takeComposerText, takeComposerPreset, improveSource, takeImproveSource,
   }), [
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, cancelLoad, reloadIfOpen, stale, refreshDeck, refreshing, activeStrategy, setActiveStrategy, activeVariant,
-    selectedSlide, setSelectedSlide, ui, activeJob, liveList, runJob, followDeck, adoptBuildMeta, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, ownBuild, building, buildEnd, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, analyzing, startGeneration,
+    selectedSlide, setSelectedSlide, ui, activeJob, liveList, runJob, followDeck, adoptBuildMeta, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, ownBuild, building, buildEnd, showEnded, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, analyzing, startGeneration,
     brief, setBrief, textIssue, checkText, params, setParams,
     composerText, composerPreset, editText, takeComposerText, takeComposerPreset, improveSource, takeImproveSource,
   ]);

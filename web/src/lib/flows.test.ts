@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { api } from "../api";
-import { endSeen, failMessage, followBuild, improveArrives, uploadTemplateFlow, watchingBuild, type GenerationDeps, type UploadDeps } from "./flows";
+import { endedToShow, endSeen, failMessage, followBuild, improveArrives, uploadTemplateFlow, watchingBuild, type GenerationDeps, type UploadDeps } from "./flows";
 import type { Generation, Job } from "../types";
 
 test("сообщение помощника о неудаче задачи: причина по-русски, без технического хвоста", () => {
@@ -93,6 +93,41 @@ test("итог сборки, кончившейся в другом месте, 
   assert.equal(endSeen(end, "build", "j2", "g1"), false); // на экране другая сборка
   assert.equal(endSeen(end, "result", "j1", "g2"), false); // открыта другая презентация
   assert.equal(endSeen(end, "create", "j1", "g1"), false);
+});
+
+// ── R2: ушли, пока читался список; раздел поверх экрана «Сборка» — тоже «в другом месте»
+test("watchingBuild: «Мои презентации» или «Шаблоны» поверх экрана «Сборка» — человек не смотрит на сборку", () => {
+  assert.equal(watchingBuild("build", "j1", "j1", null), true);
+  assert.equal(watchingBuild("build", "j1", "j1", "hist"), false);
+  assert.equal(watchingBuild("build", "j1", "j1", "tpls"), false);
+});
+
+test("ушли с экрана сборки, пока читался список: презентация не грузится (открытая и открываемая остаются), итог — строкой", async () => {
+  let here = true;
+  const f = fakeDeps({ here: () => here });
+  f.d.refreshGenerations = async () => { f.log.push("list"); here = false; };
+  let ended = 0;
+  followBuild(target, f.d, () => ended++);
+  await f.done();
+  assert.deepEqual(f.log, ["list", "away:g1:j1:done"]);
+  assert.equal(ended, 1);
+});
+
+test("итог увидели, только когда поверх ничего не открыто (раздел над экраном «Сборка» или результатом — ещё нет)", () => {
+  const end = { gid: "g1", job: "j1" };
+  assert.equal(endSeen(end, "build", "j1", null, "hist"), false);
+  assert.equal(endSeen(end, "result", "j1", "g1", "tpls"), false);
+  assert.equal(endSeen(end, "build", "j1", null, null), true);
+});
+
+test("«Посмотреть» у сборки A, упавшей, пока экран вёл сборку B (R3): экран возвращается к A; уже на A — ничего не меняется", () => {
+  const a = { id: "ja", status: "failed" };
+  const b = { id: "jb", status: "running" };
+  const kept = (id: string) => (id === "ja" ? a : undefined);
+  assert.equal(endedToShow(b, { job: "ja" }, kept), a);
+  assert.equal(endedToShow(a, { job: "ja" }, kept), null);
+  assert.equal(endedToShow(null, { job: "ja" }, kept), a);
+  assert.equal(endedToShow(b, { job: "jx" }, kept), null);
 });
 
 test("«Улучшить готовую»: прочитанная презентация открывает «Создать», только когда человек там; иначе ждёт", () => {

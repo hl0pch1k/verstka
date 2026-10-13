@@ -34,7 +34,7 @@ const LIST_FAILED = "Не удалось обновить список през�
 export function HistoryLayer() {
   const {
     ui, dispatch, generations, refreshGenerations, generation, generationId, loadGeneration, cancelLoad, templateLabel, templates, selectTemplate,
-    editText, buildJob, followDeck, notices, clearNotice, activeStrategy, setActiveStrategy, setSelectedSlide, stale,
+    editText, buildJob, followDeck, notices, clearNotice, activeStrategy, setActiveStrategy, setSelectedSlide, stale, buildEnd, showEnded,
   } = useApp();
   const rise = useRise();
   const open = ui.sect === "hist";
@@ -173,13 +173,17 @@ export function HistoryLayer() {
     }
   };
 
+  // неудачная сборка, кончившаяся в другом месте: её экран «Сборка» — именно её, даже если с тех пор экран вёл другую
+  const endedFail = buildEnd && !buildEnd.ok ? buildEnd.gid : null;
+  const toEnded = (id: string) => (buildEnd && buildEnd.gid === id ? showEnded(buildEnd) : dispatch({ type: "go", screen: "build" }));
+
   const pick = async (g: GenerationMeta) => {
     if (wait?.on) return; // одна презентация за раз
     const at = ui.screen;
-    const plan = openPlan(g, { screen: at, openId: generation?.id ?? null, buildId: buildJob?.generation ?? null, stale: stale?.gid ?? null });
+    const plan = openPlan(g, { screen: at, openId: generation?.id ?? null, buildId: buildJob?.generation ?? null, stale: stale?.gid ?? null, endedId: endedFail });
     if (plan.kind === "stay") return close();
     // неудачная сборка, которую держит страница: её экран «Сборка» (причина, «Вернуться к тексту», «Собрать ещё раз»)
-    if (plan.kind === "ended") return dispatch({ type: "go", screen: "build" });
+    if (plan.kind === "ended") return toEnded(g.id);
     if (plan.kind === "result") return toResult(g, plan, at);
     // идущая, которую страница уже ведёт, — сразу к её сборке
     if (plan.kind === "build" && buildRunning(buildJob) && buildJob?.generation === g.id && followDeck(g)) return;
@@ -187,9 +191,9 @@ export function HistoryLayer() {
     const d = await fetchFull(g, n);
     if (!d || !live(n, at)) return;
     // статус — по свежей мете: сборка могла кончиться, пока список стоял
-    const now = openPlan(d, { screen: at, openId: generation?.id ?? null, buildId: buildJob?.generation ?? null, stale: stale?.gid ?? null });
+    const now = openPlan(d, { screen: at, openId: generation?.id ?? null, buildId: buildJob?.generation ?? null, stale: stale?.gid ?? null, endedId: endedFail });
     if (now.kind === "stay") return close();
-    if (now.kind === "ended") return dispatch({ type: "go", screen: "build" });
+    if (now.kind === "ended") return toEnded(d.id);
     if (now.kind === "result") return toResult(d, now, at);
     if (now.kind === "create") return toCreate(d);
     if (!followDeck(d)) fail(n, `${OPEN_FAILED}: сборка не найдена`);
