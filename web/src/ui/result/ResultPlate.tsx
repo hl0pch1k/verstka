@@ -50,6 +50,7 @@ import {
 } from "./resultView";
 import { Stage } from "./Stage";
 import { StageMarks } from "./StageMarks";
+import type { Tone } from "./marks";
 import { useCheckTitles } from "./useCheckTitles";
 import { useOpenSheet } from "./useOpenSheet";
 import { usePictureSelect } from "./usePictureSelect";
@@ -59,6 +60,7 @@ import { WorkHead } from "./WorkHead";
 
 /** Сколько смена варианта ждёт декодирования его картинок, прежде чем смениться как есть. */
 const SWITCH_WAIT = 800;
+const NO_BADGES = new Map<number, { count: number; tone: Tone }>();
 
 /** Секунд до конца паузы модели: пересчёт раз в 15 с и ровно к концу паузы — «Собрать ещё раз»
  *  оживает вовремя. Таймер снимается вместе с экраном и с новым состоянием модели. */
@@ -211,6 +213,10 @@ function ResultBody({ g }: { g: Generation }) {
   // поверх результата открыт слой или лист: клавиши (←/→, Home/End, Esc) — его
   const layered = !!(ui.sheet || ui.textLayer || ui.lightbox || ui.sect || ui.tplPreview || ui.tplDelete);
   const pic = usePictureSelect({ v, n, job, now, blocked: ui.remarks || rm.mounted, layered });
+  // задача над вариантом, которую этот экран не запускал (исправление, начатое до возвращения сюда, правка помощника),
+  // — дуга на миниатюре её слайда и без режима «Замечания»
+  const spinOnly = job.elsewhere?.slide ?? null;
+  const filmMarks = useMemo(() => rm.film ?? (spinOnly !== null ? { badges: NO_BADGES, out: false, spin: spinOnly } : null), [rm.film, spinOnly]);
   // клавиши ←/→ листают слайды, Home/End — к первому и последнему, пока поверх результата ничего не открыто
   useEffect(() => {
     if (ui.screen !== "result" || layered || total < 2) return;
@@ -346,7 +352,7 @@ function ResultBody({ g }: { g: Generation }) {
               {rm.stage && <StageMarks {...rm.stage} />}
               {rm.sketch && <FixSketch {...rm.sketch} />}
             </Stage>
-            <Film film={film} variant={v} n={n} headline={headline} onPick={setSelectedSlide} marks={rm.film} />
+            <Film film={film} variant={v} n={n} headline={headline} onPick={setSelectedSlide} marks={filmMarks} />
           </div>
           <Aside d={aside} onVariant={pickVariant} onEditText={() => editDeck(g.brief ?? null)} open={openSheet} className="ra-main"
             hidden={rm.shown || !!pic.column?.shown} style={{ height: g2.height }} />

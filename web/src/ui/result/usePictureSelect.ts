@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useState, type ComponentProps } from "react";
 import type { BboxFrac, SlidePicture, Variant } from "../../types";
 import { usePresence } from "../kit/usePresence";
-import { clock, lastEditIs } from "./fix";
+import { clock, lastEditIs, undoneIn } from "./fix";
 import { pickedPicture, pictureView, slidePictures } from "./picture";
 import type { PictureCard, PictureRunView } from "./PictureCard";
 import { ownsKeys } from "./resultView";
@@ -74,12 +74,13 @@ export function usePictureSelect({ v, n, job, now, blocked, layered }: {
     progress: picRun?.phase === "work" ? job.live.progress : 0,
     message: job.live.message,
     clock: picRun ? clock((picRun.phase === "work" ? now : picRun.endedAt ?? now) - picRun.startedAt) : "0:00",
-    done: picRun?.phase === "done" && picRun.picture?.applied && picRun.undo !== "work" ? picRun.action : null,
+    // изображение вернули как было в другом месте (лист «Подробнее», помощник) — итога больше нет
+    done: picRun?.phase === "done" && picRun.picture?.applied && picRun.undo !== "work" && !undoneIn(v, picRun.picture.version) ? picRun.action : null,
     canUndo: !!picRun?.picture?.applied && lastEditIs(v, picRun.picture.version, "picture"),
     error: picRun ? picRun.undoError ?? picRun.error : null,
   };
   const start = (action: "generate" | "remove") => {
-    if (job.busy) return;
+    if (job.busy || job.elsewhere) return;
     void job.start("picture", n, action === "remove" ? { action } : { action, wish: wish.trim() || null }).then((ok) => {
       if (!ok) return;
       setWish("");
@@ -99,7 +100,9 @@ export function usePictureSelect({ v, n, job, now, blocked, layered }: {
           setWish("");
         },
         onGenerate: () => start("generate"), onRemove: () => start("remove"), onUndo: job.undo, run: runView,
-        off: job.busy && !runView.work ? busyWhy(run) : null,
+        // своя работа на другом слайде или задача над вариантом, которую этот экран не запускал (помощник, лист
+        // «Подробнее», исправление, начатое до возвращения сюда)
+        off: (job.busy && !runView.work ? busyWhy(run) : null) ?? (!runView.work ? job.elsewhere?.why ?? null : null),
       },
     } : null,
   };

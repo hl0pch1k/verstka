@@ -9,7 +9,7 @@ import type { Variant } from "../../types";
 import { usePresence } from "../kit/usePresence";
 import type { FilmMarks } from "./Film";
 import { useFixStage, type FxPhase } from "./FixSketch";
-import { clock, fixedRows, fixSteps, fixSummary, fixToRevert, lastEditIs, slideSketch } from "./fix";
+import { clock, fixedRows, fixSteps, fixSummary, fixToRevert, lastEditIs, slideSketch, undoneIn } from "./fix";
 import { firstRemarkSlide, slideBadges, slideRemarks, stageMarks, type Frame, type OkPin, type Pin } from "./marks";
 import type { PanelLine, PanelRow, PanelView, RemarksPanelProps } from "./RemarksPanel";
 import { busyWhy } from "./slideJob";
@@ -20,7 +20,8 @@ export interface RemarksMode {
   mounted: boolean;
   /** Панель стоит на месте колонки (колонка под ней скрыта). */
   shown: boolean;
-  /** Почему переключатель сейчас не нажимается (агент исправляет слайд); null — нажимается. */
+  /** Почему переключатель сейчас не нажимается (агент исправляет слайд этого варианта, над вариантом идёт другая
+   *  задача); null — нажимается. */
   off: string | null;
   toggle(): void;
   /** Разметка сцены (StageMarks); null — режим выключен. */
@@ -59,7 +60,8 @@ export function useRemarksMode({ v, n, src, job, now, titleOf }: {
   const fixBusy = !!fixRun && fixRun.phase === "work" && !fixRun.jobId;
   const fx = useFixStage(fixRun?.jobId && rm.mounted ? fixRun.seq : null, fixRun?.phase === "done", src);
   const fixing = !!fixRun && ((fixRun.phase === "work" && !!fixRun.jobId) || fx !== null);
-  const fixDone = !!fixRun && !fixing && fixRun.phase === "done" && !!fixRun.fix?.applied;
+  // итог держится, пока исправление не вернули как было — здесь или в другом месте (лист «Подробнее», помощник)
+  const fixDone = !!fixRun && !fixing && fixRun.phase === "done" && !!fixRun.fix?.applied && !undoneIn(v, fixRun.fix.version);
   const view: PanelView = fixing ? "fix" : fixDone ? "done" : open.length ? "rem" : "none";
   const rows: PanelRow[] = useMemo(
     () => (view === "fix" ? fixRun!.requested : view === "done" ? fixedRows(fixRun!.requested, fixRun!.fix!, open) : open),
@@ -73,7 +75,10 @@ export function useRemarksMode({ v, n, src, job, now, titleOf }: {
   const [wishAt, setWishAt] = useState({ k: "", t: "" });
   const wish = wishAt.k === slideKey ? wishAt.t : "";
   const badges = useMemo(() => slideBadges(v), [v]);
-  const off = fixWork ? `Агент исправляет слайд ${fixWork.slide}` : null;
+  // над вариантом идёт задача, которую этот экран не запускал (начатая до возвращения на него, помощником, листом
+  // «Подробнее»): переключатель и «Исправить слайд» выключены с её причиной, на миниатюре её слайда — дуга
+  const other = job.elsewhere;
+  const off = fixWork ? `Агент исправляет слайд ${fixWork.slide}` : other?.why ?? null;
 
   const toggle = () => {
     if (off) return;
@@ -87,7 +92,7 @@ export function useRemarksMode({ v, n, src, job, now, titleOf }: {
     dispatch({ type: "set", patch: { remarks: true } });
   };
   const onFix = () => {
-    if (job.busy || !open.length) return;
+    if (job.busy || other || !open.length) return;
     void job.start("fix", n, { wishes: wish.trim() || null, issue_ids: open.map((r) => r.id) }, open).then((ok) => {
       if (ok) setWishAt({ k: "", t: "" });
     });
@@ -117,10 +122,10 @@ export function useRemarksMode({ v, n, src, job, now, titleOf }: {
       onPick: (id) => setSelAt({ k: viewKey, i: rows.findIndex((r) => r.id === id) }),
     },
     sketch: fx ? { phase: fx, ...slideSketch(v, n, job.live.events) } : null,
-    film: { badges, out: !rm.shown, spin: fixWork && fixWork.strategy === v.strategy ? fixWork.slide : null },
+    film: { badges, out: !rm.shown, spin: fixWork ? fixWork.slide : other?.slide ?? null },
     panel: {
       shown: rm.shown, since, n, view, rows, sel, onSel: (i) => setSelAt({ k: viewKey, i }),
-      wish, onWish: (t) => setWishAt({ k: slideKey, t }), onFix, fixBusy, fixOff: busyWhy(run), revert,
+      wish, onWish: (t) => setWishAt({ k: slideKey, t }), onFix, fixBusy, fixOff: busyWhy(run) ?? other?.why ?? null, revert,
       line: view === "rem" ? line : null,
       elsewhere: badges.size > 0,
       progress: view === "fix" && fixRun && steps ? {

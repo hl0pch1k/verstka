@@ -9,6 +9,7 @@ import { templateTitle, tplLabel } from "./lib/plain";
 import { LS, storage, uid } from "./lib/utils";
 import { decodeImage } from "./lib/motion";
 import { draftBrief, writeDraft } from "./lib/draft";
+import { reloadPlan, replayWanted } from "./lib/reload";
 import { variantRev, withRev } from "./lib/rev";
 import { uiReducer, UI0, type UiAction, type UiState } from "./ui/deck/geometry";
 import { textError, writerOn, type TextIssue } from "./ui/create/textRules";
@@ -75,10 +76,12 @@ export interface AppState {
    *  (`hold`), or, when none was open, none opens. A load already applied stays. */
   cancelLoad(gid: string): void;
   /** Re-reads deck `gid` after a change made to it (a slide fix, a picture, «верни как было») — only while it is still
-   *  the open deck and no other deck is being opened; the screen, the variant and the slide stay. A job that ends
-   *  after the person left the result screen still lands: the deck shows the change on the way back. Resolves to the
-   *  deck read, or null when it was not reloaded (another deck is open) or did not load — then `onError` hears why
-   *  (the failure is also told on the result, as any). */
+   *  the open deck; the screen, the variant and the slide stay. A job that ends after the person left the result screen
+   *  still lands: the deck shows the change on the way back. Another deck being opened over it («Мои презентации»): the
+   *  re-read waits and runs when that load is dropped or fails (the open deck stays). Resolves to the deck read, or null
+   *  when it was not reloaded (another deck is open, the re-read waits) or did not load — then `onError` hears why. The
+   *  re-read is quiet: the open deck stays as it was, no «Не удалось открыть презентацию» on the result — the place of
+   *  the action tells the failure itself, once. */
   reloadIfOpen(gid: string, onError?: (e: unknown) => void): Promise<Generation | null>;
   activeStrategy: string | null; setActiveStrategy(s: string): void; activeVariant: Variant | null;
   selectedSlide: number; setSelectedSlide(n: number): void; // 1-based
@@ -278,6 +281,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const genSeq = useRef(0);
   // the deck asked for last (fetchGeneration): a reload after a change never races a deck being opened over it
   const askedGen = useRef<string | null>(null);
+  // a re-read of the open deck skipped while another deck was being opened over it: it runs when that load is dropped
+  // (cancelLoad) or fails — the open deck stays and must show the change (reloadSkipped)
+  const skippedReload = useRef<string | null>(null);
+  const replayRef = useRef<(openId: string | null) => void>(() => {});
   const jobSubs = useRef(new Map<string, () => void>());
 
   const [notices, setNotices] = useState<Partial<Record<NoticeArea, Notice>>>({});
@@ -429,7 +436,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
     try {
       const g = await api.generation(gid);
-      if (seq !== genSeq.current) return g; // a newer load has started — do not touch the state
+      if (seq !== genSeq.current) {
+        // a newer load has started — do not touch the state; a re-read of the open deck it cut off runs again when that
+        // load is dropped or fails (the open deck stays)
+        if (sameAsOpen) skippedReload.current = gid;
+        return g;
+      }
       const names = g.variants.map((v) => v.strategy);
       const nextStrategy = openStrategy(names, sameAsOpen ? latest.current.activeStrategy : null, want);
       const next = g.variants.find((v) => v.strategy === nextStrategy);
@@ -445,6 +457,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setGenerationId(gid);
           storage.set(LS.generation, gid);
         }
+        // the open deck is read anew, or another deck took its place: a waiting re-read has nothing left to show
+        skippedReload.current = null;
         setGeneration(g);
         setActiveStrategyState(nextStrategy);
         setSelectedSlideState((cur) => (sameAsOpen ? clamp(cur, 1, max) : 1));
@@ -456,8 +470,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return g;
     } catch (e) {
       if (seq !== genSeq.current) return null;
-      // the open deck stayed: a change made to it reloads it again (reloadIfOpen asks for the deck asked for last)
-      if (holding) askedGen.current = latest.current.generation?.id ?? null;
+      // the open deck stayed: a change made to it reloads it again (reloadIfOpen asks for the deck asked for last), and
+      // a re-read it skipped meanwhile runs now
+      if (holding) {
+        askedGen.current = latest.current.generation?.id ?? null;
+        replayRef.current(askedGen.current);
+      }
       if (e instanceof ApiError && e.status === 404) {
         if (!holding) clearGeneration();
         // picked from «Мои презентации» and gone meanwhile: the list drops it (offline — the list stays as it is)
@@ -487,12 +505,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!open) return clearGeneration(); // nothing was open: the half-opened deck goes (its id, its skeleton)
     genSeq.current += 1; // the held deck stays: the load in flight lands nowhere
     askedGen.current = open.id;
+    replayRef.current(open.id); // a re-read it skipped meanwhile runs now
   }, [clearGeneration]);
 
   const reloadIfOpen = useCallback(async (gid: string, onError?: (e: unknown) => void) => {
-    if (latest.current.generation?.id !== gid || askedGen.current !== gid) return null;
-    return fetchGeneration(gid, false, false, "result", null, onError);
+    const plan = reloadPlan(gid, latest.current.generation?.id ?? null, askedGen.current);
+    if (plan === "none") return null;
+    // another deck is being opened over this one: the re-read waits for that load to be dropped or to fail
+    if (plan === "wait") {
+      skippedReload.current = gid;
+      return null;
+    }
+    // quiet: a failed re-read leaves the open deck as it was, the place of the action tells it (onError)
+    return fetchGeneration(gid, true, false, "result", null, onError);
   }, [fetchGeneration]);
+  replayRef.current = (openId) => {
+    if (!replayWanted(skippedReload.current, openId)) return;
+    skippedReload.current = null;
+    void fetchGeneration(openId!, true);
+  };
 
   const setActiveStrategy = useCallback((s: string) => {
     const variant = latest.current.generation?.variants.find((v) => v.strategy === s);

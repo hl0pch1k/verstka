@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { OutlineSlide, SlideFixResult } from "../../types";
-import { asSlideFixResult, clock, fixedRows, fixSteps, fixSummary, fixToRevert, lastEditIs, slideSketch } from "./fix";
+import { asSlideFixResult, clock, fixedRows, fixSteps, fixSummary, fixToRevert, lastEditIs, slideSketch, undoneIn } from "./fix";
 import { slideRemarks } from "./marks";
 import { CONTRAST, DENSE, MODEL, edit, ev, issue, titleOf, variant } from "./remarks.fixtures";
 
@@ -112,4 +112,15 @@ test("эскиз исправляемого слайда: форма, котор
   assert.deepEqual(slideSketch(v, 2, [ev("designer", "Переделываю по замечаниям")].map((e) => ({ ...e, slide: 2 }))), { kind: "pie", formula: false });
   assert.deepEqual(slideSketch(v, 3, [ev("revise", "«Первообразная» — текст с формулой")]), { kind: "text", formula: true });
   assert.deepEqual(slideSketch(v, 9), { kind: "text", formula: false });
+});
+
+test("изменение вернули как было в другом месте (лист «Подробнее», помощник) — итога больше нет (C3)", () => {
+  // исправление версии 2, потом «верни как было» этой версии
+  const undone = variant([], { edits: [edit({ version: 2 }), edit({ kind: "undo", version: 3, undo_of: 2 })] });
+  assert.equal(undoneIn(undone, 2), true);
+  // вернули другое изменение; ничего не возвращали; версия неизвестна
+  assert.equal(undoneIn(variant([], { edits: [edit({ version: 2 }), edit({ kind: "undo", version: 3, undo_of: 1 })] }), 2), false);
+  assert.equal(undoneIn(variant([], { edits: [edit({ version: 2 })] }), 2), false);
+  assert.equal(undoneIn(undone, null), false);
+  assert.equal(undoneIn(null, 2), false);
 });

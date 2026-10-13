@@ -2,6 +2,7 @@
 // порядке, их названия и тексты, рамки и номера на слайде, бейджи миниатюр и переключатель в шапке. Порядок и названия
 // замечаний — как у сервера (verstka/api/remarks.py): «замечание 2» значит одно и то же на сцене, в строке критика и в
 // ответе. Исправление слайда — fix.ts, изображение на слайде — picture.ts.
+import { issueTone } from "../../lib/auditCounts";
 import { plural } from "../../lib/utils";
 import type { BboxFrac, Issue, Severity, Variant } from "../../types";
 import type { IconName } from "../kit/icons";
@@ -12,7 +13,14 @@ const pct = (n: number) => `${+(n * 100).toFixed(2)}%`;
 
 /** Тон замечания на сцене и в списке (V2 `SEV`): ошибка — красный, предупреждение — янтарный, модель — серый. */
 export type Tone = "err" | "warn" | "note";
-export const toneOf = (s: Severity): Tone => (s === "error" ? "err" : s === "warn" ? "warn" : "note");
+/** Тон — то же правило, что у листа «Подробнее» и карточки «Качество» (`issueTone`): ошибка — всегда ошибка, замечание
+ *  модели — серое «Замечание модели», даже с важностью «предупреждение» (так их присылают взгляд дизайнера и проверка
+ *  содержания), правила — по важности. Порядок и номера — по важности, как у сервера (`orderRemarks`). */
+export const remarkTone = (i: Issue): Tone => {
+  const t = issueTone(i);
+  return t === "err" ? "err" : t === "warn" ? "warn" : "note";
+};
+const TONE_RANK: Record<Tone, number> = { err: 0, warn: 1, note: 2 };
 const SEV: Record<Tone, { label: string; icon: IconName }> = {
   err: { label: "Ошибка", icon: "alert" },
   warn: { label: "Предупреждение", icon: "warning" },
@@ -104,7 +112,7 @@ export interface Remark {
 }
 
 function asRemark(i: Issue, n: number, titleOf: (checkId: string) => string | null | undefined): Remark {
-  const tone = toneOf(i.severity);
+  const tone = remarkTone(i);
   const boxes = boxesOf(i);
   const whole = boxes.length === 0;
   return {
@@ -126,8 +134,11 @@ export function slideBadges(v: Variant | null | undefined): Map<number, { count:
   const out = new Map<number, { count: number; tone: Tone }>();
   for (const n of [...by.keys()].sort((a, b) => a - b)) {
     const list = by.get(n)!;
-    const worst = list.reduce((w, i) => (RANK[i.severity] < RANK[w] ? i.severity : w), "info" as Severity);
-    out.set(n, { count: list.length, tone: toneOf(worst) });
+    const worst = list.reduce<Tone>((w, i) => {
+      const t = remarkTone(i);
+      return TONE_RANK[t] < TONE_RANK[w] ? t : w;
+    }, "note");
+    out.set(n, { count: list.length, tone: worst });
   }
   return out;
 }

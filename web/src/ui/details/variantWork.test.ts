@@ -126,3 +126,14 @@ test("итог «верни как было»: вернулось — null; се
   assert.equal(undoRefusal({ changed: false, reply: "Возвращать нечего — это первая версия." }), "Возвращать нечего — это первая версия.");
   assert.equal(undoRefusal({ changed: false }), "Вернуть не получилось. Попробуйте ещё раз.");
 });
+
+test("исправление кончилось, а вариант не прочитался ни открытым, ни тихо — «Исправлено» не показывается (C4, D-1)", () => {
+  let s = workNext(WORK0, { type: "fix", key: K, ids: "all" });
+  const seq = s[K]!.fix!.seq;
+  s = workNext(s, { type: "fixLost", key: K, seq });
+  assert.deepEqual(fixView(s, K, "r1", false), { busy: null, working: null, status: null, undo: false, error: null, locked: false });
+  // снова можно исправлять; опоздавший «потерян» прежнего запуска новый не трогает
+  const again = workNext(s, { type: "fix", key: K, ids: ["a"] });
+  assert.equal(again[K]!.fix!.phase, "fix");
+  assert.equal(workNext(again, { type: "fixLost", key: K, seq }), again);
+});

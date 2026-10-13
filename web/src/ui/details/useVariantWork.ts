@@ -11,6 +11,7 @@ import { api, ApiError } from "../../api";
 import { humanError } from "../../lib/errors";
 import { variantRev } from "../../lib/rev";
 import type { Generation, Job, JobKind } from "../../types";
+import { reloadFailText } from "../helper/chat";
 import { fixedCount } from "./quality";
 import { fixedFromJob, undoRefusal, VARIANT_BUSY, WORK0, workKey, workNext, type UndoBy, type WorkAction, type WorkState } from "./variantWork";
 
@@ -23,7 +24,8 @@ export interface VariantWorkDeps {
     kind: JobKind; area: "result"; quiet: true; generation: string; target: { generation: string; strategy: string; slide: number };
     onDone(job: Job): void; onFailed(job: Job): void;
   }): void;
-  reloadIfOpen(gid: string): Promise<Generation | null>;
+  /** Перечитать открытую презентацию; не перечиталась — `onError` слышит почему (строку пишет место действия). */
+  reloadIfOpen(gid: string, onError?: (e: unknown) => void): Promise<Generation | null>;
   /** Над вариантом (`workKey`) идёт задача хранилища. */
   live(key: string): boolean;
   /** Ревизия варианта открытой презентации (`variantRev`); не открыта — null. */
@@ -80,10 +82,20 @@ export function useVariantWork(deps: VariantWorkDeps): VariantWorkApi {
       d.current.runJob(jobId, "Исправляю замечания", {
         kind: "fix", area: "result", quiet: true, generation: gid, target: { generation: gid, strategy, slide: 0 },
         onDone: async (job) => {
-          const g = await d.current.reloadIfOpen(gid);
+          // итог держится, пока вариант не изменился (`rev`): презентация не открыта или не перечиталась — вариант
+          // читается тихо; не прочитался и так — итога нет, а не «Исправлено» без ревизии навсегда
+          let lost: { e: unknown } | null = null;
+          const open = await d.current.reloadIfOpen(gid, (e) => {
+            lost = { e };
+          });
+          // открытая не перечиталась: изменение сохранено, а экран прежний — так и сказано у «Исправить» (один раз)
+          const failed = lost as { e: unknown } | null;
+          if (failed) return void fail(reloadFailText(failed.e));
+          const g = open ?? (await api.generation(gid).catch(() => null));
           const v = g?.variants.find((x) => x.strategy === strategy) ?? null;
-          const fixed = fixedFromJob(job.result, count) ?? (v?.audit ? fixedCount(count, v.audit) : count.length);
-          send({ type: "fixed", key, seq, fixed, rev: v ? variantRev(v) : null });
+          if (!v) return void send({ type: "fixLost", key, seq });
+          const fixed = fixedFromJob(job.result, count) ?? (v.audit ? fixedCount(count, v.audit) : count.length);
+          send({ type: "fixed", key, seq, fixed, rev: variantRev(v) });
         },
         onFailed: (job) => fail(jobError(job, "исправить замечания")),
       });
@@ -110,8 +122,12 @@ export function useVariantWork(deps: VariantWorkDeps): VariantWorkApi {
           onDone: async (job) => {
             const no = undoRefusal(job.result);
             if (no) return resolve(no);
-            await d.current.reloadIfOpen(gid);
-            resolve(null);
+            let lost: { e: unknown } | null = null;
+            await d.current.reloadIfOpen(gid, (e) => {
+              lost = { e };
+            });
+            const failed = lost as { e: unknown } | null;
+            resolve(failed ? reloadFailText(failed.e) : null);
           },
           onFailed: (job) => resolve(jobError(job, "вернуть как было")),
         });

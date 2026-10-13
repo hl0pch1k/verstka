@@ -143,6 +143,13 @@ export function lastEditIs(v: Variant | null | undefined, version: number | null
   return !!last && version != null && last.version === version && last.kind === kind && last.undo_of == null;
 }
 
+/** Изменение `version` (исправление слайда, изображение) уже вернули как было — где угодно: «Вернуть как было» листа
+ *  «Подробнее» (вкладка «Агент»), «верни как было» помощнику. Тогда его итог («Исправлено», «Новое изображение на
+ *  слайде») больше не верен: слайд снова прежний, со своими замечаниями. */
+export function undoneIn(v: Variant | null | undefined, version: number | null | undefined): boolean {
+  return version != null && (v?.edits ?? []).some((e) => e.undo_of === version);
+}
+
 /** «Вернуть как было» без итога этой страницы (перезагрузка, возврат на экран): последнее изменение варианта —
  *  исправление слайда `n` (`kind` «fix», не отмена, с сохранённой версией) — его и вернёт «верни как было». */
 export function fixToRevert(v: Variant | null | undefined, n: number): boolean {

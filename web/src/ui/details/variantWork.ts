@@ -67,6 +67,9 @@ export type WorkAction =
   | { type: "fix"; key: string; ids: string[] | "all" }
   | { type: "fixed"; key: string; seq: number; fixed: number; rev: string | null }
   | { type: "fixFailed"; key: string; seq: number; error: string; rev: string | null }
+  /** Исправление кончилось, но вариант не прочитался ни открытым, ни тихо: сколько исправлено и к какой ревизии это
+   *  относится, неизвестно — итога «Исправлено N» нет (он был бы «свежим» навсегда). */
+  | { type: "fixLost"; key: string; seq: number }
   | { type: "undo"; key: string; by: UndoBy }
   /** «Верни как было» варианта удалось — своё (`seq` возврата) или с экрана результата (null): итога исправления нет. */
   | { type: "undone"; key: string; seq: number | null }
@@ -96,6 +99,9 @@ export function workNext(s: WorkState, a: WorkAction): WorkState {
     case "fixFailed":
       if (!fix || fix.seq !== a.seq || fix.phase !== "fix") return s;
       return put({ ...w, fix: { ...fix, phase: "idle", rev: a.rev, error: a.error } });
+    case "fixLost":
+      if (!fix || fix.seq !== a.seq || fix.phase !== "fix") return s;
+      return put({ ...w, fix: { ...fix, phase: "idle", fixed: 0, rev: null, error: null } });
     case "undo":
       if (working(w)) return s;
       return put({ fix: fix && { ...fix, error: null }, undo: { seq: ++counter, by: a.by, busy: true, error: null } });

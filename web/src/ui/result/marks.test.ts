@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  clampBox, countText, firstRemarkSlide, orderRemarks, plainMessage, remarksSwitch, remarkTitle, slideBadges, slideRemarks, stageMarks, type Remark,
+  clampBox, countText, firstRemarkSlide, orderRemarks, plainMessage, remarksSwitch, remarkTitle, remarkTone, slideBadges, slideRemarks, stageMarks, type Remark,
 } from "./marks";
 import { CONTRAST, DENSE, GRID, MODEL, issue, titleOf, variant } from "./remarks.fixtures";
 
@@ -50,6 +50,16 @@ test("замечания слайда: только видимые на сцен
 test("бейджи миниатюр: число открытых замечаний слайда и цвет худшего", () => {
   const b = slideBadges(variant([MODEL, DENSE, GRID, CONTRAST, issue({ id: "m", slide: 6, severity: "info", kind: "model" }), issue({ id: "deck", slide: 0, severity: "error" })]));
   assert.deepEqual([...b.entries()], [[3, { count: 3, tone: "err" }], [6, { count: 1, tone: "note" }]]);
+});
+
+test("замечание модели с важностью «предупреждение» — серое «Замечание модели», как в листе «Подробнее» (C1)", () => {
+  const v = variant([MODEL, issue({ id: "slide_content-5-0", slide: 5, check_id: "slide_content", severity: "warn", kind: "model", message: "мало" })]);
+  assert.deepEqual([...slideBadges(v).entries()], [[3, { count: 1, tone: "note" }], [5, { count: 1, tone: "note" }]]);
+  const [r] = slideRemarks(v, 3, titleOf);
+  assert.deepEqual([r.tone, r.label, r.icon], ["note", "Замечание модели · Весь слайд", "chat-note"]);
+  // ошибка модели — ошибка; предупреждение правил рядом с замечанием модели — бейдж янтарный
+  assert.equal(remarkTone(issue({ severity: "error", kind: "model" })), "err");
+  assert.equal(slideBadges(variant([MODEL, DENSE])).get(3)?.tone, "warn");
 });
 
 test("включение режима: слайд с замечаниями остаётся, без них — первый слайд с замечаниями", () => {

@@ -27,7 +27,8 @@ export const titleOf = (id: string) => TITLES[id] ?? null;
 export const CONTRAST = issue({ id: "contrast_low-3-1", check_id: "contrast_low", severity: "error", message: "Подпись под формулой (#9CA3AF на #FFFFFF, 3.1:1)",
   bboxes: [{ x: 0.0521, y: 0.5741, w: 0.4125, h: 0.0667 }], element_ids: ["12"] });
 export const DENSE = issue({ id: "fill_ratio-3-2", check_id: "fill_ratio", message: "абзац под формулой — 4 строки", bboxes: [{ x: 0.0208, y: 0.6815, w: 0.7708, h: 0.1889 }] });
-export const MODEL = issue({ id: "design_review-3-0", check_id: "design_review", severity: "info", kind: "model", message: "Нет примера", suggestion: "покажите, как найти первообразную" });
+// взгляд дизайнера присылает свои замечания с важностью «предупреждение» (verstka/audit/eyes.py) — тон у них серый
+export const MODEL = issue({ id: "design_review-3-0", check_id: "design_review", severity: "warn", kind: "model", message: "Нет примера", suggestion: "покажите, как найти первообразную" });
 export const GRID = issue({ id: "grid-3-9", check_id: "grid_alignment", severity: "info", message: "сетка" });
 
 export const ev = (step: string, message: string): AgentEvent => ({ step, message, slide: 3, variant: "structured" });
