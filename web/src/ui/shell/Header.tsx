@@ -2,7 +2,6 @@
 // `<header class="p2-hdr">`.
 import { useEffect, useRef } from "react";
 import { useApp } from "../../store";
-import { LS, storage } from "../../lib/utils";
 import { Brand } from "./Brand";
 import { Nav } from "./Nav";
 
@@ -10,18 +9,18 @@ import { Nav } from "./Nav";
 const DOWN_MS = 560;
 
 export function Header() {
-  const { ui, dispatch, healthError } = useApp();
+  const { ui, dispatch, healthError, setBrief } = useApp();
   const downTimer = useRef(0);
   useEffect(() => () => window.clearTimeout(downTimer.current), []);
 
-  // V2 `goHome`: `go('create')` и чистый лист — пустой текст, текст раскрыт, разделы и «Все параметры» закрыты,
-  // «Улучшить готовую» снята. С результата плита 04 уходит вниз непрозрачной вместе с плитами (`down`); `go`
-  // сбрасывает `down`, поэтому он ставится после и держится, если плита ещё уезжает от прошлого нажатия.
+  // V2 `goHome`: `go('create')` и чистый лист — пустой текст (черновик тоже), текст раскрыт, разделы и «Все
+  // параметры» закрыты, «Улучшить готовую» снята. С результата плита 04 уходит вниз непрозрачной вместе с плитами
+  // (`down`); `go` сбрасывает `down`, поэтому он ставится после и держится, если плита ещё уезжает от прошлого нажатия.
   const goHome = () => {
     const fromResult = ui.screen === "result";
     dispatch({ type: "go", screen: "create" });
     dispatch({ type: "set", patch: { improve: false, down: fromResult || ui.down } });
-    storage.set(LS.brief, null);
+    setBrief("");
     if (fromResult) {
       window.clearTimeout(downTimer.current);
       downTimer.current = window.setTimeout(() => dispatch({ type: "set", patch: { down: false } }), DOWN_MS);

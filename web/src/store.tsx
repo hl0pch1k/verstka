@@ -8,14 +8,17 @@ import { errText, firstLine, newestTemplate, slideCount } from "./lib/narrate";
 import { templateTitle, tplLabel } from "./lib/plain";
 import { LS, storage, uid } from "./lib/utils";
 import { decodeImage, viewTransition } from "./lib/motion";
+import { draftBrief, writeDraft } from "./lib/draft";
 import { variantRev, withRev } from "./lib/rev";
 import { uiReducer, UI0, type UiAction, type UiState } from "./ui/deck/geometry";
+import { textError, type TextIssue } from "./ui/create/textRules";
 import type {
   ChatMessage, GenerateRequest, Generation, GenerationMeta, Health, ImprovedFrom, ImproveSource, Job, JobKind, ModelsStatus, Notice, NoticeArea, StrategyInfo, TemplateListItem, TemplateManifest, Variant,
 } from "./types";
 
 export type { ActiveJob } from "./lib/jobState";
 export type { Notice, NoticeArea } from "./types";
+export type { TextIssue } from "./ui/create/textRules";
 /** `items`: what the job works on (the strategies of a generation) — the build screen shows one card per item.
  *  `generation` / `slides`: the deck a generation builds and the slide count asked for (the build's rail).
  *  `area`: where a failure is told («Не получилось: …»); by default — by the job's kind (`jobArea`).
@@ -69,15 +72,28 @@ export interface AppState {
   clearNotice(area: NoticeArea): void;
   uploadTemplate(file: File, useModels: boolean, improve?: boolean): Promise<void>;
   startGeneration(req: GenerateRequest, expectedSlides?: number | null): Promise<void>;
+  /** Текст шага «Текст» (черновик): хранится в localStorage `verstka.brief_draft` и переживает перезагрузку. */
+  brief: string;
+  /** Новый текст поля. Снимает ошибку у поля и строку области «Текст»: она была о прежнем тексте. */
+  setBrief(text: string): void;
+  /** Ошибка у поля «Текст» (красная рамка и строка); null — ошибки нет. */
+  textIssue: TextIssue | null;
+  setTextIssue(issue: TextIssue | null): void;
+  /** Проверка поля перед сборкой (V2 `txStart`): ошибка — она встаёт у поля, плиты поднимают шаг «Текст»
+   *  («Все параметры» сворачиваются) и возвращается false; текст годится — true. */
+  checkText(): boolean;
   /** A text handed to the create screen's field once (the agent's written text, «Изменить»); null when none waits. */
   composerText: string | null;
-  /** The parameters handed with it (a deck's own: «Изменить текст» on a deck restores how it was built). */
+  /** The parameters handed with it (a deck's own: «Изменить текст» on a deck restores how it was built). They stay
+   *  after the field takes the text — the parameters step takes them itself. */
   composerPreset: ComposerPreset | null;
-  /** Opens the create screen with `text` in the field (it replaces the saved draft once), and the deck's parameters. */
+  /** Opens the create screen with `text` in the field (it replaces the saved draft once), and the deck's parameters.
+   *  An improved deck's text comes back in «Улучшить готовую», with the deck it was read from. */
   editText(text: string, preset?: ComposerPreset): void;
-  /** The create screen took the handed text. */
+  /** The create screen's field took the handed text (the preset stays for the parameters step). */
   takeComposerText(): void;
-  /** «Улучшить готовую презентацию»: the deck read back, handed to the create screen once (null when none waits). */
+  /** «Улучшить готовую»: the deck read back. Handed to the text step, it stays while the improve mode lives
+   *  (`ui.improve`) — the build sends it as `improved_from`; the text step drops it when the mode ends. */
   improveSource: ImproveSource | null;
   takeImproveSource(): void;
 }
@@ -128,26 +144,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [ui, dispatch] = useReducer(uiReducer, UI0, (s0): UiState => (storage.get(LS.generation) ? { ...s0, screen: "result" } : s0));
   const [composerText, setComposerText] = useState<string | null>(null);
   const [composerPreset, setComposerPreset] = useState<ComposerPreset | null>(null);
+  const [improveSource, setImproveSource] = useState<ImproveSource | null>(null);
   const editText = useCallback((text: string, preset?: ComposerPreset) => {
     setComposerText(text);
     setComposerPreset(preset ?? null);
-    // an improved deck's «Изменить текст» returns into the improve mode; any other text leaves it
+    // an improved deck's «Изменить текст» returns into the improve mode, with the deck it was read from (the note over
+    // the field and the strip 01 tell it); any other text leaves it
+    const from = preset?.improvedFrom ?? null;
+    setImproveSource(from ? { brief: text, name: from.name, template_id: from.template_id, slides: from.slides ?? 0, tables: 0, charts: 0, pictures: 0, audit: from.audit ?? null } : null);
     dispatch({ type: "go", screen: "create" });
-    dispatch({ type: "set", patch: { improve: !!preset?.improvedFrom } });
+    dispatch({ type: "set", patch: { improve: !!from } });
   }, []);
-  const takeComposerText = useCallback(() => {
-    setComposerText(null);
-    setComposerPreset(null);
-  }, []);
-  const [improveSource, setImproveSource] = useState<ImproveSource | null>(null);
+  const takeComposerText = useCallback(() => setComposerText(null), []);
   const takeImproveSource = useCallback(() => setImproveSource(null), []);
   const [activeJob, setActiveJob] = useState<ActiveJob | null>(null);
   const liveJobs = useRef(new Map<string, ActiveJob>()); // every job still running, the newest last
   const [messages, setMessages] = useState<ChatMessage[]>([]);
 
+  const [brief, setBriefState] = useState(draftBrief);
+  const [textIssue, setTextIssue] = useState<TextIssue | null>(null);
+
   // Latest values for callbacks that must stay referentially stable.
-  const latest = useRef({ templateId, templates, manifest, generationId, generation, activeStrategy, strategies, ui });
-  latest.current = { templateId, templates, manifest, generationId, generation, activeStrategy, strategies, ui };
+  const latest = useRef({ templateId, templates, manifest, generationId, generation, activeStrategy, strategies, ui, brief });
+  latest.current = { templateId, templates, manifest, generationId, generation, activeStrategy, strategies, ui, brief };
   const genSeq = useRef(0);
   const jobSubs = useRef(new Map<string, () => void>());
 
@@ -170,6 +189,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (offline) setHealthError(true);
     if (!(offline && quietOffline)) notify(area, "error", `${prefix}: ${errText(e)}`);
   }, [notify]);
+
+  const setBrief = useCallback((text: string) => {
+    setBriefState(text);
+    setTextIssue(null);
+    clearNotice("text");
+  }, [clearNotice]);
+  // черновик пишется через 300 мс после последней правки, а при уходе со страницы — сразу
+  useEffect(() => {
+    const t = window.setTimeout(() => writeDraft({ brief }), 300);
+    return () => window.clearTimeout(t);
+  }, [brief]);
+  useEffect(() => {
+    const flush = () => writeDraft({ brief: latest.current.brief });
+    window.addEventListener("pagehide", flush);
+    return () => window.removeEventListener("pagehide", flush);
+  }, []);
+  const checkText = useCallback(() => {
+    const issue = textError(latest.current.brief);
+    if (!issue) return true;
+    setTextIssue(issue);
+    // пустое поле — «Улучшить готовую» кончилась (V2 `txStart`: `txImp: false`)
+    if (issue.kind === "empty") dispatch({ type: "set", patch: { improve: false } });
+    dispatch({ type: "open", step: "text" });
+    return false;
+  }, []);
 
   const pushMessage = useCallback((role: "user" | "assistant", text: string) => {
     setMessages((list) => [...list, { id: uid("m"), role, text, ts: Date.now() / 1000 }]);
@@ -469,11 +513,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, activeStrategy, setActiveStrategy, activeVariant,
     selectedSlide, setSelectedSlide, ui, dispatch, activeJob, runJob, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
+    brief, setBrief, textIssue, setTextIssue, checkText,
     composerText, composerPreset, editText, takeComposerText, improveSource, takeImproveSource,
   }), [
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, activeStrategy, setActiveStrategy, activeVariant,
     selectedSlide, setSelectedSlide, ui, activeJob, runJob, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
+    brief, setBrief, textIssue, checkText,
     composerText, composerPreset, editText, takeComposerText, improveSource, takeImproveSource,
   ]);
 

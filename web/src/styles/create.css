@@ -1,5 +1,6 @@
 /* Шаг 01 «Шаблон» (модуль tp): лента обложек C-templates, файл над шагом C-upload, разбор C-analyzing. Дословно из
  * boards/V2.dc.html (<helmet><style>, блок «Шаблоны (модуль tp)»): классы tt-, up-, an-, tp-zone, tp-out, tp-fill, tp-wf.
+ * Шаг 02 «Текст» (модуль tx) — в конце файла, тоже дословно: классы ct-, ci-, tx-.
  * Стили слоёв, «Слайдов шаблона» (pv-) и диалога удаления (dl-) — в layers.css. */
 /* ── Шаблоны (модуль tp) · C-templates: плитка обложки + таблетка «Слайды» (наведение, фокус, всегда на тач-экранах) */
 .tt-tile{position:relative}
@@ -81,3 +82,55 @@
 .tp-wf-d{flex:none;width:112px;height:auto;aspect-ratio:16 / 9;border-radius:12px}
 .tp-b{position:absolute;display:block;border-radius:999px;background:rgba(11,18,32,.14)}
 .tp-dk{background:rgba(11,18,32,.4)}
+/* «02 Текст» (C-text, C-improve, C-errors): «Из файла» с выбором файла, разбор текста, «Улучшить готовую»,
+   ошибки в строке у поля. Состояния поля сменяются перекрёстным затуханием (p2-on/p2-off), заметка выезжает из-под поля */
+.ct-ta{overflow:auto;scrollbar-width:thin;scrollbar-color:rgba(11,18,32,.14) transparent}
+.ci-strip{position:absolute;left:48px;right:48px;top:0;height:40px;display:flex;align-items:center;gap:12px;padding:0;border:0;border-radius:16px;background:none;font-family:inherit;text-align:left;white-space:nowrap;cursor:pointer}
+.ci-sname{font-size:14px;font-weight:700;line-height:20px;color:#0B1220}
+.ci-strip:hover .ci-sname{color:#2563EB}
+.tx-fg{position:relative;z-index:4}
+.tx-menu{position:absolute;top:48px;left:0;z-index:3;width:320px;padding:8px;border-radius:24px;background:#FFFFFF;box-shadow:0 0 0 1px rgba(11,18,32,.08),0 16px 48px 0 rgba(11,18,32,.12);transform-origin:top left;opacity:0;visibility:hidden;transform:scale(.98);pointer-events:none;transition:opacity 160ms var(--ease),transform 160ms var(--ease),visibility 0s linear 160ms}
+.tx-menu-on{opacity:1;visibility:visible;transform:scale(1);pointer-events:auto;transition:opacity 240ms var(--ease),transform 240ms var(--ease),visibility 0s}
+.tx-mcap{margin:0;padding:4px 12px 8px;font-size:13px;font-weight:600;line-height:20px;color:#5A6272}
+.tx-mi{display:flex;align-items:center;gap:12px;width:100%;height:56px;padding:0 12px;border:0;border-radius:16px;background:transparent;color:#0B1220;text-align:left;cursor:pointer;transition:transform 160ms var(--ease)}
+.tx-mi:hover{background:#F3F4F1}
+.tx-mi:active{transform:scale(.98)}
+.tx-mic{display:flex;align-items:center;justify-content:center;width:32px;height:32px;flex:none;border-radius:999px;background:#E9F1FF;color:#2563EB}
+.tx-mt{display:flex;flex-direction:column;min-width:0}
+.tx-mn{font-size:14px;font-weight:700;line-height:20px;color:#0B1220;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tx-mm{font-size:13px;font-weight:500;line-height:20px;color:#5A6272;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tx-scrim{position:absolute;inset:0;z-index:3;padding:0;border:0;border-radius:40px;background:none;cursor:default}
+.tx-top{position:absolute;right:48px;top:40px;height:64px}
+.tx-b2{position:relative}
+.tx-note{position:absolute;left:0;right:0;top:0}
+.tx-fw{transition:transform 520ms var(--ease)}
+.tx-ring{position:relative}
+.tx-ring::before{content:"";position:absolute;left:0;right:0;bottom:0;height:48px;border-radius:0 0 24px 24px;background:#FFFFFF;pointer-events:none;transition:transform 520ms var(--ease)}
+.tx-ring>.p2-wrap{position:relative;transition:transform 520ms var(--ease)}
+.tx-ring::after{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:0 0 0 2px #DC2626;opacity:0;pointer-events:none;transition:opacity 240ms var(--ease)}
+.tx-ring.ce-bad::after{opacity:1}
+/* «Улучшить готовую»: поле уходит под заметку (88 px) и вырастает вниз на 16 px — низ поля и строка под текстом
+   встают туда же, где на доске C-improve; всё едет transform'ом вместе с плитой. Рамка фокуса — по всему полю */
+@media (min-width: 901px){
+.tx-fw-imp{transform:translateY(88px)}
+.tx-fw-imp .tx-ring::before,.tx-fw-imp .tx-ring>.p2-wrap{transform:translateY(16px)}
+.tx-fw-imp .tx-ring::after{bottom:-16px}
+.tx-fw-imp .p2-field.tx-ring:has(.p2-ta:focus){box-shadow:none}
+.tx-fw-imp .tx-ring:has(.p2-ta:focus)::after{opacity:1;box-shadow:0 0 0 2px #2563EB;transition:none}
+.tx-fw-imp .tx-ring.ce-bad:has(.p2-ta:focus)::after{box-shadow:0 0 0 2px #DC2626}
+}
+.tx-sw{display:grid;align-items:center;min-width:0}
+.tx-sw>*{grid-area:1 / 1}
+.tx-swr{flex:none;justify-items:end}
+.tx-take{display:inline-flex;align-items:center;height:20px;padding:0;border:0;border-radius:4px;background:none;color:#2563EB;font-size:14px;font-weight:700;line-height:20px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
+.tx-take:hover{transform:translateY(-2px)}
+.tx-take:active{transform:scale(.98)}
+.tx-take.p2-none{display:none}
+@media (max-width: 900px){.tx-strip,.tx-scrim{display:none !important}.tx-note{position:static;margin-bottom:16px}.tx-err{flex-wrap:wrap;white-space:normal !important}}
+/* Заметка «Улучшить готовую» бывает выше двух строк (при 1280 px, с помощником): поле уходит под неё на её высоту + 16
+   и растёт вниз меньше (TextBody ставит --tx-sh и --tx-gr по высоте заметки). Без переменных — числа доски: 88 и 16 */
+@media (min-width: 901px){
+.tx-fw-imp{transform:translateY(var(--tx-sh,88px))}
+.tx-fw-imp .tx-ring::before,.tx-fw-imp .tx-ring>.p2-wrap{transform:translateY(var(--tx-gr,16px))}
+.tx-fw-imp .tx-ring::after{bottom:calc(var(--tx-gr,16px) * -1)}
+}
