@@ -9,18 +9,20 @@ import { Nav } from "./Nav";
 const DOWN_MS = 560;
 
 export function Header() {
-  const { ui, dispatch, healthError, setBrief } = useApp();
+  const { ui, dispatch, healthError, setBrief, setParams } = useApp();
   const downTimer = useRef(0);
   useEffect(() => () => window.clearTimeout(downTimer.current), []);
 
-  // V2 `goHome`: `go('create')` и чистый лист — пустой текст (черновик тоже), текст раскрыт, разделы и «Все
-  // параметры» закрыты, «Улучшить готовую» снята. С результата плита 04 уходит вниз непрозрачной вместе с плитами
-  // (`down`); `go` сбрасывает `down`, поэтому он ставится после и держится, если плита ещё уезжает от прошлого нажатия.
+  // V2 `goHome`: `go('create')` и чистый лист — пустой текст и аудитория (черновик тоже; остальные параметры
+  // остаются), текст раскрыт, разделы и «Все параметры» закрыты, «Улучшить готовую» снята. С результата плита 04
+  // уходит вниз непрозрачной вместе с плитами (`down`); `go` сбрасывает `down`, поэтому он ставится после и держится,
+  // если плита ещё уезжает от прошлого нажатия.
   const goHome = () => {
     const fromResult = ui.screen === "result";
     dispatch({ type: "go", screen: "create" });
     dispatch({ type: "set", patch: { improve: false, down: fromResult || ui.down } });
     setBrief("");
+    setParams({ audience: "" });
     if (fromResult) {
       window.clearTimeout(downTimer.current);
       downTimer.current = window.setTimeout(() => dispatch({ type: "set", patch: { down: false } }), DOWN_MS);

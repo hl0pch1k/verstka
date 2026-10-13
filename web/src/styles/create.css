@@ -1,6 +1,8 @@
 /* Шаг 01 «Шаблон» (модуль tp): лента обложек C-templates, файл над шагом C-upload, разбор C-analyzing. Дословно из
  * boards/V2.dc.html (<helmet><style>, блок «Шаблоны (модуль tp)»): классы tt-, up-, an-, tp-zone, tp-out, tp-fill, tp-wf.
- * Шаг 02 «Текст» (модуль tx) — в конце файла, тоже дословно: классы ct-, ci-, tx-.
+ * Шаг 02 «Текст» (модуль tx) — после него, тоже дословно: классы ct-, ci-, tx-.
+ * Шаг 03 «Параметры и запуск» — в конце файла: стрелка «Все параметры» (p2-more) и поля меню (cp-) дословно из V2,
+ * сводка со строкой ошибки (pp-) — по C-errors.
  * Стили слоёв, «Слайдов шаблона» (pv-) и диалога удаления (dl-) — в layers.css. */
 /* ── Шаблоны (модуль tp) · C-templates: плитка обложки + таблетка «Слайды» (наведение, фокус, всегда на тач-экранах) */
 .tt-tile{position:relative}
@@ -132,4 +134,62 @@
 .tx-fw-imp{transform:translateY(var(--tx-sh,88px))}
 .tx-fw-imp .tx-ring::before,.tx-fw-imp .tx-ring>.p2-wrap{transform:translateY(var(--tx-gr,16px))}
 .tx-fw-imp .tx-ring::after{bottom:calc(var(--tx-gr,16px) * -1)}
+}
+/* Стрелка «Все параметры» под 03: цвет и прозрачность как у цифры, ширина по ширине «03» */
+.p2-more{display:flex;flex-direction:column;align-items:center;height:64px;padding:0;border:0;border-radius:16px;background:none;color:#FFFFFF;opacity:.22;cursor:pointer;transition:opacity 160ms var(--ease),transform 160ms var(--ease)}
+.p2-more-w{display:block;height:0;overflow:hidden;visibility:hidden;font-family:'Unbounded','Manrope',sans-serif;font-weight:700;font-size:88px;line-height:64px;letter-spacing:-0.04em}
+.p2-p3:has(.p2-head:hover) .p2-more{opacity:.4}
+.p2-more:hover{opacity:.56;transform:translateY(2px)}
+.p2-more:active{transform:translateY(2px) scale(.96)}
+.p2-more:focus-visible{outline:2px solid rgba(255,255,255,.64);outline-offset:4px}
+@media (max-width: 900px){.p2-more{display:none !important}}
+/* Раскрытие «Все параметры»: плита 03 поднимается, полное меню проявляется лесенкой, стрелка поворачивается */
+.cp-fbox{position:relative;display:flex;flex-direction:column;justify-content:center;gap:4px;height:88px;padding:0 24px}
+.cp-fbox:has(.cp-ctl:focus){box-shadow:inset 0 0 0 1px rgba(255,255,255,.1),0 0 0 2px #38BDF8}
+.cp-lbl{font-size:13px;font-weight:600;line-height:20px;color:rgba(255,255,255,.64)}
+.cp-ctl{display:block;width:100%;height:40px;margin:0;padding:0;border:0;border-radius:0;background:transparent;font-family:inherit;font-size:16px;font-weight:700;line-height:24px;color:#FFFFFF;-webkit-appearance:none;appearance:none}
+.cp-ctl:focus{outline:none}
+.cp-ctl::placeholder{color:rgba(255,255,255,.48);font-weight:600;opacity:1}
+select.cp-ctl{padding-right:32px;cursor:pointer}
+.cp-ctl option{color:#0B1220;background:#FFFFFF}
+.cp-chev{position:absolute;right:24px;bottom:24px;color:rgba(255,255,255,.64);pointer-events:none}
+.cp-vc{height:120px;flex-direction:row;align-items:stretch;justify-content:flex-start;gap:16px}
+.cp-nm{text-wrap:balance}
+.cp-own{padding-right:48px}
+.cp-x{position:absolute;right:16px;bottom:12px}
+.p2-more svg{transition:transform 360ms var(--ease)}
+.p2-more-up svg{transform:rotate(180deg)}
+.p2-more-up:hover{transform:translateY(-2px)}
+.p2-more-up:active{transform:translateY(-2px) scale(.96)}
+@media (max-width: 900px){.p2-more-body{display:none !important}}
+/* «03 Параметры и запуск»: переключатель, который сейчас не действует (модель не подключена), — как недоступные p2-rb */
+.p2-p3 .p2-sw:disabled{opacity:.32;cursor:default}
+/* Короткий ряд (V2 `#p2-b3`): степпер, варианты (--pp-n), переключатели; поля меню с переключателями — не ниже 104 */
+.pp-row{display:grid;grid-template-columns:216px repeat(var(--pp-n,3),minmax(0,1fr)) 264px;gap:16px;height:88px;margin:24px 0 0 192px}
+.pp-swb{min-height:104px;padding:16px 24px}
+.pp-th{display:block;flex:none;width:156px;height:88px}
+.pp-th svg{width:100%;height:100%}
+/* Сводка в заголовке плиты 03 и строка ошибки под ней (C-errors): обе в одной клетке; с ошибкой сводка поднимается на
+   10 px, строка встаёт под неё — места те же, что у столбца доски, а сводка не прыгает. Обе сжимаются с многоточием */
+.pp-sum{display:grid;flex:0 1 auto;min-width:0;justify-items:end;align-items:center}
+.pp-sum>*{grid-area:1 / 1;min-width:0;max-width:100%}
+.pp-sumt{font-size:15px;font-weight:600;line-height:24px;color:rgba(255,255,255,.64);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:transform 240ms var(--ease)}
+.pp-bad .pp-sumt{transform:translateY(-10px)}
+.pp-err{display:flex;justify-content:flex-end;transform:translateY(12px)}
+.pp-err>p{max-width:100%}
+/* короткий ряд при узкой колоде: названия и подписи вариантов не вылезают из карточек */
+.pp-vt{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Колода уже доски (1280 px; помощник): плита 03 — контейнер, ряд и меню подстраиваются под её ширину.
+   - Ряд не вмещает пять колонок (варианту нужно 173 px): переключатели остаются в «Все параметры», варианты шире.
+   - В меню миниатюры вариантов меньше, а название и подсказка — целиком.
+   - Сводке тесно для строки ошибки: строка встаёт под ряд заголовка, вправо к «Создать презентацию», сводка на месте. */
+.p2-p3{container:p3 / inline-size}
+@container p3 (max-width: 1254px){
+  .pp-row{grid-template-columns:216px repeat(var(--pp-n,3),minmax(0,1fr))}
+  .pp-row>.pp-sws{display:none}
+  .pp-th{width:112px;height:63px}
+}
+@container p3 (max-width: 1289px){
+  .pp-bad .pp-sumt{transform:none}
+  .pp-err{position:absolute;left:240px;right:48px;top:106px;transform:none}
 }

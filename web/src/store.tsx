@@ -12,6 +12,7 @@ import { draftBrief, writeDraft } from "./lib/draft";
 import { variantRev, withRev } from "./lib/rev";
 import { uiReducer, UI0, type UiAction, type UiState } from "./ui/deck/geometry";
 import { textError, type TextIssue } from "./ui/create/textRules";
+import { draftParams, type Params } from "./ui/create/params";
 import type {
   ChatMessage, GenerateRequest, Generation, GenerationMeta, Health, ImprovedFrom, ImproveSource, Job, JobKind, ModelsStatus, Notice, NoticeArea, StrategyInfo, TemplateListItem, TemplateManifest, Variant,
 } from "./types";
@@ -19,6 +20,7 @@ import type {
 export type { ActiveJob } from "./lib/jobState";
 export type { Notice, NoticeArea } from "./types";
 export type { TextIssue } from "./ui/create/textRules";
+export type { Params } from "./ui/create/params";
 /** `items`: what the job works on (the strategies of a generation) — the build screen shows one card per item.
  *  `generation` / `slides`: the deck a generation builds and the slide count asked for (the build's rail).
  *  `area`: where a failure is told («Не получилось: …»); by default — by the job's kind (`jobArea`).
@@ -82,6 +84,10 @@ export interface AppState {
   /** Проверка поля перед сборкой (V2 `txStart`): ошибка — она встаёт у поля, плиты поднимают шаг «Текст»
    *  («Все параметры» сворачиваются) и возвращается false; текст годится — true. */
   checkText(): boolean;
+  /** Параметры шага 03 (черновик рядом с текстом, ключ `params` в `verstka.brief_draft`). */
+  params: Params;
+  /** Новые параметры: часть полей или функция от прежних. */
+  setParams(patch: Partial<Params> | ((p: Params) => Params)): void;
   /** A text handed to the create screen's field once (the agent's written text, «Изменить»); null when none waits. */
   composerText: string | null;
   /** The parameters handed with it (a deck's own: «Изменить текст» on a deck restores how it was built). They stay
@@ -92,6 +98,8 @@ export interface AppState {
   editText(text: string, preset?: ComposerPreset): void;
   /** The create screen's field took the handed text (the preset stays for the parameters step). */
   takeComposerText(): void;
+  /** The parameters step took the handed parameters. */
+  takeComposerPreset(): void;
   /** «Улучшить готовую»: the deck read back. Handed to the text step, it stays while the improve mode lives
    *  (`ui.improve`) — the build sends it as `improved_from`; the text step drops it when the mode ends. */
   improveSource: ImproveSource | null;
@@ -156,6 +164,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     dispatch({ type: "set", patch: { improve: !!from } });
   }, []);
   const takeComposerText = useCallback(() => setComposerText(null), []);
+  const takeComposerPreset = useCallback(() => setComposerPreset(null), []);
   const takeImproveSource = useCallback(() => setImproveSource(null), []);
   const [activeJob, setActiveJob] = useState<ActiveJob | null>(null);
   const liveJobs = useRef(new Map<string, ActiveJob>()); // every job still running, the newest last
@@ -163,10 +172,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const [brief, setBriefState] = useState(draftBrief);
   const [textIssue, setTextIssue] = useState<TextIssue | null>(null);
+  const [params, setParamsState] = useState(draftParams);
+  const setParams = useCallback((patch: Partial<Params> | ((p: Params) => Params)) => {
+    setParamsState((p) => (typeof patch === "function" ? patch(p) : { ...p, ...patch }));
+  }, []);
 
   // Latest values for callbacks that must stay referentially stable.
-  const latest = useRef({ templateId, templates, manifest, generationId, generation, activeStrategy, strategies, ui, brief });
-  latest.current = { templateId, templates, manifest, generationId, generation, activeStrategy, strategies, ui, brief };
+  const latest = useRef({ templateId, templates, manifest, generationId, generation, activeStrategy, strategies, ui, brief, params });
+  latest.current = { templateId, templates, manifest, generationId, generation, activeStrategy, strategies, ui, brief, params };
   const genSeq = useRef(0);
   const jobSubs = useRef(new Map<string, () => void>());
 
@@ -195,13 +208,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setTextIssue(null);
     clearNotice("text");
   }, [clearNotice]);
-  // черновик пишется через 300 мс после последней правки, а при уходе со страницы — сразу
+  // черновик (текст и параметры) пишется через 300 мс после последней правки, а при уходе со страницы — сразу
   useEffect(() => {
     const t = window.setTimeout(() => writeDraft({ brief }), 300);
     return () => window.clearTimeout(t);
   }, [brief]);
   useEffect(() => {
-    const flush = () => writeDraft({ brief: latest.current.brief });
+    const t = window.setTimeout(() => writeDraft({ params }), 300);
+    return () => window.clearTimeout(t);
+  }, [params]);
+  useEffect(() => {
+    const flush = () => writeDraft({ brief: latest.current.brief, params: latest.current.params });
     window.addEventListener("pagehide", flush);
     return () => window.removeEventListener("pagehide", flush);
   }, []);
@@ -513,14 +530,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, activeStrategy, setActiveStrategy, activeVariant,
     selectedSlide, setSelectedSlide, ui, dispatch, activeJob, runJob, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
-    brief, setBrief, textIssue, setTextIssue, checkText,
-    composerText, composerPreset, editText, takeComposerText, improveSource, takeImproveSource,
+    brief, setBrief, textIssue, setTextIssue, checkText, params, setParams,
+    composerText, composerPreset, editText, takeComposerText, takeComposerPreset, improveSource, takeImproveSource,
   }), [
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, activeStrategy, setActiveStrategy, activeVariant,
     selectedSlide, setSelectedSlide, ui, activeJob, runJob, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
-    brief, setBrief, textIssue, checkText,
-    composerText, composerPreset, editText, takeComposerText, improveSource, takeImproveSource,
+    brief, setBrief, textIssue, checkText, params, setParams,
+    composerText, composerPreset, editText, takeComposerText, takeComposerPreset, improveSource, takeImproveSource,
   ]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

@@ -1,5 +1,5 @@
 // Черновик «Создать» в localStorage (`verstka.brief_draft`): один JSON-объект, как прежде. Поле `brief` — текст шага
-// «Текст»; параметры шага 03 ложатся рядом своими полями. Запись сливает новое с тем, что уже лежит.
+// «Текст», поле `params` — параметры шага 03 (ui/create/params.ts). Запись сливает новое с тем, что уже лежит.
 import { LS, storage } from "./utils";
 
 export type Draft = Record<string, unknown>;

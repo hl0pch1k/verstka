@@ -6,6 +6,7 @@ import { useApp } from "../../store";
 import { tplLabel } from "../../lib/plain";
 import type { TemplateListItem } from "../../types";
 import { ImproveStrip } from "../create/ImproveNote";
+import { ParamsBody, ParamsHead, useParamsPlate } from "../create/ParamsPlate";
 import { tplMeta } from "../create/ribbon";
 import { TemplateBody, TemplateHead, useTemplateUpload } from "../create/TemplatePlate";
 import { TextBody, TextHead, useTextPlate } from "../create/TextPlate";
@@ -35,6 +36,8 @@ export function AppShell() {
   const s1 = templateStrip(templates.find((t) => t.template_id === templateId));
   // шаг «Текст» — одно состояние на заголовок и тело плиты 02; разбор текста в нём считается один раз на правку
   const text = useTextPlate();
+  // шаг «Параметры и запуск» — одно состояние на заголовок плиты 03 (сводка, запуск) и её тело
+  const params = useParamsPlate();
   // полоса 02 на «Создать» и сборке — текст поля; на результате её подпишет результат (название презентации)
   const s2 = ui.screen === "result" ? undefined : textStrip(brief, { line: text.line, improve: ui.improve ? improveSource : null });
   // загрузка своего шаблона — одна на плиту 01 и раздел «Шаблоны»
@@ -68,7 +71,8 @@ export function AppShell() {
         {/* место помощника закрыто (колонка 0); плиту помощника и сужение колоды добавляет его задача */}
         <div className="hp-wrap hp-closed">
           <Deck s1={s1} h1={<TemplateHead upload={upload} />} p1={<TemplateBody upload={upload} />}
-            s2={s2} h2={<TextHead tp={text} />} p2={<TextBody tp={text} />} layers={layers} />
+            s2={s2} h2={<TextHead tp={text} />} p2={<TextBody tp={text} />}
+            h3={<ParamsHead pp={params} />} p3={<ParamsBody pp={params} />} layers={layers} />
           <div className="hp-hcell" />
         </div>
       </div>
