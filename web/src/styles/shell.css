@@ -11,6 +11,9 @@
 .hp-wrap{display:grid;grid-template-columns:minmax(0,1fr) 0px;column-gap:0px;height:812px;transition:grid-template-columns 340ms var(--ease),column-gap 340ms var(--ease)}
 .hp-wrap.hp-nar{grid-template-columns:minmax(0,1fr) 400px;column-gap:16px;transition-duration:520ms}
 .hp-hcell{position:relative;z-index:1;min-width:0;height:812px}
+/* колода — контейнер `deck`: плиты и слои перестраиваются по её ширине (помощник сужает её до 976 при 1440 и до 816 при
+   1280; пороги — ui/deck/fit.ts: узкая ≤ 1100, тесная ≤ 900) */
+.p2-deck{container:deck / inline-size}
 /* закрытая плита ждёт за правым краем (+32 px) — без горизонтальной прокрутки страницы: лишнее обрезается по краю окна */
 .p2-root:has(.hp-wrap){overflow-x:clip}
 @media (max-width: 900px){

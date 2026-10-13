@@ -73,7 +73,7 @@ function TemplateBody({ m }: { m: TemplateManifest }) {
         </div>
       </section>
 
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 416px", gap: 24, alignItems: "start", marginTop: 16 }}>
+      <div className="dtp-g" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 416px", gap: 24, alignItems: "start", marginTop: 16 }}>
         <section className="dtp-box p2-in" aria-labelledby="dtp-lay" style={{ animationDelay: "160ms" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, height: 40 }}>
             <h2 id="dtp-lay" className="dtp-h2">Макеты <span style={{ color: "#5A6272" }}>{m.patterns.length}</span></h2>

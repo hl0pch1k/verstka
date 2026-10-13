@@ -78,12 +78,12 @@ export function PatternLayer({ deck }: { deck: DeckManifest }) {
             <div style={{ display: "flex", flexDirection: "column", height: 532 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 24, height: 64, flex: "none" }}>
                 <h2 key={`t${p.n}`} id="dpt-title" className="dpt-title p2-in" style={{ animationDelay: "120ms" }}>{p.title}</h2>
-                <p key={`d${p.n}`} id="dpt-desc" className="p2-in" style={{ margin: 0, fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#5A6272", whiteSpace: "nowrap", animationDelay: "160ms" }}>{p.desc}</p>
+                <p key={`d${p.n}`} id="dpt-desc" className="p2-in" title={p.desc} style={{ minWidth: 0, margin: 0, fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#5A6272", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", animationDelay: "160ms" }}>{p.desc}</p>
                 <span style={{ flex: 1, minWidth: 0 }} />
-                <button type="button" className="p2-rbl p2-in" onClick={close} aria-label="Закрыть" title="Закрыть (Esc)" style={{ animationDelay: "200ms" }}><Icon name="x" size={18} /></button>
+                <button type="button" className="p2-rbl p2-in" onClick={close} aria-label="Закрыть" title="Закрыть (Esc)" style={{ flex: "none", animationDelay: "200ms" }}><Icon name="x" size={18} /></button>
               </div>
 
-              <div key={p.n} style={{ display: "grid", gridTemplateColumns: "576px 296px minmax(0, 1fr)", gap: 32, height: 388, marginTop: 24 }}>
+              <div key={p.n} className="dpt-g" style={{ display: "grid", gridTemplateColumns: "576px 296px minmax(0, 1fr)", gap: 32, height: 388, marginTop: 24 }}>
                 <div style={{ minWidth: 0 }}>
                   <figure className="dpt-map p2-in" style={{ animationDelay: "160ms" }}>
                     <Shot src={p.img} fallback={p.fallback} alt={p.alt} loading="eager" style={{ width: "100%", aspectRatio: aspect }} />

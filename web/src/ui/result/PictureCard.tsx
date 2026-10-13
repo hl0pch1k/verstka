@@ -54,8 +54,10 @@ export interface PictureRunView {
   error: string | null;
 }
 
-export function PictureCard({ view, form, formDelay, wish, onWish, onToggleForm, onCancel, onGenerate, onRemove, onUndo, run, off }: {
+export function PictureCard({ view, form, formDelay, wish, onWish, onToggleForm, onCancel, onGenerate, onRemove, onUndo, run, off, idp = "rp" }: {
   view: PictureView;
+  /** Начало id карточки: та же карточка стоит и в компактном виде результата (помощник открыт) — id не повторяются. */
+  idp?: string;
   form: boolean;
   /** Задержка появления формы: 320 мс вместе с колонкой, 40 мс по «Заменить». */
   formDelay: number;
@@ -77,9 +79,9 @@ export function PictureCard({ view, form, formDelay, wish, onWish, onToggleForm,
   const working = run.work !== null;
   const blocked = off ?? undefined;
   return (
-    <section className="p2-stag" aria-labelledby="rp-pt" style={{ padding: 24, borderRadius: 24, background: "#F3F4F1", transitionDelay: "280ms" }}>
+    <section className="p2-stag" aria-labelledby={`${idp}-pt`} style={{ padding: 24, borderRadius: 24, background: "#F3F4F1", transitionDelay: "280ms" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, height: 24 }}>
-        <h3 id="rp-pt" style={{ margin: 0, fontFamily: "'Unbounded','Manrope',sans-serif", fontSize: 14, fontWeight: 600, lineHeight: "24px", letterSpacing: "-0.02em", color: "#0B1220" }}>
+        <h3 id={`${idp}-pt`} style={{ margin: 0, fontFamily: "'Unbounded','Manrope',sans-serif", fontSize: 14, fontWeight: 600, lineHeight: "24px", letterSpacing: "-0.02em", color: "#0B1220" }}>
           {view.title}
         </h3>
         {view.tag && <span className="rp-tag">{view.tag}</span>}
@@ -118,8 +120,8 @@ export function PictureCard({ view, form, formDelay, wish, onWish, onToggleForm,
             </p>
           )}
           {run.error && <ErrorLine text={run.error} lines={2} style={{ marginTop: 16 }} />}
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 16 }}>
-            <button type="button" className={cls("p2-ob", form && "rp-on")} onClick={onToggleForm} aria-expanded={form} aria-controls="rp-form" style={{ height: 40 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginTop: 16 }}>
+            <button type="button" className={cls("p2-ob", form && "rp-on")} onClick={onToggleForm} aria-expanded={form} aria-controls={`${idp}-form`} style={{ height: 40 }}>
               {view.action}
             </button>
             {view.canRemove && (
@@ -137,7 +139,7 @@ export function PictureCard({ view, form, formDelay, wish, onWish, onToggleForm,
             )}
           </div>
           {form && (
-            <div id="rp-form" className="p2-in" style={{ marginTop: 16, animationDelay: `${formDelay}ms` }}>
+            <div id={`${idp}-form`} className="p2-in" style={{ marginTop: 16, animationDelay: `${formDelay}ms` }}>
               <label className="p2-field" style={{ display: "block", padding: "16px 24px", borderRadius: 24, background: "#FFFFFF" }}>
                 <span className="p2-sr">Ваши правки к изображению</span>
                 <textarea ref={area} className="p2-ta" rows={2} maxLength={500} value={wish} onChange={(e) => onWish(e.target.value)}
@@ -150,7 +152,7 @@ export function PictureCard({ view, form, formDelay, wish, onWish, onToggleForm,
                   }}
                   style={{ display: "block", width: "100%", height: 48, margin: 0, padding: 0, border: 0, resize: "none", background: "transparent", fontFamily: "inherit", fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#0B1220" }} />
               </label>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 16 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginTop: 16 }}>
                 <button type="button" className="p2-ob" onClick={onGenerate} disabled={!!off} title={blocked}>
                   <Icon name="wand" size={18} />
                   <span>Сгенерировать</span>

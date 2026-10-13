@@ -1,6 +1,7 @@
 // Оболочка «Слоёв»: страница (#F3F4F1, поля 24, ширина до 1392), шапка и колода в обёртке `hp-wrap` — сетке из двух
 // колонок, где вторая (место помощника) 0 → 400 px. Разметка — boards/V2.dc.html, `.p2-root`. Задачи областей
-// подключают сюда содержимое плит и слоёв через слоты `Deck`.
+// подключают сюда содержимое плит и слоёв через слоты `Deck`. Помощник открыт — колода сужается на любом экране
+// (`hp-open hp-nar`: сетка 520 мс, плита въезжает), и плиты и слои перестраиваются по её ширине (`@container deck`).
 import { useMemo, type CSSProperties } from "react";
 import { useApp } from "../../store";
 import { tplLabel } from "../../lib/plain";
@@ -19,6 +20,8 @@ import { Deck } from "../deck/Deck";
 // лист «Подробнее» — в основном куске сборки: первое открытие въезжает, как любое (кусок, догружаемый по клику, мог бы
 // не успеть к движению или не загрузиться вовсе); библиотеки — отдельным куском (vite.config `manualChunks`)
 import { DetailsSheet } from "../details/DetailsSheet";
+import { HelperPlate } from "../helper/HelperPlate";
+import { cls } from "../kit/cls";
 import { Icon } from "../kit/Icon";
 import type { StripData } from "../deck/Strip";
 import { HistoryLayer } from "../layers/HistoryLayer";
@@ -130,12 +133,12 @@ export function AppShell() {
     <div className="p2-root" style={ROOT}>
       <div style={{ width: "100%", maxWidth: 1392, margin: "0 auto" }}>
         <Header />
-        {/* место помощника закрыто (колонка 0); плиту помощника и сужение колоды добавляет его задача */}
-        <div className="hp-wrap hp-closed">
+        {/* колода и место помощника: закрыт — колонка 0; открыт — 400 px, зазор 16, колода сужается на всех экранах */}
+        <div className={cls("hp-wrap", ui.helper ? "hp-open hp-nar" : "hp-closed")}>
           <Deck s1={s1} h1={<TemplateHead upload={upload} />} p1={<TemplateBody upload={upload} />}
             s2={s2} h2={<TextHead tp={text} />} p2={<TextBody tp={text} />}
             h3={<ParamsHead pp={params} />} p3={<ParamsBody pp={params} />} b3={<BuildPlate />} s3={s3} p4={<ResultPlate />} layers={layers} />
-          <div className="hp-hcell" />
+          <HelperPlate />
         </div>
       </div>
     </div>

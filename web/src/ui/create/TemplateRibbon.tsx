@@ -1,5 +1,5 @@
-// Лента шага 01 (C-templates): шесть обложек — свои первыми, выбранная всегда видна, — плитка «Все шаблоны · ещё N» и
-// плитка «Загрузить свой». Разметка — boards/V2.dc.html, `#p2-b1` (`tpRib`, `tpMoreOn`, плитка `tpUpload`). Здесь же
+// Лента шага 01 (C-templates): шесть обложек (четыре, когда помощник сужает колоду) — свои первыми, выбранная всегда
+// видна, — плитка «Все шаблоны · ещё N» и плитка «Загрузить свой». Разметка — boards/V2.dc.html, `#p2-b1` (`tpRib`, `tpMoreOn`, плитка `tpUpload`). Здесь же
 // обложка шаблона (картинка или схема титульного слайда `tp-wf`) и плитка обложки — их берут разбор, раздел «Шаблоны»,
 // «Слайды шаблона» и диалог удаления.
 import { useState, type CSSProperties } from "react";
@@ -10,6 +10,8 @@ import type { TemplateListItem } from "../../types";
 import { cls } from "../kit/cls";
 import { Icon, type IconName } from "../kit/Icon";
 import { ribbonItems, tplMeta, tplShort } from "./ribbon";
+import { ribbonLayout } from "../deck/fit";
+import { useDeckFit } from "../deck/useDeckFit";
 
 /** Как стоит обложка: плитка ленты (142 px), раздел «Шаблоны» (16:9), миниатюра слайда (16:9, r12), шапка шага
  *  (80×45), диалог удаления (112, 16:9). */
@@ -121,7 +123,9 @@ export function Ribbon({ fresh, onPeek, onGallery, onUpload }: {
 }) {
   const { templates, templateId } = useApp();
   const pick = usePickTemplate();
-  const { shown, rest } = ribbonItems(templates, templateId, 6, fresh);
+  // широкая колода — шесть обложек, суженная помощником — четыре (с «Все шаблоны» и «Загрузить свой» — те же два ряда)
+  const { covers } = ribbonLayout(useDeckFit());
+  const { shown, rest } = ribbonItems(templates, templateId, covers, fresh);
   const hidden = templates.filter((x) => !shown.includes(x));
   return (
     <>

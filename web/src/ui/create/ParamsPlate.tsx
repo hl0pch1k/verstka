@@ -15,6 +15,7 @@ import { Icon } from "../kit/Icon";
 import { Switch } from "../kit/Switch";
 import { useHeld, useModelOn } from "./ImproveNote";
 import { ParamsAll } from "./ParamsAll";
+import { useDeckFit } from "../deck/useDeckFit";
 import {
   buildRequest, eyesOn, imagesHint, picturesOn, presetParams, SLIDES_LOCKED, slidesView, slideWord, startFailure, stepSlides,
   summaryLine, toggleEyes as nextEyes, togglePictures as nextPictures, toggleStrategy, variantCards, writesHint,
@@ -168,8 +169,11 @@ export function ParamsHead({ pp }: { pp: ParamsPlate }) {
             : <ErrorLine key={shown?.text ?? ""} text={shown?.text ?? ""} lines={1} quiet={shown?.echo} style={{ color: "#F87171" }} />}
         </div>
       </div>
-      <button type="button" className="p2-cta" onClick={pp.start} aria-busy={pp.starting || undefined} aria-describedby={on ? "pp-err" : undefined}>
-        <span>Создать презентацию</span>
+      {/* тесная колода (помощник при 1280) — «Создать»: кнопка целиком видна рядом с названием шага */}
+      <button type="button" className="p2-cta pp-cta" onClick={pp.start} aria-busy={pp.starting || undefined} aria-describedby={on ? "pp-err" : undefined}
+        aria-label="Создать презентацию">
+        <span className="pp-cta-l">Создать презентацию</span>
+        <span className="pp-cta-s">Создать</span>
         <Icon name="arrow-right" size={20} />
       </button>
     </>
@@ -203,23 +207,39 @@ const SW_ROW = { display: "flex", alignItems: "center", justifyContent: "space-b
 const SW_NAME = { fontSize: 14, fontWeight: 600, lineHeight: "20px", color: "#FFFFFF" } as const;
 
 /** Тело плиты 03 (слот `p3`): короткий ряд `#p2-b3`, «Все параметры» `#p2-b3m` и стрелка под «03». */
+/** Варианты в тесной колоде (помощник при 1280): одна коробка рядом со степпером, варианты — строками с галочкой. */
+function VariantList({ pp }: { pp: ParamsPlate }) {
+  return (
+    <div className="p2-box p2-stag pp-vlist" role="group" aria-label="Варианты оформления" style={{ transitionDelay: "40ms" }}>
+      {pp.cards.map((v) => (
+        <button key={v.name} type="button" role="checkbox" aria-checked={v.on} className={cls("pp-vli", v.on && "pp-vli-on")} onClick={() => pp.toggle(v.name)} title={v.full}>
+          <span className="p2-vbox" aria-hidden="true"><Icon name="check" size={12} /></span>
+          <span className="pp-vt">{v.title}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function ParamsBody({ pp }: { pp: ParamsPlate }) {
   const { ui, dispatch } = useApp();
   const create = ui.screen === "create";
   const more = create && ui.more;
   const on = create && ui.open === "text" && !ui.more;
+  // колода, суженная помощником при 1280: варианты карточками рядом со степпером не помещаются — одна коробка-список
+  const tight = useDeckFit() === "tight";
   return (
     <>
-      <div id="p2-b3" className={cls("p2-body p2-params pp-row", show(on))} style={{ "--pp-n": pp.cards.length } as CSSProperties}>
+      <div id="p2-b3" className={cls("p2-body p2-params pp-row", tight && "pp-row-t", show(on))} style={{ "--pp-n": pp.cards.length } as CSSProperties}>
         <ShortSlides pp={pp} />
-        {pp.cards.map((v, i) => (
+        {tight ? <VariantList pp={pp} /> : pp.cards.map((v, i) => (
           <div key={v.name} className="p2-stag" style={{ transitionDelay: `${40 + i * 40}ms` }}>
-            <button type="button" role="checkbox" aria-checked={v.on} className={cls("p2-vc", v.on && "p2-vc-on")} onClick={() => pp.toggle(v.name)} title={v.full}>
+            <button type="button" role="checkbox" aria-checked={v.on} className={cls("p2-vc pp-vc", v.on && "p2-vc-on")} onClick={() => pp.toggle(v.name)} title={v.full}>
               <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, width: "100%" }}>
                 <span className="pp-vt" style={{ fontSize: 16, fontWeight: 700, lineHeight: "24px", color: "#FFFFFF" }}>{v.title}</span>
                 <span className="p2-vbox" aria-hidden="true"><Icon name="check" size={12} /></span>
               </span>
-              <span className="pp-vt" style={{ maxWidth: "100%", fontSize: 13, fontWeight: 500, lineHeight: "20px", color: "rgba(255,255,255,.64)" }}>{v.desc}</span>
+              <span className="pp-vt pp-vd" style={{ maxWidth: "100%", fontSize: 13, fontWeight: 500, lineHeight: "20px", color: "rgba(255,255,255,.64)" }}>{v.desc}</span>
             </button>
           </div>
         ))}

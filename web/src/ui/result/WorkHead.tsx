@@ -31,10 +31,10 @@ export function WorkHead({ n, total, title, remarks, remarksOn = false, remarksO
         {total > 0 ? `Слайд ${n} из ${total}` : "Слайдов нет"}{" "}
         {title && <span style={{ fontWeight: 500, color: "#5A6272" }}>· {title}</span>}
       </p>
-      <div style={{ display: "flex", alignItems: "center", gap: 24, flex: "none" }}>
+      <div className="ra-whr" style={{ display: "flex", alignItems: "center", gap: 24, flex: "none" }}>
         {sw.shown && (
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span id="ra-swl" style={{ fontSize: 14, fontWeight: 600, lineHeight: "20px", color: "#0B1220" }}>Замечания</span>
+            <span id="ra-swl" className="ra-swl" style={{ fontSize: 14, fontWeight: 600, lineHeight: "20px", color: "#0B1220" }}>Замечания</span>
             {sw.counter && (
               <span id="ra-swc" className={cls("ra-cnt", sw.counter === "err" ? "rk-cnt-err" : "ra-cnt-warn")}>
                 {remarks.count}

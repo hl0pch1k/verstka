@@ -1,0 +1,114 @@
+/* Помощник (ui/helper) и компактный «Результат» (ui/result/CompactResult). Блок «Помощник (модуль helper, как
+ * G-helper-open и G-helper)» — дословно из boards/V2.dc.html (<helmet><style>): плита hp-help, каскад hp-st, лента и
+ * поле gh-, компактный слой hp-in (hp-top, hp-ncol, hp-xf) и правила полного вида при сужении. Сетка колоды и ячейка
+ * помощника (hp-wrap, hp-hcell) — в shell.css. Отличие от V2: колода сужается на всех экранах (не плита поверх колоды
+ * на «Создать», «Сборке» и под «Подробнее»), поэтому тени hp-ovl нет; содержимое экранов перестраивается по ширине
+ * колоды правилами `@container deck` в стилях своих областей.
+ *   Открытие:  0 мс    колода сужается: колонка 0 → 400 px, зазор 0 → 16 — 520 мс (исключение: анимируется сетка)
+ *              0 мс    сетка результата перестраивается вместе с колодой: колонка 416 → 184, зазор 48 → 24, слайд
+ *                      опускается на 24 px (строка шапки 48 → 64, отступ 16 → 24) — 520 мс
+ *              0 мс    полный вид «Результата» (уведомление и колонка) гаснет — 240 мс
+ *              0 мс    «Помощник» в шапке — белая таблетка (p2-nav-on) — 240 мс
+ *              120 мс  плита помощника: translateX(32px) → 0 и opacity — 360 мс
+ *              120 мс  компактный вид (шапка с действиями и узкая колонка) проявляется — 240 мс
+ *              160 мс… шапка помощника, сообщения, подсказки, поле ввода — каскад 40 мс (12 px, 360 мс)
+ *   Закрытие (2/3 входа): сетки 340 мс; плита уходит вправо на 32 px и гаснет за 240 мс; компактный вид гаснет за 160 мс,
+ *              полный проявляется за 160 мс через 80 мс; содержимое помощника сбрасывается невидимо (240 мс). */
+/* плита помощника стоит у правого края и въезжает на последние 32 px */
+.hp-help{position:absolute;top:0;right:0;width:400px;height:812px;opacity:0;visibility:hidden;pointer-events:none;transform:translateX(32px);transition:opacity 240ms var(--ease),transform 240ms var(--ease),visibility 0s linear 240ms}
+.hp-open .hp-help{opacity:1;visibility:visible;pointer-events:auto;transform:translateX(0);transition:opacity 360ms var(--ease) 120ms,transform 360ms var(--ease) 120ms,visibility 0s linear 0s}
+/* содержимое помощника: тот же ход, что p2-in, но переходом — повторяется при каждом открытии; задержки каскада — инлайн */
+.hp-st{opacity:0;transform:translateY(12px);transition:opacity 0s linear,transform 0s linear}
+.hp-open .hp-st{opacity:1;transform:translateY(0);transition:opacity 360ms var(--ease),transform 360ms var(--ease)}
+/* из G-helper: лента, поле ввода, крестик */
+.gh-x{background:#FFFFFF}
+.gh-item{max-width:304px}
+.gh-l{align-self:flex-start}
+.gh-r{align-self:flex-end}
+.gh-bot{padding:12px 16px;border-radius:24px;background:#FFFFFF;color:#0B1220;font-size:14px;font-weight:500;line-height:20px}
+.gh-user{padding:12px 16px;border-radius:24px;background:#2563EB;color:#FFFFFF;font-size:14px;font-weight:600;line-height:20px;white-space:pre-wrap;overflow-wrap:anywhere}
+.gh-ul{margin:4px 0 0;padding:0;list-style:none}
+.gh-ul li{position:relative;margin-top:4px;padding-left:16px}
+.gh-ul li::before{content:"";position:absolute;left:4px;top:8px;width:4px;height:4px;border-radius:999px;background:#2563EB}
+.gh-job{width:304px;padding:16px;border-radius:24px;background:#FFFFFF;color:#0B1220}
+.gh-comp{transition:box-shadow 0s}
+.gh-comp:has(.gh-ta:focus){box-shadow:0 0 0 2px #2563EB}
+.gh-ta::placeholder{color:#5A6272;opacity:1}
+.gh-ta:focus{outline:none}
+.gh-send{width:40px;height:40px;flex:none;padding:0;border:0;border-radius:999px;background:#2563EB;color:#FFFFFF;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:transform 160ms var(--ease),opacity 160ms var(--ease)}
+.gh-send:hover{transform:translateY(-2px)}
+.gh-send:active{transform:scale(.98)}
+.gh-send:disabled{opacity:.32;cursor:default;transform:none}
+/* компактный вид «Результата» — слой поверх плиты с сеткой gho-in: строка шапки 48 → 64, зазор 16 → 24, колонка 416 → 184, зазор 48 → 24 */
+.hp-in{position:absolute;left:48px;right:48px;top:40px;z-index:2;display:grid;grid-template-columns:minmax(0,1fr) 416px;grid-template-rows:48px minmax(0,1fr);row-gap:16px;column-gap:48px;height:612px;pointer-events:none;transition:grid-template-columns 340ms var(--ease),grid-template-rows 340ms var(--ease),row-gap 340ms var(--ease),column-gap 340ms var(--ease)}
+.hp-nar .hp-in{grid-template-columns:minmax(0,1fr) 184px;grid-template-rows:64px minmax(0,1fr);row-gap:24px;column-gap:24px;transition-duration:520ms}
+.hp-top{grid-column:1 / -1;grid-row:1;align-self:start;min-width:0}
+.hp-ncol{grid-column:2;grid-row:2;justify-self:start;display:flex;flex-direction:column;width:184px;min-width:0}
+.hp-xf{opacity:0;visibility:hidden;pointer-events:none;transition:opacity 160ms var(--ease),visibility 0s linear 160ms}
+.hp-nar .hp-xf{opacity:1;visibility:visible;pointer-events:auto;transition:opacity 240ms var(--ease) 120ms,visibility 0s linear 0s}
+/* полный вид (разметка R-aside не меняется): сетка результата сужает правую колонку вместе с колодой, слайд опускается на 24 px
+   и не выше свободного места (143 = листание 40 + отступ 16 + лента 87); уведомление и колонка гаснут, колонка едет со своей
+   колонкой сетки и не сжимается. Раскрытое уведомление держит действия видимыми — прячем их вместе со слоем (Tab) */
+@media (min-width: 901px){
+  .hp-wrap .ra-note{transition:transform 160ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
+  .hp-nar .ra-note{opacity:0;visibility:hidden;pointer-events:none;transition:transform 160ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
+  .hp-nar .ra-note .ra-ni{visibility:hidden;transition:visibility 0s linear 240ms}
+  .hp-wrap .ra-note ~ .p2-two{transition:grid-template-columns 340ms var(--ease),column-gap 340ms var(--ease)}
+  .hp-nar .ra-note ~ .p2-two{grid-template-columns:minmax(0,1fr) 184px !important;column-gap:24px !important;transition-duration:520ms}
+  .hp-wrap .ra-note ~ .p2-two > :first-child{height:100%;margin-top:0;container-type:size;transition:height 340ms var(--ease),margin-top 340ms var(--ease)}
+  .hp-nar .ra-note ~ .p2-two > :first-child{height:calc(100% - 24px);margin-top:24px;transition-duration:520ms}
+  .hp-wrap .ra-note ~ .p2-two .ra-stage{max-width:min(720px, calc((100cqh - 143px) * var(--ra-ar, 1.7778)))}
+  .hp-wrap .ra-note ~ .p2-two > aside{justify-self:start;width:424px;transition:opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
+  .hp-nar .ra-note ~ .p2-two > aside{opacity:0;visibility:hidden;pointer-events:none;transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
+}
+@media (max-width: 900px){
+  .hp-wrap{display:flex !important;flex-direction:column;height:auto !important;gap:16px}
+  .hp-hcell{height:auto !important}
+  .hp-closed .hp-hcell{display:none}
+  .hp-help{position:relative !important;transform:none !important}
+  .gh-help{width:100% !important;height:640px !important}
+  .hp-in{display:none !important}
+}
+
+/* ── Свои дополнения */
+/* «печатает…»: ответ ещё не пришёл — тихая строка в пузыре помощника, мерцает прозрачностью */
+@keyframes hp-typing{from{opacity:1}to{opacity:.48}}
+.hp-typing{color:#5A6272;animation:hp-typing 720ms var(--ease) infinite alternate}
+/* полосы задач и пузыри по ширине ленты: в ленту 400 − 48 влезают все 304 */
+.gh-job{max-width:100%}
+/* действия-иконки шапки компактного вида — ссылки на файлы в облике круглых кнопок */
+a.p2-rbl{text-decoration:none}
+a.p2-rbl:hover{color:#0B1220}
+.p2-rbl.rt-nb-off:hover,.p2-rbl.rt-nb-off:active{transform:none}
+/* итог проверки в узкой колонке — не длиннее четырёх строк, целиком — в подсказке */
+.hp-chk{min-width:0;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;overflow:hidden}
+/* слой компактного вида, который сейчас не на месте (колонка занята замечаниями или изображением): гаснет, как при закрытии */
+.hp-nar .hp-xf.hp-xf-off{opacity:0;visibility:hidden;pointer-events:none;transition:opacity 160ms var(--ease),visibility 0s linear 160ms}
+/* Режим «Замечания» и изображение на слайде при открытом помощнике: колонка компактного вида шире — 320 px (184 мало
+   для рядов замечаний и карточки «Изображение»); сетка едет тем же ходом. Панель замечаний встаёт в колонку полного вида
+   (она шире на 320 и не гаснет), карточка «Изображение» — в колонку компактного, вместо итогов. */
+.hp-nar .hp-in.hp-wide{grid-template-columns:minmax(0,1fr) 320px}
+.hp-pcol{grid-column:2;grid-row:2;justify-self:start;display:flex;flex-direction:column;width:320px;min-width:0;min-height:0;overflow-y:auto;scrollbar-width:none}
+.hp-pcol::-webkit-scrollbar{display:none}
+@media (min-width: 901px){
+  .hp-nar .ra-note ~ .p2-two.hp-wide{grid-template-columns:minmax(0,1fr) 320px !important}
+  /* панель замечаний — своей ширины колонки (полный вид 416, компактный 320), а не 424 колонки с полями −4 */
+  .hp-wrap .ra-note ~ .p2-two > aside.rm-col{width:416px}
+  .hp-nar .ra-note ~ .p2-two > aside.rm-col{width:320px}
+  .hp-nar .ra-note ~ .p2-two > aside.rm-col.rm-col-on{opacity:1;visibility:visible;pointer-events:auto;transition:opacity 360ms var(--ease) 120ms,visibility 0s}
+}
+/* правило V2 «колонка проявляется за 160 мс через 80 мс» — о возвращении полного вида при закрытии помощника; свои
+   сменщики колонки при закрытом помощнике (панель замечаний, колонка «Изображение») ходят своими ходами (result.css) */
+@media (min-width: 901px){
+  .hp-closed .ra-note ~ .p2-two > aside.rm-col{transition:opacity 240ms var(--ease)}
+  .hp-closed .ra-note ~ .p2-two > aside.rt-pcw.p2-on{transition:opacity 360ms var(--ease) 120ms,visibility 0s}
+  .hp-closed .ra-note ~ .p2-two > aside.rt-pcw.p2-off{transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
+  .hp-closed .ra-note ~ .p2-two:has(.rm-col) > .ra-main{transition:opacity 360ms var(--ease) 120ms,visibility 0s}
+  .hp-closed .ra-note ~ .p2-two:has(.rm-col.rm-col-on) > .ra-main{transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
+}
+/* рабочая область уже 440 px (помощник при 1280 и панель замечаний рядом): подпись «Замечания» у переключателя уходит
+   (остаётся для чтения с экрана — она его имя), номер слайда в шапке виден целиком */
+@container (max-width: 440px){
+  .ra-swl{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+  .ra-whr{gap:12px !important}
+}

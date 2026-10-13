@@ -52,7 +52,7 @@ export function PlanTab({ g, v, active }: { g: Generation; v: Variant; active: b
   };
 
   return (
-    <div id="dd-panel-plan" role="tabpanel" aria-labelledby="dd-tab-plan" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 416px", gap: 24, height: 484, marginTop: 24 }}>
+    <div id="dd-panel-plan" className="dpl-g" role="tabpanel" aria-labelledby="dd-tab-plan" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 416px", gap: 24, height: 484, marginTop: 24 }}>
       <div className="dpl-listw p2-in" style={{ animationDelay: "120ms" }}>
         <div ref={list} className="dpl-list p2-fade">
           <ol key={v.strategy} aria-label="Слайды плана" style={{ display: "flex", flexDirection: "column", margin: 0, padding: 0, listStyle: "none" }}>

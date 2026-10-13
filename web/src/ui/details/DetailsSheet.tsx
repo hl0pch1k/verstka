@@ -96,9 +96,9 @@ export function DetailsSheet() {
             </div>
             <span style={{ flex: 1, minWidth: 0 }} />
             <div style={{ position: "relative", flex: "none" }}>
-              <button type="button" className="p2-ob" aria-haspopup="menu" aria-expanded={menu} aria-label={`Вариант оформления: ${strategyTitle(v.strategy)}${score === null ? "" : `, оценка ${Math.round(score)}`}`}
-                onClick={() => setMenu(!menu)} style={{ height: 40, padding: "0 16px 0 24px" }}>
-                <span>{strategyTitle(v.strategy)}</span>
+              <button type="button" aria-haspopup="menu" aria-expanded={menu} aria-label={`Вариант оформления: ${strategyTitle(v.strategy)}${score === null ? "" : `, оценка ${Math.round(score)}`}`}
+                onClick={() => setMenu(!menu)} className="p2-ob dd-var" style={{ height: 40, padding: "0 16px 0 24px" }}>
+                <span className="dd-var-n">{strategyTitle(v.strategy)}</span>
                 {score !== null && <span className="p2-rsc" title={`Оценка качества ${Math.round(score)} из 100`}>{Math.round(score)}</span>}
                 <Icon name="chevron-down" size={18} className={cls("df-chev", menu && "df-chev-up")} />
               </button>
@@ -111,7 +111,7 @@ export function DetailsSheet() {
                   }} />
               )}
             </div>
-            <button type="button" className="p2-rbl" aria-label="Закрыть" title="Закрыть (Esc)" onClick={close} style={{ background: "#FFFFFF" }}><Icon name="x" size={18} /></button>
+            <button type="button" className="p2-rbl" aria-label="Закрыть" title="Закрыть (Esc)" onClick={close} style={{ flex: "none", background: "#FFFFFF" }}><Icon name="x" size={18} /></button>
           </div>
 
           <div className="p2-ls" style={{ ...lsDelay(200), position: "absolute", inset: 0, pointerEvents: "none" }}>

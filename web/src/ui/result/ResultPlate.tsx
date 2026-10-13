@@ -8,6 +8,8 @@
 // useSlideJob. «Показать текст» и «На весь экран» открывают слои колоды (ui/layers TextLayer, Lightbox); пока открыт
 // слой текста, над ним видна полоса «04 Результат» этой плиты (R-text), клик по ней закрывает слой. Карточки и ссылки
 // колонки открывают лист «Подробнее» (`useOpenSheet`, ui/details); пока он открыт, над ним видна полоса «04 …» (BackStrip).
+// Помощник сужает колоду — результат переходит в компактный вид (CompactResult, helper.css): шапка с действиями-иконками
+// вместо уведомления, узкая колонка вместо полной; в режиме «Замечания» и с выбранным изображением колонка шире.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { humanError } from "../../lib/errors";
 import { decodeImage, isDecoded } from "../../lib/motion";
@@ -22,8 +24,11 @@ import { ErrorLine } from "../kit/ErrorLine";
 import { Icon } from "../kit/Icon";
 import { cls } from "../kit/cls";
 import { BackStrip } from "../details/BackStrip";
+import { useGoHome } from "../shell/useGoHome";
 import { textStripMeta, writtenText } from "../layers/writerText";
 import { Aside, type AsideData } from "./Aside";
+import { compactChecks } from "./compact";
+import { CompactResult, type CompactData } from "./CompactResult";
 import { Film, loadedThumbs } from "./Film";
 import { FixSketch } from "./FixSketch";
 import { NotePill, NoteRow } from "./NotePill";
@@ -113,6 +118,7 @@ function ResultBody({ g, goDown }: { g: Generation; goDown(): void }) {
     editText, retryBuild, building, health, modelStatus, refreshModelStatus, generations, notices,
   } = useApp();
   const openSheet = useOpenSheet();
+  const goHome = useGoHome();
   const v = activeVariant && g.variants.includes(activeVariant) ? activeVariant : g.variants[0];
   const total = slidesOf(v);
   const n = Math.min(Math.max(1, selectedSlide), Math.max(1, total));
@@ -264,6 +270,13 @@ function ResultBody({ g, goDown }: { g: Generation; goDown(): void }) {
     cards: { quality: qualityCard(g, v), agent, why: whyText(v, n), eyes: eyesCard(v, n), slide: n, variant: v.strategy },
   };
   const h = headline(n);
+  // компактный вид (помощник открыт): те же данные, итоги проверки — узкой колонкой; колонка шире, пока на её месте
+  // панель замечаний или карточка «Изображение»
+  const compact: CompactData = {
+    title, line: aside.line, error: errText, score: aside.score, variants: aside.variants, variant: v.strategy, pptx: aside.pptx, pdf: aside.pdf,
+    fileBase: aside.fileBase, pptxTitle: aside.pptxTitle, checks: compactChecks(g, v, note), hasText,
+  };
+  const wide = rm.shown || !!pic.column?.shown;
 
   return (
     <>
@@ -294,7 +307,9 @@ function ResultBody({ g, goDown }: { g: Generation; goDown(): void }) {
       ) : (
         <NoteRow>{line}</NoteRow>
       )}
-      <div className="p2-two" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 416px", gap: 48, height: 548, marginTop: 16 }}>
+      <CompactResult d={compact} wide={wide} onVariant={pickVariant} onEditText={() => editDeck(g.brief ?? null)} onShowText={onShowText} onNew={goHome}
+        card={pic.column ? { shown: pic.column.shown, node: <PictureCard {...pic.column.card} idp="hp-p" /> } : null} />
+      <div className={cls("p2-two", wide && "hp-wide")} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 416px", gap: 48, height: 548, marginTop: 16 }}>
         <div style={{ display: "flex", flexDirection: "column", minWidth: 0, gridArea: "1 / 1" }}>
           <WorkHead n={n} total={total} title={h} remarks={remarkCount(v)} remarksOn={ui.remarks} remarksOff={rm.off}
             onPrev={() => setSelectedSlide(n - 1)} onNext={() => setSelectedSlide(n + 1)} onToggleRemarks={rm.toggle} onOpenLightbox={onOpenLightbox} />

@@ -3,7 +3,8 @@
 // эскизы формы (pop 360 мс, по 60 мс друг за другом), метки критика «Замечание» и «Переделан», рамка 2 px на слайде,
 // о котором говорит агент или который верстается (с бегущей полоской), галочка сверстанного и настоящее превью — по три
 // за такт. Колонок столько, чтобы все слайды были видны (lib/stage fitColumns), не меньше четырёх, пока карточка не
-// уже 150 px; не помещаются — список прокручивается сам к слайду в работе (если человек не листает его сам).
+// уже 150 px (в колоде, суженной помощником при 1280, — 112); не помещаются — список прокручивается сам к слайду в
+// работе (если человек не листает его сам).
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { fitColumns, BOARD_GAP } from "../../lib/stage";
 import { smoothScroll } from "../../lib/motion";
@@ -11,16 +12,19 @@ import { cls } from "../kit/cls";
 import { Icon } from "../kit/Icon";
 import type { BuildView, CardView } from "./buildView";
 import { SlideSketch } from "./SlideSketch";
+import { useDeckFit } from "../deck/useDeckFit";
 
 /** Ширины пульсирующих строк заглушки: [заголовок в карточке, подпись под ней], % (V2 `GHOST`). */
 const GHOST: Array<[number, number]> = [[56, 64], [44, 52], [64, 72], [52, 48], [60, 68], [48, 56], [58, 60], [42, 50], [62, 66], [50, 58], [54, 62], [46, 54]];
 const MIN_CARD = 150;
+/** Самая узкая карточка в тесной колоде (помощник при 1280). */
+const TIGHT_CARD = 112;
 /** Человек листает раскадровку сам — она не прокручивается к слайду в работе столько времени. */
 const HOLD_MS = 5000;
 
 export interface VariantSeg { name: string; label: string; desc: string }
 
-function useColumns(box: RefObject<HTMLElement>, n: number, aspect: number): number {
+function useColumns(box: RefObject<HTMLElement>, n: number, aspect: number, minCard = MIN_CARD): number {
   const [cols, setCols] = useState(4);
   useLayoutEffect(() => {
     const el = box.current;
@@ -30,14 +34,14 @@ function useColumns(box: RefObject<HTMLElement>, n: number, aspect: number): num
       const h = el.clientHeight;
       if (w <= 0) return;
       // четыре колонки доски, пока карточка не уже MIN_CARD; больше — когда иначе все слайды не видны
-      const base = [4, 3, 2].find((c) => (w - (c - 1) * BOARD_GAP) / c >= MIN_CARD) ?? 1;
+      const base = [4, 3, 2].find((c) => (w - (c - 1) * BOARD_GAP) / c >= minCard) ?? 1;
       setCols(Math.max(base, fitColumns(w, h - 8, n, aspect)));
     };
     fit();
     const ro = new ResizeObserver(fit);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [box, n, aspect]);
+  }, [box, n, aspect, minCard]);
   return cols;
 }
 
@@ -98,7 +102,8 @@ export function Storyboard({ view, segs, onPick, aspect }: {
   aspect: number;
 }) {
   const box = useRef<HTMLDivElement>(null);
-  const cols = useColumns(box, view.cards.length, aspect);
+  // колода, суженная помощником при 1280: три колонки карточек поуже (как миниатюры ленты результата), а не две
+  const cols = useColumns(box, view.cards.length, aspect, useDeckFit() === "tight" ? TIGHT_CARD : MIN_CARD);
   // человек листает раскадровку (колесо, касание, клавиши, полоса прокрутки) — она стоит, где он её оставил
   const heldUntil = useRef(0);
   useEffect(() => {
@@ -131,7 +136,7 @@ export function Storyboard({ view, segs, onPick, aspect }: {
 
   return (
     <>
-      <div className="p2-in p2-wrap" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 24, height: 40, marginTop: 24, animationDelay: "120ms" }}>
+      <div className="p2-in p2-wrap bd-sbh" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 24, height: 40, marginTop: 24, animationDelay: "120ms" }}>
         <p style={{ display: "flex", flexDirection: "column", minWidth: 0, margin: 0, whiteSpace: "nowrap" }}>
           <span style={{ fontSize: 15, fontWeight: 700, lineHeight: "20px", color: "#FFFFFF" }}>Раскадровка</span>
           <span aria-live="polite" style={{ fontSize: 13, fontWeight: 500, lineHeight: "20px", color: "rgba(255,255,255,.64)" }}>{view.board}</span>

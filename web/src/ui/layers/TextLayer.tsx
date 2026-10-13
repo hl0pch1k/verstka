@@ -78,20 +78,23 @@ export function TextLayer() {
       {w && (
         <div style={{ display: "flex", flexDirection: "column", height: 572 }}>
           <div className="p2-hrow p2-ls" style={{ ...lsDelay(120), display: "flex", alignItems: "center", gap: 24, height: 64, flex: "none" }}>
-            <h2 className="p2-ttl" style={{ flex: "none", margin: 0, color: "#0B1220" }}>Текст презентации</h2>
-            <Byline w={w} />
+            {/* колода уже (помощник): подпись встаёт под заголовок, «Скопировать» в тесной колоде — значок */}
+            <div className="rt-head" style={{ display: "flex", alignItems: "center", gap: 24, minWidth: 0 }}>
+              <h2 className="p2-ttl" style={{ flex: "none", margin: 0, color: "#0B1220" }}>Текст презентации</h2>
+              <Byline w={w} />
+            </div>
             <span style={{ flex: 1, minWidth: 0 }} />
-            <div style={{ display: "flex", alignItems: "center", gap: 16, flex: "none" }}>
+            <div className="rt-acts" style={{ display: "flex", alignItems: "center", gap: 16, flex: "none" }}>
               <CopyLine copy={copy} />
-              <button type="button" className="p2-ob" onClick={onCopy} style={{ height: 40 }}>
+              <button type="button" className="p2-ob rt-copy" onClick={onCopy} aria-label="Скопировать" title="Скопировать текст" style={{ flex: "none", height: 40 }}>
                 <Icon name="copy" size={18} />
                 <span>Скопировать</span>
               </button>
-              <button type="button" className="p2-cta" onClick={onEdit} title="Открыть этот текст на шаге «Текст» и собрать заново">
+              <button type="button" className="p2-cta" onClick={onEdit} title="Открыть этот текст на шаге «Текст» и собрать заново" style={{ flex: "none" }}>
                 <Icon name="pen" size={20} />
                 <span>Изменить</span>
               </button>
-              <button type="button" className="p2-rbl rt-x" onClick={close} aria-label="Закрыть" title="Закрыть (Esc)">
+              <button type="button" className="p2-rbl rt-x" onClick={close} aria-label="Закрыть" title="Закрыть (Esc)" style={{ flex: "none" }}>
                 <Icon name="x" size={18} />
               </button>
             </div>

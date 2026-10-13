@@ -13,7 +13,7 @@ export function Nav() {
         onClick={() => dispatch({ type: "sect", sect: hist ? null : "hist" })}>Мои презентации</button>
       <button type="button" className={cls("p2-nav", tpls && "p2-nav-on")} aria-expanded={tpls} aria-controls="p2-lay-t"
         onClick={() => dispatch({ type: "sect", sect: tpls ? null : "tpls" })}>Шаблоны</button>
-      <button type="button" className={cls("p2-nav", ui.helper && "p2-nav-on")} aria-expanded={ui.helper} aria-controls="hp-help"
+      <button type="button" id="hp-nav" className={cls("p2-nav", ui.helper && "p2-nav-on")} aria-expanded={ui.helper} aria-controls="hp-help"
         title={ui.helper ? "Закрыть помощника" : "Открыть помощника"}
         onClick={() => dispatch({ type: "set", patch: { helper: !ui.helper } })}>Помощник</button>
     </nav>

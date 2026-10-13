@@ -5,7 +5,8 @@
 import { api } from "../api";
 import type { GenerateRequest, GenerateResponse, Generation, ImproveSource, Job, JobKind, Notice, NoticeArea, TemplateListItem, TemplateManifest, UploadResponse } from "../types";
 import type { UiAction } from "../ui/deck/geometry";
-import { describeGeneration, firstLine, newestTemplate } from "./narrate";
+import { humanError } from "./errors";
+import { describeGeneration, newestTemplate } from "./narrate";
 import { templateTitle } from "./plain";
 import { templateFileProblem } from "./templateFiles";
 import { plural } from "./utils";
@@ -75,12 +76,19 @@ export function uploadTemplateFlow(file: File, useModels: boolean, d: UploadDeps
           resolve();
         },
         onFailed: (job) => {
-          d.pushMessage("assistant", `Не получилось разобрать «${templateTitle(file.name)}»: ${firstLine(job.error ?? job.message)}`);
+          d.pushMessage("assistant", failMessage(`Не получилось разобрать «${templateTitle(file.name)}»`, job));
           resolve();
         },
       });
     })();
   });
+}
+
+/** The helper's line about a failed job: the job's reason in Russian, without its technical tail (`humanError`:
+ *  «Модель не ответила: ProviderError: 503» → «модель не ответила»); no Russian left — the lead alone. */
+export function failMessage(lead: string, job: Pick<Job, "error" | "message">): string {
+  const why = humanError(job.error ?? job.message, "");
+  return why ? `${lead}: ${why[0].toLowerCase()}${why.slice(1)}` : `${lead}.`;
 }
 
 /** The helper's line after «Улучшить готовую»: what the deck holds and what its own audit found; the model's look at
@@ -138,7 +146,7 @@ export function followBuild(t: BuildTarget, d: GenerationDeps, ended?: () => voi
       ended?.();
     },
     onFailed: (job) => {
-      d.pushMessage("assistant", `Не получилось собрать презентацию: ${firstLine(job.error ?? job.message)}`);
+      d.pushMessage("assistant", failMessage("Не получилось собрать презентацию", job));
       void d.refreshGenerations();
       void d.refreshModelStatus();
       ended?.();

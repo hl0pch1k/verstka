@@ -1,5 +1,6 @@
 // Разбор загруженного шаблона (C-analyzing): слева 2×2 — разбираемый файл (скелетон с полосой хода), две первые обложки
-// ленты и «Все шаблоны», справа на две колонки — восемь шагов разбора. Разметка — boards/V2.dc.html, `tpRunOn`.
+// ленты и «Все шаблоны», справа на две колонки — восемь шагов разбора. Разметка — boards/V2.dc.html, `tpRunOn`. Когда
+// помощник сужает колоду (лента в три колонки), слева остаются файл и «Все шаблоны», шаги — на двух колонках справа.
 // Шаги идут по сообщениям задачи `analyze` (ribbon.ts `analysisSteps`); по окончании разбор гаснет за 240 мс (`tp-out`).
 // Неудача — строка в той же коробке: причина по-русски (ribbon.ts `analysisError`) и «Попробовать ещё раз»; если файл
 // не принят по типу — повторять нечего, вместо него «Выбрать другой файл».
@@ -18,9 +19,11 @@ const H2: CSSProperties = {
   color: "#0B1220", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
 };
 
-export function Analysis({ list, name, fileName, steps, facts, out, error, canRetry, info, onPeek, onGallery, onRetry, onOther, onClose }: {
+export function Analysis({ list, cols = 4, name, fileName, steps, facts, out, error, canRetry, info, onPeek, onGallery, onRetry, onOther, onClose }: {
   /** Шаблоны в порядке ленты (первые два стоят рядом с разбором). */
   list: TemplateListItem[];
+  /** Колонок у ленты: 4 — как на доске; 3 (колода сужена) — без двух обложек рядом с разбором. */
+  cols?: number;
   /** Имя шаблона («Northwind Q3») и файла («Northwind Q3.pptx»). */
   name: string; fileName: string;
   steps: StepState[]; facts: AnalysisFacts;
@@ -38,8 +41,8 @@ export function Analysis({ list, name, fileName, steps, facts, out, error, canRe
   const pick = usePickTemplate();
   const done = steps.filter((s) => s === "done").length;
   const all = done >= ANALYSIS_STEPS;
-  const two = list.slice(0, 2);
-  const hid = Math.max(0, list.length - 2);
+  const two = cols >= 4 ? list.slice(0, 2) : [];
+  const hid = Math.max(0, list.length - two.length);
   const rows = analysisRows(steps, facts);
   return (
     <>
@@ -70,11 +73,11 @@ export function Analysis({ list, name, fileName, steps, facts, out, error, canRe
 
       {hid > 0 && (
         <ActTile kind="an" icon="grid" note={[moreText(hid)]} name="Все шаблоны" delay={120} out={out} onClick={onGallery}
-          label={`Все шаблоны, ${moreText(hid)}`} title={list.slice(2).map(tplLabel).join(", ")} />
+          label={`Все шаблоны, ${moreText(hid)}`} title={list.slice(two.length).map(tplLabel).join(", ")} />
       )}
 
       <section className={cls("an-box p2-stag p2-in", out && "tp-out")} aria-labelledby="an-job" aria-live="polite"
-        style={{ gridColumn: "3 / span 2", gridRow: "1 / span 2", animationDelay: "160ms", transitionDelay: "160ms" }}>
+        style={{ gridColumn: `${cols - 1} / span 2`, gridRow: "1 / span 2", animationDelay: "160ms", transitionDelay: "160ms" }}>
         {error ? (
           <>
             <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>

@@ -23,7 +23,8 @@ import {
 
 const show = (on: boolean) => (on ? "p2-on" : "p2-off");
 
-const HINT_TOPIC = "Это тема — агент напишет полный текст: ключевые факты, даты, формулы с пояснениями";
+const HINT_TOPIC = "Это тема — агент напишет полный текст";
+const HINT_TOPIC_TAIL = ": ключевые факты, даты, формулы с пояснениями";
 const NO_FACTS = "Цифр и таблиц в тексте нет — слайды будут из формулировок";
 const FIX = "Вставьте готовый текст или загрузите .txt и .md";
 
@@ -239,6 +240,7 @@ export function TextHead({ tp }: { tp: TextPlate }) {
   const closed = create && ui.open === "tpl";
   // готовый текст: агент разложит его по слайдам (V2 `txHintTop`) — не в «Улучшить готовую», не при ошибке
   const top = txOpen && tp.line.kind === "facts" && !impOn && !tp.issue && !tp.reading;
+  const topText = writes ? "Это готовый текст — агент разложит его по слайдам и допишет недостающее" : "Это готовый текст — агент разложит его по слайдам без переписывания";
   const pv = textPreview(brief);
   return (
     <>
@@ -271,18 +273,22 @@ export function TextHead({ tp }: { tp: TextPlate }) {
           }} />
       </div>
       <span style={{ flex: 1, minWidth: 0 }} />
-      <p className={cls("p2-in p2-hide-s tx-top", show(top))}
+      {/* колода уже (помощник) — подсказка встаёт в ряд и короче: «Готовый текст — агент разложит его по слайдам», в тесной —
+          «Это готовый текст»; целиком — в подсказке */}
+      <p className={cls("p2-in p2-hide-s tx-top", show(top))} title={topText}
         style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, margin: 0, fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#5A6272", whiteSpace: "nowrap", animationDelay: "80ms" }}>
         <span style={{ display: "flex", flex: "none" }}><Icon name="info" size={16} /></span>
-        <span>{writes ? "Это готовый текст — агент разложит его по слайдам и допишет недостающее" : "Это готовый текст — агент разложит его по слайдам без переписывания"}</span>
+        <span className="tx-top-t tx-top-l">{topText}</span>
+        <span className="tx-top-t tx-top-m">Готовый текст — агент разложит его по слайдам</span>
+        <span className="tx-top-t tx-top-s">Это готовый текст</span>
       </p>
       {closed && (
-        <div className="p2-in" style={{ display: "flex", alignItems: "center", gap: 24, minWidth: 0 }}>
+        <div className="p2-in tx-closed" style={{ display: "flex", alignItems: "center", gap: 24, minWidth: 0 }}>
           <span className={pv.empty ? "p2-muted" : undefined}
-            style={{ maxWidth: 480, fontSize: 15, fontWeight: 600, lineHeight: "24px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            style={{ minWidth: 0, maxWidth: 480, fontSize: 15, fontWeight: 600, lineHeight: "24px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
             {pv.text}
           </span>
-          <button type="button" className="p2-ob" onClick={() => dispatch({ type: "open", step: "text" })} style={{ height: 40 }}>Изменить</button>
+          <button type="button" className="p2-ob" onClick={() => dispatch({ type: "open", step: "text" })} style={{ flex: "none", height: 40 }}>Изменить</button>
         </div>
       )}
     </>
@@ -303,6 +309,8 @@ function useBusyHeld(busy: boolean): boolean {
 }
 
 const LINE: CSSProperties = { display: "flex", alignItems: "center", gap: 8, minWidth: 0, margin: 0, fontSize: 14, fontWeight: 500, lineHeight: "20px", color: "#5A6272" };
+/** Текст строки под полем — одна строка: узкая колода (помощник) сжимает его многоточием, целиком — в подсказке. */
+const ONE: CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
 const NOTE_LINE: CSSProperties = { flex: "none", fontSize: 13, lineHeight: "20px", color: "#5A6272", whiteSpace: "nowrap" };
 
 /** Тело шага 02 (слот `p2`, `#p2-b2`). */
@@ -346,15 +354,15 @@ export function TextBody({ tp }: { tp: TextPlate }) {
             </label>
             <div className="p2-wrap" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 24, height: 20, marginTop: 16 }}>
               <div className="tx-sw">
-                <p className={show(hintOn)} style={LINE}>
+                <p className={show(hintOn)} style={LINE} title={HINT_TOPIC + HINT_TOPIC_TAIL}>
                   <span style={{ display: "flex", flex: "none" }}><Icon name="info" size={16} /></span>
-                  <span>{HINT_TOPIC}</span>
+                  <span style={ONE}>{HINT_TOPIC}<span className="tx-hint-tail">{HINT_TOPIC_TAIL}</span></span>
                 </p>
-                <p id="ct-facts" className={show(factsOn)} style={LINE}>
+                <p id="ct-facts" className={show(factsOn)} style={LINE} title={facts?.kind === "facts" && facts.facts ? `В тексте: ${facts.facts}` : NO_FACTS}>
                   <span style={{ display: "flex", flex: "none", color: "#2563EB" }}><Icon name="numbers" size={16} /></span>
                   {facts?.kind === "facts" && facts.facts
-                    ? <span>В тексте: <b style={{ fontWeight: 700, color: "#0B1220" }}>{facts.facts}</b></span>
-                    : <span>{NO_FACTS}</span>}
+                    ? <span style={ONE}>В тексте: <b style={{ fontWeight: 700, color: "#0B1220" }}>{facts.facts}</b></span>
+                    : <span style={ONE}>{NO_FACTS}</span>}
                 </p>
                 <div id="ce-err" className={cls("tx-err", show(!!issue))} style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
                   <ErrorLine key={tp.issueSeq} text={shown?.text ?? ""} lines={1} />

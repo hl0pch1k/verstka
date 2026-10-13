@@ -5,7 +5,7 @@
 // Пропорции — шаблона (по умолчанию 16:9); высота сцены не больше, чем у 16:9 шириной 720, — рабочая область держит
 // свою высоту. Поверх слоёв — то, что приходит детьми: зоны изображений (R-picture), разметка замечаний (R-remarks) и
 // эскиз исправления (R-fixing); слои под ними живут своей жизнью.
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { isDecoded, prefersReducedMotion } from "../../lib/motion";
 import { cls } from "../kit/cls";
 import { pushShot, shotDone, shotReady, type Shot } from "./stageLayers";
@@ -14,8 +14,9 @@ export function Stage({ src, alt, aspect, children }: { src: string | null; alt:
   const ar = aspect > 0 ? aspect : 16 / 9;
   return (
     <div className="p2-in" style={{ display: "flex", justifyContent: "center", marginTop: 16, animationDelay: "240ms" }}>
-      {/* выше 16:9 (например, 4:3) — уже: высота сцены та же, что у 16:9 шириной 720 */}
-      <div className="ra-stage" style={{ aspectRatio: String(ar), maxWidth: ar < 16 / 9 - 0.01 ? `${Math.round(405 * ar)}px` : undefined }}>
+      {/* выше 16:9 (например, 4:3) — уже: высота сцены та же, что у 16:9 шириной 720; помощник сужает колоду — сцена не
+          выше свободного места (helper.css: `--ra-ar` — пропорции шаблона) */}
+      <div className="ra-stage" style={{ aspectRatio: String(ar), "--ra-ar": ar.toFixed(4) } as CSSProperties}>
         <Shots src={src} alt={alt} />
         {children}
       </div>

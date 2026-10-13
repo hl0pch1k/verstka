@@ -31,7 +31,7 @@
 .ra-sw .p2-sw-knob{box-shadow:0 1px 2px rgba(11,18,32,.06),0 4px 16px 0 rgba(11,18,32,.08)}
 .ra-cnt{display:inline-flex;align-items:center;justify-content:center;min-width:24px;height:24px;padding:0 8px;border-radius:999px;font-size:12px;font-weight:700;line-height:16px}
 .ra-cnt-warn{background:#FFFBEB;color:#B45309}
-.ra-stage{position:relative;width:100%;max-width:720px;border-radius:24px;overflow:hidden;background:#F3F4F1;box-shadow:0 0 0 1px rgba(11,18,32,.08),0 16px 48px 0 rgba(11,18,32,.12)}
+.ra-stage{position:relative;width:100%;max-width:min(720px, calc(405px * var(--ra-ar, 1.7778)));border-radius:24px;overflow:hidden;background:#F3F4F1;box-shadow:0 0 0 1px rgba(11,18,32,.08),0 16px 48px 0 rgba(11,18,32,.12)}
 .ra-col{scrollbar-width:none}
 .ra-col::-webkit-scrollbar{display:none}
 .ra-col>*{flex:none}
@@ -272,3 +272,19 @@ a.p2-ob:hover{color:#0B1220}
 .rt-st-on{opacity:1;transition-duration:360ms}
 .lb-arrow{transition:transform 160ms var(--ease),opacity 160ms var(--ease),visibility 0s}
 .lb-arrow.lb-hide{transition:opacity 160ms var(--ease),visibility 0s linear 160ms}
+
+/* «Текст презентации» в колоде, суженной помощником (задача 13): подпись «Написал агент по статье…» — под заголовком
+   (обе строки — в ряд шапки 64), «Скопировано» сжимается многоточием; в тесной колоде «Скопировать» — круглая кнопка
+   со значком (имя — в подсказке и для чтения с экрана) */
+.rt-st{min-width:0}
+.rt-st > span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+@container deck (max-width: 1100px){
+  .rt-head{flex-direction:column;align-items:flex-start !important;gap:0 !important}
+  .rt-head .rt-sub{max-width:100%;font-size:13px !important;line-height:20px !important}
+}
+@container deck (max-width: 900px){
+  /* строка неудачи копирования рядом с кнопками — короче, с многоточием (целиком — в подсказке) */
+  .rt-acts > .p2-in{max-width:160px !important}
+  .rt-copy{width:40px;padding:0}
+  .rt-copy > span{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+}

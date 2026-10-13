@@ -34,7 +34,7 @@ export function FilesTab({ g, v }: { g: Generation; v: Variant }) {
               <li key={f.key} className={cls("df-row", f.cur && "df-row-on")} aria-current={f.cur || undefined} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, height: 64, padding: "0 12px 0 16px", borderRadius: 16 }}>
                 <div style={{ minWidth: 0 }}>
                   <p style={{ display: "flex", alignItems: "center", gap: 8, margin: 0, fontSize: 15, fontWeight: 700, lineHeight: "24px", color: "#0B1220", whiteSpace: "nowrap" }}>
-                    <span>{f.title}</span>{f.score !== null && <span className="df-score" title={f.tip}>{f.score}</span>}{f.cur && <span className="df-now">на экране</span>}
+                    <span title={f.title} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{f.title}</span>{f.score !== null && <span className="df-score" title={f.tip}>{f.score}</span>}{f.cur && <span className="df-now">на экране</span>}
                   </p>
                   <p title={f.file} style={{ margin: 0, fontSize: 13, fontWeight: 500, lineHeight: "20px", color: "#5A6272", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{f.file}</p>
                 </div>

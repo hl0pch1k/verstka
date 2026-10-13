@@ -114,9 +114,9 @@ function BuildContent({ job, leaving }: { job: ActiveJob | null; leaving: boolea
 
   return (
     <div key={epoch} className={cls("p2-two bd-two", (leaving || retry) && "bd-out")}
-      style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 416px", gap: 48, height: 652 }}>
-      <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-        <Phases phase={view.phase} />
+      style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 416px", gridTemplateRows: "64px minmax(0, 1fr)", columnGap: 48, height: 652 }}>
+      <Phases phase={view.phase} />
+      <div className="bd-body" style={{ display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>
         <div className="p2-in" style={{ display: "flex", alignItems: "center", gap: 24, height: 24, marginTop: 16, animationDelay: "80ms" }}>
           <p style={{ margin: 0, fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "rgba(255,255,255,.64)", whiteSpace: "nowrap" }}>
             <b style={{ fontFamily: "'Unbounded','Manrope',sans-serif", fontWeight: 600, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums", color: "#FFFFFF" }}>{view.clock}</b>

@@ -13,6 +13,8 @@ import { Analysis } from "./Analysis";
 import { Cover, inkOf, Ribbon } from "./TemplateRibbon";
 import { analysisError, analysisFacts, analysisSteps, ANALYSIS_STEPS, orderTemplates, tplMeta, type AnalysisFacts, type StepState } from "./ribbon";
 import { FileInput, UploadZone, useFileDrop } from "./UploadZone";
+import { ribbonLayout } from "../deck/fit";
+import { useDeckFit } from "../deck/useDeckFit";
 
 /** idle — лента; run — файл уходит на сервер и разбирается; settle — разбор закончился, решается итог; done — все
  *  галочки держатся 560 мс; out — разбор гаснет 240 мс; fail — строка ошибки в коробке разбора. */
@@ -184,7 +186,7 @@ export function TemplateHead({ upload }: { upload: TemplateUpload }) {
           <button type="button" className="p2-ob" onClick={() => dispatch({ type: "open", step: "text" })} style={{ height: 40 }}>Готово</button>
         </div>
       ) : (
-        <div key="closed" className="p2-in" style={{ display: "flex", alignItems: "center", gap: 24 }}>
+        <div key="closed" className="p2-in" style={{ display: "flex", alignItems: "center", gap: 24, minWidth: 0 }}>
           {kind === "run" ? (
             <HeadSlot key="run" fade={fade}><RunningLine name={upload.file?.name ?? ""} /></HeadSlot>
           ) : kind === "fail" ? (
@@ -195,12 +197,12 @@ export function TemplateHead({ upload }: { upload: TemplateUpload }) {
                 <Cover src={t.cover_url} kind="m" ink={inkOf(t)} label={`Обложка шаблона ${tplLabel(t)}`} />
                 <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
                   <span style={{ fontSize: 15, fontWeight: 700, lineHeight: "24px", color: "#0B1220", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{tplLabel(t)}</span>
-                  <span style={{ fontSize: 13, fontWeight: 500, lineHeight: "20px", color: "#5A6272", whiteSpace: "nowrap" }}>{tplMeta(t)}</span>
+                  <span style={{ fontSize: 13, fontWeight: 500, lineHeight: "20px", color: "#5A6272", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{tplMeta(t)}</span>
                 </div>
               </div>
             </HeadSlot>
           )}
-          <button type="button" className="p2-ob" onClick={() => dispatch({ type: "open", step: "tpl" })} style={{ height: 40 }}>
+          <button type="button" className="p2-ob" onClick={() => dispatch({ type: "open", step: "tpl" })} style={{ flex: "none", height: 40 }}>
             {t ? "Сменить" : "Выбрать шаблон"}
           </button>
         </div>
@@ -212,6 +214,8 @@ export function TemplateHead({ upload }: { upload: TemplateUpload }) {
 /** Тело шага 01 (слот `p1`, `#p2-b1`): лента или разбор и зона «Отпустите файл». */
 export function TemplateBody({ upload }: { upload: TemplateUpload }) {
   const { ui, dispatch, templates, notices } = useApp();
+  // помощник сужает колоду: лента — четыре обложки в три колонки (ribbonLayout), и тот же разбор
+  const { cols } = ribbonLayout(useDeckFit());
   const on = ui.screen === "create" && ui.open === "tpl" && !ui.more;
   const body = useRef<HTMLDivElement>(null);
   const over = useFileDrop(body, on && !upload.busy, upload.start);
@@ -221,11 +225,11 @@ export function TemplateBody({ upload }: { upload: TemplateUpload }) {
   const info = notices.template?.kind === "info" ? notices.template.text : null;
   return (
     <div id="p2-b1" ref={body} className={cls("p2-body p2-g4", on ? "p2-on" : "p2-off")}
-      style={{ position: "relative", display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 16, margin: "24px 0 0 192px" }}>
+      style={{ position: "relative", display: "grid", gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: 16, margin: "24px 0 0 192px" }}>
       {upload.phase === "idle" ? (
         <Ribbon fresh={upload.fresh} onPeek={peek} onGallery={gallery} onUpload={upload.pick} />
       ) : (
-        <Analysis list={orderTemplates(templates, upload.fresh)} name={templateTitle(fileName)} fileName={fileName}
+        <Analysis list={orderTemplates(templates, upload.fresh)} cols={cols} name={templateTitle(fileName)} fileName={fileName}
           steps={upload.steps} facts={upload.facts} out={upload.phase === "out"} error={upload.failure?.text ?? null} canRetry={upload.failure?.retry ?? true}
           info={upload.phase === "fail" ? null : info} onPeek={peek} onGallery={gallery}
           onRetry={upload.retry} onOther={upload.pick} onClose={upload.dismiss} />
