@@ -3,6 +3,7 @@
 // (qualityCard), чего в данных нет — того пункта нет.
 import { templateTitle } from "../../lib/plain";
 import type { Generation, Variant } from "../../types";
+import { PLATE_PAD } from "../deck/fit";
 import type { SheetTab } from "../deck/geometry";
 import type { IconName } from "../kit/icons";
 import { qualityCard } from "./resultView";
@@ -50,4 +51,22 @@ export function compactChecks(g: Generation, v: Variant, note: { title: string }
   const src = sourceText(g, note);
   out.push({ icon: "book", tone: "ok", lead: "", rest: src, title: src });
   return out;
+}
+
+// ── шапка компактного вида: название, значки-действия (40 px через 8) и «Скачать PowerPoint» (285 px, отступ 8 + 8)
+const ICON = 40;
+const ICON_GAP = 8;
+const CTA_FULL = 285;
+const HEAD_GAP = 24;
+/** Названию в шапке — не меньше 320 px (около 13 букв заголовка 32 px): уже — и оно сжимается до нескольких букв. */
+export const TITLE_MIN = 320;
+
+/** «PowerPoint» вместо «Скачать PowerPoint» в шапке компактного вида: рядом с `icons` значками (уведомление «i» +
+ *  пять действий) полной подписи и названию не хватает места. Решение — по целевой ширине колоды (раскладка колоды,
+ *  `useDeckWidth`), а не по кадру хода: при 1440 полная подпись остаётся с пятью значками (G-helper) и уступает с шестью,
+ *  при 1280 — всегда короткая. 0 — ширина ещё не измерена: полная. */
+export function ctaShort(deck: number, icons: number): boolean {
+  if (!(deck > 0)) return false;
+  const right = icons * (ICON + ICON_GAP) + ICON_GAP + CTA_FULL;
+  return deck - PLATE_PAD - right - HEAD_GAP < TITLE_MIN;
 }

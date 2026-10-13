@@ -17,7 +17,9 @@ import type { DeckManifest } from "./useDeckManifest";
 
 const LEGEND: Array<[string, string]> = [[PLACE_COLOR.title, "заголовок"], [PLACE_COLOR.text, "текст"], [PLACE_COLOR.image, "изображение"], [PLACE_COLOR.data, "данные"]];
 
-export function PatternLayer({ deck }: { deck: DeckManifest }) {
+/** `fx` — класс перекрёстного затухания листа (помощник сужает колоду: образец и сведения встают иначе): содержимое
+ *  слоя гаснет и проявляется вместе с листом, белая плита стоит. */
+export function PatternLayer({ deck, fx }: { deck: DeckManifest; fx?: string }) {
   const { ui, dispatch } = useApp();
   const m = deck.manifest;
   const view = m && ui.pattern !== null ? patternView(m, ui.pattern) : null;
@@ -75,7 +77,7 @@ export function PatternLayer({ deck }: { deck: DeckManifest }) {
       <Layer id="dl-lay-x" open={open} top={40} z={2} bare label={p ? p.title : "Слайд шаблона"} onClose={close}>
         {p && (
           <section className="dpt-layer" role="dialog" aria-modal="true" aria-labelledby="dpt-title" aria-describedby="dpt-desc" tabIndex={-1} onKeyDown={onKey} style={{ outline: "none" }}>
-            <div style={{ display: "flex", flexDirection: "column", height: 532 }}>
+            <div className={fx} style={{ display: "flex", flexDirection: "column", height: 532 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 24, height: 64, flex: "none" }}>
                 <h2 key={`t${p.n}`} id="dpt-title" className="dpt-title p2-in" style={{ animationDelay: "120ms" }}>{p.title}</h2>
                 <p key={`d${p.n}`} id="dpt-desc" className="p2-in" title={p.desc} style={{ minWidth: 0, margin: 0, fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#5A6272", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", animationDelay: "160ms" }}>{p.desc}</p>

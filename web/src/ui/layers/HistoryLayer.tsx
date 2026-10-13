@@ -23,7 +23,7 @@ import { usePresence } from "../kit/usePresence";
 import { deckPreset, openStrategy, slideSrc } from "../result/resultView";
 import { useGoDown, useRise } from "../result/useGoDown";
 import { coverStrategy, historyView, openPlan, type HistItem, type OpenPlan } from "./history";
-import { Layer, LAYER_MS, lsDelay } from "./Layer";
+import { Layer, LAYER_MS, lsDelay, useLayerFit } from "./Layer";
 
 /** Сколько открытие ждёт декодирования первого слайда, прежде чем ехать как есть. */
 const DECODE_WAIT = 800;
@@ -87,6 +87,8 @@ export function HistoryLayer() {
     [mounted, generations, templateLabel, current],
   );
   const byId = useMemo(() => new Map(generations.map((g) => [g.id, g])), [generations]);
+  // помощник сужает колоду: четыре колонки → три и заголовок 24/32 — перекрёстным затуханием всего содержимого слоя
+  const fit = useLayerFit(open);
 
   /** Ход начат: дуга на обложке, строка прежней неудачи уходит. Возвращает номер хода — он устарел, если начат новый. */
   const begin = (id: string) => {
@@ -188,6 +190,7 @@ export function HistoryLayer() {
   return (
     <Layer id="p2-lay-h" open={open} top={120} z={open ? 7 : 6} height={692} label="Мои презентации" onClose={close}
       plateStyle={{ display: "flex", flexDirection: "column" }}>
+      <div className={cls("gh-body", fit.cls)} data-fit={fit.shown}>
       <div style={{ display: "flex", alignItems: "center", gap: 24, height: 64, flex: "none" }}>
         <h2 className="p2-ttl" style={{ margin: 0, color: "#0B1220" }}>Мои презентации</h2>
         <span style={{ flex: 1, minWidth: 0, display: "flex", justifyContent: "flex-end" }}>
@@ -218,6 +221,7 @@ export function HistoryLayer() {
             </ul>
           </section>
         ))}
+      </div>
       </div>
     </Layer>
   );

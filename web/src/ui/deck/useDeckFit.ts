@@ -1,11 +1,11 @@
 // Раскладка колоды для того, что решает JS и CSS (обложки ленты, колонки раскадровки, короткий ряд, правила
 // `.p2-deck[data-fit=…]`). Решение — по целевой ширине (fit.ts `deckLayout`): обёртка колоды (`hp-wrap`) не
 // анимируется, колода = обёртка − место помощника. Открытие — узкая раскладка с первого кадра; закрытие — узкая
-// держится, пока сетка обёртки не доехала (`transitionend` на grid-template-columns, запасной таймер 340 мс). Посреди
-// хода раскладка не меняется.
+// держится, пока сетка обёртки не доехала (`transitionend` на grid-template-columns, запасной таймер — ход 340 мс + 40).
+// Посреди хода раскладка не меняется.
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useState, type RefObject } from "react";
 import { prefersReducedMotion } from "../../lib/motion";
-import { deckLayout, type DeckFit, type DeckLayout } from "./fit";
+import { CLOSE_HOLD_MS, deckLayout, type DeckFit, type DeckLayout } from "./fit";
 
 export const DeckFitContext = createContext<DeckLayout>({ width: 0, fit: "wide" });
 
@@ -18,9 +18,6 @@ export function useDeckFit(): DeckFit {
 export function useDeckWidth(): number {
   return useContext(DeckFitContext).width;
 }
-
-/** Закрытие помощника: сетка обёртки 340 мс (shell.css `.hp-wrap`). */
-const CLOSE_MS = 340;
 
 /** Раскладка колоды `ref` по ширине её обёртки и помощнику (`helper` открыт). */
 export function useDeckLayout(ref: RefObject<HTMLElement>, helper: boolean): DeckLayout {
@@ -49,7 +46,7 @@ export function useDeckLayout(ref: RefObject<HTMLElement>, helper: boolean): Dec
       if (e.target === el && e.propertyName === "grid-template-columns") end();
     };
     el?.addEventListener("transitionend", onEnd);
-    const t = window.setTimeout(end, CLOSE_MS);
+    const t = window.setTimeout(end, CLOSE_HOLD_MS);
     return () => {
       el?.removeEventListener("transitionend", onEnd);
       window.clearTimeout(t);

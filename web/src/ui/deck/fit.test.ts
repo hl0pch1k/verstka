@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { deckFit, deckLayout, errBelow, hintTail, ribbonLayout, rowMode, segStatus } from "./fit";
+import { CLOSE_HOLD_MS, deckFit, deckLayout, errBelow, HELPER_CLOSE_MS, hintTail, ribbonLayout, rowMode, segStatus } from "./fit";
 
 // ширины колоды: 1440 — 1392 (закрыт) и 976 (помощник); 1280 — 1232 и 816
 test("deckFit: закрытый помощник — широкая колода при 1280 и 1440", () => {
@@ -36,6 +36,10 @@ test("deckLayout: закрытие — узкая раскладка держи�
   assert.deepEqual(deckLayout(1232, false, true), { width: 816, fit: "tight" });
   // доехала — широкая
   assert.deepEqual(deckLayout(1392, false, false), { width: 1392, fit: "wide" });
+});
+test("закрытие: запасной таймер узкой раскладки — ход сетки обёртки (340 мс) + 40, после transitionend, а не до", () => {
+  assert.equal(HELPER_CLOSE_MS, 340);
+  assert.equal(CLOSE_HOLD_MS, HELPER_CLOSE_MS + 40);
 });
 test("deckLayout: обёртка ещё не измерена — широкая, без ширины", () => {
   assert.deepEqual(deckLayout(0, true), { width: 0, fit: "wide" });

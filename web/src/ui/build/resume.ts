@@ -39,6 +39,14 @@ export function requestOf(g: GenerationMeta): GenerateRequest {
   };
 }
 
+/** Полная мета сборки прочиталась позже (помощник начал сборку, а первое чтение меты не удалось — экран вёл её по
+ *  задаче из ответа, с запросом-заглушкой без темы и вариантов): запрос сборки — полоса 02 и «Собрать ещё раз» — из
+ *  этой меты. Только если на экране запрос этой же сборки и он неполный (без вариантов); иначе null — менять нечего. */
+export function completeAsk(ask: PendingBuild | null, g: GenerationMeta): PendingBuild | null {
+  if (!ask || ask.gid !== g.id || ask.request.strategies.length) return null;
+  return { gid: g.id, request: requestOf(g), expected: g.slides ?? ask.expected };
+}
+
 /** О чём говорят полосы 01/02 экрана «Сборка»: шаблон (`template`, `templateFile` — имя файла шаблона, которого нет в
  *  библиотеке) и тема (`brief`) самой сборки, «Улучшить готовую» (`improved`), пишет ли текст агент (`useModels`). */
 export interface BuildTopic { template: string | null; templateFile: string | null; brief: string | null; useModels: boolean; improved: ImprovedFrom | null }

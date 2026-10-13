@@ -15,6 +15,11 @@ export const TIGHT_DECK = 900;
 export const HELPER_COL = 416;
 /** Поля плиты (48 + 48): содержимое плиты уже колоды на столько. */
 export const PLATE_PAD = 96;
+/** Закрытие помощника: ход сетки обёртки колоды (shell.css `.hp-wrap`, grid-template-columns 340 мс). */
+export const HELPER_CLOSE_MS = 340;
+/** Запасной таймер узкой раскладки при закрытии — на 40 мс позже конца хода: она снимается по `transitionend`, а таймер
+ *  — только если события не было (переход прерван или не начался), и не раньше, чем сетка доехала. */
+export const CLOSE_HOLD_MS = HELPER_CLOSE_MS + 40;
 
 export type DeckFit = "wide" | "narrow" | "tight";
 

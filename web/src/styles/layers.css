@@ -79,6 +79,12 @@
 .gh-wait{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;border-radius:16px;background:rgba(255,255,255,.72);color:#2563EB;opacity:0;transition:opacity 240ms var(--ease)}
 @keyframes gh-wait{from{opacity:0}to{opacity:1}}
 .gh-wait-on{opacity:1;animation:gh-wait 240ms var(--ease) 120ms backwards}
-/* Колода, суженная помощником (задача 13; `.p2-deck[data-fit=narrow|tight]` — ui/deck/fit.ts): «Мои презентации»,
-   «Шаблоны» и «Слайды шаблона» — в три колонки (карточкам с названием и подписью в четыре тесно) */
-:where(.p2-deck[data-fit=narrow], .p2-deck[data-fit=tight]) :is(.gh-grid,.ga-grid,.pv-grid){grid-template-columns:repeat(3,minmax(0,1fr))}
+/* Колода, суженная помощником (задача 13; раскладка — ui/deck/fit.ts): «Мои презентации», «Шаблоны» и «Слайды
+   шаблона» — в три колонки (карточкам с названием и подписью в четыре тесно), заголовок «Мои презентации» — 24/32, как
+   у шагов. Не по `data-fit` колоды, а по своему (useLayerFit): он меняется в подмене перекрёстного затухания — сетка
+   гаснет 120 мс, встаёт в три колонки невидимой и проявляется 240 мс («Мои презентации» — вместе с шапкой) */
+.gh-body{display:flex;flex-direction:column;flex:1;min-height:0}
+.gh-body .p2-ttl{font-size:32px;line-height:40px}
+.gh-body:where([data-fit=narrow],[data-fit=tight]) .p2-ttl{font-size:24px;line-height:32px}
+.gh-body:where([data-fit=narrow],[data-fit=tight]) .gh-grid,
+:is(.ga-grid,.pv-grid):where([data-fit=narrow],[data-fit=tight]){grid-template-columns:repeat(3,minmax(0,1fr))}

@@ -8,7 +8,7 @@ import { cls } from "../kit/cls";
 import { Icon } from "../kit/Icon";
 import { Cover, inkOf, usePickTemplate } from "../create/TemplateRibbon";
 import { orderTemplates, tplMeta, UPLOAD_BUSY_TITLE } from "../create/ribbon";
-import { Layer, lsDelay } from "./Layer";
+import { Layer, lsDelay, useLayerFit } from "./Layer";
 
 export function TemplatesLayer({ fresh, onUpload, busy }: {
   /** Только что загруженный шаблон — первым, как в ленте. */
@@ -23,6 +23,8 @@ export function TemplatesLayer({ fresh, onUpload, busy }: {
   const open = ui.sect === "tpls";
   const list = orderTemplates(templates, fresh);
   const close = () => dispatch({ type: "sect", sect: null });
+  // помощник сужает колоду: сетка 4 → 3 колонки перекрёстным затуханием (useLayerFit)
+  const fit = useLayerFit(open);
   return (
     <Layer id="p2-lay-t" open={open} top={120} z={open ? 7 : 6} height={692} label="Шаблоны" onClose={close}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 24, height: 64 }}>
@@ -37,7 +39,7 @@ export function TemplatesLayer({ fresh, onUpload, busy }: {
 
       <div className="ga-box">
         <div className="ga-scroll p2-fade">
-          <div className="ga-grid">
+          <div className={cls("ga-grid", fit.cls)} data-fit={fit.shown}>
             <div className="p2-ls" style={lsDelay(160)}>
               <button type="button" className="p2-card" onClick={busy ? undefined : onUpload} aria-disabled={busy || undefined}
                 title={busy ? UPLOAD_BUSY_TITLE : undefined}>

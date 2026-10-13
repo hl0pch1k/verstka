@@ -5,8 +5,11 @@
 // элементы с классом `p2-ls` и задержкой `--d` (style={{ "--d": "160ms" }}): проявляются после въезда, сбрасываются,
 // когда слой уехал.
 import { useEffect, useRef, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
+import { useDeckFit } from "../deck/useDeckFit";
+import type { DeckFit } from "../deck/fit";
 import { cls } from "../kit/cls";
 import { usePresence } from "../kit/usePresence";
+import { useSwap } from "../kit/useSwap";
 
 /** Сколько слой едет (и сколько держится его содержимое после закрытия). */
 export const LAYER_MS = 520;
@@ -85,3 +88,13 @@ export function Layer({ open, top, z, height = 812, label, children, onClose, id
 
 /** Задержка лесенки `p2-ls` (CSS-переменная `--d`). */
 export const lsDelay = (ms: number) => ({ "--d": `${ms}ms` }) as CSSProperties;
+
+/** Раскладка содержимого слоя по колоде, которую сужает помощник (сетки «Мои презентации», «Шаблоны», «Слайды
+ *  шаблона» 4 → 3 колонки, лист «Подробнее» 2 → 1, шапка «Текста презентации»): `shown` — для `data-fit` обёртки
+ *  содержимого (правила слоя — по нему, а не по `data-fit` колоды), `cls` — её класс затухания. Смена — перекрёстным
+ *  затуханием (useSwap: гаснет 120 мс, подменяется невидимой, проявляется 240 мс), пока слой на экране — открыт или ещё
+ *  уезжает; закрытый меняется сразу. */
+export function useLayerFit(open: boolean): { shown: DeckFit; cls: string | undefined } {
+  const fit = useSwap(useDeckFit(), usePresence(open, LAYER_MS).mounted);
+  return { shown: fit.shown, cls: fit.cls };
+}

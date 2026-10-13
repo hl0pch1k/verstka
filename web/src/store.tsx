@@ -13,7 +13,7 @@ import { variantRev, withRev } from "./lib/rev";
 import { uiReducer, UI0, type UiAction, type UiState } from "./ui/deck/geometry";
 import { textError, type TextIssue } from "./ui/create/textRules";
 import { buildRunning, draftParams, type Params } from "./ui/create/params";
-import { failedBuildJob, parsePendingBuild, pendingFor, requestOf, resumeBuild, type PendingBuild } from "./ui/build/resume";
+import { completeAsk, failedBuildJob, parsePendingBuild, pendingFor, requestOf, resumeBuild, type PendingBuild } from "./ui/build/resume";
 import { openStrategy } from "./ui/result/resultView";
 import { useVariantWork, type VariantWorkApi } from "./ui/details/useVariantWork";
 import { busyKeys } from "./ui/details/variantWork";
@@ -93,6 +93,9 @@ export interface AppState {
    *  возвращается к ней (и показывает её, даже если с тех пор подключились к другой). false — вести нечего (у меты нет
    *  задачи). Мета — полная (`GET /api/generations/{gid}`): «Собрать ещё раз» повторит её запрос. */
   followDeck(g: GenerationMeta): boolean;
+  /** Полная мета сборки, которую ведут по задаче без неё (помощник начал сборку, а мета тогда не прочиталась): запрос
+   *  сборки — полоса 02 экрана «Сборка» и «Собрать ещё раз» — берётся из неё, если он ещё заглушка этой сборки. */
+  adoptBuildMeta(g: GenerationMeta): void;
   /** Варианты, над которыми идёт задача (`workKey(gid, strategy)` по цели задачи): сервер держит одну задачу на вариант,
    *  и кнопки работы над ним выключены, где бы её ни начали. */
   busyVariants: string[];
@@ -626,6 +629,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return true;
   }, [attachBuild]);
 
+  const adoptBuildMeta = useCallback((g: GenerationMeta) => {
+    const ask = completeAsk(lastBuild.current, g);
+    if (ask) keepBuild(ask);
+  }, [keepBuild]);
+
   /** A build that failed while the page was closed: nothing follows its job any more — the build screen shows its
    *  failure (B-failed) from the deck's meta (the reason) and, while the server remembers it, its job's record (the
    *  agent's timeline, where it stopped); «Собрать ещё раз» repeats its request. */
@@ -774,13 +782,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AppState>(() => ({
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, cancelLoad, reloadIfOpen, activeStrategy, setActiveStrategy, activeVariant,
-    selectedSlide, setSelectedSlide, ui, dispatch, activeJob, liveJobs: liveList, runJob, followDeck, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, building, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
+    selectedSlide, setSelectedSlide, ui, dispatch, activeJob, liveJobs: liveList, runJob, followDeck, adoptBuildMeta, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, building, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
     brief, setBrief, textIssue, setTextIssue, checkText, params, setParams,
     composerText, composerPreset, editText, takeComposerText, takeComposerPreset, improveSource, takeImproveSource,
   }), [
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, cancelLoad, reloadIfOpen, activeStrategy, setActiveStrategy, activeVariant,
-    selectedSlide, setSelectedSlide, ui, activeJob, liveList, runJob, followDeck, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, building, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
+    selectedSlide, setSelectedSlide, ui, activeJob, liveList, runJob, followDeck, adoptBuildMeta, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, building, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
     brief, setBrief, textIssue, checkText, params, setParams,
     composerText, composerPreset, editText, takeComposerText, takeComposerPreset, improveSource, takeImproveSource,
   ]);

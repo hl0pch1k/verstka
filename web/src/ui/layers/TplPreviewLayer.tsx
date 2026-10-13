@@ -9,11 +9,12 @@ import { errText } from "../../lib/narrate";
 import { templateTitle, tplLabel } from "../../lib/plain";
 import { plural } from "../../lib/utils";
 import type { TemplateListItem } from "../../types";
+import { cls } from "../kit/cls";
 import { ErrorLine } from "../kit/ErrorLine";
 import { Icon } from "../kit/Icon";
 import { Cover, hexOf, inkOf, usePickTemplate } from "../create/TemplateRibbon";
 import { useRise } from "../result/useGoDown";
-import { Layer, lsDelay } from "./Layer";
+import { Layer, lsDelay, useLayerFit } from "./Layer";
 import { Scrim } from "./Scrim";
 
 const thumb = (id: string, n: number) => `/api/templates/${encodeURIComponent(id)}/files/thumbs/slide-${String(n).padStart(3, "0")}.jpg`;
@@ -54,6 +55,8 @@ export function TplPreviewLayer() {
     }
   }, [id, ctx, dispatch]);
   const open = !!id && ctx;
+  // помощник сужает колоду: сетка миниатюр 4 → 3 колонки перекрёстным затуханием (useLayerFit)
+  const fit = useLayerFit(open);
 
   // последний показанный шаблон держится, пока слой уезжает (и если его только что удалили)
   const found = id ? templates.find((t) => t.template_id === id) : undefined;
@@ -176,7 +179,7 @@ export function TplPreviewLayer() {
 
             <div className="pv-box">
               <div className="pv-scroll p2-fade">
-                <ol className="pv-grid" aria-label="Слайды шаблона">
+                <ol className={cls("pv-grid", fit.cls)} data-fit={fit.shown} aria-label="Слайды шаблона">
                   {Array.from({ length: n }, (_, i) => (
                     <li key={i} className="p2-ls" style={lsDelay(slideDelay(i))}>
                       <Cover src={thumb(t.template_id, i + 1)} kind="s" ink={inkOf(t)} label={`Слайд ${i + 1} шаблона`} />

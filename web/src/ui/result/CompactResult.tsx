@@ -10,11 +10,12 @@
 // (`snap`: сетка подменяется без хода, пока слайд и колонка не видны).
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { SheetTab } from "../deck/geometry";
+import { useDeckWidth } from "../deck/useDeckFit";
 import { cls } from "../kit/cls";
 import { ErrorLine } from "../kit/ErrorLine";
 import { Icon } from "../kit/Icon";
 import { Spinner } from "../kit/Spinner";
-import type { CheckItem } from "./compact";
+import { ctaShort, type CheckItem } from "./compact";
 import type { NoteActions } from "./NotePill";
 import type { NoteView } from "./resultView";
 
@@ -131,6 +132,8 @@ export function CompactResult({ d, live, wide, snap, note, noteActions, onVarian
    *  колонке полного вида (смена вида). null — изображение не выбрано. */
   card: { shown: boolean; node: ReactNode } | null;
 }) {
+  // «Скачать PowerPoint» → «PowerPoint», когда рядом со значками названию мало места (по целевой ширине колоды)
+  const short = ctaShort(useDeckWidth(), (note ? 1 : 0) + 5);
   return (
     <div className={cls("hp-in", snap.wide && "hp-wide", snap.now && "hp-snap")}>
       <div className="hp-top hp-xf">
@@ -161,8 +164,7 @@ export function CompactResult({ d, live, wide, snap, note, noteActions, onVarian
             {d.pptx && (
               <a className="p2-cta" href={d.pptx} download={`${d.fileBase}.pptx`} aria-label="Скачать PowerPoint" title={d.pptxTitle} style={{ marginLeft: 8 }}>
                 <Icon name="download" size={20} />
-                <span className="hp-cta-l">Скачать PowerPoint</span>
-                <span className="hp-cta-s" aria-hidden="true">PowerPoint</span>
+                <span>{short ? "PowerPoint" : "Скачать PowerPoint"}</span>
               </a>
             )}
           </div>

@@ -98,7 +98,8 @@ export function HelperPlate() {
   const intro = introFor({ building: ui.screen === "build" && building, deck });
   const fixable = !!activeVariant?.audit?.issues.some((i) => i.autofix && i.autofix.action !== "none");
   const chips = chipsFor({
-    pending: chat.pending, busy: building || chat.working, empty: messages.length === 0, edited: chat.edited, deck, slide: selectedSlide,
+    pending: chat.pending, busy: building || chat.working, empty: messages.length === 0, edited: chat.edited, deck,
+    open: deck ? generation?.id ?? null : null, slide: selectedSlide,
     template: !!templateId, fixable,
   });
   const placeholder = placeholderFor({ screen: ui.screen, deck, slide: selectedSlide });

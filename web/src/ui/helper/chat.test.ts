@@ -197,7 +197,7 @@ test("feedDelay: закрытие — сброс после того, как п�
 });
 
 // ── подсказки, приветствие, поле
-const base = { pending: false, busy: false, empty: true, edited: null, deck: true, slide: 3, template: true, fixable: false };
+const base = { pending: false, busy: false, empty: true, edited: null, deck: true, open: "g1", slide: 3, template: true, fixable: false };
 test("chipsFor: пустая лента на результате — «Почему слайд N такой?» и «Как работал агент?»", () => {
   assert.deepEqual(chipsFor(base), ["Почему слайд 3 такой?", "Как работал агент?"]);
 });
@@ -205,12 +205,20 @@ test("chipsFor: есть что исправить — «Исправь всё»
   assert.deepEqual(chipsFor({ ...base, fixable: true }), ["Почему слайд 3 такой?", "Исправь всё"]);
 });
 test("chipsFor: после правки — «Верни как было» и вопрос о изменённом слайде", () => {
-  assert.deepEqual(chipsFor({ ...base, empty: false, edited: { slide: 6 } }), ["Верни как было", "Почему слайд 6 такой?"]);
-  assert.deepEqual(chipsFor({ ...base, empty: false, edited: { slide: null } }), ["Верни как было"]);
+  assert.deepEqual(chipsFor({ ...base, empty: false, edited: { gid: "g1", slide: 6 } }), ["Верни как было", "Почему слайд 6 такой?"]);
+  assert.deepEqual(chipsFor({ ...base, empty: false, edited: { gid: "g1", slide: null } }), ["Верни как было"]);
+});
+test("chipsFor: правка другой презентации — ни «Верни как было», ни вопроса о её слайде (они были бы о чужой)", () => {
+  // открыли другую из «Мои презентации»
+  assert.deepEqual(chipsFor({ ...base, empty: false, open: "g2", edited: { gid: "g1", slide: 6 } }), []);
+  // ушли на «Создать» или «Сборку» — презентации на экране нет
+  assert.deepEqual(chipsFor({ ...base, empty: false, deck: false, open: null, edited: { gid: "g1", slide: 6 } }), []);
+  // вернулись к ней — подсказки снова на месте
+  assert.deepEqual(chipsFor({ ...base, empty: false, open: "g1", edited: { gid: "g1", slide: 6 } }), ["Верни как было", "Почему слайд 6 такой?"]);
 });
 test("chipsFor: пока ждём ответ или идёт задача — ничего; разговор идёт — ничего", () => {
   assert.deepEqual(chipsFor({ ...base, pending: true }), []);
-  assert.deepEqual(chipsFor({ ...base, busy: true, edited: { slide: 2 } }), []);
+  assert.deepEqual(chipsFor({ ...base, busy: true, edited: { gid: "g1", slide: 2 } }), []);
   assert.deepEqual(chipsFor({ ...base, empty: false }), []);
 });
 test("chipsFor: без презентации — о шаблоне; без шаблона — «Что ты умеешь?»", () => {

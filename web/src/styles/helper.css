@@ -89,12 +89,6 @@ a.p2-rbl:hover{color:#0B1220}
 .hp-chkb:hover{transform:translateY(-2px)}
 .hp-chkb:active{transform:scale(.98)}
 .hp-chkb:focus-visible{outline:2px solid #2563EB;outline-offset:4px}
-/* «Скачать PowerPoint» в тесной колоде (помощник при 1280) — «PowerPoint»: названию и шести значкам нужно место */
-.hp-cta-s{display:none}
-:where(.p2-deck[data-fit=tight]){
-  .hp-cta-l{display:none}
-  .hp-cta-s{display:inline}
-}
 /* уведомление результата в компактном виде: значок «i» (синий, как у таблетки) и меню df-menu с его текстом и
    действиями — те же, что у раскрытой таблетки полного вида; значок — первый в ряду, меню раскрывается от него вправо
    (влево ему мало места при 1280) */

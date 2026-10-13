@@ -222,7 +222,8 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 /* обложки ленты в узкой колоде уже своих картинок — видна левая часть (там начинается заголовок слайда) */
 :where([data-ribbon=narrow]) :is(.tt-tile,.an-tile) .p2-cover img{object-position:0 50%}
 :where(.p2-deck[data-fit=narrow], .p2-deck[data-fit=tight]){
-  /* названия шагов (и слоёв) — 24/32, как в V2 на узком экране: номер шага и кнопки шапки встают рядом */
+  /* названия шагов — 24/32, как в V2 на узком экране: номер шага и кнопки шапки встают рядом (у слоёв — по своему
+     data-fit, layers.css `.gh-body`, result.css `.rt-hd`) */
   .p2-ttl{font-size:24px;line-height:32px}
   /* «Это готовый текст…» — в ряду шапки и короче */
   .tx-top{position:static;height:auto;flex:0 1 auto}

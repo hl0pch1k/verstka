@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { GenerateRequest, GenerationMeta, Job, JobEvent } from "../../types";
 import { buildView } from "./buildView";
-import { buildTopic, failedBuildJob, parsePendingBuild, pendingFor, requestOf, resumeBuild, type PendingBuild } from "./resume";
+import { buildTopic, completeAsk, failedBuildJob, parsePendingBuild, pendingFor, requestOf, resumeBuild, type PendingBuild } from "./resume";
 
 const REQ: GenerateRequest = {
   template_id: "t1", brief: "Итоги квартала", audience: null, purpose: null, slides: 5, language: "ru", extra_instructions: null,
@@ -176,4 +176,28 @@ test("полосы 01/02 до того, как задача найдена (пе
   assert.deepEqual(buildTopic(null, pending, []), { template: "t3", templateFile: null, brief: "Итоги квартала", useModels: false, improved: null });
   assert.equal(buildTopic(null, null, [meta("g1")]), null);
   assert.equal(buildTopic({ generation: null, template: null }, null, []), null);
+});
+
+test("сборка из чата, чья мета не прочиталась: запрос (полоса 02, «Собрать ещё раз») — из меты, прочитанной позже", () => {
+  // подключились по задаче из ответа: мета-заглушка без темы и вариантов
+  const stub: PendingBuild = { gid: "g1", request: requestOf({ id: "g1", template_id: "t1", strategies: [], status: "running", job_id: "j1" }), expected: null };
+  assert.equal(stub.request.brief, "");
+  const full = meta("g1", { brief: "История СССР", slides: 8, use_models: true, status: "running", job_id: "j1" });
+  const ask = completeAsk(stub, full);
+  assert.deepEqual(ask, { gid: "g1", request: requestOf(full), expected: 8 });
+  assert.equal(ask?.request.brief, "История СССР");
+  assert.deepEqual(ask?.request.strategies, ["structured", "visual"]);
+  // полоса 02 говорит о теме сборки
+  assert.equal(buildTopic({ generation: "g1", template: "t1" }, ask, [])?.brief, "История СССР");
+});
+
+test("мета, прочитанная позже, не трогает чужой или уже полный запрос", () => {
+  const full = meta("g1", { brief: "История СССР" });
+  // на экране уже другая сборка
+  const other: PendingBuild = { gid: "g2", request: { ...REQ, strategies: [], brief: "" }, expected: null };
+  assert.equal(completeAsk(other, full), null);
+  assert.equal(completeAsk(null, full), null);
+  // свой запрос страницы для этой сборки — уже полный
+  const own: PendingBuild = { gid: "g1", request: { ...REQ, brief: "Своя тема" }, expected: 5 };
+  assert.equal(completeAsk(own, full), null);
 });

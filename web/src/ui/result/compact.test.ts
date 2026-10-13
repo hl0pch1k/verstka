@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { AuditReport, AuditSummary, Generation, Issue, Variant } from "../../types";
-import { compactChecks, sourceText } from "./compact";
+import { compactChecks, ctaShort, sourceText } from "./compact";
 
 const audit = (summary: Partial<AuditSummary> = {}, issues: Partial<Issue>[] = []): AuditReport => ({
   deck: "d", template_id: "t1", strategy: "structured", per_slide: {}, iterations: 1, applied_fixes: [], seconds: 1,
@@ -51,4 +51,19 @@ test("источник: «Улучшить готовую» — исходная
   assert.equal(sourceText(gen({ improved_from: { name: "old_quarter_report.pptx" } }), null), "Текст из презентации «old quarter report»");
   assert.equal(sourceText(gen(), { title: "Собрано без модели" }), "Собрано без модели");
   assert.equal(sourceText(gen(), null), "Ваш текст — агент разложил его по слайдам");
+});
+
+// шапка компактного вида: ряд = колода − поля 96; справа значки 40 (через 8), «Скачать PowerPoint» 285 (через 8 + 8)
+test("ctaShort: при 1440 (колода 976) с шестью значками (есть уведомление) — «PowerPoint», названию остаётся место", () => {
+  assert.equal(ctaShort(976, 6), true);
+});
+test("ctaShort: при 1440 с пятью значками (G-helper) — «Скачать PowerPoint», как на доске", () => {
+  assert.equal(ctaShort(976, 5), false);
+});
+test("ctaShort: при 1280 (колода 816) — всегда «PowerPoint»", () => {
+  assert.equal(ctaShort(816, 5), true);
+  assert.equal(ctaShort(816, 6), true);
+});
+test("ctaShort: ширина ещё не измерена — полная подпись", () => {
+  assert.equal(ctaShort(0, 6), false);
 });

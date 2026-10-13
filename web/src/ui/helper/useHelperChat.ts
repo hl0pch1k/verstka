@@ -3,7 +3,8 @@
 // доходят до ленты и тогда, когда помощник закрыт. Логика действий — старый ChatActions.ts, переписанный под «Слои»;
 // что делает ответ — чистая planActions (chat.ts): действия — только для презентации, о которой ответ.
 //  · generation_started — экран «Сборка» с этой сборкой (followDeck по её мете, как из «Мои презентации»; мета не
-//    прочиталась — по задаче из ответа: идущую сборку не открываем как готовую);
+//    прочиталась — по задаче из ответа: идущую сборку не открываем как готовую; мета читается ещё раз, когда список
+//    обновился, и дополняет запрос сборки — adoptBuildMeta);
 //  · edit (правка слайда, изображение) и jobs («Исправь всё») — задачи хранилища (`runJob`) с целью-вариантом: кнопки
 //    работы над ним выключены, пока задача идёт; ход каждой — своя полоса в ленте (`liveJobs`); готово — презентация
 //    перечитывается, если она открыта (`reloadIfOpen`; сцена сменяет слайд перекрёстным затуханием), открыта другая —
@@ -16,7 +17,7 @@ import { useApp } from "../../store";
 import type { ChatResponse, Generation, Job } from "../../types";
 import {
   asEditResult, asFixResult, chatFailText, describeFixes, editFailText, feedProgress, planActions, reloadFailText, OTHER_DECK,
-  type EditAction, type FeedJob, type FeedNote, type FixOutcome,
+  type EditAction, type Edited, type FeedJob, type FeedNote, type FixOutcome,
 } from "./chat";
 
 export interface HelperChat {
@@ -25,8 +26,9 @@ export interface HelperChat {
   notes: FeedNote[];
   /** Ответ ещё не пришёл. */
   pending: boolean;
-  /** Последняя правка изменила открытую презентацию (подсказка «Верни как было»); null — нет. */
-  edited: { slide: number | null } | null;
+  /** Последняя правка изменила презентацию `gid`, открытую тогда (подсказки «Верни как было» и «Почему слайд N
+   *  такой?» — только пока она на экране, chipsFor); null — нет. */
+  edited: Edited | null;
   /** Идёт задача, начатая из чата. */
   working: boolean;
   /** Отправить вопрос; false — не ушёл (пусто или ответ ещё не пришёл). */
@@ -47,7 +49,9 @@ export function useHelperChat(): HelperChat {
   const busy = useRef(false);
   const [jobs, setJobs] = useState<FeedJob[]>([]);
   const [notes, setNotes] = useState<FeedNote[]>([]);
-  const [edited, setEdited] = useState<{ slide: number | null } | null>(null);
+  const [edited, setEdited] = useState<Edited | null>(null);
+  /** Сборка из чата, чья мета не прочиталась (followNewBuild): её мета читается ещё раз, когда обновится список. */
+  const lateMeta = useRef<string | null>(null);
 
   const addJob = useCallback((id: string, label: string) => {
     setJobs((js) => (js.some((j) => j.id === id) ? js : [...js, { id, label, ts: now(), progress: 0, status: "run" }]));
@@ -98,7 +102,7 @@ export function useHelperChat(): HelperChat {
           after = await reloadDeck(gid);
           // «Верни как было» и вопрос о слайде — только когда на экране та презентация, которую изменили
           if (after.kind === "open") {
-            setEdited(r.kind === "undo" ? null : { slide: r.slide ?? a.slide ?? null });
+            setEdited(r.kind === "undo" ? null : { gid, slide: r.slide ?? a.slide ?? null });
             const strategy = r.strategy ?? a.strategy;
             if (strategy && latest.current.activeStrategy !== strategy) latest.current.setActiveStrategy(strategy);
             if (r.slide) latest.current.setSelectedSlide(r.slide);
@@ -156,12 +160,27 @@ export function useHelperChat(): HelperChat {
     // мета новой сборки уже есть (сервер пишет её до старта задачи): экран «Сборка» ведёт её, как из «Мои презентации»
     const meta = await api.generation(gid).catch(() => null);
     const s = latest.current;
+    // не прочиталась — её прочитают ещё раз, когда список обновится (эффект ниже)
+    lateMeta.current = meta ? null : gid;
     void s.refreshGenerations();
     // кончилась мгновенно — открытие само скажет, что вышло
     if (meta && meta.status !== "running") return void s.loadGeneration(gid);
     // идёт — или мета не прочиталась (связь): сборку ведёт её задача из ответа; идущую не открываем как готовую
     s.followDeck(meta ? { ...meta, job_id: meta.job_id ?? job } : { id: gid, template_id: template ?? s.templateId ?? "", strategies: [], status: "running", job_id: job });
   }, []);
+  // мета сборки из чата не прочиталась: список обновился и в нём есть эта сборка (связь вернулась) — мета читается ещё
+  // раз, и полоса 02 и «Собрать ещё раз» берут из неё тему и варианты вместо заглушки (adoptBuildMeta — только если на
+  // экране всё ещё запрос-заглушка этой сборки). Не прочиталась и теперь — ещё раз при следующем обновлении списка
+  const listed = app.generations;
+  useEffect(() => {
+    const gid = lateMeta.current;
+    if (!gid || !listed.some((g) => g.id === gid)) return;
+    void api.generation(gid).then((g) => {
+      if (lateMeta.current !== gid) return;
+      lateMeta.current = null;
+      latest.current.adoptBuildMeta(g);
+    }, () => {});
+  }, [listed]);
 
   const perform = useCallback((res: ChatResponse, sent: string | null) => {
     const s = latest.current;

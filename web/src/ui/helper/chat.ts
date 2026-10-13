@@ -225,20 +225,26 @@ export interface ChipCtx {
   busy: boolean;
   /** В ленте ещё ничего не написано. */
   empty: boolean;
-  /** Последняя правка изменила презентацию: её слайд (null — какой, неизвестно). */
-  edited: { slide: number | null } | null;
+  /** Последняя правка изменила презентацию `gid`: её слайд (null — какой, неизвестно). */
+  edited: Edited | null;
   /** На экране — результат с презентацией; `slide` — открытый слайд. */
   deck: boolean;
+  /** Презентация на экране (результат); null — её нет («Создать», «Сборка»). */
+  open: string | null;
   slide: number;
   template: boolean;
   /** Есть замечания, которые правятся сами («Исправь всё»). */
   fixable: boolean;
 }
 
-/** Подсказки под лентой (не больше двух): после правки — «Верни как было»; в пустой ленте — по месту. */
+/** Правка из чата изменила презентацию `gid` (её слайд; null — какой, неизвестно). */
+export interface Edited { gid: string; slide: number | null }
+
+/** Подсказки под лентой (не больше двух): после правки — «Верни как было», пока на экране та презентация, которую
+ *  изменили (на другой или без презентации они были бы о чужой); в пустой ленте — по месту. */
 export function chipsFor(c: ChipCtx): string[] {
   if (c.pending || c.busy) return [];
-  if (c.edited) return ["Верни как было", ...(c.edited.slide ? [`Почему слайд ${c.edited.slide} такой?`] : [])];
+  if (c.edited && c.edited.gid === c.open) return ["Верни как было", ...(c.edited.slide ? [`Почему слайд ${c.edited.slide} такой?`] : [])];
   if (!c.empty) return [];
   if (c.deck) return [`Почему слайд ${c.slide} такой?`, c.fixable ? "Исправь всё" : "Как работал агент?"];
   return c.template ? ["Что в шаблоне?", "Что ты умеешь?"] : ["Что ты умеешь?"];

@@ -16,7 +16,7 @@ import { cls } from "../kit/cls";
 import { usePresence } from "../kit/usePresence";
 import { deckPreset } from "../result/resultView";
 import { useGoDown } from "../result/useGoDown";
-import { Layer, lsDelay } from "./Layer";
+import { Layer, lsDelay, useLayerFit } from "./Layer";
 import { firstSource, sourceLine, writerByline, writerSlides, writtenText, type TextPiece, type WriterSource } from "./writerText";
 
 /** Сколько стоит строка «Скопировано». */
@@ -28,6 +28,7 @@ export function TextLayer() {
   const goDown = useGoDown();
   const text = ui.screen === "result" ? writtenText(generation?.writer) : null;
   const open = ui.textLayer && !!text;
+  const fit = useLayerFit(open);
   // текста больше нет (другая презентация) — флаг снимается, иначе слой вернулся бы сам
   useEffect(() => {
     if (ui.textLayer && !text) dispatch({ type: "set", patch: { textLayer: false } });
@@ -77,8 +78,10 @@ export function TextLayer() {
     <Layer id="rt-lay-text" open={open} top={160} z={5} label="Текст презентации" role="dialog" onClose={close}>
       {w && (
         <div style={{ display: "flex", flexDirection: "column", height: 572 }}>
-          <div className="p2-hrow p2-ls" style={{ ...lsDelay(120), display: "flex", alignItems: "center", gap: 24, height: 64, flex: "none" }}>
-            {/* колода уже (помощник): подпись встаёт под заголовок, «Скопировать» в тесной колоде — значок */}
+          {/* колода уже (помощник): подпись встаёт под заголовок, «Скопировать» в тесной колоде — значок; шапка
+              перестраивается перекрёстным затуханием (useLayerFit, `data-fit` шапки — result.css) */}
+          <div className={cls("rt-hd", fit.cls)} data-fit={fit.shown} style={{ flex: "none" }}>
+          <div className="p2-hrow p2-ls" style={{ ...lsDelay(120), display: "flex", alignItems: "center", gap: 24, height: 64 }}>
             <div className="rt-head" style={{ display: "flex", alignItems: "center", gap: 24, minWidth: 0 }}>
               <h2 className="p2-ttl" style={{ flex: "none", margin: 0, color: "#0B1220" }}>Текст презентации</h2>
               <Byline w={w} />
@@ -98,6 +101,7 @@ export function TextLayer() {
                 <Icon name="x" size={18} />
               </button>
             </div>
+          </div>
           </div>
 
           <div className="p2-ls" style={{ ...lsDelay(200), display: "flex", flexDirection: "column", flex: 1, minHeight: 0, marginTop: 24, borderRadius: 24, background: "#FFFFFF", overflow: "hidden" }}>
