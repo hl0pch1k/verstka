@@ -36,7 +36,8 @@ export interface LayerProps {
   /** region — раздел, dialog — слой поверх работы (aria-modal). */
   role?: "region" | "dialog";
   tone?: "light" | "dark";
-  /** Своя плита у содержимого (лист «Подробнее»): слой даёт только место. */
+  /** Своя плита у содержимого (лист «Подробнее»): слой даёт только место; фокус при открытии — в первый элемент
+   *  содержимого, если у него есть tabIndex. */
   bare?: boolean;
   /** Дополнение к стилю плиты (например, flex-колонка). */
   plateStyle?: CSSProperties;
@@ -51,7 +52,9 @@ export function Layer({ open, top, z, height = 812, label, children, onClose, id
     if (!p.shown) return;
     const back = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const el = slot.current;
-    if (el && !el.contains(document.activeElement)) (plate.current ?? el).focus({ preventScroll: true });
+    // своя плита у содержимого (bare): фокус — в неё, если она его принимает (tabIndex)
+    const own = el?.firstElementChild instanceof HTMLElement && el.firstElementChild.hasAttribute("tabindex") ? el.firstElementChild : null;
+    if (el && !el.contains(document.activeElement)) (plate.current ?? own ?? el).focus({ preventScroll: true });
     return () => {
       const now = document.activeElement;
       if (back && back.isConnected && (!now || now === document.body || el?.contains(now))) back.focus({ preventScroll: true });

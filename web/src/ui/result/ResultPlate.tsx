@@ -6,8 +6,8 @@
 // ленты, панель на месте колонки, исправление слайда с эскизом и «Вернуть как было») — useRemarksMode; изображение на
 // слайде (R-picture: зона на сцене, колонка с карточкой «Изображение») — usePictureSelect; работа над слайдом —
 // useSlideJob. «Показать текст» и «На весь экран» открывают слои колоды (ui/layers TextLayer, Lightbox); пока открыт
-// слой текста, над ним видна полоса «04 Результат» этой плиты (R-text), клик по ней закрывает слой. Лист «Подробнее»
-// (задача 11, `useOpenSheet`) подключается своей задачей.
+// слой текста, над ним видна полоса «04 Результат» этой плиты (R-text), клик по ней закрывает слой. Карточки и ссылки
+// колонки открывают лист «Подробнее» (`useOpenSheet`, ui/details); пока он открыт, над ним видна полоса «04 …» (BackStrip).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { humanError } from "../../lib/errors";
 import { decodeImage, isDecoded } from "../../lib/motion";
@@ -21,6 +21,7 @@ import { BUILD_RUNNING } from "../create/ParamsPlate";
 import { ErrorLine } from "../kit/ErrorLine";
 import { Icon } from "../kit/Icon";
 import { cls } from "../kit/cls";
+import { BackStrip } from "../details/BackStrip";
 import { textStripMeta, writtenText } from "../layers/writerText";
 import { Aside, type AsideData } from "./Aside";
 import { Film, loadedThumbs } from "./Film";
@@ -277,6 +278,8 @@ function ResultBody({ g, goDown }: { g: Generation; goDown(): void }) {
           </span>
         </button>
       </div>
+      {/* полоса «04 …» под листом «Подробнее»: клик закрывает лист */}
+      <BackStrip g={g} v={v} />
       {note ? (
         <NotePill note={note} open={ui.note} line={line} actions={{
           onToggle: () => dispatch({ type: "set", patch: { note: !ui.note } }),

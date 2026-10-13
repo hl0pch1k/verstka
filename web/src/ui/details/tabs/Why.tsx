@@ -1,0 +1,206 @@
+// Вкладка «Почему так» листа «Подробнее» (boards/D-why, V2 `#dd-panel-why`, модуль details `dlW`): липкая навигация
+// по слайдам — одна с результатом (`selectedSlide`), «Почему такая форма», «Как собран слайд», «Другие подходящие
+// макеты» и строка «Проверка слайда» (ведёт в «Качество»). Новый слайд, вариант или версия — колонки проявляются
+// заново лесенкой (p2-in); стрелки ←/→ листают, пока вкладка на экране. Нет довода у слайда — объяснение сервера.
+import { useEffect, useState } from "react";
+import { api } from "../../../api";
+import { humanError } from "../../../lib/errors";
+import { errText } from "../../../lib/narrate";
+import { variantRev } from "../../../lib/rev";
+import { useApp } from "../../../store";
+import type { Generation, TemplateManifest, Variant } from "../../../types";
+import { cls } from "../../kit/cls";
+import { ErrorLine } from "../../kit/ErrorLine";
+import { Icon } from "../../kit/Icon";
+import { Spinner } from "../../kit/Spinner";
+import { ownsKeys, slideForKey } from "../../result/resultView";
+import { Shot } from "../parts";
+import { SEV } from "../quality";
+import { explainWhy, whyView } from "../why";
+
+const asked = new Map<string, string | null>();
+
+/** Объяснение сервера для слайда без довода дизайнера (один раз на слайд и версию варианта). */
+function useExplain(gid: string, strategy: string, n: number, rev: string, need: boolean): { text: string | null; busy: boolean; error: string | null } {
+  const key = `${gid}/${strategy}/${n}/${rev}`;
+  const [st, setSt] = useState<{ key: string; text: string | null; busy: boolean; error: string | null }>({ key: "", text: null, busy: false, error: null });
+  useEffect(() => {
+    if (!need) return;
+    if (asked.has(key)) return void setSt({ key, text: asked.get(key) ?? null, busy: false, error: null });
+    let off = false;
+    setSt({ key, text: null, busy: true, error: null });
+    api.explain(gid, strategy, n).then(
+      (r) => {
+        const t = explainWhy(r.text);
+        asked.set(key, t);
+        if (!off) setSt({ key, text: t, busy: false, error: null });
+      },
+      (e) => !off && setSt({ key, text: null, busy: false, error: humanError(`Не удалось получить объяснение: ${errText(e)}`, "Не удалось получить объяснение") }),
+    );
+    return () => {
+      off = true;
+    };
+  }, [key, need, gid, strategy, n]);
+  return st.key === key ? st : { text: null, busy: need, error: null };
+}
+
+const FRAME = { width: "100%", aspectRatio: "16 / 9", borderRadius: 12, boxShadow: "0 0 0 1px rgba(11,18,32,.08)" } as const;
+const SMALL = { margin: 0, fontSize: 14, fontWeight: 500, lineHeight: "20px", color: "#0B1220" } as const;
+
+export function WhyTab({ g, v, manifest, active }: { g: Generation; v: Variant; manifest: TemplateManifest | null; active: boolean }) {
+  const { selectedSlide, setSelectedSlide, setActiveStrategy, strategyTitle, dispatch, ui } = useApp();
+  const w = whyView(g, v, Math.min(Math.max(1, selectedSlide), Math.max(1, v.slides.length || v.outline?.slides.length || 1)), manifest, strategyTitle);
+  const n = w.n;
+  const rev = variantRev(v);
+  const ex = useExplain(g.id, v.strategy, n, rev, w.ask);
+  const why = w.why ?? ex.text;
+
+  // ←/→ листают слайды, пока вкладка на экране и поверх неё ничего не открыто
+  useEffect(() => {
+    if (!active || ui.pattern !== null || w.total < 2) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || ownsKeys(e.target)) return;
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      const to = slideForKey(e.key, n, w.total);
+      if (to === null) return;
+      e.preventDefault();
+      if (to !== n) setSelectedSlide(to);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [active, ui.pattern, n, w.total, setSelectedSlide]);
+
+  return (
+    <div id="dd-panel-why" className="dd-scroll p2-fade dw-fade" role="tabpanel" aria-labelledby="dd-tab-why" tabIndex={0}>
+      <div className="dw-navw">
+        <nav className="dd-box p2-in" aria-label="Слайды презентации" style={{ display: "flex", alignItems: "center", gap: 16, height: 72, padding: "12px 16px", animationDelay: "240ms" }}>
+          <button type="button" className="p2-rbl" aria-label="Предыдущий слайд" title="Предыдущий слайд (←)" disabled={n <= 1} onClick={() => setSelectedSlide(n - 1)}><Icon name="chevron-left" size={18} /></button>
+          <div key={`${n}|${v.strategy}`} className="p2-in" style={{ display: "flex", flexDirection: "column", alignItems: "center", flex: 1, minWidth: 0, textAlign: "center" }}>
+            <span className="dd-cap">{w.cap}</span>
+            <h3 className="dd-h" title={w.title} style={{ maxWidth: "100%", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{w.title}</h3>
+          </div>
+          <button type="button" className="p2-rbl" aria-label="Следующий слайд" title="Следующий слайд (→)" disabled={n >= w.total} onClick={() => setSelectedSlide(n + 1)}><Icon name="chevron-right" size={18} /></button>
+        </nav>
+      </div>
+
+      <div key={`${n}|${v.strategy}|${rev}`} className="dd-g dw-g">
+        <section className="dd-box p2-in" aria-labelledby="dw-h-form" style={{ display: "flex", flexDirection: "column", minWidth: 0, animationDelay: "0ms" }}>
+          <h3 id="dw-h-form" className="dd-h">Почему такая форма</h3>
+          {w.src && <p style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 0 0", fontSize: 13, fontWeight: 600, lineHeight: "20px", color: "#5A6272" }}><Icon name="file-text" size={16} />{w.src}</p>}
+          {why ? <p className={cls(!w.why && "p2-in")} style={{ margin: "16px 0 0", fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#0B1220" }}>{why}</p>
+            : ex.busy ? <p style={{ display: "flex", alignItems: "center", gap: 8, margin: "16px 0 0", fontSize: 14, fontWeight: 600, lineHeight: "20px", color: "#5A6272" }}><Spinner size={16} />Собираю объяснение…</p>
+              : ex.error ? <ErrorLine text={ex.error} style={{ marginTop: 16 }} />
+                : <p style={{ margin: "16px 0 0", fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#5A6272" }}>Дизайнер не оставил объяснения для этого слайда.</p>}
+          {w.dl.length > 0 && (
+            <dl style={{ display: "grid", gridTemplateColumns: "72px minmax(0, 1fr)", gap: "8px 12px", margin: "16px 0 0", paddingTop: 16, borderTop: "1px solid rgba(11,18,32,.08)" }}>
+              {w.dl.map((x) => [
+                <dt key={`${x.t}t`} className="dw-sub">{x.t}</dt>,
+                <dd key={`${x.t}d`} style={{ ...SMALL }}>{x.d}</dd>,
+              ])}
+            </dl>
+          )}
+          {w.forms.length > 0 && (
+            <>
+              <h4 className="dw-sub" style={{ marginTop: 24 }}>Другие формы</h4>
+              <ul style={{ margin: "8px 0 0", padding: 0, listStyle: "none" }}>
+                {w.forms.map((f, i) => (
+                  <li key={i} className="dw-row">
+                    <p style={{ ...SMALL, flex: 1, minWidth: 0 }}>{f.name && <b style={{ fontWeight: 700 }}>{f.name}</b>}{f.name && f.text ? " — " : ""}{f.text}</p>
+                    {(f.variant || f.onScreen) && (
+                      <span style={{ flex: "none" }}>
+                        {f.variant && (
+                          <button type="button" className="p2-ob" title="Переключиться на этот вариант" aria-label={`Переключиться на вариант ${f.variant.name}`} onClick={() => setActiveStrategy(f.variant!.key)} style={{ height: 40, padding: "0 16px", fontSize: 14 }}>
+                            <span>{f.variant.name}</span>{f.variant.score !== null && <span className="p2-rsc">{f.variant.score}</span>}
+                          </button>
+                        )}
+                        {f.onScreen && <span className="dd-tag dd-tag-b p2-in">{f.onScreen}</span>}
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          {w.crit.length > 0 && (
+            <div style={{ marginTop: "auto", paddingTop: 24 }}>
+              <h4 className="dw-sub">Критик и правка</h4>
+              <ol style={{ display: "flex", flexDirection: "column", gap: 12, margin: "12px 0 0", padding: 16, borderRadius: 16, background: "#F3F4F1", listStyle: "none" }}>
+                {w.crit.map((c, i) => (
+                  <li key={i} className="dw-cr">
+                    <span className="dd-tag" style={{ background: "#FFFFFF", color: c.who === "Критик" ? "#0B1220" : "#2563EB" }}>{c.who}</span>
+                    <span>{c.arrow && <><b style={{ fontWeight: 700, color: "#2563EB" }}>→</b> </>}{c.text}</span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+        </section>
+
+        <div style={{ minWidth: 0 }}>
+          <section className="dd-box p2-in" aria-labelledby="dw-h-build" style={{ animationDelay: "40ms" }}>
+            <h3 id="dw-h-build" className="dd-h">Как собран слайд</h3>
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 40px minmax(0, 1fr)", alignItems: "center", rowGap: 8, marginTop: 16 }}>
+              {w.sample ? <Shot src={w.sample.src} alt={w.sample.label} style={FRAME} />
+                : <span className="dw-wf" style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 16, textAlign: "center" }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, lineHeight: "20px", color: "#5A6272" }}>{w.composed ? "Готового образца не нашлось" : "Образца нет"}</span>
+                </span>}
+              <span aria-hidden="true" style={{ display: "flex", alignItems: "center", justifyContent: "center", color: "#2563EB" }}><Icon name="arrow-right" size={20} /></span>
+              <Shot src={w.own.src} alt={w.own.alt} style={FRAME} />
+              <span className="dd-cap">{w.sample ? w.sample.caption : w.composed ? w.ownCaption : "Образец шаблона не найден"}</span>
+              <span />
+              <span className="dd-cap" style={{ color: "#0B1220" }}>Ваш слайд</span>
+            </div>
+            {w.sim && (
+              <div style={{ marginTop: 24, paddingTop: 16, borderTop: "1px solid rgba(11,18,32,.08)" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, height: 28 }}>
+                  <span id="dw-sim" style={{ fontSize: 14, fontWeight: 700, lineHeight: "20px", color: "#0B1220" }}>Сходство с образцом</span>
+                  <span style={{ fontFamily: "'Unbounded','Manrope',sans-serif", fontWeight: 600, fontSize: 20, lineHeight: "28px", letterSpacing: "-0.02em", color: "#2563EB" }}>{w.sim.pct}%</span>
+                </div>
+                <div role="meter" aria-labelledby="dw-sim" aria-valuemin={0} aria-valuemax={100} aria-valuenow={w.sim.pct} aria-valuetext={`${w.sim.pct}%`} style={{ position: "relative", height: 4, marginTop: 8, borderRadius: 999, background: "#F3F4F1", overflow: "hidden" }}>
+                  <span style={{ position: "absolute", inset: 0, borderRadius: 999, background: "#2563EB", transformOrigin: "left center", transform: `scaleX(${w.sim.pct / 100})` }} />
+                </div>
+                <p style={{ margin: "8px 0 0", fontSize: 14, fontWeight: 500, lineHeight: "20px", color: "#5A6272" }}>{w.sim.note}</p>
+              </div>
+            )}
+            {w.reasons.length > 0 && (
+              <ul style={{ display: "flex", flexDirection: "column", gap: 12, margin: "16px 0 0", padding: "16px 0 0", borderTop: "1px solid rgba(11,18,32,.08)", listStyle: "none" }}>
+                {w.reasons.map((r) => (
+                  <li key={r.text} className="dw-ok">
+                    <span style={{ display: "flex", flex: "none", color: r.good ? "#2563EB" : "#B45309" }}><Icon name={r.good ? "check-circle" : "warning"} size={20} /></span>
+                    <span>{r.text}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          {w.alts.length > 0 && (
+            <section className="dd-box p2-in" aria-labelledby="dw-h-alt" style={{ marginTop: 24, animationDelay: "80ms" }}>
+              <h3 id="dw-h-alt" className="dd-h">Другие подходящие макеты</h3>
+              <ul style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 16, margin: "16px 0 0", padding: 0, listStyle: "none" }}>
+                {w.alts.map((a) => (
+                  <li key={a.key}>
+                    <Shot src={a.src} alt={a.label} style={FRAME} />
+                    <p style={{ margin: "8px 0 0", fontSize: 13, fontWeight: 700, lineHeight: "20px", color: "#0B1220" }}>{a.cap}</p>
+                    <p className="dd-cap" style={{ margin: 0 }}>{a.sim}</p>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+        </div>
+
+        {w.check && (
+          <button type="button" className="dw-chk p2-in" onClick={() => dispatch({ type: "sheet", tab: "quality" })} aria-label={`Проверка слайда: ${w.check.text} — открыть вкладку «Качество»`} style={{ gridColumn: "1 / -1", animationDelay: "120ms" }}>
+            <span className="dd-ico" aria-hidden="true"><Icon name="list-check" size={18} /></span>
+            <span style={{ fontFamily: "'Unbounded','Manrope',sans-serif", fontSize: 14, fontWeight: 600, lineHeight: "24px", letterSpacing: "-0.02em" }}>
+              Проверка слайда <span style={{ fontFamily: "'Manrope',system-ui,sans-serif", fontSize: 15, fontWeight: 500, letterSpacing: 0, color: "#5A6272" }}>· {w.check.text}</span>
+            </span>
+            {w.check.tone && <span className={cls("dd-tag", SEV[w.check.tone].cls)}><Icon name={SEV[w.check.tone].icon} size={14} />{SEV[w.check.tone].label}</span>}
+            <span style={{ display: "flex", marginLeft: "auto", flex: "none", color: "#5A6272" }}><Icon name="chevron-right" size={18} /></span>
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
