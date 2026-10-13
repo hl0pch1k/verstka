@@ -1,7 +1,7 @@
 // Лист «Подробнее» без React (boards/D-*, V2 `#p2-lay-d`, `ddTabs`, `dd-back`, меню варианта `dlf.vmenu`): шесть
 // вкладок, ход стрелками по ним, полоса «04 Название · Вариант N» над листом и пункты меню варианта.
 import type { Generation, Variant } from "../../types";
-import type { SheetTab } from "../deck/geometry";
+import type { SheetTab, UiState } from "../deck/geometry";
 import { docTitle, scoreOf } from "../result/resultView";
 
 export const SHEET_TABS: { key: SheetTab; label: string }[] = [
@@ -16,6 +16,10 @@ export function tabStep(cur: SheetTab, key: string): SheetTab | null {
   const to = key === "ArrowRight" ? (i + 1) % n : key === "ArrowLeft" ? (i - 1 + n) % n : key === "Home" ? 0 : key === "End" ? n - 1 : null;
   return to === null ? null : SHEET_TABS[to].key;
 }
+
+/** Поверх листа открыт слой шапки — раздел «Шаблоны» / «Мои презентации», просмотр или удаление шаблона: клавиши
+ *  (←/→ вкладки «Почему так», запасной Esc листа и слоя «Слайд N шаблона») — его, не листа. */
+export const headerLayerOpen = (ui: Pick<UiState, "sect" | "tplPreview" | "tplDelete">) => !!ui.sect || !!ui.tplPreview || !!ui.tplDelete;
 
 const round = (s: number | null) => (s === null ? null : Math.round(s));
 

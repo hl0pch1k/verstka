@@ -1,7 +1,8 @@
 // Работа над одним слайдом открытой презентации (R-fixing, R-fixed, R-picture): «Исправить слайд» (задача
 // `slide_fix`), «Заменить» / «Убрать» изображение (задача `picture`) и «Вернуть как было» («верни как было», задача
-// `edit`). Задачи идут через `runJob` хранилища тихо — ход и неудачу показывает место действия (панель замечаний,
-// карточка «Изображение»), а не строка уведомления. Шаги запуска — чистый slideJobNext (slideJob.ts): у варианта одна
+// `edit`; одно на всё приложение — хранилище `revertVariant`, им же пользуется лист «Подробнее»). Задачи идут через
+// `runJob` хранилища тихо — ход и неудачу показывает место действия (панель замечаний, карточка «Изображение»), а не
+// строка уведомления. Шаги запуска — чистый slideJobNext (slideJob.ts): у варианта одна
 // задача за раз (сервер отвечает 409), второй запуск в том же кадре отклоняется. По готовности презентация
 // перечитывается (`reloadIfOpen`: тот же вариант и слайд, превью — по новой ревизии `withRev`) — и тогда, когда человек
 // уже ушёл с экрана результата: вернувшись, он видит новый слайд. Состояние этого экрана (итог, строки, часы) живёт,
@@ -49,7 +50,7 @@ const startError = (e: unknown, what: string) =>
   humanError(e instanceof ApiError || e instanceof Error ? e.message : String(e), `Не получилось ${what}. Попробуйте ещё раз.`);
 
 export function useSlideJob(gid: string, strategy: string): SlideJob {
-  const { runJob, reloadIfOpen, activeJob } = useApp();
+  const { runJob, reloadIfOpen, revertVariant, activeJob } = useApp();
   // Последнее состояние — у шагов (клик, ответ сервера, конец задачи), а не у отрисовки: второй клик в том же кадре
   // видит первый запуск. Экран перерисовывается, пока он открыт; продолжения задач идут и без него.
   const box = useRef<SlideJobState>(JOB0);
@@ -124,34 +125,19 @@ export function useSlideJob(gid: string, strategy: string): SlideJob {
     return true;
   }, [gid, strategy, runJob, reloadIfOpen, send]) as SlideJob["start"];
 
+  // «Вернуть как было» — общее для всех мест действия (хранилище `revertVariant`): второй возврат или возврат во время
+  // чужой задачи над вариантом не уходит на сервер, а возвращает отказ строкой
   const undoAt = useCallback((kind: SlideJobKind, to: string, slide: number) => {
     const before = box.current;
     const now = send({ type: "undo", kind, strategy: to, slide, at: Date.now() });
     if (now === before || !now.run) return; // идёт другая работа
     const s = now.run.seq;
-    void (async () => {
-      let jobId: string;
-      try {
-        jobId = (await api.editVariant(gid, to, { message: "верни как было", slide })).job_id;
-      } catch (e) {
-        return void send({ type: "undoFailed", seq: s, error: startError(e, "вернуть как было") });
-      }
-      runJob(jobId, "Возвращаю как было", {
-        kind: "edit",
-        target: { generation: gid, strategy: to, slide },
-        area: "result",
-        quiet: true,
-        onDone: async (job) => {
-          const r = job.result as { changed?: boolean; reply?: string } | null;
-          if (r && r.changed === false) return void send({ type: "undoFailed", seq: s, error: humanError(r.reply, "Вернуть не получилось. Попробуйте ещё раз.") });
-          await reloadIfOpen(gid);
-          // вернулось как было — итога больше нет: слайд снова со своими замечаниями
-          send({ type: "undone", seq: s });
-        },
-        onFailed: (job) => void send({ type: "undoFailed", seq: s, error: jobError(job, "вернуть как было") }),
-      });
-    })();
-  }, [gid, runJob, reloadIfOpen, send]);
+    void revertVariant(gid, to, { slide }).then((why) => {
+      // вернулось как было — итога больше нет: слайд снова со своими замечаниями
+      if (why === null) send({ type: "undone", seq: s });
+      else send({ type: "undoFailed", seq: s, error: why });
+    });
+  }, [gid, revertVariant, send]);
 
   const undo = useCallback(() => {
     const cur = box.current.run;

@@ -95,24 +95,30 @@ test("замечания на слайдах: ошибки, предупрежд
   assert.deepEqual(remarkCount(variant()), { count: 0, errors: false });
 });
 
-test("карточка «Качество»: кольцо, ошибки и предупреждения, сверенные числа, как считается оценка", () => {
-  const v = variant({ audit: audit({ score: 89, errors: 0, warnings: 3, model_flags: 1, figures: { checked: 20, derived: 0, unverified: 0 } }) });
+test("карточка «Качество»: кольцо, ошибки и предупреждения по самим замечаниям, сверенные числа; в подсказке — что посчитано", () => {
+  // сводка сервера считает замечание модели ещё и предупреждением (warnings 3) — карточка считает по замечаниям
+  const issues: Partial<Issue>[] = [{ severity: "warn" }, { severity: "warn" }, { severity: "warn", kind: "model" }, { severity: "info" }];
+  const v = variant({ audit: audit({ score: 89, errors: 0, warnings: 3, model_flags: 1, figures: { checked: 20, derived: 0, unverified: 0 } }, issues) });
   const q = qualityCard(gen(), v);
   if (!q) throw new Error("карточки нет");
   assert.equal(q.score, 89);
   assert.equal(q.verdict, "Ошибок нет");
-  assert.equal(q.warnings, "3 предупреждения");
+  assert.equal(q.warnings, "2 предупреждения");
   assert.deepEqual(q.figures, { text: "20 чисел сверены с текстом", tone: "ok", title: undefined });
-  assert.equal(q.title, "Оценка качества 89 из 100 · 100 − 10 за ошибку − 3 за предупреждение − 2 за замечание модели");
-  const bad = qualityCard(gen(), variant({ audit: audit({ score: 70, errors: 2, warnings: 0, figures: { checked: 9, derived: 0, unverified: 3 } }) }));
+  assert.equal(plain(q.title), "Оценка качества 89 из 100 · ошибок нет, 2 предупреждения, 1 замечание модели");
+  const bad = qualityCard(gen(), variant({ audit: audit({ score: 70, errors: 2, warnings: 0, figures: { checked: 9, derived: 0, unverified: 3 } }, [{ severity: "error" }, { severity: "error", kind: "model" }]) }));
   assert.equal(bad?.verdict, "2 ошибки");
   assert.equal(bad?.warnings, null);
   assert.deepEqual(bad?.figures, { text: "3 числа не найдены в тексте", tone: "warn" });
+  assert.equal(plain(bad?.title), "Оценка качества 70 из 100 · 2 ошибки, предупреждений нет, замечаний модели нет");
   // оценки нет — карточки нет (пустых карточек не бывает)
   assert.equal(qualityCard(gen(), variant()), null);
-  // только мета: оценка есть, сколько ошибок — неизвестно
+  // только мета (отчёт не загружен): оценка есть, сколько ошибок — неизвестно
   const meta = qualityCard(gen({ summary: { structured: { score: 92 } } }), variant());
-  assert.deepEqual([meta?.score, meta?.verdict, meta?.figures], [92, null, null]);
+  assert.deepEqual([meta?.score, meta?.verdict, meta?.figures, meta?.title], [92, null, null, "Оценка качества 92 из 100"]);
+  // мета с числами — запасной путь, пока отчёта нет
+  const metaN = qualityCard(gen({ summary: { structured: { score: 92, errors: 0, warnings: 1 } } }), variant());
+  assert.deepEqual([metaN?.verdict, metaN?.warnings], ["Ошибок нет", "1 предупреждение"]);
 });
 
 const ev = (step: string, message: string, slide: number | null = null, variant: string | null = null, fix: string | null = null): AgentEvent =>

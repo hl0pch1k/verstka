@@ -1,9 +1,11 @@
 // Вкладка «Качество» листа «Подробнее» (boards/D-quality, V2 `#dd-panel-quality`, модуль details `dlQ`): сводка с
 // кольцом оценки и исправлением отмеченных, чипы, замечания по слайдам с флажками и «Показать», «Взгляд дизайнера»,
-// мелкие заметки, исправленное автоматически и «Что проверяется». Данные и тексты — quality.ts, исправление —
-// useQualityFix. Смена чипа, итог исправления и «Вернуть как было» заново проявляют список лесенкой (p2-in).
+// мелкие заметки, исправленное автоматически и «Что проверяется». Данные и тексты — quality.ts, числа сводки —
+// auditCounts (те же, что у карточки результата и «Файлов»), исправление — useQualityFix (состояние в хранилище:
+// переживает закрытие листа). Смена чипа, итог исправления и «Вернуть как было» заново проявляют список лесенкой (p2-in).
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../../../api";
+import { auditCounts } from "../../../lib/auditCounts";
 import { variantRev } from "../../../lib/rev";
 import { plural } from "../../../lib/utils";
 import { useApp } from "../../../store";
@@ -47,8 +49,14 @@ export function QualityTab({ g, v }: { g: Generation; v: Variant }) {
   const [filter, setFilter] = useState<QFilter>("all");
   const [k, setK] = useState(0);
   const [unmarked, setUnmarked] = useState<Set<string>>(() => new Set());
+  // другой вариант — свои замечания: снятые флажки прежнего не переносятся
+  const [marksOf, setMarksOf] = useState(v.strategy);
+  if (marksOf !== v.strategy) {
+    setMarksOf(v.strategy);
+    setUnmarked(new Set());
+  }
   const [open, setOpen] = useState<Record<string, boolean>>({});
-  const fix = useQualityFix(g.id, v.strategy);
+  const fix = useQualityFix(g.id, v);
   const checks = useChecks();
   const toggle = (key: string) => setOpen((o) => ({ ...o, [key]: !o[key] }));
   const pick = (f: QFilter) => {
@@ -66,11 +74,12 @@ export function QualityTab({ g, v }: { g: Generation; v: Variant }) {
   }
 
   const score = scoreOf(g, v) ?? audit.summary.score;
-  const sum = qualitySummary(score, main);
+  const sum = qualitySummary(score, auditCounts(audit)!);
   const groups = qualityGroups(v, main, filter, selectedSlide, unmarked, fix.busy);
   const marked = fixableIds(main, unmarked);
   const fixableAll = audit.issues.filter(isFixable).map((i) => i.id);
-  const busy = !!fix.working;
+  // над вариантом идёт работа (своя — и после закрытия листа, или чужая задача): кнопки и флажки выключены
+  const busy = fix.locked;
   const allOn = !fix.undo && fixableAll.length > 0;
   const ctaOn = main.some(isFixable);
   const outline = v.outline?.slides ?? [];
@@ -205,7 +214,7 @@ export function QualityTab({ g, v }: { g: Generation; v: Variant }) {
 
         <div style={{ minWidth: 0 }}>
           {eye && <EyeBox eye={eye} open={!!open.eye} onToggle={() => toggle("eye")} />}
-          {(minors.length > 0 || fixed.length > 0 || checkList.length > 0) && (
+          {(minors.length > 0 || fixed.length > 0 || audit.summary.checks_run.length > 0) && (
             <section className="dd-box p2-in" aria-label="Подробности проверки" style={{ marginTop: eye ? 24 : 0, padding: "0 24px", animationDelay: "360ms" }}>
               {minors.length > 0 && (
                 <Acc id="dq-acc-notes" icon="note" title="Мелкие заметки" n={minors.length} open={!!open.notes} onToggle={() => toggle("notes")} first>
@@ -220,7 +229,7 @@ export function QualityTab({ g, v }: { g: Generation; v: Variant }) {
               {audit.summary.checks_run.length > 0 && (
                 <Acc id="dq-acc-checks" icon="list-check" title="Что проверяется" n={audit.summary.checks_run.length} open={!!open.checks} onToggle={() => toggle("checks")} first={minors.length === 0 && fixed.length === 0}>
                   {checkList.length ? checkList.map((r) => <Row key={r.b} {...r} />)
-                    : <Row tag={null} b="" c={`${plural(audit.summary.checks_run.length, "проверка", "проверки", "проверок")}${checks === "failed" ? " — список проверок не загрузился" : " — список загружается"}`} />}
+                    : <Row tag={null} b="" c={`${plural(audit.summary.checks_run.length, "проверка", "проверки", "проверок")}${checks === "failed" ? " — список проверок не загрузился" : checks === null ? " — список загружается" : ""}`} />}
                 </Acc>
               )}
             </section>

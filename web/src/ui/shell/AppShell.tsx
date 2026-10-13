@@ -1,7 +1,7 @@
 // Оболочка «Слоёв»: страница (#F3F4F1, поля 24, ширина до 1392), шапка и колода в обёртке `hp-wrap` — сетке из двух
 // колонок, где вторая (место помощника) 0 → 400 px. Разметка — boards/V2.dc.html, `.p2-root`. Задачи областей
 // подключают сюда содержимое плит и слоёв через слоты `Deck`.
-import { lazy, Suspense, type CSSProperties } from "react";
+import type { CSSProperties } from "react";
 import { useApp } from "../../store";
 import { tplLabel } from "../../lib/plain";
 import type { Generation, TemplateListItem, Variant } from "../../types";
@@ -15,6 +15,9 @@ import { TextBody, TextHead, useTextPlate } from "../create/TextPlate";
 import { textStrip } from "../create/textRules";
 import { useStrayFileDrop } from "../create/UploadZone";
 import { Deck } from "../deck/Deck";
+// лист «Подробнее» — в основном куске сборки: первое открытие въезжает, как любое (кусок, догружаемый по клику, мог бы
+// не успеть к движению или не загрузиться вовсе); библиотеки — отдельным куском (vite.config `manualChunks`)
+import { DetailsSheet } from "../details/DetailsSheet";
 import { Icon } from "../kit/Icon";
 import type { StripData } from "../deck/Strip";
 import { Lightbox } from "../layers/Lightbox";
@@ -26,10 +29,6 @@ import { TplPreviewLayer } from "../layers/TplPreviewLayer";
 import { ResultPlate } from "../result/ResultPlate";
 import { deckStrip, openDeck } from "../result/resultView";
 import { Header } from "./Header";
-
-// лист «Подробнее» — отдельным куском сборки: он грузится сразу после страницы, параллельно, и к первому клику по
-// карточке результата уже на месте
-const DetailsSheet = lazy(() => import("../details/DetailsSheet").then((m) => ({ default: m.DetailsSheet })));
 
 const ROOT: CSSProperties = {
   width: "100%", minHeight: 900, boxSizing: "border-box", padding: "0 24px 24px", background: "#F3F4F1", color: "#0B1220",
@@ -94,7 +93,7 @@ export function AppShell() {
       <TextLayer />
       <Lightbox />
       {/* лист «Подробнее» (до 160 px, z 5): шесть вкладок и слой «Слайд N шаблона» */}
-      <Suspense fallback={null}><DetailsSheet /></Suspense>
+      <DetailsSheet />
       {/* пока раздел открыт, видимая полоса колоды над слоем закрывает его */}
       <Scrim open={!!ui.sect} onClose={() => dispatch({ type: "sect", sect: null })}
         label={ui.sect === "hist" ? "Закрыть «Мои презентации»" : "Закрыть «Шаблоны»"} />

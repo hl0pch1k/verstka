@@ -7,8 +7,7 @@ import { useApp } from "../../../store";
 import type { Generation, Variant } from "../../../types";
 import { cls } from "../../kit/cls";
 import { Icon } from "../../kit/Icon";
-import { appliedRows } from "../fixes";
-import { checkTiles, fileRows, passport, stagesOf } from "../files";
+import { checkTiles, fileRows, fixRowsOf, passport, stagesOf } from "../files";
 import { slideTag } from "../quality";
 import { FilesDev } from "./FilesDev";
 
@@ -22,11 +21,7 @@ export function FilesTab({ g, v }: { g: Generation; v: Variant }) {
   const m = v.run_manifest;
   const stages = m ? stagesOf(m) : null;
   const check = checkTiles(g, v);
-  const slideOf = (id: string) => {
-    const i = v.outline?.slides.findIndex((s) => s.id === id) ?? -1;
-    return i >= 0 ? i + 1 : null;
-  };
-  const fixes = appliedRows(m?.applied_fixes ?? v.audit?.applied_fixes ?? [], slideOf, () => null);
+  const fixes = fixRowsOf(v);
   const n = files.length;
 
   return (

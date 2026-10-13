@@ -3,6 +3,7 @@
 // шаблона (образец, сходство, доводы подбора, другие подходящие макеты) и строка проверки слайда. Данные — `design[n]`,
 // план раскладки `plan.slides`, `agent.critic`, отчёт проверки и разбор шаблона презентации.
 import { eventParts } from "../../lib/agent";
+import { humanError } from "../../lib/errors";
 import { humanReasons, type Reason } from "../../lib/reasons";
 import { kindLabel, plural } from "../../lib/utils";
 import type { Generation, LayoutSlide, Pattern, TemplateManifest, Variant } from "../../types";
@@ -27,10 +28,13 @@ export interface WhyView {
   forms: WhyForm[];
   crit: WhyCrit[];
   sample: { src: string | null; caption: string; label: string } | null;
-  /** Слайд собран заново по сетке шаблона (не по образцу). */
+  /** Слайд собран заново по сетке шаблона (не по образцу) — только настоящий synth-слайд плана. */
   composed: boolean;
+  /** Текст в пустой рамке образца (образца не показать — почему); образец есть — null. */
+  frame: string | null;
+  /** Подпись под рамкой образца. */
+  sampleCap: string;
   own: { src: string | null; alt: string };
-  ownCaption: string;
   sim: { pct: number; note: string } | null;
   reasons: Reason[];
   alts: WhyAlt[];
@@ -45,7 +49,20 @@ export function planEntry(v: Variant, n: number): LayoutSlide | null {
 
 const pct = (score: number) => Math.round(Math.min(1, Math.max(0, score)) * 100);
 
-export function whyView(g: Generation, v: Variant, n: number, manifest: TemplateManifest | null, titleOf: (name: string) => string): WhyView {
+/** Разбор шаблона презентации для «Как собран слайд»: есть, грузится, шаблона нет в библиотеке, не загрузился. */
+export type SampleSource = "ready" | "loading" | "missing" | "failed";
+
+/** Слайд собран по образцу, а образца не показать: почему (рамка и строка под сходством). */
+const NO_SAMPLE: Record<SampleSource, { frame: string; note: string }> = {
+  loading: { frame: "Образец загружается…", note: "Образец загружается…" },
+  missing: { frame: "Шаблона больше нет в библиотеке", note: "Шаблона больше нет в библиотеке — образец не показать" },
+  failed: { frame: "Разбор шаблона не загрузился", note: "Разбор шаблона не загрузился — образец не показать" },
+  ready: { frame: "Образец не найден в разборе шаблона", note: "Образца нет в разборе шаблона — показать его нельзя" },
+};
+
+/** `source` — что с разбором шаблона (без него образцы не показать); по умолчанию — есть ли `manifest`. */
+export function whyView(g: Generation, v: Variant, n: number, manifest: TemplateManifest | null, titleOf: (name: string) => string,
+  source: SampleSource = manifest ? "ready" : "missing"): WhyView {
   const total = slidesOf(v);
   const o = v.outline?.slides[n - 1] ?? null;
   const d = v.design?.find((x) => x.index === n) ?? null;
@@ -97,12 +114,15 @@ export function whyView(g: Generation, v: Variant, n: number, manifest: Template
     label: `Слайд ${sp.source_slide} шаблона: ${kindLabel(sp.kind)}`,
   } : null;
 
+  // собран по образцу, а образца не показать: разбор грузится, шаблона нет, не загрузился или образца нет в разборе —
+  // так и сказано (слова «собран заново» — только у synth-слайда)
+  const noSample = entry && !composed && !pattern ? NO_SAMPLE[ok ? "ready" : source === "ready" ? "missing" : source] : null;
   let sim: WhyView["sim"] = null;
   if (entry && !composed) {
     const match = pct(entry.score);
     const others = entry.alternatives.filter(([pid]) => pid !== entry.pattern_id).map(([, s]) => s);
     const runnerUp = others.length ? pct(Math.max(...others)) : null;
-    const note = !pattern ? "Ни один образец не подошёл достаточно хорошо — слайд собран с нуля в стиле шаблона"
+    const note = noSample ? noSample.note
       : runnerUp === null ? "Единственный макет шаблона, подходящий для такого слайда"
         : runnerUp <= match ? `Лучший из рассмотренных: у остальных сходство ${runnerUp}% и ниже`
           : entry.reasons.some((r) => r.startsWith("автофикс:")) ? `Заменён проверкой качества: макет со сходством ${runnerUp}% дал замечания`
@@ -131,8 +151,10 @@ export function whyView(g: Generation, v: Variant, n: number, manifest: Template
   return {
     n, total, cap: `Слайд ${n} / ${total} · ${kindLabel(d?.kind ?? o?.kind)}`, title: headline || "Без заголовка",
     src: spec ? `В вашем тексте — слайд ${spec}` : null, why, ask: !why, dl, forms, crit,
-    sample, composed, own: { src: slideSrc(v, n), alt: headline ? `Ваш слайд ${n}: ${headline}` : `Ваш слайд ${n}` },
-    ownCaption: !sample && composed ? "Собран заново по сетке, шрифтам и цветам шаблона" : "Ваш слайд",
+    sample, composed,
+    frame: sample ? null : composed ? "Готового образца не нашлось" : noSample ? noSample.frame : "Образца нет",
+    sampleCap: sample ? sample.caption : composed ? "Собран заново по сетке, шрифтам и цветам шаблона" : entry ? "Образец шаблона" : "Образец шаблона не найден",
+    own: { src: slideSrc(v, n), alt: headline ? `Ваш слайд ${n}: ${headline}` : `Ваш слайд ${n}` },
     sim, reasons, alts: altList, check,
   };
 }
@@ -144,4 +166,12 @@ export function explainWhy(text: string | null | undefined): string | null {
   const why = lines.find((l) => /^Почему так:/i.test(l));
   if (why) return why.replace(/^Почему так:\s*/i, "") || null;
   return lines.slice(1).join(" ") || null;
+}
+
+/** Объяснение сервера не получено — почему, по-человечески. 404 у открытой презентации — разбора шаблона больше нет
+ *  (сервер объясняет слайд по нему). */
+export function explainError(status: number, message: string): string {
+  if (status === 404) return "Шаблона больше нет — объяснение недоступно";
+  if (status === 0) return "Не удалось получить объяснение: нет связи с сервером";
+  return humanError(`Не удалось получить объяснение: ${message}`, "Не удалось получить объяснение");
 }

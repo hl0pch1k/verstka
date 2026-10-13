@@ -14,6 +14,8 @@ import { uiReducer, UI0, type UiAction, type UiState } from "./ui/deck/geometry"
 import { textError, type TextIssue } from "./ui/create/textRules";
 import { buildRunning, draftParams, type Params } from "./ui/create/params";
 import { failedBuildJob, parsePendingBuild, pendingFor, requestOf, resumeBuild, type PendingBuild } from "./ui/build/resume";
+import { useVariantWork, type VariantWorkApi } from "./ui/details/useVariantWork";
+import { busyKeys } from "./ui/details/variantWork";
 import type {
   ChatMessage, GenerateRequest, Generation, GenerationMeta, Health, ImprovedFrom, ImproveSource, Job, JobKind, ModelsStatus, Notice, NoticeArea, StrategyInfo, TemplateListItem, TemplateManifest, Variant,
 } from "./types";
@@ -77,6 +79,14 @@ export interface AppState {
   ui: UiState; dispatch(a: UiAction): void;
   activeJob: ActiveJob | null;
   runJob(jobId: string, label: string, opts?: RunJobOptions): void;
+  /** Варианты, над которыми идёт задача (`workKey(gid, strategy)` по цели задачи): сервер держит одну задачу на вариант,
+   *  и кнопки работы над ним выключены, где бы её ни начали. */
+  busyVariants: string[];
+  /** Работа над вариантами (ui/details/useVariantWork): «Исправить замечания» листа «Подробнее» и единственное «Вернуть
+   *  как было» — для вкладок «Качество», «Агент» и исправления слайда. Состояние по `workKey` переживает закрытие листа. */
+  work: VariantWorkApi["work"];
+  fixIssues: VariantWorkApi["fixIssues"];
+  revertVariant: VariantWorkApi["revertVariant"];
   /** Сборка, которую показывает экран «Сборка»: самая новая задача `generate` — идущая или законченная (неудача
    *  остаётся на экране, пока с него не ушли: слот `activeJob` пустеет через 1,5 с после конца задачи). */
   buildJob: ActiveJob | null;
@@ -200,6 +210,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const takeImproveSource = useCallback(() => setImproveSource(null), []);
   const [activeJob, setActiveJob] = useState<ActiveJob | null>(null);
   const liveJobs = useRef(new Map<string, ActiveJob>()); // every job still running, the newest last
+  const [busyVariants, setBusyVariants] = useState<string[]>([]);
+  const syncBusyVariants = useCallback(() => {
+    const next = busyKeys(liveJobs.current.values());
+    setBusyVariants((cur) => (cur.length === next.length && cur.every((k, i) => k === next[i]) ? cur : next));
+  }, []);
   const [buildJob, setBuildJob] = useState<ActiveJob | null>(null);
   const [building, setBuilding] = useState(false);
   // the newest build and its request (startGeneration once the server took it, or a build found again after a reload):
@@ -443,6 +458,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const settle = (p: Partial<ActiveJob>) => {
       jobSubs.current.delete(jobId);
       liveJobs.current.delete(jobId);
+      syncBusyVariants();
       if (build) {
         // the build screen keeps the ended build (a failure stays on it), with the clock stopped
         setBuildJob((cur) => (cur && cur.id === jobId ? { ...cur, ...p, endedAt: Date.now() } : cur));
@@ -456,6 +472,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
     const first: ActiveJob = { id: jobId, label, progress: 0, message: "В очереди…", status: "queued", kind: opts?.kind ?? "other", startedAt: opts?.startedAt ?? Date.now(), items: opts?.items, template: opts?.template, target: opts?.target, generation: gid, slides: opts?.slides ?? null };
     liveJobs.current.set(jobId, first);
+    syncBusyVariants();
     setActiveJob(first);
     if (build) {
       setBuildJob(first);
@@ -488,7 +505,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       },
     });
     jobSubs.current.set(jobId, stop);
-  }, [notify]);
+  }, [notify, syncBusyVariants]);
+
+  // работа над вариантами: идёт ли задача над вариантом — по идущим задачам, ревизия — открытой презентации
+  const variantLive = useCallback((key: string) => busyKeys(liveJobs.current.values()).includes(key), []);
+  const variantRevOf = useCallback((gid: string, strategy: string) => {
+    const g = latest.current.generation;
+    const v = g && g.id === gid ? g.variants.find((x) => x.strategy === strategy) : null;
+    return v ? variantRev(v) : null;
+  }, []);
+  const { work, fixIssues, revertVariant } = useVariantWork({ runJob, reloadIfOpen, live: variantLive, rev: variantRevOf });
 
   const adoptManifest = useCallback((m: TemplateManifest) => {
     setManifest(m); // same batch as the id: the manifest effect sees a match and skips the refetch
@@ -689,13 +715,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AppState>(() => ({
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, reloadIfOpen, activeStrategy, setActiveStrategy, activeVariant,
-    selectedSlide, setSelectedSlide, ui, dispatch, activeJob, runJob, buildJob, building, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
+    selectedSlide, setSelectedSlide, ui, dispatch, activeJob, runJob, busyVariants, work, fixIssues, revertVariant, buildJob, building, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
     brief, setBrief, textIssue, setTextIssue, checkText, params, setParams,
     composerText, composerPreset, editText, takeComposerText, takeComposerPreset, improveSource, takeImproveSource,
   }), [
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, reloadIfOpen, activeStrategy, setActiveStrategy, activeVariant,
-    selectedSlide, setSelectedSlide, ui, activeJob, runJob, buildJob, building, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
+    selectedSlide, setSelectedSlide, ui, activeJob, runJob, busyVariants, work, fixIssues, revertVariant, buildJob, building, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
     brief, setBrief, textIssue, checkText, params, setParams,
     composerText, composerPreset, editText, takeComposerText, takeComposerPreset, improveSource, takeImproveSource,
   ]);

@@ -1,12 +1,13 @@
 // Вкладка «Файлы» без React (boards/D-files, V2 модуль details `dlF`; логика — старые ExportPanel, RunPanel*):
 // файлы каждого варианта, паспорт запуска (`run_manifest`: шаблон, когда, версия, кто составил план, какие модели),
 // время по этапам, итог проверки, автоисправления и «Для разработчиков» (JSON, навыки и агенты, сравнение запусков).
+import { auditCounts } from "../../lib/auditCounts";
 import { plannedByText } from "../../lib/plain";
 import { fmtSeconds, fmtWhen, plural, shortSha } from "../../lib/utils";
 import type { DiffResponse, Generation, RunManifest, SkillsResponse, Variant } from "../../types";
 import type { IconName } from "../kit/icons";
 import { docTitle, fileBase, scoreOf } from "../result/resultView";
-import { appliedRows } from "./fixes";
+import { appliedRows, type FixRow } from "./fixes";
 
 export interface FileRow {
   key: string; title: string; score: number | null; tip: string; file: string; cur: boolean;
@@ -118,23 +119,37 @@ export function stagesOf(m: RunManifest): { total: string; title: string; rows: 
 
 export interface Tile { label: string; v: string; sub: string; cls: string; icon: IconName; span: number }
 
+/** Автоисправления варианта: живой отчёт проверки (после «Исправить замечания» паспорт запуска устарел), иначе паспорт. */
+const appliedOf = (v: Variant) => v.audit?.applied_fixes ?? v.run_manifest?.applied_fixes ?? [];
+
+/** Строки «Автоисправлений» (слайд — по id плана). */
+export function fixRowsOf(v: Variant): FixRow[] {
+  const slideOf = (id: string) => {
+    const i = v.outline?.slides.findIndex((s) => s.id === id) ?? -1;
+    return i >= 0 ? i + 1 : null;
+  };
+  return appliedRows(appliedOf(v), slideOf, () => null);
+}
+
+/** «Итог проверки»: числа — `auditCounts` живого отчёта (те же, что у карточки результата и вкладки «Качество»);
+ *  отчёта нет — сводка паспорта запуска. «По картинке» — замечания модели; выключенная проверка без них — «выключена». */
 export function checkTiles(g: Generation, v: Variant): { head: string | null; score: number | null; tiles: Tile[] } {
-  const a = { ...(v.audit?.summary ?? {}), ...(v.run_manifest?.audit ?? {}) } as Record<string, unknown>;
-  const n = (k: string) => (typeof a[k] === "number" ? (a[k] as number) : null);
-  const run = Array.isArray(a.checks_run) ? (a.checks_run as string[]) : [];
+  const live = auditCounts(v.audit);
+  const m = (v.run_manifest?.audit ?? {}) as Record<string, unknown>;
+  const n = (k: string) => (typeof m[k] === "number" ? (m[k] as number) : 0);
+  const c = live ?? { errors: n("errors"), warnings: n("warnings"), model: n("model_flags"), infos: n("infos") };
+  const run = v.audit?.summary.checks_run ?? (Array.isArray(m.checks_run) ? (m.checks_run as string[]) : []);
   const off = v.run_manifest ? roleUsed("vlm", v.run_manifest, g) === false : g.audit_models === false;
-  const err = n("errors") ?? 0;
-  const warn = n("warnings") ?? 0;
-  const fixes = appliedRows(v.audit?.applied_fixes ?? v.run_manifest?.applied_fixes ?? [], () => null, () => null).reduce((k, r) => k + r.n, 0);
+  const fixes = fixRowsOf(v).reduce((k, r) => k + r.n, 0);
   const score = scoreOf(g, v);
   return {
     head: run.length ? plural(run.length, "проверка", "проверки", "проверок") : null,
     score: score === null ? null : Math.round(score),
     tiles: [
-      { label: "Ошибки", v: String(err), sub: "", cls: err ? "" : "df-t-ok", icon: "check-circle", span: 2 },
-      { label: "Предупреждения", v: String(warn), sub: "", cls: warn ? "df-t-warn" : "", icon: "warning", span: 2 },
-      { label: "Заметки", v: String(n("infos") ?? 0), sub: "", cls: "", icon: "info", span: 2 },
-      off ? { label: "По картинке", v: "—", sub: "выключена", cls: "df-t-off", icon: "eye", span: 3 } : { label: "По картинке", v: String(n("model_flags") ?? 0), sub: "", cls: "", icon: "eye", span: 3 },
+      { label: "Ошибки", v: String(c.errors), sub: "", cls: c.errors ? "" : "df-t-ok", icon: "check-circle", span: 2 },
+      { label: "Предупреждения", v: String(c.warnings), sub: "", cls: c.warnings ? "df-t-warn" : "", icon: "warning", span: 2 },
+      { label: "Заметки", v: String(c.infos), sub: "", cls: "", icon: "info", span: 2 },
+      off && !c.model ? { label: "По картинке", v: "—", sub: "выключена", cls: "df-t-off", icon: "eye", span: 3 } : { label: "По картинке", v: String(c.model), sub: "", cls: "", icon: "eye", span: 3 },
       { label: "Автоисправления", v: String(fixes), sub: "", cls: "", icon: "wrench", span: 3 },
     ],
   };

@@ -1,9 +1,8 @@
 // «Взгляд дизайнера» на вкладке «Качество» (boards/D-quality, правая колонка): что модель зрения увидела на готовых
 // слайдах — пересобранные слайды «было / стало» с причиной, оставленные с объяснением и свёрнутые мелкие замечания.
 import { Icon } from "../../kit/Icon";
-import { Acc } from "../parts";
+import { Acc, Shot } from "../parts";
 import type { EyeView } from "../quality";
-import { Shot } from "../parts";
 
 const P = { margin: "16px 0 0", fontSize: 14, fontWeight: 500, lineHeight: "20px", color: "#0B1220" } as const;
 const FRAME = { width: "100%", aspectRatio: "16 / 9", borderRadius: 12, boxShadow: "0 0 0 1px rgba(11,18,32,.08)" } as const;
@@ -18,9 +17,7 @@ export function EyeBox({ eye, open, onToggle }: { eye: EyeView; open: boolean; o
           <p style={{ margin: 0, fontSize: 14, fontWeight: 500, lineHeight: "20px", color: "#5A6272" }}>{eye.line}</p>
         </div>
       </div>
-      <p style={{ ...P, color: "#5A6272" }}>
-        Модель с компьютерным зрением посмотрела на каждый готовый слайд, как арт-директор перед отправкой клиенту. Где вёрстка мешала читать — собрала слайд заново и оставила новую версию, только если она лучше прежней.
-      </p>
+      <p style={{ ...P, color: "#5A6272" }}>{eye.intro}</p>
 
       {eye.fixed.map((f) => (
         <article key={f.slide} aria-label={`${f.tag} пересобран`} style={{ marginTop: 16, padding: 16, borderRadius: 16, background: "#F3F4F1" }}>

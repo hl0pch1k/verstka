@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { GEN, titleOf } from "./details.fixtures";
-import { backStrip, menuItems, SHEET_TABS, tabStep } from "./sheetView";
+import { UI0, type UiState } from "../deck/geometry";
+import { backStrip, headerLayerOpen, menuItems, SHEET_TABS, tabStep } from "./sheetView";
 
 test("вкладки листа — шесть, в порядке доски", () => {
   assert.deepEqual(SHEET_TABS.map((t) => t.label), ["Качество", "Почему так", "Агент", "План", "Шаблон", "Файлы"]);
@@ -23,4 +24,14 @@ test("полоса «04»: название, вариант с оценкой и
 
 test("меню варианта: номер, название, оценка", () => {
   assert.deepEqual(menuItems(GEN, titleOf), [{ key: "structured", n: 1, name: "Структурный", score: 89 }, { key: "visual", n: 2, name: "Визуальный", score: 84 }, { key: "compact", n: 3, name: "Компактный", score: 89 }]);
+});
+
+test("поверх листа открыт раздел шапки, просмотр или удаление шаблона — клавиши (←/→, запасной Esc) не листа", () => {
+  assert.equal(headerLayerOpen(UI0), false);
+  assert.equal(headerLayerOpen({ ...UI0, sect: "tpls" }), true);
+  assert.equal(headerLayerOpen({ ...UI0, tplPreview: "t1" }), true);
+  assert.equal(headerLayerOpen({ ...UI0, tplDelete: "t1" }), true);
+  // слой «Слайд N шаблона» — часть листа, не шапки
+  const withPattern: UiState = { ...UI0, pattern: 3 };
+  assert.equal(headerLayerOpen(withPattern), false);
 });

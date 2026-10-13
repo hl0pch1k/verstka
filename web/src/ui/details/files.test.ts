@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { GEN, titleOf } from "./details.fixtures";
-import { checkTiles, diffRows, fileRows, passport, registryRows, stagesOf } from "./files";
+import { checkTiles, diffRows, fileRows, fixRowsOf, passport, registryRows, stagesOf } from "./files";
 
 const v = GEN.variants[0];
 
@@ -35,14 +35,34 @@ test("время по этапам: этапы варианта, общий пл
   assert.equal(s.rows[1].w, "37.1%");
 });
 
-test("итог проверки: ошибки, предупреждения, заметки, по картинке (выключена), автоисправления", () => {
+test("итог проверки: ошибки, предупреждения, заметки, по картинке, автоисправления — по самим замечаниям отчёта", () => {
   const t = checkTiles(GEN, v);
   assert.equal(t.head, "2 проверки");
   assert.equal(t.score, 89);
+  // сводка сервера: warnings 2 (с замечанием модели); здесь предупреждение одно, замечание модели — «по картинке»
   assert.deepEqual(t.tiles.map((x) => [x.label, x.v, x.sub, x.cls, x.span]), [
-    ["Ошибки", "0", "", "df-t-ok", 2], ["Предупреждения", "2", "", "df-t-warn", 2], ["Заметки", "0", "", "", 2],
-    ["По картинке", "—", "выключена", "df-t-off", 3], ["Автоисправления", "1", "", "", 3],
+    ["Ошибки", "0", "", "df-t-ok", 2], ["Предупреждения", "1", "", "df-t-warn", 2], ["Заметки", "0", "", "", 2],
+    ["По картинке", "1", "", "", 3], ["Автоисправления", "1", "", "", 3],
   ]);
+  // проверка по картинке выключена и замечаний модели нет — «выключена»
+  const quiet = { ...v, audit: { ...v.audit!, issues: v.audit!.issues.filter((i) => i.kind !== "model") } };
+  assert.deepEqual(checkTiles(GEN, quiet).tiles[3], { label: "По картинке", v: "—", sub: "выключена", cls: "df-t-off", icon: "eye", span: 3 });
+});
+
+test("итог проверки и автоисправления — по живому отчёту: после исправлений паспорт запуска устарел", () => {
+  const live = {
+    ...v,
+    audit: { ...v.audit!, summary: { ...v.audit!.summary, checks_run: ["a", "b", "c"] }, applied_fixes: [...v.audit!.applied_fixes, { iteration: 1, action: "move_inside", slide: 2, kind: "move_inside" }] },
+  };
+  const t = checkTiles(GEN, live);
+  assert.equal(t.head, "3 проверки");
+  assert.equal(t.tiles[4].v, "2");
+  const rows = fixRowsOf(live);
+  assert.deepEqual(rows.map((r) => [r.slide, r.title]), [[3, "Сокращён текст"], [2, "Элемент возвращён в кадр"]]);
+  // отчёта нет — паспорт запуска
+  const old = { ...v, audit: null };
+  assert.equal(checkTiles(GEN, old).head, "2 проверки");
+  assert.deepEqual(fixRowsOf(old).map((r) => r.title), ["Сокращён текст"]);
 });
 
 test("навыки и агенты: версия и как они относятся к этому запуску", () => {

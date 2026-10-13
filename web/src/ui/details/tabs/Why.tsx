@@ -3,12 +3,11 @@
 // макеты» и строка «Проверка слайда» (ведёт в «Качество»). Новый слайд, вариант или версия — колонки проявляются
 // заново лесенкой (p2-in); стрелки ←/→ листают, пока вкладка на экране. Нет довода у слайда — объяснение сервера.
 import { useEffect, useState } from "react";
-import { api } from "../../../api";
-import { humanError } from "../../../lib/errors";
+import { api, ApiError } from "../../../api";
 import { errText } from "../../../lib/narrate";
 import { variantRev } from "../../../lib/rev";
 import { useApp } from "../../../store";
-import type { Generation, TemplateManifest, Variant } from "../../../types";
+import type { Generation, Variant } from "../../../types";
 import { cls } from "../../kit/cls";
 import { ErrorLine } from "../../kit/ErrorLine";
 import { Icon } from "../../kit/Icon";
@@ -16,16 +15,19 @@ import { Spinner } from "../../kit/Spinner";
 import { ownsKeys, slideForKey } from "../../result/resultView";
 import { Shot } from "../parts";
 import { SEV } from "../quality";
-import { explainWhy, whyView } from "../why";
+import { headerLayerOpen } from "../sheetView";
+import type { DeckManifest } from "../useDeckManifest";
+import { explainError, explainWhy, whyView, type SampleSource } from "../why";
 
 const asked = new Map<string, string | null>();
 
-/** Объяснение сервера для слайда без довода дизайнера (один раз на слайд и версию варианта). */
-function useExplain(gid: string, strategy: string, n: number, rev: string, need: boolean): { text: string | null; busy: boolean; error: string | null } {
+/** Объяснение сервера для слайда без довода дизайнера (один раз на слайд и версию варианта). Шаблона презентации больше
+ *  нет (`gone`) — сервер объяснить не сможет: не спрашиваем, так и говорим. */
+function useExplain(gid: string, strategy: string, n: number, rev: string, need: boolean, gone: boolean): { text: string | null; busy: boolean; error: string | null } {
   const key = `${gid}/${strategy}/${n}/${rev}`;
   const [st, setSt] = useState<{ key: string; text: string | null; busy: boolean; error: string | null }>({ key: "", text: null, busy: false, error: null });
   useEffect(() => {
-    if (!need) return;
+    if (!need || gone) return;
     if (asked.has(key)) return void setSt({ key, text: asked.get(key) ?? null, busy: false, error: null });
     let off = false;
     setSt({ key, text: null, busy: true, error: null });
@@ -35,29 +37,35 @@ function useExplain(gid: string, strategy: string, n: number, rev: string, need:
         asked.set(key, t);
         if (!off) setSt({ key, text: t, busy: false, error: null });
       },
-      (e) => !off && setSt({ key, text: null, busy: false, error: humanError(`Не удалось получить объяснение: ${errText(e)}`, "Не удалось получить объяснение") }),
+      (e) => !off && setSt({ key, text: null, busy: false, error: explainError(e instanceof ApiError ? e.status : -1, errText(e)) }),
     );
     return () => {
       off = true;
     };
-  }, [key, need, gid, strategy, n]);
+  }, [key, need, gone, gid, strategy, n]);
+  if (need && gone && !asked.has(key)) return { text: null, busy: false, error: explainError(404, "") };
   return st.key === key ? st : { text: null, busy: need, error: null };
 }
+
+/** Разбор шаблона листа → что с образцами «Как собран слайд». */
+const SOURCE: Record<DeckManifest["state"], SampleSource> = { ready: "ready", loading: "loading", gone: "missing", offline: "failed", error: "failed" };
 
 const FRAME = { width: "100%", aspectRatio: "16 / 9", borderRadius: 12, boxShadow: "0 0 0 1px rgba(11,18,32,.08)" } as const;
 const SMALL = { margin: 0, fontSize: 14, fontWeight: 500, lineHeight: "20px", color: "#0B1220" } as const;
 
-export function WhyTab({ g, v, manifest, active }: { g: Generation; v: Variant; manifest: TemplateManifest | null; active: boolean }) {
+export function WhyTab({ g, v, deck, active }: { g: Generation; v: Variant; deck: DeckManifest; active: boolean }) {
   const { selectedSlide, setSelectedSlide, setActiveStrategy, strategyTitle, dispatch, ui } = useApp();
-  const w = whyView(g, v, Math.min(Math.max(1, selectedSlide), Math.max(1, v.slides.length || v.outline?.slides.length || 1)), manifest, strategyTitle);
+  const w = whyView(g, v, Math.min(Math.max(1, selectedSlide), Math.max(1, v.slides.length || v.outline?.slides.length || 1)), deck.manifest, strategyTitle, SOURCE[deck.state]);
   const n = w.n;
   const rev = variantRev(v);
-  const ex = useExplain(g.id, v.strategy, n, rev, w.ask);
+  const ex = useExplain(g.id, v.strategy, n, rev, w.ask, deck.state === "gone");
   const why = w.why ?? ex.text;
 
-  // ←/→ листают слайды, пока вкладка на экране и поверх неё ничего не открыто
+  // ←/→ листают слайды, пока вкладка на экране и поверх листа ничего не открыто (слой «Слайд N шаблона», раздел шапки,
+  // просмотр или удаление шаблона)
+  const covered = ui.pattern !== null || headerLayerOpen(ui);
   useEffect(() => {
-    if (!active || ui.pattern !== null || w.total < 2) return;
+    if (!active || covered || w.total < 2) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || ownsKeys(e.target)) return;
       if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
@@ -68,7 +76,7 @@ export function WhyTab({ g, v, manifest, active }: { g: Generation; v: Variant; 
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [active, ui.pattern, n, w.total, setSelectedSlide]);
+  }, [active, covered, n, w.total, setSelectedSlide]);
 
   return (
     <div id="dd-panel-why" className="dd-scroll p2-fade dw-fade" role="tabpanel" aria-labelledby="dd-tab-why" tabIndex={0}>
@@ -142,11 +150,11 @@ export function WhyTab({ g, v, manifest, active }: { g: Generation; v: Variant; 
             <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 40px minmax(0, 1fr)", alignItems: "center", rowGap: 8, marginTop: 16 }}>
               {w.sample ? <Shot src={w.sample.src} alt={w.sample.label} style={FRAME} />
                 : <span className="dw-wf" style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 16, textAlign: "center" }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, lineHeight: "20px", color: "#5A6272" }}>{w.composed ? "Готового образца не нашлось" : "Образца нет"}</span>
+                  <span style={{ fontSize: 13, fontWeight: 600, lineHeight: "20px", color: "#5A6272" }}>{w.frame}</span>
                 </span>}
               <span aria-hidden="true" style={{ display: "flex", alignItems: "center", justifyContent: "center", color: "#2563EB" }}><Icon name="arrow-right" size={20} /></span>
               <Shot src={w.own.src} alt={w.own.alt} style={FRAME} />
-              <span className="dd-cap">{w.sample ? w.sample.caption : w.composed ? w.ownCaption : "Образец шаблона не найден"}</span>
+              <span className="dd-cap">{w.sampleCap}</span>
               <span />
               <span className="dd-cap" style={{ color: "#0B1220" }}>Ваш слайд</span>
             </div>

@@ -23,8 +23,10 @@ export function TemplateTab({ deck }: { deck: DeckManifest }) {
           <p style={{ display: "flex", alignItems: "center", gap: 8, margin: 0, padding: 24, fontSize: 14, fontWeight: 600, lineHeight: "20px", color: "#5A6272" }}><Spinner size={16} />Загружаю разбор шаблона…</p>
         ) : deck.state === "gone" ? (
           <Empty title="Шаблона больше нет в библиотеке" text="Презентация открывается и скачивается как прежде; чтобы пересобрать её, загрузите шаблон снова." />
-        ) : (
+        ) : deck.state === "offline" ? (
           <Empty title="Разбор шаблона не загрузился" text="Нет связи с сервером — откройте вкладку ещё раз, когда связь вернётся." />
+        ) : (
+          <Empty title="Разбор шаблона не загрузился" text="Сервер не смог отдать разбор шаблона — откройте вкладку ещё раз, чтобы попросить снова." />
         )}
     </div>
   );

@@ -13,7 +13,7 @@ import { Menu } from "../kit/Menu";
 import { Layer, LAYER_MS, lsDelay } from "../layers/Layer";
 import { Panel } from "./parts";
 import { PatternLayer } from "./PatternLayer";
-import { menuItems, SHEET_TABS, tabStep } from "./sheetView";
+import { headerLayerOpen, menuItems, SHEET_TABS, tabStep } from "./sheetView";
 import { AgentTab } from "./tabs/Agent";
 import { FilesTab } from "./tabs/Files";
 import { PlanTab } from "./tabs/Plan";
@@ -34,9 +34,17 @@ export function DetailsSheet() {
   const last = useRef<{ g: Generation; v: Variant } | null>(null);
   if (open && generation) last.current = { g: generation, v: activeVariant && generation.variants.includes(activeVariant) ? activeVariant : generation.variants[0] };
   const keep = last.current;
-  const deck = useDeckManifest(keep?.g.template_id ?? null);
-  const [menu, setMenu] = useState(false);
   const tab = ui.sheetLast;
+  // разбор шаблона не загрузился — лист открыли снова или сменили вкладку: просим ещё раз (закрытие не просит)
+  const [attempt, setAttempt] = useState(0);
+  const [seen, setSeen] = useState("");
+  const at = open ? tab : "";
+  if (at !== seen) {
+    setSeen(at);
+    if (at) setAttempt((a) => a + 1);
+  }
+  const deck = useDeckManifest(keep?.g.template_id ?? null, attempt);
+  const [menu, setMenu] = useState(false);
 
   const pattern = ui.pattern;
   useEffect(() => {
@@ -49,9 +57,11 @@ export function DetailsSheet() {
   }, [open, pattern, dispatch]);
 
   const close = () => dispatch({ type: "sheet", tab: null });
-  // фокус потерялся (на странице ничего не выбрано) — Esc закрывает лист, если поверх него ничего нет
+  // фокус потерялся (на странице ничего не выбрано) — Esc закрывает лист, если поверх него ничего нет: ни меню, ни слоя
+  // шаблона, ни раздела шапки, ни просмотра или удаления шаблона (Esc — их)
+  const covered = menu || pattern !== null || headerLayerOpen(ui);
   useEffect(() => {
-    if (!open || menu || pattern !== null) return;
+    if (!open || covered) return;
     const onEsc = (e: globalThis.KeyboardEvent) => {
       if (e.key !== "Escape" || e.defaultPrevented || (document.activeElement && document.activeElement !== document.body)) return;
       e.preventDefault();
@@ -59,7 +69,7 @@ export function DetailsSheet() {
     };
     window.addEventListener("keydown", onEsc);
     return () => window.removeEventListener("keydown", onEsc);
-  }, [open, menu, pattern, dispatch]);
+  }, [open, covered, dispatch]);
   const onTabKey = (e: KeyboardEvent<HTMLDivElement>) => {
     const to = tabStep(tab, e.key);
     if (!to) return;
@@ -107,7 +117,7 @@ export function DetailsSheet() {
           <div className="p2-ls" style={{ ...lsDelay(200), position: "absolute", inset: 0, pointerEvents: "none" }}>
             <div style={{ pointerEvents: "auto" }}>
               <Panel tab="quality" on={tab === "quality"}><QualityTab g={g} v={v} /></Panel>
-              <Panel tab="why" on={tab === "why"}><WhyTab g={g} v={v} manifest={deck.manifest} active={open && tab === "why"} /></Panel>
+              <Panel tab="why" on={tab === "why"}><WhyTab g={g} v={v} deck={deck} active={open && tab === "why"} /></Panel>
               <Panel tab="agent" on={tab === "agent"}><AgentTab g={g} v={v} /></Panel>
               <Panel tab="plan" on={tab === "plan"} style={{ height: 508, display: "flex", flexDirection: "column" }}><PlanTab g={g} v={v} active={open && tab === "plan"} /></Panel>
               <Panel tab="template" on={tab === "template"} style={{ height: 508, display: "flex", flexDirection: "column" }}><TemplateTab deck={deck} /></Panel>

@@ -1,17 +1,21 @@
 // Вкладка «Качество» листа «Подробнее» без React (boards/D-quality, V2 модуль details `dlQ`): сводка проверки, чипы,
 // замечания по слайдам с флажками, «Взгляд дизайнера», мелкие заметки и «Что проверяется». Всё — по настоящему отчёту
 // проверки варианта (`audit`) и записи взгляда дизайнера (`eyes`); чего в данных нет, того нет и на экране.
+import { issueTone, type AuditCounts } from "../../lib/auditCounts";
 import { designEyeLine, problemsText } from "../../lib/designEye";
 import { plural } from "../../lib/utils";
 import type { AuditReport, CheckSpec, DesignEye, Issue, Variant } from "../../types";
 import type { IconName } from "../kit/icons";
 import { cap, plainMessage } from "../result/marks";
-import { slideHeadline, slideSrc } from "../result/resultView";
+import { slideHeadline, slideSrc, slidesOf } from "../result/resultView";
 
 /** Тон замечания на вкладке (V2 `SEV`): ошибка — красная при любом виде, замечание модели — серое, остальное —
- *  предупреждение (янтарное). */
+ *  предупреждение (янтарное). Тот же, что считает auditCounts (мелкие заметки в список не идут). */
 export type QTone = "err" | "warn" | "model";
-export const qTone = (i: Issue): QTone => (i.severity === "error" ? "err" : i.kind === "model" ? "model" : "warn");
+export const qTone = (i: Issue): QTone => {
+  const t = issueTone(i);
+  return t === "info" ? "warn" : t;
+};
 
 /** Метка, класс метки, цвет точки и значок тона (V2 `SEV`; красной метки на доске нет — `dd-tag-e`, своя). */
 export const SEV: Record<QTone, { label: string; cls: string; color: string; icon: IconName }> = {
@@ -24,7 +28,7 @@ const RANK: Record<QTone, number> = { err: 0, warn: 1, model: 2 };
 /** Замечание, которое сервер исправит сам (у него есть автоисправление). */
 export const isFixable = (i: Issue) => !!i.autofix && i.autofix.action !== "none";
 /** Мелкая заметка правил («сетка», контраст подписи): в список не идёт, она в разделе «Мелкие заметки». */
-export const isMinorIssue = (i: Issue) => i.severity === "info" && i.kind !== "model";
+export const isMinorIssue = (i: Issue) => issueTone(i) === "info";
 
 export function splitIssues(issues: Issue[]): { main: Issue[]; minor: Issue[] } {
   return { main: issues.filter((i) => !isMinorIssue(i)), minor: issues.filter(isMinorIssue) };
@@ -37,19 +41,17 @@ const RING = 251.3;
 
 export interface QSummary { score: number; dash: string; head: string; nErr: string; nWarn: string; nModel: string; hasErr: boolean }
 
-export function qualitySummary(score: number, main: Issue[]): QSummary {
+/** Сводка по числам отчёта (`auditCounts` — те же, что у карточки результата и «Итога проверки» во «Файлах»). */
+export function qualitySummary(score: number, c: AuditCounts): QSummary {
   const s = Math.round(Math.max(0, Math.min(100, score)));
-  const n = (t: QTone) => main.filter((i) => qTone(i) === t).length;
-  const err = n("err");
-  const warn = n("warn");
   return {
     score: s,
     dash: `${((s / 100) * RING).toFixed(1)} ${RING}`,
-    head: err + warn > 0 ? "Есть что поправить" : "Ошибок и предупреждений нет",
-    nErr: plural(err, "ошибка", "ошибки", "ошибок"),
-    nWarn: plural(warn, "предупреждение", "предупреждения", "предупреждений"),
-    nModel: plural(n("model"), "замечание модели", "замечания модели", "замечаний модели"),
-    hasErr: err > 0,
+    head: c.errors + c.warnings > 0 ? "Есть что поправить" : "Ошибок и предупреждений нет",
+    nErr: plural(c.errors, "ошибка", "ошибки", "ошибок"),
+    nWarn: plural(c.warnings, "предупреждение", "предупреждения", "предупреждений"),
+    nModel: plural(c.model, "замечание модели", "замечания модели", "замечаний модели"),
+    hasErr: c.errors > 0,
   };
 }
 
@@ -161,7 +163,7 @@ export function checkRows(checks: CheckSpec[], run: string[]): QRow[] {
 // ---- взгляд дизайнера ------------------------------------------------------------------------------------------------
 
 export interface EyeFixed { slide: number; tag: string; title: string; text: string; pics: { before: string; after: string } | null; redone: boolean; why: string | null }
-export interface EyeView { line: string; fixed: EyeFixed[]; kept: { slide: number; tag: string; text: string }[]; seen: { slide: number; tag: string; text: string }[] }
+export interface EyeView { line: string; intro: string; fixed: EyeFixed[]; kept: { slide: number; tag: string; text: string }[]; seen: { slide: number; tag: string; text: string }[] }
 
 const noStop = (s: string) => s.trim().replace(/[.\s]+$/, "");
 
@@ -169,8 +171,12 @@ const noStop = (s: string) => s.trim().replace(/[.\s]+$/, "");
 export function eyeView(eye: DesignEye | null | undefined, v: Variant): EyeView | null {
   if (!eye || eye.skipped || eye.looked <= 0) return null;
   const at = (st: string) => eye.slides.filter((s) => s.status === st).sort((a, b) => a.slide - b.slide);
+  // посмотрела не на все слайды (часть не дождалась модели) — так и сказано, а не «на каждый»
+  const total = slidesOf(v);
+  const which = total > eye.looked ? `на ${eye.looked} из ${plural(total, "готового слайда", "готовых слайдов", "готовых слайдов")}` : "на каждый готовый слайд";
   return {
     line: designEyeLine(eye),
+    intro: `Модель с компьютерным зрением посмотрела ${which}, как арт-директор перед отправкой клиенту. Где вёрстка мешала читать — собрала слайд заново и оставила новую версию, только если она лучше прежней.`,
     fixed: at("fixed").map((s) => ({
       slide: s.slide, tag: `Слайд ${s.slide}`, title: slideHeadline(v, s.slide), text: `${cap(problemsText(s, true))} — собрал заново.`,
       pics: !s.redone && s.before && s.after ? { before: s.before, after: s.after } : null, redone: !!s.redone, why: s.reason?.trim() || null,

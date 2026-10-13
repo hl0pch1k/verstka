@@ -1,7 +1,7 @@
 // «Для разработчиков» вкладки «Файлы» (boards/D-files, V2 `#df-dev`): JSON-файлы запуска и три раскрываемые строки —
 // реестр навыков и агентов сервера рядом с версиями этого запуска (`api.skills`), журнал агента и сравнение с другим
 // запуском (`api.diff`). Раскрытое появляется ходом p2-in, свёрнутое убирается сразу.
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api } from "../../../api";
 import { humanError } from "../../../lib/errors";
 import { errText } from "../../../lib/narrate";
@@ -79,27 +79,42 @@ function Compare({ g, v }: { g: Generation; v: Variant }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const strat = other && other.strategies.includes(s) ? s : other?.strategies[0] ?? "";
+  // номер запроса: ответ о прежнем выборе (другой запуск, вариант этой презентации или ушедший с экрана раздел) не
+  // ложится поверх нового
+  const seq = useRef(0);
+  const ask = `${g.id}|${v.strategy}|${gid}|${strat}`;
+  useEffect(() => {
+    seq.current += 1;
+    setBusy(false);
+    setRes(null);
+    setErr(null);
+  }, [ask]);
+  useEffect(() => () => {
+    seq.current += 1;
+  }, []);
   const run = async () => {
     if (!gid || !strat || busy) return;
+    const my = ++seq.current;
     setBusy(true);
     setErr(null);
     try {
-      setRes(await api.diff(g.id, v.strategy, gid, strat));
+      const d = await api.diff(g.id, v.strategy, gid, strat);
+      if (my === seq.current) setRes(d);
     } catch (e) {
-      setErr(humanError(`Не удалось сравнить: ${errText(e)}`, "Не удалось сравнить"));
+      if (my === seq.current) setErr(humanError(`Не удалось сравнить: ${errText(e)}`, "Не удалось сравнить"));
     } finally {
-      setBusy(false);
+      if (my === seq.current) setBusy(false);
     }
   };
   const rows = res ? diffRows(res, strategyTitle) : null;
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <select aria-label="Другой запуск" value={gid} onChange={(e) => { setGid(e.target.value); setRes(null); }} style={{ ...SELECT, flex: 1 }}>
+        <select aria-label="Другой запуск" value={gid} onChange={(e) => setGid(e.target.value)} style={{ ...SELECT, flex: 1 }}>
           <option value="">Выберите запуск…</option>
           {done.map((x) => <option key={x.id} value={x.id}>{fmtWhen(x.created_at)} · {x.title || templateLabel(x.template_id, x.template_file)}{x.id === g.id ? " · этот" : ""}</option>)}
         </select>
-        <select aria-label="Вариант другого запуска" value={strat} disabled={!other} onChange={(e) => { setS(e.target.value); setRes(null); }} style={{ ...SELECT, width: 176 }}>
+        <select aria-label="Вариант другого запуска" value={strat} disabled={!other} onChange={(e) => setS(e.target.value)} style={{ ...SELECT, width: 176 }}>
           {!other && <option value="">Вариант…</option>}
           {(other?.strategies ?? []).map((x) => <option key={x} value={x}>{strategyTitle(x)}</option>)}
         </select>

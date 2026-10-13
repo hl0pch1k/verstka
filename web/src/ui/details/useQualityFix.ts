@@ -1,17 +1,12 @@
-// «Исправить отмеченные» / «Исправить всё автоматически» (`api.fixes` → задача `fix`) и «Вернуть как было»
-// (`api.editVariant` «верни как было» → задача `edit`) на вкладке «Качество». Задачи идут через `runJob` хранилища
-// тихо (ход и неудача — строкой в сводке, без уведомлений); по готовности презентация перечитывается (`reloadIfOpen`),
-// итог «Исправлено N» считается по новому отчёту проверки. Шаги — чистый fixNext (qualityFix.ts).
-import { useCallback, useEffect, useRef, useState } from "react";
-import { api, ApiError } from "../../api";
-import { humanError } from "../../lib/errors";
+// «Исправить отмеченные» / «Исправить всё автоматически» и «Вернуть как было» на вкладке «Качество». Сама работа и её
+// состояние — в хранилище (`fixIssues`, `revertVariant`, `work` по ключу варианта; ui/details/useVariantWork): лист
+// закрыли во время исправления — оно идёт дальше, открыли снова — отмеченные приглушены и кнопки выключены, а итог
+// «Исправлено N» с «Вернуть как было» держится, пока вариант не изменится снова. Кнопки выключены и тогда, когда над
+// вариантом идёт чужая задача (исправление слайда, изображение, возврат из «Агента»).
 import { useApp } from "../../store";
-import type { Job } from "../../types";
-import { fixedCount } from "./quality";
-import { FIX0, fixNext, fixView, type FixAction, type FixState, type FixView } from "./qualityFix";
-
-const startError = (e: unknown, what: string) => humanError(e instanceof ApiError || e instanceof Error ? e.message : String(e), `Не получилось ${what}. Попробуйте ещё раз.`);
-const jobError = (job: Job, what: string) => humanError(job.error ?? job.message, `Не получилось ${what}. Попробуйте ещё раз.`);
+import type { Variant } from "../../types";
+import { variantRev } from "../../lib/rev";
+import { fixView, workKey, type FixView } from "./variantWork";
 
 export interface QualityFix extends FixView {
   /** `ids` — что исправить («all» — всё автоматически), `count` — какие замечания считать исправленными. */
@@ -20,74 +15,12 @@ export interface QualityFix extends FixView {
   revert(): void;
 }
 
-export function useQualityFix(gid: string, strategy: string): QualityFix {
-  const { runJob, reloadIfOpen } = useApp();
-  const box = useRef<FixState>(FIX0);
-  const [state, setState] = useState<FixState>(FIX0);
-  const alive = useRef(true);
-  useEffect(() => {
-    alive.current = true;
-    return () => {
-      alive.current = false;
-    };
-  }, []);
-  const send = useCallback((a: FixAction) => {
-    const next = fixNext(box.current, a);
-    if (next !== box.current) {
-      box.current = next;
-      if (alive.current) setState(next);
-    }
-    return next;
-  }, []);
-
-  const start = useCallback((ids: string[] | "all", count: string[]) => {
-    const before = box.current;
-    const now = send({ type: "start", strategy, ids });
-    if (now === before) return;
-    const seq = now[strategy]!.seq;
-    void (async () => {
-      let jobId: string;
-      try {
-        jobId = (await api.fixes(gid, strategy, ids === "all" ? { all_deterministic: true } : { issue_ids: ids })).job_id;
-      } catch (e) {
-        return void send({ type: "failed", strategy, seq, error: startError(e, "исправить замечания") });
-      }
-      runJob(jobId, "Исправляю замечания", {
-        kind: "fix", area: "result", quiet: true,
-        onDone: async () => {
-          const g = await reloadIfOpen(gid);
-          const after = g?.variants.find((v) => v.strategy === strategy)?.audit ?? null;
-          send({ type: "done", strategy, seq, fixed: after ? fixedCount(count, after) : count.length });
-        },
-        onFailed: (job) => void send({ type: "failed", strategy, seq, error: jobError(job, "исправить замечания") }),
-      });
-    })();
-  }, [gid, strategy, runJob, reloadIfOpen, send]);
-
-  const revert = useCallback(() => {
-    const before = box.current;
-    const now = send({ type: "undo", strategy });
-    if (now === before) return;
-    const seq = now[strategy]!.seq;
-    void (async () => {
-      let jobId: string;
-      try {
-        jobId = (await api.editVariant(gid, strategy, { message: "верни как было" })).job_id;
-      } catch (e) {
-        return void send({ type: "failed", strategy, seq, error: startError(e, "вернуть как было") });
-      }
-      runJob(jobId, "Возвращаю как было", {
-        kind: "edit", area: "result", quiet: true,
-        onDone: async (job) => {
-          const r = job.result as { changed?: boolean; reply?: string } | null;
-          if (r && r.changed === false) return void send({ type: "failed", strategy, seq, error: humanError(r.reply, "Вернуть не получилось. Попробуйте ещё раз.") });
-          await reloadIfOpen(gid);
-          send({ type: "undone", strategy, seq });
-        },
-        onFailed: (job) => void send({ type: "failed", strategy, seq, error: jobError(job, "вернуть как было") }),
-      });
-    })();
-  }, [gid, strategy, runJob, reloadIfOpen, send]);
-
-  return { ...fixView(state, strategy), start, revert };
+export function useQualityFix(gid: string, v: Variant): QualityFix {
+  const { work, busyVariants, fixIssues, revertVariant } = useApp();
+  const key = workKey(gid, v.strategy);
+  return {
+    ...fixView(work, key, variantRev(v), busyVariants.includes(key)),
+    start: (ids, count) => fixIssues(gid, v.strategy, ids, count),
+    revert: () => void revertVariant(gid, v.strategy, { by: "quality" }),
+  };
 }

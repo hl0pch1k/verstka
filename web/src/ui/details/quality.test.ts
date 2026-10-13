@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { auditCounts } from "../../lib/auditCounts";
 import type { AuditReport, DesignEye, Issue, Variant } from "../../types";
 import {
   checkRows, chipsOf, emptyOf, eyeView, fixableIds, fixedCount, fixingLabel, fixLabel, fixedText, minorRows, qTone, qualityGroups,
@@ -46,17 +47,20 @@ test("список и мелкие заметки: заметки правил (
   assert.deepEqual(minor.map((i) => i.id), ["contrast_low-12-1", "grid_alignment-5-3"]);
 });
 
-test("сводка: «Есть что поправить», ошибки, предупреждения и замечания модели — по списку, с правильными окончаниями", () => {
-  const s = qualitySummary(89.4, splitIssues(ISSUES).main);
+test("сводка: «Есть что поправить», ошибки, предупреждения и замечания модели — по числам отчёта (auditCounts), с правильными окончаниями", () => {
+  const s = qualitySummary(89.4, auditCounts(audit(ISSUES))!);
   assert.equal(s.score, 89);
   assert.equal(s.head, "Есть что поправить");
   assert.equal(s.nErr, "1 ошибка");
   assert.equal(s.nWarn, "2 предупреждения");
   assert.equal(s.nModel, "2 замечания модели");
   assert.equal(s.dash, "223.7 251.3");
-  const clean = qualitySummary(100, [I("x-1-1", 1, "warn", "model")]);
+  // сводка сервера (warnings 3 — с замечанием модели) на числа не влияет
+  const clean = qualitySummary(100, auditCounts(audit([I("x-1-1", 1, "warn", "model")]))!);
   assert.equal(clean.head, "Ошибок и предупреждений нет");
   assert.equal(clean.nErr, "0 ошибок");
+  assert.equal(clean.nWarn, "0 предупреждений");
+  assert.equal(clean.nModel, "1 замечание модели");
 });
 
 test("чипы: Все, Ошибки, Предупреждения, Исправимые — счёт по списку; выбранный отмечен", () => {
@@ -157,6 +161,7 @@ test("взгляд дизайнера: строка итога, пересобр
   const view = eyeView(eye, V([]))!;
   assert.ok(view);
   assert.equal(view.line, "посмотрел на 12 слайдов · пересобрал 1 · 1 оставил как было");
+  assert.ok(view.intro.startsWith("Модель с компьютерным зрением посмотрела на каждый готовый слайд, как арт-директор"));
   assert.deepEqual(view.fixed.map((f) => [f.slide, f.title, f.text, f.pics?.before, f.why]), [
     [9, "Заголовок 9", "Вывод теряется (низ слайда) — собрал заново.", "/b.jpg", "вывод поднят под заголовок."],
   ]);
@@ -166,4 +171,10 @@ test("взгляд дизайнера: строка итога, пересобр
   assert.deepEqual(view.seen.map((k) => [k.tag, k.text]), [["Слайд 2", "Тесно"]]);
   assert.equal(eyeView({ looked: 0, slides: [] }, V([])), null);
   assert.equal(eyeView(null, V([])), null);
+});
+
+test("взгляд дизайнера посмотрел не на все слайды — «посмотрела на N из M слайдов», а не «на каждый»", () => {
+  const view = eyeView({ looked: 9, slides: [] }, V([]))!;
+  assert.ok(view.intro.startsWith("Модель с компьютерным зрением посмотрела на 9 из 12 готовых слайдов, как арт-директор"), view.intro);
+  assert.ok(eyeView({ looked: 1, slides: [] }, V([]))!.intro.includes("посмотрела на 1 из 12 готовых слайдов"));
 });

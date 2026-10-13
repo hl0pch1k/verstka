@@ -2,6 +2,7 @@
 // название и строка под ним, оценка и варианты, уведомление над рабочей областью, карточки колонки. Чего в данных нет,
 // того нет и на экране: функция карточки отвечает null или пустым списком, и карточка не рисуется.
 import { agentSummary, hasAgentWork, plainWords } from "../../lib/agent";
+import { auditCounts } from "../../lib/auditCounts";
 import { designEyeLine, problemsText } from "../../lib/designEye";
 import { deckNotice, modelFailed, skeletonDeck, type LiveModel } from "../../lib/modelText";
 import { figuresLine } from "../../lib/narrate";
@@ -91,9 +92,11 @@ export function remarkCount(v: Variant | null | undefined): { count: number; err
   return { count: stage.length, errors: stage.some((i) => i.severity === "error") };
 }
 
-/** Карточка «Качество» (R-aside): кольцо по оценке, «Ошибок нет» / «2 ошибки», предупреждения, сверенные с текстом
- *  числа и в подсказке — как считается оценка (AUDIT.md: 100 − 10·ошибок − 3·предупреждений − 2·замечаний модели).
- *  Нет оценки — нет карточки. `verdict` null — сколько ошибок, неизвестно (только мета). */
+/** Карточка «Качество» (R-aside): кольцо по оценке, «Ошибок нет» / «2 ошибки», предупреждения и сверенные с текстом
+ *  числа. Ошибки и предупреждения — `auditCounts` по самим замечаниям (те же числа, что в листе «Подробнее» и «Итоге
+ *  проверки»; предупреждения — без замечаний модели); замечаниям модели на карточке места нет — они в подсказке, где
+ *  перечислено всё посчитанное. Отчёт не загружен — числа меты генерации, если есть. Нет оценки — нет карточки.
+ *  `verdict` null — сколько ошибок, неизвестно (только оценка). */
 export interface QualityView {
   score: number;
   verdict: string | null;
@@ -106,17 +109,22 @@ export function qualityCard(g: Generation, v: Variant): QualityView | null {
   const raw = scoreOf(g, v);
   if (raw === null) return null;
   const score = Math.round(raw);
-  const s = v.audit?.summary;
+  const c = auditCounts(v.audit);
   const meta = g.summary?.[v.strategy];
-  const errors = s?.errors ?? meta?.errors ?? null;
-  const warnings = s?.warnings ?? meta?.warnings ?? null;
+  const errors = c ? c.errors : meta?.errors ?? null;
+  const warnings = c ? c.warnings : meta?.warnings ?? null;
+  const counted = c ? [
+    c.errors ? plural(c.errors, "ошибка", "ошибки", "ошибок") : "ошибок нет",
+    c.warnings ? plural(c.warnings, "предупреждение", "предупреждения", "предупреждений") : "предупреждений нет",
+    c.model ? plural(c.model, "замечание модели", "замечания модели", "замечаний модели") : "замечаний модели нет",
+  ].join(", ") : null;
   return {
     score,
     verdict: errors === null ? null : errors > 0 ? plural(errors, "ошибка", "ошибки", "ошибок") : "Ошибок нет",
     errors: (errors ?? 0) > 0,
     warnings: warnings ? plural(warnings, "предупреждение", "предупреждения", "предупреждений") : null,
-    figures: figuresLine(s?.figures),
-    title: `Оценка качества ${score} из 100 · 100 − 10 за ошибку − 3 за предупреждение − 2 за замечание модели`,
+    figures: figuresLine(v.audit?.summary.figures),
+    title: `Оценка качества ${score} из 100${counted ? ` · ${counted}` : ""}`,
   };
 }
 

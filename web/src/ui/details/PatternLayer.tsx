@@ -11,6 +11,7 @@ import { Icon } from "../kit/Icon";
 import { Layer } from "../layers/Layer";
 import { Shot } from "./parts";
 import { patternView, PLACE_COLOR, type PatternView } from "./pattern";
+import { headerLayerOpen } from "./sheetView";
 import { bandOf } from "./templateTab";
 import type { DeckManifest } from "./useDeckManifest";
 
@@ -45,9 +46,11 @@ export function PatternLayer({ deck }: { deck: DeckManifest }) {
     // новый образец заменяет содержимое: фокус остаётся в слое (Esc и стрелки работают дальше)
     e.currentTarget.focus({ preventScroll: true });
   };
-  // фокус потерялся (на странице ничего не выбрано) — Esc всё равно закрывает слой
+  // фокус потерялся (на странице ничего не выбрано) — Esc всё равно закрывает слой, если поверх него ничего нет (раздел
+  // шапки, просмотр или удаление шаблона)
+  const covered = headerLayerOpen(ui);
   useEffect(() => {
-    if (!open) return;
+    if (!open || covered) return;
     const onEsc = (e: globalThis.KeyboardEvent) => {
       if (e.key !== "Escape" || e.defaultPrevented || (document.activeElement && document.activeElement !== document.body)) return;
       e.preventDefault();
@@ -55,7 +58,7 @@ export function PatternLayer({ deck }: { deck: DeckManifest }) {
     };
     window.addEventListener("keydown", onEsc);
     return () => window.removeEventListener("keydown", onEsc);
-  }, [open, dispatch]);
+  }, [open, covered, dispatch]);
   const band = m ? bandOf(m) : null;
   const aspect = m && m.slide_size.w && m.slide_size.h ? `${m.slide_size.w} / ${m.slide_size.h}` : "16 / 9";
 

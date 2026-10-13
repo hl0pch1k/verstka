@@ -28,5 +28,12 @@ export default defineConfig({
     outDir: "dist",
     emptyOutDir: true,
     sourcemap: false,
+    rollupOptions: {
+      output: {
+        // библиотеки (React) — своим куском: приложение целиком в основном куске (лист «Подробнее» не догружается по
+        // клику), и ни один кусок не перерастает предел предупреждения Vite (500 kB)
+        manualChunks: (id) => (id.includes("node_modules") ? "vendor" : undefined),
+      },
+    },
   },
 });

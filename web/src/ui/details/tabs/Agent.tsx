@@ -1,56 +1,22 @@
 // Вкладка «Агент» листа «Подробнее» (boards/D-agent, V2 `#dd-panel-agent`, модуль details `dlA`): полная лента работы
 // агента над вариантом по ролям — номер слайда открывает «Почему так» на этом слайде, исправление критика — стрелкой;
-// справа — «Ваши правки» с «Вернуть как было» («верни как было» → задача `edit`, презентация перечитывается).
-import { useEffect, useRef, useState } from "react";
-import { api, ApiError } from "../../../api";
-import { humanError } from "../../../lib/errors";
+// справа — «Ваши правки» с «Вернуть как было» (общее хранилища `revertVariant`: «верни как было» → задача `edit`,
+// презентация перечитывается; ход и неудача — в хранилище, они переживают закрытие листа).
 import { useApp } from "../../../store";
-import type { Generation, Job, Variant } from "../../../types";
+import type { Generation, Variant } from "../../../types";
 import { Arc } from "../../kit/Arc";
 import { cls } from "../../kit/cls";
 import { ErrorLine } from "../../kit/ErrorLine";
 import { Icon } from "../../kit/Icon";
 import { agentCap, agentRoles, editRows, legacyLines } from "../agentTab";
+import { undoView, workKey } from "../variantWork";
 
-/** «Вернуть как было» последней правки варианта; ход — дуга в кнопке, неудача — строка под шапкой. */
+/** «Вернуть как было» последней правки варианта; ход — дуга в кнопке, неудача — строка под шапкой. Кнопка выключена,
+ *  пока над вариантом идёт любая работа (сервер держит одну задачу на вариант). */
 function useUndoEdit(gid: string, strategy: string) {
-  const { runJob, reloadIfOpen } = useApp();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const alive = useRef(true);
-  useEffect(() => {
-    alive.current = true;
-    return () => {
-      alive.current = false;
-    };
-  }, []);
-  const set = (b: boolean, e: string | null) => {
-    if (!alive.current) return;
-    setBusy(b);
-    setError(e);
-  };
-  const undo = async () => {
-    if (busy) return;
-    set(true, null);
-    const fail = (t: string | null | undefined) => set(false, humanError(t, "Вернуть не получилось. Попробуйте ещё раз."));
-    let jobId: string;
-    try {
-      jobId = (await api.editVariant(gid, strategy, { message: "верни как было" })).job_id;
-    } catch (e) {
-      return fail(e instanceof ApiError || e instanceof Error ? e.message : String(e));
-    }
-    runJob(jobId, "Возвращаю как было", {
-      kind: "edit", area: "result", quiet: true,
-      onDone: async (job: Job) => {
-        const r = job.result as { changed?: boolean; reply?: string } | null;
-        if (r && r.changed === false) return fail(r.reply);
-        await reloadIfOpen(gid);
-        set(false, null);
-      },
-      onFailed: (job: Job) => fail(job.error ?? job.message),
-    });
-  };
-  return { busy, error, undo };
+  const { work, busyVariants, revertVariant } = useApp();
+  const key = workKey(gid, strategy);
+  return { ...undoView(work, key, busyVariants.includes(key)), undo: () => void revertVariant(gid, strategy, { by: "agent" }) };
 }
 
 export function AgentTab({ g, v }: { g: Generation; v: Variant }) {
@@ -121,8 +87,8 @@ export function AgentTab({ g, v }: { g: Generation; v: Variant }) {
           <div style={{ display: "flex", alignItems: "center", gap: 8, height: 40 }}>
             <h3 id="da-h-ed" className="dd-h">Ваши правки</h3>
             <span className="da-cnt">{ed.active}</span>
-            <button type="button" className="p2-ob dla-ob" onClick={() => void un.undo()} disabled={!ed.canUndo || un.busy} aria-busy={un.busy || undefined} style={{ height: 40, marginLeft: "auto" }}>
-              {un.busy ? <Arc size={18} /> : <Icon name="undo" size={18} />}
+            <button type="button" className="p2-ob dla-ob" onClick={un.undo} disabled={!ed.canUndo || un.busy} aria-busy={un.arc || undefined} style={{ height: 40, marginLeft: "auto" }}>
+              {un.arc ? <Arc size={18} /> : <Icon name="undo" size={18} />}
               <span>Вернуть как было</span>
             </button>
           </div>
