@@ -1,5 +1,5 @@
-// Константы формы «Создать»: цели, лимиты текста и слайдов, пример текста и аудитории.
-// Перенесены дословно из старого components/NewGenerationFormParts.tsx; tests/unit/test_writer_mode.py читает SAMPLE_BRIEF отсюда.
+// Константы формы «Создать»: цели, лимиты текста и слайдов, пример текста.
+// tests/unit/test_writer_mode.py читает SAMPLE_BRIEF отсюда (копия текста лежит в tests/unit/test_short_brief.py — держать в ногу).
 
 export const PURPOSES: Array<{ value: string; label: string }> = [
   { value: "feature", label: "Функция" },
@@ -15,8 +15,6 @@ export const BRIEF_MIN_TOPIC = 3;
 export const SLIDES_MIN = 5;
 export const SLIDES_MAX = 20;
 export const SLIDES_DEFAULT = 12;
-
-export const SAMPLE_AUDIENCE = "Продуктовый комитет и руководители направлений";
 
 export const SAMPLE_BRIEF = `Запуск функции «Умные сводки» в корпоративном мессенджере VK WorkSpace: итоги пилота за Q2 2026 и план масштабирования.
 

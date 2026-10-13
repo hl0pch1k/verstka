@@ -227,7 +227,7 @@ export function retryLeft(s: number, at: number, now: number): number {
   return Math.max(0, Math.ceil(s - Math.max(0, now - at) / 1000));
 }
 
-/** Через сколько миллисекунд пересчитать паузу: раз в 15 с (как старый экран), а последний раз — ровно к её концу, чтобы
+/** Через сколько миллисекунд пересчитать паузу: раз в 15 с, а последний раз — ровно к её концу, чтобы
  *  «Собрать ещё раз» ожил вовремя; пауза кончилась — null. */
 export function retryTick(s: number, at: number, now: number): number | null {
   if (!retryLeft(s, at, now)) return null;

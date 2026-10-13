@@ -85,7 +85,7 @@ test("сводка: шаблон · слайды · варианты", () => {
   assert.equal(summaryLine(null, 1, 1), "1 слайд · 1 вариант");
 });
 
-test("запрос: поля как в старом CreateScreen; взгляд дизайнера с моделью включён, проверки моделью — как в 3.0, выключены", () => {
+test("запрос: поля сборки; взгляд дизайнера с моделью включён, проверки моделью — как в 3.0, выключены", () => {
   assert.deepEqual(req(), {
     template_id: "t1", brief: "История VK", audience: null, purpose: "product", slides: 12,
     strategies: ["structured", "visual", "compact"], use_models: true, audit_models: false, eyes: true, pictures: true,

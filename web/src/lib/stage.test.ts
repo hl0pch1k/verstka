@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { clock, fitColumns, quoted, railSlides, sketchInk, sketchKind, sketchOf, stripQuoted } from "./stage";
+import { clock, fitColumns, quoted, railSlides, sketchKind, sketchOf, stripQuoted } from "./stage";
 import type { AgentEvent } from "../types";
 
 const ev = (step: string, message: string, slide: number | null = null, variant: string | null = null): AgentEvent => ({ step, message, slide, variant });
@@ -66,17 +66,6 @@ test("clock", () => {
   assert.equal(clock(0), "0:00");
   assert.equal(clock(65.2), "1:05");
   assert.equal(clock(301), "5:01");
-});
-
-test("sketchInk: the template's first strong colour, VK blue when it has none", () => {
-  // VK Education: white and a pale blue come first, the accent is #0077FF; its soft tone is VK's accent-200
-  assert.deepEqual(sketchInk(["FFFFFF", "EBF3F9", "0077FF", "000000"]), { ink: "#0077FF", soft: "#ADD3FF" });
-  // a coffee template: the brown, not the cream
-  assert.equal(sketchInk(["FFFFFF", "F3F2EE", "6D2F29", "151513"]).ink, "#6D2F29");
-  // greys and near-black only: VK blue
-  assert.deepEqual(sketchInk(["FEFCFF", "454754", "879AA3", "000000"]), { ink: "#0077FF", soft: "#ADD3FF" });
-  assert.equal(sketchInk(undefined).ink, "#0077FF");
-  assert.equal(sketchInk(["#2A74FF"]).ink, "#2A74FF");
 });
 
 test("fitColumns: every slide in view at the largest size, readable columns when they cannot all fit", () => {

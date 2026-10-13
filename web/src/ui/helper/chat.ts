@@ -1,6 +1,6 @@
 // Помощник без React (boards/G-helper, G-helper-open, V2 модуль `hp`): что делает действие ответа сервера с экраном,
 // как лента собирается из сообщений и задач, как пузырь ответа делится на абзацы и список, какие подсказки и какое
-// приветствие стоят, тексты неудач. Логика действий — из старого ChatActions.ts (79c6f81), переписанная под `dispatch`.
+// приветствие стоят, тексты неудач. Логика действий — из версии до «Слоёв» (79c6f81), переписанная под `dispatch`.
 import { ApiError } from "../../api";
 import { hasCyrillic, humanError } from "../../lib/errors";
 import { plural } from "../../lib/utils";
@@ -94,7 +94,7 @@ const reasonOf = (raw: string | null | undefined): string => {
   return t ? t[0].toLowerCase() + t.slice(1) : "";
 };
 
-/** Итог «Исправь всё» (старый describeFixes): строка на вариант — оценка было → стало, ошибки, предупреждения. */
+/** Итог «Исправь всё» (как прежде): строка на вариант — оценка было → стало, ошибки, предупреждения. */
 export function describeFixes(list: FixOutcome[], title: (name: string) => string): string {
   const ok = list.filter((o) => o.done).length;
   const rows = list.map((o) => {
@@ -165,7 +165,7 @@ export function bubbleBlocks(text: string): Block[] {
   return out;
 }
 
-/** Русская вёрстка ответа (старый ChatParts): «900 000», «слайд 5», «6 категорий», «в тексте», «— вывод» не
+/** Русская вёрстка ответа (как прежде): «900 000», «слайд 5», «6 категорий», «в тексте», «— вывод» не
  *  разрываются переносом; одно- и двухбуквенное слово не остаётся в конце строки. */
 export function typeset(text: string): string {
   return text

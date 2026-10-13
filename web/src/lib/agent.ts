@@ -470,13 +470,4 @@ export function agentSummary(v: Variant | null | undefined): AgentSummaryLine[] 
   });
 }
 
-/** The sentence the agent says when the text dictated every slide's form: the variants differ only in how they present
- *  it (a tooltip of the result's variant switch). */
-export function variantsNote(v: Variant | null | undefined): string | null {
-  const a = v?.agent;
-  if (!a) return null;
-  const same = [...(a.events ?? []).map((e) => e.message), ...(a.log ?? [])].find((m) => /отличаются подачей/.test(m));
-  return same ? plainTerms(same.replace(/^Сборка:\s*/, "")) : null;
-}
-
 export const hasAgentWork = (v: Variant | null | undefined) => !!v?.agent && ((v.agent.events?.length ?? 0) > 0 || (v.agent.log?.length ?? 0) > 0);

@@ -1,6 +1,6 @@
 // Шаг «03 Параметры и запуск» без React: черновик параметров, степпер слайдов (и его блокировка, когда число задано
 // в тексте), варианты оформления, сводка в заголовке и запрос сборки. Тексты — boards/V2.dc.html (`VN`, `VD`, `VH`,
-// `writesHint`, `imagesHint`, `summary`) и C-params; поля запроса — как в старом CreateScreen.
+// `writesHint`, `imagesHint`, `summary`) и C-params; поля запроса — те, что принимает POST /api/generations.
 import { PURPOSES, SLIDES_DEFAULT, SLIDES_MAX, SLIDES_MIN } from "../../lib/createForm";
 import { readDraft } from "../../lib/draft";
 import { humanError } from "../../lib/errors";
@@ -174,7 +174,7 @@ export interface RequestInput {
   improve: ImproveSource | null;
 }
 
-/** Запрос сборки (POST /api/generations) — поля как в старом CreateScreen:
+/** Запрос сборки (POST /api/generations):
  *  - число слайдов, заданное в тексте заголовками «Слайд N», отправляется; заданное фразой («не более 10 слайдов»)
  *    сервер читает сам по тем же правилам (planning/brief.py) — отправленное число перебило бы его чтение;
  *  - варианты — как у карточек: пока `/api/strategies` не ответил, три известных, а не пустой список;

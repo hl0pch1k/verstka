@@ -1292,8 +1292,7 @@ const skelG = { id: "g", template_id: "t", strategies: ["structured"], use_model
 const skelV = { strategy: "structured", outline: { planned_by: "skeleton" }, slides: [], files: {} };
 const skeletonNotice = m.deckNotice(skelG, skelV, 6, { status: st({ state: "down", retryable: false, advice: UNAVAILABLE, owner }), latest: true, retryIn: 0 });
 const skeletonDeck = [m.skeletonDeck(skelG, skelV), m.skeletonDeck({ ...skelG, writer: { status: "written", text: "x" } }, skelV), m.skeletonDeck(skelG, v)];
-const downLine = m.modelIndicator(st({ state: "down", owner }), true);
-console.log(JSON.stringify({ offers, notice, error400DownNotice, skeletonNotice, skeletonDeck, downLine }));
+console.log(JSON.stringify({ offers, notice, error400DownNotice, skeletonNotice, skeletonDeck }));
 """
 
 
@@ -1377,7 +1376,6 @@ def test_web_a_failed_writers_skeleton_says_so_and_shows_no_score(tmp_path):
     assert n["owner"] == OWNER_MONEY
     _plain(n["title"], n["basis"], n["help"])
     assert r["skeletonDeck"] == [True, False, False]
-    assert r["downLine"]["text"] == "Модель недоступна · соберу без неё" and r["downLine"]["hint"] == OWNER_MONEY
 
 
 # ---------------------------------------------------------------------------- the swarm review of the migration

@@ -1,5 +1,3 @@
-import type { Severity } from "../types";
-
 export function cn(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(" ");
 }
@@ -58,27 +56,6 @@ export function fmtSeconds(s: number | undefined | null): string {
 const toDate = (ts: number | string) => (typeof ts === "number" ? new Date(ts * 1000) : new Date(ts));
 const dayStart = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
 
-/** «Сегодня» · «Вчера» · «24 сент.» · «24 сент. 2025» (unix seconds or an ISO string). */
-export function fmtDay(ts: number | string | undefined | null): string {
-  if (ts === undefined || ts === null || ts === "") return "";
-  const d = toDate(ts);
-  if (Number.isNaN(d.getTime())) return String(ts);
-  const now = new Date();
-  const diff = Math.round((dayStart(now) - dayStart(d)) / 86_400_000);
-  if (diff === 0) return "Сегодня";
-  if (diff === 1) return "Вчера";
-  const opts: Intl.DateTimeFormatOptions = d.getFullYear() === now.getFullYear() ? { day: "numeric", month: "short" } : { day: "numeric", month: "short", year: "numeric" };
-  return d.toLocaleDateString("ru-RU", opts).replace(/\s*г\.$/, "");
-}
-
-/** «10:05» (unix seconds or an ISO string). */
-export function fmtTime(ts: number | string | undefined | null): string {
-  if (ts === undefined || ts === null || ts === "") return "";
-  const d = toDate(ts);
-  if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
-}
-
 /** «сегодня, 19:41» · «вчера, 09:05» · «12 сент., 19:41» · «12.09.2025» (unix seconds or an ISO string). */
 export function fmtWhen(ts: number | string | undefined | null): string {
   if (ts === undefined || ts === null || ts === "") return "";
@@ -93,13 +70,6 @@ export function fmtWhen(ts: number | string | undefined | null): string {
   return d.toLocaleDateString("ru-RU");
 }
 
-/** 0.563 → «56 %» with a narrow no-break space, Russian decimal comma («56,3 %» with digits = 1). */
-export function fmtPct(v: number | undefined | null, digits = 0): string {
-  if (v === undefined || v === null || Number.isNaN(v)) return "—";
-  const n = (v * 100).toLocaleString("ru-RU", { minimumFractionDigits: digits, maximumFractionDigits: digits });
-  return `${n}\u202F%`;
-}
-
 export function shortSha(s: string | undefined | null, n = 8): string {
   return s ? s.slice(0, n) : "—";
 }
@@ -111,8 +81,6 @@ export function plural(n: number, one: string, few: string, many: string): strin
   if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return `${n} ${few}`;
   return `${n} ${many}`;
 }
-
-export const SEVERITY_LABEL: Record<Severity, string> = { error: "Ошибка", warn: "Предупреждение", info: "Заметка" };
 
 export const KIND_LABEL: Record<string, string> = {
   title: "Титул",
@@ -139,28 +107,4 @@ export const KIND_LABEL: Record<string, string> = {
 
 export function kindLabel(kind: string | null | undefined): string {
   return (kind && KIND_LABEL[kind]) || "Слайд";
-}
-
-export function scoreTone(score: number | null | undefined): "success" | "warn" | "error" | "neutral" {
-  if (score === null || score === undefined) return "neutral";
-  if (score >= 90) return "success";
-  if (score >= 70) return "warn";
-  return "error";
-}
-
-/** Text colour per score tone (status text follows the fixed shades of the palette). */
-export const TONE_TEXT: Record<ReturnType<typeof scoreTone>, string> = {
-  success: "text-emerald-700",
-  warn: "text-amber-700",
-  error: "text-red-600",
-  neutral: "text-zinc-500",
-};
-
-export function isLightHex(hex: string): boolean {
-  const h = hex.replace("#", "");
-  if (h.length < 6) return true;
-  const r = parseInt(h.slice(0, 2), 16);
-  const g = parseInt(h.slice(2, 4), 16);
-  const b = parseInt(h.slice(4, 6), 16);
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 160;
 }

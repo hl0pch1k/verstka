@@ -1,26 +1,10 @@
-// The model's state in words: the one grey line on the Create screen (only when no model can answer) and the notice
-// above a deck built without the model. The advice comes from the server (verstka/api/model_status.py);
-// whatever an older server still sends about money, keys, config files or providers never reaches the screen.
+// The model's state in words: the notice above a deck built without the model and the «Собрать ещё раз» offer.
+// The advice comes from the server (verstka/api/model_status.py); whatever an older server still sends about money, keys, config files or providers never reaches the screen.
 import type { Generation, ModelsStatus, PlannerInfo, Variant } from "../types";
 import { plural } from "./utils";
 
-export type Tone = "ok" | "neutral" | "retry" | "warn" | "off";
-
-export interface Indicator { text: string; tone: Tone; hint: string | null; retry: string | null }
-
 /** «$5–10», «1–5 ₽»: a number range never breaks across lines (word joiners around the dash). */
 const keepRanges = (s: string) => s.replace(/(\d)–(\d)/g, "$1\u2060–\u2060$2");
-
-/** The line on the Create screen, or null: nothing is said while any model can answer (ok, unknown, retry, fallback)
- * or when the person switched the model off. `enabled`: the person left the model switched on. */
-export function modelIndicator(st: ModelsStatus | null, enabled: boolean, _retryIn?: number): Indicator | null {
-  if (!st) return null;
-  if (!st.configured || st.state === "off") return { text: "Без модели · быстрая сборка", tone: "off", hint: null, retry: null };
-  if (!enabled) return null;
-  // the owner's fix (the balance, the key, a model id) is the line's tooltip: the line itself stays plain
-  if (st.state === "down") return { text: "Модель недоступна · соберу без неё", tone: "off", hint: st.owner ?? null, retry: null };
-  return null;
-}
 
 /** A topic's deck that is only a skeleton (the writer wrote no text: the model failed, refused or the topic is the
  * person's own): its audit score says nothing about the deck and is never shown as a success. */

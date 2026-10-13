@@ -164,28 +164,6 @@ export function fitColumns(width: number, height: number, n: number, aspect: num
   return c;
 }
 
-/** VK blue and its soft tone (accent-200): the sketches' colours when the template has no strong colour of its own. */
-const VK_INK = { ink: "#0077FF", soft: "#ADD3FF" };
-
-/** The colours a storyboard draws its sketches in: the template's first strong colour (saturated, neither near-white
- *  nor near-black — its accent), so the sketches already look like the deck; `soft` is that colour at 32% on white
- *  (VK blue gives exactly VK's #ADD3FF). VK blue when the template has only whites, greys and blacks. */
-export function sketchInk(palette: string[] | null | undefined): { ink: string; soft: string } {
-  for (const raw of palette ?? []) {
-    const hex = raw.replace(/^#/, "").toUpperCase();
-    if (!/^[0-9A-F]{6}$/.test(hex)) continue;
-    const [r, g, b] = [0, 2, 4].map((i) => parseInt(hex.slice(i, i + 2), 16));
-    const max = Math.max(r, g, b) / 255;
-    const min = Math.min(r, g, b) / 255;
-    const l = (max + min) / 2;
-    const s = max === min ? 0 : (max - min) / (1 - Math.abs(2 * l - 1));
-    if (s < 0.35 || l < 0.18 || l > 0.68) continue;
-    const soft = [r, g, b].map((c) => Math.round(255 * 0.68 + c * 0.32).toString(16).padStart(2, "0")).join("").toUpperCase();
-    return { ink: `#${hex}`, soft: `#${soft}` };
-  }
-  return VK_INK;
-}
-
 /** «1:05» */
 export const clock = (seconds: number) => {
   const s = Math.max(0, Math.floor(seconds));

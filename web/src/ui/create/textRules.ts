@@ -47,7 +47,7 @@ export function fileKind(name: string): FileKind {
  *    берёт, остальное — «Файл «X.pdf» не подойдёт».
  *  - Пустой текст и одни пробелы — `empty` (настройки «---» в начале — не текст, сервер их не считает).
  *  - Текст короче `BRIEF_MIN_TOPIC` — `short`. Это когда сервер пишет текст по теме (`writer`, `health.writer`); без
- *    этого тема — не текст: нужен готовый текст от `BRIEF_MIN` знаков (как старый CreateScreen). */
+ *    этого тема — не текст: нужен готовый текст от `BRIEF_MIN` знаков. */
 export function textError(text: string, file: { name: string } | null | undefined, opts: { writer: boolean }): null | { kind: "empty" | "short" | "type"; text: string } {
   if (file) return fileKind(file.name) === "other" ? { kind: "type", text: `Файл «${file.name}» не подойдёт` } : null;
   const body = briefBody(text ?? "").trim();
