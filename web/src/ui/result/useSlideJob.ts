@@ -64,9 +64,12 @@ export interface SlideJob {
   undo(): void;
   /** «Вернуть как было» исправления слайда без итога на странице (перезагрузка): последнее изменение варианта — его. */
   revert(strategy: string, slide: number): void;
-  /** Другой слайд (`slide` — тот, что теперь на экране): строка неудачи или «слайд остался прежним» уходит (итог, который
-   *  можно вернуть, остаётся; работа слайда, на который вернулись, — тоже). */
-  clear(slide?: number): void;
+  /** Другой слайд или вариант: строка неудачи или «слайд остался прежним» уходит (итог, который можно вернуть, и
+   *  неувиденная неудача остаются). */
+  clear(): void;
+  /** Строку неудачи показали у её места (вызывать после `clear` того же кадра): работа снова уходит со сменой слайда,
+   *  строка результата о ней уходит. */
+  see(): void;
 }
 
 const EMPTY: SlideLive = { events: [], progress: 0, message: "" };
@@ -208,7 +211,7 @@ export function useSlideJob(gid: string, strategy: string, ctx?: SlideJobCtx): S
   }, [undoAt, strategy]);
   const revert = useCallback((to: string, slide: number) => undoAt("fix", to, slide), [undoAt]);
 
-  const clear = useCallback((slide?: number) => void send({ type: "clear", strategy, slide }), [send, strategy]);
+  const clear = useCallback(() => void send({ type: "clear", strategy }), [send, strategy]);
 
   // задача над этим вариантом, которую экран не запускал (своя — у `run`)
   const other = variantLiveJob(liveJobs, gid, strategy, run?.jobId ?? null);
@@ -291,13 +294,14 @@ export function useSlideJob(gid: string, strategy: string, ctx?: SlideJobCtx): S
     if (!f || f.gid !== gid || f.strategy !== strategy || Object.values(box.current.runs).some((x) => x?.jobId === f.jobId)) return;
     send({ type: "failedAway", strategy, slide: f.slide, kind: f.kind, action: f.action, jobId: f.jobId, error: f.error, at: Date.now() });
   }, [slideFail, gid, strategy, send]);
-  // строку неудачи показали у её места: работа снова уходит со сменой слайда, строка результата о ней уходит
-  useEffect(() => {
+  // строку неудачи показали у её места: работа снова уходит со сменой слайда, строка результата о ней уходит (экран
+  // зовёт это после снятия строк того же кадра — иначе неудача, до места которой только что дошли, ушла бы сразу)
+  const see = useCallback(() => {
     const r = runOf(box.current, strategy);
     if (!r || !r.unseen || !ctxRef.current?.looking(r)) return;
     send({ type: "seen", strategy });
     if (r.jobId) dropSlideFail({ jobId: r.jobId });
-  });
+  }, [send, strategy, dropSlideFail]);
 
   const elsewhere = useMemo(() => (other && !plan ? liveWork(other) : null), [other, plan]);
   const refresh = useStale(gid);
@@ -319,5 +323,6 @@ export function useSlideJob(gid: string, strategy: string, ctx?: SlideJobCtx): S
     undo,
     revert,
     clear,
+    see,
   };
 }

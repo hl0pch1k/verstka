@@ -9,6 +9,8 @@
 // замечаний стоит в ней, а карточка «Изображение» — здесь, вместо итогов; смена 184 ↔ 320 — перекрёстным затуханием
 // (`snap`: сетка подменяется без хода, пока слайд и колонка не видны).
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Arc } from "../kit/Arc";
+import { useSwap } from "../kit/useSwap";
 import type { SheetTab } from "../deck/geometry";
 import { useDeckWidth } from "../deck/useDeckFit";
 import { cls } from "../kit/cls";
@@ -26,8 +28,10 @@ const MI_T = { fontSize: 14, fontWeight: 600, lineHeight: "20px", color: "#0B122
 export interface CompactData {
   title: string;
   line: string;
-  /** Строка неудачи результата (на месте строки под названием: уведомления в компактном виде нет). */
-  error: string | null;
+  /** Строка ряда результата (на месте строки под названием: уведомления и ряда в компактном виде нет) — с тем же
+   *  действием, что в ряду: «Показать» у неудачи работы над слайдом, «Обновить» у несвежей презентации (дуга, пока она
+   *  читается); целиком — в подсказке. null — строки нет. */
+  error: { text: string; act: { label: string; title: string; busy?: boolean; icon?: "refresh"; onClick(): void } | null } | null;
   score: number | null;
   variants: { key: string; label: string; score: number | null; title?: string }[];
   variant: string;
@@ -111,6 +115,35 @@ function NoteMenu({ note, actions, live }: { note: NoteView; actions: NoteAction
   );
 }
 
+/** Строка под названием: строка ряда результата с её действием или «шаблон · слайды · когда»; смена — перекрёстным
+ *  затуханием, уходящая гаснет со своим содержимым. */
+function HeadLine({ d }: { d: CompactData }) {
+  const key = d.error ? `e:${d.error.text}:${d.error.act?.label ?? ""}` : "line";
+  const sw = useSwap(key);
+  const held = useRef(new Map<string, CompactData["error"]>());
+  held.current.set(key, d.error);
+  for (const k of [...held.current.keys()]) if (k !== key && k !== sw.shown) held.current.delete(k);
+  const e = sw.shown === key ? d.error : held.current.get(sw.shown) ?? null;
+  const a = e?.act ?? null;
+  return (
+    <div className={sw.cls} style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, marginTop: 4 }}>
+      {e ? (
+        <>
+          <ErrorLine text={e.text} lines={1} quiet style={{ display: "flex", flex: "0 1 auto" }} />
+          {a && (
+            <button type="button" className="gh-act hp-act" onClick={a.onClick} aria-busy={a.busy || undefined} title={a.busy ? "Перечитываю презентацию…" : a.title}>
+              {a.icon && (a.busy ? <Arc size={16} /> : <Icon name="refresh" size={16} />)}
+              {a.label}
+            </button>
+          )}
+        </>
+      ) : (
+        <p title={d.line} style={{ margin: 0, fontSize: 13, fontWeight: 500, lineHeight: "20px", color: "#5A6272", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{d.line}</p>
+      )}
+    </div>
+  );
+}
+
 export function CompactResult({ d, live, wide, snap, note, noteActions, onVariant, onEditText, onShowText, onDetails, onNew, card }: {
   d: CompactData;
   /** Компактный вид на месте (помощник открыт). */
@@ -140,9 +173,7 @@ export function CompactResult({ d, live, wide, snap, note, noteActions, onVarian
         <div className="gh-top p2-in" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 24, height: 64, animationDelay: "160ms" }}>
           <div style={{ minWidth: 0 }}>
             <h1 title={d.title} style={{ margin: 0, fontFamily: UNB, fontWeight: 600, fontSize: 32, lineHeight: "40px", letterSpacing: "-0.03em", color: "#0B1220", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{d.title}</h1>
-            {d.error
-              ? <ErrorLine text={d.error} lines={1} quiet style={{ display: "flex", marginTop: 4 }} />
-              : <p title={d.line} style={{ margin: "4px 0 0", fontSize: 13, fontWeight: 500, lineHeight: "20px", color: "#5A6272", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{d.line}</p>}
+            <HeadLine d={d} />
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flex: "none" }}>
             {note && <NoteMenu note={note} actions={noteActions} live={live} />}

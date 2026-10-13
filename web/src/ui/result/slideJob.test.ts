@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import type { SlideFixResult } from "../../types";
 import type { ActiveJob } from "../../lib/jobState";
 import { VARIANT_BUSY } from "../details/variantWork";
-import { adoptPlan, awayFailText, busyWhy, failInRow, JOB0, liveWork, placeShown, runOf, slideFailAfter, staleInRow, STALE_FIRST, undoOffOf, slideBusy, slideJobNext, staleOf, variantLiveJob, type SlideJobAction, type SlideJobState } from "./slideJob";
+import { adoptPlan, awayFailText, busyWhy, compactRow, failInRow, JOB0, revealStep, liveWork, placeShown, runOf, slideFailAfter, staleInRow, STALE_FIRST, undoOffOf, slideBusy, slideJobNext, staleOf, variantLiveJob, type SlideJobAction, type SlideJobState } from "./slideJob";
 import type { PictureChangeResult } from "../../types";
 import type { Remark } from "./marks";
 
@@ -218,9 +218,11 @@ test("неудача, которую ещё не видели у её места
   assert.equal(seen.runs.structured!.unseen, false);
   assert.equal(slideJobNext(seen, { type: "seen", strategy: "structured" }), seen);
   assert.equal(slideJobNext(seen, { type: "clear", strategy: "structured" }).runs.structured, undefined);
-  // вернулись на её слайд (и тут же увидели строку) — смена слайда её не снимает; ушли снова — снимает
-  assert.equal(slideJobNext(seen, { type: "clear", strategy: "structured", slide: 5 }), seen);
-  assert.equal(slideJobNext(seen, { type: "clear", strategy: "structured", slide: 6 }).runs.structured, undefined);
+  // кадр, в котором дошли до места: сначала снимаются строки (неувиденная остаётся), потом она отмечается увиденной
+  const arrived = slideJobNext(slideJobNext(failed, { type: "clear", strategy: "structured" }), { type: "seen", strategy: "structured" });
+  assert.equal(arrived.runs.structured!.error, "Модель не ответила");
+  // T2: увиденная не возвращается — смена варианта и возврат на тот же номер слайда её снимают
+  assert.equal(slideJobNext(arrived, { type: "clear", strategy: "structured" }).runs.structured, undefined);
   // удачный итог — не «неувиденная неудача»
   assert.equal(run(JOB0, fix(), { type: "settled", seq: 1, at: 900, fix: RES }).runs.structured!.unseen, false);
 });
@@ -290,4 +292,22 @@ test("запасная строка «не обновилась» — когда
   assert.equal(staleInRow(true, [st], AT), true); // работа есть, но её место не на экране
   assert.equal(staleInRow(true, [st], { ...AT, slide: 5, remarks: true }), false); // строка у работы
   assert.equal(staleInRow(false, [st], AT), false); // презентация свежая
+});
+
+// ── Round 4
+test("«Показать» у неудачи изображения ждёт, пока режим «Замечания» погаснет и вариант сменится; ушли — не ждёт (T3)", () => {
+  const p = { strategy: "visual", slide: 4 };
+  assert.equal(revealStep(null, { strategy: "visual", slide: 4, blocked: false }), null);
+  assert.equal(revealStep(p, { strategy: "visual", slide: 4, blocked: true }), "wait"); // панель замечаний ещё на экране
+  assert.equal(revealStep(p, { strategy: "visual", slide: 4, blocked: false }), "open");
+  assert.equal(revealStep(p, { strategy: "visual", slide: 5, blocked: false }), "drop"); // ушёл на другой слайд
+  assert.equal(revealStep(p, { strategy: "structured", slide: 4, blocked: false }), "drop");
+});
+
+test("строка компактного вида — та же строка ряда с тем же действием; «Обновить» не повторяет живую строку ленты (T1)", () => {
+  assert.deepEqual(compactRow({ err: "Не удалось открыть", fail: FAIL, stale: "не обновилась", feedSays: false }), { text: "Не удалось открыть", act: null });
+  assert.deepEqual(compactRow({ err: null, fail: FAIL, stale: "не обновилась", feedSays: true }), { text: FAIL.text, act: "show" });
+  assert.deepEqual(compactRow({ err: null, fail: null, stale: "не обновилась", feedSays: false }), { text: "не обновилась", act: "refresh" });
+  assert.equal(compactRow({ err: null, fail: null, stale: "не обновилась", feedSays: true }), null);
+  assert.equal(compactRow({ err: null, fail: null, stale: null, feedSays: false }), null);
 });

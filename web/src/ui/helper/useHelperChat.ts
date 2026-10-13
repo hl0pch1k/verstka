@@ -85,7 +85,11 @@ export function useHelperChat(): HelperChat {
    *  и «Обновить» (пока презентация несвежая). */
   const tellReload = useCallback((r: Reload | null, gid: string | null) => {
     if (r?.kind === "other") addNote(OTHER_DECK);
-    else if (r?.kind === "failed") addNote(reloadFailText(r.error), gid ?? undefined);
+    else if (r?.kind === "failed") {
+      addNote(reloadFailText(r.error), gid ?? undefined);
+      // строка «не обновилась» с «Обновить» теперь в ленте: компактный вид результата её не повторяет
+      if (gid) latest.current.noteFeedRefresh(gid);
+    }
   }, [addNote]);
 
   const followEdit = useCallback((a: EditAction) => {

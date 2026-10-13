@@ -121,6 +121,8 @@ a.p2-rbl:hover{color:#0B1220}
 .gh-act:active{transform:scale(.98)}
 .gh-act[aria-busy="true"]{cursor:progress;transform:none}
 .gh-act:focus-visible{outline:2px solid #2563EB;outline-offset:2px}
+/* то же действие в строке под названием компактного результата: «Показать», «Обновить» — 14/20, не сжимается */
+.hp-act{flex:none;font-size:14px;line-height:20px;white-space:nowrap}
 /* слой компактного вида, который сейчас не на месте (колонка занята замечаниями или изображением): гаснет за 120 мс —
    к подмене сетки его уже не видно */
 .hp-nar .hp-xf.hp-xf-off{opacity:0;visibility:hidden;pointer-events:none;transition:opacity 120ms var(--ease),visibility 0s linear 120ms}

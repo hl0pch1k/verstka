@@ -94,6 +94,10 @@ export interface AppState {
    *  resolves true, когда прочиталась. Пока читается — `refreshing`. */
   refreshDeck(gid: string): Promise<boolean>;
   refreshing: string | null;
+  /** Презентации, о которых лента помощника сказала «не обновилась» строкой с «Обновить» (самая новая из них живая, пока
+   *  презентация несвежая): компактный вид результата при открытом помощнике не повторяет её своей строкой. */
+  feedRefresh: string[];
+  noteFeedRefresh(gid: string): void;
   activeStrategy: string | null; setActiveStrategy(s: string): void; activeVariant: Variant | null;
   selectedSlide: number; setSelectedSlide(n: number): void; // 1-based
   /** Экран, раскрытые шаги, слои и листы «Слоёв» (`ui/deck/geometry.ts`); меняется только через `dispatch`. */
@@ -348,6 +352,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setStaleState(v);
   }, []);
   const [refreshing, setRefreshing] = useState<string | null>(null);
+  const [feedRefresh, setFeedRefresh] = useState<string[]>([]);
+  const noteFeedRefresh = useCallback((gid: string) => setFeedRefresh((cur) => (cur.includes(gid) ? cur : [...cur, gid])), []);
   const jobSubs = useRef(new Map<string, () => void>());
 
   const [notices, setNotices] = useState<Partial<Record<NoticeArea, Notice>>>({});
@@ -1010,13 +1016,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<AppState>(() => ({
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
-    generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, cancelLoad, reloadIfOpen, stale, refreshDeck, refreshing, activeStrategy, setActiveStrategy, activeVariant,
+    generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, cancelLoad, reloadIfOpen, stale, refreshDeck, refreshing, feedRefresh, noteFeedRefresh, activeStrategy, setActiveStrategy, activeVariant,
     selectedSlide, setSelectedSlide, ui, dispatch, activeJob, liveJobs: liveList, runJob, watchJob, slideFail, failAway, dropSlideFail, followDeck, adoptBuildMeta, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, ownBuild, building, buildEnd, showEnded, goBuild, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, analyzing, startGeneration,
     brief, setBrief, textIssue, setTextIssue, checkText, params, setParams,
     composerText, composerPreset, editText, takeComposerText, takeComposerPreset, improveSource, takeImproveSource,
   }), [
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
-    generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, cancelLoad, reloadIfOpen, stale, refreshDeck, refreshing, activeStrategy, setActiveStrategy, activeVariant,
+    generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, cancelLoad, reloadIfOpen, stale, refreshDeck, refreshing, feedRefresh, noteFeedRefresh, activeStrategy, setActiveStrategy, activeVariant,
     selectedSlide, setSelectedSlide, ui, activeJob, liveList, runJob, watchJob, slideFail, failAway, dropSlideFail, followDeck, adoptBuildMeta, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, ownBuild, building, buildEnd, showEnded, goBuild, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, analyzing, startGeneration,
     brief, setBrief, textIssue, checkText, params, setParams,
     composerText, composerPreset, editText, takeComposerText, takeComposerPreset, improveSource, takeImproveSource,

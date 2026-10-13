@@ -118,19 +118,21 @@ function Body(p: RemarksPanelProps) {
             </span>
           </div>
         </div>
-        {p.line && <Line line={p.line} />}
         {p.revert && <Revert p={p} ride={ride} />}
+        {/* строка встаёт последней и проявляется: ничего под ней не сдвигается */}
+        {p.line && <Line line={p.line} />}
       </>
     );
   }
   return <Remarks p={p} d={d} ride={ride} />;
 }
 
+/** Строка у кнопки: проявляется (p2-in), а не появляется рывком. */
 function Line({ line }: { line: PanelLine }) {
-  if (line.refresh) return <StaleLine r={line.refresh} style={{ marginTop: 16, flex: "none" }} />;
-  if (line.tone === "error") return <ErrorLine text={line.text} lines={2} style={{ marginTop: 16, flex: "none" }} />;
+  if (line.refresh) return <div className="p2-in" style={{ marginTop: 16, flex: "none" }}><StaleLine r={line.refresh} /></div>;
+  if (line.tone === "error") return <div className="p2-in" style={{ marginTop: 16, flex: "none" }}><ErrorLine text={line.text} lines={2} /></div>;
   return (
-    <p role="status" title={line.text}
+    <p role="status" title={line.text} className="p2-in"
       style={{ display: "flex", alignItems: "flex-start", gap: 8, margin: "16px 0 0", flex: "none", fontSize: 14, fontWeight: 600, lineHeight: "20px", color: "#5A6272" }}>
       <span style={{ display: "flex", flex: "none", paddingTop: 2, color: "#2563EB" }}><Icon name="info" size={16} /></span>
       <span style={{ minWidth: 0, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{line.text}</span>

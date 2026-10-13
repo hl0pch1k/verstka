@@ -56,7 +56,7 @@ import { useOpenSheet } from "./useOpenSheet";
 import { usePictureSelect } from "./usePictureSelect";
 import { useRemarksMode } from "./useRemarksMode";
 import { useSlideJob, type SlideRun } from "./useSlideJob";
-import { failInRow, placeShown, staleInRow, type ResultAt, type SlideFail } from "./slideJob";
+import { compactRow, failInRow, placeShown, staleInRow, type ResultAt, type SlideFail } from "./slideJob";
 import { StaleLine } from "../shell/StaleLine";
 import { WorkHead } from "./WorkHead";
 
@@ -126,7 +126,7 @@ function NoDeck({ g }: { g: Generation }) {
 function ResultBody({ g }: { g: Generation }) {
   const {
     activeVariant, setActiveStrategy, selectedSlide, setSelectedSlide, strategyTitle, strategies, templateLabel, templates, ui, dispatch,
-    editText, retryBuild, building, health, modelStatus, refreshModelStatus, generations, notices, slideFail,
+    editText, retryBuild, building, health, modelStatus, refreshModelStatus, generations, notices, slideFail, feedRefresh,
   } = useApp();
   const openSheet = useOpenSheet();
   const goHome = useGoHome();
@@ -216,7 +216,10 @@ function ResultBody({ g }: { g: Generation }) {
   // другой слайд или вариант: строка неудачи или «слайд остался прежним» уходит вместе со слайдом (итог применённой
   // работы остаётся — у него «Вернуть»)
   const clearJob = job.clear;
-  useEffect(() => clearJob(n), [v.strategy, n, clearJob]);
+  useEffect(() => clearJob(), [v.strategy, n, clearJob]);
+  // после снятия строк этого кадра — неудача, до места которой дошли, отмечается увиденной (а не снимается сразу)
+  const seeJob = job.see;
+  useEffect(() => seeJob());
   const rm = useRemarksMode({ v, n, src, job, now, titleOf });
   // поверх результата открыт слой или лист: клавиши (←/→, Home/End, Esc) — его
   const layered = !!(ui.sheet || ui.textLayer || ui.lightbox || ui.sect || ui.tplPreview || ui.tplDelete);
@@ -235,8 +238,8 @@ function ResultBody({ g }: { g: Generation }) {
     if (f.strategy !== v.strategy) setActiveStrategy(f.strategy);
     setSelectedSlide(f.slide);
     dispatch({ type: "set", patch: { remarks: f.kind === "fix" } });
-    // изображение: его карточка (на том же варианте; режим «Замечания» был выключен — выбор не заблокирован)
-    if (f.kind === "picture" && f.strategy === v.strategy) pic.reveal(f.slide);
+    // изображение: его карточка — когда вариант сменился и режим «Замечания» погас (usePictureSelect ждёт)
+    if (f.kind === "picture") pic.reveal(f.strategy, f.slide);
   };
   const lineStyle = note ? { marginLeft: 16, flex: "0 1 auto" } : undefined;
   const lineKey = errText ? `e:${errText}` : fail ? `f:${fail.jobId}` : staleRow ? "s" : "";
@@ -259,7 +262,15 @@ function ResultBody({ g }: { g: Generation }) {
   for (const k of [...lines.current.keys()]) if (k !== lineKey && k !== lineSwap.shown) lines.current.delete(k);
   // уходящая строка в ряду уведомления гаснет, а не пропадает; раскладка рабочей области — по строке, которая есть сейчас
   const line = lineKey || lineSwap.shown ? <span className={lineSwap.cls} style={{ display: "flex", minWidth: 0, ...lineStyle }}>{lineShown}</span> : null;
-  const lineText = errText ?? fail?.text ?? staleRow?.text ?? null;
+  // компактный вид (помощник открыт): та же строка с тем же действием; «не обновилась» — только если лента помощника не
+  // говорит этого живой строкой
+  const row = compactRow({ err: errText, fail, stale: staleRow?.text ?? null, feedSays: feedRefresh.includes(g.id) });
+  const compactErr: CompactData["error"] = row && {
+    text: row.text,
+    act: row.act === "show" && fail ? { label: "Показать", title: fail.kind === "fix" ? `Слайд ${fail.slide} в режиме «Замечания»` : `Слайд ${fail.slide}`, onClick: () => showFail(fail) }
+      : row.act === "refresh" && staleRow ? { label: "Обновить", title: "Перечитать презентацию", busy: staleRow.busy, icon: "refresh", onClick: staleRow.onRefresh }
+      : null,
+  };
   // работа над слайдом (своя, подхваченная, чужая над вариантом) — дуга на миниатюре её слайда и без режима «Замечания»
   const spinOnly = job.spin;
   const filmMarks = useMemo(() => rm.film ?? (spinOnly !== null ? { badges: NO_BADGES, out: false, spin: spinOnly } : null), [rm.film, spinOnly]);
@@ -331,7 +342,7 @@ function ResultBody({ g }: { g: Generation }) {
   // компактный вид (помощник открыт): те же данные, итоги проверки — узкой колонкой; колонка шире, пока на её месте
   // панель замечаний или карточка «Изображение»
   const compact: CompactData = {
-    title, line: aside.line, error: lineText, score: aside.score, variants: aside.variants, variant: v.strategy, pptx: aside.pptx, pdf: aside.pdf,
+    title, line: aside.line, error: compactErr, score: aside.score, variants: aside.variants, variant: v.strategy, pptx: aside.pptx, pdf: aside.pdf,
     fileBase: aside.fileBase, pptxTitle: aside.pptxTitle, checks: compactChecks(g, v, note), hasText,
   };
   const wide = rm.shown || !!pic.column?.shown;

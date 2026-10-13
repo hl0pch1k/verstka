@@ -10,7 +10,7 @@ import { clock, lastEditIs, undoneIn } from "./fix";
 import { pickedPicture, pictureView, slidePictures } from "./picture";
 import type { PictureCard, PictureRunView } from "./PictureCard";
 import { ownsKeys } from "./resultView";
-import { busyWhy, staleOf } from "./slideJob";
+import { busyWhy, revealStep, staleOf } from "./slideJob";
 import type { SlideJob } from "./useSlideJob";
 
 type Pic = SlidePicture & { bbox: BboxFrac };
@@ -20,9 +20,9 @@ export interface PictureSelect {
   spots: { pics: Pic[]; sel: string | null; frame: boolean; onPick(id: string): void } | null;
   /** Колонка «Изображение» в DOM: стоит (`shown`) или уезжает, с карточкой. */
   column: { shown: boolean; card: ComponentProps<typeof PictureCard> } | null;
-  /** «Показать» у строки неудачи изображения: колонка «Изображение» картинки слайда `slide` этого варианта (вместе со
-   *  сменой слайда — тем же нажатием); картинок на слайде нет или выбор заблокирован — ничего. */
-  reveal(slide: number): void;
+  /** «Показать» у строки неудачи изображения: колонка «Изображение» картинки слайда `slide` варианта `strategy` — когда
+   *  вариант и слайд сменились и режим «Замечания» погас (`revealStep`); ушли на другой слайд раньше — не открывается. */
+  reveal(strategy: string, slide: number): void;
 }
 
 export function usePictureSelect({ v, n, job, now, blocked, layered }: {
@@ -97,10 +97,17 @@ export function usePictureSelect({ v, n, job, now, blocked, layered }: {
     });
   };
 
-  const reveal = (slide: number) => {
-    const first = blocked ? null : slidePictures(v, slide)[0];
-    if (first) setSel({ k: `${v.strategy}:${slide}`, id: first.id, form: false, d: 320 });
-  };
+  // «Показать» ждёт, пока карточку можно открыть: вариант сменился, режим «Замечания» погас (его панель ещё 520 мс на
+  // экране — картинки не выбираются)
+  const [pending, setPending] = useState<{ strategy: string; slide: number } | null>(null);
+  const step = revealStep(pending, { strategy: v.strategy, slide: n, blocked });
+  useEffect(() => {
+    if (!step || step === "wait") return;
+    setPending(null);
+    const first = step === "open" ? slidePictures(v, n)[0] : null;
+    if (first) setSel({ k: slideKey, id: first.id, form: false, d: 320 });
+  }, [step, v, n, slideKey]);
+  const reveal = (strategy: string, slide: number) => setPending({ strategy, slide });
 
   return {
     reveal,

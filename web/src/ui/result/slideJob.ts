@@ -78,9 +78,10 @@ export type SlideJobAction =
   | { type: "undoStale"; seq: number }
   /** Вернулось как было: итога больше нет — слайд снова со своими замечаниями. */
   | { type: "undone"; seq: number }
-  /** Другой слайд (`slide` — тот, что теперь на экране): строка неудачи или «слайд остался прежним» уходит; итог, который
-   *  можно вернуть, остаётся; работа своего слайда (на него вернулись) — тоже. */
-  | { type: "clear"; strategy: string; slide?: number }
+  /** Другой слайд или вариант: строка неудачи (увиденная) или «слайд остался прежним» уходит; итог, который можно вернуть,
+   *  и неудача, которую ещё не видели у её места, остаются. Экран сначала снимает строки, потом отмечает увиденное
+   *  (`seen`): неудача, до места которой только что дошли, не уходит в том же кадре. */
+  | { type: "clear"; strategy: string }
   /** Строку неудачи работы варианта показали у её места: дальше она уходит со сменой слайда, как прежде. */
   | { type: "seen"; strategy: string }
   /** Неудача работы, чей экран закрылся (`SlideFail` хранилища): новый экран заводит её кончившейся работой с этой
@@ -163,8 +164,7 @@ export function slideJobNext(s: SlideJobState, a: SlideJobAction): SlideJobState
       const r = runOf(s, a.strategy);
       // строка «не обновилась» с «Обновить» остаётся: изменение сохранено, экран его ещё не показал
       // неудача, которую ещё не показали у её места, ждёт его (иначе она не была бы сказана нигде)
-      const changedNothing = !!r && r.phase === "done" && r.undo !== "work" && !r.fix?.applied && !r.picture?.applied && !r.stale && !r.note && !r.unseen
-        && r.slide !== a.slide;
+      const changedNothing = !!r && r.phase === "done" && r.undo !== "work" && !r.fix?.applied && !r.picture?.applied && !r.stale && !r.note && !r.unseen;
       return changedNothing ? put(s, a.strategy, null) : s;
     }
     case "seen": {
@@ -282,4 +282,23 @@ export function slideFailAfter(cur: SlideFail | null, m: { jobId?: string | null
   if (!cur) return cur;
   const hit = m.jobId ? cur.jobId === m.jobId : !!m.gid && cur.gid === m.gid && (!m.strategy || cur.strategy === m.strategy);
   return hit ? null : cur;
+}
+
+/** «Показать» у строки неудачи изображения ждёт, пока карточку можно открыть: вариант сменился, слайд тот, режим
+ *  «Замечания» погас (пока его панель на экране, картинки не выбираются). `open` — открыть карточку картинки слайда;
+ *  `wait` — ещё рано; `drop` — человек ушёл на другой слайд или вариант: ждать нечего. */
+export function revealStep(pending: { strategy: string; slide: number } | null, at: { strategy: string; slide: number; blocked: boolean }): "open" | "wait" | "drop" | null {
+  if (!pending) return null;
+  if (at.strategy !== pending.strategy || at.slide !== pending.slide) return "drop";
+  return at.blocked ? "wait" : "open";
+}
+
+/** Строка под названием компактного вида (помощник открыт) — та же строка ряда результата, с тем же действием:
+ *  неудача запуска или открытия — без действия; неудача работы, чьё место не на экране, — «Показать»; несвежая
+ *  презентация — «Обновить», если лента помощника уже не говорит этого живой строкой (`feedSays`): одна строка на одно. */
+export function compactRow(o: { err: string | null; fail: SlideFail | null; stale: string | null; feedSays: boolean }): { text: string; act: "show" | "refresh" | null } | null {
+  if (o.err) return { text: o.err, act: null };
+  if (o.fail) return { text: o.fail.text, act: "show" };
+  if (o.stale && !o.feedSays) return { text: o.stale, act: "refresh" };
+  return null;
 }
