@@ -7,7 +7,7 @@ import { trackJob } from "./lib/jobs";
 import { errText, firstLine, newestTemplate, slideCount } from "./lib/narrate";
 import { templateTitle, tplLabel } from "./lib/plain";
 import { LS, storage, uid } from "./lib/utils";
-import { decodeImage, viewTransition } from "./lib/motion";
+import { decodeImage } from "./lib/motion";
 import { draftBrief, writeDraft } from "./lib/draft";
 import { variantRev, withRev } from "./lib/rev";
 import { uiReducer, UI0, type UiAction, type UiState } from "./ui/deck/geometry";
@@ -65,8 +65,9 @@ export interface AppState {
   manifest: TemplateManifest | null; manifestLoading: boolean;
   generations: GenerationMeta[]; refreshGenerations(): Promise<void>;
   generationId: string | null; generation: Generation | null; generationLoading: boolean;
-  /** `hold`: keep the open deck on screen until the new one is ready, then swap inside a view transition (history). */
-  /** Open a deck; resolves to it (null when it did not load — the failure is already reported). */
+  /** Open a deck; resolves to it (null when it did not load — the failure is already reported). `hold` («Мои
+   *  презентации»): the open deck stays until the new one is ready and its first slide decoded, then the new one takes
+   *  its place at once — the history layer covers the plate meanwhile and moves the deck itself. */
   loadGeneration(gid: string, opts?: { hold?: boolean }): Promise<Generation | null>;
   /** Re-reads deck `gid` after a change made to it (a slide fix, a picture, «верни как было») — only while it is still
    *  the open deck and no other deck is being opened; the screen, the variant and the slide stay. A job that ends
@@ -79,6 +80,10 @@ export interface AppState {
   ui: UiState; dispatch(a: UiAction): void;
   activeJob: ActiveJob | null;
   runJob(jobId: string, label: string, opts?: RunJobOptions): void;
+  /** «Мои презентации»: идущая сборка (мета с `job_id`) — экран «Сборка» с её задачей; задачу уже ведут — экран просто
+   *  возвращается к ней. false — вести нечего (у меты нет задачи). Мета — полная (`GET /api/generations/{gid}`): «Собрать
+   *  ещё раз» повторит её запрос. */
+  followDeck(g: GenerationMeta): boolean;
   /** Варианты, над которыми идёт задача (`workKey(gid, strategy)` по цели задачи): сервер держит одну задачу на вариант,
    *  и кнопки работы над ним выключены, где бы её ни начали. */
   busyVariants: string[];
@@ -366,9 +371,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   /** Loads a generation. A reload of the already open one keeps the chosen variant and slide (clamped). `hold` (another
    *  deck picked over an open one, from the history): the open deck stays on screen while the new one loads and its
-   *  first slide decodes, then the new deck replaces it inside a view transition — never a skeleton in between (the
-   *  history row shows the wait); a failed load leaves the open deck as it was. `area`: where a failure is told (the
-   *  result; the build screen for a deck that has just been built). */
+   *  first slide decodes, then the new deck replaces it at once — never a skeleton in between (the history card shows
+   *  the wait, the history layer covers the plate and closes in the same moment; a view transition would cross-fade a
+   *  snapshot of the layer over its own slide down); a failed load leaves the open deck as it was. `area`: where a
+   *  failure is told (the result; the build screen for a deck that has just been built). */
   const fetchGeneration = useCallback(async (gid: string, quiet = false, hold = false, area: NoticeArea = "result"): Promise<Generation | null> => {
     const seq = ++genSeq.current;
     askedGen.current = gid;
@@ -405,14 +411,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setActiveStrategyState(nextStrategy);
         setSelectedSlideState((cur) => (sameAsOpen ? clamp(cur, 1, max) : 1));
       };
-      if (holding) viewTransition(apply);
-      else apply();
+      apply();
       clearNotice("result"); // the deck opened: an earlier «Не удалось открыть презентацию» is stale
       const { templateId: tid, templates: list } = latest.current;
       if (g.template_id && g.template_id !== tid && list.some((t) => t.template_id === g.template_id)) selectTemplate(g.template_id);
       return g;
     } catch (e) {
       if (seq !== genSeq.current) return null;
+      // the open deck stayed: a change made to it reloads it again (reloadIfOpen asks for the deck asked for last)
+      if (holding) askedGen.current = latest.current.generation?.id ?? null;
       if (e instanceof ApiError && e.status === 404 && !holding) clearGeneration();
       if (!quiet) report(e, "Не удалось открыть презентацию", area);
       return null;
@@ -567,6 +574,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [generationDeps]);
   attachRef.current = attachBuild;
 
+  const followDeck = useCallback((g: GenerationMeta) => {
+    if (!g.job_id) return false;
+    if (liveJobs.current.has(g.job_id)) dispatch({ type: "go", screen: "build" });
+    else attachBuild(g);
+    return true;
+  }, [attachBuild]);
+
   /** A build that failed while the page was closed: nothing follows its job any more — the build screen shows its
    *  failure (B-failed) from the deck's meta (the reason) and, while the server remembers it, its job's record (the
    *  agent's timeline, where it stopped); «Собрать ещё раз» repeats its request. */
@@ -715,13 +729,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AppState>(() => ({
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, reloadIfOpen, activeStrategy, setActiveStrategy, activeVariant,
-    selectedSlide, setSelectedSlide, ui, dispatch, activeJob, runJob, busyVariants, work, fixIssues, revertVariant, buildJob, building, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
+    selectedSlide, setSelectedSlide, ui, dispatch, activeJob, runJob, followDeck, busyVariants, work, fixIssues, revertVariant, buildJob, building, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
     brief, setBrief, textIssue, setTextIssue, checkText, params, setParams,
     composerText, composerPreset, editText, takeComposerText, takeComposerPreset, improveSource, takeImproveSource,
   }), [
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, reloadIfOpen, activeStrategy, setActiveStrategy, activeVariant,
-    selectedSlide, setSelectedSlide, ui, activeJob, runJob, busyVariants, work, fixIssues, revertVariant, buildJob, building, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
+    selectedSlide, setSelectedSlide, ui, activeJob, runJob, followDeck, busyVariants, work, fixIssues, revertVariant, buildJob, building, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
     brief, setBrief, textIssue, checkText, params, setParams,
     composerText, composerPreset, editText, takeComposerText, takeComposerPreset, improveSource, takeImproveSource,
   ]);

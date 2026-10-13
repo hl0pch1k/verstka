@@ -61,7 +61,8 @@ export function Layer({ open, top, z, height = 812, label, children, onClose, id
     };
   }, [p.shown]);
   if (!p.mounted) return null;
-  const on = p.shown;
+  // закрытие — в том же кадре, что и сам переход (колода едет в этом же рендере); открытие — со следующего кадра
+  const on = open && p.shown;
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key !== "Escape" || !onClose || !on || e.defaultPrevented) return;
     e.preventDefault();

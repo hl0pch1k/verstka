@@ -20,6 +20,7 @@ import { Deck } from "../deck/Deck";
 import { DetailsSheet } from "../details/DetailsSheet";
 import { Icon } from "../kit/Icon";
 import type { StripData } from "../deck/Strip";
+import { HistoryLayer } from "../layers/HistoryLayer";
 import { Lightbox } from "../layers/Lightbox";
 import { Scrim } from "../layers/Scrim";
 import { TemplatesLayer } from "../layers/TemplatesLayer";
@@ -97,6 +98,7 @@ export function AppShell() {
       {/* пока раздел открыт, видимая полоса колоды над слоем закрывает его */}
       <Scrim open={!!ui.sect} onClose={() => dispatch({ type: "sect", sect: null })}
         label={ui.sect === "hist" ? "Закрыть «Мои презентации»" : "Закрыть «Шаблоны»"} />
+      <HistoryLayer />
       <TemplatesLayer fresh={upload.fresh} onUpload={uploadFromGallery} busy={upload.busy} />
       <TplPreviewLayer />
       <TplDeleteDialog />

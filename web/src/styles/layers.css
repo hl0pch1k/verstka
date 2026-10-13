@@ -1,6 +1,6 @@
 /* Слои колоды (Layer, Scrim) и разделы над ней. Дословно из boards/V2.dc.html: общий слой p2-lay (уезжает за 520 мс
  * непрозрачным, лесенка p2-ls по --d), полоса-подложка p2-scrim, раздел «Шаблоны» (ga-, C-gallery), «Слайды шаблона»
- * (pv-, C-tplpreview), «Удалить шаблон?» (dl-, tp-dls/tp-dlw, C-tpldelete). */
+ * (pv-, C-tplpreview), «Удалить шаблон?» (dl-, tp-dls/tp-dlw, C-tpldelete), «Мои презентации» (gh-, G-history). */
 .ga-rbw{background:#FFFFFF}
 .ga-box{height:532px;margin-top:16px;border-radius:24px;background:#FFFFFF;overflow:hidden}
 .ga-scroll{height:100%;overflow:auto;padding:24px}
@@ -50,3 +50,32 @@
 .tp-dlw .dl-dlg{opacity:0;transform:scale(.98);transition:opacity 240ms var(--ease),transform 240ms var(--ease)}
 .tp-dlw.tp-dl-on .dl-dlg{opacity:1;transform:scale(1);transition:opacity 360ms var(--ease) 40ms,transform 360ms var(--ease) 40ms}
 @media (max-width: 900px){.tp-dls,.tp-dlw{display:none !important}}
+/* G-history: «Мои презентации» — дословно из V2 (`#p2-lay-h`): список прокручивается внутри слоя (отрицательные поля —
+   чтобы обводка открытой не обрезалась), липкий заголовок дня, четыре колонки, обложка 16:9 радиус 16 */
+.gh-list{flex:1;min-height:0;margin:24px -8px 0;padding:0 8px 8px;overflow:auto;scrollbar-width:thin;scrollbar-color:rgba(11,18,32,.14) transparent}
+.gh-group + .gh-group{margin-top:24px}
+.gh-day{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:8px;height:40px;margin:0 -8px;padding:0 8px;background:#E9F1FF;font-family:'Unbounded','Manrope',sans-serif;font-size:14px;font-weight:600;line-height:24px;letter-spacing:-0.02em;color:#0B1220}
+.gh-dayn{font-family:'Manrope',sans-serif;font-size:13px;font-weight:500;line-height:20px;letter-spacing:0;color:#5A6272}
+.gh-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:24px 16px;margin:8px 0 0;padding:0;list-style:none}
+.gh-cover{height:auto;aspect-ratio:16 / 9}
+.gh-img{position:absolute;inset:0;display:block;width:100%;height:100%;aspect-ratio:16 / 9;object-fit:cover;border-radius:16px;box-shadow:0 0 0 1px rgba(11,18,32,.08)}
+.gh-ph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;border-radius:16px;background:#FFFFFF}
+.gh-ic{width:48px;height:48px;border-radius:999px;display:flex;align-items:center;justify-content:center}
+.gh-ic-run{background:#E9F1FF;color:#2563EB}
+.gh-ic-fail{background:#FEF2F2;color:#DC2626}
+.gh-row{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-top:12px}
+.gh-title{min-width:0;font-size:15px;font-weight:700;line-height:24px;color:#0B1220;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.gh-score{flex:none;font-family:'Unbounded','Manrope',sans-serif;font-weight:600;font-size:15px;line-height:24px;letter-spacing:-0.02em;color:#2563EB}
+.gh-badge{flex:none;display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 8px;border-radius:999px;font-size:12px;font-weight:700;line-height:16px;white-space:nowrap}
+.gh-badge-run{background:#FFFFFF;color:#2563EB}
+.gh-badge-fail{background:#FEF2F2;color:#DC2626}
+.gh-bdot{width:8px;height:8px;border-radius:999px;background:#2563EB}
+.gh-meta{display:block;margin-top:4px;font-size:13px;font-weight:500;line-height:20px;color:#5A6272;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Сверх доски (настоящие данные): обложка проявляется, когда слайд загрузился (240 мс), до того — белая рамка; слайда
+   нет — тихая заглушка; открываемая карточка — белая вуаль с дугой, проявляется через 120 мс (быстрая загрузка не мигает) */
+.gh-img{transition:opacity 240ms var(--ease)}
+.gh-img-wait{opacity:0}
+.gh-ic-none{background:#F3F4F1;color:#5A6272}
+.gh-wait{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;border-radius:16px;background:rgba(255,255,255,.72);color:#2563EB;opacity:0;transition:opacity 240ms var(--ease)}
+@keyframes gh-wait{from{opacity:0}to{opacity:1}}
+.gh-wait-on{opacity:1;animation:gh-wait 240ms var(--ease) 120ms backwards}

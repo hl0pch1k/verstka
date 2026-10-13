@@ -56,6 +56,8 @@ export function Deck({ h1, h2, h3, p1, p2, p3, b3, p4, s1, s2, s3, layers }: Dec
   // поднимается из «Создать» (`rise`; в V2 `keep3` ставится и снимается вместе с `rise`)
   const c3 = create || ui.rise;
   const head3 = create && !enter3;
+  // заголовки 01 и 02 проявляются в том же кадре, что «03» и содержимое плиты 03 (возврат на «Создать»: все три ждут enter3)
+  const heads = g.heads && !enter3;
 
   // overflow: clip, а не hidden, как на доске: вид тот же, но колода не становится прокручиваемой — scrollIntoView или
   // фокус на элементе плиты ниже края не сдвигают все плиты вверх
@@ -63,7 +65,7 @@ export function Deck({ h1, h2, h3, p1, p2, p3, b3, p4, s1, s2, s3, layers }: Dec
     <main className="p2-deck" style={{ position: "relative", zIndex: 0, minWidth: 0, height: 812, borderRadius: 40, overflow: "clip" }}>
       <Plate z={1} y={g.y[0]} className="p2-rise" label="Шаг 1 — шаблон" style={{ background: "#FFFFFF", color: "#0B1220", animationDelay: "0ms" }}>
         <Strip n="01" {...s1} on={g.strips} onClick={more ? () => dispatch({ type: "open", step: "tpl" }) : undefined} label="Вернуться к шагу «Шаблон»" />
-        <div className={show(g.heads)}>
+        <div className={show(heads)}>
           <div className="p2-hrow" style={{ display: "flex", alignItems: "center", gap: 24, height: 64 }}>
             <button type="button" className="p2-head" aria-expanded={tplOpen} aria-controls="p2-b1"
               onClick={() => dispatch({ type: "open", step: ui.open === "tpl" ? "text" : "tpl" })}>
@@ -79,7 +81,7 @@ export function Deck({ h1, h2, h3, p1, p2, p3, b3, p4, s1, s2, s3, layers }: Dec
       <Plate z={2} y={g.y[1]} className="p2-p2 p2-rise" label="Шаг 2 — текст"
         style={{ background: "#E9F1FF", color: "#0B1220", boxShadow: "0 -24px 48px -24px rgba(11,18,32,.16)", animationDelay: "40ms" }}>
         <Strip n="02" {...s2} on={g.strips} onClick={more ? () => dispatch({ type: "open", step: "text" }) : undefined} label="Вернуться к шагу «Текст»" />
-        <div className={show(g.heads)}>
+        <div className={show(heads)}>
           <div className="p2-hrow" style={{ display: "flex", alignItems: "center", gap: 24, height: 64 }}>
             <button type="button" className="p2-head" aria-expanded={!tplOpen} aria-controls="p2-b2"
               onClick={() => dispatch({ type: "open", step: ui.open === "text" ? "tpl" : "text" })}>
