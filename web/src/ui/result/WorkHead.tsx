@@ -25,10 +25,13 @@ export function WorkHead({ n, total, title, remarks, remarksOn = false, remarksO
 }) {
   const word = plural(remarks.count, "замечание", "замечания", "замечаний").slice(String(remarks.count).length + 1);
   const sw = remarksSwitch(remarks, remarksOn);
+  const where = total > 0 ? `Слайд ${n} из ${total}` : "Слайдов нет";
   return (
     <div className="p2-in" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, height: 40, animationDelay: "200ms" }}>
-      <p style={{ minWidth: 0, margin: 0, fontSize: 15, fontWeight: 700, lineHeight: "24px", color: "#0B1220", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-        {total > 0 ? `Слайд ${n} из ${total}` : "Слайдов нет"}{" "}
+      {/* в тесной колоде (помощник при 1280) заголовок слайда сжимается многоточием — целиком он в подсказке */}
+      <p title={title ? `${where} · ${title}` : where}
+        style={{ minWidth: 0, margin: 0, fontSize: 15, fontWeight: 700, lineHeight: "24px", color: "#0B1220", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        {where}{" "}
         {title && <span style={{ fontWeight: 500, color: "#5A6272" }}>· {title}</span>}
       </p>
       <div className="ra-whr" style={{ display: "flex", alignItems: "center", gap: 24, flex: "none" }}>
