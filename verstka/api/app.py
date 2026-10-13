@@ -304,10 +304,36 @@ def _eyes_of(vdir: Path, run_manifest: Optional[dict], outline: Optional[dict], 
     return {"looked": eyes.get("looked") or 0, "seconds": eyes.get("seconds"), "skipped": eyes.get("skipped"), "slides": slides}
 
 
+def _slide_size(deck: Path) -> Optional[tuple[int, int]]:
+    """The deck's slide size in EMU (ppt/presentation.xml `p:sldSz`); None when the file does not say."""
+    import zipfile
+
+    from lxml import etree
+
+    try:
+        with zipfile.ZipFile(deck) as z:
+            root = etree.fromstring(z.read("ppt/presentation.xml"))
+        sz = root.find("{http://schemas.openxmlformats.org/presentationml/2006/main}sldSz")
+        cx, cy = int(sz.get("cx")), int(sz.get("cy"))
+    except (OSError, KeyError, ValueError, TypeError, AttributeError, zipfile.BadZipFile, etree.XMLSyntaxError):
+        return None
+    return (cx, cy) if cx > 0 and cy > 0 else None
+
+
 def _pictures_of(vdir: Path) -> list[dict]:
+    """The picture records for the interface, each with where its place is on the slide (`bbox`, slide fractions):
+    the result screen frames the picture there and takes a click on it."""
     from verstka.images.fill import public_records, read_records
 
-    return public_records(read_records(vdir))
+    records = read_records(vdir)
+    out = public_records(records)
+    size = _slide_size(vdir / "deck.pptx") if records else None
+    for pub, rec in zip(out, records):
+        box = rec.get("box")
+        if size and isinstance(box, (list, tuple)) and len(box) == 4 and all(isinstance(n, (int, float)) for n in box):
+            w, h = size
+            pub["bbox"] = {"x": round(box[0] / w, 5), "y": round(box[1] / h, 5), "w": round(box[2] / w, 5), "h": round(box[3] / h, 5)}
+    return out
 
 
 def _edits_of(vdir: Path) -> list[dict]:

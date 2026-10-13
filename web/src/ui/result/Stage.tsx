@@ -3,13 +3,14 @@
 // и, проявившись, снимает слои под собой. Медленная картинка не оставляет серую рамку — до её готовности виден прежний
 // слайд; быстрое листание не обрывает проявляющийся слой — это тот же элемент, он доигрывает своё затухание.
 // Пропорции — шаблона (по умолчанию 16:9); высота сцены не больше, чем у 16:9 шириной 720, — рабочая область держит
-// свою высоту.
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+// свою высоту. Поверх слоёв — то, что приходит детьми: зоны изображений (R-picture), разметка замечаний (R-remarks) и
+// эскиз исправления (R-fixing); слои под ними живут своей жизнью.
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { isDecoded, prefersReducedMotion } from "../../lib/motion";
 import { cls } from "../kit/cls";
 import { pushShot, shotDone, shotReady, type Shot } from "./stageLayers";
 
-export function Stage({ src, alt, aspect }: { src: string | null; alt: string; aspect: number }) {
+export function Stage({ src, alt, aspect, children }: { src: string | null; alt: string; aspect: number; children?: ReactNode }) {
   const seq = useRef(0);
   const [layers, setLayers] = useState<Shot[]>(() => pushShot([], src, alt, ++seq.current));
   useEffect(() => {
@@ -26,6 +27,7 @@ export function Stage({ src, alt, aspect }: { src: string | null; alt: string; a
       {/* выше 16:9 (например, 4:3) — уже: высота сцены та же, что у 16:9 шириной 720 */}
       <div className="ra-stage" style={{ aspectRatio: String(ar), maxWidth: ar < 16 / 9 - 0.01 ? `${Math.round(405 * ar)}px` : undefined }}>
         {layers.map((l, i) => <Layer key={l.id} shot={l} top={i === top} onReady={ready} onDone={done} />)}
+        {children}
       </div>
     </div>
   );

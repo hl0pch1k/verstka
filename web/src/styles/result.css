@@ -66,3 +66,164 @@ a.p2-ob:hover{color:#0B1220}
 .ra-xf{animation:ra-xf 240ms var(--ease) backwards}
 /* «Собрать ещё раз» ждёт ответа сервера: кнопка занята, указатель — ожидание */
 .ra-nb[aria-busy="true"]{cursor:progress}
+
+/* Режим «Замечания», исправление слайда и изображение на слайде (задача 9). Блоки ниже — дословно из boards/V2.dc.html
+ * (модули `rm` и `rt`, классы rm- rk- rf- rd- rp- rt-), с поправками интерфейса: колонка результата — `.ra-main` (на
+ * доске — любой aside рядом с панелью); панель снимается из DOM, а не прячется (rm-hid не нужен); места рамки
+ * изображения и его зоны — из данных (инлайн), а не постоянные доски. */
+/* Режим «Замечания» (R-remarks · R-fixing · R-fixed): панель вместо колонки, рамки и номера на слайде,
+   бейджи на миниатюрах; «Исправить слайд» — слайд сворачивается в эскиз, как в раскадровке сборки */
+.ra-sw:disabled{cursor:default}
+.rm-out{opacity:0}
+.rm-col{display:flex;flex-direction:column;min-width:0;height:548px;grid-area:1 / 2;transition:opacity 240ms var(--ease)}
+.rm-col.rm-out{pointer-events:none}
+.p2-two:has(.rm-col) > .ra-main{transition:opacity 360ms var(--ease) 120ms,visibility 0s}
+.p2-two:has(.rm-col.rm-col-on) > .ra-main{opacity:0;visibility:hidden;pointer-events:none;transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
+@keyframes rm-fade{from{opacity:0}to{opacity:1}}
+.rm-mk{position:absolute;inset:0;z-index:1;pointer-events:none;transition:opacity 240ms var(--ease);animation:rm-fade 240ms var(--ease) 200ms backwards}
+.rm-mk .rk-pin,.rm-mk .rd-okpin{pointer-events:auto}
+.rm-mk.rm-out .rk-pin,.rm-mk.rm-out .rd-okpin{pointer-events:none}
+.p2-film .p2-th{position:relative}
+.p2-film .rk-tb{transition:opacity 240ms var(--ease)}
+.rm-cta:disabled{opacity:.32;cursor:default;transform:none}
+/* R-fixing: сцена слайда = карточка-эскиз; картинку закрывает тёмная подложка, поверх — линии схемы и рабочая полоса */
+.ra-stage:has(.rm-fx){transition:transform 520ms var(--ease)}
+.ra-stage:has(.rf-mini){transform:scale(.5)}
+.rm-fx{position:absolute;inset:0;z-index:2;pointer-events:none}
+.rm-dk{position:absolute;inset:0;background:#0B1220;opacity:0;transition:opacity 240ms var(--ease) 200ms}
+.rf-mini .rm-dk{opacity:1;transition-delay:0ms}
+.rf-sk{position:absolute;inset:0;width:100%;height:100%;opacity:0;transition:opacity 240ms var(--ease)}
+.rf-work{position:absolute;left:0;right:0;bottom:0;height:4px;background:#38BDF8;transform-origin:left center;opacity:0;transition:opacity 240ms var(--ease)}
+.rf-mini .rf-sk{opacity:1;transition-delay:160ms}
+.rf-mini .rf-work{opacity:1;animation:p2-work 1100ms var(--ease) infinite}
+.rf-draw{stroke-dasharray:100;stroke-dashoffset:0}
+.rf-mini .rf-draw{animation:rf-draw 1800ms var(--ease) infinite both}
+.rf-mini .rf-d2{animation-delay:120ms}.rf-mini .rf-d3{animation-delay:240ms}.rf-mini .rf-d4{animation-delay:360ms}
+@keyframes rf-draw{0%{stroke-dashoffset:100}55%,100%{stroke-dashoffset:0}}
+.rf-mini .rf-tint{animation:rf-tint 1800ms var(--ease) infinite both}
+@keyframes rf-tint{0%,20%{opacity:0}55%,100%{opacity:1}}
+.rf-err{background:#DC2626}
+.rf-warn{background:#B45309}
+.rf-note{background:#5A6272}
+.rf-tsp{position:absolute;top:4px;right:4px;width:20px;height:20px;border-radius:999px;background:#FFFFFF;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 1px rgba(11,18,32,.08);pointer-events:none}
+.rf-list{scrollbar-width:none}
+.rf-list::-webkit-scrollbar{display:none}
+.rf-row{display:grid;grid-template-columns:24px minmax(0,1fr);column-gap:12px;padding:16px;border-radius:24px;background:#FFFFFF;box-shadow:inset 0 0 0 1px rgba(11,18,32,.08);opacity:.56}
+.rf-dot{display:flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:999px;color:#FFFFFF;font-size:12px;font-weight:700;line-height:16px}
+.rf-rt{display:block;font-size:14px;font-weight:700;line-height:20px;color:#0B1220;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rf-rl{display:flex;align-items:center;gap:8px;margin-top:4px;font-size:13px;font-weight:700;line-height:20px}
+.rf-c-err{color:#DC2626}
+.rf-c-warn{color:#B45309}
+.rf-c-note{color:#5A6272}
+.rf-step{display:grid;grid-template-columns:16px 72px minmax(0,1fr);column-gap:8px;align-items:center;height:20px}
+.rf-sd{width:16px;height:16px;flex:none;border-radius:999px;display:flex;align-items:center;justify-content:center;background:#FFFFFF;box-shadow:inset 0 0 0 1px rgba(11,18,32,.14);color:#FFFFFF}
+.rf-sd svg{opacity:0}
+.rf-done .rf-sd{background:#2563EB;box-shadow:none}
+.rf-done .rf-sd svg{opacity:1}
+.rf-act .rf-sd{background:transparent;box-shadow:inset 0 0 0 2px #2563EB}
+.rf-sn{font-size:13px;font-weight:700;line-height:20px;color:#0B1220}
+.rf-wait .rf-sn{color:#5A6272}
+.rf-sl{min-width:0;font-size:13px;font-weight:500;line-height:20px;color:#5A6272;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rf-act .rf-sl{color:#2563EB;font-weight:600}
+/* R-fixed: исправление закончено — галочки на слайде, итог внизу панели */
+.rd-okpin{position:absolute;z-index:3;width:24px;height:24px;margin:-12px 0 0 -12px;border-radius:999px;background:#2563EB;color:#FFFFFF;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 2px #FFFFFF}
+.rd-err{background:#DC2626}
+.rd-warn{background:#B45309}
+.rd-note{background:#5A6272}
+.rd-list{scrollbar-width:none}
+.rd-list::-webkit-scrollbar{display:none}
+.rd-row{display:grid;grid-template-columns:24px minmax(0,1fr);column-gap:12px;width:100%;padding:16px;border:0;border-radius:24px;background:#FFFFFF;box-shadow:inset 0 0 0 1px rgba(11,18,32,.08);color:#0B1220;text-align:left}
+.rd-btn{cursor:pointer;transition:transform 160ms var(--ease)}
+.rd-btn:hover{transform:translateY(-2px)}
+.rd-btn:active{transform:scale(.98)}
+.rd-dot{display:flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:999px;color:#FFFFFF;font-size:12px;font-weight:700;line-height:16px}
+.rd-ok{background:#2563EB}
+.rd-rt{display:block;font-size:14px;font-weight:700;line-height:20px;color:#0B1220;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rd-rt-done{color:#5A6272}
+.rd-rx{display:-webkit-box;margin-top:4px;font-size:14px;font-weight:500;line-height:20px;color:#5A6272;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.rd-rl{display:flex;align-items:center;gap:8px;margin-top:4px;font-size:13px;font-weight:700;line-height:20px}
+.rd-c-ok{color:#2563EB}
+.rd-c-err{color:#DC2626}
+.rd-c-warn{color:#B45309}
+.rd-c-note{color:#5A6272}
+.rd-sum{margin-top:16px;padding:24px;border-radius:24px;background:#F3F4F1}
+.rd-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px;margin:0}
+.rd-stat{display:flex;flex-direction:column;min-width:0;margin:0}
+.rd-num{display:flex;align-items:baseline;gap:8px;height:40px;margin:0;font-family:'Unbounded','Manrope',sans-serif;font-weight:600;font-size:32px;line-height:40px;letter-spacing:-0.03em;color:#0B1220;white-space:nowrap}
+.rd-arr{flex:none;align-self:center}
+.rd-mut{color:#5A6272}
+.rd-acc{color:#2563EB}
+.rd-cap{margin:0;font-size:14px;font-weight:500;line-height:20px;color:#5A6272;white-space:nowrap}
+.rd-line{display:flex;align-items:center;gap:12px;height:40px;margin-top:16px;padding-top:16px;box-sizing:content-box;border-top:1px solid rgba(11,18,32,.08)}
+/* R-remarks: режим «Замечания» — разметка на слайде, бейджи на миниатюрах, панель вместо колонки
+   (после rd-row: выбранный ряд «Исправлено» получает ту же обводку, что и в R-remarks) */
+.rk-cnt-err{background:#FEF2F2;color:#DC2626}
+.rk-frame{position:absolute;z-index:1;border:2px solid #5A6272;border-radius:8px;pointer-events:none}
+.rk-frame-err{border-color:#DC2626}
+.rk-frame-warn{border-color:#B45309}
+.rk-frame-note{border-color:#5A6272}
+.rk-frame-on{z-index:2;box-shadow:0 0 0 2000px rgba(11,18,32,.32)}
+.rk-pin{position:absolute;z-index:3;width:24px;height:24px;margin:-12px 0 0 -12px;padding:0;border:0;border-radius:999px;color:#FFFFFF;font-size:12px;font-weight:700;line-height:24px;text-align:center;box-shadow:0 0 0 2px #FFFFFF;cursor:pointer;transition:transform 160ms var(--ease)}
+.rk-pin:hover{transform:translateY(-2px)}
+.rk-pin:active{transform:scale(.98)}
+.rk-err{background:#DC2626}
+.rk-warn{background:#B45309}
+.rk-note{background:#5A6272}
+.rk-tb{position:absolute;top:4px;right:4px;min-width:20px;height:20px;padding:0 4px;border-radius:999px;color:#FFFFFF;font-size:12px;font-weight:700;line-height:20px;text-align:center;box-shadow:0 0 0 2px #FFFFFF;pointer-events:none}
+.rk-list{scrollbar-width:none}
+.rk-list::-webkit-scrollbar{display:none}
+.rk-row{display:grid;grid-template-columns:24px minmax(0,1fr);column-gap:12px;width:100%;padding:16px;border:0;border-radius:24px;background:#FFFFFF;box-shadow:inset 0 0 0 1px rgba(11,18,32,.08);color:#0B1220;text-align:left;cursor:pointer;transition:transform 160ms var(--ease)}
+.rk-row:hover{transform:translateY(-2px)}
+.rk-row:active{transform:scale(.98)}
+.rk-on-err{box-shadow:inset 0 0 0 2px #DC2626}
+.rk-on-warn{box-shadow:inset 0 0 0 2px #B45309}
+.rk-on-note{box-shadow:inset 0 0 0 2px #5A6272}
+.rk-dot{display:flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:999px;color:#FFFFFF;font-size:12px;font-weight:700;line-height:16px}
+.rk-rt{display:block;font-size:14px;font-weight:700;line-height:20px;color:#0B1220}
+.rk-rx{display:-webkit-box;margin-top:4px;font-size:14px;font-weight:500;line-height:20px;color:#5A6272;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.rk-rl{display:flex;align-items:center;gap:8px;margin-top:4px;font-size:13px;font-weight:700;line-height:20px}
+.rk-c-err{color:#DC2626}
+.rk-c-warn{color:#B45309}
+.rk-c-note{color:#5A6272}
+.rk-inp{display:block;width:100%;height:48px;padding:0 24px;border:0;border-radius:999px;background:#F3F4F1;font-family:inherit;font-size:15px;font-weight:500;line-height:24px;color:#0B1220}
+/* цифры в кружках — Unbounded */
+.rk-pin,.rk-tb,.rk-dot,.rf-dot,.rd-dot{font-family:'Unbounded','Manrope',sans-serif;font-weight:600;letter-spacing:0;font-variant-numeric:tabular-nums}
+/* resulttools · «Изображение на слайде» (R-picture): рамка вокруг изображения на слайде и карточка в колонке */
+.rp-frame{position:absolute;border:2px solid #38BDF8;border-radius:8px;pointer-events:none}
+.rp-col{scrollbar-width:none}
+.rp-col::-webkit-scrollbar{display:none}
+.rp-in>*{flex:none}
+.rp-card{position:relative;display:block;padding:16px 24px;border-radius:24px;background:#F3F4F1;color:#0B1220;text-decoration:none;transition:transform 160ms var(--ease)}
+.rp-card:hover{color:#0B1220;transform:translateY(-2px)}
+.rp-card:active{transform:scale(.98)}
+.rp-ch{display:flex;align-items:center;justify-content:space-between;gap:8px;height:24px}
+.rp-ct{font-family:'Unbounded','Manrope',sans-serif;font-size:14px;font-weight:600;line-height:24px;letter-spacing:-0.02em;color:#0B1220;white-space:nowrap}
+.rp-cm{font-size:13px;font-weight:600;line-height:20px;color:#5A6272;white-space:nowrap}
+.rp-go{flex:none;color:#5A6272;transition:transform 160ms var(--ease)}
+.rp-card:hover .rp-go{transform:translateX(2px)}
+.rp-ri{display:flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:999px;background:#FFFFFF;color:#2563EB}
+.rp-tag{display:inline-flex;align-items:center;height:24px;padding:0 8px;border-radius:999px;background:#E9F1FF;color:#2563EB;font-size:12px;font-weight:700;line-height:16px;white-space:nowrap}
+.rp-on{box-shadow:inset 0 0 0 2px #2563EB}
+/* колонка стоит в конце прокрутки (column-reverse) — края мягкие постоянно: 24 сверху и снизу */
+.p2-fade.rp-col{animation:none;--p2-ft:24px;--p2-fb:24px}
+.rp-vg{display:inline-flex;align-items:baseline;gap:6px}
+/* кликабельная зона изображения (там же, где рамка); при наведении рамка проступает подсказкой */
+.rt-hit{position:absolute;padding:0;border:0;border-radius:8px;background:none;cursor:pointer}
+.rt-fr{opacity:0;transform:scale(.98);transition:opacity 240ms var(--ease),transform 240ms var(--ease)}
+.rt-fr-on{opacity:1;transform:none;transition:opacity 360ms var(--ease) 280ms,transform 360ms var(--ease) 280ms}
+.rt-hit:hover + .rt-fr:not(.rt-fr-on){opacity:.48;transform:none}
+/* колонка «Изображение» лежит точно над обычной колонкой (непрозрачная) и сменяет её проявлением */
+.rt-pcw{background:#FFFFFF}
+@media (max-width: 900px){.rt-pcw,.rt-hit{display:none !important}}
+@media (max-width: 900px){
+  .rm-col,.p2-two:has(.rm-col) > .ra-main{grid-area:auto}
+  .p2-two:has(.rm-col.rm-col-on) > .ra-main{display:none}
+}
+
+/* Свои дополнения. Содержимое разметки сцены входит заново на каждом слайде (rm-in). Вторая и следующие рамки выбранного места — над затемнением первой. Выключенные
+ * кнопки карточки «Изображение» — как у шапки результата (p2-rbl:disabled). */
+.rm-in{position:absolute;inset:0;animation:rm-fade 240ms var(--ease) backwards}
+.rk-frame-lift{z-index:2}
+.rp-col .p2-ob:disabled,.rp-col .p2-gb:disabled{opacity:.32;cursor:default;transform:none}
+.rp-col .p2-gb:disabled:hover{background:transparent}
+.rm-col .p2-ob[aria-busy="true"]:hover,.rm-col .p2-ob[aria-busy="true"]:active{transform:none}

@@ -57,6 +57,25 @@ def test_the_variant_payload_lists_its_pictures(built):
     assert c.get("/api/health").json()["images"]["configured"] is True
 
 
+def test_each_place_says_where_it_is_on_the_slide(built):
+    """The interface frames a picture on the slide («Изображение на слайде»): every place's box in slide fractions
+    (`bbox`), from its EMU box and the deck's slide size; the EMU box itself stays inside."""
+    from verstka.images.fill import read_records
+
+    c, mod, mock, gid, v = built
+    vdir = mod.store.generation_dir(gid) / "structured"
+    prs = Presentation(str(vdir / "deck.pptx"))
+    sw, sh = prs.slide_width, prs.slide_height
+    boxes = {r["id"]: r["box"] for r in read_records(vdir)}
+    assert v["pictures"]
+    for p in v["pictures"]:
+        x, y, w, h = boxes[p["id"]]
+        assert p["bbox"] == pytest.approx({"x": x / sw, "y": y / sh, "w": w / sw, "h": h / sh}, abs=1e-4)
+        b = p["bbox"]
+        assert 0 <= b["x"] < 1 and 0 <= b["y"] < 1 and 0 < b["w"] <= 1 and 0 < b["h"] <= 1
+        assert "box" not in p
+
+
 def test_a_new_picture_on_a_wish_and_back_again(built):
     c, mod, mock, gid, v = built
     n = next(p for p in v["pictures"] if p["status"] == "generated")["slide"]

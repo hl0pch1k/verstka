@@ -441,6 +441,8 @@ export interface VariantEdit {
   at: number; request: string; reply: string; kind: string; slides: number[]; score_before: number | null; score_after: number | null;
   /** A slide fix (kind "fix", newer servers): the remarks it fixed, how (model | rules | autofix) and the snapshot version. */
   fixed?: string[]; how?: string; version?: number | null;
+  /** «верни как было» (newer servers): the version this entry undid; null — a change of its own. */
+  undo_of?: number | null;
 }
 export interface Variant {
   strategy: string;
@@ -499,6 +501,8 @@ export interface SlidePicture {
   model_label?: string | null;
   palette_match?: number | null;
   at?: number | null;
+  /** Where the place is on the slide, in slide fractions (newer servers): the result screen frames it and takes a click. */
+  bbox?: BboxFrac | null;
 }
 /** «Заменить изображение»: POST /api/generations/{gid}/{strategy}/slides/{n}/image */
 export interface PictureChangeRequest { wish?: string | null; action?: "generate" | "remove" }

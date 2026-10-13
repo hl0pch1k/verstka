@@ -1,15 +1,21 @@
 // Шапка рабочей области (R-aside): «Слайд 3 из 12 · Неопределённый интеграл», справа — «Замечания» со счётчиком и
-// переключателем (только когда на слайдах есть замечания), стрелки и «На весь экран». Режим замечаний — задача 9,
-// просмотр на весь экран — задача 10: здесь их кнопки в окончательном виде, обработчики приходят сверху.
+// переключателем (когда на слайдах есть замечания или режим включён), стрелки и «На весь экран». Счётчик — открытые
+// замечания варианта: янтарный, а в режиме «Замечания» при ошибке — красный (R-remarks). Пока агент исправляет слайд,
+// переключатель не нажимается. Просмотр на весь экран — задача 10: обработчик приходит сверху.
 import { plural } from "../../lib/utils";
+import { cls } from "../kit/cls";
 import { Icon } from "../kit/Icon";
 import { Switch } from "../kit/Switch";
 
-export function WorkHead({ n, total, title, remarks, onPrev, onNext, onToggleRemarks, onOpenLightbox }: {
+export function WorkHead({ n, total, title, remarks, remarksOn = false, remarksOff = null, onPrev, onNext, onToggleRemarks, onOpenLightbox }: {
   n: number;
   total: number;
   title: string;
   remarks: { count: number; errors: boolean };
+  /** Режим «Замечания» включён. */
+  remarksOn?: boolean;
+  /** Почему переключатель сейчас не нажимается (агент исправляет слайд); null — нажимается. */
+  remarksOff?: string | null;
   onPrev(): void;
   onNext(): void;
   onToggleRemarks(): void;
@@ -23,15 +29,16 @@ export function WorkHead({ n, total, title, remarks, onPrev, onNext, onToggleRem
         {title && <span style={{ fontWeight: 500, color: "#5A6272" }}>· {title}</span>}
       </p>
       <div style={{ display: "flex", alignItems: "center", gap: 24, flex: "none" }}>
-        {remarks.count > 0 && (
+        {(remarks.count > 0 || remarksOn) && (
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span id="ra-swl" style={{ fontSize: 14, fontWeight: 600, lineHeight: "20px", color: "#0B1220" }}>Замечания</span>
-            <span id="ra-swc" className="ra-cnt ra-cnt-warn">
+            <span id="ra-swc" className={cls("ra-cnt", remarksOn && remarks.errors ? "rk-cnt-err" : "ra-cnt-warn")}>
               {remarks.count}
               <span className="p2-sr"> {word} на слайдах, {remarks.errors ? "есть ошибка" : "ошибок нет"}</span>
             </span>
             <span style={{ display: "flex", marginLeft: 4 }}>
-              <Switch on={false} onToggle={onToggleRemarks} labelledBy="ra-swl" describedBy="ra-swc" className="ra-sw" />
+              <Switch on={remarksOn} onToggle={onToggleRemarks} labelledBy="ra-swl" describedBy="ra-swc" className="ra-sw" disabled={!!remarksOff}
+                title={remarksOff ?? undefined} />
             </span>
           </div>
         )}
