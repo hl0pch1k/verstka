@@ -118,6 +118,7 @@
 .tx-sw{display:grid;align-items:center;min-width:0}
 .tx-sw>*{grid-area:1 / 1}
 .tx-swr{flex:none;justify-items:end}
+.tx-swr.p2-none{display:none}
 .tx-take{display:inline-flex;align-items:center;height:20px;padding:0;border:0;border-radius:4px;background:none;color:#2563EB;font-size:14px;font-weight:700;line-height:20px;white-space:nowrap;cursor:pointer;transition:transform 160ms var(--ease)}
 .tx-take:hover{transform:translateY(-2px)}
 .tx-take:active{transform:scale(.98)}

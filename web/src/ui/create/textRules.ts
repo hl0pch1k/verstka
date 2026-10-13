@@ -201,7 +201,10 @@ export const improveSlides = (src: Pick<ImproveSource, "name" | "slides">) => sl
 // ── жизнь режима «Улучшить готовую»
 /** Где режим сейчас: `tpl` — шаблон исходной презентации (null — шаблон не выбран), `hadText` — в поле уже был текст. */
 export interface ImproveLive { tpl: string | null; hadText: boolean }
-export const improveLive = (tpl: string | null): ImproveLive => ({ tpl, hadText: false });
+/** Начало режима. `sourceBrief` — текст презентации, который встаёт в поле: он есть с самого начала (`hadText`), даже если
+ *  в поле не изменился (презентацию прочитали заново, «Изменить текст» после сборки с тем же текстом) — иначе очистка
+ *  такого поля режим не кончала бы: «текст появился» эффект не увидел бы. */
+export const improveLive = (tpl: string | null, sourceBrief: string): ImproveLive => ({ tpl, hadText: !!sourceBrief.trim() });
 
 /** Кончается ли режим «Улучшить готовую» (V2 `txText`, `txImpOn`): другой шаблон выбран или поле очищено. Ввод в поле
  *  режим держит. У презентации без текста поле пусто с самого начала: это не очистка, режим кончится, когда текст

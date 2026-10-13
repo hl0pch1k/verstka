@@ -195,7 +195,7 @@ test("файл: пустой — строка «Файл «X» пустой», �
 
 // ── «Улучшить готовую»: когда режим кончается
 test("режим: ввод в поле его держит", () => {
-  let live = improveLive("t1");
+  let live = improveLive("t1", "");
   let r = improveStep(live, "Слайд 1. Итоги", "t1");
   assert.equal(r.ends, false);
   live = r.live;
@@ -206,22 +206,22 @@ test("режим: ввод в поле его держит", () => {
   }
 });
 test("режим: очистка поля (и одни пробелы) его кончает", () => {
-  const live = improveStep(improveLive("t1"), "Слайд 1. Итоги", "t1").live;
+  const live = improveStep(improveLive("t1", ""), "Слайд 1. Итоги", "t1").live;
   assert.equal(improveStep(live, "", "t1").ends, true);
   assert.equal(improveStep(live, " \n\t", "t1").ends, true);
 });
 test("режим: другой шаблон его кончает, тот же — нет", () => {
-  const live = improveStep(improveLive("t1"), "Слайд 1. Итоги", "t1").live;
+  const live = improveStep(improveLive("t1", ""), "Слайд 1. Итоги", "t1").live;
   assert.equal(improveStep(live, "Слайд 1. Итоги", "t2").ends, true);
   assert.equal(improveStep(live, "Слайд 1. Итоги", null).ends, true);
   assert.equal(improveStep(live, "Слайд 1. Итоги", "t1").ends, false);
   // презентация без шаблона (null): режим держится, пока шаблон не выбран другой
-  const bare = improveStep(improveLive(null), "Слайд 1. Итоги", null).live;
+  const bare = improveStep(improveLive(null, ""), "Слайд 1. Итоги", null).live;
   assert.equal(improveStep(bare, "Слайд 1. Итоги", null).ends, false);
   assert.equal(improveStep(bare, "Слайд 1. Итоги", "t3").ends, true);
 });
 test("режим: презентация без текста не кончается с первого прохода — только когда текст появился и его стёрли", () => {
-  let r = improveStep(improveLive("t1"), "", "t1");
+  let r = improveStep(improveLive("t1", ""), "", "t1");
   assert.equal(r.ends, false);
   r = improveStep(r.live, "  ", "t1");
   assert.equal(r.ends, false);
@@ -229,5 +229,18 @@ test("режим: презентация без текста не кончает
   assert.equal(r.ends, false);
   assert.equal(improveStep(r.live, "", "t1").ends, true);
   // другой шаблон кончает и пустую
-  assert.equal(improveStep(improveLive("t1"), "", "t2").ends, true);
+  assert.equal(improveStep(improveLive("t1", ""), "", "t2").ends, true);
+});
+test("режим: в поле уже был текст презентации — очистка кончает режим с первого же прохода", () => {
+  // презентацию прочитали заново или открыли «Изменить текст», а текст в поле не изменился: эффект не видит, как текст
+  // «появился», но он был с самого начала — очистка должна кончать режим
+  const src = "Слайд 1. Итоги\nВыручка выросла";
+  const live = improveLive("t1", src);
+  assert.equal(live.hadText, true);
+  assert.equal(improveStep(live, "", "t1").ends, true);
+  assert.equal(improveStep(live, " \n\t", "t1").ends, true);
+  // пока поле не очищено — режим жив
+  assert.equal(improveStep(live, src, "t1").ends, false);
+  // текст источника из одних пробелов — текста не было: как презентация без текста
+  assert.equal(improveLive("t1", "  \n").hadText, false);
 });

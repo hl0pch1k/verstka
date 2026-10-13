@@ -111,7 +111,7 @@ export function useTextPlate(): TextPlate {
   useEffect(() => {
     if (improveSource && improveSource !== applied.current) {
       applied.current = improveSource;
-      live.current = improveLive(improveSource.template_id ?? templateId);
+      live.current = improveLive(improveSource.template_id ?? templateId, improveSource.brief);
       setBrief(improveSource.brief);
       return;
     }
@@ -288,6 +288,19 @@ export function TextHead({ tp }: { tp: TextPlate }) {
   );
 }
 
+/** Идёт ли чтение — для строки о ходе, которая гаснет вместе с его концом. Чтение кончилось — «идёт» держится ещё
+ *  время ухода (240 мс, `p2-off`), строка успевает погаснуть со спиннером и «Читаю…»; не погасла (осталась без чтения) —
+ *  дальше показывает как есть. */
+function useBusyHeld(busy: boolean): boolean {
+  const [held, setHeld] = useState(busy);
+  useEffect(() => {
+    if (busy) return setHeld(true);
+    const t = window.setTimeout(() => setHeld(false), 240);
+    return () => window.clearTimeout(t);
+  }, [busy]);
+  return busy || held;
+}
+
 const LINE: CSSProperties = { display: "flex", alignItems: "center", gap: 8, minWidth: 0, margin: 0, fontSize: 14, fontWeight: 500, lineHeight: "20px", color: "#5A6272" };
 const NOTE_LINE: CSSProperties = { flex: "none", fontSize: 13, lineHeight: "20px", color: "#5A6272", whiteSpace: "nowrap" };
 
@@ -311,6 +324,9 @@ export function TextBody({ tp }: { tp: TextPlate }) {
   const shown = useHeld(issue);
   const deck = useHeld(tp.reading);
   const note = useHeld(tp.info);
+  // строка о ходе, пока гаснет, остаётся такой, какой была: со спиннером и «Читаю…» — чтение кончается на кадр раньше,
+  // чем строка уходит, и живое `busy` подменило бы значок и текст прямо в уходе
+  const infoBusy = useBusyHeld(busy);
   return (
     <div id="p2-b2" className={cls("p2-body", show(on))} style={{ margin: "24px 0 0 192px" }}>
       <div className="tx-b2" style={{ "--tx-sh": `${shift}px`, "--tx-gr": `${grow}px` } as CSSProperties}>
@@ -350,11 +366,12 @@ export function TextBody({ tp }: { tp: TextPlate }) {
                   <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{deck ? `Читаю презентацию «${templateStem(deck)}»…` : ""}</span>
                 </p>
                 <p className={show(infoOn)} role="status" title={infoOn && note ? note : undefined} style={{ ...LINE, whiteSpace: "nowrap" }}>
-                  <span style={{ display: "flex", flex: "none", color: busy ? "#2563EB" : undefined }}>{busy ? <Spinner size={16} /> : <Icon name="info" size={16} />}</span>
-                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{busy && deck ? `Читаю презентацию «${templateStem(deck)}»… ${note ?? ""}` : note}</span>
+                  <span style={{ display: "flex", flex: "none", color: infoBusy ? "#2563EB" : undefined }}>{infoBusy ? <Spinner size={16} /> : <Icon name="info" size={16} />}</span>
+                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{infoBusy && deck ? `Читаю презентацию «${templateStem(deck)}»… ${note ?? ""}` : note}</span>
                 </p>
               </div>
-              <span className="tx-sw tx-swr">
+              {/* ошибка файла длинная — правая часть (счётчик, подсказка) уходит из ряда, и строка ошибки получает всю ширину */}
+              <span className={cls("tx-sw tx-swr", issue?.kind === "file" && "p2-none")}>
                 <span aria-live="polite" className={show(!issue)} style={{ ...NOTE_LINE, fontWeight: 600 }}>{charsLabel(brief.length)}</span>
                 <span className={show(!!issue)} style={{ ...NOTE_LINE, fontWeight: 500 }}>{FIX}</span>
               </span>
