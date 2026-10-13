@@ -578,6 +578,11 @@ def generate_variants(
             except Exception as e:  # noqa: BLE001 - the deck stays as the deterministic steps made it
                 log.warning("design review failed on %s", name, exc_info=True)
                 v["warnings"].append(f"design review failed: {str(e)[:160]}")
+                # the timeline ends the step as skipped (not «now» till the build's end), «Агент» says why
+                from verstka.audit.eyes import EyesOutcome, skip_message
+
+                eyes_seen[name] = EyesOutcome(skipped=f"failed: {str(e)[:160]}", skipped_code="failed").summary()
+                say(skip_message("failed"))
             v["timings"]["eyes"] = round(time.time() - tey, 2)
         try:
             from verstka.rendering.renderer import strip_outline_marks

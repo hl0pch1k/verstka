@@ -185,6 +185,69 @@ def test_the_review_needs_time_a_vision_model_and_slide_images(variant, tmp_path
     assert off[4].skipped == "off in configs/eyes.yaml"
 
 
+def test_a_review_that_does_not_start_says_so_on_the_timeline_with_a_code(variant, tmp_path):
+    """The build's «Взгляд дизайнера» never hangs «now» till the end: a skip is a line of its own under the step, in the
+    person's words (the reason's English stays in `skipped` for the log), and the outcome keeps the reason's code."""
+    v, manifest, ws = variant
+    events: list = []
+
+    def run(**kw):
+        return E.look(v.out_dir, v.audit, v.outline, v.plan, manifest, ws, skills=SKILLS, images=_shots,
+                      emit=lambda message, slide=None, fix=None: events.append((slide, message)), **kw)[4]
+
+    short = run(providers=_model(1, True, []), deadline=time.monotonic() + 10)
+    assert short.skipped_code == "no_time" and short.summary()["skipped_code"] == "no_time"
+    assert events == [(None, "Взгляд дизайнера пропущен: не хватило времени на сборку.")]
+    events.clear()
+    assert run(providers=ProviderRegistry(roles={"llm": MockProvider({})})).skipped_code == "no_model"
+    assert events == [(None, "Взгляд дизайнера пропущен: модель недоступна.")]
+    events.clear()
+    assert run(providers=_model(1, True, []), cfg={"enabled": False}).skipped_code == "off"
+    assert events == [(None, "Взгляд дизайнера пропущен: выключен в настройках.")]
+    # a review that ran says what it saw, never «пропущен»
+    events.clear()
+    seen = run(providers=_model(-1, True, []), deadline=time.monotonic() + 120)
+    assert seen.skipped is None and seen.skipped_code is None and not any("пропущен" in m for _, m in events)
+
+
+def test_the_skip_reasons_have_a_code_and_the_interfaces_words():
+    assert E.skip_code("no time left in the generation's model budget") == "no_time"
+    assert E.skip_code("no slide images (soffice not found)") == "no_images"
+    assert E.skip_code("the model did not answer") == "no_answer"
+    assert E.skip_code("off in configs/eyes.yaml") == "off" and E.skip_code("no vision model") == "no_model"
+    assert E.skip_code("failed: boom") == "failed" and E.skip_code("something new") is None and E.skip_code(None) is None
+    assert E.skip_message("no_time") == "Взгляд дизайнера пропущен: не хватило времени на сборку."
+    assert E.skip_message("unknown") == "Взгляд дизайнера пропущен."
+    # no English reaches the screen: the words are Russian, and the web keeps the same ones for runs recorded before
+    # the timeline said it (web/src/lib/designEye.ts `EYES_SKIP`)
+    web = (Path(__file__).resolve().parents[2] / "web" / "src" / "lib" / "designEye.ts").read_text(encoding="utf-8")
+    for code, words in E.SKIP_RU.items():
+        assert not any("a" <= ch.lower() <= "z" for ch in words), words
+        assert f'{code}: "{words}"' in web, code
+
+
+def test_a_review_that_fails_in_the_pipeline_ends_as_skipped_on_the_timeline(simple_deck, tmp_path, monkeypatch):
+    def broken(*a, **kw):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(E, "look", broken)
+    events: list = []
+
+    def progress(msg="", frac=None, event=None):
+        if event is not None:
+            events.append(event)
+
+    res = generate_variants(simple_deck, brief=parse_brief_text(BRIEF), strategies=["structured"], out_dir=tmp_path / "out", workspace_root=tmp_path / "ws",
+                            use_llm=False, use_vlm=True, providers=_model(1, True, []), skills=SKILLS, exports=[], render_images=False, pictures=False,
+                            progress=progress)
+    said = [e for e in events if e.get("step") == "eyes"]
+    assert [(e["message"], e["variant"]) for e in said] == [("Взгляд дизайнера пропущен: не получилось посмотреть на слайды.", "structured")]
+    import json
+
+    m = json.loads((res.variants[0].out_dir / "run_manifest.json").read_text(encoding="utf-8"))
+    assert m["eyes"]["skipped_code"] == "failed" and m["eyes"]["skipped"].startswith("failed: boom")
+
+
 def test_a_model_that_does_not_answer_leaves_the_slides_and_says_so(variant, tmp_path):
     v, manifest, ws = variant
 

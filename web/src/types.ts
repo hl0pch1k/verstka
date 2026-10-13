@@ -484,7 +484,9 @@ export interface DesignEyeSlide {
   /** Redesigned since the build: the pictures of the review are not this slide's any more. */
   redone?: boolean;
 }
-export interface DesignEye { looked: number; seconds?: number | null; skipped?: string | null; slides: DesignEyeSlide[] }
+/** `skipped` — why the review did not look (English, for the log); `skipped_code` — the same as a code the interface
+ *  says in words (lib/designEye `EYES_SKIP`): off · no_model · no_time · no_images · no_answer · failed. */
+export interface DesignEye { looked: number; seconds?: number | null; skipped?: string | null; skipped_code?: string | null; slides: DesignEyeSlide[] }
 
 /** A picture inside a slide, or the place kept for one: generated — a text-to-image model made it; free — the place
  *  waits (why: the author's own photo, generation off, the model did not answer); removed — the person took it out. */

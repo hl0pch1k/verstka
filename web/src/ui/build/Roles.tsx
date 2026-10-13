@@ -50,11 +50,13 @@ export function Roles({ view }: { view: BuildView }) {
   const queued = view.phase === "queued";
   const last = view.roles.length - 1;
 
-  // сдвиг ленты: работающая роль (или с ошибкой) и следующая — над нижним краем
+  // сдвиг ленты: работающая роль (или с ошибкой) и следующая — над нижним краем. Работающей нет (последнюю роль сервер
+  // пропустил, а сборка ещё сохраняет файлы) — на виду последняя пройденная, лента не уезжает к началу
   const list = useRef<HTMLOListElement>(null);
   const [roll, setRoll] = useState(0);
   const at = view.roles.findIndex((r) => r.status === "now" || r.status === "error");
-  const focus = at >= 0 ? at : view.phase === "done" ? last : -1;
+  const reached = view.roles.map((r) => r.status !== "queue").lastIndexOf(true);
+  const focus = at >= 0 ? at : view.phase === "done" ? last : reached;
   useLayoutEffect(() => {
     const el = list.current;
     if (!el || focus < 0) return void setRoll(0);

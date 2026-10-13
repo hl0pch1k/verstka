@@ -122,3 +122,42 @@ test("«Взгляд дизайнера» never says «замечаний нет
   } as unknown as Variant;
   assert.equal(agentSummary(record).find((l) => l.step === "Взгляд дизайнера")?.text.replace(/ /g, " "), "Посмотрел на 9 слайдов, пересобрал 1 слайд");
 });
+
+test("buildTimeline: «Взгляд дизайнера» the server skipped is a skipped step with its reason", () => {
+  const events = [
+    { step: "analyst", message: "Нашёл в тексте 12 слайдов.", slide: null, variant: null },
+    { step: "eyes", message: "Взгляд дизайнера пропущен: не хватило времени на сборку.", slide: null, variant: "structured" },
+    { step: "eyes", message: "Взгляд дизайнера пропущен: не хватило времени на сборку.", slide: null, variant: "visual" },
+  ];
+  const done = buildTimeline({ events, phase: "eyes", running: false }).find((r) => r.key === "eyes");
+  assert.equal(done?.status, "skipped");
+  assert.equal(done?.note?.replace(/ /g, " "), "пропущен: не хватило времени на сборку");
+  // live: over once every variant of the build said so — not «now» till the build's end
+  const live = (vs: string[]) => buildTimeline({ events, phase: "eyes", running: true, variants: vs }).find((r) => r.key === "eyes");
+  assert.equal(live(["structured", "visual"])?.status, "skipped");
+  assert.equal(live(["structured", "visual", "compact"])?.status, "active");
+  // the note of a review that looked at one variant and skipped another counts only what it saw
+  const mixed = buildTimeline({
+    events: [...events.slice(0, 2), { step: "eyes", message: "Посмотрел на 12 слайдов — замечаний нет.", slide: null, variant: "visual" }],
+    phase: "eyes", running: false,
+  }).find((r) => r.key === "eyes");
+  assert.equal(mixed?.status, "done");
+  assert.equal(mixed?.note, "замечаний нет");
+  const onlySkip = buildTimeline({ events: events.slice(0, 2), phase: "eyes", running: true, variants: ["structured", "visual"] }).find((r) => r.key === "eyes");
+  assert.equal(onlySkip?.status, "active");
+  assert.equal(onlySkip?.note, null);
+});
+
+test("agentSummary: a skipped «Взгляд дизайнера» is no review — no «посмотрел на слайды» line", () => {
+  const v = {
+    strategy: "structured",
+    eyes: { looked: 0, skipped: "no time left in the generation's model budget", skipped_code: "no_time", slides: [] },
+    agent: {
+      events: [
+        { step: "analyst", message: "Нашёл в тексте 12 слайдов.", slide: null, variant: null },
+        { step: "eyes", message: "Взгляд дизайнера пропущен: не хватило времени на сборку.", slide: null, variant: "structured" },
+      ],
+    },
+  } as unknown as Variant;
+  assert.equal(agentSummary(v).find((l) => l.step === "Взгляд дизайнера"), undefined);
+});

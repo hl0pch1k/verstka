@@ -239,6 +239,9 @@ export interface TimelineInput {
   /** The job is still running (false: everything reached is done). */
   running: boolean;
   notes?: Partial<Record<PhaseKey, string | null>>;
+  /** The variants the build makes: a live «Взгляд дизайнера» that each of them said it skipped is over — skipped, not
+   *  «now» till the build's end. */
+  variants?: string[];
 }
 
 /** The critic's count line («3 замечания — слайды 2, 4, 5.»): the step's header says it instead. */
@@ -299,6 +302,13 @@ const flaggedSlides = (events: AgentEvent[]) =>
 // … and a review the model did not answer (no slide seen)
 const unseen = (events: AgentEvent[]) => events.some((e) => /посмотрел на 0(?:\s|\u00a0)|модель не ответила/i.test(e.message));
 
+/** A step's line that only says it was skipped: «Критик пропущен: …», «Взгляд дизайнера пропущен: …» (the step's name
+ *  may be dropped already), «… не запускался». */
+const skipSaid = (key: PhaseKey, e: AgentEvent) => {
+  const title = PHASES.find((p) => p.key === key)?.title ?? "";
+  return (e.slide === null || e.slide === undefined) && new RegExp(`^(?:${title}\\s+)?(?:пропущен|не\\s+запускал)`, "iu").test(e.message.trim());
+};
+
 /** The card's line of «Взгляд дизайнера»: what it looked at, laid out again, and what stayed a remark. */
 function eyesLine(looked: number | null, redone: number, left: number): string {
   if (looked === 0) return "Модель не ответила — слайды остались как были";
@@ -317,7 +327,9 @@ function ownNote(key: PhaseKey, events: TimelineEvent[]): string | null {
   }
   if (key === "revise" && slides.length) return `${plural(slides.length, "слайд", "слайда", "слайдов")} ${agrees(slides.length, "переделан", "переделаны")}`;
   if (key === "eyes") {
-    // «Взгляд дизайнера»: the slides it laid out again (an event with a slide and a «Собрал заново» fix), or none
+    // «Взгляд дизайнера»: the slides it laid out again (an event with a slide and a «Собрал заново» fix), or none; a
+    // variant it skipped says nothing about what it saw
+    events = events.filter((e) => !skipSaid("eyes", e));
     const onSlide = events.filter((e) => e.slide !== null && e.slide !== undefined);
     const redone = uniqueSlides(onSlide.filter((e) => /^собрал заново/i.test(e.fix ?? "")));
     const left = [...new Set([...uniqueSlides(onSlide), ...flaggedSlides(events)])].filter((n) => !redone.includes(n)).sort((a, b) => a - b);
@@ -330,7 +342,7 @@ function ownNote(key: PhaseKey, events: TimelineEvent[]): string | null {
   return null;
 }
 
-export function buildTimeline({ events, phase, running, notes }: TimelineInput): TimelineRow[] {
+export function buildTimeline({ events, phase, running, notes, variants }: TimelineInput): TimelineRow[] {
   const evs = withPhases(events);
   const allVariants = [...new Set(evs.map((e) => e.variant).filter((v): v is string => !!v))];
   let cur = phase;
@@ -367,10 +379,13 @@ export function buildTimeline({ events, phase, running, notes }: TimelineInput):
     const passed = running ? idx < curIdx : idx <= curIdx || !cur;
     let status: PhaseStatus = passed ? "done" : running && idx === curIdx ? "active" : "pending";
     let note = notes?.[def.key] ?? ownNote(def.key, own);
-    // a critic that only said it was skipped («Критик пропущен: …») is a skipped step: a grey dash and the reason beside
-    // its title, never a blue check over no work
-    const skippedSaid = def.key === "critic" && own.length > 0 && own.every((e) => (e.slide === null || e.slide === undefined) && /^(?:критик\s+)?(?:пропущен|не\s+запускал)/i.test(e.message.trim()));
-    if (skippedSaid && passed) {
+    // a critic or a «Взгляд дизайнера» that only said it was skipped («Критик пропущен: …», «Взгляд дизайнера пропущен:
+    // не хватило времени на сборку.») is a skipped step: a grey dash and the reason beside its title, never a blue
+    // check over no work. A live «Взгляд дизайнера» is over once every variant of the build said so (it is the last
+    // step: nothing after it would end it)
+    const skippedSaid = (def.key === "critic" || def.key === "eyes") && own.length > 0 && own.every((e) => skipSaid(def.key, e));
+    const allSaid = def.key === "eyes" && !!variants?.length && variants.every((n) => evs.some((e) => e.phase === "eyes" && e.variant === n));
+    if (skippedSaid && (passed || allSaid)) {
       const why = eventText(own[0]).replace(/[.\s]+$/, "");
       rows.push({ key: def.key, title: def.title, hint: def.hint, status: "skipped", note: why.charAt(0).toLowerCase() + why.slice(1), events: [] });
       continue;
@@ -449,7 +464,7 @@ export function agentSummary(v: Variant | null | undefined): AgentSummaryLine[] 
     }
     // «Взгляд дизайнера»: how many finished slides the vision model looked at, how many it laid out again and how many
     // serious remarks stayed — from the review's own record when the server sends it, else from the timeline
-    const eyes = evs.filter((e) => e.phase === "eyes" && mine(e));
+    const eyes = evs.filter((e) => e.phase === "eyes" && mine(e) && !skipSaid("eyes", e));
     const record = v?.eyes;
     if (record && !record.skipped) {
       const redone = record.slides.filter((s) => s.status === "fixed").length;

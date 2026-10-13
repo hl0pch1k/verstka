@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { phaseOfStep, type PhaseKey } from "../lib/agent";
+import { eyesSkipEvent } from "../lib/designEye";
 import { foldJobEvent, type ActiveJob } from "../lib/jobState";
 import { useApp } from "../store";
 import type { AgentEvent, Generation, JobEvent } from "../types";
@@ -53,13 +54,17 @@ function script(g: Generation, speed: number): Step[] {
     for (let k = 1; k <= n; k++) push(160, { progress: base + span * (k / n), message: `${v.strategy}: rendered slide ${k}/${n}` });
     push(300, { progress: base + span, message: `${v.strategy}: audit` });
   });
-  if (after.length) {
+  // a variant the server skipped «Взгляд дизайнера» for: recordings made before the timeline said so get the line the
+  // server says now («Взгляд дизайнера пропущен: не хватило времени на сборку.»), after the lines of those it looked at
+  const skips = g.variants.map(eyesSkipEvent).filter((e): e is AgentEvent => e !== null);
+  if (after.length || skips.length) {
     names.forEach((name) => push(300, { progress: 0.85, message: `${name}: design review` }));
-    prev = after[0].t ?? prev;
+    prev = after[0]?.t ?? prev;
     after.forEach((e) => {
       agentStep(e, prev, 0.85);
       prev = e.t ?? prev;
     });
+    skips.forEach((e) => push(600, { type: "agent", step: e.step, message: e.message, slide: null, variant: e.variant, seq: ++seq, fix: null, progress: 0.85 }));
   }
   push(800, { progress: 0.86, message: "export: pdf, html, slide previews" });
   names.forEach((name) => push(900, { progress: 0.97, message: `${name}: done in 42.0s` }));

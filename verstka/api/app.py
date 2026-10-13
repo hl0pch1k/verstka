@@ -265,7 +265,7 @@ def _variant_payload(gdir: Path, strategy: str, use_models: Optional[bool] = Non
 def _eyes_of(vdir: Path, run_manifest: Optional[dict], outline: Optional[dict], gid: str, strategy: str, edits: list[dict]) -> Optional[dict]:
     """The review of the variant for the result screen, by the slides' current numbers (an edit may have added or taken
     slides away since the build). The pictures of a slide redesigned since the build are not its pictures any more."""
-    from verstka.audit.eyes import CODES
+    from verstka.audit.eyes import CODES, skip_code
 
     eyes = (run_manifest or {}).get("eyes")
     if not isinstance(eyes, dict):
@@ -301,7 +301,10 @@ def _eyes_of(vdir: Path, run_manifest: Optional[dict], outline: Optional[dict], 
             "redone": not fresh,
         })
     slides.sort(key=lambda x: x["slide"])
-    return {"looked": eyes.get("looked") or 0, "seconds": eyes.get("seconds"), "skipped": eyes.get("skipped"), "slides": slides}
+    # why it did not look, by its code (eyes.SKIP_RU — the interface's words); runs before the code was kept: by the reason
+    skipped = eyes.get("skipped")
+    code = eyes.get("skipped_code") or skip_code(skipped)
+    return {"looked": eyes.get("looked") or 0, "seconds": eyes.get("seconds"), "skipped": skipped, "skipped_code": code if skipped else None, "slides": slides}
 
 
 def _slide_size(deck: Path) -> Optional[tuple[int, int]]:

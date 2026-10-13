@@ -3,6 +3,7 @@
 // критика стрелкой — и «Ваши правки» (журнал правок варианта: отменённые помечены, «Вернуть как было» — пока есть что
 // вернуть). Лента — lib/agent `buildTimeline` по `variant.agent.events`, правки — `variant.edits`.
 import { buildTimeline, eventParts, formsSummary, slideGroups, type PhaseKey } from "../../lib/agent";
+import { eyesSkipEvent } from "../../lib/designEye";
 import { plainTerms } from "../../lib/plain";
 import { plural } from "../../lib/utils";
 import type { Generation, Variant, VariantEdit } from "../../types";
@@ -41,8 +42,11 @@ export function agentRoles(g: Generation, v: Variant, titleOf: (name: string) =>
   const a = v.audit?.summary;
   const n = slidesOf(v);
   const fixes = appliedRows(v.audit?.applied_fixes ?? [], () => null, () => null).reduce((k, r) => k + r.n, 0);
+  // «Взгляд дизайнера», пропущенный сервером без строки в ленте (сборки до того, как он стал её говорить), — по записи
+  // варианта: «пропущен» и причина по-русски
+  const skipped = eyesSkipEvent(v);
   const rows = buildTimeline({
-    events: v.agent?.events ?? [],
+    events: skipped ? [...(v.agent?.events ?? []), skipped] : v.agent?.events ?? [],
     phase: "check",
     running: false,
     notes: {

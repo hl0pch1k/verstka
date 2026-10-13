@@ -77,6 +77,38 @@ FIX_HINTS: dict[str, str] = {
 _SYNONYMS = {"word_break": "word_broken", "broken_word": "word_broken", "cut": "text_cut", "overflow": "text_cut", "contrast": "low_contrast",
              "empty": "unbalanced", "imbalance": "unbalanced", "placeholder": "leftover", "small_text": "too_small", "crowded": "cramped"}
 
+# why the review did not look at the variant, by its code (`EyesOutcome.skipped_code`) — the person's words: the build's
+# timeline says «Взгляд дизайнера пропущен: …», «Подробнее» → «Агент» shows the step skipped with the reason
+# (web/src/lib/designEye.ts `EYES_SKIP` has the same words for runs recorded before the timeline said it). `skipped`
+# keeps the reason in English for the log.
+SKIP_RU: dict[str, str] = {
+    "off": "выключен в настройках",
+    "no_model": "модель недоступна",
+    "no_time": "не хватило времени на сборку",
+    "no_images": "не получилось снять картинки слайдов",
+    "no_answer": "модель не ответила",
+    "failed": "не получилось посмотреть на слайды",
+}
+_SKIP_OF = (
+    ("off in configs", "off"), ("no vision model", "no_model"), ("no time left", "no_time"), ("no slide images", "no_images"),
+    ("the model did not answer", "no_answer"), ("failed", "failed"),
+)
+
+
+def skip_code(why: Optional[str]) -> Optional[str]:
+    """The code of a skip reason (`EyesOutcome.skipped`, English): runs recorded before the code was kept are read by
+    their words; None — the review ran, or a reason this module does not know."""
+    if not why:
+        return None
+    low = str(why).lower()
+    return next((code for lead, code in _SKIP_OF if low.startswith(lead)), None)
+
+
+def skip_message(code: Optional[str]) -> str:
+    """The timeline's line of a skipped review: «Взгляд дизайнера пропущен: не хватило времени на сборку.»"""
+    said = SKIP_RU.get(code or "")
+    return f"Взгляд дизайнера пропущен: {said}." if said else "Взгляд дизайнера пропущен."
+
 DESIGN_REVIEW = CheckSpec(
     id="design_review", title="Взгляд дизайнера (VLM)", severity="warn", kind="model", category="layout",
     description=(
@@ -195,12 +227,13 @@ class EyesOutcome:
     fixed: list[dict] = field(default_factory=list)  # {"slide", "outline_id", "result", "reason"}: the new layout stayed
     kept: list[dict] = field(default_factory=list)  # tried again, the old layout stayed: {"slide", "outline_id", "why"}
     skipped: Optional[str] = None
+    skipped_code: Optional[str] = None  # SKIP_RU: off · no_model · no_time · no_images · no_answer · failed
     seconds: float = 0.0
 
     def summary(self) -> dict:
         return {
             "looked": self.looked, "calls": self.calls, "flagged": self.flagged, "fixed": self.fixed, "kept": self.kept,
-            "skipped": self.skipped, "seconds": round(self.seconds, 2),
+            "skipped": self.skipped, "skipped_code": self.skipped_code, "seconds": round(self.seconds, 2),
         }
 
 
@@ -317,20 +350,27 @@ def look(
 
     def done(why: Optional[str] = None) -> tuple[AuditReport, Any, Any, Any, EyesOutcome]:
         out.skipped = why
+        out.skipped_code = skip_code(why)
         out.seconds = time.monotonic() - t0
         return report, plan, outline, render_result, out
 
+    def skip(why: str) -> tuple[AuditReport, Any, Any, Any, EyesOutcome]:
+        """Not looked at all: the timeline says so (the step ends skipped, not «now» till the build's end)."""
+        got = done(why)
+        say(skip_message(out.skipped_code), None)
+        return got
+
     if not cfg.get("enabled", True):
-        return done("off in configs/eyes.yaml")
+        return skip("off in configs/eyes.yaml")
     if providers is None or skills is None or not providers.has("vlm"):
-        return done("no vision model")
+        return skip("no vision model")
     if _left(deadline) < float(cfg["min_seconds_left"]):
-        return done("no time left in the generation's model budget")
+        return skip("no time left in the generation's model budget")
     try:
         before = shoot(pptx, Path(vdir) / "eyes" / "before", int(cfg["dpi"]))
     except Exception as e:  # noqa: BLE001 - no LibreOffice, a deck it cannot open: the deck stays as it is
         log.warning("design review: slide images failed: %s", e)
-        return done(f"no slide images ({str(e)[:120]})")
+        return skip(f"no slide images ({str(e)[:120]})")
 
     ir = _ir_slides(report, outline)
     oid_of = {s.index: s.outline_id for s in ir}

@@ -149,6 +149,26 @@ test("готово — все пройденные роли готовы, не �
   assert.equal(v.failed, null);
 });
 
+test("«Взгляд дизайнера», пропущенный сервером у каждого варианта, — пропущен с причиной, а не «сейчас» до конца сборки", () => {
+  const laid = fold(start, ANALYST, DESIGN3, msg("structured: planned 3 slides, rendering"), msg("structured: rendered slide 3/3", 0.7), msg("structured: audit", 0.75),
+    msg("visual: planned 3 slides, rendering"), msg("visual: rendered slide 3/3", 0.8), msg("visual: audit", 0.82), msg("structured: design review", 0.85));
+  const skip = (variant: string) => agent("eyes", "Взгляд дизайнера пропущен: не хватило времени на сборку.", null, variant);
+  // смотрит — «сейчас»
+  assert.equal(view(laid).roles.find((r) => r.key === "eyes")?.status, "now");
+  // один вариант сказал «пропущен», второй ещё нет — роль работает
+  const one = fold(laid, skip("structured"), msg("visual: design review", 0.85));
+  assert.equal(view(one).roles.find((r) => r.key === "eyes")?.status, "now");
+  // оба — пропущена, с причиной, пока сборка ещё сохраняет файлы
+  const both = fold(one, skip("visual"), msg("export: pdf, html, slide previews", 0.9));
+  const eye = view(both).roles.find((r) => r.key === "eyes");
+  assert.equal(eye?.status, "skip");
+  assert.equal(plain(eye?.note), "пропущен: не хватило времени на сборку");
+  assert.deepEqual(eye?.lines, []);
+  // и после конца сборки
+  const end = view({ ...both, status: "done", progress: 1, message: "Готово", endedAt: 61_000 }).roles.find((r) => r.key === "eyes");
+  assert.deepEqual([end?.status, plain(end?.note)], ["skip", "пропущен: не хватило времени на сборку"]);
+});
+
 test("тема: шаблон разбирается раньше, чем автор пишет текст, — сейчас работает автор, а не аналитик", () => {
   const job = fold(start, msg("analyze: loaded cached manifest", 0.03), msg("plan: 2 variants", 0.15),
     agent("writer", "Ищу материалы по теме «Пределы»."), agent("writer", "Нашёл статью «Предел (математика)» в Википедии."));

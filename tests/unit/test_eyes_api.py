@@ -69,3 +69,22 @@ def test_the_review_by_the_slides_current_numbers_with_the_slide_before_and_afte
     assert c.get(f"/api/generations/{gid}/structured/eyes/elsewhere/slide-002.jpg").status_code == 404
     assert c.get(f"/api/generations/{gid}/structured/eyes/before/slide-2.jpg").status_code == 404
     assert c.get(f"/api/generations/{gid}/structured/eyes/after/slide-003.jpg").status_code == 404
+
+
+def test_a_skipped_review_has_its_code_also_for_runs_recorded_before_the_code(built):
+    """The interface says why the review did not look by its code (web/src/lib/designEye.ts); the English reason stays
+    for the log. A run recorded before the code was kept gets it from its reason."""
+    c, mod, gid = built
+    vdir = mod.store.generation_dir(gid) / "structured"
+    m = json.loads((vdir / "run_manifest.json").read_text(encoding="utf-8"))
+    m["eyes"] = {"looked": 0, "calls": 0, "seconds": 0.0, "skipped": "no time left in the generation's model budget", "flagged": [], "fixed": [], "kept": []}
+    (vdir / "run_manifest.json").write_text(json.dumps(m, ensure_ascii=False), encoding="utf-8")
+    eye = c.get(f"/api/generations/{gid}").json()["variants"][0]["eyes"]
+    assert eye["skipped_code"] == "no_time" and eye["looked"] == 0 and eye["slides"] == []
+    m["eyes"] |= {"skipped": "failed: boom", "skipped_code": "failed"}
+    (vdir / "run_manifest.json").write_text(json.dumps(m, ensure_ascii=False), encoding="utf-8")
+    assert c.get(f"/api/generations/{gid}").json()["variants"][0]["eyes"]["skipped_code"] == "failed"
+    # it looked: no code
+    m["eyes"] |= {"looked": 3, "skipped": None, "skipped_code": None}
+    (vdir / "run_manifest.json").write_text(json.dumps(m, ensure_ascii=False), encoding="utf-8")
+    assert c.get(f"/api/generations/{gid}").json()["variants"][0]["eyes"]["skipped_code"] is None

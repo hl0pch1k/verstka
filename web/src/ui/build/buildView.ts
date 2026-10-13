@@ -203,7 +203,9 @@ export function buildView(job: ActiveJob, previews: Record<string, string[]>, op
     ? `${names.length > 1 ? `${titleOf(layingVariant.n)} · ` : ""}${layingVariant.st.laid ?? 0} из ${layingVariant.st.of}`
     : layoutPast && names.length ? plural(names.length, "вариант", "варианта", "вариантов") : undefined;
   const checkNote = agentPhase === "check" && /проверка качества|исправляю замечания|сохраняю файлы/i.test(job.message) ? job.message : undefined;
-  const rows = buildTimeline({ events, phase: agentPhase, running: !done, notes: { layout: layoutNote, check: checkNote } });
+  // «Взгляд дизайнера», пропущенный сервером у каждого варианта («…пропущен: не хватило времени на сборку»), — пропущен
+  // сразу, а не «сейчас» до конца сборки
+  const rows = buildTimeline({ events, phase: agentPhase, running: !done, notes: { layout: layoutNote, check: checkNote }, variants: names });
   const rowOf = (key: PhaseKey) => rows.find((r) => r.key === key);
   const activeKey = rows.find((r) => r.status === "active")?.key ?? (running && agentPhase ? agentPhase : null);
   const failedKey: PhaseKey | null = failedJob ? activeKey ?? agentPhase ?? "analyst" : null;

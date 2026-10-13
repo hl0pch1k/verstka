@@ -75,3 +75,23 @@ test("всё отменено — нечего возвращать; право�
   assert.equal(none.canUndo, false);
   assert.equal(none.hint, "После сборки слайды не меняли. Правки из помощника и исправления замечаний появятся здесь.");
 });
+
+test("«Взгляд дизайнера», пропущенный сервером: прочерк, «пропущен» и причина по-русски — и у старых сборок без строки в ленте", () => {
+  const eyes = { looked: 0, skipped: "no time left in the generation's model budget", skipped_code: "no_time", slides: [] };
+  const roles = agentRoles(GEN, { ...v, eyes }, titleOf);
+  const eye = roles.find((r) => r.key === "eyes")!;
+  assert.equal(eye.name, "Взгляд дизайнера");
+  assert.equal(eye.skip, true);
+  assert.equal(eye.icon, "dash");
+  assert.equal(nb(eye.sum ?? ""), "Не хватило времени на сборку");
+  assert.equal(eye.lines.length, 0);
+  assert.ok(eye.last);
+  // в ленте строка уже есть (новый сервер) — та же роль, без второй строки
+  const said = { step: "eyes", message: "Взгляд дизайнера пропущен: не хватило времени на сборку.", slide: null, variant: v.strategy };
+  const again = agentRoles(GEN, { ...v, eyes, agent: { ...v.agent!, events: [...(v.agent?.events ?? []), said] } }, titleOf).find((r) => r.key === "eyes")!;
+  assert.deepEqual([again.skip, nb(again.sum ?? "")], [true, "Не хватило времени на сборку"]);
+  // английская причина без кода на экран не попадает
+  const bare = agentRoles(GEN, { ...v, eyes: { ...eyes, skipped_code: null } }, titleOf).find((r) => r.key === "eyes")!;
+  assert.equal(bare.skip, true);
+  assert.ok(!/[a-z]/i.test(bare.sum ?? ""));
+});
