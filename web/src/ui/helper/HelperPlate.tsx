@@ -16,7 +16,7 @@ import { ErrorLine } from "../kit/ErrorLine";
 import { Icon } from "../kit/Icon";
 import { useSwap } from "../kit/useSwap";
 import { useStale } from "../shell/StaleLine";
-import { bubbleBlocks, chipsFor, feedDelay, feedItems, introFor, noteView, placeholderFor, typeset, type FeedJob, type FeedNote } from "./chat";
+import { bubbleBlocks, chipsFor, feedDelay, feedItems, introFor, latestRefreshNote, noteView, placeholderFor, typeset, type FeedJob, type FeedNote } from "./chat";
 import { useHelperChat } from "./useHelperChat";
 
 const LINE = 24;
@@ -65,10 +65,10 @@ function JobCard({ job }: { job: FeedJob }) {
 /** Тихая строка ленты (не ответ помощника): «Это другая презентация — откройте её из «Мои презентации»». Строка о
  *  презентации, которую изменили, а она не перечиталась, — с «Обновить», пока она несвежая (дуга, пока читается);
  *  перечиталась — «Презентация на экране обновлена» (смена текста — перекрёстным затуханием). */
-function NoteLine({ note }: { note: FeedNote }) {
+function NoteLine({ note, latest }: { note: FeedNote; latest: boolean }) {
   const { generation } = useApp();
   const r = useStale(note.refresh ?? "");
-  const view = noteView(note, { stale: r && note.refresh ? { gid: note.refresh, text: r.text } : null, open: generation?.id ?? null });
+  const view = noteView(note, { stale: r && note.refresh ? { gid: note.refresh, text: r.text } : null, open: generation?.id ?? null, latest });
   // текст и «Обновить» сменяются вместе (затухание 120 мс, проявление 240 мс): уходящая кнопка гаснет со строкой
   const t = useSwap(view.refresh ? `1${view.text}` : `0${view.text}`);
   const held = useRef(r);
@@ -253,7 +253,7 @@ export function HelperPlate() {
               return (
                 <div key={id} className={cls("gh-item hp-st", user ? "gh-r" : "gh-l", fresh(ts) && "p2-in")} style={st(feedDelay(i + 1, n, open))}>
                   {it.kind === "job" ? <JobCard job={it.job} />
-                    : it.kind === "note" ? <NoteLine note={it.note} />
+                    : it.kind === "note" ? <NoteLine note={it.note} latest={it.note.id === latestRefreshNote(chat.notes, it.note.refresh)} />
                     : user ? <div className="gh-user">{it.msg.text}</div> : <BotText text={it.msg.text} />}
                 </div>
               );

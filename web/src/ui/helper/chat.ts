@@ -198,10 +198,19 @@ export interface FeedJob { id: string; label: string; ts: number; progress: numb
  *  презентация, которую изменили, а она не перечиталась: у строки «Обновить» (noteView). */
 export interface FeedNote { id: string; text: string; ts: number; refresh?: string }
 
-/** Что показывает строка ленты: у строки о неперечитанной презентации — пока хранилище держит её несвежей, причина
- *  (последняя) и «Обновить»; перечиталась и открыта — «обновлена»; открыта другая — как была записана. */
-export function noteView(note: FeedNote, o: { stale: { gid: string; text: string } | null; open: string | null }): { text: string; refresh: boolean } {
-  if (!note.refresh) return { text: note.text, refresh: false };
+/** Самая новая строка ленты о неперечитанной презентации `gid` — только она живая (`noteView`). */
+export function latestRefreshNote(notes: FeedNote[], gid: string | null | undefined): string | null {
+  if (!gid) return null;
+  for (let i = notes.length - 1; i >= 0; i--) if (notes[i].refresh === gid) return notes[i].id;
+  return null;
+}
+
+/** Что показывает строка ленты. Живая — только самая новая строка о неперечитанной презентации (`latest`): пока
+ *  хранилище держит её несвежей — последняя причина и «Обновить»; перечиталась и открыта — «обновлена»; открыта другая —
+ *  как была записана. Прежние строки о ней остаются такими, какими были записаны (без «Обновить»): в ленте одна живая
+ *  строка, а не несколько одинаковых. */
+export function noteView(note: FeedNote, o: { stale: { gid: string; text: string } | null; open: string | null; latest: boolean }): { text: string; refresh: boolean } {
+  if (!note.refresh || !o.latest) return { text: note.text, refresh: false };
   if (o.stale && o.stale.gid === note.refresh) return { text: o.stale.text, refresh: true };
   return { text: o.open === note.refresh ? REFRESHED : note.text, refresh: false };
 }

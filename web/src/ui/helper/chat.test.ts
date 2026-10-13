@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   asEditResult, asFixResult, bubbleBlocks, chatFailText, chatTarget, chipsFor, describeFixes, editFailText, feedDelay, feedItems, feedProgress, introFor,
-  noteView, openTabSteps, placeholderFor, planActions, reloadFailText, typeset, OTHER_DECK, REFRESHED, type FeedJob,
+  latestRefreshNote, noteView, openTabSteps, placeholderFor, planActions, reloadFailText, typeset, OTHER_DECK, REFRESHED, type FeedJob,
 } from "./chat";
 import type { ChatAction, ChatResponse } from "../../types";
 import { ApiError } from "../../api";
@@ -249,9 +249,27 @@ test("reloadFailText не обещает того, чего нет: путь —
 
 test("noteView: строка о несвежей презентации — с «Обновить», пока она несвежая; перечиталась — «обновлена»; открыта другая — как записана", () => {
   const n = { id: "n", text: "старая причина", ts: 1, refresh: "g1" };
-  assert.deepEqual(noteView(n, { stale: { gid: "g1", text: "новая причина" }, open: "g1" }), { text: "новая причина", refresh: true });
-  assert.deepEqual(noteView(n, { stale: null, open: "g1" }), { text: REFRESHED, refresh: false });
-  assert.deepEqual(noteView(n, { stale: null, open: "g2" }), { text: "старая причина", refresh: false });
-  assert.deepEqual(noteView(n, { stale: { gid: "g2", text: "x" }, open: "g2" }), { text: "старая причина", refresh: false });
-  assert.deepEqual(noteView({ id: "o", text: OTHER_DECK, ts: 1 }, { stale: { gid: "g1", text: "x" }, open: "g1" }), { text: OTHER_DECK, refresh: false });
+  const L = { latest: true };
+  assert.deepEqual(noteView(n, { stale: { gid: "g1", text: "новая причина" }, open: "g1", ...L }), { text: "новая причина", refresh: true });
+  assert.deepEqual(noteView(n, { stale: null, open: "g1", ...L }), { text: REFRESHED, refresh: false });
+  assert.deepEqual(noteView(n, { stale: null, open: "g2", ...L }), { text: "старая причина", refresh: false });
+  assert.deepEqual(noteView(n, { stale: { gid: "g2", text: "x" }, open: "g2", ...L }), { text: "старая причина", refresh: false });
+  assert.deepEqual(noteView({ id: "o", text: OTHER_DECK, ts: 1 }, { stale: { gid: "g1", text: "x" }, open: "g1", ...L }), { text: OTHER_DECK, refresh: false });
+});
+
+test("в ленте живая только самая новая строка о несвежей презентации — прежние остаются как записаны (S5)", () => {
+  const notes = [
+    { id: "a", text: "причина 1", ts: 1, refresh: "g1" },
+    { id: "o", text: OTHER_DECK, ts: 2 },
+    { id: "b", text: "причина 2", ts: 3, refresh: "g1" },
+    { id: "c", text: "другая", ts: 4, refresh: "g2" },
+  ];
+  assert.equal(latestRefreshNote(notes, "g1"), "b");
+  assert.equal(latestRefreshNote(notes, "g2"), "c");
+  assert.equal(latestRefreshNote(notes, undefined), null);
+  const stale = { gid: "g1", text: "новая причина" };
+  assert.deepEqual(noteView(notes[0], { stale, open: "g1", latest: false }), { text: "причина 1", refresh: false });
+  assert.deepEqual(noteView(notes[2], { stale, open: "g1", latest: true }), { text: "новая причина", refresh: true });
+  // перечиталась — «обновлена» говорит только новая, прежняя — как была
+  assert.deepEqual(noteView(notes[0], { stale: null, open: "g1", latest: false }), { text: "причина 1", refresh: false });
 });
