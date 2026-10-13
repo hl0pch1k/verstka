@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { foldJobEvent, type ActiveJob } from "../../lib/jobState";
 import { PHASES } from "../../lib/agent";
 import { STAGE_TITLE } from "../../lib/stage";
-import type { JobEvent } from "../../types";
-import { buildView } from "./buildView";
+import type { Generation, JobEvent, Variant } from "../../types";
+import { buildStripText, buildView } from "./buildView";
 
 // Задача сборки так, как её видит экран: события агента и сообщения конвейера сворачиваются тем же foldJobEvent, что и
 // живой поток (store.runJob), — экран строится из того же ActiveJob.
@@ -160,4 +160,23 @@ test("тема: шаблон разбирается раньше, чем авт�
   assert.equal(v.step, "шаг 1 из 9");
   // аналитик заговорил — его очередь
   assert.equal(view(fold(job, ANALYST)).phase, "analyst");
+});
+
+test("полоса 03: «Сборка завершена» — только у законченной; остановившаяся — «Сборка остановилась»; идущая — ничего", () => {
+  const variant = (n: number) => ({ strategy: "s", slides: Array.from({ length: n }, (_, i) => `slide-${i + 1}.jpg`), outline: null, plan: null, audit: null, run_manifest: null }) as unknown as Variant;
+  const gen = (patch: Partial<Generation>) => ({ id: "g", template_id: "t", strategies: ["s"], variants: [variant(11), variant(9), variant(12)], ...patch }) as Generation;
+  assert.deepEqual(buildStripText(gen({ status: "done", seconds: 176 }), null), { tone: "done", title: "Сборка завершена за 2:56", meta: "3 варианта · 11 слайдов" });
+  // слайды — у открытого варианта
+  assert.equal(buildStripText(gen({ status: "done", seconds: 176 }), variant(9))?.meta, "3 варианта · 9 слайдов");
+  assert.deepEqual(buildStripText(gen({ status: "done" }), null), { tone: "done", title: "Сборка завершена", meta: "3 варианта · 11 слайдов" });
+  // остановилась — без галочки и без итогов
+  assert.deepEqual(buildStripText(gen({ status: "failed", seconds: 40, variants: [] }), null), { tone: "failed", title: "Сборка остановилась", meta: null });
+  assert.deepEqual(buildStripText(gen({ status: "failed" }), null), { tone: "failed", title: "Сборка остановилась", meta: null });
+  // идёт — её показывает экран «Сборка»
+  assert.equal(buildStripText(gen({ status: "running", variants: [] }), null), null);
+  assert.equal(buildStripText(gen({ status: "running" }), null), null);
+  // старая презентация без статуса, но с вариантами, — законченная
+  assert.equal(buildStripText(gen({ seconds: 48 }), null)?.title, "Сборка завершена за 0:48");
+  assert.equal(buildStripText(gen({ variants: [] }), null), null);
+  assert.equal(buildStripText(null, null), null);
 });

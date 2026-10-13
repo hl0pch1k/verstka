@@ -5,7 +5,7 @@
 // (bd-out): со «Сборки» на «Создать» или под поднимающуюся плиту результата. «Собрать ещё раз»: содержимое гаснет,
 // уходит тот же запрос, и плита собирается заново лесенкой, когда сервер ответил (новая сборка или новая строка
 // неудачи).
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ActiveJob } from "../../lib/jobState";
 import { useApp } from "../../store";
 import { variantCards } from "../create/params";
@@ -54,7 +54,8 @@ function BuildContent({ job, leaving }: { job: ActiveJob | null; leaving: boolea
   const shown = picked && names.includes(picked) ? picked : names[0] ?? null;
   const own = shown ? j.variants?.[shown] : undefined;
   const exporting = j.progress >= EXPORT_AT || /^сохраняю файлы/i.test(j.message) || j.status === "done";
-  const previews = usePreviews(j.generation, shown, own?.of ?? 0, exporting);
+  // превью — этой генерации (у повтора свои); опрос идёт, пока идёт сборка; у упавшей раскадровку закрывает коробка
+  const previews = usePreviews(j.generation, shown, own?.of ?? 0, exporting && j.status !== "failed", live);
   // строка неудачи области «Сборка» этой сборки (переживает задачу); прежняя сборка своей строки сюда не приносит
   const note = notices.build;
   const error = note && note.kind === "error" && note.at >= j.startedAt ? note.text : null;
@@ -84,10 +85,13 @@ function BuildContent({ job, leaving }: { job: ActiveJob | null; leaving: boolea
     setShownId(job.id);
     if (shownId) setEpoch((e) => e + 1);
   }
+  // запрос уходит, когда плита погасла; ушли с экрана раньше — не уходит
+  const retryTimer = useRef(0);
+  useEffect(() => () => window.clearTimeout(retryTimer.current), []);
   const onRetry = () => {
     if (retry) return;
     setRetry({ from: j.id, at: Date.now() });
-    window.setTimeout(() => {
+    retryTimer.current = window.setTimeout(() => {
       void retryBuild().then((ok) => {
         if (!ok) dispatch({ type: "go", screen: "create" }); // повторять нечего — к тексту
       });

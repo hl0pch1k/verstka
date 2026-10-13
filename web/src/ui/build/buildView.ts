@@ -5,11 +5,11 @@
 import { buildTimeline, eventParts, laterPhase, PHASES, phaseOfStep, phaseOrder, type PhaseKey, type TimelineEvent, type TimelineRow } from "../../lib/agent";
 import { humanError } from "../../lib/errors";
 import type { ActiveJob } from "../../lib/jobState";
-import { failReason } from "../../lib/narrate";
+import { failReason, slideCount } from "../../lib/narrate";
 import { clock as clockText, KIND_LABEL, railSlides, sketchOf, STAGE_TITLE, type RailSlide, type SketchKind } from "../../lib/stage";
 import { plural } from "../../lib/utils";
-import { START_FAILED } from "../create/params";
-import type { AgentEvent } from "../../types";
+import { START_FAILED, START_PREFIX } from "../create/params";
+import type { AgentEvent, Generation, Variant } from "../../types";
 
 /** Фаза сборки на экране: очередь, одна из девяти ролей, готово или остановилась. */
 export type BuildPhase = PhaseKey | "queued" | "done" | "failed";
@@ -61,7 +61,7 @@ export interface VariantView { name: string; status: string | null; done: boolea
 export interface BuildView {
   phase: BuildPhase;
   title: string;
-  /** «1:12» — от начала сборки; у законченной стоит на конце. */
+  /** «1:12» — от начала сборки; у законченной стоит на конце; «—» — конец неизвестен (сборка упала без страницы). */
   clock: string;
   /** Доля хода 0..1; null — хода ещё нет (бежит отрезок). */
   progress: number | null;
@@ -96,8 +96,6 @@ export interface BuildViewOptions {
 /** Причины, сказанные не по-русски, — так же, как lib/narrate `failReason`. */
 const FAIL_FALLBACK = failReason(null).replace(/[.\s]+$/, "");
 const FAIL_PREFIX = /^(?:Не получилось|Не удалось начать сборку презентации):\s*/;
-/** «Собрать ещё раз» не приняли (flows.ts `generationFlow` → `report`). */
-const START_PREFIX = /^Не удалось начать сборку презентации:/;
 /** До плана, пока число слайдов неизвестно, — десять заглушек (B-start). */
 const GHOSTS = 10;
 const LINES = 3;
@@ -295,13 +293,14 @@ export function buildView(job: ActiveJob, previews: Record<string, string[]>, op
   });
 
   const why = opts.error ?? job.message ?? "";
+  // «Собрать ещё раз» не приняли (flows.ts `generationFlow` → `report`): своя подсказка, как у запуска на «Создать»
   const fallback = START_PREFIX.test(why) ? START_FAILED : FAIL_FALLBACK;
   const failed = failedKey ? { role: failedKey, text: humanError(why.replace(FAIL_PREFIX, ""), fallback).replace(/[.\s]+$/, "") } : null;
 
   return {
     phase,
     title: STAGE_TITLE[phase],
-    clock: clockText(((job.endedAt ?? now) - job.startedAt) / 1000),
+    clock: job.endedAt === null ? "—" : clockText(((job.endedAt ?? now) - job.startedAt) / 1000),
     progress: queued ? null : done ? 1 : clamp01(job.progress),
     doneRoles,
     step,
@@ -313,4 +312,18 @@ export function buildView(job: ActiveJob, previews: Record<string, string[]>, op
     roles,
     failed,
   };
+}
+
+/** Полоса 03 на результате (V2 `strip3`, `resultMeta`): законченная сборка — «Сборка завершена за 2:31» с галочкой и
+ *  «3 варианта · 12 слайдов»; остановившаяся — «Сборка остановилась» тихим красным B-failed, без галочки и итогов;
+ *  идущая — ничего (её показывает экран «Сборка»). Старые презентации без статуса — законченные, если у них есть
+ *  варианты. Слайды — у открытого варианта `v`, без него — у первого. */
+export interface BuildStripText { tone: "done" | "failed"; title: string; meta: string | null }
+export function buildStripText(g: Generation | null, v: Variant | null): BuildStripText | null {
+  if (!g) return null;
+  if (g.status === "failed") return { tone: "failed", title: "Сборка остановилась", meta: null };
+  const n = g.variants.length;
+  if (g.status !== "done" && (g.status || !n)) return null;
+  const meta = n ? `${plural(n, "вариант", "варианта", "вариантов")} · ${plural(slideCount(v ?? g.variants[0]), "слайд", "слайда", "слайдов")}` : null;
+  return { tone: "done", title: g.seconds ? `Сборка завершена за ${clockText(g.seconds)}` : "Сборка завершена", meta };
 }

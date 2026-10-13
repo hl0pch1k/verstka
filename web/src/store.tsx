@@ -13,6 +13,7 @@ import { variantRev, withRev } from "./lib/rev";
 import { uiReducer, UI0, type UiAction, type UiState } from "./ui/deck/geometry";
 import { textError, type TextIssue } from "./ui/create/textRules";
 import { buildRunning, draftParams, type Params } from "./ui/create/params";
+import { failedBuildJob, parsePendingBuild, pendingFor, requestOf, resumeBuild, type PendingBuild } from "./ui/build/resume";
 import type {
   ChatMessage, GenerateRequest, Generation, GenerationMeta, Health, ImprovedFrom, ImproveSource, Job, JobKind, ModelsStatus, Notice, NoticeArea, StrategyInfo, TemplateListItem, TemplateManifest, Variant,
 } from "./types";
@@ -35,26 +36,7 @@ export interface RunJobOptions {
 
 /** The request of the build in progress, kept in localStorage (LS.build): a page opened again follows the build and
  *  can repeat it («Собрать ещё раз») with the same inputs. */
-interface PendingBuild { gid: string; request: GenerateRequest; expected: number | null }
-function readPendingBuild(): PendingBuild | null {
-  try {
-    const v = JSON.parse(storage.get(LS.build) ?? "null") as PendingBuild | null;
-    return v && typeof v.gid === "string" && v.request && typeof v.request.template_id === "string" ? v : null;
-  } catch {
-    return null;
-  }
-}
-
-/** A deck's request again, from its meta (a build started elsewhere, found after a reload without its request). */
-function requestOf(g: GenerationMeta): GenerateRequest {
-  return {
-    template_id: g.template_id, brief: g.brief ?? "", audience: g.audience ?? null, purpose: g.purpose ?? null, slides: g.slides ?? null,
-    language: g.language, extra_instructions: g.extra_instructions ?? null, strategies: g.strategies,
-    // a running deck's meta has no `use_models` yet: the server turns it off by itself when no model is configured
-    use_models: g.use_models ?? true, audit_models: !!g.audit_models, autofix: g.autofix ?? true, exports: g.exports ?? ["pdf", "html"],
-    pictures: g.pictures ?? null, eyes: g.eyes ?? null, improved_from: g.improved_from ?? null,
-  };
-}
+const readPendingBuild = (): PendingBuild | null => parsePendingBuild(storage.get(LS.build));
 
 /** Where a job's failure stands by default: template analysis at the template step, a build on the build screen, the
  *  work on a built deck (fixes, edits, pictures) on the result. */
@@ -166,6 +148,10 @@ export function useApp(): AppState {
   return value;
 }
 
+/** The request of deck `g` for «Собрать ещё раз»: the page's own (LS.build) when it is this deck's, else from its meta. */
+const askOf = (g: GenerationMeta, pending: PendingBuild | null): PendingBuild =>
+  pending && pending.gid === g.id ? pending : { gid: g.id, request: requestOf(g), expected: g.slides ?? null };
+
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, Number.isFinite(n) ? Math.round(n) : lo));
 const titleIn = (list: StrategyInfo[], name: string) => list.find((s) => s.name === name)?.title ?? name;
 
@@ -210,8 +196,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const liveJobs = useRef(new Map<string, ActiveJob>()); // every job still running, the newest last
   const [buildJob, setBuildJob] = useState<ActiveJob | null>(null);
   const [building, setBuilding] = useState(false);
-  // the request of the newest build (startGeneration, or the one found again after a reload): «Собрать ещё раз»
-  const lastBuild = useRef<{ request: GenerateRequest; expected: number | null } | null>(null);
+  // the newest build and its request (startGeneration once the server took it, or a build found again after a reload):
+  // «Собрать ещё раз» repeats it; LS.build is written only for the deck this request belongs to
+  const lastBuild = useRef<PendingBuild | null>(null);
   // attachBuild needs the generation flow's deps, defined further down: loadGeneration and boot reach it through this
   const attachRef = useRef<(g: GenerationMeta, pending?: PendingBuild | null) => void>(() => {});
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -410,9 +397,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [report, clearNotice, selectTemplate, clearGeneration]);
 
   const loadGeneration = useCallback(async (gid: string, opts?: { hold?: boolean }) => {
-    const g = await fetchGeneration(gid, false, !!opts?.hold);
-    // a deck still being built opens on its build
-    if (g?.status === "running" && g.job_id) attachRef.current(g);
+    const load = fetchGeneration(gid, false, !!opts?.hold);
+    const seq = genSeq.current; // fetchGeneration takes its number before its first await
+    const g = await load;
+    // a deck still being built opens on its build — unless another deck was asked for meanwhile (or this one was dropped)
+    if (seq === genSeq.current && g?.status === "running" && g.job_id) attachRef.current(g);
     return g;
   }, [fetchGeneration]);
 
@@ -456,9 +445,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (build) {
       setBuildJob(first);
       syncBuilding();
-      // a reload finds this build again and can repeat it
-      const last = lastBuild.current;
-      if (gid && last) storage.set(LS.build, JSON.stringify({ gid, request: last.request, expected: last.expected } satisfies PendingBuild));
+      // a reload finds this build again and can repeat it — with its own request (never another deck's)
+      const pending = pendingFor(lastBuild.current, gid);
+      if (pending) storage.set(LS.build, JSON.stringify(pending));
     }
     const stop = trackJob(jobId, {
       onEvent: (ev) => {
@@ -510,8 +499,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }), [runJob, report, notify, clearNotice, pushMessage, refreshGenerations, fetchGeneration, refreshModelStatus]);
 
   const startGeneration = useCallback((req: GenerateRequest, expectedSlides?: number | null) => {
-    lastBuild.current = { request: req, expected: expectedSlides ?? null };
-    return generationFlow(req, generationDeps, expectedSlides ?? null);
+    const expected = expectedSlides ?? null;
+    // the request belongs to the deck the server answers with; a refused start leaves the shown build's request as it was
+    return generationFlow(req, generationDeps, expected, (gid) => {
+      lastBuild.current = { gid, request: req, expected };
+    });
   }, [generationDeps]);
 
   const retryBuild = useCallback(async () => {
@@ -525,7 +517,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
    *  screen shows it from where it is (the job's record brings the agent's whole timeline). */
   const attachBuild = useCallback((g: GenerationMeta, pending?: PendingBuild | null) => {
     if (!g.job_id || liveJobs.current.has(g.job_id)) return;
-    lastBuild.current = pending && pending.gid === g.id ? { request: pending.request, expected: pending.expected } : { request: requestOf(g), expected: g.slides ?? null };
+    lastBuild.current = askOf(g, pending ?? readPendingBuild());
     followBuild({
       jobId: g.job_id, generation: g.id, strategies: g.strategies, template: g.template_id, slides: g.slides ?? lastBuild.current.expected,
       startedAt: g.created_at ? g.created_at * 1000 : undefined,
@@ -533,6 +525,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     dispatch({ type: "go", screen: "build" });
   }, [generationDeps]);
   attachRef.current = attachBuild;
+
+  /** A build that failed while the page was closed: nothing follows its job any more — the build screen shows its
+   *  failure (B-failed) from the deck's meta (the reason) and, while the server remembers it, its job's record (the
+   *  agent's timeline, where it stopped); «Собрать ещё раз» repeats its request. */
+  const showFailedBuild = useCallback((g: GenerationMeta, rec: Job | null, pending: PendingBuild | null) => {
+    lastBuild.current = askOf(g, pending);
+    setBuildJob(failedBuildJob(g, rec, (name) => titleIn(latest.current.strategies, name)));
+    dispatch({ type: "go", screen: "build" });
+  }, []);
 
   // Health loop: first success boots the data (lists + restore from localStorage); afterwards keeps the banner truthful.
   useEffect(() => {
@@ -551,27 +552,57 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const stored = latest.current.templateId; // drop a stale id, fall back to the newest template
         if (!stored || !tp.value.some((t) => t.template_id === stored)) selectTemplate(newestTemplate(tp.value)?.template_id ?? null);
       }
-      // a build that ran when the page was left: followed again while its job runs; one that ended meanwhile opens on its
-      // deck (done) or gives way to the stored deck or «Создать» (failed, gone)
+      // a build that ran when the page was left (LS.build), else the newest one running now (the list: started in another
+      // tab, or before LS.build was written): followed again while its job runs. The page's own build that ended
+      // meanwhile shows its failure on the build screen (failed) or opens on its deck (done); gone — the stored deck or
+      // «Создать»
       const pending = readPendingBuild();
+      let own: Generation | null = null;
       if (pending) {
-        let g: Generation | null = null;
         try {
-          g = await api.generation(pending.gid);
+          own = await api.generation(pending.gid);
         } catch {
-          g = null;
+          own = null;
         }
         if (!alive) return;
-        if (g?.status === "running" && g.job_id) attachRef.current(g, pending);
-        else {
-          storage.set(LS.build, null);
-          if (g?.status === "done" && (await fetchGeneration(pending.gid, true))) {
-            if (alive) dispatch({ type: "go", screen: "result" });
-            return;
-          }
-          if (alive && latest.current.ui.screen === "build") dispatch({ type: "go", screen: storage.get(LS.generation) ? "result" : "create" });
-        }
       }
+      const pick = resumeBuild(pending, own, gn.status === "fulfilled" ? gn.value : []);
+      // the stored build is over or gone: its record goes (a build followed again writes it anew)
+      if (pending && !(pick?.kind === "attach" && pick.meta.id === pending.gid)) storage.set(LS.build, null);
+      let shown = false; // the build screen has a build to show
+      if (pick?.kind === "attach") {
+        // a deck from the list carries its text cut short: «Собрать ещё раз» takes the request from the deck itself
+        let g: GenerationMeta | null = pick.meta;
+        if (pick.listed) {
+          try {
+            g = await api.generation(pick.meta.id);
+          } catch {
+            g = null;
+          }
+          if (!alive) return;
+        }
+        if (g?.status === "running" && g.job_id) {
+          attachRef.current(g, pending);
+          shown = true;
+        }
+      } else if (pick?.kind === "failed") {
+        let rec: Job | null = null;
+        if (pick.meta.job_id) {
+          try {
+            rec = await api.job(pick.meta.job_id);
+          } catch {
+            rec = null; // the server restarted since: the deck's meta tells the reason
+          }
+          if (!alive) return;
+        }
+        showFailedBuild(pick.meta, rec, pending);
+        shown = true;
+      } else if (pick?.kind === "done" && (await fetchGeneration(pick.meta.id, true))) {
+        if (alive) dispatch({ type: "go", screen: "result" });
+        return;
+      }
+      if (!alive) return;
+      if (pending && !shown && latest.current.ui.screen === "build") dispatch({ type: "go", screen: storage.get(LS.generation) ? "result" : "create" });
       const storedGen = storage.get(LS.generation);
       // a stored deck that loads needs no move: the screen started on the result (the reducer's initial state), and a
       // place the person went to meanwhile (a layer, «Создать») stays as it is
@@ -606,7 +637,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       alive = false;
       window.clearTimeout(timer);
     };
-  }, [report, selectTemplate, fetchGeneration]);
+  }, [report, selectTemplate, fetchGeneration, showFailedBuild]);
 
   // Manifest follows templateId (re-runs when the API comes back online).
   useEffect(() => {

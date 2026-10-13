@@ -3,12 +3,10 @@
 // подключают сюда содержимое плит и слоёв через слоты `Deck`.
 import type { CSSProperties } from "react";
 import { useApp } from "../../store";
-import { slideCount } from "../../lib/narrate";
 import { tplLabel } from "../../lib/plain";
-import { clock } from "../../lib/stage";
-import { plural } from "../../lib/utils";
 import type { Generation, TemplateListItem, Variant } from "../../types";
 import { BuildPlate } from "../build/BuildPlate";
+import { buildStripText } from "../build/buildView";
 import { ImproveStrip } from "../create/ImproveNote";
 import { ParamsBody, ParamsHead, useParamsPlate } from "../create/ParamsPlate";
 import { tplMeta } from "../create/ribbon";
@@ -36,14 +34,17 @@ function templateStrip(t: TemplateListItem | undefined): StripData | undefined {
   return { title: tplLabel(t), meta: tplMeta(t) || undefined };
 }
 
-/** Полоса 03 на результате: «Сборка завершена за 2:31 · 3 варианта · 12 слайдов» (V2 `strip3`, `resultMeta`). */
+/** Полоса 03 на результате (V2 `strip3`, `resultMeta`; тексты — buildStripText): «✓ Сборка завершена за 2:31 · 3 варианта ·
+ *  12 слайдов» у законченной сборки; «Сборка остановилась» тихим красным B-failed (#F87171), без галочки, у упавшей;
+ *  у идущей полосы нет. */
 function buildStrip(g: Generation | null, v: Variant | null): StripData | undefined {
-  if (!g) return undefined;
-  const n = g.variants.length;
+  const t = buildStripText(g, v);
+  if (!t) return undefined;
+  if (t.tone === "failed") return { title: <span style={{ color: "#F87171" }}>{t.title}</span> };
   return {
     icon: <span style={{ display: "inline-flex", flex: "none", color: "#38BDF8" }}><Icon name="check-circle" size={16} /></span>,
-    title: g.seconds ? `Сборка завершена за ${clock(g.seconds)}` : "Сборка завершена",
-    meta: [n ? plural(n, "вариант", "варианта", "вариантов") : null, n ? plural(slideCount(v ?? g.variants[0]), "слайд", "слайда", "слайдов") : null].filter(Boolean).join(" · ") || undefined,
+    title: t.title,
+    meta: t.meta ?? undefined,
   };
 }
 

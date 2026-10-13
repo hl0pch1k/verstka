@@ -147,8 +147,10 @@ export function followBuild(t: BuildTarget, d: GenerationDeps, ended?: () => voi
 }
 
 /** `expected`: the slide count the screen read in the text (the build screen's placeholders), never sent.
+ *  `started`: the server took the request — the deck it builds (the caller ties the request to it: «Собрать ещё раз»
+ *  and LS.build), called before the build is followed.
  *  The build screen stands while the job runs (followBuild). The helper stays as it is: it narrows every screen. */
-export function generationFlow(req: GenerateRequest, d: GenerationDeps, expected: number | null = null): Promise<void> {
+export function generationFlow(req: GenerateRequest, d: GenerationDeps, expected: number | null = null, started?: (gid: string) => void): Promise<void> {
   return new Promise<void>((resolve) => {
     void (async () => {
       d.clearNotice("build");
@@ -159,6 +161,7 @@ export function generationFlow(req: GenerateRequest, d: GenerationDeps, expected
         d.report(e, "Не удалось начать сборку презентации", "build");
         return resolve();
       }
+      started?.(res.generation_id);
       d.dispatch({ type: "go", screen: "build" });
       followBuild({ jobId: res.job_id, generation: res.generation_id, strategies: req.strategies, template: req.template_id, slides: req.slides ?? expected }, d, resolve);
     })();

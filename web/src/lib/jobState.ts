@@ -10,8 +10,9 @@ export interface StageLine { text: string; slide: number | null; variant: string
 
 export interface ActiveJob {
   id: string; label: string; progress: number; message: string; status: JobStatus; kind: JobKind; startedAt: number; items?: string[]; variants?: Record<string, VariantProgress>;
-  /** When the job ended (ms; done or failed): the build's clock stops there. */
-  endedAt?: number;
+  /** When the job ended (ms; done or failed): the build's clock stops there. null — it ended, when is not known (a build
+   *  that stopped while the page was closed, its job forgotten by the server): the clock shows a dash. */
+  endedAt?: number | null;
   /** The planning agent's steps so far (Agent v2) and the latest phase of the timeline the job has reached. */
   agent?: AgentEvent[]; phase?: PhaseKey | null;
   /** The template a generation is built from (the build screen names it under its title). */
