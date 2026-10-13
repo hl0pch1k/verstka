@@ -137,7 +137,8 @@ export const imagesHint = (on: boolean) => (on ? "По описаниям в т�
 /** Презентацию соберут так, как собрали: её аудитория, тип, число слайдов, переключатели и варианты.
  *  - Числа слайдов нет — его читали из текста: степпер «не трогали» (null), а не прежнее число черновика.
  *  - Вариантов нет — все.
- *  - Взгляд дизайнера — `eyes`; у старых презентаций его нет — `auditModels` (переключатель тогда значил его).
+ *  - Взгляд дизайнера — `eyes`; у старых презентаций его нет — `auditModels` (переключатель тогда значил его);
+ *    `eyes` null без `auditModels` — как модель (null).
  *  - Изображения null — как решит сервер (null).
  *  Переключателей, которых в параметрах нет, — как было. */
 export function presetParams(p: Params, preset: ComposerPreset): Params {
@@ -152,6 +153,8 @@ export function presetParams(p: Params, preset: ComposerPreset): Params {
   if (typeof preset.useModels === "boolean") out.useModels = preset.useModels;
   const eyes = preset.eyes ?? preset.auditModels;
   if (typeof eyes === "boolean") out.eyes = eyes;
+  // взгляд «как у модели» (сервер решал сам) — так же и в параметрах, а не прежний выбор человека
+  else if (preset.eyes === null) out.eyes = null;
   if (preset.pictures !== undefined) out.pictures = preset.pictures;
   return out;
 }

@@ -21,6 +21,8 @@ import { Scrim } from "../layers/Scrim";
 import { TemplatesLayer } from "../layers/TemplatesLayer";
 import { TplDeleteDialog } from "../layers/TplDeleteDialog";
 import { TplPreviewLayer } from "../layers/TplPreviewLayer";
+import { ResultPlate } from "../result/ResultPlate";
+import { deckStrip } from "../result/resultView";
 import { Header } from "./Header";
 
 const ROOT: CSSProperties = {
@@ -49,15 +51,20 @@ function buildStrip(g: Generation | null, v: Variant | null): StripData | undefi
 }
 
 export function AppShell() {
-  const { templates, templateId, ui, dispatch, brief, improveSource, generation, activeVariant } = useApp();
-  const s1 = templateStrip(templates.find((t) => t.template_id === templateId));
+  const { templates, templateId, templateLabel, ui, dispatch, brief, improveSource, generation, activeVariant } = useApp();
+  // полоса 01 на результате — шаблон открытой презентации (шаблона нет в библиотеке — его имя), иначе выбранный
+  const deck = ui.screen === "result" ? generation : null;
+  const s1 = deck
+    ? templateStrip(templates.find((t) => t.template_id === deck.template_id)) ?? { title: templateLabel(deck.template_id, deck.template_file) }
+    : templateStrip(templates.find((t) => t.template_id === templateId));
   const s3 = buildStrip(generation, activeVariant);
   // шаг «Текст» — одно состояние на заголовок и тело плиты 02; разбор текста в нём считается один раз на правку
   const text = useTextPlate();
   // шаг «Параметры и запуск» — одно состояние на заголовок плиты 03 (сводка, запуск) и её тело
   const params = useParamsPlate();
-  // полоса 02 на «Создать» и сборке — текст поля; на результате её подпишет результат (название презентации)
-  const s2 = ui.screen === "result" ? undefined : textStrip(brief, { line: text.line, improve: ui.improve ? improveSource : null });
+  // полоса 02 на «Создать» и сборке — текст поля; на результате — открытая презентация: название и откуда текст
+  const s2 = ui.screen === "result" ? (deck ? deckStrip(deck, activeVariant) : undefined)
+    : textStrip(brief, { line: text.line, improve: ui.improve ? improveSource : null });
   // загрузка своего шаблона — одна на плиту 01 и раздел «Шаблоны»
   const upload = useTemplateUpload();
   // файл, отпущенный мимо включённой зоны, браузер не открывает
@@ -90,7 +97,7 @@ export function AppShell() {
         <div className="hp-wrap hp-closed">
           <Deck s1={s1} h1={<TemplateHead upload={upload} />} p1={<TemplateBody upload={upload} />}
             s2={s2} h2={<TextHead tp={text} />} p2={<TextBody tp={text} />}
-            h3={<ParamsHead pp={params} />} p3={<ParamsBody pp={params} />} b3={<BuildPlate />} s3={s3} layers={layers} />
+            h3={<ParamsHead pp={params} />} p3={<ParamsBody pp={params} />} b3={<BuildPlate />} s3={s3} p4={<ResultPlate />} layers={layers} />
           <div className="hp-hcell" />
         </div>
       </div>

@@ -222,3 +222,7 @@ test("параметры презентации: взгляд — `eyes`, у с�
   assert.equal(presetParams(P(), { eyes: null, auditModels: false }).eyes, false);
   assert.equal(presetParams(P({ eyes: true }), {}).eyes, true);
 });
+test("параметры презентации: взгляд null без `auditModels` — «как модель» (null), а не прежний выбор", () => {
+  assert.equal(presetParams(P({ eyes: false }), { eyes: null }).eyes, null);
+  assert.equal(presetParams(P({ eyes: false }), {}).eyes, false);
+});

@@ -79,8 +79,9 @@ export interface AppState {
   building: boolean;
   /** «Собрать ещё раз»: тот же запрос сборки повторно. Обещание — как у startGeneration: решается, когда повторная сборка
    *  кончилась или не началась (её начало видно по `buildJob`, отказ — по строке области «Сборка»); false — повторять
-   *  нечего (запрос неизвестен). */
-  retryBuild(): Promise<boolean>;
+   *  нечего (запрос неизвестен). `deck` — открытая презентация (результат): повторяется её запрос — свой запрос
+   *  страницы, если это её сборка, иначе собранный из меты (`requestOf`), а не запрос последней сборки. */
+  retryBuild(deck?: GenerationMeta | null): Promise<boolean>;
   messages: ChatMessage[]; pushMessage(role: "user" | "assistant", text: string): void; // ts = unix seconds (fmtDate-compatible)
   /** Строки статуса по областям — показываются рядом с местом действия (всплывающих уведомлений в «Слоях» нет). */
   notices: Partial<Record<NoticeArea, Notice>>;
@@ -506,8 +507,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   }, [generationDeps]);
 
-  const retryBuild = useCallback(async () => {
-    const last = lastBuild.current;
+  const retryBuild = useCallback(async (deck?: GenerationMeta | null) => {
+    const last = deck ? askOf(deck, lastBuild.current) : lastBuild.current;
     if (!last) return false;
     await startGeneration(last.request, last.expected);
     return true;

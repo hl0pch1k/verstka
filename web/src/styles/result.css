@@ -1,0 +1,64 @@
+/* Плита 04 «Результат» (ui/result). Блок «Результат — как «Правая колонка целиком»» — дословно из boards/V2.dc.html
+ * (<helmet><style>, он же — стили доски R-aside): уведомление-таблетка ra-note, сцена ra-stage, колонка ra-col, карточки
+ * ra-card. Общие правила результата (p2-rbl, p2-film, p2-th, p2-rseg, p2-rsc, p2-fade) — в base.css; помощник сужает
+ * результат правилами hp- своей задачи (helper.css). После блока — правила V2 для приглушённой карточки и кнопки
+ * (ra-card-static, rt-nb-off) и свои дополнения. */
+/* Результат — как «Правая колонка целиком» (R-aside): уведомление-таблетка, рабочая область, полная колонка */
+.ra-note{position:relative;display:flex;align-items:center;height:48px;transform-origin:left center;transition:transform 160ms var(--ease)}
+.ra-note:not(.ra-note-on):has(.ra-ntg:hover){transform:translateY(-2px)}
+.ra-note:not(.ra-note-on):has(.ra-ntg:active){transform:scale(.98)}
+.ra-ntg{position:relative;z-index:1;display:inline-flex;align-items:center;gap:12px;flex:none;height:48px;padding:0 16px;border:0;border-radius:999px;background:#E9F1FF;color:#0B1220;font-size:15px;font-weight:700;line-height:24px;white-space:nowrap;cursor:pointer}
+.ra-chev{display:flex;align-items:center;justify-content:center;width:20px;height:20px;flex:none;color:#5A6272;transform:rotate(0deg) translateX(0);transition:transform 240ms var(--ease)}
+.ra-ntg:hover .ra-chev{transform:rotate(0deg) translateX(2px)}
+.ra-note-on .ra-chev{transform:rotate(180deg) translateX(0)}
+.ra-note-on .ra-ntg:hover .ra-chev{transform:rotate(180deg) translateX(2px)}
+.ra-nd{position:relative;display:flex;align-items:center;gap:4px;flex:1;min-width:0;height:48px;margin-left:-24px;padding:4px 4px 4px 32px}
+.ra-nbg{position:absolute;inset:0;border-radius:0 24px 24px 0;background:#E9F1FF;clip-path:inset(0 100% 0 0 round 0 24px 24px 0);transition:clip-path 240ms var(--ease) 60ms}
+.ra-note-on .ra-nbg{clip-path:inset(0 0 0 0 round 0 24px 24px 0);transition:clip-path 360ms var(--ease)}
+.ra-ni{position:relative;display:inline-flex;align-items:center;flex:none;opacity:0;transform:translateX(-8px);visibility:hidden;transition:opacity 120ms var(--ease),transform 120ms var(--ease),visibility 0s linear 120ms}
+.ra-note-on .ra-ni{opacity:1;transform:translateX(0);visibility:visible;transition:opacity 240ms var(--ease) 160ms,transform 240ms var(--ease) 160ms,visibility 0s}
+.ra-note-on .ra-ni2{transition-delay:200ms,200ms,0s}
+.ra-note-on .ra-ni3{transition-delay:240ms,240ms,0s}
+.ra-note-on .ra-ni4{transition-delay:280ms,280ms,0s}
+.ra-note-on .ra-ni5{transition-delay:320ms,320ms,0s}
+.ra-nsp{flex:1;min-width:16px}
+.ra-ni1{flex:0 1 auto;min-width:0}
+.ra-src{min-width:0;font-size:14px;font-weight:500;line-height:20px;color:#5A6272;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ra-nb{height:40px;padding:0 16px;box-shadow:none}
+.ra-nx{background:#FFFFFF}
+.ra-vg{display:inline-flex;align-items:baseline;gap:6px}
+.p2-sw.ra-sw{background:#E9EEF3}
+.ra-sw .p2-sw-knob{box-shadow:0 1px 2px rgba(11,18,32,.06),0 4px 16px 0 rgba(11,18,32,.08)}
+.ra-cnt{display:inline-flex;align-items:center;justify-content:center;min-width:24px;height:24px;padding:0 8px;border-radius:999px;font-size:12px;font-weight:700;line-height:16px}
+.ra-cnt-warn{background:#FFFBEB;color:#B45309}
+.ra-stage{position:relative;width:100%;max-width:720px;border-radius:24px;overflow:hidden;background:#F3F4F1;box-shadow:0 0 0 1px rgba(11,18,32,.08),0 16px 48px 0 rgba(11,18,32,.12)}
+.ra-col{scrollbar-width:none}
+.ra-col::-webkit-scrollbar{display:none}
+.ra-col>*{flex:none}
+.ra-card{position:relative;display:block;padding:16px 24px;border-radius:24px;background:#F3F4F1;color:#0B1220;text-decoration:none;transition:transform 160ms var(--ease)}
+.ra-card:hover{color:#0B1220;transform:translateY(-2px)}
+.ra-card:active{transform:scale(.98)}
+.ra-ch{display:flex;align-items:center;justify-content:space-between;gap:8px;height:24px}
+.ra-ct{font-family:'Unbounded','Manrope',sans-serif;font-size:14px;font-weight:600;line-height:24px;letter-spacing:-0.02em;color:#0B1220;white-space:nowrap}
+.ra-cm{font-size:13px;font-weight:600;line-height:20px;color:#5A6272;white-space:nowrap}
+.ra-go{flex:none;color:#5A6272;transition:transform 160ms var(--ease)}
+.ra-card:hover .ra-go{transform:translateX(2px)}
+.ra-tag{display:inline-flex;align-items:center;height:24px;padding:0 8px;border-radius:999px;background:#E9F1FF;color:#2563EB;font-size:12px;font-weight:700;line-height:16px;white-space:nowrap}
+.ra-ri{display:flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:999px;background:#FFFFFF;color:#2563EB}
+.ra-cnt{font-family:'Unbounded','Manrope',sans-serif;font-weight:600;letter-spacing:0;font-variant-numeric:tabular-nums}
+.ra-card-static{pointer-events:none}
+/* «Показать текст» у презентаций только с обложкой: текста нет — кнопка приглушена и не открывает слой */
+.rt-nb-off{opacity:.32;cursor:default}
+.p2-ob.rt-nb-off:hover,.p2-ob.rt-nb-off:active{transform:none}
+
+/* Свои дополнения. Карточки колонки — кнопки (открывают лист «Подробнее» на своей вкладке), а не ссылки доски: без
+ * рамки и фона кнопки, текст слева, шрифт страницы. Скачивания — ссылки на файлы варианта в облике кнопок доски:
+ * без подчёркивания и без цвета ссылки при наведении (a:hover из base.css). */
+button.ra-card{width:100%;border:0;font:inherit;text-align:left;cursor:pointer}
+a.p2-cta,a.p2-ob{text-decoration:none}
+a.p2-cta:hover{color:#FFFFFF}
+a.p2-ob:hover{color:#0B1220}
+/* сцена: прежний слайд лежит под новым, новый проявляется поверх (перекрёстное затухание 240 мс); пропорции — шаблона */
+.ra-shot{position:absolute;inset:0;display:block;width:100%;height:100%;object-fit:cover}
+@keyframes ra-xf{from{opacity:0}to{opacity:1}}
+.ra-xf{animation:ra-xf 240ms var(--ease) backwards}
