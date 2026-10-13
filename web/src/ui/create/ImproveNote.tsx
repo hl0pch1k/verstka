@@ -7,7 +7,7 @@ import { useApp } from "../../store";
 import type { ImproveSource } from "../../types";
 import { cls } from "../kit/cls";
 import { Icon } from "../kit/Icon";
-import { improveNoteParts, improveSlides, improveStripMeta } from "./textRules";
+import { improveNoteParts, improveSlides, improveStripMeta, modelOnOf } from "./textRules";
 
 /** Последнее непустое значение: уходящее содержимое гаснет со своими данными. */
 export function useHeld<T>(value: T | null): T | null {
@@ -25,7 +25,7 @@ export function useImproveOn(): boolean {
 /** Модель подключена: заметка обещает, что она посмотрит на каждый новый слайд. */
 export function useModelOn(): boolean {
   const { health, modelStatus } = useApp();
-  return !!health?.models_configured && modelStatus?.state !== "off";
+  return modelOnOf(health, modelStatus);
 }
 
 /** Полоса «01 …» над плитой 02 (слой колоды, z 1). Клик — выход из режима к шагу «Шаблон», текст остаётся

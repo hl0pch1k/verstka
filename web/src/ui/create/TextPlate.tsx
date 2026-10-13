@@ -19,7 +19,7 @@ import { useDeckWidth } from "../deck/useDeckFit";
 import { FileMenu, type FilePick } from "./FileMenu";
 import { ImproveNote, useHeld, useImproveOn, useModelOn } from "./ImproveNote";
 import {
-  charsLabel, DECK_ACCEPT, deckError, fileKind, fileTextIssue, improveLive, improveShift, improveStep, MAX_TEXT_BYTES, TEXT_ACCEPT, textError,
+  charsLabel, DECK_ACCEPT, deckError, fileKind, fileTextIssue, improveLive, improveShift, improveStep, MAX_TEXT_BYTES, sampleText, TEXT_ACCEPT, textError, writerOn,
   textLine, textPreview, TW, TW0, TW_FIRST_MS, TW_WAKE_MS, twBlink, twStep, twText, type ImproveLive, type TextIssue, type TextLine, type Tw,
 } from "./textRules";
 
@@ -27,16 +27,19 @@ const show = (on: boolean) => (on ? "p2-on" : "p2-off");
 
 const HINT_TOPIC = "Это тема — агент напишет полный текст";
 const HINT_TOPIC_TAIL = ": ключевые факты, даты, формулы с пояснениями";
+/** Пустое поле, а текст агент не пишет (модель не подключена или не пишет тексты): нужен готовый текст. */
+const HINT_READY = "Вставьте готовый текст — агент разложит его по слайдам";
 const NO_FACTS = "Цифр и таблиц в тексте нет — слайды будут из формулировок";
 const FIX = "Вставьте готовый текст или загрузите .txt и .md";
 
-/** Кто пишет текст: `writer` — агент распишет тему (сервер в режиме writer, модель подключена и пишет тексты: строка
- *  «Это тема — агент напишет…»); `writes` — модель пишет тексты слайдов («…и допишет недостающее», иначе «…без
- *  переписывания»). Оба сужает переключатель «Модель пишет тексты» шага 03: без него сервер не пишет и тему. */
+/** Кто пишет текст: `writer` — агент распишет тему (`writerOn`: сервер в режиме writer, модель подключена и пишет
+ *  тексты — строка «Это тема — агент напишет…», «Взять пример» даёт тему, тема проходит проверку перед сборкой);
+ *  `writes` — модель пишет тексты слайдов («…и допишет недостающее», иначе «…без переписывания»). Оба сужает
+ *  переключатель «Модель пишет тексты» шага 03: без него сервер не пишет и тему. */
 export function useWriting(): { writer: boolean; writes: boolean } {
-  const { health, params } = useApp();
+  const { health, modelStatus, params } = useApp();
   const writes = useModelOn() && params.useModels;
-  return { writer: !!health?.writer && writes, writes };
+  return { writer: writerOn({ health, status: modelStatus, useModels: params.useModels }), writes };
 }
 
 /** Состояние шага на обе части плиты (заголовок и тело): меню, выбор файла, чтение презентации, ошибка у поля,
@@ -67,14 +70,14 @@ export interface TextPlate {
   tw: MutableRefObject<{ s: Tw; started: boolean }>;
   /** Ввод в поле. */
   type(v: string): void;
-  /** «Взять пример»: тема из подсказки (V2 `txTake`). */
+  /** «Взять пример»: тема из подсказки (V2 `txTake`); агент текст не пишет — готовый текст-пример. */
   take(): void;
 }
 
 export function useTextPlate(): TextPlate {
   const {
     ui, dispatch, brief, setBrief, textIssue, setTextIssue, notices, clearNotice, uploadTemplate, templateId,
-    composerText, takeComposerText, improveSource, takeImproveSource, health,
+    composerText, takeComposerText, improveSource, takeImproveSource,
   } = useApp();
   const [menu, setMenu] = useState(false);
   const [reading, setReading] = useState<string | null>(null);
@@ -153,7 +156,7 @@ export function useTextPlate(): TextPlate {
   const onFile = useCallback(async (f: File) => {
     setMenu(false);
     // у файла проверяется только тип: его текст ещё встанет в поле
-    const bad = textError("", f, { writer: !!health?.writer });
+    const bad = textError("", f, { writer });
     if (bad) return setTextIssue(bad);
     if (fileKind(f.name) === "deck") return readDeck(f);
     if (f.size > MAX_TEXT_BYTES) return setTextIssue({ kind: "file", text: `Файл «${f.name}» больше 2 МБ` });
@@ -166,7 +169,7 @@ export function useTextPlate(): TextPlate {
     } catch (e) {
       setTextIssue({ kind: "file", text: humanError(e instanceof Error ? e.message : "", `Не удалось прочитать «${f.name}»`) });
     }
-  }, [readDeck, replace, setTextIssue, health?.writer]);
+  }, [readDeck, replace, setTextIssue, writer]);
 
   const pick = useCallback((k: FilePick) => {
     setMenu(false);
@@ -185,9 +188,9 @@ export function useTextPlate(): TextPlate {
   }, [setBrief]);
 
   const take = useCallback(() => {
-    replace(TW[tw.current.s.i] ?? TW[0]);
+    replace(sampleText(writer, TW[tw.current.s.i] ?? TW[0]));
     taRef.current?.focus({ preventScroll: true });
-  }, [replace]);
+  }, [replace, writer]);
 
   // проверка перед сборкой (пусто, коротко) поднимает шаг «Текст» и ставит курсор в поле
   useEffect(() => {
@@ -328,6 +331,7 @@ export function TextBody({ tp }: { tp: TextPlate }) {
   // строка о ходе чтения («Модель не подключена…») встаёт на место подсказки и «Читаю…»; ошибка сильнее неё
   const infoOn = !issue && !!tp.info;
   const hintOn = !issue && !busy && !infoOn && line.kind === "topic";
+  const readyOn = !issue && !busy && !infoOn && line.kind === "ready";
   const factsOn = !issue && !busy && !infoOn && line.kind === "facts";
   const busyOn = busy && !infoOn && !issue;
   // гаснущая строка держит своё: разбор, ошибку, имя презентации, строку о ходе
@@ -361,6 +365,10 @@ export function TextBody({ tp }: { tp: TextPlate }) {
                 <p className={show(hintOn)} style={LINE} title={HINT_TOPIC + HINT_TOPIC_TAIL}>
                   <span style={{ display: "flex", flex: "none" }}><Icon name="info" size={16} /></span>
                   <span style={ONE}>{HINT_TOPIC}{tail && HINT_TOPIC_TAIL}</span>
+                </p>
+                <p className={show(readyOn)} style={LINE} title={HINT_READY}>
+                  <span style={{ display: "flex", flex: "none" }}><Icon name="info" size={16} /></span>
+                  <span style={ONE}>{HINT_READY}</span>
                 </p>
                 <p id="ct-facts" className={show(factsOn)} style={LINE} title={facts?.kind === "facts" && facts.facts ? `В тексте: ${facts.facts}` : NO_FACTS}>
                   <span style={{ display: "flex", flex: "none", color: "#2563EB" }}><Icon name="numbers" size={16} /></span>

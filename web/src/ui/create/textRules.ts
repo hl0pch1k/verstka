@@ -1,13 +1,13 @@
 // Шаг «02 Текст» без React: что поле скажет о тексте и о файле, печатающаяся подсказка, строки под полем, полоса 02 и
 // заметка «Улучшить готовую». Правила и тексты — boards/V2.dc.html (модуль tx, `twTick`, C-text, C-improve, C-errors);
 // разбор текста — lib/textFacts.ts и lib/writerMode.ts.
-import { BRIEF_MIN, BRIEF_MIN_TOPIC } from "../../lib/createForm";
+import { BRIEF_MIN, BRIEF_MIN_TOPIC, SAMPLE_BRIEF } from "../../lib/createForm";
 import { humanError } from "../../lib/errors";
 import { templateStem } from "../../lib/templateFiles";
 import { briefBody, factsLine, textFacts } from "../../lib/textFacts";
 import { plural } from "../../lib/utils";
 import { writerModeOf } from "../../lib/writerMode";
-import type { ImprovedFrom, ImproveSource } from "../../types";
+import type { Health, ImprovedFrom, ImproveSource, ModelsStatus } from "../../types";
 
 /** Ошибка у поля. `empty` / `short` / `type` — правила `textError`; `file` — файл не прочитался или презентацию не
  *  удалось прочитать на сервере (причина — в `text`). */
@@ -15,8 +15,22 @@ export interface TextIssue { kind: "empty" | "short" | "type" | "file"; text: st
 
 export const EMPTY_TEXT = "Напишите, о чём презентация";
 export const SHORT_TEXT = "Слишком коротко — напишите тему подробнее";
-/** Сервер не пишет текст по теме (`health.writer` выключен): презентация строится из текста как есть. */
-export const SHORT_NO_WRITER = `Нужен готовый текст от ${BRIEF_MIN} знаков — агент на этом сервере не пишет текст по теме`;
+/** Агент не пишет текст по теме (`writerOn` — нет: модель не подключена, «Модель пишет тексты» выключено или сервер не в
+ *  режиме writer): презентация строится из текста как есть. */
+export const SHORT_NO_WRITER = `Нужен готовый текст от ${BRIEF_MIN} знаков — модель не подключена или не пишет тексты`;
+
+// ── пишет ли агент текст по теме — одно правило на поле, его строки, «Взять пример» и проверку перед сборкой
+/** Модель подключена и не выключена (индикатор шапки): она пишет тексты и смотрит на слайды. */
+export const modelOnOf = (health: Pick<Health, "models_configured"> | null | undefined, status: Pick<ModelsStatus, "state"> | null | undefined): boolean =>
+  !!health?.models_configured && status?.state !== "off";
+
+/** Агент распишет тему в полный текст: сервер в режиме writer (`health.writer`), модель подключена и «Модель пишет
+ *  тексты» включено. Иначе тема — не текст: нужен готовый текст от `BRIEF_MIN` знаков. */
+export const writerOn = (o: { health: Pick<Health, "writer" | "models_configured"> | null | undefined; status: Pick<ModelsStatus, "state"> | null | undefined; useModels: boolean }): boolean =>
+  !!o.health?.writer && modelOnOf(o.health, o.status) && o.useModels;
+
+/** «Взять пример»: агент пишет текст — тема из печатающейся подсказки; не пишет — готовый текст-пример. */
+export const sampleText = (writer: boolean, phrase: string): string => (writer ? phrase : SAMPLE_BRIEF);
 
 // ── файлы «Из файла»
 const EXT_RE = /\.[a-z0-9]+$/i;
@@ -131,12 +145,12 @@ export function charsLabel(n: number): string {
 }
 
 /** Строка слева под полем: `topic` — «Это тема — агент напишет полный текст…» (пустое поле и тема, которую агент
- *  распишет); `facts` — готовый текст: «В тексте: 6 слайдов, 14 чисел, 1 таблица» (`facts` null — ни слайдов, ни чисел,
- *  ни таблиц). `writer` — агент пишет текст по теме (сервер в режиме writer, модель пишет тексты). О своём проекте
- *  («наш», «мы») агент не пишет — такой текст строится как есть. */
-export type TextLine = { kind: "topic" } | { kind: "facts"; facts: string | null };
+ *  распишет); `ready` — пустое поле, а текст агент не пишет (`writerOn` — нет): нужен готовый текст; `facts` — готовый
+ *  текст: «В тексте: 6 слайдов, 14 чисел, 1 таблица» (`facts` null — ни слайдов, ни чисел, ни таблиц). `writer` — агент
+ *  пишет текст по теме (`writerOn`). О своём проекте («наш», «мы») агент не пишет — такой текст строится как есть. */
+export type TextLine = { kind: "topic" } | { kind: "ready" } | { kind: "facts"; facts: string | null };
 export function textLine(text: string, writer: boolean): TextLine {
-  if (!briefBody(text).trim()) return { kind: "topic" };
+  if (!briefBody(text).trim()) return writer ? { kind: "topic" } : { kind: "ready" };
   const w = writerModeOf(text);
   if (writer && w.mode && !w.privateHint) return { kind: "topic" };
   return { kind: "facts", facts: factsLine(textFacts(text)) };
@@ -174,7 +188,7 @@ export function textStrip(text: string, o: { line: TextLine; improve?: Pick<Impr
   if (!first) return { title: "Тема ещё не задана" };
   const l = o.line;
   if (l.kind === "topic") return { title: clipLine(first, 60), meta: "тема · текст пишет агент" };
-  return { title: clipLine(first, 60), meta: l.facts ? `готовый текст · ${l.facts}` : "готовый текст" };
+  return { title: clipLine(first, 60), meta: l.kind === "facts" && l.facts ? `готовый текст · ${l.facts}` : "готовый текст" };
 }
 
 // ── «Улучшить готовую»

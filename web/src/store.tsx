@@ -11,7 +11,7 @@ import { decodeImage } from "./lib/motion";
 import { draftBrief, writeDraft } from "./lib/draft";
 import { variantRev, withRev } from "./lib/rev";
 import { uiReducer, UI0, type UiAction, type UiState } from "./ui/deck/geometry";
-import { textError, type TextIssue } from "./ui/create/textRules";
+import { textError, writerOn, type TextIssue } from "./ui/create/textRules";
 import { buildRunning, draftParams, type Params } from "./ui/create/params";
 import { completeAsk, failedBuildJob, parsePendingBuild, pendingFor, requestOf, resumeBuild, type PendingBuild } from "./ui/build/resume";
 import { openStrategy } from "./ui/result/resultView";
@@ -273,8 +273,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // Latest values for callbacks that must stay referentially stable.
-  const latest = useRef({ templateId, templates, manifest, generationId, generation, activeStrategy, strategies, ui, brief, params, health, buildJob });
-  latest.current = { templateId, templates, manifest, generationId, generation, activeStrategy, strategies, ui, brief, params, health, buildJob };
+  const latest = useRef({ templateId, templates, manifest, generationId, generation, activeStrategy, strategies, ui, brief, params, health, modelStatus, buildJob });
+  latest.current = { templateId, templates, manifest, generationId, generation, activeStrategy, strategies, ui, brief, params, health, modelStatus, buildJob };
   const genSeq = useRef(0);
   // the deck asked for last (fetchGeneration): a reload after a change never races a deck being opened over it
   const askedGen = useRef<string | null>(null);
@@ -320,8 +320,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("pagehide", flush);
   }, []);
   const checkText = useCallback(() => {
-    // тема годится, только когда сервер пишет текст по теме сам (`health.writer`); иначе нужен готовый текст
-    const issue = textError(latest.current.brief, null, { writer: !!latest.current.health?.writer });
+    // тема годится, только когда агент пишет текст по теме (`writerOn` — то же правило, что у поля и его строк);
+    // иначе нужен готовый текст
+    const { brief: text, health: h, modelStatus: status, params: p } = latest.current;
+    const issue = textError(text, null, { writer: writerOn({ health: h, status, useModels: p.useModels }) });
     if (!issue) return true;
     setTextIssue(issue);
     // пустое поле — «Улучшить готовую» кончилась (V2 `txStart`: `txImp: false`)

@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { BRIEF_MIN, BRIEF_MIN_TOPIC } from "../../lib/createForm";
-import { charsLabel, clipLine, deckError, fileKind, fileTextIssue, improveLive, improveNoteParts, improveDeckStrip, improveShift, improveStep, improveStripMeta, NOT_UTF8, textError, textLine, textPreview, textStrip, TW, TW0, twBlink, twStep, twText, type Tw } from "./textRules";
+import { BRIEF_MIN, BRIEF_MIN_TOPIC, SAMPLE_BRIEF } from "../../lib/createForm";
+import { charsLabel, clipLine, deckError, fileKind, fileTextIssue, improveLive, improveNoteParts, improveDeckStrip, improveShift, improveStep, improveStripMeta, modelOnOf, NOT_UTF8, sampleText, SHORT_NO_WRITER, textError, textLine, textPreview, textStrip, TW, TW0, twBlink, twStep, twText, writerOn, type Tw } from "./textRules";
 
 /** Сервер пишет текст по теме (`health.writer`) — и без него. */
 const W = { writer: true };
@@ -32,7 +32,7 @@ test("«интегралы» — ошибки нет", () => {
 test("сервер не пишет текст по теме (`health.writer` выкл.): нужен готовый текст от BRIEF_MIN знаков", () => {
   const e = textError("История VK", null, NO_W);
   assert.equal(e?.kind, "short");
-  assert.equal(e?.text, "Нужен готовый текст от 40 знаков — агент на этом сервере не пишет текст по теме");
+  assert.equal(e?.text, "Нужен готовый текст от 40 знаков — модель не подключена или не пишет тексты");
   assert.equal(textError("и".repeat(BRIEF_MIN - 1), null, NO_W)?.kind, "short");
   assert.equal(textError(`  ${"и".repeat(BRIEF_MIN - 1)}  `, null, NO_W)?.kind, "short");
   assert.equal(textError("и".repeat(BRIEF_MIN), null, NO_W), null);
@@ -276,4 +276,29 @@ test("полоса 01 улучшенной презентации на сбор�
   // не «Улучшить готовую»
   assert.equal(improveDeckStrip(null, "1b88"), null);
   assert.equal(improveDeckStrip({ name: " " }, "1b88"), null);
+});
+
+// B-I2: одно правило «пишет ли агент текст» — для поля, его строк, «Взять пример» и проверки перед сборкой
+test("writerOn: сервер в режиме writer, модель подключена и не выключена, «Модель пишет тексты» включено", () => {
+  const h = { writer: true, models_configured: true };
+  assert.equal(writerOn({ health: h, status: { state: "ok" }, useModels: true }), true);
+  assert.equal(writerOn({ health: h, status: null, useModels: true }), true); // индикатор ещё не ответил
+  assert.equal(writerOn({ health: h, status: { state: "ok" }, useModels: false }), false); // переключатель выключен
+  assert.equal(writerOn({ health: h, status: { state: "off" }, useModels: true }), false); // модель выключена
+  assert.equal(writerOn({ health: { writer: true, models_configured: false }, status: null, useModels: true }), false);
+  assert.equal(writerOn({ health: { writer: false, models_configured: true }, status: null, useModels: true }), false);
+  assert.equal(writerOn({ health: null, status: null, useModels: true }), false);
+  assert.equal(modelOnOf({ models_configured: true }, { state: "off" }), false);
+  assert.equal(modelOnOf({ models_configured: true }, { state: "retry" }), true);
+});
+test("агент текст не пишет: пустое поле просит готовый текст, «Взять пример» даёт готовый текст, тема — коротко", () => {
+  assert.deepEqual(textLine("", false), { kind: "ready" });
+  assert.deepEqual(textLine("   ", false), { kind: "ready" });
+  assert.equal(sampleText(false, TW[0]), SAMPLE_BRIEF);
+  assert.equal(sampleText(true, TW[0]), TW[0]);
+  // пример годится и без агента-писателя: он длиннее BRIEF_MIN знаков
+  assert.equal(textError(SAMPLE_BRIEF, null, { writer: false }), null);
+  assert.equal(textError("История VK", null, { writer: false })?.text, SHORT_NO_WRITER);
+  // полоса 02 пустого поля одна при любом правиле
+  assert.deepEqual(textStrip("", { line: textLine("", false) }), { title: "Тема ещё не задана" });
 });
