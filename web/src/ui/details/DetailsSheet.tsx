@@ -122,12 +122,12 @@ export function DetailsSheet() {
 
           <div className="p2-ls" style={{ ...lsDelay(200), position: "absolute", inset: 0, pointerEvents: "none" }}>
             <div style={{ pointerEvents: "auto" }}>
-              <Panel tab="quality" on={tab === "quality"}><QualityTab g={g} v={v} /></Panel>
+              <Panel tab="quality" on={tab === "quality"}><QualityTab g={g} v={v} deck={deck} /></Panel>
               <Panel tab="why" on={tab === "why"}><WhyTab g={g} v={v} deck={deck} active={open && tab === "why"} /></Panel>
               <Panel tab="agent" on={tab === "agent"}><AgentTab g={g} v={v} /></Panel>
               <Panel tab="plan" on={tab === "plan"} style={{ height: 508, display: "flex", flexDirection: "column" }}><PlanTab g={g} v={v} active={open && tab === "plan"} /></Panel>
               <Panel tab="template" on={tab === "template"} style={{ height: 508, display: "flex", flexDirection: "column" }}><TemplateTab deck={deck} /></Panel>
-              <Panel tab="files" on={tab === "files"} style={{ height: 508, display: "flex", flexDirection: "column" }}><FilesTab g={g} v={v} /></Panel>
+              <Panel tab="files" on={tab === "files"} style={{ height: 508, display: "flex", flexDirection: "column" }}><FilesTab g={g} v={v} deck={deck} /></Panel>
             </div>
           </div>
           </div>

@@ -17,6 +17,7 @@ import { Spinner } from "../kit/Spinner";
 import { hintTail } from "../deck/fit";
 import { useDeckWidth } from "../deck/useDeckFit";
 import { FileMenu, type FilePick } from "./FileMenu";
+import { TEMPLATE_BUSY } from "./ribbon";
 import { ImproveNote, useHeld, useImproveOn, useModelOn } from "./ImproveNote";
 import {
   charsLabel, DECK_ACCEPT, deckError, fileKind, fileTextIssue, improveLive, improveShift, improveStep, MAX_TEXT_BYTES, sampleText, TEXT_ACCEPT, textError, writerOn,
@@ -55,6 +56,8 @@ export interface TextPlate {
   onFile(f: File): void;
   /** Имя презентации, которую сервер сейчас читает («Улучшить готовую»); null — не читает. */
   reading: string | null;
+  /** Почему «Улучшить готовую» сейчас не выбирается (презентация уже читается, разбирается свой шаблон); null — выбирается. */
+  deckOff: string | null;
   /** Что поле говорит о тексте (подсказка агента или разбор). Считается один раз на изменение текста и отдаётся
    *  заголовку, телу и полосе 02: разбор большого текста не повторяется на каждую часть плиты. */
   line: TextLine;
@@ -77,8 +80,12 @@ export interface TextPlate {
 export function useTextPlate(): TextPlate {
   const {
     ui, dispatch, brief, setBrief, textIssue, setTextIssue, notices, clearNotice, uploadTemplate, templateId,
-    composerText, takeComposerText, improveSource, takeImproveSource,
+    composerText, takeComposerText, improveSource, takeImproveSource, analyzing,
   } = useApp();
+  // разбирается свой шаблон (шаг 01): «Улучшить готовую» ждёт — обе выбирают свой шаблон
+  const tplBusy = analyzing === "template";
+  const tplBusyNow = useRef(tplBusy);
+  tplBusyNow.current = tplBusy;
   const [menu, setMenu] = useState(false);
   const [reading, setReading] = useState<string | null>(null);
   const lastDeck = useRef("");
@@ -139,7 +146,8 @@ export function useTextPlate(): TextPlate {
   }, [txOpen]);
 
   const readDeck = useCallback((f: File) => {
-    if (readBusy.current) return; // сервер уже читает презентацию: вторую рядом не начинаем (пункт меню тоже закрыт)
+    // сервер уже читает презентацию или разбирает свой шаблон: рядом не начинаем (пункт меню тоже закрыт)
+    if (readBusy.current || tplBusyNow.current) return;
     const n = ++readSeq.current;
     readBusy.current = true;
     lastDeck.current = f.name;
@@ -204,7 +212,8 @@ export function useTextPlate(): TextPlate {
   const key = issue ? `${issue.kind}:${issue.text}` : null;
   if (key !== seq.current.key) seq.current = { key, n: key ? seq.current.n + 1 : seq.current.n };
 
-  return { menu, setMenu, btnRef, inputRef, taRef, pick, onFile, reading, line, writes, info, issue, issueSeq: seq.current.n, tw, type, take };
+  const deckOff = reading ? "Презентация уже читается" : tplBusy ? TEMPLATE_BUSY : null;
+  return { menu, setMenu, btnRef, inputRef, taRef, pick, onFile, reading, deckOff, line, writes, info, issue, issueSeq: seq.current.n, tw, type, take };
 }
 
 const reducedMotion = () => typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
@@ -265,7 +274,7 @@ export function TextHead({ tp }: { tp: TextPlate }) {
         <span id="ct-fmt" className={cls("p2-hide-s", show(txOpen && !tp.issue))} style={{ fontSize: 13, fontWeight: 500, lineHeight: "20px", color: "#5A6272", whiteSpace: "nowrap" }}>
           .txt или .md
         </span>
-        <FileMenu open={tp.menu} busy={!!tp.reading} onPick={tp.pick}
+        <FileMenu open={tp.menu} off={tp.deckOff} onPick={tp.pick}
           onClose={(back) => {
             tp.setMenu(false);
             if (back) tp.btnRef.current?.focus({ preventScroll: true });

@@ -498,4 +498,62 @@ def test_the_web_version_opens_in_the_browser_and_the_pptx_is_a_download(client)
     assert html.status_code == 200 and html.headers["content-type"].startswith("text/html")
     assert html.headers["content-disposition"].startswith("inline")
     pptx = c.get("/api/generations/g2/structured/files/deck.pptx")
-    assert pptx.headers["content-disposition"].startswith("attachment") and 'filename="deck.pptx"' in pptx.headers["content-disposition"]
+    assert pptx.headers["content-disposition"].startswith("attachment")
+    # without a plan or a title of its own the deck saves as «Презентация — Структурный.pptx» (ASCII fallback for the rest)
+    assert 'filename="verstka-structured.pptx"' in pptx.headers["content-disposition"]
+    assert "filename*=UTF-8''" in pptx.headers["content-disposition"]
+
+
+def test_the_deck_downloads_under_its_title_and_variant(client):
+    # «Скачать PowerPoint» / «PDF» save «Название — Вариант.pptx», not deck.pptx / deck (1).pptx (C10)
+    from urllib.parse import quote
+
+    c, mod = client
+    vdir = mod.store.root / "runs" / "g3" / "visual"
+    vdir.mkdir(parents=True)
+    (vdir / "deck.pptx").write_bytes(b"PK-g3")
+    (vdir / "deck.pdf").write_bytes(b"%PDF-g3")
+    (vdir / "outline.json").write_text(json.dumps({"title": "Итоги: Q3 / 2026?"}), encoding="utf-8")
+    (vdir / "audit_report.json").write_text("{}", encoding="utf-8")
+    title = mod.load_strategies()["visual"].title
+    want = f"Итоги Q3 2026 — {title}"
+    for ext in ("pptx", "pdf"):
+        cd = c.get(f"/api/generations/g3/visual/files/deck.{ext}").headers["content-disposition"]
+        assert cd == f"attachment; filename=\"verstka-visual.{ext}\"; filename*=UTF-8''{quote(want + '.' + ext, safe='')}", cd
+    # the JSON files keep their own names
+    assert 'filename="audit_report.json"' in c.get("/api/generations/g3/visual/files/audit_report.json").headers["content-disposition"]
+    # no plan: the generation's own title
+    (vdir / "outline.json").unlink()
+    mod.store.write_generation_meta("g3", {"id": "g3", "title": "Отчёт"})
+    cd = c.get("/api/generations/g3/visual/files/deck.pptx").headers["content-disposition"]
+    assert quote(f"Отчёт — {title}.pptx", safe="") in cd
+
+
+def test_download_names_and_the_header():
+    import verstka.api.app as app_module
+
+    assert app_module.download_name("Интеграл", "Структурный", "pptx") == "Интеграл — Структурный.pptx"
+    assert app_module.download_name('  a/b:c*d?"e<f>g|h  ', "V", "pdf") == "a b c d e f g h — V.pdf"
+    assert app_module.download_name(None, "V", "pdf") == "Презентация — V.pdf"
+    assert app_module.download_name("я" * 120, "V", "pptx") == "я" * 80 + " — V.pptx"
+    assert app_module.content_disposition("attachment", "deck.pptx", "x.pptx") == 'attachment; filename="deck.pptx"'
+    assert app_module.content_disposition("attachment", "Отчёт — V.pptx", "x.pptx") == (
+        "attachment; filename=\"x.pptx\"; filename*=UTF-8''%D0%9E%D1%82%D1%87%D1%91%D1%82%20%E2%80%94%20V.pptx"
+    )
+
+
+def test_fixes_on_a_deck_whose_template_was_deleted_say_so(client):
+    # the template is gone from the library: not «Вариант не найден», but why nothing can be fixed (D-9)
+    c, mod = client
+    vdir = mod.store.root / "runs" / "g4" / "structured"
+    vdir.mkdir(parents=True)
+    mod.store.write_generation_meta("g4", {"id": "g4", "template_id": "deleted-template"})
+    for name in ("deck.pptx", "outline.json", "audit_report.json", "layout_plan.json"):
+        (vdir / name).write_text("{}", encoding="utf-8")
+    r = c.post("/api/generations/g4/structured/fixes", json={"all_deterministic": True})
+    assert r.status_code == 404 and r.json()["detail"] == "Шаблона этой презентации больше нет в библиотеке — исправить её нельзя"
+    r = c.post("/api/generations/g4/structured/slides/1/fix", json={})
+    assert r.status_code == 404 and r.json()["detail"] == "Шаблона этой презентации больше нет в библиотеке — исправить её нельзя"
+    # a variant without its report is still «Вариант не найден»
+    (vdir / "audit_report.json").unlink()
+    assert c.post("/api/generations/g4/structured/fixes", json={"all_deterministic": True}).json()["detail"] == "Вариант не найден"

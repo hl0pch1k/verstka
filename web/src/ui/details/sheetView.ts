@@ -34,3 +34,14 @@ export function backStrip(g: Generation, v: Variant, titleOf: (name: string) => 
 export function menuItems(g: Generation, titleOf: (name: string) => string): { key: string; n: number; name: string; score: number | null }[] {
   return g.variants.map((v, i) => ({ key: v.strategy, n: i + 1, name: titleOf(v.strategy), score: round(scoreOf(g, v)) }));
 }
+
+/** Спрашивать ли разбор шаблона листа снова. Разобранный — нет. Ответ 404 («gone») — не навсегда: 404 бывает и у шаблона,
+ *  который ещё не разобран или загружен заново с тем же id; его спрашивают снова, когда лист открыли или сменили вкладку
+ *  (`attempt`) или изменился список шаблонов (`list`). `goneAt` — при каком из них пришёл 404 (null — не приходил). */
+export function manifestAsk(o: { have: boolean; goneAt: string | null; attempt: unknown; list: string }): boolean {
+  if (o.have) return false;
+  return o.goneAt !== `${String(o.attempt)}|${o.list}`;
+}
+/** Отметка 404 для `manifestAsk`. */
+export const goneMark = (attempt: unknown, list: string) => `${String(attempt)}|${list}`;
+

@@ -17,7 +17,7 @@ import { Shot } from "../parts";
 import { SEV } from "../quality";
 import { headerLayerOpen } from "../sheetView";
 import type { DeckManifest } from "../useDeckManifest";
-import { explainError, explainWhy, whyView, type SampleSource } from "../why";
+import { explainError, explainPlan, explainWhy, whyView, type SampleSource } from "../why";
 
 const asked = new Map<string, string | null>();
 
@@ -27,8 +27,10 @@ function useExplain(gid: string, strategy: string, n: number, rev: string, need:
   const key = `${gid}/${strategy}/${n}/${rev}`;
   const [st, setSt] = useState<{ key: string; text: string | null; busy: boolean; error: string | null }>({ key: "", text: null, busy: false, error: null });
   useEffect(() => {
-    if (!need || gone) return;
-    if (asked.has(key)) return void setSt({ key, text: asked.get(key) ?? null, busy: false, error: null });
+    // спрошенное раньше берётся и тогда, когда шаблона уже нет (иначе вкладка ждала бы ответа вечно)
+    const plan = explainPlan(need, asked.has(key), gone);
+    if (plan === "cached") return void setSt({ key, text: asked.get(key) ?? null, busy: false, error: null });
+    if (plan !== "ask") return;
     let off = false;
     setSt({ key, text: null, busy: true, error: null });
     api.explain(gid, strategy, n).then(
@@ -43,7 +45,7 @@ function useExplain(gid: string, strategy: string, n: number, rev: string, need:
       off = true;
     };
   }, [key, need, gone, gid, strategy, n]);
-  if (need && gone && !asked.has(key)) return { text: null, busy: false, error: explainError(404, "") };
+  if (explainPlan(need, asked.has(key), gone) === "gone") return { text: null, busy: false, error: explainError(404, "") };
   return st.key === key ? st : { text: null, busy: need, error: null };
 }
 

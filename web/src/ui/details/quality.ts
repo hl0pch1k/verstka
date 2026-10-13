@@ -71,7 +71,12 @@ export interface QItem { id: string; tone: QTone; label: string; cls: string; co
 export interface QGroup { slide: number; label: string; sub: string; img: string | null; count: string; current: boolean; aria: string; items: QItem[] }
 
 /** Текст замечания: что не так и, если проверка подсказала, как исправить — словами человека. */
+/** Заметка о проверке, которая упала (отчёты до того, как сервер стал писать её по-русски без исключения):
+ *  «проверка contrast упала: KeyError …» — без технического хвоста. */
+const CRASHED = /^проверка\s+\S+\s+упала(?:[:\s]|$)/i;
+
 export function issueText(i: Issue): string {
+  if (CRASHED.test(i.message)) return "Проверка не выполнилась — её замечаний в отчёте нет.";
   const msg = plainMessage(i.message);
   const tip = plainMessage(i.suggestion ?? "");
   if (!tip) return msg;
@@ -108,6 +113,13 @@ export function qualityGroups(v: Variant, main: Issue[], filter: QFilter, cur: n
 
 /** Исправимые замечания списка, отмеченные (без снятых флажков) — их и отправит «Исправить отмеченные». */
 export const fixableIds = (main: Issue[], unmarked: Set<string> = new Set()) => main.filter((i) => isFixable(i) && !unmarked.has(i.id)).map((i) => i.id);
+
+/** Шаблона презентации больше нет в библиотеке: сервер не перевёрстывает её — исправления выключены, с причиной. */
+export const TEMPLATE_GONE_FIX = "Шаблона этой презентации больше нет в библиотеке — исправить её нельзя";
+/** Кнопки исправления выключены (`off`): над вариантом идёт работа (`locked`) или шаблона нет (`gone` — тогда и почему). */
+export function fixLock(locked: boolean, gone: boolean): { off: boolean; why: string | null } {
+  return { off: locked || gone, why: gone ? TEMPLATE_GONE_FIX : null };
+}
 
 const many = (n: number) => plural(n, "замечание", "замечания", "замечаний");
 export const fixLabel = (n: number) => `Исправить отмеченные (${n})`;

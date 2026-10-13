@@ -51,6 +51,17 @@ export interface PlanCtx {
  *  спросили. Пока ждали ответ, открыли другую — лист и слайд не открываются (они были бы о чужой); правка идёт над
  *  своей презентацией (её id — в действии), исправления — над презентацией ответа: о том, что она не открыта, скажет
  *  лента, когда задача кончится. */
+/** О какой презентации вопрос помощнику — о той, что на экране: на результате — открытая, её вариант и слайд; на
+ *  «Сборке» — собираемая (без варианта и слайда); на «Создать» — никакая (последняя открытая там не видна, и правка
+ *  ушла бы в презентацию, которой на экране нет). */
+export function chatTarget(o: { screen: Screen; open: string | null; strategy: string | null; slide: number | null; building: string | null }): {
+  generation_id: string | null; strategy: string | null; slide: number | null;
+} {
+  if (o.screen === "result" && o.open) return { generation_id: o.open, strategy: o.strategy, slide: o.slide };
+  if (o.screen === "build" && o.building) return { generation_id: o.building, strategy: null, slide: null };
+  return { generation_id: null, strategy: null, slide: null };
+}
+
 export function planActions(res: ChatResponse, ctx: PlanCtx): Plan[] {
   const gid = res.generation_id ?? ctx.sent;
   const same = !gid || gid === ctx.open;

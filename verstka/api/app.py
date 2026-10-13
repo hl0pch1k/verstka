@@ -67,6 +67,8 @@ _chat_lock = threading.Lock()
 _fix_active: set[tuple[str, str]] = set()  # (generation id, strategy) with an autofix job or an edit in flight
 _fix_lock = threading.Lock()
 _VARIANT_BUSY = "Этот вариант уже меняется — дождитесь, пока агент закончит"
+# the deck's template was deleted from the library: nothing can be laid out again in it (fixes, edits, slide fixes)
+_TEMPLATE_GONE = "Шаблона этой презентации больше нет в библиотеке — исправить её нельзя"
 
 
 def providers() -> Optional[ProviderRegistry]:
@@ -951,15 +953,54 @@ def eyes_image(gid: str, strategy: str, stage: str, name: str):
     return _serve_file(vdir / "eyes" / stage, name, media_type="image/jpeg")
 
 
+def download_name(title: Optional[str], variant: str, ext: str) -> str:
+    """The deck's file name for people — «Название — Вариант.pptx», as the web's `fileBase`: the deck's title without the
+    characters a file system refuses (at most 80 characters), else «Презентация»."""
+    safe = re.sub(r"\s+", " ", re.sub(r'[\\/:*?"<>|]', " ", title or "")).strip()
+    safe = safe[:80].strip() or "Презентация"
+    return f"{safe} — {variant}.{ext}"
+
+
+def content_disposition(kind: str, name: str, fallback: str) -> str:
+    """`Content-Disposition` with a non-ASCII name (RFC 6266 / RFC 5987): `filename*=UTF-8''…` for browsers that read it
+    (all current ones), `filename="…"` — an ASCII fallback — for the rest."""
+    from urllib.parse import quote
+
+    if name.isascii() and '"' not in name:
+        return f'{kind}; filename="{name}"'
+    return f"{kind}; filename=\"{fallback}\"; filename*=UTF-8''{quote(name, safe='')}"
+
+
+def _deck_title(gid: str, vdir: Path) -> Optional[str]:
+    """The title the result screen shows: the variant's plan, else the generation's own."""
+    try:
+        own = json.loads((vdir / "outline.json").read_text(encoding="utf-8")).get("title")
+    except (OSError, ValueError, AttributeError):
+        own = None
+    if isinstance(own, str) and own.strip():
+        return own.strip()
+    meta = store.read_generation_meta(gid) or {}
+    title = meta.get("title")
+    return title.strip() if isinstance(title, str) and title.strip() else None
+
+
 @app.get("/api/generations/{gid}/{strategy}/files/{name}")
 def generation_file(gid: str, strategy: str, name: str):
     vdir = _variant_dir(gid, strategy)
     if name not in ("deck.pptx", "deck.pdf", "deck.html", "outline.json", "layout_plan.json", "audit_report.json", "run_manifest.json"):
         raise HTTPException(404, "Не найдено")
-    media = {"pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation", "pdf": "application/pdf", "html": "text/html", "json": "application/json"}[name.rsplit(".", 1)[-1]]
+    ext = name.rsplit(".", 1)[-1]
+    media = {"pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation", "pdf": "application/pdf", "html": "text/html", "json": "application/json"}[ext]
     # the web version opens in the browser («Веб» → a new tab); the other files are downloads
     how = "inline" if name == "deck.html" else "attachment"
-    return _serve_file(vdir, name, media_type=media, filename=name, content_disposition_type=how)
+    if not name.startswith("deck."):
+        return _serve_file(vdir, name, media_type=media, filename=name, content_disposition_type=how)
+    # the deck itself saves as «Название — Вариант.pptx», not deck.pptx / deck (1).pptx (the header wins over the link's
+    # `download`)
+    spec = load_strategies().get(strategy)
+    human = download_name(_deck_title(gid, vdir), spec.title if spec else strategy, ext)
+    header = content_disposition(how, human, f"verstka-{strategy}.{ext}")
+    return _serve_file(vdir, name, media_type=media, headers={"Content-Disposition": header})
 
 
 @app.get("/api/generations/{gid}/{strategy}/explain/{index}")
@@ -988,8 +1029,10 @@ def apply_fixes(gid: str, strategy: str, req: FixRequest) -> dict:
     vdir = _variant_dir(gid, strategy)
     meta = store.read_generation_meta(gid) or {}
     manifest = store.manifest(meta.get("template_id", ""))
-    if manifest is None or not (vdir / "audit_report.json").exists():
+    if not (vdir / "audit_report.json").exists():
         raise HTTPException(404, "Вариант не найден")
+    if manifest is None:
+        raise HTTPException(404, _TEMPLATE_GONE)
     key = (gid, strategy)
     with _fix_lock:
         if key in _fix_active:
@@ -1141,8 +1184,10 @@ def _edit_job(gid: str, strategy: str, body: EditRequestBody) -> Callable[[Job],
         vdir = _variant_dir(gid, strategy)
         meta = store.read_generation_meta(gid) or {}
         manifest = store.manifest(meta.get("template_id", ""))
-        if manifest is None or not (vdir / "outline.json").exists():
+        if not (vdir / "outline.json").exists():
             raise ValueError("Вариант не найден")
+        if manifest is None:
+            raise ValueError(_TEMPLATE_GONE)
         outline = DeckOutline.model_validate_json((vdir / "outline.json").read_text(encoding="utf-8"))
         total = len(outline.slides)
         req = parse_edit(body.message, body.slide, total)
@@ -1270,8 +1315,10 @@ def _slide_fix_job(gid: str, strategy: str, n: int, requested: list, wishes: Opt
         vdir = _variant_dir(gid, strategy)
         meta = store.read_generation_meta(gid) or {}
         manifest = store.manifest(meta.get("template_id", ""))
-        if manifest is None or not (vdir / "outline.json").exists() or not (vdir / "audit_report.json").exists():
+        if not (vdir / "outline.json").exists() or not (vdir / "audit_report.json").exists():
             raise ValueError("Вариант не найден")
+        if manifest is None:
+            raise ValueError(_TEMPLATE_GONE)
         use_models = bool(meta.get("use_models", True)) and models_configured()
         res = R.fix_slide(
             vdir, strategy, n, manifest=manifest, ws=store.workspace(meta["template_id"]), remarks=requested, wishes=wishes,
@@ -1302,8 +1349,10 @@ def fix_slide(gid: str, strategy: str, n: int, body: SlideFixBody) -> dict:
     except HTTPException:
         raise HTTPException(404, "Вариант не найден")
     meta = store.read_generation_meta(gid) or {}
-    if store.manifest(meta.get("template_id", "")) is None or not all((vdir / f).exists() for f in ("deck.pptx", "outline.json", "audit_report.json", "layout_plan.json")):
+    if not all((vdir / f).exists() for f in ("deck.pptx", "outline.json", "audit_report.json", "layout_plan.json")):
         raise HTTPException(404, "Вариант не найден")
+    if store.manifest(meta.get("template_id", "")) is None:
+        raise HTTPException(404, _TEMPLATE_GONE)
     try:
         outline = DeckOutline.model_validate_json((vdir / "outline.json").read_text(encoding="utf-8"))
         report = AuditReport.model_validate_json((vdir / "audit_report.json").read_text(encoding="utf-8"))

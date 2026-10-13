@@ -28,6 +28,11 @@ function resultText(result: string | null, templateSlide: (pid: string) => numbe
   return /[а-яё]/i.test(result) && !/^slide \d+:/.test(result) ? result : null;
 }
 
+/** Номер слайда шаблона по id макета («p9» → 9) — из разбора шаблона листа; разбора нет — null (строка без «по образцу»). */
+export function patternSlideOf(manifest: { patterns: { id: string; source_slide: number }[] } | null | undefined): (pid: string) => number | null {
+  return (pid) => manifest?.patterns.find((p) => p.id === pid)?.source_slide ?? null;
+}
+
 export interface FixRow { slide: number | null; title: string; extra: string | null; n: number; pass: string | null }
 
 export function appliedRows(fixes: Record<string, unknown>[], slideOf: (outlineId: string) => number | null, templateSlide: (pid: string) => number | null): FixRow[] {

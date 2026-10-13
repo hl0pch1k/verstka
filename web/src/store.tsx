@@ -43,9 +43,8 @@ export interface RunJobOptions {
 const readPendingBuild = (): PendingBuild | null => parsePendingBuild(storage.get(LS.build));
 
 /** Where a job's failure stands by default: template analysis at the template step, a build on the build screen, the
- *  work on a built deck (fixes, edits, pictures) on the result. */
-const jobArea = (kind: JobKind): NoticeArea =>
-  kind === "analyze" ? "template" : kind === "generate" ? "build" : kind === "other" ? "global" : "result";
+ *  work on a built deck (fixes, edits, pictures, anything else) on the result. */
+const jobArea = (kind: JobKind): NoticeArea => (kind === "analyze" ? "template" : kind === "generate" ? "build" : "result");
 
 export interface AppState {
   health: Health | null; healthError: boolean;
@@ -137,7 +136,12 @@ export interface AppState {
   notify(area: NoticeArea, kind: Notice["kind"], text: string): void;
   /** Убирает строку статуса области. */
   clearNotice(area: NoticeArea): void;
-  uploadTemplate(file: File, useModels: boolean, improve?: boolean): Promise<void>;
+  /** Загрузка шаблона (шаг 01) или чтение презентации («Улучшить готовую», `improve`). `onJob` — задача разбора, когда
+   *  сервер принял файл. Одно за раз: пока идёт одно, другое не начинается (`analyzing`). */
+  uploadTemplate(file: File, useModels: boolean, improve?: boolean, onJob?: (jobId: string) => void): Promise<void>;
+  /** Что сейчас разбирается: свой шаблон (`template`) или презентация для «Улучшить готовую» (`deck`); null — ничего.
+   *  Пока идёт одно, второе выключено (обе задачи выбирают свой шаблон, кто кончил последним — тот и выбран бы). */
+  analyzing: "template" | "deck" | null;
   startGeneration(req: GenerateRequest, expectedSlides?: number | null): Promise<void>;
   /** Текст шага «Текст» (черновик): хранится в localStorage `verstka.brief_draft` и переживает перезагрузку. */
   brief: string;
@@ -420,12 +424,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try {
       const list = await api.generations();
       setGenerations(list);
+      clearNotice("history"); // the list is fresh: an earlier «Не удалось обновить список презентаций» is stale
       const current = latest.current.generation?.id; // a loaded generation that was deleted meanwhile
       if (current && !list.some((g) => g.id === current)) clearGeneration();
     } catch (e) {
-      report(e, "Не удалось обновить список презентаций", "global");
+      // the line stands in the header of «Мои презентации» (the list shown there may be stale)
+      report(e, "Не удалось обновить список презентаций", "history");
     }
-  }, [report, clearGeneration]);
+  }, [report, clearGeneration, clearNotice]);
 
   /** Loads a generation. A reload of the already open one keeps the chosen variant and slide (clamped). `hold` (another
    *  deck picked over an open one, from the history): the open deck stays on screen while the new one loads and its
@@ -650,11 +656,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (buildEnd && endSeen(buildEnd, ui.screen, buildJob?.id, generationId)) setBuildEnd(null);
   }, [buildEnd, ui.screen, buildJob, generationId]);
 
-  const uploadTemplate = useCallback(
-    (file: File, useModels: boolean, improve?: boolean) =>
-      uploadTemplateFlow(file, useModels, { runJob, report, notify, clearNotice, pushMessage, dispatch, setTemplates, adoptManifest }, improve ? improveReady : undefined),
-    [runJob, report, notify, clearNotice, pushMessage, adoptManifest, improveReady],
-  );
+  const [analyzing, setAnalyzing] = useState<"template" | "deck" | null>(null);
+  const uploadTemplate = useCallback((file: File, useModels: boolean, improve?: boolean, onJob?: (jobId: string) => void) => {
+    setAnalyzing(improve ? "deck" : "template");
+    return uploadTemplateFlow(file, useModels, { runJob, report, notify, clearNotice, pushMessage, dispatch, setTemplates, adoptManifest, refreshTemplates }, improve ? improveReady : undefined, onJob)
+      .finally(() => setAnalyzing(null));
+  }, [runJob, report, notify, clearNotice, pushMessage, adoptManifest, improveReady, refreshTemplates]);
 
   const generationDeps = useMemo<GenerationDeps>(() => ({
     runJob, report, notify, clearNotice, pushMessage, dispatch, refreshGenerations, fetchGeneration: (gid) => fetchGeneration(gid, false, false, "build"), refreshModelStatus,
@@ -743,8 +750,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (!alive) return;
       if (st.status === "fulfilled") setStrategies(st.value);
       if (gn.status === "fulfilled") setGenerations(gn.value);
-      const failed = [st, tp, gn].find((r): r is PromiseRejectedResult => r.status === "rejected");
-      if (failed) report(failed.reason, "Не удалось загрузить данные", "global", true);
+      // a failure stands where its data is shown: the templates and the variants at the template step, the list of decks
+      // in the header of «Мои презентации» (offline: the header's banner tells it)
+      if (tp.status === "rejected") report(tp.reason, "Не удалось загрузить шаблоны", "template", true);
+      else if (st.status === "rejected") report(st.reason, "Не удалось загрузить варианты оформления", "template", true);
+      if (gn.status === "rejected") report(gn.reason, "Не удалось загрузить список презентаций", "history", true);
       if (tp.status === "fulfilled") {
         setTemplates(tp.value);
         const stored = latest.current.templateId; // drop a stale id, fall back to the newest template
@@ -872,13 +882,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AppState>(() => ({
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, cancelLoad, reloadIfOpen, activeStrategy, setActiveStrategy, activeVariant,
-    selectedSlide, setSelectedSlide, ui, dispatch, activeJob, liveJobs: liveList, runJob, followDeck, adoptBuildMeta, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, ownBuild, building, buildEnd, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
+    selectedSlide, setSelectedSlide, ui, dispatch, activeJob, liveJobs: liveList, runJob, followDeck, adoptBuildMeta, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, ownBuild, building, buildEnd, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, analyzing, startGeneration,
     brief, setBrief, textIssue, setTextIssue, checkText, params, setParams,
     composerText, composerPreset, editText, takeComposerText, takeComposerPreset, improveSource, takeImproveSource,
   }), [
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, cancelLoad, reloadIfOpen, activeStrategy, setActiveStrategy, activeVariant,
-    selectedSlide, setSelectedSlide, ui, activeJob, liveList, runJob, followDeck, adoptBuildMeta, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, ownBuild, building, buildEnd, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
+    selectedSlide, setSelectedSlide, ui, activeJob, liveList, runJob, followDeck, adoptBuildMeta, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, ownBuild, building, buildEnd, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, analyzing, startGeneration,
     brief, setBrief, textIssue, checkText, params, setParams,
     composerText, composerPreset, editText, takeComposerText, takeComposerPreset, improveSource, takeImproveSource,
   ]);

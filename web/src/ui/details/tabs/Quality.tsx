@@ -15,10 +15,11 @@ import { cls } from "../../kit/cls";
 import { ErrorLine } from "../../kit/ErrorLine";
 import { Icon } from "../../kit/Icon";
 import { scoreOf } from "../../result/resultView";
-import { appliedRows } from "../fixes";
+import { appliedRows, patternSlideOf } from "../fixes";
+import type { DeckManifest } from "../useDeckManifest";
 import { Acc, Empty, Row, Shot } from "../parts";
 import {
-  checkRows, chipsOf, emptyOf, eyeView, fixableIds, fixingLabel, fixLabel, isFixable, minorRows, qualityGroups, qualitySummary, slideTag, splitIssues, type QFilter,
+  checkRows, chipsOf, emptyOf, eyeView, fixableIds, fixingLabel, fixLabel, fixLock, isFixable, minorRows, qualityGroups, qualitySummary, slideTag, splitIssues, type QFilter,
 } from "../quality";
 import { useQualityFix } from "../useQualityFix";
 import { EyeBox } from "./QualityEye";
@@ -42,7 +43,7 @@ function useChecks(): CheckSpec[] | "failed" | null {
   return list;
 }
 
-export function QualityTab({ g, v }: { g: Generation; v: Variant }) {
+export function QualityTab({ g, v, deck }: { g: Generation; v: Variant; deck: DeckManifest }) {
   const { selectedSlide, setSelectedSlide, dispatch } = useApp();
   const audit = v.audit;
   const { main, minor } = useMemo(() => splitIssues(audit?.issues ?? []), [audit]);
@@ -77,9 +78,13 @@ export function QualityTab({ g, v }: { g: Generation; v: Variant }) {
   const sum = qualitySummary(score, auditCounts(audit)!);
   const groups = qualityGroups(v, main, filter, selectedSlide, unmarked, fix.busy);
   const marked = fixableIds(main, unmarked);
-  const fixableAll = audit.issues.filter(isFixable).map((i) => i.id);
-  // над вариантом идёт работа (своя — и после закрытия листа, или чужая задача): кнопки и флажки выключены
-  const busy = fix.locked;
+  // «Исправить всё автоматически» — исправимые замечания списка (как чип «Исправимые» и V2), явными id: мелкие заметки
+  // (контраст акцента бренда, сетка) им не трогаются
+  const fixableAll = fixableIds(main);
+  // над вариантом идёт работа (своя — и после закрытия листа, или чужая задача) или шаблона презентации больше нет в
+  // библиотеке (сервер исправить не сможет): кнопки и флажки выключены, у кнопок — почему
+  const lock = fixLock(fix.locked, deck.state === "gone");
+  const busy = lock.off;
   const allOn = !fix.undo && fixableAll.length > 0;
   const ctaOn = main.some(isFixable);
   const outline = v.outline?.slides ?? [];
@@ -87,7 +92,7 @@ export function QualityTab({ g, v }: { g: Generation; v: Variant }) {
     const i = outline.findIndex((s) => s.id === id);
     return i >= 0 ? i + 1 : null;
   };
-  const fixed = appliedRows(audit.applied_fixes, slideOf, () => null);
+  const fixed = appliedRows(audit.applied_fixes, slideOf, patternSlideOf(deck.manifest));
   const minors = minorRows(minor);
   const checkList = Array.isArray(checks) ? checkRows(checks, audit.summary.checks_run) : [];
   const eye = eyeView(v.eyes, v);
@@ -137,17 +142,17 @@ export function QualityTab({ g, v }: { g: Generation; v: Variant }) {
           {fix.undo && (
             <>
               <p className="dlq-st p2-in" role="status"><Icon name="check-circle" size={20} />{fix.status}</p>
-              <button type="button" className="p2-ob dlq-ob p2-in" onClick={fix.revert} disabled={busy} aria-busy={fix.working === "undo" || undefined} style={{ animationDelay: "40ms" }}>
+              <button type="button" className="p2-ob dlq-ob p2-in" onClick={fix.revert} disabled={busy} title={lock.why ?? undefined} aria-busy={fix.working === "undo" || undefined} style={{ animationDelay: "40ms" }}>
                 {fix.working === "undo" ? <Arc size={18} /> : <Icon name="undo" size={18} />}
                 <span>Вернуть как было</span>
               </button>
             </>
           )}
           {allOn && (
-            <button type="button" className="p2-ob dlq-ob" disabled={busy} onClick={() => fix.start("all", fixableAll)}>Исправить всё автоматически</button>
+            <button type="button" className="p2-ob dlq-ob" disabled={busy} title={lock.why ?? undefined} onClick={() => fix.start(fixableAll, fixableAll)}>Исправить всё автоматически</button>
           )}
           {ctaOn && (
-            <button type="button" className="p2-cta dq-cta" disabled={busy || marked.length === 0} onClick={() => fix.start(marked, marked)}>
+            <button type="button" className="p2-cta dq-cta" disabled={busy || marked.length === 0} title={lock.why ?? undefined} onClick={() => fix.start(marked, marked)}>
               <Icon name="wand" size={20} />
               <span>{fix.working === "fix" ? fixingLabel(fix.busy === "all" ? fixableAll.length : (fix.busy ?? []).length) : fixLabel(marked.length)}</span>
             </button>

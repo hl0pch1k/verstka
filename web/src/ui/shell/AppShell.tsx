@@ -4,7 +4,7 @@
 // (`hp-open hp-nar`: сетка 520 мс, плита въезжает), и плиты и слои перестраиваются по её целевой ширине (ui/deck/fit,
 // useDeckFit): содержимое — перекрёстным затуханием своей обёртки (usePlateFit у плит, useLayer у слоёв), плиты и
 // названия шагов не гаснут.
-import { useContext, useMemo, type CSSProperties } from "react";
+import { useContext, useEffect, useMemo, type CSSProperties } from "react";
 import { useApp } from "../../store";
 import { tplLabel } from "../../lib/plain";
 import type { Generation, TemplateListItem, Variant } from "../../types";
@@ -34,7 +34,9 @@ import { TextLayer } from "../layers/TextLayer";
 import { TplDeleteDialog } from "../layers/TplDeleteDialog";
 import { TplPreviewLayer } from "../layers/TplPreviewLayer";
 import { ResultPlate } from "../result/ResultPlate";
-import { deckStrip, openDeck } from "../result/resultView";
+import { buildRunning } from "../create/params";
+import { deckStrip, docTitle, openDeck } from "../result/resultView";
+import { tabTitle } from "./tabTitle";
 import { Header } from "./Header";
 
 const ROOT: CSSProperties = {
@@ -68,6 +70,13 @@ export function AppShell() {
     health,
   } = useApp();
   const modelOn = useModelOn();
+  // заголовок вкладки: ход идущей сборки (в фоновой вкладке видно, сколько осталось), название открытой презентации
+  const running = buildRunning(buildJob);
+  const progress = running ? buildJob?.progress ?? 0 : 0;
+  const deckName = ui.screen === "result" && generation ? docTitle(generation, activeVariant) : null;
+  useEffect(() => {
+    document.title = tabTitle({ building: running, progress, screen: ui.screen, deck: deckName });
+  }, [running, progress, ui.screen, deckName]);
   /** Полоса 01 о шаблоне презентации или сборки: шаблон по id; его нет в библиотеке — имя по файлу; id нет — пусто. */
   const tplStrip = (id: string | null | undefined, file?: string | null): StripData | undefined =>
     templateStrip(templates.find((t) => t.template_id === id)) ?? (id ? { title: templateLabel(id, file) } : undefined);
@@ -82,11 +91,12 @@ export function AppShell() {
   const replay = useContext(BuildReplay);
   const shownJob = replay ? replay.job : buildJob;
   const topic = useMemo(() => (build ? buildTopic(shownJob, buildAsk, [generation, ...generations]) : null), [build, shownJob, buildAsk, generation, generations]);
-  // «Улучшить готовую»: на сборке и результате полоса 01 — исходный файл и «оформление из презентации», как на «Создать»
-  // (C-improve, ImproveStrip), а не шаблон, которым он стал
+  // «Улучшить готовую»: на сборке, результате и на «Создать» под «Все параметры» полоса 01 — исходный файл и «оформление из
+  // презентации», как над плитой 02 (C-improve, ImproveStrip), а не шаблон, которым он стал
+  const createTpl = templateStrip(templates.find((t) => t.template_id === templateId));
   const s1 = result ? (open ? improveDeckStrip(open.improved_from, open.template_id) ?? tplStrip(open.template_id, open.template_file) : undefined)
     : build ? (topic ? improveDeckStrip(topic.improved, topic.template) ?? tplStrip(topic.template, topic.templateFile) : undefined)
-    : templateStrip(templates.find((t) => t.template_id === templateId));
+    : (ui.improve && improveSource ? improveDeckStrip(improveSource, templateId) ?? createTpl : createTpl);
   const deck = result ? generation : null;
   const s3 = buildStrip(generation, activeVariant);
   // шаг «Текст» — одно состояние на заголовок и тело плиты 02; разбор текста в нём считается один раз на правку
@@ -131,7 +141,7 @@ export function AppShell() {
       <Scrim open={!!ui.sect} onClose={() => dispatch({ type: "sect", sect: null })}
         label={ui.sect === "hist" ? "Закрыть «Мои презентации»" : "Закрыть «Шаблоны»"} />
       <HistoryLayer />
-      <TemplatesLayer fresh={upload.fresh} onUpload={uploadFromGallery} busy={upload.busy} />
+      <TemplatesLayer fresh={upload.fresh} onUpload={uploadFromGallery} busy={upload.busyWhy} />
       <TplPreviewLayer />
       <TplDeleteDialog />
     </>

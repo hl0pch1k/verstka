@@ -10,10 +10,11 @@ import { Icon } from "../../kit/Icon";
 import { checkTiles, fileRows, fixRowsOf, passport, stagesOf } from "../files";
 import { slideTag } from "../quality";
 import { FilesDev } from "./FilesDev";
+import type { DeckManifest } from "../useDeckManifest";
 
 const H = { margin: 0 } as const;
 
-export function FilesTab({ g, v }: { g: Generation; v: Variant }) {
+export function FilesTab({ g, v, deck }: { g: Generation; v: Variant; deck: DeckManifest }) {
   const { strategyTitle, templateLabel } = useApp();
   const [dev, setDev] = useState(false);
   const files = fileRows(g, v.strategy, strategyTitle);
@@ -21,7 +22,7 @@ export function FilesTab({ g, v }: { g: Generation; v: Variant }) {
   const m = v.run_manifest;
   const stages = m ? stagesOf(m) : null;
   const check = checkTiles(g, v);
-  const fixes = fixRowsOf(v);
+  const fixes = fixRowsOf(v, deck.manifest);
   const n = files.length;
 
   return (

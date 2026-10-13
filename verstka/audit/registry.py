@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -12,6 +13,14 @@ from verstka.schemas.audit import CheckSpec, Issue
 from verstka.schemas.deck_ir import DeckIR
 from verstka.schemas.outline import DeckOutline
 from verstka.schemas.template import TemplateManifest
+
+log = logging.getLogger(__name__)
+
+
+def crash_note(spec: CheckSpec) -> str:
+    """The note of a check that crashed, for people: Russian, without the exception (it stays in the log and in the
+    issue's `details`)."""
+    return f"Проверка «{spec.title}» не выполнилась — её замечаний в отчёте нет"
 
 
 @dataclass
@@ -87,6 +96,7 @@ def run_checks(ctx: AuditContext, only: Optional[set[str]] = None, skip: Optiona
         try:
             issues.extend(fn(ctx))
         except Exception as e:  # noqa: BLE001
-            issues.append(ctx.new_issue(spec, 0, f"проверка {spec.id} упала: {str(e)[:120]}", severity="info", details={"exception": str(e)[:300]}))
+            log.warning("audit check %s crashed: %s", spec.id, e, exc_info=True)
+            issues.append(ctx.new_issue(spec, 0, crash_note(spec), severity="info", details={"exception": f"{type(e).__name__}: {str(e)[:300]}"}))
         ran.append(spec.id)
     return issues, ran

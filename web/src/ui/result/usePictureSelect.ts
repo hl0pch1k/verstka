@@ -57,9 +57,11 @@ export function usePictureSelect({ v, n, job, now, blocked, layered }: {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || e.defaultPrevented || ownsKeys(e.target)) return;
       setSel(null);
+      // одно Esc закрывает одно: помощник (он слушает Esc тоже, но позже — здесь фаза перехвата) это нажатие уже не видит
+      e.preventDefault();
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, [on, layered]);
 
   const onPick = (id: string) => {

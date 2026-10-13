@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { auditCounts } from "../../lib/auditCounts";
 import type { AuditReport, DesignEye, Issue, Variant } from "../../types";
 import {
-  checkRows, chipsOf, emptyOf, eyeView, fixableIds, fixedCount, fixingLabel, fixLabel, fixedText, minorRows, qTone, qualityGroups,
-  qualitySummary, splitIssues,
+  checkRows, chipsOf, emptyOf, eyeView, fixableIds, fixedCount, fixingLabel, fixLabel, fixLock, fixedText, issueText, minorRows, qTone, qualityGroups,
+  qualitySummary, splitIssues, TEMPLATE_GONE_FIX,
 } from "./quality";
 
 const I = (id: string, slide: number, severity: Issue["severity"], kind: Issue["kind"] = "deterministic", fix: string | null = null, message = `замечание ${id}`): Issue => ({
@@ -184,4 +184,22 @@ test("взгляд дизайнера посмотрел не на все сла
   const view = eyeView({ looked: 9, slides: [] }, V([]))!;
   assert.ok(view.intro.startsWith("Модель с компьютерным зрением посмотрела на 9 из 12 готовых слайдов, как арт-директор"), view.intro);
   assert.ok(eyeView({ looked: 1, slides: [] }, V([]))!.intro.includes("посмотрела на 1 из 12 готовых слайдов"));
+});
+
+test("«Исправить всё автоматически» — исправимые замечания списка, без мелких заметок (D-4)", () => {
+  const issues = [I("contrast_low-3-1", 3, "warn", "deterministic", "recolor"), I("brand-0-2", 0, "info", "deterministic", "recolor"), I("fill-4-3", 4, "error", "deterministic", null)];
+  const { main } = splitIssues(issues);
+  // заметка о контрасте акцента бренда исправима, но в «Мелких заметках» — «Исправить всё» её не трогает
+  assert.deepEqual(fixableIds(main), ["contrast_low-3-1"]);
+});
+
+test("исправления выключены, пока идёт работа или шаблона больше нет — тогда с причиной (D-9)", () => {
+  assert.deepEqual(fixLock(false, false), { off: false, why: null });
+  assert.deepEqual(fixLock(true, false), { off: true, why: null });
+  assert.deepEqual(fixLock(false, true), { off: true, why: TEMPLATE_GONE_FIX });
+});
+
+test("упавшая проверка в старых отчётах — по-русски, без исключения (D-11)", () => {
+  assert.equal(issueText(I("contrast-0-1", 0, "info", "deterministic", null, "проверка contrast упала: KeyError 'slot_7'")), "Проверка не выполнилась — её замечаний в отчёте нет.");
+  assert.equal(issueText(I("new-0-1", 0, "info", "deterministic", null, "Проверка «Контраст текста» не выполнилась — её замечаний в отчёте нет")), "Проверка «Контраст текста» не выполнилась — её замечаний в отчёте нет");
 });

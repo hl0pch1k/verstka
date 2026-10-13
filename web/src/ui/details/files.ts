@@ -4,10 +4,10 @@
 import { auditCounts } from "../../lib/auditCounts";
 import { plannedByText } from "../../lib/plain";
 import { fmtSeconds, fmtWhen, plural, shortSha } from "../../lib/utils";
-import type { DiffResponse, Generation, RunManifest, SkillsResponse, Variant } from "../../types";
+import type { DiffResponse, Generation, RunManifest, SkillsResponse, TemplateManifest, Variant } from "../../types";
 import type { IconName } from "../kit/icons";
 import { docTitle, fileBase, scoreOf } from "../result/resultView";
-import { appliedRows, type FixRow } from "./fixes";
+import { appliedRows, patternSlideOf, type FixRow } from "./fixes";
 
 export interface FileRow {
   key: string; title: string; score: number | null; tip: string; file: string; cur: boolean;
@@ -31,6 +31,8 @@ export function fileRows(g: Generation, cur: string, titleOf: (name: string) => 
 // ---- паспорт запуска -------------------------------------------------------------------------------------------------
 
 const ROLES: Array<[string, string]> = [["llm", "Тексты и план"], ["vlm", "Проверка по картинке"], ["embed", "Поиск похожего"], ["audit", "Проверка"]];
+/** Роль модели или навыка словами (`llm` → «Тексты и план»); неизвестная — как есть. */
+export const roleLabel = (role: string) => ROLES.find(([k]) => k === role)?.[1] ?? role;
 type Link = { backend?: string; model?: string; label?: string; off?: boolean };
 type Provider = RunManifest["providers"][string] & { chain?: Link[]; label?: string };
 
@@ -122,13 +124,13 @@ export interface Tile { label: string; v: string; sub: string; cls: string; icon
 /** Автоисправления варианта: живой отчёт проверки (после «Исправить замечания» паспорт запуска устарел), иначе паспорт. */
 const appliedOf = (v: Variant) => v.audit?.applied_fixes ?? v.run_manifest?.applied_fixes ?? [];
 
-/** Строки «Автоисправлений» (слайд — по id плана). */
-export function fixRowsOf(v: Variant): FixRow[] {
+/** Строки «Автоисправлений» (слайд — по id плана; «теперь по образцу слайда N шаблона» — по разбору шаблона листа). */
+export function fixRowsOf(v: Variant, manifest?: TemplateManifest | null): FixRow[] {
   const slideOf = (id: string) => {
     const i = v.outline?.slides.findIndex((s) => s.id === id) ?? -1;
     return i >= 0 ? i + 1 : null;
   };
-  return appliedRows(appliedOf(v), slideOf, () => null);
+  return appliedRows(appliedOf(v), slideOf, patternSlideOf(manifest));
 }
 
 /** «Итог проверки»: числа — `auditCounts` живого отчёта (те же, что у карточки результата и вкладки «Качество»);
@@ -167,7 +169,7 @@ export function registryRows(data: SkillsResponse, m: RunManifest | null): { nam
   return all.map((r) => {
     const used = m?.skills[r.name];
     const match = !m ? "" : !used ? "не участвовал" : used.sha256 === r.sha ? "как в запуске" : used.version !== r.version ? `в запуске v${used.version}` : "текст изменён";
-    return { name: r.name, role: r.role, version: `v${r.version}`, match };
+    return { name: r.name, role: roleLabel(r.role), version: `v${r.version}`, match };
   });
 }
 
@@ -179,7 +181,7 @@ export function diffRows(d: DiffResponse, titleOf: (name: string) => string): { 
   const rows: { label: string; from: string; to: string }[] = [];
   if (d.diff.strategy) rows.push({ label: "Вариант", from: titleOf(d.diff.strategy.from), to: titleOf(d.diff.strategy.to) });
   if (d.diff.audit_score) rows.push({ label: "Оценка качества", from: d.diff.audit_score.from === null ? "—" : String(Math.round(d.diff.audit_score.from)), to: d.diff.audit_score.to === null ? "—" : String(Math.round(d.diff.audit_score.to)) });
-  for (const [role, ch] of Object.entries(d.diff.providers)) rows.push({ label: `Модель · ${role}`, from: named(ch.from as Named), to: named(ch.to as Named) });
+  for (const [role, ch] of Object.entries(d.diff.providers)) rows.push({ label: `Модель · ${roleLabel(role)}`, from: named(ch.from as Named), to: named(ch.to as Named) });
   for (const [name, ch] of Object.entries(d.diff.skills)) rows.push({ label: `Навык · ${name}`, from: ch.from ? `v${ch.from.version} · ${shortSha(ch.from.sha256)}` : "не участвовал", to: ch.to ? `v${ch.to.version} · ${shortSha(ch.to.sha256)}` : "не участвовал" });
   return rows;
 }

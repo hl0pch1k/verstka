@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { analysisError, analysisFacts, analysisRows, analysisSteps, FILE_BROKEN, ribbonItems, tplMeta, tplShort } from "./ribbon";
+import { analysisError, analysisFacts, analysisRows, analysisSteps, FILE_BROKEN, ribbonItems, tplMeta, tplShort, uploadFailed } from "./ribbon";
 import { humanizeJobMessage } from "../../lib/jobText";
 
 const t = (id: string, at: string) => ({ template_id: id, analyzed_at: at } as any);
@@ -140,4 +140,11 @@ test("разбор не удался после русского префикс�
   assert.equal(analysisError("Шаблон разобран, но не загрузился: Not Found", "a.pptx").text, "Шаблон разобран, но не загрузился");
   assert.equal(analysisError("Шаблон разобран, но не загрузился: Internal Server Error", "a.pptx").retry, true);
   assert.equal(analysisError("Шаблон не открылся: OSError: [Errno 28] No space left on device", "a.pptx").text, "Шаблон не открылся");
+});
+
+test("неудача загрузки шаблона — только строка ошибки, пришедшая после её начала (B-M6)", () => {
+  assert.equal(uploadFailed({ kind: "error", at: 1200 }, 1000), true);
+  assert.equal(uploadFailed({ kind: "error", at: 900 }, 1000), false); // прежняя строка (список, манифест, давняя загрузка)
+  assert.equal(uploadFailed({ kind: "info", at: 1200 }, 1000), false);
+  assert.equal(uploadFailed(null, 1000), false);
 });

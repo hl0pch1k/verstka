@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { GEN, titleOf } from "./details.fixtures";
-import { checkTiles, diffRows, fileRows, fixRowsOf, passport, registryRows, stagesOf } from "./files";
+import { checkTiles, diffRows, fileRows, fixRowsOf, passport, registryRows, roleLabel, stagesOf } from "./files";
 
 const v = GEN.variants[0];
 
@@ -68,6 +68,10 @@ test("итог проверки и автоисправления — по жи�
 test("навыки и агенты: версия и как они относятся к этому запуску", () => {
   const rows = registryRows({ skills: [{ name: "deck_designer", version: "2.2.0", role: "llm", sha256: "aaa", description: "", changelog: [] }, { name: "auditor", version: "0.3.0", role: "audit", sha256: "ccc", description: "", changelog: [] }, { name: "new_one", version: "0.1.0", role: "llm", sha256: "d", description: "", changelog: [] }], agents: [] }, v.run_manifest);
   assert.deepEqual(rows.map((r) => [r.name, r.version, r.match]), [["deck_designer", "v2.2.0", "как в запуске"], ["auditor", "v0.3.0", "в запуске v0.2.0"], ["new_one", "v0.1.0", "не участвовал"]]);
+  // роль — словами, не llm / vlm (D-10)
+  assert.deepEqual(rows.map((r) => r.role), ["Тексты и план", "Проверка", "Тексты и план"]);
+  assert.equal(roleLabel("vlm"), "Проверка по картинке");
+  assert.equal(roleLabel("агент"), "агент");
 });
 
 test("сравнение запусков: что изменилось — вариант, оценка, модели и навыки", () => {
@@ -81,6 +85,6 @@ test("сравнение запусков: что изменилось — ва�
   }, titleOf);
   assert.deepEqual(rows, [
     { label: "Вариант", from: "Структурный", to: "Визуальный" }, { label: "Оценка качества", from: "89", to: "84" },
-    { label: "Модель · llm", from: "Qwen3.8-27B", to: "без модели" }, { label: "Навык · auditor", from: "v0.2.0 · bbbbbbbb", to: "не участвовал" },
+    { label: "Модель · Тексты и план", from: "Qwen3.8-27B", to: "без модели" }, { label: "Навык · auditor", from: "v0.2.0 · bbbbbbbb", to: "не участвовал" },
   ]);
 });

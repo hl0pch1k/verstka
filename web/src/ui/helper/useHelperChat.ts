@@ -16,7 +16,7 @@ import { sessionId } from "../../lib/utils";
 import { useApp } from "../../store";
 import type { ChatResponse, Generation, Job } from "../../types";
 import {
-  asEditResult, asFixResult, chatFailText, describeFixes, editFailText, feedProgress, planActions, reloadFailText, OTHER_DECK,
+  asEditResult, asFixResult, chatFailText, chatTarget, describeFixes, editFailText, feedProgress, planActions, reloadFailText, OTHER_DECK,
   type EditAction, type Edited, type FeedJob, type FeedNote, type FixOutcome,
 } from "./chat";
 
@@ -204,13 +204,15 @@ export function useHelperChat(): HelperChat {
     setEdited(null);
     const s = latest.current;
     s.pushMessage("user", message);
-    // вопрос — о том, что на экране: открытая презентация, её вариант и слайд («почему слайд 3 такой» — про него);
-    // ответ действует только на неё (planActions), даже если пока ждали, открыли другую
-    const sent = s.generationId;
-    void api.chat({
-      session_id: sessionId(), message, template_id: s.templateId, generation_id: sent, strategy: s.activeStrategy,
-      slide: s.generation ? s.selectedSlide : null,
-    }).then((res) => {
+    // вопрос — о том, что на экране: на результате — открытая презентация, её вариант и слайд («почему слайд 3 такой» —
+    // про него), на «Сборке» — собираемая, на «Создать» — никакая; ответ действует только на неё (planActions), даже
+    // если пока ждали, открыли другую
+    const target = chatTarget({
+      screen: s.ui.screen, open: s.generationId, strategy: s.activeStrategy, slide: s.generation ? s.selectedSlide : null,
+      building: s.buildJob?.generation ?? null,
+    });
+    const sent = target.generation_id;
+    void api.chat({ session_id: sessionId(), message, template_id: s.templateId, ...target }).then((res) => {
       latest.current.pushMessage("assistant", res.reply);
       perform(res, res.generation_id ?? sent);
     }, (e: unknown) => {

@@ -302,3 +302,10 @@ test("агент текст не пишет: пустое поле просит 
   // полоса 02 пустого поля одна при любом правиле
   assert.deepEqual(textStrip("", { line: textLine("", false) }), { title: "Тема ещё не задана" });
 });
+
+test("полоса 01 на «Создать» в «Улучшить готовую» под «Все параметры» — исходный файл, как на сборке и результате (B-M5)", () => {
+  const src = { brief: "x", name: "Итоги квартала.pptx", template_id: "t9", slides: 14, tables: 0, charts: 0, pictures: 0, audit: null };
+  assert.deepEqual(improveDeckStrip(src, "t9"), { title: "Итоги квартала.pptx", meta: "14 слайдов · оформление из презентации" });
+  // выбрали другой шаблон — полоса о нём
+  assert.equal(improveDeckStrip(src, "t1"), null);
+});

@@ -5,6 +5,7 @@ import { agentSummary, hasAgentWork, plainWords } from "../../lib/agent";
 import { auditCounts } from "../../lib/auditCounts";
 import { designEyeLine, problemsText } from "../../lib/designEye";
 import { deckNotice, modelFailed, skeletonDeck, type LiveModel } from "../../lib/modelText";
+import { humanError } from "../../lib/errors";
 import { figuresLine } from "../../lib/narrate";
 import { fileSafe } from "../../lib/plain";
 import { variantRev, withRev } from "../../lib/rev";
@@ -56,6 +57,14 @@ export function ownsKeys(el: EventTarget | null): boolean {
 /** Название презентации (V2 `docTitle`): заголовок плана варианта, иначе генерации, иначе «Презентация». */
 export function docTitle(g: Generation, v: Variant | null | undefined): string {
   return v?.outline?.title?.trim() || g.title?.trim() || "Презентация";
+}
+
+/** Презентация без вариантов (сборка не удалась): «Не получилось собрать презентацию.» и причина по-русски — без
+ *  технического хвоста (`humanError`, как на экране «Сборка»: «Модель не ответила: ReadTimeout: timed out» → «Модель не
+ *  ответила»); причины по-русски нет — что делать. */
+export function noDeckText(error: string | null | undefined): string {
+  const why = humanError(error, "").replace(/[.\s]+$/, "");
+  return `Не получилось собрать презентацию. ${why ? `${why}.` : "Измените текст и соберите заново"}`;
 }
 
 /** Строка под названием (V2 `docLine`): «VK Tech · 12 слайдов · сегодня, 17:38»; `when` — `fmtWhen(created_at)`. */

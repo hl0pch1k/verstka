@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { appliedRows } from "./fixes";
+import { appliedRows, patternSlideOf } from "./fixes";
 
 const slideOf = (id: string) => ({ sl3: 3, sl10: 10 })[id] ?? null;
 const tplSlide = (pid: string) => ({ p22: 22 })[pid] ?? null;
@@ -28,4 +28,12 @@ test("правка на месте говорит сама за себя; без
 test("попытка, которая ничего не поменяла («skip», «kept»), — не исправление", () => {
   const rows = appliedRows([{ iteration: 1, outline_id: "sl3", action: "rematch", result: "skip" }, { iteration: "eyes", outline_id: "sl3", action: "rematch", result: "kept" }], slideOf, tplSlide);
   assert.deepEqual(rows, []);
+});
+
+test("«по образцу слайда N шаблона» — по разбору шаблона листа; разбора нет — без образца (D-8)", () => {
+  const m = { patterns: [{ id: "p9", source_slide: 9 }, { id: "p22", source_slide: 22 }] };
+  const rows = appliedRows([{ iteration: 1, action: "rematch", outline_id: "sl10", result: "rematch → p22" }], slideOf, patternSlideOf(m));
+  assert.equal(rows[0].extra, "теперь по образцу слайда 22 шаблона");
+  assert.equal(appliedRows([{ iteration: 1, action: "rematch", outline_id: "sl10", result: "rematch → p22" }], slideOf, patternSlideOf(null))[0].extra, null);
+  assert.equal(patternSlideOf(m)("p404"), null);
 });

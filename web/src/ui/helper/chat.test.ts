@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  asEditResult, asFixResult, bubbleBlocks, chatFailText, chipsFor, describeFixes, editFailText, feedDelay, feedItems, feedProgress, introFor,
+  asEditResult, asFixResult, bubbleBlocks, chatFailText, chatTarget, chipsFor, describeFixes, editFailText, feedDelay, feedItems, feedProgress, introFor,
   openTabSteps, placeholderFor, planActions, reloadFailText, typeset, OTHER_DECK, type FeedJob,
 } from "./chat";
 import type { ChatAction, ChatResponse } from "../../types";
@@ -232,4 +232,12 @@ test("introFor и placeholderFor: по экрану", () => {
   assert.equal(placeholderFor({ screen: "result", deck: true, slide: 3 }), "Что поменять на слайде 3?");
   assert.equal(placeholderFor({ screen: "build", deck: true, slide: 3 }), "Вопрос о сборке");
   assert.equal(placeholderFor({ screen: "create", deck: true, slide: 3 }), "Вопрос или текст презентации");
+});
+
+test("вопрос помощнику — о презентации на экране: результат — открытая, «Сборка» — собираемая, «Создать» — никакая (A6)", () => {
+  const ctx = { open: "A", strategy: "visual", slide: 3, building: "B" };
+  assert.deepEqual(chatTarget({ ...ctx, screen: "result" }), { generation_id: "A", strategy: "visual", slide: 3 });
+  assert.deepEqual(chatTarget({ ...ctx, screen: "build" }), { generation_id: "B", strategy: null, slide: null });
+  assert.deepEqual(chatTarget({ ...ctx, screen: "create" }), { generation_id: null, strategy: null, slide: null });
+  assert.deepEqual(chatTarget({ ...ctx, screen: "build", building: null }), { generation_id: null, strategy: null, slide: null });
 });

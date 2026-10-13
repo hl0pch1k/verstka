@@ -10,7 +10,8 @@ export type PatternKind =
 
 /** Where a status line stands (no pop-ups in «Слои»): the template step, the text step, the build (its launch and the
  *  build screen), the result, or the page as a whole. Screens and sheets: `ui/deck/geometry.ts`. */
-export type NoticeArea = "template" | "text" | "build" | "result" | "global";
+/** Где стоит строка статуса: шаг «Шаблон», шаг «Текст», экран «Сборка», результат, шапка раздела «Мои презентации». */
+export type NoticeArea = "template" | "text" | "build" | "result" | "history";
 /** A status line: an error, a done action or a remark, and when it came (ms; the same text again restarts its fade). */
 export interface Notice { kind: "error" | "success" | "info"; text: string; at: number }
 export type JobKind = "analyze" | "generate" | "fix" | "edit" | "slide_fix" | "picture" | "other";

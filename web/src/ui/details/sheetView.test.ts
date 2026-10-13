@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { GEN, titleOf } from "./details.fixtures";
 import { UI0, type UiState } from "../deck/geometry";
-import { backStrip, headerLayerOpen, menuItems, SHEET_TABS, tabStep } from "./sheetView";
+import { backStrip, goneMark, headerLayerOpen, manifestAsk, menuItems, SHEET_TABS, tabStep } from "./sheetView";
 
 test("вкладки листа — шесть, в порядке доски", () => {
   assert.deepEqual(SHEET_TABS.map((t) => t.label), ["Качество", "Почему так", "Агент", "План", "Шаблон", "Файлы"]);
@@ -34,4 +34,13 @@ test("поверх листа открыт раздел шапки, просмо
   // слой «Слайд N шаблона» — часть листа, не шапки
   const withPattern: UiState = { ...UI0, pattern: 3 };
   assert.equal(headerLayerOpen(withPattern), false);
+});
+
+test("разбор шаблона листа: 404 не навсегда — снова при новом открытии листа или новом списке шаблонов (D-7)", () => {
+  assert.equal(manifestAsk({ have: true, goneAt: null, attempt: 1, list: "a,b" }), false);
+  assert.equal(manifestAsk({ have: false, goneAt: null, attempt: 1, list: "a,b" }), true);
+  const mark = goneMark(1, "a,b");
+  assert.equal(manifestAsk({ have: false, goneAt: mark, attempt: 1, list: "a,b" }), false); // в этом открытии уже спрашивали
+  assert.equal(manifestAsk({ have: false, goneAt: mark, attempt: 2, list: "a,b" }), true); // лист открыли снова
+  assert.equal(manifestAsk({ have: false, goneAt: mark, attempt: 1, list: "a,b,vk" }), true); // шаблон загрузили заново
 });

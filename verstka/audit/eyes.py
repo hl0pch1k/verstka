@@ -375,8 +375,8 @@ def look(
     ir = _ir_slides(report, outline)
     oid_of = {s.index: s.outline_id for s in ir}
     by_id = {s.id: s for s in outline.slides}
-    skip = set(cfg.get("skip_kinds") or ())
-    todo = [i for i in sorted(before) if (by_id.get(oid_of.get(i) or "") is not None) and by_id[oid_of[i]].kind.value not in skip]
+    skip_kinds = set(cfg.get("skip_kinds") or ())
+    todo = [i for i in sorted(before) if (by_id.get(oid_of.get(i) or "") is not None) and by_id[oid_of[i]].kind.value not in skip_kinds]
     title = getattr(outline, "title", "") or ""
 
     def review(i: int) -> tuple[int, Optional[DesignReview]]:

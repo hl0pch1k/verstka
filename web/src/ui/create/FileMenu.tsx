@@ -18,10 +18,10 @@ const ITEMS: { key: FilePick; icon: IconName; name: string; meta: string }[] = [
   { key: "sample", icon: "file-text", name: "Пример: Умные сводки.md", meta: `Текст Markdown · ${sampleKb} КБ` },
 ];
 
-export function FileMenu({ open, busy, onPick, onClose }: {
+export function FileMenu({ open, off: deckOff, onPick, onClose }: {
   open: boolean;
-  /** Презентация уже читается: второй раз её не выбирают. */
-  busy: boolean;
+  /** «Улучшить готовую» не выбирается (презентация уже читается, разбирается свой шаблон): почему; null — выбирается. */
+  off: string | null;
   onPick(k: FilePick): void;
   /** Закрыть меню; `back` — вернуть фокус на кнопку «Из файла» (Esc). */
   onClose(back?: boolean): void;
@@ -51,10 +51,10 @@ export function FileMenu({ open, busy, onPick, onClose }: {
     <div ref={ref} id="tx-menu" role="menu" aria-label="Выберите файл" aria-hidden={!open || undefined} className={cls("tx-menu", open && "tx-menu-on")} onKeyDown={onKey}>
       <p className="tx-mcap">Выберите файл</p>
       {ITEMS.map((it) => {
-        const off = it.key === "deck" && busy;
+        const off = it.key === "deck" ? deckOff : null;
         return (
-          <button key={it.key} type="button" role="menuitem" className="tx-mi" tabIndex={open ? 0 : -1} aria-disabled={off || undefined}
-            title={off ? "Презентация уже читается" : undefined} onClick={() => !off && onPick(it.key)}>
+          <button key={it.key} type="button" role="menuitem" className="tx-mi" tabIndex={open ? 0 : -1} aria-disabled={off ? true : undefined}
+            title={off ?? undefined} onClick={() => !off && onPick(it.key)}>
             <span className="tx-mic" aria-hidden="true"><Icon name={it.icon} size={16} /></span>
             <span className="tx-mt"><span className="tx-mn">{it.name}</span><span className="tx-mm">{it.meta}</span></span>
           </button>

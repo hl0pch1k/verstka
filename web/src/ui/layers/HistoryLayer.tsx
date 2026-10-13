@@ -20,15 +20,15 @@ import { cls } from "../kit/cls";
 import { ErrorLine } from "../kit/ErrorLine";
 import { Icon } from "../kit/Icon";
 import { Spinner } from "../kit/Spinner";
-import { usePresence } from "../kit/usePresence";
 import { deckPreset, openStrategy, slideSrc } from "../result/resultView";
 import { useRise } from "../result/useRise";
 import { coverStrategy, historyView, openPlan, type HistItem, type OpenPlan } from "./history";
-import { Layer, LAYER_MS, lsDelay, useLayer } from "./Layer";
+import { Layer, lsDelay, useLayer } from "./Layer";
 
 /** Сколько открытие ждёт декодирования первого слайда, прежде чем ехать как есть. */
 const DECODE_WAIT = 800;
 const OPEN_FAILED = "Не удалось открыть презентацию";
+const LIST_FAILED = "Не удалось обновить список презентаций";
 
 export function HistoryLayer() {
   const {
@@ -79,17 +79,21 @@ export function HistoryLayer() {
     clearNotice("result");
   }, [failed, clearNotice]);
 
+  // список не обновился (при открытии слоя, после сборки, при загрузке страницы): строка в шапке слоя — показанный список
+  // мог отстать; пустой список при этом — не «появятся здесь», а неизвестность
+  const listErr = notices.history?.kind === "error" ? humanError(notices.history.text, LIST_FAILED) : null;
+  // помощник сужает колоду: четыре колонки → три и заголовок 24/32 — перекрёстным затуханием всего содержимого слоя
+  const layer = useLayer(open);
+  const fit = layer.fit;
   // список считается, только пока слой на экране (и доигрывает уход), — колода перерисовывается часто, раздел закрыт
-  const mounted = usePresence(open, LAYER_MS).mounted;
+  const mounted = layer.presence.mounted;
   const current = ui.screen === "result" ? generationId : ui.screen === "build" ? buildJob?.generation ?? null : null;
   const view = useMemo(
     () => (mounted ? historyView(generations, { now: new Date(), label: (g) => templateLabel(g.template_id, g.template_file), current }) : null),
     [mounted, generations, templateLabel, current],
   );
   const byId = useMemo(() => new Map(generations.map((g) => [g.id, g])), [generations]);
-  // помощник сужает колоду: четыре колонки → три и заголовок 24/32 — перекрёстным затуханием всего содержимого слоя
-  const layer = useLayer(open);
-  const fit = layer.fit;
+  const headErr = err ?? listErr;
 
   /** Ход начат: дуга на обложке, строка прежней неудачи уходит. Возвращает номер хода — он устарел, если начат новый. */
   const begin = (id: string) => {
@@ -197,14 +201,14 @@ export function HistoryLayer() {
       <div style={{ display: "flex", alignItems: "center", gap: 24, height: 64, flex: "none" }}>
         <h2 className="p2-ttl" style={{ margin: 0, color: "#0B1220" }}>Мои презентации</h2>
         <span style={{ flex: 1, minWidth: 0, display: "flex", justifyContent: "flex-end" }}>
-          {err && <span className="p2-in" style={{ display: "flex", minWidth: 0 }}><ErrorLine text={err} lines={1} /></span>}
+          {headErr && <span key={headErr} className="p2-in" style={{ display: "flex", minWidth: 0 }}><ErrorLine text={headErr} lines={1} /></span>}
         </span>
         <span style={{ fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#5A6272", whiteSpace: "nowrap" }}>{view?.total}</span>
         <button type="button" className="p2-rbl" onClick={close} aria-label="Закрыть"><Icon name="x" size={18} /></button>
       </div>
 
       <div className="gh-list">
-        {view?.groups.length === 0 && (
+        {view?.groups.length === 0 && !listErr && (
           <p className="p2-ls" style={{ ...lsDelay(200), margin: "8px 0 0", fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#5A6272" }}>
             Здесь появятся презентации, которые вы соберёте.
           </p>

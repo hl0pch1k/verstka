@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { GEN, TPL, titleOf } from "./details.fixtures";
-import { explainError, explainWhy, whyView } from "./why";
+import { explainError, explainPlan, explainWhy, whyView } from "./why";
 
 const v = GEN.variants[0];
 
@@ -114,4 +114,12 @@ test("объяснение сервера недоступно: шаблон у�
   assert.equal(explainError(404, "Вариант не найден"), "Шаблона больше нет — объяснение недоступно");
   assert.equal(explainError(0, "Сеть недоступна: Failed to fetch"), "Не удалось получить объяснение: нет связи с сервером");
   assert.equal(explainError(500, "Internal Server Error"), "Не удалось получить объяснение");
+});
+
+test("объяснение сервера: спрошенное раньше берётся и без шаблона — вкладка не ждёт вечно (D-3)", () => {
+  assert.equal(explainPlan(false, false, false), "none");
+  assert.equal(explainPlan(true, true, true), "cached");
+  assert.equal(explainPlan(true, true, false), "cached");
+  assert.equal(explainPlan(true, false, true), "gone");
+  assert.equal(explainPlan(true, false, false), "ask");
 });

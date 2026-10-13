@@ -18,7 +18,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { humanError } from "../../lib/errors";
 import { decodeImage, isDecoded } from "../../lib/motion";
-import { failReason } from "../../lib/narrate";
 import { variantHint } from "../../lib/plain";
 import { fmtWhen } from "../../lib/utils";
 import { useApp } from "../../store";
@@ -44,7 +43,7 @@ import { NotePill, NoteRow, type NoteActions } from "./NotePill";
 import { PictureCard, PictureSpots } from "./PictureCard";
 import { RemarksPanel } from "./RemarksPanel";
 import {
-  agentLines, deckPreset, docLine, docTitle, eyesCard, fileBase, latestWithModel, noteView, ownsKeys, qualityCard, recheckIn, remarkCount,
+  agentLines, deckPreset, docLine, docTitle, eyesCard, fileBase, latestWithModel, noDeckText, noteView, ownsKeys, qualityCard, recheckIn, remarkCount,
   retryLeft, retryTick, retryWaitTitle, rewriteText, scoreOf, slideForKey, slideHeadline, slideSrc, slidesOf, switchShots, variantSegs, whyText,
   WORK_GEO, workGeo,
 } from "./resultView";
@@ -112,7 +111,7 @@ function NoDeck({ g }: { g: Generation }) {
   };
   return (
     <NoteRow>
-      <ErrorLine text={`Не получилось собрать презентацию. ${failReason(g.error)}`} lines={1} />
+      <ErrorLine text={noDeckText(g.error)} lines={1} />
       <button type="button" className="p2-ob" onClick={back} style={{ flex: "none", height: 40, padding: "0 16px" }}>
         <Icon name="arrow-left" size={18} />
         <span>Вернуться к тексту</span>

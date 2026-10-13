@@ -91,12 +91,14 @@ export function TemplateTile({ t, selected, delay, out, onPick, onPeek, kind = "
 }
 
 /** Служебная плитка: значок-слои и подпись в две строки (высота 40 у обеих — знаки на одной линии). */
-export function ActTile({ icon, note, name, delay, out, onClick, label, title, kind = "tt" }: {
+export function ActTile({ icon, note, name, delay, out, onClick, label, title, kind = "tt", off }: {
   icon: IconName; note: string[]; name: string; delay: number; out?: boolean; onClick(): void; label?: string; title?: string; kind?: "tt" | "an";
+  /** Плитка занята: почему (подсказка); null — нет. */
+  off?: string | null;
 }) {
   return (
     <div className={cls("p2-stag p2-in", out && "tp-out")} style={{ animationDelay: `${delay}ms`, transitionDelay: `${delay}ms` }}>
-      <button type="button" className="p2-card" onClick={onClick} aria-label={label} title={title}>
+      <button type="button" className="p2-card" onClick={off ? undefined : onClick} aria-label={label} title={off ?? title} aria-disabled={off ? true : undefined}>
         <span className={`p2-cover ${kind}-act`}>
           <span className="p2-lic" aria-hidden="true"><span className="p2-lic-b" /><span className="p2-lic-f"><Icon name={icon} size={22} /></span></span>
           <span className={`${kind}-note`}>{note.map((s) => <span key={s}>{s}</span>)}</span>
@@ -112,7 +114,7 @@ export function ActTile({ icon, note, name, delay, out, onClick, label, title, k
 /** «ещё 2 шаблона». */
 export const moreText = (n: number) => `ещё ${plural(n, "шаблон", "шаблона", "шаблонов")}`;
 
-export function Ribbon({ covers, fresh, onPeek, onGallery, onUpload }: {
+export function Ribbon({ covers, fresh, onPeek, onGallery, onUpload, uploadOff }: {
   /** Сколько обложек: в широкой колоде шесть, в суженной помощником — четыре (с «Все шаблоны» и «Загрузить свой» — те же
    *  два ряда; fit.ts `ribbonLayout`). */
   covers: number;
@@ -121,6 +123,8 @@ export function Ribbon({ covers, fresh, onPeek, onGallery, onUpload }: {
   onPeek(id: string): void;
   onGallery(): void;
   onUpload(): void;
+  /** «Загрузить свой» занята (читается презентация «Улучшить готовую»): почему; null — нет. */
+  uploadOff?: string | null;
 }) {
   const { templates, templateId } = useApp();
   const pick = usePickTemplate();
@@ -136,7 +140,7 @@ export function Ribbon({ covers, fresh, onPeek, onGallery, onUpload }: {
         <ActTile icon="grid" note={[moreText(rest)]} name="Все шаблоны" delay={240} onClick={onGallery}
           label={`Все шаблоны, ${moreText(rest)}`} title={hidden.map(tplLabel).join(", ")} />
       )}
-      <ActTile icon="upload" note={[".pptx, .potx, .ppt или .odp", "до 200 МБ"]} name="Загрузить свой" delay={280} onClick={onUpload} />
+      <ActTile icon="upload" note={[".pptx, .potx, .ppt или .odp", "до 200 МБ"]} name="Загрузить свой" delay={280} onClick={onUpload} off={uploadOff} />
     </>
   );
 }

@@ -104,3 +104,26 @@ def test_generated_deck_audits_and_autofix(simple_deck, tmp_path):
     final, plan2, outline2, _ = autofix_loop(out, report, outline, plan, manifest, ws, max_iterations=2)
     assert final.iterations <= 2
     assert final.summary.errors <= report.summary.errors
+
+
+def test_a_crashed_check_is_told_in_russian_without_the_exception(monkeypatch):
+    # «Мелкие заметки» get «Проверка «…» не выполнилась…»; the exception stays in the issue's details and the log (D-11)
+    import verstka.audit.registry as reg
+    from verstka.schemas.audit import CheckSpec, Issue
+
+    spec = CheckSpec(id="boom", title="Контраст текста", severity="warn", category="template")
+
+    def crash(ctx):
+        raise KeyError("slot_7")
+
+    class Ctx:
+        def new_issue(self, s, slide, message, **kw):
+            return Issue(id=f"{s.id}-{slide}-1", slide=slide, check_id=s.id, severity=kw.pop("severity", s.severity), kind=s.kind, message=message, **kw)
+
+    monkeypatch.setattr(reg, "all_checks", lambda: [(spec, crash)])
+    issues, ran = reg.run_checks(Ctx())
+    assert ran == ["boom"]
+    (i,) = issues
+    assert i.message == "Проверка «Контраст текста» не выполнилась — её замечаний в отчёте нет"
+    assert "KeyError" not in i.message and "slot_7" not in i.message
+    assert i.severity == "info" and i.details["exception"].startswith("KeyError")

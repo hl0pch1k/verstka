@@ -11,7 +11,7 @@ import { ErrorLine } from "../kit/ErrorLine";
 import { Spinner } from "../kit/Spinner";
 import { Analysis } from "./Analysis";
 import { Cover, inkOf, Ribbon } from "./TemplateRibbon";
-import { analysisError, analysisFacts, analysisSteps, ANALYSIS_STEPS, orderTemplates, tplMeta, type AnalysisFacts, type StepState } from "./ribbon";
+import { analysisError, analysisFacts, analysisSteps, ANALYSIS_STEPS, orderTemplates, READING_DECK, tplMeta, UPLOAD_BUSY_TITLE, uploadFailed, type AnalysisFacts, type StepState } from "./ribbon";
 import { FileInput, UploadZone, useFileDrop } from "./UploadZone";
 import { ribbonLayout } from "../deck/fit";
 import { useDeckFit } from "../deck/useDeckFit";
@@ -31,8 +31,11 @@ export interface TemplateUpload {
   fresh: string | null;
   /** Текст неудачи (fail) как пришёл: сырой, для показа не годится — см. `failure`. */
   error: string | null;
-  /** Идёт загрузка или разбор (run, settle, done, out): новый файл не принимается. */
+  /** Идёт загрузка или разбор (run, settle, done, out) или читается презентация для «Улучшить готовую»: новый файл не
+   *  принимается. */
   busy: boolean;
+  /** Почему файл сейчас не принимается (подсказка занятой плитки «Загрузить свой»); null — принимается. */
+  busyWhy: string | null;
   /** Неудача (fail) для показа: причина по-русски и можно ли повторить с тем же файлом (`analysisError`). */
   failure: { text: string; retry: boolean } | null;
   steps: StepState[];
@@ -49,7 +52,13 @@ export interface TemplateUpload {
 const ALL_DONE: StepState[] = Array.from({ length: ANALYSIS_STEPS }, () => "done");
 
 export function useTemplateUpload(): TemplateUpload {
-  const { uploadTemplate, clearNotice, notices, templateId, activeJob } = useApp();
+  const { uploadTemplate, clearNotice, notices, templateId, activeJob, liveJobs, analyzing } = useApp();
+  // задача разбора этой загрузки (по её номеру): рядом может идти чтение презентации «Улучшить готовую» — её шаги сюда не
+  // попадают
+  const [jobId, setJobId] = useState<string | null>(null);
+  const reading = analyzing === "deck";
+  const readingNow = useRef(reading);
+  readingNow.current = reading;
   const [phase, setPhase] = useState<UploadPhase>("idle");
   const [file, setFile] = useState<File | null>(null);
   const [fresh, setFresh] = useState<string | null>(null);
@@ -63,7 +72,8 @@ export function useTemplateUpload(): TemplateUpload {
   phaseNow.current = phase;
 
   const start = useCallback((f: File) => {
-    if (BUSY.includes(phaseNow.current)) return;
+    // разбор уже идёт или читается презентация «Улучшить готовую» (обе выбирают свой шаблон): второй файл не принимается
+    if (BUSY.includes(phaseNow.current) || readingNow.current) return;
     const n = ++seq.current;
     since.current = Date.now();
     lastSteps.current = analysisSteps("", 0);
@@ -71,17 +81,21 @@ export function useTemplateUpload(): TemplateUpload {
     setFile(f);
     setError(null);
     setFacts({});
+    setJobId(null);
     setPhase("run");
-    void uploadTemplate(f, true).then(() => {
+    void uploadTemplate(f, true, false, (id) => {
+      if (seq.current === n) setJobId(id);
+    }).then(() => {
       if (seq.current === n) setPhase((p) => (p === "run" ? "settle" : p));
     });
   }, [uploadTemplate, clearNotice]);
 
-  // итог: строка ошибки области «Шаблон» — неудача; иначе шаблон уже выбран (adoptManifest) — он и есть новый
+  // итог: строка ошибки области «Шаблон», пришедшая после начала этой загрузки, — неудача; иначе шаблон уже выбран
+  // (adoptManifest) — он и есть новый
   const notice = notices.template;
   useEffect(() => {
     if (phase !== "settle") return;
-    if (notice?.kind === "error") {
+    if (notice && uploadFailed(notice, since.current)) {
       setError(notice.text.replace(/^Не получилось:\s*/, ""));
       setPhase("fail");
     } else {
@@ -101,8 +115,8 @@ export function useTemplateUpload(): TemplateUpload {
     if (phase === "idle" && notice?.kind === "info") clearNotice("template");
   }, [phase, notice, clearNotice]);
 
-  // задача этой загрузки: analyze, начатая после выбора файла
-  const job = activeJob && activeJob.kind === "analyze" && activeJob.startedAt >= since.current ? activeJob : null;
+  // задача этой загрузки — по её номеру (среди идущих; кончилась — пока её держит слот)
+  const job = jobId ? liveJobs.find((j) => j.id === jobId) ?? (activeJob?.id === jobId ? activeJob : null) : null;
   const live = phase === "run" || phase === "settle";
   const msg = live ? job?.message : undefined;
   useEffect(() => {
@@ -114,7 +128,7 @@ export function useTemplateUpload(): TemplateUpload {
 
   // пока файл разбирается, второй не выбирают: окно выбора не открывается, выбранное молча пропало бы (start занят)
   const pick = useCallback(() => {
-    if (!BUSY.includes(phaseNow.current)) inputRef.current?.click();
+    if (!BUSY.includes(phaseNow.current) && !readingNow.current) inputRef.current?.click();
   }, []);
   const retry = useCallback(() => {
     if (file) start(file);
@@ -124,9 +138,11 @@ export function useTemplateUpload(): TemplateUpload {
     setError(null);
     clearNotice("template");
   }, [clearNotice]);
-  const busy = BUSY.includes(phase);
+  const own = BUSY.includes(phase);
+  const busy = own || reading;
+  const busyWhy = own ? UPLOAD_BUSY_TITLE : reading ? READING_DECK : null;
   const failure = useMemo(() => (phase === "fail" ? analysisError(error, file?.name) : null), [phase, error, file]);
-  return { phase, file, fresh, error, busy, failure, steps, facts, inputRef, start, pick, retry, dismiss };
+  return { phase, file, fresh, error, busy, busyWhy, failure, steps, facts, inputRef, start, pick, retry, dismiss };
 }
 
 /** Строка в свёрнутой шапке, пока файл разбирается. */
@@ -229,7 +245,7 @@ export function TemplateBody({ upload }: { upload: TemplateUpload }) {
     <div id="p2-b1" ref={body} className={cls("p2-body p2-g4", on ? "p2-on" : "p2-off")} data-ribbon={fit === "wide" ? "wide" : "narrow"}
       style={{ position: "relative", display: "grid", gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: 16, margin: "24px 0 0 192px" }}>
       {upload.phase === "idle" ? (
-        <Ribbon covers={covers} fresh={upload.fresh} onPeek={peek} onGallery={gallery} onUpload={upload.pick} />
+        <Ribbon covers={covers} fresh={upload.fresh} onPeek={peek} onGallery={gallery} onUpload={upload.pick} uploadOff={upload.busyWhy} />
       ) : (
         <Analysis list={orderTemplates(templates, upload.fresh)} cols={cols} name={templateTitle(fileName)} fileName={fileName}
           steps={upload.steps} facts={upload.facts} out={upload.phase === "out"} error={upload.failure?.text ?? null} canRetry={upload.failure?.retry ?? true}

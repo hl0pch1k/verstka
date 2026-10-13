@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { endSeen, failMessage, followBuild, improveArrives, watchingBuild, type GenerationDeps } from "./flows";
+import { api } from "../api";
+import { endSeen, failMessage, followBuild, improveArrives, uploadTemplateFlow, watchingBuild, type GenerationDeps, type UploadDeps } from "./flows";
 import type { Generation, Job } from "../types";
 
 test("сообщение помощника о неудаче задачи: причина по-русски, без технического хвоста", () => {
@@ -111,4 +112,30 @@ test("сборка кончилась, а её презентация не от�
   followBuild(target, away.d);
   await away.done();
   assert.deepEqual(away.log, ["list", "away:g1:j1:done"]);
+});
+
+test("загрузка шаблона и чтение презентации: задача разбора — вызывающему; неудачное чтение обновляет список шаблонов (B-M6, B-M3)", async () => {
+  const real = api.uploadTemplate;
+  api.uploadTemplate = (async () => ({ job_id: "j9", use_models: true })) as unknown as typeof api.uploadTemplate;
+  try {
+    for (const improve of [false, true]) {
+      const log: string[] = [];
+      let hooks: Hooks = {};
+      const d: UploadDeps = {
+        runJob: (id, _l, opts) => { log.push(`job:${id}`); hooks = opts ?? {}; },
+        report: () => log.push("report"), notify: () => log.push("notify"), clearNotice: () => {}, pushMessage: () => log.push("msg"), dispatch: () => {},
+        setTemplates: () => {}, adoptManifest: () => {}, refreshTemplates: async () => { log.push("templates"); },
+      };
+      let job: string | null = null;
+      const done = uploadTemplateFlow({ name: "Итоги.pptx" } as File, true, d, improve ? () => {} : undefined, (id) => { job = id; log.push(`own:${id}`); });
+      await new Promise((r) => setTimeout(r, 0));
+      assert.equal(job, "j9");
+      assert.deepEqual(log.slice(0, 2), ["own:j9", "job:j9"]);
+      hooks.onFailed?.({ id: "j9", error: "битый файл", message: "" } as Job);
+      await done;
+      assert.equal(log.includes("templates"), improve);
+    }
+  } finally {
+    api.uploadTemplate = real;
+  }
 });

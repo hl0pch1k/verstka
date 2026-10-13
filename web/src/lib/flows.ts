@@ -26,12 +26,16 @@ interface CommonDeps {
 
 export interface UploadDeps extends CommonDeps {
   setTemplates(list: TemplateListItem[]): void;
+  /** The template list read again (a failure is told in the template area). */
+  refreshTemplates(): Promise<void>;
   /** Puts the manifest into the state and selects its template in one batch. */
   adoptManifest(m: TemplateManifest): void;
 }
 
-/** `improve`: «Улучшить готовую» — the deck is read back as text; its lines stand at the text step, not the template's. */
-export function uploadTemplateFlow(file: File, useModels: boolean, d: UploadDeps, improve?: (src: ImproveSource) => void): Promise<void> {
+/** `improve`: «Улучшить готовую» — the deck is read back as text; its lines stand at the text step, not the template's.
+ *  `onJob`: the server took the file — the job that analyses it (the analysis box follows its own job, not the newest).
+ *  A failed read that still added the deck as a template («…она добавлена как шаблон») refreshes the template list. */
+export function uploadTemplateFlow(file: File, useModels: boolean, d: UploadDeps, improve?: (src: ImproveSource) => void, onJob?: (jobId: string) => void): Promise<void> {
   const area: NoticeArea = improve ? "text" : "template";
   return new Promise<void>((resolve) => {
     void (async () => {
@@ -49,6 +53,7 @@ export function uploadTemplateFlow(file: File, useModels: boolean, d: UploadDeps
         return resolve();
       }
       if (useModels && !res.use_models) d.notify(area, "info", improve ? "Модель не подключена — прочитаю презентацию по правилам" : "Модель не подключена — разберу шаблон по правилам");
+      onJob?.(res.job_id);
       d.runJob(res.job_id, improve ? `Читаю презентацию «${templateTitle(file.name)}»` : `Разбираю шаблон «${templateTitle(file.name)}»`, {
         kind: "analyze",
         area,
@@ -77,6 +82,8 @@ export function uploadTemplateFlow(file: File, useModels: boolean, d: UploadDeps
         },
         onFailed: (job) => {
           d.pushMessage("assistant", failMessage(`Не получилось разобрать «${templateTitle(file.name)}»`, job));
+          // презентацию не прочитали как текст, но могли добавить шаблоном («…она добавлена как шаблон»): шаг 01 видит её сразу
+          if (improve) void d.refreshTemplates();
           resolve();
         },
       });

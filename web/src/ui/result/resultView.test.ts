@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { ringDash } from "../kit/ring";
 import type { AgentEvent, AuditReport, AuditSummary, DeckOutline, DesignEye, Generation, Issue, ModelsStatus, OutlineSlide, Variant } from "../../types";
 import {
-  agentLines, deckPreset, deckStrip, docLine, docTitle, eyesCard, fileBase, latestWithModel, noteView, openDeck, openStrategy, qualityCard, recheckIn, remarkCount,
+  agentLines, deckPreset, deckStrip, docLine, docTitle, eyesCard, fileBase, latestWithModel, noDeckText, noteView, openDeck, openStrategy, qualityCard, recheckIn, remarkCount,
   retryLeft, retryTick, rewriteText, scoreOf, slideForKey, slideSrc, slidesOf, switchShots, variantSegs, whyText, WORK_GEO, workGeo,
 } from "./resultView";
 
@@ -364,4 +364,12 @@ test("раскладка рабочей области: уведомления �
   assert.deepEqual(WORK_GEO.note, { height: 548, marginTop: 16 });
   // нижний край рабочей области — один и тот же: ряд уведомления 48 + отступ + 548 = 612
   assert.equal(48 + WORK_GEO.note.marginTop + WORK_GEO.note.height, WORK_GEO.top.marginTop + WORK_GEO.top.height);
+});
+
+test("презентация без вариантов: причина по-русски без технического хвоста, как на экране «Сборка» (C8)", () => {
+  assert.equal(noDeckText("Модель не ответила: ReadTimeout: timed out"), "Не получилось собрать презентацию. Модель не ответила.");
+  assert.equal(noDeckText("Шаблон ещё не разобран — загрузите его снова.\nTraceback (most recent call last):"),
+    "Не получилось собрать презентацию. Шаблон ещё не разобран — загрузите его снова.");
+  assert.equal(noDeckText("list index out of range"), "Не получилось собрать презентацию. Измените текст и соберите заново");
+  assert.equal(noDeckText(null), "Не получилось собрать презентацию. Измените текст и соберите заново");
 });
