@@ -16,7 +16,7 @@ import { ParamsBody, ParamsHead, ParamsMore, useParamsPlate } from "../create/Pa
 import { tplMeta } from "../create/ribbon";
 import { TemplateBody, TemplateHead, useTemplateUpload } from "../create/TemplatePlate";
 import { TextBody, TextHead, useTextPlate } from "../create/TextPlate";
-import { textLine, textStrip } from "../create/textRules";
+import { improveDeckStrip, textLine, textStrip } from "../create/textRules";
 import { useStrayFileDrop } from "../create/UploadZone";
 import { Deck } from "../deck/Deck";
 // лист «Подробнее» — в основном куске сборки: первое открытие въезжает, как любое (кусок, догружаемый по клику, мог бы
@@ -82,8 +82,10 @@ export function AppShell() {
   const replay = useContext(BuildReplay);
   const shownJob = replay ? replay.job : buildJob;
   const topic = useMemo(() => (build ? buildTopic(shownJob, buildAsk, [generation, ...generations]) : null), [build, shownJob, buildAsk, generation, generations]);
-  const s1 = result ? (open ? tplStrip(open.template_id, open.template_file) : undefined)
-    : build ? (topic ? tplStrip(topic.template, topic.templateFile) : undefined)
+  // «Улучшить готовую»: на сборке и результате полоса 01 — исходный файл и «оформление из презентации», как на «Создать»
+  // (C-improve, ImproveStrip), а не шаблон, которым он стал
+  const s1 = result ? (open ? improveDeckStrip(open.improved_from, open.template_id) ?? tplStrip(open.template_id, open.template_file) : undefined)
+    : build ? (topic ? improveDeckStrip(topic.improved, topic.template) ?? tplStrip(topic.template, topic.templateFile) : undefined)
     : templateStrip(templates.find((t) => t.template_id === templateId));
   const deck = result ? generation : null;
   const s3 = buildStrip(generation, activeVariant);

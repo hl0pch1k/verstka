@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { BRIEF_MIN, BRIEF_MIN_TOPIC } from "../../lib/createForm";
-import { charsLabel, clipLine, deckError, fileKind, fileTextIssue, improveLive, improveNoteParts, improveShift, improveStep, improveStripMeta, NOT_UTF8, textError, textLine, textPreview, textStrip, TW, TW0, twBlink, twStep, twText, type Tw } from "./textRules";
+import { charsLabel, clipLine, deckError, fileKind, fileTextIssue, improveLive, improveNoteParts, improveDeckStrip, improveShift, improveStep, improveStripMeta, NOT_UTF8, textError, textLine, textPreview, textStrip, TW, TW0, twBlink, twStep, twText, type Tw } from "./textRules";
 
 /** Сервер пишет текст по теме (`health.writer`) — и без него. */
 const W = { writer: true };
@@ -264,4 +264,16 @@ test("режим: в поле уже был текст презентации �
   assert.equal(improveStep(live, src, "t1").ends, false);
   // текст источника из одних пробелов — текста не было: как презентация без текста
   assert.equal(improveLive("t1", "  \n").hadText, false);
+});
+
+test("полоса 01 улучшенной презентации на сборке и результате — исходный файл и «оформление из презентации», как на «Создать»", () => {
+  const from = { name: "VK_WorkSpace_Клиентская_конференция_Шаблон_03.pptx", slides: 29, template_id: "1b88" };
+  assert.deepEqual(improveDeckStrip(from, "1b88"), { title: "VK_WorkSpace_Клиентская_конференция_Шаблон_03.pptx", meta: "29 слайдов · оформление из презентации" });
+  // открыта из «Мои презентации» без шаблона в записи или без числа слайдов
+  assert.deepEqual(improveDeckStrip({ name: "Итоги квартала.pptx" }, "t"), { title: "Итоги квартала.pptx", meta: "оформление из презентации" });
+  // свёрстана в другом шаблоне — полоса о шаблоне
+  assert.equal(improveDeckStrip(from, "vk-tech"), null);
+  // не «Улучшить готовую»
+  assert.equal(improveDeckStrip(null, "1b88"), null);
+  assert.equal(improveDeckStrip({ name: " " }, "1b88"), null);
 });

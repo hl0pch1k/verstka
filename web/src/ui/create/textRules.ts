@@ -7,7 +7,7 @@ import { templateStem } from "../../lib/templateFiles";
 import { briefBody, factsLine, textFacts } from "../../lib/textFacts";
 import { plural } from "../../lib/utils";
 import { writerModeOf } from "../../lib/writerMode";
-import type { ImproveSource } from "../../types";
+import type { ImprovedFrom, ImproveSource } from "../../types";
 
 /** Ошибка у поля. `empty` / `short` / `type` — правила `textError`; `file` — файл не прочитался или презентацию не
  *  удалось прочитать на сервере (причина — в `text`). */
@@ -201,6 +201,16 @@ export const improveStripMeta = (src: Pick<ImproveSource, "name" | "slides">) =>
 
 /** Число слайдов для читающего с экрана («14 слайдов») или null — полоса 01 называет его в `aria-label`. */
 export const improveSlides = (src: Pick<ImproveSource, "name" | "slides">) => slidesLabel(src.slides);
+
+/** Полоса 01 сборки и результата презентации «Улучшить готовую» — та же, что на «Создать» (C-improve): имя исходного
+ *  файла и «29 слайдов · оформление из презентации», а не шаблон, в который превратилась исходная презентация (у
+ *  открытой из «Мои презентации» — по её `improved_from`). Оформление не из неё (другой шаблон) или имени нет — null:
+ *  полоса о шаблоне. */
+export function improveDeckStrip(from: Pick<ImprovedFrom, "name" | "slides" | "template_id"> | null | undefined, templateId: string | null | undefined): { title: string; meta: string } | null {
+  if (!from?.name?.trim()) return null;
+  if (from.template_id && templateId && from.template_id !== templateId) return null;
+  return { title: from.name, meta: improveStripMeta(from) };
+}
 
 // ── жизнь режима «Улучшить готовую»
 /** Где режим сейчас: `tpl` — шаблон исходной презентации (null — шаблон не выбран), `hadText` — в поле уже был текст. */
