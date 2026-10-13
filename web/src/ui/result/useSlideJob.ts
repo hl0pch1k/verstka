@@ -4,8 +4,13 @@
 // `runJob` хранилища тихо — ход и неудачу показывает место действия (панель замечаний, карточка «Изображение»), а не
 // строка уведомления. Шаги запуска — чистый slideJobNext (slideJob.ts): у варианта одна
 // задача за раз (сервер отвечает 409), второй запуск в том же кадре отклоняется; у другого варианта — своя работа. Задача
-// над вариантом, которую этот экран не запускал (начатая до возвращения на него, помощником, листом «Подробнее»), —
-// `elsewhere`: кнопки работы выключены с причиной, на миниатюре её слайда дуга. Ход задачи — из идущих задач хранилища
+// над вариантом, которую этот экран не запускал (начатая до возвращения на него, помощником, листом «Подробнее»): задача
+// над слайдом — исправление, изображение, правка помощника, «Вернуть как было» слайда — подхватывается и выглядит как
+// своя (`adoptPlan`: карточка хода R-fixing или ход в карточке «Изображение», замечания слайда рядами; её конец хранилище
+// сообщает после того, как запустивший перечитал презентацию, — `watchJob`, итог встаёт у места действия; не удалась, а
+// её места человек не видит — строка результата, экран не молчит); задача над всем вариантом — `elsewhere`: кнопки
+// работы выключены с причиной. Своя задача, кончившаяся неудачей, когда экрана уже нет и её никто не подхватил, —
+// строка результата открытой презентации (`tellAway`). Ход задачи — из идущих задач хранилища
 // по её номеру (а не из слота самой новой задачи). По готовности презентация
 // перечитывается (`reloadIfOpen`: тот же вариант и слайд, превью — по новой ревизии `withRev`) — и тогда, когда человек
 // уже ушёл с экрана результата: вернувшись, он видит новый слайд. Состояние этого экрана (итог, строки, часы) живёт,
@@ -17,9 +22,13 @@ import { asPictureResult } from "../../lib/pictures";
 import { useApp, type ActiveJob } from "../../store";
 import type { AgentEvent, Job, PictureChangeRequest, PictureChangeResult, SlideFixRequest, SlideFixResult } from "../../types";
 import { useStale, type Refresh } from "../shell/StaleLine";
+import { asEditResult } from "../helper/chat";
+import { undoRefusal } from "../details/variantWork";
 import { asSlideFixResult } from "./fix";
 import type { Remark } from "./marks";
-import { JOB0, liveWork, runOf, slideBusy, slideJobNext, variantLiveJob, type SlideJobAction, type SlideJobKind, type SlideJobState, type SlideRun } from "./slideJob";
+import {
+  adoptPlan, awayFailText, JOB0, jobWhat, liveWork, runOf, slideBusy, slideJobNext, variantLiveJob, type SlideJobAction, type SlideJobKind, type SlideJobState, type SlideRun,
+} from "./slideJob";
 
 export type { SlideJobKind, SlideRun } from "./slideJob";
 
@@ -40,6 +49,8 @@ export interface SlideJob {
   /** Презентация несвежая (изменение сохранено, а перечитать не вышло): строка и «Обновить» для места действия, чья
    *  работа это изменение (`run.stale`); null — свежая. */
   refresh: Refresh | null;
+  /** Слайд, над которым идёт работа (своя, подхваченная или чужая над вариантом): дуга на его миниатюре; null — нет. */
+  spin: number | null;
   start(kind: "fix", n: number, body: SlideFixRequest, requested: Remark[]): Promise<boolean>;
   start(kind: "picture", n: number, body: PictureChangeRequest): Promise<boolean>;
   /** «Вернуть как было» для итога этой работы. */
@@ -59,8 +70,19 @@ const jobError = (job: Job, what: string) => humanError(job.error ?? job.message
 const startError = (e: unknown, what: string) =>
   humanError(e instanceof ApiError || e instanceof Error ? e.message : String(e), `Не получилось ${what}. Попробуйте ещё раз.`);
 
-export function useSlideJob(gid: string, strategy: string): SlideJob {
-  const { runJob, reloadIfOpen, revertVariant, liveJobs } = useApp();
+/** Что экран результата сообщает о себе для подхваченной работы: замечания слайда (ряды карточки хода), род последнего
+ *  изменения слайда (что возвращает «Вернуть как было»), видит ли человек место работы (режим «Замечания» на её слайде
+ *  или колонка «Изображение» на нём). Читается в момент события — всегда свежее. */
+export interface SlideJobCtx {
+  remarksOf(slide: number): Remark[];
+  undoKind(slide: number): SlideJobKind;
+  looking(run: SlideRun): boolean;
+}
+
+export function useSlideJob(gid: string, strategy: string, ctx?: SlideJobCtx): SlideJob {
+  const { runJob, reloadIfOpen, revertVariant, liveJobs, watchJob, tellAway } = useApp();
+  const ctxRef = useRef(ctx);
+  ctxRef.current = ctx;
   // Последнее состояние — у шагов (клик, ответ сервера, конец задачи), а не у отрисовки: второй клик в том же кадре
   // видит первый запуск. Экран перерисовывается, пока он открыт; продолжения задач идут и без него.
   const box = useRef<SlideJobState>(JOB0);
@@ -139,10 +161,14 @@ export function useSlideJob(gid: string, strategy: string): SlideJob {
           send({ type: "settled", seq: s, at: Date.now(), picture: res, stale, error: res.applied ? null : humanError(res.reply, "Изображение не поменялось. Попробуйте ещё раз.") });
         }
       },
-      onFailed: (job) => void send({ type: "settled", seq: s, at: Date.now(), error: jobError(job, what) }),
+      onFailed: (job) => {
+        // экрана уже нет (ушли с результата), и задачу никто не подхватил: строка результата — вернувшись, человек её увидит
+        if (!alive.current) tellAway(jobId, gid, awayFailText(kind, pic ? pic.action ?? "generate" : null, n, job));
+        send({ type: "settled", seq: s, at: Date.now(), error: jobError(job, what) });
+      },
     });
     return true;
-  }, [gid, strategy, runJob, reloadIfOpen, send]) as SlideJob["start"];
+  }, [gid, strategy, runJob, reloadIfOpen, send, tellAway]) as SlideJob["start"];
 
   // «Вернуть как было» — общее для всех мест действия (хранилище `revertVariant`): второй возврат или возврат во время
   // чужой задачи над вариантом не уходит на сервер, а возвращает отказ строкой
@@ -170,8 +196,73 @@ export function useSlideJob(gid: string, strategy: string): SlideJob {
 
   // задача над этим вариантом, которую экран не запускал (своя — у `run`)
   const other = variantLiveJob(liveJobs, gid, strategy, run?.jobId ?? null);
-  const elsewhere = useMemo(() => (other ? liveWork(other) : null), [other]);
+  // задача над слайдом подхватывается: та же работа экрана, что у своей (карточка хода, итог у места действия)
+  const plan = adoptPlan(other, run, (k) => ctxRef.current?.undoKind(k) ?? "fix");
+  const subs = useRef(new Map<string, () => void>());
+  useEffect(() => {
+    const own = subs.current;
+    return () => {
+      own.forEach((stop) => stop());
+      own.clear();
+    };
+  }, []);
+  const planKey = plan && other ? `${other.id}|${plan.kind}|${plan.slide}|${plan.undo}` : null;
+  useEffect(() => {
+    if (!plan || !other || subs.current.has(other.id)) return;
+    const jobId = other.id;
+    let seq = -1;
+    // конец задачи — после того, как запустивший отработал своё (перечитал презентацию); `stale` — не перечиталась
+    const stop = watchJob(jobId, (job, ok, stale) => {
+      subs.current.delete(jobId);
+      if (seq >= 0) settleAdopted(seq, plan, job, ok, stale);
+    });
+    const now = send({
+      type: "adopt", kind: plan.kind, strategy, slide: plan.slide, jobId, startedAt: other.startedAt, undo: plan.undo,
+      requested: plan.kind === "fix" && !plan.undo ? ctxRef.current?.remarksOf(plan.slide) ?? [] : [],
+    });
+    const r = runOf(now, strategy);
+    if (!r || r.jobId !== jobId) return stop();
+    seq = r.seq;
+    subs.current.set(jobId, stop);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- одна подхваченная задача — один раз (planKey)
+  }, [planKey]);
+
+  /** Конец подхваченной задачи: итог — как у своей (перечитанная презентация, «Исправлено», «Новое изображение», строка
+   *  правки помощника); неудача — строка у места действия, а если человек его не видит — строка результата. */
+  const settleAdopted = (seq: number, p: NonNullable<ReturnType<typeof adoptPlan>>, job: Job, ok: boolean, stale: boolean) => {
+    const r = Object.values(box.current.runs).find((x) => x?.seq === seq);
+    if (!r) return;
+    const at = Date.now();
+    if (p.undo) {
+      const no = ok ? undoRefusal(job.result) : jobError(job, "вернуть как было");
+      if (no) return void send({ type: "undoFailed", seq, error: no });
+      return void send(stale ? { type: "undoStale", seq } : { type: "undone", seq });
+    }
+    if (!ok) {
+      if (alive.current && ctxRef.current?.looking(r)) return void send({ type: "settled", seq, at, error: jobError(job, jobWhat(p.kind, r.action)) });
+      tellAway(job.id, gid, awayFailText(p.kind, r.action, p.slide, job));
+      return void send({ type: "settled", seq, at });
+    }
+    if (p.source === "slide_fix") {
+      const res = asSlideFixResult(job.result);
+      if (!res) return void send({ type: "settled", seq, at, error: "Сервер не смог исправить слайд. Попробуйте ещё раз." });
+      return void send({ type: "settled", seq, at, fix: res, stale: res.applied && stale });
+    }
+    if (p.source === "picture") {
+      const res = asPictureResult(job.result);
+      if (!res) return void send({ type: "settled", seq, at, error: "Сервер не смог поменять изображение. Попробуйте ещё раз." });
+      return void send({ type: "settled", seq, at, picture: res, stale: res.applied && stale, error: res.applied ? null : humanError(res.reply, "Изображение не поменялось. Попробуйте ещё раз.") });
+    }
+    // правка помощника: тихая строка — что сделано или почему слайд остался прежним (его же ответ)
+    const e = asEditResult(job.result);
+    const said = (e?.reply ?? "").split("\n")[0].trim().replace(/[.\s]+$/, "");
+    const note = !e ? null : e.changed ? (said ? `${said}.` : "Слайд изменён.") : `Слайд остался прежним${said ? `: ${said[0].toLowerCase()}${said.slice(1)}` : ""}.`;
+    send({ type: "settled", seq, at, note, stale: !!e?.changed && stale });
+  };
+
+  const elsewhere = useMemo(() => (other && !plan ? liveWork(other) : null), [other, plan]);
   const refresh = useStale(gid);
+  const spin = run && run.jobId && (run.phase === "work" || run.undo === "work") ? run.slide : elsewhere?.slide ?? null;
 
   return {
     run,
@@ -181,6 +272,7 @@ export function useSlideJob(gid: string, strategy: string): SlideJob {
     elsewhere,
     live,
     refresh,
+    spin,
     start,
     undo,
     revert,

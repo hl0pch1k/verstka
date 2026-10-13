@@ -78,17 +78,21 @@ export function useRemarksMode({ v, n, src, job, now, titleOf }: {
   const [wishAt, setWishAt] = useState({ k: "", t: "" });
   const wish = wishAt.k === slideKey ? wishAt.t : "";
   const badges = useMemo(() => slideBadges(v), [v]);
-  // над вариантом идёт задача, которую этот экран не запускал (начатая до возвращения на него, помощником, листом
-  // «Подробнее»): переключатель и «Исправить слайд» выключены с её причиной, на миниатюре её слайда — дуга
+  // над вариантом идёт задача над всем вариантом, которую этот экран не запускал («Исправить всё», возврат из
+  // «Агента»): переключатель и «Исправить слайд» выключены с её причиной. Работа над слайдом (своя или подхваченная —
+  // начатая до возвращения сюда, помощником) режим не выключает: пока агент исправляет слайд, режим не закрывается, а
+  // включить его можно — он открывается на этом слайде с карточкой хода
   const other = job.elsewhere;
-  const off = fixWork ? `Агент исправляет слайд ${fixWork.slide}` : other?.why ?? null;
+  const off = fixWork && ui.remarks ? `Агент исправляет слайд ${fixWork.slide}` : other?.why ?? null;
 
   const toggle = () => {
     if (off) return;
     if (ui.remarks) return dispatch({ type: "set", patch: { remarks: false } });
     setSince(Date.now());
-    // на открытом слайде замечаний нет (и нет итога исправления) — к первому слайду с ними
-    if (!open.length && !fixDone) {
+    // агент исправляет слайд — к нему (карточка хода); на открытом слайде замечаний нет (и нет итога исправления) — к
+    // первому слайду с ними
+    if (fixWork && fixWork.slide !== n) setSelectedSlide(fixWork.slide);
+    else if (!fixWork && !open.length && !fixDone) {
       const to = firstRemarkSlide(v, n);
       if (to !== null && to !== n) setSelectedSlide(to);
     }
@@ -106,6 +110,7 @@ export function useRemarksMode({ v, n, src, job, now, titleOf }: {
   const line: PanelLine | null = fixRun && fixRun.phase === "done" && !fixing
     ? stale === "change" && job.refresh ? { tone: "error", text: job.refresh.text, refresh: job.refresh }
       : fixRun.error ? { tone: "error", text: fixRun.error }
+      : fixRun.note ? { tone: "info", text: fixRun.note }
       : fixRun.fix && !fixRun.fix.applied ? { tone: "info", text: `Слайд остался прежним: ${lower((fixRun.fix.why ?? "замечания остались").replace(/\.\s*$/, ""))}` } : null
     : null;
   const steps = fixRun ? fixSteps(job.live.events, fixRun.phase === "done") : null;
@@ -127,7 +132,7 @@ export function useRemarksMode({ v, n, src, job, now, titleOf }: {
       onPick: (id) => setSelAt({ k: viewKey, i: rows.findIndex((r) => r.id === id) }),
     },
     sketch: fx ? { phase: fx, ...slideSketch(v, n, job.live.events) } : null,
-    film: { badges, out: !rm.shown, spin: fixWork ? fixWork.slide : other?.slide ?? null },
+    film: { badges, out: !rm.shown, spin: job.spin },
     panel: {
       shown: rm.shown, since, n, view, rows, sel, onSel: (i) => setSelAt({ k: viewKey, i }),
       wish, onWish: (t) => setWishAt({ k: slideKey, t }), onFix, fixBusy, fixOff: busyWhy(run) ?? other?.why ?? null, revert,

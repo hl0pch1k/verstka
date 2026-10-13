@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { OutlineSlide, SlideFixResult } from "../../types";
-import { asSlideFixResult, clock, fixedRows, fixSteps, fixSummary, fixToRevert, lastEditIs, slideSketch, undoneIn } from "./fix";
+import { asSlideFixResult, clock, fixedRows, fixSteps, fixSummary, fixToRevert, lastEditIs, slideEditKind, slideSketch, undoneIn } from "./fix";
 import { slideRemarks } from "./marks";
 import { CONTRAST, DENSE, MODEL, edit, ev, issue, titleOf, variant } from "./remarks.fixtures";
 
@@ -123,4 +123,11 @@ test("изменение вернули как было в другом мест
   assert.equal(undoneIn(variant([], { edits: [edit({ version: 2 })] }), 2), false);
   assert.equal(undoneIn(undone, null), false);
   assert.equal(undoneIn(null, 2), false);
+});
+
+test("slideEditKind: что вернёт «Вернуть как было» слайда — последнее изменение варианта на этом слайде (R9)", () => {
+  assert.equal(slideEditKind(variant([], { edits: [edit({}), edit({ kind: "picture", slides: [4], version: 3 })] }), 4), "picture");
+  assert.equal(slideEditKind(variant([], { edits: [edit({ kind: "picture", slides: [4], version: 3 })] }), 3), "fix");
+  assert.equal(slideEditKind(variant([], { edits: [edit({ kind: "picture", slides: [4], version: 3 }), edit({ undo_of: 3, version: 4 })] }), 4), "picture");
+  assert.equal(slideEditKind(variant([], {}), 1), "fix");
 });

@@ -157,6 +157,13 @@ export function fixToRevert(v: Variant | null | undefined, n: number): boolean {
   return !!last && last.kind === "fix" && last.undo_of == null && last.version != null && (last.slides ?? []).includes(n);
 }
 
+/** Что вернёт «Вернуть как было» слайда `n` (подхваченный возврат на экране результата): последнее изменение варианта —
+ *  замена изображения на этом слайде — `picture` (ход в карточке «Изображение»); иначе — `fix` (панель замечаний). */
+export function slideEditKind(v: Variant | null | undefined, n: number): "fix" | "picture" {
+  const last = (v?.edits ?? []).filter((e) => e.undo_of == null).pop();
+  return last && last.kind === "picture" && (last.slides ?? []).includes(n) ? "picture" : "fix";
+}
+
 // ---- эскиз исправляемого слайда -------------------------------------------------------------------------------------
 
 /** Форма слайда по плану → эскиз раскадровки (ui/build/SlideSketch). */

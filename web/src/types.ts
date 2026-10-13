@@ -14,7 +14,8 @@ export type PatternKind =
 export type NoticeArea = "template" | "text" | "build" | "result" | "history";
 /** A status line: an error, a done action or a remark, and when it came (ms; the same text again restarts its fade). */
 export interface Notice { kind: "error" | "success" | "info"; text: string; at: number }
-export type JobKind = "analyze" | "generate" | "fix" | "edit" | "slide_fix" | "picture" | "other";
+/** `undo` — «Вернуть как было» (задача `edit` сервера с «верни как было»): экран результата отличает её от правки. */
+export type JobKind = "analyze" | "generate" | "fix" | "edit" | "undo" | "slide_fix" | "picture" | "other";
 export type JobStatus = "queued" | "running" | "done" | "failed";
 
 export interface BboxFrac { x: number; y: number; w: number; h: number }

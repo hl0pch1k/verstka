@@ -49,12 +49,13 @@ import {
 } from "./resultView";
 import { Stage } from "./Stage";
 import { StageMarks } from "./StageMarks";
-import type { Tone } from "./marks";
+import { slideRemarks, type Tone } from "./marks";
+import { slideEditKind } from "./fix";
 import { useCheckTitles } from "./useCheckTitles";
 import { useOpenSheet } from "./useOpenSheet";
 import { usePictureSelect } from "./usePictureSelect";
 import { useRemarksMode } from "./useRemarksMode";
-import { useSlideJob } from "./useSlideJob";
+import { useSlideJob, type SlideRun } from "./useSlideJob";
 import { WorkHead } from "./WorkHead";
 
 /** Сколько смена варианта ждёт декодирования его картинок, прежде чем смениться как есть. */
@@ -202,7 +203,14 @@ function ResultBody({ g }: { g: Generation }) {
 
   // ── работа над слайдом: исправление, изображение, «Вернуть как было» (одна задача на вариант за раз)
   const titleOf = useCheckTitles();
-  const job = useSlideJob(g.id, v.strategy);
+  // подхваченная работа над слайдом (начатая до возвращения сюда, помощником): замечания слайда — ряды карточки хода;
+  // что вернёт «Вернуть как было» — род последнего изменения слайда; видит ли человек её место — для строки неудачи
+  const look = useRef<(r: SlideRun) => boolean>(() => false);
+  const job = useSlideJob(g.id, v.strategy, {
+    remarksOf: (k) => slideRemarks(v, k, titleOf),
+    undoKind: (k) => slideEditKind(v, k),
+    looking: (r) => look.current(r),
+  });
   const now = useTick(job.busy);
   // другой слайд или вариант: строка неудачи или «слайд остался прежним» уходит вместе со слайдом (итог применённой
   // работы остаётся — у него «Вернуть»)
@@ -212,9 +220,9 @@ function ResultBody({ g }: { g: Generation }) {
   // поверх результата открыт слой или лист: клавиши (←/→, Home/End, Esc) — его
   const layered = !!(ui.sheet || ui.textLayer || ui.lightbox || ui.sect || ui.tplPreview || ui.tplDelete);
   const pic = usePictureSelect({ v, n, job, now, blocked: ui.remarks || rm.mounted, layered });
-  // задача над вариантом, которую этот экран не запускал (исправление, начатое до возвращения сюда, правка помощника),
-  // — дуга на миниатюре её слайда и без режима «Замечания»
-  const spinOnly = job.elsewhere?.slide ?? null;
+  look.current = (r) => ui.screen === "result" && !layered && r.strategy === v.strategy && r.slide === n && (r.kind === "fix" ? ui.remarks : !!pic.column?.shown);
+  // работа над слайдом (своя, подхваченная, чужая над вариантом) — дуга на миниатюре её слайда и без режима «Замечания»
+  const spinOnly = job.spin;
   const filmMarks = useMemo(() => rm.film ?? (spinOnly !== null ? { badges: NO_BADGES, out: false, spin: spinOnly } : null), [rm.film, spinOnly]);
   // клавиши ←/→ листают слайды, Home/End — к первому и последнему, пока поверх результата ничего не открыто
   useEffect(() => {

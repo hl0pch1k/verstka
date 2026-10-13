@@ -4,9 +4,12 @@
 // объект состояния); другой вариант той же презентации работает сам по себе — у каждого своя работа (`runs`).
 // Каждый запуск — новый номер `seq`; шаги прежнего запуска (поздний ответ, конец его задачи) новый не трогают.
 // Задача над вариантом, которую этот экран не запускал (начатая до возвращения на него, помощником, листом
-// «Подробнее»), видна по идущим задачам хранилища (`variantLiveJob`). Задачи, сеть и перечитывание — useSlideJob.
+// «Подробнее»), видна по идущим задачам хранилища (`variantLiveJob`); задача над слайдом (исправление, изображение,
+// правка помощника, «Вернуть как было» слайда) становится работой экрана (`adopt`, `adoptPlan`) — у неё та же карточка
+// хода, что у своей, и тот же итог у места действия. Задачи, сеть и перечитывание — useSlideJob.
+import { humanError } from "../../lib/errors";
 import type { ActiveJob } from "../../lib/jobState";
-import type { PictureChangeResult, SlideFixResult } from "../../types";
+import type { Job, JobKind, PictureChangeResult, SlideFixResult } from "../../types";
 import { VARIANT_BUSY } from "../details/variantWork";
 import type { Remark } from "./marks";
 
@@ -35,6 +38,9 @@ export interface SlideRun {
   picture: PictureChangeResult | null;
   /** Неудача запуска или задачи — строкой у места действия. */
   error: string | null;
+  /** Тихая строка итога у места действия (правка помощника, которую экран подхватил: что сделано или почему слайд остался
+   *  прежним); null — её нет. */
+  note: string | null;
   /** «Вернуть как было»: идёт или не получилось (строка `undoError`). */
   undo: "work" | "error" | null;
   undoError: string | null;
@@ -57,7 +63,10 @@ export type SlideJobAction =
   | { type: "accepted"; seq: number; jobId: string; at: number }
   /** Работа `seq` кончилась: итог, отказ при запуске или неудача задачи. `stale` — итог применён, а презентация не
    *  перечиталась. */
-  | { type: "settled"; seq: number; at: number; fix?: SlideFixResult; picture?: PictureChangeResult; error?: string | null; stale?: boolean }
+  | { type: "settled"; seq: number; at: number; fix?: SlideFixResult; picture?: PictureChangeResult; error?: string | null; stale?: boolean; note?: string | null }
+  /** Задача над слайдом, которую экран не запускал (`adoptPlan`), становится его работой: номер задачи, её часы, замечания
+   *  слайда для карточки хода; `undo` — это «Вернуть как было» (работа кончилась, идёт возврат). */
+  | { type: "adopt"; kind: SlideJobKind; strategy: string; slide: number; jobId: string; startedAt: number; requested: Remark[]; undo: boolean }
   /** «Вернуть как было» на слайде: у кончившейся работы того же рода на этом слайде — её; иначе (перезагрузка: итога
    *  на странице нет) — свой запуск, сразу кончившийся, с идущим возвратом. */
   | { type: "undo"; kind: SlideJobKind; strategy: string; slide: number; at: number }
@@ -91,7 +100,17 @@ export function slideJobNext(s: SlideJobState, a: SlideJobAction): SlideJobState
       const seq = s.seq + 1;
       return put(s, a.strategy, {
         seq, kind: a.kind, strategy: a.strategy, slide: a.slide, phase: "work", jobId: null, startedAt: a.at, endedAt: null, wish: a.wish.trim(),
-        action: a.action, requested: a.requested, fix: null, picture: null, error: null, undo: null, undoError: null, stale: null,
+        action: a.action, requested: a.requested, fix: null, picture: null, error: null, note: null, undo: null, undoError: null, stale: null,
+      }, seq);
+    }
+    case "adopt": {
+      const r = runOf(s, a.strategy);
+      if (slideBusy(r) || r?.jobId === a.jobId) return s;
+      const seq = s.seq + 1;
+      return put(s, a.strategy, {
+        seq, kind: a.kind, strategy: a.strategy, slide: a.slide, phase: a.undo ? "done" : "work", jobId: a.jobId, startedAt: a.startedAt,
+        endedAt: a.undo ? a.startedAt : null, wish: "", action: null, requested: a.requested, fix: null, picture: null, error: null, note: null,
+        undo: a.undo ? "work" : null, undoError: null, stale: null,
       }, seq);
     }
     case "accepted": {
@@ -103,7 +122,11 @@ export function slideJobNext(s: SlideJobState, a: SlideJobAction): SlideJobState
       const k = ownerOf(s, a.seq);
       if (k === null) return s;
       const r = s.runs[k]!;
-      return put(s, k, { ...r, phase: "done", endedAt: a.at, fix: a.fix ?? r.fix, picture: a.picture ?? r.picture, error: a.error ?? null, stale: a.stale ? "change" : null });
+      // подхваченная замена изображения узнаёт, что делали («Заменить» или «Убрать»), из итога
+      return put(s, k, {
+        ...r, phase: "done", endedAt: a.at, fix: a.fix ?? r.fix, picture: a.picture ?? r.picture, action: r.action ?? a.picture?.action ?? null,
+        error: a.error ?? null, note: a.note ?? null, stale: a.stale ? "change" : null,
+      });
     }
     case "undo": {
       const r = runOf(s, a.strategy);
@@ -112,7 +135,7 @@ export function slideJobNext(s: SlideJobState, a: SlideJobAction): SlideJobState
       const seq = s.seq + 1;
       return put(s, a.strategy, {
         seq, kind: a.kind, strategy: a.strategy, slide: a.slide, phase: "done", jobId: null, startedAt: a.at, endedAt: a.at, wish: "", action: null,
-        requested: [], fix: null, picture: null, error: null, undo: "work", undoError: null, stale: null,
+        requested: [], fix: null, picture: null, error: null, note: null, undo: "work", undoError: null, stale: null,
       }, seq);
     }
     case "undoFailed": {
@@ -130,7 +153,7 @@ export function slideJobNext(s: SlideJobState, a: SlideJobAction): SlideJobState
     case "clear": {
       const r = runOf(s, a.strategy);
       // строка «не обновилась» с «Обновить» остаётся: изменение сохранено, экран его ещё не показал
-      const changedNothing = !!r && r.phase === "done" && r.undo !== "work" && !r.fix?.applied && !r.picture?.applied && !r.stale;
+      const changedNothing = !!r && r.phase === "done" && r.undo !== "work" && !r.fix?.applied && !r.picture?.applied && !r.stale && !r.note;
       return changedNothing ? put(s, a.strategy, null) : s;
     }
   }
@@ -149,6 +172,7 @@ export function variantLiveJob(live: readonly ActiveJob[], gid: string, strategy
  *  меняет (дуга на его миниатюре; null — весь вариант). */
 export function liveWork(j: ActiveJob): { why: string; slide: number | null } {
   const slide = j.target && j.target.slide > 0 ? j.target.slide : null;
+  if (j.kind === "undo") return { why: UNDO_BUSY, slide };
   if (j.kind === "slide_fix" && slide) return { why: `Агент сейчас исправляет слайд ${slide}`, slide };
   if (j.kind === "picture" && slide) return { why: `Агент меняет изображение на слайде ${slide}`, slide };
   return { why: VARIANT_BUSY, slide };
@@ -161,6 +185,37 @@ export const staleOf = (run: SlideRun | null | undefined, staleNow: boolean): Sl
 /** Почему новая работа над вариантом сейчас не начнётся (подсказка выключенной кнопки); null — начнётся. */
 export function busyWhy(run: SlideRun | null | undefined): string | null {
   if (!run || !slideBusy(run)) return null;
-  if (run.undo === "work") return "Возвращаю как было — дождитесь конца";
+  if (run.undo === "work") return UNDO_BUSY;
   return run.kind === "fix" ? `Агент сейчас исправляет слайд ${run.slide}` : `Агент меняет изображение на слайде ${run.slide}`;
+}
+
+const UNDO_BUSY = "Возвращаю как было — дождитесь конца";
+
+/** Как экран подхватывает задачу над вариантом, которую не запускал (`j` — `variantLiveJob`), чтобы она выглядела как
+ *  своя: исправление слайда и правка помощника на слайде — работа `fix` (карточка хода R-fixing), изображение —
+ *  `picture` (ход в карточке «Изображение», R-picture), «Вернуть как было» слайда — возврат работы того рода, каким
+ *  было последнее изменение слайда (`undoKind`). Задача над всем вариантом («Исправить всё», возврат из «Агента») — не
+ *  слайда: её не подхватывают (кнопки выключены с её причиной). Своя работа над вариантом ещё идёт — тоже нет. */
+export function adoptPlan(j: ActiveJob | null, run: SlideRun | null, undoKind: (slide: number) => SlideJobKind): { kind: SlideJobKind; slide: number; undo: boolean; source: JobKind } | null {
+  if (!j || !j.target || j.target.slide < 1 || slideBusy(run) || run?.jobId === j.id) return null;
+  const slide = j.target.slide;
+  if (j.kind === "slide_fix" || j.kind === "edit") return { kind: "fix", slide, undo: false, source: j.kind };
+  if (j.kind === "picture") return { kind: "picture", slide, undo: false, source: j.kind };
+  if (j.kind === "undo") return { kind: undoKind(slide), slide, undo: true, source: j.kind };
+  return null;
+}
+
+/** Что не получилось у работы над слайдом — словами места действия. */
+export function jobWhat(kind: SlideJobKind, action: "generate" | "remove" | null, slide?: number): string {
+  const on = slide ? ` ${slide}` : "";
+  if (kind === "fix") return `исправить слайд${on}`;
+  return `${action === "remove" ? "убрать изображение" : "заменить изображение"}${slide ? ` на слайде ${slide}` : ""}`;
+}
+
+/** Работа над слайдом не удалась, а человек её места не видит (ушёл с экрана, режим «Замечания» выключен, другой слайд):
+ *  строка результата — «Не получилось исправить слайд 5: модель не ответила», без технического хвоста. */
+export function awayFailText(kind: SlideJobKind, action: "generate" | "remove" | null, slide: number, job: Pick<Job, "error" | "message">): string {
+  const why = humanError(job.error ?? job.message, "");
+  const lead = `Не получилось ${jobWhat(kind, action, slide)}`;
+  return why ? `${lead}: ${why[0].toLowerCase()}${why.slice(1).replace(/[.\s]+$/, "")}.` : `${lead}. Попробуйте ещё раз.`;
 }

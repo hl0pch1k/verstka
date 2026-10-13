@@ -127,7 +127,7 @@ export function useVariantWork(deps: VariantWorkDeps): VariantWorkApi {
     const why = await new Promise<string | null>((resolve) => {
       api.editVariant(gid, strategy, slide ? { message: "верни как было", slide } : { message: "верни как было" }).then((r) => {
         d.current.runJob(r.job_id, "Возвращаю как было", {
-          kind: "edit", area: "result", quiet: true, generation: gid, target: { generation: gid, strategy, slide: slide ?? 0 },
+          kind: "undo", area: "result", quiet: true, generation: gid, target: { generation: gid, strategy, slide: slide ?? 0 },
           onDone: async (job) => {
             const no = undoRefusal(job.result);
             if (no) return resolve(no);

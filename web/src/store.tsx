@@ -31,7 +31,8 @@ export type { Params } from "./ui/create/params";
  *  `area`: where a failure is told («Не получилось: …»); by default — by the job's kind (`jobArea`).
  *  `quiet`: the caller tells the failure itself (no «Не получилось: …» line from the store). */
 export interface RunJobOptions {
-  kind?: JobKind; items?: string[]; template?: string | null; onDone?: (job: Job) => void; onFailed?: (job: Job) => void;
+  /** `onDone` may return a promise (a re-read of the deck): watchers (`watchJob`) hear the end after it settles. */
+  kind?: JobKind; items?: string[]; template?: string | null; onDone?: (job: Job) => void | Promise<void>; onFailed?: (job: Job) => void;
   target?: { generation: string; strategy: string; slide: number }; quiet?: boolean; area?: NoticeArea;
   generation?: string | null; slides?: number | null;
   /** When the job began (ms): a build found again after a reload keeps its own clock. */
@@ -101,6 +102,13 @@ export interface AppState {
    *  per variant; `activeJob` shows only the newest). */
   liveJobs: ActiveJob[];
   runJob(jobId: string, label: string, opts?: RunJobOptions): void;
+  /** Конец идущей задачи для того, кто её не запускал (экран результата подхватил чужую работу над слайдом): `cb` слышит
+   *  его после того, как запустивший отработал своё (перечитал презентацию); `stale` — презентация задачи после этого
+   *  несвежая. Задача не идёт — ничего. Возвращает отписку. */
+  watchJob(jobId: string, cb: (job: Job, ok: boolean, stale: boolean) => void): () => void;
+  /** Работа над слайдом не удалась, а её места никто не показывает (экран, который её запустил, закрыт, и никто её не
+   *  подхватил): строка результата для открытой презентации `gid` — экран не молчит, когда человек вернётся. */
+  tellAway(jobId: string, gid: string, text: string): void;
   /** «Мои презентации»: идущая сборка (мета с `job_id`) — экран «Сборка» с её задачей; задачу уже ведут — экран просто
    *  возвращается к ней (и показывает её, даже если с тех пор подключились к другой). false — вести нечего (у меты нет
    *  задачи). Мета — полная (`GET /api/generations/{gid}`): «Собрать ещё раз» повторит её запрос. */
@@ -320,7 +328,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // (cancelLoad) or fails — the open deck stays and must show the change (reloadSkipped)
   const skippedReload = useRef<string | null>(null);
   const replayRef = useRef<(openId: string | null) => void>(() => {});
-  const [stale, setStale] = useState<StaleDeck | null>(null);
+  const [stale, setStaleState] = useState<StaleDeck | null>(null);
+  // the same for callbacks that run before the next render (a job's watchers hear the end right after the re-read)
+  const staleRef = useRef<StaleDeck | null>(null);
+  const setStale = useCallback((v: StaleDeck | null) => {
+    staleRef.current = v;
+    setStaleState(v);
+  }, []);
   const [refreshing, setRefreshing] = useState<string | null>(null);
   const jobSubs = useRef(new Map<string, () => void>());
 
@@ -429,6 +443,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [report, clearNotice]);
 
+  const watchers = useRef(new Map<string, Set<(job: Job, ok: boolean, stale: boolean) => void>>());
   const clearGeneration = useCallback(() => {
     genSeq.current += 1;
     askedGen.current = null;
@@ -439,7 +454,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setActiveStrategyState(null);
     setSelectedSlideState(1);
     storage.set(LS.generation, null);
-  }, []);
+  }, [setStale]);
 
   const refreshGenerations = useCallback(async () => {
     try {
@@ -532,7 +547,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } finally {
       if (seq === genSeq.current) setGenerationLoading(false);
     }
-  }, [report, clearNotice, clearGeneration, refreshGenerations]);
+  }, [report, clearNotice, clearGeneration, refreshGenerations, setStale]);
 
   const loadGeneration = useCallback(async (gid: string, opts?: { hold?: boolean; strategy?: string | null; area?: NoticeArea }) => {
     const load = fetchGeneration(gid, false, !!opts?.hold, opts?.area ?? "result", opts?.strategy ?? null);
@@ -630,6 +645,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const pending = gid && gid === ownRef.current ? pendingFor(asks.current.get(gid) ?? lastBuild.current, gid) : null;
       if (pending) storage.set(LS.build, JSON.stringify(pending));
     }
+    // who did not start the job hears its end after its owner (a deck re-read included): `stale` — the job's deck stayed
+    // unread
+    const deck = opts?.target?.generation ?? gid;
+    const tell = (job: Job, ok: boolean) => {
+      const set = watchers.current.get(jobId);
+      watchers.current.delete(jobId);
+      set?.forEach((cb) => cb(job, ok, !!deck && staleRef.current?.gid === deck));
+    };
     const stop = trackJob(jobId, {
       onEvent: (ev) => {
         if (ev.status === "done" || ev.status === "failed") return; // settled below, once the full job record is fetched
@@ -643,7 +666,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       },
       onDone: (job) => {
         settle({ status: "done", progress: 1, message: "Готово" });
-        opts?.onDone?.(job);
+        void Promise.resolve(opts?.onDone?.(job)).catch(() => {}).then(() => tell(job, true));
       },
       onFailed: (job) => {
         const reason = firstLine(job.error ?? job.message);
@@ -652,10 +675,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // helper open it stays too — the line is part of the screen, not a pop-up repeating the helper's message
         if (!opts?.quiet) notify(opts?.area ?? jobArea(opts?.kind ?? "other"), "error", `Не получилось: ${reason}`);
         opts?.onFailed?.(job);
+        tell(job, false);
       },
     });
     jobSubs.current.set(jobId, stop);
   }, [notify, syncBusyVariants, syncLive]);
+
+  const watchJob = useCallback((jobId: string, cb: (job: Job, ok: boolean, stale: boolean) => void) => {
+    if (!liveJobs.current.has(jobId)) return () => {};
+    let set = watchers.current.get(jobId);
+    if (!set) watchers.current.set(jobId, (set = new Set()));
+    set.add(cb);
+    return () => {
+      const cur = watchers.current.get(jobId);
+      cur?.delete(cb);
+      if (cur && !cur.size) watchers.current.delete(jobId);
+    };
+  }, []);
+  const tellAway = useCallback((jobId: string, gid: string, text: string) => {
+    if (watchers.current.get(jobId)?.size || latest.current.generation?.id !== gid) return;
+    notify("result", "error", text);
+  }, [notify]);
 
   // работа над вариантами: идёт ли задача над вариантом — по идущим задачам, ревизия — открытой презентации
   const variantLive = useCallback((key: string) => busyKeys(liveJobs.current.values()).includes(key), []);
@@ -945,13 +985,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AppState>(() => ({
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, cancelLoad, reloadIfOpen, stale, refreshDeck, refreshing, activeStrategy, setActiveStrategy, activeVariant,
-    selectedSlide, setSelectedSlide, ui, dispatch, activeJob, liveJobs: liveList, runJob, followDeck, adoptBuildMeta, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, ownBuild, building, buildEnd, showEnded, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, analyzing, startGeneration,
+    selectedSlide, setSelectedSlide, ui, dispatch, activeJob, liveJobs: liveList, runJob, watchJob, tellAway, followDeck, adoptBuildMeta, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, ownBuild, building, buildEnd, showEnded, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, analyzing, startGeneration,
     brief, setBrief, textIssue, setTextIssue, checkText, params, setParams,
     composerText, composerPreset, editText, takeComposerText, takeComposerPreset, improveSource, takeImproveSource,
   }), [
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, cancelLoad, reloadIfOpen, stale, refreshDeck, refreshing, activeStrategy, setActiveStrategy, activeVariant,
-    selectedSlide, setSelectedSlide, ui, activeJob, liveList, runJob, followDeck, adoptBuildMeta, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, ownBuild, building, buildEnd, showEnded, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, analyzing, startGeneration,
+    selectedSlide, setSelectedSlide, ui, activeJob, liveList, runJob, watchJob, tellAway, followDeck, adoptBuildMeta, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, ownBuild, building, buildEnd, showEnded, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, analyzing, startGeneration,
     brief, setBrief, textIssue, checkText, params, setParams,
     composerText, composerPreset, editText, takeComposerText, takeComposerPreset, improveSource, takeImproveSource,
   ]);
