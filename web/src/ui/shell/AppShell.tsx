@@ -4,10 +4,15 @@
 import type { CSSProperties } from "react";
 import { useApp } from "../../store";
 import { tplLabel } from "../../lib/plain";
-import { plural } from "../../lib/utils";
 import type { TemplateListItem } from "../../types";
+import { tplMeta } from "../create/ribbon";
+import { TemplateBody, TemplateHead, useTemplateUpload } from "../create/TemplatePlate";
 import { Deck } from "../deck/Deck";
 import type { StripData } from "../deck/Strip";
+import { Scrim } from "../layers/Scrim";
+import { TemplatesLayer } from "../layers/TemplatesLayer";
+import { TplDeleteDialog } from "../layers/TplDeleteDialog";
+import { TplPreviewLayer } from "../layers/TplPreviewLayer";
 import { Header } from "./Header";
 
 const ROOT: CSSProperties = {
@@ -18,21 +23,38 @@ const ROOT: CSSProperties = {
 /** Полоса 01: «VK Tech · 54 слайда · Play» — название шаблона, число его слайдов и шрифт. */
 function templateStrip(t: TemplateListItem | undefined): StripData | undefined {
   if (!t) return undefined;
-  const n = t.n_slides;
-  const meta = [n ? plural(n, "слайд", "слайда", "слайдов") : null, t.font].filter(Boolean).join(" · ");
-  return { title: tplLabel(t), meta: meta || undefined };
+  return { title: tplLabel(t), meta: tplMeta(t) || undefined };
 }
 
 export function AppShell() {
-  const { templates, templateId } = useApp();
+  const { templates, templateId, ui, dispatch } = useApp();
   const s1 = templateStrip(templates.find((t) => t.template_id === templateId));
+  // загрузка своего шаблона — одна на плиту 01 и раздел «Шаблоны»
+  const upload = useTemplateUpload();
+  // «Загрузить свой» в разделе: раздел уезжает, раскрывается шаг 01 и над ним — выбор файла (V2 `tpGalUp`)
+  const uploadFromGallery = () => {
+    if (ui.screen !== "create") dispatch({ type: "go", screen: "create" });
+    dispatch({ type: "sect", sect: null });
+    dispatch({ type: "open", step: "tpl" });
+    upload.pick();
+  };
+  const layers = (
+    <>
+      {/* пока раздел открыт, видимая полоса колоды над слоем закрывает его */}
+      <Scrim open={!!ui.sect} onClose={() => dispatch({ type: "sect", sect: null })}
+        label={ui.sect === "hist" ? "Закрыть «Мои презентации»" : "Закрыть «Шаблоны»"} />
+      <TemplatesLayer fresh={upload.fresh} onUpload={uploadFromGallery} />
+      <TplPreviewLayer />
+      <TplDeleteDialog />
+    </>
+  );
   return (
     <div className="p2-root" style={ROOT}>
       <div style={{ width: "100%", maxWidth: 1392, margin: "0 auto" }}>
         <Header />
         {/* место помощника закрыто (колонка 0); плиту помощника и сужение колоды добавляет его задача */}
         <div className="hp-wrap hp-closed">
-          <Deck s1={s1} />
+          <Deck s1={s1} h1={<TemplateHead upload={upload} />} p1={<TemplateBody upload={upload} />} layers={layers} />
           <div className="hp-hcell" />
         </div>
       </div>

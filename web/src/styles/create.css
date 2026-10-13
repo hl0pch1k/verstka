@@ -1,0 +1,83 @@
+/* Шаг 01 «Шаблон» (модуль tp): лента обложек C-templates, файл над шагом C-upload, разбор C-analyzing. Дословно из
+ * boards/V2.dc.html (<helmet><style>, блок «Шаблоны (модуль tp)»): классы tt-, up-, an-, tp-zone, tp-out, tp-fill, tp-wf.
+ * Стили слоёв, «Слайдов шаблона» (pv-) и диалога удаления (dl-) — в layers.css. */
+/* ── Шаблоны (модуль tp) · C-templates: плитка обложки + таблетка «Слайды» (наведение, фокус, всегда на тач-экранах) */
+.tt-tile{position:relative}
+.tt-tile:hover .p2-card,.tt-hot .p2-card{transform:translateY(-2px)}
+.tt-tile:hover .p2-cover::after,.tt-hot .p2-cover::after{opacity:1}
+.tt-tile .p2-card:active{transform:scale(.98)}
+.tt-eye{position:absolute;top:102px;right:8px;display:inline-flex;align-items:center;gap:8px;height:32px;padding:0 12px;border:0;border-radius:999px;background:#FFFFFF;color:#0B1220;font-size:13px;font-weight:700;line-height:20px;white-space:nowrap;cursor:pointer;box-shadow:0 1px 2px rgba(11,18,32,.06),0 4px 16px 0 rgba(11,18,32,.08);opacity:0;pointer-events:none;transition:opacity 160ms var(--ease),transform 160ms var(--ease)}
+.tt-tile:hover .tt-eye,.tt-tile:focus-within .tt-eye,.tt-hot .tt-eye{opacity:1;pointer-events:auto;transform:translateY(-2px)}
+.tt-tile .tt-eye:active{transform:translateY(-2px) scale(.98)}
+@media (hover: none){.tt-eye{opacity:1;pointer-events:auto}}
+/* служебные плитки: «Все шаблоны», «Загрузить свой» — иконка-слои + подпись в 2 строки (высота 40 у обеих: знаки на одной линии) */
+.tt-act{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;background:#F3F4F1;box-shadow:inset 0 0 0 1px rgba(11,18,32,.08)}
+.tt-note{display:block;width:100%;height:40px;padding:0 16px;font-size:13px;font-weight:600;line-height:20px;color:#5A6272;text-align:center;white-space:nowrap}
+.tt-note span{display:block;overflow:hidden;text-overflow:ellipsis}
+.tt-cap{display:flex;align-items:baseline;justify-content:space-between;gap:8px;height:20px;margin-top:8px}
+.tt-name{min-width:0;font-size:14px;font-weight:700;line-height:20px;color:#0B1220;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tt-meta{flex:none;font-size:12px;font-weight:600;line-height:20px;color:#5A6272;white-space:nowrap}
+.p2-lic-f svg{display:block}
+.p2-lic-w .p2-lic-f{background:#F3F4F1}
+/* C-upload: файл над шагом — пунктир по телу плиты 01, белая подложка (только opacity), подсказка по центру */
+@keyframes up-fade{from{opacity:0}to{opacity:1}}
+.up-zone{position:absolute;inset:-16px;z-index:2;border-radius:24px;animation:up-fade 240ms var(--ease) backwards}
+.up-veil{position:absolute;inset:0;border-radius:24px;background:#FFFFFF;opacity:.88}
+.up-line{position:absolute;inset:0;border-radius:24px;border:2px dashed #2563EB}
+.up-msg{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;text-align:center}
+/* C-analyzing: плитки ленты (как в C-templates) */
+.an-tile{position:relative}
+.an-tile:hover .p2-card{transform:translateY(-2px)}
+.an-tile:hover .p2-cover::after{opacity:1}
+.an-tile .p2-card:active{transform:scale(.98)}
+.an-eye{position:absolute;top:102px;right:8px;display:inline-flex;align-items:center;gap:8px;height:32px;padding:0 12px;border:0;border-radius:999px;background:#FFFFFF;color:#0B1220;font-size:13px;font-weight:700;line-height:20px;white-space:nowrap;cursor:pointer;box-shadow:0 1px 2px rgba(11,18,32,.06),0 4px 16px 0 rgba(11,18,32,.08);opacity:0;pointer-events:none;transition:opacity 160ms var(--ease),transform 160ms var(--ease)}
+.an-tile:hover .an-eye,.an-tile:focus-within .an-eye{opacity:1;pointer-events:auto;transform:translateY(-2px)}
+@media (hover: none){.an-eye{opacity:1;pointer-events:auto}}
+.an-act{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;background:#F3F4F1;box-shadow:inset 0 0 0 1px rgba(11,18,32,.08)}
+.an-note{display:block;width:100%;height:40px;padding:0 16px;font-size:13px;font-weight:600;line-height:20px;color:#5A6272;text-align:center;white-space:nowrap}
+.an-note span{display:block;overflow:hidden;text-overflow:ellipsis}
+.an-cap{display:flex;align-items:baseline;justify-content:space-between;gap:8px;height:20px;margin-top:8px}
+.an-name{min-width:0;font-size:14px;font-weight:700;line-height:20px;color:#0B1220;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.an-meta{flex:none;font-size:12px;font-weight:600;line-height:20px;color:#5A6272;white-space:nowrap}
+/* C-analyzing: скелетон новой обложки — только opacity-пульс .6↔1 за 1200 мс */
+@keyframes an-pulse{0%{opacity:1}50%{opacity:.6}100%{opacity:1}}
+.an-sk{position:relative;display:block;height:142px;border-radius:16px;overflow:hidden}
+.an-pulse{position:absolute;inset:0;background:#F3F4F1;animation:an-pulse 1200ms var(--ease) infinite}
+.an-skin{position:relative;display:flex;flex-direction:column;justify-content:center;height:100%;padding:0 24px}
+.an-line{display:block;height:12px;border-radius:999px;background:#F3F4F1;animation:an-pulse 1200ms var(--ease) infinite}
+.an-track{position:relative;display:block;height:4px;margin-top:12px;border-radius:999px;background:#FFFFFF;overflow:hidden}
+.an-fill{position:absolute;inset:0;border-radius:999px;background:#2563EB;transform-origin:left center}
+/* C-analyzing: коробка «Разбираю шаблон» — шаги разбора */
+.an-box{display:flex;flex-direction:column;justify-content:space-between;align-self:start;height:328px;min-width:0;padding:24px;border-radius:24px;background:#F3F4F1}
+.an-steps{margin:0;padding:0;list-style:none}
+.an-step{position:relative;display:grid;grid-template-columns:20px minmax(0,1fr) auto;align-items:center;column-gap:12px;height:28px}
+.an-step::before{content:"";position:absolute;left:9px;top:25px;width:2px;height:6px;border-radius:999px;background:rgba(11,18,32,.14)}
+.an-done::before{background:#2563EB}
+.an-last::before{display:none}
+.an-dot{display:flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:999px;box-shadow:inset 0 0 0 2px rgba(11,18,32,.14);color:#FFFFFF}
+.an-dot svg{opacity:0}
+.an-done .an-dot{background:#2563EB;box-shadow:none}
+.an-done .an-dot svg{opacity:1}
+.an-cur .an-dot{box-shadow:inset 0 0 0 2px #2563EB}
+.an-txt{min-width:0;font-size:14px;font-weight:500;line-height:20px;color:#0B1220;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.an-txt b{font-weight:700}
+.an-cur .an-txt{font-weight:700}
+.an-pend .an-txt{color:#5A6272}
+.an-now{font-size:13px;font-weight:600;line-height:20px;color:#2563EB}
+/* живые переходы «Шаблонов»: файл над шагом проявляется и гаснет 240 мс (подсказка — 360 мс через 80 мс); разбор гаснет 240 мс,
+   затем лента проявляется лесенкой (p2-in); полоса разбора едет 520 мс; галочка шага проявляется 240 мс */
+.tp-zone{cursor:pointer;opacity:0;visibility:hidden;pointer-events:none;transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
+.tp-zone-on{opacity:1;visibility:visible;pointer-events:auto;transition:opacity 240ms var(--ease)}
+.tp-zone .up-msg{opacity:0;transform:scale(.98);transition:opacity 240ms var(--ease),transform 240ms var(--ease)}
+.tp-zone-on .up-msg{opacity:1;transform:scale(1);transition:opacity 360ms var(--ease) 80ms,transform 360ms var(--ease) 80ms}
+.tp-out{opacity:0 !important;transform:none !important;transition:opacity 240ms var(--ease) !important}
+.tp-fill{transition:transform 520ms var(--ease)}
+.an-step .an-dot svg{transition:opacity 240ms var(--ease)}
+/* обложка своего шаблона, пока нет картинки: схема титульного слайда (как макеты в «Почему так»), акцент — цвет шаблона */
+.tp-wf{position:relative;display:block;width:100%;height:142px;border-radius:16px;background:#F3F4F1;box-shadow:inset 0 0 0 1px rgba(11,18,32,.08);overflow:hidden}
+.tp-wf-r{height:auto;aspect-ratio:16 / 9}
+.tp-wf-s{height:auto;aspect-ratio:16 / 9;border-radius:12px}
+.tp-wf-m{flex:none;width:80px;height:45px;border-radius:12px}
+.tp-wf-d{flex:none;width:112px;height:auto;aspect-ratio:16 / 9;border-radius:12px}
+.tp-b{position:absolute;display:block;border-radius:999px;background:rgba(11,18,32,.14)}
+.tp-dk{background:rgba(11,18,32,.4)}

@@ -1,0 +1,52 @@
+/* Слои колоды (Layer, Scrim) и разделы над ней. Дословно из boards/V2.dc.html: общий слой p2-lay (уезжает за 520 мс
+ * непрозрачным, лесенка p2-ls по --d), полоса-подложка p2-scrim, раздел «Шаблоны» (ga-, C-gallery), «Слайды шаблона»
+ * (pv-, C-tplpreview), «Удалить шаблон?» (dl-, tp-dls/tp-dlw, C-tpldelete). */
+.ga-rbw{background:#FFFFFF}
+.ga-box{height:532px;margin-top:16px;border-radius:24px;background:#FFFFFF;overflow:hidden}
+.ga-scroll{height:100%;overflow:auto;padding:24px}
+.ga-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:24px 16px}
+.ga-tile{position:relative}
+.ga-tile:hover .p2-card{transform:translateY(-2px)}
+.ga-tile:hover .p2-cover::after{opacity:1}
+.ga-tile .p2-card:active{transform:scale(.98)}
+.ga-eye{position:absolute;right:8px;bottom:56px;display:inline-flex;align-items:center;gap:8px;height:32px;padding:0 12px;border:0;border-radius:999px;background:#FFFFFF;color:#0B1220;font-size:13px;font-weight:700;line-height:20px;white-space:nowrap;cursor:pointer;box-shadow:0 1px 2px rgba(11,18,32,.06),0 4px 16px 0 rgba(11,18,32,.08);opacity:0;pointer-events:none;transition:opacity 160ms var(--ease),transform 160ms var(--ease)}
+.ga-tile:hover .ga-eye,.ga-tile:focus-within .ga-eye{opacity:1;pointer-events:auto;transform:translateY(-2px)}
+@media (hover: none){.ga-eye{opacity:1;pointer-events:auto}}
+.ga-act{display:flex;align-items:center;justify-content:center;background:#F3F4F1;box-shadow:inset 0 0 0 1px rgba(11,18,32,.08)}
+.ga-cap{display:flex;flex-direction:column;margin-top:8px}
+.ga-name{font-size:14px;font-weight:700;line-height:20px;color:#0B1220;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ga-meta{font-size:13px;font-weight:500;line-height:20px;color:#5A6272;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.p2-lay-off{visibility:hidden;transition:transform 520ms var(--ease),visibility 0s linear 520ms}
+.p2-lay .p2-ls{opacity:1;transform:none;transition:opacity 360ms var(--ease) var(--d,0ms),transform 360ms var(--ease) var(--d,0ms)}
+.p2-lay-off .p2-ls{opacity:0;transform:translateY(12px);transition:opacity 0s linear 520ms,transform 0s linear 520ms}
+.p2-scrim{padding:0;border:0;background:none;cursor:pointer}
+@media (max-width: 900px){.p2-lay,.p2-scrim{display:none !important}}
+/* C-tplpreview: слой «Слайды шаблона» — круглые кнопки белые на голубом слое */
+.pv-rbw{background:#FFFFFF}
+.pv-edit{width:32px;height:32px;flex:none}
+.pv-dot{display:block;width:16px;height:16px;border-radius:999px;box-shadow:inset 0 0 0 1px rgba(11,18,32,.14)}
+.pv-name{width:400px;height:40px;padding:0 16px;border:0;border-radius:999px;background:#FFFFFF;box-shadow:0 0 0 2px #2563EB;font-family:inherit;font-size:20px;font-weight:700;line-height:28px;color:#0B1220}
+.pv-name:focus{outline:none}
+/* белая коробка: сетка миниатюр прокручивается внутри, ряд действий прижат к низу */
+.pv-box{display:flex;flex-direction:column;height:532px;margin-top:16px;border-radius:24px;background:#FFFFFF;overflow:hidden}
+.pv-scroll{flex:1;min-height:0;overflow:auto;padding:24px}
+.pv-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin:0;padding:0;list-style:none}
+.pv-n{display:block;height:20px;margin-top:8px;font-family:'Unbounded','Manrope',sans-serif;font-size:12px;font-weight:600;line-height:20px;color:#5A6272}
+.pv-foot{display:flex;align-items:center;justify-content:space-between;gap:16px;flex:none;height:56px;margin:16px 24px 24px}
+.pv-cta{height:48px;padding:0 24px;gap:8px;font-size:15px}
+.pv-del{margin-left:-16px;color:#DC2626}
+.pv-del:hover{background:#FEF2F2}
+/* C-tpldelete: пустая рамка слайда без картинки; диалог — затемнение колоды (только opacity) + белая плита 560 по центру, поля 32 */
+.dl-frame{display:block;width:100%;aspect-ratio:16 / 9;border-radius:12px;background:#F3F4F1;box-shadow:0 0 0 1px rgba(11,18,32,.08)}
+@keyframes dl-fade{from{opacity:0}to{opacity:1}}
+.dl-scrim{position:absolute;inset:0;z-index:5;background:rgba(11,18,32,.4);animation:dl-fade 240ms var(--ease) backwards}
+.dl-wrap{position:absolute;inset:0;z-index:6;display:flex;align-items:center;justify-content:center;pointer-events:none}
+.dl-dlg{width:560px;padding:32px;border-radius:40px;background:#FFFFFF;color:#0B1220;box-shadow:0 16px 48px 0 rgba(11,18,32,.16);pointer-events:auto}
+/* «Удалить шаблон?» над слоем «Слайды шаблона»: затемнение 240 мс, плита — pop 360 мс через 40 мс; уходят за 240 мс */
+.dl-scrim.tp-dls{z-index:9;opacity:0;visibility:hidden;pointer-events:none;transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
+.dl-scrim.tp-dls.tp-dl-on{opacity:1;visibility:visible;pointer-events:auto;transition:opacity 240ms var(--ease)}
+.dl-wrap.tp-dlw{z-index:10;visibility:hidden;transition:visibility 0s linear 240ms}
+.dl-wrap.tp-dlw.tp-dl-on{visibility:visible;transition:none}
+.tp-dlw .dl-dlg{opacity:0;transform:scale(.98);transition:opacity 240ms var(--ease),transform 240ms var(--ease)}
+.tp-dlw.tp-dl-on .dl-dlg{opacity:1;transform:scale(1);transition:opacity 360ms var(--ease) 40ms,transform 360ms var(--ease) 40ms}
+@media (max-width: 900px){.tp-dls,.tp-dlw{display:none !important}}
