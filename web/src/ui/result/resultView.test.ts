@@ -51,12 +51,14 @@ test("число слайдов варианта: картинки, иначе �
   assert.equal(slidesOf(variant()), 0);
 });
 
-test("кольцо: дуга — доля оценки от окружности r = 19 (119.38)", () => {
+test("кольцо: дуга — доля оценки от окружности r = 19 (119.38); оценка 0 — дуги нет (не точка круглого конца)", () => {
   assert.equal(ringDash(89), "106.25 119.38");
   assert.equal(ringDash(100), "119.38 119.38");
   assert.equal(ringDash(140), "119.38 119.38");
-  assert.equal(ringDash(-5), "0.00 119.38");
-  assert.equal(ringDash(Number.NaN), "0.00 119.38");
+  assert.equal(ringDash(1), "1.19 119.38");
+  assert.equal(ringDash(0), null);
+  assert.equal(ringDash(-5), null);
+  assert.equal(ringDash(Number.NaN), null);
 });
 
 test("оценка: живой отчёт проверки сильнее меты; у каркаса без текста оценки нет", () => {

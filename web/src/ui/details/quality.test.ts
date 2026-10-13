@@ -63,6 +63,13 @@ test("сводка: «Есть что поправить», ошибки, пре
   assert.equal(clean.nModel, "1 замечание модели");
 });
 
+test("сводка: оценка 0 — у кольца нет дуги (нулевая дуга с круглым концом рисуется точкой)", () => {
+  const counts = auditCounts(audit(ISSUES))!;
+  assert.equal(qualitySummary(0, counts).dash, null);
+  assert.equal(qualitySummary(0.4, counts).dash, null);
+  assert.equal(qualitySummary(1, counts).dash, "2.5 251.3");
+});
+
 test("чипы: Все, Ошибки, Предупреждения, Исправимые — счёт по списку; выбранный отмечен", () => {
   const chips = chipsOf(splitIssues(ISSUES).main, "warn");
   assert.deepEqual(chips.map((c) => [c.key, c.label, c.n, c.on]), [

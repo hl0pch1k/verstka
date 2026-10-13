@@ -39,14 +39,15 @@ export function splitIssues(issues: Issue[]): { main: Issue[]; minor: Issue[] } 
 /** Длина окружности кольца 88 (r = 40): 2π·40 ≈ 251.3. */
 const RING = 251.3;
 
-export interface QSummary { score: number; dash: string; head: string; nErr: string; nWarn: string; nModel: string; hasErr: boolean }
+export interface QSummary { score: number; dash: string | null; head: string; nErr: string; nWarn: string; nModel: string; hasErr: boolean }
 
 /** Сводка по числам отчёта (`auditCounts` — те же, что у карточки результата и «Итога проверки» во «Файлах»). */
 export function qualitySummary(score: number, c: AuditCounts): QSummary {
   const s = Math.round(Math.max(0, Math.min(100, score)));
   return {
     score: s,
-    dash: `${((s / 100) * RING).toFixed(1)} ${RING}`,
+    // оценка 0 — дуги нет: штрих нулевой длины с круглым концом рисуется точкой на дорожке
+    dash: s > 0 ? `${((s / 100) * RING).toFixed(1)} ${RING}` : null,
     head: c.errors + c.warnings > 0 ? "Есть что поправить" : "Ошибок и предупреждений нет",
     nErr: plural(c.errors, "ошибка", "ошибки", "ошибок"),
     nWarn: plural(c.warnings, "предупреждение", "предупреждения", "предупреждений"),

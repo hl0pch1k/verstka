@@ -109,7 +109,7 @@ export function QualityTab({ g, v }: { g: Generation; v: Variant }) {
         <div className="dq-ring" role="img" aria-label={`Оценка качества ${sum.score} из 100`}>
           <svg width="88" height="88" viewBox="0 0 88 88" aria-hidden="true">
             <circle cx="44" cy="44" r="40" fill="none" stroke="#F3F4F1" strokeWidth="8" />
-            <circle cx="44" cy="44" r="40" fill="none" stroke="#2563EB" strokeWidth="8" strokeLinecap="round" strokeDasharray={sum.dash} />
+            {sum.dash && <circle cx="44" cy="44" r="40" fill="none" stroke="#2563EB" strokeWidth="8" strokeLinecap="round" strokeDasharray={sum.dash} />}
           </svg>
           <span className="dq-ring-v" aria-hidden="true">
             <span style={{ fontFamily: "'Unbounded','Manrope',sans-serif", fontWeight: 700, fontSize: 28, lineHeight: "32px", letterSpacing: "-0.04em", color: "#0B1220" }}>{sum.score}</span>

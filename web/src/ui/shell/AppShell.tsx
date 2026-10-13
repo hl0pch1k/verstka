@@ -4,11 +4,11 @@
 // (`hp-open hp-nar`: сетка 520 мс, плита въезжает), и плиты и слои перестраиваются по её целевой ширине (ui/deck/fit,
 // useDeckFit): содержимое — перекрёстным затуханием своей обёртки (usePlateFit у плит, useLayer у слоёв), плиты и
 // названия шагов не гаснут.
-import { useMemo, type CSSProperties } from "react";
+import { useContext, useMemo, type CSSProperties } from "react";
 import { useApp } from "../../store";
 import { tplLabel } from "../../lib/plain";
 import type { Generation, TemplateListItem, Variant } from "../../types";
-import { BuildPlate } from "../build/BuildPlate";
+import { BuildPlate, BuildReplay } from "../build/BuildPlate";
 import { buildStripText } from "../build/buildView";
 import { buildTopic } from "../build/resume";
 import { ImproveStrip, useModelOn } from "../create/ImproveNote";
@@ -78,7 +78,10 @@ export function AppShell() {
   // полосы 01/02 на сборке — шаблон и тема самой сборки (её запрос или мета её презентации), не черновик поля:
   // подключились к чужой сборке из «Мои презентации» — полосы о ней, а текст в поле «Создать» остаётся своим
   const build = ui.screen === "build";
-  const topic = useMemo(() => (build ? buildTopic(buildJob, buildAsk, [generation, ...generations]) : null), [build, buildJob, buildAsk, generation, generations]);
+  // реплей записанной сборки (dev/StageReplay) показывает свою сборку — и полосы 01/02 о ней, как у живой (B-sketch)
+  const replay = useContext(BuildReplay);
+  const shownJob = replay ? replay.job : buildJob;
+  const topic = useMemo(() => (build ? buildTopic(shownJob, buildAsk, [generation, ...generations]) : null), [build, shownJob, buildAsk, generation, generations]);
   const s1 = result ? (open ? tplStrip(open.template_id, open.template_file) : undefined)
     : build ? (topic ? tplStrip(topic.template, topic.templateFile) : undefined)
     : templateStrip(templates.find((t) => t.template_id === templateId));
