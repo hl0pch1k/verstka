@@ -165,12 +165,13 @@ export function followBuild(t: BuildTarget, d: GenerationDeps, ended?: () => voi
       if (!here) return ended?.();
       const g = await d.fetchGeneration(t.generation);
       // no «Презентация готова» line: the result opens by itself — if the person is still on the build's screen (left it
-      // while the deck loaded — «Создать» tells it is ready)
+      // while the deck loaded — «Создать» tells it is ready). The deck did not load: on the build screen its line and
+      // «Открыть ещё раз» (BuildPlate); left meanwhile — «Сборка готова · Открыть» on «Создать»
       if (g && d.watching(t.jobId)) {
         d.dispatch({ type: "go", screen: "result" });
         d.selectBuilt(g.template_id);
         d.pushMessage("assistant", describeGeneration(g, d.titleOf));
-      } else if (g) d.endedAway(t.generation, t.jobId, true);
+      } else if (!d.watching(t.jobId)) d.endedAway(t.generation, t.jobId, true);
       ended?.();
     },
     onFailed: (job) => {

@@ -99,3 +99,16 @@ test("«Улучшить готовую»: прочитанная презент
   assert.equal(improveArrives("result"), "wait");
   assert.equal(improveArrives("build"), "wait");
 });
+
+test("сборка кончилась, а её презентация не открылась: на её экране — строка и «Открыть ещё раз», ушли — строка на «Создать» (B-M2)", async () => {
+  const here = fakeDeps({ here: () => true, deck: null });
+  followBuild(target, here.d);
+  await here.done();
+  assert.deepEqual(here.log, ["list", "load:g1"]); // экран «Сборка» стоит, его строку пишет загрузка (область «Сборка»)
+  let on = true;
+  const away = fakeDeps({ here: () => on, deck: null });
+  away.d.fetchGeneration = async () => { on = false; return null; };
+  followBuild(target, away.d);
+  await away.done();
+  assert.deepEqual(away.log, ["list", "away:g1:j1:done"]);
+});

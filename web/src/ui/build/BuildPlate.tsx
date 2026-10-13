@@ -4,7 +4,8 @@
 // Содержимое входит лесенкой p2-in (40/80/120 мс, карточки по 40 мс, роли с 160 мс), уходит прозрачностью 240 мс
 // (bd-out): со «Сборки» на «Создать» или под поднимающуюся плиту результата. «Собрать ещё раз»: содержимое гаснет,
 // уходит тот же запрос, и плита собирается заново лесенкой, когда сервер ответил (новая сборка или новая строка
-// неудачи).
+// неудачи). Сборка кончилась, а её презентация не открылась (сбой связи): строка области «Сборка» рядом с полосой хода и
+// «Открыть ещё раз». «Вернуться к тексту» у чужой сборки (другая вкладка, помощник) — её собственный текст и параметры.
 // Помощник сужает колоду: содержимое стоит в ширине колоды на конец хода (fit.ts `plateWidth`) и меняет раскладку
 // (колонка агента 416 → 320/288 под строкой фазы, кегль фазы, колонки раскадровки, переносы) перекрёстным затуханием
 // своей обёртки (usePlateFit, `.p2-fx[data-fit]` — build.css); плита и «03» не гаснут.
@@ -16,7 +17,10 @@ import { cls } from "../kit/cls";
 import { usePresence } from "../kit/usePresence";
 import { plateWidth } from "../deck/fit";
 import { DeckFitContext, useDeckLayoutNow, usePlateFit } from "../deck/useDeckFit";
+import { humanError } from "../../lib/errors";
+import { ErrorLine } from "../kit/ErrorLine";
 import { buildView } from "./buildView";
+import { backToText } from "./resume";
 import { Failed } from "./Failed";
 import { Phases } from "./Phases";
 import { Roles } from "./Roles";
@@ -40,7 +44,10 @@ export function BuildPlate() {
 }
 
 function BuildContent({ job, leaving }: { job: ActiveJob | null; leaving: boolean }) {
-  const { strategies, strategyTitle, templates, manifest, notices, retryBuild: storeRetry, dispatch } = useApp();
+  const {
+    strategies, strategyTitle, templates, manifest, notices, retryBuild: storeRetry, dispatch, buildAsk, ownBuild, editText, loadGeneration, clearNotice,
+    selectTemplate, ui,
+  } = useApp();
   const replay = useContext(BuildReplay);
   const retryBuild = replay?.retry ?? storeRetry;
   const live = !!job && (job.status === "queued" || job.status === "running");
@@ -112,6 +119,31 @@ function BuildContent({ job, leaving }: { job: ActiveJob | null; leaving: boolea
 
   const failed = view.failed;
   const queued = view.phase === "queued";
+  // сборка кончилась, а её презентация не открылась (строка области «Сборка» после конца): причина и «Открыть ещё раз»
+  const ended = j.endedAt ?? null;
+  const openErr = j.status === "done" && !replay && note && note.kind === "error" && ended !== null && note.at >= ended
+    ? humanError(note.text, "Не удалось открыть презентацию") : null;
+  const [opening, setOpening] = useState(false);
+  const screen = useRef(ui.screen);
+  screen.current = ui.screen;
+  const openAgain = () => {
+    const gid = j.generation;
+    if (!gid || opening) return;
+    setOpening(true);
+    clearNotice("build");
+    void loadGeneration(gid, { area: "build" }).then((g) => {
+      setOpening(false);
+      if (!g || screen.current !== "build") return;
+      dispatch({ type: "go", screen: "result" });
+      if (g.template_id && templates.some((t) => t.template_id === g.template_id)) selectTemplate(g.template_id);
+    });
+  };
+  // «Вернуться к тексту»: своя сборка — к черновику поля; чужая (другая вкладка, помощник) — к её тексту и параметрам
+  const back = () => {
+    const own = replay ? null : backToText(buildAsk, ownBuild, j.generation);
+    if (own) editText(own.brief, own.preset);
+    else dispatch({ type: "go", screen: "create" });
+  };
   const nowRole = view.roles.find((r) => r.status === "now");
   const vt = failed ? `остановилась на шаге ${view.step.replace(/^ошибка на шаге /, "")}` : queued ? "в очереди" : view.phase === "done" ? "готово"
     : `${view.step}${nowRole ? ` — ${nowRole.title.toLowerCase()}` : ""}`;
@@ -142,13 +174,19 @@ function BuildContent({ job, leaving }: { job: ActiveJob | null; leaving: boolea
             <span className={cls("p2-bar bd-bar", !failed && "bd-hide")} aria-hidden="true"
               style={{ position: "absolute", inset: 0, borderRadius: 999, background: "rgba(255,255,255,.24)", transformOrigin: "left center", transform: `scaleX(${prog})` }} />
           </div>
+          {openErr && (
+            <div className="p2-in pp-busy" style={{ flex: "0 1 auto", animationDelay: "0ms" }}>
+              <ErrorLine text={openErr} lines={1} style={{ color: "#F87171" }} />
+              <button type="button" className="pp-go" onClick={openAgain} aria-busy={opening || undefined}>Открыть ещё раз</button>
+            </div>
+          )}
         </div>
         <div style={{ position: "relative", display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
           <div className={failed ? "p2-off" : "p2-on"} style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
             <Storyboard view={view} segs={segs} onPick={setPicked} aspect={aspect} swapping={pf.phase !== null} />
           </div>
           {failed && (
-            <Failed text={failed.text} onRetry={onRetry} onBack={() => dispatch({ type: "go", screen: "create" })} />
+            <Failed text={failed.text} onRetry={onRetry} onBack={back} />
           )}
         </div>
       </div>

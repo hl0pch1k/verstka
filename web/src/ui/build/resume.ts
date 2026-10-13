@@ -27,6 +27,34 @@ export function pendingFor(last: PendingBuild | null, gid: string | null | undef
   return last && gid && last.gid === gid ? { gid, request: last.request, expected: last.expected } : null;
 }
 
+/** Запрос сборки `gid` среди известных странице (`known`: свой, из LS.build, собранные из меты при подключении) —
+ *  только именно её; null — его нет: «Собрать ещё раз» не повторит запрос другой сборки. */
+export function askFor(gid: string | null | undefined, known: (PendingBuild | null | undefined)[]): PendingBuild | null {
+  if (!gid) return null;
+  return known.find((p): p is PendingBuild => !!p && p.gid === gid) ?? null;
+}
+
+/** «Вернуться к тексту» на экране «Сборка» (B-failed): у своей сборки страницы (`own`) — черновик поля «Создать»; у
+ *  чужой, к которой подключились (другая вкладка, помощник), — её собственный текст и параметры (`ask` — запрос
+ *  показанной сборки `shown`). null — к черновику: своя сборка или запрос показанной неизвестен. */
+export function backToText(ask: PendingBuild | null, own: string | null, shown: string | null | undefined): { brief: string; preset: AskPreset } | null {
+  if (!ask || !shown || ask.gid !== shown || ask.gid === own || !ask.request.brief.trim()) return null;
+  const r = ask.request;
+  return {
+    brief: r.brief,
+    preset: {
+      audience: r.audience ?? null, purpose: r.purpose ?? null, slides: r.slides ?? null, useModels: r.use_models, eyes: r.eyes ?? null,
+      pictures: r.pictures ?? null, strategies: r.strategies, improvedFrom: r.improved_from ?? null,
+      ...(r.eyes === undefined || r.eyes === null ? { auditModels: r.audit_models } : {}),
+    },
+  };
+}
+/** Параметры «Создать» из запроса сборки (store `ComposerPreset`). */
+export interface AskPreset {
+  audience: string | null; purpose: string | null; slides: number | null; useModels: boolean; eyes: boolean | null; pictures: boolean | null;
+  strategies: string[]; improvedFrom: ImprovedFrom | null; auditModels?: boolean;
+}
+
 /** Запрос презентации по её мете — сборка найдена без своего запроса (начата не с этой страницы). Мета идущей сборки
  *  ещё без `use_models`: модель включена, сервер сам выключит её, если модели нет. Мета из списка (`/api/generations`)
  *  несёт текст обрезанным — запрос берётся из меты самой презентации. */

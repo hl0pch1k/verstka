@@ -14,7 +14,7 @@ import { variantRev, withRev } from "./lib/rev";
 import { uiReducer, UI0, type UiAction, type UiState } from "./ui/deck/geometry";
 import { textError, writerOn, type TextIssue } from "./ui/create/textRules";
 import { buildRunning, draftParams, type Params } from "./ui/create/params";
-import { completeAsk, failedBuildJob, parsePendingBuild, pendingFor, requestOf, resumeBuild, type PendingBuild } from "./ui/build/resume";
+import { askFor, completeAsk, failedBuildJob, parsePendingBuild, pendingFor, requestOf, resumeBuild, type PendingBuild } from "./ui/build/resume";
 import { openStrategy } from "./ui/result/resultView";
 import { useVariantWork, type VariantWorkApi } from "./ui/details/useVariantWork";
 import { busyKeys } from "./ui/details/variantWork";
@@ -70,8 +70,9 @@ export interface AppState {
   /** Open a deck; resolves to it (null when it did not load — the failure is already reported). `hold` («Мои
    *  презентации»): the open deck stays until the new one is ready and its first slide decoded, then the new one takes
    *  its place at once — the history layer covers the plate meanwhile and moves the deck itself; a deck that is gone
-   *  (404) leaves the list. `strategy`: the variant it opens on (the history card's cover), else the first. */
-  loadGeneration(gid: string, opts?: { hold?: boolean; strategy?: string | null }): Promise<Generation | null>;
+   *  (404) leaves the list. `strategy`: the variant it opens on (the history card's cover), else the first. `area`:
+   *  where a failure is told (the result by default; the build screen for «Открыть ещё раз» of a finished build). */
+  loadGeneration(gid: string, opts?: { hold?: boolean; strategy?: string | null; area?: NoticeArea }): Promise<Generation | null>;
   /** «Мои презентации» closed while deck `gid` was being opened: its load is dropped — the open deck stays as it was
    *  (`hold`), or, when none was open, none opens. A load already applied stays. */
   cancelLoad(gid: string): void;
@@ -114,6 +115,10 @@ export interface AppState {
    *  страницы или собранный из меты чужой сборки, к которой подключились; до подключения после перезагрузки — из
    *  LS.build. Полосы 01/02 экрана «Сборка» говорят о нём (ui/build/resume `buildTopic`), а не о черновике поля. */
   buildAsk: PendingBuild | null;
+  /** Своя сборка страницы — начатая здесь («Создать презентацию», «Собрать ещё раз») или найденная по LS.build после
+   *  перезагрузки (её генерация); null — своей нет. Только её запрос лежит в LS.build; у чужой сборки, к которой
+   *  подключились, «Вернуться к тексту» берёт её текст, а не черновик поля. */
+  ownBuild: string | null;
   /** Идёт хотя бы одна сборка (задача `generate` в очереди или в работе): вторая поверх не начинается. */
   building: boolean;
   /** Сборка, которая кончилась, пока человек был в другом месте (не на её экране «Сборка»): экран она не уводит —
@@ -258,12 +263,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // the newest build and its request (startGeneration once the server took it, or a build found again after a reload):
   // «Собрать ещё раз» repeats it; LS.build is written only for the deck this request belongs to
   const lastBuild = useRef<PendingBuild | null>(null);
+  // every build's request the page knows (its own, the ones it followed): the build screen shows one build at a time —
+  // switching back to an earlier one brings its own request back, never another deck's
+  const asks = useRef(new Map<string, PendingBuild>());
   // the same request for the screen (the build screen's strips 01/02): a ref does not re-render
   const [buildAsk, setBuildAsk] = useState<PendingBuild | null>(readPendingBuild);
   const keepBuild = useCallback((p: PendingBuild) => {
     lastBuild.current = p;
+    asks.current.set(p.gid, p);
     setBuildAsk(p);
   }, []);
+  // the page's own build (started here, or found again by LS.build): only its request lives in LS.build
+  const [ownBuild, setOwnBuild] = useState<string | null>(() => readPendingBuild()?.gid ?? null);
+  const ownRef = useRef(ownBuild);
+  ownRef.current = ownBuild;
   // attachBuild needs the generation flow's deps, defined further down: loadGeneration and boot reach it through this
   const attachRef = useRef<(g: GenerationMeta, pending?: PendingBuild | null) => void>(() => {});
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -489,8 +502,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [report, clearNotice, clearGeneration, refreshGenerations]);
 
-  const loadGeneration = useCallback(async (gid: string, opts?: { hold?: boolean; strategy?: string | null }) => {
-    const load = fetchGeneration(gid, false, !!opts?.hold, "result", opts?.strategy ?? null);
+  const loadGeneration = useCallback(async (gid: string, opts?: { hold?: boolean; strategy?: string | null; area?: NoticeArea }) => {
+    const load = fetchGeneration(gid, false, !!opts?.hold, opts?.area ?? "result", opts?.strategy ?? null);
     const seq = genSeq.current; // fetchGeneration takes its number before its first await
     const g = await load;
     // a deck still being built opens on its build — unless another deck was asked for meanwhile (or this one was dropped)
@@ -570,8 +583,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setBuildJob(first);
       setBuildEnd(null); // a new build: the line about the previous one is stale
       syncBuilding();
-      // a reload finds this build again and can repeat it — with its own request (never another deck's)
-      const pending = pendingFor(lastBuild.current, gid);
+      // a reload finds the page's own build again and can repeat it — with its own request (never another deck's); a
+      // build followed from the list or the helper does not take the record over
+      const pending = gid && gid === ownRef.current ? pendingFor(asks.current.get(gid) ?? lastBuild.current, gid) : null;
       if (pending) storage.set(LS.build, JSON.stringify(pending));
     }
     const stop = trackJob(jobId, {
@@ -657,12 +671,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const expected = expectedSlides ?? null;
     // the request belongs to the deck the server answers with; a refused start leaves the shown build's request as it was
     return generationFlow(req, generationDeps, expected, (gid) => {
+      ownRef.current = gid; // before the build is followed: its record goes to LS.build
+      setOwnBuild(gid);
       keepBuild({ gid, request: req, expected });
     });
   }, [generationDeps, keepBuild]);
 
   const retryBuild = useCallback(async (deck?: GenerationMeta | null) => {
-    const last = deck ? askOf(deck, lastBuild.current) : lastBuild.current;
+    // a deck: its own request (the page's, if it is its build), else from its meta. No deck: the build the build screen
+    // shows — its own request, never the request of another build followed since
+    const shown = latest.current.buildJob?.generation ?? lastBuild.current?.gid ?? null;
+    const last = deck ? askOf(deck, asks.current.get(deck.id) ?? lastBuild.current)
+      : askFor(shown, [asks.current.get(shown ?? ""), lastBuild.current, readPendingBuild()]);
     if (!last) return false;
     await startGeneration(last.request, last.expected);
     return true;
@@ -689,11 +709,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       attachBuild(g);
       return true;
     }
-    // the page already follows it: the build screen shows this build (another one followed since may be on it)
-    if (live.kind === "generate") setBuildJob((cur) => (cur && cur.id === live.id ? cur : live));
+    // the page already follows it: the build screen shows this build (another one followed since may be on it) — with
+    // its own request (strips 01/02, «Собрать ещё раз»), not the request of the build followed last
+    if (live.kind === "generate") {
+      setBuildJob((cur) => (cur && cur.id === live.id ? cur : live));
+      keepBuild(asks.current.get(g.id) ?? askOf(g, lastBuild.current));
+    }
     dispatch({ type: "go", screen: "build" });
     return true;
-  }, [attachBuild]);
+  }, [attachBuild, keepBuild]);
 
   const adoptBuildMeta = useCallback((g: GenerationMeta) => {
     const ask = completeAsk(lastBuild.current, g);
@@ -848,13 +872,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AppState>(() => ({
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, cancelLoad, reloadIfOpen, activeStrategy, setActiveStrategy, activeVariant,
-    selectedSlide, setSelectedSlide, ui, dispatch, activeJob, liveJobs: liveList, runJob, followDeck, adoptBuildMeta, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, building, buildEnd, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
+    selectedSlide, setSelectedSlide, ui, dispatch, activeJob, liveJobs: liveList, runJob, followDeck, adoptBuildMeta, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, ownBuild, building, buildEnd, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
     brief, setBrief, textIssue, setTextIssue, checkText, params, setParams,
     composerText, composerPreset, editText, takeComposerText, takeComposerPreset, improveSource, takeImproveSource,
   }), [
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, cancelLoad, reloadIfOpen, activeStrategy, setActiveStrategy, activeVariant,
-    selectedSlide, setSelectedSlide, ui, activeJob, liveList, runJob, followDeck, adoptBuildMeta, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, building, buildEnd, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
+    selectedSlide, setSelectedSlide, ui, activeJob, liveList, runJob, followDeck, adoptBuildMeta, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, ownBuild, building, buildEnd, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
     brief, setBrief, textIssue, checkText, params, setParams,
     composerText, composerPreset, editText, takeComposerText, takeComposerPreset, improveSource, takeImproveSource,
   ]);

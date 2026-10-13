@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { GenerateRequest, GenerationMeta, Job, JobEvent } from "../../types";
 import { buildView } from "./buildView";
-import { buildTopic, completeAsk, failedBuildJob, parsePendingBuild, pendingFor, requestOf, resumeBuild, type PendingBuild } from "./resume";
+import { askFor, backToText, buildTopic, completeAsk, failedBuildJob, parsePendingBuild, pendingFor, requestOf, resumeBuild, type PendingBuild } from "./resume";
 
 const REQ: GenerateRequest = {
   template_id: "t1", brief: "Итоги квартала", audience: null, purpose: null, slides: 5, language: "ru", extra_instructions: null,
@@ -200,4 +200,29 @@ test("мета, прочитанная позже, не трогает чужо�
   // свой запрос страницы для этой сборки — уже полный
   const own: PendingBuild = { gid: "g1", request: { ...REQ, brief: "Своя тема" }, expected: 5 };
   assert.equal(completeAsk(own, full), null);
+});
+
+test("«Собрать ещё раз» на экране «Сборка» — запрос именно показанной сборки, никогда другой (A1, B-M1)", () => {
+  const a: PendingBuild = { gid: "A", request: { ...REQ, brief: "Чужая сборка" }, expected: 5 };
+  const b: PendingBuild = { gid: "B", request: REQ, expected: 7 };
+  // на экране своя B, а последней подключились к A
+  assert.equal(askFor("B", [undefined, a, b]), b);
+  assert.equal(askFor("A", [a, b]), a);
+  // запрос показанной неизвестен — повторять нечего
+  assert.equal(askFor("C", [a, b]), null);
+  assert.equal(askFor(null, [a, b]), null);
+});
+
+test("«Вернуться к тексту»: своя сборка — к черновику; чужая — к её тексту и параметрам (B-M8)", () => {
+  const theirs: PendingBuild = { gid: "A", request: { ...REQ, brief: "История VK", audience: "Школьники", strategies: ["visual"], use_models: true, eyes: null, audit_models: true }, expected: 5 };
+  assert.deepEqual(backToText(theirs, "B", "A"), {
+    brief: "История VK",
+    preset: { audience: "Школьники", purpose: null, slides: 5, useModels: true, eyes: null, pictures: null, strategies: ["visual"], improvedFrom: null, auditModels: true },
+  });
+  // своя сборка — черновик поля
+  assert.equal(backToText(theirs, "A", "A"), null);
+  // запрос не показанной сборки или без текста — черновик
+  assert.equal(backToText(theirs, "B", "C"), null);
+  assert.equal(backToText({ ...theirs, request: { ...theirs.request, brief: "  " } }, "B", "A"), null);
+  assert.equal(backToText(null, "B", "A"), null);
 });
