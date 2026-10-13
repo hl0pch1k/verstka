@@ -1,6 +1,5 @@
 // Small JS helpers for motion; the animations themselves are CSS (styles/tokens.css: transform and opacity, the curve
-// cubic-bezier(0.2, 0, 0, 1), 160/240/360/520 ms). Reduced motion: every helper here obeys it.
-import { useEffect, useRef, useState } from "react";
+// cubic-bezier(0.2, 0, 0, 1), 160/240/360/520 ms). Reduced motion: `smoothScroll` obeys it; `prefersReducedMotion` lets callers do the same.
 
 // ---------------------------------------------------------------------------------------------------------------------
 // reduced motion
@@ -16,57 +15,6 @@ export function prefersReducedMotion(): boolean {
 /** `behavior` for JS scrolls: CSS `scroll-behavior` does not reach `scrollTo({behavior:"smooth"})`. */
 export function smoothScroll(): ScrollBehavior {
   return prefersReducedMotion() ? "auto" : "smooth";
-}
-
-// ---------------------------------------------------------------------------------------------------------------------
-// numbers
-
-const expoOut = (t: number) => (t >= 1 ? 1 : 1 - 2 ** (-10 * t));
-
-export interface CountUpOptions {
-  /** Duration of one move (default 400). */
-  ms?: number;
-  /** Wait before the first move after mount (a card's rise lands first); later moves start at once. */
-  delay?: number;
-  /** The first mount starts here instead of 0. */
-  from?: number;
-}
-
-/** Animates (expo-out) from the last shown value to `target`. The first mount starts at 0 (or `from`), so a ring draws
- *  in; a later change moves directly from the value on screen, so a switch between two scores never drains the ring.
- *  Reduced motion or a hidden tab jumps. A number argument is the duration (old callers). */
-export function useCountUp(target: number | null, opts?: number | CountUpOptions): number | null {
-  const o: CountUpOptions = typeof opts === "number" ? { ms: opts } : opts ?? {};
-  const ms = o.ms ?? 400;
-  const [value, setValue] = useState<number | null>(() => (target === null || prefersReducedMotion() ? target : o.from ?? 0));
-  const shown = useRef<number | null>(value);
-  shown.current = value;
-  // the delay holds until the first move really starts (StrictMode's mount → unmount → mount keeps it)
-  const moved = useRef(false);
-  const delay = useRef(o.delay ?? 0);
-  useEffect(() => {
-    const wait = moved.current ? 0 : delay.current;
-    if (target === null || prefersReducedMotion() || (typeof document !== "undefined" && document.hidden)) {
-      moved.current = true;
-      return void setValue(target);
-    }
-    const from = shown.current ?? 0;
-    if (from === target) return;
-    let raf = 0;
-    let start = 0;
-    const step = (now: number) => {
-      if (!start) start = now + wait;
-      const t = Math.max(0, Math.min(1, (now - start) / ms));
-      if (now >= start) {
-        moved.current = true;
-        setValue(t >= 1 ? target : from + (target - from) * expoOut(t));
-      }
-      if (t < 1) raf = requestAnimationFrame(step);
-    };
-    raf = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(raf);
-  }, [target, ms]);
-  return value;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
