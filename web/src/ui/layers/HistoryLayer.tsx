@@ -203,7 +203,8 @@ export function HistoryLayer() {
         <span style={{ flex: 1, minWidth: 0, display: "flex", justifyContent: "flex-end" }}>
           {headErr && <span key={headErr} className="p2-in" style={{ display: "flex", minWidth: 0 }}><ErrorLine text={headErr} lines={1} /></span>}
         </span>
-        <span style={{ fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#5A6272", whiteSpace: "nowrap" }}>{view?.total}</span>
+        {/* список не загрузился ни разу — «0 презентаций» было бы неправдой */}
+        <span style={{ fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#5A6272", whiteSpace: "nowrap" }}>{listErr && !generations.length ? null : view?.total}</span>
         <button type="button" className="p2-rbl" onClick={close} aria-label="Закрыть"><Icon name="x" size={18} /></button>
       </div>
 
