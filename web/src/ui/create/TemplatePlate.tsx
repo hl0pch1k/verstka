@@ -2,8 +2,9 @@
 // `#p2-b1` — лента обложек (C-templates), файл над шагом (C-upload) и разбор загруженного файла (C-analyzing).
 // Разметка — boards/V2.dc.html, плита 01 и модуль tp. Загрузка живёт в `useTemplateUpload` (AppShell): её начинают
 // и плитка ленты, и перетаскивание на плиту, и «Загрузить свой» в разделе «Шаблоны».
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { useApp } from "../../store";
+import { humanError } from "../../lib/errors";
 import { templateTitle, tplLabel } from "../../lib/plain";
 import { cls } from "../kit/cls";
 import { ErrorLine } from "../kit/ErrorLine";
@@ -136,37 +137,68 @@ function RunningLine({ name }: { name: string }) {
   );
 }
 
+/** Короткая красная строка в свёрнутой шапке, когда разбор не удался: целиком помещается и при 1280 px, без
+ *  многоточия. Причина — в открытом шаге (коробка разбора), «Сменить» и заголовок его раскрывают. */
+export const HEAD_FAIL = "Не удалось разобрать шаблон";
+/** Строка области «Шаблон» в шапке, когда причины в тексте не осталось (одни технические слова). */
+const HEAD_NOTE = "Не удалось загрузить шаблоны";
+
+/** Что стоит в свёрнутой шапке перед «Сменить»: ход разбора, неудача, выбранный шаблон. */
+type HeadKind = "run" | "fail" | "tpl" | "none";
+
+/** Место под одну из этих строк: при смене содержимого оно проявляется (`p2-in`, как всё на доске), а не
+ *  подменяется рывком. Решение «проявлять» принимается один раз при появлении: класс не снимается посреди движения. */
+function HeadSlot({ fade, children }: { fade: boolean; children: ReactNode }) {
+  const [on] = useState(fade);
+  return <span className={on ? "p2-in" : undefined} style={{ display: "inline-flex", alignItems: "center", minWidth: 0 }}>{children}</span>;
+}
+
 /** Заголовок плиты 01 справа (слот `h1`): выбранный шаблон и «Сменить», на раскрытом шаге — «Готово». Строка ошибки
- *  области «Шаблон», которая пришла не от разбора (список, манифест), стоит перед ними. Пока шаг свёрнут, а файл
- *  разбирается, вместо шаблона стоит строка «Разбираю шаблон…»; если разбор не удался — красная строка с причиной
- *  (полная коробка с «Попробовать ещё раз» — на раскрытом шаге, «Сменить» и заголовок его раскрывают). */
+ *  области «Шаблон», которая пришла не от разбора (список, манифест), стоит перед ними — без технического хвоста
+ *  (`humanError`). Пока шаг свёрнут, а файл разбирается, вместо шаблона стоит строка «Разбираю шаблон…»; если разбор
+ *  не удался — короткая красная строка (`HEAD_FAIL`; полная причина и «Попробовать ещё раз» — в коробке раскрытого
+ *  шага, «Сменить» и заголовок его раскрывают). Каждая из них проявляется, а не появляется сразу. */
 export function TemplateHead({ upload }: { upload: TemplateUpload }) {
   const { ui, dispatch, templates, templateId, notices } = useApp();
   const open = ui.screen === "create" && ui.open === "tpl";
   const t = templates.find((x) => x.template_id === templateId);
-  const note = upload.phase === "idle" && notices.template?.kind === "error" ? notices.template.text : null;
+  const note = upload.phase === "idle" && notices.template?.kind === "error" ? humanError(notices.template.text, HEAD_NOTE) : null;
+  const running = upload.phase === "run" || upload.phase === "settle";
+  const kind: HeadKind = running ? "run" : upload.failure ? "fail" : t ? "tpl" : "none";
+  // что стояло в прошлый раз: если то же, содержимое не новое — плита (p2-in на группе) уже проявляет его целиком
+  const was = useRef<HeadKind | null>(null);
+  useEffect(() => {
+    was.current = kind;
+  });
+  const fade = was.current !== null && was.current !== kind;
   return (
     <>
       <span style={{ flex: 1, minWidth: 0 }} />
-      {note && <ErrorLine text={note} lines={1} style={{ maxWidth: 480 }} />}
+      {note && (
+        <span key={note} className="p2-in" style={{ display: "inline-flex", minWidth: 0 }}>
+          <ErrorLine text={note} lines={1} style={{ maxWidth: 480 }} />
+        </span>
+      )}
       {open ? (
         <div key="open" className="p2-in" style={{ display: "flex", alignItems: "center", gap: 24 }}>
           <button type="button" className="p2-ob" onClick={() => dispatch({ type: "open", step: "text" })} style={{ height: 40 }}>Готово</button>
         </div>
       ) : (
         <div key="closed" className="p2-in" style={{ display: "flex", alignItems: "center", gap: 24 }}>
-          {upload.phase === "run" || upload.phase === "settle" ? (
-            <RunningLine name={upload.file?.name ?? ""} />
-          ) : upload.failure ? (
-            <ErrorLine text={upload.failure.text} lines={1} style={{ maxWidth: 720 }} />
+          {kind === "run" ? (
+            <HeadSlot key="run" fade={fade}><RunningLine name={upload.file?.name ?? ""} /></HeadSlot>
+          ) : kind === "fail" ? (
+            <HeadSlot key="fail" fade={fade}><ErrorLine text={HEAD_FAIL} lines={1} /></HeadSlot>
           ) : t && (
-            <div style={{ display: "flex", alignItems: "center", gap: 16, minWidth: 0 }}>
-              <Cover src={t.cover_url} kind="m" ink={inkOf(t)} label={`Обложка шаблона ${tplLabel(t)}`} />
-              <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-                <span style={{ fontSize: 15, fontWeight: 700, lineHeight: "24px", color: "#0B1220", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{tplLabel(t)}</span>
-                <span style={{ fontSize: 13, fontWeight: 500, lineHeight: "20px", color: "#5A6272", whiteSpace: "nowrap" }}>{tplMeta(t)}</span>
+            <HeadSlot key="tpl" fade={fade}>
+              <div style={{ display: "flex", alignItems: "center", gap: 16, minWidth: 0 }}>
+                <Cover src={t.cover_url} kind="m" ink={inkOf(t)} label={`Обложка шаблона ${tplLabel(t)}`} />
+                <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+                  <span style={{ fontSize: 15, fontWeight: 700, lineHeight: "24px", color: "#0B1220", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{tplLabel(t)}</span>
+                  <span style={{ fontSize: 13, fontWeight: 500, lineHeight: "20px", color: "#5A6272", whiteSpace: "nowrap" }}>{tplMeta(t)}</span>
+                </div>
               </div>
-            </div>
+            </HeadSlot>
           )}
           <button type="button" className="p2-ob" onClick={() => dispatch({ type: "open", step: "tpl" })} style={{ height: 40 }}>
             {t ? "Сменить" : "Выбрать шаблон"}
@@ -191,7 +223,7 @@ export function TemplateBody({ upload }: { upload: TemplateUpload }) {
     <div id="p2-b1" ref={body} className={cls("p2-body p2-g4", on ? "p2-on" : "p2-off")}
       style={{ position: "relative", display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 16, margin: "24px 0 0 192px" }}>
       {upload.phase === "idle" ? (
-        <Ribbon fresh={upload.fresh} onPeek={peek} onGallery={gallery} onUpload={upload.pick} busy={upload.busy} />
+        <Ribbon fresh={upload.fresh} onPeek={peek} onGallery={gallery} onUpload={upload.pick} />
       ) : (
         <Analysis list={orderTemplates(templates, upload.fresh)} name={templateTitle(fileName)} fileName={fileName}
           steps={upload.steps} facts={upload.facts} out={upload.phase === "out"} error={upload.failure?.text ?? null} canRetry={upload.failure?.retry ?? true}

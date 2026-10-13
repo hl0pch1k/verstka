@@ -4,6 +4,7 @@
 // раздел): ушёл контекст — слой уезжает вниз вместе со всем, под новым разделом (z 6), и сам не возвращается.
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useApp } from "../../store";
+import { humanError } from "../../lib/errors";
 import { errText } from "../../lib/narrate";
 import { templateTitle, tplLabel } from "../../lib/plain";
 import { plural } from "../../lib/utils";
@@ -99,7 +100,7 @@ export function TplPreviewLayer() {
       await renameTemplate(t.template_id, title);
       setEdit(false);
     } catch (e) {
-      setErr(`Не удалось переименовать: ${errText(e)}`);
+      setErr(humanError(`Не удалось переименовать: ${errText(e)}`, "Не удалось переименовать шаблон"));
     } finally {
       setSaving(false);
     }

@@ -134,3 +134,10 @@ test("сбой отправки файла: сырой хвост («Failed to f
   // русский ответ сервера остаётся
   assert.equal(analysisError("Не удалось загрузить шаблон: Файл слишком большой", "a.pptx").text, "Не удалось загрузить шаблон: Файл слишком большой");
 });
+test("разбор не удался после русского префикса: английский хвост («Failed to fetch», «Not Found») не показывается", () => {
+  // lib/flows.ts: report(e, «Шаблон разобран, но не загрузился») → «<префикс>: <errText>»
+  assert.equal(analysisError("Шаблон разобран, но не загрузился: Сеть недоступна: Failed to fetch", "a.pptx").text, "Шаблон разобран, но не загрузился: Сеть недоступна");
+  assert.equal(analysisError("Шаблон разобран, но не загрузился: Not Found", "a.pptx").text, "Шаблон разобран, но не загрузился");
+  assert.equal(analysisError("Шаблон разобран, но не загрузился: Internal Server Error", "a.pptx").retry, true);
+  assert.equal(analysisError("Шаблон не открылся: OSError: [Errno 28] No space left on device", "a.pptx").text, "Шаблон не открылся");
+});

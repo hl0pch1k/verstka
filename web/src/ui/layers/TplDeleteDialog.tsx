@@ -4,6 +4,7 @@
 // сервера (409 — на шаблоне идёт сборка) — строкой в диалоге.
 import { useEffect, useRef, useState } from "react";
 import { useApp } from "../../store";
+import { humanError } from "../../lib/errors";
 import { errText } from "../../lib/narrate";
 import { tplLabel } from "../../lib/plain";
 import { plural } from "../../lib/utils";
@@ -76,7 +77,7 @@ export function TplDeleteDialog() {
       await deleteTemplate(t.template_id);
       dispatch({ type: "set", patch: { tplDelete: null, tplPreview: null } });
     } catch (e) {
-      setErr(errText(e));
+      setErr(humanError(errText(e), "Не удалось удалить шаблон. Попробуйте ещё раз."));
       setBusy(false);
     }
   };
