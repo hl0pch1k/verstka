@@ -10,13 +10,18 @@
 // странице нет (перезагрузка, возврат на экран).
 // Содержимое вида входит лесенкой p2-in по 40 мс; панель, которая только что появилась, сдвигает лесенку на 200 мс
 // (V2 `rmD`) и не ведёт свои поля отдельно (V2 `rmRide`).
+// Ширина панели — колонки того вида, что на месте (416 полного, 320 компактного при открытом помощнике): при открытии и
+// закрытии помощника содержимое панели гаснет 120 мс, панель меняет ширину (`data-fit`) невидимой и содержимое
+// проявляется 240 мс (useSwap) — размер не меняется на глазах, пока колонка сетки едет.
 import { useState, type ReactNode } from "react";
 import { Arc } from "../kit/Arc";
 import { ErrorLine } from "../kit/ErrorLine";
 import { Icon } from "../kit/Icon";
 import { Spinner } from "../kit/Spinner";
 import { cls } from "../kit/cls";
+import { useSwap } from "../kit/useSwap";
 import type { FixStep, FixSummary, StepState } from "./fix";
+import { panelFit } from "./compact";
 import { countText, type Remark } from "./marks";
 
 export type PanelView = "rem" | "fix" | "done" | "none";
@@ -29,6 +34,8 @@ export interface RemarksPanelProps {
   shown: boolean;
   /** Когда панель появилась (мс): содержимое, вошедшее вместе с ней, не ведёт лесенку отдельно. */
   since: number;
+  /** Помощник открыт: панель стоит в узкой колонке компактного вида (320), а не полного (416). */
+  helper: boolean;
   n: number;
   view: PanelView;
   rows: PanelRow[];
@@ -64,18 +71,22 @@ const LIST = { display: "flex", flexDirection: "column", gap: 8, flex: 1, minHei
 
 export function RemarksPanel(p: RemarksPanelProps) {
   const open = p.rows.filter((r) => !r.done).length;
+  // раскладка (ширина) панели меняется в подмене: содержимое в обёртке `.rm-body` гаснет, панель встаёт в новую ширину
+  const fit = useSwap(panelFit(p.helper));
   return (
-    <aside className={cls("rm-col p2-in", p.shown ? "rm-col-on" : "rm-out")} aria-labelledby="rk-h" aria-hidden={p.shown ? undefined : true}
+    <aside className={cls("rm-col p2-in", p.shown ? "rm-col-on" : "rm-out")} data-fit={fit.shown} aria-labelledby="rk-h" aria-hidden={p.shown ? undefined : true}
       style={{ animationDelay: "200ms" }}>
-      <div style={{ display: "flex", alignItems: "center", height: 40, flex: "none" }}>
-        <h2 id="rk-h" style={H2}>
-          Слайд {p.n}{" "}
-          <span style={{ marginLeft: 4, fontFamily: "'Manrope',sans-serif", fontSize: 15, fontWeight: 600, lineHeight: "24px", letterSpacing: 0, color: "#5A6272" }}>
-            · {p.view === "fix" ? countText(p.rows.length) : countText(open)}
-          </span>
-        </h2>
+      <div className={cls("rm-body", fit.cls)}>
+        <div style={{ display: "flex", alignItems: "center", height: 40, flex: "none" }}>
+          <h2 id="rk-h" style={H2}>
+            Слайд {p.n}{" "}
+            <span style={{ marginLeft: 4, fontFamily: "'Manrope',sans-serif", fontSize: 15, fontWeight: 600, lineHeight: "24px", letterSpacing: 0, color: "#5A6272" }}>
+              · {p.view === "fix" ? countText(p.rows.length) : countText(open)}
+            </span>
+          </h2>
+        </div>
+        <Body key={`${p.n}:${p.view}`} {...p} />
       </div>
-      <Body key={`${p.n}:${p.view}`} {...p} />
     </aside>
   );
 }

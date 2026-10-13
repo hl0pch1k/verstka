@@ -77,6 +77,9 @@ a.p2-ob:hover{color:#0B1220}
 .rm-out{opacity:0}
 .rm-col{display:flex;flex-direction:column;min-width:0;height:548px;grid-area:1 / 2;transition:opacity 240ms var(--ease)}
 .rm-col.rm-out{pointer-events:none}
+/* содержимое панели: гаснет и проявляется при смене её ширины (helper.css, `data-fit` панели) — своя обёртка, у панели
+   есть и собственная прозрачность */
+.rm-body{display:flex;flex-direction:column;flex:1 1 auto;min-width:0;min-height:0}
 .p2-two:has(.rm-col) > .ra-main{transition:opacity 360ms var(--ease) 120ms,visibility 0s}
 .p2-two:has(.rm-col.rm-col-on) > .ra-main{opacity:0;visibility:hidden;pointer-events:none;transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
 @keyframes rm-fade{from{opacity:0}to{opacity:1}}

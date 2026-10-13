@@ -11,7 +11,9 @@
 // Помощник сужает колоду — результат переходит в компактный вид (CompactResult, helper.css): шапка с действиями-иконками
 // вместо уведомления (его действия — за значком «i»), узкая колонка вместо полной; в режиме «Замечания» и с выбранным
 // изображением колонка шире — смена ширины перекрёстным затуханием (useSwap), а не ходом сетки. Карточка «Изображение»
-// одна: в колонке того вида, что на месте (при смене вида — через 120 мс, когда уходящая колонка почти погасла).
+// одна: в колонке того вида, что на месте (при смене вида — в компактную встаёт через 120 мс, из полной уходит ещё через
+// 120 мс, когда та погасла). Панель замечаний меняет ширину колонки (416 ↔ 320) вместе с помощником перекрёстным
+// затуханием своего содержимого (RemarksPanel).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { humanError } from "../../lib/errors";
 import { decodeImage, isDecoded } from "../../lib/motion";
@@ -25,7 +27,8 @@ import { BUILD_RUNNING } from "../create/ParamsPlate";
 import { ErrorLine } from "../kit/ErrorLine";
 import { Icon } from "../kit/Icon";
 import { cls } from "../kit/cls";
-import { useSwap } from "../kit/useSwap";
+import { usePresence } from "../kit/usePresence";
+import { SWAP_OUT, useSwap } from "../kit/useSwap";
 import { useDeckFit } from "../deck/useDeckFit";
 import { BackStrip } from "../details/BackStrip";
 import { useGoHome } from "../shell/useGoHome";
@@ -284,8 +287,11 @@ function ResultBody({ g, goDown }: { g: Generation; goDown(): void }) {
   // колонка компактного вида 184 ↔ 320: слайд и колонка гаснут, сетка подменяется невидимой, новое проявляется (без хода
   // ширины); при закрытом помощнике ширина колонки не меняется — сразу
   const swap = useSwap(wide, ui.helper);
-  // карточка «Изображение» — одна, в колонке того вида, что сейчас на месте
+  // карточка «Изображение» — одна, в колонке того вида, что сейчас на месте. В компактную она встаёт через 120 мс (та ещё
+  // невидима), из полной уходит ещё через 120 мс: к тому времени колонка погасла (240 мс) — уйди карточка раньше, всё
+  // остальное содержимое колонки (внизу, `column-reverse`) подскочило бы на её высоту на 16-процентной видимости
   const compactCard = useSwap(ui.helper).shown;
+  const fullCard = usePresence(!compactCard, SWAP_OUT).mounted;
   // шапка рабочей области в тесной колоде рядом с колонкой 320 — без подписи «Замечания» (helper.css `.ra-whx`): смена —
   // перекрёстным затуханием шапки, пока результат на экране; в подмене сетки (`swap`, слайд уже невидим) — сразу
   const head = useSwap(headTight(useDeckFit(), swap.shown) ? "tight" : "wide", ui.screen === "result" && swap.phase === null);
@@ -337,9 +343,9 @@ function ResultBody({ g, goDown }: { g: Generation; goDown(): void }) {
         {pic.column && (
           <Aside d={aside} onVariant={pickVariant} onEditText={() => editDeck(g.brief ?? null)} open={openSheet} id="rt-pcol" enter={false} bottom
             className={cls("rt-pcw", pic.column.shown ? "p2-on" : "p2-off")} style={{ position: "relative", zIndex: 1 }}
-            extra={compactCard ? undefined : <PictureCard {...pic.column.card} />} />
+            extra={fullCard ? <PictureCard {...pic.column.card} /> : undefined} />
         )}
-        {rm.panel && <RemarksPanel {...rm.panel} />}
+        {rm.panel && <RemarksPanel {...rm.panel} helper={ui.helper} />}
       </div>
     </>
   );

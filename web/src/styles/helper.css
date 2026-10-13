@@ -110,7 +110,10 @@ a.p2-rbl:hover{color:#0B1220}
    гаснет), карточка «Изображение» — в колонку компактного, вместо итогов. Смена 184 ↔ 320 — не ход ширины, а
    перекрёстное затухание (ResultPlate, useSwap): слайд с лентой (сетка .p2-two) и итоги колонки гаснут за 120 мс, обе
    сетки подменяются невидимыми и без хода (`fx-in`, `hp-snap`), слайд проявляется за 240 мс, панель замечаний и карточка
-   «Изображение» — своими ходами с 120 мс. */
+   «Изображение» — своими ходами с 120 мс. Когда помощник сам открывается или закрывается при уже включённом режиме (или
+   выбранном изображении), панель замечаний меняет ширину колонки 416 ↔ 320 тем же перекрёстным затуханием своего
+   содержимого (RemarksPanel, `data-fit` панели), а карточка «Изображение» остаётся в колонке полного вида, пока та не
+   погасла (ResultPlate, `fullCard`). */
 .hp-nar .hp-in.hp-wide{grid-template-columns:minmax(0,1fr) 320px}
 .hp-nar .hp-in.hp-snap{transition:none}
 .hp-pcol{grid-column:2;grid-row:2;justify-self:start;display:flex;flex-direction:column;width:320px;min-width:0;min-height:0;overflow-y:auto;scrollbar-width:none}
@@ -121,9 +124,11 @@ a.p2-rbl:hover{color:#0B1220}
   .hp-nar .ra-note ~ .p2-two.fx-in{transition:opacity 240ms var(--ease)}
   /* уходящая панель замечаний гаснет к подмене сетки (120 мс), а не после неё */
   .hp-nar .ra-note ~ .p2-two > aside.rm-col:not(.rm-col-on){transition:opacity 120ms var(--ease),visibility 0s linear 120ms}
-  /* панель замечаний — своей ширины колонки (полный вид 416, компактный 320), а не 424 колонки с полями −4 */
+  /* панель замечаний — своей ширины колонки (полный вид 416, компактный 320), а не 424 колонки с полями −4. Ширина — по
+     `data-fit` самой панели (RemarksPanel, useSwap), а не по `.hp-nar`: панель меняет её в подмене, пока её содержимое
+     (`.rm-body`) невидимо, а не в кадре клика по «Помощнику», когда колонка сетки ещё едет 520 мс */
   .hp-wrap .ra-note ~ .p2-two > aside.rm-col{width:416px}
-  .hp-nar .ra-note ~ .p2-two > aside.rm-col{width:320px}
+  .hp-wrap .ra-note ~ .p2-two > aside.rm-col[data-fit=narrow]{width:320px}
   .hp-nar .ra-note ~ .p2-two > aside.rm-col.rm-col-on{opacity:1;visibility:visible;pointer-events:auto;transition:opacity 360ms var(--ease) 120ms,visibility 0s}
 }
 /* правило V2 «колонка проявляется за 160 мс через 80 мс» — о возвращении полного вида при закрытии помощника; свои

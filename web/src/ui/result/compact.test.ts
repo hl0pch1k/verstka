@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { AuditReport, AuditSummary, Generation, Issue, Variant } from "../../types";
-import { compactChecks, ctaShort, headTight, sourceText } from "./compact";
+import { compactChecks, ctaShort, headTight, panelFit, sourceText } from "./compact";
 
 const audit = (summary: Partial<AuditSummary> = {}, issues: Partial<Issue>[] = []): AuditReport => ({
   deck: "d", template_id: "t1", strategy: "structured", per_slide: {}, iterations: 1, applied_fixes: [], seconds: 1,
@@ -75,4 +75,8 @@ test("headTight: только тесная колода и широкая кол
   assert.equal(headTight("tight", false), false);
   assert.equal(headTight("narrow", true), false);
   assert.equal(headTight("wide", true), false);
+});
+test("panelFit: панель замечаний — 320 при открытом помощнике (колонка компактного вида), иначе 416 (полного)", () => {
+  assert.equal(panelFit(true), "narrow");
+  assert.equal(panelFit(false), "wide");
 });

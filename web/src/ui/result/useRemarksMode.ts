@@ -28,7 +28,8 @@ export interface RemarksMode {
   /** Эскиз исправления поверх сцены (FixSketch); null — его нет. */
   sketch: { phase: FxPhase; kind: SketchKind; formula: boolean } | null;
   film: FilmMarks | null;
-  panel: RemarksPanelProps | null;
+  /** Панель замечаний; `helper` (ширина колонки) подставляет плита результата. */
+  panel: Omit<RemarksPanelProps, "helper"> | null;
 }
 
 const lower = (t: string) => t.charAt(0).toLowerCase() + t.slice(1);

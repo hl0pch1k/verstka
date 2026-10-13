@@ -75,3 +75,8 @@ export function ctaShort(deck: number, icons: number): boolean {
  *  подпись «Замечания» у переключателя уходит (остаётся для чтения с экрана), ряд плотнее. Смена — перекрёстным
  *  затуханием шапки (ResultPlate), а не мгновенно. */
 export const headTight = (fit: DeckFit, wide: boolean): boolean => fit === "tight" && wide;
+
+/** Панель замечаний встаёт в колонку того вида, что на месте: полного (416 px) или, пока открыт помощник, компактного
+ *  (320 px). Смена — перекрёстным затуханием содержимого панели (RemarksPanel, `data-fit` панели), а не шириной в кадре
+ *  клика, пока колонка сетки ещё едет. */
+export const panelFit = (helper: boolean): "narrow" | "wide" => (helper ? "narrow" : "wide");
