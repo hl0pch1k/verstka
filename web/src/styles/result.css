@@ -87,7 +87,7 @@ a.p2-ob:hover{color:#0B1220}
 .p2-film .rk-tb{transition:opacity 240ms var(--ease)}
 .rm-cta:disabled{opacity:.32;cursor:default;transform:none}
 /* R-fixing: сцена слайда = карточка-эскиз; картинку закрывает тёмная подложка, поверх — линии схемы и рабочая полоса */
-.ra-stage:has(.rm-fx){transition:transform 520ms var(--ease)}
+.ra-stage{transition:transform 520ms var(--ease)}
 .ra-stage:has(.rf-mini){transform:scale(.5)}
 .rm-fx{position:absolute;inset:0;z-index:2;pointer-events:none}
 .rm-dk{position:absolute;inset:0;background:#0B1220;opacity:0;transition:opacity 240ms var(--ease) 200ms}
@@ -214,6 +214,9 @@ a.p2-ob:hover{color:#0B1220}
 .rt-hit:hover + .rt-fr:not(.rt-fr-on){opacity:.48;transform:none}
 /* колонка «Изображение» лежит точно над обычной колонкой (непрозрачная) и сменяет её проявлением */
 .rt-pcw{background:#FFFFFF}
+/* обычная колонка под ней не ловит фокус и не читается: прячется, когда та проявилась (120 + 360 мс), и встаёт сразу,
+   как та начала уходить (как под панелью замечаний) */
+.p2-two:has(#rt-pcol.p2-on) > .ra-main{visibility:hidden;transition:visibility 0s linear 480ms}
 @media (max-width: 900px){.rt-pcw,.rt-hit{display:none !important}}
 @media (max-width: 900px){
   .rm-col,.p2-two:has(.rm-col) > .ra-main{grid-area:auto}
@@ -221,9 +224,13 @@ a.p2-ob:hover{color:#0B1220}
 }
 
 /* Свои дополнения. Содержимое разметки сцены входит заново на каждом слайде (rm-in). Вторая и следующие рамки выбранного места — над затемнением первой. Выключенные
- * кнопки карточки «Изображение» — как у шапки результата (p2-rbl:disabled). */
+ * кнопки карточки «Изображение» и панели замечаний — как у шапки результата (p2-rbl:disabled). Переход сцены привязан
+ * всегда (а не только пока на ней эскиз): смена слайда посреди исправления разворачивает её из scale(.5), а не рывком. */
 .rm-in{position:absolute;inset:0;animation:rm-fade 240ms var(--ease) backwards}
 .rk-frame-lift{z-index:2}
 .rp-col .p2-ob:disabled,.rp-col .p2-gb:disabled{opacity:.32;cursor:default;transform:none}
 .rp-col .p2-gb:disabled:hover{background:transparent}
 .rm-col .p2-ob[aria-busy="true"]:hover,.rm-col .p2-ob[aria-busy="true"]:active{transform:none}
+.rm-col .p2-ob:disabled{opacity:.32;cursor:default;transform:none}
+.rm-cta[aria-busy="true"]{cursor:progress}
+.rm-cta[aria-busy="true"]:hover,.rm-cta[aria-busy="true"]:active{transform:none}

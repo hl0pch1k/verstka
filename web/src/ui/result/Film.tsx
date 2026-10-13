@@ -5,8 +5,9 @@
 // который исправляет агент, — дуга загрузки (`rf-tsp`); режим выключается — бейджи гаснут вместе с панелью.
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { decodeImage, isDecoded, prefersReducedMotion } from "../../lib/motion";
+import { Arc } from "../kit/Arc";
 import { cls } from "../kit/cls";
-import { countText, type Tone } from "./remarks";
+import { countText, type Tone } from "./marks";
 import { slideSrc } from "./resultView";
 import type { Variant } from "../../types";
 
@@ -92,10 +93,7 @@ function Thumb({ src, alt, on, onPick, badge, out, spin }: {
       {badge && <span className={cls("rk-tb p2-pop", `rk-${badge.tone}`, out && "rm-out")} aria-hidden="true" style={{ animationDelay: "240ms" }}>{badge.count}</span>}
       {spin && (
         <span className="rf-tsp p2-pop" aria-hidden="true">
-          <svg className="gh-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true">
-            <circle cx="12" cy="12" r="8" stroke="rgba(37,99,235,.14)" />
-            <path d="M12 4a8 8 0 0 1 8 8" stroke="#2563EB" />
-          </svg>
+          <Arc size={14} />
         </span>
       )}
     </button>

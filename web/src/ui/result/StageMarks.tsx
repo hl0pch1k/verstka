@@ -2,10 +2,10 @@
 // важности), номера у их углов (`rk-pin`, цифры в кружках) и галочки исправленных (`rd-okpin`). Выбранная рамка
 // затемняет остальной слайд; «весь слайд» обводится по краю, только выбранным. Слой проявляется 240 мс после
 // включения режима и гаснет вместе с ним (`rm-out`); на другом слайде его содержимое проявляется заново, номера
-// всплывают по 40 мс. Геометрия — remarks.ts `stageMarks`.
+// всплывают по 40 мс. Геометрия — marks.ts `stageMarks`.
 import { cls } from "../kit/cls";
 import { Icon } from "../kit/Icon";
-import type { Frame, OkPin, Pin } from "./remarks";
+import type { Frame, OkPin, Pin } from "./marks";
 
 export function StageMarks({ k, frames, pins, oks, out, delay, onPick }: {
   /** Ключ содержимого: слайд и вид панели — новое содержимое проявляется заново. */

@@ -11,6 +11,7 @@ import { plural } from "../../lib/utils";
 import type { ComposerPreset } from "../../store";
 import type { Generation, GenerationMeta, ModelsStatus, Variant } from "../../types";
 import type { IconName } from "../kit/icons";
+import { isStage } from "./marks";
 
 const cap = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 const noStop = (s: string) => s.replace(/[.\s]+$/, "");
@@ -41,6 +42,14 @@ export function slideForKey(key: string, n: number, total: number): number | nul
   const last = Math.max(1, total);
   const to = key === "ArrowRight" ? n + 1 : key === "ArrowLeft" ? n - 1 : key === "Home" ? 1 : key === "End" ? last : null;
   return to === null ? null : Math.min(Math.max(1, to), last);
+}
+
+/** Клавиши, которые поле или виджет держит себе: ←/→, Home/End и Esc в них не листают слайды и не закрывают колонку. */
+export function ownsKeys(el: EventTarget | null): boolean {
+  const t = el as HTMLElement | null;
+  if (!t || typeof t.closest !== "function") return false;
+  return t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable
+    || !!t.closest('[role="tablist"], [role="dialog"], [role="radiogroup"], [role="menu"], [role="slider"]');
 }
 
 /** Название презентации (V2 `docTitle`): заголовок плана варианта, иначе генерации, иначе «Презентация». */
@@ -78,7 +87,7 @@ export function variantSegs(g: Generation, titleOf: (name: string) => string): {
 /** Замечания на слайдах (переключатель «Замечания», R-remarks): ошибки, предупреждения и замечания модели на слайдах;
  *  мелкие заметки проверки и замечания ко всей презентации (слайд 0) — нет. `errors` — среди них есть ошибка. */
 export function remarkCount(v: Variant | null | undefined): { count: number; errors: boolean } {
-  const stage = (v?.audit?.issues ?? []).filter((i) => i.slide >= 1 && !(i.severity === "info" && i.kind !== "model"));
+  const stage = (v?.audit?.issues ?? []).filter(isStage);
   return { count: stage.length, errors: stage.some((i) => i.severity === "error") };
 }
 

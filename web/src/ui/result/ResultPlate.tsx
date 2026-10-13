@@ -3,9 +3,10 @@
 // названием, оценкой, вариантами, скачиванием, карточками и ссылками. Содержимое стоит, пока открыт результат, и
 // уезжает вниз вместе с плитой (`ui.down`); у каждой презентации — своё (ключ — id), и входит оно лесенкой p2-in
 // (160/200/240/280 мс). Данные — resultView. Режим «Замечания» (R-remarks/R-fixing/R-fixed: разметка на сцене, бейджи
-// ленты, панель на месте колонки, исправление слайда с эскизом и «Вернуть как было») и изображение на слайде
-// (R-picture: зона на сцене, колонка с карточкой «Изображение») — remarks.ts, useSlideJob и их компоненты; слой текста
-// и просмотр на весь экран (задача 10) и лист «Подробнее» (задача 11, `useOpenSheet`) подключаются своими задачами.
+// ленты, панель на месте колонки, исправление слайда с эскизом и «Вернуть как было») — useRemarksMode; изображение на
+// слайде (R-picture: зона на сцене, колонка с карточкой «Изображение») — usePictureSelect; работа над слайдом —
+// useSlideJob. Слой текста и просмотр на весь экран (задача 10) и лист «Подробнее» (задача 11, `useOpenSheet`)
+// подключаются своими задачами.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { humanError } from "../../lib/errors";
 import { decodeImage, isDecoded } from "../../lib/motion";
@@ -19,25 +20,22 @@ import { BUILD_RUNNING } from "../create/ParamsPlate";
 import { ErrorLine } from "../kit/ErrorLine";
 import { Icon } from "../kit/Icon";
 import { cls } from "../kit/cls";
-import { usePresence } from "../kit/usePresence";
 import { Aside, type AsideData } from "./Aside";
 import { Film, loadedThumbs } from "./Film";
-import { FixSketch, useFixStage } from "./FixSketch";
+import { FixSketch } from "./FixSketch";
 import { NotePill, NoteRow } from "./NotePill";
-import { PictureCard, PictureSpots, type PictureRunView } from "./PictureCard";
+import { PictureCard, PictureSpots } from "./PictureCard";
+import { RemarksPanel } from "./RemarksPanel";
 import {
-  clock, firstRemarkSlide, fixedRows, fixSteps, fixSummary, lastEditIs, pictureView, slideBadges, slidePictures, slideRemarks, slideSketch,
-  stageMarks,
-} from "./remarks";
-import { RemarksPanel, type PanelLine, type PanelRow, type PanelView } from "./RemarksPanel";
-import {
-  agentLines, deckPreset, docLine, docTitle, eyesCard, fileBase, latestWithModel, noteView, qualityCard, recheckIn, remarkCount, retryLeft,
-  retryTick, retryWaitTitle, rewriteText, scoreOf, slideForKey, slideHeadline, slideSrc, slidesOf, switchShots, variantSegs, whyText,
+  agentLines, deckPreset, docLine, docTitle, eyesCard, fileBase, latestWithModel, noteView, ownsKeys, qualityCard, recheckIn, remarkCount,
+  retryLeft, retryTick, retryWaitTitle, rewriteText, scoreOf, slideForKey, slideHeadline, slideSrc, slidesOf, switchShots, variantSegs, whyText,
 } from "./resultView";
 import { Stage } from "./Stage";
 import { StageMarks } from "./StageMarks";
 import { useCheckTitles } from "./useCheckTitles";
 import { useOpenSheet } from "./useOpenSheet";
+import { usePictureSelect } from "./usePictureSelect";
+import { useRemarksMode } from "./useRemarksMode";
 import { useSlideJob } from "./useSlideJob";
 import { WorkHead } from "./WorkHead";
 
@@ -71,14 +69,6 @@ function useTick(on: boolean): number {
   }, [on]);
   return now;
 }
-
-/** Клавиши ←/→, Home/End листают слайды, пока фокус не в поле и не в элементе со своими клавишами. */
-const ownsKeys = (el: EventTarget | null) => {
-  const t = el as HTMLElement | null;
-  if (!t || typeof t.closest !== "function") return false;
-  return t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable
-    || !!t.closest('[role="tablist"], [role="dialog"], [role="radiogroup"], [role="menu"], [role="slider"]');
-};
 
 export function ResultPlate() {
   const { ui, dispatch, generation, notices } = useApp();
@@ -200,115 +190,16 @@ function ResultBody({ g, goDown }: { g: Generation; goDown(): void }) {
   // ── работа над слайдом: исправление, изображение, «Вернуть как было» (одна задача на вариант за раз)
   const titleOf = useCheckTitles();
   const job = useSlideJob(g.id, v.strategy);
-  const run = job.run;
-  const here = !!run && run.strategy === v.strategy && run.slide === n;
-  const fixWork = run?.kind === "fix" && run.phase === "work" ? run : null;
   const now = useTick(job.busy);
-  const busyWhy = !job.busy || !run ? null
-    : run.undo === "work" ? "Возвращаю как было — дождитесь конца"
-      : run.kind === "fix" ? `Агент сейчас исправляет слайд ${run.slide}` : `Агент меняет изображение на слайде ${run.slide}`;
-
-  // ── режим «Замечания» (V2 `rmToggle`): панель на месте колонки, разметка на сцене, бейджи ленты
-  const rm = usePresence(ui.remarks, 520);
-  const rmSince = useRef(0);
-  const open = useMemo(() => slideRemarks(v, n, titleOf), [v, n, titleOf]);
-  const fixRun = here && run?.kind === "fix" ? run : null;
-  const fx = useFixStage(fixRun && fixRun.jobId && rm.mounted ? fixRun.seq : null, fixRun?.phase === "done", src);
-  const fixing = !!fixRun && (fixRun.phase === "work" || fx !== null);
-  const fixDone = !!fixRun && !fixing && fixRun.phase === "done" && !!fixRun.fix?.applied;
-  const view: PanelView = fixing ? "fix" : fixDone ? "done" : open.length ? "rem" : "none";
-  const rows: PanelRow[] = useMemo(
-    () => (view === "fix" ? fixRun!.requested : view === "done" ? fixedRows(fixRun!.requested, fixRun!.fix!, open) : open),
-    [view, fixRun, open],
-  );
-  const viewKey = `${v.strategy}:${n}:${view}`;
-  const [selAt, setSelAt] = useState<{ k: string; i: number } | null>(null);
-  const sel = selAt?.k === viewKey ? selAt.i : view === "rem" || view === "fix" ? 0 : -1;
-  const marks = useMemo(() => stageMarks(rows, sel), [rows, sel]);
-  const [wishAt, setWishAt] = useState({ k: "", t: "" });
-  const slideKey = `${v.strategy}:${n}`;
-  const wish = wishAt.k === slideKey ? wishAt.t : "";
-  const remarksOff = fixWork ? `Агент исправляет слайд ${fixWork.slide}` : null;
-  const onToggleRemarks = () => {
-    if (remarksOff) return;
-    if (ui.remarks) return dispatch({ type: "set", patch: { remarks: false } });
-    rmSince.current = Date.now();
-    setPicSel(null); // панель встаёт на место колонки — и колонки «Изображение»
-    // на открытом слайде замечаний нет (и нет итога исправления) — к первому слайду с ними
-    if (!open.length && !fixDone) {
-      const to = firstRemarkSlide(v, n);
-      if (to !== null && to !== n) setSelectedSlide(to);
-    }
-    dispatch({ type: "set", patch: { remarks: true } });
-  };
-  const onFix = () => {
-    if (job.busy || !open.length) return;
-    void job.start("fix", n, { wishes: wish.trim() || null, issue_ids: open.map((r) => r.id) }, open).then((ok) => {
-      if (ok) setWishAt({ k: "", t: "" });
-    });
-  };
-  const lower = (t: string) => t.charAt(0).toLowerCase() + t.slice(1);
-  const panelLine: PanelLine | null = fixRun && fixRun.phase === "done" && !fixing
-    ? fixRun.error ? { tone: "error", text: fixRun.error }
-      : fixRun.fix && !fixRun.fix.applied ? { tone: "info", text: `Слайд остался прежним: ${lower((fixRun.fix.why ?? "замечания остались").replace(/\.\s*$/, ""))}` } : null
-    : null;
-  const steps = fixRun ? fixSteps(job.live.events, fixRun.phase === "done") : null;
-  const summary = fixDone ? fixSummary(fixRun!.fix!) : null;
-  const badges = useMemo(() => slideBadges(v), [v]);
-
-  // ── изображение на слайде (V2 `rtTogglePic`): клик по картинке — рамка и колонка с карточкой «Изображение»
-  const pics = useMemo(() => slidePictures(v, n), [v, n]);
-  const [picSel, setPicSel] = useState<{ k: string; id: string; form: boolean; d: number } | null>(null);
-  // другой слайд или вариант — выбор картинки снимается (V2 `rtStale`), возврат на слайд колонку не открывает; строка
-  // неудачи или «слайд остался прежним» уходит вместе со слайдом (итог применённой работы остаётся — у него «Вернуть»)
+  // другой слайд или вариант: строка неудачи или «слайд остался прежним» уходит вместе со слайдом (итог применённой
+  // работы остаётся — у него «Вернуть»)
   const clearJob = job.clear;
-  const settledWithout = !!run && run.phase === "done" && !run.fix?.applied && !run.picture?.applied;
-  useEffect(() => {
-    setPicSel(null);
-    if (settledWithout) clearJob();
-  }, [slideKey]); // только смена слайда: строка, пришедшая на этом слайде, остаётся
-  const picked = picSel && picSel.k === slideKey ? pics.find((p) => p.id === picSel.id) ?? pics[0] ?? null : null;
-  const picOn = !!picked && !rm.mounted;
-  const pcol = usePresence(picOn, 280);
-  const lastPic = useRef(picked);
-  if (picked) lastPic.current = picked;
-  const shownPic = picked ?? lastPic.current;
-  const [picWish, setPicWish] = useState("");
-  const onPickPic = (id: string) => {
-    if (picSel && picSel.k === slideKey && picked?.id === id && picSel.form) return setPicSel(null);
-    setPicSel({ k: slideKey, id, form: true, d: picOn ? 40 : 320 });
-  };
-  const picRun = here && run?.kind === "picture" ? run : null;
-  const picRunView: PictureRunView = {
-    work: picRun?.phase === "work" ? "change" : picRun?.undo === "work" ? "undo" : null,
-    action: picRun?.action ?? null,
-    progress: picRun?.phase === "work" ? job.live.progress : 0,
-    message: job.live.message,
-    clock: picRun ? clock((picRun.phase === "work" ? now : picRun.endedAt ?? now) - picRun.startedAt) : "0:00",
-    done: picRun?.phase === "done" && picRun.picture?.applied && picRun.undo !== "work" ? picRun.action : null,
-    canUndo: !!picRun?.picture?.applied && lastEditIs(v, picRun.picture.version, "picture"),
-    error: picRun ? picRun.undoError ?? picRun.error : null,
-  };
-  const picStart = (action: "generate" | "remove") => {
-    if (job.busy) return;
-    void job.start("picture", n, action === "remove" ? { action } : { action, wish: picWish.trim() || null }).then((ok) => {
-      if (!ok) return;
-      setPicWish("");
-      setPicSel((x) => (x ? { ...x, form: false } : x));
-    });
-  };
-  // клавиши ←/→ листают слайды, Home/End — к первому и последнему, пока поверх результата ничего не открыто
+  useEffect(() => clearJob(), [v.strategy, n, clearJob]);
+  const rm = useRemarksMode({ v, n, src, job, now, titleOf });
+  // поверх результата открыт слой или лист: клавиши (←/→, Home/End, Esc) — его
   const layered = !!(ui.sheet || ui.textLayer || ui.lightbox || ui.sect || ui.tplPreview || ui.tplDelete);
-  // Esc снимает выбор картинки (колонка «Изображение» уходит), пока поверх ничего не открыто
-  useEffect(() => {
-    if (!picOn || layered) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || e.defaultPrevented || ownsKeys(e.target)) return;
-      setPicSel(null);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [picOn, layered]);
+  const pic = usePictureSelect({ v, n, job, now, blocked: ui.remarks || rm.mounted, layered });
+  // клавиши ←/→ листают слайды, Home/End — к первому и последнему, пока поверх результата ничего не открыто
   useEffect(() => {
     if (ui.screen !== "result" || layered || total < 2) return;
     const onKey = (e: KeyboardEvent) => {
@@ -391,47 +282,23 @@ function ResultBody({ g, goDown }: { g: Generation; goDown(): void }) {
       )}
       <div className="p2-two" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 416px", gap: 48, height: 548, marginTop: 16 }}>
         <div style={{ display: "flex", flexDirection: "column", minWidth: 0, gridArea: "1 / 1" }}>
-          <WorkHead n={n} total={total} title={h} remarks={remarkCount(v)} remarksOn={ui.remarks} remarksOff={remarksOff}
-            onPrev={() => setSelectedSlide(n - 1)} onNext={() => setSelectedSlide(n + 1)} onToggleRemarks={onToggleRemarks} onOpenLightbox={onOpenLightbox} />
+          <WorkHead n={n} total={total} title={h} remarks={remarkCount(v)} remarksOn={ui.remarks} remarksOff={rm.off}
+            onPrev={() => setSelectedSlide(n - 1)} onNext={() => setSelectedSlide(n + 1)} onToggleRemarks={rm.toggle} onOpenLightbox={onOpenLightbox} />
           <Stage src={src} alt={h ? `Слайд ${n}: ${h}` : `Слайд ${n}`} aspect={aspect}>
-            {pics.length > 0 && !rm.mounted && <PictureSpots pics={pics} sel={picked?.id ?? null} frame={!!picked && !!picSel?.form} onPick={onPickPic} />}
-            {rm.mounted && (
-              <StageMarks k={viewKey} frames={marks.frames} pins={marks.pins} oks={marks.oks} out={!rm.shown || fixing}
-                delay={Date.now() - rmSince.current < 300 ? 200 : 0} onPick={(id) => setSelAt({ k: viewKey, i: rows.findIndex((r) => r.id === id) })} />
-            )}
-            {fx && <FixSketch phase={fx} {...slideSketch(v, n, job.live.events)} />}
+            {pic.spots && <PictureSpots {...pic.spots} />}
+            {rm.stage && <StageMarks {...rm.stage} />}
+            {rm.sketch && <FixSketch {...rm.sketch} />}
           </Stage>
-          <Film film={film} variant={v} n={n} headline={headline} onPick={setSelectedSlide}
-            marks={rm.mounted ? { badges, out: !rm.shown, spin: fixWork && fixWork.strategy === v.strategy ? fixWork.slide : null } : null} />
+          <Film film={film} variant={v} n={n} headline={headline} onPick={setSelectedSlide} marks={rm.film} />
         </div>
-        <Aside d={aside} onVariant={pickVariant} onEditText={() => editDeck(g.brief ?? null)} open={openSheet} className="ra-main" hidden={rm.shown || pcol.shown} />
-        {pcol.mounted && shownPic && (
+        <Aside d={aside} onVariant={pickVariant} onEditText={() => editDeck(g.brief ?? null)} open={openSheet} className="ra-main"
+          hidden={rm.shown || !!pic.column?.shown} />
+        {pic.column && (
           <Aside d={aside} onVariant={pickVariant} onEditText={() => editDeck(g.brief ?? null)} open={openSheet} id="rt-pcol" enter={false} bottom
-            className={cls("rt-pcw", pcol.shown ? "p2-on" : "p2-off")} style={{ position: "relative", zIndex: 1 }}
-            extra={
-              <PictureCard view={pictureView(shownPic)} form={!!picSel?.form && picOn} formDelay={picSel?.d ?? 320} wish={picWish} onWish={setPicWish}
-                onToggleForm={() => setPicSel((x) => (x ? { ...x, form: !x.form, d: 40 } : x))}
-                onCancel={() => {
-                  setPicSel((x) => (x ? { ...x, form: false } : x));
-                  setPicWish("");
-                }}
-                onGenerate={() => picStart("generate")} onRemove={() => picStart("remove")} onUndo={job.undo} run={picRunView}
-                off={job.busy && !picRunView.work ? busyWhy : null} />
-            } />
+            className={cls("rt-pcw", pic.column.shown ? "p2-on" : "p2-off")} style={{ position: "relative", zIndex: 1 }}
+            extra={<PictureCard {...pic.column.card} />} />
         )}
-        {rm.mounted && (
-          <RemarksPanel shown={rm.shown} since={rmSince.current} n={n} view={view} rows={rows} sel={sel} onSel={(i) => setSelAt({ k: viewKey, i })}
-            wish={wish} onWish={(t) => setWishAt({ k: slideKey, t })} onFix={onFix} fixOff={job.busy ? busyWhy : null} line={view === "rem" ? panelLine : null}
-            elsewhere={badges.size > 0}
-            progress={view === "fix" && fixRun && steps ? {
-              clock: clock((fixRun.endedAt ?? now) - fixRun.startedAt), value: fixRun.phase === "work" ? job.live.progress : 1,
-              steps: steps.steps, preview: steps.preview, wish: fixRun.wish,
-            } : null}
-            done={summary && fixRun ? {
-              summary, onShow: () => summary.show !== null && setSelectedSlide(summary.show), onUndo: job.undo,
-              canUndo: lastEditIs(v, fixRun.fix!.version, "fix"), undoBusy: fixRun.undo === "work", undoError: fixRun.undoError,
-            } : null} />
-        )}
+        {rm.panel && <RemarksPanel {...rm.panel} />}
       </div>
     </>
   );

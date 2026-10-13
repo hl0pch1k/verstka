@@ -1,17 +1,23 @@
 // Панель режима «Замечания» (R-remarks, R-fixing, R-fixed; V2 `rm-col`): встаёт на место правой колонки (колонка
 // гаснет 240 мс, панель проявляется), выключение — наоборот. Шапка «Слайд 3 · 3 замечания»; ниже — один из видов:
-//  · rem  — список замечаний слайда (выбранное — в обводке своего цвета), «Ваши правки» и «Исправить слайд»;
+//  · rem  — список замечаний слайда (выбранное — в обводке своего цвета), «Ваши правки» и «Исправить слайд» (пока
+//           сервер не ответил на запуск — кнопка занята, вид ещё не меняется: отказ не мигает карточкой хода);
 //  · fix  — приглушённые ряды и карточка хода «Агент исправляет слайд»: часы, полоса, шаги Критик → Дизайнер → Вёрстка
 //           → Проверка по событиям задачи, «Готовлю превью слайда», пожелание;
 //  · done — ряды «Исправлено» и итог: «N из M», оценка было → стало, какие слайды ещё изменились, «Вернуть как было»;
 //  · none — «Замечаний нет».
+// В rem и none — ещё «Вернуть как было», если последнее изменение варианта — исправление этого слайда, а итога на
+// странице нет (перезагрузка, возврат на экран).
 // Содержимое вида входит лесенкой p2-in по 40 мс; панель, которая только что появилась, сдвигает лесенку на 200 мс
 // (V2 `rmD`) и не ведёт свои поля отдельно (V2 `rmRide`).
 import { useState, type ReactNode } from "react";
+import { Arc } from "../kit/Arc";
 import { ErrorLine } from "../kit/ErrorLine";
 import { Icon } from "../kit/Icon";
+import { Spinner } from "../kit/Spinner";
 import { cls } from "../kit/cls";
-import { countText, type FixStep, type FixSummary, type Remark, type StepState } from "./remarks";
+import type { FixStep, FixSummary, StepState } from "./fix";
+import { countText, type Remark } from "./marks";
 
 export type PanelView = "rem" | "fix" | "done" | "none";
 export type PanelRow = Remark & { done?: boolean };
@@ -31,8 +37,12 @@ export interface RemarksPanelProps {
   wish: string;
   onWish(text: string): void;
   onFix(): void;
-  /** Почему «Исправить слайд» сейчас не начнётся (идёт другая работа); null — начнётся. */
+  /** «Исправить слайд» нажато, сервер ещё не ответил: кнопка занята (вид сменится, только когда задача принята). */
+  fixBusy: boolean;
+  /** Почему «Исправить слайд» и «Вернуть как было» сейчас не начнутся (идёт работа над вариантом); null — начнутся. */
   fixOff: string | null;
+  /** «Вернуть как было» без итога на странице: последнее изменение варианта — исправление этого слайда. */
+  revert: { onRevert(): void; busy: boolean; error: string | null } | null;
   /** Строка у кнопки: неудача или почему слайд остался прежним. */
   line: PanelLine | null;
   /** На других слайдах замечания есть (вид «Замечаний нет» говорит про числа на миниатюрах). */
@@ -80,15 +90,18 @@ function Body(p: RemarksPanelProps) {
   if (p.view === "done" && p.done) return <Done p={p} d={d} />;
   if (p.view === "none" || !p.rows.length) {
     return (
-      <div className={ride} role="status" style={{ marginTop: 16, flex: "none" }}>
-        <div className="rd-row">
-          <span className="rd-dot rd-ok" aria-hidden="true"><Icon name="check" size={12} /></span>
-          <span style={{ display: "block", minWidth: 0 }}>
-            <span className="rd-rt">Замечаний нет</span>
-            <span className="rd-rx">{p.elsewhere ? "Числа на миниатюрах показывают, на каких слайдах они есть." : "На слайдах этого варианта замечаний не осталось."}</span>
-          </span>
+      <>
+        <div className={ride} role="status" style={{ marginTop: 16, flex: "none" }}>
+          <div className="rd-row">
+            <span className="rd-dot rd-ok" aria-hidden="true"><Icon name="check" size={12} /></span>
+            <span style={{ display: "block", minWidth: 0 }}>
+              <span className="rd-rt">Замечаний нет</span>
+              <span className="rd-rx">{p.elsewhere ? "Числа на миниатюрах показывают, на каких слайдах они есть." : "На слайдах этого варианта замечаний не осталось."}</span>
+            </span>
+          </div>
         </div>
-      </div>
+        {p.revert && <Revert p={p} ride={ride} />}
+      </>
     );
   }
   return <Remarks p={p} d={d} ride={ride} />;
@@ -137,26 +150,34 @@ function Remarks({ p, d, ride }: { p: RemarksPanelProps; d(ms: number): string; 
             }
           }} />
       </label>
-      <button type="button" className={cls("p2-cta rm-cta", ride)} onClick={p.onFix} disabled={!!p.fixOff} title={p.fixOff ?? undefined}
-        style={{ width: "100%", marginTop: 8, flex: "none" }}>
-        <Icon name="wand" size={20} />
+      <button type="button" className={cls("p2-cta rm-cta", ride)} onClick={p.onFix} disabled={!p.fixBusy && !!p.fixOff} title={p.fixBusy ? "Отправляю слайд агенту…" : p.fixOff ?? undefined}
+        aria-busy={p.fixBusy || undefined} aria-disabled={p.fixBusy || undefined} style={{ width: "100%", marginTop: 8, flex: "none" }}>
+        {p.fixBusy ? <Spinner size={20} /> : <Icon name="wand" size={20} />}
         <span>Исправить слайд</span>
       </button>
+      {p.revert && <Revert p={p} ride={ride} />}
+    </>
+  );
+}
+
+/** «Вернуть как было» исправления, сделанного раньше (итога на странице нет): тот же «верни как было», что в итоге. */
+function Revert({ p, ride }: { p: RemarksPanelProps; ride?: string }) {
+  const r = p.revert!;
+  const off = r.busy ? null : p.fixOff;
+  return (
+    <>
+      <button type="button" className={cls("p2-ob", ride)} onClick={r.onRevert} disabled={!!off} aria-busy={r.busy || undefined} aria-disabled={r.busy || undefined}
+        title={r.busy ? "Возвращаю слайд, каким он был до исправления…" : off ?? "Вернуть слайд, каким он был до последнего исправления"}
+        style={{ width: "100%", marginTop: 8, flex: "none", cursor: r.busy ? "progress" : undefined }}>
+        {r.busy ? <Arc size={18} /> : <Icon name="undo" size={18} />}
+        <span>Вернуть как было</span>
+      </button>
+      {r.error && <ErrorLine text={r.error} lines={2} style={{ marginTop: 8, flex: "none" }} />}
     </>
   );
 }
 
 const STEP_SR: Record<StepState, string> = { done: "готово: ", act: "сейчас: ", wait: "ждёт: " };
-
-/** Дуга загрузки досок R-fixing (кольцо и четверть), крутится по кругу (`gh-spin`). */
-export function Arc({ size = 16 }: { size?: number }) {
-  return (
-    <svg className="gh-spin" width={size} height={size} viewBox="0 0 24 24" fill="none" strokeWidth="2.5" strokeLinecap="round" aria-hidden="true" style={{ flex: "none" }}>
-      <circle cx="12" cy="12" r="8" stroke="rgba(37,99,235,.14)" />
-      <path d="M12 4a8 8 0 0 1 8 8" stroke="#2563EB" />
-    </svg>
-  );
-}
 
 function Fixing({ p, d, ride }: { p: RemarksPanelProps; d(ms: number): string; ride?: string }) {
   const g = p.progress;

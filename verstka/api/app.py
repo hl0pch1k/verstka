@@ -305,17 +305,24 @@ def _eyes_of(vdir: Path, run_manifest: Optional[dict], outline: Optional[dict], 
 
 
 def _slide_size(deck: Path) -> Optional[tuple[int, int]]:
-    """The deck's slide size in EMU (ppt/presentation.xml `p:sldSz`); None when the file does not say."""
+    """The deck's slide size in EMU (ppt/presentation.xml `p:sldSz`); None when the file does not say.
+
+    Intentionally unlike `PptxPackage.slide_size`, which falls back to 4:3 (9144000 × 6858000): a picture's box measured
+    against a guessed size would frame it in the wrong place on a 16:9 slide, so a deck without `sldSz` gets no `bbox`
+    at all. The XML is parsed without resolving entities (the deck is the person's upload)."""
     import zipfile
 
     from lxml import etree
 
+    parser = etree.XMLParser(resolve_entities=False, no_network=True)
     try:
         with zipfile.ZipFile(deck) as z:
-            root = etree.fromstring(z.read("ppt/presentation.xml"))
+            root = etree.fromstring(z.read("ppt/presentation.xml"), parser)
         sz = root.find("{http://schemas.openxmlformats.org/presentationml/2006/main}sldSz")
+        if sz is None:
+            return None
         cx, cy = int(sz.get("cx")), int(sz.get("cy"))
-    except (OSError, KeyError, ValueError, TypeError, AttributeError, zipfile.BadZipFile, etree.XMLSyntaxError):
+    except (OSError, KeyError, ValueError, TypeError, zipfile.BadZipFile, etree.XMLSyntaxError):
         return None
     return (cx, cy) if cx > 0 and cy > 0 else None
 

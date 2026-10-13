@@ -7,11 +7,11 @@
 import { Fragment, useEffect, useRef } from "react";
 import { stage } from "../../lib/pictures";
 import type { BboxFrac, SlidePicture } from "../../types";
+import { Arc } from "../kit/Arc";
 import { ErrorLine } from "../kit/ErrorLine";
 import { Icon } from "../kit/Icon";
 import { cls } from "../kit/cls";
-import type { PictureView } from "./remarks";
-import { Arc } from "./RemarksPanel";
+import type { PictureView } from "./picture";
 
 const pct = (n: number) => `${+(n * 100).toFixed(2)}%`;
 const place = (b: BboxFrac) => ({ left: pct(b.x), top: pct(b.y), width: pct(b.w), height: pct(b.h) });

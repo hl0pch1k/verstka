@@ -66,6 +66,11 @@ export interface AppState {
   /** `hold`: keep the open deck on screen until the new one is ready, then swap inside a view transition (history). */
   /** Open a deck; resolves to it (null when it did not load — the failure is already reported). */
   loadGeneration(gid: string, opts?: { hold?: boolean }): Promise<Generation | null>;
+  /** Re-reads deck `gid` after a change made to it (a slide fix, a picture, «верни как было») — only while it is still
+   *  the open deck and no other deck is being opened; the screen, the variant and the slide stay. A job that ends
+   *  after the person left the result screen still lands: the deck shows the change on the way back. Resolves to the
+   *  deck read, or null when it was not reloaded (another deck is open) or did not load. */
+  reloadIfOpen(gid: string): Promise<Generation | null>;
   activeStrategy: string | null; setActiveStrategy(s: string): void; activeVariant: Variant | null;
   selectedSlide: number; setSelectedSlide(n: number): void; // 1-based
   /** Экран, раскрытые шаги, слои и листы «Слоёв» (`ui/deck/geometry.ts`); меняется только через `dispatch`. */
@@ -215,6 +220,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const latest = useRef({ templateId, templates, manifest, generationId, generation, activeStrategy, strategies, ui, brief, params, health });
   latest.current = { templateId, templates, manifest, generationId, generation, activeStrategy, strategies, ui, brief, params, health };
   const genSeq = useRef(0);
+  // the deck asked for last (fetchGeneration): a reload after a change never races a deck being opened over it
+  const askedGen = useRef<string | null>(null);
   const jobSubs = useRef(new Map<string, () => void>());
 
   const [notices, setNotices] = useState<Partial<Record<NoticeArea, Notice>>>({});
@@ -322,6 +329,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const clearGeneration = useCallback(() => {
     genSeq.current += 1;
+    askedGen.current = null;
     setGenerationId(null);
     setGeneration(null);
     setGenerationLoading(false);
@@ -348,6 +356,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
    *  result; the build screen for a deck that has just been built). */
   const fetchGeneration = useCallback(async (gid: string, quiet = false, hold = false, area: NoticeArea = "result"): Promise<Generation | null> => {
     const seq = ++genSeq.current;
+    askedGen.current = gid;
     const sameAsOpen = latest.current.generation?.id === gid;
     const holding = hold && !sameAsOpen && !!latest.current.generation;
     if (!holding) {
@@ -404,6 +413,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // a deck still being built opens on its build — unless another deck was asked for meanwhile (or this one was dropped)
     if (seq === genSeq.current && g?.status === "running" && g.job_id) attachRef.current(g);
     return g;
+  }, [fetchGeneration]);
+
+  const reloadIfOpen = useCallback(async (gid: string) => {
+    if (latest.current.generation?.id !== gid || askedGen.current !== gid) return null;
+    return fetchGeneration(gid);
   }, [fetchGeneration]);
 
   const setActiveStrategy = useCallback((s: string) => {
@@ -674,13 +688,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<AppState>(() => ({
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
-    generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, activeStrategy, setActiveStrategy, activeVariant,
+    generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, reloadIfOpen, activeStrategy, setActiveStrategy, activeVariant,
     selectedSlide, setSelectedSlide, ui, dispatch, activeJob, runJob, buildJob, building, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
     brief, setBrief, textIssue, setTextIssue, checkText, params, setParams,
     composerText, composerPreset, editText, takeComposerText, takeComposerPreset, improveSource, takeImproveSource,
   }), [
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
-    generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, activeStrategy, setActiveStrategy, activeVariant,
+    generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, reloadIfOpen, activeStrategy, setActiveStrategy, activeVariant,
     selectedSlide, setSelectedSlide, ui, activeJob, runJob, buildJob, building, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, startGeneration,
     brief, setBrief, textIssue, checkText, params, setParams,
     composerText, composerPreset, editText, takeComposerText, takeComposerPreset, improveSource, takeImproveSource,

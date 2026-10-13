@@ -76,6 +76,39 @@ def test_each_place_says_where_it_is_on_the_slide(built):
         assert "box" not in p
 
 
+def test_without_the_slide_size_no_place_is_framed(built, monkeypatch):
+    """A deck that does not say its slide size (`_slide_size` → None): the places keep everything else but get no
+    `bbox` — the interface frames nothing rather than frame a picture against a guessed 4:3 slide."""
+    c, mod, mock, gid, v = built
+    monkeypatch.setattr(mod, "_slide_size", lambda deck: None)
+    pics = c.get(f"/api/generations/{gid}").json()["variants"][0]["pictures"]
+    assert [p["id"] for p in pics] == [p["id"] for p in v["pictures"]]
+    assert all("bbox" not in p and "box" not in p for p in pics)
+    assert {p["status"] for p in pics} == {"free", "generated"}
+
+
+def test_the_slide_size_comes_from_the_deck_or_not_at_all(tmp_path):
+    """`_slide_size` reads `p:sldSz`; no element, a zero size, no file or no presentation part — None (no 4:3 default,
+    unlike `PptxPackage.slide_size`)."""
+    import zipfile
+
+    from verstka.api.app import _slide_size
+
+    ns = "http://schemas.openxmlformats.org/presentationml/2006/main"
+
+    def deck(name: str, xml: str | None) -> Path:
+        path = tmp_path / name
+        with zipfile.ZipFile(path, "w") as z:
+            z.writestr("ppt/presentation.xml" if xml is not None else "ppt/other.xml", xml or "<x/>")
+        return path
+
+    assert _slide_size(deck("wide.pptx", f'<p:presentation xmlns:p="{ns}"><p:sldSz cx="12192000" cy="6858000"/></p:presentation>')) == (12192000, 6858000)
+    assert _slide_size(deck("nosize.pptx", f'<p:presentation xmlns:p="{ns}"><p:notesSz cx="6858000" cy="9144000"/></p:presentation>')) is None
+    assert _slide_size(deck("zero.pptx", f'<p:presentation xmlns:p="{ns}"><p:sldSz cx="0" cy="6858000"/></p:presentation>')) is None
+    assert _slide_size(deck("nopart.pptx", None)) is None
+    assert _slide_size(tmp_path / "missing.pptx") is None
+
+
 def test_a_new_picture_on_a_wish_and_back_again(built):
     c, mod, mock, gid, v = built
     n = next(p for p in v["pictures"] if p["status"] == "generated")["slide"]
