@@ -112,7 +112,11 @@ export interface ComposerPreset {
   purpose?: string | null;
   slides?: number | null;
   useModels?: boolean;
+  /** Older decks: the switch «Модель проверяет слайды по картинке» stood for `audit_models` — restored when `eyes` is
+   *  not known. */
   auditModels?: boolean;
+  /** «Модель проверяет слайды по картинке» (the designer's look) as the deck was built (null: the server's default). */
+  eyes?: boolean | null;
   /** «Генерировать изображения» as the deck was built (null: the server's default). */
   pictures?: boolean | null;
   strategies?: string[];
@@ -178,8 +182,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // Latest values for callbacks that must stay referentially stable.
-  const latest = useRef({ templateId, templates, manifest, generationId, generation, activeStrategy, strategies, ui, brief, params });
-  latest.current = { templateId, templates, manifest, generationId, generation, activeStrategy, strategies, ui, brief, params };
+  const latest = useRef({ templateId, templates, manifest, generationId, generation, activeStrategy, strategies, ui, brief, params, health });
+  latest.current = { templateId, templates, manifest, generationId, generation, activeStrategy, strategies, ui, brief, params, health };
   const genSeq = useRef(0);
   const jobSubs = useRef(new Map<string, () => void>());
 
@@ -223,7 +227,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("pagehide", flush);
   }, []);
   const checkText = useCallback(() => {
-    const issue = textError(latest.current.brief);
+    // тема годится, только когда сервер пишет текст по теме сам (`health.writer`); иначе нужен готовый текст
+    const issue = textError(latest.current.brief, null, { writer: !!latest.current.health?.writer });
     if (!issue) return true;
     setTextIssue(issue);
     // пустое поле — «Улучшить готовую» кончилась (V2 `txStart`: `txImp: false`)

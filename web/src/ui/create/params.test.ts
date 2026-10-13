@@ -1,9 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  buildRequest, chosenStrategies, OWN, PARAMS0, presetParams, readParams, slidesView, slideWord, stepSlides, summaryLine,
-  toggleStrategy, variantCards, type Params,
+  buildRequest, buildRunning, chosenStrategies, eyesOn, OWN, PARAMS0, picturesOn, presetParams, readParams, slidesView, slideWord,
+  START_FAILED, startFailure, stepSlides, summaryLine, toggleEyes, togglePictures, toggleStrategy, variantCards, type Params,
 } from "./params";
+import type { ActiveJob } from "../../lib/jobState";
 import type { ImproveSource, StrategyInfo } from "../../types";
 
 const S: StrategyInfo[] = [
@@ -13,11 +14,16 @@ const S: StrategyInfo[] = [
 ];
 const P = (patch: Partial<Params> = {}): Params => ({ ...PARAMS0, ...patch });
 const req = (patch: Partial<Parameters<typeof buildRequest>[0]> = {}) =>
-  buildRequest({ templateId: "t1", brief: "  История VK  ", params: P(), strategies: S, modelOn: true, imagesOn: true, improve: null, ...patch });
+  buildRequest({ templateId: "t1", brief: "  История VK  ", params: P(), strategies: S, modelOn: true, images: IMG, improve: null, ...patch });
+/** Модель изображений: ключ есть, сервер по умолчанию их генерирует. */
+const IMG = { configured: true, enabled: true };
 
-test("черновик: по умолчанию — как V2 (12 слайдов, все варианты, модель пишет, взгляд выключен, изображения)", () => {
+test("черновик: по умолчанию — 12 слайдов, все варианты, модель пишет; взгляд и изображения — как решат модель и сервер", () => {
   assert.deepEqual(readParams(undefined), PARAMS0);
-  assert.deepEqual(PARAMS0, { slides: null, strategies: [], audience: "", purpose: "product", ownPurpose: "", useModels: true, eyes: false, pictures: true });
+  assert.deepEqual(PARAMS0, { slides: null, strategies: [], audience: "", purpose: "product", ownPurpose: "", useModels: true, eyes: null, pictures: null });
+  // выбор человека из черновика остаётся, не тронутое — null
+  assert.deepEqual([readParams({ eyes: false, pictures: true }).eyes, readParams({ eyes: false, pictures: true }).pictures], [false, true]);
+  assert.deepEqual([readParams({}).eyes, readParams({}).pictures], [null, null]);
 });
 test("черновик: испорченные поля заменяются значениями по умолчанию, годные остаются", () => {
   const p = readParams({ slides: 99, strategies: ["visual", 3], audience: 7, purpose: "что-то", ownPurpose: "лекция", useModels: false, eyes: "да", pictures: false });
@@ -79,31 +85,47 @@ test("сводка: шаблон · слайды · варианты", () => {
   assert.equal(summaryLine(null, 1, 1), "1 слайд · 1 вариант");
 });
 
-test("запрос: поля как в старом CreateScreen", () => {
+test("запрос: поля как в старом CreateScreen; взгляд дизайнера с моделью включён, проверки моделью — как в 3.0, выключены", () => {
   assert.deepEqual(req(), {
     template_id: "t1", brief: "История VK", audience: null, purpose: "product", slides: 12,
-    strategies: ["structured", "visual", "compact"], use_models: true, audit_models: false, eyes: false, pictures: true,
+    strategies: ["structured", "visual", "compact"], use_models: true, audit_models: false, eyes: true, pictures: true,
     autofix: true, exports: ["pdf", "html"], improved_from: undefined,
   });
 });
-test("запрос: аудитория, свой тип презентации, выбранные варианты, «взгляд» — проверка по картинке", () => {
-  const r = req({ params: P({ audience: "  Совет директоров ", purpose: OWN, ownPurpose: " лекция для студентов ", strategies: ["visual"], eyes: true, slides: 8 }) });
+test("запрос: аудитория, свой тип презентации, выбранные варианты", () => {
+  const r = req({ params: P({ audience: "  Совет директоров ", purpose: OWN, ownPurpose: " лекция для студентов ", strategies: ["visual"], slides: 8 }) });
   assert.equal(r.audience, "Совет директоров");
   assert.equal(r.purpose, "лекция для студентов");
   assert.deepEqual(r.strategies, ["visual"]);
   assert.equal(r.slides, 8);
-  assert.equal(r.audit_models, true);
-  assert.equal(r.eyes, true);
   assert.equal(req({ params: P({ purpose: OWN, ownPurpose: "  " }) }).purpose, null);
 });
+test("запрос: «Модель проверяет слайды по картинке» — только взгляд дизайнера (`eyes`), не `audit_models`", () => {
+  // человек выключил — выключен; включил при выключенной «Модель пишет тексты» — включён
+  assert.deepEqual([req({ params: P({ eyes: false }) }).eyes, req({ params: P({ eyes: false }) }).audit_models], [false, false]);
+  assert.deepEqual([req({ params: P({ eyes: true, useModels: false }) }).eyes, req({ params: P({ eyes: true }) }).audit_models], [true, false]);
+  // не трогал — как модель: модель не пишет тексты — и не смотрит
+  assert.equal(req({ params: P({ useModels: false }) }).eyes, false);
+});
 test("запрос: без модели переключатели модели выключены; без модели изображений — решает сервер", () => {
-  const r = req({ params: P({ eyes: true }), modelOn: false, imagesOn: false });
+  const r = req({ params: P({ eyes: true }), modelOn: false, images: { configured: false, enabled: true } });
   assert.equal(r.use_models, false);
   assert.equal(r.audit_models, false);
   assert.equal(r.eyes, false);
+  assert.equal(req({ modelOn: false }).eyes, false);
   assert.equal(r.pictures, null);
   assert.equal(req({ params: P({ pictures: false, useModels: false }) }).pictures, false);
   assert.equal(req({ params: P({ useModels: false }) }).use_models, false);
+});
+test("запрос: изображения по умолчанию — как у сервера (`health.images.enabled`)", () => {
+  assert.equal(req({ images: { configured: true, enabled: false } }).pictures, false);
+  assert.equal(req({ images: { configured: true, enabled: true } }).pictures, true);
+  // выбор человека сильнее
+  assert.equal(req({ params: P({ pictures: true }), images: { configured: true, enabled: false } }).pictures, true);
+});
+test("запрос: «/api/strategies» ещё не ответил — варианты как у карточек (три известных), а не пустой список", () => {
+  assert.deepEqual(req({ strategies: [] }).strategies, ["structured", "visual", "compact"]);
+  assert.deepEqual(req({ strategies: [], params: P({ strategies: ["visual"] }) }).strategies, ["visual"]);
 });
 test("запрос: число слайдов из текста — заголовками отправляется, фразой — решает сервер", () => {
   const heads = "Слайд 1. Итоги квартала\nВыручка 10 млн\nСлайд 2. Планы\nРост 20%\nСлайд 3. Риски\nКонкуренты";
@@ -116,15 +138,87 @@ test("запрос: «Улучшить готовую» — исходная п�
   assert.deepEqual(r.improved_from, { name: "Итоги.pptx", slides: 14, template_id: "src", audit: { score: 62, errors: 3, warnings: 5 } });
   assert.equal(r.eyes, true);
   assert.equal(r.audit_models, false);
+  // переключатель выключен — в «Улучшить готовую» модель всё равно смотрит
+  assert.equal(req({ improve: src, params: P({ eyes: false, useModels: false }) }).eyes, true);
   assert.equal(req({ improve: src, modelOn: false }).eyes, false);
 });
 
+test("взгляд дизайнера: по умолчанию включён с моделью, которая пишет тексты; без модели выключен", () => {
+  assert.equal(eyesOn(P(), true), true);
+  assert.equal(eyesOn(P(), false), false);
+  assert.equal(eyesOn(P({ useModels: false }), true), false);
+  // выбор человека — без модели всё равно выключен
+  assert.equal(eyesOn(P({ eyes: true }), false), false);
+});
+test("взгляд дизайнера: выбор человека держится — и при смене «Модель пишет тексты», и после черновика", () => {
+  const off = toggleEyes(P(), true);
+  assert.equal(off.eyes, false);
+  assert.equal(eyesOn(off, true), false);
+  assert.equal(eyesOn({ ...off, useModels: false }, true), false);
+  assert.equal(eyesOn({ ...off, useModels: true }, true), false);
+  assert.equal(eyesOn(readParams(JSON.parse(JSON.stringify(off))), true), false);
+  // включил при выключенной «Модель пишет тексты» — включён
+  const on = toggleEyes(P({ useModels: false }), true);
+  assert.deepEqual([on.eyes, eyesOn(on, true)], [true, true]);
+  assert.equal(eyesOn(toggleEyes(on, true), true), false);
+});
+test("изображения: по умолчанию — как у сервера; выбор человека держится; без модели изображений — выключены", () => {
+  assert.equal(picturesOn(P(), { configured: true, enabled: true }), true);
+  assert.equal(picturesOn(P(), { configured: true, enabled: false }), false);
+  assert.equal(picturesOn(P({ pictures: true }), { configured: false, enabled: true }), false);
+  const off = togglePictures(P(), { configured: true, enabled: true });
+  assert.deepEqual([off.pictures, picturesOn(off, { configured: true, enabled: true })], [false, false]);
+  const on = togglePictures(P(), { configured: true, enabled: false });
+  assert.deepEqual([on.pictures, picturesOn(on, { configured: true, enabled: false })], [true, true]);
+});
+
+const job = (patch: Partial<ActiveJob>): ActiveJob => ({ id: "j", label: "", progress: 0, message: "", status: "running", kind: "generate", startedAt: 0, ...patch });
+test("сборка уже идёт: только задача generate в очереди или в работе", () => {
+  assert.equal(buildRunning(null), false);
+  assert.equal(buildRunning(job({})), true);
+  assert.equal(buildRunning(job({ status: "queued" })), true);
+  assert.equal(buildRunning(job({ status: "done" })), false);
+  assert.equal(buildRunning(job({ status: "failed" })), false);
+  assert.equal(buildRunning(job({ kind: "analyze" })), false);
+  assert.equal(buildRunning(job({ kind: "slide_fix" })), false);
+});
+test("неудача запуска: только ответ на это нажатие, а не строка прежней сборки или прежнего нажатия", () => {
+  const at = 1000;
+  const n = (text: string, t = at + 5, kind: "error" | "success" = "error") => ({ kind, text, at: t });
+  assert.equal(startFailure(n("Не удалось начать сборку презентации: Текст презентации пуст"), at), "Текст презентации пуст");
+  assert.equal(startFailure(n("Не удалось начать сборку презентации: Internal Server Error"), at), START_FAILED);
+  // строка прежней сборки («Не получилось: …») — не неудача запуска, даже если пришла после нажатия
+  assert.equal(startFailure(n("Не получилось: модель не ответила"), at), null);
+  // прежнее нажатие, не ошибка, нажатия нет, строки нет
+  assert.equal(startFailure(n("Не удалось начать сборку презентации: Сеть недоступна", at - 1), at), null);
+  assert.equal(startFailure(n("Не удалось начать сборку презентации: x", at + 5, "success"), at), null);
+  assert.equal(startFailure(n("Не удалось начать сборку презентации: Сеть недоступна"), null), null);
+  assert.equal(startFailure(undefined, at), null);
+});
+
 test("параметры презентации («Изменить текст»): аудитория, тип, слайды, модель, варианты", () => {
-  const p = presetParams(P({ audience: "старая" }), { audience: null, purpose: "report", slides: 30, useModels: false, auditModels: true, pictures: null, strategies: ["compact"] });
-  assert.deepEqual(p, { ...PARAMS0, audience: "", purpose: "report", slides: 20, useModels: false, eyes: true, pictures: true, strategies: ["compact"] });
+  const p = presetParams(P({ audience: "старая" }), { audience: null, purpose: "report", slides: 30, useModels: false, auditModels: true, pictures: false, strategies: ["compact"] });
+  assert.deepEqual(p, { ...PARAMS0, audience: "", purpose: "report", slides: 20, useModels: false, eyes: true, pictures: false, strategies: ["compact"] });
   const own = presetParams(P(), { purpose: "лекция для студентов" });
   assert.deepEqual([own.purpose, own.ownPurpose], [OWN, "лекция для студентов"]);
-  // чего в параметрах нет — остаётся
-  const kept = presetParams(P({ slides: 9, strategies: ["visual"], pictures: false }), {});
-  assert.deepEqual([kept.slides, kept.strategies, kept.pictures], [9, ["visual"], false]);
+  // переключатели, которых в параметрах нет, — остаются
+  const kept = presetParams(P({ useModels: false, eyes: true, pictures: false }), {});
+  assert.deepEqual([kept.useModels, kept.eyes, kept.pictures], [false, true, false]);
+});
+test("параметры презентации: слайдов и вариантов нет — степпер «по тексту» (null) и все варианты, а не черновик", () => {
+  const p = presetParams(P({ slides: 9, strategies: ["visual"] }), { slides: null });
+  assert.deepEqual([p.slides, p.strategies], [null, []]);
+  const q = presetParams(P({ slides: 9, strategies: ["visual"] }), { strategies: [] });
+  assert.deepEqual([q.slides, q.strategies], [null, []]);
+});
+test("параметры презентации: изображения null — как решит сервер (null), а не «включены»", () => {
+  assert.equal(presetParams(P({ pictures: false }), { pictures: null }).pictures, null);
+  assert.equal(presetParams(P(), { pictures: true }).pictures, true);
+});
+test("параметры презентации: взгляд — `eyes`, у старых презентаций — `auditModels`; `eyes` сильнее", () => {
+  assert.equal(presetParams(P(), { eyes: false, auditModels: true }).eyes, false);
+  assert.equal(presetParams(P(), { eyes: true, auditModels: false }).eyes, true);
+  assert.equal(presetParams(P(), { auditModels: true }).eyes, true);
+  assert.equal(presetParams(P(), { eyes: null, auditModels: false }).eyes, false);
+  assert.equal(presetParams(P({ eyes: true }), {}).eyes, true);
 });

@@ -1,12 +1,12 @@
 // Плита 03 «Параметры и запуск» (V2, плита 03; C-params; C-errors). Справа в заголовке — сводка «VK Tech · 12 слайдов ·
-// 3 варианта» (под ней строка ошибки запуска) и «Создать презентацию»; тело `#p2-b3` — короткий ряд: степпер слайдов,
-// варианты оформления, «Модель пишет тексты» и «С изображениями». Ниже — «Все параметры» (`#p2-b3m`, ParamsAll) и
-// стрелка под «03». Стрелка, «03» и заголовок переключают `ui.more` (заголовок с «03» — в Deck): плиты 01/02 уходят в
-// полосы, плита 03 поднимается на 80 за 520 мс, меню проявляется лесенкой с 40 мс, стрелка поворачивается вверх.
+// 3 варианта» (под ней строка ошибки запуска или тихая «Сборка уже идёт») и «Создать презентацию»; тело `#p2-b3` —
+// короткий ряд: степпер слайдов, варианты оформления, «Модель пишет тексты» и «С изображениями». Ниже — «Все параметры»
+// (`#p2-b3m`, ParamsAll) и стрелка под «03». Стрелка, «03» и заголовок переключают `ui.more` (заголовок с «03» — в
+// Deck): плиты 01/02 уходят в полосы, плита 03 поднимается на 80 за 520 мс, меню проявляется лесенкой с 40 мс, стрелка
+// поворачивается вверх.
 // Разметка — boards/V2.dc.html, правила — params.ts.
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useApp } from "../../store";
-import { humanError } from "../../lib/errors";
 import { tplLabel } from "../../lib/plain";
 import { dictatedSlides } from "../../lib/textFacts";
 import { cls } from "../kit/cls";
@@ -16,16 +16,19 @@ import { Switch } from "../kit/Switch";
 import { useHeld, useModelOn } from "./ImproveNote";
 import { ParamsAll } from "./ParamsAll";
 import {
-  buildRequest, imagesHint, presetParams, SLIDES_LOCKED, slidesView, slideWord, stepSlides, summaryLine, toggleStrategy, variantCards, writesHint,
-  type SlidesView, type SwitchView, type VariantCard,
+  buildRequest, buildRunning, eyesOn, imagesHint, picturesOn, presetParams, SLIDES_LOCKED, slidesView, slideWord, startFailure, stepSlides,
+  summaryLine, toggleEyes as nextEyes, togglePictures as nextPictures, toggleStrategy, variantCards, writesHint,
+  type ImagesInfo, type SlidesView, type SwitchView, type VariantCard,
 } from "./params";
 
 const show = (on: boolean) => (on ? "p2-on" : "p2-off");
 
 export const NO_TEMPLATE = "Выберите или загрузите шаблон";
-/** Сервер не начал сборку, а причину сказал не по-русски. */
-export const START_FAILED = "Не удалось начать сборку — попробуйте ещё раз";
-const START_PREFIX = /^Не удалось начать сборку презентации:\s*/;
+export const BUILD_RUNNING = "Сборка уже идёт";
+
+/** Строка под сводкой: ошибка (поле пусто или коротко, нет шаблона, сервер не начал сборку; `echo` — она повторяет
+ *  ошибку у поля «Текст», её читает та строка) или тихая «Сборка уже идёт» со ссылкой «Вернуться к сборке». */
+export type HeadLine = { kind: "error"; text: string; echo: boolean } | { kind: "busy" };
 
 /** Состояние шага на обе части плиты (заголовок и тело). Одно на приложение — его создаёт AppShell. */
 export interface ParamsPlate {
@@ -37,22 +40,22 @@ export interface ParamsPlate {
   toggleWrites(): void; toggleEyes(): void; togglePictures(): void;
   writesHint: string; imagesHint: string;
   summary: string;
-  /** Строка под сводкой: поле пусто или коротко, нет шаблона, сервер не начал сборку; null — всё хорошо. */
-  issue: string | null;
-  /** Строка повторяет ошибку у поля «Текст» (её читает та строка). */
-  issueEcho: boolean;
+  /** Строка под сводкой; null — сказать нечего. */
+  line: HeadLine | null;
   /** Запрос сборки ушёл, ответа ещё нет. */
   starting: boolean;
   start(): void;
+  /** «Вернуться к сборке»: экран «Сборка» идущей сборки. */
+  goBuild(): void;
 }
 
 export function useParamsPlate(): ParamsPlate {
   const {
     params, setParams, brief, strategies, health, templates, templateId, checkText, textIssue, startGeneration, ui, dispatch, notices,
-    improveSource, composerPreset, takeComposerPreset,
+    improveSource, composerPreset, takeComposerPreset, activeJob,
   } = useApp();
   const modelOn = useModelOn();
-  const imagesOn = !!health?.images?.configured;
+  const images: ImagesInfo = { configured: !!health?.images?.configured, enabled: !!health?.images?.enabled };
   const improve = ui.improve ? improveSource : null;
 
   // «Изменить текст» на результате: параметры собранной презентации встают сюда (текст взяло поле)
@@ -78,20 +81,31 @@ export function useParamsPlate(): ParamsPlate {
   const summary = summaryLine(tpl ? tplLabel(tpl) : null, slides.count, cards.filter((c) => c.on).length);
 
   // запуск: ответ сервера — это смена экрана (сборка началась) или строка области «Сборка» (не началась). Строку
-  // показывает только та, что пришла после нажатия; ушли с «Создать» — нажатие забыто
+  // показывает только неудача этого запроса (`startFailure`: после нажатия и именно «не удалось начать», а не строка
+  // упавшей прежней сборки); ушли с «Создать» — нажатие забыто
   const [attempt, setAttempt] = useState<number | null>(null);
   const [noTpl, setNoTpl] = useState(false);
+  // сборка уже идёт: вторая поверх не начинается, нажатие ставит тихую строку; сборка кончилась — строка уходит
+  const building = buildRunning(activeJob);
+  const [busyAsk, setBusyAsk] = useState(false);
   useEffect(() => {
-    if (ui.screen !== "create") setAttempt(null);
+    if (ui.screen !== "create") {
+      setAttempt(null);
+      setBusyAsk(false);
+    }
   }, [ui.screen]);
-  const note = notices.build;
-  const failed = attempt !== null && note?.kind === "error" && note.at >= attempt ? note.text : null;
+  useEffect(() => {
+    if (!building) setBusyAsk(false);
+  }, [building]);
+  const failed = startFailure(notices.build, attempt);
   const starting = attempt !== null && failed === null;
 
   const start = () => {
     if (starting) return;
     setNoTpl(false);
     setAttempt(null);
+    setBusyAsk(building);
+    if (building) return;
     // поле пусто или коротко: ошибка встаёт у поля, плиты поднимают шаг «Текст» (V2 `txStart`)
     if (!checkText()) return;
     if (!templateId) {
@@ -100,44 +114,61 @@ export function useParamsPlate(): ParamsPlate {
       return;
     }
     setAttempt(Date.now());
-    void startGeneration(buildRequest({ templateId, brief, params, strategies, modelOn, imagesOn, improve }), slides.count);
+    void startGeneration(buildRequest({ templateId, brief, params, strategies, modelOn, images, improve }), slides.count);
   };
 
   const textBad = textIssue && (textIssue.kind === "empty" || textIssue.kind === "short") ? textIssue.text : null;
-  const issue = textBad ?? (noTpl && !templateId ? NO_TEMPLATE : null) ?? (failed !== null ? humanError(failed.replace(START_PREFIX, ""), START_FAILED) : null);
+  const bad = textBad ?? (noTpl && !templateId ? NO_TEMPLATE : null) ?? failed;
+  const line: HeadLine | null = busyAsk && building ? { kind: "busy" } : bad !== null ? { kind: "error", text: bad, echo: bad === textBad } : null;
 
   const writes: SwitchView = { on: modelOn && params.useModels, disabled: !modelOn, title: modelOn ? undefined : "Модель не подключена" };
-  // «Улучшить готовую»: модель смотрит на каждый новый слайд (так говорит заметка над полем) — переключатель стоит
+  // взгляд дизайнера: пока не трогали — как модель; «Улучшить готовую»: модель смотрит на каждый новый слайд (так
+  // говорит заметка над полем) — переключатель стоит
   const eyes: SwitchView = {
-    on: modelOn && (params.eyes || !!improve), disabled: !modelOn || !!improve,
+    on: eyesOn(params, modelOn) || (modelOn && !!improve), disabled: !modelOn || !!improve,
     title: !modelOn ? "Модель не подключена" : improve ? "В «Улучшить готовую» модель смотрит на каждый новый слайд" : undefined,
   };
-  const pictures: SwitchView = { on: imagesOn && params.pictures, disabled: !imagesOn, title: imagesOn ? undefined : "Модель изображений не подключена" };
+  const pictures: SwitchView = { on: picturesOn(params, images), disabled: !images.configured, title: images.configured ? undefined : "Модель изображений не подключена" };
 
   return {
     slides, step, cards, toggle, writes, eyes, pictures,
     toggleWrites: () => setParams((p) => ({ ...p, useModels: !p.useModels })),
-    toggleEyes: () => setParams((p) => ({ ...p, eyes: !p.eyes })),
-    togglePictures: () => setParams((p) => ({ ...p, pictures: !p.pictures })),
+    toggleEyes: () => setParams((p) => nextEyes(p, modelOn)),
+    togglePictures: () => setParams((p) => nextPictures(p, images)),
     writesHint: writesHint(writes.on), imagesHint: imagesHint(pictures.on),
-    summary, issue, issueEcho: textBad !== null, starting, start,
+    summary, line, starting, start,
+    goBuild: () => dispatch({ type: "go", screen: "build" }),
   };
 }
 
-/** Заголовок плиты 03 справа (слот `h3`): сводка, строка ошибки под ней (C-errors) и «Создать презентацию». */
+/** Тихая строка (не ошибка): сборка уже идёт, вторая поверх не начинается; «Вернуться к сборке» — её экран. */
+function BusyLine({ onBack }: { onBack(): void }) {
+  return (
+    <p role="status" className="pp-busy">
+      <span>{BUILD_RUNNING}</span>
+      <button type="button" className="pp-go" onClick={onBack}>Вернуться к сборке</button>
+    </p>
+  );
+}
+
+/** Заголовок плиты 03 справа (слот `h3`): сводка, строка под ней (ошибка — C-errors, или «Сборка уже идёт») и
+ *  «Создать презентацию». */
 export function ParamsHead({ pp }: { pp: ParamsPlate }) {
-  const bad = pp.issue !== null;
-  const shown = useHeld(pp.issue);
+  const on = pp.line !== null;
+  // уходящая строка гаснет со своим текстом
+  const shown = useHeld(pp.line);
   return (
     <>
       <span style={{ flex: 1, minWidth: 0 }} />
-      <div className={cls("pp-sum", bad && "pp-bad")}>
+      <div className={cls("pp-sum", on && "pp-bad")}>
         <span className="p2-hide-s pp-sumt" title={pp.summary}>{pp.summary}</span>
-        <div id="pp-err" className={cls("pp-err", show(bad))}>
-          <ErrorLine key={shown ?? ""} text={shown ?? ""} lines={1} quiet={pp.issueEcho} style={{ color: "#F87171" }} />
+        <div id="pp-err" className={cls("pp-err", show(on))}>
+          {shown?.kind === "busy"
+            ? <BusyLine onBack={pp.goBuild} />
+            : <ErrorLine key={shown?.text ?? ""} text={shown?.text ?? ""} lines={1} quiet={shown?.echo} style={{ color: "#F87171" }} />}
         </div>
       </div>
-      <button type="button" className="p2-cta" onClick={pp.start} aria-busy={pp.starting || undefined} aria-describedby={bad ? "pp-err" : undefined}>
+      <button type="button" className="p2-cta" onClick={pp.start} aria-busy={pp.starting || undefined} aria-describedby={on ? "pp-err" : undefined}>
         <span>Создать презентацию</span>
         <Icon name="arrow-right" size={20} />
       </button>

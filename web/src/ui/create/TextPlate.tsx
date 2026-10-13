@@ -71,7 +71,7 @@ export interface TextPlate {
 export function useTextPlate(): TextPlate {
   const {
     ui, dispatch, brief, setBrief, textIssue, setTextIssue, notices, clearNotice, uploadTemplate, templateId,
-    composerText, takeComposerText, improveSource, takeImproveSource,
+    composerText, takeComposerText, improveSource, takeImproveSource, health,
   } = useApp();
   const [menu, setMenu] = useState(false);
   const [reading, setReading] = useState<string | null>(null);
@@ -149,7 +149,8 @@ export function useTextPlate(): TextPlate {
 
   const onFile = useCallback(async (f: File) => {
     setMenu(false);
-    const bad = textError("", f);
+    // у файла проверяется только тип: его текст ещё встанет в поле
+    const bad = textError("", f, { writer: !!health?.writer });
     if (bad) return setTextIssue(bad);
     if (fileKind(f.name) === "deck") return readDeck(f);
     if (f.size > MAX_TEXT_BYTES) return setTextIssue({ kind: "file", text: `Файл «${f.name}» больше 2 МБ` });
@@ -162,7 +163,7 @@ export function useTextPlate(): TextPlate {
     } catch (e) {
       setTextIssue({ kind: "file", text: humanError(e instanceof Error ? e.message : "", `Не удалось прочитать «${f.name}»`) });
     }
-  }, [readDeck, replace, setTextIssue]);
+  }, [readDeck, replace, setTextIssue, health?.writer]);
 
   const pick = useCallback((k: FilePick) => {
     setMenu(false);

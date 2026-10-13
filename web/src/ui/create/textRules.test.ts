@@ -1,33 +1,54 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { BRIEF_MIN_TOPIC } from "../../lib/createForm";
+import { BRIEF_MIN, BRIEF_MIN_TOPIC } from "../../lib/createForm";
 import { charsLabel, clipLine, deckError, fileKind, fileTextIssue, improveLive, improveNoteParts, improveShift, improveStep, improveStripMeta, NOT_UTF8, textError, textLine, textPreview, textStrip, TW, TW0, twBlink, twStep, twText, type Tw } from "./textRules";
+
+/** Сервер пишет текст по теме (`health.writer`) — и без него. */
+const W = { writer: true };
+const NO_W = { writer: false };
 
 // ── бриф задачи: textError
 test("пустое поле и одни пробелы — empty", () => {
-  assert.equal(textError("")?.kind, "empty");
-  assert.equal(textError("   \n\t ")?.kind, "empty");
-  assert.equal(textError("")?.text, "Напишите, о чём презентация");
+  assert.equal(textError("", null, W)?.kind, "empty");
+  assert.equal(textError("   \n\t ", null, W)?.kind, "empty");
+  assert.equal(textError("", null, W)?.text, "Напишите, о чём презентация");
+  assert.equal(textError("", null, NO_W)?.text, "Напишите, о чём презентация");
 });
 test(".pdf — type: «Файл «X.pdf» не подойдёт»", () => {
-  const e = textError("", { name: "X.pdf" });
+  const e = textError("", { name: "X.pdf" }, W);
   assert.equal(e?.kind, "type");
   assert.equal(e?.text, "Файл «X.pdf» не подойдёт");
-  assert.equal(textError("интегралы", { name: "Итоги квартала.pdf" })?.text, "Файл «Итоги квартала.pdf» не подойдёт");
+  assert.equal(textError("интегралы", { name: "Итоги квартала.pdf" }, W)?.text, "Файл «Итоги квартала.pdf» не подойдёт");
 });
 test("текст короче BRIEF_MIN_TOPIC — short", () => {
   const short = "и".repeat(BRIEF_MIN_TOPIC - 1);
-  assert.equal(textError(short)?.kind, "short");
-  assert.equal(textError(`  ${short}  `)?.kind, "short");
-  assert.equal(textError("и".repeat(BRIEF_MIN_TOPIC)), null);
+  assert.equal(textError(short, null, W)?.kind, "short");
+  assert.equal(textError(`  ${short}  `, null, W)?.kind, "short");
+  assert.equal(textError("и".repeat(BRIEF_MIN_TOPIC), null, W), null);
 });
 test("«интегралы» — ошибки нет", () => {
-  assert.equal(textError("интегралы"), null);
+  assert.equal(textError("интегралы", null, W), null);
+});
+test("сервер не пишет текст по теме (`health.writer` выкл.): нужен готовый текст от BRIEF_MIN знаков", () => {
+  const e = textError("История VK", null, NO_W);
+  assert.equal(e?.kind, "short");
+  assert.equal(e?.text, "Нужен готовый текст от 40 знаков — агент на этом сервере не пишет текст по теме");
+  assert.equal(textError("и".repeat(BRIEF_MIN - 1), null, NO_W)?.kind, "short");
+  assert.equal(textError(`  ${"и".repeat(BRIEF_MIN - 1)}  `, null, NO_W)?.kind, "short");
+  assert.equal(textError("и".repeat(BRIEF_MIN), null, NO_W), null);
+  // настройки в начале текста — не текст
+  assert.equal(textError(`---\nslides: 8\n---\n${"и".repeat(BRIEF_MIN - 1)}`, null, NO_W)?.kind, "short");
+  // с пишущим сервером тема годится
+  assert.equal(textError("История VK", null, W), null);
+});
+test("файл проверяется только по типу — пишет ли сервер текст, неважно", () => {
+  assert.equal(textError("", { name: "Умные сводки.md" }, NO_W), null);
+  assert.equal(textError("", { name: "X.pdf" }, NO_W)?.kind, "type");
 });
 test("файлы, которые поле берёт: .txt и .md — текст, .pptx — «Улучшить готовую»", () => {
-  assert.equal(textError("", { name: "Умные сводки.md" }), null);
-  assert.equal(textError("", { name: "заметки.TXT" }), null);
-  assert.equal(textError("", { name: "Итоги квартала.pptx" }), null);
+  assert.equal(textError("", { name: "Умные сводки.md" }, W), null);
+  assert.equal(textError("", { name: "заметки.TXT" }, W), null);
+  assert.equal(textError("", { name: "Итоги квартала.pptx" }, W), null);
   assert.equal(fileKind("a.md"), "text");
   assert.equal(fileKind("a.markdown"), "text");
   assert.equal(fileKind("a.pptx"), "deck");
@@ -39,7 +60,7 @@ test("файлы, которые поле берёт: .txt и .md — текст
   assert.equal(fileKind("без расширения"), "other");
 });
 test("настройки в начале текста («---» … «---») — не текст: поле пустое", () => {
-  assert.equal(textError("---\nslides: 8\n---\n")?.kind, "empty");
+  assert.equal(textError("---\nslides: 8\n---\n", null, W)?.kind, "empty");
 });
 
 // ── печатающаяся подсказка: ритм V2 `twTick`

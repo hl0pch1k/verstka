@@ -3,27 +3,30 @@
 // `writesHint`, `imagesHint`, `summary`) и C-params; поля запроса — как в старом CreateScreen.
 import { PURPOSES, SLIDES_DEFAULT, SLIDES_MAX, SLIDES_MIN } from "../../lib/createForm";
 import { readDraft } from "../../lib/draft";
+import { humanError } from "../../lib/errors";
+import type { ActiveJob } from "../../lib/jobState";
 import { dictatedByHeadings, dictatedSlides } from "../../lib/textFacts";
 import { plural } from "../../lib/utils";
 import type { ComposerPreset } from "../../store";
-import type { GenerateRequest, ImproveSource, StrategyInfo } from "../../types";
+import type { GenerateRequest, ImproveSource, Notice, StrategyInfo } from "../../types";
 
 /** Параметры сборки — черновик рядом с текстом (`verstka.brief_draft`, ключ `params`).
  *  - `slides`: null — степпер не трогали (12).
  *  - `strategies`: выбранные варианты; пусто — все.
  *  - `purpose`: значение `PURPOSES` или `OWN` («Свой вариант…»: тип — `ownPurpose`).
- *  - `eyes`: «Модель проверяет слайды по картинке». */
+ *  - `eyes`: «Модель проверяет слайды по картинке» — взгляд дизайнера; null — не трогали: как модель (`eyesOn`).
+ *  - `pictures`: «С изображениями»; null — не трогали: как у сервера (`picturesOn`). */
 export interface Params {
   slides: number | null; strategies: string[]; audience: string; purpose: string; ownPurpose: string;
-  useModels: boolean; eyes: boolean; pictures: boolean;
+  useModels: boolean; eyes: boolean | null; pictures: boolean | null;
 }
 
 /** «Свой вариант…» в списке типов. */
 export const OWN = "own";
 
-/** По умолчанию — как V2: 12 слайдов, все варианты, тип «Продукт», модель пишет тексты, взгляд по картинке выключен,
- *  изображения генерируются. */
-export const PARAMS0: Params = { slides: null, strategies: [], audience: "", purpose: "product", ownPurpose: "", useModels: true, eyes: false, pictures: true };
+/** По умолчанию — как V2: 12 слайдов, все варианты, тип «Продукт», модель пишет тексты; взгляд дизайнера — как модель,
+ *  изображения — как у сервера. */
+export const PARAMS0: Params = { slides: null, strategies: [], audience: "", purpose: "product", ownPurpose: "", useModels: true, eyes: null, pictures: null };
 
 const clampSlides = (n: number) => Math.min(SLIDES_MAX, Math.max(SLIDES_MIN, Math.round(n)));
 const isPurpose = (v: unknown): v is string => v === OWN || PURPOSES.some((p) => p.value === v);
@@ -32,12 +35,13 @@ const isPurpose = (v: unknown): v is string => v === OWN || PURPOSES.some((p) =>
 export function readParams(raw: unknown): Params {
   const d = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
   const bool = (v: unknown, def: boolean) => (typeof v === "boolean" ? v : def);
+  const choice = (v: unknown) => (typeof v === "boolean" ? v : null);
   const str = (v: unknown) => (typeof v === "string" ? v : "");
   const slides = typeof d.slides === "number" && Number.isInteger(d.slides) && d.slides >= SLIDES_MIN && d.slides <= SLIDES_MAX ? d.slides : null;
   const strategies = Array.isArray(d.strategies) && d.strategies.every((x) => typeof x === "string") ? (d.strategies as string[]) : [];
   return {
     slides, strategies, audience: str(d.audience), purpose: isPurpose(d.purpose) ? d.purpose : PARAMS0.purpose, ownPurpose: str(d.ownPurpose),
-    useModels: bool(d.useModels, PARAMS0.useModels), eyes: bool(d.eyes, PARAMS0.eyes), pictures: bool(d.pictures, PARAMS0.pictures),
+    useModels: bool(d.useModels, PARAMS0.useModels), eyes: choice(d.eyes), pictures: choice(d.pictures),
   };
 }
 
@@ -109,6 +113,19 @@ export function variantCards(list: StrategyInfo[], selected: string[]): VariantC
 // ── переключатели и подписи
 /** Переключатель шага 03: включён ли, можно ли его трогать и почему нельзя (подсказка). */
 export interface SwitchView { on: boolean; disabled: boolean; title?: string }
+
+/** «Модель проверяет слайды по картинке» (взгляд дизайнера, `eyes`). Пока человек его не трогал — как модель: включён,
+ *  когда модель подключена и пишет тексты (так и сервер: `eyes` null — по `use_models`). Тронул — его выбор. Без модели
+ *  выключен. */
+export const eyesOn = (p: Params, modelOn: boolean): boolean => modelOn && (p.eyes ?? p.useModels);
+/** Нажатие: выбор человека — противоположность тому, что он видел; дальше переключатель от модели не зависит. */
+export const toggleEyes = (p: Params, modelOn: boolean): Params => ({ ...p, eyes: !eyesOn(p, modelOn) });
+
+/** Модель изображений (`health.images`): есть ли ключ и генерирует ли сервер изображения по умолчанию. */
+export interface ImagesInfo { configured: boolean; enabled: boolean }
+/** «С изображениями»: пока человек не трогал — как у сервера (`enabled`); без модели изображений выключен. */
+export const picturesOn = (p: Params, images: ImagesInfo): boolean => images.configured && (p.pictures ?? images.enabled);
+export const togglePictures = (p: Params, images: ImagesInfo): Params => ({ ...p, pictures: !picturesOn(p, images) });
 /** «VK Tech · 12 слайдов · 3 варианта» (V2 `summary`); без шаблона — без его имени. */
 export function summaryLine(tpl: string | null, count: number, variants: number): string {
   return [tpl, plural(count, "слайд", "слайда", "слайдов"), plural(variants, "вариант", "варианта", "вариантов")].filter(Boolean).join(" · ");
@@ -117,8 +134,12 @@ export const writesHint = (on: boolean) => (on ? "Сокращает и пере
 export const imagesHint = (on: boolean) => (on ? "По описаниям в тексте, в палитре шаблона" : "Места под изображения останутся свободными");
 
 // ── «Изменить текст»: параметры собранной презентации
-/** Презентацию соберут так, как собрали: её аудитория, тип, число слайдов, переключатели и варианты. Чего в параметрах
- *  нет — остаётся как было. */
+/** Презентацию соберут так, как собрали: её аудитория, тип, число слайдов, переключатели и варианты.
+ *  - Числа слайдов нет — его читали из текста: степпер «не трогали» (null), а не прежнее число черновика.
+ *  - Вариантов нет — все.
+ *  - Взгляд дизайнера — `eyes`; у старых презентаций его нет — `auditModels` (переключатель тогда значил его).
+ *  - Изображения null — как решит сервер (null).
+ *  Переключателей, которых в параметрах нет, — как было. */
 export function presetParams(p: Params, preset: ComposerPreset): Params {
   const out: Params = { ...p, audience: preset.audience ?? "" };
   const purpose = preset.purpose?.trim();
@@ -126,12 +147,12 @@ export function presetParams(p: Params, preset: ComposerPreset): Params {
     if (PURPOSES.some((x) => x.value === purpose)) out.purpose = purpose;
     else Object.assign(out, { purpose: OWN, ownPurpose: purpose });
   }
-  if (preset.slides) out.slides = clampSlides(preset.slides);
+  out.slides = preset.slides ? clampSlides(preset.slides) : null;
+  out.strategies = preset.strategies?.length ? [...preset.strategies] : [];
   if (typeof preset.useModels === "boolean") out.useModels = preset.useModels;
-  if (typeof preset.auditModels === "boolean") out.eyes = preset.auditModels;
-  // null — как решит сервер: изображения есть, когда у модели изображений есть ключ
-  if (preset.pictures !== undefined) out.pictures = preset.pictures ?? true;
-  if (preset.strategies?.length) out.strategies = [...preset.strategies];
+  const eyes = preset.eyes ?? preset.auditModels;
+  if (typeof eyes === "boolean") out.eyes = eyes;
+  if (preset.pictures !== undefined) out.pictures = preset.pictures;
   return out;
 }
 
@@ -144,8 +165,8 @@ export interface RequestInput {
   strategies: StrategyInfo[];
   /** Модель подключена (`useModelOn`): без неё переключатели модели не действуют. */
   modelOn: boolean;
-  /** У модели изображений есть ключ (`health.images.configured`); нет — решает сервер. */
-  imagesOn: boolean;
+  /** Модель изображений (`health.images`): ключа нет — решает сервер. */
+  images: ImagesInfo;
   /** «Улучшить готовую»: исходная презентация, пока режим живёт. */
   improve: ImproveSource | null;
 }
@@ -153,7 +174,9 @@ export interface RequestInput {
 /** Запрос сборки (POST /api/generations) — поля как в старом CreateScreen:
  *  - число слайдов, заданное в тексте заголовками «Слайд N», отправляется; заданное фразой («не более 10 слайдов»)
  *    сервер читает сам по тем же правилам (planning/brief.py) — отправленное число перебило бы его чтение;
- *  - «Модель проверяет слайды по картинке» — проверки по картинке (`audit_models`) и взгляд модели (`eyes`);
+ *  - варианты — как у карточек: пока `/api/strategies` не ответил, три известных, а не пустой список;
+ *  - «Модель проверяет слайды по картинке» — только взгляд дизайнера (`eyes`); проверки моделью (`audit_models`)
+ *    выключены, как по умолчанию в Verstka 3.0;
  *  - «Улучшить готовую»: модель смотрит на каждый новый слайд (так говорит заметка над полем), исходная презентация —
  *    «было» оценки. */
 export function buildRequest(i: RequestInput): GenerateRequest {
@@ -167,13 +190,30 @@ export function buildRequest(i: RequestInput): GenerateRequest {
     audience: p.audience.trim() || null,
     purpose: p.purpose === OWN ? p.ownPurpose.trim() || null : p.purpose,
     slides: dictated !== null && !dictatedByHeadings(i.brief) ? null : count,
-    strategies: chosenStrategies(i.strategies, p.strategies),
+    strategies: chosenStrategies(listOf(i.strategies), p.strategies),
     use_models: p.useModels && i.modelOn,
-    audit_models: p.eyes && i.modelOn,
-    eyes: (p.eyes || !!src) && i.modelOn,
-    pictures: i.imagesOn ? p.pictures : null,
+    audit_models: false,
+    eyes: (eyesOn(p, i.modelOn) || !!src) && i.modelOn,
+    pictures: i.images.configured ? picturesOn(p, i.images) : null,
     autofix: true,
     exports: ["pdf", "html"],
     improved_from: src ? { name: src.name, slides: src.slides, template_id: src.template_id, audit: src.audit ?? null } : undefined,
   };
+}
+
+/** Сборка уже идёт (задача `generate` в очереди или в работе): вторая не начинается поверх. */
+export const buildRunning = (job: ActiveJob | null): boolean =>
+  !!job && job.kind === "generate" && (job.status === "queued" || job.status === "running");
+
+/** Сервер не начал сборку, а причину сказал не по-русски. */
+export const START_FAILED = "Не удалось начать сборку — попробуйте ещё раз";
+/** Так начинается строка области «Сборка», когда сервер не принял запрос (flows.ts `generationFlow` → `report`). */
+const START_PREFIX = /^Не удалось начать сборку презентации:\s*/;
+
+/** Неудача запуска для нажатия в `since` (Date.now()): только ответ сервера на этот запрос — строка «Не удалось начать
+ *  сборку презентации: …», пришедшая после нажатия. Строка прежней сборки («Не получилось: …» — задача упала) и строка
+ *  прежнего нажатия — не она. Причина — по-русски, без префикса; null — неудачи нет. */
+export function startFailure(note: Notice | null | undefined, since: number | null): string | null {
+  if (since === null || !note || note.kind !== "error" || note.at < since || !START_PREFIX.test(note.text)) return null;
+  return humanError(note.text.replace(START_PREFIX, ""), START_FAILED);
 }

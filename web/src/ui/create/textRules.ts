@@ -1,7 +1,7 @@
 // Шаг «02 Текст» без React: что поле скажет о тексте и о файле, печатающаяся подсказка, строки под полем, полоса 02 и
 // заметка «Улучшить готовую». Правила и тексты — boards/V2.dc.html (модуль tx, `twTick`, C-text, C-improve, C-errors);
 // разбор текста — lib/textFacts.ts и lib/writerMode.ts.
-import { BRIEF_MIN_TOPIC } from "../../lib/createForm";
+import { BRIEF_MIN, BRIEF_MIN_TOPIC } from "../../lib/createForm";
 import { humanError } from "../../lib/errors";
 import { templateStem } from "../../lib/templateFiles";
 import { briefBody, factsLine, textFacts } from "../../lib/textFacts";
@@ -15,6 +15,8 @@ export interface TextIssue { kind: "empty" | "short" | "type" | "file"; text: st
 
 export const EMPTY_TEXT = "Напишите, о чём презентация";
 export const SHORT_TEXT = "Слишком коротко — напишите тему подробнее";
+/** Сервер не пишет текст по теме (`health.writer` выключен): презентация строится из текста как есть. */
+export const SHORT_NO_WRITER = `Нужен готовый текст от ${BRIEF_MIN} знаков — агент на этом сервере не пишет текст по теме`;
 
 // ── файлы «Из файла»
 const EXT_RE = /\.[a-z0-9]+$/i;
@@ -44,11 +46,13 @@ export function fileKind(name: string): FileKind {
  *  - С файлом проверяется только его тип: содержимое файла ещё заменит текст поля. `.txt`/`.md` и презентации поле
  *    берёт, остальное — «Файл «X.pdf» не подойдёт».
  *  - Пустой текст и одни пробелы — `empty` (настройки «---» в начале — не текст, сервер их не считает).
- *  - Текст короче `BRIEF_MIN_TOPIC` — `short`. */
-export function textError(text: string, file?: { name: string } | null): null | { kind: "empty" | "short" | "type"; text: string } {
+ *  - Текст короче `BRIEF_MIN_TOPIC` — `short`. Это когда сервер пишет текст по теме (`writer`, `health.writer`); без
+ *    этого тема — не текст: нужен готовый текст от `BRIEF_MIN` знаков (как старый CreateScreen). */
+export function textError(text: string, file: { name: string } | null | undefined, opts: { writer: boolean }): null | { kind: "empty" | "short" | "type"; text: string } {
   if (file) return fileKind(file.name) === "other" ? { kind: "type", text: `Файл «${file.name}» не подойдёт` } : null;
   const body = briefBody(text ?? "").trim();
   if (!body) return { kind: "empty", text: EMPTY_TEXT };
+  if (!opts.writer && body.length < BRIEF_MIN) return { kind: "short", text: SHORT_NO_WRITER };
   if (body.length < BRIEF_MIN_TOPIC) return { kind: "short", text: SHORT_TEXT };
   return null;
 }
