@@ -1140,6 +1140,22 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 .hp-push .hp-help{left:0;right:auto;opacity:1;transform:translateX(var(--hpgo));transition:transform 340ms var(--ease),visibility 0s linear 340ms}
 .hp-push.hp-open .hp-help{transform:translateX(0);transition:transform 520ms var(--ease),visibility 0s linear 0s}
 .hp-help::before{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:-24px 0 48px -24px rgba(11,18,32,.16);opacity:0;transition:opacity 240ms var(--ease);pointer-events:none}
+/* тень колоды на плиту помощника (reveal). Пока плита под колодой, правый край колоды отбрасывает на неё ту же мягкую тень,
+   что плиты в стопке друг на друга (0 −24 48 −24), повёрнутую вправо: 24 0 48 −24, rgba(11,18,32,.28). Тень даёт фигура
+   правого края колоды (углы 40 px, как у плит) — полоса постоянного размера 184 × 812 в первой дорожке сетки hp-wrap: правым
+   краем за краем колоды на 72 px, по высоте обрезана по колоде; слой — над ячейкой помощника, под колодой (z −1, позже ячейки).
+   Её размер не меняется — каждый кадр она только сдвигается вместе с краем, а видимость — одни переходы opacity:
+   видно = прозрачность полосы × прозрачность её ::before (в покое, открыт и закрыт, произведение 0):
+     открытие — полоса 0 → 1 за 240 мс (как сама плита), ::before 1 → 0 за 160 мс с 340 мс (край колоды доходит до места,
+                открывается зазор 16 px — тень уходит вместе с его раскрытием);
+     закрытие — ::before 0 → 1 за 160 мс с 0 (колода наезжает на плиту), полоса 1 → 0 за 240 мс с 100 мс (как сама плита).
+   push: плита никогда не лежит под колодой — тени нет. */
+.hp-wrap{position:relative}
+.hp-shade{position:absolute;grid-column:1 / 2;grid-row:1 / 2;top:0;right:-72px;width:184px;height:812px;overflow:hidden;z-index:-1;pointer-events:none;opacity:0;transition:opacity 240ms var(--ease) 100ms}
+.hp-open .hp-shade{opacity:1;transition:opacity 240ms var(--ease)}
+.hp-shade::before{content:"";position:absolute;top:0;bottom:0;left:0;right:72px;border-radius:0 40px 40px 0;box-shadow:24px 0 48px -24px rgba(11,18,32,.28);transition:opacity 160ms var(--ease)}
+.hp-open .hp-shade::before{opacity:0;transition:opacity 160ms var(--ease) 340ms}
+.hp-push .hp-shade{display:none}
 /* содержимое помощника: тот же ход, что p2-in, но переходом — повторяется при каждом открытии; задержки каскада — инлайн */
 .hp-st{opacity:0;transform:translateY(12px);transition:opacity 0s linear,transform 0s linear}
 .hp-open .hp-st{opacity:1;transform:translateY(0);transition:opacity 360ms var(--ease),transform 360ms var(--ease)}
@@ -1191,6 +1207,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
   .hp-help{position:relative !important;transform:none !important}
   .gh-help{width:100% !important;height:640px !important}
   .hp-in{display:none !important}
+  .hp-shade{display:none !important}
 }
 /* ——— Колода, суженная помощником, на «Создать», «Сборке» и под «Подробнее» — тем же ходом, что «Результат» ———
    Содержимое плит идёт за шириной колоды каждый кадр (как сетка «Результата»): всё, что в узкой раскладке меняется,
@@ -4122,6 +4139,8 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 
 </aside>
 </div>
+<!-- ПОМОЩНИК · тень правого края колоды на плиту (только reveal и только пока плита под колодой) — см. .hp-shade -->
+<div class="hp-shade" aria-hidden="true"></div>
 </div>
 </div>
 </div>
