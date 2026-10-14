@@ -1125,6 +1125,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 /* плита помощника стоит у правого края и въезжает на последние 32 px */
 .hp-help{position:absolute;top:0;right:0;width:400px;height:812px;opacity:0;visibility:hidden;pointer-events:none;transform:translateX(32px);transition:opacity 240ms var(--ease),transform 240ms var(--ease),visibility 0s linear 240ms}
 .hp-open .hp-help{opacity:1;visibility:visible;pointer-events:auto;transform:translateX(0);transition:opacity 360ms var(--ease) 120ms,transform 360ms var(--ease) 120ms,visibility 0s linear 0s}
+.hp-help::before{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:-24px 0 48px -24px rgba(11,18,32,.16);opacity:0;transition:opacity 240ms var(--ease);pointer-events:none}
 /* содержимое помощника: тот же ход, что p2-in, но переходом — повторяется при каждом открытии; задержки каскада — инлайн */
 .hp-st{opacity:0;transform:translateY(12px);transition:opacity 0s linear,transform 0s linear}
 .hp-open .hp-st{opacity:1;transform:translateY(0);transition:opacity 360ms var(--ease),transform 360ms var(--ease)}
@@ -1177,123 +1178,248 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
   .gh-help{width:100% !important;height:640px !important}
   .hp-in{display:none !important}
 }
-/* ——— Колода, суженная помощником (на всех экранах; при 1440 колода 976, содержимое плиты 880) ———
-   Раскладка решается по ЦЕЛЕВОЙ ширине колоды, а не по кадру хода сетки:
-     hp-dk   колода узкая — с первого кадра открытия и до конца хода закрытия (сетка 340 мс + 40): названия шагов
-             сжимаются 32 → 24 px transform'ом (scale .75 от левого края, 520 мс) вместе с колодой;
-     hp-fn   показанная раскладка содержимого — меняется в подмене перекрёстного затухания обёрток p2-fx:
-             hp-fxo — гаснут 120 мс, раскладка подменяется невидимой, hp-fxi — проявляются 240 мс (только opacity).
-   Содержимое плит «Создать» и «Сборки» (p2-cbox) стоит в ширине колоды на конец хода (100cqw обёртки hp-wrap − поля 96,
-   с помощником − ещё 416): колода сужается или расширяется, край плиты подъезжает к содержимому или отъезжает, посреди
-   хода ничего не перестраивается и не переносится. Плиты, номера и названия шагов не гаснут. Лист «Подробнее» и слои
-   резиновые (как на «Результате»), их раскладка меняется той же подменой.
-   Открытие: 0 мс колода и названия; 0–120 содержимое гаснет; 120 подмена; 120–360 проявляется (плита и каскад — как выше).
-   Закрытие: 0 мс сетка 340; узкая раскладка держится до 380; 380–500 гаснет; 500 подмена; 500–740 проявляется. */
-.hp-fxo .p2-fx{opacity:0;transition:opacity 120ms var(--ease)}
-.hp-fxi .p2-fx{opacity:1;transition:opacity 240ms var(--ease)}
-/* в подмене раскладка встаёт на место сразу, без своих ходов (сдвиг поля «Улучшить готовую», прокрутка ленты агента) */
-.hp-fxi .tx-fw,.hp-fxi .tx-ring::before,.hp-fxi .tx-ring>.p2-wrap,.hp-fxi .bd-li{transition:none}
-/* название шага: место в ряду держит невидимая мерка (24 px в узкой раскладке — меняется в подмене), видимое название
-   поверх неё сжимается вместе с колодой */
+/* ——— Колода, суженная помощником, на «Создать», «Сборке» и под «Подробнее» — тем же ходом, что «Результат» ———
+   Содержимое плит идёт за шириной колоды каждый кадр (как сетка «Результата»): всё, что в узкой раскладке меняется,
+   выражено тем, что интерполируется на той же кривой (var(--ease)) и за то же время — открытие 520 мс, закрытие 340:
+     · дорожки сеток с тем же числом дорожек (лишняя сжимается до нуля), отступы, ширина подписи, которая уходит;
+     · transform: названия шагов 32 → 24 px (scale .75 от левого края; место в ряду держит невидимая мерка, её кегль
+       идёт той же кривой), фаза сборки;
+     · прозрачность на месте — только у того, что есть в одной раскладке (hp-wo — только в широкой, hp-no — только в
+       узкой), по таймингу полного и компактного вида «Результата»: открытие — широкое гаснет 240 мс с 0, узкое
+       проявляется 240 мс с 120; закрытие — узкое гаснет 160 мс, широкое проявляется 160 мс через 80.
+   Ничего, что есть в обеих раскладках, не гаснет и не перескакивает между рядами. */
+.p2-hx{position:relative;display:flex;align-items:center;gap:24px;flex:1 1 0%;min-width:0;height:64px}
 .p2-ttl-box{position:relative;display:block;height:40px}
 .p2-ttl-sz{display:block;visibility:hidden}
-.hp-fn .p2-ttl-sz{font-size:24px}
-.p2-ttl-v{position:absolute;left:0;top:0;transform-origin:left center;transition:transform 520ms var(--ease)}
-.hp-dk .p2-ttl-v{transform:scale(.75)}
-/* ряд заголовка справа от названия — обёртка затухания; подсказки и свёрнутый шаг стоят у её правого края */
-.p2-hx{position:relative;display:flex;align-items:center;gap:24px;flex:1 1 0%;min-width:0;height:64px}
-/* что есть только в узкой раскладке (hp-nw) или только в широкой (hp-wd); телефон — всегда широкая */
-.hp-wrap:not(.hp-fn) .hp-nw{display:none !important}
+.p2-ttl-v{position:absolute;left:0;top:0;transform-origin:left center}
+.p2-root .hp-sw{display:grid}
+.p2-root .hp-sw > *{grid-area:1 / 1}
 @media (min-width: 901px){
-  .hp-wrap{container-type:inline-size}
-  .p2-cbox{width:calc(100cqw - 96px)}
-  .hp-fn .p2-cbox{width:calc(100cqw - 512px)}
-  #p2-b3m{right:auto !important;width:calc(100cqw - 288px)}
-  .hp-fn #p2-b3m{width:calc(100cqw - 704px)}
-  .p2-hx .tx-top{right:0;top:0}
+  .p2-ttl-sz{transition:font-size 340ms var(--ease)}
+  .p2-ttl-v{transition:transform 340ms var(--ease)}
+  .hp-nar .p2-ttl-sz{font-size:24px;transition-duration:520ms}
+  .hp-nar .p2-ttl-v{transform:scale(.75);transition-duration:520ms}
+  .hp-wo{transition:opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
+  .hp-nar .hp-wo{opacity:0;visibility:hidden;pointer-events:none;transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
+  .hp-no{opacity:0;visibility:hidden;pointer-events:none;transition:opacity 160ms var(--ease),visibility 0s linear 160ms}
+  .hp-nar .hp-no{opacity:1;visibility:inherit;pointer-events:auto;transition:opacity 240ms var(--ease) 120ms,visibility 0s linear 0s}
 
-  /* 01 · лента: четыре обложки в три колонки + «Все шаблоны» и «Загрузить свой» (два ряда, как в широкой); обложки уже
-     своих картинок — видна левая часть, где начинается заголовок слайда; разбор: файл и «Все шаблоны» слева, ход — справа */
-  .hp-fn .hp-wd,.hp-fn #p2-b1 .tp-nh{display:none !important}
-  .hp-fn #p2-b1{grid-template-columns:repeat(3,minmax(0,1fr)) !important}
-  .hp-fn :is(.tt-tile,.an-tile) .p2-cover img{object-position:0 50%}
-  .hp-fn .an-box{grid-column:2 / span 2 !important}
-  /* 02 · «.txt или .md» уходит (он в подсказке кнопки); «Это готовый текст…» — в ряду шапки и короче; свёрнутый шаг —
-     тема и «Изменить» у правого края поверх погасших «Из файла» и подсказки; справа под полем — только счёт знаков */
-  .hp-fn #ct-fmt{display:none}
-  .hp-fn .p2-hx .tx-top{position:static;height:auto;flex:0 1 auto;overflow:hidden}
-  .hp-fn .p2-hx .tx-top > span{min-width:0;overflow:hidden;text-overflow:ellipsis}
-  .hp-fn .p2-hx .tx-closed{position:absolute;right:0;top:0;height:64px;max-width:100%}
-  .hp-fn .tx-swr > :last-child{display:none}
-  /* «Улучшить готовую»: заметка в узкой колоде выше (4 строки, 112 px; уже 1380 — 5 строк, 132) — поле уходит под неё на
-     её высоту + 16 и вниз не растёт (низ поля — над плитой 03) */
-  .hp-fn .tx-fw-imp{transform:translateY(128px)}
-  .hp-fn .tx-fw-imp .tx-ring::before,.hp-fn .tx-fw-imp .tx-ring>.p2-wrap{transform:none}
-  .hp-fn .tx-fw-imp .tx-ring::after{bottom:0}
-  /* 03 · сводка уступает место «Создать презентацию»; короткий ряд: степпер 200, варианты — название, галочка на месте
-     описания; переключатели — в «Все параметры». В «Все параметры» у вариантов нет миниатюр, переключатели — по тексту */
-  .hp-fn .pp-sum{display:none}
-  .hp-fn #p2-b3{grid-template-columns:200px repeat(3,minmax(0,1fr)) !important}
-  .hp-fn #p2-b3 > .p2-box:last-child{display:none !important}
-  .hp-fn #p2-b3 .p2-vc{position:relative}
-  .hp-fn #p2-b3 .p2-vc > span:last-child{display:none}
-  .hp-fn #p2-b3 .p2-vc .p2-vbox{position:absolute;left:16px;bottom:16px}
-  .hp-fn #p2-b3m .cp-vc > span:first-child{display:none !important}
-  .hp-fn #p2-b3m > .p2-params:last-child > .p2-box{height:auto !important;min-height:104px}
+  /* 01 · лента — ряды по четыре дорожки; межколонник — поле справа у каждой плитки (дорожка с нулём сжимается вместе с
+     ним), лишнее поле последней колонки уходит за край отрицательным отступом. Разбор: вторая дорожка сжимается до нуля */
+  #p2-b1{grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) !important;column-gap:0 !important;margin-right:-16px !important;transition:grid-template-columns 340ms var(--ease)}
+  .hp-nar #p2-b1.tp-anl{grid-template-columns:minmax(0,1fr) minmax(0,0fr) minmax(0,1fr) minmax(0,1fr) !important;transition-duration:520ms}
+  #p2-b1 > *{margin-right:16px}
+  #p2-b1 > .tp-row{grid-column:1 / -1;margin-right:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1fr);transition:grid-template-columns 340ms var(--ease)}
+  .hp-nar #p2-b1 > .tp-row{grid-template-columns:var(--tn);transition-duration:520ms}
+  .tp-row > .tp-cell{min-width:0;margin-right:16px}
+  .tp-cut{min-width:0;overflow:clip;overflow-clip-margin:8px}
+  :is(.tt-tile,.an-tile) .p2-cover img{transition:object-position 340ms var(--ease)}
+  .hp-nar :is(.tt-tile,.an-tile) .p2-cover img{object-position:0 50%;transition-duration:520ms}
+  .tt-note .hp-sw{display:grid}
 
-  /* Сборка: фаза — первой строкой во всю ширину плиты (36 px, мельче — только когда самая длинная не встаёт); под ней
-     слева — часы и полоса, раскадровка в три колонки (прокручивается внутри); справа — «Как думает агент», 320 px */
-  .hp-fn .bd-two{grid-template-columns:minmax(0,1fr) 320px !important;grid-template-rows:64px auto minmax(0,1fr);row-gap:0 !important}
-  .hp-fn .bd-two > div:first-child{display:contents !important}
-  .hp-fn .bd-two > div:first-child > :nth-child(1){grid-column:1 / -1;grid-row:1}
-  .hp-fn .bd-two > div:first-child > :nth-child(2){grid-column:1;grid-row:2}
-  .hp-fn .bd-two > div:first-child > :nth-child(3){grid-column:1;grid-row:3;min-height:0}
-  .hp-fn .bd-two > aside{grid-column:2;grid-row:2 / 4;height:auto !important;min-height:0}
-  .hp-fn .bd-two .p2-ph{font-size:clamp(24px, calc((100cqw - 704px) / 17.8), 36px) !important}
-  .hp-fn .bd-two > div:first-child > :nth-child(3) > div:first-child{display:flex;flex-direction:column;height:100%;min-height:0}
-  .hp-fn .bd-two .p2-wrap{flex-wrap:wrap;height:auto !important;row-gap:12px}
-  .hp-fn .bd-two .bk-vst > span{display:none}
-  .hp-fn .bd-two .p2-g4{grid-template-columns:repeat(3,minmax(0,1fr)) !important;flex:1 1 auto;min-height:0;align-content:start;overflow-y:auto;padding-bottom:24px;scrollbar-width:none;-webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 24px),transparent 100%);mask-image:linear-gradient(to bottom,#000 calc(100% - 24px),transparent 100%)}
-  .hp-fn .bd-two .p2-g4::-webkit-scrollbar{display:none}
-  .hp-fn .bd-two > aside > div:first-child{flex-direction:column;align-items:flex-start !important;justify-content:center !important;gap:0 !important}
-  .hp-fn .bd-two .bf-empty > div:last-child{flex-wrap:wrap}
+  /* 02 · «.txt или .md» сжимается и гаснет; «Это готовый текст…» — в ряду шапки, сжимается слева и меняет формулировку на
+     месте; свёрнутый шаг — у правого края ряда; подсказка под полем меняет формулировку на месте */
+  .tx-fmtw{display:block;max-width:120px;overflow:hidden;transition:max-width 340ms var(--ease),margin-left 340ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
+  .hp-nar .tx-fmtw{max-width:0;margin-left:-12px;transition:max-width 520ms var(--ease),margin-left 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
+  .p2-hx .tx-top{position:static;flex:0 1 auto;justify-content:flex-end;overflow:hidden}
+  .tx-tops{min-width:0;justify-items:end}
+  .tx-tops > span{display:flex;align-items:center;gap:8px;white-space:nowrap}
+  .tx-tops svg{flex:none}
+  .p2-hx .tx-closed{position:absolute;right:0;top:0;height:64px;max-width:100%}
+  .tx-hsw{min-width:0}
+  .tx-hsw > span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tx-fixw{display:block;max-width:400px;overflow:hidden;transition:max-width 340ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
+  .hp-nar .tx-fixw{max-width:0;transition:max-width 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
+  /* «Улучшить готовую»: заметка в узкой колоде выше (2 → 4 строки) — её коробка растёт той же кривой, поле уходит под
+     неё ниже на 40 px и вниз не растёт (собственный translate: ход «Улучшить готовую» — свой transform, 520 мс) */
+  @media (min-width: 1440px){
+    .tx-note{height:72px}
+    .hp-nar .tx-note{height:112px}
+    .tx-note.p2-on{transition:opacity 360ms var(--ease) 120ms,height 340ms var(--ease)}
+    .tx-note.p2-off{transition:opacity 240ms var(--ease),visibility 0s linear 240ms,height 340ms var(--ease)}
+    .hp-nar .tx-note.p2-on{transition:opacity 360ms var(--ease) 120ms,height 520ms var(--ease)}
+    .hp-nar .tx-note.p2-off{transition:opacity 240ms var(--ease),visibility 0s linear 240ms,height 520ms var(--ease)}
+  }
+  .tx-fw{transition:transform 520ms var(--ease),translate 340ms var(--ease)}
+  .hp-nar .tx-fw{transition:transform 520ms var(--ease),translate 520ms var(--ease)}
+  .hp-nar .tx-fw-imp{translate:0 40px}
+  .tx-ring::before,.tx-ring>.p2-wrap{transition:transform 520ms var(--ease),translate 340ms var(--ease)}
+  .hp-nar .tx-ring::before,.hp-nar .tx-ring>.p2-wrap{transition:transform 520ms var(--ease),translate 520ms var(--ease)}
+  .hp-nar .tx-fw-imp .tx-ring::before,.hp-nar .tx-fw-imp .tx-ring>.p2-wrap{translate:0 -16px}
+  .tx-fw-imp .tx-ring::after{transition:opacity 240ms var(--ease),bottom 340ms var(--ease)}
+  .hp-nar .tx-fw-imp .tx-ring::after{bottom:0;transition:opacity 240ms var(--ease),bottom 520ms var(--ease)}
 
-  /* «Подробнее» (лист резиновый, раскладка — по hp-fn, подмена — затуханием содержимого листа): вкладки плотнее; сводка
-     «Качества» — действия под заголовком; две колонки, которым тесно, — одна под другой; «План» — список и «О плане»
-     одно под другим (вкладка прокручивается, список — своей прокруткой, короче), ряд — миниатюра 120 × 68 и текст,
-     содержание под заголовком; полоса шаблона — в три ряда; «Почему так» остаётся в две колонки */
-  .hp-fn .dd-tabs .p2-rseg{padding:0 12px}
-  .hp-fn .dq-sum{flex-wrap:wrap;row-gap:16px}
-  .hp-fn .dq-sum > div:last-child{width:100%;padding-left:112px}
-  .hp-fn .dd-g:not(.dw-g){grid-template-columns:minmax(0,1fr)}
-  .hp-fn #dd-panel-plan{grid-template-columns:minmax(0,1fr) !important;align-content:start;overflow-y:auto;scrollbar-width:none}
-  .hp-fn #dd-panel-plan::-webkit-scrollbar{display:none}
-  .hp-fn #dd-panel-plan .dpl-listw{height:340px}
-  .hp-fn .dlp-aside{max-height:none;overflow:visible}
-  .hp-fn .dpl-row{grid-template-columns:120px minmax(0,1fr);row-gap:8px}
-  .hp-fn .dpl-th{width:120px;height:68px}
-  .hp-fn .dpl-body{grid-column:2}
-  .hp-fn .dtp-band{grid-template-columns:repeat(6,minmax(0,1fr))}
-  .hp-fn .dtp-band > .dtp-name{grid-column:1 / -1}
-  .hp-fn .dtp-band .dtp-fact{grid-column:span 2}
-  .hp-fn .dtp-band :is(.dtp-font,.dtp-pal){grid-column:span 3}
-  .hp-fn .dtp-g{grid-template-columns:minmax(0,1fr) !important}
-  .hp-fn .df-grid{grid-template-columns:minmax(0,1fr) !important}
-  /* «Слайд N шаблона»: образец и сведения о нём — рядом, места для содержания — под ними; всё прокручивается */
-  .hp-fn .dpt-g{grid-template-columns:minmax(0,1fr) 296px !important;align-content:start;overflow-y:auto;scrollbar-width:none}
-  .hp-fn .dpt-g::-webkit-scrollbar{display:none}
-  .hp-fn .dpt-g > section:last-child{grid-column:1 / -1;min-height:auto}
-  .hp-fn .dpt-title{min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:24px;line-height:32px}
+  /* 03 · сводка уступает место «Создать презентацию» (сжимается слева и гаснет); короткий ряд — те же пять дорожек:
+     степпер 216 → 200, переключатели 264 → 0 (гаснут на месте), лишний межколонник уходит за край; у вариантов описание
+     и галочка справа гаснут, галочка проявляется на месте описания. «Все параметры»: миниатюры вариантов сжимаются и
+     гаснут; коробки переключателей растут той же кривой под текст */
+  .p2-hx .pp-sum{display:flex;justify-content:flex-end;flex:0 1 auto;min-width:0;overflow:hidden}
+  #p2-b3{grid-template-columns:216px minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) 264px !important;margin-right:0 !important;transition:grid-template-columns 340ms var(--ease),margin-right 340ms var(--ease)}
+  .hp-nar #p2-b3{grid-template-columns:200px minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) 0px !important;margin-right:-16px !important;transition-duration:520ms}
+  .pp-swc{min-width:0;overflow:clip}
+  #p2-b3 .p2-vc{position:relative}
+  .pp-vb1{overflow:hidden;transition:width 340ms var(--ease),margin-left 340ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
+  .hp-nar .pp-vb1{width:0;margin-left:-8px;transition:width 520ms var(--ease),margin-left 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
+  .pp-vb2{position:absolute;left:16px;bottom:16px}
+  .pp-th{overflow:hidden;transition:width 340ms var(--ease),margin-right 340ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
+  .hp-nar .pp-th{width:0 !important;margin-right:-16px;transition:width 520ms var(--ease),margin-right 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
+  #p2-b3m > .p2-params:last-child > .p2-box{transition:height 340ms var(--ease)}
+  .hp-nar #p2-b3m > .p2-params:last-child > .p2-box{height:var(--pp-swh,164px) !important;transition-duration:520ms}
+
+  /* Сборка: колонка агента 416 → 320, зазор 48 → 24; фаза остаётся в своей клетке и мельчает той же кривой (scale до
+     .75, длинная — сколько нужно, --phs из логики); раскадровка — те же четыре колонки, сужаются; у вариантов
+     раскадровки слова хода гаснут и сжимаются кеглем до нуля (ширина — той же кривой; галочки остаются), сегменты плотнее; «Не получилось» — поля 48 → 24; заголовок «Как думает агент» 20 → 18 px, зазор 16 → 8 */
+  .bd-two{grid-template-columns:minmax(0,1fr) 416px !important;column-gap:48px !important;transition:grid-template-columns 340ms var(--ease),column-gap 340ms var(--ease)}
+  .hp-nar .bd-two{grid-template-columns:minmax(0,1fr) 320px !important;column-gap:24px !important;transition-duration:520ms}
+  .bd-two .p2-ph{transform-origin:0 50%;transition:opacity 360ms var(--ease),transform 360ms var(--ease),scale 340ms var(--ease)}
+  .bd-two .p2-ph-past,.bd-two .p2-ph-next{transition-duration:240ms,240ms,340ms}
+  .hp-nar .bd-two .p2-ph{scale:var(--phs,.75);transition-duration:360ms,360ms,520ms}
+  .hp-nar .bd-two .p2-ph-past,.hp-nar .bd-two .p2-ph-next{transition-duration:240ms,240ms,520ms}
+  .bd-two .bk-vst > span{white-space:nowrap;transition:font-size 340ms var(--ease),margin-left 340ms var(--ease),opacity 160ms var(--ease) 80ms}
+  .hp-nar .bd-two .bk-vst > span{font-size:0;margin-left:-4px;opacity:0;transition:font-size 520ms var(--ease),margin-left 520ms var(--ease),opacity 240ms var(--ease)}
+  .bd-two .p2-seg{transition:transform 160ms var(--ease),padding 340ms var(--ease)}
+  .hp-nar .bd-two .p2-seg{padding:0 8px;transition:transform 160ms var(--ease),padding 520ms var(--ease)}
+  .bd-two > aside > div:first-child{transition:gap 340ms var(--ease)}
+  .hp-nar .bd-two > aside > div:first-child{gap:8px !important;transition-duration:520ms}
+  .bd-two > aside > div:first-child > h2{flex:none;transition:font-size 340ms var(--ease)}
+  .hp-nar .bd-two > aside > div:first-child > h2{font-size:18px !important;transition-duration:520ms}
+  .bd-two > aside > div:first-child > span{min-width:0}
+  .bd-two > aside > div:first-child > span > span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+  .bd-two .bf-empty{transition:padding 340ms var(--ease)}
+  .hp-nar .bd-two .bf-empty{padding:40px 24px;transition-duration:520ms}
+  /* «Подробнее» — лист резиновый (как «Результат»): вкладки плотнее; вторая колонка «Качества» 526 → 376 и «Агента» → 340 (короткие подписи и заголовки в одну строку, как в широкой), первая «Почему так» 526 → 416;
+     «Исправить всё автоматически» сжимается и гаснет; у «Вернуть как было» и «Изменить» в узкой остаётся значок;
+     «План»: колонка «О плане» 416 → 300, в ряду плана миниатюра 160 → 120, заголовок 232 → 160; «Шаблон»: та же
+     полоса, дорожки уже, название 32 → 24 px, «Аа» и подсказка палитры сжимаются и гаснут, правила остаются 416 (уже — макеты), факты «формат» и «слайда» 112 → 84;
+     «Слайд N шаблона»: места для содержания — третья дорожка, сжимается до нуля и гаснет (только в широкой) */
+  .dd-tabs .p2-rseg{transition:transform 160ms var(--ease),padding 340ms var(--ease)}
+  .hp-nar .dd-tabs .p2-rseg{padding:0 12px;transition:transform 160ms var(--ease),padding 520ms var(--ease)}
+  .dd-g{transition:grid-template-columns 340ms var(--ease)}
+  .hp-nar .dd-g:not(.dw-g){grid-template-columns:minmax(0,1fr) 376px;transition-duration:520ms}
+  .hp-nar #dd-panel-agent .dd-g{grid-template-columns:minmax(0,1fr) 340px}
+  .hp-nar .dw-g{grid-template-columns:416px minmax(0,1fr);transition-duration:520ms}
+  .dq-allw{display:block;max-width:320px;overflow:hidden;transition:max-width 340ms var(--ease),margin-left 340ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
+  .hp-nar .dq-allw{max-width:0;margin-left:-16px;transition:max-width 520ms var(--ease),margin-left 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
+  :is(.dla-ob,.dpl-col .p2-ob){transition:transform 160ms var(--ease),padding 340ms var(--ease),gap 340ms var(--ease)}
+  :is(.dla-ob,.dpl-col .p2-ob) > span{transition:font-size 340ms var(--ease),opacity 160ms var(--ease) 80ms}
+  .hp-nar :is(.dla-ob,.dpl-col .p2-ob){padding:0 11px !important;gap:0;transition:transform 160ms var(--ease),padding 520ms var(--ease),gap 520ms var(--ease)}
+  .hp-nar :is(.dla-ob,.dpl-col .p2-ob) > span{font-size:0;opacity:0;transition:font-size 520ms var(--ease),opacity 240ms var(--ease)}
+  #dd-panel-plan{transition:grid-template-columns 340ms var(--ease)}
+  .hp-nar #dd-panel-plan{grid-template-columns:minmax(0, 1fr) 300px !important;transition-duration:520ms}
+  .dpl-row{transition:transform 160ms var(--ease),grid-template-columns 340ms var(--ease)}
+  .hp-nar .dpl-row{grid-template-columns:120px 160px minmax(0,1fr);transition-duration:160ms,520ms}
+  .dpl-th{transition:width 340ms var(--ease),height 340ms var(--ease)}
+  .hp-nar .dpl-th{width:120px;height:68px;transition-duration:520ms}
+  .dpl-tr > span{min-width:0;overflow-wrap:anywhere}
+  .dtp-band{transition:grid-template-columns 340ms var(--ease)}
+  .hp-nar .dtp-band{grid-template-columns:minmax(0,1fr) 84px 84px 144px 140px 180px;transition-duration:520ms}
+  .dtp-fact dt{white-space:normal}
+  .dtp-name{transition:font-size 340ms var(--ease),line-height 340ms var(--ease)}
+  .hp-nar .dtp-name{font-size:24px;transition-duration:520ms}
+  .dtp-aa,.dtp-palhint{transition:font-size 340ms var(--ease),margin-right 340ms var(--ease),opacity 160ms var(--ease) 80ms}
+  .hp-nar :is(.dtp-aa,.dtp-palhint){font-size:0;opacity:0;transition:font-size 520ms var(--ease),margin-right 520ms var(--ease),opacity 240ms var(--ease)}
+  .hp-nar .dtp-aa{margin-right:-16px}
+  .dtp-g{transition:grid-template-columns 340ms var(--ease)}
+  .hp-nar .dtp-g{grid-template-columns:minmax(0, 1fr) 416px !important;transition-duration:520ms}
+  .dpt-g{grid-template-columns:minmax(0,576px) 296px minmax(0,1fr) !important;transition:grid-template-columns 340ms var(--ease),margin-right 340ms var(--ease)}
+  .hp-nar .dpt-g{grid-template-columns:minmax(0,576px) 296px minmax(0,0fr) !important;margin-right:-32px;transition-duration:520ms}
+  .dpt-plw{overflow:clip}
+  /* «Качество»: строка счёта 15 → 13 px, значок у «Исправить отмеченные» сжимается и гаснет; «Файлы»: те же две колонки,
+     правая 50 % → 44 % (380 px при 1440), кнопки плотнее, «на экране» и подпись варианта в «Паспорте» сжимаются и гаснут, у плиток итога значки
+     сжимаются и гаснут, длинная подпись — многоточием */
+  .dq-cnts{transition:font-size 340ms var(--ease)}
+  .hp-nar .dq-cnts{font-size:13px !important;transition-duration:520ms}
+  .dq-cta svg{transition:width 340ms var(--ease),margin-right 340ms var(--ease),opacity 160ms var(--ease) 80ms}
+  .hp-nar .dq-cta svg{width:0;margin-right:-12px;opacity:0;transition:width 520ms var(--ease),margin-right 520ms var(--ease),opacity 240ms var(--ease)}
+  .df-card li .p2-ob{transition:transform 160ms var(--ease),padding 340ms var(--ease)}
+  .hp-nar .df-card li .p2-ob{padding:0 10px !important;transition:transform 160ms var(--ease),padding 520ms var(--ease)}
+  .df-t{min-width:0;overflow:hidden;text-overflow:ellipsis}
+  .df-grid{grid-template-columns:minmax(0,1fr) calc(50% - 8px) !important;transition:grid-template-columns 340ms var(--ease)}
+  .hp-nar .df-grid{grid-template-columns:minmax(0,1fr) calc(44.09% - 8px) !important;transition-duration:520ms}
+  .df-now,.df-pb{overflow:hidden;transition:font-size 340ms var(--ease),padding 340ms var(--ease),margin-left 340ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
+  .hp-nar :is(.df-now,.df-pb){font-size:0;padding:0;margin-left:-8px;transition:font-size 520ms var(--ease),padding 520ms var(--ease),margin-left 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
+  .df-tl > span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+  .df-tl svg{transition:width 340ms var(--ease),margin-right 340ms var(--ease),opacity 160ms var(--ease) 80ms}
+  .hp-nar .df-tl svg{width:0;margin-right:-8px;opacity:0;transition:width 520ms var(--ease),margin-right 520ms var(--ease),opacity 240ms var(--ease)}
 }
-@media (min-width: 901px) and (max-width: 1379px){
-  .hp-fn .tx-fw-imp{transform:translateY(148px)}
+/* Многострочный текст не переносится заново посреди хода (как на «Результате»: его текстовые блоки не меняют ширину —
+   колонка и компактный вид подменяются на месте). Блок, ширина которого в узкой раскладке другая, — «стопка» (hp-tx):
+   в одной клетке широкая копия (hp-txw, сам блок) и узкая (hp-txn, клон, свёрстанный на узкую ширину). Ширина каждой
+   копии на всём ходу постоянна: клетка сужается вместе с колодой по той же кривой, а --hpp (0 → 1, тот же ход, что сетка
+   hp-wrap) прибавляет к ней ровно то, на что она уже сузилась (--hpd — на сколько клетка у́же в узкой раскладке):
+   широкая копия = клетка + --hpd·p (в начале — вся клетка), узкая = клетка − --hpd·(1 − p) (в конце — вся клетка).
+   Подмена — как у полного и компактного вида «Результата»: открытие — широкая гаснет 240 мс с 0, узкая проявляется
+   240 мс с 120; закрытие — узкая гаснет 160 мс, широкая проявляется 160 мс через 80. Высота копий идёт auto ↔ 0 той же
+   кривой (520 / 340 мс), поэтому высота клетки и коробки вокруг меняется непрерывно; текст внутри не переносится ни в
+   одном кадре. */
+@property --hpp{syntax:'<number>';inherits:true;initial-value:0}
+@media (min-width: 901px){
+  .hp-wrap{transition:grid-template-columns 340ms var(--ease),column-gap 340ms var(--ease),--hpp 340ms var(--ease)}
+  .hp-wrap.hp-nar{--hpp:1}
+  .hp-tx{display:grid;grid-template-columns:minmax(0,1fr);align-items:start;min-width:0;overflow:clip;overflow-clip-margin:8px;interpolate-size:allow-keywords}
+  .hp-tx.hp-txf{flex:1 1 0%}
+  span.hp-tx{display:grid}
+  .hp-tx > .hp-txw,.hp-tx > .hp-txn{grid-area:1 / 1;min-width:0;overflow:clip;overflow-clip-margin:8px;box-sizing:border-box}
+  .hp-tx > .hp-txw{width:calc(100% + var(--hpd,0px) * var(--hpp)) !important;transition:height 340ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
+  .hp-nar .hp-tx > .hp-txw{height:0;opacity:0;visibility:hidden;pointer-events:none;transition:height 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
+  .hp-tx > .hp-txn{width:calc(100% - var(--hpd,0px) * (1 - var(--hpp))) !important;height:0;opacity:0;visibility:hidden;pointer-events:none;transition:height 340ms var(--ease),opacity 160ms var(--ease),visibility 0s linear 160ms}
+  .hp-nar .hp-tx > .hp-txn{height:auto;opacity:1;visibility:inherit;pointer-events:auto;transition:height 520ms var(--ease),opacity 240ms var(--ease) 120ms,visibility 0s linear 0s}
+  /* поле «О чём презентация»: обе копии во всю высоту поля, меняется только прозрачность */
+  .hp-tx.hp-txa{align-items:stretch;flex:1 1 0%;min-height:0;overflow:clip}
+  .hp-txa > textarea.hp-txw,.hp-txa > textarea.hp-txn,.hp-nar .hp-txa > textarea.hp-txw,.hp-nar .hp-txa > textarea.hp-txn{height:auto;overflow:auto}
+  .tx-note > .hp-tx{align-self:flex-start}
+  /* подсказка роли в «Агенте» в широкой раскладке — одна строка (при 1440): в узкой не переносится, а сокращается
+     многоточием, ряд имени не перестраивается; при закрытии строка снова может переноситься, только когда колода
+     уже широкая (дискретный переход 680 мс — смена на середине, к концу хода 340) */
+  .da-head{transition:flex-wrap 680ms allow-discrete}
+  .da-head > .da-name{flex:none}
+  .da-hint{transition:white-space 680ms allow-discrete,text-overflow 680ms allow-discrete}
+  .hp-nar .da-head{flex-wrap:nowrap;transition:none}
+  .hp-nar .da-hint{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:none}
+  /* --hpd по замеру: на сколько клетка у́же в узкой раскладке (не зависит от ширины окна) */
+  [data-tx="a-a"]{--hpd:186px}
+  [data-tx="a-hint2"]{--hpd:186px}
+  [data-tx="a-q"]{--hpd:186px}
+  [data-tx="a-sum"]{--hpd:230px}
+  [data-tx="a-tx"]{--hpd:230px}
+  [data-tx="b-err"]{--hpd:96px}
+  [data-tx="b-hint"]{--hpd:96px}
+  [data-tx="b-line"]{--hpd:96px}
+  [data-tx="c-note"]{--hpd:416px}
+  [data-tx="c-swd"]{--hpd:138.667px}
+  [data-tx="c-swt"]{--hpd:138.667px}
+  [data-tx="c-ta"]{--hpd:416px}
+  [data-tx="c-vhint"]{--hpd:-33.333px}
+  [data-tx="p-body"]{--hpd:188px}
+  [data-tx="p-ctx"]{--hpd:116px}
+  [data-tx="p-ctx1"]{--hpd:16.56px}
+  [data-tx="p-hd"]{--hpd:72px}
+  [data-tx="p-meta"]{--hpd:116px}
+  [data-tx="p-sub"]{--hpd:116px}
+  [data-tx="q-acc"]{--hpd:150px}
+  [data-tx="q-ex1"]{--hpd:150px}
+  [data-tx="q-ex2"]{--hpd:150px}
+  [data-tx="q-eye"]{--hpd:150px}
+  [data-tx="q-kept"]{--hpd:150px}
+  [data-tx="q-msg"]{--hpd:266px}
+  [data-tx="q-row"]{--hpd:150px}
+  [data-tx="w-crit"]{--hpd:110px}
+  [data-tx="w-dd"]{--hpd:110px}
+  [data-tx="w-form"]{--hpd:110px}
+  [data-tx="w-ok"]{--hpd:306px}
+  [data-tx="w-sim"]{--hpd:306px}
+  [data-tx="w-why"]{--hpd:110px}
 }
 @media (max-width: 900px){
-  .hp-nw{display:none !important}
+  .hp-txn{display:none !important}
+}
+@media (max-width: 900px){
+  .hp-no{display:none !important}
   .p2-hx{display:contents}
   .p2-ttl-box{height:auto}
   .p2-ttl-sz{display:none}
   .p2-ttl-v{position:static;transform:none !important}
+  .tp-row{display:contents}
 }
 </style>
 </helmet>
@@ -1331,13 +1457,13 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <sc-if value="{{ more }}" hint-placeholder-val="{{ false }}"><button type="button" class="p2-sbtn" onClick="{{ backTpl }}" aria-label="Вернуться к шагу «Шаблон»"></button></sc-if>
 </div>
 
-<div class="p2-cbox {{ head1 }}">
+<div class="{{ head1 }}">
 <div class="p2-hrow" style="display:flex; align-items:center; gap:24px; height:64px;">
 <button type="button" class="p2-head" onClick="{{ toggleTpl }}" aria-expanded="{{ tplOpenStr }}" aria-controls="p2-b1">
 <span class="p2-num" aria-hidden="true" style="color:#0B1220;">01</span>
 <span class="p2-ttl-box"><span class="p2-ttl p2-ttl-sz" aria-hidden="true">Шаблон</span><span class="p2-ttl p2-ttl-v" style="color:#0B1220;">Шаблон</span></span>
 </button>
-<div class="p2-hx p2-fx">
+<div class="p2-hx">
 <span style="flex:1; min-width:0;"></span>
 <sc-if value="{{ tplOpen }}" hint-placeholder-val="{{ false }}">
 <div class="p2-in" style="display:flex; align-items:center; gap:24px;">
@@ -1359,13 +1485,18 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 </div>
 </div>
 
-<div class="p2-fx">
-<div id="p2-b1" class="p2-body p2-g4 {{ body1 }}" style="position:relative; display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:16px; margin:24px 0 0 192px;">
+<div>
+<div id="p2-b1" class="p2-body p2-g4 {{ body1 }} {{ tpAnl }}" style="position:relative; display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:16px; margin:24px 0 0 192px;">
 <!-- Лента (как C-templates): 6 обложек — свои первыми, выбранная всегда видна; остальные за плиткой «Все шаблоны» -->
 <sc-if value="{{ tpRibOn }}" hint-placeholder-val="{{ true }}">
-<sc-for list="{{ tpRib }}" as="t" hint-placeholder-count="6">
-<div class="p2-stag p2-in {{ t.nh }}" style="animation-delay: {{ t.delay }}; transition-delay: {{ t.delay }};">
-<div class="tt-tile">
+<!-- ряды ленты: в узкой колоде у каждого ряда одна дорожка сжимается до нуля (её обложка гаснет на месте), остальные три
+     сужаются вместе с плитой — четыре обложки в три колонки без перескоков; выбранная видна всегда -->
+<sc-for list="{{ tpRows }}" as="r" hint-placeholder-count="2">
+<div class="tp-row" style="--tn: {{ r.tn }};">
+<sc-for list="{{ r.slots }}" as="t" hint-placeholder-count="4">
+<div class="p2-stag p2-in tp-cell {{ t.cut }}" style="animation-delay: {{ t.delay }}; transition-delay: {{ t.delay }};">
+<sc-if value="{{ t.isCover }}" hint-placeholder-val="{{ true }}">
+<div class="tt-tile {{ t.wo }}">
 <button type="button" class="p2-card" onClick="{{ t.pick }}" aria-pressed="{{ t.pressed }}" title="{{ t.full }}">
 <span class="p2-cover {{ t.selCls }}">
 <sc-if value="{{ t.hasImg }}" hint-placeholder-val="{{ true }}"><img src="{{ t.img }}" alt="Обложка шаблона {{ t.name }}" style="display:block; width:100%; height:142px; object-fit:cover; border-radius:16px; box-shadow:0 0 0 1px rgba(11,18,32,.08);"></sc-if>
@@ -1382,25 +1513,20 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <span>Слайды</span>
 </button>
 </div>
-</div>
-</sc-for>
-
-<sc-if value="{{ tpMoreOn }}" hint-placeholder-val="{{ true }}">
-<div class="p2-stag p2-in {{ tpMoreCls }}" style="animation-delay:240ms; transition-delay:240ms;">
-<button type="button" class="p2-card" onClick="{{ tpGalOpen }}" aria-label="Все шаблоны, {{ tpMoreText }}" title="{{ tpMoreTip }}">
+</sc-if>
+<sc-if value="{{ t.isAll }}" hint-placeholder-val="{{ false }}">
+<button type="button" class="p2-card" onClick="{{ t.galOpen }}" aria-label="Все шаблоны, {{ t.moreText }}" title="{{ t.moreTip }}">
 <span class="p2-cover tt-act">
 <span class="p2-lic" aria-hidden="true"><span class="p2-lic-b"></span><span class="p2-lic-f"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4h2.5a2 2 0 0 1 2 2v2.5a2 2 0 0 1 -2 2h-2.5a2 2 0 0 1 -2 -2v-2.5a2 2 0 0 1 2 -2z M15.5 4h2.5a2 2 0 0 1 2 2v2.5a2 2 0 0 1 -2 2h-2.5a2 2 0 0 1 -2 -2v-2.5a2 2 0 0 1 2 -2z M6 13.5h2.5a2 2 0 0 1 2 2v2.5a2 2 0 0 1 -2 2h-2.5a2 2 0 0 1 -2 -2v-2.5a2 2 0 0 1 2 -2z M15.5 13.5h2.5a2 2 0 0 1 2 2v2.5a2 2 0 0 1 -2 2h-2.5a2 2 0 0 1 -2 -2v-2.5a2 2 0 0 1 2 -2z"></path></svg></span></span>
-<span class="tt-note"><span class="hp-wd">{{ tpMoreText }}</span><span class="hp-nw">{{ tpMoreTextS }}</span></span>
+<span class="tt-note"><span class="hp-sw"><span class="hp-wo">{{ t.moreText }}</span><span class="hp-no">{{ t.moreTextN }}</span></span></span>
 </span>
 <span class="tt-cap">
 <span class="tt-name">Все шаблоны</span>
 </span>
 </button>
-</div>
 </sc-if>
-
-<div class="p2-stag p2-in" style="animation-delay:280ms; transition-delay:280ms;">
-<button type="button" class="p2-card" onClick="{{ tpUpload }}">
+<sc-if value="{{ t.isUp }}" hint-placeholder-val="{{ false }}">
+<button type="button" class="p2-card" onClick="{{ t.upload }}">
 <span class="p2-cover tt-act">
 <span class="p2-lic" aria-hidden="true"><span class="p2-lic-b"></span><span class="p2-lic-f"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 14.5V4 M7.5 8.5L12 4l4.5 4.5 M4.5 15.5v2A2.5 2.5 0 0 0 7 20h10a2.5 2.5 0 0 0 2.5-2.5v-2"></path></svg></span></span>
 <span class="tt-note"><span>.pptx, .potx, .ppt или .odp</span><span>до 200 МБ</span></span>
@@ -1409,7 +1535,11 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <span class="tt-name">Загрузить свой</span>
 </span>
 </button>
+</sc-if>
 </div>
+</sc-for>
+</div>
+</sc-for>
 </sc-if>
 
 <!-- Разбор загруженного файла (как C-analyzing): слева 2×2 плитки (первая — разбираемый файл), справа на две колонки — ход разбора -->
@@ -1430,8 +1560,8 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 </div>
 
 <sc-for list="{{ tpAn2 }}" as="t" hint-placeholder-count="2">
-<div class="p2-stag p2-in {{ t.out }} {{ t.nh }}" style="animation-delay: {{ t.delay }}; transition-delay: {{ t.delay }};">
-<div class="an-tile">
+<div class="p2-stag p2-in {{ t.out }} {{ t.cut }}" style="animation-delay: {{ t.delay }}; transition-delay: {{ t.delay }};">
+<div class="an-tile {{ t.wo }}">
 <button type="button" class="p2-card" onClick="{{ t.pick }}" aria-pressed="{{ t.pressed }}" title="{{ t.full }}">
 <span class="p2-cover {{ t.selCls }}">
 <sc-if value="{{ t.hasImg }}" hint-placeholder-val="{{ true }}"><img src="{{ t.img }}" alt="Обложка шаблона {{ t.name }}" style="display:block; width:100%; height:142px; object-fit:cover; border-radius:16px; box-shadow:0 0 0 1px rgba(11,18,32,.08);"></sc-if>
@@ -1452,16 +1582,18 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 </sc-for>
 
 <sc-if value="{{ tpAnMore }}" hint-placeholder-val="{{ true }}">
-<div class="p2-stag p2-in {{ tpOut }} {{ tpAnCls }}" style="animation-delay:120ms; transition-delay:120ms;">
+<div class="p2-stag p2-in {{ tpOut }} tp-cut" style="animation-delay:120ms; transition-delay:120ms;">
+<div class="hp-wo">
 <button type="button" class="p2-card" onClick="{{ tpGalOpen }}" aria-label="Все шаблоны, {{ tpAnText }}" title="{{ tpAnTip }}">
 <span class="p2-cover an-act">
 <span class="p2-lic" aria-hidden="true"><span class="p2-lic-b"></span><span class="p2-lic-f"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4h2.5a2 2 0 0 1 2 2v2.5a2 2 0 0 1 -2 2h-2.5a2 2 0 0 1 -2 -2v-2.5a2 2 0 0 1 2 -2z M15.5 4h2.5a2 2 0 0 1 2 2v2.5a2 2 0 0 1 -2 2h-2.5a2 2 0 0 1 -2 -2v-2.5a2 2 0 0 1 2 -2z M6 13.5h2.5a2 2 0 0 1 2 2v2.5a2 2 0 0 1 -2 2h-2.5a2 2 0 0 1 -2 -2v-2.5a2 2 0 0 1 2 -2z M15.5 13.5h2.5a2 2 0 0 1 2 2v2.5a2 2 0 0 1 -2 2h-2.5a2 2 0 0 1 -2 -2v-2.5a2 2 0 0 1 2 -2z"></path></svg></span></span>
-<span class="an-note"><span class="hp-wd">{{ tpAnText }}</span><span class="hp-nw">{{ tpAnTextS }}</span></span>
+<span class="an-note"><span>{{ tpAnText }}</span></span>
 </span>
 <span class="an-cap">
 <span class="an-name">Все шаблоны</span>
 </span>
 </button>
+</div>
 </div>
 </sc-if>
 
@@ -1517,19 +1649,19 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <sc-if value="{{ more }}" hint-placeholder-val="{{ false }}"><button type="button" class="p2-sbtn" onClick="{{ backText }}" aria-label="Вернуться к шагу «Текст»"></button></sc-if>
 </div>
 
-<div class="p2-cbox {{ head2 }}">
+<div class="{{ head2 }}">
 <div class="p2-hrow" style="display:flex; align-items:center; gap:24px; height:64px;">
 <button type="button" class="p2-head" onClick="{{ toggleText }}" aria-expanded="{{ textOpenStr }}" aria-controls="p2-b2">
 <span class="p2-num" aria-hidden="true" style="color:#2563EB;">02</span>
 <span class="p2-ttl-box"><span class="p2-ttl p2-ttl-sz" aria-hidden="true">Текст</span><span class="p2-ttl p2-ttl-v" style="color:#0B1220;">Текст</span></span>
 </button>
-<div class="p2-hx p2-fx">
+<div class="p2-hx">
 <div class="p2-in tx-fg {{ txHead }}" style="display:flex; align-items:center; gap:12px; animation-delay:40ms;">
 <button type="button" class="p2-ob" onClick="{{ txFileBtn }}" title="Текст из файла .txt или .md" aria-describedby="ct-fmt" aria-haspopup="menu" aria-expanded="{{ txMenuStr }}" aria-controls="tx-menu" style="height:40px;">
 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19.5 11.5l-7.6 7.6a4.6 4.6 0 0 1-6.5-6.5l8.1-8.1a3.1 3.1 0 0 1 4.4 4.4l-8 8a1.55 1.55 0 0 1-2.2-2.2l7.3-7.3"></path></svg>
 <span>Из файла</span>
 </button>
-<span id="ct-fmt" class="p2-hide-s {{ txFmt }}" style="font-size:13px; font-weight:500; line-height:20px; color:#5A6272; white-space:nowrap;">.txt или .md</span>
+<span class="hp-wo tx-fmtw"><span id="ct-fmt" class="p2-hide-s {{ txFmt }}" style="font-size:13px; font-weight:500; line-height:20px; color:#5A6272; white-space:nowrap;">.txt или .md</span></span>
 <div id="tx-menu" role="menu" aria-label="Выберите файл" class="tx-menu {{ txMenuCls }}">
 <p class="tx-mcap">Выберите файл</p>
 <sc-for list="{{ txFiles }}" as="f" hint-placeholder-count="3">
@@ -1542,8 +1674,10 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 </div>
 <span style="flex:1; min-width:0;"></span>
 <p class="p2-in p2-hide-s tx-top {{ txHintTop }}" style="display:flex; align-items:center; gap:8px; min-width:0; margin:0; font-size:15px; font-weight:500; line-height:24px; color:#5A6272; white-space:nowrap; animation-delay:80ms;">
-<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M12 11v5 M12 7.8h.01"></path></svg>
-<span class="hp-wd">{{ txHintLong }}</span><span class="hp-nw">Готовый текст — агент разложит его по слайдам</span>
+<span class="hp-sw tx-tops">
+<span class="hp-wo"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M12 11v5 M12 7.8h.01"></path></svg><span>{{ txHintLong }}</span></span>
+<span class="hp-no"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M12 11v5 M12 7.8h.01"></path></svg><span>Готовый текст — агент разложит его по слайдам</span></span>
+</span>
 </p>
 <sc-if value="{{ textClosed }}" hint-placeholder-val="{{ false }}">
 <div class="p2-in tx-closed" style="display:flex; align-items:center; gap:24px; min-width:0;">
@@ -1554,24 +1688,24 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 </div>
 </div>
 
-<div class="p2-fx">
+<div>
 <div id="p2-b2" class="p2-body {{ body2 }}" style="margin:24px 0 0 192px;">
 <div class="tx-b2">
 <div class="tx-note {{ txNote }}" role="note" style="display:flex; align-items:center; gap:16px; flex:none; padding:16px 24px; border-radius:24px; box-shadow:inset 0 0 0 1px rgba(37,99,235,.14);">
 <span aria-hidden="true" style="display:flex; align-items:center; justify-content:center; flex:none; width:32px; height:32px; border-radius:999px; background:#2563EB; color:#FFFFFF;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.25 7.75l2 2-9.4 9.4a1.41 1.41 0 0 1-2-2z M12.5 9.5l2 2 M18.5 3v3.5 M16.75 4.75h3.5 M19.5 12.5v2.5 M18.25 13.75h2.5 M9.5 3.5v2 M8.5 4.5h2"></path></svg></span>
-<p style="min-width:0; margin:0; font-size:14px; font-weight:500; line-height:20px; color:#0B1220;">Текст и оформление — из презентации <b style="font-weight:700;">«Итоги квартала»</b>: 14 слайдов, 3 таблицы, 4 диаграммы, 6 изображений. Оценка исходной презентации — <b style="font-weight:700;">62 из 100</b>. Модель нашла в ней <b style="font-weight:700;">9 проблем вёрстки</b>. Слайды останутся те же, вёрстка соберётся заново, а модель посмотрит на каждый новый слайд.</p>
+<div class="hp-tx hp-txf" data-tx="c-note"><p class="hp-txw" style="min-width:0; margin:0; font-size:14px; font-weight:500; line-height:20px; color:#0B1220;">Текст и оформление — из презентации <b style="font-weight:700;">«Итоги квартала»</b>: 14 слайдов, 3 таблицы, 4 диаграммы, 6 изображений. Оценка исходной презентации — <b style="font-weight:700;">62 из 100</b>. Модель нашла в ней <b style="font-weight:700;">9 проблем вёрстки</b>. Слайды останутся те же, вёрстка соберётся заново, а модель посмотрит на каждый новый слайд.</p><p class="hp-txn" style="min-width:0; margin:0; font-size:14px; font-weight:500; line-height:20px; color:#0B1220;" aria-hidden="true">Текст и оформление — из презентации <b style="font-weight:700;">«Итоги квартала»</b>: 14 слайдов, 3 таблицы, 4 диаграммы, 6 изображений. Оценка исходной презентации — <b style="font-weight:700;">62 из 100</b>. Модель нашла в ней <b style="font-weight:700;">9 проблем вёрстки</b>. Слайды останутся те же, вёрстка соберётся заново, а модель посмотрит на каждый новый слайд.</p></div>
 </div>
 <div class="tx-fw {{ txFw }}">
 <div class="p2-field p2-stag tx-ring {{ txBad }}" style="display:flex; flex-direction:column; height:244px; padding:24px; border-radius:24px; background:#FFFFFF;">
 <label style="display:flex; flex-direction:column; flex:1; min-height:0;">
 <span style="font-size:13px; font-weight:600; line-height:20px; color:#5A6272;">О чём презентация</span>
-<span class="p2-taw"><textarea class="p2-ta ct-ta p2-fade" aria-invalid="{{ txBadStr }}" aria-describedby="{{ txDesc }}" value="{{ text }}" onInput="{{ txOnText }}" style="flex:1; min-height:0; width:100%; padding:0 0 24px; border:0; resize:none; background:transparent; font-family:inherit; font-size:16px; font-weight:500; line-height:24px; color:#0B1220;"></textarea><sc-if value="{{ phShow }}" hint-placeholder-val="{{ true }}"><span class="p2-tph" aria-hidden="true">{{ phText }}<span class="p2-caret {{ caretCls }}"></span></span></sc-if></span>
+<span class="p2-taw"><span class="hp-tx hp-txf hp-txa" data-tx="c-ta"><textarea class="hp-txw p2-ta ct-ta p2-fade" aria-invalid="{{ txBadStr }}" aria-describedby="{{ txDesc }}" value="{{ text }}" onInput="{{ txOnText }}" style="flex:1; min-height:0; width:100%; padding:0 0 24px; border:0; resize:none; background:transparent; font-family:inherit; font-size:16px; font-weight:500; line-height:24px; color:#0B1220;"></textarea><textarea class="hp-txn p2-ta ct-ta p2-fade" aria-invalid="{{ txBadStr }}" aria-describedby="{{ txDesc }}" value="{{ text }}" onInput="{{ txOnText }}" style="flex:1; min-height:0; width:100%; padding:0 0 24px; border:0; resize:none; background:transparent; font-family:inherit; font-size:16px; font-weight:500; line-height:24px; color:#0B1220;" aria-hidden="true" tabindex="-1"></textarea></span><sc-if value="{{ phShow }}" hint-placeholder-val="{{ true }}"><span class="p2-tph" aria-hidden="true">{{ phText }}<span class="p2-caret {{ caretCls }}"></span></span></sc-if></span>
 </label>
 <div class="p2-wrap" style="display:flex; align-items:center; justify-content:space-between; gap:24px; height:20px; margin-top:16px;">
 <div class="tx-sw">
 <p class="{{ txHintCls }}" style="display:flex; align-items:center; gap:8px; min-width:0; margin:0; font-size:14px; font-weight:500; line-height:20px; color:#5A6272;">
 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M12 11v5 M12 7.8h.01"></path></svg>
-<span class="hp-wd">{{ txHintShort }}</span><span class="hp-nw">Это тема — агент напишет полный текст</span>
+<span class="hp-sw tx-hsw"><span class="hp-wo">{{ txHintShort }}</span><span class="hp-no">Это тема — агент напишет полный текст</span></span>
 </p>
 <p id="ct-facts" class="{{ txFactsCls }}" style="display:flex; align-items:center; gap:8px; min-width:0; margin:0; font-size:14px; font-weight:500; line-height:20px; color:#5A6272;">
 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2563EB" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;"><path d="M5 9h14 M5 15h14 M10.5 4.5l-2 15 M15.5 4.5l-2 15"></path></svg>
@@ -1585,7 +1719,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 </div>
 <span class="tx-sw tx-swr">
 <span aria-live="polite" class="{{ txCharsCls }}" style="flex:none; font-size:13px; font-weight:600; line-height:20px; color:#5A6272; white-space:nowrap;">{{ chars }}</span>
-<span class="{{ txFixCls }}" style="flex:none; font-size:13px; font-weight:500; line-height:20px; color:#5A6272; white-space:nowrap;">Вставьте готовый текст или загрузите .txt и .md</span>
+<span class="hp-wo tx-fixw"><span class="{{ txFixCls }}" style="flex:none; font-size:13px; font-weight:500; line-height:20px; color:#5A6272; white-space:nowrap;">Вставьте готовый текст или загрузите .txt и .md</span></span>
 </span>
 </div>
 </div>
@@ -1612,15 +1746,15 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <span class="{{ num3 }}"><span class="p2-num p2-num3" aria-hidden="true" style="position:absolute; top:40px; left:48px; color:#FFFFFF;">03</span></span>
 
 <sc-if value="{{ c3 }}" hint-placeholder-val="{{ true }}">
-<div class="p2-cbox {{ head3 }}">
+<div class="{{ head3 }}">
 <div class="p2-hrow" style="display:flex; align-items:center; gap:24px; height:64px;">
 <button type="button" class="p2-head" onClick="{{ toggleMore }}" aria-expanded="{{ moreStr }}" aria-controls="p2-b3m">
 <span class="p2-spc" aria-hidden="true" style="display:block; width:160px; height:64px; flex:none;"></span>
 <span class="p2-ttl-box"><span class="p2-ttl p2-ttl-sz" aria-hidden="true">Параметры и запуск</span><span class="p2-ttl p2-ttl-v" style="color:#FFFFFF;">Параметры и запуск</span></span>
 </button>
-<div class="p2-hx p2-fx">
+<div class="p2-hx">
 <span style="flex:1; min-width:0;"></span>
-<span class="p2-hide-s pp-sum" style="font-size:15px; font-weight:600; line-height:24px; color:rgba(255,255,255,.64); white-space:nowrap;">{{ summary }}</span>
+<span class="p2-hide-s pp-sum hp-wo" style="font-size:15px; font-weight:600; line-height:24px; color:rgba(255,255,255,.64); white-space:nowrap;">{{ summary }}</span>
 <button type="button" class="p2-cta" onClick="{{ start }}">
 <span>Создать презентацию</span>
 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14 M13.5 6.5L19 12l-5.5 5.5"></path></svg>
@@ -1628,7 +1762,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 </div>
 </div>
 
-<div class="p2-fx">
+<div>
 <div id="p2-b3" class="p2-body p2-params {{ body3 }}" style="display:grid; grid-template-columns:216px repeat(3, minmax(0, 1fr)) 264px; gap:16px; height:88px; margin:24px 0 0 192px;">
 <div class="p2-box p2-stag" style="display:flex; align-items:center; justify-content:space-between; height:88px; padding:0 16px; transition-delay:0ms;">
 <button type="button" class="p2-rb" onClick="{{ dec }}" disabled="{{ decDis }}" aria-label="Меньше слайдов"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5.5 12h13"></path></svg></button>
@@ -1643,12 +1777,14 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <button type="button" role="checkbox" aria-checked="{{ v.checked }}" class="p2-vc {{ v.cls }}" onClick="{{ v.toggle }}">
 <span style="display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%;">
 <span style="font-size:16px; font-weight:700; line-height:24px; color:#FFFFFF;">{{ v.name }}</span>
-<span class="p2-vbox" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 12.5l4.25 4.25L18.5 8"></path></svg></span>
+<span class="p2-vbox hp-wo pp-vb1" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 12.5l4.25 4.25L18.5 8"></path></svg></span>
 </span>
-<span style="font-size:13px; font-weight:500; line-height:20px; color:rgba(255,255,255,.64);">{{ v.desc }}</span>
+<span class="hp-wo" style="font-size:13px; font-weight:500; line-height:20px; color:rgba(255,255,255,.64);">{{ v.desc }}</span>
+<span class="p2-vbox hp-no pp-vb2" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 12.5l4.25 4.25L18.5 8"></path></svg></span>
 </button>
 </div>
 </sc-for>
+<div class="hp-wo pp-swc">
 <div class="p2-box p2-stag" style="display:flex; flex-direction:column; justify-content:center; gap:8px; height:88px; padding:8px 16px; transition-delay:160ms;">
 <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; height:32px;">
 <span id="p2-sw1" style="font-size:14px; font-weight:600; line-height:20px; color:#FFFFFF;">Модель пишет тексты</span>
@@ -1657,6 +1793,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; height:32px;">
 <span id="p2-sw2" style="font-size:14px; font-weight:600; line-height:20px; color:#FFFFFF;">С изображениями</span>
 <button type="button" role="switch" aria-checked="{{ imagesStr }}" aria-labelledby="p2-sw2" class="p2-sw {{ imagesCls }}" onClick="{{ toggleImages }}"><span class="p2-sw-fill"></span><span class="p2-sw-knob"></span></button>
+</div>
 </div>
 </div>
 </div>
@@ -1706,7 +1843,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <sc-for list="{{ mvars }}" as="v" hint-placeholder-count="3">
 <div class="p2-stag" style="transition-delay: {{ v.delay }};">
 <button type="button" role="checkbox" aria-checked="{{ v.checked }}" class="p2-vc cp-vc {{ v.cls }}" onClick="{{ v.toggle }}" title="{{ v.full }}">
-<span aria-hidden="true" style="display:block; flex:none; width:156px; height:88px;">
+<span class="hp-wo pp-th" aria-hidden="true" style="display:block; flex:none; width:156px; height:88px;">
 <sc-if value="{{ v.isS }}" hint-placeholder-val="{{ true }}">
 <svg width="156" height="88" viewBox="0 0 172 96" fill="none" aria-hidden="true" style="display:block;"><rect x="0.5" y="0.5" width="171" height="95" rx="11.5" fill="rgba(255,255,255,.04)" stroke="rgba(255,255,255,.16)"></rect><path d="M20 24h64" stroke="rgba(255,255,255,.72)" stroke-width="6" stroke-linecap="round"></path><circle cx="22" cy="46" r="4" fill="#38BDF8"></circle><path d="M34 46h96" stroke="rgba(255,255,255,.48)" stroke-width="4" stroke-linecap="round"></path><circle cx="22" cy="60" r="4" fill="rgba(255,255,255,.32)"></circle><path d="M34 60h80" stroke="rgba(255,255,255,.32)" stroke-width="4" stroke-linecap="round"></path><circle cx="22" cy="74" r="4" fill="rgba(255,255,255,.32)"></circle><path d="M34 74h88" stroke="rgba(255,255,255,.32)" stroke-width="4" stroke-linecap="round"></path></svg>
 </sc-if>
@@ -1722,7 +1859,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <span style="font-size:16px; font-weight:700; line-height:24px; color:#FFFFFF; white-space:nowrap;">{{ v.name }}</span>
 <span class="p2-vbox" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 12.5l4.25 4.25L18.5 8"></path></svg></span>
 </span>
-<span style="font-size:13px; font-weight:500; line-height:20px; color:rgba(255,255,255,.64);">{{ v.hint }}</span>
+<span class="hp-tx" data-tx="c-vhint"><span class="hp-txw" style="font-size:13px; font-weight:500; line-height:20px; color:rgba(255,255,255,.64);">{{ v.hint }}</span><span class="hp-txn" style="font-size:13px; font-weight:500; line-height:20px; color:rgba(255,255,255,.64);" aria-hidden="true">{{ v.hint }}</span></span>
 </span>
 </button>
 </div>
@@ -1733,24 +1870,24 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <div class="p2-params p2-stag" style="display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:16px; margin-top:32px; transition-delay:280ms;">
 <div class="p2-box" style="height:104px; padding:16px 24px;">
 <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:16px;">
-<span id="cp-sw1" class="cp-nm" style="padding-top:2px; font-size:14px; font-weight:600; line-height:20px; color:#FFFFFF;">Модель пишет тексты слайдов</span>
+<div class="hp-tx hp-txf" data-tx="c-swt"><span id="cp-sw1" class="hp-txw cp-nm" style="padding-top:2px; font-size:14px; font-weight:600; line-height:20px; color:#FFFFFF;">Модель пишет тексты слайдов</span><span class="hp-txn cp-nm" style="padding-top:2px; font-size:14px; font-weight:600; line-height:20px; color:#FFFFFF;" aria-hidden="true">Модель пишет тексты слайдов</span></div>
 <button type="button" role="switch" aria-checked="{{ writesStr }}" aria-labelledby="cp-sw1" aria-describedby="cp-sw1d" class="p2-sw {{ writesCls }}" onClick="{{ toggleWrites }}"><span class="p2-sw-fill"></span><span class="p2-sw-knob"></span></button>
 </div>
-<p id="cp-sw1d" style="margin:4px 0 0; font-size:13px; font-weight:500; line-height:20px; color:rgba(255,255,255,.64);">{{ writesHint }}</p>
+<div class="hp-tx" data-tx="c-swd"><p class="hp-txw" id="cp-sw1d" style="margin:4px 0 0; font-size:13px; font-weight:500; line-height:20px; color:rgba(255,255,255,.64);">{{ writesHint }}</p><p class="hp-txn" style="margin:4px 0 0; font-size:13px; font-weight:500; line-height:20px; color:rgba(255,255,255,.64);" aria-hidden="true">{{ writesHint }}</p></div>
 </div>
 <div class="p2-box" style="height:104px; padding:16px 24px;">
 <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:16px;">
-<span id="cp-sw2" class="cp-nm" style="padding-top:2px; font-size:14px; font-weight:600; line-height:20px; color:#FFFFFF;">Модель проверяет слайды по картинке</span>
+<div class="hp-tx hp-txf" data-tx="c-swt"><span id="cp-sw2" class="hp-txw cp-nm" style="padding-top:2px; font-size:14px; font-weight:600; line-height:20px; color:#FFFFFF;">Модель проверяет слайды по картинке</span><span class="hp-txn cp-nm" style="padding-top:2px; font-size:14px; font-weight:600; line-height:20px; color:#FFFFFF;" aria-hidden="true">Модель проверяет слайды по картинке</span></div>
 <button type="button" role="switch" aria-checked="{{ eyesStr }}" aria-labelledby="cp-sw2" aria-describedby="cp-sw2d" class="p2-sw {{ eyesCls }}" onClick="{{ toggleEyes }}"><span class="p2-sw-fill"></span><span class="p2-sw-knob"></span></button>
 </div>
-<p id="cp-sw2d" style="margin:4px 0 0; font-size:13px; font-weight:500; line-height:20px; color:rgba(255,255,255,.64);">Посмотрит на каждый новый слайд</p>
+<div class="hp-tx" data-tx="c-swd"><p class="hp-txw" id="cp-sw2d" style="margin:4px 0 0; font-size:13px; font-weight:500; line-height:20px; color:rgba(255,255,255,.64);">Посмотрит на каждый новый слайд</p><p class="hp-txn" style="margin:4px 0 0; font-size:13px; font-weight:500; line-height:20px; color:rgba(255,255,255,.64);" aria-hidden="true">Посмотрит на каждый новый слайд</p></div>
 </div>
 <div class="p2-box" style="height:104px; padding:16px 24px;">
 <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:16px;">
-<span id="cp-sw3" class="cp-nm" style="padding-top:2px; font-size:14px; font-weight:600; line-height:20px; color:#FFFFFF;">Генерировать изображения</span>
+<div class="hp-tx hp-txf" data-tx="c-swt"><span id="cp-sw3" class="hp-txw cp-nm" style="padding-top:2px; font-size:14px; font-weight:600; line-height:20px; color:#FFFFFF;">Генерировать изображения</span><span class="hp-txn cp-nm" style="padding-top:2px; font-size:14px; font-weight:600; line-height:20px; color:#FFFFFF;" aria-hidden="true">Генерировать изображения</span></div>
 <button type="button" role="switch" aria-checked="{{ imagesStr }}" aria-labelledby="cp-sw3" aria-describedby="cp-sw3d" class="p2-sw {{ imagesCls }}" onClick="{{ toggleImages }}"><span class="p2-sw-fill"></span><span class="p2-sw-knob"></span></button>
 </div>
-<p id="cp-sw3d" style="margin:4px 0 0; font-size:13px; font-weight:500; line-height:20px; color:rgba(255,255,255,.64);">{{ imagesHint }}</p>
+<div class="hp-tx" data-tx="c-swd"><p class="hp-txw" id="cp-sw3d" style="margin:4px 0 0; font-size:13px; font-weight:500; line-height:20px; color:rgba(255,255,255,.64);">{{ imagesHint }}</p><p class="hp-txn" style="margin:4px 0 0; font-size:13px; font-weight:500; line-height:20px; color:rgba(255,255,255,.64);" aria-hidden="true">{{ imagesHint }}</p></div>
 </div>
 </div>
 </div>
@@ -1761,7 +1898,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 
 <sc-if value="{{ isBuild }}" hint-placeholder-val="{{ false }}">
 <sc-if value="{{ bdShow }}" hint-placeholder-val="{{ true }}">
-<div class="p2-cbox p2-fx bd-fxw">
+<div class="bd-fxw">
 <div class="p2-two bd-two {{ bdOut }}" style="display:grid; grid-template-columns:minmax(0, 1fr) 416px; gap:48px; height:652px;">
 
 <!-- левая колонка: фаза, время, раскадровка (заглушки → эскизы → слайды) или ошибка -->
@@ -1770,7 +1907,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <span class="p2-spc" aria-hidden="true" style="display:block; width:160px; height:64px; flex:none;"></span>
 <div class="p2-phs p2-in" style="position:relative; flex:1; min-width:0; height:48px; animation-delay:40ms;">
 <sc-for list="{{ bdPhases }}" as="ph" hint-placeholder-count="12">
-<span class="p2-ph {{ ph.cls }}" aria-hidden="true" style="font-family:'Unbounded','Manrope',sans-serif; font-weight:600; font-size:36px; line-height:48px; letter-spacing:-0.03em; color:#FFFFFF;">{{ ph.name }}</span>
+<span class="p2-ph {{ ph.cls }}" aria-hidden="true" style="--phs: {{ ph.phs }}; font-family:'Unbounded','Manrope',sans-serif; font-weight:600; font-size:36px; line-height:48px; letter-spacing:-0.03em; color:#FFFFFF;">{{ ph.name }}</span>
 </sc-for>
 <h1 class="p2-sr" aria-live="polite">{{ bdPhase }}</h1>
 </div>
@@ -1905,7 +2042,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <span class="p2-rname">{{ r.name }}</span>
 <span class="p2-sr">шаг {{ r.n }}, впереди</span>
 </div>
-<p class="bs-hint">{{ r.hint }}</p>
+<div class="hp-tx" data-tx="b-hint"><p class="hp-txw bs-hint">{{ r.hint }}</p><p class="hp-txn bs-hint" aria-hidden="true">{{ r.hint }}</p></div>
 </div>
 </li>
 </sc-for>
@@ -1929,10 +2066,10 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <span class="p2-sr">{{ r.sr }}</span>
 </div>
 <sc-for list="{{ r.lines }}" as="l" hint-placeholder-count="2">
-<p class="p2-in" style="margin:4px 0 0; font-size:14px; font-weight:500; line-height:20px; color:rgba(255,255,255,.72); animation-delay: {{ l.delay }};">{{ l.a }}<b style="font-weight:700; color:#FFFFFF;">{{ l.b }}</b>{{ l.c }}<span class="{{ l.arrCls }}">→</span><b style="font-weight:700; color:#FFFFFF;">{{ l.d }}</b></p>
+<div class="hp-tx" data-tx="b-line"><p class="hp-txw p2-in" style="margin:4px 0 0; font-size:14px; font-weight:500; line-height:20px; color:rgba(255,255,255,.72); animation-delay: {{ l.delay }};">{{ l.a }}<b style="font-weight:700; color:#FFFFFF;">{{ l.b }}</b>{{ l.c }}<span class="{{ l.arrCls }}">→</span><b style="font-weight:700; color:#FFFFFF;">{{ l.d }}</b></p><p class="hp-txn p2-in" style="margin:4px 0 0; font-size:14px; font-weight:500; line-height:20px; color:rgba(255,255,255,.72); animation-delay: {{ l.delay }};" aria-hidden="true">{{ l.a }}<b style="font-weight:700; color:#FFFFFF;">{{ l.b }}</b>{{ l.c }}<span class="{{ l.arrCls }}">→</span><b style="font-weight:700; color:#FFFFFF;">{{ l.d }}</b></p></div>
 </sc-for>
 <sc-if value="{{ r.isErr }}" hint-placeholder-val="{{ false }}">
-<p class="bf-err p2-in" style="animation-delay: {{ r.errDelay }};"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M12 7.5v5 M12 16.2h.01"></path></svg><span>{{ r.err }}</span></p>
+<div class="hp-tx" data-tx="b-err"><p class="hp-txw bf-err p2-in" style="animation-delay: {{ r.errDelay }};"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M12 7.5v5 M12 16.2h.01"></path></svg><span>{{ r.err }}</span></p><p class="hp-txn bf-err p2-in" style="animation-delay: {{ r.errDelay }};" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M12 7.5v5 M12 16.2h.01"></path></svg><span>{{ r.err }}</span></p></div>
 </sc-if>
 </div>
 </li>
@@ -2494,7 +2631,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <!-- СЛОЙ · «Подробнее» (как доски D-*), живой: открывается карточками и ссылками правой колонки результата -->
 <div id="p2-lay-d" class="p2-slot p2-lay {{ ddLay }}" style="position:absolute; left:0; right:0; top:0; height:812px; z-index:5; transform: {{ ddY }};">
 <section class="dd-sheet" role="region" aria-label="Подробнее о презентации «Интеграл»">
-<div class="p2-fx dd-fx">
+<div class="dd-fx">
 <div class="dd-top p2-ls" style="--d:120ms;">
 <div class="dd-tabs" role="tablist" aria-label="Разделы подробностей">
 <sc-for list="{{ ddTabs }}" as="tb" hint-placeholder-count="6">
@@ -2540,7 +2677,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 </div>
 <div style="flex:1; min-width:0;">
 <h3 class="dd-h">{{ dlq.head }}</h3>
-<p style="display:flex; align-items:center; gap:8px; margin:4px 0 0; font-size:15px; font-weight:500; line-height:24px; color:#0B1220; white-space:nowrap;">
+<p class="dq-cnts" style="display:flex; align-items:center; gap:8px; margin:4px 0 0; font-size:15px; font-weight:500; line-height:24px; color:#0B1220; white-space:nowrap;">
 <span>{{ dlq.nErr }}</span>
 <span aria-hidden="true" style="color:#5A6272;">·</span>
 <span style="display:inline-flex; align-items:center; gap:4px; font-weight:700; color:#B45309;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.27 4.75a2 2 0 0 1 3.46 0l7.02 12.25A2 2 0 0 1 19.02 20H4.98a2 2 0 0 1-1.73-3z M12 9.5v4 M12 16.8h.01"></path></svg>{{ dlq.nWarn }}</span>
@@ -2554,7 +2691,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <button type="button" class="p2-ob p2-in" onClick="{{ dlq.undo }}" style="animation-delay:40ms;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14.5L4.5 10 9 5.5 M4.5 10h10a5 5 0 0 1 0 10H11"></path></svg><span>Вернуть как было</span></button>
 </sc-if>
 <sc-if value="{{ dlq.allOn }}" hint-placeholder-val="{{ true }}">
-<button type="button" class="p2-ob dlq-ob" onClick="{{ dlq.fixAll }}" disabled="{{ dlq.busy }}">Исправить всё автоматически</button>
+<span class="hp-wo dq-allw"><button type="button" class="p2-ob dlq-ob" onClick="{{ dlq.fixAll }}" disabled="{{ dlq.busy }}">Исправить всё автоматически</button></span>
 </sc-if>
 <sc-if value="{{ dlq.ctaOn }}" hint-placeholder-val="{{ true }}">
 <button type="button" class="p2-cta dq-cta" onClick="{{ dlq.fix }}" disabled="{{ dlq.fixDis }}">
@@ -2606,7 +2743,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 </div>
 <div style="min-width:0;">
 <span class="dd-tag {{ i.tagCls }}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{ i.p1 }}"></path><path d="{{ i.p2 }}"></path><path d="{{ i.p3 }}"></path></svg>{{ i.sev }}</span>
-<p style="margin:8px 0 0; font-size:15px; font-weight:600; line-height:24px; color:#0B1220;">{{ i.msg }}</p>
+<div class="hp-tx" data-tx="q-msg"><p class="hp-txw" style="margin:8px 0 0; font-size:15px; font-weight:600; line-height:24px; color:#0B1220;">{{ i.msg }}</p><p class="hp-txn" style="margin:8px 0 0; font-size:15px; font-weight:600; line-height:24px; color:#0B1220;" aria-hidden="true">{{ i.msg }}</p></div>
 </div>
 </li>
 </sc-for>
@@ -2654,7 +2791,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 </div>
 <div style="min-width:0;">
 <span class="dd-tag {{ i.tagCls }}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{ i.p1 }}"></path><path d="{{ i.p2 }}"></path><path d="{{ i.p3 }}"></path></svg>{{ i.sev }}</span>
-<p style="margin:8px 0 0; font-size:15px; font-weight:600; line-height:24px; color:#0B1220;">{{ i.msg }}</p>
+<div class="hp-tx" data-tx="q-msg"><p class="hp-txw" style="margin:8px 0 0; font-size:15px; font-weight:600; line-height:24px; color:#0B1220;">{{ i.msg }}</p><p class="hp-txn" style="margin:8px 0 0; font-size:15px; font-weight:600; line-height:24px; color:#0B1220;" aria-hidden="true">{{ i.msg }}</p></div>
 </div>
 </li>
 </sc-for>
@@ -2683,7 +2820,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <p style="margin:0; font-size:14px; font-weight:500; line-height:20px; color:#5A6272;">посмотрел на 12 слайдов · пересобрал 1</p>
 </div>
 </div>
-<p style="margin:16px 0 0; font-size:14px; font-weight:500; line-height:20px; color:#5A6272;">Модель с компьютерным зрением посмотрела на каждый готовый слайд, как арт-директор перед отправкой клиенту. Где вёрстка мешала читать — собрала слайд заново и оставила новую версию, только если она лучше прежней.</p>
+<div class="hp-tx" data-tx="q-eye"><p class="hp-txw" style="margin:16px 0 0; font-size:14px; font-weight:500; line-height:20px; color:#5A6272;">Модель с компьютерным зрением посмотрела на каждый готовый слайд, как арт-директор перед отправкой клиенту. Где вёрстка мешала читать — собрала слайд заново и оставила новую версию, только если она лучше прежней.</p><p class="hp-txn" style="margin:16px 0 0; font-size:14px; font-weight:500; line-height:20px; color:#5A6272;" aria-hidden="true">Модель с компьютерным зрением посмотрела на каждый готовый слайд, как арт-директор перед отправкой клиенту. Где вёрстка мешала читать — собрала слайд заново и оставила новую версию, только если она лучше прежней.</p></div>
 
 <article aria-label="Слайд 9 пересобран" style="margin-top:16px; padding:16px; border-radius:16px; background:#F3F4F1;">
 <div style="display:flex; align-items:center; gap:8px; height:24px;">
@@ -2691,7 +2828,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <span style="min-width:0; font-size:14px; font-weight:700; line-height:20px; color:#0B1220; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Пример вычисления</span>
 <span class="dd-tag dd-tag-b" style="margin-left:auto; flex:none;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12a7.5 7.5 0 0 1 12.95-5.15L19.5 9 M19.5 4.5V9H15 M19.5 12a7.5 7.5 0 0 1-12.95 5.15L4.5 15 M4.5 19.5V15H9"></path></svg>пересобрал</span>
 </div>
-<p style="margin:12px 0 0; font-size:14px; font-weight:500; line-height:20px; color:#0B1220;">Вывод стоял последней строкой под тремя плашками и терялся — собрал заново.</p>
+<div class="hp-tx" data-tx="q-ex1"><p class="hp-txw" style="margin:12px 0 0; font-size:14px; font-weight:500; line-height:20px; color:#0B1220;">Вывод стоял последней строкой под тремя плашками и терялся — собрал заново.</p><p class="hp-txn" style="margin:12px 0 0; font-size:14px; font-weight:500; line-height:20px; color:#0B1220;" aria-hidden="true">Вывод стоял последней строкой под тремя плашками и терялся — собрал заново.</p></div>
 <div style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:16px; margin-top:16px;">
 <figure style="margin:0;">
 <figcaption class="dd-cap" style="margin-bottom:8px;">Было</figcaption>
@@ -2702,12 +2839,12 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <img src="/_blob/a6711f28fa01480a29f24df59e7d7986" alt="Слайд 9 после пересборки: вывод под заголовком, шаги строками" style="display:block; width:100%; aspect-ratio:16 / 9; object-fit:cover; border-radius:12px; box-shadow:0 0 0 1px rgba(11,18,32,.08);">
 </figure>
 </div>
-<p style="margin:16px 0 0; font-size:14px; font-weight:500; line-height:20px; color:#0B1220;"><b style="font-weight:700;">Почему новая:</b> вывод поднят под заголовок и выделен, шаги решения идут строками без плашек — формулам больше места.</p>
+<div class="hp-tx" data-tx="q-ex2"><p class="hp-txw" style="margin:16px 0 0; font-size:14px; font-weight:500; line-height:20px; color:#0B1220;"><b style="font-weight:700;">Почему новая:</b> вывод поднят под заголовок и выделен, шаги решения идут строками без плашек — формулам больше места.</p><p class="hp-txn" style="margin:16px 0 0; font-size:14px; font-weight:500; line-height:20px; color:#0B1220;" aria-hidden="true"><b style="font-weight:700;">Почему новая:</b> вывод поднят под заголовок и выделен, шаги решения идут строками без плашек — формулам больше места.</p></div>
 </article>
 
 <p style="display:flex; align-items:flex-start; gap:12px; margin:16px 0 0; font-size:14px; font-weight:500; line-height:20px; color:#0B1220;">
 <span class="dd-tag dd-tag-n" style="flex:none; margin-top:-2px;">Слайд 2</span>
-<span>Пробовал другую вёрстку, оставил прежнюю: шесть дат читаются одной линией слева направо.</span>
+<span class="hp-tx hp-txf" data-tx="q-kept"><span class="hp-txw">Пробовал другую вёрстку, оставил прежнюю: шесть дат читаются одной линией слева направо.</span><span class="hp-txn" aria-hidden="true">Пробовал другую вёрстку, оставил прежнюю: шесть дат читаются одной линией слева направо.</span></span>
 </p>
 
 <div style="margin-top:8px;">
@@ -2720,7 +2857,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 </h4>
 <sc-if value="{{ dlq.eye.open }}" hint-placeholder-val="{{ false }}">
 <ul id="dq-eye-rows" class="dq-rows p2-in" style="padding:0 0 8px;">
-<li class="dq-row"><span class="dd-tag dd-tag-n">Слайд 4</span><span>Поле графика под формулой почти пустое: на нём только отрезок от a до b.</span></li>
+<li class="dq-row"><span class="dd-tag dd-tag-n">Слайд 4</span><div class="hp-tx hp-txf" data-tx="q-row"><span class="hp-txw">Поле графика под формулой почти пустое: на нём только отрезок от a до b.</span><span class="hp-txn" aria-hidden="true">Поле графика под формулой почти пустое: на нём только отрезок от a до b.</span></div></li>
 </ul>
 </sc-if>
 </div>
@@ -2744,7 +2881,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <sc-if value="{{ rw.hasTag }}" hint-placeholder-val="{{ true }}">
 <span class="dd-tag dd-tag-n">{{ rw.tag }}</span>
 </sc-if>
-<span><b style="font-weight:700;">{{ rw.b }}</b>{{ rw.c }}</span>
+<div class="hp-tx hp-txf" data-tx="q-acc"><span class="hp-txw"><b style="font-weight:700;">{{ rw.b }}</b>{{ rw.c }}</span><span class="hp-txn" aria-hidden="true"><b style="font-weight:700;">{{ rw.b }}</b>{{ rw.c }}</span></div>
 </li>
 </sc-for>
 </ul>
@@ -2787,11 +2924,11 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <section class="dd-box p2-in" aria-labelledby="dw-h-form" style="display:flex; flex-direction:column; min-width:0; animation-delay:0ms;">
 <h3 id="dw-h-form" class="dd-h">Почему такая форма</h3>
 <p style="display:flex; align-items:center; gap:8px; margin:4px 0 0; font-size:13px; font-weight:600; line-height:20px; color:#5A6272;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.5 3.5h-6a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8.5z M13.5 3.5v3a2 2 0 0 0 2 2h3 M9 13h6 M9 16.5h4"></path></svg>{{ dlw.src }}</p>
-<p style="margin:16px 0 0; font-size:15px; font-weight:500; line-height:24px; color:#0B1220;">{{ dlw.why }}</p>
+<div class="hp-tx" data-tx="w-why"><p class="hp-txw" style="margin:16px 0 0; font-size:15px; font-weight:500; line-height:24px; color:#0B1220;">{{ dlw.why }}</p><p class="hp-txn" style="margin:16px 0 0; font-size:15px; font-weight:500; line-height:24px; color:#0B1220;" aria-hidden="true">{{ dlw.why }}</p></div>
 <dl style="display:grid; grid-template-columns:72px minmax(0, 1fr); gap:8px 12px; margin:16px 0 0; padding-top:16px; border-top:1px solid rgba(11,18,32,.08);">
 <sc-for list="{{ dlw.dl }}" as="x" hint-placeholder-count="2">
 <dt class="dw-sub">{{ x.t }}</dt>
-<dd style="margin:0; font-size:14px; font-weight:500; line-height:20px; color:#0B1220;">{{ x.d }}</dd>
+<div class="hp-tx" data-tx="w-dd"><dd class="hp-txw" style="margin:0; font-size:14px; font-weight:500; line-height:20px; color:#0B1220;">{{ x.d }}</dd><dd class="hp-txn" style="margin:0; font-size:14px; font-weight:500; line-height:20px; color:#0B1220;" aria-hidden="true">{{ x.d }}</dd></div>
 </sc-for>
 </dl>
 
@@ -2799,7 +2936,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <ul style="margin:8px 0 0; padding:0; list-style:none;">
 <sc-for list="{{ dlw.forms }}" as="f" hint-placeholder-count="2">
 <li class="dw-row">
-<p style="flex:1; min-width:0; margin:0; font-size:14px; font-weight:500; line-height:20px; color:#0B1220;"><b style="font-weight:700;">{{ f.name }}</b> — {{ f.text }}</p>
+<div class="hp-tx hp-txf" data-tx="w-form"><p class="hp-txw" style="flex:1; min-width:0; margin:0; font-size:14px; font-weight:500; line-height:20px; color:#0B1220;"><b style="font-weight:700;">{{ f.name }}</b> — {{ f.text }}</p><p class="hp-txn" style="flex:1; min-width:0; margin:0; font-size:14px; font-weight:500; line-height:20px; color:#0B1220;" aria-hidden="true"><b style="font-weight:700;">{{ f.name }}</b> — {{ f.text }}</p></div>
 <span style="flex:none;">
 <sc-if value="{{ f.hasVar }}" hint-placeholder-val="{{ true }}">
 <button type="button" class="p2-ob" title="Переключиться на этот вариант" aria-label="Переключиться на вариант {{ f.varName }}" onClick="{{ f.pick }}" style="height:40px; padding:0 16px; font-size:14px;"><span>{{ f.varName }}</span><span class="p2-rsc">{{ f.varScore }}</span></button>
@@ -2816,8 +2953,8 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <div style="margin-top:auto; padding-top:24px;">
 <h4 class="dw-sub">Критик и правка</h4>
 <ol style="display:flex; flex-direction:column; gap:12px; margin:12px 0 0; padding:16px; border-radius:16px; background:#F3F4F1; list-style:none;">
-<li class="dw-cr"><span class="dd-tag" style="background:#FFFFFF; color:#0B1220;">Критик</span><span>{{ dlw.critA }}</span></li>
-<li class="dw-cr"><span class="dd-tag" style="background:#FFFFFF; color:#2563EB;">Правка</span><span><b style="font-weight:700; color:#2563EB;">→</b> {{ dlw.critB }}</span></li>
+<li class="dw-cr"><span class="dd-tag" style="background:#FFFFFF; color:#0B1220;">Критик</span><div class="hp-tx" data-tx="w-crit"><span class="hp-txw">{{ dlw.critA }}</span><span class="hp-txn" aria-hidden="true">{{ dlw.critA }}</span></div></li>
+<li class="dw-cr"><span class="dd-tag" style="background:#FFFFFF; color:#2563EB;">Правка</span><div class="hp-tx" data-tx="w-crit"><span class="hp-txw"><b style="font-weight:700; color:#2563EB;">→</b> {{ dlw.critB }}</span><span class="hp-txn" aria-hidden="true"><b style="font-weight:700; color:#2563EB;">→</b> {{ dlw.critB }}</span></div></li>
 </ol>
 </div>
 </sc-if>
@@ -2846,12 +2983,12 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <div role="meter" aria-labelledby="dw-sim" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ dlw.simN }}" aria-valuetext="{{ dlw.sim }}" style="position:relative; height:4px; margin-top:8px; border-radius:999px; background:#F3F4F1; overflow:hidden;">
 <span style="position:absolute; inset:0; border-radius:999px; background:#2563EB; transform-origin:left center; transform:scaleX({{ dlw.simS }});"></span>
 </div>
-<p style="margin:8px 0 0; font-size:14px; font-weight:500; line-height:20px; color:#5A6272;">{{ dlw.simNote }}</p>
+<div class="hp-tx" data-tx="w-sim"><p class="hp-txw" style="margin:8px 0 0; font-size:14px; font-weight:500; line-height:20px; color:#5A6272;">{{ dlw.simNote }}</p><p class="hp-txn" style="margin:8px 0 0; font-size:14px; font-weight:500; line-height:20px; color:#5A6272;" aria-hidden="true">{{ dlw.simNote }}</p></div>
 </div>
 
 <ul style="display:flex; flex-direction:column; gap:12px; margin:16px 0 0; padding:16px 0 0; border-top:1px solid rgba(11,18,32,.08); list-style:none;">
 <sc-for list="{{ dlw.reasons }}" as="rs" hint-placeholder-count="3">
-<li class="dw-ok"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2563EB" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M8.5 12.25l2.4 2.4 4.6-4.9"></path></svg><span>{{ rs.text }}</span></li>
+<li class="dw-ok"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2563EB" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M8.5 12.25l2.4 2.4 4.6-4.9"></path></svg><div class="hp-tx hp-txf" data-tx="w-ok"><span class="hp-txw">{{ rs.text }}</span><span class="hp-txn" aria-hidden="true">{{ rs.text }}</span></div></li>
 </sc-for>
 </ul>
 </section>
@@ -2889,11 +3026,11 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <section class="dd-box p2-in" aria-labelledby="dw-h-form" style="display:flex; flex-direction:column; min-width:0; animation-delay:0ms;">
 <h3 id="dw-h-form" class="dd-h">Почему такая форма</h3>
 <p style="display:flex; align-items:center; gap:8px; margin:4px 0 0; font-size:13px; font-weight:600; line-height:20px; color:#5A6272;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.5 3.5h-6a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8.5z M13.5 3.5v3a2 2 0 0 0 2 2h3 M9 13h6 M9 16.5h4"></path></svg>{{ dlw.src }}</p>
-<p style="margin:16px 0 0; font-size:15px; font-weight:500; line-height:24px; color:#0B1220;">{{ dlw.why }}</p>
+<div class="hp-tx" data-tx="w-why"><p class="hp-txw" style="margin:16px 0 0; font-size:15px; font-weight:500; line-height:24px; color:#0B1220;">{{ dlw.why }}</p><p class="hp-txn" style="margin:16px 0 0; font-size:15px; font-weight:500; line-height:24px; color:#0B1220;" aria-hidden="true">{{ dlw.why }}</p></div>
 <dl style="display:grid; grid-template-columns:72px minmax(0, 1fr); gap:8px 12px; margin:16px 0 0; padding-top:16px; border-top:1px solid rgba(11,18,32,.08);">
 <sc-for list="{{ dlw.dl }}" as="x" hint-placeholder-count="2">
 <dt class="dw-sub">{{ x.t }}</dt>
-<dd style="margin:0; font-size:14px; font-weight:500; line-height:20px; color:#0B1220;">{{ x.d }}</dd>
+<div class="hp-tx" data-tx="w-dd"><dd class="hp-txw" style="margin:0; font-size:14px; font-weight:500; line-height:20px; color:#0B1220;">{{ x.d }}</dd><dd class="hp-txn" style="margin:0; font-size:14px; font-weight:500; line-height:20px; color:#0B1220;" aria-hidden="true">{{ x.d }}</dd></div>
 </sc-for>
 </dl>
 
@@ -2901,7 +3038,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <ul style="margin:8px 0 0; padding:0; list-style:none;">
 <sc-for list="{{ dlw.forms }}" as="f" hint-placeholder-count="2">
 <li class="dw-row">
-<p style="flex:1; min-width:0; margin:0; font-size:14px; font-weight:500; line-height:20px; color:#0B1220;"><b style="font-weight:700;">{{ f.name }}</b> — {{ f.text }}</p>
+<div class="hp-tx hp-txf" data-tx="w-form"><p class="hp-txw" style="flex:1; min-width:0; margin:0; font-size:14px; font-weight:500; line-height:20px; color:#0B1220;"><b style="font-weight:700;">{{ f.name }}</b> — {{ f.text }}</p><p class="hp-txn" style="flex:1; min-width:0; margin:0; font-size:14px; font-weight:500; line-height:20px; color:#0B1220;" aria-hidden="true"><b style="font-weight:700;">{{ f.name }}</b> — {{ f.text }}</p></div>
 <span style="flex:none;">
 <sc-if value="{{ f.hasVar }}" hint-placeholder-val="{{ true }}">
 <button type="button" class="p2-ob" title="Переключиться на этот вариант" aria-label="Переключиться на вариант {{ f.varName }}" onClick="{{ f.pick }}" style="height:40px; padding:0 16px; font-size:14px;"><span>{{ f.varName }}</span><span class="p2-rsc">{{ f.varScore }}</span></button>
@@ -2918,8 +3055,8 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <div style="margin-top:auto; padding-top:24px;">
 <h4 class="dw-sub">Критик и правка</h4>
 <ol style="display:flex; flex-direction:column; gap:12px; margin:12px 0 0; padding:16px; border-radius:16px; background:#F3F4F1; list-style:none;">
-<li class="dw-cr"><span class="dd-tag" style="background:#FFFFFF; color:#0B1220;">Критик</span><span>{{ dlw.critA }}</span></li>
-<li class="dw-cr"><span class="dd-tag" style="background:#FFFFFF; color:#2563EB;">Правка</span><span><b style="font-weight:700; color:#2563EB;">→</b> {{ dlw.critB }}</span></li>
+<li class="dw-cr"><span class="dd-tag" style="background:#FFFFFF; color:#0B1220;">Критик</span><div class="hp-tx" data-tx="w-crit"><span class="hp-txw">{{ dlw.critA }}</span><span class="hp-txn" aria-hidden="true">{{ dlw.critA }}</span></div></li>
+<li class="dw-cr"><span class="dd-tag" style="background:#FFFFFF; color:#2563EB;">Правка</span><div class="hp-tx" data-tx="w-crit"><span class="hp-txw"><b style="font-weight:700; color:#2563EB;">→</b> {{ dlw.critB }}</span><span class="hp-txn" aria-hidden="true"><b style="font-weight:700; color:#2563EB;">→</b> {{ dlw.critB }}</span></div></li>
 </ol>
 </div>
 </sc-if>
@@ -2948,12 +3085,12 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <div role="meter" aria-labelledby="dw-sim" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ dlw.simN }}" aria-valuetext="{{ dlw.sim }}" style="position:relative; height:4px; margin-top:8px; border-radius:999px; background:#F3F4F1; overflow:hidden;">
 <span style="position:absolute; inset:0; border-radius:999px; background:#2563EB; transform-origin:left center; transform:scaleX({{ dlw.simS }});"></span>
 </div>
-<p style="margin:8px 0 0; font-size:14px; font-weight:500; line-height:20px; color:#5A6272;">{{ dlw.simNote }}</p>
+<div class="hp-tx" data-tx="w-sim"><p class="hp-txw" style="margin:8px 0 0; font-size:14px; font-weight:500; line-height:20px; color:#5A6272;">{{ dlw.simNote }}</p><p class="hp-txn" style="margin:8px 0 0; font-size:14px; font-weight:500; line-height:20px; color:#5A6272;" aria-hidden="true">{{ dlw.simNote }}</p></div>
 </div>
 
 <ul style="display:flex; flex-direction:column; gap:12px; margin:16px 0 0; padding:16px 0 0; border-top:1px solid rgba(11,18,32,.08); list-style:none;">
 <sc-for list="{{ dlw.reasons }}" as="rs" hint-placeholder-count="3">
-<li class="dw-ok"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2563EB" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M8.5 12.25l2.4 2.4 4.6-4.9"></path></svg><span>{{ rs.text }}</span></li>
+<li class="dw-ok"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2563EB" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M8.5 12.25l2.4 2.4 4.6-4.9"></path></svg><div class="hp-tx hp-txf" data-tx="w-ok"><span class="hp-txw">{{ rs.text }}</span><span class="hp-txn" aria-hidden="true">{{ rs.text }}</span></div></li>
 </sc-for>
 </ul>
 </section>
@@ -3009,7 +3146,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <span class="dd-tag dd-tag-n">пропущен</span>
 </sc-if>
 </div>
-<p class="da-sum">{{ r.sum }}</p>
+<div class="hp-tx" data-tx="a-sum"><p class="hp-txw da-sum">{{ r.sum }}</p><p class="hp-txn da-sum" aria-hidden="true">{{ r.sum }}</p></div>
 <sc-if value="{{ r.hasLines }}" hint-placeholder-val="{{ true }}">
 <ul class="da-lns">
 <sc-for list="{{ r.lines }}" as="l" hint-placeholder-count="3">
@@ -3022,7 +3159,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2563EB" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M8.5 12.25l2.4 2.4 4.6-4.9"></path></svg>
 </sc-if>
 </span>
-<span class="da-tx"><span class="{{ l.arrCls }}" aria-hidden="true">→</span>{{ l.a }}<b style="font-weight:700;">{{ l.b }}</b>{{ l.c }}<sc-if value="{{ l.hasTag }}" hint-placeholder-val="{{ false }}"><span class="dd-tag dd-tag-n" style="margin-left:8px;">{{ l.tag }}</span></sc-if></span>
+<div class="hp-tx" data-tx="a-tx"><span class="hp-txw da-tx"><span class="{{ l.arrCls }}" aria-hidden="true">→</span>{{ l.a }}<b style="font-weight:700;">{{ l.b }}</b>{{ l.c }}<sc-if value="{{ l.hasTag }}" hint-placeholder-val="{{ false }}"><span class="dd-tag dd-tag-n" style="margin-left:8px;">{{ l.tag }}</span></sc-if></span><span class="hp-txn da-tx" aria-hidden="true"><span class="{{ l.arrCls }}" aria-hidden="true">→</span>{{ l.a }}<b style="font-weight:700;">{{ l.b }}</b>{{ l.c }}<sc-if value="{{ l.hasTag }}" hint-placeholder-val="{{ false }}"><span class="dd-tag dd-tag-n" style="margin-left:8px;">{{ l.tag }}</span></sc-if></span></div>
 </li>
 </sc-for>
 </ul>
@@ -3043,12 +3180,12 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <span>Вернуть как было</span>
 </button>
 </div>
-<p style="margin:8px 0 0; font-size:14px; font-weight:500; line-height:20px; color:#5A6272;">{{ dla.hint }}</p>
+<div class="hp-tx" data-tx="a-hint2"><p class="hp-txw" style="margin:8px 0 0; font-size:14px; font-weight:500; line-height:20px; color:#5A6272;">{{ dla.hint }}</p><p class="hp-txn" style="margin:8px 0 0; font-size:14px; font-weight:500; line-height:20px; color:#5A6272;" aria-hidden="true">{{ dla.hint }}</p></div>
 <ol style="margin:16px 0 0; padding:0; list-style:none;">
 <sc-for list="{{ dla.edits }}" as="e" hint-placeholder-count="2">
 <li class="da-ed dla-ed {{ e.cls }}">
-<p style="margin:0; font-size:15px; font-weight:600; line-height:24px; color:#0B1220;">«{{ e.q }}»<sc-if value="{{ e.off }}" hint-placeholder-val="{{ false }}"><span class="dd-tag dd-tag-n p2-in" style="margin-left:8px;">отменена</span></sc-if></p>
-<p style="margin:4px 0 0; font-size:14px; font-weight:500; line-height:20px; color:#5A6272;">{{ e.a }}</p>
+<div class="hp-tx" data-tx="a-q"><p class="hp-txw" style="margin:0; font-size:15px; font-weight:600; line-height:24px; color:#0B1220;">«{{ e.q }}»<sc-if value="{{ e.off }}" hint-placeholder-val="{{ false }}"><span class="dd-tag dd-tag-n p2-in" style="margin-left:8px;">отменена</span></sc-if></p><p class="hp-txn" style="margin:0; font-size:15px; font-weight:600; line-height:24px; color:#0B1220;" aria-hidden="true">«{{ e.q }}»<sc-if value="{{ e.off }}" hint-placeholder-val="{{ false }}"><span class="dd-tag dd-tag-n p2-in" style="margin-left:8px;">отменена</span></sc-if></p></div>
+<div class="hp-tx" data-tx="a-a"><p class="hp-txw" style="margin:4px 0 0; font-size:14px; font-weight:500; line-height:20px; color:#5A6272;">{{ e.a }}</p><p class="hp-txn" style="margin:4px 0 0; font-size:14px; font-weight:500; line-height:20px; color:#5A6272;" aria-hidden="true">{{ e.a }}</p></div>
 </li>
 </sc-for>
 </ol>
@@ -3067,12 +3204,16 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <li class="p2-in" style="animation-delay: {{ r.delay }};">
 <button type="button" class="dpl-row {{ r.cls }}" aria-current="{{ r.cur }}" aria-label="Слайд {{ r.n }}: {{ r.title }}" title="Открыть слайд {{ r.n }}" onClick="{{ r.pick }}">
 <span class="dpl-th"><img src="{{ r.img }}" alt="" style="display:block; width:100%; height:100%; aspect-ratio:16 / 9; object-fit:cover;"><span class="dpl-n" aria-hidden="true">{{ r.n }}</span></span>
-<span class="dpl-hd">
+<span class="hp-tx" data-tx="p-hd"><span class="hp-txw dpl-hd">
 <span class="dpl-kind">{{ r.kind }}</span>
 <span class="dpl-h">{{ r.title }}</span>
 <sc-if value="{{ r.hasSub }}" hint-placeholder-val="{{ false }}"><span class="dpl-sub2">{{ r.sub }}</span></sc-if>
-</span>
-<span class="dpl-body">
+</span><span class="hp-txn dpl-hd" aria-hidden="true">
+<span class="dpl-kind">{{ r.kind }}</span>
+<span class="dpl-h">{{ r.title }}</span>
+<sc-if value="{{ r.hasSub }}" hint-placeholder-val="{{ false }}"><span class="dpl-sub2">{{ r.sub }}</span></sc-if>
+</span></span>
+<span class="hp-tx" data-tx="p-body"><span class="hp-txw dpl-body">
 <sc-if value="{{ r.hasPar }}" hint-placeholder-val="{{ true }}"><span class="dpl-par">{{ r.par }}</span></sc-if>
 <sc-if value="{{ r.hasBul }}" hint-placeholder-val="{{ false }}"><span class="dpl-ul"><sc-for list="{{ r.bul }}" as="b" hint-placeholder-count="3"><span class="dpl-li">{{ b.s }}</span></sc-for></span></sc-if>
 <sc-if value="{{ r.hasChips }}" hint-placeholder-val="{{ false }}"><span class="dpl-chips"><sc-for list="{{ r.chips }}" as="c" hint-placeholder-count="6"><span class="dpl-chip"><b>{{ c.v }}</b>{{ c.l }}</span></sc-for></span></sc-if>
@@ -3081,7 +3222,16 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <sc-if value="{{ r.hasTbl }}" hint-placeholder-val="{{ false }}"><span class="dpl-tbl"><span class="dpl-tr dpl-thd"><span>{{ r.tc1 }}</span><span>{{ r.tc2 }}</span></span><sc-for list="{{ r.tbl }}" as="tr" hint-placeholder-count="3"><span class="dpl-tr"><span>{{ tr.a }}</span><span>{{ tr.b }}</span></span></sc-for></span></sc-if>
 <sc-if value="{{ r.hasChart }}" hint-placeholder-val="{{ false }}"><span class="dpl-line"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 4.5v13a2 2 0 0 0 2 2h13 M8 15l3.5-3.5 3 3 5-5.5"></path></svg><span><b>{{ r.chartType }}</b>{{ r.chartRest }}</span></span></sc-if>
 <sc-if value="{{ r.hasImg }}" hint-placeholder-val="{{ false }}"><span class="dpl-line"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 4.5h11a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2z M4.5 16l4.5-4.5 4 4 2.5-2.5 4 4 M15.5 8.5h.01"></path></svg><span>Изображение: {{ r.imgHint }}</span></span></sc-if>
-</span>
+</span><span class="hp-txn dpl-body" aria-hidden="true">
+<sc-if value="{{ r.hasPar }}" hint-placeholder-val="{{ true }}"><span class="dpl-par">{{ r.par }}</span></sc-if>
+<sc-if value="{{ r.hasBul }}" hint-placeholder-val="{{ false }}"><span class="dpl-ul"><sc-for list="{{ r.bul }}" as="b" hint-placeholder-count="3"><span class="dpl-li">{{ b.s }}</span></sc-for></span></sc-if>
+<sc-if value="{{ r.hasChips }}" hint-placeholder-val="{{ false }}"><span class="dpl-chips"><sc-for list="{{ r.chips }}" as="c" hint-placeholder-count="6"><span class="dpl-chip"><b>{{ c.v }}</b>{{ c.l }}</span></sc-for></span></sc-if>
+<sc-if value="{{ r.hasFx }}" hint-placeholder-val="{{ false }}"><span class="dpl-fx"><sc-for list="{{ r.fx }}" as="k" hint-placeholder-count="10"><sc-if value="{{ k.isInt }}" hint-placeholder-val="{{ false }}"><span class="dpl-int"><svg width="11" height="30" viewBox="0 0 12 32" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="M10.6 4.2C10.2 2.4 9.3 1.5 8.3 1.6C6.9 1.8 6.6 3.6 6.5 6.4L5.5 25.6C5.4 28.4 5.1 30.2 3.7 30.4C2.7 30.5 1.8 29.6 1.4 27.8"></path></svg><sc-if value="{{ k.lim }}" hint-placeholder-val="{{ false }}"><span class="dpl-lims"><span>{{ k.hi }}</span><span class="dpl-lo">{{ k.lo }}</span></span></sc-if></span></sc-if><sc-if value="{{ k.isInt2 }}" hint-placeholder-val="{{ false }}"><span class="dpl-int"><svg width="11" height="30" viewBox="0 0 12 32" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="M10.6 4.2C10.2 2.4 9.3 1.5 8.3 1.6C6.9 1.8 6.6 3.6 6.5 6.4L5.5 25.6C5.4 28.4 5.1 30.2 3.7 30.4C2.7 30.5 1.8 29.6 1.4 27.8"></path></svg><svg width="11" height="30" viewBox="0 0 12 32" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><path d="M10.6 4.2C10.2 2.4 9.3 1.5 8.3 1.6C6.9 1.8 6.6 3.6 6.5 6.4L5.5 25.6C5.4 28.4 5.1 30.2 3.7 30.4C2.7 30.5 1.8 29.6 1.4 27.8"></path></svg><span class="dpl-lims"><span></span><span class="dpl-lo">{{ k.lo }}</span></span></span></sc-if><sc-if value="{{ k.isV }}" hint-placeholder-val="{{ true }}"><span class="dpl-v">{{ k.s }}</span><sc-if value="{{ k.hasSub }}" hint-placeholder-val="{{ false }}"><span class="dpl-sb">{{ k.sub }}</span></sc-if></sc-if><sc-if value="{{ k.isT }}" hint-placeholder-val="{{ false }}"><span class="dpl-t">{{ k.s }}</span></sc-if><sc-if value="{{ k.isOp }}" hint-placeholder-val="{{ false }}"><span class="dpl-op">{{ k.s }}</span></sc-if><sc-if value="{{ k.isLim }}" hint-placeholder-val="{{ false }}"><span class="dpl-limop"><span>lim</span><span class="dpl-und">{{ k.under }}</span></span></sc-if><sc-if value="{{ k.isSum }}" hint-placeholder-val="{{ false }}"><span class="dpl-sum"><span class="dpl-sm">{{ k.hi }}</span><span class="dpl-sig">Σ</span><span class="dpl-sm">{{ k.lo }}</span></span></sc-if></sc-for></span></sc-if>
+<sc-if value="{{ r.hasItems }}" hint-placeholder-val="{{ false }}"><span class="dpl-items {{ r.itemsCls }}"><sc-for list="{{ r.items }}" as="it" hint-placeholder-count="2"><span class="dpl-item"><span class="dpl-it">{{ it.t }}</span><span class="dpl-ix">{{ it.x }}</span></span></sc-for></span></sc-if>
+<sc-if value="{{ r.hasTbl }}" hint-placeholder-val="{{ false }}"><span class="dpl-tbl"><span class="dpl-tr dpl-thd"><span>{{ r.tc1 }}</span><span>{{ r.tc2 }}</span></span><sc-for list="{{ r.tbl }}" as="tr" hint-placeholder-count="3"><span class="dpl-tr"><span>{{ tr.a }}</span><span>{{ tr.b }}</span></span></sc-for></span></sc-if>
+<sc-if value="{{ r.hasChart }}" hint-placeholder-val="{{ false }}"><span class="dpl-line"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 4.5v13a2 2 0 0 0 2 2h13 M8 15l3.5-3.5 3 3 5-5.5"></path></svg><span><b>{{ r.chartType }}</b>{{ r.chartRest }}</span></span></sc-if>
+<sc-if value="{{ r.hasImg }}" hint-placeholder-val="{{ false }}"><span class="dpl-line"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 4.5h11a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2z M4.5 16l4.5-4.5 4 4 2.5-2.5 4 4 M15.5 8.5h.01"></path></svg><span>Изображение: {{ r.imgHint }}</span></span></sc-if>
+</span></span>
 </button>
 </li>
 </sc-for>
@@ -3092,14 +3242,14 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <aside class="dlp-aside p2-fade" aria-label="О плане" style="display:flex; flex-direction:column; gap:16px; min-width:0;">
 <section class="p2-in" style="padding:24px; border-radius:24px; background:#FFFFFF; animation-delay:160ms;">
 <h2 style="margin:0; font-family:'Unbounded','Manrope',sans-serif; font-weight:600; font-size:32px; line-height:40px; letter-spacing:-0.03em; color:#0B1220;">Интеграл</h2>
-<p style="margin:8px 0 0; font-size:15px; font-weight:500; line-height:24px; color:#5A6272;">Понятие, свойства, вычисление и приложения интеграла</p>
-<p style="margin:8px 0 0; font-size:13px; font-weight:600; line-height:20px; color:#0B1220;">12 слайдов · аудитория: студенты 1 курса</p>
+<div class="hp-tx" data-tx="p-sub"><p class="hp-txw" style="margin:8px 0 0; font-size:15px; font-weight:500; line-height:24px; color:#5A6272;">Понятие, свойства, вычисление и приложения интеграла</p><p class="hp-txn" style="margin:8px 0 0; font-size:15px; font-weight:500; line-height:24px; color:#5A6272;" aria-hidden="true">Понятие, свойства, вычисление и приложения интеграла</p></div>
+<div class="hp-tx" data-tx="p-meta"><p class="hp-txw" style="margin:8px 0 0; font-size:13px; font-weight:600; line-height:20px; color:#0B1220;">12 слайдов · аудитория: студенты 1 курса</p><p class="hp-txn" style="margin:8px 0 0; font-size:13px; font-weight:600; line-height:20px; color:#0B1220;" aria-hidden="true">12 слайдов · аудитория: студенты 1 курса</p></div>
 </section>
 
 <section class="dpl-col {{ dlp.text.cls }} dpl-col-tall p2-in" aria-label="Текст агента" style="animation-delay:200ms;">
 <button type="button" class="dpl-colbtn" aria-expanded="{{ dlp.text.exp }}" onClick="{{ dlp.text.toggle }}">
 <span class="dpl-chev" aria-hidden="true"><svg class="df-chev {{ dlp.text.chev }}" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 9.5L12 15l5.5-5.5"></path></svg></span>
-<span class="dpl-ctx"><span class="dpl-ct">Текст агента</span><span class="dpl-ch">По статье «Интеграл» · 12 слайдов</span></span>
+<span class="hp-tx hp-txf" data-tx="p-ctx1"><span class="hp-txw dpl-ctx"><span class="dpl-ct">Текст агента</span><span class="dpl-ch">По статье «Интеграл» · 12 слайдов</span></span><span class="hp-txn dpl-ctx" aria-hidden="true"><span class="dpl-ct">Текст агента</span><span class="dpl-ch">По статье «Интеграл» · 12 слайдов</span></span></span>
 </button>
 <button type="button" class="p2-ob" onClick="{{ editText }}" title="Изменить текст презентации" style="height:40px; padding:0 20px;">
 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15.5 5l3.5 3.5L9 18.5l-4.5 1 1-4.5z M13 7.5l3.5 3.5"></path></svg>
@@ -3119,7 +3269,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <section class="dpl-col {{ dlp.nums.cls }} p2-in" aria-label="Цифры из текста" style="animation-delay:240ms;">
 <button type="button" class="dpl-colbtn" aria-expanded="{{ dlp.nums.exp }}" onClick="{{ dlp.nums.toggle }}">
 <span class="dpl-chev" aria-hidden="true"><svg class="df-chev {{ dlp.nums.chev }}" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 9.5L12 15l5.5-5.5"></path></svg></span>
-<span class="dpl-ctx"><span class="dpl-ct">Цифры из текста</span><span class="dpl-ch">9 цифр</span></span>
+<span class="hp-tx hp-txf" data-tx="p-ctx"><span class="hp-txw dpl-ctx"><span class="dpl-ct">Цифры из текста</span><span class="dpl-ch">9 цифр</span></span><span class="hp-txn dpl-ctx" aria-hidden="true"><span class="dpl-ct">Цифры из текста</span><span class="dpl-ch">9 цифр</span></span></span>
 </button>
 <sc-if value="{{ dlp.nums.open }}" hint-placeholder-val="{{ false }}">
 <div class="dl-body p2-in">
@@ -3134,7 +3284,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <section class="dpl-col {{ dlp.data.cls }} p2-in" aria-label="Данные для диаграмм" style="animation-delay:280ms;">
 <button type="button" class="dpl-colbtn" aria-expanded="{{ dlp.data.exp }}" onClick="{{ dlp.data.toggle }}">
 <span class="dpl-chev" aria-hidden="true"><svg class="df-chev {{ dlp.data.chev }}" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 9.5L12 15l5.5-5.5"></path></svg></span>
-<span class="dpl-ctx"><span class="dpl-ct">Данные для диаграмм</span><span class="dpl-ch">1 ряд</span></span>
+<span class="hp-tx hp-txf" data-tx="p-ctx"><span class="hp-txw dpl-ctx"><span class="dpl-ct">Данные для диаграмм</span><span class="dpl-ch">1 ряд</span></span><span class="hp-txn dpl-ctx" aria-hidden="true"><span class="dpl-ct">Данные для диаграмм</span><span class="dpl-ch">1 ряд</span></span></span>
 </button>
 <sc-if value="{{ dlp.data.open }}" hint-placeholder-val="{{ false }}">
 <div class="dl-body p2-in">
@@ -3234,7 +3384,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <sc-for list="{{ dlf.files }}" as="f" hint-placeholder-count="3">
 <li class="{{ f.cls }}" aria-current="{{ f.current }}" style="display:flex; align-items:center; justify-content:space-between; gap:16px; height:64px; padding:0 12px 0 16px; border-radius:16px;">
 <div style="min-width:0;">
-<p style="display:flex; align-items:center; gap:8px; margin:0; font-size:15px; font-weight:700; line-height:24px; color:#0B1220; white-space:nowrap;"><span>{{ f.title }}</span><span class="df-score" title="{{ f.tip }}">{{ f.score }}</span><sc-if value="{{ f.cur }}" hint-placeholder-val="{{ false }}"><span class="df-now">на экране</span></sc-if></p>
+<p style="display:flex; align-items:center; gap:8px; margin:0; font-size:15px; font-weight:700; line-height:24px; color:#0B1220; white-space:nowrap;"><span class="df-t">{{ f.title }}</span><span class="df-score" title="{{ f.tip }}">{{ f.score }}</span><sc-if value="{{ f.cur }}" hint-placeholder-val="{{ false }}"><span class="df-now hp-wo">на экране</span></sc-if></p>
 <p style="margin:0; font-size:13px; font-weight:500; line-height:20px; color:#5A6272; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ f.file }}</p>
 </div>
 <div style="display:flex; gap:8px; flex:none;">
@@ -3251,7 +3401,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <section class="df-card p2-in" aria-labelledby="df-h2" style="animation-delay:320ms;">
 <div class="df-hd">
 <h2 id="df-h2" class="df-h">Паспорт запуска</h2>
-<span class="df-badge">{{ dlf.passBadge }}</span>
+<span class="df-badge df-pb hp-wo">{{ dlf.passBadge }}</span>
 </div>
 <dl style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:16px 24px; margin:16px 0 0;">
 <sc-for list="{{ dlf.facts }}" as="x" hint-placeholder-count="8">
@@ -3359,7 +3509,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <!-- СЛОЙ · «Слайд N шаблона» (как D-pattern): белый над голубым, на 40 px ниже листа; въезжает снизу и уезжает вниз вместе с содержимым -->
 <div id="dl-lay-x" class="p2-slot p2-lay {{ dlx.lay }}" style="position:absolute; left:0; right:0; top:0; height:812px; z-index:2; transform: {{ dlx.y }};">
 <section class="dpt-layer" role="dialog" aria-modal="true" aria-labelledby="dpt-title" aria-describedby="dpt-desc">
-<div class="p2-fx" style="display:flex; flex-direction:column; height:532px;">
+<div style="display:flex; flex-direction:column; height:532px;">
 
 <div style="display:flex; align-items:center; gap:24px; height:64px; flex:none;">
 <sc-if value="{{ dlx.pa }}" hint-placeholder-val="{{ true }}">
@@ -3438,7 +3588,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 </section>
 </div>
 
-<section class="p2-in" aria-labelledby="dpt-pl" style="display:flex; flex-direction:column; min-width:0; animation-delay:240ms;">
+<section class="p2-in dpt-plw hp-wo" aria-labelledby="dpt-pl" style="display:flex; flex-direction:column; min-width:0; animation-delay:240ms;">
 <h3 id="dpt-pl" class="dpt-h3">{{ dlx.placesH }}</h3>
 <p class="dpt-legend">
 <span><span class="dpt-dot" style="background:#2563EB;"></span>заголовок</span>
@@ -3516,7 +3666,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 </section>
 </div>
 
-<section class="p2-in" aria-labelledby="dpt-pl" style="display:flex; flex-direction:column; min-width:0; animation-delay:240ms;">
+<section class="p2-in dpt-plw hp-wo" aria-labelledby="dpt-pl" style="display:flex; flex-direction:column; min-width:0; animation-delay:240ms;">
 <h3 id="dpt-pl" class="dpt-h3">{{ dlx.placesH }}</h3>
 <p class="dpt-legend">
 <span><span class="dpt-dot" style="background:#2563EB;"></span>заголовок</span>
@@ -3961,7 +4111,7 @@ class Component extends DCLogic {
       images: true,
       more: false,
       note: false, dd: '', ddLast: 'quality',
-      hpOpen: false, hpHeld: false, hpFit: '', hpFx: '', hpText: '', hpSent: [],
+      hpOpen: false, hpText: '', hpSent: [],
       ofK: 0,
       dlqF: 'all', dlqM: { a: true, b: true, f: true }, dlqO: {}, dlqRun: [], dlqDone: [], dlqLast: [], dlqK: 0,
       dlaU: 0, dlpO: {}, dltCopied: '', dltK: 0, dltAll: false, dltFonts: false,
@@ -4075,8 +4225,6 @@ class Component extends DCLogic {
     if (this.dlFixT) { clearTimeout(this.dlFixT); this.dlFixT = null; }
     if (this.dlRstT) { clearTimeout(this.dlRstT); this.dlRstT = null; }
     if (this.rtClr) { clearTimeout(this.rtClr); this.rtClr = null; }
-    if (this.hpHoldT) { clearTimeout(this.hpHoldT); this.hpHoldT = null; }
-    if (this.hpT) { clearTimeout(this.hpT); this.hpT = null; }
     this.rmStop();
     if (this.bdT) { clearTimeout(this.bdT); this.bdT = null; }
     this.tpStop();
@@ -5725,47 +5873,6 @@ class Component extends DCLogic {
   // «Нет связи с сервером» (ofOffline в настройках доски). Режим полосок логотипа: idle — на месте, run — бегут
   // (анимация G-toasts), land — связь вернулась: бег на паузе в текущей позе, за 360 мс полоски сходятся домой,
   // через 440 мс анимации снимаются. Связь пропала во время возврата — сначала дом, потом бег с начала цикла.
-  // Помощник сужает колоду на любом экране. Раскладка решается по ЦЕЛЕВОЙ ширине колоды: открытие — узкая с первого кадра;
-  // закрытие — узкая держится, пока сетка hp-wrap не доехала (340 мс + 40). Содержимое плит «Создать», «Сборки», листа
-  // «Подробнее» меняет раскладку перекрёстным затуханием: гаснет 120 мс, подменяется невидимым, проявляется 240 мс.
-  // Зеркала hpWant / hpShown — синхронно, чтобы не читать this.state сразу после setState.
-  hpSet(open) {
-    const s = this.state;
-    if (!!s.hpOpen === open) return;
-    if (this.hpShown == null) this.hpShown = s.hpFit || ((s.hpOpen || s.hpHeld) ? 'n' : 'w');
-    if (this.hpHoldT) { clearTimeout(this.hpHoldT); this.hpHoldT = null; }
-    this.hpWant = 'n';
-    if (open) {
-      this.setState({ hpOpen: true, hpHeld: false, hpFit: this.hpShown });
-      this.hpSwap();
-      return;
-    }
-    this.setState({ hpOpen: false, hpHeld: true, hpFit: this.hpShown });
-    this.hpHoldT = setTimeout(() => {
-      this.hpHoldT = null;
-      this.hpWant = 'w';
-      this.setState({ hpHeld: false });
-      this.hpSwap();
-    }, 380);
-  }
-
-  hpSwap() {
-    if (this.hpPh || this.hpShown === this.hpWant) return;
-    this.hpPh = 'o';
-    this.setState({ hpFx: 'o' });
-    this.hpT = setTimeout(() => {
-      this.hpShown = this.hpWant;
-      this.hpPh = 'i';
-      this.setState({ hpFit: this.hpShown, hpFx: 'i' });
-      this.hpT = setTimeout(() => {
-        this.hpT = null;
-        this.hpPh = null;
-        this.setState({ hpFx: '' });
-        this.hpSwap();
-      }, 240);
-    }, 120);
-  }
-
   ofSync() {
     const off = !!this.props.ofOffline;
     if (!this.ofMode) this.ofMode = 'idle';
@@ -5812,12 +5919,10 @@ class Component extends DCLogic {
     const ON = 'p2-on';
     const OFF = 'p2-off';
     // Помощник (G-helper-open): открыт — колода сужается на любом экране тем же ходом, что на «Результате» (сетка
-    // hp-nar 520 мс, закрытие 340); результат — в компактном виде. hpDeckN — раскладка колоды по цели хода (узкая с
-    // первого кадра открытия и до конца хода закрытия); hpFitN — показанная раскладка содержимого (меняется в подмене)
+    // hp-nar 520 мс, закрытие 340), и содержимое плит перестраивается вместе с ней непрерывно, на той же кривой (CSS);
+    // результат — в компактном виде
     const hpOpen = !!st.hpOpen;
     const hpNar = hpOpen;
-    const hpDeckN = hpOpen || !!st.hpHeld;
-    const hpFitN = st.hpFit ? st.hpFit === 'n' : hpDeckN;
     const tplOpen = isCreate && st.open === 'tpl';
     const textOpen = !tplOpen;
     const ty = (v) => 'translateY(' + v + 'px)';
@@ -5946,7 +6051,13 @@ class Component extends DCLogic {
     bdB.ROLES.forEach((r, i) => { if (bdStep === 10 && bdBt < r.e) bdStep = bdBt >= r.s ? i + 1 : 0; });
     const bdDoneN = bdStep === 10 ? 9 : Math.max(0, bdStep - 1);
     const bdPi = bdFailed ? bdB.PH.length - 1 : bdStep;
-    const bdPhases = bdB.PH.map((name, i) => ({ name, cls: i === bdPi ? 'p2-ph-on' : (i < bdPi ? 'p2-ph-past' : 'p2-ph-next') }));
+    // фаза в узкой колоде мельчает до .75 (как названия шагов), длинная — сколько нужно, чтобы встать в свою клетку
+    // (колонка без места «03»: 880 − 320 − 24 − 192 = 344 px при 1440); ширины при 36 px — замер, иначе по числу знаков
+    const PHW = { 'Готовлюсь к сборке': 433, 'Пишу текст по теме': 431, 'Читаю текст': 273, 'Выстраиваю сюжет': 445,
+      'Продумываю слайды': 486, 'Сверяю план с текстом': 515, 'Переделываю слайды': 502, 'Раскладываю по макетам': 586,
+      'Проверяю шрифты и цвета': 608, 'Смотрю на слайды целиком': 633, 'Презентация готова': 450, 'Сборка остановилась': 493 };
+    const bdPhs = (name) => Math.min(0.75, 340 / (PHW[name] || name.length * 27)).toFixed(3);
+    const bdPhases = bdB.PH.map((name, i) => ({ name, phs: bdPhs(name), cls: i === bdPi ? 'p2-ph-on' : (i < bdPi ? 'p2-ph-past' : 'p2-ph-next') }));
     const bdSec = bdFailed ? bdB.FCLK : bdB.CLK[bdBt];
     const bdClock = Math.floor(bdSec / 60) + ':' + String(bdSec % 60).padStart(2, '0');
     const bdVt = bdFailed ? 'остановилась на шаге 5 из 9' : (bdStep === 0 ? 'в очереди' : (bdStep === 10 ? 'готово'
@@ -6039,13 +6150,13 @@ class Component extends DCLogic {
     let bdY = 16;
     let bdEnd = 0;
     // в узкой колоде лента — 320 px под фазой: строки мысли переносятся (≈ 7.2 px на знак в 276 px), окно ленты ниже на 64
-    const bdLn = (l) => (hpFitN ? Math.max(1, Math.ceil(((l.a + l.b + l.c + l.d).length + (l.d ? 3 : 0)) * 7.2 / 276)) : 1);
+    const bdLn = (l) => (hpNar ? Math.max(1, Math.ceil(((l.a + l.b + l.c + l.d).length + (l.d ? 3 : 0)) * 7.2 / 276)) : 1);
     bdRoles.forEach((r, i) => {
       const h = 28 + r.lines.reduce((a, l) => a + 4 + 20 * bdLn(l), 0) + (r.isErr ? 24 : 0);
       if (i <= Math.min(bdLast, bdActI + 1)) bdEnd = bdY + h;
       bdY += h + 12;
     });
-    const bdRollPx = Math.max(0, bdEnd - (hpFitN ? 500 : 564));
+    const bdRollPx = Math.max(0, bdEnd - (hpNar ? 500 : 564));
     bdRoles.forEach((r) => { r.y = 'translateY(' + (-bdRollPx) + 'px)'; });
     const bdQueue = bdB.ROLES.map((r, i) => ({
       n: i + 1, name: r.name, hint: r.hint,
@@ -6109,11 +6220,39 @@ class Component extends DCLogic {
     let tpRibL = tpL.slice(0, 6);
     if (tpSelI >= 6) tpRibL = tpRibL.slice(0, 5).concat([tpL[tpSelI]]);
     const tpHid = tpL.filter((x) => tpRibL.indexOf(x) < 0);
-    // помощник сужает колоду: лента — четыре обложки в три колонки (с «Все шаблоны» и «Загрузить свой» — те же два ряда);
-    // узкая лента — часть широкой в том же порядке (выбранная видна всегда), лишние обложки прячет CSS (tp-nh, по hp-fn)
-    let tpRibS = tpL.slice(0, 4);
-    if (tpSelI >= 4) tpRibS = tpRibS.slice(0, 3).concat([tpL[tpSelI]]);
-    const tpHidS = tpL.filter((x) => tpRibS.indexOf(x) < 0);
+    // Лента по рядам (как C-templates: шесть обложек, «Все шаблоны», «Загрузить свой» — ряды по четыре). Помощник сужает
+    // колоду: в ряду из четырёх одна обложка уходит — её дорожка сжимается до нуля, обложка гаснет на месте (последняя
+    // обложка ряда, если она не выбранная, иначе предыдущая); пустые дорожки сверх трёх тоже сжимаются. Остальные
+    // плитки ряда сужаются вместе с плитой: четыре обложки в три колонки без перескоков между рядами
+    const FR = 'minmax(0, 1fr)', FR0 = 'minmax(0, 0fr)';
+    const tpSlots = tpRibL.map((x, i) => Object.assign(tpCard(x, i, 0, 'step'), { isCover: true, isAll: false, isUp: false, x }));
+    if (tpHid.length) tpSlots.push({ isCover: false, isAll: true, isUp: false, delay: '240ms' });
+    tpSlots.push({ isCover: false, isAll: false, isUp: true, delay: '280ms' });
+    const tpRowsL = [];
+    for (let i = 0; i < tpSlots.length; i += 4) tpRowsL.push(tpSlots.slice(i, i + 4));
+    let tpGoneN = 0;
+    const tpRows = tpRowsL.map((row) => {
+      const tr = [FR, FR, FR, FR];
+      if (row.length === 4) {
+        const cov = row.map((t, k) => (t.isCover ? k : -1)).filter((k) => k >= 0);
+        let k = cov[cov.length - 1];
+        if (k !== undefined && row[k].x.id === st.tpl) k = cov[cov.length - 2];
+        if (k !== undefined) { row[k].cut = 'tp-cut'; row[k].wo = 'hp-wo'; tr[k] = FR0; tpGoneN++; }
+      }
+      for (let k = 3, open = tr.filter((v) => v === FR).length; k >= row.length && open > 3; k--, open--) tr[k] = FR0;
+      return { tn: tr.join(' '), slots: row };
+    });
+    const tpMoreN = tpHid.length + tpGoneN;
+    tpRows.forEach((r) => r.slots.forEach((t) => {
+      t.cut = t.cut || ''; t.wo = t.wo || '';
+      if (t.isUp) t.upload = () => this.tpUpload();
+      if (t.isAll) Object.assign(t, {
+        galOpen: () => this.setState({ sect: 'tpls' }),
+        moreText: 'ещё ' + tpHid.length + ' ' + this.pl(tpHid.length, 'шаблон', 'шаблона', 'шаблонов'),
+        moreTextN: 'ещё ' + tpMoreN + ' ' + this.pl(tpMoreN, 'шаблон', 'шаблона', 'шаблонов'),
+        moreTip: tpHid.map((x) => x.name).join(', ')
+      });
+    }));
     const tpRunOn = tpUp === 'run' || tpUp === 'out';
     const tpF = this.tpNext();
     const tpN = Math.max(0, Math.min(8, st.tpStep || 0));
@@ -6494,12 +6633,12 @@ class Component extends DCLogic {
       noteStr: String(!!st.note),
       rebuild: () => this.go('build'),
       // Помощник: класс на обёртке колоды переключает сетку, плиту, компактный вид результата; таблетка в шапке — p2-nav-on
-      hpWrap: (hpNar ? 'hp-open hp-nar' : 'hp-closed') + (hpDeckN ? ' hp-dk' : '') + (hpFitN ? ' hp-fn' : '') + (st.hpFx ? ' hp-fx' + st.hpFx : ''),
+      hpWrap: hpNar ? 'hp-open hp-nar' : 'hp-closed',
       hpNav: hpOpen ? 'p2-nav-on' : '',
       hpOpenStr: String(hpOpen),
       hpNavTip: hpOpen ? 'Закрыть помощника' : 'Открыть помощника',
-      hpToggle: () => this.hpSet(!this.state.hpOpen),
-      hpClose: () => this.hpSet(false),
+      hpToggle: () => this.setState({ hpOpen: !this.state.hpOpen }),
+      hpClose: () => this.setState({ hpOpen: false }),
       hpDHead: hpDl(160), hpDChips: hpDl(440), hpDComp: hpDl(480),
       hpMsgs, hpChips, hpHasChips: hpChips.length > 0,
       hpPh: 'Что поменять на слайде ' + (fullDoc ? rs + 1 : 1) + '?',
@@ -6594,11 +6733,7 @@ class Component extends DCLogic {
       rmUndo: () => this.rmUndo(rs),
       // ── Шаблоны (модуль tp)
       tpRibOn: !tpRunOn,
-      tpRib: tpRibL.map((x, i) => Object.assign(tpCard(x, i, 0, 'step'), { nh: tpRibS.indexOf(x) < 0 ? 'tp-nh' : '' })),
-      tpMoreOn: tpHidS.length > 0,
-      tpMoreCls: tpHid.length > 0 ? '' : 'hp-nw',
-      tpMoreText: 'ещё ' + tpHid.length + ' ' + this.pl(tpHid.length, 'шаблон', 'шаблона', 'шаблонов'),
-      tpMoreTextS: 'ещё ' + tpHidS.length + ' ' + this.pl(tpHidS.length, 'шаблон', 'шаблона', 'шаблонов'),
+      tpRows,
       tpMoreTip: tpHid.map((x) => x.name).join(', '),
       tpGalOpen: () => this.setState({ sect: 'tpls' }),
       tpUpload: () => this.tpUpload(),
@@ -6613,11 +6748,12 @@ class Component extends DCLogic {
       tpProg: (tpN / 8).toFixed(4),
       tpSteps,
       // разбор в узкой колоде: слева разбираемый файл и «Все шаблоны», справа на две колонки — ход разбора (tp-nh, hp-nw)
-      tpAn2: tpL.slice(0, 2).map((x, i) => Object.assign(tpCard(x, i, 40, 'step'), { nh: 'tp-nh' })),
-      tpAnMore: tpL.length > 0,
-      tpAnCls: tpAnHid > 0 ? '' : 'hp-nw',
+      // разбор в узкой колоде: вторая дорожка (первая плитка шаблона и «Все шаблоны») сжимается до нуля — слева файл и
+      // шаблон, справа на две колонки ход разбора
+      tpAn2: tpL.slice(0, 2).map((x, i) => Object.assign(tpCard(x, i, 40, 'step'), { cut: i === 0 ? 'tp-cut' : '', wo: i === 0 ? 'hp-wo' : '' })),
+      tpAnMore: tpAnHid > 0,
+      tpAnl: tpRunOn ? 'tp-anl' : '',
       tpAnText: 'ещё ' + tpAnHid + ' ' + this.pl(tpAnHid, 'шаблон', 'шаблона', 'шаблонов'),
-      tpAnTextS: 'ещё ' + tpL.length + ' ' + this.pl(tpL.length, 'шаблон', 'шаблона', 'шаблонов'),
       tpAnTip: tpL.slice(2).map((x) => x.name).join(', '),
       tpGal: tpL.map((x, i) => tpCard(x, i, 200, 'gal')),
       tpGsub: tpL.length + ' ' + this.pl(tpL.length, 'шаблон', 'шаблона', 'шаблонов') + '. Выберите оформление или загрузите своё.',
