@@ -1109,22 +1109,36 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
                              слайд опускается на 24 px (строка шапки 48 → 64, отступ 16 → 24) — 520 мс
                      0 мс    полный вид «Результата» (уведомление над слайдом и правая колонка) гаснет — 240 мс
                      0 мс    «Помощник» в шапке — белая таблетка (p2-nav-on, как соседние пункты) — 240 мс
-                     120 мс  плита помощника: translateX(32px) → 0 и opacity — 360 мс
+                     0 мс    плита помощника — под колодой, на своём месте: край колоды, уходя влево, открывает её (как плита из-под
+                             плиты, «Слои»); сама плита сдвигается translateX(32px) → 0 той же кривой и за то же время (520 мс),
+                             прозрачность 0 → 1 за 240 мс — только чтобы полоса за краем окна (сдвиг 32 px) не вспыхнула в первом
+                             кадре. Ни в одном кадре плита не ложится поверх колоды: колода выше по слою (hp-hcell z-index −1).
+                             Вариант доски hpEnter = push («Вместе с краем колоды»): левый край плиты приклеен к краю колоды
+                             (+ зазор), плита въезжает из-за правого края окна вместе с ним — translateX(поле окна) → 0, 520 мс
                      120 мс  компактный вид (шапка с действиями и узкая колонка) проявляется — 240 мс
                      160 мс… шапка помощника, 6 сообщений, подсказки, поле ввода — каскад 40 мс, как p2-in (12 px, 360 мс)
-   Закрытие (выход = 2/3 входа): сетки 340 мс; плита уходит вправо на 32 px и гаснет за 240 мс; компактный вид гаснет за 160 мс,
-                     полный проявляется за 160 мс с задержкой 80 мс; содержимое помощника сбрасывается невидимо (240 мс).
+   Закрытие (выход = 2/3 входа): сетки 340 мс; колода наезжает на плиту и закрывает её (плита — вправо на 32 px той же кривой,
+                     непрозрачна вместе с содержимым; полоса за краем окна гаснет к концу: 240 мс с 100); в push плита уходит
+                     за край окна вместе с краем колоды. Компактный вид гаснет за 160 мс, полный проявляется за 160 мс с
+                     задержкой 80 мс; содержимое помощника сбрасывается невидимо, когда плита уже закрыта (340 мс).
    «Создать», «Сборка», «Подробнее»: колода сужается тем же ходом (сетка 520 / 340 мс, плита и каскад — те же); при переходах
                      между экранами с открытым помощником колода остаётся узкой. Как перестраивается содержимое — блок
                      «Колода, суженная помощником» ниже. */
-.hp-wrap{display:grid;grid-template-columns:minmax(0,1fr) 0px;column-gap:0px;height:812px;transition:grid-template-columns 340ms var(--ease),column-gap 340ms var(--ease)}
+.hp-wrap{display:grid;grid-template-columns:minmax(0,1fr) 0px;column-gap:0px;height:812px;isolation:isolate;--hpgo:max(24px, calc(50vw - 696px));transition:grid-template-columns 340ms var(--ease),column-gap 340ms var(--ease)}
 .hp-wrap.hp-nar{grid-template-columns:minmax(0,1fr) 400px;column-gap:16px;transition-duration:520ms}
-.hp-hcell{position:relative;z-index:1;min-width:0;height:812px}
+/* ячейка помощника — под колодой, пока идёт ход (колода z-index 0; isolation держит −1 внутри hp-wrap, над фоном
+   страницы); в покое открытая плита рядом с колодой и не пересекается с ней — возвращается на прежний слой (z-index 1,
+   как было), через 520 мс после открытия; при закрытии уходит под колоду сразу */
+.hp-hcell{position:relative;z-index:-1;min-width:0;height:812px}
+.hp-open .hp-hcell{z-index:1;transition:z-index 0s linear 520ms}
 /* закрытая плита ждёт за правым краем (+32 px) — без горизонтальной прокрутки страницы: лишнее обрезается по краю окна */
 .p2-root:has(.hp-wrap){overflow-x:clip}
-/* плита помощника стоит у правого края и въезжает на последние 32 px */
-.hp-help{position:absolute;top:0;right:0;width:400px;height:812px;opacity:0;visibility:hidden;pointer-events:none;transform:translateX(32px);transition:opacity 240ms var(--ease),transform 240ms var(--ease),visibility 0s linear 240ms}
-.hp-open .hp-help{opacity:1;visibility:visible;pointer-events:auto;transform:translateX(0);transition:opacity 360ms var(--ease) 120ms,transform 360ms var(--ease) 120ms,visibility 0s linear 0s}
+/* reveal (по умолчанию): плита стоит у правого края, под колодой, и доезжает последние 32 px на кривой колоды */
+.hp-help{position:absolute;top:0;right:0;width:400px;height:812px;opacity:0;visibility:hidden;pointer-events:none;transform:translateX(32px);transition:transform 340ms var(--ease),opacity 240ms var(--ease) 100ms,visibility 0s linear 340ms}
+.hp-open .hp-help{opacity:1;visibility:visible;pointer-events:auto;transform:translateX(0);transition:transform 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 0s}
+/* push: плита у левого края своей ячейки (= край колоды + зазор) и ждёт за краем окна (--hpgo — поле от hp-wrap до края) */
+.hp-push .hp-help{left:0;right:auto;opacity:1;transform:translateX(var(--hpgo));transition:transform 340ms var(--ease),visibility 0s linear 340ms}
+.hp-push.hp-open .hp-help{transform:translateX(0);transition:transform 520ms var(--ease),visibility 0s linear 0s}
 .hp-help::before{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:-24px 0 48px -24px rgba(11,18,32,.16);opacity:0;transition:opacity 240ms var(--ease);pointer-events:none}
 /* содержимое помощника: тот же ход, что p2-in, но переходом — повторяется при каждом открытии; задержки каскада — инлайн */
 .hp-st{opacity:0;transform:translateY(12px);transition:opacity 0s linear,transform 0s linear}
@@ -1164,11 +1178,11 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
   .hp-nar .ra-note .ra-ni{visibility:hidden;transition:visibility 0s linear 240ms}
   .hp-wrap .ra-note ~ .p2-two{transition:grid-template-columns 340ms var(--ease),column-gap 340ms var(--ease)}
   .hp-nar .ra-note ~ .p2-two{grid-template-columns:minmax(0,1fr) 184px !important;column-gap:24px !important;transition-duration:520ms}
-  .hp-wrap .ra-note ~ .p2-two > :first-child{height:100%;margin-top:0;container-type:size;transition:height 340ms var(--ease),margin-top 340ms var(--ease)}
-  .hp-nar .ra-note ~ .p2-two > :first-child{height:calc(100% - 24px);margin-top:24px;transition-duration:520ms}
+  .hp-wrap .ra-note ~ .p2-two > .hq-rmain{height:100%;margin-top:0;container-type:size;transition:height 340ms var(--ease),margin-top 340ms var(--ease)}
+  .hp-nar .ra-note ~ .p2-two > .hq-rmain{height:calc(100% - 24px);margin-top:24px;transition-duration:520ms}
   .hp-wrap .ra-note ~ .p2-two .ra-stage{max-width:min(720px, calc((100cqh - 143px) * 16 / 9))}
-  .hp-wrap .ra-note ~ .p2-two > aside{justify-self:start;width:424px;transition:opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
-  .hp-nar .ra-note ~ .p2-two > aside{opacity:0;visibility:hidden;pointer-events:none;transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
+  .hp-wrap .ra-note ~ .p2-two > .hq-raside{justify-self:start;width:424px;transition:opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
+  .hp-nar .ra-note ~ .p2-two > .hq-raside{opacity:0;visibility:hidden;pointer-events:none;transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
 }
 @media (max-width: 900px){
   .hp-wrap{display:flex !important;flex-direction:column;height:auto !important;gap:16px}
@@ -1213,8 +1227,8 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
   .hp-nar #p2-b1 > .tp-row{grid-template-columns:var(--tn);transition-duration:520ms}
   .tp-row > .tp-cell{min-width:0;margin-right:16px}
   .tp-cut{min-width:0;overflow:clip;overflow-clip-margin:8px}
-  :is(.tt-tile,.an-tile) .p2-cover img{transition:object-position 340ms var(--ease)}
-  .hp-nar :is(.tt-tile,.an-tile) .p2-cover img{object-position:0 50%;transition-duration:520ms}
+  :is(.tt-tile,.an-tile) .p2-cover .hq-cimg{transition:object-position 340ms var(--ease)}
+  .hp-nar :is(.tt-tile,.an-tile) .p2-cover .hq-cimg{object-position:0 50%;transition-duration:520ms}
   .tt-note .hp-sw{display:grid}
 
   /* 02 · «.txt или .md» сжимается и гаснет; «Это готовый текст…» — в ряду шапки, сжимается слева и меняет формулировку на
@@ -1257,6 +1271,13 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
   #p2-b3{grid-template-columns:216px minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) 264px !important;margin-right:0 !important;transition:grid-template-columns 340ms var(--ease),margin-right 340ms var(--ease)}
   .hp-nar #p2-b3{grid-template-columns:200px minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) 0px !important;margin-right:-16px !important;transition-duration:520ms}
   .pp-swc{min-width:0;overflow:clip}
+  /* подписи переключателей и описания вариантов не переносятся заново, пока гаснут: подпись — в одну строку и уходит под край
+     (переключатель остаётся у правого края); строка описания держит ширину покоя (вариант у́же в узкой ровно на 40 px при
+     любой ширине окна — --hpp та же кривая), лишнее обрезается краем описания */
+  .pp-swc [id^="p2-sw"]{min-width:0;white-space:nowrap;overflow:clip;overflow-clip-margin:4px}
+  #p2-b3 .pp-vd{display:block;min-width:0;overflow:clip;overflow-clip-margin:8px}
+  #p2-b3 .pp-vdi{display:block;--hpp:0;width:calc(100% + 40px * var(--hpp));transition:--hpp 340ms var(--ease)}
+  .hp-nar #p2-b3 .pp-vdi{--hpp:1;transition-duration:520ms}
   #p2-b3 .p2-vc{position:relative}
   .pp-vb1{overflow:hidden;transition:width 340ms var(--ease),margin-left 340ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
   .hp-nar .pp-vb1{width:0;margin-left:-8px;transition:width 520ms var(--ease),margin-left 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
@@ -1275,14 +1296,14 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
   .bd-two .p2-ph-past,.bd-two .p2-ph-next{transition-duration:240ms,240ms,340ms}
   .hp-nar .bd-two .p2-ph{scale:var(--phs,.75);transition-duration:360ms,360ms,520ms}
   .hp-nar .bd-two .p2-ph-past,.hp-nar .bd-two .p2-ph-next{transition-duration:240ms,240ms,520ms}
-  .bd-two .bk-vst > span{white-space:nowrap;transition:font-size 340ms var(--ease),margin-left 340ms var(--ease),opacity 160ms var(--ease) 80ms}
-  .hp-nar .bd-two .bk-vst > span{font-size:0;margin-left:-4px;opacity:0;transition:font-size 520ms var(--ease),margin-left 520ms var(--ease),opacity 240ms var(--ease)}
+  .bd-two .bk-vst > .hq-vsw{white-space:nowrap;transition:font-size 340ms var(--ease),margin-left 340ms var(--ease),opacity 160ms var(--ease) 80ms}
+  .hp-nar .bd-two .bk-vst > .hq-vsw{font-size:0;margin-left:-4px;opacity:0;transition:font-size 520ms var(--ease),margin-left 520ms var(--ease),opacity 240ms var(--ease)}
   .bd-two .p2-seg{transition:transform 160ms var(--ease),padding 340ms var(--ease)}
   .hp-nar .bd-two .p2-seg{padding:0 8px;transition:transform 160ms var(--ease),padding 520ms var(--ease)}
-  .bd-two > aside > div:first-child{transition:gap 340ms var(--ease)}
-  .hp-nar .bd-two > aside > div:first-child{gap:8px !important;transition-duration:520ms}
-  .bd-two > aside > div:first-child > h2{flex:none;transition:font-size 340ms var(--ease)}
-  .hp-nar .bd-two > aside > div:first-child > h2{font-size:18px !important;transition-duration:520ms}
+  .bd-two > aside > .hq-bdh{transition:gap 340ms var(--ease)}
+  .hp-nar .bd-two > aside > .hq-bdh{gap:8px !important;transition-duration:520ms}
+  .bd-two > aside > .hq-bdh > .hq-bdt{flex:none;transition:font-size 340ms var(--ease)}
+  .hp-nar .bd-two > aside > .hq-bdh > .hq-bdt{font-size:18px !important;transition-duration:520ms}
   .bd-two > aside > div:first-child > span{min-width:0}
   .bd-two > aside > div:first-child > span > span{min-width:0;overflow:hidden;text-overflow:ellipsis}
   .bd-two .bf-empty{transition:padding 340ms var(--ease)}
@@ -1301,9 +1322,9 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
   .dq-allw{display:block;max-width:320px;overflow:hidden;transition:max-width 340ms var(--ease),margin-left 340ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
   .hp-nar .dq-allw{max-width:0;margin-left:-16px;transition:max-width 520ms var(--ease),margin-left 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
   :is(.dla-ob,.dpl-col .p2-ob){transition:transform 160ms var(--ease),padding 340ms var(--ease),gap 340ms var(--ease)}
-  :is(.dla-ob,.dpl-col .p2-ob) > span{transition:font-size 340ms var(--ease),opacity 160ms var(--ease) 80ms}
+  :is(.dla-ob,.dpl-col .p2-ob) > .hq-obt{transition:font-size 340ms var(--ease),opacity 160ms var(--ease) 80ms}
   .hp-nar :is(.dla-ob,.dpl-col .p2-ob){padding:0 11px !important;gap:0;transition:transform 160ms var(--ease),padding 520ms var(--ease),gap 520ms var(--ease)}
-  .hp-nar :is(.dla-ob,.dpl-col .p2-ob) > span{font-size:0;opacity:0;transition:font-size 520ms var(--ease),opacity 240ms var(--ease)}
+  .hp-nar :is(.dla-ob,.dpl-col .p2-ob) > .hq-obt{font-size:0;opacity:0;transition:font-size 520ms var(--ease),opacity 240ms var(--ease)}
   #dd-panel-plan{transition:grid-template-columns 340ms var(--ease)}
   .hp-nar #dd-panel-plan{grid-template-columns:minmax(0, 1fr) 300px !important;transition-duration:520ms}
   .dpl-row{transition:transform 160ms var(--ease),grid-template-columns 340ms var(--ease)}
@@ -1324,13 +1345,16 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
   .dpt-g{grid-template-columns:minmax(0,576px) 296px minmax(0,1fr) !important;transition:grid-template-columns 340ms var(--ease),margin-right 340ms var(--ease)}
   .hp-nar .dpt-g{grid-template-columns:minmax(0,576px) 296px minmax(0,0fr) !important;margin-right:-32px;transition-duration:520ms}
   .dpt-plw{overflow:clip}
+  /* «N мест для содержания» уходит вместе со своей дорожкой (1fr → 0): содержимое держит ширину покоя (дорожка = ширина
+     колоды − 1 032 px) и обрезается краем колонки, а не переносится заново, пока гаснет */
+  .dpt-plw > *{min-width:calc(min(1392px, 100vw - 48px) - 1032px)}
   /* «Качество»: строка счёта 15 → 13 px, значок у «Исправить отмеченные» сжимается и гаснет; «Файлы»: те же две колонки,
      правая 50 % → 44 % (380 px при 1440), кнопки плотнее, «на экране» и подпись варианта в «Паспорте» сжимаются и гаснут, у плиток итога значки
      сжимаются и гаснут, длинная подпись — многоточием */
   .dq-cnts{transition:font-size 340ms var(--ease)}
   .hp-nar .dq-cnts{font-size:13px !important;transition-duration:520ms}
-  .dq-cta svg{transition:width 340ms var(--ease),margin-right 340ms var(--ease),opacity 160ms var(--ease) 80ms}
-  .hp-nar .dq-cta svg{width:0;margin-right:-12px;opacity:0;transition:width 520ms var(--ease),margin-right 520ms var(--ease),opacity 240ms var(--ease)}
+  .dq-cta .hq-ico{transition:width 340ms var(--ease),margin-right 340ms var(--ease),opacity 160ms var(--ease) 80ms}
+  .hp-nar .dq-cta .hq-ico{width:0;margin-right:-12px;opacity:0;transition:width 520ms var(--ease),margin-right 520ms var(--ease),opacity 240ms var(--ease)}
   .df-card li .p2-ob{transition:transform 160ms var(--ease),padding 340ms var(--ease)}
   .hp-nar .df-card li .p2-ob{padding:0 10px !important;transition:transform 160ms var(--ease),padding 520ms var(--ease)}
   .df-t{min-width:0;overflow:hidden;text-overflow:ellipsis}
@@ -1339,8 +1363,8 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
   .df-now,.df-pb{overflow:hidden;transition:font-size 340ms var(--ease),padding 340ms var(--ease),margin-left 340ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
   .hp-nar :is(.df-now,.df-pb){font-size:0;padding:0;margin-left:-8px;transition:font-size 520ms var(--ease),padding 520ms var(--ease),margin-left 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
   .df-tl > span{min-width:0;overflow:hidden;text-overflow:ellipsis}
-  .df-tl svg{transition:width 340ms var(--ease),margin-right 340ms var(--ease),opacity 160ms var(--ease) 80ms}
-  .hp-nar .df-tl svg{width:0;margin-right:-8px;opacity:0;transition:width 520ms var(--ease),margin-right 520ms var(--ease),opacity 240ms var(--ease)}
+  .df-tl .hq-ico{transition:width 340ms var(--ease),margin-right 340ms var(--ease),opacity 160ms var(--ease) 80ms}
+  .hp-nar .df-tl .hq-ico{width:0;margin-right:-8px;opacity:0;transition:width 520ms var(--ease),margin-right 520ms var(--ease),opacity 240ms var(--ease)}
 }
 /* Многострочный текст не переносится заново посреди хода (как на «Результате»: его текстовые блоки не меняют ширину —
    колонка и компактный вид подменяются на месте). Блок, ширина которого в узкой раскладке другая, — «стопка» (hp-tx):
@@ -1348,25 +1372,38 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
    копии на всём ходу постоянна: клетка сужается вместе с колодой по той же кривой, а --hpp (0 → 1, тот же ход, что сетка
    hp-wrap) прибавляет к ней ровно то, на что она уже сузилась (--hpd — на сколько клетка у́же в узкой раскладке):
    широкая копия = клетка + --hpd·p (в начале — вся клетка), узкая = клетка − --hpd·(1 − p) (в конце — вся клетка).
-   Подмена — как у полного и компактного вида «Результата»: открытие — широкая гаснет 240 мс с 0, узкая проявляется
-   240 мс с 120; закрытие — узкая гаснет 160 мс, широкая проявляется 160 мс через 80. Высота копий идёт auto ↔ 0 той же
-   кривой (520 / 340 мс), поэтому высота клетки и коробки вокруг меняется непрерывно; текст внутри не переносится ни в
-   одном кадре. */
-@property --hpp{syntax:'<number>';inherits:true;initial-value:0}
+   Подмена: открытие — широкая гаснет 160 мс с 0, узкая проявляется 240 мс с 120 (половинки почти не двоятся);
+   закрытие — узкая гаснет 160 мс, широкая проявляется 160 мс через 80. Высоту меняет только копия, которая выше в своей
+   раскладке (узкая; у c-vhint — широкая): auto ↔ 0 той же кривой (520 / 340 мс), вторая всё время во весь рост. Клетка =
+   большей из двух, поэтому её высота идёт монотонно, без «вдоха» (прежде обе копии шли auto ↔ 0, и клетка с копиями равной
+   высоты проседала посреди хода вдвое и вырастала обратно); уходящая копия не обрезается. Растущая копия обрезана по своей
+   высоте точно (clip-path, по вертикали 2 px вместо поля 8 px) — её следующая строка не заходит на то, что ниже клетки.
+   Текст внутри не переносится ни в одном кадре. */
+/* --hpp не наследуется и идёт на самих копиях: прежде ход наследуемого свойства на hp-wrap пересчитывал стиль всей колоды
+   (≈2 200 элементов) каждый кадр; переходы стартуют тем же переключением класса — кадр в кадр с сеткой hp-wrap */
+@property --hpp{syntax:'<number>';inherits:false;initial-value:0}
+/* ширина мягкого края растущей копии (ниже) — тоже не наследуется: иначе каждый кадр пересчитывался бы стиль всего её текста */
+@property --hpf{syntax:'<length>';inherits:false;initial-value:0px}
 @media (min-width: 901px){
-  .hp-wrap{transition:grid-template-columns 340ms var(--ease),column-gap 340ms var(--ease),--hpp 340ms var(--ease)}
-  .hp-wrap.hp-nar{--hpp:1}
   .hp-tx{display:grid;grid-template-columns:minmax(0,1fr);align-items:start;min-width:0;overflow:clip;overflow-clip-margin:8px;interpolate-size:allow-keywords}
   .hp-tx.hp-txf{flex:1 1 0%}
   span.hp-tx{display:grid}
   .hp-tx > .hp-txw,.hp-tx > .hp-txn{grid-area:1 / 1;min-width:0;overflow:clip;overflow-clip-margin:8px;box-sizing:border-box}
-  .hp-tx > .hp-txw{width:calc(100% + var(--hpd,0px) * var(--hpp)) !important;transition:height 340ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
-  .hp-nar .hp-tx > .hp-txw{height:0;opacity:0;visibility:hidden;pointer-events:none;transition:height 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
-  .hp-tx > .hp-txn{width:calc(100% - var(--hpd,0px) * (1 - var(--hpp))) !important;height:0;opacity:0;visibility:hidden;pointer-events:none;transition:height 340ms var(--ease),opacity 160ms var(--ease),visibility 0s linear 160ms}
-  .hp-nar .hp-tx > .hp-txn{height:auto;opacity:1;visibility:inherit;pointer-events:auto;transition:height 520ms var(--ease),opacity 240ms var(--ease) 120ms,visibility 0s linear 0s}
+  .hp-tx > .hp-txw{--hpp:0;width:calc(100% + var(--hpd,0px) * var(--hpp)) !important;transition:--hpp 340ms var(--ease),height 340ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
+  .hp-nar .hp-tx > .hp-txw{--hpp:1;opacity:0;visibility:hidden;pointer-events:none;transition:--hpp 520ms var(--ease),height 520ms var(--ease),opacity 160ms var(--ease),visibility 0s linear 160ms}
+  .hp-tx > .hp-txn{--hpp:0;width:calc(100% - var(--hpd,0px) * (1 - var(--hpp))) !important;height:0;overflow:visible;clip-path:inset(-2px -8px);opacity:0;visibility:hidden;pointer-events:none;transition:--hpp 340ms var(--ease),height 340ms var(--ease),opacity 160ms var(--ease),visibility 0s linear 160ms}
+  /* нижний край растущей (сжимающейся) копии посреди хода — мягкий: последние 16 px гаснут (маска только пока идёт ход,
+     в покое её нет; ширина края → 0 к обоим концам хода, без щелчка) — строки проявляются, а не режутся */
+  .hp-tx > .hp-txn{--hpf:calc(16px * min(1, 4 * var(--hpp), 4 - 4 * var(--hpp)));mask-image:if(style(--hpp: 0): none; style(--hpp: 1): none; else: linear-gradient(#000 calc(100% - var(--hpf)), transparent))}
+  /* c-vhint: узкая копия шире и ниже — роли наоборот */
+  .hp-tx[data-tx="c-vhint"] > .hp-txn{height:auto;overflow:clip;clip-path:none;mask-image:none}
+  .hp-tx[data-tx="c-vhint"] > .hp-txw{overflow:visible;clip-path:inset(-2px -8px);--hpf:calc(16px * min(1, 4 * var(--hpp), 4 - 4 * var(--hpp)));mask-image:if(style(--hpp: 0): none; style(--hpp: 1): none; else: linear-gradient(#000 calc(100% - var(--hpf)), transparent))}
+  .hp-nar .hp-tx[data-tx="c-vhint"] > .hp-txw{height:0}
+  .hp-nar .hp-tx > .hp-txn{--hpp:1;height:auto;opacity:1;visibility:inherit;pointer-events:auto;transition:--hpp 520ms var(--ease),height 520ms var(--ease),opacity 240ms var(--ease) 120ms,visibility 0s linear 0s}
   /* поле «О чём презентация»: обе копии во всю высоту поля, меняется только прозрачность */
   .hp-tx.hp-txa{align-items:stretch;flex:1 1 0%;min-height:0;overflow:clip}
   .hp-txa > textarea.hp-txw,.hp-txa > textarea.hp-txn,.hp-nar .hp-txa > textarea.hp-txw,.hp-nar .hp-txa > textarea.hp-txn{height:auto;overflow:auto}
+  .hp-txa > textarea.hp-txn{clip-path:none;mask-image:none}
   .tx-note > .hp-tx{align-self:flex-start}
   /* подсказка роли в «Агенте» в широкой раскладке — одна строка (при 1440): в узкой не переносится, а сокращается
      многоточием, ряд имени не перестраивается; при закрытии строка снова может переноситься, только когда колода
@@ -1409,6 +1446,23 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
   [data-tx="w-ok"]{--hpd:306px}
   [data-tx="w-sim"]{--hpd:306px}
   [data-tx="w-why"]{--hpd:110px}
+  [data-tx="t-sl"]{--hpd:208px}
+}
+/* Закрытые слои (история, шаблоны, «Подробнее», текст, лупа, образец, предпросмотр) — за краем колоды, невидимы. Пока слой
+   закрыт полностью (через 520 мс после закрытия — когда доиграл его уход), ход помощника его не трогает: ширина
+   постоянна — ширина колоды в покое (раскладка его поддерева не пересчитывается каждый кадр), переходы внутри выключены
+   (перестройка под узкую колоду — сразу, невидимо). --lgone — метка «слой закрыт полностью» (наследуется, читается
+   запросом стиля). Открытие слоя снимает и то и другое в том же кадре; ширина при этом та же — ничего не прыгает. */
+@property --lgone{syntax:'<number>';inherits:true;initial-value:0}
+@media (min-width: 901px){
+  .hp-wrap .p2-lay-off{--lgone:1;width:min(1392px, calc(100vw - 48px));transition:transform 520ms var(--ease),visibility 0s linear 520ms,--lgone 0s linear 520ms,width 0s linear 520ms;transition-behavior:allow-discrete}
+  .hp-wrap.hp-nar .p2-lay-off{width:calc(min(1392px, calc(100vw - 48px)) - 416px)}
+  /* то же для невыбранных вкладок «Подробнее» (гаснут за 240 мс; их поля — 48 px от краёв слоя) */
+  .hp-wrap .dd-pw.p2-off{--lgone:1;width:calc(min(1392px, calc(100vw - 48px)) - 96px);transition:opacity 240ms var(--ease),visibility 0s linear 240ms,--lgone 0s linear 240ms,width 0s linear 240ms;transition-behavior:allow-discrete}
+  .hp-wrap.hp-nar .dd-pw.p2-off{width:calc(min(1392px, calc(100vw - 48px)) - 512px)}
+  @container style(--lgone: 1){
+    .p2-lay *{transition:none !important}
+  }
 }
 @media (max-width: 900px){
   .hp-txn{display:none !important}
@@ -1499,7 +1553,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <div class="tt-tile {{ t.wo }}">
 <button type="button" class="p2-card" onClick="{{ t.pick }}" aria-pressed="{{ t.pressed }}" title="{{ t.full }}">
 <span class="p2-cover {{ t.selCls }}">
-<sc-if value="{{ t.hasImg }}" hint-placeholder-val="{{ true }}"><img src="{{ t.img }}" alt="Обложка шаблона {{ t.name }}" style="display:block; width:100%; height:142px; object-fit:cover; border-radius:16px; box-shadow:0 0 0 1px rgba(11,18,32,.08);"></sc-if>
+<sc-if value="{{ t.hasImg }}" hint-placeholder-val="{{ true }}"><img class="hq-cimg" src="{{ t.img }}" alt="Обложка шаблона {{ t.name }}" style="display:block; width:100%; height:142px; object-fit:cover; border-radius:16px; box-shadow:0 0 0 1px rgba(11,18,32,.08);"></sc-if>
 <sc-if value="{{ t.wf }}" hint-placeholder-val="{{ false }}"><span class="tp-wf" role="img" aria-label="Обложка шаблона {{ t.name }}"><span class="tp-b" style="left:8%; top:24%; width:10%; height:4%; background: {{ t.ink }};"></span><span class="tp-b tp-dk" style="left:8%; top:36%; width:56%; height:9%;"></span><span class="tp-b tp-dk" style="left:8%; top:49%; width:38%; height:9%;"></span><span class="tp-b" style="left:8%; top:66%; width:30%; height:4%;"></span></span></sc-if>
 <span class="p2-chk {{ t.chkCls }}" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 12.5l4.25 4.25L18.5 8"></path></svg></span>
 </span>
@@ -1564,7 +1618,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <div class="an-tile {{ t.wo }}">
 <button type="button" class="p2-card" onClick="{{ t.pick }}" aria-pressed="{{ t.pressed }}" title="{{ t.full }}">
 <span class="p2-cover {{ t.selCls }}">
-<sc-if value="{{ t.hasImg }}" hint-placeholder-val="{{ true }}"><img src="{{ t.img }}" alt="Обложка шаблона {{ t.name }}" style="display:block; width:100%; height:142px; object-fit:cover; border-radius:16px; box-shadow:0 0 0 1px rgba(11,18,32,.08);"></sc-if>
+<sc-if value="{{ t.hasImg }}" hint-placeholder-val="{{ true }}"><img class="hq-cimg" src="{{ t.img }}" alt="Обложка шаблона {{ t.name }}" style="display:block; width:100%; height:142px; object-fit:cover; border-radius:16px; box-shadow:0 0 0 1px rgba(11,18,32,.08);"></sc-if>
 <sc-if value="{{ t.wf }}" hint-placeholder-val="{{ false }}"><span class="tp-wf" role="img" aria-label="Обложка шаблона {{ t.name }}"><span class="tp-b" style="left:8%; top:24%; width:10%; height:4%; background: {{ t.ink }};"></span><span class="tp-b tp-dk" style="left:8%; top:36%; width:56%; height:9%;"></span><span class="tp-b tp-dk" style="left:8%; top:49%; width:38%; height:9%;"></span><span class="tp-b" style="left:8%; top:66%; width:30%; height:4%;"></span></span></sc-if>
 <span class="p2-chk {{ t.chkCls }}" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 12.5l4.25 4.25L18.5 8"></path></svg></span>
 </span>
@@ -1779,7 +1833,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <span style="font-size:16px; font-weight:700; line-height:24px; color:#FFFFFF;">{{ v.name }}</span>
 <span class="p2-vbox hp-wo pp-vb1" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 12.5l4.25 4.25L18.5 8"></path></svg></span>
 </span>
-<span class="hp-wo" style="font-size:13px; font-weight:500; line-height:20px; color:rgba(255,255,255,.64);">{{ v.desc }}</span>
+<span class="hp-wo pp-vd" style="font-size:13px; font-weight:500; line-height:20px; color:rgba(255,255,255,.64);"><span class="pp-vdi">{{ v.desc }}</span></span>
 <span class="p2-vbox hp-no pp-vb2" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 12.5l4.25 4.25L18.5 8"></path></svg></span>
 </button>
 </div>
@@ -1936,7 +1990,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <sc-if value="{{ bv.hasSt }}" hint-placeholder-val="{{ true }}">
 <span class="bk-vst p2-in">
 <sc-if value="{{ bv.done }}" hint-placeholder-val="{{ true }}"><svg class="p2-pop" style="display:block;" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 12.5l4.25 4.25L18.5 8"></path></svg></sc-if>
-<span>{{ bv.st }}</span>
+<span class="hq-vsw">{{ bv.st }}</span>
 </span>
 </sc-if>
 </button>
@@ -2014,8 +2068,8 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 
 <!-- правая колонка: лента агента — очередь (подготовка) сменяется рабочей лентой ролей -->
 <aside aria-label="Как думает агент" style="display:flex; flex-direction:column; min-width:0; height:652px;">
-<div style="display:flex; align-items:center; justify-content:space-between; gap:16px; height:64px;">
-<h2 style="margin:0; font-family:'Unbounded','Manrope',sans-serif; font-weight:600; font-size:20px; line-height:28px; letter-spacing:-0.02em; color:#FFFFFF;">Как думает агент</h2>
+<div class="hq-bdh" style="display:flex; align-items:center; justify-content:space-between; gap:16px; height:64px;">
+<h2 class="hq-bdt" style="margin:0; font-family:'Unbounded','Manrope',sans-serif; font-weight:600; font-size:20px; line-height:28px; letter-spacing:-0.02em; color:#FFFFFF;">Как думает агент</h2>
 <sc-if value="{{ bdQueued }}" hint-placeholder-val="{{ true }}">
 <span style="display:inline-flex; align-items:center; gap:8px; font-size:13px; font-weight:600; line-height:20px; color:rgba(255,255,255,.64); white-space:nowrap;">
 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5a8.5 8.5 0 1 1 0 17a8.5 8.5 0 0 1 0-17z M12 7.5V12l3 2"></path></svg>
@@ -2184,7 +2238,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 
 <div class="p2-two" style="display:grid; grid-template-columns:minmax(0, 1fr) 416px; gap:48px; height:548px; margin-top:16px;">
 
-<div style="display:flex; flex-direction:column; min-width:0;">
+<div class="hq-rmain" style="display:flex; flex-direction:column; min-width:0;">
 <div class="p2-in" style="display:flex; align-items:center; justify-content:space-between; gap:16px; height:40px; animation-delay:200ms;">
 <p style="min-width:0; margin:0; font-size:15px; font-weight:700; line-height:24px; color:#0B1220; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">Слайд {{ bigN }} из {{ nSlides }} <span style="font-weight:500; color:#5A6272;">· {{ bigTitle }}</span></p>
 <div style="display:flex; align-items:center; gap:24px; flex:none;">
@@ -2250,7 +2304,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 
 <!-- resulttools · «Изображение на слайде» (как R-picture): колонка, прокрученная к карточке «Изображение» (column-reverse =
      старт снизу); лежит непрозрачной точно над обычной колонкой и сменяет её проявлением, пока выбрана картинка слайда 1 -->
-<aside id="rt-pcol" class="rt-pcw {{ rtPcolCls }}" aria-label="{{ docAria }}" style="position:absolute; top:104px; right:44px; z-index:1; width:424px; height:548px;">
+<aside id="rt-pcol" class="rt-pcw hq-raside {{ rtPcolCls }}" aria-label="{{ docAria }}" style="position:absolute; top:104px; right:44px; z-index:1; width:424px; height:548px;">
 <div class="rp-col p2-fade" style="display:flex; flex-direction:column-reverse; height:572px; padding:24px 4px; overflow-y:auto;">
 <div class="rp-in" style="display:flex; flex-direction:column; flex:none;">
 
@@ -2375,7 +2429,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 </aside>
 
 <!-- колонка: появление (p2-in) — на обёртке, прокрутка с мягким краем (p2-fade) — внутри; поле 24 снизу — зона растворения -->
-<aside class="p2-in" aria-label="{{ docAria }}" style="min-width:0; height:548px; margin:0 -4px; animation-delay:240ms;">
+<aside class="p2-in hq-raside" aria-label="{{ docAria }}" style="min-width:0; height:548px; margin:0 -4px; animation-delay:240ms;">
 <div class="ra-col p2-fade" style="display:flex; flex-direction:column; height:100%; padding:0 4px 24px; overflow-y:auto;">
 <h1 style="margin:0; font-family:'Unbounded','Manrope',sans-serif; font-weight:600; font-size:40px; line-height:48px; letter-spacing:-0.03em; color:#0B1220;">{{ docTitle }}</h1>
 <p style="margin:8px 0 0; font-size:15px; font-weight:500; line-height:24px; color:#5A6272;">{{ docLine }}</p>
@@ -2486,7 +2540,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 </aside>
 
 <!-- Режим «Замечания» (R-remarks · R-fixing · R-fixed): панель встаёт на место колонки, колонка гаснет -->
-<aside class="rm-col p2-in {{ rmColCls }}" aria-labelledby="rk-h" style="animation-delay:200ms;">
+<aside class="rm-col p2-in hq-raside {{ rmColCls }}" aria-labelledby="rk-h" style="animation-delay:200ms;">
 <div style="display:flex; align-items:center; height:40px; flex:none;">
 <h2 id="rk-h" style="margin:0; font-family:'Unbounded','Manrope',sans-serif; font-weight:600; font-size:20px; line-height:28px; letter-spacing:-0.02em; color:#0B1220; white-space:nowrap;">Слайд {{ rmN }} <span style="margin-left:4px; font-family:'Manrope',sans-serif; font-size:15px; font-weight:600; line-height:24px; letter-spacing:0; color:#5A6272;">· {{ rmCountText }}</span></h2>
 </div>
@@ -2663,7 +2717,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 </div>
 <div class="p2-ls" style="--d:200ms; position:absolute; inset:0; pointer-events:none;">
 <div style="pointer-events:auto;">
-<div class="{{ dd_quality }}" style="position:absolute; left:48px; right:48px; top:104px;">
+<div class="dd-pw {{ dd_quality }}" style="position:absolute; left:48px; right:48px; top:104px;">
 <div id="dd-panel-quality" class="dd-scroll p2-fade" role="tabpanel" aria-labelledby="dd-tab-quality" tabindex="0">
 
 <!-- Сводка -->
@@ -2695,7 +2749,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 </sc-if>
 <sc-if value="{{ dlq.ctaOn }}" hint-placeholder-val="{{ true }}">
 <button type="button" class="p2-cta dq-cta" onClick="{{ dlq.fix }}" disabled="{{ dlq.fixDis }}">
-<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.25 7.75l2 2-9.4 9.4a1.41 1.41 0 0 1-2-2z M12.5 9.5l2 2 M18.5 3v3.5 M16.75 4.75h3.5 M19.5 12.5v2.5 M18.25 13.75h2.5 M9.5 3.5v2 M8.5 4.5h2"></path></svg>
+<svg class="hq-ico" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.25 7.75l2 2-9.4 9.4a1.41 1.41 0 0 1-2-2z M12.5 9.5l2 2 M18.5 3v3.5 M16.75 4.75h3.5 M19.5 12.5v2.5 M18.25 13.75h2.5 M9.5 3.5v2 M8.5 4.5h2"></path></svg>
 <span>{{ dlq.fixLabel }}</span>
 </button>
 </sc-if>
@@ -2894,7 +2948,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 </div>
 </div>
 </div>
-<div class="{{ dd_why }}" style="position:absolute; left:48px; right:48px; top:104px;">
+<div class="dd-pw {{ dd_why }}" style="position:absolute; left:48px; right:48px; top:104px;">
 <div id="dd-panel-why" class="dd-scroll p2-fade dw-fade" role="tabpanel" aria-labelledby="dd-tab-why" tabindex="0">
 
 <!-- Липкая навигация по слайдам -->
@@ -3124,7 +3178,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 
 </div>
 </div>
-<div class="{{ dd_agent }}" style="position:absolute; left:48px; right:48px; top:104px;">
+<div class="dd-pw {{ dd_agent }}" style="position:absolute; left:48px; right:48px; top:104px;">
 <div id="dd-panel-agent" class="dd-scroll p2-fade" role="tabpanel" aria-labelledby="dd-tab-agent" tabindex="0">
 <div class="dd-g">
 
@@ -3177,7 +3231,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <span class="da-cnt">{{ dla.cnt }}</span>
 <button type="button" class="p2-ob dla-ob" onClick="{{ dla.undo }}" disabled="{{ dla.undoDis }}" style="height:40px; margin-left:auto;">
 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14.5L4.5 10 9 5.5 M4.5 10h10a5 5 0 0 1 0 10H11"></path></svg>
-<span>Вернуть как было</span>
+<span class="hq-obt">Вернуть как было</span>
 </button>
 </div>
 <div class="hp-tx" data-tx="a-hint2"><p class="hp-txw" style="margin:8px 0 0; font-size:14px; font-weight:500; line-height:20px; color:#5A6272;">{{ dla.hint }}</p><p class="hp-txn" style="margin:8px 0 0; font-size:14px; font-weight:500; line-height:20px; color:#5A6272;" aria-hidden="true">{{ dla.hint }}</p></div>
@@ -3194,7 +3248,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 </div>
 </div>
 </div>
-<div class="{{ dd_plan }}" style="position:absolute; left:48px; right:48px; top:104px; height:508px; display:flex; flex-direction:column;">
+<div class="dd-pw {{ dd_plan }}" style="position:absolute; left:48px; right:48px; top:104px; height:508px; display:flex; flex-direction:column;">
 <div id="dd-panel-plan" role="tabpanel" aria-labelledby="dd-tab-plan" style="display:grid; grid-template-columns:minmax(0, 1fr) 416px; gap:24px; height:484px; margin-top:24px;">
 
 <div class="dpl-listw p2-in" style="animation-delay:120ms;">
@@ -3253,7 +3307,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 </button>
 <button type="button" class="p2-ob" onClick="{{ editText }}" title="Изменить текст презентации" style="height:40px; padding:0 20px;">
 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15.5 5l3.5 3.5L9 18.5l-4.5 1 1-4.5z M13 7.5l3.5 3.5"></path></svg>
-<span>Изменить</span>
+<span class="hq-obt">Изменить</span>
 </button>
 <sc-if value="{{ dlp.text.open }}" hint-placeholder-val="{{ false }}">
 <div class="dl-body p2-in">
@@ -3297,7 +3351,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 
 </div>
 </div>
-<div class="{{ dd_template }}" style="position:absolute; left:48px; right:48px; top:104px; height:508px; display:flex; flex-direction:column;">
+<div class="dd-pw {{ dd_template }}" style="position:absolute; left:48px; right:48px; top:104px; height:508px; display:flex; flex-direction:column;">
 <div id="dd-panel-template" class="dtp-scroll p2-fade" role="tabpanel" aria-labelledby="dd-tab-template">
 
 <section class="dtp-box dtp-band p2-in" aria-label="Обзор шаблона" style="animation-delay:120ms;">
@@ -3370,7 +3424,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 </div>
 </div>
 </div>
-<div class="{{ dd_files }}" style="position:absolute; left:48px; right:48px; top:104px; height:508px; display:flex; flex-direction:column;">
+<div class="dd-pw {{ dd_files }}" style="position:absolute; left:48px; right:48px; top:104px; height:508px; display:flex; flex-direction:column;">
 <div id="dd-panel-files" class="df-scroll p2-fade" role="tabpanel" aria-label="Файлы" tabindex="0" style="flex:1; min-height:0; padding:24px 0; overflow-y:auto; border-radius:24px;">
 <div class="df-grid" style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:16px;">
 
@@ -3439,7 +3493,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <div style="display:grid; grid-template-columns:repeat(6, minmax(0, 1fr)); gap:12px; margin-top:16px;">
 <sc-for list="{{ dlf.tiles }}" as="t" hint-placeholder-count="5">
 <div class="df-tile {{ t.cls }}" style="grid-column: span {{ t.span }};">
-<p class="df-tl"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;"><path d="{{ t.p1 }}"></path><path d="{{ t.p2 }}"></path><path d="{{ t.p3 }}"></path></svg><span>{{ t.label }}</span></p>
+<p class="df-tl"><svg class="hq-ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;"><path d="{{ t.p1 }}"></path><path d="{{ t.p2 }}"></path><path d="{{ t.p3 }}"></path></svg><span>{{ t.label }}</span></p>
 <p class="df-tv"><span>{{ t.v }}</span><span class="df-tsub">{{ t.sub }}</span></p>
 </div>
 </sc-for>
@@ -3737,9 +3791,16 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 <div class="rt-scroll p2-fade-top" tabindex="0" role="region" aria-label="Текст по слайдам" style="flex:1; min-height:0; overflow-y:auto; padding:24px;">
 <div class="rt-grid" style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:24px 48px;">
 <sc-for list="{{ rtSlides }}" as="s" hint-placeholder-count="12">
-<div>
+<!-- абзац слайда — стопка (широкая и узкая копии, как hp-tx выше): под помощником текст не переносится посреди хода -->
+<div class="hp-tx" data-tx="t-sl">
+<div class="hp-txw">
 <p style="margin:0; font-size:15px; font-weight:700; line-height:24px; color:#0B1220;">Слайд {{ s.n }}. <span style="font-weight:600; color:#5A6272;">{{ s.title }}</span></p>
 <p style="margin:4px 0 0; font-size:15px; font-weight:500; line-height:24px; color:#0B1220;"><sc-for list="{{ s.parts }}" as="x" hint-placeholder-count="3"><span class="{{ x.cls }}" tabindex="{{ x.tab }}" onClick="{{ x.pick }}">{{ x.t }}</span></sc-for></p>
+</div>
+<div class="hp-txn">
+<p style="margin:0; font-size:15px; font-weight:700; line-height:24px; color:#0B1220;">Слайд {{ s.n }}. <span style="font-weight:600; color:#5A6272;">{{ s.title }}</span></p>
+<p style="margin:4px 0 0; font-size:15px; font-weight:500; line-height:24px; color:#0B1220;"><sc-for list="{{ s.parts }}" as="x" hint-placeholder-count="3"><span class="{{ x.cls }}" tabindex="{{ x.tab }}" onClick="{{ x.pick }}">{{ x.t }}</span></sc-for></p>
+</div>
 </div>
 </sc-for>
 </div>
@@ -4065,7 +4126,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 </div>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"screen":{"editor":"enum","options":["create","build","result"],"default":"create"},"frozen":{"editor":null,"default":false},"bdFail":{"editor":"boolean","default":false},"ofOffline":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":900}}'>
+<script type="text/x-dc" data-dc-script data-props='{"screen":{"editor":"enum","options":["create","build","result"],"default":"create"},"frozen":{"editor":null,"default":false},"bdFail":{"editor":"boolean","default":false},"ofOffline":{"editor":"boolean","default":false},"hpEnter":{"editor":"enum","options":["reveal","push"],"default":"reveal"},"$preview":{"width":1440,"height":900}}'>
 class Component extends DCLogic {
   constructor(props) {
     super(props);
@@ -6437,8 +6498,9 @@ class Component extends DCLogic {
     const ofOff = this.ofSync();
     const ofRun = this.ofMode !== 'idle';
     // каскад содержимого при открытии: шапка 160 мс, сообщения 200…400, подсказки 440, поле ввода 480 (шаг 40);
-    // при закрытии — без каскада: всё гаснет вместе с плитой, а через 240 мс (плита уже не видна) сбрасывается в исходное
-    const hpDl = (ms) => (hpOpen ? ms : 240) + 'ms';
+    // при закрытии — без каскада: содержимое уходит вместе с плитой непрозрачным, а через 340 мс (плита уже закрыта
+    // колодой или за краем окна) сбрасывается в исходное
+    const hpDl = (ms) => (hpOpen ? ms : 340) + 'ms';
     // отправка: сообщение пользователя добавляется в ленту, подсказки прячутся (как «пока ждём ответ»)
     const hpPost = (t) => {
       const v = String(t || '').trim();
@@ -6633,7 +6695,8 @@ class Component extends DCLogic {
       noteStr: String(!!st.note),
       rebuild: () => this.go('build'),
       // Помощник: класс на обёртке колоды переключает сетку, плиту, компактный вид результата; таблетка в шапке — p2-nav-on
-      hpWrap: hpNar ? 'hp-open hp-nar' : 'hp-closed',
+      // hpEnter (настройка доски): reveal — «Из-под колоды» (по умолчанию), push — «Вместе с краем колоды»
+      hpWrap: (hpNar ? 'hp-open hp-nar' : 'hp-closed') + (this.props.hpEnter === 'push' ? ' hp-push' : ''),
       hpNav: hpOpen ? 'p2-nav-on' : '',
       hpOpenStr: String(hpOpen),
       hpNavTip: hpOpen ? 'Закрыть помощника' : 'Открыть помощника',
