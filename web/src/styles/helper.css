@@ -1,24 +1,45 @@
 /* Помощник (ui/helper) и компактный «Результат» (ui/result/CompactResult). Блок «Помощник (модуль helper, как
  * G-helper-open и G-helper)» — дословно из boards/V2.dc.html (<helmet><style>): плита hp-help, каскад hp-st, лента и
  * поле gh-, компактный слой hp-in (hp-top, hp-ncol, hp-xf) и правила полного вида при сужении. Сетка колоды и ячейка
- * помощника (hp-wrap, hp-hcell) — в shell.css. Отличие от V2: колода сужается на всех экранах (не плита поверх колоды
- * на «Создать», «Сборке» и под «Подробнее»), поэтому тени hp-ovl нет; содержимое экранов перестраивается по целевой
- * ширине колоды (ui/deck/fit.ts): узкая раскладка — с первого кадра открытия и до конца хода закрытия; содержимое плит
- * «Создать» и «Сборки», слоёв и листа меняет её перекрёстным затуханием своей обёртки (правила — по её `data-fit`),
- * названия шагов сжимаются transform'ом.
+ * помощника (hp-wrap, hp-hcell) — в shell.css. Колода сужается на всех экранах; плита помощника выходит из-под неё
+ * (reveal, V2 версии 100) с тенью края колоды (hp-shade). Режим push доски (hp-push, свойство hpEnter) не перенесён —
+ * владелец оставил reveal. Содержимое экранов перестраивается по целевой ширине колоды (ui/deck/fit.ts): узкая
+ * раскладка — с первого кадра открытия и до конца хода закрытия; содержимое плит «Создать» и «Сборки», слоёв и листа
+ * меняет её перекрёстным затуханием своей обёртки (правила — по её `data-fit`), названия шагов сжимаются transform'ом.
  *   Открытие:  0 мс    колода сужается: колонка 0 → 400 px, зазор 0 → 16 — 520 мс (исключение: анимируется сетка)
  *              0 мс    сетка результата перестраивается вместе с колодой: колонка 416 → 184, зазор 48 → 24, слайд
  *                      опускается на 24 px (строка шапки 48 → 64, отступ 16 → 24) — 520 мс
  *              0 мс    полный вид «Результата» (уведомление и колонка) гаснет — 240 мс
  *              0 мс    «Помощник» в шапке — белая таблетка (p2-nav-on) — 240 мс
- *              120 мс  плита помощника: translateX(32px) → 0 и opacity — 360 мс
+ *              0 мс    плита помощника — под колодой, на своём месте: край колоды, уходя влево, открывает её (как плита
+ *                      из-под плиты, «Слои»); сама плита сдвигается translateX(32px) → 0 той же кривой и за то же время
+ *                      (520 мс), прозрачность 0 → 1 за 240 мс — только чтобы полоса за краем окна (сдвиг 32 px) не
+ *                      вспыхнула в первом кадре. Ни в одном кадре плита не ложится поверх колоды: колода выше по слою
+ *                      (hp-hcell z-index −1)
  *              120 мс  компактный вид (шапка с действиями и узкая колонка) проявляется — 240 мс
  *              160 мс… шапка помощника, сообщения, подсказки, поле ввода — каскад 40 мс (12 px, 360 мс)
- *   Закрытие (2/3 входа): сетки 340 мс; плита уходит вправо на 32 px и гаснет за 240 мс; компактный вид гаснет за 160 мс,
- *              полный проявляется за 160 мс через 80 мс; содержимое помощника сбрасывается невидимо (240 мс). */
-/* плита помощника стоит у правого края и въезжает на последние 32 px */
-.hp-help{position:absolute;top:0;right:0;width:400px;height:812px;opacity:0;visibility:hidden;pointer-events:none;transform:translateX(32px);transition:opacity 240ms var(--ease),transform 240ms var(--ease),visibility 0s linear 240ms}
-.hp-open .hp-help{opacity:1;visibility:visible;pointer-events:auto;transform:translateX(0);transition:opacity 360ms var(--ease) 120ms,transform 360ms var(--ease) 120ms,visibility 0s linear 0s}
+ *   Закрытие (2/3 входа): сетки 340 мс; колода наезжает на плиту и закрывает её (плита — вправо на 32 px той же кривой,
+ *              непрозрачна вместе с содержимым; полоса за краем окна гаснет к концу: 240 мс с 100). Компактный вид
+ *              гаснет за 160 мс, полный проявляется за 160 мс через 80 мс; содержимое помощника сбрасывается невидимо,
+ *              когда плита уже закрыта (340 мс). */
+/* reveal: плита стоит у правого края, под колодой, и доезжает последние 32 px на кривой колоды */
+.hp-help{position:absolute;top:0;right:0;width:400px;height:812px;opacity:0;visibility:hidden;pointer-events:none;transform:translateX(32px);transition:transform 340ms var(--ease),opacity 240ms var(--ease) 100ms,visibility 0s linear 340ms}
+.hp-open .hp-help{opacity:1;visibility:visible;pointer-events:auto;transform:translateX(0);transition:transform 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 0s}
+/* тень колоды на плиту помощника. Пока плита под колодой, правый край колоды отбрасывает на неё ту же мягкую тень,
+   что плиты в стопке друг на друга (0 −24 48 −24), повёрнутую вправо: 24 0 48 −24, rgba(11,18,32,.28). Тень даёт фигура
+   правого края колоды (углы 40 px, как у плит) — полоса постоянного размера 184 × 812 в первой дорожке сетки hp-wrap: правым
+   краем за краем колоды на 72 px, по высоте обрезана по колоде; слой — над ячейкой помощника, под колодой (z −1, позже ячейки).
+   Её размер не меняется — каждый кадр она только сдвигается вместе с краем, а видимость — одни переходы opacity:
+   видно = прозрачность полосы × прозрачность её ::before (в покое, открыт и закрыт, произведение 0):
+     открытие — полоса 0 → 1 за 240 мс (как сама плита), ::before 1 → 0 за 160 мс с 340 мс (край колоды доходит до места,
+                открывается зазор 16 px — тень уходит вместе с его раскрытием);
+     закрытие — ::before 0 → 1 за 160 мс с 0 (колода наезжает на плиту), полоса 1 → 0 за 240 мс с 100 мс (как сама плита).
+   Элемент — последний ребёнок hp-wrap (ui/shell/AppShell). */
+.hp-wrap{position:relative}
+.hp-shade{position:absolute;grid-column:1 / 2;grid-row:1 / 2;top:0;right:-72px;width:184px;height:812px;overflow:hidden;z-index:-1;pointer-events:none;opacity:0;transition:opacity 240ms var(--ease) 100ms}
+.hp-open .hp-shade{opacity:1;transition:opacity 240ms var(--ease)}
+.hp-shade::before{content:"";position:absolute;top:0;bottom:0;left:0;right:72px;border-radius:0 40px 40px 0;box-shadow:24px 0 48px -24px rgba(11,18,32,.28);transition:opacity 160ms var(--ease)}
+.hp-open .hp-shade::before{opacity:0;transition:opacity 160ms var(--ease) 340ms}
 /* содержимое помощника: тот же ход, что p2-in, но переходом — повторяется при каждом открытии; задержки каскада — инлайн */
 .hp-st{opacity:0;transform:translateY(12px);transition:opacity 0s linear,transform 0s linear}
 .hp-open .hp-st{opacity:1;transform:translateY(0);transition:opacity 360ms var(--ease),transform 360ms var(--ease)}
@@ -83,6 +104,7 @@
   .hp-help{position:relative !important;transform:none !important}
   .gh-help{width:100% !important;height:640px !important}
   .hp-in{display:none !important}
+  .hp-shade{display:none !important}
 }
 
 /* ── Свои дополнения */

@@ -1,7 +1,8 @@
 // Оболочка «Слоёв»: страница (#F3F4F1, поля 24, ширина до 1392), шапка и колода в обёртке `hp-wrap` — сетке из двух
 // колонок, где вторая (место помощника) 0 → 400 px. Разметка — boards/V2.dc.html, `.p2-root`. Задачи областей
 // подключают сюда содержимое плит и слоёв через слоты `Deck`. Помощник открыт — колода сужается на любом экране
-// (`hp-open hp-nar`: сетка 520 мс, плита въезжает), и плиты и слои перестраиваются по её целевой ширине (ui/deck/fit,
+// (`hp-open hp-nar`: сетка 520 мс, плита выходит из-под колоды, край колоды бросает на неё тень `hp-shade`, пока она
+// под колодой), и плиты и слои перестраиваются по её целевой ширине (ui/deck/fit,
 // useDeckFit): содержимое — перекрёстным затуханием своей обёртки (usePlateFit у плит, useLayer у слоёв), плиты и
 // названия шагов не гаснут.
 import { useContext, useEffect, useMemo, type CSSProperties } from "react";
@@ -156,6 +157,8 @@ export function AppShell() {
             s2={s2} h2={<TextHead tp={text} />} p2={<TextBody tp={text} />}
             h3={<ParamsHead pp={params} />} p3={<ParamsBody pp={params} />} m3={<ParamsMore />} b3={<BuildPlate />} s3={s3} p4={<ResultPlate />} layers={layers} />
           <HelperPlate />
+          {/* тень правого края колоды на плиту помощника — видна, только пока плита под колодой (helper.css `.hp-shade`) */}
+          <div className="hp-shade" aria-hidden="true" />
         </div>
       </div>
     </div>

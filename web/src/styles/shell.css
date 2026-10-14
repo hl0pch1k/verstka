@@ -1,6 +1,7 @@
 /* Оболочка и колода. Дословно из boards/V2.dc.html: пункты шапки — кнопки (p2-nav, p2-nav-on), кнопка поверх полосы
  * свёрнутой плиты (p2-sbtn), подъём и уход плиты результата (p2-s4-up, p2-s4-down), обёртка колоды с местом помощника
- * (hp-wrap: вторая колонка 0 → 400 px, hp-hcell). Плиту помощника и остальные правила hp- добавляет helper.css. */
+ * (hp-wrap: вторая колонка 0 → 400 px, hp-hcell — под колодой, пока идёт ход), логотип крупнее (p2-brand). Плиту
+ * помощника, тень края колоды (hp-shade) и остальные правила hp- добавляет helper.css. */
 .p2-sbtn{position:absolute;inset:0;padding:0;border:0;border-radius:16px;background:none;cursor:pointer}
 .p2-nav{border:0;background:none;cursor:pointer;transition:transform 160ms var(--ease),background-color 240ms var(--ease),color 240ms var(--ease)}
 .p2-nav-on,.p2-nav-on:hover{background:#FFFFFF;color:#0B1220}
@@ -8,9 +9,13 @@
 .p2-s4-up{transition:transform 520ms var(--ease),opacity 0s,visibility 0s}
 /* Возврат на главный: плита результата уходит вниз непрозрачной, с презентацией, в одном движении с плитами */
 .p2-s4-down{opacity:1;visibility:visible;pointer-events:none;transition:transform 520ms var(--ease)}
-.hp-wrap{display:grid;grid-template-columns:minmax(0,1fr) 0px;column-gap:0px;height:812px;transition:grid-template-columns 340ms var(--ease),column-gap 340ms var(--ease)}
+.hp-wrap{display:grid;grid-template-columns:minmax(0,1fr) 0px;column-gap:0px;height:812px;isolation:isolate;transition:grid-template-columns 340ms var(--ease),column-gap 340ms var(--ease)}
 .hp-wrap.hp-nar{grid-template-columns:minmax(0,1fr) 400px;column-gap:16px;transition-duration:520ms}
-.hp-hcell{position:relative;z-index:1;min-width:0;height:812px}
+/* ячейка помощника — под колодой, пока идёт ход (колода z-index 0; isolation держит −1 внутри hp-wrap, над фоном
+   страницы); в покое открытая плита рядом с колодой и не пересекается с ней — возвращается на прежний слой (z-index 1,
+   как было), через 520 мс после открытия; при закрытии уходит под колоду сразу */
+.hp-hcell{position:relative;z-index:-1;min-width:0;height:812px}
+.hp-open .hp-hcell{z-index:1;transition:z-index 0s linear 520ms}
 /* плиты и слои перестраиваются по ширине колоды — по целевой, а не по кадру хода (ui/deck/useDeckFit; помощник сужает её
    до 976 при 1440 и до 816 при 1280; пороги — ui/deck/fit.ts: узкая ≤ 1100, тесная ≤ 900). Колода ставит `data-fit`
    (wide, narrow, tight) — по нему названия шагов сжимаются transform'ом. Содержимое плит «Создать» и «Сборки», слоёв и
@@ -23,3 +28,5 @@
   .hp-hcell{height:auto !important}
   .hp-closed .hp-hcell{display:none}
 }
+/* логотип крупнее (владелец, 15.10): «Verstka» 25 px, полоски 5 px — всё в пропорции, вместе с наведением и анимацией «Нет связи» */
+.p2-brand{zoom:1.25}
