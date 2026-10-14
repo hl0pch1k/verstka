@@ -1,7 +1,9 @@
-// Лента шага 01 (C-templates): шесть обложек (четыре, когда помощник сужает колоду) — свои первыми, выбранная всегда
-// видна, — плитка «Все шаблоны · ещё N» и плитка «Загрузить свой». Разметка — boards/V2.dc.html, `#p2-b1` (`tpRib`, `tpMoreOn`, плитка `tpUpload`). Здесь же
-// обложка шаблона (картинка или схема титульного слайда `tp-wf`) и плитка обложки — их берут разбор, раздел «Шаблоны»,
-// «Слайды шаблона» и диалог удаления.
+// Лента шага 01 (C-templates): шесть обложек — свои первыми, выбранная всегда видна, — плитка «Все шаблоны · ещё N» и
+// плитка «Загрузить свой», ряды по четыре (V2 `tpRows`). Помощник сужает колоду: в каждом ряду одна обложка уходит — её
+// дорожка сжимается до нуля, она гаснет на месте; остальные плитки сужаются вместе с плитой (четыре обложки в три
+// колонки, без перескоков между рядами), «ещё N» меняет число на месте (morph.ts `ribbonRows`, create.css «01 · лента»).
+// Разметка — boards/V2.dc.html, `#p2-b1`. Здесь же обложка шаблона (картинка или схема титульного слайда `tp-wf`) и
+// плитка обложки — их берут разбор, раздел «Шаблоны», «Слайды шаблона» и диалог удаления.
 import { useState, type CSSProperties } from "react";
 import { useApp } from "../../store";
 import { tplLabel } from "../../lib/plain";
@@ -9,6 +11,7 @@ import { plural } from "../../lib/utils";
 import type { TemplateListItem } from "../../types";
 import { cls } from "../kit/cls";
 import { Icon, type IconName } from "../kit/Icon";
+import { ribbonRows } from "./morph";
 import { ribbonItems, tplMeta, tplShort } from "./ribbon";
 
 /** Как стоит обложка: плитка ленты (142 px), раздел «Шаблоны» (16:9), миниатюра слайда (16:9, r12), шапка шага
@@ -46,7 +49,9 @@ export function Wireframe({ kind, ink, label }: { kind: CoverKind; ink: string; 
 export function Cover({ src, kind, ink, label }: { src?: string | null; kind: CoverKind; ink: string; label: string }) {
   const [bad, setBad] = useState<string | null>(null);
   if (!src || bad === src) return <Wireframe kind={kind} ink={ink} label={label} />;
-  return <img src={src} alt={label} loading={kind === "s" ? "lazy" : undefined} decoding="async" style={IMG[kind]} onError={() => setBad(src)} />;
+  // обложка плитки ленты в узкой колоде уже своей картинки — видна левая часть (там начинается заголовок слайда), сдвиг
+  // идёт той же кривой (create.css `.hq-cimg`)
+  return <img src={src} alt={label} className={kind === "tile" ? "hq-cimg" : undefined} loading={kind === "s" ? "lazy" : undefined} decoding="async" style={IMG[kind]} onError={() => setBad(src)} />;
 }
 
 /** Выбор шаблона в ленте, разделе и «Слайдах шаблона». Другой шаблон выводит из «Улучшить готовую» (её оформление —
@@ -61,16 +66,17 @@ export function usePickTemplate() {
 }
 
 /** Плитка обложки: выбор по клику, галочка у выбранной, таблетка «Слайды» при наведении. `kind` — классы доски:
- *  tt (лента) или an (лента во время разбора). */
-export function TemplateTile({ t, selected, delay, out, onPick, onPeek, kind = "tt" }: {
-  t: TemplateListItem; selected: boolean; delay: number; out?: boolean; onPick(): void; onPeek(): void; kind?: "tt" | "an";
+ *  tt (лента) или an (лента во время разбора). `cell` — клетка ряда ленты (`tp-cell`); `cut` — уходит в узкой колоде:
+ *  клетка сжимается до нуля (`tp-cut`), плитка гаснет на месте (`hp-wo`). */
+export function TemplateTile({ t, selected, delay, out, onPick, onPeek, kind = "tt", cell, cut }: {
+  t: TemplateListItem; selected: boolean; delay: number; out?: boolean; onPick(): void; onPeek(): void; kind?: "tt" | "an"; cell?: boolean; cut?: boolean;
 }) {
   const name = tplLabel(t);
   const short = tplShort(t);
   const full = [name, tplMeta(t)].filter(Boolean).join(" · ");
   return (
-    <div className={cls("p2-stag p2-in", out && "tp-out")} style={{ animationDelay: `${delay}ms`, transitionDelay: `${delay}ms` }}>
-      <div className={`${kind}-tile`}>
+    <div className={cls("p2-stag p2-in", out && "tp-out", cell && "tp-cell", cut && "tp-cut")} style={{ animationDelay: `${delay}ms`, transitionDelay: `${delay}ms` }}>
+      <div className={cls(`${kind}-tile`, cut && "hp-wo")}>
         <button type="button" className="p2-card" onClick={onPick} aria-pressed={selected} title={full}>
           <span className={cls("p2-cover", selected && "p2-sel")}>
             <Cover src={t.cover_url} kind="tile" ink={inkOf(t)} label={`Обложка шаблона ${name}`} />
@@ -90,23 +96,33 @@ export function TemplateTile({ t, selected, delay, out, onPick, onPeek, kind = "
   );
 }
 
-/** Служебная плитка: значок-слои и подпись в две строки (высота 40 у обеих — знаки на одной линии). */
-export function ActTile({ icon, note, name, delay, out, onClick, label, title, kind = "tt", off }: {
-  icon: IconName; note: string[]; name: string; delay: number; out?: boolean; onClick(): void; label?: string; title?: string; kind?: "tt" | "an";
+/** Служебная плитка: значок-слои и подпись в две строки (высота 40 у обеих — знаки на одной линии). `noteNarrow` —
+ *  подпись в узкой колоде: обе стоят в одном месте, широкая гаснет, узкая проявляется (`hp-sw`). `cell` — клетка ряда
+ *  ленты; `cut` — плитка уходит в узкой колоде (клетка сжимается до нуля, плитка гаснет на месте). */
+export function ActTile({ icon, note, noteNarrow, name, delay, out, onClick, label, title, kind = "tt", off, cell, cut }: {
+  icon: IconName; note: string[]; noteNarrow?: string; name: string; delay: number; out?: boolean; onClick(): void; label?: string; title?: string; kind?: "tt" | "an";
   /** Плитка занята: почему (подсказка); null — нет. */
   off?: string | null;
+  cell?: boolean; cut?: boolean;
 }) {
+  const button = (
+    <button type="button" className="p2-card" onClick={off ? undefined : onClick} aria-label={label} title={off ?? title} aria-disabled={off ? true : undefined}>
+      <span className={`p2-cover ${kind}-act`}>
+        <span className="p2-lic" aria-hidden="true"><span className="p2-lic-b" /><span className="p2-lic-f"><Icon name={icon} size={22} /></span></span>
+        <span className={`${kind}-note`}>
+          {noteNarrow != null
+            ? <span className="hp-sw"><span className="hp-wo">{note[0]}</span><span className="hp-no">{noteNarrow}</span></span>
+            : note.map((s) => <span key={s}>{s}</span>)}
+        </span>
+      </span>
+      <span className={`${kind}-cap`}>
+        <span className={`${kind}-name`}>{name}</span>
+      </span>
+    </button>
+  );
   return (
-    <div className={cls("p2-stag p2-in", out && "tp-out")} style={{ animationDelay: `${delay}ms`, transitionDelay: `${delay}ms` }}>
-      <button type="button" className="p2-card" onClick={off ? undefined : onClick} aria-label={label} title={off ?? title} aria-disabled={off ? true : undefined}>
-        <span className={`p2-cover ${kind}-act`}>
-          <span className="p2-lic" aria-hidden="true"><span className="p2-lic-b" /><span className="p2-lic-f"><Icon name={icon} size={22} /></span></span>
-          <span className={`${kind}-note`}>{note.map((s) => <span key={s}>{s}</span>)}</span>
-        </span>
-        <span className={`${kind}-cap`}>
-          <span className={`${kind}-name`}>{name}</span>
-        </span>
-      </button>
+    <div className={cls("p2-stag p2-in", out && "tp-out", cell && "tp-cell", cut && "tp-cut")} style={{ animationDelay: `${delay}ms`, transitionDelay: `${delay}ms` }}>
+      {cut ? <div className="hp-wo">{button}</div> : button}
     </div>
   );
 }
@@ -114,10 +130,7 @@ export function ActTile({ icon, note, name, delay, out, onClick, label, title, k
 /** «ещё 2 шаблона». */
 export const moreText = (n: number) => `ещё ${plural(n, "шаблон", "шаблона", "шаблонов")}`;
 
-export function Ribbon({ covers, fresh, onPeek, onGallery, onUpload, uploadOff }: {
-  /** Сколько обложек: в широкой колоде шесть, в суженной помощником — четыре (с «Все шаблоны» и «Загрузить свой» — те же
-   *  два ряда; fit.ts `ribbonLayout`). */
-  covers: number;
+export function Ribbon({ fresh, onPeek, onGallery, onUpload, uploadOff }: {
   /** Только что загруженный шаблон — первым. */
   fresh: string | null;
   onPeek(id: string): void;
@@ -126,21 +139,30 @@ export function Ribbon({ covers, fresh, onPeek, onGallery, onUpload, uploadOff }
   /** «Загрузить свой» занята (читается презентация «Улучшить готовую»): почему; null — нет. */
   uploadOff?: string | null;
 }) {
-  const { templates, templateId } = useApp();
+  const { templates, templateId, ui } = useApp();
   const pick = usePickTemplate();
-  const { shown, rest } = ribbonItems(templates, templateId, covers, fresh);
+  const { shown, rest } = ribbonItems(templates, templateId, 6, fresh);
+  const { rows } = ribbonRows(shown, (t) => t.template_id === templateId, rest > 0);
+  // в узкой колоде «Все шаблоны» прячет и обложки, ушедшие из рядов
+  const cut = rows.flatMap((r) => r.slots.filter((s) => s.cut && s.item).map((s) => s.item as TemplateListItem));
   const hidden = templates.filter((x) => !shown.includes(x));
+  const restNarrow = rest + cut.length;
+  const tip = (ui.helper ? [...cut, ...hidden] : hidden).map(tplLabel).join(", ");
   return (
     <>
-      {shown.map((t, i) => (
-        <TemplateTile key={t.template_id} t={t} selected={t.template_id === templateId} delay={i * 40}
-          onPick={() => pick(t.template_id)} onPeek={() => onPeek(t.template_id)} />
+      {rows.map((r, ri) => (
+        <div key={ri} className="tp-row" style={{ "--tn": r.narrow } as CSSProperties}>
+          {r.slots.map((s) => s.kind === "cover" && s.item ? (
+            <TemplateTile key={s.item.template_id} t={s.item} selected={s.item.template_id === templateId} delay={shown.indexOf(s.item) * 40} cell cut={s.cut}
+              onPick={() => pick((s.item as TemplateListItem).template_id)} onPeek={() => onPeek((s.item as TemplateListItem).template_id)} />
+          ) : s.kind === "all" ? (
+            <ActTile key="all" icon="grid" note={[moreText(rest)]} noteNarrow={moreText(restNarrow)} name="Все шаблоны" delay={240} onClick={onGallery} cell
+              label={`Все шаблоны, ${moreText(ui.helper ? restNarrow : rest)}`} title={tip} />
+          ) : (
+            <ActTile key="up" icon="upload" note={[".pptx, .potx, .ppt или .odp", "до 200 МБ"]} name="Загрузить свой" delay={280} onClick={onUpload} off={uploadOff} cell />
+          ))}
+        </div>
       ))}
-      {rest > 0 && (
-        <ActTile icon="grid" note={[moreText(rest)]} name="Все шаблоны" delay={240} onClick={onGallery}
-          label={`Все шаблоны, ${moreText(rest)}`} title={hidden.map(tplLabel).join(", ")} />
-      )}
-      <ActTile icon="upload" note={[".pptx, .potx, .ppt или .odp", "до 200 МБ"]} name="Загрузить свой" delay={280} onClick={onUpload} off={uploadOff} />
     </>
   );
 }

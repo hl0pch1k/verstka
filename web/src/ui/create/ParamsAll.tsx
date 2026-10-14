@@ -1,14 +1,21 @@
 // «Все параметры» (`#p2-b3m`, boards/V2.dc.html и C-params): плита 03 поднялась на 80, меню проявляется лесенкой —
 // тип презентации (`PURPOSES` и «Свой вариант…»), аудитория и слайды (40 мс), «Варианты оформления» (120 мс) и
 // варианты с миниатюрами (160/200/240 мс), три переключателя (280 мс). Лесенка — `.p2-stag` внутри `p2-on`/`p2-off`.
-import { useEffect, useRef, useState, type ReactNode } from "react";
+// Помощник сужает колоду — меню перестраивается вместе с ней (V2 «03 · …«Все параметры»…»): миниатюры вариантов
+// сжимаются и гаснут, подсказки вариантов и тексты переключателей — стопками из двух копий (не переносятся заново посреди
+// хода), коробки переключателей растут той же кривой под текст. В тесной колоде (1280, morph.ts `moreGrid`) степпер
+// слайдов — по содержимому, поля плотнее, переключатели — строками (весь ряд — стопкой из двух копий).
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useApp } from "../../store";
 import { PURPOSES } from "../../lib/createForm";
+import { useDeckWrap } from "../deck/useDeckFit";
 import { cls } from "../kit/cls";
 import { Icon } from "../kit/Icon";
 import { Switch } from "../kit/Switch";
+import { moreGrid } from "./morph";
 import { OWN, SLIDES_LOCKED, type SwitchView } from "./params";
 import type { ParamsPlate } from "./ParamsPlate";
+import { useNarrow } from "./useNarrow";
 
 const show = (on: boolean) => (on ? "p2-on" : "p2-off");
 const GRID3 = { display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 16 } as const;
@@ -58,22 +65,88 @@ function Thumb({ kind }: { kind: "s" | "v" | "c" }) {
   );
 }
 
-/** Переключатель с названием и подсказкой под ним (ряд 3). */
-function SwitchBox({ id, name, hint, sw, onToggle }: { id: string; name: string; hint: string; sw: SwitchView; onToggle(): void }) {
+const SW_NM: CSSProperties = { paddingTop: 2, fontSize: 14, fontWeight: 600, lineHeight: "20px", color: "#FFFFFF" };
+const SW_HINT: CSSProperties = { margin: "4px 0 0", fontSize: 13, fontWeight: 500, lineHeight: "20px", color: "rgba(255,255,255,.64)" };
+const V_HINT: CSSProperties = { fontSize: 13, fontWeight: 500, lineHeight: "20px", color: "rgba(255,255,255,.64)" };
+
+interface SwitchItem { id: string; name: string; hint: string; sw: SwitchView; onToggle(): void }
+
+/** Переключатель с названием и подсказкой под ним (ряд 3). `copies` — название и подсказка стопками из двух копий
+ *  (широкая и узкая, V2 `c-swt`, `c-swd`): в узкой колоде они в колонке у́же и переносятся иначе — но не посреди хода;
+ *  активная копия — по `narrow`. Без копий — коробка ряда, который сам стоит одной из копий (тесная раскладка). */
+function SwitchBox({ it, copies, narrow }: { it: SwitchItem; copies: boolean; narrow: boolean }) {
+  const { id, name, hint, sw, onToggle } = it;
   return (
     <div className="p2-box pp-swb">
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16 }}>
-        <span id={id} className="cp-nm" style={{ paddingTop: 2, fontSize: 14, fontWeight: 600, lineHeight: "20px", color: "#FFFFFF" }}>{name}</span>
+        {copies ? (
+          <div className="hp-tx hp-txf" data-tx="c-swt">
+            <span id={id} className="hp-txw cp-nm" style={SW_NM} aria-hidden={narrow || undefined}>{name}</span>
+            <span className="hp-txn cp-nm" style={SW_NM} aria-hidden={!narrow || undefined}>{name}</span>
+          </div>
+        ) : <span id={id} className="cp-nm" style={SW_NM}>{name}</span>}
         <Switch on={sw.on} disabled={sw.disabled} title={sw.title} labelledBy={id} describedBy={`${id}d`} onToggle={onToggle} />
       </div>
-      <p id={`${id}d`} style={{ margin: "4px 0 0", fontSize: 13, fontWeight: 500, lineHeight: "20px", color: "rgba(255,255,255,.64)" }}>{hint}</p>
+      {copies ? (
+        <div className="hp-tx" data-tx="c-swd">
+          <p id={`${id}d`} className="hp-txw" style={SW_HINT} aria-hidden={narrow || undefined}>{hint}</p>
+          <p className="hp-txn" style={SW_HINT} aria-hidden={!narrow || undefined}>{hint}</p>
+        </div>
+      ) : <p id={`${id}d`} style={SW_HINT}>{hint}</p>}
     </div>
   );
 }
 
-/** `short` — плита 03 уже доски (окно около 1280, помощник; fit.ts `rowMode`): миниатюры вариантов меньше. */
+/** Высоты коробок переключателей в обеих раскладках (наибольшая в ряду): замер копий — у каждой своя постоянная ширина. */
+function useSwitchHeights(row: React.RefObject<HTMLDivElement>, deps: unknown[]): { wide: number; narrow: number } {
+  const [h, setH] = useState({ wide: 0, narrow: 0 });
+  useLayoutEffect(() => {
+    const el = row.current;
+    if (!el) return;
+    const measure = () => {
+      let wide = 0, narrow = 0;
+      for (const box of el.querySelectorAll<HTMLElement>(":scope > .p2-box")) {
+        const [tw, tn] = [...box.querySelectorAll<HTMLElement>(".hp-tx[data-tx=c-swt] > *")];
+        const [dw, dn] = [...box.querySelectorAll<HTMLElement>(".hp-tx[data-tx=c-swd] > *")];
+        if (!tw || !tn || !dw || !dn) return;
+        // поля 16 + 16, ряд названия (не ниже переключателя 24), подсказка с полем 4 сверху
+        wide = Math.max(wide, 32 + Math.max(24, tw.offsetHeight) + 4 + dw.offsetHeight);
+        narrow = Math.max(narrow, 32 + Math.max(24, tn.scrollHeight) + 4 + dn.scrollHeight);
+      }
+      setH((cur) => (cur.wide === wide && cur.narrow === narrow ? cur : { wide, narrow }));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    for (const box of el.querySelectorAll(".hp-tx[data-tx=c-swt] > .hp-txw")) ro.observe(box);
+    window.addEventListener("resize", measure);
+    void document.fonts?.ready.then(measure);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
+  return h;
+}
+
+/** `short` — короткий ряд плиты 03 без переключателей (окно около 1280): миниатюры вариантов меньше. */
 export function ParamsAll({ pp, on, short }: { pp: ParamsPlate; on: boolean; short: boolean }) {
   const { params, setParams } = useApp();
+  const wrap = useDeckWrap();
+  const narrow = useNarrow();
+  const g = moreGrid(wrap, pp.cards.length, short);
+  const switches: SwitchItem[] = [
+    { id: "cp-sw1", name: "Модель пишет тексты слайдов", hint: pp.writesHint, sw: pp.writes, onToggle: pp.toggleWrites },
+    { id: "cp-sw2", name: "Модель проверяет слайды по картинке", hint: "Посмотрит на каждый новый слайд", sw: pp.eyes, onToggle: pp.toggleEyes },
+    { id: "cp-sw3", name: "Генерировать изображения", hint: pp.imagesHint, sw: pp.pictures, onToggle: pp.togglePictures },
+  ];
+  const swRow = useRef<HTMLDivElement>(null);
+  const swh = useSwitchHeights(swRow, [g.tight, wrap, pp.writesHint, pp.imagesHint]);
+  const vars = {
+    "--pp-r1w": g.r1Wide, "--pp-r1n": g.r1Narrow,
+    // коробки не ниже доски: 104 в широкой раскладке, 164 в узкой (V2 `--pp-swh`); выше — когда текст длиннее
+    ...(swh.wide > 0 && { "--pp-swhw": `${Math.max(104, swh.wide)}px` }), ...(swh.narrow > 0 && { "--pp-swh": `${Math.max(164, swh.narrow)}px` }),
+  } as CSSProperties;
   const own = params.purpose === OWN;
   // «Вернуться к списку» ставит тип, который был выбран в списке до «Свой вариант…» (V2: `own: false`)
   const listed = useRef(own ? "product" : params.purpose);
@@ -89,9 +162,11 @@ export function ParamsAll({ pp, on, short }: { pp: ParamsPlate; on: boolean; sho
   }, [focusTo, own]);
   const s = pp.slides;
   return (
-    <div id="p2-b3m" className={cls("p2-body p2-more-body", short && "pp-short", show(on))} style={{ position: "absolute", left: 240, right: 48, top: 128, display: "flex", flexDirection: "column" }}>
-      {/* ряд 1: тип · аудитория · слайдов */}
-      <div className="p2-params p2-stag" style={{ ...GRID3, transitionDelay: "40ms" }}>
+    <div id="p2-b3m" className={cls("p2-body p2-more-body", short && "pp-short", g.tight && "pp-tight", show(on))}
+      style={{ position: "absolute", left: 240, right: 48, top: 128, display: "flex", flexDirection: "column", ...vars }}>
+      {/* ряд 1: тип · аудитория · слайдов (лесенка — на обёртке: у сетки свой ход вместе с колодой) */}
+      <div className="p2-stag" style={{ transitionDelay: "40ms" }}>
+      <div className="p2-params pp-r1" style={GRID3}>
         {own ? (
           <div className="p2-box cp-fbox">
             <span id="cp-tl" className="cp-lbl">Тип презентации</span>
@@ -124,7 +199,7 @@ export function ParamsAll({ pp, on, short }: { pp: ParamsPlate; on: boolean; sho
           <span className="cp-lbl">Аудитория</span>
           <input type="text" className="cp-ctl" value={params.audience} onChange={(e) => setParams({ audience: e.target.value })} placeholder="Руководство, инвесторы, команда…" />
         </label>
-        <div className="p2-box cp-fbox" role="group" aria-labelledby="cp-cnt" title={s.locked ? SLIDES_LOCKED : undefined}>
+        <div className="p2-box cp-fbox pp-slb" role="group" aria-labelledby="cp-cnt" title={s.locked ? SLIDES_LOCKED : undefined}>
           <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16 }}>
             <span id="cp-cnt" className="cp-lbl">Слайдов</span>
             {/* C-params: метка появляется, когда число слайдов задано в тексте, — тогда степпер заблокирован */}
@@ -133,12 +208,13 @@ export function ParamsAll({ pp, on, short }: { pp: ParamsPlate; on: boolean; sho
               <span>задано в тексте</span>
             </span>
           </span>
-          <span style={{ display: "flex", alignItems: "center", gap: 16, height: 40 }}>
+          <span className="pp-sl" style={{ display: "flex", alignItems: "center", gap: 16, height: 40 }}>
             <button type="button" className="p2-rb" onClick={() => pp.step(-1)} disabled={!s.dec} aria-label="Меньше слайдов"><Icon name="minus" size={18} /></button>
             <span aria-live="polite" style={{ minWidth: 48, textAlign: "center", fontFamily: "'Unbounded','Manrope',sans-serif", fontWeight: 600, fontSize: 32, lineHeight: "40px", letterSpacing: "-0.03em", color: "#FFFFFF" }}>{s.count}</span>
             <button type="button" className="p2-rb" onClick={() => pp.step(1)} disabled={!s.inc} aria-label="Больше слайдов"><Icon name="plus" size={18} /></button>
           </span>
         </div>
+      </div>
       </div>
 
       {/* ряд 2: варианты оформления */}
@@ -147,25 +223,47 @@ export function ParamsAll({ pp, on, short }: { pp: ParamsPlate; on: boolean; sho
         {pp.cards.map((v, i) => (
           <div key={v.name} className="p2-stag" style={{ transitionDelay: `${160 + i * 40}ms` }}>
             <button type="button" role="checkbox" aria-checked={v.on} className={cls("p2-vc cp-vc", v.on && "p2-vc-on")} onClick={() => pp.toggle(v.name)} title={v.full}>
-              <span className="pp-th" aria-hidden="true"><Thumb kind={v.thumb} /></span>
+              <span className="hp-wo pp-th" aria-hidden="true"><Thumb kind={v.thumb} /></span>
               <span style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1, minWidth: 0 }}>
                 <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
                   <span className="pp-vt" style={{ fontSize: 16, fontWeight: 700, lineHeight: "24px", color: "#FFFFFF" }}>{v.title}</span>
                   <span className="p2-vbox" aria-hidden="true"><Icon name="check" size={12} /></span>
                 </span>
-                <span style={{ fontSize: 13, fontWeight: 500, lineHeight: "20px", color: "rgba(255,255,255,.64)" }}>{v.hint}</span>
+                {/* подсказка — стопкой: миниатюра уходит, и в узкой колоде подсказка в колонке другой ширины; ниже та копия,
+                    что у́же (morph.ts `moreGrid`: при 1440 узкая шире — роли наоборот, hp-txr) */}
+                <span className={cls("hp-tx", g.vhint < 0 && "hp-txr")} data-tx="c-vhint" style={{ "--hpd": `${g.vhint}px` } as CSSProperties}>
+                  <span className="hp-txw" style={V_HINT} aria-hidden={narrow || undefined}>{v.hint}</span>
+                  <span className="hp-txn" style={V_HINT} aria-hidden={!narrow || undefined}>{v.hint}</span>
+                </span>
               </span>
             </button>
           </div>
         ))}
       </div>
 
-      {/* ряд 3: модель и изображения */}
-      <div className="p2-params p2-stag" style={{ ...GRID3, marginTop: 32, transitionDelay: "280ms" }}>
-        <SwitchBox id="cp-sw1" name="Модель пишет тексты слайдов" hint={pp.writesHint} sw={pp.writes} onToggle={pp.toggleWrites} />
-        <SwitchBox id="cp-sw2" name="Модель проверяет слайды по картинке" hint="Посмотрит на каждый новый слайд" sw={pp.eyes} onToggle={pp.toggleEyes} />
-        <SwitchBox id="cp-sw3" name="Генерировать изображения" hint={pp.imagesHint} sw={pp.pictures} onToggle={pp.togglePictures} />
-      </div>
+      {/* ряд 3: модель и изображения. Тесная раскладка (1280): в узкой колоде переключатели — строками без подсказок; весь
+          ряд — стопкой из двух копий (ширина «Все параметры» = колода − 288: --hpd 416), активная — по раскладке */}
+      {g.tight ? (
+        <div className="p2-stag" style={{ marginTop: 32, transitionDelay: "280ms" }}>
+          <div className="hp-tx" data-tx="c-swr">
+            <div className="hp-txw p2-params" style={GRID3} aria-hidden={narrow || undefined}>
+              {switches.map((it) => <SwitchBox key={it.id} it={it} copies={false} narrow={narrow} />)}
+            </div>
+            <div className="hp-txn pp-swl" aria-hidden={!narrow || undefined}>
+              {switches.map((it) => (
+                <div key={it.id} className="p2-box">
+                  <span id={`${it.id}r`} className="cp-nm" style={{ ...SW_NM, paddingTop: 0 }}>{it.name}</span>
+                  <Switch on={it.sw.on} disabled={it.sw.disabled} title={it.sw.title} labelledBy={`${it.id}r`} describedBy={`${it.id}d`} onToggle={it.onToggle} />
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div ref={swRow} className="p2-params p2-stag" style={{ ...GRID3, marginTop: 32, transitionDelay: "280ms" }}>
+          {switches.map((it) => <SwitchBox key={it.id} it={it} copies narrow={narrow} />)}
+        </div>
+      )}
     </div>
   );
 }

@@ -16,8 +16,6 @@ import { Icon } from "../kit/Icon";
 import { usePresence } from "../kit/usePresence";
 import { useHeld } from "./ImproveNote";
 import { FileInput, UploadZone, useFileDrop } from "./UploadZone";
-import { ribbonLayout } from "../deck/fit";
-import { useDeckFit } from "../deck/useDeckFit";
 
 /** idle — лента; run — файл уходит на сервер и разбирается; settle — разбор закончился, решается итог; done — все
  *  галочки держатся 560 мс; out — разбор гаснет 240 мс; fail — строка ошибки в коробке разбора. */
@@ -260,14 +258,12 @@ export function TemplateHead({ upload }: { upload: TemplateUpload }) {
   );
 }
 
-/** Тело шага 01 (слот `p1`, `#p2-b1`): лента или разбор и зона «Отпустите файл». */
+/** Тело шага 01 (слот `p1`, `#p2-b1`): лента или разбор и зона «Отпустите файл». Помощник сужает колоду — сетка
+ *  тела (четыре дорожки) перестраивается вместе с ней: у ленты в каждом ряду одна обложка уходит, у разбора — вторая
+ *  дорожка (create.css «01 · лента», `tp-anl`). */
 export function TemplateBody({ upload }: { upload: TemplateUpload }) {
   const { ui, dispatch, templates, notices } = useApp();
   const on = ui.screen === "create" && ui.open === "tpl" && !ui.more;
-  // помощник сужает колоду: лента — четыре обложки в три колонки (ribbonLayout), и тот же разбор. Раскладка — показанная
-  // раскладка шага (Deck, usePlateFit): число обложек меняется в подмене перекрёстного затухания всего содержимого шага
-  const fit = useDeckFit();
-  const { cols, covers } = ribbonLayout(fit);
   const body = useRef<HTMLDivElement>(null);
   // пока читается презентация «Улучшить готовую», файл на плиту не принимается — шапка шага говорит почему
   const over = useFileDrop(body, on && !upload.busy, upload.start, on && upload.busyWhy === READING_DECK ? upload.refuse : undefined);
@@ -276,12 +272,12 @@ export function TemplateBody({ upload }: { upload: TemplateUpload }) {
   const fileName = upload.file?.name ?? "";
   const info = notices.template?.kind === "info" ? notices.template.text : null;
   return (
-    <div id="p2-b1" ref={body} className={cls("p2-body p2-g4", on ? "p2-on" : "p2-off")} data-ribbon={fit === "wide" ? "wide" : "narrow"}
-      style={{ position: "relative", display: "grid", gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gap: 16, margin: "24px 0 0 192px" }}>
+    <div id="p2-b1" ref={body} className={cls("p2-body p2-g4", on ? "p2-on" : "p2-off", upload.phase !== "idle" && "tp-anl")}
+      style={{ position: "relative", display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 16, margin: "24px 0 0 192px" }}>
       {upload.phase === "idle" ? (
-        <Ribbon covers={covers} fresh={upload.fresh} onPeek={peek} onGallery={gallery} onUpload={upload.pick} uploadOff={upload.busyWhy} />
+        <Ribbon fresh={upload.fresh} onPeek={peek} onGallery={gallery} onUpload={upload.pick} uploadOff={upload.busyWhy} />
       ) : (
-        <Analysis list={orderTemplates(templates, upload.fresh)} cols={cols} name={templateTitle(fileName)} fileName={fileName}
+        <Analysis list={orderTemplates(templates, upload.fresh)} name={templateTitle(fileName)} fileName={fileName}
           steps={upload.steps} facts={upload.facts} out={upload.phase === "out"} error={upload.failure?.text ?? null} canRetry={upload.failure?.retry ?? true}
           info={upload.phase === "fail" ? null : info} onPeek={peek} onGallery={gallery}
           onRetry={upload.retry} onOther={upload.pick} onClose={upload.dismiss} />

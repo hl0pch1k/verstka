@@ -19,8 +19,8 @@ import { Switch } from "../kit/Switch";
 import { useSwap } from "../kit/useSwap";
 import { useHeld, useModelOn } from "./ImproveNote";
 import { ParamsAll } from "./ParamsAll";
-import { errBelow, rowMode } from "../deck/fit";
-import { useDeckWidth } from "../deck/useDeckFit";
+import { useDeckWrap } from "../deck/useDeckFit";
+import { ctaShort, paramsRow } from "./morph";
 import {
   buildRequest, eyesOn, imagesHint, picturesOn, presetParams, SLIDES_LOCKED, slidesView, slideWord, startFailure, stepSlides,
   summaryLine, toggleEyes as nextEyes, togglePictures as nextPictures, toggleStrategy, variantCards, writesHint, headLine,
@@ -220,34 +220,37 @@ function EndedLine({ line, busy, onOpen }: { line: Extract<HeadLine, { kind: "en
   );
 }
 
-/** Заголовок плиты 03 справа (слот `h3`): сводка, строка под ней (ошибка — C-errors, или «Сборка уже идёт») и
- *  «Создать презентацию». */
+/** Заголовок плиты 03 справа (слот `h3`): сводка и «Создать презентацию». Помощник сужает колоду — сводка сжимается
+ *  слева и гаснет, уступая место кнопке (её межколонники уходят вместе с ней); в тесной колоде (1280) «презентацию»
+ *  сжимается и гаснет на месте — остаётся «Создать» (morph.ts `ctaShort`). Строка под рядом заголовка — ParamsLine. */
 export function ParamsHead({ pp }: { pp: ParamsPlate }) {
-  const on = pp.line !== null;
-  // уходящая строка гаснет со своим текстом
-  const shown = useHeld(pp.line);
-  // плита 03 уже доски (окно около 1280, помощник): строке ошибки тесно рядом со сводкой — она встаёт под ряд заголовка
-  // (ширина — показанной раскладки шага: меняется в подмене перекрёстного затухания, Deck `usePlateFit`)
-  const low = errBelow(useDeckWidth());
+  const short = ctaShort(useDeckWrap());
   return (
     <>
       <span style={{ flex: 1, minWidth: 0 }} />
-      <div className={cls("pp-sum", on && "pp-bad", low && "pp-low")}>
-        <span className="p2-hide-s pp-sumt" title={pp.summary}>{pp.summary}</span>
-        <div id="pp-err" className={cls("pp-err", show(on))}>
-          {shown?.kind === "busy" ? <BusyLine onBack={pp.goBuild} />
-            : shown?.kind === "ended" ? <EndedLine line={shown} busy={pp.opening} onOpen={pp.openEnded} />
-            : <ErrorLine key={shown?.text ?? ""} text={shown?.text ?? ""} lines={1} quiet={shown?.echo} style={{ color: "#F87171" }} />}
-        </div>
-      </div>
-      {/* тесная колода (помощник при 1280) — «Создать»: кнопка целиком видна рядом с названием шага */}
-      <button type="button" className="p2-cta pp-cta" onClick={pp.start} aria-busy={pp.starting || undefined} aria-describedby={on ? "pp-err" : undefined}
+      <span className="p2-hide-s pp-sum hp-wo"><span className="pp-sumt" title={pp.summary}>{pp.summary}</span></span>
+      <button type="button" className="p2-cta pp-cta" onClick={pp.start} aria-busy={pp.starting || undefined} aria-describedby={pp.line !== null ? "pp-err" : undefined}
         aria-label="Создать презентацию">
-        <span className="pp-cta-l">Создать презентацию</span>
-        <span className="pp-cta-s">Создать</span>
+        <span>Создать<span className={cls("pp-ctat", short && "pp-ctag")}> презентацию</span></span>
         <Icon name="arrow-right" size={20} />
       </button>
     </>
+  );
+}
+
+/** Строка под рядом заголовка плиты 03 (C-errors): ошибка запуска, тихая «Сборка уже идёт» или итог сборки, кончившейся в
+ *  другом месте, — вправо к краю плиты, одно место в обеих раскладках: помощник сужает колоду, а строка не переезжает и
+ *  не гаснет (длинная — многоточием, целиком — в подсказке). */
+function ParamsLine({ pp }: { pp: ParamsPlate }) {
+  const on = pp.line !== null;
+  // уходящая строка гаснет со своим текстом
+  const shown = useHeld(pp.line);
+  return (
+    <div id="pp-err" className={cls("pp-err", show(on))}>
+      {shown?.kind === "busy" ? <BusyLine onBack={pp.goBuild} />
+        : shown?.kind === "ended" ? <EndedLine line={shown} busy={pp.opening} onOpen={pp.openEnded} />
+        : <ErrorLine key={shown?.text ?? ""} text={shown?.text ?? ""} lines={1} quiet={shown?.echo} style={{ color: "#F87171" }} />}
+    </div>
   );
 }
 
@@ -277,61 +280,56 @@ function ShortSlides({ pp }: { pp: ParamsPlate }) {
 const SW_ROW = { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, height: 32 } as const;
 const SW_NAME = { fontSize: 14, fontWeight: 600, lineHeight: "20px", color: "#FFFFFF" } as const;
 
-/** Варианты в тесной колоде (помощник при 1280): одна коробка рядом со степпером, варианты — строками с галочкой. */
-function VariantList({ pp }: { pp: ParamsPlate }) {
-  return (
-    <div className="p2-box p2-stag pp-vlist" role="group" aria-label="Варианты оформления" style={{ transitionDelay: "40ms" }}>
-      {pp.cards.map((v) => (
-        <button key={v.name} type="button" role="checkbox" aria-checked={v.on} className={cls("pp-vli", v.on && "pp-vli-on")} onClick={() => pp.toggle(v.name)} title={v.full}>
-          <span className="p2-vbox" aria-hidden="true"><Icon name="check" size={12} /></span>
-          <span className="pp-vt">{v.title}</span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-/** Тело плиты 03 (слот `p3`): короткий ряд `#p2-b3` и «Все параметры» `#p2-b3m`; стрелка под «03» — ParamsMore. */
+/** Тело плиты 03 (слот `p3`): строка под рядом заголовка, короткий ряд `#p2-b3` и «Все параметры» `#p2-b3m`; стрелка под
+ *  «03» — ParamsMore. Короткий ряд перестраивается вместе с колодой (V2 «03 · сводка уступает место…»): те же дорожки,
+ *  степпер 216 → 200, переключатели 264 → 0 (гаснут на месте), у вариантов описание и галочка справа гаснут, галочка
+ *  проявляется на месте описания. Дорожки — по ширине окна (morph.ts `paramsRow`): при 1280 переключатели только в «Все
+ *  параметры», в узкой колоде уходит и степпер (варианты — с названием). */
 export function ParamsBody({ pp }: { pp: ParamsPlate }) {
   const { ui } = useApp();
   const create = ui.screen === "create";
   const more = create && ui.more;
   const on = create && ui.open === "text" && !ui.more;
-  // короткий ряд по ширине колоды (fit.ts `rowMode`): полный (доска), без переключателей, узкий, тесный — варианты
-  // карточками рядом со степпером не помещаются, одна коробка-список. Ширина — показанной раскладки шага: ряд (разметка
-  // и правила `.pp-row[data-row=…]`) меняется в подмене перекрёстного затухания всего содержимого шага (Deck `usePlateFit`)
-  const row = rowMode(useDeckWidth());
-  const tight = row === "tight";
+  const row = paramsRow(useDeckWrap(), pp.cards.length);
   return (
     <>
-      <div id="p2-b3" className={cls("p2-body p2-params pp-row", show(on))} data-row={row} style={{ "--pp-n": pp.cards.length } as CSSProperties}>
-        <ShortSlides pp={pp} />
-        {tight ? <VariantList pp={pp} /> : pp.cards.map((v, i) => (
+      <ParamsLine pp={pp} />
+      <div id="p2-b3" className={cls("p2-body p2-params pp-row", show(on))}
+        style={{ "--pp-tw": row.wide, "--pp-tn": row.narrow, "--pp-vd": `${row.shrink}px` } as CSSProperties}>
+        <div className={cls("pp-stc", !row.stepper && "pp-stg")}>
+          <div className={row.stepper ? undefined : "hp-wo"}><ShortSlides pp={pp} /></div>
+        </div>
+        {pp.cards.map((v, i) => (
           <div key={v.name} className="p2-stag" style={{ transitionDelay: `${40 + i * 40}ms` }}>
             <button type="button" role="checkbox" aria-checked={v.on} className={cls("p2-vc pp-vc", v.on && "p2-vc-on")} onClick={() => pp.toggle(v.name)} title={v.full}>
               <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, width: "100%" }}>
                 <span className="pp-vt" style={{ fontSize: 16, fontWeight: 700, lineHeight: "24px", color: "#FFFFFF" }}>{v.title}</span>
-                <span className="p2-vbox" aria-hidden="true"><Icon name="check" size={12} /></span>
+                <span className="p2-vbox hp-wo pp-vb1" aria-hidden="true"><Icon name="check" size={12} /></span>
               </span>
-              <span className="pp-vt pp-vd" style={{ maxWidth: "100%", fontSize: 13, fontWeight: 500, lineHeight: "20px", color: "rgba(255,255,255,.64)" }}>{v.desc}</span>
+              <span className="hp-wo pp-vd" style={{ fontSize: 13, fontWeight: 500, lineHeight: "20px", color: "rgba(255,255,255,.64)" }}>
+                <span className="pp-vdi pp-vt">{v.desc}</span>
+              </span>
+              <span className="p2-vbox hp-no pp-vb2" aria-hidden="true"><Icon name="check" size={12} /></span>
             </button>
           </div>
         ))}
-        {/* переключатели — только в полном ряду (варианту нужно 173 px); уже — они в «Все параметры» */}
-        {row === "full" && (
-          <div className="p2-box p2-stag pp-sws" style={{ display: "flex", flexDirection: "column", justifyContent: "center", gap: 8, height: 88, padding: "8px 16px", transitionDelay: "160ms" }}>
-            <div style={SW_ROW}>
-              <span id="p2-sw1" style={SW_NAME}>Модель пишет тексты</span>
-              <Switch on={pp.writes.on} disabled={pp.writes.disabled} title={pp.writes.title} labelledBy="p2-sw1" onToggle={pp.toggleWrites} />
-            </div>
-            <div style={SW_ROW}>
-              <span id="p2-sw2" style={SW_NAME}>С изображениями</span>
-              <Switch on={pp.pictures.on} disabled={pp.pictures.disabled} title={pp.pictures.title} labelledBy="p2-sw2" onToggle={pp.togglePictures} />
+        {/* переключатели — только пока варианту хватает места (173 px); уже — они в «Все параметры» */}
+        {row.switches && (
+          <div className="hp-wo pp-swc">
+            <div className="p2-box p2-stag pp-sws" style={{ display: "flex", flexDirection: "column", justifyContent: "center", gap: 8, height: 88, padding: "8px 16px", transitionDelay: "160ms" }}>
+              <div style={SW_ROW}>
+                <span id="p2-sw1" style={SW_NAME}>Модель пишет тексты</span>
+                <Switch on={pp.writes.on} disabled={pp.writes.disabled} title={pp.writes.title} labelledBy="p2-sw1" onToggle={pp.toggleWrites} />
+              </div>
+              <div style={SW_ROW}>
+                <span id="p2-sw2" style={SW_NAME}>С изображениями</span>
+                <Switch on={pp.pictures.on} disabled={pp.pictures.disabled} title={pp.pictures.title} labelledBy="p2-sw2" onToggle={pp.togglePictures} />
+              </div>
             </div>
           </div>
         )}
       </div>
-      <ParamsAll pp={pp} on={more} short={row !== "full"} />
+      <ParamsAll pp={pp} on={more} short={!row.switches} />
     </>
   );
 }

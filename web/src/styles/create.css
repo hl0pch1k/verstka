@@ -163,18 +163,17 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 @media (max-width: 900px){.p2-more-body{display:none !important}}
 /* «03 Параметры и запуск»: переключатель, который сейчас не действует (модель не подключена), — как недоступные p2-rb */
 .p2-p3 .p2-sw:disabled{opacity:.32;cursor:default}
-/* Короткий ряд (V2 `#p2-b3`): степпер, варианты (--pp-n), переключатели; поля меню с переключателями — не ниже 104 */
-.pp-row{display:grid;grid-template-columns:216px repeat(var(--pp-n,3),minmax(0,1fr)) 264px;gap:16px;height:88px;margin:24px 0 0 192px}
+/* Короткий ряд (V2 `#p2-b3`): степпер, варианты, переключатели — дорожки и как они меняются вместе с колодой — ниже, в
+   блоке «Колода, суженная помощником»; поля меню с переключателями — не ниже 104 */
+.pp-row{display:grid;grid-template-columns:216px repeat(3,minmax(0,1fr)) 264px;gap:16px;height:88px;margin:24px 0 0 192px}
 .pp-swb{min-height:104px;padding:16px 24px}
 .pp-th{display:block;flex:none;width:156px;height:88px}
 .pp-th svg{width:100%;height:100%}
-/* Сводка в заголовке плиты 03 и строка ошибки под ней (C-errors): обе в одной клетке; с ошибкой сводка поднимается на
-   10 px, строка встаёт под неё — места те же, что у столбца доски, а сводка не прыгает. Обе сжимаются с многоточием */
-.pp-sum{display:grid;flex:0 1 auto;min-width:0;justify-items:end;align-items:center}
-.pp-sum>*{grid-area:1 / 1;min-width:0;max-width:100%}
-.pp-sumt{font-size:15px;font-weight:600;line-height:24px;color:rgba(255,255,255,.64);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:transform 240ms var(--ease)}
-.pp-bad .pp-sumt{transform:translateY(-10px)}
-.pp-err{display:flex;justify-content:flex-end;transform:translateY(12px)}
+/* Сводка в заголовке плиты 03 (уступает место «Создать презентацию» в узкой колоде) и строка ошибки запуска (C-errors) —
+   под рядом заголовка, вправо к краю плиты: одно место в обеих раскладках (с помощником сводки нет, строка не
+   переезжает). Обе сжимаются с многоточием */
+.pp-sumt{font-size:15px;font-weight:600;line-height:24px;color:rgba(255,255,255,.64);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pp-err{position:absolute;left:240px;right:48px;top:106px;display:flex;justify-content:flex-end}
 .pp-err>p{max-width:100%}
 /* «Сборка уже идёт»: тихая строка на месте строки ошибки (не красная) и ссылка назад к идущей сборке */
 .pp-busy{display:inline-flex;align-items:center;gap:12px;min-width:0;margin:0;font-size:14px;font-weight:600;line-height:20px;color:rgba(255,255,255,.64);white-space:nowrap}
@@ -187,98 +186,211 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 .pp-gol{transition:opacity 160ms var(--ease)}
 .pp-gos{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;transition:opacity 160ms var(--ease)}
 .pp-go[aria-busy="true"]:hover,.pp-go[aria-busy="true"]:active{transform:none}
-/* короткий ряд при узкой колоде: названия и подписи вариантов не вылезают из карточек */
+/* названия вариантов не вылезают из карточек */
 .pp-vt{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-/* Плита 03 уже доски (окно около 1280, помощник). Пороги — ui/deck/fit.ts (`rowMode`, `errBelow`), от целевой ширины
-   колоды: ход сетки помощника их не пересекает (раньше — `@container p3`, срабатывал посреди хода).
-   - Короткий ряд (`.pp-row[data-row]`, ставит ParamsBody по показанной раскладке шага — меняется в подмене перекрёстного
-     затухания): `full` — доска; `short` — пять
-     колонок не помещаются (варианту нужно 173 px), переключатели остаются в «Все параметры», варианты шире; `narrow` —
-     степпер 200, у вариантов название в строку, галочка на месте описания; `tight` — варианты строками с галочкой в одной
-     коробке рядом со степпером.
-   - В меню миниатюры вариантов меньше, а название и подсказка — целиком (`.pp-short` у «Все параметры»).
-   - Сводке тесно для строки ошибки: строка встаёт под ряд заголовка, вправо к «Создать презентацию», сводка на месте
-     (`.pp-low`). */
-.pp-row:where([data-row=short]){grid-template-columns:216px repeat(var(--pp-n,3),minmax(0,1fr))}
-.pp-row:where([data-row=narrow]){grid-template-columns:200px repeat(var(--pp-n,3),minmax(0,1fr))}
-.pp-row:where([data-row=tight]){grid-template-columns:216px minmax(0,1fr)}
-:where(.pp-row[data-row=narrow]) .pp-vc{position:relative}
-:where(.pp-row[data-row=narrow]) .pp-vc .p2-vbox{position:absolute;left:16px;bottom:16px}
-:where(.pp-row[data-row=narrow]) .pp-vd{display:none}
+/* «Все параметры» при коротком ряде без переключателей (окно около 1280): миниатюры вариантов меньше */
 :where(.pp-short) .pp-th{width:112px;height:63px}
-:where(.pp-low).pp-bad .pp-sumt{transform:none}
-:where(.pp-low) .pp-err{position:absolute;left:240px;right:48px;top:106px;transform:none}
-.pp-vlist{display:flex;flex-direction:column;justify-content:center;gap:2px;height:88px;padding:8px 12px;min-width:0}
-.pp-vli{display:flex;align-items:center;gap:8px;width:100%;height:24px;padding:0 4px;border:0;border-radius:999px;background:none;color:#FFFFFF;font-size:14px;font-weight:600;line-height:20px;text-align:left;cursor:pointer;transition:transform 160ms var(--ease)}
-.pp-vli:hover{transform:translateY(-2px)}
-.pp-vli:active{transform:scale(.98)}
-.pp-vli .p2-vbox{width:18px;height:18px}
-.pp-vli-on .p2-vbox{background:#2563EB;box-shadow:none}
-.pp-vli-on .p2-vbox svg{opacity:1}
+/* «Создать презентацию» → «Создать» (тесная колода): «презентацию» — своим словом, сжимается и гаснет на месте */
+.pp-ctat{display:inline-block;overflow:hidden;white-space:pre;vertical-align:top}
+/* переключатели строками (тесная раскладка «Все параметры», помощник при 1280): название и переключатель, без подсказки */
+.pp-swl{display:grid;grid-template-columns:minmax(0,1fr);gap:8px}
+.pp-swl > .p2-box{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 24px}
 
-/* ── Колода, суженная помощником (задача 13). Решение — по целевой ширине колоды (ui/deck/fit.ts: узкая ≤ 1100 px — 976
-   при 1440, тесная ≤ 900 px — 816 при 1280). Содержимое шага (`.p2-fxbox`, Deck `StepBox`) — место плиты целиком
-   шириной колоды на конец хода: колода сужается или расширяется, край плиты подъезжает к содержимому, а оно не
-   перестраивается и не переносится. Раскладку оно меняет перекрёстным затуханием (Deck `usePlateFit`): ряд заголовка
-   справа от названия (`.p2-hx`) и тело шага гаснут 120 мс, подменяются невидимыми — правила ниже по `data-fit` этих
-   обёрток (`.p2-fx`), а не колоды, — и проявляются 240 мс. Плита, номер и название шага не гаснут: название сжимается до
-   24 px transform'ом вместе с колодой (по `data-fit` колоды: с первого кадра открытия, при закрытии — когда сетка
-   доехала), место в ряду держит невидимая мерка — она меняется в подмене, пока соседи справа невидимы. Ничего не
-   наезжает: что не помещается, сжимается многоточием или уходит. Сколько обложек в ленте и колонок у неё, какой
-   короткий ряд — решает JS по показанной раскладке шага (вложенный DeckFitContext). */
+/* ── Колода, суженная помощником, — тем же ходом, что «Результат» (V2 версии 100, блок «Колода, суженная помощником, на
+   «Создать», «Сборке» и под «Подробнее»…»; правила V2 дословно, кроме отмеченного «сайт:»). Содержимое плит идёт за
+   шириной колоды каждый кадр (как сетка «Результата»): всё, что в узкой раскладке меняется, выражено тем, что
+   интерполируется на той же кривой (var(--ease)) и за то же время — открытие 520 мс, закрытие 340:
+     · дорожки сеток с тем же числом дорожек (лишняя сжимается до нуля), отступы, ширина подписи, которая уходит;
+     · transform: названия шагов 32 → 24 px (scale .75 от левого края; место в ряду держит невидимая мерка, её кегль
+       идёт той же кривой);
+     · прозрачность на месте — только у того, что есть в одной раскладке (hp-wo — только в широкой, hp-no — только в
+       узкой), по таймингу полного и компактного вида «Результата»: открытие — широкое гаснет 240 мс с 0, узкое
+       проявляется 240 мс с 120; закрытие — узкое гаснет 160 мс, широкое проявляется 160 мс через 80.
+   Ничего, что есть в обеих раскладках, не гаснет и не перескакивает между рядами; многострочный текст не переносится
+   заново посреди хода (стопки hp-tx ниже). Что зависит от ширины окна (дорожки короткого ряда, тесная раскладка при
+   1280, на сколько у́же клетки стопок, короткие подписи) — ui/create/morph.ts: обе раскладки сразу, переменными CSS. */
 .p2-fxbox{position:absolute;left:0;top:0;right:0;bottom:0;box-sizing:border-box;padding:40px 48px}
-.p2-hx{display:flex;align-items:center;gap:24px;flex:1 1 0%;min-width:0;height:64px}
+.p2-hx{position:relative;display:flex;align-items:center;gap:24px;flex:1 1 0%;min-width:0;height:64px}
 .p2-ttl-box{position:relative;display:block;height:40px}
 .p2-ttl-sz{display:block;visibility:hidden}
-.p2-ttl-nar .p2-ttl-sz{font-size:24px}
-.p2-ttl-v{position:absolute;left:0;top:0;transform-origin:left center;transition:transform 520ms var(--ease)}
-:where(.p2-deck[data-fit=narrow], .p2-deck[data-fit=tight]) .p2-ttl-v{transform:scale(.75)}
+.p2-ttl-v{position:absolute;left:0;top:0;transform-origin:left center}
+.p2-root .hp-sw{display:grid}
+.p2-root .hp-sw > *{grid-area:1 / 1}
+/* сайт: стопки в потоке флекса — во всю свою клетку и при ≤ 900 px (там узкой копии нет, поле — одно) */
+.hp-txf{flex:1 1 0%;min-width:0}
 @media (max-width: 900px){
+  .hp-tx.hp-txa{display:flex;flex:1 1 0%;min-width:0;min-height:0}
+}
+@media (min-width: 901px){
+  .p2-ttl-sz{transition:font-size 340ms var(--ease)}
+  .p2-ttl-v{transition:transform 340ms var(--ease)}
+  .hp-nar .p2-ttl-sz{font-size:24px;transition-duration:520ms}
+  .hp-nar .p2-ttl-v{transform:scale(.75);transition-duration:520ms}
+  .hp-wo{transition:opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
+  .hp-nar .hp-wo{opacity:0;visibility:hidden;pointer-events:none;transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
+  .hp-no{opacity:0;visibility:hidden;pointer-events:none;transition:opacity 160ms var(--ease),visibility 0s linear 160ms}
+  .hp-nar .hp-no{opacity:1;visibility:inherit;pointer-events:auto;transition:opacity 240ms var(--ease) 120ms,visibility 0s linear 0s}
+
+  /* 01 · лента — ряды по четыре дорожки; межколонник — поле справа у каждой плитки (дорожка с нулём сжимается вместе с
+     ним), лишнее поле последней колонки уходит за край отрицательным отступом. Разбор: вторая дорожка сжимается до нуля.
+     сайт: ход сетки — вместе с проявлением и уходом тела шага (p2-on / p2-off), а не вместо него */
+  #p2-b1{grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) !important;column-gap:0 !important;margin-right:-16px !important}
+  #p2-b1.p2-on{transition:grid-template-columns 340ms var(--ease),opacity 360ms var(--ease) 120ms}
+  #p2-b1.p2-off{transition:grid-template-columns 340ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
+  .hp-nar #p2-b1.tp-anl{grid-template-columns:minmax(0,1fr) minmax(0,0fr) minmax(0,1fr) minmax(0,1fr) !important}
+  .hp-nar #p2-b1.p2-on{transition:grid-template-columns 520ms var(--ease),opacity 360ms var(--ease) 120ms}
+  .hp-nar #p2-b1.p2-off{transition:grid-template-columns 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
+  #p2-b1 > *{margin-right:16px}
+  #p2-b1 > .tp-row{grid-column:1 / -1;margin-right:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1fr);transition:grid-template-columns 340ms var(--ease)}
+  .hp-nar #p2-b1 > .tp-row{grid-template-columns:var(--tn);transition-duration:520ms}
+  .tp-row > .tp-cell{min-width:0;margin-right:16px}
+  .tp-cut{min-width:0;overflow:clip;overflow-clip-margin:8px}
+  :is(.tt-tile,.an-tile) .p2-cover .hq-cimg{transition:object-position 340ms var(--ease)}
+  .hp-nar :is(.tt-tile,.an-tile) .p2-cover .hq-cimg{object-position:0 50%;transition-duration:520ms}
+  .tt-note .hp-sw{display:grid}
+
+  /* 02 · «.txt или .md» сжимается и гаснет; «Это готовый текст…» — в ряду шапки, сжимается слева и меняет формулировку на
+     месте; свёрнутый шаг — у правого края ряда; подсказка под полем меняет формулировку на месте */
+  .tx-fmtw{display:block;max-width:120px;overflow:hidden;transition:max-width 340ms var(--ease),margin-left 340ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
+  .hp-nar .tx-fmtw{max-width:0;margin-left:-12px;transition:max-width 520ms var(--ease),margin-left 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
+  .p2-hx .tx-top{position:static;flex:0 1 auto;justify-content:flex-end;overflow:hidden}
+  .tx-tops{min-width:0;justify-items:end}
+  .tx-tops > span{display:flex;align-items:center;gap:8px;white-space:nowrap}
+  .tx-tops svg{flex:none}
+  .p2-hx .tx-closed{position:absolute;right:0;top:0;height:64px;max-width:100%}
+  .tx-hsw{min-width:0}
+  .tx-hsw > span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tx-fixw{display:block;max-width:400px;overflow:hidden;transition:max-width 340ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
+  .hp-nar .tx-fixw{max-width:0;transition:max-width 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
+  /* «Улучшить готовую»: заметка в узкой колоде выше — её коробка растёт той же кривой, поле уходит под неё ниже и вниз
+     растёт меньше (собственный translate: ход «Улучшить готовую» — свой transform, 520 мс).
+     сайт: высоты заметки в обеих раскладках — замер её двух копий (TextBody: --tx-nhw / --tx-nhn, при 1440 — 72 и 112,
+     как в V2), сдвиг и рост поля — от них (textRules `improveShift`: --tx-dsh, --tx-dgr, --tx-grn) */
+  .tx-note{height:var(--tx-nhw,auto)}
+  .hp-nar .tx-note{height:var(--tx-nhn,auto)}
+  .tx-note.p2-on{transition:opacity 360ms var(--ease) 120ms,height 340ms var(--ease)}
+  .tx-note.p2-off{transition:opacity 240ms var(--ease),visibility 0s linear 240ms,height 340ms var(--ease)}
+  .hp-nar .tx-note.p2-on{transition:opacity 360ms var(--ease) 120ms,height 520ms var(--ease)}
+  .hp-nar .tx-note.p2-off{transition:opacity 240ms var(--ease),visibility 0s linear 240ms,height 520ms var(--ease)}
+  .tx-fw{transition:transform 520ms var(--ease),translate 340ms var(--ease)}
+  .hp-nar .tx-fw{transition:transform 520ms var(--ease),translate 520ms var(--ease)}
+  .hp-nar .tx-fw-imp{translate:0 var(--tx-dsh,40px)}
+  .tx-ring::before,.tx-ring>.p2-wrap{transition:transform 520ms var(--ease),translate 340ms var(--ease)}
+  .hp-nar .tx-ring::before,.hp-nar .tx-ring>.p2-wrap{transition:transform 520ms var(--ease),translate 520ms var(--ease)}
+  .hp-nar .tx-fw-imp .tx-ring::before,.hp-nar .tx-fw-imp .tx-ring>.p2-wrap{translate:0 var(--tx-dgr,-16px)}
+  .tx-fw-imp .tx-ring::after{transition:opacity 240ms var(--ease),bottom 340ms var(--ease)}
+  .hp-nar .tx-fw-imp .tx-ring::after{bottom:calc(var(--tx-grn,0px) * -1);transition:opacity 240ms var(--ease),bottom 520ms var(--ease)}
+
+  /* 03 · сводка уступает место «Создать презентацию» (сжимается слева и гаснет); короткий ряд — те же дорожки: степпер
+     216 → 200, переключатели 264 → 0 (гаснут на месте), лишний межколонник уходит за край; у вариантов описание
+     и галочка справа гаснут, галочка проявляется на месте описания. «Все параметры»: миниатюры вариантов сжимаются и
+     гаснут; коробки переключателей растут той же кривой под текст.
+     сайт: межколонники сводки уходят вместе с ней (в тесной колоде «Создать» встаёт к названию шага); дорожки короткого
+     ряда — переменными (morph.ts `paramsRow`: при 1280 переключателей в ряду нет, в узкой уходит степпер — варианты с
+     названием), межколонник — поле справа у клетки, как у ленты; ход сетки — вместе с проявлением и уходом тела шага */
+  .p2-hx .pp-sum{display:flex;justify-content:flex-end;flex:0 1 auto;min-width:0;overflow:hidden;transition:margin 340ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
+  .hp-nar .p2-hx .pp-sum{margin:0 -24px;transition:margin 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
+  .pp-ctat{max-width:160px;transition:max-width 340ms var(--ease),opacity 160ms var(--ease) 80ms}
+  .hp-nar .pp-ctag{max-width:0;opacity:0;transition:max-width 520ms var(--ease),opacity 240ms var(--ease)}
+  #p2-b3{grid-template-columns:var(--pp-tw) !important;column-gap:0 !important;margin-right:-16px !important}
+  #p2-b3.p2-on{transition:grid-template-columns 340ms var(--ease),opacity 360ms var(--ease) 120ms}
+  #p2-b3.p2-off{transition:grid-template-columns 340ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
+  .hp-nar #p2-b3{grid-template-columns:var(--pp-tn) !important}
+  .hp-nar #p2-b3.p2-on{transition:grid-template-columns 520ms var(--ease),opacity 360ms var(--ease) 120ms}
+  .hp-nar #p2-b3.p2-off{transition:grid-template-columns 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
+  #p2-b3 > *{min-width:0;margin-right:16px}
+  /* степпер, которого в узкой нет (1280): коробка постоянной ширины уходит под край своей клетки и гаснет */
+  .pp-stg{overflow:clip;overflow-clip-margin:8px}
+  .pp-stg .p2-box{width:216px}
+  .pp-swc{min-width:0;overflow:clip}
+  /* подписи переключателей и описания вариантов не переносятся заново, пока гаснут: подпись — в одну строку и уходит под край
+     (переключатель остаётся у правого края); строка описания держит ширину покоя (вариант у́же в узкой на --pp-vd — та же
+     кривая --hpp), лишнее обрезается краем описания */
+  .pp-swc [id^="p2-sw"]{min-width:0;white-space:nowrap;overflow:clip;overflow-clip-margin:4px}
+  #p2-b3 .pp-vd{display:block;min-width:0;overflow:clip;overflow-clip-margin:8px}
+  #p2-b3 .pp-vdi{display:block;--hpp:0;width:calc(100% + var(--pp-vd,40px) * var(--hpp));transition:--hpp 340ms var(--ease)}
+  .hp-nar #p2-b3 .pp-vdi{--hpp:1;transition-duration:520ms}
+  #p2-b3 .p2-vc{position:relative}
+  .pp-vb1{overflow:hidden;transition:width 340ms var(--ease),margin-left 340ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
+  .hp-nar .pp-vb1{width:0;margin-left:-8px;transition:width 520ms var(--ease),margin-left 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
+  .pp-vb2{position:absolute;left:16px;bottom:16px}
+  .pp-th{overflow:hidden;transition:width 340ms var(--ease),margin-right 340ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
+  .hp-nar .pp-th{width:0 !important;margin-right:-16px;transition:width 520ms var(--ease),margin-right 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
+  /* сайт: высоты коробок переключателей в обеих раскладках — замер их копий (ParamsAll: --pp-swhw / --pp-swh) */
+  #p2-b3m > .p2-params:last-child > .p2-box{height:var(--pp-swhw,auto);transition:height 340ms var(--ease)}
+  .hp-nar #p2-b3m > .p2-params:last-child > .p2-box{height:var(--pp-swh,164px) !important;transition-duration:520ms}
+  /* сайт: тесная раскладка «Все параметры» (помощник при 1280, morph.ts `moreGrid`): степпер слайдов в первом ряду — по
+     содержимому, поля плотнее; переключатели — строками (две копии ряда, как стопка текста ниже) */
+  .pp-r1{display:grid;gap:16px}
+  .pp-tight .pp-r1{grid-template-columns:var(--pp-r1w) !important;transition:grid-template-columns 340ms var(--ease)}
+  .hp-nar .pp-tight .pp-r1{grid-template-columns:var(--pp-r1n) !important;transition-duration:520ms}
+  .pp-tight .pp-r1 .cp-fbox{transition:padding 340ms var(--ease)}
+  .pp-tight .pp-r1 .cp-chev{transition:right 340ms var(--ease)}
+  .pp-tight .pp-r1 .pp-sl{transition:gap 340ms var(--ease)}
+  .hp-nar .pp-tight .pp-r1 .cp-fbox{padding:0 16px;transition-duration:520ms}
+  .hp-nar .pp-tight .pp-r1 .cp-fbox.pp-slb{padding:0 12px}
+  .hp-nar .pp-tight .pp-r1 .cp-chev{right:16px;transition-duration:520ms}
+  .hp-nar .pp-tight .pp-r1 .pp-sl{gap:8px !important;transition-duration:520ms}
+  .pp-tight .cp-vc{transition:transform 160ms var(--ease),padding 340ms var(--ease)}
+  .hp-nar .pp-tight .cp-vc{padding:16px 12px;transition:transform 160ms var(--ease),padding 520ms var(--ease)}
+}
+/* Многострочный текст не переносится заново посреди хода (как на «Результате»: его текстовые блоки не меняют ширину —
+   колонка и компактный вид подменяются на месте). Блок, ширина которого в узкой раскладке другая, — «стопка» (hp-tx):
+   в одной клетке широкая копия (hp-txw, сам блок) и узкая (hp-txn, клон, свёрстанный на узкую ширину). Ширина каждой
+   копии на всём ходу постоянна: клетка сужается вместе с колодой по той же кривой, а --hpp (0 → 1, тот же ход, что сетка
+   hp-wrap) прибавляет к ней ровно то, на что она уже сузилась (--hpd — на сколько клетка у́же в узкой раскладке):
+   широкая копия = клетка + --hpd·p (в начале — вся клетка), узкая = клетка − --hpd·(1 − p) (в конце — вся клетка).
+   Подмена: открытие — широкая гаснет 160 мс с 0, узкая проявляется 240 мс с 120 (половинки почти не двоятся);
+   закрытие — узкая гаснет 160 мс, широкая проявляется 160 мс через 80. Высоту меняет только копия, которая выше в своей
+   раскладке (узкая; у шире узкой — hp-txr, широкая): auto ↔ 0 той же кривой (520 / 340 мс), вторая всё время во весь
+   рост. Клетка = большей из двух, поэтому её высота идёт монотонно; уходящая копия не обрезается. Растущая копия обрезана
+   по своей высоте точно (clip-path, по вертикали 2 px вместо поля 8 px) — её следующая строка не заходит на то, что ниже
+   клетки. Текст внутри не переносится ни в одном кадре. Неактивная копия — aria-hidden (и без фокуса). */
+/* --hpp не наследуется и идёт на самих копиях: ход наследуемого свойства на hp-wrap пересчитывал бы стиль всей колоды
+   каждый кадр; переходы стартуют тем же переключением класса — кадр в кадр с сеткой hp-wrap */
+@property --hpp{syntax:'<number>';inherits:false;initial-value:0}
+/* ширина мягкого края растущей копии (ниже) — тоже не наследуется: иначе каждый кадр пересчитывался бы стиль всего её текста */
+@property --hpf{syntax:'<length>';inherits:false;initial-value:0px}
+@media (min-width: 901px){
+  .hp-tx{display:grid;grid-template-columns:minmax(0,1fr);align-items:start;min-width:0;overflow:clip;overflow-clip-margin:8px;interpolate-size:allow-keywords}
+  .hp-tx.hp-txf{flex:1 1 0%}
+  span.hp-tx{display:grid}
+  .hp-tx > .hp-txw,.hp-tx > .hp-txn{grid-area:1 / 1;min-width:0;overflow:clip;overflow-clip-margin:8px;box-sizing:border-box}
+  .hp-tx > .hp-txw{--hpp:0;width:calc(100% + var(--hpd,0px) * var(--hpp)) !important;transition:--hpp 340ms var(--ease),height 340ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
+  .hp-nar .hp-tx > .hp-txw{--hpp:1;opacity:0;visibility:hidden;pointer-events:none;transition:--hpp 520ms var(--ease),height 520ms var(--ease),opacity 160ms var(--ease),visibility 0s linear 160ms}
+  .hp-tx > .hp-txn{--hpp:0;width:calc(100% - var(--hpd,0px) * (1 - var(--hpp))) !important;height:0;overflow:visible;clip-path:inset(-2px -8px);opacity:0;visibility:hidden;pointer-events:none;transition:--hpp 340ms var(--ease),height 340ms var(--ease),opacity 160ms var(--ease),visibility 0s linear 160ms}
+  /* нижний край растущей (сжимающейся) копии посреди хода — мягкий: последние 16 px гаснут (маска только пока идёт ход,
+     в покое её нет; ширина края → 0 к обоим концам хода, без щелчка) — строки проявляются, а не режутся */
+  .hp-tx > .hp-txn{--hpf:calc(16px * min(1, 4 * var(--hpp), 4 - 4 * var(--hpp)));mask-image:if(style(--hpp: 0): none; style(--hpp: 1): none; else: linear-gradient(#000 calc(100% - var(--hpf)), transparent))}
+  /* узкая копия шире и ниже (подсказка варианта в «Все параметры» при 1440: миниатюра уходит) — роли наоборот */
+  .hp-tx.hp-txr > .hp-txn{height:auto;overflow:clip;clip-path:none;mask-image:none}
+  .hp-tx.hp-txr > .hp-txw{overflow:visible;clip-path:inset(-2px -8px);--hpf:calc(16px * min(1, 4 * var(--hpp), 4 - 4 * var(--hpp)));mask-image:if(style(--hpp: 0): none; style(--hpp: 1): none; else: linear-gradient(#000 calc(100% - var(--hpf)), transparent))}
+  .hp-nar .hp-tx.hp-txr > .hp-txw{height:0}
+  .hp-nar .hp-tx > .hp-txn{--hpp:1;height:auto;opacity:1;visibility:inherit;pointer-events:auto;transition:--hpp 520ms var(--ease),height 520ms var(--ease),opacity 240ms var(--ease) 120ms,visibility 0s linear 0s}
+  /* поле «О чём презентация»: обе копии во всю высоту поля, меняется только прозрачность (сайт: мягкий край прокрутки
+     p2-fade — у обеих копий) */
+  .hp-tx.hp-txa{align-items:stretch;flex:1 1 0%;min-height:0;overflow:clip}
+  .hp-txa > textarea.hp-txw,.hp-txa > textarea.hp-txn,.hp-nar .hp-txa > textarea.hp-txw,.hp-nar .hp-txa > textarea.hp-txn{height:auto;overflow:auto}
+  .hp-txa > textarea.hp-txn{clip-path:none;-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 var(--p2-ft),#000 calc(100% - var(--p2-fb)),transparent 100%);mask-image:linear-gradient(to bottom,transparent 0,#000 var(--p2-ft),#000 calc(100% - var(--p2-fb)),transparent 100%)}
+  .tx-note > .hp-tx{align-self:flex-start}
+  /* --hpd по замеру: на сколько клетка у́же в узкой раскладке (не зависит от ширины окна; подсказка варианта — morph.ts) */
+  [data-tx="c-note"]{--hpd:416px}
+  [data-tx="c-swd"]{--hpd:138.667px}
+  [data-tx="c-swt"]{--hpd:138.667px}
+  [data-tx="c-ta"]{--hpd:416px}
+  [data-tx="c-vhint"]{--hpd:-33.333px}
+  /* сайт: переключатели в тесной раскладке — весь ряд стопкой (ширина «Все параметры» = колода − 288); уходящий ряд
+     обрезается ровно по краю клетки — не заходит на поле плиты */
+  [data-tx="c-swr"]{--hpd:416px;overflow-clip-margin:0px}
+}
+@media (max-width: 900px){
+  .hp-txn{display:none !important}
+  .hp-no{display:none !important}
   .p2-fxbox{position:static;width:auto !important;padding:0}
   .p2-hx{flex-wrap:wrap;height:auto;row-gap:16px}
   .p2-ttl-box{height:auto}
   .p2-ttl-sz{display:none}
   .p2-ttl-v{position:static;transform:none !important}
-}
-.tx-top-t{min-width:0;overflow:hidden;text-overflow:ellipsis}
-.tx-top-m,.tx-top-s,.pp-cta-s{display:none}
-/* обложки ленты в узкой колоде уже своих картинок — видна левая часть (там начинается заголовок слайда) */
-:where([data-ribbon=narrow]) :is(.tt-tile,.an-tile) .p2-cover img{object-position:0 50%}
-:where(.p2-fx[data-fit=narrow], .p2-fx[data-fit=tight]){
-  /* «Это готовый текст…» — в ряду шапки и короче */
-  .tx-top{position:static;height:auto;flex:0 1 auto}
-  .tx-top-l{display:none}
-  .tx-top-m{display:inline}
-  /* «.txt или .md» рядом с «Из файла» уходит (он в подсказке кнопки) — подсказке о готовом тексте нужно место */
-  #ct-fmt{display:none}
-  /* шаг «Текст» свёрнут: тема и «Изменить» встают у правого края поверх погасших «Из файла» и подсказки (те держат
-     место в ряду), не левее названия шага (номер 160 + 32 + «Текст» + 24) */
-  .tx-closed{position:absolute;top:40px;right:48px;height:64px;max-width:calc(100% - 96px - 300px)}
-  /* «Вставьте готовый текст…» справа под полем уходит (держала место и скрытой): строке ошибки — вся ширина */
-  .tx-swr > :last-child{display:none}
-  /* сводка параметров уступает место «Создать презентацию»: ни сводки, ни её распорки в ряду (строка ошибки и так стоит
-     под рядом — `.pp-low`), кнопка — у правого края */
-  .pp-sumt{display:none}
-  .pp-sum{display:contents}
-  & > span:has(+ .pp-sum){display:none}
-  .pp-cta{margin-left:auto}
-  /* «Все параметры»: миниатюры вариантов уступают место названию и подсказке */
-  .cp-vc .pp-th{display:none}
-}
-:where(.p2-fx[data-fit=tight]){
-  .tx-top-m{display:none}
-  .tx-top-s{display:inline}
-  .pp-cta-l{display:none}
-  .pp-cta-s{display:inline}
-  /* «Все параметры»: поля плотнее, переключатели — строками во всю ширину, подсказки под ними уходят (они в описании) */
-  #p2-b3m .cp-fbox{padding:0 16px}
-  #p2-b3m .cp-chev{right:16px}
-  /* степпер слайдов — по своему содержимому (−, число, +), тип и аудитория делят остальное */
-  #p2-b3m > .p2-params:first-child{grid-template-columns:minmax(0,1fr) minmax(0,1fr) max-content !important}
-  #p2-b3m > .p2-params:first-child > div:last-child{padding:0 12px}
-  #p2-b3m > .p2-params:first-child > div:last-child > span:last-child{gap:8px !important}
-  #p2-b3m > .p2-params:last-child{grid-template-columns:minmax(0,1fr) !important;gap:8px !important;margin-top:24px !important}
-  #p2-b3m .cp-vc{padding:16px 12px}
-  #p2-b3m .pp-swb{min-height:0;padding:12px 24px}
-  #p2-b3m .pp-swb > p{display:none}
+  .tp-row{display:contents}
+  .pp-err{position:static}
 }

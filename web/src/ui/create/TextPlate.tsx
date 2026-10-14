@@ -4,7 +4,7 @@
 // презентации) и счётчиком знаков, над полем в «Улучшить готовую» — заметка об исходной презентации. Разметка —
 // boards/V2.dc.html, плита 02 и модуль tx. Строки под полем сменяются перекрёстным затуханием (p2-on / p2-off: уход
 // 240 мс, вход 360 мс через 120 мс) и, пока гаснут, держат своё содержимое.
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MutableRefObject, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MutableRefObject, type RefObject } from "react";
 import { useApp } from "../../store";
 import { SAMPLE_BRIEF } from "../../lib/createForm";
 import { humanError } from "../../lib/errors";
@@ -15,11 +15,12 @@ import { ErrorLine } from "../kit/ErrorLine";
 import { Icon } from "../kit/Icon";
 import { Spinner } from "../kit/Spinner";
 import { useSwap } from "../kit/useSwap";
-import { hintTail } from "../deck/fit";
-import { useDeckWidth } from "../deck/useDeckFit";
+import { useDeckWrap } from "../deck/useDeckFit";
+import { hintTail, readyShort } from "./morph";
 import { FileMenu, type FilePick } from "./FileMenu";
 import { fileRefusal, TEMPLATE_BUSY } from "./ribbon";
-import { ImproveNote, useHeld, useImproveOn, useModelOn } from "./ImproveNote";
+import { ImproveNote, useHeld, useImproveOn, useModelOn, type NoteHeights } from "./ImproveNote";
+import { useNarrow } from "./useNarrow";
 import {
   charsLabel, DECK_ACCEPT, deckError, fileKind, fileTextIssue, improveLive, improveShift, improveStep, MAX_TEXT_BYTES, sampleText, TEXT_ACCEPT, textError, writerOn,
   textLine, textPreview, TW, TW0, TW_FIRST_MS, TW_WAKE_MS, twBlink, twStep, hintText, type ImproveLive, type TextIssue, type TextLine, type Tw,
@@ -271,6 +272,7 @@ export function TextHead({ tp }: { tp: TextPlate }) {
   const top = txOpen && tp.line.kind === "facts" && !impOn && !tp.issue && !tp.reading;
   const topText = writes ? "Это готовый текст — агент разложит его по слайдам и допишет недостающее" : "Это готовый текст — агент разложит его по слайдам без переписывания";
   const pv = textPreview(brief);
+  const wrap = useDeckWrap();
   return (
     <>
       {tp.menu && (
@@ -286,8 +288,11 @@ export function TextHead({ tp }: { tp: TextPlate }) {
           <Icon name="attach" size={18} />
           <span>Из файла</span>
         </button>
-        <span id="ct-fmt" className={cls("p2-hide-s", show(txOpen && !tp.issue))} style={{ fontSize: 13, fontWeight: 500, lineHeight: "20px", color: "#5A6272", whiteSpace: "nowrap" }}>
-          .txt или .md
+        {/* помощник сужает колоду — «.txt или .md» сжимается и гаснет (он и в подсказке кнопки) */}
+        <span className="hp-wo tx-fmtw">
+          <span id="ct-fmt" className={cls("p2-hide-s", show(txOpen && !tp.issue))} style={{ fontSize: 13, fontWeight: 500, lineHeight: "20px", color: "#5A6272", whiteSpace: "nowrap" }}>
+            .txt или .md
+          </span>
         </span>
         <FileMenu open={tp.menu} off={tp.deckOff} onPick={tp.pick}
           onClose={(back) => {
@@ -302,14 +307,14 @@ export function TextHead({ tp }: { tp: TextPlate }) {
           }} />
       </div>
       <span style={{ flex: 1, minWidth: 0 }} />
-      {/* колода уже (помощник) — подсказка встаёт в ряд и короче: «Готовый текст — агент разложит его по слайдам», в тесной —
-          «Это готовый текст»; целиком — в подсказке */}
+      {/* колода уже (помощник) — подсказка короче и меняет формулировку на месте: «Готовый текст — агент разложит его по
+          слайдам», в тесной колоде (1280) — «Это готовый текст»; целиком — в подсказке */}
       <p className={cls("p2-in p2-hide-s tx-top", show(top))} title={topText}
         style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0, margin: 0, fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#5A6272", whiteSpace: "nowrap", animationDelay: "80ms" }}>
-        <span style={{ display: "flex", flex: "none" }}><Icon name="info" size={16} /></span>
-        <span className="tx-top-t tx-top-l">{topText}</span>
-        <span className="tx-top-t tx-top-m">Готовый текст — агент разложит его по слайдам</span>
-        <span className="tx-top-t tx-top-s">Это готовый текст</span>
+        <span className="hp-sw tx-tops">
+          <span className="hp-wo"><Icon name="info" size={16} /><span>{topText}</span></span>
+          <span className="hp-no"><Icon name="info" size={16} /><span>{readyShort(wrap) ? "Это готовый текст" : "Готовый текст — агент разложит его по слайдам"}</span></span>
+        </span>
       </p>
       {closed && (
         <div className="p2-in tx-closed" style={{ display: "flex", alignItems: "center", gap: 24, minWidth: 0 }}>
@@ -337,7 +342,26 @@ function useBusyHeld(busy: boolean): boolean {
   return busy || held;
 }
 
+/** Две копии поля: колода сузилась или расширилась, а курсор стоял в уходящей копии — он переходит в активную на то же
+ *  место (выделение и прокрутка — те же), без прокрутки страницы. */
+function useCopyFocus(active: RefObject<HTMLTextAreaElement>, other: RefObject<HTMLTextAreaElement>, narrow: boolean) {
+  const was = useRef(narrow);
+  useLayoutEffect(() => {
+    if (was.current === narrow) return;
+    was.current = narrow;
+    const to = active.current, from = other.current;
+    if (!to || !from || document.activeElement !== from) return;
+    const { selectionStart, selectionEnd, selectionDirection } = from;
+    const ratio = from.scrollHeight > from.clientHeight ? from.scrollTop / (from.scrollHeight - from.clientHeight) : 0;
+    to.focus({ preventScroll: true });
+    to.setSelectionRange(selectionStart, selectionEnd, selectionDirection ?? undefined);
+    to.scrollTop = ratio * Math.max(0, to.scrollHeight - to.clientHeight);
+  }, [narrow, active, other]);
+}
+
 const LINE: CSSProperties = { display: "flex", alignItems: "center", gap: 8, minWidth: 0, margin: 0, fontSize: 14, fontWeight: 500, lineHeight: "20px", color: "#5A6272" };
+/** Поле «О чём презентация» (обе копии). */
+const TA: CSSProperties = { flex: 1, minHeight: 0, width: "100%", padding: "0 0 24px", border: 0, resize: "none", background: "transparent", fontFamily: "inherit", fontSize: 16, fontWeight: 500, lineHeight: "24px", color: "#0B1220" };
 /** Текст строки под полем — одна строка: узкая колода (помощник) сжимает его многоточием, целиком — в подсказке. */
 const ONE: CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
 const NOTE_LINE: CSSProperties = { flex: "none", fontSize: 13, lineHeight: "20px", color: "#5A6272", whiteSpace: "nowrap" };
@@ -348,8 +372,18 @@ export function TextBody({ tp }: { tp: TextPlate }) {
   const { writer } = useWriting();
   const on = ui.screen === "create" && ui.open === "text" && !ui.more;
   const impOn = useImproveOn();
-  const [noteH, setNoteH] = useState(0);
-  const { shift, grow } = improveShift(noteH);
+  // «Улучшить готовую»: поле уходит под заметку на её высоту + 16 — в обеих раскладках (высоты — замер двух копий её
+  // текста); помощник сужает колоду — сдвиг и рост поля идут той же кривой, что высота заметки (create.css `.tx-fw`)
+  const [noteH, setNoteH] = useState<NoteHeights>({ wide: 0, narrow: 0 });
+  const iw = improveShift(noteH.wide), inr = improveShift(noteH.narrow || noteH.wide);
+  const noteVars = {
+    "--tx-sh": `${iw.shift}px`, "--tx-gr": `${iw.grow}px`, "--tx-dsh": `${inr.shift - iw.shift}px`, "--tx-dgr": `${inr.grow - iw.grow}px`, "--tx-grn": `${inr.grow}px`,
+    ...(noteH.wide > 0 && { "--tx-nhw": `${noteH.wide}px` }), ...(noteH.narrow > 0 && { "--tx-nhn": `${noteH.narrow}px` }),
+  } as CSSProperties;
+  // поле — две копии (широкая и узкая) в одном месте: текст не переносится заново посреди хода; активна одна — в неё фокус
+  const narrow = useNarrow();
+  const otherRef = useRef<HTMLTextAreaElement>(null);
+  useCopyFocus(tp.taRef, otherRef, narrow);
   const line = tp.line;
   const issue = tp.issue;
   const busy = !!tp.reading;
@@ -367,21 +401,29 @@ export function TextBody({ tp }: { tp: TextPlate }) {
   // строка о ходе, пока гаснет, остаётся такой, какой была: со спиннером и «Читаю…» — чтение кончается на кадр раньше,
   // чем строка уходит, и живое `busy` подменило бы значок и текст прямо в уходе
   const infoBusy = useBusyHeld(busy);
-  // «Это тема…» с перечнем — пока колода шире 1300 (fit.ts `hintTail`: при 1280 и с помощником — без перечня, он в подсказке)
-  const tail = hintTail(useDeckWidth());
+  // «Это тема…» с перечнем — пока колода шире 1300 (morph.ts `hintTail`): в узкой колоде — без перечня, он в подсказке;
+  // формулировка меняется на месте (hp-wo / hp-no)
+  const tail = hintTail(useDeckWrap());
+  const taProps = {
+    value: brief, onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => tp.type(e.target.value), style: TA,
+  };
+  const describedBy = issue ? "ce-err" : factsOn ? "ct-facts" : undefined;
   return (
     <div id="p2-b2" className={cls("p2-body", show(on))} style={{ margin: "24px 0 0 192px" }}>
-      <div className="tx-b2" style={{ "--tx-sh": `${shift}px`, "--tx-gr": `${grow}px` } as CSSProperties}>
-        <ImproveNote on={impOn} onHeight={setNoteH} />
+      <div className="tx-b2" style={noteVars}>
+        <ImproveNote on={impOn} onHeights={setNoteH} />
         <div className={cls("tx-fw", impOn && "tx-fw-imp")}>
           <div className={cls("p2-field p2-stag tx-ring", issue && "ce-bad")}
             style={{ display: "flex", flexDirection: "column", height: 244, padding: 24, borderRadius: 24, background: "#FFFFFF" }}>
-            <label style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+            <label htmlFor={narrow ? "ct-tan" : "ct-taw"} style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
               <span style={{ fontSize: 13, fontWeight: 600, lineHeight: "20px", color: "#5A6272" }}>О чём презентация</span>
               <span className="p2-taw">
-                <textarea ref={tp.taRef} className="p2-ta ct-ta p2-fade" value={brief} onChange={(e) => tp.type(e.target.value)}
-                  aria-invalid={!!issue} aria-describedby={issue ? "ce-err" : factsOn ? "ct-facts" : undefined}
-                  style={{ flex: 1, minHeight: 0, width: "100%", padding: "0 0 24px", border: 0, resize: "none", background: "transparent", fontFamily: "inherit", fontSize: 16, fontWeight: 500, lineHeight: "24px", color: "#0B1220" }} />
+                <span className="hp-tx hp-txf hp-txa" data-tx="c-ta">
+                  <textarea id="ct-taw" ref={narrow ? otherRef : tp.taRef} className="hp-txw p2-ta ct-ta p2-fade" {...taProps}
+                    aria-invalid={!!issue} aria-describedby={narrow ? undefined : describedBy} aria-hidden={narrow || undefined} tabIndex={narrow ? -1 : undefined} />
+                  <textarea id="ct-tan" ref={narrow ? tp.taRef : otherRef} className="hp-txn p2-ta ct-ta p2-fade" {...taProps}
+                    aria-invalid={!!issue} aria-describedby={narrow ? describedBy : undefined} aria-hidden={!narrow || undefined} tabIndex={narrow ? undefined : -1} />
+                </span>
                 {brief === "" && <TypingHint live={ui.screen === "create"} tw={tp.tw} writer={writer} />}
               </span>
             </label>
@@ -389,7 +431,7 @@ export function TextBody({ tp }: { tp: TextPlate }) {
               <div className="tx-sw">
                 <p className={show(hintOn)} style={LINE} title={HINT_TOPIC + HINT_TOPIC_TAIL}>
                   <span style={{ display: "flex", flex: "none" }}><Icon name="info" size={16} /></span>
-                  <span style={ONE}>{HINT_TOPIC}{tail && HINT_TOPIC_TAIL}</span>
+                  <span className="hp-sw tx-hsw"><span className="hp-wo">{HINT_TOPIC}{tail && HINT_TOPIC_TAIL}</span><span className="hp-no">{HINT_TOPIC}</span></span>
                 </p>
                 <p className={show(readyOn)} style={LINE} title={HINT_READY}>
                   <span style={{ display: "flex", flex: "none" }}><Icon name="info" size={16} /></span>
@@ -421,7 +463,8 @@ export function TextBody({ tp }: { tp: TextPlate }) {
                   перебивает чтение с экрана на каждом знаке */}
               <span className={cls("tx-sw tx-swr", show(issue?.kind !== "file"))}>
                 <span className={show(!issue)} style={{ ...NOTE_LINE, fontWeight: 600 }}>{charsLabel(brief.length)}</span>
-                <span className={show(!!issue)} style={{ ...NOTE_LINE, fontWeight: 500 }}>{FIX}</span>
+                {/* помощник сужает колоду — подсказка сжимается и гаснет: строке ошибки — вся ширина */}
+                <span className="hp-wo tx-fixw"><span className={show(!!issue)} style={{ ...NOTE_LINE, fontWeight: 500 }}>{FIX}</span></span>
               </span>
             </div>
           </div>

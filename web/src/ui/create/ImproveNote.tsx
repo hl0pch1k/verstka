@@ -1,13 +1,17 @@
 // «Улучшить готовую» (C-improve): плита 01 свёрнута в полосу «01 Итоги квартала.pptx · 14 слайдов · оформление из
 // презентации», плита 02 встаёт под неё (40 px), над полем — заметка об исходной презентации, поле уходит под неё.
 // Разметка — boards/V2.dc.html, `.tx-strip` и `.tx-note`. Обе проявляются и гаснут перекрёстным затуханием
-// (p2-on / p2-off) и, пока гаснут, держат последнюю презентацию.
+// (p2-on / p2-off) и, пока гаснут, держат последнюю презентацию. Помощник сужает колоду — текст заметки не переносится
+// заново посреди хода: две копии в одном месте (стопка `c-note`, create.css), коробка растёт той же кривой до высоты
+// узкой копии.
 import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { useApp } from "../../store";
 import type { ImproveSource } from "../../types";
+import { useDeckWrap } from "../deck/useDeckFit";
 import { cls } from "../kit/cls";
 import { Icon } from "../kit/Icon";
 import { improveNoteParts, improveSlides, improveStripMeta, modelOnOf } from "./textRules";
+import { useNarrow } from "./useNarrow";
 
 /** Последнее непустое значение: уходящее содержимое гаснет со своими данными. */
 export function useHeld<T>(value: T | null): T | null {
@@ -56,31 +60,57 @@ const NOTE: CSSProperties = {
   boxShadow: "inset 0 0 0 1px rgba(37,99,235,.14)",
 };
 
-/** Заметка над полем (`.tx-note`, absolute в `.tx-b2`). `onHeight` — её высота: TextBody сдвигает поле под неё. */
-export function ImproveNote({ on, onHeight }: { on: boolean; onHeight(h: number): void }) {
+/** Высота заметки в широкой и узкой раскладке (0 — ещё не измерена). */
+export interface NoteHeights { wide: number; narrow: number }
+
+const NOTE_P: CSSProperties = { minWidth: 0, margin: 0, fontSize: 14, fontWeight: 500, lineHeight: "20px", color: "#0B1220" };
+/** Поля заметки по вертикали (16 + 16) и значок (32): коробка не ниже его. */
+const NOTE_PAD = 32;
+const NOTE_ICON = 32;
+
+/** Заметка над полем (`.tx-note`, absolute в `.tx-b2`). `onHeights` — её высота в обеих раскладках (замер двух копий
+ *  текста: каждая на всём ходу своей ширины): TextBody сдвигает поле под неё, а create.css ведёт высоту коробки той же
+ *  кривой, что колоду. */
+export function ImproveNote({ on, onHeights }: { on: boolean; onHeights(h: NoteHeights): void }) {
   const { improveSource } = useApp();
   const modelOn = useModelOn();
+  const narrow = useNarrow();
+  const wrap = useDeckWrap();
   const src: ImproveSource | null = useHeld(improveSource);
-  const ref = useRef<HTMLDivElement>(null);
-  const [h, setH] = useState(0);
+  const parts = src ? improveNoteParts(src, modelOn) : [];
+  const key = parts.map((p) => p.t).join("|");
+  const wRef = useRef<HTMLParagraphElement>(null);
+  const nRef = useRef<HTMLParagraphElement>(null);
+  const [h, setH] = useState<NoteHeights>({ wide: 0, narrow: 0 });
   useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const measure = () => setH(el.offsetHeight);
+    const w = wRef.current, n = nRef.current;
+    if (!w || !n) return;
+    // широкая копия всегда во весь рост; узкая в широкой раскладке — высотой 0, её строки — scrollHeight
+    const measure = () => {
+      const next = { wide: w.offsetHeight ? Math.max(NOTE_ICON, w.offsetHeight) + NOTE_PAD : 0, narrow: n.scrollHeight ? Math.max(NOTE_ICON, n.scrollHeight) + NOTE_PAD : 0 };
+      setH((cur) => (cur.wide === next.wide && cur.narrow === next.narrow ? cur : next));
+    };
     measure();
     const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-  useLayoutEffect(() => onHeight(h), [h, onHeight]);
+    ro.observe(w);
+    window.addEventListener("resize", measure);
+    void document.fonts?.ready.then(measure);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [key, wrap]);
+  useLayoutEffect(() => onHeights(h), [h, onHeights]);
+  const text = parts.map((p, i) => (p.b ? <b key={i} style={{ fontWeight: 700 }}>{p.t}</b> : <span key={i}>{p.t}</span>));
   return (
-    <div ref={ref} className={cls("tx-note", on ? "p2-on" : "p2-off")} role="note" style={NOTE}>
+    <div className={cls("tx-note", on ? "p2-on" : "p2-off")} role="note" style={NOTE}>
       <span aria-hidden="true" style={{ display: "flex", alignItems: "center", justifyContent: "center", flex: "none", width: 32, height: 32, borderRadius: 999, background: "#2563EB", color: "#FFFFFF" }}>
         <Icon name="wand" size={16} />
       </span>
-      <p style={{ minWidth: 0, margin: 0, fontSize: 14, fontWeight: 500, lineHeight: "20px", color: "#0B1220" }}>
-        {src && improveNoteParts(src, modelOn).map((p, i) => (p.b ? <b key={i} style={{ fontWeight: 700 }}>{p.t}</b> : <span key={i}>{p.t}</span>))}
-      </p>
+      <div className="hp-tx hp-txf" data-tx="c-note">
+        <p ref={wRef} className="hp-txw" style={NOTE_P} aria-hidden={narrow || undefined}>{text}</p>
+        <p ref={nRef} className="hp-txn" style={NOTE_P} aria-hidden={!narrow || undefined}>{text}</p>
+      </div>
     </div>
   );
 }
