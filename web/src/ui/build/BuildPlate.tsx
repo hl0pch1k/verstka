@@ -6,23 +6,27 @@
 // уходит тот же запрос, и плита собирается заново лесенкой, когда сервер ответил (новая сборка или новая строка
 // неудачи). Сборка кончилась, а её презентация не открылась (сбой связи): строка области «Сборка» рядом с полосой хода и
 // «Открыть ещё раз». «Вернуться к тексту» у чужой сборки (другая вкладка, помощник) — её собственный текст и параметры.
-// Помощник сужает колоду: содержимое стоит в ширине колоды на конец хода (fit.ts `plateWidth`) и меняет раскладку
-// (колонка агента 416 → 320/288 под строкой фазы, кегль фазы, колонки раскадровки, переносы) перекрёстным затуханием
-// своей обёртки (usePlateFit, `.p2-fx[data-fit]` — build.css); плита и «03» не гаснут.
+// Помощник сужает колоду, и плита перестраивается вместе с ней каждый кадр, на той же кривой (V2 версии 100; build.css,
+// блок «Колода, суженная помощником»): колонка агента 416 → 320 и зазор 48 → 24 — дорожки сетки, фаза остаётся в своей
+// клетке и мельчает transform'ом, раскадровка — те же колонки, сужаются, многострочный текст ленты агента — стопки из
+// двух копий. Что зависит от ширины окна (колонка агента в тесной колоде, кегль фазы, колонки раскадровки, слова хода в
+// сегментах, коробка «Не получилось»), считается по ширине обёртки колоды сразу для обеих раскладок (columns.ts
+// `buildMorph`) и посреди хода не меняется. Ничего, что есть в обеих раскладках, не гаснет.
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { ActiveJob } from "../../lib/jobState";
 import { useApp } from "../../store";
 import { variantCards } from "../create/params";
 import { cls } from "../kit/cls";
 import { usePresence } from "../kit/usePresence";
-import { plateWidth } from "../deck/fit";
-import { DeckFitContext, useDeckLayoutNow, usePlateFit } from "../deck/useDeckFit";
+import { useDeckWrap } from "../deck/useDeckFit";
+import { useNarrow, useWideScreen } from "../create/useNarrow";
 import { humanError } from "../../lib/errors";
 import { ErrorLine } from "../kit/ErrorLine";
 import { useSwap } from "../kit/useSwap";
 import { useHeld } from "../create/ImproveNote";
 import { GoLink } from "../create/ParamsPlate";
 import { buildView } from "./buildView";
+import { buildMorph } from "./columns";
 import { backToText } from "./resume";
 import { Failed } from "./Failed";
 import { Phases } from "./Phases";
@@ -158,19 +162,19 @@ function BuildContent({ job, leaving }: { job: ActiveJob | null; leaving: boolea
   const vt = failed ? `остановилась на шаге ${view.step.replace(/^ошибка на шаге /, "")}` : queued ? "в очереди" : view.phase === "done" ? "готово"
     : `${view.step}${nowRole ? ` — ${nowRole.title.toLowerCase()}` : ""}`;
   const prog = view.progress ?? 0;
-  // раскладка плиты: смена — перекрёстным затуханием, пока содержимое на месте (смонтировано — на виду или уходит);
-  // внутри — показанная раскладка (вложенный DeckFitContext: колонки раскадровки, сегменты), `--deck-w` — её ширина
-  // (кегль фазы), ширина содержимого — колода на конец хода
-  const pf = usePlateFit(useDeckLayoutNow(), true);
-  const w = plateWidth(pf.layout.width);
-  const box = (w === null ? undefined : { width: w, "--deck-w": `${pf.layout.width}px` }) as CSSProperties | undefined;
+  // обе раскладки плиты — по ширине обёртки колоды (columns.ts): колонка агента в узкой, `--hpd` стопок ленты агента,
+  // кегль фазы; активная копия стопок — по раскладке
+  const wrap = useDeckWrap();
+  const morph = useMemo(() => buildMorph(wrap), [wrap]);
+  const narrow = useNarrow();
+  const wide = useWideScreen();
+  const vars = { "--bd-an": `${morph.agent}px`, "--bd-hpd": `${morph.hpd}px`, "--bd-phf": `${morph.font}px` } as CSSProperties;
 
   return (
-    <DeckFitContext.Provider value={pf.layout}>
-    <div className={cls("p2-fx bd-fxw", pf.cls)} data-fit={pf.layout.fit} style={box}>
-    <div key={epoch} className={cls("p2-two bd-two", (leaving || retry) && "bd-out")}
-      style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 416px", gridTemplateRows: "64px minmax(0, 1fr)", columnGap: 48, height: 652 }}>
-      <Phases phase={view.phase} />
+    <div className="bd-fxw">
+    <div key={epoch} className={cls("p2-two bd-two", morph.tight && "bd-tight", (leaving || retry) && "bd-out")}
+      style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 416px", gridTemplateRows: "64px minmax(0, 1fr)", columnGap: 48, height: 652, ...vars }}>
+      <Phases phase={view.phase} morph={morph} />
       <div className="bd-body" style={{ display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>
         <div className="p2-in" style={{ display: "flex", alignItems: "center", gap: 24, height: 24, marginTop: 16, animationDelay: "80ms" }}>
           <p style={{ margin: 0, fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "rgba(255,255,255,.64)", whiteSpace: "nowrap" }}>
@@ -195,16 +199,15 @@ function BuildContent({ job, leaving }: { job: ActiveJob | null; leaving: boolea
         </div>
         <div style={{ position: "relative", display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
           <div className={failed ? "p2-off" : "p2-on"} style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
-            <Storyboard view={view} segs={segs} onPick={setPicked} aspect={aspect} swapping={pf.phase !== null} />
+            <Storyboard view={view} segs={segs} onPick={setPicked} aspect={aspect} morph={morph} wide={wide} />
           </div>
           {failed && (
-            <Failed text={failed.text} onRetry={onRetry} onBack={back} />
+            <Failed text={failed.text} onRetry={onRetry} onBack={back} width={wide ? morph.failText : 480} column={wide && morph.failCol} />
           )}
         </div>
       </div>
-      <Roles view={view} />
+      <Roles view={view} narrow={narrow} />
     </div>
     </div>
-    </DeckFitContext.Provider>
   );
 }

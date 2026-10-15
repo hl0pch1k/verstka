@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CLOSE_HOLD_MS, deckFit, deckLayout, HELPER_CLOSE_MS, layoutKey, plateWidth, segStatus } from "./fit";
+import { CLOSE_HOLD_MS, deckFit, deckLayout, HELPER_CLOSE_MS } from "./fit";
 
 // ширины колоды: 1440 — 1392 (закрыт) и 976 (помощник); 1280 — 1232 и 816
 test("deckFit: закрытый помощник — широкая колода при 1280 и 1440", () => {
@@ -37,45 +37,4 @@ test("закрытие: запасной таймер узкой расклад�
 });
 test("deckLayout: обёртка ещё не измерена — широкая, без ширины", () => {
   assert.deepEqual(deckLayout(0, true), { width: 0, fit: "wide" });
-});
-
-// плита «Сборки»: содержимое плиты — колода без полей 96
-test("segStatus: подписи хода в сегментах раскадровки — пока плите 03 больше 1263 px", () => {
-  assert.equal(segStatus(1392), true);
-  assert.equal(segStatus(1360), true);
-  assert.equal(segStatus(1359), false);
-  assert.equal(segStatus(976), false);
-  assert.equal(segStatus(0), true);
-});
-// содержимое плиты «Сборки» меняет раскладку перекрёстным затуханием (usePlateFit) — по ключу всех решений по ширине:
-// затухание — только когда меняется хоть одно, а не на каждом пикселе ширины. «Создать» перестраивается непрерывно
-// (ui/create/morph.ts) — его пороги в ключ не входят: на «Сборке» они ничего не меняли, а подмену запускали
-// (ряд параметров, строка ошибки, подсказка «Это тема…»)
-test("layoutKey: одна раскладка — один ключ (ширина внутри одних порогов)", () => {
-  assert.equal(layoutKey(976), layoutKey(1000));
-  assert.equal(layoutKey(816), layoutKey(900));
-  assert.equal(layoutKey(1392), layoutKey(1400));
-  assert.equal(layoutKey(1232), layoutKey(1240));
-});
-test("layoutKey: помощник открылся или закрылся — ключ другой при 1440 и 1280", () => {
-  assert.ok(layoutKey(1392) !== layoutKey(976));
-  assert.ok(layoutKey(1232) !== layoutKey(816));
-  // 1440 и 1280 без помощника — разные сегменты раскадровки
-  assert.ok(layoutKey(1392) !== layoutKey(1232));
-});
-test("layoutKey: меняется на каждом пороге «Сборки» — узкая/тесная колода, сегменты", () => {
-  for (const [a, b] of [[1101, 1100], [901, 900], [1360, 1359]]) {
-    assert.ok(layoutKey(a) !== layoutKey(b), `${a} / ${b}`);
-  }
-});
-test("layoutKey: пороги «Создать» (ряд параметров, строка ошибки, «Это тема…») подмену «Сборки» не запускают", () => {
-  for (const [a, b] of [[1351, 1350], [1386, 1385], [1301, 1300]]) assert.equal(layoutKey(a), layoutKey(b), `${a} / ${b}`);
-});
-test("layoutKey: не измерена — как широкая колода доски", () => {
-  assert.equal(layoutKey(0), layoutKey(1392));
-});
-test("plateWidth: содержимое плиты стоит в ширине колоды на конец хода (без полей 48 + 48); не измерена — нет", () => {
-  assert.equal(plateWidth(976), 880);
-  assert.equal(plateWidth(1392), 1296);
-  assert.equal(plateWidth(0), null);
 });

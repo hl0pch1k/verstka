@@ -1,16 +1,15 @@
-// Раскладка колоды для того, что решает JS и CSS на экранах, ещё не перенесённых на непрерывное перестроение (колонки
-// раскадровки, `data-fit` колоды и обёрток содержимого «Сборки», слоёв и листа «Подробнее»). Решение — по целевой
+// Раскладка колоды для того, что решает JS и CSS на экранах, ещё не перенесённых на непрерывное перестроение
+// (`data-fit` колоды и обёрток содержимого слоёв и листа «Подробнее», компактный «Результат»). Решение — по целевой
 // ширине (fit.ts `deckLayout`): обёртка колоды (`hp-wrap`) не анимируется, колода = обёртка − место помощника. Открытие —
 // узкая раскладка с первого кадра; закрытие — узкая держится, пока сетка обёртки не доехала (`transitionend` на
-// grid-template-columns, запасной таймер — ход 340 мс + 40). Посреди хода раскладка не меняется. Содержимое плиты
-// «Сборки» меняет её перекрёстным затуханием (`usePlateFit`) и внутри себя видит показанную раскладку — вложенный
-// DeckFitContext; слои — своим (layers/Layer `useLayer`).
-// «Создать» этим не пользуется: его содержимое перестраивается вместе с колодой каждый кадр (ui/create/morph.ts) и
-// берёт отсюда только ширину обёртки (`useDeckWrap`) — по ней считаются обе раскладки сразу.
-import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
+// grid-template-columns, запасной таймер — ход 340 мс + 40). Посреди хода раскладка не меняется. Слои меняют её
+// перекрёстным затуханием своей обёртки (layers/Layer `useLayer`).
+// «Создать» и «Сборка» этим не пользуются: их содержимое перестраивается вместе с колодой каждый кадр
+// (ui/create/morph.ts, ui/build/columns.ts) и берёт отсюда только ширину обёртки (`useDeckWrap`) — по ней считаются обе
+// раскладки сразу.
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useState, type RefObject } from "react";
 import { prefersReducedMotion } from "../../lib/motion";
-import { useSwap, type SwapPhase } from "../kit/useSwap";
-import { CLOSE_HOLD_MS, deckLayout, layoutKey, type DeckFit, type DeckLayout } from "./fit";
+import { CLOSE_HOLD_MS, deckLayout, type DeckFit, type DeckLayout } from "./fit";
 
 export const DeckFitContext = createContext<DeckLayout>({ width: 0, fit: "wide" });
 
@@ -22,26 +21,6 @@ export function useDeckFit(): DeckFit {
 /** Целевая ширина колоды (0 — ещё не измерена). */
 export function useDeckWidth(): number {
   return useContext(DeckFitContext).width;
-}
-
-/** Раскладка колоды целиком (ширина и какая она). */
-export function useDeckLayoutNow(): DeckLayout {
-  return useContext(DeckFitContext);
-}
-
-/** Раскладка содержимого плиты по раскладке колоды `now`: сменилась (`layoutKey` — любое решение по ширине) — содержимое
- *  гаснет 120 мс, подменяется невидимым и проявляется 240 мс (useSwap, `cls` — класс обёрток затухания), пока оно на
- *  виду (`live`); невидимое — сразу. `layout` — показанная раскладка (до подмены — прежняя, с её шириной): её отдают
- *  вложенному DeckFitContext, по её `fit` ставят `data-fit` обёрток, по её ширине — ширину содержимого (fit.ts
- *  `plateWidth`). `phase` — идёт ли подмена: внутренние затухания (колонки раскадровки) в ней меняются сразу. */
-export function usePlateFit(now: DeckLayout, live: boolean): { layout: DeckLayout; cls: string | undefined; phase: SwapPhase } {
-  const key = layoutKey(now.width);
-  const s = useSwap(key, live);
-  // последняя раскладка каждого ключа: показанный ключ — с той шириной, что была у него
-  const seen = useRef<Map<string, DeckLayout> | null>(null);
-  if (!seen.current) seen.current = new Map();
-  seen.current.set(key, now);
-  return { layout: seen.current.get(s.shown) ?? now, cls: s.cls, phase: s.phase };
 }
 
 /** Ширина обёртки колоды (`hp-wrap`): колода при закрытом помощнике; 0 — ещё не измерена. Внутри `Deck` —

@@ -3,11 +3,17 @@
 // синяя галочка, работающая — кольцо со своей иконкой и «сейчас», впереди — номер и подсказка, с ошибкой — красное
 // кольцо и «!», не запускавшиеся — тире. Под ролью — её последние мысли. Лента сама сдвигается (520 мс), чтобы
 // работающая роль и следующая были видны над нижним краем.
-import { useLayoutEffect, useRef, useState } from "react";
+// Помощник сужает колонку 416 → 320 (V2 версии 100; в тесной колоде — 288): многострочный текст (мысли, подсказки
+// очереди, причина ошибки) — стопки из двух копий (hp-tx, create.css): широкая гаснет, узкая проявляется на месте, ни
+// одна не переносится заново посреди хода. Высоты ролей меняются вместе со сдвигом ленты одной кривой: сдвиг считается
+// для обеих раскладок сразу (по высотам копий), высота стопки ленты на ходу идёт от широкой к узкой линейно (build.css,
+// `--hw`, `--hdd`) — роли движутся в одну сторону, нижняя видимая стоит у края.
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { PhaseKey } from "../../lib/agent";
 import { cls } from "../kit/cls";
 import { Icon, type IconName } from "../kit/Icon";
 import type { BuildView, RoleLine, RoleStatus, RoleView } from "./buildView";
+import { rollOf } from "./columns";
 
 const ROLE_ICON: Record<PhaseKey, IconName> = {
   writer: "pen", analyst: "search", architect: "outline", designer: "layout", critic: "chat-check",
@@ -19,18 +25,43 @@ const ROLE_CLS: Record<RoleStatus, string> = {
 const STATUS_WORD: Partial<Record<RoleStatus, string>> = { done: "готово", now: "сейчас", error: "ошибка" };
 /** Нижний отступ ленты (V2: 652 − 64 − 24 = 564 px видно над краем). */
 const PAD_BOTTOM = 24;
+/** Зазор между ролями ленты. */
+const GAP = 12;
+/** Закрытие помощника: ход сетки 340 мс (открытие — 520, как сдвиг ленты по новым строкам). */
+const CLOSE_MS = 340;
+const LINE: CSSProperties = { margin: 0, fontSize: 14, fontWeight: 500, lineHeight: "20px", color: "rgba(255,255,255,.72)" };
+/** Лента очереди и рабочая лента — одно место. */
+const LOG: CSSProperties = { position: "absolute", inset: 0, display: "flex", flexDirection: "column", gap: GAP, margin: 0, padding: "16px 0 24px", listStyle: "none", overflow: "auto" };
+/** Строка хода рядом с «Как думает агент». */
+const STEP: CSSProperties = { display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600, lineHeight: "20px", color: "rgba(255,255,255,.64)", whiteSpace: "nowrap" };
 
-/** «Слайд 4: нет обозначений → подписи a, b, f(x)» (критик, взгляд дизайнера) или «Слайд 3 — карточки (4)». */
-function Line({ role, line }: { role: PhaseKey; line: RoleLine }) {
+/** Стопка из двух копий (hp-tx): широкая и узкая в одной клетке; активная — по раскладке (`narrow`), вторая — aria-hidden.
+ *  Отступ сверху — у стопки, не у копий: высота стопки — высота копий. */
+function Tx({ tx, narrow, className, style, title, top = 0, children }: {
+  tx: string; narrow: boolean; className?: string; style?: CSSProperties; title?: string; top?: number; children: ReactNode;
+}) {
+  return (
+    <div className="hp-tx" data-tx={tx} style={top ? { marginTop: top } : undefined}>
+      <p className={cls("hp-txw", className)} style={style} title={narrow ? undefined : title} aria-hidden={narrow || undefined}>{children}</p>
+      <p className={cls("hp-txn", className)} style={style} title={narrow ? title : undefined} aria-hidden={!narrow || undefined}>{children}</p>
+    </div>
+  );
+}
+
+/** «Слайд 4: нет обозначений → подписи a, b, f(x)» (критик, взгляд дизайнера) или «Слайд 3 — карточки (4)»; не длиннее
+ *  двух строк (обрезка — у внутренней строки копии), целиком — в подсказке. */
+function Line({ role, line, narrow }: { role: PhaseKey; line: RoleLine; narrow: boolean }) {
   const colon = role === "critic" || role === "eyes";
   const full = `${line.slide != null ? `Слайд ${line.slide}${colon ? ": " : " — "}` : ""}${line.text}${line.fix ? ` → ${line.fix}` : ""}`;
   return (
-    <p className="p2-in bd-line" title={full} style={{ margin: "4px 0 0", fontSize: 14, fontWeight: 500, lineHeight: "20px", color: "rgba(255,255,255,.72)" }}>
-      {line.slide != null && <b style={{ fontWeight: 700, color: "#FFFFFF" }}>Слайд {line.slide}{colon ? ":" : ""}</b>}
-      {line.slide != null ? (colon ? " " : " — ") : null}
-      {line.text}
-      {line.fix && <><span className="p2-arrow">→</span><b style={{ fontWeight: 700, color: "#FFFFFF" }}>{line.fix}</b></>}
-    </p>
+    <Tx tx="b-line" narrow={narrow} className="p2-in" style={LINE} title={full} top={4}>
+      <span className="bd-line">
+        {line.slide != null && <b style={{ fontWeight: 700, color: "#FFFFFF" }}>Слайд {line.slide}{colon ? ":" : ""}</b>}
+        {line.slide != null ? (colon ? " " : " — ") : null}
+        {line.text}
+        {line.fix && <><span className="p2-arrow">→</span><b style={{ fontWeight: 700, color: "#FFFFFF" }}>{line.fix}</b></>}
+      </span>
+    </Tx>
   );
 }
 
@@ -46,49 +77,78 @@ function Dot({ r }: { r: RoleView }) {
   );
 }
 
-export function Roles({ view }: { view: BuildView }) {
+/** Высоты ролей ленты в широкой и узкой раскладке — по высотам копий её стопок (их ширины на ходу постоянны, так что
+ *  посреди хода получается то же, что в покое). Заодно ставит стопкам `--hw` (высота в широкой) и `--hdd` (на сколько
+ *  выше в узкой): по ним их высота на ходу (build.css). Сначала все замеры, потом записи — без лишних раскладок. */
+function measure(el: HTMLElement): { wide: number[]; narrow: number[] } {
+  const items = [...el.children] as HTMLElement[];
+  const rows = items.map((li) => {
+    const stacks = [...li.querySelectorAll<HTMLElement>(".hp-tx")].map((st) => {
+      const [cw, cn] = [...st.children] as HTMLElement[];
+      const w = cw.offsetHeight;
+      return { st, w, n: Math.max(w, cn.scrollHeight), live: st.offsetHeight };
+    });
+    return { h: li.offsetHeight, stacks };
+  });
+  for (const r of rows) for (const s of r.stacks) {
+    s.st.style.setProperty("--hw", `${s.w}px`);
+    s.st.style.setProperty("--hdd", `${s.n - s.w}px`);
+  }
+  const sum = (r: (typeof rows)[number], k: "w" | "n") => r.h + r.stacks.reduce((a, s) => a + s[k] - s.live, 0);
+  return { wide: rows.map((r) => sum(r, "w")), narrow: rows.map((r) => sum(r, "n")) };
+}
+
+export function Roles({ view, narrow }: { view: BuildView; narrow: boolean }) {
   const queued = view.phase === "queued";
   const last = view.roles.length - 1;
 
   // сдвиг ленты: работающая роль (или с ошибкой) и следующая — над нижним краем. Работающей нет (последнюю роль сервер
-  // пропустил, а сборка ещё сохраняет файлы) — на виду последняя пройденная, лента не уезжает к началу
+  // пропустил, а сборка ещё сохраняет файлы) — на виду последняя пройденная, лента не уезжает к началу. Считается для
+  // обеих раскладок; помощник меняет раскладку — сдвиг едет вместе с высотами ролей (открытие 520 мс, закрытие 340)
   const list = useRef<HTMLOListElement>(null);
-  const [roll, setRoll] = useState(0);
+  const [roll, setRoll] = useState({ wide: 0, narrow: 0 });
   const at = view.roles.findIndex((r) => r.status === "now" || r.status === "error");
   const reached = view.roles.map((r) => r.status !== "queue").lastIndexOf(true);
   const focus = at >= 0 ? at : view.phase === "done" ? last : reached;
   useLayoutEffect(() => {
     const el = list.current;
-    if (!el || focus < 0) return void setRoll(0);
-    const target = el.children[Math.min(last, focus + 1)] as HTMLElement | undefined;
-    if (!target) return;
-    const end = target.offsetTop + target.offsetHeight;
-    const next = Math.max(0, Math.round(end - (el.clientHeight - PAD_BOTTOM)));
-    setRoll((cur) => (cur === next ? cur : next));
+    if (!el) return;
+    const h = measure(el);
+    if (focus < 0) return void setRoll((cur) => (cur.wide || cur.narrow ? { wide: 0, narrow: 0 } : cur));
+    const top = (el.firstElementChild as HTMLElement | null)?.offsetTop ?? 0;
+    const view = el.clientHeight - PAD_BOTTOM;
+    const next = { wide: rollOf(h.wide, GAP, top, focus + 1, view), narrow: rollOf(h.narrow, GAP, top, focus + 1, view) };
+    setRoll((cur) => (cur.wide === next.wide && cur.narrow === next.narrow ? cur : next));
   });
+  // помощник закрывается: сдвиг — за 340 мс, как сетка и высоты стопок (следующие сдвиги — снова 520)
+  const was = useRef(narrow);
+  const closing = was.current && !narrow;
+  useEffect(() => {
+    was.current = narrow;
+  });
+  const shift = narrow ? roll.narrow : roll.wide;
 
   return (
     <aside aria-label="Как думает агент" style={{ display: "flex", flexDirection: "column", minWidth: 0, height: 652 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, height: 64 }}>
-        <h2 style={{ margin: 0, fontFamily: "'Unbounded','Manrope',sans-serif", fontWeight: 600, fontSize: 20, lineHeight: "28px", letterSpacing: "-0.02em", color: "#FFFFFF", whiteSpace: "nowrap" }}>
+      <div className="hq-bdh" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, height: 64 }}>
+        <h2 className="hq-bdt" style={{ margin: 0, fontFamily: "'Unbounded','Manrope',sans-serif", fontWeight: 600, fontSize: 20, lineHeight: "28px", letterSpacing: "-0.02em", color: "#FFFFFF", whiteSpace: "nowrap" }}>
           Как думает агент
         </h2>
         {queued ? (
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600, lineHeight: "20px", color: "rgba(255,255,255,.64)", whiteSpace: "nowrap" }}>
+          <span style={STEP}>
             <Icon name="clock" size={16} /><span>в очереди</span>
           </span>
         ) : view.failed ? (
-          <span key="failed" className="p2-in" style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600, lineHeight: "20px", color: "#F87171", whiteSpace: "nowrap" }}>
+          <span key="failed" className="p2-in" style={{ ...STEP, color: "#F87171" }}>
             <Icon name="alert" size={16} /><span>{view.step}</span>
           </span>
         ) : (
-          <span key="running" className="p2-in" style={{ fontSize: 13, fontWeight: 600, lineHeight: "20px", color: "rgba(255,255,255,.64)", whiteSpace: "nowrap" }}>{view.step}</span>
+          <span key="running" className="p2-in" style={{ ...STEP, display: undefined }}>{view.step}</span>
         )}
       </div>
       <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
         {/* очередь (B-start): гаснет, когда начинается работа */}
-        <ol className={cls("bs-log p2-fade", queued ? "p2-on" : "p2-off")}
-          style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", gap: 12, margin: 0, padding: "16px 0 24px", listStyle: "none", overflow: "auto" }}>
+        <ol className={cls("bs-log p2-fade", queued ? "p2-on" : "p2-off")} style={LOG}>
           {view.roles.map((r, i) => (
             <li key={r.key} className={cls("p2-role p2-in p2-role-pend", i === last && "p2-role-last")} style={{ animationDelay: `${160 + i * 40}ms` }}>
               <span className="p2-dot" aria-hidden="true"><span className="bs-n">{r.n}</span></span>
@@ -97,17 +157,16 @@ export function Roles({ view }: { view: BuildView }) {
                   <span className="p2-rname">{r.title}</span>
                   <span className="p2-sr">шаг {r.n}, впереди</span>
                 </div>
-                <p className="bs-hint">{r.hint}</p>
+                <Tx tx="b-hint" narrow={narrow} className="bs-hint">{r.hint}</Tx>
               </div>
             </li>
           ))}
         </ol>
         {!queued && (
-          <ol ref={list} className={cls("bk-log p2-fade", roll > 0 && "bd-roll")}
-            style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", gap: 12, margin: 0, padding: "16px 0 24px", listStyle: "none", overflow: "auto" }}>
+          <ol ref={list} className={cls("bk-log p2-fade", shift > 0 && "bd-roll")} style={LOG}>
             {view.roles.map((r, i) => (
               <li key={r.key} className={cls("p2-role p2-in bd-li", ROLE_CLS[r.status], i === last && "p2-role-last")}
-                style={{ animationDelay: `${160 + i * 40}ms`, transform: `translateY(${-roll}px)` }}>
+                style={{ animationDelay: `${160 + i * 40}ms`, transform: `translateY(${-shift}px)`, ...(closing && { transitionDuration: `${CLOSE_MS}ms` }) }}>
                 <Dot r={r} />
                 <div style={{ minWidth: 0 }}>
                   <div className="bk-rrow">
@@ -116,9 +175,11 @@ export function Roles({ view }: { view: BuildView }) {
                     <span className="bk-note bf-note" title={r.status === "queue" || (r.status === "now" && !r.lines.length) ? r.hint : r.note || undefined}>{r.note}</span>
                     {r.status === "queue" && <span className="p2-sr">шаг {r.n}, впереди</span>}
                   </div>
-                  {r.lines.map((l) => <Line key={l.key} role={r.key} line={l} />)}
+                  {r.lines.map((l) => <Line key={l.key} role={r.key} line={l} narrow={narrow} />)}
                   {r.status === "error" && view.failed && (
-                    <p className="bf-err p2-in"><Icon name="alert" size={16} /><span>{view.failed.text}</span></p>
+                    <Tx tx="b-err" narrow={narrow} className="bf-err p2-in" style={{ margin: 0 }} top={4}>
+                      <Icon name="alert" size={16} /><span>{view.failed.text}</span>
+                    </Tx>
                   )}
                 </div>
               </li>

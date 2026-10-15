@@ -2,7 +2,7 @@
  * досок B-start (bs-), B-sketch (bk-), B-failed (bf-), иконка-слои ошибки (p2-lic-d, p2-lic-err) и живой ход bd-.
  * Общие правила сборки (p2-seg, p2-ph, p2-bar, p2-sbf, p2-sbok, p2-work, p2-role, p2-dot) — в base.css.
  * Свои дополнения — после блока: типографика фазы (на доске она в style), прокрутка раскадровки, две строки мысли
- * агента и узкая колода (1280 px, помощник). */
+ * агента; в конце — колода, суженная помощником (V2 версии 100). */
 /* Сборка (модуль bd): «Подготовка» B-start, «Эскизы и критик» B-sketch, «Не получилось» B-failed — классы досок как есть */
 .bs-seg{position:absolute;top:0;bottom:0;left:0;width:20%;border-radius:999px;background:#38BDF8;transform:translateX(60%)}
 @keyframes bs-sweep{from{transform:translateX(-100%)}to{transform:translateX(500%)}}
@@ -67,49 +67,65 @@
 @media (max-width: 900px){.bd-errbox{position:relative !important;inset:auto !important;margin-top:24px}}
 
 /* ── дополнения «Слоёв» */
-/* фаза в заголовке: типографика .p2-ph доски (у неё — в style), не шире своей клетки */
-.bd-ph{max-width:100%;overflow:hidden;text-overflow:ellipsis;font-family:'Unbounded','Manrope',sans-serif;font-weight:600;font-size:36px;line-height:48px;letter-spacing:-0.03em;color:#FFFFFF}
+/* фаза в заголовке: типографика .p2-ph доски (у неё — в style). Кегль — от ширины окна, один в обеих раскладках
+   (BuildPlate `--bd-phf`, columns.ts `buildMorph`): 36 px, пока самая длинная («Смотрю на слайды целиком», 633 px при
+   36) встаёт в свою клетку (колода − поля 96 − колонка агента 416 − зазор 48 − место «03» 192), у́же — мельче (до 24) */
+.bd-ph{font-family:'Unbounded','Manrope',sans-serif;font-weight:600;font-size:var(--bd-phf,36px);line-height:48px;letter-spacing:-0.03em;color:#FFFFFF}
 /* раскадровка больше двенадцати слайдов прокручивается внутри (как лента агента) */
 .bd-board{scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.16) transparent}
-/* мысль агента — не длиннее двух строк, целиком — в подсказке */
+/* мысль агента — не длиннее двух строк (внутренняя строка каждой копии стопки), целиком — в подсказке */
 .bd-line{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
 .bd-segs .bk-vst svg{display:block}
-/* Колода уже доски (1280 px; помощник). Пороги — ui/deck/fit.ts, от целевой ширины колоды (`--deck-w` — показанной
-   раскладки плиты, BuildPlate): ход сетки помощника не меняет ни размер фазы, ни сегменты посреди хода.
-   - Фаза мельчает ровно настолько, чтобы самая длинная («Смотрю на слайды целиком», 633 px при 36 px) встала в свою
-     клетку: колода − поля 96 − колонка агента 416 − зазор 48 − место «03» 192 = колода − 752 px; при 1440 это 36 px.
-   - Сегментам вариантов со словами («Структурный ✓ продумано») тесно рядом с «Раскадровкой» (`.bd-segs-s`, fit.ts
-     `segStatus`): остаются галочки, слова — в подсказке сегмента и в строке под «Раскадровкой». */
-.bd-ph{font-size:clamp(24px, calc((var(--deck-w, 1392px) - 752px) / 17.8), 36px)}
-.bd-segs-s .bk-vst > span{display:none}
-
-/* ── Колода, суженная помощником (задача 13; по целевой ширине, ui/deck/fit.ts: узкая ≤ 1100 — 976 при 1440, тесная
-   ≤ 900 — 816 при 1280). Сетка сборки: фаза — первой строкой, слева под ней — часы, полоса и раскадровка, справа на обе
-   строки — «Как думает агент» (как на доске). В узкой колоде фаза встаёт во всю ширину плиты (рядом с ней колонке агента
-   нет места), колонка агента — 320 px под ней (в тесной — 288, зазор 32), раскадровка — в три колонки (Storyboard).
-   Содержимое плиты (`.bd-fxw`) стоит в ширине колоды на конец хода и меняет раскладку перекрёстным затуханием
-   (BuildPlate `usePlateFit`): гаснет 120 мс, подменяется невидимым — правила ниже по `data-fit` этой обёртки, а не
-   колоды, — и проявляется 240 мс; плита и «03» не гаснут. */
-@media (max-width: 900px){.bd-fxw{width:auto !important}}
+/* слова хода в сегментах вариантов («Структурный ✓ продумано») — пока им есть место рядом с «Раскадровкой» (columns.ts
+   `words`, по ширине окна: около 1280 — нет): иначе остаются галочки, слова — в подсказке сегмента */
+.bd-segs-s .bk-vst > .hq-vsw{display:none}
+/* сетка сборки: фаза — первой строкой, слева под ней — часы, полоса и раскадровка, справа на обе строки — «Как думает
+   агент» (как на доске) */
 .bd-two > .p2-hrow{grid-area:1 / 1}
 .bd-two > .bd-body{grid-area:2 / 1}
 .bd-two > aside{grid-area:1 / 2 / 3 / 3}
-:where(.p2-fx[data-fit=narrow], .p2-fx[data-fit=tight]){
-  .bd-two{grid-template-columns:minmax(0,1fr) 320px !important}
-  .bd-two > .p2-hrow{grid-area:1 / 1 / 2 / 3}
-  .bd-two > aside{grid-area:2 / 2;height:auto !important;min-height:0}
-  /* фаза — по ширине плиты без места «03» (поля 96 + 192): 36 px при 976, меньше — ровно настолько, чтобы самая длинная
-     встала */
-  .bd-ph{font-size:clamp(24px, calc((var(--deck-w, 976px) - 288px) / 17.8), 36px)}
-  /* «Раскадровка» и сегменты вариантов — в две строки, если в одну не встают */
-  .bd-sbh{flex-wrap:wrap;height:auto !important;row-gap:12px}
-  /* «Не получилось»: кнопки — в столбик, если в ряд не встают */
-  .bd-acts{flex-wrap:wrap}
-  /* «Как думает агент» и «шаг 5 из 9» («ошибка на шаге…», «в очереди») — две строки в той же шапке 64 */
-  .bd-two > aside > div:first-child{flex-direction:column;align-items:flex-start !important;justify-content:center !important;gap:0 !important}
-  .bd-two > aside > div:first-child > span{max-width:100%;overflow:hidden;text-overflow:ellipsis}
-}
-:where(.p2-fx[data-fit=tight]){
-  .bd-two{grid-template-columns:minmax(0,1fr) 288px !important;column-gap:32px !important}
-  .bd-two > aside h2{font-size:18px !important;line-height:24px !important}
+@media (max-width: 900px){.bd-acts{flex-wrap:wrap}}
+
+/* ── Колода, суженная помощником (V2 версии 100, блок «Сборка: колонка агента 416 → 320, зазор 48 → 24; фаза остаётся в
+   своей клетке и мельчает той же кривой…» — дословно, кроме отмеченного «сайт:»). Плита перестраивается вместе с
+   колодой каждый кадр, на той же кривой (var(--ease)) и за то же время — открытие 520 мс, закрытие 340: дорожки сетки
+   (колонка агента, зазор), transform фазы (scale до .75, длинная — сколько нужно, `--phs` — columns.ts `phaseScale`),
+   раскадровка — те же колонки, сужаются (у сегментов вариантов слова хода гаснут и сжимаются кеглем до нуля, галочки
+   остаются; сегменты плотнее), «Не получилось» — поля 48 → 24, «Как думает агент» 20 → 18 px, зазор 16 → 8. Мысли агента,
+   подсказки очереди и причина ошибки — стопки из двух копий (hp-tx, create.css; `--hpd` — на сколько колонка агента
+   у́же). Что зависит от ширины окна — columns.ts `buildMorph`, переменными на `.bd-two` (BuildPlate). */
+@media (min-width: 901px){
+  .bd-two{grid-template-columns:minmax(0,1fr) 416px !important;column-gap:48px !important;transition:grid-template-columns 340ms var(--ease),column-gap 340ms var(--ease)}
+  /* сайт: колонка агента в узкой раскладке — `--bd-an` (320; в тесной колоде — 288) */
+  .hp-nar .bd-two{grid-template-columns:minmax(0,1fr) var(--bd-an,320px) !important;column-gap:24px !important;transition-duration:520ms}
+  .bd-two .p2-ph{transform-origin:0 50%;transition:opacity 360ms var(--ease),transform 360ms var(--ease),scale 340ms var(--ease)}
+  .bd-two .p2-ph-past,.bd-two .p2-ph-next{transition-duration:240ms,240ms,340ms}
+  .hp-nar .bd-two .p2-ph{scale:var(--phs,.75);transition-duration:360ms,360ms,520ms}
+  .hp-nar .bd-two .p2-ph-past,.hp-nar .bd-two .p2-ph-next{transition-duration:240ms,240ms,520ms}
+  .bd-two .bk-vst > .hq-vsw{white-space:nowrap;transition:font-size 340ms var(--ease),margin-left 340ms var(--ease),opacity 160ms var(--ease) 80ms}
+  .hp-nar .bd-two .bk-vst > .hq-vsw{font-size:0;margin-left:-4px;opacity:0;transition:font-size 520ms var(--ease),margin-left 520ms var(--ease),opacity 240ms var(--ease)}
+  .bd-two .p2-seg{transition:transform 160ms var(--ease),padding 340ms var(--ease)}
+  .hp-nar .bd-two .p2-seg{padding:0 8px;transition:transform 160ms var(--ease),padding 520ms var(--ease)}
+  .bd-two > aside > .hq-bdh{transition:gap 340ms var(--ease)}
+  .hp-nar .bd-two > aside > .hq-bdh{gap:8px !important;transition-duration:520ms}
+  .bd-two > aside > .hq-bdh > .hq-bdt{flex:none;transition:font-size 340ms var(--ease)}
+  .hp-nar .bd-two > aside > .hq-bdh > .hq-bdt{font-size:18px !important;transition-duration:520ms}
+  .bd-two > aside > div:first-child > span{min-width:0}
+  .bd-two > aside > div:first-child > span > span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+  .bd-two .bf-empty{transition:padding 340ms var(--ease)}
+  .hp-nar .bd-two .bf-empty{padding:40px 24px;transition-duration:520ms}
+  /* --hpd стопок ленты агента (V2: 96 px; сайт: в тесной колоде 128 — `--bd-hpd`) */
+  [data-tx="b-err"],[data-tx="b-hint"],[data-tx="b-line"]{--hpd:var(--bd-hpd,96px)}
+  /* сайт: стопки рабочей ленты агента на ходу меняют высоту линейно — от высоты в широкой раскладке (`--hw`) до высоты в
+     узкой (+ `--hdd`; Roles, по высотам копий), той же кривой, что сдвиг ленты (он считается для обеих раскладок):
+     роли движутся в одну сторону, нижняя видимая стоит у края. В покое — auto (по своим копиям) */
+  .bk-log .hp-tx{--hpp:0;height:if(style(--hpp: 0): auto; style(--hpp: 1): auto; else: calc(var(--hw, 0px) + var(--hdd, 0px) * var(--hpp)));transition:--hpp 340ms var(--ease)}
+  .hp-nar .bk-log .hp-tx{--hpp:1;transition-duration:520ms}
+  /* сайт: тесная колода (окно около 1280, columns.ts `tight`). «Раскадровка» со строкой хода при трёх вариантах
+     сжимается и гаснет на месте (сегментам рядом с ней нет места); у меток «Замечание» и «Переделан» на карточках
+     (уже 100 px) слово сжимается кеглем до нуля и гаснет — остаётся значок */
+  .bd-sbl-go{max-width:140px;overflow:hidden;transition:max-width 340ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
+  .hp-nar .bd-sbl-go{max-width:0;opacity:0;visibility:hidden;transition:max-width 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
+  .bd-tight .bk-badge > .bd-bw{transition:font-size 340ms var(--ease),margin-left 340ms var(--ease),opacity 160ms var(--ease) 80ms}
+  .hp-nar .bd-tight .bk-badge > .bd-bw{font-size:0;margin-left:-4px;opacity:0;transition:font-size 520ms var(--ease),margin-left 520ms var(--ease),opacity 240ms var(--ease)}
 }

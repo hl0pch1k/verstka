@@ -62,9 +62,9 @@ function StepBox({ on, children }: { on: boolean; children: ReactNode }) {
 export function Deck({ h1, h2, h3, p1, p2, p3, m3, b3, p4, s1, s2, s3, layers }: DeckProps) {
   const { ui, dispatch } = useApp();
   const g = deckGeometry(ui);
-  // помощник сужает колоду. «Создать» перестраивается вместе с ней (CSS по `.hp-nar`), обе его раскладки считаются по
-  // ширине обёртки (DeckWrapContext); «Сборка», слои и лист «Подробнее» пока решают по цели хода (useDeckLayout) и
-  // перестраиваются перекрёстным затуханием (usePlateFit, useLayer)
+  // помощник сужает колоду. «Создать» и «Сборка» перестраиваются вместе с ней (CSS по `.hp-nar`), обе их раскладки
+  // считаются по ширине обёртки (DeckWrapContext); слои и лист «Подробнее» пока решают по цели хода (useDeckLayout) и
+  // перестраиваются перекрёстным затуханием (useLayer)
   const deckRef = useRef<HTMLElement>(null);
   const wrap = useWrapWidth(deckRef);
   const layout = useDeckLayout(deckRef, ui.helper, wrap);
