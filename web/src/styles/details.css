@@ -434,13 +434,17 @@
   /* «Шаблон»: третий факт («типов слайдов») уходит вместе со своей дорожкой (144 → 0; держит ширину, обрезается, гаснет),
      палитра 180 → 120 — названию шаблона 164 / 149 px; «Правила оформления» 416 → 336 (заголовок 275 px — в строку; их
      строки — стопки t-rule) */
+  /* полоса и без помощника: шрифт 208 → 200, палитра 320 → 272 (подписи — в строку с запасом 8 px) — названию шаблона
+     168 / 153 px (у V2 при 1280 — 112: «VK T…») */
+  .dd-tight .dtp-band{grid-template-columns:minmax(0,1fr) 112px 112px 144px 200px 272px}
   .hp-nar .dd-tight .dtp-band{grid-template-columns:minmax(0,1fr) 84px 84px 0px 140px 120px}
   .dd-tight .dtp-f3{overflow:clip;transition:padding 340ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
   .dd-tight .dtp-f3 > *{min-width:112px}
   .hp-nar .dd-tight .dtp-f3{padding:0;opacity:0;visibility:hidden;transition:padding 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
   .hp-nar .dd-tight .dtp-g{grid-template-columns:minmax(0, 1fr) 336px !important}
-  /* подпись макета: слово «слайд» сжимается и гаснет, номер остаётся — «Раздел», «Финал», «Карточки» в ячейке 93 px целиком */
-  .dd-tight .dtp-lsw{display:inline-block;vertical-align:top;max-width:48px;overflow:hidden;transition:max-width 340ms var(--ease),opacity 160ms var(--ease) 80ms}
+  /* подпись макета: слово «слайд» сжимается и гаснет, номер остаётся — «Раздел», «Финал», «Карточки» в ячейке 93 px целиком;
+     ширина слова — замер (`--ctw`, Template), чтобы сжатие шло с первого кадра */
+  .dd-tight .dtp-lsw{display:inline-block;vertical-align:top;max-width:var(--ctw, 48px);overflow:hidden;transition:max-width 340ms var(--ease),opacity 160ms var(--ease) 80ms}
   .hp-nar .dd-tight .dtp-lsw{max-width:0;opacity:0;transition:max-width 520ms var(--ease),opacity 240ms var(--ease)}
   /* «Файлы»: правая колонка 44 % → 40 % (левой — 424 / 415: у файла видно начало названия рядом с тремя кнопками); в
      «Итоге проверки» число проверок сжимается и гаснет, оценка остаётся */

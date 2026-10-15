@@ -4,7 +4,7 @@
 // оформления и «Шрифты и поля». Данные — templateTab.ts.
 // Помощник сужает колоду (V2 версии 100): полоса плотнее, макеты у́же; в тесной колоде (1280) уходит третий факт, палитра
 // у́же, «Правила» 416 → 336 (их строки — стопки t-rule), у подписи макета слово «слайд» уходит — остаётся номер.
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { fontStack, useTemplateFont } from "../../../lib/fonts";
 import { useApp } from "../../../store";
 import type { TemplateManifest } from "../../../types";
@@ -45,6 +45,20 @@ function TemplateBody({ m }: { m: TemplateManifest }) {
   const rules = rulesOf(m);
   const rows = fontRows(m);
   const lays = layoutsOf(m, all);
+  // ширина слова «слайд» в подписи макета (`--ctw`): в тесной колоде с помощником оно сжимается от неё до нуля
+  const laysRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const box = laysRef.current;
+    const w = box?.querySelector(".dtp-lsw");
+    if (!box || !w) return;
+    const set = () => {
+      const r = document.createRange();
+      r.selectNodeContents(w);
+      box.style.setProperty("--ctw", `${Math.ceil(r.getBoundingClientRect().width)}px`);
+    };
+    set();
+    void document.fonts?.ready.then(set);
+  }, [lays.length]);
   const copy = (hex: string) => {
     const k = (copied?.k ?? 0) + 1;
     const done = (ok: boolean) => setCopied({ hex, ok, k });
@@ -87,7 +101,7 @@ function TemplateBody({ m }: { m: TemplateManifest }) {
               </button>
             )}
           </div>
-          <div className="dtp-lays">
+          <div ref={laysRef} className="dtp-lays">
             {lays.map((l) => (
               <div key={l.key} className="p2-in" style={{ animationDelay: l.delay }}>
                 <button type="button" className="p2-card" onClick={() => dispatch({ type: "pattern", n: l.n })} aria-label={`Слайд ${l.n} шаблона: ${l.kind}`}>
