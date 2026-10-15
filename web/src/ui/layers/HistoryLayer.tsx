@@ -89,6 +89,22 @@ export function HistoryLayer() {
   const listErr = notices.history?.kind === "error" ? humanError(notices.history.text, LIST_FAILED) : null;
   const presence = useLayerPresence(open);
   const narrow = useNarrow();
+  // карточки вне окна списка не рисуются (layers.css, content-visibility: auto) — ход помощника их не пересчитывает. Пока
+  // карточка пропущена, переходы у неё внутри выключены (`gh-skip`): показалась после хода — встаёт сразу в нынешней
+  // раскладке, а не доигрывает ход из той, в которой её застал помощник; метка снимается через два кадра. Слушатель — до
+  // первого кадра слоя (useLayoutEffect): первые события приходят в нём
+  const listRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const onState = (e: Event) => {
+      const li = e.target as HTMLElement;
+      if ((e as Event & { skipped?: boolean }).skipped) return void li.classList.add("gh-skip");
+      requestAnimationFrame(() => requestAnimationFrame(() => li.classList.remove("gh-skip")));
+    };
+    el.addEventListener("contentvisibilityautostatechange", onState, true);
+    return () => el.removeEventListener("contentvisibilityautostatechange", onState, true);
+  }, [presence.mounted]);
   // список считается, только пока слой на экране (и доигрывает уход), — колода перерисовывается часто, раздел закрыт
   const mounted = presence.mounted;
   const current = ui.screen === "result" ? generationId : ui.screen === "build" ? buildJob?.generation ?? null : null;
@@ -217,7 +233,7 @@ export function HistoryLayer() {
         <button type="button" className="p2-rbl" onClick={close} aria-label="Закрыть"><Icon name="x" size={18} /></button>
       </div>
 
-      <div className="gh-list">
+      <div ref={listRef} className="gh-list">
         {view?.groups.length === 0 && !listErr && (
           <p className="p2-ls" style={{ ...lsDelay(200), margin: "8px 0 0", fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#5A6272" }}>
             Здесь появятся презентации, которые вы соберёте.

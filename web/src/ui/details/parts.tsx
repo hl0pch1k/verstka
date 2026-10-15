@@ -10,11 +10,11 @@ import { Tx } from "../kit/Tx";
 import type { SheetTab } from "../deck/geometry";
 
 /** Панель вкладки: стоит под рядом вкладок (top 104) и сменяется перекрёстным затуханием (p2-on / p2-off); невыбранная
- *  (`dd-pw p2-off`) держит замороженную ширину и без переходов внутри (layers.css). */
-export function Panel({ tab, on, children, style }: { tab: SheetTab; on: boolean; children: ReactNode; style?: CSSProperties }) {
+ *  (`dd-pw p2-off`) держит замороженную ширину и без переходов внутри (layers.css); содержимое — когда `mount`. */
+export function Panel({ tab, on, mount = true, children, style }: { tab: SheetTab; on: boolean; mount?: boolean; children: ReactNode; style?: CSSProperties }) {
   return (
     <div className={cls("dd-pw", on ? "p2-on" : "p2-off")} data-tab={tab} style={{ position: "absolute", left: 48, right: 48, top: 104, ...style }}>
-      {children}
+      {mount && children}
     </div>
   );
 }

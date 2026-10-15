@@ -83,6 +83,13 @@
    сужаются вместе с колодой каждый кадр; название карточки «Моих презентаций» — стопка из двух копий (kit/Tx, `h-ttl`),
    абзацы «Текста презентации» — тоже (`t-sl`, две колонки сужаются на 416 / 2) */
 .gh-body{display:flex;flex-direction:column;flex:1;min-height:0}
+/* сайт: карточка «Моих презентаций» вне окна списка не рисуется (их сотня, а день — один на все: иначе ход помощника
+   перестраивал бы каждую в каждом кадре); поиск по странице и Tab её находят. Поле 8 px вокруг карточки (и −8 снаружи —
+   дорожки сетки те же): рисование карточки обрезано по её краю, а обводка открытой выходит за обложку на 4 px
+   (overflow-clip-margin тут не годится — Safari 18 его не знает). Пока карточка пропущена — внутри без переходов
+   (`gh-skip`, HistoryLayer) */
+.gh-grid > li{content-visibility:auto;contain-intrinsic-size:auto none auto 230px;padding:8px;margin:-8px}
+.gh-skip *{transition:none !important}
 .gh-body .p2-ttl{font-size:32px;line-height:40px}
 @media (min-width: 901px){
   [data-tx="h-ttl"]{--hpd:104px}

@@ -22,6 +22,7 @@ import { SheetCtx, sheetMorph } from "./sheetMorph";
 import { Panel } from "./parts";
 import { PatternLayer } from "./PatternLayer";
 import { headerLayerOpen, menuItems, SHEET_TABS, tabStep } from "./sheetView";
+import type { SheetTab } from "../deck/geometry";
 import { AgentTab } from "./tabs/Agent";
 import { FilesTab } from "./tabs/Files";
 import { PlanTab } from "./tabs/Plan";
@@ -33,7 +34,9 @@ import { scoreOf, docTitle } from "../result/resultView";
 
 /** Сброс слоя шаблона и меню — после того как лист уехал (V2: 560 мс). */
 const RESET_MS = LAYER_MS + 40;
-/** Лист доехал (520 мс) и самая долгая лесенка вкладок доиграла («Файлы» — 480 + 360). */
+/** Невыбранные вкладки — после того как лист доехал (520 мс) и доиграла лесенка его шапки и открытой вкладки. */
+const MOUNT_MS = 720;
+/** После монтирования последней вкладки — когда её лесенка доиграла («Файлы» — 480 + 360). */
 const SETTLE_MS = 900;
 
 export function DetailsSheet() {
@@ -56,13 +59,37 @@ export function DetailsSheet() {
   const deck = useDeckManifest(keep?.g.template_id ?? null, attempt);
   const [menu, setMenu] = useState(false);
   const presence = useLayerPresence(open);
-  // лист доехал и вкладки доиграли свою лесенку (p2-in идёт и в невидимых) — невыбранные вкладки больше не рисуются
-  // (`dd-settled`, layers.css: content-visibility); раньше — их лесенка проиграла бы заново при первом показе
+  // невыбранные вкладки монтируются, когда лист доехал, по одной в свободное время (въезд листа не ждёт их раскладки);
+  // открытая — сразу и при смене вкладки (её содержимое встаёт в том же кадре, пустой панели нет). Когда все на месте и
+  // их лесенки доиграли (p2-in идёт и в невидимых), невыбранные больше не рисуются (`dd-settled`, layers.css:
+  // content-visibility); раньше — их лесенка проиграла бы заново при первом показе
+  const [mounted, setMounted] = useState<ReadonlySet<SheetTab>>(() => new Set());
   const [settled, setSettled] = useState(false);
+  if (open && tab && !mounted.has(tab)) setMounted(new Set(mounted).add(tab));
+  const mountedRef = useRef(mounted);
+  mountedRef.current = mounted;
+  if (!open && !presence.mounted && (mounted.size || settled)) {
+    setMounted(new Set());
+    setSettled(false);
+  }
   useEffect(() => {
     if (!open) return void setSettled(false);
-    const t = window.setTimeout(() => setSettled(true), SETTLE_MS);
-    return () => window.clearTimeout(t);
+    let alive = true;
+    let t = 0;
+    const idle = (f: () => void) => (window.requestIdleCallback ? window.requestIdleCallback(f, { timeout: 200 }) : window.setTimeout(f, 50));
+    const next = () => {
+      if (!alive) return;
+      const rest = SHEET_TABS.find((x) => !mountedRef.current.has(x.key));
+      if (!rest) return void (t = window.setTimeout(() => alive && setSettled(true), SETTLE_MS));
+      mountedRef.current = new Set(mountedRef.current).add(rest.key);
+      setMounted(mountedRef.current);
+      idle(next);
+    };
+    t = window.setTimeout(() => idle(next), MOUNT_MS);
+    return () => {
+      alive = false;
+      window.clearTimeout(t);
+    };
   }, [open]);
   const narrow = useNarrow();
   const morph = sheetMorph(useDeckWrap());
@@ -140,12 +167,12 @@ export function DetailsSheet() {
 
           <div className="p2-ls" style={{ ...lsDelay(200), position: "absolute", inset: 0, pointerEvents: "none" }}>
             <div style={{ pointerEvents: "auto" }}>
-              <Panel tab="quality" on={tab === "quality"}><QualityTab g={g} v={v} deck={deck} /></Panel>
-              <Panel tab="why" on={tab === "why"}><WhyTab g={g} v={v} deck={deck} active={open && tab === "why"} /></Panel>
-              <Panel tab="agent" on={tab === "agent"}><AgentTab g={g} v={v} /></Panel>
-              <Panel tab="plan" on={tab === "plan"} style={{ height: 508, display: "flex", flexDirection: "column" }}><PlanTab g={g} v={v} active={open && tab === "plan"} /></Panel>
-              <Panel tab="template" on={tab === "template"} style={{ height: 508, display: "flex", flexDirection: "column" }}><TemplateTab deck={deck} /></Panel>
-              <Panel tab="files" on={tab === "files"} style={{ height: 508, display: "flex", flexDirection: "column" }}><FilesTab g={g} v={v} deck={deck} /></Panel>
+              <Panel tab="quality" on={tab === "quality"} mount={mounted.has("quality")}><QualityTab g={g} v={v} deck={deck} /></Panel>
+              <Panel tab="why" on={tab === "why"} mount={mounted.has("why")}><WhyTab g={g} v={v} deck={deck} active={open && tab === "why"} /></Panel>
+              <Panel tab="agent" on={tab === "agent"} mount={mounted.has("agent")}><AgentTab g={g} v={v} /></Panel>
+              <Panel tab="plan" on={tab === "plan"} mount={mounted.has("plan")} style={{ height: 508, display: "flex", flexDirection: "column" }}><PlanTab g={g} v={v} active={open && tab === "plan"} /></Panel>
+              <Panel tab="template" on={tab === "template"} mount={mounted.has("template")} style={{ height: 508, display: "flex", flexDirection: "column" }}><TemplateTab deck={deck} /></Panel>
+              <Panel tab="files" on={tab === "files"} mount={mounted.has("files")} style={{ height: 508, display: "flex", flexDirection: "column" }}><FilesTab g={g} v={v} deck={deck} /></Panel>
             </div>
           </div>
           </div>
