@@ -101,11 +101,29 @@
      растёт от нуля до своей (--hn) той же кривой (kit/Tx замеряет копии): у V2 клетка — бо́льшая из копий, узкая растёт
      только когда переросла широкую, и рядом с тем, что сжимается сразу (миниатюры с пропорцией), то, что ниже, шло
      сначала вверх, потом вниз. В покое — auto (по копиям); до замера (`hp-txm`) — как у V2 */
-  .p2-lay .hp-txm{--hpp:0;height:if(style(--hpp: 0): auto; style(--hpp: 1): auto; else: calc(var(--hw, 0px) + var(--hdd, 0px) * var(--hpp)));transition:--hpp 340ms var(--ease)}
+  .p2-lay .hp-txm{--hpp:0;transition:--hpp 340ms var(--ease)}
   .hp-nar .p2-lay .hp-txm{--hpp:1;transition-duration:520ms}
-  .p2-lay .hp-txm > .hp-txn{height:if(style(--hpp: 0): 0px; style(--hpp: 1): auto; else: calc(var(--hn, 0px) * var(--hpp))) !important;transition:--hpp 340ms var(--ease),opacity 160ms var(--ease),visibility 0s linear 160ms}
+  .p2-lay .hp-txm > .hp-txn{transition:--hpp 340ms var(--ease),opacity 160ms var(--ease),visibility 0s linear 160ms}
   .hp-nar .p2-lay .hp-txm > .hp-txn{transition:--hpp 520ms var(--ease),opacity 240ms var(--ease) 120ms,visibility 0s linear 0s}
 }
+/* if() — только Chrome 137+. Значение с if() и var() другой браузер принимает при разборе и роняет при вычислении (unset):
+   узкая копия встала бы во весь рост и в широкой раскладке. Поэтому if() — только под @supports; без него стопка в покое
+   и на ходу — auto (бо́льшая из копий, как у V2), узкая копия — от нуля до своей высоты по ходу (--hn·p, без if(): в
+   покое 0 и --hn — те же высоты) */
+@supports (height: if(style(--x: 0): 0px; else: 1px)){
+  @media (min-width: 901px){
+    .p2-lay .hp-txm{height:if(style(--hpp: 0): auto; style(--hpp: 1): auto; else: calc(var(--hw, 0px) + var(--hdd, 0px) * var(--hpp)))}
+    .p2-lay .hp-txm > .hp-txn{height:if(style(--hpp: 0): 0px; style(--hpp: 1): auto; else: calc(var(--hn, 0px) * var(--hpp))) !important}
+  }
+}
+@supports not (height: if(style(--x: 0): 0px; else: 1px)){
+  @media (min-width: 901px){
+    .p2-lay .hp-txm > .hp-txn{height:calc(var(--hn, 0px) * var(--hpp)) !important}
+  }
+}
+/* замер стопки (kit/Tx): узкая копия на время чтения — во весь свой рост, без перехода (и на обратном шаге — hp-txz) */
+.p2-lay .hp-tx.hp-txq > .hp-txn{height:auto !important;transition:none !important}
+.p2-lay .hp-tx.hp-txz > .hp-txn{transition:none !important}
 /* Закрытые слои (история, шаблоны, «Подробнее», текст, просмотр на весь экран, «Слайд N шаблона», «Слайды шаблона») — за
    краем колоды, невидимы. Пока слой закрыт полностью (через 520 мс после закрытия — когда доиграл его уход), ход помощника
    его не трогает: ширина постоянна — ширина колоды в покое (раскладка его поддерева не пересчитывается каждый кадр),

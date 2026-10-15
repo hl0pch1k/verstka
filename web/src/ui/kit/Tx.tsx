@@ -44,14 +44,22 @@ function flush() {
   later = 0;
   const items = [...dirty].filter((el) => el.isConnected);
   dirty.clear();
-  // сначала все чтения: ширины копий (в покое каждая — своя постоянная ширина: клетка ± --hpd) и высоты
+  // сначала все чтения: ширины копий (в покое каждая — своя постоянная ширина: клетка ± --hpd) и высоты; узкая копия на
+  // время замера — во весь свой рост (`hp-txq`: в широкой раскладке её высота 0, а scrollHeight не знает обрезки по
+  // числу строк — line-clamp), одна раскладка на все стопки
+  items.forEach((el) => el.classList.add("hp-txq"));
   const read = items.map((el) => {
     const [w, n] = el.children as unknown as HTMLElement[];
     if (!w || !n) return null;
     const cs = getComputedStyle(w);
-    const h = stackHeights(w.offsetHeight, n.scrollHeight, (parseFloat(cs.marginTop) || 0) + (parseFloat(cs.marginBottom) || 0));
+    const h = stackHeights(w.offsetHeight, n.offsetHeight, (parseFloat(cs.marginTop) || 0) + (parseFloat(cs.marginBottom) || 0));
     return { ...h, tw: w.getBoundingClientRect().width, tn: n.getBoundingClientRect().width };
   });
+  // обратно — тоже без переходов (иначе узкая копия ехала бы к своей высоте 0 ↔ auto 340 мс): сначала только «без
+  // переходов», стиль досчитан, потом и эта метка снята — значения уже прежние, ход не начинается
+  items.forEach((el) => el.classList.replace("hp-txq", "hp-txz"));
+  if (items.length) void getComputedStyle(items[0].children[1] ?? items[0]).height;
+  items.forEach((el) => el.classList.remove("hp-txz"));
   // потом записи — только изменившиеся
   items.forEach((el, i) => {
     const h = read[i];
