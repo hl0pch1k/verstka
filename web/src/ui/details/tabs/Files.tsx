@@ -1,7 +1,9 @@
 // Вкладка «Файлы» листа «Подробнее» (boards/D-files, V2 `#dd-panel-files`, модуль details `dlF`): файлы каждого
 // варианта (PowerPoint, PDF, Веб), паспорт запуска, время по этапам, итог проверки, автоисправления и свёрнутое «Для
 // разработчиков» (FilesDev). Данные — files.ts.
-import { useState } from "react";
+// Помощник сужает колоду (V2 версии 100): те же две колонки, правая 50 % → 44 %, кнопки файлов плотнее, «на экране» и
+// бейдж «Паспорта» сжимаются и гаснут, у плиток итога значки сжимаются и гаснут, длинная подпись — многоточием.
+import { useContext, useState } from "react";
 import { plural } from "../../../lib/utils";
 import { useApp } from "../../../store";
 import type { Generation, Variant } from "../../../types";
@@ -10,6 +12,8 @@ import { Icon } from "../../kit/Icon";
 import { checkTiles, fileRows, fixRowsOf, passport, stagesOf } from "../files";
 import { slideTag } from "../quality";
 import { FilesDev } from "./FilesDev";
+import { Tx } from "../../kit/Tx";
+import { SheetCtx } from "../sheetMorph";
 import type { DeckManifest } from "../useDeckManifest";
 
 const H = { margin: 0 } as const;
@@ -24,6 +28,7 @@ export function FilesTab({ g, v, deck }: { g: Generation; v: Variant; deck: Deck
   const check = checkTiles(g, v);
   const fixes = fixRowsOf(v, deck.manifest);
   const n = files.length;
+  const fact = useContext(SheetCtx).fact;
 
   return (
     <div id="dd-panel-files" className="df-scroll p2-fade" role="tabpanel" aria-labelledby="dd-tab-files" tabIndex={0} style={{ flex: 1, minHeight: 0, padding: "24px 0", overflowY: "auto", borderRadius: 24 }}>
@@ -35,7 +40,7 @@ export function FilesTab({ g, v, deck }: { g: Generation; v: Variant; deck: Deck
               <li key={f.key} className={cls("df-row", f.cur && "df-row-on")} aria-current={f.cur || undefined} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, height: 64, padding: "0 12px 0 16px", borderRadius: 16 }}>
                 <div style={{ minWidth: 0 }}>
                   <p style={{ display: "flex", alignItems: "center", gap: 8, margin: 0, fontSize: 15, fontWeight: 700, lineHeight: "24px", color: "#0B1220", whiteSpace: "nowrap" }}>
-                    <span title={f.title} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{f.title}</span>{f.score !== null && <span className="df-score" title={f.tip}>{f.score}</span>}{f.cur && <span className="df-now">на экране</span>}
+                    <span className="df-t" title={f.title}>{f.title}</span>{f.score !== null && <span className="df-score" title={f.tip}>{f.score}</span>}{f.cur && <span className="df-now hp-wo">на экране</span>}
                   </p>
                   <p title={f.file} style={{ margin: 0, fontSize: 13, fontWeight: 500, lineHeight: "20px", color: "#5A6272", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{f.file}</p>
                 </div>
@@ -50,14 +55,14 @@ export function FilesTab({ g, v, deck }: { g: Generation; v: Variant; deck: Deck
         </section>
 
         <section className="df-card p2-in" aria-labelledby="df-h2" style={{ animationDelay: "320ms" }}>
-          <div className="df-hd"><h2 id="df-h2" className="df-h">Паспорт запуска</h2><span className="df-badge">{pass.badge}</span></div>
+          <div className="df-hd"><h2 id="df-h2" className="df-h">Паспорт запуска</h2><span className="df-badge df-pb hp-wo">{pass.badge}</span></div>
           {pass.facts.length ? (
             <dl style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "16px 24px", margin: "16px 0 0" }}>
               {pass.facts.map((x) => (
-                <div key={x.k} style={{ minWidth: 0 }} title={x.title}>
+                <Tx key={x.k} tx="f-fact" as="div" hpd={fact} title={x.title}>
                   <dt className="df-fk">{x.k}</dt>
                   <dd className={cls("df-fv", x.dim && "df-dim")} style={H}>{x.v}</dd>
-                </div>
+                </Tx>
               ))}
             </dl>
           ) : <p className="df-fk" style={{ marginTop: 16 }}>У этого варианта нет паспорта — соберите презентацию заново.</p>}
@@ -82,13 +87,13 @@ export function FilesTab({ g, v, deck }: { g: Generation; v: Variant; deck: Deck
           <div className="df-hd">
             <h2 id="df-h4" className="df-h">Итог проверки</h2>
             <span style={{ display: "inline-flex", alignItems: "baseline", gap: 8, fontSize: 14, fontWeight: 600, lineHeight: "20px", color: "#5A6272", whiteSpace: "nowrap" }}>
-              {check.head}{check.head && check.score !== null ? " ·" : ""}{check.score !== null && <span className="df-score" title={`Оценка качества ${check.score} из 100`}>{check.score}</span>}
+              {check.head && <span className="df-chk">{check.head}{check.score !== null ? " ·" : ""}</span>}{check.score !== null && <span className="df-score" title={`Оценка качества ${check.score} из 100`}>{check.score}</span>}
             </span>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gap: 12, marginTop: 16 }}>
             {check.tiles.map((t) => (
               <div key={t.label} className={cls("df-tile", t.cls)} style={{ gridColumn: `span ${t.span}` }}>
-                <p className="df-tl"><Icon name={t.icon} size={16} /><span>{t.label}</span></p>
+                <p className="df-tl"><Icon name={t.icon} size={16} className="hq-ico" /><span>{t.label}</span></p>
                 <p className="df-tv"><span>{t.v}</span>{t.sub && <span className="df-tsub">{t.sub}</span>}</p>
               </div>
             ))}

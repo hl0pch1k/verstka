@@ -3,12 +3,14 @@
 // закрывает слой. Внутри: образец с рамками мест (по нажатию на место его рамка подсвечивается), качество образца,
 // как определён тип слайда, декор, места для содержания и листание образцов (кнопки и ←/→). Въезжает снизу 520 мс и
 // уезжает вниз непрозрачным со своим содержимым (Layer); новый образец проявляет содержимое заново (p2-in).
+// Помощник сужает колоду — слой идёт за ней каждый кадр (V2 версии 100, details.css `.dpt-g`): образец чуть у́же, места
+// для содержания — третья дорожка, сжимается до нуля и гаснет вместе с ней (`dpt-plw hp-wo`), не переносясь заново.
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { plural } from "../../lib/utils";
 import { useApp } from "../../store";
 import { cls } from "../kit/cls";
 import { Icon } from "../kit/Icon";
-import { Layer, useLayer } from "../layers/Layer";
+import { Layer } from "../layers/Layer";
 import { Shot } from "./parts";
 import { patternView, PLACE_COLOR, type PatternView } from "./pattern";
 import { headerLayerOpen } from "./sheetView";
@@ -22,10 +24,6 @@ export function PatternLayer({ deck }: { deck: DeckManifest }) {
   const m = deck.manifest;
   const view = m && ui.pattern !== null ? patternView(m, ui.pattern) : null;
   const open = !!view;
-  // помощник сужает колоду: образец и сведения встают иначе, заголовок 24 — своей раскладкой слоя (useLayer, `data-fit`
-  // обёртки `.dpt-fx` — details.css): гаснет и проявляется вместе с листом (та же смена колоды), белая плита стоит;
-  // открытый посреди затухания листа встаёт в нынешней раскладке непрозрачным, не подхватывая чужое затухание
-  const layer = useLayer(open);
   // показанный образец держится, пока слой уезжает
   const last = useRef<PatternView | null>(null);
   if (view) last.current = view;
@@ -76,10 +74,10 @@ export function PatternLayer({ deck }: { deck: DeckManifest }) {
           <span className="dpt-ret">к шаблону<Icon name="chevron-up" size={16} /></span>
         </button>
       </div>
-      <Layer id="dl-lay-x" presence={layer.presence} open={open} top={40} z={2} bare label={p ? p.title : "Слайд шаблона"} onClose={close}>
+      <Layer id="dl-lay-x" open={open} top={40} z={2} bare label={p ? p.title : "Слайд шаблона"} onClose={close}>
         {p && (
           <section className="dpt-layer" role="dialog" aria-modal="true" aria-labelledby="dpt-title" aria-describedby="dpt-desc" tabIndex={-1} onKeyDown={onKey} style={{ outline: "none" }}>
-            <div className={cls("dpt-fx", layer.fit.cls)} data-fit={layer.fit.shown} style={{ display: "flex", flexDirection: "column", height: 532 }}>
+            <div className="dpt-fx" style={{ display: "flex", flexDirection: "column", height: 532 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 24, height: 64, flex: "none" }}>
                 <h2 key={`t${p.n}`} id="dpt-title" className="dpt-title p2-in" style={{ animationDelay: "120ms" }}>{p.title}</h2>
                 <p key={`d${p.n}`} id="dpt-desc" className="p2-in" title={p.desc} style={{ minWidth: 0, margin: 0, fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#5A6272", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", animationDelay: "160ms" }}>{p.desc}</p>
@@ -140,7 +138,7 @@ export function PatternLayer({ deck }: { deck: DeckManifest }) {
                   </section>
                 </div>
 
-                <section className="p2-in" aria-labelledby="dpt-pl" style={{ display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, animationDelay: "240ms" }}>
+                <section className="p2-in dpt-plw hp-wo" aria-labelledby="dpt-pl" style={{ display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, animationDelay: "240ms" }}>
                   <h3 id="dpt-pl" className="dpt-h3">{p.placesH}</h3>
                   <p className="dpt-legend">{LEGEND.map(([c, t]) => <span key={t}><span className="dpt-dot" style={{ background: c }} />{t}</span>)}</p>
                   <ul className="dpt-places" style={{ minHeight: 0, overflowY: "auto", scrollbarWidth: "none" }}>

@@ -2,6 +2,8 @@
 // по слайдам — одна с результатом (`selectedSlide`), «Почему такая форма», «Как собран слайд», «Другие подходящие
 // макеты» и строка «Проверка слайда» (ведёт в «Качество»). Новый слайд, вариант или версия — колонки проявляются
 // заново лесенкой (p2-in); стрелки ←/→ листают, пока вкладка на экране. Нет довода у слайда — объяснение сервера.
+// Помощник сужает колоду (V2 версии 100): первая колонка 526 → 416, вторая — остальное; текст — стопки (kit/Tx: w-why,
+// w-dd, w-form, w-crit — первая колонка; w-sim, w-ok, подписи образца и макетов — вторая).
 import { useEffect, useState } from "react";
 import { api, ApiError } from "../../../api";
 import { errText } from "../../../lib/narrate";
@@ -12,6 +14,7 @@ import { cls } from "../../kit/cls";
 import { ErrorLine } from "../../kit/ErrorLine";
 import { Icon } from "../../kit/Icon";
 import { Spinner } from "../../kit/Spinner";
+import { Tx } from "../../kit/Tx";
 import { ownsKeys, slideForKey } from "../../result/resultView";
 import { Shot } from "../parts";
 import { SEV } from "../quality";
@@ -97,15 +100,15 @@ export function WhyTab({ g, v, deck, active }: { g: Generation; v: Variant; deck
         <section className="dd-box p2-in" aria-labelledby="dw-h-form" style={{ display: "flex", flexDirection: "column", minWidth: 0, animationDelay: "0ms" }}>
           <h3 id="dw-h-form" className="dd-h">Почему такая форма</h3>
           {w.src && <p style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 0 0", fontSize: 13, fontWeight: 600, lineHeight: "20px", color: "#5A6272" }}><Icon name="file-text" size={16} />{w.src}</p>}
-          {why ? <p className={cls(!w.why && "p2-in")} style={{ margin: "16px 0 0", fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#0B1220" }}>{why}</p>
+          {why ? <Tx tx="w-why" className={cls(!w.why && "p2-in")} style={{ margin: "16px 0 0", fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#0B1220" }}>{why}</Tx>
             : ex.busy ? <p style={{ display: "flex", alignItems: "center", gap: 8, margin: "16px 0 0", fontSize: 14, fontWeight: 600, lineHeight: "20px", color: "#5A6272" }}><Spinner size={16} />Собираю объяснение…</p>
               : ex.error ? <ErrorLine text={ex.error} style={{ marginTop: 16 }} />
-                : <p style={{ margin: "16px 0 0", fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#5A6272" }}>Дизайнер не оставил объяснения для этого слайда.</p>}
+                : <Tx tx="w-why" style={{ margin: "16px 0 0", fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#5A6272" }}>Дизайнер не оставил объяснения для этого слайда.</Tx>}
           {w.dl.length > 0 && (
             <dl style={{ display: "grid", gridTemplateColumns: "72px minmax(0, 1fr)", gap: "8px 12px", margin: "16px 0 0", paddingTop: 16, borderTop: "1px solid rgba(11,18,32,.08)" }}>
               {w.dl.map((x) => [
                 <dt key={`${x.t}t`} className="dw-sub">{x.t}</dt>,
-                <dd key={`${x.t}d`} style={{ ...SMALL }}>{x.d}</dd>,
+                <Tx key={`${x.t}d`} tx="w-dd" as="dd" style={{ ...SMALL }}>{x.d}</Tx>,
               ])}
             </dl>
           )}
@@ -115,7 +118,7 @@ export function WhyTab({ g, v, deck, active }: { g: Generation; v: Variant; deck
               <ul style={{ margin: "8px 0 0", padding: 0, listStyle: "none" }}>
                 {w.forms.map((f, i) => (
                   <li key={i} className="dw-row">
-                    <p style={{ ...SMALL, flex: 1, minWidth: 0 }}>{f.name && <b style={{ fontWeight: 700 }}>{f.name}</b>}{f.name && f.text ? " — " : ""}{f.text}</p>
+                    <Tx tx="w-form" f style={SMALL}>{f.name && <b style={{ fontWeight: 700 }}>{f.name}</b>}{f.name && f.text ? " — " : ""}{f.text}</Tx>
                     {(f.variant || f.onScreen) && (
                       <span style={{ flex: "none" }}>
                         {f.variant && (
@@ -138,7 +141,7 @@ export function WhyTab({ g, v, deck, active }: { g: Generation; v: Variant; deck
                 {w.crit.map((c, i) => (
                   <li key={i} className="dw-cr">
                     <span className="dd-tag" style={{ background: "#FFFFFF", color: c.who === "Критик" ? "#0B1220" : "#2563EB" }}>{c.who}</span>
-                    <span>{c.arrow && <><b style={{ fontWeight: 700, color: "#2563EB" }}>→</b> </>}{c.text}</span>
+                    <Tx tx="w-crit" as="span">{c.arrow && <><b style={{ fontWeight: 700, color: "#2563EB" }}>→</b> </>}{c.text}</Tx>
                   </li>
                 ))}
               </ol>
@@ -152,13 +155,13 @@ export function WhyTab({ g, v, deck, active }: { g: Generation; v: Variant; deck
             <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 40px minmax(0, 1fr)", alignItems: "center", rowGap: 8, marginTop: 16 }}>
               {w.sample ? <Shot src={w.sample.src} alt={w.sample.label} style={FRAME} />
                 : <span className="dw-wf" style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: 16, textAlign: "center" }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, lineHeight: "20px", color: "#5A6272" }}>{w.frame}</span>
+                  <Tx tx="w-cap" as="span" wrap="span" f style={{ fontSize: 13, fontWeight: 600, lineHeight: "20px", color: "#5A6272" }}>{w.frame}</Tx>
                 </span>}
               <span aria-hidden="true" style={{ display: "flex", alignItems: "center", justifyContent: "center", color: "#2563EB" }}><Icon name="arrow-right" size={20} /></span>
               <Shot src={w.own.src} alt={w.own.alt} style={FRAME} />
-              <span className="dd-cap">{w.sampleCap}</span>
+              <Tx tx="w-cap" as="span" className="dd-cap">{w.sampleCap}</Tx>
               <span />
-              <span className="dd-cap" style={{ color: "#0B1220" }}>Ваш слайд</span>
+              <Tx tx="w-cap" as="span" className="dd-cap" style={{ color: "#0B1220" }}>Ваш слайд</Tx>
             </div>
             {w.sim && (
               <div style={{ marginTop: 24, paddingTop: 16, borderTop: "1px solid rgba(11,18,32,.08)" }}>
@@ -169,7 +172,7 @@ export function WhyTab({ g, v, deck, active }: { g: Generation; v: Variant; deck
                 <div role="meter" aria-labelledby="dw-sim" aria-valuemin={0} aria-valuemax={100} aria-valuenow={w.sim.pct} aria-valuetext={`${w.sim.pct}%`} style={{ position: "relative", height: 4, marginTop: 8, borderRadius: 999, background: "#F3F4F1", overflow: "hidden" }}>
                   <span style={{ position: "absolute", inset: 0, borderRadius: 999, background: "#2563EB", transformOrigin: "left center", transform: `scaleX(${w.sim.pct / 100})` }} />
                 </div>
-                <p style={{ margin: "8px 0 0", fontSize: 14, fontWeight: 500, lineHeight: "20px", color: "#5A6272" }}>{w.sim.note}</p>
+                <Tx tx="w-sim" style={{ margin: "8px 0 0", fontSize: 14, fontWeight: 500, lineHeight: "20px", color: "#5A6272" }}>{w.sim.note}</Tx>
               </div>
             )}
             {w.reasons.length > 0 && (
@@ -177,7 +180,7 @@ export function WhyTab({ g, v, deck, active }: { g: Generation; v: Variant; deck
                 {w.reasons.map((r) => (
                   <li key={r.text} className="dw-ok">
                     <span style={{ display: "flex", flex: "none", color: r.good ? "#2563EB" : "#B45309" }}><Icon name={r.good ? "check-circle" : "warning"} size={20} /></span>
-                    <span>{r.text}</span>
+                    <Tx tx="w-ok" as="span" f>{r.text}</Tx>
                   </li>
                 ))}
               </ul>
@@ -191,8 +194,8 @@ export function WhyTab({ g, v, deck, active }: { g: Generation; v: Variant; deck
                 {w.alts.map((a) => (
                   <li key={a.key}>
                     <Shot src={a.src} alt={a.label} style={FRAME} />
-                    <p style={{ margin: "8px 0 0", fontSize: 13, fontWeight: 700, lineHeight: "20px", color: "#0B1220" }}>{a.cap}</p>
-                    <p className="dd-cap" style={{ margin: 0 }}>{a.sim}</p>
+                    <Tx tx="w-alt" style={{ margin: "8px 0 0", fontSize: 13, fontWeight: 700, lineHeight: "20px", color: "#0B1220" }}>{a.cap}</Tx>
+                    <Tx tx="w-alt" className="dd-cap" style={{ margin: 0 }}>{a.sim}</Tx>
                   </li>
                 ))}
               </ul>

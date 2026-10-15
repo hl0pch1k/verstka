@@ -18,9 +18,8 @@
 .hp-open .hp-hcell{z-index:1;transition:z-index 0s linear 520ms}
 /* помощник сужает колоду до 976 при 1440 и до 816 при 1280. «Создать» и «Сборка» перестраиваются вместе с ней каждый
    кадр, на той же кривой (create.css и build.css, блоки «Колода, суженная помощником», ui/create/morph.ts,
-   ui/build/columns.ts); слои и лист «Подробнее» пока — по целевой ширине, а не по кадру хода (ui/deck/useDeckFit; пороги —
-   ui/deck/fit.ts: узкая ≤ 1100, тесная ≤ 900), перекрёстным затуханием своей обёртки — правила по её `data-fit`
-   (useLayer); плиты не гаснут */
+   ui/build/columns.ts); слои и лист «Подробнее» — тоже (details.css, layers.css, ui/details/sheetMorph.ts, kit/Tx);
+   закрытые слои и невыбранные вкладки ход не трогает (layers.css, `--lgone`); плиты не гаснут */
 /* закрытая плита ждёт за правым краем (+32 px) — без горизонтальной прокрутки страницы: лишнее обрезается по краю окна */
 .p2-root:has(.hp-wrap){overflow-x:clip}
 @media (max-width: 900px){

@@ -3,7 +3,9 @@
 // мелкие заметки, исправленное автоматически и «Что проверяется». Данные и тексты — quality.ts, числа сводки —
 // auditCounts (те же, что у карточки результата и «Файлов»), исправление — useQualityFix (состояние в хранилище:
 // переживает закрытие листа). Смена чипа, итог исправления и «Вернуть как было» заново проявляют список лесенкой (p2-in).
-import { useEffect, useMemo, useState } from "react";
+// Помощник сужает колоду (V2 версии 100): вторая колонка 526 → 376, строка счёта 15 → 13 px, «Исправить всё
+// автоматически» и значок у «Исправить отмеченные» сжимаются и гаснут, текст замечаний — стопки (kit/Tx).
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { api } from "../../../api";
 import { auditCounts } from "../../../lib/auditCounts";
 import { variantRev } from "../../../lib/rev";
@@ -14,15 +16,19 @@ import { Arc } from "../../kit/Arc";
 import { cls } from "../../kit/cls";
 import { ErrorLine } from "../../kit/ErrorLine";
 import { Icon } from "../../kit/Icon";
+import { Tx } from "../../kit/Tx";
 import { scoreOf } from "../../result/resultView";
 import { StaleLine } from "../../shell/StaleLine";
 import { appliedRows, patternSlideOf } from "../fixes";
 import type { DeckManifest } from "../useDeckManifest";
 import { Acc, Empty, Row, Shot } from "../parts";
 import {
-  checkRows, chipsOf, emptyOf, eyeView, fixableIds, fixingLabel, fixLabel, fixLock, isFixable, minorRows, qualityGroups, qualitySummary, slideTag, splitIssues, type QFilter,
+  checkRows, chipsOf, emptyOf, eyeView, fixableIds, fixingLabel, fixLock, isFixable, minorRows, qualityGroups, qualitySummary, slideTag, splitIssues, type QFilter,
 } from "../quality";
 import { useQualityFix } from "../useQualityFix";
+import { SheetCtx, sumNarrowing } from "../sheetMorph";
+import { observeWidth } from "../../kit/widthGate";
+import { bindShort } from "../../../lib/typo";
 import { EyeBox } from "./QualityEye";
 
 // Реестр проверок (GET /api/checks) один на страницу: его просят, когда лист открылся впервые; не ответил — раздел
@@ -42,6 +48,23 @@ function useChecks(): CheckSpec[] | "failed" | null {
     };
   }, [list]);
   return list;
+}
+
+/** Ширина элемента (замер — при монтировании, после шрифтов и когда она ушла на 1 px): кнопки сводки не меняют ширину на
+ *  ходу помощника (их места сжимаются, а не они сами), поэтому замер посреди хода не срабатывает. */
+function useWidth<T extends HTMLElement>(on: boolean): [RefObject<T>, number] {
+  const ref = useRef<T>(null);
+  const [w, setW] = useState(0);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!on || !el) return void setW(0);
+    const measure = () => setW(Math.round(el.getBoundingClientRect().width * 100) / 100);
+    measure();
+    const stop = observeWidth([el], measure);
+    void document.fonts?.ready.then(measure);
+    return stop;
+  }, [on]);
+  return [ref, w];
 }
 
 export function QualityTab({ g, v, deck }: { g: Generation; v: Variant; deck: DeckManifest }) {
@@ -66,6 +89,14 @@ export function QualityTab({ g, v, deck }: { g: Generation; v: Variant; deck: De
     setFilter(f);
     setK((x) => x + 1);
   };
+  // сводка в узкой раскладке: справа уходят «Исправить всё автоматически», значок и (тесная колода) слово «отмеченные» —
+  // их ширины задают, на сколько у́же колонка заголовка и счёта (стопка q-sumt) и как сжимаются их места (--allw, --ctw)
+  const allOn = !fix.undo && fixableIds(main).length > 0;
+  const ctaOn = main.some(isFixable);
+  const [allwRef, allwW] = useWidth<HTMLButtonElement>(allOn);
+  const [wordRef, wordW] = useWidth<HTMLSpanElement>(ctaOn && fix.working !== "fix");
+  const tight = useContext(SheetCtx).tight;
+  const sumHpd = sumNarrowing({ allw: allOn ? allwW : null, cta: ctaOn, word: tight && fix.working !== "fix" ? wordW : 0 });
 
   if (!audit) {
     return (
@@ -86,8 +117,6 @@ export function QualityTab({ g, v, deck }: { g: Generation; v: Variant; deck: De
   // библиотеке (сервер исправить не сможет): кнопки и флажки выключены, у кнопок — почему
   const lock = fixLock(fix.locked, deck.state === "gone");
   const busy = lock.off;
-  const allOn = !fix.undo && fixableAll.length > 0;
-  const ctaOn = main.some(isFixable);
   const outline = v.outline?.slides ?? [];
   const slideOf = (id: string) => {
     const i = outline.findIndex((s) => s.id === id);
@@ -111,7 +140,7 @@ export function QualityTab({ g, v, deck }: { g: Generation; v: Variant; deck: De
 
   return (
     <div id="dd-panel-quality" className="dd-scroll p2-fade" role="tabpanel" aria-labelledby="dd-tab-quality" tabIndex={0}>
-      <section className="dd-box p2-in" aria-label="Сводка проверки" style={{ display: "flex", alignItems: "center", gap: 24, animationDelay: "240ms" }}>
+      <section className="dd-box dq-sum p2-in" aria-label="Сводка проверки" style={{ display: "flex", alignItems: "center", gap: 24, animationDelay: "240ms" }}>
         <div className="dq-ring" role="img" aria-label={`Оценка качества ${sum.score} из 100`}>
           <svg width="88" height="88" viewBox="0 0 88 88" aria-hidden="true">
             <circle cx="44" cy="44" r="40" fill="none" stroke="#F3F4F1" strokeWidth="8" />
@@ -123,15 +152,17 @@ export function QualityTab({ g, v, deck }: { g: Generation; v: Variant; deck: De
           </span>
         </div>
         <div style={{ position: "relative", flex: 1, minWidth: 0 }}>
-          <h3 className="dd-h">{sum.head}</h3>
-          {/* в одну строку, как на доске; рядом с итогом исправления места меньше — счётчики переносятся, а не наезжают */}
-          <p style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: 8, margin: "4px 0 0", fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#0B1220", whiteSpace: "nowrap" }}>
+          <h3 className="dd-h">{bindShort(sum.head)}</h3>
+          {/* строка счёта — стопка (q-sumt): колонка в узкой раскладке у́же на `sumHpd` (замер кнопок справа); в одну строку,
+              как на доске; где места меньше (итог исправления рядом, настоящие числа, тесная колода) — переносится, но не
+              посреди хода. Узкая копия — 13 px (V2: строка счёта 15 → 13). Заголовок встаёт в строку в обеих раскладках */}
+          <Tx tx="q-sumt" className="dq-cnts" hpd={sumHpd} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: 8, margin: "4px 0 0", fontWeight: 500, lineHeight: "24px", color: "#0B1220", whiteSpace: "nowrap" }}>
             <span style={sum.hasErr ? { fontWeight: 700, color: "#DC2626" } : undefined}>{sum.nErr}</span>
             <span aria-hidden="true" style={{ color: "#5A6272" }}>·</span>
             <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontWeight: 700, color: "#B45309" }}><Icon name="warning" size={16} />{sum.nWarn}</span>
             <span aria-hidden="true" style={{ color: "#5A6272" }}>·</span>
             <span>{sum.nModel}</span>
-          </p>
+          </Tx>
           {/* строка неудачи — под счётчиками, не сдвигая их (сводка выровнена по центру) */}
           {fix.refresh ? (
             <div className="p2-in" style={{ position: "absolute", left: 0, right: 0, top: "100%", marginTop: 2 }}>
@@ -155,12 +186,16 @@ export function QualityTab({ g, v, deck }: { g: Generation; v: Variant; deck: De
             </>
           )}
           {allOn && (
-            <button type="button" className="p2-ob dlq-ob" disabled={busy} title={lock.why ?? undefined} onClick={() => fix.start(fixableAll, fixableAll)}>Исправить всё автоматически</button>
+            <span className="hp-wo dq-allw" style={allwW ? ({ "--allw": `${allwW}px` } as CSSProperties) : undefined}>
+              <button ref={allwRef} type="button" className="p2-ob dlq-ob" disabled={busy} title={lock.why ?? undefined} onClick={() => fix.start(fixableAll, fixableAll)}>Исправить всё автоматически</button>
+            </span>
           )}
           {ctaOn && (
-            <button type="button" className="p2-cta dq-cta" disabled={busy || marked.length === 0} title={lock.why ?? undefined} onClick={() => fix.start(marked, marked)}>
-              <Icon name="wand" size={20} />
-              <span>{fix.working === "fix" ? fixingLabel(fix.busy === "all" ? fixableAll.length : (fix.busy ?? []).length) : fixLabel(marked.length)}</span>
+            <button type="button" className="p2-cta dq-cta" disabled={busy || marked.length === 0} title={lock.why ?? undefined} onClick={() => fix.start(marked, marked)}
+              style={wordW ? ({ "--ctw": `${wordW}px` } as CSSProperties) : undefined}>
+              <Icon name="wand" size={20} className="hq-ico" />
+              {fix.working === "fix" ? <span>{fixingLabel(fix.busy === "all" ? fixableAll.length : (fix.busy ?? []).length)}</span>
+                : <span>Исправить<span className="dq-ctw"><span ref={wordRef}> отмеченные</span></span> ({marked.length})</span>}
             </button>
           )}
         </div>
@@ -168,7 +203,7 @@ export function QualityTab({ g, v, deck }: { g: Generation; v: Variant; deck: De
 
       <div className="dd-g" style={{ marginTop: 24 }}>
         <div style={{ minWidth: 0 }}>
-          <div className="p2-in" role="radiogroup" aria-label="Какие замечания показать" style={{ display: "flex", alignItems: "center", gap: 8, height: 40, animationDelay: "280ms" }}>
+          <div className="p2-in dq-chips" role="radiogroup" aria-label="Какие замечания показать" style={{ display: "flex", alignItems: "center", gap: 8, height: 40, animationDelay: "280ms" }}>
             {chipsOf(main, filter).map((ch) => (
               <button key={ch.key} type="button" role="radio" aria-checked={ch.on} className={cls("p2-pill dq-chip", ch.on && "dq-chip-on")} onClick={() => pick(ch.key)}>
                 <span>{ch.label}</span><span className={cls("dq-cnt", ch.n === 0 && "dq-cnt0")}>{ch.n}</span>
@@ -186,7 +221,7 @@ export function QualityTab({ g, v, deck }: { g: Generation; v: Variant; deck: De
                   <h3 style={{ minWidth: 0, margin: 0, fontFamily: "'Unbounded','Manrope',sans-serif", fontSize: 14, fontWeight: 600, lineHeight: "24px", letterSpacing: "-0.02em", color: "#0B1220", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                     {gr.label}<span style={{ fontFamily: "'Manrope',system-ui,sans-serif", fontSize: 15, fontWeight: 500, letterSpacing: 0, color: "#5A6272" }}>{gr.sub}</span>
                   </h3>
-                  <span style={{ marginLeft: "auto", flex: "none", fontSize: 13, fontWeight: 600, lineHeight: "20px", color: "#5A6272" }}>{gr.count}</span>
+                  <span className="dq-gcnt" style={{ marginLeft: "auto", flex: "none", fontSize: 13, fontWeight: 600, lineHeight: "20px", color: "#5A6272" }}>{gr.count}</span>
                   {gr.slide > 0 && (
                     <button type="button" className="p2-gb" onClick={() => show(gr.slide)} aria-label={`Показать слайд ${gr.slide}`} style={{ flex: "none", marginRight: -16 }}>
                       Показать<Icon name="arrow-right" size={16} />
@@ -205,7 +240,7 @@ export function QualityTab({ g, v, deck }: { g: Generation; v: Variant; deck: De
                       </div>
                       <div style={{ minWidth: 0 }}>
                         <span className={cls("dd-tag", it.cls)}><Icon name={it.icon} size={14} />{it.label}</span>
-                        <p style={{ margin: "8px 0 0", fontSize: 15, fontWeight: 600, lineHeight: "24px", color: "#0B1220" }}>{it.msg}</p>
+                        <Tx tx="q-msg" style={{ margin: "8px 0 0", fontSize: 15, fontWeight: 600, lineHeight: "24px", color: "#0B1220" }}>{it.msg}</Tx>
                       </div>
                     </li>
                   ))}

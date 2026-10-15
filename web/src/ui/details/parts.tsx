@@ -6,12 +6,14 @@ import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { cls } from "../kit/cls";
 import { Collapse } from "../kit/Collapse";
 import { Icon, type IconName } from "../kit/Icon";
+import { Tx } from "../kit/Tx";
 import type { SheetTab } from "../deck/geometry";
 
-/** Панель вкладки: стоит под рядом вкладок (top 104) и сменяется перекрёстным затуханием (p2-on / p2-off). */
+/** Панель вкладки: стоит под рядом вкладок (top 104) и сменяется перекрёстным затуханием (p2-on / p2-off); невыбранная
+ *  (`dd-pw p2-off`) держит замороженную ширину и без переходов внутри (layers.css). */
 export function Panel({ tab, on, children, style }: { tab: SheetTab; on: boolean; children: ReactNode; style?: CSSProperties }) {
   return (
-    <div className={on ? "p2-on" : "p2-off"} data-tab={tab} style={{ position: "absolute", left: 48, right: 48, top: 104, ...style }}>
+    <div className={cls("dd-pw", on ? "p2-on" : "p2-off")} data-tab={tab} style={{ position: "absolute", left: 48, right: 48, top: 104, ...style }}>
       {children}
     </div>
   );
@@ -26,7 +28,7 @@ export function Acc({ id, icon, title, n, open, onToggle, children, first, small
       <h3 style={{ margin: 0 }}>
         <button type="button" className={cls("dq-acc", open && "dq-acc-on")} aria-expanded={open} aria-controls={id} onClick={onToggle} style={small ? { height: 48 } : undefined}>
           {icon && <span className="dd-ico" aria-hidden="true"><Icon name={icon} size={18} /></span>}
-          <span style={small ? { fontSize: 14, fontWeight: 700, lineHeight: "20px" } : { fontSize: 15, fontWeight: 700, lineHeight: "24px" }}>{title}</span>
+          <span className="dq-acct" style={small ? { fontSize: 14, fontWeight: 700, lineHeight: "20px" } : { fontSize: 15, fontWeight: 700, lineHeight: "24px" }}>{title}</span>
           <span className="dq-cnt dq-cnt0">{n}</span>
           <Icon name="chevron-down" size={18} className="dq-chev" />
         </button>
@@ -36,29 +38,32 @@ export function Acc({ id, icon, title, n, open, onToggle, children, first, small
   );
 }
 
-/** Ряд раздела (`dq-row`): метка слайда, жирное начало и продолжение. */
+/** Ряд раздела (`dq-row`): метка слайда, жирное начало и продолжение — стопка (вторая колонка «Качества»). */
 export function Row({ tag, b, c }: { tag: string | null; b: string; c: string }) {
   return (
     <li className="dq-row">
       {tag && <span className="dd-tag dd-tag-n">{tag}</span>}
-      <span>{b && <b style={{ fontWeight: 700 }}>{b}</b>}{c}</span>
+      <Tx tx="q-acc" as="span" f>{b && <b style={{ fontWeight: 700 }}>{b}</b>}{c}</Tx>
     </li>
   );
 }
 
 /** Раскрываемая плашка «Плана» и «Шаблона» (`dpl-col` / `dtp-col`): стрелка в круге, название и подпись; справа —
- *  своё действие («Изменить»); тело — под рядом (`dl-body`). */
-export function Col({ prefix, label, title, hint, open, onToggle, tall, action, children, delay }: {
+ *  своё действие («Изменить»); тело — под рядом (`dl-body`). В колонке, которую помощник сужает («О плане»), название с
+ *  подписью и тело — стопки (`tx`, `bodyTx`, kit/Tx). */
+export function Col({ prefix, label, title, hint, open, onToggle, tall, action, children, delay, tx, bodyTx }: {
   prefix: "dpl" | "dtp"; label: string; title: string; hint: ReactNode; open: boolean; onToggle(): void; tall?: boolean; action?: ReactNode; children: ReactNode; delay: number;
+  tx?: string; bodyTx?: string;
 }) {
+  const ctx = <><span className={`${prefix}-ct`}>{title}</span><span className={`${prefix}-ch`}>{hint}</span></>;
   return (
     <section className={cls(`${prefix}-col`, open && "dl-acc-on", tall && "dpl-col-tall", "p2-in")} aria-label={label} style={{ animationDelay: `${delay}ms` }}>
       <button type="button" className={`${prefix}-colbtn`} aria-expanded={open} onClick={onToggle}>
         <span className={`${prefix}-chev`} aria-hidden="true"><Icon name="chevron-down" size={18} className={cls("df-chev", open && "df-chev-up")} /></span>
-        <span className={`${prefix}-ctx`}><span className={`${prefix}-ct`}>{title}</span><span className={`${prefix}-ch`}>{hint}</span></span>
+        {tx ? <Tx tx={tx} as="span" wrap="span" f className={`${prefix}-ctx`}>{ctx}</Tx> : <span className={`${prefix}-ctx`}>{ctx}</span>}
       </button>
       {action}
-      <Collapse open={open} className="dl-body">{children}</Collapse>
+      <Collapse open={open} className="dl-body">{bodyTx ? <Tx tx={bodyTx} as="div">{children}</Tx> : children}</Collapse>
     </section>
   );
 }

@@ -1,6 +1,7 @@
 // Раздел «Шаблоны» (C-gallery): голубой слой поднимается до 120 px — над ним видна полоса колоды, она закрывает раздел
 // (Scrim в AppShell). Сетка четыре колонки: «Загрузить свой», затем все шаблоны — свои первыми. Клик по обложке выбирает
 // шаблон, таблетка «Слайды» открывает «Слайды шаблона». Разметка — boards/V2.dc.html, `#p2-lay-t` (`tpGal`, `tpGalUp`).
+// Помощник сужает колоду — сетка идёт за ней каждый кадр (четыре колонки и в узкой, как V2 версии 100).
 import { useApp } from "../../store";
 import { tplLabel } from "../../lib/plain";
 import { plural } from "../../lib/utils";
@@ -8,7 +9,7 @@ import { cls } from "../kit/cls";
 import { Icon } from "../kit/Icon";
 import { Cover, inkOf, usePickTemplate } from "../create/TemplateRibbon";
 import { orderTemplates, tplMeta } from "../create/ribbon";
-import { Layer, lsDelay, useLayer } from "./Layer";
+import { Layer, lsDelay } from "./Layer";
 
 export function TemplatesLayer({ fresh, onUpload, busy }: {
   /** Только что загруженный шаблон — первым, как в ленте. */
@@ -23,11 +24,9 @@ export function TemplatesLayer({ fresh, onUpload, busy }: {
   const open = ui.sect === "tpls";
   const list = orderTemplates(templates, fresh);
   const close = () => dispatch({ type: "sect", sect: null });
-  // помощник сужает колоду: сетка 4 → 3 колонки перекрёстным затуханием (useLayer)
-  const layer = useLayer(open);
-  const fit = layer.fit;
+  // помощник сужает колоду: те же четыре колонки сужаются вместе с ней (V2 версии 100), подписи — в строку с многоточием
   return (
-    <Layer id="p2-lay-t" presence={layer.presence} open={open} top={120} z={open ? 7 : 6} height={692} label="Шаблоны" onClose={close}>
+    <Layer id="p2-lay-t" open={open} top={120} z={open ? 7 : 6} height={692} label="Шаблоны" onClose={close}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 24, height: 64 }}>
         <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
           <h2 id="ga-ttl" style={{ margin: 0, fontFamily: "'Unbounded','Manrope',sans-serif", fontWeight: 600, fontSize: 32, lineHeight: "40px", letterSpacing: "-0.03em", color: "#0B1220", whiteSpace: "nowrap" }}>Шаблоны</h2>
@@ -40,7 +39,7 @@ export function TemplatesLayer({ fresh, onUpload, busy }: {
 
       <div className="ga-box">
         <div className="ga-scroll p2-fade">
-          <div className={cls("ga-grid", fit.cls)} data-fit={fit.shown}>
+          <div className="ga-grid">
             <div className="p2-ls" style={lsDelay(160)}>
               <button type="button" className="p2-card" onClick={busy ? undefined : onUpload} aria-disabled={busy ? true : undefined}
                 title={busy ?? undefined}>

@@ -1,6 +1,8 @@
 // Вкладка «План» листа «Подробнее» (boards/D-plan, V2 `#dd-panel-plan`, модуль details `dlP`): слева — слайды плана
 // строками (выбор строки — тот же слайд в результате), справа — заголовок колоды, «Текст агента» с «Изменить»,
 // «Цифры из текста» и «Данные для диаграмм» (раскрываются ходом p2-in, сворачиваются сразу). Данные — plan.ts.
+// Помощник сужает колоду (V2 версии 100): «О плане» 416 → 300, в ряду плана миниатюра 160 → 120 и заголовок 232 → 160,
+// у «Изменить» остаётся значок; текст — стопки (kit/Tx: p-hd, p-body в рядах; p-ttl, p-sub, p-meta, p-ctx — «О плане»).
 import { useEffect, useRef, useState } from "react";
 import { figuresLine } from "../../../lib/narrate";
 import { plural } from "../../../lib/utils";
@@ -8,6 +10,8 @@ import { useApp } from "../../../store";
 import type { Generation, Variant } from "../../../types";
 import { cls } from "../../kit/cls";
 import { Icon } from "../../kit/Icon";
+import { Tx } from "../../kit/Tx";
+import { bindShort } from "../../../lib/typo";
 import { writtenText } from "../../layers/writerText";
 import { deckPreset } from "../../result/resultView";
 import { Col, Empty, Shot } from "../parts";
@@ -59,12 +63,12 @@ export function PlanTab({ g, v, active }: { g: Generation; v: Variant; active: b
                 <li key={r.id} className="p2-in" style={{ animationDelay: `${160 + Math.min(i, 7) * 40}ms` }}>
                   <button type="button" className={cls("dpl-row", on && "dpl-row-on")} aria-current={on} aria-label={`Слайд ${r.n}: ${r.title}`} title={`Открыть слайд ${r.n}`} onClick={() => setSelectedSlide(r.n)}>
                     <span className="dpl-th"><Shot src={r.img} alt="" style={{ width: "100%", height: "100%", aspectRatio: "16 / 9" }} /><span className="dpl-n" aria-hidden="true">{r.n}</span></span>
-                    <span className="dpl-hd">
+                    <Tx tx="p-hd" as="span" wrap="span" className="dpl-hd">
                       <span className="dpl-kind">{r.kind}</span>
                       <span className="dpl-h">{r.title}</span>
                       {r.sub && <span className="dpl-sub2">{r.sub}</span>}
-                    </span>
-                    <span className="dpl-body">
+                    </Tx>
+                    <Tx tx="p-body" as="span" wrap="span" className="dpl-body">
                       {r.par && <span className="dpl-par">{r.par}</span>}
                       {r.bul.length > 0 && <span className="dpl-ul">{r.bul.map((b, k) => <span key={k} className="dpl-li dpl-li-cl">{b}</span>)}</span>}
                       {r.chips.length > 0 && <span className="dpl-chips">{r.chips.map((c, k) => <span key={k} className="dpl-chip"><b>{c.v}</b>{c.l}</span>)}</span>}
@@ -82,7 +86,7 @@ export function PlanTab({ g, v, active }: { g: Generation; v: Variant; active: b
                       )}
                       {r.charts.map((c, k) => <span key={k} className="dpl-line"><Icon name="chart" size={16} /><span><b>{c.type}</b>{c.rest}</span></span>)}
                       {r.image && <span className="dpl-line"><Icon name="image" size={16} /><span>Изображение: {r.image}</span></span>}
-                    </span>
+                    </Tx>
                   </button>
                 </li>
               );
@@ -93,16 +97,17 @@ export function PlanTab({ g, v, active }: { g: Generation; v: Variant; active: b
 
       <aside className="dlp-aside p2-fade" aria-label="О плане" style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
         <section className="p2-in" style={{ padding: 24, borderRadius: 24, background: "#FFFFFF", animationDelay: "160ms" }}>
-          <h2 style={{ margin: 0, fontFamily: "'Unbounded','Manrope',sans-serif", fontWeight: 600, fontSize: 32, lineHeight: "40px", letterSpacing: "-0.03em", color: "#0B1220", overflowWrap: "anywhere" }}>{head.title}</h2>
-          {head.sub && <p style={{ margin: "8px 0 0", fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#5A6272" }}>{head.sub}</p>}
-          <p style={{ margin: "8px 0 0", fontSize: 13, fontWeight: 600, lineHeight: "20px", color: "#0B1220" }}>{head.meta}</p>
+          <Tx tx="p-ttl" as="h2" style={{ margin: 0, fontFamily: "'Unbounded','Manrope',sans-serif", fontWeight: 600, fontSize: 32, lineHeight: "40px", letterSpacing: "-0.03em", color: "#0B1220", overflowWrap: "anywhere" }}>{bindShort(head.title)}</Tx>
+          {head.sub && <Tx tx="p-sub" style={{ margin: "8px 0 0", fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#5A6272" }}>{head.sub}</Tx>}
+          <Tx tx="p-meta" style={{ margin: "8px 0 0", fontSize: 13, fontWeight: 600, lineHeight: "20px", color: "#0B1220" }}>{head.meta}</Tx>
         </section>
 
         {text && g.writer && (
           <Col prefix="dpl" label="Текст агента" title="Текст агента" hint={writerHead(g.writer)} tall open={!!open.text} onToggle={() => toggle("text")} delay={200}
+            tx="p-ctx1" bodyTx="p-cb"
             action={(
-              <button type="button" className="p2-ob" onClick={edit} title="Изменить текст презентации" style={{ height: 40, padding: "0 20px" }}>
-                <Icon name="pen" size={18} /><span>Изменить</span>
+              <button type="button" className="p2-ob" onClick={edit} title="Изменить текст презентации" aria-label="Изменить текст презентации" style={{ height: 40, padding: "0 20px" }}>
+                <Icon name="pen" size={18} /><span className="hq-obt">Изменить</span>
               </button>
             )}>
             <ol className="dlp-tx">
@@ -112,14 +117,16 @@ export function PlanTab({ g, v, active }: { g: Generation; v: Variant; active: b
         )}
 
         {facts.length > 0 && (
-          <Col prefix="dpl" label="Цифры из текста" title="Цифры из текста" hint={plural(facts.length, "цифра", "цифры", "цифр")} open={!!open.nums} onToggle={() => toggle("nums")} delay={240}>
+          <Col prefix="dpl" label="Цифры из текста" title="Цифры из текста" hint={plural(facts.length, "цифра", "цифры", "цифр")} open={!!open.nums} onToggle={() => toggle("nums")} delay={240}
+            tx="p-ctx" bodyTx="p-cb">
             <p className="dl-sub">Аналитик выписал их для сверки{fig ? ` · ${fig.text}` : ""}</p>
             <span className="dpl-chips" style={{ marginTop: 8 }}>{facts.map((f, k) => <span key={k} className="dpl-chip"><b>{f.v}</b>{f.l}</span>)}</span>
           </Col>
         )}
 
         {data.charts.length > 0 && (
-          <Col prefix="dpl" label="Данные для диаграмм" title="Данные для диаграмм" hint={data.count} open={!!open.data} onToggle={() => toggle("data")} delay={280}>
+          <Col prefix="dpl" label="Данные для диаграмм" title="Данные для диаграмм" hint={data.count} open={!!open.data} onToggle={() => toggle("data")} delay={280}
+            tx="p-ctx" bodyTx="p-cb">
             {data.charts.map((c, k) => (
               <div key={c.key} style={{ marginTop: k ? 16 : 0 }}>
                 <span className="dpl-line"><Icon name="chart" size={16} /><span><b>{c.type}</b>{c.rest}</span></span>

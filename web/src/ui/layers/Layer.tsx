@@ -4,13 +4,14 @@
 // непрозрачным, со своим содержимым — оно держится смонтированным, пока идёт уход (usePresence). Лесенка внутри —
 // элементы с классом `p2-ls` и задержкой `--d` (style={{ "--d": "160ms" }}): проявляются после въезда, сбрасываются,
 // когда слой уехал.
+// Помощник сужает колоду — содержимое открытого слоя перестраивается вместе с ней каждый кадр (сетки с тем же числом
+// дорожек, стопки многострочного текста — kit/Tx; V2 версии 100). Закрытый слой (уехал целиком) ход помощника не
+// трогает: ширина заморожена — ширина колоды в покое, переходы внутри выключены (layers.css, `--lgone`); открытие
+// снимает и то и другое в том же кадре.
 import { useEffect, useRef, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
-import { useDeckFit } from "../deck/useDeckFit";
-import type { DeckFit } from "../deck/fit";
 import { cls } from "../kit/cls";
 import type { Presence } from "../kit/presence";
 import { usePresence } from "../kit/usePresence";
-import { useSwap } from "../kit/useSwap";
 
 /** Сколько слой едет (и сколько держится его содержимое после закрытия). */
 export const LAYER_MS = 520;
@@ -45,8 +46,8 @@ export interface LayerProps {
   bare?: boolean;
   /** Дополнение к стилю плиты (например, flex-колонка). */
   plateStyle?: CSSProperties;
-  /** Присутствие слоя, уже заведённое снаружи (`useLayer`: по нему же идёт раскладка содержимого) — своё слой тогда не
-   *  заводит. */
+  /** Присутствие слоя, уже заведённое снаружи (`useLayerPresence`: по нему считается содержимое, пока слой на экране) —
+   *  своё слой тогда не заводит. */
   presence?: Presence;
 }
 
@@ -101,14 +102,8 @@ function LayerSlot({ open, top, z, height = 812, label, children, onClose, id, r
 /** Задержка лесенки `p2-ls` (CSS-переменная `--d`). */
 export const lsDelay = (ms: number) => ({ "--d": `${ms}ms` }) as CSSProperties;
 
-/** Слой и раскладка его содержимого по колоде, которую сужает помощник (сетки «Мои презентации», «Шаблоны», «Слайды
- *  шаблона» 4 → 3 колонки, лист «Подробнее» 2 → 1, шапка «Текста презентации», «Слайд N шаблона»). `presence` отдают
- *  слою (`<Layer presence>` — одно присутствие на слой и его раскладку); `fit.shown` — для `data-fit` обёртки содержимого
- *  (правила слоя — по нему, а не по `data-fit` колоды), `fit.cls` — её класс затухания. Смена — перекрёстным затуханием
- *  (useSwap: гаснет 120 мс, подменяется невидимой, проявляется 240 мс), пока слой на экране — открыт или ещё уезжает;
- *  закрытый меняется сразу, и только что открытый встаёт в нынешней раскладке непрозрачным (своё затухание, не чужое). */
-export function useLayer(open: boolean): { presence: Presence; fit: { shown: DeckFit; cls: string | undefined } } {
-  const presence = usePresence(open, LAYER_MS);
-  const fit = useSwap(useDeckFit(), presence.mounted);
-  return { presence, fit: { shown: fit.shown, cls: fit.cls } };
+/** Присутствие слоя (смонтирован, пока открыт и пока доигрывает уход) — для того, что считается только на экране;
+ *  отдаётся слою (`<Layer presence>`). */
+export function useLayerPresence(open: boolean): Presence {
+  return usePresence(open, LAYER_MS);
 }

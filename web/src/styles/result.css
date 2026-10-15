@@ -281,21 +281,20 @@ a.p2-ob:hover{color:#0B1220}
 .lb-arrow{transition:transform 160ms var(--ease),opacity 160ms var(--ease),visibility 0s}
 .lb-arrow.lb-hide{transition:opacity 160ms var(--ease),visibility 0s linear 160ms}
 
-/* «Текст презентации» в колоде, суженной помощником (задача 13; раскладка — ui/deck/fit.ts): заголовок 24/32, подпись
-   «Написал агент по статье…» — под ним (обе строки — в ряд шапки 64), «Скопировано» сжимается многоточием; в тесной
-   колоде «Скопировать» — круглая кнопка со значком (имя — в подсказке и для чтения с экрана). По `data-fit` шапки слоя
-   (`.rt-hd`, useLayerFit), а не колоды: шапка перестраивается перекрёстным затуханием */
+/* «Текст презентации» в колоде, суженной помощником (V2 версии 100): шапка идёт за колодой каждый кадр — заголовок 32 px
+   стоит, подпись «Написал агент по статье…» сжимается многоточием (при 1440 — до нуля), «Скопировано» — тоже. Сайт: в
+   тесной колоде (окно около 1280, `.rt-tight` — layers/layerMorph.ts) V2 не помещается — у «Скопировать» остаётся
+   значок (подпись сжимается и гаснет, как у «Вернуть как было» и «Изменить» в «Подробнее»; имя — в подсказке и для
+   чтения с экрана). */
 .rt-st{min-width:0}
 .rt-st > span{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .rt-hd .p2-ttl{font-size:32px;line-height:40px}
-.rt-hd:where([data-fit=narrow],[data-fit=tight]) .p2-ttl{font-size:24px;line-height:32px}
-:where(.rt-hd[data-fit=narrow], .rt-hd[data-fit=tight]){
-  .rt-head{flex-direction:column;align-items:flex-start !important;gap:0 !important}
-  .rt-head .rt-sub{max-width:100%;font-size:13px !important;line-height:20px !important}
-}
-:where(.rt-hd[data-fit=tight]){
-  /* строка неудачи копирования рядом с кнопками — короче, с многоточием (целиком — в подсказке) */
-  .rt-acts > .p2-in{max-width:160px !important}
-  .rt-copy{width:40px;padding:0}
-  .rt-copy > span{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+@media (min-width: 901px){
+  /* сайт: «Скопировано» (и неудача копирования) в узкой раскладке — под кнопками, в зазоре 24 над текстом: в ряду шапки
+     места нет (V2 строки не знает) */
+  .hp-nar .rt-acts > .rt-cl{position:absolute;right:56px;top:calc(100% + 2px);max-width:320px}
+  .rt-tight .rt-copy{transition:transform 160ms var(--ease),padding 340ms var(--ease),gap 340ms var(--ease)}
+  .rt-tight .rt-copy > .hq-obt{transition:font-size 340ms var(--ease),opacity 160ms var(--ease) 80ms}
+  .hp-nar .rt-tight .rt-copy{padding:0 11px;gap:0;transition:transform 160ms var(--ease),padding 520ms var(--ease),gap 520ms var(--ease)}
+  .hp-nar .rt-tight .rt-copy > .hq-obt{font-size:0;opacity:0;transition:font-size 520ms var(--ease),opacity 240ms var(--ease)}
 }

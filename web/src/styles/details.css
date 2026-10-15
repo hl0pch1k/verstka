@@ -266,46 +266,189 @@
 /* пункт плана — не длиннее двух строк, как абзац рядом (dpl-par): строка плана остаётся компактной */
 .dpl-li.dpl-li-cl{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
 
-/* ── Колода, суженная помощником (задача 13; раскладка по целевой ширине, ui/deck/fit.ts: узкая ≤ 1100 — 976 при 1440,
-   тесная ≤ 900 — 816 при 1280). Лист прокручивается внутри, поэтому две колонки, которым тесно, встают одна под другой;
-   ряды плана — миниатюра и текст под заголовком; полоса шаблона — в три ряда; шапка — вкладки плотнее, в тесной колоде у
-   меню варианта остаётся оценка (имя — в подсказке и для чтения с экрана). Правила — по `data-fit` самого листа
-   (`.dd-sheet`, useLayerFit), а не колоды: он меняется в подмене перекрёстного затухания — содержимое листа гаснет
-   120 мс, перестраивается невидимым и проявляется 240 мс, плита стоит. */
-:where(.dd-sheet[data-fit=narrow], .dd-sheet[data-fit=tight]){
-  .dd-tabs .p2-rseg{padding:0 12px}
-  /* «Качество», «Агент»: список и карточки — одна колонка */
-  .dd-g:not(.dw-g){grid-template-columns:minmax(0,1fr)}
-  /* «План»: список и «О плане» — одна под другой, вкладка прокручивается (список — своей прокруткой, короче); ряд —
-     миниатюра 120 × 68 и текст, содержание под заголовком */
-  .dpl-g{grid-template-columns:minmax(0,1fr) !important;align-content:start;overflow-y:auto;scrollbar-width:none}
-  .dpl-g .dpl-listw{height:340px}
-  .dlp-aside{max-height:none;overflow:visible}
-  .dpl-row{grid-template-columns:120px minmax(0,1fr);row-gap:8px}
-  .dpl-th{width:120px;height:68px}
-  .dpl-body{grid-column:2}
-  /* «Шаблон»: название — первым рядом, факты — вторым, шрифт и палитра — третьим; макеты и правила — одна колонка */
-  .dtp-band{grid-template-columns:repeat(6,minmax(0,1fr))}
-  .dtp-band > .dtp-name{grid-column:1 / -1}
-  .dtp-band .dtp-fact{grid-column:span 2}
-  .dtp-band .dtp-font,.dtp-band .dtp-pal{grid-column:span 3}
-  .dtp-g{grid-template-columns:minmax(0,1fr) !important}
-  /* «Файлы»: карточки — одна колонка */
-  .df-grid{grid-template-columns:minmax(0,1fr) !important}
+/* ── Колода, суженная помощником (V2 версии 100, блок «Подробнее» — лист резиновый…»). Лист идёт за шириной колоды
+   каждый кадр, на той же кривой (открытие 520 мс, закрытие 340): вкладки плотнее; вторая колонка «Качества» 526 → 376 и
+   «Агента» → 340, первая «Почему так» 526 → 416; «Исправить всё автоматически» сжимается и гаснет; у «Вернуть как было»
+   и «Изменить» в узкой остаётся значок; «План»: колонка «О плане» 416 → 300, в ряду плана миниатюра 160 → 120, заголовок
+   232 → 160; «Шаблон»: та же полоса, дорожки уже, название 32 → 24 px, «Аа» и подсказка палитры сжимаются и гаснут,
+   правила остаются 416 (уже — макеты), факты «формат» и «слайда» 112 → 84; «Слайд N шаблона»: места для содержания —
+   третья дорожка, сжимается до нуля и гаснет (только в широкой); «Качество»: строка счёта 15 → 13 px, значок у
+   «Исправить отмеченные» сжимается и гаснет; «Файлы»: те же две колонки, правая 50 % → 44 %, кнопки плотнее, «на экране»
+   и бейдж «Паспорта» сжимаются и гаснут, у плиток итога значки сжимаются и гаснут, длинная подпись — многоточием.
+   Многострочный текст — стопки из двух копий (kit/Tx; машинерия hp-tx — create.css), `--hpd` — ниже.
+   Сайт: при окне около 1280 (тесная колода, `.dd-tight` — sheetMorph.ts) V2 не помещается — свои дорожки ниже. */
+@media (min-width: 901px){
+  .dd-tabs .p2-rseg{transition:transform 160ms var(--ease),padding 340ms var(--ease)}
+  .hp-nar .dd-tabs .p2-rseg{padding:0 12px;transition:transform 160ms var(--ease),padding 520ms var(--ease)}
+  .dd-g{transition:grid-template-columns 340ms var(--ease)}
+  .hp-nar .dd-g:not(.dw-g){grid-template-columns:minmax(0,1fr) 376px;transition-duration:520ms}
+  .hp-nar #dd-panel-agent .dd-g{grid-template-columns:minmax(0,1fr) 340px}
+  .hp-nar .dw-g{grid-template-columns:416px minmax(0,1fr);transition-duration:520ms}
+  /* сайт: место кнопки сжимается от её ширины (замер, --allw), а не от 320 — колонка сводки сужается одним ходом с колодой */
+  .dq-allw{display:block;max-width:var(--allw, 320px);overflow:hidden;transition:max-width 340ms var(--ease),margin-left 340ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
+  .hp-nar .dq-allw{max-width:0;margin-left:-16px;transition:max-width 520ms var(--ease),margin-left 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
+  :is(.dla-ob,.dpl-col .p2-ob){transition:transform 160ms var(--ease),padding 340ms var(--ease),gap 340ms var(--ease)}
+  :is(.dla-ob,.dpl-col .p2-ob) > .hq-obt{transition:font-size 340ms var(--ease),opacity 160ms var(--ease) 80ms}
+  .hp-nar :is(.dla-ob,.dpl-col .p2-ob){padding:0 11px !important;gap:0;transition:transform 160ms var(--ease),padding 520ms var(--ease),gap 520ms var(--ease)}
+  .hp-nar :is(.dla-ob,.dpl-col .p2-ob) > .hq-obt{font-size:0;opacity:0;transition:font-size 520ms var(--ease),opacity 240ms var(--ease)}
+  #dd-panel-plan{transition:grid-template-columns 340ms var(--ease)}
+  .hp-nar #dd-panel-plan{grid-template-columns:minmax(0, 1fr) 300px !important;transition-duration:520ms}
+  .dpl-row{transition:transform 160ms var(--ease),grid-template-columns 340ms var(--ease)}
+  .hp-nar .dpl-row{grid-template-columns:120px 160px minmax(0,1fr);transition-duration:160ms,520ms}
+  .dpl-th{transition:width 340ms var(--ease),height 340ms var(--ease)}
+  .hp-nar .dpl-th{width:120px;height:68px;transition-duration:520ms}
+  .dpl-tr > span{min-width:0;overflow-wrap:anywhere}
+  .dtp-band{transition:grid-template-columns 340ms var(--ease)}
+  .hp-nar .dtp-band{grid-template-columns:minmax(0,1fr) 84px 84px 144px 140px 180px;transition-duration:520ms}
+  .dtp-fact dt{white-space:normal}
+  .dtp-name{transition:font-size 340ms var(--ease),line-height 340ms var(--ease)}
+  .hp-nar .dtp-name{font-size:24px;transition-duration:520ms}
+  .dtp-aa,.dtp-palhint{transition:font-size 340ms var(--ease),margin-right 340ms var(--ease),opacity 160ms var(--ease) 80ms}
+  .hp-nar :is(.dtp-aa,.dtp-palhint){font-size:0;opacity:0;transition:font-size 520ms var(--ease),margin-right 520ms var(--ease),opacity 240ms var(--ease)}
+  .hp-nar .dtp-aa{margin-right:-16px}
+  .dtp-g{transition:grid-template-columns 340ms var(--ease)}
+  .hp-nar .dtp-g{grid-template-columns:minmax(0, 1fr) 416px !important;transition-duration:520ms}
+  .dpt-g{grid-template-columns:minmax(0,576px) 296px minmax(0,1fr) !important;transition:grid-template-columns 340ms var(--ease),margin-right 340ms var(--ease)}
+  .hp-nar .dpt-g{grid-template-columns:minmax(0,576px) 296px minmax(0,0fr) !important;margin-right:-32px;transition-duration:520ms}
+  .dpt-plw{overflow:clip}
+  /* «N мест для содержания» уходит вместе со своей дорожкой (1fr → 0): содержимое держит ширину покоя (дорожка = ширина
+     колоды − 1 032 px) и обрезается краем колонки, а не переносится заново, пока гаснет (сайт: ширина колоды в покое —
+     `--dkw` колоды, ui/deck/Deck) */
+  .dpt-plw > *{min-width:calc(var(--dkw, min(1392px, 100vw - 48px)) - 1032px)}
+  /* сайт: строка счёта 15 → 13 px — копиями стопки (q-sumt), а не ходом кегля одной строки: с настоящими числами
+     («8 ошибок · 19 предупреждений · 23 замечания модели» — 382 px при 13 px, колонка при 1440 в узкой — 374) строка
+     переносится, и кегль на ходу переносил бы её заново */
+  .hp-tx > .hp-txw.dq-cnts{font-size:15px}
+  .hp-tx > .hp-txn.dq-cnts{font-size:13px}
+  .dq-cta .hq-ico{transition:width 340ms var(--ease),margin-right 340ms var(--ease),opacity 160ms var(--ease) 80ms}
+  .hp-nar .dq-cta .hq-ico{width:0;margin-right:-12px;opacity:0;transition:width 520ms var(--ease),margin-right 520ms var(--ease),opacity 240ms var(--ease)}
+  .df-card li .p2-ob{transition:transform 160ms var(--ease),padding 340ms var(--ease)}
+  .hp-nar .df-card li .p2-ob{padding:0 10px !important;transition:transform 160ms var(--ease),padding 520ms var(--ease)}
+  .df-t{min-width:0;overflow:hidden;text-overflow:ellipsis}
+  /* сайт: доли V2 (50 % − 8 → 44,09 % − 8) — в px от ширины листа в покое (--dfw, --dfn — sheetMorph.ts): доля от ширины,
+     которая сама сужается, шла бы не в такт колоде, и стопки фактов «Паспорта» переносились бы посреди хода */
+  .df-grid{grid-template-columns:minmax(0,1fr) var(--dfw, calc(50% - 8px)) !important;transition:grid-template-columns 340ms var(--ease)}
+  .hp-nar .df-grid{grid-template-columns:minmax(0,1fr) var(--dfn, calc(44.09% - 8px)) !important;transition-duration:520ms}
+  /* сайт: flex:none — в тесном ряду файла (1280, помощник закрыт) «на экране» не сжимается и не обрезается, как и прежде */
+  .df-now,.df-pb{flex:none;overflow:hidden;transition:font-size 340ms var(--ease),padding 340ms var(--ease),margin-left 340ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
+  .hp-nar :is(.df-now,.df-pb){font-size:0;padding:0;margin-left:-8px;transition:font-size 520ms var(--ease),padding 520ms var(--ease),margin-left 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
+  .df-tl > span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+  .df-tl .hq-ico{transition:width 340ms var(--ease),margin-right 340ms var(--ease),opacity 160ms var(--ease) 80ms}
+  .hp-nar .df-tl .hq-ico{width:0;margin-right:-8px;opacity:0;transition:width 520ms var(--ease),margin-right 520ms var(--ease),opacity 240ms var(--ease)}
+  /* подсказка роли в «Агенте» в широкой раскладке — одна строка (при 1440): в узкой не переносится, а сокращается
+     многоточием, ряд имени не перестраивается. Сайт: ряд имени — стопка (a-head; узкая копия — в строку с многоточием)
+     вместо дискретного перехода V2 (flex-wrap 680 мс): с настоящими подсказками ряд в широкой переносится, и смена
+     посреди закрытия (кривая перехода — ease, середина на 200 мс) толкала то, что ниже, вниз, пока оно шло вверх */
+  .da-head > .da-name{flex:none}
+  .hp-tx > .hp-txn.da-head{flex-wrap:nowrap}
+  .hp-tx > .hp-txn.da-head > .da-hint{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* сайт: чипы «Качества» в узкой раскладке плотнее (поля 16 → 12, кегль 14 → 13, зазоры 8 → 4): с настоящими числами
+     ряд V2 (534 px) шире колонки (480) и наезжал бы на вторую; не поместившееся уходит под мягкий край справа и
+     прокручивается вбок (тесная колода) */
+  .dq-chips{overflow-x:auto;overflow-y:hidden;scrollbar-width:none;-webkit-mask-image:linear-gradient(to left,transparent 0,#000 24px);mask-image:linear-gradient(to left,transparent 0,#000 24px);transition:gap 340ms var(--ease)}
+  .dq-chips::-webkit-scrollbar{display:none}
+  .dq-chips > .dq-chip{flex:none;transition:transform 160ms var(--ease),padding 340ms var(--ease),gap 340ms var(--ease),font-size 340ms var(--ease)}
+  .hp-nar .dq-chips{gap:4px !important;transition-duration:520ms}
+  .hp-nar .dq-chips > .dq-chip{padding:0 12px;gap:6px;font-size:13px;transition:transform 160ms var(--ease),padding 520ms var(--ease),gap 520ms var(--ease),font-size 520ms var(--ease)}
+  /* --hpd по замеру: на сколько клетка у́же в узкой раскладке (не зависит от ширины окна; в тесной колоде — ниже) */
+  [data-tx="a-a"]{--hpd:186px}
+  [data-tx="a-hint2"]{--hpd:186px}
+  [data-tx="a-head"]{--hpd:230px}
+  [data-tx="a-q"]{--hpd:186px}
+  [data-tx="a-sum"]{--hpd:230px}
+  [data-tx="a-tx"]{--hpd:230px}
+  [data-tx="p-body"]{--hpd:188px}
+  [data-tx="p-ctx"]{--hpd:116px}
+  [data-tx="p-ctx1"]{--hpd:16.56px}
+  [data-tx="p-hd"]{--hpd:72px}
+  [data-tx="p-meta"]{--hpd:116px}
+  [data-tx="p-sub"]{--hpd:116px}
+  [data-tx="q-acc"]{--hpd:150px}
+  [data-tx="q-ex1"]{--hpd:150px}
+  [data-tx="q-ex2"]{--hpd:150px}
+  [data-tx="q-eye"]{--hpd:150px}
+  [data-tx="q-kept"]{--hpd:150px}
+  [data-tx="q-msg"]{--hpd:266px}
+  [data-tx="q-row"]{--hpd:150px}
+  [data-tx="w-crit"]{--hpd:110px}
+  [data-tx="w-dd"]{--hpd:110px}
+  [data-tx="w-form"]{--hpd:110px}
+  [data-tx="w-ok"]{--hpd:306px}
+  [data-tx="w-sim"]{--hpd:306px}
+  [data-tx="w-why"]{--hpd:110px}
+  /* сайт: стопка в сетке встаёт по верху своей клетки (не тянется до высоты ряда): её высота на ходу — своя */
+  .df-card dl > .hp-tx{align-self:start}
+  /* сайт: стопки сверх V2 (настоящие данные длиннее): строка «Взгляд дизайнера» — вторая колонка «Качества»; подписи
+     образца и «Вашего слайда» (половина второй колонки «Почему так»), подписи других макетов (треть); заголовок плана и
+     раскрытые тела «Текста агента», «Цифр», «Данных» — колонка «О плане» */
+  [data-tx="q-eyl"]{--hpd:150px}
+  [data-tx="w-cap"]{--hpd:153px}
+  [data-tx="w-alt"]{--hpd:102px}
+  [data-tx="p-ttl"]{--hpd:116px}
+  [data-tx="p-cb"]{--hpd:116px}
 }
-/* «Слайд N шаблона»: образец и сведения о нём — рядом, места для содержания — под ними; всё прокручивается. По `data-fit`
-   своей обёртки (`.dpt-fx`, PatternLayer `useLayer`): слой открыли посреди затухания листа — он встаёт в нынешней
-   раскладке, а не в той, что лист ещё показывает */
-:where(.dpt-fx[data-fit=narrow], .dpt-fx[data-fit=tight]){
-  .dpt-g{grid-template-columns:minmax(0,1fr) 296px !important;align-content:start;overflow-y:auto;scrollbar-width:none}
-  .dpt-g > section:last-child{grid-column:1 / -1;min-height:auto}
-  .dpt-title{min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:24px;line-height:32px}
-}
-:where(.dd-sheet[data-fit=tight]){
-  .dd-tabs{gap:2px}
-  .dd-tabs .p2-rseg{padding:0 10px}
-  .dd-var{padding:0 12px 0 16px !important}
-  .dd-var-n{display:none}
-  /* «Почему так»: слайд и доводы — одна колонка */
-  .dw-g{grid-template-columns:minmax(0,1fr)}
+
+/* ── Тесная колода (сайт: окно около 1280, `.dd-tight` — sheetMorph.ts; V2 версии 100 там не помещается: ✕ за краем,
+   колонки «Качества» и «Агента» по 320, тело ряда плана 36 px, у полосы «Шаблона» нет места названию). Те же приёмы
+   V2 — дорожки с тем же числом дорожек, только-широкое сжимается и гаснет, стопки; в покое при закрытом помощнике лист
+   такой же, как при 1440. */
+@media (min-width: 901px){
+  /* вкладки, меню варианта и ✕ — плотнее (ряд V2 761 px шире листа 720 / 705) */
+  .dd-tight .dd-tabs{transition:gap 340ms var(--ease)}
+  .hp-nar .dd-tight .dd-tabs{gap:2px;transition-duration:520ms}
+  .hp-nar .dd-tight .dd-tabs .p2-rseg{padding:0 8px}
+  .dd-tight .dd-var{transition:transform 160ms var(--ease),padding 340ms var(--ease)}
+  .hp-nar .dd-tight .dd-var{padding:0 12px 0 16px !important;transition:transform 160ms var(--ease),padding 520ms var(--ease)}
+  /* «Качество»: вторая колонка 526 → 324 (первой — 372 / 357); у «Исправить отмеченные» слово «отмеченные» сжимается и
+     гаснет («Исправить (14)») — иначе заголовок сводки переносится; значок «Взгляда дизайнера» сжимается и гаснет
+     (заголовок — в строку); число замечаний у слайда сжимается и гаснет (оно и в списке ниже) — названию слайда место;
+     названия раскрываемых разделов — многоточием */
+  .hp-nar .dd-tight .dd-g:not(.dw-g){grid-template-columns:minmax(0,1fr) 324px}
+  .dd-tight .dq-eyei{transition:width 340ms var(--ease),margin-right 340ms var(--ease),opacity 160ms var(--ease) 80ms}
+  .hp-nar .dd-tight .dq-eyei{width:0;margin-right:-16px;opacity:0;transition:width 520ms var(--ease),margin-right 520ms var(--ease),opacity 240ms var(--ease)}
+  .dd-tight .dq-gcnt{max-width:120px;overflow:hidden;white-space:nowrap;transition:max-width 340ms var(--ease),margin-right 340ms var(--ease),opacity 160ms var(--ease) 80ms}
+  .hp-nar .dd-tight .dq-gcnt{max-width:0;margin-right:-16px;opacity:0;transition:max-width 520ms var(--ease),margin-right 520ms var(--ease),opacity 240ms var(--ease)}
+  .dd-tight .dq-acct{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .dq-ctw{display:inline-block;vertical-align:top;max-width:var(--ctw, 160px);overflow:hidden;white-space:pre;transition:max-width 340ms var(--ease),opacity 160ms var(--ease) 80ms}
+  .hp-nar .dd-tight .dq-ctw{max-width:0;opacity:0;transition:max-width 520ms var(--ease),opacity 240ms var(--ease)}
+  /* «Агент»: «Ваши правки» 526 → 300 (первой — 396 / 381) */
+  .hp-nar .dd-tight #dd-panel-agent .dd-g{grid-template-columns:minmax(0,1fr) 300px}
+  /* «Почему так»: первая колонка 526 → 376 (второй — 320 / 305: «Сходство с образцом» и проценты в строку) */
+  .hp-nar .dd-tight .dw-g{grid-template-columns:376px minmax(0,1fr)}
+  /* «План»: «О плане» 416 → 280; в ряду плана миниатюра 160 → 120, заголовок 232 → 200, тело ряда (абзац, пункты, цифры)
+     уходит вместе со своей дорожкой (1fr → 0): держит ширину покоя (колода − 1 008 px) и обрезается краем, пока гаснет */
+  .hp-nar .dd-tight #dd-panel-plan{grid-template-columns:minmax(0, 1fr) 280px !important}
+  .hp-nar .dd-tight .dpl-row{grid-template-columns:120px 200px minmax(0,0fr)}
+  .dd-tight .dpl-row > [data-tx="p-body"]{transition:opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
+  .dd-tight .dpl-row > [data-tx="p-body"] > *{min-width:calc(var(--dkw, min(1392px, 100vw - 48px)) - 1008px)}
+  .hp-nar .dd-tight .dpl-row > [data-tx="p-body"]{opacity:0;visibility:hidden;transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
+  /* «Шаблон»: плитка шрифта уходит вместе со своей дорожкой (140 → 0; шрифт — и в полосе 01 над листом), названию шаблона
+     остаётся 100 / 85 px */
+  .hp-nar .dd-tight .dtp-band{grid-template-columns:minmax(0,1fr) 84px 84px 144px 0px 180px}
+  .dd-tight .dtp-font{overflow:clip;transition:opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
+  .dd-tight .dtp-font > *{flex:none}
+  .hp-nar .dd-tight .dtp-font{opacity:0;visibility:hidden;transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
+  /* «Файлы»: правая колонка 44 % → 40 % (левой — 424 / 415: у файла видно начало названия рядом с тремя кнопками); в
+     «Итоге проверки» число проверок сжимается и гаснет, оценка остаётся */
+  .hp-nar .dd-tight .df-grid{grid-template-columns:minmax(0,1fr) var(--dfn, calc(40% - 8px)) !important}
+  .dd-tight .df-chk{display:inline-block;max-width:160px;overflow:hidden;white-space:nowrap;vertical-align:bottom;transition:max-width 340ms var(--ease),margin-right 340ms var(--ease),opacity 160ms var(--ease) 80ms}
+  .dd-tight .df-chk{margin-right:0}
+  .hp-nar .dd-tight .df-chk{max-width:0;margin-right:-8px;opacity:0;transition:max-width 520ms var(--ease),margin-right 520ms var(--ease),opacity 240ms var(--ease)}
+  /* --hpd тесной колоды: на сколько клетка у́же в узкой раскладке при своих дорожках */
+  .dd-tight :is([data-tx="q-acc"],[data-tx="q-ex1"],[data-tx="q-ex2"],[data-tx="q-eye"],[data-tx="q-kept"],[data-tx="q-row"]){--hpd:202px}
+  .dd-tight [data-tx="q-eyl"]{--hpd:146px}
+  .dd-tight [data-tx="q-msg"]{--hpd:214px}
+  .dd-tight :is([data-tx="a-a"],[data-tx="a-hint2"],[data-tx="a-q"]){--hpd:226px}
+  .dd-tight :is([data-tx="a-sum"],[data-tx="a-tx"],[data-tx="a-head"]){--hpd:190px}
+  .dd-tight :is([data-tx="w-why"],[data-tx="w-dd"],[data-tx="w-form"],[data-tx="w-crit"]){--hpd:150px}
+  .dd-tight :is([data-tx="w-ok"],[data-tx="w-sim"]){--hpd:266px}
+  .dd-tight [data-tx="w-cap"]{--hpd:133px}
+  .dd-tight [data-tx="w-alt"]{--hpd:88.667px}
+  .dd-tight [data-tx="p-hd"]{--hpd:32px}
+  /* заголовок плана в колонке «О плане» 280: узкая копия — 24 px (32 px в 232 px переносился бы по слогам) */
+  .dd-tight [data-tx="p-ttl"] > .hp-txn{font-size:24px !important;line-height:32px !important}
+  .dd-tight [data-tx="p-body"]{--hpd:0px}
+  .dd-tight :is([data-tx="p-sub"],[data-tx="p-meta"],[data-tx="p-ctx"],[data-tx="p-ttl"],[data-tx="p-cb"]){--hpd:136px}
+  /* «Текст агента»: колонка у́же на 136, «Изменить» 139.44 → 40 (замер) */
+  .dd-tight [data-tx="p-ctx1"]{--hpd:36.56px}
 }

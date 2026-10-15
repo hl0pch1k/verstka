@@ -3,8 +3,8 @@
 // подключают сюда содержимое плит и слоёв через слоты `Deck`. Помощник открыт — колода сужается на любом экране
 // (`hp-open hp-nar`: сетка 520 мс, плита выходит из-под колоды, край колоды бросает на неё тень `hp-shade`, пока она
 // под колодой). «Создать» и «Сборка» перестраиваются вместе с ней каждый кадр (ui/create/morph.ts, ui/build/columns.ts,
-// create.css, build.css); слои пока — по её целевой ширине (ui/deck/fit, useDeckFit), перекрёстным затуханием своей
-// обёртки (useLayer); плиты и названия шагов не гаснут.
+// create.css, build.css), слои и лист «Подробнее» — тоже (details.css, layers.css, kit/Tx); плиты и названия шагов не
+// гаснут.
 import { useContext, useEffect, useMemo, type CSSProperties } from "react";
 import { useApp } from "../../store";
 import { tplLabel } from "../../lib/plain";

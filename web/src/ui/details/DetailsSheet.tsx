@@ -4,14 +4,21 @@
 // перекрёстным затуханием (p2-on 360 мс через 120 / p2-off 240 мс) и все стоят, пока лист открыт: их раскрытия и выбор
 // переживают переключение. Закрытый лист уезжает вниз непрозрачным со своей вкладкой (`sheetLast`); слой «Слайд N
 // шаблона» и меню варианта сбрасываются, когда лист уехал. Esc закрывает меню, слой шаблона или лист — что сверху.
-// Помощник сужает колоду — содержимое листа перестраивается перекрёстным затуханием (useLayer, `data-fit` листа).
+// Помощник сужает колоду — лист идёт за ней каждый кадр (V2 версии 100, details.css): дорожки колонок вкладок с тем же
+// числом дорожек, многострочный текст — стопки из двух копий (kit/Tx), только-широкое сжимается и гаснет на месте.
+// Невыбранные вкладки и закрытый лист ход помощника не трогают (layers.css, `--lgone`). При окне около 1280 (тесная
+// колода, sheetMorph.ts) V2 не помещается — свои дорожки (`dd-tight`).
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useApp } from "../../store";
 import type { Generation, Variant } from "../../types";
 import { cls } from "../kit/cls";
 import { Icon } from "../kit/Icon";
 import { Menu } from "../kit/Menu";
-import { Layer, LAYER_MS, lsDelay, useLayer } from "../layers/Layer";
+import { Layer, LAYER_MS, lsDelay, useLayerPresence } from "../layers/Layer";
+import { TxNarrow } from "../kit/Tx";
+import { useNarrow } from "../create/useNarrow";
+import { useDeckWrap } from "../deck/useDeckFit";
+import { SheetCtx, sheetMorph, sheetVars } from "./sheetMorph";
 import { Panel } from "./parts";
 import { PatternLayer } from "./PatternLayer";
 import { headerLayerOpen, menuItems, SHEET_TABS, tabStep } from "./sheetView";
@@ -26,6 +33,8 @@ import { scoreOf, docTitle } from "../result/resultView";
 
 /** Сброс слоя шаблона и меню — после того как лист уехал (V2: 560 мс). */
 const RESET_MS = LAYER_MS + 40;
+/** Лист доехал (520 мс) и самая долгая лесенка вкладок доиграла («Файлы» — 480 + 360). */
+const SETTLE_MS = 900;
 
 export function DetailsSheet() {
   const { ui, dispatch, generation, activeVariant, setActiveStrategy, strategyTitle } = useApp();
@@ -46,10 +55,17 @@ export function DetailsSheet() {
   }
   const deck = useDeckManifest(keep?.g.template_id ?? null, attempt);
   const [menu, setMenu] = useState(false);
-  // помощник сужает колоду: колонки вкладок 2 → 1, шапка плотнее — перекрёстным затуханием содержимого листа (плита
-  // стоит); правила листа — по его `data-fit` (details.css); у слоя «Слайд N шаблона» — своя раскладка (PatternLayer)
-  const layer = useLayer(open);
-  const fit = layer.fit;
+  const presence = useLayerPresence(open);
+  // лист доехал и вкладки доиграли свою лесенку (p2-in идёт и в невидимых) — невыбранные вкладки больше не рисуются
+  // (`dd-settled`, layers.css: content-visibility); раньше — их лесенка проиграла бы заново при первом показе
+  const [settled, setSettled] = useState(false);
+  useEffect(() => {
+    if (!open) return void setSettled(false);
+    const t = window.setTimeout(() => setSettled(true), SETTLE_MS);
+    return () => window.clearTimeout(t);
+  }, [open]);
+  const narrow = useNarrow();
+  const morph = sheetMorph(useDeckWrap());
 
   const pattern = ui.pattern;
   useEffect(() => {
@@ -87,10 +103,12 @@ export function DetailsSheet() {
   const v = keep?.v;
   const score = g && v ? scoreOf(g, v) : null;
   return (
-    <Layer id="p2-lay-d" presence={layer.presence} open={open} top={160} z={5} bare label="Подробнее" onClose={close}>
+    <Layer id="p2-lay-d" presence={presence} open={open} top={160} z={5} bare label="Подробнее" onClose={close}>
       {g && v && (
-        <section className="dd-sheet" data-fit={fit.shown} role="region" aria-label={`Подробнее о презентации «${docTitle(g, v)}»`} tabIndex={-1} style={{ outline: "none" }}>
-          <div className={fit.cls}>
+        <TxNarrow.Provider value={narrow}>
+        <SheetCtx.Provider value={morph}>
+        <section className={cls("dd-sheet", morph.tight && "dd-tight", settled && "dd-settled")} style={{ outline: "none", ...sheetVars(morph) }} role="region" aria-label={`Подробнее о презентации «${docTitle(g, v)}»`} tabIndex={-1}>
+          <div className="dd-fx">
           <div className="dd-top p2-ls" style={lsDelay(120)}>
             <div className="dd-tabs" role="tablist" aria-label="Разделы подробностей" onKeyDown={onTabKey}>
               {SHEET_TABS.map((t) => (
@@ -133,6 +151,8 @@ export function DetailsSheet() {
           </div>
           <PatternLayer deck={deck} />
         </section>
+        </SheetCtx.Provider>
+        </TxNarrow.Provider>
       )}
     </Layer>
   );

@@ -63,8 +63,8 @@ export function Deck({ h1, h2, h3, p1, p2, p3, m3, b3, p4, s1, s2, s3, layers }:
   const { ui, dispatch } = useApp();
   const g = deckGeometry(ui);
   // помощник сужает колоду. «Создать» и «Сборка» перестраиваются вместе с ней (CSS по `.hp-nar`), обе их раскладки
-  // считаются по ширине обёртки (DeckWrapContext); слои и лист «Подробнее» пока решают по цели хода (useDeckLayout) и
-  // перестраиваются перекрёстным затуханием (useLayer)
+  // считаются по ширине обёртки (DeckWrapContext); слои и лист «Подробнее» — тоже (стопки, свои дорожки тесной колоды);
+  // по цели хода (useDeckLayout) пока решает только компактный «Результат»
   const deckRef = useRef<HTMLElement>(null);
   const wrap = useWrapWidth(deckRef);
   const layout = useDeckLayout(deckRef, ui.helper, wrap);
@@ -100,7 +100,12 @@ export function Deck({ h1, h2, h3, p1, p2, p3, m3, b3, p4, s1, s2, s3, layers }:
   const heads = g.heads && !enter3;
   // overflow: clip, а не hidden, как на доске: вид тот же, но колода не становится прокручиваемой — scrollIntoView или
   // фокус на элементе плиты ниже края не сдвигают все плиты вверх
-  const style = { position: "relative", zIndex: 0, minWidth: 0, height: 812, borderRadius: 40, overflow: "clip", ...(layout.width > 0 && { "--deck-w": `${layout.width}px` }) } as CSSProperties;
+  // `--dkw` — ширина колоды в покое без помощника (= обёртка): по ней закрытые слои и невыбранные вкладки «Подробнее»
+  // держат замороженную ширину (layers.css); меняется только с окном
+  const style = {
+    position: "relative", zIndex: 0, minWidth: 0, height: 812, borderRadius: 40, overflow: "clip",
+    ...(layout.width > 0 && { "--deck-w": `${layout.width}px` }), ...(wrap > 0 && { "--dkw": `${wrap}px` }),
+  } as CSSProperties;
   return (
     <DeckWrapContext.Provider value={wrap}>
     <DeckFitContext.Provider value={layout}>

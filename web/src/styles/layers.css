@@ -79,12 +79,55 @@
 .gh-wait{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;border-radius:16px;background:rgba(255,255,255,.72);color:#2563EB;opacity:0;transition:opacity 240ms var(--ease)}
 @keyframes gh-wait{from{opacity:0}to{opacity:1}}
 .gh-wait-on{opacity:1;animation:gh-wait 240ms var(--ease) 120ms backwards}
-/* Колода, суженная помощником (задача 13; раскладка — ui/deck/fit.ts): «Мои презентации», «Шаблоны» и «Слайды
-   шаблона» — в три колонки (карточкам с названием и подписью в четыре тесно), заголовок «Мои презентации» — 24/32, как
-   у шагов. Не по `data-fit` колоды, а по своему (useLayerFit): он меняется в подмене перекрёстного затухания — сетка
-   гаснет 120 мс, встаёт в три колонки невидимой и проявляется 240 мс («Мои презентации» — вместе с шапкой) */
+/* Колода, суженная помощником (V2 версии 100): «Мои презентации», «Шаблоны» и «Слайды шаблона» — те же четыре колонки,
+   сужаются вместе с колодой каждый кадр; название карточки «Моих презентаций» — стопка из двух копий (kit/Tx, `h-ttl`),
+   абзацы «Текста презентации» — тоже (`t-sl`, две колонки сужаются на 416 / 2) */
 .gh-body{display:flex;flex-direction:column;flex:1;min-height:0}
 .gh-body .p2-ttl{font-size:32px;line-height:40px}
-.gh-body:where([data-fit=narrow],[data-fit=tight]) .p2-ttl{font-size:24px;line-height:32px}
-.gh-body:where([data-fit=narrow],[data-fit=tight]) .gh-grid,
-:is(.ga-grid,.pv-grid):where([data-fit=narrow],[data-fit=tight]){grid-template-columns:repeat(3,minmax(0,1fr))}
+@media (min-width: 901px){
+  [data-tx="h-ttl"]{--hpd:104px}
+  [data-tx="t-sl"]{--hpd:208px}
+  .rt-grid > .hp-tx{align-self:start}
+  /* сайт: в слоях (и в листе «Подробнее») ширина копии стопки — целые пиксели: клетка + --hpd·p постоянна только до
+     1/64 px (раскладка сетки), и текст, вставший в строку впритык, на последнем кадре хода переносился бы заново.
+     Сдвиг 0.125 px держит округление вдали от половин при любых долях клеток (½, ⅓, ¼ колонок) */
+  .p2-lay .hp-tx > .hp-txw{width:round(nearest, calc(100% + var(--hpd,0px) * var(--hpp) + 0.125px), 1px) !important}
+  .p2-lay .hp-tx > .hp-txn{width:round(nearest, calc(100% - var(--hpd,0px) * (1 - var(--hpp)) + 0.125px), 1px) !important}
+  /* замеренная стопка (kit/Tx): ширины копий — их px в покое, постоянные на всём ходу (окно, шрифты, своё --hpd —
+     замер заново) */
+  .p2-lay .hp-txm > .hp-txw{width:var(--tw) !important}
+  .p2-lay .hp-txm > .hp-txn{width:var(--tn) !important}
+  /* сайт: высота стопки на ходу — линейно, от высоты в широкой раскладке (--hw) до высоты в узкой (+ --hdd), узкая копия
+     растёт от нуля до своей (--hn) той же кривой (kit/Tx замеряет копии): у V2 клетка — бо́льшая из копий, узкая растёт
+     только когда переросла широкую, и рядом с тем, что сжимается сразу (миниатюры с пропорцией), то, что ниже, шло
+     сначала вверх, потом вниз. В покое — auto (по копиям); до замера (`hp-txm`) — как у V2 */
+  .p2-lay .hp-txm{--hpp:0;height:if(style(--hpp: 0): auto; style(--hpp: 1): auto; else: calc(var(--hw, 0px) + var(--hdd, 0px) * var(--hpp)));transition:--hpp 340ms var(--ease)}
+  .hp-nar .p2-lay .hp-txm{--hpp:1;transition-duration:520ms}
+  .p2-lay .hp-txm > .hp-txn{height:if(style(--hpp: 0): 0px; style(--hpp: 1): auto; else: calc(var(--hn, 0px) * var(--hpp))) !important;transition:--hpp 340ms var(--ease),opacity 160ms var(--ease),visibility 0s linear 160ms}
+  .hp-nar .p2-lay .hp-txm > .hp-txn{transition:--hpp 520ms var(--ease),opacity 240ms var(--ease) 120ms,visibility 0s linear 0s}
+}
+/* Закрытые слои (история, шаблоны, «Подробнее», текст, просмотр на весь экран, «Слайд N шаблона», «Слайды шаблона») — за
+   краем колоды, невидимы. Пока слой закрыт полностью (через 520 мс после закрытия — когда доиграл его уход), ход помощника
+   его не трогает: ширина постоянна — ширина колоды в покое (раскладка его поддерева не пересчитывается каждый кадр),
+   переходы внутри выключены (перестройка под узкую колоду — сразу, невидимо). --lgone — метка «слой закрыт полностью»
+   (наследуется, читается запросом стиля). Открытие слоя снимает и то и другое в том же кадре; ширина при этом та же —
+   ничего не прыгает. То же — для невыбранных вкладок «Подробнее» (гаснут за 240 мс; их поля — 48 px от краёв листа).
+   Дословно из V2 версии 100; сайт: ширина колоды в покое — `--dkw` колоды (ui/deck/Deck: ширина обёртки, без полосы
+   прокрутки окна), запасное значение — как у V2. */
+@property --lgone{syntax:'<number>';inherits:true;initial-value:0}
+@media (min-width: 901px){
+  .hp-wrap .p2-lay-off{--lgone:1;width:var(--dkw, min(1392px, calc(100vw - 48px)));transition:transform 520ms var(--ease),visibility 0s linear 520ms,--lgone 0s linear 520ms,width 0s linear 520ms;transition-behavior:allow-discrete}
+  .hp-wrap.hp-nar .p2-lay-off{width:calc(var(--dkw, min(1392px, calc(100vw - 48px))) - 416px)}
+  .hp-wrap .dd-pw.p2-off{--lgone:1;width:calc(var(--dkw, min(1392px, calc(100vw - 48px))) - 96px);transition:opacity 240ms var(--ease),visibility 0s linear 240ms,--lgone 0s linear 240ms,width 0s linear 240ms,content-visibility 0s linear 240ms;transition-behavior:allow-discrete}
+  .hp-wrap.hp-nar .dd-pw.p2-off{width:calc(var(--dkw, min(1392px, calc(100vw - 48px))) - 512px)}
+  /* сайт: невыбранная вкладка, когда догасла, ещё и не рисуется (content-visibility: hidden; с тех пор как лист доехал и
+     лесенки вкладок доиграли — `dd-settled`, DetailsSheet) — щелчок помощника не пересчитывает её стиль и раскладку (в
+     кадре клика это было ~15 мс в разработке); выбранная снова снимает метку «закрыт» на кадр позже (50 мс): её
+     поддерево пересчитывается при открытии ещё без переходов — сразу в нынешней раскладке, а не ходом из той, в которой
+     его застал скрытым помощник */
+  .hp-wrap .dd-settled .dd-pw.p2-off{content-visibility:hidden}
+  .hp-wrap .dd-pw.p2-on{transition:opacity 360ms var(--ease) 120ms,--lgone 0s linear 50ms}
+  @container style(--lgone: 1){
+    .p2-lay *{transition:none !important}
+  }
+}

@@ -9,6 +9,8 @@
 // несвежая (изменение сохранено, а перечитать её не вышло) — перечитывается.
 // Пока презентация грузится, на её обложке — дуга загрузки; неудача — красной строкой в шапке слоя; слой закрыли —
 // начатое открытие отменяется.
+// Помощник сужает колоду — четыре колонки сужаются вместе с ней (V2 версии 100), название карточки — стопка из двух
+// копий (kit/Tx, `h-ttl`): не переносится заново посреди хода.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError } from "../../api";
 import { humanError } from "../../lib/errors";
@@ -23,8 +25,10 @@ import { Icon } from "../kit/Icon";
 import { Spinner } from "../kit/Spinner";
 import { deckPreset, openStrategy, slideSrc } from "../result/resultView";
 import { useRise } from "../result/useRise";
+import { useNarrow } from "../create/useNarrow";
+import { Tx, TxNarrow } from "../kit/Tx";
 import { coverStrategy, historyView, openPlan, type HistItem, type OpenPlan } from "./history";
-import { Layer, lsDelay, useLayer } from "./Layer";
+import { Layer, lsDelay, useLayerPresence } from "./Layer";
 
 /** Сколько открытие ждёт декодирования первого слайда, прежде чем ехать как есть. */
 const DECODE_WAIT = 800;
@@ -83,11 +87,10 @@ export function HistoryLayer() {
   // список не обновился (при открытии слоя, после сборки, при загрузке страницы): строка в шапке слоя — показанный список
   // мог отстать; пустой список при этом — не «появятся здесь», а неизвестность
   const listErr = notices.history?.kind === "error" ? humanError(notices.history.text, LIST_FAILED) : null;
-  // помощник сужает колоду: четыре колонки → три и заголовок 24/32 — перекрёстным затуханием всего содержимого слоя
-  const layer = useLayer(open);
-  const fit = layer.fit;
+  const presence = useLayerPresence(open);
+  const narrow = useNarrow();
   // список считается, только пока слой на экране (и доигрывает уход), — колода перерисовывается часто, раздел закрыт
-  const mounted = layer.presence.mounted;
+  const mounted = presence.mounted;
   const current = ui.screen === "result" ? generationId : ui.screen === "build" ? buildJob?.generation ?? null : null;
   const view = useMemo(
     () => (mounted ? historyView(generations, { now: new Date(), label: (g) => templateLabel(g.template_id, g.template_file), current }) : null),
@@ -200,9 +203,10 @@ export function HistoryLayer() {
   };
 
   return (
-    <Layer id="p2-lay-h" presence={layer.presence} open={open} top={120} z={open ? 7 : 6} height={692} label="Мои презентации" onClose={close}
+    <Layer id="p2-lay-h" presence={presence} open={open} top={120} z={open ? 7 : 6} height={692} label="Мои презентации" onClose={close}
       plateStyle={{ display: "flex", flexDirection: "column" }}>
-      <div className={cls("gh-body", fit.cls)} data-fit={fit.shown}>
+      <TxNarrow.Provider value={narrow}>
+      <div className="gh-body">
       <div style={{ display: "flex", alignItems: "center", gap: 24, height: 64, flex: "none" }}>
         <h2 className="p2-ttl" style={{ margin: 0, color: "#0B1220" }}>Мои презентации</h2>
         <span style={{ flex: 1, minWidth: 0, display: "flex", justifyContent: "flex-end" }}>
@@ -236,6 +240,7 @@ export function HistoryLayer() {
         ))}
       </div>
       </div>
+      </TxNarrow.Provider>
     </Layer>
   );
 }
@@ -253,7 +258,7 @@ function DeckCard({ d, wait, onPick }: { d: HistItem; wait: boolean | null; onPi
         {wait !== null && <span className={cls("gh-wait", wait && "gh-wait-on")} aria-hidden="true"><Spinner size={20} /></span>}
       </span>
       <span className="gh-row">
-        <span className="gh-title">{d.title}</span>
+        <Tx tx="h-ttl" as="span" wrap="span" f className="gh-title">{d.title}</Tx>
         {d.score !== null && <span className="gh-score" title="Лучшая оценка качества среди вариантов">{d.score}</span>}
         {d.state === "run" && <span className="gh-badge gh-badge-run"><span className="gh-bdot" aria-hidden="true" /><span>собирается</span></span>}
         {d.state === "fail" && <span className="gh-badge gh-badge-fail"><Icon name="alert" size={12} /><span>не удалось</span></span>}

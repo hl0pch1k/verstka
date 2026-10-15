@@ -5,6 +5,9 @@
 // подчёркнуты пунктиром, клик по ним меняет строку «Источник» внизу коробки. «Скопировать» кладёт текст в буфер — рядом
 // строка «Скопировано» (без всплывающих уведомлений); «Изменить» открывает «Создать» с этим текстом и параметрами
 // презентации, плита результата уходит вниз. Разбор текста — writerText.ts.
+// Помощник сужает колоду — слой идёт за ней каждый кадр (V2 версии 100): подпись «Написал агент…» сжимается
+// многоточием, абзацы слайдов — стопки из двух копий (kit/Tx, `t-sl`): текст не переносится заново посреди хода. В
+// тесной колоде (окно около 1280) у «Скопировать» остаётся значок (как «Вернуть как было» V2: подпись сжимается и гаснет).
 import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { humanError } from "../../lib/errors";
 import { errText } from "../../lib/narrate";
@@ -14,8 +17,12 @@ import { ErrorLine } from "../kit/ErrorLine";
 import { Icon } from "../kit/Icon";
 import { cls } from "../kit/cls";
 import { usePresence } from "../kit/usePresence";
+import { Tx, TxNarrow } from "../kit/Tx";
+import { useNarrow } from "../create/useNarrow";
+import { useDeckWrap } from "../deck/useDeckFit";
 import { deckPreset } from "../result/resultView";
-import { Layer, lsDelay, useLayer } from "./Layer";
+import { Layer, lsDelay } from "./Layer";
+import { textTight } from "./layerMorph";
 import { firstSource, sourceLine, writerByline, writerSlides, writtenText, type TextPiece, type WriterSource } from "./writerText";
 
 /** Сколько стоит строка «Скопировано». */
@@ -26,8 +33,8 @@ export function TextLayer() {
   const { ui, dispatch, generation, editText } = useApp();
   const text = ui.screen === "result" ? writtenText(generation?.writer) : null;
   const open = ui.textLayer && !!text;
-  const layer = useLayer(open);
-  const fit = layer.fit;
+  const narrow = useNarrow();
+  const tight = textTight(useDeckWrap());
   // текста больше нет (другая презентация) — флаг снимается, иначе слой вернулся бы сам
   useEffect(() => {
     if (ui.textLayer && !text) dispatch({ type: "set", patch: { textLayer: false } });
@@ -73,23 +80,22 @@ export function TextLayer() {
   };
 
   return (
-    <Layer id="rt-lay-text" presence={layer.presence} open={open} top={160} z={5} label="Текст презентации" role="dialog" onClose={close}>
+    <Layer id="rt-lay-text" open={open} top={160} z={5} label="Текст презентации" role="dialog" onClose={close}>
       {w && (
+        <TxNarrow.Provider value={narrow}>
         <div style={{ display: "flex", flexDirection: "column", height: 572 }}>
-          {/* колода уже (помощник): подпись встаёт под заголовок, «Скопировать» в тесной колоде — значок; шапка
-              перестраивается перекрёстным затуханием (useLayer, `data-fit` шапки — result.css) */}
-          <div className={cls("rt-hd", fit.cls)} data-fit={fit.shown} style={{ flex: "none" }}>
+          <div className={cls("rt-hd", tight && "rt-tight")} style={{ flex: "none" }}>
           <div className="p2-hrow p2-ls" style={{ ...lsDelay(120), display: "flex", alignItems: "center", gap: 24, height: 64 }}>
             <div className="rt-head" style={{ display: "flex", alignItems: "center", gap: 24, minWidth: 0 }}>
               <h2 className="p2-ttl" style={{ flex: "none", margin: 0, color: "#0B1220" }}>Текст презентации</h2>
               <Byline w={w} />
             </div>
             <span style={{ flex: 1, minWidth: 0 }} />
-            <div className="rt-acts" style={{ display: "flex", alignItems: "center", gap: 16, flex: "none" }}>
+            <div className="rt-acts" style={{ position: "relative", display: "flex", alignItems: "center", gap: 16, flex: "none" }}>
               <CopyLine copy={copy} />
               <button type="button" className="p2-ob rt-copy" onClick={onCopy} aria-label="Скопировать" title="Скопировать текст" style={{ flex: "none", height: 40 }}>
                 <Icon name="copy" size={18} />
-                <span>Скопировать</span>
+                <span className="hq-obt">Скопировать</span>
               </button>
               <button type="button" className="p2-cta" onClick={onEdit} title="Открыть этот текст на шаге «Текст» и собрать заново" style={{ flex: "none" }}>
                 <Icon name="pen" size={20} />
@@ -106,7 +112,7 @@ export function TextLayer() {
             <div className="rt-scroll p2-fade-top" tabIndex={0} role="region" aria-label="Текст по слайдам" style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 24 }}>
               <div className="rt-grid" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "24px 48px" }}>
                 {slides.map((s, i) => (
-                  <div key={i}>
+                  <Tx key={i} tx="t-sl" as="div">
                     {s.n !== null && (
                       <p style={{ margin: 0, fontSize: 15, fontWeight: 700, lineHeight: "24px", color: "#0B1220" }}>
                         Слайд {s.n}.{s.title && <> <span style={{ fontWeight: 600, color: "#5A6272" }}>{s.title}</span></>}
@@ -117,13 +123,14 @@ export function TextLayer() {
                         {line.map((p, k) => <Piece key={k} p={p} on={p.src !== null && p.src === sel} onPick={setSel} />)}
                       </p>
                     ))}
-                  </div>
+                  </Tx>
                 ))}
               </div>
             </div>
             <SourceRow w={w} sources={sources} sel={sel} />
           </div>
         </div>
+        </TxNarrow.Provider>
       )}
     </Layer>
   );
@@ -168,14 +175,14 @@ function CopyLine({ copy }: { copy: { ok: boolean; err?: string } | null }) {
   const ok = usePresence(!!copy?.ok, 240);
   if (copy && !copy.ok) {
     return (
-      <span className="p2-in" style={{ display: "flex", minWidth: 0, maxWidth: 320 }}>
+      <span className="p2-in rt-cl" style={{ display: "flex", minWidth: 0, maxWidth: 320 }}>
         <ErrorLine text={copy.err ?? "Не удалось скопировать"} lines={1} />
       </span>
     );
   }
   if (!ok.mounted) return null;
   return (
-    <p className={cls("rt-st", ok.shown && "rt-st-on")} role="status">
+    <p className={cls("rt-st rt-cl", ok.shown && "rt-st-on")} role="status">
       <Icon name="check-circle" size={20} />
       <span>Скопировано</span>
     </p>

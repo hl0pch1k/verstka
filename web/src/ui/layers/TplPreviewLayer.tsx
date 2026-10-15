@@ -9,12 +9,11 @@ import { errText } from "../../lib/narrate";
 import { templateTitle, tplLabel } from "../../lib/plain";
 import { plural } from "../../lib/utils";
 import type { TemplateListItem } from "../../types";
-import { cls } from "../kit/cls";
 import { ErrorLine } from "../kit/ErrorLine";
 import { Icon } from "../kit/Icon";
 import { Cover, hexOf, inkOf, usePickTemplate } from "../create/TemplateRibbon";
 import { useRise } from "../result/useRise";
-import { Layer, lsDelay, useLayer } from "./Layer";
+import { Layer, lsDelay } from "./Layer";
 import { Scrim } from "./Scrim";
 
 const thumb = (id: string, n: number) => `/api/templates/${encodeURIComponent(id)}/files/thumbs/slide-${String(n).padStart(3, "0")}.jpg`;
@@ -55,9 +54,7 @@ export function TplPreviewLayer() {
     }
   }, [id, ctx, dispatch]);
   const open = !!id && ctx;
-  // помощник сужает колоду: сетка миниатюр 4 → 3 колонки перекрёстным затуханием (useLayer)
-  const layer = useLayer(open);
-  const fit = layer.fit;
+  // помощник сужает колоду: четыре колонки миниатюр сужаются вместе с ней (V2 версии 100)
 
   // последний показанный шаблон держится, пока слой уезжает (и если его только что удалили)
   const found = id ? templates.find((t) => t.template_id === id) : undefined;
@@ -133,7 +130,7 @@ export function TplPreviewLayer() {
   return (
     <>
       <Scrim open={open} onClose={close} label="Закрыть «Слайды шаблона»" z={8} />
-      <Layer id="tp-lay-p" presence={layer.presence} open={open} top={120} z={open || !dead ? 8 : 6} label={`Слайды шаблона «${name}»`} role="dialog" onClose={close}>
+      <Layer id="tp-lay-p" open={open} top={120} z={open || !dead ? 8 : 6} label={`Слайды шаблона «${name}»`} role="dialog" onClose={close}>
         {t && (
           <>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 24, height: 64 }}>
@@ -180,7 +177,7 @@ export function TplPreviewLayer() {
 
             <div className="pv-box">
               <div className="pv-scroll p2-fade">
-                <ol className={cls("pv-grid", fit.cls)} data-fit={fit.shown} aria-label="Слайды шаблона">
+                <ol className="pv-grid" aria-label="Слайды шаблона">
                   {Array.from({ length: n }, (_, i) => (
                     <li key={i} className="p2-ls" style={lsDelay(slideDelay(i))}>
                       <Cover src={thumb(t.template_id, i + 1)} kind="s" ink={inkOf(t)} label={`Слайд ${i + 1} шаблона`} />
