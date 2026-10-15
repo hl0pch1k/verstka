@@ -234,6 +234,9 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
   .hp-nar .hp-wo{opacity:0;visibility:hidden;pointer-events:none;transition:opacity 240ms var(--ease),visibility 0s linear 240ms}
   .hp-no{opacity:0;visibility:hidden;pointer-events:none;transition:opacity 160ms var(--ease),visibility 0s linear 160ms}
   .hp-nar .hp-no{opacity:1;visibility:inherit;pointer-events:auto;transition:opacity 240ms var(--ease) 120ms,visibility 0s linear 0s}
+  /* обложка, вернувшаяся в ряд ленты при открытом помощнике (выбрали другую — hp-wo снялся): проявляется как hp-no —
+     240 мс с 120, а не вспыхивает; пока hp-wo есть, ход гашения остаётся его (240 мс с 0) */
+  .hp-nar .tp-cell > .tt-tile:not(.hp-wo){transition:opacity 240ms var(--ease) 120ms}
 
   /* 01 · лента — ряды по четыре дорожки; межколонник — поле справа у каждой плитки (дорожка с нулём сжимается вместе с
      ним), лишнее поле последней колонки уходит за край отрицательным отступом. Разбор: вторая дорожка сжимается до нуля.
