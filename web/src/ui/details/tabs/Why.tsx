@@ -57,6 +57,19 @@ const SOURCE: Record<DeckManifest["state"], SampleSource> = { ready: "ready", lo
 
 const FRAME = { width: "100%", aspectRatio: "16 / 9", borderRadius: 12, boxShadow: "0 0 0 1px rgba(11,18,32,.08)" } as const;
 const SMALL = { margin: 0, fontSize: 14, fontWeight: 500, lineHeight: "20px", color: "#0B1220" } as const;
+const DD = { margin: 0, minWidth: 0 } as const;
+
+/** «Вывод» и «Сноска» слайда (`dl`: только `dt` и `dd`). Определение — стопка из двух копий (kit/Tx, `w-dd`) внутри `dd`. */
+export function WhyTerms({ dl }: { dl: { t: string; d: string }[] }) {
+  return (
+    <dl style={{ display: "grid", gridTemplateColumns: "72px minmax(0, 1fr)", gap: "8px 12px", margin: "16px 0 0", paddingTop: 16, borderTop: "1px solid rgba(11,18,32,.08)" }}>
+      {dl.map((x) => [
+        <dt key={`${x.t}t`} className="dw-sub">{x.t}</dt>,
+        <dd key={`${x.t}d`} style={DD}><Tx tx="w-dd" style={SMALL}>{x.d}</Tx></dd>,
+      ])}
+    </dl>
+  );
+}
 
 export function WhyTab({ g, v, deck, active }: { g: Generation; v: Variant; deck: DeckManifest; active: boolean }) {
   const { selectedSlide, setSelectedSlide, setActiveStrategy, strategyTitle, dispatch, ui } = useApp();
@@ -104,14 +117,7 @@ export function WhyTab({ g, v, deck, active }: { g: Generation; v: Variant; deck
             : ex.busy ? <p style={{ display: "flex", alignItems: "center", gap: 8, margin: "16px 0 0", fontSize: 14, fontWeight: 600, lineHeight: "20px", color: "#5A6272" }}><Spinner size={16} />Собираю объяснение…</p>
               : ex.error ? <ErrorLine text={ex.error} style={{ marginTop: 16 }} />
                 : <Tx tx="w-why" style={{ margin: "16px 0 0", fontSize: 15, fontWeight: 500, lineHeight: "24px", color: "#5A6272" }}>Дизайнер не оставил объяснения для этого слайда.</Tx>}
-          {w.dl.length > 0 && (
-            <dl style={{ display: "grid", gridTemplateColumns: "72px minmax(0, 1fr)", gap: "8px 12px", margin: "16px 0 0", paddingTop: 16, borderTop: "1px solid rgba(11,18,32,.08)" }}>
-              {w.dl.map((x) => [
-                <dt key={`${x.t}t`} className="dw-sub">{x.t}</dt>,
-                <Tx key={`${x.t}d`} tx="w-dd" as="dd" style={{ ...SMALL }}>{x.d}</Tx>,
-              ])}
-            </dl>
-          )}
+          {w.dl.length > 0 && <WhyTerms dl={w.dl} />}
           {w.forms.length > 0 && (
             <>
               <h4 className="dw-sub" style={{ marginTop: 24 }}>Другие формы</h4>

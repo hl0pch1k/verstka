@@ -9,7 +9,7 @@ import { useApp } from "../../../store";
 import type { Generation, Variant } from "../../../types";
 import { cls } from "../../kit/cls";
 import { Icon } from "../../kit/Icon";
-import { checkTiles, fileRows, fixRowsOf, passport, stagesOf } from "../files";
+import { checkTiles, fileRows, fixRowsOf, passport, stagesOf, type Fact } from "../files";
 import { slideTag } from "../quality";
 import { FilesDev } from "./FilesDev";
 import { Tx } from "../../kit/Tx";
@@ -17,6 +17,43 @@ import { filesCols, filesVars, SheetCtx } from "../sheetMorph";
 import type { DeckManifest } from "../useDeckManifest";
 
 const H = { margin: 0 } as const;
+/** Группа факта — клетка сетки «Паспорта»: встаёт по верху своей клетки (высота стопки на ходу — своя). */
+const FACT = { alignSelf: "start", minWidth: 0 } as const;
+
+/** То, что нужно замеру полосы прокрутки (часть HTMLElement). */
+export type Scroller = Pick<HTMLElement, "offsetWidth" | "clientWidth"> & { checkVisibility?(): boolean };
+
+/** Ширина полосы прокрутки вкладки (обычная — 15 px, накладная — 0) или `null`, когда замер неверен: содержимое вкладки
+ *  не рисуется — невыбранная вкладка, догаснув, пропускает его (content-visibility: hidden у `#dd-panel-files`,
+ *  layers.css), и полосы у неё нет, хотя содержимое длиннее, — или у неё нет рамки (display: none, предок с
+ *  content-visibility: hidden). Иначе каждое скрытие и показ «Файлов» меняли бы полосу 15 → 0 → 15, а с ней дорожки
+ *  сетки (--dfw, --dfn) и замер стопок «Паспорта». Смонтированная скрытой, пока лист ещё рисует все вкладки
+ *  (DetailsSheet: в свободное время), меряется сразу — её содержимое рисуется. */
+export function scrollbarOf(el: Scroller, contentVisibility: string): number | null {
+  if (contentVisibility === "hidden" || el.checkVisibility?.() === false) return null;
+  return Math.max(0, el.offsetWidth - el.clientWidth);
+}
+
+/** Факты «Паспорта запуска» (`dl`: группы `div` из `dt` и `dd`). Факт — стопка из двух копий (kit/Tx, `f-fact`): в
+ *  каждой и название, и значение (на ходу помощника ни то ни другое не переносится заново, копия проявляется целиком).
+ *  Стопка — внутри `dd`; название в копиях скрыто от чтения с экрана, читается `dt` (p2-sr) — каждое по разу. */
+export function PassportFacts({ facts, hpd }: { facts: Fact[]; hpd: number }) {
+  return (
+    <dl style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "16px 24px", margin: "16px 0 0" }}>
+      {facts.map((x) => (
+        <div key={x.k} style={FACT}>
+          <dt className="p2-sr">{x.k}</dt>
+          <dd style={H}>
+            <Tx tx="f-fact" as="div" hpd={hpd} title={x.title}>
+              <div className="df-fk" aria-hidden="true">{x.k}</div>
+              <div className={cls("df-fv", x.dim && "df-dim")}>{x.v}</div>
+            </Tx>
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
 
 export function FilesTab({ g, v, deck }: { g: Generation; v: Variant; deck: DeckManifest }) {
   const { strategyTitle, templateLabel } = useApp();
@@ -28,13 +65,17 @@ export function FilesTab({ g, v, deck }: { g: Generation; v: Variant; deck: Deck
   const check = checkTiles(g, v);
   const fixes = fixRowsOf(v, deck.manifest);
   const n = files.length;
-  // дорожки в px — от ширины сетки: лист без полосы прокрутки вкладки (обычная полоса — 15 px, накладная — 0)
+  // дорожки в px — от ширины сетки: лист без полосы прокрутки вкладки (обычная полоса — 15 px, накладная — 0); пока
+  // вкладка скрыта и не рисуется, замер неверен — остаётся последний настоящий (scrollbarOf)
   const scroller = useRef<HTMLDivElement>(null);
   const [bar, setBar] = useState(0);
   useLayoutEffect(() => {
     const el = scroller.current;
     if (!el) return;
-    const measure = () => setBar(Math.max(0, el.offsetWidth - el.clientWidth));
+    const measure = () => {
+      const b = scrollbarOf(el, getComputedStyle(el).contentVisibility);
+      if (b !== null) setBar(b);
+    };
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
@@ -69,16 +110,8 @@ export function FilesTab({ g, v, deck }: { g: Generation; v: Variant; deck: Deck
 
         <section className="df-card p2-in" aria-labelledby="df-h2" style={{ animationDelay: "320ms" }}>
           <div className="df-hd"><h2 id="df-h2" className="df-h">Паспорт запуска</h2><span className="df-badge df-pb hp-wo">{pass.badge}</span></div>
-          {pass.facts.length ? (
-            <dl style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "16px 24px", margin: "16px 0 0" }}>
-              {pass.facts.map((x) => (
-                <Tx key={x.k} tx="f-fact" as="div" hpd={fact} title={x.title}>
-                  <dt className="df-fk">{x.k}</dt>
-                  <dd className={cls("df-fv", x.dim && "df-dim")} style={H}>{x.v}</dd>
-                </Tx>
-              ))}
-            </dl>
-          ) : <p className="df-fk" style={{ marginTop: 16 }}>У этого варианта нет паспорта — соберите презентацию заново.</p>}
+          {pass.facts.length ? <PassportFacts facts={pass.facts} hpd={fact} />
+            : <p className="df-fk" style={{ marginTop: 16 }}>У этого варианта нет паспорта — соберите презентацию заново.</p>}
         </section>
 
         {stages && (
