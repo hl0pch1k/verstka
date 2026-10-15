@@ -9,7 +9,8 @@
 // раскладке (от ширины окна, columns.ts `buildMorph`), посреди хода не меняется; у сегментов вариантов слова хода гаснут
 // и сжимаются кеглем до нуля (галочки остаются), сегменты плотнее. Сайт: в тесной колоде (1280) при трёх вариантах
 // «Раскадровка» со строкой хода сжимается и гаснет (сегментам иначе нет места), а у меток «Замечание» и «Переделан»
-// остаётся значок (карточки уже 100 px).
+// остаётся значок (карточки уже 100 px). Строка хода для чтения с экрана («сверстано 5 из 12») — в скрытом узле, который
+// есть всегда (видимая строка, уходя, становится visibility:hidden — живая область пропала бы вместе с ней).
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { BOARD_GAP } from "../../lib/stage";
 import { smoothScroll } from "../../lib/motion";
@@ -144,8 +145,9 @@ export function Storyboard({ view, segs, onPick, aspect, morph, wide }: {
       <div className="p2-in p2-wrap bd-sbh" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 24, height: 40, marginTop: 24, animationDelay: "120ms" }}>
         <p className={cls("bd-sbl", !boardLabel(morph, segs.length) && "bd-sbl-go")} style={{ display: "flex", flexDirection: "column", minWidth: 0, margin: 0, whiteSpace: "nowrap" }}>
           <span style={{ fontSize: 15, fontWeight: 700, lineHeight: "20px", color: "#FFFFFF" }}>Раскадровка</span>
-          <span aria-live="polite" style={{ fontSize: 13, fontWeight: 500, lineHeight: "20px", color: "rgba(255,255,255,.64)" }}>{view.board}</span>
+          <span aria-hidden="true" style={{ fontSize: 13, fontWeight: 500, lineHeight: "20px", color: "rgba(255,255,255,.64)" }}>{view.board}</span>
         </p>
+        <span className="p2-sr" aria-live="polite">{view.board}</span>
         {segs.length > 0 && (
           <div role="group" aria-label="Какую раскадровку показать" className={cls("bd-segs", !morph.words && "bd-segs-s")}
             style={{ display: "flex", gap: 4, padding: 4, borderRadius: 999, background: "rgba(255,255,255,.06)" }}>

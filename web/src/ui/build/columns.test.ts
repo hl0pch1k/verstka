@@ -1,11 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { AGENT, AGENT_TIGHT, ROLE_TEXT, boardColumns, boardLabel, buildMorph, MIN_CARD, phaseScale, PHASE_NARROW, rollOf } from "./columns";
+import { AGENT, AGENT_TIGHT, boardColumns, boardLabel, buildMorph, failText, FAIL_REASON, FAIL_TITLE, MIN_CARD, phaseFit, phaseLine2, phaseScale, PHASE_FLOOR, PHASE_NARROW, ROLE_TEXT, rollOf } from "./columns";
+import { BOARD_GAP } from "../../lib/stage";
+import { actsColumn } from "./Failed";
 
 const A = 16 / 9;
-/** Обёртка колоды при окне 1440 и 1280 (поля страницы 24 + 24). */
+/** Обёртка колоды при окне 1440 и 1280 (поля страницы 24 + 24); 1217 — 1280 с обычной полосой прокрутки страницы (15). */
 const W1440 = 1392;
 const W1280 = 1232;
+const W1280S = 1217;
+const PHASES = ["queued", "writer", "analyst", "architect", "designer", "critic", "revise", "layout", "check", "eyes", "done", "failed"] as const;
 
 test("boardColumns: четыре колонки доски, пока карточка не уже 150; уже — меньше колонок", () => {
   assert.equal(boardColumns(928, 600, 5, A, MIN_CARD), 4);
@@ -31,8 +35,9 @@ test("buildMorph при 1440 — как V2: колонка агента 416 → 
   assert.equal(m.list, 832);
   assert.equal(m.words, true);
   assert.equal(m.font, 36);
-  // коробка «Не получилось»: текст не шире узкой (536 − 24 − 24), кнопки в ряд
-  assert.equal(m.failText, 488);
+  // коробка «Не получилось»: текст узкой — 536 − 24 − 24, широкой — 832 − 48 − 48; кнопки в ряд в обеих
+  assert.equal(m.failNarrow, 488);
+  assert.equal(m.failWide, 736);
   assert.equal(m.failCol, false);
 });
 
@@ -47,8 +52,33 @@ test("buildMorph при 1280 — тесная колода: колонка аг�
   assert.equal(m.list, 672);
   assert.equal(m.words, false);
   assert.equal(m.font, 27.07);
-  assert.equal(m.failText, 360);
+  assert.equal(m.failNarrow, 360);
+  assert.equal(m.failWide, 576);
   assert.equal(m.failCol, true);
+});
+
+test("buildMorph при 1280 с обычной полосой прокрутки (обёртка 1217): левая колонка 393, карточки 86, фаза 26.21", () => {
+  const m = buildMorph(W1280S);
+  assert.equal(m.tight, true);
+  assert.equal(m.agent, AGENT_TIGHT);
+  assert.equal(m.left, 393);
+  assert.equal(m.cell, 201);
+  assert.equal(m.list, 657);
+  assert.equal(m.font, 26.21);
+  assert.equal(m.words, false);
+  // те же четыре колонки, что при закрытом помощнике: карточки 152 → 86 px
+  const cols = boardColumns(m.list, 468, 12, A, MIN_CARD);
+  assert.equal(cols, 4);
+  assert.equal(Math.floor((m.list - 3 * BOARD_GAP) / cols), 152);
+  assert.equal(Math.floor((m.left - 3 * BOARD_GAP) / cols), 86);
+  // «Раскадровка» при трёх и двух вариантах уходит (393 < 398), при одном — остаётся; кнопки «Не получилось» в узкой —
+  // столбиком
+  assert.equal(boardLabel(m, 3), false);
+  assert.equal(boardLabel(m, 2), false);
+  assert.equal(boardLabel(m, 1), true);
+  assert.equal(m.failCol, true);
+  assert.equal(m.failWide, 561);
+  assert.equal(m.failNarrow, 345);
 });
 
 test("buildMorph: обёртка не измерена — как при 1440", () => {
@@ -76,16 +106,85 @@ test("phaseScale: короткая фаза мельчает до .75, длин�
   assert.equal(phaseScale("analyst", m.font, m.cell), PHASE_NARROW);
   // V2: min(.75, 340 / 633) — «Смотрю на слайды целиком»
   assert.ok(Math.abs(phaseScale("eyes", m.font, m.cell) - 340 / 633) < 0.002);
-  // фаза в узкой раскладке не шире своей клетки при 1440 и 1280, в широкой — тоже (колонка без места «03», поле 4 px)
-  const W36: Record<string, number> = { queued: 433, eyes: 633, layout: 586, failed: 493 };
-  for (const wrap of [W1440, W1280]) {
+  // фаза в узкой раскладке не шире своей клетки при 1440, 1280 и 1217 (однострочная — целиком, двухстрочная — её копия),
+  // в широкой — тоже (колонка без места «03», поле 4 px)
+  const W36: Record<string, number> = { queued: 433, eyes: 633, layout: 586, failed: 493, analyst: 273 };
+  for (const wrap of [W1440, W1280, W1280S]) {
     const k = buildMorph(wrap);
     for (const [p, w36] of Object.entries(W36)) {
       const w = (w36 * k.font) / 36;
-      assert.ok(w * phaseScale(p as "eyes", k.font, k.cell) <= k.cell, `${wrap} ${p}`);
+      const f = phaseFit(p as "eyes", k.font, k.cell);
+      assert.ok((f.two ? f.width : w) * f.scale <= k.cell - 3.5, `${wrap} ${p}`);
       assert.ok(w <= k.list - 192 - 4, `${wrap} ${p} широкая`);
     }
   }
+});
+
+test("phaseFit: в узкой раскладке фаза не мельче 18 px — ни при 1440, ни при 1280, ни при 1217", () => {
+  for (const wrap of [W1440, W1280, W1280S, 1300, 1360]) {
+    const m = buildMorph(wrap);
+    for (const p of PHASES) {
+      const f = phaseFit(p, m.font, m.cell);
+      assert.ok(f.scale * m.font >= PHASE_FLOOR - 0.02, `${wrap} ${p}: ${f.scale * m.font}`);
+      assert.ok(f.scale <= PHASE_NARROW, `${wrap} ${p}`);
+      if (f.two) {
+        // две строки 18/24 — ровно ряд 48, по центру; копия свёрстана на клетку (до scale)
+        assert.ok(Math.abs(f.line * f.scale - 24) < 0.1, `${wrap} ${p} строка`);
+        assert.ok(Math.abs(f.top + f.line - 24) < 0.01, `${wrap} ${p} центр`);
+        assert.ok(Math.abs(f.width * f.scale - (m.cell - 4)) < 0.1, `${wrap} ${p} ширина`);
+        // в две строки она встаёт (длинная строка лучшего переноса — замер — не шире клетки), а не в три
+        assert.ok(phaseLine2(p, f.loose) <= m.cell - 4, `${wrap} ${p} две строки: ${phaseLine2(p, f.loose)}`);
+      }
+    }
+  }
+});
+
+test("phaseFit при 1440 — как V2 (в одну строку, не мельче 19.3 px); при 1280 длинные — в две строки 18 px", () => {
+  const w = buildMorph(W1440);
+  for (const p of PHASES) assert.equal(phaseFit(p, w.font, w.cell).two, false, p);
+  assert.ok(Math.abs(phaseFit("eyes", w.font, w.cell).scale * w.font - 19.336) < 0.02);
+  const n = buildMorph(W1280);
+  const eyes = phaseFit("eyes", n.font, n.cell);
+  assert.equal(eyes.two, true);
+  assert.ok(Math.abs(eyes.scale * n.font - 18) < 0.02);
+  // короткая встаёт в строку и мельчает до .75 (20.3 px)
+  assert.deepEqual([phaseFit("analyst", n.font, n.cell).two, phaseScale("analyst", n.font, n.cell)], [false, PHASE_NARROW]);
+  // «Смотрю на слайды» (214.5 px при 18) в клетку 212 не встаёт: неразрывный пробел в двухстрочной копии — обычный
+  assert.equal(eyes.loose, true);
+  assert.equal(phaseFit("check", n.font, n.cell).loose, false);
+});
+
+test("failText: при 1440 заголовок и причина — одной копией (как B-failed); при 1280 — двумя: широкая как B-failed, узкая — в клетку", () => {
+  const w = failText(buildMorph(W1440));
+  assert.equal(w.title.stack, false);
+  assert.equal(w.reason.stack, false);
+  assert.equal(w.reason.narrow, FAIL_REASON);
+  for (const wrap of [W1280, W1280S]) {
+    const m = buildMorph(wrap);
+    const t = failText(m);
+    assert.equal(t.title.stack, true);
+    // закрыт помощник: заголовок в строку (B-failed), причина до 480
+    assert.ok(t.title.wide >= FAIL_TITLE, `${wrap}`);
+    assert.equal(t.reason.wide, FAIL_REASON);
+    assert.equal(t.title.narrow, m.failNarrow);
+    assert.equal(t.reason.narrow, m.failNarrow);
+  }
+});
+
+test("actsColumn: ряд кнопок → столбик — обе к центру ряда, вторая под первую через зазор", () => {
+  const b1 = { w: 276, h: 56 }, b2 = { w: 199, h: 48 };
+  const c = actsColumn(b1, b2, 16);
+  // центры в ряду (ряд по центру): −(491)/2 + 138 и 491/2 − 99.5
+  const c1 = -491 / 2 + 138 + c.x1, c2 = 491 / 2 - 99.5 + c.x2;
+  assert.equal(c1, 0);
+  assert.equal(c2, 0);
+  // вторая — под первой: верх второй = низ первой + 16
+  assert.equal(28 + c.y2 - 24, 56 + 16);
+  assert.equal(c.grow, 64);
+  // уход центра коробки идёт кривой колоды, остальное — своим тактом: в сумме — те же сдвиги
+  const d = actsColumn(b1, b2, 16, 132);
+  assert.equal(d.x1s + 132, c.x1);
+  assert.equal(d.x2s + 132, c.x2);
 });
 
 test("rollOf: роль и следующая — над нижним краем; влезает — без сдвига", () => {

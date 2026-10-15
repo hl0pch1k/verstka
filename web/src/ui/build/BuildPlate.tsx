@@ -202,7 +202,7 @@ function BuildContent({ job, leaving }: { job: ActiveJob | null; leaving: boolea
             <Storyboard view={view} segs={segs} onPick={setPicked} aspect={aspect} morph={morph} wide={wide} />
           </div>
           {failed && (
-            <Failed text={failed.text} onRetry={onRetry} onBack={back} width={wide ? morph.failText : 480} column={wide && morph.failCol} />
+            <Failed text={failed.text} onRetry={onRetry} onBack={back} morph={morph} wide={wide} narrow={narrow} />
           )}
         </div>
       </div>

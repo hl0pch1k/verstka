@@ -89,7 +89,7 @@
 /* ── Колода, суженная помощником (V2 версии 100, блок «Сборка: колонка агента 416 → 320, зазор 48 → 24; фаза остаётся в
    своей клетке и мельчает той же кривой…» — дословно, кроме отмеченного «сайт:»). Плита перестраивается вместе с
    колодой каждый кадр, на той же кривой (var(--ease)) и за то же время — открытие 520 мс, закрытие 340: дорожки сетки
-   (колонка агента, зазор), transform фазы (scale до .75, длинная — сколько нужно, `--phs` — columns.ts `phaseScale`),
+   (колонка агента, зазор), transform фазы (scale до .75, длинная — сколько нужно, `--phs` — columns.ts `phaseFit`),
    раскадровка — те же колонки, сужаются (у сегментов вариантов слова хода гаснут и сжимаются кеглем до нуля, галочки
    остаются; сегменты плотнее), «Не получилось» — поля 48 → 24, «Как думает агент» 20 → 18 px, зазор 16 → 8. Мысли агента,
    подсказки очереди и причина ошибки — стопки из двух копий (hp-tx, create.css; сайт: ширины копий — постоянные, в px).
@@ -136,4 +136,32 @@
   .hp-nar .bd-sbl-go{max-width:0;opacity:0;visibility:hidden;transition:max-width 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
   .bd-tight .bk-badge > .bd-bw{transition:font-size 340ms var(--ease),margin-left 340ms var(--ease),opacity 160ms var(--ease) 80ms}
   .hp-nar .bd-tight .bk-badge > .bd-bw{font-size:0;margin-left:-4px;opacity:0;transition:font-size 520ms var(--ease),margin-left 520ms var(--ease),opacity 240ms var(--ease)}
+  /* сайт: фаза не мельче 18 px (columns.ts `phaseFit`). Не встаёт в клетку и при 18 (окно около 1280) — в узкой раскладке
+     две строки 18/24 в ряду 48: однострочная копия гаснет, двухстрочная (свёрстана на ширину клетки до scale, по центру
+     ряда) проявляется на месте; обе мельчают тем же scale фазы */
+  .bd-ph2{grid-template-rows:48px;align-items:start}
+  .bd-ph2 > .bd-phn{white-space:normal;text-wrap:balance}
+  /* сайт: «Не получилось» при закрытом помощнике — как B-failed при любой ширине окна. Заголовок и причина, которые в узкой
+     колоде переносятся иначе, — стопки из двух копий постоянной ширины (`--bf-tw`, `--bf-tn`) по центру коробки; кнопки,
+     которым в узкой колоде нет места в ряд (`bd-col`), встают столбиком: каждая — сдвигом к центру, вторая — под первую
+     (Failed `actsColumn`), коробка подвигает содержимое отступом снизу. Чтобы кнопки не наезжали друг на друга, ход —
+     в два такта: открытие — сначала по вертикали (вторая уходит вниз, стопки растут, 160 мс), затем по горизонтали
+     (360 мс через 60); закрытие — наоборот (240 мс, затем 160 через 180). Всё вертикальное в коробке — на одной кривой
+     (стопки растут линейно — `--hw`, `--hdd`): ничто не идёт то вверх, то вниз */
+  .bd-errbox .bf-tx{justify-items:center;overflow:visible;--hpp:0;height:if(style(--hpp: 0): auto; style(--hpp: 1): auto; else: calc(var(--hw, 0px) + var(--hdd, 0px) * var(--hpp)));transition:--hpp 160ms var(--ease) 180ms}
+  .hp-nar .bd-errbox .bf-tx{--hpp:1;transition:--hpp 160ms var(--ease)}
+  .bd-errbox .bf-tx > .hp-txw{width:var(--bf-tw) !important}
+  .bd-errbox .bf-tx > .hp-txn{width:var(--bf-tn) !important;transition:--hpp 160ms var(--ease) 180ms,height 160ms var(--ease) 180ms,opacity 160ms var(--ease),visibility 0s linear 160ms}
+  .hp-nar .bd-errbox .bf-tx > .hp-txn{transition:--hpp 160ms var(--ease),height 160ms var(--ease),opacity 240ms var(--ease) 120ms,visibility 0s linear 0s}
+  .bd-col{transition:margin-bottom 160ms var(--ease) 180ms}
+  .hp-nar .bd-col{margin-bottom:var(--bf-gr,64px);transition:margin-bottom 160ms var(--ease)}
+  /* сдвиг кнопки = уход центра коробки (кривой колоды: пока коробка сужается, кнопки стоят) + свой такт */
+  .bd-col > .p2-cta,.bd-col > .bf-obd{translate:calc(var(--bfa) + var(--bfx)) var(--bfy);transition:transform 160ms var(--ease),--bfa 340ms var(--ease),--bfx 240ms var(--ease),--bfy 160ms var(--ease) 180ms}
+  .hp-nar .bd-col > .p2-cta,.hp-nar .bd-col > .bf-obd{--bfa:var(--bf-a,0px);transition:transform 160ms var(--ease),--bfa 520ms var(--ease),--bfx 360ms var(--ease) 60ms,--bfy 160ms var(--ease)}
+  .hp-nar .bd-col > .p2-cta{--bfx:var(--bf-x1,0px)}
+  .hp-nar .bd-col > .bf-obd{--bfx:var(--bf-x2,0px);--bfy:var(--bf-y2,0px)}
 }
+/* сдвиги кнопок «Не получилось» — свои ходы (выше); не наследуются */
+@property --bfa{syntax:'<length>';inherits:false;initial-value:0px}
+@property --bfx{syntax:'<length>';inherits:false;initial-value:0px}
+@property --bfy{syntax:'<length>';inherits:false;initial-value:0px}
