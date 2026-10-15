@@ -8,14 +8,15 @@
 // числом дорожек, многострочный текст — стопки из двух копий (kit/Tx), только-широкое сжимается и гаснет на месте.
 // Невыбранные вкладки и закрытый лист ход помощника не трогают (layers.css, `--lgone`). При окне около 1280 (тесная
 // колода, sheetMorph.ts) V2 не помещается — свои дорожки (`dd-tight`).
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { flushSync } from "react-dom";
 import { useApp } from "../../store";
 import type { Generation, Variant } from "../../types";
 import { cls } from "../kit/cls";
 import { Icon } from "../kit/Icon";
 import { Menu } from "../kit/Menu";
 import { Layer, LAYER_MS, lsDelay, useLayerPresence } from "../layers/Layer";
-import { TxNarrow } from "../kit/Tx";
+import { MOVE_MS, onDeckMove, TxNarrow } from "../kit/Tx";
 import { useNarrow } from "../create/useNarrow";
 import { useDeckWrap } from "../deck/useDeckFit";
 import { SheetCtx, sheetMorph } from "./sheetMorph";
@@ -39,6 +40,61 @@ const MOUNT_MS = 720;
 /** После монтирования последней вкладки — когда её лесенка доиграла («Файлы» — 480 + 360). */
 const SETTLE_MS = 900;
 
+/** Что нужно очереди невыбранных вкладок (лист — настоящее, тесты — подставное). */
+export interface TabQueueEnv {
+  /** Следующая несмонтированная вкладка; все на месте — undefined. */
+  rest(): SheetTab | undefined;
+  /** Смонтировать вкладку — целиком, вместе с раскладкой (ход, начатый сразу после, её уже не застанет). */
+  mount(tab: SheetTab): void;
+  /** Все на месте и их лесенки доиграли: невыбранные больше не рисуются (`dd-settled`). */
+  settle(): void;
+  /** Свободное время браузера (requestIdleCallback). */
+  idle(f: () => void): void;
+  later(f: () => void, ms: number): number;
+  clear(id: number): void;
+  /** Ход колоды (помощник): `true` — пошла, `false` — доехала. */
+  onMove(f: (moving: boolean) => void): () => void;
+}
+
+/** Невыбранные вкладки — по одной в свободное время с MOUNT_MS после открытия листа, через SETTLE_MS после последней —
+ *  `settle`. На ходу колоды ни то ни другое не идёт (помощник открыли вскоре после листа — иначе до пяти вкладок встали
+ *  бы с раскладкой в кадры его хода 520 мс): шаг ждёт конца хода и идёт в первое свободное время после. Возвращает
+ *  остановку (лист закрыли). */
+export function queueTabs(env: TabQueueEnv): () => void {
+  let alive = true;
+  let moving = false;
+  let held: (() => void) | null = null;
+  let t = 0;
+  const step = (f: () => void) => {
+    const run = () => {
+      if (!alive) return;
+      if (moving) held = run;
+      else f();
+    };
+    return run;
+  };
+  const settle = step(() => env.settle());
+  const next = step(() => {
+    const k = env.rest();
+    if (!k) return void (t = env.later(settle, SETTLE_MS));
+    env.mount(k);
+    env.idle(next);
+  });
+  const off = env.onMove((m) => {
+    moving = m;
+    if (m || !held) return;
+    const f = held;
+    held = null;
+    env.idle(f);
+  });
+  t = env.later(() => env.idle(next), MOUNT_MS);
+  return () => {
+    alive = false;
+    env.clear(t);
+    off();
+  };
+}
+
 export function DetailsSheet() {
   const { ui, dispatch, generation, activeVariant, setActiveStrategy, strategyTitle } = useApp();
   const ready = ui.screen === "result" && !!generation && generation.variants.length > 0;
@@ -59,10 +115,11 @@ export function DetailsSheet() {
   const deck = useDeckManifest(keep?.g.template_id ?? null, attempt);
   const [menu, setMenu] = useState(false);
   const presence = useLayerPresence(open);
-  // невыбранные вкладки монтируются, когда лист доехал, по одной в свободное время (въезд листа не ждёт их раскладки);
-  // открытая — сразу и при смене вкладки (её содержимое встаёт в том же кадре, пустой панели нет). Когда все на месте и
-  // их лесенки доиграли (p2-in идёт и в невидимых), невыбранные больше не рисуются (`dd-settled`, layers.css:
-  // content-visibility); раньше — их лесенка проиграла бы заново при первом показе
+  // невыбранные вкладки монтируются, когда лист доехал, по одной в свободное время (въезд листа не ждёт их раскладки) и
+  // не на ходу помощника (queueTabs); открытая — сразу и при смене вкладки (её содержимое встаёт в том же кадре, пустой
+  // панели нет). Когда все на месте и их лесенки доиграли (p2-in идёт и в невидимых), невыбранные больше не рисуются
+  // (`dd-settled`, layers.css: content-visibility); раньше — их лесенка проиграла бы заново при первом показе. Закрытие
+  // метку не снимает — и на уходе листа невыбранные не рисуются; снимается вместе с вкладками, когда лист уехал
   const [mounted, setMounted] = useState<ReadonlySet<SheetTab>>(() => new Set());
   const [settled, setSettled] = useState(false);
   if (open && tab && !mounted.has(tab)) setMounted(new Set(mounted).add(tab));
@@ -72,26 +129,44 @@ export function DetailsSheet() {
     setMounted(new Set());
     setSettled(false);
   }
-  useEffect(() => {
-    if (!open) return void setSettled(false);
-    let alive = true;
-    let t = 0;
-    const idle = (f: () => void) => (window.requestIdleCallback ? window.requestIdleCallback(f, { timeout: 200 }) : window.setTimeout(f, 50));
-    const next = () => {
-      if (!alive) return;
-      const rest = SHEET_TABS.find((x) => !mountedRef.current.has(x.key));
-      if (!rest) return void (t = window.setTimeout(() => alive && setSettled(true), SETTLE_MS));
-      mountedRef.current = new Set(mountedRef.current).add(rest.key);
-      setMounted(mountedRef.current);
-      idle(next);
-    };
-    t = window.setTimeout(() => idle(next), MOUNT_MS);
-    return () => {
-      alive = false;
-      window.clearTimeout(t);
-    };
-  }, [open]);
+  const sheet = useRef<HTMLElement>(null);
   const narrow = useNarrow();
+  // ход колоды для очереди: о нём сообщают стопки листа (kit/Tx), а у пустой вкладки («Проверки нет», «Плана нет») их
+  // нет — тогда по своей раскладке (тот же ход)
+  const [moves] = useState(() => new Set<(moving: boolean) => void>());
+  const seenNarrow = useRef(narrow);
+  useLayoutEffect(() => {
+    if (seenNarrow.current === narrow) return;
+    seenNarrow.current = narrow;
+    moves.forEach((f) => f(true));
+    const t = window.setTimeout(() => moves.forEach((f) => f(false)), MOVE_MS);
+    return () => window.clearTimeout(t);
+  }, [narrow, moves]);
+  useEffect(() => {
+    if (!open) return;
+    return queueTabs({
+      rest: () => SHEET_TABS.find((x) => !mountedRef.current.has(x.key))?.key,
+      // смонтирована и разложена здесь же, в свободное время: щелчок помощника сразу после не понесёт её раскладку в
+      // первый кадр своего хода
+      mount: (k) => {
+        mountedRef.current = new Set(mountedRef.current).add(k);
+        flushSync(() => setMounted(mountedRef.current));
+        void sheet.current?.querySelector<HTMLElement>(`.dd-pw[data-tab="${k}"]`)?.offsetHeight;
+      },
+      settle: () => setSettled(true),
+      idle: (f) => void (window.requestIdleCallback ? window.requestIdleCallback(f, { timeout: 200 }) : window.setTimeout(f, 50)),
+      later: (f, ms) => window.setTimeout(f, ms),
+      clear: (id) => window.clearTimeout(id),
+      onMove: (f) => {
+        const off = onDeckMove(f);
+        moves.add(f);
+        return () => {
+          off();
+          moves.delete(f);
+        };
+      },
+    });
+  }, [open, moves]);
   const morph = sheetMorph(useDeckWrap());
 
   const pattern = ui.pattern;
@@ -134,13 +209,14 @@ export function DetailsSheet() {
       {g && v && (
         <TxNarrow.Provider value={narrow}>
         <SheetCtx.Provider value={morph}>
-        <section className={cls("dd-sheet", morph.tight && "dd-tight", settled && "dd-settled")} style={{ outline: "none" }} role="region" aria-label={`Подробнее о презентации «${docTitle(g, v)}»`} tabIndex={-1}>
+        <section ref={sheet} className={cls("dd-sheet", morph.tight && "dd-tight", settled && "dd-settled")} style={{ outline: "none" }} role="region" aria-label={`Подробнее о презентации «${docTitle(g, v)}»`} tabIndex={-1}>
           <div className="dd-fx">
           <div className="dd-top p2-ls" style={lsDelay(120)}>
+            {/* aria-controls — когда панель есть (`dd-panel-*` у содержимого вкладки, а невыбранные монтируются позже) */}
             <div className="dd-tabs" role="tablist" aria-label="Разделы подробностей" onKeyDown={onTabKey}>
               {SHEET_TABS.map((t) => (
                 <button key={t.key} type="button" role="tab" id={`dd-tab-${t.key}`} className={cls("p2-rseg", t.key === tab && "p2-rseg-on")}
-                  aria-selected={t.key === tab} aria-controls={`dd-panel-${t.key}`} tabIndex={t.key === tab ? 0 : -1} onClick={() => dispatch({ type: "sheet", tab: t.key })}>
+                  aria-selected={t.key === tab} aria-controls={mounted.has(t.key) ? `dd-panel-${t.key}` : undefined} tabIndex={t.key === tab ? 0 : -1} onClick={() => dispatch({ type: "sheet", tab: t.key })}>
                   {t.label}
                 </button>
               ))}
