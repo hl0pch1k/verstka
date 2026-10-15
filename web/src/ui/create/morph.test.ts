@@ -1,11 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ctaShort, deckWidths, hintTail, moreGrid, paramsRow, readyShort, ribbonRows } from "./morph";
+import { ctaShort, deckWidths, hintTail, listCard, moreGrid, paramsRow, readyShort, ribbonRows, STEPPER, STEPPER_NARROW, VARIANT_NAME } from "./morph";
 
-// обёртка колоды: 1392 при окне 1440, 1232 при 1280
-const W1440 = 1392, W1280 = 1232;
+// обёртка колоды: 1392 при окне 1440, 1232 при 1280, 1217 — 1280 с обычной полосой прокрутки страницы (15 px)
+const W1440 = 1392, W1280 = 1232, W1280S = 1217;
 const tracks = (s: string) => s.split(/\s+(?![^(]*\))/);
 const pxOf = (s: string) => parseFloat(s);
+/** Самое длинное название варианта («Структурный», 16 px) — замер. */
+const LONGEST_TITLE = 106;
+/** Ширина ряда плиты 03 с полями клеток (колода − поля 96 − «03» 192 + поле последней клетки 16). */
+const cells = (deck: number) => deck - 96 - 192 + 16;
 
 test("deckWidths: открытый помощник сужает колоду на 416 (плита 400 + зазор 16); не измерена — как на доске", () => {
   assert.deepEqual(deckWidths(W1440), { wide: 1392, narrow: 976 });
@@ -13,34 +17,75 @@ test("deckWidths: открытый помощник сужает колоду н
   assert.deepEqual(deckWidths(0), { wide: 1392, narrow: 976 });
 });
 
-test("paramsRow при 1440: дорожки V2 — степпер 216 → 200, переключатели 264 → 0, варианты 186.67 → 146.67", () => {
+test("paramsRow при 1440: дорожки V2 — степпер 216 → 200, переключатели 264 → 0, варианты карточками 186.67 → 146.67", () => {
   const r = paramsRow(W1440, 3);
   assert.equal(r.switches, true);
-  assert.equal(r.stepper, true);
+  assert.equal(r.list, null);
   // клетка = коробка + поле 16
   assert.deepEqual(tracks(r.wide), ["232px", "minmax(0, 1fr)", "minmax(0, 1fr)", "minmax(0, 1fr)", "280px"]);
   assert.deepEqual(tracks(r.narrow), ["216px", "minmax(0, 1fr)", "minmax(0, 1fr)", "minmax(0, 1fr)", "0px"]);
   assert.equal(r.shrink, 40);
 });
 
-test("paramsRow: число дорожек в обеих раскладках одно — сетка интерполируется", () => {
-  for (const w of [W1440, W1280, 1300, 1360]) for (const n of [1, 2, 3, 4]) {
+test("paramsRow: число дорожек в обеих раскладках одно — сетка интерполируется; степпер остаётся в обеих", () => {
+  for (const w of [W1440, W1280, W1280S, 1300, 1360]) for (const n of [1, 2, 3, 4]) {
     const r = paramsRow(w, n);
-    assert.equal(tracks(r.wide).length, n + 2, `${w}/${n}`);
-    assert.equal(tracks(r.narrow).length, n + 2, `${w}/${n}`);
+    assert.equal(tracks(r.wide).length, tracks(r.narrow).length, `${w}/${n}`);
+    assert.equal(tracks(r.wide).length, r.list ? 3 : n + 2, `${w}/${n}`);
+    assert.equal(pxOf(tracks(r.wide)[0]), STEPPER + 16, `${w}/${n}`);
+    assert.equal(pxOf(tracks(r.narrow)[0]), STEPPER_NARROW + 16, `${w}/${n}`);
   }
 });
 
-test("paramsRow при 1280: переключатели — только в «Все параметры», в узкой степпер уходит, варианты с названием", () => {
-  const r = paramsRow(W1280, 3);
-  assert.equal(r.switches, false);
-  assert.equal(r.stepper, false);
-  assert.deepEqual(tracks(r.wide), ["232px", "minmax(0, 1fr)", "minmax(0, 1fr)", "minmax(0, 1fr)", "0px"]);
-  assert.deepEqual(tracks(r.narrow), ["0px", "minmax(0, 1fr)", "minmax(0, 1fr)", "minmax(0, 1fr)", "0px"]);
-  // варианты 226.67 → 165.33: описание держит ширину покоя
-  assert.equal(Math.round(r.shrink * 100) / 100, 61.33);
-  // в узкой — не уже, чем нужно названию
-  assert.ok((W1280 - 416 - 96 - 192 + 16) / 3 - 16 >= 138);
+test("paramsRow при 1280 (1232 и 1217): степпер остаётся на плите, варианты в узкой — списком, название встаёт целиком", () => {
+  for (const w of [W1280, W1280S]) {
+    const r = paramsRow(w, 3);
+    assert.equal(r.switches, false, `${w}`);
+    const g = r.list;
+    assert.ok(g, `${w}: список`);
+    if (!g) continue;
+    // карточками рядом со степпером 200 названию места нет — поэтому список
+    const card = (cells(deckWidths(w).narrow) - 216) / 3 - 16;
+    assert.ok(card < VARIANT_NAME, `${w}`);
+    // одна колонка строк по 24 через 8 — ровно ряд 88
+    assert.equal(g.cols, 1);
+    assert.equal(3 * g.pillH + 2 * 8, 88);
+    // название не обрезается ни в карточке, ни в строке, и ширина его места одна на всём ходу
+    assert.ok(g.title >= LONGEST_TITLE, `${w}: ${g.title}`);
+    for (const k of ["wide", "narrow"] as const) {
+      const c = listCard(g, 0)[k];
+      // название не заходит на галочку справа (зазор 8) ни в карточке, ни в строке
+      assert.ok(c.text.x + g.title + 8 <= c.box.x + 0.01, `${w} ${k}`);
+    }
+  }
+});
+
+test("listCard: карточки широкой раскладки — ряд во всю дорожку вариантов; строки узкой — столбиком в её пределах", () => {
+  for (const w of [W1280, W1280S]) for (const n of [3, 4]) {
+    const g = paramsRow(w, n).list;
+    if (!g) continue;
+    const block = (deck: number, st: number) => cells(deck) - st - 16;
+    const bw = block(deckWidths(w).wide, STEPPER + 16), bn = block(deckWidths(w).narrow, STEPPER_NARROW + 16);
+    const cs = Array.from({ length: n }, (_, i) => listCard(g, i));
+    // широкая: подряд через 16, последняя — у края дорожки
+    for (let i = 1; i < n; i++) assert.ok(Math.abs(cs[i].wide.x - (cs[i - 1].wide.x + cs[i - 1].wide.w + 16)) < 0.01, `${w}/${n}/${i}`);
+    assert.ok(Math.abs(cs[n - 1].wide.x + cs[n - 1].wide.w - bw) < 0.01, `${w}/${n}`);
+    // узкая: в пределах дорожки и ряда 88, без наложений
+    for (const c of cs) {
+      assert.ok(c.narrow.x + c.narrow.w <= bn + 0.01 && c.narrow.y + c.narrow.h <= 88 + 0.01, `${w}/${n}`);
+      // галочка и название — внутри своей карточки в обеих раскладках
+      for (const k of ["wide", "narrow"] as const) {
+        const b = c[k];
+        assert.ok(b.box.x >= 0 && b.box.x + 20 <= b.w && b.box.y >= 0 && b.box.y + 20 <= b.h, `${w}/${n} ${k} галочка`);
+        assert.ok(b.text.x + g.title <= b.w + 0.01 && b.text.y >= 0 && b.text.y + 24 <= b.h + 0.01, `${w}/${n} ${k} название`);
+      }
+    }
+    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+      const a = cs[i].narrow, b = cs[j].narrow;
+      const sep = a.x + a.w <= b.x + 0.01 || b.x + b.w <= a.x + 0.01 || a.y + a.h <= b.y + 0.01 || b.y + b.h <= a.y + 0.01;
+      assert.ok(sep, `${w}/${n}: ${i} и ${j}`);
+    }
+  }
 });
 
 test("paramsRow: переключатели уходят ровно там, где варианту меньше 173 px (колода 1350)", () => {

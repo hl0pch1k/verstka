@@ -20,7 +20,7 @@ import { useSwap } from "../kit/useSwap";
 import { useHeld, useModelOn } from "./ImproveNote";
 import { ParamsAll } from "./ParamsAll";
 import { useDeckWrap } from "../deck/useDeckFit";
-import { ctaShort, paramsRow } from "./morph";
+import { ctaShort, listCard, paramsRow, type VariantListGeo } from "./morph";
 import {
   buildRequest, eyesOn, imagesHint, picturesOn, presetParams, SLIDES_LOCKED, slidesView, slideWord, startFailure, stepSlides,
   summaryLine, toggleEyes as nextEyes, togglePictures as nextPictures, toggleStrategy, variantCards, writesHint, headLine,
@@ -280,26 +280,55 @@ function ShortSlides({ pp }: { pp: ParamsPlate }) {
 const SW_ROW = { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, height: 32 } as const;
 const SW_NAME = { fontSize: 14, fontWeight: 600, lineHeight: "20px", color: "#FFFFFF" } as const;
 
+/** Вариант списком (окно около 1280, узкая колода; morph.ts `VariantListGeo`): карточка ряда, которая в узкой раскладке
+ *  перестраивается в строку-таблетку списка — сначала «лесенкой» (ниже и ниже, ещё в ряду), затем съезжает в столбик и
+ *  расширяется; название и галочка едут transform'ом на свои места, описание гаснет. Карточка, её название и галочка —
+ *  одни и те же в обеих раскладках: ничего из них не гаснет, ничего не наезжает. */
+function ListCard({ v, i, g, onToggle }: { v: VariantCard; i: number; g: VariantListGeo; onToggle(): void }) {
+  const c = listCard(g, i);
+  const vars = {
+    "--vi": i, "--vn": g.n, "--vc": c.col, "--vcs": g.cols, "--vyn": `${c.narrow.y}px`, "--vhn": `${g.pillH}px`,
+    "--vbyn": `${c.narrow.box.y}px`, "--vtyn": `${c.narrow.text.y}px`, "--vtm": `${g.title}px`, "--vdw": `${g.card - 32}px`,
+  } as CSSProperties;
+  return (
+    <div className="pp-vi" style={vars}>
+      <div className="p2-stag" style={{ transitionDelay: `${40 + i * 40}ms` }}>
+        <button type="button" role="checkbox" aria-checked={v.on} className={cls("p2-vc pp-vc", v.on && "p2-vc-on")} onClick={onToggle} title={v.full}>
+          <span className="pp-vt pp-vtl" style={{ fontSize: 16, fontWeight: 700, lineHeight: "24px", color: "#FFFFFF" }}>{v.title}</span>
+          <span className="p2-vbox pp-vbl" aria-hidden="true"><Icon name="check" size={12} /></span>
+          <span className="hp-wo pp-vdl" style={{ fontSize: 13, fontWeight: 500, lineHeight: "20px", color: "rgba(255,255,255,.64)" }}>
+            <span className="pp-vt">{v.desc}</span>
+          </span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /** Тело плиты 03 (слот `p3`): строка под рядом заголовка, короткий ряд `#p2-b3` и «Все параметры» `#p2-b3m`; стрелка под
  *  «03» — ParamsMore. Короткий ряд перестраивается вместе с колодой (V2 «03 · сводка уступает место…»): те же дорожки,
  *  степпер 216 → 200, переключатели 264 → 0 (гаснут на месте), у вариантов описание и галочка справа гаснут, галочка
  *  проявляется на месте описания. Дорожки — по ширине окна (morph.ts `paramsRow`): при 1280 переключатели только в «Все
- *  параметры», в узкой колоде уходит и степпер (варианты — с названием). */
+ *  параметры», а в узкой колоде варианты встают списком рядом со степпером (степпер остаётся всегда — решение владельца:
+ *  число слайдов видно и меняется прямо на плите). */
 export function ParamsBody({ pp }: { pp: ParamsPlate }) {
   const { ui } = useApp();
   const create = ui.screen === "create";
   const more = create && ui.more;
   const on = create && ui.open === "text" && !ui.more;
   const row = paramsRow(useDeckWrap(), pp.cards.length);
+  const list = row.list;
   return (
     <>
       <ParamsLine pp={pp} />
-      <div id="p2-b3" className={cls("p2-body p2-params pp-row", show(on))}
+      <div id="p2-b3" className={cls("p2-body p2-params pp-row", list && "pp-lst", show(on))}
         style={{ "--pp-tw": row.wide, "--pp-tn": row.narrow, "--pp-vd": `${row.shrink}px` } as CSSProperties}>
-        <div className={cls("pp-stc", !row.stepper && "pp-stg")}>
-          <div className={row.stepper ? undefined : "hp-wo"}><ShortSlides pp={pp} /></div>
-        </div>
-        {pp.cards.map((v, i) => (
+        <div className="pp-stc"><ShortSlides pp={pp} /></div>
+        {list ? (
+          <div className="pp-vs" role="group" aria-label="Варианты оформления">
+            {pp.cards.map((v, i) => <ListCard key={v.name} v={v} i={i} g={list} onToggle={() => pp.toggle(v.name)} />)}
+          </div>
+        ) : pp.cards.map((v, i) => (
           <div key={v.name} className="p2-stag" style={{ transitionDelay: `${40 + i * 40}ms` }}>
             <button type="button" role="checkbox" aria-checked={v.on} className={cls("p2-vc pp-vc", v.on && "p2-vc-on")} onClick={() => pp.toggle(v.name)} title={v.full}>
               <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, width: "100%" }}>
