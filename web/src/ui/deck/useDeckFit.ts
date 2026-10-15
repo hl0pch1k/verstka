@@ -1,11 +1,8 @@
-// Раскладка колоды для того, что решает JS и CSS на экране, ещё не перенесённом на непрерывное перестроение
-// (`data-fit` колоды, компактный «Результат»). Решение — по целевой
-// ширине (fit.ts `deckLayout`): обёртка колоды (`hp-wrap`) не анимируется, колода = обёртка − место помощника. Открытие —
-// узкая раскладка с первого кадра; закрытие — узкая держится, пока сетка обёртки не доехала (`transitionend` на
-// grid-template-columns, запасной таймер — ход 340 мс + 40). Посреди хода раскладка не меняется.
-// «Создать», «Сборка», слои и лист «Подробнее» этим не пользуются: их содержимое перестраивается вместе с колодой каждый
-// кадр (ui/create/morph.ts, ui/build/columns.ts, ui/details/sheetMorph.ts) и берёт отсюда только ширину обёртки
-// (`useDeckWrap`) — по ней считаются обе раскладки сразу.
+// Ширина колоды для её содержимого. Всё, что перестраивается вместе с колодой каждый кадр («Создать», «Сборка», слои,
+// лист «Подробнее»: ui/create/morph.ts, ui/build/columns.ts, ui/details/sheetMorph.ts), берёт отсюда только ширину
+// обёртки (`useDeckWrap`) — по ней считаются обе раскладки сразу. Раскладку по целевой ширине (fit.ts `deckLayout`:
+// открытие — узкая с первого кадра; закрытие — узкая держится, пока сетка обёртки не доехала, `transitionend` на
+// grid-template-columns, запасной таймер — ход 340 мс + 40) читает только «Результат» (`useDeckFit`, `useDeckWidth`).
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useState, type RefObject } from "react";
 import { prefersReducedMotion } from "../../lib/motion";
 import { CLOSE_HOLD_MS, deckLayout, type DeckFit, type DeckLayout } from "./fit";
