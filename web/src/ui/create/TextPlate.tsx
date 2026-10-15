@@ -342,20 +342,157 @@ function useBusyHeld(busy: boolean): boolean {
   return busy || held;
 }
 
-/** Две копии поля: колода сузилась или расширилась, а курсор стоял в уходящей копии — он переходит в активную на то же
- *  место (выделение и прокрутка — те же), без прокрутки страницы. */
+/** Строки текста в копии поля: `line(i)` — номер строки, на которой стоит символ `i` (0…n, n — место за последним
+ *  символом, там встаёт курсор в конце); не убывает по `i`. `lh` — высота строки, `pad` — отступ текста сверху,
+ *  `height` — высота окна поля (clientHeight), `max` — предел прокрутки. */
+export interface CopyLines {
+  n: number;
+  line(i: number): number;
+  lh: number;
+  pad: number;
+  height: number;
+  max: number;
+}
+
+/** Место верха поля в тексте: символ, с которого начинается первая видимая строка, и на сколько пикселей эта строка уже
+ *  ушла вверх. Копии разной ширины переносят строки по-разному — общее у них только место в тексте. */
+export interface TextSpot {
+  at: number;
+  dy: number;
+}
+
+/** Первый символ строки `k`: наименьший `i` из 0…n, у которого `line(i) >= k` (двоичный поиск — для длинного текста
+ *  хватает двух десятков замеров). */
+export function lineStart(c: Pick<CopyLines, "n" | "line">, k: number): number {
+  if (k <= 0) return 0;
+  let lo = 0, hi = c.n;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (c.line(mid) >= k) hi = mid;
+    else lo = mid + 1;
+  }
+  return lo;
+}
+
+/** Где в тексте верх поля, прокрученного на `scrollTop`. */
+export function spotAt(c: CopyLines, scrollTop: number): TextSpot {
+  const y = Math.max(0, scrollTop - c.pad);
+  const k = Math.floor(y / c.lh);
+  return { at: lineStart(c, k), dy: y - k * c.lh };
+}
+
+/** Строка курсора `caret` видна целиком в поле, прокрученном на `scrollTop`. */
+export function caretShown(c: CopyLines, scrollTop: number, caret: number): boolean {
+  const top = c.pad + c.line(caret) * c.lh;
+  return top >= scrollTop - 0.5 && top + c.lh <= scrollTop + c.height + 0.5;
+}
+
+/** Прокрутка копии, при которой наверху поля — то же место текста: строка с символом `spot.at`, ушедшая вверх на те же
+ *  `dy`. `caret` — курсор, который был виден в уходящей копии: он остаётся виден и здесь (широкая строка в узкой копии —
+ *  несколько строк, и курсор мог бы уйти под низ поля). */
+export function scrollFor(c: CopyLines, spot: TextSpot, caret: number | null = null): number {
+  let top = c.pad + c.line(spot.at) * c.lh + spot.dy;
+  if (caret !== null) {
+    const bottom = c.pad + (c.line(caret) + 1) * c.lh;
+    if (bottom > top + c.height) top = bottom - c.height;
+  }
+  return Math.min(Math.max(0, top), c.max);
+}
+
+/** Свойства, от которых зависят переносы строк поля, — двойник берёт их у копии. */
+const TWIN_PROPS = [
+  "font-family", "font-size", "font-weight", "font-style", "font-stretch", "font-variant", "font-feature-settings", "font-variation-settings",
+  "font-kerning", "font-optical-sizing", "letter-spacing", "word-spacing", "line-height", "text-transform", "text-indent", "tab-size",
+  "white-space", "white-space-collapse", "text-wrap-mode", "text-wrap-style", "overflow-wrap", "word-break", "line-break", "hyphens",
+  "text-rendering", "direction", "unicode-bidi",
+];
+
+/** Строки копии поля. В textarea строк не видно — их показывает двойник: невидимый блок той же ширины текста и того же
+ *  шрифта, в нём номер строки символа — по его прямоугольнику. Копия без раскладки (скрыта в узком окне) — null. */
+function copyLines(ta: HTMLTextAreaElement): { lines: CopyLines; drop(): void } | null {
+  if (!ta.isConnected || ta.clientHeight === 0) return null;
+  const cs = getComputedStyle(ta);
+  const px = (v: string) => parseFloat(v) || 0;
+  const side = px(cs.paddingLeft) + px(cs.paddingRight), border = px(cs.borderLeftWidth) + px(cs.borderRightWidth);
+  const bar = Math.max(0, ta.offsetWidth - ta.clientWidth - border);
+  const width = px(cs.width) - (cs.boxSizing === "border-box" ? side + border : 0) - bar;
+  const lh = px(cs.lineHeight) || px(cs.fontSize) * 1.2;
+  const value = ta.value, n = value.length;
+  // двойник строится при первом замере: поле наверху текста и без курсора его не требует
+  let twin: { el: HTMLDivElement; text: Text; base: number; range: Range } | null = null;
+  const make = () => {
+    const el = document.createElement("div");
+    for (const p of TWIN_PROPS) {
+      const v = cs.getPropertyValue(p);
+      if (v) el.style.setProperty(p, v);
+    }
+    Object.assign(el.style, {
+      position: "fixed", left: "-100000px", top: "0", width: `${width}px`, margin: "0", padding: "0", border: "0", boxSizing: "content-box",
+      overflow: "hidden", visibility: "hidden", pointerEvents: "none", contain: "layout style",
+    });
+    // символ нулевой ширины за текстом — место курсора в конце (и строка за последним переводом строки, как в поле)
+    const text = document.createTextNode(`${value}\u200b`);
+    el.appendChild(text);
+    document.body.appendChild(el);
+    return { el, text, base: el.getBoundingClientRect().top, range: document.createRange() };
+  };
+  const memo = new Map<number, number>([[0, 0]]);
+  const line = (i: number): number => {
+    const at = Math.min(Math.max(0, i), n);
+    const known = memo.get(at);
+    if (known !== undefined) return known;
+    twin ??= make();
+    twin.range.setStart(twin.text, at);
+    twin.range.setEnd(twin.text, at + 1);
+    const r = twin.range.getClientRects()[0];
+    // строка — по середине прямоугольника знака: его высота — высота шрифта, а не строки
+    const k = r ? Math.max(0, Math.floor((r.top + r.height / 2 - twin.base) / lh)) : line(at - 1);
+    memo.set(at, k);
+    return k;
+  };
+  return {
+    lines: { n, line, lh, pad: px(cs.paddingTop), height: ta.clientHeight, max: Math.max(0, ta.scrollHeight - ta.clientHeight) },
+    drop: () => twin?.el.remove(),
+  };
+}
+
+/** Две копии поля: колода сузилась или расширилась — копии меняются перекрёстным затуханием. На каждой смене входящая
+ *  копия встаёт на то же место текста, что и уходящая (первая видимая строка — та же; в покое скрытая копия могла стоять
+ *  где угодно), фокус тут ни при чём: посреди хода обе показывают одно и то же. Курсор стоял в уходящей копии — он
+ *  переходит во входящую на то же место (выделение то же) и не уходит из виду, без прокрутки страницы. Смена туда и
+ *  обратно без прокрутки между ними возвращает уходящую копию ровно туда, где она стояла. */
 function useCopyFocus(active: RefObject<HTMLTextAreaElement>, other: RefObject<HTMLTextAreaElement>, narrow: boolean) {
   const was = useRef(narrow);
+  // последняя переданная прокрутка: копия, куда встала, на что и откуда (место текста)
+  const last = useRef<{ el: HTMLTextAreaElement; top: number; value: string; spot: TextSpot } | null>(null);
   useLayoutEffect(() => {
     if (was.current === narrow) return;
     was.current = narrow;
     const to = active.current, from = other.current;
-    if (!to || !from || document.activeElement !== from) return;
+    if (!to || !from) return;
+    const focused = document.activeElement === from;
     const { selectionStart, selectionEnd, selectionDirection } = from;
-    const ratio = from.scrollHeight > from.clientHeight ? from.scrollTop / (from.scrollHeight - from.clientHeight) : 0;
-    to.focus({ preventScroll: true });
-    to.setSelectionRange(selectionStart, selectionEnd, selectionDirection ?? undefined);
-    to.scrollTop = ratio * Math.max(0, to.scrollHeight - to.clientHeight);
+    const caret = selectionDirection === "backward" ? selectionStart : selectionEnd;
+    if (focused) {
+      to.focus({ preventScroll: true });
+      to.setSelectionRange(selectionStart, selectionEnd, selectionDirection ?? undefined);
+    }
+    const src = copyLines(from);
+    if (!src) return;
+    const dst = copyLines(to);
+    try {
+      if (!dst) return;
+      const prev = last.current;
+      // уходящая копия стоит там, куда её поставила прошлая смена, — место текста то же, что тогда (пересчёт с её
+      // переносов сдвинул бы его на строку назад при каждой смене)
+      const spot = prev && prev.el === from && prev.value === from.value && Math.abs(prev.top - from.scrollTop) < 1 ? prev.spot : spotAt(src.lines, from.scrollTop);
+      const keep = focused && caretShown(src.lines, from.scrollTop, caret) ? caret : null;
+      to.scrollTop = scrollFor(dst.lines, spot, keep);
+      last.current = { el: to, top: to.scrollTop, value: to.value, spot };
+    } finally {
+      src.drop();
+      dst?.drop();
+    }
   }, [narrow, active, other]);
 }
 
