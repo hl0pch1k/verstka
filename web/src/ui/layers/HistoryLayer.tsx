@@ -28,7 +28,7 @@ import { useRise } from "../result/useRise";
 import { useNarrow } from "../create/useNarrow";
 import { Tx, TxNarrow } from "../kit/Tx";
 import { coverStrategy, historyView, openPlan, type HistItem, type OpenPlan } from "./history";
-import { Layer, lsDelay, useLayerPresence } from "./Layer";
+import { Layer, LAYER_MS, lsDelay, useLayerPresence } from "./Layer";
 
 /** Сколько открытие ждёт декодирования первого слайда, прежде чем ехать как есть. */
 const DECODE_WAIT = 800;
@@ -89,22 +89,23 @@ export function HistoryLayer() {
   const listErr = notices.history?.kind === "error" ? humanError(notices.history.text, LIST_FAILED) : null;
   const presence = useLayerPresence(open);
   const narrow = useNarrow();
-  // карточки вне окна списка не рисуются (layers.css, content-visibility: auto) — ход помощника их не пересчитывает. Пока
-  // карточка пропущена, переходы у неё внутри выключены (`gh-skip`): показалась после хода — встаёт сразу в нынешней
-  // раскладке, а не доигрывает ход из той, в которой её застал помощник; метка снимается через два кадра. Слушатель — до
-  // первого кадра слоя (useLayoutEffect): первые события приходят в нём
+  // на ходу помощника карточки вне окна списка не рисуются (`gh-moving`, layers.css: content-visibility: auto) — ход не
+  // перестраивает сотню карточек в каждом кадре; в покое рисуются все: поиск по странице, прокрутка рывком, тень
+  // наведения — как без него. Метка ставится в том же кадре, что и раскладка колоды, и снимается, когда ход кончился
   const listRef = useRef<HTMLDivElement>(null);
+  const seenNarrow = useRef(narrow);
   useLayoutEffect(() => {
+    if (seenNarrow.current === narrow) return;
+    seenNarrow.current = narrow;
     const el = listRef.current;
     if (!el) return;
-    const onState = (e: Event) => {
-      const li = e.target as HTMLElement;
-      if ((e as Event & { skipped?: boolean }).skipped) return void li.classList.add("gh-skip");
-      requestAnimationFrame(() => requestAnimationFrame(() => li.classList.remove("gh-skip")));
+    el.classList.add("gh-moving");
+    const t = window.setTimeout(() => el.classList.remove("gh-moving"), LAYER_MS + 80);
+    return () => {
+      window.clearTimeout(t);
+      el.classList.remove("gh-moving");
     };
-    el.addEventListener("contentvisibilityautostatechange", onState, true);
-    return () => el.removeEventListener("contentvisibilityautostatechange", onState, true);
-  }, [presence.mounted]);
+  }, [narrow]);
   // список считается, только пока слой на экране (и доигрывает уход), — колода перерисовывается часто, раздел закрыт
   const mounted = presence.mounted;
   const current = ui.screen === "result" ? generationId : ui.screen === "build" ? buildJob?.generation ?? null : null;
