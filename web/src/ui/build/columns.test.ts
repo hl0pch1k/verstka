@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { AGENT, AGENT_TIGHT, boardColumns, boardLabel, buildMorph, MIN_CARD, phaseScale, PHASE_NARROW, rollOf } from "./columns";
+import { AGENT, AGENT_TIGHT, ROLE_TEXT, boardColumns, boardLabel, buildMorph, MIN_CARD, phaseScale, PHASE_NARROW, rollOf } from "./columns";
 
 const A = 16 / 9;
 /** Обёртка колоды при окне 1440 и 1280 (поля страницы 24 + 24). */
@@ -23,7 +23,9 @@ test("buildMorph при 1440 — как V2: колонка агента 416 → 
   const m = buildMorph(W1440);
   assert.equal(m.tight, false);
   assert.equal(m.agent, 320);
-  assert.equal(m.hpd, 96);
+  // текст ролей ленты агента: 416 − 44 и 320 − 44 (V2: строки мысли переносятся в 276 px)
+  assert.equal(m.textWide, 372);
+  assert.equal(m.textNarrow, 276);
   assert.equal(m.left, 536);
   assert.equal(m.cell, 344);
   assert.equal(m.list, 832);
@@ -38,7 +40,8 @@ test("buildMorph при 1280 — тесная колода: колонка аг�
   const m = buildMorph(W1280);
   assert.equal(m.tight, true);
   assert.equal(m.agent, AGENT_TIGHT);
-  assert.equal(m.hpd, AGENT - AGENT_TIGHT);
+  assert.equal(m.textNarrow, AGENT_TIGHT - ROLE_TEXT);
+  assert.equal(m.textWide - m.textNarrow, AGENT - AGENT_TIGHT);
   assert.equal(m.left, 408);
   assert.equal(m.cell, 216);
   assert.equal(m.list, 672);

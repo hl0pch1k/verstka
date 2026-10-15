@@ -5,10 +5,12 @@
 // работающая роль и следующая были видны над нижним краем.
 // Помощник сужает колонку 416 → 320 (V2 версии 100; в тесной колоде — 288): многострочный текст (мысли, подсказки
 // очереди, причина ошибки) — стопки из двух копий (hp-tx, create.css): широкая гаснет, узкая проявляется на месте, ни
-// одна не переносится заново посреди хода. Высоты ролей меняются вместе со сдвигом ленты одной кривой: сдвиг считается
-// для обеих раскладок сразу (по высотам копий), высота стопки ленты на ходу идёт от широкой к узкой линейно (build.css,
-// `--hw`, `--hdd`) — роли движутся в одну сторону, нижняя видимая стоит у края.
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+// одна не переносится заново посреди хода. Ширины копий — постоянные, в px (build.css `--bd-tw`, `--bd-tn`): строка,
+// пришедшая посреди хода, свёрстана на ширину своей раскладки сразу, а не на живую ширину колонки. Высоты ролей
+// меняются вместе со сдвигом ленты одной кривой: сдвиг считается для обеих раскладок сразу (по высотам копий; замер —
+// только когда меняются строки ленты, не каждый кадр и не каждую секунду часов), высота стопки ленты на ходу идёт от
+// широкой к узкой линейно (build.css, `--hw`, `--hdd`) — роли движутся в одну сторону, нижняя видимая стоит у края.
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { PhaseKey } from "../../lib/agent";
 import { cls } from "../kit/cls";
 import { Icon, type IconName } from "../kit/Icon";
@@ -23,7 +25,12 @@ const ROLE_CLS: Record<RoleStatus, string> = {
   queue: "p2-role-pend", now: "p2-role-act", done: "p2-role-done", error: "bf-role-err", skip: "bf-role-skip",
 };
 const STATUS_WORD: Partial<Record<RoleStatus, string>> = { done: "готово", now: "сейчас", error: "ошибка" };
-/** Нижний отступ ленты (V2: 652 − 64 − 24 = 564 px видно над краем). */
+/** Нижний отступ ленты (V2: 652 − 64 − 24 = 564 px видно над краем).
+ *  Сайт: окно 564 — в обеих раскладках. V2 v100 в узкой берёт 500 (`hpNar ? 500 : 564`) — остаток раскладки, где узкая
+ *  колонка агента стояла под фазой («окно ленты ниже на 64»); в v100 колонка агента — во всю высоту плиты в обеих
+ *  раскладках (замер V2: aside 652, лента 588 и закрытой, и открытой), и с 500 открытие помощника каждый раз уводило бы
+ *  ленту на 64 px дальше, чем нужно (такт 16: сдвиг −120 вместо −56), — работающая роль и следующая вставали бы на 64 px
+ *  выше нижнего края, хотя ни одна строка не перенеслась. */
 const PAD_BOTTOM = 24;
 /** Зазор между ролями ленты. */
 const GAP = 12;
@@ -77,10 +84,12 @@ function Dot({ r }: { r: RoleView }) {
   );
 }
 
-/** Высоты ролей ленты в широкой и узкой раскладке — по высотам копий её стопок (их ширины на ходу постоянны, так что
- *  посреди хода получается то же, что в покое). Заодно ставит стопкам `--hw` (высота в широкой) и `--hdd` (на сколько
- *  выше в узкой): по ним их высота на ходу (build.css). Сначала все замеры, потом записи — без лишних раскладок. */
-function measure(el: HTMLElement): { wide: number[]; narrow: number[] } {
+/** Высоты ролей ленты в широкой и узкой раскладке — по высотам копий её стопок (их ширины постоянны, так что посреди
+ *  хода получается то же, что в покое), отступ первой роли и сколько ленты видно над нижним краем. Заодно ставит стопкам
+ *  `--hw` (высота в широкой) и `--hdd` (на сколько выше в узкой): по ним их высота на ходу (build.css). Сначала все
+ *  замеры, потом записи — без лишних раскладок. */
+interface LogHeights { wide: number[]; narrow: number[]; top: number; view: number }
+function measure(el: HTMLElement): LogHeights {
   const items = [...el.children] as HTMLElement[];
   const rows = items.map((li) => {
     const stacks = [...li.querySelectorAll<HTMLElement>(".hp-tx")].map((st) => {
@@ -90,15 +99,29 @@ function measure(el: HTMLElement): { wide: number[]; narrow: number[] } {
     });
     return { h: li.offsetHeight, stacks };
   });
+  const top = items[0]?.offsetTop ?? 0;
+  const view = el.clientHeight - PAD_BOTTOM;
   for (const r of rows) for (const s of r.stacks) {
     s.st.style.setProperty("--hw", `${s.w}px`);
     s.st.style.setProperty("--hdd", `${s.n - s.w}px`);
   }
   const sum = (r: (typeof rows)[number], k: "w" | "n") => r.h + r.stacks.reduce((a, s) => a + s[k] - s.live, 0);
-  return { wide: rows.map((r) => sum(r, "w")), narrow: rows.map((r) => sum(r, "n")) };
+  return { wide: rows.map((r) => sum(r, "w")), narrow: rows.map((r) => sum(r, "n")), top, view };
 }
 
-export function Roles({ view, narrow }: { view: BuildView; narrow: boolean }) {
+const same = (a: LogHeights | null, b: LogHeights) =>
+  !!a && a.top === b.top && a.view === b.view && a.wide.join() === b.wide.join() && a.narrow.join() === b.narrow.join();
+
+/** Что меняет высоты ролей ленты: строки (их тексты), ошибка, статусы ролей. Часы и ход помощника — нет. */
+const logShape = (view: BuildView) =>
+  view.roles.map((r) => `${r.key}:${r.status}:${r.lines.map((l) => `${l.key}/${l.slide ?? ""}/${l.text}/${l.fix ?? ""}`).join("\u0001")}`).join("|")
+  + `|${view.failed?.text ?? ""}`;
+
+export function Roles({ view, narrow, widths }: {
+  view: BuildView; narrow: boolean;
+  /** Ширины текста ролей в широкой и узкой раскладке (columns.ts `textWide`, `textNarrow`): по ним — замер. */
+  widths: string;
+}) {
   const queued = view.phase === "queued";
   const last = view.roles.length - 1;
 
@@ -106,20 +129,32 @@ export function Roles({ view, narrow }: { view: BuildView; narrow: boolean }) {
   // пропустил, а сборка ещё сохраняет файлы) — на виду последняя пройденная, лента не уезжает к началу. Считается для
   // обеих раскладок; помощник меняет раскладку — сдвиг едет вместе с высотами ролей (открытие 520 мс, закрытие 340)
   const list = useRef<HTMLOListElement>(null);
-  const [roll, setRoll] = useState({ wide: 0, narrow: 0 });
+  const [hs, setHs] = useState<LogHeights | null>(null);
   const at = view.roles.findIndex((r) => r.status === "now" || r.status === "error");
   const reached = view.roles.map((r) => r.status !== "queue").lastIndexOf(true);
   const focus = at >= 0 ? at : view.phase === "done" ? last : reached;
+  // замер — только когда меняются строки ленты (и ширины текста — с окном) и когда догрузились шрифты: не каждую
+  // перерисовку (часы идущей сборки — раз в секунду) и не посреди хода помощника
+  const shape = logShape(view);
   useLayoutEffect(() => {
     const el = list.current;
-    if (!el) return;
-    const h = measure(el);
-    if (focus < 0) return void setRoll((cur) => (cur.wide || cur.narrow ? { wide: 0, narrow: 0 } : cur));
-    const top = (el.firstElementChild as HTMLElement | null)?.offsetTop ?? 0;
-    const view = el.clientHeight - PAD_BOTTOM;
-    const next = { wide: rollOf(h.wide, GAP, top, focus + 1, view), narrow: rollOf(h.narrow, GAP, top, focus + 1, view) };
-    setRoll((cur) => (cur.wide === next.wide && cur.narrow === next.narrow ? cur : next));
-  });
+    if (!el) return void setHs(null);
+    let alive = true;
+    const run = () => {
+      if (!alive || !list.current) return;
+      const next = measure(list.current);
+      setHs((cur) => (same(cur, next) ? cur : next));
+    };
+    run();
+    void document.fonts?.ready.then(run);
+    return () => {
+      alive = false;
+    };
+  }, [shape, widths, queued]);
+  const roll = useMemo(() => {
+    if (!hs || focus < 0) return { wide: 0, narrow: 0 };
+    return { wide: rollOf(hs.wide, GAP, hs.top, focus + 1, hs.view), narrow: rollOf(hs.narrow, GAP, hs.top, focus + 1, hs.view) };
+  }, [hs, focus]);
   // помощник закрывается: сдвиг — за 340 мс, как сетка и высоты стопок (следующие сдвиги — снова 520)
   const was = useRef(narrow);
   const closing = was.current && !narrow;

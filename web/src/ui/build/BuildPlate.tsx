@@ -162,13 +162,13 @@ function BuildContent({ job, leaving }: { job: ActiveJob | null; leaving: boolea
   const vt = failed ? `остановилась на шаге ${view.step.replace(/^ошибка на шаге /, "")}` : queued ? "в очереди" : view.phase === "done" ? "готово"
     : `${view.step}${nowRole ? ` — ${nowRole.title.toLowerCase()}` : ""}`;
   const prog = view.progress ?? 0;
-  // обе раскладки плиты — по ширине обёртки колоды (columns.ts): колонка агента в узкой, `--hpd` стопок ленты агента,
-  // кегль фазы; активная копия стопок — по раскладке
+  // обе раскладки плиты — по ширине обёртки колоды (columns.ts): колонка агента в узкой, ширины текста ролей ленты
+  // агента в обеих (копии стопок — постоянной ширины), кегль фазы; активная копия стопок — по раскладке
   const wrap = useDeckWrap();
   const morph = useMemo(() => buildMorph(wrap), [wrap]);
   const narrow = useNarrow();
   const wide = useWideScreen();
-  const vars = { "--bd-an": `${morph.agent}px`, "--bd-hpd": `${morph.hpd}px`, "--bd-phf": `${morph.font}px` } as CSSProperties;
+  const vars = { "--bd-an": `${morph.agent}px`, "--bd-tw": `${morph.textWide}px`, "--bd-tn": `${morph.textNarrow}px`, "--bd-phf": `${morph.font}px` } as CSSProperties;
 
   return (
     <div className="bd-fxw">
@@ -206,7 +206,7 @@ function BuildContent({ job, leaving }: { job: ActiveJob | null; leaving: boolea
           )}
         </div>
       </div>
-      <Roles view={view} narrow={narrow} />
+      <Roles view={view} narrow={narrow} widths={`${morph.textWide}/${morph.textNarrow}`} />
     </div>
     </div>
   );
