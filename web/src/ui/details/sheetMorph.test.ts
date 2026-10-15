@@ -20,6 +20,37 @@ test("sheetMorph: при 1440 — раскладка V2 (лист 880 в узк�
   assert.equal(sheetMorph(TIGHT_INNER + HELPER_COL + SHEET_PAD - 1).tight, true);
 });
 
+test("sheetMorph: при 1366 и 1400 — тесная колода (дорожки V2 — только при полной колоде, окно от 1440)", () => {
+  // обёртка колоды — окно − 48
+  const W1366 = 1318, W1400 = 1352;
+  assert.deepEqual(sheetMorph(W1366), { tight: true, inner: 806, wrap: W1366 });
+  assert.deepEqual(sheetMorph(W1400), { tight: true, inner: 840, wrap: W1400 });
+  // колода на 1 px у́же полной — уже тесная
+  assert.equal(sheetMorph(W1440 - 1).tight, true);
+  assert.equal(sheetMorph(W1440).tight, false);
+});
+
+test("«Шаблон» с помощником: при 1366 и 1400 полоса V2 режет название шаблона и подписи макетов, тесная — нет", () => {
+  const css = cssFile("details.css");
+  const NAME = 113;    // «VK Tech» кеглем 24 (замер)
+  const CAPTION = 119; // подпись макета «Карточки слайд 7» (замер)
+  // название — содержимое листа без полей полосы (24 + 24), пяти дорожек фактов, шрифта и палитры и их зазоров (16)
+  const name = (inner: number, sel: string) => inner - 48 - [0, 1, 2, 3, 4].reduce((s, i) => s + track(css, sel, i), 0) - 5 * 16;
+  // подпись макета — треть колонки макетов (содержимое − «Правила» − зазор 24 − поля 48 − два зазора 16)
+  const caption = (inner: number, sel: string) => (inner - track(css, sel) - 24 - 48 - 32) / 3;
+  const v2 = ".hp-nar .dtp-band", t = ".hp-nar .dd-tight .dtp-band";
+  const v2g = ".hp-nar .dtp-g", tg = ".hp-nar .dd-tight .dtp-g";
+  // V2 при 1440: название 120, подпись 120 — помещаются; у́же полной колоды уже нет
+  assert.equal(name(880, v2), 120);
+  assert.equal(caption(880, v2g), 120);
+  for (const inner of [806, 840, TIGHT_INNER - 8]) assert.ok(name(inner, v2) < NAME, `V2 ${inner}: название ${name(inner, v2)}`);
+  for (const inner of [806, 840, TIGHT_INNER - 4]) assert.ok(caption(inner, v2g) < CAPTION, `V2 ${inner}: подпись ${caption(inner, v2g)}`);
+  // тесная колода: название целиком от 1217 до 1439; подпись при 1366 и 1400 — и со словом «слайд» (при 1280 оно уходит)
+  for (const inner of [705, 720, 806, 840, TIGHT_INNER - 1]) assert.ok(name(inner, t) >= NAME, `тесная ${inner}: название ${name(inner, t)}`);
+  for (const inner of [806, 840]) assert.ok(caption(inner, tg) >= CAPTION, `тесная ${inner}: подпись ${caption(inner, tg)}`);
+  assert.ok(caption(720, tg) < CAPTION);
+});
+
 test("«Файлы»: правая колонка в px — в покое те же 50 % − 8 и 44,09 % − 8 (380 при 1440), что у V2; факт паспорта у́же на половину", () => {
   const m = filesCols(sheetMorph(W1440));
   assert.equal(m.wide, 0.5 * (W1440 - 96) - 8);
