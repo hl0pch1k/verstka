@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { filesCols, filesVars, FILES_RIGHT, FILES_RIGHT_TIGHT, HELPER_COL, sheetMorph, SHEET_PAD, sumNarrowing, TIGHT_INNER } from "./sheetMorph";
+import { HELPER_COL, SHEET_PAD } from "../deck/layout";
+import { filesCols, filesVars, FILES_RIGHT, FILES_RIGHT_TIGHT, sheetMorph, sumNarrowing, TIGHT_INNER } from "./sheetMorph";
 import { textTight, TEXT_ROW } from "../layers/layerMorph";
 import { stackHeights } from "../kit/Tx";
 

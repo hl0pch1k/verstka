@@ -56,7 +56,8 @@ export function Lightbox() {
     return () => window.removeEventListener("keydown", onKey);
   }, [keys, n, total, close, setSelectedSlide]);
 
-  // слой стоит всегда (закрытым) — тогда первое открытие тоже въезжает снизу
+  // слой монтируется при открытии: сначала внизу (закрытым), со следующего кадра въезжает; после закрытия уезжает 520 мс
+  // и размонтируется (Layer, kit/usePresence)
   return (
     <Layer id="rt-lay-lb" open={open} top={0} z={5} label="Просмотр на весь экран" role="dialog" tone="dark" onClose={close}
       plateStyle={{ display: "flex", flexDirection: "column" }}>

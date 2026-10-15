@@ -8,6 +8,7 @@
 // меняется — меняется только окно.
 import { BOARD_GAP, fitColumns, STAGE_TITLE } from "../../lib/stage";
 import { bindShort } from "../../lib/typo";
+import { HELPER_COL, PLATE_PAD } from "../deck/layout";
 import type { BuildPhase } from "./buildView";
 
 /** Самая узкая карточка доски (широкая раскладка). */
@@ -21,10 +22,6 @@ export function boardColumns(w: number, h: number, n: number, aspect: number, mi
   return Math.max(base, fitColumns(w, h - 8, n, aspect));
 }
 
-/** Место помощника в обёртке колоды: плита 400 + зазор 16. */
-const HELPER_COL = 416;
-/** Поля плиты (48 + 48). */
-const PLATE_PAD = 96;
 /** Колонка агента и зазор: широкая раскладка (доска) и узкая (V2 версии 100). */
 export const AGENT = 416;
 export const AGENT_GAP = 48;

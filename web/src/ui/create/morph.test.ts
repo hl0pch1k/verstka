@@ -1,9 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  CARD_PAD_TIGHT, ctaShort, deckWidths, GAP_TIGHT, hintTail, HELPER_COL, moreCards, moreGrid, moreThird, NAME_TIGHT, paramsRow,
+  CARD_PAD_TIGHT, ctaShort, deckWidths, GAP_TIGHT, hintTail, moreCards, moreGrid, NAME_TIGHT, paramsRow,
   readyShort, ribbonRows, STEPPER, STEPPER_NARROW, STEPPER_TIGHT, VARIANT_NAME,
 } from "./morph";
+import { HELPER_COL } from "../deck/layout";
 
 // обёртка колоды: 1392 при окне 1440, 1232 при 1280, 1217 — 1280 с обычной полосой прокрутки страницы (15 px)
 const W1440 = 1392, W1280 = 1232, W1280S = 1217;
@@ -155,9 +156,10 @@ test("--hpd стопок в create.css сходится с геометрией 
   }
   // коробки переключателей «Все параметры» — треть ряда: у́же на треть места помощника (пока раскладка не тесная)
   for (const w of [W1440, 1360]) {
-    const t = moreThird(w);
-    assert.ok(Math.abs(hpd["c-swt"] - (t.wide - t.narrow)) < 0.001, `${w} c-swt`);
-    assert.ok(Math.abs(hpd["c-swd"] - (t.wide - t.narrow)) < 0.001, `${w} c-swd`);
+    const d = deckWidths(w);
+    const third = (d.wide - d.narrow) / 3;
+    assert.ok(Math.abs(hpd["c-swt"] - third) < 0.001, `${w} c-swt`);
+    assert.ok(Math.abs(hpd["c-swd"] - third) < 0.001, `${w} c-swd`);
   }
   // подсказка варианта: в CSS — значение при 1440 (поверх него — переменная morph.ts при любой ширине)
   assert.equal(hpd["c-vhint"], moreGrid(W1440, 3, false).vhint);

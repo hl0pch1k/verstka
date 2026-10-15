@@ -303,7 +303,7 @@ export function ParamsBody({ pp }: { pp: ParamsPlate }) {
         style={{ "--pp-tw": row.wide, "--pp-tn": row.narrow, "--pp-vd": `${row.shrink}px`, "--pp-tm": `${row.title}px` } as CSSProperties}>
         <div className="pp-stc"><ShortSlides pp={pp} tight={row.tight} /></div>
         {pp.cards.map((v, i) => (
-          <div key={v.name} className="pp-vw">
+          <div key={v.name}>
             <div className="p2-stag" style={{ transitionDelay: `${40 + i * 40}ms` }}>
               <button type="button" role="checkbox" aria-checked={v.on} className={cls("p2-vc pp-vc", v.on && "p2-vc-on")} onClick={() => pp.toggle(v.name)} title={v.full}>
                 <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, width: "100%" }}>

@@ -2,7 +2,7 @@
 // заново посреди хода»): широкая копия (hp-txw) и узкая (hp-txn) в одной клетке, каждая постоянной ширины на всём ходу
 // помощника (`--hpd` — на сколько клетка у́же в узкой раскладке, по `data-tx` в CSS или своим `hpd`). Активная копия —
 // по раскладке колоды (TxNarrow: помощник открыт и окно шире 900 px), вторая — aria-hidden.
-// Сайт (слои и лист «Подробнее», `hp-txl`, layers.css): высота стопки на ходу идёт линейно — от высоты широкой копии
+// Сайт (слои и лист «Подробнее», `.p2-lay .hp-txm` в layers.css): высота стопки на ходу идёт линейно — от высоты широкой копии
 // (`--hw`) до высоты в узкой раскладке (`--hw + --hdd`), узкая копия растёт линейно от нуля (`--hn`): так стопки и то,
 // что на ходу сжимается рядом (миниатюры с пропорцией), складываются в один ход — то, что ниже, не идёт вверх, а потом
 // вниз. Замер здесь, одним проходом для всех стопок (сначала все чтения, потом записи, и только изменившиеся): высоты
@@ -268,7 +268,7 @@ export function Tx({ tx, as = "p", wrap = "div", className, style, f, hpd, title
   const W = wrap;
   const T = as;
   return (
-    <W ref={ref as never} className={cls("hp-tx hp-txl", f && "hp-txf")} data-tx={tx} data-share={share} style={hpd === undefined ? undefined : ({ "--hpd": `${hpd}px` } as CSSProperties)}>
+    <W ref={ref as never} className={cls("hp-tx", f && "hp-txf")} data-tx={tx} data-share={share} style={hpd === undefined ? undefined : ({ "--hpd": `${hpd}px` } as CSSProperties)}>
       <T className={cls("hp-txw", className)} style={style} title={narrow ? undefined : title} aria-hidden={narrow || undefined}>{children}</T>
       <T className={cls("hp-txn", className)} style={style} title={narrow ? title : undefined} aria-hidden={!narrow || undefined}>{children}</T>
     </W>

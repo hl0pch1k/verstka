@@ -5,11 +5,8 @@
 // ширине обёртки колоды (`hp-wrap` не анимируется: закрыт помощник — колода во всю обёртку, открыт — на 416 у́же), и
 // ставятся переменными CSS; правила create.css переключают их классом `hp-nar`. Решения по порогам (переключатели в
 // коротком ряду, степпер в узком, тесная раскладка «Все параметры») не меняются посреди хода — меняется только окно.
+import { HELPER_COL, PLATE_PAD } from "../deck/layout";
 
-/** Место помощника в обёртке колоды: плита 400 + зазор 16. */
-export const HELPER_COL = 416;
-/** Поля плиты (48 + 48). */
-const PLATE_PAD = 96;
 /** Тела шагов (`#p2-b1`, `#p2-b2`, `#p2-b3`) — от 192 px слева. */
 const BODY_LEFT = 192;
 /** «Все параметры» (`#p2-b3m`): слева 240, справа 48. */
@@ -94,13 +91,6 @@ export function paramsRow(wrap: number, n: number): ParamsRow {
   };
 }
 
-/** Коробка переключателя в «Все параметры» (три колонки, `#p2-b3m`: слева 240, справа 48) в широкой и узкой раскладке. */
-export function moreThird(wrap: number): { wide: number; narrow: number } {
-  const { wide, narrow } = deckWidths(wrap);
-  const third = (w: number) => r3((w - MORE_PAD - 2 * GAP) / 3);
-  return { wide: third(wide), narrow: third(narrow) };
-}
-
 export interface MoreGrid {
   /** Тесная раскладка «Все параметры» (помощник при окне около 1280): переключатели — строками. */
   tight: boolean;
@@ -115,13 +105,9 @@ export interface MoreGrid {
 }
 
 /** Карточки вариантов «Все параметры» (`#p2-b3m`) в широкой и узкой раскладке: карточка и колонка её подсказки (в
- *  широкой — справа от миниатюры, в узкой — миниатюры нет; в тесной поля по бокам 16 → 12). */
-export function moreCards(wrap: number, n: number, short: boolean): Record<"wide" | "narrow", { card: number; hint: number }> {
-  const c = moreCardsRaw(wrap, n, short);
-  return { wide: { card: r3(c.wide.card), hint: r3(c.wide.hint) }, narrow: { card: r3(c.narrow.card), hint: r3(c.narrow.hint) } };
-}
-
-function moreCardsRaw(wrap: number, n: number, short: boolean) {
+ *  широкой — справа от миниатюры, в узкой — миниатюры нет; в тесной поля по бокам 16 → 12). Без округления; в разметку
+ *  идёт через `moreGrid` (`vhint`), отдельно открыта ради тестов геометрии. */
+export function moreCards(wrap: number, n: number, short: boolean) {
   const { wide, narrow } = deckWidths(wrap);
   const k = Math.max(1, n);
   const card = (w: number) => (w - MORE_PAD - (k - 1) * GAP) / k;
@@ -147,7 +133,7 @@ export function moreGrid(wrap: number, n: number, short: boolean): MoreGrid {
   const r1Wide = [px(third(W)), px(third(W)), px(third(W))].join(" ");
   const rest = (N - 2 * GAP - SLIDES_TIGHT) / 2;
   const r1Narrow = tight ? [px(rest), px(rest), px(SLIDES_TIGHT)].join(" ") : [px(third(N)), px(third(N)), px(third(N))].join(" ");
-  const c = moreCardsRaw(wrap, n, short);
+  const c = moreCards(wrap, n, short);
   return { tight, r1Wide, r1Narrow, thumb: short ? THUMB_SHORT : THUMB, vhint: r3(c.wide.hint - c.narrow.hint) };
 }
 

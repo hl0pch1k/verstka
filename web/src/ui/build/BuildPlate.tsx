@@ -171,7 +171,6 @@ function BuildContent({ job, leaving }: { job: ActiveJob | null; leaving: boolea
   const vars = buildVars(morph) as CSSProperties;
 
   return (
-    <div className="bd-fxw">
     <div key={epoch} className={cls("p2-two bd-two", morph.tight && "bd-tight", (leaving || retry) && "bd-out")}
       style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 416px", gridTemplateRows: "64px minmax(0, 1fr)", columnGap: 48, height: 652, ...vars }}>
       <Phases phase={view.phase} morph={morph} />
@@ -207,7 +206,6 @@ function BuildContent({ job, leaving }: { job: ActiveJob | null; leaving: boolea
         </div>
       </div>
       <Roles view={view} narrow={narrow} widths={`${morph.textWide}/${morph.textNarrow}`} />
-    </div>
     </div>
   );
 }
