@@ -20,8 +20,8 @@ const GAP = 16;
 /** Варианту в коротком ряду со строкой описания и галочкой справа нужно 173 px — уже, и переключатели уходят в «Все
  *  параметры» (окно около 1280). */
 export const VARIANT_FULL = 173;
-/** В узкой раскладке у варианта только название (самое длинное — 106 px) и поля 16 + 16; уже (окно около 1280) — варианты
- *  встают списком рядом со степпером. */
+/** В узкой раскладке у варианта только название (самое длинное — 106 px) и поля 16 + 16; уже (окно около 1280) —
+ *  тесный ряд: степпер компактный, варианты — узкие карточки (поля по бокам 8, название — scale .875). */
 export const VARIANT_NAME = 138;
 /** Колонке названия переключателя в «Все параметры» (узкая раскладка) нужно 96 px — самое длинное слово
  *  «Генерировать»; уже — переключатели встают строками (тесная раскладка). */
@@ -32,14 +32,15 @@ export const THUMB_SHORT = 112;
 /** Степпер слайдов в первом ряду «Все параметры» в тесной раскладке — по содержимому (−, число, +, поля 12). */
 export const SLIDES_TIGHT = 168;
 /** Степпер короткого ряда: 216 в широкой раскладке, 200 в узкой (V2) — он остаётся на плите всегда (решение владельца:
- *  число слайдов видно и меняется прямо на плите). */
+ *  число слайдов видно и меняется прямо на плите); в тесном ряду (окно около 1280) — компактный, 144: поля 16 → 4,
+ *  кнопки 40 → 32 (scale .8), число — scale .875 (−, «30» / «слайдов» 54, + — 134). */
 export const STEPPER = 216;
 export const STEPPER_NARROW = 200;
-/** Ряд плиты 03 — 88 px; строки списка вариантов: название с поля 12, галочка 20 у правого края (поле 2). */
-const ROW_H = 88;
-const LIST_GAP = 8;
-const LIST_TEXT = 12;
-const LIST_BOX = 2;
+export const STEPPER_TIGHT = 144;
+/** Тесный ряд: межколонник 16 → 12, у карточки варианта поля по бокам 16 → 8, название мельчает до .875 (16 → 14 px). */
+export const GAP_TIGHT = 12;
+export const CARD_PAD_TIGHT = 8;
+export const NAME_TIGHT = 0.875;
 
 const px = (n: number) => `${Math.round(n * 1000) / 1000}px`;
 const fr = "minmax(0, 1fr)";
@@ -51,80 +52,45 @@ export function deckWidths(wrap: number): { wide: number; narrow: number } {
   return { wide: w, narrow: w - HELPER_COL };
 }
 
-/** Варианты списком (окно около 1280, узкая колода): карточки ряда перестраиваются в строки-таблетки рядом со степпером.
- *  Ход без наложений: на открытии карточки сначала (240 мс) становятся строками «лесенкой» — высота 88 → 24 и сдвиг вниз,
- *  пока они ещё в ряду, — затем (360 мс через 120) съезжают в столбик и расширяются; на закрытии — наоборот (240, затем
- *  160 через 180). Ширины и места по горизонтали — поля в долях дорожки вариантов (идут за колодой сами), по вертикали — px.
- *  Название и галочка — одни и те же в обеих раскладках, едут transform'ом (галочка — у правого края: путь не пересекает
- *  название); гаснет только описание (в списке его нет). */
-export interface VariantListGeo {
-  /** Вариантов и колонок списка (1; 2 — когда вариантов больше трёх). */
-  n: number;
-  cols: number;
-  /** Карточка в широкой раскладке (ряд, высота 88) и строка списка в узкой — в покое. */
-  card: number;
-  pill: number;
-  pillH: number;
-  /** Название — не шире этого в обеих раскладках (многоточие не меняется на ходу). */
-  title: number;
-}
-
-/** Где карточка `i` списка в покое широкой и узкой раскладки: место, размер, место названия и галочки внутри. */
-export function listCard(g: VariantListGeo, i: number) {
-  const col = i % g.cols, row = Math.floor(i / g.cols);
-  return {
-    col, row,
-    wide: { x: r3(i * (g.card + GAP)), y: 0, w: g.card, h: ROW_H, box: { x: r3(g.card - 16 - 20), y: 18 }, text: { x: 16, y: 16 } },
-    narrow: {
-      x: r3(col * (g.pill + LIST_GAP)), y: r3(row * (g.pillH + LIST_GAP)), w: g.pill, h: g.pillH,
-      box: { x: r3(g.pill - LIST_BOX - 20), y: r3((g.pillH - 20) / 2) }, text: { x: LIST_TEXT, y: r3((g.pillH - 24) / 2) },
-    },
-  };
-}
-
 export interface ParamsRow {
-  /** Дорожки `#p2-b3` в широкой и узкой раскладке (одинаковое число: степпер, n вариантов — или их список одной
-   *  дорожкой, — переключатели). Межколонник — поле справа у каждой клетки (16), лишнее поле последней уходит за край
+  /** Дорожки `#p2-b3` в широкой и узкой раскладке (одинаковое число: степпер, n вариантов, переключатели). Межколонник —
+   *  поле справа у каждой клетки (16; в тесном ряду в узкой — 12), лишнее поле последней уходит за край
    *  (`margin-right:-16px`): дорожка с нулём сжимается вместе со своим полем. */
   wide: string;
   narrow: string;
   /** Переключатели в коротком ряду широкой раскладки (иначе их дорожка — 0 в обеих). */
   switches: boolean;
-  /** Варианты в узкой раскладке — списком (карточкам с названием рядом со степпером нет места); null — карточками. */
-  list: VariantListGeo | null;
-  /** На сколько вариант у́же в узкой раскладке: строка описания держит ширину покоя, пока гаснет (`.pp-vdi`). */
+  /** Тесный ряд в узкой раскладке (окно около 1280): компактный степпер, межколонник 12, узкие карточки вариантов. */
+  tight: boolean;
+  /** Карточка варианта в широкой и узкой раскладке (без поля). */
+  card: { wide: number; narrow: number };
+  /** На сколько строка описания варианта (внутри полей) у́же в узкой раскладке: она держит ширину покоя, пока гаснет
+   *  (`.pp-vdi`). */
   shrink: number;
+  /** Название варианта — не шире этого в обеих раскладках (в тесном ряду до scale .875): многоточие не меняется на ходу. */
+  title: number;
 }
 
-/** Короткий ряд плиты 03 (`#p2-b3`) при `n` вариантах. Степпер остаётся в обеих раскладках (216 → 200). */
+/** Короткий ряд плиты 03 (`#p2-b3`) при `n` вариантах. Степпер остаётся в обеих раскладках (216 → 200; в тесном ряду
+ *  → 144). Все карточки — в своих дорожках обеих раскладок: ряд сужается одним ходом вместе с колодой. */
 export function paramsRow(wrap: number, n: number): ParamsRow {
   const { wide, narrow } = deckWidths(wrap);
   const k = Math.max(1, n);
-  const row = (deck: number) => deck - PLATE_PAD - BODY_LEFT + GAP; // клетки с полями 16
-  const cell = (deck: number, stepper: number, sw: number) => (row(deck) - stepper - sw) / k - GAP; // вариант без поля
+  const row = (deck: number, gap: number) => deck - PLATE_PAD - BODY_LEFT + gap; // клетки с полями
+  const cell = (deck: number, stepper: number, sw: number, gap = GAP) => (row(deck, gap) - stepper - sw) / k - gap; // вариант без поля
   const switches = cell(wide, STEPPER + GAP, 264 + GAP) >= VARIANT_FULL;
   const sw = switches ? 264 + GAP : 0;
-  const st = STEPPER_NARROW + GAP;
-  const cards = cell(narrow, st, 0) >= VARIANT_NAME;
-  if (cards) {
-    const vars = (s: number, w: number) => [px(s), ...Array.from({ length: k }, () => fr), px(w)].join(" ");
-    return {
-      wide: vars(STEPPER + GAP, sw), narrow: vars(st, 0), switches, list: null,
-      shrink: Math.max(0, r3(cell(wide, STEPPER + GAP, sw) - cell(narrow, st, 0))),
-    };
-  }
-  // список: варианты — одна дорожка (степпер · варианты · переключатели в обеих раскладках)
-  const block = (deck: number, s: number, w: number) => row(deck) - s - w - GAP;
-  const bw = block(wide, STEPPER + GAP, sw), bn = block(narrow, st, 0);
-  const cols = k > 3 ? 2 : 1;
-  const rows = Math.ceil(k / cols);
-  const card = r3((bw - (k - 1) * GAP) / k);
-  const pill = r3((bn - (cols - 1) * LIST_GAP) / cols);
-  const pillH = r3((ROW_H - (rows - 1) * LIST_GAP) / rows);
+  const tight = cell(narrow, STEPPER_NARROW + GAP, 0) < VARIANT_NAME;
+  const gn = tight ? GAP_TIGHT : GAP;
+  const st = (tight ? STEPPER_TIGHT : STEPPER_NARROW) + gn;
+  const cw = cell(wide, STEPPER + GAP, sw), cn = cell(narrow, st, 0, gn);
+  const padN = tight ? CARD_PAD_TIGHT : 16;
+  const vars = (s: number, w: number) => [px(s), ...Array.from({ length: k }, () => fr), px(w)].join(" ");
   return {
-    wide: [px(STEPPER + GAP), fr, px(sw)].join(" "), narrow: [px(st), fr, "0px"].join(" "), switches,
-    list: { n: k, cols, card, pill, pillH, title: r3(Math.min(card - 16 - 8 - 20 - 16, pill - LIST_TEXT - 8 - 20 - LIST_BOX)) },
-    shrink: 0,
+    wide: vars(STEPPER + GAP, sw), narrow: vars(st, 0), switches, tight,
+    card: { wide: r3(cw), narrow: r3(cn) },
+    shrink: Math.max(0, r3((cw - 32) - (cn - 2 * padN))),
+    title: r3(Math.min(cw - 32 - 20 - 8, tight ? (cn - 2 * padN) / NAME_TIGHT : cn - 32)),
   };
 }
 

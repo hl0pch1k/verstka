@@ -290,8 +290,8 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
      и галочка справа гаснут, галочка проявляется на месте описания. «Все параметры»: миниатюры вариантов сжимаются и
      гаснут; коробки переключателей растут той же кривой под текст.
      сайт: межколонники сводки уходят вместе с ней (в тесной колоде «Создать» встаёт к названию шага); дорожки короткого
-     ряда — переменными (morph.ts `paramsRow`: при 1280 переключателей в ряду нет, а варианты в узкой — списком рядом со
-     степпером, ниже), межколонник — поле справа у клетки, как у ленты; ход сетки — вместе с проявлением и уходом тела шага */
+     ряда — переменными (morph.ts `paramsRow`: при 1280 переключателей в ряду нет, а в узкой ряд тесный — ниже),
+     межколонник — поле справа у клетки, как у ленты; ход сетки — вместе с проявлением и уходом тела шага */
   .p2-hx .pp-sum{display:flex;justify-content:flex-end;flex:0 1 auto;min-width:0;overflow:hidden;transition:margin 340ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
   .hp-nar .p2-hx .pp-sum{margin:0 -24px;transition:margin 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
   .pp-ctat{max-width:160px;transition:max-width 340ms var(--ease),opacity 160ms var(--ease) 80ms}
@@ -303,24 +303,32 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
   .hp-nar #p2-b3.p2-on{transition:grid-template-columns 520ms var(--ease),opacity 360ms var(--ease) 120ms}
   .hp-nar #p2-b3.p2-off{transition:grid-template-columns 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
   #p2-b3 > *{min-width:0;margin-right:16px}
-  /* сайт: варианты списком (окно около 1280, узкая колода; степпер остаётся — решение владельца). Варианты — одна
-     дорожка (`.pp-vs`), карточки — в одной её клетке; карточка ряда перестраивается в строку-таблетку списка без
-     наложений: открытие — сначала «лесенкой» (высота 88 → 24 и сдвиг вниз, 240 мс, пока карточки ещё в ряду), затем
-     съезжает в столбик и расширяется (поля в долях дорожки, 360 мс через 120); закрытие — наоборот (240 мс, затем 160
-     через 180). Название и галочка едут transform'ом (галочка — у правого края, её путь не пересекает название),
-     описание гаснет на месте. Ничего, что есть в обеих раскладках, не гаснет (morph.ts `VariantListGeo`) */
-  .pp-vs{display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:88px;align-items:start}
-  .pp-vi{grid-area:1 / 1;min-width:0;height:88px;translate:0 0;margin-left:calc(var(--vi) * (100% + 16px) / var(--vn));margin-right:calc((var(--vn) - 1 - var(--vi)) * (100% + 16px) / var(--vn));transition:margin-left 240ms var(--ease),margin-right 240ms var(--ease),height 160ms var(--ease) 180ms,translate 160ms var(--ease) 180ms}
-  .hp-nar .pp-vi{height:var(--vhn);translate:0 var(--vyn);margin-left:calc(var(--vc) * (100% + 8px) / var(--vcs));margin-right:calc((var(--vcs) - 1 - var(--vc)) * (100% + 8px) / var(--vcs));transition:margin-left 360ms var(--ease) 120ms,margin-right 360ms var(--ease) 120ms,height 240ms var(--ease),translate 240ms var(--ease)}
-  .pp-vi > .p2-stag{height:100%}
-  .pp-vi .pp-vc{position:relative;display:block;height:100%;padding:0;overflow:clip;transition:transform 160ms var(--ease),border-radius 160ms var(--ease) 180ms}
-  .hp-nar .pp-vi .pp-vc{border-radius:calc(var(--vhn) / 2);transition:transform 160ms var(--ease),border-radius 240ms var(--ease)}
-  .pp-vi .pp-vtl{position:absolute;left:0;top:0;max-width:var(--vtm);translate:16px 16px;transition:translate 160ms var(--ease) 180ms}
-  .hp-nar .pp-vi .pp-vtl{translate:12px var(--vtyn);transition:translate 240ms var(--ease)}
-  .pp-vi .pp-vbl{position:absolute;left:100%;top:0;translate:-36px 18px;transition:translate 160ms var(--ease) 180ms}
-  .hp-nar .pp-vi .pp-vbl{translate:-22px var(--vbyn);transition:translate 240ms var(--ease)}
-  .pp-vi .pp-vdl{position:absolute;left:16px;top:52px;display:block;width:var(--vdw)}
-  .pp-vi .pp-vdl > .pp-vt{display:block}
+  /* сайт: тесный ряд (окно около 1280, узкая колода, `pp-tgt`; степпер остаётся на плите — решение владельца). Всё одним
+     ходом, той же кривой и за то же время, что колода: дорожки (степпер 216 → 144, карточки сужаются), межколонник
+     16 → 12, у степпера поля 16 → 4, кнопки 40 → 32 (scale), число — scale .875, «задано в тексте» меняет формулировку на
+     месте («в тексте»); у карточек поля по бокам 16 → 8, название — scale .875 (его место — одной ширины в обеих
+     раскладках: многоточие не меняется), галочка внизу — на поле 8. Ничего не разворачивается и не обгоняет край колоды */
+  #p2-b3.pp-tgt.p2-on{transition:grid-template-columns 340ms var(--ease),margin-right 340ms var(--ease),opacity 360ms var(--ease) 120ms}
+  #p2-b3.pp-tgt.p2-off{transition:grid-template-columns 340ms var(--ease),margin-right 340ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
+  .hp-nar #p2-b3.pp-tgt{margin-right:-12px !important}
+  .hp-nar #p2-b3.pp-tgt.p2-on{transition:grid-template-columns 520ms var(--ease),margin-right 520ms var(--ease),opacity 360ms var(--ease) 120ms}
+  .hp-nar #p2-b3.pp-tgt.p2-off{transition:grid-template-columns 520ms var(--ease),margin-right 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
+  #p2-b3.pp-tgt > *{transition:margin-right 340ms var(--ease)}
+  .hp-nar #p2-b3.pp-tgt > *{margin-right:12px;transition-duration:520ms}
+  #p2-b3.pp-tgt .pp-stc > .p2-box{transition:opacity 360ms var(--ease),transform 360ms var(--ease),padding 340ms var(--ease)}
+  .hp-nar #p2-b3.pp-tgt .pp-stc > .p2-box{padding:0 4px !important;transition:opacity 360ms var(--ease),transform 360ms var(--ease),padding 520ms var(--ease)}
+  #p2-b3.pp-tgt .pp-stc .p2-rb{transition:transform 160ms var(--ease),opacity 160ms var(--ease),scale 340ms var(--ease)}
+  .hp-nar #p2-b3.pp-tgt .pp-stc .p2-rb{scale:.8;transition:transform 160ms var(--ease),opacity 160ms var(--ease),scale 520ms var(--ease)}
+  #p2-b3.pp-tgt .pp-stn{transition:scale 340ms var(--ease)}
+  .hp-nar #p2-b3.pp-tgt .pp-stn{scale:.875;transition-duration:520ms}
+  .pp-stl{justify-items:center;max-width:100px;overflow:clip;transition:max-width 340ms var(--ease)}
+  .hp-nar .pp-stl{max-width:54px;transition-duration:520ms}
+  #p2-b3.pp-tgt .pp-vc{transition:transform 160ms var(--ease),padding 340ms var(--ease)}
+  .hp-nar #p2-b3.pp-tgt .pp-vc{padding:16px 8px;transition:transform 160ms var(--ease),padding 520ms var(--ease)}
+  #p2-b3.pp-tgt .pp-vtt{flex:none;max-width:var(--pp-tm);transform-origin:0 50%;transition:scale 340ms var(--ease)}
+  .hp-nar #p2-b3.pp-tgt .pp-vtt{scale:.875;transition-duration:520ms}
+  #p2-b3.pp-tgt .pp-vb2{transition:opacity 160ms var(--ease),visibility 0s linear 160ms,translate 340ms var(--ease)}
+  .hp-nar #p2-b3.pp-tgt .pp-vb2{translate:-8px 0;transition:opacity 240ms var(--ease) 120ms,visibility 0s linear 0s,translate 520ms var(--ease)}
   .pp-swc{min-width:0;overflow:clip}
   /* подписи переключателей и описания вариантов не переносятся заново, пока гаснут: подпись — в одну строку и уходит под край
      (переключатель остаётся у правого края); строка описания держит ширину покоя (вариант у́же в узкой на --pp-vd — та же

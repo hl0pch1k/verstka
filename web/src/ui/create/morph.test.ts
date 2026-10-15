@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  ctaShort, deckWidths, hintTail, HELPER_COL, listCard, moreCards, moreGrid, moreThird, paramsRow, readyShort, ribbonRows,
-  STEPPER, STEPPER_NARROW, VARIANT_NAME,
+  CARD_PAD_TIGHT, ctaShort, deckWidths, GAP_TIGHT, hintTail, HELPER_COL, moreCards, moreGrid, moreThird, NAME_TIGHT, paramsRow,
+  readyShort, ribbonRows, STEPPER, STEPPER_NARROW, STEPPER_TIGHT, VARIANT_NAME,
 } from "./morph";
 
 // обёртка колоды: 1392 при окне 1440, 1232 при 1280, 1217 — 1280 с обычной полосой прокрутки страницы (15 px)
@@ -20,74 +20,69 @@ test("deckWidths: открытый помощник сужает колоду н
   assert.deepEqual(deckWidths(0), { wide: 1392, narrow: 976 });
 });
 
-test("paramsRow при 1440: дорожки V2 — степпер 216 → 200, переключатели 264 → 0, варианты карточками 186.67 → 146.67", () => {
+test("paramsRow при 1440: дорожки V2 — степпер 216 → 200, переключатели 264 → 0, варианты 186.67 → 146.67", () => {
   const r = paramsRow(W1440, 3);
   assert.equal(r.switches, true);
-  assert.equal(r.list, null);
+  assert.equal(r.tight, false);
   // клетка = коробка + поле 16
   assert.deepEqual(tracks(r.wide), ["232px", "minmax(0, 1fr)", "minmax(0, 1fr)", "minmax(0, 1fr)", "280px"]);
   assert.deepEqual(tracks(r.narrow), ["216px", "minmax(0, 1fr)", "minmax(0, 1fr)", "minmax(0, 1fr)", "0px"]);
+  assert.deepEqual(r.card, { wide: 186.667, narrow: 146.667 });
   assert.equal(r.shrink, 40);
 });
 
 test("paramsRow: число дорожек в обеих раскладках одно — сетка интерполируется; степпер остаётся в обеих", () => {
   for (const w of [W1440, W1280, W1280S, 1300, 1360]) for (const n of [1, 2, 3, 4]) {
     const r = paramsRow(w, n);
-    assert.equal(tracks(r.wide).length, tracks(r.narrow).length, `${w}/${n}`);
-    assert.equal(tracks(r.wide).length, r.list ? 3 : n + 2, `${w}/${n}`);
+    assert.equal(tracks(r.wide).length, n + 2, `${w}/${n}`);
+    assert.equal(tracks(r.narrow).length, n + 2, `${w}/${n}`);
     assert.equal(pxOf(tracks(r.wide)[0]), STEPPER + 16, `${w}/${n}`);
-    assert.equal(pxOf(tracks(r.narrow)[0]), STEPPER_NARROW + 16, `${w}/${n}`);
+    assert.equal(pxOf(tracks(r.narrow)[0]), r.tight ? STEPPER_TIGHT + GAP_TIGHT : STEPPER_NARROW + 16, `${w}/${n}`);
   }
 });
 
-test("paramsRow при 1280 (1232 и 1217): степпер остаётся на плите, варианты в узкой — списком, название встаёт целиком", () => {
+/** Края клеток короткого ряда в раскладке (от левого края ряда): степпер, варианты. */
+function edges(stepper: number, card: number, gap: number, n: number): Array<[number, number]> {
+  const out: Array<[number, number]> = [[0, stepper]];
+  for (let i = 0; i < n; i++) { const l = stepper + gap + i * (card + gap); out.push([l, l + card]); }
+  return out;
+}
+
+test("paramsRow при 1280 (1232 и 1217): тесный ряд — степпер на плите, три узкие карточки, название встаёт целиком", () => {
   for (const w of [W1280, W1280S]) {
     const r = paramsRow(w, 3);
     assert.equal(r.switches, false, `${w}`);
-    const g = r.list;
-    assert.ok(g, `${w}: список`);
-    if (!g) continue;
-    // карточками рядом со степпером 200 названию места нет — поэтому список
-    const card = (cells(deckWidths(w).narrow) - 216) / 3 - 16;
-    assert.ok(card < VARIANT_NAME, `${w}`);
-    // одна колонка строк по 24 через 8 — ровно ряд 88
-    assert.equal(g.cols, 1);
-    assert.equal(3 * g.pillH + 2 * 8, 88);
-    // название не обрезается ни в карточке, ни в строке, и ширина его места одна на всём ходу
-    assert.ok(g.title >= LONGEST_TITLE, `${w}: ${g.title}`);
-    for (const k of ["wide", "narrow"] as const) {
-      const c = listCard(g, 0)[k];
-      // название не заходит на галочку справа (зазор 8) ни в карточке, ни в строке
-      assert.ok(c.text.x + g.title + 8 <= c.box.x + 0.01, `${w} ${k}`);
-    }
+    assert.equal(r.tight, true, `${w}`);
+    // со степпером 200 карточке с названием места нет — поэтому тесный ряд
+    assert.ok((cells(deckWidths(w).narrow) - 216) / 3 - 16 < VARIANT_NAME, `${w}`);
+    // ряд узкой раскладки: степпер 144 + 3 карточки через 12 — ровно ширина ряда
+    const row = deckWidths(w).narrow - 96 - 192;
+    assert.ok(Math.abs(STEPPER_TIGHT + 3 * (r.card.narrow + GAP_TIGHT) - row) < 0.01, `${w}`);
+    // самое длинное название при .875 встаёт в карточку (поля 8), и его место — одной ширины в обеих раскладках
+    assert.ok(LONGEST_TITLE * NAME_TIGHT <= r.card.narrow - 2 * CARD_PAD_TIGHT, `${w}: ${r.card.narrow}`);
+    assert.ok(r.title >= LONGEST_TITLE && r.title * NAME_TIGHT <= r.card.narrow - 2 * CARD_PAD_TIGHT + 0.01, `${w}: ${r.title}`);
+    assert.ok(r.title <= r.card.wide - 60, `${w}`);
   }
+  // при 1280 карточки 116 (в пределах 116–124), при 1217 — 111
+  assert.equal(paramsRow(W1280, 3).card.narrow, 116);
+  assert.equal(paramsRow(W1280S, 3).card.narrow, 111);
 });
 
-test("listCard: карточки широкой раскладки — ряд во всю дорожку вариантов; строки узкой — столбиком в её пределах", () => {
-  for (const w of [W1280, W1280S]) for (const n of [3, 4]) {
-    const g = paramsRow(w, n).list;
-    if (!g) continue;
-    const block = (deck: number, st: number) => cells(deck) - st - 16;
-    const bw = block(deckWidths(w).wide, STEPPER + 16), bn = block(deckWidths(w).narrow, STEPPER_NARROW + 16);
-    const cs = Array.from({ length: n }, (_, i) => listCard(g, i));
-    // широкая: подряд через 16, последняя — у края дорожки
-    for (let i = 1; i < n; i++) assert.ok(Math.abs(cs[i].wide.x - (cs[i - 1].wide.x + cs[i - 1].wide.w + 16)) < 0.01, `${w}/${n}/${i}`);
-    assert.ok(Math.abs(cs[n - 1].wide.x + cs[n - 1].wide.w - bw) < 0.01, `${w}/${n}`);
-    // узкая: в пределах дорожки и ряда 88, без наложений
-    for (const c of cs) {
-      assert.ok(c.narrow.x + c.narrow.w <= bn + 0.01 && c.narrow.y + c.narrow.h <= 88 + 0.01, `${w}/${n}`);
-      // галочка и название — внутри своей карточки в обеих раскладках
-      for (const k of ["wide", "narrow"] as const) {
-        const b = c[k];
-        assert.ok(b.box.x >= 0 && b.box.x + 20 <= b.w && b.box.y >= 0 && b.box.y + 20 <= b.h, `${w}/${n} ${k} галочка`);
-        assert.ok(b.text.x + g.title <= b.w + 0.01 && b.text.y >= 0 && b.text.y + 24 <= b.h + 0.01, `${w}/${n} ${k} название`);
+test("paramsRow: ряд сужается одним ходом — каждый край клетки идёт влево, и не дальше края колоды", () => {
+  for (const w of [W1440, W1280, W1280S, 1300]) {
+    const r = paramsRow(w, 3);
+    const sw = r.switches ? 264 : 0;
+    const a = edges(STEPPER, r.card.wide, 16, 3);
+    const b = edges(r.tight ? STEPPER_TIGHT : STEPPER_NARROW, r.card.narrow, r.tight ? GAP_TIGHT : 16, 3);
+    for (let i = 0; i < a.length; i++) {
+      for (const k of [0, 1]) {
+        const d = b[i][k] - a[i][k];
+        assert.ok(d <= 0.01 && -d <= 416 + 0.01, `${w} клетка ${i} край ${k}: ${d}`);
       }
     }
-    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
-      const a = cs[i].narrow, b = cs[j].narrow;
-      const sep = a.x + a.w <= b.x + 0.01 || b.x + b.w <= a.x + 0.01 || a.y + a.h <= b.y + 0.01 || b.y + b.h <= a.y + 0.01;
-      assert.ok(sep, `${w}/${n}: ${i} и ${j}`);
-    }
+    // правый край последней карточки — у края ряда в обеих раскладках (переключатели справа — свои дорожки)
+    assert.ok(Math.abs(a[3][1] + (sw ? sw + 16 : 0) - (w - 96 - 192)) < 0.01, `${w}`);
+    assert.ok(Math.abs(b[3][1] - (w - 416 - 96 - 192)) < 0.01, `${w}`);
   }
 });
 
