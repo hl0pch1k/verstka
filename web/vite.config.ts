@@ -30,9 +30,15 @@ export default defineConfig({
     sourcemap: false,
     rollupOptions: {
       output: {
-        // библиотеки (React) — своим куском: приложение целиком в основном куске (лист «Подробнее» не догружается по
-        // клику), и ни один кусок не перерастает предел предупреждения Vite (500 kB)
-        manualChunks: (id) => (id.includes("node_modules") ? "vendor" : undefined),
+        // три куска, все грузятся сразу (лист «Подробнее» не догружается по клику), и ни один не перерастает предел
+        // предупреждения Vite (500 kB): библиотеки (React) — `vendor`; логика без интерфейса (src/lib, api.ts, types.ts:
+        // тексты, разбор событий агента, запросы к API) — `lib`, она не импортирует ни компонентов, ни store, так что
+        // куски не ссылаются друг на друга по кругу; интерфейс — основной кусок
+        manualChunks: (id) => {
+          if (id.includes("node_modules")) return "vendor";
+          if (/\/src\/(lib\/|api\.ts$|types\.ts$)/.test(id)) return "lib";
+          return undefined;
+        },
       },
     },
   },
