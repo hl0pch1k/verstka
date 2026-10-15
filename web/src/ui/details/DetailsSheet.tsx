@@ -18,7 +18,7 @@ import { Layer, LAYER_MS, lsDelay, useLayerPresence } from "../layers/Layer";
 import { TxNarrow } from "../kit/Tx";
 import { useNarrow } from "../create/useNarrow";
 import { useDeckWrap } from "../deck/useDeckFit";
-import { SheetCtx, sheetMorph, sheetVars } from "./sheetMorph";
+import { SheetCtx, sheetMorph } from "./sheetMorph";
 import { Panel } from "./parts";
 import { PatternLayer } from "./PatternLayer";
 import { headerLayerOpen, menuItems, SHEET_TABS, tabStep } from "./sheetView";
@@ -107,7 +107,7 @@ export function DetailsSheet() {
       {g && v && (
         <TxNarrow.Provider value={narrow}>
         <SheetCtx.Provider value={morph}>
-        <section className={cls("dd-sheet", morph.tight && "dd-tight", settled && "dd-settled")} style={{ outline: "none", ...sheetVars(morph) }} role="region" aria-label={`Подробнее о презентации «${docTitle(g, v)}»`} tabIndex={-1}>
+        <section className={cls("dd-sheet", morph.tight && "dd-tight", settled && "dd-settled")} style={{ outline: "none" }} role="region" aria-label={`Подробнее о презентации «${docTitle(g, v)}»`} tabIndex={-1}>
           <div className="dd-fx">
           <div className="dd-top p2-ls" style={lsDelay(120)}>
             <div className="dd-tabs" role="tablist" aria-label="Разделы подробностей" onKeyDown={onTabKey}>

@@ -96,6 +96,23 @@ export function QualityTab({ g, v, deck }: { g: Generation; v: Variant; deck: De
   const [allwRef, allwW] = useWidth<HTMLButtonElement>(allOn);
   const [wordRef, wordW] = useWidth<HTMLSpanElement>(ctaOn && fix.working !== "fix");
   const tight = useContext(SheetCtx).tight;
+  // ряд чипов шире колонки (тесная колода с помощником) — колесо прокручивает его вбок, пока есть куда; дальше — лист
+  const chipsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = chipsRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (Math.abs(e.deltaX) >= Math.abs(e.deltaY)) return;
+      const max = el.scrollWidth - el.clientWidth;
+      if (max < 1) return;
+      const next = Math.max(0, Math.min(max, el.scrollLeft + e.deltaY));
+      if (Math.abs(next - el.scrollLeft) < 0.5) return;
+      el.scrollLeft = next;
+      e.preventDefault();
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [audit]);
   const sumHpd = sumNarrowing({ allw: allOn ? allwW : null, cta: ctaOn, word: tight && fix.working !== "fix" ? wordW : 0 });
 
   if (!audit) {
@@ -156,12 +173,13 @@ export function QualityTab({ g, v, deck }: { g: Generation; v: Variant; deck: De
           {/* строка счёта — стопка (q-sumt): колонка в узкой раскладке у́же на `sumHpd` (замер кнопок справа); в одну строку,
               как на доске; где места меньше (итог исправления рядом, настоящие числа, тесная колода) — переносится, но не
               посреди хода. Узкая копия — 13 px (V2: строка счёта 15 → 13). Заголовок встаёт в строку в обеих раскладках */}
-          <Tx tx="q-sumt" className="dq-cnts" hpd={sumHpd} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: 8, margin: "4px 0 0", fontWeight: 500, lineHeight: "24px", color: "#0B1220", whiteSpace: "nowrap" }}>
-            <span style={sum.hasErr ? { fontWeight: 700, color: "#DC2626" } : undefined}>{sum.nErr}</span>
-            <span aria-hidden="true" style={{ color: "#5A6272" }}>·</span>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontWeight: 700, color: "#B45309" }}><Icon name="warning" size={16} />{sum.nWarn}</span>
-            <span aria-hidden="true" style={{ color: "#5A6272" }}>·</span>
-            <span>{sum.nModel}</span>
+          {/* точка-разделитель — перед каждым числом, у переноса она уходит за левый край (`dq-cl`): строка не кончается «·» */}
+          <Tx tx="q-sumt" className="dq-cnts" hpd={sumHpd} style={{ margin: "4px 0 0", fontWeight: 500, lineHeight: "24px", color: "#0B1220" }}>
+            <span className="dq-cl">
+              <span className="dq-ci" style={sum.hasErr ? { fontWeight: 700, color: "#DC2626" } : undefined}>{sum.nErr}</span>
+              <span className="dq-ci" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontWeight: 700, color: "#B45309" }}><Icon name="warning" size={16} />{sum.nWarn}</span>
+              <span className="dq-ci">{sum.nModel}</span>
+            </span>
           </Tx>
           {/* строка неудачи — под счётчиками, не сдвигая их (сводка выровнена по центру) */}
           {fix.refresh ? (
@@ -203,7 +221,7 @@ export function QualityTab({ g, v, deck }: { g: Generation; v: Variant; deck: De
 
       <div className="dd-g" style={{ marginTop: 24 }}>
         <div style={{ minWidth: 0 }}>
-          <div className="p2-in dq-chips" role="radiogroup" aria-label="Какие замечания показать" style={{ display: "flex", alignItems: "center", gap: 8, height: 40, animationDelay: "280ms" }}>
+          <div ref={chipsRef} className="p2-in dq-chips" role="radiogroup" aria-label="Какие замечания показать" style={{ display: "flex", alignItems: "center", gap: 8, height: 40, animationDelay: "280ms" }}>
             {chipsOf(main, filter).map((ch) => (
               <button key={ch.key} type="button" role="radio" aria-checked={ch.on} className={cls("p2-pill dq-chip", ch.on && "dq-chip-on")} onClick={() => pick(ch.key)}>
                 <span>{ch.label}</span><span className={cls("dq-cnt", ch.n === 0 && "dq-cnt0")}>{ch.n}</span>

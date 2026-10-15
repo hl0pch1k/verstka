@@ -63,7 +63,7 @@ export function PlanTab({ g, v, active }: { g: Generation; v: Variant; active: b
                 <li key={r.id} className="p2-in" style={{ animationDelay: `${160 + Math.min(i, 7) * 40}ms` }}>
                   <button type="button" className={cls("dpl-row", on && "dpl-row-on")} aria-current={on} aria-label={`Слайд ${r.n}: ${r.title}`} title={`Открыть слайд ${r.n}`} onClick={() => setSelectedSlide(r.n)}>
                     <span className="dpl-th"><Shot src={r.img} alt="" style={{ width: "100%", height: "100%", aspectRatio: "16 / 9" }} /><span className="dpl-n" aria-hidden="true">{r.n}</span></span>
-                    <Tx tx="p-hd" as="span" wrap="span" className="dpl-hd">
+                    <Tx tx="p-hd" as="span" wrap="span" className="dpl-hd" share="hdn">
                       <span className="dpl-kind">{r.kind}</span>
                       <span className="dpl-h">{r.title}</span>
                       {r.sub && <span className="dpl-sub2">{r.sub}</span>}

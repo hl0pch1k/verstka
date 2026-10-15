@@ -55,12 +55,14 @@ export function AgentTab({ g, v }: { g: Generation; v: Variant }) {
                 <li key={r.key} className={cls("da-role p2-in", r.skip && "da-skip", r.last && "da-last")} style={{ animationDelay: r.delay }}>
                   <span className="da-dot" aria-hidden="true"><Icon name={r.icon} size={16} /></span>
                   <div style={{ minWidth: 0 }}>
-                    {/* ряд имени — стопка: в широкой подсказка переносится, в узкой — в строку с многоточием (V2) */}
-                    <Tx tx="a-head" as="div" className="da-head">
+                    {/* подсказка роли — стопка: в широкой переносится, в узкой — в строку с многоточием (V2); имя роли — вне
+                        стопки, оно в обеих раскладках одно */}
+                    <div className="da-head">
                       <span className="da-name">{r.name}</span>
-                      <span className="da-hint">{r.hint}</span>
-                      {r.skip && <span className="dd-tag dd-tag-n">пропущен</span>}
-                    </Tx>
+                      <Tx tx="a-head" as="span" wrap="span" f className="da-hint">
+                        <span className="da-hintt">{r.hint}</span>{r.skip && <span className="dd-tag dd-tag-n">пропущен</span>}
+                      </Tx>
+                    </div>
                     {r.sum && <Tx tx="a-sum" className="da-sum">{r.sum}</Tx>}
                     {r.lines.length > 0 && (
                       <ul className="da-lns">
@@ -99,7 +101,7 @@ export function AgentTab({ g, v }: { g: Generation; v: Variant }) {
             <h3 id="da-h-ed" className="dd-h">Ваши правки</h3>
             <span className="da-cnt">{ed.active}</span>
             <button type="button" className="p2-ob dla-ob" onClick={un.undo} disabled={!ed.canUndo || un.busy || !!un.off} aria-busy={un.arc || undefined}
-              title={un.off ?? undefined} style={{ height: 40, marginLeft: "auto" }}>
+              title={un.off ?? "Вернуть как было"} style={{ height: 40, marginLeft: "auto" }}>
               {un.arc ? <Arc size={18} /> : <Icon name="undo" size={18} />}
               <span className="hq-obt">Вернуть как было</span>
             </button>

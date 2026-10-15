@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { FILES_RIGHT, FILES_RIGHT_TIGHT, HELPER_COL, sheetMorph, sheetVars, SHEET_PAD, sumNarrowing, TIGHT_INNER } from "./sheetMorph";
+import { filesCols, filesVars, FILES_RIGHT, FILES_RIGHT_TIGHT, HELPER_COL, sheetMorph, SHEET_PAD, sumNarrowing, TIGHT_INNER } from "./sheetMorph";
 import { textTight, TEXT_ROW } from "../layers/layerMorph";
 import { stackHeights } from "../kit/Tx";
 
@@ -21,17 +21,27 @@ test("sheetMorph: при 1440 — раскладка V2 (лист 880 в узк�
 });
 
 test("«Файлы»: правая колонка в px — в покое те же 50 % − 8 и 44,09 % − 8 (380 при 1440), что у V2; факт паспорта у́же на половину", () => {
-  const m = sheetMorph(W1440);
-  assert.equal(m.filesWide, 0.5 * (W1440 - 96) - 8);
-  assert.ok(Math.abs(m.filesNarrow - 380) < 0.01);
-  assert.ok(Math.abs(m.filesNarrow - (FILES_RIGHT * 880 - 8)) < 0.001);
-  assert.ok(Math.abs(m.fact - (m.filesWide - m.filesNarrow) / 2) < 0.001);
+  const m = filesCols(sheetMorph(W1440));
+  assert.equal(m.wide, 0.5 * (W1440 - 96) - 8);
+  assert.ok(Math.abs(m.narrow - 380) < 0.01);
+  assert.ok(Math.abs(m.narrow - (FILES_RIGHT * 880 - 8)) < 0.001);
+  assert.ok(Math.abs(m.fact - (m.wide - m.narrow) / 2) < 0.001);
   // тесная колода — 40 %: левой колонке (с тремя кнопками у файла) больше места
-  const t = sheetMorph(W1280);
-  assert.ok(Math.abs(t.filesNarrow - (FILES_RIGHT_TIGHT * 720 - 8)) < 0.001);
-  assert.ok(720 - 16 - t.filesNarrow > 720 - 16 - (FILES_RIGHT * 720 - 8));
-  assert.deepEqual(sheetVars(m), { "--dfw": `${m.filesWide}px`, "--dfn": `${m.filesNarrow}px` });
-  assert.deepEqual(sheetVars(sheetMorph(0)), {});
+  const t = filesCols(sheetMorph(W1280));
+  assert.ok(Math.abs(t.narrow - (FILES_RIGHT_TIGHT * 720 - 8)) < 0.001);
+  assert.ok(720 - 16 - t.narrow > 720 - 16 - (FILES_RIGHT * 720 - 8));
+  assert.deepEqual(filesVars(m), { "--dfw": `${m.wide}px`, "--dfn": `${m.narrow}px` });
+  assert.deepEqual(filesVars(filesCols(sheetMorph(0))), {});
+});
+
+test("«Файлы» с обычной полосой прокрутки (15 px): колонки — половины сетки без полосы, как доли V2 от неё", () => {
+  const bar = 15;
+  const m = filesCols(sheetMorph(W1440), bar);
+  const grid = W1440 - 96 - bar;
+  // правая — 50 % − 8 сетки, левая (1fr) — остальное за вычетом зазора 16: поровну
+  assert.ok(Math.abs(m.wide - (grid / 2 - 8)) < 0.001);
+  assert.ok(Math.abs((grid - 16 - m.wide) - m.wide) < 0.001);
+  assert.ok(Math.abs(m.narrow - (FILES_RIGHT * (880 - bar) - 8)) < 0.001);
 });
 
 test("sumNarrowing: колонка сводки «Качества» у́же на место помощника за вычетом того, что справа уходит", () => {
@@ -125,6 +135,12 @@ test("--hpd стопок листа сходится с дорожками ко�
   assert.equal(base["p-body"], HELPER_COL - (aside - pa) - (th - 120) - (hd - row));
   // в тесной колоде тело уходит вместе со своей дорожкой — копии одной ширины
   assert.equal(tight["p-body"], 0);
+  // «Шаблон»: «Правила оформления» при 1440 — 416 и в узкой (V2), в тесной колоде — у́же; строки правил и «Шрифты и поля»
+  const rules = 416;
+  for (const n of ["t-rule", "t-cb"]) {
+    assert.equal(base[n], rules - track(css, ".hp-nar .dtp-g"), n);
+    assert.equal(tight[n], rules - track(css, ".hp-nar .dd-tight .dtp-g"), n);
+  }
 });
 
 test("--hpd стопок слоёв: «Текст презентации» — две колонки, «Мои презентации» — четыре; сетки те же в обеих раскладках", () => {

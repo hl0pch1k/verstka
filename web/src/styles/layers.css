@@ -133,18 +133,22 @@
    Дословно из V2 версии 100; сайт: ширина колоды в покое — `--dkw` колоды (ui/deck/Deck: ширина обёртки, без полосы
    прокрутки окна), запасное значение — как у V2. */
 @property --lgone{syntax:'<number>';inherits:true;initial-value:0}
+@property --lcv{syntax:'<number>';inherits:true;initial-value:0}
 @media (min-width: 901px){
   .hp-wrap .p2-lay-off{--lgone:1;width:var(--dkw, min(1392px, calc(100vw - 48px)));transition:transform 520ms var(--ease),visibility 0s linear 520ms,--lgone 0s linear 520ms,width 0s linear 520ms;transition-behavior:allow-discrete}
   .hp-wrap.hp-nar .p2-lay-off{width:calc(var(--dkw, min(1392px, calc(100vw - 48px))) - 416px)}
-  .hp-wrap .dd-pw.p2-off{--lgone:1;width:calc(var(--dkw, min(1392px, calc(100vw - 48px))) - 96px);transition:opacity 240ms var(--ease),visibility 0s linear 240ms,--lgone 0s linear 240ms,width 0s linear 240ms,content-visibility 0s linear 240ms;transition-behavior:allow-discrete}
+  .hp-wrap .dd-pw.p2-off{--lgone:1;--lcv:1;width:calc(var(--dkw, min(1392px, calc(100vw - 48px))) - 96px);transition:opacity 240ms var(--ease),visibility 0s linear 240ms,--lgone 0s linear 240ms,--lcv 0s linear 240ms,width 0s linear 240ms;transition-behavior:allow-discrete}
   .hp-wrap.hp-nar .dd-pw.p2-off{width:calc(var(--dkw, min(1392px, calc(100vw - 48px))) - 512px)}
-  /* сайт: невыбранная вкладка, когда догасла, ещё и не рисуется (content-visibility: hidden; с тех пор как лист доехал и
-     лесенки вкладок доиграли — `dd-settled`, DetailsSheet) — щелчок помощника не пересчитывает её стиль и раскладку (в
-     кадре клика это было ~15 мс в разработке); выбранная снова снимает метку «закрыт» на кадр позже (50 мс): её
-     поддерево пересчитывается при открытии ещё без переходов — сразу в нынешней раскладке, а не ходом из той, в которой
-     его застал скрытым помощник */
-  .hp-wrap .dd-settled .dd-pw.p2-off{content-visibility:hidden}
+  /* сайт: невыбранная вкладка, когда догасла, ещё и не рисуется (content-visibility: hidden у её содержимого; с тех пор как
+     лист доехал и лесенки вкладок доиграли — `dd-settled`, DetailsSheet) — щелчок помощника не пересчитывает её стиль и
+     раскладку (~15 мс кадра клика в разработке). Две метки: --lcv «не рисуется» — через 240 мс после ухода (догасла), при
+     открытии снимается сразу; --lgone «без переходов» — снимается на 50 мс позже: поддерево открытой вкладки пересчитывается
+     ещё без переходов — сразу в нынешней раскладке, а не ходом из той, в которой его застал скрытым помощник. Без запросов
+     стиля (Firefox) — просто рисуется, как у V2 */
   .hp-wrap .dd-pw.p2-on{transition:opacity 360ms var(--ease) 120ms,--lgone 0s linear 50ms}
+  @container style(--lcv: 1){
+    .dd-settled .dd-pw.p2-off > *{content-visibility:hidden}
+  }
   @container style(--lgone: 1){
     .p2-lay *{transition:none !important}
   }

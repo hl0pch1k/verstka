@@ -21,32 +21,41 @@ export interface SheetMorph {
   tight: boolean;
   /** Ширина содержимого листа в узкой раскладке, px (0 — обёртка не измерена). */
   inner: number;
-  /** «Файлы»: правая колонка в широкой и узкой раскладке, px (V2: 50 % − 8 и 44,09 % − 8 — доли от ширины листа, которая
-   *  сама сужается: ход доли по сужающейся ширине не линеен, и колонка шла бы не в такт колоде). 0 — не измерена. */
-  filesWide: number;
-  filesNarrow: number;
-  /** «Файлы», «Паспорт запуска»: на сколько у́же колонка факта в узкой раскладке (`--hpd` стопки f-fact). */
-  fact: number;
+  /** Ширина обёртки колоды, px. */
+  wrap: number;
 }
 
 /** Раскладка листа — для вкладок (ставит DetailsSheet). */
-export const SheetCtx = createContext<SheetMorph>({ tight: false, inner: 0, filesWide: 0, filesNarrow: 0, fact: 0 });
+export const SheetCtx = createContext<SheetMorph>({ tight: false, inner: 0, wrap: 0 });
 
 const r3 = (x: number) => Math.round(x * 1000) / 1000;
 
 export function sheetMorph(wrap: number): SheetMorph {
   const inner = wrap > 0 ? wrap - HELPER_COL - SHEET_PAD : 0;
-  const tight = inner > 0 && inner < TIGHT_INNER;
-  if (!(inner > 0)) return { tight, inner, filesWide: 0, filesNarrow: 0, fact: 0 };
-  // правая колонка «Файлов»: 50 % − 8 листа в широкой и доля узкой − 8 в узкой; факты паспорта — в две колонки
-  const filesWide = r3(0.5 * (wrap - SHEET_PAD) - 8);
-  const filesNarrow = r3((tight ? FILES_RIGHT_TIGHT : FILES_RIGHT) * inner - 8);
-  return { tight, inner, filesWide, filesNarrow, fact: r3((filesWide - filesNarrow) / 2) };
+  return { tight: inner > 0 && inner < TIGHT_INNER, inner, wrap };
 }
 
-/** CSS-переменные листа: дорожки «Файлов» в px. */
-export function sheetVars(m: SheetMorph): Record<string, string> {
-  return m.filesWide > 0 ? { "--dfw": `${m.filesWide}px`, "--dfn": `${m.filesNarrow}px` } : {};
+export interface FilesCols {
+  /** Правая колонка в широкой и узкой раскладке, px (V2: 50 % − 8 и 44,09 % − 8 — доли от ширины сетки, которая сама
+   *  сужается: ход доли по сужающейся ширине не линеен, и колонка шла бы не в такт колоде). 0 — не измерена. */
+  wide: number;
+  narrow: number;
+  /** «Паспорт запуска»: на сколько у́же колонка факта в узкой раскладке (`--hpd` стопки f-fact). */
+  fact: number;
+}
+
+/** «Файлы»: дорожки по ширине обёртки колоды и полосе прокрутки вкладки (`scrollbar`, px: обычная полоса — 15, накладная
+ *  — 0): сетка у́же листа на её ширину, и доли V2 считаются от неё. */
+export function filesCols(m: SheetMorph, scrollbar = 0): FilesCols {
+  if (!(m.inner > 0)) return { wide: 0, narrow: 0, fact: 0 };
+  const wide = r3(0.5 * (m.wrap - SHEET_PAD - scrollbar) - 8);
+  const narrow = r3((m.tight ? FILES_RIGHT_TIGHT : FILES_RIGHT) * (m.inner - scrollbar) - 8);
+  return { wide, narrow, fact: r3((wide - narrow) / 2) };
+}
+
+/** CSS-переменные сетки «Файлов»: дорожки в px. */
+export function filesVars(f: FilesCols): Record<string, string> {
+  return f.wide > 0 ? { "--dfw": `${f.wide}px`, "--dfn": `${f.narrow}px` } : {};
 }
 
 /** «Качество», сводка: на сколько у́же колонка заголовка и строки счёта в узкой раскладке (`--hpd` её стопки). Колода

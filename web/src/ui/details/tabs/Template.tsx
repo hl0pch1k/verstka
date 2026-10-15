@@ -2,6 +2,8 @@
 // шаблона презентации (имя, формат, слайды, типы, шрифт, палитра — клик копирует цвет, строка над лентой говорит
 // «Цвет … скопирован»), макеты (шесть, «Все N» ↔ «Свернуть»; клик открывает слой «Слайд N шаблона»), правила
 // оформления и «Шрифты и поля». Данные — templateTab.ts.
+// Помощник сужает колоду (V2 версии 100): полоса плотнее, макеты у́же; в тесной колоде (1280) уходит третий факт, палитра
+// у́же, «Правила» 416 → 336 (их строки — стопки t-rule), у подписи макета слово «слайд» уходит — остаётся номер.
 import { useState } from "react";
 import { fontStack, useTemplateFont } from "../../../lib/fonts";
 import { useApp } from "../../../store";
@@ -9,6 +11,7 @@ import type { TemplateManifest } from "../../../types";
 import { cls } from "../../kit/cls";
 import { Icon } from "../../kit/Icon";
 import { Spinner } from "../../kit/Spinner";
+import { Tx } from "../../kit/Tx";
 import { Col, Empty, Shot } from "../parts";
 import { bandOf, copyHint, fontRows, layoutsOf, paletteOf, rulesOf } from "../templateTab";
 import type { DeckManifest } from "../useDeckManifest";
@@ -54,7 +57,7 @@ function TemplateBody({ m }: { m: TemplateManifest }) {
       <section className="dtp-box dtp-band p2-in" aria-label="Обзор шаблона" style={{ animationDelay: "120ms" }}>
         <h2 className="dtp-name" title={band.name}>{band.name}</h2>
         <dl style={{ display: "contents" }}>
-          {band.facts.map((f) => <div key={f.l} className="dtp-tile dtp-fact"><dt>{f.l}</dt><dd>{f.v}</dd></div>)}
+          {band.facts.map((f, i) => <div key={f.l} className={cls("dtp-tile dtp-fact", i === 2 && "dtp-f3")}><dt>{f.l}</dt><dd>{f.v}</dd></div>)}
         </dl>
         <div className="dtp-tile dtp-font">
           <span className="dtp-aa" aria-hidden="true" style={{ fontFamily: fontStack(band.font) }}>Аа</span>
@@ -93,7 +96,7 @@ function TemplateBody({ m }: { m: TemplateManifest }) {
                   </span>
                   <span style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, height: 20, marginTop: 8 }}>
                     <span style={{ fontSize: 14, fontWeight: 700, lineHeight: "20px", color: "#0B1220", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{l.kind}</span>
-                    <span style={{ flex: "none", fontSize: 12, fontWeight: 600, lineHeight: "20px", color: "#5A6272", whiteSpace: "nowrap" }}>слайд {l.n}</span>
+                    <span style={{ flex: "none", fontSize: 12, fontWeight: 600, lineHeight: "20px", color: "#5A6272", whiteSpace: "nowrap" }}><span className="dtp-lsw">слайд{"\u00A0"}</span>{l.n}</span>
                   </span>
                 </button>
               </div>
@@ -105,11 +108,11 @@ function TemplateBody({ m }: { m: TemplateManifest }) {
           {rules.length > 0 && (
             <section className="dtp-box p2-in" aria-labelledby="dtp-rules" style={{ animationDelay: "200ms" }}>
               <h2 id="dtp-rules" className="dtp-h2">Правила оформления</h2>
-              <ul className="dtp-rules">{rules.map((r) => <li key={r} className="dtp-rule">{r}</li>)}</ul>
+              <ul className="dtp-rules">{rules.map((r) => <li key={r} className="dtp-rule"><Tx tx="t-rule" as="span" wrap="span" f>{r}</Tx></li>)}</ul>
             </section>
           )}
           {rows.length > 0 && (
-            <Col prefix="dtp" label="Шрифты и поля" title="Шрифты и поля" hint="для дизайнера" open={fonts} onToggle={() => setFonts(!fonts)} delay={240}>
+            <Col prefix="dtp" label="Шрифты и поля" title="Шрифты и поля" hint="для дизайнера" open={fonts} onToggle={() => setFonts(!fonts)} delay={240} bodyTx="t-cb">
               <span className="dpl-tbl">{rows.map((r) => <span key={r.a} className="dpl-tr"><span>{r.a}</span><span>{r.b}</span></span>)}</span>
             </Col>
           )}

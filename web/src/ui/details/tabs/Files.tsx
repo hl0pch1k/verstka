@@ -3,7 +3,7 @@
 // разработчиков» (FilesDev). Данные — files.ts.
 // Помощник сужает колоду (V2 версии 100): те же две колонки, правая 50 % → 44 %, кнопки файлов плотнее, «на экране» и
 // бейдж «Паспорта» сжимаются и гаснут, у плиток итога значки сжимаются и гаснут, длинная подпись — многоточием.
-import { useContext, useState } from "react";
+import { useContext, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { plural } from "../../../lib/utils";
 import { useApp } from "../../../store";
 import type { Generation, Variant } from "../../../types";
@@ -13,7 +13,7 @@ import { checkTiles, fileRows, fixRowsOf, passport, stagesOf } from "../files";
 import { slideTag } from "../quality";
 import { FilesDev } from "./FilesDev";
 import { Tx } from "../../kit/Tx";
-import { SheetCtx } from "../sheetMorph";
+import { filesCols, filesVars, SheetCtx } from "../sheetMorph";
 import type { DeckManifest } from "../useDeckManifest";
 
 const H = { margin: 0 } as const;
@@ -28,11 +28,24 @@ export function FilesTab({ g, v, deck }: { g: Generation; v: Variant; deck: Deck
   const check = checkTiles(g, v);
   const fixes = fixRowsOf(v, deck.manifest);
   const n = files.length;
-  const fact = useContext(SheetCtx).fact;
+  // дорожки в px — от ширины сетки: лист без полосы прокрутки вкладки (обычная полоса — 15 px, накладная — 0)
+  const scroller = useRef<HTMLDivElement>(null);
+  const [bar, setBar] = useState(0);
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const measure = () => setBar(Math.max(0, el.offsetWidth - el.clientWidth));
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const cols = filesCols(useContext(SheetCtx), bar);
+  const fact = cols.fact;
 
   return (
-    <div id="dd-panel-files" className="df-scroll p2-fade" role="tabpanel" aria-labelledby="dd-tab-files" tabIndex={0} style={{ flex: 1, minHeight: 0, padding: "24px 0", overflowY: "auto", borderRadius: 24 }}>
-      <div className="df-grid" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 16 }}>
+    <div ref={scroller} id="dd-panel-files" className="df-scroll p2-fade" role="tabpanel" aria-labelledby="dd-tab-files" tabIndex={0} style={{ flex: 1, minHeight: 0, padding: "24px 0", overflowY: "auto", borderRadius: 24 }}>
+      <div className="df-grid" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 16, ...filesVars(cols) } as CSSProperties}>
         <section className="df-card p2-in" aria-labelledby="df-h1" style={{ animationDelay: "280ms" }}>
           <div className="df-hd"><h2 id="df-h1" className="df-h">Файлы</h2><span className="df-badge">{plural(n, "вариант", "варианта", "вариантов")}</span></div>
           <ul style={{ display: "flex", flexDirection: "column", gap: 16, margin: "16px 0 0", padding: 0, listStyle: "none" }}>

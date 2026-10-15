@@ -8,8 +8,9 @@
 // вниз. Замер здесь, одним проходом для всех стопок (сначала все чтения, потом записи, и только изменившиеся): высоты
 // копий и их ширины в покое — после замера (`hp-txm`) ширина каждой копии — эти px (`--tw`, `--tn`), а не клетка ± --hpd·p:
 // та постоянна только до 1/64 px, и строка, вставшая впритык, могла бы перенестись посреди хода. До замера — ход V2.
-// Когда: после монтирования — когда слой доехал (не в кадрах его въезда); новый текст — в ближайшем кадре; окно
-// перестало меняться, догрузились шрифты, сменилось своё --hpd — заново по клетке.
+// Когда: после монтирования — когда слой доехал (не в кадрах его въезда); новый текст, клетка сменила ширину в покое
+// (ResizeObserver; ход помощника — не в счёт), окно перестало меняться, догрузились шрифты, сменилось своё --hpd — заново
+// по клетке в ближайшем кадре.
 // Для листа «Подробнее» и слоёв; «Создать» и «Сборка» держат свои стопки (create/, build/Roles).
 import { createContext, useContext, useLayoutEffect, useRef, type CSSProperties, type ReactNode } from "react";
 import { cls } from "./cls";
@@ -24,9 +25,14 @@ const all = new Set<HTMLElement>();
 const dirty = new Set<HTMLElement>();
 const last = new WeakMap<HTMLElement, string>();
 const texts = new WeakMap<HTMLElement, string>();
+/** Ширина клетки в покое в широкой и узкой раскладке (замер в одной, вторая — на --hpd у́же или шире). */
+const rest = new WeakMap<HTMLElement, { wide: number; narrow: number }>();
 let frame = 0;
 let later = 0;
 let resized = 0;
+let ro: ResizeObserver | null = null;
+/** Раскладка колоды сейчас (узкая — помощник открыт): с ней сверяется ширина клетки в покое. */
+let narrowNow = false;
 /** Первый замер после монтирования — не раньше, чем слой доехал (его въезд 520 мс и лесенка). */
 export const MEASURE_LATER = 700;
 /** Окно перестало меняться — замер заново. */
@@ -53,7 +59,10 @@ function flush() {
     if (!w || !n) return null;
     const cs = getComputedStyle(w);
     const h = stackHeights(w.offsetHeight, n.offsetHeight, (parseFloat(cs.marginTop) || 0) + (parseFloat(cs.marginBottom) || 0));
-    return { ...h, tw: w.getBoundingClientRect().width, tn: n.getBoundingClientRect().width };
+    const cell = el.getBoundingClientRect().width;
+    const hpd = parseFloat(getComputedStyle(el).getPropertyValue("--hpd")) || 0;
+    const cells = narrowNow ? { wide: cell + hpd, narrow: cell } : { wide: cell, narrow: cell - hpd };
+    return { ...h, tw: w.getBoundingClientRect().width, tn: n.getBoundingClientRect().width, cells };
   });
   // обратно — тоже без переходов (иначе узкая копия ехала бы к своей высоте 0 ↔ auto 340 мс): сначала только «без
   // переходов», стиль досчитан, потом и эта метка снята — значения уже прежние, ход не начинается
@@ -64,6 +73,7 @@ function flush() {
   items.forEach((el, i) => {
     const h = read[i];
     if (!h) return;
+    rest.set(el, h.cells);
     const key = `${h.hw}|${h.hdd}|${h.hn}|${h.tw}|${h.tn}`;
     if (last.get(el) === key && el.classList.contains("hp-txm")) return;
     last.set(el, key);
@@ -72,11 +82,32 @@ function flush() {
     el.style.setProperty("--hn", `${h.hn}px`);
     el.style.setProperty("--tw", `${h.tw}px`);
     el.style.setProperty("--tn", `${h.tn}px`);
+    // высота стопки в узкой раскладке — и соседям (ряд плана: до неё сжимается тело ряда)
+    if (el.dataset.share) el.parentElement?.style.setProperty(`--${el.dataset.share}`, `${h.hw + h.hdd}px`);
     el.classList.add("hp-txm");
   });
 }
 
-/** Замер в ближайшем кадре (новый текст: ширины копий те же, высоты — новые). */
+/** Клетка стопки сменила ширину в покое (бейдж рядом, подпись кнопки, полоса прокрутки) — замер заново; доли пикселя
+ *  (дрожь раскладки) — не повод. */
+function checkCell(el: HTMLElement, width: number) {
+  const r = rest.get(el);
+  if (!r || !el.isConnected) return;
+  if (Math.abs(width - (narrowNow ? r.narrow : r.wide)) >= 0.5) remeasure(el);
+}
+
+function onCells(entries: ResizeObserverEntry[]) {
+  for (const e of entries) {
+    const el = e.target as HTMLElement;
+    // на ходу помощника (ход стопки --hpp между 0 и 1) клетка меняет ширину сама — не повод; в конце хода наблюдатель
+    // сработает ещё раз, уже в покое
+    const p = parseFloat(getComputedStyle(el).getPropertyValue("--hpp"));
+    if (p > 0 && p < 1) continue;
+    checkCell(el, e.contentRect.width);
+  }
+}
+
+/** Замер в ближайшем кадре. */
 function mark(el: HTMLElement) {
   dirty.add(el);
   if (later) {
@@ -109,14 +140,19 @@ function track(el: HTMLElement): () => void {
   all.add(el);
   markLater(el);
   void document.fonts?.ready.then(() => (last.has(el) ? remeasure(el) : markLater(el)));
+  if (typeof ResizeObserver !== "undefined") {
+    ro ??= new ResizeObserver(onCells);
+    ro.observe(el);
+  }
   return () => {
     all.delete(el);
     dirty.delete(el);
+    ro?.unobserve(el);
     if (all.size === 0) window.removeEventListener("resize", onResize);
   };
 }
 
-export function Tx({ tx, as = "p", wrap = "div", className, style, f, hpd, title, children }: {
+export function Tx({ tx, as = "p", wrap = "div", className, style, f, hpd, title, share, children }: {
   /** Имя стопки — по нему CSS ставит `--hpd` (details.css, layers.css). */
   tx: string;
   /** Тег копий. */
@@ -131,9 +167,12 @@ export function Tx({ tx, as = "p", wrap = "div", className, style, f, hpd, title
   hpd?: number;
   /** Подсказка — у активной копии. */
   title?: string;
+  /** Высоту стопки в узкой раскладке — родителю, CSS-переменной с этим именем. */
+  share?: string;
   children: ReactNode;
 }) {
   const narrow = useContext(TxNarrow);
+  narrowNow = narrow;
   const ref = useRef<HTMLElement>(null);
   useLayoutEffect(() => {
     const el = ref.current;
@@ -152,12 +191,12 @@ export function Tx({ tx, as = "p", wrap = "div", className, style, f, hpd, title
     const t = el?.firstElementChild?.textContent ?? "";
     if (!el || texts.get(el) === t) return;
     texts.set(el, t);
-    mark(el);
+    remeasure(el);
   });
   const W = wrap;
   const T = as;
   return (
-    <W ref={ref as never} className={cls("hp-tx hp-txl", f && "hp-txf")} data-tx={tx} style={hpd === undefined ? undefined : ({ "--hpd": `${hpd}px` } as CSSProperties)}>
+    <W ref={ref as never} className={cls("hp-tx hp-txl", f && "hp-txf")} data-tx={tx} data-share={share} style={hpd === undefined ? undefined : ({ "--hpd": `${hpd}px` } as CSSProperties)}>
       <T className={cls("hp-txw", className)} style={style} title={narrow ? undefined : title} aria-hidden={narrow || undefined}>{children}</T>
       <T className={cls("hp-txn", className)} style={style} title={narrow ? title : undefined} aria-hidden={!narrow || undefined}>{children}</T>
     </W>

@@ -161,7 +161,7 @@ export function WhyTab({ g, v, deck, active }: { g: Generation; v: Variant; deck
               <Shot src={w.own.src} alt={w.own.alt} style={FRAME} />
               <Tx tx="w-cap" as="span" className="dd-cap">{w.sampleCap}</Tx>
               <span />
-              <Tx tx="w-cap" as="span" className="dd-cap" style={{ color: "#0B1220" }}>Ваш слайд</Tx>
+              <span className="dd-cap" style={{ color: "#0B1220" }}>Ваш слайд</span>
             </div>
             {w.sim && (
               <div style={{ marginTop: 24, paddingTop: 16, borderTop: "1px solid rgba(11,18,32,.08)" }}>
