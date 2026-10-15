@@ -8,10 +8,7 @@
 // помощника (плита 400 + зазор 16). Открытие — узкая раскладка сразу; закрытие — узкая держится, пока сетка не доехала
 // (`held`, useDeckFit.ts).
 
-import { HELPER_COL, PLATE_PAD } from "./layout";
-
-// result/compact.ts берёт PLATE_PAD отсюда; общий источник — ./layout (там и импортировать, тогда этот реэкспорт лишний).
-export { PLATE_PAD };
+import { HELPER_COL } from "./layout";
 
 /** Колода не шире — узкая (открыт помощник). */
 const NARROW_DECK = 1100;

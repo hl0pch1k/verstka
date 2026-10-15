@@ -3,7 +3,8 @@
 // (qualityCard), чего в данных нет — того пункта нет.
 import { templateTitle } from "../../lib/plain";
 import type { Generation, Variant } from "../../types";
-import { PLATE_PAD, type DeckFit } from "../deck/fit";
+import { type DeckFit } from "../deck/fit";
+import { PLATE_PAD } from "../deck/layout";
 import type { SheetTab } from "../deck/geometry";
 import type { IconName } from "../kit/icons";
 import { qualityCard } from "./resultView";
