@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ctaShort, deckWidths, hintTail, listCard, moreGrid, paramsRow, readyShort, ribbonRows, STEPPER, STEPPER_NARROW, VARIANT_NAME } from "./morph";
+import {
+  ctaShort, deckWidths, hintTail, HELPER_COL, listCard, moreCards, moreGrid, moreThird, paramsRow, readyShort, ribbonRows,
+  STEPPER, STEPPER_NARROW, VARIANT_NAME,
+} from "./morph";
 
 // обёртка колоды: 1392 при окне 1440, 1232 при 1280, 1217 — 1280 с обычной полосой прокрутки страницы (15 px)
 const W1440 = 1392, W1280 = 1232, W1280S = 1217;
@@ -93,7 +96,7 @@ test("paramsRow: переключатели уходят ровно там, гд
   assert.equal(paramsRow(1350, 3).switches, false);
 });
 
-test("moreGrid при 1440: три колонки в обеих раскладках, подсказка варианта шире в узкой на 33.33 (миниатюра ушла)", () => {
+test("moreGrid при 1440: три колонки в обеих раскладках, подсказка варианта шире в узкой (миниатюра ушла) — роли копий наоборот", () => {
   const m = moreGrid(W1440, 3, false);
   assert.equal(m.tight, false);
   assert.equal(m.thumb, 156);
@@ -103,26 +106,77 @@ test("moreGrid при 1440: три колонки в обеих раскладк
   assert.equal(pxOf(tracks(m.r1Narrow)[0]), pxOf(tracks(m.r1Narrow)[2]));
 });
 
-test("moreGrid при 1280: тесная — переключатели строками, степпер слайдов по содержимому", () => {
-  const m = moreGrid(W1280, 3, true);
-  assert.equal(m.tight, true);
-  assert.equal(m.thumb, 112);
-  const n = tracks(m.r1Narrow).map(pxOf);
-  assert.equal(n[2], 168);
-  assert.equal(Math.round((n[0] + n[1] + n[2] + 32) * 100) / 100, 816 - 288);
-  assert.equal(tracks(m.r1Wide).map(pxOf).reduce((a, b) => a + b) + 32, 1232 - 288);
-  // вариант 304 → 165.33, миниатюра 112 уходит, поля 16 → 12: подсказка у́же на 10.67 — роли копий обычные
-  assert.equal(m.vhint, 304 - 32 - 112 - 16 - (496 / 3 - 24) > 0 ? Math.round((304 - 32 - 112 - 16 - (496 / 3 - 24)) * 1000) / 1000 : NaN);
-  assert.ok(m.vhint > 0);
+test("moreGrid при 1280 (1232 и 1217): тесная — степпер слайдов по содержимому; подсказка варианта у́же в узкой", () => {
+  for (const w of [W1280, W1280S]) {
+    const m = moreGrid(w, 3, true);
+    assert.equal(m.tight, true);
+    assert.equal(m.thumb, 112);
+    const n = tracks(m.r1Narrow).map(pxOf);
+    assert.equal(n[2], 168);
+    // первый ряд — во всю ширину «Все параметры» (колода − 288) в обеих раскладках
+    assert.ok(Math.abs(n[0] + n[1] + n[2] + 32 - (deckWidths(w).narrow - 288)) < 0.01);
+    assert.ok(Math.abs(tracks(m.r1Wide).map(pxOf).reduce((a, b) => a + b) + 32 - (w - 288)) < 0.01);
+    // в узкой у карточки нет миниатюры, но она на 140 px у́же — подсказка всё равно у́же: обычные роли копий
+    assert.ok(m.vhint > 0, `${w}`);
+  }
 });
 
-test("подписи по ширине: при 1440 — полные, при 1280 — короткие; перечень у «Это тема…» — пока колода шире 1300", () => {
+test("moreCards: карточки заполняют ряд «Все параметры», подсказка — колонка текста карточки; --hpd подсказки — их разница", () => {
+  for (const w of [W1440, W1280, W1280S]) for (const short of [false, true]) {
+    const c = moreCards(w, 3, short);
+    const m = moreGrid(w, 3, short);
+    for (const k of ["wide", "narrow"] as const) {
+      const row = deckWidths(w)[k] - 288;
+      assert.ok(Math.abs(3 * c[k].card + 32 - row) < 0.01, `${w} ${k}`);
+      assert.ok(c[k].hint > 0 && c[k].hint < c[k].card, `${w} ${k}`);
+    }
+    // в широкой рядом с подсказкой миниатюра: колонка текста меньше карточки на поля, миниатюру и зазор
+    assert.ok(Math.abs(c.wide.card - c.wide.hint - (32 + m.thumb + 16)) < 0.01, `${w}`);
+    assert.ok(Math.abs(m.vhint - (c.wide.hint - c.narrow.hint)) < 0.01, `${w}`);
+  }
+});
+
+/** create.css: `--hpd` стопок, заданный числом (на сколько клетка у́же в узкой раскладке). Файл — из папки web (`npm test`). */
+function cssHpd(): Record<string, number> {
+  // без @types/node: модули node — через process.getBuiltinModule
+  const proc = (globalThis as unknown as { process: { cwd(): string; getBuiltinModule(id: string): unknown } }).process;
+  const fs = proc.getBuiltinModule("node:fs") as { existsSync(p: string): boolean; readFileSync(p: string, enc: "utf8"): string };
+  const path = proc.getBuiltinModule("node:path") as { join(...p: string[]): string };
+  let dir = proc.cwd();
+  while (!fs.existsSync(path.join(dir, "src/styles/create.css")) && dir !== path.join(dir, "..")) dir = path.join(dir, "..");
+  const css = fs.readFileSync(path.join(dir, "src/styles/create.css"), "utf8");
+  const out: Record<string, number> = {};
+  for (const m of css.matchAll(/\[data-tx="([\w-]+)"\]\{--hpd:(-?[\d.]+)px/g)) out[m[1]] = parseFloat(m[2]);
+  return out;
+}
+
+test("--hpd стопок в create.css сходится с геометрией обеих раскладок при любой ширине окна", () => {
+  const hpd = cssHpd();
+  for (const w of [W1440, 1360, 1300, W1280, W1280S]) {
+    const d = deckWidths(w);
+    // поле и заметка «Улучшить готовую» — во всю ширину тела шага: у́же ровно на место помощника
+    assert.equal(hpd["c-note"], d.wide - d.narrow, `${w} c-note`);
+    assert.equal(hpd["c-ta"], HELPER_COL, `${w} c-ta`);
+  }
+  // коробки переключателей «Все параметры» — треть ряда: у́же на треть места помощника (пока раскладка не тесная)
+  for (const w of [W1440, 1360]) {
+    const t = moreThird(w);
+    assert.ok(Math.abs(hpd["c-swt"] - (t.wide - t.narrow)) < 0.001, `${w} c-swt`);
+    assert.ok(Math.abs(hpd["c-swd"] - (t.wide - t.narrow)) < 0.001, `${w} c-swd`);
+  }
+  // подсказка варианта: в CSS — значение при 1440 (поверх него — переменная morph.ts при любой ширине)
+  assert.equal(hpd["c-vhint"], moreGrid(W1440, 3, false).vhint);
+});
+
+test("подписи по ширине: при 1440 — полные, при 1280 (и 1217) — короткие; перечень у «Это тема…» — пока колода шире 1300", () => {
   assert.equal(readyShort(W1440), false);
   assert.equal(ctaShort(W1440), false);
-  assert.equal(readyShort(W1280), true);
-  assert.equal(ctaShort(W1280), true);
+  for (const w of [W1280, W1280S]) {
+    assert.equal(readyShort(w), true);
+    assert.equal(ctaShort(w), true);
+    assert.equal(hintTail(w), false);
+  }
   assert.equal(hintTail(W1440), true);
-  assert.equal(hintTail(W1280), false);
   assert.equal(hintTail(1301), true);
   assert.equal(hintTail(1300), false);
 });

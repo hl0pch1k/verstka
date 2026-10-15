@@ -128,6 +128,13 @@ export function paramsRow(wrap: number, n: number): ParamsRow {
   };
 }
 
+/** Коробка переключателя в «Все параметры» (три колонки, `#p2-b3m`: слева 240, справа 48) в широкой и узкой раскладке. */
+export function moreThird(wrap: number): { wide: number; narrow: number } {
+  const { wide, narrow } = deckWidths(wrap);
+  const third = (w: number) => r3((w - MORE_PAD - 2 * GAP) / 3);
+  return { wide: third(wide), narrow: third(narrow) };
+}
+
 export interface MoreGrid {
   /** Тесная раскладка «Все параметры» (помощник при окне около 1280): переключатели — строками. */
   tight: boolean;
@@ -141,25 +148,41 @@ export interface MoreGrid {
   vhint: number;
 }
 
+/** Карточки вариантов «Все параметры» (`#p2-b3m`) в широкой и узкой раскладке: карточка и колонка её подсказки (в
+ *  широкой — справа от миниатюры, в узкой — миниатюры нет; в тесной поля по бокам 16 → 12). */
+export function moreCards(wrap: number, n: number, short: boolean): Record<"wide" | "narrow", { card: number; hint: number }> {
+  const c = moreCardsRaw(wrap, n, short);
+  return { wide: { card: r3(c.wide.card), hint: r3(c.wide.hint) }, narrow: { card: r3(c.narrow.card), hint: r3(c.narrow.hint) } };
+}
+
+function moreCardsRaw(wrap: number, n: number, short: boolean) {
+  const { wide, narrow } = deckWidths(wrap);
+  const k = Math.max(1, n);
+  const card = (w: number) => (w - MORE_PAD - (k - 1) * GAP) / k;
+  const thumb = short ? THUMB_SHORT : THUMB;
+  return {
+    wide: { card: card(wide), hint: card(wide) - 32 - thumb - GAP },
+    narrow: { card: card(narrow), hint: card(narrow) - (moreTight(wrap) ? 24 : 32) },
+  };
+}
+
+/** Тесная раскладка «Все параметры» (окно около 1280): в узкой колоде колонке названия переключателя меньше 96 px. */
+const moreTight = (wrap: number): boolean => {
+  const N = deckWidths(wrap).narrow - MORE_PAD;
+  return (N - 2 * GAP) / 3 - 48 - 44 - GAP < SWITCH_NAME;
+};
+
 /** «Все параметры» (`#p2-b3m`) при `n` вариантах; `short` — короткий ряд без переключателей (миниатюры меньше). */
 export function moreGrid(wrap: number, n: number, short: boolean): MoreGrid {
   const { wide, narrow } = deckWidths(wrap);
-  const k = Math.max(1, n);
   const W = wide - MORE_PAD, N = narrow - MORE_PAD;
   const third = (w: number) => (w - 2 * GAP) / 3;
-  const tight = third(N) - 48 - 44 - GAP < SWITCH_NAME;
-  const thumb = short ? THUMB_SHORT : THUMB;
-  const card = (w: number) => (w - (k - 1) * GAP) / k;
+  const tight = moreTight(wrap);
   const r1Wide = [px(third(W)), px(third(W)), px(third(W))].join(" ");
   const rest = (N - 2 * GAP - SLIDES_TIGHT) / 2;
   const r1Narrow = tight ? [px(rest), px(rest), px(SLIDES_TIGHT)].join(" ") : [px(third(N)), px(third(N)), px(third(N))].join(" ");
-  return {
-    tight,
-    r1Wide,
-    r1Narrow,
-    thumb,
-    vhint: Math.round(((card(W) - 32 - thumb - GAP) - (card(N) - (tight ? 24 : 32))) * 1000) / 1000,
-  };
+  const c = moreCardsRaw(wrap, n, short);
+  return { tight, r1Wide, r1Narrow, thumb: short ? THUMB_SHORT : THUMB, vhint: r3(c.wide.hint - c.narrow.hint) };
 }
 
 /** Подсказка о готовом тексте в ряду шапки шага 02 в узкой раскладке: «Готовый текст — агент разложит его по слайдам»
