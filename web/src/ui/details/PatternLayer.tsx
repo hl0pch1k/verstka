@@ -4,7 +4,7 @@
 // как определён тип слайда, декор, места для содержания и листание образцов (кнопки и ←/→). Въезжает снизу 520 мс и
 // уезжает вниз непрозрачным со своим содержимым (Layer); новый образец проявляет содержимое заново (p2-in).
 // Помощник сужает колоду — слой идёт за ней каждый кадр (V2 версии 100, details.css `.dpt-g`): образец чуть у́же, места
-// для содержания — третья дорожка, сжимается до нуля и гаснет вместе с ней (`dpt-plw hp-wo`), не переносясь заново.
+// для содержания — третья дорожка, сжимается до нуля и гаснет вместе с ней (`hp-wo` вокруг `dpt-plw`), не переносясь заново.
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { plural } from "../../lib/utils";
 import { useApp } from "../../store";
@@ -31,10 +31,14 @@ export function PatternLayer({ deck }: { deck: DeckManifest }) {
   const [map, setMap] = useState(true);
   const [hov, setHov] = useState<string | null>(null);
   const [seen, setSeen] = useState<number | null>(null);
+  // вход «мест для содержания» (p2-in) ещё идёт, а образец показан при закрытом помощнике: если помощник откроется посреди
+  // входа, вход замирает (animation-play-state), а не растёт поверх гашения; при уже открытом помощнике вход бежит скрытым
+  const [entering, setEntering] = useState(false);
   if ((view?.n ?? null) !== seen) {
     setSeen(view?.n ?? null);
     setMap(true);
     setHov(null);
+    setEntering(!!view && !ui.helper);
   }
   const close = () => dispatch({ type: "pattern", n: null });
   const go = (to: number | null) => to !== null && dispatch({ type: "pattern", n: to });
@@ -138,24 +142,30 @@ export function PatternLayer({ deck }: { deck: DeckManifest }) {
                   </section>
                 </div>
 
-                <section className="p2-in dpt-plw hp-wo" aria-labelledby="dpt-pl" style={{ display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, animationDelay: "240ms" }}>
-                  <h3 id="dpt-pl" className="dpt-h3">{p.placesH}</h3>
-                  <p className="dpt-legend">{LEGEND.map(([c, t]) => <span key={t}><span className="dpt-dot" style={{ background: c }} />{t}</span>)}</p>
-                  <ul className="dpt-places" style={{ minHeight: 0, overflowY: "auto", scrollbarWidth: "none" }}>
-                    {p.places.map((x) => {
-                      const on = hov === x.id;
-                      return (
-                        <li key={x.id}>
-                          <button type="button" className={cls("dpt-pl", on && "dpt-pl-on")} aria-pressed={on} onClick={() => setHov(on ? null : x.id)}>
-                            <span className="dpt-pl1">{x.num && <span className="dpt-num" style={{ background: x.c }}>{x.num}</span>}{!x.num && <span className="dpt-dot" style={{ background: x.c, margin: "0 6px" }} />}<span className="dpt-role">{x.role}</span>{x.extra && <span className="dpt-extra">{x.extra}</span>}</span>
-                            {x.sample && <span className="dpt-sample" title={x.sample}>{x.sample}</span>}
-                            {x.note && <span className="dpt-note">{x.note}</span>}
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </section>
+                {/* гашение на месте при открытии помощника (hp-wo) — у внешнего div, вход (p2-in) — у section: анимация и переход
+                    не делят opacity и не спорят (анимация перебивала гашение, и «места» вспыхивали, пока слой ещё входит); рамка
+                    обрезки (`.dpt-plw`) входит вместе с содержимым, как и прежде. Пока помощник открыт, недоигранный вход стоит
+                    на месте — видимость только падает */}
+                <div className="hp-wo" style={{ display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0 }}>
+                  <section className="p2-in dpt-plw" aria-labelledby="dpt-pl" onAnimationEnd={(e) => { if (e.target === e.currentTarget) setEntering(false); }} style={{ display: "flex", flexDirection: "column", flex: "1 1 0%", minWidth: 0, minHeight: 0, animationDelay: "240ms", animationPlayState: ui.helper && entering ? "paused" : "running" }}>
+                    <h3 id="dpt-pl" className="dpt-h3">{p.placesH}</h3>
+                    <p className="dpt-legend">{LEGEND.map(([c, t]) => <span key={t}><span className="dpt-dot" style={{ background: c }} />{t}</span>)}</p>
+                    <ul className="dpt-places" style={{ minHeight: 0, overflowY: "auto", scrollbarWidth: "none" }}>
+                      {p.places.map((x) => {
+                        const on = hov === x.id;
+                        return (
+                          <li key={x.id}>
+                            <button type="button" className={cls("dpt-pl", on && "dpt-pl-on")} aria-pressed={on} onClick={() => setHov(on ? null : x.id)}>
+                              <span className="dpt-pl1">{x.num && <span className="dpt-num" style={{ background: x.c }}>{x.num}</span>}{!x.num && <span className="dpt-dot" style={{ background: x.c, margin: "0 6px" }} />}<span className="dpt-role">{x.role}</span>{x.extra && <span className="dpt-extra">{x.extra}</span>}</span>
+                              {x.sample && <span className="dpt-sample" title={x.sample}>{x.sample}</span>}
+                              {x.note && <span className="dpt-note">{x.note}</span>}
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </section>
+                </div>
               </div>
 
               <div className="p2-in" style={{ display: "flex", alignItems: "center", gap: 8, height: 40, marginTop: 16, animationDelay: "280ms" }}>
