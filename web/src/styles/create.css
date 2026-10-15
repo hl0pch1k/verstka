@@ -353,6 +353,9 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
   .hp-nar .pp-tight .pp-r1 .pp-sl{gap:8px !important;transition-duration:520ms}
   .pp-tight .cp-vc{transition:transform 160ms var(--ease),padding 340ms var(--ease)}
   .hp-nar .pp-tight .cp-vc{padding:16px 12px;transition:transform 160ms var(--ease),padding 520ms var(--ease)}
+  /* сайт: то, что гаснет на месте вместе со своей обёрткой (hp-wo — только в широкой, hp-no — только в узкой), и с
+     собственным проявлением p2-on (оно ставит visibility:visible) не остаётся видимым для чтения с экрана */
+  :is(.hp-wo,.hp-no) .p2-on{visibility:inherit}
 }
 /* Многострочный текст не переносится заново посреди хода (как на «Результате»: его текстовые блоки не меняют ширину —
    колонка и компактный вид подменяются на месте). Блок, ширина которого в узкой раскладке другая, — «стопка» (hp-tx):
