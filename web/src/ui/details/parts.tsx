@@ -2,7 +2,7 @@
 // перекрёстным затуханием, раскрываемые разделы (`dq-acc` «Качества», `dpl-col` «Плана» и «Шаблона», `df-coll`
 // «Файлов»), картинка с тихой заменой и строка ошибки у места действия. Раскрытое тело появляется ходом `p2-in`,
 // закрытое убирается сразу (kit/Collapse, S-motion карта 17).
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { cls } from "../kit/cls";
 import { Collapse } from "../kit/Collapse";
 import { Icon, type IconName } from "../kit/Icon";
@@ -10,10 +10,22 @@ import { Tx } from "../kit/Tx";
 import type { SheetTab } from "../deck/geometry";
 
 /** Панель вкладки: стоит под рядом вкладок (top 104) и сменяется перекрёстным затуханием (p2-on / p2-off); невыбранная
- *  (`dd-pw p2-off`) держит замороженную ширину и без переходов внутри (layers.css); содержимое — когда `mount`. */
+ *  (`dd-pw p2-off`) держит замороженную ширину и без переходов внутри (layers.css); содержимое — когда `mount`.
+ *  Смонтированная позже листа (DetailsSheet: в свободное время или по щелчку на вкладку) встаёт сразу целиком: её лесенка
+ *  `p2-in` — часть въезда листа, а он уже доехал; иначе при ранней смене вкладки панель проявлялась бы пустой, пока не
+ *  дойдут задержки лесенки. Ходы, начатые потом (раскрытие разделов), — как обычно. */
 export function Panel({ tab, on, mount = true, children, style }: { tab: SheetTab; on: boolean; mount?: boolean; children: ReactNode; style?: CSSProperties }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const was = useRef(mount);
+  useLayoutEffect(() => {
+    if (!mount || was.current) return;
+    was.current = true;
+    ref.current?.getAnimations({ subtree: true }).forEach((a) => {
+      if (a instanceof CSSAnimation && a.animationName === "p2-in") a.finish();
+    });
+  }, [mount]);
   return (
-    <div className={cls("dd-pw", on ? "p2-on" : "p2-off")} data-tab={tab} style={{ position: "absolute", left: 48, right: 48, top: 104, ...style }}>
+    <div ref={ref} className={cls("dd-pw", on ? "p2-on" : "p2-off")} data-tab={tab} style={{ position: "absolute", left: 48, right: 48, top: 104, ...style }}>
       {mount && children}
     </div>
   );
