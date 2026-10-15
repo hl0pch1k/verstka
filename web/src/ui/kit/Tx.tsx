@@ -9,8 +9,9 @@
 // копий и их ширины в покое — после замера (`hp-txm`) ширина каждой копии — эти px (`--tw`, `--tn`), а не клетка ± --hpd·p:
 // та постоянна только до 1/64 px, и строка, вставшая впритык, могла бы перенестись посреди хода. До замера — ход V2.
 // Когда: после монтирования — когда слой доехал (не в кадрах его въезда); новый текст, клетка сменила ширину в покое
-// (ResizeObserver; ход помощника — не в счёт), окно перестало меняться, догрузились шрифты, сменилось своё --hpd — заново
-// по клетке в ближайшем кадре.
+// (ResizeObserver), окно перестало меняться, догрузились шрифты, сменилось своё --hpd — заново по клетке в ближайшем кадре.
+// Только в покое: от смены раскладки колоды (помощник) до конца её хода (MOVE_MS) ни замер, ни снятие замера не идут —
+// они меняли бы геометрию посреди хода; отложенное — в первом кадре после хода, тогда же сверка всех клеток.
 // Для листа «Подробнее» и слоёв; «Создать» и «Сборка» держат свои стопки (create/, build/Roles).
 import { createContext, useContext, useLayoutEffect, useRef, type CSSProperties, type ReactNode } from "react";
 import { cls } from "./cls";
@@ -37,6 +38,44 @@ let narrowNow = false;
 export const MEASURE_LATER = 700;
 /** Окно перестало меняться — замер заново. */
 const RESIZE_SETTLE = 150;
+/** Ход колоды при смене раскладки (520 мс, create.css / layers.css) и запас. */
+export const MOVE_MS = 560;
+/** Колода идёт к новой раскладке — замеров нет (снимает таймер хода: те же часы, что у переходов страницы). */
+let movingNow = false;
+let moveEnd = 0;
+/** Стопки, чей замер снят посреди хода, — снять в первом кадре после него. */
+const pending = new Set<HTMLElement>();
+/** Клетки, сменившие ширину на ходу (наблюдатель на ходу молчит), — сверить после него. */
+const missed = new Set<HTMLElement>();
+
+function moving(): boolean {
+  return movingNow;
+}
+
+/** Раскладка колоды сменилась: замеры — после хода. */
+function startMove() {
+  movingNow = true;
+  window.clearTimeout(moveEnd);
+  moveEnd = window.setTimeout(() => {
+    moveEnd = 0;
+    movingNow = false;
+    requestAnimationFrame(afterMove);
+  }, MOVE_MS);
+}
+
+/** Ход кончился: отложенные снятия замера, сверка клеток, сменивших ширину на ходу, отложенный замер. */
+function afterMove() {
+  if (moving()) return;
+  pending.forEach((el) => {
+    if (!el.isConnected) return;
+    el.classList.remove("hp-txm");
+    dirty.add(el);
+  });
+  pending.clear();
+  missed.forEach((el) => el.isConnected && checkCell(el, el.getBoundingClientRect().width));
+  missed.clear();
+  if (dirty.size && !frame) frame = requestAnimationFrame(flush);
+}
 
 /** Высоты стопки по копиям: широкая — во весь рост и в узкой раскладке (там она только невидима), узкая — её содержимое
  *  (и тогда, когда её высота 0); `margin` — вертикальные поля копий (клетка = копия + поля). Стопка: `hw` в широкой,
@@ -48,6 +87,7 @@ export function stackHeights(wide: number, narrow: number, margin = 0): { hw: nu
 function flush() {
   frame = 0;
   later = 0;
+  if (moving()) return; // после хода — afterMove
   const items = [...dirty].filter((el) => el.isConnected);
   dirty.clear();
   // сначала все чтения: ширины копий (в покое каждая — своя постоянная ширина: клетка ± --hpd) и высоты; узкая копия на
@@ -69,7 +109,9 @@ function flush() {
   items.forEach((el) => el.classList.replace("hp-txq", "hp-txz"));
   if (items.length) void getComputedStyle(items[0].children[1] ?? items[0]).height;
   items.forEach((el) => el.classList.remove("hp-txz"));
-  // потом записи — только изменившиеся
+  // потом записи — только изменившиеся; метка замера ставится без переходов (`hp-txz`): ход стопки --hpp в узкой
+  // раскладке иначе начался бы с нуля — высота стопки поехала бы в покое от широкой к узкой
+  const fresh: HTMLElement[] = [];
   items.forEach((el, i) => {
     const h = read[i];
     if (!h) return;
@@ -77,6 +119,10 @@ function flush() {
     const key = `${h.hw}|${h.hdd}|${h.hn}|${h.tw}|${h.tn}`;
     if (last.get(el) === key && el.classList.contains("hp-txm")) return;
     last.set(el, key);
+    if (!el.classList.contains("hp-txm")) {
+      el.classList.add("hp-txz");
+      fresh.push(el);
+    }
     el.style.setProperty("--hw", `${h.hw}px`);
     el.style.setProperty("--hdd", `${h.hdd}px`);
     el.style.setProperty("--hn", `${h.hn}px`);
@@ -86,6 +132,9 @@ function flush() {
     if (el.dataset.share) el.parentElement?.style.setProperty(`--${el.dataset.share}`, `${h.hw + h.hdd}px`);
     el.classList.add("hp-txm");
   });
+  if (!fresh.length) return;
+  void getComputedStyle(fresh[0]).getPropertyValue("--hpp");
+  fresh.forEach((el) => el.classList.remove("hp-txz"));
 }
 
 /** Клетка стопки сменила ширину в покое (бейдж рядом, подпись кнопки, полоса прокрутки) — замер заново; доли пикселя
@@ -97,14 +146,9 @@ function checkCell(el: HTMLElement, width: number) {
 }
 
 function onCells(entries: ResizeObserverEntry[]) {
-  for (const e of entries) {
-    const el = e.target as HTMLElement;
-    // на ходу помощника (ход стопки --hpp между 0 и 1) клетка меняет ширину сама — не повод; в конце хода наблюдатель
-    // сработает ещё раз, уже в покое
-    const p = parseFloat(getComputedStyle(el).getPropertyValue("--hpp"));
-    if (p > 0 && p < 1) continue;
-    checkCell(el, e.contentRect.width);
-  }
+  // на ходу колоды клетки меняют ширину сами — не повод; после хода их сверяет afterMove
+  if (moving()) return void entries.forEach((e) => missed.add(e.target as HTMLElement));
+  for (const e of entries) checkCell(e.target as HTMLElement, e.contentRect.width);
 }
 
 /** Замер в ближайшем кадре. */
@@ -117,8 +161,9 @@ function mark(el: HTMLElement) {
   if (!frame && typeof requestAnimationFrame === "function") frame = requestAnimationFrame(flush);
 }
 
-/** Ширины копий снова по клетке (окно, шрифты, своё --hpd) — и замер в ближайшем кадре. */
+/** Ширины копий снова по клетке (окно, шрифты, своё --hpd) — и замер в ближайшем кадре; на ходу — после него. */
 function remeasure(el: HTMLElement) {
+  if (moving()) return void pending.add(el);
   el.classList.remove("hp-txm");
   mark(el);
 }
@@ -147,6 +192,8 @@ function track(el: HTMLElement): () => void {
   return () => {
     all.delete(el);
     dirty.delete(el);
+    pending.delete(el);
+    missed.delete(el);
     ro?.unobserve(el);
     if (all.size === 0) window.removeEventListener("resize", onResize);
   };
@@ -174,6 +221,13 @@ export function Tx({ tx, as = "p", wrap = "div", className, style, f, hpd, title
   const narrow = useContext(TxNarrow);
   narrowNow = narrow;
   const ref = useRef<HTMLElement>(null);
+  // раскладка колоды сменилась (помощник) — колода пошла к новой: замеры после хода (первым из эффектов — до замеров ниже)
+  const seenNarrow = useRef(narrow);
+  useLayoutEffect(() => {
+    if (seenNarrow.current === narrow) return;
+    seenNarrow.current = narrow;
+    startMove();
+  }, [narrow]);
   useLayoutEffect(() => {
     const el = ref.current;
     return el ? track(el) : undefined;

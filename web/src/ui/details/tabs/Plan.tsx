@@ -3,7 +3,7 @@
 // «Цифры из текста» и «Данные для диаграмм» (раскрываются ходом p2-in, сворачиваются сразу). Данные — plan.ts.
 // Помощник сужает колоду (V2 версии 100): «О плане» 416 → 300, в ряду плана миниатюра 160 → 120 и заголовок 232 → 160,
 // у «Изменить» остаётся значок; текст — стопки (kit/Tx: p-hd, p-body в рядах; p-ttl, p-sub, p-meta, p-ctx — «О плане»).
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
 import { figuresLine } from "../../../lib/narrate";
 import { plural } from "../../../lib/utils";
 import { useApp } from "../../../store";
@@ -15,6 +15,7 @@ import { bindShort } from "../../../lib/typo";
 import { writtenText } from "../../layers/writerText";
 import { deckPreset } from "../../result/resultView";
 import { Col, Empty, Shot } from "../parts";
+import { SheetCtx } from "../sheetMorph";
 import { chartData, deckHead, factChips, planRows, writerHead, writerTexts } from "../plan";
 
 export function PlanTab({ g, v, active }: { g: Generation; v: Variant; active: boolean }) {
@@ -24,6 +25,10 @@ export function PlanTab({ g, v, active }: { g: Generation; v: Variant; active: b
   const list = useRef<HTMLDivElement>(null);
   const o = v.outline;
   const rows = planRows(v);
+  // тело ряда в тесной колоде уходит вместе со своей дорожкой (details.css): клетка сжимается до нуля, копии держат
+  // ширину покоя (колода − 1 008) — это и есть её --hpd, по нему kit/Tx сверяет клетку после хода
+  const sheet = useContext(SheetCtx);
+  const bodyHpd = sheet.tight && sheet.wrap > 0 ? sheet.wrap - 1008 : undefined;
 
   // вкладка открылась — текущий слайд виден в списке
   useEffect(() => {
@@ -68,7 +73,7 @@ export function PlanTab({ g, v, active }: { g: Generation; v: Variant; active: b
                       <span className="dpl-h">{r.title}</span>
                       {r.sub && <span className="dpl-sub2">{r.sub}</span>}
                     </Tx>
-                    <Tx tx="p-body" as="span" wrap="span" className="dpl-body">
+                    <Tx tx="p-body" as="span" wrap="span" className="dpl-body" hpd={bodyHpd}>
                       {r.par && <span className="dpl-par">{r.par}</span>}
                       {r.bul.length > 0 && <span className="dpl-ul">{r.bul.map((b, k) => <span key={k} className="dpl-li dpl-li-cl">{b}</span>)}</span>}
                       {r.chips.length > 0 && <span className="dpl-chips">{r.chips.map((c, k) => <span key={k} className="dpl-chip"><b>{c.v}</b>{c.l}</span>)}</span>}

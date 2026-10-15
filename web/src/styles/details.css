@@ -424,12 +424,13 @@
   /* «План»: «О плане» 416 → 280; в ряду плана миниатюра 160 → 120, заголовок 232 → 200, тело ряда (абзац, пункты, цифры)
      уходит вместе со своей дорожкой (1fr → 0): держит ширину покоя (колода − 1 008 px), обрезается краем и гаснет, а его
      высота той же кривой сжимается до высоты ряда без него — заголовка в узкой (`--hdn`, kit/Tx `share`) или миниатюры
-     68: ряд не держит дыр и идёт одним ходом (тело — выше всех в начале и не ниже в конце, всё — линейно) */
+     68: ряд не держит дыр и идёт одним ходом (тело — выше всех в начале и не ниже в конце, всё — линейно). Тело — само
+     стопка (kit/Tx): её ход --hpp — в том же списке переходов, иначе он прыгал бы в 0 / 1 */
   .hp-nar .dd-tight #dd-panel-plan{grid-template-columns:minmax(0, 1fr) 280px !important}
   .hp-nar .dd-tight .dpl-row{grid-template-columns:120px 200px minmax(0,0fr)}
-  .dd-tight .dpl-row > [data-tx="p-body"]{max-height:var(--hw, none);transition:max-height 340ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
+  .dd-tight .dpl-row > [data-tx="p-body"]{max-height:var(--hw, none);transition:--hpp 340ms var(--ease),max-height 340ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
   .dd-tight .dpl-row > [data-tx="p-body"] > *{min-width:calc(var(--dkw, min(1392px, 100vw - 48px)) - 1008px)}
-  .hp-nar .dd-tight .dpl-row > [data-tx="p-body"]{max-height:max(68px, var(--hdn, 0px));opacity:0;visibility:hidden;transition:max-height 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
+  .hp-nar .dd-tight .dpl-row > [data-tx="p-body"]{max-height:max(68px, var(--hdn, 0px));opacity:0;visibility:hidden;transition:--hpp 520ms var(--ease),max-height 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
   /* «Шаблон»: третий факт («типов слайдов») уходит вместе со своей дорожкой (144 → 0; держит ширину, обрезается, гаснет),
      палитра 180 → 120 — названию шаблона 164 / 149 px; «Правила оформления» 416 → 336 (заголовок 275 px — в строку; их
      строки — стопки t-rule) */
