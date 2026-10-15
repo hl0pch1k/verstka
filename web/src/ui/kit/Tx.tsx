@@ -52,14 +52,32 @@ function moving(): boolean {
   return movingNow;
 }
 
+/** Слушатель хода колоды: `true` — пошла (в том же кадре, что и раскладка), `false` — доехала. На `false` слушатель
+ *  может вернуть обещание: замеры ждут его (так «Мои презентации» сначала снова рисуют все карточки — в пропущенной
+ *  content-visibility карточке замер неверен). */
+export type DeckMoveListener = (moving: boolean) => void | Promise<void>;
+const moveListeners = new Set<DeckMoveListener>();
+
+export function onDeckMove(f: DeckMoveListener): () => void {
+  moveListeners.add(f);
+  return () => void moveListeners.delete(f);
+}
+
 /** Раскладка колоды сменилась: замеры — после хода. */
 function startMove() {
   movingNow = true;
   window.clearTimeout(moveEnd);
+  moveListeners.forEach((f) => void f(true));
   moveEnd = window.setTimeout(() => {
     moveEnd = 0;
-    movingNow = false;
-    requestAnimationFrame(afterMove);
+    const waits = [...moveListeners].map((f) => f(false)).filter((x): x is Promise<void> => !!x);
+    const done = () => {
+      if (moveEnd) return; // пока ждали, колода пошла снова
+      movingNow = false;
+      requestAnimationFrame(afterMove);
+    };
+    if (waits.length) void Promise.all(waits).then(done);
+    else done();
   }, MOVE_MS);
 }
 

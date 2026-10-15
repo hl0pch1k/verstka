@@ -85,14 +85,19 @@
 .gh-body{display:flex;flex-direction:column;flex:1;min-height:0}
 /* сайт: на ходу помощника (`gh-moving`, HistoryLayer: от клика до конца хода) карточка «Моих презентаций» вне окна списка
    не рисуется — ход не перестраивает сотню карточек в каждом кадре; её место — последний свой размер (auto), он и есть
-   нынешний: до хода рисовались все. В покое — без content-visibility: поиск, прокрутка рывком, тень наведения — как
-   без него. Поле 8 px вокруг карточки (и −8 снаружи, дорожки те же): на ходу рисование карточки обрезано по её краю, а
-   обводка открытой выходит за обложку на 4 px */
-.gh-grid > li{contain-intrinsic-size:auto none auto 236px;padding:8px;margin:-8px}
-.gh-moving .gh-grid > li{content-visibility:auto}
+   нынешний: до хода рисовались все. После хода карточки снова рисуются по 16 за кадр (`gh-vis`). В покое — без
+   content-visibility: поиск, прокрутка рывком, тень наведения — как без него. contain: layout style — всегда: снятие
+   content-visibility (а с ним и сдерживания) тогда не сдвигает ряды на полпикселя. Поле 8 px вокруг карточки (и −8
+   снаружи, дорожки те же): на ходу рисование карточки обрезано по её краю, а обводка открытой выходит за обложку на 4 px */
+.gh-grid > li{contain:layout style;contain-intrinsic-size:auto none auto 236px;padding:8px;margin:-8px}
+.gh-moving .gh-grid > li:not(.gh-vis){content-visibility:auto}
+.gh-grid > li.gh-snap *{transition:none !important}
 .gh-body .p2-ttl{font-size:32px;line-height:40px}
 @media (min-width: 901px){
   [data-tx="h-ttl"]{--hpd:104px}
+  /* название карточки — ровно две строки: копии стопки обрезаются со своим полем 8 px (create.css), и верх третьей строки
+     выглядывал над метой; по вертикали — точно по краю копии, по горизонтали поле остаётся */
+  .hp-tx[data-tx="h-ttl"] > .gh-title{clip-path:inset(0 -8px)}
   [data-tx="t-sl"]{--hpd:208px}
   .rt-grid > .hp-tx{align-self:start}
   /* сайт: в слоях (и в листе «Подробнее») ширина копии стопки — целые пиксели: клетка + --hpd·p постоянна только до

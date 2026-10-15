@@ -26,12 +26,14 @@ import { Spinner } from "../kit/Spinner";
 import { deckPreset, openStrategy, slideSrc } from "../result/resultView";
 import { useRise } from "../result/useRise";
 import { useNarrow } from "../create/useNarrow";
-import { Tx, TxNarrow } from "../kit/Tx";
+import { onDeckMove, Tx, TxNarrow } from "../kit/Tx";
 import { coverStrategy, historyView, openPlan, type HistItem, type OpenPlan } from "./history";
-import { Layer, LAYER_MS, lsDelay, useLayerPresence } from "./Layer";
+import { Layer, lsDelay, useLayerPresence } from "./Layer";
 
 /** Сколько открытие ждёт декодирования первого слайда, прежде чем ехать как есть. */
 const DECODE_WAIT = 800;
+/** Карточек, которые снова рисуются за кадр, когда ход помощника кончился. */
+const GH_CHUNK = 16;
 const OPEN_FAILED = "Не удалось открыть презентацию";
 const LIST_FAILED = "Не удалось обновить список презентаций";
 
@@ -91,21 +93,51 @@ export function HistoryLayer() {
   const narrow = useNarrow();
   // на ходу помощника карточки вне окна списка не рисуются (`gh-moving`, layers.css: content-visibility: auto) — ход не
   // перестраивает сотню карточек в каждом кадре; в покое рисуются все: поиск по странице, прокрутка рывком, тень
-  // наведения — как без него. Метка ставится в том же кадре, что и раскладка колоды, и снимается, когда ход кончился
+  // наведения — как без него. Метка ставится в том же кадре, что и раскладка колоды (kit/Tx onDeckMove); когда ход
+  // кончился, карточки снова рисуются — по GH_CHUNK за кадр (весь список разом — один долгий кадр), и только потом kit/Tx
+  // меряет названия (в пропущенной карточке замер неверен, а в только что показанной шёл бы её запоздалый ход)
   const listRef = useRef<HTMLDivElement>(null);
-  const seenNarrow = useRef(narrow);
-  useLayoutEffect(() => {
-    if (seenNarrow.current === narrow) return;
-    seenNarrow.current = narrow;
-    const el = listRef.current;
-    if (!el) return;
-    el.classList.add("gh-moving");
-    const t = window.setTimeout(() => el.classList.remove("gh-moving"), LAYER_MS + 80);
+  useEffect(() => {
+    let stop = () => {};
+    const off = onDeckMove((moving) => {
+      stop();
+      const el = listRef.current;
+      if (!el) return;
+      if (moving) {
+        el.querySelectorAll(".gh-vis").forEach((li) => li.classList.remove("gh-vis"));
+        el.classList.add("gh-moving");
+        return;
+      }
+      if (!el.classList.contains("gh-moving")) return;
+      return new Promise<void>((resolve) => {
+        const lis = [...el.querySelectorAll<HTMLElement>(".gh-grid > li")];
+        let i = 0;
+        let raf = 0;
+        stop = () => {
+          stop = () => {};
+          cancelAnimationFrame(raf);
+          resolve();
+        };
+        const step = () => {
+          // карточка, пропущенная на ходу, встаёт сразу в нынешней раскладке (`gh-snap`: без переходов), а не доигрывает
+          // ход из той, в которой её застал помощник
+          const chunk = lis.slice(i, (i = Math.min(lis.length, i + GH_CHUNK)));
+          chunk.forEach((li) => li.classList.add("gh-vis", "gh-snap"));
+          chunk.forEach((li) => void getComputedStyle(li.querySelector(".hp-txw") ?? li).getPropertyValue("--hpp"));
+          chunk.forEach((li) => li.classList.remove("gh-snap"));
+          if (i < lis.length) return void (raf = requestAnimationFrame(step));
+          el.classList.remove("gh-moving");
+          lis.forEach((li) => li.classList.remove("gh-vis"));
+          stop();
+        };
+        step();
+      });
+    });
     return () => {
-      window.clearTimeout(t);
-      el.classList.remove("gh-moving");
+      stop();
+      off();
     };
-  }, [narrow]);
+  }, []);
   // список считается, только пока слой на экране (и доигрывает уход), — колода перерисовывается часто, раздел закрыт
   const mounted = presence.mounted;
   const current = ui.screen === "result" ? generationId : ui.screen === "build" ? buildJob?.generation ?? null : null;
