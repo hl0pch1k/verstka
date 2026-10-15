@@ -1,8 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { AGENT, AGENT_TIGHT, boardColumns, boardLabel, buildMorph, failText, FAIL_REASON, FAIL_TITLE, MIN_CARD, phaseFit, phaseLine2, phaseScale, PHASE_FLOOR, PHASE_NARROW, ROLE_TEXT, rollOf } from "./columns";
+import { AGENT, AGENT_TIGHT, boardColumns, boardLabel, buildMorph, failText, FAIL_ACTS_SHORT, FAIL_REASON, FAIL_TITLE, MIN_CARD, phaseFit, phaseLine2, phaseScale, PHASE_FLOOR, PHASE_NARROW, ROLE_TEXT, rollOf } from "./columns";
 import { BOARD_GAP } from "../../lib/stage";
-import { actsColumn } from "./Failed";
 
 const A = 16 / 9;
 /** Обёртка колоды при окне 1440 и 1280 (поля страницы 24 + 24); 1217 — 1280 с обычной полосой прокрутки страницы (15). */
@@ -38,7 +37,7 @@ test("buildMorph при 1440 — как V2: колонка агента 416 → 
   // коробка «Не получилось»: текст узкой — 536 − 24 − 24, широкой — 832 − 48 − 48; кнопки в ряд в обеих
   assert.equal(m.failNarrow, 488);
   assert.equal(m.failWide, 736);
-  assert.equal(m.failCol, false);
+  assert.equal(m.failShort, false);
 });
 
 test("buildMorph при 1280 — тесная колода: колонка агента 288, фаза мельче, сегменты с галочками, кнопки столбиком", () => {
@@ -54,7 +53,7 @@ test("buildMorph при 1280 — тесная колода: колонка аг�
   assert.equal(m.font, 27.07);
   assert.equal(m.failNarrow, 360);
   assert.equal(m.failWide, 576);
-  assert.equal(m.failCol, true);
+  assert.equal(m.failShort, true);
 });
 
 test("buildMorph при 1280 с обычной полосой прокрутки (обёртка 1217): левая колонка 393, карточки 86, фаза 26.21", () => {
@@ -76,7 +75,7 @@ test("buildMorph при 1280 с обычной полосой прокрутки
   assert.equal(boardLabel(m, 3), false);
   assert.equal(boardLabel(m, 2), false);
   assert.equal(boardLabel(m, 1), true);
-  assert.equal(m.failCol, true);
+  assert.equal(m.failShort, true);
   assert.equal(m.failWide, 561);
   assert.equal(m.failNarrow, 345);
 });
@@ -171,20 +170,14 @@ test("failText: при 1440 заголовок и причина — одной 
   }
 });
 
-test("actsColumn: ряд кнопок → столбик — обе к центру ряда, вторая под первую через зазор", () => {
-  const b1 = { w: 276, h: 56 }, b2 = { w: 199, h: 48 };
-  const c = actsColumn(b1, b2, 16);
-  // центры в ряду (ряд по центру): −(491)/2 + 138 и 491/2 − 99.5
-  const c1 = -491 / 2 + 138 + c.x1, c2 = 491 / 2 - 99.5 + c.x2;
-  assert.equal(c1, 0);
-  assert.equal(c2, 0);
-  // вторая — под первой: верх второй = низ первой + 16
-  assert.equal(28 + c.y2 - 24, 56 + 16);
-  assert.equal(c.grow, 64);
-  // уход центра коробки идёт кривой колоды, остальное — своим тактом: в сумме — те же сдвиги
-  const d = actsColumn(b1, b2, 16, 132);
-  assert.equal(d.x1s + 132, c.x1);
-  assert.equal(d.x2s + 132, c.x2);
+test("кнопки «Не получилось» — в ряд в обеих раскладках: в узкой при 1280 и 1217 — с короткими подписями, они встают", () => {
+  for (const wrap of [W1280, W1280S]) {
+    const m = buildMorph(wrap);
+    assert.equal(m.failShort, true);
+    // ряд с короткими подписями — в коробке узкой раскладки (без полей)
+    assert.ok(FAIL_ACTS_SHORT <= m.failNarrow, `${wrap}: ${m.failNarrow}`);
+  }
+  assert.equal(buildMorph(W1440).failShort, false);
 });
 
 test("rollOf: роль и следующая — над нижним краем; влезает — без сдвига", () => {
