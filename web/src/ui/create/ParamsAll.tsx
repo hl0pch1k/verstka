@@ -107,7 +107,9 @@ function useSwitchHeights(row: React.RefObject<HTMLDivElement>, deps: unknown[])
   useLayoutEffect(() => {
     const el = row.current;
     if (!el) return;
+    let alive = true;
     const measure = () => {
+      if (!alive) return;
       let wide = 0, narrow = 0;
       for (const box of el.querySelectorAll<HTMLElement>(":scope > .p2-box")) {
         const [tw, tn] = [...box.querySelectorAll<HTMLElement>(".hp-tx[data-tx=c-swt] > *")];
@@ -125,6 +127,7 @@ function useSwitchHeights(row: React.RefObject<HTMLDivElement>, deps: unknown[])
     window.addEventListener("resize", measure);
     void document.fonts?.ready.then(measure);
     return () => {
+      alive = false;
       stop();
       window.removeEventListener("resize", measure);
     };

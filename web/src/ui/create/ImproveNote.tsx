@@ -86,8 +86,10 @@ export function ImproveNote({ on, onHeights }: { on: boolean; onHeights(h: NoteH
   useLayoutEffect(() => {
     const w = wRef.current, n = nRef.current;
     if (!w || !n) return;
+    let alive = true;
     // широкая копия всегда во весь рост; узкая в широкой раскладке — высотой 0, её строки — scrollHeight
     const measure = () => {
+      if (!alive) return;
       const next = { wide: w.offsetHeight ? Math.max(NOTE_ICON, w.offsetHeight) + NOTE_PAD : 0, narrow: n.scrollHeight ? Math.max(NOTE_ICON, n.scrollHeight) + NOTE_PAD : 0 };
       setH((cur) => (cur.wide === next.wide && cur.narrow === next.narrow ? cur : next));
     };
@@ -97,6 +99,7 @@ export function ImproveNote({ on, onHeights }: { on: boolean; onHeights(h: NoteH
     window.addEventListener("resize", measure);
     void document.fonts?.ready.then(measure);
     return () => {
+      alive = false;
       stop();
       window.removeEventListener("resize", measure);
     };
