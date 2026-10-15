@@ -5,9 +5,12 @@
 // Помощник сужает колоду: фаза остаётся в своей клетке и мельчает той же кривой (scale до .75, длинная — сколько нужно,
 // `--phs` — columns.ts `phaseFit`); кегль — от ширины окна, один в обеих раскладках (build.css `--bd-phf`). Мельче 18 px
 // фаза не становится: не встаёт в клетку и при 18 (окно около 1280) — в узкой раскладке она в две строки 18/24: две
-// копии в одном месте (однострочная гаснет, двухстрочная проявляется, обе — постоянной ширины, мельчают тем же scale).
+// копии в одном месте (однострочная гаснет, двухстрочная проявляется, обе — постоянной ширины, мельчают тем же scale);
+// «Смотрю на слайды целиком» при обёртке 1217 в две строки встаёт только при 16.9 px (columns.ts `phaseFit`).
+// Короткие предлоги и союзы привязаны к следующему слову (lib/typo `bindShort`) — в конце строки не остаются.
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { STAGE_TITLE } from "../../lib/stage";
+import { bindShort } from "../../lib/typo";
 import { cls } from "../kit/cls";
 import { PHASE_ROLL, type BuildPhase } from "./buildView";
 import { phaseFit, type BuildMorph } from "./columns";
@@ -38,10 +41,10 @@ export function Phases({ phase, morph }: { phase: BuildPhase; morph: BuildMorph 
               style={{ "--phs": f.scale } as CSSProperties}>
               {f.two ? (
                 <span className="hp-sw bd-ph2">
-                  <span className="hp-wo">{STAGE_TITLE[p]}</span>
-                  <span className="hp-no bd-phn" style={{ width: f.width, marginTop: f.top, lineHeight: `${f.line}px` }}>{f.loose ? STAGE_TITLE[p].replace(/\u00a0/g, " ") : STAGE_TITLE[p]}</span>
+                  <span className="hp-wo">{bindShort(STAGE_TITLE[p])}</span>
+                  <span className="hp-no bd-phn" style={{ width: f.width, marginTop: f.top, lineHeight: `${f.line}px` }}>{bindShort(STAGE_TITLE[p])}</span>
                 </span>
-              ) : STAGE_TITLE[p]}
+              ) : bindShort(STAGE_TITLE[p])}
             </span>
           );
         })}

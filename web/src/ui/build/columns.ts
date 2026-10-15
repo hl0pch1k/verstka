@@ -70,13 +70,12 @@ const PHW: Record<BuildPhase, number> = {
   queued: 433, writer: 431, analyst: 273, architect: 445, designer: 486, critic: 515, revise: 502, layout: 586,
   check: 608, eyes: 633, done: 450, failed: 493,
 };
-/** Фаза в две строки (при 36 px, замер): ширина длинной строки при лучшем переносе — с неразрывными пробелами
- *  STAGE_TITLE («на слайды») и без них. */
+/** Фаза в две строки (при 36 px, замер): ширина длинной строки при лучшем переносе — короткие предлоги и союзы привязаны
+ *  к следующему слову (lib/typo `bindShort`: «Смотрю на слайды / целиком»). */
 const PHW2: Record<BuildPhase, number> = {
   queued: 235, writer: 255, analyst: 147, architect: 289, designer: 303, critic: 293, revise: 320, layout: 320,
   check: 372, eyes: 429, done: 295, failed: 318,
 };
-const PHW2_LOOSE: Partial<Record<BuildPhase, number>> = { eyes: 380 };
 
 export interface BuildMorph {
   /** Тесная колода (окно около 1280): узкой колонке агента 320 не хватает места — 288. */
@@ -151,27 +150,29 @@ export interface PhaseFit {
   width: number;
   line: number;
   top: number;
-  /** Две строки не встают в клетку с неразрывными пробелами фазы («Смотрю на слайды» при 1280 с обычной полосой
-   *  прокрутки) — в двухстрочной копии они обычные (сайт: предлог может остаться в конце строки). */
-  loose: boolean;
 }
 
 /** Фаза `phase` в узкой раскладке: мельчает до .75, длинная — чтобы встала в клетку `cell` (поле 4 px, V2 `bdPhs`), но не
- *  мельче 18 px; не встаёт и при 18 — в две строки по 18/24. `font` — кегль фазы (один в обеих раскладках). */
+ *  мельче 18 px; не встаёт и при 18 — в две строки по 18/24 (в клетку с полем 4, иначе — во всю клетку). Две строки при 18
+ *  не встают и во всю клетку (только «Смотрю на слайды целиком» при обёртке 1217: длинная строка 214.5 px, клетка 201) —
+ *  мельчает, пока две строки не встанут (16.9 px; предлог не отрывается от слова). `font` — кегль фазы. */
 export function phaseFit(phase: BuildPhase, font: number, cell: number): PhaseFit {
   const w = (PHW[phase] * font) / PHASE_MAX;
   const floor = PHASE_FLOOR / font;
   const fit = (cell - 4) / w;
   const r3 = (n: number) => Math.round(n * 1000) / 1000;
-  if (fit >= floor) return { scale: r3(Math.min(PHASE_NARROW, fit)), two: false, width: 0, line: 0, top: 0, loose: false };
+  if (fit >= floor) return { scale: r3(Math.min(PHASE_NARROW, fit)), two: false, width: 0, line: 0, top: 0 };
   const line = (PHASE_LINE2 * font) / PHASE_FLOOR;
-  const loose = (PHW2[phase] * PHASE_FLOOR) / PHASE_MAX > cell - 4 && PHW2_LOOSE[phase] !== undefined;
-  return { scale: r3(floor), two: true, width: r3(((cell - 4) * font) / PHASE_FLOOR), line: r3(line), top: r3((PHASE_ROW - 2 * line) / 2), loose };
+  const two = phaseLine2(phase); // длинная строка при 18 px
+  const room = two <= cell - 4 ? cell - 4 : cell;
+  // scale — до тысячных вниз, когда две строки встают только мельче 18: после округления они всё равно в клетке
+  const scale = two * floor <= room * floor + 1e-9 ? r3(floor) : Math.floor(((floor * room) / two) * 1000) / 1000;
+  return { scale, two: true, width: r3(room / scale), line: r3(line), top: r3((PHASE_ROW - 2 * line) / 2) };
 }
 
-/** Ширина длинной строки фазы в две строки при 18 px (с неразрывными пробелами или без — `loose`). */
-export function phaseLine2(phase: BuildPhase, loose: boolean): number {
-  return (((loose ? PHW2_LOOSE[phase] : undefined) ?? PHW2[phase]) * PHASE_FLOOR) / PHASE_MAX;
+/** Ширина длинной строки фазы в две строки при 18 px (замер `PHW2`). */
+export function phaseLine2(phase: BuildPhase): number {
+  return (PHW2[phase] * PHASE_FLOOR) / PHASE_MAX;
 }
 
 /** Во сколько раз фаза мельчает в узкой раскладке (`phaseFit`). */

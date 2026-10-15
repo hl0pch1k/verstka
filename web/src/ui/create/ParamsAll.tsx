@@ -19,6 +19,7 @@ import { OWN, SLIDES_LOCKED, type SwitchView } from "./params";
 import type { ParamsPlate } from "./ParamsPlate";
 import { useNarrow } from "./useNarrow";
 import { observeWidth } from "../kit/widthGate";
+import { bindShort } from "../../lib/typo";
 
 const show = (on: boolean) => (on ? "p2-on" : "p2-off");
 const GRID3 = { display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 16 } as const;
@@ -78,7 +79,9 @@ interface SwitchItem { id: string; name: string; hint: string; sw: SwitchView; o
  *  узкая, V2 `c-swt`, `c-swd`): в узкой колоде они в колонке у́же и переносятся иначе — но не посреди хода; активная
  *  копия — по `narrow`. Сам переключатель один в обеих раскладках. */
 function SwitchBox({ it, narrow }: { it: SwitchItem; narrow: boolean }) {
-  const { id, name, hint, sw, onToggle } = it;
+  const { id, hint, sw, onToggle } = it;
+  // название переносится в две строки (узкая колонка) — короткий предлог не остаётся в конце строки
+  const name = bindShort(it.name);
   return (
     <div className="p2-box pp-swb">
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16 }}>

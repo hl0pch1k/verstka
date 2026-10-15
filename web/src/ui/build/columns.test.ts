@@ -113,7 +113,7 @@ test("phaseScale: короткая фаза мельчает до .75, длин�
     for (const [p, w36] of Object.entries(W36)) {
       const w = (w36 * k.font) / 36;
       const f = phaseFit(p as "eyes", k.font, k.cell);
-      assert.ok((f.two ? f.width : w) * f.scale <= k.cell - 3.5, `${wrap} ${p}`);
+      assert.ok((f.two ? f.width : w) * f.scale <= (f.two ? k.cell + 0.1 : k.cell - 3.5), `${wrap} ${p}`);
       assert.ok(w <= k.list - 192 - 4, `${wrap} ${p} широкая`);
     }
   }
@@ -124,15 +124,17 @@ test("phaseFit: в узкой раскладке фаза не мельче 18 p
     const m = buildMorph(wrap);
     for (const p of PHASES) {
       const f = phaseFit(p, m.font, m.cell);
-      assert.ok(f.scale * m.font >= PHASE_FLOOR - 0.02, `${wrap} ${p}: ${f.scale * m.font}`);
+      // не мельче 18 — кроме «Смотрю на слайды целиком» при обёртке 1217 (две строки при 18 не встают и во всю клетку)
+      const floor = wrap === W1280S && p === "eyes" ? 16.8 : PHASE_FLOOR - 0.02;
+      assert.ok(f.scale * m.font >= floor, `${wrap} ${p}: ${f.scale * m.font}`);
       assert.ok(f.scale <= PHASE_NARROW, `${wrap} ${p}`);
       if (f.two) {
         // две строки 18/24 — ровно ряд 48, по центру; копия свёрстана на клетку (до scale)
-        assert.ok(Math.abs(f.line * f.scale - 24) < 0.1, `${wrap} ${p} строка`);
+        assert.ok(f.line * f.scale <= 24.1 && Math.abs(f.line * PHASE_FLOOR / m.font - 24) < 0.1, `${wrap} ${p} строка`);
         assert.ok(Math.abs(f.top + f.line - 24) < 0.01, `${wrap} ${p} центр`);
-        assert.ok(Math.abs(f.width * f.scale - (m.cell - 4)) < 0.1, `${wrap} ${p} ширина`);
-        // в две строки она встаёт (длинная строка лучшего переноса — замер — не шире клетки), а не в три
-        assert.ok(phaseLine2(p, f.loose) <= m.cell - 4, `${wrap} ${p} две строки: ${phaseLine2(p, f.loose)}`);
+        // в две строки она встаёт (длинная строка лучшего переноса — замер — после scale не шире клетки), а не в три
+        assert.ok((phaseLine2(p) * f.scale * m.font) / PHASE_FLOOR <= m.cell + 0.05, `${wrap} ${p} две строки`);
+        assert.ok(Math.abs(f.width * f.scale - (phaseLine2(p) <= m.cell - 4 ? m.cell - 4 : m.cell)) < 0.1, `${wrap} ${p} ширина`);
       }
     }
   }
@@ -148,9 +150,12 @@ test("phaseFit при 1440 — как V2 (в одну строку, не мел�
   assert.ok(Math.abs(eyes.scale * n.font - 18) < 0.02);
   // короткая встаёт в строку и мельчает до .75 (20.3 px)
   assert.deepEqual([phaseFit("analyst", n.font, n.cell).two, phaseScale("analyst", n.font, n.cell)], [false, PHASE_NARROW]);
-  // «Смотрю на слайды» (214.5 px при 18) в клетку 212 не встаёт: неразрывный пробел в двухстрочной копии — обычный
-  assert.equal(eyes.loose, true);
-  assert.equal(phaseFit("check", n.font, n.cell).loose, false);
+  // «Смотрю на слайды» (214.5 px при 18) в клетку с полем (212) не встаёт — во всю клетку (216) встаёт; при обёртке 1217
+  // (клетка 201) — мельчает до 16.9 px, предлог от слова не отрывается
+  assert.ok(Math.abs(eyes.width * eyes.scale - n.cell) < 0.1);
+  const s = buildMorph(W1280S);
+  const e2 = phaseFit("eyes", s.font, s.cell);
+  assert.ok(Math.abs(e2.scale * s.font - 16.87) < 0.02, String(e2.scale * s.font));
 });
 
 test("failText: при 1440 заголовок и причина — одной копией (как B-failed); при 1280 — двумя: широкая как B-failed, узкая — в клетку", () => {

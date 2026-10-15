@@ -8,6 +8,7 @@
 // места нет — подписи меняют формулировку на месте («К тексту», «Ещё раз»), и кнопка сужается вместе с колодой, одним
 // ходом (ширина подписи — замер обеих). Имя кнопки для чтения с экрана — полное.
 import { useLayoutEffect, useRef, type CSSProperties, type ReactNode } from "react";
+import { bindShort } from "../../lib/typo";
 import { cls } from "../kit/cls";
 import { Icon } from "../kit/Icon";
 import type { BuildMorph } from "./columns";
@@ -71,7 +72,7 @@ export function Failed({ text, onBack, onRetry, morph, wide, narrow }: {
         <span className="p2-lic-f"><Icon name="alert" size={22} /></span>
       </span>
       {pair("b-ttl", 24, t.title, (p) => (
-        <h2 className={cls("bf-ttl", p.cls)} style={p.style} aria-hidden={p.hidden || undefined}>Не получилось собрать презентацию</h2>
+        <h2 className={cls("bf-ttl", p.cls)} style={p.style} aria-hidden={p.hidden || undefined}>{bindShort("Не получилось собрать презентацию")}</h2>
       ))}
       {pair("b-why", 8, wide ? t.reason : { wide: 480, narrow: 480, stack: false }, (p) => (
         <p className={p.cls} style={{ ...REASON, maxWidth: 480, ...p.style }} aria-hidden={p.hidden || undefined}>{text}</p>
