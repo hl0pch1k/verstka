@@ -6,14 +6,15 @@
 // `--phs` — columns.ts `phaseFit`); кегль — от ширины окна, один в обеих раскладках (build.css `--bd-phf`). Мельче 18 px
 // фаза не становится: не встаёт в клетку и при 18 (окно около 1280) — в узкой раскладке она в две строки 18/24: две
 // копии в одном месте (однострочная гаснет, двухстрочная проявляется, обе — постоянной ширины, мельчают тем же scale);
-// «Смотрю на слайды целиком» при обёртке 1217 в две строки встаёт только при 16.9 px (columns.ts `phaseFit`).
+// строки двухстрочной — явные, каждая без переноса (columns.ts `phaseLines`); «Смотрю на слайды целиком» при обёртке
+// 1217 в две строки встаёт только при 16.9 px (columns.ts `phaseFit`).
 // Короткие предлоги и союзы привязаны к следующему слову (lib/typo `bindShort`) — в конце строки не остаются.
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { STAGE_TITLE } from "../../lib/stage";
 import { bindShort } from "../../lib/typo";
 import { cls } from "../kit/cls";
 import { PHASE_ROLL, type BuildPhase } from "./buildView";
-import { phaseFit, type BuildMorph } from "./columns";
+import { phaseFit, phaseLines, type BuildMorph } from "./columns";
 
 const DWELL_MS = 1100;
 
@@ -36,13 +37,14 @@ export function Phases({ phase, morph }: { phase: BuildPhase; morph: BuildMorph 
       <div className="p2-phs p2-in" style={{ position: "relative", flex: 1, minWidth: 0, height: 48, animationDelay: "40ms" }}>
         {PHASE_ROLL.map((p, i) => {
           const f = phaseFit(p, morph.font, morph.cell);
+          const [l1, l2] = f.two ? phaseLines(p) : ["", ""];
           return (
             <span key={p} className={cls("p2-ph bd-ph", i === at ? "p2-ph-on" : i < at ? "p2-ph-past" : "p2-ph-next")} aria-hidden="true"
               style={{ "--phs": f.scale } as CSSProperties}>
               {f.two ? (
                 <span className="hp-sw bd-ph2">
                   <span className="hp-wo">{bindShort(STAGE_TITLE[p])}</span>
-                  <span className="hp-no bd-phn" style={{ width: f.width, marginTop: f.top, lineHeight: `${f.line}px` }}>{bindShort(STAGE_TITLE[p])}</span>
+                  <span className="hp-no bd-phn" style={{ width: f.width, marginTop: f.top, lineHeight: `${f.line}px` }}><span>{l1}</span><span>{l2}</span></span>
                 </span>
               ) : bindShort(STAGE_TITLE[p])}
             </span>

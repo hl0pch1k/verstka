@@ -124,6 +124,7 @@
   .bd-two :is([data-tx="b-err"],[data-tx="b-hint"],[data-tx="b-line"]) > .hp-txw{width:var(--bd-tw,372px) !important}
   .bd-two :is([data-tx="b-err"],[data-tx="b-hint"],[data-tx="b-line"]) > .hp-txn{width:var(--bd-tn,276px) !important}
   .bd-two :is(.bs-log,.bk-log){scrollbar-width:none}
+  .bd-two :is(.bs-log,.bk-log)::-webkit-scrollbar{display:none}
   /* сайт: стопки рабочей ленты агента на ходу меняют высоту линейно — от высоты в широкой раскладке (`--hw`) до высоты в
      узкой (+ `--hdd`; Roles, по высотам копий), той же кривой, что сдвиг ленты (он считается для обеих раскладок):
      роли движутся в одну сторону, нижняя видимая стоит у края. В покое — auto (по своим копиям) */
@@ -138,9 +139,10 @@
   .hp-nar .bd-tight .bk-badge > .bd-bw{font-size:0;margin-left:-4px;opacity:0;transition:font-size 520ms var(--ease),margin-left 520ms var(--ease),opacity 240ms var(--ease)}
   /* сайт: фаза не мельче 18 px (columns.ts `phaseFit`). Не встаёт в клетку и при 18 (окно около 1280) — в узкой раскладке
      две строки 18/24 в ряду 48: однострочная копия гаснет, двухстрочная (свёрстана на ширину клетки до scale, по центру
-     ряда) проявляется на месте; обе мельчают тем же scale фазы */
+     ряда) проявляется на месте; обе мельчают тем же scale фазы. Строки двухстрочной — явные (columns.ts `phaseLines`),
+     каждая без переноса: при обёртке 1217 запас ширины — меньше пикселя, шрифт пошире перенёс бы её в три строки */
   .bd-ph2{grid-template-rows:48px;align-items:start}
-  .bd-ph2 > .bd-phn{white-space:normal;text-wrap:balance}
+  .bd-ph2 > .bd-phn > span{display:block;white-space:nowrap}
   /* сайт: «Не получилось» при закрытом помощнике — как B-failed при любой ширине окна. Заголовок и причина, которые в узкой
      колоде переносятся иначе, — стопки из двух копий постоянной ширины (`--bf-tw`, `--bf-tn`) по центру коробки; высота
      стопки на ходу идёт линейно (`--hw`, `--hdd`), той же кривой и за то же время, что колода, — всё вертикальное в

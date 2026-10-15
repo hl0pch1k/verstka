@@ -25,9 +25,29 @@ test("bindShort: подряд идущие короткие слова, загл
   assert.equal(bindShort("Сверяю план"), "Сверяю план");
 });
 
-test("bindShort: в названиях фаз ни один короткий предлог или союз не остаётся перед обычным пробелом", () => {
+test("bindShort: в названиях фаз без неразрывных пробелов ни один короткий предлог или союз не остаётся перед обычным пробелом", () => {
+  // STAGE_TITLE уже с неразрывными пробелами — проверяется сырой текст (с обычными), иначе тест ничего не проверяет
   for (const [k, t] of Object.entries(STAGE_TITLE)) {
-    const b = bindShort(t);
+    const raw = t.replace(/\u00a0/g, " ");
+    const b = bindShort(raw);
     assert.ok(!/(^|\s)(в|к|с|о|у|и|а|на|по|за|из|от|до|не) /iu.test(b), `${k}: ${b}`);
+    assert.equal(b.replace(/\u00a0/g, " "), raw, k);
   }
+  assert.equal(bindShort("Сверяю план с текстом"), `Сверяю план с${NB}текстом`);
+  assert.equal(bindShort("Проверяю шрифты и цвета"), STAGE_TITLE.check);
+});
+
+test("bindShort: через тире и закрывающие знаки не привязывает; к числу, кавычке и скобке — привязывает", () => {
+  assert.equal(bindShort("план и — текст"), "план и — текст");
+  assert.equal(bindShort("план и – текст"), "план и – текст");
+  assert.equal(bindShort("план и … текст"), "план и … текст");
+  assert.equal(bindShort("«план и » текст"), "«план и » текст");
+  assert.equal(bindShort("на 12 слайдов"), `на${NB}12 слайдов`);
+  assert.equal(bindShort("по «Плану»"), `по${NB}«Плану»`);
+  assert.equal(bindShort("для (черновика)"), `для${NB}(черновика)`);
+});
+
+test("bindShort: частица «ли» относится к предыдущему слову — вперёд не привязывается", () => {
+  assert.equal(bindShort("Есть ли ошибки"), "Есть ли ошибки");
+  assert.equal(bindShort("Верно ли посчитано"), "Верно ли посчитано");
 });

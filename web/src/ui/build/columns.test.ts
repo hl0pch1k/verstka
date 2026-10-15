@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { AGENT, AGENT_TIGHT, boardColumns, boardLabel, buildMorph, failText, FAIL_ACTS_SHORT, FAIL_REASON, FAIL_TITLE, MIN_CARD, phaseFit, phaseLine2, phaseScale, PHASE_FLOOR, PHASE_NARROW, ROLE_TEXT, rollOf } from "./columns";
-import { BOARD_GAP } from "../../lib/stage";
+import { AGENT, AGENT_TIGHT, boardColumns, boardLabel, buildMorph, buildVars, failText, FAIL_ACTS_SHORT, FAIL_REASON, FAIL_TITLE, MIN_CARD, phaseFit, phaseLine2, phaseLines, PHASE_FLOOR, PHASE_NARROW, ROLE_TEXT, rollOf } from "./columns";
+import { BOARD_GAP, STAGE_TITLE } from "../../lib/stage";
 
 const A = 16 / 9;
 /** Обёртка колоды при окне 1440 и 1280 (поля страницы 24 + 24); 1217 — 1280 с обычной полосой прокрутки страницы (15). */
@@ -100,11 +100,11 @@ test("boardLabel: «Раскадровка» остаётся при трёх в
   assert.equal(boardLabel(buildMorph(W1280), 1), true);
 });
 
-test("phaseScale: короткая фаза мельчает до .75, длинная — чтобы встала в клетку (V2 `bdPhs`)", () => {
+test("phaseFit: короткая фаза мельчает до .75, длинная — чтобы встала в клетку (V2 `bdPhs`)", () => {
   const m = buildMorph(W1440);
-  assert.equal(phaseScale("analyst", m.font, m.cell), PHASE_NARROW);
+  assert.equal(phaseFit("analyst", m.font, m.cell).scale, PHASE_NARROW);
   // V2: min(.75, 340 / 633) — «Смотрю на слайды целиком»
-  assert.ok(Math.abs(phaseScale("eyes", m.font, m.cell) - 340 / 633) < 0.002);
+  assert.ok(Math.abs(phaseFit("eyes", m.font, m.cell).scale - 340 / 633) < 0.002);
   // фаза в узкой раскладке не шире своей клетки при 1440, 1280 и 1217 (однострочная — целиком, двухстрочная — её копия),
   // в широкой — тоже (колонка без места «03», поле 4 px)
   const W36: Record<string, number> = { queued: 433, eyes: 633, layout: 586, failed: 493, analyst: 273 };
@@ -132,9 +132,13 @@ test("phaseFit: в узкой раскладке фаза не мельче 18 p
         // две строки 18/24 — ровно ряд 48, по центру; копия свёрстана на клетку (до scale)
         assert.ok(f.line * f.scale <= 24.1 && Math.abs(f.line * PHASE_FLOOR / m.font - 24) < 0.1, `${wrap} ${p} строка`);
         assert.ok(Math.abs(f.top + f.line - 24) < 0.01, `${wrap} ${p} центр`);
-        // в две строки она встаёт (длинная строка лучшего переноса — замер — после scale не шире клетки), а не в три
-        assert.ok((phaseLine2(p) * f.scale * m.font) / PHASE_FLOOR <= m.cell + 0.05, `${wrap} ${p} две строки`);
-        assert.ok(Math.abs(f.width * f.scale - (phaseLine2(p) <= m.cell - 4 ? m.cell - 4 : m.cell)) < 0.1, `${wrap} ${p} ширина`);
+        // длинная строка (замер, при кегле фазы) помещается в копию — строк ровно две, а не три — и после scale копия не
+        // выходит из клетки
+        const long = (phaseLine2(p) * m.font) / PHASE_FLOOR;
+        assert.ok(long <= f.width + 0.01, `${wrap} ${p}: строка ${long} в копии ${f.width}`);
+        assert.ok(f.width * f.scale <= m.cell + 0.01, `${wrap} ${p}: копия ${f.width * f.scale} в клетке ${m.cell}`);
+        // где длинная строка встаёт с полем 4 px, поле остаётся и у копии
+        if (long * f.scale <= m.cell - 4) assert.ok(f.width * f.scale <= m.cell - 4 + 0.01, `${wrap} ${p} поле`);
       }
     }
   }
@@ -149,13 +153,49 @@ test("phaseFit при 1440 — как V2 (в одну строку, не мел�
   assert.equal(eyes.two, true);
   assert.ok(Math.abs(eyes.scale * n.font - 18) < 0.02);
   // короткая встаёт в строку и мельчает до .75 (20.3 px)
-  assert.deepEqual([phaseFit("analyst", n.font, n.cell).two, phaseScale("analyst", n.font, n.cell)], [false, PHASE_NARROW]);
+  assert.deepEqual([phaseFit("analyst", n.font, n.cell).two, phaseFit("analyst", n.font, n.cell).scale], [false, PHASE_NARROW]);
   // «Смотрю на слайды» (214.5 px при 18) в клетку с полем (212) не встаёт — во всю клетку (216) встаёт; при обёртке 1217
   // (клетка 201) — мельчает до 16.9 px, предлог от слова не отрывается
   assert.ok(Math.abs(eyes.width * eyes.scale - n.cell) < 0.1);
   const s = buildMorph(W1280S);
   const e2 = phaseFit("eyes", s.font, s.cell);
   assert.ok(Math.abs(e2.scale * s.font - 16.87) < 0.02, String(e2.scale * s.font));
+});
+
+test("phaseLines: две строки фазы — явный перенос по обычному пробелу, короткий предлог не остаётся в конце первой", () => {
+  const NB = "\u00a0";
+  for (const p of PHASES) {
+    const [a, b] = phaseLines(p);
+    assert.ok(a && b, p);
+    // строки вместе — то же название (короткие слова привязаны неразрывным пробелом), перенос — на месте обычного пробела
+    assert.equal(`${a} ${b}`.replace(new RegExp(NB, "g"), " "), STAGE_TITLE[p].replace(new RegExp(NB, "g"), " "), p);
+    assert.ok(!/(^|[\s\u00a0])(в|к|с|о|у|и|а|на|по|за|из|от|до|не|для)$/iu.test(a), `${p}: «${a}»`);
+  }
+  assert.deepEqual(phaseLines("eyes"), [`Смотрю на${NB}слайды`, "целиком"]);
+  assert.deepEqual(phaseLines("check"), ["Проверяю", `шрифты и${NB}цвета`]);
+  assert.deepEqual(phaseLines("critic"), ["Сверяю план", `с${NB}текстом`]);
+});
+
+test("строка агента, пришедшая посреди хода (B1): копии свёрстаны на ширину своей раскладки сразу и не меняют её", () => {
+  const css = cssFile("build.css");
+  // ширины копий стопок ленты агента — переменные в px, без доли клетки и без хода --hpp: у стопки, смонтированной посреди
+  // хода, --hpp сразу на конце, и с шириной от живой клетки её текст переносился бы заново, пока колонка доезжает
+  const sel = '.bd-two :is([data-tx="b-err"],[data-tx="b-hint"],[data-tx="b-line"]) > ';
+  const at = (copy: string) => css.match(new RegExp(`${esc(sel + copy)}\\{width:([^}]*)\\}`))?.[1];
+  const w1440 = buildMorph(W1440);
+  assert.equal(at(".hp-txw"), `var(--bd-tw,${w1440.textWide}px) !important`);
+  assert.equal(at(".hp-txn"), `var(--bd-tn,${w1440.textNarrow}px) !important`);
+  // полоса прокрутки ленты не занимает места ни в одном движке: иначе, появившись посреди хода, она сузила бы колонку
+  assert.ok(/\.bd-two :is\(\.bs-log,\.bk-log\)\{scrollbar-width:none\}/.test(css));
+  assert.ok(/\.bd-two :is\(\.bs-log,\.bk-log\)::-webkit-scrollbar\{display:none\}/.test(css));
+  for (const wrap of [W1440, W1280, W1280S]) {
+    const m = buildMorph(wrap);
+    // ширины — от окна (обёртки колоды), а не от колоды в кадре: в любом кадре хода строка получает те же
+    const v = buildVars(m);
+    assert.equal(v["--bd-tw"], `${AGENT - ROLE_TEXT}px`, `${wrap}`);
+    assert.equal(v["--bd-tn"], `${m.agent - ROLE_TEXT}px`, `${wrap}`);
+    assert.equal(v["--bd-an"], `${m.agent}px`, `${wrap}`);
+  }
 });
 
 test("failText: при 1440 заголовок и причина — одной копией (как B-failed); при 1280 — двумя: широкая как B-failed, узкая — в клетку", () => {
@@ -223,3 +263,17 @@ test("rollOf: высоты и сдвиг идут одной кривой — р
     assert.ok(Math.abs(end - view) <= 1, `край ${end} на ${e}`);
   }
 });
+
+/** Текст CSS-файла из папки web (`npm test`). */
+function cssFile(name: string): string {
+  // без @types/node: модули node — через process.getBuiltinModule
+  const proc = (globalThis as unknown as { process: { cwd(): string; getBuiltinModule(id: string): unknown } }).process;
+  const fs = proc.getBuiltinModule("node:fs") as { existsSync(p: string): boolean; readFileSync(p: string, enc: "utf8"): string };
+  const path = proc.getBuiltinModule("node:path") as { join(...p: string[]): string };
+  let dir = proc.cwd();
+  while (!fs.existsSync(path.join(dir, "src/styles", name)) && dir !== path.join(dir, "..")) dir = path.join(dir, "..");
+  return fs.readFileSync(path.join(dir, "src/styles", name), "utf8");
+}
+function esc(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}

@@ -80,7 +80,9 @@ interface SwitchItem { id: string; name: string; hint: string; sw: SwitchView; o
  *  копия — по `narrow`. Сам переключатель один в обеих раскладках. */
 function SwitchBox({ it, narrow }: { it: SwitchItem; narrow: boolean }) {
   const { id, hint, sw, onToggle } = it;
-  // название переносится в две строки (узкая колонка) — короткий предлог не остаётся в конце строки
+  // название переносится в две строки (узкая колонка) — короткий предлог не остаётся в конце строки. сайт: поэтому
+  // «Модель проверяет слайды по картинке» в узкой копии переносится не как в V2: «…слайды / по картинке» (у V2 без
+  // привязки «по» остаётся в конце строки)
   const name = bindShort(it.name);
   return (
     <div className="p2-box pp-swb">

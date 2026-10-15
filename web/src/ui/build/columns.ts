@@ -6,7 +6,8 @@
 // что от ширины окна зависит: обе раскладки считаются сразу, по ширине обёртки колоды (`hp-wrap` не анимируется: закрыт
 // помощник — колода во всю обёртку, открыт — на 416 у́же), и ставятся переменными CSS. Посреди хода ничего из этого не
 // меняется — меняется только окно.
-import { BOARD_GAP, fitColumns } from "../../lib/stage";
+import { BOARD_GAP, fitColumns, STAGE_TITLE } from "../../lib/stage";
+import { bindShort } from "../../lib/typo";
 import type { BuildPhase } from "./buildView";
 
 /** Самая узкая карточка доски (широкая раскладка). */
@@ -70,12 +71,26 @@ const PHW: Record<BuildPhase, number> = {
   queued: 433, writer: 431, analyst: 273, architect: 445, designer: 486, critic: 515, revise: 502, layout: 586,
   check: 608, eyes: 633, done: 450, failed: 493,
 };
-/** Фаза в две строки (при 36 px, замер): ширина длинной строки при лучшем переносе — короткие предлоги и союзы привязаны
- *  к следующему слову (lib/typo `bindShort`: «Смотрю на слайды / целиком»). */
+/** Фаза в две строки: сколько слов в первой строке (слова — по обычным пробелам после lib/typo `bindShort`, короткие
+ *  предлоги и союзы привязаны к следующему слову). Перенос — лучший (длинная строка короче всего; так же переносит
+ *  text-wrap: balance), но явный: строки не переносятся заново при других метриках шрифта (при обёртке 1217 запас
+ *  ширины копии — 0.7 px). */
+const PHASE_BREAK: Record<BuildPhase, number> = {
+  queued: 1, writer: 2, analyst: 1, architect: 1, designer: 1, critic: 2, revise: 1, layout: 1, check: 1, eyes: 2,
+  done: 1, failed: 1,
+};
+/** Ширина длинной строки фазы в две строки (`PHASE_BREAK`) при 36 px, замер: «Смотрю на слайды / целиком». */
 const PHW2: Record<BuildPhase, number> = {
   queued: 235, writer: 255, analyst: 147, architect: 289, designer: 303, critic: 293, revise: 320, layout: 320,
   check: 372, eyes: 429, done: 295, failed: 318,
 };
+
+/** Две строки фазы `phase` в узкой раскладке (копия `bd-phn`, каждая строка — без переноса). */
+export function phaseLines(phase: BuildPhase): [string, string] {
+  const words = bindShort(STAGE_TITLE[phase]).split(" ");
+  const k = PHASE_BREAK[phase];
+  return [words.slice(0, k).join(" "), words.slice(k).join(" ")];
+}
 
 export interface BuildMorph {
   /** Тесная колода (окно около 1280): узкой колонке агента 320 не хватает места — 288. */
@@ -127,6 +142,12 @@ export function buildMorph(wrap: number): BuildMorph {
   };
 }
 
+/** Переменные CSS плиты (`.bd-two`, build.css): колонка агента в узкой раскладке, ширины копий стопок ленты агента в
+ *  широкой и узкой (постоянные на всём ходу: строка, смонтированная посреди хода, свёрстана на них сразу), кегль фазы. */
+export function buildVars(m: BuildMorph): Record<"--bd-an" | "--bd-tw" | "--bd-tn" | "--bd-phf", string> {
+  return { "--bd-an": `${m.agent}px`, "--bd-tw": `${m.textWide}px`, "--bd-tn": `${m.textNarrow}px`, "--bd-phf": `${m.font}px` };
+}
+
 /** Заголовок и причина «Не получилось»: ширины копий в широкой и узкой раскладке; `stack` — в узкой они переносятся
  *  иначе, чем в широкой (две копии в одном месте); иначе — одна, шириной узкой (как при 1440: 488 ≥ 470). */
 export function failText(m: BuildMorph): { title: { wide: number; narrow: number; stack: boolean }; reason: { wide: number; narrow: number; stack: boolean } } {
@@ -173,11 +194,6 @@ export function phaseFit(phase: BuildPhase, font: number, cell: number): PhaseFi
 /** Ширина длинной строки фазы в две строки при 18 px (замер `PHW2`). */
 export function phaseLine2(phase: BuildPhase): number {
   return (PHW2[phase] * PHASE_FLOOR) / PHASE_MAX;
-}
-
-/** Во сколько раз фаза мельчает в узкой раскладке (`phaseFit`). */
-export function phaseScale(phase: BuildPhase, font: number, cell: number): number {
-  return phaseFit(phase, font, cell).scale;
 }
 
 /** Сдвиг ленты агента: роли до `upto` включительно — над нижним краем. `heights` — высоты ролей, `gap` — зазор между

@@ -26,7 +26,7 @@ import { useSwap } from "../kit/useSwap";
 import { useHeld } from "../create/ImproveNote";
 import { GoLink } from "../create/ParamsPlate";
 import { buildView } from "./buildView";
-import { buildMorph } from "./columns";
+import { buildMorph, buildVars } from "./columns";
 import { backToText } from "./resume";
 import { Failed } from "./Failed";
 import { Phases } from "./Phases";
@@ -168,7 +168,7 @@ function BuildContent({ job, leaving }: { job: ActiveJob | null; leaving: boolea
   const morph = useMemo(() => buildMorph(wrap), [wrap]);
   const narrow = useNarrow();
   const wide = useWideScreen();
-  const vars = { "--bd-an": `${morph.agent}px`, "--bd-tw": `${morph.textWide}px`, "--bd-tn": `${morph.textNarrow}px`, "--bd-phf": `${morph.font}px` } as CSSProperties;
+  const vars = buildVars(morph) as CSSProperties;
 
   return (
     <div className="bd-fxw">
