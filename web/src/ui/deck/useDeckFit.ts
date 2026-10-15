@@ -3,6 +3,7 @@
 // обёртки (`useDeckWrap`) — по ней считаются обе раскладки сразу. Раскладку по целевой ширине (fit.ts `deckLayout`:
 // открытие — узкая с первого кадра; закрытие — узкая держится, пока сетка обёртки не доехала, `transitionend` на
 // grid-template-columns, запасной таймер — ход 340 мс + 40) читает только «Результат» (`useDeckFit`, `useDeckWidth`).
+// Содержимое колоды встаёт сразу в настоящей ширине обёртки (`useWrapWidth`, Deck.tsx): при загрузке ничего не едет.
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useState, type RefObject } from "react";
 import { prefersReducedMotion } from "../../lib/motion";
 import { CLOSE_HOLD_MS, deckLayout, type DeckFit, type DeckLayout } from "./fit";
@@ -19,19 +20,26 @@ export function useDeckWidth(): number {
   return useContext(DeckFitContext).width;
 }
 
-/** Ширина обёртки колоды (`hp-wrap`): колода при закрытом помощнике; 0 — ещё не измерена. Внутри `Deck` —
- *  `useDeckWrap`. */
+/** Ширина обёртки колоды (`hp-wrap`): колода при закрытом помощнике. Содержимое колоды встаёт уже после замера
+ *  (`Deck`), так что внутри неё ширина всегда настоящая; 0 — только вне `Deck`. Внутри `Deck` — `useDeckWrap`. */
 export const DeckWrapContext = createContext(0);
 export function useDeckWrap(): number {
   return useContext(DeckWrapContext);
 }
 
-/** Ширина обёртки колоды `ref` (её родителя): не анимируется — меняется только с окном. */
-export function useWrapWidth(ref: RefObject<HTMLElement>): number {
-  const [wrap, setWrap] = useState(0);
+/** Ширина обёртки колоды `ref` (её родителя): не анимируется — меняется только с окном. `null` — ещё не измерена:
+ *  первая отрисовка, колоды ещё нет в документе. Замер — в том же кадре, до первой отрисовки страницы; тот же замер
+ *  потом сообщает ResizeObserver (ширина рамки, с полосой прокрутки окна, если она есть). До вставки ширину не угадать:
+ *  в пустом документе ещё нет полосы прокрутки, а с колодой она появится (классическая полоса — 1232 вместо 1217 при
+ *  1280), и то, что встало в угаданной ширине, поехало бы к настоящей своим ходом. */
+export function useWrapWidth(ref: RefObject<HTMLElement>): number | null {
+  const [wrap, setWrap] = useState<number | null>(null);
   useLayoutEffect(() => {
     const el = ref.current?.parentElement;
-    if (!el) return;
+    if (!el) {
+      setWrap(0); // мерить нечего — содержимое встаёт как есть
+      return;
+    }
     const measure = () => setWrap(Math.round(el.getBoundingClientRect().width));
     measure();
     const ro = new ResizeObserver(measure);
