@@ -333,7 +333,7 @@
   /* сайт: flex:none — в тесном ряду файла (1280, помощник закрыт) «на экране» не сжимается и не обрезается, как и прежде */
   .df-now,.df-pb{flex:none;overflow:hidden;transition:font-size 340ms var(--ease),padding 340ms var(--ease),margin-left 340ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
   .hp-nar :is(.df-now,.df-pb){font-size:0;padding:0;margin-left:-8px;transition:font-size 520ms var(--ease),padding 520ms var(--ease),margin-left 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
-  .df-tl > span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+  .df-tl > span:not(.hp-tx){min-width:0;overflow:hidden;text-overflow:ellipsis}
   .df-tl .hq-ico{transition:width 340ms var(--ease),margin-right 340ms var(--ease),opacity 160ms var(--ease) 80ms}
   .hp-nar .df-tl .hq-ico{width:0;margin-right:-8px;opacity:0;transition:width 520ms var(--ease),margin-right 520ms var(--ease),opacity 240ms var(--ease)}
   /* подсказка роли в «Агенте» в широкой раскладке — одна строка (при 1440): в узкой не переносится, а сокращается
@@ -381,8 +381,6 @@
   [data-tx="w-ok"]{--hpd:306px}
   [data-tx="w-sim"]{--hpd:306px}
   [data-tx="w-why"]{--hpd:110px}
-  /* сайт: стопка в сетке встаёт по верху своей клетки (не тянется до высоты ряда): её высота на ходу — своя */
-  .df-card dl > .hp-tx{align-self:start}
   /* сайт: стопки сверх V2 (настоящие данные длиннее): строка «Взгляд дизайнера» — вторая колонка «Качества»; подписи
      образца и «Вашего слайда» (половина второй колонки «Почему так»), подписи других макетов (треть); заголовок плана и
      раскрытые тела «Текста агента», «Цифр», «Данных» — колонка «О плане» */
@@ -420,6 +418,15 @@
   .dd-tight .dq-acct{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .dq-ctw{display:inline-block;vertical-align:top;max-width:var(--ctw, 160px);overflow:hidden;white-space:pre;transition:max-width 340ms var(--ease),opacity 160ms var(--ease) 80ms}
   .hp-nar .dd-tight .dq-ctw{max-width:0;opacity:0;transition:max-width 520ms var(--ease),opacity 240ms var(--ease)}
+  /* названия разделов «Подробностей проверки» — целиком («Исправлено автоматически» — 209 px, в колонке 324 им было 160):
+     значок в круге сжимается и гаснет, как у «Взгляда дизайнера», зазоры ряда 16 → 12 (место и двузначному числу
+     рядом); ряды раскрытого раздела встают под название (поле 56 → 0) — их стопки q-acc на 56 шире (--hpd ниже) */
+  .dd-tight .dq-acc{transition:transform 160ms var(--ease),gap 340ms var(--ease)}
+  .hp-nar .dd-tight .dq-acc{gap:12px;transition:transform 160ms var(--ease),gap 520ms var(--ease)}
+  .dd-tight .dq-acc > .dd-ico{transition:width 340ms var(--ease),margin-right 340ms var(--ease),opacity 160ms var(--ease) 80ms}
+  .hp-nar .dd-tight .dq-acc > .dd-ico{width:0;margin-right:-12px;opacity:0;transition:width 520ms var(--ease),margin-right 520ms var(--ease),opacity 240ms var(--ease)}
+  .dd-tight .dq-rows:not(.dq-rows-tight){transition:padding-left 340ms var(--ease)}
+  .hp-nar .dd-tight .dq-rows:not(.dq-rows-tight){padding-left:0;transition-duration:520ms}
   /* «Агент»: «Ваши правки» 526 → 300 (первой — 396 / 381) */
   .hp-nar .dd-tight #dd-panel-agent .dd-g{grid-template-columns:minmax(0,1fr) 300px}
   /* «Почему так»: первая колонка 526 → 376 (второй — 320 / 305: «Сходство с образцом» и проценты в строку) */
@@ -455,9 +462,22 @@
   .dd-tight .df-chk{display:inline-block;max-width:160px;overflow:hidden;white-space:nowrap;vertical-align:bottom;transition:max-width 340ms var(--ease),margin-right 340ms var(--ease),opacity 160ms var(--ease) 80ms}
   .dd-tight .df-chk{margin-right:0}
   .hp-nar .dd-tight .df-chk{max-width:0;margin-right:-8px;opacity:0;transition:max-width 520ms var(--ease),margin-right 520ms var(--ease),opacity 240ms var(--ease)}
+  /* подписи плиток итога — целиком (кроме «Предупреждений»: у V2 в узкой и при 1440 — многоточием): дорожки плиток — по
+     замеру подписей (Files: tileTrack; --dtw / --dtn — доли из px покоя, идут вместе с колонкой); в узкой раскладке поля
+     плиток 16 → 12, зазоры 12 → 8. Подпись, которой и так тесно в одну строку («Автоисправления» при 1280), — стопка
+     f-tl: узкая копия в две строки по мягкому переносу, плитка на ходу растёт от 96. «выключена» рядом с прочерком «По
+     картинке» в узкой не помещается — сжимается и гаснет, как число проверок в шапке */
+  .dd-tight .df-tiles{grid-template-columns:var(--dtw, repeat(6, minmax(0, 1fr))) !important;transition:grid-template-columns 340ms var(--ease),gap 340ms var(--ease)}
+  .hp-nar .dd-tight .df-tiles{grid-template-columns:var(--dtn, repeat(6, minmax(0, 1fr))) !important;gap:8px !important;transition-duration:520ms}
+  .dd-tight .df-tile{height:auto;min-height:96px;transition:padding 340ms var(--ease)}
+  .hp-nar .dd-tight .df-tile{padding:16px 12px;transition-duration:520ms}
+  .df-tl > .hp-tx > .hp-txn{white-space:normal}
+  .dd-tight .df-tsub{max-width:120px;overflow:clip;white-space:nowrap;transition:max-width 340ms var(--ease),margin-left 340ms var(--ease),opacity 160ms var(--ease) 80ms}
+  .hp-nar .dd-tight .df-tsub{max-width:0;margin-left:-8px;opacity:0;transition:max-width 520ms var(--ease),margin-left 520ms var(--ease),opacity 240ms var(--ease)}
   /* --hpd тесной колоды: на сколько клетка у́же в узкой раскладке при своих дорожках */
   .dd-tight :is([data-tx="q-acc"],[data-tx="q-ex1"],[data-tx="q-ex2"],[data-tx="q-eye"],[data-tx="q-kept"],[data-tx="q-row"]){--hpd:202px}
   .dd-tight [data-tx="q-eyl"]{--hpd:146px}
+  .dd-tight .dq-rows:not(.dq-rows-tight) [data-tx="q-acc"]{--hpd:146px}
   .dd-tight [data-tx="q-msg"]{--hpd:214px}
   .dd-tight :is([data-tx="a-a"],[data-tx="a-hint2"],[data-tx="a-q"]){--hpd:226px}
   .dd-tight :is([data-tx="a-sum"],[data-tx="a-tx"],[data-tx="a-head"]){--hpd:190px}
