@@ -12,6 +12,7 @@ import { cls } from "../kit/cls";
 import { Icon } from "../kit/Icon";
 import { improveNoteParts, improveSlides, improveStripMeta, modelOnOf } from "./textRules";
 import { useNarrow } from "./useNarrow";
+import { observeWidth } from "../kit/widthGate";
 
 /** Последнее непустое значение: уходящее содержимое гаснет со своими данными. */
 export function useHeld<T>(value: T | null): T | null {
@@ -91,12 +92,12 @@ export function ImproveNote({ on, onHeights }: { on: boolean; onHeights(h: NoteH
       setH((cur) => (cur.wide === next.wide && cur.narrow === next.narrow ? cur : next));
     };
     measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(w);
+    // ширина копии на ходу помощника постоянна только до долей пикселя: замер — лишь когда она ушла на 1 px и больше
+    const stop = observeWidth([w], measure);
     window.addEventListener("resize", measure);
     void document.fonts?.ready.then(measure);
     return () => {
-      ro.disconnect();
+      stop();
       window.removeEventListener("resize", measure);
     };
   }, [key, wrap]);

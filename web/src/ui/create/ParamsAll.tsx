@@ -3,8 +3,10 @@
 // варианты с миниатюрами (160/200/240 мс), три переключателя (280 мс). Лесенка — `.p2-stag` внутри `p2-on`/`p2-off`.
 // Помощник сужает колоду — меню перестраивается вместе с ней (V2 «03 · …«Все параметры»…»): миниатюры вариантов
 // сжимаются и гаснут, подсказки вариантов и тексты переключателей — стопками из двух копий (не переносятся заново посреди
-// хода), коробки переключателей растут той же кривой под текст. В тесной колоде (1280, morph.ts `moreGrid`) степпер
-// слайдов — по содержимому, поля плотнее, переключатели — строками (весь ряд — стопкой из двух копий).
+// хода), коробки переключателей растут той же кривой под текст. При окне около 1280 (тесная раскладка, morph.ts
+// `moreGrid`) в узкой колоде степпер слайдов — по содержимому, поля плотнее, а переключатели — строками в обеих
+// раскладках (строки сужаются вместе с колодой, подсказка в строке сжимается и гаснет; сами переключатели не гаснут и
+// не подменяются — фокус остаётся на месте).
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useApp } from "../../store";
 import { PURPOSES } from "../../lib/createForm";
@@ -16,6 +18,7 @@ import { moreGrid } from "./morph";
 import { OWN, SLIDES_LOCKED, type SwitchView } from "./params";
 import type { ParamsPlate } from "./ParamsPlate";
 import { useNarrow } from "./useNarrow";
+import { observeWidth } from "../kit/widthGate";
 
 const show = (on: boolean) => (on ? "p2-on" : "p2-off");
 const GRID3 = { display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 16 } as const;
@@ -71,28 +74,24 @@ const V_HINT: CSSProperties = { fontSize: 13, fontWeight: 500, lineHeight: "20px
 
 interface SwitchItem { id: string; name: string; hint: string; sw: SwitchView; onToggle(): void }
 
-/** Переключатель с названием и подсказкой под ним (ряд 3). `copies` — название и подсказка стопками из двух копий
- *  (широкая и узкая, V2 `c-swt`, `c-swd`): в узкой колоде они в колонке у́же и переносятся иначе — но не посреди хода;
- *  активная копия — по `narrow`. Без копий — коробка ряда, который сам стоит одной из копий (тесная раскладка). */
-function SwitchBox({ it, copies, narrow }: { it: SwitchItem; copies: boolean; narrow: boolean }) {
+/** Переключатель с названием и подсказкой под ним (ряд 3). Название и подсказка — стопками из двух копий (широкая и
+ *  узкая, V2 `c-swt`, `c-swd`): в узкой колоде они в колонке у́же и переносятся иначе — но не посреди хода; активная
+ *  копия — по `narrow`. Сам переключатель один в обеих раскладках. */
+function SwitchBox({ it, narrow }: { it: SwitchItem; narrow: boolean }) {
   const { id, name, hint, sw, onToggle } = it;
   return (
     <div className="p2-box pp-swb">
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16 }}>
-        {copies ? (
-          <div className="hp-tx hp-txf" data-tx="c-swt">
-            <span id={id} className="hp-txw cp-nm" style={SW_NM} aria-hidden={narrow || undefined}>{name}</span>
-            <span className="hp-txn cp-nm" style={SW_NM} aria-hidden={!narrow || undefined}>{name}</span>
-          </div>
-        ) : <span id={id} className="cp-nm" style={SW_NM}>{name}</span>}
+        <div className="hp-tx hp-txf" data-tx="c-swt">
+          <span id={id} className="hp-txw cp-nm" style={SW_NM} aria-hidden={narrow || undefined}>{name}</span>
+          <span className="hp-txn cp-nm" style={SW_NM} aria-hidden={!narrow || undefined}>{name}</span>
+        </div>
         <Switch on={sw.on} disabled={sw.disabled} title={sw.title} labelledBy={id} describedBy={`${id}d`} onToggle={onToggle} />
       </div>
-      {copies ? (
-        <div className="hp-tx" data-tx="c-swd">
-          <p id={`${id}d`} className="hp-txw" style={SW_HINT} aria-hidden={narrow || undefined}>{hint}</p>
-          <p className="hp-txn" style={SW_HINT} aria-hidden={!narrow || undefined}>{hint}</p>
-        </div>
-      ) : <p id={`${id}d`} style={SW_HINT}>{hint}</p>}
+      <div className="hp-tx" data-tx="c-swd">
+        <p id={`${id}d`} className="hp-txw" style={SW_HINT} aria-hidden={narrow || undefined}>{hint}</p>
+        <p className="hp-txn" style={SW_HINT} aria-hidden={!narrow || undefined}>{hint}</p>
+      </div>
     </div>
   );
 }
@@ -116,12 +115,12 @@ function useSwitchHeights(row: React.RefObject<HTMLDivElement>, deps: unknown[])
       setH((cur) => (cur.wide === wide && cur.narrow === narrow ? cur : { wide, narrow }));
     };
     measure();
-    const ro = new ResizeObserver(measure);
-    for (const box of el.querySelectorAll(".hp-tx[data-tx=c-swt] > .hp-txw")) ro.observe(box);
+    // ширины копий на ходу помощника постоянны только до долей пикселя: замер — лишь когда какая-то ушла на 1 px и больше
+    const stop = observeWidth(el.querySelectorAll(".hp-tx[data-tx=c-swt] > .hp-txw"), measure);
     window.addEventListener("resize", measure);
     void document.fonts?.ready.then(measure);
     return () => {
-      ro.disconnect();
+      stop();
       window.removeEventListener("resize", measure);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -241,27 +240,24 @@ export function ParamsAll({ pp, on, short }: { pp: ParamsPlate; on: boolean; sho
         ))}
       </div>
 
-      {/* ряд 3: модель и изображения. Тесная раскладка (1280): в узкой колоде переключатели — строками без подсказок; весь
-          ряд — стопкой из двух копий (ширина «Все параметры» = колода − 288: --hpd 416), активная — по раскладке */}
+      {/* ряд 3: модель и изображения. Тесная раскладка (окно около 1280): строками в обеих раскладках — название и
+          подсказка в строку, переключатель справа; в узкой колоде подсказка сжимается и гаснет (она и в описании
+          переключателя), название и переключатель остаются */}
       {g.tight ? (
-        <div className="p2-stag" style={{ marginTop: 32, transitionDelay: "280ms" }}>
-          <div className="hp-tx" data-tx="c-swr">
-            <div className="hp-txw p2-params" style={GRID3} aria-hidden={narrow || undefined}>
-              {switches.map((it) => <SwitchBox key={it.id} it={it} copies={false} narrow={narrow} />)}
+        <div className="p2-stag pp-swl" style={{ marginTop: 32, transitionDelay: "280ms" }}>
+          {switches.map((it) => (
+            <div key={it.id} className="p2-box">
+              <span className="pp-swn">
+                <span id={it.id} className="cp-nm" style={{ ...SW_NM, paddingTop: 0 }}>{it.name}</span>
+                <span id={`${it.id}d`} className="hp-wo pp-swh" style={{ fontSize: 13, fontWeight: 500, lineHeight: "20px", color: "rgba(255,255,255,.64)" }}>{it.hint}</span>
+              </span>
+              <Switch on={it.sw.on} disabled={it.sw.disabled} title={it.sw.title} labelledBy={it.id} describedBy={`${it.id}d`} onToggle={it.onToggle} />
             </div>
-            <div className="hp-txn pp-swl" aria-hidden={!narrow || undefined}>
-              {switches.map((it) => (
-                <div key={it.id} className="p2-box">
-                  <span id={`${it.id}r`} className="cp-nm" style={{ ...SW_NM, paddingTop: 0 }}>{it.name}</span>
-                  <Switch on={it.sw.on} disabled={it.sw.disabled} title={it.sw.title} labelledBy={`${it.id}r`} describedBy={`${it.id}d`} onToggle={it.onToggle} />
-                </div>
-              ))}
-            </div>
-          </div>
+          ))}
         </div>
       ) : (
         <div ref={swRow} className="p2-params p2-stag" style={{ ...GRID3, marginTop: 32, transitionDelay: "280ms" }}>
-          {switches.map((it) => <SwitchBox key={it.id} it={it} copies narrow={narrow} />)}
+          {switches.map((it) => <SwitchBox key={it.id} it={it} narrow={narrow} />)}
         </div>
       )}
     </div>

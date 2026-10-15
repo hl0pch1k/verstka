@@ -192,9 +192,13 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 :where(.pp-short) .pp-th{width:112px;height:63px}
 /* «Создать презентацию» → «Создать» (тесная колода): «презентацию» — своим словом, сжимается и гаснет на месте */
 .pp-ctat{display:inline-block;overflow:hidden;white-space:pre;vertical-align:top}
-/* переключатели строками (тесная раскладка «Все параметры», помощник при 1280): название и переключатель, без подсказки */
+/* переключатели строками (тесная раскладка «Все параметры», окно около 1280 — в обеих раскладках): название и подсказка
+   в строку, переключатель справа; подсказка уступает место (многоточием), с помощником — гаснет */
 .pp-swl{display:grid;grid-template-columns:minmax(0,1fr);gap:8px}
 .pp-swl > .p2-box{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 24px}
+.pp-swn{display:flex;align-items:baseline;gap:16px;flex:1 1 auto;min-width:0}
+.pp-swn > .cp-nm{flex:none;white-space:nowrap}
+.pp-swh{display:block;flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* ── Колода, суженная помощником, — тем же ходом, что «Результат» (V2 версии 100, блок «Колода, суженная помощником, на
    «Создать», «Сборке» и под «Подробнее»…»; правила V2 дословно, кроме отмеченного «сайт:»). Содержимое плит идёт за
@@ -334,8 +338,9 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
   /* сайт: высоты коробок переключателей в обеих раскладках — замер их копий (ParamsAll: --pp-swhw / --pp-swh) */
   #p2-b3m > .p2-params:last-child > .p2-box{height:var(--pp-swhw,auto);transition:height 340ms var(--ease)}
   .hp-nar #p2-b3m > .p2-params:last-child > .p2-box{height:var(--pp-swh,164px) !important;transition-duration:520ms}
-  /* сайт: тесная раскладка «Все параметры» (помощник при 1280, morph.ts `moreGrid`): степпер слайдов в первом ряду — по
-     содержимому, поля плотнее; переключатели — строками (две копии ряда, как стопка текста ниже) */
+  /* сайт: тесная раскладка «Все параметры» (окно около 1280, morph.ts `moreGrid`): степпер слайдов в первом ряду — по
+     содержимому, поля плотнее; переключатели — строками в обеих раскладках (ниже): строка сужается вместе с колодой,
+     подсказка в строке сжимается и гаснет на месте */
   .pp-r1{display:grid;gap:16px}
   .pp-tight .pp-r1{grid-template-columns:var(--pp-r1w) !important;transition:grid-template-columns 340ms var(--ease)}
   .hp-nar .pp-tight .pp-r1{grid-template-columns:var(--pp-r1n) !important;transition-duration:520ms}
@@ -394,9 +399,6 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
   [data-tx="c-swt"]{--hpd:138.667px}
   [data-tx="c-ta"]{--hpd:416px}
   [data-tx="c-vhint"]{--hpd:-33.333px}
-  /* сайт: переключатели в тесной раскладке — весь ряд стопкой (ширина «Все параметры» = колода − 288); уходящий ряд
-     обрезается ровно по краю клетки — не заходит на поле плиты */
-  [data-tx="c-swr"]{--hpd:416px;overflow-clip-margin:0px}
 }
 @media (max-width: 900px){
   .hp-txn{display:none !important}
