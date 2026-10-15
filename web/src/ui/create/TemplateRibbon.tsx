@@ -2,6 +2,7 @@
 // плитка «Загрузить свой», ряды по четыре (V2 `tpRows`). Помощник сужает колоду: в каждом ряду одна обложка уходит — её
 // дорожка сжимается до нуля, она гаснет на месте; остальные плитки сужаются вместе с плитой (четыре обложки в три
 // колонки, без перескоков между рядами), «ещё N» меняет число на месте (morph.ts `ribbonRows`, create.css «01 · лента»).
+// Без «Все шаблоны» (скрытых шаблонов нет) обложки не уходят: до ушедшей было бы не добраться.
 // Разметка — boards/V2.dc.html, `#p2-b1`. Здесь же обложка шаблона (картинка или схема титульного слайда `tp-wf`) и
 // плитка обложки — их берут разбор, раздел «Шаблоны», «Слайды шаблона» и диалог удаления.
 import { useState, type CSSProperties } from "react";
@@ -12,6 +13,7 @@ import type { TemplateListItem } from "../../types";
 import { cls } from "../kit/cls";
 import { Icon, type IconName } from "../kit/Icon";
 import { ribbonRows } from "./morph";
+import { useNarrow } from "./useNarrow";
 import { ribbonItems, tplMeta, tplShort } from "./ribbon";
 
 /** Как стоит обложка: плитка ленты (142 px), раздел «Шаблоны» (16:9), миниатюра слайда (16:9, r12), шапка шага
@@ -139,7 +141,8 @@ export function Ribbon({ fresh, onPeek, onGallery, onUpload, uploadOff }: {
   /** «Загрузить свой» занята (читается презентация «Улучшить готовую»): почему; null — нет. */
   uploadOff?: string | null;
 }) {
-  const { templates, templateId, ui } = useApp();
+  const { templates, templateId } = useApp();
+  const narrow = useNarrow();
   const pick = usePickTemplate();
   const { shown, rest } = ribbonItems(templates, templateId, 6, fresh);
   const { rows } = ribbonRows(shown, (t) => t.template_id === templateId, rest > 0);
@@ -147,7 +150,8 @@ export function Ribbon({ fresh, onPeek, onGallery, onUpload, uploadOff }: {
   const cut = rows.flatMap((r) => r.slots.filter((s) => s.cut && s.item).map((s) => s.item as TemplateListItem));
   const hidden = templates.filter((x) => !shown.includes(x));
   const restNarrow = rest + cut.length;
-  const tip = (ui.helper ? [...cut, ...hidden] : hidden).map(tplLabel).join(", ");
+  // узкая колода — та раскладка, что на деле (≤ 900 px помощник встаёт под колоду, обложки не уходят)
+  const tip = (narrow ? [...cut, ...hidden] : hidden).map(tplLabel).join(", ");
   return (
     <>
       {rows.map((r, ri) => (
@@ -157,7 +161,7 @@ export function Ribbon({ fresh, onPeek, onGallery, onUpload, uploadOff }: {
               onPick={() => pick((s.item as TemplateListItem).template_id)} onPeek={() => onPeek((s.item as TemplateListItem).template_id)} />
           ) : s.kind === "all" ? (
             <ActTile key="all" icon="grid" note={[moreText(rest)]} noteNarrow={moreText(restNarrow)} name="Все шаблоны" delay={240} onClick={onGallery} cell
-              label={`Все шаблоны, ${moreText(ui.helper ? restNarrow : rest)}`} title={tip} />
+              label={`Все шаблоны, ${moreText(narrow ? restNarrow : rest)}`} title={tip} />
           ) : (
             <ActTile key="up" icon="upload" note={[".pptx, .potx, .ppt или .odp", "до 200 МБ"]} name="Загрузить свой" delay={280} onClick={onUpload} off={uploadOff} cell />
           ))}

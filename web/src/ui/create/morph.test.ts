@@ -97,9 +97,20 @@ test("ribbonRows: выбранная обложка не уходит — ухо
   assert.deepEqual(ids(rows), [["a", "b", "c✂", "d"], ["e✂", "f", "all", "upload"]]);
 });
 
-test("ribbonRows: короткий ряд — лишние пустые дорожки сверх трёх сжимаются, ничего не уходит", () => {
-  const { rows, gone } = ribbonRows(["a"], () => false, false);
-  assert.deepEqual(ids(rows), [["a", "upload"]]);
+test("ribbonRows: без «Все шаблоны» (5–6 шаблонов, скрытых нет) обложки не уходят — до каждой можно добраться; ряды по четыре", () => {
+  for (const covers of [["a", "b", "c", "d", "e"], ["a", "b", "c", "d", "e", "f"], ["a", "b", "c"]]) {
+    const { rows, gone } = ribbonRows(covers, (t) => t === "a", false);
+    assert.equal(gone, 0, covers.join());
+    assert.ok(rows.every((r) => r.slots.every((s) => !s.cut)), covers.join());
+    // колонки рядов совпадают и в узкой раскладке: по четыре живые дорожки
+    for (const r of rows) assert.equal(r.narrow, "minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr)");
+    assert.equal(rows.flatMap((r) => r.slots).filter((s) => s.kind === "cover").length, covers.length);
+  }
+});
+
+test("ribbonRows: со «Все шаблоны» короткий ряд — лишние пустые дорожки сверх трёх сжимаются", () => {
+  const { rows, gone } = ribbonRows(["a"], () => false, true);
+  assert.deepEqual(ids(rows), [["a", "all", "upload"]]);
   assert.equal(gone, 0);
   assert.equal(rows[0].narrow, "minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0fr)");
 });

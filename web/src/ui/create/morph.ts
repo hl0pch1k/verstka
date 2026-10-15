@@ -136,7 +136,9 @@ export interface RibbonRow<T> { slots: RibbonSlot<T>[]; /** Дорожки ря�
 /** Ряды ленты: обложки, затем «Все шаблоны» (если есть скрытые) и «Загрузить свой», по четыре. Помощник сужает колоду:
  *  в ряду из четырёх одна обложка уходит — её дорожка сжимается до нуля (последняя обложка ряда, если она не выбранная,
  *  иначе предыдущая); пустые дорожки сверх трёх тоже сжимаются. Остальные плитки ряда сужаются вместе с плитой —
- *  четыре обложки в три колонки без перескоков между рядами. `gone` — сколько обложек уходит. */
+ *  четыре обложки в три колонки без перескоков между рядами. `gone` — сколько обложек уходит.
+ *  Сайт: без «Все шаблоны» (скрытых шаблонов нет, `more` — нет) обложки не уходят — до ушедшей при открытом помощнике было
+ *  бы не добраться; ряды остаются по четыре дорожки и в узкой раскладке (колонки рядов совпадают). */
 export function ribbonRows<T>(covers: T[], selected: (t: T) => boolean, more: boolean): { rows: RibbonRow<T>[]; gone: number } {
   const slots: RibbonSlot<T>[] = covers.map((item) => ({ kind: "cover", item, cut: false }));
   if (more) slots.push({ kind: "all", cut: false });
@@ -146,6 +148,10 @@ export function ribbonRows<T>(covers: T[], selected: (t: T) => boolean, more: bo
   for (let i = 0; i < slots.length; i += 4) {
     const row = slots.slice(i, i + 4);
     const tr = [FR, FR, FR, FR];
+    if (!more) {
+      rows.push({ slots: row, narrow: tr.join(" ") });
+      continue;
+    }
     if (row.length === 4) {
       const cov = row.map((s, k) => (s.kind === "cover" ? k : -1)).filter((k) => k >= 0);
       let k: number | undefined = cov[cov.length - 1];
