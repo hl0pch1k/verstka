@@ -327,27 +327,28 @@ def _walk(root: Path) -> list[Path]:
 
 def _studio_data(d: Path, files: list[Path]) -> tuple[Optional[dict], set[Path], list[str]]:
     """Папка Tokens Studio (`$metadata.json`, `$themes.json`, по файлу на набор) → один словарь: наборы в порядке
-    `tokenSetOrder` (имя набора — путь файла без «.json»), `$themes` и `$metadata`. Возвращает ещё файлы папки (их отдельно
-    не читать) и предупреждения."""
+    `tokenSetOrder` (имя набора — путь файла без «.json»), `$themes` и `$metadata`. Если `tokenSetOrder` есть, берутся только
+    перечисленные в нём наборы (посторонние JSON рядом читаются как обычные файлы); если нет — все файлы папки. Возвращает
+    ещё файлы, которые уже прочитаны (отдельно их не читать), и предупреждения."""
     from verstka.brand.tokens import load_json
 
     warnings: list[str] = []
-    members: dict[Path, str] = {
+    all_json: dict[Path, str] = {
         f: f.relative_to(d).with_suffix("").as_posix()
         for f in files if f.suffix.lower() == ".json" and d in f.parents and not f.name.startswith("$")
     }
-    consumed = set(members) | {f for f in files if f.parent == d and f.name in ("$metadata.json", "$themes.json")}
-    order: list[str] = []
+    listed: list[str] = []
     meta_path = d / "$metadata.json"
-    if meta_path in consumed:
+    if meta_path in files:
         try:
             meta = load_json(meta_path)
             if isinstance(meta, dict) and isinstance(meta.get("tokenSetOrder"), list):
-                order = [str(x) for x in meta["tokenSetOrder"]]
+                listed = [str(x) for x in meta["tokenSetOrder"]]
         except BrandReadError as e:
             warnings.append(f"«$metadata.json»: {e}")
-    by_name = {name: f for f, name in members.items()}
-    order = [n for n in order if n in by_name] + sorted(n for n in by_name if n not in order)
+    by_name = {name: f for f, name in all_json.items() if not listed or name in listed}
+    order = [n for n in listed if n in by_name] + ([] if listed else sorted(by_name))
+    consumed = set(by_name.values()) | {f for f in files if f.parent == d and f.name in ("$metadata.json", "$themes.json")}
     data: dict = {}
     for name in order:
         try:
@@ -357,7 +358,7 @@ def _studio_data(d: Path, files: list[Path]) -> tuple[Optional[dict], set[Path],
     if not data:
         return None, consumed, warnings
     themes_path = d / "$themes.json"
-    if themes_path in consumed:
+    if themes_path in files:
         try:
             themes = load_json(themes_path)
             if isinstance(themes, list):

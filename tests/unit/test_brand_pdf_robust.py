@@ -11,6 +11,7 @@ import pypdfium2 as pdfium
 import pytest
 from PIL import Image
 
+from brand_helpers import pdf_bytes as _pdf_bytes
 from verstka.brand.common import ColorHit, make_palette
 from verstka.brand.pdf import (
     _FILE_TITLE,
@@ -147,7 +148,9 @@ def test_font_role_phrasings(text, expected):
 def test_single_word_fonts_outside_the_known_list_are_kept():
     assert _fonts_of("Шрифт заголовков: Poppins Bold / Шрифт текста: Inter") == {"heading": ("Poppins", 700), "body": ("Inter", 400)}
     assert _fonts_of("Primary typeface: Zephyr. Secondary typeface: Quasar.") == {"heading": ("Zephyr", 700), "body": ("Quasar", 400)}
-    assert _fonts_of("Headings: Zephyr Bold\nBody: Quasar") == {"heading": ("Zephyr", 700), "body": ("Quasar", 400)}
+    # метка роли без слов про шрифт достаточна, только если на странице есть раздел о шрифтах
+    assert _fonts_of("Typography\nHeadings: Zephyr Bold\nBody: Quasar") == {"heading": ("Zephyr", 700), "body": ("Quasar", 400)}
+    assert _fonts_of("Headings: Zephyr Bold\nBody: Quasar") == {}
     spec = read_brandbook(FIX / "swatches.pdf")  # «Primary typeface: Poppins. Secondary typeface: Source Sans Pro.»
     assert _fonts(spec) == {"heading": ("Poppins", None, 700), "body": ("Source Sans Pro", None, 400)}
 
@@ -291,8 +294,6 @@ def test_scanned_pdf_is_read_by_the_model_and_merged(tmp_path):
 
 
 def test_the_models_name_outranks_a_name_guessed_from_the_file_name(tmp_path):
-    from test_brand_read import _pdf_bytes
-
     pdf = tmp_path / "navybank.pdf"
     pdf.write_bytes(_pdf_bytes(["Primary colour  #1A73E8", "Text  #202124", "Headings: Inter Bold"]))
     assert read_pdf(pdf).name == "navybank"  # без модели — догадка по имени файла
@@ -303,3 +304,84 @@ def test_the_models_name_outranks_a_name_guessed_from_the_file_name(tmp_path):
     pdf2.write_bytes(_pdf_bytes(["Acme Brand Guidelines", "Primary colour  #1A73E8", "Text  #202124", "Headings: Inter Bold"]))
     providers = ProviderRegistry.mock({"brand guideline": {"name": "Другое имя"}})
     assert read_pdf(pdf2, providers=providers, use_vlm=True).name == "Acme"
+
+
+# ---- повторное ревью: образцы с CMYK и Pantone до HEX ---------------------------------------------------------------------------------------
+SWATCH_ORDERS = {
+    "pantone-cmyk-rgb-hex": "{n}\nPANTONE {p} C\nCMYK {c}\nRGB {r}\nHEX {h}\n",
+    "cmyk-hex": "{n}\nCMYK {c}\nHEX {h}\n",
+    "rgb-cmyk-hex": "{n}\nRGB {r}\nCMYK {c}\nHEX {h}\n",
+    "hex-rgb-cmyk": "{n}\nHEX {h}\nRGB {r}\nCMYK {c}\n",
+    "hex-cmyk": "{n}\nHEX {h}\nCMYK {c}\nPantone {p} C\n",
+    "cmyk-rgb": "{n}\nCMYK {c}\nRGB {r}\n",
+}
+NAVY = dict(n="Deep Navy", p="289", c="100 80 40 50", r="10 37 64", h="#0A2540")
+BLUE = dict(n="Bright Blue", p="2925", c="88 48 0 0", r="30 144 255", h="#1E90FF")
+
+
+@pytest.mark.parametrize("order", sorted(SWATCH_ORDERS))
+def test_cmyk_or_pantone_lines_before_the_hex_belong_to_the_same_swatch(order):
+    text = "".join(SWATCH_ORDERS[order].format(**sw) for sw in (NAVY, BLUE))
+    hits = pdf_colors(text)
+    expected = ["#0A2540", "#1E90FF"]
+    assert [h.hex for h in hits] == expected  # без призраков #00194C и #1F85FF
+    assert {h.hex: h.name for h in hits} == {"#0A2540": "Deep Navy", "#1E90FF": "Bright Blue"}  # имя — над Pantone, CMYK и RGB
+    assert not any(h.approx for h in hits)
+    colors, warnings = make_palette(hits)
+    assert [c.hex for c in colors] == expected and not any("приблизительно" in w for w in warnings)
+
+
+def test_print_style_swatches_in_a_real_pdf_give_two_colours_and_keep_the_roles(tmp_path):
+    lines = ["Primary colours"]
+    for sw in (NAVY, BLUE):
+        lines += [sw["n"], f"PANTONE {sw['p']} C", f"CMYK {sw['c']}", f"RGB {sw['r']}", f"HEX {sw['h']}"]
+    pdf = tmp_path / "Aster brand guidelines.pdf"
+    pdf.write_bytes(_pdf_bytes(lines))
+    spec = read_brandbook(pdf)
+    assert [(c.hex, c.role) for c in spec.colors] == [("#0A2540", "primary"), ("#1E90FF", "chart")]
+    assert not any("приблизительно" in w for w in spec.warnings)
+
+
+def test_a_cmyk_colour_close_to_an_exact_one_elsewhere_on_the_page_is_not_a_new_colour():
+    text = "Deep Navy #0A2540\nКогда цвет нужен в печати, берите значения на следующей странице.\nПечать: CMYK 100 80 40 50\n"
+    assert [h.hex for h in pdf_colors(text)] == ["#0A2540"]
+    # а цвет, которого в экранных значениях нет, остаётся (приблизительно)
+    hits = pdf_colors("Deep Navy #0A2540\nПечать, акцент: CMYK 0 35 100 0\n")
+    assert [(h.hex, h.approx) for h in hits] == [("#0A2540", False), ("#FFA600", True)]
+
+
+# ---- повторное ревью: названия цветов — не шрифты --------------------------------------------------------------------------------------------
+def test_colour_names_next_to_rgb_cmyk_and_pantone_are_not_fonts(tmp_path):
+    pdf = tmp_path / "palette.pdf"
+    pdf.write_bytes(_pdf_bytes(["Colour palette", "Primary - Navy - RGB 10 37 64", "Secondary - Coral - RGB 255 90 79"]))
+    spec = read_brandbook(pdf)
+    assert spec.fonts == [] and any("не нашёл названий шрифтов" in w for w in spec.warnings)
+    assert [c.hex for c in spec.colors] == ["#0A2540", "#FF5A4F"]
+    # настоящие шрифты рядом читаются, названия цветов в них не попадают
+    pdf.write_bytes(_pdf_bytes(["Colour palette", "Primary - Navy - RGB 10 37 64", "Secondary - Coral - RGB 255 90 79", "Typeface: Poppins, Inter"]))
+    assert _fonts(read_brandbook(pdf)) == {"heading": ("Poppins", None, 700), "body": ("Inter", None, 400)}
+    assert _fonts_of("Primary — Sun — PANTONE 130 C — CMYK 0 35 100 0\nSecondary — Ocean — CMYK 100 40 50 60") == {}
+
+
+@pytest.mark.parametrize("text", [
+    "Primary: Blue\nSecondary: Green\nAccent: Orange",
+    "Основной цвет: Blue. Дополнительный: Green.",
+    "Primary — Navy\nSecondary — Coral\n",
+    "Основной цвет — Navy. Основной цвет логотипа — Midnight.",
+    "Typography\nUse Sparingly. Never stretch the logo.",
+    "Text: Black on White backgrounds. Display: Large",  # «Text» и «Display» сами по себе — не названия
+    "Use Navy for headings, Coral for accents.",
+])
+def test_plain_colour_and_prose_lines_give_no_fonts(text):
+    assert _fonts_of(text) == {}
+
+
+def test_an_unknown_font_after_a_verb_is_kept_when_the_sentence_names_the_roles():
+    assert _fonts_of("Для заголовков используйте Evolventa, для основного текста — Open Sans") == {"heading": ("Evolventa", 700), "body": ("Open Sans", 400)}
+    assert _fonts_of("Для заголовков используйте Evolventa, для основного текста — Open Sans, для таблиц — Roboto Mono") == {
+        "heading": ("Evolventa", 700), "body": ("Open Sans", 400)}  # третий шрифт роли не получает и не сдвигает первые два
+    assert _fonts_of("Для основного текста применяйте Evolventa.") == {"heading": ("Evolventa", 700), "body": ("Evolventa", 400)}
+    assert _fonts_of("Use Evolventa for headings and Inter for body text.") == {"heading": ("Evolventa", 700), "body": ("Inter", 400)}
+    assert _fonts_of("Для заголовков: Evolventa. Для текста: Arial.") == {"heading": ("Evolventa", 700), "body": ("Arial", 400)}
+    assert _fonts_of("Для заголовков: Navy. Для текста: Coral.") == {}  # названия цветов — не шрифты и после «для …:»
+    assert _fonts_of("Используйте Evolventa.") == {}  # без ролей и слов про шрифт — это может быть что угодно

@@ -47,6 +47,7 @@ from verstka.brand.common import (
     make_palette,
     margins_px,
     name_from_path,
+    parse_color,
     rgb_distance,
     rgb_hex,
     split_weight,
@@ -229,42 +230,80 @@ def _label_only(line: str, start: int, end: int) -> bool:
     return not re.search(r"[A-Za-zА-Яа-яЁё]", rest)
 
 
+def _swatch_continuations(lines: list[str], per_line: list[list[tuple[int, int, str, str]]]) -> set[int]:
+    """Номера строк, которые только повторяют цвет соседнего образца (RGB и CMYK рядом с HEX, CMYK рядом с RGB)."""
+    nb = [i for i, ln in enumerate(lines) if ln]
+    chains: list[list[int]] = []  # подряд идущие строки образца: с цветом или «Pantone 289 C»
+    cur: list[int] = []
+    for i in nb:
+        if per_line[i] or _OTHER_FORMAT.match(lines[i]):
+            cur.append(i)
+        else:
+            if cur:
+                chains.append(cur)
+            cur = []
+    if cur:
+        chains.append(cur)
+    skip: set[int] = set()
+
+    def label_only_line(i: int) -> bool:
+        ms = per_line[i]
+        return len(ms) == 1 and _label_only(lines[i], ms[0][0], ms[0][1])
+
+    for chain in chains:
+        pos = {i: k for k, i in enumerate(chain)}
+        # RGB-строка — продолжение HEX того же образца, если рядом (до или после) HEX с тем же цветом
+        for i in chain:
+            ms = per_line[i]
+            if ms and ms[0][3] == "rgb" and label_only_line(i):
+                if any(per_line[j] and per_line[j][0][3] == "hex" and abs(pos[j] - pos[i]) <= 3
+                       and any(len(h[2]) == 7 and rgb_distance(ms[0][2], h[2]) <= 18 for h in per_line[j] if h[3] == "hex")
+                       for j in chain):
+                    skip.add(i)
+        # CMYK-строка — продолжение ближайшего образца с HEX или RGB
+        for i in chain:
+            ms = per_line[i]
+            if ms and ms[0][3] == "cmyk" and label_only_line(i):
+                if any(j not in skip and per_line[j] and per_line[j][0][3] in ("hex", "rgb") and abs(pos[j] - pos[i]) <= 3 for j in chain):
+                    skip.add(i)
+    # RGB-строка без HEX, равная названному где-то HEX, — дубль (RGB считается точно)
+    hex_known = [m[2] for i, ms in enumerate(per_line) if i not in skip for m in ms if m[3] == "hex" and len(m[2]) == 7]
+    for i, ms in enumerate(per_line):
+        if i not in skip and ms and ms[0][3] == "rgb" and label_only_line(i) and any(rgb_distance(ms[0][2], h) <= 12 for h in hex_known):
+            skip.add(i)
+    return skip
+
+
 def pdf_colors(text: str) -> list[ColorHit]:
     """Цвета гайдлайна с ролями по голосам (см. описание модуля)."""
     lines = [ln.strip() for ln in text.splitlines()]
     per_line = [_mentions(ln) for ln in lines]
-    # образец цвета часто напечатан столбиком: HEX, RGB и CMYK — отдельными строками («HEX #0A2540 / RGB 10 37 64 / CMYK…»).
-    # Строка RGB или CMYK в пределах трёх строк после HEX (без имени другого образца между ними) — тот же цвет, отдельным
-    # цветом она не считается; RGB и CMYK читаются, только если у образца нет HEX
-    skip: set[int] = set()
-    anchor: Optional[tuple[int, int]] = None  # (ранг, номер строки) последней строки-образца
-    gap = 0
-    for i, ln in enumerate(lines):
-        if not ln:
-            continue
-        ms = per_line[i]
-        if ms:
-            rank = _RANK[ms[0][3]]
-            if anchor is not None and gap < 3 and rank < anchor[0] and len(ms) == 1 and _label_only(ln, ms[0][0], ms[0][1]):
-                skip.add(i)
-                gap += 1
-                continue
-            anchor, gap = (rank, i), 0
-        elif anchor is not None:
-            if _OTHER_FORMAT.match(ln):
-                gap += 1
-            else:
-                anchor = None
-    # RGB-строка без HEX, равная уже названному HEX, — дубль (RGB считается точно)
-    hex_known = [m[2] for i, ms in enumerate(per_line) if i not in skip for m in ms if m[3] == "hex"]
-    for i, ms in enumerate(per_line):
-        if i not in skip and len(ms) == 1 and ms[0][3] == "rgb" and _label_only(lines[i], ms[0][0], ms[0][1]) and any(rgb_distance(ms[0][2], h) <= 12 for h in hex_known if len(h) == 7):
-            skip.add(i)
+    # образец цвета часто напечатан столбиком: имя, Pantone, CMYK, RGB и HEX отдельными строками — в любом порядке
+    # («Pantone / CMYK / RGB / HEX» в печатных гайдлайнах, «HEX / RGB / CMYK» в экранных). Строки образца идут подряд, пока
+    # не встретится строка с именем или текстом. Строка только с меткой формата и числами («RGB 10 37 64») в пределах трёх
+    # строк до или после HEX (RGB — если число сходится с HEX) или RGB (CMYK) — тот же образец, отдельным цветом она не
+    # считается. RGB и CMYK читаются как цвет, только если у образца нет HEX.
+    skip = _swatch_continuations(lines, per_line)
     votes: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
     names: dict[str, str] = {}
     order: list[str] = []
     positive: set[str] = set()
     approx: dict[str, bool] = {}
+
+    def _text_above(i: int) -> list[int]:
+        """Строки с текстом над строкой i (ближайшая первой) — подписи карточки; строки того же образца (Pantone, CMYK, RGB) и
+        пустые пропускаются, строка другого цвета обрывает поиск."""
+        out: list[int] = []
+        for k in range(i - 1, max(-1, i - 9), -1):
+            if not lines[k] or k in skip or _OTHER_FORMAT.match(lines[k]):
+                continue
+            if per_line[k]:
+                break
+            out.append(k)
+            if len(out) >= 3:
+                break
+        return out
+
     for i, ln in enumerate(lines):
         ms = per_line[i]
         if not ms or i in skip:
@@ -292,18 +331,20 @@ def pdf_colors(text: str) -> list[ColorHit]:
                     votes[hx][r] += (1.5 if single else 0.75) * (0.75 if r == "chart" else 1.0)
                 elif len(ms) == 1:
                     # карточка цвета: подпись роли — строкой выше или ниже (до другого цвета)
-                    for k, w in ((i - 1, 1.0), (i - 2, 0.75), (i + 1, 0.75)):
-                        if 0 <= k < len(lines) and not per_line[k]:
-                            r = color_role(lines[k])
-                            if r:
-                                votes[hx][r] += w
-                                break
+                    above = _text_above(i)
+                    cands = [(above[0], 1.0)] if above else []
+                    cands += [(above[1], 0.75)] if len(above) > 1 else []
+                    cands += [(i + 1, 0.75)] if i + 1 < len(lines) and not per_line[i + 1] else []
+                    for k, w in cands:
+                        r = color_role(lines[k])
+                        if r:
+                            votes[hx][r] += w
+                            break
             nm = _name_near(before)
             if not nm and single:
-                # карточка: имя — одной из двух строк выше («VK Blue» / «Основной» / «#0077FF»), подпись роли пропускается
-                for k in (i - 1, i - 2):
-                    if k < 0 or per_line[k]:
-                        break
+                # карточка: имя — одной из строк выше («VK Blue» / «Основной» / «#0077FF»); подпись роли, строки Pantone, CMYK и
+                # RGB того же образца пропускаются
+                for k in _text_above(i)[:3]:
                     if len(lines[k]) <= 24 and not color_role(lines[k]):
                         nm = _name_near(lines[k])
                         if nm:
@@ -311,9 +352,12 @@ def pdf_colors(text: str) -> list[ColorHit]:
             if nm and hx not in names:
                 names[hx] = nm
     hits: list[ColorHit] = []
+    exact = [hx for hx in order if hx in positive and not approx.get(hx)]
     for hx in order:
         if hx not in positive:
             continue
+        if approx.get(hx) and any(rgb_distance(hx, e) <= 25 for e in exact):
+            continue  # CMYK без профиля даёт цвет, чуть отличный от HEX того же образца: это не новый цвет
         v = votes.get(hx) or {}
         role = None
         if v:
@@ -331,27 +375,51 @@ _LABEL_BEFORE = re.compile(
     r"primary|secondary|display|set\s+in)\s*(?:[:—–-]\s*|\s+(?:is|are|—)\s+)?$",
     re.I,
 )
+# метка роли с двоеточием или тире: достаточна для названия вне списка, только если на странице вообще говорится о шрифтах
+_ROLE_LABEL_BEFORE = re.compile(
+    r"(?:heading\w*|headline\w*|title\w*|body(?:\s+(?:text|copy))?|text|заголов\w*|основн\w*\s+текст\w*|текст\w*)\s*[:—–-]\s*$", re.I)
+# «Для заголовков: Evolventa» — роль с «для» и двоеточием называет шрифт и без слов «шрифт» на странице
+_FOR_LABEL_BEFORE = re.compile(r"(?:для|for)\s+(?:заголов\w*|подзаголов\w*|heading\w*|headline\w*|title\w*|основн\w*\s+текст\w*|текст\w*|body(?:\s+(?:text|copy))?|"
+                               r"наборн\w*|таблиц\w*|подпис\w*)\s*[:—–-]\s*$", re.I)
+# «используйте Evolventa», «набирайте …», «use …»: глагол перед названием, если в предложении есть «для заголовков», «for body»…
+_VERB_BEFORE = re.compile(r"(?:используй\w*|примен[яи]\w*|набирай\w*|набир\w*\s+в|use|set\s+in|set\s+with)\s*$", re.I)
+_FOR_ROLE = re.compile(r"(?:для|for)\s+(?:заголов\w*|подзаголов\w*|heading\w*|headline\w*|title\w*|основн\w*\s+текст\w*|текст\w*|body|"
+                       r"наборн\w*|таблиц\w*|подпис\w*|caption\w*|table\w*)", re.I)
 _LABEL_AFTER = re.compile(r"\s*(?:[—–,:-]\s*)?(?:это\s+|наш\s+|is\s+(?:the\s+|our\s+)?(?:\w+\s+)?)?(?:шрифт|гарнитур|font|typeface)", re.I)
+_FONT_WORD_ANY = re.compile(r"шрифт|гарнитур|начертан|типограф|font|typeface|typograph", re.I)
+# предложение про цвет — в нём названия шрифтов не ищутся: «Primary - Navy - RGB 10 37 64» (Navy — цвет, а не шрифт)
+_COLOUR_SENTENCE = re.compile(r"(?<![A-Za-z])(?:RGB|CMYK|PANTONE|PMS|RAL|NCS)(?![A-Za-z])", re.I)
+_LEAD_VERB = re.compile(r"(?:Use|Using|Set|Apply|Choose|Select)\s+(?=[A-Z])")
 _LOWER_WORD_AFTER = re.compile(r"\s+([a-z]{3,})")
 _WORD_OK_AFTER = {"is", "for", "and", "or", "and", "bold", "regular", "light", "medium", "italic", "semibold", "black", "thin"}
+# названия цветов, которых нет среди имён CSS
+_COLOUR_WORDS = {"sun", "ocean", "charcoal", "midnight", "mint", "snow", "sky", "coral", "teal", "slate", "ink", "paper", "rose", "sand", "lemon",
+                 "amber", "berry", "forest", "graphite", "cobalt", "azure", "emerald", "ruby", "jade", "peach", "cream", "ivory", "steel", "storm"}
 
 
-def _plausible_font(family: str, sent: str, brand: Optional[str], start: int, end: int) -> bool:
+def _plausible_font(family: str, sent: str, brand: Optional[str], start: int, end: int, page_has_font_word: bool = False) -> bool:
     low = family.lower()
     if low in _NOT_FONTS or (brand and low == brand.lower()) or len(family) < 3:
         return False
-    if _FONT_HINT.search(family):
+    if _FONT_HINT.search(family) and len(family.split()) >= 2:  # «Golos Text» — да, одинокое «Text» или «Display» — нет
         return True
     if low in _KNOWN_FONTS or any(low.startswith(k + " ") for k in _KNOWN_FONTS):
         return True
     if _FONT_WORD.search(sent) and len(family.split()) >= 2:
         return True
-    # одно слово, которого нет в списке известных («Poppins»): название, если стоит сразу после метки шрифта или перед ней
-    if len(family.split()) == 1 and low not in _NOT_FONT_WORDS and family.isalpha() and family[0].isupper():
+    # одно слово, которого нет в списке известных («Poppins»): нужны слова про шрифт — в предложении, на странице или
+    # глагол «используйте …» с ролью («Для заголовков используйте Evolventa»); название цвета («Navy») шрифтом не считается
+    if (len(family.split()) == 1 and family.isalpha() and family[0].isupper() and low not in _NOT_FONT_WORDS and low not in _COLOUR_WORDS
+            and parse_color(low, named=True) is None):
         nxt = _LOWER_WORD_AFTER.match(sent[end:])
         if nxt and nxt.group(1) not in _WORD_OK_AFTER:
             return False  # «Use sparingly» — обычная фраза, а не название
-        return bool(_LABEL_BEFORE.search(sent[max(0, start - 60):start]) or _LABEL_AFTER.match(sent[end:end + 60]))
+        pre = sent[max(0, start - 60):start]
+        if _FONT_WORD_ANY.search(sent):
+            return bool(_LABEL_BEFORE.search(pre) or _LABEL_AFTER.match(sent[end:end + 60]))
+        if (page_has_font_word and _ROLE_LABEL_BEFORE.search(pre)) or _FOR_LABEL_BEFORE.search(pre):
+            return True
+        return bool(_VERB_BEFORE.search(pre) and _FOR_ROLE.search(sent))
     return False
 
 
@@ -365,14 +433,17 @@ def pdf_fonts(text: str, brand: Optional[str] = None) -> tuple[list[FontHit], Op
     используется шрифт …», «… для заголовков»)."""
     hits: list[FontHit] = []
     fallback: Optional[str] = None
+    page_font = bool(_FONT_WORD_ANY.search(text))
     for sent in _font_sentences(text):
-        if _HEX.search(sent) or is_negative(sent):
+        if _HEX.search(sent) or _COLOUR_SENTENCE.search(sent) or is_negative(sent):
             continue
         phrases = []
         for m in _FONT_PHRASE.finditer(sent):
-            fam, w = split_weight(m.group(1))
-            if _plausible_font(fam, sent, brand, m.start(), m.start() + len(fam)):
-                phrases.append((m.start(), m.start() + len(fam), fam, w, m.end()))
+            lead = _LEAD_VERB.match(m.group(1))  # «Use Evolventa» — глагол в начале предложения не часть названия
+            start = m.start() + (lead.end() if lead else 0)
+            fam, w = split_weight(m.group(1)[lead.end():] if lead else m.group(1))
+            if _plausible_font(fam, sent, brand, start, start + len(fam), page_font):
+                phrases.append((start, start + len(fam), fam, w, m.end()))
         if not phrases:
             continue
         fb = _FALLBACK_AT.search(sent)

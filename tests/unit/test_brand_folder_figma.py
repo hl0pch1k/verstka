@@ -13,8 +13,9 @@ from PIL import Image
 import verstka.brand.folder as folder_mod
 from verstka.brand.common import BrandReadError
 from verstka.brand.figma import figma_key, is_figma_url, normalize_url, read_figma_url
-from verstka.brand.folder import logo_variant_of, rasterize_svg
+from verstka.brand.folder import _studio_data, logo_variant_of, rasterize_svg
 from verstka.brand.read import read_brandbook
+import verstka.brand.svg_raster as svg_raster_mod
 from verstka.brand.svg_raster import render_svg
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -284,3 +285,108 @@ def test_figma_variables_export_names_are_not_role_words():
     assert [(c.hex, c.role, c.name) for c in spec.colors] == [("#0077FF", "primary", None), ("#0A121F", "text", None)]
     spec = read_figma_url(f"https://www.figma.com/design/{KEY}/x", token="t", client=_client([], variables=VARIABLES))
     assert {c.hex: c.name for c in spec.colors}["#0B1220"] is None  # «Default» — не имя цвета
+
+
+# ---- повторное ревью: Tokens Studio — только наборы из tokenSetOrder --------------------------------------------------------------------------------
+def test_only_the_sets_listed_in_token_set_order_are_merged(tmp_path):
+    root = tmp_path / "tokens"
+    shutil.copytree(FIX / "ts-multi", root)
+    (root / "extra").mkdir()
+    (root / "extra" / "brand-extra.json").write_text('{"color": {"primary": {"value": "#123456", "type": "color"}}}', encoding="utf-8")
+    (root / "notes.json").write_text('{"version": 3}', encoding="utf-8")
+    files = sorted(p for p in root.rglob("*") if p.is_file())
+    data, consumed, warnings = _studio_data(root, files)
+    assert list(data) == ["global", "semantic", "$themes", "$metadata"] and warnings == []
+    assert data["$metadata"]["tokenSetOrder"] == ["global", "semantic"]
+    assert root / "extra" / "brand-extra.json" not in consumed and root / "notes.json" not in consumed
+    assert root / "$themes.json" in consumed and root / "global.json" in consumed
+    # без tokenSetOrder берутся все файлы папки по алфавиту
+    (root / "$metadata.json").unlink()
+    files = sorted(p for p in root.rglob("*") if p.is_file())
+    data, consumed, _ = _studio_data(root, files)
+    assert list(data)[:4] == ["extra/brand-extra", "global", "notes", "semantic"] and root / "notes.json" in consumed
+    # папка целиком читается по перечисленным наборам: чужой файл рядом цветов темы не меняет и не сливается с ней
+    (root / "$metadata.json").write_text('{"tokenSetOrder": ["global", "semantic"]}', encoding="utf-8")
+    spec = read_brandbook(root)
+    assert _roles(spec) == {"#0055FF": "primary", "#111111": "text", "#FFFFFF": "background", "#FF6A00": "accent"}
+    assert any("notes.json" in w for w in spec.warnings)  # посторонний файл прочитан сам по себе (в нём нет токенов)
+
+
+# ---- повторное ревью: встроенный растеризатор отказывается, а не рисует неверно -----------------------------------------------------------------------
+def _render(tmp_path: Path, body: str, vb: str = "0 0 100 100", root_attrs: str = ""):
+    path = tmp_path / "t.svg"
+    path.write_text(f'<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="{vb}" {root_attrs}>{body}</svg>', encoding="utf-8")
+    return render_svg(path, 100)
+
+
+REFUSED = {
+    "clip-path attribute": '<defs><clipPath id="c"><circle cx="50" cy="50" r="20"/></clipPath></defs><rect width="100" height="100" fill="#0044CC" clip-path="url(#c)"/>',
+    "clip-path on a group": '<defs><clipPath id="c"><circle cx="50" cy="50" r="20"/></clipPath></defs><g clip-path="url(#c)"><rect width="100" height="100" fill="#0044CC"/></g>',
+    "clip-path in style": '<defs><clipPath id="c"><circle cx="50" cy="50" r="20"/></clipPath></defs><rect width="100" height="100" fill="#0044CC" style="clip-path:url(#c)"/>',
+    "clip-path in a stylesheet": '<defs><style>.k{clip-path:url(#c)}</style><clipPath id="c"><circle cx="50" cy="50" r="20"/></clipPath></defs><rect class="k" width="100" height="100"/>',
+    "mask": '<defs><mask id="m"><circle cx="50" cy="50" r="20" fill="white"/></mask></defs><rect width="100" height="100" fill="#0044CC" mask="url(#m)"/>',
+    "filter attribute": '<defs><filter id="f"><feGaussianBlur stdDeviation="5"/></filter></defs><rect width="100" height="100" fill="#000" filter="url(#f)"/>',
+    "filter in style": '<defs><filter id="f"><feGaussianBlur stdDeviation="5"/></filter></defs><rect width="100" height="100" fill="#000" style="filter:url(#f)"/>',
+    "use": '<defs><rect id="p" width="100" height="100"/></defs><rect width="20" height="20" fill="#f00"/><use xlink:href="#p" fill="#00f"/>',
+    "nested svg with x and y": '<svg x="50" y="50"><rect width="10" height="10" fill="#000"/></svg>',
+    "nested svg with a size": '<svg width="50" height="50" viewBox="0 0 10 10"><rect width="10" height="10" fill="#000"/></svg>',
+    "nested svg with only a viewBox": '<svg viewBox="0 0 10 10"><rect width="10" height="10" fill="#000"/></svg>',
+    "fill and stroke": '<rect x="20" y="20" width="60" height="60" fill="#fff" stroke="#000" stroke-width="20"/>',
+    "stroke without fill": '<path fill="none" stroke="#000" d="M0 0L50 50"/>',
+    "stroke from the group": '<g stroke="#000" stroke-width="4"><rect width="50" height="50" fill="#0044CC"/></g>',
+    "stroke in style": '<rect width="50" height="50" fill="#0044CC" style="stroke:#000;stroke-width:3"/>',
+    "line": '<line x1="0" y1="0" x2="100" y2="100" stroke="#000"/>',
+    "text": '<text x="0" y="50">A</text>',
+    "image": '<image width="10" height="10" xlink:href="data:image/png;base64,AAAA"/>',
+    "pattern fill": '<defs><pattern id="p" width="10" height="10" patternUnits="userSpaceOnUse"><rect width="5" height="5" fill="#000"/></pattern></defs><rect width="100" height="100" fill="url(#p)"/>',
+    "unknown fill colour": '<rect width="100" height="100" fill="oklch(0.5 0.2 30)"/>',
+    "broken transform": '<rect width="100" height="100" fill="#000" transform="matrix(1 2 3)"/>',
+}
+
+
+@pytest.mark.parametrize("case", sorted(REFUSED))
+def test_builtin_rasteriser_refuses_what_it_cannot_draw(tmp_path, case):
+    assert _render(tmp_path, REFUSED[case]) is None
+
+
+def test_builtin_rasteriser_refuses_a_root_that_clips_or_strokes_and_a_size_in_percent(tmp_path):
+    assert _render(tmp_path, '<rect width="100" height="100" fill="#000"/>', root_attrs='style="filter:url(#f)"') is None
+    assert _render(tmp_path, '<circle cx="12" cy="12" r="9" stroke="#0044CC" stroke-width="2"/>', "0 0 24 24", 'fill="none"') is None  # иконка Figma: обводка
+    path = tmp_path / "pct.svg"
+    path.write_text('<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%"><rect width="40" height="40"/></svg>', encoding="utf-8")
+    assert render_svg(path, 100) is None
+
+
+def test_builtin_rasteriser_still_draws_what_it_says_it_can(tmp_path):
+    # вложенный svg без размеров и положения, невидимая обводка, группа без эффектов — рисуются
+    assert _render(tmp_path, '<svg><rect width="50" height="50" fill="#0044CC"/></svg>').getpixel((25, 25)) == (0, 68, 204, 255)
+    assert _render(tmp_path, '<rect width="50" height="50" fill="#0044CC" stroke="none"/>').getpixel((25, 25)) == (0, 68, 204, 255)
+    assert _render(tmp_path, '<rect width="50" height="50" fill="#0044CC" stroke="#000" stroke-width="0"/>').getpixel((25, 25)) == (0, 68, 204, 255)
+    assert _render(tmp_path, '<rect width="50" height="50" fill="#0044CC" stroke="#000" stroke-opacity="0"/>').getpixel((25, 25)) == (0, 68, 204, 255)
+    assert _render(tmp_path, '<rect width="50" height="50" fill="#0044CC" clip-path="none" filter="none"/>').getpixel((25, 25)) == (0, 68, 204, 255)
+
+
+def test_the_roots_own_presentation_attributes_are_applied(tmp_path):
+    assert _render(tmp_path, '<rect width="100" height="100"/>', root_attrs='fill="#ffffff"').getpixel((50, 50)) == (255, 255, 255, 255)
+    assert _render(tmp_path, '<rect width="100" height="100" fill="#000"/>', root_attrs='opacity="0.5"').getpixel((50, 50))[3] in range(126, 130)
+    assert _render(tmp_path, '<rect width="100" height="100"/>', root_attrs='fill-opacity=".5"').getpixel((50, 50))[3] in range(126, 130)
+    assert _render(tmp_path, '<rect width="100" height="100"/>', root_attrs='style="fill:#112233"').getpixel((50, 50))[:3] == (17, 34, 51)
+    assert _render(tmp_path, '<rect width="100" height="100"/>', root_attrs='fill="none"') is None  # ничего не нарисовано — не пустая картинка
+    assert _render(tmp_path, '<rect width="100" height="100"/>', root_attrs='display="none"') is None
+
+
+def test_the_docstring_names_everything_the_rasteriser_refuses():
+    doc = " ".join(svg_raster_mod.__doc__.split())
+    for word in ("stroke", "`<line>`", "текст", "`<image>`", "`<use>`", "`clip-path`", "`mask`", "`filter`", "вложенный `<svg>`", "узор"):
+        assert word in doc, word
+
+
+def test_an_svg_the_builtin_rasteriser_refuses_stays_svg_with_a_calm_warning(tmp_path, monkeypatch):
+    monkeypatch.setattr(folder_mod.shutil, "which", lambda name: None)
+    root = tmp_path / "brand" / "logos"
+    _svg(root / "clipped.svg", REFUSED["clip-path attribute"], "0 0 100 100")
+    _svg(root / "ring.svg", REFUSED["fill and stroke"], "0 0 100 100")
+    spec = read_brandbook(tmp_path / "brand", assets_dir=tmp_path / "assets")
+    assert sorted(lg.file for lg in spec.logos) == ["logos/clipped.svg", "logos/ring.svg"]  # неверный PNG не подставлен
+    assert not list((tmp_path / "assets" / "logos").glob("*.png"))
+    assert sum("в PNG не перевёлся" in w for w in spec.warnings) == 2

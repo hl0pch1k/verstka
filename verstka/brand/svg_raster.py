@@ -1,11 +1,17 @@
 """Растр SVG-логотипа без внешних программ: контуры, простые фигуры, заливки, прозрачность, преобразования.
 
 PowerPoint не вставляет SVG-логотип как есть (нужен PNG), а на машине, где работает Verstka, нет ни `rsvg-convert`, ни Inkscape.
-Поэтому для логотипов из папки брендбука здесь есть небольшой растеризатор на Pillow: `<path>` (все команды, дуги), `<rect>`,
-`<circle>`, `<ellipse>`, `<polygon>`, `<polyline>`, группы с `transform`, заливки (`fill`, `fill-opacity`, `opacity`, `fill-rule`),
-стили из атрибута `style` и из `<style>` по классам, градиент заменяется цветом своей средней остановки. Не поддерживаются
-обводки, текст, фильтры и обрезка — такой SVG не растрируется (`render_svg` вернёт None), и вызывающий оставит SVG как есть.
-Внешний `rsvg-convert` или Inkscape, если они есть, точнее: `rasterize_svg` в `folder.py` пробует их первыми."""
+Поэтому для логотипов из папки брендбука здесь есть небольшой растеризатор на Pillow.
+
+Умеет: `<path>` (все команды, дуги), `<rect>`, `<circle>`, `<ellipse>`, `<polygon>`, `<polyline>`, группы с `transform`, заливки
+(`fill`, `fill-opacity`, `opacity`, `fill-rule`), свойства корневого `<svg>` (например `fill="none"`, `opacity`), стили из атрибута
+`style` и из `<style>` по классам; градиент заменяется цветом своей средней остановки.
+
+Не умеет — и тогда `render_svg` возвращает None, а не рисует неверно (вызывающий оставит SVG как есть и скажет об этом):
+обводка (`stroke` с видимой шириной), `<line>`, текст, `<image>`, `<foreignObject>`, `<switch>`, `<use>`, обрезка `clip-path`, маска
+`mask`, фильтр `filter` (атрибутом, в `style` или в `<style>`), вложенный `<svg>` с `x`, `y`, `width`, `height` или `viewBox`,
+заливка узором или цветом, которого не понять. Внешний `rsvg-convert` или Inkscape, если они есть, точнее: `rasterize_svg` в
+`folder.py` пробует их первыми."""
 
 from __future__ import annotations
 
@@ -20,7 +26,10 @@ from verstka.brand.common import parse_color
 
 _NUM = r"[-+]?(?:\d*\.\d+|\d+\.?)(?:[eE][-+]?\d+)?"
 _SKIP_TAGS = {"defs", "clippath", "mask", "symbol", "title", "desc", "metadata", "style", "script", "filter", "pattern", "marker", "lineargradient",
-              "radialgradient", "text", "tspan", "image", "foreignobject", "switch"}
+              "radialgradient", "text", "tspan", "image", "foreignobject", "switch", "use", "line"}
+# всё это растеризатор не рисует — файл с таким тегом не растрируется (остальные теги из _SKIP_TAGS — определения и служебные)
+_REFUSED_TAGS = {"text", "tspan", "image", "foreignobject", "switch", "use", "line"}
+_EFFECTS = ("clip-path", "mask", "filter")
 Matrix = tuple[float, float, float, float, float, float]
 _IDENTITY: Matrix = (1, 0, 0, 1, 0, 0)
 
@@ -53,7 +62,7 @@ def _transform(text: str) -> Matrix:
         elif name == "skewy" and v:
             n = (1, math.tan(math.radians(v[0])), 0, 1, 0, 0)
         else:
-            continue
+            raise ValueError(f"transform {name}")  # непонятное преобразование — файл не растрируется, а не рисуется без него
         m = _mul(m, n)
     return m
 
@@ -228,7 +237,7 @@ def _css_rules(root) -> dict[str, dict[str, str]]:
     return rules
 
 
-_INHERITED = ("fill", "fill-opacity", "fill-rule", "stroke")
+_INHERITED = ("fill", "fill-opacity", "fill-rule", "stroke", "stroke-width", "stroke-opacity")
 
 
 def _style_of(el, parent: dict[str, str], rules: dict[str, dict[str, str]]) -> dict[str, str]:
@@ -240,7 +249,7 @@ def _style_of(el, parent: dict[str, str], rules: dict[str, dict[str, str]]) -> d
         props.update(rules.get("." + cls, {}))
     if el.get("id"):
         props.update(rules.get("#" + el.get("id"), {}))
-    for k in ("fill", "fill-opacity", "fill-rule", "opacity", "display", "visibility", "stroke"):
+    for k in ("fill", "fill-opacity", "fill-rule", "opacity", "display", "visibility", "stroke", "stroke-width", "stroke-opacity", *_EFFECTS):
         if el.get(k) is not None:
             st[k] = el.get(k).strip()
     st.update(props)
@@ -319,7 +328,7 @@ class _Unsupported(Exception):
 
 def render_svg(path: Path | str, height: int = 480, *, max_width: int = 4000) -> Optional[Image.Image]:
     """SVG-файл → RGBA-картинка высотой `height` (прозрачный фон, сглаживание 4×) или None, если файл не прочитан или в нём
-    есть то, чего растеризатор не умеет (обводки без заливки, текст, картинки)."""
+    есть то, чего растеризатор не умеет (список — в описании модуля)."""
     from lxml import etree
 
     try:
@@ -332,6 +341,8 @@ def render_svg(path: Path | str, height: int = 480, *, max_width: int = 4000) ->
     if len(vb) == 4 and vb[2] > 0 and vb[3] > 0:
         minx, miny, vw, vh = vb
     else:
+        if "%" in (root.get("width") or "") + (root.get("height") or ""):
+            return None  # размер в процентах без viewBox — холста нет
         vw, vh, minx, miny = _f(root, "width", 100.0), _f(root, "height", 100.0), 0.0, 0.0
     if vw <= 0 or vh <= 0:
         return None
@@ -353,11 +364,18 @@ def render_svg(path: Path | str, height: int = 480, *, max_width: int = 4000) ->
             return
         tag = el.tag.split("}")[-1].lower()
         if tag in _SKIP_TAGS:
-            if tag in ("text", "image"):
+            if tag in _REFUSED_TAGS:
                 raise _Unsupported(tag)
             return
         st = _style_of(el, parent_style, rules)
-        if st.get("display") == "none" or st.get("visibility") == "hidden":
+        if st.get("display") == "none":
+            return
+        for effect in _EFFECTS:  # обрезка, маска и фильтр меняют вид логотипа — растеризатор их не применяет
+            if st.get(effect, "none").strip().lower() not in ("none", ""):
+                raise _Unsupported(effect)
+        if tag == "svg" and el is not root and any(el.get(a) is not None for a in ("x", "y", "width", "height", "viewBox")):
+            raise _Unsupported("вложенный svg")
+        if st.get("visibility") == "hidden" and tag not in ("g", "svg", "a"):
             return
         m2 = _mul(m, _transform(el.get("transform") or ""))
         own = st.get("opacity")
@@ -374,14 +392,22 @@ def render_svg(path: Path | str, height: int = 480, *, max_width: int = 4000) ->
         subs = _shape(el)
         if subs is None:
             return
-        fill = st.get("fill", "#000000")
-        if fill.lower() == "none":
-            if st.get("stroke", "none").lower() not in ("none", ""):
-                raise _Unsupported("stroke")
+        if st.get("stroke", "none").strip().lower() not in ("none", "", "transparent"):
+            try:
+                visible = float(re.match(_NUM, st.get("stroke-width", "1")).group(0)) != 0 and float(re.match(_NUM, st.get("stroke-opacity", "1")).group(0)) != 0
+            except (AttributeError, ValueError):
+                visible = True
+            if visible:
+                raise _Unsupported("stroke")  # обводку растеризатор не рисует: без неё контур другой
+        fill = st.get("fill", "#000000").strip()
+        if fill.lower() in ("none", "transparent"):
             return
-        colour = _gradient_colour(root, fill) if fill.lower().startswith("url(") else parse_color(fill if fill.lower() != "currentcolor" else "#000000", named=True)
+        if fill.lower().startswith("url("):
+            colour = _gradient_colour(root, fill)
+        else:
+            colour = parse_color("#000000" if fill.lower() == "currentcolor" else fill, named=True)
         if colour is None:
-            return
+            raise _Unsupported("заливка")  # узор или цвет, которого не понять
         try:
             alpha = float(st.get("fill-opacity", "1").rstrip("%")) * opacity
         except ValueError:
@@ -419,9 +445,8 @@ def render_svg(path: Path | str, height: int = 480, *, max_width: int = 4000) ->
         drawn += 1
 
     try:
-        root_style = {"fill": "#000000", "fill-opacity": "1", "fill-rule": "nonzero"}
-        for ch in root:
-            draw(ch, base, root_style, 1.0)
+        # свойства самого корня («<svg fill="none">» у иконок Figma, opacity, transform) действуют на всё содержимое
+        draw(root, base, {"fill": "#000000", "fill-opacity": "1", "fill-rule": "nonzero"}, 1.0)
     except (_Unsupported, ValueError, IndexError, ZeroDivisionError, OverflowError):
         return None
     if not drawn or canvas.getchannel("A").getbbox() is None:

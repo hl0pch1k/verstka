@@ -65,7 +65,7 @@ _FONT_PATH = re.compile(r"(?<![a-z])(fonts?|typefaces?|typography|fontfamil\w*)(
 _NOT_FAMILY_PATH = re.compile(r"(?<![a-z])(size|weight|style|decoration|transform|spacing|height|case|align|variant|stretch|feature)s?$")
 _NOT_FAMILY_VALUES = {"italic", "normal", "oblique", "uppercase", "lowercase", "capitalize", "none", "underline", "bold", "regular", "medium", "light", "inherit", "initial"}
 _PLURAL_FONT_GROUP = re.compile(r"(?<![a-z])(fonts|typefaces|families|fontfamilies|font families|шрифты|гарнитуры)$")
-_DARK_THEME = re.compile(r"dark|night|тёмн|темн", re.I)
+_DARK_THEME = re.compile(r"(?<![a-zа-яё])(?:dark|night|тёмн\w*|темн\w*)(?![a-zа-яё])", re.I)
 _FALLBACK_WORDS = re.compile(r"(?<![a-zа-яё])(fallback|substitute|запасн\w*|замен\w*|резервн\w*)(?![a-zа-яё])")
 _MARGIN_PATH = re.compile(r"(?<![a-zа-яё])(margins?|safe area|page padding|slide padding|slide margin|пол[яе]|отступ\w*)(?![a-zа-яё])")
 _COLUMNS_PATH = re.compile(r"(?<![a-z])(columns?|cols?|колон\w*)(?![a-z])")
@@ -326,12 +326,12 @@ def _chroma(hex_: str) -> float:
     return (max(r, g, b) - min(r, g, b)) / 255
 
 
-def _active_sets(data: Any) -> Optional[set[str]]:
+def _active_sets(data: Any) -> tuple[Optional[set[str]], str, int]:
     """Наборы токенов темы Tokens Studio, которые читаются: первая тема (светлая раньше тёмной), в которой есть наборы со
-    статусом source или enabled. Нет тем — None (читаются все наборы)."""
+    статусом source или enabled; её название и число таких тем. Нет тем — (None, "", 0): читаются все наборы."""
     themes = data.get("$themes") if isinstance(data, dict) else None
     if not isinstance(themes, list):
-        return None
+        return None, "", 0
     cands: list[tuple[str, set[str]]] = []
     for th in themes:
         sel = th.get("selectedTokenSets") if isinstance(th, dict) else None
@@ -340,8 +340,9 @@ def _active_sets(data: Any) -> Optional[set[str]]:
             if on:
                 cands.append((str(th.get("name") or ""), on))
     if not cands:
-        return None
-    return next((on for name, on in cands if not _DARK_THEME.search(name)), cands[0][1])
+        return None, "", 0
+    name, on = next((c for c in cands if not _DARK_THEME.search(c[0])), cands[0])
+    return on, name, len(cands)
 
 
 def _unreadable(items: list[str]) -> str:
@@ -360,6 +361,7 @@ def spec_from_tokens(data: Any, *, file: Optional[str] = None, source: str = "to
     sets: set[str] = set()
     order: list[str] = []
     active: Optional[set[str]] = None
+    theme_name, n_themes = "", 0
     if isinstance(data, dict):
         meta = data.get("$metadata")
         if isinstance(meta, dict) and isinstance(meta.get("tokenSetOrder"), list):
@@ -369,13 +371,16 @@ def spec_from_tokens(data: Any, *, file: Optional[str] = None, source: str = "to
             order = [k for k in data if not str(k).startswith("$")]
             sets = set(order)
         if sets:
-            active = _active_sets(data)  # у Tokens Studio читается одна тема, а не все наборы подряд (тёмный набор — не основной)
+            # у Tokens Studio читается одна тема, а не все наборы подряд (тёмный набор — не основной)
+            active, theme_name, n_themes = _active_sets(data)
     tokens = flatten(data)
     if not tokens:
         raise BrandReadError("В JSON не нашёл токенов дизайна. Подойдут W3C Design Tokens, экспорт Tokens Studio или переменных Figma.")
     idx = _index(tokens, sets, active, order)
     warnings: list[str] = []
     unreadable: list[str] = []
+    if n_themes > 1:
+        warnings.append(f"В файле несколько тем — прочитана «{theme_name or 'первая'}».")
 
     semantic: list[ColorHit] = []
     primitive: list[ColorHit] = []

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import yaml
 from PIL import Image
 
@@ -27,7 +28,7 @@ def test_sample_key_figures_slide_has_no_empty_lower_third():
     with Image.open(SAMPLE / "slides" / "03-pokazateli.png") as im:
         assert im.size == (1920, 1080)
         lower = im.convert("RGB").crop((0, 720, 1920, 980))
-    inked = sum(1 for p in lower.getdata() if min(p) < 235)
+    inked = int((np.asarray(lower).min(axis=2) < 235).sum())
     assert inked / (lower.width * lower.height) > 0.10  # полоса «Выручка по кварталам» занимает нижнюю треть
     # слайд по-прежнему читается как фирменный: цвета палитры на месте
     spec = read_brandbook(SAMPLE / "slides" / "03-pokazateli.png")

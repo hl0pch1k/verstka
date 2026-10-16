@@ -163,3 +163,22 @@ def test_flat_file_with_brand_colours_dark_and_light_keeps_text_and_background()
                                         "primary": {"$value": "{color.blue.500}"}}})
     assert _roles(spec) == {"#0077FF": "primary"}
 
+
+
+def test_a_theme_is_dark_only_by_a_whole_word_and_the_reader_says_which_theme_it_read():
+    sets = {"a": {"color": {"primary": {"value": "#0055FF", "type": "color"}}}, "b": {"color": {"primary": {"value": "#4488FF", "type": "color"}}}}
+    themes = [{"name": "Nightingale", "selectedTokenSets": {"a": "enabled"}}, {"name": "Dark mode", "selectedTokenSets": {"b": "enabled"}}]
+    spec = spec_from_tokens({**sets, "$themes": themes, "$metadata": {"tokenSetOrder": ["a", "b"]}})
+    assert _roles(spec) == {"#0055FF": "primary"}  # «Nightingale» — не тёмная, «Dark mode» — тёмная
+    assert "В файле несколько тем — прочитана «Nightingale»." in spec.warnings
+    spec = spec_from_tokens({**sets, "$themes": themes[::-1], "$metadata": {"tokenSetOrder": ["a", "b"]}})
+    assert _roles(spec) == {"#0055FF": "primary"} and any("прочитана «Nightingale»" in w for w in spec.warnings)
+    for name in ("Darkroom", "Midnightly", "Тёмная", "Night"):
+        only = {**sets, "$themes": [{"name": name, "selectedTokenSets": {"b": "enabled"}}, {"name": "Light", "selectedTokenSets": {"a": "enabled"}}],
+                "$metadata": {"tokenSetOrder": ["a", "b"]}}
+        read = _roles(spec_from_tokens(only))
+        assert read == ({"#0055FF": "primary"} if name in ("Тёмная", "Night") else {"#4488FF": "primary"}), name
+    spec = _read("ts_sets.json")  # Light и Dark
+    assert "В файле несколько тем — прочитана «Light»." in spec.warnings
+    one = spec_from_tokens({**sets, "$themes": themes[:1], "$metadata": {"tokenSetOrder": ["a", "b"]}})
+    assert not any("несколько тем" in w for w in one.warnings)  # одна тема — молчим
