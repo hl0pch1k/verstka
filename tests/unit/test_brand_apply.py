@@ -22,8 +22,13 @@ from pptx.enum.shapes import MSO_SHAPE
 from pptx.util import Emu, Pt
 
 import verstka.brand.apply as ap
+import verstka.brand.logos as lg
+import verstka.brand.palette as pal
+from verstka.schemas.common import contrast_ratio
+from lxml import etree
 from verstka.analysis.manifest import analyze_template
-from verstka.brand.apply import ColorPlan, apply_brand, brand_fingerprint, branded_info, branded_template, plan_colors, theme_info, tone
+from verstka.brand.apply import apply_brand, brand_fingerprint, branded_info, branded_template
+from verstka.brand.palette import ColorPlan, plan_colors, theme_info, tone
 from verstka.brand.conflicts import brand_conflicts
 from verstka.ingest.workspace import TemplateWorkspace
 from verstka.schemas.brand import BrandColor, BrandFont, BrandLogo, BrandSpec
@@ -225,11 +230,12 @@ def test_explicit_colors_mapped_by_role(synthetic, fonts_here, tmp_path):
     assert res.colors["#1F6FEB"] == "#0077FF"
     assert res.colors["#1F2937"] == "#0B1220"
     assert res.colors["#F7F7F7"] == "#FFFFFF"
-    # второй акцент (тёплый оранжевый) — к ближайшему по тону цвету бренда: тёплому розовому, не к синим
-    assert res.colors["#E8590C"] == "#FF3985"
+    # второй акцент (оранжевый): близкого тона у бренда нет (розовый «акцент» — только для близкого выделения) — по
+    # порядку ролей, дополнительный цвет бренда
+    assert res.colors["#E8590C"] == "#2787F5"
     # светлая плашка — тот же светлый оттенок, только в тоне бренда
     tint = res.colors.get("#DCE8FD", "#DCE8FD").lstrip("#")
-    assert tone(tint) in ("tint", "light") and ap._hls(tint)[1] > 0.85
+    assert tone(tint) in ("tint", "light") and pal.hls(tint)[1] > 0.85
     # белые цифры на синей плашке остаются белыми: контраст не ломается
     assert "FFFFFF" in hx
     # диаграмма: заливка серии тоже в цветах бренда
@@ -241,8 +247,8 @@ def test_theme_colors_and_fonts_rewritten(synthetic, fonts_here, tmp_path):
     src, m, bdir = synthetic
     out = tmp_path / "branded.pptx"
     apply_brand(src, out, _brand(), manifest=m, brand_dir=bdir)
-    before = theme_info(ap.etree.fromstring(_parts(src, r"ppt/theme/theme1\.xml$")["ppt/theme/theme1.xml"].encode()))
-    after = theme_info(ap.etree.fromstring(_parts(out, r"ppt/theme/theme1\.xml$")["ppt/theme/theme1.xml"].encode()))
+    before = theme_info(etree.fromstring(_parts(src, r"ppt/theme/theme1\.xml$")["ppt/theme/theme1.xml"].encode()))
+    after = theme_info(etree.fromstring(_parts(out, r"ppt/theme/theme1\.xml$")["ppt/theme/theme1.xml"].encode()))
     assert before.stock  # стандартная тема python-pptx: её акценты занимает бренд по порядку
     assert after.slots["accent1"] == "0077FF"
     assert after.slots["accent2"] == "2787F5"
@@ -256,9 +262,10 @@ def test_fonts_rewritten_by_role(synthetic, fonts_here, tmp_path):
     res = apply_brand(src, out, _brand(), manifest=m, brand_dir=bdir)
     slides = _all(out, r"ppt/slides/slide\d+\.xml$")
     assert "Georgia" not in slides and "Verdana" not in slides
-    # заголовок (36 пт) — шрифтом заголовков и полужирным (вес бренда 700), текст 14 пт — шрифтом текста
+    # заголовок (36 пт) — шрифтом заголовков, текст 14 пт — шрифтом текста; начертание — как у шаблона (полужирный
+    # не навязывается: подбор кегля образцов шаблона не меняется)
     title = re.search(r'<a:rPr[^>]*sz="3600"[^>]*>.*?</a:rPr>', slides, re.S).group(0)
-    assert 'typeface="Brand Display"' in title and 'b="1"' in title
+    assert 'typeface="Brand Display"' in title and 'b="1"' not in title
     body = re.search(r'<a:rPr[^>]*sz="1400"[^>]*>.*?</a:rPr>', slides, re.S).group(0)
     assert 'typeface="Brand Text"' in body and 'b="1"' not in body
     # мастера, макеты и диаграммы
@@ -302,7 +309,7 @@ def test_blip_recolor_kept():
         '<p:pic><p:blipFill><a:blip r:embed="rId2"><a:duotone><a:srgbClr val="1F6FEB"/><a:srgbClr val="FFFFFF"/></a:duotone></a:blip></p:blipFill>'
         '<p:spPr><a:ln><a:solidFill><a:srgbClr val="1F6FEB"/></a:solidFill></a:ln></p:spPr></p:pic></p:spTree></p:cSld></p:sld>'
     )
-    root = ap.etree.fromstring(xml.encode())
+    root = etree.fromstring(xml.encode())
     plan = ColorPlan(table={"1F6FEB": "0077FF"})
     from collections import Counter
 
@@ -362,8 +369,9 @@ def test_dark_ground_gets_white_logo(tmp_path, fonts_here):
     assert res.logos_replaced == 3
     media = [n for n in zipfile.ZipFile(out).namelist() if n.startswith("ppt/media/brand-logo-")]
     assert media and all("white" in n for n in media)
-    # тёмный фон шаблона брендбук со светлым фоном не переворачивает
-    assert "101828" in _hexes(_all(out, r"ppt/slides/slide\d+\.xml$"))
+    # тёмный фон шаблона брендбук со светлым фоном не переворачивает: та же светлота, оттенок — нейтральных бренда
+    grounds = [h for h in _hexes(_all(out, r"ppt/slides/slide\d+\.xml$")) if h != "FFFFFF"]
+    assert grounds and all(abs(pal.lightness(h) - pal.lightness("101828")) < 1.5 for h in grounds)
 
 
 def test_no_template_logo_brand_rule_adds_logo(tmp_path, fonts_here):
@@ -398,7 +406,7 @@ def test_added_logo_skips_covered_corner(tmp_path, fonts_here):
     m = _analyze(src, tmp_path / "ws")
     res = apply_brand(src, tmp_path / "out.pptx", _brand(), manifest=m, brand_dir=_brand_dir(tmp_path))
     assert res.logos_added == 0
-    assert any("угол занят" in w for w in res.warnings)
+    assert any("нет свободного места" in w and "2 слайда" in w for w in res.warnings)  # содержательных образцов — два
     assert "Логотип Облако" not in _all(tmp_path / "out.pptx", r"ppt/(slides|slideLayouts)/.*\.xml$")
 
 
@@ -438,7 +446,7 @@ def test_priority_template_only_fills_gaps(synthetic, fonts_here, tmp_path):
     assert "Georgia" in slides and "Verdana" in slides
     assert 'b="1"' not in re.search(r'<a:rPr[^>]*sz="3600"[^>]*>', slides).group(0)
     assert res.logos_replaced == 0 and "Логотип ACME" in slides
-    theme = theme_info(ap.etree.fromstring(_parts(out, r"ppt/theme/theme1\.xml$")["ppt/theme/theme1.xml"].encode()))
+    theme = theme_info(etree.fromstring(_parts(out, r"ppt/theme/theme1\.xml$")["ppt/theme/theme1.xml"].encode()))
     assert theme.slots["accent1"] == "0077FF"  # стандартная тема — пустое место
     assert theme.major == "Brand Display"  # Calibri темы — шрифт по умолчанию, не свой у шаблона
     assert theme.slots["dk1"] == "000000"
@@ -461,14 +469,14 @@ def test_priority_brand_vs_template_on_real_template(tmp_path, fonts_here):
     vis = _all(out, r"ppt/(slides|slideLayouts|slideMasters)/.*\.xml$")
     assert not {"04617B", "009EDA"} & _hexes(vis)
     assert 'typeface="Noto Sans"' not in vis and re.search(r'typeface="Brand (Display|Text)"', vis)
-    theme = theme_info(ap.etree.fromstring(_parts(out, r"ppt/theme/theme1\.xml$")["ppt/theme/theme1.xml"].encode()))
+    theme = theme_info(etree.fromstring(_parts(out, r"ppt/theme/theme1\.xml$")["ppt/theme/theme1.xml"].encode()))
     assert theme.slots["accent1"] == "0077FF" and theme.major == "Brand Display"
     # разбор копии: акценты — цвета бренда или их оттенки (заливки шаблона с модификаторами яркости)
     bid = branded_template(m.template_id, brand, "brand", workspace_root=ws, brand_dir=bdir, render=False)
     copy = TemplateManifest.model_validate_json((ws / "templates" / bid / "manifest.json").read_text(encoding="utf-8"))
     acc = [t.hex for t in copy.tokens.colors if (t.role or "").startswith("accent.")]
     assert acc and {"0077FF", "2787F5"} <= set(acc)
-    assert all(min(ap._hue_dist(ap._hue(a), ap._hue(b[1:])) for b in chrom) <= 25 for a in acc)
+    assert all(min(pal.hue_dist(pal.hue(a), pal.hue(b[1:])) for b in chrom) <= 25 for a in acc)
     assert not {"1A82BF", "009EDA", "04617B"} & {t.hex for t in copy.tokens.colors}
     assert {f.family for f in copy.tokens.typography.families} & {"Brand Display", "Brand Text"}
     # шаблон важнее: свои цвета и Noto Sans остаются
@@ -575,6 +583,13 @@ def test_conflicts_vk_tech_and_vk_cloud_as_in_scenario(monkeypatch):
     src = FIX / "vktech_short.pptx"  # колода на шаблоне VK Tech: его тема и макеты
     got = brand_conflicts(m, brand, source=src, brand_dir=BRAND_EXAMPLE)
     by = {c.what: c for c in got}
+    # ровно четыре строки, как принял контроллер
+    assert [(c.what, c.template, c.brand, c.result) for c in got] == [
+        ("Шрифт заголовков", "Play", "VK Sans Display", "VK Sans Display, замена — Play"),
+        ("Шрифт текста", "Play", "VK Sans Text", "VK Sans Text, замена — Play"),
+        ("Второй акцент", "#FF3885", "#FF3985", "#FF3985"),
+        ("Логотип", "логотип шаблона", "логотип VK Cloud", "логотип VK Cloud"),
+    ]
     head = by["Шрифт заголовков"]
     assert (head.template, head.brand, head.result, head.kind) == ("Play", "VK Sans Display", "VK Sans Display, замена — Play", "font")
     acc = by["Второй акцент"]
@@ -602,3 +617,294 @@ def test_conflicts_without_template_file():
     got = brand_conflicts(_vk_manifest(), _brand(), workspace_root="/nonexistent")
     assert any(c.what == "Шрифт заголовков" for c in got)
     assert all(c.what and c.template and c.brand and c.result for c in got)
+
+
+# ============================================================================================== правки после ревью
+# «брендбук важнее шаблона — на любом шаблоне»: красный, коричневый, оливковый шаблоны; контраст; место логотипа
+
+
+def _zip_put(path: Path, parts: dict[str, bytes]) -> None:
+    import io as _io
+
+    buf = _io.BytesIO()
+    with zipfile.ZipFile(path) as zin, zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zout:
+        for item in zin.infolist():
+            zout.writestr(item, parts.pop(item.filename, None) or zin.read(item))
+        for name, data in parts.items():
+            zout.writestr(name, data)
+    path.write_bytes(buf.getvalue())
+
+
+def _set_theme(path: Path, slots: dict[str, str]) -> None:
+    with zipfile.ZipFile(path) as z:
+        xml = z.read("ppt/theme/theme1.xml").decode("utf-8")
+    for slot, hexv in slots.items():
+        xml = re.sub(rf"<a:{slot}>.*?</a:{slot}>", f'<a:{slot}><a:srgbClr val="{hexv}"/></a:{slot}>', xml, flags=re.S)
+    _zip_put(path, {"ppt/theme/theme1.xml": xml.encode("utf-8")})
+
+
+def build_custom(tmp: Path, name: str, *, bg: str, text: str, cards: list[tuple[str, str]], theme: dict[str, str] | None = None,
+                 n: int = 4, footer: bool = False, bg_picture: str | None = None, logos: list[tuple[str, float]] | None = None,
+                 card_size: float = 14) -> Path:
+    """Шаблон из `n` слайдов: фон `bg`, заголовок цвета `text`, карточки (заливка, цвет текста на ней), по желанию —
+    текст колонтитула в правом нижнем углу, фоновая картинка во весь слайд, логотипы (имя, x) внизу."""
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Emu(W), Emu(H)
+    logo_png = _logo_png(tmp / "src" / f"{name}-logo.png", (31, 111, 235, 255), (31, 41, 55, 255))
+    pic_png = None
+    if bg_picture:
+        pic_png = tmp / "src" / f"{name}-bg.png"
+        Image.new("RGB", (160, 90), tuple(int(bg_picture[i:i + 2], 16) for i in (0, 2, 4))).save(pic_png)
+    for i in range(n):
+        s = prs.slides.add_slide(prs.slide_layouts[6])
+        s.background.fill.solid()
+        s.background.fill.fore_color.rgb = RGBColor.from_string(bg)
+        if pic_png:
+            pic = s.shapes.add_picture(str(pic_png), 0, 0, Emu(W), Emu(H))
+            s.shapes._spTree.remove(pic._element)
+            s.shapes._spTree.insert(2, pic._element)
+        _text(s, f"Итоги квартала {i + 1}", int(W * 0.05), int(H * 0.06), int(W * 0.8), int(H * 0.14), "Georgia", 36, text)
+        for k, (fill, ink) in enumerate(cards):
+            sp = _card(s, int(W * (0.05 + 0.31 * k)), fill)
+            tf = sp.text_frame
+            tf.text = "Выручка выросла на 23 % к сентябрю"
+            r = tf.paragraphs[0].runs[0]
+            r.font.size, r.font.name = Pt(card_size), "Verdana"
+            r.font.color.rgb = RGBColor.from_string(ink)
+        if footer:
+            _text(s, f"стр. {i + 1}", int(W * 0.84), int(H * 0.9), int(W * 0.12), int(H * 0.06), "Verdana", 12, text)
+        for lname, lx in logos or []:
+            if lname.endswith("only-first") and i:
+                continue
+            pic = s.shapes.add_picture(str(logo_png), Emu(int(W * lx)), Emu(int(H * 0.9)), height=Emu(int(H * 0.05)))
+            pic.name = lname
+    out = tmp / "src" / f"{name}.pptx"
+    prs.save(out)
+    if theme:
+        _set_theme(out, theme)
+    return out
+
+
+def _vk_cloud():
+    from verstka.brand.read import read_brandbook
+
+    return read_brandbook(BRAND_EXAMPLE)
+
+
+def _hexes_of(pptx: Path) -> set[str]:
+    return _hexes(_all(pptx, r"ppt/(slides|slideLayouts|slideMasters|theme)/.*\.xml$"))
+
+
+def test_red_theme_accent_like_lct_becomes_brand_primary(tmp_path, fonts_missing):
+    """Красный акцент темы (как #FF0053 у ЛЦТ), разбором отмеченный «падением», — фирменный цвет шаблона: его заменяет
+    основной цвет бренда; цвета диаграмм копии начинаются с основного цвета, «акцент» бренда — не первым."""
+    src = build_custom(tmp_path, "red", bg="F3F4F5", text="1C1D22", cards=[("FF0053", "FFFFFF"), ("FF0053", "FFFFFF")],
+                       theme={"accent1": "FF0053", "accent2": "FFD6E3", "accent3": "FC3777", "accent4": "8A83D1", "accent5": "520977",
+                              "accent6": "2D1451", "hlink": "FF0053"}, card_size=24)
+    ws = tmp_path / "ws"
+    m = _analyze(src, ws)
+    for t in m.tokens.colors:
+        if t.hex == "FF0053":
+            t.semantic = "negative"  # как у ЛЦТ: разбор считает красный «падением»
+    TemplateWorkspace.open(m.template_id, ws).manifest_path.write_text(m.model_dump_json(), encoding="utf-8")
+    brand = _vk_cloud()
+    plan = ap.brand_plan(src, m, brand).colors
+    assert plan.map("FF0053") == "0077FF" and "FF0053" not in plan.keep
+    assert plan.map("FC3777") == "FF3985"  # близкий по тону розовый акцент шаблона — «акцент» бренда
+    out = tmp_path / "red-brand.pptx"
+    apply_brand(src, out, brand, manifest=m, brand_dir=BRAND_EXAMPLE)
+    assert "FF0053" not in _hexes_of(out)
+    bid = branded_template(m.template_id, brand, "brand", workspace_root=ws, brand_dir=BRAND_EXAMPLE, render=False)
+    copy = TemplateManifest.model_validate_json((ws / "templates" / bid / "manifest.json").read_text(encoding="utf-8"))
+    series = copy.components.chart_style.series_colors
+    assert series[0] == "0077FF" and series.index("FF3985") > series.index("2787F5") if "FF3985" in series else series[0] == "0077FF"
+    rows = {c.what: c for c in brand_conflicts(m, brand, source=src, brand_dir=BRAND_EXAMPLE)}
+    assert rows["Основной акцент"].template == "#FF0053" and rows["Основной акцент"].result == "#0077FF"
+
+
+def test_dark_olive_like_classic_gets_brand_shade_not_crimson(tmp_path, fonts_missing):
+    """Тёмно-оливковый фон (как #59512B у «Классики») и коричневые — не в розовый «акцент» бренда (#840033): тёмный
+    оттенок основного цвета бренда той же светлоты; коричневые нейтральные — холодные той же светлоты."""
+    src = build_custom(tmp_path, "olive", bg="59512B", text="FFFFFF", cards=[("474134", "FFFFFF"), ("625342", "FFFFFF")],
+                       theme={"accent1": "CEC5A7", "accent2": "59512B", "accent3": "827D57", "accent4": "B6A592", "accent5": "625342",
+                              "accent6": "474134", "dk2": "474134"})
+    m = _analyze(src, tmp_path / "ws")
+    out = tmp_path / "olive-brand.pptx"
+    apply_brand(src, out, _vk_cloud(), manifest=m, brand_dir=BRAND_EXAMPLE)
+    hexes = _hexes_of(out)
+    assert not {"59512B", "474134", "625342", "840033", "FF3985"} & hexes
+    pinkish = [h for h in hexes if pal.chroma(h) > 0.15 and pal.hue_dist(pal.hue(h), 337) <= 40]
+    assert not pinkish
+    plan = ap.brand_plan(src, m, _vk_cloud()).colors
+    olive = plan.map("59512B")
+    assert pal.hue_dist(pal.hue(olive), 212) <= 15 and abs(pal.lightness(olive) - pal.lightness("59512B")) < 2
+    for brown in ("474134", "625342"):
+        cool = plan.map(brown)
+        assert abs(pal.lightness(cool) - pal.lightness(brown)) < 2 and pal.lab(cool)[2] < 0  # холодный (синеватый)
+
+
+def test_brown_like_coffee_theme_accent_and_dark_ground_mapped(tmp_path, fonts_missing):
+    """Коричневый шаблон (как «Кофейня»): акцент темы #913F37 («падение» по разбору) и бордовый фон обложки #6D2F29 —
+    цвета бренда; основной акцент — в расхождениях; чёрный не сдвигается в #00000D."""
+    src = build_custom(tmp_path, "coffee", bg="FFFFFF", text="151513", cards=[("913F37", "FFFFFF"), ("000000", "FFFFFF")],
+                       theme={"accent1": "913F37", "accent2": "72726A", "accent3": "9B9B8F", "accent4": "64514F", "accent5": "9E655B",
+                              "accent6": "A1A088", "dk1": "151513", "dk2": "322924"})
+    prs = Presentation(str(src))
+    cover = prs.slides[0]
+    cover.background.fill.fore_color.rgb = RGBColor.from_string("6D2F29")
+    prs.save(src)
+    m = _analyze(src, tmp_path / "ws")
+    for t in m.tokens.colors:
+        if t.hex == "913F37":
+            t.semantic = "negative"
+    brand = _vk_cloud()
+    plan = ap.brand_plan(src, m, brand).colors
+    assert pal.hue_dist(pal.hue(plan.map("913F37")), 212) <= 15
+    assert pal.hue_dist(pal.hue(plan.map("6D2F29")), 212) <= 15
+    assert plan.map("000000") in ("000000", "0B1220")
+    out = tmp_path / "coffee-brand.pptx"
+    apply_brand(src, out, brand, manifest=m, brand_dir=BRAND_EXAMPLE)
+    assert not {"913F37", "6D2F29", "00000D"} & _hexes_of(out)
+    rows = {c.what: c for c in brand_conflicts(m, brand, source=src, brand_dir=BRAND_EXAMPLE)}
+    assert rows["Основной акцент"].template == "#913F37"
+
+
+def test_kept_main_accent_is_a_conflict(tmp_path, fonts_missing):
+    """Брендбук без фирменных цветов: акцент шаблона остаётся — и это видно в расхождениях, с причиной."""
+    src = build_custom(tmp_path, "keep", bg="FFFFFF", text="1F2937", cards=[("E8590C", "FFFFFF")], theme={"accent1": "E8590C", "accent2": "C2410C", "accent3": "9A3412", "accent4": "FDBA74", "accent5": "7C2D12", "accent6": "FED7AA"})
+    m = _analyze(src, tmp_path / "ws")
+    brand = _brand(colors=[BrandColor(hex="#0B1220", role="text"), BrandColor(hex="#FFFFFF", role="background")])
+    rows = {c.what: c for c in brand_conflicts(m, brand, source=src, brand_dir=_brand_dir(tmp_path))}
+    assert rows["Основной акцент"].result == "#E8590C, как в шаблоне: в брендбуке нет фирменных цветов"
+
+
+def test_white_text_on_purple_card_stays_readable(tmp_path, fonts_missing):
+    """Белый текст на фиолетовой карточке (как #753A93 у ЛЦТ, 7,55 : 1) остаётся ≥ 4,5 : 1: цвет бренда берётся со
+    светлотой карточки шаблона (#0077FF с белым — только 4,1 : 1)."""
+    src = build_custom(tmp_path, "purple", bg="F3F4F5", text="1C1D22", cards=[("753A93", "FFFFFF"), ("753A93", "FFFFFF")],
+                       theme={"accent1": "753A93", "accent2": "976BAE", "accent3": "520977", "accent4": "8A83D1", "accent5": "2D1451", "accent6": "DCCEE4"})
+    m = _analyze(src, tmp_path / "ws")
+    out = tmp_path / "purple-brand.pptx"
+    res = apply_brand(src, out, _vk_cloud(), manifest=m, brand_dir=BRAND_EXAMPLE)
+    card = res.colors["#753A93"].lstrip("#")
+    assert pal.hue_dist(pal.hue(card), 212) <= 15
+    assert contrast_ratio("FFFFFF", card) >= 4.5
+
+
+def test_link_on_light_card_stays_readable(tmp_path, fonts_missing):
+    """Ссылка #0563C1 мелким текстом на #EEF2F7 (5,25 : 1, как «Перейти» у VK Tech) не падает ниже 4,5 : 1."""
+    src = build_custom(tmp_path, "link", bg="FFFFFF", text="000000", cards=[("EEF2F7", "0563C1"), ("0077FF", "FFFFFF")],
+                       theme={"accent1": "0077FF", "accent2": "FFFFFF", "accent3": "FF3885", "accent4": "202020", "accent5": "F7FAFE",
+                              "accent6": "D6ECFF", "hlink": "0563C1"}, card_size=12)
+    m = _analyze(src, tmp_path / "ws")
+    out = tmp_path / "link-brand.pptx"
+    res = apply_brand(src, out, _vk_cloud(), manifest=m, brand_dir=BRAND_EXAMPLE)
+    link = res.colors.get("#0563C1", "#0563C1").lstrip("#")
+    ground = res.colors.get("#EEF2F7", "#EEF2F7").lstrip("#")
+    assert contrast_ratio(link, ground) >= 4.5
+
+
+def _logo_boxes(pptx: Path) -> list[tuple[str, tuple[int, int, int, int]]]:
+    out = []
+    for name, xml in _parts(pptx, r"ppt/(slides|slideLayouts)/.*\.xml$").items():
+        for m in re.finditer(r'name="Логотип [^"]*".*?<a:off x="(\d+)" y="(\d+)"/><a:ext cx="(\d+)" cy="(\d+)"', xml, re.S):
+            out.append((name, tuple(int(v) for v in m.groups())))
+    return out
+
+
+def test_added_logo_avoids_footer_text(tmp_path, fonts_here):
+    """Номер страницы в правом нижнем углу (там, где логотипу место по брендбуку): логотип встаёт рядом, не на текст,
+    или не ставится — со спокойным объяснением."""
+    src = build_custom(tmp_path, "foot", bg="FFFFFF", text="1F2937", cards=[("1F6FEB", "FFFFFF"), ("DCE8FD", "1F2937"), ("1F6FEB", "FFFFFF")], footer=True)
+    m = _analyze(src, tmp_path / "ws")
+    out = tmp_path / "foot-brand.pptx"
+    res = apply_brand(src, out, _brand(), manifest=m, brand_dir=_brand_dir(tmp_path))
+    foot = (int(W * 0.84), int(H * 0.9), int(W * 0.12), int(H * 0.06))
+    boxes = _logo_boxes(out)
+    assert boxes or any("нет свободного места" in w for w in res.warnings)
+    for _, (x, y, cx, cy) in boxes:
+        assert not (x < foot[0] + foot[2] and foot[0] < x + cx and y < foot[1] + foot[3] and foot[1] < y + cy), "логотип на номере страницы"
+        assert y > H * 0.75 and x > W * 0.5  # у того же края и угла
+
+
+def test_added_logo_variant_by_real_ground(tmp_path, fonts_here):
+    """Образцы светлого шаблона, но в углу — тёмная фоновая картинка: логотип встаёт поверх неё белым вариантом."""
+    src = build_custom(tmp_path, "darkpic", bg="FFFFFF", text="1F2937", cards=[("1F6FEB", "FFFFFF")], bg_picture="101828")
+    m = _analyze(src, tmp_path / "ws")
+    out = tmp_path / "darkpic-brand.pptx"
+    res = apply_brand(src, out, _brand(), manifest=m, brand_dir=_brand_dir(tmp_path))
+    assert res.logos_added >= 1
+    media = [n for n in zipfile.ZipFile(out).namelist() if n.startswith("ppt/media/brand-logo-")]
+    assert media and all("white" in n for n in media)
+
+
+def test_replaced_logo_keeps_one_side_and_readable_size(tmp_path, fonts_here):
+    """Два логотипа шаблона (свой слева на всех слайдах, партнёр справа на части) — логотип бренда везде слева, а не
+    то слева, то справа; маленькая рамка — логотип не мельче читаемого."""
+    src = build_custom(tmp_path, "two", bg="FFFFFF", text="1F2937", cards=[("1F6FEB", "FFFFFF")],
+                       logos=[("Logo ACME", 0.04), ("Logo Partner only-first", 0.85)])
+    prs = Presentation(str(src))
+    for s in prs.slides:
+        for sh in s.shapes:
+            if sh.name.startswith("Logo ACME"):
+                sh.height = Emu(int(H * 0.015))
+                sh.width = Emu(int(H * 0.06))
+    prs.save(src)
+    m = _analyze(src, tmp_path / "ws")
+    out = tmp_path / "two-brand.pptx"
+    res = apply_brand(src, out, _brand(), manifest=m, brand_dir=_brand_dir(tmp_path))
+    boxes = _logo_boxes(out)
+    assert len(boxes) == 4 and res.logos_removed == 1
+    assert all(x < W * 0.5 for _, (x, _y, _cx, _cy) in boxes)
+    assert all(cy >= H * lg.MIN_WORDMARK_H * 0.99 for _, (_x, _y, _cx, cy) in boxes)
+
+
+def test_theme_object_defaults_and_table_styles_rewritten(synthetic, fonts_here, tmp_path):
+    src, m, bdir = synthetic
+    with zipfile.ZipFile(src) as z:
+        theme = z.read("ppt/theme/theme1.xml").decode("utf-8")
+    defaults = (
+        '<a:objectDefaults><a:spDef><a:spPr><a:solidFill><a:srgbClr val="1F6FEB"/></a:solidFill></a:spPr><a:bodyPr/>'
+        '<a:lstStyle><a:defPPr><a:defRPr><a:latin typeface="Georgia"/></a:defRPr></a:defPPr></a:lstStyle></a:spDef></a:objectDefaults>'
+    )
+    theme = re.sub(r"<a:objectDefaults\s*/>|<a:objectDefaults>.*?</a:objectDefaults>", defaults, theme, flags=re.S)
+    if "<a:objectDefaults>" not in theme:
+        theme = theme.replace("</a:themeElements>", "</a:themeElements>" + defaults)
+    styles = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><a:tblStyleLst xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+        'def="{5C22544A-7EE6-4342-B048-85BDC9FD1C3A}"><a:tblStyle styleId="{5C22544A-7EE6-4342-B048-85BDC9FD1C3A}" styleName="Brand">'
+        '<a:wholeTbl><a:tcTxStyle><a:font><a:latin typeface="Georgia"/></a:font><a:srgbClr val="1F2937"/></a:tcTxStyle>'
+        '<a:tcStyle><a:fill><a:solidFill><a:srgbClr val="1F6FEB"/></a:solidFill></a:fill></a:tcStyle></a:wholeTbl></a:tblStyle></a:tblStyleLst>'
+    )
+    _zip_put(src, {"ppt/theme/theme1.xml": theme.encode("utf-8"), "ppt/tableStyles.xml": styles.encode("utf-8")})
+    out = tmp_path / "defaults.pptx"
+    apply_brand(src, out, _brand(), manifest=m, brand_dir=bdir)
+    th = _parts(out, r"ppt/theme/theme1\.xml$")["ppt/theme/theme1.xml"]
+    od = re.search(r"<a:objectDefaults>.*?</a:objectDefaults>", th, re.S).group(0)
+    assert 'val="0077FF"' in od and 'typeface="Brand Text"' in od
+    ts = _parts(out, r"ppt/tableStyles\.xml$")["ppt/tableStyles.xml"]
+    assert 'val="0077FF"' in ts and 'val="0B1220"' in ts and 'typeface="Brand Text"' in ts
+
+
+def test_image_probe_cache_keyed_by_hash(synthetic):
+    src, m, _ = synthetic
+    lg.find_template_logos(ap.Package(src), m)
+    assert lg._PROBES and all(isinstance(k, str) and len(k) == 64 for k in lg._PROBES)
+    assert not any(isinstance(x, (bytes, bytearray)) for v in lg._PROBES.values() if v for x in v)
+
+
+def test_logo_path_confined_to_brand_dir(tmp_path):
+    bdir = _brand_dir(tmp_path)
+    ok = lg.logo_path(BrandLogo(name="Основной", file="logos/primary.png"), bdir)
+    assert ok is not None and ok.is_relative_to(bdir.resolve())
+    for bad in ("/etc/hosts", "../secret.png", "logos/../../secret.png", "C:/secret.png"):
+        assert lg.logo_path(BrandLogo(name="x", file=bad), bdir) is None
+    assert lg.logo_path(BrandLogo(name="x", file="logos/primary.png"), None) is None
+
+
+def test_conflicts_module_uses_public_api_only():
+    import ast
+
+    tree = ast.parse((ROOT / "verstka" / "brand" / "conflicts.py").read_text(encoding="utf-8"))
+    private = [a.name for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and (n.module or "").startswith("verstka.brand") for a in n.names if a.name.startswith("_")]
+    assert private == []
