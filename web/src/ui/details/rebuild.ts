@@ -5,8 +5,8 @@
 // было» — как у других правок слайда, store `revertVariant`). Работа — одна на вариант презентации (сервер держит одну
 // задачу на вариант), живёт вне вкладки (`rebuildStore`): лист закрыли посреди пересборки — она идёт, открыли снова —
 // строка хода на месте. Шаги — чистый rebuildNext; сеть и задачи — useRebuild.
-import { humanError } from "./errors";
-import type { Job, RebuildResult } from "../types";
+import { humanError } from "../../lib/errors";
+import type { Job, RebuildResult } from "../../types";
 
 export interface RebuildRun {
   /** Номер запуска: шаги прежнего (поздний ответ, конец его задачи) новый не трогают. */

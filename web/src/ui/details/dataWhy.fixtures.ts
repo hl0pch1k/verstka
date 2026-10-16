@@ -1,5 +1,5 @@
 // Слайды с данными настоящей колоды (пример «данные продаж», без модели; verstka/data/story.py) — для тестов «Почему так».
-import type { OutlineSlide } from "../types";
+import type { OutlineSlide } from "../../types";
 
 export const DATA_SLIDES: Record<number, OutlineSlide> = {
  "2": {

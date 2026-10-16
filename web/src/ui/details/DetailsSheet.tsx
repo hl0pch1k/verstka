@@ -9,6 +9,8 @@
 // Невыбранные вкладки ход помощника не трогают (layers.css, `--lgone`). Закрытый лист уезжает 520 мс, пока уезжает —
 // идёт за колодой, как открытый, и после этого размонтируется (Layer, kit/usePresence). Содержимое листа в узкой раскладке
 // у́же TIGHT_INNER = 880 (тесная колода, sheetMorph.ts; окно уже 1440) — V2 не помещается, свои дорожки (`dd-tight`).
+// Вкладки и слой «Слайд N шаблона» — отдельный кусок сборки (lazySheet.tsx, SheetPanels): грузится в свободное время
+// после первой отрисовки и при открытии листа; шапка листа, его ход и очередь вкладок — здесь, в основном куске.
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { flushSync } from "react-dom";
 import { useApp } from "../../store";
@@ -21,16 +23,9 @@ import { MOVE_MS, onDeckMove, TxNarrow } from "../kit/Tx";
 import { useNarrow } from "../create/useNarrow";
 import { useDeckWrap } from "../deck/useDeckFit";
 import { SheetCtx, sheetMorph } from "./sheetMorph";
-import { Panel } from "./parts";
-import { PatternLayer } from "./PatternLayer";
 import { headerLayerOpen, menuItems, SHEET_TABS, tabStep } from "./sheetView";
 import type { SheetTab } from "../deck/geometry";
-import { AgentTab } from "./tabs/Agent";
-import { FilesTab } from "./tabs/Files";
-import { PlanTab } from "./tabs/Plan";
-import { QualityTab } from "./tabs/Quality";
-import { TemplateTab } from "./tabs/Template";
-import { WhyTab } from "./tabs/Why";
+import { LazyPanels, LazyPattern, loadSheet, preloadSheet, SheetBoundary } from "./lazySheet";
 import { useDeckManifest } from "./useDeckManifest";
 import { scoreOf, docTitle } from "../result/resultView";
 
@@ -169,6 +164,11 @@ export function DetailsSheet() {
     });
   }, [open, moves]);
   const morph = sheetMorph(useDeckWrap());
+  // кусок вкладок — в свободное время после первой отрисовки; лист открыли раньше — сразу
+  useEffect(() => preloadSheet(), []);
+  useEffect(() => {
+    if (open) void loadSheet().catch(() => {});
+  }, [open]);
 
   const pattern = ui.pattern;
   useEffect(() => {
@@ -243,17 +243,10 @@ export function DetailsSheet() {
           </div>
 
           <div className="p2-ls" style={{ ...lsDelay(200), position: "absolute", inset: 0, pointerEvents: "none" }}>
-            <div style={{ pointerEvents: "auto" }}>
-              <Panel tab="quality" on={tab === "quality"} mount={mounted.has("quality")}><QualityTab g={g} v={v} deck={deck} /></Panel>
-              <Panel tab="why" on={tab === "why"} mount={mounted.has("why")}><WhyTab g={g} v={v} deck={deck} active={open && tab === "why"} /></Panel>
-              <Panel tab="agent" on={tab === "agent"} mount={mounted.has("agent")}><AgentTab g={g} v={v} /></Panel>
-              <Panel tab="plan" on={tab === "plan"} mount={mounted.has("plan")} style={{ height: 508, display: "flex", flexDirection: "column" }}><PlanTab g={g} v={v} active={open && tab === "plan"} /></Panel>
-              <Panel tab="template" on={tab === "template"} mount={mounted.has("template")} style={{ height: 508, display: "flex", flexDirection: "column" }}><TemplateTab deck={deck} /></Panel>
-              <Panel tab="files" on={tab === "files"} mount={mounted.has("files")} style={{ height: 508, display: "flex", flexDirection: "column" }}><FilesTab g={g} v={v} deck={deck} /></Panel>
-            </div>
+            <SheetBoundary><LazyPanels g={g} v={v} deck={deck} tab={tab} mounted={mounted} open={open} /></SheetBoundary>
           </div>
           </div>
-          <PatternLayer deck={deck} />
+          <SheetBoundary quiet><LazyPattern deck={deck} /></SheetBoundary>
         </section>
         </SheetCtx.Provider>
         </TxNarrow.Provider>

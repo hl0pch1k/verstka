@@ -2,12 +2,12 @@
 // хранилища тихо (ход и отказ показывает сам вариант визуализации, не строка уведомления) с целью `target` — пока она
 // идёт, вариант презентации занят и для других мест действия (исправление слайда, «Качество», помощник); по готовности
 // презентация перечитывается (`reloadIfOpen`) — и новый слайд, и «Выбран» у нового варианта встают по ней. «Вернуть как
-// было» — общее для всех правок (store `revertVariant`, «верни как было» сервера). Состояние — lib/rebuild.ts (`rebuildStore`,
+// было» — общее для всех правок (store `revertVariant`, «верни как было» сервера). Состояние — rebuild.ts (`rebuildStore`,
 // одно на страницу: лист закрыли — работа идёт дальше).
 import { useCallback, useSyncExternalStore } from "react";
 import { api, ApiError } from "../../api";
 import { useApp } from "../../store";
-import { asRebuildResult, jobFailText, notChangedText, rebuildStore, refusalText, type RebuildRun } from "../../lib/rebuild";
+import { asRebuildResult, jobFailText, notChangedText, rebuildStore, refusalText, type RebuildRun } from "./rebuild";
 import { VARIANT_BUSY, workKey } from "./variantWork";
 
 export interface Rebuild {

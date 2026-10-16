@@ -29,6 +29,9 @@ export function sourceText(g: Generation, note: { title: string } | null): strin
     return `Текст написал агент — по ${p.length > 1 ? "статьям" : "статье"} ${names} в Википедии`;
   }
   if (g.improved_from?.name) return `Текст из презентации «${templateTitle(g.improved_from.name)}»`;
+  // колода из файлов с данными (V2 v105 `hpSrc`): текст слайдов написал агент — по брифу и файлам
+  const files = g.dataset_ids?.length ?? 0;
+  if (files) return `Текст написал агент — по ${g.brief?.trim() ? "брифу и " : ""}${files} ${files % 10 === 1 && files % 100 !== 11 ? "файлу" : "файлам"} данных`;
   return note?.title || "Ваш текст — агент разложил его по слайдам";
 }
 
@@ -47,7 +50,7 @@ export function compactChecks(g: Generation, v: Variant, note: { title: string }
       icon: q.errors ? "alert" : "check-circle", tone: q.errors ? "error" : "ok",
       lead: q.verdict ?? `Оценка ${q.score}`, rest: q.warnings ? ` · ${q.warnings}` : "", title: q.title, sheet: "quality",
     });
-    if (q.figures) out.push({ icon: "numbers", tone: q.figures.tone, ...splitCount(q.figures.text), title: q.figures.title ?? q.figures.text, sheet: "quality" });
+    if (q.figures) out.push({ icon: "numbers", tone: q.figures.tone, ...(q.figures.compact ?? splitCount(q.figures.text)), title: q.figures.title ?? q.figures.text, sheet: "quality" });
   }
   const src = sourceText(g, note);
   out.push({ icon: "book", tone: "ok", lead: "", rest: src, title: src });

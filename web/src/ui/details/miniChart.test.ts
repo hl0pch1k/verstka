@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { ColorToken, VizKind } from "../types";
+import type { ColorToken, VizKind } from "../../types";
 import { DATA_SLIDES } from "./dataWhy.fixtures";
 import { miniChart, miniColors, miniSource, numberOf, pagesOf, tint, type MiniLayers } from "./miniChart";
 

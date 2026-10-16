@@ -68,6 +68,9 @@ a.p2-ob:hover{color:#0B1220}
 .ds-rfile{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:13px;font-weight:600;line-height:20px;color:#5A6272;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ds-rfile svg{flex:none;color:#2563EB}
 .ds-rfile > span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+/* «Оформление» (V2 v105 `ds-look`): карточка неподвижна, палитра брендбука — плиткой 56×32 */
+.ra-card-static{pointer-events:none}
+.bb-tile.ds-tile{width:56px;height:32px;border-radius:8px}
 /* «Собрать ещё раз» ждёт ответа сервера: кнопка занята, указатель — ожидание */
 .ra-nb[aria-busy="true"]{cursor:progress}
 /* презентация без уведомления (`ra-top`; доски R-remarks, R-fixing, R-fixed, R-text, R-picture): ряда 48 + 16 нет —

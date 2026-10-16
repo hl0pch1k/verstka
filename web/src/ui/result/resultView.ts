@@ -11,8 +11,8 @@ import { fileSafe } from "../../lib/plain";
 import { variantRev, withRev } from "../../lib/rev";
 import { plural } from "../../lib/utils";
 import type { ComposerPreset } from "../../store";
-import type { Generation, GenerationMeta, ModelsStatus, Variant } from "../../types";
-import { brandStrip, dataKind } from "../create/dataRules";
+import type { BrandSpec, Generation, GenerationMeta, ModelsStatus, Variant } from "../../types";
+import { brandPalette, brandStrip, dataKind } from "../create/dataRules";
 import { fileIcon, type DsIconName } from "../create/dsKit";
 import type { IconName } from "../kit/icons";
 import { isStage } from "./marks";
@@ -75,6 +75,29 @@ export function docLine(template: string, total: number, when: string, brand: st
   return [template, brand, total > 0 ? plural(total, "слайд", "слайда", "слайдов") : null, when || null].filter(Boolean).join(" · ");
 }
 
+/** Карточка «Оформление» колоды из файлов или с брендбуком (V2 v105 `ds-look`): чем оформлена — шаблоном или шаблоном и
+ *  брендбуком, что важнее при расхождении (метка), палитра брендбука плиткой. «Брендбук важнее» — шрифт заголовков
+ *  бренда с заменой и акцент бренда (из BrandSpec, `brand`; нет его — без подробностей); «шаблон важнее» — при
+ *  расхождении как в шаблоне; без брендбука — палитра, шрифт и сетка шаблона. Ни файлов, ни брендбука — карточки нет. */
+export interface LookView { tag: string; text: string; palette: string[] | null }
+export function lookCard(g: Pick<GenerationMeta, "dataset_ids" | "brandbook" | "brand_priority">, o: { template: string; font: string | null; brand: BrandSpec | null }): LookView | null {
+  const brand = deckBrand(g);
+  if (!brand) {
+    if (!g.dataset_ids?.length) return null;
+    return { tag: "по шаблону", text: `Палитра, ${o.font ? `шрифт ${o.font}` : "шрифты"} и сетка — из шаблона ${o.template}`, palette: null };
+  }
+  const head = `${o.template} и ${brand}`;
+  const palette = o.brand ? brandPalette(o.brand) : null;
+  if (g.brand_priority === "template") return { tag: "шаблон важнее", text: `${head}: при расхождении — как в шаблоне`, palette: palette?.length ? palette : null };
+  const font = o.brand?.fonts.find((f) => f.role === "heading");
+  const accent = o.brand?.colors.find((c) => c.role === "accent");
+  const parts = [
+    font ? `заголовки — ${font.family}${font.fallback && font.fallback !== font.family ? `, замена — ${font.fallback}` : ""}` : null,
+    accent ? `акцент ${accent.hex.toUpperCase()}` : null,
+  ].filter(Boolean);
+  return { tag: "брендбук важнее", text: parts.length ? `${head}: ${parts.join("; ")}` : head, palette: palette?.length ? palette : null };
+}
+
 /** Шаблон презентации для людей (строка под названием, полоса 01): у колоды с брендбуком она свёрстана на
  *  брендированной копии (`template_id`), а выбирали исходный — `base_template_id`. */
 export const deckTemplate = (g: Pick<GenerationMeta, "template_id" | "base_template_id">): string => g.base_template_id || g.template_id;
@@ -125,8 +148,27 @@ export interface QualityView {
   verdict: string | null;
   errors: boolean;
   warnings: string | null;
-  figures: { text: string; tone: "ok" | "warn"; title?: string } | null;
+  /** Сверка чисел: с текстом брифа или (колода из файлов с данными) с файлами; `compact` — слова узкой колонки
+   *  («7 файлов данных — числа сверены», V2 v105 `hp-ncol`), без них — по числу в начале строки. */
+  figures: { text: string; tone: "ok" | "warn"; title?: string; compact?: { lead: string; rest: string } } | null;
   title: string;
+}
+
+/** Проверки аудита, что сверяют числа слайдов с файлами (verstka/audit/checks/data.py). */
+const DATA_FIGURE_CHECKS = new Set(["chart_values_mismatch", "headline_figure_not_in_data"]);
+
+/** Колода из файлов с данными: числа слайдов сверены с файлами (V2 v105: «Числа на слайдах сверены с файлами», в узкой
+ *  колонке — «7 файлов данных — числа сверены»); проверки нашли расхождения — сколько, жёлтым. Без файлов — null. */
+export function dataFigures(g: Pick<GenerationMeta, "dataset_ids">, v: Pick<Variant, "audit">): QualityView["figures"] {
+  const files = g.dataset_ids?.length ?? 0;
+  if (!files) return null;
+  const off = (v.audit?.issues ?? []).filter((i) => DATA_FIGURE_CHECKS.has(i.check_id)).length;
+  const lead = `${plural(files, "файл", "файла", "файлов")} данных`;
+  if (off) {
+    const n = plural(off, "замечание", "замечания", "замечаний");
+    return { text: `Не совпало с файлами: ${n}`, tone: "warn", title: `Числа слайдов сверены с файлами данных (${lead}): ${n}`, compact: { lead: n, rest: " — числа не совпали с файлами" } };
+  }
+  return { text: "Числа на слайдах сверены с файлами", tone: "ok", title: `Числа слайдов сверены с файлами: ${lead}`, compact: { lead, rest: " — числа сверены" } };
 }
 export function qualityCard(g: Generation, v: Variant): QualityView | null {
   const raw = scoreOf(g, v);
@@ -146,7 +188,7 @@ export function qualityCard(g: Generation, v: Variant): QualityView | null {
     verdict: errors === null ? null : errors > 0 ? plural(errors, "ошибка", "ошибки", "ошибок") : "Ошибок нет",
     errors: (errors ?? 0) > 0,
     warnings: warnings ? plural(warnings, "предупреждение", "предупреждения", "предупреждений") : null,
-    figures: figuresLine(v.audit?.summary.figures),
+    figures: dataFigures(g, v) ?? figuresLine(v.audit?.summary.figures),
     title: `Оценка качества ${score} из 100${counted ? ` · ${counted}` : ""}`,
   };
 }

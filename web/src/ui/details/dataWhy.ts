@@ -4,10 +4,10 @@
 // и доводами (выбранный — «Выбран», невыбранный — почему не он) и откуда заголовок-вывод (ключевое число, как оно
 // посчитано, каким был бы заголовок-описание). Всё — из `OutlineSlide.data` (SlideData) и содержимого слайда: интерпретация
 // данных — детерминированный код сервера, здесь только слова. Чистые функции, без React.
-import { plural } from "./utils";
+import { plural } from "../../lib/utils";
 import type {
   ColumnProfile, ColumnRole, ColumnType, HeadlineFact, OutlineSlide, SlideData, SourceKind, TaskKind, TimeFreq, Variant, VizKind, VizOption,
-} from "../types";
+} from "../../types";
 import { miniChart, miniSource, type MiniLayers } from "./miniChart";
 
 /** Названия задач — как у сервера (verstka/schemas/data.py `TASK_TITLES`), в порядке ТЗ. */

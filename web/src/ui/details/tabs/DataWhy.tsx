@@ -3,8 +3,8 @@
 // времени, метрики, измерения, пропуски, выбросы, как подготовлены данные слайда) и «Задача» (какая, цель из текста,
 // почему, все задачи с выбранной). Справа — «Варианты визуализации» (лучший по данным — первым: номер, мини-график из
 // данных слайда, название, «Выбран», довод или почему не он, «Пересобрать слайд так») и «Заголовок-вывод» (слайд,
-// ключевое число, как оно посчитано, каким был бы заголовок-описание). Данные и слова — lib/dataWhy.ts, эскизы —
-// lib/miniChart.ts, пересборка — useRebuild (шаги — lib/rebuild.ts). Место действия варианта — одно, 40 px: кнопка, строка хода, причина отказа и
+// ключевое число, как оно посчитано, каким был бы заголовок-описание). Данные и слова — dataWhy.ts, эскизы —
+// miniChart.ts, пересборка — useRebuild (шаги — rebuild.ts). Место действия варианта — одно, 40 px: кнопка, строка хода, причина отказа и
 // «Вернуть как было» сменяют друг друга перекрёстным затуханием (useSwap), ничего ниже не сдвигается. Пересобрано —
 // презентация перечиталась, и колонки проявляются заново лесенкой (ключ версии у Why.tsx), как после любой правки.
 // Текст в несколько строк — стопки из двух копий (kit/Tx: x-l — левая колонка, x-r… — правая), подпись «лучший по
@@ -22,10 +22,10 @@ import { Tx } from "../../kit/Tx";
 import { useSwap } from "../../kit/useSwap";
 import { slideSrc } from "../../result/resultView";
 import { StaleLine, type Refresh } from "../../shell/StaleLine";
-import { dataWhyView, type DxVar } from "../../../lib/dataWhy";
-import type { MiniColors, MiniLayers } from "../../../lib/miniChart";
+import { dataWhyView, type DxVar } from "../dataWhy";
+import type { MiniColors, MiniLayers } from "../miniChart";
 import { Shot } from "../parts";
-import { busyText, rowAct, UNDO_TEXT, type RowAct } from "../../../lib/rebuild";
+import { busyText, rowAct, UNDO_TEXT, type RowAct } from "../rebuild";
 import type { Rebuild } from "../useRebuild";
 
 /** Эскиз варианта (V2 `dx-mini`): рамка, слои по порядку. */

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { HeadlineFact, SlideData, Variant, VariantEdit } from "../types";
+import type { HeadlineFact, SlideData, Variant, VariantEdit } from "../../types";
 import { dataCols, dataFacts, dataWhyCap, dataWhyView, keyFact, keyText, NO_KEY, periodText, rebuiltLast } from "./dataWhy";
 import { DATA_SLIDES } from "./dataWhy.fixtures";
 

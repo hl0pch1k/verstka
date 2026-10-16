@@ -43,7 +43,7 @@ import { NotePill, NoteRow, type NoteActions } from "./NotePill";
 import { PictureCard, PictureSpots } from "./PictureCard";
 import { RemarksPanel } from "./RemarksPanel";
 import {
-  agentLines, deckBrand, deckPreset, deckTemplate, docLine, docTitle, eyesCard, fileBase, whyFile, latestWithModel, noDeckText, noteView, ownsKeys, qualityCard, recheckIn, remarkCount,
+  agentLines, deckBrand, deckPreset, deckTemplate, docLine, docTitle, eyesCard, fileBase, lookCard, whyFile, latestWithModel, noDeckText, noteView, ownsKeys, qualityCard, recheckIn, remarkCount,
   retryLeft, retryTick, retryWaitTitle, rewriteText, scoreOf, slideForKey, slideHeadline, slideSrc, slidesOf, switchShots, variantSegs, whyText,
   WORK_GEO, workGeo,
 } from "./resultView";
@@ -56,6 +56,7 @@ import { useOpenSheet } from "./useOpenSheet";
 import { usePictureSelect } from "./usePictureSelect";
 import { useRemarksMode } from "./useRemarksMode";
 import { useSlideJob, type SlideRun } from "./useSlideJob";
+import { useDeckBrand } from "./useDeckBrand";
 import { compactRow, failInRow, placeShown, staleInRow, type ResultAt, type SlideFail } from "./slideJob";
 import { StaleLine } from "../shell/StaleLine";
 import { WorkHead } from "./WorkHead";
@@ -136,7 +137,9 @@ function ResultBody({ g }: { g: Generation }) {
   const src = v.slides[n - 1] ? slideSrc(v, n) : null;
   const headline = useCallback((k: number) => slideHeadline(v, k), [v]);
   const title = docTitle(g, v);
-  const tpl = templates.find((t) => t.template_id === g.template_id);
+  // шаблон, который выбирали (у колоды с брендбуком она свёрстана на брендированной копии с теми же пропорциями)
+  const tpl = templates.find((t) => t.template_id === deckTemplate(g));
+  const brand = useDeckBrand(g);
   const aspect = tpl?.aspect && tpl.aspect > 0 ? tpl.aspect : 16 / 9;
 
   // новая презентация открывается со свёрнутой таблеткой (по умолчанию — таблетка)
@@ -337,7 +340,10 @@ function ResultBody({ g }: { g: Generation }) {
     pdf: v.files["deck.pdf"] ?? null,
     fileBase: fileBase(title, name),
     pptxTitle: `Вариант ${g.variants.indexOf(v) + 1} · ${name}`,
-    cards: { quality: qualityCard(g, v), agent, why: whyText(v, n), whyFile: whyFile(v, n), eyes: eyesCard(v, n), slide: n, variant: v.strategy },
+    cards: {
+      quality: qualityCard(g, v), agent, why: whyText(v, n), whyFile: whyFile(v, n), eyes: eyesCard(v, n), slide: n, variant: v.strategy,
+      look: brand.ready ? lookCard(g, { template: templateLabel(deckTemplate(g), g.template_file), font: tpl?.font ?? null, brand: brand.spec }) : null,
+    },
   };
   const h = headline(n);
   // компактный вид (помощник открыт): те же данные, итоги проверки — узкой колонкой; колонка шире, пока на её месте

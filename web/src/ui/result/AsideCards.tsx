@@ -1,13 +1,15 @@
 // Карточки колонки результата (R-aside `ra-card`): «Качество», «Как работал агент», «Почему так», «Взгляд дизайнера».
 // Каждая открывает лист «Подробнее» на своей вкладке. Данные — resultView: карточки без данных нет, пустых карточек не
 // бывает. Сменились вариант или слайд — меняющийся текст проявляется заново (ra-xf 240 мс), сама карточка стоит.
-// У слайда с данными под «Почему так» — его файл и природа данных (V2 v105 `ds-rfile`).
+// У слайда с данными под «Почему так» — его файл и природа данных (V2 v105 `ds-rfile`). У колоды из файлов или с
+// брендбуком — «Оформление» (V2 v105 `ds-look`): чем оформлена, что важнее при расхождении, палитра брендбука; карточка
+// неподвижна (не ссылка).
 import { DsIcon, type DsIconName } from "../create/dsKit";
 import type { SheetTab } from "../deck/geometry";
 import { Icon, type IconName } from "../kit/Icon";
 import { ScoreRing } from "../kit/ScoreRing";
 import { useChanged } from "../kit/useChanged";
-import type { EyesView, QualityView } from "./resultView";
+import type { EyesView, LookView, QualityView } from "./resultView";
 
 const Go = () => <Icon name="chevron-right" size={16} className="ra-go" />;
 
@@ -18,20 +20,23 @@ export interface AsideCardsData {
   /** Файл с данными слайда (resultView `whyFile`); слайд не из файла — null. */
   whyFile?: { text: string; icon: DsIconName } | null;
   eyes: EyesView | null;
+  /** «Оформление» (resultView `lookCard`); нет — карточки нет. */
+  look?: LookView | null;
   /** Текущий слайд (с 1) и вариант — ключи смены текста. */
   slide: number;
   variant: string;
 }
 
 export function AsideCards({ data, open }: { data: AsideCardsData; open(tab: SheetTab): void }) {
-  const { quality, agent, why, eyes } = data;
-  if (!quality && !agent.length && !why && !eyes) return null;
+  const { quality, agent, why, eyes, look } = data;
+  if (!quality && !agent.length && !why && !eyes && !look) return null;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 24 }}>
       {quality && <QualityCard q={quality} variant={data.variant} onOpen={() => open("quality")} />}
       {agent.length > 0 && <AgentCard lines={agent} variant={data.variant} onOpen={() => open("agent")} />}
       {why && <WhyCard text={why} file={data.whyFile ?? null} slide={data.slide} k={`${data.variant}/${data.slide}`} onOpen={() => open("why")} />}
       {eyes && <EyesCard e={eyes} slide={data.slide} k={`${data.variant}/${data.slide}`} onOpen={() => open("quality")} />}
+      {look && <LookCard l={look} />}
     </div>
   );
 }
@@ -99,6 +104,18 @@ function WhyCard({ text, file, slide, k, onOpen }: { text: string; file: AsideCa
       </span>
       {file && <span key={`f/${k}`} className={swapped ? "ds-rfile ra-xf" : "ds-rfile"} title={file.text}><DsIcon name={file.icon} size={14} /><span>{file.text}</span></span>}
     </button>
+  );
+}
+
+function LookCard({ l }: { l: LookView }) {
+  return (
+    <div className="ra-card ra-card-static ds-look">
+      <span className="ra-ch"><span className="ra-ct">Оформление</span><span className="ra-cm">{l.tag}</span></span>
+      <span style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 8 }}>
+        {l.palette && <span className="bb-tile ds-tile" aria-hidden="true">{l.palette.map((hex, i) => <span key={i} style={{ background: hex }} />)}</span>}
+        <span style={{ minWidth: 0, fontSize: 14, fontWeight: 500, lineHeight: "20px", color: "#0B1220" }}>{l.text}</span>
+      </span>
+    </div>
   );
 }
 

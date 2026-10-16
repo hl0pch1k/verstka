@@ -3,7 +3,7 @@
 // разделителей. Рисуется из данных самого слайда (OutlineSlide.content: ряды графика, таблица, карточки) — числа не
 // придумываются: столбцы, линия, сектора — это значения слайда в форме варианта; таблица, карточки и страницы — только
 // их строение (сколько строк, колонок, карточек). Чего в данных нет, того на эскизе нет. Чистые функции, без React.
-import type { OutlineSlide, SlideData, TemplateManifest, VizKind, VizOption } from "../types";
+import type { OutlineSlide, SlideData, TemplateManifest, VizKind, VizOption } from "../../types";
 
 /** Слои эскиза — пути `d` в координатах 160×90 (пусто — слоя нет). Порядок отрисовки — как здесь. */
 export interface MiniLayers {
