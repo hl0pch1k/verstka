@@ -10,15 +10,19 @@ import re
 import shutil
 import threading
 import time
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Literal, Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.exception_handlers import http_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from verstka import __version__
 from verstka.api.agent_view import describe_agent_work, describe_slide_design, job_progress, link_alternatives, read_agent_events, slide_design, variant_agent, write_agent_file
@@ -59,6 +63,11 @@ def _env_mb(name: str, default: float) -> int:
     return int(mb * 1024 * 1024)
 
 
+def _mb(limit: int) -> str:
+    """Bytes as megabytes for people: «25», «0,5»."""
+    return f"{round(limit / (1024 * 1024), 2):g}".replace(".", ",")
+
+
 def max_upload_bytes() -> int:
     return _env_mb("VERSTKA_MAX_UPLOAD_MB", 200)
 
@@ -73,16 +82,96 @@ def max_brandbook_bytes() -> int:
     return _env_mb("VERSTKA_MAX_BRAND_MB", 50)
 
 
+# a file of each format reads, with its profile and preliminary choice, in ≤ ~10 s on this Mac (measured 16.10 through
+# POST /api/datasets, 5 columns: CSV 24 MB / 500 000 rows — 7,4 s; JSON 24 MB — 4,4 s; text with a table 9,6 MB — 6,2 s,
+# 24 MB — 11 s; a book of Excel 4,0 MB / 135 000 rows — 8,4 s, 4,7 MB — 10,7 s: openpyxl reads cell by cell)
+def max_xlsx_bytes() -> int:
+    return _env_mb("VERSTKA_MAX_XLSX_MB", 4)
+
+
+def max_text_bytes() -> int:
+    return _env_mb("VERSTKA_MAX_TEXT_MB", 15)
+
+
 _MAX_DATA_FILES = 10  # файлов с данными за один запрос
 _MAX_DATA_TABLES = 30  # таблиц (листов, ключей JSON, таблиц в тексте) из одного запроса
+# строк одной таблицы, которые читаются в набор: дальше — «Прочитаны первые 200 000 строк из 640 000». Профиль и
+# предварительный выбор 200 000 × 5 — ~3 с; у широких таблиц предел — по ячейкам
+_MAX_DATA_ROWS = 200_000
+_MAX_DATA_CELLS = 1_000_000
 _MAX_GENERATION_DATASETS = 30  # наборов в одной сборке
 _MAX_BRAND_FOLDER_FILES = 300  # файлов в папке брендбука
 _MAX_ZIP_ENTRIES = 1000
 _MAX_ZIP_UNPACKED = 200 * 1024 * 1024
 _BRAND_EXTS = {".json", ".pdf", ".zip", ".pptx", ".potx", ".pptm", ".svg", ".png", ".jpg", ".jpeg", ".webp"}
+# брендбук, чей разбор прервал перезапуск сервера (.parsing без brand.json), убирается при запуске, если он старше этого:
+# разбор с моделью идёт до 150 с, а рабочую папку может делить ещё один сервер со своим разбором
+_BRAND_SWEEP_AGE = 600.0
+_SLACK = 1 << 20  # заголовки частей multipart сверх самих файлов
 
 
-app = FastAPI(title="Verstka API", version=__version__)
+def _upload_cap(path: str) -> Optional[tuple[int, str]]:
+    """The largest body an upload route can accept (all its files at their limits) and what to say past it — or None.
+    Checked by Content-Length before the body is read (Starlette writes a multipart body to disk before the handler)."""
+    if path == "/api/datasets":
+        each = max_data_bytes()
+        return _MAX_DATA_FILES * each + _SLACK, f"Файлы с данными больше {_mb(_MAX_DATA_FILES * each)} МБ за один раз — добавляйте их по одному, каждый до {_mb(each)} МБ"
+    if path == "/api/brandbooks":
+        limit = max_brandbook_bytes()
+        return limit + _SLACK, f"Брендбук больше {_mb(limit)} МБ — сожмите картинки в PDF или загрузите токены JSON и логотипы архивом"
+    if path == "/api/templates":
+        limit = max_upload_bytes()
+        return limit + _SLACK, f"Файл больше {_mb(limit)} МБ — уменьшите картинки в шаблоне или удалите лишние слайды"
+    return None
+
+
+class UploadSizeGate:
+    """413 for an upload whose Content-Length is over its route's limit — before a byte of it is read or written."""
+
+    def __init__(self, app_: Any) -> None:
+        self.app = app_
+
+    async def __call__(self, scope: dict, receive: Callable, send: Callable) -> None:
+        if scope.get("type") == "http" and scope.get("method") == "POST":
+            cap = _upload_cap(str(scope.get("path") or "").rstrip("/"))
+            if cap is not None:
+                raw = dict(scope.get("headers") or []).get(b"content-length")
+                try:
+                    length = int(raw) if raw is not None else None
+                except ValueError:
+                    length = None
+                if length is not None and length > cap[0]:
+                    await JSONResponse({"detail": cap[1]}, status_code=413, headers={"Connection": "close"})(scope, receive, send)
+                    return
+        await self.app(scope, receive, send)
+
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    _on_start()
+    yield
+
+
+def _on_start() -> None:
+    """At launch: the models profile goes to the log (default_models_path logs it once), and the brandbooks a restart
+    interrupted are cleared away."""
+    from verstka.providers.registry import default_models_path
+
+    try:
+        default_models_path()
+    except Exception:  # noqa: BLE001 - the server starts all the same; the status page says what is wrong
+        log.warning("models profile not resolved at start", exc_info=True)
+    try:
+        swept = store.sweep_interrupted_brandbooks(_BRAND_SWEEP_AGE)
+    except OSError:
+        log.warning("interrupted brandbooks not swept", exc_info=True)
+        swept = []
+    if swept:
+        log.info("swept %d brandbook(s) a restart interrupted: %s", len(swept), ", ".join(swept))
+
+
+app = FastAPI(title="Verstka API", version=__version__, lifespan=_lifespan)
+app.add_middleware(UploadSizeGate)  # inside CORS: its 413 carries the CORS headers too
 app.add_middleware(CORSMiddleware, allow_origins=cors_origins(), allow_methods=["*"], allow_headers=["*"])
 store = Store()
 runner = JobRunner()
@@ -210,14 +299,115 @@ class RebuildBody(BaseModel):
 # ---------------------------------------------------------------------------- helpers
 
 
-def _validation_message(e: ValidationError, limit: int = 5) -> str:
+_RU_ERRORS = {
+    "missing": "обязательное поле",
+    "bool_parsing": "нужно «да» или «нет» (true / false)",
+    "bool_type": "нужно «да» или «нет» (true / false)",
+    "int_parsing": "нужно целое число",
+    "int_type": "нужно целое число",
+    "int_from_float": "нужно целое число",
+    "float_parsing": "нужно число",
+    "float_type": "нужно число",
+    "string_type": "нужна строка",
+    "list_type": "нужен список",
+    "tuple_type": "нужен список",
+    "dict_type": "нужен объект",
+    "model_type": "нужен объект",
+    "model_attributes_type": "нужен объект",
+    "json_invalid": "запрос — не JSON",
+    "json_type": "запрос — не JSON",
+    "extra_forbidden": "лишнее поле",
+    "none_required": "должно быть пустым",
+}
+_REQUEST_PARTS = ("body", "query", "path", "header", "cookie", "form")
+
+
+def _ru_values(expected: str) -> str:
+    """«'brand' or 'template'» → «brand» или «template» (eight values at most: a long list is cut with «…»)."""
+    vals = re.findall(r"'([^']*)'", expected or "")
+    if not vals:
+        return ""
+    shown = [f"«{v}»" for v in vals[:8]] + (["…"] if len(vals) > 8 else [])
+    return shown[0] if len(shown) == 1 else ", ".join(shown[:-1]) + " или " + shown[-1]
+
+
+def ru_validation_error(err: dict) -> str:
+    """One pydantic error in Russian: what the value should be («нужно целое число», «нужно «brand» или «template»»)."""
+    kind = str(err.get("type") or "")
+    ctx = err.get("ctx") or {}
+    msg = str(err.get("msg") or "")
+    if kind in ("literal_error", "enum"):
+        values = _ru_values(str(ctx.get("expected") or ""))
+        if values:
+            return f"нужно {values}"
+    bounds = {"greater_than_equal": ("не меньше", "ge"), "greater_than": ("больше", "gt"), "less_than_equal": ("не больше", "le"), "less_than": ("меньше", "lt")}
+    if kind in bounds and bounds[kind][1] in ctx:
+        return f"{bounds[kind][0]} {ctx[bounds[kind][1]]}"
+    if kind == "string_too_long" and "max_length" in ctx:
+        return f"не длиннее {ru_count(int(ctx['max_length']), 'символа', 'символов', 'символов')}"
+    if kind == "string_too_short" and "min_length" in ctx:
+        return f"не короче {ru_count(int(ctx['min_length']), 'символа', 'символов', 'символов')}"
+    if kind == "too_long" and "max_length" in ctx:
+        return f"не больше {ctx['max_length']} элементов"
+    if kind == "too_short" and "min_length" in ctx:
+        return f"не меньше {ctx['min_length']} элементов"
+    if "UploadFile" in msg:
+        return "нужен файл"
+    if kind in _RU_ERRORS:
+        return _RU_ERRORS[kind]
+    if kind == "value_error" and re.search(r"[А-Яа-яЁё]", msg):
+        return re.sub(r"^Value error,\s*", "", msg)  # a validator's own words (ours are Russian)
+    return "значение не подходит"
+
+
+def _validation_message(e: Any, limit: int = 5) -> str:
+    """Pydantic's (or a request's) errors for people: «brand_priority: нужно «brand» или «template»; slides: нужно целое
+    число». The field's path stays as in the request (slides.0.kind) — the person or the client knows it by that name."""
     errors = e.errors()
     parts = []
     for err in errors[:limit]:
-        loc = ".".join(str(x) for x in err.get("loc", ()))
-        parts.append(f"{loc}: {err.get('msg')}" if loc else str(err.get("msg")))
+        loc = [x for x in err.get("loc", ()) if not (isinstance(x, str) and x in _REQUEST_PARTS)]
+        # a field's path (slides.0.kind); a bare position — where the JSON broke — says nothing to a person
+        where = ".".join(str(x) for x in loc) if any(isinstance(x, str) for x in loc) else ""
+        text = ru_validation_error(err)
+        parts.append(f"{where}: {text}" if where else text)
     more = len(errors) - limit
-    return "; ".join(parts) + (f" (+{more} more)" if more > 0 else "")
+    return "; ".join(parts) + (f" (и ещё {more})" if more > 0 else "")
+
+
+# the framework's own English words (Starlette's multipart limits, routing) said the API's way
+_FRAMEWORK_RU = [
+    (re.compile(r"Too many files\. Maximum number of files is (\d+)\."), lambda m: f"Слишком много файлов в одном запросе — до {m.group(1)}. Загрузите папку архивом .zip"),
+    (re.compile(r"Too many fields\. Maximum number of fields is (\d+)\."), lambda m: f"Слишком много полей в одном запросе — до {m.group(1)}"),
+    (re.compile(r"Part exceeded maximum size of (\d+)KB\."), lambda m: f"Поле запроса больше {m.group(1)} КБ"),
+    (re.compile(r"There was an error parsing the body|Missing boundary in multipart\.|Invalid multipart"), lambda m: "Запрос не прочитан — отправьте его ещё раз"),
+    (re.compile(r"Not Found"), lambda m: "Не найдено"),
+    (re.compile(r"Method Not Allowed"), lambda m: "Такой запрос здесь не принимается"),
+]
+
+
+def ru_framework_detail(detail: str) -> str:
+    for rx, say in _FRAMEWORK_RU:
+        m = rx.fullmatch(detail.strip())
+        if m:
+            return say(m)
+    return detail
+
+
+@app.exception_handler(RequestValidationError)
+async def _request_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """422 in the API's own format — `detail` is one line for people, in Russian (not pydantic's English list)."""
+    return JSONResponse({"detail": _validation_message(exc)}, status_code=422)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def _http_error(request: Request, exc: StarletteHTTPException):
+    """Every HTTP error as before; the framework's own English (multipart limits, «Not Found») said in Russian."""
+    if isinstance(exc.detail, str):
+        ru = ru_framework_detail(exc.detail)
+        if ru != exc.detail:
+            exc = StarletteHTTPException(exc.status_code, ru, headers=getattr(exc, "headers", None))
+    return await http_exception_handler(request, exc)
 
 
 def _serve_file(base: Path, rel: str, **kwargs) -> FileResponse:
@@ -459,8 +649,15 @@ class InputGone(ValueError):
 
 @dataclass
 class GenerationData:
-    """Вторая ступень: файлы с данными и брендбук запроса сборки, прочитанные из рабочей папки при её запуске (набор,
-    удалённый во время сборки, ей уже не мешает). Колоду из них строит Task 10 (`_run_generation`)."""
+    """Вторая ступень: файлы с данными и брендбук запроса сборки. create_generation читает их из рабочей папки при запуске
+    (и тем проверяет, что они есть), задача сборки получает их готовыми (`_run_generation`).
+
+    - Таблицы и профили — в памяти: набор, удалённый во время сборки, ей не мешает. Колода-история (verstka/data/story.py)
+      строится из них в начале задачи, после неё `_run_generation` их отпускает (остаются планы и слайды).
+    - Брендбук: `brand` (BrandSpec) — в памяти, а файлы логотипов — на диске, в `brand_dir` (brandbooks/<id>/). Задача
+      первым делом копирует их в папку сборки (`_brand_files` → runs/<gid>/brand/) и брендирует шаблон уже оттуда:
+      удалить брендбук после этого можно. Если его удалили раньше — между запуском и копированием, — копия шаблона
+      собирается без логотипов (предупреждение в журнале), цвета и шрифты остаются."""
 
     dataset_ids: list[str] = field(default_factory=list)
     tables: list[Table] = field(default_factory=list)
@@ -704,12 +901,19 @@ def image_provider():
 
 
 def _t2i_hint() -> str:
-    """Which variables the active t2i role needs (for the log): Polza's key, or the VK profile's endpoint and model."""
+    """Which variables the t2i role needs (for the log), by its links in order: VK's own model (VK_T2I_MODEL with the
+    VK inference keys — without VK_T2I_MODEL that link is off), then Polza's Z-Image (POLZA_API_KEY)."""
     p = image_provider()
-    names = {getattr(lk, "name", "") for lk in (getattr(p, "links", None) or [])}
-    if "openai_images" in names:
-        return "VK_INFERENCE_BASE_URL, VK_INFERENCE_API_KEY and VK_T2I_MODEL in .env"
-    return "POLZA_API_KEY in .env"
+    names = [getattr(lk, "name", "") for lk in (getattr(p, "links", None) or [])]
+    need: list[str] = []
+    for name in names:
+        if name == "openai_images":
+            need.append("VK_T2I_MODEL with VK_INFERENCE_API_KEY and VK_PROJECT_ID")
+        elif name == "polza_media":
+            need.append("POLZA_API_KEY")
+    if not need:
+        return "a t2i role in the models config (configs/models.yaml)" if p is None else "POLZA_API_KEY in .env"
+    return " or ".join(dict.fromkeys(need)) + " in .env"
 
 
 def _picture_failure_reply(error: str, states: Optional[list] = None) -> str:
@@ -999,34 +1203,44 @@ def job_events(job_id: str):
 # ---------------------------------------------------------------------------- routes: data files (вторая ступень)
 
 _BAD_NAME_CHARS = re.compile(r'[\x00-\x1f\x7f\\/:*?"<>|]')
+_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 _NAME_MAX = 120
 
 
+def _cut_name(name: str) -> str:
+    """At most _NAME_MAX characters, the extension kept."""
+    if len(name) <= _NAME_MAX:
+        return name
+    stem, dot, ext = name.rpartition(".")
+    ext = ext if dot and stem and len(ext) <= 10 else ""
+    return (stem if ext else name)[: _NAME_MAX - len(ext) - 1].rstrip() + (f".{ext}" if ext else "")
+
+
 def safe_file_name(raw: Optional[str], fallback: str) -> str:
-    """The file's own name for people (a card, «Источник: …», BrandSpec.file), safe as one path segment: no folders, no
-    characters a file system refuses, not hidden, at most _NAME_MAX characters with its extension kept."""
+    """A name that becomes a path (a brandbook's file or a part of its folder — BrandSpec.file is it too), safe as one
+    path segment: no folders, no characters a file system refuses, not hidden, at most _NAME_MAX characters."""
     base = re.split(r"[\\/]", raw or "")[-1]
     name = " ".join(_BAD_NAME_CHARS.sub(" ", base).split()).lstrip(". ").strip()
-    if not name:
-        return fallback
-    if len(name) > _NAME_MAX:
-        stem, dot, ext = name.rpartition(".")
-        ext = ext if dot and stem and len(ext) <= 10 else ""
-        name = (stem if ext else name)[: _NAME_MAX - len(ext) - 1].rstrip() + (f".{ext}" if ext else "")
-    return name
+    return _cut_name(name) if name else fallback
+
+
+def data_file_name(raw: Optional[str], fallback: str = "данные") -> str:
+    """A data file's name as the person gave it — the card and «Источник: …» under the chart: without its folders and
+    control characters, everything else kept («Отчёт: продажи?.csv»). It never becomes a path (the file is kept as
+    datasets/<id>/source.<ext>)."""
+    base = re.split(r"[\\/]", raw or "")[-1]
+    name = " ".join(_CONTROL_CHARS.sub(" ", base).split())
+    return _cut_name(name) if name.strip(". ") else fallback
 
 
 def _ext_of(name: str) -> str:
     return PurePosixPath(name).suffix.lower()
 
 
-def _mb(limit: int) -> str:
-    return f"{limit / (1024 * 1024):g}"
-
-
-def _dataset_issues(profile: DatasetProfile) -> list[str]:
-    """What the card says is notable in the data, shortly: «Не для графика: …», «2 пропуска», «3 выброса»."""
-    out: list[str] = []
+def _dataset_issues(profile: DatasetProfile, cut: Optional[str] = None) -> list[str]:
+    """What the card says is notable in the data, shortly: «Прочитаны первые 200 000 строк из 640 000», «Не для
+    графика: …», «2 пропуска», «3 выброса»."""
+    out: list[str] = [cut] if cut else []
     if not profile.typable:
         out.append(f"Не для графика: {profile.untypable_reason or 'данные не складываются в график'}")
     gaps = len(profile.time_axis.missing_periods) if profile.time_axis else 0
@@ -1038,8 +1252,59 @@ def _dataset_issues(profile: DatasetProfile) -> list[str]:
     return out
 
 
-def _dataset_summary(did: str, table: Table, profile: DatasetProfile) -> DatasetSummary:
-    return DatasetSummary(id=did, file=table.file, kind=table.kind, rows=profile.rows, cols=profile.cols, nature=profile.nature, line=profile.summary, issues=_dataset_issues(profile), sheet=table.sheet)
+def _dataset_summary(did: str, table: Table, profile: DatasetProfile, cut: Optional[str] = None) -> DatasetSummary:
+    return DatasetSummary(id=did, file=table.file, kind=table.kind, rows=profile.rows, cols=profile.cols, nature=profile.nature, line=profile.summary, issues=_dataset_issues(profile, cut), sheet=table.sheet)
+
+
+def _cap_rows(table: Table) -> tuple[Table, Optional[str]]:
+    """A very large table keeps its first rows (_MAX_DATA_ROWS, fewer for a wide one: _MAX_DATA_CELLS) — the profile,
+    the choice and the deck work on them; the card says so: «Прочитаны первые 200 000 строк из 640 000»."""
+    n = len(table.rows)
+    cap = max(1000, min(_MAX_DATA_ROWS, _MAX_DATA_CELLS // max(1, len(table.columns))))
+    if n <= cap:
+        return table, None
+    update: dict[str, Any] = {"rows": table.rows[:cap], "totals": [i for i in table.totals if i < cap]}
+    row_units = getattr(table, "row_units", None)
+    if row_units:
+        update["row_units"] = list(row_units)[:cap]
+    word = ru_count(cap, "строка", "строки", "строк").split(" ", 1)[1]
+    return table.model_copy(update=update), f"Прочитаны первые {_grouped(cap)} {word} из {_grouped(n)}"
+
+
+def _preliminary_plan(table: Table, profile: DatasetProfile) -> Optional[dict]:
+    """The choice without the text's goals (the build makes the real one with them): computed once — at the upload, or
+    at the first GET of a dataset kept before plan.json — then read from plan.json."""
+    try:
+        from verstka.data.plan import plan_dataset
+
+        return plan_dataset(profile, table).model_dump(mode="json")
+    except Exception:  # noqa: BLE001 - the card and the profile stand without the preliminary choice
+        log.warning("preliminary plan failed: %s", table.id, exc_info=True)
+        return None
+
+
+_OTHER_ZIPS = {".zip", ".docx", ".pptx", ".odt", ".ods", ".odp", ".key", ".numbers", ".pages"}  # the reader refuses these by name
+
+
+def _is_excel(name: str, data: bytes) -> bool:
+    """A book of Excel by its bytes (a ZIP) — an «.xlsx» that is really text reads as fast as a CSV."""
+    return data[:4] == b"PK\x03\x04" and _ext_of(name) not in _OTHER_ZIPS
+
+
+def _slow_format_limit(name: str, data: bytes) -> Optional[tuple[int, str]]:
+    """Formats that read slower than a CSV have a smaller limit (max_xlsx_bytes, max_text_bytes) and their own words."""
+    if _is_excel(name, data):
+        limit = max_xlsx_bytes()
+        return limit, f"Книга Excel «{name}» больше {_mb(limit)} МБ — сохраните нужный лист как CSV (он прочитается быстрее) или оставьте в книге только нужные листы"
+    if _ext_of(name) in (".txt", ".md", ".markdown"):
+        limit = max_text_bytes()
+        return limit, f"Текст «{name}» больше {_mb(limit)} МБ — сохраните таблицу из него как CSV (она прочитается быстрее)"
+    return None
+
+
+def _grouped(n: int) -> str:
+    """640000 → «640 000» (a no-break space between the groups, as the profile writes numbers)."""
+    return f"{n:,}".replace(",", "\u00a0")
 
 
 def _profile_of(table: Table) -> DatasetProfile:
@@ -1092,10 +1357,13 @@ def upload_datasets(files: Optional[list[UploadFile]] = File(None)) -> list[dict
     out: list[dict] = []
     try:
         for f in uploads:
-            name = safe_file_name(f.filename, "данные")
+            name = data_file_name(f.filename)
             data = f.file.read(limit + 1)
             if len(data) > limit:
                 raise HTTPException(413, f"«{name}» больше {_mb(limit)} МБ — оставьте в файле только нужные строки и листы")
+            slow = _slow_format_limit(name, data)
+            if slow is not None and len(data) > slow[0]:
+                raise HTTPException(413, slow[1])
             tables = _read_tables(name, data, several)
             if len(created) + len(tables) > _MAX_DATA_TABLES:
                 raise HTTPException(413, f"Слишком много таблиц за один раз — до {_MAX_DATA_TABLES}. Оставьте в книге только нужные листы")
@@ -1104,11 +1372,13 @@ def upload_datasets(files: Optional[list[UploadFile]] = File(None)) -> list[dict
                 did, _ = store.new_dataset_dir()
                 created.append(did)
                 # the table is known by its dataset's id: SlideData.dataset_id, the card and the request say the same
-                t = t.model_copy(update={"id": did})
+                t, cut = _cap_rows(t.model_copy(update={"id": did}))
                 profile = _profile_of(t)
-                saved = store.write_dataset(did, t, profile, source=source, data=None if source else data, ext=_ext_of(name))
+                summary = _dataset_summary(did, t, profile, cut).model_dump(mode="json")
+                saved = store.write_dataset(did, t, profile, source=source, data=None if source else data, ext=_ext_of(name),
+                                            plan=_preliminary_plan(t, profile), summary=summary)
                 source = source or saved
-                out.append(_dataset_summary(did, t, profile).model_dump(mode="json"))
+                out.append(summary)
     except BaseException:
         for did in created:
             store.delete_dataset(did)
@@ -1116,25 +1386,28 @@ def upload_datasets(files: Optional[list[UploadFile]] = File(None)) -> list[dict
     return out
 
 
-def _dataset_or_404(did: str) -> tuple[Table, DatasetProfile]:
-    loaded = store.read_dataset(did)
-    if loaded is None:
-        raise HTTPException(404, "Файл с данными не найден — приложите его снова")
-    return loaded
-
-
 @app.get("/api/datasets/{did}")
 def get_dataset(did: str) -> dict:
-    """Карточка набора, его профиль и предварительный выбор (без целей из текста: их учитывает сборка)."""
-    table, profile = _dataset_or_404(did)
-    try:
-        from verstka.data.plan import plan_dataset
-
-        plan = plan_dataset(profile, table).model_dump(mode="json")
-    except Exception:  # noqa: BLE001 - the card and the profile stand without the preliminary choice
-        log.warning("preliminary plan failed: %s", did, exc_info=True)
-        plan = None
-    return {**_dataset_summary(did, table, profile).model_dump(mode="json"), "profile": profile.model_dump(mode="json"), "plan": plan}
+    """Карточка набора, его профиль и предварительный выбор (без целей из текста: их учитывает сборка) — как их
+    посчитала загрузка (summary.json, profile.json, plan.json); таблица читается, только если чего-то из них нет."""
+    profile = store.read_dataset_profile(did)
+    if profile is None:
+        raise HTTPException(404, "Файл с данными не найден — приложите его снова")
+    summary = store.read_dataset_json(did, "summary.json")
+    plan = store.read_dataset_json(did, "plan.json")
+    if summary is None or plan is None:  # a dataset kept before these files: they are made once, now
+        loaded = store.read_dataset(did)
+        if loaded is None:
+            raise HTTPException(404, "Файл с данными не найден — приложите его снова")
+        table = loaded[0]
+        if summary is None:
+            summary = _dataset_summary(did, table, profile).model_dump(mode="json")
+            store.write_dataset_json(did, "summary.json", summary)
+        if plan is None:
+            plan = _preliminary_plan(table, profile)
+            if plan is not None:
+                store.write_dataset_json(did, "plan.json", plan)
+    return {**summary, "id": did, "profile": profile.model_dump(mode="json"), "plan": plan}
 
 
 @app.delete("/api/datasets/{did}")
@@ -1308,14 +1581,46 @@ def _brandbook_source(bdir: Path, file: Optional[UploadFile], files: list[Upload
     left = limit
     for rel, f in kept:
         target = src.joinpath(*((wrap,) if wrap else ()), *rel.parts)
-        target.parent.mkdir(parents=True, exist_ok=True)
+        clash = HTTPException(400, f"В папке брендбука файл и папка называются одинаково («{rel.as_posix()}») — переименуйте один из них или загрузите папку архивом .zip")
+        if target.is_dir():
+            raise clash  # «a/b.png», then «a»; names that clean to the same one («a?», «a*») too
         if target.exists():
             continue  # the same path twice: the first one stays
-        size = _save_limited(f, target, left)
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            size = _save_limited(f, target, left)
+        except OSError:
+            raise clash  # «a», then «a/b.png»: a file stands where a folder should go
         if size < 0:
             raise HTTPException(413, f"Папка брендбука больше {_mb(limit)} МБ — уберите из неё лишнее или загрузите архив .zip")
         left -= size
     return src / (wrap or next(iter(tops)))
+
+
+def _brand_opened(source: Path | str) -> Optional[tuple[str, dict]]:
+    """The «open» step said before the reading (the reader tells its steps only at its end, and a PDF read by the model
+    takes up to two minutes): the PDF's pages, the archive's or the folder's files. None — nothing quick to say."""
+    if isinstance(source, str):
+        return None  # a Figma link: nothing is open before the answer
+    try:
+        if source.is_dir():
+            n = sum(1 for p in source.rglob("*") if p.is_file())
+            return f"Открыта папка: {ru_count(n, 'файл', 'файла', 'файлов')}", {"source": "folder", "file": source.name}
+        ext = source.suffix.lower()
+        if ext == ".pdf":
+            from pypdf import PdfReader
+
+            n = len(PdfReader(str(source)).pages)
+            return f"Открыт файл: {ru_count(n, 'страница', 'страницы', 'страниц')}", {"source": "pdf", "file": source.name, "pages": n}
+        if ext == ".zip":
+            import zipfile
+
+            with zipfile.ZipFile(source) as z:
+                n = sum(1 for i in z.infolist() if not i.is_dir())
+            return f"Открыт архив: {ru_count(n, 'файл', 'файла', 'файлов')}", {"source": "folder", "file": source.name}
+    except Exception:  # noqa: BLE001 - the reader says what is wrong with the file
+        return None
+    return None
 
 
 @app.post("/api/brandbooks")
@@ -1352,6 +1657,11 @@ def upload_brandbook(
     def run(job: Job) -> dict:
         try:
             job.emit("Открываю брендбук", 0.05)
+            opened = _brand_opened(source)
+            if opened is not None:
+                job.emit(opened[0], 0.12, step="open", brand=opened[1])
+            if use_vlm and isinstance(source, Path) and source.suffix.lower() == ".pdf":
+                job.emit("Страницы гайдлайна смотрит модель — это до двух минут", 0.14)
             p = providers() if use_vlm else None
             try:
                 spec = read_brandbook(
@@ -1367,9 +1677,8 @@ def upload_brandbook(
             for key, (what, result), part, at in zip(_BRAND_STEPS, brand_steps(spec), _brand_partials(spec), _BRAND_STEP_AT):
                 job.emit(f"{what[:1].upper()}{what[1:]}: {result}", at, step=key, brand=part)
             manifest, conflicts = _conflicts_with(spec, template_id, bdir)
-            if not marker.exists():
+            if not marker.exists() or not store.write_brandbook(bid, spec):
                 raise ValueError(_BRAND_REMOVED)
-            store.write_brandbook(bid, spec)
             marker.unlink(missing_ok=True)
             found = ru_count(len(conflicts), "расхождение", "расхождения", "расхождений") if conflicts else "расхождений нет"
             job.emit(f"Сверка с шаблоном: {found if manifest is not None else 'шаблон не выбран'}", 0.96, step="compare", conflicts=[c.model_dump(mode="json") for c in conflicts])

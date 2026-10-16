@@ -39,7 +39,7 @@ REVENUE = (
 def api(tmp_path, monkeypatch):
     store = Store(tmp_path)
     monkeypatch.setattr(A, "store", store)
-    for var in ("VERSTKA_MAX_DATA_MB", "VERSTKA_MAX_BRAND_MB"):
+    for var in ("VERSTKA_MAX_DATA_MB", "VERSTKA_MAX_BRAND_MB", "VERSTKA_MAX_XLSX_MB", "VERSTKA_MAX_TEXT_MB", "VERSTKA_MAX_UPLOAD_MB"):
         monkeypatch.delenv(var, raising=False)
     return TestClient(A.app), store, tmp_path
 
@@ -86,8 +86,9 @@ def test_a_csv_becomes_a_card_and_is_kept(api):
     assert card["nature"] == "time_series" and card["nature_label"] == "Временной ряд" and card["sheet"] is None
     assert card["line"].startswith("Временной ряд · 12 строк")
     d = root / "datasets" / card["id"]
-    assert sorted(p.name for p in d.iterdir()) == ["profile.json", "source.csv", "table.json"]
+    assert sorted(p.name for p in d.iterdir()) == ["plan.json", "profile.json", "source.csv", "summary.json", "table.json"]
     assert (d / "source.csv").read_bytes() == REVENUE
+    assert json.loads((d / "summary.json").read_text(encoding="utf-8")) == card
     # the table and its profile are known by the dataset's id (SlideData.dataset_id, the card and the request agree)
     assert json.loads((d / "table.json").read_text(encoding="utf-8"))["id"] == card["id"]
     assert json.loads((d / "profile.json").read_text(encoding="utf-8"))["table_id"] == card["id"]
@@ -230,7 +231,8 @@ def test_no_file_is_said_in_words(api):
     ("../../evil.csv", "evil.csv"),
     ("..\\..\\win.csv", "win.csv"),
     ("/etc/passwd.csv", "passwd.csv"),
-    ("a<b>:c|?.csv", "a b c .csv"),
+    ("Отчёт: продажи?.csv", "Отчёт: продажи?.csv"),  # a data file's name is never a path: kept as people wrote it
+    ("a<b>|*.csv", "a<b>|*.csv"),
     ("..", "данные"),
 ])
 def test_file_names_are_safe(api, raw, shown):
@@ -239,7 +241,9 @@ def test_file_names_are_safe(api, raw, shown):
     assert r.status_code == 200, r.text
     (card,) = r.json()
     assert card["file"] == shown
-    assert sorted(p.name for p in (root / "datasets" / card["id"]).iterdir())[1].startswith("source")
+    d = root / "datasets" / card["id"]
+    assert [p.name for p in d.iterdir() if p.name.startswith("source")] == ["source.csv"] or shown == "данные"
+    assert c.get(f"/api/datasets/{card['id']}").json()["plan"]["source"].endswith(shown)
     assert not (root.parent / "evil.csv").exists() and not (root / "evil.csv").exists()
 
 
@@ -248,6 +252,10 @@ def test_safe_file_name_keeps_the_extension_of_a_long_name():
     assert len(name) <= 120 and name.endswith(".xlsx")
     assert A.safe_file_name("a\x00b\tc\x7f.csv", "x") == "a b c .csv"
     assert A.safe_file_name(".hidden.csv", "x") == "hidden.csv" and A.safe_file_name("...", "x") == "x"
+    assert A.safe_file_name("Отчёт: продажи?.pdf", "x") == "Отчёт продажи .pdf"  # a brandbook's name becomes a path
+    assert A.data_file_name("C:\\Users\\Отчёт: продажи?.csv") == "Отчёт: продажи?.csv"
+    assert A.data_file_name("a\x00b\tc.csv") == "a b c.csv" and A.data_file_name("..") == "данные"
+    assert len(A.data_file_name("Очень " * 60 + ".csv")) <= 120
 
 
 # ============================================================================================ брендбук
@@ -685,3 +693,243 @@ def test_a_deck_built_on_a_branded_copy_holds_its_template(api, monkeypatch):
     r = c.delete("/api/templates/aaaaaaaaaaaaaaaa")
     assert r.status_code == 409 and "собирается" in r.json()["detail"]
     assert (root / "templates" / "bbbbbbbbbbbbbbbb").exists()
+
+
+# ============================================================================================ ошибки по-русски, размеры, кэш
+
+
+def test_folder_file_and_folder_with_one_name_is_a_calm_400(api):
+    c, _, root = api
+    png = (BRAND / "logos" / "primary.png").read_bytes()
+    cases = [
+        [("files", ("Бренд/a", b"x", "text/plain")), ("files", ("Бренд/a/b.png", png, "image/png"))],  # a file, then a folder
+        [("files", ("Бренд/a/b.png", png, "image/png")), ("files", ("Бренд/a", b"x", "text/plain"))],  # a folder, then a file
+        [("files", ("Бренд/a?/b.png", png, "image/png")), ("files", ("Бренд/a*", b"x", "text/plain"))],  # names that clean alike
+    ]
+    for parts in cases:
+        r = c.post("/api/brandbooks", files=parts)
+        assert r.status_code == 400 and "называются одинаково" in r.json()["detail"], r.text
+    assert _dirs(root, "brandbooks") == []
+
+
+@pytest.mark.parametrize("call,detail", [
+    (lambda c: c.post("/api/generations", json={"template_id": "0123456789abcdef", "brief": "x", "brand_priority": "both"}), "brand_priority: нужно «brand» или «template»"),
+    (lambda c: c.post("/api/generations", json={"template_id": "0123456789abcdef", "brief": "x", "slides": "z"}), "slides: нужно целое число"),
+    (lambda c: c.post("/api/generations", json={"brief": "x"}), "template_id: обязательное поле"),
+    (lambda c: c.post("/api/generations", content=b"{bad", headers={"content-type": "application/json"}), "запрос — не JSON"),
+    (lambda c: c.post("/api/brandbooks", data={"use_models": "abc", "figma_url": "x"}), "use_models: нужно «да» или «нет» (true / false)"),
+    (lambda c: c.post("/api/datasets", data={"files": "x"}), "files.0: нужен файл"),
+])
+def test_validation_errors_are_said_in_russian(api, call, detail):
+    c, _, _ = api
+    r = call(c)
+    assert r.status_code == 422 and r.json() == {"detail": detail}
+
+
+def test_an_outline_that_does_not_read_is_said_in_russian():
+    from pydantic import ValidationError
+
+    from verstka.schemas.outline import DeckOutline
+
+    with pytest.raises(ValidationError) as e:
+        DeckOutline.model_validate({"title": "x", "slides": [{"kind": "nope"}]})
+    msg = A._validation_message(e.value)
+    assert "slides.0.kind: нужно «title», «section»" in msg and "slides.0.headline: обязательное поле" in msg and "Input should" not in msg
+
+
+def test_framework_errors_are_said_in_russian(api):
+    c, _, _ = api
+    parts = [("files", (f"f{i}.csv", b"a", "text/csv")) for i in range(1001)]
+    r = c.post("/api/datasets", files=parts)
+    assert r.status_code == 400 and r.json()["detail"].startswith("Слишком много файлов в одном запросе — до 1000")
+    assert c.get("/api/nope").json()["detail"] == "Не найдено"
+    assert c.put("/api/health").json()["detail"] == "Такой запрос здесь не принимается"
+    # the API's own errors are as they were
+    assert c.get("/api/datasets/000000000000").json() == {"detail": "Файл с данными не найден — приложите его снова"}
+
+
+def test_an_oversize_body_is_refused_before_it_is_read(api, monkeypatch):
+    """Content-Length over the route's limit → 413 at once: the multipart parser never runs (nothing goes to disk)."""
+    from starlette.formparsers import MultiPartParser
+
+    async def never(self):
+        raise AssertionError("the body was parsed")
+
+    monkeypatch.setattr(MultiPartParser, "parse", never)
+    c, _, root = api
+    monkeypatch.setenv("VERSTKA_MAX_DATA_MB", "0.01")  # 10 files × 10 КБ + 1 МБ of headers
+    body = b"x" * (A._SLACK + 200_000)
+    r = c.post("/api/datasets", files=[("files", ("big.csv", body, "text/csv"))])
+    assert r.status_code == 413 and r.json()["detail"].startswith("Файлы с данными больше") and "по одному" in r.json()["detail"]
+    monkeypatch.setenv("VERSTKA_MAX_BRAND_MB", "0.01")
+    r = c.post("/api/brandbooks", files={"file": ("b.pdf", body, "application/pdf")})
+    assert r.status_code == 413 and r.json()["detail"].startswith("Брендбук больше 0,01 МБ")
+    monkeypatch.setenv("VERSTKA_MAX_UPLOAD_MB", "0.01")
+    r = c.post("/api/templates", files={"file": ("t.pptx", body, "application/octet-stream")})
+    assert r.status_code == 413 and "МБ" in r.json()["detail"]
+    assert _dirs(root, "datasets") == [] and _dirs(root, "brandbooks") == []
+    # a body within the limits goes on: the parser is reached (here it breaks — said in Russian, as the framework's words are)
+    monkeypatch.delenv("VERSTKA_MAX_DATA_MB")
+    r = c.post("/api/datasets", files=[("files", ("small.csv", b"a;b\n1;2\n", "text/csv"))])
+    assert r.status_code == 400 and r.json()["detail"] == "Запрос не прочитан — отправьте его ещё раз"
+
+
+def test_a_huge_table_keeps_its_first_rows_and_says_so(api, monkeypatch):
+    c, _, root = api
+    monkeypatch.setattr(A, "_MAX_DATA_ROWS", 5000)
+    rows = "Месяц;Выручка\n" + "\n".join(f"2025-{1 + i % 12:02d};{i}" for i in range(12000)) + "\n"
+    r = c.post("/api/datasets", files=[("files", ("Много.csv", rows.encode(), "text/csv"))])
+    assert r.status_code == 200, r.text
+    (card,) = r.json()
+    assert card["rows"] == 5000 and card["issues"][0] == "Прочитаны первые 5 000 строк из 12 000"
+    assert "5 000 строк" in card["line"]
+    table = json.loads((root / "datasets" / card["id"] / "table.json").read_text(encoding="utf-8"))
+    assert len(table["rows"]) == 5000
+    assert c.get(f"/api/datasets/{card['id']}").json()["issues"][0].startswith("Прочитаны первые")
+    # a wide table: the cap is by cells
+    monkeypatch.setattr(A, "_MAX_DATA_ROWS", 200_000)
+    monkeypatch.setattr(A, "_MAX_DATA_CELLS", 4000)
+    wide = ";".join(f"К{j}" for j in range(4)) + "\n" + "\n".join(";".join(str(i * j) for j in range(4)) for i in range(3000)) + "\n"
+    (card,) = c.post("/api/datasets", files=[("files", ("Широкая.csv", wide.encode(), "text/csv"))]).json()
+    assert card["rows"] == 1000 and card["issues"][0] == "Прочитаны первые 1 000 строк из 3 000"
+
+
+def test_cap_rows_keeps_totals_and_row_units_in_step():
+    t = A.Table(id="t", file="x.csv", kind="csv", columns=["a", "b"], rows=[[str(i), i] for i in range(3000)], totals=[5, 2500])
+    capped, cut = A._cap_rows(t)
+    assert cut is None and capped is t
+    old = A._MAX_DATA_ROWS
+    try:
+        A._MAX_DATA_ROWS = 1000
+        capped, cut = A._cap_rows(t)
+    finally:
+        A._MAX_DATA_ROWS = old
+    assert len(capped.rows) == 1000 and capped.totals == [5] and cut == "Прочитаны первые 1 000 строк из 3 000"
+
+
+def test_a_book_of_excel_has_its_own_limit(api, monkeypatch):
+    c, _, root = api
+    book = _xlsx({"Лист": [["Регион", "Выручка"]] + [[f"Регион {i}", i] for i in range(300)]})
+    monkeypatch.setenv("VERSTKA_MAX_XLSX_MB", str(len(book) / 2 / 1024 / 1024))
+    r = c.post("/api/datasets", files=[("files", ("Регионы.xlsx", book, "application/octet-stream"))])
+    assert r.status_code == 413 and r.json()["detail"].startswith("Книга Excel «Регионы.xlsx» больше") and "CSV" in r.json()["detail"]
+    # a CSV of the same size is fine, and so is a «.xlsx» that is really text
+    text = ("Регион;Выручка\n" + "\n".join(f"Регион {i};{i}" for i in range(2000)) + "\n").encode()
+    assert len(text) > len(book) / 2
+    assert c.post("/api/datasets", files=[("files", ("Регионы.csv", text, "text/csv"))]).status_code == 200
+    assert c.post("/api/datasets", files=[("files", ("Выгрузка.xlsx", text, "application/octet-stream"))]).status_code == 200
+    # a text with a table has its own limit too
+    monkeypatch.setenv("VERSTKA_MAX_TEXT_MB", str(len(text) / 2 / 1024 / 1024))
+    r = c.post("/api/datasets", files=[("files", ("Итоги.txt", text, "text/plain"))])
+    assert r.status_code == 413 and r.json()["detail"].startswith("Текст «Итоги.txt» больше") and "CSV" in r.json()["detail"]
+    assert c.post("/api/datasets", files=[("files", ("Итоги.csv", text, "text/csv"))]).status_code == 200
+
+
+def test_the_plan_is_computed_once(api, monkeypatch):
+    import verstka.data.plan as PL
+
+    c, store, root = api
+    did = c.post("/api/datasets", files=[("files", ("Выручка.csv", REVENUE, "text/csv"))]).json()[0]["id"]
+    first = c.get(f"/api/datasets/{did}").json()
+    monkeypatch.setattr(PL, "plan_dataset", lambda *a, **k: (_ for _ in ()).throw(AssertionError("recomputed")))
+    monkeypatch.setattr(store, "read_dataset", lambda *a: (_ for _ in ()).throw(AssertionError("the table was read")))
+    again = c.get(f"/api/datasets/{did}").json()
+    assert again == first and again["plan"]["task"]["task"] == "dynamics"
+
+
+def test_a_dataset_kept_before_the_cache_gets_it_once(api):
+    c, store, root = api
+    did = c.post("/api/datasets", files=[("files", ("Выручка.csv", REVENUE, "text/csv"))]).json()[0]["id"]
+    d = root / "datasets" / did
+    (d / "plan.json").unlink()
+    (d / "summary.json").unlink()
+    got = c.get(f"/api/datasets/{did}").json()
+    assert got["plan"]["options"][0]["kind"] == "line" and got["file"] == "Выручка.csv"
+    assert (d / "plan.json").is_file() and (d / "summary.json").is_file()
+
+
+def test_interrupted_brandbooks_are_swept_at_start(api, monkeypatch):
+    import os
+
+    import verstka.providers.registry as REG
+
+    c, store, root = api
+    old, fresh, done = (root / "brandbooks" / n for n in ("old000000001", "new000000001", "fin000000001"))
+    for d in (old, fresh, done):
+        (d / "source").mkdir(parents=True)
+        (d / ".parsing").write_text("gone0000", encoding="utf-8")
+    (done / "brand.json").write_text("{}", encoding="utf-8")
+    past = time.time() - A._BRAND_SWEEP_AGE - 60
+    os.utime(old / ".parsing", (past, past))
+    os.utime(done / ".parsing", (past, past))
+    asked = []
+    monkeypatch.setattr(REG, "default_models_path", lambda: asked.append(1) or Path("configs/models.yaml"))
+    with TestClient(A.app):  # the lifespan: the models profile is logged, interrupted brandbooks go
+        pass
+    assert asked and not old.exists() and fresh.exists() and done.exists()
+
+
+def test_a_brandbook_removed_at_the_last_moment_is_not_done(api, monkeypatch):
+    c, store, root = api
+    monkeypatch.setattr(store, "write_brandbook", lambda bid, spec: False)
+    bid, job = _upload_brand(c, files={"file": ("tokens.json", (BRAND / "tokens.json").read_bytes(), "application/json")})
+    assert job.status == "failed" and job.message == f"Не получилось: {A._BRAND_REMOVED}"
+    assert not (root / "brandbooks" / bid).exists()
+
+
+def test_the_open_step_comes_before_the_reading(api, monkeypatch):
+    """The reader tells its steps at its end: «open» (with the PDF's pages) is said before it starts."""
+    import verstka.brand.read as BR
+
+    seen = []
+    real = BR.read_brandbook
+
+    def spy(source, **kw):
+        seen.append([e.get("step") for e in A.runner.get(jid[0]).events if e.get("step")])
+        return real(source, **kw)
+
+    jid = []
+    monkeypatch.setattr(BR, "read_brandbook", spy)
+    orig_submit = A.runner.submit
+
+    def submit(kind, fn):
+        job = orig_submit(kind, lambda j: (jid.append(j.id), fn(j))[1])
+        return job
+
+    monkeypatch.setattr(A.runner, "submit", submit)
+    c, _, _ = api
+    bid, job = _upload_brand(c, files={"file": ("Брендбук VK Cloud.pdf", (BRAND / "guideline.pdf").read_bytes(), "application/pdf")})
+    assert job.status == "done", job.error
+    assert seen == [["open"]]
+    first = next(e for e in job.events if e.get("step") == "open")
+    assert first["message"] == "Открыт файл: 12 страниц" and first["brand"]["pages"] == 12 and first["progress"] < 0.17
+    steps = [e["step"] for e in job.events if e.get("step")]
+    assert steps == ["open", "open", "palette", "fonts", "logos", "rules", "compare"]
+
+
+def test_brand_opened_for_each_source(tmp_path):
+    z = tmp_path / "b.zip"
+    z.write_bytes(_zip({"VK/tokens.json": b"{}", "VK/logos/a.png": b"x", "VK/": b""}))
+    assert A._brand_opened(z)[0] == "Открыт архив: 2 файла"
+    d = tmp_path / "Бренд"
+    (d / "logos").mkdir(parents=True)
+    (d / "logos" / "a.png").write_bytes(b"x")
+    assert A._brand_opened(d) == ("Открыта папка: 1 файл", {"source": "folder", "file": "Бренд"})
+    assert A._brand_opened("https://www.figma.com/design/AbC/x") is None
+    assert A._brand_opened(tmp_path / "t.json") is None
+    bad = tmp_path / "bad.pdf"
+    bad.write_bytes(b"%PDF-1.4 broken")
+    assert A._brand_opened(bad) is None
+
+
+def test_the_t2i_hint_names_polza_when_vk_has_no_image_model(monkeypatch):
+    import verstka.images.providers as IP
+
+    monkeypatch.setattr(IP, "_CACHE", {})
+    monkeypatch.setenv("VERSTKA_MODELS", "configs/models.vk.yaml")
+    monkeypatch.delenv("VK_T2I_MODEL", raising=False)
+    hint = A._t2i_hint()
+    assert "POLZA_API_KEY" in hint and "VK_T2I_MODEL" in hint
+    monkeypatch.setattr(IP, "_CACHE", {})
+    monkeypatch.setenv("VERSTKA_MODELS", "configs/models.yaml")
+    assert A._t2i_hint() == "POLZA_API_KEY in .env"

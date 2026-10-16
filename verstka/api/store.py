@@ -258,8 +258,9 @@ class Store:
         return False
 
     # ---- datasets (вторая ступень) ----------------------------------------------------
-    # datasets/<id>/{source.<ext>, table.json, profile.json}: одна таблица (лист XLSX, ключ JSON, таблица в тексте) — одна
-    # папка; у книги из нескольких листов исходный файл лежит в папке каждого листа (жёсткой ссылкой, где можно)
+    # datasets/<id>/{source.<ext>, table.json, profile.json, plan.json, summary.json}: одна таблица (лист XLSX, ключ JSON,
+    # таблица в тексте) — одна папка; у книги из нескольких листов исходный файл лежит в папке каждого листа (жёсткой
+    # ссылкой, где можно). plan.json — предварительный выбор без целей текста, summary.json — карточка (как при загрузке)
 
     def new_dataset_dir(self) -> tuple[str, Path]:
         did = uuid.uuid4().hex[:12]
@@ -272,9 +273,10 @@ class Store:
         return d if d is not None and d.is_dir() else None
 
     def write_dataset(self, did: str, table: Table, profile: DatasetProfile, *, source: Optional[Path] = None,
-                      data: Optional[bytes] = None, ext: str = "") -> Optional[Path]:
-        """Таблица, её профиль и исходный файл набора (`source` — уже сохранённый файл другого листа той же книги,
-        иначе `data`). Возвращает путь исходного файла в папке набора."""
+                      data: Optional[bytes] = None, ext: str = "", plan: Optional[dict] = None,
+                      summary: Optional[dict] = None) -> Optional[Path]:
+        """Таблица, её профиль, исходный файл набора (`source` — уже сохранённый файл другого листа той же книги,
+        иначе `data`), предварительный выбор и карточка. Возвращает путь исходного файла в папке набора."""
         d = self.dataset_dir(did)
         if d is None:
             return None
@@ -289,6 +291,9 @@ class Store:
             target.write_bytes(data)
         _write_text_atomic(d / "table.json", table.model_dump_json())
         _write_text_atomic(d / "profile.json", profile.model_dump_json(indent=2))
+        for name, value in (("plan.json", plan), ("summary.json", summary)):
+            if value is not None:
+                _write_json_atomic(d / name, value)
         return target
 
     def read_dataset(self, did: str) -> Optional[tuple[Table, DatasetProfile]]:
@@ -303,9 +308,33 @@ class Store:
             return None
         return table, profile
 
-    def has_dataset(self, did: str) -> bool:
+    def read_dataset_profile(self, did: str) -> Optional[DatasetProfile]:
+        """Профиль набора без таблицы (таблица большого набора читается секунды)."""
         d = self.dataset_dir(did)
-        return d is not None and (d / "table.json").is_file() and (d / "profile.json").is_file()
+        if d is None or not (d / "table.json").is_file():
+            return None
+        try:
+            return DatasetProfile.model_validate_json((d / "profile.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+
+    def read_dataset_json(self, did: str, name: str) -> Optional[dict]:
+        """plan.json или summary.json набора; None — файла нет (набор сохранён до них) или он не читается."""
+        d = self.dataset_dir(did)
+        if d is None or name not in ("plan.json", "summary.json"):
+            return None
+        try:
+            value = json.loads((d / name).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        return value if isinstance(value, dict) else None
+
+    def write_dataset_json(self, did: str, name: str, value: dict) -> bool:
+        d = self.dataset_dir(did)
+        if d is None or name not in ("plan.json", "summary.json"):
+            return False
+        _write_json_atomic(d / name, value)
+        return True
 
     def delete_dataset(self, did: str) -> bool:
         d = self.dataset_dir(did)
@@ -361,3 +390,22 @@ class Store:
             return False
         shutil.rmtree(d, ignore_errors=True)
         return not d.exists()
+
+    def sweep_interrupted_brandbooks(self, older_than: float) -> list[str]:
+        """Брендбуки, чей разбор прервал перезапуск: `.parsing` без brand.json, старше `older_than` секунд, — убираются
+        (их задачи больше нет, GET и так отвечает 404). Возвращает их id."""
+        now = time.time()
+        gone = []
+        for d in sorted(self.brandbooks.glob("*")):
+            marker = d / BRAND_PARSING
+            if not d.is_dir() or not _ID_RE.fullmatch(d.name) or (d / BRAND_FILE).exists() or not marker.is_file():
+                continue
+            try:
+                if now - marker.stat().st_mtime < older_than:
+                    continue
+            except OSError:
+                continue
+            shutil.rmtree(d, ignore_errors=True)
+            if not d.exists():
+                gone.append(d.name)
+        return gone
