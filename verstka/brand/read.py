@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from verstka.brand.common import BrandReadError
-from verstka.brand.figma import FIG_FILE, is_figma_url, read_figma_url
+from verstka.brand.figma import FIG_FILE, normalize_url, read_figma_url
 from verstka.brand.folder import read_collection, read_folder, read_zip
 from verstka.brand.pdf import read_pdf
 from verstka.brand.tokens import read_tokens
@@ -58,12 +58,12 @@ def read_brandbook(source: Path | str, *, providers: Any = None, skills: Any = N
     `assets_dir` — куда сложить логотипы (из PDF, папки или архива); пути в `BrandSpec.logos` — относительно неё.
     `figma_token` / `figma_client` — для ссылок Figma (по умолчанию `FIGMA_TOKEN` из окружения и настоящий HTTP)."""
     kw = dict(providers=providers, skills=skills, use_vlm=use_vlm, assets_dir=assets_dir)
-    if isinstance(source, str) and re.match(r"^\s*[a-z][a-z0-9+.-]*://", source, re.I):
-        url = source.strip()
-        if not is_figma_url(url):
-            raise BrandReadError("По ссылке читаю только файлы Figma. Другой брендбук загрузите файлом: PDF, JSON с токенами, "
-                                 "папку или ZIP с логотипами и примерами слайдов.")
-        spec = read_figma_url(url, token=figma_token, client=figma_client)
+    figma_url = normalize_url(source) if isinstance(source, str) else None
+    if figma_url is None and isinstance(source, str) and re.match(r"^\s*[a-z][a-z0-9+.-]*://", source, re.I):
+        raise BrandReadError("По ссылке читаю только файлы Figma. Другой брендбук загрузите файлом: PDF, JSON с токенами, "
+                             "папку или ZIP с логотипами и примерами слайдов.")
+    if figma_url is not None and not Path(source).exists():
+        spec = read_figma_url(figma_url, token=figma_token, client=figma_client)
     else:
         path = Path(source)
         if not path.exists():

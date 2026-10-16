@@ -153,6 +153,20 @@ def rgb_distance(a: str, b: str) -> float:
     return sum((x - y) ** 2 for x, y in zip(pa, pb)) ** 0.5
 
 
+# слова, которые не бывают именем цвета: «Default», «Base», «blue-500»
+_NAME_JUNK_WORDS = {"default", "base", "main", "normal", "regular", "standard", "color", "colour", "colors", "colours", "palette", "brand"}
+
+
+def usable_color_name(name: Optional[str]) -> Optional[str]:
+    """Имя цвета для людей («VK Blue», «Acme Coral»): не слово-роль («Primary», «Основной»), не «Default» и не шкала («blue-500»)."""
+    n = (name or "").strip()
+    if not n or len(n) > 30 or color_role(words(n)) is not None or n.lower() in _NAME_JUNK_WORDS:
+        return None
+    if re.fullmatch(r"[a-zа-яё]+[\s_-]?\d{2,3}", n.lower()):
+        return None
+    return n
+
+
 @dataclass
 class ColorHit:
     """Цвет, найденный читателем: HEX, роль, если брендбук её назвал, имя («VK Blue»). `approx` — HEX пересчитан из CMYK

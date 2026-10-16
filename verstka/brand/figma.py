@@ -27,13 +27,19 @@ from verstka.brand.common import (
     make_fonts,
     make_palette,
     parse_color,
+    usable_color_name,
     weight_of,
     words,
 )
 from verstka.schemas.brand import BrandRule, BrandSpec
 
 API = "https://api.figma.com/v1"
-_URL_RE = re.compile(r"^https?://(?:[\w-]+\.)?figma\.com/(?:file|design|proto|board|slides|deck)/([A-Za-z0-9]{10,})", re.I)
+# ссылки на файлы Figma: design, file (старый вид), proto, board (FigJam), slides, deck, make; у ветки — свой ключ
+# («…/design/<ключ файла>/branch/<ключ ветки>/<название>»): читается ветка, а не основной файл
+_URL_RE = re.compile(
+    r"^https?://(?:[\w-]+\.)?figma\.com/(?:file|design|proto|board|slides|deck|make)/([A-Za-z0-9]{10,})(?:/branch/([A-Za-z0-9]{10,}))?", re.I
+)
+_HOST_RE = re.compile(r"^https?://(?:[\w-]+\.)?figma\.com/", re.I)
 _STATE = re.compile(r"(?<![a-z])(hover|pressed|active|focus|disabled|overlay|shadow|border|stroke|divider)(?![a-z])")
 
 NO_TOKEN = (
@@ -47,15 +53,25 @@ FIG_FILE = (
 )
 
 
+def normalize_url(s: object) -> Optional[str]:
+    """Ссылка на Figma в привычном виде: пробелы, скобки «<…>», кавычки и отсутствие «https://» не мешают
+    («figma.com/design/…» из адресной строки). Не ссылка на figma.com — None."""
+    t = str(s).strip().strip("<>\"'«»").strip()
+    if re.match(r"^(?:[\w-]+\.)?figma\.com/", t, re.I):
+        t = "https://" + t
+    return t if _HOST_RE.match(t) else None
+
+
 def is_figma_url(s: str) -> bool:
-    return bool(re.match(r"^https?://(?:[\w-]+\.)?figma\.com/", str(s).strip(), re.I))
+    return normalize_url(s) is not None
 
 
 def figma_key(url: str) -> str:
-    m = _URL_RE.match(str(url).strip())
+    """Ключ файла из ссылки; у ветки — ключ ветки (по нему REST API отдаёт именно ветку)."""
+    m = _URL_RE.match(normalize_url(url) or "")
     if not m:
         raise BrandReadError("Не похоже на ссылку на файл Figma: нужна ссылка вида https://www.figma.com/design/<ключ>/<название>.")
-    return m.group(1)
+    return m.group(2) or m.group(1)
 
 
 # ---- переменные ---------------------------------------------------------------------------------------------------------
@@ -112,7 +128,7 @@ def _parse_variables(data: dict, parts: _Parts) -> None:
         if typ == "COLOR":
             hx = parse_color(val)
             if hx and not _STATE.search(w):
-                parts.colors.append(ColorHit(hx, color_role(w), nm.split("/")[-1].strip() or None))
+                parts.colors.append(ColorHit(hx, color_role(w), usable_color_name(nm.split("/")[-1])))
                 if desc and looks_like_rule(desc):
                     add_rule(parts.rules, desc)
         elif typ == "STRING" and isinstance(val, str):
@@ -207,6 +223,7 @@ def _solid(fills: Any) -> Optional[str]:
 def read_figma_url(url: str, *, token: Optional[str] = None, client: Any = None, timeout: float = 20.0) -> BrandSpec:
     """Ссылка на файл Figma → `BrandSpec` через REST API. `client` — для проверок (httpx.Client с подменным транспортом)."""
     key = figma_key(url)
+    url = normalize_url(url) or url
     token = (token or os.environ.get("FIGMA_TOKEN") or "").strip()
     if not token:
         raise BrandReadError(NO_TOKEN)
@@ -236,7 +253,7 @@ def read_figma_url(url: str, *, token: Optional[str] = None, client: Any = None,
                 if st.get("styleType") == "FILL":
                     hx = _solid(node.get("fills"))
                     if hx and not _STATE.search(w):
-                        parts.colors.append(ColorHit(hx, color_role(w), sname.split("/")[-1].strip() or None))
+                        parts.colors.append(ColorHit(hx, color_role(w), usable_color_name(sname.split("/")[-1])))
                 else:
                     ts = node.get("style") or {}
                     fam = ts.get("fontFamily")

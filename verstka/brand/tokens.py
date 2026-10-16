@@ -40,6 +40,7 @@ from verstka.brand.common import (
     name_from_path,
     parse_color,
     to_px,
+    usable_color_name,
     weight_of,
     words,
 )
@@ -235,7 +236,7 @@ def _dimension_px(value: Any) -> Optional[float]:
 def _color_name(t: Token, idx: dict[str, Token]) -> Optional[str]:
     """Имя цвета: имя из списка палитры, описание примитива («VK Blue») или его ключ, если он написан как имя («VK Blue»), а не
     «blue-500» и не слово-роль («Основной»)."""
-    if t.name and color_role(words(t.name)) is None:
+    if usable_color_name(t.name):
         return t.name
     for tok in (_alias_target(t.value, idx), t):
         if tok is None:
@@ -245,8 +246,8 @@ def _color_name(t: Token, idx: dict[str, Token]) -> Optional[str]:
             return d
     target = _alias_target(t.value, idx)
     key = (target or t).path[-1] if (target or t).path else ""
-    if key and (" " in key or any(c.isupper() for c in key)) and len(key) <= 30 and color_role(words(key)) is None:
-        return key
+    if key and (" " in key or any(c.isupper() for c in key)):
+        return usable_color_name(key)
     return None
 
 

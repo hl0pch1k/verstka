@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import re
 import shutil
+import subprocess
 import tempfile
 import zipfile
 from pathlib import Path, PurePosixPath
@@ -28,6 +29,7 @@ from verstka.brand.common import (
     make_fonts,
     make_palette,
     name_from_path,
+    parse_color,
     rgb_distance,
     rgb_hex,
 )
@@ -52,21 +54,48 @@ _STOCK_ACCENTS = {("4472C4", "ED7D31"), ("4F81BD", "C0504D"), ("156082", "E97132
 
 
 # ---- логотипы ------------------------------------------------------------------------------------------------------------
+_SHAPES = re.compile(r"<(?:path|rect|circle|ellipse|polygon|polyline)\b")
+_FILL_RE = re.compile(r"(?:fill|stop-color)\s*[:=]\s*[\"']?\s*(#[0-9A-Fa-f]{3,8}|rgba?\([^)]*\)|[A-Za-z]+)")
+
+
+def _svg_fills(text: str) -> set[str]:
+    """Цвета заливок SVG: «#FFF», «white», «rgb(…)», в атрибутах, `style` и `<style>` (Figma, Illustrator, Sketch); «none» не в счёт."""
+    out: set[str] = set()
+    for m in _FILL_RE.finditer(text):
+        hx = parse_color(m.group(1), named=True)
+        if hx:
+            out.add(hx)
+    return out
+
+
+def _svg_square(text: str) -> bool:
+    vb = re.search(r"viewBox\s*=\s*[\"']\s*[-\d.eE]+[\s,]+[-\d.eE]+[\s,]+([\d.eE]+)[\s,]+([\d.eE]+)", text)
+    if vb:
+        w, h = float(vb.group(1)), float(vb.group(2))
+    else:
+        mw = re.search(r"<svg[^>]*?\swidth\s*=\s*[\"']\s*([\d.]+)", text)
+        mh = re.search(r"<svg[^>]*?\sheight\s*=\s*[\"']\s*([\d.]+)", text)
+        if not (mw and mh):
+            return False
+        w, h = float(mw.group(1)), float(mh.group(1))
+    return h > 0 and 0.8 <= w / h <= 1.25
+
+
 def _svg_variant(path: Path) -> tuple[str, str]:
-    """Версия SVG-логотипа по заливкам и пропорциям: все заливки белые — белый, один тёмный цвет — монохром."""
+    """Версия SVG-логотипа по заливкам и пропорциям: все заливки белые («#fff», «white») — белый, один тёмный цвет (в том числе
+    чёрный по умолчанию, когда заливка не указана) — монохром, квадрат — знак."""
     try:
         text = path.read_text(encoding="utf-8", errors="ignore")
     except OSError:
         return "primary", "light"
-    fills = {m.upper() for m in re.findall(r"(?:fill|stop-color)\s*[:=]\s*[\"']?\s*#([0-9A-Fa-f]{6})", text)}
-    fills |= {"".join(c * 2 for c in m).upper() for m in re.findall(r"(?:fill|stop-color)\s*[:=]\s*[\"']?\s*#([0-9A-Fa-f]{3})(?![0-9A-Fa-f])", text)}
-    vb = re.search(r"viewBox\s*=\s*[\"']\s*[-\d.]+[\s,]+[-\d.]+[\s,]+([\d.]+)[\s,]+([\d.]+)", text)
-    square = bool(vb) and 0.8 <= float(vb.group(1)) / max(float(vb.group(2)), 1e-6) <= 1.25
-    if fills and all(f in ("FFFFFF", "FFF") for f in fills):
+    fills = _svg_fills(text)
+    square = _svg_square(text)
+    if not fills and _SHAPES.search(text) and not re.search(r"<image\b|url\(", text):
+        fills = {"#000000"}  # заливка не задана — SVG рисует чёрным
+    if fills and fills == {"#FFFFFF"}:
         return "white", "dark"
     if fills and len(fills) == 1 and not square:
-        f = "#" + next(iter(fills))
-        r, g, b = (int(f[i:i + 2], 16) for i in (1, 3, 5))
+        r, g, b = (int(next(iter(fills))[i:i + 2], 16) for i in (1, 3, 5))
         if max(r, g, b) - min(r, g, b) <= 60 and max(r, g, b) <= 90:
             return "mono", "light"
     if square:
@@ -74,12 +103,18 @@ def _svg_variant(path: Path) -> tuple[str, str]:
     return "primary", "light"
 
 
+def _variant_by_name(path: Path) -> Optional[tuple[str, str]]:
+    for variant, ground, rx in _VARIANTS:
+        if rx.search(path.stem):
+            return variant, ground
+    return None
+
+
 def logo_variant_of(path: Path) -> tuple[str, str]:
     """Версия логотипа: по словам в имени файла («white», «знак»), иначе по картинке."""
-    stem = path.stem
-    for variant, ground, rx in _VARIANTS:
-        if rx.search(stem):
-            return variant, ground
+    named = _variant_by_name(path)
+    if named:
+        return named
     if path.suffix.lower() == ".svg":
         return _svg_variant(path)
     try:
@@ -112,36 +147,102 @@ def _is_logo(rel: PurePosixPath, path: Path) -> bool:
     return not slide_like
 
 
-def _collect_logos(logo_files: list[tuple[PurePosixPath, Path]], assets_dir: Optional[Path]) -> list[BrandLogo]:
-    """Один логотип на пару «имя.svg + имя.png» (в презентацию вставляется PNG); не больше восьми."""
+def rasterize_svg(svg: Path, png: Path, *, height: int = 480) -> bool:
+    """SVG → PNG с прозрачным фоном: `rsvg-convert`, Inkscape или `resvg`, если они есть, иначе встроенный растеризатор
+    (`svg_raster.py`: контуры, фигуры, заливки). False — не получилось (обводки, текст, картинки в SVG)."""
+    tools = (
+        ("rsvg-convert", lambda exe: [exe, "-h", str(height), "-o", str(png), str(svg)]),
+        ("inkscape", lambda exe: [exe, "--export-type=png", f"--export-height={height}", f"--export-filename={png}", str(svg)]),
+        ("resvg", lambda exe: [exe, "-h", str(height), str(svg), str(png)]),
+    )
+    for name, argv in tools:
+        exe = shutil.which(name)
+        if not exe:
+            continue
+        try:
+            r = subprocess.run(argv(exe), capture_output=True, timeout=60)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if r.returncode == 0 and png.exists() and png.stat().st_size > 0:
+            return True
+    from verstka.brand.svg_raster import render_svg
+
+    try:
+        im = render_svg(svg, height)
+        if im is None:
+            return False
+        im.save(png, format="PNG")
+        return True
+    except OSError:
+        return False
+
+
+_VARIANT_ORDER = {"primary": 0, "white": 1, "mark": 2, "mono": 3}
+_MAX_LOGOS = 8
+
+
+def _collect_logos(logo_files: list[tuple[PurePosixPath, Path]], assets_dir: Optional[Path]) -> tuple[list[BrandLogo], list[str]]:
+    """Логотипы папки: сначала все распознаются по версии, потом берётся по одному на каждую версию (основной, белый, знак,
+    монохром), остальные места — по порядку, всего не больше восьми. Пара «имя.svg + имя.png» — один логотип (в презентацию
+    вставляется PNG). SVG без PNG при `assets_dir` растрируется в PNG рядом с копией SVG."""
+    warnings: list[str] = []
     by_stem: dict[tuple[str, str], list[tuple[PurePosixPath, Path]]] = {}
     for rel, p in logo_files:
         by_stem.setdefault((str(rel.parent), p.stem.lower()), []).append((rel, p))
+    found: list[tuple[str, str, bool, PurePosixPath, Path]] = []  # версия, фон, версия названа в имени, путь, файл
+    for group in by_stem.values():
+        group.sort(key=lambda x: {".png": 0, ".svg": 1}.get(x[1].suffix.lower(), 2))
+        rel, p = group[0]
+        variant, ground = logo_variant_of(p)  # растр — по картинке надёжнее, чем разбор заливок SVG
+        found.append((variant, ground, _variant_by_name(p) is not None, rel, p))
+    chosen: list[tuple[str, str, bool, PurePosixPath, Path]] = []
+    for variant in _VARIANT_ORDER:  # по одному на версию; из нескольких — тот, чья версия названа в имени файла
+        cands = [f for f in found if f[0] == variant]
+        if cands:
+            chosen.append(next((f for f in cands if f[2]), cands[0]))
+    for f in found:
+        if len(chosen) >= _MAX_LOGOS:
+            break
+        if f not in chosen:
+            chosen.append(f)
+    if len(found) > _MAX_LOGOS:
+        warnings.append(f"В папке {len(found)} логотипов — взял {_MAX_LOGOS}: по одному на каждую версию и первые по порядку.")
+    found_order = {id(f): i for i, f in enumerate(found)}
+    chosen.sort(key=lambda f: (_VARIANT_ORDER.get(f[0], 9), not f[2], found_order[id(f)]))  # внутри версии — названные в имени первыми
     out: list[BrandLogo] = []
     used: dict[str, int] = {}
     if assets_dir is not None:
         (assets_dir / "logos").mkdir(parents=True, exist_ok=True)
-    for group in by_stem.values():
-        if len(out) >= 8:
-            break
-        group.sort(key=lambda x: {".png": 0, ".svg": 1}.get(x[1].suffix.lower(), 2))
-        rel, p = group[0]
-        variant, ground = logo_variant_of(p)  # растр — по картинке надёжнее, чем разбор заливок SVG
+
+    def free_name(stem: str, suffix: str) -> Path:
+        target = assets_dir / "logos" / f"{stem}{suffix}"  # type: ignore[operator]
+        k = 2
+        while target.exists():
+            target = assets_dir / "logos" / f"{stem}-{k}{suffix}"  # type: ignore[operator]
+            k += 1
+        return target
+
+    for variant, ground, _named, rel, p in chosen:
         used[variant] = used.get(variant, 0) + 1
         name = LOGO_NAMES[variant] + ("" if used[variant] == 1 else f" {used[variant]}")
         file = rel.as_posix()
         if assets_dir is not None:
-            target = assets_dir / "logos" / p.name
-            k = 2
-            while target.exists():
-                target = assets_dir / "logos" / f"{p.stem}-{k}{p.suffix}"
-                k += 1
-            shutil.copyfile(p, target)
-            file = f"logos/{target.name}"
+            if p.suffix.lower() == ".svg":
+                svg_copy = free_name(p.stem, ".svg")
+                shutil.copyfile(p, svg_copy)
+                png = free_name(p.stem, ".png")
+                if rasterize_svg(p, png):
+                    file = f"logos/{png.name}"  # в PPTX вставляется PNG; SVG лежит рядом
+                else:
+                    file = f"logos/{svg_copy.name}"
+                    warnings.append(f"Логотип «{p.name}» — SVG с обводками или текстом, в PNG не перевёлся: в презентацию его не вставить, "
+                                    "загрузите PNG.")
+            else:
+                target = free_name(p.stem, p.suffix)
+                shutil.copyfile(p, target)
+                file = f"logos/{target.name}"
         out.append(BrandLogo(name=name, file=file, variant=variant, ground=ground))  # type: ignore[arg-type]
-    order = {"primary": 0, "white": 1, "mark": 2, "mono": 3}
-    out.sort(key=lambda lg: order.get(lg.variant, 9))
-    return out
+    return out, warnings
 
 
 # ---- картинки и тема -----------------------------------------------------------------------------------------------------------
@@ -224,12 +325,55 @@ def _walk(root: Path) -> list[Path]:
     return out
 
 
+def _studio_data(d: Path, files: list[Path]) -> tuple[Optional[dict], set[Path], list[str]]:
+    """Папка Tokens Studio (`$metadata.json`, `$themes.json`, по файлу на набор) → один словарь: наборы в порядке
+    `tokenSetOrder` (имя набора — путь файла без «.json»), `$themes` и `$metadata`. Возвращает ещё файлы папки (их отдельно
+    не читать) и предупреждения."""
+    from verstka.brand.tokens import load_json
+
+    warnings: list[str] = []
+    members: dict[Path, str] = {
+        f: f.relative_to(d).with_suffix("").as_posix()
+        for f in files if f.suffix.lower() == ".json" and d in f.parents and not f.name.startswith("$")
+    }
+    consumed = set(members) | {f for f in files if f.parent == d and f.name in ("$metadata.json", "$themes.json")}
+    order: list[str] = []
+    meta_path = d / "$metadata.json"
+    if meta_path in consumed:
+        try:
+            meta = load_json(meta_path)
+            if isinstance(meta, dict) and isinstance(meta.get("tokenSetOrder"), list):
+                order = [str(x) for x in meta["tokenSetOrder"]]
+        except BrandReadError as e:
+            warnings.append(f"«$metadata.json»: {e}")
+    by_name = {name: f for f, name in members.items()}
+    order = [n for n in order if n in by_name] + sorted(n for n in by_name if n not in order)
+    data: dict = {}
+    for name in order:
+        try:
+            data[name] = load_json(by_name[name])
+        except BrandReadError as e:
+            warnings.append(f"«{name}.json»: {e}")
+    if not data:
+        return None, consumed, warnings
+    themes_path = d / "$themes.json"
+    if themes_path in consumed:
+        try:
+            themes = load_json(themes_path)
+            if isinstance(themes, list):
+                data["$themes"] = themes
+        except BrandReadError as e:
+            warnings.append(f"«$themes.json»: {e}")
+    data["$metadata"] = {"tokenSetOrder": [n for n in order if n in data]}
+    return data, consumed, warnings
+
+
 def read_collection(files: list[Path], base: Path, *, label: str, providers: Any = None, skills: Any = None,
                     use_vlm: bool = False, assets_dir: Optional[Path | str] = None, guess_name: bool = True) -> BrandSpec:
     """Набор файлов брендбука (папка, архив или один файл) → `BrandSpec`; пути логотипов — относительно `base`.
     `guess_name` — брать имя бренда из имени папки или архива, если его нет внутри (у одной картинки — нет)."""
     from verstka.brand.pdf import read_pdf
-    from verstka.brand.tokens import read_tokens
+    from verstka.brand.tokens import read_tokens, spec_from_tokens
 
     assets = Path(assets_dir) if assets_dir is not None else None
     warnings: list[str] = []
@@ -246,8 +390,23 @@ def read_collection(files: list[Path], base: Path, *, label: str, providers: Any
         except ValueError:
             return PurePosixPath(p.name)
 
+    # Tokens Studio, выгруженный в несколько файлов («$metadata.json», «$themes.json», «global.json», «semantic.json»), читается
+    # одним файлом: наборы склеиваются до разбора, иначе ссылки между файлами не раскроются, а роли придётся угадывать
+    consumed: set[Path] = set()
+    for d in sorted({f.parent for f in files if f.name in ("$metadata.json", "$themes.json")}):
+        data, members, w = _studio_data(d, files)
+        warnings += w
+        consumed.update(members)
+        if data:
+            try:
+                specs.append(spec_from_tokens(data, file=None))
+            except BrandReadError as e:
+                warnings.append(f"«{rel(d)}» (Tokens Studio): {e}")
+
     for p in files:
         ext = p.suffix.lower()
+        if p in consumed or (ext == ".json" and p.name.startswith("$")):
+            continue
         if ext == ".json":
             try:
                 specs.append(read_tokens(p))
@@ -294,7 +453,8 @@ def read_collection(files: list[Path], base: Path, *, label: str, providers: Any
     for s in specs:
         for r in s.rules:
             add_rule(rules, r.text, r.kind, limit=14)
-    logos = _collect_logos(logo_files, assets)
+    logos, logo_warnings = _collect_logos(logo_files, assets)
+    warnings += logo_warnings
     if not logos and pdf_spec is not None:
         logos = list(pdf_spec.logos)
     first = lambda attr: next((getattr(s, attr) for s in specs if getattr(s, attr)), None)  # noqa: E731
