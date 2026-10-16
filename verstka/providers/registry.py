@@ -127,7 +127,7 @@ POLZA_BASE_URL = "https://polza.ai/api/v1"
 # what a model link reads; anything else (the old hosts' pools, max_tokens_cap, min_interval_s, prices) does nothing
 _LINK_OPTIONS = frozenset({
     "backend", "model", "base_url", "api_key", "timeout_s", "max_attempts", "extra_body", "json_mode", "requests_per_minute",
-    "label", "system_suffix", "exclude_quantizations", "responses",
+    "label", "system_suffix", "exclude_quantizations", "responses", "headers",
 })
 _WARNED: set = set()
 
@@ -178,6 +178,8 @@ def build_provider(spec: dict, limits: ProviderLimits) -> Provider:
             requests_per_minute=_rpm(spec, limits),
             label=spec.get("label"),
             system_suffix=spec.get("system_suffix"),
+            # extra request headers (VK inference: «Project-ID»); a header whose variable is unset is left out
+            headers={str(k): str(v) for k, v in (spec.get("headers") or {}).items() if v not in (None, "")} or None,
             exclude_quantizations=spec.get("exclude_quantizations") if polza else None,
             name="polza" if polza else "openai_compat",
         )
