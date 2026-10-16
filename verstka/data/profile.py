@@ -34,6 +34,7 @@ from verstka.data.parse import (
     period_parts,
     quantity,
     split_unit,
+    word_unit_column,
 )
 from verstka.schemas.data import (
     NATURE_LABELS,
@@ -73,12 +74,15 @@ _ID_NAME = re.compile(
     r"(?:^|[^а-яёa-z])(?:id|ид|no|номер|код|артикул|инн|огрн|кпп|sku|uuid|guid|идентификатор|ключ)(?:[^а-яёa-z]|$)|[№#]"
 )
 _MONEY_NAME = re.compile(
-    r"выручк|доход|прибыл|стоимост|цен[аыу]|зарплат|оклад|чек|себестоим|стипенди|revenue|price|cost|income|profit|sales"
+    r"выручк|доход|прибыл|стоимост|цен[аыу]|зарплат|оклад|чек|себестоим|стипенди|дебет|кредит|сальдо|revenue|price|"
+    r"cost|income|profit|sales"
 )
 # «бюджет» (места), «расход» (топлива), «оборот», «факт» — деньги, только если на это что-то указывает: «сумма»,
 # «руб.», «финансирование» в имени или величина рублей (от 10 000, медиана от 5 000). Малые значения («Бюджет: 120
 # мест», «Расход топлива: 12,5») — числа; с ростом масштаба тип меняется только в сторону денег
-_WEAK_MONEY_NAME = re.compile(r"бюджет|затрат|расход|оборот|(?:^|[^а-яё])факт(?:[^а-яёо]|$)|фактическ")
+_WEAK_MONEY_NAME = re.compile(r"бюджет|затрат|расход|оборот|(?:^|[^а-яё])(?:факт|план)(?:[^а-яёо]|$)|фактическ|прогноз")
+# пары «план / факт / прогноз / бюджет» — один вердикт: если одна из них деньги, то и соседние того же порядка
+_PLAN_FACT = re.compile(r"(?:^|[^а-яё])(?:план|факт|прогноз|бюджет)|фактическ|плановы")
 _MONEY_HINT = re.compile(r"сумм|руб|₽|финанс|средств|деньг|денеж")
 _PERCENT_NAME = re.compile(r"%|процент|доля|доли|share|percent|конверси")
 _FRACTION_NAME = re.compile(r"доля|доли|share|удельн")
@@ -303,6 +307,10 @@ def _analyze(j: int, name: str, unit: Optional[str], cells: list, total: np.ndar
         ok_rows = sum(cnt[k] for k in parsed)
         if not parsed or not _enough(rows["num"] + ok_rows, rows["num"] + rows["str"]):
             parsed = {}
+            if not rows["num"] and len(str_keys) <= 5000:  # «30 задач», «12 задач» — общее слово-единица
+                wu = word_unit_column([kinds[k][1] for k in str_keys], dec)
+                if wu is not None:
+                    parsed = {k: wu[0][kinds[k][1]] for k in str_keys}
     if (rows["num"] and not str_keys) or parsed:
         marks: Counter = Counter()
         bases: Counter = Counter()
@@ -488,6 +496,39 @@ def _money_by_name(lname: str, integral: bool, vmin: float = 0.0, vmed: float = 
     return bool(_MONEY_HINT.search(lname)) or vmin >= 10_000 or vmed >= 5_000
 
 
+def _plan_fact_money(cols: list[_Col]) -> None:
+    """«План» и «Факт» — один вердикт: если одна из колонок «план/факт/прогноз/бюджет» — деньги, соседние того же
+    порядка без своей единицы — тоже деньги."""
+    pf = [c for c in cols if c.kind == "number" and c.role == "metric" and _PLAN_FACT.search(c.name.lower())]
+    money = [c for c in pf if c.type == "money"]
+    if not money or len(pf) < 2:
+        return
+    ref = float(np.median(np.concatenate([np.abs(c.num[c.present]) for c in money])))
+    for c in pf:
+        if c.type == "number" and not c.unit and c.present.any():
+            med = float(np.median(np.abs(c.num[c.present])))
+            if ref > 0 and med > 0 and max(ref, med) <= 10 * min(ref, med):
+                c.type = "money"
+
+
+_COMPLEMENT = (("дебет", "кредит"), ("приход", "расход"), ("поступлени", "списани"), ("доход", "расход"))
+
+
+def _complementary_blanks(cols: list[_Col]) -> None:
+    """Дебет/кредит (приход/расход): в строке заполнена одна из пары — пустая клетка другой не пропуск, а «нет операции»."""
+    metrics = [c for c in cols if c.kind == "number" and c.present is not None]
+    for a_word, b_word in _COMPLEMENT:
+        a = next((c for c in metrics if a_word in c.name.lower()), None)
+        b = next((c for c in metrics if b_word in c.name.lower() and c is not a), None)
+        if a is None or b is None:
+            continue
+        either = a.present | b.present
+        if not bool(np.all(either[a.present | b.present])):
+            continue
+        a.missing = max(0, a.missing - int(np.count_nonzero(~a.present & b.present)))
+        b.missing = max(0, b.missing - int(np.count_nonzero(~b.present & a.present)))
+
+
 def _has_currency(lunit: str) -> bool:
     return any(s in lunit for s in ("₽", "руб", "р.", "$", "€", "£", "¥", "usd", "eur", "rub", "долл", "евро"))
 
@@ -651,8 +692,8 @@ def _time_axis(c: _Col, metrics: list[_Col]) -> TimeAxis:
             if uper.size >= 5 and not bool(np.any(wd >= 5)):  # только рабочие дни — выходные не пропуски
                 expected = expected[((expected - 1) % 7) < 5]
         coverage = uper.size / max(expected.size, 1)
-        if coverage < 0.5:
-            out_freq = "irregular"
+        if coverage < 0.5 or (freq == "day" and g not in (1, 7)):
+            out_freq = "irregular"  # 2, 5, 11 марта — не ряд «через 3 дня» с пропуском 8-го
         else:
             gaps = np.setdiff1d(expected, with_val, assume_unique=False)
             missing = [period_iso(iso_gran, int(o)) for o in gaps[:_MISSING_PERIODS_MAX]]
@@ -978,6 +1019,8 @@ def profile_table(t: Table) -> DatasetProfile:
     total_rows = np.flatnonzero(total)
 
     cols = [_analyze(j, names[j], t.unit_of(j), columns_cells[j], total, j == 0) for j in range(ncols)]
+    _plan_fact_money(cols)
+    _complementary_blanks(cols)
 
     # ось времени: первая колонка дат/периодов, которая идёт по порядку или с постоянным шагом (дата договора в списке
     # клиентов — атрибут, а не ось)

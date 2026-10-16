@@ -949,3 +949,28 @@ def test_place_rank_and_apartment_numbers_are_ids():
     assert _col(flats, "Квартира").role == "id" and flats.metrics == ["Площадь", "Цена"]
     counts = profile_table(_t(["Корпус", "Аудиторий", "Этажей"], [["А", 12, 3], ["Б", 20, 5], ["В", 8, 2]]))
     assert counts.metrics == ["Аудиторий", "Этажей"]  # множественное число — счёт, а не номер
+
+
+# ── раунд 4 ───────────────────────────────────────────────────────────────────────────────────────────────────────────
+def test_plan_and_fact_get_one_verdict():
+    # Важное 3: «Факт» — деньги по величине, «План» того же порядка — тоже
+    p = profile_table(_t(["Месяц", "План", "Факт"], [["2025-01", 4500, 5200], ["2025-02", 4700, 5600],
+                                                     ["2025-03", 4800, 5900]]))
+    assert [_col(p, "План").type, _col(p, "Факт").type] == ["money", "money"]
+    small = profile_table(_t(["Цех", "План", "Факт"], [["А", 120, 118], ["Б", 90, 95], ["В", 60, 61]]))
+    assert [_col(small, "План").type, _col(small, "Факт").type] == ["number", "number"]
+
+
+def test_debit_credit_are_money_and_their_blanks_are_not_missing():
+    # Мелочь 4: «Дебет/Кредит» — деньги; пустая клетка там, где операция в другой колонке, — не пропуск
+    rows = [["2026-03-01", "А", 80000, None], ["2026-03-02", "Б", None, 50000], ["2026-03-03", "В", 112300, None],
+            ["2026-03-04", "Г", None, 30000]]
+    p = profile_table(_t(["Дата", "Контрагент", "Дебет", "Кредит"], rows))
+    assert [_col(p, "Дебет").type, _col(p, "Кредит").type] == ["money", "money"]
+    assert (_col(p, "Дебет").missing, _col(p, "Кредит").missing, p.nature) == (0, 0, "time_series")
+
+
+def test_irregular_dates_have_no_invented_missing_day():
+    # Мелочь 6: 2, 5, 11 марта — нерегулярные даты, а не ряд «через 3 дня» с пропуском 8-го
+    p = profile_table(_t(["Дата", "Заказов"], [["2026-03-02", 5], ["2026-03-05", 7], ["2026-03-11", 4]]))
+    assert (p.time_axis.freq, p.time_axis.missing_periods) == ("irregular", [])

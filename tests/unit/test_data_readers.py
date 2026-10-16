@@ -972,3 +972,127 @@ def test_semicolon_file_with_commas_in_title_header_and_decimals():
     assert t.columns == ["Название", "Сумма", "Заказов"] and t.rows[0] == ["Товар 1", 1.5, 730]
     t = read_bytes("q.csv", 'Товар,Описание,Цена\nА,"мягкий; синий",10\nБ,"жёсткий; красный",20\n'.encode())[0]
     assert t.rows[0] == ["А", "мягкий; синий", 10]
+
+
+# ------------------------------------------------------------------------------------------------ раунд 4: разделитель, подшапки, единицы по признакам
+
+
+@pytest.mark.parametrize("text, columns, row0", [
+    ("Название,Авторы,Год выпуска,Цитирований\nСтатья 1,Иванов И.И.; Петров П.П.,2024,12\n"
+     "Статья 2,Сидоров С.С.; Козлов К.К.,2023,30\nСтатья 3,Ким А.; Ли Б.,2022,5\n",
+     ["Название", "Авторы", "Год выпуска", "Цитирований"], ["Статья 1", "Иванов И.И.; Петров П.П."]),
+    ("Товар,Теги,Цена\nМолоко,свежее;молочное,90\nХлеб,свежее;выпечка,45\nСыр,молочное;твёрдое,600\n",
+     ["Товар", "Теги", "Цена"], ["Молоко", "свежее;молочное", 90]),
+    ("Структура, %\n\nНазвание;Сумма;Заказов, шт.\nТовар 1;1,5;730\nТовар 2;2,5;800\nТовар 3;3,5;805\n",
+     ["Название", "Сумма", "Заказов"], ["Товар 1", 1.5, 730]),
+])
+def test_delimiter_with_semicolons_in_text_and_decimal_commas(text, columns, row0):
+    # C-1: «;» в списке авторов или тегов CSV через запятую — не разделитель; «;»-файл с дробной запятой — «;»
+    t = read_bytes("d.csv", text.encode())[0]
+    assert t.columns == columns and t.rows[0][:len(row0)] == row0
+
+
+def _two_floor_xlsx(group: str, leaves: list[str]) -> bytes:
+    def build(wb):
+        ws = wb.active
+        ws.append(["Товар", group] + [None] * (len(leaves) - 1))
+        ws.append([None] + leaves)
+        ws.merge_cells(start_row=1, start_column=2, end_row=1, end_column=1 + len(leaves))
+        ws.merge_cells("A1:A2")
+        ws.append(["А", 100, 150])
+        ws.append(["Б", 80, 120])
+    return _xlsx(build)
+
+
+@pytest.mark.parametrize("group, leaves, columns, units", [
+    ("Цена", ["Мин", "Макс"], ["Товар", "Мин", "Макс"], [None, None, None]),
+    ("План", ["Год", "Месяц"], ["Товар", "Год", "Месяц"], [None, None, None]),
+    ("Выручка", ["млн ₽", "%"], ["Товар", "Выручка", "Выручка (2)"], [None, "млн ₽", "%"]),
+])
+def test_second_floor_words_are_names_unless_all_are_units(group, leaves, columns, units):
+    # C-2: «Мин | Макс», «Год | Месяц» под группой — названия, а не минуты и годы; «млн ₽ | %» — единицы
+    t = read_bytes("h.xlsx", _two_floor_xlsx(group, leaves))[0]
+    assert t.columns == columns and t.units == units and t.column_groups == [None, group, group]
+
+
+def test_count_nouns_in_cells_are_units_but_class_numbers_are_labels():
+    # Важное 1: «30 задач», «12 рейсов» — одно слово у всей колонки → единица; «5 класс, 6 класс» — номера подряд
+    text = ("Отдел;Класс;Задач;Рейсов;Договоров\nА;5 класс;30 задач;12 рейсов;120 договоров\n"
+            "Б;6 класс;12 задач;3 рейса;45 договоров\nВ;7 класс;7 задач;10 рейсов;60 договоров\n")
+    t = read_bytes("w.csv", text.encode())[0]
+    assert col(t, "Класс") == ["5 класс", "6 класс", "7 класс"]
+    assert t.units == [None, None, "задач", "рейсов", "договоров"] and col(t, "Задач") == [30, 12, 7]
+    assert col(t, "Рейсов") == [12, 3, 10] and col(t, "Договоров") == [120, 45, 60]
+
+
+@pytest.mark.parametrize("text, units", [
+    ("Выручка по магазинам, тыс. ₽\n№;Магазин;Выручка;Прибыль\n" + "".join(f"{i};М{i};{1000 + i * 7};{100 + i}\n"
+                                                                         for i in range(1, 13)),
+     [None, None, "тыс. ₽", "тыс. ₽"]),
+    ("Выручка по регионам, млн ₽\nРегион;Код региона;Выручка\nМосква;77;140\nСПб;78;90\nКазань;16;60\n",
+     [None, None, "млн ₽"]),
+    ("Зарплаты по отделу, тыс. ₽\nСотрудник;Возраст;Оклад;Премия\nА;25;80;10\nБ;40;120;15\nВ;55;90;12\n",
+     [None, None, "тыс. ₽", "тыс. ₽"]),
+])
+def test_title_unit_never_lands_on_id_age_or_ordinal_columns(text, units):
+    # Важное 2: «№», «Код региона», «Возраст» — не мера; единица названия — только колонкам со словом этой единицы
+    assert read_bytes("t.csv", text.encode())[0].units == units
+
+
+def test_unit_labels_next_to_price_and_quantity_are_names():
+    # Важное 4: «Яблоки, кг» при колонках «Цена», «Количество» без единиц — подписи как в файле, единиц строк нет
+    t = read_bytes("g.csv", "Товар;Цена;Количество\nЯблоки, кг;120;10\nМолоко, л;90;5\nГвозди, шт.;3;100\n".encode())[0]
+    assert col(t, "Товар") == ["Яблоки, кг", "Молоко, л", "Гвозди, шт."] and t.row_units == []
+
+
+def test_two_tables_on_one_sheet_or_in_one_csv():
+    # Важное 5: две таблицы через пустую строку — две Table; слова второй шапки не становятся пропусками
+    text = ("Регион;Выручка 2025, млн ₽;План\nМосква;120;110\nКазань;60;65\n\n"
+            "Менеджер;Сделок;Конверсия, %\nИванов;24;31,5\nПетров;18;22\n")
+    a, b = read_bytes("s.csv", text.encode())
+    assert (a.sheet, a.columns, a.rows) == ("Таблица 1", ["Регион", "Выручка 2025", "План"], [["Москва", 120, 110],
+                                                                                            ["Казань", 60, 65]])
+    assert (b.sheet, b.columns, b.units, b.rows) == ("Таблица 2", ["Менеджер", "Сделок", "Конверсия"], [None, None, "%"],
+                                                    [["Иванов", 24, 31.5], ["Петров", 18, 22]])
+
+    def build(wb):
+        ws = wb.active
+        ws.title = "Отчёт"
+        for r in [["Регион", "Выручка"], ["Москва", 120], ["Казань", 60], [], ["Менеджер", "Сделок"], ["Иванов", 24],
+                  ["Петров", 18]]:
+            ws.append(r)
+    a, b = read_bytes("s.xlsx", _xlsx(build))
+    assert (a.sheet, b.sheet) == ("Отчёт, таблица 1", "Отчёт, таблица 2") and b.rows == [["Иванов", 24], ["Петров", 18]]
+    # повтор той же шапки через пустую строку (склеенные выгрузки) — одна таблица
+    t = read_bytes("g.csv", "Регион;Выручка\nМосква;5\n\nРегион;Выручка\nКазань;6\n".encode())
+    assert len(t) == 1 and t[0].rows == [["Москва", 5], ["Казань", 6]]
+
+
+def test_numeric_id_with_a_count_word_keeps_its_name():
+    # Мелочь 3: «Номер, заказ» с числами — номер, а не «заказов»
+    t = read_bytes("i.csv", "Номер, заказ;Сумма\n101;500\n102;700\n103;800\n".encode())[0]
+    assert t.columns == ["Номер, заказ", "Сумма"] and t.units == [None, None]
+
+
+def test_hidden_columns_and_rows_are_skipped_like_hidden_sheets():
+    # Мелочь 5: скрытые колонки и строки не читаются, а в заметках сказано, сколько
+    def build(wb):
+        ws = wb.active
+        for r in [["Товар", "Внутренний код", "Цена", "Себестоимость"], ["А", 11, 100, 60], ["Б", 12, 200, 120],
+                  ["В", 13, 150, 90]]:
+            ws.append(r)
+        ws.column_dimensions["B"].hidden = True
+        ws.column_dimensions["D"].hidden = True
+        ws.row_dimensions[3].hidden = True
+    t = read_bytes("h.xlsx", _xlsx(build))[0]
+    assert t.columns == ["Товар", "Цена"] and t.rows == [["А", 100], ["В", 150]]
+    assert t.notes == "Скрытые колонки и строки листа не прочитаны, как и скрытые листы: колонок — 2, строк — 1"
+
+
+def test_json_meta_and_approximate_values_are_noted():
+    # Мелочь 5: «meta» рядом с данными и «≈» в числах — в заметках, а не молча
+    t = read_bytes("m.json", json.dumps({"status": "ok", "data": [{"a": 1, "b": "x"}, {"a": 2, "b": "y"}],
+                                         "meta": {"total": 2, "generated": "2026-03-01"}}).encode())[0]
+    assert t.notes == "status: ok\nmeta: total 2, generated 2026-03-01"
+    t = read_bytes("a.csv", "Регион;Выручка\nМосква;≈ 1 200\nКазань;~450\n".encode())[0]
+    assert col(t, "Выручка") == [1200, 450] and t.notes == "Приближённые значения («≈», «~») прочитаны как числа: «Выручка»"

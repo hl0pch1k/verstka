@@ -21,6 +21,7 @@ import re
 from typing import Any, Optional, Union
 
 __all__ = [
+    "word_unit_column",
     "BOOL",
     "COUNT_UNITS",
     "CURRENCIES",
@@ -437,6 +438,41 @@ def quantity(s: str, dec: Optional[str] = None, strict: bool = False) -> Optiona
     if neg:
         value = -value
     return Quantity(value, is_int, scale, factor, base, plus)
+
+
+_WORD_CELL = re.compile(r"^(?P<num>[-+−]?\d[\d \u00a0\u202f.,]*)\s+(?P<word>[^\W\d_]{2,}\.?)$")
+
+
+def word_unit_column(strings: list[str], dec: Optional[str] = None) -> Optional[tuple[dict[str, Quantity], str]]:
+    """Колонка «число + слово» с одним словом у всех («30 задач», «12 задач», «7 задач»; «10 рейсов», «3 рейса») →
+    числа и это слово как единица. Только по прямому однородному признаку: таких ячеек не меньше трёх и это все
+    непустые ячейки, у слов общая основа (от 4 букв), слово — не одна буква, числа — не подряд 1, 2, 3… (так пишут
+    классы, этажи, курсы, туры: «5 класс», «6 класс», «1 курс»). Иначе None — ячейки остаются как в файле."""
+    if len(strings) < 3:
+        return None
+    out: dict[str, Quantity] = {}
+    words: list[str] = []
+    for raw in strings:
+        m = _WORD_CELL.match(" ".join(raw.split()))
+        if not m:
+            return None
+        q = quantity(m.group("num").strip(), dec)
+        if q is None or q.base is not None or q.scale is not None:
+            return None
+        out[raw] = q
+        words.append(m.group("word"))
+    low = [w.lower().rstrip(".") for w in words]
+    stem = low[0][:4]
+    if any(not w.startswith(stem) for w in low) or len(stem) < 2:
+        return None
+    if len(set(low)) > 1 and len(stem) < 4:
+        return None
+    ints = sorted({int(q.value) for q in out.values() if q.is_int})
+    if len(ints) == len(out) or len(ints) >= 3:
+        if len(ints) >= 2 and ints == list(range(ints[0], ints[0] + len(ints))):
+            return None  # 5, 6, 7 … — номера (классы, этажи), а не количества
+    unit = max(set(words), key=lambda w: (words.count(w), w))
+    return {k: Quantity(q.value, q.is_int, None, 1.0, unit) for k, q in out.items()}, unit
 
 
 def parse_quantity(s: Any, decimal: Optional[str] = None) -> Optional[tuple[float, Optional[str]]]:
