@@ -1,0 +1,21 @@
+name: data_storyteller
+version: 1.0.0
+role: llm
+description: >
+  Writes the connecting text of a deck built from data files (verstka/data/story.py): the deck's title and subtitle,
+  up to five context lines from the brief, the summary's three conclusions and up to three next steps, and it may say
+  each dataset slide's conclusion headline better. The program has already chosen every chart and counted every number:
+  the model never adds a number — every number it writes must be one of the facts given (a slide's headline — that
+  slide's facts; the summary and the next steps — the facts of the deck; the title and the context — the brief's
+  numbers). The program checks each sentence and keeps its own wording where the check fails; without the model the
+  deck keeps the deterministic wording.
+prompt_files:
+  system: prompts/system.md
+  user: prompts/user.md
+output_schema: verstka.data.story.StoryWriting
+params:
+  temperature: 0.2
+  max_tokens: 1800
+changelog:
+  - "1.0.0: second stage (2026-10-16): the connecting text of a data deck; numbers only from the facts, checked by
+    headline_ok — a rephrasing that fails keeps the analysis's own headline."
