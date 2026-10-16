@@ -385,7 +385,7 @@ def test_the_vk_config_switches_thinking_off():
         spec = cfg["roles"][role]
         assert spec["extra_body"]["chat_template_kwargs"]["enable_thinking"] is False
         assert spec["system_suffix"] == "/no_think"
-    assert cfg["limits"]["max_concurrency"] == 4
+    assert cfg["limits"]["max_concurrency"] == 8
 
 
 def test_the_manifest_counts_every_request_and_token():
