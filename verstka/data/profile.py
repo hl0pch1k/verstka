@@ -73,9 +73,12 @@ _ID_NAME = re.compile(
     r"(?:^|[^а-яёa-z])(?:id|ид|no|номер|код|артикул|инн|огрн|кпп|sku|uuid|guid|идентификатор|ключ)(?:[^а-яёa-z]|$)|[№#]"
 )
 _MONEY_NAME = re.compile(
-    r"выручк|доход|прибыл|стоимост|цен[аыу]|бюджет|затрат|расход|зарплат|оклад|чек|оборот|себестоим|revenue|price|cost|"
-    r"income|profit|sales"
+    r"выручк|доход|прибыл|стоимост|цен[аыу]|зарплат|оклад|чек|себестоим|стипенди|revenue|price|cost|income|profit|sales"
 )
+# «бюджет» (места), «расход» (топлива), «оборот» — деньги, только если на это что-то указывает: дробные значения или
+# «сумма», «руб.», «финансирование» в имени. Целые счёты («Бюджет: 120 мест») — числа
+_WEAK_MONEY_NAME = re.compile(r"бюджет|затрат|расход|оборот")
+_MONEY_HINT = re.compile(r"сумм|руб|₽|финанс|средств|деньг|денеж")
 _PERCENT_NAME = re.compile(r"%|процент|доля|доли|share|percent|конверси")
 _FRACTION_NAME = re.compile(r"доля|доли|share|удельн")
 # доли целого называют так; проценты-ставки (конверсия, маржа, загрузка) в сумме ≈ 100 случайно — это не доли
@@ -88,7 +91,7 @@ _CHANGE_NAME = re.compile(r"изменени|(?:^|[^а-яё])(?:при)?рост
 _KPI_LABEL = re.compile(r"показател|метрик|kpi|индикатор|параметр")
 _PARENT_NAME = re.compile(
     r"регион|област|край|округ|стран|республик|континент|категори|групп|раздел|отдел|департамент|подразделени|дивизион|"
-    r"направлени|сегмент|отрасл|бренд|марк[аи]|семейств|филиал|класс|тип"
+    r"направлени|сегмент|отрасл|бренд|марк[аи]|семейств|филиал|класс|тип|институт|факультет|школ|кампус|дирекци"
 )
 _ID_VALUE = re.compile(r"^(?=.*\d)[0-9a-zа-яё_\-/.#:№]{2,40}$", re.I)
 
@@ -385,9 +388,16 @@ def _try_time(str_keys: list, kinds: dict, cnt: Counter, str_rows: int, lname: s
     if not _enough(sum(cnt[k] for k in parsed), str_rows):
         return None
     if any(g == "hour" for g, _ in parsed.values()):
-        # время суток: несколько времён в один день — ось по часам, по одному в день — по дням
+        # время суток: несколько времён в один день и ряд по часам плотный (≥ 80% часов или не дольше трёх суток) —
+        # ось по часам; журнал событий (заказы в рабочие часы за два месяца) и по одному времени в день — по дням.
+        # Минуты не различаются: записи раз в 15 минут ложатся на часовую ось по нескольку в час
         hours = {(o if g == "hour" else o * 24) for g, o in parsed.values() if g in ("hour", "day")}
         by_hour = len(hours) > len({h // 24 for h in hours})
+        if by_hour:
+            hs = np.array(sorted(hours), dtype=np.int64)
+            step = max(int(np.gcd.reduce(np.diff(hs))), 1)
+            expected = int((hs[-1] - hs[0]) // step) + 1
+            by_hour = hs.size >= 0.8 * expected or int(hs[-1] - hs[0]) <= 72
         for k, (g, o) in list(parsed.items()):
             if g == "hour" and not by_hour:
                 parsed[k] = ("day", o // 24)
@@ -442,10 +452,16 @@ def _type_number(c: _Col, lname: str, pct_share: float, money_share: float, firs
     elif _PERCENT_NAME.search(lname) and v.size and vmin >= 0 and vmax <= 100 and not _has_currency(lunit):
         c.type = "percent"
         c.fraction = bool(vmax <= 1.0) and bool(_FRACTION_NAME.search(lname))
-    elif _has_currency(lunit) or money_share >= _SHARE_OK or (not unit and _MONEY_NAME.search(lname)):
+    elif _has_currency(lunit) or money_share >= _SHARE_OK or (not unit and _money_by_name(lname, integral)):
         c.type = "money"
     else:
         c.type = "number"
+
+
+def _money_by_name(lname: str, integral: bool) -> bool:
+    if _MONEY_NAME.search(lname):
+        return True
+    return bool(_WEAK_MONEY_NAME.search(lname)) and (not integral or bool(_MONEY_HINT.search(lname)))
 
 
 def _has_currency(lunit: str) -> bool:
@@ -672,8 +688,9 @@ def _hierarchies(cols: list[_Col]) -> list[tuple[str, str]]:
             if pairs != n_child:
                 continue
             unique_child = n_child == a.size
-            if unique_child and not _PARENT_NAME.search(pa.name.lower()):
-                continue  # подписи строк определяют всё — иерархия, только если родитель назван как группа
+            if unique_child and not _PARENT_NAME.search(pa.name.lower()) and not _grouped_left(pa, ch, b):
+                continue  # подписи строк определяют всё — иерархия, только если родитель назван как группа или
+                # стоит левее и идёт блоками («Институт» над своими кафедрами)
             found.append((ch, pa))
     names = {(ch.name, pa.name) for ch, pa in found}
     out = []
@@ -711,6 +728,67 @@ def _sums_to_total(m: _Col, axis: Optional[_Col], total_rows: np.ndarray) -> boo
         return checked > 0
     s_all = float(v.sum())
     return any(close(s_all, float(t)) for t in tv if not np.isnan(t))
+
+
+def _grouped_left(pa: _Col, ch: _Col, codes: np.ndarray) -> bool:
+    """Родитель левее дочерней колонки, у него меньше половины разных значений, и каждое значение идёт одним блоком
+    строк — так выгружают иерархию «институт → кафедра», «регион → город»."""
+    if pa.j >= ch.j or codes.size < 4 or not 2 <= pa.distinct <= codes.size // 2:
+        return False
+    runs = 1 + int(np.count_nonzero(np.diff(codes)))
+    return runs == np.unique(codes).size
+
+
+def _total_column(cols: list[_Col], metrics: list[_Col]) -> tuple[Optional[_Col], list[_Col]]:
+    """Колонка-итог по строкам: имя «Всего», «Итого»… и в каждой строке она равна сумме других числовых колонок (всех
+    сопоставимых или стоящих подряд перед ней): «Бюджет + Платное + Целевое = Всего». → (итог, части)."""
+    for tc in metrics:
+        name = tc.name.strip().lower()
+        if not (is_total_label(tc.name) or name.startswith(("всего", "итого", "общий итог", "total"))):
+            continue
+        pool = [m for m in metrics if m is not tc and m.type != "percent" and not m.signed
+                and not _CHANGE_NAME.search(m.name.lower()) and (m.unit == tc.unit or not m.unit or not tc.unit)]
+        left = []
+        for m in reversed([m for m in pool if m.j < tc.j]):
+            if left and left[-1].j - m.j != 1:
+                break
+            left.append(m)
+        for parts in (pool, sorted(left, key=lambda m: m.j)):
+            if len(parts) >= 2 and _row_sums_match(tc, parts):
+                return tc, parts
+    return None, []
+
+
+def _row_sums_match(tc: _Col, parts: list[_Col]) -> bool:
+    ok = tc.present.copy()
+    for m in parts:
+        ok &= m.present
+    if int(ok.sum()) < 2:
+        return False
+    s = np.zeros(int(ok.sum()))
+    for m in parts:
+        s += m.num[ok]
+    t = tc.num[ok]
+    close = np.abs(s - t) <= np.maximum(0.01 * np.abs(t), 0.5)
+    return float(close.mean()) >= _SHARE_OK
+
+
+def _strongly_related(metrics: list[_Col], skip: set) -> bool:
+    """Две числовые колонки (не изменения, не итог и не части) заметно связаны: |r| ≥ 0,5 на 30+ общих строках —
+    «часы подготовки и балл», а не справочник."""
+    cand = [m for m in metrics if id(m) not in skip and not m.signed and not m.incomparable
+            and not _CHANGE_NAME.search(m.name.lower())][:6]
+    for a in range(len(cand)):
+        for b in range(a + 1, len(cand)):
+            ok = cand[a].present & cand[b].present
+            if int(ok.sum()) < 30:
+                continue
+            x, y = cand[a].num[ok], cand[b].num[ok]
+            if float(x.std()) == 0 or float(y.std()) == 0:
+                continue
+            if abs(float(np.corrcoef(x, y)[0, 1])) >= 0.5:
+                return True
+    return False
 
 
 def _parts_of_whole(metrics: list[_Col], has_label: bool, axis: Optional[_Col], total_rows: np.ndarray) -> bool:
@@ -855,6 +933,11 @@ def profile_table(t: Table) -> DatasetProfile:
         axis.role = "time"
         time_axis = _time_axis(axis, metrics)
 
+    # таблица показателей по строкам: у строк свои единицы (Table.row_units) — колонки чисел несравнимы
+    row_units = list(getattr(t, "row_units", None) or [])
+    if row_units and len({u for i, u in enumerate(row_units) if i < n and not total[i]}) > 1:
+        for m in metrics:
+            m.incomparable = True
     for m in metrics:
         _find_outliers(m)
 
@@ -863,12 +946,16 @@ def profile_table(t: Table) -> DatasetProfile:
     data_rows = int(n - int(total.sum()))
     has_label = bool(dims or labels)
     parts = _parts_of_whole(metrics, has_label, axis if axis is not None and dims else None, total_rows)
+    total_col, part_cols = _total_column(cols, metrics)
+    parts = parts or total_col is not None
     hierarchies = _hierarchies(cols)
 
     typable, reason = _typable(cols, metrics, dims, axis, data_rows)
-    nature = _nature(t, cols, metrics, dims, labels, axis, time_axis, parts, typable, data_rows)
+    skip = {id(c) for c in ([total_col] if total_col is not None else []) + part_cols}
+    related = data_rows > 30 and _strongly_related(metrics, skip)
+    nature = _nature(t, cols, metrics, dims, labels, axis, time_axis, parts, typable, data_rows, related)
     missing_total = int(sum(c.missing for c in cols))
-    outliers = [o for c in cols for o in c.outliers]
+    outliers, expected = _split_outliers(cols, dims, nature)
     # строки — данные (без строк итога): «Доли · 4 строки», даже если в файле пятой идёт «Итого»
     summary = " · ".join(
         (NATURE_LABELS[nature], count_ru(data_rows, "строка", "строки", "строк"),
@@ -878,9 +965,50 @@ def profile_table(t: Table) -> DatasetProfile:
         table_id=t.id, file=t.file, kind=t.kind, sheet=t.sheet, rows=data_rows, cols=ncols,
         columns=[_column_profile(c) for c in cols], time_axis=time_axis,
         metrics=[c.name for c in metrics], dimensions=[c.name for c in dims], hierarchies=hierarchies,
-        missing_total=missing_total, outliers=outliers, parts_of_whole=parts, size=_size(data_rows), nature=nature,
+        missing_total=missing_total, outliers=outliers, expected_outliers=expected, parts_of_whole=parts,
+        total_column=total_col.name if total_col is not None else None, part_columns=[c.name for c in part_cols],
+        size=_size(data_rows), nature=nature,
         typable=typable, untypable_reason=reason, summary=summary,
     )
+
+
+# природа, где строка — сущность (клиент, регион, канал): большие значения у крупных — норма, а не выброс-ошибка
+_ENTITY_NATURES = frozenset({"reference", "comparison", "shares", "kpi", "text_table"})
+
+
+def _split_outliers(cols: list[_Col], dims: list[_Col], nature: str) -> tuple[list[Outlier], list[Outlier]]:
+    """Выбросы → (заметные, естественные). Естественные: большие значения у справочника, сравнения, долей и карточек
+    (крупнейшие клиенты, Москва среди регионов) и выбросы — целые категории (все строки «Москвы» в длинной таблице по
+    месяцам). Заметные — остальные: время ответа в распределении, всплеск ряда, «сбой» −500 среди сотен."""
+    notable: list[Outlier] = []
+    expected: list[Outlier] = []
+    for c in cols:
+        if not c.outliers:
+            continue
+        if _category_scale(c.outlier_rows, dims):
+            expected += c.outliers
+        elif nature in _ENTITY_NATURES:
+            # большие у крупных — норма; слишком малое («сбой» −500 среди сотен) — похоже на ошибку
+            med = float(np.median(c.num[c.present]))
+            for o in c.outliers:
+                (expected if o.value > med else notable).append(o)
+        else:
+            notable += c.outliers
+    return notable, expected
+
+
+def _category_scale(rows: list[int], dims: list[_Col]) -> bool:
+    """Выбросы — это несколько категорий целиком (у каждой несколько строк и не меньше половины из них — выбросы,
+    категорий — не больше половины): разница масштаба категорий, а не ошибки в данных."""
+    for d in dims:
+        vals = d.svals or []
+        hit = Counter(vals[r] for r in rows if r < len(vals) and vals[r] is not None)
+        if not hit:
+            continue
+        per = Counter(v for v in vals if v is not None)
+        if len(hit) <= max(1, len(per) // 2) and all(per[k] >= 2 and hit[k] >= 0.5 * per[k] for k in hit):
+            return True
+    return False
 
 
 def _typable(cols: list[_Col], metrics: list[_Col], dims: list[_Col], axis: Optional[_Col],
@@ -907,7 +1035,8 @@ def _typable(cols: list[_Col], metrics: list[_Col], dims: list[_Col], axis: Opti
 
 
 def _nature(t: Table, cols: list[_Col], metrics: list[_Col], dims: list[_Col], labels: list[_Col],
-            axis: Optional[_Col], time_axis: Optional[TimeAxis], parts: bool, typable: bool, data_rows: int) -> Nature:
+            axis: Optional[_Col], time_axis: Optional[TimeAxis], parts: bool, typable: bool, data_rows: int,
+            related: bool = False) -> Nature:
     if not typable:
         return "untypable"
     if time_axis is not None and metrics:
@@ -928,6 +1057,8 @@ def _nature(t: Table, cols: list[_Col], metrics: list[_Col], dims: list[_Col], l
     n_values = int(metrics[0].present.sum())
     if len(metrics) == 1 and not dims and not labels and n_values >= 30:
         return "distribution"
+    if related:
+        return "relationship"  # две связанные метрики на 30+ строках — взаимосвязь, даже рядом с id и группой
     if data_rows > 30 and len(cols) >= 4:
         return "reference"
     if dims:

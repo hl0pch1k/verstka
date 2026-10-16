@@ -106,6 +106,12 @@ class Table(BaseModel):
     # номера строк (Table.rows) с итогом по строгому правилу («Итого», «Всего:», «Итого по России»): строка остаётся
     # в таблице, но не данные — в графики и статистику не идёт, по ней проверяются «доли от итога»
     totals: list[int] = Field(default_factory=list)
+    # таблица показателей по строкам («Показатель | 2026 | 2025 | Изменение»): единица каждой строки
+    # («чел.», «%», «млн ₽»; None — без единицы), по порядку Table.rows. Пусто — единицы у колонок (Table.units)
+    row_units: list[Optional[str]] = Field(default_factory=list)
+    # группа над колонкой из двухэтажной шапки («Форма обучения» над «Бюджет · Платное · Целевое»), по порядку
+    # колонок; None — без группы. Пусто — групп нет
+    column_groups: list[Optional[str]] = Field(default_factory=list)
 
     def column_values(self, column: Union[int, str]) -> list[Cell]:
         """Значения колонки по номеру или имени (короткая строка — пусто)."""
@@ -171,9 +177,16 @@ class DatasetProfile(BaseModel):
     # иерархии: (дочерняя, родительская) — («город», «регион»)
     hierarchies: list[tuple[str, str]] = Field(default_factory=list)
     missing_total: int = 0
+    # выбросы, похожие на ошибку или событие (время ответа 1 430 мин в распределении) — их показывает карточка файла
     outliers: list[Outlier] = Field(default_factory=list)
+    # значения далеко от остальных, но естественные для сущностей строк: крупнейшие клиенты справочника, Москва среди
+    # регионов. Не проблема данных — карточка их не называет; для анализа остаются здесь (и в ColumnProfile.outliers)
+    expected_outliers: list[Outlier] = Field(default_factory=list)
     # части одного целого: доли с суммой ≈ 100 или доли от итога
     parts_of_whole: bool = False
+    # колонка-итог по строкам («Всего» = «Бюджет» + «Платное» + «Целевое») и её части; None / пусто — такой нет
+    total_column: Optional[str] = None
+    part_columns: list[str] = Field(default_factory=list)
     size: DatasetSize = "small"
     nature: Nature
     # пригодность для графика: False — с причиной («одни текстовые колонки», «одна строка»)

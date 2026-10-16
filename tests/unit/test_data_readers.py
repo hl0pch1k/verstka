@@ -670,8 +670,11 @@ def test_dot_as_thousands_separator_with_one_group():
     # п. 10: «1.234», «2.500», «12.000» рядом с «950» — тысячи, а не дроби
     t = read_bytes("d.csv", "Регион;Выручка, руб.\nМосква;1.234\nКазань;2.500\nТверь;12.000\nОмск;950\n".encode())[0]
     assert col(t, "Выручка") == [1234, 2500, 12000, 950]
-    t = read_bytes("c.csv", "Регион;Выручка\nМосква;1,234\nКазань;2,500\nТверь;12,000\nОмск;950\n".encode())[0]
-    assert col(t, "Выручка") == [1234, 2500, 12000, 950]
+    # запятая с тремя знаками — дробь: курсы, коэффициенты, вес («75,500», «1,250»)
+    t = read_bytes("c.csv", "Товар;Курс\nА;75,500\nБ;76,250\nВ;74,900\nГ;950\n".encode())[0]
+    assert col(t, "Курс") == [75.5, 76.25, 74.9, 950]
+    t = read_bytes("k.tsv", "Марка\tКоэффициент\nА\t1,500\nБ\t1,250\nВ\t1,100\n".encode())[0]
+    assert col(t, "Коэффициент") == [1.5, 1.25, 1.1]
     # без «…00» и без целых рядом — дробь как написано; обычные дроби не трогаем
     t = read_bytes("f.csv", "Замер;Значение\nА;1.234\nБ;2.345\nВ;3.456\n".encode())[0]
     assert col(t, "Значение") == [1.234, 2.345, 3.456]
@@ -706,3 +709,184 @@ def test_timestamps_keep_the_time_of_day_in_one_format():
             ws.append([dt.datetime(2025, 3, 1) + dt.timedelta(hours=h), 30 + h % 24])
     t = read_bytes("hourly.xlsx", _xlsx(build))[0]
     assert col(t, "Время")[:2] == ["2025-03-01T00:00", "2025-03-01T01:00"] and col(t, "Время")[24] == "2025-03-02T00:00"
+
+
+# ------------------------------------------------------------------------------------------------ второй набор данных и повторное ревью
+
+
+def test_units_from_header_words_and_brackets():
+    # G2: счётные слова и темп в шапке — единица, а не часть имени
+    t = read_bytes("p.csv", "Год;Scopus, статей;РИНЦ, статей\n2024;328;980\n2025;381;1001\n".encode())[0]
+    assert t.columns == ["Год", "Scopus", "РИНЦ"] and t.units == [None, "статей", "статей"]
+    t = read_bytes("h.csv", "Ученик,Занятия (ч в неделю),Зарплата, руб. в месяц\nА,4,100\nБ,6,120\n".encode())[0]
+    assert t.columns[1] == "Занятия" and t.units[1] == "ч/нед."
+    t = read_bytes("s.csv", "Склад;Отгружено, человек;Остаток, шт.\nА;5;10\nБ;7;12\n".encode())[0]
+    assert t.units == [None, "чел.", "шт."]
+
+
+def test_unit_from_the_title_row():
+    # G2/M10: «…, человек» в строке-названии — единица числовых колонок без своей; доли и деньги — не трогаем
+    text = "Набор на курсы в 2026 году, человек\n\nКурс;Очно;Заочно;Всего\nPython;40;25;65\nSQL;30;10;40\n"
+    t = read_bytes("n.csv", text.encode())[0]
+    assert t.units == [None, "чел.", "чел.", "чел."] and t.notes == "Набор на курсы в 2026 году, человек"
+    money = "Продажи по регионам, млн руб.\nРегион;Выручка;Рост, %;Клиентов\nМосква;10;5;100\nКазань;6;8;60\n"
+    t = read_bytes("m.csv", money.encode())[0]
+    assert t.units == [None, "млн ₽", "%", None]  # счёт клиентов — не рубли
+    # развёрнутая широкая таблица получает единицу названия (повторное ревью, M4)
+    wide = "Выручка по годам, млн руб.\nРегион;2023;2024;2025\nМосква;10;12;15\nКазань;5;6;7\n"
+    t = read_bytes("w.csv", wide.encode())[0]
+    assert t.columns == ["Регион", "Год", "Значение"] and t.units == [None, None, "млн ₽"]
+
+
+def test_metric_rows_carry_their_own_units():
+    # M21: «Показатель | 2026 | 2025 | Изменение» — единица у строки, а не у колонки
+    text = ("Показатель;2026;2025;Изменение\nПринято, чел.;1 200;1 100;+9%\nДоля отличников, %;35%;31%;+4 п.п.\n"
+            "Объём закупок, млн ₽;540;500;+8%\nСредний балл;4,4;4,3;+0,1\n")
+    t = read_bytes("k.csv", text.encode())[0]
+    assert t.units == [None, None, None, None]  # «%» одной строки не стал единицей колонок «2026» и «2025»
+    assert t.row_units == ["чел.", "%", "млн ₽", None]
+    assert col(t, "Показатель") == ["Принято", "Доля отличников", "Объём закупок", "Средний балл"]
+    assert col(t, "2026") == ["1 200", "35%", "540", "4,4"]  # разные единицы — как в файле
+    plain = read_bytes("p.csv", "Показатель;2026;2025\nВыручка, млн ₽;540;500\nКлиенты, чел.;1200;1100\n".encode())[0]
+    assert plain.row_units == ["млн ₽", "чел."] and col(plain, "2026") == [540, 1200] and plain.units == [None] * 3
+    # единица из ячеек строки, если в подписи её нет
+    cells = read_bytes("c.md", ("| Показатель | 2026 | 2025 |\n|---|---|---|\n| Выручка | 1,2 млрд ₽ | 1,0 млрд ₽ |\n"
+                                "| Клиенты | 3 480 | 2 949 |\n").encode())[0]
+    assert cells.row_units == ["млрд ₽", None]
+    # обычная таблица — без единиц строк
+    assert read_bytes("r.csv", "Регион;Выручка\nМосква;10\nКазань;6\n".encode())[0].row_units == []
+
+
+def test_two_row_header_keeps_leaf_names_and_the_group():
+    # M7: «Состав» над «Профессора · Доценты · Ассистенты» — группа отдельно, имена колонок — листья
+    text = "Кафедра;Состав;;;Всего\n;Профессора;Доценты;Ассистенты;\nФизики;3;5;7;15\nХимии;2;4;—;6\n"
+    t = read_bytes("k.csv", text.encode())[0]
+    assert t.columns == ["Кафедра", "Профессора", "Доценты", "Ассистенты", "Всего"]
+    assert t.column_groups == [None, "Состав", "Состав", "Состав", None]
+    assert t.raw_header[1] == "Состав Профессора"
+    # одинаковые листья в двух группах — имена с группой, чтобы не повторялись
+    dup = "Регион;Выручка;;Клиенты;\n;План;Факт;План;Факт\nМосква;1;2;3;4\nКазань;5;6;7;8\n"
+    t = read_bytes("d.csv", dup.encode())[0]
+    assert t.columns == ["Регион", "Выручка План", "Выручка Факт", "Клиенты План", "Клиенты Факт"]
+    assert t.column_groups == [None, "Выручка", "Выручка", "Клиенты", "Клиенты"]
+
+
+def test_dash_is_zero_in_a_counts_table_with_totals():
+    # M9: «—» в таблице счётов с колонкой «Всего» — ноль; «н/д» и пусто — пропуск
+    text = "Кафедра;Профессора;Доценты;Ассистенты;Всего\nФизики;3;5;7;15\nХимии;2;4;—;6\nБиологии;н/д;3;;5\n"
+    t = read_bytes("k.csv", text.encode())[0]
+    assert col(t, "Ассистенты") == [7, 0, None] and col(t, "Профессора") == [3, 2, None]
+    # без итога «—» — пропуск (NPS за квартал без данных)
+    t = read_bytes("n.csv", "Квартал;NPS\nI кв. 2025;41\nII кв. 2025;—\nIII кв. 2025;46\n".encode())[0]
+    assert col(t, "NPS") == [41, None, 46]
+    # строка «Итого» — тоже признак таблицы счётов
+    t = read_bytes("t.csv", "Отдел;Штат\nА;4\nБ;—\nИтого;4\n".encode())[0]
+    assert col(t, "Штат") == [4, 0, 4]
+
+
+def test_formula_column_in_a_big_workbook_reads_fast():
+    # повторное ревью, C1: 20 000 строк с колонкой формул (с сохранёнными значениями и без) — меньше 2 с
+    def book(cached: bool) -> bytes:
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["Регион", "План", "Факт", "Отклонение"])
+        for i in range(2, 20002):
+            ws.append([f"Регион {i % 50}", i, i + 3, f"=C{i}-B{i}"])
+        buf = io.BytesIO()
+        wb.save(buf)
+        data = buf.getvalue()
+        if not cached:
+            return data
+        import zipfile
+        src, out = zipfile.ZipFile(io.BytesIO(data)), io.BytesIO()
+        with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as dst:  # как сохраняет Excel: значение записано
+            for item in src.infolist():
+                body = src.read(item.filename)
+                if item.filename.startswith("xl/worksheets/"):
+                    body = body.replace(b"<v></v>", b"<v>3</v>").replace(b"<v />", b"<v>3</v>")
+                dst.writestr(item, body)
+        return out.getvalue()
+
+    for cached in (False, True):
+        data = book(cached)
+        best = 1e9
+        for _ in range(2):
+            start = time.perf_counter()
+            t = read_bytes("f.xlsx", data)[0]
+            best = min(best, time.perf_counter() - start)
+        assert best < 2.0, f"{best:.2f} с"
+        assert len(t.rows) == 20000 and (t.rows[0][3] == 3) is cached
+        assert ("формулы без сохранённых значений" in t.notes) is (not cached)
+
+
+def test_three_decimal_commas_stay_decimals():
+    # повторное ревью, I1: «75,500», «1,250» в «;»-файле — дробь, а не тысячи; точка — тысячи
+    t = read_bytes("w.csv", "Груз;Вес\nА;2,500\nБ;1,250\nВ;3,750\n".encode())[0]
+    assert col(t, "Вес") == [2.5, 1.25, 3.75]
+
+
+@pytest.mark.parametrize("text", [
+    "Итоги за квартал:\nВыручка 1,5 млрд\nПрибыль 0,3 млрд\nКлиенты 2,4 тыс.\n",
+    "Коротко:\n- Выручка по месяцам: 100, 120, 130\n- Клиенты по месяцам: 10, 12, 15\n",
+    "Цели: показать рост выручки на 15%, снижение оттока.\nАудитория: совет директоров, 10 человек.\n",
+    "Привет, команда.\nНужна презентация про рост, итоги года и планы.\nСрок до пятницы, 15 слайдов максимум.\n",
+    "Привет, коллеги, как дела?\nВсё хорошо, спасибо, работаем.\n",
+])
+def test_prose_with_commas_is_not_a_table(text):
+    # повторное ревью, I3: дробные запятые в тексте и список через запятую — не CSV
+    with pytest.raises(DataReadError, match="Не нашёл таблицу в тексте"):
+        read_bytes("p.txt", text.encode())
+
+
+def test_greeting_is_not_the_header_of_a_comma_block():
+    # повторное ревью, I3: «Добрый день, коллеги!» — не шапка; текст остаётся в заметках
+    text = "Добрый день, коллеги!\nНиже данные за квартал, прошу посмотреть.\nМосква, 120\nКазань, 80\n"
+    t = read_bytes("g.txt", text.encode())[0]
+    assert t.rows == [["Москва", 120], ["Казань", 80]] and t.notes.startswith("Добрый день, коллеги!")
+    q = read_bytes("q.txt", "Квартал,Выручка\nQ1 2025,100\nQ2 2025,120\n".encode())[0]  # подписи с цифрами — можно
+    assert q.rows == [["2025-Q1", 100], ["2025-Q2", 120]]
+
+
+@pytest.mark.parametrize("label", ["Общий итог", "Общая сумма", "Итого, млн ₽", "Итого общее"])
+def test_pivot_totals_are_total_rows(label):
+    # повторное ревью, I4: итог сводной таблицы Excel и «Итого, млн ₽»
+    t = read_bytes("p.csv", f"Регион;Выручка\nМосква;60\nКазань;40\n{label};100\n".encode())[0]
+    assert t.totals == [2]
+
+
+def test_id_column_left_of_periods_does_not_block_the_melt():
+    # повторное ревью, M1: «№ п/п» и «Код» слева от лет — подписи строк
+    t = read_bytes("n.csv", "№ п/п;Регион;2023;2024;2025\n1;Москва;10;20;30\n2;Казань;5;6;7\n3;Тверь;1;2;3\n".encode())[0]
+    assert t.columns == ["№ п/п", "Регион", "Год", "Значение"] and t.rows[0] == [1, "Москва", "2023", 10]
+    t = read_bytes("c.csv", "Регион;Код;2023;2024;2025\nМосква;77;10;20;30\nКазань;16;5;6;7\n".encode())[0]
+    assert t.columns == ["Регион", "Код", "Год", "Значение"]
+
+
+def test_merged_numbers_are_not_copied_and_merges_are_found():
+    # повторное ревью, M2/M5: число в объединённой ячейке не размножается; объединения читаются из XML листа
+    from verstka.data.readers import _sheet_extras
+
+    def build(wb):
+        ws = wb.active
+        ws.append(["Регион", "Город", "План региона"])
+        for r in [("Центр", "Москва", 100), (None, "Тверь", None), (None, "Тула", None)]:
+            ws.append(list(r))
+        ws.merge_cells("A2:A4")
+        ws.merge_cells("C2:C4")
+    data = _xlsx(build)
+    t = read_bytes("m.xlsx", data)[0]
+    assert col(t, "Регион") == ["Центр"] * 3 and col(t, "План региона") == [100, None, None]
+    wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+    try:  # закрытые атрибуты openpyxl (путь к XML листа, архив книги): если пропадут — тест упадёт, а не молча
+        merges, formulas = _sheet_extras(wb, wb.worksheets[0])
+    finally:
+        wb.close()
+    assert sorted(merges) == [(1, 0, 3, 0), (1, 2, 3, 2)] and formulas == set()
+
+
+def test_last_data_row_that_looks_like_a_footnote_word_stays_data():
+    # повторное ревью, M6: «Notebook;50», «Источник питания;50» — данные, «Источник: CRM» — сноска
+    t = read_bytes("a.csv", "Товар;Продажи\nТелефон;10\nNotebook;50\n".encode())[0]
+    assert t.rows[-1] == ["Notebook", 50] and t.notes == ""
+    t = read_bytes("b.csv", "Товар;Продажи\nТелефон;10\nИсточник питания;50\nИсточник: CRM\n".encode())[0]
+    assert t.rows[-1] == ["Источник питания", 50] and t.notes == "Источник: CRM"

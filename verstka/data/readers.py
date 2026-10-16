@@ -46,6 +46,7 @@ from verstka.data.parse import (
     MISSING,
     MISSING_FIRST,
     TIME_HEADER,
+    TOTAL_FIRST,
     Quantity,
     dayfirst_hint,
     decimal_hint,
@@ -109,8 +110,8 @@ class _NoData(Exception):
 
 _MISSING = MISSING
 _MISSING_FIRST = MISSING_FIRST
-_TOTAL_FIRST = frozenset("иИвВtTgG")  # первые буквы подписей итога: «Итого», «Всего», «Total», «Grand total»
-_FOOTNOTE = re.compile(r"^(?:\*|примечани|прим\.|источник|сноск|note|source)", re.IGNORECASE)
+_TOTAL_FIRST = TOTAL_FIRST
+_FOOTNOTE = re.compile(r"^(?:\*|примечани|прим\.|источник|сноск|note\b|notes\b|source\b)", re.IGNORECASE)
 
 
 def _clean_str(s: str) -> str:
@@ -206,10 +207,11 @@ def _uniform_time(cells: list[Cell]) -> list[Cell]:
 
 
 def _type_column(vals: list[Any], name: str, file_decimal: Optional[str], *, english: bool = False,
-                 epoch: Optional[dt.datetime] = None) -> tuple[list[Cell], Optional[str]]:
+                 epoch: Optional[dt.datetime] = None, rowwise: bool = False) -> tuple[list[Cell], Optional[str]]:
     """Колонка нормализованных значений (`_norm_raw`) → типизированные ячейки и единица из ячеек (если у всех чисел
     она одна). Решение — по колонке: ≥ 80 % непустых ячеек — числа (с одной единицей) или даты/периоды. english —
-    заголовки таблицы по-английски («01/02/2025» — 2 января), epoch — начало отсчёта дат книги Excel."""
+    заголовки таблицы по-английски («01/02/2025» — 2 января), epoch — начало отсчёта дат книги Excel. rowwise —
+    колонка таблицы показателей по строкам: числа с разными единицами (и без единицы) остаются как в файле."""
     counts: Counter = Counter(v for v in vals if v.__class__ is str)
     time_header = bool(_TIME_HEADER.search(name))
     nonstr_num = [v for v in vals if v.__class__ is int or v.__class__ is float]
@@ -248,14 +250,14 @@ def _type_column(vals: list[Any], name: str, file_decimal: Optional[str], *, eng
             return _uniform_time(out), None
 
     if q_share >= 0.8:
-        typed = _numeric_column(vals, distinct, counts, q_sample, dec, total)
+        typed = _numeric_column(vals, distinct, counts, q_sample, dec, total, rowwise)
         if typed is not None:
             return typed
     return [_clean_str(v) if v.__class__ is str else v for v in vals], None
 
 
 def _numeric_column(vals: list[Any], distinct: list[str], counts: Counter, q_sample: dict, dec: Optional[str],
-                    total: int) -> Optional[tuple[list[Cell], Optional[str]]]:
+                    total: int, rowwise: bool = False) -> Optional[tuple[list[Cell], Optional[str]]]:
     qmap: dict[str, Optional[_Q]] = {}
     for s in distinct:
         qmap[s] = q_sample[s] if s in q_sample else _quantity(s, dec)
@@ -269,6 +271,8 @@ def _numeric_column(vals: list[Any], distinct: list[str], counts: Counter, q_sam
         if q is not None:
             units[(q.scale, q.factor, q.base)] += counts[s]
     plain = (None, 1.0, None)
+    if rowwise and (len(units) > 1 or (units and nonstr and plain not in units)):
+        return None  # «2 425», «74,1», «87%» — у каждой строки своя единица: как в файле
     keys = [k for k in units if k != plain]
     if len(keys) <= 1:
         if keys and keys[0][0] is not None and (units.get(plain) or nonstr):
@@ -357,9 +361,14 @@ def _numbers_below(below: list[list[Any]], j: int) -> bool:
     return bool(kinds) and sum(k in ("num", "year") for k in kinds) * 2 > len(kinds)
 
 
-def _merge_headers(h1: list[Any], h2: list[Any], below: list[list[Any]], width: int) -> Optional[list[str]]:
-    """Двухэтажная шапка → один ряд названий; None — второй ряд не шапка. Склеивает строку единиц под названиями
-    («Выручка» / «млн ₽») и подзаголовки под объединённой группой («Выручка» над «2024», «2025»)."""
+_Header = tuple[list[str], list[Optional[str]], list[str]]  # имена колонок, группы, заголовки как в файле
+
+
+def _merge_headers(h1: list[Any], h2: list[Any], below: list[list[Any]], width: int) -> Optional[_Header]:
+    """Двухэтажная шапка → (имена, группы, заголовки как в файле); None — второй ряд не шапка. Строка единиц под
+    названиями («Выручка» / «млн ₽») приклеивается к названиям. Подзаголовки под объединённой группой: названия
+    («Форма обучения» над «Бюджет · Платное · Целевое») — имена колонок, группа — отдельно; периоды («Выручка» над
+    «2024 · 2025») — «Выручка 2024», группа «Выручка» (так длинная таблица узнаёт ряды)."""
     k2 = [_kind(h2[j]) if j < len(h2) else "empty" for j in range(width)]
     filled2 = [j for j in range(width) if k2[j] != "empty"]
     if not filled2:
@@ -371,7 +380,8 @@ def _merge_headers(h1: list[Any], h2: list[Any], below: list[list[Any]], width: 
         all(s1[j] and _header_unit(s2[j]) for j in filled2)
         and any(_numbers_below(below, j) for j in filled2)
     ):
-        return [f"{s1[j]}, {s2[j]}" if s2[j] else s1[j] for j in range(width)]
+        units_row = [f"{s1[j]}, {s2[j]}" if s2[j] else s1[j] for j in range(width)]
+        return units_row, [None] * width, units_row
     if not _header_like(k2):
         return None
     if not any(not s1[j] and s2[j] for j in range(width)):
@@ -379,7 +389,10 @@ def _merge_headers(h1: list[Any], h2: list[Any], below: list[list[Any]], width: 
     # подзаголовок стоит над числами хотя бы в одной колонке
     if not any(k2[j] in ("text", "year", "period") and _numbers_below(below, j) for j in filled2):
         return None
-    names, group = [], ""
+    names: list[str] = []
+    groups: list[Optional[str]] = []
+    leaves: dict[int, str] = {}
+    group = ""
     for j in range(width):
         if s1[j]:
             group = s1[j]
@@ -388,14 +401,27 @@ def _merge_headers(h1: list[Any], h2: list[Any], below: list[list[Any]], width: 
         parent = s1[j] or (group if s2[j] else "")
         if parent and s2[j] and s2[j] == s1[j]:
             names.append(s1[j])  # объединённая по вертикали ячейка шапки («Регион» на два этажа)
+            groups.append(None)
         elif parent and s2[j]:
             pn, pu = split_unit(parent)
             cn, cu = split_unit(s2[j])
             unit = cu or pu
             names.append(f"{pn} {cn}" + (f", {unit}" if unit else ""))
+            groups.append(pn or None)
+            if k2[j] == "text":
+                leaves[j] = cn + (f", {unit}" if unit else "")
         else:
             names.append(parent or s2[j])
-    return names
+            groups.append(None)
+    raw = list(names)
+    # названия под группой — сами по себе имена колонок, если не повторяются («Бюджет», а не «Форма обучения Бюджет»)
+    if leaves and len(leaves) == sum(1 for g in groups if g):
+        leaf_names = [split_unit(v)[0] for v in leaves.values()]
+        others = {split_unit(names[j])[0] for j in range(width) if j not in leaves}
+        if len(set(leaf_names)) == len(leaf_names) and not set(leaf_names) & others:
+            for j, v in leaves.items():
+                names[j] = v
+    return names, groups, raw
 
 
 def _group_row(row: list[Any]) -> bool:
@@ -428,7 +454,18 @@ def _build_table(
     """Строки сырых ячеек → Table. header_row: -1 — найти шапку, None — шапки нет, k — шапка в строке k.
     first_name — имя безымянной первой колонки (ключи JSON-объекта), иначе «Колонка 1». epoch — начало отсчёта дат
     книги Excel; formula_cols — номера колонок листа с формулами без сохранённых значений (не выбрасываются)."""
-    rows = [_norm_row(r) for r in rows]
+    # «—» в ячейке: пропуск, но в таблице счётов с итогом — ноль; где стояли прочерки, помним (по строке-объекту)
+    small = len(rows) <= 20000
+    dash_at: dict[int, list[int]] = {}
+    normed = []
+    for r in rows:
+        nr = _norm_row(r)
+        if small and None in nr:
+            ds = [j for j, v in enumerate(r) if v.__class__ is str and v.strip() in _DASHES]
+            if ds:
+                dash_at[id(nr)] = ds
+        normed.append(nr)
+    rows = normed
     for r in rows:
         while r and r[-1] is None:
             r.pop()
@@ -454,7 +491,8 @@ def _build_table(
     min_fill = 1 if width_est < 2 else max(2, math.ceil(width_est * 0.6))
 
     header: Optional[list[Any]] = None
-    merged_names: Optional[list[str]] = None
+    merged_names: Optional[_Header] = None
+    title_rows: list[list[Any]] = []
     if header_row == -1:
         # шапка — первая «широкая» строка; название отчёта и пустые строки над ней — заметки
         h = next((i for i, c in enumerate(counts) if c >= min_fill), 0)
@@ -475,17 +513,23 @@ def _build_table(
                     merged_names, h = group, h - 1
         else:
             header, data = None, rows[h:]
-        note_lines += [_row_text(r) for r in rows[:h] if r]
+        title_rows = [r for r in rows[:h] if r]
+        note_lines += [_row_text(r) for r in title_rows]
     elif header_row is None:
         header, data = None, rows
     else:
-        note_lines += [_row_text(r) for r in rows[:header_row] if r]
+        title_rows = [r for r in rows[:header_row] if r]
+        note_lines += [_row_text(r) for r in title_rows]
         header, data = rows[header_row], rows[header_row + 1:]
 
     width = max([len(header) if header else 0] + [len(r) for r in data])
     raw_names: list[str] = [""] * width
+    raw_groups: list[Optional[str]] = [None] * width
+    raw_full: Optional[list[str]] = None
     if merged_names is not None:
-        raw_names = (merged_names + raw_names)[:width]
+        raw_names = (merged_names[0] + raw_names)[:width]
+        raw_groups = (merged_names[1] + raw_groups)[:width]
+        raw_full = (merged_names[2] + [""] * width)[:width]
     elif header is not None:
         raw_names = ([str(v) if v is not None else "" for v in header] + raw_names)[:width]
         # вторая строка шапки: подзаголовки под группой или строка единиц (шапку искали сами — у JSON и
@@ -493,7 +537,9 @@ def _build_table(
         if data and header_row == -1:
             merged = _merge_headers(header, data[0], data[1:], width)
             if merged is not None:
-                raw_names, data = merged, data[1:]
+                data = data[1:]
+                raw_names, raw_groups = merged[0], merged[1]
+                raw_full = merged[2]
 
     # пустые строки и повтор шапки (склеенные выгрузки) — прочь; сноски в конце — не данные (строка «Итого» остаётся:
     # её отмечает Table.totals)
@@ -506,9 +552,11 @@ def _build_table(
         last = data[-1]
         filled = [v for v in last if v is not None]
         first = filled[0] if filled else None
+        numbers = any(_is_num(v) or (isinstance(v, str) and _quantity(v) is not None) for v in filled[1:])
         if (
             width >= 2
             and isinstance(first, str)
+            and not numbers  # «Источник питания;50», «Notebook;50» — данные, а не сноска
             and (
                 _FOOTNOTE.match(first)
                 or (len(filled) == 1 and len(first) >= 25 and _quantity(first) is None and _period(first) is None)
@@ -534,6 +582,7 @@ def _build_table(
     # колонки
     names_units = [split_unit(n) for n in raw_names]
     english = _english_header(raw_names)
+    dash_rows = {i: dash_at[id(r)] for i, r in enumerate(data) if id(r) in dash_at}
     typed_cols: list[list[Cell]] = []
     units: list[Optional[str]] = []
     keep: list[int] = []
@@ -543,13 +592,25 @@ def _build_table(
     for i, k in total_labels.items():
         saved.setdefault(k, []).append((i, columns[k][i]))
         columns[k][i] = None
+    # таблица показателей: каждая строка — свой показатель со своей единицей («Принято, чел.», «Трудоустроено, %»);
+    # единица строки не становится единицей колонки
+    label_j = _metric_label_column(columns, names_units)
+    row_units_all: Optional[list[Optional[str]]] = None
+    if label_j is not None:
+        row_units_all = _row_units(columns, label_j, names_units)
+        columns[label_j] = [(split_unit(v)[0] or v) if v.__class__ is str and split_unit(v)[1] else v
+                            for v in columns[label_j]]
+    totals_evident = bool(total_labels) or any(is_total_label(nm) for nm, _ in names_units)
     for j in range(width):
         name, unit = names_units[j]
-        typed, cell_unit = _type_column(columns[j], name, decimal, english=english, epoch=epoch)
+        typed, cell_unit = _type_column(columns[j], name, decimal, english=english, epoch=epoch,
+                                        rowwise=label_j is not None and j != label_j)
         for i, label in saved.get(j, ()):
             if typed is columns[j]:
                 typed = list(typed)
             typed[i] = _clean_str(label)
+        if totals_evident and dash_rows:
+            typed = _dashes_as_zero(typed, j, dash_rows, set(total_labels))
         if all(v is None for v in typed) and not (j in formula_cols and name):
             continue  # пустая колонка (колонку формул без сохранённых значений оставляем — о ней заметка)
         unnamed = not name or name.lower().startswith("unnamed:")
@@ -569,8 +630,16 @@ def _build_table(
                 or f"Колонка {pos + 1}"
         names.append(name)
     names = _dedupe(names)
-    raw_header = [" ".join(raw_names[j].split()) if not raw_names[j].lower().startswith("unnamed:") else ""
-                  for j in keep]
+    shown = raw_full if raw_full is not None else raw_names
+    raw_header = [" ".join(shown[j].split()) if not shown[j].lower().startswith("unnamed:") else "" for j in keep]
+    groups = [raw_groups[j] for j in keep]
+    column_groups = groups if any(groups) else []
+    # единица из названия таблицы («Приём … по направлениям, человек») — числовым колонкам без своей единицы
+    title_unit = _title_unit(title_rows) if label_j is None else None
+    if title_unit:
+        for pos, j in enumerate(keep):
+            if units[pos] is None and _takes_title_unit(names[pos], typed_cols[pos], title_unit):
+                units[pos] = title_unit
 
     n = len(typed_cols)
     out_rows: list[list[Cell]] = []
@@ -582,15 +651,123 @@ def _build_table(
     if not kept_rows:
         raise _NoData("В таблице нет значений")
     totals = [k for k, i in enumerate(kept_rows) if i in total_labels]
+    row_units = [row_units_all[i] for i in kept_rows] if row_units_all is not None and label_j in keep else []
     melt_notes: list[str] = []
-    melted = _melt_wide(names, units, raw_header, typed_cols, kept_rows, set(totals))
+    melted = _melt_wide(names, units, raw_header, typed_cols, kept_rows, set(totals), row_units)
     if melted is not None:
         names, units, raw_header, out_rows, totals, melt_notes = melted
+        row_units, column_groups = [], []
     all_notes = "\n".join(p for p in [notes.strip(), *note_lines, *tail_notes, *melt_notes, *extra_notes] if p)
     return Table.model_construct(
         id=tid, file=file, kind=kind, sheet=sheet, columns=names, units=units, rows=out_rows,
-        raw_header=raw_header, notes=all_notes, totals=totals,
+        raw_header=raw_header, notes=all_notes, totals=totals, row_units=row_units, column_groups=column_groups,
     )
+
+
+_DASHES = frozenset({"-", "--", "---", "—", "–", "−"})
+
+
+def _dashes_as_zero(typed: list[Cell], j: int, dash_rows: dict[int, list[int]], totals: set[int]) -> list[Cell]:
+    """В таблице счётов с итогом («Всего», строка «Итого») прочерк в колонке целых неотрицательных чисел — явный
+    ноль («Целевое: —»), а не пропуск. «н/д», пусто и «нет данных» остаются пропусками."""
+    vals = [v for i, v in enumerate(typed) if v is not None and i not in totals]
+    if not vals or not all(v.__class__ is int and v >= 0 for v in vals):
+        return typed
+    hits = [i for i, cols in dash_rows.items() if j in cols and i < len(typed) and typed[i] is None]
+    if not hits:
+        return typed
+    out = list(typed)
+    for i in hits:
+        out[i] = 0
+    return out
+
+
+# подписи показателей в первой колонке: «Показатель», «Метрика», «Статья»
+_KPI_HEADER_ROWS = re.compile(r"показател|метрик|kpi|индикатор|параметр|стать[яи]|наименовани", re.IGNORECASE)
+_CHANGE_COLUMN = re.compile(r"изменени|прирост|(?:^|\s)рост|динамик|отклонени|разниц|δ|г/г|yoy|\bvs\b|change|delta",
+                            re.IGNORECASE)
+
+
+def _metric_label_column(columns: list[list[Any]], names_units: list[tuple[str, Optional[str]]]) -> Optional[int]:
+    """Таблица показателей по строкам: первая заполненная колонка — разные подписи (не числа и не даты), и это
+    показатели — колонка «Показатель»/«Метрика»/«Статья» или у двух и больше подписей своя единица («Принято, чел.»,
+    «Объём НИОКР, млн ₽»). Тогда единицы — у строк (`Table.row_units`), а не у колонок. None — обычная таблица."""
+    if len(columns) < 2:
+        return None
+    n = len(columns[0])
+    if not 2 <= n <= 30:
+        return None
+    for j, col in enumerate(columns):
+        filled = [v for v in col if v is not None]
+        if not filled:
+            continue
+        if len(filled) < 0.8 * n or not all(v.__class__ is str and _quantity(v) is None and _period(v) is None
+                                            for v in filled):
+            return None
+        if len(set(filled)) != len(filled):
+            return None
+        values = [c for k, c in enumerate(columns) if k != j]
+        if not any(_is_num(v) or (v.__class__ is str and _quantity(v) is not None) for c in values for v in c):
+            return None
+        with_units = sum(1 for v in filled if split_unit(v)[1])
+        return j if (_KPI_HEADER_ROWS.search(names_units[j][0]) or with_units >= 2) else None
+    return None
+
+
+def _row_units(columns: list[list[Any]], label_j: int, names_units: list[tuple[str, Optional[str]]]) -> list[Optional[str]]:
+    """Единица каждой строки-показателя: из подписи («…, чел.» → «чел.»), иначе общая у её значений («1,24 млрд ₽»
+    и «1,01 млрд ₽» → «млрд ₽»); колонки изменений («Изменение», «Рост») не в счёт."""
+    skip = {j for j, (nm, _) in enumerate(names_units) if _CHANGE_COLUMN.search(nm)}
+    out: list[Optional[str]] = []
+    for i, label in enumerate(columns[label_j]):
+        unit = split_unit(label)[1] if label.__class__ is str else None
+        if unit is None:
+            seen: set = set()
+            for j, col in enumerate(columns):
+                v = col[i] if i < len(col) else None
+                if j == label_j or j in skip or v is None:
+                    continue
+                if v.__class__ is str:
+                    q = _quantity(v)
+                    seen.add(q.unit if q is not None else "?")
+                elif _is_num(v):
+                    seen.add(None)
+            unit = next(iter(seen)) if len(seen) == 1 and "?" not in seen else None
+        out.append(unit)
+    return out
+
+
+_COUNT_NAME = re.compile(r"кол-во|количеств|число|клиент|сделок|заказ|человек|чел\.|студент|сотрудник|штук|шт\.|мест",
+                         re.IGNORECASE)
+_MONEYISH_NAME = re.compile(r"выручк|доход|прибыл|стоимост|цен[аыу]|сумм|руб|затрат|расход|зарплат|оклад|чек",
+                            re.IGNORECASE)
+_RATE_NAME = re.compile(r"дол[яиюей]|процент|(?:^|\s)рост|изменени|прирост|темп|конверси|%|индекс|балл|рейтинг|оценк",
+                        re.IGNORECASE)
+
+
+def _title_unit(title_rows: list[list[Any]]) -> Optional[str]:
+    """Единица из строки-названия над шапкой: «Приём на первый курс по направлениям, человек» → «чел.»,
+    «Выручка по регионам (млн руб.)» → «млн ₽». Строка-название — одна заполненная ячейка с текстом."""
+    for r in title_rows:
+        filled = [v for v in r if v is not None]
+        if len(filled) == 1 and isinstance(filled[0], str):
+            unit = split_unit(filled[0])[1]
+            if unit:
+                return unit
+    return None
+
+
+def _takes_title_unit(name: str, typed: list[Cell], unit: str) -> bool:
+    """Единица названия таблицы подходит колонке: колонка — числа, это не доля/рост/индекс, у денег — не счёт людей и
+    штук, у счёта — не деньги."""
+    nums = [v for v in typed if v is not None and not isinstance(v, str)]
+    if not nums or not all(_is_num(v) for v in nums) or any(isinstance(v, str) for v in typed if v is not None
+                                                            and not is_total_label(v)):
+        return False
+    if _RATE_NAME.search(name):
+        return False
+    money = any(c in unit for c in "₽$€£¥₸")
+    return not (_COUNT_NAME.search(name) if money else _MONEYISH_NAME.search(name))
 
 
 def _dedupe(names: list[str]) -> list[str]:
@@ -622,6 +799,7 @@ _DERIVED_COLUMN = re.compile(
     re.IGNORECASE,
 )
 _WIDE_NOTE = "Таблица развёрнута: периоды были в колонках"
+_ID_HEADER = re.compile(r"(?:^|[^а-яёa-z])(?:№|n|no|id|ид|код|номер|п/п|артикул)(?:[^а-яёa-z]|$)|№", re.IGNORECASE)
 
 
 def _header_period(name: str) -> Optional[tuple[str, str, int]]:
@@ -643,7 +821,8 @@ def _header_period(name: str) -> Optional[tuple[str, str, int]]:
 
 
 def _melt_wide(names: list[str], units: list[Optional[str]], raw_header: list[str], cols: list[list[Cell]],
-               kept_rows: list[int], totals: set[int]) -> Optional[tuple]:
+               kept_rows: list[int], totals: set[int], row_units: Optional[list[Optional[str]]] = None,
+               ) -> Optional[tuple]:
     """Периоды в колонках («Регион · 2023 · 2024 · 2025», «Показатель · янв 2025 · фев 2025 · мар 2025») → длинная
     таблица: колонки-подписи, колонка периода («Год», «Месяц», «Квартал»), колонка значения. Если подписи —
     показатели («Показатель»: «Выручка, млн ₽», «Клиенты») или строка одна, каждый показатель становится своей
@@ -674,11 +853,16 @@ def _melt_wide(names: list[str], units: list[Optional[str]], raw_header: list[st
     if len(steps) != 1 or 0 in steps:
         return None
     n_rows = len(kept_rows)
+    texty = False  # числа строками («87%», «2 425»): таблица показателей с единицами по строкам
     for j in pcols:  # под периодами — числа
         for i in range(n_rows):
             v = cols[j][kept_rows[i]]
-            if v is not None and i not in totals and not _is_num(v):
-                return None
+            if v is None or i in totals or _is_num(v):
+                continue
+            if v.__class__ is str and _quantity(v) is not None:
+                texty = True
+                continue
+            return None
     ids: list[int] = []
     dropped: list[int] = []
     last_period = max(pcols)
@@ -687,6 +871,9 @@ def _melt_wide(names: list[str], units: list[Optional[str]], raw_header: list[st
             continue
         vals = [cols[j][kept_rows[i]] for i in range(n_rows) if i not in totals and cols[j][kept_rows[i]] is not None]
         numeric = bool(vals) and sum(1 for v in vals if _is_num(v)) * 2 > len(vals)
+        if numeric and j < min(pcols) and (_ID_HEADER.search(names[j]) or _is_row_number(vals)):
+            ids.append(j)  # «№ п/п», «Код» слева от периодов — подпись строки, а не мера
+            continue
         if numeric or is_total_label(names[j]):
             if j > last_period and _DERIVED_COLUMN.search(names[j]):
                 dropped.append(j)  # «Итого», «Изменение, %» за периодами — считаются из них
@@ -717,13 +904,21 @@ def _melt_wide(names: list[str], units: list[Optional[str]], raw_header: list[st
     if by_metric:
         common = group_unit(groups[""])
         out_names, out_units, out_raw = [pname], [None], [pname]
-        for label in labels:
+        new_cols: list[list[Cell]] = []
+        for i, label in zip(data_rows, labels):
             nm, u = split_unit(label)
+            vals = [cols[j][kept_rows[i]] for j in groups[""]]
+            cell_unit = None
+            if any(v.__class__ is str for v in vals):  # строка показателя — колонка: свои единицы в ячейках
+                vals, cell_unit = _type_column(vals, nm or label, None)
             out_names.append(nm or label)
-            out_units.append(u or common)
+            out_units.append(u or (row_units[i] if row_units else None) or cell_unit or common)
             out_raw.append(" ".join(label.split()))
-        rows = [[pv] + [cols[j][kept_rows[i]] for i in data_rows] for pv, j in zip(pvalues, groups[""])]
+            new_cols.append(vals)
+        rows = [[pv] + [c[k] for c in new_cols] for k, pv in enumerate(pvalues)]
         return _dedupe(out_names), out_units, out_raw, rows, [], notes
+    if texty:
+        return None  # разные единицы под периодами у обычной таблицы — оставить как есть
     out_names = [names[j] for j in ids] + [pname] + [p or "Значение" for p in prefixes]
     out_units = [units[j] for j in ids] + [None] + [group_unit(groups[p]) for p in prefixes]
     out_raw = [raw_header[j] for j in ids] + [pname] + [p or "Значение" for p in prefixes]
@@ -981,13 +1176,14 @@ def _comma_block(lines: list[str], i: int) -> Optional[tuple[int, list[list[str]
     """CSV через запятую внутри письма или в блоке ```csv: одинаковое число полей (≥ 2) в строках подряд, короткие
     ячейки без выравнивания пробелами, под шапкой — числа."""
     first = lines[i]
-    if "," not in first or "  " in first.strip() or "\t" in first:
+    if "," not in first or "  " in first.strip() or "\t" in first or _BULLET.match(first):
         return None
     try:
-        n = len(next(csv.reader([first], skipinitialspace=True)))
+        head = next(csv.reader([first], skipinitialspace=True))
     except csv.Error:
         return None
-    if n < 2:
+    n = len(head)
+    if n < 2 or any(_prose_cell(c) for c in head):
         return None
     j = i
     rows = []
@@ -1002,10 +1198,35 @@ def _comma_block(lines: list[str], i: int) -> Optional[tuple[int, list[list[str]
         j += 1
     if len(rows) < 2 or any(not c for c in rows[0]):
         return None
+    # «Выручка 1,5 млрд» — дробная запятая в тексте, а не разделитель: «Выручка 1» + «5 млрд»
+    raw_pairs = [re.split(r",(?=\S)", lines[k]) for k in range(i, j)]
+    glued = sum(1 for parts in raw_pairs[1:] if any(
+        _GLUED_TAIL.search(a.strip()) and b[:1].isdigit() and _period(a.strip()) is None
+        for a, b in zip(parts, parts[1:])))
+    if glued * 2 >= len(rows) - 1:
+        return None
     numeric_rows = sum(1 for r in rows[1:] if any(_quantity(c) is not None or _period(c) is not None for c in r if c))
     if not any(_quantity(c) is not None for r in rows[1:] for c in r if c) or numeric_rows * 2 < len(rows) - 1:
         return None
     return j, rows, -1
+
+
+_BULLET = re.compile(r"^\s*(?:[-–—•*·]\s|\d{1,2}[.)]\s)")
+_GLUED_TAIL = re.compile(r"[^\W\d_][^,]*\s\d{1,3}$")  # «Выручка 1» перед «5 млрд»
+
+
+def _prose_cell(cell: str) -> bool:
+    """Ячейка шапки похожа на прозу, а не на название колонки: «коллеги!», «прошу посмотреть.», «Ниже данные за
+    квартал», «Выручка по месяцам: 100»."""
+    c = cell.strip()
+    if not c:
+        return False
+    if c[-1] in "!?" or ":" in c:
+        return True
+    words = c.split()
+    if len(words) >= 4:
+        return True
+    return c.endswith(".") and len(words[-1].rstrip(".")) > 4  # «команда.», «посмотреть.» — не «руб.», «чел.»
 
 
 _SPACED = re.compile(r"\s{2,}|\t")
@@ -1069,9 +1290,12 @@ def _read_text(name: str, text: str, digest: str) -> list[Table]:
         # весь файл — CSV через запятую с расширением .txt
         delim = _sniff_delimiter(lines)
         if delim in (",", ";", "\t") and len(nonempty) >= 2:
-            counts = [len(r) for r in csv.reader([lines[k] for k in nonempty], delimiter=delim)]
+            parsed = list(csv.reader([lines[k] for k in nonempty], delimiter=delim, skipinitialspace=True))
+            counts = [len(r) for r in parsed]
             mode, freq = Counter(counts).most_common(1)[0]
-            if mode >= 2 and freq >= 0.9 * len(counts):
+            # проза с запятыми («Цели: …, …», «Привет, коллеги, как дела?») — не таблица
+            prose = delim == "," and any(_prose_cell(c) for c in parsed[0])
+            if mode >= 2 and freq >= 0.9 * len(counts) and not prose:
                 return _read_delimited(name, text, "tsv" if delim == "\t" else "csv", digest, delim)
         raise DataReadError("Не нашёл таблицу в тексте", file=name)
     # весь файл — одна таблица через табуляцию, «;» или запятую: это CSV/TSV, а не «таблица в тексте»
@@ -1171,10 +1395,12 @@ def _sheet_extras(wb: Any, ws: Any) -> tuple[list[tuple[int, int, int, int]], se
     formulas: set[int] = set()
     for m in _FORMULA_TAG.finditer(xml):
         pos = m.start()
-        start = max(xml.rfind(b"<c ", 0, pos), xml.rfind(b":c ", 0, pos))
-        end = xml.find(b"</c>", pos)
+        lo = max(0, pos - 4000)  # начало ячейки — рядом с <f>: поиск назад не дальше 4 КБ (иначе квадратично)
+        start = max(xml.rfind(b"<c ", lo, pos), xml.rfind(b":c ", lo, pos))
+        hi = pos + 20000  # и вперёд — в пределах одной ячейки
+        end = xml.find(b"</c>", pos, hi)
         if end < 0:
-            end = xml.find(b"c>", pos)
+            end = xml.find(b"c>", pos, hi)
         if start < 0 or end < 0:
             continue
         cell = xml[start:end]
@@ -1191,15 +1417,16 @@ def _sheet_extras(wb: Any, ws: Any) -> tuple[list[tuple[int, int, int, int]], se
 
 
 def _fill_merged(rows: list[list[Any]], merges: list[tuple[int, int, int, int]]) -> None:
-    """Объединённые по вертикали ячейки («Центр» на строки 2–4) → значение верхней ячейки в каждой строке диапазона.
+    """Объединённые по вертикали ячейки с текстом («Центр» на строки 2–4) → значение верхней ячейки в каждой строке
+    диапазона (числа не размножаются).
     Объединения в одну строку (заголовок отчёта на всю ширину, группа «Выручка» над «2024 · 2025») не размножаются:
     шапку из них собирает разбор двухэтажной шапки, а заголовок отчёта уходит в заметки."""
     for r1, c1, r2, c2 in merges:
         if r2 <= r1 or c2 != c1 or r1 >= len(rows) or c1 >= len(rows[r1]):
             continue
         top = rows[r1][c1]
-        if top is None or (isinstance(top, str) and not top.strip()):
-            continue
+        if not isinstance(top, str) or not top.strip():
+            continue  # числа не размножаем: «План региона» 100 на три города — не 100 у каждого
         for r in range(r1 + 1, min(r2, len(rows) - 1) + 1):
             row = rows[r]
             if len(row) <= c1:

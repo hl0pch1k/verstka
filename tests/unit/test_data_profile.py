@@ -519,7 +519,10 @@ def test_strict_total_rule_keeps_label_rows_that_only_start_with_vsego():
     # п. 5: «Всего клиентов» — показатель, а не строка итога: он в статистике и первый в колонке
     p = _read("kpi.csv", "Показатель;Значение\nВсего клиентов;3480\nНовых клиентов;420\nУшли;35\nВыручка, млн ₽;1240\n")
     c = _col(p, "Значение")
-    assert (c.max, c.first) == (3480.0, 3480) and _col(p, "Показатель").first == "Всего клиентов" and p.rows == 4
+    assert c.first == 3480 and _col(p, "Показатель").first == "Всего клиентов" and p.rows == 4
+    assert c.max is None  # у строк разные единицы (чел. и млн ₽) — максимум по колонке не считается
+    same = _read("kpi.csv", "Показатель;Значение\nВсего клиентов;3480\nНовых клиентов;420\nУшли;35\n")
+    assert (_col(same, "Значение").max, same.rows) == (3480.0, 3)
     # все подписи — «Итого…»: это не строки итога, а подписи; колонка подписей — категории без пропусков
     q = profile_table(_t(["Показатель", "2025", "2026"], [["Итого", 3000, 3480], ["Итого по Москве", 1000, 1240]]))
     lab = _col(q, "Показатель")
@@ -671,3 +674,145 @@ def test_sample_files_end_to_end_details():
     assert not reg.parts_of_whole and reg.dimensions == ["Регион"]
     txt = prof("Итоги квартала.txt")
     assert txt.dimensions == ["Показатель"] and _col(txt, "III кв. 2026").max is None
+
+
+# ── второй набор данных (университет) и повторное ревью: регрессии ────────────────────────────────────────────────────
+def test_budget_word_alone_is_not_money():
+    # M8: «Бюджет» — места (целые счёты), а не деньги; деньги — если на это что-то указывает
+    p = profile_table(_t(["Направление", "Бюджет", "Платное"], [["А", 120, 140], ["Б", 110, 150], ["В", 90, 60]]))
+    assert _col(p, "Бюджет").type == "number"
+    assert profile_table(_t(["Отдел", "Бюджет"], [["А", 12.5], ["Б", 7.25], ["В", 3.1]])).columns[1].type == "money"
+    assert profile_table(_t(["Отдел", "Сумма бюджета"], [["А", 12], ["Б", 7], ["В", 3]])).columns[1].type == "money"
+    assert profile_table(_t(["Регион", "Выручка"], [["А", 12], ["Б", 7], ["В", 3]])).columns[1].type == "money"
+
+
+def test_total_column_equal_to_the_sum_of_parts():
+    # M9: «Всего» = «Очно» + «Заочно» + «Вечерне» в каждой строке — части целого, итог и части отмечены
+    rows = [["Физики", 30, 10, 5, 45], ["Химии", 20, 0, 4, 24], ["Биологии", 15, 5, 0, 20], ["Права", 50, 30, 10, 90]]
+    p = profile_table(_t(["Кафедра", "Очно", "Заочно", "Вечерне", "Всего"], rows))
+    assert p.parts_of_whole and p.total_column == "Всего" and p.part_columns == ["Очно", "Заочно", "Вечерне"]
+    assert p.nature == "shares"
+    off = [r[:4] + [r[4] + 7] for r in rows]  # «Всего» не сходится — это не итог
+    q = profile_table(_t(["Кафедра", "Очно", "Заочно", "Вечерне", "Всего"], off))
+    assert q.total_column is None and q.part_columns == [] and not q.parts_of_whole
+    # итог сходится только с колонками подряд перед ним (доля в конце — не часть)
+    rows2 = [r + [round(100 * r[1] / r[4])] for r in rows]
+    r2 = profile_table(_t(["Кафедра", "Очно", "Заочно", "Вечерне", "Всего", "Доля очных"], rows2,
+                          units=[None, None, None, None, None, "%"]))
+    assert r2.total_column == "Всего" and r2.part_columns == ["Очно", "Заочно", "Вечерне"]
+
+
+def test_hierarchy_of_a_parent_listed_in_blocks_to_the_left():
+    # M16: «Корпус → Кафедра» (имя родителя не из словаря групп): каждая кафедра в одном факультете, факультет левее и идёт блоками
+    rows = [[f, k, 10 + i] for i, (f, k) in enumerate([("Физфак", "Оптики"), ("Физфак", "Акустики"), ("Физфак", "Ядерной"),
+                                                      ("Химфак", "Органики"), ("Химфак", "Неорганики"),
+                                                      ("Биофак", "Генетики"), ("Биофак", "Ботаники")])]
+    p = profile_table(_t(["Корпус", "Кафедра", "Публикаций"], rows))
+    assert p.hierarchies == [("Кафедра", "Корпус")]
+    # родитель правее или вперемешку — случайность, а не иерархия
+    mixed = [rows[i] for i in (0, 3, 5, 1, 4, 6, 2)]
+    assert profile_table(_t(["Корпус", "Кафедра", "Публикаций"], mixed)).hierarchies == []
+    right = [[k, f, v] for f, k, v in rows]
+    assert profile_table(_t(["Кафедра", "Корпус", "Публикаций"], right)).hierarchies == []
+
+
+def test_id_group_and_two_correlated_measures_is_a_relationship():
+    # M2: id + группа + две связанные метрики на 100 строках — взаимосвязь, а не справочник
+    rows = [[f"ID-{1000 + i}", ["А", "Б", "В"][i % 3], 2 + i % 20, 40 + 2 * (i % 20) + (i * 7) % 9] for i in range(100)]
+    p = profile_table(_t(["Участник", "Группа", "Часы", "Балл"], rows))
+    assert p.nature == "relationship" and p.summary.startswith("Взаимосвязь")
+    noise = [[f"ID-{1000 + i}", ["А", "Б", "В"][i % 3], 2 + i % 20, 40 + (i * 37) % 53] for i in range(100)]
+    assert profile_table(_t(["Участник", "Группа", "Часы", "Балл"], noise)).nature == "reference"
+    # изменение той же величины рядом с ней — не взаимосвязь
+    chg = [[f"ID-{i}", ["А", "Б"][i % 2], 100 + i, 2 * i % 15] for i in range(60)]
+    assert profile_table(_t(["Кафедра", "Группа", "Бюджет", "Изменение к 2025"], chg)).nature != "relationship"
+
+
+def test_row_units_make_value_columns_incomparable():
+    # M21: у строк свои единицы — у колонок «2026», «2025» нет min/max и единицы «%»
+    t = Table(id="k", file="k.csv", kind="csv", columns=["Показатель", "2026", "2025"], units=[None, None, None],
+              rows=[["Выручка", 540, 500], ["Клиенты", 1200, 1100], ["Доля отличников", 35, 31]],
+              raw_header=["Показатель", "2026", "2025"], row_units=["млн ₽", "чел.", "%"])
+    p = profile_table(t)
+    c = _col(p, "2026")
+    assert (c.min, c.max, c.median, c.unit, c.type) == (None, None, None, None, "number") and c.first == 540
+
+
+def test_event_log_keeps_a_day_axis():
+    # повторное ревью, I2: заказы в рабочие часы за 60 дней — ось по дням без сотен «пропущенных» ночных часов
+    rows = []
+    for d in range(60):
+        for k in range(12):
+            ts = dt.datetime(2025, 3, 1, 8) + dt.timedelta(days=d, hours=(k * 5 + d) % 13, minutes=(k * 17) % 60)
+            rows.append([ts.strftime("%Y-%m-%dT%H:%M"), 100 + k])
+    p = profile_table(_t(["Дата заказа", "Сумма"], rows, units=[None, "₽"]))
+    assert p.time_axis.freq == "day" and p.time_axis.points == 60 and p.time_axis.missing_periods == []
+    short = [r for r in rows if r[0] < "2025-03-03"]  # двое суток — по часам видно, когда заказывают
+    assert profile_table(_t(["Дата заказа", "Сумма"], short)).time_axis.freq == "hour"
+
+
+def test_quarter_hour_readings_lie_on_an_hourly_axis():
+    # повторное ревью, M3 (выбранное правило): минуты не различаются — 96 замеров раз в 15 минут дают 24 часа
+    stamps = [(dt.datetime(2025, 3, 1) + dt.timedelta(minutes=15 * k)).strftime("%Y-%m-%dT%H:%M") for k in range(96)]
+    p = profile_table(_t(["Время", "Нагрузка"], [[s, 30 + k % 7] for k, s in enumerate(stamps)]))
+    assert (p.time_axis.freq, p.time_axis.points, p.time_axis.missing_periods) == ("hour", 24, [])
+
+
+# ── чтение → профиль: второй набор данных (университет), только сквозная проверка ─────────────────────────────────────
+SCIENCE = EXAMPLES.parent / "data-science-2026"
+
+
+def test_science_files_end_to_end():
+    from verstka.data.readers import read_file
+
+    def both(name: str):
+        t = read_file(SCIENCE / name)[0]
+        return t, profile_table(t)
+
+    t, p = both("Часы подготовки и баллы ЕГЭ.csv")
+    assert p.nature == "relationship" and (_col(p, "Подготовка").unit, t.raw_header[2]) == ("ч/нед.", "Подготовка (ч в неделю)")
+    t, p = both("Приём по направлениям.xlsx")
+    assert t.columns[1:4] == ["Бюджет", "Платное", "Целевое"] and t.column_groups[1] == "Форма обучения"
+    assert set(t.units[1:]) == {"чел."} and _col(p, "Бюджет").type == "number" and _col(p, "Целевое").missing == 0
+    assert p.parts_of_whole and p.total_column == "Всего" and p.part_columns == ["Бюджет", "Платное", "Целевое"]
+    t, p = both("Публикации по годам.json")
+    assert t.columns == ["Год", "Scopus", "РИНЦ"] and t.units[1:] == ["статей", "статей"] and p.metrics == ["Scopus", "РИНЦ"]
+    t, p = both("Бюджет НИОКР.csv")
+    assert ("Кафедра", "Институт") in p.hierarchies and t.totals == [18]
+    t, p = both("Итоги года.txt")
+    assert t.units == [None] * 4 and t.row_units == ["чел.", None, "%", None, "млн ₽", "чел."]
+    assert _col(p, "2026").max is None and col_first(t) == "Принято на 1 курс"
+    t, p = both("Стипендии.csv")
+    assert p.nature == "distribution" and _col(p, "Размер стипендии").unit == "₽"
+
+
+def col_first(t: Table) -> str:
+    return t.rows[0][0]
+
+
+# ── выбросы на карточке файла: только похожие на ошибку ──────────────────────────────────────────────────────────────
+def test_reference_card_of_clients_has_no_outlier_issue():
+    # крупнейшие клиенты справочника — не проблема данных: карточка их не называет, анализу они остаются
+    from verstka.api.app import _dataset_summary
+    from verstka.data.readers import read_file
+
+    t = read_file(EXAMPLES / "Клиенты.xlsx")[0]
+    p = profile_table(t)
+    card = _dataset_summary("clients", t, p)
+    assert card.line == "Справочник · 240 строк · 6 колонок" and not any("выброс" in i for i in card.issues)
+    assert p.outliers == [] and len(p.expected_outliers) == 10 and len(_col(p, "Выручка").outliers) == 10
+    t2 = read_file(EXAMPLES / "Время ответа поддержки.csv")[0]
+    card2 = _dataset_summary("support", t2, profile_table(t2))
+    assert "3 выброса" in card2.issues  # время ответа 1 430 мин в распределении — заметно
+
+
+def test_a_big_category_in_a_long_series_is_not_an_outlier_issue():
+    # Москва в 10 раз больше других регионов каждый месяц — масштаб категории, а не ошибка
+    rows = [[f"2025-{m:02d}", r, (1000 if r == "Москва" else 100) + m + k]
+            for m in range(1, 13) for k, r in enumerate(["Москва", "Казань", "Тверь", "Омск", "Сочи"])]
+    p = profile_table(_t(["Месяц", "Регион", "Выручка"], rows))
+    assert p.nature == "time_series" and p.outliers == [] and len(p.expected_outliers) == 12
+    spike = [[f"2025-{m:02d}", 100 + m % 3] for m in range(1, 13)] + [[f"2026-{m:02d}", 100 + m % 3] for m in range(1, 13)]
+    spike[7][1] = 900  # всплеск в одном месяце ряда — заметен
+    q = profile_table(_t(["Месяц", "Заказы"], spike))
+    assert [o.value for o in q.outliers] == [900.0] and q.expected_outliers == []

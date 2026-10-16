@@ -65,7 +65,7 @@ def test_decimal_hint_by_column():
     assert decimal_hint(["1 234,5", "17"]) == "," and decimal_hint(["0.25", "1.5"]) == "."
     # одна группа из трёх цифр + «…00» или целые от 100 — разделитель тысяч
     assert decimal_hint(["1.234", "2.500", "12.000", "950"]) == ","
-    assert decimal_hint(["1,234", "2,500", "950"]) == "."
+    assert decimal_hint(["1,234", "2,500", "950"]) is None  # запятая с тремя знаками — дробь («75,500»)
     assert decimal_hint(["1.234", "2.345"]) is None  # неясно — решает запись
     assert decimal_hint(["1.234", "2.500"], ".") == "."  # CSV через запятую: точка — дробь
 
@@ -120,6 +120,7 @@ def test_missing_and_bool_tokens_are_shared():
     "label, total",
     [("Итого", True), ("ИТОГО:", True), ("Всего", True), ("Всего:", True), ("Итого по России", True),
      ("Всего за 2025 год", True), ("Total", True), ("Grand total", True), ("В целом по компании", True),
+     ("Общий итог", True), ("Общая сумма", True), ("Итого, млн ₽", True), ("Итого общее", True),
      ("Всего клиентов", False), ("Итого выручка", False), ("Всего лишь пробный", False), ("Итоговый отчёт", False),
      ("Москва", False), (None, False), (100, False)],
 )
@@ -130,3 +131,8 @@ def test_strict_total_rule(label, total):
 def test_split_unit():
     assert split_unit("Выручка, млн ₽") == ("Выручка", "млн ₽") and split_unit("Доля (%)") == ("Доля", "%")
     assert split_unit("Город, регион") == ("Город, регион", None) and split_unit("2023, млн ₽") == ("2023", "млн ₽")
+    # счётные слова и темп: «Scopus, статей», «Подготовка (ч в неделю)», «Зарплата, руб. в месяц»
+    assert split_unit("Scopus, статей") == ("Scopus", "статей") and split_unit("Приём, человек") == ("Приём", "чел.")
+    assert split_unit("Подготовка (ч в неделю)") == ("Подготовка", "ч/нед.")
+    assert split_unit("Зарплата, руб. в месяц") == ("Зарплата", "₽/мес.")
+    assert split_unit("Выручка за месяц") == ("Выручка за месяц", None)  # «за месяц» без единицы — часть имени
