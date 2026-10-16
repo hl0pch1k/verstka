@@ -130,6 +130,11 @@ def _chart_derived(text: str, f, changes: tuple[list[float], list[float], list[f
     return _near(f.value, f.dec, [d / (f.scale or 1.0) for d in diffs])
 
 
+def _plain(text: str) -> str:
+    """A line as words: no-break spaces and word joiners as spaces, no closing period, lower case."""
+    return " ".join(re.sub(r"[\u00a0\u202f\u2009\u2060\u200b]", " ", text or "").split()).rstrip(".").lower()
+
+
 def _near(value: float, dec: int, candidates: list[float]) -> bool:
     step = 10 ** -dec
     return any(abs(value - c) <= step * 0.51 + 1e-9 for c in candidates)
@@ -177,7 +182,17 @@ def figure_not_in_brief(ctx: AuditContext) -> list[Issue]:
     idx = _index(ctx)
     stats = FigureStats()
     out: list[Issue] = []
+    # a slide made from a data file (OutlineSlide.data) takes its figures from the file, not from the brief: they are
+    # checked against the dataset's facts and values (audit/checks/data.py)
+    data_slides = [s for s in (ctx.outline.slides if ctx.outline is not None else []) if getattr(s, "data", None) is not None]
+    from_data = {s.id for s in data_slides}
+    # the facts the analysis counted from those files: the summary of a data deck («Выручка выросла на 23%») says them
+    data_facts = [float(f.value) for s in data_slides for f in s.data.headline_facts]
+    # …and the data slides' conclusions repeated whole (a summary card: «Прямые продажи приносят почти половину выручки»)
+    data_heads = {_plain(s.headline) for s in data_slides}
     for s in ctx.ir.slides:
+        if s.outline_id in from_data:
+            continue
         shares, totals = _chart_parts(s)
         changes = _chart_changes(s)
         cover = _cover(s, ctx)
@@ -197,6 +212,8 @@ def figure_not_in_brief(ctx: AuditContext) -> list[Issue]:
                     except Exception:  # noqa: BLE001 - the plain verdict then
                         pass
             for t in _texts(e):
+                if data_heads and _plain(t) in data_heads:
+                    continue
                 for f in figures(t):
                     if cover and (f.date is not None or (f.plain and 1900 <= f.value <= 2100)):
                         continue  # the cover's date is the deck's, not a fact of the brief
@@ -214,6 +231,8 @@ def figure_not_in_brief(ctx: AuditContext) -> list[Issue]:
                         v = "derived"  # a difference, a percent change or a ratio of the brief's figures
                     if v != "ok" and t in row_given:
                         v = "derived"  # 3 200 ₽ / 4 занятия = 800 ₽ за занятие, in the same row of the table
+                    elif v != "ok" and data_facts and _near(f.value, f.dec, data_facts):
+                        v = "derived"  # a fact of the deck's data files (the summary's conclusions, the key figures)
                     found.append((written, v))
             if e.chart is not None:
                 for ser in e.chart.series:

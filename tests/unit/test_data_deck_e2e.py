@@ -163,3 +163,45 @@ def test_the_second_data_set_builds_on_the_unseen_template(tmp_path):
     v = res.variants[0]
     assert (v.out_dir / "deck.pptx").is_file()
     assert len([s for s in v.outline.slides if s.data is not None]) >= 5
+
+
+def _decor_over_frames(pptx: Path, outline) -> list[tuple]:
+    """(slide, file, where the decor comes from, share of the frame it covers) for every chart or table frame of a data
+    slide that the template's decor — the art its layout and master draw (`layers.art_layers`: grounds, rules and the
+    slide's own shapes aside) and the pictures kept on the slide — stands on."""
+    from lxml import etree
+    from pptx import Presentation
+
+    from verstka.rendering.deck import element_bbox
+    from verstka.rendering.layers import art_layers, opaque_box
+    from verstka.schemas.common import Bbox
+
+    prs = Presentation(str(pptx))
+    out = []
+    for k, (slide, osl) in enumerate(zip(prs.slides, outline.slides), 1):
+        if osl.data is None:
+            continue
+        tree = slide._element.cSld.find("{http://schemas.openxmlformats.org/presentationml/2006/main}spTree")
+        frames = [Bbox(x=b[0], y=b[1], w=b[2], h=b[3]) for el in tree if etree.QName(el).localname == "graphicFrame" and (b := element_bbox(el)) and b[2] > 0]
+        for lay in art_layers(slide):
+            if lay.kind in ("graphicFrame", "cxnSp") or (lay.source == "slide" and not lay.picture) or lay.cover >= 0.85:
+                continue
+            box = lay.box
+            if lay.kind == "pic":
+                part = slide.part if lay.source == "slide" else slide.slide_layout.part if lay.source == "layout" else slide.slide_layout.slide_master.part
+                try:
+                    box = opaque_box(part, lay.el, box)
+                except Exception:  # noqa: BLE001
+                    pass
+            for f in frames:
+                share = f.intersection(box) / max(1, f.area)
+                if share > 0.002:
+                    out.append((k, osl.data.file, lay.source, round(share, 3)))
+    return out
+
+
+def test_no_template_decor_stands_on_a_chart_or_table(built):
+    out, _, _ = built
+    for name, (_, res, _) in out.items():
+        for v in res.variants:
+            assert _decor_over_frames(v.out_dir / "deck.pptx", v.outline) == [], (name, v.strategy)

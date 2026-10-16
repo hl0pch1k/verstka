@@ -307,6 +307,9 @@ def slide_for(plan: DatasetPlan, table: Table, part: int = 1, *, slide_id: str, 
     body = chart_spec_of(plan, table, part=part)
     if body is None or isinstance(body, NotBuilt):
         return body
+    if isinstance(body, ChartSpec):
+        # the analysis chose this kind (or the person did, rebuilding the slide): the engine never turns it
+        body = body.model_copy(update={"kind_locked": True})
     total = max(1, plan.slides)
     head = plan.headline or plan.plain_headline
     if part > 1:

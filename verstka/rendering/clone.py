@@ -2488,7 +2488,7 @@ def _place_native_object(ctx: _SlideCtx, oslide: OutlineSlide) -> None:
     manifest = ctx.manifest
     drawn = _drawn_table_area(ctx)
     if drawn is not None:
-        _draw_native(ctx, oslide, _below_heading(ctx, _reserve_notes_room(ctx, oslide, drawn)))
+        _draw_native(ctx, oslide, _clear_of_decor(ctx, _below_heading(ctx, _reserve_notes_room(ctx, oslide, drawn))))
         return
     # sample charts/tables/images on the slide are replaced by the native object
     # (the template's art is no place for a chart or a table: VK Tech p7's 3D spiral stays beside the slide's data)
@@ -2516,7 +2516,7 @@ def _place_native_object(ctx: _SlideCtx, oslide: OutlineSlide) -> None:
         # «Item 1 … Item 5» laid over the lower slide): its painted part, under the texts that stay, takes the object
         pic_box = _content_picture_area(ctx)
         if pic_box is not None:
-            box = pic_box
+            box = _across_empty_row(ctx, pic_box)
     if box is None and ctx.pattern.kind in (PatternKind.chart, PatternKind.table) and not big_candidates:
         # the sample chart/table is drawn with shapes: clear everything except title/subtitle and use that area
         keep = {s.shape_id for s in ctx.pattern.slots if s.role in (SlotRole.title, SlotRole.subtitle)}
@@ -2564,7 +2564,66 @@ def _place_native_object(ctx: _SlideCtx, oslide: OutlineSlide) -> None:
         box = _grow_into_free_area(box, ctx, oslide)
     box = _reserve_notes_room(ctx, oslide, box)
     box = _below_heading(ctx, box)
+    box = _clear_of_decor(ctx, box)
     _draw_native(ctx, oslide, box)
+
+
+def _across_empty_row(ctx: _SlideCtx, box: Bbox) -> Bbox:
+    """The sample's figure picture beside text slots the slide leaves empty (WorkSpace p19: a ring on the right of
+    «Заголовок / ХХ» pills): the object takes the whole row of the safe area — not half a slide with the other half
+    blank. Kept as it is when a text the slide fills stands beside it."""
+    safe = ctx.manifest.tokens.spacing.safe_area
+    x0, x1 = int(safe.x * ctx.W), int(safe.x2 * ctx.W)
+    if box.w >= 0.75 * (x1 - x0):
+        return box
+    row = Bbox(x=x0, y=box.y, w=x1 - x0, h=box.h)
+    for sid in ctx.filled:
+        slot = ctx.slot_of.get(sid)
+        if slot is None or slot.role in (SlotRole.title, SlotRole.subtitle):
+            continue
+        el = ctx.els.get(sid)
+        b = element_bbox(el) if el is not None else None
+        if b and Bbox(x=b[0], y=b[1], w=b[2], h=b[3]).intersection(row) > 0:
+            return box
+    return row
+
+
+def decor_boxes(slide, own: Optional[list[Bbox]] = None) -> list[Bbox]:
+    """The template's decor a chart or a table must keep clear of: the art its layout and master draw (rings, dots,
+    illustrations, photos — `layers.art_layers`, grounds and rules aside) and `own` — the painted parts of the sample's
+    art kept on the slide (`_SlideCtx.art_boxes`)."""
+    from verstka.rendering.layers import art_layers
+
+    out = list(own or [])
+    try:
+        for lay in art_layers(slide):
+            if lay.source == "slide" or lay.kind in ("graphicFrame", "cxnSp") or lay.cover >= 0.85:
+                continue  # (a busy picture under the whole slide is its ground, not decor)
+            ix = max(0, min(lay.box.x2, lay.slide_w) - max(lay.box.x, 0))
+            iy = max(0, min(lay.box.y2, lay.slide_h) - max(lay.box.y, 0))
+            if ix > 0 and iy > 0:
+                out.append(Bbox(x=max(lay.box.x, 0), y=max(lay.box.y, 0), w=ix, h=iy))
+    except Exception:  # noqa: BLE001 - the slide's own art then
+        log.debug("layout art not read", exc_info=True)
+    return out
+
+
+def _clear_of_decor(ctx: _SlideCtx, box: Bbox) -> Bbox:
+    """A chart or a table never stands on the template's decor (WorkSpace p19: the sample's big ring under a line
+    chart, its dots in the corner over the bars): the frame shrinks to the largest rectangle inside it clear of the
+    decor when that keeps most of it; else the sample is no place for the object — the renderer takes the next sample or
+    composes the slide."""
+    from verstka.rendering.layers import largest_free
+
+    pad = int(0.012 * ctx.W)
+    hits = [d for d in decor_boxes(ctx.slide, ctx.art_boxes()) if d.intersection(box) > 0.002 * box.area]
+    if not hits:
+        return box
+    free = largest_free(box, [Bbox(x=d.x - pad, y=d.y - pad, w=d.w + 2 * pad, h=d.h + 2 * pad) for d in hits])
+    if free.w >= 0.6 * box.w and free.h >= 0.6 * box.h and free.area >= 0.12 * ctx.W * ctx.H:
+        ctx.warnings.append("the chart kept clear of the template's decor")
+        return free
+    raise RuntimeError("the template's decor would lie under the chart")
 
 
 def _texts_beside_chart(ctx: _SlideCtx, oslide: OutlineSlide) -> bool:
@@ -2705,7 +2764,10 @@ def _draw_native(ctx: _SlideCtx, oslide: OutlineSlide, box: Bbox) -> None:
         pic_box = Bbox(x=b[0], y=b[1], w=b[2], h=b[3])
         if ctx.pic_kind.get(ctx.origin.get(sid, sid)) == "panel" and pic_box.area >= 0.9 * box.area:
             continue  # the plate the sample's table or chart stands on stays under the native one
-        if box.intersection(pic_box) > 0.3 * pic_box.area:
+        # (the sample's own figure drawn as a picture — WorkSpace p19's big ring, mostly off the slide — goes whenever
+        # the object stands on it: the object takes its place)
+        mine = ctx.pic_kind.get(ctx.origin.get(sid, sid)) == "content" and box.intersection(pic_box) > 0.02 * box.area
+        if mine or box.intersection(pic_box) > 0.3 * pic_box.area:
             remove_element(el)
             ctx.removed.add(sid)
             gone.append(pic_box)

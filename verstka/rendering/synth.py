@@ -1696,7 +1696,7 @@ def _render_content(builder: DeckBuilder, comp: str, oslide: OutlineSlide, manif
     foot_room = None
     if art is None:
         full = area
-        area = _clear_of_art(slide, area, title_ph, W, H, warnings)
+        area = _clear_of_art(slide, area, title_ph, W, H, warnings, data=oslide.content.chart is not None or oslide.content.table is not None)
         foot_room = _foot_room(slide, full, area, title_ph, W, H)
     area = _clear_of_rules(slide, area, W, H, warnings)
     _true_ground(slide, area, pal, manifest)
@@ -2015,15 +2015,27 @@ def _reclaim_left(slide: Slide, title_ph, safe_box: tuple[int, int, int, int], m
     warnings.append("heading moved to the page grid: its sample's column stood beside a picture the composed slide does not keep")
 
 
-def _clear_of_art(slide: Slide, area: Bbox, title_ph, W: int, H: int, warnings: list[str]) -> Bbox:
+def _clear_of_art(slide: Slide, area: Bbox, title_ph, W: int, H: int, warnings: list[str], data: bool = False) -> Bbox:
     """The content area clear of the template's art (illustrations, triangles, trees, photos the layout or the master
     draws — contract C2 layers.free_rect): when art covers 3 % of the area or more, the content takes the largest free
-    rectangle inside it (below that, small marks are left to the foot and logo rules)."""
+    rectangle inside it (below that, small marks are left to the foot and logo rules). `data`: the slide holds a chart
+    or a table — no decor at all may stand under it (dots in a corner over the bars): any art inside the area moves
+    it to the largest free rectangle when that is large enough."""
     try:
         from verstka.rendering.layers import art_boxes, art_share, free_rect
     except ImportError:
         return area
     skip = (title_ph._element,) if title_ph is not None else ()
+    if data:
+        try:
+            hits = [b for b in art_boxes(slide, skip=skip) if b.w * b.h < 0.85 * W * H and b.intersection(area) > 0.002 * area.area]
+            if hits:
+                free = free_rect(slide, area, skip=skip)
+                if free.w >= 0.3 * W and free.h >= 0.2 * H and free.area >= 0.5 * area.area:
+                    warnings.append("the chart's area kept clear of the template's decor")
+                    return free
+        except Exception:  # noqa: BLE001 - the rule below then
+            log.debug("decor clearance failed", exc_info=True)
     try:
         share = art_share(slide, area, skip=skip)
         # an illustration standing mostly inside the area (a tree in its corner) is art to keep clear of even when it

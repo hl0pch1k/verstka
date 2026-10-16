@@ -1327,6 +1327,8 @@ def prefer_bar(spec: ChartSpec, outline: DeckOutline) -> bool:
         return False
     if t in _HORIZONTAL:
         return True
+    if getattr(spec, "kind_locked", False):
+        return False  # chosen on purpose (the data's option, the person's «Пересобрать слайд так»): columns stay columns
     series = resolve_series(spec, outline)
     if not series:
         return False

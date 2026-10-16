@@ -175,6 +175,30 @@ def test_an_option_the_data_does_not_suit_is_refused_calmly(api, deck):
     assert r.status_code == 404
 
 
+def test_columns_chosen_by_the_person_stay_columns(api, deck):
+    """«Пересобрать слайд так» → «Вертикальные столбцы» у регионов с длинными названиями: в файле — столбцы (движок не
+    поворачивает выбранный вид в полосы), подписи не наезжают друг на друга и на соседей."""
+    from verstka.audit.ir import build_deck_ir
+
+    c, store, root, tid = api
+    gid, gen, ids = deck
+    vdir = store.generation_dir(gid) / "structured"
+    o = json.loads((vdir / "outline.json").read_text(encoding="utf-8"))
+    n = _slide_of(o, "Регионы.xlsx")
+    assert o["slides"][n - 1]["content"]["chart"]["kind_locked"] is True
+    r = c.post(f"/api/generations/{gid}/structured/slides/{n}/rebuild", json={"option": 1})
+    assert r.status_code == 200, r.text
+    job = _wait(r.json()["job_id"])
+    assert job.status == "done" and job.result["viz"] == "column", job.events[-1]
+    ir = build_deck_ir(vdir / "deck.pptx")
+    assert [e.chart.type for e in ir.slides[n - 1].elements if e.chart] == ["column"]
+    rep = json.loads((vdir / "audit_report.json").read_text(encoding="utf-8"))
+    bad = [(i["check_id"], i["message"]) for i in rep["issues"] if i["slide"] == n and i["severity"] in ("error", "warn")]
+    assert bad == [], bad
+    r = c.post(f"/api/generations/{gid}/structured/edits", json={"message": "верни как было"})
+    assert _wait(r.json()["job_id"]).status == "done"
+
+
 def test_a_rebuild_into_more_slides_lays_the_variant_out_again(api, deck):
     c, store, root, tid = api
     gid, gen, ids = deck
@@ -258,3 +282,27 @@ def test_the_logos_are_copied_before_the_brandbook_can_go(api, tmp_path):
 
     copy_id = branded_template(tid, data.brand, "brand", workspace_root=root, brand_dir=copy, render=False)
     assert (branded_info(copy_id, root) or {}).get("base_template_id") == tid
+
+
+def test_fixes_and_chat_edits_check_data_figures_against_the_data_not_the_brief(api):
+    """«Исправить слайд» and the chat's edits audit the variant with the brief (generation.json): the figures of the data
+    slides and of the summary come from the files — `figure_not_in_brief` must not flag them."""
+    from verstka.audit.runner import run_audit
+    from verstka.schemas.outline import DeckOutline
+
+    c, store, root, tid = api
+    gid, gen = _generate(c, tid, _upload(c), strategies=["compact"])
+    vdir = store.generation_dir(gid) / "compact"
+    meta = store.read_generation_meta(gid)
+    brief = A._brief_of_meta(meta)
+    assert brief is not None and brief.text.strip()
+    outline = DeckOutline.model_validate_json((vdir / "outline.json").read_text(encoding="utf-8"))
+    rep = run_audit(vdir / "deck.pptx", store.manifest(tid), outline, store.workspace(tid), render=False, use_vlm=False, use_llm=False, brief_text=brief.text)
+    assert not [i for i in rep.issues if i.check_id == "figure_not_in_brief"], [i.message for i in rep.issues if i.check_id == "figure_not_in_brief"]
+    # a chat edit lays the variant out again and audits it against the brief
+    r = c.post(f"/api/generations/{gid}/compact/edits", json={"message": "поменяй местами слайды 3 и 4"})
+    job = _wait(r.json()["job_id"])
+    assert job.status == "done" and job.result["changed"], job.events[-1]
+    after = json.loads((vdir / "audit_report.json").read_text(encoding="utf-8"))
+    assert not [i for i in after["issues"] if i["check_id"] == "figure_not_in_brief"]
+    assert not [i for i in after["issues"] if i["check_id"] in ("chart_values_mismatch", "headline_figure_not_in_data")]

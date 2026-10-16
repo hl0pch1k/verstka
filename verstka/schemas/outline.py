@@ -102,6 +102,9 @@ class ChartSpec(BaseModel):
     gaps: SkipJsonSchema[bool] = False
     source: SkipJsonSchema[Optional[str]] = None
     xy: SkipJsonSchema[list[XYSeries]] = Field(default_factory=list)
+    # the kind was chosen on purpose (the data layer's chosen option, «Пересобрать слайд так»): the engine draws it as
+    # written — columns with long labels stay columns (their labels wrap or turn), never horizontal bars
+    kind_locked: SkipJsonSchema[bool] = False
 
 
 class CodeBlock(BaseModel):
