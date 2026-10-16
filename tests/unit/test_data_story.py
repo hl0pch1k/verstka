@@ -311,3 +311,13 @@ def test_the_variants_say_who_wrote_the_plan_and_count_the_storyteller(tmp_path,
     plan = story_plan(saved, st.dataset_ids[0])
     assert plan is not None and plan.profile.table_id == st.dataset_ids[0]
     assert numbers_in("Топ-10") == [10.0]
+
+
+def test_the_context_goes_before_any_data(sales):
+    text = ("Итоги продаж VK Cloud за 9 месяцев 2026 года. Компания вышла в три новых региона и запустила маркетплейс. "
+            "Команда продаж выросла вдвое, а партнёрская программа заработала с весны. Покажи рост выручки.")
+    full = build_data_outline(Brief(text=text), sales)
+    assert len(full.slides) == 10 and any(s.id.startswith("context") for s in full.slides)
+    o = build_data_outline(Brief(text=text, slide_count=9), sales)
+    assert len(o.slides) == 9 and not any(s.id.startswith("context") for s in o.slides)
+    assert len([s for s in o.slides if s.data is not None]) == 7

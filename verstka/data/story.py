@@ -521,7 +521,7 @@ def build_data_story(
     for j in range(0, min(len(ctx_lines), CONTEXT_LINES * MAX_CONTEXT_SLIDES), CONTEXT_LINES):
         chunk = ctx_lines[j : j + CONTEXT_LINES]
         head = "Контекст" if j == 0 else "Контекст (продолжение)"
-        entries.append(_Entry(OutlineSlide(id=f"context-{j // CONTEXT_LINES + 1}", kind=PatternKind.bullets, headline=head, content=SlideContent(bullets=chunk), verbatim=True), "context", keep=20 - j))
+        entries.append(_Entry(OutlineSlide(id=f"context-{j // CONTEXT_LINES + 1}", kind=PatternKind.bullets, headline=head, content=SlideContent(bullets=chunk), verbatim=True), "context", keep=3 - j // CONTEXT_LINES))
 
     data_entries: list[_Entry] = []
     kpi_done = False
