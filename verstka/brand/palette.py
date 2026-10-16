@@ -27,7 +27,7 @@ import colorsys
 import logging
 import math
 import re
-from collections import Counter
+from collections import Counter, OrderedDict
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -283,7 +283,8 @@ class TextPair:
 
 
 _PAIRS: dict[tuple, list[TextPair]] = {}
-_IRS: dict[tuple, object] = {}
+_IRS: "OrderedDict[tuple, object]" = OrderedDict()
+IR_CACHE_SIZE = 2  # IR большого шаблона с картинками — десятки мегабайт (ЛЦТ ≈ 70, VK Education ≈ 140): сервер живёт долго
 _THEMES: dict[tuple, ThemeInfo] = {}
 
 
@@ -303,17 +304,20 @@ def source_ir(src: Path | str):
     key = file_key(src)
     if key is None:
         return None
-    if key not in _IRS:
-        try:
-            from verstka.audit.ir import build_deck_ir
+    if key in _IRS:
+        _IRS.move_to_end(key)
+        return _IRS[key]
+    try:
+        from verstka.audit.ir import build_deck_ir
 
-            _IRS[key] = build_deck_ir(Path(src), with_images=True)
-        except Exception as e:  # noqa: BLE001
-            log.warning("deck IR unavailable: %s", e)
-            _IRS[key] = None
-        while len(_IRS) > 8:
-            _IRS.pop(next(iter(_IRS)))
-    return _IRS[key]
+        ir = build_deck_ir(Path(src), with_images=True)
+    except Exception as e:  # noqa: BLE001
+        log.warning("deck IR unavailable: %s", e)
+        ir = None
+    _IRS[key] = ir
+    while len(_IRS) > IR_CACHE_SIZE:
+        _IRS.popitem(last=False)
+    return ir
 
 
 def text_pairs(src: Path | str, manifest: Optional[TemplateManifest] = None) -> list[TextPair]:
@@ -382,6 +386,7 @@ class ColorPlan:
     stock_slots: dict[str, str] = field(default_factory=dict)  # слот стандартной темы → цвет бренда
     chart_order: list[str] = field(default_factory=list)  # цвета диаграмм бренда по порядку (основной первым)
     brand_accents: set[str] = field(default_factory=set)  # «акцент» бренда — не раньше остальных цветов диаграмм
+    link: Optional[str] = None  # цвет ссылок бренда — основной
     warnings: list[str] = field(default_factory=list)
     _cache: dict[str, str] = field(default_factory=dict, repr=False)
 
@@ -425,6 +430,19 @@ class ColorPlan:
             return h
         near = min(plain, key=lambda c: hue_dist(hue(c), hue(h)))
         return at_lightness(near, lightness(h))
+
+    def map_link(self, value: str, near: float = 2.0) -> str:
+        """Цвет ссылки (слот `hlink` темы, явный цвет текста со ссылкой): основной цвет бренда, если он не дальше `near`
+        по светлоте, иначе его оттенок своей светлоты (контраст с фоном тот же), а не розовый акцент или офисный синий
+        #0563C1."""
+        h = self.map(value)
+        v = value.upper()
+        if not self.enabled or not self.link or v in self.keep or tone(v) != "chromatic":
+            return h
+        if h != v and tone(h) == "chromatic" and hue_dist(hue(h), hue(self.link)) <= 8:
+            return h  # слот темы уже в семье основного (со своей подгонкой контраста)
+        own = lightness(v)
+        return self.link if abs(lightness(self.link) - own) <= near else at_lightness(self.link, own)
 
     def kept(self, h: str, reason: str, target: Optional[str] = None) -> None:
         was = self.table.pop(h, None)
@@ -615,6 +633,7 @@ def plan_colors(
             if a not in plan.table:
                 plan.kept(a, "no_brand_colors")
     else:
+        plan.link = _brand_hex(brand, "primary") or next((h for h, r in chrom if r != "accent"), chrom[0][0])
         _assign_accents(plan, manifest, brand, chrom, {theme.slots[k] for k in ("hlink", "folHlink") if k in theme.slots})
         for s, b in plan.stock_slots.items():
             plan.table.setdefault(theme.slots[s], b)
@@ -662,6 +681,10 @@ def _assign_accents(plan: ColorPlan, manifest: TemplateManifest, brand: BrandSpe
                 near += [h for h, r in chrom if r == "accent" and d[h] <= 30 and abs(lightness(a) - lightness(h)) <= 20]
             if near:
                 b = min(near, key=lambda h: (d[h] + 40.0 * uses[h] + (10.0 if by_hex[h] == "accent" else 0.0), order.index(h) if h in order else 9))
+                if b != primary and lightness(a) < 50 and lightness(b) - lightness(a) > (10 if ground else 20):
+                    # близкий тон бренда получается только затемнением ниже L* 50 (голубой → петрольный у lo_focus) —
+                    # тёмный оттенок основного: одна семья цветов
+                    b = primary
             elif lightness(a) < 45:
                 # тёмное без близкого тона (фиолетовые карточки) — тёмный оттенок основного: одна семья цветов,
                 # а не бирюза из затемнённого голубого

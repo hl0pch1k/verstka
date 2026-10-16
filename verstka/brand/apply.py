@@ -60,7 +60,7 @@ from verstka.schemas.template import TemplateManifest
 log = logging.getLogger(__name__)
 
 # версия правил применения: меняется — старые копии в кэше не используются
-APPLY_VERSION = "3"
+APPLY_VERSION = "4"
 BRAND_FILE = "brand.json"
 
 _LATIN = f"{{{A}}}latin"
@@ -197,12 +197,16 @@ def _recolor(root: etree._Element, plan: ColorPlan, counter: Counter, strict: bo
     # картинки не перекрашиваются (элементы держатся в списке: lxml сохраняет их обёртки, пока на них есть ссылки)
     inside = [c for b in root.iter(f"{{{A}}}blip", f"{{{A}}}clrScheme") for c in b.iter(SRGB)]
     skip = set(inside)
+    # явный цвет текста со ссылкой (розовые ссылки ЛЦТ) — как слот ссылок темы: семья основного цвета бренда
+    links = [c for r in root.iter(f"{{{A}}}rPr", f"{{{A}}}defRPr", f"{{{A}}}endParaRPr") if r.find(f"{{{A}}}hlinkClick") is not None
+             for c in r.findall(f"{{{A}}}solidFill/{SRGB}")]
+    link_els = set(links)
     changed = False
     for el in root.iter(SRGB):
         if el in skip:
             continue
         v = (el.get("val") or "").upper()
-        nv = plan.map_strict(v) if strict else plan.map(v)
+        nv = plan.map_link(v) if el in link_els else (plan.map_strict(v) if strict else plan.map(v))
         if nv != v:
             el.set("val", nv)
             counter[(v, nv)] += 1
@@ -223,7 +227,8 @@ def _retheme(root: etree._Element, plan: ColorPlan, fp: FontPlan, counter: Count
             old = slot_hex(slot)
             if not old:
                 continue
-            new = plan.map(old)
+            # слот ссылок темы (и у темы заметок — офисный #0563C1) — основной цвет бренда
+            new = plan.map_link(old, near=12.0) if name in ("hlink", "folHlink") else plan.map(old)
             if new == old:
                 continue
             for ch in list(slot):
@@ -369,9 +374,15 @@ class ApplyResult:
     font_swaps: dict[str, str] = field(default_factory=dict)  # «Arial» → «Play»
     logos_replaced: int = 0
     logos_removed: int = 0  # второй логотип шаблона на той же части (партнёр, соседняя марка)
-    logos_added: int = 0
+    # Добавленный логотип (в шаблоне своего не было). Человеку показывать «на `logo_covered` из `logo_samples`
+    # содержательных слайдов» и `logo_where`; `logos_added` — число картинок, вместе с макетами без образцов (у
+    # «Кофейни» их 56 при 6 слайдах), для людей не годится.
+    logos_added: int = 0  # картинок логотипа бренда: на слайдах и макетах
+    logo_layouts: int = 0  # из них на макетах (их получат и новые слайды, собранные по макету)
     logo_samples: int = 0  # содержательных образцов шаблона
-    logo_covered: int = 0  # из них с добавленным логотипом бренда
+    logo_covered: int = 0  # из них с добавленным логотипом бренда (на самом слайде или на его макете)
+    logo_place: Optional[str] = None  # brand — угол из брендбука, brand_edge — у того же угла, fallback — у другого
+    logo_where: Optional[str] = None  # то же словами: «в углу из брендбука», «в правом верхнем углу: …»
     refit: int = 0  # строк образцов, подогнанных после смены шрифта
     warnings: list[str] = field(default_factory=list)
 
@@ -464,6 +475,7 @@ def apply_brand(
     elif images:
         rep = add_logos(pkg, manifest, brand, images, res.warnings, src)
         res.logos_added, res.logo_samples, res.logo_covered = rep.added, rep.samples, rep.covered
+        res.logo_layouts, res.logo_place, res.logo_where = rep.layouts, rep.place, rep.where
 
     res.colors = {f"#{a}": f"#{b}" for (a, b) in sorted(colors)}
     res.font_swaps = {a: b for (a, b) in sorted(fonts)}

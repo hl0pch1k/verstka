@@ -219,6 +219,47 @@ def _iou(a: Box, b: Box) -> float:
 
 
 _CLR_MAP = {"bg1": "lt1", "tx1": "dk1", "bg2": "lt2", "tx2": "dk2"}
+_MAP_KEYS = ("bg1", "tx1", "bg2", "tx2", "accent1", "accent2", "accent3", "accent4", "accent5", "accent6", "hlink", "folHlink")
+
+
+def _map_of(el: Optional[etree._Element]) -> dict[str, str]:
+    return {k: v for k, v in (el.attrib.items() if el is not None else []) if k in _MAP_KEYS and v}
+
+
+def clr_map(pkg: Package, part: str) -> dict[str, str]:
+    """Карта цветов части (bg1 → lt1 …): `p:clrMap` мастера, поверх — `overrideClrMapping` макета, поверх — слайда.
+    Тёмный макет («Title with Picture 6» у «Кофейни»: bg2 → dk2) красит фон и фигуры тёмным при светлой теме;
+    `masterClrMapping` у слайда — без своей карты (как у PowerPoint и LibreOffice: действует карта макета)."""
+    cache = pkg.__dict__.setdefault("_clr_maps", {})
+    if part in cache:
+        return cache[part]
+    chain = _chain(pkg, part)
+    master = next((p for p in chain if p.startswith("ppt/slideMasters/")), None)
+    root = pkg.xml(master) if master else None
+    out = dict(_CLR_MAP)
+    out.update(_map_of(root.find(f"{{{P}}}clrMap") if root is not None else None))
+    for p in reversed([c for c in chain if c != master]):  # макет, затем слайд
+        r = pkg.xml(p)
+        ovr = r.find(f"{{{P}}}clrMapOvr/{{{A}}}overrideClrMapping") if r is not None else None
+        out.update(_map_of(ovr))
+    cache[part] = out
+    return out
+
+
+def master_map(pkg: Package, part: str) -> dict[str, str]:
+    """Карта цветов мастера части — по ней красит IR аудита."""
+    master = next((p for p in _chain(pkg, part) if p.startswith("ppt/slideMasters/")), None)
+    root = pkg.xml(master) if master else None
+    return {**_CLR_MAP, **_map_of(root.find(f"{{{P}}}clrMap") if root is not None else None)}
+
+
+def part_slots(pkg: Package, part: str, slots: dict[str, str]) -> dict[str, str]:
+    """Слоты темы с bg1/tx1/bg2/tx2 по карте цветов части."""
+    out = dict(slots)
+    for k, v in clr_map(pkg, part).items():
+        if v in slots:
+            out[k] = slots[v]
+    return out
 
 
 def _with_mods(h: Optional[str], el: etree._Element) -> Optional[str]:
@@ -270,7 +311,7 @@ def _fill_hex(el: Optional[etree._Element], slots: dict[str, str]) -> Optional[s
         if tag == "sysClr":
             return _with_mods((c.get("lastClr") or "").upper() or None, c)
         v = c.get("val") or ""
-        return _with_mods(slots.get(_CLR_MAP.get(v, v)), c)
+        return _with_mods(slots.get(v) or slots.get(_CLR_MAP.get(v, v)), c)
     return None
 
 
@@ -351,34 +392,42 @@ def _picture_under(pkg: Package, part: str, pic: etree._Element, pbox: Box, box:
 
 
 def ground_under(pkg: Package, part: str, box: Box, slots: dict[str, str]) -> str:
-    """light / dark — настоящий цвет под рамкой: верхняя залитая фигура или картинка под ней (слайд, его макет, мастер),
-    иначе фон."""
-    sw, sh = pkg.slide_size()
-    for p in _chain(pkg, part):
+    """light / dark — настоящий цвет под рамкой (см. `_xml_spot`)."""
+    return _xml_spot(pkg, part, box, slots, with_part=True).ground
+
+
+def _xml_spot(pkg: Package, part: str, box: Box, slots: dict[str, str], *, with_part: bool) -> "Spot":
+    """Что под рамкой — по самому файлу: верхняя залитая фигура или картинка (слайд, если `with_part`, его макет,
+    мастер; `showMasterSp="0"` скрывает нижние слои), иначе фон-фото, иначе цвет фона. Цвета темы — по карте цветов
+    части (тёмный макет с `overrideClrMapping`)."""
+    ps = part_slots(pkg, part, slots)
+    chain = _chain(pkg, part)
+    for k, p in enumerate(chain):
         root = pkg.xml(p)
         tree = root.find(f"{{{P}}}cSld/{{{P}}}spTree") if root is not None else None
-        if tree is None:
-            continue
-        for el in reversed(list(tree)):
-            b = shape_box(el)
-            if not b or overlap(b, box) < 0.5 * box[2] * box[3]:
-                continue
-            tag = etree.QName(el).localname
-            if tag == "pic":
-                got = _picture_under(pkg, p, el, b, box)
-                if got and got[1] >= 0.5:
-                    return "dark" if got[0] < 55 else "light"
-            elif tag == "sp" and _filled(el):
-                h = _fill_hex(el.find(f"{{{P}}}spPr"), slots)
-                if h and re.fullmatch(r"[0-9A-F]{6}", h):
-                    return "dark" if lightness(h) < 55 else "light"
+        if tree is not None and (with_part or k > 0):
+            for el in reversed(list(tree)):
+                b = shape_box(el)
+                if not b or overlap(b, box) < 0.5 * box[2] * box[3]:
+                    continue
+                tag = etree.QName(el).localname
+                if tag == "pic":
+                    got = _picture_under(pkg, p, el, b, box)
+                    if got and got[1] >= 0.5:
+                        return Spot(got[0])
+                elif tag == "sp" and _filled(el):
+                    h = _fill_hex(el.find(f"{{{P}}}spPr"), ps)
+                    if h and re.fullmatch(r"[0-9A-F]{6}", h):
+                        return Spot(lightness(h))
+        if root is not None and root.get("showMasterSp") in ("0", "false"):
+            break
     photo = _bg_photo_under(pkg, part, box)
     if photo is not None:
-        return photo.ground
-    bg = part_bg(pkg, part, slots)
+        return photo
+    bg = part_bg(pkg, part, ps)
     if bg and re.fullmatch(r"[0-9A-F]{6}", bg):
-        return "dark" if lightness(bg) < 55 else "light"
-    return "light"
+        return Spot(lightness(bg))
+    return Spot(95.0)
 
 
 def _ground_of_lockup(pkg: Package, group: list[Pic], slots: dict[str, str]) -> str:
@@ -862,8 +911,11 @@ def _bg_photo_under(pkg: Package, part: str, box: Box) -> Optional[Spot]:
 
 def _spot(pkg: Package, part: str, slide, box: Box, *, with_slide: bool) -> Spot:
     """Что под рамкой: верхний слой во весь слайд (картинка, градиент, заливка — слайда, если логотип на слайде, затем
-    макета и мастера), иначе фон-фото, иначе цвет фона слайда (с модификаторами цвета темы)."""
+    макета и мастера), иначе фон-фото, иначе цвет фона слайда (с модификаторами цвета темы). IR красит цвета темы по
+    карте мастера; у слайда с другой картой (тёмный макет с `overrideClrMapping`) — по самому файлу."""
     sw, sh = pkg.slide_size()
+    if {k: v for k, v in clr_map(pkg, part).items() if k in _CLR_MAP} != {k: v for k, v in master_map(pkg, part).items() if k in _CLR_MAP}:
+        return _xml_spot(pkg, part, box, package_slots(pkg), with_part=with_slide)
     layers = (list(slide.elements) if with_slide else []) + list(slide.template_elements)
     for e in sorted((e for e in layers if _full(e, sw, sh) or overlap(_ebox(e), box) >= 0.9 * box[2] * box[3]), key=lambda e: (e.source == "slide", e.z), reverse=True):
         got = _cells_under(e, box)
@@ -911,17 +963,40 @@ def _ir_obstacles(slide, sw: float, sh: float, *, under_slide: bool) -> tuple[li
     return hard, soft
 
 
+class Thin(tuple):
+    """Линия или край рамки — тонкая полоса с допуском толщины `tol`: охранное поле логотипа от неё то же, что от
+    карточки, но допуск в него уже входит."""
+
+    tol: float
+
+    def __new__(cls, box, tol: float):
+        o = super().__new__(cls, box)
+        o.tol = tol
+        return o
+
+
+def _thin(b: Box, tol: float) -> "Thin":
+    return Thin((b[0] - tol, b[1] - tol, b[2] + 2 * tol, b[3] + 2 * tol), tol)
+
+
 def _edges(b: Box, sw: float) -> list[Box]:
     """Четыре края рамки — тонкие полосы (с допуском толщины линии)."""
     t = 0.004 * sw
     x, y, w, h = b
-    return [(x - t, y - t, w + 2 * t, 2 * t), (x - t, y + h - t, w + 2 * t, 2 * t), (x - t, y - t, 2 * t, h + 2 * t), (x + w - t, y - t, 2 * t, h + 2 * t)]
+    return [_thin((x, y, w, 0), t), _thin((x, y + h, w, 0), t), _thin((x, y, 0, h), t), _thin((x + w, y, 0, h), t)]
+
+
+CLEAR = 0.01  # охранное поле логотипа — доля высоты слайда: ни карточка, ни текст не подходят к нему ближе
+
+
+def _padded(box: Box, pad: float) -> Box:
+    return box[0] - pad, box[1] - pad, box[2] + 2 * pad, box[3] + 2 * pad
 
 
 def _shrunk(frame: Box, logo: Box, sh: float) -> Optional[Box]:
     """Рамка заполнителя, отступившая от логотипа (охранное поле) — сверху, снизу или сбоку; не больше чем на 30 %
     высоты или 25 % ширины. None — так не получится."""
-    if overlap(frame, logo) <= 0.03 * logo[2] * logo[3]:
+    if overlap(frame, _padded(logo, CLEAR * sh)) <= 0.03 * logo[2] * logo[3]:
         return frame
     gap = 0.012 * sh
     x, y, w, h = frame
@@ -990,9 +1065,65 @@ def _resolved_frame(pkg: Package, part: str, sp: etree._Element) -> Optional[Box
     return None
 
 
+_FOOTER_ALIGN = {"sldNum": "r", "dt": "l", "ftr": "ctr"}
+_FOOTER_CHARS = {"sldNum": 3, "dt": 10, "ftr": 12}
+
+
+def _master_ph(pkg: Package, part: str, kind: str) -> Optional[etree._Element]:
+    master = pkg.related(part, "slideMaster") if not part.startswith("ppt/slideMasters/") else part
+    root = pkg.xml(master) if master else None
+    if root is None:
+        return None
+    for el in root.iter(f"{{{P}}}sp"):
+        ph = el.find(f"{{{P}}}nvSpPr/{{{P}}}nvPr/{{{P}}}ph")
+        if ph is not None and (ph.get("type") or "body") == kind:
+            return el
+    return None
+
+
+def _first_attr(sps: list[Optional[etree._Element]], paths: tuple[str, ...], attr: str) -> Optional[str]:
+    for sp in sps:
+        if sp is None:
+            continue
+        for path in paths:
+            for el in sp.iterfind(path, {"a": A, "p": P}):
+                if el.get(attr):
+                    return el.get(attr)
+    return None
+
+
+def _footer_text_box(pkg: Package, part: str, sp: etree._Element, frame: Box, kind: str) -> Box:
+    """Где встанет текст колонтитула, когда его включат: у края рамки по её выравниванию (номер — справа, дата — слева,
+    подпись — посередине, если рамка не говорит иного), шириной в свой текст (номер — 3 знака, дата — 10, подпись —
+    своя, а пустая — короткая, 12 знаков) при своём кегле. На собранных слайдах колонтитулы пусты — логотипу место рядом с ними есть,
+    пока он не заходит туда, где встанет их текст."""
+    msp = _master_ph(pkg, part, kind)
+    sps = [sp, msp]
+    algn = _first_attr(sps, ("p:txBody/a:lstStyle/a:lvl1pPr", "p:txBody/a:p/a:pPr"), "algn") or _FOOTER_ALIGN.get(kind, "l")
+    sz = _first_attr(sps, ("p:txBody/a:lstStyle/a:lvl1pPr/a:defRPr", "p:txBody/a:p/a:r/a:rPr", "p:txBody/a:p/a:fld/a:rPr", "p:txBody/a:p/a:endParaRPr"), "sz")
+    try:
+        pt = int(sz) / 100.0 if sz else 12.0
+    except ValueError:
+        pt = 12.0
+    text = "".join(t.text or "" for t in sp.iter(f"{{{A}}}t")).strip()
+    chars = 3 if kind == "sldNum" else max(len(text), _FOOTER_CHARS.get(kind, 10)) if kind == "dt" else (len(text) or _FOOTER_CHARS.get(kind, 12))
+    ins = 0
+    for k, d in (("lIns", 91440), ("rIns", 91440)):
+        v = _first_attr(sps, ("p:txBody/a:bodyPr",), k)
+        ins += int(v) if v and v.lstrip("-").isdigit() else d
+    x, y, w, h = frame
+    tw = min(w, chars * 0.6 * pt * 12700 + ins)
+    if algn == "r":
+        return x + w - tw, y, tw, h
+    if algn == "ctr":
+        return x + (w - tw) / 2, y, tw, h
+    return x, y, tw, h
+
+
 def _layout_obstacles(pkg: Package, layout: str) -> tuple[list[Box], list[tuple[Box, etree._Element]]]:
     """(жёсткие, заполнители содержимого макета): туда ляжет содержимое собранных слайдов (текст, картинка, таблица,
-    кружок с номером); колонтитулы и заголовки макета и мастера — жёсткие. Рамки — у мастера, если своих нет."""
+    кружок с номером); заголовки макета — жёсткие; колонтитулы макета и мастера — там, где встанет их текст, когда их
+    включат. Рамки — у мастера, если своих нет."""
     hard: list[Box] = []
     soft: list[tuple[Box, etree._Element]] = []
     for part in (layout, pkg.related(layout, "slideMaster")):
@@ -1008,22 +1139,41 @@ def _layout_obstacles(pkg: Package, layout: str) -> tuple[list[Box], list[tuple[
             b = _resolved_frame(pkg, part, sp)
             if b is None:
                 continue
-            if part == layout and kind not in _HARD_PH:
+            if kind in _FOOTER_PH:
+                hard.append(_footer_text_box(pkg, part, sp, b, kind))
+            elif part == layout and kind not in _HARD_PH:
                 soft.append((b, sp))
             else:
                 hard.append(b)
     return hard, soft
 
 
-def _clear(box: Box, obstacles: list[Box]) -> bool:
-    return not any(overlap(o, box) > 0.03 * box[2] * box[3] for o in obstacles)
+def _clear(box: Box, obstacles: list[Box], pad: float = 0.0) -> bool:
+    """Ни одно препятствие не заходит в рамку с охранным полем `pad` (допуск — 3 % площади логотипа)."""
+    area = 0.03 * box[2] * box[3]
+    big = _padded(box, pad)
+    for o in obstacles:
+        tol = getattr(o, "tol", 0.0)
+        if overlap(o, big if not tol else _padded(box, max(0.0, pad - tol))) > area:
+            return False
+    return True
 
 
-def _candidates(place: LogoPlace, w: float, h: float, margin: float, sw: float, sh: float) -> list[tuple[str, Box]]:
-    """(угол, рамка): угол из брендбука (шагами вдоль края к середине, затем над полосой колонтитула), потом — тот же
-    край с другой стороны, другой край и противоположный угол: одно запасное место на весь шаблон, если угол брендбука
-    занят."""
-    out: list[tuple[str, Box]] = []
+SMALLER = 0.85  # запасной размер логотипа: 0,045 → 0,038 высоты слайда — всё ещё крупнее читаемого минимума
+
+
+def _smaller(corner: str, box: Box, k: float) -> Box:
+    """Та же рамка, уменьшенная в `k` раз, прижатая к тому же углу."""
+    x, y, w, h = box
+    w2, h2 = w * k, h * k
+    return (x if corner.endswith("left") else x + w - w2, y if corner.startswith("top") else y + h - h2, w2, h2)
+
+
+def _candidates(place: LogoPlace, w: float, h: float, margin: float, sw: float, sh: float) -> list[tuple[str, str, Box]]:
+    """(угол, где, рамка): угол из брендбука (`corner`), шагами вдоль края к середине (`edge`), затем над полосой
+    колонтитула (`lifted`), потом — тот же край с другой стороны, другой край и противоположный угол: одно запасное
+    место на весь шаблон, если угол брендбука занят."""
+    out: list[tuple[str, str, Box]] = []
     corners = [place]
     v, hside = place.split("_")
     other_h = "left" if hside == "right" else "right"
@@ -1038,13 +1188,34 @@ def _candidates(place: LogoPlace, w: float, h: float, margin: float, sw: float, 
             if x < margin - 1 or x + w > sw - margin + 1 or (left and x + w > 0.5 * sw) or (not left and x < 0.5 * sw):
                 break
             xs.append(x)
-        out += [(corner, (x, y0, w, h)) for x in xs]
+        out += [(corner, "corner" if k == 0 else "edge", (x, y0, w, h)) for k, x in enumerate(xs)]
         for j in range(1, 5):
             y = y0 + j * 0.6 * h if top else y0 - j * 0.6 * h
             if (top and y + h > 0.2 * sh) or (not top and y < 0.8 * sh):
                 break
-            out += [(corner, (x, y, w, h)) for x in xs[:3]]
+            out += [(corner, "lifted", (x, y, w, h)) for x in xs[:3]]
     return out
+
+
+_CORNER_RU = {"bottom_right": "правом нижнем", "bottom_left": "левом нижнем", "top_right": "правом верхнем", "top_left": "левом верхнем"}
+_CORNER_NEAR_RU = {"bottom_right": "правым нижним", "bottom_left": "левым нижним", "top_right": "правым верхним", "top_left": "левым верхним"}
+
+
+def logo_where(place: str, corner: str, kind: str) -> str:
+    """Где встал логотип — словами для предупреждения: в углу из брендбука, у того же края ближе к середине, рядом с
+    углом (выше или ниже) или в другом углу."""
+    if corner == place:
+        if kind == "corner":
+            return "в углу из брендбука"
+        if kind == "edge":
+            return f"у {'верхнего' if corner.startswith('top') else 'нижнего'} края ближе к середине: в самом углу из брендбука занято"
+        return f"{'чуть ниже' if corner.startswith('top') else 'чуть выше'} угла из брендбука: в самом углу занято"
+    if kind == "corner":
+        return f"в {_CORNER_RU[corner]} углу: угол из брендбука занят"
+    if kind == "edge":
+        side = "левой" if corner.endswith("left") else "правой"
+        return f"у {'верхнего' if corner.startswith('top') else 'нижнего'} края, в {side} половине: угол из брендбука занят"
+    return f"рядом с {_CORNER_NEAR_RU[corner]} углом: угол из брендбука занят"
 
 
 def package_slots(pkg: Package) -> dict[str, str]:
@@ -1084,8 +1255,7 @@ def _part_shapes(pkg: Package, part: Optional[str]) -> list[Box]:
         if b[2] * b[3] >= 0.85 * sw * sh:
             continue
         if b[2] < 1 or b[3] < 1:
-            tol = 0.004 * sw
-            b = (b[0] - tol, b[1] - tol, b[2] + 2 * tol, b[3] + 2 * tol)
+            b = _thin(b, 0.004 * sw)
         out.append(b)
     return out
 
@@ -1115,7 +1285,7 @@ def part_lines(pkg: Package, part: Optional[str]) -> list[Box]:
         geom = el.find(f"{{{P}}}spPr/{{{A}}}prstGeom")
         is_line = etree.QName(el).localname == "cxnSp" or b[2] < 1 or b[3] < 1 or (geom is not None and _LINE_GEOM_RE.match(geom.get("prst") or ""))
         if is_line:
-            out.append((b[0] - tol, b[1] - tol, b[2] + 2 * tol, b[3] + 2 * tol))
+            out.append(_thin(b, tol))
         elif not _filled(el) and el.find(f"{{{P}}}spPr/{{{A}}}custGeom") is None:
             out += _edges(b, sw)
     return out
@@ -1145,10 +1315,12 @@ def _place_pic(pkg: Package, part: str, media: Media, img: BrandImage, box: Box,
 
 @dataclass
 class AddReport:
-    added: int = 0  # картинок логотипа (на макетах и слайдах)
+    added: int = 0  # картинок логотипа (на макетах, в том числе без образцов, и на слайдах)
+    layouts: int = 0  # из них на макетах
     samples: int = 0  # содержательных образцов
     covered: int = 0  # из них с логотипом
-    place: Optional[str] = None  # где встал: угол брендбука или запасной
+    place: Optional[str] = None  # brand — в углу брендбука, brand_edge — у того же угла, fallback — у другого
+    where: Optional[str] = None  # то же словами
 
 
 def add_logos(pkg: Package, manifest: TemplateManifest, brand: BrandSpec, images: list[BrandImage], warnings: list[str], src: Path | str) -> AddReport:
@@ -1226,47 +1398,65 @@ def add_logos(pkg: Package, manifest: TemplateManifest, brand: BrandSpec, images
         return spot_cache[key]
 
     def fits(hard: list[Box], soft, box: Box) -> bool:
-        return _clear(box, hard) and all(_shrunk(b, box, sh) is not None for b, _ in soft)
+        return _clear(box, hard, CLEAR * sh) and all(_shrunk(b, box, sh) is not None for b, _ in soft)
 
     def free_on(i: int, box: Box) -> bool:
         return fits(*on_top[i], box) and not spot(i, box, True).busy
 
+    slots = package_slots(pkg)
+    own_cache: dict[tuple, Spot] = {}
+
     def on_layout(lp: str, box: Box) -> Optional[Spot]:
         """Логотип на макет: свободно у его заголовков и колонтитулов (и мастера) и у всех слайдов на нём (логотип
-        макета лежит под фигурами слайда; заполнители содержимого отступают); фон под ним у всех слайдов один и тот же
-        и не пёстрый. Что под логотипом, или None."""
+        макета лежит под фигурами слайда; заполнители содержимого отступают); фон под ним у всех слайдов один и тот же,
+        что и у самого макета (новый слайд, собранный по макету, своего фона не имеет), и не пёстрый. Что под
+        логотипом, или None."""
         if lp not in lay_obst or not fits(*lay_obst[lp], box):
             return None
         everyone = users.get(lp, by_layout[lp])
         if not all(fits(*under[j], box) for j in everyone):
             return None
-        spots = [spot(j, box, False) for j in everyone]
-        if not spots or any(sp.busy for sp in spots) or len({sp.ground for sp in spots}) != 1:
+        if (lp, box) not in own_cache:
+            own_cache[(lp, box)] = _xml_spot(pkg, lp, box, slots, with_part=True)
+        spots = [spot(j, box, False) for j in everyone] + [own_cache[(lp, box)]]
+        if any(sp.busy for sp in spots) or len({sp.ground for sp in spots}) != 1:
             return None
         return spots[0]
 
-    def coverage(box: Box) -> tuple[float, float]:
-        """(сколько содержательных слайдов получат логотип и сколько пустых макетов — с весом ¼: какие из них возьмёт
-        сборка, заранее не известно; всего)."""
-        got = 0.0
+    def coverage(box: Box) -> tuple[int, int]:
+        """(сколько содержательных слайдов получат логотип, сколько макетов без образцов)."""
+        got = 0
         for lp, idxs in by_layout.items():
             got += len(idxs) if on_layout(lp, box) is not None else sum(free_on(i, box) for i in idxs)
-        got += 0.25 * sum(fits(*unused[lp], box) for lp in unused)
-        return got, len(samples) + 0.25 * len(unused)
+        return got, sum(fits(*unused[lp], box) for lp in unused)
+
+    def score(cov: tuple[int, int]) -> float:
+        return cov[0] + 0.25 * cov[1]  # макеты без образцов — с весом ¼: какие из них возьмёт сборка, заранее не известно
 
     # одно место на весь шаблон: первое (по порядку) место, где логотип получат хотя бы 60 % содержательных слайдов и
-    # пустых макетов (по ним собираются слайды колоды), иначе — где больше всего
-    best, best_n, corner = None, 0, None
-    for cn, c in _candidates(brand.logo_place, w, h, margin, sw, sh):
-        n, total = coverage(c)
-        if n > best_n:
-            best, best_n, corner = c, n, cn
-        if n >= 0.6 * total:
+    # 60 % всего вместе с макетами без образцов (по ним собираются слайды колоды); иначе — где больше всего
+    # содержательных слайдов
+    total = len(samples) + 0.25 * len(unused)
+    best, best_cov, corner, kind = None, (-1, -1), None, None
+    for cn, kd, c in _candidates(brand.logo_place, w, h, margin, sw, sh):
+        cov = coverage(c)
+        # то же место чуть меньшим логотипом (у того же угла), если так охранное поле есть у заметно большего числа
+        # слайдов и макетов (хотя бы у десятой части): ради одного слайда логотип не мельчает на всех
+        small = _smaller(cn, c, SMALLER)
+        cov2 = coverage(small)
+        if cov2[0] >= cov[0] and score(cov2) - score(cov) >= max(1.0, 0.1 * total):
+            c, cov = small, cov2
+        if (cov[0], score(cov)) > (best_cov[0], score(best_cov)):
+            best, best_cov, corner, kind = c, cov, cn, kd
+        if cov[0] >= 0.6 * len(samples) and score(cov) >= 0.6 * total:
             break
+    if best is not None and best_cov[0] == 0 and best_cov[1] == 0:
+        best = None
     if best is None:
         warnings.append("Логотип бренда не поставлен: у краёв слайдов шаблона нет свободного места.")
         return rep
-    rep.place = "brand" if corner == brand.logo_place else "fallback"
+    rep.place = ("brand" if kind == "corner" else "brand_edge") if corner == brand.logo_place else "fallback"
+    rep.where = logo_where(brand.logo_place, corner, kind)
     media = Media(pkg)
 
     def shrink(part: str, items, by_sid: bool) -> None:
@@ -1290,6 +1480,7 @@ def add_logos(pkg: Package, manifest: TemplateManifest, brand: BrandSpec, images
                 shrink(order[j - 1], own, by_sid=True)
             _place_pic(pkg, lp, media, pick_logo(images, sp_layout.ground, mark=False) or wordmark, best, brand.name)
             rep.added += 1
+            rep.layouts += 1
             covered.update(idxs)
             continue
         for i in idxs:
@@ -1299,16 +1490,16 @@ def add_logos(pkg: Package, manifest: TemplateManifest, brand: BrandSpec, images
             _place_pic(pkg, order[i - 1], media, pick_logo(images, spot(i, best, True).ground, mark=False) or wordmark, best, brand.name)
             rep.added += 1
             covered.add(i)
-    slots = package_slots(pkg)
     for lp, (hard, soft) in unused.items():
         if not fits(hard, soft, best):
             continue
         shrink(lp, soft, by_sid=False)
         _place_pic(pkg, lp, media, pick_logo(images, ground_under(pkg, lp, best, slots), mark=False) or wordmark, best, brand.name)
         rep.added += 1
+        rep.layouts += 1
     rep.covered = len(covered)
     missing = rep.samples - rep.covered
-    where = "в углу из брендбука" if rep.place == "brand" else "в соседнем углу: угол из брендбука у образцов занят"
+    where = rep.where
     if missing:
         warnings.append(
             f"Логотип бренда стоит {where} — на {rep.covered} из {rep.samples} {plural(rep.samples, 'содержательного слайда', 'содержательных слайдов', 'содержательных слайдов')} "

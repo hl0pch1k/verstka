@@ -409,7 +409,8 @@ def test_added_logo_takes_one_fallback_corner(tmp_path, fonts_here):
     out = tmp_path / "out.pptx"
     res = apply_brand(src, out, _brand(), manifest=m, brand_dir=_brand_dir(tmp_path))
     assert res.logos_added >= 1 and res.logo_covered == res.logo_samples
-    assert any("соседнем углу" in w for w in res.warnings)
+    assert res.logo_place == "fallback" and any(res.logo_where in w for w in res.warnings)
+    assert any(k in res.logo_where for k in ("левом нижнем углу", "левой половине", "левым нижним углом")), res.logo_where
     boxes = _logo_boxes(out)
     assert {round(x / W, 2) for _, (x, _y, _cx, _cy) in boxes} and all(x < W * 0.5 for _, (x, _y, _cx, _cy) in boxes)
     assert _ir_collisions(out) == []
@@ -1231,3 +1232,230 @@ def test_logo_does_not_sit_on_a_layout_line(tmp_path, fonts_here):
     res = apply_brand(src, out, _brand(), manifest=m, brand_dir=_brand_dir(tmp_path))
     assert res.logos_added >= 1
     assert _ir_collisions(out) == []
+
+
+# ============================================================================================== правки после ревью, круг 3
+
+
+_OVERRIDE_DARK = (
+    '<p:clrMapOvr><a:overrideClrMapping bg1="dk1" tx1="lt1" bg2="dk2" tx2="lt2" accent1="accent1" accent2="accent2" '
+    'accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" hlink="hlink" folHlink="folHlink"/></p:clrMapOvr>'
+)
+
+
+def _dark_layout(pptx: Path, part: str) -> None:
+    """Макет с фоном bg2 и своей картой цветов bg2 → dk2 (как «Title with Picture 6» у «Кофейни»): тёмный при светлой
+    теме."""
+    with zipfile.ZipFile(pptx) as z:
+        xml = z.read(part).decode("utf-8")
+    assert "<a:masterClrMapping/>" in xml
+    xml = xml.replace("<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>", _OVERRIDE_DARK)
+    bg = '<p:bg><p:bgPr><a:solidFill><a:schemeClr val="bg2"/></a:solidFill><a:effectLst/></p:bgPr></p:bg>'
+    xml = re.sub(r"(<p:cSld[^>]*>)", lambda mm: mm.group(1) + bg, xml, count=1)
+    _zip_put(pptx, {part: xml.encode("utf-8")})
+
+
+def _part_logo_media(pptx: Path, part: str) -> list[str]:
+    """Картинки логотипа бренда на части (слайд или макет)."""
+    with zipfile.ZipFile(pptx) as z:
+        xml = z.read(part).decode("utf-8")
+        rels = z.read(re.sub(r"([^/]+)$", r"_rels/\1.rels", part)).decode("utf-8")
+    out = []
+    for mm in re.finditer(r'name="Логотип[^"]*".*?r:embed="([^"]+)"', xml, re.S):
+        t = re.search(rf'Id="{mm.group(1)}"[^>]*Target="([^"]+)"', rels) or re.search(rf'Target="([^"]+)"[^>]*Id="{mm.group(1)}"', rels)
+        out.append(t.group(1))
+    return out
+
+
+def test_dark_colour_map_override_gets_white_logo(tmp_path, fonts_here):
+    """Фон макета — bg2, а его карта цветов bg2 → dk2: макет тёмный при светлой теме. Логотип на нём — белый: и на
+    макете образцов, и на пустом макете; на обычном светлом макете — основной."""
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Emu(W), Emu(H)
+    for i in range(3):
+        s = prs.slides.add_slide(prs.slide_layouts[5])  # «Только заголовок» — станет тёмным
+        s.shapes.title.text = f"Итоги квартала {i + 1}"
+        _text(s, "Выручка выросла на 23 % к сентябрю", int(W * 0.05), int(H * 0.35), int(W * 0.5), int(H * 0.1), "Verdana", 16, "FFFFFF")
+        _card(s, int(W * 0.05), "1F6FEB")
+    src = tmp_path / "ovr.pptx"
+    prs.save(src)
+    _dark_layout(src, "ppt/slideLayouts/slideLayout6.xml")  # макет образцов
+    _dark_layout(src, "ppt/slideLayouts/slideLayout7.xml")  # пустой макет без образцов
+    m = _analyze(src, tmp_path / "ws")
+    out = tmp_path / "ovr-brand.pptx"
+    res = apply_brand(src, out, _brand(), manifest=m, brand_dir=_brand_dir(tmp_path))
+    assert res.logo_samples >= 1 and res.logo_covered == res.logo_samples
+    on_samples = _part_logo_media(out, "ppt/slideLayouts/slideLayout6.xml") + _slide_logo_media(out)
+    assert on_samples and all("white" in n for n in on_samples), on_samples
+    blank = _part_logo_media(out, "ppt/slideLayouts/slideLayout7.xml")
+    assert blank and all("white" in n for n in blank), blank
+    light = _part_logo_media(out, "ppt/slideLayouts/slideLayout2.xml")
+    assert all("primary" in n for n in light), light
+
+
+def test_colour_modifiers_as_powerpoint_applies_them():
+    """Модификаторы цвета темы: lumMod 20 % + lumOff 80 % — почти белый того же тона, shade — темнее, tint — светлее;
+    `_fill_hex` берёт цвет слота темы и применяет их."""
+    ns = 'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"'
+
+    def el(inner: str) -> etree._Element:
+        return etree.fromstring(f"<a:schemeClr {ns} val=\"accent6\">{inner}</a:schemeClr>")
+
+    light = lg._with_mods("1F4E79", el('<a:lumMod val="20000"/><a:lumOff val="80000"/>'))
+    assert pal.lightness(light) > 85 and pal.hue_dist(pal.hue(light), pal.hue("1F4E79")) <= 10
+    assert lg._with_mods("FFFFFF", el('<a:shade val="50000"/>')) == "808080"
+    assert lg._with_mods("000000", el('<a:tint val="25000"/>')) == "BFBFBF"
+    assert lg._with_mods("FFFFFF", el('<a:lumMod val="50000"/>')) == "808080"
+    fill = etree.fromstring(f'<a:solidFill {ns}><a:schemeClr val="accent6"><a:lumMod val="20000"/><a:lumOff val="80000"/></a:schemeClr></a:solidFill>')
+    assert lg._fill_hex(fill, {"accent6": "1F4E79"}) == light
+
+
+def test_unused_layout_with_photo_background_gets_white_logo(tmp_path, fonts_here):
+    """Пустой макет (без образцов) с тёмным фото фоном `p:bg`: логотип на нём — белый, по точкам фото под ним; на
+    светлых образцах — основной."""
+    photo = tmp_path / "src" / "night.png"
+    photo.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (320, 180), (24, 20, 48)).save(photo)
+    src = build_custom(tmp_path, "lay", bg="FFFFFF", text="1F2937", cards=[("1F6FEB", "FFFFFF")])
+    prs = Presentation(str(src))
+    lay = prs.slide_layouts[1]  # «Заголовок и объект» — образцов на нём нет
+    _, rid = lay.part.get_or_add_image_part(str(photo))
+    _set_slide_bg(lay, f'<a:blipFill><a:blip r:embed="{rid}"/><a:stretch><a:fillRect/></a:stretch></a:blipFill>')
+    prs.save(src)
+    m = _analyze(src, tmp_path / "ws")
+    out = tmp_path / "lay-brand.pptx"
+    apply_brand(src, out, _brand(), manifest=m, brand_dir=_brand_dir(tmp_path))
+    dark = _part_logo_media(out, "ppt/slideLayouts/slideLayout2.xml")
+    assert dark and all("white" in n for n in dark), dark
+    light = _slide_logo_media(out) + _part_logo_media(out, "ppt/slideLayouts/slideLayout7.xml")
+    assert light and all("primary" in n for n in light), light
+
+
+def test_logo_keeps_clear_space_from_a_card(tmp_path, fonts_here):
+    """Карточка кончается в миллиметре над углом логотипа: логотип не встаёт вплотную — между ними охранное поле не
+    меньше 1 % высоты слайда (иначе — другое место или чуть меньший логотип)."""
+    src = build_custom(tmp_path, "gap", bg="FFFFFF", text="1F2937", cards=[("DCE8FD", "1F2937")])
+    margin, h = 48 / 1920 * W, 0.045 * H
+    top = H - margin - h
+    card = (int(W * 0.5), int(H * 0.55), int(W * 0.48), int(top - 0.005 * H - H * 0.55))
+    prs = Presentation(str(src))
+    for s in prs.slides:
+        sp = s.shapes.add_shape(MSO_SHAPE.RECTANGLE, *(Emu(v) for v in card))
+        sp.fill.solid()
+        sp.fill.fore_color.rgb = RGBColor.from_string("1F6FEB")
+        sp.line.fill.background()
+    prs.save(src)
+    m = _analyze(src, tmp_path / "ws")
+    out = tmp_path / "gap-brand.pptx"
+    res = apply_brand(src, out, _brand(), manifest=m, brand_dir=_brand_dir(tmp_path))
+    boxes = _logo_boxes(out)
+    assert res.logos_added >= 1 and boxes
+    cx, cy, cw, ch = card
+    for _, (x, y, w, hh) in boxes:
+        dx = max(0, max(x, cx) - min(x + w, cx + cw))
+        dy = max(0, max(y, cy) - min(y + hh, cy + ch))
+        assert (dx * dx + dy * dy) ** 0.5 >= 0.0095 * H, (x / W, y / H, dx / H, dy / H)
+    assert _ir_collisions(out) == []
+
+
+def test_dark_tone_reachable_only_by_darkening_becomes_primary_shade(tmp_path, fonts_missing):
+    """Тёмно-зелёный акцент шаблона (#168253, lo_focus): ближайший тон бренда — светлый голубой, и он получился бы
+    только затемнением ниже L* 50 (петрольный). Вместо него — оттенок основного: одна семья."""
+    src = build_custom(tmp_path, "focus", bg="FFFFFF", text="1F2937", cards=[("E8A202", "1F2937"), ("168253", "FFFFFF")],
+                       theme={"accent1": "E8A202", "accent2": "168253", "accent3": "F10D0C", "accent4": "EA7500"})
+    m = _analyze(src, tmp_path / "ws")
+    plan = ap.brand_plan(src, m, _brand()).colors
+    got = plan.map("168253")
+    assert pal.hue_dist(pal.hue(got), pal.hue("0077FF")) <= 8, got
+
+
+def test_link_colours_follow_brand_primary(tmp_path, fonts_missing):
+    """Ссылки — основной цвет бренда: явный розовый цвет текста со ссылкой (ЛЦТ, слайд 30) — оттенок основного своей
+    светлоты (контраст тот же); офисный #0563C1 в теме заметок — основной."""
+    src = build_custom(tmp_path, "links", bg="2D1451", text="FFFFFF", cards=[("FF0053", "FFFFFF"), ("F92571", "FFFFFF")],
+                       theme={"accent1": "FF0053", "accent2": "F92571", "accent3": "8A83D1"})
+    prs = Presentation(str(src))
+    for s in prs.slides:
+        tb = _text(s, "https://www.flaticon.com/", int(W * 0.05), int(H * 0.8), int(W * 0.5), int(H * 0.06), "Verdana", 14, "F92571")
+        tb.text_frame.paragraphs[0].runs[0].hyperlink.address = "https://www.flaticon.com/"
+    prs.slides[0].notes_slide.notes_text_frame.text = "Заметка"
+    prs.save(src)
+    with zipfile.ZipFile(src) as z:
+        notes_rels = z.read("ppt/notesMasters/_rels/notesMaster1.xml.rels").decode("utf-8")
+        notes_theme = "ppt/theme/" + re.search(r'Target="\.\./theme/(theme\d+\.xml)"', notes_rels).group(1)
+        xml = z.read(notes_theme).decode("utf-8")
+    xml = re.sub(r"<a:hlink>.*?</a:hlink>", '<a:hlink><a:srgbClr val="0563C1"/></a:hlink>', xml, flags=re.S)
+    _zip_put(src, {notes_theme: xml.encode("utf-8")})
+    m = _analyze(src, tmp_path / "ws")
+    out = tmp_path / "links-brand.pptx"
+    apply_brand(src, out, _vk_cloud(), manifest=m, brand_dir=BRAND_EXAMPLE)
+    slide = _parts(out, r"ppt/slides/slide1\.xml$")["ppt/slides/slide1.xml"]
+    rpr = re.search(r"<a:rPr[^>]*>(?:(?!</a:rPr>).)*?hlinkClick(?:(?!</a:rPr>).)*?</a:rPr>|<a:rPr[^>]*>(?:(?!</a:rPr>).)*?</a:rPr>(?=<a:t>https)", slide, re.S)
+    link = re.search(r'srgbClr val="([0-9A-F]{6})"', rpr.group(0)).group(1)
+    assert pal.hue_dist(pal.hue(link), pal.hue("0077FF")) <= 8, link
+    assert abs(pal.lightness(link) - pal.lightness("F92571")) <= 3  # контраст с фоном тот же
+    theme = _parts(out, re.escape(notes_theme) + "$")[notes_theme]
+    hl = re.search(r'<a:hlink><a:srgbClr val="([0-9A-F]{6})"/>', theme).group(1)
+    assert hl == "0077FF", hl
+
+
+def test_ir_cache_keeps_two_templates(tmp_path):
+    """IR большого шаблона весит десятки мегабайт: в долгоживущем сервере кэш держит только два последних файла."""
+    files = [build_custom(tmp_path, f"ir{i}", bg="FFFFFF", text="1F2937", cards=[("1F6FEB", "FFFFFF")], n=1) for i in range(3)]
+    pal._IRS.clear()
+    for f in files:
+        assert pal.source_ir(f) is not None
+    assert len(pal._IRS) <= pal.IR_CACHE_SIZE == 2
+    assert pal.source_ir(files[-1]) is pal.source_ir(files[-1])
+
+
+def test_logo_goes_on_layouts_next_to_empty_footers(tmp_path, fonts_here):
+    """Колонтитулы мастера — дата, подпись, номер — тянутся через весь низ слайда (4 : 3, как у synth_sidebar43). На
+    собранных слайдах они пусты: логотип встаёт на макет рядом с ними, не заходя туда, где встанет номер слайда, когда
+    его включат; новый слайд на этом макете получает логотип без столкновений."""
+    prs = Presentation()
+    for i in range(3):
+        s = prs.slides.add_slide(prs.slide_layouts[1])
+        s.shapes.title.text = f"Итоги квартала {i + 1}"
+        s.placeholders[1].text = "Выручка выросла\nКлиентов стало больше"
+    src = tmp_path / "foot43.pptx"
+    prs.save(src)
+    m = _analyze(src, tmp_path / "ws")
+    out = tmp_path / "foot43-brand.pptx"
+    res = apply_brand(src, out, _brand(), manifest=m, brand_dir=_brand_dir(tmp_path))
+    assert res.logo_layouts >= 1 and res.logo_covered == res.logo_samples
+    boxes = [b for part, b in _logo_boxes(out) if part == "ppt/slideLayouts/slideLayout2.xml"]
+    assert boxes
+    sw = 9144000
+    master = _parts(out, r"ppt/slideMasters/slideMaster1\.xml$")["ppt/slideMasters/slideMaster1.xml"]
+    num = re.search(r'<p:ph type="sldNum".*?<a:off x="(\d+)" y="(\d+)"/><a:ext cx="(\d+)" cy="(\d+)"/>', master, re.S)
+    nx, ny, ncx, ncy = (int(v) for v in num.groups())
+    tw = 3 * 0.6 * 12 * 12700 + 91440 * 2
+    number = (nx + ncx - tw, ny, tw, ncy)  # где встанет номер слайда, когда его включат
+    for x, y, cx, cy in boxes:
+        assert y + cy > ny  # в полосе колонтитулов, рядом с ними, а не над ней
+        assert min(x + cx, number[0] + number[2]) - max(x, number[0]) <= 0 or min(y + cy, ny + ncy) - max(y, ny) <= 0
+        assert x + cx <= sw
+    prs2 = Presentation(str(out))
+    prs2.slides.add_slide(prs2.slide_layouts[1])
+    fresh = tmp_path / "foot43-fresh.pptx"
+    prs2.save(fresh)
+    assert [h for h in _ir_collisions(fresh) if h[0] == 4] == []
+
+
+def test_layout_logo_matches_the_layout_own_ground(tmp_path, fonts_here):
+    """Макет тёмный (фото-фон ЛЦТ), а все его образцы — со своим светлым фоном: основной логотип на макете был бы
+    тёмным на тёмном у нового слайда, собранного прямо по макету. Логотип встаёт на сами образцы (основной), а на
+    макете — только подходящий его собственному фону."""
+    src = build_custom(tmp_path, "darklay", bg="FFFFFF", text="1F2937", cards=[("1F6FEB", "FFFFFF")])
+    prs = Presentation(str(src))
+    _set_slide_bg(prs.slide_layouts[6], '<a:solidFill><a:srgbClr val="1E1B4B"/></a:solidFill>')
+    prs.save(src)
+    m = _analyze(src, tmp_path / "ws")
+    out = tmp_path / "darklay-brand.pptx"
+    res = apply_brand(src, out, _brand(), manifest=m, brand_dir=_brand_dir(tmp_path))
+    assert res.logo_covered == res.logo_samples >= 1
+    on_layout = _part_logo_media(out, "ppt/slideLayouts/slideLayout7.xml")
+    assert all("white" in n for n in on_layout), on_layout
+    on_slides = _slide_logo_media(out)
+    assert on_slides and all("primary" in n for n in on_slides), on_slides
