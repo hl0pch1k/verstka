@@ -112,8 +112,12 @@ def generate(
     no_eyes: bool = typer.Option(False, "--no-eyes", help="Skip «Взгляд дизайнера»: the vision model's look at the finished slides"),
     export: str = typer.Option("pptx", "--export", help="pptx | pdf | html | all (comma separated)"),
     render: bool = typer.Option(False, "--render", help="Render slide images even without audit"),
+    data: Optional[list[str]] = typer.Option(None, "--data", "-d", help="Data files (CSV, XLSX, JSON, TXT/MD with a table) or a folder of them; repeat --data for several, or give one comma-separated value: the deck becomes a data story"),
+    brand: Optional[str] = typer.Option(None, "--brand", help="Brandbook: tokens JSON, PDF guideline, a folder or .zip with logos, or a Figma link — the deck is laid out on the template's branded copy"),
+    brand_priority: str = typer.Option("brand", "--brand-priority", help="brand (the brandbook wins over the template) | template (the brand only adds what the template lacks)"),
 ) -> None:
-    """Generate three layout variants (or one) from a template and a brief, audit, autofix and export them."""
+    """Generate three layout variants (or one) from a template and a brief (and data files, a brandbook), audit,
+    autofix and export them."""
     from verstka.pipeline.generate import generate_variants
     from verstka.planning.brief import load_brief
     from verstka.schemas.outline import DeckOutline
@@ -132,8 +136,13 @@ def generate(
     no_autofix = no_autofix or bool(cfg.get("no_autofix", False))
     audit_models = audit_models or bool(cfg.get("audit_models", False))
     no_eyes = no_eyes or bool(cfg.get("no_eyes", False))
-    if template is None or (brief is None and outline is None):
-        raise typer.BadParameter("--template and (--brief or --outline) are required (or a --config run.yaml)")
+    data = list(data or []) or [str(x) for x in (cfg.get("data") or [])]
+    brand = brand or cfg.get("brand")
+    brand_priority = cfg.get("brand_priority", brand_priority) if brand_priority == "brand" else brand_priority
+    if brand_priority not in ("brand", "template"):
+        raise typer.BadParameter("--brand-priority: brand | template")
+    if template is None or (brief is None and outline is None and not data):
+        raise typer.BadParameter("--template and (--brief, --outline or --data) are required (or a --config run.yaml)")
     strategies = None if strategy in ("all", None) else [s.strip() for s in str(strategy).split(",")]
     exports = ["pdf", "html"] if export == "all" else [e.strip() for e in export.split(",") if e.strip() and e.strip() != "pptx"]
     use_models = not no_llm
@@ -145,7 +154,23 @@ def generate(
     if brief_obj is not None and cfg.get("audience"):
         brief_obj.audience = cfg["audience"]
     outline_obj = DeckOutline.model_validate_json(Path(outline).read_text(encoding="utf-8")) if outline else None
+    template = Path(template)
+    story = None
     with console.status("Generating…") as status:
+        if brand:
+            template = _branded(template, brand, brand_priority, workspace, providers, skills, use_vlm=not no_vlm and use_models, status=status)
+        if data and outline_obj is None:
+            from verstka.data.story import build_data_story
+
+            tables = _read_data(data)
+            story = build_data_story(
+                brief_obj, tables, use_llm=use_models, skills=skills if use_models else None,
+                providers=providers if use_models else None, slide_count=int(slides) if slides else None,
+                progress=lambda stage, frac=None, **_: status.update(f"[data] {stage}"),
+            )
+            outline_obj, brief_obj = story.outline, None  # the data deck's figures are checked against the data
+            for line in story.log:
+                console.print(f"  {line}")
         res = generate_variants(
             template,
             brief=brief_obj,
@@ -168,6 +193,13 @@ def generate(
             image_provider=_image_provider(models) if models and not (no_llm and no_vlm) else None,
             progress=lambda stage, frac: status.update(f"[{frac:4.0%}] {stage}"),
         )
+    if story is not None:
+        from verstka.data.story import stamp_variants
+
+        stamp_variants(res, story, out)
+        made = f"the model ({story.model}) wrote the connecting text" if story.model_used else "deterministic wording"
+        refused = f", {len(story.rejected)} rephrasings refused by the facts check" if story.rejected else ""
+        console.print(f"Data story: {len(story.plans)} datasets, {len(story.outline.slides)} slides, {made}{refused}")
     console.print(f"[bold]{res.manifest.source_file}[/bold] · template {res.template_id} · {res.seconds}s total")
     for v in res.variants:
         tbl = Table(title=f"{v.strategy}: {len(v.outline.slides)} slides in {v.seconds}s" + (f" · audit score {v.audit.summary.score} (errors {v.audit.summary.errors}, warnings {v.audit.summary.warnings}, fixes {len(v.audit.applied_fixes)})" if v.audit else ""))
@@ -184,6 +216,63 @@ def generate(
         console.print(tbl)
         console.print("  " + " · ".join(f"{k}: {p}" for k, p in v.exports.items()))
     console.print(f"Output: {out.resolve()}")
+
+
+_DATA_EXT = {".csv", ".tsv", ".xlsx", ".json", ".txt", ".md"}
+_NOT_DATA = {"scenario.md", "readme.md"}
+
+
+def _data_files(items: list[str]) -> list[Path]:
+    """--data values → files: a file as given, a folder → its data files (not SCENARIO.md / README.md), a value with
+    commas → several."""
+    out: list[Path] = []
+    for item in items:
+        for part in [x.strip() for x in str(item).split(",") if x.strip()]:
+            p = Path(part)
+            if p.is_dir():
+                out += [f for f in sorted(p.iterdir()) if f.is_file() and f.suffix.lower() in _DATA_EXT and f.name.lower() not in _NOT_DATA]
+            elif p.is_file():
+                out.append(p)
+            else:
+                raise typer.BadParameter(f"--data: «{part}» не найден")
+    return list(dict.fromkeys(out))
+
+
+def _read_data(items: list[str]):
+    from verstka.data.readers import DataReadError, read_file
+
+    tables = []
+    for f in _data_files(items):
+        try:
+            tables += read_file(f)
+        except DataReadError as e:
+            raise typer.BadParameter(f"--data: «{f.name}» — {e}")
+    if not tables:
+        raise typer.BadParameter("--data: таблиц не нашлось")
+    return tables
+
+
+def _branded(template: Path, brand: str, priority: str, workspace: Optional[Path], providers, skills, *, use_vlm: bool, status) -> Path:
+    """The template's branded copy (verstka/brand/apply.py): the brandbook read (its logos kept in the workspace's
+    brandbooks/<hash>/), applied to the analysed template; returns the copy's source.pptx."""
+    import hashlib
+
+    from verstka.analysis.manifest import analyze_template
+    from verstka.brand.apply import branded_template
+    from verstka.brand.read import read_brandbook
+    from verstka.ingest.workspace import TemplateWorkspace, default_workspace_root
+
+    root = Path(workspace) if workspace else default_workspace_root()
+    status.update("[brand] reading the brandbook")
+    key = hashlib.sha256(str(Path(brand).resolve() if Path(brand).exists() else brand).encode("utf-8")).hexdigest()[:16]
+    assets = root / "brandbooks" / f"cli-{key}"
+    assets.mkdir(parents=True, exist_ok=True)
+    spec = read_brandbook(brand, providers=providers if use_vlm else None, skills=skills if use_vlm else None, use_vlm=use_vlm, assets_dir=assets)
+    spec.id = assets.name
+    m = analyze_template(template, workspace_root=root, use_llm=False, use_vlm=False, progress=lambda s, f: status.update(f"[brand] analyse: {s}"))
+    tid = branded_template(m.template_id, spec, priority, workspace_root=root, brand_dir=assets, progress=lambda s, f: status.update(f"[brand] {s}"))
+    console.print(f"Brandbook «{spec.name or Path(brand).name}» → branded copy {tid} (priority: {priority})")
+    return TemplateWorkspace.open(tid, root).source
 
 
 @app.command()
