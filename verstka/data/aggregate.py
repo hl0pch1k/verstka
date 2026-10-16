@@ -1,0 +1,1223 @@
+"""Подготовка данных (описание решения §2.5): из таблицы и профиля — то, что пойдёт на слайд.
+
+- Ряд по времени (`TimeView`): периоды подряд с частотой оси, пропуски — `None` (линия с разрывами, а не ноль),
+  ресэмплинг больше 36 точек (дни → недели → месяцы → кварталы → годы: сумма для потоков, среднее для уровней,
+  последнее значение для остатков вроде числа клиентов), длинный формат «период × категория» — ряд на категорию.
+- Категории (`CatView`): сумма или среднее по категории, ранжирование (порядковые подписи «0–30», «1 курс» — как
+  в файле), топ-N и «Остальные» больше 12 категорий, доли от итога.
+- Распределение (`DistView`): интервалы по Фридману–Диаконису с «круглой» шириной, 7–12 интервалов (5–12 на малых
+  выборках), открытый последний «больше X»; выбросы — отдельно.
+- Ключевые показатели (`KpiView`): значение, единица и изменение каждой строки («1,24 млрд ₽», «+23%», «+6 п.»).
+- Справочник (`RefView`): топ-10 по главной метрике и строка «Остальные 230 …», до 5 колонок, доля посчитана;
+  разбиение на слайды по 10 строк, если агрегация теряет смысл (не больше 3 слайдов).
+- Взаимосвязь (`XYView`): пары значений и коэффициент корреляции.
+
+Строки итога (`Table.totals`, если чтение их отметило, или подпись «Итого/Всего») в графики не идут — по ним
+считаются доли от итога. Всё детерминировано и без модели."""
+
+from __future__ import annotations
+
+import math
+import re
+from dataclasses import dataclass, field
+from datetime import date
+from functools import cached_property
+from typing import Any, Optional
+
+import numpy as np
+
+from verstka.data.headline import (
+    PERIOD_WORDS, count_words, fmt_num, fmt_value, join_and, lower_first, period_label, phrase,
+)
+from verstka.data.profile import parse_number_value, parse_time_value, period_iso
+from verstka.data.readers import parse_quantity
+from verstka.schemas.data import ColumnProfile, DatasetProfile, Table
+
+__all__ = [
+    "MAX_POINTS", "MAX_CATS", "TOP_N", "TABLE_ROWS", "MAX_SLIDES",
+    "Measure", "SeriesV", "TimeView", "CatView", "Bins", "DistView", "KpiItem", "KpiView", "RefView", "XYView", "Data",
+    "histogram_bins", "nice_width", "resample_freq", "unit_short",
+]
+
+MAX_POINTS = 36  # больше точек — ресэмплинг к более крупному периоду
+MAX_CATS = 12  # больше категорий — топ и «Остальные»
+TOP_N = 10  # строк справочника на слайде
+TABLE_ROWS = 10
+MAX_SLIDES = 3  # больше слайдов на один датасет — уже не разбиение, а агрегация
+MAX_SERIES = 5
+
+_TOTAL_LABEL = re.compile(r"^\s*(?:итого|всего|итог|total|grand total)\s*[:.]?\s*$", re.I)
+_CHANGE = re.compile(r"изменени|(?:^|[^а-яё])(?:при)?рост|динамик|разниц|отклонени|к прошл|г/г|yoy|дельта|δ", re.I)
+_LEVEL = re.compile(
+    r"nps|csat|индекс|средн|рейтинг|оценк|балл|конверси|курс|цен[аы]|ставк|температур|доля|коэффициент|уровень|"
+    r"процент|медиан|время|срок|скорост|длительн|возраст|удовлетвор|загрузк|маржа|маржин|рентабельн|плотност|чек",
+    re.I,
+)
+_STOCK = re.compile(r"клиент|пользовател|сотрудник|абонент|подписчик|остат|баланс|численност|штат|запас|база", re.I)
+_TIME_NAME = {
+    "мин": "мин", "минут": "мин", "минуты": "мин", "час": "ч", "часов": "ч", "часа": "ч", "ч": "ч", "дней": "дн.",
+    "день": "дн.", "дня": "дн.", "дн": "дн.", "сек": "с", "секунд": "с",
+}
+_TIME_UNITS = {"мин": 1.0, "мин.": 1.0, "минут": 1.0, "ч": 60.0, "ч.": 60.0, "час": 60.0, "часов": 60.0,
+               "дн.": 1440.0, "дн": 1440.0, "дней": 1440.0, "с": 1 / 60, "сек": 1 / 60, "с.": 1 / 60}
+_CODE = re.compile(r"^[A-Za-zА-Яа-яЁё]{0,6}[-_/#№.]?\d{1,12}[A-Za-z]?$")
+_ORDINAL_LABEL = re.compile(r"^\s*(?:до|от|свыше|более|больше|менее|меньше|<|>|≤|≥)?\s*\d")
+
+
+def unit_short(unit: Optional[str]) -> Optional[str]:
+    return unit or None
+
+
+def _time_unit_of(name: str, unit: Optional[str]) -> Optional[str]:
+    """Единица длительности колонки: из единицы («мин») или из имени («Минут до ответа», «Время, ч»)."""
+    if unit:
+        u = unit.strip().lower()
+        return u if u in _TIME_UNITS else None
+    first = re.split(r"[\s,()]+", name.strip().lower())[0] if name.strip() else ""
+    return _TIME_NAME.get(first)
+
+
+@dataclass
+class Measure:
+    """Метрика — колонка с числами."""
+
+    j: int
+    name: str
+    unit: Optional[str]
+    type: str
+    values: list[Optional[float]]  # по строкам таблицы (строки итога — None)
+    change: bool = False  # изменение/рост (знак важен, не складывается)
+    level: bool = False  # уровень (доля, индекс, среднее): не складывается, при ресэмплинге — среднее
+    stock: bool = False  # остаток (клиентов, сотрудников): по категориям складывается, по времени — последнее
+    mixed: bool = False  # в колонке разные единицы по строкам («1,24 млрд ₽», «3 480»)
+    time_unit: Optional[str] = None  # «мин», «ч», «дн.» — длительность
+    raw: list[Optional[float]] = field(default_factory=list)  # числа как написаны («1,24 млрд ₽» → 1.24)
+    row_units: list[Optional[str]] = field(default_factory=list)  # единица каждой строки (колонка с разными единицами)
+
+    @property
+    def additive(self) -> bool:
+        return not (self.change or self.level or self.mixed)
+
+    @property
+    def nonneg(self) -> bool:
+        return all(v is None or v >= 0 for v in self.values)
+
+    @property
+    def present(self) -> list[float]:
+        return [v for v in self.values if v is not None]
+
+    @property
+    def how(self) -> str:
+        """Как собирать значения одного периода: сумма, среднее или последнее."""
+        if self.change or self.level or self.mixed:
+            return "mean"
+        if self.stock:
+            return "last"
+        return "sum"
+
+    @property
+    def unit_text(self) -> Optional[str]:
+        return self.unit or self.time_unit
+
+
+@dataclass
+class SeriesV:
+    name: str
+    unit: Optional[str]
+    values: list[Optional[float]]
+
+
+@dataclass
+class TimeView:
+    column: str
+    freq: str  # частота после ресэмплинга
+    periods: list[str]  # ISO
+    labels: list[str]
+    series: list[SeriesV]
+    measure: Measure
+    source_freq: str
+    source_points: int
+    how: str  # sum | mean | last
+    dim: Optional[str] = None  # ряды по категориям этой колонки (длинный формат)
+    others: int = 0  # сколько категорий ушло в «Остальные»
+    column_type: str = "date"
+    partial: int = 0  # неполных крайних периодов не показано (сумма за них занижена)
+
+    @property
+    def points(self) -> int:
+        return len(self.periods)
+
+    @property
+    def main(self) -> SeriesV:
+        return self.series[0]
+
+    @property
+    def missing(self) -> list[str]:
+        """Периоды без значения главного ряда (у рядов по категориям — без значения ни в одном)."""
+        if self.dim:
+            return [p for i, p in enumerate(self.periods) if all(s.values[i] is None for s in self.series)]
+        return [p for p, v in zip(self.periods, self.main.values) if v is None]
+
+    @property
+    def gaps(self) -> bool:
+        return any(v is None for s in self.series for v in s.values)
+
+    @property
+    def resampled(self) -> bool:
+        return self.freq != self.source_freq
+
+    @property
+    def split(self) -> bool:
+        """Ряды в разных единицах — каждый своим графиком рядом (ChartSpec.split)."""
+        return len({s.unit for s in self.series}) > 1
+
+    @property
+    def note(self) -> Optional[str]:
+        """«по месяцам: 400 дней → 14 месяцев, сумма»."""
+        if not self.resampled:
+            return None
+        src = PERIOD_WORDS.get(self.source_freq, PERIOD_WORDS["irregular"])
+        dst = PERIOD_WORDS.get(self.freq, PERIOD_WORDS["irregular"])
+        how = {"sum": "сумма", "mean": "среднее", "last": "значение на конец периода"}[self.how]
+        by = {"week": "по неделям", "month": "по месяцам", "quarter": "по кварталам", "year": "по годам",
+              "day": "по дням"}.get(self.freq, "по периодам")
+        s = (f"{by}: {count_words(self.source_points, src[0], src[1], src[2])} → "
+             f"{count_words(self.points, dst[0], dst[1], dst[2])}, {how}")
+        if self.partial:
+            s += f"; {'неполный крайний период не показан' if self.partial == 1 else 'неполные крайние периоды не показаны'}"
+        return s
+
+
+@dataclass
+class CatView:
+    dim: str
+    labels: list[str]
+    values: list[float]
+    measure: Optional[Measure]  # None — счёт строк
+    extra: dict[str, list[Optional[float]]] = field(default_factory=dict)  # другие метрики по тем же категориям
+    extra_measures: list[Measure] = field(default_factory=list)
+    others: int = 0  # категорий в «Остальных»
+    ranked: bool = True
+    total: Optional[float] = None  # итог (строка «Итого» или сумма)
+    total_from_row: bool = False
+    distinct: int = 0  # категорий до топа
+    aggregated: bool = False  # строки сложены по категории
+
+    @property
+    def n(self) -> int:
+        return len(self.labels)
+
+    @property
+    def long_labels(self) -> bool:
+        if not self.labels:
+            return False
+        lens = [len(x) for x in self.labels]
+        return max(lens) > 12 or sum(lens) / len(lens) > 9
+
+    @property
+    def additive(self) -> bool:
+        return self.measure is None or self.measure.additive
+
+    @property
+    def negatives(self) -> int:
+        return sum(1 for v in self.values if v < 0)
+
+    @property
+    def shares(self) -> Optional[list[float]]:
+        if not self.additive or self.negatives or not self.total or self.total <= 0:
+            return None
+        return [v / self.total * 100 for v in self.values]
+
+    @property
+    def note(self) -> Optional[str]:
+        if self.others:
+            return f"топ-{self.n - 1} и «Остальные {self.others}»"
+        return None
+
+    @property
+    def unit(self) -> Optional[str]:
+        return self.measure.unit_text if self.measure else None
+
+
+@dataclass
+class Bins:
+    edges: list[float]  # границы регулярных интервалов (правая включена)
+    counts: list[int]
+    labels: list[str]
+    width: float
+    open_from: Optional[float] = None  # последний интервал «больше X»
+
+    @property
+    def n(self) -> int:
+        return len(self.counts)
+
+
+@dataclass
+class DistView:
+    measure: Measure
+    values: np.ndarray  # все значения
+    inliers: np.ndarray
+    outliers: list[float]
+    bins: Bins
+    entity: Optional[str]  # подпись строки («Обращение») — для «80% обращений»
+
+    @property
+    def n(self) -> int:
+        return int(self.values.size)
+
+    @property
+    def median(self) -> float:
+        return float(np.median(self.values))
+
+    def percentile(self, q: float) -> float:
+        return float(np.percentile(self.values, q))
+
+    @property
+    def note(self) -> str:
+        u = self.measure.unit_text
+        w = fmt_num(self.bins.width) + (f" {u}" if u else "")
+        s = f"{count_words(self.bins.n, 'интервал', 'интервала', 'интервалов')} по {w}"
+        if self.bins.open_from is not None:
+            s += f", последний — «больше {fmt_num(self.bins.open_from)}»"
+        if self.outliers:
+            s += f"; {count_words(len(self.outliers), 'выброс', 'выброса', 'выбросов')} — отдельно"
+        return s
+
+
+@dataclass
+class KpiItem:
+    label: str
+    value: float
+    value_text: str  # «1,24 млрд ₽»
+    unit: Optional[str]
+    change: Optional[float] = None  # в единицах change_unit
+    change_unit: Optional[str] = None  # «%», «п.», «п.п.»
+    prev_text: Optional[str] = None
+
+
+@dataclass
+class KpiView:
+    items: list[KpiItem]
+    period: Optional[str] = None  # «III кв. 2026»
+    prev_period: Optional[str] = None  # «III кв. 2025»
+    mixed_units: bool = False
+
+    @property
+    def with_change(self) -> list[KpiItem]:
+        return [i for i in self.items if i.change is not None]
+
+
+@dataclass
+class RefView:
+    label: Optional[str]  # колонка-подпись («Клиент»)
+    columns: list[str]  # колонки на слайде
+    rows: list[list[str]]  # строки слайда (топ)
+    rest: Optional[list[str]]  # строка «Остальные 230 клиентов»
+    measure: Optional[Measure]
+    n: int  # строк данных
+    top_n: int
+    total: Optional[float]
+    top_sum: Optional[float]
+    dropped: list[str]  # колонки, не вошедшие на слайд
+    share_added: bool
+    all_rows: list[list[str]] = field(default_factory=list)  # все строки (для разбиения)
+    full_columns: list[str] = field(default_factory=list)
+
+    @property
+    def top_share(self) -> Optional[float]:
+        if self.total and self.top_sum is not None and self.total > 0:
+            return self.top_sum / self.total * 100
+        return None
+
+    @property
+    def pages(self) -> int:
+        return max(1, math.ceil(self.n / TABLE_ROWS))
+
+
+@dataclass
+class XYView:
+    x: Measure
+    y: Measure
+    xs: list[float]
+    ys: list[float]
+    labels: list[str]
+    r: float
+
+    @property
+    def n(self) -> int:
+        return len(self.xs)
+
+
+# ── время ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+_FREQ_ORDER = ["hour", "day", "week", "month", "quarter", "year"]
+
+
+def _to_freq(gran: str, ordinal: int, freq: str) -> Optional[int]:
+    """Номер периода `gran` → номер периода частоты `freq` (не мельче исходного)."""
+    if gran == freq:
+        return ordinal
+    if gran == "day":
+        d = date.fromordinal(ordinal)
+        if freq == "week":
+            return (ordinal - 1) // 7
+        if freq == "month":
+            return d.year * 12 + d.month - 1
+        if freq == "quarter":
+            return d.year * 4 + (d.month - 1) // 3
+        if freq == "year":
+            return d.year
+    if gran == "week":
+        d = date.fromordinal(ordinal * 7 + 1)
+        return _to_freq("day", d.toordinal(), freq) if freq != "week" else ordinal
+    if gran == "month":
+        if freq == "quarter":
+            return (ordinal // 12) * 4 + (ordinal % 12) // 3
+        if freq == "year":
+            return ordinal // 12
+    if gran == "quarter" and freq == "year":
+        return ordinal // 4
+    return None
+
+
+def resample_freq(freq: str, points: int, span: dict[str, int]) -> str:
+    """Самая мелкая частота не мельче исходной, при которой точек ≤ 36."""
+    if points <= MAX_POINTS:
+        return freq
+    start = _FREQ_ORDER.index(freq) if freq in _FREQ_ORDER else 1
+    for f in _FREQ_ORDER[start + 1:]:
+        if span.get(f, 10**9) <= MAX_POINTS:
+            return f
+    return "year"
+
+
+def _cell_time(cell: Any) -> Optional[tuple[str, int]]:
+    if isinstance(cell, bool):
+        return None
+    if isinstance(cell, int) and 1900 <= cell <= 2100:
+        return "year", cell
+    if isinstance(cell, float) and cell.is_integer() and 1900 <= cell <= 2100:
+        return "year", int(cell)
+    if isinstance(cell, str):
+        s = cell.strip()
+        m = re.match(r"^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})", s)
+        if m:
+            d = date(int(m.group(1)), int(m.group(2)), int(m.group(3))).toordinal()
+            return "hour", d * 24 + int(m.group(4))
+        return parse_time_value(s)
+    return None
+
+
+def _iso(freq: str, o: int) -> str:
+    if freq == "hour":
+        d = date.fromordinal(o // 24)
+        return f"{d.isoformat()}T{o % 24:02d}:00"
+    if freq == "irregular":
+        return date.fromordinal(o).isoformat()
+    return period_iso(freq, o)
+
+
+# ── главный объект ────────────────────────────────────────────────────────────────────────────────────────────────────
+class Data:
+    """Датасет для анализа: таблица, профиль, метрики, подписи и подготовленные виды (лениво)."""
+
+    def __init__(self, table: Table, profile: DatasetProfile, subject: tuple[str, ...] = ()):
+        self.table = table
+        self.profile = profile
+        self.subject = subject
+        cols = profile.columns
+        self.cols: list[ColumnProfile] = cols
+        self.ncols = len(cols)
+        self.totals: set[int] = self._total_rows()
+        self.rows_idx = [i for i in range(len(table.rows)) if i not in self.totals]
+        self.n = len(self.rows_idx)
+        self.measures: list[Measure] = [self._measure(j, c) for j, c in enumerate(cols) if c.role == "metric"]
+        self.measures = [m for m in self.measures if m.present]
+        self.codes = {j for j, c in enumerate(cols) if c.role in ("dimension", "text") and self._code_like(j)}
+        self.dims = [j for j, c in enumerate(cols)
+                     if c.role == "dimension" and c.type in ("category", "boolean") and j not in self.codes]
+        self.label = self._label_col()
+        self.id_col = next((j for j, c in enumerate(cols) if c.role == "id"), None)
+        if self.id_col is None and self.codes:
+            self.id_col = min(self.codes)
+        self.time_col = next((j for j, c in enumerate(cols) if profile.time_axis and c.name == profile.time_axis.column),
+                             None)
+
+    # ── строки и колонки
+    def _total_rows(self) -> set[int]:
+        marked = getattr(self.table, "totals", None) or []
+        out = {int(i) for i in marked if isinstance(i, int) and 0 <= i < len(self.table.rows)}
+        if out:
+            return out
+        for i, r in enumerate(self.table.rows):
+            for v in r[:2]:
+                if isinstance(v, str) and _TOTAL_LABEL.match(v):
+                    out.add(i)
+        return out if len(out) < len(self.table.rows) else set()
+
+    def cell(self, i: int, j: int) -> Any:
+        r = self.table.rows[i]
+        return r[j] if j < len(r) else None
+
+    def column_cells(self, j: int) -> list[Any]:
+        return [self.cell(i, j) for i in self.rows_idx]
+
+    def text(self, i: int, j: int) -> str:
+        v = self.cell(i, j)
+        if v is None:
+            return ""
+        if isinstance(v, bool):
+            return "да" if v else "нет"
+        if isinstance(v, (int, float)):
+            return fmt_num(float(v))
+        return " ".join(str(v).split())
+
+    def _measure(self, j: int, c: ColumnProfile) -> Measure:
+        cells = [self.cell(i, j) for i in range(len(self.table.rows))]
+        units = set()
+        vals: list[Optional[float]] = []
+        raw: list[Optional[float]] = []
+        row_units: list[Optional[str]] = []
+        for i, v in enumerate(cells):
+            if i in self.totals:
+                vals.append(None)
+                raw.append(None)
+                row_units.append(None)
+                continue
+            q = None
+            if isinstance(v, str):
+                q = parse_quantity(v)
+                if q is not None and q[1]:
+                    units.add(q[1])
+                elif q is not None:
+                    units.add("")
+            elif isinstance(v, (int, float)) and not isinstance(v, bool):
+                units.add("")
+            vals.append(parse_number_value(v) if not isinstance(v, bool) else None)
+            raw.append(q[0] if q is not None else vals[-1])
+            row_units.append(q[1] if q is not None else None)
+        mixed = len(units) > 1
+        name = c.name
+        lname = name.lower()
+        signed = sum(1 for v in cells if isinstance(v, str) and v.strip().startswith("+"))
+        change = bool(_CHANGE.search(lname)) or signed >= max(1, len([v for v in cells if v is not None]) // 2)
+        level = (c.type == "percent" and not change) or bool(_LEVEL.search(lname))
+        unit = c.unit
+        if mixed:
+            unit = None
+        tu = _time_unit_of(name, unit)
+        return Measure(j=j, name=name, unit=unit, type=c.type, values=vals, change=change, level=level and not change,
+                       stock=bool(_STOCK.search(lname)) and not level, mixed=mixed, time_unit=tu, raw=raw,
+                       row_units=row_units)
+
+    def _code_like(self, j: int) -> bool:
+        """Колонка кодов («SUP-48213», «A-12», «Z1000»): у каждой строки свой, буквы и цифры без пробелов — это
+        идентификатор, а не подпись и не категория."""
+        vals = [v for v in (self.cell(i, j) for i in self.rows_idx) if isinstance(v, str) and v.strip()]
+        if len(vals) < 3 or len(set(vals)) < len(vals):
+            return False
+        ok = sum(1 for v in vals if _CODE.match(v.strip()))
+        return ok >= 0.9 * len(vals)
+
+    def _label_col(self) -> Optional[int]:
+        """Подпись строки: текст или категория, у каждой строки своя (клиент, регион, показатель)."""
+        best = None
+        for j, c in enumerate(self.cols):
+            if c.role not in ("text", "dimension") or c.type in ("boolean",) or j in self.codes:
+                continue
+            if c.type == "text" and c.distinct and any(isinstance(s, str) and len(s) > 60 for s in c.samples):
+                continue
+            vals = [self.text(i, j) for i in self.rows_idx]
+            filled = [v for v in vals if v]
+            if filled and len(set(filled)) == len(filled) and len(filled) >= max(1, int(0.9 * self.n)):
+                best = j
+                break
+        return best
+
+    # ── метрики
+    def measure(self, name: str) -> Optional[Measure]:
+        return next((m for m in self.measures if m.name == name), None)
+
+    @cached_property
+    def main(self) -> Optional[Measure]:
+        """Главная метрика: та, что названа целью; иначе деньги; иначе первая не-изменение; иначе первая."""
+        ms = self.measures
+        if not ms:
+            return None
+        if self.subject:
+            from verstka.data.goals import stems_match
+
+            for m in ms:
+                if stems_match(self.subject, m.name):
+                    return m
+        for pred in (
+            lambda m: m.type == "money" and not m.change and not m.mixed,
+            lambda m: not m.change and not m.mixed,
+            lambda m: not m.change,
+        ):
+            for m in ms:
+                if pred(m):
+                    return m
+        return ms[0]
+
+    @cached_property
+    def parts_measure(self) -> Optional[Measure]:
+        """Колонка долей (сумма ≈ 100) — если профиль нашёл части целого."""
+        if not self.profile.parts_of_whole:
+            return None
+        for m in self.measures:
+            if m.type == "percent" and not m.change:
+                v = m.present
+                s = sum(v)
+                if v and all(x >= 0 for x in v) and (95 <= s <= 105 or 0.95 <= s <= 1.05):
+                    return m
+        return None
+
+    @cached_property
+    def mixed_units(self) -> bool:
+        return any(m.mixed for m in self.measures)
+
+    @cached_property
+    def entity(self) -> Optional[str]:
+        """Что за строка (подпись или id): «Клиент», «Обращение»."""
+        for j in (self.label, self.id_col):
+            if j is not None:
+                return self.cols[j].name
+        return None
+
+    # ── виды
+    @cached_property
+    def time(self) -> Optional[TimeView]:
+        return self.time_view(self.main)
+
+    def time_view(self, m: Optional[Measure], max_points: int = MAX_POINTS) -> Optional[TimeView]:
+        ax = self.profile.time_axis
+        if ax is None or self.time_col is None:
+            return None
+        tj = self.time_col
+        cells = [(i, _cell_time(self.cell(i, tj))) for i in self.rows_idx]
+        cells = [(i, t) for i, t in cells if t is not None]
+        if not cells:
+            return None
+        grans = {t[0] for _, t in cells}
+        gran = "day" if "day" in grans else sorted(grans, key=lambda g: _FREQ_ORDER.index(g) if g in _FREQ_ORDER else 0)[0]
+        if "hour" in grans:
+            gran = "hour"
+        cells = [(i, t) for i, t in cells if t[0] == gran]
+        freq = ax.freq if ax.freq in _FREQ_ORDER else gran
+        if _FREQ_ORDER.index(freq) < _FREQ_ORDER.index(gran):
+            freq = gran
+        irregular = ax.freq == "irregular"
+        keyed = []
+        for i, (g, o) in cells:
+            k = o if irregular else _to_freq(g, o, freq)
+            if k is not None:
+                keyed.append((i, k))
+        if not keyed:
+            return None
+        src_freq = "day" if irregular else freq
+        uniq = sorted({k for _, k in keyed})
+        if irregular:
+            src_points = len(uniq)
+        else:
+            src_points = uniq[-1] - uniq[0] + 1
+        partial = 0
+
+        def how_of(mm: Optional[Measure]) -> str:
+            return "sum" if mm is None else ("mean" if mm.change else mm.how)
+
+        # ресэмплинг
+        target = src_freq
+        if src_points > max_points:
+            spans = {}
+            for f in _FREQ_ORDER[_FREQ_ORDER.index(src_freq) + 1:]:
+                ks = [_to_freq(gran, t[1], f) for _, t in cells]
+                ks = [k for k in ks if k is not None]
+                if ks:
+                    spans[f] = max(ks) - min(ks) + 1
+            target = resample_freq(src_freq, src_points, spans)
+            keyed = [(i, _to_freq(gran, t[1], target)) for i, t in cells]
+            keyed = [(i, k) for i, k in keyed if k is not None]
+            uniq = sorted({k for _, k in keyed})
+            irregular = False
+        if target != src_freq and how_of(m) == "sum":
+            # неполные крайние периоды (месяц, за который есть 5 дней из 30) — сумма за них занижена: не показываем
+            per: dict[int, set] = {}
+            for _, t in cells:
+                k = _to_freq(gran, t[1], target)
+                if k is not None:
+                    per.setdefault(k, set()).add(t[1])
+            full = sorted(len(v) for v in per.values())
+            med = full[len(full) // 2] if full else 0
+            drop = {k for k in (uniq[0], uniq[-1]) if len(uniq) > 3 and len(per.get(k, ())) < 0.7 * med}
+            if drop:
+                keyed = [(i, k) for i, k in keyed if k not in drop]
+                uniq = [k for k in uniq if k not in drop]
+                partial = len(drop)
+        if irregular or len(uniq) == 2:
+            order = uniq
+        else:
+            order = list(range(uniq[0], uniq[-1] + 1))
+        pos = {k: p for p, k in enumerate(order)}
+        out_freq = target if not (ax.freq == "irregular" and target == src_freq) else "irregular"
+        iso_freq = "day" if out_freq == "irregular" else out_freq
+        periods = [_iso(iso_freq, k) for k in order]
+        labels = [period_label(p, out_freq) for p in periods]
+
+        # ряды: длинный формат — по категориям, иначе метрика (и метрики в тех же единицах)
+        dupes = len(keyed) > len({k for _, k in keyed})
+        series: list[SeriesV] = []
+        dim_name = None
+        others = 0
+        measures = [m] if m is not None else []
+        how = m.how if m is not None else "sum"
+        if m is not None and m.change:
+            how = "mean"
+
+        def agg(vals: list[float], how_: str) -> Optional[float]:
+            if not vals:
+                return None
+            if how_ == "sum":
+                return float(sum(vals))
+            if how_ == "last":
+                return float(vals[-1])
+            return float(sum(vals) / len(vals))
+
+        if dupes and self.dims and m is not None:
+            dj = next((j for j in self.dims if 2 <= self.cols[j].distinct <= 12), None)
+            if dj is not None:
+                dim_name = self.cols[dj].name
+                groups: dict[str, dict[int, list[float]]] = {}
+                g_units: dict[str, list[str]] = {}
+                for i, k in keyed:
+                    v = m.raw[i] if m.mixed else m.values[i]
+                    lab = self.text(i, dj)
+                    if v is None or not lab:
+                        continue
+                    groups.setdefault(lab, {}).setdefault(pos[k], []).append(v)
+                    if m.mixed:
+                        g_units.setdefault(lab, []).append(m.row_units[i] or "")
+                tot = {g: sum(sum(x) for x in d.values()) for g, d in groups.items()}
+                names = sorted(groups, key=lambda g: (-tot[g], g)) if m.additive else list(groups)
+                keep = names
+                if len(names) > MAX_SERIES:
+                    keep = names[: MAX_SERIES - 1]
+                    others = len(names) - len(keep)
+                for g in keep:
+                    vals = [agg(groups[g].get(p, []), how) for p in range(len(order))]
+                    gu = m.unit_text
+                    if m.mixed and g_units.get(g):
+                        gu = max(set(g_units[g]), key=g_units[g].count) or None
+                    series.append(SeriesV(g, gu, vals))
+                if others and m.additive:
+                    rest: dict[int, list[float]] = {}
+                    for g in names[len(keep):]:
+                        for p, xs in groups[g].items():
+                            rest.setdefault(p, []).extend(xs)
+                    series.append(SeriesV(f"Остальные {others}", m.unit_text,
+                                          [agg(rest.get(p, []), how) for p in range(len(order))]))
+                elif others:
+                    others = 0
+        if not series:
+            if m is None:
+                counts = [0] * len(order)
+                for _, k in keyed:
+                    counts[pos[k]] += 1
+                series = [SeriesV("Число строк", None, [float(c) for c in counts])]
+                how = "sum"
+            else:
+                # метрики в тех же единицах и того же размаха — рядом (план и факт)
+                for mm in self.measures:
+                    if mm is m:
+                        continue
+                    if len(measures) >= 4 or mm.change or mm.mixed or mm.type != m.type:
+                        continue
+                    same_unit = (mm.unit or "") == (m.unit or "") and (m.unit or mm.type in ("money", "percent"))
+                    a, b = max(map(abs, m.present), default=0), max(map(abs, mm.present), default=0)
+                    if same_unit and a and b and max(a, b) / min(a, b) <= 3:
+                        measures.append(mm)
+                for mm in measures:
+                    buckets: dict[int, list[float]] = {}
+                    for i, k in keyed:
+                        v = mm.values[i]
+                        if v is not None:
+                            buckets.setdefault(pos[k], []).append(v)
+                    h = how if mm is m else mm.how
+                    series.append(SeriesV(mm.name, mm.unit_text, [agg(buckets.get(p, []), h) for p in range(len(order))]))
+        meas = m if m is not None else Measure(j=-1, name="Число строк", unit=None, type="number",
+                                               values=[1.0] * len(self.table.rows))
+        return TimeView(
+            column=self.cols[tj].name, freq=out_freq, periods=periods, labels=labels, series=series, measure=meas,
+            source_freq="irregular" if ax.freq == "irregular" else src_freq, source_points=src_points, how=how,
+            dim=dim_name, others=others, column_type=self.cols[tj].type, partial=partial,
+        )
+
+    @cached_property
+    def cats(self) -> Optional[CatView]:
+        return self.cat_view(self.main)
+
+    def cat_dim(self) -> Optional[int]:
+        """Колонка категорий для сравнения: подпись строки (≤ 60, если есть метрика) или измерение с повторами (2–60
+        значений). Без метрики сравнивают число строк — подпись, у которой каждая строка своя, для этого не годится."""
+        if self.label is not None and self.n <= 60 and self.main is not None:
+            return self.label
+        cands = [j for j in self.dims if 2 <= self.cols[j].distinct <= 60]
+        if self.subject:
+            from verstka.data.goals import stems_match
+
+            for j in cands:
+                if stems_match(self.subject, self.cols[j].name):
+                    return j
+        if not cands:
+            return None
+        # самое «крупное» деление, которое ещё различает строки: меньше всего значений, но больше одного
+        return sorted(cands, key=lambda j: (self.cols[j].distinct > 12, j))[0]
+
+    def cat_view(self, m: Optional[Measure], top: int = MAX_CATS, dim: Optional[int] = None,
+                 rank: bool = True) -> Optional[CatView]:
+        dj = dim if dim is not None else self.cat_dim()
+        if dj is None:
+            return None
+        groups: dict[str, list[int]] = {}
+        for i in self.rows_idx:
+            lab = self.text(i, dj)
+            if lab:
+                groups.setdefault(lab, []).append(i)
+        if len(groups) < 2:
+            return None
+        aggregated = any(len(v) > 1 for v in groups.values())
+
+        def value_of(mm: Optional[Measure], idx: list[int]) -> Optional[float]:
+            if mm is None:
+                return float(len(idx))
+            xs = [mm.values[i] for i in idx if mm.values[i] is not None]
+            if not xs:
+                return None
+            if len(xs) == 1:
+                return float(xs[0])
+            return float(sum(xs)) if mm.additive or mm.stock else float(sum(xs) / len(xs))
+
+        labels = list(groups)
+        values = [value_of(m, groups[g]) for g in labels]
+        keep = [k for k, v in enumerate(values) if v is not None]
+        labels = [labels[k] for k in keep]
+        values = [values[k] for k in keep]  # type: ignore[misc]
+        if len(labels) < 2:
+            return None
+        extra_ms = [mm for mm in self.measures if mm is not m and not mm.mixed]
+        extra = {mm.name: [value_of(mm, groups[g]) for g in labels] for mm in extra_ms}
+        ordinal = sum(1 for x in labels if _ORDINAL_LABEL.match(x)) >= 0.8 * len(labels)
+        ranked = rank and not ordinal
+        order = list(range(len(labels)))
+        if ranked:
+            order.sort(key=lambda k: (-values[k], k))
+        labels = [labels[k] for k in order]
+        values = [values[k] for k in order]  # type: ignore[misc]
+        extra = {k: [v[o] for o in order] for k, v in extra.items()}
+        total = None
+        total_row = False
+        if m is None or m.additive:
+            # итог: строка «Итого» таблицы или сумма
+            for i in sorted(self.totals):
+                if m is not None and m.j >= 0:
+                    tv = parse_number_value(self.cell(i, m.j))
+                    if tv is not None and tv > 0:
+                        total, total_row = tv, True
+                        break
+            if total is None:
+                total = float(sum(values))
+        distinct = len(labels)
+        others = 0
+        if len(labels) > top:
+            if ranked and (m is None or m.additive):
+                head = top - 1
+                others = len(labels) - head
+                rest = float(sum(values[head:]))
+                labels = labels[:head] + [f"Остальные {others}"]
+                values = values[:head] + [rest]
+                extra = {k: v[:head] + [None] for k, v in extra.items()}
+            else:
+                labels, values = labels[:top], values[:top]
+                extra = {k: v[:top] for k, v in extra.items()}
+        return CatView(
+            dim=self.cols[dj].name, labels=labels, values=values, measure=m, extra=extra, extra_measures=extra_ms,
+            others=others, ranked=ranked, total=total, total_from_row=total_row, distinct=distinct, aggregated=aggregated,
+        )
+
+    @cached_property
+    def dist(self) -> Optional[DistView]:
+        m = self.main
+        if m is None:
+            return None
+        x = np.array(m.present, dtype=float)
+        if x.size < 2:
+            return None
+        out_rows = {o.row for o in self.profile.outliers if o.column == m.name}
+        outliers = sorted(float(m.values[i]) for i in out_rows if i < len(m.values) and m.values[i] is not None)
+        inl = np.array([v for i, v in enumerate(m.values) if v is not None and i not in out_rows], dtype=float)
+        if inl.size < 2:
+            inl = x
+        bins = histogram_bins(inl, m.unit_text)
+        return DistView(measure=m, values=x, inliers=inl, outliers=outliers, bins=bins, entity=self.entity)
+
+    @cached_property
+    def kpi(self) -> Optional[KpiView]:
+        return _kpi_view(self)
+
+    @cached_property
+    def ref(self) -> RefView:
+        return _ref_view(self)
+
+    @cached_property
+    def xy(self) -> Optional[XYView]:
+        ms = [m for m in self.measures if not m.mixed]
+        if len(ms) < 2:
+            return None
+        y = next((m for m in ms if re.search(r"выручк|продаж|прибыл|доход|оценк|балл|nps|конверси|результат|успеваем",
+                                             m.name, re.I)), None)
+        if y is None:
+            x, y = ms[0], ms[1]
+        else:
+            x = next(m for m in ms if m is not y)
+        xs, ys, labels = [], [], []
+        for i in self.rows_idx:
+            a, b = x.values[i], y.values[i]
+            if a is None or b is None:
+                continue
+            xs.append(float(a))
+            ys.append(float(b))
+            labels.append(self.text(i, self.label) if self.label is not None else "")
+        if len(xs) < 3:
+            return None
+        ax, ay = np.array(xs), np.array(ys)
+        r = 0.0
+        if ax.std() > 0 and ay.std() > 0:
+            r = float(np.corrcoef(ax, ay)[0, 1])
+        return XYView(x=x, y=y, xs=xs, ys=ys, labels=labels, r=r)
+
+    # ── свойства для задачи
+    @cached_property
+    def kpi_like(self) -> bool:
+        """До 6 показателей с подписью: разные единицы, подпись «Показатель» или колонка изменения."""
+        if self.profile.nature == "kpi":
+            return True
+        kv = self.kpi
+        if kv is None or not (1 <= len(kv.items) <= 6):
+            return False
+        if self.n == 1:
+            return True
+        lab = self.cols[self.label].name.lower() if self.label is not None else ""
+        named = bool(re.search(r"показател|метрик|kpi|индикатор|параметр", lab))
+        return kv.mixed_units or named
+
+    @cached_property
+    def label_lengths(self) -> list[int]:
+        cv = self.cats
+        return [len(x) for x in cv.labels] if cv else []
+
+
+# ── распределение ─────────────────────────────────────────────────────────────────────────────────────────────────────
+_NICE_MIN = [1, 2, 5, 10, 15, 20, 30, 60, 90, 120, 180, 240, 360, 480, 720, 1440]
+
+
+def nice_width(w: float, unit: Optional[str] = None) -> list[float]:
+    """«Круглые» ширины интервала вокруг w (по возрастанию): для минут — 5, 10, 15, 20, 30, 60…; иначе 1, 2, 2,5, 5 × 10ᵏ."""
+    if w <= 0 or not math.isfinite(w):
+        w = 1.0
+    if unit in ("мин", "мин."):
+        grid = [float(x) for x in _NICE_MIN] + [1440.0 * k for k in (2, 3, 7)]
+        return grid
+    k = math.floor(math.log10(w))
+    out = []
+    for e in range(k - 2, k + 3):
+        for b in (1, 2, 2.5, 5):
+            out.append(round(b * 10**e, 10))
+    return sorted(set(out))
+
+
+def histogram_bins(x: np.ndarray, unit: Optional[str] = None, lo_bins: int = 7, hi_bins: int = 12) -> Bins:
+    """Интервалы гистограммы: ширина по Фридману–Диаконису, округлённая до «круглой»; регулярные интервалы — до первой
+    границы не ниже 90-го перцентиля, остальное — открытый «больше X» (если хвост длинный); 7–12 интервалов (на малой
+    выборке — от 5). Правая граница включена: «100–120» — это (100; 120]."""
+    x = np.sort(np.asarray(x, dtype=float))
+    n = x.size
+    if n < 30 or len(np.unique(x)) < 7:
+        lo_bins = 5
+    q1, q3 = np.percentile(x, [25, 75])
+    iqr = float(q3 - q1)
+    span = float(x[-1] - x[0]) or 1.0
+    fd = 2 * iqr / (n ** (1 / 3)) if iqr > 0 else span / 10
+    grid = nice_width(fd, unit)
+    idx = int(np.argmin([abs(math.log(g / fd)) if g > 0 and fd > 0 else 1e9 for g in grid]))
+    p90 = float(np.percentile(x, 90))
+
+    def build(w: float) -> tuple[float, float, int, bool]:
+        start = math.floor(x[0] / w) * w
+        if x[0] >= 0 and start < 0:
+            start = 0.0
+        cut = max(math.ceil(p90 / w) * w, start + w)
+        open_tail = float(x[-1]) > cut + w
+        if not open_tail:
+            cut = max(math.ceil(float(x[-1]) / w) * w, start + w)
+        k = int(round((cut - start) / w)) + (1 if open_tail else 0)
+        return start, cut, k, open_tail
+
+    for _ in range(len(grid)):
+        start, cut, k, open_tail = build(grid[idx])
+        if k > hi_bins and idx + 1 < len(grid):
+            idx += 1
+            continue
+        if k < lo_bins and idx > 0:
+            s2, c2, k2, o2 = build(grid[idx - 1])
+            if k2 <= hi_bins:
+                idx -= 1
+                if k2 >= lo_bins:
+                    break
+                continue
+        break
+    w = grid[idx]
+    start, cut, k, open_tail = build(w)
+    edges = [start + w * t for t in range(int(round((cut - start) / w)) + 1)]
+    counts = []
+    labels = []
+    for a, b in zip(edges, edges[1:]):
+        if a == edges[0]:
+            c = int(((x >= a) & (x <= b)).sum())
+        else:
+            c = int(((x > a) & (x <= b)).sum())
+        counts.append(c)
+        labels.append(f"{fmt_num(a)}–{fmt_num(b)}")
+    if open_tail:
+        counts.append(int((x > cut).sum()))
+        labels.append(f"больше {fmt_num(cut)}")
+    return Bins(edges=edges, counts=counts, labels=labels, width=w, open_from=cut if open_tail else None)
+
+
+# ── ключевые показатели ───────────────────────────────────────────────────────────────────────────────────────────────
+def _norm_text(v: Any) -> str:
+    return " ".join(str(v).replace(" ", " ").split())
+
+
+def _value_text(v: Any, unit: Optional[str]) -> Optional[tuple[float, str, Optional[str]]]:
+    """Ячейка → (число, текст «1,24 млрд ₽», единица)."""
+    if v is None or isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        if isinstance(v, float) and not math.isfinite(v):
+            return None
+        return float(v), fmt_value(float(v), unit), unit
+    q = parse_quantity(v)
+    if q is None:
+        return None
+    num, u = q
+    u = u or unit
+    text = fmt_value(num, u)
+    return num, text, u
+
+
+def _kpi_view(d: Data) -> Optional[KpiView]:
+    if d.n == 0 or not d.measures:
+        return None
+    # одна строка: показатели — колонки
+    if d.n == 1:
+        i = d.rows_idx[0]
+        items = []
+        for m in d.measures:
+            vt = _value_text(d.cell(i, m.j), m.unit_text)
+            if vt is not None:
+                items.append(KpiItem(label=m.name, value=vt[0], value_text=vt[1], unit=vt[2]))
+        return KpiView(items=items, mixed_units=len({it.unit for it in items}) > 1) if items else None
+    lab_j = d.label
+    if lab_j is None:
+        # длинный формат: «Показатель × Период → Значение» (широкую таблицу чтение разворачивает так)
+        return _kpi_long(d)
+    if d.n > 6:
+        return None
+    changes = [m for m in d.measures if m.change]
+    values = [m for m in d.measures if not m.change]
+    if not values:
+        return None
+    # колонки-периоды («III кв. 2026», «III кв. 2025»): текущая — поздняя
+    timed = [(m, _cell_time(m.name)) for m in values]
+    cur, prev = values[0], None
+    if all(t is not None for _, t in timed) and len(timed) >= 2:
+        timed.sort(key=lambda mt: (mt[1][0], mt[1][1]))  # type: ignore[index]
+        cur, prev = timed[-1][0], timed[-2][0]
+    elif len(values) >= 2:
+        prev = None
+    items: list[KpiItem] = []
+    units = set()
+    for i in d.rows_idx:
+        label = d.text(i, lab_j)
+        vt = _value_text(d.cell(i, cur.j), cur.unit_text)
+        if not label or vt is None:
+            continue
+        units.add(vt[2] or "")
+        it = KpiItem(label=label, value=vt[0], value_text=vt[1], unit=vt[2])
+        if prev is not None:
+            pv = _value_text(d.cell(i, prev.j), prev.unit_text)
+            if pv is not None:
+                it.prev_text = pv[1]
+        if changes:
+            cq = d.cell(i, changes[0].j)
+            q = parse_quantity(cq) if isinstance(cq, str) else (None if cq is None else (float(cq), changes[0].unit))
+            if q is not None:
+                it.change, it.change_unit = q[0], (q[1] or changes[0].unit)
+        elif prev is not None:
+            pv = _value_text(d.cell(i, prev.j), prev.unit_text)
+            if pv is not None and pv[0] and (pv[2] or "") == (vt[2] or "") and pv[0] > 0:
+                it.change, it.change_unit = (vt[0] / pv[0] - 1) * 100, "%"
+        items.append(it)
+    if not items:
+        return None
+    return KpiView(items=items, period=cur.name if prev is not None else None,
+                   prev_period=prev.name if prev is not None else None, mixed_units=len(units) > 1)
+
+
+def _kpi_long(d: Data) -> Optional[KpiView]:
+    if d.time_col is None or not d.dims:
+        return None
+    lab_j = d.dims[0]
+    m = next((x for x in d.measures if not x.change), None)
+    if m is None:
+        return None
+    ch = next((x for x in d.measures if x.change), None)
+    rows_by: dict[str, list[tuple[tuple[str, int], int]]] = {}
+    for i in d.rows_idx:
+        lab = d.text(i, lab_j)
+        t = _cell_time(d.cell(i, d.time_col))
+        if lab and t is not None:
+            rows_by.setdefault(lab, []).append((t, i))
+    if not rows_by or len(rows_by) > 6 or any(len(v) > 4 for v in rows_by.values()):
+        return None
+    items = []
+    units = set()
+    periods = sorted({t for v in rows_by.values() for t, _ in v})
+    for lab, rs in rows_by.items():
+        rs.sort()
+        i_cur = rs[-1][1]
+        vt = _value_text(d.cell(i_cur, m.j), m.unit_text)
+        if vt is None:
+            continue
+        units.add(vt[2] or "")
+        it = KpiItem(label=lab, value=vt[0], value_text=vt[1], unit=vt[2])
+        if len(rs) >= 2 and rs[-2][0] != rs[-1][0]:
+            pv = _value_text(d.cell(rs[-2][1], m.j), m.unit_text)
+            if pv is not None:
+                it.prev_text = pv[1]
+                if pv[0] and (pv[2] or "") == (vt[2] or "") and pv[0] > 0:
+                    it.change, it.change_unit = (vt[0] / pv[0] - 1) * 100, "%"
+        if ch is not None:
+            for _, i in reversed(rs):
+                cq = d.cell(i, ch.j)
+                q = parse_quantity(cq) if isinstance(cq, str) else (None if cq is None else (float(cq), ch.unit))
+                if q is not None:
+                    it.change, it.change_unit = q[0], (q[1] or ch.unit)
+                    break
+        items.append(it)
+    if not items:
+        return None
+    from verstka.data.headline import period_text
+
+    per = [period_text(_iso(g, o)) for g, o in periods[-2:]] if periods else []
+    return KpiView(items=items, period=per[-1] if per else None, prev_period=per[0] if len(per) == 2 else None,
+                   mixed_units=len(units) > 1)
+
+
+# ── справочник ────────────────────────────────────────────────────────────────────────────────────────────────────────
+def _ref_view(d: Data) -> RefView:
+    m = d.main
+    lab = d.label if d.label is not None else d.id_col
+    order = list(d.rows_idx)
+    if m is not None and m.additive and m.nonneg:
+        order.sort(key=lambda i: (-(m.values[i] if m.values[i] is not None else -math.inf), i))
+    # колонки: подпись, измерения (до 2), метрика, доля
+    cols: list[int] = []
+    if lab is not None:
+        cols.append(lab)
+    budget = 5 - len(cols) - (2 if m is not None and m.additive else 1 if m is not None else 0)
+    for j in d.dims:
+        if j != lab and budget > 0 and d.cols[j].distinct < d.n:
+            cols.append(j)
+            budget -= 1
+    if m is not None:
+        cols.append(m.j)
+    if m is None:
+        for j, c in enumerate(d.cols):
+            if j not in cols and len(cols) < 5 and c.role != "id":
+                cols.append(j)
+    cols_sorted = sorted(set(cols), key=lambda j: (j != lab, j))
+    share_added = m is not None and m.additive and m.nonneg
+    total = None
+    if m is not None and m.additive:
+        total = float(sum(m.present))
+        for i in sorted(d.totals):
+            tv = parse_number_value(d.cell(i, m.j))
+            if tv is not None and tv > 0:
+                total = tv
+                break
+    names = [d.cols[j].name + (f", {d.cols[j].unit}" if d.cols[j].unit else "") for j in cols_sorted]
+    if share_added:
+        names.append("Доля, %")
+
+    def row(i: int) -> list[str]:
+        r = [_fmt_cell(d, i, j) for j in cols_sorted]
+        if share_added:
+            v = m.values[i]  # type: ignore[union-attr]
+            r.append(fmt_num(v / total * 100, 1) if v is not None and total else "")
+        return r
+
+    all_rows = [row(i) for i in order]
+    top_n = min(TOP_N, d.n)
+    rows = all_rows[:top_n]
+    rest = None
+    top_sum = None
+    if m is not None and m.additive:
+        top_sum = float(sum(m.values[i] or 0 for i in order[:top_n]))
+    if d.n > top_n:
+        k = d.n - top_n
+        ent = phrase(d.entity) if d.entity else None
+        name = f"Остальные {k}" + (f" {(ent.gen_pl if k % 10 != 1 or k % 100 == 11 else ent.gen).lower()}"
+                                   if ent and ent.sure else "")
+        rest = [""] * len(names)
+        rest[0] = name
+        if m is not None and m.additive and total:
+            rv = total - (top_sum or 0)
+            mi = cols_sorted.index(m.j)
+            rest[mi] = fmt_num(rv)
+            if share_added:
+                rest[-1] = fmt_num(rv / total * 100, 1)
+    dropped = [c.name for j, c in enumerate(d.cols) if j not in cols_sorted and c.role != "id"]
+    return RefView(
+        label=d.cols[lab].name if lab is not None else None, columns=names, rows=rows, rest=rest, measure=m, n=d.n,
+        top_n=top_n, total=total, top_sum=top_sum, dropped=dropped, share_added=share_added, all_rows=all_rows,
+        full_columns=names,
+    )
+
+
+def _fmt_cell(d: Data, i: int, j: int) -> str:
+    v = d.cell(i, j)
+    c = d.cols[j]
+    if v is None:
+        return "—"
+    if c.type == "date" and isinstance(v, str):
+        m = re.match(r"^(\d{4})-(\d{2})-(\d{2})", v)
+        if m:
+            return f"{m.group(3)}.{m.group(2)}.{m.group(1)}"
+    if c.type == "period" and isinstance(v, str):
+        return period_label(v, "")
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return fmt_num(float(v), _decimals(v))
+    return d.text(i, j)
+
+
+def _decimals(v: float) -> int:
+    """Сколько знаков после запятой у значения, как в файле (не больше двух): 212.4 → 1, 296 → 0."""
+    f = float(v)
+    for k in (0, 1, 2):
+        if abs(round(f, k) - f) < 1e-9:
+            return k
+    return 2
+
+
+def describe_dropped(names: list[str]) -> str:
+    return join_and([lower_first(n) for n in names])
