@@ -240,7 +240,7 @@ VK WorkSpace, компактный вариант:
 | Десктопный веб | ✅ | Интерфейс для экранов от 1280 px |
 | Chrome, Firefox, Safari, Яндекс Браузер | ◐ | Проверено в Chrome. Только стандартные веб-API; анимации переходов (View Transitions) выключаются там, где их нет |
 | Открытые веса, Apache 2.0 / MIT, ≤ 35B (изображения ≤ 20B) | ✅ | Qwen3.8-27B, запасная Qwen3.6-27B, изображения — Z-Image ≈ 10B; все через Polza — [`MODELS.md`](MODELS.md). Закрытые API не используются нигде, тесты работают на `MockProvider` |
-| Инференс VK для топ-10 | ✅ | Готовый конфиг [`configs/models.vk.yaml`](configs/models.vk.yaml): меняются только адрес и ключ |
+| Инференс VK для топ-10 | ✅ | Готовый конфиг [`configs/models.vk.yaml`](configs/models.vk.yaml): включается сам, когда в `.env` есть `VK_INFERENCE_API_KEY` и `VK_PROJECT_ID` |
 | Python / TypeScript, React | ✅ | Python 3.11 + FastAPI, React 18 + TypeScript + Vite |
 
 **Документация и сдача**
@@ -483,14 +483,14 @@ POLZA_API_KEY=ваш_ключ
 
 Сохраните файл. `.env` не попадает в git, ключ остаётся только на вашей машине. Сервис читает `.env` при запуске, поэтому после изменения ключа перезапустите `verstka serve`.
 
-Для финала (топ-10) — инференс VK: строка `VERSTKA_MODELS=configs/models.vk.yaml` и переменные `VK_INFERENCE_BASE_URL`, `VK_INFERENCE_API_KEY` в `.env` (Qwen3.8-27B, одна модель); модель изображений на инференсе VK — `VK_T2I_MODEL`. Без неё в этом профиле изображения не генерируются, места под них остаются свободными. Настройки запросов, лимиты и цены — в [MODELS.md](MODELS.md#сервис-api-и-настройки).
+На финале по ТЗ обязателен инференс VK. Добавьте в `.env` ключи `VK_INFERENCE_API_KEY` и `VK_PROJECT_ID` — при них профиль VK (`configs/models.vk.yaml`, Qwen3.8-27B, одна модель) выбирается сам, ничего больше менять не нужно. Картинки — Z-Image через Polza (`POLZA_API_KEY` остаётся в `.env`), пока у VK нет своей модели изображений; если её дадут — укажите id в `VK_T2I_MODEL`. Переменная `VERSTKA_MODELS` принудительно выбирает профиль (`configs/models.vk.yaml` или `configs/models.yaml`) и важнее ключей VK. Настройки запросов, лимиты и цены — в [MODELS.md](MODELS.md#сервис-api-и-настройки).
 
 | Переменная | Что задаёт | Если не задана |
 |---|---|---|
 | `POLZA_API_KEY` | ключ Polza.ai: Qwen3.8-27B, запасная Qwen3.6-27B, изображения Z-Image | работа без моделей, места под изображения свободны |
-| `VERSTKA_MODELS` | другой конфиг моделей; финал — `configs/models.vk.yaml` | `configs/models.yaml` |
-| `VK_INFERENCE_BASE_URL`, `VK_INFERENCE_API_KEY` | инференс VK для `configs/models.vk.yaml` | модели VK выключены |
-| `VK_T2I_MODEL` | модель изображений на инференсе VK | в профиле VK изображений нет |
+| `VERSTKA_MODELS` | принудительно выбирает конфиг моделей (`configs/models.vk.yaml` или `configs/models.yaml`), важнее ключей VK | профиль выбирается по ключам: VK при обоих ключах VK, иначе `configs/models.yaml` |
+| `VK_INFERENCE_API_KEY`, `VK_PROJECT_ID` | инференс VK (финал, обязателен по ТЗ): при обоих профиль `configs/models.vk.yaml` включается сам | профиль Polza, модели VK выключены |
+| `VK_T2I_MODEL` | собственная модель изображений VK; Z-Image через Polza отвечает после неё | в профиле VK изображения рисует Z-Image через Polza |
 | `VERSTKA_WORKSPACE` | кэш разобранных шаблонов и генераций | `./workspace` |
 
 **Проверка, что модель отвечает** (около минуты):

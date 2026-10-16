@@ -28,7 +28,9 @@
 # every answer is in the prompt (json_mode false); a cut-off or invalid answer is asked again (see openai_compat). The
 # temperature is each skill's own (skills/<name>/skill.yaml params).
 #
-# The final (top-10): the same Qwen3.8-27B on VK inference — configs/models.vk.yaml (VERSTKA_MODELS in .env).
+# The final (top-10): the same Qwen3.8-27B on VK inference — configs/models.vk.yaml, mandatory by the ТЗ. This file is the
+# default only while VK_INFERENCE_API_KEY and VK_PROJECT_ID are not both set: with them the VK profile is chosen by
+# itself (verstka.providers.registry.resolve_models_profile); VERSTKA_MODELS=<path> forces either profile.
 roles:
   llm: &llm
     backend: polza

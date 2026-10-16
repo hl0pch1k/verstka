@@ -193,14 +193,38 @@ def _rpm(spec: dict, limits: ProviderLimits) -> Optional[int]:
     return limits.requests_per_minute
 
 
-def default_models_path() -> Path:
-    """models.yaml to use: $VERSTKA_MODELS (a path relative to the repository is fine) or configs/models.yaml."""
-    import os
+VK_PROFILE = "models.vk.yaml"
+_PROFILE_LOGGED: set[tuple[str, str]] = set()
 
+
+def resolve_models_profile() -> tuple[Path, str]:
+    """The models config to use and why: `(path, reason)`; reason is "env" ($VERSTKA_MODELS), "vk" (the keys of VK
+    inference are set) or "default". The ТЗ of the final makes VK inference mandatory for text and image reading, so
+    its profile (configs/models.vk.yaml) is chosen by the presence of its two variables, VK_INFERENCE_API_KEY and
+    VK_PROJECT_ID; $VERSTKA_MODELS (a path relative to the repository is fine) overrides everything; otherwise
+    configs/models.yaml (Polza). The environment is read at each call (.env is loaded into it at import)."""
     root = Path(__file__).resolve().parents[2]
-    env = os.environ.get("VERSTKA_MODELS")
+    env = (os.environ.get("VERSTKA_MODELS") or "").strip()
     if env:
         p = Path(env)
-        return p if p.is_absolute() else (root / p)
-    return root / "configs" / "models.yaml"
+        return (p if p.is_absolute() else (root / p)), "env"
+    if all((os.environ.get(name) or "").strip() for name in ("VK_INFERENCE_API_KEY", "VK_PROJECT_ID")):
+        return root / "configs" / VK_PROFILE, "vk"
+    return root / "configs" / "models.yaml", "default"
 
+
+_PROFILE_WHY = {
+    "env": "VERSTKA_MODELS is set",
+    "vk": "VK_INFERENCE_API_KEY and VK_PROJECT_ID are set",
+    "default": "no VERSTKA_MODELS and no VK keys",
+}
+
+
+def default_models_path() -> Path:
+    """models.yaml to use (see resolve_models_profile): the one function behind the provider registry, the images
+    module, the CLI and the model-status API. The choice and its reason are logged once per process (names only)."""
+    path, why = resolve_models_profile()
+    if (str(path), why) not in _PROFILE_LOGGED:
+        _PROFILE_LOGGED.add((str(path), why))
+        log.info("models profile: %s (%s)", path.name, _PROFILE_WHY[why])
+    return path

@@ -342,6 +342,79 @@ def test_the_default_config_draws_with_z_image_on_polza(monkeypatch):
         IP.reset_cache()
 
 
+def test_the_images_module_follows_the_same_profile_resolver(monkeypatch, tmp_path):
+    """load_image_provider() without a path asks registry.default_models_path(), the one function that picks
+    $VERSTKA_MODELS, the VK profile (both VK variables) or configs/models.yaml."""
+    from verstka.providers import registry as R
+
+    mine = tmp_path / "mine.yaml"
+    mine.write_text("roles:\n  t2i: {backend: mock, model: m, label: Mine}\nlimits: {}\n", encoding="utf-8")
+    seen: list[str] = []
+    real = R.default_models_path
+    monkeypatch.setattr(R, "default_models_path", lambda: (seen.append("asked"), mine)[1])
+    IP.reset_cache()
+    try:
+        assert [lk.label for lk in IP.load_image_provider().links] == ["Mine"] and seen == ["asked"]
+    finally:
+        IP.reset_cache()
+    monkeypatch.setattr(R, "default_models_path", real)  # the real resolver again, driven by the environment alone
+    monkeypatch.setenv("POLZA_API_KEY", "pza_test")
+    monkeypatch.delenv("VERSTKA_MODELS", raising=False)
+    monkeypatch.setenv("VK_INFERENCE_API_KEY", "vk-test")
+    monkeypatch.setenv("VK_PROJECT_ID", "PRJ-test")
+    IP.reset_cache()
+    try:
+        vk_chain = IP.load_image_provider()
+        assert vk_chain is IP.load_image_provider(R.default_models_path())  # the cache is keyed by that very file
+        assert R.default_models_path().name == "models.vk.yaml"
+        monkeypatch.setenv("VERSTKA_MODELS", "configs/models.yaml")
+        assert IP.load_image_provider() is not vk_chain and R.default_models_path().name == "models.yaml"
+    finally:
+        IP.reset_cache()
+
+
+def test_the_vk_profile_draws_with_z_image_on_polza(monkeypatch):
+    """VK inference has no text-to-image model: the VK profile's t2i role is the same Z-Image on Polza as the default
+    profile's; without POLZA_API_KEY it is off; VK_T2I_MODEL puts VK's own model first, Z-Image answering behind it."""
+    from pathlib import Path
+
+    vk = Path(__file__).resolve().parents[2] / "configs" / "models.vk.yaml"
+    default = Path(__file__).resolve().parents[2] / "configs" / "models.yaml"
+    monkeypatch.setenv("VK_INFERENCE_API_KEY", "vk-test")
+    monkeypatch.setenv("VK_PROJECT_ID", "PRJ-test")
+    monkeypatch.setenv("POLZA_API_KEY", "pza_test")
+    IP.reset_cache()
+    try:
+        chain = IP.load_image_provider(vk)
+        live = [lk for lk in chain.links if not lk.off]
+        assert len(live) == 1 and not chain.off
+        z = live[0]
+        assert (z.name, z.model, z.label, z.base_url, z.api_key, z.timeout_s) == ("polza_media", "tongyi-mai/z-image", "Z-Image", "https://polza.ai/api/v1", "pza_test", 90.0)
+        ref = IP.load_image_provider(default).links[0]  # the very link of the default profile
+        assert (ref.name, ref.model, ref.label, ref.base_url, ref.timeout_s) == (z.name, z.model, z.label, z.base_url, z.timeout_s)
+        assert [d["state"] for d in chain.describe()] == ["off", "ready"]  # VK_T2I_MODEL unset: VK's own link is never asked
+        with pytest.raises(IP.ImageError, match="no API key or model"):
+            chain.links[0]._post("https://example.invalid/x", {}, None)
+    finally:
+        IP.reset_cache()
+    # no Polza key: no pictures, as before (the slides keep their free places)
+    monkeypatch.delenv("POLZA_API_KEY")
+    try:
+        assert IP.load_image_provider(vk).off
+    finally:
+        IP.reset_cache()
+    # VK offers its own model: its link is asked first, on the same endpoint with the project header; Z-Image is behind it
+    monkeypatch.setenv("POLZA_API_KEY", "pza_test")
+    monkeypatch.setenv("VK_T2I_MODEL", "open-t2i-model")
+    try:
+        first, second = IP.load_image_provider(vk).links
+        assert (first.name, first.model, first.off) == ("openai_images", "open-t2i-model", False)
+        assert first.base_url.endswith("/inference-providers-router/00000000-0000-0000-0000-000000000001/v1") and first.api_key == "vk-test"
+        assert first.headers == {"Project-ID": "PRJ-test"} and (second.name, second.model, second.off) == ("polza_media", "tongyi-mai/z-image", False)
+    finally:
+        IP.reset_cache()
+
+
 def test_nearest_aspect():
     assert IP.nearest_aspect(1600, 900) == "16:9"
     assert IP.nearest_aspect(900, 1200) == "3:4"

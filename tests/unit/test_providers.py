@@ -1,10 +1,12 @@
+from pathlib import Path
+
 import pytest
 from pydantic import BaseModel
 
 from verstka.providers.base import ChatMessage, ProviderError
 from verstka.providers.mock import MockProvider
 from verstka.providers.openai_compat import extract_json, to_openai_messages
-from verstka.providers.registry import ProviderRegistry, expand_env
+from verstka.providers.registry import ProviderRegistry, default_models_path, expand_env, resolve_models_profile
 
 
 class Out(BaseModel):
@@ -186,3 +188,58 @@ def test_upstream_congestion_fails_fast_instead_of_waiting_out_the_budget(monkey
     assert not oc._rate_limit_info(RuntimeError("Error code: 429 - Достигнут минутный лимит запросов к модели")).upstream
     assert oc.status.blocked(p.health)[0] == "congested"  # the breaker is per (account, model) now
     oc.status.reset()
+
+
+# ---------------------------------------------------------------------------------------------- the profile choice
+
+_REPO = Path(__file__).resolve().parents[2]
+
+
+def test_the_models_profile_is_chosen_env_then_vk_keys_then_default(monkeypatch):
+    """$VERSTKA_MODELS > both VK variables set > configs/models.yaml. The final's ТЗ makes VK inference mandatory, so the
+    keys alone switch the profile; nothing is read from the files, only the environment."""
+    for name in ("VERSTKA_MODELS", "VK_INFERENCE_API_KEY", "VK_PROJECT_ID"):
+        monkeypatch.delenv(name, raising=False)
+    default, vk = _REPO / "configs" / "models.yaml", _REPO / "configs" / "models.vk.yaml"
+    assert resolve_models_profile() == (default, "default") and default_models_path() == default
+    # one of the two variables is not enough, an empty or blank one counts as unset
+    monkeypatch.setenv("VK_INFERENCE_API_KEY", "vk-test-key")
+    assert resolve_models_profile() == (default, "default")
+    monkeypatch.setenv("VK_PROJECT_ID", "")
+    assert resolve_models_profile() == (default, "default")
+    monkeypatch.setenv("VK_PROJECT_ID", "   ")
+    assert resolve_models_profile() == (default, "default")
+    monkeypatch.delenv("VK_INFERENCE_API_KEY")
+    monkeypatch.setenv("VK_PROJECT_ID", "PRJ-test")
+    assert resolve_models_profile() == (default, "default")
+    # both: the VK profile
+    monkeypatch.setenv("VK_INFERENCE_API_KEY", "vk-test-key")
+    assert resolve_models_profile() == (vk, "vk") and default_models_path() == vk and vk.is_file()
+    # VERSTKA_MODELS wins over the keys: a path relative to the repository, an absolute one, and back to Polza by hand
+    monkeypatch.setenv("VERSTKA_MODELS", "configs/models.yaml")
+    assert resolve_models_profile() == (default, "env")
+    monkeypatch.setenv("VERSTKA_MODELS", "/somewhere/else.yaml")
+    assert resolve_models_profile() == (Path("/somewhere/else.yaml"), "env")
+    monkeypatch.setenv("VERSTKA_MODELS", "")  # an empty variable is not a choice
+    assert resolve_models_profile() == (vk, "vk")
+
+
+def test_the_models_profile_is_logged_once_with_its_reason_and_no_secret(monkeypatch, caplog):
+    from verstka.providers import registry as R
+
+    monkeypatch.setattr(R, "_PROFILE_LOGGED", set())
+    monkeypatch.delenv("VERSTKA_MODELS", raising=False)
+    monkeypatch.setenv("VK_INFERENCE_API_KEY", "vk-secret-value-123")
+    monkeypatch.setenv("VK_PROJECT_ID", "PRJ-secret-project")
+    with caplog.at_level("INFO", logger="verstka.providers.registry"):
+        for _ in range(3):
+            default_models_path()
+    lines = [r.getMessage() for r in caplog.records if "models profile" in r.getMessage()]
+    assert lines == ["models profile: models.vk.yaml (VK_INFERENCE_API_KEY and VK_PROJECT_ID are set)"]
+    assert "secret" not in caplog.text
+    caplog.clear()
+    monkeypatch.setenv("VERSTKA_MODELS", "configs/models.yaml")  # another choice is another line
+    with caplog.at_level("INFO", logger="verstka.providers.registry"):
+        default_models_path()
+        default_models_path()
+    assert [r.getMessage() for r in caplog.records if "models profile" in r.getMessage()] == ["models profile: models.yaml (VERSTKA_MODELS is set)"]

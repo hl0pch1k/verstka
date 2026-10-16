@@ -386,6 +386,7 @@ def test_the_vk_config_switches_thinking_off():
         assert spec["extra_body"]["chat_template_kwargs"]["enable_thinking"] is False
         assert spec["system_suffix"] == "/no_think"
     assert cfg["limits"]["max_concurrency"] == 8
+    assert cfg["limits"]["time_budget_s"] == 210  # the Polza profile's model time per generation
 
 
 def test_the_manifest_counts_every_request_and_token():

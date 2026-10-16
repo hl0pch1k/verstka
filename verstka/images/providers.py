@@ -546,8 +546,9 @@ _CACHE_LOCK = threading.Lock()
 
 
 def load_image_provider(path: Optional[Path | str] = None) -> Optional[ImageChain]:
-    """The `t2i` role of the models config (default: configs/models.yaml or $VERSTKA_MODELS), cached per file — the
-    links' holds live as long as the server. None when the config has no t2i role."""
+    """The `t2i` role of the models config (default: the profile verstka.providers.registry.default_models_path()
+    picks — $VERSTKA_MODELS, else configs/models.vk.yaml with the VK keys set, else configs/models.yaml), cached per
+    file — the links' holds live as long as the server. None when the config has no t2i role."""
     import yaml
 
     from verstka.providers.registry import default_models_path, expand_env

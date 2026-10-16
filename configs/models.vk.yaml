@@ -1,9 +1,12 @@
 # Final stage (top-10): the main model, Qwen3.8-27B (fp8, id qwen38-27b-fp8), served by VK inference (organisers'
 # quickstart 16.10: OpenAI-compatible, key in VK_INFERENCE_API_KEY, header «Project-ID» from VK_PROJECT_ID) — the ТЗ makes VK inference mandatory for
-# the top-10 (the organisers: for every model component). Only the endpoint and key change; no other models, no fallback chain: one model.
+# text and image reading in the top-10 (the organisers: for every model component). One model, no fallback chain.
 # A single model: up to 3 attempts with backoff; a 429 of the hosts gets a short pause and one more try (two in a row:
 # the model is skipped for 2 minutes); per-minute caps are waited out; a 402 / 401 / 403 / 404 is reported after the
-# attempts and the model is skipped for at most 1 minute. Switch to it with VERSTKA_MODELS=configs/models.vk.yaml.
+# attempts and the model is skipped for at most 1 minute.
+#
+# This is the DEFAULT profile whenever VK_INFERENCE_API_KEY and VK_PROJECT_ID are both set (.env or the environment):
+# verstka.providers.registry.resolve_models_profile(). $VERSTKA_MODELS=<path> overrides the choice either way.
 roles:
   llm:
     backend: openai_compat
@@ -32,18 +35,29 @@ roles:
     extra_body:
       chat_template_kwargs: { enable_thinking: false }
     system_suffix: "/no_think"
-  # Pictures (star task) on VK inference when it serves an open text-to-image model (≤ 20B, Apache 2.0 / MIT) through
-  # the OpenAI-compatible POST /images/generations; the model id is the host's. Without VK_T2I_MODEL the link is off
-  # and the slides keep their free places.
+  # Pictures (star task). VK inference serves no text-to-image model (as of 16.10), so the pictures are drawn by the same
+  # Z-Image on Polza as in configs/models.yaml (Apache 2.0, ≈ 10B; POLZA_API_KEY; without it the role is off and the
+  # slides keep their free places). When VK does provide an open text-to-image model, name it in VK_T2I_MODEL: the
+  # first link (POST /images/generations on the same endpoint) is then asked first and Z-Image answers when it cannot;
+  # with VK_T2I_MODEL empty that link is off and never asked.
   t2i:
-    backend: openai_images
-    model: ${VK_T2I_MODEL}
-    label: Text-to-image (VK)
-    base_url: ${VK_INFERENCE_BASE_URL}
-    api_key: ${VK_INFERENCE_API_KEY}
-    timeout_s: 120
+    chain:
+      - backend: openai_images
+        model: ${VK_T2I_MODEL}
+        label: Text-to-image (VK)
+        base_url: https://ai-demo.platformpreview.ru/api/inference-providers-router/00000000-0000-0000-0000-000000000001/v1
+        api_key: ${VK_INFERENCE_API_KEY}
+        headers: { Project-ID: "${VK_PROJECT_ID}" }
+        timeout_s: 120
+      - backend: polza_media
+        base_url: https://polza.ai/api/v1
+        api_key: ${POLZA_API_KEY}
+        model: tongyi-mai/z-image
+        label: Z-Image
+        timeout_s: 90
 limits:
   # measured 16.10: 16 parallel requests in 5.2 s with no refusals (text 1.6–3.7 s, an image 1.6 s)
   max_concurrency: 8
   timeout_s: 180
   max_attempts: 3
+  time_budget_s: 210  # model time per generation; past it the deterministic steps take over (as in configs/models.yaml)

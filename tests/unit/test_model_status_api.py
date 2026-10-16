@@ -500,6 +500,26 @@ def test_status_of_the_shipped_polza_chain(api, monkeypatch):
     assert st["state"] == "unknown" and st["summary"] == "Qwen3.8-27B · доступна" and st["retryable"] is True and st["owner"] is None
 
 
+def test_status_shows_the_vk_profile_chosen_by_the_vk_keys(api, monkeypatch):
+    """Both VK variables in the environment switch the server to configs/models.vk.yaml by themselves; the status names
+    that config and its one model, never a key or the project id."""
+    c, mod = api
+    monkeypatch.setenv("VK_INFERENCE_API_KEY", "vk-test-key-status-000001")
+    monkeypatch.setenv("VK_PROJECT_ID", "PRJ-test-status-000001")
+    monkeypatch.setattr(mod, "_providers", None)
+    r = c.get("/api/models/status")
+    st = r.json()
+    assert st["configured"] is True and st["config"] == "configs/models.vk.yaml" and st["source"] == "status"
+    assert [(link["model"], link["label"], link["host"], link["roles"]) for link in st["links"]] == [("qwen38-27b-fp8", "Qwen3.8-27B (VK)", "ai-demo.platformpreview.ru", ["llm"])]
+    assert st["active_model"] == "qwen38-27b-fp8" and st["host"] == "ai-demo.platformpreview.ru" and st["active_model_label"].startswith("Qwen3.8-27B")
+    assert "test-key-status" not in r.text and "PRJ-test-status" not in r.text
+    # the same server forced back to Polza by VERSTKA_MODELS
+    monkeypatch.setenv("VERSTKA_MODELS", "configs/models.yaml")
+    monkeypatch.setenv("POLZA_API_KEY", "test-key-forced-polza")
+    monkeypatch.setattr(mod, "_providers", None)
+    assert c.get("/api/models/status").json()["config"] == "configs/models.yaml"
+
+
 def test_status_uses_the_fallback_chain_snapshot(api, monkeypatch):
     c, mod = api
     monkeypatch.setattr(mod, "_providers", _polza_registry())

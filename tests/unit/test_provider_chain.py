@@ -18,6 +18,7 @@ from types import SimpleNamespace
 import httpx
 import openai
 import pytest
+import yaml
 from pydantic import BaseModel
 
 from verstka.providers import openai_compat as oc
@@ -1596,6 +1597,9 @@ def test_the_ui_names_each_failed_link_by_its_label(config_env, sleeps, caplog):
 def test_the_vk_config_is_one_model_on_vk_inference(vk_env):
     vk = ProviderRegistry.from_yaml(VK_CONFIG)
     assert sorted(vk.roles) == ["llm", "vlm"] and vk.limits.timeout_s == 180
+    # every limit the Polza profile sets is set here too (the VK profile may only differ in its values)
+    assert vk.limits.time_budget_s == ProviderRegistry.from_yaml(DEFAULT).limits.time_budget_s == 210 and vk.limits.max_concurrency == 8
+    assert set(yaml.safe_load(DEFAULT.read_text(encoding="utf-8"))["limits"]) <= set(yaml.safe_load(VK_CONFIG.read_text(encoding="utf-8"))["limits"])
     for role in ("llm", "vlm"):
         p = vk.get(role)
         assert isinstance(p, oc.OpenAICompatProvider) and p.name == "openai_compat" and p.model == VK_FINAL_MODEL  # one model, no chain
