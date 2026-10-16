@@ -38,7 +38,7 @@ from typing import Callable, Optional
 
 from lxml import etree
 
-from verstka.brand.logos import add_logos, find_template_logos, load_logo, logo_path, replace_logos
+from verstka.brand.logos import brand_logos, find_template_logos, find_text_logos, load_logo, logo_path
 from verstka.brand.package import A, C, P, Package
 from verstka.brand.palette import (
     SRGB,
@@ -60,7 +60,7 @@ from verstka.schemas.template import TemplateManifest
 log = logging.getLogger(__name__)
 
 # версия правил применения: меняется — старые копии в кэше не используются
-APPLY_VERSION = "5"
+APPLY_VERSION = "6"
 BRAND_FILE = "brand.json"
 
 _LATIN = f"{{{A}}}latin"
@@ -380,9 +380,12 @@ class ApplyResult:
     logos_added: int = 0  # картинок логотипа бренда: на слайдах и макетах
     logo_layouts: int = 0  # из них на макетах (их получат и новые слайды, собранные по макету)
     logo_samples: int = 0  # содержательных образцов шаблона
-    logo_covered: int = 0  # из них с добавленным логотипом бренда (на самом слайде или на его макете)
+    logo_covered: int = 0  # из них с логотипом бренда (добавленным, перенесённым или заменённым на месте)
     logo_place: Optional[str] = None  # brand — угол из брендбука, brand_edge — у того же угла, fallback — у другого
     logo_where: Optional[str] = None  # то же словами: «в углу из брендбука», «в правом верхнем углу: …»
+    # логотип шаблона в другом углу, чем велит брендбук: «в шаблоне слева внизу, по брендбуку — справа внизу;
+    # поставлен справа внизу» (или «оставлен слева внизу: угол из брендбука занят»)
+    logo_note: Optional[str] = None
     refit: int = 0  # строк образцов, подогнанных после смены шрифта
     warnings: list[str] = field(default_factory=list)
 
@@ -465,17 +468,21 @@ def apply_brand(
     # логотипы
     bdir = resolve_brand_dir(brand, brand_dir)
     images = [im for im in (load_logo(lg, bdir) for lg in brand.logos) if im is not None]
-    if brand.logos and not images:
-        res.warnings.append("Файлы логотипов брендбука не найдены — логотипы шаблона оставлены.")
-    slots = package_theme(pkg).slots or plan.theme.slots
-    lockups = find_template_logos(pkg, manifest, slots)
-    if lockups:
-        if priority == "brand" and images:
-            res.logos_replaced, res.logos_removed = replace_logos(pkg, lockups, images, brand.name, res.warnings, brand.logo_place)
-    elif images:
-        rep = add_logos(pkg, manifest, brand, images, res.warnings, src)
-        res.logos_added, res.logo_samples, res.logo_covered = rep.added, rep.samples, rep.covered
-        res.logo_layouts, res.logo_place, res.logo_where = rep.layouts, rep.place, rep.where
+    theme = package_theme(pkg)
+    slots = theme.slots or plan.theme.slots
+    fonts_pair = (theme.major or plan.theme.major or "", theme.minor or plan.theme.minor or "")
+    if priority == "brand" and images:
+        out_logos = brand_logos(pkg, manifest, brand, images, res.warnings, src, slots, fonts_pair)
+        res.logos_replaced, res.logos_removed = out_logos.replaced, out_logos.removed
+        rep = out_logos.add
+        res.logos_added, res.logo_layouts, res.logo_place, res.logo_where = rep.added, rep.layouts, rep.place, rep.where
+        res.logo_samples, res.logo_covered, res.logo_note = out_logos.samples, out_logos.covered, out_logos.note
+    elif not images:
+        has_own = bool(find_template_logos(pkg, manifest, slots) or find_text_logos(pkg, manifest, fonts_pair, src))
+        if brand.logos:
+            res.warnings.append("Файлы логотипов брендбука не найдены — " + ("логотип шаблона оставлен." if has_own else "логотип бренда не поставлен."))
+        elif brand.logo_place or has_own:
+            res.warnings.append("В брендбуке нет файлов логотипа — " + ("логотип шаблона оставлен." if has_own else "логотип бренда не поставлен."))
 
     res.colors = {f"#{a}": f"#{b}" for (a, b) in sorted(colors)}
     res.font_swaps = {a: b for (a, b) in sorted(fonts)}

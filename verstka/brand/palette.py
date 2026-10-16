@@ -387,6 +387,7 @@ class ColorPlan:
     chart_order: list[str] = field(default_factory=list)  # цвета диаграмм бренда по порядку (основной первым)
     brand_accents: set[str] = field(default_factory=set)  # «акцент» бренда — не раньше остальных цветов диаграмм
     link: Optional[str] = None  # цвет ссылок бренда — основной
+    danger: Optional[str] = None  # цвет ошибки бренда (роль danger), если он есть
     warnings: list[str] = field(default_factory=list)
     _cache: dict[str, str] = field(default_factory=dict, repr=False)
 
@@ -405,6 +406,8 @@ class ColorPlan:
         if h in self.keep:
             return h
         t = tone(h)
+        if t == "chromatic" and self.danger and status_red(h):
+            return self.danger  # красный ошибки и падения — цвет ошибки бренда
         if t == "chromatic" and self.anchors:
             # тот же цвет, чуть иначе записанный (#007DEA при #0187F6, маркер списка #FD0C50 при #FF0053); другой
             # насыщенный цвет, которого нет в палитре разбора (жёлтый рядом с оранжевым), остаётся как был
@@ -425,6 +428,8 @@ class ColorPlan:
         h = self.map(value)
         if h != value.upper() or not self.enabled or not self.anchors or h in self.keep or tone(h) != "chromatic":
             return h
+        if status_red(h):
+            return self.danger or h  # смысловой красный (ошибка, падение) — не в синий бренда
         plain = [c for c in self.chart_order if c not in self.brand_accents] or self.chart_order
         if not plain:
             return h
@@ -451,6 +456,16 @@ class ColorPlan:
         if target or was:
             self.kept_target[h] = target or was  # type: ignore[assignment]
         self._cache.clear()
+
+
+def status_red(h: str) -> bool:
+    """Красный «ошибки и падения» (тон 350–15°, насыщенный, средней светлоты): так шаблон отмечает отрицательное;
+    розово-малиновый фирменный акцент (ЛЦТ #FF0053, 340°) — не он."""
+    h = (h or "").upper()
+    if not re.fullmatch(r"[0-9A-F]{6}", h) or tone(h) != "chromatic":
+        return False
+    hu = hue(h)
+    return (hu >= 350 or hu <= 15) and lab_chroma(h) >= 30 and 30 <= lightness(h) <= 70
 
 
 def _brand_hex(brand: BrandSpec, role: str) -> Optional[str]:
@@ -551,13 +566,19 @@ def plan_colors(
     plan.chart_order = brand_chart_order(brand)
     plan.brand_accents = {h for h, r in chrom if r == "accent"}
     stock = theme.stock if theme.slots else False
-    # слоты стандартной темы — места, которые автор шаблона не заполнял: бренд занимает их по порядку диаграмм
+    plan.danger = _brand_hex(brand, "danger")
+    # слоты стандартной темы — места, которые автор шаблона не заполнял: бренд занимает их по порядку диаграмм;
+    # красный слот (ошибка, отрицательное значение) — цвет ошибки бренда, а без него остаётся красным
     plain_order = [h for h in plan.chart_order if h not in plan.brand_accents] or plan.chart_order
     if stock and plain_order:
         k = 0
         for s in ACCENT_SLOTS:
             v = theme.slots.get(s)
             if v and tone(v) == "chromatic":
+                if status_red(v):
+                    if plan.danger:
+                        plan.stock_slots[s] = plan.danger
+                    continue
                 plan.stock_slots[s] = plain_order[k % len(plain_order)]
                 k += 1
     plan.main = main_palette(manifest, theme)
@@ -615,6 +636,8 @@ def plan_colors(
         b = _brand_hex(brand, "success" if t.semantic == "positive" else "danger")
         if b:
             plan.table.setdefault(h, b)
+        elif t.semantic == "negative" and status_red(h) and h != (plan.main[0] if plan.main else None):
+            plan.kept(h, "semantic")  # красный «падения» без пары в брендбуке остаётся красным, а не синим бренда
         elif h in theme_vals or h in plan.main or h in series:
             semantic_mapped.append(h)  # фирменный цвет шаблона, а не только «падение» — его заменяет бренд
         else:
@@ -627,6 +650,13 @@ def plan_colors(
         hl = theme.slots.get(slot)
         if hl and tone(hl) == "chromatic":
             palette.append(hl)
+    main0 = plan.main[0] if plan.main else None
+    for h in dict.fromkeys(palette):
+        if status_red(h) and h != main0 and h not in plan.table and h not in plan.keep:
+            if plan.danger:
+                plan.table[h] = plan.danger
+            else:
+                plan.kept(h, "semantic")  # красный акцент темы — цвет ошибки и падения; пары в брендбуке нет
     plan.palette = [p for p in dict.fromkeys(palette) if p not in plan.keep and p not in plan.table]
     if not chrom:
         for a in plan.main:

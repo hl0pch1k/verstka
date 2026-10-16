@@ -24,7 +24,7 @@ import re
 import shutil
 import subprocess
 from collections import Counter, OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Optional
 
@@ -518,6 +518,175 @@ def find_template_logos(pkg: Package, manifest: Optional[TemplateManifest] = Non
             dup = any(lk.part == part and _iou(lk.box, box) >= 0.9 for lk in lockups)
             lockups.append(Lockup(part=part, pics=group, box=box, ground=_ground_of_lockup(pkg, group, slots), duplicate=dup))
     return lockups
+
+
+# ---------------------------------------------------------------------------------- словесный логотип из текста
+
+_GENERIC_WORDS = {"deck", "pitch", "template", "templates", "presentation", "slides", "slide", "theme", "source", "шаблон",
+                  "шаблона", "презентация", "презентации", "слайды", "тема"}
+_DOMAIN_RE = re.compile(r"\.[a-zа-яё]{2,}$", re.I)
+_NOT_WORDMARK_RE = re.compile(r"\d{3,}|\d+\s*[:/.]\s*\d+|[%₽$€]")  # год, время, дата, число, сумма
+
+
+@dataclass
+class TextLockup:
+    """Словесный логотип шаблона на одной части: короткая надпись («mybrand.») и знак рядом (кружок, точка, группа
+    фигур), без картинки."""
+
+    part: str
+    els: list[etree._Element]  # надпись первой, затем знак
+    box: Box  # надпись (где стоят её буквы) и знак вместе
+    text: str
+    by_name: bool  # надпись — имя самого шаблона
+
+    @property
+    def duplicate(self) -> bool:
+        return False
+
+
+def _norm_word(s: str) -> str:
+    return re.sub(r"[^0-9a-zа-яё]", "", (s or "").lower())
+
+
+def _name_forms(manifest: Optional[TemplateManifest], src: Optional[Path | str] = None) -> set[str]:
+    """Имя шаблона во всех видах: файл («MyBrand_Pitch_Deck» → mybrandpitchdeck, mybrand) и название в рабочей папке
+    (`title.txt` рядом с `source.pptx`, без « · брендбук …»). Заголовки обложек — нет: это подсказки образца
+    («Название презентации»), а не имя."""
+    names: list[str] = []
+    if manifest is not None:
+        names.append(PurePosixPath(manifest.source_file or "").stem)
+    if src is not None:
+        title = Path(src).parent / "title.txt"
+        try:
+            names.append(title.read_text(encoding="utf-8").strip().splitlines()[0].split(" · ")[0])
+        except (OSError, IndexError):
+            pass
+    out: set[str] = set()
+    for name in names:
+        words = [w for w in re.split(r"[\s_\-·|,:]+", name or "") if w]
+        full = _norm_word("".join(words))
+        if len(full) >= 4:
+            out.add(full)
+        for k, w in enumerate(words):
+            n = _norm_word(w)
+            if len(n) >= 4 and n not in _GENERIC_WORDS and k < 2:
+                out.add(n)
+        if len(words) >= 2 and words[1].lower() not in _GENERIC_WORDS:
+            out.add(_norm_word(words[0] + words[1]))
+    return {f for f in out if f not in _GENERIC_WORDS}
+
+
+def _text_ink(pkg: Package, sp: etree._Element, fonts: tuple[str, str]) -> Optional[tuple[Box, str]]:
+    """(где стоят буквы, текст) короткой надписи в одну строку: отступы рамки и абзаца, выравнивание, кегль и шрифт
+    первой строки; None — не надпись в одну строку."""
+    body = sp.find(f"{{{P}}}txBody")
+    b = shape_box(sp)
+    if body is None or not b or b[2] <= 0 or b[3] <= 0:
+        return None
+    paras = [p for p in body.findall(f"{{{A}}}p") if "".join(t.text or "" for t in p.iter(f"{{{A}}}t")).strip()]
+    if len(paras) != 1:
+        return None
+    p = paras[0]
+    text = "".join(t.text or "" for t in p.iter(f"{{{A}}}t")).strip()
+    bp = body.find(f"{{{A}}}bodyPr")
+
+    def num(el, name: str, default: int) -> int:
+        v = el.get(name) if el is not None else None
+        return int(v) if v is not None and v.lstrip("-").isdigit() else default
+
+    l_ins, t_ins, r_ins = num(bp, "lIns", 91440), num(bp, "tIns", 45720), num(bp, "rIns", 91440)
+    ppr = p.find(f"{{{A}}}pPr")
+    lvl = body.find(f"{{{A}}}lstStyle/{{{A}}}lvl1pPr")
+    mar = num(ppr, "marL", num(lvl, "marL", 0)) + num(ppr, "indent", num(lvl, "indent", 0))
+    algn = (ppr.get("algn") if ppr is not None else None) or (lvl.get("algn") if lvl is not None else None) or "l"
+    rpr = next((r for r in p.iter(f"{{{A}}}rPr") if r.get("sz")), None)
+    size = int(rpr.get("sz")) / 100.0 if rpr is not None else 18.0
+    lat = next((r.find(f"{{{A}}}latin") for r in p.iter(f"{{{A}}}rPr") if r.find(f"{{{A}}}latin") is not None), None)
+    ph = sp.find(f"{{{P}}}nvSpPr/{{{P}}}nvPr/{{{P}}}ph")
+    head = ph is not None and (ph.get("type") or "") in ("title", "ctrTitle")
+    family = (lat.get("typeface") if lat is not None else None) or (fonts[0] if head else fonts[1]) or "Arial"
+    if family.startswith("+mj"):
+        family = fonts[0] or "Arial"
+    elif family.startswith("+mn"):
+        family = fonts[1] or "Arial"
+    try:
+        from verstka.rendering.fonts import text_width_pt
+
+        w = text_width_pt(text, family, size) * 12700
+    except Exception:  # noqa: BLE001
+        w = 0.55 * size * len(text) * 12700
+    h = 1.2 * size * 12700
+    x0, inner = b[0] + l_ins + max(mar, 0), b[2] - l_ins - r_ins - max(mar, 0)
+    w = min(w, max(inner, 1))
+    x = x0 + (inner - w if algn == "r" else ((inner - w) / 2 if algn == "ctr" else 0))
+    anchor = (bp.get("anchor") if bp is not None else None) or "t"
+    y = b[1] + t_ins if anchor == "t" else (b[1] + b[3] - num(bp, "bIns", 45720) - h if anchor == "b" else b[1] + (b[3] - h) / 2)
+    return (x, y, w, h), text
+
+
+def _mark_of(tree: etree._Element, text_el: etree._Element, ink: Box, sw: float, sh: float) -> list[etree._Element]:
+    """Знак словесного логотипа: небольшая фигура, группа или картинка без текста вплотную к надписи на её строке."""
+    x, y, w, h = ink
+    out = []
+    for el in tree:
+        if el is text_el or etree.QName(el).localname not in ("sp", "pic", "grpSp"):
+            continue
+        if any((t.text or "").strip() for t in el.iter(f"{{{A}}}t")):
+            continue
+        b = shape_box(el)
+        if not b or b[2] <= 0 or b[3] <= 0 or b[2] > 3 * h or b[3] > 3 * h or b[2] * b[3] > 0.02 * sw * sh:
+            continue
+        inter = max(0.0, min(y + h, b[1] + b[3]) - max(y, b[1]))
+        gap = max(b[0] - (x + w), x - (b[0] + b[2]), 0.0)
+        if inter >= 0.5 * min(h, b[3]) and gap <= 1.5 * h:
+            out.append(el)
+    return out
+
+
+def find_text_logos(pkg: Package, manifest: Optional[TemplateManifest] = None, fonts: tuple[str, str] = ("", ""), src: Optional[Path | str] = None) -> list[TextLockup]:
+    """Словесные логотипы шаблона без картинки: короткая надпись (до трёх слов, не число, не дата, не адрес сайта) в
+    углу слайда, макета или мастера — имя самого шаблона («mybrand.» у «MyBrand Pitch Deck»), или надпись строчными
+    со знаком рядом, повторённая хотя бы на трёх частях."""
+    sw, sh = pkg.slide_size()
+    forms = _name_forms(manifest, src)
+    cands: list[tuple[str, etree._Element, Box, str, bool, list]] = []
+    for part in sorted(n for n in pkg.names() if _LOGO_PART_RE.match(n)):
+        root = pkg.xml(part)
+        tree = root.find(f"{{{P}}}cSld/{{{P}}}spTree") if root is not None else None
+        if tree is None:
+            continue
+        for el in tree:
+            if etree.QName(el).localname != "sp":
+                continue
+            ph = el.find(f"{{{P}}}nvSpPr/{{{P}}}nvPr/{{{P}}}ph")
+            if ph is not None and (ph.get("type") or "body") in ("sldNum", "dt", "ftr"):
+                continue
+            xfrm = el.find(f"{{{P}}}spPr/{{{A}}}xfrm")
+            if xfrm is not None and (xfrm.get("rot") or "0") not in ("0", "") or (el.find(f"{{{P}}}txBody/{{{A}}}bodyPr") is not None and (el.find(f"{{{P}}}txBody/{{{A}}}bodyPr").get("vert") or "horz") != "horz"):
+                continue  # подпись вдоль края (повёрнутая, вертикальная) — не логотип
+            got = _text_ink(pkg, el, fonts)
+            if got is None:
+                continue
+            ink, text = got
+            if len(text) > 24 or len(text.split()) > 3 or _DOMAIN_RE.search(text) or _NOT_WORDMARK_RE.search(text) or not re.search(r"[A-Za-zА-Яа-яЁё]", text):
+                continue
+            x, y, w, h = ink
+            cx, cy = x + w / 2, y + h / 2
+            if w > 0.35 * sw or h > 0.15 * sh or 0.3 * sh < cy < 0.7 * sh or 0.4 * sw < cx < 0.6 * sw:
+                continue  # не в углу
+            by_name = _norm_word(text) in forms
+            lower = text == text.lower()
+            if not (by_name or lower):
+                continue
+            cands.append((part, el, ink, text, by_name, _mark_of(tree, el, ink, sw, sh)))
+    seen: Counter = Counter(_norm_word(c[3]) for c in cands)
+    out: list[TextLockup] = []
+    for part, el, ink, text, by_name, marks in cands:
+        if not (by_name or (marks and seen[_norm_word(text)] >= 3)):
+            continue
+        box = _union([ink] + [shape_box(m) for m in marks])
+        out.append(TextLockup(part=part, els=[el] + marks, box=box, text=text, by_name=by_name))
+    return out
 
 
 _HAS_LOGO: dict[tuple, bool] = {}
@@ -1322,20 +1491,53 @@ def _place_pic(pkg: Package, part: str, media: Media, img: BrandImage, box: Box,
 class AddReport:
     added: int = 0  # картинок логотипа (на макетах, в том числе без образцов, и на слайдах)
     layouts: int = 0  # из них на макетах
-    samples: int = 0  # содержательных образцов
+    samples: int = 0  # содержательных образцов (без тех, где логотип уже есть)
     covered: int = 0  # из них с логотипом
+    shown: int = 0  # содержательных образцов, где логотип бренда уже стоит (логотип шаблона, заменённый на месте)
     place: Optional[str] = None  # brand — в углу брендбука, brand_edge — у того же угла, fallback — у другого
     where: Optional[str] = None  # то же словами
+    placed: set = field(default_factory=set)  # части, получившие логотип (макеты и слайды)
+    split: dict = field(default_factory=dict)  # макет с логотипом шаблона → номера его слайдов, где угол брендбука занят
+    box: Optional[Box] = None  # выбранное место
+    corner: Optional[str] = None
+    kind: Optional[str] = None
 
 
-def add_logos(pkg: Package, manifest: TemplateManifest, brand: BrandSpec, images: list[BrandImage], warnings: list[str], src: Path | str) -> AddReport:
+def add_logos(
+    pkg: Package,
+    manifest: TemplateManifest,
+    brand: BrandSpec,
+    images: list[BrandImage],
+    warnings: list[str],
+    src: Path | str,
+    *,
+    corners: Optional[list[str]] = None,
+    exclude: frozenset = frozenset(),
+    layout_only: frozenset = frozenset(),
+    skip_layouts: frozenset = frozenset(),
+    ignore: tuple = (),
+    dry_run: bool = False,
+    quiet: bool = False,
+    split_users: Optional[dict] = None,
+    fixed: Optional[tuple] = None,
+    taken: frozenset = frozenset(),
+) -> AddReport:
     """Логотипа в шаблоне нет, а брендбук велит место — логотип бренда на содержательные слайды. Одно место на весь
     шаблон: угол брендбука, если он свободен хотя бы у половины образцов, иначе — запасной угол, свободный у
     большинства. Свободно — значит ни текст, ни заголовок, ни колонтитул (рамки — из макета и мастера), ни линия, ни
     контур, ни фигура, ни картинка туда не заходят и фон под ним не пёстрый; заполнители содержимого отступают,
     оставляя охранное поле (не больше чем на 30 % высоты или 25 % ширины), — тогда и содержимое собранных слайдов
     туда не зайдёт. На макет — если так получается у макета, мастера и всех слайдов на нём (логотип макета лежит под
-    фигурами слайда); иначе — поверх образцов, где получается. Вариант логотипа — по настоящему цвету под ним."""
+    фигурами слайда); иначе — поверх образцов, где получается. Вариант логотипа — по настоящему цвету под ним.
+
+    `corners` — только эти углы (логотип шаблона переезжает в угол брендбука); `exclude` — образцы, где логотип бренда
+    уже стоит; `layout_only` — макеты с логотипом шаблона: их слайды получают логотип только с макета; `skip_layouts` —
+    пустые макеты, где логотип уже есть; `ignore` — рамки логотипов шаблона, которые уходят (не препятствия);
+    `dry_run` — только решить, ничего не меняя. Макет из `layout_only`, у части слайдов которого угол брендбука занят,
+    получает логотип в углу брендбука, а эти слайды перечислены в `split` (их переводят на копию макета с логотипом в
+    углу шаблона); `split_users` — уже переведённые (их на макете нет), `fixed` — (рамка, угол, вид) из пробного
+    решения; `taken` — номера слайдов, где логотип бренда уже виден (логотип шаблона на месте): макет, на котором они
+    стоят, второго логотипа не получает."""
     from verstka.brand.palette import source_ir
     from verstka.data.words import plural
 
@@ -1350,8 +1552,9 @@ def add_logos(pkg: Package, manifest: TemplateManifest, brand: BrandSpec, images
     margin = (brand.margins_px / 1920.0 * sw) if brand.margins_px and 0 < brand.margins_px <= 200 else 0.04 * sw
     order = pkg.slide_order()
     slides = {s.index: s for s in ir.slides}
-    samples = [i for i in _content_samples(manifest) if i in slides and 0 < i <= len(order)]
-    rep.samples = len(samples)
+    every = [i for i in _content_samples(manifest) if i in slides and 0 < i <= len(order)]
+    samples = [i for i in every if i not in exclude]
+    rep.samples, rep.shown = len(samples), len(every) - len(samples)
     if not samples:
         return rep
     wordmark = pick_logo(images, "light", mark=False) or images[0]
@@ -1368,8 +1571,11 @@ def add_logos(pkg: Package, manifest: TemplateManifest, brand: BrandSpec, images
             out += lines_cache[p]
         return out
 
+    def gone(b: Box) -> bool:
+        return any(_iou(b, g) >= 0.8 for g in ignore)
+
     def with_lines(obst: tuple[list[Box], list], part: str) -> tuple[list[Box], list]:
-        return obst[0] + lines_of(part), obst[1]
+        return [b for b in obst[0] + lines_of(part) if not gone(b)], obst[1]
 
     on_top = {i: with_lines(_ir_obstacles(slides[i], sw, sh, under_slide=False), order[i - 1]) for i in samples}
     by_layout: dict[str, list[int]] = {}
@@ -1377,8 +1583,12 @@ def add_logos(pkg: Package, manifest: TemplateManifest, brand: BrandSpec, images
         by_layout.setdefault(slides[i].layout_part or pkg.related(order[i - 1], "slideLayout") or "", []).append(i)
     users: dict[str, list[int]] = {}
     for s in ir.slides:
-        if s.layout_part:
+        if s.layout_part and s.index not in (split_users or {}).get(s.layout_part, ()):
             users.setdefault(s.layout_part, []).append(s.index)
+    for lp in list(by_layout):
+        by_layout[lp] = [i for i in by_layout[lp] if i not in (split_users or {}).get(lp, ())]
+        if not by_layout[lp]:
+            del by_layout[lp]
     under = {j: with_lines(_ir_obstacles(slides[j], sw, sh, under_slide=True), order[j - 1]) for lp in by_layout for j in users.get(lp, by_layout[lp])}
     lay_obst = {lp: with_lines(_layout_obstacles(pkg, lp), lp) for lp in by_layout if lp and pkg.xml(lp) is not None}
     # макеты без образцов (по ним собирает слайды синтез: «Заголовок и объект», пустой макет…); обложки и разделы — нет
@@ -1386,14 +1596,14 @@ def add_logos(pkg: Package, manifest: TemplateManifest, brand: BrandSpec, images
     unused: dict[str, tuple[list[Box], list[tuple[Box, etree._Element]]]] = {}
     for lp in sorted(n for n in pkg.names() if re.match(r"^ppt/slideLayouts/slideLayout\d+\.xml$", n)):
         root = pkg.xml(lp)
-        if lp in by_layout or lp in users or lp in title_layouts or root is None or (root.get("type") or "") in ("title", "secHead"):
+        if lp in by_layout or lp in users or lp in title_layouts or lp in skip_layouts or root is None or (root.get("type") or "") in ("title", "secHead"):
             continue
         hard, soft = _layout_obstacles(pkg, lp)
         master = pkg.related(lp, "slideMaster")
         hard = hard + _part_shapes(pkg, lp) + part_lines(pkg, lp)
         if root.get("showMasterSp") not in ("0", "false"):
             hard += _part_shapes(pkg, master) + part_lines(pkg, master)
-        unused[lp] = (hard, soft)
+        unused[lp] = ([b for b in hard if not gone(b)], soft)
     spot_cache: dict[tuple, Spot] = {}
 
     def spot(i: int, box: Box, with_slide: bool) -> Spot:
@@ -1405,11 +1615,16 @@ def add_logos(pkg: Package, manifest: TemplateManifest, brand: BrandSpec, images
     def fits(hard: list[Box], soft, box: Box) -> bool:
         return _clear(box, hard, CLEAR * sh) and all(_shrunk(b, box, sh) is not None for b, _ in soft)
 
+    lay_of = {i: slides[i].layout_part or pkg.related(order[i - 1], "slideLayout") or "" for i in samples}
+
     def free_on(i: int, box: Box) -> bool:
+        if lay_of[i] in layout_only:
+            return False  # на макете стоит логотип шаблона: логотип бренда — только с макета, не второй поверх
         return fits(*on_top[i], box) and not spot(i, box, True).busy
 
     slots = package_slots(pkg)
     own_cache: dict[tuple, Spot] = {}
+    blockers: dict[tuple, list[int]] = {}
 
     def on_layout(lp: str, box: Box) -> Optional[Spot]:
         """Логотип на макет: свободно у его заголовков и колонтитулов (и мастера) и у всех слайдов на нём (логотип
@@ -1419,11 +1634,21 @@ def add_logos(pkg: Package, manifest: TemplateManifest, brand: BrandSpec, images
         if lp not in lay_obst or not fits(*lay_obst[lp], box):
             return None
         everyone = users.get(lp, by_layout[lp])
-        if not all(fits(*under[j], box) for j in everyone):
-            return None
         if (lp, box) not in own_cache:
             own_cache[(lp, box)] = _xml_spot(pkg, lp, box, slots, with_part=True)
-        spots = [spot(j, box, False) for j in everyone] + [own_cache[(lp, box)]]
+        own = own_cache[(lp, box)]
+        if lp in layout_only:
+            # макет с логотипом шаблона: слайды, где угол брендбука занят или фон другой, уходят на копию макета
+            if own.busy:
+                return None
+            bad = [j for j in everyone if j in taken or not fits(*under[j], box) or spot(j, box, False).busy or spot(j, box, False).ground != own.ground]
+            blockers[(lp, box)] = bad
+            return own
+        if any(j in taken for j in everyone):
+            return None  # у слайда на этом макете свой логотип (на месте логотипа шаблона): второй с макета — нет
+        if not all(fits(*under[j], box) for j in everyone):
+            return None
+        spots = [spot(j, box, False) for j in everyone] + [own]
         if any(sp.busy for sp in spots) or len({sp.ground for sp in spots}) != 1:
             return None
         return spots[0]
@@ -1432,7 +1657,10 @@ def add_logos(pkg: Package, manifest: TemplateManifest, brand: BrandSpec, images
         """(сколько содержательных слайдов получат логотип, сколько макетов без образцов)."""
         got = 0
         for lp, idxs in by_layout.items():
-            got += len(idxs) if on_layout(lp, box) is not None else sum(free_on(i, box) for i in idxs)
+            if on_layout(lp, box) is not None:
+                got += len([i for i in idxs if i not in blockers.get((lp, box), ())])
+            else:
+                got += sum(free_on(i, box) for i in idxs)
         return got, sum(fits(*unused[lp], box) for lp in unused)
 
     def score(cov: tuple[int, int]) -> float:
@@ -1443,7 +1671,9 @@ def add_logos(pkg: Package, manifest: TemplateManifest, brand: BrandSpec, images
     # содержательных слайдов
     total = len(samples) + 0.25 * len(unused)
     best, best_cov, corner, kind = None, (-1, -1), None, None
-    for cn, kd, c in _candidates(brand.logo_place, w, h, margin, sw, sh):
+    for cn, kd, c in ([(fixed[1], fixed[2], fixed[0])] if fixed else _candidates(brand.logo_place, w, h, margin, sw, sh)):
+        if corners and cn not in corners:
+            continue
         cov = coverage(c)
         # то же место чуть меньшим логотипом (у того же угла), если так охранное поле есть у заметно большего числа
         # слайдов и макетов (хотя бы у десятой части): ради одного слайда логотип не мельчает на всех
@@ -1458,11 +1688,30 @@ def add_logos(pkg: Package, manifest: TemplateManifest, brand: BrandSpec, images
     if best is not None and best_cov[0] == 0 and best_cov[1] == 0:
         best = None
     if best is None:
-        warnings.append("Логотип бренда не поставлен: у краёв слайдов шаблона нет свободного места.")
+        if not quiet and not dry_run:
+            warnings.append("Логотип бренда не поставлен: у краёв слайдов шаблона нет свободного места.")
         return rep
     rep.place = ("brand" if kind == "corner" else "brand_edge") if corner == brand.logo_place else "fallback"
     rep.where = logo_where(brand.logo_place, corner, kind)
+    rep.box, rep.corner, rep.kind = best, corner, kind
     media = Media(pkg)
+    if dry_run:
+        covered0: set[int] = set()
+        for lp, idxs in by_layout.items():
+            if on_layout(lp, best) is not None:
+                rep.placed.add(lp)
+                bad = blockers.get((lp, best), [])
+                if bad:
+                    rep.split[lp] = list(bad)
+                covered0.update(i for i in idxs if i not in bad)
+                continue
+            for i in idxs:
+                if free_on(i, best):
+                    rep.placed.add(order[i - 1])
+                    covered0.add(i)
+        rep.placed |= {lp for lp, (hard, soft) in unused.items() if fits(hard, soft, best)}
+        rep.covered = len(covered0)
+        return rep
 
     def shrink(part: str, items, by_sid: bool) -> None:
         for b, ref in items:
@@ -1477,16 +1726,19 @@ def add_logos(pkg: Package, manifest: TemplateManifest, brand: BrandSpec, images
     covered: set[int] = set()
     for lp, idxs in sorted(by_layout.items()):
         sp_layout = on_layout(lp, best)
+        if sp_layout is not None and blockers.get((lp, best)):
+            rep.split[lp] = list(blockers[(lp, best)])  # переводят на копию макета до этого шага (`split_users`)
         if sp_layout is not None:
             shrink(lp, lay_obst[lp][1], by_sid=False)
-            for j in users.get(lp, idxs):
+            for j in [j for j in users.get(lp, idxs) if j not in blockers.get((lp, best), ())]:
                 # у слайдов со своей рамкой заполнителя — своя отступившая рамка (унаследованные отступят с макетом)
                 own = [(b, sid) for b, sid in under[j][1] if (el := _sp_by_id(pkg, order[j - 1], sid)) is not None and shape_box(el) is not None]
                 shrink(order[j - 1], own, by_sid=True)
             _place_pic(pkg, lp, media, pick_logo(images, sp_layout.ground, mark=False) or wordmark, best, brand.name)
             rep.added += 1
             rep.layouts += 1
-            covered.update(idxs)
+            rep.placed.add(lp)
+            covered.update(i for i in idxs if i not in blockers.get((lp, best), ()))
             continue
         for i in idxs:
             if not free_on(i, best):
@@ -1494,6 +1746,7 @@ def add_logos(pkg: Package, manifest: TemplateManifest, brand: BrandSpec, images
             shrink(order[i - 1], on_top[i][1], by_sid=True)
             _place_pic(pkg, order[i - 1], media, pick_logo(images, spot(i, best, True).ground, mark=False) or wordmark, best, brand.name)
             rep.added += 1
+            rep.placed.add(order[i - 1])
             covered.add(i)
     for lp, (hard, soft) in unused.items():
         if not fits(hard, soft, best):
@@ -1502,14 +1755,363 @@ def add_logos(pkg: Package, manifest: TemplateManifest, brand: BrandSpec, images
         _place_pic(pkg, lp, media, pick_logo(images, ground_under(pkg, lp, best, slots), mark=False) or wordmark, best, brand.name)
         rep.added += 1
         rep.layouts += 1
+        rep.placed.add(lp)
     rep.covered = len(covered)
     missing = rep.samples - rep.covered
     where = rep.where
-    if missing:
+    total = rep.samples + rep.shown
+    if quiet:
+        pass
+    elif missing:
         warnings.append(
-            f"Логотип бренда стоит {where} — на {rep.covered} из {rep.samples} {plural(rep.samples, 'содержательного слайда', 'содержательных слайдов', 'содержательных слайдов')} "
+            f"Логотип бренда стоит {where} — на {rep.covered + rep.shown} из {total} {plural(total, 'содержательного слайда', 'содержательных слайдов', 'содержательных слайдов')} "
             f"шаблона; на {missing} {plural(missing, 'слайде', 'слайдах', 'слайдах')} там нет свободного места."
         )
     elif rep.place != "brand":
         warnings.append(f"Логотип бренда стоит {where}.")
     return rep
+
+
+# ============================================================================================ логотипы: всё вместе
+
+_COVER_KINDS = ("title", "section", "thanks")
+CORNER_RU = {"bottom_right": "справа внизу", "bottom_left": "слева внизу", "top_right": "справа вверху", "top_left": "слева вверху"}
+
+
+def _corner_of(box: Box, sw: float, sh: float) -> str:
+    return ("top" if box[1] + box[3] / 2 < sh / 2 else "bottom") + "_" + ("left" if box[0] + box[2] / 2 < sw / 2 else "right")
+
+
+@dataclass
+class LogoOutcome:
+    """Что стало с логотипами: логотипы шаблона (картинки и словесные) заменены на месте, перенесены в угол
+    брендбука или убраны; логотип бренда добавлен туда, где логотипа не было."""
+
+    template_logo: bool = False  # у шаблона есть свой логотип
+    replaced: int = 0  # заменено на месте
+    removed: int = 0  # убрано (второй логотип на части, перенесённый)
+    add: AddReport = field(default_factory=AddReport)
+    template_corner: Optional[str] = None  # где логотип шаблона на содержательных слайдах
+    moved: int = 0  # частей, где логотип переехал в угол брендбука
+    kept: int = 0  # частей, где остался в углу шаблона (угол брендбука занят)
+    samples: int = 0  # содержательных образцов
+    covered: int = 0  # из них с логотипом бренда (заменённым, перенесённым или добавленным)
+    note: Optional[str] = None  # место логотипа словами (для расхождений и предупреждений)
+
+
+_COVER_NAME_RE = re.compile(r"титул|обложк|заставк|cover|title\s*slide|спасибо|thank|финал|final|раздел|section|divider|qr", re.I)
+
+
+def _cover_parts(pkg: Package, manifest: TemplateManifest) -> set[str]:
+    """Обложки, разделы и финальные слайды; макеты, на которых стоят только они; макеты без слайдов типа «титул» или с
+    таким именем («1_Титульный слайд», «Слайд "Спасибо!"», «Разделитель»)."""
+    order = pkg.slide_order()
+    kind = {p.source_slide: getattr(p.kind, "value", p.kind) for p in manifest.patterns}
+    out: set[str] = set()
+    users: dict[str, list[bool]] = {}
+    for i, part in enumerate(order, 1):
+        cov = kind.get(i) in _COVER_KINDS
+        if cov:
+            out.add(part)
+        lp = pkg.related(part, "slideLayout")
+        if lp and i in kind:  # слайд вне разбора (справочный) не решает
+            users.setdefault(lp, []).append(cov)
+    for lp, flags in users.items():
+        if all(flags):
+            out.add(lp)
+    for n in pkg.names():
+        if re.match(r"^ppt/slideLayouts/slideLayout\d+\.xml$", n) and n not in users:
+            root = pkg.xml(n)
+            name = root.find(f"{{{P}}}cSld").get("name") if root is not None and root.find(f"{{{P}}}cSld") is not None else ""
+            if root is not None and ((root.get("type") or "") in ("title", "secHead") or _COVER_NAME_RE.search(name or "")):
+                out.add(n)
+    return out
+
+
+def _shows(pkg: Package, part: str, parts: set[str]) -> bool:
+    """На части (слайд, макет) виден логотип с одной из `parts`: её собственный, с макета или с мастера."""
+    chain = _chain(pkg, part)
+    for k, p in enumerate(chain):
+        if p in parts:
+            return True
+        root = pkg.xml(p)
+        if root is not None and root.get("showMasterSp") in ("0", "false"):
+            break
+    return False
+
+
+def _replace_text_logo(pkg: Package, lk: TextLockup, images: list[BrandImage], brand_name: str, media: Media, slots: dict[str, str]) -> bool:
+    """Словесный логотип шаблона → логотип бренда на том же месте (надпись и знак уходят)."""
+    for el in lk.els:
+        if el.getparent() is not None:
+            el.getparent().remove(el)
+    pkg.dirty.add(lk.part)
+    sw, sh = pkg.slide_size()
+    probe = pick_logo(images, "light", mark=False) or images[0]
+    img = pick_logo(images, ground_under(pkg, lk.part, _fit(lk.box, probe, sw, sh), slots), mark=False)
+    if img is None:
+        return False
+    _place_pic(pkg, lk.part, media, img, _fit(lk.box, img, sw, sh), brand_name)
+    return True
+
+
+def _replace_pic_logo(pkg: Package, lk: Lockup, images: list[BrandImage], brand_name: str, media: Media) -> bool:
+    sw, sh = pkg.slide_size()
+    x, y, w, h = lk.box
+    img = pick_logo(images, lk.ground, mark=w / h < 1.6 if h else False)
+    if img is None:
+        return False
+    keep = lk.pics[0]
+    rid = pkg.add_rel(lk.part, IMG_REL, media.part_for(img))
+    _set_blip(keep.el, rid, img, brand_name)
+    _set_box(keep.el, keep.groups, _fit(lk.box, img, sw, sh))
+    for pc in lk.pics[1:]:
+        if pc.el.getparent() is not None:
+            pc.el.getparent().remove(pc.el)
+    pkg.dirty.add(lk.part)
+    return True
+
+
+_LAYOUT_CT = "application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"
+_LAYOUT_REL = R + "/slideLayout"
+
+
+def _twin_layout(pkg: Package, lp: str) -> str:
+    """Копия макета (с его логотипом шаблона) для слайдов, где угол брендбука занят: имя части, связи, тип, место в
+    списке макетов мастера."""
+    import copy
+
+    nums = [int(m.group(1)) for n in pkg.names() if (m := re.match(r"^ppt/slideLayouts/slideLayout(\d+)\.xml$", n))]
+    name = f"ppt/slideLayouts/slideLayout{max(nums, default=0) + 1}.xml"
+    root = copy.deepcopy(pkg.xml(lp))
+    csld = root.find(f"{{{P}}}cSld")
+    if csld is not None:
+        csld.set("name", (csld.get("name") or "Макет") + " · логотип как в шаблоне")
+    pkg.trees[name] = root
+    pkg.added[name] = b""
+    pkg.dirty.add(name)
+    rels = pkg.xml(pkg.rels_name(lp))
+    if rels is not None:
+        rn = pkg.rels_name(name)
+        pkg.trees[rn] = copy.deepcopy(rels)
+        pkg.added[rn] = b""
+        pkg.dirty.add(rn)
+    ct = pkg.xml("[Content_Types].xml")
+    if ct is not None:
+        o = etree.SubElement(ct, f"{{http://schemas.openxmlformats.org/package/2006/content-types}}Override")
+        o.set("PartName", "/" + name)
+        o.set("ContentType", _LAYOUT_CT)
+        pkg.dirty.add("[Content_Types].xml")
+    master = pkg.related(lp, "slideMaster")
+    mroot = pkg.xml(master) if master else None
+    lst = mroot.find(f"{{{P}}}sldLayoutIdLst") if mroot is not None else None
+    if lst is not None:
+        ids = [int(e.get("id")) for m in pkg.names() if re.match(r"^ppt/slideMasters/slideMaster\d+\.xml$", m)
+               for e in pkg.xml(m).iter(f"{{{P}}}sldLayoutId") if (e.get("id") or "").isdigit()]
+        pres = pkg.xml("ppt/presentation.xml")
+        ids += [int(e.get("id")) for e in pres.iter(f"{{{P}}}sldMasterId") if (e.get("id") or "").isdigit()] if pres is not None else []
+        rid = pkg.add_rel(master, _LAYOUT_REL, name)
+        e = etree.SubElement(lst, f"{{{P}}}sldLayoutId")
+        e.set("id", str(max(ids + [2147483648]) + 1))
+        e.set(f"{{{R}}}id", rid)
+        pkg.dirty.add(master)
+    return name
+
+
+def _repoint(pkg: Package, slide: str, layout: str) -> None:
+    """Слайд — на другой макет (связь slideLayout)."""
+    rn = pkg.rels_name(slide)
+    root = pkg.xml(rn)
+    for r in root if root is not None else []:
+        if (r.get("Type") or "").endswith("/slideLayout"):
+            r.set("Target", posixpath.relpath(layout, posixpath.dirname(slide)))
+            pkg.dirty.add(rn)
+    cache = pkg.__dict__.get("_clr_maps")
+    if cache:
+        cache.pop(slide, None)
+
+
+def _twin_lockup(pkg: Package, lk, twin: str):
+    """Тот же логотип шаблона на копии макета (фигуры с теми же id)."""
+    root = pkg.xml(twin)
+    by_id = {nv.get("id"): nv for nv in root.iter(f"{{{P}}}cNvPr")}
+
+    def find(el):
+        nv = next(el.iter(f"{{{P}}}cNvPr"), None)
+        hit = by_id.get(nv.get("id")) if nv is not None else None
+        return hit.getparent().getparent() if hit is not None else None
+
+    if isinstance(lk, TextLockup):
+        els = [e for e in (find(x) for x in lk.els) if e is not None]
+        return TextLockup(part=twin, els=els, box=lk.box, text=lk.text, by_name=lk.by_name) if els else None
+    pics = []
+    for pc in lk.pics:
+        el = find(pc.el)
+        if el is not None:
+            pics.append(Pic(part=twin, el=el, box=pc.box, media=pc.media, name=pc.name, groups=[a for a in el.iterancestors() if a.tag == f"{{{P}}}grpSp"]))
+    return Lockup(part=twin, pics=pics, box=lk.box, ground=lk.ground) if pics else None
+
+
+def _remove_lockup(pkg: Package, lk) -> None:
+    for el in (lk.els if isinstance(lk, TextLockup) else [pc.el for pc in lk.pics]):
+        if el.getparent() is not None:
+            el.getparent().remove(el)
+    pkg.dirty.add(lk.part)
+
+
+def brand_logos(
+    pkg: Package,
+    manifest: TemplateManifest,
+    brand: BrandSpec,
+    images: list[BrandImage],
+    warnings: list[str],
+    src: Path | str,
+    slots: dict[str, str],
+    fonts: tuple[str, str] = ("", ""),
+    *,
+    dry_run: bool = False,
+) -> LogoOutcome:
+    """Логотипы копии при приоритете брендбука.
+
+    Логотипы шаблона — картинки (`find_template_logos`) и словесные (`find_template_logos` их не видит: надпись и знак
+    фигурами, «mybrand.»). На обложках и разделах они заменяются логотипом бренда на месте. На содержательных слайдах
+    логотип стоит там, где велит брендбук (`logo_place`): если логотип шаблона в другом углу, он переезжает туда — на
+    каждом макете и слайде, где угол брендбука свободен (та же проверка, что у добавленного логотипа); где занят —
+    остаётся в углу шаблона, и об этом сказано. Образцы, где логотипа шаблона нет вовсе (у VK Education он только на
+    обложках), получают логотип бренда как шаблон без логотипа. `dry_run` — только решить (для расхождений)."""
+    from verstka.data.words import plural
+
+    out = LogoOutcome()
+    sw, sh = pkg.slide_size()
+    pics = find_template_logos(pkg, manifest, slots)
+    texts = find_text_logos(pkg, manifest, fonts, src)
+    out.template_logo = any(not lk.duplicate for lk in pics) or bool(texts)
+    if not images:
+        return out
+    order = pkg.slide_order()
+    cover = _cover_parts(pkg, manifest)
+    main = _main_lockups(pics, brand.logo_place, sw, sh)
+    keep: list = [lk for lk in pics if not lk.duplicate and id(lk) in main] + list(texts)
+    drop = [lk for lk in pics if lk.duplicate or id(lk) not in main]
+    content = [lk for lk in keep if lk.part not in cover and not lk.part.startswith("ppt/slideMasters/")]
+    votes = Counter(_corner_of(lk.box, sw, sh) for lk in content)
+    out.template_corner = votes.most_common(1)[0][0] if votes else None
+    move = bool(brand.logo_place and content and out.template_corner != brand.logo_place)
+
+    def boxes(lks) -> list[Box]:
+        return [b for lk in lks for b in ([lk.box] if isinstance(lk, TextLockup) else [pc.box for pc in lk.pics])]
+
+    stay = [lk for lk in keep if not (move and lk in content)]
+    stay_parts = {lk.part for lk in stay}
+    layouts = [n for n in pkg.names() if re.match(r"^ppt/slideLayouts/slideLayout\d+\.xml$", n)]
+    every = [i for i in _content_samples(manifest) if 0 < i <= len(order)]
+    exclude = frozenset(i for i in every if _shows(pkg, order[i - 1], stay_parts))
+    lock_layouts = frozenset(lk.part for lk in content if "/slideLayouts/" in lk.part) if move else frozenset()
+    skip = frozenset(lp for lp in layouts if _shows(pkg, lp, stay_parts))
+    taken = frozenset(i for i in range(1, len(order) + 1) if _shows(pkg, order[i - 1], stay_parts))
+    ignore = tuple(boxes(drop) + (boxes(content) if move else []))
+    twins: dict[str, str] = {}
+    if not move:
+        rep = add_logos(pkg, manifest, brand, images, warnings, src, exclude=exclude, skip_layouts=skip, ignore=ignore, dry_run=dry_run, taken=taken)
+    else:
+        common = dict(corners=[brand.logo_place], exclude=exclude, layout_only=lock_layouts, ignore=ignore, quiet=True, taken=taken)
+        rep = add_logos(pkg, manifest, brand, images, [], src, skip_layouts=skip, dry_run=True, **common)
+        if not dry_run and rep.box is not None:
+            # слайды макета с логотипом шаблона, где угол брендбука занят, — на копию макета с логотипом в углу шаблона
+            for lp, bad in rep.split.items():
+                twins[lp] = _twin_layout(pkg, lp)
+                for j in bad:
+                    _repoint(pkg, order[j - 1], twins[lp])
+            rep = add_logos(pkg, manifest, brand, images, [], src, skip_layouts=skip | frozenset(twins.values()),
+                            split_users={lp: set(v) for lp, v in rep.split.items()}, fixed=(rep.box, rep.corner, rep.kind), **common)
+    out.add = rep
+    moved: set[str] = set()
+    if move:
+        for lk in content:
+            lay = pkg.related(lk.part, "slideLayout") if "/slides/" in lk.part else None
+            if lk.part in rep.placed or (lay in rep.placed):
+                moved.add(lk.part)
+    kept_parts = {lk.part for lk in content if lk.part not in moved} | set(twins.values()) if move else set()
+    out.samples = len(every)
+    # что видно: на содержательных образцах (для отчёта) и на всех слайдах шаблона, кроме обложек (для места логотипа)
+    split_idx = {j for v in rep.split.values() for j in v} if dry_run else set()
+    body = [i for i in range(1, len(order) + 1) if order[i - 1] not in cover]
+    new = {i for i in body if i not in split_idx and _shows(pkg, order[i - 1], rep.placed)}
+    kept = {i for i in body if i not in new and (i in split_idx or _shows(pkg, order[i - 1], kept_parts))}
+    out.covered = sum(1 for i in every if (i not in split_idx and _shows(pkg, order[i - 1], rep.placed)) or i in split_idx
+                      or _shows(pkg, order[i - 1], kept_parts | stay_parts))
+    if move:
+        out.moved, out.kept = len(new), len(kept)
+        t, b = CORNER_RU.get(out.template_corner or "", ""), CORNER_RU.get(brand.logo_place or "", "")
+        if not kept and new:
+            out.note = f"в шаблоне {t}, по брендбуку — {b}; поставлен {b}"
+        elif not new:
+            out.note = f"в шаблоне {t}, по брендбуку — {b}; оставлен {t}: угол из брендбука занят"
+        else:
+            n = len(new) + len(kept)
+            out.note = f"в шаблоне {t}, по брендбуку — {b}; поставлен {b}, а на {len(kept)} из {n} {plural(n, 'слайда', 'слайдов', 'слайдов')} шаблона, где этот угол занят, — {t}"
+        if not dry_run:
+            warnings.append(f"Логотип: {out.note}.")
+    if dry_run:
+        return out
+    media = Media(pkg)
+    missing = False
+    for lp, twin in twins.items():
+        for lk in [x for x in pics if x.part == lp]:
+            tl = _twin_lockup(pkg, lk, twin)
+            if tl is None:
+                continue
+            if lk in keep:
+                ok = _replace_pic_logo(pkg, tl, images, brand.name, media) if isinstance(tl, Lockup) else _replace_text_logo(pkg, tl, images, brand.name, media, slots)
+                out.replaced += ok
+                missing |= not ok
+            else:
+                _remove_lockup(pkg, tl)
+    for lk in drop:
+        _remove_lockup(pkg, lk)
+        out.removed += 0 if lk.duplicate else 1
+    for lk in keep:
+        if move and lk in content and lk.part in moved:
+            _remove_lockup(pkg, lk)
+            out.removed += 1
+            continue
+        ok = _replace_text_logo(pkg, lk, images, brand.name, media, slots) if isinstance(lk, TextLockup) else _replace_pic_logo(pkg, lk, images, brand.name, media)
+        out.replaced += ok
+        missing |= not ok
+    if missing:
+        warnings.append("Для части логотипов шаблона не нашлось подходящего варианта логотипа бренда — там оставлен логотип шаблона.")
+    if move and out.covered < out.samples:
+        warnings.append(
+            f"Логотип бренда — на {out.covered} из {out.samples} {plural(out.samples, 'содержательного слайда', 'содержательных слайдов', 'содержательных слайдов')} "
+            f"шаблона; на остальных у края нет свободного места."
+        )
+    return out
+
+
+_OUTCOMES: "OrderedDict[tuple, LogoOutcome]" = OrderedDict()
+
+
+def logo_outcome(src: Path | str, manifest: TemplateManifest, brand: BrandSpec, brand_dir: Optional[Path | str]) -> Optional[LogoOutcome]:
+    """Что копия сделает с логотипами (без записи копии) — для расхождений; кэш по файлу шаблона и логотипам бренда.
+    None — логотипов бренда нет или шаблон не читается."""
+    from verstka.brand.palette import file_key, package_theme
+
+    images = [im for im in (load_logo(lg, brand_dir) for lg in brand.logos) if im is not None]
+    if not images:
+        return None
+    key = (file_key(src), manifest.template_id, brand.logo_place, brand.margins_px, tuple(hashlib.sha256(im.data).hexdigest()[:12] for im in images))
+    if key[0] is not None and key in _OUTCOMES:
+        _OUTCOMES.move_to_end(key)
+        return _OUTCOMES[key]
+    try:
+        pkg = Package(src)
+        theme = package_theme(pkg)
+        got = brand_logos(pkg, manifest, brand, images, [], src, theme.slots, (theme.major or "", theme.minor or ""), dry_run=True)
+    except Exception as e:  # noqa: BLE001
+        log.warning("logo outcome unavailable: %s", e)
+        return None
+    if key[0] is not None:
+        _OUTCOMES[key] = got
+        while len(_OUTCOMES) > 16:
+            _OUTCOMES.popitem(last=False)
+    return got

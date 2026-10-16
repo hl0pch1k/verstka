@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Optional
 
 from verstka.brand.apply import brand_plan, font_base, font_result, resolve_brand_dir
-from verstka.brand.logos import has_template_logo, logo_path
+from verstka.brand.logos import has_template_logo, logo_outcome, logo_path
 from verstka.brand.palette import ACCENT_ORDINALS, NEUTRAL_DE, delta_e, kept_reason_text
 from verstka.ingest.workspace import TemplateWorkspace
 from verstka.schemas.brand import BrandConflict, BrandPriority, BrandSpec
@@ -114,12 +114,19 @@ def brand_conflicts(
         elif t != b:
             add(what, _hx(t), _hx(bh), _hx(b), "color")
 
-    # --- логотип
-    if brand.logos and (has_template_logo(path, manifest) if path else any(a.kind == "logo" for a in manifest.assets)):
-        title = _template_title(ws)
-        tpl = f"логотип {title}" if title else "логотип шаблона"
-        brd = f"логотип {brand.name}" if brand.name else "логотип брендбука"
-        bdir = resolve_brand_dir(brand, brand_dir, workspace_root)
-        found = any((p := logo_path(lg, bdir)) is not None and p.exists() for lg in brand.logos)
-        add("Логотип", tpl, brd, brd if found else f"{tpl}: файлов логотипа бренда нет", "logo")
+    # --- логотип: чей и где
+    bdir = resolve_brand_dir(brand, brand_dir, workspace_root)
+    found = any((p := logo_path(lg, bdir)) is not None and p.exists() for lg in brand.logos)
+    title = _template_title(ws)
+    tpl = f"логотип {title}" if title else "логотип шаблона"
+    brd = f"логотип {brand.name}" if brand.name else "логотип брендбука"
+    outcome = logo_outcome(path, manifest, brand, bdir) if path and found and priority == "brand" else None
+    own = outcome.template_logo if outcome is not None else (has_template_logo(path, manifest) if path else any(a.kind == "logo" for a in manifest.assets))
+    if own and brand.logos:
+        result = brd if found else f"{tpl}: файлов логотипа бренда нет"
+        if outcome is not None and outcome.note:
+            result = f"{brd}: {outcome.note}"
+        add("Логотип", tpl, brd, result, "logo")
+    elif own and not brand.logos:
+        add("Логотип", tpl, "в брендбуке нет файлов логотипа", f"{tpl} оставлен", "logo")
     return out

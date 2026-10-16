@@ -251,7 +251,8 @@ def test_theme_colors_and_fonts_rewritten(synthetic, fonts_here, tmp_path):
     after = theme_info(etree.fromstring(_parts(out, r"ppt/theme/theme1\.xml$")["ppt/theme/theme1.xml"].encode()))
     assert before.stock  # стандартная тема python-pptx: её акценты занимает бренд по порядку
     assert after.slots["accent1"] == "0077FF"
-    assert after.slots["accent2"] == "2787F5"
+    assert after.slots["accent2"] == "C0504D"  # красный слот — цвет ошибки и падения: в брендбуке пары нет, остаётся
+    assert after.slots["accent3"] == "2787F5"
     assert after.slots["dk1"] == "0B1220"
     assert after.major == "Brand Display" and after.minor == "Brand Text"
 
@@ -322,9 +323,10 @@ def test_blip_recolor_kept():
 
 
 def test_logos_replaced_with_brand_logo(synthetic, fonts_here, tmp_path):
+    """Логотип шаблона в том же углу, что велит брендбук (слева внизу): логотип бренда встаёт на его место."""
     src, m, bdir = synthetic
     out = tmp_path / "branded.pptx"
-    res = apply_brand(src, out, _brand(), manifest=m, brand_dir=bdir)
+    res = apply_brand(src, out, _brand(logo_place="bottom_left"), manifest=m, brand_dir=bdir)
     assert res.logos_replaced == 4 and res.logos_added == 0
     with zipfile.ZipFile(out) as z:
         names = z.namelist()
@@ -365,7 +367,7 @@ def test_dark_ground_gets_white_logo(tmp_path, fonts_here):
     prs.save(src)
     m = _analyze(src, tmp_path / "ws")
     out = tmp_path / "dark-branded.pptx"
-    res = apply_brand(src, out, _brand(), manifest=m, brand_dir=_brand_dir(tmp_path))
+    res = apply_brand(src, out, _brand(logo_place="top_right"), manifest=m, brand_dir=_brand_dir(tmp_path))
     assert res.logos_replaced == 3
     media = [n for n in zipfile.ZipFile(out).namelist() if n.startswith("ppt/media/brand-logo-")]
     assert media and all("white" in n for n in media)
@@ -528,7 +530,9 @@ def test_branded_template_stored_analyzed_and_cached(synthetic, fonts_here, tmp_
     assert {"Brand Display", "Brand Text"} & fams and not {"Georgia", "Verdana"} & fams
     info = branded_info(bid, ws)
     assert info["base_template_id"] == base.template_id and info["priority"] == "brand" and info["brand_name"] == "Облако"
-    assert info["result"]["logos_replaced"] == 4
+    # логотип ACME слева внизу, брендбук велит справа внизу — логотип бренда там, и это сказано
+    assert info["result"]["logo_note"] == "в шаблоне слева внизу, по брендбуку — справа внизу; поставлен справа внизу"
+    assert info["result"]["logo_covered"] == info["result"]["logo_samples"] >= 1
 
     # кэш: тот же брендбук и приоритет — без нового применения и разбора
     calls = []
@@ -580,6 +584,10 @@ def _vk_manifest() -> TemplateManifest:
     return TemplateManifest.model_validate(data)
 
 
+def by_logo_result(rows) -> str:
+    return next(c.result for c in rows if c.what == "Логотип")
+
+
 def test_conflicts_vk_tech_and_vk_cloud_as_in_scenario(monkeypatch):
     """SCENARIO.md: шрифт заголовков Play → VK Sans Display (замена — Play), второй акцент #FF3885 → #FF3985."""
     from verstka.brand.read import read_brandbook
@@ -595,7 +603,7 @@ def test_conflicts_vk_tech_and_vk_cloud_as_in_scenario(monkeypatch):
         ("Шрифт заголовков", "Play", "VK Sans Display", "VK Sans Display, замена — Play"),
         ("Шрифт текста", "Play", "VK Sans Text", "VK Sans Text, замена — Play"),
         ("Второй акцент", "#FF3885", "#FF3985", "#FF3985"),
-        ("Логотип", "логотип шаблона", "логотип VK Cloud", "логотип VK Cloud"),
+        ("Логотип", "логотип шаблона", "логотип VK Cloud", by_logo_result(got)),
     ]
     head = by["Шрифт заголовков"]
     assert (head.template, head.brand, head.result, head.kind) == ("Play", "VK Sans Display", "VK Sans Display, замена — Play", "font")
@@ -603,7 +611,8 @@ def test_conflicts_vk_tech_and_vk_cloud_as_in_scenario(monkeypatch):
     assert (acc.template, acc.brand, acc.result, acc.kind) == ("#FF3885", "#FF3985", "#FF3985", "color")
     # основной акцент совпадает (#0077FF), чёрный и #0B1220, #FAFCFF и белый — для человека одно и то же
     assert "Основной акцент" not in by and "Цвет текста" not in by and "Фон" not in by
-    assert by["Логотип"].result == "логотип VK Cloud"
+    # логотип VK Tech слева внизу, брендбук велит справа внизу: в расхождении сказано, где он встанет
+    assert by["Логотип"].result.startswith("логотип VK Cloud: в шаблоне слева внизу, по брендбуку — справа внизу; ")
     # шаблон важнее — в презентации остаётся шаблон
     tpl = {c.what: c for c in brand_conflicts(m, brand, priority="template", source=src, brand_dir=BRAND_EXAMPLE)}
     assert tpl["Шрифт заголовков"].result == "Play, как в шаблоне"
@@ -616,7 +625,8 @@ def test_conflicts_brand_font_installed(monkeypatch):
     monkeypatch.setattr(ap, "font_available", lambda f: True)
     got = {c.what: c for c in brand_conflicts(_vk_manifest(), read_brandbook(BRAND_EXAMPLE / "tokens.json"), source=FIX / "vktech_short.pptx")}
     assert got["Шрифт заголовков"].result == "VK Sans Display"
-    assert "Логотип" not in got  # у токенов нет файлов логотипов
+    # у токенов нет файлов логотипов: логотип шаблона остаётся, и это сказано
+    assert (got["Логотип"].brand, got["Логотип"].result) == ("в брендбуке нет файлов логотипа", "логотип шаблона оставлен")
 
 
 def test_conflicts_without_template_file():
@@ -875,7 +885,7 @@ def test_replaced_logo_keeps_one_side_and_readable_size(tmp_path, fonts_here):
     prs.save(src)
     m = _analyze(src, tmp_path / "ws")
     out = tmp_path / "two-brand.pptx"
-    res = apply_brand(src, out, _brand(), manifest=m, brand_dir=_brand_dir(tmp_path))
+    res = apply_brand(src, out, _brand(logo_place="bottom_left"), manifest=m, brand_dir=_brand_dir(tmp_path))
     boxes = _logo_boxes(out)
     assert len(boxes) == 4 and res.logos_removed == 1
     assert all(x < W * 0.5 for _, (x, _y, _cx, _cy) in boxes)
@@ -1477,7 +1487,7 @@ def test_added_logo_carries_the_brand_logo_mark(tmp_path, fonts_here):
     assert tags and all(f'title="{BRAND_LOGO_MARK}"' in t and 'descr="Логотип Облако"' in t for t in tags)
     rep = tmp_path / "rep-brand.pptx"
     src2 = build_custom(tmp_path, "rep", bg="FFFFFF", text="1F2937", cards=[("1F6FEB", "FFFFFF")], logos=[("Logo ACME", 0.04)])
-    apply_brand(src2, rep, _brand(), manifest=_analyze(src2, tmp_path / "ws2"), brand_dir=_brand_dir(tmp_path))
+    apply_brand(src2, rep, _brand(logo_place="bottom_left"), manifest=_analyze(src2, tmp_path / "ws2"), brand_dir=_brand_dir(tmp_path))
     assert BRAND_LOGO_MARK not in _all(rep, r"ppt/slides/[^/]*\.xml$")
 
 
@@ -1604,3 +1614,231 @@ def _parts_of(pptx: Path) -> dict[str, bytes]:
             else:
                 out[n] = data
     return out
+
+
+# ============================================================================================== круг 5: живой прогон
+
+
+def _wordmark_template(tmp: Path, name: str = "Acme_Pitch_Deck", text: str = "acme.", n: int = 4) -> Path:
+    """Шаблон с логотипом без картинки, как у MyBrand: кружок-знак (группа фигур) и надпись «acme.» в заголовке-
+    заполнителе с отступом слева — в левом верхнем углу обложки и нескольких слайдов."""
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Emu(W), Emu(H)
+    for i in range(n):
+        s = prs.slides.add_slide(prs.slide_layouts[5] if i else prs.slide_layouts[0])
+        if i == 0:
+            s.background.fill.solid()
+            s.background.fill.fore_color.rgb = RGBColor.from_string("1F4FE0")
+        grp = s.shapes.add_group_shape()
+        c = grp.shapes.add_shape(MSO_SHAPE.OVAL, Emu(int(W * 0.05)), Emu(int(H * 0.05)), Emu(int(H * 0.08)), Emu(int(H * 0.08)))
+        c.fill.solid()
+        c.fill.fore_color.rgb = RGBColor.from_string("FFFFFF" if i == 0 else "1F4FE0")
+        c.line.fill.background()
+        bar = grp.shapes.add_shape(MSO_SHAPE.RECTANGLE, Emu(int(W * 0.05 + H * 0.02)), Emu(int(H * 0.085)), Emu(int(H * 0.04)), Emu(int(H * 0.01)))
+        bar.fill.solid()
+        bar.fill.fore_color.rgb = RGBColor.from_string("1F2937")
+        tb = _text(s, text, int(W * 0.05 + H * 0.1), int(H * 0.05), int(W * 0.3), int(H * 0.08), "Verdana", 28, "FFFFFF" if i == 0 else "1F2937")
+        tb.text_frame.word_wrap = False
+        if i == 0:
+            s.shapes.title.text = "Итоги года"
+        else:
+            s.shapes.title.text = f"Раздел {i}"
+            s.shapes.title.top = Emu(int(H * 0.2))
+            _text(s, "Выручка выросла на 23 % к сентябрю", int(W * 0.05), int(H * 0.4), int(W * 0.5), int(H * 0.1), "Verdana", 16, "1F2937")
+    out = tmp / "src" / f"{name}.pptx"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    prs.save(out)
+    return out
+
+
+def test_text_and_shape_wordmark_is_found_and_replaced(tmp_path, fonts_here):
+    """Логотип шаблона из надписи и знака-фигур («mybrand.» у MyBrand): находится по имени шаблона в имени файла,
+    вместе со знаком; в копии его нет — на его месте логотип бренда (на тёмной обложке — белый)."""
+    src = _wordmark_template(tmp_path)
+    m = _analyze(src, tmp_path / "ws")
+    pkg = ap.Package(src)
+    found = lg.find_text_logos(pkg, m, ("Calibri", "Calibri"), src)
+    assert len(found) == 4 and all(lk.text == "acme." and len(lk.els) == 2 and lk.by_name for lk in found)
+    out = tmp_path / "acme-brand.pptx"
+    res = apply_brand(src, out, _brand(logo_place="top_left"), manifest=m, brand_dir=_brand_dir(tmp_path))
+    assert res.logos_replaced == 4
+    slides = _all(out, r"ppt/slides/slide\d+\.xml$")
+    assert ">acme.<" not in slides and "<a:t>acme.</a:t>" not in slides
+    assert "white" in _part_logo_media(out, "ppt/slides/slide1.xml")[0]
+    assert all("primary" in _part_logo_media(out, f"ppt/slides/slide{i}.xml")[0] for i in (2, 3, 4))
+    for _, (x, y, cx, cy) in _logo_boxes(out):
+        assert x < W * 0.3 and y < H * 0.2  # там же, где был логотип шаблона
+
+
+def test_short_texts_that_are_not_logos_stay(tmp_path):
+    """Не логотип: адрес сайта, дата, число, надпись без знака и не имя шаблона, надпись посреди слайда."""
+    src = _wordmark_template(tmp_path, name="Report_Deck", text="nordline.example")
+    assert lg.find_text_logos(ap.Package(src), _analyze(src, tmp_path / "ws"), ("Calibri", "Calibri"), src) == []
+    src2 = _wordmark_template(tmp_path, name="Report_Deck2", text="2026")
+    assert lg.find_text_logos(ap.Package(src2), _analyze(src2, tmp_path / "ws2"), ("Calibri", "Calibri"), src2) == []
+    # строчная надпись со знаком на трёх слайдах — логотип, даже если имя шаблона другое
+    src3 = _wordmark_template(tmp_path, name="Report_Deck3", text="nordic.")
+    assert len(lg.find_text_logos(ap.Package(src3), _analyze(src3, tmp_path / "ws3"), ("Calibri", "Calibri"), src3)) == 4
+
+
+def test_template_logo_moves_to_the_brandbook_corner(synthetic, fonts_here, tmp_path):
+    """Брендбук велит справа внизу, логотип шаблона слева внизу: логотип бренда встаёт справа внизу, логотипа шаблона
+    нет, столкновений нет, и сказано, что сделано."""
+    src, m, bdir = synthetic
+    out = tmp_path / "moved.pptx"
+    res = apply_brand(src, out, _brand(), manifest=m, brand_dir=bdir)
+    assert res.logo_note == "в шаблоне слева внизу, по брендбуку — справа внизу; поставлен справа внизу"
+    assert "Логотип: в шаблоне слева внизу, по брендбуку — справа внизу; поставлен справа внизу." in res.warnings
+    got = Presentation(str(out))
+    kinds = {p.source_slide: getattr(p.kind, "value", p.kind) for p in m.patterns}
+    for i, s in enumerate(got.slides, 1):
+        logos = [sh for owner in (s, s.slide_layout) for sh in owner.shapes if sh.name.startswith("Логотип")]
+        assert len(logos) <= 1, i  # ни на одном слайде нет двух логотипов
+        if kinds.get(i) not in ("title", "section", "thanks"):
+            assert logos and logos[0].left > W * 0.5 and logos[0].top > H * 0.7, i
+    assert "Логотип ACME" not in _all(out, r"ppt/(slides|slideLayouts)/[^/]*\.xml$")
+    assert res.logo_covered == res.logo_samples and _ir_collisions(out) == []
+    rows = {c.what: c for c in brand_conflicts(m, _brand(), source=src, brand_dir=bdir)}
+    assert rows["Логотип"].result.endswith("поставлен справа внизу")
+
+
+def test_template_logo_stays_where_the_brandbook_corner_is_taken(tmp_path, fonts_here):
+    """Угол из брендбука занят карточкой на всех слайдах: логотип бренда — на месте логотипа шаблона (слева внизу), и
+    это сказано; на одном слайде из трёх угол свободен — там логотип переезжает, остальные — как в шаблоне."""
+    src = build_custom(tmp_path, "busy", bg="FFFFFF", text="1F2937", cards=[("DCE8FD", "1F2937")], logos=[("Logo ACME", 0.04)])
+    prs = Presentation(str(src))
+    for s in prs.slides:
+        sp = s.shapes.add_shape(MSO_SHAPE.RECTANGLE, Emu(int(W * 0.55)), Emu(int(H * 0.7)), Emu(int(W * 0.43)), Emu(int(H * 0.28)))
+        sp.fill.solid()
+        sp.fill.fore_color.rgb = RGBColor.from_string("1F6FEB")
+        sp.line.fill.background()
+    prs.save(src)
+    m = _analyze(src, tmp_path / "ws")
+    out = tmp_path / "busy-brand.pptx"
+    res = apply_brand(src, out, _brand(), manifest=m, brand_dir=_brand_dir(tmp_path))
+    assert res.logo_note == "в шаблоне слева внизу, по брендбуку — справа внизу; оставлен слева внизу: угол из брендбука занят"
+    boxes = [b for part, b in _logo_boxes(out) if "/slides/" in part]
+    assert boxes and all(x < W * 0.5 for (x, _y, _cx, _cy) in boxes) and res.logos_replaced >= 1
+
+
+def test_layout_logo_moves_and_blocked_slides_keep_a_copy_of_the_layout(tmp_path, fonts_here):
+    """Логотип шаблона на макете (как у VK Tech). На двух слайдах из трёх угол брендбука свободен, на одном — занят
+    карточкой: макет получает логотип в углу брендбука, а слайд с карточкой — копию макета с логотипом в углу
+    шаблона. Файл открывается, копия — в списке макетов мастера, столкновений нет."""
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Emu(W), Emu(H)
+    lay = prs.slide_layouts[6]
+    png = _logo_png(tmp_path / "src" / "acme.png", (31, 111, 235, 255), (31, 41, 55, 255))
+    tmp_slide = prs.slides.add_slide(lay)
+    pic = tmp_slide.shapes.add_picture(str(png), Emu(int(W * 0.04)), Emu(int(H * 0.9)), height=Emu(int(H * 0.05)))
+    pic.name = "Logo ACME"
+    _, rid = lay.part.get_or_add_image_part(str(png))
+    el = pic._element
+    el.blipFill.blip.set("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed", rid)
+    lay.shapes._spTree.append(el)
+    sld_ids = prs.slides._sldIdLst
+    prs.part.drop_rel(sld_ids[0].rId)
+    sld_ids.remove(sld_ids[0])
+    for i in range(3):
+        s = prs.slides.add_slide(lay)
+        _text(s, f"Итоги квартала {i + 1}", int(W * 0.05), int(H * 0.06), int(W * 0.8), int(H * 0.14), "Georgia", 36, "1F2937")
+        _card(s, int(W * 0.05), "DCE8FD")
+        if i == 2:
+            sp = s.shapes.add_shape(MSO_SHAPE.RECTANGLE, Emu(int(W * 0.55)), Emu(int(H * 0.7)), Emu(int(W * 0.43)), Emu(int(H * 0.28)))
+            sp.fill.solid()
+            sp.fill.fore_color.rgb = RGBColor.from_string("1F6FEB")
+    src = tmp_path / "src" / "laylogo.pptx"
+    prs.save(src)
+    m = _analyze(src, tmp_path / "ws")
+    out = tmp_path / "laylogo-brand.pptx"
+    res = apply_brand(src, out, _brand(), manifest=m, brand_dir=_brand_dir(tmp_path))
+    assert res.logo_note and re.search(r"поставлен справа внизу, а на 1 из \d слайд\w* шаблона, где этот угол занят, — слева внизу", res.logo_note), res.logo_note
+    got = Presentation(str(out))
+    names = [l.name for mm in got.slide_masters for l in mm.slide_layouts]
+    assert any("логотип как в шаблоне" in n for n in names)
+    sides = []
+    for s in got.slides:
+        logos = [sh for owner in (s, s.slide_layout) for sh in owner.shapes if sh.name.startswith("Логотип")]
+        assert len(logos) == 1
+        sides.append("right" if logos[0].left > W * 0.5 else "left")
+    assert sides == ["right", "right", "left"]
+    assert _ir_collisions(out) == []
+
+
+def test_logo_only_on_covers_content_slides_get_the_brand_logo(tmp_path, fonts_here):
+    """Логотип шаблона только на обложке (как у VK Education): обложка — логотип бренда на его месте, содержательные
+    слайды — логотип бренда в углу из брендбука."""
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Emu(W), Emu(H)
+    png = _logo_png(tmp_path / "src" / "edu.png", (31, 111, 235, 255), (31, 41, 55, 255))
+    cover = prs.slides.add_slide(prs.slide_layouts[0])
+    cover.shapes.title.text = "Образовательная программа"
+    cover.placeholders[1].text = "Итоги года"
+    cover.shapes.add_picture(str(png), Emu(int(W * 0.04)), Emu(int(H * 0.05)), height=Emu(int(H * 0.06))).name = "Logo EDU"
+    for i in range(3):
+        s = prs.slides.add_slide(prs.slide_layouts[6])
+        _text(s, f"Итоги квартала {i + 1}", int(W * 0.05), int(H * 0.06), int(W * 0.8), int(H * 0.14), "Georgia", 36, "1F2937")
+        for k in range(3):
+            _card(s, int(W * (0.05 + 0.31 * k)), "DCE8FD")
+    src = tmp_path / "src" / "edu.pptx"
+    prs.save(src)
+    m = _analyze(src, tmp_path / "ws")
+    out = tmp_path / "edu-brand.pptx"
+    res = apply_brand(src, out, _brand(), manifest=m, brand_dir=_brand_dir(tmp_path))
+    assert res.logos_replaced == 1 and res.logos_added >= 1
+    assert res.logo_samples >= 1 and res.logo_covered == res.logo_samples
+    cover_logo = [b for part, b in _logo_boxes(out) if part == "ppt/slides/slide1.xml"]
+    assert cover_logo and cover_logo[0][0] < W * 0.3 and cover_logo[0][1] < H * 0.2
+
+
+def _dataset(name: str):
+    import os
+
+    env = os.environ.get("VERSTKA_FIXTURES_DIR")
+    for d in ([Path(env)] if env else []) + [p / "Датасет" for p in ROOT.parents]:
+        if d.is_dir():
+            hit = next((p for p in d.glob("*.pptx") if name in p.name.lower()), None)
+            if hit is not None:
+                return hit
+    return None
+
+
+def test_vk_education_content_slides_get_the_logo(tmp_path, fonts_missing):
+    """VK Education: логотип шаблона — только на обложках и финальных; содержательные слайды получают логотип VK Cloud
+    (раньше — ни на одном)."""
+    src = _dataset("education")
+    if src is None:
+        pytest.skip("шаблон VK Education не найден (VERSTKA_FIXTURES_DIR)")
+    m = _analyze(src, tmp_path / "ws")
+    out = tmp_path / "edu-brand.pptx"
+    res = apply_brand(src, out, _vk_cloud(), manifest=m, brand_dir=BRAND_EXAMPLE)
+    assert res.logo_samples >= 10 and res.logo_covered >= 0.8 * res.logo_samples
+    assert res.logos_added >= 10 and _ir_collisions(out) == []
+
+
+def test_brandbook_without_logo_files_says_so(tmp_path, fonts_here):
+    """Брендбук из tokens.json без файлов логотипа: спокойное предупреждение — логотип шаблона оставлен (или логотип
+    бренда не поставлен, если у шаблона его нет)."""
+    src = build_custom(tmp_path, "nofiles", bg="FFFFFF", text="1F2937", cards=[("1F6FEB", "FFFFFF")], logos=[("Logo ACME", 0.04)])
+    res = apply_brand(src, tmp_path / "a.pptx", _brand(logos=[]), manifest=_analyze(src, tmp_path / "ws"), brand_dir=_brand_dir(tmp_path))
+    assert "В брендбуке нет файлов логотипа — логотип шаблона оставлен." in res.warnings
+    src2 = build_custom(tmp_path, "nofiles2", bg="FFFFFF", text="1F2937", cards=[("1F6FEB", "FFFFFF")])
+    res2 = apply_brand(src2, tmp_path / "b.pptx", _brand(logos=[]), manifest=_analyze(src2, tmp_path / "ws2"), brand_dir=_brand_dir(tmp_path))
+    assert "В брендбуке нет файлов логотипа — логотип бренда не поставлен." in res2.warnings
+
+
+def test_status_red_is_kept_unless_the_brand_has_a_danger_colour(tmp_path, fonts_missing):
+    """Красный «ошибки и падения» не становится синим бренда: слот стандартной темы и красный акцент шаблона остаются
+    красными; если в брендбуке есть цвет ошибки — становятся им. Розово-малиновый главный акцент (ЛЦТ) — по-прежнему
+    цвет бренда."""
+    src = build_custom(tmp_path, "red", bg="FFFFFF", text="1F2937", cards=[("1F6FEB", "FFFFFF"), ("C9211E", "FFFFFF")])
+    m = _analyze(src, tmp_path / "ws")
+    plan = ap.brand_plan(src, m, _brand()).colors
+    assert plan.map("C0504D") == "C0504D" and plan.map("C9211E") == "C9211E"
+    assert plan.map_strict("C9211E") == "C9211E"
+    danger = _brand(colors=_brand().colors + [BrandColor(hex="#E5243B", role="danger")])
+    plan2 = ap.brand_plan(src, m, danger).colors
+    assert plan2.map("C0504D") == "E5243B" and plan2.map("C9211E") == "E5243B"
+    assert pal.status_red("C9211E") and not pal.status_red("FF0053") and not pal.status_red("FF3985")
+    lct = build_custom(tmp_path, "lctred", bg="F3F4F5", text="1C1D22", cards=[("FF0053", "FFFFFF")], theme={"accent1": "FF0053", "accent2": "FC3777"})
+    assert pal.hue_dist(pal.hue(ap.brand_plan(lct, _analyze(lct, tmp_path / "ws3"), _brand()).colors.map("FF0053")), pal.hue("0077FF")) <= 8
