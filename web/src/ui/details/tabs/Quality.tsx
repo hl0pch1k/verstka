@@ -29,6 +29,7 @@ import { useQualityFix } from "../useQualityFix";
 import { SheetCtx, sumNarrowing } from "../sheetMorph";
 import { observeWidth } from "../../kit/widthGate";
 import { bindShort } from "../../../lib/typo";
+import { radioGroup } from "../../kit/radios";
 import { EyeBox } from "./QualityEye";
 
 // Реестр проверок (GET /api/checks) один на страницу: его просят, когда лист открылся впервые; не ответил — раздел
@@ -89,6 +90,9 @@ export function QualityTab({ g, v, deck }: { g: Generation; v: Variant; deck: De
     setFilter(f);
     setK((x) => x + 1);
   };
+  // чипы — радиокнопки: стрелки переключают, в порядке Tab — только выбранный
+  const chips = chipsOf(main, filter);
+  const chipKeys = radioGroup(chips.map((c) => c.key), filter, pick);
   // сводка в узкой раскладке: справа уходят «Исправить всё автоматически», значок и (тесная колода) слово «отмеченные» —
   // их ширины задают, на сколько у́же колонка заголовка и счёта (стопка q-sumt) и как сжимаются их места (--allw, --ctw)
   const allOn = !fix.undo && fixableIds(main).length > 0;
@@ -221,9 +225,9 @@ export function QualityTab({ g, v, deck }: { g: Generation; v: Variant; deck: De
 
       <div className="dd-g" style={{ marginTop: 24 }}>
         <div style={{ minWidth: 0 }}>
-          <div ref={chipsRef} className="p2-in dq-chips" role="radiogroup" aria-label="Какие замечания показать" style={{ display: "flex", alignItems: "center", gap: 8, height: 40, animationDelay: "280ms" }}>
-            {chipsOf(main, filter).map((ch) => (
-              <button key={ch.key} type="button" role="radio" aria-checked={ch.on} className={cls("p2-pill dq-chip", ch.on && "dq-chip-on")} onClick={() => pick(ch.key)}>
+          <div ref={chipsRef} className="p2-in dq-chips" role="radiogroup" aria-label="Какие замечания показать" onKeyDown={chipKeys.onKeyDown} style={{ display: "flex", alignItems: "center", gap: 8, height: 40, animationDelay: "280ms" }}>
+            {chips.map((ch) => (
+              <button key={ch.key} type="button" role="radio" aria-checked={ch.on} tabIndex={chipKeys.tabIndex(ch.key)} className={cls("p2-pill dq-chip", ch.on && "dq-chip-on")} onClick={() => pick(ch.key)}>
                 <span>{ch.label}</span><span className={cls("dq-cnt", ch.n === 0 && "dq-cnt0")}>{ch.n}</span>
               </button>
             ))}

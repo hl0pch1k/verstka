@@ -52,8 +52,9 @@ function Tile({ t, delay, cut }: { t: BrandTile; delay: number; cut: boolean }) 
           {t.key === "palette" && (
             <span className="bb-atin bb-atpal">{(spec.colors ?? []).slice(0, 6).map((c, i) => <span key={`${c.hex}-${i}`} style={{ background: c.hex }} />)}</span>
           )}
+          {/* картинки логотипов сервер отдаёт, когда разбор кончился (до того — 409): пока идёт — знаки */}
           {t.key === "logos" && (
-            <span className="bb-atin bb-atlg">{(spec.logos ?? []).slice(0, 4).map((l, i) => <LogoTile key={`${l.file}-${i}`} logo={l} brandId={b.id} />)}</span>
+            <span className="bb-atin bb-atlg">{(spec.logos ?? []).slice(0, 4).map((l, i) => <LogoTile key={`${l.file}-${i}`} logo={l} brandId={b.phase === "run" ? null : b.id} />)}</span>
           )}
         </span>
         <span className="an-cap">

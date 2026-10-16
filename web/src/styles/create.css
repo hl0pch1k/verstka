@@ -502,9 +502,13 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 .tx-fw.dt-g.dt-w{grid-template-columns:minmax(0,1fr) 400px;column-gap:16px}
 .dt-g>.p2-field{grid-column:1;grid-row:1;min-width:0}
 .dt-cell{grid-column:2;grid-row:1;align-self:stretch;min-width:0;overflow:clip}
+/* сайт: панель не задаёт высоту строк — она во всю клетку (поле + 16 + цели = 348), список прокручивается внутри: при
+   восьми и больше карточках панель не уходит под плиту 03 */
+.dt-cell{position:relative}
 .dt-on>.dt-cell{grid-row:1 / span 2}
 .dt-goalw{grid-column:1;grid-row:2;min-width:0}
 .dt-pan{display:flex;flex-direction:column;height:100%;min-width:0;padding:16px 8px 8px;border-radius:24px;background:#FFFFFF}
+.dt-pan{position:absolute;inset:0;height:auto}
 .dt-hd{display:flex;align-items:center;justify-content:space-between;gap:8px;height:20px;margin:0 8px 8px;white-space:nowrap}
 .dt-lbl{flex:none;font-size:13px;font-weight:600;line-height:20px;color:#5A6272}
 .dt-st{min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:13px;font-weight:600;line-height:20px;color:#5A6272}
@@ -549,6 +553,7 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 .dt-gc{display:inline-flex;align-items:center;flex:none;height:32px;padding:0 12px;border-radius:999px;background:#E9F1FF;font-size:13px;font-weight:700;line-height:20px;color:#0B1220;white-space:nowrap}
 .dt-gt{display:inline-block;max-width:var(--gtw,220px);overflow:hidden;font-weight:600;color:#2563EB;white-space:nowrap;vertical-align:top}
 .dt-zone{z-index:5}
+.dt-gc-x{visibility:hidden}
 @media (min-width: 901px){
   /* узкая колода: панель «Данные» 400 → 320 (сайт: в тесной колоде — у́же, --dtn: dataRules `dataPanel`), поле — копии
      текста (c-tad); «→ тип графика» у целей сжимается и гаснет; в разборе брендбука вторая дорожка сжимается до нуля
@@ -564,6 +569,18 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
   .hp-nar .dt-gc{padding:0 10px;transition-duration:520ms}
   .dt-gt{transition:max-width 340ms var(--ease),opacity 160ms var(--ease) 80ms}
   .hp-nar .dt-gt{max-width:0;opacity:0;transition:max-width 520ms var(--ease),opacity 240ms var(--ease)}
+  /* сайт: таблетка, не поместившаяся целиком в одной из раскладок (GoalsBox, dataRules `goalsFit`), гаснет в ней на месте —
+     по таймингу hp-wo / hp-no, вместе с ходом своих полей; не помещается ни в одной — не видна */
+  .dt-gc.hp-wo{transition:padding 340ms var(--ease),opacity 160ms var(--ease) 80ms,visibility 0s linear 0s}
+  .hp-nar .dt-gc.hp-wo{transition:padding 520ms var(--ease),opacity 240ms var(--ease),visibility 0s linear 240ms}
+  .dt-gc.hp-no{transition:padding 340ms var(--ease),opacity 160ms var(--ease),visibility 0s linear 160ms}
+  .hp-nar .dt-gc.hp-no{transition:padding 520ms var(--ease),opacity 240ms var(--ease) 120ms,visibility 0s linear 0s}
+  /* сайт: тесная колода с помощником — у карточки брендбука в заголовке шага 01 остаётся плитка палитры, подпись
+     сжимается и гаснет на месте (dataRules `brandTight`); название и подпись шаблона — целиком */
+  .bb-chip-t{transition:transform 160ms var(--ease),gap 340ms var(--ease)}
+  .bb-chip-t .bb-ct{max-width:var(--ctw,280px);overflow:hidden;transition:max-width 340ms var(--ease),opacity 160ms var(--ease) 80ms}
+  .hp-nar .bb-chip-t{gap:0;transition:transform 160ms var(--ease),gap 520ms var(--ease)}
+  .hp-nar .bb-chip-t .bb-ct{max-width:0;opacity:0;transition:max-width 520ms var(--ease),opacity 240ms var(--ease)}
   /* карточка шаблона рядом с брендбуком: в узкой колоде обложка сжимается и гаснет на месте (только в широкой) */
   .bb-tpl-n>img,.bb-tpl-n>.tp-wf-m{transition:width 340ms var(--ease),margin-right 340ms var(--ease),opacity 160ms var(--ease) 80ms}
   .hp-nar .bb-tpl-n>img,.hp-nar .bb-tpl-n>.tp-wf-m{width:0 !important;margin-right:-16px;opacity:0;transition:width 520ms var(--ease),margin-right 520ms var(--ease),opacity 240ms var(--ease)}

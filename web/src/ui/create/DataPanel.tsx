@@ -4,10 +4,11 @@
 // не переносится, строки обрезаются многоточием. Убрать файл: карточка гаснет 240 мс, нижние подъезжают на её место
 // (transform); последний — панель уезжает (её дорожка 400 → 0), коробка целей гаснет. Файлы, отпущенные на плиту 02, —
 // зона «Отпустите файлы — разберу данные» (как C-upload).
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { cls } from "../kit/cls";
 import { cardSize, cardTip, panelStatus, runWord, type DataCard } from "./dataRules";
 import { DsIcon, DsSpin, fileIcon } from "./dsKit";
+import { focusAfter } from "./dataModel";
 import { plural } from "../../lib/utils";
 
 const show = (on: boolean) => (on ? "p2-on" : "p2-off");
@@ -22,8 +23,8 @@ export interface PanelMotion {
   grid: string;
   /** Коробка целей стоит (видна или гаснет). */
   goals: boolean;
-  /** Карточка, которая гаснет. */
-  out: string | null;
+  /** Карточки, которые гаснут (убирают несколько подряд — гаснут вместе, каждая своим ходом). */
+  out: string[];
   /** Карточки, которые подъезжают на место убранной (класс `dt-upa` / `dt-upb` — новый ход на каждое удаление). */
   shift: Record<string, "a" | "b">;
   remove(key: string): void;
@@ -31,38 +32,47 @@ export interface PanelMotion {
 
 export function usePanelMotion(cards: DataCard[], removeCard: (key: string) => void): PanelMotion {
   const on = cards.length > 0;
-  const [out, setOut] = useState<string | null>(null);
-  const [shift, setShift] = useState<Record<string, "a" | "b">>({});
+  // въезд панели и последняя карточка: смена `on` решается в той же отрисовке (не эффектом после неё) — коробка целей и
+  // сетка `dt-on` не пропадают ни на один кадр, а гаснут (V2 `dtKeep`) и въезжают (`dtIn`)
+  const [prev, setPrev] = useState(on);
   const [keep, setKeep] = useState(false);
   const [enter, setEnter] = useState(false);
-  const was = useRef(on);
+  if (prev !== on) {
+    setPrev(on);
+    setKeep(!on);
+    setEnter(on);
+  }
   useEffect(() => {
-    if (on === was.current) return;
-    was.current = on;
-    if (on) {
-      setKeep(false);
-      setEnter(true);
-      const t = window.setTimeout(() => setEnter(false), IN_MS);
-      return () => window.clearTimeout(t);
-    }
-    setEnter(false);
-    setKeep(true);
+    if (!keep) return;
     const t = window.setTimeout(() => setKeep(false), KEEP_MS);
     return () => window.clearTimeout(t);
-  }, [on]);
+  }, [keep]);
+  useEffect(() => {
+    if (!enter) return;
+    const t = window.setTimeout(() => setEnter(false), IN_MS);
+    return () => window.clearTimeout(t);
+  }, [enter]);
+
+  const [out, setOut] = useState<string[]>([]);
+  const [shift, setShift] = useState<Record<string, "a" | "b">>({});
   const cardsNow = useRef(cards);
   cardsNow.current = cards;
   const outNow = useRef(out);
   outNow.current = out;
-  const timer = useRef(0);
-  useEffect(() => () => window.clearTimeout(timer.current), []);
+  const timers = useRef(new Map<string, number>());
+  useEffect(() => () => timers.current.forEach((t) => window.clearTimeout(t)), []);
   const remove = useCallback((key: string) => {
-    if (outNow.current) return;
-    setOut(key);
-    outNow.current = key;
-    timer.current = window.setTimeout(() => {
+    if (outNow.current.includes(key)) return;
+    outNow.current = [...outNow.current, key];
+    setOut(outNow.current);
+    // каждая убранная карточка гаснет своим ходом: второй ✕ во время первого не теряется
+    timers.current.set(key, window.setTimeout(() => {
+      timers.current.delete(key);
       const list = cardsNow.current;
-      const k = list.findIndex((c) => c.key === key);
+      const keys = list.map((c) => c.key);
+      const k = keys.indexOf(key);
+      const focused = !!document.activeElement?.closest?.(".dt-pan");
+      const target = focusAfter(keys, key, outNow.current);
       if (k >= 0) {
         setShift((sh) => {
           const next = { ...sh };
@@ -71,9 +81,14 @@ export function usePanelMotion(cards: DataCard[], removeCard: (key: string) => v
         });
         removeCard(key);
       }
-      setOut(null);
-      outNow.current = null;
-    }, OUT_MS);
+      outNow.current = outNow.current.filter((x) => x !== key);
+      setOut(outNow.current);
+      // фокус был в панели (✕ с клавиатуры или мыши): он встаёт на ✕ соседней карточки, а без карточек — на «Из файла»
+      if (focused) requestAnimationFrame(() => {
+        const el = target ? document.querySelector<HTMLElement>(`.dt-x[data-key="${CSS.escape(target)}"]`) : document.querySelector<HTMLElement>('[aria-controls="tx-menu"]');
+        el?.focus({ preventScroll: true });
+      });
+    }, OUT_MS));
   }, [removeCard]);
   return { grid: cls((on || keep) && "dt-on", on && "dt-w", enter && "dt-in"), goals: on || keep, out, shift, remove };
 }
@@ -84,7 +99,7 @@ function Card({ c, i, motion }: { c: DataCard; i: number; motion: PanelMotion })
   const sh = motion.shift[c.key];
   const bad = c.status === "fail";
   return (
-    <li className={cls("dt-li p2-in", motion.out === c.key && "dt-out", sh && `dt-up${sh}`)} style={{ animationDelay: `${160 + i * 40}ms` }}>
+    <li className={cls("dt-li p2-in", motion.out.includes(c.key) && "dt-out", sh && `dt-up${sh}`)} style={{ animationDelay: `${160 + i * 40}ms` }}>
       <div className={cls("dt-card", bad && "dt-card-bad")} title={cardTip(c)}>
         <span className="dt-ic" aria-hidden="true"><DsIcon name={bad ? "warn" : fileIcon(c.kind)} size={16} /></span>
         <span className="dt-tx">
@@ -103,7 +118,7 @@ function Card({ c, i, motion }: { c: DataCard; i: number; motion: PanelMotion })
             <span className={cls("dt-bad", show(bad))}>{c.error}</span>
           </span>
         </span>
-        <button type="button" className="dt-x" onClick={() => motion.remove(c.key)} aria-label={`Убрать файл «${c.file}»`} title="Убрать файл">
+        <button type="button" className="dt-x" data-key={c.key} onClick={() => motion.remove(c.key)} aria-label={`Убрать файл «${c.file}»`} title="Убрать файл">
           <DsIcon name="x" size={14} />
         </button>
       </div>
@@ -114,13 +129,26 @@ function Card({ c, i, motion }: { c: DataCard; i: number; motion: PanelMotion })
 /** Панель «Данные» (клетка `.dt-cell` — её ставит TextBody в сетку поля). */
 export function DataPanel({ cards, motion }: { cards: DataCard[]; motion: PanelMotion }) {
   const st = panelStatus(cards);
+  // карточек больше, чем помещается: список прокручивается внутри панели, края мягко растворяются (p2-fade) — знак, что
+  // дальше есть ещё (полосы прокрутки нет)
+  const list = useRef<HTMLUListElement>(null);
+  const [over, setOver] = useState(false);
+  useLayoutEffect(() => {
+    const el = list.current;
+    if (!el) return;
+    const check = () => setOver(el.scrollHeight > el.clientHeight + 1);
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [cards.length]);
   return (
     <section className="dt-pan" aria-labelledby="dt-h">
       <div className="dt-hd">
         <span id="dt-h" className="dt-lbl">Данные</span>
         <span className={cls("dt-st", st.busy && "dt-st-run")} aria-live="polite">{st.text}</span>
       </div>
-      <ul className="dt-list">
+      <ul ref={list} className={cls("dt-list", over && "p2-fade")}>
         {cards.map((c, i) => <Card key={c.key} c={c} i={i} motion={motion} />)}
       </ul>
     </section>

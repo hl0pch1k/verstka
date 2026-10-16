@@ -313,6 +313,16 @@ test("«Изменить текст»: параметры презентации
   assert.equal("auditModels" in deckPreset(gen({ eyes: null, audit_models: false })), false);
   assert.equal(deckPreset(gen({ audit_models: true })).auditModels, true);
 });
+test("«Изменить текст»: наборы данных, брендбук и что важнее — как у презентации; старая без них — не трогает «Создать»", () => {
+  const p = deckPreset(gen({ dataset_ids: ["d1", "d2"], brandbook_id: "b1", brand_priority: "template" }));
+  assert.deepEqual([p.datasetIds, p.brandbookId, p.brandPriority], [["d1", "d2"], "b1", "template"]);
+  // собрана без данных (сервер пишет [] и null) — с «Создать» они уходят
+  const none = deckPreset(gen({ dataset_ids: [], brandbook_id: null }));
+  assert.deepEqual([none.datasetIds, none.brandbookId, "brandPriority" in none], [[], null, false]);
+  // старая презентация — полей нет вовсе
+  const old = deckPreset(gen({}));
+  assert.deepEqual(["datasetIds" in old, "brandbookId" in old, "brandPriority" in old], [false, false, false]);
+});
 
 test("«Дописать текст»: текст, который написал агент, иначе свой текст презентации", () => {
   assert.equal(rewriteText(gen({ brief: "про интегралы", writer: WRITER })), WRITER.text);

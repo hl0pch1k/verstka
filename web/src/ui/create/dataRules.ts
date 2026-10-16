@@ -156,11 +156,11 @@ export function briefShort(text: string): string {
 export const dataFilesLabel = (n: number): string => `${plural(n, "файл", "файла", "файлов")} данных`;
 
 // ── панель «Данные» в узкой колоде: 400 → 320 (V2); сайт: в тесной колоде (окно около 1280) поле не у́же 280 — панель
-//    сжимается сильнее, но не у́же 240. --hpd поля (стопка c-tad) — на сколько поле у́же в узкой раскладке
+//    сжимается сильнее (не у́же 200). --hpd поля (стопка c-tad) — на сколько поле у́же в узкой раскладке
 const BODY_LEFT = 192;
 export const PANEL = 400;
 export const PANEL_NARROW = 320;
-export const PANEL_MIN = 240;
+export const PANEL_MIN = 200;
 export const FIELD_MIN = 280;
 const GAP = 16;
 export function dataPanel(wrap: number): { wide: number; narrow: number; hpd: number } {
@@ -169,6 +169,33 @@ export function dataPanel(wrap: number): { wide: number; narrow: number; hpd: nu
   const narrow = Math.max(PANEL_MIN, Math.min(PANEL_NARROW, body - GAP - FIELD_MIN));
   return { wide: PANEL, narrow, hpd: HELPER_COL - (PANEL - narrow) };
 }
+/** Ширина поля «О чём презентация» рядом с панелью: без помощника и с ним. */
+export function fieldWidths(wrap: number): { wide: number; narrow: number } {
+  const deck = wrap > 0 ? wrap : 1392;
+  const body = deck - PLATE_PAD - BODY_LEFT;
+  return { wide: body - PANEL - GAP, narrow: body - HELPER_COL - dataPanel(wrap).narrow - GAP };
+}
+
+/** Таблетки целей, которые помещаются целиком в коробку (поля 24, с помощником 16): в широкой раскладке таблетка —
+ *  «цель» + «→ график» и поля 12, в узкой — только «цель» и поля 10; промежуток 8. Не поместилась — она и следующие
+ *  гаснут в этой раскладке (а не обрезаются посреди слова); первая видна всегда. `w` — ширины текста цели и «→ график». */
+export function goalsFit(w: { q: number; gt: number }[], wrap: number): { wide: boolean[]; narrow: boolean[] } {
+  const f = fieldWidths(wrap);
+  const fit = (inner: number, width: (x: { q: number; gt: number }) => number) => {
+    let x = 0;
+    let ok = true;
+    return w.map((p, i) => {
+      x += (i ? 8 : 0) + width(p);
+      ok = ok && (i === 0 || x <= inner + 0.5);
+      return ok;
+    });
+  };
+  return { wide: fit(f.wide - 48, (p) => p.q + 24 + p.gt), narrow: fit(f.narrow - 32, (p) => p.q + 20) };
+}
+
+/** Тесная колода с помощником (окно около 1366 и уже): в заголовке шага 01 у карточки брендбука остаётся плитка палитры —
+ *  подпись сжимается и гаснет, место — шаблону и «Сменить». */
+export const brandTight = (wrap: number): boolean => (wrap > 0 ? wrap : 1392) - HELPER_COL < 960;
 
 // ── брендбук
 export type BrandSource = "pdf" | "json" | "dir" | "figma";

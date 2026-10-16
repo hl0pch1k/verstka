@@ -2,10 +2,11 @@
 // меню как «Из файла» (выровнено по правому краю кнопки) → разбор в теле шага (BrandAnalysis) → карточка с палитрой
 // (BrandCard), она открывает слой «Брендбук». Пока разбор идёт — строка «Разбираю брендбук…». Каждое из трёх
 // проявляется (p2-in), меню — 240 мс, гаснет 160 мс. Figma: пункт меню раскрывает в том же меню поле ссылки.
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useApp } from "../../store";
 import { cls } from "../kit/cls";
-import { BRAND_ACCEPT, BRAND_ITEMS, BRAND_SAMPLE, brandMeta, brandName, brandPalette, figmaUrlOk, type BrandSource } from "./dataRules";
+import { BRAND_ACCEPT, BRAND_ITEMS, BRAND_SAMPLE, brandMeta, brandName, brandPalette, brandTight, figmaUrlOk, type BrandSource } from "./dataRules";
+import { useDeckWrap } from "../deck/useDeckFit";
 import { DsIcon, DsSpin, type DsIconName } from "./dsKit";
 
 const ITEM_ICON: Record<BrandSource, DsIconName> = { pdf: "file", json: "json", dir: "folder", figma: "frame" };
@@ -24,13 +25,28 @@ export function PaletteTile({ hexes, className }: { hexes: string[]; className?:
 /** Карточка брендбука — пара карточке шаблона: плитка палитры и две строки; клик — слой «Брендбук». */
 export function BrandCard() {
   const { data, dispatch } = useApp();
+  const tight = brandTight(useDeckWrap());
   const b = data.brand;
+  // подпись в тесной колоде сжимается до нуля от своей ширины (--ctw — замер): ход идёт той же кривой до конца
+  const ct = useRef<HTMLSpanElement>(null);
+  const label = b.spec ? `${brandName(b.spec, b.file)}|${brandMeta(b.spec)}` : "";
+  useLayoutEffect(() => {
+    const el = ct.current;
+    if (!el) return;
+    let alive = true;
+    const measure = () => alive && el.style.setProperty("--ctw", `${Math.ceil(el.scrollWidth)}px`);
+    measure();
+    void document.fonts?.ready.then(measure);
+    return () => {
+      alive = false;
+    };
+  }, [label, tight]);
   if (!b.spec) return null;
   return (
-    <button type="button" className="bb-chip p2-in" onClick={() => dispatch({ type: "set", patch: { brandLayer: true } })}
-      aria-haspopup="dialog" aria-controls="bb-lay" title="Открыть брендбук: палитра, шрифты, правила, расхождения с шаблоном">
+    <button type="button" className={cls("bb-chip p2-in", tight && "bb-chip-t")} onClick={() => dispatch({ type: "set", patch: { brandLayer: true } })}
+      aria-haspopup="dialog" aria-controls="bb-lay" title={`Брендбук ${brandName(b.spec, b.file)} · ${brandMeta(b.spec)} — палитра, шрифты, правила, расхождения с шаблоном`}>
       <PaletteTile hexes={brandPalette(b.spec)} />
-      <span className="bb-ct">
+      <span ref={ct} className="bb-ct">
         <span className="bb-cn">Брендбук {brandName(b.spec, b.file)}</span>
         <span className="bb-cm">{brandMeta(b.spec)}</span>
       </span>
@@ -128,7 +144,9 @@ export function BrandHead({ menu, setMenu, off }: { menu: boolean; setMenu(on: b
         <span className="bb-busy p2-in" role="status" title={b.file}><DsSpin /><span>Разбираю брендбук…</span></span>
       )}
       {has && <BrandCard />}
-      <div id="bb-menu" role="menu" aria-label="Выберите брендбук" aria-hidden={!menu || undefined} className={cls("tx-menu bb-menu", menu && "tx-menu-on")} onKeyDown={onKey}>
+      {/* поле ссылки Figma — не пункт меню: пока оно открыто, плита — группа с формой, а не меню */}
+      <div id="bb-menu" role={figma ? "group" : "menu"} aria-label={figma ? "Ссылка на файл Figma" : "Выберите брендбук"} aria-hidden={!menu || undefined}
+        className={cls("tx-menu bb-menu", menu && "tx-menu-on")} onKeyDown={onKey}>
         {!figma ? (
           <>
             <p className="tx-mcap">Брендбук или дизайн-система</p>
@@ -148,8 +166,8 @@ export function BrandHead({ menu, setMenu, off }: { menu: boolean; setMenu(on: b
           <form className="bb-fig p2-in" onSubmit={(e) => { e.preventDefault(); sendLink(); }}>
             <label className="tx-mcap" htmlFor="bb-figma">Ссылка на файл Figma</label>
             <input id="bb-figma" className={cls("bb-figin", linkBad && "bb-figbad")} type="url" inputMode="url" placeholder="https://www.figma.com/design/…"
-              value={link} onChange={(e) => { setLink(e.target.value); setLinkBad(false); }} aria-invalid={linkBad || undefined} />
-            <p className={cls("bb-fighint", linkBad && "bb-figbadt")}>{linkBad ? "Это не ссылка на файл Figma" : "Стили и переменные файла — по ключу сервера"}</p>
+              value={link} onChange={(e) => { setLink(e.target.value); setLinkBad(false); }} aria-invalid={linkBad || undefined} aria-describedby="bb-fighint" />
+            <p id="bb-fighint" className={cls("bb-fighint", linkBad && "bb-figbadt")} aria-live="polite">{linkBad ? "Это не ссылка на файл Figma" : "Стили и переменные файла — по ключу сервера"}</p>
             <div className="bb-figrow">
               <button type="button" className="p2-gb" onClick={() => setFigma(false)}>Назад</button>
               <button type="submit" className="p2-ob" style={{ height: 40 }} disabled={!link.trim()}>Разобрать</button>

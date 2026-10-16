@@ -136,9 +136,7 @@ export function useParamsPlate(): ParamsPlate {
     setDataWait(wait);
     if (wait) return;
     setAttempt(Date.now());
-    const req = buildRequest({ templateId, brief, params, strategies, modelOn, images, improve, data: data.request });
-    data.markUsed([...(req.dataset_ids ?? []), ...(req.brandbook_id ? [req.brandbook_id] : [])]);
-    void startGeneration(req, slides.count);
+    void startGeneration(buildRequest({ templateId, brief, params, strategies, modelOn, images, improve, data: data.request }), slides.count);
   };
 
   // сборка кончилась, пока человек был в другом месте: «Открыть» — её презентация (как из «Мои презентации»: открытая

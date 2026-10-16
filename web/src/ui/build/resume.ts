@@ -46,9 +46,9 @@ export function backToText(ask: PendingBuild | null, own: string | null, shown: 
       audience: r.audience ?? null, purpose: r.purpose ?? null, slides: r.slides ?? null, useModels: r.use_models, eyes: r.eyes ?? null,
       pictures: r.pictures ?? null, strategies: r.strategies, improvedFrom: r.improved_from ?? null,
       ...(r.eyes === undefined || r.eyes === null ? { auditModels: r.audit_models } : {}),
-      // вторая ступень: наборы данных и брендбук сборки (запрос без них — то, что на «Создать», остаётся)
-      ...(r.dataset_ids ? { datasetIds: r.dataset_ids } : {}), ...(r.brandbook_id ? { brandbookId: r.brandbook_id } : {}),
-      ...(r.brand_priority ? { brandPriority: r.brand_priority } : {}),
+      // вторая ступень: наборы данных и брендбук сборки. Запрос известен целиком: полей нет — сборка шла без них
+      // (buildRequest не шлёт пустые), и с «Создать» они уходят, а не смешиваются с этой сборкой
+      datasetIds: r.dataset_ids ?? [], brandbookId: r.brandbook_id ?? null, ...(r.brand_priority ? { brandPriority: r.brand_priority } : {}),
     },
   };
 }

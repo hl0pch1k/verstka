@@ -35,7 +35,7 @@ import { TextLayer } from "../layers/TextLayer";
 import { TplDeleteDialog } from "../layers/TplDeleteDialog";
 import { TplPreviewLayer } from "../layers/TplPreviewLayer";
 import { BrandLayer } from "../layers/BrandLayer";
-import { brandStrip, briefShort, dataFilesLabel } from "../create/dataRules";
+import { brandStrip, briefShort, dataFilesLabel, datasetIds } from "../create/dataRules";
 import { ResultPlate } from "../result/ResultPlate";
 import { buildRunning } from "../create/params";
 import { deckStrip, docTitle, openDeck } from "../result/resultView";
@@ -126,7 +126,7 @@ export function AppShell() {
   const deckData = deck?.dataset_ids?.length ?? 0;
   const s2 = result ? (deck ? (deckData && !deck.improved_from ? { title: briefShort(deck.brief ?? ""), meta: dataFilesLabel(deckData) } : deckStrip(deck, activeVariant)) : undefined)
     : build ? buildText
-    : textStrip(brief, { line: text.line, improve: ui.improve ? improveSource : null, data: data.cards.length });
+    : textStrip(brief, { line: text.line, improve: ui.improve ? improveSource : null, data: datasetIds(data.cards).length });
   // загрузка своего шаблона — одна на плиту 01 и раздел «Шаблоны»
   const upload = useTemplateUpload();
   // файл, отпущенный мимо включённой зоны, браузер не открывает

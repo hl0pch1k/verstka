@@ -866,6 +866,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return generationFlow(req, generationDeps, expected, (gid) => {
       ownRef.current = gid; // before the build is followed: its record goes to LS.build
       setOwnBuild(gid);
+      // сервер начал сборку с этими наборами и брендбуком: убранные с «Создать», на сервере они остаются (отказ — нет)
+      dataRef.current?.markUsed([...(req.dataset_ids ?? []), ...(req.brandbook_id ? [req.brandbook_id] : [])]);
       keepBuild({ gid, request: req, expected });
     });
   }, [generationDeps, keepBuild]);

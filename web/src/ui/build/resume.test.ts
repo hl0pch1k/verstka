@@ -217,7 +217,8 @@ test("«Вернуться к тексту»: своя сборка — к че�
   const theirs: PendingBuild = { gid: "A", request: { ...REQ, brief: "История VK", audience: "Школьники", strategies: ["visual"], use_models: true, eyes: null, audit_models: true }, expected: 5 };
   assert.deepEqual(backToText(theirs, "B", "A"), {
     brief: "История VK",
-    preset: { audience: "Школьники", purpose: null, slides: 5, useModels: true, eyes: null, pictures: null, strategies: ["visual"], improvedFrom: null, auditModels: true },
+    // сборка шла без файлов и брендбука — они уходят и с «Создать» (вторая ступень)
+    preset: { audience: "Школьники", purpose: null, slides: 5, useModels: true, eyes: null, pictures: null, strategies: ["visual"], improvedFrom: null, auditModels: true, datasetIds: [], brandbookId: null },
   });
   // своя сборка — черновик поля
   assert.equal(backToText(theirs, "A", "A"), null);

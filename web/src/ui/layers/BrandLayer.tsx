@@ -8,6 +8,7 @@ import { useApp } from "../../store";
 import { tplLabel } from "../../lib/plain";
 import type { BrandPriority } from "../../types";
 import { cls } from "../kit/cls";
+import { radioGroup } from "../kit/radios";
 import { Icon } from "../kit/Icon";
 import { LogoTile } from "../create/BrandAnalysis";
 import { brandLayerMeta, brandName, conflictView, fontRoleLabel, roleLabel } from "../create/dataRules";
@@ -35,9 +36,12 @@ export function BrandLayer() {
   const tpl = templates.find((t) => t.template_id === templateId);
   const tplName = tpl ? tplLabel(tpl) : null;
   const name = spec ? `Брендбук ${brandName(spec, b.file)}` : "";
+  const seg = radioGroup(SEG.map(([k]) => k), data.priority, data.setPriority);
+  // «Убрать брендбук»: карточки, открывшей слой, больше нет — фокус встаёт на кнопку «Брендбук», которая вернулась
   const remove = () => {
     close();
     data.removeBrand();
+    window.setTimeout(() => document.querySelector<HTMLElement>(".bb-btn")?.focus({ preventScroll: true }), 60);
   };
   return (
     <>
@@ -115,9 +119,9 @@ export function BrandLayer() {
                     <section className="p2-ls" aria-labelledby="bb-h-cf" style={lsDelay(200)}>
                       <h3 id="bb-h-cf" className="dd-h">Расхождения с шаблоном</h3>
                       <p className="bb-sub">При расхождении важнее</p>
-                      <div className="bb-seg" role="radiogroup" aria-label="При расхождении важнее">
+                      <div className="bb-seg" role="radiogroup" aria-label="При расхождении важнее" onKeyDown={seg.onKeyDown}>
                         {SEG.map(([k, label]) => (
-                          <button key={k} type="button" role="radio" aria-checked={data.priority === k} className={cls("p2-rseg", data.priority === k && "p2-rseg-on")}
+                          <button key={k} type="button" role="radio" aria-checked={data.priority === k} tabIndex={seg.tabIndex(k)} className={cls("p2-rseg", data.priority === k && "p2-rseg-on")}
                             onClick={() => data.setPriority(k)}>
                             {label}
                           </button>

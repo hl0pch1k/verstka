@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   BRAND_RUN0, brandFileName, brandLayerMeta, brandMeta, brandName, brandPalette, brandRows, brandSourceOf, brandTiles, briefShort,
-  cardName, cardSize, cardTip, conflictView, dataBusy, dataFilesLabel, dataKind, dataPanel, dataRequest, datasetIds, dropKind, figmaUrlOk,
+  brandTight, cardName, cardSize, cardTip, conflictView, dataBusy, dataFilesLabel, dataKind, dataPanel, dataRequest, datasetIds, dropKind, fieldWidths, figmaUrlOk, goalsFit,
   fmtLabel, foldBrandEvent, goalsLabel, goalsOf, hasTable, panelStatus, parseManifest, runWord, type DataCard,
 } from "./dataRules";
 import type { BrandConflict, BrandSpec, DatasetSummary, JobEvent } from "../../types";
@@ -78,16 +78,27 @@ test("полоса 02 с данными: первая фраза брифа до
   assert.equal(dataFilesLabel(7), "7 файлов данных");
   assert.equal(dataFilesLabel(1), "1 файл данных");
 });
-test("панель «Данные» в узкой колоде: 400 → 320 при 1440, в тесной колоде поле не у́же 280, панель не у́же 240", () => {
+test("панель «Данные» в узкой колоде: 400 → 320 при 1440; в тесной колоде поле не у́же 280 — панель сжимается", () => {
   assert.deepEqual(dataPanel(1392), { wide: 400, narrow: 320, hpd: 336 });
   assert.deepEqual(dataPanel(0), { wide: 400, narrow: 320, hpd: 336 });
-  const t = dataPanel(1232); // окно 1280
-  assert.equal(t.narrow, 240);
-  assert.equal(t.hpd, 256);
-  const m = dataPanel(1318); // окно 1366
-  assert.equal(m.narrow, 318);
-  // поле в узкой раскладке = тело − панель − 16
-  assert.equal(1318 - 416 - 96 - 192 - m.narrow - 16, 280);
+  assert.deepEqual(fieldWidths(1392), { wide: 688, narrow: 352 });
+  // окно 1280: полоса прокрутки окна поверх (1232) и классическая, 15 px (1217) — поле 280 в обеих
+  assert.deepEqual([dataPanel(1232).narrow, fieldWidths(1232).narrow, fieldWidths(1232).wide], [232, 280, 528]);
+  assert.deepEqual([dataPanel(1217).narrow, fieldWidths(1217).narrow], [217, 280]);
+  assert.equal(dataPanel(1232).hpd, 248);
+  // окно 1366
+  assert.deepEqual([dataPanel(1318).narrow, fieldWidths(1318).narrow], [318, 280]);
+  // ещё у́же — панель не у́же 200
+  assert.equal(dataPanel(1100).narrow, 200);
+});
+test("таблетки целей: гаснут те, что не помещаются целиком (первая — всегда); тесная колода с помощником", () => {
+  const w = [{ q: 150, gt: 129 }, { q: 105, gt: 70 }];
+  assert.deepEqual(goalsFit(w, 1392), { wide: [true, true], narrow: [true, true] });
+  assert.deepEqual(goalsFit(w, 1232), { wide: [true, false], narrow: [true, false] });
+  assert.deepEqual(goalsFit([{ q: 900, gt: 100 }], 1232), { wide: [true], narrow: [true] });
+  assert.equal(brandTight(1392), false);
+  assert.equal(brandTight(1318), true);
+  assert.equal(brandTight(1232), true);
 });
 test("брендбук: откуда, имя файла, ссылка Figma", () => {
   const f = (name: string) => new File(["x"], name);
