@@ -2,7 +2,7 @@
 // (книга XLSX — по карточке на лист), брендбук и его черновик, «использованные» наборы, свежесть расхождений. Чистые
 // функции — тесты в dataModel.test.ts.
 import type { BrandConflict, BrandPriority, BrandSpec, DatasetSummary } from "../../types";
-import { BRAND_RUN0, BRAND_STEPS, cardName, dataKind, MAX_DATA_BYTES, type BrandRun, type BrandSource, type DataCard } from "./dataRules";
+import { BRAND_RUN0, BRAND_STEPS, cardName, dataKind, sizeProblem, type BrandRun, type BrandSource, type DataCard } from "./dataRules";
 
 /** Разбор брендбука: нет; идёт (`run`); все шаги готовы и держатся 560 мс (`done`); гаснет 240 мс (`out`); брендбук
  *  приложен (`on`); не получилось (`fail` — причина в коробке разбора). */
@@ -54,8 +54,7 @@ export function toSummary(raw: DatasetSummary, id?: string): DatasetSummary {
 export function fileProblem(f: { name: string; size: number }): string | null {
   if (!dataKind(f.name)) return "Такой файл не прочитать — нужен CSV, XLSX, JSON или текст с таблицей";
   if (f.size === 0) return "Файл пустой";
-  if (f.size > MAX_DATA_BYTES) return "Файл больше 25 МБ";
-  return null;
+  return sizeProblem(f.name, f.size);
 }
 
 /** Новые карточки: в очередь (`wait`) или сразу с причиной (`fail`). */

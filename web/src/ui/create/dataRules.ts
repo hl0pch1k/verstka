@@ -15,8 +15,25 @@ const EXT: Record<string, SourceKind> = {
 /** Что принимает «Файлы с данными» (окно выбора и перетаскивание). */
 export const DATA_ACCEPT = [...Object.keys(EXT), "text/csv", "application/json", "text/plain", "text/markdown",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"].join(",");
-/** Больше — не отправляем: сервер всё равно откажет, а строка скажет это сразу. */
-export const MAX_DATA_BYTES = 25 * 1024 * 1024;
+/** Пределы размера файла с данными — как у сервера (verstka/api/app.py: `max_data_bytes`, `max_xlsx_bytes`,
+ *  `max_text_bytes`, по умолчанию 25 / 4 / 15 МБ): книга Excel и текст с таблицей читаются медленнее CSV — у них свои
+ *  пределы. Больше — файл не отправляется: сервер ответил бы 413, а карточка говорит то же самое сразу. */
+const MB = 1024 * 1024;
+export const MAX_DATA_BYTES = { any: 25 * MB, xlsx: 4 * MB, text: 15 * MB } as const;
+const mb = (bytes: number) => String(Math.round((bytes / MB) * 100) / 100).replace(".", ",");
+
+/** Файл больше своего предела — что скажет карточка (слова сервера, `upload_datasets` и `_slow_format_limit`); null —
+ *  размер годится. Сначала общий предел, потом предел медленного формата (как на сервере). Книга Excel — по
+ *  расширению (сервер узнаёт её по байтам). */
+export function sizeProblem(name: string, size: number): string | null {
+  if (size > MAX_DATA_BYTES.any) return `«${name}» больше ${mb(MAX_DATA_BYTES.any)} МБ — оставьте в файле только нужные строки и листы`;
+  const k = dataKind(name);
+  if (k === "xlsx" && size > MAX_DATA_BYTES.xlsx) {
+    return `Книга Excel «${name}» больше ${mb(MAX_DATA_BYTES.xlsx)} МБ — сохраните нужный лист как CSV (он прочитается быстрее) или оставьте в книге только нужные листы`;
+  }
+  if (k === "text" && size > MAX_DATA_BYTES.text) return `Текст «${name}» больше ${mb(MAX_DATA_BYTES.text)} МБ — сохраните таблицу из него как CSV (она прочитается быстрее)`;
+  return null;
+}
 
 const extOf = (name: string) => {
   const m = /\.[^./\\]+$/.exec(name.toLowerCase());

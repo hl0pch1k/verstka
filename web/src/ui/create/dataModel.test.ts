@@ -17,14 +17,14 @@ const SPEC: BrandSpec = {
 let n = 0;
 const key = () => `k${++n}`;
 
-test("новые карточки: годные — в очередь, без формата, пустые и больше 25 МБ — сразу с причиной", () => {
+test("новые карточки: годные — в очередь, без формата, пустые и больше предела — сразу с причиной (запроса нет)", () => {
   n = 0;
   const cs = newCards([{ name: "a.csv", size: 10 }, { name: "b.pdf", size: 10 }, { name: "c.csv", size: 0 }, { name: "d.json", size: 26 * 1024 * 1024 }], key);
   assert.deepEqual(cs.map((c) => [c.key, c.status, c.error]), [
     ["k1", "wait", null],
     ["k2", "fail", "Такой файл не прочитать — нужен CSV, XLSX, JSON или текст с таблицей"],
     ["k3", "fail", "Файл пустой"],
-    ["k4", "fail", "Файл больше 25 МБ"],
+    ["k4", "fail", "«d.json» больше 25 МБ — оставьте в файле только нужные строки и листы"],
   ]);
   assert.equal(fileProblem({ name: "x.tsv", size: 5 }), null);
 });

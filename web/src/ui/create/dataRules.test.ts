@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   BRAND_RUN0, brandFileName, brandLayerMeta, brandMeta, brandName, brandPalette, brandRows, brandSourceOf, brandTiles, briefShort,
   brandTight, cardName, cardSize, cardTip, conflictView, dataBusy, dataFilesLabel, dataKind, dataPanel, dataRequest, datasetIds, dropKind, fieldWidths, figmaUrlOk, goalsFit,
-  fmtLabel, foldBrandEvent, goalsLabel, goalsOf, hasTable, panelStatus, parseManifest, runWord, type DataCard,
+  fmtLabel, foldBrandEvent, goalsLabel, goalsOf, hasTable, MAX_DATA_BYTES, panelStatus, parseManifest, runWord, sizeProblem, type DataCard,
 } from "./dataRules";
 import type { BrandConflict, BrandSpec, DatasetSummary, JobEvent } from "../../types";
 
@@ -30,6 +30,20 @@ test("файлы данных: формат по расширению, CSV/XLSX/
   assert.deepEqual(["a.CSV", "b.tsv", "c.xlsx", "d.json", "e.txt", "f.md", "g.pdf"].map(dataKind), ["csv", "tsv", "xlsx", "json", "text", "text", null]);
   assert.deepEqual(["a.csv", "b.md", "c.pptx", "d.docx"].map(dropKind), ["data", "text", "deck", "other"]);
   assert.equal(fmtLabel("Регионы.xlsx"), "XLSX");
+});
+test("пределы размера — как у сервера: книга Excel 4 МБ, текст с таблицей 15 МБ, остальное 25 МБ; его же слова", () => {
+  const MB = 1024 * 1024;
+  assert.deepEqual(MAX_DATA_BYTES, { any: 25 * MB, xlsx: 4 * MB, text: 15 * MB });
+  assert.equal(sizeProblem("Регионы.xlsx", 4 * MB), null);
+  assert.equal(sizeProblem("Регионы.xlsx", 4 * MB + 1),
+    "Книга Excel «Регионы.xlsx» больше 4 МБ — сохраните нужный лист как CSV (он прочитается быстрее) или оставьте в книге только нужные листы");
+  assert.equal(sizeProblem("Итоги.md", 15 * MB + 1), "Текст «Итоги.md» больше 15 МБ — сохраните таблицу из него как CSV (она прочитается быстрее)");
+  assert.equal(sizeProblem("Итоги.txt", 15 * MB), null);
+  // CSV, TSV и JSON — общий предел 25 МБ (как на сервере: медленные форматы — только книга и текст)
+  assert.equal(sizeProblem("Выручка.csv", 20 * MB), null);
+  assert.equal(sizeProblem("Каналы.json", 25 * MB + 1), "«Каналы.json» больше 25 МБ — оставьте в файле только нужные строки и листы");
+  // больше общего предела — сначала общий, как на сервере
+  assert.equal(sizeProblem("Большая.xlsx", 30 * MB), "«Большая.xlsx» больше 25 МБ — оставьте в файле только нужные строки и листы");
 });
 test("таблица в тексте: Markdown с разделителем или три строки через табуляцию/«;»; обычный текст — не таблица", () => {
   assert.equal(hasTable("Итоги\n\n| Показатель | III кв. 2026 |\n|---|---|\n| Выручка | 1,24 млрд ₽ |\n"), true);
