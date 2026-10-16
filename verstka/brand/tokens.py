@@ -44,13 +44,27 @@ from verstka.brand.common import (
     words,
 )
 from verstka.schemas.brand import BrandRule, BrandSpec
+from verstka.schemas.common import relative_luminance
 
 _ALIAS = re.compile(r"\{([^{}]+)\}")
-# состояния и служебные оттенки — не цвета бренда
+# состояния и служебные оттенки — не цвета бренда («on-primary» — цвет текста на основном, «primary-container» — его тон)
 _STATE_WORDS = re.compile(
     r"(?<![a-z])(hover|active|pressed|focus|focused|disabled|visited|selected|overlay|shadow|scrim|alpha|opacity|transparent|"
-    r"border|outline|divider|stroke)(?![a-z])"
+    r"border|outline|divider|stroke|container|on (?:primary|secondary|accent|tertiary|error|brand|main))(?![a-z])"
 )
+# «on-surface», «on-background» (Material) — цвет текста на подложке и на фоне
+_ON_SURFACE = re.compile(r"(?<![a-z])on (?:surface|background)(?![a-z])")
+# «второй» цвет роли: «text.secondary», «background.muted» — при двух цветах роли основным остаётся не он
+_MINOR_WORDS = re.compile(
+    r"(?<![a-zа-яё])(secondary|tertiary|muted|subtle|disabled|placeholder|caption|hint|inverse|inverted|alt|alternate|alternative|"
+    r"variant|second|вторичн\w*|приглушённ\w*|приглушенн\w*)(?![a-zа-яё])"
+)
+_FONT_PATH = re.compile(r"(?<![a-z])(fonts?|typefaces?|typography|fontfamil\w*)(?![a-z])|шрифт\w*|гарнитур\w*")
+# свойства шрифта, значения которых — не названия семейств
+_NOT_FAMILY_PATH = re.compile(r"(?<![a-z])(size|weight|style|decoration|transform|spacing|height|case|align|variant|stretch|feature)s?$")
+_NOT_FAMILY_VALUES = {"italic", "normal", "oblique", "uppercase", "lowercase", "capitalize", "none", "underline", "bold", "regular", "medium", "light", "inherit", "initial"}
+_PLURAL_FONT_GROUP = re.compile(r"(?<![a-z])(fonts|typefaces|families|fontfamilies|font families|шрифты|гарнитуры)$")
+_DARK_THEME = re.compile(r"dark|night|тёмн|темн", re.I)
 _FALLBACK_WORDS = re.compile(r"(?<![a-zа-яё])(fallback|substitute|запасн\w*|замен\w*|резервн\w*)(?![a-zа-яё])")
 _MARGIN_PATH = re.compile(r"(?<![a-zа-яё])(margins?|safe area|page padding|slide padding|slide margin|пол[яе]|отступ\w*)(?![a-zа-яё])")
 _COLUMNS_PATH = re.compile(r"(?<![a-z])(columns?|cols?|колон\w*)(?![a-z])")
@@ -66,6 +80,8 @@ class Token:
     description: str = ""
     alias_of: Optional[tuple[str, ...]] = None
     extensions: dict = field(default_factory=dict)
+    # имя из списка палитры: {"colors": [{"name": "Acme Blue", "hex": "#0044CC", "role": "primary"}]} — путь несёт роль, имя — здесь
+    name: Optional[str] = None
 
     @property
     def dotted(self) -> str:
@@ -83,8 +99,28 @@ def _is_token(node: dict) -> bool:
     return not isinstance(node["value"], dict) or not any(isinstance(v, dict) for v in node["value"].values())
 
 
+_ITEM_VALUE_KEYS = ("$value", "value", "hex", "color", "colour", "family", "fontFamily", "font-family", "font")
+_ITEM_NAME_KEYS = ("name", "label", "title", "id", "key")
+_ITEM_ROLE_KEYS = ("role", "usage", "use", "purpose")
+
+
+def _list_item(item: dict, path: tuple[str, ...], index: int, inherited: Optional[str]) -> Optional[Token]:
+    """Элемент списка палитры или шрифтов {"name": "Acme Blue", "hex": "#0044CC", "role": "primary"} → токен: путь —
+    роль (или имя, или номер), имя цвета — отдельно."""
+    key = next((k for k in _ITEM_VALUE_KEYS if k in item and isinstance(item[k], (str, int, float, dict, list))), None)
+    if key is None or isinstance(item[key], bool):
+        return None
+    role = next((str(item[k]) for k in _ITEM_ROLE_KEYS if isinstance(item.get(k), str) and item[k].strip()), None)
+    name = next((str(item[k]).strip() for k in _ITEM_NAME_KEYS if isinstance(item.get(k), str) and item[k].strip()), None)
+    label = role or name or str(index)
+    return Token(path=path + (label,), value=item[key], type=(item.get("$type") or item.get("type")) if isinstance(item.get("$type") or item.get("type"), str) else inherited,
+                 description=str(item.get("description") or item.get("$description") or ""), name=name if role else None)
+
+
 def flatten(data: Any) -> list[Token]:
-    """Все токены файла (лист дерева или узел с `$value`/`value`) с путём, типом (своим или группы) и описанием."""
+    """Все токены файла (лист дерева или узел с `$value`/`value`) с путём, типом (своим или группы) и описанием. Списки —
+    палитра ({"colors": [{"name": …, "hex": …}]} или ["#0077FF", …]) и шрифты ({"fonts": ["Inter", "Roboto"]}), как и
+    верхнеуровневый список."""
     out: list[Token] = []
 
     def walk(node: Any, path: tuple[str, ...], inherited: Optional[str], depth: int) -> None:
@@ -111,21 +147,41 @@ def flatten(data: Any) -> list[Token]:
         elif isinstance(node, (str, int, float)):
             if path:
                 out.append(Token(path=path, value=node, type=inherited))
-        elif isinstance(node, list) and path and node and all(isinstance(x, str) for x in node):
-            out.append(Token(path=path, value=list(node), type=inherited))
+        elif isinstance(node, list) and node:
+            strings = all(isinstance(x, str) for x in node)
+            plural = bool(path) and bool(_PLURAL_FONT_GROUP.search(words(path[-1])))
+            if strings and path and not plural and not all(parse_color(x, named=True) for x in node):
+                out.append(Token(path=path, value=list(node), type=inherited))  # «font-body»: ["Golos Text", "Play"] — стопка шрифтов
+                return
+            for i, item in enumerate(node):
+                if isinstance(item, dict):
+                    tok = _list_item(item, path, i, inherited)
+                    if tok is not None:
+                        out.append(tok)
+                    else:
+                        walk(item, path + (str(item.get("name") or i),), inherited, depth + 1)
+                elif isinstance(item, (str, int, float)) and not isinstance(item, bool):
+                    out.append(Token(path=path + (str(i),), value=item, type=inherited))
 
     walk(data, (), None, 0)
     return out
 
 
-def _index(tokens: list[Token], sets: set[str]) -> dict[str, Token]:
-    """Ссылки по полному пути и — для Tokens Studio — по пути без имени набора («global.color.x» → «color.x»)."""
+def _index(tokens: list[Token], sets: set[str], active: Optional[set[str]] = None, order: Optional[list[str]] = None) -> dict[str, Token]:
+    """Ссылки по полному пути и — для Tokens Studio — по пути без имени набора («global.color.x» → «color.x»). У Tokens Studio
+    токен позднего набора перекрывает ранний, а наборы выбранной темы — остальные."""
     idx: dict[str, Token] = {}
-    for t in tokens:
-        idx.setdefault(t.dotted, t)
-    for t in tokens:
+    if not sets:
+        for t in tokens:
+            idx.setdefault(t.dotted, t)
+        return idx
+    pos = {name: i for i, name in enumerate(order or [])}
+    inactive = [t for t in tokens if active is not None and t.path[0] in sets and t.path[0] not in active]
+    rest = sorted((t for t in tokens if t not in inactive), key=lambda t: pos.get(t.path[0], 0) if t.path[0] in sets else -1)
+    for t in inactive + rest:
+        idx[t.dotted] = t
         if len(t.path) > 1 and t.path[0] in sets:
-            idx.setdefault(".".join(t.path[1:]), t)
+            idx[".".join(t.path[1:])] = t
     return idx
 
 
@@ -177,7 +233,10 @@ def _dimension_px(value: Any) -> Optional[float]:
 
 
 def _color_name(t: Token, idx: dict[str, Token]) -> Optional[str]:
-    """Имя цвета: описание примитива («VK Blue») или его ключ, если он написан как имя («VK Blue»), а не «blue-500»."""
+    """Имя цвета: имя из списка палитры, описание примитива («VK Blue») или его ключ, если он написан как имя («VK Blue»), а не
+    «blue-500» и не слово-роль («Основной»)."""
+    if t.name and color_role(words(t.name)) is None:
+        return t.name
     for tok in (_alias_target(t.value, idx), t):
         if tok is None:
             continue
@@ -186,14 +245,18 @@ def _color_name(t: Token, idx: dict[str, Token]) -> Optional[str]:
             return d
     target = _alias_target(t.value, idx)
     key = (target or t).path[-1] if (target or t).path else ""
-    if key and (" " in key or any(c.isupper() for c in key)) and len(key) <= 30:
+    if key and (" " in key or any(c.isupper() for c in key)) and len(key) <= 30 and color_role(words(key)) is None:
         return key
     return None
+
+
+_COLOR_PATH = re.compile(r"(?<![a-z])(colou?rs?|palette|brand)(?![a-z])|цвет\w*|палитр\w*|бренд\w*")
 
 
 def _kind(t: Token, value: Any) -> Optional[str]:
     ty = (t.type or "").lower()
     w = words(t.dotted)
+    last = words(t.path[-1]) if t.path else ""
     if ty in ("color",):
         return "color"
     if ty in ("typography",) or (isinstance(value, dict) and ("fontFamily" in value or "font-family" in value)):
@@ -206,8 +269,12 @@ def _kind(t: Token, value: Any) -> Optional[str]:
         return "dimension"
     if ty == "" and parse_color(value) is not None:
         return "color"
-    if ty == "" and isinstance(value, (str, list)) and re.search(r"(?<![a-z])font(?![a-z])|шрифт", w):
+    if (ty == "" and isinstance(value, (str, list)) and _FONT_PATH.search(w) and not _NOT_FAMILY_PATH.search(last)
+            and not (isinstance(value, str) and value.strip().lower() in _NOT_FAMILY_VALUES)):
         return "family"
+    # «primary»: «blue» в группе цветов — название CSS-цвета
+    if ty == "" and isinstance(value, str) and (_COLOR_PATH.search(w) or color_role(w)) and parse_color(value, named=True) is not None:
+        return "color"
     if isinstance(value, str):
         return "string"
     return None
@@ -253,6 +320,34 @@ def _looks_like_figma_variables(data: Any) -> bool:
     return False
 
 
+def _chroma(hex_: str) -> float:
+    r, g, b = (int(hex_[i:i + 2], 16) for i in (1, 3, 5))
+    return (max(r, g, b) - min(r, g, b)) / 255
+
+
+def _active_sets(data: Any) -> Optional[set[str]]:
+    """Наборы токенов темы Tokens Studio, которые читаются: первая тема (светлая раньше тёмной), в которой есть наборы со
+    статусом source или enabled. Нет тем — None (читаются все наборы)."""
+    themes = data.get("$themes") if isinstance(data, dict) else None
+    if not isinstance(themes, list):
+        return None
+    cands: list[tuple[str, set[str]]] = []
+    for th in themes:
+        sel = th.get("selectedTokenSets") if isinstance(th, dict) else None
+        if isinstance(sel, dict):
+            on = {str(k) for k, v in sel.items() if str(v).lower() in ("source", "enabled")}
+            if on:
+                cands.append((str(th.get("name") or ""), on))
+    if not cands:
+        return None
+    return next((on for name, on in cands if not _DARK_THEME.search(name)), cands[0][1])
+
+
+def _unreadable(items: list[str]) -> str:
+    shown = "; ".join(items[:3]) + (f"; и ещё {len(items) - 3}" if len(items) > 3 else "")
+    return f"Не прочитал цвета: {shown}. Понимаю HEX, rgb(), hsl() и названия CSS — остальное пропустил."
+
+
 def spec_from_tokens(data: Any, *, file: Optional[str] = None, source: str = "tokens") -> BrandSpec:
     """Разобранный JSON токенов → `BrandSpec` (ошибка `BrandReadError`, если в нём нет ни цветов, ни шрифтов)."""
     if _looks_like_figma_variables(data):
@@ -262,17 +357,24 @@ def spec_from_tokens(data: Any, *, file: Optional[str] = None, source: str = "to
     if not isinstance(data, (dict, list)):
         raise BrandReadError("В JSON нет токенов дизайна: ожидался объект с цветами и шрифтами.")
     sets: set[str] = set()
+    order: list[str] = []
+    active: Optional[set[str]] = None
     if isinstance(data, dict):
         meta = data.get("$metadata")
         if isinstance(meta, dict) and isinstance(meta.get("tokenSetOrder"), list):
-            sets = {str(s) for s in meta["tokenSetOrder"]}
+            order = [str(s) for s in meta["tokenSetOrder"]]
+            sets = set(order)
         elif "$themes" in data:
-            sets = {k for k in data if not str(k).startswith("$")}
+            order = [k for k in data if not str(k).startswith("$")]
+            sets = set(order)
+        if sets:
+            active = _active_sets(data)  # у Tokens Studio читается одна тема, а не все наборы подряд (тёмный набор — не основной)
     tokens = flatten(data)
     if not tokens:
         raise BrandReadError("В JSON не нашёл токенов дизайна. Подойдут W3C Design Tokens, экспорт Tokens Studio или переменных Figma.")
-    idx = _index(tokens, sets)
+    idx = _index(tokens, sets, active, order)
     warnings: list[str] = []
+    unreadable: list[str] = []
 
     semantic: list[ColorHit] = []
     primitive: list[ColorHit] = []
@@ -286,6 +388,11 @@ def spec_from_tokens(data: Any, *, file: Optional[str] = None, source: str = "to
     color_rules: list[tuple[str, str]] = []
 
     for t in tokens:
+        if sets and t.path and t.path[0] in sets:
+            if active is not None and t.path[0] not in active:
+                continue  # набор, которого нет в выбранной теме
+            if len(t.path) > 1 and idx.get(".".join(t.path[1:])) is not t:
+                continue  # токен позднего набора перекрыл этот
         value = _resolve(t.value, idx)
         if t.type is None:
             target = _alias_target(t.value, idx)
@@ -294,11 +401,21 @@ def spec_from_tokens(data: Any, *, file: Optional[str] = None, source: str = "to
         kind = _kind(t, value)
         path_words = words(" ".join(t.path[1:] if sets and t.path and t.path[0] in sets else t.path))
         if kind == "color":
-            hx = parse_color(value)
-            if not hx or _STATE_WORDS.search(path_words):
+            if _ON_SURFACE.search(path_words):
+                path_words = _ON_SURFACE.sub("text", path_words)
+            if _STATE_WORDS.search(path_words):
                 continue
+            hx = parse_color(value, named=True)
+            if not hx:
+                if isinstance(value, str) and t.type and t.type.lower() == "color":
+                    unreadable.append(f"{t.dotted} (ссылка {value} не найдена)" if _ALIAS.fullmatch(value.strip()) else f"{t.dotted} («{value}»)")
+                elif isinstance(value, dict):
+                    unreadable.append(f"{t.dotted} (цветовое пространство {value.get('colorSpace', '?')})")
+                continue
+            path_words = re.sub(r"(?<![a-z])font(?![a-z])", "text", path_words)  # Style Dictionary: color.font.base — цвет текста
             role = color_role(path_words)
-            hit = ColorHit(hx, role, _color_name(t, idx))
+            rank = 1 if role in ("text", "background", "surface") and _MINOR_WORDS.search(path_words) else 0
+            hit = ColorHit(hx, role, _color_name(t, idx), rank=rank)
             (semantic if role else primitive).append(hit)
             if role and t.description and looks_like_rule(t.description):
                 color_rules.append((role, t.description.strip()))
@@ -338,10 +455,23 @@ def spec_from_tokens(data: Any, *, file: Optional[str] = None, source: str = "to
     # шкалы примитивов («blue.500») — сырьё для смысловых токенов: в палитру идут, только если смысловые токены не называют
     # цветов бренда (основной, дополнительный, акцент, графики)
     brand_roles = {"primary", "secondary", "accent", "chart"}
-    pool = semantic if any(h.role in brand_roles for h in semantic) else semantic + primitive
+    if any(h.role in brand_roles for h in semantic):
+        pool = list(semantic)
+        # «dark» и «light» плоского файла рядом с «brand-*»: белый и чёрный, если фон и текст не названы, берутся из примитивов
+        have = {h.role for h in semantic}
+        if "background" not in have:
+            light = [h for h in primitive if relative_luminance(h.hex) >= 0.85 and _chroma(h.hex) <= 0.06]
+            pool += sorted(light, key=lambda h: -relative_luminance(h.hex))[:1]
+        if "text" not in have:
+            dark = [h for h in primitive if relative_luminance(h.hex) <= 0.06 and _chroma(h.hex) <= 0.2]
+            pool += sorted(dark, key=lambda h: relative_luminance(h.hex))[:1]
+    else:
+        pool = semantic + primitive
     colors, w1 = make_palette(pool)
     fonts, w2 = make_fonts(font_hits, fallback=fallback)
     warnings += w1 + w2
+    if unreadable:
+        warnings.append(_unreadable(unreadable))
 
     name, root_rules = _root_meta(data)
     rules: list[BrandRule] = []
@@ -355,7 +485,8 @@ def spec_from_tokens(data: Any, *, file: Optional[str] = None, source: str = "to
     for r in root_rules:
         add_rule(rules, r)
     if not colors and not fonts:
-        raise BrandReadError("В JSON нет ни цветов, ни шрифтов. Подойдут W3C Design Tokens, экспорт Tokens Studio или переменных Figma.")
+        raise BrandReadError("В JSON нет ни цветов, ни шрифтов. " + (_unreadable(unreadable) + " " if unreadable else "")
+                             + "Подойдут W3C Design Tokens, экспорт Tokens Studio или переменных Figma.")
     return BrandSpec(
         name=name or (name_from_path(Path(file).stem) if file else None) or "",
         source=source,  # type: ignore[arg-type]

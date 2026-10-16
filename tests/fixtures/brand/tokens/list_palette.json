@@ -1,0 +1,1 @@
+{"name": "Acme", "palette": [{"name": "Acme Blue", "hex": "#0044CC", "role": "primary"}, {"name": "Acme Coral", "hex": "#FF5A4F", "role": "accent"}, {"name": "Ink", "hex": "#101820", "role": "text"}], "fonts": [{"family": "PT Sans", "role": "body"}]}

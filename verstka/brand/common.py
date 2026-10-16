@@ -77,12 +77,13 @@ _RGB_FN = re.compile(r"rgba?\(\s*(\d{1,3})\s*[, ]\s*(\d{1,3})\s*[, ]\s*(\d{1,3})
 _HSL_FN = re.compile(r"hsla?\(\s*(-?\d+(?:\.\d+)?)(?:deg)?\s*[, ]\s*(\d+(?:\.\d+)?)%\s*[, ]\s*(\d+(?:\.\d+)?)%", re.I)
 
 
-def parse_color(value: object) -> Optional[str]:
+def parse_color(value: object, *, named: bool = False) -> Optional[str]:
     """«#0077ff», «#0077FFCC», «rgb(0, 119, 255)», «hsl(217, 100%, 50%)», {"hex": …}, {"colorSpace": "srgb", "components": [0, .47, 1]},
-    {"r": 0, "g": .47, "b": 1} (Figma) → «#0077FF»; не цвет (и названия вроде «blue») — None."""
+    {"r": 0, "g": .47, "b": 1} (Figma) → «#0077FF»; не цвет — None. Названия CSS («blue») читаются только с `named=True`:
+    без него слово вроде «bold» или «left» цветом не считается."""
     if isinstance(value, dict):
         if isinstance(value.get("hex"), str):
-            return parse_color(value["hex"])
+            return parse_color(value["hex"], named=named)
         comps = value.get("components")
         if isinstance(comps, (list, tuple)) and len(comps) >= 3 and all(isinstance(c, (int, float)) for c in comps[:3]):
             if str(value.get("colorSpace", "srgb")).lower() not in ("srgb", ""):
@@ -109,6 +110,14 @@ def parse_color(value: object) -> Optional[str]:
         if sat <= 100 and lig <= 100:
             r, g, b = colorsys.hls_to_rgb(h / 360, lig / 100, sat / 100)
             return rgb_hex(r * 255, g * 255, b * 255)
+    if named and re.fullmatch(r"[A-Za-z]{3,25}", s):
+        try:
+            from PIL import ImageColor
+
+            r, g, b = ImageColor.getrgb(s.lower())[:3]
+            return rgb_hex(r, g, b)
+        except ValueError:
+            return None
     return None
 
 
