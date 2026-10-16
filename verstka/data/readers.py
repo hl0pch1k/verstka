@@ -43,6 +43,7 @@ from typing import Any, Optional, Union
 
 from verstka.data.parse import (
     BOOL,
+    COUNT_UNITS,
     MISSING,
     MISSING_FIRST,
     TIME_HEADER,
@@ -408,7 +409,10 @@ def _merge_headers(h1: list[Any], h2: list[Any], below: list[list[Any]], width: 
             unit = cu or pu
             names.append(f"{pn} {cn}" + (f", {unit}" if unit else ""))
             groups.append(pn or None)
-            if k2[j] == "text":
+            leaf_unit = _header_unit(s2[j])
+            if leaf_unit:
+                names[j] = f"{pn}, {leaf_unit}"  # строка единиц под группой: «Выручка» над «млн ₽ | %»
+            elif k2[j] == "text":
                 leaves[j] = cn + (f", {unit}" if unit else "")
         else:
             names.append(parent or s2[j])
@@ -455,12 +459,11 @@ def _build_table(
     first_name — имя безымянной первой колонки (ключи JSON-объекта), иначе «Колонка 1». epoch — начало отсчёта дат
     книги Excel; formula_cols — номера колонок листа с формулами без сохранённых значений (не выбрасываются)."""
     # «—» в ячейке: пропуск, но в таблице счётов с итогом — ноль; где стояли прочерки, помним (по строке-объекту)
-    small = len(rows) <= 20000
     dash_at: dict[int, list[int]] = {}
     normed = []
     for r in rows:
         nr = _norm_row(r)
-        if small and None in nr:
+        if None in nr:
             ds = [j for j, v in enumerate(r) if v.__class__ is str and v.strip() in _DASHES]
             if ds:
                 dash_at[id(nr)] = ds
@@ -598,18 +601,22 @@ def _build_table(
     row_units_all: Optional[list[Optional[str]]] = None
     if label_j is not None:
         row_units_all = _row_units(columns, label_j, names_units)
-        columns[label_j] = [(split_unit(v)[0] or v) if v.__class__ is str and split_unit(v)[1] else v
-                            for v in columns[label_j]]
+        # «Принято, чел.» → «Принято» (единица — в row_units); «Молоко 3,2%», «Скидка 10%» — имена, их не трогаем
+        columns[label_j] = [_label_unit(v)[0] if v.__class__ is str else v for v in columns[label_j]]
     totals_evident = bool(total_labels) or any(is_total_label(nm) for nm, _ in names_units)
     for j in range(width):
         name, unit = names_units[j]
         typed, cell_unit = _type_column(columns[j], name, decimal, english=english, epoch=epoch,
                                         rowwise=label_j is not None and j != label_j)
+        if unit is not None and (unit in COUNT_UNITS or _RATE_ONLY.match(unit)) and not _numeric_values(typed):
+            # «Менеджер, клиент», «Номер, заказ» — колонка не числа: это имя целиком, а не единица
+            name, unit = " ".join(raw_names[j].split()), None
+            names_units[j] = (name, unit)
         for i, label in saved.get(j, ()):
             if typed is columns[j]:
                 typed = list(typed)
             typed[i] = _clean_str(label)
-        if totals_evident and dash_rows:
+        if totals_evident and dash_rows and not _NOT_A_COUNT.search(name):
             typed = _dashes_as_zero(typed, j, dash_rows, set(total_labels))
         if all(v is None for v in typed) and not (j in formula_cols and name):
             continue  # пустая колонка (колонку формул без сохранённых значений оставляем — о ней заметка)
@@ -634,11 +641,16 @@ def _build_table(
     raw_header = [" ".join(shown[j].split()) if not shown[j].lower().startswith("unnamed:") else "" for j in keep]
     groups = [raw_groups[j] for j in keep]
     column_groups = groups if any(groups) else []
-    # единица из названия таблицы («Приём … по направлениям, человек») — числовым колонкам без своей единицы
+    # единица из названия таблицы («Приём … по направлениям, человек»): всем числовым колонкам без своей единицы, если
+    # они однородны (одного порядка, ни одна не противоречит единице по имени); иначе — только колонкам, в имени
+    # которых есть слово этой единицы («Фонд оплаты» при «тыс. руб.»). Нет признаков — единица остаётся в заметках
     title_unit = _title_unit(title_rows) if label_j is None else None
     if title_unit:
-        for pos, j in enumerate(keep):
-            if units[pos] is None and _takes_title_unit(names[pos], typed_cols[pos], title_unit):
+        cands = [pos for pos in range(len(keep)) if units[pos] is None and _numeric_values(typed_cols[pos])]
+        homogeneous = bool(cands) and all(_takes_title_unit(names[pos], title_unit) for pos in cands) \
+            and _one_order([typed_cols[pos] for pos in cands])
+        for pos in cands:
+            if homogeneous or _names_the_unit(names[pos], title_unit):
                 units[pos] = title_unit
 
     n = len(typed_cols)
@@ -665,6 +677,35 @@ def _build_table(
 
 
 _DASHES = frozenset({"-", "--", "---", "—", "–", "−"})
+# прочерк у кода, номера, оценки, возраста, года — «нет», а не ноль
+_NOT_A_COUNT = re.compile(r"код|№|(?:^|[^а-яёa-z])(?:id|no|номер)(?:[^а-яёa-z]|$)|оценк|балл|возраст|(?:^|\s)год", re.IGNORECASE)
+_RATE_ONLY = re.compile(r"^(?:в|за|на) ")
+
+
+def _numeric_values(typed: list[Cell]) -> bool:
+    """Колонка — числа: есть int/float, а строки — только подписи итога."""
+    has = False
+    for v in typed:
+        if v is None:
+            continue
+        if v.__class__ is str:
+            if not is_total_label(v):
+                return False
+        elif _is_num(v):
+            has = True
+        else:
+            return False
+    return has
+
+
+def _one_order(cols: list[list[Cell]]) -> bool:
+    """Медианы колонок (по модулю, без нулей) одного порядка: наибольшая не больше чем в 10 раз больше наименьшей."""
+    meds = []
+    for c in cols:
+        vals = sorted(abs(float(v)) for v in c if _is_num(v) and v != 0)
+        if vals:
+            meds.append(vals[len(vals) // 2])
+    return bool(meds) and max(meds) <= 10 * min(meds)
 
 
 def _dashes_as_zero(typed: list[Cell], j: int, dash_rows: dict[int, list[int]], totals: set[int]) -> list[Cell]:
@@ -688,10 +729,33 @@ _CHANGE_COLUMN = re.compile(r"изменени|прирост|(?:^|\s)рост|�
                             re.IGNORECASE)
 
 
+_PAREN_LABEL = re.compile(r"^(?P<name>.*\S)\s*\((?P<unit>[^()]{1,30})\)$")
+
+
+def _label_unit(label: str) -> tuple[str, Optional[str]]:
+    """Подпись строки → (имя, единица), если единица — после запятой или в скобках, а имя не кончается цифрой:
+    «Принято на 1 курс, чел.» → («Принято на 1 курс», «чел.»), «Объём (млн ₽)» → («Объём», «млн ₽»). «Молоко 3,2%»,
+    «Скидка 10%», «НДС 20%» — имена: (подпись как есть, None)."""
+    text = " ".join(label.split())
+    m = _PAREN_LABEL.match(text)
+    if m:
+        name, unit = m.group("name").strip(), header_unit(m.group("unit"))
+    elif "," in text:
+        name, _, tail = text.rpartition(",")
+        name, unit = name.strip(), header_unit(tail.strip())
+    else:
+        return label, None
+    if not unit or not name or name[-1].isdigit():
+        return label, None
+    return name, unit
+
+
 def _metric_label_column(columns: list[list[Any]], names_units: list[tuple[str, Optional[str]]]) -> Optional[int]:
-    """Таблица показателей по строкам: первая заполненная колонка — разные подписи (не числа и не даты), и это
-    показатели — колонка «Показатель»/«Метрика»/«Статья» или у двух и больше подписей своя единица («Принято, чел.»,
-    «Объём НИОКР, млн ₽»). Тогда единицы — у строк (`Table.row_units`), а не у колонок. None — обычная таблица."""
+    """Таблица показателей по строкам: первая заполненная колонка — разные подписи (не числа и не даты), у других
+    числовых колонок нет своих единиц в шапке, и есть прямой признак единиц у строк — у двух и больше подписей единица
+    после запятой или в скобках («Принято, чел.», «Объём НИОКР, млн ₽»), или в ячейках строки одна единица, а у разных
+    строк — разные («1,24 млрд ₽» и «3 480»). Тогда единицы — у строк (`Table.row_units`). Слово «Показатель» в шапке
+    само по себе не признак. None — обычная таблица."""
     if len(columns) < 2:
         return None
     n = len(columns[0])
@@ -706,43 +770,75 @@ def _metric_label_column(columns: list[list[Any]], names_units: list[tuple[str, 
             return None
         if len(set(filled)) != len(filled):
             return None
-        values = [c for k, c in enumerate(columns) if k != j]
-        if not any(_is_num(v) or (v.__class__ is str and _quantity(v) is not None) for c in values for v in c):
+        values = [k for k in range(len(columns)) if k != j]
+        if not any(_is_num(v) or (v.__class__ is str and _quantity(v) is not None) for k in values for v in columns[k]):
             return None
-        with_units = sum(1 for v in filled if split_unit(v)[1])
-        return j if (_KPI_HEADER_ROWS.search(names_units[j][0]) or with_units >= 2) else None
+        if any(names_units[k][1] for k in values if any(v is not None for v in columns[k])):
+            return None  # у колонок свои единицы («Выручка, тыс. ₽») — единицы не у строк
+        with_units = sum(1 for v in filled if _label_unit(v)[1])
+        return j if with_units >= 2 or _cells_differ_by_row(columns, j, names_units) else None
     return None
 
 
-def _row_units(columns: list[list[Any]], label_j: int, names_units: list[tuple[str, Optional[str]]]) -> list[Optional[str]]:
-    """Единица каждой строки-показателя: из подписи («…, чел.» → «чел.»), иначе общая у её значений («1,24 млрд ₽»
-    и «1,01 млрд ₽» → «млрд ₽»); колонки изменений («Изменение», «Рост») не в счёт."""
+def _row_cell_units(columns: list[list[Any]], label_j: int, names_units: list[tuple[str, Optional[str]]],
+                    i: int) -> Optional[set]:
+    """Единицы значений строки i (колонки изменений не в счёт): множество `Quantity.unit` (None — без единицы);
+    None — в строке есть не число."""
     skip = {j for j, (nm, _) in enumerate(names_units) if _CHANGE_COLUMN.search(nm)}
+    seen: set = set()
+    for j, col in enumerate(columns):
+        v = col[i] if i < len(col) else None
+        if j == label_j or j in skip or v is None:
+            continue
+        if v.__class__ is str:
+            q = _quantity(v)
+            if q is None:
+                return None
+            seen.add((q.unit, q.base))
+        elif _is_num(v):
+            seen.add((None, None))
+    return seen
+
+
+def _cells_differ_by_row(columns: list[list[Any]], label_j: int,
+                         names_units: list[tuple[str, Optional[str]]]) -> bool:
+    """В каждой строке значения в одной единице, а у строк единицы разные по сути (разные базы: «млрд ₽» и «без
+    единицы»; «млн ₽» и «тыс. ₽» — одна база, это не признак)."""
+    bases = set()
+    for i in range(len(columns[label_j])):
+        seen = _row_cell_units(columns, label_j, names_units, i)
+        if seen is None or len(seen) > 1:
+            return False
+        if seen:
+            bases.add(next(iter(seen))[1])
+    return len(bases) >= 2 and any(b is not None for b in bases)
+
+
+def _row_units(columns: list[list[Any]], label_j: int, names_units: list[tuple[str, Optional[str]]]) -> list[Optional[str]]:
+    """Единица каждой строки-показателя: из подписи после запятой или в скобках («…, чел.» → «чел.»), иначе общая у её
+    значений («1,24 млрд ₽» и «1,01 млрд ₽» → «млрд ₽»); колонки изменений («Изменение», «Рост») не в счёт."""
     out: list[Optional[str]] = []
     for i, label in enumerate(columns[label_j]):
-        unit = split_unit(label)[1] if label.__class__ is str else None
+        unit = _label_unit(label)[1] if label.__class__ is str else None
         if unit is None:
-            seen: set = set()
-            for j, col in enumerate(columns):
-                v = col[i] if i < len(col) else None
-                if j == label_j or j in skip or v is None:
-                    continue
-                if v.__class__ is str:
-                    q = _quantity(v)
-                    seen.add(q.unit if q is not None else "?")
-                elif _is_num(v):
-                    seen.add(None)
-            unit = next(iter(seen)) if len(seen) == 1 and "?" not in seen else None
+            seen = _row_cell_units(columns, label_j, names_units, i)
+            unit = next(iter(seen))[0] if seen is not None and len(seen) == 1 else None
         out.append(unit)
     return out
 
 
-_COUNT_NAME = re.compile(r"кол-во|количеств|число|клиент|сделок|заказ|человек|чел\.|студент|сотрудник|штук|шт\.|мест",
+# слова, по которым колонка — счёт людей и штук, деньги или доля/рост: единица названия таблицы им может противоречить
+_COUNT_NAME = re.compile(r"кол-во|количеств|число|клиент|сделок|заказ|человек|чел\.|студент|сотрудник|штук|шт\.|мест|"
+                         r"магазин|филиал|визит|лид|посещ|единиц|площад|объём|объем|вес|длин|расстоян",
                          re.IGNORECASE)
-_MONEYISH_NAME = re.compile(r"выручк|доход|прибыл|стоимост|цен[аыу]|сумм|руб|затрат|расход|зарплат|оклад|чек",
-                            re.IGNORECASE)
-_RATE_NAME = re.compile(r"дол[яиюей]|процент|(?:^|\s)рост|изменени|прирост|темп|конверси|%|индекс|балл|рейтинг|оценк",
-                        re.IGNORECASE)
+_MONEYISH_NAME = re.compile(r"выручк|доход|прибыл|стоимост|цен[аыу]|сумм|руб|затрат|расход|зарплат|оклад|чек|фонд|"
+                            r"преми|стипенди|выплат|оборот|бюджет\s|бюджета|финанс", re.IGNORECASE)
+_RATE_NAME = re.compile(r"дол[яиюей]|процент|(?:^|\s)рост|изменени|прирост|темп|конверси|%|индекс|балл|рейтинг|оценк|"
+                        r"текучест|конкурс", re.IGNORECASE)
+# слово самой единицы в имени колонки: «Численность» при «человек», «Фонд оплаты» при «тыс. руб.»
+_PERSON_NAME = re.compile(r"численност|человек|чел\.|сотрудник|студент|работник|персонал|штат|учащ|ученик|участник|"
+                          r"посетител|пациент|жител|населени|принят|зачислен|при[её]м|абитуриент|выпускник",
+                          re.IGNORECASE)
 
 
 def _title_unit(title_rows: list[list[Any]]) -> Optional[str]:
@@ -757,17 +853,26 @@ def _title_unit(title_rows: list[list[Any]]) -> Optional[str]:
     return None
 
 
-def _takes_title_unit(name: str, typed: list[Cell], unit: str) -> bool:
-    """Единица названия таблицы подходит колонке: колонка — числа, это не доля/рост/индекс, у денег — не счёт людей и
-    штук, у счёта — не деньги."""
-    nums = [v for v in typed if v is not None and not isinstance(v, str)]
-    if not nums or not all(_is_num(v) for v in nums) or any(isinstance(v, str) for v in typed if v is not None
-                                                            and not is_total_label(v)):
-        return False
+def _takes_title_unit(name: str, unit: str) -> bool:
+    """Единица названия таблицы не противоречит колонке: это не доля/рост/индекс, у денег — не счёт людей и штук,
+    у счёта — не деньги."""
     if _RATE_NAME.search(name):
         return False
     money = any(c in unit for c in "₽$€£¥₸")
     return not (_COUNT_NAME.search(name) if money else _MONEYISH_NAME.search(name))
+
+
+def _names_the_unit(name: str, unit: str) -> bool:
+    """В имени колонки — слово самой единицы: деньги — «выручка», «фонд», «сумма»; «чел.» — «численность»,
+    «сотрудники»; другие — сама единица («Статей в Scopus» при «статей»)."""
+    if _RATE_NAME.search(name):
+        return False
+    if any(c in unit for c in "₽$€£¥₸"):
+        return bool(_MONEYISH_NAME.search(name))
+    if unit == "чел.":
+        return bool(_PERSON_NAME.search(name))
+    word = re.sub(r"[^а-яёa-z]", "", unit.lower())
+    return len(word) >= 3 and word in name.lower()
 
 
 def _dedupe(names: list[str]) -> list[str]:
@@ -1030,23 +1135,31 @@ def _looks_binary(text: str) -> bool:
 
 
 def _sniff_delimiter(lines: list[str]) -> Optional[str]:
-    """Разделитель по согласованности числа полей в первых строках: «\\t», «;», «,», «|»; None — одна колонка."""
+    """Разделитель по согласованности числа полей в первых строках: «\\t», «;», «,», «|»; None — одна колонка. Если
+    табуляция или «;» делят строки согласованно (≥ 80%) и без оборванных кавычек, они важнее запятой: в «;»-файле с
+    дробной запятой, «, %» в названии и «, шт.» в шапке запятая тоже делит все строки поровну, но это не разделитель."""
     sample = [ln for ln in lines if ln.strip()][:200]
     if not sample:
         return None
-    best: Optional[tuple[float, int, str]] = None
+    scored: list[tuple[float, int, str, bool]] = []
     for order, d in enumerate(("\t", ";", ",", "|")):
         if not any(d in ln for ln in sample):
             continue
-        counts = [len(r) for r in csv.reader(sample, delimiter=d)]
+        rows = list(csv.reader(sample, delimiter=d))
+        counts = [len(r) for r in rows]
         mode, freq = Counter(c for c in counts).most_common(1)[0]
         if mode < 2:
             continue
-        share = freq / len(counts)
-        score = (round(share, 1), -order)
-        if best is None or score > best[:2]:
-            best = (score[0], score[1], d)
-    if best is None or best[0] < 0.5:
+        share = round(freq / len(counts), 1)
+        stray = sum(1 for r in rows if any('"' in c for c in r)) > 0.1 * len(rows)
+        scored.append((share, -order, d, stray))
+    if not scored:
+        return None
+    steady = [x for x in scored if x[0] >= 0.8 and not x[3]]
+    strong = [x for x in steady if x[2] in ("\t", ";")]
+    pool = strong or steady or scored
+    best = max(pool, key=lambda x: (x[0], x[1]))
+    if best[0] < 0.5:
         return None
     return best[2]
 
@@ -1216,15 +1329,15 @@ _GLUED_TAIL = re.compile(r"[^\W\d_][^,]*\s\d{1,3}$")  # «Выручка 1» п�
 
 
 def _prose_cell(cell: str) -> bool:
-    """Ячейка шапки похожа на прозу, а не на название колонки: «коллеги!», «прошу посмотреть.», «Ниже данные за
-    квартал», «Выручка по месяцам: 100»."""
+    """Ячейка шапки похожа на прозу, а не на название колонки: «коллеги!», «прошу посмотреть.», «Выручка по месяцам:
+    100», четыре слова и больше со знаком предложения. «Среднее время ответа клиенту» — название."""
     c = cell.strip()
     if not c:
         return False
     if c[-1] in "!?" or ":" in c:
         return True
     words = c.split()
-    if len(words) >= 4:
+    if len(words) >= 4 and re.search(r"[.!?…]", c):  # длинное название колонки без знаков предложения — не проза
         return True
     return c.endswith(".") and len(words[-1].rstrip(".")) > 4  # «команда.», «посмотреть.» — не «руб.», «чел.»
 

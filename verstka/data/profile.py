@@ -75,9 +75,10 @@ _ID_NAME = re.compile(
 _MONEY_NAME = re.compile(
     r"выручк|доход|прибыл|стоимост|цен[аыу]|зарплат|оклад|чек|себестоим|стипенди|revenue|price|cost|income|profit|sales"
 )
-# «бюджет» (места), «расход» (топлива), «оборот» — деньги, только если на это что-то указывает: дробные значения или
-# «сумма», «руб.», «финансирование» в имени. Целые счёты («Бюджет: 120 мест») — числа
-_WEAK_MONEY_NAME = re.compile(r"бюджет|затрат|расход|оборот")
+# «бюджет» (места), «расход» (топлива), «оборот», «факт» — деньги, только если на это что-то указывает: «сумма»,
+# «руб.», «финансирование» в имени или величина рублей (от 10 000, медиана от 5 000). Малые значения («Бюджет: 120
+# мест», «Расход топлива: 12,5») — числа; с ростом масштаба тип меняется только в сторону денег
+_WEAK_MONEY_NAME = re.compile(r"бюджет|затрат|расход|оборот|(?:^|[^а-яё])факт(?:[^а-яёо]|$)|фактическ")
 _MONEY_HINT = re.compile(r"сумм|руб|₽|финанс|средств|деньг|денеж")
 _PERCENT_NAME = re.compile(r"%|процент|доля|доли|share|percent|конверси")
 _FRACTION_NAME = re.compile(r"доля|доли|share|удельн")
@@ -183,6 +184,7 @@ class _Col:
     fraction: bool = False
     free_text: bool = False  # длинный текст (комментарии), а не подпись строки
     outlier_rows: list[int] = field(default_factory=list)
+    hi_fence: float = math.inf  # верхняя граница Тьюки (у колонки без выбросов — бесконечность)
     outliers: list[Outlier] = field(default_factory=list)
 
 
@@ -389,7 +391,8 @@ def _try_time(str_keys: list, kinds: dict, cnt: Counter, str_rows: int, lname: s
         return None
     if any(g == "hour" for g, _ in parsed.values()):
         # время суток: несколько времён в один день и ряд по часам плотный (≥ 80% часов или не дольше трёх суток) —
-        # ось по часам; журнал событий (заказы в рабочие часы за два месяца) и по одному времени в день — по дням.
+        # ось по часам (на коротком отрезке — от 50%); журнал событий (заказы в рабочие часы) и по одному времени в
+        # день — по дням.
         # Минуты не различаются: записи раз в 15 минут ложатся на часовую ось по нескольку в час
         hours = {(o if g == "hour" else o * 24) for g, o in parsed.values() if g in ("hour", "day")}
         by_hour = len(hours) > len({h // 24 for h in hours})
@@ -397,7 +400,11 @@ def _try_time(str_keys: list, kinds: dict, cnt: Counter, str_rows: int, lname: s
             hs = np.array(sorted(hours), dtype=np.int64)
             step = max(int(np.gcd.reduce(np.diff(hs))), 1)
             expected = int((hs[-1] - hs[0]) // step) + 1
-            by_hour = hs.size >= 0.8 * expected or int(hs[-1] - hs[0]) <= 72
+            dense = hs.size >= 0.8 * expected
+            short = int(hs[-1] - hs[0]) <= 72 and hs.size >= 0.5 * expected
+            if short and not dense and len({int(h) // 24 for h in hs}) >= 2 and 24 - len({int(h) % 24 for h in hs}) >= 6:
+                short = False  # каждый день одни и те же часы (рабочий день 09–18) — ночи не пропуски: ось по дням
+            by_hour = dense or short
         for k, (g, o) in list(parsed.items()):
             if g == "hour" and not by_hour:
                 parsed[k] = ("day", o // 24)
@@ -434,6 +441,9 @@ def _type_number(c: _Col, lname: str, pct_share: float, money_share: float, firs
         if _ID_NAME.search(lname) or row_numbers:
             c.type, c.role = "id", "id"
             return
+    elif integral and v.size >= 3 and _ID_NAME.search(lname) and not unit:
+        c.type, c.role = "id", "id"  # «№ п/п», «Код» повторяются по периодам длинной таблицы — всё равно номер
+        return
     # год числами: «2023, 2024, 2025» с подсказкой в имени или первой колонкой подряд
     if integral and v.size >= 1 and float(v.min()) >= 1900 and float(v.max()) <= 2100 and not unit:
         steps = np.diff(v)
@@ -452,16 +462,19 @@ def _type_number(c: _Col, lname: str, pct_share: float, money_share: float, firs
     elif _PERCENT_NAME.search(lname) and v.size and vmin >= 0 and vmax <= 100 and not _has_currency(lunit):
         c.type = "percent"
         c.fraction = bool(vmax <= 1.0) and bool(_FRACTION_NAME.search(lname))
-    elif _has_currency(lunit) or money_share >= _SHARE_OK or (not unit and _money_by_name(lname, integral)):
+    elif _has_currency(lunit) or money_share >= _SHARE_OK or (
+            not unit and _money_by_name(lname, integral, vmin, float(np.median(v)) if v.size else 0.0)):
         c.type = "money"
     else:
         c.type = "number"
 
 
-def _money_by_name(lname: str, integral: bool) -> bool:
+def _money_by_name(lname: str, integral: bool, vmin: float = 0.0, vmed: float = 0.0) -> bool:
     if _MONEY_NAME.search(lname):
         return True
-    return bool(_WEAK_MONEY_NAME.search(lname)) and (not integral or bool(_MONEY_HINT.search(lname)))
+    if not _WEAK_MONEY_NAME.search(lname):
+        return False
+    return bool(_MONEY_HINT.search(lname)) or vmin >= 10_000 or vmed >= 5_000
 
 
 def _has_currency(lunit: str) -> bool:
@@ -526,6 +539,7 @@ def _find_outliers(c: _Col) -> None:
         basis = f" значений, кроме повторяющегося {_fmt(mode)},"
     gap = _TUKEY_K * iqr
     hi_fence, lo_fence = float(q3 + gap), float(q1 - gap)
+    c.hi_fence = hi_fence
     cut_hi = cut_lo = None
     i = int(np.searchsorted(xs, hi_fence, side="right"))
     if i < xs.size:
@@ -731,12 +745,16 @@ def _sums_to_total(m: _Col, axis: Optional[_Col], total_rows: np.ndarray) -> boo
 
 
 def _grouped_left(pa: _Col, ch: _Col, codes: np.ndarray) -> bool:
-    """Родитель левее дочерней колонки, у него меньше половины разных значений, и каждое значение идёт одним блоком
-    строк — так выгружают иерархию «институт → кафедра», «регион → город»."""
-    if pa.j >= ch.j or codes.size < 4 or not 2 <= pa.distinct <= codes.size // 2:
+    """Родитель левее дочерней колонки, каждое его значение идёт одним блоком строк, и блоков из трёх строк и больше —
+    не меньше трёх: так выгружают иерархию «институт → кафедра», «регион → город» («Пол → Сотрудник» — два блока,
+    не иерархия)."""
+    if pa.j >= ch.j or codes.size < 9 or not 3 <= pa.distinct <= codes.size // 2:
         return False
-    runs = 1 + int(np.count_nonzero(np.diff(codes)))
-    return runs == np.unique(codes).size
+    cuts = np.flatnonzero(np.diff(codes)) + 1
+    if cuts.size + 1 != np.unique(codes).size:
+        return False
+    lengths = np.diff(np.concatenate(([0], cuts, [codes.size])))
+    return int(np.count_nonzero(lengths >= 3)) >= 3
 
 
 def _total_column(cols: list[_Col], metrics: list[_Col]) -> tuple[Optional[_Col], list[_Col]]:
@@ -746,7 +764,7 @@ def _total_column(cols: list[_Col], metrics: list[_Col]) -> tuple[Optional[_Col]
         name = tc.name.strip().lower()
         if not (is_total_label(tc.name) or name.startswith(("всего", "итого", "общий итог", "total"))):
             continue
-        pool = [m for m in metrics if m is not tc and m.type != "percent" and not m.signed
+        pool = [m for m in metrics if m is not tc and (m.type != "percent" or tc.type == "percent") and not m.signed
                 and not _CHANGE_NAME.search(m.name.lower()) and (m.unit == tc.unit or not m.unit or not tc.unit)]
         left = []
         for m in reversed([m for m in pool if m.j < tc.j]):
@@ -769,8 +787,19 @@ def _row_sums_match(tc: _Col, parts: list[_Col]) -> bool:
     for m in parts:
         s += m.num[ok]
     t = tc.num[ok]
-    close = np.abs(s - t) <= np.maximum(0.01 * np.abs(t), 0.5)
+    # допуск — округление записи: у целых 0,5, у дробей полшага последнего знака («2,3» при 1,2 + 0,8 — не сумма)
+    step = 0.5 if all(_decimals(m.num[ok]) == 0 for m in [tc, *parts]) else \
+        0.51 * 10.0 ** -max(_decimals(m.num[ok]) for m in [tc, *parts])
+    close = np.abs(s - t) <= np.maximum(0.01 * np.abs(t), step)
     return float(close.mean()) >= _SHARE_OK
+
+
+def _decimals(x: np.ndarray) -> int:
+    """Сколько знаков после запятой у значений (до 6)."""
+    for d in range(7):
+        if bool(np.all(np.abs(np.round(x, d) - x) < 1e-9)):
+            return d
+    return 6
 
 
 def _strongly_related(metrics: list[_Col], skip: set) -> bool:
@@ -786,8 +815,32 @@ def _strongly_related(metrics: list[_Col], skip: set) -> bool:
             x, y = cand[a].num[ok], cand[b].num[ok]
             if float(x.std()) == 0 or float(y.std()) == 0:
                 continue
-            if abs(float(np.corrcoef(x, y)[0, 1])) >= 0.5:
+            if abs(float(np.corrcoef(x, y)[0, 1])) >= 0.5 and not _derived_pair(cand[a], cand[b], metrics):
                 return True
+    return False
+
+
+def _derived_pair(a: _Col, b: _Col, metrics: list[_Col]) -> bool:
+    """Связь по построению, а не находка: одна колонка пропорциональна другой («Розница» = «Закупка» × 1,3), или
+    равна произведению либо сумме другой и третьей («Сумма» = «Кол-во» × «Цена»)."""
+    ok = a.present & b.present
+    x, y = a.num[ok], b.num[ok]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ratio = x / y
+    ratio = ratio[np.isfinite(ratio)]
+    if ratio.size >= 5 and float(np.mean(ratio)) != 0 and float(np.std(ratio) / abs(np.mean(ratio))) < 0.02:
+        return True
+    for c in metrics:
+        if c is a or c is b:
+            continue
+        both = a.present & b.present & c.present
+        if int(both.sum()) < 5:
+            continue
+        xa, xb, xc = a.num[both], b.num[both], c.num[both]
+        for z, p, q in ((xa, xb, xc), (xb, xa, xc)):
+            for made in (p * q, p + q):
+                if float(np.mean(np.abs(made - z) <= np.maximum(0.01 * np.abs(z), 0.5))) >= _SHARE_OK:
+                    return True
     return False
 
 
@@ -977,9 +1030,11 @@ _ENTITY_NATURES = frozenset({"reference", "comparison", "shares", "kpi", "text_t
 
 
 def _split_outliers(cols: list[_Col], dims: list[_Col], nature: str) -> tuple[list[Outlier], list[Outlier]]:
-    """Выбросы → (заметные, естественные). Естественные: большие значения у справочника, сравнения, долей и карточек
-    (крупнейшие клиенты, Москва среди регионов) и выбросы — целые категории (все строки «Москвы» в длинной таблице по
-    месяцам). Заметные — остальные: время ответа в распределении, всплеск ряда, «сбой» −500 среди сотен."""
+    """Выбросы → (заметные, естественные). Естественные — только по прямому признаку: целые категории (все строки
+    «Москвы» в длинной таблице по месяцам) или «лестница» крупнейших у сущностей (справочник, сравнение, доли,
+    карточки): три значения и больше над границей, каждое не больше чем втрое выше предыдущего (начиная с самого
+    большого обычного) и не дальше 10 границ Тьюки — крупнейшие клиенты 212, 177, 158, 142… Заметные — остальное:
+    одиночный всплеск, опечатка ×10, доля больше 100%, отрицательное в счёте, любые длительности (минуты, часы, дни)."""
     notable: list[Outlier] = []
     expected: list[Outlier] = []
     for c in cols:
@@ -987,14 +1042,41 @@ def _split_outliers(cols: list[_Col], dims: list[_Col], nature: str) -> tuple[li
             continue
         if _category_scale(c.outlier_rows, dims):
             expected += c.outliers
-        elif nature in _ENTITY_NATURES:
-            # большие у крупных — норма; слишком малое («сбой» −500 среди сотен) — похоже на ошибку
-            med = float(np.median(c.num[c.present]))
-            for o in c.outliers:
-                (expected if o.value > med else notable).append(o)
-        else:
-            notable += c.outliers
+            continue
+        natural = _ladder_rows(c) if nature in _ENTITY_NATURES and not _is_duration(c) else set()
+        for o in c.outliers:
+            (expected if o.row in natural else notable).append(o)
     return notable, expected
+
+
+_DURATION_NAME = re.compile(r"врем|минут|(?:^|[^а-яё])мин(?:[^а-яё]|$)|час|секунд|(?:^|\s)дн(?:ей|я|и)?(?:\s|$|\.)|"
+                            r"суток|длительн|срок|ожидан|задержк")
+_DURATION_UNITS = frozenset({"мин", "ч", "с", "мс", "дн.", "нед.", "мес.", "лет"})
+
+
+def _is_duration(c: _Col) -> bool:
+    return (c.unit or "") in _DURATION_UNITS or bool(_DURATION_NAME.search(c.name.lower()))
+
+
+def _ladder_rows(c: _Col) -> set:
+    """Верхние выбросы, которые продолжают «лестницу» от самого большого обычного значения: шаг не больше ×3 и не
+    выше 10 границ Тьюки; лестница из трёх и больше — естественна (крупнейшие клиенты), иначе — ничего."""
+    present = c.present
+    v = c.num[present]
+    med = float(np.median(v))
+    out = set(c.outlier_rows)
+    body = [float(c.num[i]) for i in np.flatnonzero(present) if int(i) not in out]
+    if not body:
+        return set()
+    upper = sorted((float(c.num[r]), r) for r in c.outlier_rows if float(c.num[r]) > med)
+    prev = max(body)
+    accepted = set()
+    for val, r in upper:
+        if prev <= 0 or val > 3 * prev or val > 10 * c.hi_fence or (c.type == "percent" and val > 100):
+            break
+        accepted.add(r)
+        prev = val
+    return accepted if len(accepted) >= 3 else set()
 
 
 def _category_scale(rows: list[int], dims: list[_Col]) -> bool:

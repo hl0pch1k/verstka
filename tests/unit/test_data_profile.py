@@ -11,6 +11,7 @@ import csv
 import datetime as dt
 import json
 import math
+import random
 import re
 import time
 from pathlib import Path
@@ -520,7 +521,7 @@ def test_strict_total_rule_keeps_label_rows_that_only_start_with_vsego():
     p = _read("kpi.csv", "Показатель;Значение\nВсего клиентов;3480\nНовых клиентов;420\nУшли;35\nВыручка, млн ₽;1240\n")
     c = _col(p, "Значение")
     assert c.first == 3480 and _col(p, "Показатель").first == "Всего клиентов" and p.rows == 4
-    assert c.max is None  # у строк разные единицы (чел. и млн ₽) — максимум по колонке не считается
+    assert c.max == 3480.0  # одна подпись с единицей — не признак таблицы показателей по строкам
     same = _read("kpi.csv", "Показатель;Значение\nВсего клиентов;3480\nНовых клиентов;420\nУшли;35\n")
     assert (_col(same, "Значение").max, same.rows) == (3480.0, 3)
     # все подписи — «Итого…»: это не строки итога, а подписи; колонка подписей — категории без пропусков
@@ -681,7 +682,7 @@ def test_budget_word_alone_is_not_money():
     # M8: «Бюджет» — места (целые счёты), а не деньги; деньги — если на это что-то указывает
     p = profile_table(_t(["Направление", "Бюджет", "Платное"], [["А", 120, 140], ["Б", 110, 150], ["В", 90, 60]]))
     assert _col(p, "Бюджет").type == "number"
-    assert profile_table(_t(["Отдел", "Бюджет"], [["А", 12.5], ["Б", 7.25], ["В", 3.1]])).columns[1].type == "money"
+    assert profile_table(_t(["Отдел", "Бюджет"], [["А", 12.5], ["Б", 7.25], ["В", 3.1]])).columns[1].type == "number"
     assert profile_table(_t(["Отдел", "Сумма бюджета"], [["А", 12], ["Б", 7], ["В", 3]])).columns[1].type == "money"
     assert profile_table(_t(["Регион", "Выручка"], [["А", 12], ["Б", 7], ["В", 3]])).columns[1].type == "money"
 
@@ -703,17 +704,22 @@ def test_total_column_equal_to_the_sum_of_parts():
 
 
 def test_hierarchy_of_a_parent_listed_in_blocks_to_the_left():
-    # M16: «Корпус → Кафедра» (имя родителя не из словаря групп): каждая кафедра в одном факультете, факультет левее и идёт блоками
-    rows = [[f, k, 10 + i] for i, (f, k) in enumerate([("Физфак", "Оптики"), ("Физфак", "Акустики"), ("Физфак", "Ядерной"),
-                                                      ("Химфак", "Органики"), ("Химфак", "Неорганики"),
-                                                      ("Биофак", "Генетики"), ("Биофак", "Ботаники")])]
+    # M16: «Корпус → Кафедра» (имя родителя не из словаря групп): каждая кафедра в одном корпусе, корпус левее и идёт
+    # блоками — три блока по три строки и больше
+    pairs = [("Физфак", "Оптики"), ("Физфак", "Акустики"), ("Физфак", "Ядерной"), ("Химфак", "Органики"),
+             ("Химфак", "Неорганики"), ("Химфак", "Аналитики"), ("Биофак", "Генетики"), ("Биофак", "Ботаники"),
+             ("Биофак", "Зоологии")]
+    rows = [[f, k, 10 + i] for i, (f, k) in enumerate(pairs)]
     p = profile_table(_t(["Корпус", "Кафедра", "Публикаций"], rows))
     assert p.hierarchies == [("Кафедра", "Корпус")]
-    # родитель правее или вперемешку — случайность, а не иерархия
-    mixed = [rows[i] for i in (0, 3, 5, 1, 4, 6, 2)]
+    # родитель вперемешку или правее — случайность, а не иерархия
+    mixed = [rows[i] for i in (0, 3, 6, 1, 4, 7, 2, 5, 8)]
     assert profile_table(_t(["Корпус", "Кафедра", "Публикаций"], mixed)).hierarchies == []
     right = [[k, f, v] for f, k, v in rows]
     assert profile_table(_t(["Кафедра", "Корпус", "Публикаций"], right)).hierarchies == []
+    # два блока («Пол → Сотрудник») — сортировка, а не иерархия (повторное ревью, Minor 3)
+    two = [["М" if i < 6 else "Ж", f"Сотрудник {i}", 100 + i] for i in range(12)]
+    assert profile_table(_t(["Пол", "Сотрудник", "Оклад"], two)).hierarchies == []
 
 
 def test_id_group_and_two_correlated_measures_is_a_relationship():
@@ -747,8 +753,8 @@ def test_event_log_keeps_a_day_axis():
             rows.append([ts.strftime("%Y-%m-%dT%H:%M"), 100 + k])
     p = profile_table(_t(["Дата заказа", "Сумма"], rows, units=[None, "₽"]))
     assert p.time_axis.freq == "day" and p.time_axis.points == 60 and p.time_axis.missing_periods == []
-    short = [r for r in rows if r[0] < "2025-03-03"]  # двое суток — по часам видно, когда заказывают
-    assert profile_table(_t(["Дата заказа", "Сумма"], short)).time_axis.freq == "hour"
+    short = [r for r in rows if r[0] < "2025-03-03"]  # двое суток рабочих часов — ночи не пропуски (раунд 3, Minor 5)
+    assert profile_table(_t(["Дата заказа", "Сумма"], short)).time_axis.freq == "day"
 
 
 def test_quarter_hour_readings_lie_on_an_hourly_axis():
@@ -816,3 +822,102 @@ def test_a_big_category_in_a_long_series_is_not_an_outlier_issue():
     spike[7][1] = 900  # всплеск в одном месяце ряда — заметен
     q = profile_table(_t(["Месяц", "Заказы"], spike))
     assert [o.value for o in q.outliers] == [900.0] and q.expected_outliers == []
+
+
+# ── раунд 3: признаки вместо догадок ──────────────────────────────────────────────────────────────────────────────────
+def test_lone_spikes_stay_outliers_in_entity_tables():
+    # I-3: опечатка ×10 и больше, доля больше 100%, длительность — заметные выбросы даже в справочнике
+    rnd = random.Random(3)
+    tickets = [[f"T-{i}", f"Тема {i % 5}", "Иван", "Высокий", rnd.randint(5, 60)] for i in range(200)]
+    tickets.append(["T-x", "Тема 1", "Иван", "Высокий", 4800])
+    p = profile_table(_t(["Тикет", "Тема", "Исполнитель", "Приоритет", "Минут до ответа"], tickets))
+    assert [o.value for o in p.outliers] == [4800.0] and p.expected_outliers == []
+    clients = [[f"Клиент {i}", round(rnd.uniform(0.5, 12), 1)] for i in range(200)] + [["Клиент X", 1200.0]]
+    p = profile_table(_t(["Клиент", "Выручка"], clients, units=[None, "млн ₽"]))
+    assert 1200.0 in [o.value for o in p.outliers] and 1200.0 not in [o.value for o in p.expected_outliers]
+    staff = [[f"Сотрудник {i}", rnd.randint(60_000, 140_000)] for i in range(80)] + [["Сотрудник X", 9_000_000]]
+    p = profile_table(_t(["Сотрудник", "Оклад"], staff, units=[None, "₽"]))
+    assert [o.value for o in p.outliers] == [9_000_000.0]
+    share = [[f"Канал {i}", rnd.randint(1, 9)] for i in range(30)] + [["Канал X", 450]]
+    p = profile_table(_t(["Канал", "Доля"], share, units=[None, "%"]))
+    assert [o.value for o in p.outliers] == [450.0]
+
+
+def test_a_ladder_of_big_clients_is_natural():
+    # I-3: крупнейшие идут лестницей (каждый не больше чем втрое выше следующего) — естественны, карточка их не называет
+    vals = [round(5 + i / 20, 2) for i in range(60)] + [12.0, 16.0, 22.0, 30.0]
+    rows = [[f"Клиент {i:03d}", v] for i, v in enumerate(vals)]
+    p = profile_table(_t(["Клиент", "Выручка"], rows, units=[None, "млн ₽"]))
+    assert p.outliers == [] and sorted(o.value for o in p.expected_outliers) == [12.0, 16.0, 22.0, 30.0]
+    typo = rows + [["Клиент 999", 900.0]]  # опечатка над лестницей — заметна, лестница — нет
+    q = profile_table(_t(["Клиент", "Выручка"], typo, units=[None, "млн ₽"]))
+    assert [o.value for o in q.outliers] == [900.0] and len(q.expected_outliers) == 4
+
+
+def test_weak_money_words_need_ruble_magnitude():
+    # I-4: «Бюджет», «Факт», «Расходы», «Затраты», «Оборот» в целых рублях — деньги; малые числа — нет
+    big = profile_table(_t(["Отдел", "Бюджет", "Факт"], [["А", 1_500_000, 1_400_000], ["Б", 800_000, 820_000],
+                                                         ["В", 2_300_000, 2_100_000]]))
+    assert [c.type for c in big.columns[1:]] == ["money", "money"]
+    for name in ("Расходы", "Затраты", "Оборот"):
+        assert profile_table(_t(["Статья", name], [["А", 350_000], ["Б", 900_000], ["В", 150_000]])).columns[1].type \
+            == "money"
+    small = profile_table(_t(["Машина", "Расход топлива"], [["А", 12.5], ["Б", 15.0], ["В", 9.0]]))
+    assert small.columns[1].type == "number"
+
+
+def test_class_labels_are_categories():
+    # «5А», «5Б» … «11Б» — подписи классов, а не числа: «Класс» — категория, две метрики
+    from verstka.data.readers import read_bytes
+
+    rows = "\n".join(f"{g}{letter};{24 + (g * 3 + i) % 7};{3.5 + ((g + i) % 10) / 10}".replace(".", ",")
+                     for g in range(5, 12) for i, letter in enumerate("АБ"))
+    t = read_bytes("k.csv", ("Класс;Учеников;Средний балл\n" + rows + "\n").encode())[0]
+    assert t.rows[0][0] == "5А" and t.rows[-1][0] == "11Б"
+    p = profile_table(t)
+    assert (_col(p, "Класс").type, _col(p, "Класс").role) == ("category", "dimension")
+    assert p.metrics == ["Учеников", "Средний балл"] and p.nature == "comparison"
+    for label in ("5-А", "11 кл.", "1 курс", "2-й этаж"):
+        assert parse_number_value(label) is None, label
+
+
+def test_id_column_after_a_melt_stays_an_id():
+    # Minor 4: «№ п/п» повторяется по годам длинной таблицы — всё равно номер
+    from verstka.data.readers import read_bytes
+
+    t = read_bytes("n.csv", "№ п/п;Регион;2023;2024;2025\n1;Москва;10;20;30\n2;Казань;5;6;7\n3;Тверь;1;2;3\n".encode())[0]
+    p = profile_table(t)
+    assert _col(p, "№ п/п").role == "id" and p.metrics == ["Значение"]
+
+
+def test_short_business_hours_log_has_a_day_axis():
+    # Minor 5: два дня по 09–18 ч — меньше половины часов: ось по дням, без ночных «пропусков»
+    rows = [[(dt.datetime(2025, 3, 3, 9) + dt.timedelta(days=d, hours=h)).strftime("%Y-%m-%dT%H:%M"), 10 + h]
+            for d in range(3) for h in range(0, 10, 2)]
+    p = profile_table(_t(["Время", "Звонков"], rows))
+    assert p.time_axis.freq == "day" and p.time_axis.missing_periods == []
+
+
+def test_total_column_tolerance_and_percent_parts():
+    # Minor 6: 1,2 + 0,8 ≠ 2,3 — не итог; Minor 7: доли в % с «Всего, %» = 100 — части целого
+    rows = [["А", 1.2, 0.8, 2.3], ["Б", 4.2, 3.9, 8.4], ["В", 2.0, 1.1, 3.4]]
+    assert profile_table(_t(["Поставщик", "Закупка", "Доставка", "Итого"], rows)).total_column is None
+    exact = [["А", 1.2, 0.8, 2.0], ["Б", 4.2, 3.9, 8.1], ["В", 2.0, 1.1, 3.1]]
+    assert profile_table(_t(["Поставщик", "Закупка", "Доставка", "Итого"], exact)).total_column == "Итого"
+    pct = [["Москва", 60, 30, 10, 100], ["Казань", 50, 35, 15, 100], ["Омск", 40, 40, 20, 100]]
+    p = profile_table(_t(["Регион", "Онлайн", "Офлайн", "Партнёры", "Всего"], pct, units=[None, "%", "%", "%", "%"]))
+    assert p.total_column == "Всего" and p.part_columns == ["Онлайн", "Офлайн", "Партнёры"] and p.parts_of_whole
+
+
+def test_derived_columns_are_not_a_relationship():
+    # Minor 8: «Сумма» = «Кол-во» × «Цена», «Розница» = «Закупка» × 1,3 — связь по построению, а не находка
+    rnd = random.Random(5)
+    lines = []
+    for i in range(60):
+        q, price = rnd.randint(1, 20), rnd.randint(100, 900)
+        lines.append([f"Строка {i}", ["А", "Б"][i % 2], q, price, q * price])
+    p = profile_table(_t(["Заказ", "Склад", "Кол-во", "Цена", "Сумма"], lines))
+    assert p.nature != "relationship"
+    price = [[f"Товар {i}", ["А", "Б"][i % 2], c, round(c * 1.3, 2)] for i, c in
+             enumerate(rnd.randint(100, 900) for _ in range(60))]
+    assert profile_table(_t(["Товар", "Группа", "Закупка", "Розница"], price)).nature != "relationship"
