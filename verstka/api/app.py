@@ -10,7 +10,8 @@ import re
 import shutil
 import threading
 import time
-from pathlib import Path
+from dataclasses import dataclass, field
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Literal, Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -24,14 +25,15 @@ from verstka.api.agent_view import describe_agent_work, describe_slide_design, j
 from verstka.api.jobs import Job, JobRunner
 from verstka.api.model_status import ChainContext, active_chain_context, config_label, generation_planner, models_status, planner_info
 from verstka.api.narrator import describe_audit, describe_plan, describe_slide_choice, describe_template
-from verstka.api.store import SAFE_ID_RE, Store
+from verstka.api.store import BRAND_PARSING, SAFE_ID_RE, Store
 from verstka.ingest.workspace import file_sha256
 from verstka.planning.brief import normalize_purpose, parse_brief_text
 from verstka.planning.strategies import STRATEGY_NAMES, load_strategies
 from verstka.ru import ru_count
 from verstka.providers.registry import ProviderRegistry
 from verstka.schemas.audit import AuditReport
-from verstka.schemas.brand import BrandPriority
+from verstka.schemas.brand import BrandConflict, BrandPriority, BrandSpec
+from verstka.schemas.data import DatasetProfile, DatasetSummary, Table
 from verstka.schemas.layout import LayoutPlan
 from verstka.schemas.template import TemplateManifest
 from verstka.schemas.outline import Brief, DeckOutline
@@ -49,12 +51,35 @@ def cors_origins() -> list[str]:
     return [o.strip() for o in raw.split(",") if o.strip()]
 
 
-def max_upload_bytes() -> int:
+def _env_mb(name: str, default: float) -> int:
     try:
-        mb = float(os.environ.get("VERSTKA_MAX_UPLOAD_MB", "200"))
+        mb = float(os.environ.get(name, str(default)))
     except ValueError:
-        mb = 200.0
+        mb = default
     return int(mb * 1024 * 1024)
+
+
+def max_upload_bytes() -> int:
+    return _env_mb("VERSTKA_MAX_UPLOAD_MB", 200)
+
+
+# вторая ступень: файлы с данными и брендбук. Файл с данными — как в интерфейсе (MAX_DATA_BYTES в web/src/ui/create/
+# dataRules.ts), брендбук — файл, папка целиком или архив (распакованный — до _MAX_ZIP_UNPACKED)
+def max_data_bytes() -> int:
+    return _env_mb("VERSTKA_MAX_DATA_MB", 25)
+
+
+def max_brandbook_bytes() -> int:
+    return _env_mb("VERSTKA_MAX_BRAND_MB", 50)
+
+
+_MAX_DATA_FILES = 10  # файлов с данными за один запрос
+_MAX_DATA_TABLES = 30  # таблиц (листов, ключей JSON, таблиц в тексте) из одного запроса
+_MAX_GENERATION_DATASETS = 30  # наборов в одной сборке
+_MAX_BRAND_FOLDER_FILES = 300  # файлов в папке брендбука
+_MAX_ZIP_ENTRIES = 1000
+_MAX_ZIP_UNPACKED = 200 * 1024 * 1024
+_BRAND_EXTS = {".json", ".pdf", ".zip", ".pptx", ".potx", ".pptm", ".svg", ".png", ".jpg", ".jpeg", ".webp"}
 
 
 app = FastAPI(title="Verstka API", version=__version__)
@@ -416,12 +441,75 @@ def _generation_payload(gid: str) -> dict:
     return {**meta, "planner": planner, "variants": variants}
 
 
-def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job) -> dict:
+class InputGone(ValueError):
+    """A file with data or a brandbook the request names is not on the server (any more) or not read yet: the message is
+    for people, `status` — the HTTP status create_generation answers with."""
+
+    def __init__(self, status: int, message: str) -> None:
+        super().__init__(message)
+        self.status = status
+
+
+@dataclass
+class GenerationData:
+    """Вторая ступень: файлы с данными и брендбук запроса сборки, прочитанные из рабочей папки при её запуске (набор,
+    удалённый во время сборки, ей уже не мешает). Колоду из них строит Task 10 (`_run_generation`)."""
+
+    dataset_ids: list[str] = field(default_factory=list)
+    tables: list[Table] = field(default_factory=list)
+    profiles: list[DatasetProfile] = field(default_factory=list)
+    brand: Optional[BrandSpec] = None
+    brand_dir: Optional[Path] = None  # логотипы брендбука (BrandLogo.file — пути от неё)
+    brand_priority: BrandPriority = "brand"
+
+    @property
+    def empty(self) -> bool:
+        return not self.tables and self.brand is None
+
+    def describe(self) -> dict:
+        """What generation.json keeps of them besides the ids: the files' and the brandbook's names for people."""
+        out: dict = {}
+        if self.tables:
+            out["datasets"] = [{"id": i, "file": t.file, "sheet": t.sheet, "kind": t.kind} for i, t in zip(self.dataset_ids, self.tables)]
+        if self.brand is not None:
+            out["brandbook"] = {"id": self.brand.id, "name": self.brand.name, "file": self.brand.file, "source": self.brand.source}
+        return out
+
+
+def _generation_data(req: GenerateRequest) -> GenerationData:
+    """The request's datasets and brandbook read from the workspace; InputGone when one is missing."""
+    ids = list(dict.fromkeys(req.dataset_ids))
+    if len(ids) > _MAX_GENERATION_DATASETS:
+        raise InputGone(422, f"Слишком много файлов с данными: {len(ids)} — в одну презентацию до {_MAX_GENERATION_DATASETS}")
+    data = GenerationData(dataset_ids=ids, brand_priority=req.brand_priority)
+    for did in ids:
+        loaded = store.read_dataset(did) if isinstance(did, str) else None
+        if loaded is None:
+            raise InputGone(404, "Одного из файлов с данными больше нет на сервере — приложите его снова")
+        data.tables.append(loaded[0])
+        data.profiles.append(loaded[1])
+    if req.brandbook_id:
+        bid = req.brandbook_id
+        spec = store.read_brandbook(bid)
+        if spec is None:
+            if _brand_parsing(bid):
+                raise InputGone(409, "Брендбук ещё разбирается — подождите несколько секунд и соберите снова")
+            raise InputGone(404, "Брендбука больше нет на сервере — загрузите его снова")
+        data.brand = spec
+        data.brand_dir = store.brandbook_dir(bid)
+    return data
+
+
+def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job, data: Optional[GenerationData] = None) -> dict:
     from verstka.pipeline.generate import generate_variants
 
     manifest = store.manifest(req.template_id)
     if manifest is None:
         raise ValueError("Шаблон ещё не разобран — загрузите его снова")
+    # вторая ступень: файлы с данными и брендбук запроса (create_generation уже прочитал их). Колода из данных и
+    # брендированный шаблон — Task 10; до неё сборка идёт как раньше, а generation.json помнит, с чем собирали
+    if data is None:
+        data = _generation_data(req)
     brief = None
     outline = None
     if req.outline is not None:
@@ -484,6 +572,7 @@ def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job) -> dic
         "slides": req.slides,
         "use_models": use_models,
         **_request_options(req),
+        **data.describe(),
         "seconds": res.seconds,
         "created_at": gdir.stat().st_mtime,
         "status": "done",
@@ -512,13 +601,13 @@ def _request_options(req: GenerateRequest) -> dict:
             "dataset_ids": list(req.dataset_ids), "brandbook_id": req.brandbook_id, "brand_priority": req.brand_priority}
 
 
-def _generation_job(gid: str, gdir: Path, req: GenerateRequest) -> Callable[[Job], dict]:
+def _generation_job(gid: str, gdir: Path, req: GenerateRequest, data: Optional[GenerationData] = None) -> Callable[[Job], dict]:
     """Wrap the pipeline so generation.json always ends in status done or failed (the UI lists both)."""
 
     def run(job: Job) -> dict:
         store.merge_generation_meta(gid, {"status": "running", "job_id": job.id})
         try:
-            return _run_generation(gid, gdir, req, job)
+            return _run_generation(gid, gdir, req, job, data)
         except BaseException as e:
             write_agent_file(gdir, job.agent_events())  # how far the agent got
             store.merge_generation_meta(gid, {"status": "failed", "job_id": job.id, "error": str(e)[:300]})
@@ -755,7 +844,9 @@ def delete_template(template_id: str) -> dict:
         store.workspace(template_id)
     except FileNotFoundError:
         raise HTTPException(404, "Шаблон не найден")
-    if any(g.get("template_id") == template_id and _settle_orphan(g).get("status") == "running" for g in store.list_generations()):
+    # its branded copies go with it (store.delete_template): a deck built on one of them holds the template too
+    ids = {template_id, *store.branded_copies(template_id)}
+    if any(g.get("template_id") in ids and _settle_orphan(g).get("status") == "running" for g in store.list_generations()):
         raise HTTPException(409, "На этом шаблоне сейчас собирается презентация — удалите его, когда она будет готова")
     if not store.delete_template(template_id):
         raise HTTPException(500, "Не удалось удалить шаблон — попробуйте ещё раз")
@@ -837,6 +928,495 @@ def job_events(job_id: str):
     return StreamingResponse(gen(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
+# ---------------------------------------------------------------------------- routes: data files (вторая ступень)
+
+_BAD_NAME_CHARS = re.compile(r'[\x00-\x1f\x7f\\/:*?"<>|]')
+_NAME_MAX = 120
+
+
+def safe_file_name(raw: Optional[str], fallback: str) -> str:
+    """The file's own name for people (a card, «Источник: …», BrandSpec.file), safe as one path segment: no folders, no
+    characters a file system refuses, not hidden, at most _NAME_MAX characters with its extension kept."""
+    base = re.split(r"[\\/]", raw or "")[-1]
+    name = " ".join(_BAD_NAME_CHARS.sub(" ", base).split()).lstrip(". ").strip()
+    if not name:
+        return fallback
+    if len(name) > _NAME_MAX:
+        stem, dot, ext = name.rpartition(".")
+        ext = ext if dot and stem and len(ext) <= 10 else ""
+        name = (stem if ext else name)[: _NAME_MAX - len(ext) - 1].rstrip() + (f".{ext}" if ext else "")
+    return name
+
+
+def _ext_of(name: str) -> str:
+    return PurePosixPath(name).suffix.lower()
+
+
+def _mb(limit: int) -> str:
+    return f"{limit / (1024 * 1024):g}"
+
+
+def _dataset_issues(profile: DatasetProfile) -> list[str]:
+    """What the card says is notable in the data, shortly: «Не для графика: …», «2 пропуска», «3 выброса»."""
+    out: list[str] = []
+    if not profile.typable:
+        out.append(f"Не для графика: {profile.untypable_reason or 'данные не складываются в график'}")
+    gaps = len(profile.time_axis.missing_periods) if profile.time_axis else 0
+    missing = gaps or profile.missing_total
+    if missing:
+        out.append(ru_count(missing, "пропуск", "пропуска", "пропусков"))
+    if profile.outliers:
+        out.append(ru_count(len(profile.outliers), "выброс", "выброса", "выбросов"))
+    return out
+
+
+def _dataset_summary(did: str, table: Table, profile: DatasetProfile) -> DatasetSummary:
+    return DatasetSummary(id=did, file=table.file, kind=table.kind, rows=profile.rows, cols=profile.cols, nature=profile.nature, line=profile.summary, issues=_dataset_issues(profile), sheet=table.sheet)
+
+
+def _profile_of(table: Table) -> DatasetProfile:
+    """The table's profile; a table the profile cannot make sense of is still a card — «не для графика» with the reason."""
+    from verstka.data.profile import profile_table
+
+    try:
+        return profile_table(table)
+    except Exception:  # noqa: BLE001 - the person sees a card with the reason, not a server error
+        log.warning("profile failed: %s", table.file, exc_info=True)
+    rows, cols = len(table.rows), len(table.columns)
+    reason = "не удалось разобрать колонки"
+    return DatasetProfile(
+        table_id=table.id, file=table.file, kind=table.kind, sheet=table.sheet, rows=rows, cols=cols, nature="untypable", typable=False, untypable_reason=reason,
+        summary=f"Не для графика · {ru_count(rows, 'строка', 'строки', 'строк')} · {ru_count(cols, 'колонка', 'колонки', 'колонок')}",
+    )
+
+
+def _read_tables(name: str, data: bytes, several: bool) -> list[Table]:
+    """The file's tables (verstka/data/readers.py); a file that is not a table → 400 with the reader's own words."""
+    from verstka.data.readers import DataReadError, read_bytes
+
+    prefix = f"«{name}»: " if several else ""
+    try:
+        tables = read_bytes(name, data)
+    except DataReadError as e:
+        msg = str(e).strip() or "файл не читается как таблица"
+        raise HTTPException(400, prefix + (msg[:1].lower() + msg[1:] if prefix else msg))
+    except Exception:  # noqa: BLE001 - a reader's slip on a broken file: said in words, not as a server error
+        log.warning("data file not read: %s", name, exc_info=True)
+        raise HTTPException(400, f"Не удалось прочитать «{name}» как таблицу — проверьте, что файл не повреждён, или сохраните его как CSV или XLSX")
+    if not tables:
+        raise HTTPException(400, prefix + ("н" if prefix else "Н") + "е нашёл таблицу в файле")
+    return tables
+
+
+@app.post("/api/datasets")
+def upload_datasets(files: Optional[list[UploadFile]] = File(None)) -> list[dict]:
+    """Файлы с данными (CSV, TSV, XLSX, JSON, текст с таблицей): чтение и профиль — сразу, по карточке на таблицу (у книги
+    XLSX — на лист). Хранение — datasets/<id>/{source.<ext>, table.json, profile.json}. Ошибка — 4xx с текстом для
+    человека; файл, который читается, но не годится для графика, — карточка с причиной в `issues`."""
+    uploads = [f for f in files or [] if f is not None]
+    if not uploads:
+        raise HTTPException(400, "Выберите файл с данными: CSV, XLSX, JSON или текст с таблицей")
+    if len(uploads) > _MAX_DATA_FILES:
+        raise HTTPException(413, f"За один раз — до {_MAX_DATA_FILES} файлов с данными, а выбрано {len(uploads)}. Добавьте остальные следующим шагом")
+    limit = max_data_bytes()
+    several = len(uploads) > 1
+    created: list[str] = []
+    out: list[dict] = []
+    try:
+        for f in uploads:
+            name = safe_file_name(f.filename, "данные")
+            data = f.file.read(limit + 1)
+            if len(data) > limit:
+                raise HTTPException(413, f"«{name}» больше {_mb(limit)} МБ — оставьте в файле только нужные строки и листы")
+            tables = _read_tables(name, data, several)
+            if len(created) + len(tables) > _MAX_DATA_TABLES:
+                raise HTTPException(413, f"Слишком много таблиц за один раз — до {_MAX_DATA_TABLES}. Оставьте в книге только нужные листы")
+            source: Optional[Path] = None
+            for t in tables:
+                did, _ = store.new_dataset_dir()
+                created.append(did)
+                # the table is known by its dataset's id: SlideData.dataset_id, the card and the request say the same
+                t = t.model_copy(update={"id": did})
+                profile = _profile_of(t)
+                saved = store.write_dataset(did, t, profile, source=source, data=None if source else data, ext=_ext_of(name))
+                source = source or saved
+                out.append(_dataset_summary(did, t, profile).model_dump(mode="json"))
+    except BaseException:
+        for did in created:
+            store.delete_dataset(did)
+        raise
+    return out
+
+
+def _dataset_or_404(did: str) -> tuple[Table, DatasetProfile]:
+    loaded = store.read_dataset(did)
+    if loaded is None:
+        raise HTTPException(404, "Файл с данными не найден — приложите его снова")
+    return loaded
+
+
+@app.get("/api/datasets/{did}")
+def get_dataset(did: str) -> dict:
+    """Карточка набора, его профиль и предварительный выбор (без целей из текста: их учитывает сборка)."""
+    table, profile = _dataset_or_404(did)
+    try:
+        from verstka.data.plan import plan_dataset
+
+        plan = plan_dataset(profile, table).model_dump(mode="json")
+    except Exception:  # noqa: BLE001 - the card and the profile stand without the preliminary choice
+        log.warning("preliminary plan failed: %s", did, exc_info=True)
+        plan = None
+    return {**_dataset_summary(did, table, profile).model_dump(mode="json"), "profile": profile.model_dump(mode="json"), "plan": plan}
+
+
+@app.delete("/api/datasets/{did}")
+def delete_dataset(did: str) -> dict:
+    if not SAFE_ID_RE.fullmatch(did):
+        raise HTTPException(404, "Файл с данными не найден")
+    return {"deleted": store.delete_dataset(did)}
+
+
+# ---------------------------------------------------------------------------- routes: brandbooks (вторая ступень)
+
+_BRAND_STEPS = ("open", "palette", "fonts", "logos", "rules")  # шаги разбора (web: dataRules.ts BRAND_STEPS) и «compare»
+_BRAND_STEP_AT = (0.3, 0.45, 0.6, 0.72, 0.84)
+_BRAND_REMOVED = "Брендбук убрали, пока он разбирался"
+
+
+def _vlm_configured() -> bool:
+    """A vision model with a key: a PDF brandbook is read by the model too (without one — by its text)."""
+    p = providers()
+    if p is None or not p.has("vlm"):
+        return False
+    try:
+        v = p.get("vlm")
+        return v.name == "mock" or bool(getattr(v, "api_key", ""))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _brand_parsing(bid: str) -> bool:
+    """The brandbook is being read now by a job of this server (a restart drops the job: the brandbook is gone)."""
+    jid = store.brandbook_parsing(bid)
+    if jid is None:
+        return False
+    if not jid:  # the job is being submitted this very moment
+        d = store.brandbook_dir(bid)
+        try:
+            return d is not None and time.time() - (d / BRAND_PARSING).stat().st_mtime < 60
+        except OSError:
+            return False
+    job = runner.get(jid)
+    return job is not None and job.status in ("queued", "running")
+
+
+def _brandbook_or_error(bid: str) -> BrandSpec:
+    spec = store.read_brandbook(bid)
+    if spec is not None:
+        return spec
+    if _brand_parsing(bid):
+        raise HTTPException(409, "Брендбук ещё разбирается — подождите несколько секунд")
+    raise HTTPException(404, "Брендбук не найден — загрузите его снова")
+
+
+def _brand_conflicts(manifest: TemplateManifest, spec: BrandSpec, brand_dir: Optional[Path]) -> list[BrandConflict]:
+    """Where the brandbook and the template differ, and what the deck gets with «брендбук важнее» (the web shows
+    «шаблон важнее» by itself)."""
+    from verstka.brand.conflicts import brand_conflicts
+
+    return brand_conflicts(manifest, spec, priority="brand", workspace_root=store.root, brand_dir=brand_dir)
+
+
+def _conflicts_with(spec: BrandSpec, template_id: Optional[str], brand_dir: Optional[Path]) -> tuple[Optional[TemplateManifest], list[BrandConflict]]:
+    """The template to compare with (None — none chosen or not analysed) and the brandbook's conflicts with it."""
+    if not template_id:
+        return None, []
+    try:
+        manifest = store.manifest(template_id)
+    except Exception:  # noqa: BLE001 - a broken analysis: nothing to compare with
+        log.warning("template %s unreadable for brand conflicts", template_id, exc_info=True)
+        manifest = None
+    if manifest is None:
+        return None, []
+    try:
+        return manifest, _brand_conflicts(manifest, spec, brand_dir)
+    except Exception:  # noqa: BLE001 - the brandbook stands; the layer shows no conflicts
+        log.warning("brand conflicts failed: %s × %s", spec.id, template_id, exc_info=True)
+        return manifest, []
+
+
+def _brand_partials(spec: BrandSpec) -> list[dict]:
+    """What each reading step brings to the analysis tiles (the event's `brand`, merged on the client)."""
+    d = spec.model_dump(mode="json")
+    return [
+        {k: d[k] for k in ("id", "name", "source", "file", "pages")},
+        {"colors": d["colors"]},
+        {"fonts": d["fonts"]},
+        {"logos": d["logos"]},
+        {k: d[k] for k in ("rules", "margins_px", "grid", "logo_place", "warnings")},
+    ]
+
+
+def _save_limited(f: UploadFile, target: Path, limit: int) -> int:
+    """Copy an upload to `target` in chunks; more than `limit` bytes → -1 (the caller says how much is allowed)."""
+    size = 0
+    with open(target, "wb") as out:
+        while chunk := f.file.read(_UPLOAD_CHUNK):
+            size += len(chunk)
+            if size > limit:
+                return -1
+            out.write(chunk)
+    return size
+
+
+def _check_zip(path: Path, name: str) -> None:
+    """A brandbook archive within the limits by its directory, before anything is unpacked (the reader also counts the
+    bytes it really writes)."""
+    import zipfile
+
+    try:
+        with zipfile.ZipFile(path) as z:
+            infos = [i for i in z.infolist() if not i.is_dir()]
+    except (zipfile.BadZipFile, OSError, ValueError):
+        raise HTTPException(400, f"Архив «{name}» повреждён или это не ZIP")
+    if not infos:
+        raise HTTPException(400, f"Архив «{name}» пустой")
+    if len(infos) > _MAX_ZIP_ENTRIES:
+        raise HTTPException(413, f"В архиве «{name}» больше {_MAX_ZIP_ENTRIES} файлов — оставьте в нём логотипы, токены, гайдлайн и примеры слайдов")
+    if sum(max(0, i.file_size) for i in infos) > _MAX_ZIP_UNPACKED:
+        raise HTTPException(413, f"Архив «{name}» в распакованном виде больше {_mb(_MAX_ZIP_UNPACKED)} МБ — уберите из него лишнее")
+
+
+def folder_path(raw: Optional[str]) -> Optional[PurePosixPath]:
+    """A file of an uploaded folder by its relative path («Брендбук/logos/main.svg»), every part a safe name. None — a
+    file to skip (hidden, system, deeper than 8 levels); «..» anywhere → 400."""
+    parts = [p for p in re.split(r"[\\/]", raw or "") if p not in ("", ".")]
+    if any(p == ".." for p in parts):
+        raise HTTPException(400, "В папке брендбука есть файл с недопустимым путём — загрузите папку заново или архивом .zip")
+    if not parts or len(parts) > 8 or any(p.startswith((".", "__MACOSX", "~$")) for p in parts):
+        return None
+    return PurePosixPath(*(safe_file_name(p, "файл") for p in parts))
+
+
+def _brandbook_source(bdir: Path, file: Optional[UploadFile], files: list[UploadFile], figma_url: Optional[str]) -> Path | str:
+    """Save the upload under brandbooks/<id>/source/ (or check the Figma link): what read_brandbook reads."""
+    from verstka.brand.figma import FIG_FILE, normalize_url
+    from verstka.brand.read import SUPPORTED
+
+    limit = max_brandbook_bytes()
+    src = bdir / "source"
+    src.mkdir()
+    if figma_url:
+        url = normalize_url(figma_url.strip())
+        if url is None:
+            raise HTTPException(400, "Ссылка не похожа на файл Figma — скопируйте её из адресной строки: figma.com/design/… или figma.com/file/…")
+        return url
+    if file is not None:
+        name = safe_file_name(file.filename, "брендбук")
+        ext = _ext_of(name)
+        if ext == ".fig":
+            raise HTTPException(400, FIG_FILE)
+        if ext not in _BRAND_EXTS:
+            raise HTTPException(400, f"Формат «{ext or name}» для брендбука не подходит. Подойдут: {SUPPORTED}.")
+        path = src / name
+        size = _save_limited(file, path, limit)
+        if size < 0:
+            raise HTTPException(413, f"Брендбук больше {_mb(limit)} МБ — сожмите картинки в PDF или загрузите токены JSON и логотипы архивом")
+        if size == 0:
+            raise HTTPException(400, f"Файл «{name}» пустой — выберите брендбук ещё раз")
+        if ext == ".zip":
+            _check_zip(path, name)
+        return path
+    # a folder: each part's name is its path inside the folder («Брендбук VK Cloud/logos/primary.svg»)
+    if len(files) > _MAX_BRAND_FOLDER_FILES:
+        raise HTTPException(413, f"В папке брендбука больше {_MAX_BRAND_FOLDER_FILES} файлов — оставьте логотипы, токены, гайдлайн и примеры слайдов или загрузите архив .zip")
+    rels = [(folder_path(f.filename), f) for f in files]
+    kept = [(rel, f) for rel, f in rels if rel is not None]
+    if not kept:
+        raise HTTPException(400, "Папка брендбука пустая — в ней нужны токены JSON, PDF-гайдлайн, логотипы или примеры слайдов")
+    tops = {rel.parts[0] for rel, _ in kept}
+    # one folder chosen in the browser: its files all start with its name; loose files go into a folder of their own
+    wrap = None if len(tops) == 1 and all(len(rel.parts) > 1 for rel, _ in kept) else "Брендбук"
+    left = limit
+    for rel, f in kept:
+        target = src.joinpath(*((wrap,) if wrap else ()), *rel.parts)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.exists():
+            continue  # the same path twice: the first one stays
+        size = _save_limited(f, target, left)
+        if size < 0:
+            raise HTTPException(413, f"Папка брендбука больше {_mb(limit)} МБ — уберите из неё лишнее или загрузите архив .zip")
+        left -= size
+    return src / (wrap or next(iter(tops)))
+
+
+@app.post("/api/brandbooks")
+def upload_brandbook(
+    file: Optional[UploadFile] = File(None),
+    files: Optional[list[UploadFile]] = File(None),
+    figma_url: Optional[str] = Form(None),
+    template_id: Optional[str] = Form(None),
+    use_models: bool = Form(True),
+) -> dict:
+    """Брендбук: файл (PDF-гайдлайн, токены JSON, архив .zip, тема .pptx, логотип), папка (`files`, имя части — путь в
+    папке) или ссылка Figma. Разбор — задачей: события шагов open · palette · fonts · logos · rules · compare (`step`,
+    итог шага в `message`, прочитанное — в `brand`), итог — {brand, conflicts} с шаблоном `template_id`."""
+    from verstka.brand.common import BrandReadError
+    from verstka.brand.read import brand_steps, read_brandbook
+
+    folder = [f for f in files or [] if f is not None]
+    url = (figma_url or "").strip()
+    given = (file is not None) + bool(folder) + bool(url)
+    if given == 0:
+        raise HTTPException(400, "Выберите брендбук: PDF-гайдлайн, токены JSON, архив .zip, папку или ссылку на Figma")
+    if given > 1:
+        raise HTTPException(400, "Пришлите что-то одно: файл брендбука, папку или ссылку на Figma")
+    bid, bdir = store.new_brandbook_dir()
+    marker = bdir / BRAND_PARSING
+    try:
+        marker.write_text("", encoding="utf-8")
+        source = _brandbook_source(bdir, file, folder, url or None)
+    except BaseException:
+        store.delete_brandbook(bid)
+        raise
+    use_vlm = use_models and _vlm_configured()
+
+    def run(job: Job) -> dict:
+        try:
+            job.emit("Открываю брендбук", 0.05)
+            p = providers() if use_vlm else None
+            try:
+                spec = read_brandbook(
+                    source, providers=p.with_deadline(time.monotonic() + 150) if p is not None else None, skills=skills() if use_vlm else None,
+                    use_vlm=use_vlm, assets_dir=bdir,
+                )
+            except BrandReadError:
+                raise
+            except Exception as e:  # noqa: BLE001 - a reader's slip on a broken file: said in words
+                log.warning("brandbook not read: %s", source, exc_info=True)
+                raise ValueError("Не удалось прочитать брендбук — проверьте файл или загрузите токены JSON") from e
+            spec.id = bid
+            for key, (what, result), part, at in zip(_BRAND_STEPS, brand_steps(spec), _brand_partials(spec), _BRAND_STEP_AT):
+                job.emit(f"{what[:1].upper()}{what[1:]}: {result}", at, step=key, brand=part)
+            manifest, conflicts = _conflicts_with(spec, template_id, bdir)
+            if not marker.exists():
+                raise ValueError(_BRAND_REMOVED)
+            store.write_brandbook(bid, spec)
+            marker.unlink(missing_ok=True)
+            found = ru_count(len(conflicts), "расхождение", "расхождения", "расхождений") if conflicts else "расхождений нет"
+            job.emit(f"Сверка с шаблоном: {found if manifest is not None else 'шаблон не выбран'}", 0.96, step="compare", conflicts=[c.model_dump(mode="json") for c in conflicts])
+            return {"brandbook_id": bid, "brand": spec.model_dump(mode="json"), "conflicts": [c.model_dump(mode="json") for c in conflicts]}
+        except BaseException as e:
+            gone = not marker.exists()
+            store.delete_brandbook(bid)  # a brandbook that did not read leaves nothing behind (the card offers a retry)
+            if gone and isinstance(e, Exception) and str(e) != _BRAND_REMOVED:
+                # removed while it was read (its files went from under the reader): say that, not the reader's slip
+                raise ValueError(_BRAND_REMOVED) from e
+            raise
+
+    try:
+        job = runner.submit("brandbook", run)
+    except BaseException:
+        store.delete_brandbook(bid)
+        raise
+    if marker.exists():
+        try:
+            marker.write_text(job.id, encoding="utf-8")
+        except OSError:
+            pass
+    return {"job_id": job.id, "brandbook_id": bid}
+
+
+@app.get("/api/brandbooks/{bid}")
+def get_brandbook(bid: str, template_id: Optional[str] = None) -> dict:
+    """Разобранный брендбук и его расхождения с шаблоном `template_id` (другой шаблон — свои расхождения)."""
+    spec = _brandbook_or_error(bid)
+    _, conflicts = _conflicts_with(spec, template_id, store.brandbook_dir(bid))
+    return {"brand": spec.model_dump(mode="json"), "conflicts": [c.model_dump(mode="json") for c in conflicts]}
+
+
+@app.delete("/api/brandbooks/{bid}")
+def delete_brandbook(bid: str) -> dict:
+    if not SAFE_ID_RE.fullmatch(bid):
+        raise HTTPException(404, "Брендбук не найден")
+    return {"deleted": store.delete_brandbook(bid)}
+
+
+@app.get("/api/brandbooks/{bid}/files/{path:path}")
+def brandbook_file(bid: str, path: str):
+    """Логотип брендбука по пути из `BrandLogo.file` (только логотипы: не исходник и не brand.json)."""
+    spec = _brandbook_or_error(bid)
+    bdir = store.brandbook_dir(bid)
+    rel = PurePosixPath(path)
+    if bdir is None or ".." in rel.parts or not (path in {lg.file for lg in spec.logos} or (len(rel.parts) > 1 and rel.parts[0] == "logos")):
+        raise HTTPException(404, "Файл не найден")
+    return _serve_file(bdir, path)
+
+
+# ---------------------------------------------------------------------------- routes: examples (вторая ступень)
+
+_EXAMPLES = _REPO_ROOT / "examples"
+# пример брендбука — PDF-гайдлайн (его показывает холст: «Брендбук VK Cloud.pdf»); имя — как у файла, который приложил человек
+_BRAND_EXAMPLE = ("brandbook-vk-cloud", "guideline.pdf", "Брендбук VK Cloud.pdf")
+_EXAMPLE_SKIP = {"SCENARIO.md", "README.md"}
+_DATA_EXTS = {".csv", ".tsv", ".tab", ".xlsx", ".xlsm", ".json", ".txt", ".md"}
+
+
+def _example_url(name: str, file: str) -> str:
+    from urllib.parse import quote
+
+    return f"/api/examples/{name}/files/{quote(file, safe='')}"
+
+
+def _example(name: str) -> Optional[dict]:
+    """An example the «Создать» screen loads in one click: the text, the slide count, the data files (in the scenario's
+    order) and the brandbook. `served` — the files GET /api/examples/{name}/files/… gives out (public name → path)."""
+    brand_dir, brand_file, brand_name = _BRAND_EXAMPLE
+    brandbook = {"name": brand_name, "url": _example_url(brand_dir, brand_file)} if (_EXAMPLES / brand_dir / brand_file).is_file() else None
+    if name == brand_dir:
+        if brandbook is None:
+            return None
+        return {"name": name, "title": "Брендбук VK Cloud", "brief": None, "slides": None, "files": [], "brandbook": brandbook,
+                "served": {brand_file: _EXAMPLES / brand_dir / brand_file}}
+    if name != "data-sales-2026":
+        return None
+    d = _EXAMPLES / name
+    if not d.is_dir():
+        return None
+    try:
+        scenario = (d / "SCENARIO.md").read_text(encoding="utf-8")
+    except OSError:
+        scenario = ""
+    m = re.search(r"^Текст \(бриф.*?\):\s*«(.*)»\s*$", scenario, re.M)
+    brief = m.group(1).strip() if m else None
+    m = re.search(r"^## Колода «.*?(\d+)\s+слайд", scenario, re.M)
+    slides = int(m.group(1)) if m else None
+    data = {p.name: p for p in d.iterdir() if p.is_file() and not p.name.startswith(".") and p.name not in _EXAMPLE_SKIP and p.suffix.lower() in _DATA_EXTS}
+    order = [n for n in re.findall(r"^\d+\.\s+`([^`]+)`", scenario, re.M) if n in data]
+    names = list(dict.fromkeys(order + sorted(data)))
+    return {"name": name, "title": "Данные продаж", "brief": brief, "slides": slides,
+            "files": [{"name": n, "url": _example_url(name, n)} for n in names], "brandbook": brandbook, "served": data}
+
+
+@app.get("/api/examples/{name}")
+def get_example(name: str) -> dict:
+    """Пример для «Создать»: текст, число слайдов, файлы с данными и брендбук — ссылками (файлы уходят на сервер тем же
+    путём, что свои)."""
+    ex = _example(name)
+    if ex is None:
+        raise HTTPException(404, "Пример не найден")
+    return {k: v for k, v in ex.items() if k != "served"}
+
+
+@app.get("/api/examples/{name}/files/{path:path}")
+def example_file(name: str, path: str):
+    ex = _example(name)
+    target = (ex or {}).get("served", {}).get(path)
+    if target is None:
+        raise HTTPException(404, "Файл не найден")
+    return _serve_file(target.parent, target.name)
+
+
 # ---------------------------------------------------------------------------- routes: generations
 
 
@@ -907,9 +1487,15 @@ def create_generation(req: GenerateRequest) -> dict:
             raise HTTPException(422, "План слайдов не прочитан: " + _validation_message(e))
     elif not _brief_from_request(req).text.strip():
         raise HTTPException(422, "Текст презентации пуст")
+    # вторая ступень: файлы с данными и брендбук должны быть на сервере (и брендбук — уже разобран)
+    req.dataset_ids = list(dict.fromkeys(req.dataset_ids))
+    try:
+        data = _generation_data(req)
+    except InputGone as e:
+        raise HTTPException(e.status, str(e))
     gid, gdir = store.new_generation_dir()
     store.write_generation_meta(gid, {"id": gid, "template_id": req.template_id, "strategies": req.strategies, "brief": req.brief, "audience": req.audience, "purpose": req.purpose, "slides": req.slides, **_request_options(req), "status": "running", "created_at": time.time()})
-    job = runner.submit("generate", _generation_job(gid, gdir, req))
+    job = runner.submit("generate", _generation_job(gid, gdir, req, data))
     store.merge_generation_meta(gid, {"job_id": job.id}, only_missing=True)  # visible at once, whatever the thread did
     return {"job_id": job.id, "generation_id": gid}
 

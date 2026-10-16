@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import threading
 import time
@@ -13,9 +14,30 @@ from typing import Optional
 
 from verstka.analysis.rules import with_fresh_derived_rules
 from verstka.ingest.workspace import SAFE_ID_RE, TemplateWorkspace, default_workspace_root
+from verstka.schemas.brand import BrandSpec
+from verstka.schemas.data import DatasetProfile, Table
 from verstka.schemas.template import TemplateManifest
 
 _META_LOCK = threading.RLock()
+_SOURCE_EXT_RE = re.compile(r"\.[a-z0-9]{1,10}")
+# брендбук ещё разбирается: в файле — id задачи разбора (DELETE во время разбора убирает папку вместе с ним)
+BRAND_PARSING = ".parsing"
+BRAND_FILE = "brand.json"
+# брендированная копия шаблона (verstka.brand.apply.BRAND_FILE в templates/<id>/): её base_template_id — исходный шаблон.
+# Копия — кэш сборки с брендбуком: в библиотеке её нет, она уходит вместе со своим шаблоном
+BRANDED_COPY_FILE = "brand.json"
+
+
+def _branded_base(tdir: Path) -> Optional[str]:
+    """The template a branded copy was made of; None — `tdir` is a template of the library ("" — a copy whose
+    brand.json does not read)."""
+    p = tdir / BRANDED_COPY_FILE
+    if not p.is_file():
+        return None
+    try:
+        return str(json.loads(p.read_text(encoding="utf-8")).get("base_template_id") or "")
+    except (OSError, ValueError, AttributeError):
+        return ""
 
 
 def _card_of(tdir: Path, m: dict) -> dict:
@@ -49,9 +71,14 @@ def _title_of(tdir: Path) -> Optional[str]:
 def _write_json_atomic(path: Path, data: dict) -> None:
     """Readers (the UI polls generation.json while the job thread rewrites it) see the old file or the new one,
     never a truncated one: write aside, then rename over."""
+    _write_text_atomic(path, json.dumps(data, ensure_ascii=False, indent=2))
+
+
+def _write_text_atomic(path: Path, text: str) -> None:
     tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex[:8]}.tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.write_text(text, encoding="utf-8")
     os.replace(tmp, path)
+
 
 _ID_RE = SAFE_ID_RE
 
@@ -72,7 +99,10 @@ class Store:
         self.root = Path(root) if root else default_workspace_root()
         self.uploads = self.root / "uploads"
         self.runs = self.root / "runs"
-        for d in (self.root, self.uploads, self.runs, self.root / "templates"):
+        # вторая ступень: файлы с данными (по таблице на папку) и разобранные брендбуки
+        self.datasets = self.root / "datasets"
+        self.brandbooks = self.root / "brandbooks"
+        for d in (self.root, self.uploads, self.runs, self.root / "templates", self.datasets, self.brandbooks):
             d.mkdir(parents=True, exist_ok=True)
 
     # ---- templates ----------------------------------------------------------------
@@ -94,7 +124,7 @@ class Store:
         out = []
         for d in sorted((self.root / "templates").glob("*")):
             mp = d / "manifest.json"
-            if mp.exists():
+            if mp.exists() and not (d / BRANDED_COPY_FILE).exists():  # a branded copy is not a template of the library
                 try:
                     m = json.loads(mp.read_text(encoding="utf-8"))
                     out.append({"template_id": m["template_id"], "source_file": m.get("source_file"), "title": _title_of(d), "n_slides": m.get("n_slides"), "n_patterns": len(m.get("patterns", [])), "analyzed_at": mp.stat().st_mtime, **_card_of(d, m)})
@@ -135,13 +165,22 @@ class Store:
         """Raises FileNotFoundError for unknown and for malformed ids."""
         return TemplateWorkspace.open(template_id, self.root)
 
+    def branded_copies(self, template_id: str) -> list[str]:
+        """The branded copies of a template (verstka/brand/apply.py: templates/<id>/brand.json says which template)."""
+        if not isinstance(template_id, str) or not _ID_RE.fullmatch(template_id):
+            return []
+        return [d.name for d in sorted((self.root / "templates").glob("*")) if d.is_dir() and _ID_RE.fullmatch(d.name) and _branded_base(d) == template_id]
+
     def delete_template(self, template_id: str) -> bool:
-        """Remove a template from the library: its workspace (analysis, previews, the copy of the file). Decks built on
-        it keep their own files and stay viewable; only rebuilding them needs the template again."""
+        """Remove a template from the library: its workspace (analysis, previews, the copy of the file) and its branded
+        copies (a cache of builds with a brandbook — without the template they cannot be made again). Decks built on it
+        keep their own files and stay viewable; only rebuilding them needs the template again."""
         try:
             ws = TemplateWorkspace.open(template_id, self.root)
         except FileNotFoundError:
             return False
+        for cid in self.branded_copies(template_id):
+            shutil.rmtree(self.root / "templates" / cid, ignore_errors=True)
         shutil.rmtree(ws.dir, ignore_errors=True)
         return not ws.dir.exists()
 
@@ -217,3 +256,108 @@ class Store:
             shutil.rmtree(d)
             return True
         return False
+
+    # ---- datasets (вторая ступень) ----------------------------------------------------
+    # datasets/<id>/{source.<ext>, table.json, profile.json}: одна таблица (лист XLSX, ключ JSON, таблица в тексте) — одна
+    # папка; у книги из нескольких листов исходный файл лежит в папке каждого листа (жёсткой ссылкой, где можно)
+
+    def new_dataset_dir(self) -> tuple[str, Path]:
+        did = uuid.uuid4().hex[:12]
+        d = self.datasets / did
+        d.mkdir(parents=True, exist_ok=False)
+        return did, d
+
+    def dataset_dir(self, did: str) -> Optional[Path]:
+        d = _safe(self.datasets, did)
+        return d if d is not None and d.is_dir() else None
+
+    def write_dataset(self, did: str, table: Table, profile: DatasetProfile, *, source: Optional[Path] = None,
+                      data: Optional[bytes] = None, ext: str = "") -> Optional[Path]:
+        """Таблица, её профиль и исходный файл набора (`source` — уже сохранённый файл другого листа той же книги,
+        иначе `data`). Возвращает путь исходного файла в папке набора."""
+        d = self.dataset_dir(did)
+        if d is None:
+            return None
+        ext = ext.lower() if _SOURCE_EXT_RE.fullmatch(ext.lower() or "") else ""
+        target = d / f"source{ext}"
+        if source is not None:
+            try:
+                os.link(source, target)
+            except OSError:
+                shutil.copyfile(source, target)
+        elif data is not None:
+            target.write_bytes(data)
+        _write_text_atomic(d / "table.json", table.model_dump_json())
+        _write_text_atomic(d / "profile.json", profile.model_dump_json(indent=2))
+        return target
+
+    def read_dataset(self, did: str) -> Optional[tuple[Table, DatasetProfile]]:
+        """Таблица и профиль набора; None — набора нет (или его файлы не читаются)."""
+        d = self.dataset_dir(did)
+        if d is None:
+            return None
+        try:
+            table = Table.model_validate_json((d / "table.json").read_text(encoding="utf-8"))
+            profile = DatasetProfile.model_validate_json((d / "profile.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+        return table, profile
+
+    def has_dataset(self, did: str) -> bool:
+        d = self.dataset_dir(did)
+        return d is not None and (d / "table.json").is_file() and (d / "profile.json").is_file()
+
+    def delete_dataset(self, did: str) -> bool:
+        d = self.dataset_dir(did)
+        if d is None:
+            return False
+        shutil.rmtree(d, ignore_errors=True)
+        return not d.exists()
+
+    # ---- brandbooks (вторая ступень) --------------------------------------------------
+    # brandbooks/<id>/: source/ — загруженный файл или папка, logos/ — логотипы (BrandLogo.file — пути от папки
+    # брендбука), brand.json — разобранный BrandSpec (его id — id папки: verstka.brand.apply находит её по нему)
+
+    def new_brandbook_dir(self) -> tuple[str, Path]:
+        bid = uuid.uuid4().hex[:12]
+        d = self.brandbooks / bid
+        d.mkdir(parents=True, exist_ok=False)
+        return bid, d
+
+    def brandbook_dir(self, bid: str) -> Optional[Path]:
+        d = _safe(self.brandbooks, bid)
+        return d if d is not None and d.is_dir() else None
+
+    def write_brandbook(self, bid: str, spec: BrandSpec) -> bool:
+        d = self.brandbook_dir(bid)
+        if d is None:
+            return False
+        _write_text_atomic(d / BRAND_FILE, spec.model_copy(update={"id": bid}).model_dump_json(indent=2))
+        return True
+
+    def read_brandbook(self, bid: str) -> Optional[BrandSpec]:
+        """Разобранный брендбук; None — его нет, он ещё разбирается или файл не читается."""
+        d = self.brandbook_dir(bid)
+        if d is None:
+            return None
+        try:
+            return BrandSpec.model_validate_json((d / BRAND_FILE).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+
+    def brandbook_parsing(self, bid: str) -> Optional[str]:
+        """Id задачи, которая разбирает брендбук (пустая строка — задача ещё не записана); None — не разбирается."""
+        d = self.brandbook_dir(bid)
+        if d is None or (d / BRAND_FILE).exists():
+            return None
+        try:
+            return (d / BRAND_PARSING).read_text(encoding="utf-8").strip()
+        except OSError:
+            return None
+
+    def delete_brandbook(self, bid: str) -> bool:
+        d = self.brandbook_dir(bid)
+        if d is None:
+            return False
+        shutil.rmtree(d, ignore_errors=True)
+        return not d.exists()
