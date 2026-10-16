@@ -506,3 +506,168 @@ def test_sample_clients_nps_and_text():
     assert nps.time_axis.missing_periods == ["2025-Q2", "2026-Q2"] and nps.time_axis.freq == "quarter"
     txt = profile_table(_load("Итоги квартала.txt"))
     assert txt.dimensions == ["Показатель"] and txt.metrics == ["III кв. 2026", "III кв. 2025", "Изменение"]
+
+
+# ── ревью Task 2/3: регрессии ─────────────────────────────────────────────────────────────────────────────────────────
+def _read(name: str, text: str) -> DatasetProfile:
+    from verstka.data.readers import read_bytes
+
+    return profile_table(read_bytes(name, text.encode())[0])
+
+
+def test_strict_total_rule_keeps_label_rows_that_only_start_with_vsego():
+    # п. 5: «Всего клиентов» — показатель, а не строка итога: он в статистике и первый в колонке
+    p = _read("kpi.csv", "Показатель;Значение\nВсего клиентов;3480\nНовых клиентов;420\nУшли;35\nВыручка, млн ₽;1240\n")
+    c = _col(p, "Значение")
+    assert (c.max, c.first) == (3480.0, 3480) and _col(p, "Показатель").first == "Всего клиентов" and p.rows == 4
+    # все подписи — «Итого…»: это не строки итога, а подписи; колонка подписей — категории без пропусков
+    q = profile_table(_t(["Показатель", "2025", "2026"], [["Итого", 3000, 3480], ["Итого по Москве", 1000, 1240]]))
+    lab = _col(q, "Показатель")
+    assert (lab.type, lab.role, lab.missing, lab.distinct) == ("category", "dimension", 0, 2) and q.nature != "reference"
+
+
+def test_total_row_from_the_reader_proves_shares_at_the_end_or_the_start():
+    # п. 6: «Итого» в конце (обычный макет) и в начале — «доли от итога»; строка итога — не данные
+    for text in ("Регион;Выручка\nМосква;50\nКазань;30\nТверь;20\nИтого;100\n",
+                 "Регион;Выручка\nИтого;100\nМосква;50\nКазань;30\nТверь;20\n"):
+        p = _read("t.csv", text)
+        assert p.parts_of_whole and p.nature == "shares" and p.summary == "Доли · 3 строки · 2 колонки"
+        assert _col(p, "Выручка").max == 50 and p.rows == 3
+    # таблица, собранная не чтением: Table.totals отмечает итог
+    t = Table(id="t", file="t.csv", kind="csv", columns=["Отдел", "Штат"], units=[None, None],
+              rows=[["А", 40], ["Б", 60], ["Все отделы", 100]], raw_header=["Отдел", "Штат"], totals=[2])
+    assert profile_table(t).parts_of_whole and _col(profile_table(t), "Штат").max == 60
+
+
+def test_wide_tables_profile_as_series_after_the_reader_melts_them():
+    # п. 4: 5 лет показателей — ряд, а не карточки; «Регион · 2023 · 2024 · 2025» — ряд по регионам, а не сравнение
+    kpi = _read("w.csv", ("Показатель;2021;2022;2023;2024;2025\nВыручка, млн ₽;100;120;150;170;210\n"
+                          "Прибыль, млн ₽;10;12;18;20;25\nКлиенты;1000;1200;1300;1500;1700\n"))
+    assert kpi.nature == "time_series" and kpi.time_axis.freq == "year" and kpi.time_axis.points == 5
+    assert kpi.metrics == ["Выручка", "Прибыль", "Клиенты"]
+    reg = _read("r.csv", "Регион;2023;2024;2025\nМосква;100;120;150\nКазань;50;60;80\nТверь;20;25;22\n")
+    assert reg.nature == "time_series" and reg.time_axis.column == "Год" and reg.dimensions == ["Регион"]
+    # «Итого» по каждому году = сумма регионов — доли от итога в длинной таблице
+    tot = _read("t.csv", "Регион;2023;2024;2025\nМосква;10;20;30\nКазань;5;5;5\nИтого;15;25;35\n")
+    assert tot.parts_of_whole and tot.rows == 6
+
+
+def test_timestamps_within_a_day_give_an_hourly_axis():
+    # п. 8: 48 часовых строк — 48 точек по часам, а не 2 дня; одна запись в день со временем — ось по дням
+    hours = [(dt.datetime(2025, 3, 1) + dt.timedelta(hours=h)).strftime("%Y-%m-%dT%H:%M") for h in range(48)]
+    p = profile_table(_t(["Время", "Нагрузка"], [[h, 30 + i % 24] for i, h in enumerate(hours)], units=[None, "%"]))
+    ax = p.time_axis
+    assert (ax.freq, ax.points, ax.start, ax.end) == ("hour", 48, "2025-03-01T00:00", "2025-03-02T23:00")
+    assert _col(p, "Время").type == "date" and _col(p, "Время").min == "2025-03-01T00:00"
+    one_day = profile_table(_t(["Время", "Звонков"], [[h, i] for i, h in enumerate(hours[:24])]))
+    assert one_day.time_axis.points == 24 and one_day.time_axis.freq == "hour"
+    gaps = profile_table(_t(["Время", "Звонков"], [[h, i] for i, h in enumerate(hours[:24]) if i != 5]))
+    assert gaps.time_axis.missing_periods == ["2025-03-01T05:00"]
+    daily = profile_table(_t(["Дата", "Значение"], [["15.01.2025 10:30", 1], ["16.01.2025 00:00", 2],
+                                                    ["17.01.2025 12:30", 3], ["18.01.2025 13:30", 4]]))
+    assert (daily.time_axis.freq, daily.time_axis.points) == ("day", 4)
+
+
+def test_rate_percentages_summing_to_100_are_not_shares():
+    # п. 12: конверсия 25/30/20/24 (сумма 99) — не доли целого; доля с суммой 96 — доли; безымянные % — только ≈ 100
+    conv = profile_table(_t(["Канал", "Конверсия"], [["Поиск", 25], ["Соцсети", 30], ["Почта", 20], ["Прямые", 24]],
+                            units=[None, "%"]))
+    assert not conv.parts_of_whole and conv.nature == "comparison"
+    share = profile_table(_t(["Канал", "Доля"], [["А", 46], ["Б", 28], ["В", 13], ["Г", 9]], units=[None, "%"]))
+    assert share.parts_of_whole
+    loose = profile_table(_t(["Канал", "Значение"], [["А", 46], ["Б", 28], ["В", 13], ["Г", 9]], units=[None, "%"]))
+    assert not loose.parts_of_whole  # 96 без слова «доля» — не части целого
+    exact = profile_table(_t(["Канал", "Значение"], [["А", 46], ["Б", 28], ["В", 17], ["Г", 9]], units=[None, "%"]))
+    assert exact.parts_of_whole
+
+
+def test_zero_inflated_column_still_finds_a_detached_value():
+    # п. 15: 150 нулей, 40 небольших значений и 5000 — межквартильный размах 0, но 5000 — выброс
+    vals = [0] * 150 + [1 + (i * 7) % 50 for i in range(40)] + [5000]
+    p = profile_table(_t(["Возвраты"], [[v] for v in vals]))
+    assert [(o.row, o.value) for o in p.outliers] == [(190, 5000.0)]
+    assert "кроме повторяющегося 0" in p.outliers[0].reason
+    flat = profile_table(_t(["Флаг"], [[0]] * 150 + [[1]] * 20))
+    assert flat.outliers == []  # одни нули и единицы — выбросов нет
+
+
+def test_short_code_like_labels_are_categories_not_ids():
+    # п. 16: «A320», «B737», «SSJ100» в коротком списке — подписи для сравнения, а не идентификаторы
+    p = profile_table(_t(["Модель", "Рейсов"], [["A320", 120], ["B737", 95], ["SSJ100", 60], ["A321", 80], ["E190", 30]]))
+    assert (_col(p, "Модель").type, _col(p, "Модель").role) == ("category", "dimension") and p.nature == "comparison"
+    long = profile_table(_t(["Заказ", "Сумма"], [[f"ORD-{i:05d}", i % 17] for i in range(80)]))
+    assert _col(long, "Заказ").type == "id"  # длинный список кодов — идентификатор
+
+
+def test_mixed_units_have_no_min_max_median():
+    # п. 17: «1,24 млрд ₽», «3 480», «356 тыс. ₽», «52» — у каждой строки своя единица
+    rows = [["Выручка", "1,24 млрд ₽", "+23%"], ["Клиенты", "3 480", "+18%"], ["Средний чек", "356 тыс. ₽", "+4%"],
+            ["NPS", "52", "+6 п."]]
+    p = profile_table(_t(["Показатель", "III кв. 2026", "Изменение"], rows))
+    c = _col(p, "III кв. 2026")
+    assert (c.min, c.max, c.median) == (None, None, None) and (c.first, c.last) == ("1,24 млрд ₽", "52")
+    assert c.role == "metric" and p.nature == "kpi"
+    same_base = profile_table(_t(["Сделка", "Сумма"], [["А", "1,2 млн ₽"], ["Б", "800 тыс. ₽"], ["В", "950 тыс. ₽"]]))
+    s = _col(same_base, "Сумма")
+    assert (s.min, s.max, s.unit) == (800000.0, 1200000.0, "₽")  # одна база — сравнимо в рублях
+
+
+def test_reader_and_profile_share_one_parser():
+    # дубли разбора убраны: чтение и профиль берут числа, периоды, пропуски и итог из verstka/data/parse.py
+    from verstka.data import parse
+    from verstka.data import profile, readers
+
+    assert readers.parse_number is parse.parse_number and readers.parse_quantity is parse.parse_quantity
+    assert readers.parse_period is parse.parse_period and readers.split_unit is parse.split_unit
+    assert profile.period_iso is parse.period_iso
+    for cell in ["(15)", "1e3", "#DIV/0!", "#REF!", "NA", "1 234,5", "$1,200", "1,24 млрд ₽", "−12"]:
+        q = parse.quantity(cell)
+        assert readers.parse_number(cell) == (None if q is None else q.value)
+        assert profile.parse_number_value(cell) == (None if q is None else q.full)
+
+
+# ── чтение → профиль: семь файлов примера целиком (п. 18) ─────────────────────────────────────────────────────────────
+@pytest.mark.parametrize(
+    "name, nature, summary",
+    [
+        ("Выручка по месяцам.csv", "time_series", "Временной ряд · 21 строка · 3 колонки"),
+        ("Регионы.xlsx", "comparison", "Сравнение · 8 строк · 3 колонки"),
+        ("Каналы продаж.json", "shares", "Доли · 4 строки · 4 колонки"),
+        ("Время ответа поддержки.csv", "distribution", "Распределение · 512 строк · 2 колонки"),
+        ("Клиенты.xlsx", "reference", "Справочник · 240 строк · 6 колонок"),
+        ("NPS по кварталам.csv", "with_gaps", "С пропусками · 8 строк · 3 колонки"),
+        ("Итоги квартала.txt", "text_table", "Таблица в тексте · 4 строки · 4 колонки"),
+    ],
+)
+def test_sample_files_read_and_profiled_end_to_end(name, nature, summary):
+    from verstka.data.readers import read_file
+
+    tables = read_file(EXAMPLES / name)
+    assert len(tables) == 1
+    p = profile_table(tables[0])
+    assert p.typable and p.nature == nature and p.summary == summary
+
+
+def test_sample_files_end_to_end_details():
+    from verstka.data.readers import read_file
+
+    def prof(name: str) -> DatasetProfile:
+        return profile_table(read_file(EXAMPLES / name)[0])
+
+    rev = prof("Выручка по месяцам.csv")
+    assert (rev.time_axis.freq, rev.time_axis.start, rev.time_axis.end, rev.time_axis.points) == (
+        "month", "2025-01", "2026-09", 21)
+    assert _col(rev, "Выручка").unit == "млн ₽" and (_col(rev, "Выручка").first, _col(rev, "Выручка").last) == (296, 423)
+    sup = prof("Время ответа поддержки.csv")
+    assert sorted(o.value for o in sup.outliers) == [655.0, 812.0, 1430.0] and _col(sup, "Обращение").role == "id"
+    nps = prof("NPS по кварталам.csv")
+    assert nps.time_axis.missing_periods == ["2025-Q2", "2026-Q2"]
+    cli = prof("Клиенты.xlsx")
+    assert cli.time_axis is None and _col(cli, "Дата договора").role == "attribute"
+    assert ("Клиент", "Регион") in cli.hierarchies
+    chn = prof("Каналы продаж.json")
+    assert chn.parts_of_whole and _col(chn, "Доля").unit == "%"
+    reg = prof("Регионы.xlsx")
+    assert not reg.parts_of_whole and reg.dimensions == ["Регион"]
+    txt = prof("Итоги квартала.txt")
+    assert txt.dimensions == ["Показатель"] and _col(txt, "III кв. 2026").max is None

@@ -5,10 +5,12 @@
 образцы. Для таблицы — ось времени с частотой и пропущенными периодами, метрики и измерения, иерархии («город → регион»),
 части целого, размер, природа («Временной ряд · 21 строка · 3 колонки») и пригодность для графика.
 
-Всё считается детерминированным кодом, без модели: один и тот же `Table` всегда даёт один и тот же профиль. Чтение
-устойчиво к «сырым» ячейкам: кроме чисел и ISO-строк, которые отдаёт чтение файлов, понимает «1 234,5», «46 %»,
-«1,24 млрд ₽», «янв 2025», «IV кв. 2025», «31.01.2025». Разбор строк идёт по уникальным значениям, статистика — в numpy:
-100 тыс. строк × 10 колонок — меньше секунды."""
+Всё считается детерминированным кодом, без модели: один и тот же `Table` всегда даёт один и тот же профиль. Ячейки из
+чтения (числа, ISO-строки) берутся как есть; строки разбираются тем же кодом, что и при чтении файла
+(`verstka/data/parse.py`): «1 234,5», «46 %», «1,24 млрд ₽», «янв 2025», «IV кв. 2025», «31.01.2025». Строки итога
+(`Table.totals` или подпись «Итого»/«Всего:» по строгому правилу) в статистику не идут, по ним проверяются «доли от
+итога». Разбор строк идёт по уникальным значениям, статистика — в numpy: 100 тыс. строк × 10 колонок — меньше
+секунды."""
 
 from __future__ import annotations
 
@@ -21,6 +23,18 @@ from typing import Any, Optional
 
 import numpy as np
 
+from verstka.data.parse import (
+    BOOL,
+    MISSING,
+    Quantity,
+    dayfirst_hint,
+    decimal_hint,
+    is_total_label,
+    period_iso,
+    period_parts,
+    quantity,
+    split_unit,
+)
 from verstka.schemas.data import (
     NATURE_LABELS,
     Cell,
@@ -53,15 +67,6 @@ _MISSING_PERIODS_MAX = 1000
 _SAMPLE_UNIQUE = 2000  # больше уникальных строк — тип сначала проверяется по детерминированной выборке
 _NO_ORD = np.int64(-(2**62))
 
-_MISSING = frozenset(
-    {"", "-", "--", "—", "–", "−", "н/д", "н.д.", "нд", "н/а", "нет данных", "n/a", "na", "nan", "null", "none", "#н/д",
-     "#n/a", "?", "…", "..."}
-)
-_BOOL_TRUE = frozenset({"да", "true", "yes", "истина", "y", "д"})
-_BOOL_FALSE = frozenset({"нет", "false", "no", "ложь", "n"})
-_TOTAL_RE = re.compile(r"^(?:итого|всего|итог|total|grand total|в целом)(?:\b|$)")
-_TOTAL_FIRST = frozenset("ивtg")
-
 # подсказки по имени колонки
 _YEAR_NAME = re.compile(r"(?:^|[^а-яёa-z])(?:год|года|годы|year|г)(?:[^а-яёa-z]|$)")
 _ID_NAME = re.compile(
@@ -73,276 +78,39 @@ _MONEY_NAME = re.compile(
 )
 _PERCENT_NAME = re.compile(r"%|процент|доля|доли|share|percent|конверси")
 _FRACTION_NAME = re.compile(r"доля|доли|share|удельн")
+# доли целого называют так; проценты-ставки (конверсия, маржа, загрузка) в сумме ≈ 100 случайно — это не доли
+_SHARE_NAME = re.compile(r"дол[яиюей]|share|структур|удельн|вклад|распределени|состав")
+_RATE_NAME = re.compile(
+    r"конверси|загрузк|марж|рентабельн|выполнени|ставк|доходност|эффективн|отток|удержани|оборачиваем|"
+    r"conversion|margin|utili[sz]ation|rate|churn|retention"
+)
 _CHANGE_NAME = re.compile(r"изменени|(?:^|[^а-яё])(?:при)?рост|динамик|разниц|отклонени|к прошл|г/г|yoy|δ|дельта|\bvs\b")
 _KPI_LABEL = re.compile(r"показател|метрик|kpi|индикатор|параметр")
 _PARENT_NAME = re.compile(
     r"регион|област|край|округ|стран|республик|континент|категори|групп|раздел|отдел|департамент|подразделени|дивизион|"
     r"направлени|сегмент|отрасл|бренд|марк[аи]|семейств|филиал|класс|тип"
 )
-_UNIT_WORDS = frozenset(
-    {"шт", "мин", "ч", "час", "часов", "сек", "с", "дн", "дней", "чел", "кг", "т", "г", "л", "км", "м", "см", "мм", "гб",
-     "тб", "мб", "квт", "раз", "ед", "п", "пункт", "пунктов", "балл", "баллов", "мес"}
-)
 _ID_VALUE = re.compile(r"^(?=.*\d)[0-9a-zа-яё_\-/.#:№]{2,40}$", re.I)
 
-# ── числа ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
-_CURRENCY = {"₽": "₽", "руб": "₽", "рублей": "₽", "рубля": "₽", "рубль": "₽", "р": "₽", "rub": "₽", "$": "$", "usd": "$",
-             "долл": "$", "долларов": "$", "доллара": "$", "€": "€", "eur": "€", "евро": "€", "£": "£", "¥": "¥"}
-_SCALES = {"тыс": 1e3, "млн": 1e6, "млрд": 1e9, "трлн": 1e12, "k": 1e3, "m": 1e6, "bn": 1e9}
-_NUM_RE = re.compile(r"^(?P<core>\d(?:[\d.,'’]|[ \u00a0\u202f\u2009](?=\d))*)\s*(?P<suf>\D*)$")
-_SUF_RE = re.compile(
-    r"^(?:(?P<scale>тыс|млн|млрд|трлн|k|m|bn)(?![а-яёa-z])\.?\s*)?"
-    r"(?:(?P<cur>₽|руб(?:лей|ля|ль)?|р|rub|\$|usd|€|eur|евро|£|¥|долл(?:аров|ара)?)(?![а-яёa-z])\.?\s*)?"
-    r"(?P<pct>%|проц(?:ент(?:ов|а)?)?)?\.?\s*"
-    r"(?P<rest>.*)$"
-)
-_PP_RE = re.compile(r"^(?:п\.?\s?п\.?|пп\.?|pp|б\.?\s?п\.?)$")
-_GROUP_SEP = re.compile(r"[ \u00a0\u202f\u2009'’]")
 
-
-@dataclass(frozen=True)
-class _Num:
-    value: float  # без множителя («1,24 млрд» → 1.24)
-    factor: float  # множитель («млрд» → 1e9)
-    mark: str  # единица из ячейки («млрд ₽», «%», «мин»); пусто — без единицы
-    pct: bool
-    money: bool
-    signed: bool  # число со знаком «+» («+23%») — похоже на изменение
-
-
-def _core_float(core: str, english: bool = False) -> Optional[float]:
-    """«1 234,5», «1.234,5», «1,234.5» → число; одна запятая — десятичная («1,5»), кроме записи «$1,200»."""
-    if english and core.count(",") == 1 and "." not in core and re.fullmatch(r"\d{1,3},\d{3}", core):
-        core = core.replace(",", "")
-    parts = _GROUP_SEP.split(core)
-    if len(parts) > 1:  # «1 234,5»: группы после первой — ровно по три цифры
-        if not parts[0] or len(re.match(r"\d*", parts[0]).group()) > 3:
-            return None
-        for p in parts[1:]:
-            m = re.match(r"\d+", p)
-            if not m or len(m.group()) != 3:
-                return None
-        core = "".join(parts)
-    dots, commas = core.count("."), core.count(",")
-    if dots and commas:
-        dec, thou = (".", ",") if core.rfind(".") > core.rfind(",") else (",", ".")
-        if core.count(dec) > 1:
-            return None
-        core = core.replace(thou, "").replace(dec, ".")
-    elif commas > 1 or dots > 1:
-        sep = "," if commas else "."
-        groups = core.split(sep)
-        if any(len(g) != 3 for g in groups[1:]) or len(groups[0]) > 3:
-            return None
-        core = core.replace(sep, "")
-    elif commas:
-        core = core.replace(",", ".")
-    try:
-        return float(core)
-    except ValueError:
-        return None
-
-
-def _parse_number_str(s: str) -> Optional[_Num]:
-    """Строка с числом: «1 234,5», «46 %», «+23%», «−5», «1,24 млрд ₽», «356 тыс. ₽», «$1,200», «120 мин», «+6 п.»."""
-    t = s.strip().lower()
-    if not t:
-        return None
-    sign, signed = 1.0, False
-    if t[0] in "+-−–":
-        signed = t[0] == "+"
-        sign = -1.0 if t[0] != "+" else 1.0
-        t = t[1:].lstrip()
-    money_pre = ""
-    if t and t[0] in "$€£¥₽":
-        money_pre, t = _CURRENCY[t[0]], t[1:].lstrip()
-        if t and t[0] in "+-−–" and not signed and sign > 0:
-            signed, sign = t[0] == "+", (-1.0 if t[0] != "+" else 1.0)
-            t = t[1:].lstrip()
-    m = _NUM_RE.match(t)
-    if not m:
-        return None
-    v = _core_float(m.group("core"), english=money_pre in ("$", "£"))
-    if v is None:
-        return None
-    suf = m.group("suf").strip()
-    factor, mark_parts, pct, money = 1.0, [], False, bool(money_pre)
-    if suf:
-        sm = _SUF_RE.match(suf)
-        if not sm:
-            return None
-        if sm.group("scale"):
-            factor = _SCALES[sm.group("scale")]
-            mark_parts.append("тыс." if sm.group("scale") == "тыс" else sm.group("scale"))
-        cur = sm.group("cur")
-        if cur:
-            money = True
-            mark_parts.append(_CURRENCY.get(cur, "₽"))
-        if sm.group("pct"):
-            pct = True
-            mark_parts.append("%")
-        rest = sm.group("rest").strip()
-        if rest:
-            if len(rest) > 24:
-                return None
-            if _PP_RE.match(rest):
-                pct = True
-                mark_parts.append("п.п.")
-            else:
-                mark_parts.append(rest)
-    if money_pre and money_pre not in mark_parts:
-        mark_parts.append(money_pre)
-    return _Num(sign * v, factor, " ".join(mark_parts), pct, money, signed)
-
-
+# ── числа и время (разбор — общий с чтением файлов: verstka/data/parse.py) ────────────────────────────────────────────
 def parse_number_value(cell: Cell) -> Optional[float]:
-    """Число ячейки с множителем («1,24 млрд» → 1.24e9, «46 %» → 46.0); None — не число или пусто."""
+    """Число ячейки с множителем («1,24 млрд» → 1.24e9, «46 %» → 46.0, «(15)» → −15); None — не число или пусто."""
     if cell is None or isinstance(cell, bool):
         return None
     if isinstance(cell, (int, float)):
-        return None if isinstance(cell, float) and math.isnan(cell) else float(cell)
-    r = _parse_number_str(_norm(cell))
-    return None if r is None else r.value * r.factor
-
-
-# ── даты и периоды ────────────────────────────────────────────────────────────────────────────────────────────────────
-_MONTHS: dict[str, int] = {}
-for _k, _forms in enumerate(
-    [
-        ("январь", "января", "янв", "january", "jan"),
-        ("февраль", "февраля", "фев", "февр", "february", "feb"),
-        ("март", "марта", "мар", "march", "mar"),
-        ("апрель", "апреля", "апр", "april", "apr"),
-        ("май", "мая", "may"),
-        ("июнь", "июня", "июн", "june", "jun"),
-        ("июль", "июля", "июл", "july", "jul"),
-        ("август", "августа", "авг", "august", "aug"),
-        ("сентябрь", "сентября", "сен", "сент", "september", "sep", "sept"),
-        ("октябрь", "октября", "окт", "october", "oct"),
-        ("ноябрь", "ноября", "ноя", "нояб", "november", "nov"),
-        ("декабрь", "декабря", "дек", "december", "dec"),
-    ],
-    start=1,
-):
-    for _f in _forms:
-        _MONTHS[_f] = _k
-_ROMAN = {"i": 1, "ii": 2, "iii": 3, "iv": 4}
-_YSUF = r"(?:\s*(?:г\.?|года?))?"
-_Q = r"([1-4]|iv|i{1,3})"
-_ISO_DAY = re.compile(r"^(\d{4})-(\d{1,2})-(\d{1,2})(?:[t ]\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:z|[+-]\d{2}:?\d{2})?)?$")
-_YMD = re.compile(r"^(\d{4})[./](\d{1,2})[./](\d{1,2})$")
-_DMY = re.compile(r"^(\d{1,2})[./-](\d{1,2})[./-](\d{4}|\d{2})" + _YSUF + r"(?:[t ]\d{1,2}:\d{2}(?::\d{2})?)?$")
-_ISO_MONTH = re.compile(r"^(\d{4})[-./](\d{1,2})$")
-_MY = re.compile(r"^(\d{1,2})[./-](\d{4})" + _YSUF + "$")
-_ISO_Q = re.compile(r"^(\d{4})" + _YSUF + r"\s*[-–,]?\s*q\s*([1-4])$")
-_Q_FIRST = re.compile(r"^q\s*([1-4])[\s\-–'’/.,]*(\d{4}|\d{2})" + _YSUF + "$")
-_Q_RU = re.compile(r"^" + _Q + r"\s*(?:-?й\s*)?(?:кв\.?|квартал[ае]?|q)\s*[\s\-–'’,]*(\d{4}|\d{2})" + _YSUF + "$")
-_Y_Q_RU = re.compile(r"^(\d{4})" + _YSUF + r"\s*[-–,]?\s*" + _Q + r"\s*(?:-?й\s*)?(?:кв\.?|квартал)$")
-_WEEK = re.compile(r"^(\d{4})-?w(\d{1,2})$")
-_YEAR = re.compile(r"^(\d{4})" + _YSUF + "$")
-_MONTH_NAME = re.compile(r"^(?:(\d{1,2})\s+)?([a-zа-яё]+)\.?[\s\-–'’.,/]*(\d{4}|\d{2})" + _YSUF + "$")
-
-
-def _year(s: str) -> Optional[int]:
-    y = int(s)
-    if len(s) == 2:
-        y += 2000 if y < 70 else 1900
-    return y if 1900 <= y <= 2100 else None
-
-
-def _qnum(s: str) -> int:
-    return int(s) if s.isdigit() else _ROMAN[s]
-
-
-def _day(y: Optional[int], m: int, d: int) -> Optional[tuple[str, int]]:
-    if y is None:
-        return None
-    try:
-        return "day", date(y, m, d).toordinal()
-    except ValueError:
-        return None
-
-
-def _month(y: Optional[int], m: int) -> Optional[tuple[str, int]]:
-    return ("month", y * 12 + m - 1) if y is not None and 1 <= m <= 12 else None
-
-
-def _quarter(y: Optional[int], q: int) -> Optional[tuple[str, int]]:
-    return ("quarter", y * 4 + q - 1) if y is not None and 1 <= q <= 4 else None
-
-
-def _parse_time_str(s: str) -> Optional[tuple[str, int]]:
-    """Строка (уже нижний регистр, пробелы схлопнуты) → (зернистость, порядковый номер периода) или None."""
-    if len(s) < 4 or len(s) > 40:
-        return None
-    if len(s) >= 10 and s[4] == "-" and s[7] == "-" and (len(s) == 10 or s[10] in " t"):
-        try:
-            return "day", date.fromisoformat(s[:10]).toordinal()
-        except ValueError:
-            pass
-    c = s[0]
-    if c.isdigit():
-        if m := _ISO_DAY.match(s):
-            return _day(_year(m.group(1)), int(m.group(2)), int(m.group(3)))
-        if m := _YEAR.match(s):
-            y = _year(m.group(1))
-            return ("year", y) if y is not None else None
-        if m := _ISO_MONTH.match(s):
-            return _month(_year(m.group(1)), int(m.group(2)))
-        if m := _DMY.match(s):
-            return _day(_year(m.group(3)), int(m.group(2)), int(m.group(1)))
-        if m := _YMD.match(s):
-            return _day(_year(m.group(1)), int(m.group(2)), int(m.group(3)))
-        if m := _MY.match(s):
-            return _month(_year(m.group(2)), int(m.group(1)))
-        if m := _ISO_Q.match(s):
-            return _quarter(_year(m.group(1)), int(m.group(2)))
-        if m := _Y_Q_RU.match(s):
-            return _quarter(_year(m.group(1)), _qnum(m.group(2)))
-        if m := _WEEK.match(s):
-            y = _year(m.group(1))
-            if y is None:
-                return None
-            try:
-                return "week", (date.fromisocalendar(y, int(m.group(2)), 1).toordinal() - 1) // 7
-            except ValueError:
-                return None
-    if m := _Q_RU.match(s):
-        return _quarter(_year(m.group(2)), _qnum(m.group(1)))
-    if m := _Q_FIRST.match(s):
-        return _quarter(_year(m.group(2)), int(m.group(1)))
-    if m := _MONTH_NAME.match(s):
-        k = _MONTHS.get(m.group(2))
-        if k is None:
-            return None
-        y = _year(m.group(3))
-        if m.group(1):
-            return _day(y, k, int(m.group(1)))
-        return _month(y, k)
-    return None
+        return float(cell) if math.isfinite(cell) else None
+    q = quantity(_norm(str(cell)))
+    return None if q is None else q.full
 
 
 def parse_time_value(cell: Cell) -> Optional[tuple[str, int]]:
     """Дата или период ячейки → (зернистость day|week|month|quarter|year, порядковый номер периода); None — не время.
-    Номер — день от начала эры, неделя (понедельник), год·12+месяц, год·4+квартал или год; `period_iso` возвращает ISO."""
+    Номер — день от начала эры, неделя (понедельник), год·12+месяц, год·4+квартал или год; `period_iso` возвращает ISO.
+    Время суток здесь не учитывается: «2025-01-31T10:30» → день (часы различает профиль колонки)."""
     if not isinstance(cell, str):
         return None
-    return _parse_time_str(_norm(cell).lower())
-
-
-def period_iso(gran: str, ordinal: int) -> str:
-    """ISO периода: «2025-01-31», «2025-W05», «2025-01», «2025-Q1», «2025»."""
-    o = int(ordinal)
-    if gran == "month":
-        return f"{o // 12:04d}-{o % 12 + 1:02d}"
-    if gran == "quarter":
-        return f"{o // 4:04d}-Q{o % 4 + 1}"
-    if gran == "year":
-        return f"{o:04d}"
-    if gran == "week":
-        y, w, _ = date.fromordinal(o * 7 + 1).isocalendar()
-        return f"{y:04d}-W{w:02d}"
-    return date.fromordinal(o).isoformat()
+    return period_parts(_norm(cell))
 
 
 # ── тексты ────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -395,15 +163,18 @@ class _Col:
     kind: str = "empty"  # number | time | bool | string | empty
     type: str = "text"
     role: str = "text"
-    present: Optional[np.ndarray] = None  # bool по строкам: значение есть (строки «Итого» — нет)
+    present: Optional[np.ndarray] = None  # bool по строкам: значение есть (строки итога — нет)
     num: Optional[np.ndarray] = None  # числа по строкам (nan — нет)
-    num_total: Optional[np.ndarray] = None  # числа в строках «Итого»
+    num_total: Optional[np.ndarray] = None  # числа в строках итога (по порядку строк итога)
     tord: Optional[np.ndarray] = None  # номер периода по строкам (_NO_ORD — нет)
+    # номера периодов вместе со строками итога («Итого» за 2024 в длинной таблице)
+    tord_total: Optional[np.ndarray] = None
     gran: Optional[str] = None
     svals: Optional[list] = None  # нормализованные строки по строкам (None — нет)
     missing: int = 0
     distinct: int = 0
-    mixed_units: bool = False
+    mixed_units: bool = False  # в ячейках разные единицы («1,24 млрд ₽», «3 480», «52»)
+    incomparable: bool = False  # разные базы единиц: min/max/медиана и выбросы бессмысленны
     signed: bool = False
     mark: str = ""  # общая единица из ячеек («%», «млн ₽»)
     fraction: bool = False
@@ -413,7 +184,7 @@ class _Col:
 
 
 def _key_kind(v: Any) -> tuple[str, Any]:
-    """Уникальное значение ячейки → ('miss'|'total'|'bool'|'num'|'str', значение)."""
+    """Уникальное значение ячейки → ('miss'|'bool'|'num'|'str', значение)."""
     if v is None:
         return "miss", None
     if isinstance(v, bool):
@@ -427,14 +198,10 @@ def _key_kind(v: Any) -> tuple[str, Any]:
         if len(s) > 40:
             return "str", s
         low = s.lower()
-        if low in _MISSING:
+        if low in MISSING:
             return "miss", None
-        if _TOTAL_RE.match(low):
-            return "total", s
-        if low in _BOOL_TRUE:
-            return "bool", True
-        if low in _BOOL_FALSE:
-            return "bool", False
+        if low in BOOL:
+            return "bool", BOOL[low]
         return "str", s
     return "str", _norm(str(v))
 
@@ -452,20 +219,6 @@ def _enough(ok: int, total: int) -> bool:
     return ok == total if total <= 20 else ok >= _SHARE_OK * total
 
 
-def _unit_from_name(name: str) -> Optional[str]:
-    """«Выручка, млн ₽» / «Доля (%)» → единица, если чтение её не отделило."""
-    m = re.match(r"^(.*\S)\s*(?:,\s*|\(\s*)([^,()]{1,16}?)\s*\)?$", name)
-    if not m:
-        return None
-    u = m.group(2).strip()
-    probe = _parse_number_str("1 " + u)
-    if probe is None or not probe.mark:
-        return None
-    if probe.pct or probe.money or probe.factor != 1.0 or probe.mark.rstrip(".") in _UNIT_WORDS:
-        return u
-    return None
-
-
 def _str_of(k: Any) -> str:
     """Значение ячейки как строка для категорий и подписей: строка как в файле, число без «.0»."""
     if isinstance(k, str):
@@ -478,14 +231,15 @@ def _str_of(k: Any) -> str:
 def _analyze(j: int, name: str, unit: Optional[str], cells: list, total: np.ndarray, first_col: bool) -> _Col:
     n = len(cells)
     c = _Col(j=j, name=name, unit=unit, cells=cells)
-    cnt = Counter(cells)
+    n_total = int(total.sum())
+    # строки итога в выборе типа не участвуют: «Итого» в колонке дат не делает её текстом
+    cnt = Counter(cells) if not n_total else Counter(v for v, t in zip(cells, total.tolist()) if not t)
     kinds: dict[Any, tuple[str, Any]] = {k: _key_kind(k) for k in cnt}
-    rows = {"miss": 0, "total": 0, "bool": 0, "num": 0, "str": 0}
+    rows = {"miss": 0, "bool": 0, "num": 0, "str": 0}
     for k, (kk, _) in kinds.items():
         rows[kk] += cnt[k]
     present_rows = rows["bool"] + rows["num"] + rows["str"]
     lname = name.lower()
-    n_total = int(total.sum())
     if present_rows == 0:
         c.kind, c.type, c.role = "empty", "text", "attribute"
         c.present = np.zeros(n, dtype=bool)
@@ -508,10 +262,11 @@ def _analyze(j: int, name: str, unit: Optional[str], cells: list, total: np.ndar
         if tmap is not None:
             gran, lookup = tmap
             c.kind, c.gran = "time", gran
-            c.type = "date" if gran == "day" else "period"
+            c.type = "date" if gran in ("day", "hour") else "period"
             c.role = "attribute"
             tord = np.fromiter((lookup.get(v, _NO_ORD) for v in cells), dtype=np.int64, count=n)
             if n_total:
+                c.tord_total = tord.copy()
                 tord[total] = _NO_ORD
             c.tord = tord
             c.present = tord != _NO_ORD
@@ -520,43 +275,51 @@ def _analyze(j: int, name: str, unit: Optional[str], cells: list, total: np.ndar
             return c
 
     # числа: родные и из строк («1 234,5», «46 %», «1,24 млрд ₽»)
-    parsed: dict[Any, _Num] = {}
+    parsed: dict[Any, Quantity] = {}
+    dec: Optional[str] = None
     if str_keys:
         cand = _sample(str_keys)
+        dec = decimal_hint([kinds[k][1] for k in cand])
         if len(cand) < len(str_keys):
-            ok = sum(cnt[k] for k in cand if _parse_number_str(kinds[k][1]) is not None)
+            ok = sum(cnt[k] for k in cand if quantity(kinds[k][1], dec) is not None)
             cand = str_keys if ok >= 0.9 * sum(cnt[k] for k in cand) else []
-        leading_zero = 0
         for k in cand:
-            s = kinds[k][1]
-            r = _parse_number_str(s)
-            if r is not None:
-                parsed[k] = r
-                leading_zero += 1 if len(s) >= 2 and s[0] == "0" and s.isdigit() else 0
+            q = quantity(kinds[k][1], dec)
+            if q is not None:
+                parsed[k] = q
         ok_rows = sum(cnt[k] for k in parsed)
-        if not parsed or not _enough(rows["num"] + ok_rows, rows["num"] + rows["str"]) or leading_zero * 2 >= len(parsed):
+        if not parsed or not _enough(rows["num"] + ok_rows, rows["num"] + rows["str"]):
             parsed = {}
     if (rows["num"] and not str_keys) or parsed:
         marks: Counter = Counter()
+        bases: Counter = Counter()
         if rows["num"]:
             marks[""] += rows["num"]
+            bases[""] += rows["num"]
         factors = {1.0} if rows["num"] else set()
         pct_rows = money_rows = signed_rows = 0
-        for k, r in parsed.items():
+        for k, q in parsed.items():
             w = cnt[k]
-            marks[r.mark] += w
-            factors.add(r.factor)
-            pct_rows += w if r.pct else 0
-            money_rows += w if r.money else 0
-            signed_rows += w if r.signed else 0
+            marks[q.unit or ""] += w
+            bases[q.base or ""] += w
+            factors.add(q.factor)
+            pct_rows += w if q.pct else 0
+            money_rows += w if q.money else 0
+            signed_rows += w if q.plus else 0
         mixed_scale = len(factors) > 1
         lookup: dict[Any, float] = {k: v for k, (kk, v) in kinds.items() if kk == "num"}
-        for k, r in parsed.items():
-            lookup[k] = r.value * r.factor if mixed_scale else r.value
+        for k, q in parsed.items():
+            lookup[k] = q.full if mixed_scale else q.value
         c.kind = "number"
         num = np.fromiter((lookup.get(v, np.nan) for v in cells), dtype=float, count=n)
         if n_total:
-            c.num_total = num[total].copy()
+            # числа строк итога: их значения в выбор типа не входили — разбираются тем же правилом колонки
+            tv = []
+            for i in np.flatnonzero(total):
+                v = cells[i]
+                x = lookup.get(v) if v in lookup else _total_number(v, dec, mixed_scale)
+                tv.append(np.nan if x is None else x)
+            c.num_total = np.asarray(tv, dtype=float)
             num[total] = np.nan
         c.num = num
         c.present = ~np.isnan(num)
@@ -564,8 +327,11 @@ def _analyze(j: int, name: str, unit: Optional[str], cells: list, total: np.ndar
         nn = max(rows["num"] + sum(cnt[k] for k in parsed), 1)
         c.signed = signed_rows > 0 and signed_rows >= 0.5 * nn
         c.mixed_units = len(marks) > 1
+        c.incomparable = len(bases) > 1
         if len(marks) == 1 and not mixed_scale:
             c.mark = next(iter(marks))
+        elif len(bases) == 1 and mixed_scale and c.unit is None:
+            c.mark = next(iter(bases))  # «1,2 млн ₽» и «800 тыс. ₽» приведены к рублям
         _type_number(c, lname, pct_rows / nn, money_rows / nn, first_col)
         return c
 
@@ -576,6 +342,17 @@ def _analyze(j: int, name: str, unit: Optional[str], cells: list, total: np.ndar
     _finish_strings(c, total)
     _type_string(c, lname)
     return c
+
+
+def _total_number(v: Any, dec: Optional[str], mixed_scale: bool) -> Optional[float]:
+    if v is None or isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        return float(v) if math.isfinite(v) else None
+    q = quantity(_norm(str(v)), dec)
+    if q is None:
+        return None
+    return q.full if mixed_scale else q.value
 
 
 def _finish_strings(c: _Col, total: np.ndarray) -> None:
@@ -591,18 +368,32 @@ def _finish_strings(c: _Col, total: np.ndarray) -> None:
 def _try_time(str_keys: list, kinds: dict, cnt: Counter, str_rows: int, lname: str, cells: list,
               first_col: bool) -> Optional[tuple[str, dict]]:
     cand = _sample(str_keys)
+    dayfirst = dayfirst_hint([kinds[k][1] for k in cand])
+
+    def parse(k: Any) -> Optional[tuple[str, int]]:
+        return period_parts(kinds[k][1], dayfirst, True, True)
+
     if len(cand) < len(str_keys):
-        ok = sum(cnt[k] for k in cand if _parse_time_str(kinds[k][1].lower()) is not None)
+        ok = sum(cnt[k] for k in cand if parse(k) is not None)
         if ok < 0.9 * sum(cnt[k] for k in cand):
             return None
     parsed: dict[Any, tuple[str, int]] = {}
     for k in str_keys:
-        r = _parse_time_str(kinds[k][1].lower())
+        r = parse(k)
         if r is not None:
             parsed[k] = r
     if not _enough(sum(cnt[k] for k in parsed), str_rows):
         return None
-    grans = Counter()
+    if any(g == "hour" for g, _ in parsed.values()):
+        # время суток: несколько времён в один день — ось по часам, по одному в день — по дням
+        hours = {(o if g == "hour" else o * 24) for g, o in parsed.values() if g in ("hour", "day")}
+        by_hour = len(hours) > len({h // 24 for h in hours})
+        for k, (g, o) in list(parsed.items()):
+            if g == "hour" and not by_hour:
+                parsed[k] = ("day", o // 24)
+            elif g == "day" and by_hour:
+                parsed[k] = ("hour", o * 24)
+    grans: Counter = Counter()
     for k, (g, _) in parsed.items():
         grans[g] += cnt[k]
     gran, g_rows = grans.most_common(1)[0]
@@ -622,7 +413,7 @@ def _type_number(c: _Col, lname: str, pct_share: float, money_share: float, firs
     integral = v.size > 0 and bool(np.all(np.mod(v, 1) == 0))
     uniq = np.unique(v)
     c.distinct = int(uniq.size)
-    unit = c.unit if c.unit is not None else (c.mark or _unit_from_name(c.name))
+    unit = c.unit if c.unit is not None else (c.mark or split_unit(c.name)[1])
     if c.unit is None and unit:
         c.unit = unit
     lunit = (unit or "").lower()
@@ -669,8 +460,9 @@ def _type_string(c: _Col, lname: str) -> None:
     all_unique = c.distinct == present
     if present and sample:
         id_like = sum(1 for s in sample if " " not in s and _ID_VALUE.match(s))
+        # код по виду значений («SUP-48213») — только у длинной таблицы: «A320», «B737» в коротком списке — подписи
         if (_ID_NAME.search(lname) and c.distinct >= _SHARE_OK * present) or (
-            all_unique and present >= 3 and id_like >= _SHARE_OK * len(sample)
+            all_unique and present > _LABEL_UNIQUE_MAX and id_like >= _SHARE_OK * len(sample)
         ):
             c.type, c.role = "id", "id"
             return
@@ -698,13 +490,24 @@ def _find_outliers(c: _Col) -> None:
     остаётся данными, а три оторванных значения — выбросами. Меньше 12 значений — выбросов нет."""
     present = c.present
     x = c.num[present]
-    if x.size < _MIN_OUTLIER_N:
+    if x.size < _MIN_OUTLIER_N or c.incomparable:
         return
     xs = np.sort(x)
     q1, q3 = np.percentile(xs, [25, 75])
     iqr = float(q3 - q1)
+    basis = ""
     if iqr <= 0:
-        return
+        # больше половины значений одинаковые (150 нулей): размах — по остальным значениям, отрыв — от всех
+        vals, counts = np.unique(xs, return_counts=True)
+        mode = float(vals[int(np.argmax(counts))])
+        rest = xs[xs != mode]
+        if rest.size < 4:
+            return
+        q1, q3 = np.percentile(rest, [25, 75])
+        iqr = float(q3 - q1)
+        if iqr <= 0:
+            return
+        basis = f" значений, кроме повторяющегося {_fmt(mode)},"
     gap = _TUKEY_K * iqr
     hi_fence, lo_fence = float(q3 + gap), float(q1 - gap)
     cut_hi = cut_lo = None
@@ -732,8 +535,8 @@ def _find_outliers(c: _Col) -> None:
     rows = np.flatnonzero(mask)
     c.outlier_rows = [int(r) for r in rows]
     apart = "и отдельно от остальных значений"
-    hi_txt = f"выше границы {_fmt(hi_fence)} (третий квартиль + 1,5 межквартильного размаха) {apart}"
-    lo_txt = f"ниже границы {_fmt(lo_fence)} (первый квартиль − 1,5 межквартильного размаха) {apart}"
+    hi_txt = f"выше границы {_fmt(hi_fence)} (третий квартиль{basis} + 1,5 межквартильного размаха) {apart}"
+    lo_txt = f"ниже границы {_fmt(lo_fence)} (первый квартиль{basis} − 1,5 межквартильного размаха) {apart}"
     c.outliers = [
         Outlier(column=c.name, row=int(r), value=float(c.num[r]), reason=hi_txt if c.num[r] > q3 else lo_txt) for r in rows
     ]
@@ -881,18 +684,48 @@ def _hierarchies(cols: list[_Col]) -> list[tuple[str, str]]:
     return out
 
 
-def _parts_of_whole(metrics: list[_Col], has_label: bool, axis: Optional[_Col]) -> bool:
+def _sums_to_total(m: _Col, axis: Optional[_Col], total_rows: np.ndarray) -> bool:
+    """Строки итога равны сумме остальных: в длинной таблице — по каждому периоду («Итого» за 2024 = сумма регионов за
+    2024), иначе итог (общий, а не промежуточный) — сумма всех строк."""
+    tv = m.num_total
+    if tv is None or not np.any(~np.isnan(tv)):
+        return False
+    v = m.num[m.present]
+    if v.size < 2 or bool(np.any(v < 0)):
+        return False
+
+    def close(a: float, b: float) -> bool:
+        return b > 0 and abs(a - b) <= max(0.01 * b, 0.5)
+
+    if axis is not None and axis.tord_total is not None:
+        checked = 0
+        for k, r in enumerate(total_rows):
+            if np.isnan(tv[k]):
+                continue
+            p = axis.tord_total[r]
+            if p == _NO_ORD:
+                return False
+            if not close(float(m.num[m.present & (axis.tord == p)].sum()), float(tv[k])):
+                return False
+            checked += 1
+        return checked > 0
+    s_all = float(v.sum())
+    return any(close(s_all, float(t)) for t in tv if not np.isnan(t))
+
+
+def _parts_of_whole(metrics: list[_Col], has_label: bool, axis: Optional[_Col], total_rows: np.ndarray) -> bool:
     for m in metrics:
-        v = m.num[m.present]
+        lname = m.name.lower()
         # «доли от итога»: строка «Итого» равна сумме остальных
-        if m.num_total is not None and v.size >= 2 and bool(np.all(v >= 0)):
-            tv = m.num_total[~np.isnan(m.num_total)]
-            if tv.size and tv[0] > 0 and abs(float(v.sum()) - float(tv[0])) <= max(0.01 * float(tv[0]), 0.5):
-                return True
+        if total_rows.size and _sums_to_total(m, axis, total_rows):
+            return True
+        v = m.num[m.present]
         if m.type != "percent" or v.size < 2 or not has_label or bool(np.any(v < 0)):
             continue
-        if m.signed or _CHANGE_NAME.search(m.name.lower()):
-            continue  # «Рост, %» и «Изменение» — не доли, даже если в сумме случайно ≈ 100
+        if m.signed or _CHANGE_NAME.search(lname) or _RATE_NAME.search(lname):
+            continue  # «Рост, %», «Изменение», «Конверсия, %» — не доли, даже если в сумме случайно ≈ 100
+        named = bool(_SHARE_NAME.search(lname))
+        lo, hi = (95, 105) if named else (99, 101)  # без слова «доля» — только почти ровно 100
         if axis is not None:
             # длинный формат: в каждом периоде доли в сумме ≈ 100
             per = axis.tord
@@ -902,11 +735,11 @@ def _parts_of_whole(metrics: list[_Col], has_label: bool, axis: Optional[_Col]) 
             keys, inv = np.unique(per[ok], return_inverse=True)
             sums = np.bincount(inv, weights=m.num[ok])
             counts = np.bincount(inv)
-            if keys.size >= 1 and bool(np.all(counts >= 2)) and bool(np.all((sums >= 95) & (sums <= 105))):
+            if keys.size >= 1 and bool(np.all(counts >= 2)) and bool(np.all((sums >= lo) & (sums <= hi))):
                 return True
             continue
         s = float(v.sum())
-        if 95 <= s <= 105:
+        if lo <= s <= hi:
             return True
         if m.fraction and 0.95 <= s <= 1.05:
             return True
@@ -928,7 +761,11 @@ def _column_profile(c: _Col) -> ColumnProfile:
     idx = np.flatnonzero(present)
     first = last = None
     vmin = vmax = med = None
-    if c.kind == "number" and idx.size:
+    if c.kind == "number" and idx.size and c.incomparable:
+        # «1,24 млрд ₽», «3 480», «52» — у каждой строки своя единица: сравнивать и усреднять нечего
+        first, last = c.cells[idx[0]], c.cells[idx[-1]]
+        first, last = (_norm(x) if isinstance(x, str) else x for x in (first, last))
+    elif c.kind == "number" and idx.size:
         v = c.num[present]
         vmin, vmax, med = float(v.min()), float(v.max()), float(np.median(v))
         first, last = _py(c.num[idx[0]]), _py(c.num[idx[-1]])
@@ -975,19 +812,28 @@ def profile_table(t: Table) -> DatasetProfile:
     else:
         columns_cells = [[r[j] if j < len(r) else None for r in t.rows] for j in range(ncols)]
 
-    # строки «Итого» / «Всего»: не данные, а сумма — в статистику не идут, по ним проверяется «доли от итога»
+    # строки итога: не данные, а сумма — в статистику не идут, по ним проверяется «доли от итога». Их отмечает чтение
+    # (Table.totals); у таблицы, собранной не чтением, — то же строгое правило: первая ячейка строки — «Итого», «Всего:»
     total = np.zeros(n, dtype=bool)
-    for cells in columns_cells:
-        tkeys = {
-            v for v in set(cells)
-            if isinstance(v, str) and len(v) <= 48 and v.lstrip()[:1].lower() in _TOTAL_FIRST and _key_kind(v)[0] == "total"
-        }
-        if tkeys:
-            for i, v in enumerate(cells):
-                if v in tkeys:
+    marked = [i for i in (getattr(t, "totals", None) or []) if isinstance(i, int) and 0 <= i < n]
+    if marked:
+        total[marked] = True
+    elif ncols >= 2 and columns_cells:
+        # подпись итога — первая заполненная ячейка строки; разные значения первой колонки проверяются по разу
+        col0 = columns_cells[0]
+        distinct0 = set(col0)
+        keys = {v for v in distinct0 if v.__class__ is str and is_total_label(v)}
+        if keys or None in distinct0:
+            for i, v in enumerate(col0):
+                if v is None:
+                    v = next((x for x in t.rows[i] if x is not None), None)
+                    if isinstance(v, str) and is_total_label(v):
+                        total[i] = True
+                elif v in keys:
                     total[i] = True
     if total.all():
         total[:] = False
+    total_rows = np.flatnonzero(total)
 
     cols = [_analyze(j, names[j], t.unit_of(j), columns_cells[j], total, j == 0) for j in range(ncols)]
 
@@ -1016,21 +862,23 @@ def profile_table(t: Table) -> DatasetProfile:
     labels = [c for c in cols if c.role == "text"]
     data_rows = int(n - int(total.sum()))
     has_label = bool(dims or labels)
-    parts = _parts_of_whole(metrics, has_label, axis if axis is not None and dims else None)
+    parts = _parts_of_whole(metrics, has_label, axis if axis is not None and dims else None, total_rows)
     hierarchies = _hierarchies(cols)
 
     typable, reason = _typable(cols, metrics, dims, axis, data_rows)
     nature = _nature(t, cols, metrics, dims, labels, axis, time_axis, parts, typable, data_rows)
     missing_total = int(sum(c.missing for c in cols))
     outliers = [o for c in cols for o in c.outliers]
+    # строки — данные (без строк итога): «Доли · 4 строки», даже если в файле пятой идёт «Итого»
     summary = " · ".join(
-        (NATURE_LABELS[nature], count_ru(n, "строка", "строки", "строк"), count_ru(ncols, "колонка", "колонки", "колонок"))
+        (NATURE_LABELS[nature], count_ru(data_rows, "строка", "строки", "строк"),
+         count_ru(ncols, "колонка", "колонки", "колонок"))
     )
     return DatasetProfile(
-        table_id=t.id, file=t.file, kind=t.kind, sheet=t.sheet, rows=n, cols=ncols,
+        table_id=t.id, file=t.file, kind=t.kind, sheet=t.sheet, rows=data_rows, cols=ncols,
         columns=[_column_profile(c) for c in cols], time_axis=time_axis,
         metrics=[c.name for c in metrics], dimensions=[c.name for c in dims], hierarchies=hierarchies,
-        missing_total=missing_total, outliers=outliers, parts_of_whole=parts, size=_size(n), nature=nature,
+        missing_total=missing_total, outliers=outliers, parts_of_whole=parts, size=_size(data_rows), nature=nature,
         typable=typable, untypable_reason=reason, summary=summary,
     )
 
