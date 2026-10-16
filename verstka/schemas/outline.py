@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Literal, Optional
+from typing import Literal, Optional, Union
 
 from pydantic import BaseModel, Field
+from pydantic.json_schema import SkipJsonSchema
 
 from verstka.schemas.common import PatternKind
+from verstka.schemas.data import SlideData
 
 # the name the free place for the user's photo carries on the slide (SlideContent.photo_slot): the audit knows it by
 # it — a quiet stand-in for a photo, not a colour of the deck's own
@@ -55,13 +57,32 @@ class InlineSeries(BaseModel):
     """One data series written into a chart by the planner (Agent v2): its values are checked against the brief."""
 
     name: str = ""
-    values: list[float] = Field(default_factory=list)
+    # None — пропуск в данных (вторая ступень: линия с разрывами, а не ноль). Пропуски бывают только у серий из файлов
+    # с данными; планировщик и агент пишут числа, и схема, которую видит модель, — по-прежнему массив чисел
+    values: list[Union[float, SkipJsonSchema[None]]] = Field(default_factory=list)
     # the series' own unit when the chart's series measure different things (a split chart: litres, minutes, hours)
     unit: Optional[str] = None
 
 
+class XYSeries(BaseModel):
+    """Точки рассеяния (вторая ступень): пары (x, y) одной серии."""
+
+    name: str = ""
+    x: list[float] = Field(default_factory=list)
+    y: list[float] = Field(default_factory=list)
+
+
+# типы графиков, которые пишут планировщик и агент (и видит модель в схеме ответа)
+PlannerChartType = Literal["bar", "column", "line", "area", "pie", "doughnut"]
+# типы графиков слоя данных (вторая ступень): их выбирает код по профилю датасета, не модель
+DataChartType = Literal["histogram", "scatter", "stacked_column", "stacked_bar", "grouped_column", "grouped_bar"]
+ChartType = Union[PlannerChartType, DataChartType]
+
+
 class ChartSpec(BaseModel):
-    type: Literal["bar", "column", "line", "area", "pie", "doughnut"] = "column"
+    # новые типы и поля второй ступени скрыты из JSON-схемы (SkipJsonSchema): схема, которую видит планировщик
+    # (PlannedDeck), остаётся прежней — их заполняет только слой данных
+    type: Union[PlannerChartType, SkipJsonSchema[DataChartType]] = "column"
     series_ids: list[str] = Field(default_factory=list)
     title: Optional[str] = None
     unit: Optional[str] = None
@@ -73,6 +94,13 @@ class ChartSpec(BaseModel):
     # every series is a chart of its own, side by side under its name and unit («для каждого показателя — отдельный
     # график со своей единицей измерения»): small multiples of one comparison
     split: bool = False
+    # вторая ступень: подписи осей (из имён колонок и единиц), пропуски — разрывы линии (dispBlanksAs gap), строка
+    # источника под графиком («Источник: Выручка по месяцам.csv»), точки рассеяния
+    x_title: SkipJsonSchema[Optional[str]] = None
+    y_title: SkipJsonSchema[Optional[str]] = None
+    gaps: SkipJsonSchema[bool] = False
+    source: SkipJsonSchema[Optional[str]] = None
+    xy: SkipJsonSchema[list[XYSeries]] = Field(default_factory=list)
 
 
 class CodeBlock(BaseModel):
@@ -168,6 +196,9 @@ class OutlineSlide(BaseModel):
     # the slide shows the author's own sentences, whole (verbatim mode, planning/faithful.py): no later step rewrites,
     # shortens or reshapes them — the tense guard, the variety pass, case polish and the editors leave them as written
     verbatim: bool = False
+    # вторая ступень: слайд показывает датасет — профиль, задача, варианты визуализации и факты заголовка для «Почему
+    # так». Заполняет слой данных (verstka/data/story.py); модели планировщика поле не показывается
+    data: SkipJsonSchema[Optional[SlideData]] = None
 
 
 class DeckOutline(BaseModel):

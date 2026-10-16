@@ -25,6 +25,11 @@ dependencies = [
     # formula's picture for LibreOffice (TeX layout, the STIX Two Math font) — pure Python, MIT
     "latex2mathml>=3.77",
     "ziamath>=0.13",
+    # second stage: data files and brandbooks — XLSX tables (verstka/data/readers.py, MIT), a PDF brandbook's text
+    # (verstka/brand/pdf.py, BSD) and its pages as pictures for the vision model (pdfium, Apache-2.0/BSD)
+    "openpyxl>=3.1",
+    "pypdf>=4.0",
+    "pypdfium2>=4.20",
 ]
 
 [project.optional-dependencies]

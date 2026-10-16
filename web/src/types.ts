@@ -254,10 +254,17 @@ export interface SlideDesign {
 export interface Fact { id: string; value: string; unit: string | null; label: string; source_span: string | null }
 export interface Series { id: string; name: string; categories: string[]; values: number[]; unit: string | null }
 export interface TableData { columns: string[]; rows: string[][]; unit: string | null; caption: string | null }
+/** Точки рассеяния (вторая ступень). */
+export interface XYSeries { name: string; x: number[]; y: number[] }
 export interface ChartSpec {
+  /** "bar" | "column" | "line" | "area" | "pie" | "doughnut"; слой данных — ещё "histogram" | "scatter" | "stacked_column" |
+   * "stacked_bar" | "grouped_column" | "grouped_bar". */
   type: string; series_ids: string[]; title: string | null; unit: string | null; highlight_index: number | null;
-  /** Agent v2: the chart's data written by the designer. */
-  categories?: string[]; series?: { name: string; values: number[] }[];
+  /** Agent v2: the chart's data written by the designer; null — a gap in a data file (a break in the line, not zero). */
+  categories?: string[]; series?: { name: string; values: (number | null)[]; unit?: string | null }[];
+  split?: boolean;
+  /** Вторая ступень: подписи осей, пропуски — разрывы линии, строка источника, точки рассеяния. */
+  x_title?: string | null; y_title?: string | null; gaps?: boolean; source?: string | null; xy?: XYSeries[];
 }
 export interface SlideItem { title: string; text: string; icon_hint: string | null; number: string | null; bullets: string[] }
 export interface NumberCallout { value: string; label: string; fact_id: string | null }
@@ -292,6 +299,8 @@ export interface OutlineSlide {
   rationale?: string | null;
   spec_ref?: number | null;
   alternatives?: { kind: string; change: string }[];
+  /** Вторая ступень: слайд показывает датасет — профиль, задача, варианты и факты для «Почему так». */
+  data?: SlideData | null;
 }
 export interface DeckOutline {
   title: string;
@@ -416,6 +425,10 @@ export interface GenerationMeta {
   eyes?: boolean | null;
   /** «Улучшить готовую презентацию»: the original deck (its name, slides and audit). */
   improved_from?: ImprovedFrom | null;
+  /** Вторая ступень: файлы с данными, брендбук и что важнее при расхождении — как просил запрос. */
+  dataset_ids?: string[];
+  brandbook_id?: string | null;
+  brand_priority?: BrandPriority;
 }
 /** What the agent wrote from a topic (generation.json `writer`, planning/writer.py `WriterResult.meta`). */
 export interface WriterInfo {
@@ -539,6 +552,11 @@ export interface GenerateRequest {
   eyes?: boolean | null;
   /** «Улучшить готовую презентацию»: the original deck, for «было → стало». */
   improved_from?: ImprovedFrom | null;
+  /** Вторая ступень: id файлов с данными (POST /api/datasets), брендбука (POST /api/brandbooks) и что важнее при
+   * расхождении брендбука с шаблоном (по умолчанию — брендбук). */
+  dataset_ids?: string[];
+  brandbook_id?: string | null;
+  brand_priority?: BrandPriority;
 }
 export interface GenerateResponse { job_id: string; generation_id: string }
 export interface FixRequest { issue_ids?: string[]; all_deterministic?: boolean }
@@ -579,3 +597,81 @@ export type ChatAction =
 export interface EditResult { reply: string; changed: boolean; slide?: number | null; strategy?: string; score?: number | null; kind?: string }
 export interface ChatResponse { reply: string; intent: string; actions: ChatAction[]; template_id: string | null; generation_id: string | null }
 export interface ChatMessage { id: string; role: "user" | "assistant"; text: string; ts: number; pending?: boolean }
+
+// ---- данные (вторая ступень): verstka/schemas/data.py ---------------------------------
+export type SourceKind = "csv" | "tsv" | "xlsx" | "json" | "text";
+export type ColumnType = "number" | "percent" | "money" | "date" | "period" | "category" | "text" | "boolean" | "id";
+export type ColumnRole = "time" | "dimension" | "metric" | "id" | "text" | "attribute";
+export type TimeFreq = "day" | "week" | "month" | "quarter" | "year" | "irregular";
+export type TaskKind = "dynamics" | "comparison" | "shares" | "distribution" | "relationship" | "reference" | "kpi";
+export type VizKind =
+  | "line" | "column" | "bar" | "histogram" | "pie" | "doughnut" | "scatter" | "grouped_column" | "grouped_bar"
+  | "stacked_column" | "stacked_bar" | "kpi_cards" | "table" | "area";
+export type Nature =
+  | "time_series" | "comparison" | "shares" | "distribution" | "reference" | "with_gaps" | "text_table" | "relationship"
+  | "kpi" | "untypable";
+export type DatasetSize = "small" | "medium" | "large";
+export type FactKind = "change" | "share" | "leader" | "max" | "min" | "median" | "percentile" | "count" | "total" | "gap" | "outliers";
+/** Ячейка таблицы; даты и периоды — ISO-строки. */
+export type Cell = number | boolean | string | null;
+export interface ColumnProfile {
+  name: string; unit: string | null; type: ColumnType; role: ColumnRole; missing: number; distinct: number;
+  /** Числа — числом, даты и периоды — ISO-строкой. */
+  min: number | string | null; max: number | string | null; median: number | string | null;
+  first: Cell; last: Cell;
+  /** Номера строк с выбросами. */
+  outliers: number[];
+  samples: Cell[];
+}
+export interface TimeAxis { column: string; freq: TimeFreq; start: string; end: string; points: number; missing_periods: string[] }
+export interface Outlier { column: string; row: number; value: number; reason: string }
+export interface DatasetProfile {
+  table_id: string; file: string; kind: SourceKind; sheet: string | null; rows: number; cols: number;
+  columns: ColumnProfile[]; time_axis: TimeAxis | null; metrics: string[]; dimensions: string[];
+  /** (дочерняя, родительская) — ["город", "регион"]. */
+  hierarchies: [string, string][];
+  missing_total: number; outliers: Outlier[]; parts_of_whole: boolean; size: DatasetSize; nature: Nature;
+  typable: boolean; untypable_reason: string | null; summary: string;
+}
+export interface TaskDecision { task: TaskKind; reasons: string[]; goal: string | null; scores: Partial<Record<TaskKind, number>> }
+export interface VizOption { kind: VizKind; score: number; title: string; reasons: string[]; why_not: string | null; aggregation: string | null }
+export interface HeadlineFact { id: string; text: string; value: number; unit: string | null; kind: FactKind; explain: string }
+export interface DatasetPlan {
+  profile: DatasetProfile; task: TaskDecision;
+  /** 2–3 варианта, лучший по данным — первым; `chosen` — номер выбранного. */
+  options: VizOption[]; chosen: number;
+  headline: string; headline_facts: HeadlineFact[]; plain_headline: string; caption: string | null; source: string;
+  slides: number; message: string | null;
+}
+/** Данные слайда для «Почему так» (OutlineSlide.data). */
+export interface SlideData {
+  dataset_id: string; file: string; profile_line: string; nature: Nature | null; nature_label: string;
+  columns: ColumnProfile[]; time_axis: TimeAxis | null; metrics: string[]; dimensions: string[];
+  missing_total: number; outliers: Outlier[]; task: TaskDecision | null;
+  /** Варианты визуализации, лучший — первым; `chosen` — номер выбранного. */
+  options: VizOption[]; chosen: number;
+  headline_facts: HeadlineFact[]; plain_headline: string; aggregation: string | null;
+  /** Часть k из n: датасет на нескольких слайдах. */
+  part: [number, number];
+}
+/** Карточка файла в панели «Данные» (POST /api/datasets). */
+export interface DatasetSummary {
+  id: string; file: string; kind: SourceKind; rows: number; cols: number; nature: Nature; nature_label: string;
+  line: string; issues: string[]; sheet: string | null;
+}
+
+// ---- брендбук (вторая ступень): verstka/schemas/brand.py ------------------------------
+export type BrandColorRole =
+  | "primary" | "secondary" | "accent" | "text" | "background" | "surface" | "chart" | "neutral" | "success" | "warning" | "danger";
+export type BrandPriority = "brand" | "template";
+export interface BrandColor { hex: string; role: BrandColorRole; name: string | null }
+export interface BrandFont { role: "heading" | "body"; family: string; fallback: string | null; weight: number }
+export interface BrandLogo { name: string; file: string; variant: "primary" | "white" | "mark" | "mono"; ground: "light" | "dark" | "any" }
+export interface BrandRule { text: string; kind: "logo" | "color" | "type" | "grid" | "other" }
+export interface BrandSpec {
+  id: string; name: string; source: "tokens" | "pdf" | "folder" | "figma"; file: string | null; pages: number;
+  colors: BrandColor[]; fonts: BrandFont[]; logos: BrandLogo[]; margins_px: number | null; grid: string | null;
+  rules: BrandRule[]; logo_place: "top_left" | "top_right" | "bottom_left" | "bottom_right" | null; warnings: string[];
+}
+/** Расхождение брендбука с шаблоном и что попало в презентацию. */
+export interface BrandConflict { what: string; template: string; brand: string; result: string; kind: "color" | "font" | "logo" | "margins" | "other" }

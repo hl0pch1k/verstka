@@ -1137,7 +1137,8 @@ def _fingerprint(s: OutlineSlide) -> str:
     return f"{s.kind.value} | {s.headline}" + (" | " + "; ".join(bits) if bits else "")
 
 
-_V2_SLIDE = ("takeaway", "footnote", "rationale", "spec_ref", "continues")  # Agent v2 fields: left out while at their defaults
+# Agent v2 fields: left out while at their defaults; data — the second stage's dataset of the slide (verstka/data)
+_V2_SLIDE = ("takeaway", "footnote", "rationale", "spec_ref", "continues", "data")
 # photo_slot: the free place for the user's photo, None by default; photo_hint and code: the verbatim layout's
 # (planning/faithful.py)
 _V2_CONTENT = ("chart2", "formula", "photo_slot", "photo_hint", "code")
@@ -1160,7 +1161,8 @@ def _digest(o: DeckOutline) -> str:
         if d["content"].get("photo_own") is False:  # the author's own photo place (verstka/images), off by default
             d["content"].pop("photo_own")
         if d["content"].get("chart"):
-            for k, empty in (("categories", []), ("series", []), ("split", False)):
+            # the second stage's chart fields (axis titles, gaps, source, scatter points) at their defaults too
+            for k, empty in (("categories", []), ("series", []), ("split", False), ("x_title", None), ("y_title", None), ("gaps", False), ("source", None), ("xy", [])):
                 if d["content"]["chart"].get(k) == empty:
                     d["content"]["chart"].pop(k, None)
             for ser in d["content"]["chart"].get("series") or []:

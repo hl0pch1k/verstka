@@ -31,6 +31,7 @@ from verstka.planning.strategies import STRATEGY_NAMES, load_strategies
 from verstka.ru import ru_count
 from verstka.providers.registry import ProviderRegistry
 from verstka.schemas.audit import AuditReport
+from verstka.schemas.brand import BrandPriority
 from verstka.schemas.layout import LayoutPlan
 from verstka.schemas.template import TemplateManifest
 from verstka.schemas.outline import Brief, DeckOutline
@@ -136,6 +137,11 @@ class GenerateRequest(BaseModel):
     eyes: Optional[bool] = None
     # «Улучшить презентацию»: what the original deck was (its name, slides and audit), for «было → стало»
     improved_from: Optional[dict] = None
+    # вторая ступень: файлы с данными (id из POST /api/datasets), брендбук (id из POST /api/brandbooks) и что важнее,
+    # когда брендбук расходится с шаблоном: «brand» — брендбук (по умолчанию), «template» — бренд только дополняет шаблон
+    dataset_ids: list[str] = Field(default_factory=list)
+    brandbook_id: Optional[str] = None
+    brand_priority: BrandPriority = "brand"
 
 
 class PictureBody(BaseModel):
@@ -502,7 +508,8 @@ def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job) -> dic
 
 def _request_options(req: GenerateRequest) -> dict:
     """The request's switches, kept in generation.json: «Собрать ещё раз» repeats the deck with the same inputs."""
-    return {"audit_models": req.audit_models, "autofix": req.autofix, "exports": list(req.exports), "language": req.language, "extra_instructions": req.extra_instructions, "outline_supplied": req.outline is not None, "pictures": req.pictures, "eyes": req.eyes, "improved_from": req.improved_from}
+    return {"audit_models": req.audit_models, "autofix": req.autofix, "exports": list(req.exports), "language": req.language, "extra_instructions": req.extra_instructions, "outline_supplied": req.outline is not None, "pictures": req.pictures, "eyes": req.eyes, "improved_from": req.improved_from,
+            "dataset_ids": list(req.dataset_ids), "brandbook_id": req.brandbook_id, "brand_priority": req.brand_priority}
 
 
 def _generation_job(gid: str, gdir: Path, req: GenerateRequest) -> Callable[[Job], dict]:
