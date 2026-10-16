@@ -1,20 +1,23 @@
 """Чтение файлов с данными в таблицы `Table` (описание решения §2.1).
 
 Форматы: CSV/TSV (кодировка, разделитель, кавычки, десятичная запятая, пробелы-разделители тысяч), XLSX (все листы,
-лист — таблица, даты Excel, проценты по формату ячейки), JSON (массив записей, `{columns, rows}`, «ключ → записи»,
-«категория → число», колонки-массивы), текст .txt/.md (таблицы Markdown, блоки через табуляцию, «;» и выровненные
-пробелами «столбцы»; текст вокруг таблицы — в `notes`).
+лист — таблица, даты Excel, проценты по формату ячейки, объединённые ячейки, формулы без сохранённых значений), JSON
+(массив записей, `{columns, rows}`, «ключ → записи», «категория → число», колонки-массивы), текст .txt/.md (таблицы
+Markdown, блоки через табуляцию, «;», запятую и выровненные пробелами «столбцы»; текст вокруг таблицы — в `notes`).
 
-Ячейки типизируются по колонке, а не по одной ячейке: числа — int/float («1 234,5», «46 %», «−12», «1,2 млн ₽»),
-даты и периоды — ISO-строки («2025-01-31», «2025-01», «2025-Q4», «2025»), да/нет — bool, пропуски («», «—», «н/д») — None.
-Единица уходит из заголовка в `Table.units` («Выручка, млн ₽» → «Выручка» + «млн ₽»); одинаковая единица в ячейках
-(«46 %») — тоже. Колонка, где у чисел разные единицы (строка показателей «1,24 млрд ₽», «3 480», «356 тыс. ₽»),
-остаётся строками как в файле: число и единицу каждой ячейки даёт `parse_quantity`.
+Разбор чисел, единиц, дат и периодов, пропусков и строки итога — общий с профилем (`verstka/data/parse.py`). Ячейки
+типизируются по колонке, а не по одной ячейке: числа — int/float («1 234,5», «46 %», «−12», «1,2 млн ₽»), даты и
+периоды — ISO-строки («2025-01-31», «2025-01», «2025-Q4», «2025», «2025-03-01T10:00»), да/нет — bool, пропуски
+(«», «—», «н/д») — None. Единица уходит из заголовка в `Table.units` («Выручка, млн ₽» → «Выручка» + «млн ₽»);
+одинаковая единица в ячейках («46 %») — тоже. Колонка, где у чисел разные единицы (строка показателей «1,24 млрд ₽»,
+«3 480», «356 тыс. ₽»), остаётся строками как в файле: число и единицу каждой ячейки даёт `parse_quantity`.
 
 Шапка — первая «широкая» строка (заголовки и пустые строки над ней уходят в `notes`); двухэтажная шапка (группа над
 подзаголовками, строка единиц под названиями) склеивается. Пустые строки и колонки, безымянная колонка-нумерация,
-повтор шапки, строка «Итого» в конце и сноски под таблицей в данные не попадают; титульный лист книги — не таблица;
-«выгрузка в Excel», которая на деле текст через табуляцию (.xls), читается как CSV.
+повтор шапки и сноски под таблицей в данные не попадают; строка итога («Итого», «Всего:») остаётся и отмечается в
+`Table.totals`. Широкая таблица (периоды в колонках: «Регион · 2023 · 2024 · 2025») разворачивается в длинную
+(«Регион · Год · Значение»). Титульный лист книги — не таблица; «выгрузка в Excel», которая на деле текст через
+табуляцию (.xls), читается как CSV.
 
 `Table` собирается без повторной проверки pydantic (`model_construct`): типы ячеек гарантирует разбор, а 100 тысяч
 строк читаются быстрее секунды.
@@ -38,6 +41,29 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Optional, Union
 
+from verstka.data.parse import (
+    BOOL,
+    MISSING,
+    MISSING_FIRST,
+    TIME_HEADER,
+    Quantity,
+    dayfirst_hint,
+    decimal_hint,
+    excel_serial_iso,
+    header_unit,
+    is_total_label,
+    iso_of_datetime,
+    iso_ord,
+    parse_number,
+    parse_period,
+    parse_quantity,
+    period_iso,
+    period_str,
+    quantity,
+    split_unit,
+    unit_text,
+)
+from verstka.data.parse import _CUR_SYMBOLS
 from verstka.schemas.data import Cell, SourceKind, Table
 
 __all__ = [
@@ -51,6 +77,16 @@ __all__ = [
 ]
 
 csv.field_size_limit(min(sys.maxsize, 1 << 30))
+
+# короткие имена внутри модуля (разбор — общий с профилем, verstka/data/parse.py)
+_quantity = quantity
+_period = period_str
+_header_unit = header_unit
+_unit_text = unit_text
+_iso_of_datetime = iso_of_datetime
+_Q = Quantity
+_BOOL = BOOL
+_TIME_HEADER = TIME_HEADER
 
 
 class DataReadError(Exception):
@@ -69,508 +105,11 @@ class _NoData(Exception):
     """Внутреннее: в этом блоке/листе нет строк с данными (сообщение — для единственной таблицы файла)."""
 
 
-# ======================================================================================================== единицы
-
-_SCALES: dict[str, tuple[str, float]] = {}
-for _forms, _canon, _factor in (
-    (("тыс", "тыс.", "тысяч", "тысяча", "тысячи", "thousand", "thousands", "k"), "тыс.", 1e3),
-    (("млн", "млн.", "миллион", "миллиона", "миллионов", "million", "millions", "mn", "mln", "m"), "млн", 1e6),
-    (("млрд", "млрд.", "миллиард", "миллиарда", "миллиардов", "billion", "billions", "bn", "b"), "млрд", 1e9),
-    (("трлн", "трлн.", "триллион", "триллиона", "триллионов", "trillion"), "трлн", 1e12),
-):
-    for _f in _forms:
-        _SCALES[_f] = (_canon, _factor)
-# латинские k/m/b — только в ячейке сразу за числом («5K», «$1.2M»), в заголовке «m» — это метры
-_LATIN_SCALES = {"k", "m", "b", "mn", "mln", "bn"}
-
-_BASE_UNITS: dict[str, str] = {}
-for _forms, _canon in (
-    (("₽", "руб", "руб.", "рубль", "рубля", "рублей", "рубли", "р", "р.", "rub", "rur"), "₽"),
-    (("$", "usd", "долл", "долл.", "доллар", "доллара", "долларов", "доллары"), "$"),
-    (("€", "eur", "евро"), "€"),
-    (("¥", "cny", "юань", "юаня", "юаней"), "¥"),
-    (("£", "gbp"), "£"),
-    (("₸", "kzt", "тенге"), "₸"),
-    (("%", "％", "проц", "проц.", "процент", "процента", "процентов", "проценты", "percent", "pct"), "%"),
-    (("п.п.", "п.п", "п. п.", "пп", "пп.", "pp", "п.п.%"), "п.п."),
-    (("п.", "пункт", "пункта", "пунктов", "пункты", "pt", "pts"), "п."),
-    (("шт", "шт.", "штук", "штука", "штуки"), "шт."),
-    (("чел", "чел.", "человек", "человека"), "чел."),
-    (("мин", "мин.", "минут", "минута", "минуты", "min"), "мин"),
-    (("сек", "сек.", "секунд", "секунда", "секунды", "с", "с.", "s"), "с"),
-    (("ч", "ч.", "час", "часа", "часов", "часы", "h"), "ч"),
-    (("дн", "дн.", "день", "дня", "дней", "дни", "сут", "сут.", "суток"), "дн."),
-    (("нед", "нед.", "неделя", "недели", "недель"), "нед."),
-    (("мес", "мес.", "месяц", "месяца", "месяцев"), "мес."),
-    (("лет", "год", "года", "годы"), "лет"),
-    (("балл", "балла", "баллов", "баллы", "б."), "баллов"),
-    (("раз", "раза", "x", "×"), "раз"),
-    (("ед", "ед.", "единиц", "единицы"), "ед."),
-):
-    for _f in _forms:
-        _BASE_UNITS[_f] = _canon
-# единицы, которые пишут как есть (размерности и объёмы)
-for _f in (
-    "кг", "г", "т", "тонн", "тонны", "ц", "км", "м", "см", "мм", "м²", "м2", "кв. м", "кв.м", "м³", "м3", "куб. м",
-    "л", "литров", "га", "вт", "квт", "мвт", "гвт", "квт·ч", "квт*ч", "квтч", "мвт·ч", "гвт·ч", "кб", "мб", "гб",
-    "тб", "пб", "кбайт", "мбайт", "гбайт", "тбайт", "кбит/с", "мбит/с", "гбит/с", "мс", "ms", "мгц", "ггц", "°c",
-    "°с", "°", "rps", "rpm", "fps", "ops",
-):
-    _BASE_UNITS.setdefault(_f, _f.replace("квт*ч", "квт·ч"))
-_UPPER_KEEP = {"кб": "КБ", "мб": "МБ", "гб": "ГБ", "тб": "ТБ", "пб": "ПБ", "квт": "кВт", "мвт": "МВт", "гвт": "ГВт",
-               "вт": "Вт", "квт·ч": "кВт·ч", "мвт·ч": "МВт·ч", "гвт·ч": "ГВт·ч", "мгц": "МГц", "ггц": "ГГц",
-               "°c": "°C", "°с": "°C", "кбит/с": "Кбит/с", "мбит/с": "Мбит/с", "гбит/с": "Гбит/с",
-               "кбайт": "Кбайт", "мбайт": "Мбайт", "гбайт": "Гбайт", "тбайт": "Тбайт", "rps": "RPS", "rpm": "RPM",
-               "fps": "FPS", "ops": "OPS"}
-_CUR_SYMBOLS = "₽$€£¥₸"
-
-_SCALE_HEAD = re.compile(
-    r"(тыс(?:яч[аи]?)?\.?|млн\.?|миллион(?:а|ов)?|млрд\.?|миллиард(?:а|ов)?|трлн\.?|триллион(?:а|ов)?"
-    r"|thousands?|millions?|billions?|trillion|mn|mln|bn|k|m|b)(?![a-zа-яё])\.?",
-    re.IGNORECASE,
-)
-
-
-def _base_unit(text: str, strict: bool) -> Optional[str]:
-    """Каноническая единица без множителя («руб.» → «₽», «процентов» → «%»); strict — только известные."""
-    t = " ".join(text.split()).strip(" ,;:")
-    if not t:
-        return None
-    low = t.lower().replace("ё", "е")
-    if low in _BASE_UNITS:
-        canon = _BASE_UNITS[low]
-        return _UPPER_KEEP.get(canon, canon)
-    if "/" in low:  # «₽/мес.», «шт./день», «км/ч»
-        parts = [p.strip() for p in t.split("/")]
-        if len(parts) == 2 and all(parts):
-            left = _base_unit(parts[0], strict=False) if parts[0][:1] not in "0123456789" else None
-            right = _base_unit(parts[1], strict=False) if parts[1][:1] not in "0123456789" else None
-            known = parts[0].lower() in _BASE_UNITS or parts[1].lower() in _BASE_UNITS
-            if left and right and (known or not strict):
-                return f"{left}/{right}"
-        return None
-    if strict:
-        return None
-    # в ячейке — короткое слово после числа («3 480 клиентов», «12 месяцев» — не из словаря, но единица)
-    if len(t) <= 20 and len(t.split()) <= 2 and re.fullmatch(r"[^\W\d_][\w.\-·°²³ ]*", t) and not re.search(r"\d", t):
-        return t
-    return None
-
-
-def _unit_parts(text: str, *, strict: bool, cell: bool = False) -> Optional[tuple[Optional[str], float, Optional[str]]]:
-    """Единица → (множитель словом, множитель числом, база): «млн руб.» → («млн», 1e6, «₽»), «%» → (None, 1, «%»)."""
-    t = " ".join(text.split()).strip()
-    t = re.sub(r"^(?:в|in)\s+", "", t, flags=re.IGNORECASE)
-    if not t:
-        return None
-    if re.fullmatch(r"т\.?\s?р\.?|тр\.?|т\.\s?руб\.?", t, flags=re.IGNORECASE):
-        return "тыс.", 1e3, "₽"
-    scale_word, factor, rest = None, 1.0, t
-    m = _SCALE_HEAD.match(t)
-    if m:
-        word = m.group(1)
-        key = word.lower().rstrip(".")
-        latin = key in _LATIN_SCALES
-        # «m» в заголовке — метры, «b» — не миллиард; в ячейке «5K», «1.2M» — множитель (заглавная или вплотную)
-        allowed = not latin or (cell and (word in {"K", "M", "B", "k", "bn", "mn", "mln"}))
-        if key in ("m", "b") and not cell:
-            allowed = False
-        if allowed and (key in _SCALES or key + "." in _SCALES):
-            scale_word, factor = _SCALES.get(key, _SCALES.get(key + "."))
-            rest = t[m.end():].strip()
-    if not rest:
-        return (scale_word, factor, None) if scale_word else None
-    # валюта перед множителем: «$ млн», «₽ тыс.»
-    if scale_word is None and rest[:1] in _CUR_SYMBOLS:
-        m2 = _SCALE_HEAD.match(rest[1:].strip())
-        if m2 and m2.group(1).lower().rstrip(".") in _SCALES and m2.end() == len(rest[1:].strip()):
-            scale_word, factor = _SCALES[m2.group(1).lower().rstrip(".")]
-            return scale_word, factor, _BASE_UNITS[rest[0]]
-    base = _base_unit(rest, strict=strict)
-    if base is None:
-        return None
-    return scale_word, factor, base
-
-
-def _unit_text(scale_word: Optional[str], base: Optional[str]) -> Optional[str]:
-    return " ".join(p for p in (scale_word, base) if p) or None
-
-
-def _header_unit(text: str) -> Optional[str]:
-    """Строка — единица измерения целиком («млн ₽», «руб.», «%», «шт.», «в %») → каноническая, иначе None."""
-    parts = _unit_parts(text, strict=True)
-    if parts is None:
-        return None
-    return _unit_text(parts[0], parts[2])
-
-
-_PAREN_TAIL = re.compile(r"^(?P<name>.*?)\s*[(\[](?P<unit>[^()\[\]]{1,30})[)\]]\s*$")
-_TRAIL_SYMBOL = re.compile(r"^(?P<name>.*?\S)\s*(?P<unit>[%％₽$€£¥₸])$")
-_TRAIL_SCALE = re.compile(
-    r"^(?P<name>.*?\S)\s+(?P<unit>(?:в\s+)?(?:тыс\.?|млн\.?|млрд\.?|трлн\.?)\s*[^\s,]{0,8})$", re.IGNORECASE
-)
-_TRAIL_IN = re.compile(r"^(?P<name>.*?\S)\s+(?P<unit>в\s+(?:%|процентах|рублях|долларах|евро|штуках|минутах|часах|днях))$",
-                       re.IGNORECASE)
-_IN_WORDS = {"процентах": "%", "рублях": "₽", "долларах": "$", "евро": "€", "штуках": "шт.", "минутах": "мин",
-             "часах": "ч", "днях": "дн."}
-
-
-def split_unit(header: Any) -> tuple[str, Optional[str]]:
-    """Заголовок колонки → (имя без единицы, единица): «Выручка, млн ₽» → («Выручка», «млн ₽»), «Доля (%)» →
-    («Доля», «%»), «Цена, руб.» → («Цена», «₽»), «Количество, шт.» → («Количество», «шт.»). Скобки и запятые,
-    за которыми не единица, остаются в имени: «Выручка (план)», «Город, регион»."""
-    text = " ".join(str(header if header is not None else "").split()).strip()
-    if not text:
-        return "", None
-    # «Выручка (млн ₽)», «Доля [%]»
-    m = _PAREN_TAIL.match(text)
-    if m and m.group("name"):
-        unit = _header_unit(m.group("unit"))
-        if unit:
-            return _clean_name(m.group("name")), unit
-    # «Выручка, млн ₽», «Выручка, млн ₽, план» — единица в любой части через запятую
-    if "," in text:
-        parts = [p.strip() for p in text.split(",")]
-        for k in range(len(parts) - 1, 0, -1):
-            unit = _header_unit(parts[k])
-            if unit and parts[0]:
-                rest = [p for i, p in enumerate(parts) if i != k and p]
-                return _clean_name(", ".join(rest)), unit
-    # «Доля в %», «Сумма в рублях»
-    m = _TRAIL_IN.match(text)
-    if m:
-        w = m.group("unit").split()[-1].lower()
-        return _clean_name(m.group("name")), "%" if w == "%" else _IN_WORDS.get(w)
-    # «Выручка млн ₽», «Население тыс. чел.»
-    m = _TRAIL_SCALE.match(text)
-    if m:
-        unit = _header_unit(m.group("unit"))
-        if unit:
-            return _clean_name(m.group("name")), unit
-    # «Рост %», «Цена ₽»
-    m = _TRAIL_SYMBOL.match(text)
-    if m:
-        return _clean_name(m.group("name")), _header_unit(m.group("unit"))
-    # «% выполнения плана» — единица ясна, имя оставляем как есть
-    if text.startswith("%") and len(text) > 2:
-        return text, "%"
-    return _clean_name(text), None
-
-
-def _clean_name(name: str) -> str:
-    n = " ".join(name.split()).strip(" ,;:")
-    return n.replace("**", "").replace("__", "").replace("`", "").strip()
-
-
-# ======================================================================================================== числа
-
-_SPACE_CHARS = "\u00a0\u202f\u2009\u2007\u2002\u2003\u2004\u2005\u2006\u2008\u200a\u205f\u3000"
-_SPACE_TRANS = str.maketrans({c: " " for c in _SPACE_CHARS})
-_PLAIN_INT = re.compile(r"-?(?:0|[1-9]\d{0,14})")
-_PLAIN_DEC = re.compile(r"-?(?:0|[1-9]\d{0,14})\.(\d+)")
-_PLAIN_COMMA = re.compile(r"-?(?:0|[1-9]\d{0,14}),(\d+)")
-_SPACED_NUM = re.compile("(-?[1-9]\\d{0,2}(?:[ \u00a0\u202f]\\d{3})+)(?:,(\\d+))?")
-_NUM_HEAD = re.compile(r"[\d '’.,]*\d(?:[eE][+\-]?\d+)?")
-_GROUP_SPACE = re.compile(r"(\d{1,3}(?: \d{3})+)(?:([.,])(\d+))?")
-_GROUP_COMMA_DOT = re.compile(r"\d{1,3}(?:,\d{3})+\.\d+")
-_GROUP_DOT_COMMA = re.compile(r"\d{1,3}(?:\.\d{3})+,\d+")
-_GROUP_COMMAS = re.compile(r"\d{1,3}(?:,\d{3}){2,}")
-_GROUP_DOTS = re.compile(r"\d{1,3}(?:\.\d{3}){2,}")
-_SIMPLE = re.compile(r"(\d*)(?:([.,])(\d+))?(?:[eE]([+\-]?\d+))?")
-
-
-class _Q:
-    """Число из ячейки: значение, целое ли оно, единица (множитель словом, множитель, база)."""
-
-    __slots__ = ("value", "is_int", "scale", "factor", "base")
-
-    def __init__(self, value: float, is_int: bool, scale: Optional[str], factor: float, base: Optional[str]):
-        self.value, self.is_int, self.scale, self.factor, self.base = value, is_int, scale, factor, base
-
-    @property
-    def unit(self) -> Optional[str]:
-        return _unit_text(self.scale, self.base)
-
-
-def _core_number(core: str, dec: Optional[str]) -> Optional[tuple[float, bool]]:
-    """Цифры с разделителями → (значение, целое ли). dec — десятичный разделитель колонки («,» или «.»), если известен."""
-    c = core.replace("'", " ").replace("’", " ")
-    if " " in c:
-        m = _GROUP_SPACE.fullmatch(c)
-        if not m:
-            return None
-        whole = m.group(1).replace(" ", "")
-        if m.group(3) is not None:
-            if dec is not None and m.group(2) != dec and len(m.group(3)) == 3:
-                return None  # «1 234.567» при десятичной запятой — не число
-            return float(f"{whole}.{m.group(3)}"), False
-        return float(whole), True
-    has_comma, has_dot = "," in c, "." in c
-    if has_comma and has_dot:
-        if c.rfind(",") > c.rfind("."):
-            if not _GROUP_DOT_COMMA.fullmatch(c):
-                return None
-            return float(c.replace(".", "").replace(",", ".")), False
-        if not _GROUP_COMMA_DOT.fullmatch(c):
-            return None
-        return float(c.replace(",", "")), False
-    if c.count(",") > 1:
-        return (float(c.replace(",", "")), True) if _GROUP_COMMAS.fullmatch(c) else None
-    if c.count(".") > 1:
-        return (float(c.replace(".", "")), True) if _GROUP_DOTS.fullmatch(c) else None
-    m = _SIMPLE.fullmatch(c)
-    if not m:
-        return None
-    whole, sep, frac, exp = m.group(1), m.group(2), m.group(3), m.group(4)
-    if not whole and not frac:
-        return None
-    if len(whole) > 1 and whole[0] == "0":
-        return None  # «007», «01.2025» — код или дата, не число
-    if sep is not None:
-        # «1,234» / «1.234»: тысячи, если колонка пишет десятичную дробь другим знаком
-        if len(frac) == 3 and 1 <= len(whole) <= 3 and whole != "0" and dec is not None and dec != sep and exp is None:
-            return float(whole + frac), True
-        text = f"{whole or '0'}.{frac}" + (f"e{exp}" if exp else "")
-        return float(text), False
-    if exp is not None:
-        return float(f"{whole}e{exp}"), False
-    if len(whole) > 15:
-        return None  # длинные цифры — номер (ИНН, счёт), не величина
-    return float(whole), True
-
-
-def _quantity(s: str, dec: Optional[str] = None, strict: bool = False) -> Optional[_Q]:
-    """Ячейка целиком — число с необязательными знаком, валютой и единицей; иначе None («SUP-48213», «2025-01»).
-    strict — единица только из словаря («1 тур», «2 место» — не числа: так пишут шапку)."""
-    if _PLAIN_INT.fullmatch(s):
-        if len(s.lstrip("-")) > 15:
-            return None
-        return _Q(float(int(s)), True, None, 1.0, None)
-    m = _PLAIN_DEC.fullmatch(s)
-    if m and not (dec == "," and len(m.group(1)) == 3):
-        return _Q(float(s), False, None, 1.0, None)
-    m = _PLAIN_COMMA.fullmatch(s)
-    if m and not (dec == "." and len(m.group(1)) == 3):
-        return _Q(float(s.replace(",", ".")), False, None, 1.0, None)
-    m = _SPACED_NUM.fullmatch(s)
-    if m and (m.group(2) is None or dec != "." or len(m.group(2)) != 3):
-        whole = ("-" if s[0] == "-" else "") + re.sub(r"\D", "", m.group(1))
-        if m.group(2) is None:
-            return _Q(float(int(whole)), True, None, 1.0, None)
-        return _Q(float(f"{whole}.{m.group(2)}"), False, None, 1.0, None)
-    t = s.translate(_SPACE_TRANS).strip()
-    if not t:
-        return None
-    neg = False
-    if t[0] == "(" and t[-1] == ")":
-        neg, t = True, t[1:-1].strip()
-    t = t.rstrip("*").rstrip()
-    if t[:1] in "~≈":
-        t = t[1:].lstrip()
-    cur = None
-    for _ in range(2):  # «-$5», «$-5», «−5»
-        if t[:1] in "+-−–":
-            neg ^= t[0] != "+"
-            t = t[1:].lstrip()
-        elif t[:1] and t[0] in _CUR_SYMBOLS and cur is None:
-            cur, t = t[0], t[1:].lstrip()
-    if not t or not (t[0].isdigit() or (t[0] in ".," and t[1:2].isdigit())):
-        return None
-    if t[0] in ".,":
-        t = "0" + t
-    m = _NUM_HEAD.match(t)
-    if not m:
-        return None
-    core, rest = m.group(0), t[m.end():].strip()
-    parsed = _core_number(core, dec)
-    if parsed is None:
-        return None
-    value, is_int = parsed
-    scale, factor, base = None, 1.0, None
-    if rest:
-        if rest[0].isdigit() or rest[0] in "-–—:/+=<>":
-            return None
-        if rest[0] in _CUR_SYMBOLS and cur is not None:
-            return None
-        parts = _unit_parts(rest, strict=strict, cell=True)
-        if parts is None:
-            return None
-        scale, factor, base = parts
-    if cur is not None:
-        if base is not None and base != _BASE_UNITS[cur]:
-            return None
-        base = _BASE_UNITS[cur]
-    if neg:
-        value = -value
-    return _Q(value, is_int, scale, factor, base)
-
-
-def parse_quantity(s: Any, decimal: Optional[str] = None) -> Optional[tuple[float, Optional[str]]]:
-    """Ячейка → (число, единица): «1,24 млрд ₽» → (1.24, «млрд ₽»), «+23%» → (23.0, «%»), «3 480» → (3480.0, None),
-    «+6 п.» → (6.0, «п.»). Число — как написано, без умножения на множитель. Не число — None."""
-    if s is None or isinstance(s, bool):
-        return None
-    if isinstance(s, (int, float)):
-        return None if isinstance(s, float) and not math.isfinite(s) else (float(s), None)
-    text = str(s).strip()
-    if not text:
-        return None
-    q = _quantity(text, decimal)
-    return None if q is None else (q.value, q.unit)
-
-
-def parse_number(s: Any) -> Optional[float]:
-    """Число из ячейки или None: «1 234,5» → 1234.5, «46 %» → 46.0, «−12» → -12.0, «1,2 млн ₽» → 1.2, «(15)» → -15.0;
-    «SUP-48213», «2025-01», «Москва» → None."""
-    q = parse_quantity(s)
-    return None if q is None else q[0]
-
-
-# ======================================================================================================== периоды
-
-_MONTH_STEMS = {
-    "янв": 1, "фев": 2, "мар": 3, "апр": 4, "май": 5, "мая": 5, "мае": 5, "июн": 6, "июл": 7, "авг": 8, "сен": 9,
-    "окт": 10, "ноя": 11, "дек": 12, "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6, "jul": 7,
-    "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
-}
-_MON = r"(?P<mon>янв|фев|мар|апр|ма[йяе]|июн|июл|авг|сен|окт|ноя|дек|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-zа-я]{0,6}\.?"
-_ROMAN = {"i": 1, "ii": 2, "iii": 3, "iv": 4, "1": 1, "2": 2, "3": 3, "4": 4}
-_QWORD = r"(?:q|кв\.?|квартал[а-я]{0,2})"
-_ORD = r"(?:\s*-?\s*(?:й|ый|ой|ий))?"
-
-_P_ISO = re.compile(
-    r"(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?:[t ](\d{1,2}):(\d{2})(?::(\d{2})(?:[.,]\d+)?)?\s*(?:z|[+\-]\d{2}:?\d{2})?)?"
-)
-_P_DMY = re.compile(r"(\d{1,2})[./\-](\d{1,2})[./\-](\d{4}|\d{2})(?:[ t,]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?")
-_P_YM = re.compile(r"(\d{4})[-/](\d{1,2})")
-_P_MY = re.compile(r"(\d{1,2})[./\-](\d{4})")
-_P_YEAR = re.compile(r"(?:fy\s*)?(\d{4})")
-_P_WEEK = re.compile(r"(\d{4})-?w(\d{1,2})")
-_P_Q_NUM_Y = re.compile(_QWORD + r"\s*([1-4])[\s'’/.,\-]*(\d{4}|\d{2})")
-_P_NUM_Q_Y = re.compile(r"(iv|i{1,3}|[1-4])" + _ORD + r"\s*" + _QWORD + r"[\s'’/.,\-]*(\d{4}|\d{2})")
-_P_Y_Q_NUM = re.compile(r"(\d{4})\s*[-/ ]?\s*" + _QWORD + r"\s*([1-4])")
-_P_Y_NUM_Q = re.compile(r"(\d{4})[\s,]+(iv|i{1,3}|[1-4])" + _ORD + r"\s*" + _QWORD)
-_P_MON_Y = re.compile(_MON + r"[\s.,'’/\-]*(?P<y>\d{4}|\d{2})")
-_P_Y_MON = re.compile(r"(?P<y>\d{4})[\s.,/\-]+" + _MON)
-_P_D_MON_Y = re.compile(r"(?P<d>\d{1,2})[\s.\-]*" + _MON + r"[\s.,'’\-]*(?P<y>\d{4}|\d{2})")
-_P_MON_D_Y = re.compile(_MON + r"\s+(?P<d>\d{1,2}),?\s+(?P<y>\d{4})")
-_YEAR_TAIL = re.compile(r"(\d{2,4})\s*(?:г\.?|гг\.?|года?|year)$")
-
-
-def _year(text: str) -> Optional[int]:
-    y = int(text)
-    if len(text) == 2:
-        y += 2000 if y < 70 else 1900
-    return y if 1900 <= y <= 2100 else None
-
-
-def _iso_date(y: Optional[int], mo: int, d: int, hh: Any = None, mm: Any = None, ss: Any = None) -> Optional[str]:
-    if y is None:
-        return None
-    try:
-        day = dt.date(y, mo, d)
-    except ValueError:
-        return None
-    if hh is not None and (int(hh), int(mm or 0), int(ss or 0)) != (0, 0, 0):
-        if not (0 <= int(hh) < 24 and 0 <= int(mm or 0) < 60 and 0 <= int(ss or 0) < 60):
-            return None
-        tail = f"T{int(hh):02d}:{int(mm or 0):02d}" + (f":{int(ss):02d}" if ss and int(ss) else "")
-        return day.isoformat() + tail
-    return day.isoformat()
-
-
-def _period(s: str, dayfirst: bool = True, years: bool = True) -> Optional[str]:
-    """Строка → ISO-период или None. years=False — голые годы («2025») не считаются периодом (числа колонки)."""
-    t = " ".join(s.translate(_SPACE_TRANS).lower().replace("ё", "е").split())
-    if not t or len(t) > 40:
-        return None
-    t = _YEAR_TAIL.sub(r"\1", t).strip(" ,")
-    if not t or not (t[0].isdigit() or t[0] in "qкijfadmnosпамиоянфдсвi"):
-        return None
-    m = _P_ISO.fullmatch(t)
-    if m:
-        return _iso_date(int(m.group(1)) if 1900 <= int(m.group(1)) <= 2100 else None, int(m.group(2)),
-                         int(m.group(3)), m.group(4), m.group(5), m.group(6))
-    m = _P_DMY.fullmatch(t)
-    if m:
-        a, b = int(m.group(1)), int(m.group(2))
-        d, mo = (a, b) if dayfirst else (b, a)
-        if mo > 12 and d <= 12:
-            d, mo = mo, d
-        return _iso_date(_year(m.group(3)), mo, d, m.group(4), m.group(5), m.group(6))
-    m = _P_YM.fullmatch(t)
-    if m:
-        y, mo = _year(m.group(1)), int(m.group(2))
-        return f"{y}-{mo:02d}" if y and 1 <= mo <= 12 else None
-    m = _P_MY.fullmatch(t)
-    if m:
-        y, mo = _year(m.group(2)), int(m.group(1))
-        return f"{y}-{mo:02d}" if y and 1 <= mo <= 12 else None
-    m = _P_YEAR.fullmatch(t)
-    if m:
-        if not years and not t.startswith("fy"):
-            return None
-        y = _year(m.group(1))
-        return str(y) if y else None
-    m = _P_WEEK.fullmatch(t)
-    if m:
-        y, w = _year(m.group(1)), int(m.group(2))
-        return f"{y}-W{w:02d}" if y and 1 <= w <= 53 else None
-    for pat, qi, yi in ((_P_Q_NUM_Y, 1, 2), (_P_NUM_Q_Y, 1, 2), (_P_Y_Q_NUM, 2, 1), (_P_Y_NUM_Q, 2, 1)):
-        m = pat.fullmatch(t)
-        if m:
-            y = _year(m.group(yi))
-            return f"{y}-Q{_ROMAN[m.group(qi)]}" if y else None
-    for pat in (_P_MON_Y, _P_Y_MON):
-        m = pat.fullmatch(t)
-        if m:
-            y = _year(m.group("y"))
-            return f"{y}-{_MONTH_STEMS[m.group('mon')]:02d}" if y else None
-    for pat in (_P_D_MON_Y, _P_MON_D_Y):
-        m = pat.fullmatch(t)
-        if m:
-            return _iso_date(_year(m.group("y")), _MONTH_STEMS[m.group("mon")], int(m.group("d")))
-    return None
-
-
-def _iso_of_datetime(v: Union[dt.datetime, dt.date, dt.time]) -> str:
-    if isinstance(v, dt.datetime):
-        return _iso_date(v.year, v.month, v.day, v.hour, v.minute, v.second) or v.date().isoformat()
-    if isinstance(v, dt.date):
-        return v.isoformat()
-    return v.strftime("%H:%M") + (f":{v.second:02d}" if v.second else "")
-
-
-def parse_period(s: Any) -> Optional[str]:
-    """Дата или период → ISO-строка: «янв 2025», «Январь 2025», «01.2025», «2025-01» → «2025-01»; «IV кв. 2025»,
-    «Q4 2025», «4 квартал 2025» → «2025-Q4»; «2025», «2025 г.» → «2025»; «31.01.2025», «31 января 2025»,
-    datetime → «2025-01-31». Не дата — None."""
-    if s is None or isinstance(s, bool):
-        return None
-    if isinstance(s, (dt.datetime, dt.date)):
-        return _iso_of_datetime(s)
-    if isinstance(s, (int, float)):
-        if isinstance(s, float) and not s.is_integer():
-            return None
-        return str(int(s)) if 1900 <= s <= 2100 else None
-    return _period(str(s))
-
-
 # ======================================================================================================== ячейки и колонки
 
-_MISSING = {
-    "-", "--", "---", "—", "–", "−", "...", "…", "?", "н/д", "нд", "н.д.", "н/а", "нет данных", "n/a", "nan",
-    "null", "none", "nil", "#н/д", "#n/a", "#div/0!", "#дел/0!", "#ref!", "#ссылка!", "#value!", "#знач!", "#name?",
-    "#имя?", "#num!", "#число!", "#null!", "#пусто!", "#error!",
-}
-_MISSING_FIRST = {m[0] for m in _MISSING} | {m[0].upper() for m in _MISSING}
-_BOOL = {"да": True, "нет": False, "true": True, "false": False, "yes": True, "no": False, "истина": True,
-         "ложь": False}
-_TIME_HEADER = re.compile(
-    r"\b(?:дата|date|день|day|недел[яи]|week|месяц|month|квартал|quarter|кв|год|года|годы|year|период|period|fy)\b",
-    re.IGNORECASE,
-)
-_TOTAL_ROW = re.compile(r"^(?:итого|всего|итог|total|grand total|в сумме)(?:\s*[:.])?(?:\s+по\s.+)?$", re.IGNORECASE)
+_MISSING = MISSING
+_MISSING_FIRST = MISSING_FIRST
+_TOTAL_FIRST = frozenset("иИвВtTgG")  # первые буквы подписей итога: «Итого», «Всего», «Total», «Grand total»
 _FOOTNOTE = re.compile(r"^(?:\*|примечани|прим\.|источник|сноск|note|source)", re.IGNORECASE)
 
 
@@ -609,49 +148,76 @@ def _norm_row(r: list[Any]) -> list[Any]:
     ]
 
 
-def _decimal_hint(strings: list[str], file_hint: Optional[str]) -> Optional[str]:
-    """Десятичный разделитель колонки по однозначным записям («1 234,5», «1,234.5», «0.25»)."""
-    comma = dot = 0
-    for s in strings[:2000]:
-        if "," in s:
-            if re.search(r"\d,\d{1,2}(?!\d)|\d,\d{4,}|^[-+−]?0,\d|\d \d{3},\d", s) or re.search(r"\.\d{3},\d", s):
-                comma += 1
-            elif re.search(r"\d,\d{3},\d{3}|,\d{3}\.\d", s):
-                dot += 1
-        if "." in s:
-            if re.search(r"\d\.\d{1,2}(?!\d)|\d\.\d{4,}|^[-+−]?0\.\d|\d \d{3}\.\d", s) or re.search(r",\d{3}\.\d", s):
-                dot += 1
-            elif re.search(r"\d\.\d{3}\.\d{3}|\.\d{3},\d", s):
-                comma += 1
-    if comma and not dot:
-        return ","
-    if dot and not comma:
-        return "."
-    return file_hint
-
-
-def _dayfirst_hint(strings: list[str]) -> bool:
-    first_big = second_big = False
-    for s in strings[:2000]:
-        m = re.match(r"\s*(\d{1,2})[./\-](\d{1,2})[./\-]\d{2,4}", s)
-        if m:
-            a, b = int(m.group(1)), int(m.group(2))
-            first_big |= a > 12
-            second_big |= b > 12
-    return not (second_big and not first_big)
-
-
 def _is_num(v: Any) -> bool:
     return v.__class__ is int or v.__class__ is float or (isinstance(v, (int, float)) and not isinstance(v, bool))
 
 
-def _type_column(vals: list[Any], name: str, file_decimal: Optional[str]) -> tuple[list[Cell], Optional[str]]:
+_SERIAL_STR = re.compile(r"\d{5}(?:[.,]\d+)?")
+_ISO_DATE_CELL = re.compile(r"\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2})?)?")
+# шапка колонки дат: с неё начинается имя («Дата», «Дата договора», «Date»), а не «Заказов за день»
+_DATE_HEADER = re.compile(r"^(?:дата|date|день|day|период|period|месяц|month|недел[яи]|week|datetime|timestamp)\b",
+                          re.IGNORECASE)
+
+
+def _excel_serials(vals: list[Any], counts: Counter, nonstr_num: list, name: str,
+                   epoch: Optional[dt.datetime]) -> Optional[list[Cell]]:
+    """Даты Excel числами (45658 → «2025-01-01»): под шапкой дат («Дата», «Date») или в колонке, где рядом настоящие
+    даты (книга Excel, ячейки с форматом «Общий»). Числа — от 20 000 до 60 000 (1954–2064)."""
+    date_header = bool(_DATE_HEADER.search(name.strip()))
+    if not nonstr_num and not date_header:
+        return None
+    serial_strs: list[str] = []
+    has_dates = False
+    for s in counts:
+        if _SERIAL_STR.fullmatch(s):
+            serial_strs.append(s)
+        elif _ISO_DATE_CELL.fullmatch(s):
+            has_dates = True
+        else:
+            return None  # в колонке есть что-то, кроме дат и чисел-дат
+    if not nonstr_num and not serial_strs:
+        return None
+    if not date_header and not (has_dates and not serial_strs):
+        return None
+    smap = {s: excel_serial_iso(float(s.replace(",", ".")), epoch) for s in serial_strs}
+    if any(v is None for v in smap.values()):
+        return None
+    nmap = {v: excel_serial_iso(v, epoch) for v in set(nonstr_num)}
+    if any(v is None for v in nmap.values()):
+        return None
+    out: list[Cell] = []
+    for v in vals:
+        if v.__class__ is str:
+            out.append(smap.get(v, v))
+        elif _is_num(v):
+            out.append(nmap[v])
+        else:
+            out.append(None)
+    return _uniform_time(out)
+
+
+def _uniform_time(cells: list[Cell]) -> list[Cell]:
+    """В колонке, где есть время суток («2025-03-01T10:00»), полночь пишется так же («2025-03-01T00:00»)."""
+    has_time = any(v.__class__ is str and len(v) > 10 and v[10:11] == "T" for v in cells)
+    if not has_time:
+        return cells
+    return [v + "T00:00" if v.__class__ is str and len(v) == 10 and v[4:5] == "-" and v[7:8] == "-" else v
+            for v in cells]
+
+
+def _type_column(vals: list[Any], name: str, file_decimal: Optional[str], *, english: bool = False,
+                 epoch: Optional[dt.datetime] = None) -> tuple[list[Cell], Optional[str]]:
     """Колонка нормализованных значений (`_norm_raw`) → типизированные ячейки и единица из ячеек (если у всех чисел
-    она одна). Решение — по колонке: ≥ 80 % непустых ячеек — числа (с одной единицей) или даты/периоды."""
+    она одна). Решение — по колонке: ≥ 80 % непустых ячеек — числа (с одной единицей) или даты/периоды. english —
+    заголовки таблицы по-английски («01/02/2025» — 2 января), epoch — начало отсчёта дат книги Excel."""
     counts: Counter = Counter(v for v in vals if v.__class__ is str)
     time_header = bool(_TIME_HEADER.search(name))
     nonstr_num = [v for v in vals if v.__class__ is int or v.__class__ is float]
     years_only = bool(nonstr_num) and all(float(v).is_integer() and 1900 <= v <= 2100 for v in nonstr_num)
+    if nonstr_num or counts:
+        serials = _excel_serials(vals, counts, nonstr_num, name, epoch)
+        if serials is not None:
+            return serials, None
     if not counts:
         # уже типизированные значения (XLSX, JSON): годы в колонке «Год» — периоды
         if time_header and years_only:
@@ -664,8 +230,8 @@ def _type_column(vals: list[Any], name: str, file_decimal: Optional[str]) -> tup
     if not nonstr_num and all(s.lower() in _BOOL for s in distinct):
         return [_BOOL[v.lower()] if v.__class__ is str else v for v in vals], None
 
-    dec = _decimal_hint(distinct, file_decimal)
-    dayfirst = _dayfirst_hint(distinct)
+    dec = decimal_hint(distinct, file_decimal)
+    dayfirst = dayfirst_hint(distinct, english)
     sample = distinct[:300]
     s_total = sum(counts[s] for s in sample) or 1
     q_sample = {s: _quantity(s, dec) for s in sample}
@@ -678,7 +244,8 @@ def _type_column(vals: list[Any], name: str, file_decimal: Optional[str]) -> tup
         pmap = {s: (p_sample[s] if s in p_sample else _period(s, dayfirst, years=time_header)) for s in distinct}
         hits = sum(counts[s] for s in distinct if pmap[s] is not None) + len(nonstr_num)
         if hits >= 0.8 * total:
-            return [pmap[v] if v.__class__ is str else (str(int(v)) if _is_num(v) else None) for v in vals], None
+            out = [pmap[v] if v.__class__ is str else (str(int(v)) if _is_num(v) else None) for v in vals]
+            return _uniform_time(out), None
 
     if q_share >= 0.8:
         typed = _numeric_column(vals, distinct, counts, q_sample, dec, total)
@@ -761,6 +328,22 @@ def _header_like(kinds: list[str]) -> bool:
     return (text >= 1 or timey >= 2) and score * 2 > len(filled)
 
 
+def _numbered_header(row: list[Any]) -> bool:
+    """Шапка из номеров: название в первой ячейке и номера подряд 1..k (k ≥ 3) — «Месяц · 1 · 2 · 3 · 4 · 5»."""
+    filled = [v for v in row if v is not None]
+    if len(filled) < 4 or not isinstance(filled[0], str) or _kind(filled[0]) != "text":
+        return False
+    nums: list[int] = []
+    for v in filled[1:]:
+        if v.__class__ is int:
+            nums.append(v)
+        elif isinstance(v, str) and v.isascii() and v.isdigit() and len(v) <= 3:
+            nums.append(int(v))
+        else:
+            return False
+    return nums[0] in (0, 1) and nums == list(range(nums[0], nums[0] + len(nums)))
+
+
 def _filled(row: list[Any]) -> int:
     return sum(1 for v in row if v is not None)
 
@@ -803,7 +386,9 @@ def _merge_headers(h1: list[Any], h2: list[Any], below: list[list[Any]], width: 
         elif not s2[j]:
             group = ""
         parent = s1[j] or (group if s2[j] else "")
-        if parent and s2[j]:
+        if parent and s2[j] and s2[j] == s1[j]:
+            names.append(s1[j])  # объединённая по вертикали ячейка шапки («Регион» на два этажа)
+        elif parent and s2[j]:
             pn, pu = split_unit(parent)
             cn, cu = split_unit(s2[j])
             unit = cu or pu
@@ -836,9 +421,13 @@ def _build_table(
     header_row: Optional[int] = -1,
     decimal: Optional[str] = None,
     first_name: str = "",
+    epoch: Optional[dt.datetime] = None,
+    formula_cols: frozenset = frozenset(),
+    extra_notes: tuple = (),
 ) -> Table:
     """Строки сырых ячеек → Table. header_row: -1 — найти шапку, None — шапки нет, k — шапка в строке k.
-    first_name — имя безымянной первой колонки (ключи JSON-объекта), иначе «Колонка 1»."""
+    first_name — имя безымянной первой колонки (ключи JSON-объекта), иначе «Колонка 1». epoch — начало отсчёта дат
+    книги Excel; formula_cols — номера колонок листа с формулами без сохранённых значений (не выбрасываются)."""
     rows = [_norm_row(r) for r in rows]
     for r in rows:
         while r and r[-1] is None:
@@ -876,7 +465,7 @@ def _build_table(
                 h += 1
             else:
                 break
-        if _header_like([_kind(v) for v in rows[h]]):
+        if _header_like([_kind(v) for v in rows[h]]) or _numbered_header(rows[h]):
             header, data = rows[h], rows[h + 1:]
             # группа над шапкой: «;Выручка;;Клиенты» над «Регион;2024;2025;2024;2025»
             if h >= 1 and _group_row(rows[h - 1]):
@@ -906,7 +495,8 @@ def _build_table(
             if merged is not None:
                 raw_names, data = merged, data[1:]
 
-    # пустые строки и повтор шапки (склеенные выгрузки) — прочь; сноски и «Итого» в конце — не данные
+    # пустые строки и повтор шапки (склеенные выгрузки) — прочь; сноски в конце — не данные (строка «Итого» остаётся:
+    # её отмечает Table.totals)
     head_cells = [v for v in (header or []) if v is not None]
     head_first = head_cells[0] if head_cells else None
     data = [r for r in data if r and not (
@@ -926,25 +516,42 @@ def _build_table(
         ):
             tail_notes.insert(0, _row_text(last))
             data.pop()
-        elif width >= 2 and isinstance(first, str) and _TOTAL_ROW.match(first) and len(data) > 1:
-            data.pop()
         else:
             break
     if not data:
         raise _NoData("В таблице только заголовок — строк с данными нет" if header is not None else "Файл пустой")
 
+    # строки итога («Итого», «Всего:») — по строгому правилу; их подпись не участвует в выборе типа колонки
+    total_labels: dict[int, int] = {}  # строка → колонка подписи
+    if width >= 2:
+        for i, r in enumerate(data):
+            k = 0 if r[0] is not None else next((k for k, v in enumerate(r) if v is not None), None)
+            if k is not None and r[k].__class__ is str and r[k][:1] in _TOTAL_FIRST and is_total_label(r[k]):
+                total_labels[i] = k
+        if len(total_labels) == len(data):
+            total_labels = {}
+
     # колонки
     names_units = [split_unit(n) for n in raw_names]
+    english = _english_header(raw_names)
     typed_cols: list[list[Cell]] = []
     units: list[Optional[str]] = []
     keep: list[int] = []
     padded = [r if len(r) == width else r + [None] * (width - len(r)) for r in data]
     columns = [list(c) for c in zip(*padded)]
+    saved: dict[int, list[tuple[int, Any]]] = {}
+    for i, k in total_labels.items():
+        saved.setdefault(k, []).append((i, columns[k][i]))
+        columns[k][i] = None
     for j in range(width):
         name, unit = names_units[j]
-        typed, cell_unit = _type_column(columns[j], name, decimal)
-        if all(v is None for v in typed):
-            continue  # пустая колонка
+        typed, cell_unit = _type_column(columns[j], name, decimal, english=english, epoch=epoch)
+        for i, label in saved.get(j, ()):
+            if typed is columns[j]:
+                typed = list(typed)
+            typed[i] = _clean_str(label)
+        if all(v is None for v in typed) and not (j in formula_cols and name):
+            continue  # пустая колонка (колонку формул без сохранённых значений оставляем — о ней заметка)
         unnamed = not name or name.lower().startswith("unnamed:")
         if unnamed and j == 0 and not first_name and _is_row_number(typed):
             continue  # безымянная нумерация строк (индекс pandas)
@@ -955,28 +562,181 @@ def _build_table(
         raise _NoData("В таблице нет значений")
 
     names: list[str] = []
-    seen: Counter = Counter()
     for pos, j in enumerate(keep):
         name = names_units[j][0]
         if not name or name.lower().startswith("unnamed:"):
             name = (first_name if (j == 0 and first_name) else None) or _name_by_values(typed_cols[pos]) \
                 or f"Колонка {pos + 1}"
-        seen[name] += 1
-        if seen[name] > 1:
-            name = f"{name} ({seen[name]})"
         names.append(name)
+    names = _dedupe(names)
     raw_header = [" ".join(raw_names[j].split()) if not raw_names[j].lower().startswith("unnamed:") else ""
                   for j in keep]
 
     n = len(typed_cols)
-    out_rows = [list(r) for r in zip(*typed_cols) if r.count(None) != n]
-    if not out_rows:
+    out_rows: list[list[Cell]] = []
+    kept_rows: list[int] = []
+    for i, r in enumerate(zip(*typed_cols)):
+        if r.count(None) != n:
+            out_rows.append(list(r))
+            kept_rows.append(i)
+    if not kept_rows:
         raise _NoData("В таблице нет значений")
-    all_notes = "\n".join(p for p in [notes.strip(), *note_lines, *tail_notes] if p)
+    totals = [k for k, i in enumerate(kept_rows) if i in total_labels]
+    melt_notes: list[str] = []
+    melted = _melt_wide(names, units, raw_header, typed_cols, kept_rows, set(totals))
+    if melted is not None:
+        names, units, raw_header, out_rows, totals, melt_notes = melted
+    all_notes = "\n".join(p for p in [notes.strip(), *note_lines, *tail_notes, *melt_notes, *extra_notes] if p)
     return Table.model_construct(
         id=tid, file=file, kind=kind, sheet=sheet, columns=names, units=units, rows=out_rows,
-        raw_header=raw_header, notes=all_notes,
+        raw_header=raw_header, notes=all_notes, totals=totals,
     )
+
+
+def _dedupe(names: list[str]) -> list[str]:
+    seen: Counter = Counter()
+    out = []
+    for name in names:
+        seen[name] += 1
+        out.append(name if seen[name] == 1 else f"{name} ({seen[name]})")
+    return out
+
+
+_LATIN = re.compile(r"[A-Za-z]")
+_CYRILLIC = re.compile(r"[А-Яа-яЁё]")
+
+
+def _english_header(raw_names: list[str]) -> bool:
+    """Заголовки таблицы по-английски (есть латиница, нет кириллицы): «01/02/2025» тогда — 2 января."""
+    text = " ".join(raw_names)
+    return bool(_LATIN.search(text)) and not _CYRILLIC.search(text)
+
+
+# ── широкая таблица → длинная
+
+_PERIOD_COLUMN = {"year": "Год", "month": "Месяц", "quarter": "Квартал", "week": "Неделя", "day": "Дата",
+                  "hour": "Время"}
+_KPI_HEADER = re.compile(r"показател|метрик|kpi|индикатор|параметр|стать[яи]|наименовани", re.IGNORECASE)
+_DERIVED_COLUMN = re.compile(
+    r"изменени|прирост|рост|динамик|отклонени|разниц|итог|всего|сумм|средн|total|change|growth|avg|average|δ|%",
+    re.IGNORECASE,
+)
+_WIDE_NOTE = "Таблица развёрнута: периоды были в колонках"
+
+
+def _header_period(name: str) -> Optional[tuple[str, str, int]]:
+    """Имя колонки — период («2024», «I кв. 2025», «янв 2025») или «Выручка 2024» → (префикс, зернистость, номер)."""
+    if not name or len(name) > 60:
+        return None
+    words = name.split()
+    for k in range(len(words), 0, -1):
+        if k > 3 and k != len(words):
+            continue
+        iso = period_str(" ".join(words[-k:]), True, years=True)
+        if iso is None:
+            continue
+        r = iso_ord(iso)
+        if r is None:
+            return None
+        return " ".join(words[:-k]), r[0], r[1]
+    return None
+
+
+def _melt_wide(names: list[str], units: list[Optional[str]], raw_header: list[str], cols: list[list[Cell]],
+               kept_rows: list[int], totals: set[int]) -> Optional[tuple]:
+    """Периоды в колонках («Регион · 2023 · 2024 · 2025», «Показатель · янв 2025 · фев 2025 · мар 2025») → длинная
+    таблица: колонки-подписи, колонка периода («Год», «Месяц», «Квартал»), колонка значения. Если подписи —
+    показатели («Показатель»: «Выручка, млн ₽», «Клиенты») или строка одна, каждый показатель становится своей
+    колонкой. Нужно ≥ 3 периодов одной зернистости с постоянным шагом и числа под ними; иначе None — таблица
+    остаётся как есть."""
+    per = [_header_period(n) for n in names]
+    pcols = [j for j, p in enumerate(per) if p is not None]
+    if len(pcols) < 3:
+        return None
+    grans = {per[j][1] for j in pcols}
+    if len(grans) != 1:
+        return None
+    gran = grans.pop()
+    ords = {j: per[j][2] for j in pcols}
+    if gran == "day":  # даты-заголовки 1-го числа подряд по месяцам — месяцы
+        days = [dt.date.fromordinal(ords[j]) for j in pcols]
+        if all(d.day == 1 for d in days):
+            gran = "month"
+            ords = {j: d.year * 12 + d.month - 1 for j, d in zip(pcols, days)}
+    groups: dict[str, list[int]] = {}
+    for j in pcols:
+        groups.setdefault(per[j][0], []).append(j)
+    seqs = [[ords[j] for j in js] for js in groups.values()]
+    first = seqs[0]
+    if len(first) < 3 or any(s != first for s in seqs):
+        return None
+    steps = {b - a for a, b in zip(first, first[1:])}
+    if len(steps) != 1 or 0 in steps:
+        return None
+    n_rows = len(kept_rows)
+    for j in pcols:  # под периодами — числа
+        for i in range(n_rows):
+            v = cols[j][kept_rows[i]]
+            if v is not None and i not in totals and not _is_num(v):
+                return None
+    ids: list[int] = []
+    dropped: list[int] = []
+    last_period = max(pcols)
+    for j in range(len(names)):
+        if per[j] is not None:
+            continue
+        vals = [cols[j][kept_rows[i]] for i in range(n_rows) if i not in totals and cols[j][kept_rows[i]] is not None]
+        numeric = bool(vals) and sum(1 for v in vals if _is_num(v)) * 2 > len(vals)
+        if numeric or is_total_label(names[j]):
+            if j > last_period and _DERIVED_COLUMN.search(names[j]):
+                dropped.append(j)  # «Итого», «Изменение, %» за периодами — считаются из них
+                continue
+            return None
+        ids.append(j)
+    data_rows = [i for i in range(n_rows) if i not in totals]
+    if not ids and len(data_rows) != 1:
+        return None
+    pname = _PERIOD_COLUMN[gran]
+    pvalues = [period_iso(gran, o) for o in first]
+    notes = [_WIDE_NOTE]
+    if dropped:
+        listed = ", ".join(f"«{names[j]}»" for j in dropped)
+        notes.append(f"Не вошли колонки, которые считаются из периодов: {listed}")
+    prefixes = list(groups)
+
+    def group_unit(js: list[int]) -> Optional[str]:
+        us = {units[j] for j in js}
+        return us.pop() if len(us) == 1 else None
+
+    labels = [cols[ids[0]][kept_rows[i]] for i in data_rows] if len(ids) == 1 else []
+    by_metric = (
+        prefixes == [""] and len(ids) == 1 and not totals and 1 <= len(labels) <= 12
+        and all(isinstance(v, str) for v in labels) and len(set(labels)) == len(labels)
+        and bool(_KPI_HEADER.search(names[ids[0]]) or any(split_unit(v)[1] for v in labels) or len(labels) == 1)
+    )
+    if by_metric:
+        common = group_unit(groups[""])
+        out_names, out_units, out_raw = [pname], [None], [pname]
+        for label in labels:
+            nm, u = split_unit(label)
+            out_names.append(nm or label)
+            out_units.append(u or common)
+            out_raw.append(" ".join(label.split()))
+        rows = [[pv] + [cols[j][kept_rows[i]] for i in data_rows] for pv, j in zip(pvalues, groups[""])]
+        return _dedupe(out_names), out_units, out_raw, rows, [], notes
+    out_names = [names[j] for j in ids] + [pname] + [p or "Значение" for p in prefixes]
+    out_units = [units[j] for j in ids] + [None] + [group_unit(groups[p]) for p in prefixes]
+    out_raw = [raw_header[j] for j in ids] + [pname] + [p or "Значение" for p in prefixes]
+    rows: list[list[Cell]] = []
+    new_totals: list[int] = []
+    for i in range(n_rows):
+        r = kept_rows[i]
+        head = [cols[j][r] for j in ids]
+        for k, pv in enumerate(pvalues):
+            if i in totals:
+                new_totals.append(len(rows))
+            rows.append(head + [pv] + [cols[groups[p][k]][r] for p in prefixes])
+    return _dedupe(out_names), out_units, out_raw, rows, new_totals, notes
 
 
 _ISO_DAY = re.compile(r"\d{4}-\d{2}-\d{2}(?:T.*)?")
@@ -1030,18 +790,40 @@ def _decode(data: bytes) -> str:
     except UnicodeDecodeError:
         pass
     loose = data.decode("utf-8", errors="replace")
-    if loose.count("\ufffd") <= max(1, len(loose) // 2000):
-        return loose  # UTF-8 с парой битых байтов
-    best, best_score = None, -1
+    bad = loose.count("\ufffd")
+    good = len(loose) - len(loose.encode("ascii", "ignore")) - bad  # настоящие не-ASCII буквы UTF-8
+    if bad <= max(1, len(loose) // 2000) and good >= 4 * bad:
+        return loose  # UTF-8 с парой битых байтов (рядом много настоящих русских букв)
+    if good <= 0:
+        return data.decode(_single_byte_encoding(data), errors="replace")
+    # строки по отдельности: шапка в UTF-8, тело в cp1251 (склеенные выгрузки) — каждая строка в своей кодировке
+    lines = data.split(b"\n")
+    utf8_lines: dict[int, str] = {}
+    for k, ln in enumerate(lines):
+        if not ln.isascii():
+            try:
+                utf8_lines[k] = ln.decode("utf-8")
+            except UnicodeDecodeError:
+                pass
+    enc = _single_byte_encoding(b"\n".join(ln for k, ln in enumerate(lines) if k not in utf8_lines))
+    if not utf8_lines:
+        return data.decode(enc, errors="replace")
+    return "\n".join(utf8_lines[k] if k in utf8_lines else ln.decode(enc, errors="replace")
+                     for k, ln in enumerate(lines))
+
+
+def _single_byte_encoding(data: bytes) -> str:
+    """Однобайтовая русская кодировка по частым буквам: cp1251, KOI8-R, cp866 или MacCyrillic."""
+    best, best_score = "latin-1", -1
     for enc in ("cp1251", "koi8_r", "cp866", "mac_cyrillic"):
         try:
-            text = data.decode(enc)
+            text = data[:60000].decode(enc)
         except UnicodeDecodeError:
             continue
         score = sum(_RU_WEIGHTS.get(ch, 0) for ch in text[:30000])
         if score > best_score:
-            best, best_score = text, score
-    return best if best is not None else data.decode("latin-1")
+            best, best_score = enc, score
+    return best
 
 
 def _looks_binary(text: str) -> bool:
@@ -1195,6 +977,37 @@ def _semicolon_block(lines: list[str], i: int) -> Optional[tuple[int, list[list[
     return j, rows, -1
 
 
+def _comma_block(lines: list[str], i: int) -> Optional[tuple[int, list[list[str]], Optional[int]]]:
+    """CSV через запятую внутри письма или в блоке ```csv: одинаковое число полей (≥ 2) в строках подряд, короткие
+    ячейки без выравнивания пробелами, под шапкой — числа."""
+    first = lines[i]
+    if "," not in first or "  " in first.strip() or "\t" in first:
+        return None
+    try:
+        n = len(next(csv.reader([first], skipinitialspace=True)))
+    except csv.Error:
+        return None
+    if n < 2:
+        return None
+    j = i
+    rows = []
+    while j < len(lines) and lines[j].strip():
+        try:
+            r = next(csv.reader([lines[j]], skipinitialspace=True))
+        except csv.Error:
+            break
+        if len(r) != n or any(len(c) > 40 or "  " in c.strip() for c in r):
+            break
+        rows.append([c.strip() for c in r])
+        j += 1
+    if len(rows) < 2 or any(not c for c in rows[0]):
+        return None
+    numeric_rows = sum(1 for r in rows[1:] if any(_quantity(c) is not None or _period(c) is not None for c in r if c))
+    if not any(_quantity(c) is not None for r in rows[1:] for c in r if c) or numeric_rows * 2 < len(rows) - 1:
+        return None
+    return j, rows, -1
+
+
 _SPACED = re.compile(r"\s{2,}|\t")
 
 
@@ -1235,7 +1048,7 @@ def _text_blocks(lines: list[str]) -> list[tuple[int, int, list[list[str]], Opti
             i += 1
             continue
         for how, finder in (("pipe", _pipe_block), ("tab", _tab_block), ("semicolon", _semicolon_block),
-                            ("spaced", _spaced_block)):
+                            ("comma", _comma_block), ("spaced", _spaced_block)):
             found = finder(lines, i)
             if found is not None:
                 end, rows, header_row = found
@@ -1261,12 +1074,14 @@ def _read_text(name: str, text: str, digest: str) -> list[Table]:
             if mode >= 2 and freq >= 0.9 * len(counts):
                 return _read_delimited(name, text, "tsv" if delim == "\t" else "csv", digest, delim)
         raise DataReadError("Не нашёл таблицу в тексте", file=name)
-    # весь файл — одна таблица через табуляцию или «;»: это CSV/TSV, а не «таблица в тексте»
-    if len(blocks) == 1 and blocks[0][4] in ("tab", "semicolon"):
+    # весь файл — одна таблица через табуляцию, «;» или запятую: это CSV/TSV, а не «таблица в тексте»
+    if len(blocks) == 1 and blocks[0][4] in ("tab", "semicolon", "comma"):
         start, end = blocks[0][0], blocks[0][1]
         if all(start <= k < end for k in nonempty):
-            return _read_delimited(name, text, "tsv" if blocks[0][4] == "tab" else "csv", digest,
-                                   "\t" if blocks[0][4] == "tab" else ";")
+            how = blocks[0][4]
+            body = "\n".join(ln for ln in lines if not _MD_FENCE.match(ln))
+            return _read_delimited(name, body, "tsv" if how == "tab" else "csv", digest,
+                                   {"tab": "\t", "semicolon": ";", "comma": ","}[how])
     covered = set()
     for start, end, *_ in blocks:
         covered.update(range(start, end))
@@ -1324,6 +1139,75 @@ def _xlsx_cell(cell: Any) -> Any:
     return v
 
 
+_MERGE_REF = re.compile(rb'<(?:\w+:)?mergeCell\b[^>]*?\bref="\$?([A-Z]{1,3})\$?(\d+):\$?([A-Z]{1,3})\$?(\d+)"')
+_CELL_REF = re.compile(rb'\br="([A-Z]{1,3})\d+"')
+_CELL_VALUE = re.compile(rb"<(?:\w+:)?v>([^<]*)</(?:\w+:)?v>")
+_FORMULA_TAG = re.compile(rb"<(?:\w+:)?f[ >/]")
+FORMULA_NOTE = "В книге есть формулы без сохранённых значений — откройте и сохраните её в Excel"
+
+
+def _col_index(letters: bytes) -> int:
+    n = 0
+    for ch in letters:
+        n = n * 26 + (ch - 64)
+    return n - 1
+
+
+def _sheet_extras(wb: Any, ws: Any) -> tuple[list[tuple[int, int, int, int]], set[int]]:
+    """Из XML листа: объединённые диапазоны (строка₁, колонка₁, строка₂, колонка₂ — с нуля) и номера колонок, где есть
+    формулы без сохранённого значения (книгу записала программа, а не Excel: openpyxl, pandas)."""
+    path = getattr(ws, "_worksheet_path", None)
+    archive = getattr(wb, "_archive", None)
+    if not path or archive is None:
+        return [], set()
+    try:
+        xml = archive.read(path)
+    except Exception:
+        return [], set()
+    merges = []
+    if b"mergeCell" in xml:
+        for m in _MERGE_REF.finditer(xml):
+            merges.append((int(m.group(2)) - 1, _col_index(m.group(1)), int(m.group(4)) - 1, _col_index(m.group(3))))
+    formulas: set[int] = set()
+    for m in _FORMULA_TAG.finditer(xml):
+        pos = m.start()
+        start = max(xml.rfind(b"<c ", 0, pos), xml.rfind(b":c ", 0, pos))
+        end = xml.find(b"</c>", pos)
+        if end < 0:
+            end = xml.find(b"c>", pos)
+        if start < 0 or end < 0:
+            continue
+        cell = xml[start:end]
+        head = cell[:cell.find(b">") + 1]
+        if b't="str"' in head or b't="e"' in head:
+            continue  # формула с текстом или ошибкой: значение сохранено (может быть пустой строкой)
+        v = _CELL_VALUE.search(cell)
+        if v is not None and v.group(1).strip():
+            continue
+        ref = _CELL_REF.search(head)
+        if ref is not None:
+            formulas.add(_col_index(ref.group(1)))
+    return merges, formulas
+
+
+def _fill_merged(rows: list[list[Any]], merges: list[tuple[int, int, int, int]]) -> None:
+    """Объединённые по вертикали ячейки («Центр» на строки 2–4) → значение верхней ячейки в каждой строке диапазона.
+    Объединения в одну строку (заголовок отчёта на всю ширину, группа «Выручка» над «2024 · 2025») не размножаются:
+    шапку из них собирает разбор двухэтажной шапки, а заголовок отчёта уходит в заметки."""
+    for r1, c1, r2, c2 in merges:
+        if r2 <= r1 or c2 != c1 or r1 >= len(rows) or c1 >= len(rows[r1]):
+            continue
+        top = rows[r1][c1]
+        if top is None or (isinstance(top, str) and not top.strip()):
+            continue
+        for r in range(r1 + 1, min(r2, len(rows) - 1) + 1):
+            row = rows[r]
+            if len(row) <= c1:
+                row.extend([None] * (c1 + 1 - len(row)))
+            if row[c1] is None:
+                row[c1] = top
+
+
 def _read_xlsx(name: str, data: bytes, digest: str) -> list[Table]:
     try:
         import openpyxl
@@ -1353,6 +1237,7 @@ def _read_xlsx(name: str, data: bytes, digest: str) -> list[Table]:
                 ws.reset_dimensions()
             except Exception:
                 pass
+            merges, formula_cols = _sheet_extras(wb, ws)
             rows: list[list[Any]] = []
             empty_run = 0
             with warnings.catch_warnings():
@@ -1368,10 +1253,18 @@ def _read_xlsx(name: str, data: bytes, digest: str) -> list[Table]:
                     else:
                         empty_run = 0
                     rows.append(vals)
+            _fill_merged(rows, merges)
+            epoch = getattr(wb, "epoch", None)
             try:
-                tables.append(_build_table(rows, file=name, kind="xlsx", sheet=ws.title, tid=_table_id(digest, k)))
+                tables.append(_build_table(
+                    rows, file=name, kind="xlsx", sheet=ws.title, tid=_table_id(digest, k),
+                    epoch=epoch if isinstance(epoch, dt.datetime) else None, formula_cols=frozenset(formula_cols),
+                    extra_notes=(FORMULA_NOTE,) if formula_cols else (),
+                ))
             except _NoData as e:
                 first_error = first_error or str(e)
+                if formula_cols and first_error in ("Файл пустой", "В таблице нет значений"):
+                    first_error = FORMULA_NOTE
     finally:
         wb.close()
     if not tables:

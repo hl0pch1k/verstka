@@ -21,8 +21,8 @@ ColumnType = Literal["number", "percent", "money", "date", "period", "category",
 # роль колонки в датасете: ось времени, измерение (категории), метрика (числа), идентификатор, подпись (текст строки),
 # атрибут (описывает строку, но не ось и не мера: дата договора в списке клиентов)
 ColumnRole = Literal["time", "dimension", "metric", "id", "text", "attribute"]
-# частота оси времени; «irregular» — даты без постоянного шага
-TimeFreq = Literal["day", "week", "month", "quarter", "year", "irregular"]
+# частота оси времени; «hour» — время внутри дня («2025-03-01T10:00»); «irregular» — даты без постоянного шага
+TimeFreq = Literal["hour", "day", "week", "month", "quarter", "year", "irregular"]
 # аналитическая задача датасета (ТЗ, п. 2)
 TaskKind = Literal["dynamics", "comparison", "shares", "distribution", "relationship", "reference", "kpi"]
 # вид визуализации — от задачи и профиля, не от шаблона и не от формата файла
@@ -103,6 +103,9 @@ class Table(BaseModel):
     raw_header: list[str] = Field(default_factory=list)
     # текст вокруг таблицы (файл .txt/.md): контекст, единицы, период
     notes: str = ""
+    # номера строк (Table.rows) с итогом по строгому правилу («Итого», «Всего:», «Итого по России»): строка остаётся
+    # в таблице, но не данные — в графики и статистику не идёт, по ней проверяются «доли от итога»
+    totals: list[int] = Field(default_factory=list)
 
     def column_values(self, column: Union[int, str]) -> list[Cell]:
         """Значения колонки по номеру или имени (короткая строка — пусто)."""
