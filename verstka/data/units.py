@@ -45,7 +45,7 @@ _FLOW = re.compile(
     r"(?:^|[^а-яё])(?:числ[оа]|количеств|кол-во|кол\.|объ[её]м|сумм[аы]?(?![а-яё]*\s+средн)|итог|всего|выручк|доход|"
     r"расход|затрат|издержк|поступлен|платеж|плат[её]ж|выплат|оплат|продаж|выпуск|производств|отгрузк|доставк|заказ|"
     r"потреблен|выработк|экспорт|импорт|оборот|прибыл|убыт|бюджет|фонд|начислен|население|численност|при[её]м|набор|"
-    r"посещен|просмотр|визит|сделк|покупк|регистрац|скачиван|показ|переход|добыч|запас|остат|штат|клиент|пользовател|"
+    r"посещен|просмотр|визит|сделк|покупк|регистрац|скачиван|показ(?:ы|ов|ам|ами|ах)\b|переход|добыч|запас|остат|штат|клиент|пользовател|"
     r"сотрудник|студент|пациент|участник|ученик|жител|публикац|стат(?:ей|ьи|ья)|патент|проект|заявк|обращен|звонк|"
     r"инвестиц|вложен|кредит|депозит|вклад|налог|взнос|пожертвован|грант|субсиди|премi?и?|зарплатн\w*\s+фонд|фот\b)",
     re.I)
@@ -178,7 +178,7 @@ def is_currency_code(name: str) -> bool:
 
 
 def additivity(name: str, unit: Optional[str], mtype: str, title: str = "", sums: bool = False,
-               duration: bool = False) -> tuple[bool, str]:
+               duration: bool = False, ints: bool = False) -> tuple[bool, str]:
     """(складывается ли, признак). Уровень — по признаку в названии или единице; сумма — по признаку потока или счёта
     (или `sums`: итог в таблице равен сумме); иначе — название датасета о курсах и ценах; иначе деньги — поток; нет
     признака — уровень (без долей и итогов)."""
@@ -203,6 +203,8 @@ def additivity(name: str, unit: Optional[str], mtype: str, title: str = "", sums
         return True, f"единица «{u}» — счёт или объём"
     if is_counter(base) or is_event_name(base) or _FLOW.search(base):
         return True, f"«{base}» — поток или счёт"
+    if ints and re.fullmatch(r"[А-ЯЁ]{2,5}", base.strip()):
+        return True, f"«{base}» — счёт событий (целые числа)"  # «ДТП», «ЧС» по часам — число случаев
     if title and _LEVEL_TITLE.search(title):
         return False, f"«{title}» — данные об уровнях (курсы, цены), их не складывают"
     th = head_word(re.sub(r"^[A-Z]\d+\s+", "", title)) if title else ""
@@ -249,13 +251,21 @@ def build_measure(d: "Data", j: int, c: ColumnProfile) -> Measure:
     if mixed:
         unit = None
     tu = _time_unit_of(name, unit)
+    present = [v for v in vals if v is not None]
     add, why = additivity(name, unit, c.type, file_title(d.profile.file, d.profile.sheet), sums=d.sums_check(j, vals),
-                          duration=tu is not None)
+                          duration=tu is not None, ints=bool(present) and all(float(v).is_integer() for v in present))
     level = not add
+    # огромные деньги без множителя (капитализация в рублях: 7 345 000 000 000) — в млрд или трлн: «7,3 из 30,6 трлн ₽»
+    scale = 1.0
+    if unit in ("₽", "$", "€") and present and max(abs(v) for v in present) >= 1e9:
+        scale = 1e12 if max(abs(v) for v in present) >= 1e12 else 1e9
+        unit = f"{'трлн' if scale == 1e12 else 'млрд'} {unit}"
+        vals = [None if v is None else v / scale for v in vals]
+        raw = [None if v is None else v / scale for v in raw]
     # остаток (число клиентов на конец месяца) — только если остаток и есть главное слово названия («Клиентов»,
     # «Активные клиенты»); «Выручка от клиентов» — поток денег, деньги остатком не бывают
     head = name if is_counter(name) else head_word(name)
     stock = c.type != "money" and bool(_STOCK.search(head)) and not level
     return Measure(j=j, name=name, unit=unit, type=c.type, values=vals, change=change, level=level and not change,
-                   stock=stock, mixed=mixed, time_unit=tu, raw=raw, row_units=row_units, basis=why)
+                   stock=stock, mixed=mixed, time_unit=tu, raw=raw, row_units=row_units, basis=why, scale=scale)
 

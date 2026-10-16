@@ -43,6 +43,7 @@ class Measure:
     raw: list[Optional[float]] = field(default_factory=list)  # числа как написаны («1,24 млрд ₽» → 1.24)
     row_units: list[Optional[str]] = field(default_factory=list)  # единица каждой строки (колонка с разными единицами)
     basis: str = ""  # признак, по которому решено, складывается ли величина («единица «ц/га» — величина на единицу»)
+    scale: float = 1.0  # значения поделены на это (огромные рубли — в млрд или трлн), единица — с множителем
 
     @property
     def additive(self) -> bool:

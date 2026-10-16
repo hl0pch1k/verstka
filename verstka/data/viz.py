@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -187,6 +188,9 @@ def _comparison(d: Data) -> list[_Cand]:
     if not cv.ranked:
         col.score += 0.1
         col.reasons.append("Подписи по порядку (интервалы, ступени) — столбцы сохраняют этот порядок.")
+        if sum(1 for x in cv.labels if re.match(r"^\s*\d{1,2}:\d{2}\s*$", x)) >= 0.8 * C:
+            col.score += 0.15  # часы суток — профиль по оси времени: вертикальные столбцы, как на часах
+            col.why_not = "Часы суток по порядку — профиль дня."
     out.append(col)
     if grouped and plan_fact:
         gk: VizKind = "grouped_bar" if long_ or C > 7 else "grouped_column"
@@ -553,6 +557,14 @@ _BUILDERS = {
 def candidates(task: TaskKind, d: Data) -> list[_Cand]:
     """Все варианты задачи (с отвергнутыми); меньше двух — добавляются честные альтернативы."""
     out = _BUILDERS[task](d)
+    if d.constant_main and task in ("comparison", "shares", "reference"):
+        # все значения одинаковые (все нули): графику нечего сравнивать — первой таблица, графики отвергнуты
+        for c in out:
+            if c.kind != "table" and c.kind != "kpi_cards":
+                c.feasible, c.score = False, min(c.score, 0.05)
+                c.why_not = "Все значения одинаковые — графику нечего сравнивать."
+        if not any(c.kind == "table" for c in out):
+            out.append(_Cand("table", 0.6, title="Таблица", key="table", reasons=["Все значения как в файле."]))
     if not out:
         # задача без вида (данных не хватило) — справочная таблица
         out = _reference(d)

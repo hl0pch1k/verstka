@@ -52,8 +52,10 @@ def task_scores(d: Data) -> dict[TaskKind, float]:
         pts = d.time.points if d.time is not None else 0
         if ms:
             s["dynamics"] = 0.9 if pts >= 4 else 0.5 if pts >= 2 else 0.0
-        elif p.time_axis is not None and d.time is not None and pts >= 2:
-            s["dynamics"] = 0.6  # одни даты с повторами — число событий по периодам
+        elif p.time_axis is not None and d.time is not None and pts >= 2 and d.label is None:
+            # одни даты с повторами — число событий по периодам; у каждой строки своя подпись (вехи, события) — это
+            # перечень, а не ряд: его показывают таблицей
+            s["dynamics"] = 0.6
         if d.kpi_like:
             s["dynamics"] = min(s["dynamics"], 0.3)
     elif d.columns_time is not None and ms:
@@ -80,7 +82,7 @@ def task_scores(d: Data) -> dict[TaskKind, float]:
             if n > 30 and len(d.cols) >= 4 and d.label is not None:
                 base = 0.45  # список строк с подписью — скорее справочник
             elif not ms and d.label is not None:
-                base = 0.55  # список без чисел: счёт строк по группам — запасной путь
+                base = 0.3  # список без чисел (вехи, контакты): счёт строк по группам — запасной путь, первым — таблица
             if has_time:
                 base = min(base, 0.4)
             if d.parts_measure is not None or p.parts_of_whole:
@@ -98,7 +100,9 @@ def task_scores(d: Data) -> dict[TaskKind, float]:
 
     # взаимосвязь
     strong = False
-    if d.xy is not None and not has_time and d.xy.n >= 8 and not d.parallel:
+    # колонки-«близнецы» («Показатель А · Показатель Б») мешают связи, только если есть категории или время — без них
+    # пара величин и есть вопрос о связи
+    if d.xy is not None and not has_time and d.xy.n >= 8 and not (d.parallel and cats is not None):
         r = min(1.0, abs(d.xy.r))
         strong = r >= 0.5
         if d.label is not None and n <= 60:
@@ -116,6 +120,8 @@ def task_scores(d: Data) -> dict[TaskKind, float]:
         s["reference"] = 0.7  # §2.3: id-колонка — справочник (список строк с кодами)
     elif d.label is not None and n > 12:
         s["reference"] = 0.65 if not ms else 0.5
+    elif d.label is not None and not ms and n > 1:
+        s["reference"] = 0.6  # у каждой строки своя подпись и чисел нет — перечень (вехи, контакты): таблица
     else:
         s["reference"] = 0.15
     return {k: round(v, 3) for k, v in s.items()}

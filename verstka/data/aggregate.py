@@ -36,7 +36,9 @@ from verstka.data.views import (
     MAX_CATS, MAX_ORDINAL, MAX_POINTS, MAX_SERIES, MAX_SLIDES, TABLE_ROWS, TOP_N, Bins, CatView, DistView, KpiItem,
     KpiView, Measure, RefView, SeriesV, TimeView, XYView,
 )
-from verstka.data.words import fmt_num, head_word, is_counter, same_stem, stems_match, stems_of, upper_first
+from verstka.data.words import (
+    file_title, fmt_num, head_word, is_counter, same_stem, stem, stem_in, stems_match, stems_of, upper_first,
+)
 from verstka.schemas.data import ColumnProfile, DatasetProfile, Table
 
 __all__ = [
@@ -50,7 +52,9 @@ __all__ = [
 _BENCHMARK = re.compile(r"^(?:среднее|в\s+среднем|средн\w*\s+(?:по|значение)|по\s+(?:стране|россии|рф|миру|отрасли|"
                         r"региону|округу|выборке|компании)|норматив\w*|норма|целевое\s+значение|бенчмарк|benchmark|"
                         r"average|медиана\s+по)(?:\s|$|,)", re.I)
-_CENTRAL = re.compile(r"(?:^|[^а-яёa-z])(?:медиан\w*|средн\w*|median|mean|average)", re.I)
+_CENTRAL = re.compile(r"(?:^|[^а-яёa-z])(?:медиан\w*|средн\w*|смешанн\w*|комбинированн\w*|median|mean|average)",
+                      re.I)
+_CLOCK = re.compile(r"^\s*\d{1,2}:\d{2}(?:\s*[–—-]\s*\d{1,2}:\d{2})?\s*$")
 _STAT_ANY = re.compile(r"(?:^|[^а-яёa-z])(?:минимум\w*|максимум\w*|мин\.|макс\.|минимальн\w*|максимальн\w*|min|max)",
                        re.I)
 # «Прочее», «Другие», «Остальное» — строка-остаток: в конце списка и никогда не лидер
@@ -62,9 +66,15 @@ def is_other_label(label: str) -> bool:
 
 
 def stem_hits(subject: tuple[str, ...] | list[str], text: str) -> int:
-    """Сколько основ предмета цели есть в тексте («доле брошенных корзин» и «Доля брошенных корзин» — 3)."""
+    """Сколько основ предмета цели есть в тексте («доле брошенных корзин» и «Доля брошенных корзин» — 3); части
+    сложных слов тоже («потреблению» — в «Водопотребление»)."""
     words = stems_of(text)
-    return sum(1 for s in subject if any(same_stem(s, w) for w in words))
+    return sum(1 for s in subject if any(stem_in(s, w) for w in words))
+
+
+# слова величин-уровней в цели: «по конверсии», «по доле», «по среднему» — из равных колонок берётся уровень (процент)
+_LEVEL_GOAL = re.compile(r"^(?:конверс|дол[ьиея]?$|процент|средн|оценк|балл|рейтинг|скорост|цен|тариф|медиан|уров|"
+                         r"удельн|частот|плотн|открываем|посещаем|загрузк|заполняем)", re.I)
 
 
 # ── главный объект ────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -94,15 +104,18 @@ class Data:
         if len(self.measures) == 1 and len(texts) >= 3:
             m0 = self.measures[0]
             pv = m0.present
-            if not m0.unit and not m0.additive and pv and all(float(v).is_integer() for v in pv) \
-                    and len(set(pv)) <= 0.7 * len(pv):
+            # длительность или счёт по названию («Дней открыт», «Заказов») — величина, а не номер
+            if not m0.unit and not m0.additive and m0.time_unit is None and not is_counter(m0.name) and pv \
+                    and all(float(v).is_integer() for v in pv) and len(set(pv)) <= 0.7 * len(pv):
                 self.not_numbers = [m0.name]
                 self.measures = []
         self.codes = {j for j, c in enumerate(cols) if c.role in ("dimension", "text") and self._code_like(j)}
         self.dims = [j for j, c in enumerate(cols)
                      if c.role == "dimension" and c.type in ("category", "boolean") and j not in self.codes]
+        # коды ответа HTTP («Код ответа»: 404, 500) — категории, а не номера строк
+        self.status_cols = {j for j, c in enumerate(cols) if c.role == "id" and self._status_like(j)}
         self.label = self._label_col()
-        self.id_col = next((j for j, c in enumerate(cols) if c.role == "id"), None)
+        self.id_col = next((j for j, c in enumerate(cols) if c.role == "id" and j not in self.status_cols), None)
         if self.id_col is None and self.codes:
             self.id_col = min(self.codes)
         self.time_col = next((j for j, c in enumerate(cols) if profile.time_axis and c.name == profile.time_axis.column),
@@ -177,11 +190,20 @@ class Data:
         ok = sum(1 for v in vals if _CODE.match(v.strip()))
         return ok >= 0.9 * len(vals)
 
+    def _status_like(self, j: int) -> bool:
+        """Колонка кодов состояния: целые 100–599 (ответы HTTP) под названием «код/статус» — подпись категории."""
+        if not re.search(r"код|статус|status|code|http", self.cols[j].name, re.I):
+            return False
+        vals = [self.cell(i, j) for i in self.rows_idx]
+        nums = [_num(v) for v in vals if v is not None]
+        return len(nums) >= 2 and all(x is not None and float(x).is_integer() and 100 <= x <= 599 for x in nums)
+
     def _label_col(self) -> Optional[int]:
         """Подпись строки: текст или категория, у каждой строки своя (клиент, регион, показатель)."""
         best = None
         for j, c in enumerate(self.cols):
-            if c.role not in ("text", "dimension") or c.type in ("boolean",) or j in self.codes:
+            if (c.role not in ("text", "dimension") and j not in self.status_cols) or c.type in ("boolean",) \
+                    or j in self.codes:
                 continue
             if c.type == "text" and c.distinct and any(isinstance(s, str) and len(s) > 60 for s in c.samples):
                 continue
@@ -205,10 +227,18 @@ class Data:
         if not ms:
             return None
         if self.subject:
-            hits = [(stem_hits(self.subject, m.name), -k) for k, m in enumerate(ms)]
-            best = max(range(len(ms)), key=lambda k: hits[k])
-            if hits[best][0] > 0:
-                return ms[best]
+            hits = [stem_hits(self.subject, m.name) for m in ms]
+            top = max(hits)
+            if top > 0:
+                tied = [m for m, h in zip(ms, hits) if h == top]
+                if len(tied) > 1:
+                    # равные по словам цели: слово уровня («по конверсии») — процент и уровень; иначе («структура
+                    # выплат») — поток денег, потом то, что складывается
+                    if any(_LEVEL_GOAL.match(s_) for s_ in self.subject):
+                        tied.sort(key=lambda m: (m.type != "percent", m.additive, m.j))
+                    else:
+                        tied.sort(key=lambda m: (not (m.type == "money" and m.additive), not m.additive, m.j))
+                return self._rate_over_count(tied[0])
         if self.compare and self.total_metric is not None:
             return self.total_metric
 
@@ -219,8 +249,13 @@ class Data:
             sib = [x for x in ms if _period_name(x.name) and (x.unit or "") == (m.unit or "") and not x.change]
             return max(sib, key=lambda x: (_period_key(x.name), x.j)) if len(sib) >= 2 else m
 
+        th = self._title_head
         for pred in (
             lambda m: m.type == "money" and not m.change and not m.mixed and m.additive,
+            # колонка, названная как файл («Пробег автопарка октябрь» — «Пробег за месяц», а не одометр; «Загрузка
+            # отеля» — загрузка, а не тариф), — если это не статистика вроде «Средняя выплата»
+            lambda m: bool(th) and not m.change and not m.mixed and not _STAT_ANY.search(m.name)
+            and not _CENTRAL.search(m.name) and stem_in(th, stem(head_word(split_unit(m.name)[0] or m.name))),
             # оценочная метрика (балл, качество, выручка) главнее счёта размера (учеников, пользователей)
             lambda m: not m.change and not m.mixed and bool(_EVAL_NAME.search(m.name)),
             # центральная статистика: медиана и среднее — главнее минимума и максимума
@@ -232,8 +267,34 @@ class Data:
         ):
             for m in ms:
                 if pred(m):
-                    return latest(m)
+                    return self._rate_over_count(latest(m))
         return ms[0]
+
+    @cached_property
+    def _title_head(self) -> str:
+        """Основа главного слова названия файла («Пробег автопарка октябрь» → «пробег»), без кодов и чисел в начале."""
+        title = re.sub(r"^(?:[\w-]*\d[\w-]*\s+)+", "", file_title(self.profile.file, self.profile.sheet))
+        h = head_word(title)
+        return stem(h) if h and h not in ("данные", "итоги", "итог", "отчёт", "отчет", "таблица", "список") else ""
+
+    def _rate_over_count(self, m: Measure) -> Measure:
+        """Счёт и его доля рядом («Конверсии» и «Конверсия, %», A/B-тест): сравнивают долю — она не зависит от размера
+        группы."""
+        if m.type == "percent":
+            return m
+        hm = stem(head_word(split_unit(m.name)[0] or m.name))
+        for x in self.measures:
+            if x is not m and x.type == "percent" and not x.change \
+                    and same_stem(hm, stem(head_word(split_unit(x.name)[0] or x.name))):
+                return x
+        return m
+
+    @cached_property
+    def constant_main(self) -> bool:
+        """У главной метрики все значения одинаковые (все нули): лидера и графика нет."""
+        m = self.main
+        vals = m.present if m is not None else []
+        return len(vals) >= 2 and max(vals) == min(vals)
 
     @cached_property
     def parts_measure(self) -> Optional[Measure]:
@@ -345,8 +406,8 @@ class Data:
                 continue
             if (x.unit or "") != (m.unit or "") or _kind(x) != _kind(m):
                 continue
-            if self.time_col is not None:
-                group.append(x)
+            if self.time_col is not None and not self.compare:
+                group.append(x)  # на оси времени — ряды рядом; сравнение категорий (смены по браку) — по одной величине
             elif _common_suffix([m.name, x.name]) or (_period_name(m.name) and _period_name(x.name)) \
                     or self._siblings(m, x):
                 group.append(x)
@@ -481,6 +542,9 @@ class Data:
             parent = self.parent_of(self.label) if self._rollable else None
             return parent if parent is not None and self.n > MAX_CATS - 4 else self.label
         cands = [j for j in self.dims if 2 <= self.cols[j].distinct <= 60]
+        if self.main is None:
+            # без метрики считают строки по группам — нужна колонка с повторами, а не подпись каждой строки
+            cands = [j for j in cands if self.cols[j].distinct < self.n] or cands
         if self.subject:
             for j in cands:
                 if stems_match(self.subject, self.cols[j].name):
@@ -533,7 +597,7 @@ class Data:
             return None
         extra_ms = [mm for mm in self.measures if mm is not m and not mm.mixed]
         extra = {mm.name: [value_of(mm, groups[g]) for g in labels] for mm in extra_ms}
-        ordinal = sum(1 for x in labels if _ORDINAL_LABEL.match(x)) >= 0.8 * len(labels)
+        ordinal = sum(1 for x in labels if _ORDINAL_LABEL.match(x)) >= 0.8 * len(labels) and dj not in self.status_cols
         ranked = rank and not ordinal and not (dj == self.label and self.funnel)
         order = list(range(len(labels)))
         key_vals = list(values)
@@ -562,11 +626,13 @@ class Data:
         others = cut = merged = 0
         low: tuple[Optional[str], Optional[float]] = (None, None)
         summable = m is None or m.additive or m.stock
-        if not ranked and len(labels) > max(top, MAX_ORDINAL):
-            # порядковые группы («0–4», «5–9», …) не обрезаются молча: хвост — одной подписанной группой
+        clock = sum(1 for x in labels if _CLOCK.match(x)) >= 0.8 * len(labels)
+        if not ranked and len(labels) > max(top, MAX_ORDINAL) and not (clock and len(labels) <= 48):
+            # порядковые группы («0–4», «5–9», …) не обрезаются молча: хвост — одной подписанной группой (у уровня —
+            # «в среднем»); часы суток («00:00 … 23:00») — ось, их не сворачивают
             head = max(top, MAX_ORDINAL) - 1
             merged = len(labels) - head
-            tail_lab = f"{labels[head]} … {labels[-1]}"
+            tail_lab = f"{labels[head]} … {labels[-1]}" + ("" if summable else " (в среднем)")
             tail_v = float(sum(values[head:])) if summable else float(sum(values[head:]) / merged)
             labels, values = labels[:head] + [tail_lab], values[:head] + [tail_v]
             extra = {k: v[:head] + [None] for k, v in extra.items()}

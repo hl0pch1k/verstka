@@ -22,7 +22,7 @@ __all__ = [
     "is_plural_value", "verb", "number_word", "WORD_NUMS", "times_word", "PERIOD_WORDS", "month_name", "period_label",
     "period_text", "period_dative", "period_gen", "period_dat_full", "fraction_words", "duration_text", "duration_gen",
     "stem", "stems_of", "same_stem", "stems_match", "file_title", "period_acc", "period_in", "fmt_count",
-    "fmt_pct_any", "round_pct_any", "is_event_name", "count_gen", "count_dat", "is_period_name",
+    "fmt_pct_any", "round_pct_any", "is_event_name", "count_gen", "count_dat", "is_period_name", "stem_in",
 ]
 
 NBSP = " "
@@ -60,10 +60,15 @@ def fmt_num(x: float, decimals: Optional[int] = None) -> str:
     Без `decimals`: от 100 — целое, от 10 — один знак, меньше — два (нули в конце убираются)."""
     if x is None or not math.isfinite(x):
         return "—"
+    a = abs(x)
     if decimals is None:
-        a = abs(x)
         decimals = 0 if a >= 100 else 1 if a >= 10 else 2
+        if 0 < a < 1:
+            decimals = max(2, -math.floor(math.log10(a)) + 1)  # две значащие цифры: 0,012, 0,006, 0,0035
     r = round(float(x), decimals)
+    if r == 0 and a > 0:
+        # ненулевое значение не пишется нулём: столько знаков, сколько нужно для двух значащих
+        return fmt_num(x, max(decimals, -math.floor(math.log10(a)) + 1))
     if r == 0:
         r = 0.0
     if float(r).is_integer():
@@ -241,7 +246,9 @@ _FEM_PL_STEMS = {
     "организаций", "отгрузок",
 }
 _MASC_PL_A = {"города": "город", "дома": "дом", "номера": "номер", "счета": "счёт", "адреса": "адрес", "округа": "округ",
-              "края": "край", "года": "год", "директора": "директор", "учителя": "учитель", "профессора": "профессор"}
+              "края": "край", "года": "год", "директора": "директор", "учителя": "учитель", "профессора": "профессор",
+              "голоса": "голос", "поезда": "поезд", "паспорта": "паспорт", "доктора": "доктор", "берега": "берег",
+              "острова": "остров", "сорта": "сорт", "цвета": "цвет", "вечера": "вечер"}
 # несклоняемые и особые
 _INDECL = {"сочи", "тольятти", "такси", "кафе", "кино", "метро", "пальто", "онлайн", "офлайн", "оффлайн", "хаб", "nps"}
 _SPECIAL = {
@@ -327,6 +334,9 @@ def _noun(w: str) -> Optional[_Word]:
         # мягкая основа: отрасли, пользователи, области
         fem = (st + "ь") in _FEM_SOFT or st.endswith(("ост", "ест"))
         return _Word(st + "ь", st + ("и" if fem else "я"), st + ("и" if fem else "ю"), st + "ей", st + "ям", w, "pl")
+    # «новые», «активные», «прочие» — прилагательное во мн. числе как название: мн. число
+    if len(w) >= 4 and w.endswith(("ые", "ие")) and not w.endswith(_NOUN_IE):
+        return _Word(w, w[:-1] + "х", w[:-1] + "м", w[:-1] + "х", w[:-1] + "м", w, "pl")
     # «поступления», «отчисления», «задания» — мн. число от «-ение/-ание» («компания», «Германия» — ед.)
     if len(w) > 5 and (w.endswith("ения") or (w.endswith("ания") and w[-5] in "вдзстрл")):
         st = w[:-1]
@@ -532,6 +542,9 @@ def is_counter(name: Optional[str]) -> bool:
 
 # причастие («Доставлено», «Утверждено») и глагол прошедшего времени («Оплатили», «Добавили в корзину») в названии —
 # счёт событий или людей: в заголовке «Число доставок», «Число оплативших», а не «Доставлено выросло»
+# причастие объёма продукции — существительным: «Выпущено» → «Выпуск» (не «Число выпущенных»)
+_PARTICIPLE_NOM = {"выпущено": "Выпуск", "произведено": "Производство", "изготовлено": "Выпуск", "добыто": "Добыча",
+                   "потреблено": "Потребление", "выработано": "Выработка", "переработано": "Переработка"}
 _PARTICIPLE_NOUN = {"доставлено": "доставок", "продано": "продаж", "отгружено": "отгрузок", "поставлено": "поставок",
                     "куплено": "покупок", "выдано": "выдач", "заказано": "заказов"}
 _NOT_VERB = {"автомобили", "профили", "стили", "модели", "цели", "недели", "детали", "медали", "рубли", "роли", "отрасли",
@@ -591,6 +604,8 @@ def metric_phrase(name: Optional[str], mtype: str = "number") -> Optional[Phrase
         toks = base.split(" ")
         first = toks[0].lower()
         rest = (" " + " ".join(toks[1:])) if len(toks) > 1 else ""
+        if first in _PARTICIPLE_NOM and len(toks) == 1:
+            return phrase(_PARTICIPLE_NOM[first])
         if mtype == "money" and is_participle(first):
             st = first[:-1] + ("н" if first.endswith("но") else "")
             return Phrase(base, st + "ого" + rest, st + "ому" + rest, st + "ых" + rest, st + "ым" + rest, base, "n")
@@ -599,6 +614,13 @@ def metric_phrase(name: Optional[str], mtype: str = "number") -> Optional[Phrase
             return None
         gen += rest
         return Phrase("Число " + gen, gen, "числу " + gen, "чисел " + gen, "числам " + gen, "Числа " + gen, "n")
+    m_num = re.match(r"^(?:число|количество|кол-во|кол\.)\s+(.+)$", base, re.I)
+    if m_num and mtype != "percent":
+        # «Число ошибок» — после «N%» и «из» говорят «ошибок», а не «числа ошибок»
+        p = phrase(base)
+        rest = m_num.group(1)
+        if p is not None:
+            return Phrase(p.nom, rest, p.dat, p.gen_pl, p.dat_pl, p.nom_pl, p.gender, p.sure)
     if is_counter(name):
         p = phrase(("Доля " if mtype == "percent" else "Число ") + lower_first(base))
         if p is not None and mtype != "percent":
@@ -918,11 +940,15 @@ _ENDINGS = sorted(
 
 
 def stem(word: str) -> str:
-    """Грубая основа русского слова: «выручки», «выручка», «выручку» → «выручк»; «регионы» → «регион»."""
+    """Грубая основа русского слова: «выручки», «выручка», «выручку» → «выручк»; «регионы» → «регион»; беглая гласная —
+    без неё: «свинец», «свинцу» → «свинц», «рынок», «рынка» → «рынк»."""
     w = word.lower().replace("ё", "е")
     for e in _ENDINGS:
         if w.endswith(e) and len(w) - len(e) >= 3:
-            return w[: -len(e)]
+            w = w[: -len(e)]
+            break
+    if len(w) >= 5 and w[-2:] in ("ец", "ок", "ек") and w[-3] not in "аеиоуыэюя":
+        w = w[:-2] + w[-1]
     return w
 
 
@@ -943,6 +969,15 @@ def same_stem(a: str, b: str) -> bool:
         return True
     short, long_ = sorted((a, b), key=len)
     return len(short) >= 4 and long_.startswith(short)
+
+
+def stem_in(a: str, b: str) -> bool:
+    """Основы совпадают или одна — часть сложного слова: «потреблен» в «водопотреблени», «вод» в начале
+    «водопотреблени»."""
+    if same_stem(a, b):
+        return True
+    short, long_ = sorted((a, b), key=len)
+    return (len(short) >= 5 and short in long_) or (len(short) >= 3 and len(long_) >= 8 and long_.startswith(short))
 
 
 def stems_match(subject: Sequence[str], text: str) -> bool:

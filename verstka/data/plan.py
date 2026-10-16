@@ -21,7 +21,7 @@ from pydantic import BaseModel
 from verstka.data.aggregate import MAX_SLIDES, TABLE_ROWS, CatView, Data, KpiItem
 from verstka.data.facts import facts_for
 from verstka.data.goals import Goal, goal_match, goals_of, stems_of
-from verstka.data.words import same_stem
+from verstka.data.words import stem_in
 from verstka.data.headline import compose
 from verstka.data.profile import profile_table
 from verstka.data.task import FEASIBLE, decide_task, task_scores
@@ -131,15 +131,17 @@ def _file_match(g: Goal, d: Data) -> bool:
     if goal_match(g, d.profile.model_copy(update={"columns": []})) < 1.0:
         return False
     words = stems_of(file_title(d.profile.file, d.profile.sheet) + " " + " ".join(c.name for c in d.profile.columns))
-    return all(any(same_stem(s, w) for w in words) for s in g.subject)
+    return all(any(stem_in(s, w) for w in words) for s in g.subject)
 
 
 def _metric_ok(g: Goal, d: Data) -> bool:
     """Величина цели («по прибыли») есть в колонках или в названии файла; цель без величины — да."""
     if not g.metric:
         return True
-    words = stems_of(file_title(d.profile.file, d.profile.sheet) + " " + " ".join(c.name for c in d.profile.columns))
-    return all(any(same_stem(s_, w) for w in words) for s_ in g.metric)
+    words = stems_of(file_title(d.profile.file, d.profile.sheet) + " " + " ".join(
+        f"{c.name} {c.unit or ''}" for c in d.profile.columns))
+    # части сложных слов тоже: «воды» — в «Водопотребление», «на человека» — в единице «л/сут на человека»
+    return all(any(stem_in(s_, w) for w in words) for s_ in g.metric)
 
 
 def assign_goals(goals: Sequence[Goal], datas: Sequence[Data]) -> list[list[Goal]]:
@@ -496,11 +498,8 @@ def _spec_shares(d: Data, opt: VizOption, src: str, part: int, plan: DatasetPlan
     cv, shares = got
     labels = list(cv.labels)
     if opt.kind in ("doughnut", "pie") and len(labels) > 6:
-        # крупнейшие пять — отдельно, остальные одним сектором (одна свёртка полного списка)
-        order = sorted(range(len(shares)), key=lambda k: (-shares[k], k))
-        top = sorted(order[:5])
-        rest = [k for k in range(len(shares)) if k not in top]
-        labels = [cv.labels[k] for k in top] + [f"Остальные {len(rest)}"]
+        top, rest, rest_label = _doughnut_split(cv.labels, shares)
+        labels = [cv.labels[k] for k in top] + [rest_label]
         shares = [shares[k] for k in top] + [sum(shares[k] for k in rest)]
     vals = [round(x, 1) for x in shares]
     lead = _argmax(vals[:-1] + [None]) if labels[-1].startswith("Остальные ") else _argmax(vals)
@@ -514,6 +513,18 @@ def _spec_shares(d: Data, opt: VizOption, src: str, part: int, plan: DatasetPlan
     kind = opt.kind if opt.kind in ("doughnut", "pie", "column", "bar") else "doughnut"
     return ChartSpec(type=kind, categories=labels, series=[InlineSeries(name="Доля", values=vals, unit="%")], unit="%",
                      highlight_index=lead, x_title=cv.dim, y_title="Доля", source=src)
+
+
+def _doughnut_split(labels: list[str], shares: list[float]) -> tuple[list[int], list[int], str]:
+    """Кольцо больше 6 долей: пять крупнейших названных — отдельно, остальное одним сектором. «Прочие» в файле — не
+    отдельный сектор рядом с «Остальными»: всё, что не вошло, — одни «Прочие» (бренды названы в подписи)."""
+    from verstka.data.aggregate import is_other_label
+
+    order = sorted(range(len(shares)), key=lambda k: (is_other_label(labels[k]), -shares[k], k))
+    top = sorted(k for k in order[:5] if not is_other_label(labels[k]))
+    rest = [k for k in range(len(shares)) if k not in top]
+    other = next((labels[k] for k in rest if is_other_label(labels[k])), None)
+    return top, rest, other or f"Остальные {len(rest)}"
 
 
 def _spec_distribution(d: Data, opt: VizOption, src: str, part: int, plan: DatasetPlan) -> Optional[SlideBody]:

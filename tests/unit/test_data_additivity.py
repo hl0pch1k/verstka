@@ -207,11 +207,11 @@ def test_goal_wins_ties_and_picks_most_matching_metric():
                          f"{late:.1f}".replace(".", ",")])
     t = _t("Доставки по складам.csv", rows)
     p = _plan(t, "Сравни склады по доле опозданий.")
-    assert p.task.task == "comparison" and p.headline.startswith("Химки впереди: 6,3%")
+    assert p.task.task == "comparison" and p.headline.startswith("Больше всего — Химки: 6,3%")  # опоздания: не «впереди»
     t = _t("Корзины.csv", [["Устройство", "Добавили в корзину", "Оплатили", "Доля брошенных корзин, %"],
                            ["Смартфон", 48200, 12650, "73,8"], ["Компьютер", 21400, 9870, "53,9"], ["Планшет", 5300, 1710, "67,7"]])
     p = _plan(t, "Сравни устройства по доле брошенных корзин.")
-    assert p.headline.startswith("Смартфон впереди: 73,8%")
+    assert p.headline.startswith("Больше всего — Смартфон: 73,8%")
 
 
 def test_goal_feasibility_uses_its_subject():

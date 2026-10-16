@@ -227,6 +227,21 @@ _IN_WORDS = {"процентах": "%", "рублях": "₽", "долларах
              "часах": "ч", "днях": "дн."}
 
 
+_COMPOUND_UNIT = re.compile(r"^(?:[%‰]|[^\W\d_]{1,6}\.?(?:\s?[·*]\s?[^\W\d_]{1,4}\.?)?)\s*/\s*\d{0,4}\s*[^\W\d_]{1,8}\.?"
+                            r"(?:\s+(?:на|в|за)\s+[^\W\d_]{1,12})?$")
+_PCT_YOY = re.compile(r"^%\s*(?:г/г|г\.\s?г\.|y/y|yoy|к\s+прошлому\s+году|к\s+пред\w*\s+году)$", re.IGNORECASE)
+
+
+def compound_unit(text: str) -> Optional[str]:
+    """Составная единица после запятой: «л/100 км», «мг/л», «л/сут на человека» — как написана; «% г/г» → «%»."""
+    t = " ".join(str(text or "").split())
+    if _PCT_YOY.match(t):
+        return "%"
+    if len(t) <= 30 and _COMPOUND_UNIT.match(t):
+        return t
+    return None
+
+
 def split_unit(header: Any) -> tuple[str, Optional[str]]:
     """Заголовок колонки → (имя без единицы, единица): «Выручка, млн ₽» → («Выручка», «млн ₽»), «Доля (%)» →
     («Доля», «%»), «Цена, руб.» → («Цена», «₽»), «Количество, шт.» → («Количество», «шт.»). Скобки и запятые,
@@ -240,11 +255,12 @@ def split_unit(header: Any) -> tuple[str, Optional[str]]:
         unit = header_unit(m.group("unit"))
         if unit:
             return _clean_name(m.group("name")), unit
-    # «Выручка, млн ₽», «Выручка, млн ₽, план» — единица в любой части через запятую
+    # «Выручка, млн ₽», «Выручка, млн ₽, план» — единица в любой части через запятую; составная «X/Y» («л/100 км»,
+    # «мг/л», «л/сут на человека») — тоже единица (величина на единицу), «% г/г» — проценты
     if "," in text:
         parts = [p.strip() for p in text.split(",")]
         for k in range(len(parts) - 1, 0, -1):
-            unit = header_unit(parts[k])
+            unit = header_unit(parts[k]) or compound_unit(parts[k])
             if unit and parts[0]:
                 rest = [p for i, p in enumerate(parts) if i != k and p]
                 return _clean_name(", ".join(rest)), unit

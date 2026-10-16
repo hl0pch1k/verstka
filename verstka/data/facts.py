@@ -248,6 +248,17 @@ def _dynamics(d: Data) -> FactSet:
            f"Наибольшее значение ряда. {_by(m)}")
     fs.add("min", vals[lo], "min", f"Минимум — {fmt_value(vals[lo], unit)} ({period_text(tv.periods[lo])})", unit,
            f"Наименьшее значение ряда. {_by(m)}")
+    vmin, vmax = float(vals[lo]), float(vals[hi])  # type: ignore[arg-type]
+    # «держится» — только если весь ряд в узкой полосе, а не потому, что первое значение равно последнему
+    fs.ctx["flat"] = (vmax - vmin) <= 0.02 * max(abs(vmax), abs(vmin), 1e-9)
+    if not m.additive and F < hi < L and vmax > 0 and min(first, last) > 0 and vmax >= 1.5 * max(first, last):
+        # уровень (вода, температура): пик внутри ряда в полтора раза выше краёв — главное, его и называют
+        # период — подписью оси графика («нед. 18, 2025»): его цифры — имя периода, а не число вывода
+        fs.ctx["peak"] = ("пик", vmax, tv.labels[hi])
+        fs.ctx["labels"].append(tv.labels[hi])
+    elif not m.additive and F < lo < L and vmin > 0 and vmin <= min(first, last) / 1.5:
+        fs.ctx["peak"] = ("минимум", vmin, tv.labels[lo])
+        fs.ctx["labels"].append(tv.labels[lo])
     missing = tv.missing
     if missing:
         names = ", ".join(period_text(p) for p in missing[:4]) + (" …" if len(missing) > 4 else "")
@@ -278,8 +289,9 @@ def _dynamics(d: Data) -> FactSet:
             caption.append(
                 f"{subj}: {period_text(pf)} — {fmt_value(first, unit)}, {period_text(pl)} — {fmt_value(last, unit)} "
                 f"({fmt_signed(last - first, du)} за {count_words(L - F, pw[0], pw[1], pw[2])}).")
-        elif not (base > 0 and last >= 0):
-            # убыток, ноль в начале: проценты не считаются — изменение в единицах метрики
+        elif not (base > 0 and last >= 0) or _gauge(m, unit):
+            # убыток, ноль в начале — проценты не считаются; уровень по шкале с произвольным нулём (вода в см,
+            # температура) — тоже: изменение в единицах метрики
             delta = last - base
             fs.ctx.update(delta=delta, abs_change=True)
             fs.add("change", abs(delta) if abs(delta) >= 100 else round(abs(delta), 2), "change",
@@ -410,6 +422,14 @@ def _dynamics_composition(d: Data, tv: TimeView, fs: FactSet) -> bool:
     return True
 
 
+_GAUGE_UNITS = {"см", "мм", "м", "°c", "°с", "°f", "°", "градусов", "град."}
+
+
+def _gauge(m: Measure, unit: Optional[str]) -> bool:
+    """Уровень по шкале с произвольным нулём (уровень воды в см, температура): изменение — в единицах, а не в %."""
+    return not m.additive and (unit or "").strip().lower() in _GAUGE_UNITS
+
+
 def _dynamics_hourly(d: Data, tv: TimeView, vals: list[Optional[float]], idx: list[int], fs: FactSet) -> bool:
     """Почасовой ряд: суточный цикл, а не «первый час против последнего» — пик и среднее за час."""
     m = tv.measure
@@ -505,8 +525,10 @@ def _dynamics_series(d: Data, tv: TimeView, fs: FactSet) -> bool:
     fs.add("span", span, "count", count_words(span, pw[0], pw[1], pw[2]), None,
            f"От {period_gen(tv.periods[0])} до {period_gen(tv.periods[-1])}.")
     p0 = phrase(names[0])
+    # даты без регулярного шага («точки») — не единица времени: «за период»
+    when = f"за {count_words(span, pw[0], pw[1], pw[2])}" if tv.freq != "irregular" else "за период"
     fs.ctx.update(multi=True, names=names, labels=list(names), freq=tv.freq, unit_short=unit,
-                  gender=p0.gender if p0 is not None else "m", when=f"за {count_words(span, pw[0], pw[1], pw[2])}")
+                  gender=p0.gender if p0 is not None else "m", when=when)
     caption = [f"{_range_text(tv.periods[0], tv.periods[-1])}: "
                + ", ".join(f"{_mid(sv.name)} — с {fmt_value(first, unit, 'gen')} до {fmt_value(last, unit, 'gen')}"
                            for sv, F, L, first, last in items) + "."]
@@ -594,6 +616,12 @@ def _plan_fact(d: Data, cv: CatView) -> FactSet:
 
 
 _TEMP = re.compile(r"температур|°", re.I)
+_SLOW = re.compile(r"пинг|ping|отклик|latency|загрузк\w*\s+(?:страниц|сайт)|(?:^|[^a-zа-яё])p\d{2}(?:[^a-zа-яё\d]|$)", re.I)
+_LONG = re.compile(r"задержк|опоздан|ожидан|время|длительн|(?:^|[^а-яё])срок", re.I)
+_DELAY = re.compile(r"задержк|опоздан|ожидан", re.I)
+_WORSE = re.compile(r"ошибк|отток|брак|дефект|просроч|опоздан|брошен|жалоб|возврат|авари|дтп|примес|загрязн|концентрац|выброс|"
+                    r"расход\s+топлив|(?:^|[^а-яё])расход(?:[^а-яё]|$)", re.I)
+_CLOCK_LAB = re.compile(r"^\s*\d{1,2}:\d{2}\s*$")
 # порядковые группы-интервалы: «0–4», «70 и старше», «до 30», «100+» (а не «5-А», «1 курс»)
 _BIN_LABEL = re.compile(r"^\s*(?:до|от|свыше|более|больше|менее|меньше|<|>|≤|≥)?\s*\d+(?:[.,]\d+)?\s*"
                         r"(?:[–—-]\s*\d|\+|(?:лет\s+)?(?:и|или)\s+(?:старше|более|больше|выше|младше|меньше)|$)", re.I)
@@ -601,9 +629,10 @@ _PRICE = re.compile(r"(?:^|[^а-яё])(?:цен[аыу]?|стоимост\w*|т�
 
 
 def _ties(cv: CatView, ks: list[int], k0: int, unit: Optional[str]) -> list[int]:
-    """Категории с тем же значением, что у k0, как его пишет заголовок: «ИТ и Склад — 3,2», а не одна из них."""
-    shown = fmt_value(cv.values[k0], unit)
-    return [k for k in ks if fmt_value(cv.values[k], unit) == shown]
+    """Категории с тем же значением, что у k0 (по самим числам, а не по округлённым: 0,012 и 0,006 — не ничья):
+    «ИТ и Склад — 3,2», а не одна из них."""
+    v0 = cv.values[k0]
+    return [k for k in ks if abs(cv.values[k] - v0) <= 1e-9 * max(1.0, abs(v0))]
 
 
 def _names(cv: CatView, ks: list[int]) -> str:
@@ -616,12 +645,23 @@ def _wording(d: Data, cv: CatView, m: Optional[Measure]) -> str:
     «больше всего»; иначе «впереди»."""
     if m is None:
         return "lead"
-    if _TEMP.search(m.name) or _TEMP.search(m.unit_text or "") or _TEMP.search(file_title(d.profile.file)):
+    title = file_title(d.profile.file)
+    unit = (m.unit_text or "").strip().lower()
+    if _TEMP.search(m.name) or _TEMP.search(unit) or _TEMP.search(title):
         return "temp"
-    if _PRICE.search(m.name) and not m.additive:
+    # цена и тариф — «дороже/дешевле всего» (по названию, единице «₽/…» или названию файла)
+    if not m.additive and (_PRICE.search(m.name) or unit.startswith(("₽/", "руб")) or _PRICE.search(title)):
         return "price"
-    bins = sum(1 for x in cv.labels if _BIN_LABEL.match(x)) >= 0.8 * max(1, len(cv.labels))
-    return "most" if not cv.ranked and bins else "lead"
+    # меньше — лучше: задержка, время, пинг, отклик — «дольше/медленнее всего» у первого, «быстрее всего» у лучшего
+    # только у длительностей (единица времени): «Доля опозданий, %» — не время
+    if unit in ("мс", "ms") or (_SLOW.search(m.name) and (m.time_unit or unit in TO_MINUTES)):
+        return "slow"
+    if m.time_unit or unit in TO_MINUTES:
+        return "delay" if _DELAY.search(m.name) else "long"
+    bins = sum(1 for x in cv.labels if _BIN_LABEL.match(x) or _CLOCK_LAB.match(x)) >= 0.8 * max(1, len(cv.labels))
+    if (not cv.ranked and bins) or _WORSE.search(m.name) or _WORSE.search(title):
+        return "most"  # порядковые группы, а ещё ошибки, брак, отток, примеси — «больше/меньше всего», не «впереди»
+    return "lead"
 
 
 def _comparison(d: Data) -> FactSet:
@@ -633,6 +673,8 @@ def _comparison(d: Data) -> FactSet:
         return _funnel(d, cv)
     if d.plan_fact is not None and cv.measure in d.plan_fact:
         return _plan_fact(d, cv)
+    if d.constant_main:
+        return _constant(d, cv)
     m = cv.measure
     unit = cv.unit
     shown = cv
@@ -738,6 +780,7 @@ def _comparison(d: Data) -> FactSet:
         forms = (dp.low.nom, dp.low.gen, dp.low.gen_pl) if dp is not None and dp.sure and dp.gender != "pl" else \
             ("категория", "категории", "категорий")
         fs.ctx["neg_forms"] = forms
+        fs.ctx["neg_all"] = neg == len(real)  # все в минусе — «все 5 филиалов в минусе»
         fs.add("negatives", neg, "count", f"{count_words(neg, *forms)} в минусе", None,
                f"Отрицательные значения: {', '.join(cv.labels[k] for k in real if cv.values[k] < 0)}.")
     bench = _benchmark(d, cv, m)
@@ -760,6 +803,28 @@ def _comparison(d: Data) -> FactSet:
     return fs
 
 
+def _constant(d: Data, cv: CatView) -> FactSet:
+    """У всех одно значение (возвратов нет ни в одном магазине): лидера нет — это и вывод, без столбцов."""
+    fs = FactSet()
+    m = cv.measure
+    v = cv.values[0]
+    n = cv.distinct
+    unit = cv.unit
+    mp = metric_phrase(m.name, m.type) if m is not None else None
+    dp = phrase(cv.dim)
+    fs.add("constant", v, "total", f"У всех — {fmt_value(v, unit)}", unit,
+           f"Все {n} значений колонки «{m.name if m else 'Число строк'}» равны {fmt_value(v, unit)}.")
+    fs.add("count", n, "count", count_words(n, "категория", "категории", "категорий"), None, "Категорий в данных.")
+    fs.ctx.update(constant=True, unit_short=unit, labels=[],
+                  metric_gen=(mp.low.gen_pl if mp is not None and mp.sure else None),
+                  dim_gen=(dp.low.gen_pl if dp is not None and dp.sure and dp.gender != "pl" else None),
+                  dim_forms=(dp.low.nom, dp.low.gen, dp.low.gen_pl) if dp is not None and dp.sure and dp.gender != "pl"
+                  else ("категория", "категории", "категорий"))
+    fs.ctx["caption"] = (f"Все {n} значений одинаковые: {fmt_value(v, unit)} — сравнивать нечего, поэтому таблица, а не "
+                         f"столбцы.")
+    return fs
+
+
 def _benchmark(d: Data, cv: CatView, m: Optional[Measure]) -> Optional[tuple[str, float, int]]:
     """Строка-ориентир («Среднее по стране»): её значение и сколько категорий выше неё."""
     if m is None or m.j < 0 or not d.benchmarks:
@@ -773,8 +838,15 @@ def _benchmark(d: Data, cv: CatView, m: Optional[Measure]) -> Optional[tuple[str
 
 
 # ── доли ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
-def _whole_phrase(d: Data, parts: Optional[Measure]) -> tuple[Optional[Phrase], bool]:
-    """Целое, долю которого показывают: «выручки» (деньги рядом с долями), «рынка» (из «Доля рынка»)."""
+def _whole_phrase(d: Data, parts: Optional[Measure], summed: Optional[Measure] = None) -> tuple[Optional[Phrase], bool]:
+    """Целое, долю которого показывают. Доли посчитаны по колонке (`summed`) — целое называется ею и только ею
+    («суммы выплат», если делили суммы, «числа выплат» — если число); колонка долей («Доля рынка») — «рынка» или
+    деньги рядом с ней («выручки»)."""
+    if parts is None and summed is not None:
+        if _GENERIC.match(re.sub(r"\s*,.*$", "", summed.name).strip()):
+            return _title_whole(d) or metric_phrase(summed.name, summed.type), summed.type == "money"
+        p = metric_phrase(summed.name, summed.type)
+        return p, summed.type == "money"
     money = next((m for m in d.measures if m.additive and m is not parts and m.type == "money"), None)
     other = money or next((m for m in d.measures if m.additive and m is not parts), None)
     if other is not None:
@@ -867,10 +939,9 @@ def _shares(d: Data) -> FactSet:
     order = sorted(range(len(shares)), key=lambda k: (is_other_label(cv.labels[k]), -shares[k], k))
     k1 = order[0]
     leader = cv.labels[k1]
-    whole, money = _whole_phrase(d, d.parts_measure)
-    src = next((m for m in d.measures if m.additive and m is not d.parts_measure), None)
-    if src is not None and _GENERIC.match(re.sub(r"\s*,.*$", "", src.name).strip()):
-        whole = _title_whole(d) or whole
+    whole, money = _whole_phrase(d, d.parts_measure, cv.measure)
+    src = cv.measure if d.parts_measure is None else \
+        next((m for m in d.measures if m.additive and m is not d.parts_measure), None)
     gives = src is not None and src.type == "money" and bool(_REVENUE.search(src.name))
     fs.ctx.update(leader=leader, whole=whole, money=money, labels=[leader], gives=gives)
     p = shares[k1]
@@ -888,7 +959,20 @@ def _shares(d: Data) -> FactSet:
     total = sum(shares)
     fs.add("total_share", round(total), "total", f"Сумма долей — {fmt_pct(total)}%", "%",
            "Части одного целого: сумма долей ≈ 100%.")
-    fs.ctx["caption"] = _short([", ".join(f"{cv.labels[k]} — {fmt_pct(shares[k])}%" for k in order[:6]) + "."])
+    if len(order) > 6:
+        # подпись — то, что на кольце: пять крупнейших и одни «Прочие» (с перечнем, кто в них)
+        from verstka.data.plan import _doughnut_split
+
+        top, rest, rest_label = _doughnut_split(cv.labels, shares)
+        top = sorted(top, key=lambda k: (-shares[k], k))
+        named = [cv.labels[k] for k in rest if not is_other_label(cv.labels[k])]
+        tail = f"{rest_label}" + (f" (вместе с {join_and(named[:4])}{' и другими' if len(named) > 4 else ''})"
+                                  if named and is_other_label(rest_label) else "")
+        fs.ctx["caption"] = _short([", ".join(f"{cv.labels[k]} — {fmt_pct(shares[k])}%" for k in top)
+                                    + f", {tail} — {fmt_pct(sum(shares[k] for k in rest))}%."])
+        fs.ctx["labels"] = list(fs.ctx["labels"]) + [cv.labels[k] for k in rest]
+    else:
+        fs.ctx["caption"] = _short([", ".join(f"{cv.labels[k]} — {fmt_pct(shares[k])}%" for k in order[:6]) + "."])
     return fs
 
 
@@ -972,7 +1056,11 @@ def _distribution(d: Data) -> FactSet:
                              f"{fmt_value(float(x.max()), unit)} — разброса почти нет.")
         return fs
     p80 = float(np.percentile(x, 80))
-    if duration:
+    if duration and to_min >= 1440:
+        # дни — граница в днях («не дольше 60 дней»), а не в тысячах часов
+        t = _nice_ceil(p80)
+        text, tv, tu = duration_text(t * to_min)
+    elif duration:
         pm = p80 * to_min  # в минутах
         t_min = next((float(v) for v in NICE_MINUTES if v >= pm - 1e-9), _nice_ceil(pm))
         step = 5.0 if pm < 60 else 10.0
@@ -1091,7 +1179,9 @@ def _reference(d: Data) -> FactSet:
         j = grp[0]
         gp = phrase(d.cols[j].name)
         k = d.cols[j].distinct
-        if gp is not None and gp.sure:
+        # группа-прилагательное («Ответственный») не склоняется как существительное — без «из 4 …»
+        adjective = bool(re.search(r"(?:ый|ий|ой|ая|яя|ое|ее|ые|ие)$", d.cols[j].name.strip().lower()))
+        if gp is not None and gp.sure and not adjective:
             fs.add("groups", k, "count", f"«{d.cols[j].name}»: {count_words(k, 'значение', 'значения', 'значений')}",
                    None, f"Разных значений в колонке «{d.cols[j].name}».")
             fs.ctx["group_forms"] = (gp.low.gen, gp.low.gen_pl)

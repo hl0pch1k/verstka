@@ -13,7 +13,7 @@ from typing import Iterable, Optional
 
 from pydantic import BaseModel, Field
 
-from verstka.data.words import file_title, same_stem, stem, stems_match
+from verstka.data.words import file_title, stem, stem_in, stems_match
 from verstka.data.words import stems_of as _stems_of
 from verstka.schemas.data import DatasetProfile, TaskKind, VizKind
 
@@ -54,7 +54,8 @@ _PATTERNS: list[tuple[TaskKind, re.Pattern[str]]] = [
         + r"|динамик[аиуе]\s+" + _END, re.I)),
     ("comparison", re.compile(
         r"(?:сравни(?:те)?|сравнить|сопоставь(?:те)?|сопоставить|сравнение)\s+" + _END
-        + r"|(?:кто|какие|какой|какая)\s+(?:лидирует|лидируют|впереди|отста[её]т|отстают)" + _END
+        + r"|(?:кто|какие|какой|какая)(?:\s+[^\s,.;:!?]+){0,2}?\s+(?:лидирует|лидируют|впереди|отста[её]т|отстают)"
+        + _END
         + r"|(?:рейтинг|лидер(?:ы|ов)?)\s+" + _END
         + r"|на\s+что\s+(?:уш[её]л|ушла|ушло|ушли|потрачен[аоы]?|тратится|тратятся|тратим|расходуется|пош[её]л|пошла|"
           r"пошли|израсходован[аоы]?)" + _END
@@ -119,7 +120,9 @@ def _metric_of(phrase_: str) -> list[str]:
     return [x for x in out if x not in _PERIOD_STEMS]
 
 
-_PERIOD_STEMS = {"год", "года", "годам", "месяц", "месяцам", "квартал", "кварталам", "недел", "неделям", "дням", "дн"}
+# разрез («по годам») и служебные слова величины («по числу посетителей» — величина «посетители») — не величина
+_PERIOD_STEMS = {"год", "года", "годам", "месяц", "месяцам", "квартал", "кварталам", "недел", "неделям", "дням", "дн",
+                 "числ", "количеств", "кол", "объем", "объём"}
 # «сравни A по X и B по Y» — две цели: «сравни районы по цене … и школы по среднему баллу»
 _SPLIT_AND = re.compile(r"^(?P<verb>(?:сравни(?:те)?|сравнить|сопоставь(?:те)?|сопоставить)\s+)(?P<a>.+?\s+по\s+.+?)\s+и\s+"
                         r"(?P<b>\S+(?:\s+\S+)?\s+по\s+.+)$", re.I)
@@ -168,17 +171,17 @@ def goal_match(goal: Goal, profile: DatasetProfile, values: Optional[Iterable[st
     score = 0.0
     used: set[str] = set()
     for s in goal.subject:
-        if any(same_stem(s, w) for w in names):
+        if any(stem_in(s, w) for w in names):
             score += 1.0
             used.add(s)
     col_words = stems_of(" ".join(c.name for c in profile.columns))
     for s in goal.subject:
-        if any(same_stem(s, w) for w in col_words):
+        if any(stem_in(s, w) for w in col_words):
             score += 0.6
             used.add(s)
     if values:
         val_words = stems_of(" ".join(values))
         for s in goal.subject:
-            if s not in used and any(same_stem(s, w) for w in val_words):
+            if s not in used and any(stem_in(s, w) for w in val_words):
                 score += 0.6
     return score

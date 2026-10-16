@@ -15,7 +15,7 @@ from typing import Optional, Sequence
 from verstka.data.facts import FactSet
 from verstka.data.words import (
     PERIOD_WORDS, WORD_NUMS, Gender, Phrase, count_words, fmt_num, fmt_pct, fmt_pct_any, fmt_signed, fmt_value,
-    fraction_words, is_period_name, is_plural_value, lower_first, number_word, phrase, plural, round_pct, times_word,
+    fraction_words, is_event_name, is_period_name, is_plural_value, lower_first, number_word, phrase, plural, round_pct, times_word,
     upper_first, verb,
 )
 from verstka.schemas.data import HeadlineFact, TaskKind
@@ -32,7 +32,8 @@ _WORD_RE = re.compile(r"[а-яё]+", re.I)
 def _without(text: str, labels: Sequence[str]) -> str:
     """Текст без известных подписей («Филиал 1», «25–34»): цифры внутри названий — не числа заголовка."""
     for lab in sorted({x for x in labels if x}, key=len, reverse=True):
-        text = re.sub(r"(?<![\w])" + re.escape(lab) + r"(?![\w])", " ", text)
+        # подпись — целым словом, не кусок десятичной дроби («67» не вырезается из «0,67»)
+        text = re.sub(r"(?<![\w,.])" + re.escape(lab) + r"(?![\w]|[,.]\d)", " ", text)
     return text
 
 
@@ -78,7 +79,8 @@ def _labels(fs: FactSet) -> list[str]:
     """Подписи и названия, которые шаблон сам ставит в заголовок: их цифры («Филиал 1», «Бюджет 2026») — не вывод."""
     c = fs.ctx
     out = list(c.get("labels") or [])
-    for k in ("leader", "last_label", "growth_leader", "a_name", "b_name", "subject", "x", "y"):
+    for k in ("leader", "last_label", "growth_leader", "a_name", "b_name", "subject", "x", "y", "unit_short",
+              "second_leader", "first_name", "second_name"):
         if c.get(k):
             out.append(c[k])
     out += list(c.get("names") or []) + list(c.get("parts") or [])
@@ -166,10 +168,24 @@ def _dynamics(fs: FactSet) -> tuple[str, Optional[str]]:
     last = _f(fs, "last")
     change = _f(fs, "change")
     ratio = _f(fs, "ratio")
+    u = c.get("unit_short")
+
+    def hold() -> str:
+        """«держится на уровне» — только у ряда в узкой полосе; иначе — размах и конец («от 0 до 1, в конце — 1»)."""
+        if c.get("flat", True):
+            return f"{subj} {verb('hold', g, past=False)} на уровне {fmt_value(last.value, u)}"
+        mn, mx = _f(fs, "min"), _f(fs, "max")
+        return f"{subj}: от {fmt_value(mn.value, u)} до {fmt_value(mx.value, u)}, в конце — {fmt_value(last.value, u)}"
+
+    if c.get("peak") and last is not None:
+        # уровень с пиком внутри ряда: пик — главное
+        what, v, per = c["peak"]
+        return f"{subj}: {what} {fmt_value(v, u)} ({per}), к концу — {fmt_value(last.value, u)}" + gap_txt, \
+            c.get("caption")
     if c.get("level") and last is not None:
         delta = c.get("delta", 0.0)
         if abs(delta) < 1e-9 or change is None:
-            head = f"{subj} {verb('hold', g, past=False)} на уровне {fmt_value(last.value, c.get('unit_short'))}"
+            head = hold()
         else:
             v = verb("grow" if delta > 0 else "fall", g)
             head = f"{subj} {v} до {fmt_value(last.value, c.get('unit_short'))}"
@@ -184,13 +200,13 @@ def _dynamics(fs: FactSet) -> tuple[str, Optional[str]]:
         head = f"{subj} {verb('grow', g)} в {fmt_num(r, 1)} {times_word(r)} {when}"
     elif c.get("abs_change") and last is not None:
         if abs(c["delta"]) < 1e-9:
-            head = f"{subj} {verb('hold', g, past=False)} на уровне {fmt_value(last.value, c.get('unit_short'))}"
+            head = hold()
         else:
             v = verb("grow" if c["delta"] > 0 else "fall", g)
             head = (f"{subj} {v} на {fmt_value(change.value, c.get('unit_short'))} {when}, до "
                     f"{fmt_value(last.value, c.get('unit_short'))}")
     elif abs(change.value) < 1 and last is not None:
-        head = f"{subj} {verb('hold', g, past=False)} на уровне {fmt_value(last.value, c.get('unit_short'))}"
+        head = hold()
     else:
         v = verb("grow" if c["delta"] > 0 else "fall", g)
         head = f"{subj} {v} на {fmt_pct(change.value)}% {when}"
@@ -258,7 +274,8 @@ def _dynamics_multi(fs: FactSet) -> tuple[str, Optional[str]]:
     unit = c.get("unit_short")
     parts = []
     up0 = None
-    if any(is_period_name(nm) for nm in names[:2]):
+    if any(is_period_name(nm) or is_event_name(nm) or (phrase(nm) is not None and not phrase(nm).sure
+                                                       and re.search(r"[а-яё]", nm, re.I)) for nm in names[:2]):
         # ряды-номера («Неделя 1», «Неделя 2»): подлежащим их не делают — через двоеточие
         for k, name in enumerate(names[:2]):
             kind, v = c[f"s{k}"]
@@ -296,6 +313,13 @@ def _comparison(fs: FactSet) -> tuple[str, Optional[str]]:
         done = "выполнен" if word == "Норматив" else "исполнен"
         return (f"{word} {done} на {fmt_num(ex.value, 0 if float(ex.value).is_integer() else 1)}%: {fmt_num(fa.value)} "
                 f"из {fmt_value(pl.value, c.get('unit_short'))}"), c.get("caption")
+    if c.get("constant"):
+        v, n = _f(fs, "constant"), _f(fs, "count")
+        k = int(n.value)
+        if abs(v.value) < 1e-12 and c.get("metric_gen") and c.get("dim_gen"):
+            return f"{upper_first(c['metric_gen'])} нет ни в одном из {fmt_num(k)} {c['dim_gen']}", c.get("caption")
+        return (f"У всех {count_words(k, *c['dim_forms'])} одно значение: {fmt_value(v.value, c.get('unit_short'))}",
+                c.get("caption"))
     leader = c["leader"]
     pl = "pl" if c.get("lead_plural") or is_plural_value(leader) else "m"
     share = _f(fs, "leader_share")
@@ -316,7 +340,9 @@ def _comparison(fs: FactSet) -> tuple[str, Optional[str]]:
         last = _f(fs, "last_value")
         w = c.get("wording", "lead")
         top_w, low_w = {"temp": ("Теплее всего", "холоднее всего"), "price": ("Дороже всего", "дешевле всего"),
-                        "most": ("Больше всего", "меньше всего")}.get(w, (None, None))
+                        "most": ("Больше всего", "меньше всего"), "slow": ("Медленнее всего", "быстрее всего"),
+                        "long": ("Дольше всего", "быстрее всего"), "delay": ("Дольше всего", "меньше всего")
+                        }.get(w, (None, None))
         second = _f(fs, "second_value")
         if w == "most" and second is not None and c.get("second_leader"):
             # две величины рядом по порядковым группам: у каждой своя самая большая группа
@@ -342,7 +368,8 @@ def _comparison(fs: FactSet) -> tuple[str, Optional[str]]:
     neg = _f(fs, "negatives")
     if neg is not None and not grow_leader:
         forms = c.get("neg_forms") or ("категория", "категории", "категорий")
-        head += f", {count_words(int(neg.value), *forms)} в минусе"
+        head += (", все " if c.get("neg_all") and int(neg.value) > 1 else ", ") + \
+            f"{count_words(int(neg.value), *forms)} в минусе"
     return head, c.get("caption")
 
 
