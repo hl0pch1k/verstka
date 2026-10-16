@@ -271,11 +271,11 @@ def label_on(fill: str, text: str, ground: str, floor: float = STACK_LABEL_CONTR
     """Ink for a label printed on a filled segment or slice — the one rule of the PPTX charts and of their HTML/SVG twin
     (verstka.export.svg_charts): white, the template's text, the ground, near-black — the first that reads on `fill` at
     `floor` (3:1: the template's own ink on its accent, white on 0077FF and on FF3985), else the one of white and
-    near-black that reads best (a light fill such as 8BBFFA takes the dark ink)."""
+    pure black that reads best (a light fill such as 8BBFFA takes the dark ink; black reaches further than near-black)."""
     for c in ("FFFFFF", text, ground, "1A1A1A"):
         if contrast_ratio(c, fill) >= floor:
             return c
-    return "FFFFFF" if contrast_ratio("FFFFFF", fill) >= contrast_ratio("1A1A1A", fill) else "1A1A1A"
+    return "FFFFFF" if contrast_ratio("FFFFFF", fill) >= contrast_ratio("000000", fill) else "000000"
 
 
 def _quiet_fill(text: str, ground: str) -> str:

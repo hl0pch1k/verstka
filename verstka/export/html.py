@@ -136,7 +136,7 @@ def _element_html(e: IRElement, slide: IRSlide, ir: DeckIR, pkg: PptxPackage, ca
         return f'<div class="el pic {cls}" style="{style}"></div>'
     if e.type == "chart" and e.chart:
         colors = manifest.components.chart_style.series_colors or manifest.tokens.accents()
-        svg = chart_svg(e.chart, e.bbox.w / EMU_PER_PT, e.bbox.h / EMU_PER_PT, colors, text_hex=text_default, font=f"'{default_font}', Play, Arial, sans-serif", font_px=max(manifest.components.chart_style.font_size_pt, 9))
+        svg = chart_svg(e.chart, e.bbox.w / EMU_PER_PT, e.bbox.h / EMU_PER_PT, colors, text_hex=text_default, font=f"'{default_font}', Play, Arial, sans-serif", font_px=max(manifest.components.chart_style.font_size_pt, 9), ground=bg)
         return f'<div class="el" style="{style}">{svg}</div>'
     if e.type == "table" and e.table and e.table.rows:
         ts = manifest.components.table_style

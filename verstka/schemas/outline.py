@@ -95,7 +95,8 @@ class ChartSpec(BaseModel):
     # график со своей единицей измерения»): small multiples of one comparison
     split: bool = False
     # вторая ступень: подписи осей (из имён колонок и единиц), пропуски — разрывы линии (dispBlanksAs gap), строка
-    # источника под графиком («Источник: Выручка по месяцам.csv»), точки рассеяния
+    # источника под графиком («Источник: Выручка по месяцам.csv»), точки рассеяния. `gaps=False` (по умолчанию) — линия
+    # и область проходят через пропуск (span); слой данных ставит True, когда в ряду есть None. Столбцы — всегда пусто.
     x_title: SkipJsonSchema[Optional[str]] = None
     y_title: SkipJsonSchema[Optional[str]] = None
     gaps: SkipJsonSchema[bool] = False
