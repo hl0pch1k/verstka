@@ -521,6 +521,24 @@ def to_openai_messages(messages: list[ChatMessage]) -> list[dict]:
     return out
 
 
+def _system_first(messages: list[dict]) -> list[dict]:
+    """Every system message merged into one, first in the conversation: Qwen's own chat template (the organizers' VK
+    inference serves it as is) refuses a system message anywhere else («System message must be at the beginning») —
+    the schema instruction and a skill's system text join into one; the other messages keep their order."""
+    systems = [m for m in messages if m.get("role") == "system"]
+    if not systems or (len(systems) == 1 and messages[0] is systems[0]):
+        return messages
+    texts: list[str] = []
+    for m in systems:
+        content = m.get("content")
+        if isinstance(content, list):
+            texts.extend(p.get("text") or "" for p in content if isinstance(p, dict) and p.get("type") == "text")
+        elif content:
+            texts.append(str(content))
+    merged = {"role": "system", "content": "\n\n".join(t for t in texts if t)}
+    return [merged, *(m for m in messages if m.get("role") != "system")]
+
+
 def _with_system_suffix(messages: list[dict], suffix: str) -> list[dict]:
     """`suffix` appended to the last system message (the schema instruction, when there is one); without a system
     message, one is put first."""
@@ -814,6 +832,7 @@ class OpenAICompatProvider:
             oai_messages.append(
                 {"role": "system", "content": "Respond with a single JSON object only, no prose, matching this JSON schema:\n" + schema_json}
             )
+        oai_messages = _system_first(oai_messages)
         if self.system_suffix:
             oai_messages = _with_system_suffix(oai_messages, self.system_suffix)
         call_kw = {"nonblocking": True} if in_chain else {}  # a chain link never waits for a per-minute slot

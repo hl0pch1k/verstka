@@ -1120,7 +1120,9 @@ def test_the_system_suffix_is_sent_only_by_its_own_link():
     c = wire(ch, [http_error(502, "Bad gateway"), answer("<think>\n\n</think>\n\n" + GOOD)], [answer()])
     assert ch.complete(MSGS, schema=Out).model == BACKUP
     sent = c[0].calls[0]["messages"]
-    assert sent[-1]["role"] == "system" and sent[-1]["content"].endswith("\n/no_think") and "JSON schema" in sent[-1]["content"]
+    # one system message, first (Qwen's template refuses any other place): the schema instruction, then the switch
+    assert sent[0]["role"] == "system" and sent[0]["content"].endswith("\n/no_think") and "JSON schema" in sent[0]["content"]
+    assert [m["role"] for m in sent].count("system") == 1
     assert sum("/no_think" in str(m["content"]) for m in sent) == 1
     assert not any("/no_think" in str(m["content"]) for m in c[1].calls[0]["messages"])  # not the backup's
     # without a system message of its own, the switch comes first; the empty think block is dropped from the answer
@@ -1131,6 +1133,26 @@ def test_the_system_suffix_is_sent_only_by_its_own_link():
     assert plain.complete(MSGS).text == "ready"
     assert c[0].calls[0]["messages"][0] == {"role": "system", "content": "/no_think"} and c[0].calls[0]["messages"][1]["role"] == "user"
     assert MSGS[0].content == "classify this slide"  # the caller's messages are not changed
+
+
+def test_every_system_text_goes_into_one_first_message():
+    """VK inference serves Qwen's own chat template: a system message after the user's is refused with a 400
+    («System message must be at the beginning») — the skill's system text, the schema instruction and the thinking
+    switch are sent as one system message, first; the rest keeps its order."""
+    vk = {"backend": "openai_compat", "model": VK_MODEL, "base_url": VK, "api_key": VK_KEY, "system_suffix": "/no_think"}
+    p = registry([vk]).get("llm")
+    c = wire(p, [answer(GOOD)])
+    msgs = [ChatMessage(role="system", content="Ты — дизайнер презентаций."), ChatMessage(role="user", content="первый"),
+            ChatMessage(role="assistant", content="ответ"), ChatMessage(role="system", content="Помни про шаблон."),
+            ChatMessage(role="user", content="второй")]
+    assert p.complete(msgs, schema=Out).parsed == Out(kind="cards", confidence=0.9)
+    sent = c[0].calls[0]["messages"]
+    assert [m["role"] for m in sent] == ["system", "user", "assistant", "user"]
+    first = sent[0]["content"]
+    assert first.index("Ты — дизайнер") < first.index("Помни про шаблон") < first.index("JSON schema") < first.index("/no_think")
+    assert [m["content"] for m in sent[1:]] == ["первый", "ответ", "второй"]
+    assert oc._system_first([{"role": "system", "content": "a"}, {"role": "user", "content": "b"}])[0] == {"role": "system", "content": "a"}
+    assert oc._system_first([{"role": "user", "content": "b"}]) == [{"role": "user", "content": "b"}]
 
 
 def test_hosts_with_4_bit_weights_are_read_once_per_model_from_polzas_catalog(catalog):
