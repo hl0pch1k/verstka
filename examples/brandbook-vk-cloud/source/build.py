@@ -158,9 +158,10 @@ MONTHS = ["янв", "фев", "мар", "апр", "май", "июн", "июл", 
 
 
 def line_chart(w: int, h: int, *, big: bool = True) -> str:
-    """Линейный график выручки: линия — основной цвет, последняя точка и главное число — акцент."""
+    """Линейный график выручки: линия — основной цвет, последняя точка и главное число — акцент; у оси значений — единица
+    «млн ₽» (правило брендбука: оси и единицы подписаны всегда)."""
     pts = revenue()
-    pad_l, pad_r, pad_t, pad_b = (88, 150, 24, 56) if big else (44, 80, 12, 30)
+    pad_l, pad_r, pad_t, pad_b = (88, 150, 52, 56) if big else (44, 80, 28, 30)
     lo, hi = 280, 440
     xs = [pad_l + i * (w - pad_l - pad_r) / (len(pts) - 1) for i in range(len(pts))]
     ys = [pad_t + (hi - v) * (h - pad_t - pad_b) / (hi - lo) for _, v in pts]
@@ -170,6 +171,8 @@ def line_chart(w: int, h: int, *, big: bool = True) -> str:
         y = pad_t + (hi - v) * (h - pad_t - pad_b) / (hi - lo)
         grid += f'<line x1="{pad_l}" x2="{w - pad_r}" y1="{y:.1f}" y2="{y:.1f}" stroke="{NIGHT}" stroke-opacity=".08" stroke-width="{2 if big else 1}"/>'
         grid += f'<text x="{pad_l - 16}" y="{y + fs * .35:.1f}" font-size="{fs}" text-anchor="end" fill="{NIGHT}" fill-opacity=".55">{v}</text>'
+    unit = (f'<text x="{0 if not big else pad_l - 16}" y="{pad_t - fs * 1.1:.1f}" font-size="{fs}" text-anchor="{"start" if not big else "end"}" '
+            f'fill="{NIGHT}" fill-opacity=".55">млн ₽</text>')
     labels = ""
     for i, (d, _) in enumerate(pts):
         y, m = int(d[:4]), int(d[5:7])
@@ -180,12 +183,35 @@ def line_chart(w: int, h: int, *, big: bool = True) -> str:
     year_ago = xs[-13], ys[-13]
     r = 9 if big else 5
     return (f'<svg viewBox="0 0 {w} {h}" width="{w}" height="{h}" xmlns="http://www.w3.org/2000/svg" font-family="Play">'
-            f'{grid}{labels}'
+            f'{grid}{unit}{labels}'
             f'<polyline points="{line}" fill="none" stroke="{BLUE}" stroke-width="{5 if big else 3}" stroke-linejoin="round" stroke-linecap="round"/>'
             f'<circle cx="{year_ago[0]:.1f}" cy="{year_ago[1]:.1f}" r="{r - 2}" fill="{WHITE}" stroke="{BLUE}" stroke-width="{3 if big else 2}"/>'
             f'<circle cx="{xs[-1]:.1f}" cy="{ys[-1]:.1f}" r="{r}" fill="{PINK}"/>'
             f'<text x="{xs[-1] + (18 if big else 10):.1f}" y="{ys[-1] + (14 if big else 7):.1f}" font-size="{48 if big else 26}" font-weight="700" fill="{PINK}">+23%</text>'
             f'</svg>')
+
+
+def quarter_strip() -> str:
+    """Нижняя треть слайда «Ключевые показатели»: выручка по кварталам (сумма трёх месяцев из той же таблицы), последний
+    квартал — основным цветом, прежние — светлым тоном; значения подписаны над столбцами, единица — в заголовке."""
+    q: dict[tuple[int, int], float] = {}
+    for d, v in revenue():
+        key = (int(d[:4]), (int(d[5:7]) - 1) // 3 + 1)
+        q[key] = q.get(key, 0) + v
+    keys = sorted(q)
+    top = max(q.values())
+    roman = {1: "I", 2: "II", 3: "III", 4: "IV"}
+    cols = ""
+    for k in keys:
+        last = k == keys[-1]
+        value = f"{q[k]:,.0f}".replace(",", "&nbsp;")
+        fill = BLUE if last else "rgba(39,135,245,.26)"
+        cols += (f'<div class="qc"><span class="qv" style="color:{BLUE if last else NIGHT}">{value}</span>'
+                 f'<i style="height:{round(120 * q[k] / top)}px;background:{fill}"></i>'
+                 f'<span class="ql">{roman[k[1]]} кв. {str(k[0])[2:]}</span></div>')
+    return (f'<div style="position:absolute;left:{MARGIN}px;right:{MARGIN}px;top:716px">'
+            f'<div style="font-size:30px;opacity:.6;margin-bottom:22px">Выручка по кварталам, млн ₽</div>'
+            f'<div class="qs">{cols}</div></div>')
 
 
 def slide_html(body: str) -> str:
@@ -194,6 +220,11 @@ body {{ width: 1920px; height: 1080px; overflow: hidden; position: relative; }}
 .logo {{ position: absolute; right: {MARGIN}px; bottom: {MARGIN}px; }}
 .src {{ position: absolute; left: {MARGIN}px; bottom: {MARGIN}px; font-size: 22px; opacity: .55; }}
 h1 {{ font-weight: 700; letter-spacing: -0.01em; }}
+.qs {{ display: flex; align-items: flex-end; gap: {GUTTER * 2}px; height: 204px; border-bottom: 2px solid rgba(11,18,32,.12); padding: 0 8px; }}
+.qc {{ flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 10px; position: relative; padding-bottom: 44px; }}
+.qc i {{ display: block; width: 100%; max-width: 150px; border-radius: 10px 10px 0 0; }}
+.qv {{ font-size: 30px; font-weight: 700; }}
+.ql {{ position: absolute; bottom: 10px; font-size: 24px; opacity: .6; }}
 </style></head><body>{body}</body></html>"""
 
 
@@ -219,7 +250,7 @@ def build_slides(tmp: Path) -> None:
     cards = [("1,24 млрд ₽", "выручка за квартал", "+23% к III кв. 2025", True), ("3 480", "активных клиентов", "+18%", False),
              ("356 тыс. ₽", "средний чек", "+4%", False), ("52", "NPS", "+6 пунктов", False)]
     cells = "".join(
-        f'<div style="padding:40px 36px;border-radius:24px;background:{"#F2F7FF" if main else "#F6F7F9"};height:360px;position:relative">'
+        f'<div style="padding:40px 36px;border-radius:24px;background:{"#F2F7FF" if main else "#F6F7F9"};height:340px;position:relative">'
         f'<div style="height:96px;display:flex;align-items:flex-end;font-size:{76 if main else 64}px;line-height:1;font-weight:700;color:{PINK if main else NIGHT};white-space:nowrap">{v}</div>'
         f'<div style="font-size:30px;margin-top:20px;opacity:.7">{lab}</div>'
         f'<div style="position:absolute;left:36px;bottom:40px;font-size:30px;font-weight:700;color:{BLUE}">{chg}</div></div>'
@@ -227,8 +258,9 @@ def build_slides(tmp: Path) -> None:
     numbers = slide_html(f"""
 <h1 style="position:absolute;left:{MARGIN}px;top:{MARGIN + 24}px;font-size:72px;line-height:1.1">Выручка растёт быстрее клиентской базы</h1>
 <div style="position:absolute;left:{MARGIN}px;top:200px;font-size:30px;opacity:.6">III квартал 2026 года, сравнение с III кварталом 2025 года</div>
-<div style="position:absolute;left:{MARGIN}px;right:{MARGIN}px;top:330px;display:grid;grid-template-columns:1.35fr 1fr 1fr 1fr;gap:{GUTTER}px">{cells}</div>
-<div class="src">Источник: Итоги квартала.txt</div>
+<div style="position:absolute;left:{MARGIN}px;right:{MARGIN}px;top:300px;display:grid;grid-template-columns:1.35fr 1fr 1fr 1fr;gap:{GUTTER}px">{cells}</div>
+{quarter_strip()}
+<div class="src">Источник: Итоги квартала.txt, Выручка по месяцам.csv</div>
 <div class="logo">{inline_logo("primary", 44)}</div>""")
     for name, html in (("01-oblozhka", cover), ("02-grafik", chart), ("03-pokazateli", numbers)):
         src = tmp / f"{name}.html"
@@ -270,10 +302,14 @@ def guideline_html(slides_dir: Path, logos_dir: Path) -> str:
     order = "".join(f'<div class="ord"><i style="background:{hx}"></i><span>{i}</span><b>{nm}</b><span class="hx">{hx}</span></div>'
                     for i, (nm, hx) in enumerate((("VK Blue", BLUE), ("Cloud Blue", CLOUD), ("Sky", SKY), ("Night", NIGHT)), 1))
     bars = [("Москва", 41), ("Санкт-Петербург", 17), ("Казань", 11), ("Новосибирск", 9), ("Краснодар", 8)]
-    bar_svg = "".join(f'<text x="0" y="{20 + i * 33}" font-size="15" fill="{NIGHT}">{c}</text>'
-                      f'<rect x="150" y="{6 + i * 33}" width="{v * 7}" height="20" rx="4" fill="{BLUE}"/>'
-                      f'<text x="{160 + v * 7}" y="{21 + i * 33}" font-size="15" fill="{NIGHT}" fill-opacity=".7">{v}%</text>'
-                      for i, (c, v) in enumerate(bars))
+    x0, k = 150, 7  # начало осей и масштаб: 1 % = 7 px
+    axis = "".join(f'<line x1="{x0 + t * k}" x2="{x0 + t * k}" y1="0" y2="142" stroke="{NIGHT}" stroke-opacity=".08"/>'
+                   f'<text x="{x0 + t * k}" y="160" font-size="13" text-anchor="middle" fill="{NIGHT}" fill-opacity=".55">{t}</text>' for t in (0, 10, 20, 30, 40))
+    bar_svg = axis + "".join(f'<text x="0" y="{19 + i * 28}" font-size="15" fill="{NIGHT}">{c}</text>'
+                             f'<rect x="{x0}" y="{4 + i * 28}" width="{v * k}" height="20" rx="4" fill="{BLUE}"/>'
+                             f'<text x="{x0 + 10 + v * k}" y="{19 + i * 28}" font-size="15" fill="{NIGHT}" fill-opacity=".7">{v}%</text>'
+                             for i, (c, v) in enumerate(bars))
+    bar_svg += f'<text x="{x0}" y="180" font-size="13" fill="{NIGHT}" fill-opacity=".55">Доля выручки, % от итога</text>'
     cols = "".join(f'<i style="left:{48 + k * (1824 + GUTTER) / COLUMNS}px;width:{(1824 - GUTTER * (COLUMNS - 1)) / COLUMNS}px"></i>'
                    for k in range(COLUMNS))
 
@@ -396,8 +432,8 @@ def guideline_html(slides_dir: Path, logos_dir: Path) -> str:
 <p>Не больше шести долей в кольцевой диаграмме, остальное — в «Другое».</p>
 </div>
 <div class="charts">
-<div class="ch"><div class="cap">Выручка выросла на 23% к сентябрю</div>{line_chart(560, 180, big=False)}</div>
-<div class="ch"><div class="cap">Доля выручки по регионам</div><svg viewBox="0 0 520 172" width="520" height="172" font-family="Play">{bar_svg}</svg></div>
+<div class="ch"><div class="cap">Выручка выросла на 23% к сентябрю</div>{line_chart(560, 146, big=False)}<div class="srcl">Источник: Выручка по месяцам.csv</div></div>
+<div class="ch"><div class="cap">Доля выручки по регионам</div><svg viewBox="0 0 520 186" width="520" height="186" font-family="Play">{bar_svg}</svg><div class="srcl">Источник: Регионы.xlsx</div></div>
 </div>
 </div>"""),
         page(10, "Правила", "Как правильно и как нельзя", f'<div class="dos">{do_cards}</div>'),
@@ -502,6 +538,7 @@ code {{ font-family: 'Play'; font-size: 14px; color: {BLUE}; }}
 .charts {{ display: flex; flex-direction: column; gap: 14px; margin-top: -8px; }}
 .ch {{ border-radius: 16px; padding: 12px 18px; box-shadow: inset 0 0 0 1px rgba(11,18,32,.1); }}
 .ch .cap {{ color: {NIGHT}; text-transform: none; letter-spacing: 0; font-size: 16px; margin-bottom: 6px; }}
+.srcl {{ font-size: 12px; opacity: .55; margin-top: 2px; }}
 .dos {{ display: grid; grid-template-columns: repeat(3, 1fr); grid-auto-flow: column; grid-template-rows: auto auto; gap: 16px 40px; margin-top: -6px; }}
 .do svg {{ display: block; width: 256px; height: 144px; }}
 .do b {{ display: block; font-size: 14px; margin: 8px 0 2px; }}
