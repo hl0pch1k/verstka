@@ -112,7 +112,8 @@ def test_gaps_are_none_not_zero_and_named_in_headline():
     spec = chart_spec_of(p, t)
     assert spec.gaps and spec.series[0].values[2] is None
     assert p.options[0].title == "Линейный график с разрывами"
-    assert p.headline == "Конверсия выросла до 3%, за один месяц данных нет"
+    assert p.headline == "Конверсия выросла до 3%"  # один пропуск — в подписи, не в заголовке
+    assert "данных нет" in p.caption
 
 
 def test_outliers_counted_apart_from_bins():
@@ -239,7 +240,8 @@ def test_relationship_scatter():
            units=[None, "тыс. ₽", "тыс. ₽"])
     p = _plan(t)
     assert p.task.task == "relationship" and p.options[0].kind == "scatter"
-    assert p.headline.startswith("Чем выше расходы на рекламу, тем выше выручка")
+    # наклон в заголовке: на каждую тысячу рублей рекламы — около +3,1 тыс. ₽ выручки
+    assert p.headline.replace("\u00a0", " ") == "Каждая тысяча рублей расходов на рекламу — около +3,1 тыс. ₽ к выручке"
     spec = chart_spec_of(p, t)
     assert spec.type == "scatter" and len(spec.xy[0].x) == 20 and spec.x_title == "Расходы на рекламу, тыс. ₽"
 
@@ -261,7 +263,7 @@ def test_counts_by_category_without_numbers():
     t = _t(["Обращение", "Канал"], [[f"A-{i}", ["Почта", "Чат", "Телефон"][i % 3 if i % 7 else 0]] for i in range(60)])
     p = _plan(t)
     assert p.task.task == "comparison"
-    assert p.headline == "Почта даёт 43% обращений"
+    assert p.headline == "Почта даёт 43% обращений: 26 из 60"
 
 
 # ── цель ──────────────────────────────────────────────────────────────────────────────────────────────────────────────

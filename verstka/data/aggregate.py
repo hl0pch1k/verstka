@@ -28,8 +28,8 @@ import numpy as np
 
 from verstka.data.parse import is_total_label, parse_quantity, period_iso, period_parts, quantity
 from verstka.data.words import (
-    PERIOD_WORDS, count_words, fmt_num, fmt_value, head_word, is_counter, join_and, lower_first, period_label,
-    period_text, phrase, plural, stems_match,
+    PERIOD_WORDS, count_words, fmt_exact, fmt_num, fmt_value, head_word, is_counter, join_and, lower_first,
+    period_label, period_text, phrase, plural, stems_match, upper_first,
 )
 from verstka.schemas.data import ColumnProfile, DatasetProfile, Table
 
@@ -71,6 +71,39 @@ _ORDINAL_LABEL = re.compile(r"^\s*(?:до|от|свыше|более|больш�
 
 def unit_short(unit: Optional[str]) -> Optional[str]:
     return unit or None
+
+
+def _common_prefix_words(names: list[str]) -> str:
+    """Общие первые слова всех названий, если у каждого после них что-то остаётся: «Форма обучения Бюджет»,
+    «Форма обучения Платное» → «Форма обучения» (заголовок группы над колонками)."""
+    toks = [n.split() for n in names]
+    k = 0
+    while all(len(t) > k + 1 for t in toks) and len({t[k].lower() for t in toks}) == 1:
+        k += 1
+    return " ".join(toks[0][:k]) if k else ""
+
+
+def _common_suffix(names: list[str]) -> str:
+    """Общее дополнение после запятой: «Scopus, статей», «РИНЦ, статей» → «статей»."""
+    tails = {n.split(",", 1)[1].strip().lower() if "," in n else "" for n in names}
+    return next(iter(tails)) if len(tails) == 1 and "" not in tails else ""
+
+
+def _name_kin(a: str, b: str) -> bool:
+    """Названия из одной группы: общий заголовок спереди или общее дополнение после запятой."""
+    return bool(_common_prefix_words([a, b]) or _common_suffix([a, b]))
+
+
+def _leaf_names(names: list[str]) -> dict[str, str]:
+    pre = _common_prefix_words(names)
+    suf = _common_suffix(names)
+    out = {}
+    for n in names:
+        leaf = n[len(pre):].strip() if pre else n
+        if suf and "," in leaf:
+            leaf = leaf.rsplit(",", 1)[0].strip()
+        out[n] = upper_first(leaf) if leaf else n
+    return out
 
 
 def _num(cell: Any) -> Optional[float]:
@@ -386,6 +419,10 @@ class XYView:
     ys: list[float]
     labels: list[str]
     r: float
+    slope: float = 0.0  # наклон прямой МНК: изменение y на единицу x
+    intercept: float = 0.0
+    group: Optional[str] = None  # колонка-группа для цвета точек (≤ 5 значений)
+    groups: list[str] = field(default_factory=list)  # группа каждой точки
 
     @property
     def n(self) -> int:
@@ -610,6 +647,61 @@ class Data:
         return None
 
     @cached_property
+    def total_metric(self) -> Optional[Measure]:
+        """Колонка-итог («Всего», «Итого», «Total»): сумма серий, а не ещё одна серия."""
+        return next((m for m in self.measures if is_total_label(m.name)), None)
+
+    @cached_property
+    def parallel(self) -> list[Measure]:
+        """Метрики одного рода с главной (несколько рядов или частей): одна единица и общая часть названия
+        («Форма обучения Бюджет / Платное / Целевое», «Scopus, статей / РИНЦ, статей»), или одна единица рядом с
+        колонкой-итогом («Бюджет, Платное, Целевое, Всего»), или одна единица на общей оси времени («План, млн ₽ /
+        Факт, млн ₽» по месяцам). Изменения, колонки с разными единицами и итог («Всего») — не ряды. До 5."""
+        m = self.main
+        if m is None or m.change or m.mixed:
+            return []
+        group = [m]
+        for x in self.measures:
+            if x is m or x.change or x.mixed or x is self.total_metric:
+                continue
+            if (x.unit or "") != (m.unit or ""):
+                continue
+            kin = _name_kin(m.name, x.name)
+            # родство: общая часть названия; или рядом колонка-итог (части суммы); или общая ось времени и единица
+            # (план и факт по месяцам). Две денежные колонки по магазинам без этого — взаимосвязь, а не ряды
+            sibling = self.total_metric is not None or (self.time_col is not None and bool(m.unit))
+            if not kin and not (sibling and x.type == m.type):
+                continue
+            group.append(x)
+        group.sort(key=lambda x: x.j)
+        return group[:MAX_SERIES] if len(group) >= 2 else []
+
+    @cached_property
+    def series_names(self) -> dict[str, str]:
+        """Короткие имена рядов без общей части: «Форма обучения Платное» → «Платное», «Scopus, статей» → «Scopus»."""
+        return _leaf_names([m.name for m in self.parallel]) if self.parallel else {}
+
+    @cached_property
+    def composition(self) -> bool:
+        """Ряды — части одного целого (их можно складывать): есть колонка-итог, общий заголовок группы
+        («Форма обучения …») или профиль нашёл части целого; и все ряды суммируемые и неотрицательные."""
+        g = self.parallel
+        if len(g) < 2 or not all(x.additive and x.nonneg for x in g):
+            return False
+        prefix = _common_prefix_words([x.name for x in g])
+        return self.total_metric is not None or bool(prefix) or bool(self.profile.parts_of_whole)
+
+    def parent_of(self, j: int) -> Optional[int]:
+        """Родитель колонки в иерархии профиля («Кафедра → Институт»), если у него 2–12 значений."""
+        name = self.cols[j].name
+        for child, parent in self.profile.hierarchies:
+            if child == name:
+                pj = next((k for k, c in enumerate(self.cols) if c.name == parent), None)
+                if pj is not None and 2 <= self.cols[pj].distinct <= MAX_CATS:
+                    return pj
+        return None
+
+    @cached_property
     def shares(self) -> Optional[tuple[CatView, list[float]]]:
         """Части целого: все категории (без «Остальных») и их доли в %. Колонка долей, если она есть (доли 0–1 —
         в проценты), иначе доли суммируемой неотрицательной метрики от итога. Порядок — как у `cat_view`
@@ -782,16 +874,9 @@ class Data:
                 series = [SeriesV("Число строк", None, [float(c) for c in counts])]
                 how = "sum"
             else:
-                # метрики в тех же единицах и того же размаха — рядом (план и факт)
-                for mm in self.measures:
-                    if mm is m:
-                        continue
-                    if len(measures) >= 4 or mm.change or mm.mixed or mm.type != m.type:
-                        continue
-                    same_unit = (mm.unit or "") == (m.unit or "") and (m.unit or mm.type in ("money", "percent"))
-                    a, b = max(map(abs, m.present), default=0), max(map(abs, mm.present), default=0)
-                    if same_unit and a and b and max(a, b) / min(a, b) <= 3:
-                        measures.append(mm)
+                # метрики одного рода (Scopus и РИНЦ, план и факт) — каждая своим рядом
+                if m in self.parallel:
+                    measures = list(self.parallel)
                 for mm in measures:
                     buckets: dict[int, list[float]] = {}
                     for i, k in keyed:
@@ -799,7 +884,11 @@ class Data:
                         if v is not None:
                             buckets.setdefault(pos[k], []).append(v)
                     h = how if mm is m else mm.how
-                    series.append(SeriesV(mm.name, mm.unit_text, [agg(buckets.get(p, []), h) for p in range(len(order))]))
+                    nm = self.series_names.get(mm.name, mm.name) if len(measures) > 1 else mm.name
+                    series.append(SeriesV(nm, mm.unit_text, [agg(buckets.get(p, []), h) for p in range(len(order))]))
+        if len(series) > 1 and not dim_name:
+            # главный ряд — первым (тот, что назван целью или первый по порядку)
+            series.sort(key=lambda sv: sv.name != self.series_names.get(m.name, m.name))
         meas = m if m is not None else Measure(j=-1, name="Число строк", unit=None, type="number",
                                                values=[1.0] * len(self.table.rows))
         return TimeView(
@@ -810,13 +899,14 @@ class Data:
 
     @cached_property
     def cats(self) -> Optional[CatView]:
-        return self.cat_view(self.main)
+        return self.cat_view(self.main, rank_with=self.parallel if self.composition else None)
 
     def cat_dim(self) -> Optional[int]:
         """Колонка категорий для сравнения: подпись строки (≤ 60, если есть метрика) или измерение с повторами (2–60
         значений). Без метрики сравнивают число строк — подпись, у которой каждая строка своя, для этого не годится."""
         if self.label is not None and self.n <= 60 and self.main is not None:
-            return self.label
+            parent = self.parent_of(self.label)
+            return parent if parent is not None and self.n > MAX_CATS - 4 else self.label
         cands = [j for j in self.dims if 2 <= self.cols[j].distinct <= 60]
         if self.subject:
             for j in cands:
@@ -825,10 +915,12 @@ class Data:
         if not cands:
             return None
         # самое «крупное» деление, которое ещё различает строки: меньше всего значений, но больше одного
-        return sorted(cands, key=lambda j: (self.cols[j].distinct > 12, j))[0]
+        best = sorted(cands, key=lambda j: (self.cols[j].distinct > 12, j))[0]
+        parent = self.parent_of(best)
+        return parent if parent is not None and self.cols[best].distinct > MAX_CATS - 4 else best
 
     def cat_view(self, m: Optional[Measure], top: int = MAX_CATS, dim: Optional[int] = None,
-                 rank: bool = True) -> Optional[CatView]:
+                 rank: bool = True, rank_with: Optional[list[Measure]] = None) -> Optional[CatView]:
         dj = dim if dim is not None else self.cat_dim()
         if dj is None:
             return None
@@ -849,7 +941,8 @@ class Data:
                 return None
             if len(xs) == 1:
                 return float(xs[0])
-            return float(sum(xs)) if mm.additive or mm.stock else float(sum(xs) / len(xs))
+            # сумма без «хвоста» двоичной арифметики: 330.09999999999997 → 330.1
+            return round(float(sum(xs)), 9) if mm.additive or mm.stock else round(float(sum(xs) / len(xs)), 9)
 
         labels = list(groups)
         values = [value_of(m, groups[g]) for g in labels]
@@ -863,8 +956,12 @@ class Data:
         ordinal = sum(1 for x in labels if _ORDINAL_LABEL.match(x)) >= 0.8 * len(labels)
         ranked = rank and not ordinal
         order = list(range(len(labels)))
+        key_vals = list(values)
+        if rank_with:
+            # состав: порядок — по сумме всех частей категории
+            key_vals = [sum((value_of(mm, groups[g]) or 0.0) for mm in rank_with) for g in labels]
         if ranked:
-            order.sort(key=lambda k: (-values[k], k))
+            order.sort(key=lambda k: (-key_vals[k], k))
         labels = [labels[k] for k in order]
         values = [values[k] for k in order]  # type: ignore[misc]
         extra = {k: [v[o] for o in order] for k, v in extra.items()}
@@ -924,7 +1021,8 @@ class Data:
 
     @cached_property
     def xy(self) -> Optional[XYView]:
-        ms = [m for m in self.measures if not m.mixed]
+        # изменение («Изменение к 2025», «Δ», «прирост») — та же величина, а не вторая: не для рассеяния
+        ms = [m for m in self.measures if not m.mixed and not m.change]
         if len(ms) < 2:
             return None
         y = next((m for m in ms if re.search(r"выручк|продаж|прибыл|доход|оценк|балл|nps|конверси|результат|успеваем",
@@ -944,10 +1042,16 @@ class Data:
         if len(xs) < 3:
             return None
         ax, ay = np.array(xs), np.array(ys)
-        r = 0.0
+        r = slope = icpt = 0.0
         if ax.std() > 0 and ay.std() > 0:
             r = float(np.corrcoef(ax, ay)[0, 1])
-        return XYView(x=x, y=y, xs=xs, ys=ys, labels=labels, r=r)
+            slope, icpt = (float(v) for v in np.polyfit(ax, ay, 1))
+        gj = next((j for j in self.dims if j != self.label and 2 <= self.cols[j].distinct <= 5), None)
+        groups: list[str] = []
+        if gj is not None:
+            groups = [self.text(i, gj) for i in self.rows_idx if x.values[i] is not None and y.values[i] is not None]
+        return XYView(x=x, y=y, xs=xs, ys=ys, labels=labels, r=r, slope=slope, intercept=icpt,
+                      group=self.cols[gj].name if gj is not None else None, groups=groups)
 
     # ── свойства для задачи
     @cached_property
@@ -1260,17 +1364,8 @@ def _fmt_cell(d: Data, i: int, j: int) -> str:
     if c.type == "period" and isinstance(v, str):
         return period_label(v, "")
     if isinstance(v, (int, float)) and not isinstance(v, bool):
-        return fmt_num(float(v), _decimals(v))
+        return fmt_exact(float(v))  # как в файле: 212,4, а не 212
     return d.text(i, j)
-
-
-def _decimals(v: float) -> int:
-    """Сколько знаков после запятой у значения, как в файле (не больше двух): 212.4 → 1, 296 → 0."""
-    f = float(v)
-    for k in (0, 1, 2):
-        if abs(round(f, k) - f) < 1e-9:
-            return k
-    return 2
 
 
 def describe_dropped(names: list[str]) -> str:

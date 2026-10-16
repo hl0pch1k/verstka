@@ -17,11 +17,12 @@ from typing import Any, Optional
 
 import numpy as np
 
-from verstka.data.aggregate import NICE_MINUTES, TO_MINUTES, CatView, Data, Measure, TimeView
+from verstka.data.aggregate import NICE_MINUTES, TO_MINUTES, CatView, Data, KpiItem, Measure, TimeView
+from verstka.data.parse import quantity, split_unit
 from verstka.data.words import (
-    PERIOD_WORDS, Phrase, count_words, duration_gen, duration_text, file_title, fmt_num, fmt_pct, fmt_signed,
-    fmt_value, is_counter, join_and, lower_first, metric_phrase, period_dat_full, period_dative, period_gen,
-    period_text, phrase, round_pct, times_word, upper_first,
+    PERIOD_WORDS, Phrase, count_words, duration_gen, duration_text, each_unit, file_title, fmt_num, fmt_pct,
+    fmt_signed, fmt_value, head_word, is_counter, is_participle, join_and, lower_first, metric_phrase,
+    period_dat_full, period_dative, period_gen, period_text, phrase, round_pct, times_word, upper_first,
 )
 from verstka.schemas.data import FactKind, HeadlineFact, TaskKind
 
@@ -119,21 +120,62 @@ def _past_end(gender: str, grow: bool) -> str:
     return {"m": "ся", "f": "ась", "n": "ось", "pl": "ись"}[gender]
 
 
+def _short(parts: list[str], limit: int = 140) -> Optional[str]:
+    """Подпись — 1–2 строки: предложения по порядку, пока помещаются в ~140 знаков (первое — всегда)."""
+    out = ""
+    for p in parts:
+        if not p:
+            continue
+        nxt = (out + " " + p).strip()
+        if out and len(nxt) > limit:
+            break
+        out = nxt
+    return out or None
+
+
+def _range_text(pf: str, pl: str) -> str:
+    """«С января 2025 по сентябрь 2026», «С 2005 по 2025 год»."""
+    if re.fullmatch(r"\d{4}", pf) and re.fullmatch(r"\d{4}", pl):
+        return f"С {pf} по {pl} год"
+    return f"С {period_gen(pf)} по {period_text(pl)}"
+
+
+def _whole_period(tv: TimeView, ratio: float, span: int) -> bool:
+    """Длинный ряд: вывод — изменение за весь период, а не последний шаг. Годы — всегда (их «год к году» и есть
+    последний шаг); месяцы и кварталы — если за период величина выросла хотя бы втрое за 3 года и больше."""
+    if tv.freq == "year" and span >= 4:
+        return True
+    years = {"month": span / 12, "quarter": span / 4, "week": span / 52, "day": span / 365}.get(tv.freq, 0)
+    return (ratio >= 3 or (ratio > 0 and ratio <= 1 / 3)) and years >= 3
+
+
+def _series_change(values: list[Optional[float]]) -> Optional[tuple[int, int, float, float]]:
+    idx = [i for i, v in enumerate(values) if v is not None]
+    if len(idx) < 2:
+        return None
+    return idx[0], idx[-1], float(values[idx[0]]), float(values[idx[-1]])  # type: ignore[arg-type]
+
+
 def _dynamics(d: Data) -> FactSet:
     fs = FactSet()
     tv = d.time
     m = d.main
     if tv is None:
         return fs
+    if len(tv.series) >= 2 and not tv.dim and not d.composition:
+        multi = _dynamics_series(d, tv, fs)
+        if multi:
+            return fs
     vals = _series_values(tv)
     idx = [i for i, v in enumerate(vals) if v is not None]
     m = tv.measure if m is None else m
     subj, gender, ph = subject_of(m.name if tv.measure.j >= 0 else "Число строк", m.type)
+    subj = re.sub(r"\s*,[^,]*$", "", subj).strip() or subj
     pw = PERIOD_WORDS.get(tv.freq, PERIOD_WORDS["irregular"])
     unit = m.unit_text if tv.measure.j >= 0 else None
     level = m.level or m.type == "percent"
     fs.ctx.update(subject=subj, gender=gender, metric=ph or phrase("Значение"), freq=tv.freq, unit_short=unit,
-                  level=level)
+                  level=level, labels=[subj])
     if not idx:
         return fs
     F, L = idx[0], idx[-1]
@@ -156,7 +198,10 @@ def _dynamics(d: Data) -> FactSet:
     lag = _LAG.get(tv.freq)
     base_i = None
     yoy = False
-    if lag and L - lag >= F and vals[L - lag] is not None and tv.freq != "irregular":
+    span = L - F
+    ratio_all = last / first if first > 0 and last >= 0 else 0.0
+    if lag and L - lag >= F and vals[L - lag] is not None and tv.freq != "irregular" \
+            and not _whole_period(tv, ratio_all, span):
         base_i, yoy = L - lag, True
     elif L > F:
         base_i = F
@@ -182,13 +227,13 @@ def _dynamics(d: Data) -> FactSet:
                    f"{fmt_signed(delta, unit or '')} к {period_dat_full(pb)}", unit,
                    f"{upper_first(period_text(pl))} к {period_dat_full(pb)}: {fmt_value(last, unit)} против "
                    f"{fmt_value(base, unit)}. {_by(m)}")
-            span = L - base_i
+            sp = L - base_i
             fs.ctx["when"] = _yoy_when(tv.freq, pl) if yoy else (
-                f"за {count_words(span, pw[0], pw[1], pw[2])}" if tv.freq != "irregular" else "за период")
+                f"за {count_words(sp, pw[0], pw[1], pw[2])}" if tv.freq != "irregular" else "за период")
             if not yoy:
-                fs.add("span", span, "count", count_words(span, pw[0], pw[1], pw[2]), None,
+                fs.add("span", sp, "count", count_words(sp, pw[0], pw[1], pw[2]), None,
                        f"От {period_gen(pf)} до {period_gen(pl)}.")
-            caption.append(f"С {period_gen(pf)} по {period_text(pl)}: {fmt_value(first, unit)} → {fmt_value(last, unit)}.")
+            caption.append(f"{_range_text(pf, pl)}: {fmt_value(first, unit)} → {fmt_value(last, unit)}.")
         else:
             pct = (last / base - 1) * 100
             fs.ctx["delta"] = pct
@@ -205,17 +250,15 @@ def _dynamics(d: Data) -> FactSet:
             if yoy:
                 when = _yoy_when(tv.freq, pl)
             else:
-                span = L - F
                 when = f"за {count_words(span, pw[0], pw[1], pw[2])}" if tv.freq != "irregular" else "за период"
                 fs.add("span", span, "count", f"{count_words(span, pw[0], pw[1], pw[2])}", None,
                        f"От {period_gen(pf)} до {period_gen(pl)}.")
             fs.ctx["when"] = when
             if abs(last - first) < 1e-9:
-                caption.append(f"С {period_gen(pf)} по {period_text(pl)} {lower_first(subj)} держится на уровне "
-                               f"{fmt_value(last, unit)}.")
+                caption.append(f"{_range_text(pf, pl)} {lower_first(subj)} держится на уровне {fmt_value(last, unit)}.")
             else:
                 caption.append(
-                    f"С {period_gen(pf)} по {period_text(pl)} {lower_first(subj)} "
+                    f"{_range_text(pf, pl)} {lower_first(subj)} "
                     f"{'вырос' if last > first else 'снизил'}{_past_end(gender, last > first)} "
                     f"с {fmt_value(first, unit)} до {fmt_value(last, unit)}.")
     if missing:
@@ -224,14 +267,70 @@ def _dynamics(d: Data) -> FactSet:
             f"на графике разрывы, а не ноль.")
     if tv.resampled and tv.note:
         caption.append(upper_first(tv.note) + ".")
-    fs.ctx["caption"] = " ".join(caption) or None
+    fs.ctx["caption"] = _short(caption)
     return fs
+
+
+def _dynamics_series(d: Data, tv: TimeView, fs: FactSet) -> bool:
+    """Несколько рядов одного рода (Scopus и РИНЦ): у каждого — изменение за весь период; заголовок — оба ряда."""
+    pw = PERIOD_WORDS.get(tv.freq, PERIOD_WORDS["irregular"])
+    items = []
+    for k, sv in enumerate(tv.series[:3]):
+        ch = _series_change(sv.values)
+        if ch is None:
+            continue
+        F, L, first, last = ch
+        items.append((sv, F, L, first, last))
+    if len(items) < 2:
+        return False
+    span = max(L for _, _, L, _, _ in items) - min(F for _, F, _, _, _ in items)
+    unit = tv.measure.unit_text
+    names = []
+    for k, (sv, F, L, first, last) in enumerate(items):
+        name = sv.name
+        names.append(name)
+        if first > 0 and last >= 0:
+            ratio = last / first
+            if ratio >= 2 or ratio <= 0.5:
+                r = round(ratio if ratio >= 1 else 1 / ratio, 1)
+                fs.add(f"series_{k}", r, "change", f"{name}: в {fmt_num(r, 1)} {times_word(r)}", "раз",
+                       f"{name}: {fmt_value(first, unit)} → {fmt_value(last, unit)} ({period_text(tv.periods[F])} — "
+                       f"{period_text(tv.periods[L])}).")
+                fs.ctx[f"s{k}"] = ("ratio", ratio)
+            else:
+                pct = (last / first - 1) * 100
+                fs.add(f"series_{k}", round_pct(abs(pct)), "change", f"{name}: {fmt_signed(round_pct(pct), '%')}", "%",
+                       f"{name}: {fmt_value(first, unit)} → {fmt_value(last, unit)}.")
+                fs.ctx[f"s{k}"] = ("pct", pct)
+        else:
+            fs.add(f"series_{k}", abs(last - first), "change", f"{name}: {fmt_signed(last - first, unit or '')}", unit,
+                   f"{name}: {fmt_value(first, unit)} → {fmt_value(last, unit)}.")
+            fs.ctx[f"s{k}"] = ("abs", last - first)
+        hi = max((i for i, v in enumerate(sv.values) if v is not None), key=lambda i: sv.values[i])
+        if hi != L and sv.values[hi] is not None and last < sv.values[hi]:
+            fs.ctx.setdefault("peaks", []).append((name, sv.values[hi], tv.periods[hi]))
+    fs.add("span", span, "count", count_words(span, pw[0], pw[1], pw[2]), None,
+           f"От {period_gen(tv.periods[0])} до {period_gen(tv.periods[-1])}.")
+    p0 = phrase(names[0])
+    fs.ctx.update(multi=True, names=names, labels=list(names), freq=tv.freq, unit_short=unit,
+                  gender=p0.gender if p0 is not None else "m", when=f"за {count_words(span, pw[0], pw[1], pw[2])}")
+    caption = [f"{_range_text(tv.periods[0], tv.periods[-1])}: "
+               + ", ".join(f"{sv.name} — с {fmt_value(first, unit)} до {fmt_value(last, unit)}"
+                           for sv, F, L, first, last in items) + "."]
+    for name, v, per in fs.ctx.get("peaks", [])[:1]:
+        caption.append(f"{name}: максимум {fmt_value(v, unit)} в {period_text(per)}, затем ниже.")
+    if tv.missing:
+        caption.append(f"За {join_and([period_text(p) for p in tv.missing[:3]])} данных нет — на графике разрывы.")
+    fs.ctx["caption"] = _short(caption)
+    return True
 
 
 # ── сравнение ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 def _growth_measure(cv: CatView) -> Optional[Measure]:
+    """Колонка темпа («Рост, %»): «растёт быстрее всех» говорят про темп, а не про прибавку в рублях."""
     for mm in cv.extra_measures:
-        if mm.change and any(v is not None for v in cv.extra.get(mm.name, [])):
+        if mm.change and (mm.type == "percent" or (mm.unit or "") in ("%", "п.п.")) \
+                and any(v is not None for v in cv.extra.get(mm.name, [])):
             return mm
     return None
 
@@ -264,6 +363,9 @@ def _comparison(d: Data) -> FactSet:
             fs.add("leader_share", round_pct(p), "share", f"{leader} — {fmt_pct(p)}%", "%",
                    f"{leader} — {fmt_value(lv, unit)} из {fmt_value(cv.total, unit)}, это {fmt_pct(p)}%. "
                    f"Посчитано по колонке «{name}».")
+            fs.add("total", round(cv.total) if abs(cv.total) >= 100 else round(cv.total, 1), "total",
+                   f"Всего — {fmt_value(cv.total, unit)}", unit,
+                   "Строка «Итого» в файле." if cv.total_from_row else f"Сумма по колонке «{name}».")
         caption.append(f"{leader} — {fmt_value(lv, unit)} из {fmt_value(cv.total, unit)}.")
     fs.add("leader_value", lv, "leader", f"{leader} — {fmt_value(lv, unit)}", unit,
            f"Наибольшее значение — у категории «{leader}». Посчитано по колонке «{name}».")
@@ -304,7 +406,7 @@ def _comparison(d: Data) -> FactSet:
     if cv.others:
         caption.append(f"Остальные {count_words(cv.others, 'категория', 'категории', 'категорий')} собраны в одну "
                        f"строку.")
-    fs.ctx["caption"] = " ".join(caption) or None
+    fs.ctx["caption"] = _short(caption)
     return fs
 
 
@@ -326,7 +428,48 @@ def _whole_phrase(d: Data, parts: Optional[Measure]) -> tuple[Optional[Phrase], 
     return None, False
 
 
+def _dataset_whole(d: Data) -> Optional[Phrase]:
+    """Целое по названию датасета: «Приём по направлениям» → «приёма» (главное слово, если оно склоняется)."""
+    head = head_word(file_title(d.profile.file, d.profile.sheet))
+    if not head or head in ("данные", "таблица", "лист", "отчёт", "отчет", "итоги", "список", "выгрузка"):
+        return None
+    p = phrase(head)
+    return p if p is not None and p.sure else None
+
+
+def _composition(d: Data) -> FactSet:
+    """Части одного целого по категориям: доля каждой части в общем итоге («Платное — 53% приёма, бюджет — 35%»)."""
+    fs = FactSet()
+    cv = d.cats
+    g = d.parallel
+    names = d.series_names
+    totals = [(names.get(x.name, x.name), float(sum(x.present))) for x in g]
+    whole = sum(v for _, v in totals)
+    if whole <= 0:
+        return fs
+    order = sorted(range(len(totals)), key=lambda k: (-totals[k][1], k))
+    unit = g[0].unit_text
+    labels = [totals[k][0] for k in order]
+    fs.ctx.update(composition=True, parts=labels, whole=_dataset_whole(d), labels=list(labels))
+    for r, k in enumerate(order):
+        nm, v = totals[k]
+        fs.add(f"part_{r}", round_pct(v / whole * 100), "share", f"{nm} — {fmt_pct(v / whole * 100)}%", "%",
+               f"{nm}: {fmt_value(v, unit)} из {fmt_value(whole, unit)}.")
+    fs.add("total", round(whole) if whole >= 100 else round(whole, 1), "total", f"Всего — {fmt_value(whole, unit)}",
+           unit, f"Сумма частей по всем строкам ({', '.join(labels)}).")
+    if cv is not None:
+        lead = cv.labels[0] if cv.ranked else None
+        if lead:
+            caption = [f"Больше всего — {lead}.", f"Всего {fmt_value(whole, unit)}: "
+                       + ", ".join(f"{totals[k][0].lower() if r else totals[k][0]} — {fmt_value(totals[k][1], unit)}"
+                                   for r, k in enumerate(order)) + "."]
+            fs.ctx["caption"] = _short(caption)
+    return fs
+
+
 def _shares(d: Data) -> FactSet:
+    if d.composition and d.cats is not None and len(d.parallel) >= 2:
+        return _composition(d)
     fs = FactSet()
     got = d.shares
     if got is None:
@@ -352,7 +495,7 @@ def _shares(d: Data) -> FactSet:
     total = sum(shares)
     fs.add("total_share", round(total), "total", f"Сумма долей — {fmt_pct(total)}%", "%",
            "Части одного целого: сумма долей ≈ 100%.")
-    fs.ctx["caption"] = ", ".join(f"{lab} — {fmt_pct(v)}%" for lab, v in zip(cv.labels, shares)) + "."
+    fs.ctx["caption"] = _short([", ".join(f"{cv.labels[k]} — {fmt_pct(shares[k])}%" for k in order[:6]) + "."])
     return fs
 
 
@@ -445,7 +588,7 @@ def _distribution(d: Data) -> FactSet:
         t = _nice_ceil(p80) if p80 > 0 else p80
         text, tv, tu = fmt_value(t, unit), t, unit
     within = int((x <= t + 1e-9).sum())
-    share = math.floor(within / n * 100) if n else 0
+    share = round_pct(within / n * 100) if n else 0
     fs.ctx.update(threshold_text=text, predicate=_predicate(m.name) if duration and ent_ok else None)
     fs.add("share_within", share, "percentile", f"{share}% — не больше {fmt_value(t, unit)}", "%",
            f"{within} из {count_words(n, *ent_forms)} — не больше {fmt_value(t, unit)}. {_by(m)}")
@@ -454,6 +597,14 @@ def _distribution(d: Data) -> FactSet:
     fs.add("p80", round(p80, 1) if abs(p80) < 100 else round(p80), "percentile",
            f"80-й перцентиль — {fmt_value(p80, unit)}", unit, f"80% значений не больше этого числа. {_by(m)}")
     caption = [f"Медиана — {med_txt}."]
+    mean = float(np.mean(x))
+    if med > 0 and float(x.min()) >= 0 and mean / med >= 1.25 and not duration:
+        # длительности (время ответа, доставки) — вывод через долю «за N часов», как говорят о сроках;
+        # скошенное распределение: середину честнее показывает медиана, а не среднее
+        fs.add("mean", round(mean, 1) if abs(mean) < 100 else round(mean), "median", f"Среднее — {fmt_value(mean, unit)}",
+               unit, f"Среднее арифметическое; медиана — {fmt_value(med, unit)}: крупные значения тянут среднее вверх.")
+        fs.ctx.update(skewed=True, mean_text=fmt_value(mean, unit))
+        caption = [f"Медиана — {med_txt}, среднее — {fmt_value(mean, unit)}."]
     if dv.outliers:
         fs.add("outliers", len(dv.outliers), "outliers", count_words(len(dv.outliers), "выброс", "выброса", "выбросов"),
                None, f"Значения {', '.join(fmt_num(v) for v in dv.outliers[:5])} — далеко от остальных "
@@ -464,16 +615,16 @@ def _distribution(d: Data) -> FactSet:
         k = len(vals)
         if side == "high":
             thr = _round_down_above(min(vals), float(dv.inliers.max()) if dv.inliers.size else 0)
-            word = "больше"
+            word = "от" if any(abs(v - thr) < 1e-9 for v in vals) else "больше"  # «больше X» — строго больше
         else:
             thr = _round_up_below(max(vals), float(dv.inliers.min()) if dv.inliers.size else 0)
-            word = "меньше"
+            word = "до" if any(abs(v - thr) < 1e-9 for v in vals) else "меньше"
         thr_txt = duration_gen(thr * to_min) if duration else fmt_value(thr, unit)
         fs.add(f"outlier_bound_{side}", thr, "outliers", f"{word} {thr_txt}", unit,
                f"Граница выбросов: {count_words(k, 'значение', 'значения', 'значений')} {word} {thr_txt}.")
         caption.append(f"{upper_first(count_words(k, *ent_forms))} — {word} {thr_txt}: это выбросы, они отмечены "
-                       f"отдельно и не вошли в интервалы.")
-    fs.ctx["caption"] = " ".join(caption)
+                       f"отдельно.")
+    fs.ctx["caption"] = _short(caption)
     return fs
 
 
@@ -538,16 +689,71 @@ def _change_value(ch: float, unit: Optional[str]) -> float:
     return round_pct(abs(ch)) if unit == "%" else round(abs(ch), 1)
 
 
+def _kpi_name(it: KpiItem) -> str:
+    """Название показателя без единицы: «Принято на 1 курс, чел.» → «Принято на 1 курс»."""
+    return split_unit(it.label)[0] or it.label
+
+
+def _kpi_kind(it: KpiItem) -> Optional[str]:
+    """Род величины: единица из подписи («, чел.»), иначе из значения («млрд ₽»); множитель не важен (млн/млрд ₽)."""
+    u = split_unit(it.label)[1] or it.unit
+    if not u:
+        return None
+    return re.sub(r"^(?:тыс\.|млн|млрд|трлн)\s*", "", u.strip())
+
+
+def _scaled(it: KpiItem) -> Optional[float]:
+    q = quantity(it.value_text.replace("\u00a0", " "))
+    return q.full if q is not None else it.value
+
+
+def _related(a: KpiItem, b: KpiItem, items: list[KpiItem]) -> bool:
+    """Величины разного рода сравнимы по темпу, если в той же таблице есть их отношение (средний чек = выручка /
+    клиенты): тогда «выручка растёт быстрее клиентов» — содержательный вывод, а не сравнение людей с деньгами."""
+    va, vb = _scaled(a), _scaled(b)
+    if not va or not vb:
+        return False
+    for c in items:
+        if c is a or c is b:
+            continue
+        vc = _scaled(c)
+        if vc and (abs(va / vb - vc) <= 0.02 * abs(vc) or abs(vb / va - vc) <= 0.02 * abs(vc)):
+            return True
+    return False
+
+
+def _comparable(a: KpiItem, b: KpiItem, items: list[KpiItem]) -> bool:
+    if a.change_unit != b.change_unit:
+        return False
+    ka, kb = _kpi_kind(a), _kpi_kind(b)
+    if ka is not None and ka == kb:
+        return True
+    return _related(a, b, items)
+
+
 def _kpi(d: Data) -> FactSet:
     fs = FactSet()
     kv = d.kpi
     if kv is None or not kv.items:
         return fs
-    a = kv.items[0]
-    pa = phrase(a.label)
-    fs.ctx.update(a_name=a.label, a_gender=pa.gender if pa else "m", a_value_text=a.value_text,
-                  labels=[it.label for it in kv.items])
-    for k, it in enumerate(kv.items):
+    items = kv.items
+    names = [_kpi_name(it) for it in items]
+    with_ch = [k for k, it in enumerate(items) if it.change is not None]
+    # пара для вывода: первый показатель с изменением и следующий того же рода; иначе — самое сильное изменение
+    ia, ib = (with_ch[0] if with_ch else 0), None
+    if with_ch:
+        ib = next((k for k in with_ch[1:] if _comparable(items[ia], items[k], items)), None)
+        if ib is None:
+            pct = [k for k in with_ch if items[k].change_unit == "%"] or with_ch
+            ia = max(pct, key=lambda k: (abs(items[k].change or 0), -k))
+            pairs = [(x, y) for x in with_ch for y in with_ch if x < y and _comparable(items[x], items[y], items)]
+            if pairs:
+                ia, ib = max(pairs, key=lambda xy: (abs(items[xy[0]].change or 0) + abs(items[xy[1]].change or 0), -xy[0]))
+    a = items[ia]
+    pa = phrase(names[ia])
+    fs.ctx.update(a_name=names[ia], a_gender=pa.gender if pa else "m", a_value_text=a.value_text,
+                  a_participle=is_participle(names[ia]), labels=[it.label for it in items] + names)
+    for k, it in enumerate(items):
         fs.add(f"value_{k}", it.value, "total", f"{it.label} — {it.value_text}", it.unit,
                f"{it.label}: {it.value_text}" + (f" ({kv.period})" if kv.period else "") + ".")
     fs.add("kpi_value", a.value, "total", f"{a.label} — {a.value_text}", a.unit, f"{a.label}: {a.value_text}.")
@@ -558,26 +764,31 @@ def _kpi(d: Data) -> FactSet:
                f"{a.label}: {fmt_signed(a.change, a.change_unit or '')}", a.change_unit,
                f"{a.label} — {a.value_text}" + (f", было {a.prev_text}" if a.prev_text else "") +
                f": {fmt_signed(a.change, a.change_unit or '')}{since}.")
-        b = next((it for it in kv.items[1:] if it.change is not None and it.change_unit == a.change_unit), None)
-        if b is not None:
-            pb = phrase(b.label)
+        if ib is not None:
+            b = items[ib]
+            pb = phrase(names[ib])
             if pb is not None and pb.sure:
-                b_gen = f"числа {pb.low.gen_pl}" if pb.gender == "pl" and b.label.lower() not in _MASS_PL else pb.low.gen
+                b_gen = f"числа {pb.low.gen_pl}" if pb.gender == "pl" and names[ib].lower() not in _MASS_PL else pb.low.gen
             else:
-                b_gen = b.label if pb is not None else None
-            fs.ctx.update(b_name=b.label, b_gender=pb.gender if pb else "m", b_gen=b_gen, b_signed=b.change,
-                          b_unit=b.change_unit)
+                b_gen = names[ib] if pb is not None else None
+            fs.ctx.update(b_name=names[ib], b_gender=pb.gender if pb else "m", b_gen=b_gen, b_signed=b.change,
+                          b_unit=b.change_unit, b_participle=is_participle(names[ib]))
             fs.add("kpi_b", _change_value(b.change, b.change_unit), "change",
                    f"{b.label}: {fmt_signed(b.change, b.change_unit or '')}", b.change_unit,
                    f"{b.label} — {b.value_text}" + (f", было {b.prev_text}" if b.prev_text else "") +
                    f": {fmt_signed(b.change, b.change_unit or '')}{since}.")
+    shown = [ia] + ([ib] if ib is not None else [])
     parts = []
-    for it in kv.items:
-        s = f"{lower_first(it.label) if parts else it.label} — {it.value_text}"
+    for k in shown:
+        it = items[k]
+        s_ = f"{lower_first(names[k]) if parts else names[k]} — {it.value_text}"
         if it.change is not None:
-            s += f" ({fmt_signed(it.change, it.change_unit or '')})"
-        parts.append(s)
-    fs.ctx["caption"] = ", ".join(parts) + "." + (f" Сравнение с {kv.prev_period}." if kv.prev_period else "")
+            s_ += f" ({fmt_signed(it.change, it.change_unit or '')})"
+        parts.append(s_)
+    cap = [", ".join(parts) + "."]
+    if kv.prev_period:
+        cap.append(f"Сравнение с {kv.prev_period}.")
+    fs.ctx["caption"] = _short(cap)
     return fs
 
 
@@ -587,7 +798,17 @@ def _relationship(d: Data) -> FactSet:
     xy = d.xy
     if xy is None:
         return fs
-    fs.ctx.update(x=xy.x.name, y=xy.y.name, r_signed=round(xy.r, 2))
+    xp, yp = phrase(xy.x.name), metric_phrase(xy.y.name, xy.y.type)
+    fs.ctx.update(x=re.sub(r"\s*[,(].*$", "", xy.x.name), y=re.sub(r"\s*[,(].*$", "", xy.y.name),
+                  r_signed=round(xy.r, 2), labels=[xy.x.name, xy.y.name])
+    if abs(xy.r) >= 0.5 and xy.slope:
+        b = xy.slope
+        bv = round(b, 1) if abs(b) >= 0.95 else round(b, 2)
+        fs.add("slope", abs(bv), "change", f"{fmt_signed(bv)} на единицу «{xy.x.name}»", xy.y.unit_text,
+               f"Наклон прямой: {xy.y.name} ≈ {fmt_num(xy.intercept, 1)} {'+' if b >= 0 else '−'} "
+               f"{fmt_num(abs(bv), 2)} × {xy.x.name}.")
+        fs.ctx.update(slope=bv, each=each_unit(xy.x.unit_text), x_gen=xp.low.gen if xp is not None and xp.sure else None,
+                      y_dat=yp.low.dat if yp is not None and yp.sure else None)
     fs.add("r", round(abs(xy.r), 2), "count", f"r = {fmt_num(xy.r, 2)}", None,
            f"Коэффициент корреляции Пирсона по {count_words(xy.n, 'паре', 'парам', 'парам')} значений «{xy.x.name}» и "
            f"«{xy.y.name}».")

@@ -17,7 +17,9 @@ from typing import Optional
 
 from verstka.data.aggregate import MAX_CATS, MAX_SLIDES, TABLE_ROWS, Data, describe_dropped
 from verstka.data.goals import Goal
-from verstka.data.words import PERIOD_WORDS, count_words, fmt_num, fmt_pct, metric_phrase, phrase, upper_first
+from verstka.data.words import (
+    PERIOD_WORDS, count_words, fmt_num, fmt_pct, metric_phrase, phrase, upper_first, verb_agree,
+)
 from verstka.schemas.data import TaskKind, VizKind, VizOption
 
 __all__ = ["rank_options", "candidates", "find_candidate", "GOAL_VIZ_BONUS"]
@@ -36,6 +38,7 @@ class _Cand:
     aggregation: Optional[str] = None
     feasible: bool = True
     key: str = ""  # различает два варианта одного вида (таблица топ-10 и таблица по слайдам)
+    dim: Optional[int] = None  # колонка категорий варианта (уровень иерархии: институты или кафедры)
 
     def option(self) -> VizOption:
         return VizOption(kind=self.kind, score=round(self.score, 3), title=self.title, reasons=list(self.reasons),
@@ -57,6 +60,7 @@ def _dynamics(d: Data) -> list[_Cand]:
         return []
     P = tv.points
     S = len(tv.series)
+    Pv = sum(1 for v in tv.main.values if v is not None)  # точки со значением (пропуск — не точка)
     gaps = bool(tv.missing) or tv.gaps
     pw = PERIOD_WORDS.get(tv.freq, PERIOD_WORDS["irregular"])
     axis = "Дата" if tv.column_type == "date" else (tv.column if 0 < len(tv.column) <= 16 else "Период")
@@ -70,7 +74,7 @@ def _dynamics(d: Data) -> list[_Cand]:
         line.score, line.feasible = 0.2, False
         line.why_not = f"{upper_first(_points(P))} — для линии мало, тренда ещё нет."
     else:
-        line.reasons.append(f"{axis} и {metrics}, {_points(P)} — тренд виден сразу.")
+        line.reasons.append(f"{axis} и {metrics}, {_points(Pv)} — тренд виден сразу.")
         if gaps:
             line.reasons.append("Пропуски — разрывы линии, а не падение до нуля.")
         line.why_not = "Тоже читается, но отдельные периоды сравнивать труднее." if P < 8 else \
@@ -79,7 +83,8 @@ def _dynamics(d: Data) -> list[_Cand]:
     # столбцы
     col = _Cand("column", 0.0, title="Столбцы с пустыми местами" if gaps else "Столбцы", aggregation=agg)
     if S > 1:
-        col.kind = "stacked_column" if tv.measure.additive and tv.dim else "grouped_column"
+        parts = (tv.measure.additive and tv.dim) or d.composition
+        col.kind = "stacked_column" if parts else "grouped_column"
         col.title = "Накопительные столбцы" if col.kind == "stacked_column" else "Сгруппированные столбцы"
     if P > 36:
         col.score, col.feasible = 0.05, False
@@ -140,9 +145,8 @@ def _comparison(d: Data) -> list[_Cand]:
     cats = count_words(C, "категория", "категории", "категорий")
     out: list[_Cand] = []
     agg = cv.note
-    same = [x for x in cv.extra_measures if not x.change and m is not None and (x.unit or "") == (m.unit or "")
-            and x.type == m.type]
-    grouped = bool(same) and len(same) <= 3
+    same = [x for x in d.parallel if x is not m]
+    grouped = bool(same)
     # ранжированные полосы
     bar = _Cand("bar", 0.7 + (0.15 if long_ else 0.0) + (0.1 if C > 7 else 0.0),
                 title="Ранжированные горизонтальные столбцы" if cv.ranked else "Горизонтальные столбцы", aggregation=agg)
@@ -154,7 +158,7 @@ def _comparison(d: Data) -> list[_Cand]:
     out.append(bar)
     # вертикальные столбцы
     col = _Cand("column", 0.8, title="Вертикальные столбцы", aggregation=agg)
-    if long_ and C >= 6:
+    if long_ and (C >= 6 or max(len(x) for x in cv.labels) > 20):
         col.score -= 0.35
         col.why_not = f"{names_of} не помещаются под столбцами."
     elif C > 7:
@@ -174,6 +178,28 @@ def _comparison(d: Data) -> list[_Cand]:
                          reasons=[f"{upper_first(count_words(k, 'метрика', 'метрики', 'метрик'))} в одних единицах для "
                                   f"{count_words(C, 'категории', 'категорий', 'категорий')} — сравнение рядом."],
                          why_not="Метрики рядом, но столбцов вдвое больше."))
+    # уровень иерархии: сравнение по родителю (сумма по детям) и детали — отдельным вариантом
+    child = d.label
+    if child is not None and cv.dim != d.cols[child].name and d.parent_of(child) is not None:
+        cp, pp = phrase(d.cols[child].name), phrase(cv.dim)
+        by_child = f"по {cp.low.dat_pl}" if cp is not None and cp.sure else "по строкам"
+        by_parent = f"по {pp.low.dat_pl}" if pp is not None and pp.sure else "по группам"
+        bar.title = f"Ранжированные горизонтальные столбцы {by_parent}"
+        bar.reasons.insert(0, f"Иерархия «{d.cols[child].name} → {cv.dim}»: {by_parent} — сумма {by_child}.")
+        kc = d.cat_view(m, dim=child)
+        nchild = kc.distinct if kc is not None else d.n
+        out.append(_Cand("bar", 0.6, title=f"Столбцы {by_child}" + (", топ-11" if nchild > 12 else ""), dim=child,
+                         key="child", aggregation=kc.note if kc is not None else None,
+                         reasons=[f"Детальнее: {count_words(nchild, 'строка', 'строки', 'строк')} {by_child}."],
+                         why_not=f"Детальнее, но {count_words(nchild, 'длинное название', 'длинных названия', 'длинных названий')}"
+                                 f" — вклад {pp.low.gen_pl if pp is not None and pp.sure else 'групп'} не виден."))
+        pages = -(-d.n // TABLE_ROWS)
+        out.append(_Cand("table", 0.5, title=f"Таблица «{cv.dim} → {d.cols[child].name}»", key="table_tree",
+                         feasible=pages <= MAX_SLIDES,
+                         aggregation=f"{count_words(pages, 'слайд', 'слайда', 'слайдов')} по {TABLE_ROWS} строк, итог внизу",
+                         reasons=["Все строки с группой и итогом."],
+                         why_not=f"{upper_first(_rows(d.n))} — на слайд не помещаются, нужно "
+                                 f"{count_words(pages, 'слайд', 'слайда', 'слайдов')}."))
     # круговая — только для сумм (части целого)
     shares = cv.shares
     if m is None or m.additive:
@@ -202,7 +228,39 @@ def _comparison(d: Data) -> list[_Cand]:
 
 
 # ── доли ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+def _composition(d: Data) -> list[_Cand]:
+    """Части одного целого по категориям (формы обучения по направлениям): накопительные столбцы, сгруппированные,
+    кольцо по частям в целом."""
+    cv = d.cats
+    g = d.parallel
+    if cv is None or len(g) < 2:
+        return []
+    C, k = cv.n, len(g)
+    dp = phrase(cv.dim)
+    cats_word = count_words(C, dp.low.nom, dp.low.gen, dp.low.gen_pl) if dp is not None and dp.sure else \
+        count_words(C, "категория", "категории", "категорий")
+    long_ = cv.long_labels or C > 7
+    out = [
+        _Cand("stacked_bar" if long_ else "stacked_column", 0.9,
+              title="Накопительные горизонтальные столбцы" if long_ else "Накопительные столбцы",
+              reasons=[f"{upper_first(cats_word)} и {count_words(k, 'часть', 'части', 'частей')}: видны и размер, и "
+                       f"состав" + (", подписи слева." if long_ else ".")],
+              why_not="Видны размер и состав, но части разных категорий сравнивать труднее."),
+        _Cand("grouped_bar" if long_ else "grouped_column", 0.55,
+              title="Сгруппированные горизонтальные столбцы" if long_ else "Сгруппированные столбцы",
+              reasons=["Части рядом — сравнивать их внутри категории легко."],
+              why_not=f"{upper_first(count_words(C * k, 'столбец', 'столбца', 'столбцов'))}: состав сравнить легко, а "
+                      f"общий размер — нет."),
+        _Cand("doughnut", 0.5, title="Кольцевая диаграмма по частям в целом", key="parts_total",
+              reasons=[f"{upper_first(count_words(k, 'часть', 'части', 'частей'))} целого — сразу видно, какая больше."],
+              why_not=f"Читается, но {dp.low.nom_pl if dp is not None and dp.sure else 'категории'} потеряны."),
+    ]
+    return out
+
+
 def _shares(d: Data) -> list[_Cand]:
+    if d.composition and d.cats is not None and len(d.parallel) >= 2:
+        return _composition(d)
     got = d.shares
     if got is None:
         return []
@@ -322,13 +380,18 @@ def _reference(d: Data) -> list[_Cand]:
                              f"не имеют.")
         if rv.dropped:
             t.reasons.append(f"На слайде {count_words(len(rv.columns), 'колонка', 'колонки', 'колонок')}: "
-                             f"{describe_dropped(rv.dropped)} не вошли" + (", доля посчитана." if rv.share_added else "."))
+                             f"{describe_dropped(rv.dropped)} "
+                             f"{verb_agree(rv.dropped, ('не вошёл', 'не вошла', 'не вошло', 'не вошли'))}"
+                             + (", доля посчитана." if rv.share_added else "."))
         t.why_not = "Цифры и подписи есть, но первых видно хуже, чем на столбцах."
         out.append(t)
-        lost = describe_dropped([c.split(",")[0] for c in rv.columns[1:] if not c.startswith(("Доля", m.name))])
+        lost_names = [c.split(",")[0] for c in rv.columns[1:] if not c.startswith(("Доля", m.name))]
+        lost = describe_dropped(lost_names)
+        verb_lost = "теряется" if len(lost_names) == 1 else "теряются"
         out.append(_Cand("bar", 0.5, title=f"Столбцы топ-{rv.top_n}", key="ref_bar", aggregation=f"топ-{rv.top_n}",
                          reasons=["Видно лидеров и разрыв между ними."],
-                         why_not=f"Видно лидеров, но теряются {lost or 'остальные колонки'}."))
+                         why_not=f"Видно лидеров, но {verb_lost} {lost}." if lost else
+                         "Видно лидеров, но теряются остальные колонки."))
     else:
         feasible = pages <= MAX_SLIDES
         out.append(_Cand("table", 0.8 if feasible else 0.5, title="Таблица по слайдам" if feasible else
@@ -402,13 +465,19 @@ def _kpi(d: Data) -> list[_Cand]:
         c.reasons.append(f"{upper_first(nums)} — каждое крупно, со своей подписью.")
     c.why_not = "Числа крупно, но без сравнения."
     out.append(c)
-    out.append(_Cand("table", 0.4, title="Таблица", key="table", reasons=["Все значения и изменения в одном месте."],
+    out.append(_Cand("table", 0.5, title="Таблица", key="table", reasons=["Все значения и изменения в одном месте."],
                      why_not="Читается, но главные числа теряются в строках."))
-    col = _Cand("column", 0.5, title="Столбцы", reasons=["Сравнение по высоте."],
+    col = _Cand("column", 0.4, title="Столбцы", reasons=["Сравнение по высоте."],
                 why_not="Сравнение по высоте, но карточки показывают сами числа крупнее.")
+    vals = [abs(it.value) for it in kv.items if it.value]
+    spread = (max(vals) / min(vals)) if vals and min(vals) > 0 else 1.0
     if kv.mixed_units:
         col.score, col.feasible = 0.05, False
         col.why_not = "Разные единицы — сравнивать нельзя."
+    elif spread > 10:
+        col.score, col.feasible = 0.05, False
+        col.why_not = (f"Масштабы разные (от {fmt_num(min(vals))} до {fmt_num(max(vals))}) — на одной оси мелкие "
+                       f"значения пропадут.")
     elif k < 2:
         col.score, col.feasible = 0.05, False
         col.why_not = "Одно число — сравнивать не с чем."
@@ -421,9 +490,18 @@ def _relationship(d: Data) -> list[_Cand]:
     xy = d.xy
     if xy is None:
         return []
-    out = [_Cand("scatter", 0.9 if xy.n >= 8 else 0.2, title="Диаграмма рассеяния", feasible=xy.n >= 8,
-                 reasons=[f"Две метрики, {_points(xy.n)} — видно, есть ли связь (r = {fmt_num(xy.r, 2)})."],
-                 why_not="Связь видна, но значения каждой строки — нет.")]
+    sc = _Cand("scatter", 0.9 if xy.n >= 8 else 0.2, title="Диаграмма рассеяния", feasible=xy.n >= 8,
+               reasons=[f"Две метрики, {_points(xy.n)} — видно, есть ли связь (r = {fmt_num(xy.r, 2)})."],
+               why_not="Связь видна, но значения каждой строки — нет.")
+    if xy.group:
+        sc.reasons.append(f"Точки окрашены по колонке «{xy.group}».")
+    out = [sc]
+    if xy.n >= 30:
+        yp = metric_phrase(xy.y.name, xy.y.type)
+        out.append(_Cand("column", 0.4, title=f"Столбцы: {yp.low.nom if yp else xy.y.name} по группам «{xy.x.name}»",
+                         key="xy_bins", aggregation=f"среднее по трём группам «{xy.x.name}»",
+                         reasons=["Читается быстрее: три группы и среднее в каждой."],
+                         why_not="Читается быстрее, но прячет разброс и теряет связь как линию."))
     if d.label is not None and xy.n <= MAX_CATS:
         out.append(_Cand("grouped_bar", 0.4, title="Сгруппированные полосы",
                          reasons=["Обе метрики по каждой строке."],
@@ -482,10 +560,15 @@ def rank_options(task: TaskKind, d: Data, goals: Optional[list[Goal]] = None,
     cands = candidates(task, d)
     bonus: dict[VizKind, float] = {}
     goal_for: dict[VizKind, Goal] = {}
+    family = {"doughnut": ("doughnut", "pie", "stacked_bar", "stacked_column"), "bar": ("bar", "column")}
     for g in goals:
-        if g.viz not in bonus:
-            bonus[g.viz] = GOAL_VIZ_BONUS
-            goal_for[g.viz] = g
+        # цель поднимает лучший вариант своего рода: «как устроен …» — накопительные столбцы, если данные — состав
+        kinds = family.get(g.viz, (g.viz,))
+        own = [c for c in cands if c.kind in kinds and c.feasible]
+        kind = max(own, key=lambda c: c.score).kind if own else g.viz
+        if kind not in bonus:
+            bonus[kind] = GOAL_VIZ_BONUS
+            goal_for[kind] = g
     plain = _order(cands, {})
     ranked = _order(cands, bonus)
     for c in ranked:

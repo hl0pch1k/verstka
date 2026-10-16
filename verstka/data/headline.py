@@ -15,7 +15,7 @@ from typing import Optional, Sequence
 from verstka.data.facts import FactSet
 from verstka.data.words import (
     PERIOD_WORDS, WORD_NUMS, Gender, Phrase, count_words, fmt_num, fmt_pct, fmt_signed, fmt_value, fraction_words,
-    is_plural_value, lower_first, number_word, plural, times_word, upper_first, verb,
+    is_plural_value, lower_first, number_word, phrase, plural, times_word, upper_first, verb,
 )
 from verstka.schemas.data import HeadlineFact, TaskKind
 
@@ -73,12 +73,28 @@ def headline_ok(text: str, facts: Sequence[HeadlineFact], labels: Sequence[str] 
 
 
 def _labels(fs: FactSet) -> list[str]:
+    """Подписи и названия, которые шаблон сам ставит в заголовок: их цифры («Филиал 1», «Бюджет 2026») — не вывод."""
     c = fs.ctx
     out = list(c.get("labels") or [])
-    for k in ("leader", "last_label", "growth_leader", "a_name", "b_name"):
+    for k in ("leader", "last_label", "growth_leader", "a_name", "b_name", "subject", "x", "y"):
         if c.get(k):
             out.append(c[k])
+    out += list(c.get("names") or []) + list(c.get("parts") or [])
+    for k in ("metric", "whole"):
+        p = c.get(k)
+        if isinstance(p, Phrase):
+            for form in (p.nom, p.gen, p.dat, p.gen_pl, p.dat_pl, p.nom_pl):
+                out += [form, lower_first(form)]
     return out
+
+
+def _strongest(fs: FactSet) -> Optional[str]:
+    """Запасной вывод, если шаблон не сложился: текст самого содержательного факта (доля, изменение, лидер)."""
+    for kind in ("share", "change", "leader", "percentile", "median", "max"):
+        f = next((x for x in fs.facts if x.kind == kind and x.text), None)
+        if f is not None:
+            return f.text
+    return None
 
 
 # ── шаблоны заголовка ─────────────────────────────────────────────────────────────────────────────────────────────────
@@ -90,10 +106,15 @@ def compose(task: TaskKind, fs: FactSet) -> tuple[str, Optional[str]]:
         "reference": _reference, "kpi": _kpi, "relationship": _relationship,
     }[task]
     head, caption = fn(fs)
-    head = head.strip().rstrip(".")
-    head = upper_first(head)
-    if not headline_ok(head, fs.facts, _labels(fs)):  # страховка: число не из фактов — заголовок-описание
-        head = fs.ctx.get("plain") or head
+    head = upper_first(head.strip().rstrip("."))
+    labels = _labels(fs)
+    if not headline_ok(head, fs.facts, labels) or head == fs.ctx.get("plain"):
+        # страховка: число не из фактов или вышла тема — вывод из самого сильного факта, и только потом тема
+        alt = _strongest(fs)
+        if alt and headline_ok(alt, fs.facts, labels):
+            head = upper_first(alt)
+        elif not headline_ok(head, fs.facts, labels):
+            head = fs.ctx.get("plain") or head
     return head, caption
 
 
@@ -103,17 +124,17 @@ def _f(fs: FactSet, fid: str) -> Optional[HeadlineFact]:
 
 def _dynamics(fs: FactSet) -> tuple[str, Optional[str]]:
     c = fs.ctx
+    if c.get("multi"):
+        return _dynamics_multi(fs)
     m: Phrase = c["metric"]
     subj = c["subject"]  # «Выручка», «NPS», «Число клиентов»
     g: Gender = c["gender"]
     gap = _f(fs, "gaps")
     gap_txt = ""
-    if gap is not None:
+    if gap is not None and int(gap.value) >= 2:  # один пропуск — в подписи, не в заголовке
         k = int(gap.value)
         pw = PERIOD_WORDS.get(c["freq"], PERIOD_WORDS["irregular"])
-        if k == 1 and c.get("gap_label"):
-            gap_txt = f", за {c['gap_label']} данных нет"
-        elif k <= 4:
+        if k <= 4:
             gap_txt = f", за {number_word(k, pw[3])} {plural(k, pw[0], pw[1], pw[2])} данных нет"
         else:
             gap_txt = f", за {count_words(k, pw[0], pw[1], pw[2])} данных нет"
@@ -151,6 +172,38 @@ def _dynamics(fs: FactSet) -> tuple[str, Optional[str]]:
     return " ".join(head.split()) + gap_txt, c.get("caption")
 
 
+def _move(kind: str, v: float, unit: Optional[str]) -> tuple[bool, str]:
+    """(рост ли, «в 9,1 раза» / «на 16%» / «на 33 млн ₽»)."""
+    if kind == "ratio":
+        r = v if v >= 1 else 1 / v
+        return v >= 1, f"в {fmt_num(round(r, 1), 1)} {times_word(round(r, 1))}"
+    if kind == "pct":
+        return v >= 0, f"на {fmt_pct(abs(v))}%"
+    return v >= 0, f"на {fmt_value(abs(v), unit)}"
+
+
+def _dynamics_multi(fs: FactSet) -> tuple[str, Optional[str]]:
+    """«Scopus вырос в 9,1 раза за 20 лет, РИНЦ — в 3,4 раза»."""
+    c = fs.ctx
+    names = c["names"]
+    unit = c.get("unit_short")
+    parts = []
+    up0 = None
+    for k, name in enumerate(names[:2]):
+        kind, v = c[f"s{k}"]
+        up, how = _move(kind, v, unit)
+        p = phrase(name)
+        g: Gender = p.gender if p is not None else "m"
+        if k == 0:
+            up0 = up
+            parts.append(f"{name} {verb('grow' if up else 'fall', g)} {how} {c.get('when', '')}".strip())
+        elif up == up0:
+            parts.append(f"{name} — {how}")
+        else:
+            parts.append(f"а {name} {verb('grow' if up else 'fall', g)} {how}")
+    return ", ".join(parts), c.get("caption")
+
+
 def _comparison(fs: FactSet) -> tuple[str, Optional[str]]:
     c = fs.ctx
     leader = c["leader"]
@@ -160,6 +213,9 @@ def _comparison(fs: FactSet) -> tuple[str, Optional[str]]:
     m: Optional[Phrase] = c.get("metric")
     if share is not None and m is not None:
         head = f"{leader} {verb('give', pl, past=False)} {fmt_pct(share.value)}% {m.low.gen}"
+        lv, total = _f(fs, "leader_value"), _f(fs, "total")
+        if not grow_leader and lv is not None and total is not None:
+            head += f": {fmt_num(lv.value)} из {fmt_value(total.value, c.get('unit_short'))}"
     elif _f(fs, "leader_value") is not None:
         lv = _f(fs, "leader_value")
         head = f"{leader} впереди: {fmt_value(lv.value, c.get('unit_short'))}"
@@ -183,6 +239,14 @@ def _comparison(fs: FactSet) -> tuple[str, Optional[str]]:
 
 def _shares(fs: FactSet) -> tuple[str, Optional[str]]:
     c = fs.ctx
+    if c.get("composition"):
+        p0, p1 = _f(fs, "part_0"), _f(fs, "part_1")
+        parts = c.get("parts") or []
+        whole: Optional[Phrase] = c.get("whole")
+        if p0 is None or len(parts) < 2 or p1 is None:
+            return c.get("plain", ""), c.get("caption")
+        w = f" {whole.low.gen}" if whole is not None else ""
+        return f"{parts[0]} — {fmt_pct(p0.value)}%{w}, {lower_first(parts[1])} — {fmt_pct(p1.value)}%", c.get("caption")
     leader = c["leader"]
     pl = "pl" if is_plural_value(leader) else "m"
     share = _f(fs, "leader_share")
@@ -210,6 +274,11 @@ def _distribution(fs: FactSet) -> tuple[str, Optional[str]]:
         who = f"{'Все' if c['constant'] == 'all' else 'Почти все'} {lower_first(nom) if nom else 'значения'}"
         return f"{who} — {c['median_text']}", c.get("caption")
     share = _f(fs, "share_within")
+    if c.get("skewed") and c.get("median_text"):
+        # скошенные данные: вывод — медиана, среднее завышают крупные значения
+        who = f"Половина {ent}" if ent else "Половина значений"
+        return f"{who} — до {c['median_text']}, а крупные значения поднимают среднее до {c['mean_text']}", \
+            c.get("caption")
     if share is None:
         return (f"Медиана — {c['median_text']}" if c.get("median_text") else c.get("plain", "")), c.get("caption")
     p = share.value
@@ -265,6 +334,9 @@ def _kpi(fs: FactSet) -> tuple[str, Optional[str]]:
         b_gen = c.get("b_gen")
         sa = fmt_signed(c["a_signed"], c.get("a_unit") or "")
         sb = fmt_signed(c["b_signed"], c.get("b_unit") or "")
+        if c.get("a_participle") or c.get("b_participle"):
+            # «Принято на 1 курс: +6%, отчислено студентов: −8%» — с причастием не говорят «принято выросло»
+            return f"{a_name}: {sa}, {lower_first(c.get('b_name', ''))}: {sb}", c.get("caption")
         if c["a_signed"] > 0 and c["b_signed"] > 0 and b_gen:
             cmp_word = "быстрее" if c["a_signed"] > c["b_signed"] else "медленнее" if c["a_signed"] < c["b_signed"] else None
             if cmp_word:
@@ -274,6 +346,8 @@ def _kpi(fs: FactSet) -> tuple[str, Optional[str]]:
             return (f"{a_name} {verb('grow', ga, past=False)}, а {lower_first(c.get('b_name', ''))} "
                     f"{verb('fall', gb, past=False)}: {sa} и {sb}"), c.get("caption")
         return f"{a_name}: {sa}, {lower_first(c.get('b_name', ''))}: {sb}", c.get("caption")
+    if a is not None and c.get("a_participle"):
+        return f"{a_name}: {fmt_signed(c['a_signed'], c.get('a_unit') or '')}", c.get("caption")
     if a is not None:
         ga = c.get("a_gender", "m")
         v = verb("grow" if c["a_signed"] > 0 else "fall", ga)
@@ -297,5 +371,16 @@ def _relationship(fs: FactSet) -> tuple[str, Optional[str]]:
         return f"{upper_first(x)} и {lower_first(y)} почти не связаны: r = {rt}", c.get("caption")
     more = "выше"
     other = "выше" if rv > 0 else "ниже"
+    slope = c.get("slope")
+    if slope is not None and _f(fs, "slope") is not None:
+        yu = _f(fs, "slope").unit
+        b = fmt_signed(slope) + (f"\u00a0{yu}" if yu and yu != "%" else "%" if yu == "%" else "")
+        if c.get("each") and c.get("x_gen") and c.get("y_dat"):
+            # «Каждый час подготовки в неделю — около +1,9 к среднему баллу ЕГЭ»
+            each, per = c["each"]
+            return f"{upper_first(each)} {c['x_gen']}{' ' + per if per else ''} — около {b} к {c['y_dat']}", \
+                c.get("caption")
+        return f"Чем {more} {lower_first(x)}, тем {other} {lower_first(y)}: около {b} на единицу, r = {rt}", \
+            c.get("caption")
     strength = "" if abs(rv) >= 0.7 else ", но связь умеренная"
     return f"Чем {more} {lower_first(x)}, тем {other} {lower_first(y)}{strength}: r = {rt}", c.get("caption")

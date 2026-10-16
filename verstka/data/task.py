@@ -60,6 +60,8 @@ def task_scores(d: Data) -> dict[TaskKind, float]:
     # структура долей
     if d.parts_measure is not None:
         s["shares"] = 0.92
+    elif d.composition and cats is not None and not has_time:
+        s["shares"] = 0.88  # несколько частей одного целого по категориям (формы обучения по направлениям)
     elif p.parts_of_whole and m is not None and m.additive and m.nonneg and cats is not None and cat_count <= 12:
         s["shares"] = 0.9  # части целого: строка «Итого» равна сумме
     elif m is not None and m.additive and m.nonneg and cats is not None and 2 <= cat_count <= 60 and not has_time \
@@ -90,14 +92,19 @@ def task_scores(d: Data) -> dict[TaskKind, float]:
         s["distribution"] = 0.88 if only else 0.35
 
     # взаимосвязь
-    if d.xy is not None and not has_time and d.xy.n >= 8:
-        s["relationship"] = round(0.4 + 0.3 * min(1.0, abs(d.xy.r)), 3)
+    strong = False
+    if d.xy is not None and not has_time and d.xy.n >= 8 and not d.parallel:
+        r = min(1.0, abs(d.xy.r))
+        strong = r >= 0.5
+        # сильная связь двух разных величин — главное в данных; слабая — запасной путь
+        s["relationship"] = round(0.4 + (0.5 if strong else 0.3) * r, 3)
         if cats is not None and d.label is not None:
             s["relationship"] -= 0.05
 
     # справочник
     if n > 30 and len(d.cols) >= 4:
-        s["reference"] = 0.8
+        # строки с кодом вместо имени и сильная связь двух величин — это взаимосвязь, а не список
+        s["reference"] = 0.6 if strong and d.label is None else 0.8
     elif d.id_col is not None and n > 1:
         s["reference"] = 0.7  # §2.3: id-колонка — справочник (список строк с кодами)
     elif d.label is not None and n > 12:
@@ -132,7 +139,7 @@ def _why(task: TaskKind, d: Data) -> str:
         tv = d.time
         pw = PERIOD_WORDS.get(tv.freq, PERIOD_WORDS["irregular"])
         k = len(tv.series)
-        metrics = "одна главная метрика" if k <= 1 or tv.dim else f"{count_words(k, 'метрика', 'метрики', 'метрик')}"
+        metrics = "одна главная метрика" if k <= 1 or tv.dim else f"{count_words(k, 'ряд', 'ряда', 'рядов')}"
         miss = tv.missing
         if miss:
             gap = len(miss)
@@ -150,13 +157,21 @@ def _why(task: TaskKind, d: Data) -> str:
         dp = phrase(cv.dim)
         what = count_words(cv.distinct, dp.low.nom, dp.low.gen, dp.low.gen_pl) if dp is not None and dp.sure else \
             count_words(cv.distinct, "категория", "категории", "категорий")
-        grow = any(x.change for x in cv.extra_measures)
+        grow = any(x.change and (x.type == "percent" or (x.unit or "") in ("%", "п.п.")) for x in cv.extra_measures)
         tail = "важно, кто больше и кто растёт быстрее" if grow else "важно, кто больше и насколько"
         metric = "одна главная метрика" if m is not None else "число строк в каждой"
         s = f"{upper_first(what)} и {metric} — {tail}."
         if cv.others:
             s += f" Крупнейшие {cv.n - 1} — отдельно, остальные {cv.others} — одной строкой."
         return s
+    if task == "shares" and d.composition and d.cats is not None and len(d.parallel) >= 2:
+        cv = d.cats
+        dp = phrase(cv.dim)
+        what = count_words(cv.n, dp.low.nom, dp.low.gen, dp.low.gen_pl) if dp is not None and dp.sure else \
+            count_words(cv.n, "категория", "категории", "категорий")
+        parts = [d.series_names.get(x.name, x.name) for x in d.parallel]
+        return (f"{upper_first(what)} и {count_words(len(parts), 'часть', 'части', 'частей')} "
+                f"({', '.join(parts)}) — важно, из чего складывается каждое и целое.")
     if task == "shares":
         cv = d.cat_view(d.parts_measure) if d.parts_measure is not None else d.cats
         if cv is not None:
@@ -221,7 +236,7 @@ def decide_task(d: Data, goals: Optional[list[Goal]] = None) -> TaskDecision:
     if used is not None and used.task == task:
         goal_phrase = used.phrase
         if data_task != task:
-            reasons.append(f"Цель «{used.phrase}» подняла эту задачу: по одним данным была бы "
+            reasons.append(f"Цель «{used.phrase}» подняла эту задачу: без неё по данным задача была бы "
                            f"«{TASK_TITLES[data_task].lower()}».")
         else:
             reasons.append(f"Цель «{used.phrase}» совпала с тем, что видно по данным.")

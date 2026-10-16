@@ -14,6 +14,7 @@ from __future__ import annotations
 import math
 from typing import Optional, Sequence, Union
 
+import numpy as np
 from pydantic import BaseModel
 
 from verstka.data.aggregate import MAX_SLIDES, TABLE_ROWS, CatView, Data, KpiItem
@@ -23,7 +24,7 @@ from verstka.data.headline import compose
 from verstka.data.profile import profile_table
 from verstka.data.task import FEASIBLE, decide_task, task_scores
 from verstka.data.viz import find_candidate, rank_options
-from verstka.data.words import count_words, file_title, fmt_num, fmt_signed, fmt_value, phrase
+from verstka.data.words import count_words, file_title, fmt_exact, fmt_num, fmt_signed, fmt_value, phrase
 from verstka.schemas.data import NATURE_LABELS, DatasetPlan, DatasetProfile, SlideData, Table, TaskDecision, VizOption
 from verstka.schemas.outline import ChartSpec, InlineSeries, NumberCallout, TableData, XYSeries
 
@@ -106,13 +107,24 @@ def plan_dataset(profile: DatasetProfile, table: Table, goals: Optional[Sequence
     return plan
 
 
+def _file_match(g: Goal, d: Data) -> bool:
+    """Цель называет датасет по имени файла («на что ушёл бюджет НИОКР» → «Бюджет НИОКР.csv»)."""
+    return bool(g.subject) and goal_match(g, d.profile.model_copy(update={"columns": []})) >= 1.0
+
+
 def assign_goals(goals: Sequence[Goal], datas: Sequence[Data]) -> list[list[Goal]]:
-    """Цель — тем датасетам, о которых она больше всего говорит и где её задача осуществима: совпадение предмета
-    (файл, колонки, значения) плюс половина балла задачи по данным. Цель без предмета — лучшему по задаче."""
+    """Цель — каждому датасету, который она называет по имени файла и где её задача осуществима; если по имени не
+    назван ни один — тем, о которых она больше всего говорит (совпадение предмета с файлом, колонками и значениями плюс
+    половина балла задачи по данным). Цель без предмета — лучшему по задаче."""
     out: list[list[Goal]] = [[] for _ in datas]
     scores = [task_scores(d) for d in datas]
     values = [_values_for_match(d) for d in datas]
     for g in goals:
+        named = [k for k, d in enumerate(datas) if scores[k].get(g.task, 0.0) >= FEASIBLE and _file_match(g, d)]
+        if named:
+            for k in named:
+                out[k].append(g)
+            continue
         best, who = 0.0, []
         for k, d in enumerate(datas):
             s = scores[k].get(g.task, 0.0)
@@ -194,7 +206,15 @@ def _col_title(name: str, unit: Optional[str]) -> str:
 
 
 def _cell(v: Optional[float]) -> str:
-    return "—" if v is None else fmt_num(v)
+    """Значение в таблице — как в файле (142,6, а не 143)."""
+    return fmt_exact(v)
+
+
+def _pages_ok(rows: list[list[str]], part: int) -> Optional[NotBuilt]:
+    pages = max(1, -(-len(rows) // TABLE_ROWS))
+    if part > pages:
+        return NotBuilt(reason=f"Слайда {part} нет: таблица занимает {count_words(pages, 'слайд', 'слайда', 'слайдов')}.")
+    return None
 
 
 def chart_spec_of(plan: DatasetPlan, table: Table, option: Optional[int] = None,
@@ -211,6 +231,16 @@ def chart_spec_of(plan: DatasetPlan, table: Table, option: Optional[int] = None,
     if cand is not None and not cand.feasible:
         return NotBuilt(reason=cand.why_not or "Этот вариант не подходит к данным.")
     src = plan.source or _source(plan.profile)
+    key = cand.key if cand is not None else ""
+    if key == "child" and cand is not None and cand.dim is not None:
+        cv = d.cat_view(d.main, dim=cand.dim)
+        return _cats_spec(cv, "bar", src, unit=cv.unit) if cv is not None else None
+    if key == "table_tree":
+        return _tree_table(d, part)
+    if key == "parts_total":
+        return _parts_doughnut(d, src)
+    if key == "xy_bins":
+        return _xy_bins(d, src)
     if opt.title == "Карточки: итог и среднее":
         return _summary_cards(d)
     if opt.title.startswith("Столбцы: число строк по группам"):
@@ -254,7 +284,8 @@ def _spec_dynamics(d: Data, opt: VizOption, src: str, part: int, plan: DatasetPl
     if opt.kind == "table":
         cols = [tv.column] + [_col_title(s.name, s.unit) for s in tv.series]
         rows = [[lab] + [_cell(s.values[i]) for s in tv.series] for i, lab in enumerate(tv.labels)]
-        return TableData(columns=cols, rows=_part(rows, part), unit=unit)
+        bad = _pages_ok(rows, part)
+        return bad if bad is not None else TableData(columns=cols, rows=_part(rows, part), unit=unit)
     if opt.kind == "kpi_cards":
         vals = [(lab, v) for lab, v in zip(tv.labels, tv.main.values) if v is not None]
         return [NumberCallout(value=fmt_value(v, unit), label=lab) for lab, v in vals[-3:]]
@@ -299,23 +330,101 @@ def _spec_comparison(d: Data, opt: VizOption, src: str, part: int, plan: Dataset
             ms.append((mm.name, cv.extra.get(mm.name, []), mm.unit_text))
         cols = [cv.dim] + [_col_title(n, u) for n, _, u in ms]
         rows = [[lab] + [_cell(v[i] if i < len(v) else None) for _, v, _ in ms] for i, lab in enumerate(cv.labels)]
-        return TableData(columns=cols, rows=_part(rows, part))
+        if cv.total is not None and cv.measure is not None and cv.measure.additive:
+            rows.append(["Итого", _cell(cv.total)] + [""] * (len(ms) - 1))
+        bad = _pages_ok(rows, part)
+        return bad if bad is not None else TableData(columns=cols, rows=_part(rows, part))
     if opt.kind in ("pie", "doughnut"):
         if cv.shares is None:
             return NotBuilt(reason="Значения не складываются в целое — круговая здесь неверна.")
         return _cats_spec(cv, opt.kind, src, values=[round(s, 1) for s in cv.shares], unit="%", y_title="Доля")
-    if opt.kind in ("grouped_bar", "grouped_column"):
-        m = cv.measure
-        same = [x for x in cv.extra_measures if m is not None and not x.change and (x.unit or "") == (m.unit or "")
-                and x.type == m.type]
-        if not same:  # взаимосвязь по строкам — обе метрики
-            same = [x for x in cv.extra_measures if not x.change][:1]
-        return _cats_spec(cv, opt.kind, src, unit=unit, extra=[(x.name, cv.extra[x.name]) for x in same[:3]])
+    if opt.kind in ("grouped_bar", "grouped_column", "stacked_bar", "stacked_column"):
+        if d.parallel:
+            return _parts_spec(d, opt.kind, src)
+        same = [x for x in cv.extra_measures if not x.change][:1]  # взаимосвязь по строкам — обе метрики
+        return _cats_spec(cv, opt.kind, src, unit=unit, extra=[(x.name, cv.extra[x.name]) for x in same])
     kind = opt.kind if opt.kind in ("bar", "column") else "bar"
     return _cats_spec(cv, kind, src, unit=unit)
 
 
+def _parts_spec(d: Data, kind: str, src: str) -> Union[ChartSpec, NotBuilt]:
+    """Части по категориям: ряд на каждую часть (короткие имена), категории — по сумме частей."""
+    cv = d.cats
+    g = d.parallel
+    if cv is None or len(g) < 2:
+        return NotBuilt(reason="Частей меньше двух.")
+    names = d.series_names
+    m = cv.measure
+    unit = g[0].unit_text
+    series = []
+    for x in g:
+        vals = cv.values if x is m else cv.extra.get(x.name, [])
+        series.append(InlineSeries(name=names.get(x.name, x.name), values=[0.0 if v is None else v for v in vals],
+                                   unit=unit))
+    return ChartSpec(type=kind, categories=list(cv.labels), series=series, unit=unit, x_title=cv.dim,
+                     y_title=unit or "Значение", source=src)
+
+
+def _parts_doughnut(d: Data, src: str) -> Union[ChartSpec, NotBuilt]:
+    g = d.parallel
+    if len(g) < 2:
+        return NotBuilt(reason="Частей меньше двух.")
+    names = d.series_names
+    tot = [float(sum(x.present)) for x in g]
+    whole = sum(tot) or 1.0
+    vals = [round(v / whole * 100, 1) for v in tot]
+    lead = max(range(len(vals)), key=lambda k: (vals[k], -k))
+    return ChartSpec(type="doughnut", categories=[names.get(x.name, x.name) for x in g],
+                     series=[InlineSeries(name="Доля", values=vals, unit="%")], unit="%", highlight_index=lead,
+                     y_title="Доля", source=src)
+
+
+def _tree_table(d: Data, part: int) -> Union[TableData, NotBuilt]:
+    """Таблица «родитель → строка → значение»: группы по сумме, строки внутри по значению, итог внизу."""
+    m, child = d.main, d.label
+    parent = d.parent_of(child) if child is not None else None
+    if m is None or child is None or parent is None:
+        return NotBuilt(reason="Иерархии нет.")
+    groups: dict[str, list[int]] = {}
+    for i in d.rows_idx:
+        groups.setdefault(d.text(i, parent), []).append(i)
+    tot = {g: sum(m.values[i] or 0.0 for i in idx) for g, idx in groups.items()}
+    rows = []
+    for g in sorted(groups, key=lambda x: (-tot[x], x)):
+        for i in sorted(groups[g], key=lambda i: (-(m.values[i] or 0.0), i)):
+            rows.append([g, d.text(i, child), _cell(m.values[i])])
+    rows.append(["Итого", "", _cell(sum(tot.values()))])
+    bad = _pages_ok(rows, part)
+    if bad is not None:
+        return bad
+    return TableData(columns=[d.cols[parent].name, d.cols[child].name, _col_title(m.name, m.unit_text)],
+                     rows=_part(rows, part), unit=m.unit_text)
+
+
+def _xy_bins(d: Data, src: str) -> Union[ChartSpec, NotBuilt]:
+    """Среднее y в трёх группах x (по терцилям, границы округлены): «до 8», «8–16», «от 16»."""
+    xy = d.xy
+    if xy is None or xy.n < 30:
+        return NotBuilt(reason="Точек мало для групп.")
+    xs, ys = np.array(xy.xs), np.array(xy.ys)
+    a, b = (float(v) for v in np.percentile(xs, [100 / 3, 200 / 3]))
+    a, b = round(a), round(b)
+    if b <= a:
+        return NotBuilt(reason="Значения почти не различаются — групп не получится.")
+    masks = [xs < a, (xs >= a) & (xs < b), xs >= b]
+    labels = [f"до {fmt_num(a)}", f"{fmt_num(a)}–{fmt_num(b)}", f"от {fmt_num(b)}"]
+    vals = [round(float(ys[mk].mean()), 1) if mk.any() else None for mk in masks]
+    return ChartSpec(type="column", categories=labels, series=[InlineSeries(name=xy.y.name, values=vals,
+                                                                            unit=xy.y.unit_text)],
+                     unit=xy.y.unit_text, x_title=_col_title(xy.x.name, xy.x.unit_text), y_title=xy.y.name, source=src)
+
+
 def _spec_shares(d: Data, opt: VizOption, src: str, part: int, plan: DatasetPlan) -> Union[SlideBody, NotBuilt, None]:
+    if d.composition and d.parallel and d.cats is not None:
+        if opt.kind in ("stacked_bar", "stacked_column", "grouped_bar", "grouped_column"):
+            return _parts_spec(d, opt.kind, src)
+        if opt.kind == "table":
+            return _spec_comparison(d, opt, src, part, plan)
     got = d.shares
     if got is None:
         return NotBuilt(reason="Значения не складываются в целое.")
@@ -386,7 +495,8 @@ def _spec_reference(d: Data, opt: VizOption, src: str, part: int, plan: DatasetP
         return TableData(columns=list(rv.columns), rows=rows, unit=rv.measure.unit_text if rv.measure else None)
     if mode == "head":
         return TableData(columns=list(rv.full_columns), rows=rv.all_rows[:TABLE_ROWS])
-    return TableData(columns=list(rv.full_columns), rows=_part(rv.all_rows, part))
+    bad = _pages_ok(rv.all_rows, part)
+    return bad if bad is not None else TableData(columns=list(rv.full_columns), rows=_part(rv.all_rows, part))
 
 
 def _kpi_label(it: KpiItem, prev: Optional[str]) -> str:
@@ -430,8 +540,16 @@ def _spec_relationship(d: Data, opt: VizOption, src: str, part: int, plan: Datas
     if xy is None:
         return None
     if opt.kind == "scatter":
-        return ChartSpec(type="scatter", xy=[XYSeries(name=xy.y.name, x=list(xy.xs), y=list(xy.ys))],
-                         x_title=_col_title(xy.x.name, xy.x.unit_text), y_title=xy.y.name, unit=xy.y.unit_text, source=src)
+        if xy.group and xy.groups:
+            # точки — по группе (≤ 5 значений): цвет показывает, у кого связь сильнее
+            series = []
+            for g in sorted(set(xy.groups), key=lambda g: (-xy.groups.count(g), g)):
+                idx = [k for k, gg in enumerate(xy.groups) if gg == g]
+                series.append(XYSeries(name=g, x=[xy.xs[k] for k in idx], y=[xy.ys[k] for k in idx]))
+        else:
+            series = [XYSeries(name=xy.y.name, x=list(xy.xs), y=list(xy.ys))]
+        return ChartSpec(type="scatter", xy=series, x_title=_col_title(xy.x.name, xy.x.unit_text), y_title=xy.y.name,
+                         unit=xy.y.unit_text, source=src)
     if opt.kind == "table":
         rows = [[lab or str(k + 1), fmt_num(a), fmt_num(b)] for k, (lab, a, b) in enumerate(zip(xy.labels, xy.xs, xy.ys))]
         return TableData(columns=[d.entity or "№", _col_title(xy.x.name, xy.x.unit_text),

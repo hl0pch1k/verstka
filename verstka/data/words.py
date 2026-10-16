@@ -17,7 +17,7 @@ from typing import Literal, Optional, Sequence
 
 __all__ = [
     "NBSP", "MINUS", "Gender", "plural", "count_words", "fmt_num", "round_pct", "fmt_pct", "fmt_signed", "fmt_value",
-    "lower_first", "upper_first", "join_and", "Phrase", "phrase", "metric_phrase", "is_counter", "head_word",
+    "lower_first", "upper_first", "join_and", "fmt_exact", "each_unit", "is_participle", "verb_agree", "Phrase", "phrase", "metric_phrase", "is_counter", "head_word",
     "is_plural_value", "verb", "number_word", "WORD_NUMS", "times_word", "PERIOD_WORDS", "month_name", "period_label",
     "period_text", "period_dative", "period_gen", "period_dat_full", "fraction_words", "duration_text", "duration_gen",
     "stem", "stems_of", "same_stem", "stems_match", "file_title",
@@ -106,12 +106,26 @@ def count_words(n: int, one: str, few: str, many: str) -> str:
 
 
 def lower_first(s: str) -> str:
-    """Название колонки внутри фразы: «Выручка» → «выручка»; аббревиатуры («NPS», «ВВП») — как есть."""
+    """Название колонки внутри фразы: «Выручка» → «выручка»; аббревиатуры («NPS», «ВВП») и латиница («Scopus») —
+    как есть."""
     if not s:
         return s
     if len(s) > 1 and (s[1].isupper() or s[1].isdigit()):
         return s
+    if not ("а" <= s[0].lower() <= "я" or s[0] in "ёЁ"):
+        return s
     return s[0].lower() + s[1:]
+
+
+def fmt_exact(x: Optional[float]) -> str:
+    """Число как в файле, для таблиц: 142.6 → «142,6», 1305.2 → «1 305,2», 14.0 → «14» (до трёх знаков после запятой,
+    без округления до целых у больших чисел)."""
+    if x is None or not math.isfinite(x):
+        return "—"
+    for k in (0, 1, 2, 3):
+        if abs(round(x, k) - x) < 1e-9:
+            return fmt_num(x, k)
+    return fmt_num(x, 3)
 
 
 def upper_first(s: str) -> str:
@@ -127,6 +141,13 @@ def join_and(items: Sequence[str]) -> str:
 
 _CYR = re.compile(r"^[а-яё\-]+$")
 _ADJ_END = ("ый", "ий", "ой", "ая", "яя", "ое", "ее", "ые", "ие")
+# существительные на «-ие»: «направление», «развитие», «событие» — не прилагательные («средние», «летние» — да)
+_NOUN_IE = ("ение", "ание", "тие", "вие", "бие", "лие", "зие", "сие", "мие", "рие", "пие", "дие")
+
+
+def _is_adj(w: str) -> bool:
+    """Слово похоже на прилагательное (полная форма): «средний», «новые», «общая»; «направление» — нет."""
+    return len(w) >= 4 and bool(_CYR.match(w)) and w.endswith(_ADJ_END) and not w.endswith(_NOUN_IE)
 _HUSH = "жшчщ"
 _VELAR = "гкх"
 _VOWELS = "аеёиоуыэюя"
@@ -171,6 +192,7 @@ _SPECIAL = {
     "средства": ("средство", "средств", "средствам", "средств", "средствам", "средства", "pl"),
     "сутки": ("сутки", "суток", "суткам", "суток", "суткам", "сутки", "pl"),
     "рынок": ("рынок", "рынка", "рынку", "рынков", "рынкам", "рынки", "m"),
+    "данные": ("данные", "данных", "данным", "данных", "данным", "данные", "pl"),
 }
 
 
@@ -349,7 +371,7 @@ def phrase(name: Optional[str]) -> Optional[Phrase]:
     low = [t.lower() for t in toks]
     # главное слово — первое не-прилагательное (одно слово — всегда существительное)
     h = 0
-    while h < len(toks) - 1 and low[h].endswith(_ADJ_END) and _CYR.match(low[h]) and len(low[h]) >= 4:
+    while h < len(toks) - 1 and _is_adj(low[h]):
         h += 1
     head = low[h]
     if is_counter(s) and h == 0:
@@ -440,9 +462,59 @@ def head_word(name: Optional[str]) -> str:
     «Выручка от клиентов» → «выручка»."""
     toks = [t.lower() for t in str(name or "").replace(",", " ").split()]
     h = 0
-    while h < len(toks) - 1 and toks[h].endswith(_ADJ_END) and _CYR.match(toks[h]) and len(toks[h]) >= 4:
+    while h < len(toks) - 1 and _is_adj(toks[h]):
         h += 1
     return toks[h] if toks else ""
+
+
+# «каждый час», «каждая минута» — единица оси X в наклоне рассеяния
+_EACH: dict[str, str] = {
+    "ч": "каждый час", "ч.": "каждый час", "час": "каждый час", "мин": "каждая минута", "мин.": "каждая минута",
+    "дн.": "каждый день", "дн": "каждый день", "₽": "каждый рубль", "руб.": "каждый рубль",
+    "тыс. ₽": "каждая тысяча рублей", "млн ₽": "каждый миллион рублей", "млрд ₽": "каждый миллиард рублей",
+    "%": "каждый процент", "п.п.": "каждый процентный пункт", "шт.": "каждая штука", "чел.": "каждый человек",
+    "км": "каждый километр", "кг": "каждый килограмм", "балл": "каждый балл", "баллов": "каждый балл",
+}
+
+
+_PER = {"нед.": "в неделю", "нед": "в неделю", "неделю": "в неделю", "мес.": "в месяц", "мес": "в месяц",
+        "день": "в день", "дн.": "в день", "сут.": "в сутки", "год": "в год", "г.": "в год", "ч": "в час"}
+
+
+def each_unit(unit: Optional[str]) -> Optional[tuple[str, str]]:
+    """(«каждый час», «в неделю») для «каждый час подготовки в неделю — около +2 баллов»; единица без знаменателя —
+    («каждый миллион рублей», ""); None — единица неизвестна."""
+    if not unit:
+        return None
+    u = unit.strip().lower()
+    base, _, per = u.partition("/")
+    each = _EACH.get(base.strip())
+    if each is None:
+        return None
+    if per and per.strip() not in _PER:
+        return None
+    return each, _PER.get(per.strip(), "") if per else ""
+
+
+_NOT_PARTICIPLE = {"золото", "болото", "долото", "лото", "фото", "авто", "мясо", "лето", "место", "число", "окно"}
+
+
+def is_participle(label: Optional[str]) -> bool:
+    """Подпись — краткое причастие («Принято на 1 курс», «Отчислено студентов», «Трудоустроено»): с ним не говорят
+    «принято выросло», вывод строится через двоеточие («Принято на 1 курс: +6%»)."""
+    first = str(label or "").strip().split(" ")[0].lower()
+    return len(first) >= 5 and first not in _NOT_PARTICIPLE and first.endswith(("ено", "ано", "ято", "ыто", "ито",
+                                                                                  "оно", "уто"))
+
+
+def verb_agree(names: Sequence[str], forms: tuple[str, str, str, str]) -> str:
+    """Глагол при перечне названий: одно — по роду («не вошёл / не вошла / не вошло»), несколько — мн. («не вошли»).
+    `forms` — (м, ж, ср, мн)."""
+    if len(names) != 1:
+        return forms[3]
+    p = phrase(names[0])
+    g = p.gender if p is not None else "m"
+    return forms[{"m": 0, "f": 1, "n": 2, "pl": 3}[g]]
 
 
 def is_plural_value(value: str) -> bool:
