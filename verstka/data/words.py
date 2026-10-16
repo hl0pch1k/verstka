@@ -17,7 +17,8 @@ from typing import Literal, Optional, Sequence
 
 __all__ = [
     "NBSP", "MINUS", "Gender", "plural", "count_words", "fmt_num", "round_pct", "fmt_pct", "fmt_signed", "fmt_value",
-    "lower_first", "upper_first", "join_and", "fmt_exact", "each_unit", "is_participle", "verb_agree", "Phrase", "phrase", "metric_phrase", "is_counter", "head_word",
+    "lower_first", "upper_first", "join_and", "fmt_exact", "each_unit", "is_participle", "verb_agree", "parts_words",
+    "by_group", "Phrase", "phrase", "metric_phrase", "is_counter", "head_word",
     "is_plural_value", "verb", "number_word", "WORD_NUMS", "times_word", "PERIOD_WORDS", "month_name", "period_label",
     "period_text", "period_dative", "period_gen", "period_dat_full", "fraction_words", "duration_text", "duration_gen",
     "stem", "stems_of", "same_stem", "stems_match", "file_title",
@@ -505,6 +506,22 @@ def is_participle(label: Optional[str]) -> bool:
     first = str(label or "").strip().split(" ")[0].lower()
     return len(first) >= 5 and first not in _NOT_PARTICIPLE and first.endswith(("ено", "ано", "ято", "ыто", "ито",
                                                                                   "оно", "уто"))
+
+
+def parts_words(k: int, group: Optional[str]) -> str:
+    """«3 формы обучения» по группе колонок («Форма обучения»), иначе «3 части»."""
+    p = phrase(group) if group else None
+    if p is not None and p.sure and p.gender != "pl":
+        return count_words(k, p.low.nom, p.low.gen, p.low.gen_pl)
+    return count_words(k, "часть", "части", "частей")
+
+
+def by_group(group: Optional[str]) -> str:
+    """«по формам обучения» по группе колонок, иначе «по частям в целом»."""
+    p = phrase(group) if group else None
+    if p is not None and p.sure and p.gender != "pl":
+        return f"по {p.low.dat_pl}"
+    return "по частям в целом"
 
 
 def verb_agree(names: Sequence[str], forms: tuple[str, str, str, str]) -> str:

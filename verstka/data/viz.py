@@ -18,7 +18,7 @@ from typing import Optional
 from verstka.data.aggregate import MAX_CATS, MAX_SLIDES, TABLE_ROWS, Data, describe_dropped
 from verstka.data.goals import Goal
 from verstka.data.words import (
-    PERIOD_WORDS, count_words, fmt_num, fmt_pct, metric_phrase, phrase, upper_first, verb_agree,
+    PERIOD_WORDS, by_group, count_words, fmt_num, fmt_pct, metric_phrase, parts_words, phrase, upper_first, verb_agree,
 )
 from verstka.schemas.data import TaskKind, VizKind, VizOption
 
@@ -243,7 +243,7 @@ def _composition(d: Data) -> list[_Cand]:
     out = [
         _Cand("stacked_bar" if long_ else "stacked_column", 0.9,
               title="Накопительные горизонтальные столбцы" if long_ else "Накопительные столбцы",
-              reasons=[f"{upper_first(cats_word)} и {count_words(k, 'часть', 'части', 'частей')}: видны и размер, и "
+              reasons=[f"{upper_first(cats_word)} и {parts_words(k, d.group_name)}: видны и размер, и "
                        f"состав" + (", подписи слева." if long_ else ".")],
               why_not="Видны размер и состав, но части разных категорий сравнивать труднее."),
         _Cand("grouped_bar" if long_ else "grouped_column", 0.55,
@@ -251,8 +251,8 @@ def _composition(d: Data) -> list[_Cand]:
               reasons=["Части рядом — сравнивать их внутри категории легко."],
               why_not=f"{upper_first(count_words(C * k, 'столбец', 'столбца', 'столбцов'))}: состав сравнить легко, а "
                       f"общий размер — нет."),
-        _Cand("doughnut", 0.5, title="Кольцевая диаграмма по частям в целом", key="parts_total",
-              reasons=[f"{upper_first(count_words(k, 'часть', 'части', 'частей'))} целого — сразу видно, какая больше."],
+        _Cand("doughnut", 0.5, title=f"Кольцевая диаграмма {by_group(d.group_name)}", key="parts_total",
+              reasons=[f"{upper_first(parts_words(k, d.group_name))} одного целого — сразу видно, что больше."],
               why_not=f"Читается, но {dp.low.nom_pl if dp is not None and dp.sure else 'категории'} потеряны."),
     ]
     return out

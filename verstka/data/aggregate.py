@@ -527,6 +527,11 @@ class Data:
                 out.add(i)
         return out if len(out) < len(self.table.rows) else set()
 
+    def row_unit(self, i: int) -> Optional[str]:
+        """Единица строки таблицы показателей по строкам (`Table.row_units`): «чел.», «%», «млн ₽»."""
+        ru = getattr(self.table, "row_units", None) or []
+        return ru[i] if i < len(ru) else None
+
     def cell(self, i: int, j: int) -> Any:
         r = self.table.rows[i]
         return r[j] if j < len(r) else None
@@ -648,7 +653,13 @@ class Data:
 
     @cached_property
     def total_metric(self) -> Optional[Measure]:
-        """Колонка-итог («Всего», «Итого», «Total»): сумма серий, а не ещё одна серия."""
+        """Колонка-итог: из профиля (`total_column` — «Всего», равная сумме частей), иначе по названию («Всего»,
+        «Итого», «Total»): сумма серий, а не ещё одна серия."""
+        name = getattr(self.profile, "total_column", None)
+        if name:
+            m = self.measure(name)
+            if m is not None:
+                return m
         return next((m for m in self.measures if is_total_label(m.name)), None)
 
     @cached_property
@@ -660,6 +671,11 @@ class Data:
         m = self.main
         if m is None or m.change or m.mixed:
             return []
+        parts = [self.measure(nm) for nm in (getattr(self.profile, "part_columns", None) or [])]
+        parts = [x for x in parts if x is not None]
+        if m in parts and len(parts) >= 2:
+            # части целого по профилю (сумма частей = «Всего» в каждой строке)
+            return sorted(parts, key=lambda x: x.j)[:MAX_SERIES]
         group = [m]
         for x in self.measures:
             if x is m or x.change or x.mixed or x is self.total_metric:
@@ -688,8 +704,21 @@ class Data:
         g = self.parallel
         if len(g) < 2 or not all(x.additive and x.nonneg for x in g):
             return False
+        if set(getattr(self.profile, "part_columns", None) or []) >= {x.name for x in g}:
+            return True
         prefix = _common_prefix_words([x.name for x in g])
-        return self.total_metric is not None or bool(prefix) or bool(self.profile.parts_of_whole)
+        return self.total_metric is not None or bool(prefix) or bool(self.group_name) or bool(self.profile.parts_of_whole)
+
+    @cached_property
+    def group_name(self) -> Optional[str]:
+        """Общая группа рядов из двухэтажной шапки (`Table.column_groups`: «Форма обучения» над «Бюджет · Платное ·
+        Целевое») или общий заголовок в их названиях; None — группы нет."""
+        g = self.parallel
+        groups = getattr(self.table, "column_groups", None) or []
+        names = {groups[x.j] if x.j < len(groups) else None for x in g}
+        if len(names) == 1 and None not in names:
+            return next(iter(names))
+        return _common_prefix_words([x.name for x in g]) or None
 
     def parent_of(self, j: int) -> Optional[int]:
         """Родитель колонки в иерархии профиля («Кафедра → Институт»), если у него 2–12 значений."""
@@ -1203,13 +1232,14 @@ def _kpi_view(d: Data) -> Optional[KpiView]:
     units = set()
     for i in d.rows_idx:
         label = d.text(i, lab_j)
-        vt = _value_text(d.cell(i, cur.j), cur.unit_text)
+        ru = d.row_unit(i) or cur.unit_text  # единица строки («чел.», «%», «млн ₽») — из чтения
+        vt = _value_text(d.cell(i, cur.j), ru)
         if not label or vt is None:
             continue
         units.add(vt[2] or "")
         it = KpiItem(label=label, value=vt[0], value_text=vt[1], unit=vt[2])
         if prev is not None:
-            pv = _value_text(d.cell(i, prev.j), prev.unit_text)
+            pv = _value_text(d.cell(i, prev.j), d.row_unit(i) or prev.unit_text)
             if pv is not None:
                 it.prev_text = pv[1]
         if changes:
@@ -1218,7 +1248,7 @@ def _kpi_view(d: Data) -> Optional[KpiView]:
             if q is not None:
                 it.change, it.change_unit = q[0], (q[1] or changes[0].unit)
         elif prev is not None:
-            pv = _value_text(d.cell(i, prev.j), prev.unit_text)
+            pv = _value_text(d.cell(i, prev.j), d.row_unit(i) or prev.unit_text)
             if pv is not None and (pv[2] or "") == (vt[2] or ""):
                 ch = kpi_change(label, vt[0], pv[0], vt[2])
                 if ch is not None:
@@ -1252,13 +1282,13 @@ def _kpi_long(d: Data) -> Optional[KpiView]:
     for lab, rs in rows_by.items():
         rs.sort()
         i_cur = rs[-1][1]
-        vt = _value_text(d.cell(i_cur, m.j), m.unit_text)
+        vt = _value_text(d.cell(i_cur, m.j), d.row_unit(i_cur) or m.unit_text)
         if vt is None:
             continue
         units.add(vt[2] or "")
         it = KpiItem(label=lab, value=vt[0], value_text=vt[1], unit=vt[2])
         if len(rs) >= 2 and rs[-2][0] != rs[-1][0]:
-            pv = _value_text(d.cell(rs[-2][1], m.j), m.unit_text)
+            pv = _value_text(d.cell(rs[-2][1], m.j), d.row_unit(rs[-2][1]) or m.unit_text)
             if pv is not None:
                 it.prev_text = pv[1]
                 if (pv[2] or "") == (vt[2] or ""):

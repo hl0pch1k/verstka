@@ -361,8 +361,9 @@ def _parts_spec(d: Data, kind: str, src: str) -> Union[ChartSpec, NotBuilt]:
         vals = cv.values if x is m else cv.extra.get(x.name, [])
         series.append(InlineSeries(name=names.get(x.name, x.name), values=[0.0 if v is None else v for v in vals],
                                    unit=unit))
+    # подпись оси значений — группа частей из шапки («Форма обучения»), единица дописывается движком
     return ChartSpec(type=kind, categories=list(cv.labels), series=series, unit=unit, x_title=cv.dim,
-                     y_title=unit or "Значение", source=src)
+                     y_title=d.group_name or unit or "Значение", source=src)
 
 
 def _parts_doughnut(d: Data, src: str) -> Union[ChartSpec, NotBuilt]:

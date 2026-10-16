@@ -15,7 +15,7 @@ from typing import Optional
 from verstka.data.aggregate import Data
 from verstka.data.goals import Goal
 from verstka.data.words import (
-    PERIOD_WORDS, count_words, lower_first, metric_phrase, number_word, phrase, plural, upper_first,
+    PERIOD_WORDS, count_words, lower_first, metric_phrase, number_word, parts_words, phrase, plural, upper_first,
 )
 from verstka.schemas.data import TASK_TITLES, TaskDecision, TaskKind
 
@@ -170,7 +170,7 @@ def _why(task: TaskKind, d: Data) -> str:
         what = count_words(cv.n, dp.low.nom, dp.low.gen, dp.low.gen_pl) if dp is not None and dp.sure else \
             count_words(cv.n, "категория", "категории", "категорий")
         parts = [d.series_names.get(x.name, x.name) for x in d.parallel]
-        return (f"{upper_first(what)} и {count_words(len(parts), 'часть', 'части', 'частей')} "
+        return (f"{upper_first(what)} и {parts_words(len(parts), d.group_name)} "
                 f"({', '.join(parts)}) — важно, из чего складывается каждое и целое.")
     if task == "shares":
         cv = d.cat_view(d.parts_measure) if d.parts_measure is not None else d.cats

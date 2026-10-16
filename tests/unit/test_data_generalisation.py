@@ -300,12 +300,79 @@ def test_science_set_end_to_end():
     heads = [_sp(p.headline) for p in plans]
     assert heads[1].startswith("Платное — 53%") and "бюджет — 35%" in heads[1]
     assert heads[2].startswith("Scopus вырос в 9,1 раза за 20 лет") and "РИНЦ — в 3,4 раза" in heads[2]
-    if ("Кафедра", "Институт") in plans[3].profile.hierarchies:  # иерархию находит профиль
-        assert "27%" in heads[3] and "349 из 1 305" in heads[3]
-        assert plans[3].options[0].title == "Ранжированные горизонтальные столбцы по институтам"
+    assert ("Кафедра", "Институт") in plans[3].profile.hierarchies
+    assert "27%" in heads[3] and "349 из 1 305" in heads[3]
+    assert plans[3].options[0].title == "Ранжированные горизонтальные столбцы по институтам"
+    tree = chart_spec_of(plans[3], tables[3], option=2, part=2)
+    assert tree.columns[0] == "Институт" and tree.rows[-1][0] == "Итого"
+    # «Приём»: части из профиля (`part_columns`), «Всего» — не ряд, группа шапки — подпись оси и слова причины
+    stack = chart_spec_of(plans[1], tables[1])
+    assert [x.name for x in stack.series] == ["Бюджет", "Платное", "Целевое"] and stack.y_title == "Форма обучения"
+    assert plans[1].options[2].title == "Кольцевая диаграмма по формам обучения"
+    assert "3 формы обучения (Бюджет, Платное, Целевое)" in plans[1].task.reasons[0]
+    # «Итоги года»: единицы строк, люди сравниваются с людьми
+    assert heads[5] == "Принято на 1 курс: +6%, отчислено студентов: −8%"
+    cards = chart_spec_of(plans[5], tables[5])
+    assert [c.value for c in cards][:2] == ["2 425 чел.".replace(" ", NB, 1).replace(" чел", NB + "чел"), "74,1"]
+    assert cards[4].value == f"1{NB}305{NB}млн ₽"
     assert heads[4].startswith("Половина студентов — до 3 590 ₽")
     for p, t in zip(plans, tables):
         assert p.headline != p.plain_headline
         assert p.caption is None or len(p.caption) <= 160
         for k in range(len(p.options)):
             assert chart_spec_of(p, t, option=k) is not None
+
+
+# ── новые поля профиля (единицы строк, части целого, группа шапки, ожидаемые большие значения) ───────────────────────
+def test_row_units_give_each_kpi_its_unit_and_keep_kinds_apart():
+    t = _t(["Показатель", "2026", "2025", "Изменение"],
+           [["Принято на 1 курс", "2 425", "2 288", "+6%"], ["Трудоустроено", "87", "84", "+3 п.п."],
+            ["Объём НИОКР", "1 305", "1 164", "+12%"], ["Отчислено", "412", "450", "−8%"]], file="Итоги.txt")
+    t.row_units = ["чел.", "%", "млн ₽", "чел."]
+    p = _plan(t)
+    cards = chart_spec_of(p, t)
+    assert [c.value for c in cards] == [f"2{NB}425{NB}чел.", "87%", f"1{NB}305{NB}млн ₽", f"412{NB}чел."]
+    assert p.headline == "Принято на 1 курс: +6%, отчислено: −8%"
+
+
+def test_part_columns_and_column_groups_from_the_reader():
+    dirs = ["Информатика", "Экономика", "Юриспруденция", "Строительство", "Медицина"]
+    b, pay, tg = [120, 45, 40, 80, 90], [140, 190, 210, 120, 60], [25, 0, 0, 15, 45]
+    t = _t(["Направление", "Бюджет", "Платное", "Целевое", "Всего"],
+           [[d, x, y, z, x + y + z] for d, x, y, z in zip(dirs, b, pay, tg)], [None, "чел.", "чел.", "чел.", "чел."])
+    t.column_groups = [None, "Форма обучения", "Форма обучения", "Форма обучения", None]
+    prof = profile_table(t)
+    assert prof.total_column == "Всего" and prof.part_columns == ["Бюджет", "Платное", "Целевое"]
+    d = Data(t, prof)
+    assert [x.name for x in d.parallel] == ["Бюджет", "Платное", "Целевое"] and d.composition
+    assert d.group_name == "Форма обучения"
+    p = _plan(t)
+    spec = chart_spec_of(p, t)
+    assert [x.name for x in spec.series] == ["Бюджет", "Платное", "Целевое"] and spec.y_title == "Форма обучения"
+    assert "3 формы обучения" in p.task.reasons[0]
+
+
+def test_expected_outliers_named_in_caption_never_as_outliers():
+    rows = [[f"Клиент {i:03d}", ["ИТ", "Ритейл"][i % 2], ["Москва", "Казань", "Омск"][i % 3],
+             300.0 if i == 0 else 250.0 if i == 1 else round(5 + i / 20, 1)] for i in range(60)]
+    t = _t(["Клиент", "Отрасль", "Регион", "Выручка"], rows, [None, None, None, "млн ₽"])
+    prof = profile_table(t)
+    assert prof.expected_outliers and not prof.outliers
+    p = plan_dataset(prof, t)
+    assert p.task.task == "reference"
+    assert "Крупнейший клиент — Клиент 000: 300 млн ₽." in _sp(p.caption)
+    assert "выброс" not in (p.caption or "")
+
+
+def test_parent_level_from_block_hierarchy():
+    inst = {"Институт ИТ": [("Кафедра ИИ", 142.6), ("Кафедра сетей", 96.2), ("Кафедра данных", 110.4)],
+            "Институт энергетики": [("Кафедра ВИЭ", 87.3), ("Кафедра сетей энергии", 118.4)],
+            "Институт механики": [("Кафедра машин", 103.7), ("Кафедра материалов", 91.4), ("Кафедра роботов", 74.5)],
+            "Институт наук": [("Кафедра физики", 71.5), ("Кафедра химии", 66.8), ("Кафедра биологии", 60.1)]}
+    rows = [[i, k, v] for i, ks in inst.items() for k, v in ks]
+    t = _t(["Институт", "Кафедра", "Бюджет"], rows, [None, None, "млн ₽"], file="НИОКР.csv")
+    prof = profile_table(t)
+    assert ("Кафедра", "Институт") in prof.hierarchies
+    p = _plan(t, "на что ушёл бюджет")
+    spec = chart_spec_of(p, t)
+    assert spec.x_title == "Институт" and spec.categories[0] == "Институт ИТ" and spec.series[0].values[0] == 349.2

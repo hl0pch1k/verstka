@@ -629,6 +629,21 @@ def _distribution(d: Data) -> FactSet:
 
 
 # ── справочник ────────────────────────────────────────────────────────────────────────────────────────────────────────
+def _biggest(d: Data, m: Measure, ent: Optional[Phrase]) -> str:
+    """Естественно большое значение (`expected_outliers` профиля: крупнейший клиент) — одной фразой, без слова
+    «выброс»: «Крупнейший клиент — АО «Северный капитал»: 212,4 млн ₽»."""
+    exp = [o for o in getattr(d.profile, "expected_outliers", None) or [] if o.column == m.name]
+    if not exp or d.label is None:
+        return ""
+    o = max(exp, key=lambda x: x.value)
+    who = d.text(o.row, d.label) if o.row < len(d.table.rows) else ""
+    if not who:
+        return ""
+    adj = {"m": "Крупнейший", "f": "Крупнейшая", "n": "Крупнейшее"}.get(ent.gender if ent is not None else "", "")
+    head = f"{adj} {ent.low.nom}" if adj and ent is not None else "Больше всех"
+    return f"{head} — {who}: {fmt_value(o.value, m.unit_text)}."
+
+
 def _reference(d: Data) -> FactSet:
     fs = FactSet()
     rv = d.ref
@@ -654,7 +669,8 @@ def _reference(d: Data) -> FactSet:
                f"Остальные {rest_n} дают {fmt_value(rest_v, unit)}.")
         fs.add("rest_count", rest_n, "count", f"Остальные {rest_n}", None, "Строки, собранные в итог.")
         who = f"Остальные {count_words(rest_n, *(forms or ('строка', 'строки', 'строк')))}"
-        fs.ctx["caption"] = f"{who} дают {fmt_value(rest_v, unit)} — {fmt_pct(100 - top)}%."
+        fs.ctx["caption"] = _short([f"{who} дают {fmt_value(rest_v, unit)} — {fmt_pct(100 - top)}%.",
+                                    _biggest(d, m, ent if ent_ok else None)])
         return fs
     if m is not None and rv.values and rv.values[0] is not None:
         # рейтинг, средний чек, прибыль с убытками: лидер по значению, без долей; строки без подписи — без имени
