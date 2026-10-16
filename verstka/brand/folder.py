@@ -19,7 +19,7 @@ import subprocess
 import tempfile
 import zipfile
 from pathlib import Path, PurePosixPath
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from verstka.brand.common import (
     BrandReadError,
@@ -370,7 +370,8 @@ def _studio_data(d: Path, files: list[Path]) -> tuple[Optional[dict], set[Path],
 
 
 def read_collection(files: list[Path], base: Path, *, label: str, providers: Any = None, skills: Any = None,
-                    use_vlm: bool = False, assets_dir: Optional[Path | str] = None, guess_name: bool = True) -> BrandSpec:
+                    use_vlm: bool = False, assets_dir: Optional[Path | str] = None, guess_name: bool = True,
+                    on_progress: Optional[Callable[[str, str], None]] = None) -> BrandSpec:
     """Набор файлов брендбука (папка, архив или один файл) → `BrandSpec`; пути логотипов — относительно `base`.
     `guess_name` — брать имя бренда из имени папки или архива, если его нет внутри (у одной картинки — нет)."""
     from verstka.brand.pdf import read_pdf
@@ -429,7 +430,7 @@ def read_collection(files: list[Path], base: Path, *, label: str, providers: Any
     for p in pdfs:
         try:
             s = read_pdf(p, providers=providers, skills=skills, use_vlm=use_vlm,
-                         assets_dir=assets if (assets is not None and not logo_files) else None)
+                         assets_dir=assets if (assets is not None and not logo_files) else None, on_progress=on_progress)
         except BrandReadError as e:
             warnings.append(f"«{rel(p)}»: {e}")
             continue
@@ -487,17 +488,18 @@ def read_collection(files: list[Path], base: Path, *, label: str, providers: Any
 
 
 def read_folder(root: Path | str, *, providers: Any = None, skills: Any = None, use_vlm: bool = False,
-                assets_dir: Optional[Path | str] = None, label: Optional[str] = None, base: Optional[Path] = None) -> BrandSpec:
+                assets_dir: Optional[Path | str] = None, label: Optional[str] = None, base: Optional[Path] = None,
+                on_progress: Optional[Callable[[str, str], None]] = None) -> BrandSpec:
     root = Path(root)
     files = _walk(root)
     if not files:
         raise BrandReadError(f"Папка «{label or root.name}» пустая.")
     return read_collection(files, base or root, label=label or root.name, providers=providers, skills=skills,
-                           use_vlm=use_vlm, assets_dir=assets_dir)
+                           use_vlm=use_vlm, assets_dir=assets_dir, on_progress=on_progress)
 
 
 def read_zip(path: Path | str, *, providers: Any = None, skills: Any = None, use_vlm: bool = False,
-             assets_dir: Optional[Path | str] = None) -> BrandSpec:
+             assets_dir: Optional[Path | str] = None, on_progress: Optional[Callable[[str, str], None]] = None) -> BrandSpec:
     """ZIP с брендбуком: распаковка во временную папку (без путей вне архива, до 2000 файлов и 300 МБ), затем — как папка.
     Пути логотипов — внутри архива; с `assets_dir` логотипы копируются в `<assets_dir>/logos/`."""
     path = Path(path)
@@ -535,5 +537,5 @@ def read_zip(path: Path | str, *, providers: Any = None, skills: Any = None, use
         tops = [p for p in root.iterdir() if not p.name.startswith(".")]
         start = tops[0] if len(tops) == 1 and tops[0].is_dir() else root
         spec = read_folder(start, providers=providers, skills=skills, use_vlm=use_vlm, assets_dir=assets_dir,
-                           label=path.name, base=root)
+                           label=path.name, base=root, on_progress=on_progress)
     return spec

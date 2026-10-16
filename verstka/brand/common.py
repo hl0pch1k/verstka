@@ -8,9 +8,10 @@
 from __future__ import annotations
 
 import colorsys
+import inspect
 import re
 from dataclasses import dataclass
-from typing import Iterable, Optional
+from typing import Any, Callable, Iterable, Optional
 
 from verstka.ru import ru_count
 from verstka.schemas.brand import BrandColor, BrandColorRole, BrandFont, BrandFontRole, BrandRule, BrandRuleKind, LogoPlace, normalize_hex
@@ -620,3 +621,115 @@ def name_from_path(stem: str) -> Optional[str]:
     if stem.lower() in _GENERIC_STEMS:
         return None
     return brand_name(stem.replace("_", " ").replace("-", " ") if " " not in stem else stem)
+
+
+# ---- шаги разбора для интерфейса -----------------------------------------------------------------------------------------------
+STEP_KEYS = ("open", "palette", "fonts", "logos", "rules")  # шаги разбора по порядку; «страница» и «модель» — ход чтения, не шаги
+
+
+def palette_result(colors: list) -> str:
+    return ru_count(len(colors), "цвет", "цвета", "цветов") if colors else "нет"
+
+
+def fonts_result(fonts: list) -> str:
+    return ", ".join(dict.fromkeys(f.family for f in fonts)) or "нет"
+
+
+def logos_result(logos: list) -> str:
+    return str(len(logos)) if logos else "нет"
+
+
+def rules_result(rules: list) -> str:
+    return str(len(rules)) if rules else "нет"
+
+
+def open_text(source: str, file: Optional[str], pages: int) -> tuple[str, str]:
+    """Первый шаг: что открыто («открыт файл» — «12 страниц»)."""
+    if source == "pdf":
+        return "открыт файл", ru_count(pages, "страница", "страницы", "страниц") if pages else "PDF"
+    if source == "tokens":
+        return "прочитаны токены", "цвета, шрифты, отступы"
+    if source == "folder":
+        return ("открыт архив" if (file or "").lower().endswith(".zip") else "открыта папка"), "логотипы и примеры слайдов"
+    return "открыт файл Figma", "стили и переменные"
+
+
+def step_texts(spec: Any) -> dict[str, tuple[str, str]]:
+    """(что, итог) каждого шага по готовому `BrandSpec`."""
+    return {
+        "open": open_text(spec.source, spec.file, spec.pages),
+        "palette": ("палитра", palette_result(spec.colors)),
+        "fonts": ("шрифты", fonts_result(spec.fonts)),
+        "logos": ("логотипы", logos_result(spec.logos)),
+        "rules": ("правила", rules_result(spec.rules)),
+    }
+
+
+def step_partials(spec: Any) -> dict[str, dict]:
+    """Что каждый шаг приносит в плитки анализа: прочитанная часть `BrandSpec` (клиент склеивает части)."""
+    d = spec.model_dump(mode="json")
+    return {
+        "open": {k: d[k] for k in ("name", "source", "file", "pages")},
+        "palette": {"colors": d["colors"]},
+        "fonts": {"fonts": d["fonts"]},
+        "logos": {"logos": d["logos"]},
+        "rules": {k: d[k] for k in ("rules", "margins_px", "grid", "logo_place", "warnings")},
+    }
+
+
+def _takes_partial(cb: Optional[Callable]) -> bool:
+    """Принимает ли обработчик третий аргумент — прочитанную часть; обработчик `(что, итог)` работает как раньше."""
+    if cb is None:
+        return False
+    try:
+        params = list(inspect.signature(cb).parameters.values())
+    except (TypeError, ValueError):
+        return False
+    if any(p.kind is inspect.Parameter.VAR_POSITIONAL for p in params):
+        return True
+    return len([p for p in params if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)]) >= 3
+
+
+class StepReporter:
+    """Ход чтения брендбука для интерфейса: `on_step(что, итог)` или `on_step(что, итог, часть)` вызывается, когда очередной
+    этап готов («открыт файл», «палитра», «шрифты», «логотипы», «правила»), и по ходу долгих этапов («страница», «модель»;
+    часть у них пуста). `что` и `итог` — те же слова, что в `brand_steps`. Если после этапов чтение что-то поменяло (модель
+    уточнила роли), `refresh` повторяет только изменившиеся шаги."""
+
+    def __init__(self, cb: Optional[Callable] = None) -> None:
+        self.cb = cb
+        self.three = _takes_partial(cb)
+        self.last: dict[str, tuple[str, str, Optional[dict]]] = {}
+
+    def _send(self, what: str, result: str, partial: Optional[dict]) -> None:
+        if self.cb is None:
+            return
+        if self.three:
+            self.cb(what, result, partial)
+        else:
+            self.cb(what, result)
+
+    def step(self, key: str, what: str, result: str, partial: Optional[dict] = None) -> None:
+        self.last[key] = (what, result, partial)
+        self._send(what, result, partial)
+
+    def progress(self, what: str, result: str) -> None:
+        self._send(what, result, None)
+
+    def finish(self, spec: Any) -> None:
+        """Шаги, которые чтение ещё не сказало (быстрые читатели — токены, Figma, папка — говорят всё в конце)."""
+        texts, parts = step_texts(spec), step_partials(spec)
+        for key in STEP_KEYS:
+            if key not in self.last:
+                self.step(key, *texts[key], parts[key])
+
+    def refresh(self, spec: Any) -> None:
+        """Повторить шаги, у которых итог или часть изменились после того, как они были сказаны."""
+        texts, parts = step_texts(spec), step_partials(spec)
+        for key in STEP_KEYS:
+            if key in self.last and (self.last[key][1] != texts[key][1] or self.last[key][2] != parts[key]):
+                self.step(key, *texts[key], parts[key])
+
+
+def as_reporter(on_step: Any) -> StepReporter:
+    return on_step if isinstance(on_step, StepReporter) else StepReporter(on_step)

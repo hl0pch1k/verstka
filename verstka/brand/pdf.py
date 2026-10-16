@@ -25,7 +25,7 @@ import logging
 import re
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from pydantic import BaseModel, Field
 
@@ -34,25 +34,33 @@ from verstka.brand.common import (
     BrandReadError,
     ColorHit,
     FontHit,
+    StepReporter,
     add_rule,
+    as_reporter,
     brand_name,
     cmyk_hex,
     color_role,
     find_grid,
+    fonts_result,
     font_role,
     is_negative,
     logo_place,
+    logos_result,
     looks_like_rule,
     make_fonts,
     make_palette,
     margins_px,
     name_from_path,
+    open_text,
+    palette_result,
     parse_color,
     rgb_distance,
     rgb_hex,
+    rules_result,
     split_weight,
     weight_of,
 )
+from verstka.ru import ru_count
 from verstka.schemas.brand import BrandColor, BrandFont, BrandLogo, BrandRule, BrandSpec, LogoPlace
 
 log = logging.getLogger(__name__)
@@ -644,7 +652,7 @@ def pdf_logos(reader, page_texts: list[str], assets_dir: Path) -> list[BrandLogo
 
 
 # ---- модель ----------------------------------------------------------------------------------------------------------------
-def _page_images(path: Path, page_ids: list[int], max_w: int = 1600) -> list[bytes]:
+def _page_images(path: Path, page_ids: list[int], max_w: int = 1600, on_page: Optional[Callable[[int, int], None]] = None) -> list[bytes]:
     """Страницы PDF → JPEG шириной не меньше 1600 px: HEX на образцах цвета мелкие, при 1024 px они не читаются."""
     import pypdfium2 as pdfium
 
@@ -658,6 +666,8 @@ def _page_images(path: Path, page_ids: list[int], max_w: int = 1600) -> list[byt
             buf = io.BytesIO()
             img.save(buf, format="JPEG", quality=82)
             out.append(buf.getvalue())
+            if on_page is not None:
+                on_page(len(out), len(page_ids))
     finally:
         pdf.close()
     return out
@@ -699,11 +709,16 @@ def _vlm_pages(page_texts: list[str]) -> list[int]:
     return sorted(picked)
 
 
-def _ask_model(path: Path, page_texts: list[str], draft: BrandSpec, providers, skills) -> BrandbookReading:
+def _ask_model(path: Path, page_texts: list[str], draft: BrandSpec, providers, skills,
+               on_progress: Optional[Callable[[str, str], None]] = None) -> BrandbookReading:
+    """Страницы → навык `brandbook_reader` одним запросом. `on_progress(что, итог)` — ход: «страница 3 из 6» по мере подготовки
+    страниц и «модель читает …» перед запросом, который длится до двух минут."""
     import json
 
     pages = _vlm_pages(page_texts)
-    images = _page_images(path, pages)
+    say = on_progress or (lambda what, result: None)
+    images = _page_images(path, pages, on_page=lambda k, m: say("страница", f"{k} из {m}"))
+    say("модель", f"читает {ru_count(len(pages), 'страницу', 'страницы', 'страниц')}")
     draft_json = json.dumps(
         {"name": draft.name, "colors": [c.model_dump() for c in draft.colors], "fonts": [f.model_dump() for f in draft.fonts],
          "logo_place": draft.logo_place, "margins_px": draft.margins_px, "rules": [r.text for r in draft.rules]},
@@ -780,11 +795,19 @@ def _guess_name(title: Any, page_texts: list[str], stem: str) -> tuple[Optional[
 
 
 def read_pdf(path: Path | str, *, providers: Any = None, skills: Any = None, use_vlm: bool = False,
-             assets_dir: Optional[Path | str] = None) -> BrandSpec:
-    """PDF-гайдлайн → `BrandSpec` (по тексту; с `use_vlm` — ещё и по картинкам страниц)."""
+             assets_dir: Optional[Path | str] = None, on_step: Any = None,
+             on_progress: Optional[Callable[[str, str], None]] = None) -> BrandSpec:
+    """PDF-гайдлайн → `BrandSpec` (по тексту; с `use_vlm` — ещё и по картинкам страниц).
+
+    `on_step` — ход чтения для интерфейса (см. `StepReporter`): «открыт файл», «палитра», «шрифты», «логотипы», «правила» — каждый
+    сразу, как этап по тексту готов, а не после запроса к модели; затем «страница N из M» и «модель читает …»; шаги, которые
+    модель изменила (роли цветов, правила), повторяются с новым итогом. `on_progress(что, итог)` — только ход («страница»,
+    «модель»), без шагов: так читает PDF внутри папки, где шаги говорит сама папка."""
     path = Path(path)
     if path.stat().st_size == 0:
         raise BrandReadError(f"Файл «{path.name}» пустой.")
+    rep = as_reporter(on_step)
+    progress = on_progress or (rep.progress if rep.cb is not None else None)
     reader = _open(path)
     page_texts = _page_texts(reader)
     text = "\n".join(page_texts)
@@ -801,12 +824,25 @@ def read_pdf(path: Path | str, *, providers: Any = None, skills: Any = None, use
     except Exception:  # noqa: BLE001
         title = None
     name, name_trusted = _guess_name(title, page_texts, path.stem)
+    rep.step("open", *open_text("pdf", path.name, len(page_texts)), {"name": name or "", "source": "pdf", "file": path.name, "pages": len(page_texts)})
 
     colors, w1 = make_palette(pdf_colors(text))
+    rep.step("palette", "палитра", palette_result(colors), {"colors": [c.model_dump(mode="json") for c in colors]})
     font_hits, fallback = pdf_fonts(text, name)
     fonts, w2 = make_fonts(font_hits, fallback=fallback)
+    rep.step("fonts", "шрифты", fonts_result(fonts), {"fonts": [f.model_dump(mode="json") for f in fonts]})
+    logos: list[BrandLogo] = []
+    logo_warnings: list[str] = []
+    if assets_dir is not None:
+        try:
+            logos = pdf_logos(reader, page_texts, Path(assets_dir))
+        except OSError as e:
+            logo_warnings.append(f"Логотипы из PDF не сохранились: {e}.")
+    rep.step("logos", "логотипы", logos_result(logos), {"logos": [lg.model_dump(mode="json") for lg in logos]})
     rules, margin, grid, place = pdf_rules(text)
-    warnings = w1 + w2
+    warnings = w1 + w2 + logo_warnings
+    rep.step("rules", "правила", rules_result(rules),
+             {"rules": [r.model_dump(mode="json") for r in rules], "margins_px": margin, "grid": grid, "logo_place": place, "warnings": list(warnings)})
     spec = BrandSpec(
         name=name or "",
         source="pdf",
@@ -814,24 +850,20 @@ def read_pdf(path: Path | str, *, providers: Any = None, skills: Any = None, use
         pages=len(page_texts),
         colors=colors,
         fonts=fonts,
+        logos=logos,
         margins_px=margin,
         grid=grid,
         rules=rules,
         logo_place=place,
         warnings=warnings,
     )
-    if assets_dir is not None:
-        try:
-            spec.logos = pdf_logos(reader, page_texts, Path(assets_dir))
-        except OSError as e:
-            spec.warnings.append(f"Логотипы из PDF не сохранились: {e}.")
     if can_vlm:
         if skills is None:
             from verstka.skills_registry import SkillsRegistry
 
             skills = SkillsRegistry.load()
         try:
-            reading = _ask_model(path, page_texts, spec, providers, skills)
+            reading = _ask_model(path, page_texts, spec, providers, skills, progress)
             spec.warnings += [w for w in _merge_reading(spec, reading, scanned, name_trusted) if w not in spec.warnings]
         except Exception as e:  # noqa: BLE001 — модель необязательна: при любой её ошибке остаётся чтение по тексту
             log.warning("brandbook_reader failed: %s", e)
@@ -848,6 +880,7 @@ def read_pdf(path: Path | str, *, providers: Any = None, skills: Any = None, use
             spec.warnings.append("В PDF не нашёл цветов (HEX, RGB или CMYK) — палитра останется из шаблона.")
     if not spec.fonts:
         spec.warnings.append("В PDF не нашёл названий шрифтов — шрифты останутся из шаблона.")
+    rep.refresh(spec)  # модель уточнила роли, правила и предупреждения: повторяются только изменившиеся шаги
     return spec
 
 
