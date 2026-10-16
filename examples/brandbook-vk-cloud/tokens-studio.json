@@ -1,0 +1,151 @@
+{
+  "global": {
+    "palette": {
+      "vk-blue": {
+        "value": "#0077FF",
+        "type": "color",
+        "description": "VK Blue"
+      },
+      "cloud-blue": {
+        "value": "#2787F5",
+        "type": "color",
+        "description": "Cloud Blue"
+      },
+      "night": {
+        "value": "#0B1220",
+        "type": "color",
+        "description": "Night"
+      },
+      "white": {
+        "value": "#FFFFFF",
+        "type": "color",
+        "description": "White"
+      },
+      "pink": {
+        "value": "#FF3985",
+        "type": "color",
+        "description": "Pink"
+      },
+      "sky": {
+        "value": "#00C2FF",
+        "type": "color",
+        "description": "Sky"
+      }
+    },
+    "fontFamilies": {
+      "heading": {
+        "value": "VK Sans Display",
+        "type": "fontFamilies"
+      },
+      "body": {
+        "value": "VK Sans Text",
+        "type": "fontFamilies"
+      },
+      "fallback": {
+        "value": "Play",
+        "type": "fontFamilies"
+      }
+    },
+    "fontWeights": {
+      "heading": {
+        "value": "Bold",
+        "type": "fontWeights"
+      },
+      "body": {
+        "value": "Regular",
+        "type": "fontWeights"
+      }
+    },
+    "fontSizes": {
+      "heading": {
+        "value": "40",
+        "type": "fontSizes"
+      },
+      "body": {
+        "value": "18",
+        "type": "fontSizes"
+      }
+    },
+    "spacing": {
+      "margin": {
+        "value": "48",
+        "type": "spacing",
+        "description": "Поля слайда"
+      },
+      "gutter": {
+        "value": "24",
+        "type": "spacing"
+      }
+    },
+    "grid": {
+      "columns": {
+        "value": "12",
+        "type": "other"
+      }
+    }
+  },
+  "brand": {
+    "primary": {
+      "value": "{palette.vk-blue}",
+      "type": "color"
+    },
+    "secondary": {
+      "value": "{palette.cloud-blue}",
+      "type": "color"
+    },
+    "text": {
+      "value": "{palette.night}",
+      "type": "color"
+    },
+    "background": {
+      "value": "{palette.white}",
+      "type": "color"
+    },
+    "accent": {
+      "value": "{palette.pink}",
+      "type": "color",
+      "description": "Только для главного числа на слайде"
+    },
+    "chart": {
+      "value": "{palette.sky}",
+      "type": "color"
+    },
+    "heading": {
+      "value": {
+        "fontFamily": "{fontFamilies.heading}",
+        "fontWeight": "{fontWeights.heading}",
+        "fontSize": "{fontSizes.heading}"
+      },
+      "type": "typography"
+    },
+    "body": {
+      "value": {
+        "fontFamily": "{fontFamilies.body}",
+        "fontWeight": "{fontWeights.body}",
+        "fontSize": "{fontSizes.body}"
+      },
+      "type": "typography"
+    },
+    "logo-position": {
+      "value": "bottom-right",
+      "type": "other",
+      "description": "Логотип — в правом нижнем углу"
+    }
+  },
+  "$themes": [
+    {
+      "id": "vk-cloud",
+      "name": "VK Cloud",
+      "selectedTokenSets": {
+        "global": "source",
+        "brand": "enabled"
+      }
+    }
+  ],
+  "$metadata": {
+    "tokenSetOrder": [
+      "global",
+      "brand"
+    ]
+  }
+}
