@@ -41,26 +41,48 @@ class IRPointLabel(BaseModel):
     size_pt: Optional[float] = None
     series_name: bool = False  # «Было: 48» — the label names its series
     position: Optional[str] = None
+    # its nudge off the position (c:dLbl/c:layout/c:manualLayout), as a fraction of the chart frame: the renderer moves
+    # a point's label aside where it would sit on a neighbour
+    dx: float = 0.0
+    dy: float = 0.0
 
 
 class IRChartSeries(BaseModel):
     name: str
-    values: list[float] = Field(default_factory=list)
-    color: Optional[str] = None  # fill (bars, areas, slices' default) or line colour
+    # None — a point without a value (a gap: a break in the line, no bar), kept in its place against its category
+    values: list[Optional[float]] = Field(default_factory=list)
+    x_values: list[Optional[float]] = Field(default_factory=list)  # a scatter: the X of every point (c:xVal)
+    color: Optional[str] = None  # fill (bars, areas, slices' default), line colour or a scatter's marker fill
     outline_only: bool = False  # a hollow bar (a plan)
     dashed: bool = False
-    point_colors: dict[int, str] = Field(default_factory=dict)  # c:dPt fills (a highlighted bar, pie slices)
+    point_colors: dict[int, str] = Field(default_factory=dict)  # c:dPt fills (a highlighted bar or point, pie slices)
     labels_shown: Optional[bool] = None  # the series' own c:dLbls/c:showVal
     label_format: Optional[str] = None
     label_color: Optional[str] = None
     label_bold: Optional[bool] = None
     label_size_pt: Optional[float] = None
     point_labels: dict[int, IRPointLabel] = Field(default_factory=dict)
+    # markers (a scatter): size in pt (c:marker/c:size), fill opacity, the ring around them (the ground's colour) and a
+    # point's own size (the highlighted point, larger)
+    marker_size: Optional[float] = None
+    marker_alpha: Optional[float] = None
+    marker_line: Optional[str] = None
+    point_sizes: dict[int, float] = Field(default_factory=dict)
+
+
+class IRAxisScale(BaseModel):
+    """A value axis as written: its ends and step (c:scaling/c:min, c:max, c:majorUnit; None — the reader's choice)
+    and the number format of its ticks."""
+
+    min: Optional[float] = None
+    max: Optional[float] = None
+    step: Optional[float] = None
+    format: Optional[str] = None
 
 
 class IRChart(BaseModel):
-    type: str  # bar, column, line, area, pie, doughnut, other
-    categories: list[str] = Field(default_factory=list)
+    type: str  # bar, column, line, area, pie, doughnut, scatter, radar, other
+    categories: list[str] = Field(default_factory=list)  # a scatter: its first series' X as text
     series: list[IRChartSeries] = Field(default_factory=list)
     has_data_labels: bool = False
     has_legend: bool = False
@@ -69,9 +91,19 @@ class IRChart(BaseModel):
     number_format: Optional[str] = None
     title: Optional[str] = None  # chart title or unit caption, top left
     series_labels: bool = False  # series are named on their data labels (a legend's job)
-    axis_color: Optional[str] = None  # category label colour
-    rule_color: Optional[str] = None  # the category axis line
+    axis_color: Optional[str] = None  # category label colour (a scatter: the X axis's)
+    rule_color: Optional[str] = None  # the category axis line (a scatter: the X axis's)
     reversed_categories: bool = False
+    # bars: c:grouping (clustered, stacked, percentStacked, standard), c:gapWidth (0 — a histogram's touching bins) and
+    # c:overlap (−8 — the bars of a cluster just apart, 100 — stacked), both in % of one bar's width
+    grouping: Optional[str] = None
+    gap_width: Optional[int] = None
+    overlap: Optional[int] = None
+    # axis titles: `x_title` on the category axis (a scatter: the X axis), `y_title` on the value axis (Y)
+    x_title: Optional[str] = None
+    y_title: Optional[str] = None
+    value_scale: Optional[IRAxisScale] = None  # the value axis (a scatter: Y)
+    x_scale: Optional[IRAxisScale] = None  # a scatter's X axis
 
 
 class IRTableCell(BaseModel):

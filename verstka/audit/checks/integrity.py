@@ -228,12 +228,13 @@ def author_item_missing(ctx: AuditContext) -> list[Issue]:
         items = _author_items(ctx.brief_text, ref)
         if not items:
             continue
-        # (with the data of the slides' charts: a list of sums drawn as a pie is on the slide as its slices)
+        # (with the data of the slides' charts: a list of sums drawn as a pie is on the slide as its slices; a gap of a
+        # line — a point without a value — says no figure)
         charts = []
         for s, _ in members:
             for e in s.elements:
                 if e.type == "chart" and e.chart:
-                    charts += list(e.chart.categories) + [f"{v:,.2f}".replace(",", "").rstrip("0").rstrip(".") for sr in e.chart.series for v in sr.values]
+                    charts += list(e.chart.categories) + [f"{v:,.2f}".replace(",", "").rstrip("0").rstrip(".") for sr in e.chart.series for v in sr.values if v is not None]
         have = "|".join([slide_text_norm(s) for s, _ in members] + [_norm_text(t) for t in charts])
         missing = [t for t in items if not _item_present(t, have)]
         if not missing:

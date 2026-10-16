@@ -1,8 +1,18 @@
-"""Inline SVG charts from IRChart (bar, column, line, area, pie, doughnut), drawn to the same design as the native
-charts of verstka.rendering.charts, so the web version and the PPTX read as one deck: each bar and slice in the colour
-the chart gives it (the highlight in the accent, the rest stepped back), the labels exactly as the chart formats them
-(the unit once, Russian number format: «12 400», «4,8»), zero labels hidden, a hairline baseline, square bars, pie
-slices parted by gaps rather than by strokes of a guessed background colour, the unit caption at the top left."""
+"""Inline SVG charts from IRChart — bar, column, line, area, pie, doughnut and the data layer's histogram, stacked and
+grouped bars and scatter — drawn to the same design as the native charts of verstka.rendering.charts, so the web
+version and the PPTX read as one deck: each bar, point and slice in the colour the chart gives it (the highlight in the
+accent, the rest stepped back), the labels exactly as the chart formats them (the unit once, Russian number format:
+«12 400», «4,8»), zero labels hidden, a hairline baseline, square bars, pie slices parted by gaps rather than by strokes
+of a guessed background colour, the unit caption at the top left.
+
+What the PPTX wrote is drawn as written: the bars' gap and overlap (in % of one bar's width, as PowerPoint reads them),
+the value axis's ends, step and tick format, a scatter's markers (size, translucent fill, the ring of the ground) and a
+label's nudge off its point. A histogram's bins touch and stacked segments sit one on another, parted by a hairline
+where the ground shows through (SEAM_PT: a gap, never a stroke of a guessed colour), each stacked value inside its
+segment; a scatter's points stand on two value axes, the highlighted one larger and on top; a missing value is a break
+in the line, never a zero, and a line ends (and is labelled) on its last point with a value; axis titles stand along
+their axes in the muted label colour, the vertical one turned to read bottom-up. The source line («Источник: …») is a
+text box of the slide under the chart frame: the HTML exporter draws it with the slide's text, never inside the chart."""
 
 from __future__ import annotations
 
@@ -10,10 +20,12 @@ import html
 import math
 from typing import Optional
 
+from verstka.rendering.charts import SEAM_PT, TITLE_LINE
 from verstka.rendering.fonts import text_width_pt, wrap_lines
-from verstka.schemas.deck_ir import IRChart, IRChartSeries, IRPointLabel
+from verstka.schemas.deck_ir import IRAxisScale, IRChart, IRChartSeries, IRPointLabel
 
 _MINUS = "−"
+_MAX_TICKS = 40
 
 
 # ---------------------------------------------------------------------------------------------- numbers
@@ -108,6 +120,43 @@ def _nice(lo: float, hi: float) -> tuple[float, float, float]:
     return math.floor(lo / step + 1e-9) * step, math.ceil(hi / step - 1e-9) * step, step
 
 
+def _ticks(lo: float, hi: float, step: Optional[float]) -> list[float]:
+    """The tick values from `lo` to `hi` by `step` (the ends alone without a step)."""
+    if not step or step <= 0 or hi <= lo:
+        return [lo, hi] if hi > lo else [lo]
+    n = min(int(math.floor((hi - lo) / step + 1e-6)), _MAX_TICKS)
+    return [lo + i * step for i in range(n + 1)]
+
+
+def _tick_text(v: float, fmt: Optional[str]) -> str:
+    """What a tick prints: the axis's own format; a zero is «0», never blank (a label format hides its zeros)."""
+    return format_value(0.0 if abs(v) < 1e-9 else v, fmt) or "0"
+
+
+def _written_scale(scale: Optional[IRAxisScale]) -> Optional[tuple[float, float, Optional[float]]]:
+    """(min, max, step) of an axis as the PPTX wrote it; None where its ends are the reader's choice."""
+    if scale is None or scale.min is None or scale.max is None or scale.max <= scale.min:
+        return None
+    ok = scale.step is not None and scale.step > 0 and (scale.max - scale.min) / scale.step <= _MAX_TICKS
+    return scale.min, scale.max, (scale.step if ok else None)
+
+
+def _value_range(chart: IRChart, lo: float, hi: float, axis: bool) -> tuple[float, float, Optional[float]]:
+    """The value range of bars: the axis as written, else the data's (round ticks where the axis shows)."""
+    ws = _written_scale(chart.value_scale)
+    if ws is not None:
+        a, b, step = ws
+        return a, b, (step or (_nice(a, b)[2] if axis else None))
+    if axis:
+        return _nice(lo, hi)
+    return lo, hi, None
+
+
+def _scale_format(chart: IRChart, scale: Optional[IRAxisScale]) -> Optional[str]:
+    f = scale.format if scale is not None else None
+    return f if f and f.strip().lower() != "general" else _plain_tick_format(chart)
+
+
 # ---------------------------------------------------------------------------------------------- drawing helpers
 
 
@@ -157,10 +206,12 @@ def _legend_rows(parts: list, items: list[tuple[str, str, bool]], width: float, 
 
 
 class _Labels:
-    """What each point's label says and how it looks, from the series' c:dLbls and its per-point overrides."""
+    """What each point's label says and how it looks, from the series' c:dLbls and its per-point overrides; its nudge
+    is a fraction of the chart frame (`frame_w` × `frame_h`)."""
 
-    def __init__(self, chart: IRChart, text_hex: str, font_px: float):
+    def __init__(self, chart: IRChart, text_hex: str, font_px: float, frame_w: float = 0.0, frame_h: float = 0.0):
         self.chart, self.text, self.size = chart, text_hex, font_px
+        self.frame_w, self.frame_h = frame_w, frame_h
 
     def get(self, s: IRChartSeries, j: int) -> Optional[tuple[str, str, bool, float, Optional[str]]]:
         v = s.values[j] if j < len(s.values) else None
@@ -181,9 +232,81 @@ class _Labels:
         size = (pl.size_pt if pl is not None and pl.size_pt else None) or s.label_size_pt or self.size
         return t, color, bold, size, (pl.position if pl is not None else None)
 
+    def nudge(self, s: IRChartSeries, j: int) -> tuple[float, float]:
+        pl = s.point_labels.get(j)
+        return (pl.dx * self.frame_w, pl.dy * self.frame_h) if pl is not None else (0.0, 0.0)
+
 
 def _series_color(chart: IRChart, s: IRChartSeries, k: int, colors: list[str]) -> str:
     return s.color or (chart.colors[k] if k < len(chart.colors) else None) or colors[k % len(colors)]
+
+
+def _last_value(vals: list[Optional[float]]) -> Optional[int]:
+    return next((j for j in range(len(vals) - 1, -1, -1) if vals[j] is not None), None)
+
+
+def _runs(vals: list[Optional[float]]) -> list[list[int]]:
+    """The unbroken stretches of a series: the indices between its gaps (a missing value breaks the line)."""
+    out: list[list[int]] = []
+    cur: list[int] = []
+    for j, v in enumerate(vals):
+        if v is None:
+            if cur:
+                out.append(cur)
+            cur = []
+        else:
+            cur.append(j)
+    if cur:
+        out.append(cur)
+    return out
+
+
+def _is_stacked(chart: IRChart) -> bool:
+    return chart.type in ("bar", "column") and chart.grouping in ("stacked", "percentStacked")
+
+
+def _stack_spans(series: list[IRChartSeries], n_cat: int, pct: bool) -> tuple[dict[tuple[int, int], tuple[float, float]], list[float], list[float]]:
+    """Where each stacked segment runs ((series, category) → (from, to) in values: positives up from zero, negatives
+    down; a percent stack in shares of its category) and how far each stack reaches up and down."""
+    spans: dict[tuple[int, int], tuple[float, float]] = {}
+    tops: list[float] = []
+    bots: list[float] = []
+    for j in range(n_cat):
+        vals = [(k, s.values[j]) for k, s in enumerate(series) if j < len(s.values) and s.values[j] is not None]
+        total = sum(abs(v) for _, v in vals) or 1.0
+        up = down = 0.0
+        for k, v in vals:
+            if pct:
+                v = v / total * 100.0
+            if v >= 0:
+                spans[(k, j)] = (up, up + v)
+                up += v
+            else:
+                spans[(k, j)] = (down + v, down)
+                down += v
+        tops.append(up)
+        bots.append(down)
+    return spans, tops, bots
+
+
+def _bar_geometry(chart: IRChart, slot: float, k_ser: int, stacked: bool, fallback_group: float) -> tuple[float, float, float, float]:
+    """(cluster width, bar width, pitch between the bars of a cluster, gap inside a bar's own room) across one category
+    `slot` — c:gapWidth and c:overlap as PowerPoint reads them, in % of one bar's width (a histogram: 0, the bins
+    touch; stacked: one bar). A chart that wrote neither keeps the designed proportions."""
+    nb = 1 if stacked else max(k_ser, 1)
+    if chart.gap_width is not None:
+        ov = 1.0 if stacked else max(-1.0, min(1.0, (chart.overlap or 0) / 100.0))
+        bar = slot / (nb - (nb - 1) * ov + max(0, chart.gap_width) / 100.0)
+        pitch = bar * (1.0 - ov)
+        return bar + (nb - 1) * pitch, bar, pitch, 0.0
+    bar = fallback_group / nb
+    return fallback_group, bar, bar, (bar * 0.08 if nb > 1 else 0.0)
+
+
+def _circle(x: float, y: float, r: float, fill: str, alpha: Optional[float] = None, ring: Optional[str] = None, ring_w: float = 0.0) -> str:
+    op = f' fill-opacity="{alpha:.2f}"' if alpha is not None and alpha < 0.999 else ""
+    st = f' stroke="#{ring}" stroke-width="{ring_w:g}"' if ring and ring_w else ""
+    return f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{r:.1f}" fill="#{fill}"{op}{st}/>'
 
 
 # ---------------------------------------------------------------------------------------------- the chart
@@ -196,47 +319,90 @@ def chart_svg(chart: IRChart, width: float, height: float, colors: list[str], te
     n_cat = max(len(cats), max((len(s.values) for s in series), default=0))
     muted = chart.axis_color or text_hex
     rule = chart.rule_color
-    labels = _Labels(chart, text_hex, font_px)
+    labels = _Labels(chart, text_hex, font_px, width, height)
     parts = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width:.0f} {height:.0f}" width="100%" height="100%" font-family="{html.escape(font)}" font-size="{font_px}" fill="#{text_hex}">']
     top = 2.0
     if chart.title:
         parts.append(_txt(0, font_px * 0.7, chart.title, font_px, muted, anchor="start"))
         top += font_px * 1.6
     k_ser = len(series)
-    legend_names = [s.name for s in series] if (chart.has_legend and k_ser > 1 and chart.type not in ("pie", "doughnut")) else []
+    pie = chart.type in ("pie", "doughnut")
+    legend_names = [s.name for s in series] if (chart.has_legend and k_ser > 1 and not pie) else []
     bottom_legend = font_px * 1.9 if legend_names else 0.0
     if legend_names and sum(_width(nm, font_px) + font_px * 2.2 for nm in legend_names) > width:
         bottom_legend += font_px * 1.5
 
-    if chart.type in ("pie", "doughnut") and series:
+    if pie and series:
         parts += _pie(chart, series[0], cats, width, height, top, colors, text_hex, muted, font_px, labels)
         parts.append("</svg>")
         return "".join(parts)
+
+    # axis titles take a line of room along their axes: the left one at the frame's left edge (turned), the bottom one
+    # above the legend; horizontal bars carry the categories' title on the left
+    horizontal = chart.type == "bar"
+    left_t, bottom_t = (chart.x_title, chart.y_title) if horizontal else (chart.y_title, chart.x_title)
+    inset_l = font_px * (TITLE_LINE + 0.45) if left_t else 0.0
+    inset_b = font_px * (TITLE_LINE + 0.35) if bottom_t else 0.0
+    w_in, h_in = width - inset_l, height - bottom_legend - inset_b
 
     all_vals = [v for s in series for v in s.values if v is not None]
     vmax = max(all_vals + [0.0])
     vmin = min(all_vals + [0.0])
     base_rule = f'stroke="#{rule}"' if rule else f'stroke="#{text_hex}" stroke-opacity="0.25"'
+    geo: dict = {}
     if chart.type == "bar":
-        parts += _hbars(chart, series, cats, n_cat, width, height - bottom_legend, top, colors, muted, base_rule, font_px, labels, vmin, vmax)
+        body = _hbars(chart, series, cats, n_cat, w_in, h_in, top, colors, muted, base_rule, font_px, labels, vmin, vmax, geo)
     elif chart.type in ("line", "area"):
-        parts += _lines(chart, series, cats, n_cat, width, height - bottom_legend, top, colors, text_hex, muted, font_px, labels, vmin, vmax)
+        body = _lines(chart, series, cats, n_cat, w_in, h_in, top, colors, text_hex, muted, font_px, labels, vmin, vmax, geo)
+    elif chart.type == "scatter":
+        body = _scatter(chart, series, w_in, h_in, top, colors, muted, base_rule, font_px, labels, geo)
     else:
-        parts += _columns(chart, series, cats, n_cat, width, height - bottom_legend, top, colors, muted, base_rule, font_px, labels, vmin, vmax)
+        body = _columns(chart, series, cats, n_cat, w_in, h_in, top, colors, muted, base_rule, font_px, labels, vmin, vmax, geo)
+    if inset_l:
+        parts.append(f'<g transform="translate({inset_l:.1f},0)">')
+        parts += body
+        parts.append("</g>")
+    else:
+        parts += body
+    _axis_titles(parts, left_t, bottom_t, geo, inset_l, inset_b, width, h_in, muted, font_px)
     if legend_names:
         _legend_rows(parts, [(s.name, _series_color(chart, s, k, colors), s.outline_only) for k, s in enumerate(series)], width, height - font_px * 0.7, font_px, muted)
     parts.append("</svg>")
     return "".join(parts)
 
 
-def _value_axis(parts: list, x0: float, x1: float, y_of, lo: float, hi: float, step: float, muted: str, font_px: float, fmt: Optional[str]) -> None:
-    v = lo
-    while v <= hi + step * 1e-6:
+def _title_size(text: str, side: float, font_px: float) -> float:
+    """An axis title longer than its side steps down a size or two (as the PPTX sets it)."""
+    size = font_px
+    for s in (font_px, font_px * 0.9, font_px * 0.82):
+        size = s
+        if _width(text, s) + 4 <= side * 0.98:
+            break
+    return size
+
+
+def _axis_titles(parts: list, left_t: Optional[str], bottom_t: Optional[str], geo: dict, inset_l: float, inset_b: float, width: float, h_in: float, muted: str, font_px: float) -> None:
+    """The left title turned to read bottom-up, centred on the plot's height at the frame's left edge; the bottom one
+    centred under the plot, just above the legend. Both in the muted label colour, not bold."""
+    left, top, pw, ph = geo.get("plot") or (0.0, 0.0, width - inset_l, h_in)
+    if left_t:
+        size = _title_size(left_t, ph, font_px)
+        half = min(_width(left_t, size), h_in) / 2
+        cx = size * TITLE_LINE / 2
+        cy = min(max(top + ph / 2, half), max(half, h_in - half))
+        parts.append(f'<text x="{cx:.1f}" y="{cy:.1f}" transform="rotate(-90 {cx:.1f} {cy:.1f})" font-size="{size:.1f}" fill="#{muted}" text-anchor="middle" dominant-baseline="middle">{html.escape(left_t)}</text>')
+    if bottom_t:
+        size = _title_size(bottom_t, pw, font_px)
+        half = min(_width(bottom_t, size), width) / 2
+        cx = min(max(inset_l + left + pw / 2, half), max(half, width - half))
+        parts.append(_txt(cx, h_in + inset_b - size * TITLE_LINE / 2, bottom_t, size, muted))
+
+
+def _value_axis(parts: list, x0: float, x1: float, y_of, ticks: list[float], muted: str, font_px: float, fmt: Optional[str]) -> None:
+    for v in ticks:
         y = y_of(v)
         parts.append(f'<line x1="{x0:.1f}" y1="{y:.1f}" x2="{x1:.1f}" y2="{y:.1f}" stroke="#{muted}" stroke-opacity="0.18" stroke-width="0.5"/>')
-        t = format_value(v, fmt) if v else "0"
-        parts.append(_txt(x0 - font_px * 0.5, y, t, font_px, muted, anchor="end"))
-        v += step
+        parts.append(_txt(x0 - font_px * 0.5, y, _tick_text(v, fmt), font_px, muted, anchor="end"))
 
 
 def _plain_tick_format(chart: IRChart) -> Optional[str]:
@@ -244,25 +410,32 @@ def _plain_tick_format(chart: IRChart) -> Optional[str]:
     return '0"%"' if "%" in fmt else "#,##0"
 
 
-def _columns(chart, series, cats, n_cat, width, height, top, colors, muted, base_rule, font_px, labels, vmin, vmax) -> list:
+def _columns(chart, series, cats, n_cat, width, height, top, colors, muted, base_rule, font_px, labels, vmin, vmax, geo) -> list:
+    """Columns: one series, several side by side, stacked parts of a whole, or a histogram's touching bins."""
     parts: list = []
     k_ser = max(len(series), 1)
+    stacked = _is_stacked(chart)
+    spans: dict = {}
+    if stacked:
+        spans, tops, bots = _stack_spans(series, n_cat, chart.grouping == "percentStacked")
+        vmin, vmax = min([0.0] + bots), max([0.0] + tops)
     label_room = max((labels.get(s, j) or ("", "", False, font_px, None))[3] for s in series for j in range(len(s.values))) if series else font_px
-    left = 0.0
-    lo, hi = vmin, vmax
-    if chart.has_value_axis:
-        lo, hi, step = _nice(vmin, vmax)
-        left = _width(format_value(hi, "#,##0"), font_px) + font_px
-    pad_t = top + label_room * 1.6
-    pad_b = font_px * 2.2 + (label_room * 1.5 if vmin < 0 else 0.0)
+    lo, hi, step = _value_range(chart, vmin, vmax, chart.has_value_axis)
+    fmt = _scale_format(chart, chart.value_scale)
+    ticks = _ticks(lo, hi, step) if chart.has_value_axis else []
+    left = (max(_width(_tick_text(v, fmt), font_px) for v in ticks) + font_px) if ticks else 0.0
+    # stacked values sit inside their segments: no room above the bars for them
+    pad_t = top + (font_px * 0.7 if stacked else label_room * 1.6)
+    pad_b = font_px * 2.2 + (label_room * 1.5 if vmin < 0 and not stacked else 0.0)
     pw, ph = width - left - 2, height - pad_t - pad_b
     span = (hi - lo) or 1.0
     y_of = lambda v: pad_t + ph * (hi - v) / span  # noqa: E731
-    if chart.has_value_axis:
-        _value_axis(parts, left, width, y_of, lo, hi, step, muted, font_px, _plain_tick_format(chart))
+    geo["plot"] = (left, pad_t, pw, ph)
+    if ticks:
+        _value_axis(parts, left, width, y_of, ticks, muted, font_px, fmt)
     slot = pw / max(n_cat, 1)
-    group = min(slot / 1.7, width * 0.16 * min(k_ser, 3) * 0.9 if k_ser > 1 else width * 0.16)
-    bar = group / k_ser
+    group, bar, pitch, inner = _bar_geometry(chart, slot, k_ser, stacked, min(slot / 1.7, width * 0.16 * min(k_ser, 3) * 0.9 if k_ser > 1 else width * 0.16))
+    seam = SEAM_PT if (stacked or chart.gap_width == 0) else 0.0
     for i in range(n_cat):
         x_g = left + i * slot + (slot - group) / 2
         for k, s in enumerate(series):
@@ -270,39 +443,60 @@ def _columns(chart, series, cats, n_cat, width, height, top, colors, muted, base
             if v is None:
                 continue
             col = s.point_colors.get(i) or _series_color(chart, s, k, colors)
-            y0, y1 = sorted((y_of(0.0), y_of(v)))
-            x = x_g + k * bar
-            gap = bar * 0.08 if k_ser > 1 else 0.0
-            if s.outline_only:
-                parts.append(f'<rect x="{x + gap / 2 + 0.75:.1f}" y="{y0 + 0.75:.1f}" width="{max(0.0, bar - gap - 1.5):.1f}" height="{max(0.0, y1 - y0 - 0.75):.1f}" fill="none" stroke="#{col}" stroke-width="1.5"/>')
+            if stacked:
+                y0, y1 = sorted((y_of(spans[(k, i)][0]), y_of(spans[(k, i)][1])))
+                x = x_g
             else:
-                parts.append(f'<rect x="{x + gap / 2:.1f}" y="{y0:.1f}" width="{bar - gap:.1f}" height="{y1 - y0:.1f}" fill="#{col}"/>')
+                y0, y1 = sorted((y_of(0.0), y_of(v)))
+                x = x_g + k * pitch
+            if s.outline_only:
+                parts.append(f'<rect x="{x + inner / 2 + 0.75:.1f}" y="{y0 + 0.75:.1f}" width="{max(0.0, bar - inner - 1.5):.1f}" height="{max(0.0, y1 - y0 - 0.75):.1f}" fill="none" stroke="#{col}" stroke-width="1.5"/>')
+            else:
+                parts.append(f'<rect x="{x + inner / 2 + seam / 2:.1f}" y="{y0 + seam / 2:.1f}" width="{max(0.0, bar - inner - seam):.1f}" height="{max(0.0, y1 - y0 - seam):.1f}" fill="#{col}"/>')
             lab = labels.get(s, i)
             if lab:
                 t, c, b, size, _ = lab
-                y = (y0 - size * 0.7) if v >= 0 else (y1 + size * 0.8)
+                if stacked:
+                    y = (y0 + y1) / 2  # inside its segment
+                else:
+                    y = (y0 - size * 0.7) if v >= 0 else (y1 + size * 0.8)
                 parts.append(_txt(x + bar / 2, y, t, size, c, bold=b))
         if i < len(cats) and i % _cat_step(cats, slot, font_px) == 0:
             parts.append(_txt(left + i * slot + slot / 2, height - font_px * 1.0, cats[i], font_px, muted))
-    y_base = y_of(0.0)
+    y_base = y_of(0.0) if lo <= 0.0 <= hi else y_of(lo)
     parts.append(f'<line x1="{left:.1f}" y1="{y_base:.1f}" x2="{left + pw:.1f}" y2="{y_base:.1f}" {base_rule} stroke-width="0.75"/>')
     return parts
 
 
-def _hbars(chart, series, cats, n_cat, width, height, top, colors, muted, base_rule, font_px, labels, vmin, vmax) -> list:
+def _hbars(chart, series, cats, n_cat, width, height, top, colors, muted, base_rule, font_px, labels, vmin, vmax, geo) -> list:
+    """Horizontal bars read top-down: one series, several side by side, or stacked parts of a whole."""
     parts: list = []
     k_ser = max(len(series), 1)
+    stacked = _is_stacked(chart)
+    spans: dict = {}
+    if stacked:
+        spans, tops, bots = _stack_spans(series, n_cat, chart.grouping == "percentStacked")
+        vmin, vmax = min([0.0] + bots), max([0.0] + tops)
     cat_w = min(max((_width(c, font_px) for c in cats), default=20.0), width * 0.36)
     wrapped = [wrap_lines(c, None, font_px, False, cat_w / 1.05)[:3] for c in cats]
-    lab_w = max((_width(lab[0], lab[3], lab[2]) for s in series for j in range(len(s.values)) if (lab := labels.get(s, j))), default=0.0)
+    lab_w = 0.0 if stacked else max((_width(lab[0], lab[3], lab[2]) for s in series for j in range(len(s.values)) if (lab := labels.get(s, j))), default=0.0)
     left = cat_w + font_px * 0.8
-    pw = max(width - left - lab_w - font_px * 0.8, width * 0.3)
-    ph = height - top - font_px * 0.6
-    span = (vmax - min(vmin, 0.0)) or 1.0
-    x_of = lambda v: left + pw * (v - min(vmin, 0.0)) / span  # noqa: E731
+    lo, hi, step = _value_range(chart, min(vmin, 0.0), vmax, chart.has_value_axis)
+    fmt = _scale_format(chart, chart.value_scale)
+    ticks = _ticks(lo, hi, step) if chart.has_value_axis else []
+    right = max(lab_w, (_width(_tick_text(ticks[-1], fmt), font_px) / 2) if ticks else 0.0)
+    pw = max(width - left - right - font_px * 0.8, width * 0.3)
+    ph = height - top - font_px * 0.6 - (font_px * 1.8 if ticks else 0.0)
+    span = (hi - lo) or 1.0
+    x_of = lambda v: left + pw * (v - lo) / span  # noqa: E731
+    geo["plot"] = (left, top, pw, ph)
+    for v in ticks:  # a value axis under the bars: quiet vertical gridlines, the ticks below
+        x = x_of(v)
+        parts.append(f'<line x1="{x:.1f}" y1="{top:.1f}" x2="{x:.1f}" y2="{top + ph:.1f}" stroke="#{muted}" stroke-opacity="0.18" stroke-width="0.5"/>')
+        parts.append(_txt(x, top + ph + font_px * 0.9, _tick_text(v, fmt), font_px, muted))
     row = ph / max(n_cat, 1)
-    group = min(row / 1.7, font_px * 2.6 * (min(k_ser, 3) * 0.9 if k_ser > 1 else 1))
-    bar = group / k_ser
+    group, bar, pitch, inner = _bar_geometry(chart, row, k_ser, stacked, min(row / 1.7, font_px * 2.6 * (min(k_ser, 3) * 0.9 if k_ser > 1 else 1)))
+    seam = SEAM_PT if (stacked or chart.gap_width == 0) else 0.0
     for i in range(n_cat):
         y_g = top + i * row + (row - group) / 2
         for k, s in enumerate(series):
@@ -310,17 +504,23 @@ def _hbars(chart, series, cats, n_cat, width, height, top, colors, muted, base_r
             if v is None:
                 continue
             col = s.point_colors.get(i) or _series_color(chart, s, k, colors)
-            x0, x1 = sorted((x_of(0.0), x_of(v)))
-            y = y_g + k * bar
-            gap = bar * 0.08 if k_ser > 1 else 0.0
+            if stacked:
+                x0, x1 = sorted((x_of(spans[(k, i)][0]), x_of(spans[(k, i)][1])))
+                y = y_g
+            else:
+                x0, x1 = sorted((x_of(0.0), x_of(v)))
+                y = y_g + k * pitch
             if s.outline_only:
-                parts.append(f'<rect x="{x0:.1f}" y="{y + gap / 2 + 0.75:.1f}" width="{max(0.0, x1 - x0 - 0.75):.1f}" height="{max(0.0, bar - gap - 1.5):.1f}" fill="none" stroke="#{col}" stroke-width="1.5"/>')
-            elif x1 > x0:
-                parts.append(f'<rect x="{x0:.1f}" y="{y + gap / 2:.1f}" width="{x1 - x0:.1f}" height="{bar - gap:.1f}" fill="#{col}"/>')
+                parts.append(f'<rect x="{x0:.1f}" y="{y + inner / 2 + 0.75:.1f}" width="{max(0.0, x1 - x0 - 0.75):.1f}" height="{max(0.0, bar - inner - 1.5):.1f}" fill="none" stroke="#{col}" stroke-width="1.5"/>')
+            elif x1 - x0 > seam:
+                parts.append(f'<rect x="{x0 + seam / 2:.1f}" y="{y + inner / 2 + seam / 2:.1f}" width="{x1 - x0 - seam:.1f}" height="{max(0.0, bar - inner - seam):.1f}" fill="#{col}"/>')
             lab = labels.get(s, i)
             if lab:
                 t, c, b, size, _ = lab
-                parts.append(_txt(x1 + size * 0.4, y + bar / 2, t, size, c, anchor="start", bold=b))
+                if stacked:
+                    parts.append(_txt((x0 + x1) / 2, y + bar / 2, t, size, c, bold=b))  # inside its segment
+                else:
+                    parts.append(_txt(x1 + size * 0.4, y + bar / 2, t, size, c, anchor="start", bold=b))
         if i < len(cats):
             parts.append(_lines_txt(cat_w, top + i * row + row / 2, wrapped[i], font_px, muted, "end"))
     if vmin < 0:
@@ -329,19 +529,32 @@ def _hbars(chart, series, cats, n_cat, width, height, top, colors, muted, base_r
     return parts
 
 
-def _lines(chart, series, cats, n_cat, width, height, top, colors, text_hex, muted, font_px, labels, vmin, vmax) -> list:
+def _lines(chart, series, cats, n_cat, width, height, top, colors, text_hex, muted, font_px, labels, vmin, vmax, geo) -> list:
+    """Lines and areas: a missing value breaks the line (and the area) — never a zero; the end label sits on the last
+    point with a value."""
     parts: list = []
     data = [v for s in series for v in s.values if v is not None]
     vmin = min(data) if data else vmin
     lo, hi = min(vmin, 0.0) if vmin < 0 else vmin, vmax
+    step = None
     left = 2.0
+    ws = _written_scale(chart.value_scale)
+    fmt = _scale_format(chart, chart.value_scale)
+    if ws is not None:
+        lo, hi = ws[0], ws[1]
     if chart.has_value_axis:
-        lo, hi, step = _nice(0.0 if (vmin >= 0 and (chart.type == "area" or vmin <= 0.45 * vmax)) else vmin, vmax)
-        left = _width(format_value(hi, "#,##0"), font_px) + font_px
-    elif vmin > 0:
+        if ws is not None:
+            step = ws[2] or _nice(lo, hi)[2]
+        else:
+            lo, hi, step = _nice(0.0 if (vmin >= 0 and (chart.type == "area" or vmin <= 0.45 * vmax)) else vmin, vmax)
+        left = max(_width(_tick_text(v, fmt), font_px) for v in _ticks(lo, hi, step)) + font_px
+    elif ws is None and vmin > 0:
         lo = 0.0 if vmin <= 0.45 * vmax else vmin - (vmax - vmin) * 0.25
-    end_w = max((_width(lab[0], lab[3], lab[2]) for s in series if s.values and (lab := labels.get(s, len(s.values) - 1)) and (lab[4] == "r")), default=0.0)
-    pad_t = top + font_px * 1.8
+    lasts = [_last_value(s.values) for s in series]
+    end_w = max((_width(lab[0], lab[3], lab[2]) for s, j in zip(series, lasts) if j is not None and (lab := labels.get(s, j)) and (lab[4] == "r")), default=0.0)
+    # room over the highest point for a label set above it (the highlight's, a size up, stays whole)
+    over = max((lab[3] for s in series for j in range(len(s.values)) if (lab := labels.get(s, j)) and lab[4] not in ("r", "l", "b")), default=0.0)
+    pad_t = top + max(font_px * 1.8, over * 1.5 + 2)
     pad_b = font_px * 2.2
     pw = width - left - max(end_w + font_px, font_px * 1.5)
     ph = height - pad_t - pad_b
@@ -349,14 +562,14 @@ def _lines(chart, series, cats, n_cat, width, height, top, colors, text_hex, mut
     step_x = pw / max(n_cat, 1)
     x_of = lambda j: left + (j + 0.5) * step_x  # noqa: E731
     y_of = lambda v: pad_t + ph * (hi - v) / span  # noqa: E731
+    geo["plot"] = (left, pad_t, pw, ph)
     if chart.has_value_axis:
-        _value_axis(parts, left, left + pw, y_of, lo, hi, step, muted, font_px, _plain_tick_format(chart))
-    # end labels right of the last point, pushed apart where two lines end close together
+        _value_axis(parts, left, left + pw, y_of, _ticks(lo, hi, step), muted, font_px, fmt)
+    # end labels right of the last point with a value, pushed apart where two lines end close together
     ends = {}
-    for k, s in enumerate(series):
-        j = len(s.values) - 1
-        lab = labels.get(s, j) if j >= 0 else None
-        if lab and lab[4] == "r" and s.values[j] is not None:
+    for k, (s, j) in enumerate(zip(series, lasts)):
+        lab = labels.get(s, j) if j is not None else None
+        if lab and lab[4] == "r":
             ends[k] = y_of(s.values[j])
     lab_h = font_px * 1.25
     moved = dict(ends)
@@ -369,14 +582,18 @@ def _lines(chart, series, cats, n_cat, width, height, top, colors, text_hex, mut
                 moved[b] += push
     for k, s in enumerate(series):
         col = _series_color(chart, s, k, colors)
-        pts = [(x_of(j), y_of(v)) for j, v in enumerate(s.values) if v is not None]
-        if not pts:
+        runs = _runs(s.values)
+        if not runs:
             continue
-        if chart.type == "area":
-            d = f"M{pts[0][0]:.1f},{y_of(max(lo, 0.0)):.1f} " + " ".join(f"L{x:.1f},{y:.1f}" for x, y in pts) + f" L{pts[-1][0]:.1f},{y_of(max(lo, 0.0)):.1f} Z"
-            parts.append(f'<path d="{d}" fill="#{col}" fill-opacity="0.3"/>')
         dash = ' stroke-dasharray="5 4"' if s.dashed else ""
-        parts.append(f'<polyline points="{" ".join(f"{x:.1f},{y:.1f}" for x, y in pts)}" fill="none" stroke="#{col}" stroke-width="{1.5 if s.dashed else 2.25}" stroke-linejoin="round"{dash}/>')
+        for run in runs:  # one stretch between gaps: its own area and its own polyline
+            pts = [(x_of(j), y_of(s.values[j])) for j in run]
+            if chart.type == "area":
+                base = y_of(max(lo, 0.0))
+                d = f"M{pts[0][0]:.1f},{base:.1f} " + " ".join(f"L{x:.1f},{y:.1f}" for x, y in pts) + f" L{pts[-1][0]:.1f},{base:.1f} Z"
+                parts.append(f'<path d="{d}" fill="#{col}" fill-opacity="0.3"/>')
+            if len(pts) >= 2:
+                parts.append(f'<polyline points="{" ".join(f"{x:.1f},{y:.1f}" for x, y in pts)}" fill="none" stroke="#{col}" stroke-width="{1.5 if s.dashed else 2.25}" stroke-linejoin="round"{dash}/>')
         for j, v in enumerate(s.values):
             if v is None:
                 continue
@@ -384,14 +601,18 @@ def _lines(chart, series, cats, n_cat, width, height, top, colors, text_hex, mut
             lab = labels.get(s, j)
             big = bool(lab and (lab[2] or lab[3] > labels.size * 1.05))
             if chart.type == "line" and not s.dashed:
-                parts.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{5 if big else 3.5}" fill="#{s.point_colors.get(j, col)}"/>')
-            elif chart.type == "area" and j == len(s.values) - 1:
-                parts.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="3.5" fill="#{col}"/>')
+                # the markers as the PPTX sizes them (the highlight larger), ringed in the ground's colour
+                r = ((s.point_sizes.get(j) or s.marker_size) / 2) if s.marker_size else (5 if big else 3.5)
+                parts.append(_circle(x, y, r, s.point_colors.get(j, col), ring=s.marker_line, ring_w=2.0 if j in s.point_sizes else 1.5))
+            elif chart.type == "area" and j == lasts[k]:
+                parts.append(_circle(x, y, 3.5, col))
             if lab:
                 t, c, b, size, pos = lab
                 if pos == "r":
-                    parts.append(_txt(x + 7, moved.get(k, y) if j == len(s.values) - 1 else y, t, size, c, anchor="start", bold=b))
-                elif pos == "b":
+                    parts.append(_txt(x + 7, moved.get(k, y) if j == lasts[k] else y, t, size, c, anchor="start", bold=b))
+                    continue
+                x += labels.nudge(s, j)[0]  # (a label moved aside off a neighbouring segment)
+                if pos == "b":
                     parts.append(_txt(x, y + size * 1.1, t, size, c, bold=b))
                 elif pos == "l":
                     parts.append(_txt(x - 7, y, t, size, c, anchor="end", bold=b))
@@ -401,6 +622,87 @@ def _lines(chart, series, cats, n_cat, width, height, top, colors, text_hex, mut
     for i, c in enumerate(cats):
         if i % skip == 0:
             parts.append(_txt(x_of(i), pad_t + ph + font_px * 1.2, c, font_px, muted))
+    return parts
+
+
+def _xy_range(scale: Optional[IRAxisScale], vals: list[float]) -> tuple[float, float, float]:
+    """A scatter axis: as the PPTX wrote it, else round ticks from zero when the data sit near it (as a line's axis),
+    else from a round value under the lowest point."""
+    ws = _written_scale(scale)
+    if ws is not None:
+        return ws[0], ws[1], (ws[2] or _nice(ws[0], ws[1])[2])
+    vals = vals or [0.0]
+    mn, mx = min(vals), max(vals)
+    lo_raw = 0.0 if (mn >= 0 and mn <= 0.45 * mx) else mn - (mx - mn) * 0.08
+    hi_raw = mx + (mx - mn) * 0.04
+    lo, hi, step = _nice(lo_raw, hi_raw if hi_raw > lo_raw else lo_raw + (abs(lo_raw) or 1.0))
+    return (max(0.0, lo) if mn >= 0 else lo), hi, step
+
+
+def _num(t: str) -> Optional[float]:
+    try:
+        return float(t)
+    except (TypeError, ValueError):
+        return None
+
+
+def _scatter(chart, series, width, height, top, colors, muted, base_rule, font_px, labels, geo) -> list:
+    """Points only, no lines: translucent ringed markers on two quiet value axes on the PPTX's round ticks — Y with
+    gridlines, X on a hairline baseline; the highlighted point larger, in the accent, on top, with its value beside it."""
+    parts: list = []
+    cat_x = [_num(c) for c in chart.categories]
+    pts = [
+        (k, j, x, y)
+        for k, s in enumerate(series)
+        for j, (x, y) in enumerate(zip(s.x_values or (cat_x if k == 0 else []), s.values))
+        if x is not None and y is not None
+    ]
+    x_lo, x_hi, x_step = _xy_range(chart.x_scale, [p[2] for p in pts])
+    y_lo, y_hi, y_step = _xy_range(chart.value_scale, [p[3] for p in pts])
+    x_fmt, y_fmt = _scale_format(chart, chart.x_scale), _scale_format(chart, chart.value_scale)
+    x_ticks, y_ticks = _ticks(x_lo, x_hi, x_step), _ticks(y_lo, y_hi, y_step)
+    left = max((_width(_tick_text(v, y_fmt), font_px) for v in y_ticks), default=font_px) + font_px * 0.8
+    right = max(2.0, _width(_tick_text(x_ticks[-1], x_fmt), font_px) / 2 + 2)
+    pad_t = top + font_px * 0.9
+    pad_b = font_px * TITLE_LINE + font_px * 0.6
+    pw = max(width - left - right, width * 0.3)
+    ph = max(height - pad_t - pad_b, height * 0.3)
+    x_of = lambda v: left + pw * (v - x_lo) / ((x_hi - x_lo) or 1.0)  # noqa: E731
+    y_of = lambda v: pad_t + ph * (y_hi - v) / ((y_hi - y_lo) or 1.0)  # noqa: E731
+    geo["plot"] = (left, pad_t, pw, ph)
+    if chart.has_value_axis:
+        _value_axis(parts, left, left + pw, y_of, y_ticks, muted, font_px, y_fmt)
+    y_base = y_of(0.0) if y_lo <= 0.0 <= y_hi else y_of(y_lo)
+    parts.append(f'<line x1="{left:.1f}" y1="{y_base:.1f}" x2="{left + pw:.1f}" y2="{y_base:.1f}" {base_rule} stroke-width="0.75"/>')
+    for v in x_ticks:
+        parts.append(_txt(x_of(v), pad_t + ph + font_px * 0.95, _tick_text(v, x_fmt), font_px, muted))
+    marks: list[tuple[int, str]] = []  # (layer, svg): the highlighted points over the others
+    for k, j, x, y in pts:
+        s = series[k]
+        col = _series_color(chart, s, k, colors)
+        r = (s.marker_size or 7.0) / 2
+        if j in s.point_sizes or j in s.point_colors:
+            marks.append((1, _circle(x_of(x), y_of(y), (s.point_sizes.get(j) or s.marker_size or 7.0) / 2, s.point_colors.get(j, col), None, s.marker_line, 1.5)))
+        else:
+            marks.append((0, _circle(x_of(x), y_of(y), r, col, s.marker_alpha, s.marker_line, 0.75)))
+    parts += [m for _, m in sorted(marks, key=lambda m: m[0])]
+    for k, j, x, y in pts:
+        s = series[k]
+        lab = labels.get(s, j)
+        if not lab:
+            continue
+        t, c, b, size, pos = lab
+        dx, dy = labels.nudge(s, j)
+        cx, cy = x_of(x) + dx, y_of(y) + dy
+        gap = (s.point_sizes.get(j) or s.marker_size or 7.0) / 2 + 3
+        if pos == "b":
+            parts.append(_txt(cx, cy + gap + size * 0.6, t, size, c, bold=b))
+        elif pos == "r":
+            parts.append(_txt(cx + gap, cy, t, size, c, anchor="start", bold=b))
+        elif pos == "l":
+            parts.append(_txt(cx - gap, cy, t, size, c, anchor="end", bold=b))
+        else:
+            parts.append(_txt(cx, cy - gap - size * 0.6, t, size, c, bold=b))
     return parts
 
 

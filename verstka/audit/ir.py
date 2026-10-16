@@ -13,7 +13,7 @@ from verstka.analysis.shapes import SlideContext, extract_shapes, slide_family
 from verstka.analysis.xmlns import NS, find, findall, q
 from verstka.ingest.package import PptxPackage
 from verstka.schemas.common import ShapeKind
-from verstka.schemas.deck_ir import DeckIR, IRChart, IRChartSeries, IRElement, IRParagraph, IRPictureCells, IRPointLabel, IRRun, IRSlide, IRTable, IRTableCell
+from verstka.schemas.deck_ir import DeckIR, IRAxisScale, IRChart, IRChartSeries, IRElement, IRParagraph, IRPictureCells, IRPointLabel, IRRun, IRSlide, IRTable, IRTableCell
 
 OUTLINE_MARK_RE = re.compile(r"\[verstka:([A-Za-z0-9_\-]+)\]")
 
@@ -41,19 +41,42 @@ def _on(el: Optional[etree._Element], path: str) -> Optional[bool]:
     return None if f is None else f.get("val") in ("1", "true", None)
 
 
+def _val(el: Optional[etree._Element], path: str) -> Optional[float]:
+    """The number in `val` of the element at `path` (None where it is not written)."""
+    f = find(el, path) if el is not None else None
+    return _num(f.get("val")) if f is not None else None
+
+
+def _alpha(el: Optional[etree._Element], path: str) -> Optional[float]:
+    v = _val(el, path)
+    return v / 100000 if v is not None else None
+
+
 def _series_style(ser: etree._Element, series: IRChartSeries) -> None:
     """Paint and label overrides of one c:ser, as a chart made by verstka.rendering.charts writes them."""
     sp = find(ser, "c:spPr")
     fill = _srgb(sp, "a:solidFill/a:srgbClr")
     line = _srgb(sp, "a:ln/a:solidFill/a:srgbClr")
-    series.color = series.color or fill or line
+    # a scatter's points are its markers: their fill (translucent), their ring and their size
+    mk = find(ser, "c:marker")
+    mk_fill = _srgb(mk, "c:spPr/a:solidFill/a:srgbClr")
+    series.color = series.color or fill or line or mk_fill
     series.outline_only = sp is not None and find(sp, "a:noFill") is not None and line is not None
     series.dashed = sp is not None and find(sp, "a:ln/a:prstDash") is not None and find(sp, "a:ln/a:prstDash").get("val") not in ("solid", None)
+    if mk is not None and mk_fill:
+        series.marker_size = _val(mk, "c:size")
+        series.marker_alpha = _alpha(mk, "c:spPr/a:solidFill/a:srgbClr/a:alpha")
+        series.marker_line = _srgb(mk, "c:spPr/a:ln/a:solidFill/a:srgbClr")
     for dpt in findall(ser, "c:dPt"):
         idx = find(dpt, "c:idx")
-        col = _srgb(dpt, "c:spPr/a:solidFill/a:srgbClr")
-        if idx is not None and col:
+        if idx is None:
+            continue
+        col = _srgb(dpt, "c:spPr/a:solidFill/a:srgbClr") or _srgb(dpt, "c:marker/c:spPr/a:solidFill/a:srgbClr")
+        if col:
             series.point_colors[int(idx.get("val"))] = col
+        size = _val(dpt, "c:marker/c:size")
+        if size:
+            series.point_sizes[int(idx.get("val"))] = size
     dl = find(ser, "c:dLbls")
     if dl is None:
         return
@@ -73,6 +96,7 @@ def _series_style(ser: etree._Element, series: IRChartSeries) -> None:
             o.series_name = bool(_on(lbl, "c:showSerName"))
             pos = find(lbl, "c:dLblPos")
             o.position = pos.get("val") if pos is not None else None
+            o.dx, o.dy = _val(lbl, "c:layout/c:manualLayout/c:x") or 0.0, _val(lbl, "c:layout/c:manualLayout/c:y") or 0.0
             if not _on(lbl, "c:showVal") and not o.series_name:
                 o.deleted = True
         series.point_labels[int(idx.get("val"))] = o
@@ -112,12 +136,20 @@ def _numbers(raw: Optional[list]) -> list[Optional[float]]:
     return out
 
 
-def _ir_series(name: str, values: list[Optional[float]]) -> IRChartSeries:
-    """The IR of one series. Its values keep None where a point has no value (IRChartSeries.values is declared
-    list[float]: the gap is set after validation — see the stage 2 report: the schema should say Optional[float])."""
-    ser = IRChartSeries(name=name)
-    ser.values = values
-    return ser
+def _axis_title(ax: Optional[etree._Element]) -> Optional[str]:
+    """An axis's own title (c:title of a c:catAx / c:valAx): its paragraphs as one line."""
+    t = find(ax, "c:title") if ax is not None else None
+    if t is None:
+        return None
+    paras = ["".join(r.text or "" for r in p.iter(q("a:t"))) for p in t.iter(q("a:p"))]
+    return " ".join(" ".join(paras).split()) or None
+
+
+def _axis_scale(ax: Optional[etree._Element]) -> Optional[IRAxisScale]:
+    if ax is None:
+        return None
+    nf = find(ax, "c:numFmt")
+    return IRAxisScale(min=_val(ax, "c:scaling/c:min"), max=_val(ax, "c:scaling/c:max"), step=_val(ax, "c:majorUnit"), format=nf.get("formatCode") if nf is not None else None)
 
 
 def _chart_from_part(pkg: PptxPackage, chart_part: str) -> Optional[IRChart]:
@@ -153,11 +185,11 @@ def _chart_from_part(pkg: PptxPackage, chart_part: str) -> Optional[IRChart]:
         if val is None:
             val = find(ser, "c:yVal")  # a scatter: its Y values
         vals = _numbers(_cache_points(val))
+        xs = _numbers(_cache_points(find(ser, "c:xVal"))) if ctype == "scatter" else []
         if not categories:
             cat = find(ser, "c:cat")
             if cat is None and ctype == "scatter":
                 # a scatter's X values stand for its categories (the figures the slide shows)
-                xs = _numbers(_cache_points(find(ser, "c:xVal")))
                 categories = [f"{x:.12g}" if x is not None else "" for x in xs]
             elif cat is not None:
                 raw = _cache_points(cat)
@@ -167,9 +199,11 @@ def _chart_from_part(pkg: PptxPackage, chart_part: str) -> Optional[IRChart]:
                     categories = ["".join(find(pt, "c:v").text or "" for _ in [0]) if find(pt, "c:v") is not None else "" for pt in cat.iter(q("c:pt"))]
         sp = find(ser, "c:spPr")
         clr = find(sp, "a:solidFill/a:srgbClr") if sp is not None else None
+        if clr is None and ctype == "scatter":
+            clr = find(ser, "c:marker/c:spPr/a:solidFill/a:srgbClr")  # a scatter's colour is its markers'
         if clr is not None and clr.get("val"):
             colors.append(clr.get("val").upper())
-        series.append(_ir_series(name, vals))
+        series.append(IRChartSeries(name=name, values=vals, x_values=xs))
     dlbls = find(chart_el, "c:dLbls")
     has_labels = False
     if dlbls is not None:
@@ -182,7 +216,16 @@ def _chart_from_part(pkg: PptxPackage, chart_part: str) -> Optional[IRChart]:
                 has_labels = True
                 break
     has_legend = find(root, ".//c:legend") is not None
+    # the axes: categories and values; a scatter has two value axes — X along the bottom, Y up the side
+    cat_ax = find(plot, "c:catAx")
+    if cat_ax is None:
+        cat_ax = find(plot, "c:dateAx")
     val_ax = find(plot, "c:valAx")
+    if ctype == "scatter":
+        val_axes = findall(plot, "c:valAx")
+        pos = [(find(ax, "c:axPos").get("val") if find(ax, "c:axPos") is not None else "") for ax in val_axes]
+        cat_ax = next((ax for ax, p in zip(val_axes, pos) if p in ("b", "t")), val_axes[0] if val_axes else None)
+        val_ax = next((ax for ax, p in zip(val_axes, pos) if p in ("l", "r")), val_axes[-1] if val_axes else None)
     # (an axis kept only to carry its title — no tick labels — shows no values)
     tick_pos = find(val_ax, "c:tickLblPos") if val_ax is not None else None
     has_val_axis = val_ax is not None and (find(val_ax, "c:delete") is None or find(val_ax, "c:delete").get("val") in ("0", "false")) and not (tick_pos is not None and tick_pos.get("val") == "none")
@@ -199,8 +242,10 @@ def _chart_from_part(pkg: PptxPackage, chart_part: str) -> Optional[IRChart]:
     # the chart's own title (or unit caption), not its axes' titles
     chart_title = find(root, "c:chart/c:title")
     title = " ".join(t.text or "" for t in chart_title.iter(q("a:t"))).strip() or None if chart_title is not None else None
-    cat_ax = find(plot, "c:catAx")
     orient = find(cat_ax, "c:scaling/c:orientation") if cat_ax is not None else None
+    grouping = find(chart_el, "c:grouping")
+    gap = _val(chart_el, "c:gapWidth")
+    overlap = _val(chart_el, "c:overlap")
     return IRChart(
         type=ctype, categories=categories, series=series, has_data_labels=has_labels, has_legend=has_legend, has_value_axis=has_val_axis,
         colors=colors, number_format=nf.get("formatCode") if nf is not None else None, title=title,
@@ -208,6 +253,10 @@ def _chart_from_part(pkg: PptxPackage, chart_part: str) -> Optional[IRChart]:
         axis_color=_text_style(cat_ax)[0] if cat_ax is not None else None,
         rule_color=_srgb(cat_ax, "c:spPr/a:ln/a:solidFill/a:srgbClr") if cat_ax is not None else None,
         reversed_categories=orient is not None and orient.get("val") == "maxMin",
+        grouping=grouping.get("val") if grouping is not None else None,
+        gap_width=int(gap) if gap is not None else None, overlap=int(overlap) if overlap is not None else None,
+        x_title=_axis_title(cat_ax), y_title=_axis_title(val_ax),
+        value_scale=_axis_scale(val_ax), x_scale=_axis_scale(cat_ax) if ctype == "scatter" else None,
     )
 
 
