@@ -31,11 +31,13 @@ ROOT = Path(__file__).resolve().parents[2]
 DEFAULT = ROOT / "configs" / "models.yaml"
 VK_CONFIG = ROOT / "configs" / "models.vk.yaml"
 BASE = "https://polza.example.invalid/api/v1"  # a stand-in for Polza's endpoint
-VK = "https://vk.example.invalid/v1"
+VK = "https://ai-demo.platformpreview.ru/api/inference-providers-router/00000000-0000-0000-0000-000000000001/v1"  # the final's endpoint (organisers' quickstart 16.10)
 KEY = "pza_test_chain_000001"
 VK_KEY = "vk-test-000001"
 MAIN, BACKUP = "qwen/qwen3.8-27b", "qwen/qwen3.6-27b"
-VK_MODEL = "qwen3.8-27b"  # the final's model id on VK inference
+VK_MODEL = "qwen3.8-27b"  # a generic OpenAI-compatible link in the chain tests
+VK_FINAL_MODEL = "qwen38-27b-fp8"  # the final's model id on VK inference (configs/models.vk.yaml)
+VK_PROJECT = "PRJ-test-000001"
 THIRD, FOURTH = "test/third-model", "test/fourth-model"  # more links for the chain's generic logic (not in any config)
 _REQ = httpx.Request("POST", BASE + "/chat/completions")
 MSGS = [ChatMessage(role="user", content="classify this slide")]
@@ -222,8 +224,8 @@ def config_env(monkeypatch):
 
 @pytest.fixture
 def vk_env(monkeypatch):
-    monkeypatch.setenv("VK_INFERENCE_BASE_URL", VK)
     monkeypatch.setenv("VK_INFERENCE_API_KEY", VK_KEY)
+    monkeypatch.setenv("VK_PROJECT_ID", VK_PROJECT)
 
 
 # ---------------------------------------------------------------------------------------------- configuration
@@ -505,7 +507,7 @@ def test_the_vk_config_of_the_final_is_one_model_without_long_holds(sleeps, vk_e
     reg = ProviderRegistry.from_yaml(VK_CONFIG)
     for role in ("llm", "vlm"):
         p = reg.get(role)
-        assert isinstance(p, oc.OpenAICompatProvider) and p.name == "openai_compat" and p.model == VK_MODEL and p.max_attempts == 3
+        assert isinstance(p, oc.OpenAICompatProvider) and p.name == "openai_compat" and p.model == VK_FINAL_MODEL and p.max_attempts == 3
     p = reg.get("llm")
     c = wire(p, [http_error(401, "invalid api key")])
     with pytest.raises(ProviderError, match=r"access refused \(401/403\)"):
@@ -1574,15 +1576,16 @@ def test_the_vk_config_is_one_model_on_vk_inference(vk_env):
     assert sorted(vk.roles) == ["llm", "vlm"] and vk.limits.timeout_s == 180
     for role in ("llm", "vlm"):
         p = vk.get(role)
-        assert isinstance(p, oc.OpenAICompatProvider) and p.name == "openai_compat" and p.model == VK_MODEL  # one model, no chain
+        assert isinstance(p, oc.OpenAICompatProvider) and p.name == "openai_compat" and p.model == VK_FINAL_MODEL  # one model, no chain
         assert p.base_url == VK and p.api_key == VK_KEY and p.label == "Qwen3.8-27B (VK)" and not p.off
+        assert p.headers == {"Project-ID": VK_PROJECT}  # the project header of the organisers' inference
         assert p.extra_body == {"chat_template_kwargs": {"enable_thinking": False}} and p.system_suffix == "/no_think"
         assert p.exclude_quantizations == () and p.timeout_s == 180 and p.max_attempts == 3
     assert vk.get("vlm").health is vk.get("llm").health
 
 
-@pytest.mark.parametrize("env", [{}, {"VK_INFERENCE_API_KEY": VK_KEY}, {"VK_INFERENCE_BASE_URL": VK}])
-def test_the_vk_config_without_its_endpoint_and_key_is_off(monkeypatch, sleeps, env):
+@pytest.mark.parametrize("env", [{}, {"VK_PROJECT_ID": VK_PROJECT}])
+def test_the_vk_config_without_its_key_is_off(monkeypatch, sleeps, env):
     for name, value in env.items():
         monkeypatch.setenv(name, value)
     reg = ProviderRegistry.from_yaml(VK_CONFIG)
