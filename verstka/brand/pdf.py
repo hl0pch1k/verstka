@@ -47,6 +47,7 @@ from verstka.brand.common import (
     make_palette,
     margins_px,
     name_from_path,
+    rgb_distance,
     rgb_hex,
     split_weight,
     weight_of,
@@ -56,9 +57,18 @@ from verstka.schemas.brand import BrandColor, BrandFont, BrandLogo, BrandRule, B
 log = logging.getLogger(__name__)
 
 _HEX = re.compile(r"(?<![0-9A-Za-z&])#([0-9A-Fa-f]{6}|[0-9A-Fa-f]{3})(?![0-9A-Za-z])")
+# «HEX 0052CC» без решётки — только с меткой HEX и шестью цифрами
+_HEX_LABEL = re.compile(r"(?<![A-Za-z])HEX[\s:]*#?([0-9A-Fa-f]{6})(?![0-9A-Za-z])", re.I)
 _SEP = r"[\s,;/·|:]+"
 _RGB = re.compile(r"(?<![A-Za-z])RGB" + r"[\s:(]*(\d{1,3})" + _SEP + r"(\d{1,3})" + _SEP + r"(\d{1,3})", re.I)
+# «R 0 G 82 B 204», «R:0 G:82 B:204»
+_RGB_LETTERS = re.compile(r"(?<![A-Za-z])R\s*[:=]?\s*(\d{1,3})[\s,;/·|]+G\s*[:=]?\s*(\d{1,3})[\s,;/·|]+B\s*[:=]?\s*(\d{1,3})(?![0-9])")
 _CMYK = re.compile(r"(?<![A-Za-z])CMYK" + r"[\s:(]*(\d{1,3})%?" + (_SEP + r"(\d{1,3})%?") * 3, re.I)
+# «C100 M80 Y40 K50», «C 100 / M 80 / Y 40 / K 50»
+_CMYK_LETTERS = re.compile(r"(?<![A-Za-z])C\s*[:=]?\s*(\d{1,3})%?[\s,;/·|]+M\s*[:=]?\s*(\d{1,3})%?[\s,;/·|]+Y\s*[:=]?\s*(\d{1,3})%?[\s,;/·|]+K\s*[:=]?\s*(\d{1,3})%?(?![0-9])")
+# строки другого формата того же образца («Pantone 289 C») не разрывают описание образца
+_OTHER_FORMAT = re.compile(r"\s*(?:pantone|pms|ral|ncs|web|css|hsl|hsb|lab)\b", re.I)
+_FORMAT_LABEL = re.compile(r"\b(?:hex|rgb|cmyk)\b", re.I)
 
 _FONT_HINT = re.compile(r"(?<![A-Za-z])(Sans|Serif|Display|Text|Grotesk|Grotesque|Mono|Gothic|Neue|Slab|Condensed|Rounded|Headline)(?![A-Za-z])")
 _KNOWN_FONTS = {
@@ -68,9 +78,19 @@ _KNOWN_FONTS = {
     "proxima nova", "gilroy", "circe", "tt norms", "times new roman", "source sans", "sf pro", "yandex sans", "aptos",
     "bebas neue", "trebuchet ms", "century gothic", "franklin gothic", "museo", "graphik", "suisse", "akzidenz", "din",
     "stem", "geometria", "helios", "comfortaa", "playfair", "spectral", "literata", "jetbrains mono", "source code",
+    "poppins", "mulish", "karla", "quicksand", "barlow", "cabin", "work sans", "dm sans", "space grotesk", "plus jakarta",
+    "libre baskerville", "alegreya", "cormorant", "avenir", "myriad", "frutiger", "univers", "optima", "garamond",
+    "baskerville", "palatino", "bodoni", "didot", "gill sans", "lucida", "sofia pro", "cera pro", "tt commons",
 }
 _NOT_FONTS = {"hex", "rgb", "cmyk", "pdf", "png", "svg", "json", "pptx", "figma", "verstka", "google", "microsoft", "powerpoint",
               "keynote", "pantone", "tokens studio", "w3c", "w3c design tokens", "design tokens", "vk", "ral", "url"}
+# слова-метки и обычные английские слова: одиночное слово с большой буквы после метки «шрифт» — название, но не они
+_NOT_FONT_WORDS = {
+    "use", "never", "always", "avoid", "only", "the", "this", "that", "all", "each", "logo", "colour", "color", "colors", "colours",
+    "text", "body", "headings", "heading", "headline", "headlines", "title", "titles", "primary", "secondary", "accent", "background",
+    "font", "fonts", "typeface", "typefaces", "regular", "bold", "light", "medium", "italic", "display", "typography", "weight",
+    "weights", "size", "sizes", "see", "note", "when", "where", "for", "set", "our", "your", "not", "none", "same", "default",
+}
 _FONT_PHRASE = re.compile(r"(?<![A-Za-z0-9])([A-Z][A-Za-z0-9]*(?:[ \-][A-Z0-9][A-Za-z0-9]*){0,4})")
 _FONT_WORD = re.compile(r"шрифт|гарнитур|начертан|font|typeface", re.I)
 _FALLBACK_AT = re.compile(r"замен\w*|fallback|запасн\w*|резервн\w*|вместо|если\s+(?:\S+\s+){0,4}?нет", re.I)
@@ -144,57 +164,123 @@ def sentences(text: str) -> list[str]:
 
 
 # ---- цвета ------------------------------------------------------------------------------------------------------------------
-def _mentions(line: str) -> list[tuple[int, int, str]]:
-    """Цвета в строке: (начало, конец, HEX). RGB и CMYK — только если в строке нет HEX (это тот же цвет)."""
-    found = [(m.start(), m.end(), "#" + m.group(1)) for m in _HEX.finditer(line)]
+_RANK = {"hex": 3, "rgb": 2, "cmyk": 1}
+
+
+def _mentions(line: str) -> list[tuple[int, int, str, str]]:
+    """Цвета в строке: (начало, конец, HEX, вид — hex / rgb / cmyk). RGB и CMYK — только если в строке нет HEX
+    (это тот же цвет); CMYK — только если нет и RGB."""
+    found: dict[int, tuple[int, int, str, str]] = {}
+    for m in _HEX_LABEL.finditer(line):
+        found[m.start(1)] = (m.start(), m.end(), "#" + m.group(1), "hex")
+    for m in _HEX.finditer(line):
+        found.setdefault(m.start(1), (m.start(), m.end(), "#" + m.group(1), "hex"))
     if found:
-        return found
-    for m in _RGB.finditer(line):
-        vals = [int(v) for v in m.groups()]
-        if all(v <= 255 for v in vals):
-            found.append((m.start(), m.end(), rgb_hex(*vals)))
-    if found:
-        return found
-    for m in _CMYK.finditer(line):
-        vals = [int(v) for v in m.groups()]
-        if all(v <= 100 for v in vals):
-            found.append((m.start(), m.end(), cmyk_hex(*vals)))
-    return found
+        return sorted(found.values())
+    out: list[tuple[int, int, str, str]] = []
+    for rx in (_RGB, _RGB_LETTERS):
+        for m in rx.finditer(line):
+            vals = [int(v) for v in m.groups()]
+            if all(v <= 255 for v in vals):
+                out.append((m.start(), m.end(), rgb_hex(*vals), "rgb"))
+    if out:
+        return sorted(out)
+    for rx in (_CMYK, _CMYK_LETTERS):
+        for m in rx.finditer(line):
+            vals = [int(v) for v in m.groups()]
+            if all(v <= 100 for v in vals):
+                out.append((m.start(), m.end(), cmyk_hex(*vals), "cmyk"))
+    return sorted(out)
+
+
+_NAME_PHRASE = re.compile(r"[A-Z][A-Za-z]*(?:\s+[A-Z][A-Za-z]*){0,2}")
+# слова, которые не бывают именем цвета: заголовки разделов, метки форматов и ролей («Colour palette», «Primary», «PANTONE»)
+_NAME_JUNK = frozenset(
+    "colour colours color colors palette palettes primary secondary tertiary accent text background brand brands hex rgb cmyk pantone "
+    "pms ral ncs logo logos logotype typography font fonts guidelines guideline brandbook identity corporate style page main core "
+    "extended additional neutral neutrals tint tints shade shades swatch swatches chart charts surface usage the and for".split()
+)
+
+
+def _clean_name(phrase: str) -> Optional[str]:
+    ws = phrase.split()
+    if len(phrase) < 3 or all(w.lower() in _NAME_JUNK for w in ws):
+        return None
+    return phrase
 
 
 def _name_near(segment: str) -> Optional[str]:
-    """Имя цвета в ячейке перед HEX: «Основной VK Blue » → «VK Blue»."""
-    seg = re.sub(r"[·|:—–,]", " ", segment)
-    m = list(re.finditer(r"([A-Z][A-Za-z]*(?:\s+[A-Z][A-Za-z]*){0,2})", seg))
-    if m:
-        cand = m[-1].group(1).strip()
-        if cand.upper() not in ("HEX", "RGB", "CMYK") and len(cand) >= 3:
-            return cand
+    """Имя цвета в ячейке перед HEX: «Основной VK Blue » → «VK Blue»; «Primary — Aurora Green — PANTONE 349 C — » → «Aurora Green».
+    Берётся ближайшее к цвету имя, не являющееся меткой («Colour», «Primary», «HEX», «PANTONE»)."""
+    for seg in reversed(re.split(r"[·|:—–,]+", segment)):
+        if _OTHER_FORMAT.match(seg):
+            continue  # «PANTONE 349 C» — не имя
+        for m in reversed(list(_NAME_PHRASE.finditer(seg))):
+            name = _clean_name(m.group(0).strip())
+            if name:
+                return name
     return None
+
+
+def _label_only(line: str, start: int, end: int) -> bool:
+    """Строка — только метка формата и числа («RGB 10 37 64», «CMYK 100 80 40 50»): продолжение описания образца.
+    «CMYK 0 0 0 0 — фон слайдов» — со словами рядом — это уже отдельный цвет."""
+    rest = _FORMAT_LABEL.sub("", line[:start] + " " + line[end:])
+    return not re.search(r"[A-Za-zА-Яа-яЁё]", rest)
 
 
 def pdf_colors(text: str) -> list[ColorHit]:
     """Цвета гайдлайна с ролями по голосам (см. описание модуля)."""
     lines = [ln.strip() for ln in text.splitlines()]
     per_line = [_mentions(ln) for ln in lines]
+    # образец цвета часто напечатан столбиком: HEX, RGB и CMYK — отдельными строками («HEX #0A2540 / RGB 10 37 64 / CMYK…»).
+    # Строка RGB или CMYK в пределах трёх строк после HEX (без имени другого образца между ними) — тот же цвет, отдельным
+    # цветом она не считается; RGB и CMYK читаются, только если у образца нет HEX
+    skip: set[int] = set()
+    anchor: Optional[tuple[int, int]] = None  # (ранг, номер строки) последней строки-образца
+    gap = 0
+    for i, ln in enumerate(lines):
+        if not ln:
+            continue
+        ms = per_line[i]
+        if ms:
+            rank = _RANK[ms[0][3]]
+            if anchor is not None and gap < 3 and rank < anchor[0] and len(ms) == 1 and _label_only(ln, ms[0][0], ms[0][1]):
+                skip.add(i)
+                gap += 1
+                continue
+            anchor, gap = (rank, i), 0
+        elif anchor is not None:
+            if _OTHER_FORMAT.match(ln):
+                gap += 1
+            else:
+                anchor = None
+    # RGB-строка без HEX, равная уже названному HEX, — дубль (RGB считается точно)
+    hex_known = [m[2] for i, ms in enumerate(per_line) if i not in skip for m in ms if m[3] == "hex"]
+    for i, ms in enumerate(per_line):
+        if i not in skip and len(ms) == 1 and ms[0][3] == "rgb" and _label_only(lines[i], ms[0][0], ms[0][1]) and any(rgb_distance(ms[0][2], h) <= 12 for h in hex_known if len(h) == 7):
+            skip.add(i)
     votes: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
     names: dict[str, str] = {}
     order: list[str] = []
     positive: set[str] = set()
+    approx: dict[str, bool] = {}
     for i, ln in enumerate(lines):
         ms = per_line[i]
-        if not ms:
+        if not ms or i in skip:
             continue
         neg = is_negative(ln)
-        for j, (a, b, hx) in enumerate(ms):
+        for j, (a, b, hx, kind) in enumerate(ms):
             hx = hx.upper() if len(hx) == 7 else "#" + "".join(c * 2 for c in hx[1:]).upper()
             if hx not in order:
                 order.append(hx)
+            approx[hx] = approx.get(hx, True) and kind == "cmyk"
             if neg:
                 continue
             positive.add(hx)
-            before = ln[ms[j - 1][1] if j else 0: a]
-            after = ln[b: ms[j + 1][0] if j + 1 < len(ms) else len(ln)]
+            # слова роли берутся из того же предложения: «…цвет текста. Фон #FFFFFF» — «Фон», а не «текста»
+            before = re.split(r"(?<=[.!?])\s+", ln[ms[j - 1][1] if j else 0: a])[-1]
+            after = re.split(r"(?<=[.!?])\s+", ln[b: ms[j + 1][0] if j + 1 < len(ms) else len(ln)])[0]
             # строка-перечень («Порядок цветов в диаграммах: #…, #…») весит меньше строки-определения одного цвета
             single = len(ms) == 1
             r = color_role(before)
@@ -234,12 +320,23 @@ def pdf_colors(text: str) -> list[ColorHit]:
             best = max(v.values())
             tops = [r for r in v if v[r] == best]
             role = next((r for r in tops if r != "chart"), tops[0])
-        hits.append(ColorHit(hx, role, names.get(hx)))  # type: ignore[arg-type]
+        hits.append(ColorHit(hx, role, names.get(hx), approx=approx.get(hx, False)))  # type: ignore[arg-type]
     return hits
 
 
 # ---- шрифты -----------------------------------------------------------------------------------------------------------------
-def _plausible_font(family: str, line: str, brand: Optional[str]) -> bool:
+# метка шрифта перед названием: «Шрифт заголовков:», «Headings:», «Primary typeface —», «…используется шрифт »
+_LABEL_BEFORE = re.compile(
+    r"(?:шрифт\w*|гарнитур\w*|начертан\w*|font\w*|typeface\w*|заголов\w*|heading\w*|headline\w*|body|текст\w*|основн\w*|"
+    r"primary|secondary|display|set\s+in)\s*(?:[:—–-]\s*|\s+(?:is|are|—)\s+)?$",
+    re.I,
+)
+_LABEL_AFTER = re.compile(r"\s*(?:[—–,:-]\s*)?(?:это\s+|наш\s+|is\s+(?:the\s+|our\s+)?(?:\w+\s+)?)?(?:шрифт|гарнитур|font|typeface)", re.I)
+_LOWER_WORD_AFTER = re.compile(r"\s+([a-z]{3,})")
+_WORD_OK_AFTER = {"is", "for", "and", "or", "and", "bold", "regular", "light", "medium", "italic", "semibold", "black", "thin"}
+
+
+def _plausible_font(family: str, sent: str, brand: Optional[str], start: int, end: int) -> bool:
     low = family.lower()
     if low in _NOT_FONTS or (brand and low == brand.lower()) or len(family) < 3:
         return False
@@ -247,34 +344,51 @@ def _plausible_font(family: str, line: str, brand: Optional[str]) -> bool:
         return True
     if low in _KNOWN_FONTS or any(low.startswith(k + " ") for k in _KNOWN_FONTS):
         return True
-    return bool(_FONT_WORD.search(line)) and len(family.split()) >= 2
+    if _FONT_WORD.search(sent) and len(family.split()) >= 2:
+        return True
+    # одно слово, которого нет в списке известных («Poppins»): название, если стоит сразу после метки шрифта или перед ней
+    if len(family.split()) == 1 and low not in _NOT_FONT_WORDS and family.isalpha() and family[0].isupper():
+        nxt = _LOWER_WORD_AFTER.match(sent[end:])
+        if nxt and nxt.group(1) not in _WORD_OK_AFTER:
+            return False  # «Use sparingly» — обычная фраза, а не название
+        return bool(_LABEL_BEFORE.search(sent[max(0, start - 60):start]) or _LABEL_AFTER.match(sent[end:end + 60]))
+    return False
+
+
+def _font_sentences(text: str) -> list[str]:
+    """Предложения гайдлайна: роль шрифта ищется только внутри предложения («…Montserrat Bold. Для основного текста — Roboto»)."""
+    return sentences(text)
 
 
 def pdf_fonts(text: str, brand: Optional[str] = None) -> tuple[list[FontHit], Optional[str]]:
-    """Шрифты гайдлайна и общая замена («Play»): роль — по ближайшему к названию слову («для заголовков», «Основной текст —»)."""
+    """Шрифты гайдлайна и общая замена («Play»): роль — по слову-роли в том же предложении («Заголовки — …», «Для заголовков
+    используется шрифт …», «… для заголовков»)."""
     hits: list[FontHit] = []
     fallback: Optional[str] = None
-    for line in (ln.strip() for ln in text.splitlines()):
-        if not line or _HEX.search(line) or is_negative(line):
+    for sent in _font_sentences(text):
+        if _HEX.search(sent) or is_negative(sent):
             continue
         phrases = []
-        for m in _FONT_PHRASE.finditer(line):
+        for m in _FONT_PHRASE.finditer(sent):
             fam, w = split_weight(m.group(1))
-            if _plausible_font(fam, line, brand):
+            if _plausible_font(fam, sent, brand, m.start(), m.start() + len(fam)):
                 phrases.append((m.start(), m.start() + len(fam), fam, w, m.end()))
         if not phrases:
             continue
-        fb = _FALLBACK_AT.search(line)
+        fb = _FALLBACK_AT.search(sent)
         if fb:
             after = [p for p in phrases if p[0] >= fb.end()]
             if after and not fallback:
                 fallback = after[0][2]
             phrases = [p for p in phrases if p[0] < fb.start()]
+        prev_took_after = False
+        form_before: Optional[bool] = None  # слова «для …» в предложении стоят перед названием (True) или после него (False)
         for k, (a, b, fam, w, end) in enumerate(phrases):
             lo = phrases[k - 1][4] if k else 0
-            hi = phrases[k + 1][0] if k + 1 < len(phrases) else len(line)
-            role = _nearest_font_role(line[lo:a], line[end:hi])
-            tail = line[end:hi]
+            hi = phrases[k + 1][0] if k + 1 < len(phrases) else len(sent)
+            role, prev_took_after, form = _font_role_at(sent[lo:a], sent[end:hi], form_before, prev_took_after)
+            form_before = form if form_before is None else form_before
+            tail = sent[end:hi]
             wm = _WEIGHT_NEAR.search(tail)
             weight = w or (_weight_word(wm.group(1) or wm.group(2)) if wm else None)
             hits.append(FontHit(fam, role, weight))
@@ -295,16 +409,33 @@ def _weight_word(word: str) -> Optional[int]:
 _ROLE_WORD = re.compile(r"(?:(для|for)\s+)?(заголов\w*|heading\w*|headline\w*|title\w*|основн\w*\s+текст\w*|текст\w*|body|наборн\w*)", re.I)
 
 
-def _nearest_font_role(before: str, after: str):
-    """Роль шрифта: слово-роль перед названием («Заголовки — VK Sans Display», «основной текст — Golos Text») или
-    «для …» после него («VK Sans Display для заголовков»). «Для заголовков» перед названием относится к предыдущему шрифту."""
+def _font_role_at(before: str, after: str, form_before: Optional[bool], prev_took_after: bool):
+    """Роль шрифта по соседним словам: (роль, заняты ли слова «для …» после названия, форма предложения).
+
+    1. слово-роль перед названием («Заголовки — VK Sans Display», «основной текст — Golos Text»);
+    2. «для …» перед названием («Для заголовков используется шрифт Montserrat», «Для заголовков — Montserrat, для текста —
+       Roboto»);
+    3. «для …» сразу после названия («VK Sans Display для заголовков, Roboto для текста»).
+    Какая из форм (2 или 3) в предложении, решает первое название с такими словами; «для …» между двумя названиями
+    принадлежит следующему названию в форме 2 и предыдущему в форме 3."""
     own = [m for m in _ROLE_WORD.finditer(before) if not m.group(1)]
+    fb = next((m for m in _ROLE_WORD.finditer(before) if m.group(1)), None)
+    fa = next((m for m in _ROLE_WORD.finditer(after) if m.group(1)), None)
     if own:
-        return font_role(own[-1].group(2))
-    m = next((m for m in _ROLE_WORD.finditer(after) if m.group(1)), None)
-    if m:
-        return font_role(m.group(2))
-    return None
+        return font_role(own[-1].group(2)), False, True
+    if form_before is None:
+        if fb:
+            return font_role(fb.group(2)), False, True
+        if fa:
+            return font_role(fa.group(2)), True, False
+        return None, False, None
+    if form_before:
+        return (font_role(fb.group(2)) if fb else None), False, True
+    if fa:
+        return font_role(fa.group(2)), True, False
+    if fb and not prev_took_after:
+        return font_role(fb.group(2)), False, False
+    return None, False, False
 
 
 # ---- правила, поля, место логотипа ------------------------------------------------------------------------------------------------
@@ -366,6 +497,21 @@ def logo_variant(img) -> tuple[str, str]:
 LOGO_NAMES = {"primary": "Основной", "white": "Белый", "mark": "Знак", "mono": "Монохром"}
 
 
+def _is_photo(img) -> bool:
+    """Непрозрачная картинка с сотнями оттенков — фотография, а не логотип. У логотипа и плоской иллюстрации
+    несколько цветов (даже у JPEG с шумом сжатия различных цветов в десятки раз меньше), у фотографии и текстуры —
+    разных цветов больше 4 % пикселей уменьшенной копии."""
+    from PIL import Image
+
+    im = img.convert("RGBA")
+    small = im.resize((96, 96), Image.NEAREST)
+    raw = small.tobytes()
+    px = [raw[i:i + 4] for i in range(0, len(raw), 4)]
+    if sum(1 for p in px if p[3] < 200) / len(px) >= 0.05:
+        return False  # прозрачный фон — вырезанный логотип
+    return len({p[:3] for p in px}) / len(px) > 0.04
+
+
 def pdf_logos(reader, page_texts: list[str], assets_dir: Path) -> list[BrandLogo]:
     out: list[BrandLogo] = []
     seen: set[str] = set()
@@ -389,7 +535,7 @@ def pdf_logos(reader, page_texts: list[str], assets_dir: Path) -> list[BrandLogo
                 pil = im.image
             except Exception:  # noqa: BLE001
                 continue
-            if pil is None or min(pil.size) < 16 or pil.size[0] / max(pil.size[1], 1) > 12:
+            if pil is None or min(pil.size) < 16 or pil.size[0] / max(pil.size[1], 1) > 12 or _is_photo(pil):
                 continue
             variant, ground = logo_variant(pil)
             used[variant] += 1
@@ -402,7 +548,8 @@ def pdf_logos(reader, page_texts: list[str], assets_dir: Path) -> list[BrandLogo
 
 
 # ---- модель ----------------------------------------------------------------------------------------------------------------
-def _page_images(path: Path, page_ids: list[int], max_w: int = 1024) -> list[bytes]:
+def _page_images(path: Path, page_ids: list[int], max_w: int = 1600) -> list[bytes]:
+    """Страницы PDF → JPEG шириной не меньше 1600 px: HEX на образцах цвета мелкие, при 1024 px они не читаются."""
     import pypdfium2 as pdfium
 
     out: list[bytes] = []
@@ -413,19 +560,47 @@ def _page_images(path: Path, page_ids: list[int], max_w: int = 1024) -> list[byt
             w = page.get_width() or 1
             img = page.render(scale=max_w / w).to_pil().convert("RGB")
             buf = io.BytesIO()
-            img.save(buf, format="JPEG", quality=80)
+            img.save(buf, format="JPEG", quality=82)
             out.append(buf.getvalue())
     finally:
         pdf.close()
     return out
 
 
+def _page_scores(text: str) -> dict[str, float]:
+    """Что полезного для чтения брендбука на странице: цвета (HEX, RGB, CMYK), названия шрифтов, правила, место логотипа,
+    поля и сетка. Обложка, оглавление и колонтитулы набирают ноль: слова «цвет», «шрифт» и «логотип» в них не считаются."""
+    sents = sentences(text)
+    colours = sum(len(_mentions(ln.strip())) for ln in text.splitlines())
+    fonts = len(pdf_fonts(text)[0])
+    rules = sum(1 for sn in sents if looks_like_rule(sn) and not (_HEX.search(sn) or _RGB.search(sn)))
+    layout = (any(logo_place(sn) for sn in sents) + any(margins_px(sn) for sn in sents) + bool(find_grid("\n".join(paragraphs(text)))))
+    return {"colour": min(colours, 8), "font": min(fonts, 4), "rules": min(rules, 6), "layout": layout}
+
+
 def _vlm_pages(page_texts: list[str]) -> list[int]:
-    want = re.compile(r"#[0-9A-Fa-f]{6}|RGB|CMYK|палитр|цвет|colou?r|шрифт|font|typeface|логотип|logo|правил|нельзя|rules", re.I)
-    picked = [i for i, t in enumerate(page_texts) if want.search(t)]
-    if not picked:
-        picked = list(range(len(page_texts)))
-    return picked[:_VLM_PAGES]
+    """До шести страниц для модели: по лучшей странице каждой темы (цвета, шрифты, место логотипа и сетка, правила), остальные
+    места — по сумме баллов. Оглавление и обложка без цветов, шрифтов и правил не попадают. Скан без текста — шесть страниц
+    поровну по документу (без обложки)."""
+    n = len(page_texts)
+    if n <= _VLM_PAGES:
+        return list(range(n))
+    scores = [_page_scores(t) for t in page_texts]
+    total = [2 * sc["colour"] + 3 * sc["font"] + 1.5 * sc["rules"] + 2.5 * sc["layout"] for sc in scores]
+    if not any(total):
+        step = (n - 1) / _VLM_PAGES
+        return sorted({min(n - 1, 1 + round(k * step)) for k in range(_VLM_PAGES)})
+    picked: list[int] = []
+    for topic in ("colour", "font", "layout", "rules"):
+        best = max(range(n), key=lambda i: (scores[i][topic], -i))
+        if scores[best][topic] > 0 and best not in picked:
+            picked.append(best)
+    for i in sorted(range(n), key=lambda i: (-total[i], i)):
+        if len(picked) >= _VLM_PAGES:
+            break
+        if total[i] > 0 and i not in picked:
+            picked.append(i)
+    return sorted(picked)
 
 
 def _ask_model(path: Path, page_texts: list[str], draft: BrandSpec, providers, skills) -> BrandbookReading:
@@ -445,8 +620,9 @@ def _ask_model(path: Path, page_texts: list[str], draft: BrandSpec, providers, s
     return reading
 
 
-def _merge_reading(spec: BrandSpec, r: BrandbookReading, scanned: bool) -> list[str]:
-    """Уточнения модели поверх чтения по тексту; модель не добавляет цветов, которых нет в тексте (кроме скана)."""
+def _merge_reading(spec: BrandSpec, r: BrandbookReading, scanned: bool, name_trusted: bool = True) -> list[str]:
+    """Уточнения модели поверх чтения по тексту; модель не добавляет цветов, которых нет в тексте (кроме скана). Имя модели
+    важнее имени, угаданного по имени файла или первой строке; имя из заголовка документа остаётся."""
     notes: list[str] = []
     if scanned and r.colors:
         hits = [ColorHit(c.hex, c.role, c.name) for c in r.colors]
@@ -469,14 +645,44 @@ def _merge_reading(spec: BrandSpec, r: BrandbookReading, scanned: bool) -> list[
         add_rule(spec.rules, f"Логотип — {PLACE_TEXT[r.logo_place]}", "logo", limit=_MAX_RULES)
     if not spec.margins_px and r.margins_px and 0 < r.margins_px <= 400:
         spec.margins_px = float(r.margins_px)
-    if not spec.name and r.name:
-        spec.name = brand_name(r.name) or ""
+    if r.name and (not spec.name or not name_trusted):
+        spec.name = brand_name(r.name) or spec.name
     for rule in r.rules:
         add_rule(spec.rules, rule.text, rule.kind, limit=_MAX_RULES)
     return notes
 
 
 # ---- чтение -------------------------------------------------------------------------------------------------------------------
+# заголовок документа, который программа поставила сама («rgb_only.html», «Microsoft Word - Документ1»), — не имя бренда
+_FILE_TITLE = re.compile(
+    r"\.(?:html?|docx?|pptx?|xlsx?|indd|idml|ai|psd|pdf|key|pages|odt|rtf|md|txt|fig|sketch|tmp)\s*$|"
+    r"^(?:untitled|без\s+названия|безымянн\w*|документ\s*\d*|document\s*\d*|microsoft\s+(?:word|powerpoint|excel)\b.*|"
+    r"powerpoint\s+presentation|слайд\s*\d*|copy\s+of\b.*|new\s+document|новый\s+документ)\s*$",
+    re.I,
+)
+
+
+def _guess_name(title: Any, page_texts: list[str], stem: str) -> tuple[Optional[str], bool]:
+    """Имя бренда и уверенность в нём: заголовок документа (если это не имя файла и не служебная строка) и заголовок первой
+    страницы («Брендбук VK Cloud») — надёжны; имя файла и первая строка — догадка, и модель вправе их заменить."""
+    key = lambda x: re.sub(r"[\s_\-]+", "", str(x).lower())  # noqa: E731
+    t = str(title or "").strip()
+    if t and not _FILE_TITLE.search(t) and key(t) != key(stem):
+        name = brand_name(t)
+        if name:
+            return name, True
+    first_page = page_texts[0] if page_texts else ""
+    lines = [ln.strip() for ln in first_page.splitlines() if ln.strip()]
+    for i, ln in enumerate(lines):
+        if re.search(r"брендбук|brand\s*book|guideline|гайдлайн|руководство", ln, re.I):
+            # заголовок часто переносится: «Руководство по фирменному стилю» / ««Нева Банк»»
+            name = brand_name(ln) or (brand_name(f"{ln} {lines[i + 1]}") if i + 1 < len(lines) else None)
+            if name:
+                return name, True
+    first_line = next((ln for ln in lines if len(ln) > 2), "")
+    return name_from_path(stem) or brand_name(first_line), False
+
+
 def read_pdf(path: Path | str, *, providers: Any = None, skills: Any = None, use_vlm: bool = False,
              assets_dir: Optional[Path | str] = None) -> BrandSpec:
     """PDF-гайдлайн → `BrandSpec` (по тексту; с `use_vlm` — ещё и по картинкам страниц)."""
@@ -498,11 +704,7 @@ def read_pdf(path: Path | str, *, providers: Any = None, skills: Any = None, use
         title = (reader.metadata or {}).get("/Title")
     except Exception:  # noqa: BLE001
         title = None
-    first_line = next((ln.strip() for ln in page_texts[0].splitlines() if len(ln.strip()) > 2), "") if page_texts else ""
-    name = brand_name(str(title)) if title else None
-    if not name:
-        cand = next((ln.strip() for ln in page_texts[0].splitlines() if re.search(r"брендбук|brand\s*book|guideline|гайдлайн|руководство", ln, re.I)), "") if page_texts else ""
-        name = brand_name(cand) or name_from_path(path.stem) or brand_name(first_line)
+    name, name_trusted = _guess_name(title, page_texts, path.stem)
 
     colors, w1 = make_palette(pdf_colors(text))
     font_hits, fallback = pdf_fonts(text, name)
@@ -534,7 +736,7 @@ def read_pdf(path: Path | str, *, providers: Any = None, skills: Any = None, use
             skills = SkillsRegistry.load()
         try:
             reading = _ask_model(path, page_texts, spec, providers, skills)
-            spec.warnings += _merge_reading(spec, reading, scanned)
+            spec.warnings += [w for w in _merge_reading(spec, reading, scanned, name_trusted) if w not in spec.warnings]
         except Exception as e:  # noqa: BLE001 — модель необязательна: при любой её ошибке остаётся чтение по тексту
             log.warning("brandbook_reader failed: %s", e)
             if scanned:
@@ -543,7 +745,11 @@ def read_pdf(path: Path | str, *, providers: Any = None, skills: Any = None, use
     elif use_vlm:
         spec.warnings.append("Модель для картинок не подключена — PDF прочитан по тексту.")
     if not spec.colors:
-        spec.warnings.append("В PDF не нашёл цветов (HEX, RGB или CMYK) — палитра останется из шаблона.")
+        if re.search(r"pantone|(?<![A-Za-z])RAL\b|(?<![A-Za-z])NCS\b", text, re.I):
+            spec.warnings.append("Цвета в PDF заданы только по Pantone (или RAL) — без HEX, RGB или CMYK я не могу их перевести в цвета экрана: "
+                                 "палитра останется из шаблона. Пришлите HEX или токены JSON.")
+        else:
+            spec.warnings.append("В PDF не нашёл цветов (HEX, RGB или CMYK) — палитра останется из шаблона.")
     if not spec.fonts:
         spec.warnings.append("В PDF не нашёл названий шрифтов — шрифты останутся из шаблона.")
     return spec

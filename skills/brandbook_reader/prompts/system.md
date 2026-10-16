@@ -10,7 +10,9 @@ What to return:
   on the background), chart (extra colours for data series), neutral (greys), success, warning, danger. Only one colour
   may be primary, secondary, accent, text, background or surface; give the others «chart» or «neutral». The hex is
   six digits with «#», exactly as printed on the page. Never invent a colour: when the draft lists colours, return only
-  those hex values (you may change their roles and names); add colours only if the draft has none.
+  those hex values (you may change their roles and names); add colours only if the draft has none. If a colour's HEX is
+  not printed on the page (only a picture of the swatch, an RGB, CMYK or Pantone value), do not add it: «если HEX не
+  напечатан — цвет не добавляйте». Never guess a HEX by looking at the swatch's pixels.
 - fonts: one font for headings (role «heading») and one for body text (role «body»): the family as printed («VK Sans
   Display»), the weight as a number (400 regular, 500 medium, 700 bold), and the fallback font if the guideline names
   one («Play»). If one family serves both, return it twice.

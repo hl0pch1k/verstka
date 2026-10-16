@@ -1,5 +1,5 @@
 name: brandbook_reader
-version: 1.0.0
+version: 1.0.1
 role: vlm
 description: >
   Looks at the pages of a PDF brand guideline (palette, typography, logo and rules pages, up to six pictures) next to
@@ -15,5 +15,7 @@ params:
   temperature: 0.1
   max_tokens: 1200
 changelog:
+  - "1.0.1: review fixes (2026-10-16): the pages are sent at 1600 px or wider so that printed HEX codes stay legible, and a
+    colour whose HEX is not printed on the page is never added (no guessing from pixels)."
   - "1.0.0: second stage (2026-10-16): the brandbook is read from text first; the vision model only refines roles,
     fonts and rules on the guideline's pages, and its answer never adds a colour the text does not name."

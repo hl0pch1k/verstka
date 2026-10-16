@@ -74,11 +74,12 @@ def color_role(text: str) -> Optional[BrandColorRole]:
 # ---- цвета ------------------------------------------------------------------------------------------------------------
 _HEX_ANY = re.compile(r"#([0-9A-Fa-f]{8}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{3})(?![0-9A-Za-z])")
 _RGB_FN = re.compile(r"rgba?\(\s*(\d{1,3})\s*[, ]\s*(\d{1,3})\s*[, ]\s*(\d{1,3})", re.I)
+_HSL_FN = re.compile(r"hsla?\(\s*(-?\d+(?:\.\d+)?)(?:deg)?\s*[, ]\s*(\d+(?:\.\d+)?)%\s*[, ]\s*(\d+(?:\.\d+)?)%", re.I)
 
 
 def parse_color(value: object) -> Optional[str]:
-    """«#0077ff», «#0077FFCC», «rgb(0, 119, 255)», {"hex": …}, {"colorSpace": "srgb", "components": [0, .47, 1]},
-    {"r": 0, "g": .47, "b": 1} (Figma) → «#0077FF»; не цвет — None."""
+    """«#0077ff», «#0077FFCC», «rgb(0, 119, 255)», «hsl(217, 100%, 50%)», {"hex": …}, {"colorSpace": "srgb", "components": [0, .47, 1]},
+    {"r": 0, "g": .47, "b": 1} (Figma) → «#0077FF»; не цвет (и названия вроде «blue») — None."""
     if isinstance(value, dict):
         if isinstance(value.get("hex"), str):
             return parse_color(value["hex"])
@@ -102,6 +103,12 @@ def parse_color(value: object) -> Optional[str]:
     m = _RGB_FN.match(s)
     if m:
         return rgb_hex(*(int(x) for x in m.groups()))
+    m = _HSL_FN.match(s)
+    if m:
+        h, sat, lig = float(m.group(1)) % 360, float(m.group(2)), float(m.group(3))
+        if sat <= 100 and lig <= 100:
+            r, g, b = colorsys.hls_to_rgb(h / 360, lig / 100, sat / 100)
+            return rgb_hex(r * 255, g * 255, b * 255)
     return None
 
 
@@ -139,20 +146,28 @@ def rgb_distance(a: str, b: str) -> float:
 
 @dataclass
 class ColorHit:
-    """Цвет, найденный читателем: HEX, роль, если брендбук её назвал, имя («VK Blue»)."""
+    """Цвет, найденный читателем: HEX, роль, если брендбук её назвал, имя («VK Blue»). `approx` — HEX пересчитан из CMYK
+    без цветового профиля; `rank` — 0 для обычного цвета роли и 1 для «второго» («text.secondary», «background.muted»):
+    при двух цветах одной роли побеждает меньший `rank`."""
 
     hex: str
     role: Optional[BrandColorRole] = None
     name: Optional[str] = None
+    approx: bool = False
+    rank: int = 0
 
 
 def _colorful(hex_: str) -> bool:
     return saturation(hex_) >= 0.35 and 0.18 <= lightness(hex_) <= 0.85
 
 
+_WEAK_ROLES = (None, "chart", "neutral")
+
+
 def make_palette(hits: Iterable[ColorHit], *, max_colors: int = 12) -> tuple[list[BrandColor], list[str]]:
-    """Палитра без повторов: один HEX — один цвет (подписанная роль важнее неподписанной), по одному цвету на единственные
-    роли; роли «основной», «текст», «фон» угадываются по насыщенности и яркости, если брендбук их не назвал."""
+    """Палитра без повторов: один HEX — один цвет (конкретная роль важнее «графиков», «нейтрального» и неподписанной), по
+    одному цвету на единственные роли; роли «основной», «текст», «фон» угадываются по насыщенности и яркости, если
+    брендбук их не назвал. HEX, пересчитанные из CMYK, помечаются предупреждением (приблизительно)."""
     warnings: list[str] = []
     order: list[str] = []
     by_hex: dict[str, ColorHit] = {}
@@ -163,24 +178,32 @@ def make_palette(hits: Iterable[ColorHit], *, max_colors: int = 12) -> tuple[lis
             continue
         cur = by_hex.get(hx)
         if cur is None:
-            by_hex[hx] = ColorHit(hx, h.role, h.name)
+            by_hex[hx] = ColorHit(hx, h.role, h.name, h.approx, h.rank)
             order.append(hx)
             continue
-        if cur.role in (None, "chart") and h.role not in (None, "chart"):
-            cur.role = h.role
+        if cur.role in _WEAK_ROLES and h.role not in _WEAK_ROLES:
+            cur.role, cur.rank = h.role, h.rank
+        elif cur.role is None and h.role:
+            cur.role, cur.rank = h.role, h.rank
+        elif cur.role == h.role:
+            cur.rank = min(cur.rank, h.rank)
         if not cur.name and h.name:
             cur.name = h.name
+        cur.approx = cur.approx and h.approx  # точное значение (HEX, RGB) важнее пересчёта из CMYK
     items = [by_hex[hx] for hx in order]
     if len(items) > max_colors:
         warnings.append(f"В брендбуке {ru_count(len(items), 'цвет', 'цвета', 'цветов')} — взял первые {max_colors}.")
         items = items[:max_colors]
     taken: set[str] = set()
-    for it in items:
-        if it.role in _SINGLE_ROLES:
-            if it.role in taken:
-                it.role = _SINGLE_ROLES[it.role]  # type: ignore[assignment]
-            else:
-                taken.add(it.role)
+    for role, demoted in _SINGLE_ROLES.items():
+        cands = [(it.rank, i) for i, it in enumerate(items) if it.role == role]
+        if not cands:
+            continue
+        taken.add(role)
+        win = min(cands)[1]
+        for _, i in cands:
+            if i != win:
+                items[i].role = demoted  # type: ignore[assignment]
     free = [it for it in items if it.role is None]
     guessed: list[str] = []
     if free and len(items) >= 2:
@@ -213,6 +236,9 @@ def make_palette(hits: Iterable[ColorHit], *, max_colors: int = 12) -> tuple[lis
                         free.remove(far[0])
     if guessed:
         warnings.append("Роли цветов в брендбуке не подписаны — угадал по яркости и насыщенности: " + ", ".join(guessed) + ". Проверьте.")
+    approx = [it.hex for it in items if it.approx]
+    if approx:
+        warnings.append(f"{', '.join(approx)} — пересчитано из CMYK приблизительно, без цветового профиля печати: сверьте с HEX из брендбука.")
     colors = [BrandColor(hex=it.hex, role=it.role or "chart", name=it.name) for it in items]
     return colors, warnings
 
