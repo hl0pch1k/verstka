@@ -1486,16 +1486,74 @@ def _conflicts_with(spec: BrandSpec, template_id: Optional[str], brand_dir: Opti
         return manifest, []
 
 
-def _brand_partials(spec: BrandSpec) -> list[dict]:
-    """What each reading step brings to the analysis tiles (the event's `brand`, merged on the client)."""
-    d = spec.model_dump(mode="json")
-    return [
-        {k: d[k] for k in ("id", "name", "source", "file", "pages")},
-        {"colors": d["colors"]},
-        {"fonts": d["fonts"]},
-        {"logos": d["logos"]},
-        {k: d[k] for k in ("rules", "margins_px", "grid", "logo_place", "warnings")},
-    ]
+_BRAND_COMPARE_AT = 0.96
+# the reader's words of its steps (verstka.brand.common.step_texts) → the client's keys; «открыт…» / «прочитаны токены» — open.
+# «страница N из M», «модель читает N страниц» — the reading's progress, not steps
+_BRAND_STEP_WORDS = {"палитра": "palette", "шрифты": "fonts", "логотипы": "logos", "правила": "rules"}
+_PAGE_RE = re.compile(r"(\d+)\s+из\s+(\d+)")
+
+
+def brand_step_key(what: str) -> Optional[str]:
+    w = (what or "").strip().lower()
+    if w in _BRAND_STEP_WORDS:
+        return _BRAND_STEP_WORDS[w]
+    return "open" if w.startswith(("открыт", "прочитаны")) else None
+
+
+class BrandStepEvents:
+    """The reader's `on_step(что, итог, часть)` → the job's events, as the client folds them (web/src/ui/create/dataRules.ts
+    foldBrandEvent): a step — `step` (open · palette · fonts · logos · rules), `message` «Палитра: 6 цветов», `brand` — the
+    part read; the reading's progress («страница 3 из 6», «модель читает 6 страниц») — `progress` with a calm message under
+    the current step, never far enough to count as the next one (the client counts floor(progress × 6) steps done). A step
+    the reader says again (the model refined the colours) is said again: the client keeps the latest words."""
+
+    def __init__(self, job: Job, bid: str) -> None:
+        self.job, self.bid = job, bid
+        self.done = 0  # steps said, as the client counts them: the index of the latest + 1
+        self.said: set[str] = set()
+        self.at = 0.05
+        self._lock = threading.Lock()
+
+    def __call__(self, what: str, result: str, part: Optional[dict] = None) -> None:
+        key = brand_step_key(what)
+        if key is None:
+            self.progress(what, result)
+        else:
+            self.step(key, f"{what[:1].upper()}{what[1:]}: {result}", part)
+
+    def step(self, key: str, message: str, part: Optional[dict]) -> None:
+        i = _BRAND_STEPS.index(key)
+        with self._lock:
+            self.done = max(self.done, i + 1)
+            self.said.add(key)
+            self.at = max(self.at, _BRAND_STEP_AT[i])
+            brand = {"id": self.bid, **(part or {})} if key == "open" else part
+            self.job.emit(message, self.at, step=key, brand=brand)
+
+    def progress(self, what: str, result: str) -> None:
+        w = (what or "").strip().lower()
+        if w == "страница":
+            message = f"Готовлю страницы для модели — {result}"
+        elif w == "модель":
+            message = f"Модель {result} — это до двух минут"
+        else:
+            message = f"{what[:1].upper()}{what[1:]}: {result}" if result else what
+        with self._lock:
+            base = _BRAND_STEP_AT[self.done - 1] if self.done else 0.05
+            nxt = _BRAND_STEP_AT[self.done] if self.done < len(_BRAND_STEPS) else _BRAND_COMPARE_AT
+            top = min(nxt, (self.done + 1) / 6) - 0.006  # below the next step, and below what the client counts as one
+            m = _PAGE_RE.search(result or "")
+            share = min(1.0, int(m.group(1)) / max(1, int(m.group(2)))) * 0.9 if m and w == "страница" else 1.0
+            self.at = max(self.at, min(top, base + (top - base) * share))
+            self.job.emit(message, round(self.at, 3))
+
+    def finish(self, spec: BrandSpec) -> None:
+        """The steps the reader did not say (a reader without on_step): said now, from the brandbook read."""
+        from verstka.brand.read import brand_partials, brand_steps
+
+        for key, (what, result), part in zip(_BRAND_STEPS, brand_steps(spec), brand_partials(spec)):
+            if key not in self.said:
+                self.step(key, f"{what[:1].upper()}{what[1:]}: {result}", part)
 
 
 def _save_limited(f: UploadFile, target: Path, limit: int) -> int:
@@ -1598,8 +1656,9 @@ def _brandbook_source(bdir: Path, file: Optional[UploadFile], files: list[Upload
 
 
 def _brand_opened(source: Path | str) -> Optional[tuple[str, dict]]:
-    """The «open» step said before the reading (the reader tells its steps only at its end, and a PDF read by the model
-    takes up to two minutes): the PDF's pages, the archive's or the folder's files. None — nothing quick to say."""
+    """The «open» step said before the reading of a folder or an archive: their reader says its steps at its end (a PDF
+    inside — after the model's reading). A PDF's reader says «open» itself as soon as its text is read. None — nothing
+    to say before."""
     if isinstance(source, str):
         return None  # a Figma link: nothing is open before the answer
     try:
@@ -1607,11 +1666,6 @@ def _brand_opened(source: Path | str) -> Optional[tuple[str, dict]]:
             n = sum(1 for p in source.rglob("*") if p.is_file())
             return f"Открыта папка: {ru_count(n, 'файл', 'файла', 'файлов')}", {"source": "folder", "file": source.name}
         ext = source.suffix.lower()
-        if ext == ".pdf":
-            from pypdf import PdfReader
-
-            n = len(PdfReader(str(source)).pages)
-            return f"Открыт файл: {ru_count(n, 'страница', 'страницы', 'страниц')}", {"source": "pdf", "file": source.name, "pages": n}
         if ext == ".zip":
             import zipfile
 
@@ -1635,7 +1689,7 @@ def upload_brandbook(
     папке) или ссылка Figma. Разбор — задачей: события шагов open · palette · fonts · logos · rules · compare (`step`,
     итог шага в `message`, прочитанное — в `brand`), итог — {brand, conflicts} с шаблоном `template_id`."""
     from verstka.brand.common import BrandReadError
-    from verstka.brand.read import brand_steps, read_brandbook
+    from verstka.brand.read import read_brandbook
 
     folder = [f for f in files or [] if f is not None]
     url = (figma_url or "").strip()
@@ -1657,16 +1711,16 @@ def upload_brandbook(
     def run(job: Job) -> dict:
         try:
             job.emit("Открываю брендбук", 0.05)
+            events = BrandStepEvents(job, bid)
             opened = _brand_opened(source)
             if opened is not None:
-                job.emit(opened[0], 0.12, step="open", brand=opened[1])
-            if use_vlm and isinstance(source, Path) and source.suffix.lower() == ".pdf":
-                job.emit("Страницы гайдлайна смотрит модель — это до двух минут", 0.14)
+                events.step("open", *opened)
             p = providers() if use_vlm else None
             try:
+                # the steps come as the reader finishes them (a PDF's — before the model, which reads up to two minutes)
                 spec = read_brandbook(
                     source, providers=p.with_deadline(time.monotonic() + 150) if p is not None else None, skills=skills() if use_vlm else None,
-                    use_vlm=use_vlm, assets_dir=bdir,
+                    use_vlm=use_vlm, assets_dir=bdir, on_step=events,
                 )
             except BrandReadError:
                 raise
@@ -1674,14 +1728,13 @@ def upload_brandbook(
                 log.warning("brandbook not read: %s", source, exc_info=True)
                 raise ValueError("Не удалось прочитать брендбук — проверьте файл или загрузите токены JSON") from e
             spec.id = bid
-            for key, (what, result), part, at in zip(_BRAND_STEPS, brand_steps(spec), _brand_partials(spec), _BRAND_STEP_AT):
-                job.emit(f"{what[:1].upper()}{what[1:]}: {result}", at, step=key, brand=part)
+            events.finish(spec)
             manifest, conflicts = _conflicts_with(spec, template_id, bdir)
             if not marker.exists() or not store.write_brandbook(bid, spec):
                 raise ValueError(_BRAND_REMOVED)
             marker.unlink(missing_ok=True)
             found = ru_count(len(conflicts), "расхождение", "расхождения", "расхождений") if conflicts else "расхождений нет"
-            job.emit(f"Сверка с шаблоном: {found if manifest is not None else 'шаблон не выбран'}", 0.96, step="compare", conflicts=[c.model_dump(mode="json") for c in conflicts])
+            job.emit(f"Сверка с шаблоном: {found if manifest is not None else 'шаблон не выбран'}", _BRAND_COMPARE_AT, step="compare", conflicts=[c.model_dump(mode="json") for c in conflicts])
             return {"brandbook_id": bid, "brand": spec.model_dump(mode="json"), "conflicts": [c.model_dump(mode="json") for c in conflicts]}
         except BaseException as e:
             gone = not marker.exists()

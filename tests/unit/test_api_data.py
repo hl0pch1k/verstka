@@ -877,34 +877,143 @@ def test_a_brandbook_removed_at_the_last_moment_is_not_done(api, monkeypatch):
     assert not (root / "brandbooks" / bid).exists()
 
 
-def test_the_open_step_comes_before_the_reading(api, monkeypatch):
-    """The reader tells its steps at its end: «open» (with the PDF's pages) is said before it starts."""
-    import verstka.brand.read as BR
+WEB = ROOT / "web"
+_FOLD_TS = """
+import { readFileSync } from "node:fs";
+import { foldBrandEvent, BRAND_RUN0, brandRows, brandTiles } from %s;
+const events = JSON.parse(readFileSync(process.argv[2], "utf8"));
+let run = BRAND_RUN0;
+const trail = [];
+for (const ev of events) { run = foldBrandEvent(run, ev); trail.push(run.done); }
+console.log(JSON.stringify({ trail, run, rows: brandRows(run, %s, "VK Tech"), tiles: brandTiles(run) }));
+"""
 
-    seen = []
-    real = BR.read_brandbook
 
-    def spy(source, **kw):
-        seen.append([e.get("step") for e in A.runner.get(jid[0]).events if e.get("step")])
-        return real(source, **kw)
+def _client_fold(events: list[dict], src: str, tmp_path: Path) -> dict:
+    """The job's real events through the web client's own foldBrandEvent (web/src/ui/create/dataRules.ts, bundled by the
+    web's esbuild and run by node) — what the analysis card shows step by step."""
+    import subprocess
 
-    jid = []
-    monkeypatch.setattr(BR, "read_brandbook", spy)
-    orig_submit = A.runner.submit
+    node = shutil.which("node")
+    if not node or not (WEB / "node_modules" / "esbuild").is_dir():
+        pytest.skip("node and web/node_modules are needed to run the client's fold")
+    entry, bundle, data = tmp_path / "fold.ts", tmp_path / "fold.mjs", tmp_path / "events.json"
+    entry.write_text(_FOLD_TS % (json.dumps(str(WEB / "src" / "ui" / "create" / "dataRules.ts")), json.dumps(src)), encoding="utf-8")
+    build = f"require('esbuild').buildSync({{entryPoints: [{json.dumps(str(entry))}], outfile: {json.dumps(str(bundle))}, bundle: true, platform: 'node', format: 'esm', logLevel: 'error'}})"
+    done = subprocess.run([node, "-e", build], cwd=WEB, capture_output=True, text=True, timeout=120)
+    assert done.returncode == 0, done.stderr
+    data.write_text(json.dumps(events, ensure_ascii=False), encoding="utf-8")
+    done = subprocess.run([node, str(bundle), str(data)], capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0, done.stderr
+    return json.loads(done.stdout)
 
-    def submit(kind, fn):
-        job = orig_submit(kind, lambda j: (jid.append(j.id), fn(j))[1])
-        return job
 
-    monkeypatch.setattr(A.runner, "submit", submit)
-    c, _, _ = api
+def _steps_said(events: list[dict]) -> list[int]:
+    """Before each event, how many steps the client may count (the latest step said, by its index, + 1)."""
+    order = ["open", "palette", "fonts", "logos", "rules", "compare"]
+    out, done = [], 0
+    for e in events:
+        if e.get("step") in order:
+            done = max(done, order.index(e["step"]) + 1)
+        out.append(done)
+    return out
+
+
+def _pdf_with_the_model(c, monkeypatch, tmp_path):
+    """A PDF read by a (mock) vision model through the API: the steps come as the reader finishes them."""
+    from verstka.providers.registry import ProviderRegistry
+
+    at_model: list[list] = []
+    reading = {"name": "VK Cloud", "colors": [{"hex": "#2787F5", "role": "chart"}], "rules": [{"text": "Фото — только в полный слайд", "kind": "other"}]}
+
+    def answer(messages):
+        at_model.append([(e.get("step"), e["message"]) for e in A.runner.get(jids[-1]).events])
+        return reading
+
+    registry = ProviderRegistry.mock({"brand guideline": answer})
+    monkeypatch.setattr(A, "providers", lambda: registry)
+    jids: list[str] = []
+    orig = A.runner.submit
+    monkeypatch.setattr(A.runner, "submit", lambda kind, fn: (lambda job: (jids.append(job.id), job)[1])(orig(kind, fn)))
     bid, job = _upload_brand(c, files={"file": ("Брендбук VK Cloud.pdf", (BRAND / "guideline.pdf").read_bytes(), "application/pdf")})
     assert job.status == "done", job.error
-    assert seen == [["open"]]
-    first = next(e for e in job.events if e.get("step") == "open")
-    assert first["message"] == "Открыт файл: 12 страниц" and first["brand"]["pages"] == 12 and first["progress"] < 0.17
+    return job, at_model
+
+
+def test_pdf_steps_come_as_the_reader_reads_and_fold_on_the_client(api, monkeypatch, tmp_path):
+    c, _, _ = api
+    job, at_model = _pdf_with_the_model(c, monkeypatch, tmp_path)
+    events = job.events
+    # all five steps reached the job before the model answered; the page progress and the model's line came under «rules»
+    assert [k for k, _ in at_model[0] if k] == ["open", "palette", "fonts", "logos", "rules"]
+    assert at_model[0][-1][1] == "Модель читает 6 страниц — это до двух минут"
+    pages = [e for e in events if e["message"].startswith("Готовлю страницы для модели — ")]
+    assert [e["message"].rsplit(" ", 3)[-3:] for e in pages] == [[str(k), "из", "6"] for k in range(1, 7)]
+    assert all("step" not in e for e in pages)
+    steps = [e["step"] for e in events if e.get("step")]
+    assert steps == ["open", "palette", "fonts", "logos", "rules", "palette", "rules", "compare"]  # the model refined two
+    first = next(e for e in events if e.get("step") == "open")
+    assert first["message"] == "Открыт файл: 12 страниц" and first["brand"]["pages"] == 12 and first["brand"]["id"] == job.result["brand"]["id"]
+    # the progress never runs ahead of the steps said: the client counts floor(progress × 6) steps for an event without one
+    for e, said in zip(events, _steps_said(events)):
+        if not e.get("step") and e["status"] == "running":
+            assert int(e["progress"] * 6) <= max(said, 0), e
+    progress = [e["progress"] for e in events]
+    assert progress == sorted(progress)
+    folded = _client_fold(events, "pdf", tmp_path)
+    assert folded["trail"] == sorted(folded["trail"]) and folded["run"]["done"] == 6
+    assert all(d <= said for d, said in zip(folded["trail"], _steps_said(events)) if said < 6)
+    rows = [r["a"] + r["b"] for r in folded["rows"]]
+    assert rows[0] == "открыт файл: 12 страниц" and rows[1] == "палитра: 6 цветов" and rows[-1] == "сверка с шаблоном VK Tech: шаблон не выбран"
+    assert rows[4] == f"правила: {len(job.result['brand']['rules'])}"
+    assert [t["meta"] for t in folded["tiles"]] == ["2 шрифта", "6 цветов", "4"]
+    roles = {c["hex"]: c["role"] for c in folded["run"]["brand"]["colors"]}
+    assert roles["#2787F5"] == "chart"  # the refined palette reached the tiles
+
+
+@pytest.mark.parametrize("name,src,first", [("tokens.json", "json", "прочитаны токены: цвета, шрифты, отступы"), ("archive", "dir", "открыт архив: логотипы и примеры слайдов")])
+def test_fast_sources_say_their_steps_at_the_end_and_fold_on_the_client(api, tmp_path, name, src, first):
+    c, _, _ = api
+    if name == "archive":
+        content = {"VK Cloud/tokens.json": (BRAND / "tokens.json").read_bytes(), "VK Cloud/logos/primary.png": (BRAND / "logos" / "primary.png").read_bytes()}
+        upload = {"file": ("Брендбук.zip", _zip(content), "application/zip")}
+    else:
+        upload = {"file": (name, (BRAND / name).read_bytes(), "application/json")}
+    _, job = _upload_brand(c, files=upload)
+    assert job.status == "done", job.error
     steps = [e["step"] for e in job.events if e.get("step")]
-    assert steps == ["open", "open", "palette", "fonts", "logos", "rules", "compare"]
+    # an archive is said open before its reading («2 файла»), then the reader's own words at its end
+    assert steps == (["open"] if name == "archive" else []) + ["open", "palette", "fonts", "logos", "rules", "compare"]
+    if name == "archive":
+        assert job.events[[e.get("step") for e in job.events].index("open")]["message"] == "Открыт архив: 2 файла"
+    folded = _client_fold(job.events, src, tmp_path)
+    assert folded["run"]["done"] == 6 and folded["trail"] == sorted(folded["trail"])
+    assert folded["rows"][0]["a"] + folded["rows"][0]["b"] == first
+
+
+def test_steps_a_reader_did_not_say_are_said_after_it(api, monkeypatch):
+    """A reader that does not call on_step (an older one, a fake): its five steps are said from the brandbook read."""
+    import verstka.brand.read as BR
+
+    monkeypatch.setattr(BR, "read_brandbook", lambda src, **k: BR.read_tokens(src))
+    c, _, _ = api
+    _, job = _upload_brand(c, files={"file": ("tokens.json", (BRAND / "tokens.json").read_bytes(), "application/json")})
+    assert job.status == "done", job.error
+    assert [e["step"] for e in job.events if e.get("step")] == ["open", "palette", "fonts", "logos", "rules", "compare"]
+
+
+def test_brand_step_keys_and_progress_bounds():
+    assert [A.brand_step_key(w) for w in ("открыт файл", "прочитаны токены", "открыта папка", "открыт архив", "открыт файл Figma", "палитра", "шрифты", "логотипы", "правила", "страница", "модель")] == \
+        ["open"] * 5 + ["palette", "fonts", "logos", "rules", None, None]
+    job = A.Job(id="j", kind="brandbook", status="running")
+    ev = A.BrandStepEvents(job, "b1")
+    ev("страница", "6 из 6")  # before any step: under the first one
+    ev("открыта папка", "логотипы и примеры слайдов", {"source": "folder"})
+    ev("страница", "3 из 6")
+    ev("модель", "читает 6 страниц")
+    said = _steps_said(job.events)
+    assert all(int(e["progress"] * 6) <= s for e, s in zip(job.events, said) if not e.get("step"))
+    assert job.events[1]["brand"] == {"id": "b1", "source": "folder"}
 
 
 def test_brand_opened_for_each_source(tmp_path):
@@ -917,9 +1026,9 @@ def test_brand_opened_for_each_source(tmp_path):
     assert A._brand_opened(d) == ("Открыта папка: 1 файл", {"source": "folder", "file": "Бренд"})
     assert A._brand_opened("https://www.figma.com/design/AbC/x") is None
     assert A._brand_opened(tmp_path / "t.json") is None
-    bad = tmp_path / "bad.pdf"
-    bad.write_bytes(b"%PDF-1.4 broken")
-    assert A._brand_opened(bad) is None
+    pdf = tmp_path / "g.pdf"  # a PDF's reader says «open» itself, as soon as its text is read
+    shutil.copyfile(BRAND / "guideline.pdf", pdf)
+    assert A._brand_opened(pdf) is None
 
 
 def test_the_t2i_hint_names_polza_when_vk_has_no_image_model(monkeypatch):
