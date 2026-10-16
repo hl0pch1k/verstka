@@ -205,7 +205,7 @@ def test_reference_table_keeps_values_as_written_and_rest_row():
     assert p.task.task == "reference" and p.options[0].kind == "table"
     assert p.headline.startswith("Топ-10 клиентов дают ") and p.headline.endswith("% выручки")
     body = chart_spec_of(p, t)
-    assert body.rows[-1][0] == "Остальные 210 клиентов" and len(body.rows) == 11
+    assert len(body.rows) == 10 and "Остальные 210 клиентов —" in p.caption  # остальные — в подписи, не 11-й строкой
     assert body.columns[-1] == "Доля, %" and "Тариф" not in body.columns
     assert p.options[-1].title == "Разбиение на 22 слайда" and "слишком много" in p.options[-1].why_not
 

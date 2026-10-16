@@ -271,7 +271,8 @@ def test_rest_row_plural():
     for n, word in ((33, "клиента"), (31, "клиент"), (35, "клиентов")):
         t = _t(["Клиент", "Отрасль", "Регион", "Выручка", "Тариф"], _ref_rows([100 - i for i in range(n)]),
                [None, None, None, "млн ₽", None])
-        assert chart_spec_of(_plan(t), t).rows[-1][0] == f"Остальные {n - 10} {word}"
+        p = _plan(t)
+        assert len(chart_spec_of(p, t).rows) == 10 and _sp(p.caption).startswith(f"Остальные {n - 10} {word} — ")
 
 
 def test_times_word_and_spread_fact():

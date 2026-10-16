@@ -120,6 +120,8 @@ def compose(task: TaskKind, fs: FactSet) -> tuple[str, Optional[str]]:
             head = upper_first(alt)
         elif not headline_ok(head, fs.facts, labels):
             head = fs.ctx.get("plain") or head
+    if caption:
+        caption = re.sub(r"(?<!\.)\.\.(?!\.)", ".", caption)  # «чел..» → «чел.»: точка сокращения и конца — одна
     return head, caption
 
 

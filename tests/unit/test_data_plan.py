@@ -120,7 +120,8 @@ def test_clients_reference_top10_table(plans, tables):
     t = chart_spec_of(p, tables["Клиенты.xlsx"])
     assert isinstance(t, TableData)
     assert t.columns == ["Клиент", "Отрасль", "Регион", "Выручка, млн ₽", "Доля, %"]
-    assert len(t.rows) == 11 and t.rows[-1][0] == "Остальные 230 клиентов" and t.rows[0][3] == "212,4"
+    assert len(t.rows) == 10 and t.rows[0][3] == "212,4"  # ровно 10 строк, остальные — в подписи
+    assert _sp(p.caption).startswith("Остальные 230 клиентов — 2 167 млн ₽, 62%.")
 
 
 def test_nps_with_gaps_line_with_breaks(plans, tables):
@@ -164,7 +165,7 @@ def test_chart_specs_for_chosen_options(plans, tables):
         if p.chosen_option.kind == "kpi_cards":
             assert isinstance(body, list)
         elif p.chosen_option.kind == "table":
-            assert isinstance(body, TableData) and len(body.rows) <= 11
+            assert isinstance(body, TableData) and len(body.rows) <= 10
         else:
             assert isinstance(body, ChartSpec) and body.type == p.chosen_option.kind
             assert body.source == p.source and body.x_title
@@ -183,7 +184,7 @@ def test_other_options_rebuild_the_slide(plans, tables):
             body = chart_spec_of(p, tables[name], option=k)
             assert body is not None, (name, k)
             if isinstance(body, TableData):
-                assert len(body.rows) <= 11
+                assert len(body.rows) <= 10
 
 
 def test_slide_data_for_why(plans):

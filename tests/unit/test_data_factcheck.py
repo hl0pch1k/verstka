@@ -680,3 +680,41 @@ def test_checker_catches_planted_errors():
         if f.id == "share_within":
             f.value = 100.0
     assert any("100%" in e for e in check("bad", t2, broken))
+
+
+# ── таблицы ≤ 10 строк данных на слайд и подписи без «..» (правило организаторов, аудит `table_too_big`) ──────────
+def _all_cases() -> list[tuple[str, str]]:
+    return corpus() + random_cases(n_per=10)
+
+
+def test_every_table_option_has_at_most_ten_rows_per_slide():
+    checked = 0
+    for name, text in _all_cases():
+        t, p = _plan_of(name, text)
+        for k, o in enumerate(p.options):
+            if o.kind != "table":
+                continue
+            for part in (1, 2, 3):
+                body = chart_spec_of(p, t, option=k, part=part)
+                if isinstance(body, TableData):
+                    assert len(body.rows) <= 10, (name, o.title, part, len(body.rows))
+                    checked += 1
+        assert ".." not in (p.caption or "").replace("...", ""), (name, p.caption)
+    assert checked >= 100
+
+
+def test_sample_sets_tables_and_captions():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2] / "examples"
+    for f in sorted((root / "data-sales-2026").glob("*")) + sorted((root / "data-science-2026").glob("*")):
+        if f.suffix not in (".csv", ".xlsx", ".json", ".txt"):
+            continue
+        t = read_bytes(f.name, f.read_bytes())[0]
+        p = plan_dataset(profile_table(t), t)
+        assert ".." not in (p.caption or "").replace("...", ""), (f.name, p.caption)
+        for k, o in enumerate(p.options):
+            for part in (1, 2, 3):
+                body = chart_spec_of(p, t, option=k, part=part)
+                if isinstance(body, TableData):
+                    assert len(body.rows) <= 10, (f.name, o.title, part)

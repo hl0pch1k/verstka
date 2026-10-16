@@ -85,6 +85,17 @@ def test_goals_reach_every_named_dataset():
                                             "как подготовка влияет на баллы ЕГЭ"]
 
 
+def test_goal_without_named_dataset_goes_to_the_only_fitting_one():
+    years = _t(["Год", "Статей"], [[str(y), 40 + 9 * (y - 2005)] for y in range(2005, 2026)], file="Публикации.csv")
+    regions = _t(["Регион", "Выручка"], [["Москва", 10], ["Казань", 5], ["Омск", 3]], [None, "млн ₽"], file="Регионы.csv")
+    per = assign_goals(goals_of("Покажи, как растёт наука"), [Data(t, profile_table(t)) for t in (years, regions)])
+    assert [g.phrase for g in per[0]] == ["как растёт наука"] and per[1] == []
+    # два ряда по времени — цель без предмета неоднозначна, не достаётся никому
+    years2 = _t(["Год", "Патентов"], [[str(y), 4 + (y - 2005)] for y in range(2005, 2026)], file="Патенты.csv")
+    per = assign_goals(goals_of("Покажи, как растёт наука"), [Data(t, profile_table(t)) for t in (years, years2)])
+    assert per == [[], []]
+
+
 def test_goal_naming_two_files_reaches_both():
     a = _t(["Регион", "Выручка"], [["Москва", 10], ["Казань", 5], ["Омск", 3]], [None, "млн ₽"], file="Регионы.csv")
     b = _t(["Канал", "Выручка"], [["Прямые", 7], ["Партнёры", 5], ["Онлайн", 2]], [None, "млн ₽"], file="Каналы.csv")
@@ -303,6 +314,7 @@ def test_science_set_end_to_end():
     plans = plan_datasets(tables, brief)
     tasks = [p.task.task for p in plans]
     assert tasks == ["relationship", "shares", "dynamics", "comparison", "distribution", "kpi"]
+    assert plans[2].task.goal == "как растёт наука"  # предмет не назван в файлах — единственный ряд по годам
     kinds = [p.options[0].kind for p in plans]
     assert kinds == ["scatter", "stacked_bar", "line", "bar", "histogram", "kpi_cards"]
     heads = [_sp(p.headline) for p in plans]

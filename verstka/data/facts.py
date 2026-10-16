@@ -830,7 +830,7 @@ def _reference(d: Data) -> FactSet:
                f"Остальные {rest_n} дают {fmt_value(rest_v, unit)}.")
         fs.add("rest_count", rest_n, "count", f"Остальные {rest_n}", None, "Строки, собранные в итог.")
         who = f"Остальные {count_words(rest_n, *(forms or ('строка', 'строки', 'строк')))}"
-        fs.ctx["caption"] = _short([f"{who} дают {fmt_value(rest_v, unit)} — {fmt_pct(100 - top)}%.",
+        fs.ctx["caption"] = _short([f"{who} — {fmt_value(rest_v, unit)}, {fmt_pct(100 - top)}%.",
                                     _biggest(d, m, ent if ent_ok else None)])
         return fs
     if m is not None and rv.values and rv.values[0] is not None:

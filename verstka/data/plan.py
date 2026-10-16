@@ -70,11 +70,13 @@ def _source(p: DatasetProfile) -> str:
     return f"Источник: {p.file}" + (f", лист «{p.sheet}»" if p.sheet and p.kind == "xlsx" else "")
 
 
-def plan_dataset(profile: DatasetProfile, table: Table, goals: Optional[Sequence[Goal]] = None) -> DatasetPlan:
+def plan_dataset(profile: DatasetProfile, table: Table, goals: Optional[Sequence[Goal]] = None,
+                 assigned: bool = False) -> DatasetPlan:
     """Задача, варианты, заголовок-вывод и факты одного датасета. `goals` — цели из текста; к датасету относятся только
-    те, что о нём (предмет совпал с файлом, колонками или значениями) или без предмета."""
+    те, что о нём (предмет совпал с файлом, колонками или значениями) или без предмета. `assigned=True` — цели уже
+    распределены по датасетам (`plan_datasets`), повторно их не фильтруем."""
     d0 = Data(table, profile)
-    rel = _relevant(goals or [], d0)
+    rel = list(goals or []) if assigned else _relevant(goals or [], d0)
     first = decide_task(Data(table, profile, subject=tuple(s for g in rel for s in g.subject)), rel)
     subject = tuple(stems_of(first.goal)) if first.goal else ()
     d = Data(table, profile, subject=subject) if subject else d0
@@ -145,6 +147,16 @@ def assign_goals(goals: Sequence[Goal], datas: Sequence[Data]) -> list[list[Goal
                 best, who = c, [k]
             elif abs(c - best) <= 1e-9:
                 who.append(k)
+        if not who and g.subject:
+            # предмет не назван так, чтобы датасет мог ответить («как растёт наука»: «наук» есть лишь в названиях
+            # институтов бюджета, где нет ряда по годам) — цель достаётся единственному датасету, где её задача
+            # осуществима лучше всего; при равенстве — никому
+            feas = [(scores[k].get(g.task, 0.0), k) for k in range(len(datas)) if scores[k].get(g.task, 0.0) >= FEASIBLE]
+            if feas:
+                best_s = max(s_ for s_, _ in feas)
+                top = [k for s_, k in feas if abs(s_ - best_s) < 1e-9]
+                if len(top) == 1:
+                    who = top
         for k in who:
             out[k].append(g)
     return out
@@ -157,7 +169,7 @@ def plan_datasets(tables: Sequence[Table], brief_text: str = "",
     goals = goals_of(brief_text)
     datas = [Data(t, p) for t, p in zip(tables, profs)]
     per = assign_goals(goals, datas)
-    return [plan_dataset(p, t, g) for t, p, g in zip(tables, profs, per)]
+    return [plan_dataset(p, t, g, assigned=True) for t, p, g in zip(tables, profs, per)]
 
 
 # ── данные слайда ─────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -337,7 +349,8 @@ def _spec_comparison(d: Data, opt: VizOption, src: str, part: int, plan: Dataset
             ms.append((mm.name, cv.extra.get(mm.name, []), mm.unit_text))
         cols = [cv.dim] + [_col_title(n, u) for n, _, u in ms]
         rows = [[lab] + [_cell(v[i] if i < len(v) else None) for _, v, _ in ms] for i, lab in enumerate(cv.labels)]
-        if cv.total is not None and cv.measure is not None and cv.measure.additive:
+        if cv.total is not None and cv.measure is not None and cv.measure.additive and len(rows) % TABLE_ROWS:
+            # «Итого» — только если помещается на последнем слайде таблицы (≤ 10 строк), иначе итог — в подписи
             rows.append(["Итого", _cell(cv.total)] + [""] * (len(ms) - 1))
         bad = _pages_ok(rows, part)
         return bad if bad is not None else TableData(columns=cols, rows=_part(rows, part))
@@ -401,7 +414,8 @@ def _tree_table(d: Data, part: int) -> Union[TableData, NotBuilt]:
     for g in sorted(groups, key=lambda x: (-tot[x], x)):
         for i in sorted(groups[g], key=lambda i: (-(m.values[i] or 0.0), i)):
             rows.append([g, d.text(i, child), _cell(m.values[i])])
-    rows.append(["Итого", "", _cell(sum(tot.values()))])
+    if len(rows) % TABLE_ROWS:  # «Итого» — на последнем слайде, если там есть место
+        rows.append(["Итого", "", _cell(sum(tot.values()))])
     bad = _pages_ok(rows, part)
     if bad is not None:
         return bad
@@ -500,8 +514,9 @@ def _spec_reference(d: Data, opt: VizOption, src: str, part: int, plan: DatasetP
         return _summary_cards(d)
     mode = _table_mode(opt) if opt.kind == "table" else "top"
     if mode == "top":
-        rows = list(rv.rows) + ([rv.rest] if rv.rest else [])
-        return TableData(columns=list(rv.columns), rows=rows, unit=rv.measure.unit_text if rv.measure else None)
+        # на слайде — ровно 10 строк данных (правило ≤ 10 строк); остальные — в подписи, а не 11-й строкой
+        return TableData(columns=list(rv.columns), rows=list(rv.rows)[:TABLE_ROWS],
+                         unit=rv.measure.unit_text if rv.measure else None)
     if mode == "head":
         return TableData(columns=list(rv.full_columns), rows=rv.all_rows[:TABLE_ROWS])
     bad = _pages_ok(rv.all_rows, part)
