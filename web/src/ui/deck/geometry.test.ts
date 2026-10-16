@@ -108,3 +108,12 @@ test("другая вкладка листа закрывает слой «Сл�
   // лист закрывается — слой уезжает вместе с ним, снимает его сам лист
   assert.equal(uiReducer(open, { type: "sheet", tab: null }).pattern, 4);
 });
+test("файлы с данными на шаге «Текст»: плита 01 — своя полоса, плита 02 на 40; на шаге «Шаблон», в «Все параметры» и в «Улучшить готовую» — нет", () => {
+  const g = deckGeometry({ ...UI0, data: true });
+  assert.deepEqual([g.y, g.fold1, g.heads, g.strips], [[0, 40, 556, 812], true, true, false]);
+  assert.equal(deckGeometry({ ...UI0, data: true, open: "tpl" }).fold1, false);
+  assert.deepEqual(deckGeometry({ ...UI0, data: true, open: "tpl" }).y, [0, 524, 668, 812]);
+  assert.equal(deckGeometry({ ...UI0, data: true, more: true }).fold1, false);
+  assert.equal(deckGeometry({ ...UI0, data: true, improve: true }).fold1, false);
+  assert.equal(deckGeometry({ ...UI0, data: true, screen: "build" }).fold1, false);
+});

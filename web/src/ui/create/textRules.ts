@@ -8,6 +8,7 @@ import { briefBody, factsLine, textFacts } from "../../lib/textFacts";
 import { plural } from "../../lib/utils";
 import { writerModeOf } from "../../lib/writerMode";
 import type { Health, ImprovedFrom, ImproveSource, ModelsStatus } from "../../types";
+import { briefShort, dataFilesLabel } from "./dataRules";
 
 /** Ошибка у поля. `empty` / `short` / `type` — правила `textError`; `file` — файл не прочитался или презентацию не
  *  удалось прочитать на сервере (причина — в `text`). */
@@ -187,8 +188,10 @@ const joinDot = (parts: (string | null)[]) => parts.filter(Boolean).join(" · ")
 /** Полоса 02 (сборка, «Все параметры»): тема и «тема · текст пишет агент» (V2 `docTitle`, `docSub`), готовый текст и
  *  его разбор, презентация «Улучшить готовую». `line` — уже разобранная строка текста (`textLine`): полоса её не
  *  считает, разбор текста делается один раз на изменение. */
-export function textStrip(text: string, o: { line: TextLine; improve?: Pick<ImproveSource, "name" | "title" | "slides"> | null }): { title: string; meta?: string } {
+export function textStrip(text: string, o: { line: TextLine; improve?: Pick<ImproveSource, "name" | "title" | "slides"> | null; data?: number }): { title: string; meta?: string } {
   if (o.improve) return { title: deckName(o.improve), meta: joinDot(["текст из презентации", slidesLabel(o.improve.slides)]) };
+  // файлы с данными (V2 `s2Title`, `s2Sub`): первая фраза брифа и сколько файлов
+  if (o.data) return { title: briefShort(text), meta: dataFilesLabel(o.data) };
   const first = firstLine(text);
   if (!first) return { title: "Тема ещё не задана" };
   const l = o.line;

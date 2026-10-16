@@ -13,6 +13,9 @@ export interface UiState {
   more: boolean;
   /** «Улучшить готовую»: плита 01 свёрнута в полосу, плита 02 встаёт под неё (40 px). */
   improve: boolean;
+  /** Приложены файлы с данными: на шаге «Текст» плита 01 свёрнута в свою полосу, плита 02 встаёт под неё (40 px) —
+   *  у неё место под панель «Данные» (V2 версии 105, `dtCol`). */
+  data: boolean;
   /** Слой шапки: «Мои презентации» или «Шаблоны». */
   sect: null | "hist" | "tpls";
   /** Открытая вкладка листа «Подробнее» (null — лист закрыт) и последняя открытая. */
@@ -22,6 +25,8 @@ export interface UiState {
   textLayer: boolean; lightbox: boolean; helper: boolean; note: boolean; remarks: boolean;
   /** Шаблон, открытый на просмотр, и шаблон, ждущий подтверждения удаления (id). */
   tplPreview: string | null; tplDelete: string | null;
+  /** Слой «Брендбук» (палитра, шрифты, логотипы, расхождения с шаблоном) открыт. */
+  brandLayer: boolean;
   /** результат открыт из «Создать»: плита 04 поднимается снизу одним движением с плитами 02/03 */
   rise: boolean;
   /** возврат на «Создать» с результата: плита 04 уходит вниз непрозрачной со своим содержимым */
@@ -29,10 +34,10 @@ export interface UiState {
 }
 
 export const UI0: UiState = {
-  screen: "create", open: "text", more: false, improve: false,
+  screen: "create", open: "text", more: false, improve: false, data: false,
   sect: null, sheet: null, sheetLast: "quality", pattern: null,
   textLayer: false, lightbox: false, helper: false, note: false, remarks: false,
-  tplPreview: null, tplDelete: null, rise: false, down: false,
+  tplPreview: null, tplDelete: null, brandLayer: false, rise: false, down: false,
 };
 
 export interface Geometry {
@@ -40,6 +45,7 @@ export interface Geometry {
   s4: "on" | "off" | "up" | "down";       // класс плиты результата: p2-s4-on / p2-s4-off / + p2-s4-up / p2-s4-down
   heads: boolean;                         // шапки и тела «Создать» видны (иначе — полосы)
   strips: boolean;                        // полосы 01/02 видны
+  fold1: boolean;                         // файлы с данными на шаге «Текст»: плита 01 — своя полоса, её заголовок гаснет
 }
 
 export function deckGeometry(ui: UiState): Geometry {
@@ -49,9 +55,12 @@ export function deckGeometry(ui: UiState): Geometry {
   // «Улучшить готовую» двигает плиту 02, только пока открыт шаг «Текст» (V2: `txImpOn = txOpen && …`,
   // `txOpen = create && textOpen && !more`); `folded` уже отсекает «Все параметры» и другие экраны
   if (create && !folded && ui.open === "text" && ui.improve) y = [y[0], 40, y[2], 0];
+  // файлы с данными (не в «Улучшить готовую» — там своя полоса над плитой 02): V2 `dtCol = txOpen && dataOn && !txImpOn`
+  const fold1 = create && !folded && ui.open === "text" && ui.data && !ui.improve;
+  if (fold1) y = [y[0], 40, y[2], 0];
   y[3] = ui.screen === "result" ? 120 : create ? 812 : 80;
   const s4 = ui.screen === "result" ? (ui.rise ? "up" : "on") : ui.down ? "down" : "off";
-  return { y, s4, heads: create && !ui.more, strips: !create || ui.more };
+  return { y, s4, heads: create && !ui.more, strips: !create || ui.more, fold1 };
 }
 
 export type UiAction =
@@ -70,7 +79,7 @@ export function uiReducer(s: UiState, a: UiAction): UiState {
       return {
         ...s, screen: a.screen, open: a.screen === "create" ? "text" : s.open,
         sheet: null, sect: null, pattern: null, textLayer: false, lightbox: false, remarks: false, more: false,
-        tplPreview: null, tplDelete: null, rise: false, down: a.screen === "create" && (s.screen === "result" || s.down),
+        tplPreview: null, tplDelete: null, brandLayer: false, rise: false, down: a.screen === "create" && (s.screen === "result" || s.down),
       };
     case "open":
       // шапка шага или полоса свёрнутой плиты: шаг раскрывается, «Все параметры» сворачиваются; шаг «Шаблон»

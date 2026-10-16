@@ -226,3 +226,12 @@ test("«Вернуться к тексту»: своя сборка — к че�
   assert.equal(backToText({ ...theirs, request: { ...theirs.request, brief: "  " } }, "B", "A"), null);
   assert.equal(backToText(null, "B", "A"), null);
 });
+test("вторая ступень: «Собрать ещё раз» по мете и «Вернуться к тексту» — с наборами данных и брендбуком сборки", () => {
+  const g = { id: "g1", template_id: "t1", strategies: ["structured"], brief: "Итоги", dataset_ids: ["d1", "d2"], brandbook_id: "b1", brand_priority: "template" as const };
+  const r = requestOf(g);
+  assert.deepEqual([r.dataset_ids, r.brandbook_id, r.brand_priority], [["d1", "d2"], "b1", "template"]);
+  const plain = requestOf({ id: "g2", template_id: "t1", strategies: ["structured"], brief: "Итоги" });
+  assert.equal("dataset_ids" in plain || "brandbook_id" in plain, false);
+  const back = backToText({ gid: "A", request: r, expected: null }, "B", "A");
+  assert.deepEqual([back?.preset.datasetIds, back?.preset.brandbookId, back?.preset.brandPriority], [["d1", "d2"], "b1", "template"]);
+});

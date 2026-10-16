@@ -166,3 +166,38 @@
     .p2-lay *{transition:none !important}
   }
 }
+/* Слой «Брендбук» (модуль ds, V2 версии 105, `#bb-lay`): слева что извлечено (палитра, шрифты, логотипы), справа
+   расхождения с шаблоном, что важнее, правила. Дословно из V2; «сайт:» — сверх доски */
+.bb-g{display:grid;grid-template-columns:minmax(0,1fr) 416px;gap:24px;align-items:start}
+.bb-sec{margin-top:32px}
+.bb-sws{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin:16px 0 0;padding:0;list-style:none}
+.bb-sws>li{min-width:0}
+.bb-sw{display:block;height:56px;border-radius:12px;box-shadow:inset 0 0 0 1px rgba(11,18,32,.08)}
+.bb-hex{display:block;margin-top:8px;font-size:14px;font-weight:700;line-height:20px;color:#0B1220;font-variant-numeric:tabular-nums}
+.bb-role{display:block;font-size:13px;font-weight:500;line-height:20px;color:#5A6272;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bb-fonts{display:flex;flex-direction:column;gap:8px;margin:16px 0 0;padding:0;list-style:none}
+.bb-font{display:flex;align-items:center;gap:16px;height:72px;padding:0 16px;border-radius:16px;background:#F3F4F1;min-width:0}
+.bb-fa{flex:none;width:56px;font-family:'Play','Manrope',sans-serif;font-size:32px;line-height:40px;color:#0B1220}
+.bb-font .bb-cn,.bb-font .bb-cm{overflow:hidden;text-overflow:ellipsis}
+.bb-logos2{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin:16px 0 0;padding:0;list-style:none}
+.bb-logos2>li{min-width:0}
+.bb-lgt{aspect-ratio:16 / 9}
+.bb-lgc{display:block;margin-top:8px;font-size:13px;font-weight:600;line-height:20px;color:#0B1220;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bb-sub{margin:12px 0 0;font-size:13px;font-weight:600;line-height:20px;color:#5A6272}
+.bb-seg{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;height:48px;margin-top:8px;padding:4px;border-radius:999px;background:#F3F4F1}
+.bb-cfs{display:flex;flex-direction:column;gap:8px;margin:16px 0 0;padding:0;list-style:none}
+.bb-cf{display:flex;flex-direction:column;padding:16px;border-radius:16px;background:#F3F4F1;min-width:0}
+.bb-cfk{font-size:14px;font-weight:700;line-height:20px;color:#0B1220}
+.bb-cfv{display:flex;align-items:center;gap:6px;margin-top:4px;font-size:14px;font-weight:500;line-height:20px;color:#5A6272;white-space:nowrap}
+.bb-win{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:14px;font-weight:700;line-height:20px;color:#2563EB;white-space:nowrap}
+.bb-win svg{flex:none}
+.bb-dot{display:block;flex:none;width:12px;height:12px;border-radius:999px;box-shadow:inset 0 0 0 1px rgba(11,18,32,.14)}
+/* сайт: строки расхождения не вылезают из колонки (длинное значение — многоточием, целиком — подсказка браузера нет:
+   значения короткие); расхождений нет — тихая строка */
+.bb-cfv>span:not(.bb-dot),.bb-win>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.bb-none{margin:16px 0 0;font-size:14px;font-weight:500;line-height:20px;color:#5A6272}
+@media (min-width: 901px){
+  /* узкая колода: слой «Брендбук» — правая колонка 416 → 376 той же кривой */
+  .bb-g{transition:grid-template-columns 340ms var(--ease)}
+  .hp-nar .bb-g{grid-template-columns:minmax(0,1fr) 376px;transition-duration:520ms}
+}

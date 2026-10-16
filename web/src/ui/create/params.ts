@@ -5,6 +5,7 @@ import { PURPOSES, SLIDES_DEFAULT, SLIDES_MAX, SLIDES_MIN } from "../../lib/crea
 import { readDraft } from "../../lib/draft";
 import { humanError } from "../../lib/errors";
 import type { ActiveJob } from "../../lib/jobState";
+import type { DataRequest } from "./dataRules";
 import { dictatedByHeadings, dictatedSlides } from "../../lib/textFacts";
 import { plural } from "../../lib/utils";
 import type { ComposerPreset } from "../../store";
@@ -172,6 +173,8 @@ export interface RequestInput {
   images: ImagesInfo;
   /** «Улучшить готовую»: исходная презентация, пока режим живёт. */
   improve: ImproveSource | null;
+  /** Вторая ступень: наборы данных, брендбук и что важнее (dataRules `dataRequest`; пусто — полей нет). */
+  data?: DataRequest;
 }
 
 /** Запрос сборки (POST /api/generations):
@@ -201,6 +204,7 @@ export function buildRequest(i: RequestInput): GenerateRequest {
     autofix: true,
     exports: ["pdf", "html"],
     improved_from: src ? { name: src.name, slides: src.slides, template_id: src.template_id, audit: src.audit ?? null } : undefined,
+    ...i.data,
   };
 }
 

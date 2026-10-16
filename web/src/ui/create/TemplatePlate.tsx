@@ -16,6 +16,8 @@ import { Icon } from "../kit/Icon";
 import { usePresence } from "../kit/usePresence";
 import { useHeld } from "./ImproveNote";
 import { FileInput, UploadZone, useFileDrop } from "./UploadZone";
+import { BrandHead } from "./BrandMenu";
+import { BrandAnalysis } from "./BrandAnalysis";
 
 /** idle — лента; run — файл уходит на сервер и разбирается; settle — разбор закончился, решается итог; done — все
  *  галочки держатся 560 мс; out — разбор гаснет 240 мс; fail — строка ошибки в коробке разбора. */
@@ -207,8 +209,16 @@ function HeadSlot({ fade, children }: { fade: boolean; children: ReactNode }) {
  *  не удался — короткая красная строка (`HEAD_FAIL`; полная причина и «Попробовать ещё раз» — в коробке раскрытого
  *  шага, «Сменить» и заголовок его раскрывают). Каждая из них проявляется, а не появляется сразу. */
 export function TemplateHead({ upload }: { upload: TemplateUpload }) {
-  const { ui, dispatch, templates, templateId, notices } = useApp();
+  const { ui, dispatch, templates, templateId, notices, data } = useApp();
   const open = ui.screen === "create" && ui.open === "tpl";
+  // меню «Брендбук» — одно на оба вида заголовка (раскрытый и свёрнутый шаг): кнопка свёрнутого шага раскрывает шаг, и
+  // меню встаёт уже в раскрытом. Живёт, пока раскрыт шаг 01 на «Создать» (V2 `bbMenuOn`)
+  const [bbMenu, setBbMenu] = useState(false);
+  const bbCtx = open && !ui.more && !ui.sect;
+  useEffect(() => {
+    if (!bbCtx) setBbMenu(false);
+  }, [bbCtx]);
+  const bbHas = data.brand.phase === "on" && !!data.brand.spec;
   const t = templates.find((x) => x.template_id === templateId);
   const note = upload.phase === "idle" && notices.template?.kind === "error" ? humanError(notices.template.text, HEAD_NOTE) : null;
   const running = upload.phase === "run" || upload.phase === "settle";
@@ -228,19 +238,23 @@ export function TemplateHead({ upload }: { upload: TemplateUpload }) {
         </span>
       )}
       <RefusedLine text={upload.refused} />
+      {bbMenu && <button type="button" className="tx-scrim" tabIndex={-1} aria-label="Закрыть выбор брендбука" onClick={() => setBbMenu(false)} />}
       {open ? (
         <div key="open" className="p2-in" style={{ display: "flex", alignItems: "center", gap: 24 }}>
+          <BrandHead menu={bbMenu && bbCtx} setMenu={setBbMenu} off={upload.busyWhy} />
           <button type="button" className="p2-ob" onClick={() => dispatch({ type: "open", step: "text" })} style={{ height: 40 }}>Готово</button>
         </div>
       ) : (
         <div key="closed" className="p2-in" style={{ display: "flex", alignItems: "center", gap: 24, minWidth: 0 }}>
+          <BrandHead menu={false} setMenu={setBbMenu} off={upload.busyWhy} />
           {kind === "run" ? (
             <HeadSlot key="run" fade={fade}><RunningLine name={upload.file?.name ?? ""} /></HeadSlot>
           ) : kind === "fail" ? (
             <HeadSlot key="fail" fade={fade}><ErrorLine text={HEAD_FAIL} lines={1} /></HeadSlot>
           ) : t && (
             <HeadSlot key="tpl" fade={fade}>
-              <div style={{ display: "flex", alignItems: "center", gap: 16, minWidth: 0 }}>
+              {/* рядом с брендбуком в узкой колоде обложка шаблона сжимается и гаснет на месте (V2 `bb-tpl-n`) */}
+              <div className={cls("bb-tpl", bbHas && "bb-tpl-n")} style={{ display: "flex", alignItems: "center", gap: 16, minWidth: 0 }}>
                 <Cover src={t.cover_url} kind="m" ink={inkOf(t)} label={`Обложка шаблона ${tplLabel(t)}`} />
                 <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
                   <span style={{ fontSize: 15, fontWeight: 700, lineHeight: "24px", color: "#0B1220", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{tplLabel(t)}</span>
@@ -262,7 +276,11 @@ export function TemplateHead({ upload }: { upload: TemplateUpload }) {
  *  тела (четыре дорожки) перестраивается вместе с ней: у ленты в каждом ряду одна обложка уходит, у разбора — вторая
  *  дорожка (create.css «01 · лента», `tp-anl`). */
 export function TemplateBody({ upload }: { upload: TemplateUpload }) {
-  const { ui, dispatch, templates, notices } = useApp();
+  const { ui, dispatch, templates, notices, data } = useApp();
+  // разбор брендбука — в теле шага, на месте ленты (V2 `bbRunOn`; свой шаблон, если разбирается, — главнее)
+  const bp = data.brand.phase;
+  const brandAn = upload.phase === "idle" && (bp === "run" || bp === "done" || bp === "out" || bp === "fail");
+  const brandInput = useRef<HTMLInputElement>(null);
   const on = ui.screen === "create" && ui.open === "tpl" && !ui.more;
   const body = useRef<HTMLDivElement>(null);
   // пока читается презентация «Улучшить готовую», файл на плиту не принимается — шапка шага говорит почему
@@ -272,9 +290,14 @@ export function TemplateBody({ upload }: { upload: TemplateUpload }) {
   const fileName = upload.file?.name ?? "";
   const info = notices.template?.kind === "info" ? notices.template.text : null;
   return (
-    <div id="p2-b1" ref={body} className={cls("p2-body p2-g4", on ? "p2-on" : "p2-off", upload.phase !== "idle" && "tp-anl")}
+    <div id="p2-b1" ref={body} className={cls("p2-body p2-g4", on ? "p2-on" : "p2-off", (upload.phase !== "idle" || brandAn) && "tp-anl")}
       style={{ position: "relative", display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 16, margin: "24px 0 0 192px" }}>
-      {upload.phase === "idle" ? (
+      {brandAn ? (
+        <BrandAnalysis onOther={() => {
+          data.dismissBrand();
+          brandInput.current?.click();
+        }} />
+      ) : upload.phase === "idle" ? (
         <Ribbon fresh={upload.fresh} onPeek={peek} onGallery={gallery} onUpload={upload.pick} uploadOff={upload.busyWhy} />
       ) : (
         <Analysis list={orderTemplates(templates, upload.fresh)} name={templateTitle(fileName)} fileName={fileName}
@@ -284,6 +307,13 @@ export function TemplateBody({ upload }: { upload: TemplateUpload }) {
       )}
       <UploadZone on={over} />
       <FileInput inputRef={upload.inputRef} onFile={upload.start} />
+      {/* «Другой файл» после неудачи разбора брендбука */}
+      <input ref={brandInput} type="file" accept=".pdf,.json,.zip,application/pdf,application/json,application/zip" hidden tabIndex={-1} aria-hidden="true"
+        onChange={(e) => {
+          const f = e.currentTarget.files?.[0];
+          e.currentTarget.value = "";
+          if (f) data.startBrand(f);
+        }} />
     </div>
   );
 }

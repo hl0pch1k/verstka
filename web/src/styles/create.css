@@ -425,3 +425,155 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
   .tp-row{display:contents}
   .pp-err{position:static}
 }
+/* ═══ Данные и брендбук (модуль ds) — вторая ступень: файлы с данными и брендбук на шагах 01 и 02. Дословно из
+   boards/V2.dc.html версии 105 (<helmet><style>, блок «Данные и брендбук»); «сайт:» — сверх доски. Без файлов и
+   брендбука ничего не меняется. Слой «Брендбук» (bb-g, bb-sws, bb-cf…) — в layers.css ═══ */
+.ds-spin{display:block;flex:none;animation:gh-spin 1000ms linear infinite}
+/* 01 · «Брендбук»: тихая кнопка рядом с шаблоном; меню — как «Из файла», выровнено по правому краю кнопки */
+.bb-fg{position:relative;z-index:4;display:flex;align-items:center;flex:none}
+/* блок шапки с «Брендбуком» проявляется (p2-in) — пока идёт анимация, он сам контекст наложения; свой z-index держит меню
+   над плитками ленты, которые проявляются в то же время */
+.p2-hx>.p2-in:has(>.bb-fg){position:relative;z-index:4}
+.bb-btn{flex:none}
+.tx-menu.bb-menu{left:auto;right:0;transform-origin:top right}
+.tx-mdiv{display:block;height:1px;margin:4px 12px;background:rgba(11,18,32,.08)}
+.bb-busy{display:inline-flex;align-items:center;gap:8px;height:40px;font-size:14px;font-weight:600;line-height:20px;color:#2563EB;white-space:nowrap}
+/* карточка брендбука — пара карточке шаблона: плитка палитры 80 × 45 и две строки; кликабельна (слой «Брендбук») */
+.bb-chip{display:flex;align-items:center;gap:16px;padding:0;border:0;border-radius:12px;background:none;color:#0B1220;font-family:inherit;text-align:left;cursor:pointer;transition:transform 160ms var(--ease)}
+.bb-chip:hover{transform:translateY(-2px)}
+.bb-chip:active{transform:scale(.98)}
+.bb-tile{display:flex;flex:none;width:80px;height:45px;border-radius:12px;overflow:hidden;box-shadow:0 0 0 1px rgba(11,18,32,.08)}
+.bb-tile>span{flex:1 1 0%}
+.bb-ct{display:flex;flex-direction:column;min-width:0}
+.bb-cn{font-size:15px;font-weight:700;line-height:24px;color:#0B1220;white-space:nowrap}
+.bb-chip:hover .bb-cn{color:#2563EB}
+.bb-cm{font-size:13px;font-weight:500;line-height:20px;color:#5A6272;white-space:nowrap}
+/* сайт: тесная колода (окно около 1280 с помощником) — ряду заголовка шага 01 не хватает места на брендбук, шаблон и
+   «Сменить»: подписи карточек брендбука и шаблона сжимаются многоточием (кнопка не уходит за край плиты) */
+.p2-hx .bb-fg{flex:0 1 auto;min-width:0}
+.bb-chip{min-width:0}
+.bb-chip .bb-cn,.bb-chip .bb-cm{overflow:hidden;text-overflow:ellipsis}
+/* разбор брендбука: плитки заполняются по ходу — пульс гаснет, содержимое проявляется (только opacity и transform) */
+.bb-at{position:relative;display:block;height:142px;border-radius:16px;overflow:hidden;background:#F3F4F1}
+.bb-at .an-pulse{transition:opacity 240ms var(--ease)}
+.bb-at-on .an-pulse{opacity:0}
+.bb-atin{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;opacity:0;transform:scale(.98);transition:opacity 360ms var(--ease),transform 360ms var(--ease)}
+.bb-at-on .bb-atin{opacity:1;transform:none}
+.bb-atpal{flex-direction:row;align-items:stretch}
+.bb-atpal>span{flex:1 1 0%}
+.bb-atpal>span:nth-child(4){box-shadow:inset 0 0 0 1px rgba(11,18,32,.06)}
+.bb-aa{font-family:'Play','Manrope',sans-serif;font-weight:700;font-size:48px;line-height:56px;color:#0B1220}
+.bb-aan{font-size:13px;font-weight:600;line-height:20px;color:#5A6272}
+.bb-atlg{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:16px}
+/* логотип-знак: квадрат-знак и полоса слова; размеры — доли плитки, поэтому плитка сжимается без перестроек */
+.bb-lg{display:flex;align-items:center;justify-content:center;gap:6%;min-width:0;border-radius:12px;background:#FFFFFF;box-shadow:inset 0 0 0 1px rgba(11,18,32,.08)}
+.bb-lgm{display:block;width:16%;aspect-ratio:1;border-radius:24%;background:#0077FF}
+.bb-lgw{display:block;width:38%;aspect-ratio:6 / 1;border-radius:999px;background:#0B1220}
+.bb-lg-white{background:#0077FF;box-shadow:none}
+.bb-lg-white .bb-lgm,.bb-lg-white .bb-lgw{background:#FFFFFF}
+.bb-lg-mark .bb-lgw{display:none}
+.bb-lg-mark .bb-lgm{width:22%}
+.bb-lg-mono .bb-lgm{background:#0B1220}
+/* сайт: логотип из брендбука — картинкой в плитке (поле 14 %), знак и полоса — пока картинки нет или она не загрузилась */
+.bb-lg{position:relative;overflow:hidden}
+.bb-lgi{position:absolute;inset:14%;width:72%;height:72%;object-fit:contain}
+.bb-lg-has>.bb-lgm,.bb-lg-has>.bb-lgw{display:none}
+/* сайт: Figma — ссылка в том же меню */
+.bb-fig{display:flex;flex-direction:column;gap:8px;padding:0 0 4px}
+.bb-fig .tx-mcap{padding-bottom:0}
+.bb-figin{height:40px;margin:0 12px;padding:0 16px;border:0;border-radius:999px;background:#F3F4F1;font-family:inherit;font-size:14px;font-weight:600;line-height:20px;color:#0B1220;box-shadow:inset 0 0 0 1px rgba(11,18,32,.08)}
+.bb-figin:focus{outline:none;box-shadow:inset 0 0 0 2px #2563EB}
+.bb-figin.bb-figbad{box-shadow:inset 0 0 0 2px #DC2626}
+.bb-fighint{margin:0 12px;font-size:13px;font-weight:500;line-height:20px;color:#5A6272;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bb-fighint.bb-figbadt{color:#DC2626;font-weight:600}
+.bb-figrow{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:4px 4px 0}
+/* 02 · «Из файла» на две колонки: текст и данные; высота прежняя */
+.tx-menu.tx-menu2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:8px;width:608px}
+.tx-mcol{position:relative;min-width:0}
+.tx-mcol+.tx-mcol::before{content:"";position:absolute;left:-4px;top:8px;bottom:8px;width:1px;background:rgba(11,18,32,.08)}
+.tx-mdrop{display:flex;align-items:center;gap:12px;height:56px;margin:0;padding:0 12px}
+.tx-mdrop .tx-mic{background:#F3F4F1;color:#5A6272}
+.tx-mdrop .tx-mn{font-weight:600;color:#5A6272}
+.tx-mi[aria-disabled=true]{cursor:default}
+/* 02 · поле и панель «Данные» в одной сетке: без данных вторая дорожка 0, поле во всю ширину, как было */
+.tx-fw.dt-g{display:grid;grid-template-columns:minmax(0,1fr) 0px;grid-template-rows:auto;column-gap:0px;row-gap:0px;align-items:start;transition:transform 520ms var(--ease),grid-template-columns 340ms var(--ease),column-gap 340ms var(--ease)}
+.tx-fw.dt-g.dt-in{transition:transform 520ms var(--ease),grid-template-columns 520ms var(--ease),column-gap 520ms var(--ease)}
+.tx-fw.dt-g.dt-on{row-gap:16px}
+.tx-fw.dt-g.dt-w{grid-template-columns:minmax(0,1fr) 400px;column-gap:16px}
+.dt-g>.p2-field{grid-column:1;grid-row:1;min-width:0}
+.dt-cell{grid-column:2;grid-row:1;align-self:stretch;min-width:0;overflow:clip}
+.dt-on>.dt-cell{grid-row:1 / span 2}
+.dt-goalw{grid-column:1;grid-row:2;min-width:0}
+.dt-pan{display:flex;flex-direction:column;height:100%;min-width:0;padding:16px 8px 8px;border-radius:24px;background:#FFFFFF}
+.dt-hd{display:flex;align-items:center;justify-content:space-between;gap:8px;height:20px;margin:0 8px 8px;white-space:nowrap}
+.dt-lbl{flex:none;font-size:13px;font-weight:600;line-height:20px;color:#5A6272}
+.dt-st{min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:13px;font-weight:600;line-height:20px;color:#5A6272}
+.dt-st-run{color:#2563EB}
+.dt-list{display:flex;flex-direction:column;gap:2px;flex:1;min-height:0;margin:0;padding:0;list-style:none;overflow-y:auto;scrollbar-width:none}
+.dt-list::-webkit-scrollbar{display:none}
+.dt-list>li{flex:none}
+.dt-card{display:grid;grid-template-columns:28px minmax(0,1fr) 28px;column-gap:10px;align-items:center;height:40px;padding:0 6px 0 8px;border-radius:12px}
+.dt-card:hover{background:#F3F4F1}
+.dt-ic{display:flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:999px;background:#E9F1FF;color:#2563EB}
+.dt-tx{display:flex;flex-direction:column;min-width:0}
+.dt-nm{min-width:0;font-size:13px;font-weight:700;line-height:18px;color:#0B1220;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dt-sw{display:grid;min-width:0;height:16px}
+.dt-sw>*{grid-area:1 / 1;min-width:0;font-size:12px;line-height:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dt-run{display:flex;align-items:center;gap:4px;font-weight:600;color:#2563EB}
+.dt-run>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.dt-wait{font-weight:500;color:#5A6272}
+.dt-pf{font-weight:500;color:#5A6272}
+.dt-pf b{font-weight:700;color:#0B1220}
+.dt-pf .hp-sw{min-width:0}
+.dt-pf .hp-sw>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* сайт: файл не прочитан — причина красным, значок — предупреждение */
+.dt-bad{font-weight:600;color:#DC2626}
+.dt-card-bad .dt-ic{background:#FEF2F2;color:#DC2626}
+.dt-x{display:flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:0;border-radius:999px;background:transparent;color:#5A6272;cursor:pointer;transition:transform 160ms var(--ease)}
+.dt-x svg{opacity:.56;transition:opacity 160ms var(--ease)}
+.dt-card:hover .dt-x{color:#0B1220}
+.dt-card:hover .dt-x svg,.dt-x:focus-visible svg{opacity:1}
+.dt-x:hover{background:#FFFFFF;transform:translateY(-2px)}
+.dt-x:active{transform:scale(.98)}
+.dt-li{transition:opacity 240ms var(--ease)}
+.dt-li.dt-out{opacity:0}
+@keyframes dt-upa{from{transform:translateY(42px)}to{transform:none}}
+@keyframes dt-upb{from{transform:translateY(42px)}to{transform:none}}
+.dt-li.dt-upa{animation:dt-upa 360ms var(--ease) backwards}
+.dt-li.dt-upb{animation:dt-upb 360ms var(--ease) backwards}
+.dt-goal{display:flex;flex-direction:column;justify-content:center;gap:8px;height:88px;padding:0 24px;border-radius:24px;background:#FFFFFF;min-width:0}
+.dt-gl{display:flex;align-items:center;gap:8px;min-width:0;margin:0;font-size:13px;font-weight:600;line-height:20px;color:#5A6272;white-space:nowrap}
+.dt-gl .hp-sw{min-width:0}
+.dt-gl .hp-sw>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.dt-gcs{display:flex;align-items:center;gap:8px;min-width:0;overflow:clip}
+.dt-gc{display:inline-flex;align-items:center;flex:none;height:32px;padding:0 12px;border-radius:999px;background:#E9F1FF;font-size:13px;font-weight:700;line-height:20px;color:#0B1220;white-space:nowrap}
+.dt-gt{display:inline-block;max-width:var(--gtw,220px);overflow:hidden;font-weight:600;color:#2563EB;white-space:nowrap;vertical-align:top}
+.dt-zone{z-index:5}
+@media (min-width: 901px){
+  /* узкая колода: панель «Данные» 400 → 320 (сайт: в тесной колоде — у́же, --dtn: dataRules `dataPanel`), поле — копии
+     текста (c-tad); «→ тип графика» у целей сжимается и гаснет; в разборе брендбука вторая дорожка сжимается до нуля
+     (как у разбора шаблона) */
+  .tx-fw.dt-g{transition:transform 520ms var(--ease),translate 340ms var(--ease),grid-template-columns 340ms var(--ease),column-gap 340ms var(--ease)}
+  .hp-nar .tx-fw.dt-g,.tx-fw.dt-g.dt-in{transition:transform 520ms var(--ease),translate 520ms var(--ease),grid-template-columns 520ms var(--ease),column-gap 520ms var(--ease)}
+  .hp-nar .tx-fw.dt-g.dt-w{grid-template-columns:minmax(0,1fr) var(--dtn,320px)}
+  /* поле с панелью у́же: скрытая подсказка ошибки («Вставьте готовый текст…») не держит место у счётчика знаков */
+  .tx-fw.dt-w .tx-fixw{max-width:0}
+  .dt-goal{transition:padding 340ms var(--ease)}
+  .hp-nar .dt-goal{padding:0 16px;transition-duration:520ms}
+  .dt-gc{transition:padding 340ms var(--ease)}
+  .hp-nar .dt-gc{padding:0 10px;transition-duration:520ms}
+  .dt-gt{transition:max-width 340ms var(--ease),opacity 160ms var(--ease) 80ms}
+  .hp-nar .dt-gt{max-width:0;opacity:0;transition:max-width 520ms var(--ease),opacity 240ms var(--ease)}
+  /* карточка шаблона рядом с брендбуком: в узкой колоде обложка сжимается и гаснет на месте (только в широкой) */
+  .bb-tpl-n>img,.bb-tpl-n>.tp-wf-m{transition:width 340ms var(--ease),margin-right 340ms var(--ease),opacity 160ms var(--ease) 80ms}
+  .hp-nar .bb-tpl-n>img,.hp-nar .bb-tpl-n>.tp-wf-m{width:0 !important;margin-right:-16px;opacity:0;transition:width 520ms var(--ease),margin-right 520ms var(--ease),opacity 240ms var(--ease)}
+  .bb-tpl-n>div{min-width:0}
+  [data-tx="c-tad"]{--hpd:336px}
+}
+/* сайт: окно уже 900 — поле, под ним панель «Данные» и цели одной колонкой */
+@media (max-width: 900px){
+  .tx-fw.dt-g,.tx-fw.dt-g.dt-w{grid-template-columns:minmax(0,1fr);row-gap:16px}
+  .dt-g>.p2-field,.dt-cell,.dt-on>.dt-cell,.dt-goalw{grid-column:1;grid-row:auto}
+  .tx-fw.dt-g:not(.dt-w)>.dt-cell{display:none}
+  .tx-menu.tx-menu2{width:min(608px,calc(100vw - 48px)) !important}
+}

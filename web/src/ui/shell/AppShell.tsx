@@ -34,6 +34,8 @@ import { TemplatesLayer } from "../layers/TemplatesLayer";
 import { TextLayer } from "../layers/TextLayer";
 import { TplDeleteDialog } from "../layers/TplDeleteDialog";
 import { TplPreviewLayer } from "../layers/TplPreviewLayer";
+import { BrandLayer } from "../layers/BrandLayer";
+import { brandStrip, briefShort, dataFilesLabel } from "../create/dataRules";
 import { ResultPlate } from "../result/ResultPlate";
 import { buildRunning } from "../create/params";
 import { deckStrip, docTitle, openDeck } from "../result/resultView";
@@ -68,7 +70,7 @@ function buildStrip(g: Generation | null, v: Variant | null): StripData | undefi
 export function AppShell() {
   const {
     templates, templateId, templateLabel, ui, dispatch, brief, improveSource, generation, generationId, generations, activeVariant, buildJob, buildAsk,
-    health,
+    health, data,
   } = useApp();
   const modelOn = useModelOn();
   // заголовок вкладки: ход идущей сборки (в фоновой вкладке видно, сколько осталось), название открытой презентации
@@ -94,9 +96,14 @@ export function AppShell() {
   const topic = useMemo(() => (build ? buildTopic(shownJob, buildAsk, [generation, ...generations]) : null), [build, shownJob, buildAsk, generation, generations]);
   // «Улучшить готовую»: на сборке, результате и на «Создать» под «Все параметры» полоса 01 — исходный файл и «оформление из
   // презентации», как над плитой 02 (C-improve, ImproveStrip), а не шаблон, которым он стал
-  const createTpl = templateStrip(templates.find((t) => t.template_id === templateId));
-  const s1 = result ? (open ? improveDeckStrip(open.improved_from, open.template_id) ?? tplStrip(open.template_id, open.template_file) : undefined)
-    : build ? (topic ? improveDeckStrip(topic.improved, topic.template) ?? tplStrip(topic.template, topic.templateFile) : undefined)
+  // брендбук приложен (вторая ступень): «54 слайда · Play · брендбук VK Cloud» (V2 `s1Meta`); у презентации и сборки —
+  // если это тот же брендбук, что на «Создать» (его название известно)
+  const bb = data.brand.phase === "on" && data.brand.spec ? data.brand : null;
+  const withBrand = (st: StripData | undefined, id?: string | null): StripData | undefined =>
+    st && bb && (id === undefined || id === bb.id) ? { ...st, meta: [st.meta, brandStrip(bb.spec, bb.file)].filter(Boolean).join(" · ") } : st;
+  const createTpl = withBrand(templateStrip(templates.find((t) => t.template_id === templateId)));
+  const s1 = result ? (open ? improveDeckStrip(open.improved_from, open.template_id) ?? withBrand(tplStrip(open.template_id, open.template_file), open.brandbook_id ?? null) : undefined)
+    : build ? (topic ? improveDeckStrip(topic.improved, topic.template) ?? withBrand(tplStrip(topic.template, topic.templateFile), buildAsk?.request.brandbook_id ?? null) : undefined)
     : (ui.improve && improveSource ? improveDeckStrip(improveSource, templateId) ?? createTpl : createTpl);
   const deck = result ? generation : null;
   const s3 = buildStrip(generation, activeVariant);
@@ -112,11 +119,14 @@ export function AppShell() {
     if (!topic || topic.brief === null) return undefined;
     const from = topic.improved;
     const improve = from ? { ...from, title: improveSource?.name === from.name ? improveSource.title : undefined } : null;
-    return textStrip(topic.brief, { line: textLine(topic.brief, writer && topic.useModels), improve });
-  }, [topic, writer, improveSource]);
-  const s2 = result ? (deck ? deckStrip(deck, activeVariant) : undefined)
+    // файлы с данными сборки (её запрос, если он этой сборки): первая фраза брифа и сколько файлов
+    const n = buildAsk && buildAsk.gid === (shownJob?.generation ?? buildAsk.gid) ? buildAsk.request.dataset_ids?.length ?? 0 : 0;
+    return textStrip(topic.brief, { line: textLine(topic.brief, writer && topic.useModels), improve, data: n });
+  }, [topic, writer, improveSource, buildAsk, shownJob]);
+  const deckData = deck?.dataset_ids?.length ?? 0;
+  const s2 = result ? (deck ? (deckData && !deck.improved_from ? { title: briefShort(deck.brief ?? ""), meta: dataFilesLabel(deckData) } : deckStrip(deck, activeVariant)) : undefined)
     : build ? buildText
-    : textStrip(brief, { line: text.line, improve: ui.improve ? improveSource : null });
+    : textStrip(brief, { line: text.line, improve: ui.improve ? improveSource : null, data: data.cards.length });
   // загрузка своего шаблона — одна на плиту 01 и раздел «Шаблоны»
   const upload = useTemplateUpload();
   // файл, отпущенный мимо включённой зоны, браузер не открывает
@@ -145,6 +155,8 @@ export function AppShell() {
       <TemplatesLayer fresh={upload.fresh} onUpload={uploadFromGallery} busy={upload.busyWhy} />
       <TplPreviewLayer />
       <TplDeleteDialog />
+      {/* слой «Брендбук» (z 8): палитра, шрифты, логотипы, расхождения с шаблоном */}
+      <BrandLayer />
     </>
   );
   return (

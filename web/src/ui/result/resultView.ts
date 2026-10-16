@@ -299,6 +299,10 @@ export function deckPreset(g: GenerationMeta): ComposerPreset {
     pictures: g.pictures ?? null, strategies: g.strategies, improvedFrom: g.improved_from ?? null,
   };
   if (g.eyes === undefined) preset.auditModels = g.audit_models;
+  // вторая ступень: наборы данных и брендбук презентации встают на «Создать» (у старой презентации их нет — не трогаем)
+  if (g.dataset_ids !== undefined) preset.datasetIds = g.dataset_ids;
+  if (g.brandbook_id !== undefined) preset.brandbookId = g.brandbook_id;
+  if (g.brand_priority) preset.brandPriority = g.brand_priority;
   return preset;
 }
 

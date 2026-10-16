@@ -8,16 +8,18 @@ import type { UiState } from "../deck/geometry";
 
 /** Всё, что логотип закрывает на «Создать»: разделы шапки, лист «Подробнее», слои и окна поверх колоды. */
 export const LAYERS_CLOSED: Partial<UiState> = {
-  sect: null, sheet: null, pattern: null, textLayer: false, lightbox: false, tplPreview: null, tplDelete: null,
+  sect: null, sheet: null, pattern: null, textLayer: false, lightbox: false, tplPreview: null, tplDelete: null, brandLayer: false,
 };
 
 export function useGoHome(): () => void {
-  const { ui, dispatch, setBrief, setParams } = useApp();
+  const { ui, dispatch, setBrief, setParams, data } = useApp();
   return () => {
     if (ui.screen === "create") return dispatch({ type: "set", patch: LAYERS_CLOSED });
     dispatch({ type: "go", screen: "create" });
     dispatch({ type: "set", patch: { improve: false } });
     setBrief("");
     setParams({ audience: "" });
+    // чистый лист — и без файлов с данными (V2 `goHome`: `dt: []`); брендбук остаётся, как шаблон
+    data.clear();
   };
 }

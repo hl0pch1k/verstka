@@ -4,7 +4,7 @@
 // страницы не было (её задачу уже никто не ведёт — store собирает её вид здесь).
 import { foldJobEvent, type ActiveJob } from "../../lib/jobState";
 import { firstLine } from "../../lib/narrate";
-import type { GenerateRequest, GenerationMeta, ImprovedFrom, Job } from "../../types";
+import type { BrandPriority, GenerateRequest, GenerationMeta, ImprovedFrom, Job } from "../../types";
 
 /** Запрос сборки и её генерация: «Собрать ещё раз» повторяет именно его. `expected` — число слайдов, которое экран
  *  прочёл в тексте (заглушки раскадровки), на сервер не уходит. Так же лежит в localStorage (LS.build). */
@@ -46,6 +46,9 @@ export function backToText(ask: PendingBuild | null, own: string | null, shown: 
       audience: r.audience ?? null, purpose: r.purpose ?? null, slides: r.slides ?? null, useModels: r.use_models, eyes: r.eyes ?? null,
       pictures: r.pictures ?? null, strategies: r.strategies, improvedFrom: r.improved_from ?? null,
       ...(r.eyes === undefined || r.eyes === null ? { auditModels: r.audit_models } : {}),
+      // вторая ступень: наборы данных и брендбук сборки (запрос без них — то, что на «Создать», остаётся)
+      ...(r.dataset_ids ? { datasetIds: r.dataset_ids } : {}), ...(r.brandbook_id ? { brandbookId: r.brandbook_id } : {}),
+      ...(r.brand_priority ? { brandPriority: r.brand_priority } : {}),
     },
   };
 }
@@ -53,6 +56,7 @@ export function backToText(ask: PendingBuild | null, own: string | null, shown: 
 export interface AskPreset {
   audience: string | null; purpose: string | null; slides: number | null; useModels: boolean; eyes: boolean | null; pictures: boolean | null;
   strategies: string[]; improvedFrom: ImprovedFrom | null; auditModels?: boolean;
+  datasetIds?: string[]; brandbookId?: string | null; brandPriority?: BrandPriority;
 }
 
 /** Запрос презентации по её мете — сборка найдена без своего запроса (начата не с этой страницы). Мета идущей сборки
@@ -64,6 +68,9 @@ export function requestOf(g: GenerationMeta): GenerateRequest {
     language: g.language, extra_instructions: g.extra_instructions ?? null, strategies: g.strategies,
     use_models: g.use_models ?? true, audit_models: !!g.audit_models, autofix: g.autofix ?? true, exports: g.exports ?? ["pdf", "html"],
     pictures: g.pictures ?? null, eyes: g.eyes ?? null, improved_from: g.improved_from ?? null,
+    // вторая ступень: «Собрать ещё раз» — с теми же данными и брендбуком (generation.json)
+    ...(g.dataset_ids?.length ? { dataset_ids: g.dataset_ids } : {}),
+    ...(g.brandbook_id ? { brandbook_id: g.brandbook_id, brand_priority: g.brand_priority ?? "brand" } : {}),
   };
 }
 

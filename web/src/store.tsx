@@ -17,10 +17,11 @@ import { buildRunning, draftParams, type Params } from "./ui/create/params";
 import { askFor, completeAsk, failedBuildJob, parsePendingBuild, pendingFor, requestOf, resumeBuild, type PendingBuild } from "./ui/build/resume";
 import { openStrategy } from "./ui/result/resultView";
 import { useVariantWork, type VariantWorkApi } from "./ui/details/useVariantWork";
+import { hasDraftData, useDataState, type DataPreset, type DataState } from "./ui/create/dataState";
 import { slideFailAfter, type SlideFail } from "./ui/result/slideJob";
 import { busyKeys } from "./ui/details/variantWork";
 import type {
-  ChatMessage, GenerateRequest, Generation, GenerationMeta, Health, ImprovedFrom, ImproveSource, Job, JobKind, ModelsStatus, Notice, NoticeArea, StrategyInfo, TemplateListItem, TemplateManifest, Variant,
+  BrandPriority, ChatMessage, GenerateRequest, Generation, GenerationMeta, Health, ImprovedFrom, ImproveSource, Job, JobKind, ModelsStatus, Notice, NoticeArea, StrategyInfo, TemplateListItem, TemplateManifest, Variant,
 } from "./types";
 
 export type { ActiveJob } from "./lib/jobState";
@@ -211,6 +212,9 @@ export interface AppState {
    *  (`ui.improve`) — the build sends it as `improved_from`; the text step drops it when the mode ends. */
   improveSource: ImproveSource | null;
   takeImproveSource(): void;
+  /** Вторая ступень: файлы с данными (панель «Данные»), брендбук и что важнее при расхождении — для запроса сборки
+   *  (`data.request`) и «Создать» (ui/create/dataState). */
+  data: DataState;
 }
 
 const feedRefreshWithout = (cur: Record<string, string>, gid: string): Record<string, string> => {
@@ -241,6 +245,11 @@ export interface ComposerPreset {
   strategies?: string[];
   /** «Улучшить готовую»: the deck this text was read from (its audit stays the «было» of the next build). */
   improvedFrom?: ImprovedFrom | null;
+  /** Вторая ступень (generation.json): наборы данных, брендбук и что важнее — встают на «Создать»; undefined — у
+   *  презентации их не записано, то, что на «Создать», остаётся. */
+  datasetIds?: string[];
+  brandbookId?: string | null;
+  brandPriority?: BrandPriority;
 }
 
 const Ctx = createContext<AppState | null>(null);
@@ -277,16 +286,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // never on the create screen first; boot goes back to «Создать» when the stored deck does not load. The helper
   // starts closed (UI0): the page itself must be self-explanatory.
   // a reload during a build opens on the build screen: boot follows the build again (LS.build)
-  const [ui, dispatch] = useReducer(uiReducer, UI0, (s0): UiState =>
-    (readPendingBuild() ? { ...s0, screen: "build" } : storage.get(LS.generation) ? { ...s0, screen: "result" } : s0));
+  // файлы с данными из черновика: плита 01 уже свёрнута при первой отрисовке (а не съезжает после загрузки)
+  const [ui, dispatch] = useReducer(uiReducer, UI0, (s0): UiState => {
+    const s1 = { ...s0, data: hasDraftData() };
+    return readPendingBuild() ? { ...s1, screen: "build" } : storage.get(LS.generation) ? { ...s1, screen: "result" } : s1;
+  });
   const [composerText, setComposerText] = useState<string | null>(null);
   const [composerPreset, setComposerPreset] = useState<ComposerPreset | null>(null);
   const [improveSource, setImproveSource] = useState<ImproveSource | null>(null);
   // «Улучшить готовую»: презентация прочитана, пока человек был не на «Создать» — режим ждёт его возвращения
   const [improveWait, setImproveWait] = useState<ImproveSource | null>(null);
+  // данные и брендбук «Создать» (заводятся ниже, после текста и параметров): «Изменить текст» ставит наборы презентации
+  const dataRef = useRef<DataState | null>(null);
   const editText = useCallback((text: string, preset?: ComposerPreset) => {
     // «Изменить текст» — свой текст поверх прочитанной в фоне презентации: ждущий режим уходит
     setImproveWait(null);
+    if (preset) {
+      const p: DataPreset = { datasetIds: preset.datasetIds, brandbookId: preset.brandbookId, brandPriority: preset.brandPriority };
+      // «Улучшить готовую» — без данных (V2: выбор презентации снимает файлы)
+      if (preset.improvedFrom) p.datasetIds = [];
+      dataRef.current?.restore(p);
+    }
     setComposerText(text);
     setComposerPreset(preset ?? null);
     // an improved deck's «Изменить текст» returns into the improve mode, with the deck it was read from (the note over
@@ -407,7 +427,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // тема годится, только когда агент пишет текст по теме (`writerOn` — то же правило, что у поля и его строк);
     // иначе нужен готовый текст
     const { brief: text, health: h, modelStatus: status, params: p } = latest.current;
-    const issue = textError(text, null, { writer: writerOn({ health: h, status, useModels: p.useModels }) });
+    // с файлами данных хватает брифа: слайды соберутся по данным и без модели
+    const withData = (dataRef.current?.cards.length ?? 0) > 0;
+    const issue = textError(text, null, { writer: withData || writerOn({ health: h, status, useModels: p.useModels }) });
     if (!issue) return true;
     setTextIssue(issue);
     // пустое поле — «Улучшить готовую» кончилась (V2 `txStart`: `txImp: false`)
@@ -415,6 +437,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
     dispatch({ type: "open", step: "text" });
     return false;
   }, []);
+
+  const data = useDataState({
+    templateId,
+    setBrief: (t) => {
+      setBrief(t);
+      dispatch({ type: "set", patch: { improve: false } });
+    },
+    setSlides: (n) => setParams({ slides: n }),
+    fail: (t) => setTextIssue({ kind: "file", text: t }),
+  });
+  dataRef.current = data;
+  // файлы приложены: плита 01 сворачивается в полосу, плита 02 встаёт под неё (ui/deck/geometry `fold1`)
+  const dataOn = data.cards.length > 0;
+  useEffect(() => dispatch({ type: "set", patch: { data: dataOn } }), [dataOn]);
+  // «Улучшить готовую» началась: файлы с данными уходят (V2 — выбор презентации снимает их)
+  const clearData = data.clear;
+  useEffect(() => {
+    if (ui.improve && improveSource) clearData();
+  }, [ui.improve, improveSource, clearData]);
 
   const pushMessage = useCallback((role: "user" | "assistant", text: string) => {
     setMessages((list) => [...list, { id: uid("m"), role, text, ts: Date.now() / 1000 }]);
@@ -1029,13 +1070,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, cancelLoad, reloadIfOpen, stale, refreshDeck, refreshing, feedRefresh, noteFeedRefresh, activeStrategy, setActiveStrategy, activeVariant,
     selectedSlide, setSelectedSlide, ui, dispatch, activeJob, liveJobs: liveList, runJob, watchJob, slideFail, failAway, dropSlideFail, followDeck, adoptBuildMeta, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, ownBuild, building, buildEnd, showEnded, goBuild, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, analyzing, startGeneration,
     brief, setBrief, textIssue, setTextIssue, checkText, params, setParams,
-    composerText, composerPreset, editText, takeComposerText, takeComposerPreset, improveSource, takeImproveSource,
+    composerText, composerPreset, editText, takeComposerText, takeComposerPreset, improveSource, takeImproveSource, data,
   }), [
     health, healthError, modelStatus, refreshModelStatus, strategies, strategyTitle, templates, refreshTemplates, deleteTemplate, forgetTemplate, renameTemplate, templateLabel, templateId, selectTemplate, manifest, manifestLoading,
     generations, refreshGenerations, generationId, generation, generationLoading, loadGeneration, cancelLoad, reloadIfOpen, stale, refreshDeck, refreshing, feedRefresh, noteFeedRefresh, activeStrategy, setActiveStrategy, activeVariant,
     selectedSlide, setSelectedSlide, ui, activeJob, liveList, runJob, watchJob, slideFail, failAway, dropSlideFail, followDeck, adoptBuildMeta, busyVariants, work, fixIssues, revertVariant, buildJob, buildAsk, ownBuild, building, buildEnd, showEnded, goBuild, retryBuild, messages, pushMessage, notices, notify, clearNotice, uploadTemplate, analyzing, startGeneration,
     brief, setBrief, textIssue, checkText, params, setParams,
-    composerText, composerPreset, editText, takeComposerText, takeComposerPreset, improveSource, takeImproveSource,
+    composerText, composerPreset, editText, takeComposerText, takeComposerPreset, improveSource, takeImproveSource, data,
   ]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

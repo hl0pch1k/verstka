@@ -1,9 +1,29 @@
 // Thin typed client over the Verstka HTTP API. All URLs are relative (/api/...) so the same build
 // works behind the Vite dev proxy and when FastAPI serves web/dist directly.
 import type {
-  ChatResponse, CheckSpec, DiffResponse, ExplainResponse, FixRequest, GenerateRequest, GenerateResponse,
+  BrandConflict, BrandSpec, ChatResponse, CheckSpec, DatasetSummary, DiffResponse, ExplainResponse, FixRequest, GenerateRequest, GenerateResponse,
   Generation, GenerationMeta, Health, Job, ModelsStatus, PictureChangeRequest, SkillsResponse, SlideFixRequest, StrategyInfo, TemplateListItem, TemplateManifest, UploadResponse,
 } from "./types";
+import { parseManifest, type ExampleManifest } from "./ui/create/dataRules";
+
+/** Разобранный брендбук (итог задачи POST /api/brandbooks и ответ GET /api/brandbooks/{id}): что прочитано и чем он
+ *  расходится с шаблоном (`result` расхождения — при «брендбук важнее»). */
+export interface BrandbookResult { brand: BrandSpec; conflicts: BrandConflict[] }
+/** Пример: манифест и его файлы, уже скачанные (данные — по порядку, брендбук — отдельно). */
+export interface ExampleBundle { manifest: ExampleManifest; files: File[]; brandbook: File | null }
+
+/** Файл примера по ссылке манифеста (сервер отдаёт их сам — GET /api/examples/{name}/files/…). */
+async function fetchFile(url: string, name: string): Promise<File> {
+  let res: Response;
+  try {
+    res = await fetch(url);
+  } catch (e) {
+    throw new ApiError(0, `Сеть недоступна: ${(e as Error).message}`);
+  }
+  if (!res.ok) throw new ApiError(res.status, `Не удалось скачать «${name}»`);
+  const blob = await res.blob();
+  return new File([blob], name, { type: blob.type });
+}
 
 export class ApiError extends Error {
   status: number;
@@ -89,6 +109,43 @@ export const api = {
     ),
   fileUrl: (gid: string, strategy: string, name: string) =>
     `/api/generations/${encodeURIComponent(gid)}/${encodeURIComponent(strategy)}/files/${name}`,
+
+  // ── вторая ступень: файлы с данными и брендбук (§6 описания решения)
+  /** Файлы с данными: чтение и профиль синхронно, по карточке на таблицу (у книги XLSX — на лист). */
+  uploadDatasets: (files: File[]) => {
+    const fd = new FormData();
+    for (const f of files) fd.append("files", f, f.name);
+    return request<DatasetSummary[]>("/api/datasets", { method: "POST", body: fd });
+  },
+  /** Набор по id (карточка «Изменить текст» презентации): поля карточки (`DatasetSummary`) и полный профиль. */
+  getDataset: (id: string) => request<DatasetSummary & { profile?: unknown; plan?: unknown }>(`/api/datasets/${encodeURIComponent(id)}`),
+  deleteDataset: (id: string) => request<{ deleted: boolean }>(`/api/datasets/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  /** Брендбук: файл (PDF, токены JSON, архив .zip), папка (файлы с путями) или ссылка Figma. Разбор — задачей (её
+   *  события — шаги: open · palette · fonts · logos · rules · compare); `template_id` — с чем сверять. */
+  uploadBrandbook: (src: File | File[] | { figmaUrl: string }, templateId?: string | null) => {
+    const fd = new FormData();
+    if (Array.isArray(src)) for (const f of src) fd.append("files", f, (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name);
+    else if ("figmaUrl" in src) fd.append("figma_url", src.figmaUrl.trim());
+    else fd.append("file", src, src.name);
+    if (templateId) fd.append("template_id", templateId);
+    return request<{ job_id: string; brandbook_id: string }>("/api/brandbooks", { method: "POST", body: fd });
+  },
+  /** Брендбук и его расхождения с шаблоном `templateId` (другой шаблон — свои расхождения). */
+  getBrandbook: (id: string, templateId?: string | null) =>
+    request<BrandbookResult>(`/api/brandbooks/${encodeURIComponent(id)}${templateId ? `?template_id=${encodeURIComponent(templateId)}` : ""}`),
+  deleteBrandbook: (id: string) => request<{ deleted: boolean }>(`/api/brandbooks/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  /** Файл брендбука (логотип): путь — как в `BrandLogo.file`. */
+  brandbookFileUrl: (id: string, path: string) => `/api/brandbooks/${encodeURIComponent(id)}/files/${path.split("/").map(encodeURIComponent).join("/")}`,
+  /** Пример («данные продаж», «брендбук VK Cloud»): GET /api/examples/{name} — манифест ссылок, файлы скачиваются,
+   *  чтобы уйти на сервер тем же путём, что свои (POST /api/datasets, POST /api/brandbooks). */
+  loadExample: async (name: string): Promise<ExampleBundle> => {
+    const manifest = parseManifest(await request<unknown>(`/api/examples/${encodeURIComponent(name)}`), name);
+    const [files, brandbook] = await Promise.all([
+      Promise.all(manifest.files.map((f) => fetchFile(f.url, f.name))),
+      manifest.brandbook ? fetchFile(manifest.brandbook.url, manifest.brandbook.name) : Promise.resolve(null),
+    ]);
+    return { manifest, files, brandbook };
+  },
 
   chat: (body: { session_id: string; message: string; template_id?: string | null; generation_id?: string | null; strategy?: string | null; slide?: number | null }) =>
     request<ChatResponse>("/api/chat", json(body)),

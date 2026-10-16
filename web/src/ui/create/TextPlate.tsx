@@ -21,6 +21,9 @@ import { FileMenu, type FilePick } from "./FileMenu";
 import { fileRefusal, TEMPLATE_BUSY } from "./ribbon";
 import { ImproveNote, useHeld, useImproveOn, useModelOn, type NoteHeights } from "./ImproveNote";
 import { useNarrow } from "./useNarrow";
+import { DATA_ACCEPT, dataPanel, dropKind, hasTable } from "./dataRules";
+import { DataPanel, DataZone, useFilesDrop, usePanelMotion } from "./DataPanel";
+import { GoalsBox } from "./GoalsBox";
 import {
   charsLabel, DECK_ACCEPT, deckError, fileKind, fileTextIssue, improveLive, improveShift, improveStep, MAX_TEXT_BYTES, sampleText, TEXT_ACCEPT, textError, writerOn,
   textLine, textPreview, TW, TW0, TW_FIRST_MS, TW_WAKE_MS, twBlink, twStep, hintText, type ImproveLive, type TextIssue, type TextLine, type Tw,
@@ -30,6 +33,11 @@ const show = (on: boolean) => (on ? "p2-on" : "p2-off");
 
 const HINT_TOPIC = "Это тема — агент напишет полный текст";
 const HINT_TOPIC_TAIL = ": ключевые факты, даты, формулы с пояснениями";
+/** С файлами данных (V2 `txHintShort`, `txHintShortN`): текст — бриф, слайды — по данным. */
+const HINT_BRIEF = "Это бриф — агент напишет текст по данным";
+const HINT_BRIEF_N = "Бриф — текст по данным";
+/** Пример «данные продаж» (GET /api/examples/data-sales-2026): бриф, 7 файлов и брендбук VK Cloud. */
+export const DATA_EXAMPLE = "data-sales-2026";
 /** Пустое поле, а текст агент не пишет (модель не подключена или не пишет тексты): нужен готовый текст. */
 const HINT_READY = "Вставьте готовый текст — агент разложит его по слайдам";
 const NO_FACTS = "Цифр и таблиц в тексте нет — слайды будут из формулировок";
@@ -78,6 +86,14 @@ export interface TextPlate {
   type(v: string): void;
   /** «Взять пример»: тема из подсказки (V2 `txTake`); агент текст не пишет — готовый текст-пример. */
   take(): void;
+  /** «Файлы с данными»: окно выбора нескольких файлов. */
+  pickData(): void;
+  dataRef: RefObject<HTMLInputElement>;
+  /** Файлы, выбранные или отпущенные на плиту 02 («текст и данные вместе»): таблицы — в «Данные», текст — в поле,
+   *  презентация — «Улучшить готовую». */
+  onFiles(files: File[]): void;
+  /** «Пример: данные продаж». */
+  example(): void;
 }
 
 export function useTextPlate(): TextPlate {
@@ -96,10 +112,14 @@ export function useTextPlate(): TextPlate {
   const readSeq = useRef(0);
   const readBusy = useRef(false);
   const { writer, writes } = useWriting();
-  // разбор текста — один раз на изменение текста, для заголовка, тела и полосы 02
-  const line = useMemo(() => textLine(brief, writer), [brief, writer]);
+  const { data } = useApp();
+  const dataOn = data.cards.length > 0;
+  // разбор текста — один раз на изменение текста, для заголовка, тела и полосы 02; с файлами данных хватает брифа
+  // (слайды соберутся по данным) — короткий текст тогда «бриф», а не «нужен готовый текст»
+  const line = useMemo(() => textLine(brief, writer || dataOn), [brief, writer, dataOn]);
   const btnRef = useRef<HTMLButtonElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dataRef = useRef<HTMLInputElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const tw = useRef({ s: TW0, started: false });
   const improveNow = useRef(ui.improve);
@@ -226,8 +246,50 @@ export function useTextPlate(): TextPlate {
   const key = issue ? `${issue.kind}:${issue.text}` : null;
   if (key !== seq.current.key) seq.current = { key, n: key ? seq.current.n + 1 : seq.current.n };
 
+  // файлы с данными: таблицы — в «Данные» (V2 `dtAttach`: «Улучшить готовую» кончается); .txt/.md с таблицей — тоже
+  // данные, без таблицы — текст в поле; презентация — «Улучшить готовую» (если отпустили только её)
+  const addData = data.addFiles;
+  const onFiles = useCallback(async (list: File[]) => {
+    setMenu(false);
+    const tables: File[] = [];
+    const texts: File[] = [];
+    const decks: File[] = [];
+    for (const f of list) {
+      const k = dropKind(f.name);
+      if (k === "deck") decks.push(f);
+      else if (k === "text") {
+        let raw = "";
+        try {
+          raw = f.size <= MAX_TEXT_BYTES ? await f.slice(0, 256 * 1024).text() : "";
+        } catch {
+          raw = "";
+        }
+        (raw && !hasTable(raw) ? texts : tables).push(f);
+      } else tables.push(f);
+    }
+    if (tables.length) {
+      if (improveNow.current) dispatch({ type: "set", patch: { improve: false } });
+      addData(tables);
+    }
+    if (texts.length) void onFile(texts[0]);
+    else if (decks.length && !tables.length) void onFile(decks[0]);
+  }, [addData, onFile, dispatch]);
+  const pickData = useCallback(() => {
+    setMenu(false);
+    dataRef.current?.click();
+  }, []);
+  const loadExample = data.loadExample;
+  const example = useCallback(() => {
+    setMenu(false);
+    btnRef.current?.focus({ preventScroll: true });
+    void loadExample(DATA_EXAMPLE);
+  }, [loadExample]);
+
   const deckOff = reading ? "Презентация уже читается" : tplBusy ? TEMPLATE_BUSY : null;
-  return { menu, setMenu, btnRef, inputRef, taRef, pick, onFile, reading, deckOff, line, writes, info, issue, issueSeq: seq.current.n, tw, type, take };
+  return {
+    menu, setMenu, btnRef, inputRef, taRef, pick, onFile, reading, deckOff, line, writes, info, issue, issueSeq: seq.current.n, tw, type, take,
+    pickData, dataRef, onFiles, example,
+  };
 }
 
 const reducedMotion = () => typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
@@ -262,7 +324,7 @@ function TypingHint({ live, tw, writer }: { live: boolean; tw: MutableRefObject<
 
 /** Заголовок плиты 02 справа (слот `h2`). */
 export function TextHead({ tp }: { tp: TextPlate }) {
-  const { ui, dispatch, brief } = useApp();
+  const { ui, dispatch, brief, data } = useApp();
   const writes = tp.writes;
   const impOn = useImproveOn();
   const create = ui.screen === "create";
@@ -283,7 +345,7 @@ export function TextHead({ tp }: { tp: TextPlate }) {
           }} />
       )}
       <div className={cls("p2-in tx-fg", show(txOpen))} style={{ display: "flex", alignItems: "center", gap: 12, animationDelay: "40ms" }}>
-        <button ref={tp.btnRef} type="button" className="p2-ob" onClick={() => tp.setMenu(!tp.menu)} title="Текст из файла .txt или .md"
+        <button ref={tp.btnRef} type="button" className="p2-ob" onClick={() => tp.setMenu(!tp.menu)} title="Текст или данные из файла"
           aria-describedby="ct-fmt" aria-haspopup="menu" aria-expanded={tp.menu} aria-controls="tx-menu" style={{ height: 40 }}>
           <Icon name="attach" size={18} />
           <span>Из файла</span>
@@ -294,10 +356,16 @@ export function TextHead({ tp }: { tp: TextPlate }) {
             .txt или .md
           </span>
         </span>
-        <FileMenu open={tp.menu} off={tp.deckOff} onPick={tp.pick}
+        <FileMenu open={tp.menu} off={tp.deckOff} onPick={tp.pick} onData={tp.pickData} onExample={tp.example} exampleBusy={data.exampleBusy}
           onClose={(back) => {
             tp.setMenu(false);
             if (back) tp.btnRef.current?.focus({ preventScroll: true });
+          }} />
+        <input ref={tp.dataRef} type="file" accept={DATA_ACCEPT} multiple hidden tabIndex={-1} aria-hidden="true"
+          onChange={(e) => {
+            const files = Array.from(e.currentTarget.files ?? []);
+            e.currentTarget.value = "";
+            if (files.length) tp.onFiles(files);
           }} />
         <input ref={tp.inputRef} type="file" accept={TEXT_ACCEPT} hidden tabIndex={-1} aria-hidden="true"
           onChange={(e) => {
@@ -505,7 +573,7 @@ const NOTE_LINE: CSSProperties = { flex: "none", fontSize: 13, lineHeight: "20px
 
 /** Тело шага 02 (слот `p2`, `#p2-b2`). */
 export function TextBody({ tp }: { tp: TextPlate }) {
-  const { ui, brief } = useApp();
+  const { ui, brief, data } = useApp();
   const { writer } = useWriting();
   const on = ui.screen === "create" && ui.open === "text" && !ui.more;
   const impOn = useImproveOn();
@@ -540,35 +608,47 @@ export function TextBody({ tp }: { tp: TextPlate }) {
   const infoBusy = useBusyHeld(busy);
   // «Это тема…» с перечнем — пока колода шире 1300 (morph.ts `hintTail`): в узкой колоде — без перечня, он в подсказке;
   // формулировка меняется на месте (hp-wo / hp-no)
-  const tail = hintTail(useDeckWrap());
+  const wrap = useDeckWrap();
+  const tail = hintTail(wrap);
+  // файлы с данными: справа от поля — панель «Данные» (дорожка 0 → 400, узкая колода — dataPanel), под полем — цели из
+  // текста; поле у́же — стопка его копий c-tad (на сколько у́же в узкой раскладке — от ширины панели)
+  const dataOn = data.cards.length > 0;
+  const motion = usePanelMotion(data.cards, data.removeCard);
+  const panel = dataPanel(wrap);
+  const body = useRef<HTMLDivElement>(null);
+  const drop = useFilesDrop(body, on && !busy, tp.onFiles);
   const taProps = {
     value: brief, onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => tp.type(e.target.value), style: TA,
   };
   const describedBy = issue ? "ce-err" : factsOn ? "ct-facts" : undefined;
   return (
-    <div id="p2-b2" className={cls("p2-body", show(on))} style={{ margin: "24px 0 0 192px" }}>
+    <div id="p2-b2" ref={body} className={cls("p2-body", show(on))} style={{ margin: "24px 0 0 192px" }}>
       <div className="tx-b2" style={noteVars}>
         <ImproveNote on={impOn} onHeights={setNoteH} />
-        <div className={cls("tx-fw", impOn && "tx-fw-imp")}>
+        <div className={cls("tx-fw dt-g", impOn && "tx-fw-imp", motion.grid)} style={{ "--dtn": `${panel.narrow}px` } as CSSProperties}>
           <div className={cls("p2-field p2-stag tx-ring", issue && "ce-bad")}
             style={{ display: "flex", flexDirection: "column", height: 244, padding: 24, borderRadius: 24, background: "#FFFFFF" }}>
             <label htmlFor={narrow ? "ct-tan" : "ct-taw"} style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
               <span style={{ fontSize: 13, fontWeight: 600, lineHeight: "20px", color: "#5A6272" }}>О чём презентация</span>
               <span className="p2-taw">
-                <span className="hp-tx hp-txf hp-txa" data-tx="c-ta">
+                <span className="hp-tx hp-txf hp-txa" data-tx={dataOn ? "c-tad" : "c-ta"} style={dataOn ? ({ "--hpd": `${panel.hpd}px` } as CSSProperties) : undefined}>
                   <textarea id="ct-taw" ref={narrow ? otherRef : tp.taRef} className="hp-txw p2-ta ct-ta p2-fade" {...taProps}
                     aria-invalid={!!issue} aria-describedby={narrow ? undefined : describedBy} aria-hidden={narrow || undefined} tabIndex={narrow ? -1 : undefined} />
                   <textarea id="ct-tan" ref={narrow ? tp.taRef : otherRef} className="hp-txn p2-ta ct-ta p2-fade" {...taProps}
                     aria-invalid={!!issue} aria-describedby={narrow ? describedBy : undefined} aria-hidden={!narrow || undefined} tabIndex={narrow ? undefined : -1} />
                 </span>
-                {brief === "" && <TypingHint live={ui.screen === "create"} tw={tp.tw} writer={writer} />}
+                {brief === "" && <TypingHint live={ui.screen === "create"} tw={tp.tw} writer={writer || dataOn} />}
               </span>
             </label>
             <div className="p2-wrap" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 24, height: 20, marginTop: 16 }}>
               <div className="tx-sw">
-                <p className={show(hintOn)} style={LINE} title={HINT_TOPIC + HINT_TOPIC_TAIL}>
+                <p className={show(hintOn)} style={LINE} title={dataOn ? HINT_BRIEF : HINT_TOPIC + HINT_TOPIC_TAIL}>
                   <span style={{ display: "flex", flex: "none" }}><Icon name="info" size={16} /></span>
-                  <span className="hp-sw tx-hsw"><span className="hp-wo">{HINT_TOPIC}{tail && HINT_TOPIC_TAIL}</span><span className="hp-no">{HINT_TOPIC}</span></span>
+                  {dataOn ? (
+                    <span className="hp-sw tx-hsw"><span className="hp-wo">{HINT_BRIEF}</span><span className="hp-no">{HINT_BRIEF_N}</span></span>
+                  ) : (
+                    <span className="hp-sw tx-hsw"><span className="hp-wo">{HINT_TOPIC}{tail && HINT_TOPIC_TAIL}</span><span className="hp-no">{HINT_TOPIC}</span></span>
+                  )}
                 </p>
                 <p className={show(readyOn)} style={LINE} title={HINT_READY}>
                   <span style={{ display: "flex", flex: "none" }}><Icon name="info" size={16} /></span>
@@ -605,7 +685,18 @@ export function TextBody({ tp }: { tp: TextPlate }) {
               </span>
             </div>
           </div>
+          {/* панель «Данные» (V2 `.dt-cell`): закрыта — дорожка 0, клетка обрезает её содержимое */}
+          <div className="dt-cell" aria-hidden={!dataOn || undefined}>
+            <DataPanel cards={data.cards} motion={motion} />
+          </div>
+          {/* цели из текста: показывают, что бриф влияет на выбор графика */}
+          {motion.goals && (
+            <div className={cls("dt-goalw", show(dataOn))}>
+              <GoalsBox text={brief} />
+            </div>
+          )}
         </div>
+        <DataZone on={drop.over} count={drop.count} />
       </div>
     </div>
   );

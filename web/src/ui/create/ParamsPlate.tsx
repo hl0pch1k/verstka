@@ -36,6 +36,9 @@ export const BUILD_RUNNING = "Сборка уже идёт";
 export const BUILD_READY = "Сборка готова";
 export const BUILD_STOPPED = "Сборка не удалась";
 export const OPEN_FAILED = "Не удалось открыть презентацию";
+/** Сборка ждёт: файлы с данными или брендбук ещё разбираются (без них колода вышла бы без части данных). */
+export const DATA_WAIT = "Подождите — файлы с данными ещё разбираются";
+export const BRAND_WAIT = "Подождите — брендбук ещё разбирается";
 
 /** Состояние шага на обе части плиты (заголовок и тело). Одно на приложение — его создаёт AppShell. */
 export interface ParamsPlate {
@@ -64,7 +67,7 @@ export interface ParamsPlate {
 export function useParamsPlate(): ParamsPlate {
   const {
     params, setParams, brief, strategies, health, templates, templateId, checkText, textIssue, startGeneration, ui, dispatch, notices,
-    improveSource, composerPreset, takeComposerPreset, building, buildEnd, loadGeneration, clearNotice, showEnded, goBuild,
+    improveSource, composerPreset, takeComposerPreset, building, buildEnd, loadGeneration, clearNotice, showEnded, goBuild, data,
   } = useApp();
   const rise = useRise();
   const modelOn = useModelOn();
@@ -98,6 +101,8 @@ export function useParamsPlate(): ParamsPlate {
   // упавшей прежней сборки); ушли с «Создать» — нажатие забыто
   const [attempt, setAttempt] = useState<number | null>(null);
   const [noTpl, setNoTpl] = useState(false);
+  // «Подождите — файлы… ещё разбираются»: строка стоит, пока они разбираются (кончился разбор — уходит сама)
+  const [dataWait, setDataWait] = useState<string | null>(null);
   // сборка уже идёт (любая задача generate, не только самая новая задача в слоте): вторая поверх не начинается, нажатие
   // ставит тихую строку; сборка кончилась — строка уходит
   const [busyAsk, setBusyAsk] = useState(false);
@@ -126,8 +131,14 @@ export function useParamsPlate(): ParamsPlate {
       dispatch({ type: "open", step: "tpl" });
       return;
     }
+    // файлы или брендбук ещё разбираются: колода вышла бы без них — строка ждёт их конца
+    const wait = data.busy ? DATA_WAIT : data.brand.phase === "run" || data.brand.phase === "done" || data.brand.phase === "out" ? BRAND_WAIT : null;
+    setDataWait(wait);
+    if (wait) return;
     setAttempt(Date.now());
-    void startGeneration(buildRequest({ templateId, brief, params, strategies, modelOn, images, improve }), slides.count);
+    const req = buildRequest({ templateId, brief, params, strategies, modelOn, images, improve, data: data.request });
+    data.markUsed([...(req.dataset_ids ?? []), ...(req.brandbook_id ? [req.brandbook_id] : [])]);
+    void startGeneration(req, slides.count);
   };
 
   // сборка кончилась, пока человек был в другом месте: «Открыть» — её презентация (как из «Мои презентации»: открытая
@@ -158,7 +169,8 @@ export function useParamsPlate(): ParamsPlate {
   };
 
   const textBad = textIssue && (textIssue.kind === "empty" || textIssue.kind === "short") ? textIssue.text : null;
-  const bad = textBad ?? (noTpl && !templateId ? NO_TEMPLATE : null) ?? failed;
+  const waitNow = dataWait === DATA_WAIT ? data.busy : dataWait === BRAND_WAIT ? ["run", "done", "out"].includes(data.brand.phase) : false;
+  const bad = textBad ?? (noTpl && !templateId ? NO_TEMPLATE : null) ?? (waitNow ? dataWait : null) ?? failed;
   const line = headLine({ busy: busyAsk && building, bad, echo: bad === textBad, ended: buildEnd, openFailed: openFail });
 
   const writes: SwitchView = { on: modelOn && params.useModels, disabled: !modelOn, title: modelOn ? undefined : "Модель не подключена" };

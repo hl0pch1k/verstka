@@ -238,3 +238,9 @@ test("строка под сводкой: «Сборка уже идёт» си�
   assert.deepEqual(headLine({ busy: false, bad: null, echo: false, ended: { ok: false }, openFailed: true }), { kind: "ended", ok: false, failed: false });
   assert.equal(headLine({ busy: false, bad: null, echo: false, ended: null }), null);
 });
+test("запрос сборки: наборы данных, брендбук и что важнее — когда они есть; без них полей нет", () => {
+  const r = req({ data: { dataset_ids: ["d1", "d2"], brandbook_id: "b1", brand_priority: "template" } });
+  assert.deepEqual([r.dataset_ids, r.brandbook_id, r.brand_priority], [["d1", "d2"], "b1", "template"]);
+  const plain = req();
+  assert.equal("dataset_ids" in plain || "brandbook_id" in plain || "brand_priority" in plain, false);
+});

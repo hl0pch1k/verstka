@@ -321,3 +321,9 @@ test("подсказка пустого поля без агента-писат�
   // «Взять пример» без писателя даёт тот же текст, с которого начинается подсказка
   assert.equal(sampleText(false, TW[0]), SAMPLE_BRIEF);
 });
+test("полоса 02 с файлами данных: первая фраза брифа и сколько файлов; «Улучшить готовую» — главнее", () => {
+  const brief = "Итоги продаж VK Cloud за 9 месяцев 2026 года для правления. Покажи рост выручки.";
+  assert.deepEqual(textStrip(brief, { line: { kind: "topic" }, data: 7 }), { title: "Итоги продаж VK Cloud за 9 месяцев 2026 года…", meta: "7 файлов данных" });
+  assert.equal(textStrip(brief, { line: { kind: "topic" }, improve: { name: "Итоги.pptx", slides: 3 }, data: 7 }).meta, "текст из презентации · 3 слайда");
+  assert.equal(textStrip(brief, { line: { kind: "topic" }, data: 0 }).meta, "тема · текст пишет агент");
+});

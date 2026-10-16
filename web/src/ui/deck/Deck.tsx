@@ -116,8 +116,9 @@ export function Deck({ h1, h2, h3, p1, p2, p3, m3, b3, p4, s1, s2, s3, layers }:
           в том же кадре, до первой отрисовки, и при загрузке ни одна дорожка не едет от угаданной ширины к своей */}
       {wrap !== null && (<>
         <Plate z={1} y={g.y[0]} className="p2-rise" label="Шаг 1 — шаблон" style={{ background: "#FFFFFF", color: "#0B1220", animationDelay: "0ms" }}>
-          <Strip n="01" {...s1} on={g.strips} onClick={more ? () => dispatch({ type: "open", step: "tpl" }) : undefined} label="Вернуться к шагу «Шаблон»" />
-          <StepBox on={heads}>
+          {/* полоса 01 видна и тогда, когда плита 01 свёрнута файлами с данными (V2 `s1Cls`, `s1Btn`): её заголовок гаснет */}
+          <Strip n="01" {...s1} on={g.strips || g.fold1} onClick={more || g.fold1 ? () => dispatch({ type: "open", step: "tpl" }) : undefined} label="Вернуться к шагу «Шаблон»" />
+          <StepBox on={heads && !g.fold1}>
             <div className="p2-hrow" style={{ display: "flex", alignItems: "center", gap: 24, height: 64 }}>
               <button type="button" className="p2-head" aria-expanded={tplOpen} aria-controls="p2-b1"
                 onClick={() => dispatch({ type: "open", step: ui.open === "tpl" ? "text" : "tpl" })}>

@@ -602,7 +602,7 @@ export interface ChatMessage { id: string; role: "user" | "assistant"; text: str
 export type SourceKind = "csv" | "tsv" | "xlsx" | "json" | "text";
 export type ColumnType = "number" | "percent" | "money" | "date" | "period" | "category" | "text" | "boolean" | "id";
 export type ColumnRole = "time" | "dimension" | "metric" | "id" | "text" | "attribute";
-export type TimeFreq = "day" | "week" | "month" | "quarter" | "year" | "irregular";
+export type TimeFreq = "hour" | "day" | "week" | "month" | "quarter" | "year" | "irregular";
 export type TaskKind = "dynamics" | "comparison" | "shares" | "distribution" | "relationship" | "reference" | "kpi";
 export type VizKind =
   | "line" | "column" | "bar" | "histogram" | "pie" | "doughnut" | "scatter" | "grouped_column" | "grouped_bar"
