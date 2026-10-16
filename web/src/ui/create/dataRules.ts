@@ -114,15 +114,20 @@ export function cardTip(c: DataCard): string {
 }
 
 /** Строка в шапке панели: «разбираю 3 из 7…» (синим), «7 файлов разобраны», «5 из 7 разобраны» (часть не прочитана). */
-export function panelStatus(cards: Pick<DataCard, "status">[]): { text: string; busy: boolean } {
+export function panelStatus(cards: Pick<DataCard, "status">[]): { text: string; short: string; busy: boolean } {
   const n = cards.length;
-  if (!n) return { text: "", busy: false };
+  if (!n) return { text: "", short: "", busy: false };
   const done = cards.filter((c) => c.status === "done").length;
   const fail = cards.filter((c) => c.status === "fail").length;
-  if (done + fail < n) return { text: `разбираю ${Math.min(n, done + fail + 1)} из ${n}…`, busy: true };
-  if (!fail) return { text: plural(n, "файл разобран", "файла разобраны", "файлов разобраны"), busy: false };
-  return { text: `${done} из ${n} разобраны`, busy: false };
+  if (done + fail < n) {
+    const k = Math.min(n, done + fail + 1);
+    return { text: `разбираю ${k} из ${n}…`, short: `${k} из ${n}…`, busy: true };
+  }
+  if (!fail) return { text: plural(n, "файл разобран", "файла разобраны", "файлов разобраны"), short: `${n} готово`, busy: false };
+  return { text: `${done} из ${n} разобраны`, short: `${done} из ${n} готово`, busy: false };
 }
+/** Панель в узкой колоде у́же 300 (окно около 1280 с помощником): строка в шапке — короткая («20 готово»). */
+export const panelShort = (wrap: number): boolean => dataPanel(wrap).narrow < 300;
 
 /** id наборов для сборки — разобранные карточки по порядку. */
 export const datasetIds = (cards: DataCard[]): string[] => cards.filter((c) => c.status === "done" && c.summary).map((c) => c.summary!.id);

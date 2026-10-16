@@ -513,6 +513,8 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
 .dt-lbl{flex:none;font-size:13px;font-weight:600;line-height:20px;color:#5A6272}
 .dt-st{min-width:0;overflow:hidden;text-overflow:ellipsis;font-size:13px;font-weight:600;line-height:20px;color:#5A6272}
 .dt-st-run{color:#2563EB}
+.dt-st .hp-sw{justify-items:end;min-width:0}
+.dt-st .hp-sw>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .dt-list{display:flex;flex-direction:column;gap:2px;flex:1;min-height:0;margin:0;padding:0;list-style:none;overflow-y:auto;scrollbar-width:none}
 .dt-list::-webkit-scrollbar{display:none}
 .dt-list>li{flex:none}
@@ -581,6 +583,9 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
   .bb-chip-t .bb-ct{max-width:var(--ctw,280px);overflow:hidden;transition:max-width 340ms var(--ease),opacity 160ms var(--ease) 80ms}
   .hp-nar .bb-chip-t{gap:0;transition:transform 160ms var(--ease),gap 520ms var(--ease)}
   .hp-nar .bb-chip-t .bb-ct{max-width:0;opacity:0;transition:max-width 520ms var(--ease),opacity 240ms var(--ease)}
+  /* плитка палитры тоже уступает 32 px (80 → 48): подпись шаблона («VK Education · 55 слайдов · Play») — целиком */
+  .bb-chip-t .bb-tile{transition:width 340ms var(--ease)}
+  .hp-nar .bb-chip-t .bb-tile{width:48px;transition-duration:520ms}
   /* карточка шаблона рядом с брендбуком: в узкой колоде обложка сжимается и гаснет на месте (только в широкой) */
   .bb-tpl-n>img,.bb-tpl-n>.tp-wf-m{transition:width 340ms var(--ease),margin-right 340ms var(--ease),opacity 160ms var(--ease) 80ms}
   .hp-nar .bb-tpl-n>img,.hp-nar .bb-tpl-n>.tp-wf-m{width:0 !important;margin-right:-16px;opacity:0;transition:width 520ms var(--ease),margin-right 520ms var(--ease),opacity 240ms var(--ease)}
@@ -593,4 +598,8 @@ select.cp-ctl{padding-right:32px;cursor:pointer}
   .dt-g>.p2-field,.dt-cell,.dt-on>.dt-cell,.dt-goalw{grid-column:1;grid-row:auto}
   .tx-fw.dt-g:not(.dt-w)>.dt-cell{display:none}
   .tx-menu.tx-menu2{width:min(608px,calc(100vw - 48px)) !important}
+  /* панель в потоке колонки (её клетка не тянется на две строки): видна целиком, список прокручивается в 296 px */
+  .dt-cell{position:static;overflow:visible}
+  .dt-pan{position:static}
+  .dt-list{max-height:296px}
 }

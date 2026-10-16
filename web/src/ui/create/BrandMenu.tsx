@@ -24,23 +24,29 @@ export function PaletteTile({ hexes, className }: { hexes: string[]; className?:
 
 /** Карточка брендбука — пара карточке шаблона: плитка палитры и две строки; клик — слой «Брендбук». */
 export function BrandCard() {
-  const { data, dispatch } = useApp();
+  const { data, dispatch, ui } = useApp();
   const tight = brandTight(useDeckWrap());
   const b = data.brand;
-  // подпись в тесной колоде сжимается до нуля от своей ширины (--ctw — замер): ход идёт той же кривой до конца
+  // подпись в тесной колоде сжимается до нуля от своей ширины (--ctw — замер): ход идёт той же кривой до конца. Мерятся
+  // строки (их scrollWidth — ширина текста), а не сама подпись: под помощником она сжата до нуля, и замер дал бы 0 —
+  // подпись не вернулась бы после него. Ноль не записывается; замер — и после хода помощника
   const ct = useRef<HTMLSpanElement>(null);
   const label = b.spec ? `${brandName(b.spec, b.file)}|${brandMeta(b.spec)}` : "";
   useLayoutEffect(() => {
     const el = ct.current;
     if (!el) return;
     let alive = true;
-    const measure = () => alive && el.style.setProperty("--ctw", `${Math.ceil(el.scrollWidth)}px`);
+    const measure = () => {
+      if (!alive) return;
+      const w = Math.ceil(Math.max(0, ...Array.from(el.children, (c) => c.scrollWidth)));
+      if (w > 0) el.style.setProperty("--ctw", `${w}px`);
+    };
     measure();
     void document.fonts?.ready.then(measure);
     return () => {
       alive = false;
     };
-  }, [label, tight]);
+  }, [label, tight, ui.helper]);
   if (!b.spec) return null;
   return (
     <button type="button" className={cls("bb-chip p2-in", tight && "bb-chip-t")} onClick={() => dispatch({ type: "set", patch: { brandLayer: true } })}

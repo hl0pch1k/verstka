@@ -6,7 +6,8 @@
 // зона «Отпустите файлы — разберу данные» (как C-upload).
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { cls } from "../kit/cls";
-import { cardSize, cardTip, panelStatus, runWord, type DataCard } from "./dataRules";
+import { cardSize, cardTip, panelShort, panelStatus, runWord, type DataCard } from "./dataRules";
+import { useDeckWrap } from "../deck/useDeckFit";
 import { DsIcon, DsSpin, fileIcon } from "./dsKit";
 import { focusAfter } from "./dataModel";
 import { plural } from "../../lib/utils";
@@ -129,6 +130,8 @@ function Card({ c, i, motion }: { c: DataCard; i: number; motion: PanelMotion })
 /** Панель «Данные» (клетка `.dt-cell` — её ставит TextBody в сетку поля). */
 export function DataPanel({ cards, motion }: { cards: DataCard[]; motion: PanelMotion }) {
   const st = panelStatus(cards);
+  // тесная колода с помощником: строка «20 файлов разобраны» сменяется на месте короткой «20 готово» (hp-wo / hp-no)
+  const short = panelShort(useDeckWrap());
   // карточек больше, чем помещается: список прокручивается внутри панели, края мягко растворяются (p2-fade) — знак, что
   // дальше есть ещё (полосы прокрутки нет)
   const list = useRef<HTMLUListElement>(null);
@@ -146,7 +149,9 @@ export function DataPanel({ cards, motion }: { cards: DataCard[]; motion: PanelM
     <section className="dt-pan" aria-labelledby="dt-h">
       <div className="dt-hd">
         <span id="dt-h" className="dt-lbl">Данные</span>
-        <span className={cls("dt-st", st.busy && "dt-st-run")} aria-live="polite">{st.text}</span>
+        <span className={cls("dt-st", st.busy && "dt-st-run")} aria-live="polite" title={short ? st.text : undefined}>
+          {short ? <><span className="p2-sr">{st.text}</span><span className="hp-sw" aria-hidden="true"><span className="hp-wo">{st.text}</span><span className="hp-no">{st.short}</span></span></> : st.text}
+        </span>
       </div>
       <ul ref={list} className={cls("dt-list", over && "p2-fade")}>
         {cards.map((c, i) => <Card key={c.key} c={c} i={i} motion={motion} />)}

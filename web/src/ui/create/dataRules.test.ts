@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   BRAND_RUN0, brandFileName, brandLayerMeta, brandMeta, brandName, brandPalette, brandRows, brandSourceOf, brandTiles, briefShort,
   brandTight, cardName, cardSize, cardTip, conflictView, dataBusy, dataFilesLabel, dataKind, dataPanel, dataRequest, datasetIds, dropKind, fieldWidths, figmaUrlOk, goalsFit,
-  fmtLabel, foldBrandEvent, goalsLabel, goalsOf, hasTable, MAX_DATA_BYTES, panelStatus, parseManifest, runWord, sizeProblem, type DataCard,
+  fmtLabel, foldBrandEvent, goalsLabel, goalsOf, hasTable, MAX_DATA_BYTES, panelShort, panelStatus, parseManifest, runWord, sizeProblem, type DataCard,
 } from "./dataRules";
 import type { BrandConflict, BrandSpec, DatasetSummary, JobEvent } from "../../types";
 
@@ -63,10 +63,12 @@ test("карточка: что говорит, пока разбирается; 
   assert.equal(cardTip(card("fail", { error: "Файл пустой" })), "Выручка по месяцам.csv · Файл пустой");
 });
 test("шапка панели: ход разбора, итог; id для сборки — только разобранные; пока разбираются — сборка ждёт", () => {
-  assert.deepEqual(panelStatus([]), { text: "", busy: false });
-  assert.deepEqual(panelStatus([card("done"), card("done"), card("run"), card("wait")]), { text: "разбираю 3 из 4…", busy: true });
-  assert.deepEqual(panelStatus(Array.from({ length: 7 }, () => card("done"))), { text: "7 файлов разобраны", busy: false });
-  assert.deepEqual(panelStatus([card("done"), card("fail")]), { text: "1 из 2 разобраны", busy: false });
+  assert.deepEqual(panelStatus([]), { text: "", short: "", busy: false });
+  assert.deepEqual(panelStatus([card("done"), card("done"), card("run"), card("wait")]), { text: "разбираю 3 из 4…", short: "3 из 4…", busy: true });
+  assert.deepEqual(panelStatus(Array.from({ length: 7 }, () => card("done"))), { text: "7 файлов разобраны", short: "7 готово", busy: false });
+  assert.deepEqual(panelStatus([card("done"), card("fail")]), { text: "1 из 2 разобраны", short: "1 из 2 готово", busy: false });
+  // короткая строка — в тесной колоде с помощником (панель у́же 300), при 1440 — как на холсте
+  assert.deepEqual([panelShort(1392), panelShort(1318), panelShort(1232), panelShort(1217)], [false, false, true, true]);
   assert.deepEqual(datasetIds([card("done"), card("fail"), card("done", { summary: sum({ id: "d2" }) })]), ["d1", "d2"]);
   assert.equal(dataBusy([card("done"), card("wait")]), true);
   assert.equal(dataBusy([card("done"), card("fail")]), false);
