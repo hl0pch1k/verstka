@@ -1226,8 +1226,8 @@ def _similar_data(a: ChartSpec, b: ChartSpec) -> bool:
 
 def _covers(want: ChartSpec, got: ChartSpec) -> bool:
     """`got` shows the data of `want` (the brief's): every value of it (as is or in thousands), at most one more."""
-    wv = [v for sr in want.series for v in sr.values]
-    gv = [v for sr in got.series for v in sr.values]
+    wv = [v for sr in want.series for v in sr.values if v is not None]
+    gv = [v for sr in got.series for v in sr.values if v is not None]
     if not wv or not gv:
         return False
 
@@ -1768,7 +1768,7 @@ def _fit_form(kind: str, c: SlideContent, changes: list[str], key: str, text: st
     if c.bullets and (c.chart is not None or c.formula or (c.numbers and kind in ("stat_row", "big_number"))):
         # lines that only repeat the figures the slide already shows big (the chart's values, the row of figures, the
         # formula's terms): «100 покупок в день» under «100 × 300 × 30 = 900 000»
-        vals = [v for ch in (c.chart, c.chart2) if ch is not None for sr in ch.series for v in sr.values]
+        vals = [v for ch in (c.chart, c.chart2) if ch is not None for sr in ch.series for v in sr.values if v is not None]
         vals += [v for n in c.numbers for v in figures(n.value)] + figures(c.formula or "")
         keep = [b for b in c.bullets if not (figures(b) and all(any(abs(v - x) <= 1e-6 * max(1.0, abs(v)) for x in vals) for v in figures(b)))]
         if len(keep) < len(c.bullets):
@@ -2712,7 +2712,7 @@ def trim_chart_restatement(line: Optional[str], charts: list) -> Optional[str]:
     chart, or when what is left would not stand."""
     if not line or not charts:
         return line
-    vals = [v for ch in charts for sr in ch.series for v in sr.values]
+    vals = [v for ch in charts for sr in ch.series for v in sr.values if v is not None]
     m = re.match(r"^(?P<head>.*\d.*?)\s*\((?P<sign>[+\-−])\s?(?P<v>\d+(?:[.,]\d+)?)\s?%\)\s*$", line)
     if m:  # «… до 254 795 рублей в месяц (+112,3%)»
         head, rest = m.group("head"), ("Рост на " if m.group("sign") == "+" else "Снижение на ") + m.group("v") + "%"
@@ -3303,7 +3303,8 @@ def tidy_design(d: _Design, ctx: Optional[_Ctx] = None) -> None:
         c.numbers = []
         if s.kind == PatternKind.stat_row:
             s.kind = PatternKind.big_number
-    vals = [v for ch in (c.chart, c.chart2) if ch is not None for sr in ch.series for v in sr.values]
+    # (a gap of a chart from a data file — None — is no figure)
+    vals = [v for ch in (c.chart, c.chart2) if ch is not None for sr in ch.series for v in sr.values if v is not None]
     vals += [v for n in c.numbers for v in figures(n.value)] + figures(c.formula or "")
 
     def repeats(b: str) -> Optional[str]:
@@ -5009,7 +5010,7 @@ def missing_key_lines(s: OutlineSlide, text: str) -> list[str]:
             continue
         subj = _subject_stems(sn)
         on_chart = any(
-            all(any(abs(v - x) <= 1e-6 * max(1.0, abs(v)) for sr in ch.series for x in sr.values) for v in vals)
+            all(any(abs(v - x) <= 1e-6 * max(1.0, abs(v)) for sr in ch.series for x in sr.values if x is not None) for v in vals)
             and _meet(subj, _subject_stems(" ".join([ch.title or "", *(sr.name or "" for sr in ch.series)])))
             for ch in charts
         )

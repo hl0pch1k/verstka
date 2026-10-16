@@ -83,12 +83,47 @@ class Rebuilt:
     n_slides: int = 0
 
 
+# a form said as the way to show the slide: the instrumental («таблицей», «вертикальными столбцами», «линейным
+# графиком», «карточками»); «в виде таблицы»; «замени … на график»
+_AS_FORM = re.compile(
+    r"(?<![а-яё])(?:таблиц(?:ей|ами)|столбц(?:ами|ом)|столбиками|гистограмм(?:ой|ами)|лини(?:ей|ями)|график(?:ом|ами)|"
+    r"диаграмм(?:ой|ами)|кольц(?:ом|ами)|бублик(?:ом)?|карточк(?:ами|ой)|полос(?:ами|ой)|област(?:ью|ями)|"
+    r"рассеяни(?:ем))(?![а-яё])", re.I)
+_IN_FORM = re.compile(r"в\s+виде\s+((?:[а-яё]+\s+){0,2}?(?:таблиц[ыи]|столбц(?:ов|а)|гистограмм[ыи]|лини[ий]|график(?:а|ов)|"
+                      r"диаграмм[ыи]?|кольц[аов]*|карточ(?:ек|ки)|полос|област[ий]|рассеяния))", re.I)
+_REPLACE_ON = re.compile(r"(?:замени(?:те)?|заменить|поменяй(?:те)?|переделай(?:те)?|перестрой(?:те)?)\b.*?\bна\s+((?:[а-яё]+\s+){0,2}?[а-яё]+)", re.I)
+_NOT_BUT = re.compile(r"\bне\s+[^,.;]*?,?\s+а\s+(.+)$", re.I)
+
+
+def _form_phrase(text: str) -> Optional[str]:
+    """The words that name the form the slide should take, or None when the request names no form to show it in
+    («сделай график крупнее», «убери легенду», «добавь заголовок к таблице» are about the slide, not its form)."""
+    t = " ".join((text or "").lower().replace("ё", "е").split())
+    m = _REPLACE_ON.search(t)
+    if m:
+        return m.group(1)
+    m = _NOT_BUT.search(t)
+    if m:
+        t = m.group(1)  # «покажи не таблицей, а столбцами»: what comes after «а»
+    m = _IN_FORM.search(t)
+    if m:
+        return m.group(1)
+    m = _AS_FORM.search(t)
+    if m:
+        before = t[: m.start()].split()[-2:]  # its adjectives: «вертикальными столбцами», «круговой диаграммой»
+        return " ".join(before + [m.group(0)])
+    return None
+
+
 def option_for_request(request: str, data) -> Optional[int]:
-    """The option of the slide's data (`SlideData.options`) a person's words name («на слайде 4 покажи таблицей» → the
-    table), or None when they name no form or a form the data has no option for."""
-    text = request or ""
+    """The option of the slide's data (`SlideData.options`) the person's words name as the way to show it («на слайде 4
+    покажи таблицей», «в виде столбцов», «замени таблицу на график», «не таблицей, а линией») — or None: no form named,
+    or a form the data has no option for."""
+    phrase = _form_phrase(request)
+    if not phrase:
+        return None
     for rx, kinds in _FORM_WORDS:
-        if not rx.search(text):
+        if not rx.search(phrase):
             continue
         for kind in kinds:
             k = next((i for i, o in enumerate(data.options) if o.kind == kind), None)

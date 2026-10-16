@@ -32,7 +32,7 @@ from pydantic import BaseModel, Field
 from verstka.data.goals import goals_of
 from verstka.data.headline import headline_ok, numbers_in
 from verstka.data.plan import NotBuilt, chart_spec_of, plan_datasets, slide_data_of
-from verstka.data.words import count_words, fmt_signed, fmt_value, stems_of, upper_first
+from verstka.data.words import count_words, file_title, fmt_signed, fmt_value, stems_of, upper_first
 from verstka.schemas.common import PatternKind
 from verstka.schemas.data import TASK_TITLES, VIZ_TITLES, DatasetPlan, DatasetProfile, HeadlineFact, PreparedValues, Table
 from verstka.schemas.outline import (
@@ -314,7 +314,7 @@ def slide_for(plan: DatasetPlan, table: Table, part: int = 1, *, slide_id: str, 
     head = plan.headline or plan.plain_headline
     if part > 1:
         head = f"{head.rstrip('. ')} (продолжение)"
-    return OutlineSlide(
+    slide = OutlineSlide(
         id=slide_id,
         kind=_kind_of(body),
         headline=head,
@@ -324,20 +324,98 @@ def slide_for(plan: DatasetPlan, table: Table, part: int = 1, *, slide_id: str, 
         rationale=_rationale(plan),
         alternatives=_alternatives(plan),
         notes=_notes(plan) if part == 1 else "",
-        data=slide_data_of(plan, part).model_copy(update={"prepared": prepared_of(body)}),
+        data=slide_data_of(plan, part).model_copy(update={"prepared": prepared_of(body, plan.caption)}),
     )
+    if not data_text_ok(slide.headline, slide):
+        # the story says what the audit accepts: a headline whose number the data checks would refuse gives way to the
+        # strongest fact said in its own words, else to the topic
+        alt = next((f.text for f in plan.headline_facts if f.text and data_text_ok(f.text, slide)), None)
+        log.warning("data story: headline «%s» fails the data check — «%s» instead", slide.headline, alt or plan.plain_headline)
+        slide.headline = upper_first(alt) if alt else (plan.plain_headline or slide.headline)
+    return slide
 
 
-def prepared_of(body: Any) -> PreparedValues:
-    """What the slide shows, as the data layer prepared it from the file (the audit's reference)."""
+def prepared_of(body: Any, caption: Optional[str] = None) -> PreparedValues:
+    """What the slide shows, as the data layer prepared it from the file (the audit's reference): its values and its
+    own words — the caption, the cards' labels."""
+    texts = [caption] if caption else []
     if isinstance(body, ChartSpec):
         cats = [str(c) for c in body.categories]
         series = [(x.name or "", [None if v is None else float(v) for v in x.values]) for x in body.series]
         points = [(x.name or "", [(float(a), float(b)) for a, b in zip(x.x, x.y)]) for x in body.xy]
-        return PreparedValues(categories=cats, series=series, points=points)
+        return PreparedValues(categories=cats, series=series, points=points, texts=texts)
     if isinstance(body, TableData):
-        return PreparedValues(columns=list(body.columns), rows=[[str(c) for c in r] for r in body.rows])
-    return PreparedValues(numbers=[n.value for n in body])
+        return PreparedValues(columns=list(body.columns), rows=[[str(c) for c in r] for r in body.rows], texts=texts)
+    return PreparedValues(numbers=[n.value for n in body], texts=texts + [n.label for n in body if n.label])
+
+
+# ── numbers on a data slide: one rule for the story, the redesign and the audit ─────────────────────────────────────
+_YEAR_RE = re.compile(r"(?<![\d,.])(1[89]\d\d|20\d\d)(?![\d,])")
+_NUM_WORD_RE = re.compile(r"(?<![\w,.])\d+(?:[.,]\d+)?[\s\u00a0\u2060-]*[a-zа-яё]+\.?", re.I)
+
+
+def data_labels(s: OutlineSlide) -> list[str]:
+    """The slide's data names (`data_slide_labels`) and the number-words inside them («1 курс» of «Принято на 1 курс»,
+    «2 квартал»): a headline that says «на 1 курс» names a row, it does not state a figure."""
+    base = data_slide_labels(s)
+    extra = [m.group(0).strip() for lab in base for m in _NUM_WORD_RE.finditer(lab)]
+    return list(dict.fromkeys(base + [x for x in extra if x]))
+
+
+def data_years(s: OutlineSlide) -> set[str]:
+    """Years the data itself names: its time axis, its labels («Бюджет 2026», «III кв. 2026»), its periods. Such a year
+    in a sentence dates it («27% бюджета 2026»), it is not a figure."""
+    texts = list(data_slide_labels(s))
+    d = s.data
+    if d is not None and d.time_axis is not None:
+        texts += [d.time_axis.start, d.time_axis.end, *d.time_axis.missing_periods]
+    if d is not None and d.prepared is not None:
+        texts += list(d.prepared.categories) + list(d.prepared.columns)
+    return {m.group(1) for t in texts for m in _YEAR_RE.finditer(str(t))}
+
+
+def _without_years(text: str, years: set[str]) -> str:
+    return _YEAR_RE.sub(lambda m: " " if m.group(1) in years else m.group(0), text or "")
+
+
+def slide_values(s: OutlineSlide) -> list[float]:
+    """Every number the data layer put on the slide: its facts, the values of its chart, table and cards and the
+    numbers of its own words (caption, card labels)."""
+    d = s.data
+    out = [float(f.value) for f in d.headline_facts] if d is not None else []
+    p = d.prepared if d is not None else None
+    if p is None:
+        return out
+    for _, vals in p.series:
+        out += [float(v) for v in vals if v is not None]
+    for _, pts in p.points:
+        out += [float(v) for pair in pts for v in pair]
+    for row in p.rows:
+        for cell in row:
+            out += numbers_in(str(cell))
+    years = data_years(s)
+    for t in list(p.numbers) + list(p.texts):
+        out += numbers_in(_without_years(str(t), years))  # (every number of the data layer's own words counts)
+    return out
+
+
+def data_text_ok(text: str, s: OutlineSlide, *, values: Optional[Sequence[float]] = None) -> bool:
+    """Every number of `text` on data slide `s` is one of its facts (`values`: or one of these), not counting the digits
+    of the data's names («1 курс», «Филиал 1») and the years the data names («бюджета 2026»)."""
+    return not bad_numbers(text, s, values=values)
+
+
+def bad_numbers(text: str, s: OutlineSlide, *, values: Optional[Sequence[float]] = None) -> list[float]:
+    labels = data_labels(s)
+    plain = _without_years(text, data_years(s))
+    facts = list(s.data.headline_facts) if s.data is not None else []
+    if values is not None:
+        facts = facts + [HeadlineFact(id=f"v{k}", text="", value=float(v), kind="count") for k, v in enumerate(values)]
+    if headline_ok(plain, facts, labels):
+        return []
+    from verstka.data.headline import _matches
+
+    return [n for n in numbers_in(plain, labels) if not any(_matches(n, f.value) for f in facts)]
 
 
 def data_slide_labels(s: OutlineSlide) -> list[str]:
@@ -877,22 +955,57 @@ def _trim_table(entries: list, k: int, plan: DatasetPlan) -> None:
             e.role, e.keep = "part", 10
 
 
+# words that name no subject of their own: measures and parts every dataset may have («Рост, %», «Доля», «Число
+# обращений», «больше 180», «Остальные 5»), roman quarters
+_GENERIC = frozenset({
+    "рост", "дол", "числ", "средн", "итог", "всег", "значен", "сумм", "количеств", "показател", "больш", "меньш",
+    "остальн", "друг", "прочи", "процент", "измен", "i", "ii", "iii", "iv", "кв",
+})
+
+
+def _stem_hit(word: str, own: set[str]) -> Optional[str]:
+    """`word` names one of `own` (stems): equal, or one a prefix of the other of 3 letters and more («сентябр» —
+    «сен»)."""
+    for o in own:
+        if word == o or (min(len(word), len(o)) >= 3 and (word.startswith(o) or o.startswith(word))):
+            return o
+    return None
+
+
 class _Attribution:
-    """Which data slide a sentence of the model speaks of. Each slide's subject — the words of its topic, headline,
-    labels (categories, series, axes, row names) and facts that no other data slide of the deck has («месяц»,
-    «сентябрь» for the revenue line; «регион», «Москва», «Казань» for the regions) — and its facts. A sentence belongs
-    to the slide whose facts hold every number of it and whose own subject it names; its own headline, said again,
-    belongs to it whatever it names."""
+    """Which data slide a sentence of the model speaks of. Each slide's own subject — the words of its topic, file
+    name and labels (categories, series, row names, cards) that no other data slide has («месяц», «сен» for the revenue
+    line; «регион», «Москва», «Казань» for the regions); verbs and the words of the facts are no subject. A sentence
+    belongs to a slide when the slide's facts hold every number of it, it names that slide's own subject and no other
+    slide's, and a number tied to a category («Москва — 41%») is said of that category, not of another («Казань
+    выросла на 41%»). The slide's own headline, said again, belongs to it."""
 
     def __init__(self, slides: Sequence[OutlineSlide]) -> None:
         self.slides = [s for s in slides if s.data is not None]
-        self.labels = {s.id: data_slide_labels(s) for s in self.slides}
+        self.labels = {s.id: data_labels(s) for s in self.slides}
+        self.cats = {s.id: self._categories(s) for s in self.slides}
         vocab = {}
         for s in self.slides:
-            text = " ".join([s.data.plain_headline, s.headline, *self.labels[s.id], *(f.text for f in s.data.headline_facts)])
-            vocab[s.id] = {w for w in stems_of(text) if not w.isdigit()}
+            d = s.data
+            words = [d.plain_headline, file_title(d.file), *self.cats[s.id]]
+            if d.prepared is not None:
+                words += [name for name, _ in d.prepared.series] + [name for name, _ in d.prepared.points]
+            vocab[s.id] = {w for w in stems_of(" ".join(x for x in words if x)) if not w.isdigit() and w not in _GENERIC}
         self.own = {s.id: vocab[s.id] - set().union(*(vocab[o.id] for o in self.slides if o is not s)) for s in self.slides}
         self.all_labels = [x for v in self.labels.values() for x in v]
+
+    @staticmethod
+    def _categories(s: OutlineSlide) -> list[str]:
+        p = s.data.prepared
+        if p is None:
+            return [str(c) for c in (s.content.chart.categories if s.content.chart is not None else [])]
+        out = list(p.categories) + [str(r[0]) for r in p.rows if r]
+        out += [t.split(",")[0] for t in p.texts[1:]] if p.numbers else []  # the cards' names («Выручка», «NPS»)
+        return [x for x in out if x and not _YEAR_RE.fullmatch(x.strip())]
+
+    def _names(self, line: str, s: OutlineSlide) -> set[str]:
+        words = {w for w in stems_of(line) if not w.isdigit()}
+        return {o for w in words if (o := _stem_hit(w, self.own[s.id]))}
 
     def of(self, line: str) -> tuple[Optional[OutlineSlide], str]:
         """(the slide the line speaks of, or None with why not)."""
@@ -900,14 +1013,26 @@ class _Attribution:
         for s in self.slides:
             if low == " ".join(s.headline.lower().split()).rstrip("."):
                 return s, ""
-        words = {w for w in stems_of(line) if not w.isdigit()}
-        fits = [s for s in self.slides if headline_ok(line, s.data.headline_facts, self.labels[s.id])]
-        named = [(len(words & self.own[s.id]), k, s) for k, s in enumerate(fits) if words & self.own[s.id]]
-        if named:
-            return max(named, key=lambda t: (t[0], -t[1]))[2], ""
-        if not numbers_in(line, self.all_labels):
-            return None, "не видно, о каких данных вывод"
-        return None, "числа не из фактов того файла, о котором говорит вывод" if fits else "число не из фактов данных"
+        named = {s.id: self._names(line, s) for s in self.slides}
+        speaks = [s for s in self.slides if named[s.id]]
+        if not speaks:
+            return None, "не видно, о каких данных вывод" if not numbers_in(line, self.all_labels) else "вывод не называет, о каких данных его числа"
+        if len(speaks) > 1:
+            return None, "вывод смешивает данные разных файлов"
+        s = speaks[0]
+        if not data_text_ok(line, s):
+            return None, "числа не из фактов того файла, о котором говорит вывод"
+        # a number of a fact about one category, said of another («Казань выросла на 41%», where 41% is Moscow's)
+        low_line = line.lower()
+        cats = [c for c in self.cats[s.id] if c and c.lower() in low_line]
+        if cats:
+            from verstka.data.headline import _matches
+
+            for n in numbers_in(_without_years(line, data_years(s)), self.labels[s.id]):
+                hits = [f for f in s.data.headline_facts if _matches(n, f.value)]
+                if hits and not any(c.lower() in (f.text or "").lower() for f in hits for c in cats):
+                    return None, f"число {_num(n)} в данных относится к другой категории"
+        return s, ""
 
     def free_or_attributed(self, line: str) -> tuple[bool, str]:
         """A line without numbers stands on its own; a line with numbers must belong to one data slide."""

@@ -162,20 +162,13 @@ def _ground_rest(o: DeckOutline, brief: Brief, structure) -> DeckOutline:
     return o
 
 
-def _other_form(old: OutlineSlide, form: tuple[str, Optional[str]]) -> bool:
-    kind, chart_type = form
-    if kind != old.kind.value:
-        return True
-    ch = old.content.chart
-    return bool(chart_type and ch is not None and chart_type != ch.type)
-
-
 def keep_data(old: OutlineSlide, new: OutlineSlide) -> OutlineSlide:
     """A redesigned slide made from a data file stays the data layer's: its chart, table or figures, their source and
-    `data` (for «Почему так» and the data checks) are kept; the designer's words stay only where every number in them
-    is one of the slide's data facts (a headline «45%» where the data say 41% keeps the old one)."""
-    from verstka.data.headline import headline_ok
-    from verstka.data.story import data_slide_labels
+    `data` (for «Почему так» and the data checks) are kept. The designer's words stay only where every number in them
+    is the data's (`verstka/data/story.data_text_ok` — the same rule the audit applies): the headline — one of the
+    slide's facts; the subtitle, lines, cards and the caption — a fact or a value the slide shows. A line that fails is
+    dropped; a headline or a caption that fails (or a caption the designer left out) keeps the old one."""
+    from verstka.data.story import data_text_ok, slide_values
 
     out = new.model_copy(deep=True)
     out.kind = old.kind
@@ -186,11 +179,24 @@ def keep_data(old: OutlineSlide, new: OutlineSlide) -> OutlineSlide:
     out.content.chart2 = c.chart2.model_copy(deep=True) if c.chart2 is not None else None
     out.content.table = c.table.model_copy(deep=True) if c.table is not None else None
     out.content.numbers = [n.model_copy() for n in c.numbers]
-    facts, labels = old.data.headline_facts, data_slide_labels(old)
-    if not (out.headline or "").strip() or not headline_ok(out.headline, facts, labels):
+    values = slide_values(old)
+
+    def ok(text: Optional[str]) -> bool:
+        return not (text or "").strip() or data_text_ok(text or "", old, values=values)
+
+    if not (out.headline or "").strip() or not data_text_ok(out.headline, old):
         out.headline = old.headline
-    if out.takeaway and not headline_ok(out.takeaway, facts, labels):
+    if not (out.takeaway or "").strip() or not ok(out.takeaway):
         out.takeaway = old.takeaway
+    if not ok(out.subtitle):
+        out.subtitle = old.subtitle if ok(old.subtitle) else None
+    oc = out.content
+    oc.bullets = [b for b in oc.bullets if ok(b)]
+    oc.paragraphs = [b for b in oc.paragraphs if ok(b)]
+    oc.items = [it for it in oc.items if ok(it.title) and ok(it.text) and ok(it.number) and all(ok(b) for b in it.bullets)]
+    oc.columns = [it for it in oc.columns if ok(it.title) and ok(it.text) and ok(it.number) and all(ok(b) for b in it.bullets)]
+    if oc.quote and not ok(oc.quote):
+        oc.quote = None
     return out
 
 
@@ -282,16 +288,25 @@ def redesign_slide(
     clock = A._Clock(providers if skills is not None else None, time.monotonic() + EDIT_BUDGET_S)
     agent = A._Agent(brief, manifest, [strategy], skills, providers, tracker, clock, raw=[])
     form = requested_form(request) if request.strip() else None
-    if old.data is not None and form is not None and _other_form(old, form):
-        # a slide made from a data file changes its form only among the analysis's options («Пересобрать слайд так»)
-        titles = ", ".join(f"«{o.title.lower()}»" for o in old.data.options)
-        raise ValueError(f"слайд {index} собран из файла «{old.data.file}»: его вид меняет «Пересобрать слайд так» — можно {titles}")
     # «оставь место под фото»: the slide keeps a free place for the person's own photo (the renderer makes it — the
     # template's own photo place or a quiet frame); «убери место под фото» takes it back
     from verstka.planning.brief_structure import photo_dropped, photo_request
 
     photo = photo_request(request) if request.strip() else None
     drop_photo = bool(request.strip()) and photo_dropped(request)
+    if old.data is not None:
+        # a slide made from a data file changes its form only among the analysis's options («Пересобрать слайд так»);
+        # its words — with the model only (the rules have nothing to say about the data)
+        from verstka.data.rebuild import _form_phrase, option_for_request
+
+        titles = ", ".join(f"«{o.title.lower()}»" for o in old.data.options)
+        if request.strip() and _form_phrase(request) and option_for_request(request, old.data) is None:
+            raise ValueError(f"слайд {index} собран из файла «{old.data.file}»: его вид меняет «Пересобрать слайд так» — можно {titles}")
+        form = None
+        if not agent.models and not (photo or drop_photo):
+            if fixing:
+                raise ValueError("model_unavailable")
+            raise ValueError(f"без модели слайд из файла «{old.data.file}» меняет только «Пересобрать слайд так» — можно {titles}")
     new: Optional[OutlineSlide] = None
     how = ""
     if agent.models:

@@ -237,6 +237,51 @@ def _render_content_clone(builder: DeckBuilder, ps: LayoutSlide, oslide, pattern
     raise _CloneRedo("; ".join(tried) or "no sample")
 
 
+# why a sample did not hold a slide, as «Почему так» says it: the renderer's own reasons (English, for the log) in
+# calm Russian; what no rule knows becomes «образец не подошёл», never an English line in the person's view
+_REASONS_RU: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"no room for it on the sample \((\d+%) of the slide\)"), r"для диаграммы или таблицы мало места (\1 слайда)"),
+    (re.compile(r"(\d+) plates of the layout's placeholders stay empty on the slide"), r"плашки макета (\1) остались бы пустыми"),
+    (re.compile(r"no room for the footnote under the sample's content"), "под содержимым нет места для сноски"),
+    (re.compile(r"no room for the conclusion under the sample's content"), "под содержимым нет места для вывода"),
+    (re.compile(r"text «([^»]*)»? runs over the template's art"), r"текст «\1» лёг бы на рисунок шаблона"),
+    (re.compile(r"the template's art stands over the text «([^»]*)»?"), r"рисунок шаблона закрыл бы текст «\1»"),
+    (re.compile(r"the heading had to shrink to ([\d.]+) pt \(the deck sets ([\d.]+) pt\)"), r"заголовок пришлось бы уменьшить до \1 пт (в колоде — \2 пт)"),
+    (re.compile(r"figure «([^»]*)»? set at .*"), r"число «\1» вышло бы мельче, чем в образце"),
+    (re.compile(r"the heading runs into «([^»]*)»? under it"), r"заголовок наезжал бы на «\1»"),
+    (re.compile(r"the heading's lines cross a rule of the sample|a rule of the sample runs through the heading"), "линия образца пересекла бы заголовок"),
+    (re.compile(r"a rule of the sample runs through «([^»]*)»?"), r"линия образца пересекла бы «\1»"),
+    (re.compile(r"a chart and a table on one slide"), "диаграмма и таблица на одном слайде"),
+    (re.compile(r"a formula: the composer sets it"), "формулу собирает композиция"),
+    (re.compile(r"no place for the user's photo on the sample"), "в образце нет места для фото"),
+    (re.compile(r"it would lie over the slide's text «([^»]*)»?"), r"объект лёг бы на текст «\1»"),
+]
+_LATIN_RE = re.compile(r"[A-Za-z]{3,}")
+
+
+def reason_ru(text: str) -> str:
+    """One reason of the renderer in Russian (`_REASONS_RU`); one already in Russian stays as it is."""
+    t = re.sub(r"^(?:failed:\s*)?(?:native object failed:\s*)?", "", (text or "").strip())
+    for rx, ru in _REASONS_RU:
+        m = rx.search(t)
+        if m:
+            return m.expand(ru)
+    return t if t and not _LATIN_RE.search(t) else "образец не подошёл"
+
+
+def reasons_ru(text: str) -> str:
+    """«p21 (failed: native object failed: no room …); p23 (4 plates …)» → «p21 — для диаграммы или таблицы мало места
+    (12% слайда); p23 — плашки макета (4) остались бы пустыми»."""
+    out = []
+    for part in [x.strip() for x in (text or "").split("; ") if x.strip()]:
+        m = re.match(r"^(p\d+)\s*\((.*)\)$", part) or re.match(r"^(p\d+)\s*\((.*)$", part)  # (a cut reason has no «)»)
+        if m:
+            out.append(f"{m.group(1)} — {reason_ru(m.group(2))}")
+        else:
+            out.append(reason_ru(part))
+    return "; ".join(dict.fromkeys(out))[:240]
+
+
 def _bookend_trouble(slide, oslide: DeckOutline) -> Optional[str]:
     """Why a cloned cover, divider or closing slide reads badly, or None: a word of its heading wider than the
     heading's box at the size it was set (the renderer breaks it), or two of its texts laid over each other."""
@@ -386,11 +431,11 @@ def _render_deck(outline: DeckOutline, plan: LayoutPlan, manifest: TemplateManif
                     # (layout_plan.json and «почему слайд такой» never call a composed slide a clone)
                     fallback.fit, fallback.score, fallback.alternatives = ps.fit, ps.score, ps.alternatives
                     if isinstance(e, _CloneRedo):
-                        fallback.reasons = [f"композиция {fallback.composition}: образцы шаблона не вместили содержимое ({str(e)[:160]})"]
+                        fallback.reasons = [f"композиция {fallback.composition}: образцы шаблона не вместили содержимое ({reasons_ru(str(e))})"]
                     elif isinstance(e, _CoverRedo):
-                        fallback.reasons = [f"композиция {fallback.composition}: на образце {ps.pattern_id} титул читался плохо ({str(e)[:160]})"]
+                        fallback.reasons = [f"композиция {fallback.composition}: на образце {ps.pattern_id} титул читался плохо ({reason_ru(str(e))})"]
                     else:
-                        fallback.reasons = [f"композиция {fallback.composition}: образец {ps.pattern_id} не отрисовался ({str(e)[:160]})"]
+                        fallback.reasons = [f"композиция {fallback.composition}: образец {ps.pattern_id} не отрисовался ({reason_ru(str(e))})"]
                     plan.slides = [fallback if s is ps else s for s in plan.slides]
                 rendered.warnings.extend(warns)
             except Exception as e2:  # noqa: BLE001

@@ -277,6 +277,8 @@ class PreparedValues(BaseModel):
     columns: list[str] = Field(default_factory=list)
     rows: list[list[str]] = Field(default_factory=list)
     numbers: list[str] = Field(default_factory=list)
+    # слова слоя данных на слайде (подпись-пояснение, подписи карточек): их числа — тоже из файла
+    texts: list[str] = Field(default_factory=list)
 
 
 class SlideData(BaseModel):

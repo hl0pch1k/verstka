@@ -35,6 +35,16 @@ HEADLINE_FIGURE_NOT_IN_DATA = CheckSpec(
                 "среди фактов, посчитанных по файлу с данными (изменение, доля, медиана, лидер…). Цифры внутри названий из "
                 "данных («Филиал 1», «III кв. 2026») числами не считаются.",
 )
+TEXT_FIGURE_NOT_IN_DATA = CheckSpec(
+    id="data_text_figure_not_in_data",
+    title="Число в тексте слайда с данными не из файла",
+    severity="error",
+    category="content",
+    description="На слайде с данными каждое число в подзаголовке, пунктах, карточках, выводе и подписях — это факт, "
+                "посчитанный по файлу, значение диаграммы или таблицы этого слайда, слова слоя данных (подпись, подписи "
+                "карточек), цифра внутри названия из данных («1 курс») или год, который называют сами данные. Заголовок "
+                "проверяет своя проверка, строку «Источник» — своя.",
+)
 CHART_VALUES_MISMATCH = CheckSpec(
     id="chart_values_mismatch",
     title="Значения на слайде не совпадают с данными файла",
@@ -161,28 +171,33 @@ def _words(text: str) -> set[str]:
     return {w for w in re.findall(r"[a-zа-яё0-9]+", _norm(text).lower()) if len(w) > 1}
 
 
-def _shown_headline(s: IRSlide, osl: OutlineSlide) -> str:
-    """The slide's heading as the deck shows it: the title placeholder, else the text near the top that says most of
-    the planned headline (the person may have edited it in the file); the plan's headline when none reads as it."""
-    plan = _headline(osl)
-    want = _words(plan)
-    H = 1.0
+def _title_element(s: IRSlide, osl: OutlineSlide) -> Optional[IRElement]:
+    """The slide's heading element: the title placeholder, else the text near the top that says most of the planned
+    headline (the person may have edited it in the file); None when none reads as it."""
+    want = _words(_headline(osl))
     best, score = None, 0.0
     for e in s.elements:
         if e.type != "text" or not e.has_text or e.table is not None:
             continue
-        text = " ".join(_norm(p.text) for p in e.paragraphs if p.text.strip())
         if (e.ph_type or "") in ("title", "ctrTitle"):
-            return _CONT_RE.sub("", text).strip()
-        if e.bbox_frac.y > 0.45 * H:
+            return e
+        if e.bbox_frac.y > 0.45:
             continue
-        got = _words(text)
+        got = _words(" ".join(p.text for p in e.paragraphs))
         if not got or not want:
             continue
         j = len(got & want) / len(got | want)
         if j > score:
-            best, score = text, j
-    return _CONT_RE.sub("", best).strip() if best is not None and score >= 0.4 else plan
+            best, score = e, j
+    return best if best is not None and score >= 0.4 else None
+
+
+def _shown_headline(s: IRSlide, osl: OutlineSlide) -> str:
+    """The slide's heading as the deck shows it; the plan's headline when no text of the slide reads as it."""
+    e = _title_element(s, osl)
+    if e is None:
+        return _headline(osl)
+    return _CONT_RE.sub("", " ".join(_norm(p.text) for p in e.paragraphs if p.text.strip())).strip()
 
 
 @check(HEADLINE_NO_CONCLUSION)
@@ -203,17 +218,15 @@ def headline_no_conclusion(ctx: AuditContext) -> list[Issue]:
 
 @check(HEADLINE_FIGURE_NOT_IN_DATA)
 def headline_figure_not_in_data(ctx: AuditContext) -> list[Issue]:
-    from verstka.data.story import data_slide_labels
+    from verstka.data.story import bad_numbers
 
     out = []
     for s, osl in _data_slides(ctx):
         head = _shown_headline(s, osl)
-        facts = list(osl.data.headline_facts)
-        labels = data_slide_labels(osl)
-        if headline_ok(head, facts, labels):
+        bad = bad_numbers(head, osl)  # (the story checks its own headlines by the same rule)
+        if not bad:
             continue
-        bad = [n for n in numbers_in(head, labels) if not headline_ok(_num(n), facts)]
-        shown = ", ".join(f"«{_num(n)}»" for n in dict.fromkeys(bad)) or "число"
+        shown = ", ".join(f"«{_num(n)}»" for n in dict.fromkeys(bad))
         out.append(ctx.new_issue(
             HEADLINE_FIGURE_NOT_IN_DATA, s.index,
             f"В заголовке {shown} — такого числа нет среди фактов, посчитанных по файлу «{osl.data.file}»",
@@ -351,6 +364,46 @@ def _numbers_problem(prep, s: IRSlide) -> Optional[str]:
         if want and not all(any(abs(a - b) < 1e-9 for b in have) for a in want):
             return f"нет карточки «{_norm(value)}»"
     return None
+
+
+_SKIP_PH = {"sldNum", "dt", "ftr"}
+
+
+@check(TEXT_FIGURE_NOT_IN_DATA)
+def data_text_figure_not_in_data(ctx: AuditContext) -> list[Issue]:
+    from verstka.audit.checks.common import is_chrome_like
+    from verstka.data.story import bad_numbers, slide_values
+
+    out = []
+    for s, osl in _data_slides(ctx):
+        title = _title_element(s, osl)
+        allowed = slide_values(osl)
+        if osl.data.prepared is None:  # a deck built before the prepared values: its plan's own words
+            allowed += [v for t in (osl.takeaway or "", *(n.label for n in osl.content.numbers)) for v in numbers_in(t)]
+        found: list[tuple[IRElement, list[float]]] = []
+        for e in s.elements:
+            if e.type != "text" or not e.has_text or e is title or (e.ph_type or "") in _SKIP_PH:
+                continue
+            try:
+                if is_chrome_like(e, ctx.ir, ctx.manifest):
+                    continue  # the template's own footer, page number, date
+            except Exception:  # noqa: BLE001 - a manifest without its chrome: every text counts
+                pass
+            for para in e.paragraphs:
+                t = _norm(para.text)
+                if not t or "источник" in t.lower():
+                    continue
+                bad = bad_numbers(t, osl, values=allowed)
+                if bad:
+                    found.append((e, bad))
+        if found:
+            shown = ", ".join(dict.fromkeys(f"«{_num(n)}»" for _, bad in found for n in bad))
+            out.append(ctx.new_issue(
+                TEXT_FIGURE_NOT_IN_DATA, s.index,
+                f"В тексте слайда {shown} — таких чисел нет ни среди фактов файла «{osl.data.file}», ни на его диаграмме",
+                suggestion="Уберите строку с этим числом или пересоберите слайд по файлу.", **_bboxes([e for e, _ in found]),
+            ))
+    return out
 
 
 @check(CHART_VALUES_MISMATCH)

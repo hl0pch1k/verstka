@@ -35,7 +35,7 @@ BRIEF = ("Итоги продаж VK Cloud за 9 месяцев 2026 года �
 SCIENCE_BRIEF = ("Итоги университета за 2026 год для учёного совета. Покажи, как подготовка влияет на баллы ЕГЭ, как устроен "
                  "приём по формам обучения, как растёт наука и на что ушёл бюджет НИОКР. Данные — в приложенных файлах.")
 VK_NAMES = ("vk tech", "workspace", "education")
-DATA_CHECKS = {"headline_no_conclusion", "headline_figure_not_in_data", "chart_values_mismatch", "chart_no_units",
+DATA_CHECKS = {"headline_no_conclusion", "headline_figure_not_in_data", "data_text_figure_not_in_data", "chart_values_mismatch", "chart_no_units",
                "chart_no_source", "chart_overloaded", "table_raw_dump", "chart_from_untypable", "data_split_inconsistent"}
 DATA_EXT = {".csv", ".xlsx", ".json", ".txt"}
 
@@ -72,26 +72,40 @@ def _tables(folder: Path):
 
 
 @pytest.fixture(scope="module")
-def built(tmp_path_factory):
+def templates(tmp_path_factory):
     from verstka.analysis.manifest import analyze_template
 
     root = tmp_path_factory.mktemp("ws")
-    templates = _vk_templates() + [UNSEEN]
-    for t in templates:
+    found = _vk_templates() + [UNSEEN]
+    for t in found:
         if not _cached(t, root):
             analyze_template(t, workspace_root=root, use_llm=False, use_vlm=False)  # (not timed: a template is analysed once)
-    tables = _tables(SALES)
+    return root, found
+
+
+def _build(templates, tmp_path_factory, folder: Path, brief: Brief):
+    root, found = templates
+    tables = _tables(folder)
     t0 = time.monotonic()
     out = {}
-    for t in templates:
-        story = build_data_story(Brief(text=BRIEF, slide_count=9), tables)
+    for t in found:
+        story = build_data_story(brief, tables)
         res = generate_variants(t, outline=story.outline, out_dir=tmp_path_factory.mktemp("out"), workspace_root=root,
                                 use_llm=False, use_vlm=False, audit=False, autofix=False, exports=[], render_images=False, pictures=False)
         ws = TemplateWorkspace.open(res.template_id, root)
         audits = {v.strategy: run_audit(v.out_dir / "deck.pptx", res.manifest, v.outline, ws, render=False, use_vlm=False, use_llm=False, strategy=v.strategy) for v in res.variants}
         out[t.name] = (story, res, audits)
-    seconds = time.monotonic() - t0
-    return out, seconds, len(templates)
+    return out, time.monotonic() - t0, len(found)
+
+
+@pytest.fixture(scope="module")
+def built(templates, tmp_path_factory):
+    return _build(templates, tmp_path_factory, SALES, Brief(text=BRIEF, slide_count=9))
+
+
+@pytest.fixture(scope="module")
+def science(templates, tmp_path_factory):
+    return _build(templates, tmp_path_factory, SCIENCE, Brief(text=SCIENCE_BRIEF))
 
 
 def test_the_sample_deck_builds_on_every_template_in_a_minute(built):
@@ -205,3 +219,13 @@ def test_no_template_decor_stands_on_a_chart_or_table(built):
     for name, (_, res, _) in out.items():
         for v in res.variants:
             assert _decor_over_frames(v.out_dir / "deck.pptx", v.outline) == [], (name, v.strategy)
+
+
+@pytest.mark.parametrize("which", ["built", "science"])
+def test_both_example_sets_pass_the_data_checks_on_every_template(which, request):
+    """The deterministic story and the deterministic audit never disagree: no data error on either example set."""
+    out, _, _ = request.getfixturevalue(which)
+    for name, (story, res, audits) in out.items():
+        for strategy, rep in audits.items():
+            errors = [(i.slide, i.check_id, i.message) for i in rep.issues if i.check_id in DATA_CHECKS and i.severity == "error"]
+            assert errors == [], (which, name, strategy, errors)

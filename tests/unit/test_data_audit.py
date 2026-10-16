@@ -20,7 +20,7 @@ from verstka.schemas.template import TemplateManifest
 ROOT = Path(__file__).resolve().parents[2]
 SALES = ROOT / "examples" / "data-sales-2026"
 BRIEF = "Итоги продаж VK Cloud за 9 месяцев 2026 года для правления. Покажи рост выручки, сравни регионы, что даёт выручку."
-DATA_CHECKS = {"headline_no_conclusion", "headline_figure_not_in_data", "chart_values_mismatch", "chart_no_units",
+DATA_CHECKS = {"headline_no_conclusion", "headline_figure_not_in_data", "data_text_figure_not_in_data", "chart_values_mismatch", "chart_no_units",
                "chart_no_source", "chart_overloaded", "table_raw_dump", "chart_from_untypable", "data_split_inconsistent"}
 BOX = Bbox(x=0, y=0, w=100, h=100)
 FRAC = BboxFrac(x=0, y=0, w=0.5, h=0.5)
@@ -264,3 +264,43 @@ def test_an_aggregated_table_over_ten_rows_is_flagged_too(outline):
     assert t.data.aggregation
     got = [i for i in _issues(outline) if i.check_id == "table_raw_dump"]
     assert len(got) == 1 and "15 строк даже после агрегации" in got[0].message
+
+
+# ── review 2: the slide's other words; the digits of names and the years of the data ──────────────────────────────
+def test_numbers_in_a_data_slides_text_must_be_the_datas(outline):
+    ctx = _ctx(outline)
+    k = outline.slides.index(_slide(outline, "Регионы.xlsx"))
+    els = ctx.ir.slides[k].elements
+    els.append(_text("x1", "Выручка выросла на 99%", "Bullet"))
+    els.append(_text("x2", "Рост в 5 раз", "Subtitle"))
+    k2 = outline.slides.index(_slide(outline, "NPS по кварталам.csv"))
+    ctx.ir.slides[k2].elements.append(_text("x3", "NPS — 99", "Card"))
+    issues, _ = run_checks(ctx, only={"data_text_figure_not_in_data"})
+    by = {i.slide: i for i in issues}
+    assert set(by) == {k + 1, k2 + 1} and all(i.severity == "error" for i in issues)
+    assert "«99»" in by[k + 1].message and "«5»" in by[k + 1].message and "«99»" in by[k2 + 1].message
+
+
+def test_the_layers_own_words_values_names_and_years_pass(outline):
+    ctx = _ctx(outline)
+    k = outline.slides.index(_slide(outline, "Выручка по месяцам.csv"))
+    els = ctx.ir.slides[k].elements
+    els.append(_text("c1", outline.slides[k].takeaway or "", "Conclusion"))  # «… с 296 млн ₽ до 423 млн ₽»
+    els.append(_text("c2", "Москва — 1 433 млн ₽", "Note"))  # a value of another slide: not this one's
+    issues, _ = run_checks(ctx, only={"data_text_figure_not_in_data"})
+    assert len(issues) == 1 and "«1433»" in issues[0].message.replace("\u00a0", "")
+
+
+def test_a_label_digit_and_a_data_year_are_no_figures():
+    from verstka.data.readers import read_file as rf
+    from verstka.data.story import bad_numbers
+
+    root = Path(__file__).resolve().parents[2] / "examples" / "data-science-2026"
+    tables = [t for p in sorted(root.iterdir()) if p.suffix in (".csv", ".xlsx", ".json", ".txt") for t in rf(p)]
+    o = build_data_story("Итоги университета за 2026 год. Покажи, на что ушёл бюджет НИОКР.", tables).outline
+    for s in o.slides:
+        if s.data is not None:
+            assert bad_numbers(s.headline, s) == [], s.headline  # «на 1 курс», «бюджета 2026»
+    kpi = next(s for s in o.slides if s.data is not None and s.data.file == "Итоги года.txt")
+    assert bad_numbers("Принято на 1 курс: +7%", kpi) == [7.0]
+    assert _issues(o) == []

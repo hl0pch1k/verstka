@@ -112,7 +112,9 @@ def designer(deck, monkeypatch):
         old = o.slides[pos - 1]
         new = old.model_copy(deep=True, update={"data": None, "headline": asked.get("headline", "NPS вырос до 52"), "kind": PatternKind.bullets})
         new.content.chart = None
-        new.content.bullets = ["Пропуски — разрывы линии"]
+        new.content.bullets = asked.get("bullets", ["Пропуски — разрывы линии"])
+        if "subtitle" in asked:
+            new.subtitle = asked["subtitle"]
         return AG._Design(unit=unit, slide=new, by="model")
 
     monkeypatch.setattr(AG._Agent, "model_design", model_design)
@@ -170,3 +172,25 @@ def test_fix_slide_with_the_model_on_a_gap_chart(deck, designer):
     assert s.headline == "NPS вырос до 52"
     r = c.post(f"/api/generations/{gid}/compact/edits", json={"message": "верни как было"})
     assert _wait(r.json()["job_id"]).status == "done"
+
+
+def test_the_designers_invented_numbers_never_reach_a_data_slide(deck, designer):
+    """The reviewer's probe: «добавь пояснение» on Регионы — the designer writes «Выручка выросла на 99%» and «Рост в
+    5 раз»; they are dropped, a line without numbers stays, the audit has nothing to say about the numbers."""
+    c, store, gid, _ = deck
+    o = _outline(store, gid)
+    n = _slide_of(o, "Регионы.xlsx")
+    designer.update(headline=o.slides[n - 1].headline, subtitle="Рост в 5 раз",
+                    bullets=["Выручка выросла на 99%", "Москва даёт 41% выручки", "Казань обогнала Москву"])
+    r = c.post(f"/api/generations/{gid}/compact/edits", json={"message": f"на слайде {n} добавь пояснение"})
+    job = _wait(r.json()["job_id"])
+    assert job.status == "done", job.events[-1]
+    s = _outline(store, gid).slides[n - 1]
+    assert "Рост в 5 раз" != (s.subtitle or "") and "Выручка выросла на 99%" not in s.content.bullets
+    assert "Казань обогнала Москву" in s.content.bullets  # words without numbers stand (the line repeating the
+    # headline goes by the designer's own tidy-up rules)
+    rep = json.loads((store.generation_dir(gid) / "compact" / "audit_report.json").read_text(encoding="utf-8"))
+    assert not [i for i in rep["issues"] if i["check_id"] in ("data_text_figure_not_in_data", "headline_figure_not_in_data")]
+    if job.result.get("changed"):
+        r = c.post(f"/api/generations/{gid}/compact/edits", json={"message": "верни как было"})
+        assert _wait(r.json()["job_id"]).status == "done"
