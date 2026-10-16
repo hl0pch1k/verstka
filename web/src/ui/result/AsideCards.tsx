@@ -3,7 +3,9 @@
 // бывает. Сменились вариант или слайд — меняющийся текст проявляется заново (ra-xf 240 мс), сама карточка стоит.
 // У слайда с данными под «Почему так» — его файл и природа данных (V2 v105 `ds-rfile`). У колоды из файлов или с
 // брендбуком — «Оформление» (V2 v105 `ds-look`): чем оформлена, что важнее при расхождении, палитра брендбука; карточка
-// неподвижна (не ссылка).
+// неподвижна (не ссылка). Брендбук ответил, когда колонка уже вошла, — карточка проявляется (ra-xf), а не возникает;
+// подробности брендбука пришли позже (сервер отвечал не сразу) — её текст и палитра проявляются заново.
+import { useEffect, useRef, useState } from "react";
 import { DsIcon, type DsIconName } from "../create/dsKit";
 import type { SheetTab } from "../deck/geometry";
 import { Icon, type IconName } from "../kit/Icon";
@@ -29,6 +31,12 @@ export interface AsideCardsData {
 
 export function AsideCards({ data, open }: { data: AsideCardsData; open(tab: SheetTab): void }) {
   const { quality, agent, why, eyes, look } = data;
+  // колонка уже на экране: появившаяся после этого карточка проявляется
+  const painted = useRef(false);
+  useEffect(() => {
+    const raf = window.requestAnimationFrame(() => void (painted.current = true));
+    return () => window.cancelAnimationFrame(raf);
+  }, []);
   if (!quality && !agent.length && !why && !eyes && !look) return null;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 24 }}>
@@ -36,7 +44,7 @@ export function AsideCards({ data, open }: { data: AsideCardsData; open(tab: She
       {agent.length > 0 && <AgentCard lines={agent} variant={data.variant} onOpen={() => open("agent")} />}
       {why && <WhyCard text={why} file={data.whyFile ?? null} slide={data.slide} k={`${data.variant}/${data.slide}`} onOpen={() => open("why")} />}
       {eyes && <EyesCard e={eyes} slide={data.slide} k={`${data.variant}/${data.slide}`} onOpen={() => open("quality")} />}
-      {look && <LookCard l={look} />}
+      {look && <LookCard l={look} late={painted.current} />}
     </div>
   );
 }
@@ -107,11 +115,14 @@ function WhyCard({ text, file, slide, k, onOpen }: { text: string; file: AsideCa
   );
 }
 
-function LookCard({ l }: { l: LookView }) {
+function LookCard({ l, late }: { l: LookView; late: boolean }) {
+  const [entered] = useState(late);
+  const k = `${l.tag}|${l.text}|${(l.palette ?? []).join(",")}`;
+  const swapped = useChanged(k);
   return (
-    <div className="ra-card ra-card-static ds-look">
-      <span className="ra-ch"><span className="ra-ct">Оформление</span><span className="ra-cm">{l.tag}</span></span>
-      <span style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 8 }}>
+    <div className={entered ? "ra-card ra-card-static ds-look ra-xf" : "ra-card ra-card-static ds-look"}>
+      <span className="ra-ch"><span className="ra-ct">Оформление</span><span key={l.tag} className={swapped ? "ra-cm ra-xf" : "ra-cm"}>{l.tag}</span></span>
+      <span key={k} className={swapped ? "ra-xf" : undefined} style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 8 }}>
         {l.palette && <span className="bb-tile ds-tile" aria-hidden="true">{l.palette.map((hex, i) => <span key={i} style={{ background: hex }} />)}</span>}
         <span style={{ minWidth: 0, fontSize: 14, fontWeight: 500, lineHeight: "20px", color: "#0B1220" }}>{l.text}</span>
       </span>

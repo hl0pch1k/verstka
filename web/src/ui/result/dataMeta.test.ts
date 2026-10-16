@@ -64,7 +64,8 @@ test("«Оформление» (V2 v105 `ds-look`): брендбук важне�
 });
 
 const issue = (check_id: string): Issue => ({ id: check_id, slide: 3, check_id, severity: "error", kind: "deterministic", message: "", bboxes: [], element_ids: [], suggestion: null, autofix: null, details: {}, outline_id: null });
-const audit = (issues: Issue[] = []): AuditReport => ({ deck: "", template_id: "t1", strategy: "structured", issues, summary: { errors: issues.length, warnings: 0, infos: 0, model_flags: 0, score: 90, checks_run: [] }, per_slide: {}, iterations: 0, applied_fixes: [], seconds: 0 });
+const DATA_CHECKS = ["text_overflow", "chart_values_mismatch", "headline_figure_not_in_data"];
+const audit = (issues: Issue[] = [], checks_run = DATA_CHECKS): AuditReport => ({ deck: "", template_id: "t1", strategy: "structured", issues, summary: { errors: issues.length, warnings: 0, infos: 0, model_flags: 0, score: 90, checks_run }, per_slide: {}, iterations: 0, applied_fixes: [], seconds: 0 });
 
 test("сверка чисел колоды из файлов: «Числа на слайдах сверены с файлами», в узкой колонке — «7 файлов данных — числа сверены»", () => {
   const g = { ...meta({ dataset_ids: ["a", "b", "c", "d", "e", "f", "g"], summary: { structured: { score: 90 } } }), variants: [] } as Generation;
@@ -78,6 +79,10 @@ test("сверка чисел колоды из файлов: «Числа на 
   assert.deepEqual([dataFigures(g, bad)?.text, dataFigures(g, bad)?.tone], ["Не совпало с файлами: 2 замечания", "warn"]);
   // без файлов — как было (сверка с текстом брифа)
   assert.equal(dataFigures(meta(), v), null);
+  // сверки не было (её проверок нет в checks_run, аудита нет) — «сверены» не говорим
+  assert.equal(dataFigures(g, { ...v, audit: audit([], ["text_overflow"]) }), null);
+  assert.equal(dataFigures(g, { ...v, audit: null }), null);
+  assert.equal(qualityCard(g, { ...v, audit: audit([], []) })?.figures ?? null, null);
 });
 
 test("откуда текст колоды из файлов (V2 v105 `hpSrc`): «Текст написал агент — по брифу и 7 файлам данных»", () => {

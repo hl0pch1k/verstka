@@ -1,9 +1,12 @@
 // Мини-график варианта визуализации в «Почему так» (V2 v105 `dsMini`): эскиз 160×90 в палитре шаблона — слои сетки,
 // подписей (серые штрихи), заливок (светлая, основная, полупрозрачная), линии, кольца, акцента, пунктира и белых
-// разделителей. Рисуется из данных самого слайда (OutlineSlide.content: ряды графика, таблица, карточки) — числа не
-// придумываются: столбцы, линия, сектора — это значения слайда в форме варианта; таблица, карточки и страницы — только
-// их строение (сколько строк, колонок, карточек). Чего в данных нет, того на эскизе нет. Чистые функции, без React.
-import type { OutlineSlide, SlideData, TemplateManifest, VizKind, VizOption } from "../../types";
+// разделителей. Рисуется из данных набора (OutlineSlide.content: ряды графика, таблица, карточки) — числа не
+// придумываются: столбцы, линия, сектора — это значения в форме варианта; таблица, карточки и страницы — только их
+// строение (сколько строк, колонок, карточек — столько, сколько сделал бы сервер). Набор, разбитый на несколько слайдов,
+// — весь: значения частей по порядку (иначе другой вариант показал бы только строки этой части). Числа в разных
+// единицах («1,24 млрд ₽», «3 480 клиентов») не сравниваются — только строение. Чего в данных нет, того на эскизе нет.
+// Чистые функции, без React.
+import type { OutlineSlide, SlideData, TaskKind, TemplateManifest, VizKind, VizOption } from "../../types";
 
 /** Слои эскиза — пути `d` в координатах 160×90 (пусто — слоя нет). Порядок отрисовки — как здесь. */
 export interface MiniLayers {
@@ -11,10 +14,14 @@ export interface MiniLayers {
   sep: string; line: string; acc: string; dash: string;
 }
 
-/** Что эскиз берёт из слайда. */
+/** Что эскиз берёт из набора. */
 export interface MiniSource {
   /** Ряды значений (первый — главный); null — пропуск (разрыв линии, пустое место столбца). */
   series: (number | null)[][];
+  /** Подписи значений главного ряда (категории графика, первая колонка таблицы, подписи карточек) — для текста эскиза. */
+  labels: string[];
+  /** Числа в разных единицах: сравнивать нельзя — столбцы и сектора только строением (сколько значений). */
+  mixed: number;
   /** Точки рассеяния. */
   xy: { x: number[]; y: number[] } | null;
   /** Строк и колонок таблицы (у графика — категории и колонка подписей с рядами). */
@@ -61,6 +68,25 @@ export function numberOf(text: string | null | undefined): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+const MULT: [RegExp, number][] = [[/трлн/i, 1e12], [/млрд/i, 1e9], [/млн/i, 1e6], [/тыс/i, 1e3]];
+
+/** Величина подписи: число с множителем («1,24 млрд ₽» → 1 240 000 000) и единица без него («₽»); нет числа — null. */
+export function amountOf(text: string | null | undefined): { v: number; unit: string } | null {
+  const v = numberOf(text);
+  if (v === null) return null;
+  const t = (text ?? "").toLowerCase().replace(/ё/g, "е");
+  const mult = MULT.find(([re]) => re.test(t))?.[1] ?? 1;
+  const unit = t.replace(/[-+−]?\d[\d\s\u00a0\u202f.,]*/g, " ").replace(/трлн|млрд|млн|тыс\.?/g, " ").replace(/\s+/g, " ").trim();
+  return { v: v * mult, unit };
+}
+
+/** Значения подписей в одной шкале: единицы одинаковые — числа с множителями; разные — null (сравнивать нельзя). */
+function sameScale(texts: (string | null | undefined)[]): (number | null)[] | null {
+  const a = texts.map(amountOf);
+  const units = new Set(a.filter((x) => x !== null).map((x) => x!.unit));
+  return units.size > 1 ? null : a.map((x) => (x ? x.v : null));
+}
+
 /** Колонка таблицы с числами (не первая — она подписи): первая, где числа почти во всех строках. */
 function numericColumn(rows: string[][], cols: number): number | null {
   for (let j = 1; j < cols; j++) {
@@ -70,33 +96,68 @@ function numericColumn(rows: string[][], cols: number): number | null {
   return null;
 }
 
-/** Данные эскиза — из содержимого слайда (график, таблица или карточки) и профиля набора. */
-export function miniSource(slide: Pick<OutlineSlide, "content"> | null | undefined, data: Pick<SlideData, "outliers" | "aggregation"> | null | undefined): MiniSource {
-  const c = slide?.content;
-  const out: MiniSource = { series: [], xy: null, rows: 0, cols: 0, cards: 0, outliers: data?.outliers?.length ?? 0, restRow: /остальн/i.test(data?.aggregation ?? "") };
-  const chart = c?.chart;
-  if (chart) {
-    out.series = (chart.series ?? []).map((s) => s.values.map((v) => (typeof v === "number" && Number.isFinite(v) ? v : null)));
-    const xy = chart.xy?.[0];
-    if (xy && xy.x.length) out.xy = { x: xy.x, y: xy.y };
-    out.rows = chart.categories?.length || out.series[0]?.length || out.xy?.x.length || 0;
+/** Слайды набора по порядку частей: набор разбит на несколько слайдов (`part`) — все его части из `outline`, иначе —
+ *  сам слайд. */
+function partsOf(slide: Pick<OutlineSlide, "content"> | null | undefined, data: Pick<SlideData, "dataset_id" | "part"> | null | undefined,
+  outline: Pick<OutlineSlide, "content" | "data">[] | null | undefined): Pick<OutlineSlide, "content">[] {
+  const n = data?.part?.[1] ?? 1;
+  if (!slide || !data || !outline || n <= 1) return slide ? [slide] : [];
+  const byPart = new Map<number, Pick<OutlineSlide, "content">>();
+  for (const s of outline) {
+    const d = s.data;
+    if (d && d.dataset_id === data.dataset_id && d.part?.[1] === n && !byPart.has(d.part[0])) byPart.set(d.part[0], s);
+  }
+  if (byPart.size < 2) return [slide];
+  return [...byPart.entries()].sort((a, b) => a[0] - b[0]).map((e) => e[1]);
+}
+
+const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+
+/** Данные эскиза — из содержимого слайда (график, таблица или карточки) и профиля набора; набор на нескольких слайдах
+ *  (`data.part`) — значения всех его частей из `outline` по порядку. */
+export function miniSource(slide: Pick<OutlineSlide, "content"> | null | undefined, data: Pick<SlideData, "outliers" | "aggregation" | "dataset_id" | "part"> | null | undefined,
+  outline?: Pick<OutlineSlide, "content" | "data">[] | null): MiniSource {
+  const out: MiniSource = { series: [], labels: [], mixed: 0, xy: null, rows: 0, cols: 0, cards: 0, outliers: data?.outliers?.length ?? 0, restRow: /остальн/i.test(data?.aggregation ?? "") };
+  const joined = partsOf(slide, data, outline);
+  const parts = joined.every((p) => p.content?.chart) || joined.every((p) => p.content?.table) ? joined : slide ? [slide] : [];
+  const charts = parts.map((p) => p.content?.chart).filter((c): c is NonNullable<typeof c> => !!c);
+  if (charts.length && charts.length === parts.length) {
+    const width = Math.max(0, ...charts.map((c) => c.series?.length ?? 0));
+    out.series = Array.from({ length: width }, (_, i) => charts.flatMap((c) => (c.series?.[i]?.values ?? []).map(num)));
+    // ряды в разных единицах (`split`) друг с другом не сравниваются: эскиз — по главному
+    const units = new Set(charts.flatMap((c) => (c.series ?? []).map((x) => x.unit ?? c.unit ?? "")));
+    if (out.series.length > 1 && (charts.some((c) => c.split) || units.size > 1)) out.series = out.series.slice(0, 1);
+    out.labels = charts.flatMap((c) => c.categories ?? []);
+    const xs = charts.flatMap((c) => c.xy?.[0]?.x ?? []);
+    const ys = charts.flatMap((c) => c.xy?.[0]?.y ?? []);
+    if (xs.length) out.xy = { x: xs, y: ys };
+    out.rows = out.labels.length || out.series[0]?.length || out.xy?.x.length || 0;
     out.cols = 1 + Math.max(1, out.series.length);
     return out;
   }
-  const t = c?.table;
-  if (t) {
-    out.rows = t.rows.length;
-    out.cols = t.columns.length;
-    const j = numericColumn(t.rows, t.columns.length);
-    if (j !== null) out.series = [t.rows.map((r) => numberOf(r[j]))];
+  const tables = parts.map((p) => p.content?.table).filter((t): t is NonNullable<typeof t> => !!t);
+  if (tables.length && tables.length === parts.length) {
+    const rows = tables.flatMap((t) => t.rows);
+    out.rows = rows.length;
+    out.cols = tables[0].columns.length;
+    const j = numericColumn(rows, out.cols);
+    if (j !== null) {
+      const vs = sameScale(rows.map((r) => r[j]));
+      if (vs) out.series = [vs];
+      else out.mixed = rows.length;
+      out.labels = rows.map((r) => r[0] ?? "");
+    }
     return out;
   }
-  const nums = c?.numbers ?? [];
+  const nums = slide?.content?.numbers ?? [];
   if (nums.length) {
     out.cards = nums.length;
     out.rows = nums.length;
     out.cols = 2;
-    out.series = [nums.map((x) => numberOf(x.value))];
+    out.labels = nums.map((x) => x.label);
+    const vs = sameScale(nums.map((x) => x.value));
+    if (vs) out.series = [vs];
+    else out.mixed = nums.length;
   }
   return out;
 }
@@ -345,7 +406,8 @@ function scatter(xy: MiniSource["xy"]): MiniLayers {
 /** Карточки показателей: строение (сколько карточек), без чисел — основной брусок на месте числа, штрих — подпись. */
 function cards(n: number): MiniLayers {
   const o = { ...EMPTY };
-  const k = Math.max(1, Math.min(6, n));
+  if (n < 1) return o;
+  const k = Math.min(6, n);
   const perRow = k === 4 ? 2 : Math.min(3, k);
   const rowsN = Math.ceil(k / perRow);
   const gap = 4;
@@ -378,6 +440,46 @@ function table(rows: number, cols: number, restRow: boolean): MiniLayers {
   return o;
 }
 
+/** Числа в разных единицах: только строение — столько одинаковых светлых столбцов (полос), сколько значений, с
+ *  подписями; высота ничего не говорит (V2 `ubars` — «разные единицы — сравнивать нельзя»). */
+function units(n: number, horizontal: boolean): MiniLayers {
+  const o = { ...EMPTY };
+  const k = Math.min(horizontal ? 10 : 12, n);
+  if (!k) return o;
+  if (horizontal) {
+    const step = 62 / k;
+    const h = Math.max(1.5, step - 2.4);
+    for (let i = 0; i < k; i++) {
+      const y = 14 + i * step;
+      o.txt += hl(16, y + h / 2, 38);
+      o.light += rr(48, y, 60, h, 1.5);
+    }
+    return o;
+  }
+  o.grid = hl(14, 66, 146);
+  const step = 128 / k;
+  const w = Math.max(1.5, Math.min(14, step * 0.62));
+  for (let i = 0; i < k; i++) {
+    const x = 16 + i * step + (step - w) / 2;
+    o.light += rr(x, 38, w, 28, 1.5);
+    o.txt += hl(x - 1, i % 2 ? 80 : 74, x + w + 1);
+  }
+  return o;
+}
+
+/** Сколько карточек сделал бы сервер (verstka/data/plan.py): у слайда-карточек — их число; динамика — последние три
+ *  точки; распределение — медиана, 80-й перцентиль, число значений и выбросы; ключевые значения — до шести; итог и
+ *  среднее — итог (у неотрицательных значений), среднее и число строк. Чисел нет — карточек нет. */
+export function cardsOf(task: TaskKind | null | undefined, src: MiniSource): number {
+  if (src.cards) return Math.min(6, src.cards);
+  const vs = present(main0(src));
+  if (task === "kpi") return Math.min(6, src.rows);
+  if (task === "distribution") return vs.length ? 3 + (src.outliers ? 1 : 0) : 0;
+  if (!vs.length) return 0;
+  if (task === "dynamics") return Math.min(3, vs.length);
+  return vs.every((v) => v >= 0) ? 3 : 2;
+}
+
 /** Разбиение на слайды: столько страничек, сколько слайдов (не больше 24 видно). */
 function pages(n: number): MiniLayers {
   const o = { ...EMPTY };
@@ -397,11 +499,18 @@ export function pagesOf(opt: Pick<VizOption, "title">): number | null {
   return m ? Number(m[1]) : null;
 }
 
-/** Эскиз варианта `opt` по данным слайда `src`. */
-export function miniChart(opt: Pick<VizOption, "kind" | "title">, src: MiniSource): MiniLayers {
+/** Эскиз варианта `opt` по данным набора `src` (`task` — задача слайда: сколько карточек сделал бы сервер). */
+export function miniChart(opt: Pick<VizOption, "kind" | "title">, src: MiniSource, task?: TaskKind | null): MiniLayers {
   const kind: VizKind = opt.kind;
   const vs = main0(src);
   const many = src.series.filter((s) => present(s).length).length > 1;
+  if (src.mixed) {
+    switch (kind) {
+      case "column": case "histogram": case "grouped_column": case "stacked_column": return units(src.mixed, false);
+      case "bar": case "grouped_bar": case "stacked_bar": return units(src.mixed, true);
+      case "line": case "area": case "pie": case "doughnut": case "scatter": return { ...EMPTY, grid: kind === "line" || kind === "area" ? grid3 : "" };
+    }
+  }
   switch (kind) {
     case "line": return lines(vs, false);
     case "area": return lines(vs, true);
@@ -419,7 +528,7 @@ export function miniChart(opt: Pick<VizOption, "kind" | "title">, src: MiniSourc
     case "grouped_column": return many ? multi(src.series, false, false) : columns(vs, false, 128);
     case "grouped_bar": return many ? multi(src.series, false, true) : bars(vs);
     case "scatter": return scatter(src.xy);
-    case "kpi_cards": return cards(src.cards || 3);
+    case "kpi_cards": return cards(cardsOf(task, src));
     case "table": {
       const p = pagesOf(opt);
       return p ? pages(p) : table(src.rows, src.cols, src.restRow);

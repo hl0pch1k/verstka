@@ -116,8 +116,19 @@ export function phaseStep(shown: BuildPhase, phase: BuildPhase, data: boolean): 
 }
 /** Шаг аналитика данных в событиях сервера (verstka/data/story.py `STEP`). */
 const isDataStep = (e: AgentEvent) => (e.step ?? "").toLowerCase() === "data";
-/** Строка аналитика о файле: «„Регионы.xlsx“ — сравнение категорий, …» (первая — «Изучаю данные: 7 таблиц»). */
-const FILE_LINE = /^«[^»]+»\s+—/;
+/** Строка аналитика о таблице: «„Регионы.xlsx“ — сравнение категорий, …», у листа книги — «„Продажи.xlsx, лист
+ *  „Q1““ — …» (первая — «Изучаю данные: 7 таблиц»); группа — имя файла без листа. */
+const FILE_LINE = /^«(.+?)(?:, лист «[^»]*»)?»\s+—/;
+/** Сколько файлов разобрал аналитик: разные имена в его строках (у книги из нескольких листов строк больше, чем файлов —
+ *  «N файлов», как у панели «Данные», а не число таблиц). */
+export function dataFileCount(events: readonly AgentEvent[]): number {
+  const names = new Set<string>();
+  for (const e of events) {
+    const m = isDataStep(e) ? e.message.match(FILE_LINE) : null;
+    if (m) names.add(m[1]);
+  }
+  return names.size;
+}
 /** Сборка идёт с файлами данных: так сказал её запрос (`data`) или сервер (строки шага `data`). */
 export const buildHasData = (job: Pick<ActiveJob, "agent">, asked = false): boolean => asked || (job.agent ?? []).some(isDataStep);
 
@@ -212,7 +223,7 @@ export function buildView(job: ActiveJob, previews: Record<string, string[]>, op
   const running = !done && !failedJob;
   // сборка с данными: строки аналитика — шаг `data` (сервер не называет его фазой — фаза идёт по событиям)
   const data = buildHasData(job, opts.data);
-  const dataFiles = events.filter((e) => isDataStep(e) && FILE_LINE.test(e.message)).length;
+  const dataFiles = dataFileCount(events);
 
   // варианты верстаются один за другим: проверка первого (и взгляд дизайнера на него) не заканчивает «Вёрстку»
   // остальных, пока сборка идёт

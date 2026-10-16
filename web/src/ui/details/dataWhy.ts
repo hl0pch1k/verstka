@@ -8,7 +8,7 @@ import { plural } from "../../lib/utils";
 import type {
   ColumnProfile, ColumnRole, ColumnType, HeadlineFact, OutlineSlide, SlideData, SourceKind, TaskKind, TimeFreq, Variant, VizKind, VizOption,
 } from "../../types";
-import { miniChart, miniSource, type MiniLayers } from "./miniChart";
+import { cardsOf, miniChart, miniSource, pagesOf, type MiniLayers, type MiniSource } from "./miniChart";
 
 /** Названия задач — как у сервера (verstka/schemas/data.py `TASK_TITLES`), в порядке ТЗ. */
 export const TASK_TITLES: Record<TaskKind, string> = {
@@ -103,6 +103,8 @@ export interface DataWhyView {
   plain: string | null;
   /** Последнее изменение варианта — пересборка этого слайда: у выбранного варианта «Вернуть как было». */
   undoable: boolean;
+  /** Слайд, который выбрать после «Вернуть как было» (первый слайд пересборки). */
+  first: number;
 }
 
 const nf = (max = 2) => new Intl.NumberFormat("ru-RU", { maximumFractionDigits: max });
@@ -208,6 +210,13 @@ export function rebuiltLast(v: Pick<Variant, "edits">, n: number): boolean {
   return !!last && last.kind === "rebuild" && last.slides.includes(n);
 }
 
+/** Первый слайд пересборки, которую вернёт «Вернуть как было» (после возврата — его и выбрать: таблица на несколько
+ *  слайдов снова одна — номера после неё другие); нет такой — сам слайд. */
+export function rebuiltFirst(v: Pick<Variant, "edits">, n: number): number {
+  const last = v.edits?.[v.edits.length - 1];
+  return last && last.kind === "rebuild" && last.slides.length ? Math.min(...last.slides) : n;
+}
+
 /** У заголовка нет числа из данных (тема, а не вывод — данные не дали вывода). */
 export const NO_KEY = "В данных не нашлось числа для вывода — заголовок называет тему.";
 
@@ -219,6 +228,34 @@ function optionWhy(o: VizOption, on: boolean): { why: string; note: string | nul
   return { why: o.why_not ? sentence([o.why_not]) : sentence(o.reasons), note: null };
 }
 
+/** Сколько значений в тексте эскиза — первые, дальше «…». */
+const SAID = 4;
+
+/** Текст эскиза для тех, кто его не видит: числа, которые он рисует («Москва 1 433, Санкт-Петербург 612, Екатеринбург
+ *  318, Казань 274… — 8 значений»), или его строение (таблица, карточки, разбиение, разные единицы). */
+export function miniText(o: Pick<VizOption, "kind" | "title">, src: MiniSource, task: TaskKind | null): string {
+  if (o.kind === "table") {
+    const p = pagesOf(o);
+    if (p) return `${plural(p, "слайд", "слайда", "слайдов")} по частям таблицы`;
+    return src.rows ? `таблица: ${plural(src.rows, "строка", "строки", "строк")} × ${plural(src.cols, "колонка", "колонки", "колонок")}` : "таблица";
+  }
+  if (o.kind === "kpi_cards") {
+    const k = cardsOf(task, src);
+    return k ? plural(k, "карточка", "карточки", "карточек") : "чисел для карточек нет";
+  }
+  if (src.mixed) return `${plural(src.mixed, "значение", "значения", "значений")} в разных единицах — только строение, без сравнения`;
+  if (o.kind === "scatter") return src.xy ? plural(src.xy.x.length, "точка", "точки", "точек") : "точек нет";
+  const vs = src.series[0] ?? [];
+  if (!vs.some((v) => v !== null)) return "чисел нет";
+  const one = (v: number | null, i: number) => {
+    const t = v === null ? "нет данных" : fmtNum(v);
+    const l = (src.labels[i] ?? "").trim();
+    return l ? `${l} ${t}` : t;
+  };
+  const head = vs.slice(0, SAID).map(one).join(", ");
+  return vs.length > SAID ? `${head}… — ${plural(vs.length, "значение", "значения", "значений")}` : head;
+}
+
 /** Колонки списка «Колонки»: имя с единицей, тип, роль. */
 export function dataCols(d: SlideData): { cols: DxCol[]; more: number } {
   const cols = d.columns.slice(0, MAX_COLS).map((c) => ({ name: withUnit(c), type: TYPE[c.type]?.t ?? c.type, tcls: TYPE[c.type]?.cls ?? "dx-t-c", role: ROLE[c.role] ?? c.role }));
@@ -228,7 +265,7 @@ export function dataCols(d: SlideData): { cols: DxCol[]; more: number } {
 /** «Почему так» слайда `n` варианта `v` с данными `d` (OutlineSlide.data). */
 export function dataWhyView(v: Variant, n: number, slide: OutlineSlide, d: SlideData): DataWhyView {
   const chosen = d.options[d.chosen] ?? d.options[0] ?? null;
-  const src = miniSource(slide, d);
+  const src = miniSource(slide, d, v.outline?.slides);
   const kind: SourceKind | null = (Object.keys(KIND_LABEL) as SourceKind[]).find((k) => d.profile_line.startsWith(KIND_LABEL[k])) ?? null;
   const task = d.task?.task ?? null;
   const fct = keyFact(slide.headline, d.headline_facts);
@@ -248,12 +285,13 @@ export function dataWhyView(v: Variant, n: number, slide: OutlineSlide, d: Slide
     kinds: TASK_ORDER.filter((k) => TASK_SHOWN(k, task)).map((k) => ({ t: TASK_TITLES[k], on: k === task })),
     vars: d.options.map((o, k) => {
       const on = k === d.chosen;
-      return { k, n: k + 1, name: o.title, ...optionWhy(o, on), on, label: `Вариант ${k + 1}: ${o.title}`, mini: miniChart(o, src) };
+      return { k, n: k + 1, name: o.title, ...optionWhy(o, on), on, label: `Вариант ${k + 1}: ${o.title}. ${miniText(o, src, task)}`, mini: miniChart(o, src, task) };
     }),
     key: fct ? keyText(fct) : null,
     from: fct ? fct.explain || fct.text : NO_KEY,
     plain: plain && plain !== slide.headline.trim() ? plain : null,
     undoable: rebuiltLast(v, n),
+    first: rebuiltFirst(v, n),
   };
 }
 

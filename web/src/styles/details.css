@@ -18,6 +18,9 @@
 .dd-scroll:focus-visible{outline-offset:-2px}
 .dd-g{display:grid;grid-template-columns:minmax(0,1fr) 526px;gap:24px;align-items:start}
 .dd-box{border-radius:24px;background:#FFFFFF;padding:24px}
+/* строка загрузки ленивого куска листа (lazySheet): проявляется через 600 мс, гаснет до того, как войдёт содержимое */
+.dd-load{opacity:0;pointer-events:none;transition:opacity 160ms var(--ease)}
+.dd-load-on{opacity:1;transition-duration:240ms}
 .dd-h{margin:0;font-family:'Unbounded','Manrope',sans-serif;font-weight:600;font-size:20px;line-height:28px;letter-spacing:-0.02em;color:#0B1220}
 .dd-cap{font-size:13px;font-weight:600;line-height:20px;color:#5A6272}
 .dd-tag{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 8px;border-radius:999px;font-size:12px;font-weight:700;line-height:16px;white-space:nowrap;vertical-align:middle}
@@ -504,6 +507,11 @@
 /* «Почему так» слайда с данными (вторая ступень, boards/V2.dc.html v105, блок dx-): профиль файла, задача, варианты
    визуализации с мини-графиками, заголовок-вывод (ui/details/tabs/DataWhy.tsx) — язык D-why */
 .dx-col{min-width:0}
+/* обновление на месте (useMorph): изменившаяся часть подменена невидимой, пока то, что под ней, доезжает; белая подложка
+   коробки — отдельным слоем (data-surf): растёт и сжимается scaleY от верхнего края вместе с содержимым */
+.fx-hold{opacity:0;transition:none}
+.dd-box.dx-box{position:relative;isolation:isolate;background:transparent}
+.dx-surf{position:absolute;inset:0;z-index:-1;border-radius:inherit;background:#FFFFFF;transform-origin:50% 0;pointer-events:none}
 .dx-file{display:flex;align-items:center;gap:16px;margin-top:16px}
 .dx-fic{display:flex;align-items:center;justify-content:center;flex:none;width:40px;height:40px;border-radius:999px;background:#E9F1FF;color:#2563EB}
 .dx-ft{display:flex;flex-direction:column;min-width:0}
@@ -553,8 +561,19 @@
    как было» сменяют друг друга в нём перекрёстным затуханием */
 .dx-slot{display:flex;align-items:center;gap:8px;min-width:0;height:40px;margin:4px 0 0}
 .dx-act{margin:0 0 0 -16px}
-.dx-act:disabled{opacity:.32;cursor:default;transform:none}
-.dx-act:disabled:hover{background:transparent}
+/* выключенная — aria-disabled (фокус остаётся, причина — aria-describedby), а не disabled */
+.dx-act:disabled,.dx-act[aria-disabled="true"]{opacity:.32;cursor:default;transform:none}
+.dx-act:disabled:hover,.dx-act[aria-disabled="true"]:hover{background:transparent}
+.dx-uri[aria-disabled="true"]{opacity:.32;cursor:default;transform:none}
+/* отказ анализа и занятый сервер — спокойной строкой (не красной), неудача — ErrorLine; строки берут фокус (tabIndex -1) */
+.dx-nl{display:flex;align-items:flex-start;gap:8px;min-width:0;margin:0;font-size:14px;font-weight:600;line-height:20px;color:#5A6272}
+.dx-nl svg{color:#2563EB}
+.dx-nlt{min-width:0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.dx-fl{display:flex;flex:1;min-width:0}
+.dx-nl:focus,.dx-fl:focus,.dx-busy:focus,.dx-v:focus{outline:none}
+.dx-nl:focus-visible,.dx-fl:focus-visible,.dx-busy:focus-visible{outline:2px solid #2563EB;outline-offset:2px;border-radius:8px}
+.dx-v:focus-visible{outline:2px solid #2563EB;outline-offset:4px;border-radius:12px}
+.dx-miw{min-width:0}
 .dx-busy{display:flex;align-items:center;gap:8px;height:40px;margin:0;font-size:14px;font-weight:600;line-height:20px;color:#2563EB}
 .dx-uri{flex:none;background:transparent;color:#2563EB}
 .dx-hl{display:grid;grid-template-columns:160px minmax(0,1fr);column-gap:16px;align-items:start;margin-top:16px}
@@ -585,7 +604,7 @@
   .dd-tight .dx-hli{aspect-ratio:auto;height:90px;transition:opacity 160ms var(--ease) 80ms}
   .hp-nar .dd-tight .dx-hli{opacity:0;transition:opacity 240ms var(--ease)}
   .dd-tight .dx-vh{flex:0 1 auto;min-width:0;transform-origin:0 50%;transition:scale 340ms var(--ease)}
-  .hp-nar .dd-tight .dx-vh{scale:.85;transition-duration:520ms}
+  .hp-nar .dd-tight .dx-vh{scale:.78;transition-duration:520ms}
   .dd-tight [data-tx="x-l"]{--hpd:150px}
   .dd-tight :is([data-tx="x-r"],[data-tx="x-rn"]){--hpd:154px}
   .dd-tight [data-tx="x-rh"]{--hpd:90px}

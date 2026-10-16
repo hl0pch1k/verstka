@@ -6,7 +6,9 @@
 // w-dd, w-form, w-crit — первая колонка; w-sim, w-ok, подписи образца и макетов — вторая).
 // Слайд с данными (вторая ступень, V2 v105 `dlWD`): в тех же колонках — «Данные», «Задача», «Варианты визуализации» с
 // мини-графиками и «Пересобрать слайд так», «Заголовок-вывод» (DataWhy); в навигации — форма выбранного варианта.
-// Слайд без данных — как было.
+// Своя пересборка и её «Вернуть как было» новой версией заново не проявляют: колонки обновляются на месте (DataWhy),
+// форма в навигации сменяется перекрёстным затуханием, итог говорится вежливо («Слайд 4 пересобран: вертикальные
+// столбцы» — живая строка вкладки). Слайд без данных — как было.
 import { useEffect, useState } from "react";
 import { api, ApiError } from "../../../api";
 import { errText } from "../../../lib/narrate";
@@ -18,17 +20,18 @@ import { ErrorLine } from "../../kit/ErrorLine";
 import { Icon } from "../../kit/Icon";
 import { Spinner } from "../../kit/Spinner";
 import { Tx } from "../../kit/Tx";
+import { useSwap } from "../../kit/useSwap";
 import { liveWork, variantLiveJob } from "../../result/slideJob";
 import { ownsKeys, slideForKey } from "../../result/resultView";
 import { useStale } from "../../shell/StaleLine";
 import { dataWhyCap } from "../dataWhy";
 import { miniColors } from "../miniChart";
 import { Shot } from "../parts";
-import { SEV } from "../quality";
 import { headerLayerOpen } from "../sheetView";
 import { useRebuild } from "../useRebuild";
 import type { DeckManifest } from "../useDeckManifest";
 import { explainError, explainPlan, explainWhy, whyView, type SampleSource } from "../why";
+import { CheckRow } from "./CheckRow";
 import { DataWhy } from "./DataWhy";
 
 const asked = new Map<string, string | null>();
@@ -80,6 +83,25 @@ export function WhyTerms({ dl }: { dl: { t: string; d: string }[] }) {
   );
 }
 
+/** Текст, сменившийся на месте, — перекрёстным затуханием (прежний гаснет, новый проявляется). */
+function useHeld(text: string): { text: string; cls: string | undefined } {
+  const sw = useSwap(text);
+  return { text: sw.shown, cls: sw.cls };
+}
+
+/** Подпись и заголовок слайда в навигации: сменились на том же слайде (пересобран, вернулся) — каждый своим
+ *  перекрёстным затуханием, неизменившийся стоит; другой слайд — новый ключ и своё проявление (p2-in). */
+function NavTitle({ cap, title }: { cap: string; title: string }) {
+  const c = useHeld(cap);
+  const t = useHeld(title);
+  return (
+    <>
+      <span className={cls("dd-cap", c.cls)}>{c.text}</span>
+      <h3 className={cls("dd-h", t.cls)} title={t.text} style={{ maxWidth: "100%", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.text}</h3>
+    </>
+  );
+}
+
 /** Пересобрать слайд нельзя: шаблона презентации больше нет. */
 const TEMPLATE_GONE_REBUILD = "Шаблона этой презентации больше нет в библиотеке — пересобрать слайд нельзя";
 
@@ -99,6 +121,10 @@ export function WhyTab({ g, v, deck, active }: { g: Generation; v: Variant; deck
   const lock = deck.state === "gone" ? { off: true, why: TEMPLATE_GONE_REBUILD }
     : rebuild.taken ? { off: true, why: other ? liveWork(other).why : null } : { off: false, why: null };
   const cap = data ? dataWhyCap(w, data) : w.cap;
+  const colors = miniColors(deck.manifest);
+  const openQuality = () => dispatch({ type: "sheet", tab: "quality" });
+  // итог пересборки и возврата — вежливо, живой строкой вкладки (она не перемонтируется со слайдом)
+  const said = rebuild.run?.said ?? "";
 
   // ←/→ листают слайды, пока вкладка на экране и поверх листа ничего не открыто (слой «Слайд N шаблона», раздел шапки,
   // просмотр или удаление шаблона)
@@ -119,20 +145,22 @@ export function WhyTab({ g, v, deck, active }: { g: Generation; v: Variant; deck
 
   return (
     <div id="dd-panel-why" className="dd-scroll p2-fade dw-fade" role="tabpanel" aria-labelledby="dd-tab-why" tabIndex={0}>
+      <p className="p2-sr" aria-live="polite" aria-atomic="true">{said}</p>
       <div className="dw-navw">
         <nav className="dd-box p2-in" aria-label="Слайды презентации" style={{ display: "flex", alignItems: "center", gap: 16, height: 72, padding: "12px 16px", animationDelay: "240ms" }}>
           <button type="button" className="p2-rbl" aria-label="Предыдущий слайд" title="Предыдущий слайд (←)" disabled={n <= 1} onClick={() => setSelectedSlide(n - 1)}><Icon name="chevron-left" size={18} /></button>
           <div key={`${n}|${v.strategy}`} className="p2-in" style={{ display: "flex", flexDirection: "column", alignItems: "center", flex: 1, minWidth: 0, textAlign: "center" }}>
-            <span className="dd-cap">{cap}</span>
-            <h3 className="dd-h" title={w.title} style={{ maxWidth: "100%", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{w.title}</h3>
+            <NavTitle cap={cap} title={w.title} />
           </div>
           <button type="button" className="p2-rbl" aria-label="Следующий слайд" title="Следующий слайд (→)" disabled={n >= w.total} onClick={() => setSelectedSlide(n + 1)}><Icon name="chevron-right" size={18} /></button>
         </nav>
       </div>
 
-      <div key={`${n}|${v.strategy}|${rev}`} className="dd-g dw-g">
+      {/* слайд с данными — без версии в ключе: пересборка и возврат обновляют колонки на месте */}
+      <div key={data ? `${n}|${v.strategy}` : `${n}|${v.strategy}|${rev}`} className="dd-g dw-g">
         {data && slide ? (
-          <DataWhy v={v} n={n} slide={slide} d={data} colors={miniColors(deck.manifest)} rebuild={rebuild} lock={lock} refresh={refresh} />
+          <DataWhy v={v} n={n} slide={slide} d={data} colors={colors} rebuild={rebuild} lock={lock} refresh={refresh}
+            check={w.check} onCheck={openQuality} />
         ) : <>
         <section className="dd-box p2-in" aria-labelledby="dw-h-form" style={{ display: "flex", flexDirection: "column", minWidth: 0, animationDelay: "0ms" }}>
           <h3 id="dw-h-form" className="dd-h">Почему такая форма</h3>
@@ -234,16 +262,7 @@ export function WhyTab({ g, v, deck, active }: { g: Generation; v: Variant; deck
         </div>
         </>}
 
-        {w.check && (
-          <button type="button" className="dw-chk p2-in" onClick={() => dispatch({ type: "sheet", tab: "quality" })} aria-label={`Проверка слайда: ${w.check.text} — открыть вкладку «Качество»`} style={{ gridColumn: "1 / -1", animationDelay: "120ms" }}>
-            <span className="dd-ico" aria-hidden="true"><Icon name="list-check" size={18} /></span>
-            <span style={{ fontFamily: "'Unbounded','Manrope',sans-serif", fontSize: 14, fontWeight: 600, lineHeight: "24px", letterSpacing: "-0.02em" }}>
-              Проверка слайда <span style={{ fontFamily: "'Manrope',system-ui,sans-serif", fontSize: 15, fontWeight: 500, letterSpacing: 0, color: "#5A6272" }}>· {w.check.text}</span>
-            </span>
-            {w.check.tone && <span className={cls("dd-tag", SEV[w.check.tone].cls)}><Icon name={SEV[w.check.tone].icon} size={14} />{SEV[w.check.tone].label}</span>}
-            <span style={{ display: "flex", marginLeft: "auto", flex: "none", color: "#5A6272" }}><Icon name="chevron-right" size={18} /></span>
-          </button>
-        )}
+        {!data && w.check && <CheckRow check={w.check} onOpen={openQuality} className="p2-in" style={{ animationDelay: "120ms" }} />}
       </div>
     </div>
   );

@@ -4,7 +4,7 @@ import { foldJobEvent, type ActiveJob } from "../../lib/jobState";
 import { PHASES } from "../../lib/agent";
 import { STAGE_TITLE } from "../../lib/stage";
 import type { JobEvent } from "../../types";
-import { buildHasData, buildView, DATA_ROLE, DATA_STAGE, PHASE_ROLL, phaseStep, stageTitle, type BuildPhase } from "./buildView";
+import { buildHasData, buildView, DATA_ROLE, DATA_STAGE, dataFileCount, PHASE_ROLL, phaseStep, stageTitle, type BuildPhase } from "./buildView";
 import { buildMorph, phaseFit, phaseLines } from "./columns";
 
 // Сборка с файлами данных (вторая ступень): события сервера — как у настоящей сборки примера «данные продаж» без модели
@@ -150,4 +150,19 @@ test("без данных экран «Сборка» — как до второ
       assert.equal(stageTitle(p as BuildPhase), STAGE_TITLE[p as BuildPhase]);
     }
   }
+});
+
+test("«N файлов» аналитика — разные файлы, а не таблицы: книга из нескольких листов — один файл", () => {
+  const sheets = [
+    agent("data", "Изучаю данные: 5 таблиц"),
+    agent("data", "«Продажи.xlsx, лист «Q1»» — динамика, линейный график: 12 точек."),
+    agent("data", "«Продажи.xlsx, лист «Q2»» — динамика, линейный график: 12 точек."),
+    agent("data", "«Продажи.xlsx, лист «Регионы»» — сравнение категорий, столбцы."),
+    agent("data", "«Клиенты.csv» — справочные значения, таблица."),
+    agent("data", "«Пустой.csv» — без слайда: данные не складываются ни в график, ни в таблицу"),
+    agent("designer", "«Выручка выросла» по данным файла — линейный график", 2),
+  ];
+  assert.equal(dataFileCount(fold(start, ...sheets).agent ?? []), 3);
+  assert.equal(dataFileCount(fold(start, ...DATA).agent ?? []), 3);
+  assert.equal(plain(view(fold(start, ...sheets.slice(0, 6))).roles[1].note), "· 3 файла");
 });

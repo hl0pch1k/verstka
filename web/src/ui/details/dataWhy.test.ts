@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { HeadlineFact, SlideData, Variant, VariantEdit } from "../../types";
-import { dataCols, dataFacts, dataWhyCap, dataWhyView, keyFact, keyText, NO_KEY, periodText, rebuiltLast } from "./dataWhy";
+import { dataCols, dataFacts, dataWhyCap, dataWhyView, keyFact, keyText, miniText, NO_KEY, periodText, rebuiltFirst, rebuiltLast } from "./dataWhy";
+import { miniSource } from "./miniChart";
 import { DATA_SLIDES } from "./dataWhy.fixtures";
 
 // числа и предлоги держатся неразрывным пробелом — сравниваем по словам
@@ -42,7 +43,8 @@ test("«Почему так» слайда с данными (регионы): �
   assert.equal(w.vars[1].why, "Названия регионов не помещаются под столбцами.");
   assert.equal(w.vars[2].why, "8 долей — мелкие сектора нечитаемы.");
   assert.ok(w.vars.every((x) => x.note === null));
-  assert.equal(w.vars[1].label, "Вариант 2: Вертикальные столбцы");
+  // текст эскиза — с числами, которые он рисует (для экранного диктора)
+  assert.equal(plain(w.vars[1].label), "Вариант 2: Вертикальные столбцы. Москва 1 433, Санкт-Петербург 612, Екатеринбург 318, Казань 274… — 8 значений");
   // заголовок-вывод: число заголовка — из фактов, как оно посчитано, тема, которой заголовок не стал
   assert.equal(plain(w.key), "41 %");
   assert.ok(/^Москва — 1 433 млн ₽ из 3 495 млн ₽, это 41%/.test(plain(w.from)));
@@ -144,4 +146,23 @@ test("периоды оси времени по-русски", () => {
   assert.equal(plain(periodText("2025-03-01T10:00")), "1 марта 2025, 10:00");
   assert.equal(periodText("2025"), "2025");
   assert.equal(periodText("неделя 5"), "неделя 5");
+});
+
+test("текст эскиза: числа ряда с подписями, строение таблицы, карточек и разбиения, разные единицы — без сравнения", () => {
+  const reg = miniSource(DATA_SLIDES[4], DATA_SLIDES[4].data);
+  assert.equal(plain(miniText({ kind: "bar", title: "" }, reg, "comparison")), "Москва 1 433, Санкт-Петербург 612, Екатеринбург 318, Казань 274… — 8 значений");
+  assert.equal(miniText({ kind: "table", title: "Разбиение на 24 слайда" }, reg, "reference"), "24 слайда по частям таблицы");
+  assert.equal(miniText({ kind: "table", title: "Таблица" }, reg, "comparison"), "таблица: 8 строк × 2 колонки");
+  const nps = miniSource(DATA_SLIDES[7], DATA_SLIDES[7].data);
+  assert.ok(/нет данных/.test(miniText({ kind: "line", title: "" }, nps, "dynamics")));
+  const kpi = miniSource(DATA_SLIDES[2], DATA_SLIDES[2].data);
+  assert.equal(miniText({ kind: "column", title: "" }, kpi, "kpi"), "4 значения в разных единицах — только строение, без сравнения");
+  assert.equal(miniText({ kind: "kpi_cards", title: "" }, kpi, "kpi"), "4 карточки");
+});
+
+test("«Вернуть как было» пересборки, что разбила таблицу на слайды: выбрать её первый слайд", () => {
+  const edit = (slides: number[], kind = "rebuild") => ({ at: 0, request: "", reply: "", kind, slides, score_before: null, score_after: null }) as VariantEdit;
+  assert.equal(rebuiltFirst({ edits: [edit([5, 6, 7])] }, 6), 5);
+  assert.equal(rebuiltFirst({ edits: [edit([5, 6, 7]), edit([2], "fix")] }, 6), 6);
+  assert.equal(rebuiltFirst({ edits: [] }, 4), 4);
 });

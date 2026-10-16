@@ -57,6 +57,7 @@ import { usePictureSelect } from "./usePictureSelect";
 import { useRemarksMode } from "./useRemarksMode";
 import { useSlideJob, type SlideRun } from "./useSlideJob";
 import { useDeckBrand } from "./useDeckBrand";
+import { useRebuildResume } from "../details/useRebuild";
 import { compactRow, failInRow, placeShown, staleInRow, type ResultAt, type SlideFail } from "./slideJob";
 import { StaleLine } from "../shell/StaleLine";
 import { WorkHead } from "./WorkHead";
@@ -140,6 +141,8 @@ function ResultBody({ g }: { g: Generation }) {
   // шаблон, который выбирали (у колоды с брендбуком она свёрстана на брендированной копии с теми же пропорциями)
   const tpl = templates.find((t) => t.template_id === deckTemplate(g));
   const brand = useDeckBrand(g);
+  // страница открыта заново посреди «Пересобрать слайд так»: та задача снова своя (ход у варианта, итог, выбор слайда)
+  useRebuildResume(g);
   const aspect = tpl?.aspect && tpl.aspect > 0 ? tpl.aspect : 16 / 9;
 
   // новая презентация открывается со свёрнутой таблеткой (по умолчанию — таблетка)

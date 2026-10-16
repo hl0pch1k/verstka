@@ -158,11 +158,15 @@ export interface QualityView {
 const DATA_FIGURE_CHECKS = new Set(["chart_values_mismatch", "headline_figure_not_in_data"]);
 
 /** Колода из файлов с данными: числа слайдов сверены с файлами (V2 v105: «Числа на слайдах сверены с файлами», в узкой
- *  колонке — «7 файлов данных — числа сверены»); проверки нашли расхождения — сколько, жёлтым. Без файлов — null. */
+ *  колонке — «7 файлов данных — числа сверены»); проверки нашли расхождения — сколько, жёлтым. Без файлов — null; сверки
+ *  не было (её проверок нет в `checks_run`: аудит старый или не дошёл до них) — тоже null: «сверены» без сверки не
+ *  говорим. */
 export function dataFigures(g: Pick<GenerationMeta, "dataset_ids">, v: Pick<Variant, "audit">): QualityView["figures"] {
   const files = g.dataset_ids?.length ?? 0;
   if (!files) return null;
   const off = (v.audit?.issues ?? []).filter((i) => DATA_FIGURE_CHECKS.has(i.check_id)).length;
+  const ran = (v.audit?.summary?.checks_run ?? []).some((c) => DATA_FIGURE_CHECKS.has(c));
+  if (!off && !ran) return null;
   const lead = `${plural(files, "файл", "файла", "файлов")} данных`;
   if (off) {
     const n = plural(off, "замечание", "замечания", "замечаний");
