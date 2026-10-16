@@ -4,13 +4,16 @@ PowerPoint не вставляет SVG-логотип как есть (нуже�
 Поэтому для логотипов из папки брендбука здесь есть небольшой растеризатор на Pillow.
 
 Умеет: `<path>` (все команды, дуги), `<rect>`, `<circle>`, `<ellipse>`, `<polygon>`, `<polyline>`, группы с `transform`, заливки
-(`fill`, `fill-opacity`, `opacity`, `fill-rule`), свойства корневого `<svg>` (например `fill="none"`, `opacity`), стили из атрибута
-`style` и из `<style>` по классам; градиент заменяется цветом своей средней остановки.
+(`fill`, `fill-opacity`, `opacity`, `fill-rule`, `currentColor` по `color`), `visibility`, свойства корневого `<svg>` (например
+`fill="none"`, `opacity`), стили из атрибута `style` и из `<style>` по простым селекторам (`.класс`, `#id`, `тег`); градиент заменяется
+цветом своей средней остановки.
 
 Не умеет — и тогда `render_svg` возвращает None, а не рисует неверно (вызывающий оставит SVG как есть и скажет об этом):
 обводка (`stroke` с видимой шириной), `<line>`, текст, `<image>`, `<foreignObject>`, `<switch>`, `<use>`, обрезка `clip-path`, маска
-`mask`, фильтр `filter` (атрибутом, в `style` или в `<style>`), вложенный `<svg>` с `x`, `y`, `width`, `height` или `viewBox`,
-заливка узором или цветом, которого не понять. Внешний `rsvg-convert` или Inkscape, если они есть, точнее: `rasterize_svg` в
+`mask`, фильтр `filter` (атрибутом, в `style` или в `<style>`), `transform`, `transform-origin` и `mix-blend-mode` в стилях, вложенный
+`<svg>` с `x`, `y`, `width`, `height` или `viewBox`, заливка узором или цветом, которого не понять, цвет с прозрачностью
+(`rgba()`, `hsla()`, `#RRGGBBAA`: прозрачность задавайте через `fill-opacity` или `opacity`), составные селекторы и @-правила
+в `<style>` (`.a rect`, `g > rect`, `:root`, `@media`). Внешний `rsvg-convert` или Inkscape, если они есть, точнее: `rasterize_svg` в
 `folder.py` пробует их первыми."""
 
 from __future__ import annotations
@@ -222,22 +225,30 @@ def _path_subpaths(d: str) -> list[list[Point]]:
 
 
 # ---- стили -------------------------------------------------------------------------------------------------------------------
+_SIMPLE_SELECTOR = re.compile(r"\.[\w-]+|#[\w-]+|[a-zA-Z]+")
+
+
 def _css_rules(root) -> dict[str, dict[str, str]]:
+    """Правила из `<style>`: только простые селекторы (`.класс`, `#id`, `тег`); любое другое правило — отказ, иначе оно молча
+    не применилось бы."""
     rules: dict[str, dict[str, str]] = {}
     for st in root.iter():
         if not isinstance(st.tag, str) or st.tag.split("}")[-1].lower() != "style" or not st.text:
             continue
         text = re.sub(r"/\*.*?\*/", "", st.text, flags=re.S)
+        if "@" in text:
+            raise _Unsupported("@-правило в style")
         for sel, body in re.findall(r"([^{}]+)\{([^{}]*)\}", text):
             props = dict((k.strip().lower(), v.strip()) for k, _, v in (p.partition(":") for p in body.split(";")) if k.strip())
             for one in sel.split(","):
                 one = one.strip()
-                if re.fullmatch(r"\.[\w-]+|#[\w-]+|[a-zA-Z]+", one):
-                    rules.setdefault(one, {}).update(props)
+                if not _SIMPLE_SELECTOR.fullmatch(one):
+                    raise _Unsupported(f"селектор {one!r}")
+                rules.setdefault(one, {}).update(props)
     return rules
 
 
-_INHERITED = ("fill", "fill-opacity", "fill-rule", "stroke", "stroke-width", "stroke-opacity")
+_INHERITED = ("fill", "fill-opacity", "fill-rule", "stroke", "stroke-width", "stroke-opacity", "visibility", "color")
 
 
 def _style_of(el, parent: dict[str, str], rules: dict[str, dict[str, str]]) -> dict[str, str]:
@@ -249,7 +260,7 @@ def _style_of(el, parent: dict[str, str], rules: dict[str, dict[str, str]]) -> d
         props.update(rules.get("." + cls, {}))
     if el.get("id"):
         props.update(rules.get("#" + el.get("id"), {}))
-    for k in ("fill", "fill-opacity", "fill-rule", "opacity", "display", "visibility", "stroke", "stroke-width", "stroke-opacity", *_EFFECTS):
+    for k in ("fill", "fill-opacity", "fill-rule", "opacity", "display", "visibility", "stroke", "stroke-width", "stroke-opacity", "color", *_EFFECTS):
         if el.get(k) is not None:
             st[k] = el.get(k).strip()
     st.update(props)
@@ -326,6 +337,27 @@ class _Unsupported(Exception):
     pass
 
 
+_HEX_ALPHA = re.compile(r"#(?:[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})|[0-9A-Fa-f]{3}([0-9A-Fa-f]))")
+_FN_ALPHA = re.compile(r"(?:rgb|hsl)a?\(\s*[^,/)\s]+[\s,]+[^,/)\s]+[\s,]+[^,/)\s]+\s*[,/]\s*([\d.]+)(%?)", re.I)
+
+
+def _has_alpha(colour: str) -> bool:
+    """Цвет с прозрачностью (`rgba(0,0,0,.5)`, `#00000080`): растеризатор её не применил бы."""
+    c = colour.strip()
+    m = _HEX_ALPHA.fullmatch(c)
+    if m:
+        return int(m.group(1) or m.group(2) * 2, 16) < 255
+    if re.fullmatch(r"(?:rgba|hsla)\(.*", c, re.I):
+        f = _FN_ALPHA.match(c)
+        if not f:
+            return True
+        alpha = float(f.group(1)) / (100 if f.group(2) else 1)
+        return alpha < 1
+    if re.fullmatch(r"(?:rgb|hsl)\(.*[/].*", c, re.I):
+        return True
+    return False
+
+
 def render_svg(path: Path | str, height: int = 480, *, max_width: int = 4000) -> Optional[Image.Image]:
     """SVG-файл → RGBA-картинка высотой `height` (прозрачный фон, сглаживание 4×) или None, если файл не прочитан или в нём
     есть то, чего растеризатор не умеет (список — в описании модуля)."""
@@ -355,7 +387,7 @@ def render_svg(path: Path | str, height: int = 480, *, max_width: int = 4000) ->
     k = out_h * ss / vh
     base: Matrix = (k, 0, 0, k, -minx * k, -miny * k)
     canvas = Image.new("RGBA", (out_w * ss, out_h * ss), (0, 0, 0, 0))
-    rules = _css_rules(root)
+    rules: dict[str, dict[str, str]] = {}  # заполняется в try: составной селектор — отказ
     drawn = 0
 
     def draw(el, m: Matrix, parent_style: dict[str, str], group_opacity: float) -> None:
@@ -373,6 +405,9 @@ def render_svg(path: Path | str, height: int = 480, *, max_width: int = 4000) ->
         for effect in _EFFECTS:  # обрезка, маска и фильтр меняют вид логотипа — растеризатор их не применяет
             if st.get(effect, "none").strip().lower() not in ("none", ""):
                 raise _Unsupported(effect)
+        for prop in ("transform", "transform-origin", "mix-blend-mode"):  # из CSS: растеризатор их не применяет
+            if st.get(prop, "none").strip().lower() not in ("none", "normal", ""):
+                raise _Unsupported(prop)
         if tag == "svg" and el is not root and any(el.get(a) is not None for a in ("x", "y", "width", "height", "viewBox")):
             raise _Unsupported("вложенный svg")
         if st.get("visibility") == "hidden" and tag not in ("g", "svg", "a"):
@@ -405,7 +440,11 @@ def render_svg(path: Path | str, height: int = 480, *, max_width: int = 4000) ->
         if fill.lower().startswith("url("):
             colour = _gradient_colour(root, fill)
         else:
-            colour = parse_color("#000000" if fill.lower() == "currentcolor" else fill, named=True)
+            if fill.lower() == "currentcolor":
+                fill = st.get("color", "#000000").strip()
+            if _has_alpha(fill):
+                raise _Unsupported("цвет с прозрачностью")
+            colour = parse_color(fill, named=True)
         if colour is None:
             raise _Unsupported("заливка")  # узор или цвет, которого не понять
         try:
@@ -445,6 +484,7 @@ def render_svg(path: Path | str, height: int = 480, *, max_width: int = 4000) ->
         drawn += 1
 
     try:
+        rules.update(_css_rules(root))
         # свойства самого корня («<svg fill="none">» у иконок Figma, opacity, transform) действуют на всё содержимое
         draw(root, base, {"fill": "#000000", "fill-opacity": "1", "fill-rule": "nonzero"}, 1.0)
     except (_Unsupported, ValueError, IndexError, ZeroDivisionError, OverflowError):

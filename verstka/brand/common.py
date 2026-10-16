@@ -277,7 +277,10 @@ _WEIGHT_WORDS = {
     "demi bold": 600, "bold": 700, "extrabold": 800, "extra bold": 800, "ultrabold": 800, "black": 900, "heavy": 900,
     "тонкий": 100, "светлый": 300, "обычный": 400, "нормальный": 400, "средний": 500, "полужирный": 600, "жирный": 700,
 }
-_WEIGHT_TAIL = re.compile(r"\s+(" + "|".join(sorted((re.escape(k) for k in _WEIGHT_WORDS), key=len, reverse=True)) + r")(?:\s+italic)?\s*$", re.I)
+# «Montserrat Bold», «Montserrat Bold Italic», «Montserrat Bold 32» (размер в таблице ролей — не часть названия), «Montserrat 32pt»
+_SIZE_TAIL = r"\s+\d{1,3}(?:[.,]\d+)?\s*(?:pt|px|пт)?"
+_WEIGHT_TAIL = re.compile(r"\s+(" + "|".join(sorted((re.escape(k) for k in _WEIGHT_WORDS), key=len, reverse=True)) + r")(?:\s+italic)?(?:" + _SIZE_TAIL + r")?\s*$", re.I)
+_UNIT_SIZE_TAIL = re.compile(r"\s+\d{1,3}(?:[.,]\d+)?\s*(?:pt|px|пт)\s*$", re.I)
 
 _HEADING_WORDS = re.compile(_L + r"(?:heading|headings|header|display|title|headline|h[1-3]|заголов\w*|акцидентн\w*)(?![a-zа-яё])", re.I)
 _BODY_WORDS = re.compile(_L + r"(?:body|paragraph|text|copy|base|regular\s+text|основн\w*\s+текст\w*|текст\w*|наборн\w*)(?![a-zа-яё])", re.I)
@@ -313,6 +316,9 @@ def split_weight(family: str) -> tuple[str, Optional[int]]:
     m = _WEIGHT_TAIL.search(family)
     if m and m.start() > 0:
         return family[: m.start()].strip(), weight_of(m.group(1))
+    u = _UNIT_SIZE_TAIL.search(family)
+    if u and u.start() > 0:  # «Montserrat 32pt»; число без единицы и без веса — часть названия («Source Sans 3»)
+        return split_weight(family[: u.start()])
     return family.strip(), None
 
 
@@ -349,6 +355,12 @@ def _name_role(family: str) -> Optional[BrandFontRole]:
     return None
 
 
+def _one_font_note(family: str, role: str) -> str:
+    """Спокойное предупреждение: брендбук назвал шрифт только одной роли, на вторую поставлен тот же."""
+    return (f"Назван только шрифт {'текста' if role == 'text' else 'заголовков'} — «{family}»: "
+            f"{'для заголовков' if role == 'text' else 'для текста'} поставил тот же. Проверьте.")
+
+
 def make_fonts(hits: Iterable[FontHit], *, fallback: Optional[str] = None) -> tuple[list[BrandFont], list[str]]:
     """Шрифт заголовков и шрифт текста: подписанные роли, затем подсказки в названии («Display» — заголовки, «Text» —
     текст), затем порядок. Одно семейство на всё — у обеих ролей; общая замена («Play») — тем, у кого своей нет."""
@@ -381,6 +393,7 @@ def make_fonts(hits: Iterable[FontHit], *, fallback: Optional[str] = None) -> tu
             h.role = r
             by_role[r] = h
             rest.remove(h)
+    explicit = set(by_role)  # роли, названные брендбуком или читаемые по названию («Display», «Text»)
     for r in ("heading", "body"):
         if r not in by_role and rest:
             h = rest.pop(0)
@@ -391,9 +404,13 @@ def make_fonts(hits: Iterable[FontHit], *, fallback: Optional[str] = None) -> tu
     if "heading" not in by_role:
         b = by_role["body"]
         by_role["heading"] = FontHit(b.family, "heading", None, b.fallback)
-    if "body" not in by_role:
+        if "body" in explicit:  # шрифт без роли («Шрифт: Circe») — один на всё, это не догадка
+            warnings.append(_one_font_note(b.family, "text"))
+    elif "body" not in by_role:
         hd = by_role["heading"]
         by_role["body"] = FontHit(hd.family, "body", None, hd.fallback)
+        if "heading" in explicit:
+            warnings.append(_one_font_note(hd.family, "headings"))
     common_fb = fallback or next((h.fallback for h in by_role.values() if h.fallback), None)
     fonts: list[BrandFont] = []
     for r in ("heading", "body"):

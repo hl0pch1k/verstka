@@ -235,8 +235,8 @@ def _collect_logos(logo_files: list[tuple[PurePosixPath, Path]], assets_dir: Opt
                     file = f"logos/{png.name}"  # в PPTX вставляется PNG; SVG лежит рядом
                 else:
                     file = f"logos/{svg_copy.name}"
-                    warnings.append(f"Логотип «{p.name}» — SVG с обводками или текстом, в PNG не перевёлся: в презентацию его не вставить, "
-                                    "загрузите PNG.")
+                    warnings.append(f"Логотип «{p.name}» — в нём то, что я не умею рисовать (обводки, текст, обрезка, маска, фильтр, повтор через use), "
+                                    "в PNG не перевёлся: в презентацию его не вставить, загрузите PNG.")
             else:
                 target = free_name(p.stem, p.suffix)
                 shutil.copyfile(p, target)

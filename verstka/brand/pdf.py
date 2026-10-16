@@ -223,10 +223,17 @@ def _name_near(segment: str) -> Optional[str]:
     return None
 
 
+# «PANTONE 2925 C», «PMS 2925 C», «RAL 5015», «NCS S 2060-B»: номер каталога рядом с CMYK того же образца
+_CATALOGUE = re.compile(r"\b(?:pantone|pms|ral|ncs)\b[\s\dA-Za-z.-]*?(?=$|[,;/·|]|\s*\([^)]*\)|\bCMYK\b|\bRGB\b|\bHEX\b)", re.I)
+
+
 def _label_only(line: str, start: int, end: int) -> bool:
-    """Строка — только метка формата и числа («RGB 10 37 64», «CMYK 100 80 40 50»): продолжение описания образца.
-    «CMYK 0 0 0 0 — фон слайдов» — со словами рядом — это уже отдельный цвет."""
+    """Строка — только метка формата, числа, номер Pantone/PMS/RAL/NCS и пометка в скобках («RGB 10 37 64», «PANTONE 2925 C ·
+    CMYK 85 40 0 0», «CMYK 85 40 0 0 (печать)»): продолжение описания образца. «Печать: CMYK 0 35 100 0» и «CMYK 0 0 0 0 — фон
+    слайдов» — со словами рядом — это уже отдельный цвет."""
     rest = _FORMAT_LABEL.sub("", line[:start] + " " + line[end:])
+    rest = re.sub(r"\([^)]*\)", " ", rest)
+    rest = _CATALOGUE.sub(" ", rest)
     return not re.search(r"[A-Za-zА-Яа-яЁё]", rest)
 
 
@@ -376,8 +383,11 @@ _LABEL_BEFORE = re.compile(
     re.I,
 )
 # метка роли с двоеточием или тире: достаточна для названия вне списка, только если на странице вообще говорится о шрифтах
-_ROLE_LABEL_BEFORE = re.compile(
-    r"(?:heading\w*|headline\w*|title\w*|body(?:\s+(?:text|copy))?|text|заголов\w*|основн\w*\s+текст\w*|текст\w*)\s*[:—–-]\s*$", re.I)
+_ROLE = r"(?:heading\w*|headline\w*|title\w*|body(?:\s+(?:text|copy))?|text|заголов\w*|основн\w*\s+текст\w*|текст\w*)"
+# «Headings: Poppins», «Body text — Inter», «Headlines are set in Aeonik»
+_ROLE_LABEL_BEFORE = re.compile(r"(?:" + _ROLE + r"\s*[:—–-]\s*|" + _ROLE + r"\s+(?:is|are)\s+set\s+in\s+)$", re.I)
+# строка таблицы ролей: слово роли открывает строку, дальше пробел и название («Заголовки Evolventa Bold»)
+_ROLE_OPEN = re.compile(r"\s*" + _ROLE + r"\s+", re.I)
 # «Для заголовков: Evolventa» — роль с «для» и двоеточием называет шрифт и без слов «шрифт» на странице
 _FOR_LABEL_BEFORE = re.compile(r"(?:для|for)\s+(?:заголов\w*|подзаголов\w*|heading\w*|headline\w*|title\w*|основн\w*\s+текст\w*|текст\w*|body(?:\s+(?:text|copy))?|"
                                r"наборн\w*|таблиц\w*|подпис\w*)\s*[:—–-]\s*$", re.I)
@@ -397,18 +407,23 @@ _COLOUR_WORDS = {"sun", "ocean", "charcoal", "midnight", "mint", "snow", "sky", 
                  "amber", "berry", "forest", "graphite", "cobalt", "azure", "emerald", "ruby", "jade", "peach", "cream", "ivory", "steel", "storm"}
 
 
-def _plausible_font(family: str, sent: str, brand: Optional[str], start: int, end: int, page_has_font_word: bool = False) -> bool:
+def _plausible_font(family: str, sent: str, brand: Optional[str], start: int, end: int, page_has_font_word: bool = False,
+                    colour_next: bool = False) -> bool:
+    """Похоже ли `family` на название шрифта. `colour_next` — следующая строка — про цвет («Text: Jet» / «HEX #…»): одиночное
+    слово тогда, скорее всего, имя цвета."""
     low = family.lower()
     if low in _NOT_FONTS or (brand and low == brand.lower()) or len(family) < 3:
         return False
-    if _FONT_HINT.search(family) and len(family.split()) >= 2:  # «Golos Text» — да, одинокое «Text» или «Display» — нет
+    hint = _FONT_HINT.search(family)
+    if hint and hint.start() > 0 and len(family.split()) >= 2:  # «Golos Text» — да; одинокое «Text», «Display» и «Text Jet» (роль и цвет) — нет
         return True
     if low in _KNOWN_FONTS or any(low.startswith(k + " ") for k in _KNOWN_FONTS):
         return True
     if _FONT_WORD.search(sent) and len(family.split()) >= 2:
         return True
-    # одно слово, которого нет в списке известных («Poppins»): нужны слова про шрифт — в предложении, на странице или
-    # глагол «используйте …» с ролью («Для заголовков используйте Evolventa»); название цвета («Navy») шрифтом не считается
+    # одно слово, которого нет в списке известных («Poppins»): нужны слова про шрифт — в предложении или на странице (метка роли,
+    # строка таблицы ролей, «заголовки are set in …»), «Для заголовков: …», либо глагол «используйте …» с ролями; название
+    # цвета («Navy») шрифтом не считается
     if (len(family.split()) == 1 and family.isalpha() and family[0].isupper() and low not in _NOT_FONT_WORDS and low not in _COLOUR_WORDS
             and parse_color(low, named=True) is None):
         nxt = _LOWER_WORD_AFTER.match(sent[end:])
@@ -417,9 +432,16 @@ def _plausible_font(family: str, sent: str, brand: Optional[str], start: int, en
         pre = sent[max(0, start - 60):start]
         if _FONT_WORD_ANY.search(sent):
             return bool(_LABEL_BEFORE.search(pre) or _LABEL_AFTER.match(sent[end:end + 60]))
-        if (page_has_font_word and _ROLE_LABEL_BEFORE.search(pre)) or _FOR_LABEL_BEFORE.search(pre):
+        if colour_next:
+            return False
+        if page_has_font_word and (_ROLE_LABEL_BEFORE.search(pre) or _ROLE_OPEN.fullmatch(sent[:start])):
             return True
-        return bool(_VERB_BEFORE.search(pre) and _FOR_ROLE.search(sent))
+        if _FOR_LABEL_BEFORE.search(pre):
+            return True
+        # «Для заголовков используйте Evolventa, для основного текста — Open Sans»: две роли говорят сами за себя; одна роль
+        # («Use Cerulean for headings») — только на странице, где есть слова про шрифт
+        roles = len(_FOR_ROLE.findall(sent))
+        return bool(_VERB_BEFORE.search(pre) and (roles >= 2 or (roles == 1 and page_has_font_word)))
     return False
 
 
@@ -434,15 +456,18 @@ def pdf_fonts(text: str, brand: Optional[str] = None) -> tuple[list[FontHit], Op
     hits: list[FontHit] = []
     fallback: Optional[str] = None
     page_font = bool(_FONT_WORD_ANY.search(text))
-    for sent in _font_sentences(text):
+    units = _font_sentences(text)
+    for n, sent in enumerate(units):
         if _HEX.search(sent) or _COLOUR_SENTENCE.search(sent) or is_negative(sent):
             continue
+        following = units[n + 1] if n + 1 < len(units) else ""
+        colour_next = bool(following and (_mentions(following) or _COLOUR_SENTENCE.search(following)))
         phrases = []
         for m in _FONT_PHRASE.finditer(sent):
             lead = _LEAD_VERB.match(m.group(1))  # «Use Evolventa» — глагол в начале предложения не часть названия
             start = m.start() + (lead.end() if lead else 0)
             fam, w = split_weight(m.group(1)[lead.end():] if lead else m.group(1))
-            if _plausible_font(fam, sent, brand, start, start + len(fam), page_font):
+            if _plausible_font(fam, sent, brand, start, start + len(fam), page_font, colour_next):
                 phrases.append((start, start + len(fam), fam, w, m.end()))
         if not phrases:
             continue

@@ -12,7 +12,7 @@ import pytest
 from PIL import Image
 
 from brand_helpers import pdf_bytes as _pdf_bytes
-from verstka.brand.common import ColorHit, make_palette
+from verstka.brand.common import ColorHit, make_fonts, make_palette, split_weight
 from verstka.brand.pdf import (
     _FILE_TITLE,
     _guess_name,
@@ -380,8 +380,95 @@ def test_an_unknown_font_after_a_verb_is_kept_when_the_sentence_names_the_roles(
     assert _fonts_of("Для заголовков используйте Evolventa, для основного текста — Open Sans") == {"heading": ("Evolventa", 700), "body": ("Open Sans", 400)}
     assert _fonts_of("Для заголовков используйте Evolventa, для основного текста — Open Sans, для таблиц — Roboto Mono") == {
         "heading": ("Evolventa", 700), "body": ("Open Sans", 400)}  # третий шрифт роли не получает и не сдвигает первые два
-    assert _fonts_of("Для основного текста применяйте Evolventa.") == {"heading": ("Evolventa", 700), "body": ("Evolventa", 400)}
+    assert _fonts_of("Типографика\nДля основного текста применяйте Evolventa.") == {"heading": ("Evolventa", 700), "body": ("Evolventa", 400)}
+    assert _fonts_of("Для основного текста применяйте Evolventa.") == {}  # одна роль и ни слова про шрифт — не название
     assert _fonts_of("Use Evolventa for headings and Inter for body text.") == {"heading": ("Evolventa", 700), "body": ("Inter", 400)}
     assert _fonts_of("Для заголовков: Evolventa. Для текста: Arial.") == {"heading": ("Evolventa", 700), "body": ("Arial", 400)}
     assert _fonts_of("Для заголовков: Navy. Для текста: Coral.") == {}  # названия цветов — не шрифты и после «для …:»
     assert _fonts_of("Используйте Evolventa.") == {}  # без ролей и слов про шрифт — это может быть что угодно
+
+
+# ---- третье ревью: Pantone и пометки в строке образца --------------------------------------------------------------------------------------------
+# настоящий Pantone 2925 C: CMYK 85 40 0 0, RGB 0 156 222, #009CDE (наивный пересчёт CMYK даёт #2699FF — в 50 единицах от настоящего)
+OCEAN = "#009CDE"
+
+
+@pytest.mark.parametrize("name, body", [
+    ("pantone and cmyk on one line", "Ocean\nPANTONE 2925 C · CMYK 85 40 0 0\nRGB 0 156 222\nHEX #009CDE"),
+    ("pantone and cmyk, then hex", "Ocean\nPANTONE 2925 C / CMYK 85 40 0 0\nHEX #009CDE"),
+    ("cmyk with a note", "Ocean\nCMYK 85 40 0 0 (печать)\nHEX #009CDE"),
+    ("hex, cmyk with a note", "Ocean\nHEX #009CDE\nCMYK 85 40 0 0 (печать)"),
+    ("hex, pantone and cmyk", "Ocean\nHEX #009CDE\nPANTONE 2925 C · CMYK 85 40 0 0"),
+    ("cmyk and pms after rgb", "Ocean\nHEX #009CDE\nRGB 0 156 222\nCMYK: 85 40 0 0 / PMS 2925 C"),
+    ("rgb, cmyk and pantone, hex", "Ocean\nRGB 0 156 222\nCMYK 85 40 0 0, Pantone 2925 C\nHEX #009CDE"),
+    ("cmyk and ral", "Ocean\nCMYK 85 40 0 0 · RAL 5012\nHEX #009CDE"),
+    ("cmyk and ncs", "Ocean\nNCS S 2060-B · CMYK 85 40 0 0 (ориентир)\nHEX #009CDE"),
+])
+def test_cmyk_with_pantone_or_a_note_on_its_line_is_still_the_same_swatch(name, body):
+    hits = pdf_colors("Primary\n" + body)
+    assert [h.hex for h in hits] == [OCEAN], name  # а не #2699FF, который отнял бы роль «основной»
+    colors, warnings = make_palette(hits)
+    assert [(c.hex, c.role) for c in colors] == [(OCEAN, "primary")] and not any("приблизительно" in w for w in warnings)
+
+
+def test_a_cmyk_line_with_a_word_before_the_value_stays_a_separate_colour():
+    hits = pdf_colors("Primary\nOcean\nПечать: CMYK 85 40 0 0\nHEX #009CDE")
+    assert [(h.hex, h.approx) for h in hits] == [("#2699FF", True), (OCEAN, False)]
+    assert [h.hex for h in pdf_colors("Primary\nOcean\nHEX #009CDE\nCMYK 0 35 100 0 — акцент")] == [OCEAN, "#FFA600"]
+
+
+def test_real_pantone_swatches_in_a_pdf_read_as_one_colour_each(tmp_path):
+    pdf = tmp_path / "Ocean guidelines.pdf"
+    pdf.write_bytes(_pdf_bytes(["Primary", "Ocean", "PANTONE 2925 C · CMYK 85 40 0 0", "RGB 0 156 222", "HEX #009CDE",
+                                "Accent", "Sun", "PANTONE 130 C · CMYK 0 35 100 0 (print)", "HEX #FFA600"]))
+    spec = read_brandbook(pdf)
+    assert [(c.hex, c.role, c.name) for c in spec.colors] == [(OCEAN, "primary", "Ocean"), ("#FFA600", "accent", "Sun")]
+    assert not any("приблизительно" in w for w in spec.warnings)
+
+
+# ---- третье ревью: шрифты в таблицах ролей и «are set in» ------------------------------------------------------------------------------------------
+def test_unknown_fonts_in_a_role_table_row_and_in_set_in_sentences_keep_their_roles():
+    spec = read_brandbook(FIX / "roles_table.pdf")  # «Типографика», «Роль | Шрифт | Начертание», «Заголовки Evolventa Bold», «Текст Inter Regular»
+    assert _fonts(spec) == {"heading": ("Evolventa", None, 700), "body": ("Inter", None, 400)}
+    spec = read_brandbook(FIX / "set_in.pdf")  # «Headlines are set in Aeonik Bold and body copy in Inter Regular.»
+    assert _fonts(spec) == {"heading": ("Aeonik", None, 700), "body": ("Inter", None, 400)}
+    assert not any("только шрифт" in w for w in spec.warnings)
+    assert _fonts_of("Typography\nHeadings are set in Evolventa. Body text is set in Quasar.") == {"heading": ("Evolventa", 700), "body": ("Quasar", 400)}
+    assert _fonts_of("Типографика\nЗаголовки Evolventa Bold\nТекст Inter Regular") == {"heading": ("Evolventa", 700), "body": ("Inter", 400)}
+    assert _fonts_of("Шрифты\nЗаголовки Zephyr\nОсновной текст Quasar") == {"heading": ("Zephyr", 700), "body": ("Quasar", 400)}
+
+
+def test_a_size_column_does_not_stick_to_the_font_name():
+    spec = read_brandbook(FIX / "roles_table_size.pdf")  # «Заголовки Montserrat Bold 32», «Текст Evolventa Regular 16»
+    assert _fonts(spec) == {"heading": ("Montserrat", None, 700), "body": ("Evolventa", None, 400)}
+    assert split_weight("Montserrat Bold 32") == ("Montserrat", 700)
+    assert split_weight("Montserrat Bold Italic 24 pt") == ("Montserrat", 700)
+    assert split_weight("Montserrat 32pt") == ("Montserrat", None)
+    assert split_weight("Source Sans 3") == ("Source Sans 3", None)  # число без веса и единицы — часть названия
+    assert split_weight("Roboto Mono Medium") == ("Roboto Mono", 500)
+
+
+def test_a_role_with_no_font_of_its_own_gets_a_calm_warning_not_a_silent_copy():
+    fonts, warnings = make_fonts(pdf_fonts("Headings: Aeonik Bold / Body: Inter")[0])  # без слов про шрифт «Aeonik» не читается
+    assert [(f.role, f.family) for f in fonts] == [("heading", "Inter"), ("body", "Inter")]
+    assert any("Назван только шрифт текста — «Inter»" in w for w in warnings)
+    fonts, warnings = make_fonts(pdf_fonts("Шрифт заголовков: Poppins Bold")[0])
+    assert [f.family for f in fonts] == ["Poppins", "Poppins"] and any("Назван только шрифт заголовков — «Poppins»" in w for w in warnings)
+    # шрифт без роли — один на всё, предупреждать не о чем
+    assert make_fonts(pdf_fonts("Шрифт: Circe")[0])[1] == []
+    assert make_fonts(pdf_fonts("Шрифт заголовков: Poppins Bold. Шрифт текста: Inter.")[0])[1] == []
+
+
+def test_a_verb_with_one_role_needs_a_font_word_on_the_page():
+    for text in ("Use Cerulean for headings.", "Use Sparingly for headings.", "Use Uppercase for headings.", "Используйте Cerulean для заголовков."):
+        assert _fonts_of(text) == {}, text
+    assert _fonts_of("Typography\nUse Evolventa for headings.") == {"heading": ("Evolventa", 700), "body": ("Evolventa", 400)}
+    assert _fonts_of("Для заголовков используйте Evolventa, для основного текста — Open Sans") == {"heading": ("Evolventa", 700), "body": ("Open Sans", 400)}  # две роли
+
+
+def test_the_line_after_a_label_is_checked_before_taking_a_word_for_a_font():
+    assert _fonts_of("Typography\nText: Jet\nHEX #0B1220") == {}
+    assert _fonts_of("Typography\nBody: Charcoalish\nRGB 54 69 79") == {}
+    assert _fonts_of("Typography\nTitle: Cerulean\nCMYK 90 40 0 0") == {}
+    assert _fonts_of("Typography\nText Jet") == {}  # «Text» тут слово-роль, а не часть названия
+    assert _fonts_of("Typography\nHeadings: Zephyr\nBody: Quasar") == {"heading": ("Zephyr", 700), "body": ("Quasar", 400)}  # следующая строка — не цвет

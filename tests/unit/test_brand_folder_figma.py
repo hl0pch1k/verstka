@@ -377,7 +377,8 @@ def test_the_roots_own_presentation_attributes_are_applied(tmp_path):
 
 def test_the_docstring_names_everything_the_rasteriser_refuses():
     doc = " ".join(svg_raster_mod.__doc__.split())
-    for word in ("stroke", "`<line>`", "текст", "`<image>`", "`<use>`", "`clip-path`", "`mask`", "`filter`", "вложенный `<svg>`", "узор"):
+    for word in ("stroke", "`<line>`", "текст", "`<image>`", "`<use>`", "`clip-path`", "`mask`", "`filter`", "вложенный `<svg>`", "узор",
+                 "`rgba()`", "`#RRGGBBAA`", "составные селекторы", "`mix-blend-mode`", "`transform-origin`"):
         assert word in doc, word
 
 
@@ -390,3 +391,59 @@ def test_an_svg_the_builtin_rasteriser_refuses_stays_svg_with_a_calm_warning(tmp
     assert sorted(lg.file for lg in spec.logos) == ["logos/clipped.svg", "logos/ring.svg"]  # неверный PNG не подставлен
     assert not list((tmp_path / "assets" / "logos").glob("*.png"))
     assert sum("в PNG не перевёлся" in w for w in spec.warnings) == 2
+    assert all("в нём то, что я не умею рисовать" in w for w in spec.warnings if "в PNG не перевёлся" in w)
+
+
+# ---- третье ревью: скрытые группы, прозрачные цвета, составные селекторы --------------------------------------------------------------------------------
+def _alpha(tmp_path: Path, body: str, at, root_attrs: str = "") -> int:
+    im = _render(tmp_path, body, root_attrs=root_attrs)
+    assert im is not None
+    return im.getpixel(at)[3]
+
+
+HIDDEN = '<rect width="20" height="20" fill="#f00"/>'
+
+
+def test_a_hidden_group_is_not_drawn_but_a_visible_child_inside_it_is(tmp_path):
+    big = '<rect x="30" y="30" width="60" height="60" fill="#0044CC"/>'
+    assert _alpha(tmp_path, f'<g visibility="hidden">{big}</g>{HIDDEN}', (60, 60)) == 0
+    assert _alpha(tmp_path, f'<g style="visibility:hidden">{big}</g>{HIDDEN}', (60, 60)) == 0
+    assert _alpha(tmp_path, f'<defs><style>.h{{visibility:hidden}}</style></defs><g class="h">{big}</g>{HIDDEN}', (60, 60)) == 0
+    assert _alpha(tmp_path, f'<g visibility="hidden"><g>{big}</g></g>{HIDDEN}', (60, 60)) == 0  # скрытость наследуется вглубь
+    assert _alpha(tmp_path, f'<g visibility="hidden">{big}</g>{HIDDEN}', (10, 10)) == 255  # соседний видимый элемент рисуется
+    assert _alpha(tmp_path, f'<g visibility="hidden"><rect x="30" y="30" width="60" height="60" fill="#0044CC" visibility="visible"/>{big}</g>{HIDDEN}', (60, 60)) == 255
+    assert _alpha(tmp_path, f'<g display="none">{big}</g>{HIDDEN}', (60, 60)) == 0
+
+
+@pytest.mark.parametrize("colour", ["rgba(0, 68, 204, 0.5)", "rgba(0 68 204 / 50%)", "#0044CC80", "#04C8", "hsla(220, 100%, 40%, .5)", "rgb(0 68 204 / .5)"])
+def test_colours_with_transparency_are_refused_not_drawn_opaque(tmp_path, colour):
+    assert _render(tmp_path, f'<rect width="100" height="100" fill="{colour}"/>') is None
+    assert _render(tmp_path, f'<rect width="100" height="100" style="fill:{colour}"/>') is None
+
+
+def test_colours_with_full_opacity_and_fill_opacity_are_fine(tmp_path):
+    assert _alpha(tmp_path, '<rect width="100" height="100" fill="rgba(0, 68, 204, 1)"/>', (50, 50)) == 255
+    assert _alpha(tmp_path, '<rect width="100" height="100" fill="#0044CCFF"/>', (50, 50)) == 255
+    assert _alpha(tmp_path, '<rect width="100" height="100" fill="#0044CC" fill-opacity="0.5"/>', (50, 50)) in range(126, 130)  # прозрачность — так
+
+
+@pytest.mark.parametrize("css", [".a rect{fill:#000}", "g > rect{fill:#000}", ":root{fill:#000}", "*{fill:#000}", "rect:first-child{fill:#000}",
+                                 ".a.b{fill:#000}", "rect[fill]{fill:#000}", "@media screen{.a{fill:#000}}", ".a + .b{fill:#000}", ".ok{fill:#000},.a rect{fill:#111}"])
+def test_style_rules_that_are_not_simple_selectors_are_refused(tmp_path, css):
+    assert _render(tmp_path, f'<style>{css}</style><g class="a"><rect class="b" width="100" height="100"/></g>') is None
+
+
+def test_simple_selectors_and_css_that_the_rasteriser_ignores_unlike_a_browser(tmp_path):
+    ok = '<style>.a, .b{fill:#112233} rect{opacity:1} #x{fill:#445566}</style>'
+    assert _render(tmp_path, ok + '<rect class="a" width="50" height="100"/><rect id="x" x="50" width="50" height="100"/>').getpixel((75, 50))[:3] == (68, 85, 102)
+    for prop in ("transform:rotate(45deg)", "transform-origin:0 0", "mix-blend-mode:multiply"):
+        assert _render(tmp_path, f'<rect width="100" height="100" fill="#000" style="{prop}"/>') is None, prop
+        assert _render(tmp_path, f'<style>.m{{{prop}}}</style><rect class="m" width="100" height="100" fill="#000"/>') is None, prop
+    assert _render(tmp_path, '<rect width="100" height="100" fill="#000" style="mix-blend-mode:normal;transform:none"/>') is not None
+
+
+def test_current_colour_follows_the_color_property(tmp_path):
+    assert _render(tmp_path, '<rect width="100" height="100" fill="currentColor" color="#112233"/>').getpixel((50, 50))[:3] == (17, 34, 51)
+    assert _render(tmp_path, '<g style="color:#445566"><rect width="100" height="100" fill="currentColor"/></g>').getpixel((50, 50))[:3] == (68, 85, 102)
+    assert _render(tmp_path, '<rect width="100" height="100" fill="currentColor"/>').getpixel((50, 50))[:3] == (0, 0, 0)
+    assert _render(tmp_path, '<rect width="100" height="100" fill="currentColor" color="rgba(0,0,0,.5)"/>') is None

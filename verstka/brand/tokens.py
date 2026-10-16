@@ -66,6 +66,11 @@ _NOT_FAMILY_PATH = re.compile(r"(?<![a-z])(size|weight|style|decoration|transfor
 _NOT_FAMILY_VALUES = {"italic", "normal", "oblique", "uppercase", "lowercase", "capitalize", "none", "underline", "bold", "regular", "medium", "light", "inherit", "initial"}
 _PLURAL_FONT_GROUP = re.compile(r"(?<![a-z])(fonts|typefaces|families|fontfamilies|font families|шрифты|гарнитуры)$")
 _DARK_THEME = re.compile(r"(?<![a-zа-яё])(?:dark|night|тёмн\w*|темн\w*)(?![a-zа-яё])", re.I)
+
+
+def _is_dark_theme(name: str) -> bool:
+    """«Dark mode», «Night», «Тёмная», «DarkMode», «brandDark» — тёмная тема; «Nightingale» и «Darkroom» — нет (слова целиком)."""
+    return bool(_DARK_THEME.search(re.sub(r"(?<=[a-zа-яё])(?=[A-ZА-ЯЁ])", " ", name)))
 _FALLBACK_WORDS = re.compile(r"(?<![a-zа-яё])(fallback|substitute|запасн\w*|замен\w*|резервн\w*)(?![a-zа-яё])")
 _MARGIN_PATH = re.compile(r"(?<![a-zа-яё])(margins?|safe area|page padding|slide padding|slide margin|пол[яе]|отступ\w*)(?![a-zа-яё])")
 _COLUMNS_PATH = re.compile(r"(?<![a-z])(columns?|cols?|колон\w*)(?![a-z])")
@@ -341,7 +346,7 @@ def _active_sets(data: Any) -> tuple[Optional[set[str]], str, int]:
                 cands.append((str(th.get("name") or ""), on))
     if not cands:
         return None, "", 0
-    name, on = next((c for c in cands if not _DARK_THEME.search(c[0])), cands[0])
+    name, on = next((c for c in cands if not _is_dark_theme(c[0])), cands[0])
     return on, name, len(cands)
 
 

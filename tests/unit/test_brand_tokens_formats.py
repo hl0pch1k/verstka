@@ -182,3 +182,16 @@ def test_a_theme_is_dark_only_by_a_whole_word_and_the_reader_says_which_theme_it
     assert "В файле несколько тем — прочитана «Light»." in spec.warnings
     one = spec_from_tokens({**sets, "$themes": themes[:1], "$metadata": {"tokenSetOrder": ["a", "b"]}})
     assert not any("несколько тем" in w for w in one.warnings)  # одна тема — молчим
+
+
+def test_camel_and_pascal_case_theme_names_are_split_into_words_before_matching():
+    sets = {"a": {"color": {"primary": {"value": "#0055FF", "type": "color"}}}, "b": {"color": {"primary": {"value": "#4488FF", "type": "color"}}}}
+    for dark_name in ("DarkMode", "darkMode", "brandDark", "ThemeNight", "Dark-Theme", "Тёмная тема"):
+        spec = spec_from_tokens({**sets, "$themes": [{"name": dark_name, "selectedTokenSets": {"b": "enabled"}}, {"name": "LightMode", "selectedTokenSets": {"a": "enabled"}}],
+                                 "$metadata": {"tokenSetOrder": ["b", "a"]}})
+        assert _roles(spec) == {"#0055FF": "primary"}, dark_name  # тёмная тема первой, но читается светлая
+        assert "прочитана «LightMode»" in " ".join(spec.warnings)
+    for light_name in ("Nightingale", "Darkroom", "NightingaleBlue", "Midnight"):
+        spec = spec_from_tokens({**sets, "$themes": [{"name": light_name, "selectedTokenSets": {"b": "enabled"}}, {"name": "Light", "selectedTokenSets": {"a": "enabled"}}],
+                                 "$metadata": {"tokenSetOrder": ["b", "a"]}})
+        assert _roles(spec) == {"#4488FF": "primary"}, light_name  # обычное слово, не «dark» и не «night»
