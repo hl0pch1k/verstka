@@ -4650,6 +4650,8 @@ class Composer:
                 self._pie(cbox, plain, center=center, head=legend_head)
             else:
                 gf = add_chart(self.slide, cbox, plain, self.outline, self._chart_style(), k.manifest.tokens.typography, text_hex=k.colors.text, neutral_hex=k.colors.divider, ground_hex=self._ground_under(cbox, k.colors.ground), muted_hex=k.colors.muted)
+                if getattr(gf, "verstka_source_dropped", None) and not source_said(gf.verstka_source_dropped, self.o.footnote):
+                    self.o.footnote = " ".join(x for x in (self.o.footnote, gf.verstka_source_dropped) if x)  # the source line a frame too small left out: the slide's footnote says it
                 self._turned = bool(getattr(self, "_turned", False) or getattr(gf, "verstka_turned", False))
                 from verstka.rendering.charts import chart_plot_bbox
 
@@ -5338,7 +5340,7 @@ def label_without_figure(text: str, fig: Optional[str]) -> str:
 
 _YEAR_RE = re.compile(r"(?:1[89]|20)\d{2}")
 _YEAR_WORD_RE = re.compile(r"\s*(?:год|г\.|гг\.?|-?[мйхго]\b)", re.I)
-_YEAR_BEFORE_RE = re.compile(r"(?:^|[\s(«])(?:в|во|с|со|к|до|по|от|из|квартал[еау]?|полугоди[еия]|январ[ья]|феврал[ья]|марта?|апрел[ья]|ма[йя]|июн[ья]|июл[ья]|августа?|сентябр[ья]|октябр[ья]|ноябр[ья]|декабр[ья])\s*$", re.I)
+_YEAR_BEFORE_RE = re.compile(r"(?:^|[\s(«])(?:в|во|с|со|к|до|по|от|из|кв\.|квартал[еау]?|полугоди[еия]|январ[ья]|феврал[ья]|марта?|апрел[ья]|ма[йя]|июн[ья]|июл[ья]|августа?|сентябр[ья]|октябр[ья]|ноябр[ья]|декабр[ья])\s*$", re.I)
 
 
 def _is_year(m: "re.Match", text: str) -> bool:

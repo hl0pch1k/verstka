@@ -200,6 +200,13 @@ class SlideFixBody(BaseModel):
     issue_ids: Optional[list[str]] = None  # the remarks to fix (default: every remark the stage shows on the slide)
 
 
+class RebuildBody(BaseModel):
+    """«Пересобрать слайд так»: the slide's dataset shown with option `option` (0-based, the index in
+    `OutlineSlide.data.options`, as «Почему так» lists them)."""
+
+    option: int = Field(..., ge=0, le=20)
+
+
 # ---------------------------------------------------------------------------- helpers
 
 
@@ -506,10 +513,15 @@ def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job, data: 
     manifest = store.manifest(req.template_id)
     if manifest is None:
         raise ValueError("Шаблон ещё не разобран — загрузите его снова")
-    # вторая ступень: файлы с данными и брендбук запроса (create_generation уже прочитал их). Колода из данных и
-    # брендированный шаблон — Task 10; до неё сборка идёт как раньше, а generation.json помнит, с чем собирали
+    # вторая ступень: файлы с данными и брендбук запроса (create_generation уже прочитал их): брендбук — брендированная
+    # копия шаблона, на которой вёрстка идёт как на любом шаблоне; данные — колода-история (verstka/data/story.py)
     if data is None:
         data = _generation_data(req)
+    progress = job_progress(job)
+    template_id = req.template_id
+    if data.brand is not None:
+        template_id = _branded_template_id(req, data, gdir, progress)
+        manifest = store.manifest(template_id) or manifest
     brief = None
     outline = None
     if req.outline is not None:
@@ -521,6 +533,17 @@ def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job, data: 
     use_models = req.use_models and models_configured()
     audit_models = req.audit_models and models_configured()
     eyes = bool(req.use_models if req.eyes is None else req.eyes) and models_configured()
+    described = data.describe()
+    story = None
+    if data.tables and outline is None:
+        from verstka.data.story import build_data_story
+
+        story = build_data_story(
+            brief, data.tables, profiles=data.profiles, dataset_ids=data.dataset_ids, manifest=manifest, use_llm=use_models,
+            skills=skills() if use_models else None, providers=providers() if use_models else None, progress=progress,
+        )
+        outline, brief = story.outline, None  # the figures of a data deck are checked against the data, not the text
+        data.tables, data.profiles = [], []  # the rows are not needed any more: only the plans and the slides stay
     # «Улучшить готовую» laid out in another template: the original deck's pictures come from its own workspace
     source_pictures = None
     src_tid = (req.improved_from or {}).get("template_id")
@@ -530,7 +553,7 @@ def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job, data: 
         except FileNotFoundError:
             source_pictures = None
     res = generate_variants(
-        store.workspace(req.template_id).source,
+        store.workspace(template_id).source,
         brief=brief,
         outline=outline,
         strategies=req.strategies,
@@ -547,10 +570,14 @@ def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job, data: 
         audit_models=audit_models,
         exports=req.exports,
         # plain progress messages and the planning agent's step events (the live timeline of the build screen)
-        progress=job_progress(job),
+        progress=progress,
         pictures=req.pictures,
         image_provider=image_provider() if req.pictures is not False else None,
     )
+    if story is not None:
+        from verstka.data.story import stamp_variants
+
+        stamp_variants(res, story, gdir)  # who wrote the plan (the data analyst, with the model or not), data_story.json
     write_agent_file(gdir, job.agent_events())
     planners = {}
     supplied = req.outline is not None  # the plan came with the request: no model was asked to plan
@@ -561,7 +588,9 @@ def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job, data: 
     first_outline = res.variants[0].outline if res.variants else None
     meta = {
         "id": gid,
-        "template_id": req.template_id,
+        # the template the deck was laid out on (a brandbook's: its branded copy — fixes and edits lay out in it too)
+        "template_id": template_id,
+        **({"base_template_id": req.template_id} if template_id != req.template_id else {}),
         "template_file": manifest.source_file,
         # the deck's title for «Мои презентации» (older runs have none: the UI falls back to the brief's first line)
         "title": (getattr(first_outline, "title", None) or None) if first_outline is not None else None,
@@ -572,7 +601,8 @@ def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job, data: 
         "slides": req.slides,
         "use_models": use_models,
         **_request_options(req),
-        **data.describe(),
+        **described,
+        **({"data_story": story.summary()} if story is not None else {}),
         "seconds": res.seconds,
         "created_at": gdir.stat().st_mtime,
         "status": "done",
@@ -593,6 +623,44 @@ def _run_generation(gid: str, gdir: Path, req: GenerateRequest, job: Job, data: 
         meta["writer"] = res.writer.meta()
     store.write_generation_meta(gid, meta)
     return meta
+
+
+def _brand_files(data: GenerationData, gdir: Path) -> Optional[Path]:
+    """The brandbook's logo files copied into the generation's own folder (gdir/brand/): a brandbook deleted while the
+    deck is built cannot take its logos away (BrandLogo.file — paths from that folder)."""
+    if data.brand is None or data.brand_dir is None:
+        return data.brand_dir
+    dst = gdir / "brand"
+    src = Path(data.brand_dir)
+    for logo in data.brand.logos:
+        rel = PurePosixPath(str(logo.file or ""))
+        if not rel.parts or rel.is_absolute() or ".." in rel.parts:
+            continue
+        try:
+            target = dst.joinpath(*rel.parts)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src.joinpath(*rel.parts), target)
+        except OSError:
+            log.warning("brand logo not copied: %s", rel)  # (gone already: the copy is made without it)
+    dst.mkdir(parents=True, exist_ok=True)
+    return dst
+
+
+def _branded_template_id(req: GenerateRequest, data: GenerationData, gdir: Path, progress: Callable[..., None]) -> str:
+    """The template the deck is laid out on when a brandbook is attached: the branded copy of the request's template
+    (verstka/brand/apply.py, cached; «Собрать ещё раз» on a branded copy brands its base template, never the copy)."""
+    from verstka.brand.apply import branded_info, branded_template
+
+    base = req.template_id
+    info = branded_info(base, store.root)
+    if info and info.get("base_template_id") and store.manifest(str(info["base_template_id"])) is not None:
+        base = str(info["base_template_id"])
+    brand_dir = _brand_files(data, gdir)
+    progress("brand: применяю брендбук к шаблону", 0.01)
+    return branded_template(
+        base, data.brand, data.brand_priority, workspace_root=store.root, brand_dir=brand_dir,
+        progress=lambda stage, frac: progress(f"brand: {stage}", 0.01 + 0.04 * float(frac or 0.0)),
+    )
 
 
 def _request_options(req: GenerateRequest) -> dict:
@@ -1485,7 +1553,7 @@ def create_generation(req: GenerateRequest) -> dict:
             DeckOutline.model_validate(req.outline)
         except ValidationError as e:
             raise HTTPException(422, "План слайдов не прочитан: " + _validation_message(e))
-    elif not _brief_from_request(req).text.strip():
+    elif not _brief_from_request(req).text.strip() and not req.dataset_ids:
         raise HTTPException(422, "Текст презентации пуст")
     # вторая ступень: файлы с данными и брендбук должны быть на сервере (и брендбук — уже разобран)
     req.dataset_ids = list(dict.fromkeys(req.dataset_ids))
@@ -1981,6 +2049,75 @@ def fix_slide(gid: str, strategy: str, n: int, body: SlideFixBody) -> dict:
 
     try:
         job = runner.submit("slide_fix", run)
+    except BaseException:
+        with _fix_lock:
+            _fix_active.discard(key)
+        raise
+    return {"job_id": job.id}
+
+
+@app.post("/api/generations/{gid}/{strategy}/slides/{n}/rebuild")
+def rebuild_slide(gid: str, strategy: str, n: int, body: RebuildBody) -> dict:
+    """«Пересобрать слайд так»: slide n's dataset shown with another visualization option (`body.option`, as «Почему
+    так» lists `OutlineSlide.data.options`) — a job; the rest of the variant stays, «верни как было» undoes it. An option
+    the data does not suit is refused at once (422 with its reason)."""
+    from verstka.data.rebuild import RebuildRefused, dataset_of_slide, prepare_rebuild
+    from verstka.data.story import STORY_FILE, read_story, story_plan
+
+    try:
+        vdir = _variant_dir(gid, strategy)
+    except HTTPException:
+        raise HTTPException(404, "Вариант не найден")
+    meta = store.read_generation_meta(gid) or {}
+    if not all((vdir / f).exists() for f in ("deck.pptx", "outline.json", "audit_report.json", "layout_plan.json")):
+        raise HTTPException(404, "Вариант не найден")
+    manifest = store.manifest(meta.get("template_id", ""))
+    if manifest is None:
+        raise HTTPException(404, _TEMPLATE_GONE)
+    try:
+        outline = DeckOutline.model_validate_json((vdir / "outline.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raise HTTPException(404, "Вариант не найден")
+    did = dataset_of_slide(outline, n)
+    story = read_story(vdir.parent / STORY_FILE) if did else None
+    plan = story_plan(story, did) if story and did else None
+    try:
+        if did and plan is None:
+            raise RebuildRefused(409, "Разбор данных этой презентации не сохранился — соберите её заново")
+        loaded = store.read_dataset(did) if did else None
+        if did and loaded is None:
+            name = outline.slides[n - 1].data.file
+            raise RebuildRefused(409, f"Файла «{name}» больше нет на сервере — приложите его снова и соберите презентацию заново")
+        rp = prepare_rebuild(outline, n, body.option, plan, loaded[0]) if did else prepare_rebuild(outline, n, body.option, None, None)  # type: ignore[arg-type]
+    except RebuildRefused as e:
+        raise HTTPException(e.status, str(e))
+    key = (gid, strategy)
+    with _fix_lock:
+        if key in _fix_active:
+            raise HTTPException(409, _VARIANT_BUSY)
+        _fix_active.add(key)
+
+    def run(job: Job) -> dict:
+        from verstka.data.rebuild import rebuild_data_slide
+
+        try:
+            res = rebuild_data_slide(
+                vdir, strategy, rp, manifest=manifest, ws=store.workspace(meta["template_id"]),
+                template_source=store.workspace(meta["template_id"]).source, workspace_root=store.root,
+                exports=list(meta.get("exports") or []), progress=job_progress(job),
+            )
+            store.merge_variant_summary(gid, strategy, {"n_slides": res.n_slides, "score": res.score_after, "errors": res.errors, "warnings": res.warnings})
+            return {
+                "reply": res.reply, "changed": res.applied, "applied": res.applied, "kind": "rebuild", "strategy": strategy, "slide": n,
+                "slides": res.slides, "option": rp.option, "viz": rp.kind, "title": rp.title, "score_before": res.score_before,
+                "new_score": res.score_after, "errors": res.errors, "warnings": res.warnings, "version": res.version, "at": res.at,
+            }
+        finally:
+            with _fix_lock:
+                _fix_active.discard(key)
+
+    try:
+        job = runner.submit("rebuild", run)
     except BaseException:
         with _fix_lock:
             _fix_active.discard(key)
