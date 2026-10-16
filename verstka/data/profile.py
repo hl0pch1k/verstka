@@ -94,6 +94,14 @@ _PARENT_NAME = re.compile(
     r"регион|област|край|округ|стран|республик|континент|категори|групп|раздел|отдел|департамент|подразделени|дивизион|"
     r"направлени|сегмент|отрасл|бренд|марк[аи]|семейств|филиал|класс|тип|институт|факультет|школ|кампус|дирекци"
 )
+# номер места или объекта (не мера): «Аудитория 101», «Кабинет», «Этаж», «Ряд», «Место», «Квартира», «Дом», «Корпус»;
+# множественное число — уже счёт («Аудиторий», «Этажей», «Домов»)
+_PLACE_NAME = re.compile(
+    r"(?:^|[^а-яё])(?:аудитори[яи]|кабинет|этаж|ряд|место|квартира|дом|корпус|номер|код|комнат[аы]|палат[аы]|"
+    r"участок|секци[яи]|стенд|бокс|ячейк[аи]|пункт)(?![а-яё])|№"
+)
+# интервал или время суток в расписании: «09:00–10:30», «9.00-10.30», «14:10»
+_TIME_INTERVAL = re.compile(r"^\d{1,2}[:.]\d{2}(?:\s*[–—\-]\s*\d{1,2}[:.]\d{2})?$")
 _ID_VALUE = re.compile(r"^(?=.*\d)[0-9a-zа-яё_\-/.#:№]{2,40}$", re.I)
 
 
@@ -443,6 +451,9 @@ def _type_number(c: _Col, lname: str, pct_share: float, money_share: float, firs
             return
     elif integral and v.size >= 3 and _ID_NAME.search(lname) and not unit:
         c.type, c.role = "id", "id"  # «№ п/п», «Код» повторяются по периодам длинной таблицы — всё равно номер
+        return
+    if integral and v.size >= 2 and not unit and _PLACE_NAME.search(lname):
+        c.type, c.role = "id", "id"  # «Аудитория 101, 204», «Квартира 12» — номер места, а не величина
         return
     # год числами: «2023, 2024, 2025» с подсказкой в имени или первой колонкой подряд
     if integral and v.size >= 1 and float(v.min()) >= 1900 and float(v.max()) <= 2100 and not unit:
@@ -1004,9 +1015,16 @@ def profile_table(t: Table) -> DatasetProfile:
     hierarchies = _hierarchies(cols)
 
     typable, reason = _typable(cols, metrics, dims, axis, data_rows)
+    # расписание или перечень: чисел-мер нет, есть номера мест («Аудитория») или интервалы времени («09:00–10:30»)
+    schedule = typable and not metrics and data_rows >= 2 and any(
+        (c.role == "id" and _PLACE_NAME.search(c.name.lower())) or _time_intervals(c) for c in cols)
+    if schedule:
+        typable, reason = False, "расписание/перечень"
     skip = {id(c) for c in ([total_col] if total_col is not None else []) + part_cols}
     related = data_rows > 30 and _strongly_related(metrics, skip)
     nature = _nature(t, cols, metrics, dims, labels, axis, time_axis, parts, typable, data_rows, related)
+    if schedule:
+        nature = "text_table" if t.kind == "text" else "reference"  # таблица как есть; карточка: «Не для графика»
     missing_total = int(sum(c.missing for c in cols))
     outliers, expected = _split_outliers(cols, dims, nature)
     # строки — данные (без строк итога): «Доли · 4 строки», даже если в файле пятой идёт «Итого»
@@ -1091,6 +1109,12 @@ def _category_scale(rows: list[int], dims: list[_Col]) -> bool:
         if len(hit) <= max(1, len(per) // 2) and all(per[k] >= 2 and hit[k] >= 0.5 * per[k] for k in hit):
             return True
     return False
+
+
+def _time_intervals(c: _Col) -> bool:
+    """Колонка строк — интервалы или время суток расписания («09:00–10:30», «14:10»): не меньше 80% значений."""
+    vals = [v for v in (c.svals or []) if v is not None]
+    return bool(vals) and sum(1 for v in vals if _TIME_INTERVAL.match(str(v))) >= 0.8 * len(vals)
 
 
 def _typable(cols: list[_Col], metrics: list[_Col], dims: list[_Col], axis: Optional[_Col],

@@ -921,3 +921,31 @@ def test_derived_columns_are_not_a_relationship():
     price = [[f"Товар {i}", ["А", "Б"][i % 2], c, round(c * 1.3, 2)] for i, c in
              enumerate(rnd.randint(100, 900) for _ in range(60))]
     assert profile_table(_t(["Товар", "Группа", "Закупка", "Розница"], price)).nature != "relationship"
+
+
+# ── номера мест и расписания (ревью анализа rev7c, N4) ────────────────────────────────────────────────────────────────
+def test_timetable_room_numbers_are_ids_and_the_table_is_not_for_a_chart():
+    from verstka.api.app import _dataset_summary
+    from verstka.data.readers import read_bytes
+
+    days, times = ["Понедельник", "Вторник", "Среда"], ["09:00–10:30", "10:40–12:10", "12:40–14:10"]
+    lines = [f"{d};{tm};{['Математика', 'Физика', 'История', 'Химия'][k % 4]};{[101, 204, 305, 101, 204][k % 5]};Иванов И.И."
+             for k, (d, tm) in enumerate((d, tm) for d in days for tm in times)]
+    t = read_bytes("Расписание.csv", ("День;Время;Предмет;Аудитория;Преподаватель\n" + "\n".join(lines) + "\n").encode())[0]
+    p = profile_table(t)
+    assert (_col(p, "Аудитория").type, _col(p, "Аудитория").role) == ("id", "id") and p.metrics == []
+    assert _col(p, "Время").type != "number"  # «09:00–10:30» — интервал, а не число
+    assert (p.nature, p.typable, p.untypable_reason) == ("reference", False, "расписание/перечень")
+    assert "Не для графика: расписание/перечень" in _dataset_summary("tt", t, p).issues
+
+
+def test_place_rank_and_apartment_numbers_are_ids():
+    place = profile_table(_t(["Место", "Команда", "Очки"], [[1, "Спартак", 30], [2, "Зенит", 28], [3, "ЦСКА", 25],
+                                                          [4, "Динамо", 20], [5, "Локомотив", 18]]))
+    assert _col(place, "Место").role == "id" and place.metrics == ["Очки"] and place.typable
+    flats = profile_table(_t(["Квартира", "Площадь", "Цена"], [[12, 54.3, 9_800_000], [45, 38.0, 7_200_000],
+                                                            [7, 72.5, 13_500_000], [31, 41.2, 7_900_000]],
+                             units=[None, "м²", None]))
+    assert _col(flats, "Квартира").role == "id" and flats.metrics == ["Площадь", "Цена"]
+    counts = profile_table(_t(["Корпус", "Аудиторий", "Этажей"], [["А", 12, 3], ["Б", 20, 5], ["В", 8, 2]]))
+    assert counts.metrics == ["Аудиторий", "Этажей"]  # множественное число — счёт, а не номер
