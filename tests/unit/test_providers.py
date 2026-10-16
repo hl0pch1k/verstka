@@ -243,3 +243,23 @@ def test_the_models_profile_is_logged_once_with_its_reason_and_no_secret(monkeyp
         default_models_path()
         default_models_path()
     assert [r.getMessage() for r in caplog.records if "models profile" in r.getMessage()] == ["models profile: models.yaml (VERSTKA_MODELS is set)"]
+
+
+def test_a_leftover_verstka_models_next_to_the_vk_keys_is_warned(monkeypatch, caplog):
+    """The final's ТЗ makes VK inference mandatory: VERSTKA_MODELS pointing at another profile while the VK keys are
+    set still wins (explicit choice), but the log says so plainly."""
+    import logging
+    from verstka.providers import registry as reg
+    monkeypatch.setenv("VK_INFERENCE_API_KEY", "k")
+    monkeypatch.setenv("VK_PROJECT_ID", "p")
+    monkeypatch.setenv("VERSTKA_MODELS", "configs/models.yaml")
+    monkeypatch.setattr(reg, "_PROFILE_LOGGED", set())
+    with caplog.at_level(logging.WARNING, logger=reg.log.name):
+        assert reg.default_models_path().name == "models.yaml"
+    assert any("overrides VK inference" in r.getMessage() for r in caplog.records)
+    monkeypatch.setenv("VERSTKA_MODELS", "configs/models.vk.yaml")
+    monkeypatch.setattr(reg, "_PROFILE_LOGGED", set())
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger=reg.log.name):
+        assert reg.default_models_path().name == "models.vk.yaml"
+    assert not any("overrides VK inference" in r.getMessage() for r in caplog.records)

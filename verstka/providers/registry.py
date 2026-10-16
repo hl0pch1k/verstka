@@ -227,4 +227,11 @@ def default_models_path() -> Path:
     if (str(path), why) not in _PROFILE_LOGGED:
         _PROFILE_LOGGED.add((str(path), why))
         log.info("models profile: %s (%s)", path.name, _PROFILE_WHY[why])
+        if why == "env" and path.name != VK_PROFILE and all(
+            (os.environ.get(name) or "").strip() for name in ("VK_INFERENCE_API_KEY", "VK_PROJECT_ID")
+        ):
+            # the final's ТЗ makes VK inference mandatory: a leftover VERSTKA_MODELS in .env silently moves text and
+            # image reading to another host although the VK keys are there
+            log.warning("VERSTKA_MODELS=%s overrides VK inference although VK_INFERENCE_API_KEY and VK_PROJECT_ID are set; "
+                        "remove VERSTKA_MODELS from .env to use VK", path.name)
     return path
