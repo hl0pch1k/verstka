@@ -1,0 +1,448 @@
+"""Slides made from data files (описание решения §7): what the data layer planned (`OutlineSlide.data`, the chart,
+the table, the key figures) against what the deck shows.
+
+The figures are checked against the dataset, not against the brief: a data slide's headline may only name the facts
+the analysis counted from the file (`headline_ok`), the chart on the slide draws the values the data layer prepared from
+the file, the slide names its source, the axes are named, the chart is not overloaded, a table is never the file
+dumped whole, a file not fit for a chart never becomes one, and a table split over slides keeps its parts together.
+Slides without `data` are not this module's business."""
+
+from __future__ import annotations
+
+import math
+import re
+from typing import Optional
+
+from verstka.audit.registry import AuditContext, check
+from verstka.schemas.audit import CheckSpec, Issue
+from verstka.schemas.deck_ir import IRChart, IRElement, IRSlide
+from verstka.schemas.outline import ChartSpec, OutlineSlide
+
+HEADLINE_NO_CONCLUSION = CheckSpec(
+    id="headline_no_conclusion",
+    title="Заголовок слайда с данными называет тему, а не вывод",
+    severity="warn",
+    category="content",
+    description="У слайда с графиком или таблицей из файла заголовок говорит, что видно в данных («Выручка выросла на 23% "
+                "к сентябрю»), а не только тему («Выручка по месяцам»).",
+)
+HEADLINE_FIGURE_NOT_IN_DATA = CheckSpec(
+    id="headline_figure_not_in_data",
+    title="Число в заголовке не следует из данных",
+    severity="error",
+    category="content",
+    description="Каждое число в заголовке слайда с данными должно быть среди фактов, посчитанных по файлу (изменение, доля, "
+                "медиана, лидер…). Цифры внутри названий из данных («Филиал 1», «III кв. 2026») числами не считаются.",
+)
+CHART_VALUES_MISMATCH = CheckSpec(
+    id="chart_values_mismatch",
+    title="Значения на слайде не совпадают с данными файла",
+    severity="error",
+    category="content",
+    description="Диаграмма, таблица и карточки слайда показывают те же значения, что подготовил из файла слой данных: те же "
+                "категории и числа, пропуски — на своих местах.",
+)
+CHART_NO_UNITS = CheckSpec(
+    id="chart_no_units",
+    title="У диаграммы нет подписей осей и единиц",
+    severity="warn",
+    category="content",
+    description="У графика, столбцов и гистограммы подписаны оси или хотя бы ось значений с единицей («Выручка, млн ₽»); "
+                "у рассеяния — обе оси. Круговой и кольцевой хватает подписей долей.",
+)
+CHART_NO_SOURCE = CheckSpec(
+    id="chart_no_source",
+    title="Не указан источник данных",
+    severity="warn",
+    category="content",
+    description="На слайде с данными из файла есть строка «Источник: файл» — в сноске или под диаграммой.",
+)
+CHART_OVERLOADED = CheckSpec(
+    id="chart_overloaded",
+    title="Диаграмма перегружена",
+    severity="warn",
+    category="content",
+    description="Круговая и кольцевая — не больше 6 долей, столбцы и полосы — не больше 12 категорий, линия — не больше 60 "
+                "точек: больше не прочитать с экрана.",
+)
+TABLE_RAW_DUMP = CheckSpec(
+    id="table_raw_dump",
+    title="Таблица из файла целиком, без агрегации",
+    severity="warn",
+    category="content",
+    description="Таблица на слайде с данными длиннее 10 строк, и данные не сгруппированы (топ-N и «Остальные», интервалы, "
+                "разбиение по слайдам).",
+)
+CHART_FROM_UNTYPABLE = CheckSpec(
+    id="chart_from_untypable",
+    title="График из данных, которые не годятся для графика",
+    severity="error",
+    category="content",
+    description="Файл без чисел для графика (одни тексты, одна строка) показывается таблицей или не показывается вовсе — "
+                "диаграммы из него быть не должно.",
+)
+DATA_SPLIT_INCONSISTENT = CheckSpec(
+    id="data_split_inconsistent",
+    title="Части таблицы на нескольких слайдах разошлись",
+    severity="warn",
+    category="content",
+    description="Таблица, разбитая на 2–3 слайда, идёт подряд, все её части на месте, у них одни колонки и один заголовок.",
+)
+
+_CONT_RE = re.compile(r"\s*\((?:продолжение|continued)\)\s*$", re.I)
+_SPACE_RE = re.compile(r"[\s   ⁠​]+")
+_CATEGORY_TYPES = ("line", "area", "column", "bar", "histogram", "stacked_column", "stacked_bar", "grouped_column", "grouped_bar")
+_SLICES_MAX, _BARS_MAX, _POINTS_MAX, _ROWS_MAX = 6, 12, 60, 10
+
+
+def numbers_in(text: str, labels=()) -> list[float]:
+    # (the data layer is imported when a deck has data slides: a deck without them never loads it)
+    from verstka.data.headline import numbers_in as f
+
+    return f(text, labels)
+
+
+def headline_ok(text: str, facts, labels=()) -> bool:
+    from verstka.data.headline import headline_ok as f
+
+    return f(text, facts, labels)
+
+
+def file_title(file: Optional[str], sheet: Optional[str] = None) -> str:
+    from verstka.data.words import file_title as f
+
+    return f(file, sheet)
+
+
+def _norm(text: Optional[str]) -> str:
+    return _SPACE_RE.sub(" ", str(text or "")).replace("ё", "е").replace("Ё", "Е").strip()
+
+
+def _data_slides(ctx: AuditContext) -> list[tuple[IRSlide, OutlineSlide]]:
+    if ctx.outline is None:
+        return []
+    by_id = {s.id: s for s in ctx.outline.slides}
+    out = []
+    for s in ctx.ir.slides:
+        osl = by_id.get(s.outline_id or "")
+        if osl is not None and osl.data is not None:
+            out.append((s, osl))
+    return out
+
+
+def _elements(s: IRSlide) -> list[IRElement]:
+    return list(s.elements)
+
+
+def _charts(s: IRSlide) -> list[IRElement]:
+    return [e for e in _elements(s) if e.chart is not None]
+
+
+def _tables(s: IRSlide) -> list[IRElement]:
+    return [e for e in _elements(s) if e.table is not None]
+
+
+def _slide_text(s: IRSlide) -> str:
+    return _norm(" ".join(e.text for e in _elements(s) if e.has_text and e.table is None))
+
+
+def _bboxes(els: list[IRElement]) -> dict:
+    return {"bboxes": [e.bbox_frac for e in els], "element_ids": [e.id for e in els]}
+
+
+# ── the headline ─────────────────────────────────────────────────────────────────────────────────────────────────────
+def _headline(osl: OutlineSlide) -> str:
+    return _CONT_RE.sub("", osl.headline or "").strip()
+
+
+@check(HEADLINE_NO_CONCLUSION)
+def headline_no_conclusion(ctx: AuditContext) -> list[Issue]:
+    out = []
+    for s, osl in _data_slides(ctx):
+        head = _norm(_headline(osl)).lower().rstrip(".")
+        d = osl.data
+        topics = {_norm(x).lower() for x in (d.plain_headline, file_title(d.file), d.file) if x}
+        if not head or head in topics:
+            out.append(ctx.new_issue(
+                HEADLINE_NO_CONCLUSION, s.index,
+                f"Заголовок «{_headline(osl) or '—'}» называет тему, а не вывод из данных «{d.file}»",
+                suggestion="Скажите в заголовке, что видно в данных, с числом из них: «Выручка выросла на 23% к сентябрю».",
+            ))
+    return out
+
+
+@check(HEADLINE_FIGURE_NOT_IN_DATA)
+def headline_figure_not_in_data(ctx: AuditContext) -> list[Issue]:
+    from verstka.data.story import data_slide_labels
+
+    out = []
+    for s, osl in _data_slides(ctx):
+        head = _headline(osl)
+        facts = list(osl.data.headline_facts)
+        labels = data_slide_labels(osl)
+        if headline_ok(head, facts, labels):
+            continue
+        bad = [n for n in numbers_in(head, labels) if not headline_ok(_num(n), facts)]
+        shown = ", ".join(f"«{_num(n)}»" for n in dict.fromkeys(bad)) or "число"
+        out.append(ctx.new_issue(
+            HEADLINE_FIGURE_NOT_IN_DATA, s.index,
+            f"В заголовке {shown} — такого числа нет среди фактов, посчитанных по файлу «{osl.data.file}»",
+            suggestion="Оставьте в заголовке только числа из данных или верните заголовок-вывод, который предложил анализ.",
+        ))
+    return out
+
+
+def _num(n: float) -> str:
+    if float(n).is_integer():
+        return str(int(n))
+    return f"{n:.2f}".rstrip("0").rstrip(".").replace(".", ",")
+
+
+# ── the values ───────────────────────────────────────────────────────────────────────────────────────────────────────
+def _same(a: Optional[float], b: Optional[float]) -> bool:
+    if a is None or b is None:
+        return a is None and b is None
+    if not (math.isfinite(a) and math.isfinite(b)):
+        return False
+    return abs(a - b) <= 1e-6 * max(1.0, abs(a), abs(b)) or round(a, 2) == round(b, 2)
+
+
+def _same_labels(want: list[str], have: list[str]) -> bool:
+    """The chart's category labels are the data's: a label the renderer left out to thin a long axis (every other
+    month) or shortened («янв 2025» under «янв») still stands for its category."""
+    if len(want) != len(have):
+        return False
+    return all(not h or h == w or h.lower() in w.lower() or w.lower() in h.lower() for w, h in zip(want, have))
+
+
+def _series_found(name: str, values: list[Optional[float]], cats: list[str], charts: list[IRChart]) -> Optional[str]:
+    """None when one of the slide's charts draws this series (its values, gaps in their places; in the categories'
+    order or reversed, as horizontal bars write it); else what differs, in words."""
+    want_cats = [_norm(c) for c in cats]
+    best: Optional[str] = None
+    for c in charts:
+        have_cats = [_norm(x) for x in c.categories]
+        for sr in c.series:
+            got = list(sr.values)
+            if len(got) != len(values):
+                best = best or f"на слайде {len(got)} значений вместо {len(values)}"
+                continue
+            for cats_order, vals in ((have_cats, got), (list(reversed(have_cats)), list(reversed(got)))):
+                if want_cats and cats_order and not _same_labels(want_cats, cats_order):
+                    continue
+                if all(_same(a, b) for a, b in zip(values, vals)):
+                    return None
+            k = next((i for i, (a, b) in enumerate(zip(values, got)) if not _same(a, b)), None)
+            if k is not None:
+                lab = cats[k] if k < len(cats) else str(k + 1)
+                best = f"«{lab}»: в данных {_val(values[k])}, на слайде {_val(got[k])}"
+            else:
+                best = best or "категории идут в другом порядке"
+    return best or "на слайде нет такого ряда"
+
+
+def _val(v: Optional[float]) -> str:
+    return "пропуск" if v is None else _num(round(v, 2))
+
+
+def _chart_problem(spec: ChartSpec, s: IRSlide) -> Optional[str]:
+    charts = [e.chart for e in _charts(s)]
+    if not charts:
+        return "диаграммы на слайде нет"
+    if spec.type == "scatter":
+        for xs in spec.xy:
+            pts = sorted((round(x, 6), round(y, 6)) for x, y in zip(xs.x, xs.y) if x is not None and y is not None)
+            found = False
+            for c in charts:
+                for sr in c.series:
+                    got = sorted((round(x, 6), round(y, 6)) for x, y in zip(sr.x_values, sr.values) if x is not None and y is not None)
+                    if got == pts:
+                        found = True
+            if not found:
+                return f"точки «{xs.name}» на слайде другие"
+        return None
+    cats = [str(c) for c in spec.categories]
+    for sr in spec.series:
+        vals = [None if v is None else float(v) for v in sr.values][: len(cats)]
+        vals += [None] * (len(cats) - len(vals))
+        if not any(v is not None for v in vals):
+            continue
+        why = _series_found(sr.name, vals, cats, charts)
+        if why is not None:
+            return (f"ряд «{sr.name}»: " if sr.name and len(spec.series) > 1 else "") + why
+    return None
+
+
+def _cell_numbers(text: str) -> list[float]:
+    return numbers_in(_norm(text).replace("⁠", ""))
+
+
+def _table_problem(osl: OutlineSlide, s: IRSlide) -> Optional[str]:
+    t = osl.content.table
+    tables = _tables(s)
+    if not tables:
+        return "таблицы на слайде нет"
+    have = [[_norm(c) for c in r] for e in tables for r in e.table.rows]
+    for row in t.rows:
+        want = [_norm(c) for c in row]
+        if not want:
+            continue
+        match = next((r for r in have if r and r[0] == want[0]), None)
+        if match is None:
+            return f"нет строки «{row[0]}»"
+        if [n for c in want for n in _cell_numbers(c)] != [n for c in match for n in _cell_numbers(c)]:
+            return f"в строке «{row[0]}» другие числа"
+    return None
+
+
+def _numbers_problem(osl: OutlineSlide, s: IRSlide) -> Optional[str]:
+    text = _slide_text(s)
+    have = _cell_numbers(text)
+    for n in osl.content.numbers:
+        want = _cell_numbers(n.value)
+        if want and not all(any(abs(a - b) < 1e-9 for b in have) for a in want):
+            return f"нет карточки «{_norm(n.value)}» ({_norm(n.label)})"
+    return None
+
+
+@check(CHART_VALUES_MISMATCH)
+def chart_values_mismatch(ctx: AuditContext) -> list[Issue]:
+    out = []
+    for s, osl in _data_slides(ctx):
+        c = osl.content
+        why = None
+        els: list[IRElement] = []
+        if c.chart is not None:
+            why, els = _chart_problem(c.chart, s), _charts(s)
+        elif c.table is not None:
+            why, els = _table_problem(osl, s), _tables(s)
+        elif c.numbers:
+            why = _numbers_problem(osl, s)
+        if why:
+            out.append(ctx.new_issue(
+                CHART_VALUES_MISMATCH, s.index, f"Данные «{osl.data.file}» на слайде показаны не так, как в файле: {why}",
+                suggestion="Пересоберите слайд: значения берутся из файла заново.", **_bboxes(els),
+            ))
+    return out
+
+
+# ── axes, source, load ───────────────────────────────────────────────────────────────────────────────────────────────
+@check(CHART_NO_UNITS)
+def chart_no_units(ctx: AuditContext) -> list[Issue]:
+    out = []
+    for s, osl in _data_slides(ctx):
+        spec = osl.content.chart
+        if spec is None:
+            continue
+        for e in _charts(s):
+            c = e.chart
+            if spec.type == "scatter" or c.type == "scatter":
+                if not (c.x_title and c.y_title):
+                    out.append(ctx.new_issue(CHART_NO_UNITS, s.index, "У диаграммы рассеяния не подписаны оси", **_bboxes([e])))
+                continue
+            if spec.type not in _CATEGORY_TYPES or c.type in ("pie", "doughnut"):
+                continue
+            unit_line = any(x.name.startswith(("Unit", "Chart title")) and x.has_text for x in _elements(s))
+            if not (c.x_title or c.y_title or c.title or unit_line):
+                out.append(ctx.new_issue(
+                    CHART_NO_UNITS, s.index, f"У диаграммы «{osl.data.file}» нет подписей осей и единицы",
+                    suggestion="Подпишите ось значений с единицей («Выручка, млн ₽») и ось категорий.", **_bboxes([e]),
+                ))
+    return out
+
+
+@check(CHART_NO_SOURCE)
+def chart_no_source(ctx: AuditContext) -> list[Issue]:
+    out = []
+    for s, osl in _data_slides(ctx):
+        text = _slide_text(s).lower()
+        name = _norm(osl.data.file).lower()
+        if "источник" in text or (name and name in text):
+            continue
+        out.append(ctx.new_issue(
+            CHART_NO_SOURCE, s.index, f"На слайде не указан источник данных: «{osl.data.file}»",
+            suggestion=f"Добавьте сноску «Источник: {osl.data.file}».",
+        ))
+    return out
+
+
+@check(CHART_OVERLOADED)
+def chart_overloaded(ctx: AuditContext) -> list[Issue]:
+    out = []
+    for s, osl in _data_slides(ctx):
+        for e in _charts(s):
+            c = e.chart
+            n = len(c.categories)
+            why = None
+            if c.type in ("pie", "doughnut") and n > _SLICES_MAX:
+                why = f"{n} долей — больше {_SLICES_MAX} на круговой не прочитать"
+            elif c.type in ("column", "bar") and n > _BARS_MAX:
+                why = f"{n} категорий — больше {_BARS_MAX} столбцов не прочитать"
+            elif c.type in ("line", "area") and n > _POINTS_MAX:
+                why = f"{n} точек — больше {_POINTS_MAX} на линии не различить"
+            if why:
+                out.append(ctx.new_issue(
+                    CHART_OVERLOADED, s.index, f"Диаграмма «{osl.data.file}» перегружена: {why}",
+                    suggestion="Сгруппируйте данные: топ-N и «Остальные», месяцы вместо дней.", **_bboxes([e]),
+                ))
+    return out
+
+
+@check(TABLE_RAW_DUMP)
+def table_raw_dump(ctx: AuditContext) -> list[Issue]:
+    out = []
+    for s, osl in _data_slides(ctx):
+        t = osl.content.table
+        if t is None or len(t.rows) <= _ROWS_MAX or osl.data.aggregation:
+            continue
+        out.append(ctx.new_issue(
+            TABLE_RAW_DUMP, s.index, f"Таблица «{osl.data.file}» — {len(t.rows)} строк без агрегации",
+            suggestion="Покажите топ-10 и строку «Остальные» или разбейте таблицу на слайды по 10 строк.", **_bboxes(_tables(s)),
+        ))
+    return out
+
+
+@check(CHART_FROM_UNTYPABLE)
+def chart_from_untypable(ctx: AuditContext) -> list[Issue]:
+    out = []
+    for s, osl in _data_slides(ctx):
+        if osl.data.nature != "untypable":
+            continue
+        if osl.content.chart is not None or _charts(s):
+            out.append(ctx.new_issue(
+                CHART_FROM_UNTYPABLE, s.index, f"Из «{osl.data.file}» построен график, хотя в файле нет данных для графика",
+                suggestion="Покажите такие данные таблицей.", **_bboxes(_charts(s)),
+            ))
+    return out
+
+
+@check(DATA_SPLIT_INCONSISTENT)
+def data_split_inconsistent(ctx: AuditContext) -> list[Issue]:
+    groups: dict[str, list[tuple[int, IRSlide, OutlineSlide]]] = {}
+    for pos, (s, osl) in enumerate(_data_slides(ctx)):
+        groups.setdefault(osl.data.dataset_id, []).append((pos, s, osl))
+    out = []
+    for parts in groups.values():
+        totals = {osl.data.part[1] for _, _, osl in parts}
+        if max(totals) <= 1 and len(parts) <= 1:
+            continue
+        first = parts[0][2]
+        why = None
+        numbers = [osl.data.part[0] for _, _, osl in parts]
+        if len(totals) > 1:
+            why = "у частей разное число слайдов"
+        elif sorted(numbers) != list(range(1, max(totals) + 1)):
+            why = f"частей {len(parts)} из {max(totals)}" if len(parts) != max(totals) else "части повторяются"
+        elif numbers != sorted(numbers) or [p[1].index for p in parts] != list(range(parts[0][1].index, parts[0][1].index + len(parts))):
+            why = "части идут не подряд"
+        elif any((osl.content.table is None) != (first.content.table is None) or (osl.content.table is not None and first.content.table is not None and osl.content.table.columns != first.content.table.columns) for _, _, osl in parts):
+            why = "у частей разные колонки"
+        elif len({_norm(_headline(osl)).lower() for _, _, osl in parts}) > 1:
+            why = "у частей разные заголовки"
+        if why:
+            s = parts[0][1]
+            out.append(ctx.new_issue(
+                DATA_SPLIT_INCONSISTENT, s.index, f"Таблица «{first.data.file}» на нескольких слайдах: {why}",
+                suggestion="Пересоберите слайд: части таблицы строятся заново по файлу.",
+            ))
+    return out

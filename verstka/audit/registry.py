@@ -76,7 +76,7 @@ def load_builtin_checks() -> None:
     if _BUILTIN_LOADED:
         return
     _BUILTIN_LOADED = True
-    for mod in ("layout", "template", "density", "integrity", "facts", "writing"):
+    for mod in ("layout", "template", "density", "integrity", "facts", "writing", "data"):
         importlib.import_module(f"verstka.audit.checks.{mod}")
 
 
