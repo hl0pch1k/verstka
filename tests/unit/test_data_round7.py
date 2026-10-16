@@ -125,6 +125,9 @@ def test_duration_column_is_a_measure_not_numbers():
     p = _plan(t, "Как распределено время, которое баги остаются открытыми?")
     assert not (p.message or "").startswith("Не для графика")
     assert p.task.task == "distribution" and p.options[0].kind == "histogram" and "дней" in p.headline
+    # без цели — список по длительности: «дольше всех», а не «первое место по числу дней открыт»
+    q = _plan(t)
+    assert q.task.task == "reference" and q.headline.replace(NB, " ").endswith("дольше всех: 40 дн."), q.headline
 
 
 # ── M1/W4: составные единицы ──────────────────────────────────────────────────────────────────────────────────────

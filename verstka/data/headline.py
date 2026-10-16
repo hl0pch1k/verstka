@@ -452,6 +452,8 @@ def _reference(fs: FactSet) -> tuple[str, Optional[str]]:
     if lv is not None and c.get("leader"):
         by = f"по {m.low.dat}" if m is not None else "по значению"
         head = f"{c['leader']} — первое место {by}: {fmt_value(lv.value, c.get('unit_short'))}"
+        if c.get("duration"):
+            head = f"{c['leader']} — дольше всех: {fmt_value(lv.value, c.get('unit_short'))}"
         neg = _f(fs, "negatives")
         if neg is not None:
             forms = c.get("entity_forms") or ("строка", "строки", "строк")

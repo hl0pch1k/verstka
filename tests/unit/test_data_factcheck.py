@@ -1153,6 +1153,9 @@ class Raw:
             return True
         if T_COUNT_UNIT.match(unit) or T_FLOW.search(name):
             return True
+        if not unit and re.fullmatch(r"[А-ЯЁ]{2,5}", name.strip()) and self.vals(j) and \
+                all(float(v).is_integer() for v in self.vals(j)):
+            return True  # «ДТП», «ЧС» целыми числами — число случаев (раунд 7, C4)
         if T_LEVEL_TITLE.search(self.title):
             return False
         return bool(T_MONEY.search(unit))

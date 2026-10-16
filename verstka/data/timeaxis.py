@@ -389,4 +389,4 @@ def columns_time_view(d: "Data") -> Optional[TimeView]:
     return TimeView(column={"quarter": "Квартал", "month": "Месяц", "year": "Год"}[freq], freq=freq, periods=periods,
                     labels=[period_label(p_, freq) for p_ in periods], series=[SeriesV(name, m0.unit_text, vals)],
                     measure=meas, source_freq=freq, source_points=len(periods), how="sum" if add else "mean",
-                    column_type="period", from_columns=True)
+                    column_type="period", from_columns=True, col_js=[m.j for _, m in cols])

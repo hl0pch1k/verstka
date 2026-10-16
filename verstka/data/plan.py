@@ -19,12 +19,14 @@ import numpy as np
 from pydantic import BaseModel
 
 from verstka.data.aggregate import MAX_SLIDES, TABLE_ROWS, CatView, Data, KpiItem
-from verstka.data.facts import facts_for
+from verstka.data.facts import FactSet, facts_for
 from verstka.data.goals import Goal, goal_match, goals_of, stems_of
 from verstka.data.words import stem_in
+from verstka.data.headline import _labels as headline_labels
 from verstka.data.headline import compose
 from verstka.data.profile import profile_table
 from verstka.data.task import FEASIBLE, decide_task, task_scores
+from verstka.data.verify import numbers_ok, verify
 from verstka.data.viz import find_candidate, rank_options
 from verstka.data.words import count_words, file_title, fmt_exact, fmt_num, fmt_signed, fmt_value, phrase, upper_first
 from verstka.schemas.data import NATURE_LABELS, DatasetPlan, DatasetProfile, SlideData, Table, TaskDecision, VizOption
@@ -115,12 +117,45 @@ def plan_dataset(profile: DatasetProfile, table: Table, goals: Optional[Sequence
         words = [w for w in title.split() if not re.search(r"\d", w)]
         name = " ".join(words[:3]) if words else "Перечень"
         headline = f"{upper_first(name)}: {count_words(d.n, 'строка', 'строки', 'строк')}"
+    headline = headline or plain
+    facts = list(fs.facts)
+    # самопроверка: каждое число заголовка и подписи пересчитано по сырым строкам файла; не подтвердилось — тема
+    # вместо вывода и подпись только из подтверждённого, причина — в «Почему так»
+    labels = _check_labels(fs, d, title)
+    verdict = verify(table, fs.facts, fs.prov, "" if headline == plain else headline, caption, labels, title)
+    if not verdict.headline_ok:
+        headline = plain
+        facts = [f for f in fs.facts if f.id in verdict.ok]
+    if not verdict.caption_ok:
+        caption = _factual_caption(fs, verdict, labels)
+    if verdict.reasons:
+        decision = decision.model_copy(update={"reasons": list(decision.reasons) + verdict.reasons})
     plan = DatasetPlan(
-        profile=profile, task=decision, options=options, chosen=0, headline=headline or plain, headline_facts=fs.facts,
+        profile=profile, task=decision, options=options, chosen=0, headline=headline, headline_facts=facts,
         plain_headline=plain, caption=caption, source=source, slides=1, message=message,
     )
     plan.slides = slides_of(plan, table, 0, d)
     return plan
+
+
+def _check_labels(fs: FactSet, d: Data, title: str) -> list[str]:
+    """Подписи, цифры которых — часть названия, а не вывод: категории и имена из фактов, периоды, файл, колонки."""
+    out = headline_labels(fs) + list(fs.ctx.get("period_labels") or []) + list(fs.ctx.get("structure") or [])
+    out += [title] + [c.name for c in d.cols] + [c.unit for c in d.cols if c.unit]
+    out += [m.unit_text for m in d.measures if m.unit_text] + _values_for_match(d)
+    out = [x for x in out if isinstance(x, str) and x]
+    return out + [upper_first(x) for x in out] + [x[:1].lower() + x[1:] for x in out]
+
+
+_FACT_ORDER = ("total", "max", "leader", "median", "share", "change", "min", "count")
+
+
+def _factual_caption(fs: FactSet, verdict, labels: list[str]) -> Optional[str]:
+    """Подпись только из подтверждённых фактов (одна-две фразы); подтверждённых нет — без подписи."""
+    ok = [f for f in fs.facts if f.id in verdict.ok and f.text and not numbers_ok(f.text, verdict.pool, labels)]
+    ok.sort(key=lambda f: _FACT_ORDER.index(f.kind) if f.kind in _FACT_ORDER else len(_FACT_ORDER))
+    parts = [upper_first(f.text.rstrip(".")) + "." for f in ok[:2]]
+    return " ".join(parts) or None
 
 
 def _file_match(g: Goal, d: Data) -> bool:

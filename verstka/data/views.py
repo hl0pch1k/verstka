@@ -97,6 +97,7 @@ class TimeView:
     cat_moves: dict[str, tuple[float, float]] = field(default_factory=dict)  # категория → (первое, последнее)
     per_week: bool = False  # недели в месяцы или кварталы: значение периода — в среднем за неделю
     from_columns: bool = False  # ось из колонок-периодов («I кв. · II кв. · …»), значение — по всем строкам
+    col_js: list[int] = field(default_factory=list)  # колонки-периоды по порядку (для самопроверки)
 
     @property
     def points(self) -> int:
@@ -278,6 +279,8 @@ class KpiItem:
     change: Optional[float] = None  # в единицах change_unit
     change_unit: Optional[str] = None  # «%», «п.», «п.п.»
     prev_text: Optional[str] = None
+    prov_value: Optional[dict] = None  # откуда число (для самопроверки): ячейка таблицы
+    prov_change: Optional[dict] = None  # откуда изменение: ячейка колонки изменения или две ячейки
 
 
 @dataclass

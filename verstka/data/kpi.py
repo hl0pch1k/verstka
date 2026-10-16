@@ -48,7 +48,8 @@ def _kpi_view(d: Data) -> Optional[KpiView]:
             if vt is not None:
                 # счётчик-заголовок («Заказов») на карточке — «Число заказов»
                 lab = metric_phrase(m.name, m.type).nom if is_counter(m.name) and metric_phrase(m.name, m.type) else m.name
-                items.append(KpiItem(label=lab, value=vt[0], value_text=vt[1], unit=vt[2]))
+                items.append(KpiItem(label=lab, value=vt[0], value_text=vt[1], unit=vt[2],
+                                     prov_value={"op": "cell", "row": i, "col": m.j, "shown": True}))
         return KpiView(items=items, mixed_units=len({it.unit for it in items}) > 1) if items else None
     lab_j = d.label
     if lab_j is None:
@@ -80,7 +81,7 @@ def _kpi_view(d: Data) -> Optional[KpiView]:
             continue
         units.add(vt[2] or "")
         it = KpiItem(label=(split_unit(label)[0] or label) if lab_unit else label, value=vt[0], value_text=vt[1],
-                     unit=vt[2])
+                     unit=vt[2], prov_value={"op": "cell", "row": i, "col": cur.j, "shown": True})
         if prev is not None:
             pv = _value_text(d.cell(i, prev.j), d.row_unit(i) or lab_unit or prev.unit_text)
             if pv is not None:
@@ -90,12 +91,15 @@ def _kpi_view(d: Data) -> Optional[KpiView]:
             q = parse_quantity(cq) if isinstance(cq, str) else (None if cq is None else (float(cq), changes[0].unit))
             if q is not None:
                 it.change, it.change_unit = q[0], (q[1] or changes[0].unit)
+                it.prov_change = {"op": "cell", "row": i, "col": changes[0].j, "shown": True}
         elif prev is not None:
             pv = _value_text(d.cell(i, prev.j), d.row_unit(i) or lab_unit or prev.unit_text)
             if pv is not None and (pv[2] or "") == (vt[2] or ""):
                 ch = kpi_change(label, vt[0], pv[0], vt[2])
                 if ch is not None:
                     it.change, it.change_unit = ch
+                    it.prov_change = {"op": "cellchange", "row": i, "prev": prev.j, "cur": cur.j,
+                                      "kind": "pct" if ch[1] == "%" else "abs", "shown": True}
         items.append(it)
     if not items:
         return None
@@ -130,7 +134,8 @@ def _kpi_long(d: Data) -> Optional[KpiView]:
         if vt is None:
             continue
         units.add(vt[2] or "")
-        it = KpiItem(label=(split_unit(lab)[0] or lab) if lab_unit else lab, value=vt[0], value_text=vt[1], unit=vt[2])
+        it = KpiItem(label=(split_unit(lab)[0] or lab) if lab_unit else lab, value=vt[0], value_text=vt[1], unit=vt[2],
+                     prov_value={"op": "cell", "row": i_cur, "col": m.j, "shown": True})
         if len(rs) >= 2 and rs[-2][0] != rs[-1][0]:
             pv = _value_text(d.cell(rs[-2][1], m.j), d.row_unit(rs[-2][1]) or lab_unit or m.unit_text)
             if pv is not None:
@@ -139,12 +144,16 @@ def _kpi_long(d: Data) -> Optional[KpiView]:
                     ch2 = kpi_change(lab, vt[0], pv[0], vt[2])
                     if ch2 is not None:
                         it.change, it.change_unit = ch2
+                        it.prov_change = {"op": "cellchange", "row": i_cur, "prev_row": rs[-2][1], "prev": m.j,
+                                          "cur": m.j, "kind": "pct" if ch2[1] == "%" else "abs",
+                                          "shown": True}
         if ch is not None:
             for _, i in reversed(rs):
                 cq = d.cell(i, ch.j)
                 q = parse_quantity(cq) if isinstance(cq, str) else (None if cq is None else (float(cq), ch.unit))
                 if q is not None:
                     it.change, it.change_unit = q[0], (q[1] or ch.unit)
+                    it.prov_change = {"op": "cell", "row": i, "col": ch.j, "shown": True}
                     break
         items.append(it)
     if not items:
